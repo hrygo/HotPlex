@@ -51,7 +51,7 @@ HotPlex 充分利用 Go 的并发特性实现真正的全双工流式交互：
 
 ![HotPlex Event Flow](docs/images/async-stream.svg)
 
-*注意：当前 MVP 版本深度优化了 **Claude Code** 的协议 (`--output-format stream-json`)，但设计上已预留 `Provider` 接口以支持 OpenCode 和 Aider。*
+*注意：当前 MVP 版本针对 **Claude Code** 的全双工 JSON 协议（同时开启 `--input-format stream-json` 与 `--output-format stream-json`）进行了深度优化，但设计上已预留 `Provider` 接口以支持 OpenCode 和 Aider。*
 
 ## ⚡ 快速开始
 

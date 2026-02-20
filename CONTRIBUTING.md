@@ -5,12 +5,12 @@ First off, thank you for considering contributing to HotPlex! It's people like y
 ## 🚀 How Can I Contribute?
 
 ### Reporting Bugs
-- Check the [Issues](https://github.com/hrygo/HotPlex/issues) page to see if the bug has already been reported.
+- Check the [Issues](https://github.com/hrygo/hotplex/issues) page to see if the bug has already been reported.
 - If not, create a new issue using the **Bug Report** template.
 - Include as much detail as possible: steps to reproduce, expected behavior, and actual behavior.
 
 ### Suggesting Enhancements
-- Check the [Issues](https://github.com/hrygo/HotPlex/issues) page to see if your idea has already been suggested.
+- Check the [Issues](https://github.com/hrygo/hotplex/issues) page to see if your idea has already been suggested.
 - If not, create a new issue using the **Feature Request** template.
 
 ### Pull Requests

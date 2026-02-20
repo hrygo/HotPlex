@@ -51,7 +51,7 @@ HotPlex leverages Go's concurrency for true full-duplex streaming:
 
 ![HotPlex Event Flow](docs/images/async-stream.svg)
 
-*Note: The current MVP is deeply optimized for **Claude Code's** (`--output-format stream-json`) protocol but is designed with a future `Provider` interface abstraction in mind.*
+*Note: The current MVP is deeply optimized for **Claude Code's** full-duplex JSON protocol (`--input-format stream-json` & `--output-format stream-json`) but is designed with a future `Provider` interface abstraction in mind.*
 
 ## ⚡ Quick Start
 
