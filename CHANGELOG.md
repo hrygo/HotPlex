@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.0] - 2026-02-20
+
+### Added
+- **Full-Lifecycle Examples**: Added comprehensive examples for both Go SDK (`full_sdk`) and WebSocket protocol (`full_websocket`), covering cold starts, hot-multiplexing, and session recovery.
+- **Process Robustness**: Implemented `shutdownOnce` and enhanced `SIGKILL` logic to ensure clean termination of process groups (PGID).
+- **GitHub Integration**: Official repository initialization and CI-ready structure.
+
+### Changed
+- **Documentation Overhaul**: Synchronized `architecture.md`, `README.md`, and `README_zh.md` to reflect the v0.2.0+ security posture (Native Tool Constraints).
+- **WAF Refinement**: Updated `danger.go` to support context-aware interception and improved logging for security forensics.
+- **Session Recovery**: Enhanced deterministic UUID v5 mapping to support seamless session resumption across engine restarts.
+
 ## [v0.2.0] - 2026-02-20
 
 ### Changed
