@@ -62,39 +62,36 @@ func main() {
 		switch eventType {
 		case "thinking":
 			// Emitted when the agent is formulating a plan or waiting for the model.
-			fmt.Println("🤔 Thinking...")
+			if evt, ok := data.(*hotplex.EventWithMeta); ok {
+				fmt.Printf("🤔 Thinking: %s\n", evt.EventData)
+			} else {
+				fmt.Println("🤔 Thinking...")
+			}
 
 		case "tool_use":
 			// Emitted when the agent decides to invoke a local tool (e.g., bash, read_file).
-			// We can inspect the data struct directly for detailed tool parameters.
-			if msg, ok := data.(hotplex.StreamMessage); ok {
-				fmt.Printf("🛠️ Tool Use: %s\n", msg.Name)
+			if evt, ok := data.(*hotplex.EventWithMeta); ok {
+				fmt.Printf("🛠️ Tool Use: %s (ID: %s)\n", evt.EventData, evt.Meta.ToolID)
 			}
 
-		case "assistant":
+		case "answer":
 			// Emitted when the agent streams textual responses back to the user.
-			if msg, ok := data.(hotplex.StreamMessage); ok {
-				if len(msg.Message.Content) > 0 {
-					for _, c := range msg.Message.Content {
-						if c.Type == "text" {
-							fmt.Print(c.Text) // Print the streamed chunk without newline
-						}
-					}
-				}
+			if evt, ok := data.(*hotplex.EventWithMeta); ok {
+				fmt.Print(evt.EventData) // Print the streamed chunk without newline
 			}
 
 		case "session_stats":
-			// Emitted at the very end of the execution. Contains rich usage telemetry
-			// including duration, token consumption, and cost tracking.
+			// Emitted at the very end of the execution. Contains rich usage telemetry.
 			fmt.Println("\n\n📊 Session Completed!")
 			if stats, ok := data.(*hotplex.SessionStatsData); ok {
 				fmt.Printf("- Duration: %d ms\n", stats.TotalDurationMs)
 				fmt.Printf("- Tokens (In/Out): %d / %d\n", stats.InputTokens, stats.OutputTokens)
 				fmt.Printf("- Tools used: %d\n", stats.ToolCallCount)
+				fmt.Printf("- Cost: $%f\n", stats.TotalCostUSD)
 			}
 
 		case "danger_block":
-			// Emitted if the WAF (Web Application Firewall) intercepts a malicious prompt or tool usage.
+			// Emitted if the WAF intercepts a malicious prompt or tool usage.
 			fmt.Println("\n🚨 SECURITY ALERT: Operation blocked by HotPlex Firewall!")
 		}
 

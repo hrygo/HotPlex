@@ -1,5 +1,3 @@
-// Package hotplex provides the core HotPlex SDK for managing persistent, hot-multiplexed
-// LLM CLI agent sessions (like Claude Code) with security and observability.
 package hotplex
 
 import (

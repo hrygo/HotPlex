@@ -87,12 +87,13 @@ type SessionPool struct {
 	logger    *slog.Logger
 	timeout   time.Duration // Time after which an idle session is eligible for termination
 	opts      EngineOptions // Global constraints shared by all sessions in the pool
+	cliPath   string        // Resolved path to the CLI binary (avoids redundant LookPath calls)
 	done      chan struct{} // Internal signal for shutting down background workers
 	markerDir string        // Local filesystem path storing session persistence markers (.lock files)
 }
 
 // NewSessionPool creates a new session manager.
-func NewSessionPool(logger *slog.Logger, timeout time.Duration, opts EngineOptions) *SessionPool {
+func NewSessionPool(logger *slog.Logger, timeout time.Duration, opts EngineOptions, cliPath string) *SessionPool {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -112,6 +113,7 @@ func NewSessionPool(logger *slog.Logger, timeout time.Duration, opts EngineOptio
 		logger:    logger,
 		timeout:   timeout,
 		opts:      opts,
+		cliPath:   cliPath,
 		done:      make(chan struct{}),
 		markerDir: markerDir,
 	}
@@ -215,10 +217,7 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg C
 		return nil, fmt.Errorf("request context cancelled: %w", ctx.Err())
 	}
 
-	cliPath, err := exec.LookPath("claude")
-	if err != nil {
-		return nil, fmt.Errorf("claude Code CLI not found: %w", err)
-	}
+	cliPath := sm.cliPath
 
 	// Prepare context with cancellation.
 	// We intentionally use context.Background() instead of the request ctx
@@ -333,7 +332,7 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg C
 	var stdin io.WriteCloser
 	var stdout, stderr io.ReadCloser
 
-	stdin, err = cmd.StdinPipe()
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("stdin pipe: %w", err)

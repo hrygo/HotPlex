@@ -40,27 +40,28 @@ ws.on('message', function incoming(data) {
         // Route the event based on its type
         if (message.event === 'thinking') {
             // The agent is planning or waiting for a model response.
-            console.log('🤔 AI is thinking...');
+            const text = (message.data && message.data.EventData) ? message.data.EventData : 'AI is thinking...';
+            console.log(`🤔 ${text}`);
         } else if (message.event === 'answer') {
-            // Emitted for direct text responses or fallback raw outputs.
-            console.log(message.data);
+            // Emitted for streamed textual responses.
+            if (message.data && message.data.EventData) {
+                process.stdout.write(message.data.EventData);
+            }
+        } else if (message.event === 'tool_use') {
+            // Emitted when a tool is invoked.
+            const toolName = (message.data && message.data.EventData) ? message.data.EventData : 'unknown';
+            console.log(`🛠️ Tool: ${toolName}`);
         } else if (message.event === 'completed') {
             // The execution has successfully finished. Safe to close or send next prompt.
-            console.log('✅ Execution completed successfully!');
+            console.log('\n✅ Execution completed successfully!');
             ws.close();
         } else if (message.event === 'error') {
             // An error occurred during execution (e.g., config invalid, WAF blocked).
-            console.log('❌ Error from server:', message.data);
+            console.log('\n❌ Error from server:', message.data);
             ws.close();
-        } else if (message.event === 'assistant') {
-            // Claude Code specific stream-json event. Contains chunks of the assistant's reply.
-            if (message.data && message.data.message && message.data.message.content) {
-                const text = message.data.message.content.find(c => c.type === 'text');
-                if (text) {
-                    // Use process.stdout.write to print inline (without automatic newlines)
-                    process.stdout.write(text.text);
-                }
-            }
+        } else if (message.event === 'session_stats') {
+            // Final usage statistics.
+            console.log('\n📊 Stats:', JSON.stringify(message.data, null, 2));
         }
     } catch (e) {
         // Fallback for non-JSON messages (rare, but good practice to handle)

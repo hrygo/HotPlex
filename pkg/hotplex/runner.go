@@ -71,7 +71,7 @@ func NewEngine(options EngineOptions) (HotPlexClient, error) {
 		opts:           options,
 		cliPath:        cliPath,
 		logger:         logger,
-		manager:        NewSessionPool(logger, 30*time.Minute, options), // Default 30m idle timeout
+		manager:        NewSessionPool(logger, 30*time.Minute, options, cliPath), // Default 30m idle timeout
 		dangerDetector: dangerDetector,
 	}, nil
 }
@@ -127,10 +127,10 @@ func (r *Engine) Execute(ctx context.Context, cfg *Config, prompt string, callba
 			Status:          "running",
 			TotalDurationMs: 0,
 		}
-		_ = callbackSafe("thinking", &EventWithMeta{EventType: "thinking", EventData: "ai.thinking", Meta: meta})
+		_ = callbackSafe("thinking", NewEventWithMeta("thinking", "ai.thinking", meta))
 	}
 
-	r.logger.Info("Engine: session pipeline ready for hot-multiplexing",
+	r.logger.Info("Engine: starting execution pipeline",
 		"namespace", r.opts.Namespace,
 		"session_id", cfg.SessionID,
 	)
@@ -168,8 +168,8 @@ func (r *Engine) Execute(ctx context.Context, cfg *Config, prompt string, callba
 
 // GetSessionStats returns a copy of the current session stats.
 func (r *Engine) GetSessionStats() *SessionStats {
-	r.statsMu.Lock()
-	defer r.statsMu.Unlock()
+	r.statsMu.RLock()
+	defer r.statsMu.RUnlock()
 
 	if r.currentStats == nil {
 		return nil
@@ -182,10 +182,10 @@ func (r *Engine) GetSessionStats() *SessionStats {
 // ValidateConfig validates the Config.
 func (r *Engine) ValidateConfig(cfg *Config) error {
 	if cfg.WorkDir == "" {
-		return fmt.Errorf("work_dir is required")
+		return fmt.Errorf("%w: work_dir is required", ErrInvalidConfig)
 	}
 	if cfg.SessionID == "" {
-		return fmt.Errorf("session_id is required")
+		return fmt.Errorf("%w: session_id is required", ErrInvalidConfig)
 	}
 	return nil
 }
@@ -477,7 +477,7 @@ func (r *Engine) dispatchCallback(msg StreamMessage, callback Callback, stats *S
 					Status:          "running",
 					TotalDurationMs: totalDuration,
 				}
-				if err := callback("thinking", &EventWithMeta{EventType: "thinking", EventData: block.Text, Meta: meta}); err != nil {
+				if err := callback("thinking", NewEventWithMeta("thinking", block.Text, meta)); err != nil {
 					return err
 				}
 			}
@@ -522,7 +522,7 @@ func (r *Engine) dispatchCallback(msg StreamMessage, callback Callback, stats *S
 				InputSummary:    inputSummary,
 			}
 			r.logger.Debug("Engine: sending tool_use event", "tool_name", msg.Name, "tool_id", toolID)
-			if err := callback("tool_use", &EventWithMeta{EventType: "tool_use", EventData: msg.Name, Meta: meta}); err != nil {
+			if err := callback("tool_use", NewEventWithMeta("tool_use", msg.Name, meta)); err != nil {
 				return err
 			}
 		}
@@ -551,7 +551,7 @@ func (r *Engine) dispatchCallback(msg StreamMessage, callback Callback, stats *S
 				OutputSummary:   TruncateString(msg.Output, 500),
 			}
 			r.logger.Debug("Engine: sending tool_result event", "tool_name", toolName, "tool_id", toolID, "output_length", len(msg.Output), "duration_ms", durationMs)
-			if err := callback("tool_result", &EventWithMeta{EventType: "tool_result", EventData: msg.Output, Meta: meta}); err != nil {
+			if err := callback("tool_result", NewEventWithMeta("tool_result", msg.Output, meta)); err != nil {
 				return err
 			}
 		}
@@ -567,7 +567,7 @@ func (r *Engine) dispatchCallback(msg StreamMessage, callback Callback, stats *S
 
 		for _, block := range msg.GetContentBlocks() {
 			if block.Type == "text" && block.Text != "" {
-				if err := callback("answer", &EventWithMeta{EventType: "answer", EventData: block.Text, Meta: &EventMeta{TotalDurationMs: totalDuration}}); err != nil {
+				if err := callback("answer", NewEventWithMeta("answer", block.Text, &EventMeta{TotalDurationMs: totalDuration})); err != nil {
 					return err
 				}
 			} else if block.Type == "tool_use" && block.Name != "" {
@@ -595,7 +595,7 @@ func (r *Engine) dispatchCallback(msg StreamMessage, callback Callback, stats *S
 					TotalDurationMs: totalDuration,
 					InputSummary:    SummarizeInput(block.Input),
 				}
-				if err := callback("tool_use", &EventWithMeta{EventType: "tool_use", EventData: block.Name, Meta: meta}); err != nil {
+				if err := callback("tool_use", NewEventWithMeta("tool_use", block.Name, meta)); err != nil {
 					return err
 				}
 				r.logger.Debug("Engine: tool_use callback completed", "tool_name", block.Name, "tool_id", block.ID)
@@ -623,7 +623,7 @@ func (r *Engine) dispatchCallback(msg StreamMessage, callback Callback, stats *S
 				OutputSummary:   TruncateString(block.Content, 500),
 			}
 			r.logger.Debug("Engine: sending tool_result event from user message", "tool_name", block.Name, "tool_id", toolID, "tool_use_id", block.ToolUseID, "duration_ms", durationMs)
-			if err := callback("tool_result", &EventWithMeta{EventType: "tool_result", EventData: block.Content, Meta: meta}); err != nil {
+			if err := callback("tool_result", NewEventWithMeta("tool_result", block.Content, meta)); err != nil {
 				return err
 			}
 		}
@@ -643,7 +643,7 @@ func (r *Engine) dispatchCallback(msg StreamMessage, callback Callback, stats *S
 		for _, block := range msg.GetContentBlocks() {
 			if block.Type == "text" && block.Text != "" {
 				if callbackSafe != nil {
-					_ = callbackSafe("answer", &EventWithMeta{EventType: "answer", EventData: block.Text, Meta: &EventMeta{TotalDurationMs: totalDuration}})
+					_ = callbackSafe("answer", NewEventWithMeta("answer", block.Text, &EventMeta{TotalDurationMs: totalDuration}))
 				}
 			}
 		}
