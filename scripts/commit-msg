@@ -13,7 +13,7 @@ NC='\033[0m'
 PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .+"
 
 if [[ ! $COMMIT_MSG =~ $PATTERN ]]; then
-    echo -e "${RED}❌ Invalid commit message format!${NC}"
+    printf "${RED}❌ Invalid commit message format!${NC}\n"
     echo "Commit messages must follow Conventional Commits guidelines:"
     echo "  <type>(<scope>): <description>"
     echo ""

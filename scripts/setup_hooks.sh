@@ -14,7 +14,7 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${BLUE}🔗 Installing HotPlex Git Hooks...${NC}"
+printf "${BLUE}🔗 Installing HotPlex Git Hooks...${NC}\n"
 
 HOOKS=("pre-commit" "commit-msg" "pre-push")
 
@@ -24,10 +24,10 @@ for hook in "${HOOKS[@]}"; do
         chmod +x "$HOOK_SOURCE_DIR/$hook"
         # Create symbolic link
         ln -sf "$HOOK_SOURCE_DIR/$hook" "$HOOK_TARGET_DIR/$hook"
-        echo -e "${GREEN}✅ Linked: $hook${NC}"
+        printf "${GREEN}✅ Linked: $hook${NC}\n"
     else
-        echo "⚠️  Skip: $hook (not found in $HOOK_SOURCE_DIR)"
+        printf "⚠️  Skip: $hook (not found in $HOOK_SOURCE_DIR)\n"
     fi
 done
 
-echo -e "${BLUE}Done! Hooks are now active.${NC}"
+printf "${BLUE}Done! Hooks are now active.${NC}\n"
