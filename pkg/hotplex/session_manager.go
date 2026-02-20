@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -202,11 +201,7 @@ func (sm *SessionPool) cleanupSessionLocked(sessionID string) error {
 	}
 
 	// Force kill if needed
-	if sess.cmd != nil && sess.cmd.Process != nil {
-		// Use specific signal or Kill
-		// We set Setpgid = true, so we negate the PID to kill the process group
-		_ = syscall.Kill(-sess.cmd.Process.Pid, syscall.SIGKILL) //nolint:errcheck // force terminate entire process tree
-	}
+	killProcessGroup(sess.cmd)
 
 	return nil
 }
@@ -327,7 +322,7 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg C
 	cmd := exec.CommandContext(sessCtx, cliPath, args...)
 	cmd.Dir = cfg.WorkDir
 	cmd.Env = append(os.Environ(), "CLAUDE_DISABLE_TELEMETRY=1")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Isolate into new process group for clean tree kill
+	setupCmdSysProcAttr(cmd)
 
 	// Create pipes with proper cleanup on error paths
 	var stdin io.WriteCloser
@@ -407,10 +402,7 @@ func (s *Session) isAliveLocked() bool {
 	if s.cmd == nil || s.cmd.Process == nil || s.Status == SessionStatusDead {
 		return false
 	}
-	if err := s.cmd.Process.Signal(syscall.Signal(0)); err != nil {
-		return false
-	}
-	return true
+	return isProcessAlive(s.cmd.Process)
 }
 
 // IsAlive checks if the process is still running.
