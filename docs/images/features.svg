@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 200" width="100%" height="auto">
+  <defs>
+    <linearGradient id="grad-speed" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF7B72"/>
+      <stop offset="100%" stop-color="#FFA657"/>
+    </linearGradient>
+    <linearGradient id="grad-pool" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3FB950"/>
+      <stop offset="100%" stop-color="#56D364"/>
+    </linearGradient>
+    <linearGradient id="grad-secure" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#58A6FF"/>
+      <stop offset="100%" stop-color="#79C0FF"/>
+    </linearGradient>
+    <linearGradient id="grad-duplex" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D2A8FF"/>
+      <stop offset="100%" stop-color="#BC8CFF"/>
+    </linearGradient>
+    <filter id="icon-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="900" height="200" rx="12" fill="#0D1117" stroke="#30363D" stroke-width="2"/>
+
+  <!-- Feature 1: Hot Start -->
+  <g transform="translate(60, 50)">
+    <circle cx="50" cy="50" r="40" fill="url(#grad-speed)" opacity="0.15"/>
+    <circle cx="50" cy="50" r="40" fill="none" stroke="url(#grad-speed)" stroke-width="2"/>
+    <!-- Lightning bolt icon -->
+    <path d="M55 25 L40 55 L52 55 L45 75 L65 45 L52 45 Z" fill="url(#grad-speed)" filter="url(#icon-glow)"/>
+    <text x="50" y="115" font-family="-apple-system, sans-serif" font-size="13" font-weight="600" fill="#E6EDF3" text-anchor="middle">200ms Hot-Start</text>
+    <text x="50" y="132" font-family="-apple-system, sans-serif" font-size="11" fill="#8B949E" text-anchor="middle">Instant Response</text>
+  </g>
+
+  <!-- Feature 2: Session Pool -->
+  <g transform="translate(260, 50)">
+    <circle cx="50" cy="50" r="40" fill="url(#grad-pool)" opacity="0.15"/>
+    <circle cx="50" cy="50" r="40" fill="none" stroke="url(#grad-pool)" stroke-width="2"/>
+    <!-- Pool/stack icon -->
+    <rect x="28" y="30" width="44" height="12" rx="2" fill="url(#grad-pool)" opacity="0.6"/>
+    <rect x="28" y="46" width="44" height="12" rx="2" fill="url(#grad-pool)" opacity="0.8"/>
+    <rect x="28" y="62" width="44" height="12" rx="2" fill="url(#grad-pool)" filter="url(#icon-glow)"/>
+    <text x="50" y="115" font-family="-apple-system, sans-serif" font-size="13" font-weight="600" fill="#E6EDF3" text-anchor="middle">Session Pool</text>
+    <text x="50" y="132" font-family="-apple-system, sans-serif" font-size="11" fill="#8B949E" text-anchor="middle">Auto GC Cleanup</text>
+  </g>
+
+  <!-- Feature 3: Security -->
+  <g transform="translate(460, 50)">
+    <circle cx="50" cy="50" r="40" fill="url(#grad-secure)" opacity="0.15"/>
+    <circle cx="50" cy="50" r="40" fill="none" stroke="url(#grad-secure)" stroke-width="2"/>
+    <!-- Shield icon -->
+    <path d="M50 25 L72 35 L72 52 C72 65 62 75 50 80 C38 75 28 65 28 52 L28 35 Z" fill="url(#grad-secure)" opacity="0.3"/>
+    <path d="M50 25 L72 35 L72 52 C72 65 62 75 50 80 C38 75 28 65 28 52 L28 35 Z" fill="none" stroke="url(#grad-secure)" stroke-width="2"/>
+    <path d="M42 52 L48 58 L60 46" fill="none" stroke="url(#grad-secure)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" filter="url(#icon-glow)"/>
+    <text x="50" y="115" font-family="-apple-system, sans-serif" font-size="13" font-weight="600" fill="#E6EDF3" text-anchor="middle">Sandboxed</text>
+    <text x="50" y="132" font-family="-apple-system, sans-serif" font-size="11" fill="#8B949E" text-anchor="middle">WAF + PGID</text>
+  </g>
+
+  <!-- Feature 4: Full-Duplex -->
+  <g transform="translate(660, 50)">
+    <circle cx="50" cy="50" r="40" fill="url(#grad-duplex)" opacity="0.15"/>
+    <circle cx="50" cy="50" r="40" fill="none" stroke="url(#grad-duplex)" stroke-width="2"/>
+    <!-- Bidirectional arrows icon -->
+    <path d="M28 42 L55 42" stroke="url(#grad-duplex)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M45 35 L55 42 L45 49" stroke="url(#grad-duplex)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M72 58 L45 58" stroke="url(#grad-duplex)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M55 51 L45 58 L55 65" stroke="url(#grad-duplex)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <text x="50" y="115" font-family="-apple-system, sans-serif" font-size="13" font-weight="600" fill="#E6EDF3" text-anchor="middle">Full-Duplex</text>
+    <text x="50" y="132" font-family="-apple-system, sans-serif" font-size="11" fill="#8B949E" text-anchor="middle">Async Streaming</text>
+  </g>
+
+  <!-- Feature 5: Dual Mode -->
+  <g transform="translate(810, 50)">
+    <circle cx="40" cy="50" r="35" fill="#161B22" stroke="#30363D" stroke-width="2"/>
+    <!-- Code/SDK icon -->
+    <text x="40" y="56" font-family="monospace" font-size="18" font-weight="bold" fill="#E6EDF3" text-anchor="middle">&lt;/&gt;</text>
+    <text x="40" y="115" font-family="-apple-system, sans-serif" font-size="13" font-weight="600" fill="#E6EDF3" text-anchor="middle">SDK + WS</text>
+    <text x="40" y="132" font-family="-apple-system, sans-serif" font-size="11" fill="#8B949E" text-anchor="middle">Dual Mode</text>
+  </g>
+</svg>
