@@ -404,12 +404,11 @@ func monitorStartup(startupCtx context.Context, startedCh <-chan error, cancel c
 }
 
 // isAliveLocked checks if the process is still running. Caller must hold lock.
+// Note: We intentionally do NOT check cmd.ProcessState here to avoid data race
+// with cmd.Wait() which writes to ProcessState in a separate goroutine.
+// The isProcessAlive() function uses process.Signal(0) which is thread-safe.
 func (s *Session) isAliveLocked() bool {
 	if s.cmd == nil || s.cmd.Process == nil || s.Status == SessionStatusDead {
-		return false
-	}
-	// Also check if the context is cancelled
-	if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
 		return false
 	}
 	return isProcessAlive(s.cmd.Process)
@@ -521,10 +520,15 @@ func (s *Session) WriteInput(msg map[string]any) error {
 }
 
 // close releases resources held by the session.
-// Must be called with session lock held.
+// Must be called with session lock held (prevents deadlock with SetStatus).
 func (s *Session) close() {
-	// Signal runners to exit if they are waiting for status change
-	s.SetStatus(SessionStatusDead)
+	// Set status directly to avoid deadlock - caller already holds s.mu.Lock()
+	s.Status = SessionStatusDead
+	// Non-blocking send to statusChange channel to signal waiting goroutines
+	select {
+	case s.statusChange <- SessionStatusDead:
+	default:
+	}
 }
 
 // SetCallback registers the callback to handle stream events for the current turn.
