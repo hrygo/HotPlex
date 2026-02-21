@@ -1,8 +1,9 @@
 ## Description
 Summarize your changes and provide context.
 
-## Related Issues
-Fixes # (issue)
+## Resolve/Related Issues
+Resolves # (issue)
+Refs # (issue)
 
 ## Type of Change
 - [ ] Bug fix (non-breaking change which fixes an issue)
