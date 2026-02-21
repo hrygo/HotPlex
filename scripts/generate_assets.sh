@@ -6,6 +6,9 @@ OUTPUT_DIR=".github/assets"
 
 mkdir -p $OUTPUT_DIR
 
+echo "0/3: 同步源 SVG 到资产目录..."
+cp $SVG_FILE $OUTPUT_DIR/hotplex-logo.svg
+
 echo "1/3: 渲染基础高清 PNG..."
 # 强制输出 1024x1024 高清底图，保留透明度
 cairosvg $SVG_FILE -W 1024 -H 1024 -o $OUTPUT_DIR/logo-base.png

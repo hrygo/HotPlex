@@ -1,5 +1,5 @@
 <div align="center">
-  <img src=".github/assets/hotplex-logo.svg" alt="hotplex" width="160"/>
+  <img src=".github/assets/hotplex-logo.svg" alt="hotplex" width="160" style="background: #0D1117; border-radius: 24px; padding: 20px;"/>
   <h1>hotplex</h1>
   <p><b>让顶尖 AI CLI 智能体 跨入 生产级应用 的 控制平面 (Control Plane)</b></p>
   <p><i>无需从零构建，直接复用 Claude Code 等强大的 AI 工具，实现毫秒级响应、安全隔离与全双工集成。</i></p>

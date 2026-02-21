@@ -1,5 +1,5 @@
 <div align="center">
-  <img src=".github/assets/hotplex-logo.svg" alt="hotplex" width="160"/>
+  <img src=".github/assets/hotplex-logo.svg" alt="hotplex" width="160" style="background: #0D1117; border-radius: 24px; padding: 20px;"/>
   <h1>hotplex</h1>
   <p><b>Production-Grade Control Plane for Elite AI CLI Agents</b></p>
   <p><i>Don't reinvent the wheel. Leverage powerful tools like Claude Code with millisecond latency, secure isolation, and full-duplex integration.</i></p>
