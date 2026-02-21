@@ -36,7 +36,6 @@ const (
 // Session lifecycle constants.
 const (
 	defaultReadyTimeout  = 10 * time.Second // Maximum time to wait for session to be ready
-	statusBusyDuration   = 2 * time.Second  // Duration to keep session in Busy state after input
 	cleanupCheckInterval = 1 * time.Minute  // Interval between idle session cleanup checks
 )
 
@@ -56,8 +55,8 @@ type Session struct {
 	LastActive  time.Time     // When the process was last used (used for LRU/Idle GC)
 	Status      SessionStatus // Runtime state: starting, ready, busy, or dead
 
-	mu               sync.RWMutex
-	statusResetTimer *time.Timer // Timer to revert Busy status to Ready after predictable CLI inactivity
+	mu           sync.RWMutex
+	statusChange chan SessionStatus // Channel to broadcast status changes
 
 	callback Callback     // Active stream event handler for the current turn
 	logger   *slog.Logger // Context-aware logger initialized with session metadata
@@ -90,6 +89,7 @@ type SessionPool struct {
 	done         chan struct{} // Internal signal for shutting down background workers
 	shutdownOnce sync.Once     // Ensures Shutdown is only executed once
 	markerDir    string        // Local filesystem path storing session persistence markers (.lock files)
+	pending      map[string]chan struct{}
 }
 
 // NewSessionPool creates a new session manager.
@@ -116,6 +116,7 @@ func NewSessionPool(logger *slog.Logger, timeout time.Duration, opts EngineOptio
 		cliPath:   cliPath,
 		done:      make(chan struct{}),
 		markerDir: markerDir,
+		pending:   make(map[string]chan struct{}),
 	}
 
 	// Start idle session cleanup goroutine (per spec 6: 30m idle timeout)
@@ -126,26 +127,64 @@ func NewSessionPool(logger *slog.Logger, timeout time.Duration, opts EngineOptio
 
 // GetOrCreateSession returns an existing session or starts a new one.
 func (sm *SessionPool) GetOrCreateSession(ctx context.Context, sessionID string, cfg Config) (*Session, error) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	// Check if session exists and is alive
+	// 1. Check existing
+	sm.mu.RLock()
 	if sess, ok := sm.sessions[sessionID]; ok {
 		if sess.IsAlive() {
+			sm.mu.RUnlock()
 			sess.Touch()
 			return sess, nil
 		}
-		// If dead, cleanup and recreate
-		_ = sm.cleanupSessionLocked(sessionID) //nolint:errcheck // cleanup on dead session
+	}
+	sm.mu.RUnlock()
+
+	// 2. Slow path: Handle creation or wait for pending
+	sm.mu.Lock()
+	// Double check
+	if sess, ok := sm.sessions[sessionID]; ok {
+		if sess.IsAlive() {
+			sm.mu.Unlock()
+			sess.Touch()
+			return sess, nil
+		}
+		_ = sm.cleanupSessionLocked(sessionID)
 	}
 
-	// Create new session
+	// Check if already being created
+	if ch, ok := sm.pending[sessionID]; ok {
+		sm.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ch:
+			// Creation finished (success or fail), recurse to check result
+			return sm.GetOrCreateSession(ctx, sessionID, cfg)
+		}
+	}
+
+	// Not being created, start it
+	ch := make(chan struct{})
+	sm.pending[sessionID] = ch
+	sm.mu.Unlock()
+
+	// Ensure we cleanup the pending marker on exit
+	defer func() {
+		sm.mu.Lock()
+		delete(sm.pending, sessionID)
+		close(ch)
+		sm.mu.Unlock()
+	}()
+
+	// startSession is heavy, but now doesn't block other sessionIDs
 	sess, err := sm.startSession(ctx, sessionID, cfg)
 	if err != nil {
 		return nil, err
 	}
 
+	sm.mu.Lock()
 	sm.sessions[sessionID] = sess
+	sm.mu.Unlock()
+
 	return sess, nil
 }
 
@@ -260,18 +299,19 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg C
 		"pgid", cmd.Process.Pid)
 
 	sess := &Session{
-		ID:          sessionID,
-		CCSessionID: ccSessionID,
-		Config:      cfg,
-		cmd:         cmd,
-		stdin:       stdin,
-		stdout:      stdout,
-		stderr:      stderr,
-		cancel:      cancel,
-		CreatedAt:   time.Now(),
-		LastActive:  time.Now(),
-		Status:      SessionStatusStarting,
-		logger:      sessLog,
+		ID:           sessionID,
+		CCSessionID:  ccSessionID,
+		Config:       cfg,
+		cmd:          cmd,
+		stdin:        stdin,
+		stdout:       stdout,
+		stderr:       stderr,
+		cancel:       cancel,
+		CreatedAt:    time.Now(),
+		LastActive:   time.Now(),
+		Status:       SessionStatusStarting,
+		statusChange: make(chan SessionStatus, 10), // Buffered to prevent deadlock
+		logger:       sessLog,
 	}
 
 	go sess.readStdout()
@@ -368,6 +408,10 @@ func (s *Session) isAliveLocked() bool {
 	if s.cmd == nil || s.cmd.Process == nil || s.Status == SessionStatusDead {
 		return false
 	}
+	// Also check if the context is cancelled
+	if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+		return false
+	}
 	return isProcessAlive(s.cmd.Process)
 }
 
@@ -388,8 +432,14 @@ func (s *Session) Touch() {
 // SetStatus updates the session status with proper locking.
 func (s *Session) SetStatus(status SessionStatus) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.Status = status
+	s.mu.Unlock()
+
+	// Non-blocking send to statusChange channel
+	select {
+	case s.statusChange <- status:
+	default:
+	}
 }
 
 // GetStatus returns the current session status.
@@ -404,14 +454,23 @@ func (s *Session) GetStatus() SessionStatus {
 // The context parameter allows cancellation if the session is terminated early.
 func (s *Session) waitForReady(ctx context.Context, timeout time.Duration) {
 	go func() {
+		// Use a temporary timer for the overall deadline
+		deadlineTimer := time.NewTimer(timeout)
+		defer deadlineTimer.Stop()
+
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
-		deadline := time.Now().Add(timeout)
-		for time.Now().Before(deadline) {
+		for {
 			select {
 			case <-ctx.Done():
-				// Context cancelled - session terminated or request cancelled
+				return
+			case <-deadlineTimer.C:
+				s.mu.Lock()
+				if s.Status == SessionStatusStarting {
+					s.Status = SessionStatusDead
+				}
+				s.mu.Unlock()
 				return
 			case <-ticker.C:
 				s.mu.Lock()
@@ -420,19 +479,13 @@ func (s *Session) waitForReady(ctx context.Context, timeout time.Duration) {
 					return
 				}
 				if s.isAliveLocked() {
-					s.Status = SessionStatusReady
 					s.mu.Unlock()
+					s.SetStatus(SessionStatusReady)
 					return
 				}
 				s.mu.Unlock()
 			}
 		}
-		// Timeout - mark as dead if still not alive
-		s.mu.Lock()
-		if s.Status == SessionStatusStarting {
-			s.Status = SessionStatusDead
-		}
-		s.mu.Unlock()
 	}()
 }
 
@@ -443,31 +496,12 @@ func (s *Session) WriteInput(msg map[string]any) error {
 	defer s.mu.Unlock()
 
 	// Set status to Busy while processing input
-	// Must be done under lock to prevent race with cleanup
 	s.Status = SessionStatusBusy
-
-	// Reset existing timer if any (prevents goroutine accumulation)
-	if s.statusResetTimer != nil {
-		// Stop the timer and check if it was already fired
-		if !s.statusResetTimer.Stop() {
-			// Timer already fired - callback may be running or about to run
-			// Release lock briefly to allow callback to complete if it's holding lock
-			s.mu.Unlock()
-			time.Sleep(50 * time.Millisecond) // Give callback time to complete
-			s.mu.Lock()
-		}
+	// Broadcast status change immediately
+	select {
+	case s.statusChange <- SessionStatusBusy:
+	default:
 	}
-
-	// Schedule status recovery to Ready after a short delay
-	// This allows the session to be marked busy while the CLI processes the input
-	// Callback acquires lock to prevent race with WriteInput
-	s.statusResetTimer = time.AfterFunc(statusBusyDuration, func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.isAliveLocked() {
-			s.Status = SessionStatusReady
-		}
-	})
 
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -489,14 +523,8 @@ func (s *Session) WriteInput(msg map[string]any) error {
 // close releases resources held by the session.
 // Must be called with session lock held.
 func (s *Session) close() {
-	// Stop the status reset timer if exists
-	// Use a local copy to avoid holding lock during Stop()
-	if s.statusResetTimer != nil {
-		timer := s.statusResetTimer
-		s.statusResetTimer = nil
-		// Timer.Stop is safe to call multiple times and from different goroutines
-		timer.Stop()
-	}
+	// Signal runners to exit if they are waiting for status change
+	s.SetStatus(SessionStatusDead)
 }
 
 // SetCallback registers the callback to handle stream events for the current turn.

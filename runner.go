@@ -268,8 +268,6 @@ func (r *Engine) executeWithMultiplex(
 }
 
 func (r *Engine) waitForSession(ctx context.Context, sess *Session, sessionID string) error {
-	readyCtx, readyCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer readyCancel()
 	for {
 		status := sess.GetStatus()
 		if status == SessionStatusReady || status == SessionStatusBusy {
@@ -278,10 +276,17 @@ func (r *Engine) waitForSession(ctx context.Context, sess *Session, sessionID st
 		if status == SessionStatusDead {
 			return fmt.Errorf("session %s is dead, cannot execute", sessionID)
 		}
+
 		select {
-		case <-readyCtx.Done():
-			return fmt.Errorf("session %s not ready within 10s (status: %s)", sessionID, status)
-		case <-time.After(200 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		case s := <-sess.statusChange:
+			if s == SessionStatusReady || s == SessionStatusBusy {
+				return nil
+			}
+			if s == SessionStatusDead {
+				return fmt.Errorf("session %s is dead, cannot execute", sessionID)
+			}
 		}
 	}
 }
@@ -440,6 +445,12 @@ func (r *Engine) handleResultMessage(msg StreamMessage, stats *SessionStats, cfg
 			IsError:              msg.IsError,
 			ErrorMessage:         msg.Error,
 		})
+	}
+
+	// Turn is done, Session is now Ready for next input
+	// Find the session in manager to set it to Ready
+	if sess, ok := r.manager.GetSession(cfg.SessionID); ok {
+		sess.SetStatus(SessionStatusReady)
 	}
 }
 
