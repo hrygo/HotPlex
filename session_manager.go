@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hrygo/hotplex/internal/sys"
 )
 
 // SessionStatus defines the current state of a session.
@@ -698,4 +699,17 @@ func (sm *SessionPool) Shutdown() {
 	for sessionID := range sm.sessions {
 		_ = sm.cleanupSessionLocked(sessionID) //nolint:errcheck // cleanup on shutdown
 	}
+}
+
+// Wrapper functions for sys package (temporary during migration)
+func setupCmdSysProcAttr(cmd *exec.Cmd) {
+	sys.SetupCmdSysProcAttr(cmd)
+}
+
+func killProcessGroup(cmd *exec.Cmd) {
+	sys.KillProcessGroup(cmd)
+}
+
+func isProcessAlive(process *os.Process) bool {
+	return sys.IsProcessAlive(process)
 }

@@ -1,6 +1,6 @@
 //go:build unix
 
-package hotplex
+package sys
 
 import (
 	"os"
@@ -11,7 +11,7 @@ import (
 
 func TestSetupCmdSysProcAttr(t *testing.T) {
 	cmd := exec.Command("echo", "test")
-	setupCmdSysProcAttr(cmd)
+	SetupCmdSysProcAttr(cmd)
 
 	// Verify SysProcAttr is set
 	if cmd.SysProcAttr == nil {
@@ -27,7 +27,7 @@ func TestSetupCmdSysProcAttr(t *testing.T) {
 func TestKillProcessGroup(t *testing.T) {
 	// Start a simple process
 	cmd := exec.Command("sleep", "10")
-	setupCmdSysProcAttr(cmd)
+	SetupCmdSysProcAttr(cmd)
 
 	err := cmd.Start()
 	if err != nil {
@@ -37,7 +37,7 @@ func TestKillProcessGroup(t *testing.T) {
 	pid := cmd.Process.Pid
 
 	// Kill the process group
-	killProcessGroup(cmd)
+	KillProcessGroup(cmd)
 
 	// Wait for process to finish
 	_ = cmd.Wait()
@@ -57,19 +57,19 @@ func TestKillProcessGroup(t *testing.T) {
 
 func TestKillProcessGroup_NilCmd(t *testing.T) {
 	// Should not panic with nil cmd
-	killProcessGroup(nil)
+	KillProcessGroup(nil)
 }
 
 func TestKillProcessGroup_NilProcess(t *testing.T) {
 	// Should not panic with nil Process
 	cmd := &exec.Cmd{}
-	killProcessGroup(cmd)
+	KillProcessGroup(cmd)
 }
 
 func TestIsProcessAlive(t *testing.T) {
 	// Start a process
 	cmd := exec.Command("sleep", "1")
-	setupCmdSysProcAttr(cmd)
+	SetupCmdSysProcAttr(cmd)
 
 	err := cmd.Start()
 	if err != nil {
@@ -77,7 +77,7 @@ func TestIsProcessAlive(t *testing.T) {
 	}
 
 	// Process should be alive
-	if !isProcessAlive(cmd.Process) {
+	if !IsProcessAlive(cmd.Process) {
 		t.Error("Process should be alive")
 	}
 
@@ -86,13 +86,13 @@ func TestIsProcessAlive(t *testing.T) {
 	_ = cmd.Wait()
 
 	// Process should not be alive
-	if isProcessAlive(cmd.Process) {
+	if IsProcessAlive(cmd.Process) {
 		t.Error("Process should not be alive after kill")
 	}
 }
 
 func TestIsProcessAlive_NilProcess(t *testing.T) {
-	if isProcessAlive(nil) {
+	if IsProcessAlive(nil) {
 		t.Error("nil process should not be alive")
 	}
 }

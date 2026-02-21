@@ -1,4 +1,4 @@
-package hotplex
+package provider
 
 import (
 	"testing"
@@ -567,4 +567,15 @@ func TestMergeProviderConfigs_ExplicitDisable(t *testing.T) {
 	if !result3.Enabled {
 		t.Error("Expected Enabled=true when overlay.Enabled=true")
 	}
+}
+
+// assertContains checks if a string slice contains a specific string.
+func assertContains(t *testing.T, slice []string, want string) {
+	t.Helper()
+	for _, s := range slice {
+		if s == want {
+			return
+		}
+	}
+	t.Errorf("slice %v does not contain %q", slice, want)
 }

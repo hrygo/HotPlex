@@ -1,6 +1,6 @@
 //go:build windows
 
-package hotplex
+package sys
 
 import (
 	"fmt"
@@ -8,15 +8,15 @@ import (
 	"os/exec"
 )
 
-// setupCmdSysProcAttr configures the command for Windows (No PGID support).
-func setupCmdSysProcAttr(cmd *exec.Cmd) {
+// SetupCmdSysProcAttr configures the command for Windows (No PGID support).
+func SetupCmdSysProcAttr(cmd *exec.Cmd) {
 	// Windows does not use Setpgid or process groups in the same way as Unix.
 	// For deeper isolation on Windows, Job Objects would be required.
 }
 
-// killProcessGroup terminates the process and its children on Windows (#10).
+// KillProcessGroup terminates the process and its children on Windows (#10).
 // Uses taskkill /F /T /PID to kill the entire process tree.
-func killProcessGroup(cmd *exec.Cmd) {
+func KillProcessGroup(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
@@ -31,8 +31,8 @@ func killProcessGroup(cmd *exec.Cmd) {
 	_ = cmd.Process.Kill()
 }
 
-// isProcessAlive checks if the process is still running (Windows).
-func isProcessAlive(process *os.Process) bool {
+// IsProcessAlive checks if the process is still running (Windows).
+func IsProcessAlive(process *os.Process) bool {
 	if process == nil {
 		return false
 	}

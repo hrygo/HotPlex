@@ -1,4 +1,4 @@
-package hotplex
+package provider
 
 import (
 	"fmt"

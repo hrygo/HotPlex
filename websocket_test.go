@@ -3,6 +3,8 @@ package hotplex
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/hrygo/hotplex/internal/security"
 )
 
 func TestStreamMessage_JSON_Unmarshal(t *testing.T) {
@@ -140,10 +142,10 @@ func TestSessionStatsData_JSON_Marshal(t *testing.T) {
 }
 
 func TestDangerBlockEvent_JSON_Marshal(t *testing.T) {
-	event := &DangerBlockEvent{
+	event := &security.DangerBlockEvent{
 		Operation:     "rm -rf /",
 		Reason:        "Delete root",
-		Level:         DangerLevelCritical,
+		Level:         security.DangerLevelCritical,
 		Category:      "file_delete",
 		BypassAllowed: false,
 		Suggestions:   []string{"Use rm -i"},

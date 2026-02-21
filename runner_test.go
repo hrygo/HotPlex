@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/security"
 )
 
 func TestEngine_ValidateConfig(t *testing.T) {
@@ -14,7 +16,7 @@ func TestEngine_ValidateConfig(t *testing.T) {
 	engine := &Engine{
 		opts:           EngineOptions{Namespace: "test"},
 		logger:         logger,
-		dangerDetector: NewDetector(logger),
+		dangerDetector: security.NewDetector(logger),
 	}
 
 	tests := []struct {
@@ -81,7 +83,7 @@ func TestEngine_ValidateConfig_CleansPath(t *testing.T) {
 	engine := &Engine{
 		opts:           EngineOptions{Namespace: "test"},
 		logger:         logger,
-		dangerDetector: NewDetector(logger),
+		dangerDetector: security.NewDetector(logger),
 	}
 
 	// Test that path gets cleaned
@@ -115,7 +117,7 @@ func TestEngine_Execute_DangerBlocked(t *testing.T) {
 	engine := &Engine{
 		opts:           EngineOptions{Namespace: "test", Timeout: time.Minute},
 		logger:         logger,
-		dangerDetector: NewDetector(logger),
+		dangerDetector: security.NewDetector(logger),
 	}
 
 	// Dangerous prompt should be blocked before any execution
@@ -133,7 +135,7 @@ func TestEngine_Execute_InvalidConfig(t *testing.T) {
 	engine := &Engine{
 		opts:           EngineOptions{Namespace: "test", Timeout: time.Minute},
 		logger:         logger,
-		dangerDetector: NewDetector(logger),
+		dangerDetector: security.NewDetector(logger),
 	}
 
 	ctx := context.Background()
@@ -156,7 +158,7 @@ func TestEngine_Execute_DangerBlockEvent(t *testing.T) {
 	engine := &Engine{
 		opts:           EngineOptions{Namespace: "test", Timeout: time.Minute},
 		logger:         logger,
-		dangerDetector: NewDetector(logger),
+		dangerDetector: security.NewDetector(logger),
 	}
 
 	ctx := context.Background()
@@ -188,7 +190,7 @@ func TestEngine_Execute_ThinkingEvent(t *testing.T) {
 	engine := &Engine{
 		opts:           EngineOptions{Namespace: "test", Timeout: time.Minute},
 		logger:         logger,
-		dangerDetector: NewDetector(logger),
+		dangerDetector: security.NewDetector(logger),
 		manager:        mockMgr,
 	}
 
@@ -216,7 +218,7 @@ func TestEngine_Execute_MkdirAllFailure(t *testing.T) {
 	engine := &Engine{
 		opts:           EngineOptions{Namespace: "test", Timeout: time.Minute},
 		logger:         logger,
-		dangerDetector: NewDetector(logger),
+		dangerDetector: security.NewDetector(logger),
 	}
 
 	ctx := context.Background()
@@ -273,7 +275,7 @@ func TestEngine_StopSession(t *testing.T) {
 
 func TestEngine_DangerDetectorMethods(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	detector := NewDetector(logger)
+	detector := security.NewDetector(logger)
 	engine := &Engine{
 		opts:           EngineOptions{Namespace: "test"},
 		logger:         logger,

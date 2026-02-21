@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/security"
 )
 
 // EngineOptions defines the configuration parameters for initializing a new HotPlex Engine.
@@ -46,7 +48,7 @@ type Engine struct {
 	cliPath        string
 	logger         *slog.Logger
 	manager        SessionManager
-	dangerDetector *Detector
+	dangerDetector *security.Detector
 	// Session stats for the last execution (thread-safe)
 	statsMu      sync.RWMutex
 	currentStats *SessionStats
@@ -76,7 +78,7 @@ func NewEngine(options EngineOptions) (HotPlexClient, error) {
 	}
 
 	// Initialize danger detector for security
-	dangerDetector := NewDetector(logger)
+	dangerDetector := security.NewDetector(logger)
 	if options.AdminToken != "" {
 		dangerDetector.SetAdminToken(options.AdminToken)
 	}
@@ -698,6 +700,6 @@ func (r *Engine) SetDangerBypassEnabled(token string, enabled bool) error {
 }
 
 // GetDangerDetector returns the danger detector instance.
-func (r *Engine) GetDangerDetector() *Detector {
+func (r *Engine) GetDangerDetector() *security.Detector {
 	return r.dangerDetector
 }

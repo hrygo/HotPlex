@@ -2,6 +2,8 @@ package hotplex
 
 import (
 	"testing"
+
+	"github.com/hrygo/hotplex/internal/security"
 )
 
 func TestCloseDoneChan(t *testing.T) {
@@ -168,11 +170,11 @@ func TestConfig_Empty(t *testing.T) {
 }
 
 func TestDangerBlockEvent_Fields(t *testing.T) {
-	event := &DangerBlockEvent{
+	event := &security.DangerBlockEvent{
 		Operation:      "rm -rf /",
 		Reason:         "Delete root directory",
 		PatternMatched: "rm\\s+-rf\\s+?/",
-		Level:          DangerLevelCritical,
+		Level:          security.DangerLevelCritical,
 		Category:       "file_delete",
 		BypassAllowed:  false,
 		Suggestions:    []string{"Use rm -i"},
@@ -188,9 +190,9 @@ func TestDangerBlockEvent_Fields(t *testing.T) {
 
 func TestDangerPattern_Description(t *testing.T) {
 	// Just verify the struct is accessible
-	pattern := DangerPattern{
+	pattern := security.DangerPattern{
 		Description: "Test pattern",
-		Level:       DangerLevelHigh,
+		Level:       security.DangerLevelHigh,
 		Category:    "test",
 	}
 

@@ -1,4 +1,4 @@
-package hotplex
+package security
 
 import (
 	"log/slog"

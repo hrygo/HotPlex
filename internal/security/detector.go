@@ -1,4 +1,4 @@
-package hotplex
+package security
 
 import (
 	"bufio"
@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/hrygo/hotplex/internal/strutil"
 )
 
 // Constants for danger detector logging and display limits.
@@ -280,7 +282,7 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 
 	// If bypass is enabled (admin/Evolution mode), skip checks
 	if dd.bypassEnabled {
-		dd.logger.Warn("Danger detection bypassed", "input", TruncateString(input, MaxInputLogLength))
+		dd.logger.Warn("Danger detection bypassed", "input", strutil.Truncate(input, MaxInputLogLength))
 		return nil
 	}
 
@@ -292,7 +294,7 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 				"description", pat.Description,
 				"level", pat.Level,
 				"category", pat.Category,
-				"input", TruncateString(input, MaxPatternLogLength),
+				"input", strutil.Truncate(input, MaxPatternLogLength),
 			)
 
 			return &DangerBlockEvent{
@@ -318,11 +320,11 @@ func extractCommand(input string, pattern *regexp.Regexp) string {
 		line := scanner.Text()
 		if pattern.MatchString(line) {
 			// Truncate to reasonable length (use rune-aware truncateString for UTF-8 safety)
-			return TruncateString(line, MaxDisplayLength)
+			return strutil.Truncate(line, MaxDisplayLength)
 		}
 	}
 	// Fallback to truncated input (use existing truncateString from util.go)
-	return TruncateString(input, MaxDisplayLength)
+	return strutil.Truncate(input, MaxDisplayLength)
 }
 
 // getSuggestions returns safe alternatives for the dangerous operation.
