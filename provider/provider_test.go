@@ -103,7 +103,7 @@ func TestClaudeCodeProvider_BuildInputMessage(t *testing.T) {
 	if text == "" {
 		t.Error("Expected non-empty text content")
 	}
-	expected := "<task>\n<![CDATA[\nYou are a code reviewer\n]]>\n</task>\n\n<user_input>\n<![CDATA[\nHello, world!\n]]>\n</user_input>"
+	expected := "<context>\n<![CDATA[\nYou are a code reviewer\n]]>\n</context>\n\n<user_query>\n<![CDATA[\nHello, world!\n]]>\n</user_query>"
 	if text != expected {
 		t.Errorf("Expected structured XML prompt, got:\n%s", text)
 	}
@@ -251,7 +251,7 @@ func TestOpenCodeProvider_BuildInputMessage(t *testing.T) {
 
 	msg, _ := provider.BuildInputMessage("Hello!", "Be specific")
 	prompt := msg["prompt"].(string)
-	expected := "<task>\n<![CDATA[\nBe specific\n]]>\n</task>\n\n<user_input>\n<![CDATA[\nHello!\n]]>\n</user_input>"
+	expected := "<context>\n<![CDATA[\nBe specific\n]]>\n</context>\n\n<user_query>\n<![CDATA[\nHello!\n]]>\n</user_query>"
 	if prompt != expected {
 		t.Errorf("Expected OpenCode structured prompt, got:\n%s", prompt)
 	}

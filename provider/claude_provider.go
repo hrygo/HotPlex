@@ -156,7 +156,7 @@ func (p *ClaudeCodeProvider) BuildInputMessage(prompt string, taskInstructions s
 	// This follows Anthropic's best practices for clear delineation.
 	finalPrompt := prompt
 	if taskInstructions != "" {
-		finalPrompt = fmt.Sprintf("<task>\n<![CDATA[\n%s\n]]>\n</task>\n\n<user_input>\n<![CDATA[\n%s\n]]>\n</user_input>",
+		finalPrompt = fmt.Sprintf("<context>\n<![CDATA[\n%s\n]]>\n</context>\n\n<user_query>\n<![CDATA[\n%s\n]]>\n</user_query>",
 			taskInstructions, prompt)
 	}
 

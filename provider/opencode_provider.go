@@ -179,7 +179,7 @@ func (p *OpenCodeProvider) BuildInputMessage(prompt string, taskInstructions str
 	// Inject task-level constraints using XML tags and CDATA.
 	finalPrompt := prompt
 	if taskInstructions != "" {
-		finalPrompt = fmt.Sprintf("<task>\n<![CDATA[\n%s\n]]>\n</task>\n\n<user_input>\n<![CDATA[\n%s\n]]>\n</user_input>",
+		finalPrompt = fmt.Sprintf("<context>\n<![CDATA[\n%s\n]]>\n</context>\n\n<user_query>\n<![CDATA[\n%s\n]]>\n</user_query>",
 			taskInstructions, prompt)
 	}
 
@@ -396,7 +396,7 @@ func (p *OpenCodeProvider) GetHTTPAPIPort() int {
 func (p *OpenCodeProvider) BuildHTTPCommand(prompt string, taskInstructions string) string {
 	finalPrompt := prompt
 	if taskInstructions != "" {
-		finalPrompt = fmt.Sprintf("<task>\n<![CDATA[\n%s\n]]>\n</task>\n\n<user_input>\n<![CDATA[\n%s\n]]>\n</user_input>",
+		finalPrompt = fmt.Sprintf("<context>\n<![CDATA[\n%s\n]]>\n</context>\n\n<user_query>\n<![CDATA[\n%s\n]]>\n</user_query>",
 			taskInstructions, prompt)
 	}
 	// Escape quotes for shell
