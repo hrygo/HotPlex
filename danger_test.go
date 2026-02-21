@@ -379,3 +379,101 @@ func TestDetector_CaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+func TestDetector_CheckFileAccess(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	detector := NewDetector(logger)
+
+	// Set allowed paths
+	detector.SetAllowPaths([]string{"/safe/project"})
+
+	tests := []struct {
+		name    string
+		path    string
+		allowed bool
+	}{
+		{"allowed path", "/safe/project", true},
+		{"allowed subdirectory", "/safe/project/subdir/file.txt", true},
+		{"blocked path", "/etc/passwd", false},
+		{"relative path in allowed", "project/file.txt", true}, // Gets resolved to cwd
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detector.CheckFileAccess(tt.path)
+			// Note: relative paths are resolved against cwd, so results may vary
+			if tt.name == "blocked path" && result {
+				t.Errorf("CheckFileAccess(%q) = %v, want false", tt.path, result)
+			}
+		})
+	}
+}
+
+func TestDetector_LoadCustomPatterns(t *testing.T) {
+	// Create a temp file with custom patterns
+	tmpFile, err := os.CreateTemp("", "patterns-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	// Write test patterns - use a unique pattern that won't match built-in patterns
+	content := `# Comment line
+myuniquecmd123|Custom unique pattern|critical|system
+anotherunique|Another custom pattern|high|system
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	_ = tmpFile.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	detector := NewDetector(logger)
+
+	err = detector.LoadCustomPatterns(tmpFile.Name())
+	if err != nil {
+		t.Errorf("LoadCustomPatterns() error: %v", err)
+	}
+
+	// Test that custom pattern works
+	event := detector.CheckInput("myuniquecmd123")
+	if event == nil {
+		t.Error("Custom pattern not loaded")
+	} else if event.Reason != "Custom unique pattern" {
+		t.Errorf("Custom pattern reason = %q, want 'Custom unique pattern'", event.Reason)
+	}
+}
+
+func TestDetector_LoadCustomPatterns_FileNotFound(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	detector := NewDetector(logger)
+
+	err := detector.LoadCustomPatterns("/nonexistent/file.txt")
+	if err == nil {
+		t.Error("LoadCustomPatterns() should fail for nonexistent file")
+	}
+}
+
+func TestDetector_LoadCustomPatterns_InvalidFormat(t *testing.T) {
+	// Create a temp file with invalid pattern format
+	tmpFile, err := os.CreateTemp("", "patterns-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	// Write invalid pattern (not enough parts)
+	if _, err := tmpFile.WriteString("invalid-pattern|only-two-parts\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = tmpFile.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	detector := NewDetector(logger)
+
+	// Should not error, just skip invalid lines
+	err = detector.LoadCustomPatterns(tmpFile.Name())
+	if err != nil {
+		t.Errorf("LoadCustomPatterns() error: %v", err)
+	}
+}

@@ -2,6 +2,7 @@ package hotplex
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -150,6 +151,107 @@ func TestEngine_Execute_InvalidConfig(t *testing.T) {
 	}
 }
 
+func TestEngine_Execute_DangerBlockEvent(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	engine := &Engine{
+		opts:           EngineOptions{Namespace: "test", Timeout: time.Minute},
+		logger:         logger,
+		dangerDetector: NewDetector(logger),
+	}
+
+	ctx := context.Background()
+	cfg := &Config{WorkDir: "/tmp", SessionID: "test"}
+
+	var dangerBlockReceived bool
+	cb := func(eventType string, data any) error {
+		if eventType == "danger_block" {
+			dangerBlockReceived = true
+		}
+		return nil
+	}
+
+	err := engine.Execute(ctx, cfg, "rm -rf /", cb)
+	if err != ErrDangerBlocked {
+		t.Errorf("Execute() error = %v, want ErrDangerBlocked", err)
+	}
+	if !dangerBlockReceived {
+		t.Error("danger_block event should be sent")
+	}
+}
+
+func TestEngine_Execute_ThinkingEvent(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Create mock manager that returns error on GetOrCreateSession
+	mockMgr := &mockFailingSessionManager{}
+
+	engine := &Engine{
+		opts:           EngineOptions{Namespace: "test", Timeout: time.Minute},
+		logger:         logger,
+		dangerDetector: NewDetector(logger),
+		manager:        mockMgr,
+	}
+
+	ctx := context.Background()
+	cfg := &Config{WorkDir: "/tmp", SessionID: "test"}
+
+	var thinkingReceived bool
+	cb := func(eventType string, data any) error {
+		if eventType == "thinking" {
+			thinkingReceived = true
+		}
+		return nil
+	}
+
+	// This will fail at executeWithMultiplex, but thinking event should be sent first
+	_ = engine.Execute(ctx, cfg, "safe prompt", cb)
+
+	if !thinkingReceived {
+		t.Error("thinking event should be sent")
+	}
+}
+
+func TestEngine_Execute_MkdirAllFailure(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	engine := &Engine{
+		opts:           EngineOptions{Namespace: "test", Timeout: time.Minute},
+		logger:         logger,
+		dangerDetector: NewDetector(logger),
+	}
+
+	ctx := context.Background()
+
+	// Try to create a directory in a path that requires permission
+	// This test may pass if running as root, so we use an invalid path
+	cfg := &Config{WorkDir: "/nonexistent\x00invalid/path", SessionID: "test"}
+
+	err := engine.Execute(ctx, cfg, "safe prompt", nil)
+	if err == nil {
+		t.Error("Execute() with invalid WorkDir should fail")
+	}
+}
+
+// mockFailingSessionManager always returns error on GetOrCreateSession
+type mockFailingSessionManager struct{}
+
+func (m *mockFailingSessionManager) GetOrCreateSession(ctx context.Context, sessionID string, cfg Config) (*Session, error) {
+	return nil, fmt.Errorf("mock error: session creation failed")
+}
+
+func (m *mockFailingSessionManager) GetSession(sessionID string) (*Session, bool) {
+	return nil, false
+}
+
+func (m *mockFailingSessionManager) TerminateSession(sessionID string) error {
+	return nil
+}
+
+func (m *mockFailingSessionManager) ListActiveSessions() []*Session {
+	return nil
+}
+
+func (m *mockFailingSessionManager) Shutdown() {}
+
 func TestEngine_StopSession(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
@@ -201,20 +303,6 @@ func TestEngine_DangerDetectorMethods(t *testing.T) {
 	if engine.GetDangerDetector() != detector {
 		t.Error("GetDangerDetector() returned different instance")
 	}
-}
-
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // mockSessionManager for testing

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -545,6 +546,22 @@ func (s *Session) SetCallback(cb Callback) {
 	s.callback = cb
 }
 
+// isExpectedCloseError checks if the error is an expected pipe closure during normal shutdown.
+func isExpectedCloseError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for common pipe closure errors
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	// "read |0: file already closed" - pipe closed during session termination
+	if strings.Contains(err.Error(), "file already closed") {
+		return true
+	}
+	return false
+}
+
 // readStdout asynchronously reads CLI stdout, parses JSON, and dispatches callbacks.
 func (s *Session) readStdout() {
 	if s.stdout == nil {
@@ -567,7 +584,8 @@ func (s *Session) readStdout() {
 		}
 
 		// If scanner exited with error, the process is likely dead or in a bad state
-		if err := scanner.Err(); err != nil {
+		// Note: "file already closed" is expected during normal session shutdown
+		if err := scanner.Err(); err != nil && !isExpectedCloseError(err) {
 			if s.logger != nil {
 				s.logger.Error("Session stdout scanner error", "error", err)
 			}
@@ -594,7 +612,7 @@ func (s *Session) readStdout() {
 		}
 	}
 
-	if err := scanner.Err(); err != nil && s.logger != nil {
+	if err := scanner.Err(); err != nil && s.logger != nil && !isExpectedCloseError(err) {
 		s.logger.Error("Session stdout scanner error", "error", err)
 	}
 }
@@ -616,7 +634,7 @@ func (s *Session) readStderr() {
 		}
 	}
 
-	if err := scanner.Err(); err != nil && s.logger != nil {
+	if err := scanner.Err(); err != nil && s.logger != nil && !isExpectedCloseError(err) {
 		s.logger.Error("Session stderr scanner error", "error", err)
 	}
 }
