@@ -1,0 +1,61 @@
+name: pr-checks
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  statuses: write
+
+jobs:
+  gate:
+    name: PR Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR
+        id: validate
+        shell: bash
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          BODY=$(cat << 'EOF'
+          ${{ github.event.pull_request.body }}
+          EOF
+          )
+          
+          # 1. Branch Naming Check
+          REGEX="^(feat|fix|refactor|docs|chore|test)/([0-9]+-)?.*$"
+          if [[ ! "$BRANCH" =~ $REGEX ]]; then
+            echo "branch_error=Format: <type>/[<id>-]<desc> (e.g. feat/1-login)" >> $GITHUB_OUTPUT
+          fi
+          
+          # 2. Issue Link Check
+          if ! echo "$BODY" | grep -Eiq "(resolves|fixes|closes|refs|fix)\s+#([0-9]+)"; then
+            echo "issue_error=Missing issue link (e.g. Resolves #1 or Refs #1)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Report Status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = context.payload.pull_request.head.sha;
+            
+            const branchErr = "${{ steps.validate.outputs.branch_error }}";
+            const issueErr = "${{ steps.validate.outputs.issue_error }}";
+            
+            const reports = [
+              { context: 'pr-checks/branch-naming', state: branchErr ? 'failure' : 'success', desc: branchErr || 'Branch naming correct' },
+              { context: 'pr-checks/issue-link', state: issueErr ? 'failure' : 'success', desc: issueErr || 'Issue link found' }
+            ];
+            
+            for (const r of reports) {
+              await github.rest.repos.createCommitStatus({
+                owner, repo, sha,
+                state: r.state,
+                context: r.context,
+                description: r.desc,
+                target_url: `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`
+              });
+            }
+            
+            if (branchErr || issueErr) process.exit(1);
