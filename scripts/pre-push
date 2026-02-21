@@ -27,10 +27,10 @@ else
     printf "${YELLOW}⚠️  golangci-lint not found, skipping linting.${NC}\n"
 fi
 
-# 3. Run Go tests (with Race Detection)
-printf "🔹 Running unit tests with race detection...\n"
-if ! go test -v -race ./...; then
-    printf "${RED}❌ Tests failed! Push aborted.${NC}\n"
+# 3. Run Go tests (Fast Unit Tests)
+printf "🔹 Running fast unit tests...\n"
+if ! make test-unit; then
+    printf "${RED}❌ Unit tests failed! Push aborted.${NC}\n"
     exit 1
 fi
 

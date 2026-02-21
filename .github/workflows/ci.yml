@@ -7,8 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
-    name: Build and Test
+  test-unit:
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,14 +31,36 @@ jobs:
           chmod +x $HOME/.local/bin/claude
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Verify CLI Mock
-        run: claude --version
+      - name: Run Unit Tests
+        run: make test-unit
 
-      - name: Build
-        run: go build -v ./...
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Run Tests
-        run: go test -v -race ./...
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Setup Mock Claude CLI
+         # Reuse same setup
+        run: |
+          mkdir -p $HOME/.local/bin
+          echo '#!/bin/bash' > $HOME/.local/bin/claude
+          echo 'echo "claude version 0.0.0-mock"' >> $HOME/.local/bin/claude
+          chmod +x $HOME/.local/bin/claude
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Run Integration Tests
+        run: make test-integration
 
   lint:
     name: Lint

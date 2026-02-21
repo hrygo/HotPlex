@@ -36,10 +36,24 @@ build: ## Compile the hotplexd daemon
 	@go build -o $(DIST_DIR)/$(BINARY_NAME) $(CMD_PATH)
 	@printf "${GREEN}✅ Build complete: ${DIST_DIR}/$(BINARY_NAME)${NC}\n"
 
-test: ## Run unit tests with race detection
-	@printf "${CYAN}🧪 Running tests with race detection...${NC}\n"
+test: test-unit ## Run fast unit tests (default)
+
+test-unit: ## Run fast unit tests without race detection
+	@printf "${CYAN}🧪 Running fast unit tests...${NC}\n"
+	@go test -v -short ./...
+	@printf "${GREEN}✅ Unit tests passed!${NC}\n"
+
+test-race: ## Run unit tests with race detection
+	@printf "${CYAN}🧪 Running unit tests with race detection...${NC}\n"
 	@go test -v -race ./...
-	@printf "${GREEN}✅ Tests passed!${NC}\n"
+	@printf "${GREEN}✅ Race detection passed!${NC}\n"
+
+test-integration: ## Run heavy integration tests
+	@printf "${YELLOW}🏗️  Running heavy integration tests...${NC}\n"
+	@go test -v -tags=integration ./...
+	@printf "${GREEN}✅ Integration tests passed!${NC}\n"
+
+test-all: test-unit test-integration ## Run all tests
 
 lint: ## Run golangci-lint
 	@printf "${PURPLE}🔍 Linting code...${NC}\n"

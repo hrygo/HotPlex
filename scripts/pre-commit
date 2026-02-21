@@ -13,19 +13,24 @@ printf "${YELLOW}🔍 Running pre-commit checks...${NC}\n"
 
 # 1. Format Check (go fmt)
 printf "🔹 Checking code formatting (go fmt)...\n"
-DIFF=$(gofmt -d $(find . -name "*.go" -not -path "./vendor/*"))
-if [ -n "$DIFF" ]; then
-    printf "${YELLOW}⚠️  Code is not formatted correctly. Please run 'go fmt ./...'${NC}\n"
-    echo "$DIFF"
-    exit 1
+STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep ".go$" || true)
+if [ -n "$STAGED_GO_FILES" ]; then
+    DIFF=$(gofmt -d $STAGED_GO_FILES)
+    if [ -n "$DIFF" ]; then
+        printf "${YELLOW}⚠️  Staged code is not formatted correctly. Please run 'go fmt' on these files:${NC}\n"
+        echo "$STAGED_GO_FILES"
+        exit 1
+    fi
 fi
 
 # 2. Dependency Check (go mod tidy)
-printf "🔹 Verifying dependencies (go mod tidy)...\n"
-go mod tidy
-if ! git diff --exit-code go.mod go.sum > /dev/null; then
-    printf "${YELLOW}⚠️  go.mod or go.sum are out of sync. Please run 'go mod tidy' and stage the changes.${NC}\n"
-    exit 1
+if git diff --cached --name-only | grep -E "go.mod|go.sum" > /dev/null; then
+    printf "🔹 Verifying dependencies (go mod tidy)...\n"
+    go mod tidy
+    if ! git diff --exit-code go.mod go.sum > /dev/null; then
+        printf "${YELLOW}⚠️  go.mod or go.sum are out of sync. Please run 'go mod tidy' and stage the changes.${NC}\n"
+        exit 1
+    fi
 fi
 
 # 3. Check for forbidden placeholders/debug code
