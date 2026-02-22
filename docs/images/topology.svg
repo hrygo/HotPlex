@@ -2,8 +2,8 @@
   <defs>
     <style>
       .bg { fill: #f8f9fa; }
-      .layer-bg { fill: #fff; stroke: #e1e4e8; stroke-width: 2; }
-      .layer-sandbox { fill: #f1f3f5; stroke: #cfd4da; stroke-width: 2; stroke-dasharray: 4; }
+      .layer-bg { fill: #ffffff; stroke: #e1e4e8; stroke-width: 2; }
+      .layer-sandbox { fill: #f1f3f5; stroke: #cfd4da; stroke-width: 2; }
       .box { rx: 8; fill: #fff; stroke-width: 2; stroke: #e1e4e8; }
       .box-accent { fill: rgba(3, 102, 214, 0.05); stroke: #0366d6; stroke-width: 2; rx: 8; }
       .box-success { fill: rgba(40, 167, 69, 0.05); stroke: #28a745; stroke-width: 2; rx: 8; }
@@ -28,7 +28,7 @@
   <text x="500" y="45" text-anchor="middle" class="text-title">hotplex System Topology</text>
 
   <!-- Layer 1: Entrance Layer -->
-  <rect x="50" y="80" width="900" height="140" rx="12" class="layer-bg" style="stroke-dasharray: 8 4;"/>
+  <rect x="50" y="80" width="900" height="140" rx="12" class="layer-bg"/>
   <text x="70" y="105" class="text-layer">1. Access &amp; Interface Layer</text>
 
   <g transform="translate(100, 125)">
@@ -61,39 +61,39 @@
   </g>
 
   <!-- Components inside Layer 2 -->
-  <g transform="translate(80, 410)">
-    <rect width="200" height="140" rx="8" class="box-warning" />
-    <text x="100" y="30" text-anchor="middle" class="text-label" style="fill:#d73a49">SafetyManager</text>
-    <text x="100" y="55" text-anchor="middle" class="text-sub">internal/security</text>
-    <rect x="20" y="75" width="160" height="45" rx="4" fill="#fff" stroke="#d73a49" stroke-width="1"/>
-    <text x="100" y="95" text-anchor="middle" class="text-code">Regex WAF</text>
-    <text x="100" y="110" text-anchor="middle" class="text-code">AllowList</text>
+  <g transform="translate(100, 410)">
+    <rect width="170" height="140" rx="8" class="box-warning" />
+    <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#d73a49">SafetyManager</text>
+    <text x="85" y="55" text-anchor="middle" class="text-sub">internal/security</text>
+    <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#d73a49" stroke-width="1"/>
+    <text x="85" y="95" text-anchor="middle" class="text-code">Regex WAF</text>
+    <text x="85" y="110" text-anchor="middle" class="text-code">AllowList</text>
   </g>
 
-  <g transform="translate(300, 410)">
-    <rect width="200" height="140" rx="8" class="box-success" />
-    <text x="100" y="30" text-anchor="middle" class="text-label" style="fill:#28a745">SessionController</text>
-    <text x="100" y="55" text-anchor="middle" class="text-sub">internal/engine</text>
-    <rect x="20" y="75" width="160" height="45" rx="4" fill="#fff" stroke="#28a745" stroke-width="1"/>
-    <text x="100" y="102" text-anchor="middle" class="text-code">Process Pool &amp; GC</text>
+  <g transform="translate(310, 410)">
+    <rect width="170" height="140" rx="8" class="box-success" />
+    <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#28a745">SessionController</text>
+    <text x="85" y="55" text-anchor="middle" class="text-sub">internal/engine</text>
+    <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#28a745" stroke-width="1"/>
+    <text x="85" y="102" text-anchor="middle" class="text-code">Process Pool&amp;GC</text>
   </g>
 
   <g transform="translate(520, 410)">
-    <rect width="200" height="140" rx="8" class="box-purple" />
-    <text x="100" y="30" text-anchor="middle" class="text-label" style="fill:#6f42c1">Event Hooks</text>
-    <text x="100" y="55" text-anchor="middle" class="text-sub">hooks/*.go</text>
-    <rect x="20" y="75" width="160" height="45" rx="4" fill="#fff" stroke="#6f42c1" stroke-width="1"/>
-    <text x="100" y="95" text-anchor="middle" class="text-code">Webhooks &amp; Audit</text>
-    <text x="100" y="110" text-anchor="middle" class="text-code">OTel Tracing</text>
+    <rect width="170" height="140" rx="8" class="box-purple" />
+    <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#6f42c1">Event Hooks</text>
+    <text x="85" y="55" text-anchor="middle" class="text-sub">hooks/*.go</text>
+    <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#6f42c1" stroke-width="1"/>
+    <text x="85" y="95" text-anchor="middle" class="text-code">Webhook &amp; Audit</text>
+    <text x="85" y="110" text-anchor="middle" class="text-code">OTel Tracing</text>
   </g>
 
-  <g transform="translate(740, 410)">
-    <rect width="180" height="140" rx="8" class="box-orange" />
-    <text x="90" y="30" text-anchor="middle" class="text-label" style="fill:#e36209">Provider</text>
-    <text x="90" y="55" text-anchor="middle" class="text-sub">provider/*.go</text>
-    <rect x="15" y="75" width="150" height="45" rx="4" fill="#fff" stroke="#e36209" stroke-width="1"/>
-    <text x="90" y="95" text-anchor="middle" class="text-code">Event Normalizer</text>
-    <text x="90" y="110" text-anchor="middle" class="text-code">Claude | OpenCode</text>
+  <g transform="translate(730, 410)">
+    <rect width="170" height="140" rx="8" class="box-orange" />
+    <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#e36209">Provider</text>
+    <text x="85" y="55" text-anchor="middle" class="text-sub">provider/*.go</text>
+    <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#e36209" stroke-width="1"/>
+    <text x="85" y="95" text-anchor="middle" class="text-code">Event Normalize</text>
+    <text x="85" y="110" text-anchor="middle" class="text-code">Claude|OpenCode</text>
   </g>
 
 
@@ -101,29 +101,29 @@
   <rect x="50" y="600" width="900" height="160" rx="12" class="layer-sandbox"/>
   <text x="70" y="625" class="text-layer">3. OS Process Layer (Isolated Sandbox)</text>
 
-  <g transform="translate(250, 650)">
-    <rect width="500" height="80" rx="10" fill="#fff" stroke="#495057" stroke-width="2" />
-    <text x="250" y="35" text-anchor="middle" class="text-title" style="fill:#212529; font-size: 18px;">OS Process Group (PGID)</text>
-    <text x="250" y="60" text-anchor="middle" class="text-sub" style="fill:#495057;">Node.js Runtime | Persistent SQLite Context</text>
+  <g transform="translate(100, 650)">
+    <rect width="800" height="80" rx="10" fill="#fff" stroke="#495057" stroke-width="2" />
+    <text x="400" y="35" text-anchor="middle" class="text-title" style="fill:#212529; font-size: 18px;">OS Process Group (PGID)</text>
+    <text x="400" y="60" text-anchor="middle" class="text-sub" style="fill:#495057;">Node.js Runtime | Persistent SQLite Context</text>
   </g>
 
   <!-- Connecting Lines -->
-  <!-- Layer 1 to Layer 2: Convenging stepped lines -->
-  <path d="M 225 195 L 225 260 L 450 260 L 450 295" class="arrow" marker-end="url(#arrowhead)"/>
+  <!-- Layer 1 to Layer 2: Straight Down Lines -->
+  <path d="M 225 195 L 225 295" class="arrow" marker-end="url(#arrowhead)"/>
   <path d="M 500 195 L 500 295" class="arrow" marker-end="url(#arrowhead)"/>
-  <path d="M 775 195 L 775 260 L 550 260 L 550 295" class="arrow" marker-end="url(#arrowhead)"/>
+  <path d="M 775 195 L 775 295" class="arrow" marker-end="url(#arrowhead)"/>
 
   <!-- Inside Engine to Sub-components -->
-  <path d="M 180 380 L 180 405" class="arrow" marker-end="url(#arrowhead)"/>
-  <path d="M 400 380 L 400 405" class="arrow" marker-end="url(#arrowhead)"/>
-  <path d="M 620 380 L 620 405" class="arrow" marker-end="url(#arrowhead)"/>
-  <path d="M 830 380 L 830 405" class="arrow" marker-end="url(#arrowhead)"/>
+  <path d="M 185 380 L 185 405" class="arrow" marker-end="url(#arrowhead)"/>
+  <path d="M 395 380 L 395 405" class="arrow" marker-end="url(#arrowhead)"/>
+  <path d="M 605 380 L 605 405" class="arrow" marker-end="url(#arrowhead)"/>
+  <path d="M 815 380 L 815 405" class="arrow" marker-end="url(#arrowhead)"/>
 
   <!-- Layer 2 to Layer 3 -->
-  <path d="M 400 550 L 400 645" class="arrow" marker-end="url(#arrowhead)"/>
-  <text x="415" y="605" class="text-code" style="fill:#0366d6">Process Fork &amp; PGID</text>
+  <path d="M 395 550 L 395 645" class="arrow" marker-end="url(#arrowhead)"/>
+  <text x="405" y="605" class="text-code" style="fill:#0366d6">Process Fork &amp; PGID</text>
   
-  <path d="M 830 550 L 830 645" class="arrow" marker-end="url(#arrowhead)"/>
-  <text x="680" y="605" class="text-code" style="fill:#0366d6">Full-Duplex I/O Stream</text>
+  <path d="M 815 550 L 815 645" class="arrow" marker-end="url(#arrowhead)"/>
+  <text x="650" y="605" class="text-code" style="fill:#0366d6">Full-Duplex I/O Stream</text>
 
 </svg>
