@@ -1,0 +1,58 @@
+{
+  "name": "@hotplex/sdk",
+  "version": "0.1.0",
+  "description": "Production-ready TypeScript client for HotPlex AI Agent Control Plane",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "test": "vitest",
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "opencode",
+    "control-plane",
+    "websocket"
+  ],
+  "author": "HotPlex Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hrygo/hotplex.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hrygo/hotplex/issues"
+  },
+  "homepage": "https://github.com/hrygo/hotplex#readme",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
