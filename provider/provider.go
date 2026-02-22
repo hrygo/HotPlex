@@ -84,13 +84,14 @@ type ProviderMeta struct {
 
 // ProviderFeatures describes the capabilities of a provider.
 type ProviderFeatures struct {
-	SupportsResume      bool // Can resume existing sessions (e.g., --resume)
-	SupportsStreamJSON  bool // Supports stream-json input/output format
-	SupportsSSE         bool // Supports Server-Sent Events output
-	SupportsHTTPAPI     bool // Has HTTP API mode
-	SupportsSessionID   bool // Supports explicit session ID assignment
-	SupportsPermissions bool // Supports permission modes
-	MultiTurnReady      bool // Can handle multiple turns in one session
+	SupportsResume             bool // Can resume existing sessions (e.g., --resume)
+	SupportsStreamJSON         bool // Supports stream-json input/output format
+	SupportsSSE                bool // Supports Server-Sent Events output
+	SupportsHTTPAPI            bool // Has HTTP API mode
+	SupportsSessionID          bool // Supports explicit session ID assignment
+	SupportsPermissions        bool // Supports permission modes
+	MultiTurnReady             bool // Can handle multiple turns in one session
+	RequiresInitialPromptAsArg bool // Requires first prompt to be passed via CLI args instead of stdin
 }
 
 // ProviderSessionOptions configures a provider session.
@@ -110,6 +111,7 @@ type ProviderSessionOptions struct {
 	// System prompts
 	BaseSystemPrompt string // Engine-level foundational prompt
 	TaskInstructions string // Per-task instructions (persisted per session)
+	InitialPrompt    string // First prompt for cold start (sent as CLI arg if needed)
 
 	// Session management
 	SessionID         string // Internal SDK session ID

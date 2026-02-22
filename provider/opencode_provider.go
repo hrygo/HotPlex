@@ -76,13 +76,14 @@ func NewOpenCodeProvider(cfg ProviderConfig, logger *slog.Logger) (*OpenCodeProv
 		DisplayName: "OpenCode",
 		BinaryName:  "opencode",
 		Features: ProviderFeatures{
-			SupportsResume:      false, // OpenCode doesn't have explicit resume
-			SupportsStreamJSON:  false, // Uses different format
-			SupportsSSE:         true,  // HTTP API mode uses SSE
-			SupportsHTTPAPI:     true,  // Has HTTP API mode
-			SupportsSessionID:   false, // Uses different session model
-			SupportsPermissions: true,  // Plan/Build modes
-			MultiTurnReady:      true,
+			SupportsResume:             false, // OpenCode doesn't have explicit resume
+			SupportsStreamJSON:         false, // Uses different format
+			SupportsSSE:                true,  // HTTP API mode uses SSE
+			SupportsHTTPAPI:            true,  // Has HTTP API mode
+			SupportsSessionID:          false, // Uses different session model
+			SupportsPermissions:        true,  // Plan/Build modes
+			MultiTurnReady:             true,
+			RequiresInitialPromptAsArg: true,
 		},
 	}
 
@@ -121,18 +122,16 @@ func (p *OpenCodeProvider) BuildCLIArgs(providerSessionID string, opts *Provider
 
 	// Use --session if we have a provider-level session ID
 	if providerSessionID != "" {
-		args = append(args, "--session", providerSessionID)
+		// OpenCode v1.2.x requires session IDs to start with 'ses'
+		fullSessionID := providerSessionID
+		if !strings.HasPrefix(fullSessionID, "ses_") {
+			fullSessionID = "ses_" + fullSessionID
+		}
+		args = append(args, "--session", fullSessionID)
 	}
 
 	// Format comes before prompt and options
 	args = append(args, "--format", "json")
-
-	// Mode selection
-	if p.opencodeCfg.PlanMode || opts.PlanMode {
-		args = append(args, "--mode", "plan")
-	} else {
-		args = append(args, "--mode", "build")
-	}
 
 	// Provider and model
 	provider := p.opencodeCfg.Provider
@@ -151,12 +150,19 @@ func (p *OpenCodeProvider) BuildCLIArgs(providerSessionID string, opts *Provider
 		args = append(args, "--model", model)
 	}
 
-	// Non-interactive mode for auto-rejecting certain permissions
-	args = append(args, "--non-interactive")
-
 	// Extra arguments from config
 	if len(p.opts.ExtraArgs) > 0 {
 		args = append(args, p.opts.ExtraArgs...)
+	}
+
+	// Use --command for the initial prompt (CRITICAL for OpenCode session startup #17)
+	if opts.InitialPrompt != "" {
+		finalPrompt := opts.InitialPrompt
+		if opts.TaskInstructions != "" {
+			finalPrompt = fmt.Sprintf("<context>\n<![CDATA[\n%s\n]]>\n</context>\n\n<user_query>\n<![CDATA[\n%s\n]]>\n</user_query>",
+				opts.TaskInstructions, opts.InitialPrompt)
+		}
+		args = append(args, "--command", finalPrompt)
 	}
 
 	return args

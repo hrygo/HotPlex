@@ -238,8 +238,8 @@ func TestEngine_Execute_MkdirAllFailure(t *testing.T) {
 // mockFailingSessionManager always returns error on GetOrCreateSession
 type mockFailingSessionManager struct{}
 
-func (m *mockFailingSessionManager) GetOrCreateSession(ctx context.Context, sessionID string, cfg intengine.SessionConfig) (*intengine.Session, error) {
-	return nil, fmt.Errorf("mock error: session creation failed")
+func (m *mockFailingSessionManager) GetOrCreateSession(ctx context.Context, sessionID string, cfg intengine.SessionConfig, prompt string) (*intengine.Session, bool, error) {
+	return nil, false, fmt.Errorf("mock error: session creation failed")
 }
 
 func (m *mockFailingSessionManager) GetSession(sessionID string) (*intengine.Session, bool) {
@@ -307,11 +307,11 @@ type mockSessionManager struct {
 	sessions map[string]*intengine.Session
 }
 
-func (m *mockSessionManager) GetOrCreateSession(ctx context.Context, sessionID string, cfg intengine.SessionConfig) (*intengine.Session, error) {
+func (m *mockSessionManager) GetOrCreateSession(ctx context.Context, sessionID string, cfg intengine.SessionConfig, prompt string) (*intengine.Session, bool, error) {
 	if sess, ok := m.sessions[sessionID]; ok {
-		return sess, nil
+		return sess, false, nil
 	}
-	return nil, &sessionNotFoundError{}
+	return nil, false, &sessionNotFoundError{}
 }
 
 func (m *mockSessionManager) GetSession(sessionID string) (*intengine.Session, bool) {

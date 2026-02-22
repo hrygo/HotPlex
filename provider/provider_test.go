@@ -241,7 +241,8 @@ func TestOpenCodeProvider_BuildCLIArgs(t *testing.T) {
 	assertContains(t, args, "run")
 	assertContains(t, args, "--format")
 	assertContains(t, args, "json")
-	assertContains(t, args, "--non-interactive")
+	assertContains(t, args, "--session")
+	assertContains(t, args, "ses_test-session")
 	assertContains(t, args, "--provider")
 	assertContains(t, args, "anthropic")
 }

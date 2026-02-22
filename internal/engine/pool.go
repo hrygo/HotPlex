@@ -68,14 +68,14 @@ func NewSessionPool(logger *slog.Logger, timeout time.Duration, opts EngineOptio
 }
 
 // GetOrCreateSession returns an existing session or starts a new one.
-func (sm *SessionPool) GetOrCreateSession(ctx context.Context, sessionID string, cfg SessionConfig) (*Session, error) {
+func (sm *SessionPool) GetOrCreateSession(ctx context.Context, sessionID string, cfg SessionConfig, prompt string) (*Session, bool, error) {
 	// 1. Check existing
 	sm.mu.RLock()
 	if sess, ok := sm.sessions[sessionID]; ok {
 		if sess.IsAlive() {
 			sm.mu.RUnlock()
 			sess.Touch()
-			return sess, nil
+			return sess, false, nil
 		}
 	}
 	sm.mu.RUnlock()
@@ -87,7 +87,7 @@ func (sm *SessionPool) GetOrCreateSession(ctx context.Context, sessionID string,
 		if sess.IsAlive() {
 			sm.mu.Unlock()
 			sess.Touch()
-			return sess, nil
+			return sess, false, nil
 		}
 		_ = sm.cleanupSessionLocked(sessionID)
 	}
@@ -97,10 +97,10 @@ func (sm *SessionPool) GetOrCreateSession(ctx context.Context, sessionID string,
 		sm.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, false, ctx.Err()
 		case <-ch:
 			// Creation finished, recurse to check result
-			return sm.GetOrCreateSession(ctx, sessionID, cfg)
+			return sm.GetOrCreateSession(ctx, sessionID, cfg, prompt)
 		}
 	}
 
@@ -118,16 +118,16 @@ func (sm *SessionPool) GetOrCreateSession(ctx context.Context, sessionID string,
 	}()
 
 	// startSession is heavy, but now doesn't block other sessionIDs
-	sess, err := sm.startSession(ctx, sessionID, cfg)
+	sess, err := sm.startSession(ctx, sessionID, cfg, prompt)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	sm.mu.Lock()
 	sm.sessions[sessionID] = sess
 	sm.mu.Unlock()
 
-	return sess, nil
+	return sess, true, nil
 }
 
 // GetSession retrieves an active session.
@@ -187,7 +187,7 @@ func (sm *SessionPool) cleanupSessionLocked(sessionID string) error {
 }
 
 // startSession initializes the OS process (Cold Start).
-func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg SessionConfig) (*Session, error) {
+func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg SessionConfig, prompt string) (*Session, error) {
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("request context cancelled: %w", ctx.Err())
 	}
@@ -216,7 +216,7 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 		"provider_session_id", providerSessionID,
 	)
 
-	args := sm.buildCLIArgs(providerSessionID, sessLog)
+	args := sm.buildCLIArgs(providerSessionID, sessLog, prompt, cfg.TaskInstructions)
 	cmd := exec.CommandContext(sessCtx, sm.cliPath, args...)
 	cmd.Dir = cfg.WorkDir
 	cmd.Env = append(os.Environ(), "CLAUDE_DISABLE_TELEMETRY=1")
@@ -276,13 +276,15 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 	return sess, nil
 }
 
-func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logger) []string {
+func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logger, prompt string, taskInstructions string) []string {
 	// Build ProviderSessionOptions
 	opts := &provider.ProviderSessionOptions{
 		PermissionMode:   sm.opts.PermissionMode,
 		AllowedTools:     sm.opts.AllowedTools,
 		DisallowedTools:  sm.opts.DisallowedTools,
 		BaseSystemPrompt: sm.opts.BaseSystemPrompt,
+		TaskInstructions: taskInstructions,
+		InitialPrompt:    prompt,
 		SessionID:        providerSessionID,
 	}
 

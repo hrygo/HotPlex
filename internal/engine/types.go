@@ -72,7 +72,8 @@ type EngineOptions struct {
 // SessionManager defines the behavioral interface for managing a process pool.
 type SessionManager interface {
 	// GetOrCreateSession retrieves an active session or performs a Cold Start if none exists.
-	GetOrCreateSession(ctx context.Context, sessionID string, cfg SessionConfig) (*Session, error)
+	// Returns the session, a boolean indicating if it was a Cold Start, and an error if any.
+	GetOrCreateSession(ctx context.Context, sessionID string, cfg SessionConfig, prompt string) (*Session, bool, error)
 	// GetSession performs a non-side-effect lookup of an active session.
 	GetSession(sessionID string) (*Session, bool)
 	// TerminateSession kills the OS process group and removes the session from the pool.

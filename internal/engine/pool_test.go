@@ -137,7 +137,7 @@ func TestSessionPool_buildCLIArgs(t *testing.T) {
 		BaseSystemPrompt: "You are helpful",
 	}, "/tmp/claude", prv)
 
-	args := pool.buildCLIArgs("test-session-id", logger)
+	args := pool.buildCLIArgs("test-session-id", logger, "unit test prompt", "unit test instructions")
 
 	// Check essential args
 	if !containsInSlice(args, "--print") {
@@ -180,7 +180,7 @@ func TestSessionPool_buildCLIArgs_Resume(t *testing.T) {
 	}
 	defer func() { _ = os.Remove(markerPath) }()
 
-	args := pool.buildCLIArgs("existing-session", logger)
+	args := pool.buildCLIArgs("existing-session", logger, "unit test resume prompt", "")
 
 	// Should have --resume for existing sessions
 	if !containsInSlice(args, "--resume") {

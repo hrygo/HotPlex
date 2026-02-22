@@ -216,7 +216,7 @@ func (r *Engine) executeWithMultiplex(
 	}
 
 	// GetOrCreateSession reuses existing process or starts a new one
-	sess, err := r.manager.GetOrCreateSession(ctx, cfg.SessionID, sessionCfg)
+	sess, created, err := r.manager.GetOrCreateSession(ctx, cfg.SessionID, sessionCfg, prompt)
 	if err != nil {
 		return fmt.Errorf("get or create session: %w", err)
 	}
@@ -257,14 +257,19 @@ func (r *Engine) executeWithMultiplex(
 	sess.SetCallback(intengine.Callback(r.createEventBridge(cfg, callback, stats, doneChan)))
 
 	// Build provider-specific input message payload
-	msgPayload, err := r.provider.BuildInputMessage(prompt, cfg.TaskInstructions)
-	if err != nil {
-		return fmt.Errorf("build input message: %w", err)
-	}
-
-	// Send message to CLI stdin
-	if err := sess.WriteInput(msgPayload); err != nil {
-		return fmt.Errorf("write input: %w", err)
+	// 2. Send input - Skip if this was a cold start and the provider handles initial prompt via CLI args
+	if created && r.provider.Metadata().Features.RequiresInitialPromptAsArg {
+		r.logger.Debug("Skipping Stdin injection for cold-start (already passed via CLI args)",
+			"namespace", r.opts.Namespace,
+			"session_id", cfg.SessionID)
+	} else {
+		input, err := r.provider.BuildInputMessage(prompt, cfg.TaskInstructions)
+		if err != nil {
+			return fmt.Errorf("build input message: %w", err)
+		}
+		if err := sess.WriteInput(input); err != nil {
+			return fmt.Errorf("write input: %w", err)
+		}
 	}
 
 	// Wait for turn completion with timeout

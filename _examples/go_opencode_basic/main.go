@@ -56,19 +56,31 @@ func main() {
 	}
 	defer engine.Close()
 
+	// Get current working directory for the workspace
+	currentDir, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get current working directory: %v", err)
+	}
+
 	// 3. Define Execution Configuration
 	cfg := &hotplex.Config{
-		WorkDir:          "./demo_workspace",
-		SessionID:        "opencode-session-1",
+		WorkDir:          currentDir,
+		SessionID:        "opencode-session-fresh-1", // Unique session ID
 		TaskInstructions: "Be precise and explain your steps.",
 	}
 
+	// 4. Send Prompt
 	prompt := "Create a simple Python script that calculates Fibonacci sequence up to 100."
 
-	fmt.Printf("\n--- Sending Prompt to OpenCode ---\n%s\n----------------------------------\n\n", prompt)
+	fmt.Printf("\n--- Sending Prompt to OpenCode ---\n")
+	fmt.Printf("%s\n", prompt)
+	fmt.Printf("----------------------------------\n\n")
 
-	// 4. Define streaming callback
-	cb := func(eventType string, data any) error {
+	// 5. Execute the task
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	err = engine.Execute(ctx, cfg, prompt, func(eventType string, data any) error {
 		switch eventType {
 		case "thinking":
 			if evt, ok := data.(*hotplex.EventWithMeta); ok {
@@ -91,13 +103,7 @@ func main() {
 			}
 		}
 		return nil
-	}
-
-	// 5. Execute the task
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-
-	err = engine.Execute(ctx, cfg, prompt, cb)
+	})
 	if err != nil {
 		log.Fatalf("Execution failed: %v", err)
 	}
