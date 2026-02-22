@@ -96,7 +96,7 @@
     <text x="85" y="55" text-anchor="middle" class="text-sub">provider/*.go</text>
     <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#e36209" stroke-width="1"/>
     <text x="85" y="95" text-anchor="middle" class="text-code">Event Normalizer</text>
-    <text x="85" y="110" text-anchor="middle" class="text-code" style="font-weight: bold; fill: #e36209;">Claude | OpenCode</text>
+    <text x="85" y="110" text-anchor="middle" class="text-code" style="font-weight: bold; fill: #e36209;">Claude Code | OpenCode</text>
   </g>
 
 
