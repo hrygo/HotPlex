@@ -65,10 +65,31 @@ func NewSecurityConfig(logger *slog.Logger) *SecurityConfig {
 		}
 		logger.Info("API key authentication enabled", "key_count", len(apiKeys))
 	} else {
-		logger.Info("API key authentication disabled (no keys configured)")
+		// SECURITY WARNING: No API keys configured - authentication is disabled
+		if isProductionMode() {
+			logger.Error("SECURITY ALERT: Running in production mode without API key authentication! " +
+				"Set HOTPLEX_API_KEY or HOTPLEX_API_KEYS environment variable immediately.")
+		} else {
+			logger.Warn("API key authentication disabled (no keys configured). " +
+				"This is OK for development but set HOTPLEX_API_KEY for production.")
+		}
 	}
 
 	return c
+}
+
+// isProductionMode detects if running in a production environment.
+func isProductionMode() bool {
+	prodIndicators := []string{
+		"PRODUCTION", "PROD", "KUBERNETES_SERVICE_HOST", "K_SERVICE",
+		"AWS_LAMBDA_FUNCTION_NAME", "VERCEL", "RAILWAY_ENVIRONMENT", "RENDER", "FLY_APP_NAME",
+	}
+	for _, env := range prodIndicators {
+		if os.Getenv(env) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // parseOriginsFromEnv reads and parses the HOTPLEX_ALLOWED_ORIGINS environment variable.

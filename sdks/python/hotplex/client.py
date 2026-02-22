@@ -84,8 +84,8 @@ class HotPlexClient:
         if self._ws:
             try:
                 self._ws.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error closing WebSocket: {e}")
             self._ws = None
         logger.info("Disconnected from HotPlex")
 

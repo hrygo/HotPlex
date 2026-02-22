@@ -36,13 +36,30 @@ func NewOpenCodeHTTPHandler(engine hotplex.HotPlexClient, logger *slog.Logger, c
 	}
 }
 
+// withAuth wraps an HTTP handler with authentication check.
+func (s *OpenCodeHTTPHandler) withAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if authentication is enabled
+		if s.cors != nil && s.cors.IsAPIKeyEnabled() {
+			if !s.cors.validateAPIKey(r) {
+				s.logger.Warn("OpenCode HTTP request rejected: invalid or missing API key",
+					"remote_addr", r.RemoteAddr,
+					"path", r.URL.Path)
+				http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
 // RegisterRoutes registers the OpenCode compatibility routes to a router.
 func (s *OpenCodeHTTPHandler) RegisterRoutes(r *mux.Router) {
-	r.HandleFunc("/global/event", s.handleGlobalEvent).Methods("GET")
-	r.HandleFunc("/session", s.handleCreateSession).Methods("POST")
-	r.HandleFunc("/session/{id}/message", s.handlePrompt).Methods("POST")
-	r.HandleFunc("/session/{id}/prompt_async", s.handlePromptAsync).Methods("POST")
-	r.HandleFunc("/config", s.handleConfig).Methods("GET")
+	r.HandleFunc("/global/event", s.withAuth(s.handleGlobalEvent)).Methods("GET")
+	r.HandleFunc("/session", s.withAuth(s.handleCreateSession)).Methods("POST")
+	r.HandleFunc("/session/{id}/message", s.withAuth(s.handlePrompt)).Methods("POST")
+	r.HandleFunc("/session/{id}/prompt_async", s.withAuth(s.handlePromptAsync)).Methods("POST")
+	r.HandleFunc("/config", s.handleConfig).Methods("GET") // Public endpoint
 }
 
 func (s *OpenCodeHTTPHandler) handleGlobalEvent(w http.ResponseWriter, r *http.Request) {

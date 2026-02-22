@@ -17,7 +17,10 @@ type Metrics struct {
 	mu              sync.RWMutex
 }
 
-var globalMetrics *Metrics
+var (
+	globalMetrics   *Metrics
+	globalMetricsMu sync.Once
+)
 
 func NewMetrics(logger *slog.Logger) *Metrics {
 	if logger == nil {
@@ -92,8 +95,10 @@ func InitMetrics(logger *slog.Logger) {
 }
 
 func GetMetrics() *Metrics {
-	if globalMetrics == nil {
-		globalMetrics = NewMetrics(nil)
-	}
+	globalMetricsMu.Do(func() {
+		if globalMetrics == nil {
+			globalMetrics = NewMetrics(nil)
+		}
+	})
 	return globalMetrics
 }

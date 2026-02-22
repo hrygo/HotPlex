@@ -63,11 +63,16 @@ func (h *HealthChecker) Check() (HealthStatus, map[string]bool) {
 	return StatusUnhealthy, results
 }
 
-var globalHealthChecker *HealthChecker
+var (
+	globalHealthChecker   *HealthChecker
+	globalHealthCheckerMu sync.Once
+)
 
 func GetHealthChecker() *HealthChecker {
-	if globalHealthChecker == nil {
-		globalHealthChecker = NewHealthChecker(nil)
-	}
+	globalHealthCheckerMu.Do(func() {
+		if globalHealthChecker == nil {
+			globalHealthChecker = NewHealthChecker(nil)
+		}
+	})
 	return globalHealthChecker
 }

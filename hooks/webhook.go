@@ -3,6 +3,9 @@ package hooks
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -121,7 +124,9 @@ func (h *WebhookHook) Handle(ctx context.Context, event *Event) error {
 }
 
 func (h *WebhookHook) computeSignature(body []byte) string {
-	return fmt.Sprintf("%x", len(body))
+	mac := hmac.New(sha256.New, []byte(h.config.Secret))
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (h *WebhookHook) Close() error {
