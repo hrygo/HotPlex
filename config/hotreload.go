@@ -64,7 +64,7 @@ func (h *HotReloader) Start(ctx context.Context) error {
 	h.watcher = watcher
 
 	if err := watcher.Add(h.path); err != nil {
-		watcher.Close()
+		_ = watcher.Close()
 		return err
 	}
 

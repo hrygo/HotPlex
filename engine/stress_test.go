@@ -45,7 +45,7 @@ func TestStress1000Sessions(t *testing.T) {
 
 	sessionCount := 100
 	if os.Getenv("STRESS_SESSIONS") != "" {
-		fmt.Sscanf(os.Getenv("STRESS_SESSIONS"), "%d", &sessionCount)
+		_, _ = fmt.Sscanf(os.Getenv("STRESS_SESSIONS"), "%d", &sessionCount)
 	}
 
 	var wg sync.WaitGroup

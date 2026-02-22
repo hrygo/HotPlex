@@ -121,7 +121,7 @@ func imagePull(ctx context.Context, cli *client.Client, img string) error {
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	_, _ = io.Copy(io.Discard, reader)
 	return nil
 }
