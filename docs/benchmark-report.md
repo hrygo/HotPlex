@@ -2,8 +2,8 @@
 
 # HotPlex Performance Benchmark Report
 
-> Generated: 2026-03-01
-> Version: v1.0.0
+> Generated: 2026-02-23
+> Version: v0.9.0
 > Environment: macOS (darwin), Go 1.24
 
 ## Executive Summary

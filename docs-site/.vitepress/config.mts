@@ -20,10 +20,20 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'SDKs', link: '/sdks/go-sdk' },
       { text: 'Reference', link: '/reference/api' },
+      { text: 'Migration', link: '/migration/v0.9.0' },
       { text: 'GitHub', link: 'https://github.com/hrygo/hotplex' }
     ],
 
     sidebar: {
+      '/migration/': [
+        {
+          text: 'Migration Guides',
+          items: [
+            { text: 'v0.9.0 (Current)', link: '/migration/v0.9.0' },
+            { text: 'v0.8.0', link: '/migration/v0.8.0' }
+          ]
+        }
+      ],
       '/guide/': [
         {
           text: 'Guide',

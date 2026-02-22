@@ -25,6 +25,10 @@ HotPlex 支持的特定 AI CLI 智能体深度指南。
 - **[Claude Code 提供商](providers/claudecode_zh.md)**: 与 Anthropic 的 Claude Code CLI 集成。
 - **[OpenCode 提供商](providers/opencode_zh.md)**: 与 OpenCode CLI 生态系统集成。
 
+## 🛠️ 开发者迁移
+- **[迁移至 v0.9.0](migration/migration-guide-v0.9.0_zh.md)** (最新)
+- **[迁移至 v0.8.0](migration/migration-guide-v0.8.0_zh.md)**
+
 ---
 
 *最近更新: 2026-02-23*

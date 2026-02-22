@@ -77,10 +77,16 @@ func main() {
 	http.Handle("/session/", ocRouter)
 	http.Handle("/config", ocRouter)
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
+	// 2.2 Initialize Observability handlers
+	healthHandler := server.NewHealthHandler()
+	metricsHandler := server.NewMetricsHandler()
+	readyHandler := server.NewReadyHandler(func() bool { return engine != nil })
+	liveHandler := server.NewLiveHandler()
+
+	http.Handle("/health", healthHandler)
+	http.Handle("/health/ready", readyHandler)
+	http.Handle("/health/live", liveHandler)
+	http.Handle("/metrics", metricsHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {

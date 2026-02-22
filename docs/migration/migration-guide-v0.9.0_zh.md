@@ -1,0 +1,67 @@
+*查看其他语言: [English](migration-guide-v0.9.0.md), [简体中文](migration-guide-v0.9.0_zh.md).*
+
+# HotPlex 开发者迁移指南 (v0.8.x → v0.9.0)
+
+本指南概述了 HotPlex v0.9.0 中引入的关键 API 和架构变更，重点在于**可观测性集成**和 **SDK 版本同步**。
+
+## 1. `GetSessionStats` 方法签名变更 (重大变更)
+
+### 变更内容
+为了支持严格的基于会话的可观测性和遥测，`GetSessionStats` 方法现在需要一个显式的 `sessionID`。这确保了在高并发的“热复用”场景下，能够为正确的上下文获取指标数据。
+
+### 如何迁移
+
+**v0.8.x (已废弃):**
+```go
+stats := engine.GetSessionStats()
+```
+
+**v0.9.0 (新):**
+```go
+stats := engine.GetSessionStats("my_session_id")
+```
+
+---
+
+## 2. 默认安全与身份验证
+
+### 变更内容
+服务端模式现在默认为更安全的配置。虽然 v0.8.0 在未配置密钥时允许未授权访问，但 v0.9.0 引入了更强的警告，并为强制身份验证做好了准备。
+
+### 如何迁移
+如果您在生产环境中运行 `hotplexd`，您**必须**配置 `HOTPLEX_API_KEYS`。
+
+```bash
+export HOTPLEX_API_KEYS="key1,key2"
+```
+
+OpenCode HTTP/SSE 兼容端点现在也遵循与 WebSocket 网关相同的安全配置。
+
+---
+
+## 3. 可观测性端点
+
+### 变更内容
+HotPlex v0.9.0 引入了对 Prometheus 和 OpenTelemetry 的原生支持。
+
+### 新增端点
+- `/metrics`: Prometheus 指标（执行时间、会话数、错误率）。
+- `/health`: 用于 Kubernetes 的存活 (Liveness) 和就绪 (Readiness) 探针。
+
+---
+
+## 4. SDK 版本同步
+
+### 变更内容
+所有 SDK（Go, Python, TypeScript）现在都同步到相同的版本控制方案下。
+
+### 建议
+更新您的依赖项以匹配 `v0.9.0` 发布标签，以确保跨多语言环境的行为一致性。
+
+- **Go**: `go get github.com/hrygo/hotplex@v0.9.0`
+- **Python**: `pip install hotplex==0.9.0`
+- **TypeScript**: `npm install @hrygo/hotplex@0.9.0`
+
+---
+
+*最后更新时间: 2026-02-23*

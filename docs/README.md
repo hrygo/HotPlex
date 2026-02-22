@@ -24,6 +24,11 @@ Developer guides for interacting with HotPlex in server mode (WebSocket & OpenCo
 Deep-dive guides for specific AI CLI agents supported by HotPlex.
 - **[Claude Code Provider](providers/claudecode.md)**: Integration with Anthropic's Claude Code CLI.
 - **[OpenCode Provider](providers/opencode.md)**: Integration with the OpenCode CLI ecosystem.
+- **[Aider Integration](https://github.com/hrygo/hotplex/blob/main/docs/providers/aider.md)** (Legacy)
+
+## 🛠️ Developer Migration
+- **[Migrating to v0.9.0](migration/migration-guide-v0.9.0.md)** (Latest)
+- **[Migrating to v0.8.0](migration/migration-guide-v0.8.0.md)**
 
 ---
 

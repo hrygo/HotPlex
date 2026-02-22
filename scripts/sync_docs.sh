@@ -51,6 +51,13 @@ cp docs/server/api_zh.md docs-site/reference/api_zh.md
 cp docs/README.md docs-site/reference/index.md
 cp docs/README_zh.md docs-site/reference/index_zh.md
 
+# --- Migration ---
+mkdir -p docs-site/migration
+cp docs/migration/migration-guide-v0.8.0.md docs-site/migration/v0.8.0.md
+cp docs/migration/migration-guide-v0.8.0_zh.md docs-site/migration/v0.8.0_zh.md
+cp docs/migration/migration-guide-v0.9.0.md docs-site/migration/v0.9.0.md
+cp docs/migration/migration-guide-v0.9.0_zh.md docs-site/migration/v0.9.0_zh.md
+
 # --- Assets ---
 if [ -d "docs/images" ]; then
     cp -r docs/images/* docs-site/public/images/
@@ -92,6 +99,11 @@ find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?benc
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?roadmap-2026(_zh)?(\.md)?\)|](/guide/roadmap\2.md)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?hooks-architecture(_zh)?(\.md)?\)|](/guide/hooks\2.md)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's!\]\(\.?/?SECURITY(_zh)?(\.md)?\)!](/guide/security\1.md)!g' {} +
+find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?migration/migration-guide-v0\.8\.0(_zh)?(\.md)?\)|](/migration/v0.8.0\2.md)|g' {} +
+find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?migration/migration-guide-v0\.9\.0(_zh)?(\.md)?\)|](/migration/v0.9.0\2.md)|g' {} +
+# Fix self-referencing links in migration files themselves
+find docs-site/migration -name "*.md" -type f -exec sed -E -i.bak 's|\]\(migration-guide-v0\.9\.0(_zh)?(\.md)?\)|](/migration/v0.9.0\1.md)|g' {} +
+find docs-site/migration -name "*.md" -type f -exec sed -E -i.bak 's|\]\(migration-guide-v0\.8\.0(_zh)?(\.md)?\)|](/migration/v0.8.0\1.md)|g' {} +
 
 # Redirect GitHub-only URLs (Examples, CONTRIBUTING, LICENSE, Roadmap, ClaudeCode)
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?\.\./_examples/([^)]*)\)|](https://github.com/hrygo/hotplex/tree/main/_examples/\1)|g' {} +
