@@ -25,7 +25,10 @@
   </defs>
 
   <rect width="100%" height="100%" class="bg" rx="16"/>
-  <text x="500" y="45" text-anchor="middle" class="text-title">hotplex System Topology</text>
+  <text x="500" y="45" text-anchor="middle" class="text-title">
+    <tspan font-family="monospace" font-weight="900" font-size="28px" fill="#24292e">hot</tspan><tspan font-family="monospace" font-weight="900" font-size="28px" fill="#d73a49">plex</tspan>
+    <tspan dy="-2"> System Topology</tspan>
+  </text>
 
   <!-- Layer 1: Entrance Layer -->
   <rect x="50" y="80" width="900" height="140" rx="12" class="layer-bg"/>
@@ -75,7 +78,7 @@
     <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#28a745">SessionController</text>
     <text x="85" y="55" text-anchor="middle" class="text-sub">internal/engine</text>
     <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#28a745" stroke-width="1"/>
-    <text x="85" y="102" text-anchor="middle" class="text-code">Process Pool&amp;GC</text>
+    <text x="85" y="102" text-anchor="middle" class="text-code">Process Pool &amp; GC</text>
   </g>
 
   <g transform="translate(520, 410)">
@@ -83,7 +86,7 @@
     <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#6f42c1">Event Hooks</text>
     <text x="85" y="55" text-anchor="middle" class="text-sub">hooks/*.go</text>
     <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#6f42c1" stroke-width="1"/>
-    <text x="85" y="95" text-anchor="middle" class="text-code">Webhook &amp; Audit</text>
+    <text x="85" y="95" text-anchor="middle" class="text-code">Webhooks &amp; Audit</text>
     <text x="85" y="110" text-anchor="middle" class="text-code">OTel Tracing</text>
   </g>
 
@@ -92,8 +95,8 @@
     <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#e36209">Provider</text>
     <text x="85" y="55" text-anchor="middle" class="text-sub">provider/*.go</text>
     <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#e36209" stroke-width="1"/>
-    <text x="85" y="95" text-anchor="middle" class="text-code">Event Normalize</text>
-    <text x="85" y="110" text-anchor="middle" class="text-code">Claude|OpenCode</text>
+    <text x="85" y="95" text-anchor="middle" class="text-code">Event Normalizer</text>
+    <text x="85" y="110" text-anchor="middle" class="text-code">Claude | OpenCode</text>
   </g>
 
 
