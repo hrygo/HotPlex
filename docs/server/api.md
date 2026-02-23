@@ -49,17 +49,18 @@ Clients send JSON messages to control the engine.
 ### Server Events (JSON)
 The server broadcasts events in real-time.
 
-| Event         | Description                                                 |
-| :------------ | :---------------------------------------------------------- |
-| `thinking`    | Model reasoning or chain-of-thought                         |
-| `tool_use`    | Agent initiating a tool call (e.g., shell command)          |
-| `tool_result` | Output/response from the executed tool                      |
-| `answer`      | Final text response from the agent                          |
-| `completed`   | Task execution finished (includes `session_id` and `stats`) |
-| `stopped`     | Task manually stopped by client                             |
-| `stats`       | Returns telemetry/usage statistics for a session            |
-| `version`     | Returns version information of the underlying CLI engine    |
-| `error`       | Protocol or execution error                                 |
+| Event          | Description                                                         |
+| :------------- | :------------------------------------------------------------------ |
+| `thinking`     | Model reasoning or chain-of-thought                               |
+| `tool_use`     | Agent initiating a tool call (e.g., shell command)                 |
+| `tool_result`  | Output/response from the executed tool                             |
+| `answer`       | Final text response from the agent                                 |
+| `completed`    | Task execution finished (includes `session_id` and `stats`)        |
+| `stopped`      | Task manually stopped by client                                    |
+| `session_stats`| Final session statistics (tokens, duration, cost, files modified) |
+| `stats`        | Returns telemetry/usage statistics for a specific session          |
+| `version`      | Returns version information of the underlying CLI engine          |
+| `error`        | Protocol or execution error                                      |
 
 ### Example (Python)
 ```python
@@ -86,6 +87,62 @@ async def run_agent():
                 break
 
 asyncio.run(run_agent())
+
+### Example (Node.js)
+```javascript
+const WebSocket = require('ws');
+
+const ws = new WebSocket('ws://localhost:8080/ws/v1/agent');
+
+ws.on('open', function open() {
+  // Execute prompt
+  ws.send(JSON.stringify({
+    type: 'execute',
+    prompt: 'Write a hello world script in JavaScript',
+    work_dir: '/tmp/demo'
+  }));
+});
+
+ws.on('message', function incoming(message) {
+  const evt = JSON.parse(message);
+  console.log(`[${evt.event}]`, evt.data || '');
+  if (evt.event === 'completed') {
+    ws.close();
+  }
+});
+```
+
+### Example (Go)
+```go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"github.com/hrygo/hotplex"
+)
+
+func main() {
+	engine, _ := hotplex.NewEngine(hotplex.EngineOptions{})
+	defer engine.Close()
+
+	cfg := &hotplex.Config{
+		WorkDir:   "/tmp/demo",
+		SessionID: "ws-demo",
+	}
+
+	err := engine.Execute(context.Background(), cfg, "Write a hello world in Go",
+		func(eventType string, data any) error {
+			if eventType == "answer" {
+				fmt.Print(data)
+			}
+			return nil
+		})
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+}
 ```
 
 ---

@@ -16,7 +16,7 @@ All SDKs in this folder are **client libraries** designed to communicate with th
 ## 📂 Available SDKs
 
 - **[Python](./python)**: A production-ready Python client with full-duplex session support.
-- **[TypeScript](./typescript)**: (In Progress) Type-safe client for Web and Node.js environments.
+- **[TypeScript](./typescript)**: Type-safe client for Web and Node.js environments. Supports both browser and Node.js.
 
 ## 🚀 Getting Started
 

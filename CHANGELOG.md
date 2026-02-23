@@ -1,4 +1,16 @@
 ## [v0.9.2] - 2026-02-23
+## [v0.9.3] - 2026-02-23
+
+### 🎉 Version Bump
+
+Minor version update to reflect latest codebase changes.
+
+### Changed
+- **Version**: Bumped to v0.9.3
+
+---
+
+## [v0.9.2] - 2026-02-23
 
 ### 🛡️ Quality Audit Fixes v1.0
 

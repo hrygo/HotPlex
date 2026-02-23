@@ -49,17 +49,18 @@ sequenceDiagram
 ### 服务器事件 (JSON)
 服务器实时广播事件。
 
-| 事件          | 描述                                                  |
-| :------------ | :---------------------------------------------------- |
-| `thinking`    | 模型推理或思维链                                      |
-| `tool_use`    | 智能体发起工具调用（如 Shell 命令）                   |
-| `tool_result` | 工具执行的输出/响应                                   |
-| `answer`      | 智能体的最终文本响应                                  |
-| `completed`   | 任务执行完成（包含 `session_id` 和 `stats` 统计数据） |
-| `stopped`     | 任务被手动停止                                        |
-| `stats`       | 返回特定会话的统计数据                                |
-| `version`     | 返回底层 CLI 引擎的版本信息                           |
-| `error`       | 协议或执行错误                                        |
+| 事件           | 描述                                                         |
+| :------------- | :----------------------------------------------------------- |
+| `thinking`     | 模型推理或思维链                                       |
+| `tool_use`     | 智能体发起工具调用（如 Shell 命令）                    |
+| `tool_result`  | 工具执行的输出/响应                                    |
+| `answer`      | 智能体的最终文本响应                                   |
+| `completed`    | 任务执行完成（包含 `session_id` 和 `stats` 统计数据）   |
+| `stopped`      | 任务被手动停止                                         |
+| `session_stats`| 会话最终统计信息（Token 消耗、耗时、成本、修改文件数）  |
+| `stats`        | 返回特定会话的统计数据                                 |
+| `version`      | 返回底层 CLI 引擎的版本信息                            |
+| `error`        | 协议或执行错误                                         |
 
 ### 示例代码 (Python)
 ```python
@@ -86,6 +87,61 @@ async def run_agent():
                 break
 
 asyncio.run(run_agent())
+
+### 示例代码 (Node.js)
+```javascript
+const WebSocket = require('ws');
+
+const ws = new WebSocket('ws://localhost:8080/ws/v1/agent');
+
+ws.on('open', function open() {
+  // 执行 Prompt
+  ws.send(JSON.stringify({
+    type: 'execute',
+    prompt: '用 JavaScript 写一个 Hello World 脚本',
+    work_dir: '/tmp/demo'
+  }));
+});
+
+ws.on('message', function incoming(message) {
+  const evt = JSON.parse(message);
+  console.log(`[${evt.event}]`, evt.data || '');
+  if (evt.event === 'completed') {
+    ws.close();
+  }
+});
+```
+
+### 示例代码 (Go)
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"github.com/hrygo/hotplex"
+)
+
+func main() {
+	engine, _ := hotplex.NewEngine(hotplex.EngineOptions{})
+	defer engine.Close()
+
+	cfg := &hotplex.Config{
+		WorkDir:   "/tmp/demo",
+		SessionID: "ws-demo",
+	}
+
+	err := engine.Execute(context.Background(), cfg, "用 Go 写一个 Hello World",
+		func(eventType string, data any) error {
+			if eventType == "answer" {
+				fmt.Print(data)
+			}
+			return nil
+		})
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+}
 ```
 
 ---
