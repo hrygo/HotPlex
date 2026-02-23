@@ -1,4 +1,31 @@
-## [v0.9.2] - 2026-02-23
+## [v1.0.0] - 2026-02-23
+
+### 🚀 ChatApps-as-a-Service Milestone (v1.0.0)
+
+This major release marks the transformation of HotPlex into a comprehensive **ChatApps-as-a-Service** platform. We've introduced a centralized engine integration layer that enables seamless connections between top-tier AI agents and various chat platforms (DingTalk, Discord, Slack, Telegram, WhatsApp).
+
+### Added
+- **ChatApps Integration Core**: 
+  - `EngineHolder` and `EngineMessageHandler` for bridging chat platforms with the HotPlex engine.
+  - `StreamCallback` providing real-time UI feedback for Thinking, Tool Use, and Results.
+  - `ConfigLoader` for YAML-based multi-platform configuration.
+- **Multi-Platform Support**: Official adapters for DingTalk, Discord, Slack, Telegram, and WhatsApp.
+- **Enhanced Robustness**: 
+  - Periodic session cleanup and stale session removal for adapter implementations.
+  - Improved message queuing and retry logic for high-traffic chat scenarios.
+- **Documentation**: New [ChatApps 接入层指南](docs/chatapps-guide.md) with architecture diagrams and platform comparison.
+
+### Changed
+- **Architecture**: Decoupled engine execution from platform-specific delivery logic.
+- **SDKs**: TypeScript SDK promoted to officially supported status (Browser & Node.js).
+- **Repo Maintenance**: Archived `roadmap-2026.md` as all core milestones for H1 2026 are achieved.
+
+### Fixed
+- **Code Quality**: Project-wide lint cleanup and formatting for the `chatapps` package.
+- **Security**: Hardened terminal command validation in both WebSocket and ChatApp gateways.
+
+---
+
 ## [v0.9.3] - 2026-02-23
 
 ### 🎉 Version Bump
@@ -10,6 +37,9 @@ Minor version update to reflect latest codebase changes.
 
 ---
 
+## [v0.9.2] - 2026-02-23
+
+### 🛡️ Quality Audit Fixes v1.0
 ## [v0.9.2] - 2026-02-23
 
 ### 🛡️ Quality Audit Fixes v1.0
