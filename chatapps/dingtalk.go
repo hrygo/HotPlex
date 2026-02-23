@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,6 +23,7 @@ type DingTalkConfig struct {
 	CallbackToken string
 	CallbackKey   string
 	ServerAddr    string
+	MaxMessageLen int // Maximum message length (default 5000 for DingTalk)
 }
 
 type DingTalkCallbackRequest struct {
@@ -52,6 +54,10 @@ type DingTalkAdapter struct {
 	mu       sync.RWMutex
 	handler  MessageHandler
 	running  bool
+	// Token cache
+	token       string
+	tokenExpire time.Time
+	tokenMu     sync.Mutex
 }
 
 type DingTalkSession struct {
@@ -153,7 +159,7 @@ func (a *DingTalkAdapter) handleCallbackVerify(w http.ResponseWriter, r *http.Re
 	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, timestamp)
+	_, _ = fmt.Fprint(w, timestamp)
 }
 
 func (a *DingTalkAdapter) handleCallbackMessage(w http.ResponseWriter, r *http.Request) {
@@ -202,12 +208,12 @@ func (a *DingTalkAdapter) handleCallbackMessage(w http.ResponseWriter, r *http.R
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msgtype":"text","text":{"content":"收到消息，正在处理..."}}`))
+	_, _ = w.Write([]byte(`{"msgtype":"text","text":{"content":"收到消息，正在处理..."}}`))
 }
 
 func (a *DingTalkAdapter) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "OK")
+	_, _ = fmt.Fprint(w, "OK")
 }
 
 func (a *DingTalkAdapter) SendMessage(ctx context.Context, sessionID string, msg *ChatMessage) error {
@@ -216,44 +222,71 @@ func (a *DingTalkAdapter) SendMessage(ctx context.Context, sessionID string, msg
 		return fmt.Errorf("conversation_id not found in metadata")
 	}
 
-	payload := map[string]any{
-		"msgtype": "text",
-		"text": map[string]string{
-			"content": msg.Content,
-		},
+	// Split message if it exceeds the limit
+	chunks := a.chunkMessage(msg.Content)
+	for i, chunk := range chunks {
+		// Add chunk indicator if there are multiple chunks
+		content := chunk
+		if len(chunks) > 1 {
+			content = fmt.Sprintf("[%d/%d]\n%s", i+1, len(chunks), chunk)
+		}
+
+		var payload map[string]any
+		if msg.RichContent != nil && msg.RichContent.ParseMode == ParseModeMarkdown {
+			// Use markdown message type for rich content
+			payload = map[string]any{
+				"msgtype": "markdown",
+				"markdown": map[string]string{
+					"title": "HotPlex",
+					"text":  content,
+				},
+			}
+		} else {
+			// Default to text message
+			payload = map[string]any{
+				"msgtype": "text",
+				"text": map[string]string{
+					"content": content,
+				},
+			}
+		}
+
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal payload: %w", err)
+		}
+
+		accessToken, err := a.getAccessToken()
+		if err != nil {
+			return fmt.Errorf("get access token: %w", err)
+		}
+
+		url := fmt.Sprintf("https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend?robotCode=%s", msg.Metadata["robot_code"])
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-acs-dingtalk-access-token", accessToken)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("send message: %w", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("send failed: %d %s", resp.StatusCode, string(respBody))
+		}
+
+		// Add delay between chunks to avoid rate limiting
+		if i < len(chunks)-1 {
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal payload: %w", err)
-	}
-
-	accessToken, err := a.getAccessToken()
-	if err != nil {
-		return fmt.Errorf("get access token: %w", err)
-	}
-
-	url := fmt.Sprintf("https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend?robotCode=%s", msg.Metadata["robot_code"])
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-acs-dingtalk-access-token", accessToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("send message: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("send failed: %d %s", resp.StatusCode, string(respBody))
-	}
-
-	a.logger.Debug("Message sent", "session", sessionID)
+	a.logger.Debug("Message sent", "session", sessionID, "chunks", len(chunks))
 	return nil
 }
 
@@ -288,24 +321,40 @@ func (a *DingTalkAdapter) getAccessToken() (string, error) {
 		return "", nil
 	}
 
+	// Check cached token
+	a.tokenMu.Lock()
+	if a.token != "" && time.Now().Add(5*time.Minute).Before(a.tokenExpire) {
+		token := a.token
+		a.tokenMu.Unlock()
+		return token, nil
+	}
+	a.tokenMu.Unlock()
+
+	// Fetch new token
 	url := fmt.Sprintf("https://api.dingtalk.com/v1.0/oauth2/oAuth2/accessToken?appKey=%s&appSecret=%s",
 		a.config.AppID, a.config.AppSecret)
-
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-
+	defer func() { _ = resp.Body.Close() }()
 	var result struct {
 		AccessToken string `json:"accessToken"`
 		ExpireIn    int    `json:"expireIn"`
 	}
-
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
 
+	// Cache token (expire 5 minutes before actual expiry)
+	a.tokenMu.Lock()
+	a.token = result.AccessToken
+	if result.ExpireIn > 300 {
+		a.tokenExpire = time.Now().Add(time.Duration(result.ExpireIn-300) * time.Second)
+	} else {
+		a.tokenExpire = time.Now().Add(time.Duration(result.ExpireIn) * time.Second)
+	}
+	a.tokenMu.Unlock()
 	return result.AccessToken, nil
 }
 
@@ -315,4 +364,59 @@ func (a *DingTalkAdapter) verifySignature(signature, timestamp, nonce, token str
 	mac.Write([]byte(stringToSign))
 	sign := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return sign == signature
+}
+
+// chunkMessage splits a long message into chunks that fit within the platform's limit.
+// It tries to split at line boundaries first, then at word boundaries, and finally at any position.
+func (a *DingTalkAdapter) chunkMessage(content string) []string {
+	maxLen := a.config.MaxMessageLen
+	if maxLen <= 0 {
+		maxLen = 5000 // DingTalk default limit
+	}
+
+	if len(content) <= maxLen {
+		return []string{content}
+	}
+
+	var chunks []string
+	lines := strings.Split(content, "\n")
+	var currentChunk strings.Builder
+
+	for _, line := range lines {
+		// If single line exceeds maxLen, split by characters
+		if len(line) > maxLen {
+			if currentChunk.Len() > 0 {
+				chunks = append(chunks, currentChunk.String())
+				currentChunk.Reset()
+			}
+			// Split long line
+			for len(line) > maxLen {
+				chunks = append(chunks, line[:maxLen])
+				line = line[maxLen:]
+			}
+			if len(line) > 0 {
+				currentChunk.WriteString(line)
+				currentChunk.WriteString("\n")
+			}
+			continue
+		}
+
+		// Check if adding this line would exceed limit
+		if currentChunk.Len()+len(line)+1 > maxLen {
+			if currentChunk.Len() > 0 {
+				chunks = append(chunks, currentChunk.String())
+				currentChunk.Reset()
+			}
+		}
+
+		currentChunk.WriteString(line)
+		currentChunk.WriteString("\n")
+	}
+
+	// Don't forget the last chunk
+	if currentChunk.Len() > 0 {
+		chunks = append(chunks, currentChunk.String())
+	}
+
+	return chunks
 }

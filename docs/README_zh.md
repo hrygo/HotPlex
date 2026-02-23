@@ -14,7 +14,7 @@
 - **[Docker 部署](docker-deployment_zh.md)**: 容器与 Kubernetes 部署指南。
 - **[生产环境指南](production-guide_zh.md)**: 生产环境部署最佳实践。
 - **[基准测试报告](benchmark-report_zh.md)**: HotPlex 性能表现分析。
-- **[路线路 2026](roadmap-2026_zh.md)**: 未来发展规划与里程碑。
+- **[路线路 2026](archive/roadmap-2026_zh.md)**: 未来发展规划与里程碑。
 
 ## 🖥️ 服务端模式 (智能体控制平面)
 用于与处于服务模式下的 HotPlex 进行交互的开发者指南（WebSocket & OpenCode 协议）。

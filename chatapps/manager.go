@@ -2,6 +2,7 @@ package chatapps
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -38,7 +39,7 @@ func (m *AdapterManager) Unregister(platform string) error {
 	defer m.mu.Unlock()
 
 	if adapter, ok := m.adapters[platform]; ok {
-		adapter.Stop()
+		_ = adapter.Stop()
 		delete(m.adapters, platform)
 		m.logger.Info("Adapter unregistered", "platform", platform)
 	}
@@ -88,4 +89,13 @@ func (m *AdapterManager) ListPlatforms() []string {
 		platforms = append(platforms, platform)
 	}
 	return platforms
+}
+
+// SendMessage sends a message to a specific platform
+func (m *AdapterManager) SendMessage(ctx context.Context, platform, sessionID string, msg *ChatMessage) error {
+	adapter, ok := m.GetAdapter(platform)
+	if !ok {
+		return fmt.Errorf("adapter not found for platform: %s", platform)
+	}
+	return adapter.SendMessage(ctx, sessionID, msg)
 }

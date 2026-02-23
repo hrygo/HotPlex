@@ -14,6 +14,9 @@ mkdir -p docs-site/sdks
 mkdir -p docs-site/reference
 mkdir -p docs-site/public/images
 
+# CONSTRAINT: Never sync files from docs/archive/ to the production docs-site.
+# Archived documentation should only be accessible via GitHub repository history/links.
+
 # --- Guides ---
 cp README.md docs-site/guide/getting-started.md
 cp README_zh.md docs-site/guide/getting-started_zh.md
@@ -36,8 +39,8 @@ cp docs/production-guide.md docs-site/guide/deployment.md
 cp docs/production-guide_zh.md docs-site/guide/deployment_zh.md
 cp docs/benchmark-report.md docs-site/guide/performance.md
 cp docs/benchmark-report_zh.md docs-site/guide/performance_zh.md
-cp docs/roadmap-2026.md docs-site/guide/roadmap.md
-cp docs/roadmap-2026_zh.md docs-site/guide/roadmap_zh.md
+cp docs/chatapps-guide.md docs-site/guide/chatapps.md
+# Note: Roadmap 2026 has been archived and is excluded from sync.
 
 # --- SDKs ---
 cp docs/sdk-guide.md docs-site/sdks/go-sdk.md
@@ -96,7 +99,9 @@ find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?obse
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?docker-deployment(_zh)?(\.md)?\)|](/guide/docker\2.md)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?production-guide(_zh)?(\.md)?\)|](/guide/deployment\2.md)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?benchmark-report(_zh)?(\.md)?\)|](/guide/performance\2.md)|g' {} +
-find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?roadmap-2026(_zh)?(\.md)?\)|](/guide/roadmap\2.md)|g' {} +
+# Roadmap links are redirected to GitHub (see Redirect section)
+find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?chatapps-guide(_zh)?(\.md)?\)|](/guide/chatapps.md)|g' {} +
+find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?chatapps-design(_zh)?(\.md)?\)|](/guide/chatapps.md)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?hooks-architecture(_zh)?(\.md)?\)|](/guide/hooks\2.md)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's!\]\(\.?/?SECURITY(_zh)?(\.md)?\)!](/guide/security\1.md)!g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?migration/migration-guide-v0\.8\.0(_zh)?(\.md)?\)|](/migration/v0.8.0\2.md)|g' {} +
@@ -110,7 +115,7 @@ find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?\.\./_exampl
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?_examples/([^)]*)\)|](https://github.com/hrygo/hotplex/tree/main/_examples/\1)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?CONTRIBUTING(\.md)?\)|](https://github.com/hrygo/hotplex/blob/main/CONTRIBUTING.md)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?LICENSE\)|](https://github.com/hrygo/hotplex/blob/main/LICENSE)|g' {} +
-find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?docs/roadmap-2026(\.md)?\)|](https://github.com/hrygo/hotplex/blob/main/docs/roadmap-2026.md)|g' {} +
+find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?(archive/)?roadmap-2026(\.md)?\)|](https://github.com/hrygo/hotplex/blob/main/docs/archive/roadmap-2026.md)|g' {} +
 find docs-site -name "*.md" -type f -exec sed -E -i.bak 's|\]\(\.?/?(docs/)?(providers/)?claudecode(_zh)?(\.md)?\)|](https://github.com/hrygo/hotplex/blob/main/docs/providers/claudecode\3.md)|g' {} +
 
 # Clean up sed backups

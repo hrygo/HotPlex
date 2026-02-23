@@ -14,7 +14,7 @@ Welcome to the HotPlex documentation. This directory contains comprehensive guid
 - **[Docker Deployment](docker-deployment.md)**: Container and Kubernetes deployment guide.
 - **[Production Guide](production-guide.md)**: Production deployment best practices.
 - **[Benchmark Report](benchmark-report.md)**: Detailed performance metrics and analysis.
-- **[Roadmap 2026](roadmap-2026.md)**: Future vision and upcoming milestones.
+- **[Roadmap 2026](archive/roadmap-2026.md)**: Future vision and upcoming milestones.
 
 ## 🖥️ Server Mode (Agent Control Plane)
 Developer guides for interacting with HotPlex in server mode (WebSocket & OpenCode protocols).
@@ -27,8 +27,7 @@ Deep-dive guides for specific AI CLI agents supported by HotPlex.
 - **Aider Integration** (Removed in v0.8.3)
 
 ## 💬 ChatApps Integration
- **[ChatApps Guide](chatapps-guide.md)**: User manual for chat platform integration.
- **[ChatApps Architecture](chatapps-design.md)**: Technical design details.
+- **[ChatApps Guide](chatapps-guide.md)**: Architecture design and user manual for chat platform integration.
 
 ## 🛠️ Developer Migration
 - **[Migrating to v0.9.0](migration/migration-guide-v0.9.0.md)** (Latest)

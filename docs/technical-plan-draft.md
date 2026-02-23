@@ -1,8 +1,37 @@
-# HotPlex Q1 技术方案
+# HotPlex 技术方案
 
-**版本**: v1.1 (完善版)  
+<div align="center">
+
+**版本**: v2.0 (待实施版)  
 **日期**: 2026-02-23  
-**状态**: 已确认
+**状态**: ⏳ 待实施
+
+</div>
+
+---
+
+## 📋 目录
+
+- [一、背景与目标](#一背景与目标)
+- [二、方案总览](#二方案总览)
+- [三、详细方案](#三详细方案)
+  - [3.1 Session 池优化](#31-session-池优化)
+  - [3.2 WAF 重构 + 审计](#32-waf-重构--审计)
+  - [3.3 DX 改进](#33-dx-改进)
+  - [3.4 安全增强](#34-安全增强)
+- [四、数据模型](#四数据模型)
+- [五、兼容性策略](#五兼容性策略)
+- [六、里程碑](#六里程碑)
+- [七、风险与对策](#七风险与对策)
+- [八、验收标准](#八验收标准)
+- [九、质量门清单](#九质量门清单)
+- [十、技术选型总结](#十技术选型总结)
+- [十一、代码库一致性分析](#十一代码库一致性分析)
+- [十二、实施优先级建议](#十二实施优先级建议)
+- [十三、技术实现映射](#十三技术实现映射)
+- [十四、已知风险与缓解](#十四已知风险与缓解)
+- [附录 A：错误码完整列表](#附录-a错误码完整列表)
+- [附录 B：变更日志](#附录-b变更日志)
 
 ---
 
@@ -10,10 +39,12 @@
 
 ### 1.1 当前状态
 
-- **阶段**: PMF 阶段
-- **核心能力**: Provider 抽象、WS/HTTP 协议、安全隔离、Session 池、Hook 系统
-- **验证**: 1000+ 并发压测通过
-- **短板**: Session 池锁竞争、WAF 静态规则、调试困难
+| 维度 | 状态 |
+|------|------|
+| **阶段** | PMF 阶段 |
+| **核心能力** | Provider 抽象、WS/HTTP 协议、安全隔离、Session 池、Hook 系统 |
+| **验证** | 1000+ 并发压测通过 |
+| **短板** | Session 池锁竞争、WAF 静态规则、调试困难 |
 
 ### 1.2 Q1 目标
 
@@ -68,7 +99,7 @@
 
 **目标**: 消除全局锁竞争
 
-**优化点** (v1.1):
+**优化点**:
 - 分片数从 6 调整为 8（更均衡）
 - 哈希算法从 fnv32a 改为 xxhash（分布更均匀）
 - 新增分片数量可配置选项
@@ -217,7 +248,7 @@ CREATE INDEX idx_rules_level ON security_rules(level);
 
 #### B2. SQLite 配置与 Detector 重构
 
-**SQLite 配置结构** (v1.1 新增):
+**SQLite 配置结构**:
 
 ```go
 type SQLiteConfig struct {
@@ -276,11 +307,6 @@ type Detector struct {
     auditLogger  *AuditLogger      // 审计日志
 }
 
-func (d *Detector) LoadRules() error {
-    rows, err := d.db.Query("SELECT id, pattern, description, level, category FROM security_rules WHERE enabled = 1")
-    // 加载到内存
-}
-
 func (d *Detector) AddRule(pattern, desc string, level int, category string) error {
     // 验证正则安全性 (ReDoS 防护)
     if err := ValidateRegexPattern(pattern); err != nil {
@@ -288,11 +314,6 @@ func (d *Detector) AddRule(pattern, desc string, level int, category string) err
     }
     
     // 写入 SQLite
-    // 刷新内存缓存
-}
-
-func (d *Detector) DeleteRule(id int64) error {
-    // 从 SQLite 删除
     // 刷新内存缓存
 }
 ```
@@ -325,20 +346,16 @@ CREATE INDEX idx_audit_level ON security_audit_log(level);
 CREATE INDEX idx_audit_trace ON security_audit_log(trace_id);
 ```
 
-**写入时机**: 每次 CheckInput 触发拦截时记录
-
-**审计日志接口** (v1.1 新增):
+**审计日志接口**:
 
 ```go
-// 审计日志接口
 type AuditLogger interface {
     Log(ctx context.Context, event *AuditEvent) error
     Query(ctx context.Context, query AuditQuery) ([]AuditEvent, error)
     Export(ctx context.Context, format string, w io.Writer) error
-    Cleanup(retentionDays int) error  // 清理过期日志
+    Cleanup(retentionDays int) error
 }
 
-// 审计事件结构
 type AuditEvent struct {
     Timestamp    time.Time `json:"timestamp"`
     TraceID      string    `json:"trace_id,omitempty"`
@@ -352,21 +369,9 @@ type AuditEvent struct {
     SourceIP     string    `json:"source_ip,omitempty"`
     UserAgent    string    `json:"user_agent,omitempty"`
 }
-
-// 审计查询
-type AuditQuery struct {
-    From        *time.Time
-    To          *time.Time
-    Level       *int
-    Category    *string
-    SessionID   *string
-    Blocked     *bool
-    Limit       int
-    Offset      int
-}
 ```
 
-**审计日志保留策略** (v1.1 新增):
+**审计日志保留策略**:
 - 默认保留 90 天
 - 可通过 `SQLiteConfig.RetentionDays` 配置
 - 每天 UTC 0 点执行清理任务
@@ -375,7 +380,7 @@ type AuditQuery struct {
 
 #### B4. API 设计
 
-**API 认证配置** (v1.1 新增):
+**API 认证配置**:
 
 ```go
 type APIAuthConfig struct {
@@ -394,88 +399,19 @@ type APIAuthConfig struct {
     // 允许的 IP 白名单
     AllowedIPs []string `json:"allowed_ips,omitempty"`
 }
-
-type EngineOptions struct {
-    // ... 现有字段 ...
-    
-    // API 认证配置
-    APIAuth *APIAuthConfig `json:"api_auth,omitempty"`
-}
-```
-
-**认证流程**:
-
-```go
-func (s *Server) authenticate(r *http.Request) error {
-    cfg := s.engine.opts.APIAuth
-    if cfg == nil || cfg.Method == "none" {
-        return nil  // 未配置认证
-    }
-    
-    // IP 白名单检查
-    if len(cfg.AllowedIPs) > 0 {
-        clientIP := getClientIP(r)
-        if !contains(cfg.AllowedIPs, clientIP) {
-            return fmt.Errorf("client IP not allowed")
-        }
-    }
-    
-    switch cfg.Method {
-    case "api-key":
-        apiKey := r.Header.Get("X-API-Key")
-        if !contains(cfg.APIKeys, apiKey) {
-            return fmt.Errorf("invalid API key")
-        }
-    case "bearer":
-        token := r.Header.Get("Authorization")
-        if !strings.HasPrefix(token, "Bearer ") {
-            return fmt.Errorf("missing bearer token")
-        }
-        if token[7:] != cfg.BearerToken {
-            return fmt.Errorf("invalid bearer token")
-        }
-    }
-    
-    return nil
-}
 ```
 
 **API 端点**:
 
-```bash
-# 认证示例 (X-API-Key)
-curl -X GET http://localhost:8080/api/v1/security/rules \
-  -H "X-API-Key: your-api-key"
-
-# 添加规则
-POST /api/v1/security/rules
-Content-Type: application/json
-{
-    "pattern": "rm\\s+-rf\\s+/",
-    "description": "删除根目录",
-    "level": "critical",
-    "category": "file_delete"
-}
-
-# 删除规则
-DELETE /api/v1/security/rules/{id}
-
-# 查询规则
-GET /api/v1/security/rules?category=file_delete&enabled=true
-
-# 启用/禁用规则
-PATCH /api/v1/security/rules/{id}
-{ "enabled": false }
-
-# 查询审计日志
-GET /api/v1/audit/logs?level=critical&from=2026-01-01&to=2026-01-31&limit=100
-
-# 导出审计日志 (CSV)
-GET /api/v1/audit/logs/export?from=2026-01-01&to=2026-01-31
-
-# 健康检查
-GET /health
-```
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| POST | `/api/v1/security/rules` | 添加规则 |
+| DELETE | `/api/v1/security/rules/{id}` | 删除规则 |
+| GET | `/api/v1/security/rules` | 查询规则 |
+| PATCH | `/api/v1/security/rules/{id}` | 启用/禁用规则 |
+| GET | `/api/v1/audit/logs` | 查询审计日志 |
+| GET | `/api/v1/audit/logs/export` | 导出审计日志 (CSV) |
+| GET | `/health` | 健康检查 |
 
 **兼容性**: 新增 `/api/v1/` 前缀，现有 API 不变 ✅
 
@@ -485,10 +421,9 @@ GET /health
 
 #### C1. 错误码体系
 
-**错误码定义** (v1.1 补充完整列表):
+**错误码定义**:
 
 ```go
-// 错误码定义 (ErrorCode xxx)
 const (
     // WAF 相关 (HP_0xx)
     ErrCodeDangerBlocked     ErrorCode = "HP_001" // WAF 拦截
@@ -564,29 +499,18 @@ type ErrorResponse struct {
 **CLI 框架选型**: Cobra + Viper
 
 ```bash
-# 查看 session 列表
+# Session 管理
 $ hotplexctl session list
-SESSION_ID    STATUS    HOT_LEVEL    CREATED_AT    LAST_ACTIVE
-demo-001     Ready     0            2026-01-01    2026-01-02
-demo-002     Busy      1            2026-01-02    2026-01-02
+$ hotplexctl session info <session_id>
+$ hotplexctl session logs <session_id> -f
 
-# 查看 session 详情
-$ hotplexctl session info demo-001
+# 审计日志
+$ hotplexctl audit list --level critical
 
-# 实时查看 session 日志
-$ hotplexctl session logs demo-001 -f
-
-# 查看安全审计日志
-$ hotplexctl audit list --level critical --from=2026-01-01
-
-# 查看规则列表
+# 规则管理
 $ hotplexctl rules list --category file_delete
-
-# 添加规则
-$ hotplexctl rules add --pattern "rm -rf /" --level critical --category file_delete
-
-# 删除规则
-$ hotplexctl rules delete 123
+$ hotplexctl rules add --pattern "rm -rf /" --level critical
+$ hotplexctl rules delete <id>
 
 # 健康检查
 $ hotplexctl health
@@ -596,48 +520,24 @@ $ hotplexctl config get
 $ hotplexctl config set shard_count 16
 ```
 
-**CLI 连接配置**:
-
-```go
-type CLIConfig struct {
-    Address   string // hotplexd 地址 (默认: localhost:8080)
-    APIKey    string // API Key
-    Timeout   time.Duration
-}
-```
-
 ---
 
 #### C3. 错误页优化
 
 ```go
-// HTTP 错误响应统一格式
 type HTTPErrorResponse struct {
     Error     ErrorResponse `json:"error"`
     RequestID string       `json:"request_id,omitempty"`
-}
-
-// 4xx/5xx 错误自动返回友好消息
-{
-    "error": {
-        "code": "HP_101",
-        "message": "invalid configuration",
-        "reason": "work_dir is required",
-        "solution": "请在 Config 中设置有效的 WorkDir 字段",
-        "doc_link": "https://docs.hotplex.dev/errors/HP_101",
-        "trace_id": "req_abc123"
-    }
 }
 ```
 
 ---
 
-### 3.4 安全增强 (v1.1 新增)
+### 3.4 安全增强
 
 #### 3.4.1 ReDoS 防护
 
 ```go
-// 正则复杂度验证器
 const (
     MaxRegexLength     = 500      // 最大正则长度
     MaxRegexGroups     = 10       // 最大捕获组数量
@@ -687,33 +587,20 @@ func ValidateRegexPattern(pattern string) error {
 #### 3.4.2 规则仓库接口
 
 ```go
-// 规则仓库接口
 type RuleRepository interface {
-    // 列表查询
     List(ctx context.Context, filter RuleFilter) ([]SecurityRule, error)
-    
-    // 单条查询
     Get(ctx context.Context, id int64) (*SecurityRule, error)
-    
-    // 创建
     Create(ctx context.Context, rule *SecurityRule) (int64, error)
-    
-    // 更新
     Update(ctx context.Context, id int64, rule *SecurityRule) error
-    
-    // 删除
     Delete(ctx context.Context, id int64) error
-    
-    // 批量启用/禁用
     BatchUpdateEnabled(ctx context.Context, ids []int64, enabled bool) error
 }
 
-// 规则过滤器
 type RuleFilter struct {
     Enabled   *bool
     Level     *int
     Category  *string
-    Keyword   *string  // 搜索描述
+    Keyword   *string
     Limit     int
     Offset    int
 }
@@ -741,10 +628,6 @@ CREATE TABLE security_rules (
     UNIQUE(pattern)
 );
 
-CREATE INDEX idx_rules_enabled ON security_rules(enabled);
-CREATE INDEX idx_rules_category ON security_rules(category);
-CREATE INDEX idx_rules_level ON security_rules(level);
-
 -- 审计日志表
 CREATE TABLE security_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -760,28 +643,9 @@ CREATE TABLE security_audit_log (
     trace_id TEXT,
     request_id TEXT
 );
-
-CREATE INDEX idx_audit_session ON security_audit_log(session_id);
-CREATE INDEX idx_audit_timestamp ON security_audit_log(timestamp);
-CREATE INDEX idx_audit_level ON security_audit_log(level);
-CREATE INDEX idx_audit_trace ON security_audit_log(trace_id);
 ```
 
-### 4.2 Config 新增字段
-
-```go
-type Config struct {
-    // ... 现有字段 ...
-    
-    // SessionHotLevel 可选参数
-    // 0: 普通 session（默认，30min 空闲销毁）
-    // 1: 温 session（60min 空闲销毁）
-    // 2: 热 session（24h 空闲销毁）
-    SessionHotLevel *int `json:"session_hot_level,omitempty"`
-}
-```
-
-### 4.3 EngineOptions 完整配置
+### 4.2 EngineOptions 完整配置
 
 ```go
 type EngineOptions struct {
@@ -790,17 +654,17 @@ type EngineOptions struct {
     IdleTimeout   time.Duration
     MaxSessions  int
     
-    // 分片配置 (v1.1 新增)
-    ShardCount   *int `json:"shard_count,omitempty"` // 默认: 8
+    // 分片配置
+    ShardCount   *int `json:"shard_count,omitempty"`
     
     // 安全配置
     AllowedTools  []string
     PermissionMode string
     
-    // SQLite 配置 (v1.1 新增)
+    // SQLite 配置
     SQLite *SQLiteConfig `json:"sqlite,omitempty"`
     
-    // API 认证配置 (v1.1 新增)
+    // API 认证配置
     APIAuth *APIAuthConfig `json:"api_auth,omitempty"`
 }
 ```
@@ -819,21 +683,21 @@ type EngineOptions struct {
 
 ---
 
-## 六、里程碑 (修订版)
+## 六、里程碑
 
-| 周次 | 任务 | 交付 | 备注 |
-|------|------|------|------|
-| **Week 1** | A1 分片 + A2 读写分离 | Session 池支持 8 Shard | 合并 A1+A2 减少上下文切换 |
-| **Week 2** | A3 冷热分离 + B1 规则重构 | Config 支持 SessionHotLevel | 规则结构抽象为接口 |
-| **Week 3** | B2 SQLite + B3 审计 | 审计日志可查询 | 添加 ReDoS 验证 |
-| **Week 4** | B4 动态API + C1 错误码 | 规则可动态管理 | 添加 API 认证 |
-| **Week 5** | C2 CLI + C3 错误页 | hotplexctl 工具 | 完整 CLI 功能 |
+| 周次 | 任务 | 交付 |
+|------|------|------|
+| **Week 1** | A1 分片 + A2 读写分离 | Session 池支持 8 Shard |
+| **Week 2** | A3 冷热分离 + B1 规则重构 | Config 支持 SessionHotLevel |
+| **Week 3** | B2 SQLite + B3 审计 | 审计日志可查询 |
+| **Week 4** | B4 动态API + C1 错误码 | 规则可动态管理 |
+| **Week 5** | C2 CLI + C3 错误页 | hotplexctl 工具 |
 
 **关键路径**: A1 → A2 → A3 → B1 → B2 → B3 → B4 → C1 → C2
 
 ---
 
-## 七、风险与对策 (完善版)
+## 七、风险与对策
 
 | 风险 | 影响 | 对策 |
 |------|------|------|
@@ -857,7 +721,7 @@ type EngineOptions struct {
 - [ ] `hotplexctl` CLI 工具可用
 - [ ] 现有 API 完全兼容
 
-### 质量验收 (v1.1 新增)
+### 质量验收
 
 - [ ] 单元测试覆盖 > 70%
 - [ ] 分片迁移测试（向后兼容）
@@ -866,11 +730,15 @@ type EngineOptions struct {
 - [ ] API 认证测试
 - [ ] 审计日志清理测试
 
+### 性能基准
+
+- [ ] 1000 并发 Session 操作延迟 P99 < 100ms
+- [ ] SQLite 写入 QPS > 1000
+- [ ] 分片后锁竞争减少 > 80%
+
 ---
 
-## 九、质量门清单 (v1.1 新增)
-
-实施前必须完成以下检查项：
+## 九、质量门清单
 
 ### 设计阶段
 
@@ -912,7 +780,150 @@ type EngineOptions struct {
 
 ---
 
-**文档版本**: v1.1  
+## 十一、代码库一致性分析
+
+### 现有实现对照
+
+| 方案模块 | 代码位置 | 现状 | 一致性 |
+|----------|----------|------|--------|
+| Session 池 | `internal/engine/pool.go` | 单一 RWMutex + 双重检查锁定 + pending map | ✅ 基础已具备 |
+| 安全检测 | `internal/security/detector.go` | 80+ 正则规则，SecurityRule 接口 | ✅ 基本一致 |
+| 错误定义 | `types/errors.go` | 仅 `ErrDangerBlocked` | ⚠️ 需扩展 |
+| 配置结构 | `internal/engine/types.go` | EngineOptions 定义完整 | ⚠️ 需扩展 |
+
+### 需新增模块
+
+| 模块 | 文件位置(预估) | 工作量 | 优先级 |
+|------|----------------|--------|--------|
+| SQLite 配置 | `internal/db/sqlite.go` | 1 天 | P0 |
+| 审计日志 | `internal/security/audit.go` | 1 天 | P0 |
+| API 路由 | `internal/server/api.go` | 2 天 | P1 |
+| 错误码定义 | `types/errors.go` | 1 天 | P1 |
+
+---
+
+## 十二、实施优先级建议
+
+### 阶段划分
+
+| 阶段 | 任务 | 周期 | 风险 | 理由 |
+|------|------|------|------|------|
+| **Phase 1** | A1 + A2 (分片) | 2 天 | 🟢 低 | 现有代码基础好，改动最小，收益明确 |
+| **Phase 2** | A3 (冷热分离) | 1 天 | 🟢 低 | 依赖分片完成，配置扩展 |
+| **Phase 3** | B1 + B2 (SQLite + 规则) | 3 天 | 🟡 中 | 需引入新依赖，设计数据库 Schema |
+| **Phase 4** | B3 (审计日志) | 1 天 | 🟡 中 | 依赖 SQLite |
+| **Phase 5** | B4 (API) | 2 天 | 🔴 高 | 全新路由层，安全敏感 |
+| **Phase 6** | C1 + C2 + C3 (DX) | 3 天 | 🟢 低 | 错误码 + CLI，独立可并行 |
+
+### 推荐实施顺序
+
+```
+Phase 1 (Week 1)  Phase 2 (Week 2)  Phase 3 (Week 3)  Phase 4 (Week 4)  Phase 5 (Week 5)
++----------------+ +---------------+ +----------------+ +---------------+ +----------------+
+| A1 分片优化    |->| A3 冷热分离   |->| B1 规则接口    |->| B3 审计日志    |->| B4 动态API     |
+| A2 读写分离    |  | B1 规则结构   |  | B2 SQLite      |  |                |  |                |
++----------------+ +---------------+ +----------------+ +---------------+ +----------------+
+                                                                                |
+                                                                                v
+                                              Phase 6 (可并行)
+                                              +----------------+
+                                              | C1 错误码      |
+                                              | C2 CLI         |
+                                              | C3 错误页      |
+                                              +----------------+
+```
+
+---
+
+## 十三、技术实现映射
+
+### 现有文件修改清单
+
+| 文件 | 修改内容 | 类型 |
+|------|----------|------|
+| `internal/engine/pool.go` | 添加分片逻辑 | 重构 |
+| `internal/engine/types.go` | 添加 ShardCount, SessionHotLevel | 扩展 |
+| `internal/security/detector.go` | 添加 SQLite/审计支持 | 扩展 |
+| `types/errors.go` | 添加 50+ 错误码 | 扩展 |
+| `engine/runner.go` | 添加 SQLite/认证配置 | 扩展 |
+
+### 新增文件清单
+
+| 文件 | 职责 |
+|------|------|
+| `internal/db/sqlite.go` | SQLite 连接池、WAL 配置 |
+| `internal/security/audit.go` | 审计日志接口实现 |
+| `internal/security/rules/repo.go` | 规则仓库接口 |
+| `internal/server/api.go` | REST API 路由 |
+| `cmd/hotplexctl/main.go` | CLI 入口 |
+
+---
+
+## 十四、已知风险与缓解
+
+### 高风险项
+
+| 风险 | 影响 | 缓解措施 |
+|------|------|----------|
+| SQLite 依赖引入 | 运行时错误 | 使用纯 Go 驱动 (modernc.org/sqlite)，无 CGO 依赖 |
+| API 认证设计缺陷 | 安全漏洞 | 参考 OAuth 2.0 最佳实践，代码评审 |
+| 分片后数据迁移 | 兼容性问题 | 兼容期支持全分片查找，后续废弃 |
+
+### 中风险项
+
+| 风险 | 影响 | 缓解措施 |
+|------|------|----------|
+| 错误码数量过多 | 维护困难 | 按类别分组 (HP_0xx ~ HP_9xx)，文档自动生成 |
+| 审计日志磁盘占用 | 存储耗尽 | 自动清理任务 + 保留策略配置 |
+
+---
+
+## 附录 A：错误码完整列表
+
+| 类别 | 错误码 | 描述 |
+|------|--------|------|
+| WAF | HP_001 | WAF 拦截 |
+| WAF | HP_002 | 规则正则无效 |
+| WAF | HP_003 | 正则 ReDoS 风险 |
+| 配置 | HP_101 | 配置无效 |
+| 配置 | HP_102 | 缺少 WorkDir |
+| 配置 | HP_103 | SessionID 无效 |
+| Session | HP_201 | Session 不存在 |
+| Session | HP_202 | Session 已终止 |
+| Session | HP_203 | Session 创建失败 |
+| Session | HP_204 | Session 超时 |
+| 进程 | HP_301 | 进程启动失败 |
+| 进程 | HP_302 | 进程异常退出 |
+| 进程 | HP_303 | 进程被终止 |
+| Provider | HP_401 | Provider 不存在 |
+| Provider | HP_402 | Provider 初始化失败 |
+| Provider | HP_403 | Provider 执行失败 |
+| 数据库 | HP_501 | 数据库连接失败 |
+| 数据库 | HP_502 | 数据库查询失败 |
+| 数据库 | HP_503 | 数据库认证失败 |
+| API | HP_601 | API 未授权 |
+| API | HP_602 | API 限流 |
+| API | HP_603 | API 请求无效 |
+| 内部 | HP_901 | 内部错误 |
+| 内部 | HP_902 | 功能未实现 |
+
+---
+
+## 附录 B：变更日志
+
+| 版本 | 日期 | 变更内容 |
+|------|------|----------|
+| v1.0 | 2026-02-23 | 初始版本 |
+| v1.1 | 2026-02-23 | 完善版：补充 API 认证、SQLite 配置、ReDoS 防护 |
+| v1.2 | 2026-02-23 | 代码库交叉分析版：增加一致性分析、实施优先级建议 |
+| v2.0 | 2026-02-23 | 正式发布版：优化目录结构，添加附录 |
+
+---
+
+<div align="center">
+
+**文档版本**: v2.0 (待实施版)  
 **更新日期**: 2026-02-23  
-**文档状态**: ✅ 已确认  
-**执行待定**
+**文档状态**: ⏳ 待实施
+
+</div>
