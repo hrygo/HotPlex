@@ -66,6 +66,14 @@ func (s *Session) Touch() {
 	s.LastActive = time.Now()
 }
 
+// GetLastActive returns the last active time with proper locking.
+func (s *Session) GetLastActive() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.LastActive
+}
+
+
 // SetStatus updates the session status with proper locking.
 func (s *Session) SetStatus(status SessionStatus) {
 	s.mu.Lock()
