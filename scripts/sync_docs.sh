@@ -43,6 +43,7 @@ mkdir -p "$TARGET_ROOT/guide"
 mkdir -p "$TARGET_ROOT/sdks"
 mkdir -p "$TARGET_ROOT/reference"
 mkdir -p "$TARGET_ROOT/public/images"
+mkdir -p "$TARGET_ROOT/public/assets/"
 mkdir -p "$TARGET_ROOT/migration"
 mkdir -p "$TARGET_ROOT/plan"
 
