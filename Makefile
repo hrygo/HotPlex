@@ -49,10 +49,6 @@ help: ## Show this help message
 build: fmt vet tidy ## Compile the hotplexd daemon
 	@printf "${GREEN}🚀 Building HotPlex Daemon (${VERSION})...${NC}\n"
 	@mkdir -p $(DIST_DIR)
-	@go build -a -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME) $(CMD_PATH)
-	@printf "${GREEN}✅ Build complete: ${DIST_DIR}/$(BINARY_NAME)${NC}\n"
-	@printf "${GREEN}🚀 Building HotPlex Daemon (${VERSION})...${NC}\n"
-	@mkdir -p $(DIST_DIR)
 	@go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME) $(CMD_PATH)
 	@printf "${GREEN}✅ Build complete: ${DIST_DIR}/$(BINARY_NAME)${NC}\n"
 
@@ -138,6 +134,5 @@ stop: ## Stop the running hotplexd daemon
 	fi
 
 restart: stop run ## Restart the daemon (stop + run)
-	@
 	@printf "${PURPLE}🔥 Starting HotPlex Daemon...${NC}\n"
 	@./$(DIST_DIR)/$(BINARY_NAME)
