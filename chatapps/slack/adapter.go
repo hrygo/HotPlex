@@ -314,6 +314,18 @@ func (a *Adapter) handleEventCallback(ctx context.Context, eventData json.RawMes
 		return
 	}
 
+	// Check user permission
+	if !a.config.IsUserAllowed(msgEvent.User) {
+		a.Logger().Debug("User blocked", "user_id", msgEvent.User)
+		return
+	}
+
+	// Check channel permission
+	if !a.config.ShouldProcessChannel(msgEvent.ChannelType, msgEvent.Channel) {
+		a.Logger().Debug("Channel blocked by policy", "channel_type", msgEvent.ChannelType, "channel_id", msgEvent.Channel)
+		return
+	}
+
 	sessionID := a.GetOrCreateSession(msgEvent.Channel+":"+msgEvent.User, msgEvent.User)
 
 	msg := &base.ChatMessage{

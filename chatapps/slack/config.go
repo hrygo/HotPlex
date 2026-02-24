@@ -15,6 +15,23 @@ type Config struct {
 	Mode string
 	// ServerAddr: HTTP server address (e.g., ":8080")
 	ServerAddr string
+
+	// Permission Policy for Direct Messages
+	// "allow" - Allow all DMs (default)
+	// "pairing" - Only allow when user is paired
+	// "block" - Block all DMs
+	DMPolicy string
+
+	// Permission Policy for Group Messages
+	// "allow" - Allow all group messages (default)
+	// "mention" - Only allow when bot is mentioned
+	// "block" - Block all group messages
+	GroupPolicy string
+
+	// AllowedUsers: List of user IDs who can interact with the bot (whitelist)
+	AllowedUsers []string
+	// BlockedUsers: List of user IDs who cannot interact with the bot (blacklist)
+	BlockedUsers []string
 }
 
 // Token format patterns
@@ -71,4 +88,55 @@ func (c *Config) Validate() error {
 // IsSocketMode returns true if Socket Mode is enabled
 func (c *Config) IsSocketMode() bool {
 	return c.Mode == "socket"
+}
+
+// IsUserAllowed checks if a user is allowed to interact with the bot
+func (c *Config) IsUserAllowed(userID string) bool {
+	// Check blocked list first
+	for _, blocked := range c.BlockedUsers {
+		if blocked == userID {
+			return false
+		}
+	}
+
+	// If allowlist is set, check it
+	if len(c.AllowedUsers) > 0 {
+		for _, allowed := range c.AllowedUsers {
+			if allowed == userID {
+				return true
+			}
+		}
+		return false
+	}
+
+	// No allowlist, user is allowed
+	return true
+}
+
+// ShouldProcessChannel checks if messages from a channel should be processed
+// channelType: "dm" or "channel" or "group"
+func (c *Config) ShouldProcessChannel(channelType, channelID string) bool {
+	switch channelType {
+	case "dm":
+		switch c.DMPolicy {
+		case "block":
+			return false
+		case "pairing":
+			// TODO: Check if user is paired
+			return true
+		default: // "allow"
+			return true
+		}
+	case "channel", "group":
+		switch c.GroupPolicy {
+		case "block":
+			return false
+		case "mention":
+			// TODO: Check if bot was mentioned
+			return true
+		default: // "allow"
+			return true
+		}
+	}
+	return true
 }
