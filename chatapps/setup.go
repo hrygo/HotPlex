@@ -135,6 +135,13 @@ func setupPlatform(
 		WithConfigLoader(loader),
 		WithLogger(logger),
 		WithWorkDirFn(func(sessionID string) string {
+			// Slack uses the current working directory (HotPlex source code)
+			if platform == "slack" {
+				if wd, err := os.Getwd(); err == nil {
+					return wd
+				}
+			}
+			// Other platforms use temp directory
 			return filepath.Join("/tmp/hotplex-chatapps", platform, sessionID)
 		}),
 	)
