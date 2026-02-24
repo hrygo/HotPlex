@@ -4,6 +4,16 @@ provider:
   default_model: sonnet
   default_permission_mode: bypass-permissions
 
+# -----------------------------------------------------------------------------
+# Engine Configuration
+# -----------------------------------------------------------------------------
+engine:
+  # Working directory for AI agent execution
+  # "." means current directory (automatically resolved to absolute path)
+  # "~/path" expands to home directory
+  work_dir: .
+
+
 
 # WhatsApp Business API Configuration
 # Get these from Meta Developer Portal: https://developers.facebook.com/

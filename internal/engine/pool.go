@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -33,47 +31,6 @@ type SessionPool struct {
 	shutdownOnce sync.Once     // Ensures Shutdown is only executed once
 	markerStore  persistence.SessionMarkerStore
 	pending      map[string]chan struct{}
-}
-
-// blockedEnvPrefixes contains environment variable prefixes that should be filtered
-// out for security reasons to prevent injection attacks via environment variables.
-var blockedEnvPrefixes = []string{
-	"LD_PRELOAD",
-	"LD_LIBRARY_PATH",
-	"DYLD_INSERT_LIBRARIES",
-	"DYLD_LIBRARY_PATH",
-	"_JAVA_OPTIONS",
-	"JAVA_TOOL_OPTIONS",
-	"PYTHONPATH",
-	"PERL5LIB",
-	"NODE_OPTIONS",
-}
-
-// buildSafeEnv creates a sanitized environment for the CLI subprocess.
-// It filters out potentially dangerous environment variables that could
-// be used for privilege escalation or code injection.
-func buildSafeEnv() []string {
-	env := os.Environ()
-	safeEnv := make([]string, 0, len(env)+1)
-
-	for _, e := range env {
-		// Check if this env var should be blocked
-		blocked := false
-		for _, prefix := range blockedEnvPrefixes {
-			if strings.HasPrefix(e, prefix+"=") {
-				blocked = true
-				break
-			}
-		}
-		if !blocked {
-			safeEnv = append(safeEnv, e)
-		}
-	}
-
-	// Add required CLI environment variables
-	safeEnv = append(safeEnv, "CLAUDE_DISABLE_TELEMETRY=1")
-
-	return safeEnv
 }
 
 // NewSessionPool creates a new session manager with default file-based marker storage.
@@ -262,15 +219,6 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 		}
 	} else {
 		cmd.Dir = filepath.Clean(cfg.WorkDir)
-	}
-	if cfg.WorkDir == "." || !filepath.IsAbs(cfg.WorkDir) {
-		if absPath, err := filepath.Abs(cfg.WorkDir); err == nil {
-			cmd.Dir = absPath
-		} else {
-			cmd.Dir = cfg.WorkDir // Fallback to original if error
-		}
-	} else {
-		cmd.Dir = cfg.WorkDir
 	}
 
 	// Setup process attributes and get job handle (Windows) or zero (Unix)

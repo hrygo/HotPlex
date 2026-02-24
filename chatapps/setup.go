@@ -138,12 +138,20 @@ func setupPlatform(
 		WithWorkDirFn(func(sessionID string) string {
 			// Use work_dir from config if specified
 			if pc.Engine.WorkDir != "" {
-				// Expand ~ to home directory
+				// Expand ~ to home directory and resolve . to absolute path
 				workDir := expandPath(pc.Engine.WorkDir)
+				logger.Debug("Using work_dir from config",
+					"platform", platform,
+					"config_value", pc.Engine.WorkDir,
+					"resolved_path", workDir)
 				return workDir
 			}
 			// Default: use temp directory with platform/session isolation
-			return filepath.Join("/tmp/hotplex-chatapps", platform, sessionID)
+			defaultDir := filepath.Join("/tmp/hotplex-chatapps", platform, sessionID)
+			logger.Debug("Using default temp work_dir",
+				"platform", platform,
+				"default_path", defaultDir)
+			return defaultDir
 		}),
 	)
 
@@ -216,6 +224,15 @@ func expandPath(path string) string {
 
 		// Handle ~username/path (not commonly used, but supported)
 		return filepath.Join(homeDir, path[1:])
+	}
+
+	// Handle special case: "." should be expanded to current working directory
+	if path == "." {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return path // Return original if we can't get cwd
+		}
+		return cwd
 	}
 
 	// Clean the path to resolve any . or .. elements
