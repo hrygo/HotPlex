@@ -24,6 +24,7 @@ type Adapter struct {
 	interactivePath     string
 	slashCommandPath    string
 	sender              *base.SenderWithMutex
+	messageHandlerChain *base.MessageHandlerChain
 	webhook             *base.WebhookRunner
 	socketMode          *SocketModeConnection
 	slashCommandHandler func(cmd SlashCommand)
@@ -36,12 +37,13 @@ func NewAdapter(config Config, logger *slog.Logger, opts ...base.AdapterOption) 
 	}
 
 	a := &Adapter{
-		config:           config,
-		eventPath:        "/events",
-		interactivePath:  "/interactive",
-		slashCommandPath: "/slack",
-		sender:           base.NewSenderWithMutex(),
-		webhook:          base.NewWebhookRunner(logger),
+		config:              config,
+		eventPath:           "/events",
+		interactivePath:     "/interactive",
+		slashCommandPath:    "/slack",
+		sender:              base.NewSenderWithMutex(),
+		messageHandlerChain: base.NewMessageHandlerChain(logger),
+		webhook:             base.NewWebhookRunner(logger),
 	}
 
 	// Initialize Socket Mode if configured
@@ -81,15 +83,42 @@ func NewAdapter(config Config, logger *slog.Logger, opts ...base.AdapterOption) 
 		a.sender.SetSender(a.defaultSender)
 	}
 
+	// Initialize default message handler chain
+	// Order matters: RichContent -> Format -> RateLimit
+	a.messageHandlerChain.
+		AddHandler(base.RichContentHandler).
+		AddHandler(NewFormatConverterHandler().Handle).
+		AddHandler(NewSlackRichContentHandler().Handle)
+
 	return a
 }
 
 func (a *Adapter) SendMessage(ctx context.Context, sessionID string, msg *base.ChatMessage) error {
-	return a.sender.SendMessage(ctx, sessionID, msg)
+	// Process message through handler chain before sending
+	processedMsg, err := a.messageHandlerChain.Process(ctx, msg)
+	if err != nil {
+		a.Logger().Error("Message handler chain error", "error", err)
+		return err
+	}
+	if processedMsg == nil {
+		// Message was filtered by handler chain
+		return nil
+	}
+	return a.sender.SendMessage(ctx, sessionID, processedMsg)
 }
 
 func (a *Adapter) SetSender(fn func(ctx context.Context, sessionID string, msg *base.ChatMessage) error) {
 	a.sender.SetSender(fn)
+}
+
+// SetMessageHandlerChain allows customizing the message handler chain
+func (a *Adapter) SetMessageHandlerChain(chain *base.MessageHandlerChain) {
+	a.messageHandlerChain = chain
+}
+
+// GetMessageHandlerChain returns the current message handler chain
+func (a *Adapter) GetMessageHandlerChain() *base.MessageHandlerChain {
+	return a.messageHandlerChain
 }
 
 // defaultSender sends message via Slack API
