@@ -108,6 +108,30 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 		}
 	}
 
+	// Send reactions if present
+	if msg.RichContent != nil && len(msg.RichContent.Reactions) > 0 {
+		for _, reaction := range msg.RichContent.Reactions {
+			reaction.Channel = channelID
+			if err := a.AddReaction(ctx, reaction); err != nil {
+				a.Logger().Error("Failed to add reaction", "error", err, "reaction", reaction.Name)
+			}
+		}
+	}
+
+	// Send media/attachments if present
+	if msg.RichContent != nil && len(msg.RichContent.Attachments) > 0 {
+		for _, attachment := range msg.RichContent.Attachments {
+			if err := a.SendAttachment(ctx, channelID, threadTS, attachment); err != nil {
+				return fmt.Errorf("failed to send attachment: %w", err)
+			}
+		}
+		// Send text content after attachments
+		if msg.Content != "" {
+			return a.SendToChannel(ctx, channelID, msg.Content, threadTS)
+		}
+		return nil
+	}
+
 	return a.SendToChannel(ctx, channelID, msg.Content, threadTS)
 }
 
@@ -449,5 +473,60 @@ func (a *Adapter) sendToChannelOnce(ctx context.Context, channelID, text, thread
 	}
 
 	a.Logger().Debug("Message sent successfully", "channel", channelID)
+	return nil
+}
+
+// AddReaction adds a reaction to a message
+func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error {
+	if a.config.BotToken == "" {
+		return fmt.Errorf("slack bot token not configured")
+	}
+
+	if reaction.Channel == "" || reaction.Timestamp == "" {
+		return fmt.Errorf("channel and timestamp are required for reaction")
+	}
+
+	payload := map[string]any{
+		"channel": reaction.Channel,
+		"name":    reaction.Name,
+		"ts":      reaction.Timestamp,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://slack.com/api/reactions.add", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.config.BotToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("reaction add failed: %d %s", resp.StatusCode, string(respBody))
+	}
+
+	var slackResp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&slackResp); err != nil {
+		return fmt.Errorf("parse response: %w", err)
+	}
+
+	if !slackResp.OK {
+		return fmt.Errorf("slack API error: %s", slackResp.Error)
+	}
+
+	a.Logger().Debug("Reaction added", "emoji", reaction.Name, "channel", reaction.Channel)
 	return nil
 }
