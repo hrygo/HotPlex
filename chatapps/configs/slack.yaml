@@ -83,12 +83,42 @@ platform: slack
 provider:
   # AI provider type: claude-code, opencode
   type: claude-code
-  
+
   # Model to use: sonnet, haiku, opus, etc.
   default_model: sonnet
-  
+
   # Permission mode: bypass-permissions, ask, etc.
   default_permission_mode: bypass-permissions
+
+# -----------------------------------------------------------------------------
+# Engine Configuration
+# -----------------------------------------------------------------------------
+#
+engine:
+  # Working directory for the AI agent
+  # This is where the agent will operate, read files, and make changes.
+  #
+  # For HotPlex development, use the source code directory.
+  # For other use cases, you can specify a different path.
+  #
+  # TYPE: string (file path)
+  # DEFAULT: /tmp/hotplex-chatapps/slack/<session_id>
+  #
+  # Examples:
+  #   work_dir: /Users/you/HotPlex           # HotPlex source code
+  #   work_dir: /home/user/projects/myapp    # Your project directory
+  #   work_dir: .                            # Current directory (hotplexd startup dir)
+  work_dir: .
+
+  # Execution timeout (how long to wait for AI response)
+  # TYPE: duration
+  # DEFAULT: 30m
+  # timeout: 30m
+
+  # Idle timeout (how long to keep session alive without activity)
+  # TYPE: duration
+  # DEFAULT: 30m
+  # idle_timeout: 30m
 
 # -----------------------------------------------------------------------------
 # Connection Mode

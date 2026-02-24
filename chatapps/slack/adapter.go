@@ -135,6 +135,71 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 	return a.SendToChannel(ctx, channelID, msg.Content, threadTS)
 }
 
+// SendAttachment sends an attachment to a Slack channel
+func (a *Adapter) SendAttachment(ctx context.Context, channelID, threadTS string, attachment base.Attachment) error {
+	// Upload file to Slack using files.upload API
+	// For external URLs, we can use the url parameter
+	// For local files, we would need to read and upload
+
+	payload := map[string]any{
+		"channel": channelID,
+	}
+
+	// If there's a URL, use it directly
+	if attachment.URL != "" {
+		payload["url"] = attachment.URL
+		payload["title"] = attachment.Title
+		if threadTS != "" {
+			payload["thread_ts"] = threadTS
+		}
+		return a.sendFileFromURL(ctx, payload)
+	}
+
+	// For now, just log that we received an attachment request
+	a.Logger().Debug("Attachment received", "type", attachment.Type, "title", attachment.Title)
+	return nil
+}
+
+// sendFileFromURL sends a file from URL to Slack
+func (a *Adapter) sendFileFromURL(ctx context.Context, payload map[string]any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://slack.com/api/files.upload", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.config.BotToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("file upload failed: %d %s", resp.StatusCode, string(respBody))
+	}
+
+	var slackResp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&slackResp); err != nil {
+		return fmt.Errorf("parse response: %w", err)
+	}
+
+	if !slackResp.OK {
+		return fmt.Errorf("slack API error: %s", slackResp.Error)
+	}
+
+	return nil
+}
+
 // extractChannelID extracts channel_id from session or message metadata
 func (a *Adapter) extractChannelID(_ string, msg *base.ChatMessage) string {
 	if msg.Metadata == nil {

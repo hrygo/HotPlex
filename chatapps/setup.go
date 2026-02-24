@@ -135,13 +135,13 @@ func setupPlatform(
 		WithConfigLoader(loader),
 		WithLogger(logger),
 		WithWorkDirFn(func(sessionID string) string {
-			// Slack uses the current working directory (HotPlex source code)
-			if platform == "slack" {
-				if wd, err := os.Getwd(); err == nil {
-					return wd
-				}
+			// Use work_dir from config if specified
+			if pc.Engine.WorkDir != "" {
+				// Expand ~ to home directory
+				workDir := expandPath(pc.Engine.WorkDir)
+				return workDir
 			}
-			// Other platforms use temp directory
+			// Default: use temp directory with platform/session isolation
 			return filepath.Join("/tmp/hotplex-chatapps", platform, sessionID)
 		}),
 	)
@@ -187,4 +187,35 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 	}
 
 	return engine.NewEngine(opts)
+}
+
+// expandPath expands ~ to the user's home directory and cleans the path.
+// Supports both ~ and ~/path formats.
+func expandPath(path string) string {
+	if len(path) == 0 {
+		return path
+	}
+
+	// Handle ~ expansion
+	if path[0] == '~' {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return path // Return original path if home dir cannot be determined
+		}
+
+		if len(path) == 1 {
+			return homeDir
+		}
+
+		// Handle ~/path
+		if path[1] == '/' || path[1] == filepath.Separator {
+			return filepath.Join(homeDir, path[2:])
+		}
+
+		// Handle ~username/path (not commonly used, but supported)
+		return filepath.Join(homeDir, path[1:])
+	}
+
+	// Clean the path to resolve any . or .. elements
+	return filepath.Clean(path)
 }

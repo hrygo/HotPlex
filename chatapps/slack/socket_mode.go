@@ -287,8 +287,6 @@ func (s *SocketModeConnection) handleMessage(data []byte) {
 		} else {
 			s.logger.Warn("events_api with empty payload", "raw_message", string(data))
 		}
-		// Socket Mode uses "events_api" with "payload" field (not "body")
-		s.handleEventsAPI(msg.Payload, msg.EnvelopeID)
 
 	case "event_callback":
 		// Fallback for HTTP webhook compatibility
@@ -347,6 +345,19 @@ func (s *SocketModeConnection) handleEventsAPI(payload json.RawMessage, envelope
 	if len(payload) == 0 {
 		s.logger.Warn("Empty payload in events_api message")
 		return
+	}
+
+	// Send ACK to Slack to confirm receipt of the event
+	// Slack expects a response with the envelope_id within 3 seconds
+	if envelopeID != "" {
+		ack := map[string]any{
+			"envelope_id": envelopeID,
+		}
+		if err := s.Send(ack); err != nil {
+			s.logger.Warn("Failed to send ACK for envelope", "envelope_id", envelopeID, "error", err)
+		} else {
+			s.logger.Debug("Sent ACK for envelope", "envelope_id", envelopeID)
+		}
 	}
 
 	// The payload IS the event_callback structure, pass it directly
