@@ -17,10 +17,9 @@ import (
 
 type Adapter struct {
 	*base.Adapter
-	config        Config
-	webhookPath   string
-	messageParser func(body []byte) (*base.ChatMessage, error)
-	sender        func(ctx context.Context, sessionID string, msg *base.ChatMessage) error
+	config      Config
+	webhookPath string
+	sender      func(ctx context.Context, sessionID string, msg *base.ChatMessage) error
 }
 
 func NewAdapter(config Config, logger *slog.Logger) *Adapter {
@@ -200,10 +199,16 @@ func (a *Adapter) handleMessageCommand(ctx context.Context, interaction Interact
 
 func (a *Adapter) SendToChannel(ctx context.Context, channelID, content string) error {
 	payload := map[string]any{"content": content}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
 
 	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages", channelID)
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bot "+a.config.BotToken)
 
@@ -211,10 +216,13 @@ func (a *Adapter) SendToChannel(ctx context.Context, channelID, content string) 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("send failed with status %d (failed to read body: %v)", resp.StatusCode, err)
+		}
 		return fmt.Errorf("send failed: %d %s", resp.StatusCode, string(respBody))
 	}
 

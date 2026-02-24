@@ -80,7 +80,12 @@ func (a *Adapter) handleEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, _ := io.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		a.Logger().Error("Read body failed", "error", err)
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
 
 	if a.config.SigningSecret != "" {
 		signature := r.Header.Get("X-Slack-Signature")
@@ -164,7 +169,12 @@ func (a *Adapter) handleInteractive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, _ := io.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		a.Logger().Error("Read body failed", "error", err)
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
 	a.Logger().Debug("Interactive payload received", "body", string(body))
 
 	w.WriteHeader(http.StatusOK)
@@ -194,9 +204,15 @@ func (a *Adapter) verifySignature(body []byte, timestamp, signature string) bool
 
 func (a *Adapter) SendToChannel(ctx context.Context, channelID, text string) error {
 	payload := map[string]any{"channel": channelID, "text": text}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", "https://slack.com/api/chat.postMessage", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://slack.com/api/chat.postMessage", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.config.BotToken)
 
@@ -204,10 +220,13 @@ func (a *Adapter) SendToChannel(ctx context.Context, channelID, text string) err
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("send failed with status %d (failed to read body: %v)", resp.StatusCode, err)
+		}
 		return fmt.Errorf("send failed: %d %s", resp.StatusCode, string(respBody))
 	}
 

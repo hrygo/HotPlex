@@ -169,7 +169,7 @@ func (a *Adapter) GetAccessToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		AccessToken string `json:"accessToken"`
