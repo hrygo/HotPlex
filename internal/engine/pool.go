@@ -221,7 +221,8 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 			cmd.Dir = cleaned // Fallback to cleaned path if error
 		}
 	} else {
-		cmd.Dir = cfg.WorkDir
+		// For absolute paths, also clean to resolve . and .. elements
+		cmd.Dir = filepath.Clean(cfg.WorkDir)
 	}
 	if cfg.WorkDir == "." || !filepath.IsAbs(cfg.WorkDir) {
 		if absPath, err := filepath.Abs(cfg.WorkDir); err == nil {

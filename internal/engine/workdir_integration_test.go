@@ -41,7 +41,8 @@ func TestStartSession_WorkDirResolution(t *testing.T) {
 					resolvedDir = cleaned
 				}
 			} else {
-				resolvedDir = cfg.WorkDir
+				// For absolute paths, also clean to resolve . and .. elements
+				resolvedDir = filepath.Clean(cfg.WorkDir)
 			}
 
 			if resolvedDir != tc.expectedDir {
@@ -89,7 +90,8 @@ func TestStartSession_CmdDirAssignment(t *testing.T) {
 					cmd.Dir = cleaned
 				}
 			} else {
-				cmd.Dir = cfg.WorkDir
+				// For absolute paths, also clean to resolve . and .. elements
+				cmd.Dir = filepath.Clean(cfg.WorkDir)
 			}
 
 			if cmd.Dir != tc.wantCmdDir {
@@ -140,6 +142,26 @@ func TestChatAppsWorkDirFunction(t *testing.T) {
 func expandPathFixed(path string) string {
 	if len(path) == 0 {
 		return path
+	}
+
+	// Handle ~ expansion
+	if path[0] == '~' {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return path // Return original path if home dir cannot be determined
+		}
+
+		if len(path) == 1 {
+			return homeDir
+		}
+
+		// Handle ~/path
+		if path[1] == '/' || path[1] == filepath.Separator {
+			return filepath.Join(homeDir, path[2:])
+		}
+
+		// Handle ~username/path (not commonly used, but supported)
+		return filepath.Join(homeDir, path[1:])
 	}
 
 	// Handle special case: "." should be expanded to current working directory
