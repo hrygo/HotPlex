@@ -19,12 +19,14 @@ import (
 
 type Adapter struct {
 	*base.Adapter
-	config          Config
-	eventPath       string
-	interactivePath string
-	sender          *base.SenderWithMutex
-	webhook         *base.WebhookRunner
-	socketMode      *SocketModeConnection
+	config              Config
+	eventPath           string
+	interactivePath     string
+	slashCommandPath    string
+	sender              *base.SenderWithMutex
+	webhook             *base.WebhookRunner
+	socketMode          *SocketModeConnection
+	slashCommandHandler func(cmd SlashCommand)
 }
 
 func NewAdapter(config Config, logger *slog.Logger, opts ...base.AdapterOption) *Adapter {
@@ -34,11 +36,12 @@ func NewAdapter(config Config, logger *slog.Logger, opts ...base.AdapterOption) 
 	}
 
 	a := &Adapter{
-		config:          config,
-		eventPath:       "/events",
-		interactivePath: "/interactive",
-		sender:          base.NewSenderWithMutex(),
-		webhook:         base.NewWebhookRunner(logger),
+		config:           config,
+		eventPath:        "/events",
+		interactivePath:  "/interactive",
+		slashCommandPath: "/slack",
+		sender:           base.NewSenderWithMutex(),
+		webhook:          base.NewWebhookRunner(logger),
 	}
 
 	// Initialize Socket Mode if configured
@@ -61,6 +64,7 @@ func NewAdapter(config Config, logger *slog.Logger, opts ...base.AdapterOption) 
 	// Slack recommends using both Socket Mode and HTTP webhook together
 	handlers[a.eventPath] = a.handleEvent
 	handlers[a.interactivePath] = a.handleInteractive
+	handlers[a.slashCommandPath] = a.handleSlashCommand
 
 	// Build HTTP handler map
 	for path, handler := range handlers {
@@ -594,4 +598,50 @@ func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error
 
 	a.Logger().Debug("Reaction added", "emoji", reaction.Name, "channel", reaction.Channel)
 	return nil
+}
+
+// SlashCommand represents a Slack slash command
+type SlashCommand struct {
+	Command     string
+	Text        string
+	UserID      string
+	ChannelID   string
+	ResponseURL string
+}
+
+// SetSlashCommandHandler sets the handler for slash commands
+func (a *Adapter) SetSlashCommandHandler(fn func(cmd SlashCommand)) {
+	a.slashCommandHandler = fn
+}
+
+// handleSlashCommand processes incoming slash commands
+func (a *Adapter) handleSlashCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		a.Logger().Error("Parse slash command form failed", "error", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	cmd := SlashCommand{
+		Command:     r.FormValue("command"),
+		Text:        r.FormValue("text"),
+		UserID:      r.FormValue("user_id"),
+		ChannelID:   r.FormValue("channel_id"),
+		ResponseURL: r.FormValue("response_url"),
+	}
+
+	a.Logger().Debug("Slash command received", "command", cmd.Command, "text", cmd.Text, "user", cmd.UserID)
+
+	// Acknowledge immediately
+	w.WriteHeader(http.StatusOK)
+
+	// Process in background if handler is set
+	if a.slashCommandHandler != nil {
+		go a.slashCommandHandler(cmd)
+	}
 }
