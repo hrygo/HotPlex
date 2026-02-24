@@ -62,11 +62,21 @@
 #     - app_mention        (when someone @mentions the bot)
 #     - message.channels   (messages in public channels)
 #     - message.groups     (messages in private channels)
-#   Action: "Save Changes" → "Reinstall App" (if needed)
+#     - message.im         (messages in direct messages / DM)
+#   Action: "Save Changes"
 #
-# Step 5: Add Bot to Channel
+# Step 5: Enable Direct Messaging (App Home)
+#   Location: App Home
+#   Action:
+#     - Toggle ON "Messages Tab"
+#     - CHECK "Allow users to send Slash commands and messages from the messages tab"
+#
+# Step 6: Add Bot to Channel
 #   Go to your Slack channel → /invite @your_bot_name
 #   Or: Channel settings → Apps → Add apps
+#
+# Note: After changing scopes or App Home settings, click "Reinstall to Workspace"
+#       at the top of the Slack dashboard.
 #
 # =============================================================================
 # CONFIGURATION REFERENCE
@@ -94,21 +104,24 @@ provider:
 # Engine Configuration
 # -----------------------------------------------------------------------------
 #
-engine:
-  # Working directory for the AI agent
-  # This is where the agent will operate, read files, and make changes.
+  work_dir: .
+
+  # ---------------------------------------------------------------------------
+  # SECURITY: Path Traversal Protection
+  # ---------------------------------------------------------------------------
+  # HotPlex automatically blocks access to sensitive system directories:
+  # - /etc/*, /var/*, /usr/*, /bin, /sbin - System directories
+  # - /root, /proc/*, /sys/* - Protected filesystems
   #
-  # For HotPlex development, use the source code directory.
-  # For other use cases, you can specify a different path.
-  #
-  # TYPE: string (file path)
-  # DEFAULT: /tmp/hotplex-chatapps/slack/<session_id>
+  # The '~' symbol is automatically expanded to your home directory.
+  # Relative paths like './project' are resolved to absolute paths.
+  # Path traversal attempts (e.g., '../etc/passwd') are blocked.
   #
   # Examples:
-  #   work_dir: /Users/you/HotPlex           # HotPlex source code
-  #   work_dir: /home/user/projects/myapp    # Your project directory
-  #   work_dir: .                            # Current directory (hotplexd startup dir)
-  work_dir: .
+  #   work_dir: ~/hotplex-workspace     # Expands to /Users/you/hotplex-workspace
+  #   work_dir: ./my-project            # Resolves to current directory
+  #   work_dir: /tmp/hotplex            # Absolute path (allowed)
+  #   work_dir: /etc/passwd             # ❌ BLOCKED - sensitive path
 
   # Execution timeout (how long to wait for AI response)
   # TYPE: duration
@@ -193,6 +206,27 @@ task_instructions: |
   You are a helpful AI assistant. Execute user commands and provide clear feedback.
   Always prioritize safety: confirm destructive operations before execution.
 
+# -----------------------------------------------------------------------------
+# SYSTEM PROMPT INJECTION
+# -----------------------------------------------------------------------------
+# The system_prompt above is automatically injected into every AI request.
+#
+# How it works:
+#   1. This YAML file is loaded at startup
+#   2. ConfigLoader.GetSystemPrompt("slack") retrieves the prompt
+#   3. EngineMessageHandler combines it with task_instructions
+#   4. The full prompt is sent to Claude Code via --prompt flag
+#
+# Customization:
+#   - Modify the prompt above to match your team's tone
+#   - Add company-specific guidelines
+#   - Define safety boundaries for your use case
+#
+# Best Practices:
+#   1. Keep it concise (under 500 words)
+#   2. Be specific about platform rules
+#   3. Include safety constraints
+#   4. Test changes in development first
 # -----------------------------------------------------------------------------
 # Feature Configuration
 # -----------------------------------------------------------------------------
@@ -341,6 +375,24 @@ security:
   # DEFAULT: true
   verify_signature: true
 
+# -----------------------------------------------------------------------------
+# SECURITY: ACKNOWLEDGMENT RETRY MECHANISM (Socket Mode)
+# -----------------------------------------------------------------------------
+# HotPlex automatically implements ACK retry for Socket Mode events.
+# Slack requires acknowledgment within 3 seconds of receiving an event.
+#
+# How it works:
+#   - When an event is received, HotPlex sends an ACK with envelope_id
+#   - If the send fails, it retries with exponential backoff
+#   - Maximum 3 retries: 1s → 2s → 4s delays
+#   - Total timeout: ~8 seconds
+#
+# Configuration:
+#   - max_retries: 3 (default)
+#   - base_delay_ms: 1000 (default)
+#   - max_delay_ms: 4000 (default)
+#
+# No configuration needed - this is handled automatically by HotPlex.
 # =============================================================================
 # COMPLETE EXAMPLE CONFIGURATIONS
 # =============================================================================
@@ -412,5 +464,41 @@ security:
 #   1. Verify SLACK_APP_TOKEN is set (starts with xapp-)
 #   2. Check "Enable Socket Mode" is checked in Slack dashboard
 #   3. Firewall not blocking wss://wss.slack.com
+#
+# Issue: "System prompt not taking effect"
+# Solution:
+#   1. Verify slack.yaml syntax is valid (use `|` for multi-line strings)
+#   2. Restart hotplexd to reload configuration
+#   3. Check logs: "Loaded platform config platform=slack"
+#   4. Verify system_prompt is not empty
+#
+# Issue: "Path is blocked by security check"
+# Solution:
+#   1. Use work_dir to specify a safe working directory
+#   2. Avoid absolute paths to system directories
+#   3. Use `~` for home directory (automatically expanded)
+#   4. Check logs for "Path blocked by security check" warnings
+#
+# =============================================================================
+# EXAMPLE ENVIRONMENT FILES
+# =============================================================================
+#
+# .env.development (Socket Mode - Local)
+# ----------------------------------------
+# CHATAPPS_ENABLED=true
+# SLACK_MODE=socket
+# SLACK_BOT_TOKEN=xoxb-your-bot-token
+# SLACK_APP_TOKEN=xapp-your-app-token
+# SLACK_SERVER_ADDR=:8080
+# LOG_LEVEL=debug
+#
+# .env.production (HTTP Mode - Production)
+# ----------------------------------------
+# CHATAPPS_ENABLED=true
+# SLACK_MODE=http
+# SLACK_BOT_TOKEN=xoxb-your-bot-token
+# SLACK_SIGNING_SECRET=your-signing-secret
+# SLACK_SERVER_ADDR=:8080
+# LOG_LEVEL=info
 #
 # =============================================================================
