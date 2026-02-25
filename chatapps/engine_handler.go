@@ -175,11 +175,17 @@ func (c *StreamCallback) handleThinking(_ any) error {
 }
 
 func (c *StreamCallback) handleToolUse(data any) error {
+	c.logger.Debug("[TOOL] handleToolUse called", "data_type", fmt.Sprintf("%T", data))
+	
 	toolName := string(provider.EventTypeToolUse)
 	input := ""
 	truncated := false
 
 	if m, ok := data.(*event.EventWithMeta); ok {
+		c.logger.Debug("[TOOL] handleToolUse EventWithMeta", 
+			"event_data", m.EventData,
+			"meta_tool_name", m.Meta.ToolName,
+			"meta_input_summary", m.Meta.InputSummary)
 		if m.Meta != nil && m.Meta.ToolName != "" {
 			toolName = m.Meta.ToolName
 		}
@@ -191,16 +197,24 @@ func (c *StreamCallback) handleToolUse(data any) error {
 		}
 	}
 
+	c.logger.Debug("[TOOL] handleToolUse sending", "tool_name", toolName, "input_len", len(input))
 	blocks := c.blockBuilder.BuildToolUseBlock(toolName, input, truncated)
 	return c.sendBlockMessage(toolName, blocks, false)
 }
 
 func (c *StreamCallback) handleToolResult(data any) error {
+	c.logger.Debug("[TOOL] handleToolResult called", "data_type", fmt.Sprintf("%T", data))
+	
 	success := true
 	var durationMs int64
 	output := ""
 
 	if m, ok := data.(*event.EventWithMeta); ok {
+		c.logger.Debug("[TOOL] handleToolResult EventWithMeta",
+			"event_data", m.EventData,
+			"meta_tool_name", m.Meta.ToolName,
+			"meta_duration_ms", m.Meta.DurationMs,
+			"meta_status", m.Meta.Status)
 		if m.Meta != nil {
 			if m.Meta.Status == "error" {
 				success = false
@@ -215,6 +229,7 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		}
 	}
 
+	c.logger.Debug("[TOOL] handleToolResult sending", "success", success, "duration_ms", durationMs, "output_len", len(output))
 	blocks := c.blockBuilder.BuildToolResultBlock(success, durationMs, output, false)
 	return c.sendBlockMessage(string(provider.EventTypeToolResult), blocks, false)
 }

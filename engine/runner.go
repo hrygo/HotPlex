@@ -475,6 +475,15 @@ func (r *Engine) dispatchNormalizedCallback(pevt *provider.ProviderEvent, callba
 
 	totalDur := time.Since(stats.StartTime).Milliseconds()
 
+	// Debug: Log tool events
+	if pevt.Type == provider.EventTypeToolUse || pevt.Type == provider.EventTypeToolResult {
+		r.logger.Debug("[RUNNER] Dispatching tool event", 
+			"type", pevt.Type, 
+			"tool_name", pevt.ToolName, 
+			"tool_id", pevt.ToolID,
+			"status", pevt.Status)
+	}
+
 	switch pevt.Type {
 	case provider.EventTypeThinking:
 		stats.StartThinking()

@@ -10,6 +10,12 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 )
 
+// Buffer safety limits to prevent OOM
+const (
+	maxBufferMsgs  = 50   // Maximum messages in buffer
+	maxBufferBytes = 4000 // Maximum total content bytes (Slack single message limit)
+)
+
 // EventConfig defines aggregation behavior for specific event types
 type EventConfig struct {
 	Aggregate    bool // Whether to aggregate messages of this type
@@ -20,12 +26,12 @@ type EventConfig struct {
 
 // defaultEventConfig defines default aggregation behavior for each event type
 var defaultEventConfig = map[string]EventConfig{
-	"thinking":      {Aggregate: true, SameTypeOnly: false, Immediate: false}, // Aggregate, will be replaced by content
-	"tool_use":      {Aggregate: true, SameTypeOnly: true, Immediate: false},  // Aggregate same type only
-	"tool_result":   {Aggregate: true, SameTypeOnly: true, Immediate: false},  // Aggregate same type only
-	"answer":        {Aggregate: true, UseUpdate: true, Immediate: false},     // Stream with chat.update
-	"error":         {Aggregate: false, Immediate: true},                      // Show immediately
-	"session_stats": {Aggregate: false, Immediate: true},                      // Show immediately
+	"thinking":      {Aggregate: false, Immediate: true},                     // Show immediately, will be replaced by content
+	"tool_use":      {Aggregate: true, SameTypeOnly: true, Immediate: false}, // Aggregate same type only
+	"tool_result":   {Aggregate: true, SameTypeOnly: true, Immediate: false}, // Aggregate same type only
+	"answer":        {Aggregate: true, UseUpdate: true, Immediate: false},    // Stream with chat.update
+	"error":         {Aggregate: false, Immediate: true},                     // Show immediately
+	"session_stats": {Aggregate: false, Immediate: true},                     // Show immediately
 }
 
 // MessageAggregatorProcessor aggregates multiple rapid messages into one
@@ -39,6 +45,8 @@ type MessageAggregatorProcessor struct {
 	// Configuration
 	window     time.Duration // Time window for aggregation
 	minContent int           // Minimum content difference to trigger send
+	maxMsgs    int           // Maximum messages in buffer (default: maxBufferMsgs)
+	maxBytes   int           // Maximum total bytes in buffer (default: maxBufferBytes)
 
 	// Sender for flushing aggregated messages
 	sender AggregatedMessageSender
@@ -51,18 +59,21 @@ type AggregatedMessageSender interface {
 
 // messageBuffer holds buffered messages for aggregation
 type messageBuffer struct {
-	messages  []*base.ChatMessage
-	createdAt time.Time
-	timer     *time.Timer
-	done      chan *base.ChatMessage
-	eventType string // Event type for same-type aggregation
-	messageTS string // Timestamp for chat.update (first message)
+	messages   []*base.ChatMessage
+	createdAt  time.Time
+	timer      *time.Timer
+	done       chan *base.ChatMessage
+	eventType  string // Event type for same-type aggregation
+	messageTS  string // Timestamp for chat.update (first message)
+	totalBytes int    // Total bytes in buffer for limit checking
 }
 
 // MessageAggregatorProcessorOptions configures the aggregator
 type MessageAggregatorProcessorOptions struct {
 	Window     time.Duration // Time window to wait for more messages
 	MinContent int           // Minimum characters before sending immediately
+	MaxMsgs    int           // Maximum messages in buffer (default: maxBufferMsgs)
+	MaxBytes   int           // Maximum total bytes in buffer (default: maxBufferBytes)
 }
 
 // NewMessageAggregatorProcessor creates a new MessageAggregatorProcessor
@@ -78,12 +89,20 @@ func NewMessageAggregatorProcessor(logger *slog.Logger, opts MessageAggregatorPr
 	if opts.MinContent == 0 {
 		opts.MinContent = 200
 	}
+	if opts.MaxMsgs == 0 {
+		opts.MaxMsgs = maxBufferMsgs
+	}
+	if opts.MaxBytes == 0 {
+		opts.MaxBytes = maxBufferBytes
+	}
 
 	return &MessageAggregatorProcessor{
 		logger:     logger,
 		buffers:    make(map[string]*messageBuffer),
 		window:     opts.Window,
 		minContent: opts.MinContent,
+		maxMsgs:    opts.MaxMsgs,
+		maxBytes:   opts.MaxBytes,
 	}
 }
 
@@ -110,6 +129,8 @@ func (p *MessageAggregatorProcessor) getEventConfig(eventType string) EventConfi
 		return config
 	}
 	// Default config for unknown event types: aggregate normally
+	// Log unknown event types for debugging
+	p.logger.Debug("Unknown event type, using default aggregation", "event_type", eventType)
 	return EventConfig{Aggregate: true}
 }
 
@@ -168,6 +189,7 @@ func (p *MessageAggregatorProcessor) Process(ctx context.Context, msg *base.Chat
 }
 
 // bufferMessage adds message to buffer and returns nil (will be sent later)
+// Implements buffer safety limits with FIFO overflow strategy
 func (p *MessageAggregatorProcessor) bufferMessage(ctx context.Context, msg *base.ChatMessage, eventConfig EventConfig, eventType string) (*base.ChatMessage, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -181,11 +203,12 @@ func (p *MessageAggregatorProcessor) bufferMessage(ctx context.Context, msg *bas
 	buf, exists := p.buffers[sessionKey]
 	if !exists {
 		buf = &messageBuffer{
-			messages:  make([]*base.ChatMessage, 0, 10),
-			createdAt: time.Now(),
-			done:      make(chan *base.ChatMessage, 1),
-			eventType: eventType,
-			messageTS: "", // Will be set on first message send
+			messages:   make([]*base.ChatMessage, 0, 10),
+			createdAt:  time.Now(),
+			done:       make(chan *base.ChatMessage, 1),
+			eventType:  eventType,
+			messageTS:  "", // Will be set on first message send
+			totalBytes: 0,
 		}
 
 		// Set timer to flush buffer after window
@@ -196,12 +219,113 @@ func (p *MessageAggregatorProcessor) bufferMessage(ctx context.Context, msg *bas
 		p.buffers[sessionKey] = buf
 	}
 
+	// Check buffer limits before adding new message
+	newMsgBytes := len(msg.Content)
+
+	// Check message count limit
+	if len(buf.messages) >= p.maxMsgs {
+		p.logger.Warn("Buffer overflow (message count), forcing flush",
+			"session_key", sessionKey,
+			"current_msgs", len(buf.messages),
+			"max_msgs", p.maxMsgs)
+
+		// Record dropped metrics for overflow
+		for _, droppedMsg := range buf.messages {
+			droppedEventType, _ := droppedMsg.Metadata["event_type"].(string)
+			if droppedEventType == "" {
+				droppedEventType = "unknown"
+			}
+			MessagesDroppedTotal.WithLabelValues(droppedEventType, msg.Platform, "overflow").Inc()
+		}
+
+		// Force flush current buffer before adding new message
+		p.mu.Unlock()
+		p.flushBufferByTimer(sessionKey)
+		p.mu.Lock()
+
+		// Re-get buffer (may have been recreated)
+		buf = p.buffers[sessionKey]
+		if buf == nil {
+			// Buffer was cleared, create new one
+			buf = &messageBuffer{
+				messages:   make([]*base.ChatMessage, 0, 10),
+				createdAt:  time.Now(),
+				done:       make(chan *base.ChatMessage, 1),
+				eventType:  eventType,
+				messageTS:  "",
+				totalBytes: 0,
+			}
+			buf.timer = time.AfterFunc(p.window, func() {
+				p.flushBufferByTimer(sessionKey)
+			})
+			p.buffers[sessionKey] = buf
+		}
+	}
+
+	// Check byte limit
+	if buf.totalBytes+newMsgBytes > p.maxBytes {
+		p.logger.Warn("Buffer overflow (bytes), forcing flush",
+			"session_key", sessionKey,
+			"current_bytes", buf.totalBytes,
+			"new_bytes", newMsgBytes,
+			"max_bytes", p.maxBytes)
+
+		// Record dropped metrics for overflow
+		for _, droppedMsg := range buf.messages {
+			droppedEventType, _ := droppedMsg.Metadata["event_type"].(string)
+			if droppedEventType == "" {
+				droppedEventType = "unknown"
+			}
+			MessagesDroppedTotal.WithLabelValues(droppedEventType, msg.Platform, "overflow").Inc()
+		}
+
+		// Force flush current buffer before adding new message
+		p.mu.Unlock()
+		p.flushBufferByTimer(sessionKey)
+		p.mu.Lock()
+
+		// Re-get buffer (may have been recreated)
+		buf = p.buffers[sessionKey]
+		if buf == nil {
+			// Buffer was cleared, create new one
+			buf = &messageBuffer{
+				messages:   make([]*base.ChatMessage, 0, 10),
+				createdAt:  time.Now(),
+				done:       make(chan *base.ChatMessage, 1),
+				eventType:  eventType,
+				messageTS:  "",
+				totalBytes: 0,
+			}
+			buf.timer = time.AfterFunc(p.window, func() {
+				p.flushBufferByTimer(sessionKey)
+			})
+			p.buffers[sessionKey] = buf
+		}
+	}
+
+	// Capture messageTS from first message if use_update is enabled
+	useUpdate, _ := msg.Metadata["use_update"].(bool)
+	if useUpdate && buf.messageTS == "" {
+		// Extract ts from metadata if available (passed from adapter)
+		if ts, ok := msg.Metadata["message_ts"].(string); ok && ts != "" {
+			buf.messageTS = ts
+			p.logger.Debug("Captured message_ts for chat.update", "session_key", sessionKey, "message_ts", ts)
+		}
+	}
+
+	// Add message to buffer
 	buf.messages = append(buf.messages, msg)
+	buf.totalBytes += newMsgBytes
+
+	// Record metrics
+	MessagesAggregatedTotal.WithLabelValues(eventType, msg.Platform).Inc()
+	BufferSizeGauge.WithLabelValues(msg.Platform).Set(float64(len(buf.messages)))
 
 	p.logger.Debug("Message buffered for aggregation",
 		"session_key", sessionKey,
 		"buffer_size", len(buf.messages),
-		"content_len", len(msg.Content))
+		"content_len", newMsgBytes,
+		"total_bytes", buf.totalBytes)
 
 	// Return nil to indicate message is buffered (not sent yet)
 	return nil, nil
@@ -228,6 +352,10 @@ func (p *MessageAggregatorProcessor) flushBufferByTimer(sessionKey string) {
 		}
 	}
 
+	// Calculate buffer duration before removing
+	duration := time.Since(buf.createdAt)
+	msgCount := len(buf.messages)
+
 	// Remove buffer
 	delete(p.buffers, sessionKey)
 	p.mu.Unlock()
@@ -240,12 +368,15 @@ func (p *MessageAggregatorProcessor) flushBufferByTimer(sessionKey string) {
 
 	// Record metrics
 	MessagesFlushedTotal.WithLabelValues(eventType, platform, "timer").Inc()
+	BufferDurationHistogram.WithLabelValues(platform).Observe(duration.Seconds())
+	MessageSizeHistogram.WithLabelValues(eventType, platform).Observe(float64(len(aggregated.Content)))
+	BufferSizeGauge.WithLabelValues(platform).Set(0)
 
 	// Send via sender if available
 	if sender != nil {
 		p.logger.Info("Flushing aggregated message via sender",
 			"session_key", sessionKey,
-			"messages_count", len(buf.messages),
+			"messages_count", msgCount,
 			"content_len", len(aggregated.Content))
 
 		if err := sender.SendAggregatedMessage(context.Background(), aggregated); err != nil {
@@ -256,7 +387,7 @@ func (p *MessageAggregatorProcessor) flushBufferByTimer(sessionKey string) {
 	} else {
 		p.logger.Warn("No sender configured, aggregated message dropped",
 			"session_key", sessionKey,
-			"messages_count", len(buf.messages))
+			"messages_count", msgCount)
 	}
 }
 
@@ -287,8 +418,13 @@ func (p *MessageAggregatorProcessor) flushBuffer(finalMsg *base.ChatMessage) (*b
 		}
 	}
 
+	// Calculate buffer duration before removing
+	duration := time.Since(buf.createdAt)
+	msgCount := len(buf.messages)
+
 	// Add final message
 	buf.messages = append(buf.messages, finalMsg)
+	buf.totalBytes += len(finalMsg.Content)
 
 	// Remove buffer
 	delete(p.buffers, sessionKey)
@@ -299,11 +435,14 @@ func (p *MessageAggregatorProcessor) flushBuffer(finalMsg *base.ChatMessage) (*b
 
 	p.logger.Debug("Buffer flushed",
 		"session_key", sessionKey,
-		"messages_count", len(buf.messages),
+		"messages_count", msgCount,
 		"aggregated_len", len(aggregated.Content))
 
 	// Record metrics
 	MessagesFlushedTotal.WithLabelValues(eventType, platform, "final").Inc()
+	BufferDurationHistogram.WithLabelValues(platform).Observe(duration.Seconds())
+	MessageSizeHistogram.WithLabelValues(eventType, platform).Observe(float64(len(aggregated.Content)))
+	BufferSizeGauge.WithLabelValues(platform).Set(0)
 
 	return aggregated, nil
 }
@@ -419,6 +558,14 @@ func (p *MessageAggregatorProcessor) Stop() {
 	for _, buf := range p.buffers {
 		if buf.timer != nil {
 			buf.timer.Stop()
+		}
+		// Record dropped messages for any remaining buffered messages
+		for _, msg := range buf.messages {
+			eventType, _ := msg.Metadata["event_type"].(string)
+			if eventType == "" {
+				eventType = "unknown"
+			}
+			MessagesDroppedTotal.WithLabelValues(eventType, msg.Platform, "stop").Inc()
 		}
 	}
 

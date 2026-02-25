@@ -149,6 +149,15 @@ func (p *ClaudeCodeProvider) BuildInputMessage(prompt string, taskInstructions s
 
 // ParseEvent parses a Claude Code stream-json line into a ProviderEvent.
 func (p *ClaudeCodeProvider) ParseEvent(line string) (*ProviderEvent, error) {
+	// Debug: Log raw event for tool-related events
+	if strings.Contains(line, "tool") {
+		lineLen := len(line)
+		if lineLen > 500 {
+			lineLen = 500
+		}
+		p.logger.Debug("[PROVIDER] Raw tool event from CLI", "line", line[:lineLen])
+	}
+	
 	var msg StreamMessage
 	if err := json.Unmarshal([]byte(line), &msg); err != nil {
 		// Not valid JSON, return as raw content
@@ -202,6 +211,7 @@ func (p *ClaudeCodeProvider) ParseEvent(line string) (*ProviderEvent, error) {
 		event.Type = EventTypeToolUse
 		event.ToolName = msg.Name
 		event.Status = "running"
+		p.logger.Debug("[PROVIDER] Parsed tool_use", "name", msg.Name, "has_blocks", len(msg.GetContentBlocks()) > 0)
 		for _, block := range msg.GetContentBlocks() {
 			if block.Type == "tool_use" {
 				event.ToolID = block.ID
@@ -214,6 +224,7 @@ func (p *ClaudeCodeProvider) ParseEvent(line string) (*ProviderEvent, error) {
 		event.Type = EventTypeToolResult
 		event.Status = "success"
 		event.Content = msg.Output
+		p.logger.Debug("[PROVIDER] Parsed tool_result", "output_len", len(msg.Output), "has_blocks", len(msg.GetContentBlocks()) > 0)
 		for _, block := range msg.GetContentBlocks() {
 			if block.Type == "tool_result" {
 				event.ToolID = block.GetUnifiedToolID()

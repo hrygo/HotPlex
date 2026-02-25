@@ -895,10 +895,17 @@ func (a *Adapter) handleClearCommand(cmd SlashCommand) error {
 
 	// Send /clear command to Claude Code via stdin
 	// This clears the conversation context
-	// Use simplified format for slash command
+	// IMPORTANT: Must use the correct format with nested "message" object
+	// Claude Code CLI expects: {"type":"user","message":{"role":"user","content":[...]}}
+	// The error "R.message.role" indicates the message object is required
 	clearCmd := map[string]any{
-		"type":    "user",
-		"content": "/clear",
+		"type": "user",
+		"message": map[string]any{
+			"role": "user",
+			"content": []map[string]any{
+				{"type": "text", "text": "/clear"},
+			},
+		},
 	}
 
 	if err := sess.WriteInput(clearCmd); err != nil {
