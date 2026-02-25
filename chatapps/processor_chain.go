@@ -110,14 +110,16 @@ type ProcessorOrder int
 const (
 	// OrderRateLimit should run first to prevent abuse
 	OrderRateLimit ProcessorOrder = 10
+	// OrderThread manages thread_ts caching for message chunking
+	OrderThread ProcessorOrder = 15
 	// OrderAggregation groups messages together
 	OrderAggregation ProcessorOrder = 20
 	// OrderRichContent processes reactions, attachments, blocks
 	OrderRichContent ProcessorOrder = 30
 	// OrderFormatConversion converts markdown to platform-specific format
 	OrderFormatConversion ProcessorOrder = 40
-	// OrderEnrichment adds final metadata/enrichment
-	OrderEnrichment ProcessorOrder = 50
+	// OrderChunk splits long messages for Slack API limits
+	OrderChunk ProcessorOrder = 50
 )
 
 // NewDefaultProcessorChain creates a default processor chain with all standard processors
@@ -126,6 +128,10 @@ func NewDefaultProcessorChain(logger *slog.Logger) *ProcessorChain {
 		MinInterval: 100 * time.Millisecond,
 		MaxBurst:    5,
 		BurstWindow: time.Second,
+	})
+
+	thread := NewThreadProcessor(logger, ThreadProcessorOptions{
+		TTL: 30 * time.Minute,
 	})
 
 	aggregator := NewMessageAggregatorProcessor(logger, MessageAggregatorProcessorOptions{
@@ -137,10 +143,16 @@ func NewDefaultProcessorChain(logger *slog.Logger) *ProcessorChain {
 
 	formatConv := NewFormatConversionProcessor(logger)
 
+	chunk := NewChunkProcessor(logger, ChunkProcessorOptions{
+		MaxChars: 4000,
+	})
+
 	return NewProcessorChain(
 		rateLimit,
+		thread,
 		aggregator,
 		richContent,
 		formatConv,
+		chunk,
 	)
 }

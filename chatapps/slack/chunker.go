@@ -67,7 +67,7 @@ func chunkMessage(text string, limit int) []string {
 
 // chunkMessageMarkdown splits a markdown message into chunks,
 // keeping code blocks together as much as possible.
-func chunkMessageMarkdown(text string, limit int) []string {
+func ChunkMessageMarkdown(text string, limit int) []string {
 	if text == "" || utf8.RuneCountInString(text) <= limit {
 		return []string{text}
 	}

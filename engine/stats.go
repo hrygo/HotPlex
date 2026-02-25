@@ -49,24 +49,39 @@ func (s *SessionStats) RecordToolUse(toolName, toolID string) {
 }
 
 // RecordToolResult records the end of a tool call.
+// If RecordToolUse was not called (e.g., Claude Code didn't send tool_use event),
+// this will record a minimal duration (1ms) to indicate the tool completed.
 func (s *SessionStats) RecordToolResult() (durationMs int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.ToolCallCount++
+
 	if !s.currentToolStart.IsZero() {
+		// Normal case: tool_use was received, calculate actual duration
 		duration := time.Since(s.currentToolStart)
 		durationMs = duration.Milliseconds()
 		s.ToolDurationMs += durationMs
-		s.ToolCallCount++
-		if s.currentToolName != "" {
-			if s.ToolsUsed == nil {
-				s.ToolsUsed = make(map[string]bool)
-			}
-			s.ToolsUsed[s.currentToolName] = true
-		}
-		s.currentToolStart = time.Time{}
-		s.currentToolName = ""
-		s.currentToolID = ""
+	} else {
+		// Missed tool_use event: record minimal duration (1ms)
+		// This happens when Claude Code CLI doesn't send tool_use events
+		durationMs = 1
+		s.ToolDurationMs += durationMs
 	}
+
+	// Record tool name if available
+	if s.currentToolName != "" {
+		if s.ToolsUsed == nil {
+			s.ToolsUsed = make(map[string]bool)
+		}
+		s.ToolsUsed[s.currentToolName] = true
+	}
+
+	// Reset current tool tracking
+	s.currentToolStart = time.Time{}
+	s.currentToolName = ""
+	s.currentToolID = ""
+
 	return durationMs
 }
 

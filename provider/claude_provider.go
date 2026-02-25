@@ -69,6 +69,7 @@ func (p *ClaudeCodeProvider) BuildCLIArgs(providerSessionID string, opts *Provid
 		"--verbose",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
+		"--include-partial-messages", // Enable streaming of partial content (thinking, etc.)
 	}
 
 	// Session management
@@ -200,6 +201,10 @@ func (p *ClaudeCodeProvider) ParseEvent(line string) (*ProviderEvent, error) {
 
 	case "thinking", "status":
 		event.Type = EventTypeThinking
+		p.logger.Info("[PROVIDER] Received thinking event from CLI",
+			"has_content", len(msg.Content) > 0,
+			"status", msg.Status,
+			"subtype", msg.Subtype)
 		// Check both msg.Content (direct) and msg.Message.Content (nested)
 		allBlocks := msg.GetContentBlocks()
 		p.logger.Debug("[PROVIDER] Raw thinking event",
@@ -254,17 +259,44 @@ func (p *ClaudeCodeProvider) ParseEvent(line string) (*ProviderEvent, error) {
 		event.Type = EventTypeToolResult
 		event.Status = "success"
 		event.Content = msg.Output
-		p.logger.Debug("[PROVIDER] Parsed tool_result", "output_len", len(msg.Output), "has_blocks", len(msg.GetContentBlocks()) > 0)
+		p.logger.Debug("[PROVIDER] Parsed tool_result",
+			"output_len", len(msg.Output),
+			"has_blocks", len(msg.GetContentBlocks()) > 0,
+			"name", msg.Name) // Check if name is in the message itself
+
+		// Extract tool info from content blocks
 		for _, block := range msg.GetContentBlocks() {
+			p.logger.Debug("[PROVIDER] tool_result block",
+				"type", block.Type,
+				"name", block.Name,
+				"id", block.ID)
 			if block.Type == "tool_result" {
 				event.ToolID = block.GetUnifiedToolID()
-				event.ToolName = block.Name
+				if block.Name != "" {
+					event.ToolName = block.Name
+				}
 				event.IsError = block.IsError
 				if event.IsError {
 					event.Status = "error"
 				}
 				break
 			}
+		}
+
+		// Fallback: use msg.Name if block didn't have it
+		if event.ToolName == "" && msg.Name != "" {
+			event.ToolName = msg.Name
+			p.logger.Debug("[PROVIDER] Using msg.Name as tool_name", "name", msg.Name)
+		}
+
+		// Final fallback: try to extract tool name from content
+		if event.ToolName == "" && event.Content != "" {
+			// Try to detect tool type from content
+			content := event.Content
+			if len(content) > 100 {
+				content = content[:100]
+			}
+			p.logger.Debug("[PROVIDER] Could not extract tool_name", "content_preview", content)
 		}
 
 	case "assistant", "message", "content", "text", "delta":

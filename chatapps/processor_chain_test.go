@@ -79,18 +79,24 @@ func TestDefaultProcessorChain_Creation(t *testing.T) {
 		t.Fatal("NewDefaultProcessorChain returned nil")
 	}
 
-	if len(chain.processors) != 4 {
-		t.Errorf("Expected 4 processors, got %d", len(chain.processors))
+	// Now we have 6 processors: rateLimit, thread, aggregator, richContent, formatConv, chunk
+	if len(chain.processors) != 6 {
+		t.Errorf("Expected 6 processors, got %d", len(chain.processors))
 	}
 
 	expectedOrders := []ProcessorOrder{
 		OrderRateLimit,
+		OrderThread,
 		OrderAggregation,
 		OrderRichContent,
 		OrderFormatConversion,
+		OrderChunk,
 	}
 
 	for i, processor := range chain.processors {
+		if i >= len(expectedOrders) {
+			break
+		}
 		if processor.Order() != int(expectedOrders[i]) {
 			t.Errorf("Processor %d order mismatch: got %d, expected %d",
 				i, processor.Order(), int(expectedOrders[i]))

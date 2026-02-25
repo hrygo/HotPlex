@@ -44,7 +44,7 @@ func (a *Adapter) SendMessageWithOptions(ctx context.Context, sessionID string, 
 func (a *Adapter) sendWithChunking(ctx context.Context, channelID, text, threadTS string, isMarkdown bool) error {
 	var chunks []string
 	if isMarkdown {
-		chunks = chunkMessageMarkdown(text, SlackTextLimit)
+		chunks = ChunkMessageMarkdown(text, SlackTextLimit)
 	} else {
 		chunks = chunkMessage(text, SlackTextLimit)
 	}
