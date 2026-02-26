@@ -71,7 +71,7 @@
       <polygon points="75,55 95,50 85,65" fill="#58A6FF" class="fox-eye" />
       <polygon points="65,55 45,50 55,65" fill="#58A6FF" class="fox-eye" />
       
-      <circle cx="70" cy="120" r="5" fill="#E6EDF3" />
+      <circle cx="70" cy="120" r="4.5" fill="#0D1117" />
     </g>
   </g>
 
