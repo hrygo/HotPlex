@@ -39,6 +39,9 @@ RELEASE_NOTES.md
 release_notes_*.txt
 
 
+# Worktrees
+.worktrees/
+
 # Generated PNG assets (use svg2png.sh to regenerate)
 docs/images/png/
 

@@ -51,16 +51,16 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 	emitter := NewProgressEmitter(e.Command(), callback, steps)
 
 	// Step 1: Find session (10%)
-	emitter.Running(0)
-	emitter.Emit("Resetting Context")
+	_ = emitter.Running(0)
+	_ = emitter.Emit("Resetting Context")
 
 	sessionID := req.SessionID
 	var providerSessionID string
 
 	sess, exists := e.engine.GetSession(sessionID)
 	if !exists {
-		emitter.Error(0, "No active session found")
-		emitter.Emit("Reset Failed")
+		_ = emitter.Error(0, "No active session found")
+		_ = emitter.Emit("Reset Failed")
 		return &Result{
 			Success: false,
 			Message: "No active session found",
@@ -68,47 +68,47 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 	}
 	providerSessionID = sess.ProviderSessionID
 
-	emitter.Success(0, "Session located")
-	emitter.Emit("Resetting Context")
+	_ = emitter.Success(0, "Session located")
+	_ = emitter.Emit("Resetting Context")
 
 	// Step 2: Delete Claude Code session file (40%)
-	emitter.Running(1)
-	emitter.Emit("Resetting Context")
+	_ = emitter.Running(1)
+	_ = emitter.Emit("Resetting Context")
 
 	deletedCount := e.deleteClaudeCodeSessionFile(providerSessionID)
-	emitter.Success(1, fmt.Sprintf("Deleted %d file(s)", deletedCount))
-	emitter.Emit("Resetting Context")
+	_ = emitter.Success(1, fmt.Sprintf("Deleted %d file(s)", deletedCount))
+	_ = emitter.Emit("Resetting Context")
 
 	// Step 3: Delete HotPlex marker (60%)
-	emitter.Running(2)
-	emitter.Emit("Resetting Context")
+	_ = emitter.Running(2)
+	_ = emitter.Emit("Resetting Context")
 
 	markerDeleted := e.deleteHotPlexMarker(providerSessionID)
 	if markerDeleted {
-		emitter.Success(2, "Marker deleted")
+		_ = emitter.Success(2, "Marker deleted")
 	} else {
-		emitter.Success(2, "Marker cleanup done")
+		_ = emitter.Success(2, "Marker cleanup done")
 	}
-	emitter.Emit("Resetting Context")
+	_ = emitter.Emit("Resetting Context")
 
 	// Step 4: Terminate session (80%)
-	emitter.Running(3)
-	emitter.Emit("Resetting Context")
+	_ = emitter.Running(3)
+	_ = emitter.Emit("Resetting Context")
 
 	if err := e.engine.StopSession(sessionID, "user_requested_reset"); err != nil {
-		emitter.Error(3, fmt.Sprintf("Failed: %v", err))
-		emitter.Emit("Reset Failed")
+		_ = emitter.Error(3, fmt.Sprintf("Failed: %v", err))
+		_ = emitter.Emit("Reset Failed")
 		return &Result{
 			Success: false,
 			Message: fmt.Sprintf("Failed to terminate session: %v", err),
 		}, nil
 	}
 
-	emitter.Success(3, "Process terminated")
-	emitter.Emit("Resetting Context")
+	_ = emitter.Success(3, "Process terminated")
+	_ = emitter.Emit("Resetting Context")
 
 	// Complete
-	emitter.Complete("Context reset. Ready for fresh start!")
+	_ = emitter.Complete("Context reset. Ready for fresh start!")
 
 	return &Result{
 		Success: true,
