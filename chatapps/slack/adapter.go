@@ -484,6 +484,24 @@ func (a *Adapter) handleEventCallback(ctx context.Context, eventData json.RawMes
 		a.Logger().Debug("Converted # prefix to / prefix", "original", msgEvent.Text, "converted", processedText)
 	}
 
+	// Special handling for #reset command in threads (HTTP webhook path)
+	if processedText == "/reset" || strings.HasPrefix(processedText, "/reset ") {
+		a.Logger().Info("Detected reset command in thread message (HTTP webhook)",
+			"original", msgEvent.Text, "converted", processedText)
+		cmd := SlashCommand{
+			Command:     "/reset",
+			UserID:      msgEvent.User,
+			ChannelID:   msgEvent.Channel,
+			ResponseURL: "",
+		}
+		go func() {
+			if err := a.handleResetCommand(cmd); err != nil {
+				a.Logger().Error("handleResetCommand failed", "error", err)
+			}
+		}()
+		return
+	}
+
 	sessionID := a.GetOrCreateSession(msgEvent.User, msgEvent.BotUserID, msgEvent.Channel)
 
 	msg := &base.ChatMessage{
@@ -602,6 +620,24 @@ func (a *Adapter) handleSocketModeEvent(eventType string, data json.RawMessage) 
 	processedText, conversionMetadata := preprocessMessageText(msgEvent.Text)
 	if _, converted := conversionMetadata["converted_from_hash"]; converted {
 		a.Logger().Debug("Converted # prefix to / prefix", "original", msgEvent.Text, "converted", processedText)
+	}
+
+	// Special handling for #reset command in threads (HTTP webhook path)
+	if processedText == "/reset" || strings.HasPrefix(processedText, "/reset ") {
+		a.Logger().Info("Detected reset command in thread message (HTTP webhook)",
+			"original", msgEvent.Text, "converted", processedText)
+		cmd := SlashCommand{
+			Command:     "/reset",
+			UserID:      msgEvent.User,
+			ChannelID:   msgEvent.Channel,
+			ResponseURL: "",
+		}
+		go func() {
+			if err := a.handleResetCommand(cmd); err != nil {
+				a.Logger().Error("handleResetCommand failed", "error", err)
+			}
+		}()
+		return
 	}
 
 	sessionID := a.GetOrCreateSession(msgEvent.User, msgEvent.BotUserID, msgEvent.Channel)
@@ -1196,10 +1232,21 @@ func (a *Adapter) handleResetCommand(cmd SlashCommand) error {
 	a.Logger().Info("Found session for /reset",
 		"session_id", sessionID, "channel_id", cmd.ChannelID, "user_id", cmd.UserID)
 
-	// Step 1: Delete Claude Code project session file
-	deletedCount := a.deleteClaudeCodeSessionFile(sessionID)
+	// Get ProviderSessionID for Claude Code file deletion
+	sess, exists := a.eng.GetSession(sessionID)
+	if !exists {
+		a.Logger().Warn("Session not found in engine, proceeding with cleanup",
+			"session_id", sessionID)
+	}
+
+	// Step 1: Delete Claude Code project session file (using ProviderSessionID)
+	providerSessionID := ""
+	if sess != nil {
+		providerSessionID = sess.ProviderSessionID
+	}
+	deletedCount := a.deleteClaudeCodeSessionFile(providerSessionID)
 	a.Logger().Debug("Deleted Claude Code session files",
-		"session_id", sessionID, "count", deletedCount)
+		"session_id", sessionID, "provider_session_id", providerSessionID, "count", deletedCount)
 
 	// Step 2: Delete HotPlex session marker
 	markerDeleted := a.deleteHotPlexMarker(sessionID)
@@ -1221,9 +1268,10 @@ func (a *Adapter) handleResetCommand(cmd SlashCommand) error {
 		"✅ Context reset. Ready for fresh start!")
 }
 
-// deleteClaudeCodeSessionFile deletes the project session file for a given session.
+// deleteClaudeCodeSessionFile renames (not deletes) the project session file for a given session.
+// This preserves audit trail by adding .deleted suffix.
 // The workspace directory name is derived from the working directory path.
-func (a *Adapter) deleteClaudeCodeSessionFile(sessionID string) int {
+func (a *Adapter) deleteClaudeCodeSessionFile(providerSessionID string) int {
 	projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
 
 	// Use current working directory as workspace key
@@ -1235,9 +1283,27 @@ func (a *Adapter) deleteClaudeCodeSessionFile(sessionID string) int {
 	workspaceKey := strings.ReplaceAll(cwd, "/", "-")
 	workspaceDir := filepath.Join(projectsDir, workspaceKey)
 
-	sessionFile := filepath.Join(workspaceDir, sessionID+".jsonl")
-	if err := os.Remove(sessionFile); err == nil {
+	if providerSessionID == "" {
+		a.Logger().Debug("No providerSessionID, skipping Claude Code file cleanup")
+		return 0
+	}
+
+	sessionFile := filepath.Join(workspaceDir, providerSessionID+".jsonl")
+	deletedFile := sessionFile + ".deleted"
+
+	// Rename instead of delete to preserve audit trail
+	if err := os.Rename(sessionFile, deletedFile); err == nil {
+		a.Logger().Info("Renamed Claude Code session file",
+			"from", sessionFile,
+			"to", deletedFile)
 		return 1
+	}
+	if os.IsNotExist(err) {
+		a.Logger().Debug("Claude Code session file not found (may not exist yet)",
+			"path", sessionFile)
+	} else {
+		a.Logger().Warn("Failed to rename Claude Code session file",
+			"path", sessionFile, "error", err)
 	}
 	return 0
 }
@@ -1249,9 +1315,22 @@ func (a *Adapter) deleteHotPlexMarker(sessionID string) bool {
 		return false
 	}
 	markerPath := filepath.Join(homeDir, ".hotplex", "sessions", sessionID+".lock")
-	if err := os.Remove(markerPath); err == nil || os.IsNotExist(err) {
+	deletedPath := markerPath + ".deleted"
+
+	// Rename instead of delete to preserve audit trail
+	if err := os.Rename(markerPath, deletedPath); err == nil {
+		a.Logger().Info("Renamed HotPlex marker file",
+			"from", markerPath,
+			"to", deletedPath)
 		return true
 	}
+	if os.IsNotExist(err) {
+		a.Logger().Debug("HotPlex marker file not found (may not exist yet)",
+			"path", markerPath)
+		return true // Not existing is also "deleted"
+	}
+	a.Logger().Warn("Failed to rename HotPlex marker file",
+		"path", markerPath, "error", err)
 	return false
 }
 func (a *Adapter) handleUnknownCommand(cmd SlashCommand) {
