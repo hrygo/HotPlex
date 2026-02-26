@@ -95,14 +95,16 @@ type StreamCallback struct {
 	logger       *slog.Logger
 	mu           sync.Mutex
 	isFirst      bool
-	thinkingSent bool            // Tracks if thinking message was sent
+	thinkingSent bool            // Tracks if thinking/status message was sent
 	metadata     map[string]any  // Original message metadata (channel_id, thread_ts, etc.)
 	processor    *ProcessorChain // Message processor chain
 	blockBuilder *slack.BlockBuilder
 
-	// Thinking message state for updates
-	thinkingChannelID string // Channel ID for thinking message updates
-	thinkingMessageTS string // Message TS for thinking message updates
+	// Status message state for dynamic event type indicator
+	// Reuses thinking message infrastructure for in-place updates
+	thinkingChannelID string // Channel ID for status message updates
+	thinkingMessageTS string // Message TS for status message updates
+	currentStatus     string // Current status type (thinking, tool_use, answer)
 
 	// Stream state for throttled updates
 	streamState *StreamState
@@ -200,53 +202,9 @@ func (c *StreamCallback) handleThinking(data any) error {
 		return nil
 	}
 
-	blocks := c.blockBuilder.BuildThinkingBlock(thinkingContent)
-
-	if c.isFirst {
-		// First thinking event - create new message
-		c.isFirst = false
-		c.thinkingSent = true
-
-		// Send new message and capture ts for future updates
-		msg, err := c.buildThinkingMessage(blocks, true)
-		if err != nil {
-			return err
-		}
-
-		if err := c.sendMessageAndGetTS(msg); err != nil {
-			return err
-		}
-
-		// Extract ts from metadata after successful send
-		if ts, ok := msg.Metadata["message_ts"].(string); ok && ts != "" {
-			c.thinkingMessageTS = ts
-			if channelID, ok := msg.Metadata["channel_id"].(string); ok {
-				c.thinkingChannelID = channelID
-			}
-			c.logger.Debug("Captured thinking message ts for updates", "ts", ts, "channel_id", c.thinkingChannelID)
-		}
-
-		return nil
-	} else if c.thinkingSent {
-		// Subsequent thinking event - update the existing message
-		// This allows streaming thinking content updates
-		if c.thinkingMessageTS != "" && c.thinkingChannelID != "" {
-			// Use message_ts to update existing message
-			msg, err := c.buildThinkingMessage(blocks, false)
-			if err != nil {
-				return err
-			}
-			msg.Metadata["message_ts"] = c.thinkingMessageTS
-			msg.Metadata["channel_id"] = c.thinkingChannelID
-
-			return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, msg)
-		}
-
-		// Fallback: send as new message if we don't have ts
-		return c.sendBlockMessage(string(provider.EventTypeThinking), blocks, false)
-	}
-
-	return nil
+	// Use updateStatusMessage for dynamic status indicator
+	// This reuses thinking message infrastructure for in-place updates
+	return c.updateStatusMessage(slack.StatusThinking, thinkingContent)
 }
 
 // buildThinkingMessage constructs a thinking message with proper metadata
@@ -340,6 +298,74 @@ func (c *StreamCallback) deleteThinkingMessage() error {
 	return slackAdapter.DeleteMessage(c.ctx, c.thinkingChannelID, c.thinkingMessageTS)
 }
 
+// updateStatusMessage updates the status indicator message in-place
+// It reuses the thinking message infrastructure for efficient updates
+// Supported status types: "thinking", "tool_use", "answer"
+// NOTE: Caller must hold c.mu lock before calling this method
+func (c *StreamCallback) updateStatusMessage(statusType slack.StatusType, displayText string) error {
+	// Skip if status hasn't changed (avoid redundant updates)
+	if c.currentStatus == string(statusType) && statusType != slack.StatusThinking {
+		return nil
+	}
+
+	c.logger.Debug("Updating status message",
+		"status_type", statusType,
+		"display_text", displayText,
+		"is_first", c.isFirst,
+		"thinking_sent", c.thinkingSent)
+
+	// Build status blocks using the new BuildStatusBlock method
+	blocks := c.blockBuilder.BuildStatusBlock(statusType, displayText)
+
+	if c.isFirst {
+		// First status event - create new message
+		c.isFirst = false
+		c.thinkingSent = true
+		c.currentStatus = string(statusType)
+
+		// Send new message and capture ts for future updates
+		msg, err := c.buildThinkingMessage(blocks, true)
+		if err != nil {
+			return err
+		}
+
+		if err := c.sendMessageAndGetTS(msg); err != nil {
+			return err
+		}
+
+		// Extract ts from metadata after successful send
+		if ts, ok := msg.Metadata["message_ts"].(string); ok && ts != "" {
+			c.thinkingMessageTS = ts
+			if channelID, ok := msg.Metadata["channel_id"].(string); ok {
+				c.thinkingChannelID = channelID
+			}
+			c.logger.Debug("Captured status message ts for updates", "ts", ts, "channel_id", c.thinkingChannelID)
+		}
+
+		return nil
+	} else if c.thinkingSent {
+		// Subsequent status event - update the existing message
+		c.currentStatus = string(statusType)
+
+		if c.thinkingMessageTS != "" && c.thinkingChannelID != "" {
+			// Use message_ts to update existing message
+			msg, err := c.buildThinkingMessage(blocks, false)
+			if err != nil {
+				return err
+			}
+			msg.Metadata["message_ts"] = c.thinkingMessageTS
+			msg.Metadata["channel_id"] = c.thinkingChannelID
+
+			return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, msg)
+		}
+
+		// Fallback: send as new message if we don't have ts
+		return c.sendBlockMessage(string(provider.EventTypeThinking), blocks, false)
+	}
+
+	return nil
+}
+
 func (c *StreamCallback) handleToolUse(data any) error {
 	c.logger.Debug("[TOOL] handleToolUse called", "data_type", fmt.Sprintf("%T", data))
 
@@ -361,6 +387,12 @@ func (c *StreamCallback) handleToolUse(data any) error {
 				truncated = true
 			}
 		}
+	}
+
+	// Update status indicator to show current tool being used
+	// This updates the thinking message in-place with "Tool: Read" etc.
+	if err := c.updateStatusMessage(slack.StatusToolUse, toolName); err != nil {
+		c.logger.Warn("Failed to update status for tool_use", "error", err)
 	}
 
 	c.logger.Debug("[TOOL] handleToolUse sending", "tool_name", toolName, "input_len", len(input))

@@ -318,24 +318,56 @@ func (f *MrkdwnFormatter) FormatCodeBlock(code, language string) string {
 // Block Builders - Event Type Mappings
 // =============================================================================
 
-// BuildThinkingBlock builds a context block for thinking status
-// Used for: provider.EventTypeThinking
-// Strategy: Send immediately (not aggregated) for instant feedback
-func (b *BlockBuilder) BuildThinkingBlock(content string) []map[string]any {
-	// Use actual thinking content if available, fallback to default
-	displayText := content
-	if displayText == "" {
-		displayText = "Thinking..."
+// StatusType represents the type of status being displayed
+type StatusType string
+
+const (
+	StatusThinking StatusType = "thinking"
+	StatusToolUse  StatusType = "tool_use"
+	StatusAnswer   StatusType = "answer"
+)
+
+// BuildStatusBlock builds a context block for status indicator
+// Used for real-time status display: thinking, tool_use, answer
+// This is the primary method for status messages - updated in-place via chat.update
+func (b *BlockBuilder) BuildStatusBlock(statusType StatusType, content string) []map[string]any {
+	var emoji, displayText string
+
+	switch statusType {
+	case StatusThinking:
+		emoji = ":brain:"
+		if content == "" {
+			displayText = "Thinking..."
+		} else {
+			displayText = content
+		}
+	case StatusToolUse:
+		emoji = getToolEmoji(content) // content is tool name
+		displayText = "Tool: " + content
+	case StatusAnswer:
+		emoji = ":writing_hand:"
+		displayText = "Answer..."
+	default:
+		emoji = ":hourglass:"
+		displayText = content
 	}
 
 	return []map[string]any{
 		{
 			"type": "context",
 			"elements": []map[string]any{
-				mrkdwnText(fmt.Sprintf(":brain: _%s_", displayText)),
+				mrkdwnText(fmt.Sprintf("%s _%s_", emoji, displayText)),
 			},
 		},
 	}
+}
+
+// BuildThinkingBlock builds a context block for thinking status
+// Used for: provider.EventTypeThinking
+// Strategy: Send immediately (not aggregated) for instant feedback
+// Deprecated: Use BuildStatusBlock(StatusThinking, content) instead
+func (b *BlockBuilder) BuildThinkingBlock(content string) []map[string]any {
+	return b.BuildStatusBlock(StatusThinking, content)
 }
 
 // getToolEmoji returns the appropriate emoji for a given tool name
