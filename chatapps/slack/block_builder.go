@@ -405,6 +405,167 @@ func getToolEmoji(toolName string) string {
 	return ":hammer_and_wrench:"
 }
 
+// =============================================================================
+// Tool Progress Blocks
+// =============================================================================
+
+// ToolProgressStatus represents the execution status of a tool
+type ToolProgressStatus string
+
+const (
+	// ToolStatusStarted indicates the tool has been invoked but not yet started executing
+	ToolStatusStarted ToolProgressStatus = "started"
+	// ToolStatusRunning indicates the tool is currently executing
+	ToolStatusRunning ToolProgressStatus = "running"
+	// ToolStatusCompleted indicates the tool finished successfully
+	ToolStatusCompleted ToolProgressStatus = "completed"
+	// ToolStatusFailed indicates the tool execution failed
+	ToolStatusFailed ToolProgressStatus = "failed"
+)
+
+// BuildToolProgressBlock builds a context block for tool execution progress display.
+// Shows tool name, execution status, details (command/file path), and optional duration.
+//
+// Parameters:
+//   - toolName: Name of the tool (e.g., "Bash", "Read", "Edit")
+//   - status: Execution status ("started", "running", "completed", "failed")
+//   - detail: Additional details (command, file path, error message, output preview)
+//
+// UI Examples:
+//
+//	Started:  🔧 Tool: Bash
+//	           └─ git status
+//
+//	Running:  🔧 Tool: FileRead
+//	           └─ reading: config.yaml
+//
+//	Completed: ✅ Tool: Bash completed (150ms)
+//	           └─ On branch main...
+//
+//	Failed:   ❌ Tool: Bash failed
+//	           └─ error: command not found
+func (b *BlockBuilder) BuildToolProgressBlock(toolName, status, detail string) []map[string]any {
+	var statusText, statusEmoji string
+
+	// Get tool emoji
+	toolEmoji := getToolEmoji(toolName)
+
+	// Determine status emoji and text
+	switch ToolProgressStatus(status) {
+	case ToolStatusStarted:
+		statusEmoji = ":hourglass_flowing_sand:"
+		statusText = "Started"
+	case ToolStatusRunning:
+		statusEmoji = ":gear:"
+		statusText = "Running"
+	case ToolStatusCompleted:
+		statusEmoji = ":white_check_mark:"
+		statusText = "Completed"
+	case ToolStatusFailed:
+		statusEmoji = ":x:"
+		statusText = "Failed"
+	default:
+		statusEmoji = ":question:"
+		statusText = "Unknown"
+	}
+
+	// Build main header line
+	headerText := fmt.Sprintf("%s *%s: %s*", toolEmoji, toolName, statusText)
+	if statusEmoji != "" && statusEmoji != ":question:" {
+		headerText = fmt.Sprintf("%s %s", statusEmoji, headerText)
+	}
+
+	// Build detail line (with indentation)
+	var detailText string
+	if detail != "" {
+		// Truncate detail if too long
+		maxDetailLen := 200
+		if len(detail) > maxDetailLen {
+			detail = detail[:maxDetailLen-3] + "..."
+		}
+		detailText = fmt.Sprintf("   └─ %s", detail)
+	}
+
+	// Build context block elements
+	var elements []map[string]any
+	elements = append(elements, mrkdwnText(headerText))
+
+	if detailText != "" {
+		elements = append(elements, mrkdwnText(detailText))
+	}
+
+	return []map[string]any{
+		{
+			"type":     "context",
+			"elements": elements,
+		},
+	}
+}
+
+// BuildToolProgressBlockFromMeta builds a tool progress block from EventMeta.
+// This is a convenience wrapper that extracts relevant fields from the metadata.
+func (b *BlockBuilder) BuildToolProgressBlockFromMeta(meta *event.EventMeta) []map[string]any {
+	if meta == nil {
+		return []map[string]any{}
+	}
+
+	toolName := meta.ToolName
+	if toolName == "" {
+		toolName = "Unknown"
+	}
+
+	// Determine status based on meta.Status
+	var status string
+	switch meta.Status {
+	case "running":
+		status = string(ToolStatusRunning)
+	case "success":
+		status = string(ToolStatusCompleted)
+	case "error":
+		status = string(ToolStatusFailed)
+	default:
+		// Default to running for empty status (tool just started)
+		status = string(ToolStatusRunning)
+	}
+
+	// Build detail from available metadata
+	var detail string
+
+	// Add command/input summary
+	if meta.InputSummary != "" {
+		detail = meta.InputSummary
+	} else if meta.FilePath != "" {
+		// For file operations, show the file path
+		detail = fmt.Sprintf("file: %s", truncatePath(meta.FilePath, 50))
+	}
+
+	// Add error message if present
+	if meta.ErrorMsg != "" {
+		detail = fmt.Sprintf("error: %s", meta.ErrorMsg)
+	}
+
+	// Add output summary if available (for completed/failed status)
+	if meta.OutputSummary != "" && (status == string(ToolStatusCompleted) || status == string(ToolStatusFailed)) {
+		preview := meta.OutputSummary
+		if len(preview) > 100 {
+			preview = preview[:97] + "..."
+		}
+		if detail != "" {
+			detail = fmt.Sprintf("%s | %s", detail, preview)
+		} else {
+			detail = preview
+		}
+	}
+
+	// Add duration for completed/failed
+	if (status == string(ToolStatusCompleted) || status == string(ToolStatusFailed)) && meta.DurationMs > 0 {
+		durationStr := formatDuration(meta.DurationMs)
+		detail = fmt.Sprintf("%s (%s)", detail, durationStr)
+	}
+
+	return b.BuildToolProgressBlock(toolName, status, detail)
+}
+
 // BuildToolUseBlock builds a section block for tool invocation
 // Used for: provider.EventTypeToolUse
 // Strategy: Can be aggregated with similar tool events
