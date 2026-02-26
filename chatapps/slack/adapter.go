@@ -204,12 +204,6 @@ func (a *Adapter) SendAttachment(ctx context.Context, channelID, threadTS string
 	return nil
 }
 
-// sendBlocks sends Block Kit blocks to Slack
-func (a *Adapter) sendBlocks(ctx context.Context, channelID string, blocks []any, threadTS, fallbackText string) error {
-	_, err := a.sendBlocksAndGetTS(ctx, channelID, blocks, threadTS, fallbackText)
-	return err
-}
-
 // sendBlocksAndGetTS sends Block Kit blocks to Slack and returns the message timestamp
 func (a *Adapter) sendBlocksAndGetTS(ctx context.Context, channelID string, blocks []any, threadTS, fallbackText string) (string, error) {
 	payload := map[string]any{
