@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -240,7 +241,7 @@ func (a *Adapter) sendBlocksAndGetTS(ctx context.Context, channelID string, bloc
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return "", fmt.Errorf("rate limited: 429")
+		return "", errors.New(MapSlackErrorToUserMessage("rate_limited"))
 	}
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("send failed: %d %s", resp.StatusCode, string(respBody))
@@ -257,7 +258,7 @@ func (a *Adapter) sendBlocksAndGetTS(ctx context.Context, channelID string, bloc
 	}
 
 	if !slackResp.OK {
-		return "", fmt.Errorf("slack API error: %s", slackResp.Error)
+		return "", errors.New(MapSlackErrorToUserMessage(slackResp.Error))
 	}
 
 	a.Logger().Debug("Blocks sent successfully", "channel", channelID, "ts", slackResp.TS)
@@ -298,7 +299,7 @@ func (a *Adapter) sendFileFromURL(ctx context.Context, payload map[string]any) e
 	}
 
 	if !slackResp.OK {
-		return fmt.Errorf("slack API error: %s", slackResp.Error)
+		return errors.New(MapSlackErrorToUserMessage(slackResp.Error))
 	}
 
 	return nil
@@ -1076,7 +1077,7 @@ func (a *Adapter) sendToChannelOnce(ctx context.Context, channelID, text, thread
 
 	// Check for rate limit (429)
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return fmt.Errorf("rate limited: 429")
+		return errors.New(MapSlackErrorToUserMessage("rate_limited"))
 	}
 
 	if resp.StatusCode >= 400 {
@@ -1096,7 +1097,7 @@ func (a *Adapter) sendToChannelOnce(ctx context.Context, channelID, text, thread
 	}
 
 	if !slackResp.OK {
-		return fmt.Errorf("slack API error: %s", slackResp.Error)
+		return errors.New(MapSlackErrorToUserMessage(slackResp.Error))
 	}
 
 	a.Logger().Debug("Message sent successfully", "channel", channelID)
@@ -1151,10 +1152,70 @@ func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error
 	}
 
 	if !slackResp.OK {
-		return fmt.Errorf("slack API error: %s", slackResp.Error)
+		return errors.New(MapSlackErrorToUserMessage(slackResp.Error))
 	}
 
 	a.Logger().Debug("Reaction added", "emoji", reaction.Name, "channel", reaction.Channel)
+	return nil
+}
+
+// RemoveReaction removes a reaction from a message
+func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
+	if a.config.BotToken == "" {
+		return fmt.Errorf("slack bot token not configured")
+	}
+
+	if reaction.Channel == "" || reaction.Timestamp == "" {
+		return fmt.Errorf("channel and timestamp are required for reaction")
+	}
+
+	payload := map[string]any{
+		"channel": reaction.Channel,
+		"name":    reaction.Name,
+		"ts":      reaction.Timestamp,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://slack.com/api/reactions.remove", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.config.BotToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("reaction remove failed: %d %s", resp.StatusCode, string(respBody))
+	}
+
+	var slackResp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&slackResp); err != nil {
+		return fmt.Errorf("parse response: %w", err)
+	}
+
+	if !slackResp.OK {
+		// Ignore "no_reaction" error - reaction might not exist
+		if slackResp.Error == "no_reaction" {
+			a.Logger().Debug("Reaction not found, skipping remove", "emoji", reaction.Name, "channel", reaction.Channel)
+			return nil
+		}
+		return errors.New(MapSlackErrorToUserMessage(slackResp.Error))
+	}
+
+	a.Logger().Debug("Reaction removed", "emoji", reaction.Name, "channel", reaction.Channel)
 	return nil
 }
 
@@ -1441,7 +1502,7 @@ func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return fmt.Errorf("rate limited: 429")
+		return errors.New(MapSlackErrorToUserMessage("rate_limited"))
 	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("update failed: %d %s", resp.StatusCode, string(respBody))
@@ -1458,7 +1519,7 @@ func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string
 	}
 
 	if !slackResp.OK {
-		return fmt.Errorf("slack API error: %s", slackResp.Error)
+		return errors.New(MapSlackErrorToUserMessage(slackResp.Error))
 	}
 
 	a.Logger().Debug("Message updated successfully", "channel", channelID, "ts", slackResp.TS)
@@ -1496,7 +1557,7 @@ func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return fmt.Errorf("rate limited: 429")
+		return errors.New(MapSlackErrorToUserMessage("rate_limited"))
 	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("delete failed: %d %s", resp.StatusCode, string(respBody))
@@ -1512,7 +1573,7 @@ func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string
 	}
 
 	if !slackResp.OK {
-		return fmt.Errorf("slack API error: %s", slackResp.Error)
+		return errors.New(MapSlackErrorToUserMessage(slackResp.Error))
 	}
 
 	a.Logger().Debug("Message deleted successfully", "channel", channelID, "ts", messageTS)

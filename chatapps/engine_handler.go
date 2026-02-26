@@ -108,6 +108,13 @@ type StreamCallback struct {
 
 	// Stream state for throttled updates
 	streamState *StreamState
+
+	// ACK reaction state for Slack message reactions
+	// Tracks the original user message to add reaction to
+	reactionChannelID   string // Channel ID of original user message
+	reactionMessageTS   string // Timestamp of original user message
+	ackReactionAdded    bool   // Whether the ack reaction has been added
+	ackReactionComplete bool   // Whether the processing is complete (reaction replaced)
 }
 
 // StreamState tracks the state for streaming updates
@@ -132,10 +139,135 @@ func NewStreamCallback(ctx context.Context, sessionID, platform string, adapters
 		blockBuilder: slack.NewBlockBuilder(),
 	}
 
+	// Extract reaction metadata from original message
+	if metadata != nil {
+		if channelID, ok := metadata["channel_id"].(string); ok {
+			cb.reactionChannelID = channelID
+		}
+		if messageTS, ok := metadata["message_id"].(string); ok {
+			cb.reactionMessageTS = messageTS
+		}
+	}
+
 	// Set callback as the sender for aggregated messages
 	cb.processor.SetAggregatorSender(cb)
 
 	return cb
+}
+
+// addAckReaction adds the eyes reaction to the original user message
+// This indicates that the message is being processed
+func (c *StreamCallback) addAckReaction() error {
+	// Skip if not Slack platform or reaction already added
+	if c.platform != "slack" {
+		return nil
+	}
+	c.mu.Lock()
+	if c.ackReactionAdded || c.reactionChannelID == "" || c.reactionMessageTS == "" {
+		c.mu.Unlock()
+		return nil
+	}
+	c.ackReactionAdded = true
+	c.mu.Unlock()
+
+	// Get Slack adapter
+	adapter, ok := c.adapters.GetAdapter(c.platform)
+	if !ok || adapter == nil {
+		c.logger.Warn("No adapter for reaction", "platform", c.platform)
+		return nil
+	}
+
+	slackAdapter, ok := adapter.(*slack.Adapter)
+	if !ok {
+		c.logger.Warn("Adapter is not a Slack adapter")
+		return nil
+	}
+
+	// Add eyes reaction
+	reaction := base.Reaction{
+		Name:      "eyes",
+		Channel:   c.reactionChannelID,
+		Timestamp: c.reactionMessageTS,
+	}
+
+	if err := slackAdapter.AddReaction(c.ctx, reaction); err != nil {
+		c.logger.Warn("Failed to add ack reaction", "error", err)
+		return err
+	}
+
+	c.logger.Debug("Added ack reaction", "channel", c.reactionChannelID, "ts", c.reactionMessageTS)
+	return nil
+}
+
+// completeAckReaction removes the eyes reaction and adds checkmark reaction
+// This indicates that the message processing is complete
+func (c *StreamCallback) completeAckReaction(success bool) error {
+	// Skip if not Slack platform or reaction not added yet
+	if c.platform != "slack" {
+		return nil
+	}
+
+	c.mu.Lock()
+	if c.ackReactionComplete {
+		c.mu.Unlock()
+		return nil
+	}
+	// Only mark complete if ack was added
+	if !c.ackReactionAdded {
+		c.mu.Unlock()
+		return nil
+	}
+	c.ackReactionComplete = true
+	channelID := c.reactionChannelID
+	messageTS := c.reactionMessageTS
+	c.mu.Unlock()
+
+	if channelID == "" || messageTS == "" {
+		return nil
+	}
+
+	// Get Slack adapter
+	adapter, ok := c.adapters.GetAdapter(c.platform)
+	if !ok || adapter == nil {
+		c.logger.Warn("No adapter for reaction", "platform", c.platform)
+		return nil
+	}
+
+	slackAdapter, ok := adapter.(*slack.Adapter)
+	if !ok {
+		c.logger.Warn("Adapter is not a Slack adapter")
+		return nil
+	}
+
+	// Determine reaction based on success
+	reactionName := "white_check_mark" // Success
+	if !success {
+		reactionName = "x" // Failure
+	}
+
+	// First remove the eyes reaction
+	eyesReaction := base.Reaction{
+		Name:      "eyes",
+		Channel:   channelID,
+		Timestamp: messageTS,
+	}
+	_ = slackAdapter.RemoveReaction(c.ctx, eyesReaction)
+
+	// Then add the completion reaction
+	completionReaction := base.Reaction{
+		Name:      reactionName,
+		Channel:   channelID,
+		Timestamp: messageTS,
+	}
+
+	if err := slackAdapter.AddReaction(c.ctx, completionReaction); err != nil {
+		c.logger.Warn("Failed to add completion reaction", "error", err)
+		return err
+	}
+
+	c.logger.Debug("Completed ack reaction", "success", success, "reaction", reactionName,
+		"channel", channelID, "ts", messageTS)
+	return nil
 }
 
 // SendAggregatedMessage implements AggregatedMessageSender interface
@@ -187,6 +319,13 @@ func (c *StreamCallback) Handle(eventType string, data any) error {
 }
 
 func (c *StreamCallback) handleThinking(data any) error {
+	// Add ack reaction on first thinking event (indicates processing started)
+	if c.isFirst {
+		if err := c.addAckReaction(); err != nil {
+			c.logger.Warn("Failed to add ack reaction", "error", err)
+		}
+	}
+
 	// Extract thinking content from EventWithMeta
 	var thinkingContent string
 	if m, ok := data.(*event.EventWithMeta); ok {
@@ -446,6 +585,14 @@ func (c *StreamCallback) handleToolResult(data any) error {
 }
 
 func (c *StreamCallback) handleAnswer(data any) error {
+	// Complete ack reaction on first answer (indicates processing succeeded)
+	if c.isFirst {
+		if err := c.completeAckReaction(true); err != nil {
+			c.logger.Warn("Failed to complete ack reaction", "error", err)
+		}
+		c.isFirst = false
+	}
+
 	// Clear thinking message on first answer if it exists
 	if c.thinkingSent && c.thinkingMessageTS != "" && c.thinkingChannelID != "" {
 		c.logger.Debug("Deleting thinking message for answer",
@@ -487,6 +634,11 @@ func (c *StreamCallback) handleAnswer(data any) error {
 }
 
 func (c *StreamCallback) handleError(data any) error {
+	// Complete ack reaction on error (indicates processing failed)
+	if err := c.completeAckReaction(false); err != nil {
+		c.logger.Warn("Failed to complete ack reaction", "error", err)
+	}
+
 	// Clear thinking state on first non-thinking event
 	if c.thinkingSent {
 		c.thinkingSent = false
