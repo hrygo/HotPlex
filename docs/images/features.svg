@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1190 240" width="1190" height="240">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="1000" height="620">
   <defs>
     <style>
       .bg { fill: #f8f9fa; }
       .feature-card { fill: #ffffff; stroke: #e1e4e8; stroke-width: 2; }
-      .text-title { font-family: sans-serif; font-weight: bold; font-size: 14px; fill: #24292e; }
-      .text-sub { font-family: sans-serif; font-size: 12px; fill: #586069; }
+      .text-title { font-family: -apple-system, system-ui, sans-serif; font-weight: bold; font-size: 14px; fill: #24292e; }
+      .text-sub { font-family: -apple-system, sans-serif; font-size: 11px; fill: #586069; }
       
       .icon-bg { opacity: 0.1; }
       .icon-stroke { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -14,68 +14,102 @@
       .c3-fill { fill: #0366d6; } .c3-stroke { stroke: #0366d6; }
       .c4-fill { fill: #6f42c1; } .c4-stroke { stroke: #6f42c1; }
       .c5-fill { fill: #f66a0a; } .c5-stroke { stroke: #f66a0a; }
+      .c6-fill { fill: #0969da; } .c6-stroke { stroke: #0969da; }
     </style>
   </defs>
 
-  <rect width="1190" height="240" class="bg" rx="16"/>
+  <rect width="100%" height="100%" class="bg" rx="16"/>
 
+  <!-- Grid Row 1 -->
   <!-- Feature 1: Hot Start -->
-  <g transform="translate(40, 40)">
-    <rect width="170" height="160" rx="12" class="feature-card" />
-    <circle cx="85" cy="55" r="35" class="icon-bg c1-fill" />
-    <path d="M88 35 L75 60 L85 60 L80 80 L98 52 L88 52 Z" class="c1-fill" />
-    <text x="85" y="115" text-anchor="middle" class="text-title">200ms Hot-Start</text>
-    <text x="85" y="135" text-anchor="middle" class="text-sub">Instant CLI Execution</text>
+  <g transform="translate(60, 40)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c1-fill" />
+    <path d="M143 35 L130 60 L140 60 L135 80 L153 52 L143 52 Z" class="c1-fill" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">200ms Hot-Start</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">Instant CLI Execution &amp; Feedback</text>
   </g>
 
   <!-- Feature 2: Session Pool -->
-  <g transform="translate(230, 40)">
-    <rect width="170" height="160" rx="12" class="feature-card" />
-    <circle cx="85" cy="55" r="35" class="icon-bg c2-fill" />
-    <rect x="70" y="40" width="30" height="8" rx="2" class="c2-fill" opacity="0.4" />
-    <rect x="65" y="52" width="40" height="8" rx="2" class="c2-fill" opacity="0.6" />
-    <rect x="60" y="64" width="50" height="8" rx="2" class="c2-fill" />
-    <text x="85" y="115" text-anchor="middle" class="text-title">Session Pool</text>
-    <text x="85" y="135" text-anchor="middle" class="text-sub">Stateful Persistence</text>
+  <g transform="translate(360, 40)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c2-fill" />
+    <rect x="125" y="40" width="30" height="8" rx="2" class="c2-fill" opacity="0.4" />
+    <rect x="120" y="52" width="40" height="8" rx="2" class="c2-fill" opacity="0.6" />
+    <rect x="115" y="64" width="50" height="8" rx="2" class="c2-fill" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">Session Pool</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">Stateful Persistence &amp; Hot-Mux</text>
   </g>
 
-  <!-- Feature 3: Security -->
-  <g transform="translate(420, 40)">
-    <rect width="170" height="160" rx="12" class="feature-card" />
-    <circle cx="85" cy="55" r="35" class="icon-bg c3-fill" />
-    <path d="M85 35 L98 42 L98 55 C98 65 92 72 85 75 C78 72 72 65 72 55 L72 42 Z" class="icon-stroke c3-stroke" />
-    <path d="M78 55 L83 60 L92 48" class="icon-stroke c3-stroke" />
-    <text x="85" y="115" text-anchor="middle" class="text-title">WAF Security</text>
-    <text x="85" y="135" text-anchor="middle" class="text-sub">Regex Data Defense</text>
+  <!-- Feature 3: Security WAF -->
+  <g transform="translate(660, 40)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c3-fill" />
+    <path d="M140 35 L153 42 L153 55 C153 65 147 72 140 75 C133 72 127 65 127 55 L127 42 Z" class="icon-stroke c3-stroke" />
+    <path d="M133 55 L138 60 L147 48" class="icon-stroke c3-stroke" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">WAF Security</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">Regex-Based Inbound/Outbound Defense</text>
   </g>
 
-  <!-- Feature 4: Duplex -->
-  <g transform="translate(610, 40)">
-    <rect width="170" height="160" rx="12" class="feature-card" />
-    <circle cx="85" cy="55" r="35" class="icon-bg c4-fill" />
-    <path d="M70 48 L100 48 M90 40 L100 48 L90 56" class="icon-stroke c4-stroke" />
-    <path d="M100 62 L70 62 M80 54 L70 62 L80 70" class="icon-stroke c4-stroke" />
-    <text x="85" y="115" text-anchor="middle" class="text-title">Full-Duplex</text>
-    <text x="85" y="135" text-anchor="middle" class="text-sub">Async Token Stream</text>
+  <!-- Grid Row 2 -->
+  <!-- Feature 4: Full-Duplex -->
+  <g transform="translate(60, 220)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c4-fill" />
+    <path d="M125 48 L155 48 M145 40 L155 48 L145 56" class="icon-stroke c4-stroke" />
+    <path d="M155 62 L125 62 M135 54 L125 62 L135 70" class="icon-stroke c4-stroke" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">Full-Duplex I/O</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">Async Token Streaming &amp; Tool Events</text>
   </g>
 
-  <!-- Feature 5: Dual Mode -->
-  <g transform="translate(800, 40)">
-    <rect width="170" height="160" rx="12" class="feature-card" />
-    <circle cx="85" cy="55" r="35" class="icon-bg c5-fill" />
-    <path d="M72 45 L62 55 L72 65 M98 45 L108 55 L98 65" class="icon-stroke c5-stroke" />
-    <path d="M88 40 L82 70" class="icon-stroke c5-stroke" />
-    <text x="85" y="115" text-anchor="middle" class="text-title">SDK + Daemon</text>
-    <text x="85" y="135" text-anchor="middle" class="text-sub">Cloud-Native Ready</text>
+  <!-- Feature 5: ChatApps (NEW) -->
+  <g transform="translate(360, 220)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c5-fill" />
+    <path d="M130 40 H150 V60 H130 Z M135 70 H145 L140 75 Z" class="c5-fill" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">ChatApps Ecosystem</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">Slack, DingTalk, TG Integration</text>
   </g>
-  <!-- Feature 6: Observability -->
-  <g transform="translate(990, 40)">
-    <rect width="170" height="160" rx="12" class="feature-card" />
-    <circle cx="85" cy="55" r="35" class="icon-bg c1-fill" />
-    <path d="M70 65 L70 45 L78 45 L78 65 Z" class="c1-fill" />
-    <path d="M82 65 L82 35 L90 35 L90 65 Z" class="c1-fill" />
-    <path d="M94 65 L94 50 L102 50 L102 65 Z" class="c1-fill" />
-    <text x="85" y="115" text-anchor="middle" class="text-title">Observability</text>
-    <text x="85" y="135" text-anchor="middle" class="text-sub">Metrics &amp; Tracing</text>
+
+  <!-- Feature 6: SDK + Daemon -->
+  <g transform="translate(660, 220)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c6-fill" />
+    <path d="M127 45 L117 55 L127 65 M153 45 L163 55 L153 65" class="icon-stroke c6-stroke" />
+    <path d="M143 40 L137 70" class="icon-stroke c6-stroke" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">Go SDK + Proxy</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">Native Embedding &amp; WebSocket API</text>
+  </g>
+
+  <!-- Grid Row 3 -->
+  <!-- Feature 7: Observability -->
+  <g transform="translate(60, 400)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c1-fill" />
+    <path d="M125 65 L125 45 L133 45 L133 65 Z" class="c1-fill" />
+    <path d="M137 65 L137 35 L145 35 L145 65 Z" class="c1-fill" />
+    <path d="M149 65 L149 50 L157 50 L157 65 Z" class="c1-fill" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">Observability</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">OTel, Metrics &amp; Tracing Ready</text>
+  </g>
+
+  <!-- Feature 8: PGID Isolation (NEW) -->
+  <g transform="translate(360, 400)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c2-fill" />
+    <rect x="125" y="45" width="30" height="20" rx="4" class="icon-stroke c2-stroke" />
+    <path d="M132 45 V40 C132 35 148 35 148 40 V45" class="icon-stroke c2-stroke" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">PGID Isolation</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">Process-Level Security Sandbox</text>
+  </g>
+
+  <!-- Feature 9: Multi-Provider (NEW) -->
+  <g transform="translate(660, 400)">
+    <rect width="280" height="160" rx="12" class="feature-card" />
+    <circle cx="140" cy="55" r="35" class="icon-bg c4-fill" />
+    <path d="M125 55 A15 15 0 1 1 155 55 A15 15 0 1 1 125 55" class="icon-stroke c4-stroke" />
+    <path d="M140 40 V70 M125 55 H155" class="icon-stroke c4-stroke" />
+    <text x="140" y="115" text-anchor="middle" class="text-title">Multi-Provider</text>
+    <text x="140" y="135" text-anchor="middle" class="text-sub">Claude Code &amp; OpenCode Native</text>
   </g>
 </svg>
