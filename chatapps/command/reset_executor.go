@@ -114,9 +114,9 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 		Success: true,
 		Message: "Context reset. Ready for fresh start!",
 		Metadata: map[string]any{
-			"files_deleted":        deletedCount,
-			"marker_deleted":       markerDeleted,
-			"provider_session_id":  providerSessionID,
+			"files_deleted":       deletedCount,
+			"marker_deleted":      markerDeleted,
+			"provider_session_id": providerSessionID,
 		},
 	}, nil
 }

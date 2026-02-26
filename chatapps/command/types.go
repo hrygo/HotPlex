@@ -21,14 +21,14 @@ type Executor interface {
 
 // Request encapsulates a slash command request
 type Request struct {
-	Command     string         // Original command (e.g., "/reset")
-	Text        string         // Command arguments
-	UserID      string         // User who invoked the command
-	ChannelID   string         // Channel where command was invoked
-	SessionID   string         // Associated session ID
-	ProviderSessionID string   // Provider session ID (if available)
-	ResponseURL string         // Slack response_url (optional)
-	Metadata    map[string]any // Platform-specific metadata
+	Command           string         // Original command (e.g., "/reset")
+	Text              string         // Command arguments
+	UserID            string         // User who invoked the command
+	ChannelID         string         // Channel where command was invoked
+	SessionID         string         // Associated session ID
+	ProviderSessionID string         // Provider session ID (if available)
+	ResponseURL       string         // Slack response_url (optional)
+	Metadata          map[string]any // Platform-specific metadata
 }
 
 // Result encapsulates command execution result

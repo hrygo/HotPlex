@@ -22,10 +22,10 @@ type CommandCallback struct {
 	logger       *slog.Logger
 	metadata     map[string]any
 
-	mu            sync.Mutex
-	messageTS     string
-	channelID     string
-	title         string
+	mu        sync.Mutex
+	messageTS string
+	channelID string
+	title     string
 }
 
 // NewCommandCallback creates a new command callback

@@ -84,9 +84,9 @@ func (e *ProgressEmitter) Complete(message string) error {
 
 	// Create event data with steps
 	meta := &event.EventMeta{
-		Status:           "completed",
-		TotalDurationMs:  time.Since(e.startTime).Milliseconds(),
-		OutputSummary:    message,
+		Status:          "completed",
+		TotalDurationMs: time.Since(e.startTime).Milliseconds(),
+		OutputSummary:   message,
 	}
 
 	return e.callback(string(provider.EventTypeCommandComplete),
@@ -128,7 +128,7 @@ func (e *ProgressEmitter) emitProgress(title string) error {
 		Status:          "running",
 		Progress:        progress,
 		TotalSteps:      int32(len(stepsCopy)),
-		CurrentStep:    int32(currentStep),
+		CurrentStep:     int32(currentStep),
 		TotalDurationMs: time.Since(e.startTime).Milliseconds(),
 		OutputSummary:   title,
 	}
