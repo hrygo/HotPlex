@@ -339,26 +339,26 @@ func (b *BlockBuilder) BuildThinkingBlock(content string) []map[string]any {
 func getToolEmoji(toolName string) string {
 	mapping := map[string]string{
 		"Bash":       ":computer:",
-		"Edit":        ":pencil:",
-		"MultiEdit":   ":pencil:",
-		"Write":       ":page_facing_up:",
-		"FileWrite":   ":page_facing_up:",
-		"Read":        ":books:",
-		"FileRead":    ":books:",
-		"FileSearch":  ":mag:",
-		"Glob":        ":mag:",
-		"WebFetch":    ":globe_with_meridians:",
-		"WebSearch":   ":globe_with_meridians:",
-		"Grep":        ":magnifying_glass_tilted_left:",
-		"LS":          ":file_folder:",
-		"List":        ":file_folder:",
-		"Mkdir":       ":file_cabinet:",
-		"Rmdir":       ":file_cabinet:",
-		"Remove":      ":wastebasket:",
-		"Delete":      ":wastebasket:",
-		"Move":        ":arrow_right:",
-		"Copy":        ":clipboard:",
-		"Exit":        ":door:",
+		"Edit":       ":pencil:",
+		"MultiEdit":  ":pencil:",
+		"Write":      ":page_facing_up:",
+		"FileWrite":  ":page_facing_up:",
+		"Read":       ":books:",
+		"FileRead":   ":books:",
+		"FileSearch": ":mag:",
+		"Glob":       ":mag:",
+		"WebFetch":   ":globe_with_meridians:",
+		"WebSearch":  ":globe_with_meridians:",
+		"Grep":       ":magnifying_glass_tilted_left:",
+		"LS":         ":file_folder:",
+		"List":       ":file_folder:",
+		"Mkdir":      ":file_cabinet:",
+		"Rmdir":      ":file_cabinet:",
+		"Remove":     ":wastebasket:",
+		"Delete":     ":wastebasket:",
+		"Move":       ":arrow_right:",
+		"Copy":       ":clipboard:",
+		"Exit":       ":door:",
 	}
 	if emoji, ok := mapping[toolName]; ok {
 		return emoji
@@ -392,16 +392,16 @@ func (b *BlockBuilder) BuildToolUseBlock(toolName, input string, truncated bool)
 // BuildToolResultBlock builds a section block for tool execution result
 // Used for: provider.EventTypeToolResult
 // Strategy: Can be aggregated, includes optional button to expand output
-func (b *BlockBuilder) BuildToolResultBlock(success bool, durationMs int64, output string, hasButton bool) []map[string]any {
+func (b *BlockBuilder) BuildToolResultBlock(success bool, durationMs int64, output string, hasButton bool, toolName string) []map[string]any {
 	var blocks []map[string]any
 
 	// Build status text
-	statusEmoji := ":white_check_mark:"
-	statusText := "*Completed*"
+	status := "Completed"
 	if !success {
-		statusEmoji = ":x:"
-		statusText = "*Failed*"
+		status = "Failed"
 	}
+	statusEmoji := getToolEmoji(toolName)
+	statusText := fmt.Sprintf("*%s %s*", toolName, status) // e.g., "*Bash Completed*"
 
 	resultBlock := map[string]any{
 		"type": "section",

@@ -244,7 +244,10 @@ func (c *StreamCallback) handleToolResult(data any) error {
 
 	success := true
 	var durationMs int64
+	var toolName string
 	output := ""
+
+	_ = toolName // used in BuildToolResultBlock
 
 	if m, ok := data.(*event.EventWithMeta); ok {
 		c.logger.Debug("[TOOL] handleToolResult EventWithMeta",
@@ -260,6 +263,7 @@ func (c *StreamCallback) handleToolResult(data any) error {
 				output = m.Meta.ErrorMsg
 			}
 			durationMs = m.Meta.DurationMs
+			toolName = m.Meta.ToolName
 		}
 		if m.EventData != "" {
 			output = m.EventData
@@ -267,7 +271,7 @@ func (c *StreamCallback) handleToolResult(data any) error {
 	}
 
 	c.logger.Debug("[TOOL] handleToolResult sending", "success", success, "duration_ms", durationMs, "output_len", len(output))
-	blocks := c.blockBuilder.BuildToolResultBlock(success, durationMs, output, false)
+	blocks := c.blockBuilder.BuildToolResultBlock(success, durationMs, output, false, toolName)
 	return c.sendBlockMessage(string(provider.EventTypeToolResult), blocks, false)
 }
 
