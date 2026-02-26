@@ -422,6 +422,19 @@ func (b *BlockBuilder) BuildToolResultBlock(success bool, durationMs int64, outp
 
 	blocks = append(blocks, resultBlock)
 
+	// Add file path context block if provided
+	if filePath != "" {
+		displayPath := truncatePath(filePath, 50)
+		blocks = append(blocks, map[string]any{
+			"type": "context",
+			"elements": []map[string]any{
+				mrkdwnText(fmt.Sprintf(":page_facing_up: *File:* %s", displayPath)),
+			},
+		})
+	}
+
+	// Add metadata context block (Duration)
+	// Only show duration if it exceeds threshold
 	// Add metadata context block (Duration)
 	if durationMs > 0 {
 		blocks = append(blocks, map[string]any{
