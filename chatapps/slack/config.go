@@ -133,10 +133,10 @@ func (c *Config) IsUserAllowed(userID string) bool {
 }
 
 // ShouldProcessChannel checks if messages from a channel should be processed
-// channelType: "dm" or "channel" or "group"
+// channelType: "dm", "im" (direct message), or "channel" or "group"
 func (c *Config) ShouldProcessChannel(channelType, channelID string) bool {
 	switch channelType {
-	case "dm":
+	case "dm", "im":
 		switch c.DMPolicy {
 		case "block":
 			return false
