@@ -108,7 +108,7 @@ func TestThrottledUpdater_Update(t *testing.T) {
 	}
 
 	// Second update with small change - should be throttled
-	text, shouldSend = u.Update("hello worl")
+	_, shouldSend = u.Update("hello worl")
 	if shouldSend {
 		t.Error("should throttle small changes")
 	}

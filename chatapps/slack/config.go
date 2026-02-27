@@ -14,11 +14,29 @@ type pairingState struct {
 	users map[string]bool
 }
 
+// ThinkingLevel defines the thinking display level
+// More granular than OpenClaw: off/minimal/low/medium/high/xhigh
+type ThinkingLevel string
+
+const (
+	ThinkingLevelOff     ThinkingLevel = "off"     // No thinking display
+	ThinkingLevelMinimal ThinkingLevel = "minimal" // Just tool names
+	ThinkingLevelLow     ThinkingLevel = "low"     // Brief status
+	ThinkingLevelMedium  ThinkingLevel = "medium"  // Standard display (default)
+	ThinkingLevelHigh    ThinkingLevel = "high"    // Detailed thinking
+	ThinkingLevelXHigh   ThinkingLevel = "xhigh"   // Full verbose
+)
+
 type Config struct {
 	BotToken      string
 	AppToken      string
 	SigningSecret string
 	SystemPrompt  string
+
+	// ThinkingLevel controls the thinking status display granularity
+	// Default: medium
+	ThinkingLevel ThinkingLevel
+
 	// Mode: "http" (default) or "socket" for WebSocket connection
 	Mode string
 	// ServerAddr: HTTP server address (e.g., ":8080")

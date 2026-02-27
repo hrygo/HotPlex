@@ -327,20 +327,17 @@ const (
 	StatusAnswer   StatusType = "answer"
 )
 
-// BuildStatusBlock builds a context block for status indicator
+// BuildStatusBlockWithLevel builds a context block for status indicator with thinking level control
 // Used for real-time status display: thinking, tool_use, answer
-// This is the primary method for status messages - updated in-place via chat.update
-func (b *BlockBuilder) BuildStatusBlock(statusType StatusType, content string) []map[string]any {
+// thinkingLevel controls the granularity of thinking display (off/minimal/low/medium/high/xhigh)
+func (b *BlockBuilder) BuildStatusBlockWithLevel(statusType StatusType, content string, thinkingLevel ThinkingLevel) []map[string]any {
 	var emoji, displayText string
 
 	switch statusType {
 	case StatusThinking:
 		emoji = ":brain:"
-		if content == "" {
-			displayText = "Thinking..."
-		} else {
-			displayText = content
-		}
+		// Apply thinking level filtering
+		displayText = filterThinkingContent(content, thinkingLevel)
 	case StatusToolUse:
 		emoji = getToolEmoji(content) // content is tool name
 		displayText = "Tool: " + content
@@ -364,6 +361,55 @@ func (b *BlockBuilder) BuildStatusBlock(statusType StatusType, content string) [
 			},
 		},
 	}
+}
+
+// filterThinkingContent filters thinking content based on thinking level
+// More granular than OpenClaw's simple on/off
+func filterThinkingContent(content string, level ThinkingLevel) string {
+	if content == "" {
+		return "Thinking..."
+	}
+
+	switch level {
+	case ThinkingLevelOff:
+		return "" // No thinking display
+	case ThinkingLevelMinimal:
+		// Extract just tool names/actions
+		if len(content) > 50 {
+			return content[:50] + "..."
+		}
+		return content
+	case ThinkingLevelLow:
+		// Brief summary
+		if len(content) > 100 {
+			return content[:100] + "..."
+		}
+		return content
+	case ThinkingLevelMedium, "":
+		// Standard display
+		if len(content) > 200 {
+			return content[:200] + "..."
+		}
+		return content
+	case ThinkingLevelHigh:
+		// Detailed, longer limit
+		if len(content) > 500 {
+			return content[:500] + "..."
+		}
+		return content
+	case ThinkingLevelXHigh:
+		// Full verbose - show all
+		return content
+	default:
+		return content
+	}
+}
+
+// BuildStatusBlock builds a context block for status indicator
+// Used for real-time status display: thinking, tool_use, answer
+// This is the primary method for status messages - updated in-place via chat.update
+func (b *BlockBuilder) BuildStatusBlock(statusType StatusType, content string) []map[string]any {
+	return b.BuildStatusBlockWithLevel(statusType, content, ThinkingLevelMedium)
 }
 
 // BuildThinkingBlock builds a context block for thinking status
