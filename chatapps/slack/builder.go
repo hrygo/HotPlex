@@ -510,7 +510,7 @@ func (b *MessageBuilder) BuildSessionStatsMessage(msg *base.ChatMessage) []slack
 	headerText := slack.NewTextBlockObject("mrkdwn", ":white_check_mark: *Done*", false, false)
 	blocks = append(blocks, slack.NewSectionBlock(headerText, nil, nil))
 
-	// Build compact stats line: ⏱️ duration • 🪙 tokens • 📝 files • 🔧 tools
+	// Build compact stats line: ⏱️ duration • 🪙 tokens in/out • 📝 files • 🔧 tools
 	if msg.Metadata != nil {
 		var stats []string
 
@@ -519,13 +519,11 @@ func (b *MessageBuilder) BuildSessionStatsMessage(msg *base.ChatMessage) []slack
 			stats = append(stats, "⏱️ "+FormatDuration(duration))
 		}
 
-		// Tokens (compact format: 1.2K)
-		if tokensIn, ok := msg.Metadata["tokens_in"].(int64); ok {
-			total := tokensIn
-			if tokensOut, ok := msg.Metadata["tokens_out"].(int64); ok {
-				total += tokensOut
-			}
-			stats = append(stats, "🪙 "+formatTokenCount(total))
+		// Tokens (show in/out separately)
+		tokensIn, hasIn := msg.Metadata["tokens_in"].(int64)
+		tokensOut, hasOut := msg.Metadata["tokens_out"].(int64)
+		if hasIn || hasOut {
+			stats = append(stats, fmt.Sprintf("🪙 %s/%s", formatTokenCount(tokensIn), formatTokenCount(tokensOut)))
 		}
 
 		// Files modified
@@ -987,7 +985,7 @@ func (b *MessageBuilder) BuildPermissionRequestMessageFromChat(msg *base.ChatMes
 	var blocks []slack.Block
 
 	// Header - per spec: header block
-	headerText := slack.NewTextBlockObject("plain_text", "⚠️ Permission Request", true, false)
+	headerText := slack.NewTextBlockObject("plain_text", ":warning: Permission Request", true, false)
 	blocks = append(blocks, slack.NewHeaderBlock(headerText))
 
 	// Tool information - per spec: section
