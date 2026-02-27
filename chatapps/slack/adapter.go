@@ -500,6 +500,7 @@ func (a *Adapter) handleEventCallback(ctx context.Context, eventData json.RawMes
 		Metadata: map[string]any{
 			"channel_id":   msgEvent.Channel,
 			"channel_type": msgEvent.ChannelType,
+			"message_ts":   msgEvent.TS, // Required for reaction feedback
 		},
 	}
 
@@ -665,6 +666,7 @@ func (a *Adapter) handleAppMentionEvent(ev *slackevents.AppMentionEvent) {
 		Timestamp: time.Now(),
 		Metadata: map[string]any{
 			"channel_id": ev.Channel,
+			"message_ts": ev.TimeStamp, // Required for reaction feedback
 		},
 	}
 
@@ -725,6 +727,7 @@ func (a *Adapter) handleSocketModeMessageEvent(ev *slackevents.MessageEvent) {
 		Metadata: map[string]any{
 			"channel_id":   ev.Channel,
 			"channel_type": ev.ChannelType,
+			"message_ts":   ev.TimeStamp, // Required for reaction feedback
 		},
 	}
 
