@@ -210,3 +210,70 @@ Slack 用户 → @mention → adapter.handleAppMentionEvent()
                                   ▼
                           slack.Client 更新消息
 ```
+
+---
+
+## 4. Engine Event → Slack Block 映射
+
+### 4.1 事件处理链
+
+所有 Engine 事件通过 `StreamCallback.Handle()` 分发到对应的处理方法：
+
+| 事件类型 | 处理方法 | MessageBuilder 方法 |
+|---------|---------|-------------------|
+| `thinking` | `handleThinking()` | `BuildThinkingMessage()` |
+| `tool_use` | `handleToolUse()` | `BuildToolUseMessage()` |
+| `tool_result` | `handleToolResult()` | `BuildToolResultMessage()` |
+| `answer` | `handleAnswer()` | `BuildAnswerMessage()` |
+| `error` | `handleError()` | `BuildErrorMessage()` |
+| `plan_mode` | `handlePlanMode()` | `BuildPlanModeMessage()` |
+| `exit_plan_mode` | `handleExitPlanMode()` | `BuildExitPlanModeMessage()` |
+| `ask_user_question` | `handleAskUserQuestion()` | `BuildAskUserQuestionMessage()` |
+| `permission_request` | `handlePermissionRequest()` | `BuildPermissionRequestMessageFromChat()` |
+| `command_progress` | `handleCommandProgress()` | `BuildCommandProgressMessage()` |
+| `command_complete` | `handleCommandComplete()` | `BuildCommandCompleteMessage()` |
+| `session_start` | `handleSessionStart()` | `BuildSessionStartMessage()` |
+| `engine_starting` | `handleEngineStarting()` | `BuildEngineStartingMessage()` |
+| `user_message_received` | `handleUserMessageReceived()` | `BuildUserMessageReceivedMessage()` |
+| `system` | `handleSystem()` | `BuildSystemMessage()` |
+| `user` | `handleUser()` | `BuildUserMessage()` |
+| `step_start` | `handleStepStart()` | `BuildStepStartMessage()` |
+| `step_finish` | `handleStepFinish()` | `BuildStepFinishMessage()` |
+| `raw` | `handleRaw()` | `BuildRawMessage()` |
+| `result` | `handleSessionStats()` | `BuildSessionStatsMessage()` |
+| `danger_block` | `handleDangerBlock()` | `BuildDangerBlockMessage()` |
+
+### 4.2 SDK First 规范
+
+所有 Block Kit 构建使用 `slack-go` SDK 类型：
+
+```go
+// ✅ 正确：使用 SDK 类型
+section := slack.NewSectionBlock(
+    slack.NewTextBlockObject(slack.MarkdownType, content, false, false),
+    nil, nil,
+)
+header := slack.NewHeaderBlock(
+    slack.NewTextBlockObject(slack.PlainTextType, "Title", false, false),
+)
+btn := slack.NewButtonBlockElement("action_id", "value",
+    slack.NewTextBlockObject(slack.PlainTextType, "Button", false, false))
+
+// ❌ 禁止：使用 map[string]any
+block := map[string]any{
+    "type": "section",
+    "text": map[string]any{"type": "mrkdwn", "text": "hello"},
+}
+```
+
+---
+
+## 5. 相关文件
+
+| 文件 | 职责 |
+|------|------|
+| `chatapps/slack/adapter.go` | Slack 适配器，处理双向通信 |
+| `chatapps/slack/builder.go` | MessageBuilder，事件 → Block Kit 转换 |
+| `chatapps/engine_handler.go` | StreamCallback，Engine 事件处理 |
+| `chatapps/base/types.go` | MessageType 枚举定义 |
+| `provider/event.go` | ProviderEventType 枚举定义 |

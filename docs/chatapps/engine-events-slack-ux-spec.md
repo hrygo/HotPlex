@@ -1,8 +1,9 @@
 # Engine Events Slack UI/UX 规范
 
-> **状态**: ✅ 已确认
+> **状态**: ✅ 已实现
 > **最后更新**: 2026-02-27
 > **生效范围**: HotPlex ChatApps Slack Adapter
+> **验证状态**: 所有 21 种事件类型端到端流程已验证完整
 
 ---
 
@@ -633,20 +634,20 @@ client.ReactionsAdd(
 
 ## 实施检查清单
 
-### 高优先级 (P0)
+### 高优先级 (P0) - ✅ 全部完成
 
 - [x] EventTypeResult - Turn 完成事件 ✅ (已实现为 MessageTypeSessionStats)
 - [x] EventTypeCommandProgress - 命令进度事件 ✅
 - [x] EventTypeCommandComplete - 命令完成事件 ✅
 
-### 中优先级 (P1)
+### 中优先级 (P1) - ✅ 全部完成
 
 - [x] EventTypeThinking - 改用 context block ✅
 - [x] EventTypeToolUse - 改用 fields 双列布局，参数摘要 12 字符 ✅
 - [x] EventTypeToolResult - 添加数据长度展示 ✅
 - [x] EventTypeError - 添加引用格式 ✅
 
-### 低优先级 (P2)
+### 低优先级 (P2) - ✅ 全部完成
 
 - [x] EventTypeSystem - 系统消息 ✅
 - [x] EventTypeUser - 用户消息反射 ✅
@@ -654,13 +655,20 @@ client.ReactionsAdd(
 - [x] EventTypeRaw - 原始输出（仅展示类型和长度） ✅
 - [x] EventTypePlanMode - 改用 context block ✅
 
-### UX 优化 (0.x)
+### UX 优化 (0.x) - ✅ 全部完成
 
 - [x] EventTypeSessionStart (0.4) - 会话启动事件 ✅
 - [x] EventTypeEngineStarting (0.5) - 引擎启动中事件 ✅
 - [x] EventTypeUserMessageReceived (0.6) - 消息已收到事件 ✅
-- [ ] Slack Typing Indicator (0.1) - ⚠️ Slack SDK 不直接支持，使用 reactions 替代
+- [x] Slack Typing Indicator (0.1) - ✅ 使用 reactions 替代 (SDK 不直接支持)
 - [x] Slack Reactions 反馈 (0.2) - ✅ (AddReactionSDK 已实现)
+
+### 双向流程验证 - ✅ 完成
+
+- [x] Engine → Slack 事件流向完整
+- [x] Slack → Engine 反向流程完整
+- [x] SDK First 规范符合
+- [x] 无死代码
 
 ---
 
@@ -668,12 +676,14 @@ client.ReactionsAdd(
 
 | 文件 | 说明 |
 |------|------|
-| `chatapps/slack/builder.go` | Slack 消息构建器实现 |
-| `chatapps/engine_handler.go` | 事件处理核心逻辑 |
+| `chatapps/slack/adapter.go` | Slack 适配器，处理双向通信 |
+| `chatapps/slack/builder.go` | MessageBuilder，21 种事件 → Block Kit 转换 |
+| `chatapps/engine_handler.go` | StreamCallback，Engine 事件处理分发 |
+| `chatapps/base/types.go` | MessageType 枚举定义 (21 种) |
 | `provider/event.go` | ProviderEventType 枚举定义 |
-| `docs/chatapps/engine-events-slack-mapping.md` | 参考方案 (仅供参考) |
 
 ---
 
 **维护者**: HotPlex Team
 **最后确认**: 2026-02-27
+**验证**: Engine → Slack 双向流程完整，所有事件类型已实现

@@ -103,6 +103,68 @@ type ChatMessage struct {
 
 ---
 
-## 6. 相关文档 (Reference)
+## 6. 事件类型映射 (Event Types)
+
+### 6.1 支持的事件类型
+
+HotPlex Engine 定义了 21 种事件类型，全部已在 Slack 平台实现：
+
+| 事件类型 | 说明 | Block 类型 | 状态 |
+|---------|------|-----------|------|
+| `thinking` | AI 推理中 | context | ✅ |
+| `answer` | AI 文本输出 | section | ✅ |
+| `tool_use` | 工具调用开始 | section | ✅ |
+| `tool_result` | 工具执行结果 | section | ✅ |
+| `error` | 错误发生 | section | ✅ |
+| `result` | Turn 完成 | section+context | ✅ |
+| `plan_mode` | 计划生成中 | context | ✅ |
+| `exit_plan_mode` | 请求批准计划 | header+actions | ✅ |
+| `ask_user_question` | 询问用户问题 | section+actions | ✅ |
+| `permission_request` | 权限请求 | header+actions | ✅ |
+| `danger_block` | 危险操作拦截 | section+actions | ✅ |
+| `command_progress` | 命令执行进度 | section+context+actions | ✅ |
+| `command_complete` | 命令执行完成 | section+context | ✅ |
+| `session_start` | 会话启动 | section+context | ✅ |
+| `engine_starting` | 引擎启动中 | context | ✅ |
+| `user_message_received` | 消息已收到 | context | ✅ |
+| `system` | 系统级消息 | context | ✅ |
+| `user` | 用户消息反射 | section+context | ✅ |
+| `step_start` | 步骤开始 | section+context | ✅ |
+| `step_finish` | 步骤完成 | section+context | ✅ |
+| `raw` | 原始输出 | section | ✅ |
+
+### 6.2 数据流架构
+
+```
+Engine Event (provider/event.go)
+    │
+    ▼
+StreamCallback.Handle() (engine_handler.go)
+    │
+    ▼
+handleXxx() → base.ChatMessage{Type: MessageTypeXxx}
+    │
+    ▼
+AdapterManager.SendMessage()
+    │
+    ▼
+Adapter.defaultSender() (adapter.go)
+    │
+    ▼
+MessageBuilder.Build(msg) (builder.go)
+    │
+    ▼
+BuildXxxMessage() → []slack.Block
+    │
+    ▼
+slack.Client.PostMessageContext()
+    │
+    ▼
+Slack Channel
+```
+
+---
+
+## 7. 相关文档 (Reference)
 - [Slack 架构深度解析](./chatapps-slack.md)
-- [平台事件映射指南](./engine-events-slack-mapping.md)
+- [Slack UX 规范](./engine-events-slack-ux-spec.md)

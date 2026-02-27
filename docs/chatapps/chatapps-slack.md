@@ -88,3 +88,52 @@ HotPlex 内置了两个强大的运维指令，请手动在 `Slash Commands` 页
 *   **私聊没反应？** 确认 `App Home` 里的聊天框开关已打开。
 *   **机器人不理我？** 邀请它进入频道：`/invite @机器人名字`。
 *   **Token 错误？** 检查 `xoxb` 和 `xapp` 是否混淆，`xapp` 必须在 `Basic Information` 下生成。
+
+---
+
+## 🎯 支持的事件类型
+
+HotPlex 完整支持 21 种 Engine 事件类型在 Slack 上的渲染：
+
+### UX 优化事件 (即时反馈)
+| 事件 | Emoji | 说明 |
+|------|-------|------|
+| `session_start` | :rocket: | 会话启动/冷启动 |
+| `engine_starting` | :hourglass: | 引擎启动中 |
+| `user_message_received` | :inbox: | 消息已收到 |
+| `thinking` | :brain: | AI 推理中 |
+
+### 核心交互事件
+| 事件 | Emoji | Block 类型 | 说明 |
+|------|-------|-----------|------|
+| `answer` | - | section | AI 文本输出 |
+| `tool_use` | :computer: | section | 工具调用开始 |
+| `tool_result` | :white_check_mark: | section | 工具执行结果 |
+| `error` | :warning: | section | 错误发生 |
+| `result` | :white_check_mark: | section+context | Turn 完成 |
+
+### 交互按钮事件
+| 事件 | Emoji | Block 类型 | 按钮 |
+|------|-------|-----------|------|
+| `permission_request` | :warning: | header+actions | Allow/Deny |
+| `exit_plan_mode` | :clipboard: | header+actions | Approve/Deny |
+| `ask_user_question` | :question: | section+actions | Options |
+| `danger_block` | :rotating_light: | section+actions | Confirm/Cancel |
+
+### 命令事件
+| 事件 | Emoji | 说明 |
+|------|-------|------|
+| `command_progress` | :gear: | 命令执行进度 |
+| `command_complete` | :white_check_mark: | 命令执行完成 |
+
+### 其他事件
+| 事件 | Emoji | 说明 |
+|------|-------|------|
+| `system` | :gear: | 系统级消息 |
+| `user` | :bust_in_silhouette: | 用户消息反射 |
+| `step_start` | :arrow_right: | 步骤开始 (OpenCode) |
+| `step_finish` | :white_check_mark: | 步骤完成 (OpenCode) |
+| `plan_mode` | :mag_right: | 计划生成中 |
+| `raw` | :page_facing_up: | 原始输出 |
+
+> 💡 详细 UX 规范请参考 [engine-events-slack-ux-spec.md](./engine-events-slack-ux-spec.md)
