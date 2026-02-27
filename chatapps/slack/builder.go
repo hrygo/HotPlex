@@ -523,7 +523,7 @@ func (b *MessageBuilder) BuildSessionStatsMessage(msg *base.ChatMessage) []slack
 		tokensIn, hasIn := msg.Metadata["tokens_in"].(int64)
 		tokensOut, hasOut := msg.Metadata["tokens_out"].(int64)
 		if hasIn || hasOut {
-			stats = append(stats, fmt.Sprintf("🪙 %s/%s", formatTokenCount(tokensIn), formatTokenCount(tokensOut)))
+			stats = append(stats, fmt.Sprintf("⚡ %s/%s", formatTokenCount(tokensIn), formatTokenCount(tokensOut)))
 		}
 
 		// Files modified
