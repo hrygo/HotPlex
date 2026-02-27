@@ -1,5 +1,65 @@
 # CHANGELOG.md
 
+## [v0.13.0] - 2026-02-28
+
+### ✨ Major Features: Complete Slack UX Implementation
+
+This release delivers a production-ready Slack UX experience with real-time feedback, session lifecycle events, and comprehensive panic recovery. The ChatApps layer now provides seamless visual feedback for AI agent activities.
+
+### Added
+- **Complete Slack UX Event System** - Full implementation per UX spec
+  - `Thinking` event: Context block with streaming updates and visual indicator
+  - `Tool Use` event: Section block with tool-specific emoji and aggregation
+  - `Tool Result` event: Duration display and file path handling
+  - `Answer` event: Throttled markdown streaming (1/sec)
+  - `Session Summary`: Compact view with ⚡ tokens (In/Out separately)
+  - `Session Lifecycle`: `SessionStart` / `SessionEnd` events for state tracking
+- **Real-Time Typing Feedback** - Slack native typing indicator during AI response
+- **`#command` Prefix Support** - Thread-local slash commands via `#reset`, `#clear`
+- **Direct Message Support** - Proper handling of `im` channel type for DMs
+- **Panic Recovery System** - Production-grade goroutine panic handling
+  - New `internal/panicx` package with `RecoverableGoroutine`
+  - Stack trace capture and structured logging
+  - Graceful degradation instead of silent failures
+- **SDK-First Development Rule** - New `.agent/rules/chatapps-sdk-first.md`
+  - Mandates official platform SDKs over custom implementations
+  - Prohibits redundant signature verification, rate limiting code
+
+### Changed
+- **Thinking Message Management** - Update existing message instead of creating new ones
+- **Session Summary Style** - Simplified to Duration + ⚡ Tokens (In/Out)
+- **RateLimiter Unification** - Single `golang.org/x/time/rate` across all chatapps
+- **Go Version** - Upgraded to Go 1.25 in CI workflow
+
+### Fixed
+- **Socket Mode AppToken** - Properly pass AppToken to Slack SDK
+- **@mention Routing** - Correctly route @mention and #command messages to handler
+- **Quick CLI Response** - Delete thinking message when CLI responds immediately
+- **Link Checker** - Limit to docs-site and scripts directories only
+
+### Documentation
+- **Slack UX Spec** - Consolidated research docs into unified spec (`docs/chatapps/engine-events-slack-mapping.md`)
+- **Claude CLI Verification** - Added verification scripts for reset command, plan mode, and ask user features
+
+### Technical Details
+- **Files Changed**: 72 files
+- **Lines Added**: +7,905
+- **Lines Removed**: -6,657
+- **New Package**: `internal/panicx` with 246 lines of tests
+- **Test Coverage**: All packages passing
+
+### Breaking Changes
+- None - Backward compatible
+
+### Contributors
+- [@hrygo](https://github.com/hrygo)
+
+### Related
+- **Spec**: [Slack Block Kit Mapping](docs/chatapps/engine-events-slack-mapping.md)
+- **Rule**: [ChatApps SDK First](.agent/rules/chatapps-sdk-first.md)
+
+---
+
 ## [v0.12.1] - 2026-02-26
 
 ### ✨ Major Features: Slack Block Kit Implementation
