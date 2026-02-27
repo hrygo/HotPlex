@@ -442,11 +442,13 @@ func (c *StreamCallback) updateStatusMessage(statusType base.MessageType, displa
 	if c.isFirst {
 		// First status event - create new message
 		c.isFirst = false
-		c.thinkingSent = true
 		c.currentStatus = statusType
 
 		// Send new message and capture ts for future updates
 		if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+			// Reset state on send failure to allow retry
+			c.isFirst = true
+			c.currentStatus = ""
 			return err
 		}
 
@@ -456,7 +458,13 @@ func (c *StreamCallback) updateStatusMessage(statusType base.MessageType, displa
 			if channelID, ok := msg.Metadata["channel_id"].(string); ok {
 				c.thinkingChannelID = channelID
 			}
+			// Only set thinkingSent=true AFTER successful send and TS capture
+			c.thinkingSent = true
 			c.logger.Debug("Captured status message ts for updates", "ts", ts, "channel_id", c.thinkingChannelID)
+		} else {
+			// TS not captured - log warning but still mark as sent
+			c.logger.Warn("Failed to capture status message ts, updates may not work")
+			c.thinkingSent = true
 		}
 
 		return nil
@@ -631,6 +639,22 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
+
+	// Initialize stream state on first answer for throttled updates
+	if c.streamState == nil {
+		channelID := ""
+		if c.metadata != nil {
+			if ch, ok := c.metadata["channel_id"].(string); ok {
+				channelID = ch
+			}
+		}
+		if channelID != "" {
+			c.streamState = &StreamState{
+				ChannelID: channelID,
+				// MessageTS will be set after first send
+			}
+		}
+	}
 
 	// Use throttled streaming update if we have a message to update
 	if c.streamState != nil {
@@ -975,6 +999,10 @@ func (c *StreamCallback) copyMessageMetadata() map[string]any {
 		}
 		if messageID, ok := c.metadata["message_id"]; ok {
 			metadata["message_id"] = messageID
+		}
+		// Include message_ts for reaction updates and message tracking
+		if messageTS, ok := c.metadata["message_ts"]; ok {
+			metadata["message_ts"] = messageTS
 		}
 	}
 	return metadata

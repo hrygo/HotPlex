@@ -666,8 +666,10 @@ func (a *Adapter) handleAppMentionEvent(ev *slackevents.AppMentionEvent) {
 		MessageID: ev.TimeStamp,
 		Timestamp: time.Now(),
 		Metadata: map[string]any{
-			"channel_id": ev.Channel,
-			"message_ts": ev.TimeStamp, // Required for reaction feedback
+			"channel_id":   ev.Channel,
+			"channel_type": "channel", // App mentions are always in channels
+			"message_ts":   ev.TimeStamp,
+			"thread_ts":    ev.ThreadTimeStamp, // May be empty if not in thread
 		},
 	}
 
