@@ -542,11 +542,38 @@ func (r *Engine) dispatchNormalizedCallback(pevt *provider.ProviderEvent, callba
 		return callback("tool_use", event.NewEventWithMeta("tool_use", pevt.ToolName, meta))
 
 	case provider.EventTypeToolResult:
+		// Get tool name from stats before RecordToolResult resets it
+		// This handles the case where Claude CLI doesn't include tool_name in tool_result
+		statsToolName := stats.GetCurrentToolName()
+		statsToolID := stats.GetCurrentToolID()
 		dur := stats.RecordToolResult()
+
+		// Use provider's tool_name if available, otherwise fallback to stats
+		toolName := pevt.ToolName
+		if toolName == "" {
+			toolName = statsToolName
+		}
+		toolID := pevt.ToolID
+		if toolID == "" {
+			toolID = statsToolID
+		}
+		// Default status to "success" if not set
+		status := pevt.Status
+		if status == "" {
+			status = "success"
+		}
+
+		r.logger.Debug("[RUNNER] tool_result resolved",
+			"tool_name", toolName,
+			"stats_tool_name", statsToolName,
+			"provider_tool_name", pevt.ToolName,
+			"status", status,
+			"duration_ms", dur)
+
 		meta := &event.EventMeta{
-			ToolName:        pevt.ToolName,
-			ToolID:          pevt.ToolID,
-			Status:          pevt.Status,
+			ToolName:        toolName,
+			ToolID:          toolID,
+			Status:          status,
 			DurationMs:      dur,
 			TotalDurationMs: totalDur,
 			OutputSummary:   types.TruncateString(pevt.Content, 500),

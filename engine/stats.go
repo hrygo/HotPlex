@@ -35,6 +35,22 @@ type SessionStats struct {
 	hasGeneration   bool      `json:"-"` // Tracks if any content was generated
 }
 
+// GetCurrentToolName returns the current tool name being tracked.
+// Returns empty string if no tool is currently being tracked.
+func (s *SessionStats) GetCurrentToolName() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentToolName
+}
+
+// GetCurrentToolID returns the current tool ID being tracked.
+// Returns empty string if no tool is currently being tracked.
+func (s *SessionStats) GetCurrentToolID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentToolID
+}
+
 // RecordToolUse records the start of a tool call.
 func (s *SessionStats) RecordToolUse(toolName, toolID string) {
 	s.mu.Lock()

@@ -2,6 +2,7 @@ package slack
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -9,6 +10,28 @@ import (
 	"github.com/hrygo/hotplex/provider"
 	"github.com/slack-go/slack"
 )
+
+// controlCharRegex matches control characters that can break Slack blocks
+var controlCharRegex = regexp.MustCompile(`[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]`)
+
+// sanitizeCodeContent cleans content for safe display in Slack code blocks
+// - Removes control characters that can break blocks
+// - Handles triple backticks by replacing with single backticks
+// - Ensures content fits within Slack limits
+func sanitizeCodeContent(content string, maxLen int) string {
+	// Remove control characters
+	content = controlCharRegex.ReplaceAllString(content, "")
+
+	// Replace triple backticks with single backticks to avoid breaking the code block
+	content = strings.ReplaceAll(content, "```", "`")
+
+	// Truncate if needed, leaving room for code block markers and truncation notice
+	if maxLen > 0 && len(content) > maxLen {
+		content = content[:maxLen] + "\n... (truncated)"
+	}
+
+	return content
+}
 
 // MessageBuilder builds Slack-specific messages from platform-agnostic ChatMessage
 type MessageBuilder struct {
@@ -148,10 +171,9 @@ func (b *MessageBuilder) BuildToolUseMessage(msg *base.ChatMessage) []slack.Bloc
 
 	if input != "" && len(input) > 12 {
 		detailText := fmt.Sprintf("%s %s", toolEmoji, "*Using tool:* `"+toolName+"`")
-		if len(input) > 200 {
-			input = input[:200] + "..."
-		}
-		detailText += fmt.Sprintf("\n```\n%s\n```", input)
+		// Sanitize input for code block display
+		safeInput := sanitizeCodeContent(input, 200)
+		detailText += fmt.Sprintf("\n```\n%s\n```", safeInput)
 		mrkdwn := slack.NewTextBlockObject("mrkdwn", detailText, false, false)
 		blocks = append(blocks, slack.NewSectionBlock(mrkdwn, nil, nil))
 	}
@@ -255,10 +277,9 @@ func (b *MessageBuilder) BuildToolResultMessage(msg *base.ChatMessage) []slack.B
 	// Add content if not empty
 	content := msg.Content
 	if content != "" {
-		// Truncate if too long for display
-		if len(content) > 3000 {
-			content = content[:3000] + "\n... (truncated)"
-		}
+		// Sanitize content: remove control chars, handle backticks, truncate
+		// Max length 2900 to leave room for code block markers
+		content = sanitizeCodeContent(content, 2900)
 		// Format as code block
 		codeText := slack.NewTextBlockObject("mrkdwn", "```\n"+content+"\n```", false, false)
 		blocks = append(blocks, slack.NewSectionBlock(codeText, nil, nil))
