@@ -227,6 +227,41 @@ func (r *Engine) executeWithMultiplex(
 		return fmt.Errorf("get or create session: %w", err)
 	}
 
+	// Send session lifecycle events for UX feedback
+	// These events provide immediate feedback to users about session state
+	if callback != nil {
+		callbackSafe := event.WrapSafe(r.logger, callback)
+
+		// Send user_message_received to acknowledge receipt immediately
+		if callbackSafe != nil {
+			_ = callbackSafe("user_message_received", event.NewEventWithMeta(
+				"user_message_received",
+				"Message received",
+				&event.EventMeta{Status: "received"},
+			))
+		}
+
+		// Send session_start event on Cold Start (new session creation)
+		if created && callbackSafe != nil {
+			r.logger.Debug("Engine: sending session_start event for cold start",
+				"namespace", r.opts.Namespace,
+				"session_id", cfg.SessionID)
+
+			_ = callbackSafe("session_start", event.NewEventWithMeta(
+				"session_start",
+				"Starting new session...",
+				&event.EventMeta{Status: "starting"},
+			))
+
+			// Send engine_starting event to indicate CLI is being initialized
+			_ = callbackSafe("engine_starting", event.NewEventWithMeta(
+				"engine_starting",
+				"Initializing AI engine...",
+				&event.EventMeta{Status: "initializing"},
+			))
+		}
+	}
+
 	// Initialize or fetch persistent SessionStats
 	var stats *SessionStats
 	if ext := sess.GetExt(); ext != nil {

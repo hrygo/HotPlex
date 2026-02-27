@@ -918,66 +918,6 @@ func (b *MessageBuilder) BuildPlanCancelledBlock(reason string) []slack.Block {
 // Permission Request Messages (Interactive Callbacks)
 // =============================================================================
 
-// BuildPermissionRequestMessage builds Slack blocks for a permission request
-// Displays tool name, command preview, and approval/denial buttons
-func (b *MessageBuilder) BuildPermissionRequestMessage(req *provider.PermissionRequest, sessionID string) []slack.Block {
-	tool, input := req.GetToolAndInput()
-
-	// Sanitize and truncate commands for preview
-	safeInput := SanitizeCommand(input)
-	displayInput := safeInput
-	if RuneCount(displayInput) > 500 {
-		displayInput = TruncateByRune(displayInput, 497) + "..."
-	}
-
-	var blocks []slack.Block
-
-	// Header
-	headerText := slack.NewTextBlockObject("plain_text", "⚠️ Permission Request", true, false)
-	blocks = append(blocks, slack.NewHeaderBlock(headerText))
-
-	// Tool information
-	if tool != "" {
-		toolText := slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Tool:* `%s`", tool), false, false)
-		blocks = append(blocks, slack.NewSectionBlock(toolText, nil, nil))
-	}
-
-	// Command/Action preview
-	if displayInput != "" {
-		cmdText := slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Command:*\n```\n%s\n```", displayInput), false, false)
-		blocks = append(blocks, slack.NewSectionBlock(cmdText, nil, nil))
-	}
-
-	// Decision reason (if available)
-	if req.Decision != nil && req.Decision.Reason != "" {
-		reasonText := slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Reason:* %s", req.Decision.Reason), false, false)
-		blocks = append(blocks, slack.NewContextBlock("", []slack.MixedElement{
-			reasonText,
-		}...))
-	}
-
-	// Session info
-	sessionText := slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("Session: `%s`", sessionID), false, false)
-	blocks = append(blocks, slack.NewContextBlock("", []slack.MixedElement{
-		sessionText,
-	}...))
-
-	// Action buttons with validated block_id
-	blockID := ValidateBlockID(fmt.Sprintf("perm_%s", req.MessageID))
-
-	approveBtn := slack.NewButtonBlockElement("perm_allow", fmt.Sprintf("allow:%s:%s", sessionID, req.MessageID),
-		slack.NewTextBlockObject("plain_text", "✅ Allow", true, false))
-	approveBtn.Style = "primary"
-
-	denyBtn := slack.NewButtonBlockElement("perm_deny", fmt.Sprintf("deny:%s:%s", sessionID, req.MessageID),
-		slack.NewTextBlockObject("plain_text", "🚫 Deny", true, false))
-	denyBtn.Style = "danger"
-
-	blocks = append(blocks, slack.NewActionBlock(blockID, approveBtn, denyBtn))
-
-	return blocks
-}
-
 // BuildPermissionRequestMessageFromChat builds Slack blocks for a permission request from ChatMessage
 // This is the main entry point for the Build() switch statement
 // Implements EventTypePermissionRequest per spec (7)

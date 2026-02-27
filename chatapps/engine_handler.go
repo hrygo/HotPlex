@@ -1051,7 +1051,9 @@ func (s *StreamState) updateThrottled(ctx context.Context, adapters *AdapterMana
 		s.mu.Unlock()
 		return nil
 	}
-	s.LastUpdated = time.Time{} // Mark as updating
+	// Set timestamp immediately to prevent race condition
+	// Other goroutines will be throttled while we're sending
+	s.LastUpdated = time.Now()
 	s.mu.Unlock()
 
 	// Add thread_ts and channel_id if present in metadata
