@@ -928,21 +928,39 @@ func (a *Adapter) handleBlockActions(callback *SlackInteractionCallback, w http.
 		"channel_id", channelID,
 	)
 
+	actionID := action.ActionID
+
 	// Check if this is a permission request callback
-	if action.ActionID == "perm_allow" || action.ActionID == "perm_deny" {
+	// Format: perm_allow:{sessionID}:{messageID} or perm_deny:{sessionID}:{messageID}
+	if strings.HasPrefix(actionID, "perm_allow:") || strings.HasPrefix(actionID, "perm_deny:") {
 		a.handlePermissionCallback(callback, action, w)
 		return
 	}
 
 	// Check if this is a plan mode callback
-	if action.ActionID == "plan_approve" || action.ActionID == "plan_modify" || action.ActionID == "plan_cancel" {
+	// Format: plan_approve, plan_modify, plan_cancel
+	if actionID == "plan_approve" || actionID == "plan_modify" || actionID == "plan_cancel" {
 		a.handlePlanModeCallback(callback, action, w)
+		return
+	}
+
+	// Check if this is a danger block callback
+	// Format: danger_confirm:{sessionID} or danger_cancel:{sessionID}
+	if strings.HasPrefix(actionID, "danger_confirm") || strings.HasPrefix(actionID, "danger_cancel") {
+		a.handleDangerBlockCallback(callback, action, w)
+		return
+	}
+
+	// Check if this is an ask user question callback
+	// Format: question_option_{i}
+	if strings.HasPrefix(actionID, "question_option_") {
+		a.handleAskUserQuestionCallback(callback, action, w)
 		return
 	}
 
 	// Handle other block actions here
 	a.Logger().Info("Unhandled block action",
-		"action_id", action.ActionID,
+		"action_id", actionID,
 		"value", action.Value,
 	)
 
@@ -950,45 +968,76 @@ func (a *Adapter) handleBlockActions(callback *SlackInteractionCallback, w http.
 }
 
 // handlePermissionCallback handles permission approval/denial button clicks
+// ActionID format: perm_allow:{sessionID}:{messageID} or perm_deny:{sessionID}:{messageID}
+// Value format: "allow" or "deny"
 func (a *Adapter) handlePermissionCallback(callback *SlackInteractionCallback, action SlackAction, w http.ResponseWriter) {
 	userID := callback.User.ID
 	channelID := callback.Channel.ID
 	messageTS := callback.Message.Ts
-	_ = messageTS // Reserved for future use
-	value := action.Value
+	actionID := action.ActionID
 
 	a.Logger().Info("Permission callback received",
 		"user_id", userID,
 		"channel_id", channelID,
 		"message_ts", messageTS,
-		"value", value,
-		"action_id", action.ActionID,
+		"action_id", actionID,
 	)
 
-	// Parse and validate value: "allow:sessionID:messageID" or "deny:sessionID:messageID"
-	behavior, sessionID, messageID, err := ValidateButtonValue(value)
-	if err != nil {
-		a.Logger().Error("Invalid permission button value", "value", value, "error", err)
+	// Parse actionID: perm_allow:{sessionID}:{messageID} or perm_deny:{sessionID}:{messageID}
+	parts := strings.Split(actionID, ":")
+	if len(parts) < 3 {
+		a.Logger().Error("Invalid permission action_id format", "action_id", actionID)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
+	behavior := parts[0] // "perm_allow" or "perm_deny"
+	sessionID := parts[1]
+	messageID := parts[2]
+
+	// Map behavior to actual permission response
+	var permissionBehavior string
+	if strings.HasSuffix(behavior, "allow") {
+		permissionBehavior = "allow"
+	} else {
+		permissionBehavior = "deny"
+	}
+
+	// Send permission response to engine via stdin
+	if a.eng != nil {
+		if sess, ok := a.eng.GetSession(sessionID); ok {
+			response := map[string]any{
+				"type":       "permission_response",
+				"message_id": messageID,
+				"behavior":   permissionBehavior,
+			}
+			if err := sess.WriteInput(response); err != nil {
+				a.Logger().Error("Failed to send permission response to engine", "error", err)
+			} else {
+				a.Logger().Info("Sent permission response to engine",
+					"session_id", sessionID,
+					"behavior", permissionBehavior)
+			}
+		} else {
+			a.Logger().Warn("Session not found for permission response", "session_id", sessionID)
+		}
+	}
+
 	// Use MessageBuilder for creating response blocks
 	var slackBlocks []slack.Block
-
-	if behavior == "allow" {
+	if permissionBehavior == "allow" {
 		slackBlocks = a.messageBuilder.BuildPermissionApprovedMessage("", "")
 	} else {
 		slackBlocks = a.messageBuilder.BuildPermissionDeniedMessage("", "", "User denied permission")
 	}
 
-	// Update the Slack message using SDK (no conversion needed)
+	// Update the Slack message using SDK
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
 		a.Logger().Error("Update message failed", "error", err)
 	}
 
 	a.Logger().Info("Permission request processed",
-		"behavior", behavior,
+		"behavior", permissionBehavior,
 		"session_id", sessionID,
 		"message_id", messageID,
 	)
@@ -1064,6 +1113,133 @@ func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, act
 		"action", actionType,
 		"session_id", sessionID,
 	)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleDangerBlockCallback handles danger block confirmation button clicks
+// ActionID format: danger_confirm:{sessionID} or danger_cancel:{sessionID}
+func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, action SlackAction, w http.ResponseWriter) {
+	userID := callback.User.ID
+	channelID := callback.Channel.ID
+	messageTS := callback.Message.Ts
+	actionID := action.ActionID
+
+	a.Logger().Info("Danger block callback received",
+		"user_id", userID,
+		"channel_id", channelID,
+		"message_ts", messageTS,
+		"action_id", actionID,
+	)
+
+	// Parse actionID: danger_confirm:{sessionID} or danger_cancel:{sessionID}
+	parts := strings.Split(actionID, ":")
+	if len(parts) < 2 {
+		a.Logger().Error("Invalid danger action_id format", "action_id", actionID)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	behavior := parts[0] // "danger_confirm" or "danger_cancel"
+	sessionID := parts[1]
+
+	// Map behavior to actual response
+	var permissionBehavior string
+	if strings.HasPrefix(behavior, "danger_confirm") {
+		permissionBehavior = "allow"
+	} else {
+		permissionBehavior = "deny"
+	}
+
+	// Send response to engine via stdin
+	if a.eng != nil {
+		if sess, ok := a.eng.GetSession(sessionID); ok {
+			response := map[string]any{
+				"type":     "danger_response",
+				"behavior": permissionBehavior,
+			}
+			if err := sess.WriteInput(response); err != nil {
+				a.Logger().Error("Failed to send danger response to engine", "error", err)
+			} else {
+				a.Logger().Info("Sent danger response to engine",
+					"session_id", sessionID,
+					"behavior", permissionBehavior)
+			}
+		} else {
+			a.Logger().Warn("Session not found for danger response", "session_id", sessionID)
+		}
+	}
+
+	// Update the Slack message to show the action taken
+	statusText := ":white_check_mark: Confirmed"
+	if permissionBehavior == "deny" {
+		statusText = ":x: Cancelled"
+	}
+	statusObj := slack.NewTextBlockObject("mrkdwn", statusText, false, false)
+	slackBlocks := []slack.Block{slack.NewSectionBlock(statusObj, nil, nil)}
+
+	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
+		a.Logger().Error("Update message failed", "error", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleAskUserQuestionCallback handles ask user question option selection
+// ActionID format: question_option_{i}
+func (a *Adapter) handleAskUserQuestionCallback(callback *SlackInteractionCallback, action SlackAction, w http.ResponseWriter) {
+	userID := callback.User.ID
+	channelID := callback.Channel.ID
+	messageTS := callback.Message.Ts
+	actionID := action.ActionID
+	value := action.Value
+
+	a.Logger().Info("Ask user question callback received",
+		"user_id", userID,
+		"channel_id", channelID,
+		"message_ts", messageTS,
+		"action_id", actionID,
+		"value", value,
+	)
+
+	// Parse actionID: question_option_{i}
+	// The value contains the selected option index or text
+	selectedOption := value
+	if selectedOption == "" {
+		// Try to extract from actionID
+		if strings.HasPrefix(actionID, "question_option_") {
+			selectedOption = strings.TrimPrefix(actionID, "question_option_")
+		}
+	}
+
+	// Send response to engine via stdin
+	// The sessionID should be stored in the message metadata or derived from channel/user
+	baseSession := a.FindSessionByUserAndChannel(userID, channelID)
+	if baseSession != nil && a.eng != nil {
+		if sess, ok := a.eng.GetSession(baseSession.SessionID); ok {
+			response := map[string]any{
+				"type":    "question_response",
+				"option":  selectedOption,
+				"user_id": userID,
+			}
+			if err := sess.WriteInput(response); err != nil {
+				a.Logger().Error("Failed to send question response to engine", "error", err)
+			} else {
+				a.Logger().Info("Sent question response to engine",
+					"session_id", baseSession.SessionID,
+					"option", selectedOption)
+			}
+		}
+	}
+
+	// Update the Slack message to show the selection
+	statusText := fmt.Sprintf(":white_check_mark: Selected: %s", selectedOption)
+	statusObj := slack.NewTextBlockObject("mrkdwn", statusText, false, false)
+	slackBlocks := []slack.Block{slack.NewSectionBlock(statusObj, nil, nil)}
+
+	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
+		a.Logger().Error("Update message failed", "error", err)
+	}
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -1386,16 +1562,22 @@ func (a *Adapter) handleCommandProgress(channelID string, progressTS *string, ev
 
 	blocks := a.messageBuilder.Build(msg)
 	if len(blocks) == 0 {
+		a.Logger().Debug("No blocks generated for command progress", "event_type", eventType)
 		return nil
 	}
 
 	// Update existing message or post new one
 	if *progressTS != "" {
-		return a.UpdateMessageSDK(context.Background(), channelID, *progressTS, blocks, "Command progress")
+		if err := a.UpdateMessageSDK(context.Background(), channelID, *progressTS, blocks, "Command progress"); err != nil {
+			a.Logger().Debug("Failed to update progress message", "error", err, "ts", *progressTS)
+			return err
+		}
+		return nil
 	}
 
 	ts, err := a.sendBlocksSDK(context.Background(), channelID, blocks, "", "Command progress")
 	if err != nil {
+		a.Logger().Debug("Failed to send progress message", "error", err)
 		return err
 	}
 	*progressTS = ts
