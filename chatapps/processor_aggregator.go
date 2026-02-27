@@ -36,7 +36,7 @@ var defaultEventConfig = map[string]EventConfig{
 	// Core events
 	"thinking":    {Aggregate: false, Immediate: true},                                     // Show immediately, 500ms dedup window in handler
 	"tool_use":    {Aggregate: true, SameTypeOnly: true, Immediate: false, MinContent: 50}, // 500ms aggregation
-	"tool_result": {Aggregate: true, SameTypeOnly: true, Immediate: false},                 // Aggregate same type only
+	"tool_result": {Aggregate: false, Immediate: true},                                     // Per spec: 不聚合 - 立即发送
 	"answer":      {Aggregate: true, UseUpdate: true, Immediate: false},                    // Stream with chat.update (1/sec)
 
 	// Status events
@@ -233,15 +233,43 @@ func (p *MessageAggregatorProcessor) Process(ctx context.Context, msg *base.Chat
 
 // bufferMessage adds message to buffer and returns nil (will be sent later)
 // Implements buffer safety limits with FIFO overflow strategy
+// Note: This method handles its own locking to support safe flush operations
 func (p *MessageAggregatorProcessor) bufferMessage(ctx context.Context, msg *base.ChatMessage, eventConfig EventConfig, eventType string) (*base.ChatMessage, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	// Build session key with event type for SameTypeOnly aggregation
 	sessionKey := msg.Platform + ":" + msg.SessionID
 	if eventConfig.SameTypeOnly {
 		sessionKey = sessionKey + ":" + eventType
 	}
+
+	// Helper function to handle buffer overflow flush
+	// Returns the buffer after flush (may be nil or new)
+	handleOverflowFlush := func(buf *messageBuffer, overflowType string) *messageBuffer {
+		p.logger.Warn("Buffer overflow ("+overflowType+"), forcing flush",
+			"session_key", sessionKey)
+
+		// Record dropped metrics for overflow
+		for _, droppedMsg := range buf.messages {
+			droppedEventType, _ := droppedMsg.Metadata["event_type"].(string)
+			if droppedEventType == "" {
+				droppedEventType = "unknown"
+			}
+			MessagesDroppedTotal.WithLabelValues(droppedEventType, msg.Platform, "overflow").Inc()
+		}
+
+		// Stop the timer to prevent double flush
+		if buf.timer != nil {
+			buf.timer.Stop()
+		}
+
+		// Clear buffer messages (they will be dropped)
+		buf.messages = nil
+		buf.totalBytes = 0
+
+		// Return nil so a new buffer will be created
+		return nil
+	}
+
+	p.mu.Lock()
 
 	buf, exists := p.buffers[sessionKey]
 	if !exists {
@@ -264,86 +292,34 @@ func (p *MessageAggregatorProcessor) bufferMessage(ctx context.Context, msg *bas
 
 	// Check buffer limits before adding new message
 	newMsgBytes := len(msg.Content)
+	needNewBuffer := false
 
 	// Check message count limit
 	if len(buf.messages) >= p.maxMsgs {
-		p.logger.Warn("Buffer overflow (message count), forcing flush",
-			"session_key", sessionKey,
-			"current_msgs", len(buf.messages),
-			"max_msgs", p.maxMsgs)
-
-		// Record dropped metrics for overflow
-		for _, droppedMsg := range buf.messages {
-			droppedEventType, _ := droppedMsg.Metadata["event_type"].(string)
-			if droppedEventType == "" {
-				droppedEventType = "unknown"
-			}
-			MessagesDroppedTotal.WithLabelValues(droppedEventType, msg.Platform, "overflow").Inc()
-		}
-
-		// Force flush current buffer before adding new message
-		p.mu.Unlock()
-		p.flushBufferByTimer(sessionKey)
-		p.mu.Lock()
-
-		// Re-get buffer (may have been recreated)
-		buf = p.buffers[sessionKey]
-		if buf == nil {
-			// Buffer was cleared, create new one
-			buf = &messageBuffer{
-				messages:   make([]*base.ChatMessage, 0, 10),
-				createdAt:  time.Now(),
-				done:       make(chan *base.ChatMessage, 1),
-				eventType:  eventType,
-				messageTS:  "",
-				totalBytes: 0,
-			}
-			buf.timer = time.AfterFunc(p.window, func() {
-				p.flushBufferByTimer(sessionKey)
-			})
-			p.buffers[sessionKey] = buf
-		}
+		buf = handleOverflowFlush(buf, "message count")
+		needNewBuffer = true
 	}
 
-	// Check byte limit
-	if buf.totalBytes+newMsgBytes > p.maxBytes {
-		p.logger.Warn("Buffer overflow (bytes), forcing flush",
-			"session_key", sessionKey,
-			"current_bytes", buf.totalBytes,
-			"new_bytes", newMsgBytes,
-			"max_bytes", p.maxBytes)
+	// Check byte limit (only if we still have a buffer)
+	if buf != nil && buf.totalBytes+newMsgBytes > p.maxBytes {
+		buf = handleOverflowFlush(buf, "bytes")
+		needNewBuffer = true
+	}
 
-		// Record dropped metrics for overflow
-		for _, droppedMsg := range buf.messages {
-			droppedEventType, _ := droppedMsg.Metadata["event_type"].(string)
-			if droppedEventType == "" {
-				droppedEventType = "unknown"
-			}
-			MessagesDroppedTotal.WithLabelValues(droppedEventType, msg.Platform, "overflow").Inc()
+	// Create new buffer if needed
+	if needNewBuffer || buf == nil {
+		buf = &messageBuffer{
+			messages:   make([]*base.ChatMessage, 0, 10),
+			createdAt:  time.Now(),
+			done:       make(chan *base.ChatMessage, 1),
+			eventType:  eventType,
+			messageTS:  "",
+			totalBytes: 0,
 		}
-
-		// Force flush current buffer before adding new message
-		p.mu.Unlock()
-		p.flushBufferByTimer(sessionKey)
-		p.mu.Lock()
-
-		// Re-get buffer (may have been recreated)
-		buf = p.buffers[sessionKey]
-		if buf == nil {
-			// Buffer was cleared, create new one
-			buf = &messageBuffer{
-				messages:   make([]*base.ChatMessage, 0, 10),
-				createdAt:  time.Now(),
-				done:       make(chan *base.ChatMessage, 1),
-				eventType:  eventType,
-				messageTS:  "",
-				totalBytes: 0,
-			}
-			buf.timer = time.AfterFunc(p.window, func() {
-				p.flushBufferByTimer(sessionKey)
-			})
-			p.buffers[sessionKey] = buf
-		}
+		buf.timer = time.AfterFunc(p.window, func() {
+			p.flushBufferByTimer(sessionKey)
+		})
+		p.buffers[sessionKey] = buf
 	}
 
 	// Capture messageTS from first message if use_update is enabled
@@ -369,6 +345,8 @@ func (p *MessageAggregatorProcessor) bufferMessage(ctx context.Context, msg *bas
 		"buffer_size", len(buf.messages),
 		"content_len", newMsgBytes,
 		"total_bytes", buf.totalBytes)
+
+	p.mu.Unlock()
 
 	// Return nil to indicate message is buffered (not sent yet)
 	return nil, nil
@@ -503,9 +481,17 @@ func (p *MessageAggregatorProcessor) aggregateMessages(messages []*base.ChatMess
 	// Use first message as base
 	first := messages[0]
 
-	// Combine content
+	// Calculate total content length for efficient pre-allocation
+	totalLen := 0
+	for _, msg := range messages {
+		totalLen += len(msg.Content)
+	}
+	// Add space for newlines between messages
+	totalLen += len(messages) - 1
+
+	// Combine content with pre-allocated buffer
 	var combined strings.Builder
-	combined.Grow(len(first.Content) * len(messages))
+	combined.Grow(totalLen)
 
 	for i, msg := range messages {
 		if i > 0 {

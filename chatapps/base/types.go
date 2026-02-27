@@ -50,6 +50,8 @@ const (
 	MessageTypeEngineStarting MessageType = "engine_starting"
 	// MessageTypeUserMessageReceived indicates user message has been received
 	MessageTypeUserMessageReceived MessageType = "user_message_received"
+	// MessageTypePermissionRequest indicates a permission request from Claude Code
+	MessageTypePermissionRequest MessageType = "permission_request"
 )
 
 type ChatMessage struct {

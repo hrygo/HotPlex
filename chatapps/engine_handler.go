@@ -193,6 +193,8 @@ func (c *StreamCallback) Handle(eventType string, data any) error {
 		return c.handleEngineStarting(data)
 	case provider.EventTypeUserMessageReceived:
 		return c.handleUserMessageReceived(data)
+	case provider.EventTypePermissionRequest:
+		return c.handlePermissionRequest(data)
 	default:
 		// Check for specific engine/extended events
 		if eventType == "danger_block" {
@@ -1258,6 +1260,68 @@ func (c *StreamCallback) handleUserMessageReceived(data any) error {
 		Content: "",
 		Metadata: map[string]any{
 			"event_type": string(provider.EventTypeUserMessageReceived),
+		},
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handlePermissionRequest handles permission request events
+// Implements EventTypePermissionRequest per spec (7)
+// Triggered when Claude Code requests user approval for tool execution
+func (c *StreamCallback) handlePermissionRequest(data any) error {
+	var req *provider.PermissionRequest
+	var messageID string
+
+	switch v := data.(type) {
+	case *provider.PermissionRequest:
+		req = v
+		if req != nil {
+			messageID = req.MessageID
+		}
+	case *event.EventWithMeta:
+		// Try to parse EventData as PermissionRequest
+		if v.EventData != "" {
+			parsed, err := provider.ParsePermissionRequest([]byte(v.EventData))
+			if err == nil {
+				req = parsed
+				messageID = parsed.MessageID
+			}
+		}
+		// Also check Meta for tool info if parsing failed
+		if req == nil && v.Meta != nil {
+			// Create a synthetic request from metadata
+			req = &provider.PermissionRequest{
+				MessageID: c.sessionID + "-" + time.Now().Format("20060102150405"),
+			}
+			if v.Meta.ToolName != "" {
+				messageID = c.sessionID + "-" + v.Meta.ToolID
+			}
+		}
+	default:
+		c.logger.Debug("Unknown permission request data type", "type", fmt.Sprintf("%T", data))
+		return nil
+	}
+
+	if req == nil {
+		c.logger.Debug("Empty permission request, skipping")
+		return nil
+	}
+
+	// Get tool and input for display
+	tool, input := req.GetToolAndInput()
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypePermissionRequest,
+		Content: "", // Content is built by MessageBuilder from metadata
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypePermissionRequest),
+			"tool_name":  tool,
+			"input":      input,
+			"message_id": messageID,
+			"session_id": c.sessionID,
+			"decision":   req.Decision,
+			"reason":     req.GetDescription(),
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
