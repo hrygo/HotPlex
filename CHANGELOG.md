@@ -621,7 +621,7 @@ This version marks a significant evolution of HotPlex into a production-grade **
 - **GitHub Metadata Optimization**: Enhanced repository with SEO-friendly descriptions, topics, and performance-focused taglines.
 
 ### Fixed
-- **CI/CD Reliability**: Downgraded Go version to 1.24 across all workflows and `go.mod` to resolve `golangci-lint` compatibility issues.
+- **CI/CD Reliability**: Downgraded Go version to 1.25 across all workflows and `go.mod` to resolve `golangci-lint` compatibility issues.
 - **Terminal Compatibility**: Standardized script outputs using `printf` to resolve garbled emoji characters on various terminal emulators.
 
 

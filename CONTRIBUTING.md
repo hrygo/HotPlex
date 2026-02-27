@@ -27,7 +27,7 @@ Our **First Principle** is to leverage and bridge existing elite AI CLI tools (l
 
 ## 🛠 Development Setup
 
-1. Install Go 1.24 or later.
+1. Install Go 1.25 or later.
 2. Install Required AI CLI tools (e.g., `Claude Code` or `OpenCode`).
 3. Clone your fork: `git clone https://github.com/YOUR_USERNAME/HotPlex.git`.
 

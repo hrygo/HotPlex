@@ -8,7 +8,7 @@ This document defines the operational boundaries and technical DNA for AI agents
 ## 1. System Philosophy & DNA
 - **Cli-as-a-Service**: Bridge high-power AI CLIs (Claude Code, OpenCode) into production-ready interactive services.
 - **Persistence**: Eliminate spin-up overhead via long-lived, isolated process sessions.
-- **Tech Stack**: Go 1.24 | WebSocket Gateway | Regex WAF | PGID Isolation.
+- **Tech Stack**: Go 1.25 | WebSocket Gateway | Regex WAF | PGID Isolation.
 
 ---
 

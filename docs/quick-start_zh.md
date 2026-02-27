@@ -8,7 +8,7 @@
 
 在开始之前，请确保您已安装：
 
-1. 安装 **Go 1.24** 或更高版本（推荐）
+1. 安装 **Go 1.25** 或更高版本（推荐）
 2.  已安装并认证的 **Claude Code CLI** 或 **OpenCode CLI**
 
 ### 安装 Claude Code CLI

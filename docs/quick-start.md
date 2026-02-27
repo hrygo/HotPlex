@@ -8,7 +8,7 @@ Get up and running with HotPlex in 5 minutes.
 
 Before starting, ensure you have:
 
-1. **Go 1.24** installed (recommended)
+1. **Go 1.25** installed (recommended)
 2. **Claude Code CLI** or **OpenCode CLI** installed and authenticated
 
 ### Install Claude Code CLI

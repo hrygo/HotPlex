@@ -4,7 +4,7 @@
 
 > Generated: 2026-02-26
 > Version: `latest` (See Git Tags for exact build)
-> Environment: macOS (darwin), Go 1.24
+> Environment: macOS (darwin), Go 1.25
 
 ## Executive Summary
 
@@ -18,7 +18,7 @@ HotPlex delivers **sub-200ms response times** for hot-multiplexed sessions, maki
 
 | Parameter     | Value                                        |
 | ------------- | -------------------------------------------- |
-| Go Version    | 1.24                                         |
+| Go Version    | 1.25                                         |
 | Platform      | darwin/arm64                                 |
 | Mock CLI      | Shell script simulating Claude Code protocol |
 | Test Duration | Per-benchmark adaptive                       |
