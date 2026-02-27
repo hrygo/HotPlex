@@ -1,42 +1,47 @@
 package logging
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // MaskString masks the input string based on the sensitivity level.
-// Default masking rules:
-//   - LevelLow: shows first 4 + last 4 characters (e.g., sk-abc****xyz789)
-//   - LevelMedium: shows first 2 + last 2 characters (e.g., U0****K2)
-//   - LevelHigh: shows only the first character (e.g., s****)
+// Masking rules:
+//   - LevelLow: shows first 4 + last 4 characters (min 9 chars to mask)
+//   - LevelMedium: shows first 2 + last 2 characters (min 5 chars to mask)
+//   - LevelHigh: shows only the first character (always masks, even short strings)
 func MaskString(input string, level SensitivityLevel) string {
 	if input == "" || level == LevelNone {
 		return input
 	}
 
-	length := len(input)
+	runes := []rune(input)
+	length := len(runes)
 
 	switch level {
 	case LevelLow:
 		if length <= 8 {
-			return input
+			// Short strings: show first 2 + last 2 with masking
+			if length <= 4 {
+				return string(runes[:1]) + "****"
+			}
+			return string(runes[:2]) + "****" + string(runes[length-2:])
 		}
-		prefix := input[:4]
-		suffix := input[length-4:]
-		return prefix + "****" + suffix
+		return string(runes[:4]) + "****" + string(runes[length-4:])
 
 	case LevelMedium:
 		if length <= 4 {
-			return input
+			// Short strings: show first char only
+			return string(runes[:1]) + "****"
 		}
-		prefix := input[:2]
-		suffix := input[length-2:]
-		return prefix + "****" + suffix
+		return string(runes[:2]) + "****" + string(runes[length-2:])
 
 	case LevelHigh:
 		if length == 0 {
 			return ""
 		}
-		// Use string(rune(input[0])) to handle Unicode correctly
-		return string(rune(input[0])) + "****"
+		// Always mask, showing only first character
+		return string(runes[:1]) + "****"
 
 	default:
 		return input
@@ -56,32 +61,57 @@ func MaskStrings(input map[string]string, level SensitivityLevel) map[string]str
 	return result
 }
 
+// sensitiveFieldPatterns matches common sensitive field name patterns.
+// Uses regex to catch variations like apiKey, api-key, API_KEY, etc.
+var sensitiveFieldPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^api[-_]?key$`),
+	regexp.MustCompile(`(?i)^secret[-_]?.*$`),
+	regexp.MustCompile(`(?i)^.*[-_]?secret$`),
+	regexp.MustCompile(`(?i)^.*secret.*key$`), // mySecretKey, secret_api_key
+	regexp.MustCompile(`(?i)^password$`),
+	regexp.MustCompile(`(?i)^passwd$`),
+	regexp.MustCompile(`(?i)^pwd$`),
+	regexp.MustCompile(`(?i)^token$`),
+	regexp.MustCompile(`(?i)^.*[-_]?token$`),
+	regexp.MustCompile(`(?i)^token[-_]?.*$`),
+	regexp.MustCompile(`(?i)^access[-_]?token$`),
+	regexp.MustCompile(`(?i)^refresh[-_]?token$`),
+	regexp.MustCompile(`(?i)^auth[-_]?token$`),
+	regexp.MustCompile(`(?i)^bearer$`),
+	regexp.MustCompile(`(?i)^private[-_]?key$`),
+	regexp.MustCompile(`(?i)^api[-_]?secret$`),
+	regexp.MustCompile(`(?i)^client[-_]?secret$`),
+	regexp.MustCompile(`(?i)^authorization$`),
+	regexp.MustCompile(`(?i)^x[-_]?api[-_]?key$`),
+	regexp.MustCompile(`(?i)^session[-_]?id$`),
+	regexp.MustCompile(`(?i)^provider[-_]?session$`),
+	regexp.MustCompile(`(?i)^user[-_]?token$`),
+	regexp.MustCompile(`(?i)^credential$`),
+	regexp.MustCompile(`(?i)^credentials$`),
+	regexp.MustCompile(`(?i)^api[-_]?credentials$`),
+}
+
+// isSensitiveField checks if a field name matches sensitive patterns.
+func isSensitiveField(field string) bool {
+	fieldLower := strings.ToLower(field)
+	for _, pattern := range sensitiveFieldPatterns {
+		if pattern.MatchString(fieldLower) {
+			return true
+		}
+	}
+	return false
+}
+
 // MaskSensitiveFields masks known sensitive fields in a map of attributes.
+// Uses pattern matching to detect field name variations.
 func MaskSensitiveFields(attrs map[string]any, level SensitivityLevel) map[string]any {
 	if level == LevelNone || attrs == nil {
 		return attrs
 	}
 
-	// List of sensitive field names to mask
-	sensitiveFields := map[string]bool{
-		"api_key":          true,
-		"secret":           true,
-		"password":         true,
-		"token":            true,
-		"access_token":     true,
-		"refresh_token":    true,
-		"private_key":      true,
-		"authorization":    true,
-		"x-api-key":        true,
-		"session_id":       true,
-		"provider_session": true,
-		"user_token":       true,
-		"credential":       true,
-	}
-
 	result := make(map[string]any, len(attrs))
 	for k, v := range attrs {
-		if sensitiveFields[strings.ToLower(k)] {
+		if isSensitiveField(k) {
 			if str, ok := v.(string); ok {
 				result[k] = MaskString(str, level)
 			} else {

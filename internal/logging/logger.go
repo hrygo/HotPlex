@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -47,6 +48,7 @@ func WithFloatFormat(format FloatFormat) Option {
 
 // NewLogger creates a new Logger with the given options.
 // If no logger is provided, it uses the default slog logger.
+// Default sensitivity is LevelLow for secure-by-default behavior.
 func NewLogger(logger *slog.Logger, opts ...Option) *Logger {
 	if logger == nil {
 		logger = slog.Default()
@@ -55,7 +57,7 @@ func NewLogger(logger *slog.Logger, opts ...Option) *Logger {
 	l := &Logger{
 		logger:      logger,
 		ctx:         NewLogContext(),
-		sensitivity: LevelNone,
+		sensitivity: LevelLow, // Secure-by-default: enable basic masking
 		floatFormat: FloatPrecise,
 	}
 
@@ -66,22 +68,57 @@ func NewLogger(logger *slog.Logger, opts ...Option) *Logger {
 	return l
 }
 
-// With returns a new Logger with the given context merged.
+// With returns a new Logger with the given context merged into the existing context.
+// Non-empty fields in the provided context override existing values.
+// Sensitivity level is set to the higher of the two levels.
 func (l *Logger) With(ctx *LogContext) *Logger {
 	if ctx == nil {
 		return l
 	}
 
+	// Merge contexts: start with existing, override with non-empty new values
+	merged := &LogContext{}
+	if l.ctx != nil {
+		*merged = *l.ctx
+	}
+
+	// Override with non-empty fields from new context
+	if ctx.SessionID != "" {
+		merged.SessionID = ctx.SessionID
+	}
+	if ctx.ProviderSessionID != "" {
+		merged.ProviderSessionID = ctx.ProviderSessionID
+	}
+	if ctx.Platform != "" {
+		merged.Platform = ctx.Platform
+	}
+	if ctx.Namespace != "" {
+		merged.Namespace = ctx.Namespace
+	}
+	if ctx.UserID != "" {
+		merged.UserID = ctx.UserID
+	}
+	if ctx.ChannelID != "" {
+		merged.ChannelID = ctx.ChannelID
+	}
+	if ctx.RequestID != "" {
+		merged.RequestID = ctx.RequestID
+	}
+	// Use higher sensitivity level
+	if ctx.Sensitivity > merged.Sensitivity {
+		merged.Sensitivity = ctx.Sensitivity
+	}
+
 	newLogger := &Logger{
 		logger:      l.logger,
-		ctx:         ctx,
+		ctx:         merged,
 		sensitivity: l.sensitivity,
 		floatFormat: l.floatFormat,
 	}
 
-	// If context has sensitivity set, use it
-	if ctx.Sensitivity != LevelNone {
-		newLogger.sensitivity = ctx.Sensitivity
+	// Update sensitivity if merged context has higher level
+	if merged.Sensitivity > newLogger.sensitivity {
+		newLogger.sensitivity = merged.Sensitivity
 	}
 
 	return newLogger
@@ -108,13 +145,21 @@ func (l *Logger) buildAttrs(args ...any) []any {
 }
 
 // maskAttrs applies sensitivity masking to string values in attributes.
+// Handles string, []byte, and fmt.Stringer types to prevent bypass of masking.
 func (l *Logger) maskAttrs(attrs []any) []any {
 	result := make([]any, len(attrs))
 	for i, arg := range attrs {
 		if i%2 == 1 { // This is a value
-			if str, ok := arg.(string); ok {
-				result[i] = MaskString(str, l.sensitivity)
-			} else {
+			switch v := arg.(type) {
+			case string:
+				result[i] = MaskString(v, l.sensitivity)
+			case []byte:
+				// Convert []byte to string, mask, then convert back
+				result[i] = []byte(MaskString(string(v), l.sensitivity))
+			case fmt.Stringer:
+				// Handle types that implement String() (e.g., custom types)
+				result[i] = MaskString(v.String(), l.sensitivity)
+			default:
 				result[i] = arg
 			}
 		} else {
@@ -153,9 +198,12 @@ func (l *Logger) LogAttrs(ctx context.Context, level slog.Level, msg string, att
 	l.logger.LogAttrs(ctx, level, msg, attrs...)
 }
 
-// WithAttrs returns a new Logger with additional attributes.
-func (l *Logger) WithAttrs(attrs ...any) *slog.Logger {
-	return l.logger.With(attrs...)
+// WithAttrs returns a new Logger with additional attributes added to the underlying slog.Logger.
+// This maintains the Logger wrapper pattern for consistent API usage.
+func (l *Logger) WithAttrs(attrs ...any) *Logger {
+	newLogger := *l
+	newLogger.logger = l.logger.With(attrs...)
+	return &newLogger
 }
 
 // Named returns a new Logger with the given name.
@@ -173,8 +221,14 @@ func (l *Logger) LogTiming(operation string, start time.Time, args ...any) {
 }
 
 // LogError logs an error with optional context.
+// The error message is masked if sensitivity level is set to prevent sensitive data leakage.
 func (l *Logger) LogError(err error, msg string, args ...any) {
-	attrs := l.buildAttrs(append([]any{FieldError, err.Error()}, args...)...)
+	if err == nil {
+		return
+	}
+	// Build args with error message that will be masked if sensitivity is enabled
+	errArgs := append([]any{FieldError, err.Error()}, args...)
+	attrs := l.buildAttrs(errArgs...)
 	l.logger.Error(msg, attrs...)
 }
 
@@ -186,11 +240,6 @@ func (l *Logger) LogRequest(operation string, inputLen int, outputLen int, args 
 		FieldOutputLen, outputLen,
 	}, args...)...)
 	l.logger.Info("request", attrs...)
-}
-
-// SetLevel changes the logger's level.
-func (l *Logger) SetLevel(level slog.Level) {
-	_ = l.logger.Handler().Enabled(context.Background(), level)
 }
 
 // GetLogger returns the underlying slog.Logger.

@@ -3,7 +3,6 @@ package logging
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"math"
 	"time"
 )
@@ -25,35 +24,6 @@ func FormatFloat(f float64, format FloatFormat) float64 {
 		return math.Round(f*100) / 100
 	default:
 		return f
-	}
-}
-
-// durationValue is a custom type for time.Duration that formats properly in JSON.
-type durationValue time.Duration
-
-// String returns the string representation of the duration.
-func (d durationValue) String() string {
-	return time.Duration(d).String()
-}
-
-// MarshalJSON implements json.Marshaler for durationValue.
-func (d durationValue) MarshalJSON() ([]byte, error) {
-	return json.Marshal(d.String())
-}
-
-// slogValueHandler is a custom slog.Value handler for float64 and time.Duration.
-// It ensures consistent formatting across different log outputs.
-func slogValueHandler(v any) slog.Value {
-	switch val := v.(type) {
-	case float64:
-		// slog.Float64Value returns slog.Value, use Float64 method
-		return slog.Float64Value(val)
-	case time.Duration:
-		return slog.StringValue(val.String())
-	case DurationMs:
-		return slog.Float64Value(float64(val) / float64(time.Millisecond))
-	default:
-		return slog.AnyValue(val)
 	}
 }
 
