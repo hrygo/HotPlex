@@ -144,8 +144,8 @@ func NewStreamCallback(ctx context.Context, sessionID, platform string, adapters
 	// Set callback as the sender for aggregated messages
 	cb.processor.SetAggregatorSender(cb)
 
-	// Add :brain: reaction to user message as typing indicator
-	cb.addThinkingReaction()
+	// Note: User message reactions are disabled per UX feedback
+	// Users don't want emoji reactions on their own messages
 
 	return cb
 }
@@ -728,9 +728,6 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 		c.logger.Debug("session_stats: invalid data type", "type", fmt.Sprintf("%T", data))
 		return nil
 	}
-
-	// Update reaction from :brain: to :white_check_mark:
-	c.updateReactionToComplete()
 
 	// Send stats message with platform-agnostic MessageType
 	msg := &base.ChatMessage{
