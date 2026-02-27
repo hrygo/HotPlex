@@ -11,6 +11,7 @@ import (
 	"github.com/hrygo/hotplex/chatapps/slack"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
+	"github.com/hrygo/hotplex/internal/logging"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
 )
@@ -141,10 +142,10 @@ func NewStreamCallback(ctx context.Context, sessionID, platform string, adapters
 // SendAggregatedMessage implements AggregatedMessageSender interface
 // This is called by the MessageAggregatorProcessor when timer flushes buffered messages
 func (c *StreamCallback) SendAggregatedMessage(ctx context.Context, msg *ChatMessage) error {
-	c.logger.Info("SendAggregatedMessage called", "session_id", c.sessionID, "content_len", len(msg.Content))
+	c.logger.Info("SendAggregatedMessage called", logging.FieldSessionID, c.sessionID, "content_len", len(msg.Content))
 
 	if c.adapters == nil {
-		c.logger.Warn("No adapters in SendAggregatedMessage", "platform", c.platform)
+		c.logger.Warn("No adapters in SendAggregatedMessage", logging.FieldPlatform, c.platform)
 		return nil
 	}
 
@@ -239,7 +240,7 @@ func (c *StreamCallback) buildThinkingMessage(blocks []map[string]any, isFirst b
 // sendMessageAndGetTS sends a message and populates message_ts in metadata
 func (c *StreamCallback) sendMessageAndGetTS(msg *ChatMessage) error {
 	if c.adapters == nil {
-		c.logger.Debug("No adapters, skipping message send", "platform", c.platform)
+		c.logger.Debug("No adapters, skipping message send", logging.FieldPlatform, c.platform)
 		return nil
 	}
 
@@ -247,16 +248,16 @@ func (c *StreamCallback) sendMessageAndGetTS(msg *ChatMessage) error {
 	processedMsg, err := c.processor.Process(c.ctx, msg)
 	if err != nil {
 		c.logger.Error("Message processing failed",
-			"platform", c.platform,
-			"session_id", c.sessionID,
-			"error", err)
+			logging.FieldPlatform, c.platform,
+			logging.FieldSessionID, c.sessionID,
+			logging.FieldError, err)
 		processedMsg = msg
 	}
 
 	if processedMsg == nil {
 		c.logger.Debug("Message dropped by processor",
-			"platform", c.platform,
-			"session_id", c.sessionID)
+			logging.FieldPlatform, c.platform,
+			logging.FieldSessionID, c.sessionID)
 		return nil
 	}
 
@@ -315,7 +316,7 @@ func (c *StreamCallback) updateStatusMessage(statusType slack.StatusType, displa
 	}
 
 	c.logger.Debug("Updating status message",
-		"status_type", statusType,
+		logging.FieldStatusType, statusType,
 		"display_text", displayText,
 		"is_first", c.isFirst,
 		"thinking_sent", c.thinkingSent)
@@ -398,10 +399,10 @@ func (c *StreamCallback) handleToolUse(data any) error {
 	// Update status indicator to show current tool being used
 	// This updates the thinking message in-place with "Tool: Read" etc.
 	if err := c.updateStatusMessage(slack.StatusToolUse, toolName); err != nil {
-		c.logger.Warn("Failed to update status for tool_use", "error", err)
+		c.logger.Warn("Failed to update status for tool_use", logging.FieldError, err)
 	}
 
-	c.logger.Debug("[TOOL] handleToolUse sending", "tool_name", toolName, "input_len", len(input))
+	c.logger.Debug("[TOOL] handleToolUse sending", logging.FieldToolName, toolName, logging.FieldInputLen, len(input))
 	blocks := c.blockBuilder.BuildToolUseBlock(toolName, input, truncated)
 	return c.sendBlockMessage(toolName, blocks, false)
 }
@@ -440,7 +441,7 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		}
 	}
 
-	c.logger.Debug("[TOOL] handleToolResult sending", "success", success, "duration_ms", durationMs, "output_len", len(output))
+	c.logger.Debug("[TOOL] handleToolResult sending", "success", success, "duration_ms", durationMs, logging.FieldOutputLen, len(output))
 	blocks := c.blockBuilder.BuildToolResultBlock(success, durationMs, output, false, toolName, filePath)
 	return c.sendBlockMessage(string(provider.EventTypeToolResult), blocks, false)
 }
@@ -452,7 +453,7 @@ func (c *StreamCallback) handleAnswer(data any) error {
 			"ts", c.thinkingMessageTS,
 			"channel", c.thinkingChannelID)
 		if err := c.deleteThinkingMessage(); err != nil {
-			c.logger.Warn("Failed to delete thinking message", "error", err)
+			c.logger.Warn("Failed to delete thinking message", logging.FieldError, err)
 		}
 		c.thinkingSent = false
 		c.thinkingMessageTS = ""
@@ -545,7 +546,7 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 // sendBlockMessage sends a message with Slack blocks
 func (c *StreamCallback) sendBlockMessage(content string, blocks []map[string]any, isFinal bool) error {
 	if c.adapters == nil {
-		c.logger.Debug("No adapters, skipping message send", "platform", c.platform)
+		c.logger.Debug("No adapters, skipping message send", logging.FieldPlatform, c.platform)
 		return nil
 	}
 
@@ -580,16 +581,16 @@ func (c *StreamCallback) sendBlockMessage(content string, blocks []map[string]an
 	processedMsg, err := c.processor.Process(c.ctx, msg)
 	if err != nil {
 		c.logger.Error("Message processing failed",
-			"platform", c.platform,
-			"session_id", c.sessionID,
-			"error", err)
+			logging.FieldPlatform, c.platform,
+			logging.FieldSessionID, c.sessionID,
+			logging.FieldError, err)
 		processedMsg = msg
 	}
 
 	if processedMsg == nil {
 		c.logger.Debug("Message dropped by processor",
-			"platform", c.platform,
-			"session_id", c.sessionID)
+			logging.FieldPlatform, c.platform,
+			logging.FieldSessionID, c.sessionID)
 		return nil
 	}
 
@@ -725,15 +726,15 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 
 	// Execute with Engine
 	h.logger.Info("Executing prompt via Engine",
-		"session_id", msg.SessionID,
-		"platform", msg.Platform,
+		logging.FieldSessionID, msg.SessionID,
+		logging.FieldPlatform, msg.Platform,
 		"prompt_len", len(msg.Content))
 
 	err := h.engine.Execute(ctx, cfg, msg.Content, wrappedCallback)
 	if err != nil {
 		h.logger.Error("Engine execution failed",
-			"session_id", msg.SessionID,
-			"error", err)
+			logging.FieldSessionID, msg.SessionID,
+			logging.FieldError, err)
 
 		// Send error message back
 		if h.adapters != nil {
@@ -746,7 +747,7 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 				},
 			}
 			if err := h.adapters.SendMessage(ctx, msg.Platform, msg.SessionID, errMsg); err != nil {
-				h.logger.Error("Failed to send error message", "session_id", msg.SessionID, "error", err)
+				h.logger.Error("Failed to send error message", logging.FieldSessionID, msg.SessionID, logging.FieldError, err)
 			}
 		}
 		return err

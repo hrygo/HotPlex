@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hrygo/hotplex/internal/logging"
 	"github.com/hrygo/hotplex/internal/panicx"
 	"github.com/hrygo/hotplex/internal/persistence"
 	"github.com/hrygo/hotplex/internal/sys"
@@ -151,7 +152,7 @@ func (sm *SessionPool) ResetProviderSessionID(sessionID string) {
 	defer sm.mu.Unlock()
 	sm.resetSessions[sessionID] = true
 	sm.logger.Debug("Marked session for ProviderSessionID reset",
-		"session_id", sessionID)
+		logging.FieldSessionID, sessionID)
 }
 
 // ListActiveSessions returns all active sessions.
@@ -175,9 +176,9 @@ func (sm *SessionPool) cleanupSessionLocked(sessionID string) error {
 	delete(sm.sessions, sessionID)
 
 	sm.logger.Info("Terminating session and sweeping OS process group",
-		"namespace", sm.opts.Namespace,
-		"session_id", sessionID,
-		"provider_session_id", sess.ProviderSessionID)
+		logging.FieldNamespace, sm.opts.Namespace,
+		logging.FieldSessionID, sessionID,
+		logging.FieldProviderSessionID, sess.ProviderSessionID)
 
 	// Hold session lock to prevent race with WriteInput
 	sess.mu.Lock()
@@ -225,16 +226,16 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 		providerSessionID = uuid.New().String()
 		delete(sm.resetSessions, sessionID) // Clear the flag
 		sm.logger.Info("Generated new random ProviderSessionID for cleared session",
-			"session_id", sessionID,
-			"provider_session_id", providerSessionID)
+			logging.FieldSessionID, sessionID,
+			logging.FieldProviderSessionID, providerSessionID)
 	} else {
 		// Use deterministic SHA1 for consistent session resumption
 		providerSessionID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(uniqueStr)).String()
 	}
 	sessLog := sm.logger.With(
-		"namespace", sm.opts.Namespace,
-		"session_id", sessionID,
-		"provider_session_id", providerSessionID,
+		logging.FieldNamespace, sm.opts.Namespace,
+		logging.FieldSessionID, sessionID,
+		logging.FieldProviderSessionID, providerSessionID,
 	)
 
 	args := sm.buildCLIArgs(providerSessionID, sessLog, prompt, cfg.TaskInstructions)
@@ -292,7 +293,7 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 	// Assign process to Job Object on Windows
 	if jobHandle != 0 {
 		if err := sys.AssignProcessToJob(jobHandle, cmd.Process); err != nil {
-			sessLog.Warn("failed to assign process to Job Object", "error", err)
+			sessLog.Warn("failed to assign process to Job Object", logging.FieldError, err)
 			// Continue anyway - process is still running, will be killed via taskkill fallback
 		}
 	}
@@ -432,9 +433,9 @@ func (sm *SessionPool) cleanupIdleSessions() {
 		idleTime := now.Sub(sess.GetLastActive())
 		if idleTime > sm.timeout {
 			sm.logger.Info("Session idle timeout, terminating",
-				"namespace", sm.opts.Namespace,
-				"session_id", sessionID,
-				"provider_session_id", sess.ProviderSessionID,
+				logging.FieldNamespace, sm.opts.Namespace,
+				logging.FieldSessionID, sessionID,
+				logging.FieldProviderSessionID, sess.ProviderSessionID,
 				"idle_duration", idleTime,
 				"timeout", sm.timeout)
 			_ = sm.cleanupSessionLocked(sessionID)
@@ -473,7 +474,7 @@ func (sm *SessionPool) Shutdown() {
 	// Invoke callbacks outside of locks
 	for _, entry := range callbacks {
 		if err := entry.cb("runner_exit", nil); err != nil && entry.sessLog != nil {
-			entry.sessLog.Debug("Shutdown: callback error", "error", err)
+			entry.sessLog.Debug("Shutdown: callback error", logging.FieldError, err)
 		}
 	}
 

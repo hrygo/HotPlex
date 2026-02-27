@@ -13,6 +13,7 @@ import (
 
 	"github.com/hrygo/hotplex/event"
 	intengine "github.com/hrygo/hotplex/internal/engine"
+	"github.com/hrygo/hotplex/internal/logging"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/telemetry"
@@ -98,7 +99,7 @@ func NewEngine(options EngineOptions) (*Engine, error) {
 // which drops the entire process group (PGID) to prevent zombie processes.
 func (r *Engine) Close() error {
 	r.logger.Info("Closing Engine and sweeping all active pgid sessions",
-		"namespace", r.opts.Namespace)
+		logging.FieldNamespace, r.opts.Namespace)
 
 	r.manager.Shutdown()
 
@@ -111,8 +112,8 @@ func (r *Engine) Execute(ctx context.Context, cfg *types.Config, prompt string, 
 	// All prompts now undergo WAF checking regardless of origin
 	if dangerEvent := r.dangerDetector.CheckInput(prompt); dangerEvent != nil {
 		r.logger.Warn("Dangerous operation blocked by regex firewall",
-			"operation", dangerEvent.Operation,
-			"reason", dangerEvent.Reason,
+			logging.FieldOperation, dangerEvent.Operation,
+			logging.FieldReason, dangerEvent.Reason,
 			"level", dangerEvent.Level,
 		)
 		// Send danger block event to client (non-critical - error already being returned)
@@ -145,21 +146,21 @@ func (r *Engine) Execute(ctx context.Context, cfg *types.Config, prompt string, 
 	}
 
 	r.logger.Info("Engine: starting execution pipeline",
-		"namespace", r.opts.Namespace,
-		"session_id", cfg.SessionID)
+		logging.FieldNamespace, r.opts.Namespace,
+		logging.FieldSessionID, cfg.SessionID)
 
 	// Execute via multiplexed persistent session
 	if err := r.executeWithMultiplex(ctx, cfg, prompt, callback); err != nil {
 		r.logger.Error("Engine: execution failed",
-			"namespace", r.opts.Namespace,
-			"session_id", cfg.SessionID,
-			"error", err)
+			logging.FieldNamespace, r.opts.Namespace,
+			logging.FieldSessionID, cfg.SessionID,
+			logging.FieldError, err)
 		return err
 	}
 
 	r.logger.Info("Engine: Session completed",
-		"namespace", r.opts.Namespace,
-		"session_id", cfg.SessionID)
+		logging.FieldNamespace, r.opts.Namespace,
+		logging.FieldSessionID, cfg.SessionID)
 
 	return nil
 }
@@ -253,9 +254,9 @@ func (r *Engine) executeWithMultiplex(
 	}
 
 	r.logger.Info("Engine: session pipeline ready for hot-multiplexing",
-		"namespace", r.opts.Namespace,
-		"session_id", cfg.SessionID,
-		"provider_session_id", sess.ProviderSessionID)
+		logging.FieldNamespace, r.opts.Namespace,
+		logging.FieldSessionID, cfg.SessionID,
+		logging.FieldProviderSessionID, sess.ProviderSessionID)
 
 	// Update or reuse persistent instructions
 	if cfg.TaskInstructions != "" {
@@ -277,8 +278,8 @@ func (r *Engine) executeWithMultiplex(
 	// 2. Send input - Skip if this was a cold start and the provider handles initial prompt as CLI args
 	if created && r.provider.Metadata().Features.RequiresInitialPromptAsArg {
 		r.logger.Debug("Skipping Stdin injection for cold-start (already passed via CLI args)",
-			"namespace", r.opts.Namespace,
-			"session_id", cfg.SessionID)
+			logging.FieldNamespace, r.opts.Namespace,
+			logging.FieldSessionID, cfg.SessionID)
 	} else {
 		input, err := r.provider.BuildInputMessage(prompt, cfg.TaskInstructions)
 		if err != nil {
@@ -434,10 +435,10 @@ func (r *Engine) handleNormalizedResult(pevt *provider.ProviderEvent, stats *Ses
 	}
 
 	r.logger.Info("Engine: turn completed with normalized provider event",
-		"namespace", r.opts.Namespace,
-		"session_id", cfg.SessionID,
-		"duration_ms", stats.TotalDurationMs,
-		"cost_usd", costUSD)
+		logging.FieldNamespace, r.opts.Namespace,
+		logging.FieldSessionID, cfg.SessionID,
+		logging.FieldDurationMs, stats.TotalDurationMs,
+		logging.FieldCostUsd, costUSD)
 
 	// Dispatch stats event
 	if callback != nil {
@@ -479,7 +480,7 @@ func (r *Engine) dispatchNormalizedCallback(pevt *provider.ProviderEvent, callba
 	if pevt.Type == provider.EventTypeToolUse || pevt.Type == provider.EventTypeToolResult {
 		r.logger.Debug("[RUNNER] Dispatching tool event",
 			"type", pevt.Type,
-			"tool_name", pevt.ToolName,
+			logging.FieldToolName, pevt.ToolName,
 			"tool_id", pevt.ToolID,
 			"status", pevt.Status)
 	}
@@ -530,9 +531,9 @@ func (r *Engine) dispatchNormalizedCallback(pevt *provider.ProviderEvent, callba
 	case provider.EventTypePermissionRequest:
 		// Permission request from Claude Code - route to callback for Slack display
 		r.logger.Info("[RUNNER] Permission request received",
-			"session_id", pevt.SessionID,
-			"tool_name", pevt.ToolName,
-			"content_len", len(pevt.Content))
+			logging.FieldSessionID, pevt.SessionID,
+			logging.FieldToolName, pevt.ToolName,
+			logging.FieldContentLength, len(pevt.Content))
 		meta := &event.EventMeta{
 			ToolName:        pevt.ToolName,
 			ToolID:          pevt.ToolID, // Contains message_id for correlation
@@ -545,16 +546,16 @@ func (r *Engine) dispatchNormalizedCallback(pevt *provider.ProviderEvent, callba
 	case provider.EventTypePlanMode:
 		// Plan Mode event - Claude is generating a plan
 		r.logger.Info("[RUNNER] Plan mode event received",
-			"session_id", pevt.SessionID,
-			"content_len", len(pevt.Content))
+			logging.FieldSessionID, pevt.SessionID,
+			logging.FieldContentLength, len(pevt.Content))
 		meta := &event.EventMeta{TotalDurationMs: totalDur}
 		return callback("plan_mode", event.NewEventWithMeta("plan_mode", pevt.Content, meta))
 
 	case provider.EventTypeExitPlanMode:
 		// Exit Plan Mode - Claude requests approval to execute plan
 		r.logger.Info("[RUNNER] Exit plan mode event received",
-			"session_id", pevt.SessionID,
-			"tool_name", pevt.ToolName)
+			logging.FieldSessionID, pevt.SessionID,
+			logging.FieldToolName, pevt.ToolName)
 		meta := &event.EventMeta{
 			ToolName:        pevt.ToolName,
 			ToolID:          pevt.ToolID,
@@ -565,8 +566,8 @@ func (r *Engine) dispatchNormalizedCallback(pevt *provider.ProviderEvent, callba
 	case provider.EventTypeAskUserQuestion:
 		// AskUserQuestion - Claude requests clarification (degraded to text prompt)
 		r.logger.Info("[RUNNER] Ask user question event received",
-			"session_id", pevt.SessionID,
-			"tool_name", pevt.ToolName)
+			logging.FieldSessionID, pevt.SessionID,
+			logging.FieldToolName, pevt.ToolName)
 		meta := &event.EventMeta{
 			ToolName:        pevt.ToolName,
 			ToolID:          pevt.ToolID,
@@ -599,9 +600,9 @@ func (r *Engine) GetCLIVersion() (string, error) {
 // This is the implementation for session.stop from the spec.
 func (r *Engine) StopSession(sessionID string, reason string) error {
 	r.logger.Info("Engine: stopping session",
-		"namespace", r.opts.Namespace,
-		"session_id", sessionID,
-		"reason", reason)
+		logging.FieldNamespace, r.opts.Namespace,
+		logging.FieldSessionID, sessionID,
+		logging.FieldReason, reason)
 
 	return r.manager.TerminateSession(sessionID)
 }
@@ -612,7 +613,7 @@ func (r *Engine) ResetSessionProvider(sessionID string) {
 	if pool, ok := r.manager.(*intengine.SessionPool); ok {
 		pool.ResetProviderSessionID(sessionID)
 		r.logger.Info("Engine: marked session for ProviderSessionID reset",
-			"session_id", sessionID)
+			logging.FieldSessionID, sessionID)
 	}
 }
 
