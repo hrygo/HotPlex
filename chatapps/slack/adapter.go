@@ -1046,12 +1046,11 @@ func (a *Adapter) handlePermissionCallback(callback *SlackInteractionCallback, a
 }
 
 // handlePlanModeCallback handles plan mode approval/denial button clicks
-// TODO: Implement stdin response after confirming the response format via experiment
+// Value format: approve:{sessionID} or deny:{sessionID}
 func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, action SlackAction, w http.ResponseWriter) {
 	userID := callback.User.ID
 	channelID := callback.Channel.ID
 	messageTS := callback.Message.Ts
-	_ = messageTS
 	value := action.Value
 
 	a.Logger().Info("Plan mode callback received",
@@ -1062,7 +1061,7 @@ func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, act
 		"action_id", action.ActionID,
 	)
 
-	// Parse value: "approve:sessionID" or "modify:sessionID" or "cancel:sessionID"
+	// Parse value: "approve:{sessionID}" or "deny:{sessionID}"
 	parts := strings.Split(value, ":")
 	if len(parts) < 2 {
 		a.Logger().Error("Invalid plan mode button value", "value", value)
@@ -1073,38 +1072,50 @@ func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, act
 	actionType := parts[0]
 	sessionID := parts[1]
 
+	// Determine behavior for engine response
+	var behavior string
+	switch actionType {
+	case "approve":
+		behavior = "allow"
+	case "deny", "cancel":
+		behavior = "deny"
+	case "modify":
+		behavior = "deny" // Modify means deny and request changes
+	default:
+		behavior = "deny"
+	}
+
+	// Send plan mode response to engine via stdin
+	if a.eng != nil {
+		if sess, ok := a.eng.GetSession(sessionID); ok {
+			response := map[string]any{
+				"type":     "plan_response",
+				"behavior": behavior,
+			}
+			if err := sess.WriteInput(response); err != nil {
+				a.Logger().Error("Failed to send plan response to engine", "error", err)
+			} else {
+				a.Logger().Info("Sent plan response to engine",
+					"session_id", sessionID,
+					"behavior", behavior)
+			}
+		} else {
+			a.Logger().Warn("Session not found for plan response", "session_id", sessionID)
+		}
+	}
+
 	// Use MessageBuilder for creating response blocks
 	var slackBlocks []slack.Block
-
 	switch actionType {
 	case "approve":
 		slackBlocks = a.messageBuilder.BuildPlanApprovedBlock()
-		// TODO: Send stdin response to approve plan
-		// Based on research, the format is likely similar to permission:
-		// {"behavior": "allow"} - but needs experimental verification
-		a.Logger().Info("Plan approved - stdin response format needs verification",
-			"session_id", sessionID)
-
 	case "modify":
 		slackBlocks = a.messageBuilder.BuildPlanCancelledBlock("User requested changes")
-		// TODO: Open modal for user to specify changes
-		a.Logger().Info("Plan modification requested - modal not implemented yet",
-			"session_id", sessionID)
-
-	case "cancel":
+	case "deny", "cancel":
 		slackBlocks = a.messageBuilder.BuildPlanCancelledBlock("User cancelled")
-		// TODO: Send stdin response to deny/cancel plan
-		// {"behavior": "deny"} - but needs experimental verification
-		a.Logger().Info("Plan cancelled - stdin response format needs verification",
-			"session_id", sessionID)
-
-	default:
-		a.Logger().Error("Unknown plan mode action", "action", actionType)
-		w.WriteHeader(http.StatusOK)
-		return
 	}
 
-	// Update the Slack message using SDK (no conversion needed)
+	// Update the Slack message
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
 		a.Logger().Error("Update message failed", "error", err)
 	}
@@ -1118,34 +1129,36 @@ func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, act
 }
 
 // handleDangerBlockCallback handles danger block confirmation button clicks
-// ActionID format: danger_confirm:{sessionID} or danger_cancel:{sessionID}
+// Value format: confirm:{sessionID} or cancel:{sessionID}
 func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, action SlackAction, w http.ResponseWriter) {
 	userID := callback.User.ID
 	channelID := callback.Channel.ID
 	messageTS := callback.Message.Ts
 	actionID := action.ActionID
+	value := action.Value
 
 	a.Logger().Info("Danger block callback received",
 		"user_id", userID,
 		"channel_id", channelID,
 		"message_ts", messageTS,
 		"action_id", actionID,
+		"value", value,
 	)
 
-	// Parse actionID: danger_confirm:{sessionID} or danger_cancel:{sessionID}
-	parts := strings.Split(actionID, ":")
+	// Parse value: confirm:{sessionID} or cancel:{sessionID}
+	parts := strings.Split(value, ":")
 	if len(parts) < 2 {
-		a.Logger().Error("Invalid danger action_id format", "action_id", actionID)
+		a.Logger().Error("Invalid danger button value", "value", value)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	behavior := parts[0] // "danger_confirm" or "danger_cancel"
+	actionType := parts[0]  // "confirm" or "cancel"
 	sessionID := parts[1]
 
 	// Map behavior to actual response
 	var permissionBehavior string
-	if strings.HasPrefix(behavior, "danger_confirm") {
+	if actionType == "confirm" {
 		permissionBehavior = "allow"
 	} else {
 		permissionBehavior = "deny"
