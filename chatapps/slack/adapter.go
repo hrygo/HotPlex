@@ -791,8 +791,14 @@ func (a *Adapter) handleSocketModeSlashCommand(evt socketmode.Event) {
 		ResponseURL: cmd.ResponseURL,
 	}
 
+	// Create callback for progress events
+	var progressTS string
+	callback := func(eventType string, data any) error {
+		return a.handleCommandProgress(cmd.ChannelID, &progressTS, eventType, data)
+	}
+
 	// Execute command via registry
-	result, err := a.cmdRegistry.Execute(context.Background(), req, nil)
+	result, err := a.cmdRegistry.Execute(context.Background(), req, callback)
 	if err != nil {
 		a.Logger().Error("Command execution failed", "command", cmd.Command, "error", err)
 	} else if result != nil && result.Message != "" {
@@ -1224,8 +1230,14 @@ func (a *Adapter) processSlashCommand(cmd SlashCommand) {
 		ResponseURL: cmd.ResponseURL,
 	}
 
+	// Create callback for progress events
+	var progressTS string
+	callback := func(eventType string, data any) error {
+		return a.handleCommandProgress(cmd.ChannelID, &progressTS, eventType, data)
+	}
+
 	// Execute command via registry
-	result, err := a.cmdRegistry.Execute(context.Background(), req, nil)
+	result, err := a.cmdRegistry.Execute(context.Background(), req, callback)
 	if err != nil {
 		a.Logger().Error("Command execution failed", "command", cmd.Command, "error", err)
 		_ = a.sendCommandResponse(cmd.ResponseURL, cmd.ChannelID, "Command execution failed: "+err.Error())
