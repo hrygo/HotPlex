@@ -119,10 +119,11 @@ type StreamCallback struct {
 
 // StreamState tracks the state for streaming updates
 type StreamState struct {
-	ChannelID   string
-	MessageTS   string
-	LastUpdated time.Time
-	mu          sync.Mutex
+	ChannelID          string
+	MessageTS          string
+	LastUpdated        time.Time
+	ChatUpdateInterval time.Duration // Configurable update interval (default 3s)
+	mu                 sync.Mutex
 }
 
 // NewStreamCallback creates a new StreamCallback
@@ -323,6 +324,18 @@ func (c *StreamCallback) handleThinking(data any) error {
 	if c.isFirst {
 		if err := c.addAckReaction(); err != nil {
 			c.logger.Warn("Failed to add ack reaction", "error", err)
+		}
+
+		// Set user typing status to indicate AI is processing
+		// This helps reduce "black hole" feeling
+		if adapter, ok := c.adapters.GetAdapter(c.platform); ok {
+			if slackAdapter, ok := adapter.(*slack.Adapter); ok {
+				if userID, ok := c.metadata["user_id"].(string); ok {
+					if err := slackAdapter.SetUserTypingStatus(c.ctx, userID, true); err != nil {
+						c.logger.Warn("Failed to set user typing status", "error", err)
+					}
+				}
+			}
 		}
 	}
 
@@ -609,6 +622,17 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		c.logger.Debug("Clearing thinking state for answer")
 	}
 
+	// Clear user typing status (AI finished processing)
+	if adapter, ok := c.adapters.GetAdapter(c.platform); ok {
+		if slackAdapter, ok := adapter.(*slack.Adapter); ok {
+			if userID, ok := c.metadata["user_id"].(string); ok {
+				if err := slackAdapter.SetUserTypingStatus(c.ctx, userID, false); err != nil {
+					c.logger.Warn("Failed to clear user typing status", "error", err)
+				}
+			}
+		}
+	}
+
 	var answerContent string
 	switch v := data.(type) {
 	case string:
@@ -709,7 +733,9 @@ func (c *StreamCallback) sendBlockMessage(content string, blocks []map[string]an
 
 	// Initialize stream state on first non-thinking message
 	if content != string(provider.EventTypeThinking) && c.streamState == nil {
-		c.streamState = &StreamState{}
+		c.streamState = &StreamState{
+			ChatUpdateInterval: 3 * time.Second, // Default: 3 seconds (per Slack recommendation)
+		}
 	}
 
 	// Convert blocks to []any for RichContent
@@ -908,12 +934,16 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 }
 
 // updateThrottled sends throttled streaming updates to Slack
-// Limits updates to 1 per second to avoid rate limiting
+// Uses configurable ChatUpdateInterval (default 3s) to avoid rate limiting
 func (s *StreamState) updateThrottled(ctx context.Context, adapters *AdapterManager, platform, sessionID, content string, blockBuilder *slack.BlockBuilder, metadata map[string]any) error {
 	s.mu.Lock()
 
-	// Throttle: max 1 update per second
-	if time.Since(s.LastUpdated) < time.Second {
+	// Throttle: use configurable interval (default 3s per Slack recommendation)
+	interval := s.ChatUpdateInterval
+	if interval <= 0 {
+		interval = 3 * time.Second // Fallback to default
+	}
+	if time.Since(s.LastUpdated) < interval {
 		s.mu.Unlock()
 		return nil
 	}

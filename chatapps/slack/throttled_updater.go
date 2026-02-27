@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	// DefaultMinInterval is the default minimum interval between updates (600ms)
-	DefaultMinInterval = 600 * time.Millisecond
+	// DefaultMinInterval is the default minimum interval between updates (3s)
+	// Slack recommends max 1 chat.update per 3 seconds to avoid rate limiting
+	DefaultMinInterval = 3000 * time.Millisecond
 	// DefaultMinCharDelta is the default minimum character change required (50 chars)
 	DefaultMinCharDelta = 50
 )

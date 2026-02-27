@@ -1580,6 +1580,80 @@ func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string
 	return nil
 }
 
+// SetUserTypingStatus sets the user's status to indicate AI is thinking/processing
+// Uses Slack users.profile.set API to set assistant status
+// This helps reduce "black hole" feeling by showing user that AI is active
+func (a *Adapter) SetUserTypingStatus(ctx context.Context, userID string, isTyping bool) error {
+	if a.config.BotToken == "" {
+		return fmt.Errorf("slack bot token not configured")
+	}
+
+	if userID == "" {
+		return fmt.Errorf("user ID is required")
+	}
+
+	// Build profile update
+	profile := map[string]string{}
+	if isTyping {
+		profile["status_text"] = "AI is thinking..."
+		profile["status_emoji"] = ":brain:"
+	} else {
+		// Clear status when not typing
+		profile["status_text"] = ""
+		profile["status_emoji"] = ""
+	}
+
+	profileJSON, err := json.Marshal(profile)
+	if err != nil {
+		return fmt.Errorf("marshal profile: %w", err)
+	}
+
+	payload := map[string]any{
+		"user":    userID,
+		"profile": string(profileJSON),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://slack.com/api/users.profile.set", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.config.BotToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("set status failed: %d %s", resp.StatusCode, string(respBody))
+	}
+
+	var slackResp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&slackResp); err != nil {
+		return fmt.Errorf("parse response: %w", err)
+	}
+
+	if !slackResp.OK {
+		// Not all workspaces support this API, so we log and don't fail
+		a.Logger().Warn("Failed to set user typing status", "error", slackResp.Error, "user", userID)
+		return nil // Don't fail the whole operation
+	}
+
+	a.Logger().Debug("User typing status set", "user", userID, "is_typing", isTyping)
+	return nil
+}
+
 // SUPPORTED_COMMANDS lists all slash commands supported by the system.
 
 // SUPPORTED_COMMANDS lists all slash commands supported by the system.

@@ -65,8 +65,8 @@ func TestThrottledUpdater_ShouldUpdate_TimeThreshold(t *testing.T) {
 		t.Error("should not update: time threshold not met")
 	}
 
-	// Wait for interval
-	time.Sleep(700 * time.Millisecond)
+	// Wait for interval (now 3s by default)
+	time.Sleep(3100 * time.Millisecond)
 
 	// Now should pass time threshold, but char delta might fail
 	// Let's check with enough char delta
@@ -86,8 +86,8 @@ func TestThrottledUpdater_ShouldUpdate_CharDeltaThreshold(t *testing.T) {
 		t.Error("should not update: char delta threshold not met")
 	}
 
-	// Wait for interval to pass time threshold
-	time.Sleep(700 * time.Millisecond)
+	// Wait for interval to pass time threshold (now 3s by default)
+	time.Sleep(3100 * time.Millisecond)
 
 	// Now check with enough char delta (100 > 50)
 	if !u.ShouldUpdate(200) {

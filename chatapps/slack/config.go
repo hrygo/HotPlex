@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // pairingState holds runtime pairing state with thread-safe access
@@ -64,6 +65,11 @@ type Config struct {
 	// SlashCommandRateLimit: Maximum requests per second per user for slash commands
 	// Default: 10.0 requests/second
 	SlashCommandRateLimit float64
+
+	// ChatUpdateInterval: Minimum interval between chat.update calls (streaming)
+	// Default: 3 seconds (3000ms) - Slack recommends max 1 update per 3 seconds
+	// Lower values (e.g., 600ms) may cause rate limiting with rapid tool executions
+	ChatUpdateInterval time.Duration
 
 	// pairing holds runtime pairing state (pointer for thread safety)
 	pairing *pairingState

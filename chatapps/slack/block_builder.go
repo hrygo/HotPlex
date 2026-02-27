@@ -652,11 +652,13 @@ func truncatePath(path string, maxLen int) string {
 }
 
 // BuildToolResultBlock builds a section block for tool execution result
-
-// BuildToolResultBlock builds a section block for tool execution result
 // Used for: provider.EventTypeToolResult
-// Strategy: Can be aggregated, includes optional button to expand output
+// Strategy: Simplified - shows only status, tool name, and duration (no output preview)
+// This reduces noise in Slack by hiding verbose tool output
 func (b *BlockBuilder) BuildToolResultBlock(success bool, durationMs int64, output string, hasButton bool, toolName string, filePath string) []map[string]any {
+	// Note: output and hasButton parameters are kept for API compatibility but ignored
+	// Tool Result now shows only status + duration to reduce noise
+
 	var blocks []map[string]any
 
 	// Build status text
@@ -670,18 +672,6 @@ func (b *BlockBuilder) BuildToolResultBlock(success bool, durationMs int64, outp
 	resultBlock := map[string]any{
 		"type": "section",
 		"text": mrkdwnText(fmt.Sprintf("%s %s", statusEmoji, statusText)),
-	}
-
-	// Add output preview if available (truncated to 300 chars for better context)
-	if output != "" {
-		previewLen := 300
-		preview := output
-		if len(output) > previewLen {
-			preview = output[:previewLen] + "..."
-		}
-		resultBlock["fields"] = []map[string]any{
-			mrkdwnText("*Output:*\n```\n" + preview + "\n```"),
-		}
 	}
 
 	blocks = append(blocks, resultBlock)
@@ -699,8 +689,6 @@ func (b *BlockBuilder) BuildToolResultBlock(success bool, durationMs int64, outp
 
 	// Add metadata context block (Duration)
 	// Only show duration if it exceeds threshold
-	// Add metadata context block (Duration)
-	// Only show duration if it exceeds threshold
 	if durationMs > toolResultDurationThreshold {
 		blocks = append(blocks, map[string]any{
 			"type": "context",
@@ -710,21 +698,8 @@ func (b *BlockBuilder) BuildToolResultBlock(success bool, durationMs int64, outp
 		})
 	}
 
-	// Add action button if requested
-	if hasButton && success {
-		actionBlock := map[string]any{
-			"type": "actions",
-			"elements": []map[string]any{
-				{
-					"type":      "button",
-					"text":      plainText("View Full Output"),
-					"action_id": "view_tool_output",
-					"value":     "expand_output",
-				},
-			},
-		}
-		blocks = append(blocks, actionBlock)
-	}
+	// Note: Output preview and action button removed to reduce noise
+	// See Issue #49: "过滤低价值噪音：Tool Result 不显示内容，只看状态和耗时"
 
 	return blocks
 }
