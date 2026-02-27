@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1153,7 +1154,7 @@ func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, 
 		return
 	}
 
-	actionType := parts[0]  // "confirm" or "cancel"
+	actionType := parts[0] // "confirm" or "cancel"
 	sessionID := parts[1]
 
 	// Map behavior to actual response
@@ -1220,15 +1221,19 @@ func (a *Adapter) handleAskUserQuestionCallback(callback *SlackInteractionCallba
 	selectedOption := value
 	if selectedOption == "" {
 		// Try to extract from actionID
-		if strings.HasPrefix(actionID, "question_option_") {
-			selectedOption = strings.TrimPrefix(actionID, "question_option_")
+		if opt, found := strings.CutPrefix(actionID, "question_option_"); found {
+			selectedOption = opt
 		}
 	}
 
 	// Send response to engine via stdin
 	// The sessionID should be stored in the message metadata or derived from channel/user
 	baseSession := a.FindSessionByUserAndChannel(userID, channelID)
-	if baseSession != nil && a.eng != nil {
+	if baseSession == nil {
+		a.Logger().Warn("No active session found for question response",
+			"user_id", userID,
+			"channel_id", channelID)
+	} else if a.eng != nil {
 		if sess, ok := a.eng.GetSession(baseSession.SessionID); ok {
 			response := map[string]any{
 				"type":    "question_response",
@@ -1462,12 +1467,7 @@ var SUPPORTED_COMMANDS = []string{CommandReset, CommandDisconnect}
 
 // isSupportedCommand checks if a command (with / prefix) is in the supported commands list.
 func isSupportedCommand(cmd string) bool {
-	for _, supported := range SUPPORTED_COMMANDS {
-		if supported == cmd {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(SUPPORTED_COMMANDS, cmd)
 }
 
 // convertHashPrefixToSlash checks if the message starts with #<command>
@@ -1487,13 +1487,7 @@ func convertHashPrefixToSlash(text string) (string, bool) {
 	}
 
 	// Find command boundary (first space or end)
-	firstSpace := strings.Index(rest, " ")
-	var potentialCmd string
-	if firstSpace == -1 {
-		potentialCmd = rest
-	} else {
-		potentialCmd = rest[:firstSpace]
-	}
+	potentialCmd, _, _ := strings.Cut(rest, " ")
 
 	// Add / prefix and check if supported
 	cmdWithSlash := "/" + potentialCmd
