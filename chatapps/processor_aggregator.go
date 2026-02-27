@@ -26,13 +26,47 @@ type EventConfig struct {
 }
 
 // defaultEventConfig defines default aggregation behavior for each event type
+// Per spec: https://docs/chatapps/engine-events-slack-ux-spec.md
 var defaultEventConfig = map[string]EventConfig{
-	"thinking":      {Aggregate: false, Immediate: true},                                     // Show immediately, will be replaced by content
-	"tool_use":      {Aggregate: true, SameTypeOnly: true, Immediate: false, MinContent: 50}, // Aggregate same type only, lower threshold
-	"tool_result":   {Aggregate: true, SameTypeOnly: true, Immediate: false},                 // Aggregate same type only
-	"answer":        {Aggregate: true, UseUpdate: true, Immediate: false},                    // Stream with chat.update
-	"error":         {Aggregate: false, Immediate: true},                                     // Show immediately
-	"session_stats": {Aggregate: false, Immediate: true},                                     // Show immediately
+	// Session lifecycle events (0.4, 0.5, 0.6)
+	"session_start":         {Aggregate: false, Immediate: true},   // Show immediately - first message/cold start
+	"engine_starting":       {Aggregate: true, SameTypeOnly: true}, // Can aggregate - during engine init
+	"user_message_received": {Aggregate: false, Immediate: true},   // Show immediately - acknowledgment
+
+	// Core events
+	"thinking":    {Aggregate: false, Immediate: true},                                     // Show immediately, 500ms dedup window in handler
+	"tool_use":    {Aggregate: true, SameTypeOnly: true, Immediate: false, MinContent: 50}, // 500ms aggregation
+	"tool_result": {Aggregate: true, SameTypeOnly: true, Immediate: false},                 // Aggregate same type only
+	"answer":      {Aggregate: true, UseUpdate: true, Immediate: false},                    // Stream with chat.update (1/sec)
+
+	// Status events
+	"error":         {Aggregate: false, Immediate: true}, // Show immediately - errors need instant feedback
+	"result":        {Aggregate: false, Immediate: true}, // Show at end - final stats
+	"session_stats": {Aggregate: false, Immediate: true}, // Show at end - session complete
+
+	// Interactive events
+	"permission_request": {Aggregate: false, Immediate: true}, // Need immediate user decision
+	"danger_block":       {Aggregate: false, Immediate: true}, // Need immediate user decision
+
+	// Plan mode events
+	"plan_mode":      {Aggregate: true, UseUpdate: true},  // Stream with chat.update
+	"exit_plan_mode": {Aggregate: false, Immediate: true}, // Need immediate user decision
+
+	// Question events
+	"ask_user_question": {Aggregate: false, Immediate: true}, // Need immediate user response
+
+	// Step events (OpenCode)
+	"step_start":  {Aggregate: false, Immediate: true},   // Show immediately
+	"step_finish": {Aggregate: true, SameTypeOnly: true}, // Can aggregate with next step
+
+	// Command events
+	"command_progress": {Aggregate: true, UseUpdate: true},  // Stream with chat.update
+	"command_complete": {Aggregate: false, Immediate: true}, // Show at end
+
+	// Other
+	"system": {Aggregate: true, SameTypeOnly: true}, // Can aggregate - low priority
+	"user":   {Aggregate: false, Immediate: true},   // Show immediately - reflect user msg
+	"raw":    {Aggregate: false, Immediate: true},   // Show immediately - raw output
 }
 
 // MessageAggregatorProcessor aggregates multiple rapid messages into one

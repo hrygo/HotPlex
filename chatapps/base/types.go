@@ -44,6 +44,12 @@ const (
 	MessageTypeStepFinish MessageType = "step_finish"
 	// MessageTypeRaw indicates unparsed raw output (fallback)
 	MessageTypeRaw MessageType = "raw"
+	// MessageTypeSessionStart indicates a new session is starting (cold start)
+	MessageTypeSessionStart MessageType = "session_start"
+	// MessageTypeEngineStarting indicates the engine is starting up
+	MessageTypeEngineStarting MessageType = "engine_starting"
+	// MessageTypeUserMessageReceived indicates user message has been received
+	MessageTypeUserMessageReceived MessageType = "user_message_received"
 )
 
 type ChatMessage struct {

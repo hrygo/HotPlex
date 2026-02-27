@@ -59,6 +59,12 @@ func (b *MessageBuilder) Build(msg *base.ChatMessage) []slack.Block {
 		return b.BuildStepFinishMessage(msg)
 	case base.MessageTypeRaw:
 		return b.BuildRawMessage(msg)
+	case base.MessageTypeSessionStart:
+		return b.BuildSessionStartMessage(msg)
+	case base.MessageTypeEngineStarting:
+		return b.BuildEngineStartingMessage(msg)
+	case base.MessageTypeUserMessageReceived:
+		return b.BuildUserMessageReceivedMessage(msg)
 	default:
 		// Default to answer message for unknown types
 		return b.BuildAnswerMessage(msg)
@@ -776,6 +782,77 @@ func (b *MessageBuilder) BuildRawMessage(msg *base.ChatMessage) []slack.Block {
 }
 
 // =============================================================================
+// Session Start Message (Cold start / first message)
+// =============================================================================
+
+// BuildSessionStartMessage builds a message for session start
+// Implements EventTypeSessionStart per spec (0.4)
+// Triggered when user sends first message or CLI needs cold start
+func (b *MessageBuilder) BuildSessionStartMessage(msg *base.ChatMessage) []slack.Block {
+	content := msg.Content
+	if content == "" {
+		content = "Initializing AI assistant..."
+	}
+
+	// Get session ID from metadata if available
+	sessionID := ""
+	if msg.Metadata != nil {
+		if sid, ok := msg.Metadata["session_id"].(string); ok {
+			sessionID = sid
+		}
+	}
+
+	// Per spec: section + context layout with :rocket: emoji
+	text := ":rocket: *Starting Session*\n" + content
+	if sessionID != "" {
+		text += fmt.Sprintf("\nSession: %s", sessionID)
+	}
+
+	mrkdwn := slack.NewTextBlockObject("mrkdwn", text, false, false)
+
+	// Use section + context per spec
+	return []slack.Block{
+		slack.NewSectionBlock(mrkdwn, nil, nil),
+	}
+}
+
+// =============================================================================
+// Engine Starting Message (CLI cold start in progress)
+// =============================================================================
+
+// BuildEngineStartingMessage builds a message for engine starting
+// Implements EventTypeEngineStarting per spec (0.5)
+// Triggered during CLI cold start when engine is being initialized
+func (b *MessageBuilder) BuildEngineStartingMessage(msg *base.ChatMessage) []slack.Block {
+	content := msg.Content
+	if content == "" {
+		content = "Engine starting..."
+	}
+
+	// Per spec: context block with :hourglass: emoji
+	text := slack.NewTextBlockObject("mrkdwn", ":hourglass: _"+content+"_", false, false)
+	return []slack.Block{
+		slack.NewContextBlock("", text),
+	}
+}
+
+// =============================================================================
+// User Message Received Message (Acknowledgment)
+// =============================================================================
+
+// BuildUserMessageReceivedMessage builds a message to acknowledge user message receipt
+// Implements EventTypeUserMessageReceived per spec (0.6)
+// Triggered immediately after user message is received
+func (b *MessageBuilder) BuildUserMessageReceivedMessage(msg *base.ChatMessage) []slack.Block {
+	// Per spec: context block with :inbox: emoji
+	// Very low latency acknowledgment
+	text := slack.NewTextBlockObject("mrkdwn", ":inbox: _Message received_", false, false)
+	return []slack.Block{
+		slack.NewContextBlock("", text),
+	}
+}
+
+// =============================================================================
 // Plan Approval/Denial Messages (Interactive Callbacks)
 // =============================================================================
 
@@ -978,6 +1055,12 @@ func ParseProviderEventType(eventType provider.ProviderEventType) base.MessageTy
 		return base.MessageTypeStepFinish
 	case provider.EventTypeRaw:
 		return base.MessageTypeRaw
+	case provider.EventTypeSessionStart:
+		return base.MessageTypeSessionStart
+	case provider.EventTypeEngineStarting:
+		return base.MessageTypeEngineStarting
+	case provider.EventTypeUserMessageReceived:
+		return base.MessageTypeUserMessageReceived
 	default:
 		return base.MessageTypeAnswer
 	}

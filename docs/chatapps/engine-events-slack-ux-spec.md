@@ -635,24 +635,32 @@ client.ReactionsAdd(
 
 ### 高优先级 (P0)
 
-- [ ] EventTypeResult - Turn 完成事件
-- [ ] EventTypeCommandProgress - 命令进度事件
-- [ ] EventTypeCommandComplete - 命令完成事件
+- [x] EventTypeResult - Turn 完成事件 ✅ (已实现为 MessageTypeSessionStats)
+- [x] EventTypeCommandProgress - 命令进度事件 ✅
+- [x] EventTypeCommandComplete - 命令完成事件 ✅
 
 ### 中优先级 (P1)
 
-- [ ] EventTypeThinking - 改用 context block
-- [ ] EventTypeToolUse - 改用 fields 双列布局，参数摘要 12 字符
-- [ ] EventTypeToolResult - 添加数据长度展示
-- [ ] EventTypeError - 添加引用格式
+- [x] EventTypeThinking - 改用 context block ✅
+- [x] EventTypeToolUse - 改用 fields 双列布局，参数摘要 12 字符 ✅
+- [x] EventTypeToolResult - 添加数据长度展示 ✅
+- [x] EventTypeError - 添加引用格式 ✅
 
 ### 低优先级 (P2)
 
-- [ ] EventTypeSystem - 系统消息
-- [ ] EventTypeUser - 用户消息反射
-- [ ] EventTypeStepStart/StepFinish - 步骤事件
-- [ ] EventTypeRaw - 原始输出（仅展示类型和长度）
-- [ ] EventTypePlanMode - 改用 context block
+- [x] EventTypeSystem - 系统消息 ✅
+- [x] EventTypeUser - 用户消息反射 ✅
+- [x] EventTypeStepStart/StepFinish - 步骤事件 ✅
+- [x] EventTypeRaw - 原始输出（仅展示类型和长度） ✅
+- [x] EventTypePlanMode - 改用 context block ✅
+
+### UX 优化 (0.x)
+
+- [x] EventTypeSessionStart (0.4) - 会话启动事件 ✅
+- [x] EventTypeEngineStarting (0.5) - 引擎启动中事件 ✅
+- [x] EventTypeUserMessageReceived (0.6) - 消息已收到事件 ✅
+- [ ] Slack Typing Indicator (0.1) - ⚠️ Slack SDK 不直接支持，使用 reactions 替代
+- [x] Slack Reactions 反馈 (0.2) - ✅ (AddReactionSDK 已实现)
 
 ---
 

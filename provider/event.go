@@ -82,6 +82,18 @@ const (
 
 	// EventTypeCommandComplete indicates a slash command has completed successfully.
 	EventTypeCommandComplete ProviderEventType = "command_complete"
+
+	// EventTypeSessionStart indicates a new session is starting (cold start).
+	// Sent when user sends first message or CLI needs cold start.
+	EventTypeSessionStart ProviderEventType = "session_start"
+
+	// EventTypeEngineStarting indicates the engine is starting up.
+	// Sent during CLI cold start when engine is being initialized.
+	EventTypeEngineStarting ProviderEventType = "engine_starting"
+
+	// EventTypeUserMessageReceived indicates user message has been received.
+	// Sent immediately after user message is received to acknowledge receipt.
+	EventTypeUserMessageReceived ProviderEventType = "user_message_received"
 )
 
 // ProviderEvent represents a normalized event from any AI CLI provider.

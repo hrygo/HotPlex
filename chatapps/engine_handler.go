@@ -187,6 +187,12 @@ func (c *StreamCallback) Handle(eventType string, data any) error {
 		return c.handleStepFinish(data)
 	case provider.EventTypeRaw:
 		return c.handleRaw(data)
+	case provider.EventTypeSessionStart:
+		return c.handleSessionStart(data)
+	case provider.EventTypeEngineStarting:
+		return c.handleEngineStarting(data)
+	case provider.EventTypeUserMessageReceived:
+		return c.handleUserMessageReceived(data)
 	default:
 		// Check for specific engine/extended events
 		if eventType == "danger_block" {
@@ -1176,6 +1182,82 @@ func (c *StreamCallback) handleAskUserQuestion(data any) error {
 		Content: question,
 		Metadata: map[string]any{
 			"event_type": string(provider.EventTypeAskUserQuestion),
+		},
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// =============================================================================
+// Session Start / Engine Starting / User Message Received Event Handlers
+// =============================================================================
+
+// handleSessionStart handles session start events (cold start)
+// Implements EventTypeSessionStart per spec (0.4)
+// Triggered when user sends first message or CLI needs cold start
+func (c *StreamCallback) handleSessionStart(data any) error {
+	var content string
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		content = m.EventData
+	} else if s, ok := data.(string); ok {
+		content = s
+	} else {
+		content = "Initializing AI assistant..."
+	}
+
+	// Get session ID from callback
+	sessionID := c.sessionID
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeSessionStart,
+		Content: content,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeSessionStart),
+			"session_id": sessionID,
+		},
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleEngineStarting handles engine starting events (CLI cold start in progress)
+// Implements EventTypeEngineStarting per spec (0.5)
+// Triggered during CLI cold start when engine is being initialized
+func (c *StreamCallback) handleEngineStarting(data any) error {
+	var content string
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		content = m.EventData
+	} else if s, ok := data.(string); ok {
+		content = s
+	} else {
+		content = "Engine starting..."
+	}
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeEngineStarting,
+		Content: content,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeEngineStarting),
+		},
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleUserMessageReceived handles user message received acknowledgment
+// Implements EventTypeUserMessageReceived per spec (0.6)
+// Triggered immediately after user message is received
+func (c *StreamCallback) handleUserMessageReceived(data any) error {
+	// This event is typically sent before processing begins
+	// to acknowledge receipt of user message with minimal latency
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeUserMessageReceived,
+		Content: "",
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeUserMessageReceived),
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
