@@ -1446,6 +1446,31 @@ func (a *Adapter) AddReactionSDK(ctx context.Context, reaction base.Reaction) er
 	return nil
 }
 
+// RemoveReactionSDK removes a reaction using Slack SDK
+func (a *Adapter) RemoveReactionSDK(ctx context.Context, reaction base.Reaction) error {
+	if a.client == nil {
+		return fmt.Errorf("slack client not initialized")
+	}
+
+	if reaction.Channel == "" || reaction.Timestamp == "" {
+		return fmt.Errorf("channel and timestamp are required for reaction")
+	}
+
+	err := a.client.RemoveReactionContext(ctx,
+		reaction.Name,
+		slack.ItemRef{
+			Channel:   reaction.Channel,
+			Timestamp: reaction.Timestamp,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("remove reaction: %w", err)
+	}
+
+	a.Logger().Debug("Reaction removed via SDK", "channel", reaction.Channel, "ts", reaction.Timestamp)
+	return nil
+}
+
 // =============================================================================
 // Typing Indicator (0.1 Slack UX Feature)
 // Note: Slack's typing indicator is not directly supported by the slack-go SDK.

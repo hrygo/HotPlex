@@ -78,18 +78,30 @@ func (b *MessageBuilder) Build(msg *base.ChatMessage) []slack.Block {
 // =============================================================================
 
 // BuildThinkingMessage builds a status indicator for thinking state
-// Implements EventTypeThinking per spec - uses context block for low visual weight
+// Implements EventTypeThinking per spec - shows :brain: header + content preview in quote format
 func (b *MessageBuilder) BuildThinkingMessage(msg *base.ChatMessage) []slack.Block {
 	content := msg.Content
 	if content == "" {
 		content = "Thinking..."
 	}
 
-	// Use context block per spec for low visual weight
-	text := slack.NewTextBlockObject("mrkdwn", ":brain: "+content, false, false)
-	return []slack.Block{
-		slack.NewContextBlock("", text),
+	var blocks []slack.Block
+
+	// Header with emoji
+	headerText := slack.NewTextBlockObject("mrkdwn", ":brain: *Thinking*", false, false)
+	blocks = append(blocks, slack.NewSectionBlock(headerText, nil, nil))
+
+	// Content preview in quote format (truncate if too long)
+	if len(content) > 300 {
+		content = content[:297] + "..."
 	}
+
+	// Use quote format for content preview
+	quoteText := ">" + strings.ReplaceAll(content, "\n", "\n>")
+	quoteBlock := slack.NewTextBlockObject("mrkdwn", quoteText, false, false)
+	blocks = append(blocks, slack.NewSectionBlock(quoteBlock, nil, nil))
+
+	return blocks
 }
 
 // =============================================================================
@@ -490,39 +502,60 @@ func (b *MessageBuilder) BuildDangerBlockMessage(msg *base.ChatMessage) []slack.
 // =============================================================================
 
 // BuildSessionStatsMessage builds a message for session statistics
-// Implements EventTypeResult (Turn Complete) per spec
+// Implements EventTypeResult (Turn Complete) per spec - compact single-line format
 func (b *MessageBuilder) BuildSessionStatsMessage(msg *base.ChatMessage) []slack.Block {
-	content := msg.Content
-	if content == "" {
-		return nil
-	}
-
-	// Use section + context per spec for EventTypeResult
-	text := ":white_check_mark: *Turn Complete*\n" + content
-	mrkdwn := slack.NewTextBlockObject("mrkdwn", text, false, false)
-
-	// Add context with stats if available
 	var blocks []slack.Block
-	blocks = append(blocks, slack.NewSectionBlock(mrkdwn, nil, nil))
 
-	// Add duration and token counts from metadata if available
+	// Header: ✅ Done
+	headerText := slack.NewTextBlockObject("mrkdwn", ":white_check_mark: *Done*", false, false)
+	blocks = append(blocks, slack.NewSectionBlock(headerText, nil, nil))
+
+	// Build compact stats line: ⏱️ duration • 🪙 tokens • 📝 files • 🔧 tools
 	if msg.Metadata != nil {
-		var contextElems []slack.MixedElement
+		var stats []string
+
+		// Duration
 		if duration, ok := msg.Metadata["duration_ms"].(int64); ok && duration > 0 {
-			durationStr := FormatDuration(duration)
-			contextElems = append(contextElems, slack.NewTextBlockObject("mrkdwn", "⏱️ "+durationStr, false, false))
+			stats = append(stats, "⏱️ "+FormatDuration(duration))
 		}
+
+		// Tokens (compact format: 1.2K)
 		if tokensIn, ok := msg.Metadata["tokens_in"].(int64); ok {
+			total := tokensIn
 			if tokensOut, ok := msg.Metadata["tokens_out"].(int64); ok {
-				contextElems = append(contextElems, slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("📊 %d in / %d out", tokensIn, tokensOut), false, false))
+				total += tokensOut
 			}
+			stats = append(stats, "🪙 "+formatTokenCount(total))
 		}
-		if len(contextElems) > 0 {
-			blocks = append(blocks, slack.NewContextBlock("", contextElems...))
+
+		// Files modified
+		if files, ok := msg.Metadata["files_modified"].(int64); ok && files > 0 {
+			stats = append(stats, fmt.Sprintf("📝 %d files", files))
+		}
+
+		// Tool calls
+		if tools, ok := msg.Metadata["tool_count"].(int64); ok && tools > 0 {
+			stats = append(stats, fmt.Sprintf("🔧 %d tools", tools))
+		}
+
+		if len(stats) > 0 {
+			statsText := slack.NewTextBlockObject("mrkdwn", strings.Join(stats, " • "), false, false)
+			blocks = append(blocks, slack.NewContextBlock("", statsText))
 		}
 	}
 
 	return blocks
+}
+
+// formatTokenCount formats token count in compact form (1.2K)
+func formatTokenCount(count int64) string {
+	if count >= 1000000 {
+		return fmt.Sprintf("%.1fM", float64(count)/1000000)
+	}
+	if count >= 1000 {
+		return fmt.Sprintf("%.1fK", float64(count)/1000)
+	}
+	return fmt.Sprintf("%d", count)
 }
 
 // =============================================================================
