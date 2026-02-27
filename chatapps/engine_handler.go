@@ -107,10 +107,6 @@ type StreamCallback struct {
 
 	// Stream state for throttled updates
 	streamState *StreamState
-
-	// Reaction feedback state
-	userMessageTS string // Original user message TS for reaction feedback
-	reactionAdded bool   // Tracks if :brain: reaction was added
 }
 
 // StreamState tracks the state for streaming updates
@@ -134,116 +130,10 @@ func NewStreamCallback(ctx context.Context, sessionID, platform string, adapters
 		processor: NewDefaultProcessorChain(logger),
 	}
 
-	// Extract user message TS from metadata for reaction feedback
-	if metadata != nil {
-		if ts, ok := metadata["message_ts"].(string); ok && ts != "" {
-			cb.userMessageTS = ts
-		}
-	}
-
 	// Set callback as the sender for aggregated messages
 	cb.processor.SetAggregatorSender(cb)
 
-	// Note: User message reactions are disabled per UX feedback
-	// Users don't want emoji reactions on their own messages
-
 	return cb
-}
-
-// addThinkingReaction adds :brain: reaction to user's message
-func (c *StreamCallback) addThinkingReaction() {
-	if c.userMessageTS == "" || c.adapters == nil {
-		return
-	}
-
-	channelID := ""
-	if c.metadata != nil {
-		if ch, ok := c.metadata["channel_id"].(string); ok {
-			channelID = ch
-		}
-	}
-
-	if channelID == "" {
-		return
-	}
-
-	adapter, ok := c.adapters.GetAdapter(c.platform)
-	if !ok || adapter == nil {
-		return
-	}
-
-	// Type assert to Slack adapter for reaction support
-	slackAdapter, ok := adapter.(*slack.Adapter)
-	if !ok {
-		return
-	}
-
-	reaction := base.Reaction{
-		Channel:   channelID,
-		Timestamp: c.userMessageTS,
-		Name:      "brain",
-	}
-
-	if err := slackAdapter.AddReactionSDK(c.ctx, reaction); err != nil {
-		c.logger.Debug("Failed to add thinking reaction", "error", err)
-	} else {
-		c.reactionAdded = true
-		c.logger.Debug("Added :brain: reaction to user message", "ts", c.userMessageTS)
-	}
-}
-
-// updateReactionToComplete changes reaction from :brain: to :white_check_mark:
-func (c *StreamCallback) updateReactionToComplete() {
-	if c.userMessageTS == "" || !c.reactionAdded || c.adapters == nil {
-		return
-	}
-
-	channelID := ""
-	if c.metadata != nil {
-		if ch, ok := c.metadata["channel_id"].(string); ok {
-			channelID = ch
-		}
-	}
-
-	if channelID == "" {
-		return
-	}
-
-	adapter, ok := c.adapters.GetAdapter(c.platform)
-	if !ok || adapter == nil {
-		return
-	}
-
-	slackAdapter, ok := adapter.(*slack.Adapter)
-	if !ok {
-		return
-	}
-
-	// Remove :brain: reaction
-	removeReaction := base.Reaction{
-		Channel:   channelID,
-		Timestamp: c.userMessageTS,
-		Name:      "brain",
-	}
-
-	// Add :white_check_mark: reaction
-	addReaction := base.Reaction{
-		Channel:   channelID,
-		Timestamp: c.userMessageTS,
-		Name:      "white_check_mark",
-	}
-
-	// Remove thinking reaction
-	_ = slackAdapter.RemoveReactionSDK(c.ctx, removeReaction)
-
-	// Add complete reaction
-	if err := slackAdapter.AddReactionSDK(c.ctx, addReaction); err != nil {
-		c.logger.Debug("Failed to add complete reaction", "error", err)
-	} else {
-		c.logger.Debug("Updated reaction to :white_check_mark:", "ts", c.userMessageTS)
-	}
-
-	c.reactionAdded = false
 }
 
 // SendAggregatedMessage implements AggregatedMessageSender interface
