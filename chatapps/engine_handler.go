@@ -763,10 +763,8 @@ func (c *StreamCallback) handleCommandProgress(data any) error {
 			"event_type": string(provider.EventTypeCommandProgress),
 		},
 	}
-	if metadata != nil {
-		for k, v := range metadata {
-			msg.Metadata[k] = v
-		}
+	for k, v := range metadata {
+		msg.Metadata[k] = v
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
 	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
@@ -805,10 +803,8 @@ func (c *StreamCallback) handleCommandComplete(data any) error {
 			"event_type": string(provider.EventTypeCommandComplete),
 		},
 	}
-	if metadata != nil {
-		for k, v := range metadata {
-			msg.Metadata[k] = v
-		}
+	for k, v := range metadata {
+		msg.Metadata[k] = v
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
 	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
@@ -892,10 +888,8 @@ func (c *StreamCallback) handleStepStart(data any) error {
 			"event_type": string(provider.EventTypeStepStart),
 		},
 	}
-	if metadata != nil {
-		for k, v := range metadata {
-			msg.Metadata[k] = v
-		}
+	for k, v := range metadata {
+		msg.Metadata[k] = v
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
 	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
@@ -932,10 +926,8 @@ func (c *StreamCallback) handleStepFinish(data any) error {
 			"event_type": string(provider.EventTypeStepFinish),
 		},
 	}
-	if metadata != nil {
-		for k, v := range metadata {
-			msg.Metadata[k] = v
-		}
+	for k, v := range metadata {
+		msg.Metadata[k] = v
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
 	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
