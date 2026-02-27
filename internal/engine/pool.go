@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hrygo/hotplex/internal/panicx"
 	"github.com/hrygo/hotplex/internal/persistence"
 	"github.com/hrygo/hotplex/internal/sys"
 	"github.com/hrygo/hotplex/provider"
@@ -323,7 +324,7 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 	go sess.ReadStdout()
 	go sess.ReadStderr()
 
-	go func() {
+	panicx.SafeGo(sessLog, func() {
 		err := cmd.Wait()
 		if sess.GetStatus() != SessionStatusDead {
 			sessLog.Warn("Session OS process exited unexpectedly", "exit_error", err)
@@ -333,7 +334,7 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 				_ = cb("runner_exit", nil)
 			}
 		}
-	}()
+	})
 
 	sess.waitForReady(sessCtx, DefaultReadyTimeout)
 	success = true

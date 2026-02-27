@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/panicx"
 )
 
 // WebhookRunner manages the lifecycle of webhook processing goroutines.
@@ -29,24 +31,24 @@ func (r *WebhookRunner) Run(ctx context.Context, handler MessageHandler, msg *Ch
 	}
 
 	r.wg.Add(1)
-	go func() {
+	panicx.SafeGo(r.logger, func() {
 		defer r.wg.Done()
 		if err := handler(ctx, msg); err != nil {
 			if r.logger != nil {
 				r.logger.Error("Handle message failed", "error", err)
 			}
 		}
-	}()
+	})
 }
 
 // Wait blocks until all running goroutines complete or timeout occurs.
 // Returns true if all goroutines completed, false if timeout occurred.
 func (r *WebhookRunner) Wait(timeout time.Duration) bool {
 	done := make(chan struct{})
-	go func() {
+	panicx.SafeGo(r.logger, func() {
 		r.wg.Wait()
 		close(done)
-	}()
+	})
 
 	select {
 	case <-done:

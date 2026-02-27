@@ -18,6 +18,7 @@ import (
 
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/engine"
+	"github.com/hrygo/hotplex/internal/panicx"
 	"github.com/hrygo/hotplex/telemetry"
 )
 
@@ -513,11 +514,11 @@ func (a *Adapter) handleEventCallback(ctx context.Context, eventData json.RawMes
 			ChannelID:   msgEvent.Channel,
 			ResponseURL: "",
 		}
-		go func() {
+		panicx.SafeGo(a.Logger(), func() {
 			if err := a.handleResetCommand(cmd); err != nil {
 				a.Logger().Error("handleResetCommand failed", "error", err)
 			}
-		}()
+		})
 		return
 	}
 
@@ -651,11 +652,11 @@ func (a *Adapter) handleSocketModeEvent(eventType string, data json.RawMessage) 
 			ChannelID:   msgEvent.Channel,
 			ResponseURL: "",
 		}
-		go func() {
+		panicx.SafeGo(a.Logger(), func() {
 			if err := a.handleResetCommand(cmd); err != nil {
 				a.Logger().Error("handleResetCommand failed", "error", err)
 			}
-		}()
+		})
 		return
 	}
 

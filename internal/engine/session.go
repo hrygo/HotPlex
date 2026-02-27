@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/panicx"
 	"github.com/hrygo/hotplex/internal/sys"
 )
 
@@ -105,7 +106,7 @@ func (s *Session) GetStatusChange() <-chan SessionStatus {
 // waitForReady monitors the session and transitions from Starting to Ready
 // when the process is confirmed alive and responsive.
 func (s *Session) waitForReady(ctx context.Context, timeout time.Duration) {
-	go func() {
+	panicx.SafeGo(s.logger, func() {
 		deadlineTimer := time.NewTimer(timeout)
 		defer deadlineTimer.Stop()
 
@@ -137,7 +138,7 @@ func (s *Session) waitForReady(ctx context.Context, timeout time.Duration) {
 				s.mu.Unlock()
 			}
 		}
-	}()
+	})
 }
 
 // WriteInput injects a JSON message to Stdin.
@@ -234,6 +235,8 @@ func isExpectedCloseError(err error) bool {
 
 // ReadStdout asynchronously reads CLI stdout, parses JSON, and dispatches callbacks.
 func (s *Session) ReadStdout() {
+	defer panicx.Recover(s.logger, "ReadStdout")
+
 	if s.stdout == nil {
 		return
 	}
@@ -277,6 +280,8 @@ func (s *Session) ReadStdout() {
 
 // ReadStderr asynchronously reads CLI stderr to prevent buffer deadlocks.
 func (s *Session) ReadStderr() {
+	defer panicx.Recover(s.logger, "ReadStderr")
+
 	if s.stderr == nil {
 		return
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/hrygo/hotplex"
+	"github.com/hrygo/hotplex/internal/panicx"
 )
 
 // ClientRequest represents the JSON payload expected from the WebSocket client.
@@ -128,7 +129,9 @@ func (h *HotPlexWSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch req.Type {
 		case "execute":
 			// Process execution asynchronously to keep the read loop open
-			go h.handleExecute(connCtx, cw, req, tasks, &mu)
+			panicx.SafeGo(h.logger, func() {
+				h.handleExecute(connCtx, cw, req, tasks, &mu)
+			})
 		case "stop":
 			h.handleStop(cw, req, tasks, &mu)
 		case "stats":

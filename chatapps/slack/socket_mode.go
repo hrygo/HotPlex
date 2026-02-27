@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/hrygo/hotplex/internal/panicx"
 )
 
 // SocketModeConfig holds configuration for Socket Mode connection
@@ -196,6 +197,12 @@ func (s *SocketModeConnection) getWebSocketURL() (string, error) {
 // This implements the fix for issue #33 - Slack Socket Mode connection recovery
 func (s *SocketModeConnection) reconnect() {
 	s.mu.Lock()
+	// Check if already reconnecting to prevent duplicate reconnect attempts
+	if s.reconnects > 0 && s.reconnects >= s.maxReconnects {
+		s.mu.Unlock()
+		s.logger.Warn("Max reconnection attempts reached, giving up")
+		return
+	}
 	s.reconnects++
 	reconnectCount := s.reconnects
 	onReconnect := s.onReconnect
@@ -214,7 +221,7 @@ func (s *SocketModeConnection) reconnect() {
 		}
 
 		// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s (max 30s)
-		delay := time.Duration(1<<uint(reconnectCount-1)) * time.Second
+		delay := time.Duration(1<<uint(min(reconnectCount-1, 4))) * time.Second
 		if delay > 30*time.Second {
 			delay = 30 * time.Second
 		}
@@ -226,6 +233,9 @@ func (s *SocketModeConnection) reconnect() {
 			return
 		case <-time.After(delay):
 		}
+
+		// Clean up old connection before attempting new connection
+		s.cleanupConnection()
 
 		if err := s.connect(); err != nil {
 			s.logger.Error("Reconnection failed", "error", err, "attempt", reconnectCount)
@@ -248,9 +258,30 @@ func (s *SocketModeConnection) reconnect() {
 	}
 }
 
+// cleanupConnection properly closes and cleans up the WebSocket connection
+func (s *SocketModeConnection) cleanupConnection() {
+	s.mu.Lock()
+	conn := s.conn
+	s.conn = nil
+	s.connected = false
+	s.mu.Unlock()
+
+	if conn != nil {
+		// Set a short deadline for close to avoid hanging
+		_ = conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+		_ = conn.Close()
+		s.logger.Debug("Old connection cleaned up")
+	}
+}
+
 // readLoop continuously reads messages from the WebSocket
 func (s *SocketModeConnection) readLoop() {
+	// Recover from panics to prevent process crash
 	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("Panic recovered in readLoop", "recover", r)
+		}
+
 		s.mu.Lock()
 		s.connected = false
 		s.conn = nil // Clear the connection on exit
@@ -266,17 +297,41 @@ func (s *SocketModeConnection) readLoop() {
 		default:
 		}
 
-		_, message, err := s.conn.ReadMessage()
+		s.mu.RLock()
+		conn := s.conn
+		s.mu.RUnlock()
+
+		if conn == nil {
+			s.logger.Debug("Connection is nil, exiting readLoop")
+			return
+		}
+
+		// Set read deadline to prevent blocking forever
+		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
+		_, message, err := conn.ReadMessage()
 		if err != nil {
-			s.logger.Error("Error reading message", "error", err)
+			// Check if it's a WebSocket close error or timeout
+			isCloseError := websocket.IsCloseError(err,
+				websocket.CloseNormalClosure,
+				websocket.CloseGoingAway,
+				websocket.CloseAbnormalClosure,
+				websocket.CloseNoStatusReceived)
+
+			s.logger.Debug("WebSocket read error", "error", err, "is_close_error", isCloseError)
 
 			s.mu.RLock()
 			connected := s.connected
 			s.mu.RUnlock()
 
 			if connected {
-				// Connection lost, attempt reconnect
-				go s.reconnect()
+				// Connection lost, attempt reconnect with delay
+				// Add delay to allow old connection to fully close
+				s.logger.Info("Connection lost, scheduling reconnect with delay")
+				panicx.SafeGo(s.logger, func() {
+					time.Sleep(1 * time.Second) // Wait for old connection to close
+					s.reconnect()
+				})
 			}
 			return
 		}
