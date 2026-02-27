@@ -171,6 +171,22 @@ func (c *StreamCallback) Handle(eventType string, data any) error {
 		return c.handleExitPlanMode(data)
 	case provider.EventTypeAskUserQuestion:
 		return c.handleAskUserQuestion(data)
+	case provider.EventTypeResult:
+		return c.handleSessionStats(data)
+	case provider.EventTypeCommandProgress:
+		return c.handleCommandProgress(data)
+	case provider.EventTypeCommandComplete:
+		return c.handleCommandComplete(data)
+	case provider.EventTypeSystem:
+		return c.handleSystem(data)
+	case provider.EventTypeUser:
+		return c.handleUser(data)
+	case provider.EventTypeStepStart:
+		return c.handleStepStart(data)
+	case provider.EventTypeStepFinish:
+		return c.handleStepFinish(data)
+	case provider.EventTypeRaw:
+		return c.handleRaw(data)
 	default:
 		// Check for specific engine/extended events
 		if eventType == "danger_block" {
@@ -563,6 +579,7 @@ func (c *StreamCallback) handleDangerBlock(data any) error {
 }
 
 // handleSessionStats handles session statistics events
+// Implements EventTypeResult (Turn Complete)
 func (c *StreamCallback) handleSessionStats(data any) error {
 	stats, ok := data.(*event.SessionStatsData)
 	if !ok {
@@ -581,15 +598,250 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 		Metadata: map[string]any{
 			"event_type":           "session_stats",
 			"session_id":           stats.SessionID,
-			"total_duration_ms":    stats.TotalDurationMs,
+			"duration_ms":          stats.TotalDurationMs,
 			"thinking_duration_ms": stats.ThinkingDurationMs,
 			"tool_duration_ms":     stats.ToolDurationMs,
-			"input_tokens":         stats.InputTokens,
-			"output_tokens":        stats.OutputTokens,
+			"tokens_in":            stats.InputTokens,
+			"tokens_out":           stats.OutputTokens,
 			"total_tokens":         stats.TotalTokens,
 			"tool_call_count":      stats.ToolCallCount,
 			"tools_used":           stats.ToolsUsed,
 			"files_modified":       stats.FilesModified,
+		},
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleCommandProgress handles command progress events
+// Implements EventTypeCommandProgress per spec
+func (c *StreamCallback) handleCommandProgress(data any) error {
+	var title string
+	var metadata map[string]any
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		title = m.EventData
+		if m.Meta != nil {
+			metadata = map[string]any{
+				"duration_ms":    m.Meta.DurationMs,
+				"total_steps":    int(m.Meta.TotalSteps),
+				"current_step":   int(m.Meta.CurrentStep),
+				"progress":       int(m.Meta.Progress),
+				"tool_name":      m.Meta.ToolName,
+				"status":         m.Meta.Status,
+				"input_summary":  m.Meta.InputSummary,
+				"output_summary": m.Meta.OutputSummary,
+			}
+		}
+	} else if s, ok := data.(string); ok {
+		title = s
+	} else {
+		title = "Processing..."
+	}
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeCommandProgress,
+		Content: title,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeCommandProgress),
+		},
+	}
+	if metadata != nil {
+		for k, v := range metadata {
+			msg.Metadata[k] = v
+		}
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleCommandComplete handles command completion events
+// Implements EventTypeCommandComplete per spec
+func (c *StreamCallback) handleCommandComplete(data any) error {
+	var title string
+	var metadata map[string]any
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		title = m.EventData
+		if m.Meta != nil {
+			metadata = map[string]any{
+				"duration_ms":       m.Meta.DurationMs,
+				"total_duration_ms": m.Meta.TotalDurationMs,
+				"completed_steps":   int(m.Meta.CurrentStep),
+				"total_steps":       int(m.Meta.TotalSteps),
+				"tool_name":         m.Meta.ToolName,
+				"status":            m.Meta.Status,
+				"input_tokens":      int(m.Meta.InputTokens),
+				"output_tokens":     int(m.Meta.OutputTokens),
+			}
+		}
+	} else if s, ok := data.(string); ok {
+		title = s
+	} else {
+		title = "Command completed"
+	}
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeCommandComplete,
+		Content: title,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeCommandComplete),
+		},
+	}
+	if metadata != nil {
+		for k, v := range metadata {
+			msg.Metadata[k] = v
+		}
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleSystem handles system-level messages
+// Implements EventTypeSystem per spec - uses context block for low visual weight
+func (c *StreamCallback) handleSystem(data any) error {
+	var content string
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		content = m.EventData
+	} else if s, ok := data.(string); ok {
+		content = s
+	} else {
+		return nil
+	}
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeSystem,
+		Content: content,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeSystem),
+		},
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleUser handles user message reflection
+// Implements EventTypeUser per spec
+func (c *StreamCallback) handleUser(data any) error {
+	var content string
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		content = m.EventData
+	} else if s, ok := data.(string); ok {
+		content = s
+	} else {
+		return nil
+	}
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeUser,
+		Content: content,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeUser),
+		},
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleStepStart handles step start events (OpenCode specific)
+// Implements EventTypeStepStart per spec
+func (c *StreamCallback) handleStepStart(data any) error {
+	var content string
+	var metadata map[string]any
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		content = m.EventData
+		if m.Meta != nil {
+			metadata = map[string]any{
+				"step":          int(m.Meta.CurrentStep),
+				"total":         int(m.Meta.TotalSteps),
+				"duration_ms":   m.Meta.DurationMs,
+				"tool_name":     m.Meta.ToolName,
+				"input_summary": m.Meta.InputSummary,
+			}
+		}
+	} else if s, ok := data.(string); ok {
+		content = s
+	} else {
+		content = "Starting step..."
+	}
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeStepStart,
+		Content: content,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeStepStart),
+		},
+	}
+	if metadata != nil {
+		for k, v := range metadata {
+			msg.Metadata[k] = v
+		}
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleStepFinish handles step finish events (OpenCode specific)
+// Implements EventTypeStepFinish per spec
+func (c *StreamCallback) handleStepFinish(data any) error {
+	var content string
+	var metadata map[string]any
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		content = m.EventData
+		if m.Meta != nil {
+			metadata = map[string]any{
+				"step":           int(m.Meta.CurrentStep),
+				"total":          int(m.Meta.TotalSteps),
+				"duration_ms":    m.Meta.DurationMs,
+				"tool_name":      m.Meta.ToolName,
+				"status":         m.Meta.Status,
+				"output_summary": m.Meta.OutputSummary,
+			}
+		}
+	} else if s, ok := data.(string); ok {
+		content = s
+	} else {
+		content = "Step completed"
+	}
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeStepFinish,
+		Content: content,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeStepFinish),
+		},
+	}
+	if metadata != nil {
+		for k, v := range metadata {
+			msg.Metadata[k] = v
+		}
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, convertToChatMessage(msg))
+}
+
+// handleRaw handles raw/unparsed output
+// Implements EventTypeRaw per spec - shows only type and length
+func (c *StreamCallback) handleRaw(data any) error {
+	var content string
+
+	if m, ok := data.(*event.EventWithMeta); ok {
+		content = m.EventData
+	} else if s, ok := data.(string); ok {
+		content = s
+	} else {
+		return nil
+	}
+
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeRaw,
+		Content: content,
+		Metadata: map[string]any{
+			"event_type": string(provider.EventTypeRaw),
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)

@@ -34,6 +34,16 @@ const (
 	MessageTypeCommandProgress MessageType = "command_progress"
 	// MessageTypeCommandComplete indicates a slash command has completed
 	MessageTypeCommandComplete MessageType = "command_complete"
+	// MessageTypeSystem indicates a system-level message
+	MessageTypeSystem MessageType = "system"
+	// MessageTypeUser indicates a user message reflection
+	MessageTypeUser MessageType = "user"
+	// MessageTypeStepStart indicates a new step/milestone (OpenCode specific)
+	MessageTypeStepStart MessageType = "step_start"
+	// MessageTypeStepFinish indicates a step/milestone completed (OpenCode specific)
+	MessageTypeStepFinish MessageType = "step_finish"
+	// MessageTypeRaw indicates unparsed raw output (fallback)
+	MessageTypeRaw MessageType = "raw"
 )
 
 type ChatMessage struct {
