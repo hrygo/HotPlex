@@ -370,7 +370,9 @@ func (s *SocketModeConnection) handleMessage(data []byte) {
 		s.mu.Lock()
 		s.connected = false
 		s.mu.Unlock()
-		go s.reconnect()
+		panicx.SafeGo(s.logger, func() {
+			s.reconnect()
+		})
 
 	case "events_api":
 		// Socket Mode uses "events_api" with "payload" field
