@@ -15,6 +15,7 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/chatapps/command"
 	"github.com/hrygo/hotplex/engine"
+	"github.com/hrygo/hotplex/event"
 	"github.com/hrygo/hotplex/internal/panicx"
 	"github.com/hrygo/hotplex/telemetry"
 
@@ -1327,9 +1328,15 @@ func (a *Adapter) processHashCommand(cmd string, userID, channelID string) bool 
 		ResponseURL: "",
 	}
 
+	// Create callback for progress events
+	var progressTS string
+	callback := func(eventType string, data any) error {
+		return a.handleCommandProgress(channelID, &progressTS, eventType, data)
+	}
+
 	// Execute command via registry (async)
 	panicx.SafeGo(a.Logger(), func() {
-		result, err := a.cmdRegistry.Execute(context.Background(), req, nil)
+		result, err := a.cmdRegistry.Execute(context.Background(), req, callback)
 		if err != nil {
 			a.Logger().Error("Command execution failed", "command", cmd, "error", err)
 			return
@@ -1341,6 +1348,44 @@ func (a *Adapter) processHashCommand(cmd string, userID, channelID string) bool 
 	})
 
 	return true
+}
+
+// handleCommandProgress handles progress events from command execution
+func (a *Adapter) handleCommandProgress(channelID string, progressTS *string, eventType string, data any) error {
+	// Build progress message using MessageBuilder
+	msg := &base.ChatMessage{
+		Type:      base.MessageTypeCommandProgress,
+		Content:   fmt.Sprintf("%v", data),
+		Metadata:  map[string]any{"event_type": eventType},
+		Timestamp: time.Now(),
+	}
+
+	// Check if data is EventWithMeta for richer info
+	if ewm, ok := data.(*event.EventWithMeta); ok {
+		msg.Content = ewm.EventData
+		if ewm.Meta != nil {
+			msg.Metadata["progress"] = ewm.Meta.Progress
+			msg.Metadata["total_steps"] = ewm.Meta.TotalSteps
+			msg.Metadata["current_step"] = ewm.Meta.CurrentStep
+		}
+	}
+
+	blocks := a.messageBuilder.Build(msg)
+	if len(blocks) == 0 {
+		return nil
+	}
+
+	// Update existing message or post new one
+	if *progressTS != "" {
+		return a.UpdateMessageSDK(context.Background(), channelID, *progressTS, blocks, "Command progress")
+	}
+
+	ts, err := a.sendBlocksSDK(context.Background(), channelID, blocks, "", "Command progress")
+	if err != nil {
+		return err
+	}
+	*progressTS = ts
+	return nil
 }
 
 // the processed text along with metadata additions for the message.
