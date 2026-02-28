@@ -108,8 +108,12 @@ func (c *ProcessorChain) sortProcessorsLocked() {
 type ProcessorOrder int
 
 const (
+	// OrderFilter drops noise events before anything else
+	OrderFilter ProcessorOrder = 5
 	// OrderRateLimit should run first to prevent abuse
 	OrderRateLimit ProcessorOrder = 10
+	// OrderZoneOrder ensures messages respect zone ordering (thinking→action→output→summary)
+	OrderZoneOrder ProcessorOrder = 12
 	// OrderThread manages thread_ts caching for message chunking
 	OrderThread ProcessorOrder = 15
 	// OrderAggregation groups messages together
@@ -124,11 +128,15 @@ const (
 
 // NewDefaultProcessorChain creates a default processor chain with all standard processors
 func NewDefaultProcessorChain(logger *slog.Logger) *ProcessorChain {
+	filter := NewMessageFilterProcessor(logger)
+
 	rateLimit := NewRateLimitProcessor(logger, RateLimitProcessorOptions{
 		MinInterval: 100 * time.Millisecond,
 		MaxBurst:    5,
 		BurstWindow: time.Second,
 	})
+
+	zoneOrder := NewZoneOrderProcessor(logger)
 
 	thread := NewThreadProcessor(logger, ThreadProcessorOptions{
 		TTL: 30 * time.Minute,
@@ -148,7 +156,9 @@ func NewDefaultProcessorChain(logger *slog.Logger) *ProcessorChain {
 	})
 
 	return NewProcessorChain(
+		filter,
 		rateLimit,
+		zoneOrder,
 		thread,
 		aggregator,
 		richContent,

@@ -16,6 +16,20 @@ const (
 	maxBufferBytes = 4000 // Maximum total content bytes (Slack single message limit)
 )
 
+// ZoneConfig defines per-zone aggregation limits.
+type ZoneConfig struct {
+	MaxMsgs  int // Maximum messages kept in the zone (0 = no limit)
+	MaxBytes int // Maximum total content bytes (0 = no limit)
+}
+
+// zoneConfigs maps zone index to its configuration.
+var zoneConfigs = map[int]ZoneConfig{
+	ZoneThinking: {MaxMsgs: 5, MaxBytes: 1500}, // 思考区: 5 messages, 1500 bytes
+	ZoneAction:   {MaxMsgs: 8, MaxBytes: 2000}, // 行动区: 8 messages, 2000 bytes
+	ZoneOutput:   {MaxMsgs: 0, MaxBytes: 4000}, // 展示区: no msg limit, 4000 byte pages
+	ZoneSummary:  {MaxMsgs: 1, MaxBytes: 0},    // 总结区: only latest
+}
+
 // EventConfig defines aggregation behavior for specific event types
 type EventConfig struct {
 	Aggregate    bool // Whether to aggregate messages of this type
@@ -169,6 +183,32 @@ func (p *MessageAggregatorProcessor) getEventConfig(eventType string) EventConfi
 	return EventConfig{Aggregate: true}
 }
 
+// getZoneLimits returns the effective MaxMsgs and MaxBytes for a message
+// based on its zone_index metadata. Falls back to processor-level defaults.
+func (p *MessageAggregatorProcessor) getZoneLimits(msg *base.ChatMessage) (maxMsgs, maxBytes int) {
+	maxMsgs = p.maxMsgs
+	maxBytes = p.maxBytes
+
+	if msg.Metadata == nil {
+		return
+	}
+
+	zoneIndex, ok := msg.Metadata["zone_index"].(int)
+	if !ok {
+		return
+	}
+
+	if zc, found := zoneConfigs[zoneIndex]; found {
+		if zc.MaxMsgs > 0 {
+			maxMsgs = zc.MaxMsgs
+		}
+		if zc.MaxBytes > 0 {
+			maxBytes = zc.MaxBytes
+		}
+	}
+	return
+}
+
 // Process aggregates messages with event-type awareness
 func (p *MessageAggregatorProcessor) Process(ctx context.Context, msg *base.ChatMessage) (*base.ChatMessage, error) {
 	if msg == nil || msg.Metadata == nil {
@@ -294,14 +334,17 @@ func (p *MessageAggregatorProcessor) bufferMessage(_ context.Context, msg *base.
 	newMsgBytes := len(msg.Content)
 	needNewBuffer := false
 
-	// Check message count limit
-	if len(buf.messages) >= p.maxMsgs {
+	// Get zone-aware limits (falls back to processor-level defaults)
+	zoneMsgs, zoneBytes := p.getZoneLimits(msg)
+
+	// Check message count limit (skip if 0 = unlimited)
+	if zoneMsgs > 0 && len(buf.messages) >= zoneMsgs {
 		buf = handleOverflowFlush(buf, "message count")
 		needNewBuffer = true
 	}
 
-	// Check byte limit (only if we still have a buffer)
-	if buf != nil && buf.totalBytes+newMsgBytes > p.maxBytes {
+	// Check byte limit (only if we still have a buffer and limit is set)
+	if buf != nil && zoneBytes > 0 && buf.totalBytes+newMsgBytes > zoneBytes {
 		buf = handleOverflowFlush(buf, "bytes")
 		needNewBuffer = true
 	}

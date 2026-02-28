@@ -282,6 +282,17 @@ func (b *MessageBuilder) buildSingleToolResultBlock(msg *base.ChatMessage) []sla
 	statusObj := slack.NewTextBlockObject("mrkdwn", statusText, false, false)
 	blocks = append(blocks, slack.NewSectionBlock(statusObj, nil, nil))
 
+	// Error passthrough: on failure, append the first 200 chars of error content
+	// as a code block below the summary to aid debugging in Slack.
+	if !success && msg.Content != "" {
+		errPreview := msg.Content
+		if len(errPreview) > 200 {
+			errPreview = errPreview[:200] + "…"
+		}
+		errBlock := slack.NewTextBlockObject("mrkdwn", "```"+errPreview+"```", false, false)
+		blocks = append(blocks, slack.NewContextBlock("", errBlock))
+	}
+
 	return blocks
 }
 
