@@ -312,6 +312,9 @@ func (b *MessageBuilder) BuildAnswerMessage(msg *base.ChatMessage) []slack.Block
 	// Convert Markdown to mrkdwn
 	formattedContent := b.formatter.Format(content)
 
+	// Add zone title for visual identification (Zone 2: Output)
+	formattedContent = ":speech_balloon: *Answer*\n" + formattedContent
+
 	// Check if content is too long for a single message
 	if len(formattedContent) > 4000 {
 		// Split into chunks

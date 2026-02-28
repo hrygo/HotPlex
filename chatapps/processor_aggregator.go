@@ -281,34 +281,6 @@ func (p *MessageAggregatorProcessor) bufferMessage(_ context.Context, msg *base.
 		sessionKey = sessionKey + ":" + eventType
 	}
 
-	// Helper function to handle buffer overflow flush
-	// Returns the buffer after flush (may be nil or new)
-	handleOverflowFlush := func(buf *messageBuffer, overflowType string) *messageBuffer {
-		p.logger.Warn("Buffer overflow ("+overflowType+"), forcing flush",
-			"session_key", sessionKey)
-
-		// Record dropped metrics for overflow
-		for _, droppedMsg := range buf.messages {
-			droppedEventType, _ := droppedMsg.Metadata["event_type"].(string)
-			if droppedEventType == "" {
-				droppedEventType = "unknown"
-			}
-			MessagesDroppedTotal.WithLabelValues(droppedEventType, msg.Platform, "overflow").Inc()
-		}
-
-		// Stop the timer to prevent double flush
-		if buf.timer != nil {
-			buf.timer.Stop()
-		}
-
-		// Clear buffer messages (they will be dropped)
-		buf.messages = nil
-		buf.totalBytes = 0
-
-		// Return nil so a new buffer will be created
-		return nil
-	}
-
 	p.mu.Lock()
 
 	buf, exists := p.buffers[sessionKey]
@@ -332,37 +304,52 @@ func (p *MessageAggregatorProcessor) bufferMessage(_ context.Context, msg *base.
 
 	// Check buffer limits before adding new message
 	newMsgBytes := len(msg.Content)
-	needNewBuffer := false
 
 	// Get zone-aware limits (falls back to processor-level defaults)
 	zoneMsgs, zoneBytes := p.getZoneLimits(msg)
 
-	// Check message count limit (skip if 0 = unlimited)
+	// Sliding window: evict oldest messages when zone limit is reached
+	// This keeps the most recent N messages visible in the UI
 	if zoneMsgs > 0 && len(buf.messages) >= zoneMsgs {
-		buf = handleOverflowFlush(buf, "message count")
-		needNewBuffer = true
-	}
-
-	// Check byte limit (only if we still have a buffer and limit is set)
-	if buf != nil && zoneBytes > 0 && buf.totalBytes+newMsgBytes > zoneBytes {
-		buf = handleOverflowFlush(buf, "bytes")
-		needNewBuffer = true
-	}
-
-	// Create new buffer if needed
-	if needNewBuffer || buf == nil {
-		buf = &messageBuffer{
-			messages:   make([]*base.ChatMessage, 0, 10),
-			createdAt:  time.Now(),
-			done:       make(chan *base.ChatMessage, 1),
-			eventType:  eventType,
-			messageTS:  "",
-			totalBytes: 0,
+		// Evict oldest message to make room
+		evicted := buf.messages[0]
+		buf.messages = buf.messages[1:]
+		evictedBytes := len(evicted.Content)
+		buf.totalBytes -= evictedBytes
+		if buf.totalBytes < 0 {
+			buf.totalBytes = 0
 		}
-		buf.timer = time.AfterFunc(p.window, func() {
-			p.flushBufferByTimer(sessionKey)
-		})
-		p.buffers[sessionKey] = buf
+
+		// Record eviction metrics
+		evictedEventType, _ := evicted.Metadata["event_type"].(string)
+		if evictedEventType == "" {
+			evictedEventType = "unknown"
+		}
+		MessagesDroppedTotal.WithLabelValues(evictedEventType, msg.Platform, "sliding_window").Inc()
+
+		p.logger.Debug("Sliding window eviction (message count)",
+			"session_key", sessionKey,
+			"evicted_bytes", evictedBytes,
+			"remaining_msgs", len(buf.messages))
+	}
+
+	// Sliding window for byte limit: evict oldest until under threshold
+	if zoneBytes > 0 {
+		for len(buf.messages) > 0 && buf.totalBytes+newMsgBytes > zoneBytes {
+			evicted := buf.messages[0]
+			buf.messages = buf.messages[1:]
+			evictedBytes := len(evicted.Content)
+			buf.totalBytes -= evictedBytes
+			if buf.totalBytes < 0 {
+				buf.totalBytes = 0
+			}
+
+			evictedEventType, _ := evicted.Metadata["event_type"].(string)
+			if evictedEventType == "" {
+				evictedEventType = "unknown"
+			}
+			MessagesDroppedTotal.WithLabelValues(evictedEventType, msg.Platform, "sliding_window_bytes").Inc()
+		}
 	}
 
 	// Capture messageTS from first message if use_update is enabled

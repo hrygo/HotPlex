@@ -110,6 +110,24 @@ type StreamCallback struct {
 
 	// Stream state for throttled updates
 	streamState *StreamState
+
+	// Reaction lifecycle state — tracks the user's trigger message for emoji status
+	reactionChannelID string // Channel for reactions (from user msg)
+	reactionMessageTS string // User's message TS for reactions
+	currentReaction   string // Currently active reaction emoji name
+
+	// Starting message state for 3s delayed deletion
+	startingMsgChannelID string
+	startingMsgTS        string
+
+	// Action Zone message records for 3s delayed deletion on Answer
+	actionMsgRecords []msgRecord
+}
+
+// msgRecord tracks a sent message for later deletion
+type msgRecord struct {
+	ChannelID string
+	MessageTS string
 }
 
 // StreamState tracks the state for streaming updates
@@ -131,6 +149,16 @@ func NewStreamCallback(ctx context.Context, sessionID, platform string, adapters
 		isFirst:   true,
 		metadata:  metadata,
 		processor: NewDefaultProcessorChain(logger),
+	}
+
+	// Extract user message coordinates for reaction lifecycle
+	if metadata != nil {
+		if ch, ok := metadata["channel_id"].(string); ok {
+			cb.reactionChannelID = ch
+		}
+		if ts, ok := metadata["message_ts"].(string); ok {
+			cb.reactionMessageTS = ts
+		}
 	}
 
 	// Set callback as the sender for aggregated messages
@@ -233,14 +261,16 @@ func (c *StreamCallback) handleThinking(data any) error {
 		return nil
 	}
 
+	// Reaction lifecycle: 📥 → 🧠
+	c.setReaction("brain")
+
+	// Schedule deletion of starting session message (3s delay)
+	c.scheduleDeleteStartingMessage()
+
 	// Check if session_start has been sent
-	// NOTE: Handle() already holds c.mu lock, so we can read sessionStartSent directly
-	// without acquiring the lock again (which would cause deadlock)
 	sessionStartSent := c.sessionStartSent
 
 	if !sessionStartSent {
-		// session_start hasn't been sent yet - log warning but proceed
-		// This should not happen in normal flow, but we handle it gracefully
 		c.logger.Warn("thinking event received before session_start - proceeding anyway",
 			"session_id", c.sessionID,
 			"thinking_content", thinkingContent)
@@ -299,24 +329,100 @@ func (c *StreamCallback) sendMessageAndGetTS(msg *ChatMessage) error {
 	return nil
 }
 
-// deleteThinkingMessage deletes the thinking message from Slack
-func (c *StreamCallback) deleteThinkingMessage() error {
-	if c.thinkingChannelID == "" || c.thinkingMessageTS == "" {
-		return nil
+// setReaction sets a reaction on the user's trigger message.
+// Removes previous reaction before adding new one for clean status transitions.
+func (c *StreamCallback) setReaction(emoji string) {
+	if c.reactionChannelID == "" || c.reactionMessageTS == "" {
+		return
 	}
-
-	// Get Slack adapter and delete the message
 	adapter, ok := c.adapters.GetAdapter(c.platform)
-	if !ok || adapter == nil {
-		return fmt.Errorf("adapter not found for platform: %s", c.platform)
+	if !ok {
+		return
 	}
-
 	slackAdapter, ok := adapter.(*slack.Adapter)
 	if !ok {
-		return fmt.Errorf("adapter is not a Slack adapter")
+		return
 	}
 
-	return slackAdapter.DeleteMessageSDK(c.ctx, c.thinkingChannelID, c.thinkingMessageTS)
+	// Remove previous reaction (ignore errors — may not exist)
+	if c.currentReaction != "" && c.currentReaction != emoji {
+		_ = slackAdapter.RemoveReactionSDK(c.ctx, base.Reaction{
+			Name:      c.currentReaction,
+			Channel:   c.reactionChannelID,
+			Timestamp: c.reactionMessageTS,
+		})
+	}
+
+	// Add new reaction
+	if err := slackAdapter.AddReactionSDK(c.ctx, base.Reaction{
+		Name:      emoji,
+		Channel:   c.reactionChannelID,
+		Timestamp: c.reactionMessageTS,
+	}); err == nil {
+		c.currentReaction = emoji
+	} else {
+		c.logger.Warn("Failed to set reaction", "emoji", emoji, "error", err)
+	}
+}
+
+// scheduleDeleteStartingMessage schedules a 3-second delayed deletion
+// for the "Starting Session" / "Engine Starting" message.
+func (c *StreamCallback) scheduleDeleteStartingMessage() {
+	if c.startingMsgChannelID == "" || c.startingMsgTS == "" {
+		return
+	}
+	channelID, msgTS := c.startingMsgChannelID, c.startingMsgTS
+	c.startingMsgChannelID, c.startingMsgTS = "", "" // Clear immediately to prevent double-delete
+
+	time.AfterFunc(3*time.Second, func() {
+		adapter, ok := c.adapters.GetAdapter(c.platform)
+		if !ok {
+			return
+		}
+		if sa, ok := adapter.(*slack.Adapter); ok {
+			if err := sa.DeleteMessageSDK(c.ctx, channelID, msgTS); err != nil {
+				c.logger.Debug("Failed to delete starting message", "error", err)
+			}
+		}
+	})
+}
+
+// trackActionMessage records an action zone message for later cleanup
+func (c *StreamCallback) trackActionMessage(msg *base.ChatMessage) {
+	if msg.Metadata == nil {
+		return
+	}
+	ts, _ := msg.Metadata["message_ts"].(string)
+	ch, _ := msg.Metadata["channel_id"].(string)
+	if ts != "" && ch != "" {
+		c.actionMsgRecords = append(c.actionMsgRecords, msgRecord{ChannelID: ch, MessageTS: ts})
+	}
+}
+
+// scheduleDeleteActionMessages schedules 3-second delayed deletion
+// of all tracked Action Zone messages (tool_use, tool_result, etc.)
+func (c *StreamCallback) scheduleDeleteActionMessages() {
+	if len(c.actionMsgRecords) == 0 {
+		return
+	}
+	records := c.actionMsgRecords
+	c.actionMsgRecords = nil // Clear immediately
+
+	time.AfterFunc(3*time.Second, func() {
+		adapter, ok := c.adapters.GetAdapter(c.platform)
+		if !ok {
+			return
+		}
+		sa, ok := adapter.(*slack.Adapter)
+		if !ok {
+			return
+		}
+		for _, rec := range records {
+			if err := sa.DeleteMessageSDK(c.ctx, rec.ChannelID, rec.MessageTS); err != nil {
+				c.logger.Debug("Failed to delete action message", "ts", rec.MessageTS, "error", err)
+			}
+		}
+	})
 }
 
 // updateStatusMessage updates the status indicator message in-place
@@ -455,7 +561,11 @@ func (c *StreamCallback) handleToolUse(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+		return err
+	}
+	c.trackActionMessage(msg)
+	return nil
 }
 
 func (c *StreamCallback) handleToolResult(data any) error {
@@ -526,25 +636,41 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+		return err
+	}
+	c.trackActionMessage(msg)
+	return nil
 }
 
 func (c *StreamCallback) handleAnswer(data any) error {
-	// Clear thinking message on first answer if it exists
+	// Schedule 3-second delayed deletion of thinking message for smooth UX transition
 	if c.thinkingSent && c.thinkingMessageTS != "" && c.thinkingChannelID != "" {
-		c.logger.Debug("Deleting thinking message for answer",
+		c.logger.Debug("Scheduling delayed thinking message deletion for answer",
 			"ts", c.thinkingMessageTS,
 			"channel", c.thinkingChannelID)
-		if err := c.deleteThinkingMessage(); err != nil {
-			c.logger.Warn("Failed to delete thinking message", "error", err)
-		}
+		channelID, msgTS := c.thinkingChannelID, c.thinkingMessageTS
 		c.thinkingSent = false
 		c.thinkingMessageTS = ""
 		c.thinkingChannelID = ""
+		time.AfterFunc(3*time.Second, func() {
+			adapter, ok := c.adapters.GetAdapter(c.platform)
+			if !ok {
+				return
+			}
+			if sa, ok := adapter.(*slack.Adapter); ok {
+				if err := sa.DeleteMessageSDK(c.ctx, channelID, msgTS); err != nil {
+					c.logger.Debug("Failed to delete thinking message (delayed)", "error", err)
+				}
+			}
+		})
 	} else if c.thinkingSent {
 		c.thinkingSent = false
 		c.logger.Debug("Clearing thinking state for answer")
 	}
+
+	// Schedule 3-second delayed deletion of Action Zone messages
+	c.scheduleDeleteActionMessages()
 
 	var answerContent string
 	switch v := data.(type) {
@@ -596,6 +722,9 @@ func (c *StreamCallback) handleAnswer(data any) error {
 }
 
 func (c *StreamCallback) handleError(data any) error {
+	// Reaction lifecycle: set ❌ on error
+	c.setReaction("x")
+
 	// Clear thinking state on first non-thinking event
 	if c.thinkingSent {
 		c.thinkingSent = false
@@ -654,6 +783,9 @@ func (c *StreamCallback) handleDangerBlock(data any) error {
 // handleSessionStats handles session statistics events
 // Implements EventTypeResult (Turn Complete)
 func (c *StreamCallback) handleSessionStats(data any) error {
+	// Reaction lifecycle: set ✅ on turn complete
+	c.setReaction("white_check_mark")
+
 	stats, ok := data.(*event.SessionStatsData)
 	if !ok {
 		c.logger.Debug("session_stats: invalid data type", "type", fmt.Sprintf("%T", data))
@@ -1284,6 +1416,9 @@ func (c *StreamCallback) handleSessionStart(data any) error {
 	c.sessionStartSent = true
 	c.mu.Unlock()
 
+	// Reaction lifecycle: set 📥 on session start
+	c.setReaction("inbox_tray")
+
 	var content string
 
 	if m, ok := data.(*event.EventWithMeta); ok {
@@ -1294,7 +1429,6 @@ func (c *StreamCallback) handleSessionStart(data any) error {
 		content = "Initializing AI assistant..."
 	}
 
-	// Get session ID from callback
 	sessionID := c.sessionID
 
 	msg := &base.ChatMessage{
@@ -1306,7 +1440,19 @@ func (c *StreamCallback) handleSessionStart(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+		return err
+	}
+
+	// Capture starting message TS for 3s delayed deletion
+	if ts, ok := msg.Metadata["message_ts"].(string); ok && ts != "" {
+		c.startingMsgTS = ts
+		if ch, ok := msg.Metadata["channel_id"].(string); ok {
+			c.startingMsgChannelID = ch
+		}
+	}
+
+	return nil
 }
 
 // handleEngineStarting handles engine starting events (CLI cold start in progress)
