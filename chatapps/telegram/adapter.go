@@ -90,12 +90,12 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", a.config.BotToken)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.telegram.org/bot/sendMessage", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bot "+a.config.BotToken)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -273,8 +273,7 @@ func (a *Adapter) SetWebhook(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/setWebhook", a.config.BotToken)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.telegram.org/bot/setWebhook", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
