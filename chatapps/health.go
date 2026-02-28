@@ -78,7 +78,7 @@ func (h *HealthChecker) Register(check HealthCheck) {
 }
 
 func (h *HealthChecker) Start() {
-	go func() {
+	panicx.SafeGo(h.logger, func() {
 		ticker := time.NewTicker(h.interval)
 		defer ticker.Stop()
 		for {
@@ -89,7 +89,7 @@ func (h *HealthChecker) Start() {
 				h.runChecks()
 			}
 		}
-	}()
+	})
 }
 
 func (h *HealthChecker) Stop() {

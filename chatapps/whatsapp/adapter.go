@@ -223,11 +223,11 @@ func (a *Adapter) handleMessage(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if a.Handler() != nil {
-					go func() {
+					panicx.SafeGo(a.Logger(), func() {
 						if err := a.Handler()(r.Context(), chatMsg); err != nil {
 							a.Logger().Error("Handle message failed", "error", err)
 						}
-					}()
+					})
 				}
 			}
 		}
