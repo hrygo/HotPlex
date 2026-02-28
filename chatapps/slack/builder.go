@@ -685,11 +685,14 @@ func (b *MessageBuilder) BuildCommandProgressMessage(msg *base.ChatMessage) []sl
 		}
 	}
 
-	// Per spec: always add cancel button (actions block)
-	cancelBtn := slack.NewButtonBlockElement("cmd_cancel", "cancel",
-		slack.NewTextBlockObject("plain_text", "Cancel", false, false))
-	actionBlock := slack.NewActionBlock("cmd_actions", cancelBtn)
-	blocks = append(blocks, actionBlock)
+	// Per spec: add cancel button only for cancellable commands
+	// Reset command is NOT cancellable (terminate session is irreversible)
+	if commandName != "reset" {
+		cancelBtn := slack.NewButtonBlockElement("cmd_cancel", "cancel",
+			slack.NewTextBlockObject("plain_text", "Cancel", false, false))
+		actionBlock := slack.NewActionBlock("cmd_actions", cancelBtn)
+		blocks = append(blocks, actionBlock)
+	}
 
 	return blocks
 }
