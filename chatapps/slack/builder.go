@@ -685,12 +685,8 @@ func (b *MessageBuilder) BuildCommandProgressMessage(msg *base.ChatMessage) []sl
 		}
 	}
 
-	// Per spec: always add cancel button (actions block)
-	cancelBtn := slack.NewButtonBlockElement("cmd_cancel", "cancel",
-		slack.NewTextBlockObject("plain_text", "Cancel", false, false))
-	actionBlock := slack.NewActionBlock("cmd_actions", cancelBtn)
-	blocks = append(blocks, actionBlock)
-
+	// Per spec: do not add cancel button for command progress messages
+	// Command execution cannot be cancelled by user
 	return blocks
 }
 
