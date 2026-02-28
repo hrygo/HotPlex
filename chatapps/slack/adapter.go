@@ -1827,5 +1827,49 @@ func (a *Adapter) PostEphemeralSDK(ctx context.Context, channelID, userID, text 
 	return nil
 }
 
-// Compile-time interface compliance check
-var _ base.ChatAdapter = (*Adapter)(nil)
+// Compile-time interface compliance checks
+var (
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.MessageOperations = (*Adapter)(nil)
+	// Note: SessionOperations is implemented by base.Adapter (inherited)
+)
+
+// MessageOperations implementation for Slack
+
+// DeleteMessage implements base.MessageOperations interface
+func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string) error {
+	return a.DeleteMessageSDK(ctx, channelID, messageTS)
+}
+
+// RemoveReaction implements base.MessageOperations interface
+func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
+	if a.client == nil {
+		return fmt.Errorf("slack client not initialized")
+	}
+
+	if reaction.Channel == "" || reaction.Timestamp == "" {
+		return fmt.Errorf("channel and timestamp are required for reaction")
+	}
+
+	err := a.client.RemoveReactionContext(ctx,
+		reaction.Name,
+		slack.ItemRef{
+			Channel:   reaction.Channel,
+			Timestamp: reaction.Timestamp,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("remove reaction: %w", err)
+	}
+
+	a.Logger().Debug("Reaction removed", "emoji", reaction.Name, "channel", reaction.Channel, "ts", reaction.Timestamp)
+	return nil
+}
+
+// UpdateMessage implements base.MessageOperations interface
+func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {
+	// Use message builder to convert ChatMessage to Slack blocks
+	builder := NewMessageBuilder()
+	blocks := builder.Build(msg)
+	return a.UpdateMessageSDK(ctx, channelID, messageTS, blocks, msg.Content)
+}

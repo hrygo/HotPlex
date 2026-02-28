@@ -8,16 +8,121 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
-	"github.com/hrygo/hotplex/chatapps/slack"
 	"github.com/hrygo/hotplex/engine"
+	intengine "github.com/hrygo/hotplex/internal/engine"
 	"github.com/hrygo/hotplex/event"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
 )
 
+// sessionWrapper wraps intengine.Session to implement chatapps.Session interface
+type sessionWrapper struct {
+	sess *intengine.Session
+}
+
+func (w *sessionWrapper) ID() string {
+	if w.sess == nil {
+		return ""
+	}
+	return w.sess.ID
+}
+
+func (w *sessionWrapper) Status() string {
+	if w.sess == nil {
+		return ""
+	}
+	// Session doesn't expose status directly, use "active" as default
+	return "active"
+}
+
+func (w *sessionWrapper) CreatedAt() time.Time {
+	if w.sess == nil {
+		return time.Time{}
+	}
+	return w.sess.CreatedAt
+}
+
+// engineWrapper wraps engine.Engine to implement chatapps.Engine interface
+type engineWrapper struct {
+	eng *engine.Engine
+}
+
+func (w *engineWrapper) Execute(ctx context.Context, cfg *types.Config, prompt string, callback event.Callback) error {
+	return w.eng.Execute(ctx, cfg, prompt, callback)
+}
+
+func (w *engineWrapper) GetSession(sessionID string) (Session, bool) {
+	sess, ok := w.eng.GetSession(sessionID)
+	if !ok || sess == nil {
+		return nil, false
+	}
+	return &sessionWrapper{sess: sess}, true
+}
+
+func (w *engineWrapper) Close() error {
+	return w.eng.Close()
+}
+
+func (w *engineWrapper) GetSessionStats(sessionID string) *SessionStats {
+	stats := w.eng.GetSessionStats(sessionID)
+	if stats == nil {
+		return nil
+	}
+	// Convert engine.SessionStats to chatapps.SessionStats
+	return &SessionStats{
+		SessionID:     stats.SessionID,
+		Status:        string(stats.SessionID), // Use session ID as status placeholder
+		TotalTokens:   int64(stats.InputTokens + stats.OutputTokens + stats.CacheReadTokens + stats.CacheWriteTokens),
+		InputTokens:   int64(stats.InputTokens),
+		OutputTokens:  int64(stats.OutputTokens),
+		CacheRead:     int64(stats.CacheReadTokens),
+		CacheWrite:    int64(stats.CacheWriteTokens),
+		TotalCost:     0, // Cost not tracked in engine stats
+		Duration:      time.Duration(stats.TotalDurationMs) * time.Millisecond,
+		ToolCallCount: int(stats.ToolCallCount),
+		ErrorCount:    0, // Error count not tracked in engine stats
+	}
+}
+
+func (w *engineWrapper) ValidateConfig(cfg *types.Config) error {
+	return w.eng.ValidateConfig(cfg)
+}
+
+func (w *engineWrapper) StopSession(sessionID string, reason string) error {
+	return w.eng.StopSession(sessionID, reason)
+}
+
+func (w *engineWrapper) ResetSessionProvider(sessionID string) {
+	w.eng.ResetSessionProvider(sessionID)
+}
+
+func (w *engineWrapper) SetDangerAllowPaths(paths []string) {
+	w.eng.SetDangerAllowPaths(paths)
+}
+
+func (w *engineWrapper) SetDangerBypassEnabled(token string, enabled bool) error {
+	return w.eng.SetDangerBypassEnabled(token, enabled)
+}
+
+func (w *engineWrapper) SetAllowedTools(tools []string) {
+	w.eng.SetAllowedTools(tools)
+}
+
+func (w *engineWrapper) SetDisallowedTools(tools []string) {
+	w.eng.SetDisallowedTools(tools)
+}
+
+func (w *engineWrapper) GetAllowedTools() []string {
+	return w.eng.GetAllowedTools()
+}
+
+func (w *engineWrapper) GetDisallowedTools() []string {
+	return w.eng.GetDisallowedTools()
+}
+
 // EngineHolder holds the Engine instance and configuration for ChatApps integration
 type EngineHolder struct {
-	engine           *engine.Engine
+	engine           Engine
 	logger           *slog.Logger
 	adapters         *AdapterManager
 	defaultWorkDir   string
@@ -53,8 +158,11 @@ func NewEngineHolder(opts EngineHolderOptions) (*EngineHolder, error) {
 		return nil, fmt.Errorf("create engine: %w", err)
 	}
 
+	// Wrap engine.Engine to implement chatapps.Engine interface
+	wrappedEngine := &engineWrapper{eng: eng}
+
 	return &EngineHolder{
-		engine:           eng,
+		engine:           wrappedEngine,
 		logger:           logger,
 		adapters:         opts.Adapters,
 		defaultWorkDir:   opts.DefaultWorkDir,
@@ -77,7 +185,7 @@ type EngineHolderOptions struct {
 }
 
 // GetEngine returns the underlying Engine instance
-func (h *EngineHolder) GetEngine() *engine.Engine {
+func (h *EngineHolder) GetEngine() Engine {
 	return h.engine
 }
 
@@ -110,6 +218,10 @@ type StreamCallback struct {
 
 	// Stream state for throttled updates
 	streamState *StreamState
+
+	// Platform-specific operations (dependency injection for testability and platform agnosticism)
+	messageOps MessageOperations
+	sessionOps SessionOperations
 }
 
 // StreamState tracks the state for streaming updates
@@ -120,17 +232,27 @@ type StreamState struct {
 	mu          sync.Mutex
 }
 
-// NewStreamCallback creates a new StreamCallback
-func NewStreamCallback(ctx context.Context, sessionID, platform string, adapters *AdapterManager, logger *slog.Logger, metadata map[string]any) *StreamCallback {
+// NewStreamCallback creates a new StreamCallback with injected platform-specific operations
+func NewStreamCallback(
+	ctx context.Context,
+	sessionID, platform string,
+	adapters *AdapterManager,
+	logger *slog.Logger,
+	metadata map[string]any,
+	messageOps MessageOperations,
+	sessionOps SessionOperations,
+) *StreamCallback {
 	cb := &StreamCallback{
-		ctx:       ctx,
-		sessionID: sessionID,
-		platform:  platform,
-		adapters:  adapters,
-		logger:    logger,
-		isFirst:   true,
-		metadata:  metadata,
-		processor: NewDefaultProcessorChain(logger),
+		ctx:        ctx,
+		sessionID:  sessionID,
+		platform:   platform,
+		adapters:   adapters,
+		logger:     logger,
+		isFirst:    true,
+		metadata:   metadata,
+		processor:  NewDefaultProcessorChain(logger),
+		messageOps: messageOps,
+		sessionOps: sessionOps,
 	}
 
 	// Set callback as the sender for aggregated messages
@@ -299,24 +421,19 @@ func (c *StreamCallback) sendMessageAndGetTS(msg *ChatMessage) error {
 	return nil
 }
 
-// deleteThinkingMessage deletes the thinking message from Slack
+// deleteThinkingMessage deletes the thinking message using platform-agnostic interface
 func (c *StreamCallback) deleteThinkingMessage() error {
 	if c.thinkingChannelID == "" || c.thinkingMessageTS == "" {
 		return nil
 	}
 
-	// Get Slack adapter and delete the message
-	adapter, ok := c.adapters.GetAdapter(c.platform)
-	if !ok || adapter == nil {
-		return fmt.Errorf("adapter not found for platform: %s", c.platform)
+	// Use injected message operations interface (no type assertion needed)
+	if c.messageOps == nil {
+		c.logger.Debug("Message operations not supported on this platform", "platform", c.platform)
+		return nil
 	}
 
-	slackAdapter, ok := adapter.(*slack.Adapter)
-	if !ok {
-		return fmt.Errorf("adapter is not a Slack adapter")
-	}
-
-	return slackAdapter.DeleteMessageSDK(c.ctx, c.thinkingChannelID, c.thinkingMessageTS)
+	return c.messageOps.DeleteMessage(c.ctx, c.thinkingChannelID, c.thinkingMessageTS)
 }
 
 // updateStatusMessage updates the status indicator message in-place
@@ -1072,8 +1189,12 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 		TaskInstructions: fullInstructions,
 	}
 
-	// Create stream callback with original message metadata
-	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, msg.Metadata)
+	// Get platform-specific operations from AdapterManager
+	messageOps := h.adapters.GetMessageOperations(msg.Platform)
+	sessionOps := h.adapters.GetSessionOperations(msg.Platform)
+
+	// Create stream callback with injected dependencies
+	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, msg.Metadata, messageOps, sessionOps)
 	wrappedCallback := func(eventType string, data any) error {
 		return callback.Handle(eventType, data)
 	}
