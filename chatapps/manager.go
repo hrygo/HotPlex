@@ -187,3 +187,39 @@ func (m *AdapterManager) Handler() http.Handler {
 	m.RegisterRoutes(mux)
 	return mux
 }
+
+// GetMessageOperations returns platform-specific message operations interface
+// Returns nil if the platform doesn't support message operations
+func (m *AdapterManager) GetMessageOperations(platform string) MessageOperations {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	adapter, ok := m.adapters[platform]
+	if !ok {
+		return nil
+	}
+
+	// Safe type assertion - only place where this is allowed
+	if ops, ok := adapter.(MessageOperations); ok {
+		return ops
+	}
+	return nil
+}
+
+// GetSessionOperations returns platform-specific session operations interface
+// Returns nil if the platform doesn't support session operations
+func (m *AdapterManager) GetSessionOperations(platform string) SessionOperations {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	adapter, ok := m.adapters[platform]
+	if !ok {
+		return nil
+	}
+
+	// Safe type assertion - only place where this is allowed
+	if ops, ok := adapter.(SessionOperations); ok {
+		return ops
+	}
+	return nil
+}

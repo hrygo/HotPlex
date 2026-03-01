@@ -131,10 +131,10 @@ func setupPlatform(
 	// 2. Create Adapter
 	adapter := adapterFactory(pc)
 
-	// Wire up Engine for slash command support (Slack-specific for now)
-	// Use type assertion since SetEngine is not in ChatAdapter interface
-	if slackAdapter, ok := adapter.(*slack.Adapter); ok {
-		slackAdapter.SetEngine(eng)
+	// Wire up Engine for slash command support (platform-agnostic via interface)
+	// Only adapters that implement EngineSupport will receive the engine
+	if engineSupport, ok := adapter.(base.EngineSupport); ok {
+		engineSupport.SetEngine(eng)
 	}
 
 	// 3. Create EngineMessageHandler
