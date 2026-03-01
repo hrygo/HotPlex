@@ -11,8 +11,8 @@ func TestEnvProvider_Get(t *testing.T) {
 	// Setup
 	key := "TEST_SECRET_KEY"
 	value := "test-secret-value"
-	os.Setenv(key, value)
-	defer os.Unsetenv(key)
+	_ = os.Setenv(key, value)
+	defer func() { _ = os.Unsetenv(key) }()
 
 	ctx := context.Background()
 	p := NewEnvProvider()
@@ -36,7 +36,7 @@ func TestEnvProvider_Get(t *testing.T) {
 func TestEnvProvider_Set(t *testing.T) {
 	key := "TEST_SET_KEY"
 	value := "test-set-value"
-	defer os.Unsetenv(key)
+	defer func() { _ = os.Unsetenv(key) }()
 
 	ctx := context.Background()
 	p := NewEnvProvider()
@@ -55,8 +55,8 @@ func TestEnvProvider_Set(t *testing.T) {
 func TestManager_Get(t *testing.T) {
 	key := "MANAGER_TEST_KEY"
 	value := "manager-test-value"
-	os.Setenv(key, value)
-	defer os.Unsetenv(key)
+	_ = os.Setenv(key, value)
+	defer func() { _ = os.Unsetenv(key) }()
 
 	ctx := context.Background()
 	m := NewManager()
@@ -85,8 +85,8 @@ func TestManager_Get(t *testing.T) {
 func TestManager_CacheTTL(t *testing.T) {
 	key := "TTL_TEST_KEY"
 	value := "ttl-test-value"
-	os.Setenv(key, value)
-	defer os.Unsetenv(key)
+	_ = os.Setenv(key, value)
+	defer func() { _ = os.Unsetenv(key) }()
 
 	ctx := context.Background()
 	m := NewManager(WithTTL(100 * time.Millisecond))
@@ -123,8 +123,8 @@ func TestManager_CacheTTL(t *testing.T) {
 func TestManager_ClearCache(t *testing.T) {
 	key := "CLEAR_TEST_KEY"
 	value := "clear-test-value"
-	os.Setenv(key, value)
-	defer os.Unsetenv(key)
+	_ = os.Setenv(key, value)
+	defer func() { _ = os.Unsetenv(key) }()
 
 	ctx := context.Background()
 	m := NewManager()
