@@ -12,6 +12,7 @@ type Deduplicator struct {
 	window     time.Duration // Deduplication window
 	cleanupInt time.Duration // Cleanup interval
 	done       chan struct{}
+	wg         sync.WaitGroup
 }
 
 // NewDeduplicator creates a new event deduplicator
@@ -24,6 +25,7 @@ func NewDeduplicator(window, cleanupInt time.Duration) *Deduplicator {
 	}
 
 	// Start cleanup goroutine
+	d.wg.Add(1)
 	go d.cleanupLoop()
 
 	return d
@@ -52,6 +54,7 @@ func (d *Deduplicator) Check(key string) bool {
 
 // cleanupLoop periodically removes expired entries
 func (d *Deduplicator) cleanupLoop() {
+	defer d.wg.Done()
 	ticker := time.NewTicker(d.cleanupInt)
 	defer ticker.Stop()
 
@@ -78,9 +81,10 @@ func (d *Deduplicator) cleanup() {
 	}
 }
 
-// Shutdown stops the deduplicator
+// Shutdown stops the deduplicator and waits for goroutines to exit
 func (d *Deduplicator) Shutdown() {
 	close(d.done)
+	d.wg.Wait()
 }
 
 // Size returns the current cache size (for testing)

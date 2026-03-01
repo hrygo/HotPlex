@@ -21,6 +21,9 @@ type Provider interface {
 // EnvProvider implements Provider using environment variables
 type EnvProvider struct{}
 
+// Verify EnvProvider implements Provider at compile time
+var _ Provider = (*EnvProvider)(nil)
+
 // NewEnvProvider creates a new environment variable provider
 func NewEnvProvider() *EnvProvider {
 	return &EnvProvider{}
@@ -49,6 +52,9 @@ func (p *EnvProvider) Delete(ctx context.Context, key string) error {
 type FileProvider struct {
 	path string
 }
+
+// Verify FileProvider implements Provider at compile time
+var _ Provider = (*FileProvider)(nil)
 
 // NewFileProvider creates a new file-based provider
 func NewFileProvider(path string) *FileProvider {

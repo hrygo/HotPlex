@@ -12,6 +12,9 @@ type VaultProvider struct {
 	// client *vault.Client // TODO: Add vault client when integrated
 }
 
+// Verify VaultProvider implements Provider at compile time
+var _ Provider = (*VaultProvider)(nil)
+
 // VaultProviderOption configures VaultProvider
 type VaultProviderOption func(*VaultProvider)
 

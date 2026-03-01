@@ -10,6 +10,12 @@ import (
 	"github.com/hrygo/hotplex/internal/panicx"
 )
 
+// Default deduplication configuration
+const (
+	DefaultDedupWindow   = 30 * time.Second
+	DefaultDedupCleanup  = 10 * time.Second
+)
+
 // WebhookRunner manages the lifecycle of webhook processing goroutines.
 // This eliminates the duplicate webhookWg pattern across all adapters.
 type WebhookRunner struct {
@@ -19,15 +25,37 @@ type WebhookRunner struct {
 	keyStrategy  dedup.KeyStrategy
 }
 
-// NewWebhookRunner creates a new WebhookRunner with deduplication.
-func NewWebhookRunner(logger *slog.Logger) *WebhookRunner {
-	return &WebhookRunner{
-		logger: logger,
-		// Issue #129: Reduce TTL from 30s to 5s to prevent normal messages being skipped
-		// Short window is sufficient to prevent network jitter/button double-click duplicates
-		deduplicator: dedup.NewDeduplicator(5*time.Second, 10*time.Second),
-		keyStrategy:  dedup.NewSlackKeyStrategy(),
+// WebhookRunnerOption configures the WebhookRunner
+type WebhookRunnerOption func(*WebhookRunner)
+
+// WithDeduplication enables event deduplication with custom settings
+func WithDeduplication(window, cleanup time.Duration, strategy dedup.KeyStrategy) WebhookRunnerOption {
+	return func(r *WebhookRunner) {
+		r.deduplicator = dedup.NewDeduplicator(window, cleanup)
+		r.keyStrategy = strategy
 	}
+}
+
+// NewWebhookRunner creates a new WebhookRunner.
+func NewWebhookRunner(logger *slog.Logger, opts ...WebhookRunnerOption) *WebhookRunner {
+	r := &WebhookRunner{
+		logger: logger,
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	// Default deduplication if not configured
+	if r.deduplicator == nil {
+		r.deduplicator = dedup.NewDeduplicator(DefaultDedupWindow, DefaultDedupCleanup)
+	}
+	if r.keyStrategy == nil {
+		r.keyStrategy = dedup.NewSlackKeyStrategy()
+	}
+
+	return r
 }
 
 // Run executes the handler in a goroutine and tracks its completion.

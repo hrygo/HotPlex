@@ -1,6 +1,6 @@
-# Log Redaction
+# Event Deduplication
 
-This package provides sensitive data redaction for log messages.
+This package provides event deduplication to prevent duplicate message processing.
 
 ## Usage
 
