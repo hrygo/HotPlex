@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/hrygo/hotplex/telemetry"
+	"github.com/hrygo/hotplex/internal/telemetry"
 )
 
 // HealthHandler provides HTTP endpoints for health checking and metrics.

@@ -28,12 +28,7 @@ LOG_FILE      := $(LOG_DIR)/daemon.log
 # Default target
 all: help
 
-docs: ## Synchronize SSOT Markdown sources into docs-site
-	@printf "${CYAN}📚 Synchronizing documentation sources...${NC}\n"
-	@chmod +x scripts/sync_docs.sh 2>/dev/null || true
-	@./scripts/sync_docs.sh
-
-svg2png: ## Convert all SVG files to 4K PNG
+svg2png: ## Manual utility: Convert all SVG files to 4K PNG (for external use)
 	@printf "${CYAN}🖼️  Converting SVG to PNG...${NC}\n"
 	@chmod +x scripts/svg2png.sh 2>/dev/null || true
 	@./scripts/svg2png.sh

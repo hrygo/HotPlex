@@ -18,7 +18,7 @@ import (
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
 	"github.com/hrygo/hotplex/internal/panicx"
-	"github.com/hrygo/hotplex/telemetry"
+	"github.com/hrygo/hotplex/internal/telemetry"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"

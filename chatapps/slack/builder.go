@@ -145,8 +145,8 @@ func (b *MessageBuilder) buildSingleToolUseBlock(msg *base.ChatMessage) []slack.
 
 	// Truncate input for summary display
 	inputSummary := input
-	if len(inputSummary) > 50 {
-		inputSummary = inputSummary[:50] + "..."
+	if len(inputSummary) > 64 {
+		inputSummary = inputSummary[:64] + "..."
 	}
 
 	// Full-width single line: emoji + tool name + parameter summary
@@ -166,23 +166,23 @@ func getToolEmoji(toolName string) string {
 	toolNameLower := strings.ToLower(toolName)
 	switch {
 	case strings.Contains(toolNameLower, "bash") || strings.Contains(toolNameLower, "shell") || strings.Contains(toolNameLower, "exec"):
-		return ":computer:"
+		return ":keyboard:"
 	case strings.Contains(toolNameLower, "edit") || strings.Contains(toolNameLower, "multiedit"):
-		return ":pencil:"
+		return ":pencil2:"
 	case strings.Contains(toolNameLower, "write") || strings.Contains(toolNameLower, "filewrite"):
-		return ":page_facing_up:"
-	case strings.Contains(toolNameLower, "read") || strings.Contains(toolNameLower, "fileread"):
-		return ":books:"
+		return ":floppy_disk:"
+	case strings.Contains(toolNameLower, "read") || strings.Contains(toolNameLower, "fileread") || strings.Contains(toolNameLower, "view"):
+		return ":eyes:"
 	case strings.Contains(toolNameLower, "search") || strings.Contains(toolNameLower, "glob") || strings.Contains(toolNameLower, "fileglob"):
 		return ":mag:"
 	case strings.Contains(toolNameLower, "webfetch") || strings.Contains(toolNameLower, "websearch") || strings.Contains(toolNameLower, "fetch"):
 		return ":globe_with_meridians:"
 	case strings.Contains(toolNameLower, "grep"):
-		return ":magnifying_glass_tilted_left:"
+		return ":mag_right:"
 	case strings.Contains(toolNameLower, "ls") || strings.Contains(toolNameLower, "list") || strings.Contains(toolNameLower, "directory"):
 		return ":file_folder:"
 	default:
-		return ":hammer_and_wrench:"
+		return ":gear:"
 	}
 }
 
@@ -258,7 +258,7 @@ func (b *MessageBuilder) buildSingleToolResultBlock(msg *base.ChatMessage) []sla
 
 	icon := ":white_check_mark:"
 	if !success {
-		icon = ":x:"
+		icon = ":warning:"
 	}
 
 	// Format: icon + tool name + duration (>500ms per spec) + data length
@@ -311,6 +311,9 @@ func (b *MessageBuilder) BuildAnswerMessage(msg *base.ChatMessage) []slack.Block
 
 	// Convert Markdown to mrkdwn
 	formattedContent := b.formatter.Format(content)
+
+	// Add zone title for visual identification (Zone 2: Output)
+	formattedContent = ":speech_balloon: *Answer*\n" + formattedContent
 
 	// Check if content is too long for a single message
 	if len(formattedContent) > 4000 {
@@ -955,7 +958,7 @@ func (b *MessageBuilder) BuildSessionStartMessage(msg *base.ChatMessage) []slack
 	// Per spec: context block with session ID
 	var contextElems []slack.MixedElement
 	if sessionID != "" {
-		sessionText := slack.NewTextBlockObject("mrkdwn", "Session: `"+sessionID+"`", false, false)
+		sessionText := slack.NewTextBlockObject("mrkdwn", "`"+sessionID+"`", false, false)
 		contextElems = append(contextElems, sessionText)
 	}
 

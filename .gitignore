@@ -12,6 +12,20 @@ build/
 *.out
 *.log
 
+# Go
+go.work
+go.work.sum
+coverage.txt
+cover.out
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+
 # Node/Frontend
 node_modules/
 .npm/
@@ -27,6 +41,10 @@ Thumbs.db
 !.claude/skills
 !.claude/rules
 !.claude/workflows
+.agent/
+!.agent/rules
+!.agent/skills
+!.agent/workflows
 
 # Environment & Secrets
 .env
@@ -39,26 +57,18 @@ Thumbs.db
 RELEASE_NOTES.md
 release_notes_*.txt
 
-
 # Worktrees
 .worktrees/
 
-# Generated PNG assets (use svg2png.sh to regenerate)
+# Generated PNG assets (Optional/Manual via svg2png.sh)
 docs/images/png/
+
 
 # Documentation Site (Generated)
 .loki
-/docs-site/**/*.md
-!/docs-site/index.md
-!/docs-site/README.md
-/docs-site/guide/
-/docs-site/sdks/
-/docs-site/reference/
-/docs-site/plan/
-/docs-site/providers/
-!/docs-site/public/
-!/docs-site/.vitepress/
-
-# slack-go sdk
-docs/slack-0.18.0
 logs
+
+# Temporary files
+*.bak
+*.tmp
+*.temp

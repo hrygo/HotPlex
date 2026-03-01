@@ -1,5 +1,62 @@
 # CHANGELOG.md
 
+## [v0.15.3] - 2026-03-01
+
+### 📚 Documentation Polish & Build Fix
+
+This release fixes critical VitePress configuration issues and enhances SDK documentation.
+
+### Fixed
+- **VitePress Config Structure** - Fixed nested `sidebar: { sidebar: }` duplication and moved `socialLinks`, `footer`, `search`, `editLink`, `lastUpdated` to correct `themeConfig` level.
+- **Build Verification** - Docs site now builds successfully with zero errors.
+
+### Changed
+- **Enhanced SDK Guides** - Expanded Go, Python, and TypeScript SDK documentation with comprehensive examples and usage patterns.
+- **Ecosystem Docs** - Refined ChatApps integration guides for better clarity.
+
+---
+
+## [v0.15.2] - 2026-03-01
+
+### ✨ Artisanal Docs Portal & Narrative Soul
+
+This release transforms the HotPlex documentation site into a premium, vision-driven portal, blending high-end design with deep technical storytelling.
+
+### Added
+- **Glassmorphism UI System** - Implemented a sophisticated visual layer with backdrop-blur, shimmering gradients, and multi-layered "umbra" shadows for a premium feel.
+- **Micro-Interaction Engine** - Introduced smooth `cubic-bezier` transitions, spring-based hover effects, and rounded, translucent scrollbars.
+
+### Changed
+- **Philosophical Narrative** - Completely re-architected the `Introduction` and `Architecture` guides to emphasize the "Philosophy of the Bridge" and the HotPlex engineering ethos.
+- **Technical Storytelling** - Reframed the `Protocol` and `API` specifications as "The Design of a Conversation," ensuring artisanal quality even in technical references.
+- **Rhythmic Typography** - Optimized vertical rhythm and letter-spacing for balanced, high-performance reading.
+
+### Fixed
+- **Environment-Driven Docs** - Corrected `Getting Started` guides to accurately reflect the real-world environment-variable configuration logic of `hotplexd`.
+- **Build Integrity** - Optimized VitePress build pipeline to ensure zero dead links and 100% documentation accuracy.
+
+---
+
+## [v0.15.1] - 2026-03-01
+
+### ✨ Reliability Hardening & UI Polish
+
+This maintenance release focuses on system reliability, concurrency safety, and a premium visual refresh for the Slack integration.
+
+### Added
+- **Premium Emoji System** - Redesigned tool emojis using guaranteed standard Slack shortcodes (`:keyboard:`, `:floppy_disk:`, `:eyes:`, `:mag:`) for universal compatibility and a professional look.
+- **Initialization Synchronization** - New 500ms buffering logic in `ZoneOrderProcessor` ensures "Starting session" messages always appear at the top during cold starts.
+
+### Fixed
+- **Critical Concurrency Hardening** - Performed a full audit and hardening of all Mutex usage in the `chatapps` package, introducing `defer` patterns to prevent lock leakage under high concurrency.
+- **Memory Leak Prevention** - Implemented `ResetSession` lifecycle hooks to ensure buffers and synchronization states are thoroughly cleaned up after session completion.
+- **Build & Variable Safety** - Fixed variable re-declaration and scope issues in the `dingtalk` adapter.
+
+### Changed
+- **Slack UX Polish** - Simplified the Session ID display in initialization messages and upgraded the tool failure icon from `:x:` to a more professional `:warning:`.
+
+---
+
 ## [v0.15.0] - 2026-02-28
 
 ### ✨ Support for Plan Mode & Interaction Refinements

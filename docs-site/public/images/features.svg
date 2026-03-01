@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="1000" height="620">
+  <defs>
+    <style>
+      .bg { fill: #f8f9fa; }
+      .feature-card { fill: #ffffff; stroke: #e1e4e8; stroke-width: 1.5; }
+      .text-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-weight: 600; font-size: 14px; fill: #24292e; }
+      .text-sub { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 11px; fill: #586069; }
+      
+      .icon-bg { opacity: 0.12; }
+      .icon-stroke { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .icon-fill { stroke: none; }
+      
+      /* Refined Color Palette */
+      .c-sec { fill: #ff3b30; stroke: #ff3b30; } /* Security Red */
+      .c-link { fill: #007aff; stroke: #007aff; } /* Link Blue */
+      .c-iso { fill: #5856d6; stroke: #5856d6; }  /* Isolation Purple */
+      .c-brain { fill: #af52de; stroke: #af52de; } /* Brain Purple */
+      .c-poly { fill: #ff9500; stroke: #ff9500; } /* Polyglot Orange */
+      .c-mux { fill: #34c759; stroke: #34c759; }  /* Mux Green */
+      
+      /* Specific Bar Colors for Observability */
+      .bar-red { fill: #ff3b30; }
+      .bar-green { fill: #34c759; }
+      .bar-blue { fill: #007aff; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" class="bg" rx="16"/>
+
+  <!-- Row 1 -->
+  <!-- 1. Hot Start -->
+  <g transform="translate(45, 40)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-poly" />
+    <path d="M112 35 L98 58 H110 L104 80 L118 52 H106 L112 35 Z" class="icon-fill c-poly" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">200ms Hot-Start</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Instant CLI Execution</text>
+  </g>
+
+  <!-- 2. Session Pool -->
+  <g transform="translate(285, 40)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-mux" />
+    <path d="M93 45 L108 52 L123 45 L108 38 Z" class="icon-stroke c-mux" />
+    <path d="M93 52 L108 59 L123 52 M93 59 L108 66 L123 59" class="icon-stroke c-mux" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">Session Persistence</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Stateful Process Reuse</text>
+  </g>
+
+  <!-- 3. WAF Security -->
+  <g transform="translate(525, 40)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-sec" />
+    <path d="M108 32 L125 40 V58 C125 68 118 78 108 82 C98 78 91 68 91 58 V40 L108 32 Z" class="icon-stroke c-sec" style="stroke-width: 3;"/>
+    <path d="M100 55 L106 61 L116 49" class="icon-stroke c-sec" style="stroke-width: 3;"/>
+    <text x="108" y="115" text-anchor="middle" class="text-title">WAF Security</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Zero-Bypass Input Defense</text>
+  </g>
+
+  <!-- 4. Full-Duplex -->
+  <g transform="translate(765, 40)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-link" />
+    <path d="M96 48 H120 M114 42 L120 48 L114 54" class="icon-stroke c-link" />
+    <path d="M120 62 H96 M102 56 L96 62 L102 68" class="icon-stroke c-link" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">Full-Duplex I/O</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Async Token Streaming</text>
+  </g>
+
+  <!-- Row 2 -->
+  <!-- 5. ChatApps -->
+  <g transform="translate(45, 230)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-poly" />
+    <circle cx="100" cy="50" r="12" class="icon-stroke c-poly" />
+    <circle cx="116" cy="62" r="10" class="icon-stroke c-poly" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">ChatApps</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Slack, TG, Discord</text>
+  </g>
+
+  <!-- 6. SDK + Proxy -->
+  <g transform="translate(285, 230)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-link" />
+    <path d="M95 55 A8 8 0 0 1 103 47 H113 A8 8 0 0 1 121 55 V55 A8 8 0 0 1 113 63 H103 A8 8 0 0 1 95 55 Z" class="icon-stroke c-link" style="stroke-width: 3;"/>
+    <path d="M103 55 H113" class="icon-stroke c-link" style="stroke-width: 4;" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">SDK &amp; Proxy Server</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Embedded &amp; Gateway Modes</text>
+  </g>
+
+  <!-- 7. AI Provider (Coding CLI symbol) -->
+  <g transform="translate(525, 230)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-brain" />
+    <path d="M96 48 L88 55 L96 62 M120 48 L128 55 L120 62 M112 42 L104 68" class="icon-stroke c-brain" style="stroke-width: 3.5;"/>
+    <text x="108" y="115" text-anchor="middle" class="text-title">AI Provider</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Coding CLI Optimization</text>
+  </g>
+
+  <!-- 8. PGID Isolation -->
+  <g transform="translate(765, 230)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-iso" />
+    <rect x="92" y="42" width="32" height="26" rx="2" class="icon-stroke c-iso" style="stroke-dasharray: 4 2;"/>
+    <rect x="100" y="50" width="16" height="10" rx="1" class="icon-fill c-iso" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">PGID Sandbox</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Strict Kernel Isolation</text>
+  </g>
+
+  <!-- Row 3 -->
+  <!-- 9. Observability (REFINED: COLORFUL BARS) -->
+  <g transform="translate(45, 420)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-mux" />
+    <rect x="98" y="58" width="5" height="14" rx="1" class="bar-blue" />
+    <rect x="105" y="45" width="5" height="27" rx="1" class="bar-green" />
+    <rect x="112" y="52" width="5" height="20" rx="1" class="bar-red" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">Observability</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">OTel &amp; Metrics (Grafana)</text>
+  </g>
+
+  <!-- 10. Docker Sandbox -->
+  <g transform="translate(285, 420)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-iso" />
+    <path d="M108 38 L124 45 V63 L108 70 L92 63 V45 L108 38 Z" class="icon-stroke c-iso" />
+    <path d="M92 45 L108 52 L124 45 M108 52 V70" class="icon-stroke c-iso" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">Remote Sandbox</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Dockerized Execution</text>
+  </g>
+
+  <!-- 11. Polyglot SDK (REFINED: Go/Python/TS ONLY) -->
+  <g transform="translate(525, 420)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-poly" />
+    <path d="M100 42 L116 42 L124 50 L124 68 L100 68 Z" class="icon-stroke c-poly" />
+    <path d="M116 42 L116 50 L124 50" class="icon-stroke c-poly" />
+    <text x="108" y="115" text-anchor="middle" class="text-title">Universal SDKs</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Go, Python, TypeScript</text>
+  </g>
+
+  <!-- 12. High-Density Muxing -->
+  <g transform="translate(765, 420)">
+    <rect width="215" height="160" rx="12" class="feature-card" />
+    <circle cx="108" cy="55" r="32" class="icon-bg c-mux" />
+    <path d="M95 45 H121 M95 55 H121 M95 65 H121" class="icon-stroke c-mux" style="stroke-width: 3; stroke-dasharray: 2 4;"/>
+    <path d="M108 40 V70" class="icon-stroke c-mux" style="stroke-width: 2;"/>
+    <text x="108" y="115" text-anchor="middle" class="text-title">High-Density Mux</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">1000+ Concurrent Sessions</text>
+  </g>
+</svg>

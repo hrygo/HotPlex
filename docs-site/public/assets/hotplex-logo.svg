@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="tail-stream-1" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF7B72" /> <stop offset="100%" stop-color="#FFA657" />
+    </linearGradient>
+    <linearGradient id="tail-stream-2" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFA657" />
+      <stop offset="100%" stop-color="#D2A8FF" /> </linearGradient>
+    <linearGradient id="tail-stream-3" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF7B72" />
+      <stop offset="100%" stop-color="#58A6FF" /> </linearGradient>
+    
+    <linearGradient id="text-hot-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFAB70" />
+      <stop offset="100%" stop-color="#FF7B72" />
+    </linearGradient>
+    
+    <linearGradient id="text-plex-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F85149" />
+      <stop offset="100%" stop-color="#D73A49" />
+    </linearGradient>
+
+    <filter id="text-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2" />
+      <feOffset dx="0" dy="1" result="offsetblur" />
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3" />
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <style>
+      @keyframes eyePulse {
+        0%, 100% { filter: url(#eye-glow) brightness(1); opacity: 0.8; }
+        50% { filter: url(#eye-glow) brightness(1.5); opacity: 1; }
+      }
+      @keyframes textShimmer {
+        0%, 100% { filter: url(#text-shadow) brightness(1); }
+        50% { filter: url(#text-shadow) brightness(1.1); }
+      }
+      .fox-eye {
+        animation: eyePulse 2.5s infinite ease-in-out;
+      }
+      .hotplex-text {
+        animation: textShimmer 3s infinite ease-in-out;
+      }
+    </style>
+  </defs>
+
+  <!-- Removed fixed background container to allow perfect integration -->
+
+  <!-- Fox unit shifted up for better spacing -->
+  <g transform="translate(0, -25)">
+    <g fill="none" stroke-width="14" stroke-linecap="round" filter="url(#glow)">
+      <path d="M 190 180 C 260 110, 340 130, 310 200" stroke="url(#tail-stream-3)" opacity="0.85"/>
+      <path d="M 170 200 C 250 160, 350 210, 290 270" stroke="url(#tail-stream-1)" />
+      <path d="M 150 220 C 220 230, 310 290, 240 330" stroke="url(#tail-stream-2)" opacity="0.85"/>
+    </g>
+
+    <g transform="translate(70, 130)">
+      <polygon points="30,0 60,40 20,50" fill="#FFA657" />
+      <polygon points="110,0 120,50 80,40" fill="#FF7B72" />
+      
+      <polygon points="20,50 70,120 120,50 70,35" fill="#21262D" stroke="#30363D" stroke-width="2"/>
+      
+      <polygon points="70,120 45,70 95,70" fill="#FF7B72" opacity="0.9"/>
+      
+      <polygon points="75,55 95,50 85,65" fill="#58A6FF" class="fox-eye" />
+      <polygon points="65,55 45,50 55,65" fill="#58A6FF" class="fox-eye" />
+      
+      <circle cx="70" cy="120" r="4.5" fill="#0D1117" />
+    </g>
+  </g>
+
+  <!-- Fixed overlapping by separating anchors -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif" font-size="36" font-weight="900" class="hotplex-text" filter="url(#text-shadow)">
+    <text x="198" y="360" text-anchor="end" fill="url(#text-hot-grad)">hot</text>
+    <text x="198" y="360" text-anchor="start" fill="url(#text-plex-grad)">plex</text>
+  </g>
+</svg>

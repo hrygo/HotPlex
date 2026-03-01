@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hrygo/hotplex/event"
 	intengine "github.com/hrygo/hotplex/internal/engine"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
@@ -71,26 +70,20 @@ func TestEngine_createEventBridge_RawLine(t *testing.T) {
 
 	var received string
 	userCb := func(eventType string, data any) error {
-		if eventType == "answer" {
-			if s, ok := data.(string); ok {
-				received = s
-			} else if ev, ok := data.(*event.EventWithMeta); ok {
-				received = ev.EventData
-			}
-		}
+		received = eventType
 		return nil
 	}
 
 	cb := engine.createEventBridge(cfg, userCb, stats, doneChan)
 
-	// Test raw_line event with invalid JSON (should be passed as answer)
+	// Test raw_line event with invalid JSON — should be filtered (dropped), NOT forwarded
 	err := cb("raw_line", "not valid json")
 	if err != nil {
 		t.Errorf("raw_line callback error: %v", err)
 	}
 
-	if received != "not valid json" {
-		t.Errorf("received = %q, want 'not valid json'", received)
+	if received != "" {
+		t.Errorf("raw event should be filtered, but received eventType=%q", received)
 	}
 }
 

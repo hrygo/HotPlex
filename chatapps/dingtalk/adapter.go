@@ -165,13 +165,17 @@ func (a *Adapter) GetAccessToken() (string, error) {
 	}
 
 	// Fast path: check if we have a valid token (with lock)
-	a.tokenMu.Lock()
-	if a.token != "" && time.Now().Add(5*time.Minute).Before(a.tokenExpire) {
-		token := a.token
-		a.tokenMu.Unlock()
+	token, isValid := func() (string, bool) {
+		a.tokenMu.Lock()
+		defer a.tokenMu.Unlock()
+		if a.token != "" && time.Now().Add(5*time.Minute).Before(a.tokenExpire) {
+			return a.token, true
+		}
+		return "", false
+	}()
+	if isValid {
 		return token, nil
 	}
-	a.tokenMu.Unlock()
 
 	// Slow path: fetch new token
 	url := fmt.Sprintf("https://api.dingtalk.com/v1.0/oauth2/oAuth2/accessToken?appKey=%s&appSecret=%s",
@@ -197,7 +201,7 @@ func (a *Adapter) GetAccessToken() (string, error) {
 	} else {
 		a.tokenExpire = time.Now().Add(time.Duration(result.ExpireIn) * time.Second)
 	}
-	token := a.token
+	token = a.token
 	a.tokenMu.Unlock()
 
 	return token, nil

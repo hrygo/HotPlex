@@ -7,12 +7,6 @@ on:
       - 'v*'
     paths:
       - 'docs-site/**'
-      - 'docs/**'
-      - 'sdks/**/*.md'
-      - 'README.md'
-      - 'README_zh.md'
-      - 'CHANGELOG.md'
-      - 'scripts/sync_docs.sh'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
@@ -23,21 +17,32 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
+    name: Build Documentation
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: docs-site/package-lock.json
+
+      - name: Restore VitePress Cache
+        uses: actions/cache@v4
+        with:
+          path: docs-site/.vitepress/cache
+          key: ${{ runner.os }}-vitepress-${{ hashFiles('docs-site/package-lock.json') }}-${{ hashFiles('docs-site/.vitepress/config.mts') }}
+          restore-keys: |
+            ${{ runner.os }}-vitepress-
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -45,19 +50,19 @@ jobs:
       - name: Install dependencies
         working-directory: docs-site
         run: npm ci
-      - name: Sync documentation sources
-        run: make docs
 
       - name: Build with VitePress
         working-directory: docs-site
         run: npm run docs:build
 
-      - name: Upload artifact
+      - name: Upload Build Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs-site/.vitepress/dist
 
+
   deploy:
+    name: Deploy to GitHub Pages
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -65,6 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy Site
         id: deployment
         uses: actions/deploy-pages@v4
+
