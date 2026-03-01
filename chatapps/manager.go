@@ -196,13 +196,16 @@ func (m *AdapterManager) GetMessageOperations(platform string) MessageOperations
 
 	adapter, ok := m.adapters[platform]
 	if !ok {
+		m.logger.Debug("Adapter not found", "platform", platform)
 		return nil
 	}
 
 	// Safe type assertion - only place where this is allowed
 	if ops, ok := adapter.(MessageOperations); ok {
+		m.logger.Debug("MessageOperations supported", "platform", platform)
 		return ops
 	}
+	m.logger.Debug("Adapter does not implement MessageOperations", "platform", platform)
 	return nil
 }
 
@@ -214,12 +217,15 @@ func (m *AdapterManager) GetSessionOperations(platform string) SessionOperations
 
 	adapter, ok := m.adapters[platform]
 	if !ok {
+		m.logger.Debug("Adapter not found", "platform", platform)
 		return nil
 	}
 
 	// Safe type assertion - only place where this is allowed
 	if ops, ok := adapter.(SessionOperations); ok {
+		m.logger.Debug("SessionOperations supported", "platform", platform)
 		return ops
 	}
+	m.logger.Debug("Adapter does not implement SessionOperations", "platform", platform)
 	return nil
 }
