@@ -572,16 +572,16 @@ func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
 			ZoneIndex: zone,
 			EventType: eventType,
 		})
+	} else {
+		// Also record to legacy cleanupMsgRecords for backward compatibility
+		// TODO: Remove this after full migration to turnState
+		c.cleanupMsgRecords = append(c.cleanupMsgRecords, msgRecord{
+			ChannelID: ch,
+			MessageTS: ts,
+			ZoneIndex: zone,
+			EventType: eventType,
+		})
 	}
-
-	// Also record to legacy cleanupMsgRecords for backward compatibility
-	// TODO: Remove this after full migration to turnState
-	c.cleanupMsgRecords = append(c.cleanupMsgRecords, msgRecord{
-		ChannelID: ch,
-		MessageTS: ts,
-		ZoneIndex: zone,
-		EventType: eventType,
-	})
 
 	// Enforce sliding window independently for Thinking and Action zones
 	c.enforceSlidingWindow(zone)
