@@ -270,3 +270,6 @@ func convertLinks(text string) string {
 	}
 	return result
 }
+
+// Verify FormatConversionProcessor implements MessageProcessor at compile time
+var _ MessageProcessor = (*FormatConversionProcessor)(nil)

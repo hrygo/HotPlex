@@ -145,3 +145,6 @@ func (p *RateLimitProcessor) GetSessionStats(platform, sessionID string) (lastSe
 	}
 	return *lastTime, true
 }
+
+// Verify RateLimitProcessor implements MessageProcessor at compile time
+var _ MessageProcessor = (*RateLimitProcessor)(nil)

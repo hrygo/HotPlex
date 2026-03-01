@@ -683,3 +683,6 @@ func (p *MessageAggregatorProcessor) Stop() {
 	p.buffers = make(map[string]*messageBuffer)
 	p.logger.Info("Message aggregator stopped")
 }
+
+// Verify MessageAggregatorProcessor implements MessageProcessor at compile time
+var _ MessageProcessor = (*MessageAggregatorProcessor)(nil)

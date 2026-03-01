@@ -56,3 +56,6 @@ func (p *MessageFilterProcessor) Process(_ context.Context, msg *base.ChatMessag
 
 	return msg, nil
 }
+
+// Verify MessageFilterProcessor implements MessageProcessor at compile time
+var _ MessageProcessor = (*MessageFilterProcessor)(nil)

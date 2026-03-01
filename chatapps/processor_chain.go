@@ -186,3 +186,16 @@ func NewDefaultProcessorChain(ctx context.Context, logger *slog.Logger) *Process
 		chunk,
 	)
 }
+
+// Name returns the processor chain name
+func (c *ProcessorChain) Name() string {
+	return "chain"
+}
+
+// Order returns the processor chain order
+func (c *ProcessorChain) Order() int {
+	return 0 // Chain doesn't have a specific order, it contains processors with orders
+}
+
+// Verify ProcessorChain implements MessageProcessor at compile time
+var _ MessageProcessor = (*ProcessorChain)(nil)
