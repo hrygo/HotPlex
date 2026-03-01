@@ -6,27 +6,52 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hrygo/hotplex/chatapps/dedup"
 	"github.com/hrygo/hotplex/internal/panicx"
 )
 
 // WebhookRunner manages the lifecycle of webhook processing goroutines.
 // This eliminates the duplicate webhookWg pattern across all adapters.
 type WebhookRunner struct {
-	wg     sync.WaitGroup
-	logger *slog.Logger
+	wg          sync.WaitGroup
+	logger      *slog.Logger
+	deduplicator *dedup.Deduplicator
+	keyStrategy dedup.KeyStrategy
 }
 
-// NewWebhookRunner creates a new WebhookRunner.
+// NewWebhookRunner creates a new WebhookRunner with deduplication.
 func NewWebhookRunner(logger *slog.Logger) *WebhookRunner {
 	return &WebhookRunner{
-		logger: logger,
+		logger:       logger,
+		deduplicator: dedup.NewDeduplicator(30*time.Second, 10*time.Second),
+		keyStrategy:  dedup.NewSlackKeyStrategy(),
 	}
 }
 
 // Run executes the handler in a goroutine and tracks its completion.
 // If handler is nil, this is a no-op.
+// Implements event deduplication to prevent duplicate processing.
 func (r *WebhookRunner) Run(ctx context.Context, handler MessageHandler, msg *ChatMessage) {
 	if handler == nil {
+		return
+	}
+
+	// Generate deduplication key
+	eventData := map[string]any{
+		"platform":  msg.Platform,
+		"event_type": msg.Metadata["event_type"],
+		"channel":   msg.Metadata["channel_id"],
+		"event_ts":  msg.Metadata["event_ts"],
+		"session_id": msg.SessionID,
+	}
+	key := r.keyStrategy.GenerateKey(eventData)
+
+	// Check for duplicate
+	if r.deduplicator.Check(key) {
+		r.logger.Debug("Duplicate event detected, skipping",
+			"platform", msg.Platform,
+			"session_id", msg.SessionID,
+			"key", key)
 		return
 	}
 
