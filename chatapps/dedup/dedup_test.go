@@ -102,3 +102,29 @@ func TestDeduplicator_Shutdown(t *testing.T) {
 	// Check should still work (no panic)
 	d.Check("test:2")
 }
+
+func BenchmarkDeduplicator_Check(b *testing.B) {
+	d := dedup.NewDeduplicator(30*time.Second, 10*time.Second)
+	defer d.Shutdown()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := "benchmark:event:" + string(rune(i))
+		d.Check(key)
+	}
+}
+
+func BenchmarkDeduplicator_CheckParallel(b *testing.B) {
+	d := dedup.NewDeduplicator(30*time.Second, 10*time.Second)
+	defer d.Shutdown()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			key := "benchmark:parallel:" + string(rune(i))
+			d.Check(key)
+			i++
+		}
+	})
+}
