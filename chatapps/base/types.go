@@ -125,6 +125,7 @@ type MessageOperations interface {
 }
 
 // SessionOperations defines platform-specific session operations
+// Note: Session is defined in base/adapter.go to avoid circular dependencies
 type SessionOperations interface {
 	GetSession(key string) (*Session, bool)
 	FindSessionByUserAndChannel(userID, channelID string) *Session

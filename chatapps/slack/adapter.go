@@ -1827,5 +1827,31 @@ func (a *Adapter) PostEphemeralSDK(ctx context.Context, channelID, userID, text 
 	return nil
 }
 
-// Compile-time interface compliance check
-var _ base.ChatAdapter = (*Adapter)(nil)
+// Compile-time interface compliance checks
+var (
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.MessageOperations = (*Adapter)(nil)
+	_ base.SessionOperations = (*Adapter)(nil)
+)
+
+// MessageOperations implementation for Slack
+
+// DeleteMessage implements base.MessageOperations interface
+func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string) error {
+	return a.DeleteMessageSDK(ctx, channelID, messageTS)
+}
+
+// RemoveReaction implements base.MessageOperations interface
+func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
+	return a.RemoveReactionSDK(ctx, reaction)
+}
+
+// UpdateMessage implements base.MessageOperations interface
+func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {
+	builder := NewMessageBuilder()
+	blocks := builder.Build(msg)
+	return a.UpdateMessageSDK(ctx, channelID, messageTS, blocks, msg.Content)
+}
+
+// Note: SessionOperations methods (GetSession, FindSessionByUserAndChannel)
+// are inherited from base.Adapter and should not be overridden here
