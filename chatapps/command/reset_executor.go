@@ -13,8 +13,9 @@ import (
 
 // ResetExecutor implements the /reset command
 type ResetExecutor struct {
-	engine  *engine.Engine
-	workDir string
+	engine     *engine.Engine
+	workDir    string
+	adapters   interface{} // Will be cast to *chatapps.AdapterManager
 }
 
 // Verify ResetExecutor implements Executor at compile time
@@ -26,6 +27,11 @@ func NewResetExecutor(eng *engine.Engine, workDir string) *ResetExecutor {
 		engine:  eng,
 		workDir: workDir,
 	}
+}
+
+// SetAdapterManager sets the adapter manager for session cleanup
+func (e *ResetExecutor) SetAdapterManager(adapters interface{}) {
+	e.adapters = adapters
 }
 
 // Command returns the command name
