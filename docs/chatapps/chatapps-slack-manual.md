@@ -51,6 +51,8 @@ settings:
       - message.channels
       - message.groups
       - message.im
+  org_deploy_enabled: false
+  socket_mode_enabled: true
 ```
 ---
 

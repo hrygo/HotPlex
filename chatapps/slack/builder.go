@@ -935,11 +935,11 @@ func (b *MessageBuilder) BuildRawMessage(msg *base.ChatMessage) []slack.Block {
 // BuildSessionStartMessage builds a message for session start
 // Implements EventTypeSessionStart per spec (0.4)
 // Triggered when user sends first message or CLI needs cold start
-// Block type: section + context
+// Block type: context (lightweight)
 func (b *MessageBuilder) BuildSessionStartMessage(msg *base.ChatMessage) []slack.Block {
 	content := msg.Content
 	if content == "" {
-		content = "Initializing AI assistant..."
+		content = "Starting session..."
 	}
 
 	// Get session ID from metadata if available
@@ -950,28 +950,21 @@ func (b *MessageBuilder) BuildSessionStartMessage(msg *base.ChatMessage) []slack
 		}
 	}
 
-	// Per spec: section block with :rocket: emoji
-	text := ":rocket: *Starting Session*\n" + content
-	mrkdwn := slack.NewTextBlockObject("mrkdwn", text, false, false)
-	section := slack.NewSectionBlock(mrkdwn, nil, nil)
-
-	// Per spec: context block with session ID
+	// Per spec: Use context block for low visual weight during initialization
 	var contextElems []slack.MixedElement
+
+	// Add icon and status text
+	statusText := slack.NewTextBlockObject("mrkdwn", ":rocket: _"+content+"_", false, false)
+	contextElems = append(contextElems, statusText)
+
+	// Add session ID with prefix
 	if sessionID != "" {
-		sessionText := slack.NewTextBlockObject("mrkdwn", "`"+sessionID+"`", false, false)
+		sessionText := slack.NewTextBlockObject("mrkdwn", " •  Session: `"+sessionID+"`", false, false)
 		contextElems = append(contextElems, sessionText)
 	}
 
-	// Return section + context per spec
-	if len(contextElems) > 0 {
-		return []slack.Block{
-			section,
-			slack.NewContextBlock("", contextElems...),
-		}
-	}
-
 	return []slack.Block{
-		section,
+		slack.NewContextBlock("", contextElems...),
 	}
 }
 
