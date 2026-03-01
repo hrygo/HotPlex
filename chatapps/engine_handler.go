@@ -1454,7 +1454,7 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 	if sess, ok := h.engine.GetSession(msg.SessionID); ok && sess != nil {
 		turnState = sess.GetOrCreateTurn(msg.SessionID + ":" + time.Now().Format("150405.000"))
 	} else {
-		h.logger.Debug("Session not found, skipping turn state creation", "session_id", msg.SessionID)
+		h.logger.Warn("Session not found for turn state creation", "session_id", msg.SessionID)
 	}
 
 	// Create stream callback with injected dependencies
