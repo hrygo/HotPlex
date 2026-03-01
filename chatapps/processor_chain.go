@@ -147,7 +147,7 @@ const (
 )
 
 // NewDefaultProcessorChain creates a default processor chain with all standard processors
-func NewDefaultProcessorChain(logger *slog.Logger) *ProcessorChain {
+func NewDefaultProcessorChain(ctx context.Context, logger *slog.Logger) *ProcessorChain {
 	filter := NewMessageFilterProcessor(logger)
 
 	rateLimit := NewRateLimitProcessor(logger, RateLimitProcessorOptions{
@@ -162,7 +162,7 @@ func NewDefaultProcessorChain(logger *slog.Logger) *ProcessorChain {
 		TTL: 30 * time.Minute,
 	})
 
-	aggregator := NewMessageAggregatorProcessor(logger, MessageAggregatorProcessorOptions{
+	aggregator := NewMessageAggregatorProcessor(ctx, logger, MessageAggregatorProcessorOptions{
 		Window:     500 * time.Millisecond, // 500ms window for tool_use aggregation
 		MinContent: 50,                     // Lower threshold for short tool inputs
 	})

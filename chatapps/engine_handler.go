@@ -267,7 +267,7 @@ func NewStreamCallback(
 		logger:     logger,
 		isFirst:    true,
 		metadata:   metadata,
-		processor:  NewDefaultProcessorChain(logger),
+		processor:  NewDefaultProcessorChain(ctx, logger),
 		messageOps: messageOps,
 		sessionOps: sessionOps,
 	}
@@ -898,7 +898,8 @@ func (c *StreamCallback) handleAnswer(data any) error {
 			if c.messageOps == nil {
 				return
 			}
-			// Use context.Background() — the original c.ctx is likely cancelled by now
+			// Note: Using context.Background() is correct here - the original c.ctx is likely cancelled
+			// This is a delayed cleanup operation that should complete regardless of session lifecycle
 			if err := c.messageOps.DeleteMessage(context.Background(), channelID, msgTS); err != nil {
 				c.logger.Debug("Failed to delete thinking message (delayed)", "error", err)
 			}

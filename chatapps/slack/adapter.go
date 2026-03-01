@@ -348,6 +348,8 @@ func (a *Adapter) sendCommandResponse(responseURL, channelID, text string) error
 	}
 
 	a.Logger().Debug("No response_url, sending to channel directly", "channel_id", channelID)
+	// Note: Using context.Background() is acceptable here as this is a fallback for slash command responses
+	// which are fire-and-forget and don't need to be tied to the original request context
 	return a.SendToChannel(context.Background(), channelID, text, "")
 }
 
@@ -820,6 +822,8 @@ func (a *Adapter) handleSocketModeSlashCommand(evt socketmode.Event) {
 	}
 
 	// Execute command via registry
+	// Note: Using context.Background() is acceptable here as commands run asynchronously
+	// and should not be cancelled if the original HTTP request context is cancelled
 	result, err := a.cmdRegistry.Execute(context.Background(), req, callback)
 	if err != nil {
 		a.Logger().Error("Command execution failed", "command", cmd.Command, "error", err)
@@ -1052,6 +1056,8 @@ func (a *Adapter) handlePermissionCallback(callback *SlackInteractionCallback, a
 	}
 
 	// Update the Slack message using SDK
+	// Note: Using context.Background() as the original request context may be cancelled
+	// This is a user interaction callback that should complete regardless of request lifecycle
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
 		a.Logger().Error("Update message failed", "error", err)
 	}

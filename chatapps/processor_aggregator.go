@@ -87,6 +87,7 @@ var defaultEventConfig = map[string]EventConfig{
 // MessageAggregatorProcessor aggregates multiple rapid messages into one
 type MessageAggregatorProcessor struct {
 	logger *slog.Logger
+	ctx    context.Context // Context for background timer operations
 
 	// Buffer for aggregating messages
 	buffers map[string]*messageBuffer
@@ -127,7 +128,7 @@ type MessageAggregatorProcessorOptions struct {
 }
 
 // NewMessageAggregatorProcessor creates a new MessageAggregatorProcessor
-func NewMessageAggregatorProcessor(logger *slog.Logger, opts MessageAggregatorProcessorOptions) *MessageAggregatorProcessor {
+func NewMessageAggregatorProcessor(ctx context.Context, logger *slog.Logger, opts MessageAggregatorProcessorOptions) *MessageAggregatorProcessor {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -147,6 +148,7 @@ func NewMessageAggregatorProcessor(logger *slog.Logger, opts MessageAggregatorPr
 	}
 
 	return &MessageAggregatorProcessor{
+		ctx:        ctx,
 		logger:     logger,
 		buffers:    make(map[string]*messageBuffer),
 		window:     opts.Window,
@@ -297,7 +299,7 @@ func (p *MessageAggregatorProcessor) bufferMessage(_ context.Context, msg *base.
 
 		// Set timer to flush buffer after window
 		buf.timer = time.AfterFunc(p.window, func() {
-			p.flushBufferByTimer(sessionKey)
+			p.flushBufferByTimer(p.ctx, sessionKey)
 		})
 
 		p.buffers[sessionKey] = buf
@@ -388,7 +390,7 @@ func (p *MessageAggregatorProcessor) bufferMessage(_ context.Context, msg *base.
 }
 
 // flushBufferByTimer flushes buffer when timer expires
-func (p *MessageAggregatorProcessor) flushBufferByTimer(sessionKey string) {
+func (p *MessageAggregatorProcessor) flushBufferByTimer(ctx context.Context, sessionKey string) {
 	p.mu.Lock()
 	buf, exists := p.buffers[sessionKey]
 	sender := p.sender
@@ -435,7 +437,7 @@ func (p *MessageAggregatorProcessor) flushBufferByTimer(sessionKey string) {
 			"messages_count", msgCount,
 			"content_len", len(aggregated.Content))
 
-		if err := sender.SendAggregatedMessage(context.Background(), aggregated); err != nil {
+		if err := sender.SendAggregatedMessage(ctx, aggregated); err != nil {
 			p.logger.Error("Failed to send aggregated message",
 				"session_key", sessionKey,
 				"error", err)

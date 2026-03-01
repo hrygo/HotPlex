@@ -11,7 +11,7 @@ func TestProcessorChain_SortProcessors(t *testing.T) {
 	formatConv := NewFormatConversionProcessor(nil)
 	rateLimit := NewRateLimitProcessor(nil, RateLimitProcessorOptions{})
 	richContent := NewRichContentProcessor(nil)
-	aggregator := NewMessageAggregatorProcessor(nil, MessageAggregatorProcessorOptions{})
+	aggregator := NewMessageAggregatorProcessor(context.Background(), nil, MessageAggregatorProcessorOptions{})
 
 	chain := NewProcessorChain(formatConv, rateLimit, richContent, aggregator)
 
@@ -30,7 +30,7 @@ func TestProcessorChain_SortProcessors(t *testing.T) {
 }
 
 func TestProcessorChain_Process(t *testing.T) {
-	chain := NewDefaultProcessorChain(nil)
+	chain := NewDefaultProcessorChain(context.Background(), nil)
 
 	msg := &base.ChatMessage{
 		Platform:  "slack",
@@ -60,7 +60,7 @@ func TestProcessorChain_Process(t *testing.T) {
 }
 
 func TestProcessorChain_ProcessNilMessage(t *testing.T) {
-	chain := NewDefaultProcessorChain(nil)
+	chain := NewDefaultProcessorChain(context.Background(), nil)
 
 	processed, err := chain.Process(context.Background(), nil)
 	if err != nil {
@@ -73,7 +73,7 @@ func TestProcessorChain_ProcessNilMessage(t *testing.T) {
 }
 
 func TestDefaultProcessorChain_Creation(t *testing.T) {
-	chain := NewDefaultProcessorChain(nil)
+	chain := NewDefaultProcessorChain(context.Background(), nil)
 
 	if chain == nil {
 		t.Fatal("NewDefaultProcessorChain returned nil")
