@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,10 +16,15 @@ func TestMessageAggregatorProcessor_flushBufferByTimer(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
 	
 	// Create a mock sender to capture flushed messages
-	var flushedMsg *base.ChatMessage
+	var (
+		flushedMsgMu sync.Mutex
+		flushedMsg   *base.ChatMessage
+	)
 	mockSender := &mockAggregatedMessageSender{
 		sendFunc: func(ctx context.Context, msg *base.ChatMessage) error {
+			flushedMsgMu.Lock()
 			flushedMsg = msg
+			flushedMsgMu.Unlock()
 			return nil
 		},
 	}
@@ -54,14 +60,21 @@ func TestMessageAggregatorProcessor_flushBufferByTimer(t *testing.T) {
 	}
 	
 	// Wait for timer to flush (window + buffer)
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	
+	// Give race detector time to settle
+	time.Sleep(10 * time.Millisecond)
 	
 	// Verify message was flushed
-	if flushedMsg == nil {
+	flushedMsgMu.Lock()
+	flushedMsgCopy := flushedMsg
+	flushedMsgMu.Unlock()
+	
+	if flushedMsgCopy == nil {
 		t.Fatal("Expected message to be flushed by timer, but it wasn't")
 	}
-	if flushedMsg.Content != "Test content" {
-		t.Errorf("Expected content 'Test content', got %q", flushedMsg.Content)
+	if flushedMsgCopy.Content != "Test content" {
+		t.Errorf("Expected content 'Test content', got %q", flushedMsgCopy.Content)
 	}
 }
 

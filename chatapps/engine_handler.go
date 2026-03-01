@@ -10,14 +10,14 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
-	intengine "github.com/hrygo/hotplex/internal/engine"
+	eng "github.com/hrygo/hotplex/internal/engine"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
 )
 
-// sessionWrapper wraps intengine.Session to implement chatapps.Session interface
+// sessionWrapper wraps eng.Session to implement chatapps.Session interface
 type sessionWrapper struct {
-	sess *intengine.Session
+	sess *eng.Session
 }
 
 func (w *sessionWrapper) ID() string {
@@ -226,7 +226,11 @@ type StreamCallback struct {
 	startingMsgRecords []msgRecord
 
 	// Tracking records for 3s delayed deletion on Answer (Zone 0 & 1)
+	// Note: For concurrent turn support, new turns should use turnState instead
 	cleanupMsgRecords []msgRecord
+
+	// Turn state for concurrent turn support - stores cleanup records per turn
+	turnState *eng.TurnState
 
 	// Platform-specific operations (dependency injection for testability and platform agnosticism)
 	messageOps MessageOperations
@@ -258,6 +262,7 @@ func NewStreamCallback(
 	metadata map[string]any,
 	messageOps MessageOperations,
 	sessionOps SessionOperations,
+	turnState *eng.TurnState,
 ) *StreamCallback {
 	cb := &StreamCallback{
 		ctx:        ctx,
@@ -270,6 +275,7 @@ func NewStreamCallback(
 		processor:  NewDefaultProcessorChain(ctx, logger),
 		messageOps: messageOps,
 		sessionOps: sessionOps,
+		turnState:  turnState,
 	}
 
 	// Extract user message coordinates for reaction lifecycle
@@ -553,27 +559,44 @@ func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
 	defer c.mu.Unlock()
 
 	// Check if this TS is already tracked to handle in-place updates gracefully
-	for _, rec := range c.cleanupMsgRecords {
-		if rec.MessageTS == ts {
-			return
-		}
+	if c.turnState != nil && c.turnState.HasMessageTS(ts) {
+		return
 	}
 
-	// Record the message
-	c.cleanupMsgRecords = append(c.cleanupMsgRecords, msgRecord{
-		ChannelID: ch,
-		MessageTS: ts,
-		ZoneIndex: zone,
-		EventType: eventType,
-	})
+	// Record the message to turn state (for concurrent turn support)
+	if c.turnState != nil {
+		c.turnState.AddCleanupMsg(eng.CleanupMsgRecord{
+			ChannelID: ch,
+			MessageTS: ts,
+			ZoneIndex: zone,
+			EventType: eventType,
+		})
+	} else {
+		// Also record to legacy cleanupMsgRecords for backward compatibility
+		// TODO: Remove this after full migration to turnState
+		c.cleanupMsgRecords = append(c.cleanupMsgRecords, msgRecord{
+			ChannelID: ch,
+			MessageTS: ts,
+			ZoneIndex: zone,
+			EventType: eventType,
+		})
+	}
 
 	// Enforce sliding window independently for Thinking and Action zones
 	c.enforceSlidingWindow(zone)
 }
 
 // enforceSlidingWindow deletes oldest messages when the limit is exceeded.
+// Uses turnState for concurrent turn support, falls back to legacy cleanupMsgRecords
 // NOTE: Caller must hold c.mu lock before calling this method
 func (c *StreamCallback) enforceSlidingWindow(zone int) {
+	// Use turnState if available (concurrent turn support)
+	if c.turnState != nil {
+		c.enforceSlidingWindowWithTurnState(zone)
+		return
+	}
+
+	// Legacy fallback
 	var zoneRecords []msgRecord
 	var otherRecords []msgRecord
 
@@ -629,9 +652,29 @@ func (c *StreamCallback) enforceSlidingWindow(zone int) {
 	}()
 }
 
+// enforceSlidingWindowWithTurnState enforces sliding window using turnState
+func (c *StreamCallback) enforceSlidingWindowWithTurnState(zone int) {
+	c.turnState.EnforceSlidingWindow(zone, func(rec eng.CleanupMsgRecord) {
+		if c.messageOps == nil {
+			return
+		}
+		go func() {
+			_ = c.messageOps.DeleteMessage(context.Background(), rec.ChannelID, rec.MessageTS)
+		}()
+	})
+}
+
 // scheduleDeleteActionMessages schedules 3-second delayed deletion
 // of all tracked Thinking and Action Zone messages.
+// Uses turnState for concurrent turn support, falls back to legacy cleanupMsgRecords
 func (c *StreamCallback) scheduleDeleteActionMessages() {
+	// Use turnState if available (concurrent turn support)
+	if c.turnState != nil {
+		c.scheduleDeleteActionMessagesWithTurnState()
+		return
+	}
+
+	// Legacy fallback
 	c.mu.Lock()
 	if len(c.cleanupMsgRecords) == 0 {
 		c.mu.Unlock()
@@ -640,6 +683,26 @@ func (c *StreamCallback) scheduleDeleteActionMessages() {
 	records := c.cleanupMsgRecords
 	c.cleanupMsgRecords = nil // Clear immediately
 	c.mu.Unlock()
+
+	time.AfterFunc(3*time.Second, func() {
+		if c.messageOps == nil {
+			c.logger.Debug("Message operations not supported", "platform", c.platform)
+			return
+		}
+		for _, rec := range records {
+			if err := c.messageOps.DeleteMessage(context.Background(), rec.ChannelID, rec.MessageTS); err != nil {
+				c.logger.Debug("Failed to delete tracked message", "ts", rec.MessageTS, "error", err)
+			}
+		}
+	})
+}
+
+// scheduleDeleteActionMessagesWithTurnState schedules deletion using turnState
+func (c *StreamCallback) scheduleDeleteActionMessagesWithTurnState() {
+	if c.turnState.Len() == 0 {
+		return
+	}
+	records := c.turnState.GetAllAndClear()
 
 	time.AfterFunc(3*time.Second, func() {
 		if c.messageOps == nil {
@@ -1479,8 +1542,13 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 	messageOps := h.adapters.GetMessageOperations(msg.Platform)
 	sessionOps := h.adapters.GetSessionOperations(msg.Platform)
 
+	// Get or create turn state for concurrent turn support
+	// Each turn maintains independent cleanup records to prevent message leakage
+	sess, _ := h.engine.GetSession(msg.SessionID)
+	turnState := sess.GetOrCreateTurn(msg.SessionID + ":" + time.Now().Format("150405.000"))
+
 	// Create stream callback with injected dependencies
-	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, msg.Metadata, messageOps, sessionOps)
+	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, msg.Metadata, messageOps, sessionOps, turnState)
 	wrappedCallback := func(eventType string, data any) error {
 		return callback.Handle(eventType, data)
 	}
