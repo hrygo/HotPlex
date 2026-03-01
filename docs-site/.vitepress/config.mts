@@ -7,13 +7,13 @@ export default defineConfig({
   base: '/hotplex/',
 
   head: [
-    ['link', { rel: 'icon', href: '/hotplex/favicon.ico' }],
+    ['link', { rel: 'icon', href: '/hotplex/logo.svg' }],
     ['meta', { name: 'theme-color', content: '#00ADD8' }],
     ['meta', { name: 'google', content: 'notranslate' }],
   ],
 
   themeConfig: {
-    logo: '/logo.svg',
+    logo: '/images/mascot_primary.svg',
     siteTitle: 'HotPlex',
 
     nav: [

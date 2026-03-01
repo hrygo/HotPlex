@@ -7,8 +7,8 @@ hero:
   text: "The Strategic Bridge for AI Agent Engineering"
   tagline: Stateful, Secure, and High-Performance Agent Infrastructure.
   image:
-    src: /logo.svg
-    alt: HotPlex Logo
+    src: /images/mascot_primary.svg
+    alt: HotPlex Primary Mascot
   actions:
     - theme: brand
       text: Get Started

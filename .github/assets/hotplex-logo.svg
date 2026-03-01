@@ -1,23 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
   <defs>
-    <linearGradient id="tail-stream-1" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#FF7B72" /> <stop offset="100%" stop-color="#FFA657" />
-    </linearGradient>
-    <linearGradient id="tail-stream-2" x1="0%" y1="100%" x2="100%" y2="0%">
+    <!-- Gradients matching the new mascot/logo -->
+    <linearGradient id="body-grad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#FFA657" />
-      <stop offset="100%" stop-color="#D2A8FF" /> </linearGradient>
-    <linearGradient id="tail-stream-3" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#FF7B72" />
-      <stop offset="100%" stop-color="#58A6FF" /> </linearGradient>
+      <stop offset="100%" stop-color="#FF7B72" />
+    </linearGradient>
     
+    <linearGradient id="bridge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#58A6FF" />
+      <stop offset="100%" stop-color="#D2A8FF" />
+    </linearGradient>
+
+    <linearGradient id="hat-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#79C0FF" />
+      <stop offset="100%" stop-color="#58A6FF" />
+    </linearGradient>
+
     <linearGradient id="text-hot-grad" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#FFAB70" />
       <stop offset="100%" stop-color="#FF7B72" />
     </linearGradient>
     
     <linearGradient id="text-plex-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#F85149" />
-      <stop offset="100%" stop-color="#D73A49" />
+      <stop offset="0%" stop-color="#58A6FF" />
+      <stop offset="100%" stop-color="#D2A8FF" />
     </linearGradient>
 
     <filter id="text-shadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -33,51 +39,56 @@
     </filter>
 
     <style>
-      @keyframes eyePulse {
-        0%, 100% { filter: url(#eye-glow) brightness(1); opacity: 0.8; }
-        50% { filter: url(#eye-glow) brightness(1.5); opacity: 1; }
+      @keyframes gearRotate {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
       }
-      @keyframes textShimmer {
-        0%, 100% { filter: url(#text-shadow) brightness(1); }
-        50% { filter: url(#text-shadow) brightness(1.1); }
-      }
-      .fox-eye {
-        animation: eyePulse 2.5s infinite ease-in-out;
+      .gear-anim {
+        transform-origin: center;
+        animation: gearRotate 10s infinite linear;
       }
       .hotplex-text {
-        animation: textShimmer 3s infinite ease-in-out;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif;
+        font-size: 38px;
+        font-weight: 900;
+        filter: url(#text-shadow);
       }
     </style>
   </defs>
 
-  <!-- Removed fixed background container to allow perfect integration -->
-
-  <!-- Fox unit shifted up for better spacing -->
-  <g transform="translate(0, -25)">
-    <g fill="none" stroke-width="14" stroke-linecap="round" filter="url(#glow)">
-      <path d="M 190 180 C 260 110, 340 130, 310 200" stroke="url(#tail-stream-3)" opacity="0.85"/>
-      <path d="M 170 200 C 250 160, 350 210, 290 270" stroke="url(#tail-stream-1)" />
-      <path d="M 150 220 C 220 230, 310 290, 240 330" stroke="url(#tail-stream-2)" opacity="0.85"/>
+  <!-- Mascot Icon (Scaled for logo) -->
+  <g transform="translate(100, 40) scale(0.4)">
+    <!-- Bridge -->
+    <g id="bridge" transform="translate(56, 320)">
+      <path d="M 0 100 Q 200 -50 400 100" fill="none" stroke="url(#bridge-grad)" stroke-width="15" stroke-linecap="round" opacity="0.8"/>
+      <rect x="-20" y="90" width="440" height="20" rx="8" fill="#21262D"/>
     </g>
 
-    <g transform="translate(70, 130)">
-      <polygon points="30,0 60,40 20,50" fill="#FFA657" />
-      <polygon points="110,0 120,50 80,40" fill="#FF7B72" />
+    <!-- Beaver Body -->
+    <g transform="translate(140, 80)">
+      <path d="M 120 280 C 40 280, 20 200, 20 160 C 20 80, 80 40, 120 40 C 160 40, 220 80, 220 160 C 220 200, 200 280, 120 280" fill="url(#body-grad)" />
       
-      <polygon points="20,50 70,120 120,50 70,35" fill="#21262D" stroke="#30363D" stroke-width="2"/>
-      
-      <polygon points="70,120 45,70 95,70" fill="#FF7B72" opacity="0.9"/>
-      
-      <polygon points="75,55 95,50 85,65" fill="#58A6FF" class="fox-eye" />
-      <polygon points="65,55 45,50 55,65" fill="#58A6FF" class="fox-eye" />
-      
-      <circle cx="70" cy="120" r="4.5" fill="#0D1117" />
+      <!-- Eyes & Face -->
+      <g transform="translate(70, 100)">
+          <circle cx="25" cy="40" r="7" fill="#0D1117" />
+          <circle cx="75" cy="40" r="7" fill="#0D1117" />
+          <path d="M 40 65 Q 50 75 60 65" fill="none" stroke="#0D1117" stroke-width="3" stroke-linecap="round"/>
+          <ellipse cx="50" cy="60" rx="6" ry="4" fill="#0D1117" />
+      </g>
+
+      <!-- Hat -->
+      <g transform="translate(50, 10)">
+        <path d="M 10 70 Q 10 10, 70 10 Q 130 10, 130 70 L 145 75 Q 145 85, 130 85 L 10 85 Q -5 85 -5 75 L 10 70" fill="url(#hat-grad)" />
+        <g transform="translate(60, 40) scale(0.7)" fill="white" class="gear-anim">
+          <path d="M10,0 L12,0 L12,4 L15,5 L18,2 L20,4 L17,7 L18,10 L22,12 L22,14 L18,16 L17,19 L20,22 L18,24 L15,21 L12,22 L12,26 L10,26 L10,22 L7,21 L4,24 L2,22 L5,19 L4,16 L0,14 L0,12 L4,10 L5,7 L2,4 L4,2 L7,5 L10,4 Z M11,9 A4,4 0 1,0 11,17 A4,4 0 1,0 11,9 Z" transform="translate(-11,-13)"/>
+        </g>
+      </g>
     </g>
   </g>
 
-  <!-- Fixed overlapping by separating anchors -->
-  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif" font-size="36" font-weight="900" class="hotplex-text" filter="url(#text-shadow)">
-    <text x="198" y="360" text-anchor="end" fill="url(#text-hot-grad)">hot</text>
-    <text x="198" y="360" text-anchor="start" fill="url(#text-plex-grad)">plex</text>
+  <!-- Logo Text -->
+  <g class="hotplex-text">
+    <text x="198" y="320" text-anchor="end" fill="url(#text-hot-grad)">hot</text>
+    <text x="198" y="320" text-anchor="start" fill="url(#text-plex-grad)">plex</text>
   </g>
 </svg>
