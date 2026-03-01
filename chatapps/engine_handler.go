@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
-	"github.com/hrygo/hotplex/chatapps/slack"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
 	"github.com/hrygo/hotplex/provider"
@@ -351,12 +350,10 @@ func (c *StreamCallback) setReaction(emoji string) {
 	if c.reactionChannelID == "" || c.reactionMessageTS == "" {
 		return
 	}
-	adapter, ok := c.adapters.GetAdapter(c.platform)
-	if !ok {
-		return
-	}
-	slackAdapter, ok := adapter.(*slack.Adapter)
-	if !ok {
+
+	// Use injected MessageOperations interface - nil check for graceful fallback
+	if c.messageOps == nil {
+		c.logger.Debug("Reactions not supported on this platform", "platform", c.platform)
 		return
 	}
 
@@ -370,7 +367,7 @@ func (c *StreamCallback) setReaction(emoji string) {
 
 	// Remove previous reaction (ignore errors — may not exist)
 	if prevReaction != "" {
-		_ = slackAdapter.RemoveReactionSDK(c.ctx, base.Reaction{
+		_ = c.messageOps.RemoveReaction(c.ctx, base.Reaction{
 			Name:      prevReaction,
 			Channel:   c.reactionChannelID,
 			Timestamp: c.reactionMessageTS,
@@ -378,7 +375,7 @@ func (c *StreamCallback) setReaction(emoji string) {
 	}
 
 	// Add new reaction
-	if err := slackAdapter.AddReactionSDK(c.ctx, base.Reaction{
+	if err := c.messageOps.AddReaction(c.ctx, base.Reaction{
 		Name:      emoji,
 		Channel:   c.reactionChannelID,
 		Timestamp: c.reactionMessageTS,
@@ -391,8 +388,6 @@ func (c *StreamCallback) setReaction(emoji string) {
 	}
 }
 
-// scheduleDeleteStartingMessage schedules a 3-second delayed deletion
-// for all startup-phase messages (session_start + engine_starting).
 func (c *StreamCallback) scheduleDeleteStartingMessage() {
 	c.mu.Lock()
 	if len(c.startingMsgRecords) == 0 {
@@ -404,16 +399,13 @@ func (c *StreamCallback) scheduleDeleteStartingMessage() {
 	c.mu.Unlock()
 
 	time.AfterFunc(3*time.Second, func() {
-		adapter, ok := c.adapters.GetAdapter(c.platform)
-		if !ok {
-			return
-		}
-		sa, ok := adapter.(*slack.Adapter)
-		if !ok {
+		// Use injected MessageOperations interface - nil check for graceful fallback
+		if c.messageOps == nil {
+			c.logger.Debug("Delete message not supported on this platform", "platform", c.platform)
 			return
 		}
 		for _, rec := range records {
-			if err := sa.DeleteMessageSDK(context.Background(), rec.ChannelID, rec.MessageTS); err != nil {
+			if err := c.messageOps.DeleteMessage(context.Background(), rec.ChannelID, rec.MessageTS); err != nil {
 				c.logger.Debug("Failed to delete starting message", "ts", rec.MessageTS, "error", err)
 			}
 		}
@@ -513,18 +505,14 @@ func (c *StreamCallback) enforceSlidingWindow(zone int) {
 
 	// Delete evicted message in background
 	go func() {
-		adapter, ok := c.adapters.GetAdapter(c.platform)
-		if !ok {
+		// Use injected MessageOperations interface - nil check for graceful fallback
+		if c.messageOps == nil {
 			return
 		}
-		if sa, ok := adapter.(*slack.Adapter); ok {
-			_ = sa.DeleteMessageSDK(context.Background(), toEvict.ChannelID, toEvict.MessageTS)
-		}
+		_ = c.messageOps.DeleteMessage(context.Background(), toEvict.ChannelID, toEvict.MessageTS)
 	}()
 }
 
-// scheduleDeleteActionMessages schedules 3-second delayed deletion
-// of all tracked Thinking and Action Zone messages.
 func (c *StreamCallback) scheduleDeleteActionMessages() {
 	c.mu.Lock()
 	if len(c.cleanupMsgRecords) == 0 {
@@ -536,16 +524,13 @@ func (c *StreamCallback) scheduleDeleteActionMessages() {
 	c.mu.Unlock()
 
 	time.AfterFunc(3*time.Second, func() {
-		adapter, ok := c.adapters.GetAdapter(c.platform)
-		if !ok {
-			return
-		}
-		sa, ok := adapter.(*slack.Adapter)
-		if !ok {
+		// Use injected MessageOperations interface - nil check for graceful fallback
+		if c.messageOps == nil {
+			c.logger.Debug("Delete message not supported on this platform", "platform", c.platform)
 			return
 		}
 		for _, rec := range records {
-			if err := sa.DeleteMessageSDK(context.Background(), rec.ChannelID, rec.MessageTS); err != nil {
+			if err := c.messageOps.DeleteMessage(context.Background(), rec.ChannelID, rec.MessageTS); err != nil {
 				c.logger.Debug("Failed to delete tracked message", "ts", rec.MessageTS, "error", err)
 			}
 		}
@@ -793,15 +778,14 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		c.mu.Unlock()
 
 		time.AfterFunc(3*time.Second, func() {
-			adapter, ok := c.adapters.GetAdapter(c.platform)
-			if !ok {
+			// Use injected MessageOperations interface - nil check for graceful fallback
+			if c.messageOps == nil {
+				c.logger.Debug("Delete message not supported on this platform", "platform", c.platform)
 				return
 			}
-			if sa, ok := adapter.(*slack.Adapter); ok {
-				// Use context.Background() — the original c.ctx is likely cancelled by now
-				if err := sa.DeleteMessageSDK(context.Background(), channelID, msgTS); err != nil {
-					c.logger.Debug("Failed to delete thinking message (delayed)", "error", err)
-				}
+			// Use context.Background() — the original c.ctx is likely cancelled by now
+			if err := c.messageOps.DeleteMessage(context.Background(), channelID, msgTS); err != nil {
+				c.logger.Debug("Failed to delete thinking message (delayed)", "error", err)
 			}
 		})
 	} else if c.thinkingSent {

@@ -113,11 +113,13 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 }
 
 // SetEngine sets the engine for the adapter (used for slash commands)
-func (a *Adapter) SetEngine(eng *engine.Engine) {
-	a.eng = eng
-
-	// Register command executors after engine is set
-	a.registerCommands()
+// Implements base.EngineSetter interface
+func (a *Adapter) SetEngine(eng interface{}) {
+	if e, ok := eng.(*engine.Engine); ok {
+		a.eng = e
+		// Register command executors after engine is set
+		a.registerCommands()
+	}
 }
 
 // registerCommands registers all command executors to the registry

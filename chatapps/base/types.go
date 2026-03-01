@@ -108,6 +108,12 @@ type ChatAdapter interface {
 	SetHandler(MessageHandler)
 }
 
+// EngineSetter is an optional interface for adapters that support setting an engine.
+// This is used for platform-specific features like slash command execution.
+type EngineSetter interface {
+	SetEngine(eng interface{})
+}
+
 type MessageHandler func(ctx context.Context, msg *ChatMessage) error
 
 // WebhookProvider exposes HTTP handlers for unified server integration
