@@ -72,7 +72,7 @@ func TestManager_Get(t *testing.T) {
 	}
 
 	// Test get from cache
-	os.Unsetenv(key)
+	func() { _ = os.Unsetenv(key) }()
 	got, err = m.Get(ctx, key)
 	if err != nil {
 		t.Fatalf("Get() from cache error = %v", err)
@@ -99,7 +99,7 @@ func TestManager_CacheTTL(t *testing.T) {
 	}
 
 	// Remove from env
-	os.Unsetenv(key)
+	func() { _ = os.Unsetenv(key) }()
 
 	// Should still be in cache
 	got, err := m.Get(ctx, key)
@@ -140,7 +140,7 @@ func TestManager_ClearCache(t *testing.T) {
 	m.ClearCache()
 
 	// Remove from env
-	os.Unsetenv(key)
+	func() { _ = os.Unsetenv(key) }()
 
 	// Should be cache miss
 	_, err = m.Get(ctx, key)
