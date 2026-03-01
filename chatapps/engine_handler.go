@@ -723,23 +723,12 @@ func convertToChatMessage(msg *base.ChatMessage) *ChatMessage {
 }
 
 func (c *StreamCallback) handleToolUse(data any) error {
-	c.logger.Debug("[TOOL] handleToolUse called", "data_type", fmt.Sprintf("%T", data))
-
 	toolName := string(provider.EventTypeToolUse)
 	input := ""
 	truncated := false
 	var inputSummary string
 
 	if m, ok := data.(*event.EventWithMeta); ok {
-		var metaToolName, metaInputSummary string
-		if m.Meta != nil {
-			metaToolName = m.Meta.ToolName
-			metaInputSummary = m.Meta.InputSummary
-		}
-		c.logger.Debug("[TOOL] handleToolUse EventWithMeta",
-			"event_data", m.EventData,
-			"meta_tool_name", metaToolName,
-			"meta_input_summary", metaInputSummary)
 		if m.Meta != nil && m.Meta.ToolName != "" {
 			toolName = m.Meta.ToolName
 			inputSummary = m.Meta.InputSummary
@@ -753,12 +742,11 @@ func (c *StreamCallback) handleToolUse(data any) error {
 	}
 
 	// Update status indicator to show current tool being used
-	// This updates the thinking message in-place with "Tool: Read" etc.
 	if err := c.updateStatusMessage(base.MessageTypeToolUse, toolName); err != nil {
 		c.logger.Warn("Failed to update status for tool_use", "error", err)
 	}
 
-	c.logger.Debug("[TOOL] handleToolUse sending", "tool_name", toolName, "input_len", len(input))
+	c.logger.Debug("Sending tool use message", "tool_name", toolName, "input_len", len(input))
 
 	// Send tool use message with platform-agnostic MessageType
 	// The Adapter's MessageBuilder will convert to platform-specific blocks
@@ -781,7 +769,7 @@ func (c *StreamCallback) handleToolUse(data any) error {
 }
 
 func (c *StreamCallback) handleToolResult(data any) error {
-	c.logger.Debug("[TOOL] handleToolResult called", "data_type", fmt.Sprintf("%T", data))
+	c.logger.Debug("Tool result handler called", "data_type", fmt.Sprintf("%T", data))
 
 	success := true
 	var durationMs int64
@@ -791,7 +779,7 @@ func (c *StreamCallback) handleToolResult(data any) error {
 
 	var contentLength int64
 	if m, ok := data.(*event.EventWithMeta); ok {
-		c.logger.Debug("[TOOL] handleToolResult EventWithMeta",
+		c.logger.Debug("Tool result event data",
 			"event_data_len", len(m.EventData),
 			"meta_tool_name", m.Meta.ToolName,
 			"meta_duration_ms", m.Meta.DurationMs,
@@ -823,11 +811,11 @@ func (c *StreamCallback) handleToolResult(data any) error {
 
 	// Skip empty tool_result events (no output, no error, no length)
 	if output == "" && toolName == "" && contentLength == 0 {
-		c.logger.Debug("[TOOL] handleToolResult skipped: empty output and tool name")
+		c.logger.Debug("Skipping tool result: empty output and tool name")
 		return nil
 	}
 
-	c.logger.Debug("[TOOL] handleToolResult sending",
+	c.logger.Debug("Sending tool result message",
 		"tool_name", toolName,
 		"success", success,
 		"duration_ms", durationMs,
