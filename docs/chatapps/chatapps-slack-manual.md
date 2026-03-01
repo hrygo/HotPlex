@@ -51,9 +51,10 @@ settings:
       - message.channels
       - message.groups
       - message.im
+```
 ---
 
-## 3. (进阶) HotPlex “Craw 层”高级治理版配置
+### (进阶) HotPlex “Craw 层”高级治理版配置
 
 如果您的团队希望完全释放 HotPlex 作为**底层执行引擎 (Craw Layer)** 的能力（如：沙盒审批、产物回传、全局监控），请使用以下增强版 App Manifest。
 

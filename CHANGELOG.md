@@ -1,5 +1,58 @@
 # CHANGELOG.md
 
+## [v0.16.0] - 2026-03-01
+
+### 🔧 Comprehensive Code Quality Improvements
+
+This release delivers major code quality improvements including event deduplication, log redaction, and enhanced error handling across the ChatApps layer.
+
+### Added
+
+#### Event Deduplication (#95)
+- **New `chatapps/dedup` Package** - LRU cache-based event deduplication for webhook handlers
+- **SlackKeyStrategy** - Dedicated key generation strategy for Slack events (`platform:event_type:channel:event_ts`)
+- **WebhookRunner Integration** - Seamless deduplication with 84ns/op (single-threaded) / 258ns/op (parallel)
+- **Comprehensive Tests & Benchmarks** - Full test coverage with performance validation
+
+#### Log Redaction (#59)
+- **RedactSensitiveData Function** - Automatic redaction of sensitive tokens from logs
+- **Multi-Platform Support** - Slack (`xoxb-*,xoxp-*`), GitHub (`ghp_*,gho_*`), Generic API tokens
+- **Performance Optimized** - 237ns/op with regex-based pattern matching
+
+### Changed
+
+#### Error Handling Improvements (#106)
+- **Manager.go** - Fixed silent error swallowing in `Unregister()` with proper warning logs
+- **Reset Executor** - Added fallback to `os.TempDir()` when `os.Getwd()` fails
+- **Log Level Adjustments** - Downgraded "thinking before session_start" from Warn to Debug
+
+#### Compile-Time Interface Verification (#106)
+- **All Processors** - Added `var _ MessageProcessor = (*XXXProcessor)(nil)` compliance checks
+  - MessageAggregatorProcessor
+  - ProcessorChain
+  - MessageFilterProcessor
+  - FormatConversionProcessor
+  - RateLimitProcessor
+
+#### Timer Leak Prevention (#106)
+- **Aggregator Context Checks** - Added `p.ctx.Err()` validation before/after timer callbacks
+
+#### Documentation
+- **Slack Extensions Strategy** - New `docs/chatapps/slack-extensions-strategy.md`
+- **Site Assets** - Added architecture diagrams, mascot, and brand assets to docs-site
+
+### Fixed
+- **CI Compatibility** - Use `convert` instead of `magick` for ImageMagick 6.x compatibility
+- **PR Checks** - Use job status instead of commit status API for PR validation
+
+### Resolved Issues
+- Closes #106 - Code quality improvements
+- Closes #95 - Event deduplication
+- Closes #59 - Log redaction
+- Closes #96 - /reset command enhancement
+
+---
+
 ## [v0.15.7] - 2026-03-01
 
 ### 📦 Asset & Documentation Updates
