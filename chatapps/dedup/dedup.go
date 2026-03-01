@@ -9,8 +9,8 @@ import (
 type Deduplicator struct {
 	cache      map[string]time.Time // event_key -> timestamp
 	mu         sync.RWMutex
-	window     time.Duration        // Deduplication window
-	cleanupInt time.Duration        // Cleanup interval
+	window     time.Duration // Deduplication window
+	cleanupInt time.Duration // Cleanup interval
 	done       chan struct{}
 }
 

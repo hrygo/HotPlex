@@ -13,9 +13,9 @@ import (
 
 // ResetExecutor implements the /reset command
 type ResetExecutor struct {
-	engine     *engine.Engine
-	workDir    string
-	adapters   interface{} // Will be cast to *chatapps.AdapterManager
+	engine   *engine.Engine
+	workDir  string
+	adapters interface{} // Will be cast to *chatapps.AdapterManager
 }
 
 // Verify ResetExecutor implements Executor at compile time

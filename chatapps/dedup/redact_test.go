@@ -55,7 +55,7 @@ func TestRedactSensitiveData(t *testing.T) {
 
 func BenchmarkRedactSensitiveData(b *testing.B) {
 	input := "token: xoxb-123-456-789 and ghp_abcdefghijklmnopqrstuvwxyz123456"
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		RedactSensitiveData(input)

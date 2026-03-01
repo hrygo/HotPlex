@@ -54,10 +54,10 @@ func TestSlackKeyStrategy_GenerateKey(t *testing.T) {
 	s := dedup.NewSlackKeyStrategy()
 
 	eventData := map[string]any{
-		"platform":  "slack",
+		"platform":   "slack",
 		"event_type": "app_mention",
-		"channel":   "C123",
-		"event_ts":  "1234567890.123456",
+		"channel":    "C123",
+		"event_ts":   "1234567890.123456",
 	}
 
 	key := s.GenerateKey(eventData)
@@ -88,17 +88,17 @@ func TestSlackKeyStrategy_GenerateKey_Fallback(t *testing.T) {
 
 func TestDeduplicator_Shutdown(t *testing.T) {
 	d := dedup.NewDeduplicator(30*time.Second, 10*time.Millisecond)
-	
+
 	// Verify cleanup goroutine is running
 	d.Check("test:1")
 	time.Sleep(15 * time.Millisecond)
-	
+
 	// Shutdown should stop cleanup goroutine
 	d.Shutdown()
-	
+
 	// Wait a bit to ensure goroutine has stopped
 	time.Sleep(20 * time.Millisecond)
-	
+
 	// Check should still work (no panic)
 	d.Check("test:2")
 }

@@ -13,10 +13,10 @@ import (
 // WebhookRunner manages the lifecycle of webhook processing goroutines.
 // This eliminates the duplicate webhookWg pattern across all adapters.
 type WebhookRunner struct {
-	wg          sync.WaitGroup
-	logger      *slog.Logger
+	wg           sync.WaitGroup
+	logger       *slog.Logger
 	deduplicator *dedup.Deduplicator
-	keyStrategy dedup.KeyStrategy
+	keyStrategy  dedup.KeyStrategy
 }
 
 // NewWebhookRunner creates a new WebhookRunner with deduplication.
@@ -38,10 +38,10 @@ func (r *WebhookRunner) Run(ctx context.Context, handler MessageHandler, msg *Ch
 
 	// Generate deduplication key
 	eventData := map[string]any{
-		"platform":  msg.Platform,
+		"platform":   msg.Platform,
 		"event_type": msg.Metadata["event_type"],
-		"channel":   msg.Metadata["channel_id"],
-		"event_ts":  msg.Metadata["event_ts"],
+		"channel":    msg.Metadata["channel_id"],
+		"event_ts":   msg.Metadata["event_ts"],
 		"session_id": msg.SessionID,
 	}
 	key := r.keyStrategy.GenerateKey(eventData)
