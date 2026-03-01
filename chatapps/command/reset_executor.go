@@ -101,6 +101,9 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 	_ = emitter.Running(3)
 	_ = emitter.Emit("Resetting Context")
 
+	// Note: Adapter cleanup is handled by engine.StopSession callback
+	// Adapters will clean up their own state (aggregator buffers, etc.)
+
 	if err := e.engine.StopSession(sessionID, "user_requested_reset"); err != nil {
 		_ = emitter.Error(3, fmt.Sprintf("Failed: %v", err))
 		_ = emitter.Emit("Reset Failed")
