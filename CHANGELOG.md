@@ -1,5 +1,26 @@
 # CHANGELOG.md
 
+## [v0.15.4] - 2026-03-01
+
+### 📚 Documentation & Script Refinements
+
+This release streamlines documentation assets and refines the ecosystem overview.
+
+### Changed
+- **Ecosystem Spotlight** - Highlighted Slack as the flagship ChatApp integration in the ecosystem overview.
+- **Architecture Diagram** - Simplified architecture assets by consolidating to `topology.svg`.
+
+### Fixed
+- **Docs Image Reference** - Corrected architecture image path from logo to proper diagram.
+
+### Removed
+- **Redundant Asset** - Removed `agent-architecture.svg` in favor of unified `topology.svg`.
+
+### Refactored
+- **Script Update** - Updated `svg2png.sh` with current resource paths for asset conversion.
+
+---
+
 ## [v0.15.3] - 2026-03-01
 
 ### 📚 Documentation Polish & Build Fix
