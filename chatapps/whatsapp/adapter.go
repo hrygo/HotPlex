@@ -238,8 +238,11 @@ func (a *Adapter) handleMessage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// Compile-time interface compliance check
-var _ base.ChatAdapter = (*Adapter)(nil)
+// Compile-time interface compliance checks
+var (
+	_ base.ChatAdapter            = (*Adapter)(nil)
+	_ base.MessageOperations      = (*Adapter)(nil)
+)
 
 // =============================================================================
 // MessageOperations interface implementation (graceful fallback for unsupported ops)

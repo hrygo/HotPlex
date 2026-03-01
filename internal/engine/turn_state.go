@@ -19,10 +19,10 @@ type CleanupMsgRecord struct {
 // TurnState holds the state for a single turn in a session
 // This allows concurrent turns to maintain independent cleanup records
 type TurnState struct {
-	TurnID             string
-	CreatedAt          time.Time
-	CleanupMsgRecords  []CleanupMsgRecord // Message records to be cleaned up at turn end
-	mu                 sync.Mutex
+	TurnID            string
+	CreatedAt         time.Time
+	CleanupMsgRecords []CleanupMsgRecord // Message records to be cleaned up at turn end
+	mu                sync.Mutex
 }
 
 // NewTurnState creates a new TurnState

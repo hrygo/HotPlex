@@ -1,5 +1,5 @@
 <div align="center">
-  <img src=".github/assets/hotplex-logo.svg" alt="hotplex" width="160" style="background: #0D1117; border-radius: 24px; padding: 20px;"/>
+  <img src=".github/assets/hotplex-og.png" alt="hotplex" width="160"/>
   <h1>hotplex</h1>
   <p><b>将顶尖 AI CLI 智能体转化为“生产就绪”交互服务的执行基座</b></p>
   <p><i>打破一次性 CLI 任务的局限，通过全双工、可追加指令的有状态模式，实现毫秒级交互、安全隔离与极简系统集成。</i></p>

@@ -14,7 +14,7 @@ import (
 // TestMessageAggregatorProcessor_flushBufferByTimer tests the timer-based flush functionality
 func TestMessageAggregatorProcessor_flushBufferByTimer(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
-	
+
 	// Create a mock sender to capture flushed messages
 	var (
 		flushedMsgMu sync.Mutex
@@ -28,7 +28,7 @@ func TestMessageAggregatorProcessor_flushBufferByTimer(t *testing.T) {
 			return nil
 		},
 	}
-	
+
 	// Create processor with very short window for testing
 	ctx := context.Background()
 	processor := NewMessageAggregatorProcessor(ctx, logger, MessageAggregatorProcessorOptions{
@@ -38,7 +38,7 @@ func TestMessageAggregatorProcessor_flushBufferByTimer(t *testing.T) {
 		MaxBytes:   2000,
 	})
 	processor.SetSender(mockSender)
-	
+
 	// Create a test message with stream=true (required for aggregation)
 	msg := &base.ChatMessage{
 		Platform:  "slack",
@@ -49,7 +49,7 @@ func TestMessageAggregatorProcessor_flushBufferByTimer(t *testing.T) {
 			"stream":     true, // Required for aggregation
 		},
 	}
-	
+
 	// Process message (will be buffered)
 	result, err := processor.Process(ctx, msg)
 	if err != nil {
@@ -58,18 +58,18 @@ func TestMessageAggregatorProcessor_flushBufferByTimer(t *testing.T) {
 	if result != nil {
 		t.Fatal("Expected message to be buffered, but it was sent immediately")
 	}
-	
+
 	// Wait for timer to flush (window + buffer)
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Give race detector time to settle
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Verify message was flushed
 	flushedMsgMu.Lock()
 	flushedMsgCopy := flushedMsg
 	flushedMsgMu.Unlock()
-	
+
 	if flushedMsgCopy == nil {
 		t.Fatal("Expected message to be flushed by timer, but it wasn't")
 	}
@@ -81,7 +81,7 @@ func TestMessageAggregatorProcessor_flushBufferByTimer(t *testing.T) {
 // TestMessageAggregatorProcessor_bufferMessage tests the buffer message functionality
 func TestMessageAggregatorProcessor_bufferMessage(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
-	
+
 	ctx := context.Background()
 	processor := NewMessageAggregatorProcessor(ctx, logger, MessageAggregatorProcessorOptions{
 		Window:     100 * time.Millisecond,
@@ -89,7 +89,7 @@ func TestMessageAggregatorProcessor_bufferMessage(t *testing.T) {
 		MaxMsgs:    10,
 		MaxBytes:   2000,
 	})
-	
+
 	// Test 1: Buffer short message (stream=true required)
 	msg1 := &base.ChatMessage{
 		Platform:  "slack",
@@ -100,7 +100,7 @@ func TestMessageAggregatorProcessor_bufferMessage(t *testing.T) {
 			"stream":     true,
 		},
 	}
-	
+
 	result, err := processor.Process(ctx, msg1)
 	if err != nil {
 		t.Fatalf("Process failed: %v", err)
@@ -108,7 +108,7 @@ func TestMessageAggregatorProcessor_bufferMessage(t *testing.T) {
 	if result != nil {
 		t.Fatal("Expected short message to be buffered")
 	}
-	
+
 	// Test 2: Buffer reaches max messages limit
 	for i := 0; i < 9; i++ {
 		msg := &base.ChatMessage{
@@ -119,7 +119,7 @@ func TestMessageAggregatorProcessor_bufferMessage(t *testing.T) {
 		}
 		_, _ = processor.Process(ctx, msg)
 	}
-	
+
 	// 10th message should trigger flush due to maxMsgs limit
 	msg10 := &base.ChatMessage{
 		Platform:  "slack",
@@ -127,7 +127,7 @@ func TestMessageAggregatorProcessor_bufferMessage(t *testing.T) {
 		Content:   "Last",
 		Metadata:  map[string]any{"event_type": "tool_use"},
 	}
-	
+
 	result, err = processor.Process(ctx, msg10)
 	if err != nil {
 		t.Fatalf("Process failed: %v", err)
@@ -140,7 +140,7 @@ func TestMessageAggregatorProcessor_bufferMessage(t *testing.T) {
 // TestMessageAggregatorProcessor_bufferMessageMaxBytes tests buffer byte limit
 func TestMessageAggregatorProcessor_bufferMessageMaxBytes(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
-	
+
 	ctx := context.Background()
 	processor := NewMessageAggregatorProcessor(ctx, logger, MessageAggregatorProcessorOptions{
 		Window:     100 * time.Millisecond,
@@ -148,7 +148,7 @@ func TestMessageAggregatorProcessor_bufferMessageMaxBytes(t *testing.T) {
 		MaxMsgs:    100,
 		MaxBytes:   500, // Low limit for testing
 	})
-	
+
 	// Send messages until byte limit is reached
 	for i := 0; i < 10; i++ {
 		msg := &base.ChatMessage{
@@ -160,12 +160,12 @@ func TestMessageAggregatorProcessor_bufferMessageMaxBytes(t *testing.T) {
 				"stream":     true,
 			},
 		}
-		
+
 		result, err := processor.Process(ctx, msg)
 		if err != nil {
 			t.Fatalf("Process failed: %v", err)
 		}
-		
+
 		// Should flush when byte limit is exceeded
 		if i >= 5 && result == nil {
 			t.Errorf("Expected flush at byte limit, but message was buffered at iteration %d", i)
@@ -176,7 +176,7 @@ func TestMessageAggregatorProcessor_bufferMessageMaxBytes(t *testing.T) {
 // TestMessageAggregatorProcessor_differentEventTypes tests event-type specific aggregation
 func TestMessageAggregatorProcessor_differentEventTypes(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
-	
+
 	ctx := context.Background()
 	processor := NewMessageAggregatorProcessor(ctx, logger, MessageAggregatorProcessorOptions{
 		Window:     100 * time.Millisecond,
@@ -184,7 +184,7 @@ func TestMessageAggregatorProcessor_differentEventTypes(t *testing.T) {
 		MaxMsgs:    10,
 		MaxBytes:   2000,
 	})
-	
+
 	// Send tool_use message (stream=true required)
 	msg1 := &base.ChatMessage{
 		Platform:  "slack",
@@ -195,7 +195,7 @@ func TestMessageAggregatorProcessor_differentEventTypes(t *testing.T) {
 			"stream":     true,
 		},
 	}
-	
+
 	// Send answer message (different event type)
 	msg2 := &base.ChatMessage{
 		Platform:  "slack",
@@ -206,15 +206,15 @@ func TestMessageAggregatorProcessor_differentEventTypes(t *testing.T) {
 			"stream":     true,
 		},
 	}
-	
+
 	_, _ = processor.Process(ctx, msg1)
 	_, _ = processor.Process(ctx, msg2)
-	
+
 	// Should have 2 separate buffers (one per event type)
 	processor.mu.Lock()
 	bufferCount := len(processor.buffers)
 	processor.mu.Unlock()
-	
+
 	if bufferCount != 2 {
 		t.Errorf("Expected 2 buffers (one per event type), got %d", bufferCount)
 	}
@@ -223,13 +223,13 @@ func TestMessageAggregatorProcessor_differentEventTypes(t *testing.T) {
 // TestMessageAggregatorProcessor_flushBuffer tests flushBuffer function
 func TestMessageAggregatorProcessor_flushBuffer(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
-	
+
 	ctx := context.Background()
 	processor := NewMessageAggregatorProcessor(ctx, logger, MessageAggregatorProcessorOptions{
 		Window:     100 * time.Millisecond,
 		MinContent: 100,
 	})
-	
+
 	// First buffer a message (use 'answer' event type which aggregates)
 	msg1 := &base.ChatMessage{
 		Platform:  "slack",
@@ -241,7 +241,7 @@ func TestMessageAggregatorProcessor_flushBuffer(t *testing.T) {
 		},
 	}
 	_, _ = processor.Process(ctx, msg1)
-	
+
 	// Send message with is_final flag (should flush buffer and return aggregated)
 	msg2 := &base.ChatMessage{
 		Platform:  "slack",
@@ -253,17 +253,17 @@ func TestMessageAggregatorProcessor_flushBuffer(t *testing.T) {
 			"is_final":   true,
 		},
 	}
-	
+
 	result, err := processor.Process(ctx, msg2)
 	if err != nil {
 		t.Fatalf("Process failed: %v", err)
 	}
-	
+
 	// is_final should return aggregated message (not nil)
 	if result == nil {
 		t.Fatal("Expected aggregated message from is_final")
 	}
-	
+
 	// Content should include both messages
 	if !strings.Contains(result.Content, "Buffered") || !strings.Contains(result.Content, "Final") {
 		t.Errorf("Expected aggregated content, got: %q", result.Content)

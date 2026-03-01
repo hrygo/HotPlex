@@ -1221,7 +1221,7 @@ func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, 
 		a.Logger().Warn("Danger block cancelled, triggering security audit",
 			"session_id", sessionID,
 			"user_id", userID)
-		
+
 		// TODO: Implement security audit logging
 		// Example: auditLog.DangerBlockCancelled(sessionID, userID, time.Now())
 	}
@@ -1852,10 +1852,11 @@ func (a *Adapter) PostEphemeralSDK(ctx context.Context, channelID, userID, text 
 
 // Compile-time interface compliance checks
 var (
-	_ base.ChatAdapter       = (*Adapter)(nil)
-	_ base.EngineSupport     = (*Adapter)(nil)
+	_ base.ChatAdapter        = (*Adapter)(nil)
+	_ base.EngineSupport      = (*Adapter)(nil)
 	_ base.MessageOperations = (*Adapter)(nil)
 	_ base.SessionOperations = (*Adapter)(nil)
+	_ base.WebhookProvider     = (*Adapter)(nil)
 )
 
 // MessageOperations implementation for Slack
