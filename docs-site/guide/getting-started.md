@@ -1,23 +1,23 @@
-# Getting Started
+# The Quick Start Journey
 
 ## Experience HotPlex in 5 Minutes
 
-Welcome! This guide is designed to get your first HotPlex agent up and running as quickly as possible. We focus on the developer experience, ensuring you see results without wading through deep technical specs.
+Welcome. This guide is designed to get your first HotPlex agent up and running with surgical precision. We bypass the theoretical and focus on the immediate: a self-healing, stateful agent in your terminal.
 
 ---
 
-### 1. Installation
+### 1. Acquiring the Core
 
-HotPlex is distributed as a single, high-performance binary. Choose the method that fits your workflow:
+HotPlex is a single, high-performance binary. Choose your path to acquisition:
 
 ::: code-group
-```bash [Binary Installation]
-# Download the latest release from GitHub
+```bash [The Shell Path]
+# Download and install the latest release automatically
 curl -sfL https://raw.githubusercontent.com/hrygo/hotplex/main/scripts/install.sh | sh
 ```
 
-```bash [Go Install]
-# Build from source using the latest version
+```bash [The Source Path]
+# Build from the latest master branch
 go install github.com/hrygo/hotplex/cmd/hotplexd@latest
 ```
 :::

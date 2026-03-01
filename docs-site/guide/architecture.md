@@ -1,31 +1,40 @@
-# Architecture Overview
+# The Anatomy of a Stateful Agent
 
-## The Anatomy of a Stateful Agent
+## A Designed Nervous System for AI
 
-HotPlex isn't just a runtime; it's a **designed nervous system** for AI agents. Our architecture is built upon the "Strategic Bridge" principle—connecting raw LLM capabilities with the stability and security required for enterprise production.
+HotPlex isn't just a runtime; it's a **nervous system**. While raw LLMs provide the "brain," HotPlex provides the reflexes, memory, and skin that allow an agent to survive and thrive in production.
 
 ---
 
-### The Core Triad
+### A Day in the Life of a Packet
 
-The HotPlex engine is built around three fundamental pillars:
+To understand HotPlex, follow a single event—a user message—as it journeys across the **Strategic Bridge**.
 
-#### 1. 🧠 Stateful Persistence
-Agents shouldn't be amnesiac. HotPlex provides a high-reliability state layer that persists:
-- **Conversation History**: Every turn is tracked and managed.
-- **Agent Context**: Long-term "memories" and learned preferences.
-- **Session Continuity**: Seamlessly resume sessions across different platforms.
+1.  **Incoming Resonance**: An event (Slack Mention, API Call) hits the **ChatApp Adapter**. It's instantly normalized into the unified **HotPlex Protocol**.
+2.  **The Persistence Gate**: Before the agent even "thinks," the **State Manager** retrieves the last 50 turns of context. Continuity is established in milliseconds.
+3.  **The Secure Crucible**: The agent logic is loaded into the **Sandbox Container**. Here, it can run code and call tools, but its reach is strictly bounded by the **Security Guard**.
+4.  **The Duplex Loop**: As the agent reasons, it streams live updates back to the user via the **Duplex Stream Engine**. No waiting for whole blocks—the conversation is alive.
 
-#### 2. 🛡️ Security Sandbox
-Running untrusted agent logic is a risk. HotPlex isolates every execution in a multi-layered sandbox:
-- **Resource Limits**: Control CPU and memory usage.
-- **File Access Isolation**: Prevent unauthorized local filesystem access.
-- **API Guarding**: Fine-grained control over which external APIs an agent can call.
+---
 
-#### 3. ⚡ Duplex Stream Engine
-Communication between agents, tools, and users must be instantaneous. Our proprietary streaming protocol delivers:
-- **Low Latency**: Sub-millisecond response for event-driven updates.
-- **Bi-directional Flow**: Real-time feedback from tools back to the agent while the user is still watching.
+### The Pillars of Structural Integrity
+
+<div class="audience-section">
+  <div class="audience-card">
+    <h3>Continuity Layer</h3>
+    <p>We solve the "Amnesia Problem." By treating state as a first-class citizen, HotPlex ensures that agents remain context-aware across platforms and restarts.</p>
+  </div>
+  
+  <div class="audience-card">
+    <h3>Sovereign Isolation</h3>
+    <p>Agents need tools, but tools are dangerous. Our multi-layered sandbox provides the freedom of local execution with the safety of a zero-trust environment.</p>
+  </div>
+
+  <div class="audience-card">
+    <h3>Engine Reactivity</h3>
+    <p>Built in Go, our binary-powered core is designed for sub-millisecond event loops. In HotPlex, performance is the foundation of intelligence.</p>
+  </div>
+</div>
 
 ---
 
@@ -33,14 +42,14 @@ Communication between agents, tools, and users must be instantaneous. Our propri
 
 ![Architecture Overview](/images/topology.svg)
 
-- **The Engine**: Orchestrates the agent lifecycle and executes core logic.
-- **Plugins/Hooks**: The extensibility layer where developers inject custom behaviors.
-- **ChatApps**: Adapters that bridge the engine to user-facing platforms like Slack or DingTalk.
+- **The Engine**: The beating heart that orchestrates the agent lifecycle.
+- **Hooks & Plugins**: The nervous system's extensions where you inject custom "reflexes."
+- **ChatApp Adapters**: The sensory organs that connect to the outside world.
 
 ---
 
 ### Technical Rigor: Built for Scale
 
-HotPlex is written in **Go**, choosing performance over abstraction. Every component—from the event loop to the persistence layer—is optimized for high-throughput, ensuring that your agent infrastructure can scale alongside your user base.
+HotPlex is optimized for high-throughput, ensuring that your agent infrastructure can scale alongside your user base without sacrificing the "magic" of low-latency interaction.
 
-[Dive deeper into the SDKs](/sdks/go-sdk) or [Explore the Hooks System](/guide/hooks).
+[Continue to the Hooks API](/reference/hooks-api) or [Master the Protocol](/reference/protocol).
