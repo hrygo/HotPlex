@@ -121,12 +121,10 @@ settings:
 
 ### 进阶版配置带来的新能力：
 
-1.  **全局监控中心 (`home_tab_enabled: true`)**：允许开发者在打开 Bot 时，渲染出包含“活跃会话数”、“安全拦截日志”和“ MCP 挂载状态”的 Dashboard。
+1.  **全局监控中心 (`home_tab_enabled: true`)**：允许开发者在打开 Bot 时，渲染出包含“活跃会话数”、“安全拦截日志”和“ MCP 挂载状态”的 Dashboard。需要监听 `app_home_opened` 事件。
 2.  **审批守门员 (`/approve`)**：结合互动消息能力 (Interactivity)，在执行写库、删除等敏感调用前强制拦截并要求核心开发者确认。
 3.  **富产物挂载 (`files:read` / `files:write`)**：允许工程师直接向 Slack 丢报错日志附件，HotPlex 将其自动注入正在执行的沙盒文件系统中；Agent 也可直接生成并推送补丁包 (`.patch` 或 `zip`) 给团队。
 4.  **运行时状态透视 (`/pgid`)**：一键穿透 LLM 迷雾，直接查询对应操作系统的资源开销，提供极客级别的排障手段。
-
-3.  点击 **Create** 并 **Install to Workspace**。完成！
 
 ---
 
