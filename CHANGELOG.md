@@ -1,5 +1,18 @@
 # CHANGELOG.md
 
+## [v0.15.7] - 2026-03-01
+
+### 📦 Asset & Documentation Updates
+
+Minor release with logo updates and adapter improvements.
+
+### Changed
+- **README Logo** - Replaced SVG logo with PNG version (`hotplex-og.png`) in both English and Chinese READMEs.
+- **Brand Assets** - Updated logo SVG/PNG assets and favicon.
+- **Adapter Formatting** - Improved formatting consistency across chatapps adapters.
+
+---
+
 ## [v0.15.6] - 2026-03-01
 
 ### 🎨 Brand Asset Optimization & CI Refinement
