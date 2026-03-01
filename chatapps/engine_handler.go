@@ -400,9 +400,13 @@ func (c *StreamCallback) handleThinking(data any) error {
 	c.mu.Unlock()
 
 	if !sessionStartSent {
-		c.logger.Debug("thinking event received before session_start - proceeding anyway",
-			"session_id", c.sessionID,
-			"thinking_content", thinkingContent)
+		c.logger.Debug("thinking event received before session_start - ensuring session_start sent first",
+			"session_id", c.sessionID)
+		// Trigger handleSessionStart manually with default content if it hasn't been sent yet
+		// to ensure correct waterfall flow in ChatApp UI
+		if err := c.handleSessionStart("Resuming session..."); err != nil {
+			c.logger.Warn("Failed to send auto-session-start", "error", err)
+		}
 	}
 
 	// Use updateStatusMessage for dynamic status indicator
@@ -668,7 +672,7 @@ func (c *StreamCallback) updateStatusMessage(statusType base.MessageType, displa
 
 	if isFirst {
 		// First status event - create new message
-		if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+		if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 			// Rollback state on send failure
 			c.mu.Lock()
 			c.isFirst = true
@@ -698,15 +702,22 @@ func (c *StreamCallback) updateStatusMessage(statusType base.MessageType, displa
 		// Subsequent status event - update the existing message
 		msg.Metadata["message_ts"] = msgTS
 		msg.Metadata["channel_id"] = channelID
-		return c.sendMessageAndGetTS(convertToChatMessage(msg))
+		return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 	}
 
 	// Fallback: send as new message
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // convertToChatMessage converts base.ChatMessage to ChatMessage (local type)
-func convertToChatMessage(msg *base.ChatMessage) *ChatMessage {
+// It ensures that the current session's platform and sessionID are correctly inherited
+func (c *StreamCallback) convertToChatMessage(msg *base.ChatMessage) *ChatMessage {
+	if msg.Platform == "" {
+		msg.Platform = c.platform
+	}
+	if msg.SessionID == "" {
+		msg.SessionID = c.sessionID
+	}
 	return &ChatMessage{
 		Type:        msg.Type,
 		Platform:    msg.Platform,
@@ -760,7 +771,7 @@ func (c *StreamCallback) handleToolUse(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 		return err
 	}
 	return nil
@@ -834,7 +845,7 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 		return err
 	}
 	return nil
@@ -930,7 +941,7 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		return err
 	}
 
-	err := c.sendMessageAndGetTS(convertToChatMessage(msg))
+	err := c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 	if err == nil {
 		c.processor.ResetSession(c.platform, c.sessionID)
 	}
@@ -971,7 +982,7 @@ func (c *StreamCallback) handleError(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 		return err
 	}
 
@@ -1007,7 +1018,7 @@ func (c *StreamCallback) handleDangerBlock(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handleSessionStats handles session statistics events
@@ -1049,7 +1060,7 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 		return err
 	}
 
@@ -1096,7 +1107,7 @@ func (c *StreamCallback) handleCommandProgress(data any) error {
 		msg.Metadata[k] = v
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handleCommandComplete handles command completion events
@@ -1136,7 +1147,7 @@ func (c *StreamCallback) handleCommandComplete(data any) error {
 		msg.Metadata[k] = v
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handleSystem handles system-level messages
@@ -1160,7 +1171,7 @@ func (c *StreamCallback) handleSystem(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handleUser handles user message reflection
@@ -1184,7 +1195,7 @@ func (c *StreamCallback) handleUser(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handleStepStart handles step start events (OpenCode specific)
@@ -1221,7 +1232,7 @@ func (c *StreamCallback) handleStepStart(data any) error {
 		msg.Metadata[k] = v
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handleStepFinish handles step finish events (OpenCode specific)
@@ -1259,7 +1270,7 @@ func (c *StreamCallback) handleStepFinish(data any) error {
 		msg.Metadata[k] = v
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handleRaw handles raw/unparsed output
@@ -1283,7 +1294,7 @@ func (c *StreamCallback) handleRaw(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // copyMessageMetadata copies important metadata from original message
@@ -1449,11 +1460,14 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 
 	// Get or create turn state for concurrent turn support
 	// Each turn maintains independent cleanup records to prevent message leakage
+	// Legacy sessions might not be in cache; we'll create a default turn state if missing
 	var turnState *intengine.TurnState
 	if sess, ok := h.engine.GetSession(msg.SessionID); ok && sess != nil {
 		turnState = sess.GetOrCreateTurn(msg.SessionID + ":" + time.Now().Format("150405.000"))
 	} else {
-		h.logger.Warn("Session not found for turn state creation", "session_id", msg.SessionID)
+		// Optimization: Create a standalone turn state to track messages for cleanup even if session cache is cold
+		turnState = intengine.NewTurnState(msg.SessionID + ":cold-start:" + time.Now().Format("150405.000"))
+		h.logger.Debug("Created standalone turn state for cold-start session", "session_id", msg.SessionID)
 	}
 
 	// Create stream callback with injected dependencies
@@ -1535,7 +1549,17 @@ func (s *StreamState) updateThrottled(ctx context.Context, adapters *AdapterMana
 	}
 
 	// Convert base.ChatMessage to ChatMessage for adapter
-	chatMsg := convertToChatMessage(msg)
+	chatMsg := &ChatMessage{
+		Type:        msg.Type,
+		Platform:    platform,
+		SessionID:   sessionID,
+		UserID:      msg.UserID,
+		Content:     msg.Content,
+		MessageID:   msg.MessageID,
+		Timestamp:   msg.Timestamp,
+		Metadata:    msg.Metadata,
+		RichContent: msg.RichContent,
+	}
 
 	// Send update
 	err := adapters.SendMessage(ctx, platform, sessionID, chatMsg)
@@ -1590,7 +1614,7 @@ func (c *StreamCallback) handlePlanMode(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handleExitPlanMode handles exit plan mode requests (tool_use with name=ExitPlanMode)
@@ -1619,7 +1643,7 @@ func (c *StreamCallback) handleExitPlanMode(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // =============================================================================
@@ -1653,7 +1677,7 @@ func (c *StreamCallback) handleAskUserQuestion(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // =============================================================================
@@ -1665,6 +1689,10 @@ func (c *StreamCallback) handleAskUserQuestion(data any) error {
 // Triggered when user sends first message or CLI needs cold start
 func (c *StreamCallback) handleSessionStart(data any) error {
 	c.mu.Lock()
+	if c.sessionStartSent {
+		c.mu.Unlock()
+		return nil
+	}
 	c.sessionStartSent = true
 	c.mu.Unlock()
 
@@ -1692,7 +1720,7 @@ func (c *StreamCallback) handleSessionStart(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 		return err
 	}
 
@@ -1735,7 +1763,7 @@ func (c *StreamCallback) handleEngineStarting(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(convertToChatMessage(msg)); err != nil {
+	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 		return err
 	}
 
@@ -1770,7 +1798,7 @@ func (c *StreamCallback) handleUserMessageReceived(_ any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }
 
 // handlePermissionRequest handles permission request events
@@ -1832,5 +1860,5 @@ func (c *StreamCallback) handlePermissionRequest(data any) error {
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(convertToChatMessage(msg))
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
 }

@@ -22,9 +22,26 @@ func (s *SlackKeyStrategy) GenerateKey(eventData map[string]any) string {
 	channel, _ := eventData["channel"].(string)
 	eventTS, _ := eventData["event_ts"].(string)
 
+	// Fallback for missing event_type (common in early lifecycle or simple messages)
+	if eventType == "" {
+		if msgType, ok := eventData["type"].(string); ok && msgType != "" {
+			eventType = msgType
+		} else {
+			eventType = "unknown_event"
+		}
+	}
+
+	// Fallback for missing channel
+	if channel == "" {
+		channel = "unknown_channel"
+	}
+
 	// Fallback to session_id if event_ts is not available
 	if eventTS == "" {
 		sessionID, _ := eventData["session_id"].(string)
+		if sessionID == "" {
+			sessionID = "unknown_session"
+		}
 		return platform + ":" + eventType + ":" + channel + ":" + sessionID
 	}
 
