@@ -1449,14 +1449,16 @@ type EngineMessageHandler struct {
 	systemPromptFn func(sessionID, platform string) string
 	configLoader   *ConfigLoader
 	logger         *slog.Logger
+	pendingStore   *base.PendingMessageStore // Store for pending danger block approvals
 }
 
 // NewEngineMessageHandler creates a new EngineMessageHandler
 func NewEngineMessageHandler(engine *engine.Engine, adapters *AdapterManager, opts ...EngineMessageHandlerOption) *EngineMessageHandler {
 	h := &EngineMessageHandler{
-		engine:   engine,
-		adapters: adapters,
-		logger:   slog.Default(),
+		engine:       engine,
+		adapters:     adapters,
+		logger:       slog.Default(),
+		pendingStore: base.NewPendingMessageStore(5 * time.Minute),
 	}
 
 	for _, opt := range opts {
