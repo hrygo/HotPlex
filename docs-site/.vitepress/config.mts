@@ -18,8 +18,8 @@ export default defineConfig({
 
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
-      { text: 'Ecosystem', link: '/ecosystem/' },
-      { text: 'Reference', link: '/reference/architecture' },
+      { text: 'Ecosystem', link: '/guide/chatapps' },
+      { text: 'Reference', link: '/reference/api' },
       { text: 'Blog', link: '/blog/' },
       { text: 'GitHub', link: 'https://github.com/hrygo/hotplex' }
     ],
@@ -27,34 +27,48 @@ export default defineConfig({
     sidebar: {
       '/guide/': [
         {
-          text: 'Introduction',
+          text: 'Getting Started',
           collapsed: false,
           items: [
-            { text: 'Philosophy & Vision', link: '/guide/introduction' },
-            { text: 'Quick Start Journey', link: '/guide/getting-started' },
+            { text: 'Quick Start', link: '/guide/getting-started' },
+            { text: 'Philosophy', link: '/guide/introduction' },
           ]
         },
         {
           text: 'Core Concepts',
           collapsed: false,
           items: [
-            { text: 'Architecture of the Bridge', link: '/guide/architecture' },
-            { text: 'State & Persistence', link: '/guide/state' },
-            { text: 'The Hooks System', link: '/guide/hooks' },
+            { text: 'Architecture', link: '/guide/architecture' },
+            { text: 'State Management', link: '/guide/state' },
+            { text: 'Hooks System', link: '/guide/hooks' },
           ]
         },
         {
-          text: 'Ecosystem & Integration',
+          text: 'Security',
           collapsed: false,
           items: [
-            { text: 'Ecosystem Manifesto', link: '/guide/chatapps' },
-            { text: 'Slack Mastery Guide', link: '/guide/chatapps-slack' },
-            { text: 'Observability & Telemetry', link: '/guide/observability' },
-            { text: 'Production Deployment', link: '/guide/deployment' },
+            { text: 'Security Overview', link: '/guide/security' },
           ]
         },
         {
-          text: 'SDK Mastery Guides',
+          text: 'Integration',
+          collapsed: false,
+          items: [
+            { text: 'ChatApps Overview', link: '/guide/chatapps' },
+            { text: 'Slack Integration', link: '/guide/chatapps-slack' },
+          ]
+        },
+        {
+          text: 'Operations',
+          collapsed: false,
+          items: [
+            { text: 'Observability', link: '/guide/observability' },
+            { text: 'Deployment', link: '/guide/deployment' },
+            { text: 'Troubleshooting', link: '/guide/troubleshooting' },
+          ]
+        },
+        {
+          text: 'SDKs',
           collapsed: false,
           items: [
             { text: 'Go SDK', link: '/sdks/go-sdk' },
@@ -65,20 +79,19 @@ export default defineConfig({
       ],
       '/reference/': [
         {
-          text: 'Technical Soul',
+          text: 'Technical Reference',
           items: [
-            { text: 'The Anatomy of Agency', link: '/reference/architecture' },
             { text: 'API Specification', link: '/reference/api' },
-            { text: 'Protocol: The Conversation', link: '/reference/protocol' },
-            { text: 'Hooks Specification', link: '/reference/hooks-api' },
+            { text: 'Protocol', link: '/reference/protocol' },
+            { text: 'Hooks API', link: '/reference/hooks-api' },
           ]
         }
       ],
       '/blog/': [
         {
-          text: 'Updates & Engineering',
+          text: 'Updates',
           items: [
-            { text: 'Latest Updates', link: '/blog/' },
+            { text: 'Latest', link: '/blog/' },
             { text: 'Roadmap 2026', link: '/blog/roadmap-2026' },
           ]
         }

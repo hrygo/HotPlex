@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 680" width="100%" height="auto">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="inputGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#E3F2FD"/>
+      <stop offset="100%" style="stop-color:#BBDEFB"/>
+    </linearGradient>
+    <linearGradient id="securityGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFEBEE"/>
+      <stop offset="100%" style="stop-color:#FFCDD2"/>
+    </linearGradient>
+    <linearGradient id="isolationGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFF8E1"/>
+      <stop offset="100%" style="stop-color:#FFECB3"/>
+    </linearGradient>
+    <linearGradient id="monitorGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#E8F5E9"/>
+      <stop offset="100%" style="stop-color:#C8E6C9"/>
+    </linearGradient>
+
+    <!-- Shadow Filter -->
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.1"/>
+    </filter>
+    <filter id="shadowSmall" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+
+    <!-- Arrow Marker -->
+    <marker id="arrowDown" viewBox="0 0 10 10" refX="5" refY="10" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 5 10 L 10 0 z" fill="#78909C"/>
+    </marker>
+  </defs>
+
+  <style>
+    .layer-title { font: bold 13px 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; fill: #1565C0; }
+    .node-label { font: 500 12px 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; fill: #37474F; }
+    .sub-label { font: 400 10px 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; fill: #607D8B; }
+    .shield-icon { font-size: 14px; fill: #E53935; }
+  </style>
+
+  <!-- Layer Containers -->
+  <!-- Input Layer -->
+  <rect x="20" y="20" width="460" height="80" rx="12" fill="url(#inputGrad)" stroke="#90CAF9" stroke-width="1" filter="url(#shadow)"/>
+  <text class="layer-title" x="250" y="45" text-anchor="middle">Input Layer</text>
+
+  <!-- Input Nodes -->
+  <g transform="translate(100, 70)">
+    <rect x="-40" y="-15" width="80" height="30" rx="6" fill="white" stroke="#64B5F6" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="5" text-anchor="middle">User Input</text>
+  </g>
+  <g transform="translate(250, 70)">
+    <rect x="-45" y="-15" width="90" height="30" rx="6" fill="white" stroke="#64B5F6" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="5" text-anchor="middle">API Request</text>
+  </g>
+  <g transform="translate(400, 70)">
+    <rect x="-45" y="-15" width="90" height="30" rx="6" fill="white" stroke="#64B5F6" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="5" text-anchor="middle">WebSocket</text>
+  </g>
+
+  <!-- Security Layer -->
+  <rect x="20" y="120" width="460" height="180" rx="12" fill="url(#securityGrad)" stroke="#EF9A9A" stroke-width="1" filter="url(#shadow)"/>
+  <text class="layer-title" x="250" y="145" text-anchor="middle">Security Layer</text>
+
+  <!-- Security Nodes -->
+  <g transform="translate(250, 180)">
+    <rect x="-50" y="-18" width="100" height="36" rx="8" fill="white" stroke="#EF5350" stroke-width="1.5" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">Regex WAF</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">Pattern Detection</text>
+  </g>
+
+  <g transform="translate(150, 250)">
+    <rect x="-55" y="-18" width="110" height="36" rx="8" fill="white" stroke="#EF5350" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">Tool Whitelist</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">Allowed Tools</text>
+  </g>
+
+  <g transform="translate(350, 250)">
+    <rect x="-55" y="-18" width="110" height="36" rx="8" fill="white" stroke="#EF5350" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">Path Restriction</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">Sandbox Paths</text>
+  </g>
+
+  <!-- Isolation Layer -->
+  <rect x="20" y="320" width="460" height="180" rx="12" fill="url(#isolationGrad)" stroke="#FFE082" stroke-width="1" filter="url(#shadow)"/>
+  <text class="layer-title" x="250" y="345" text-anchor="middle">Isolation Layer</text>
+
+  <!-- Isolation Nodes -->
+  <g transform="translate(250, 390)">
+    <rect x="-60" y="-18" width="120" height="36" rx="8" fill="white" stroke="#FFA000" stroke-width="1.5" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">Process Group ID</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">PGID Isolation</text>
+  </g>
+
+  <g transform="translate(150, 460)">
+    <rect x="-50" y="-18" width="100" height="36" rx="8" fill="white" stroke="#FFA000" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">WorkDir Jail</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">Chroot Style</text>
+  </g>
+
+  <g transform="translate(350, 460)">
+    <rect x="-55" y="-18" width="110" height="36" rx="8" fill="white" stroke="#FFA000" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">Environment Lock</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">Secure Env Vars</text>
+  </g>
+
+  <!-- Monitoring Layer -->
+  <rect x="20" y="520" width="460" height="100" rx="12" fill="url(#monitorGrad)" stroke="#A5D6A7" stroke-width="1" filter="url(#shadow)"/>
+  <text class="layer-title" x="250" y="545" text-anchor="middle">Monitoring Layer</text>
+
+  <!-- Monitoring Nodes -->
+  <g transform="translate(100, 590)">
+    <rect x="-45" y="-18" width="90" height="36" rx="8" fill="white" stroke="#66BB6A" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">Audit Logs</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">All Actions</text>
+  </g>
+
+  <g transform="translate(250, 590)">
+    <rect x="-40" y="-18" width="80" height="36" rx="8" fill="white" stroke="#66BB6A" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">Metrics</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">Performance</text>
+  </g>
+
+  <g transform="translate(400, 590)">
+    <rect x="-45" y="-18" width="90" height="36" rx="8" fill="white" stroke="#66BB6A" stroke-width="1" filter="url(#shadowSmall)"/>
+    <text class="node-label" x="0" y="3" text-anchor="middle">Event Hooks</text>
+    <text class="sub-label" x="0" y="14" text-anchor="middle">Callbacks</text>
+  </g>
+
+  <!-- Connection Lines -->
+  <g stroke="#78909C" stroke-width="1.5" fill="none">
+    <!-- Input to Security -->
+    <path d="M 100 85 L 100 100 Q 100 110 150 130 L 200 155" marker-end="url(#arrowDown)"/>
+    <path d="M 250 85 L 250 155" marker-end="url(#arrowDown)"/>
+    <path d="M 400 85 L 400 100 Q 400 110 350 130 L 300 155" marker-end="url(#arrowDown)"/>
+
+    <!-- Security internal -->
+    <path d="M 250 198 L 250 215"/>
+    <path d="M 200 230 L 150 225" marker-end="url(#arrowDown)"/>
+    <path d="M 300 230 L 350 225" marker-end="url(#arrowDown)"/>
+
+    <!-- Security to Isolation -->
+    <path d="M 250 285 L 250 365" marker-end="url(#arrowDown)"/>
+
+    <!-- Isolation internal -->
+    <path d="M 250 408 L 250 430"/>
+    <path d="M 190 425 L 150 430" marker-end="url(#arrowDown)"/>
+    <path d="M 310 425 L 350 430" marker-end="url(#arrowDown)"/>
+
+    <!-- Isolation to Monitoring -->
+    <path d="M 150 478 L 150 500 Q 150 510 130 530 L 100 555" marker-end="url(#arrowDown)"/>
+    <path d="M 250 478 L 250 500 Q 250 510 250 530 L 250 565" marker-end="url(#arrowDown)"/>
+    <path d="M 350 478 L 350 500 Q 350 510 370 530 L 400 555" marker-end="url(#arrowDown)"/>
+  </g>
+
+  <!-- Shield Icons for Security -->
+  <text x="45" y="215" class="shield-icon">🛡️</text>
+  <text x="45" y="415" class="shield-icon">🔒</text>
+</svg>

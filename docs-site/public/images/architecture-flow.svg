@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 580" width="100%" height="auto">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="clientGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#E3F2FD"/>
+      <stop offset="100%" style="stop-color:#BBDEFB"/>
+    </linearGradient>
+    <linearGradient id="gatewayGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFF3E0"/>
+      <stop offset="100%" style="stop-color:#FFE0B2"/>
+    </linearGradient>
+    <linearGradient id="engineGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#E8F5E9"/>
+      <stop offset="100%" style="stop-color:#C8E6C9"/>
+    </linearGradient>
+    <linearGradient id="processGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FCE4EC"/>
+      <stop offset="100%" style="stop-color:#F8BBD9"/>
+    </linearGradient>
+
+    <!-- Shadow Filter -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.1"/>
+    </filter>
+    <filter id="shadowSmall" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+
+    <!-- Arrow Marker -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64B5F6"/>
+    </marker>
+  </defs>
+
+  <style>
+    .layer-label { font: bold 13px 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; fill: #1565C0; }
+    .node-text { font: 500 12px 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; fill: #37474F; }
+    .sub-node-text { font: 400 11px 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; fill: #546E7A; }
+    .node-rect { rx: 8; ry: 8; filter: url(#shadowSmall); }
+    .layer-rect { rx: 12; ry: 12; filter: url(#shadow); }
+    .connection { stroke: #64B5F6; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  </style>
+
+  <!-- Client Layer -->
+  <rect class="layer-rect" x="30" y="20" width="740" height="70" fill="url(#clientGrad)" stroke="#90CAF9" stroke-width="1"/>
+  <text class="layer-label" x="400" y="42" text-anchor="middle">Client Layer</text>
+
+  <g transform="translate(130, 55)">
+    <rect class="node-rect" x="-55" y="-15" width="110" height="30" fill="white" stroke="#64B5F6" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">WebSocket Client</text>
+  </g>
+  <g transform="translate(400, 55)">
+    <rect class="node-rect" x="-50" y="-15" width="100" height="30" fill="white" stroke="#64B5F6" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">REST API Client</text>
+  </g>
+  <g transform="translate(630, 55)">
+    <rect class="node-rect" x="-55" y="-15" width="110" height="30" fill="white" stroke="#64B5F6" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">Go/Python/TS SDK</text>
+  </g>
+
+  <!-- Access Layer -->
+  <rect class="layer-rect" x="30" y="110" width="740" height="100" fill="url(#gatewayGrad)" stroke="#FFB74D" stroke-width="1"/>
+  <text class="layer-label" x="400" y="130" text-anchor="middle">Access Layer</text>
+
+  <g transform="translate(180, 175)">
+    <rect class="node-rect" x="-65" y="-15" width="130" height="30" fill="white" stroke="#FFA726" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">WebSocket Gateway</text>
+  </g>
+  <g transform="translate(400, 175)">
+    <rect class="node-rect" x="-55" y="-15" width="110" height="30" fill="white" stroke="#FFA726" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">HTTP Gateway</text>
+  </g>
+  <g transform="translate(620, 175)">
+    <rect class="node-rect" x="-55" y="-15" width="110" height="30" fill="white" stroke="#FFA726" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">Authentication</text>
+  </g>
+
+  <!-- Engine Layer -->
+  <rect class="layer-rect" x="30" y="230" width="740" height="140" fill="url(#engineGrad)" stroke="#81C784" stroke-width="1"/>
+  <text class="layer-label" x="400" y="252" text-anchor="middle">Engine Layer</text>
+
+  <g transform="translate(150, 295)">
+    <rect class="node-rect" x="-50" y="-15" width="100" height="30" fill="#C8E6C9" stroke="#66BB6A" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">Session Pool</text>
+  </g>
+  <g transform="translate(150, 345)">
+    <rect class="node-rect" x="-40" y="-12" width="80" height="24" fill="white" stroke="#81C784" stroke-width="1"/>
+    <text class="sub-node-text" x="0" y="4" text-anchor="middle">Session 1</text>
+  </g>
+  <g transform="translate(280, 345)">
+    <rect class="node-rect" x="-40" y="-12" width="80" height="24" fill="white" stroke="#81C784" stroke-width="1"/>
+    <text class="sub-node-text" x="0" y="4" text-anchor="middle">Session 2</text>
+  </g>
+  <g transform="translate(410, 345)">
+    <rect class="node-rect" x="-40" y="-12" width="80" height="24" fill="white" stroke="#81C784" stroke-width="1"/>
+    <text class="sub-node-text" x="0" y="4" text-anchor="middle">Session N</text>
+  </g>
+  <g transform="translate(620, 295)">
+    <rect class="node-rect" x="-50" y="-15" width="100" height="30" fill="#C8E6C9" stroke="#66BB6A" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">WAF Security</text>
+  </g>
+
+  <!-- Process Layer -->
+  <rect class="layer-rect" x="30" y="390" width="740" height="100" fill="url(#processGrad)" stroke="#F06292" stroke-width="1"/>
+  <text class="layer-label" x="400" y="412" text-anchor="middle">Process Layer</text>
+
+  <g transform="translate(200, 455)">
+    <rect class="node-rect" x="-45" y="-15" width="90" height="30" fill="white" stroke="#EC407A" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">Claude Code</text>
+  </g>
+  <g transform="translate(350, 455)">
+    <rect class="node-rect" x="-40" y="-15" width="80" height="30" fill="white" stroke="#EC407A" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">OpenCode</text>
+  </g>
+  <g transform="translate(530, 455)">
+    <rect class="node-rect" x="-50" y="-15" width="100" height="30" fill="white" stroke="#AB47BC" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">PGID Isolation</text>
+  </g>
+  <g transform="translate(700, 455)">
+    <rect class="node-rect" x="-50" y="-15" width="100" height="30" fill="white" stroke="#AB47BC" stroke-width="1"/>
+    <text class="node-text" x="0" y="5" text-anchor="middle">PGID Isolation</text>
+  </g>
+
+  <!-- Connections -->
+  <!-- Client to Gateway -->
+  <path class="connection" d="M 130 70 L 130 90 Q 130 100 140 100 L 155 100 Q 165 100 165 110 L 165 155"/>
+  <path class="connection" d="M 400 70 L 400 155"/>
+  <path class="connection" d="M 630 70 L 630 90 Q 630 100 620 100 L 605 100 Q 595 100 595 110 L 595 155"/>
+
+  <!-- Gateway to Engine -->
+  <path class="connection" d="M 180 190 L 180 220 Q 180 230 170 230 L 160 230 Q 150 230 150 240 L 150 275"/>
+  <path class="connection" d="M 400 190 L 400 220 Q 400 230 390 230 L 200 230 Q 180 230 180 250 L 180 275"/>
+  <path class="connection" d="M 620 190 L 620 275"/>
+
+  <!-- Session Pool to Sessions -->
+  <path class="connection" d="M 150 310 L 150 330"/>
+  <path class="connection" d="M 150 320 L 240 330"/>
+  <path class="connection" d="M 150 320 L 370 330"/>
+
+  <!-- Engine to Process -->
+  <path class="connection" d="M 150 360 L 150 375 Q 150 385 165 385 L 185 385 Q 200 385 200 400 L 200 435"/>
+  <path class="connection" d="M 280 360 L 280 375 Q 280 385 300 385 L 340 385 Q 350 385 350 400 L 350 435"/>
+  <path class="connection" d="M 410 360 L 410 375 Q 410 385 450 385 L 520 385 Q 530 385 530 400 L 530 435"/>
+  <path class="connection" d="M 620 310 L 620 375 Q 620 385 640 385 L 690 385 Q 700 385 700 400 L 700 435"/>
+</svg>

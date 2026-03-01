@@ -1,55 +1,121 @@
 # The Anatomy of a Stateful Agent
 
-## A Designed Nervous System for AI
+## System Architecture
 
-HotPlex isn't just a runtime; it's a **nervous system**. While raw LLMs provide the "brain," HotPlex provides the reflexes, memory, and skin that allow an agent to survive and thrive in production.
-
----
-
-### A Day in the Life of a Packet
-
-To understand HotPlex, follow a single event—a user message—as it journeys across the **Strategic Bridge**.
-
-1.  **Incoming Resonance**: An event (Slack Mention, API Call) hits the **ChatApp Adapter**. It's instantly normalized into the unified **HotPlex Protocol**.
-2.  **The Persistence Gate**: Before the agent even "thinks," the **State Manager** retrieves the last 50 turns of context. Continuity is established in milliseconds.
-3.  **The Secure Crucible**: The agent logic is loaded into the **Sandbox Container**. Here, it can run code and call tools, but its reach is strictly bounded by the **Security Guard**.
-4.  **The Duplex Loop**: As the agent reasons, it streams live updates back to the user via the **Duplex Stream Engine**. No waiting for whole blocks—the conversation is alive.
+HotPlex is a Go-based runtime that orchestrates AI CLI agents. It provides stateful sessions, process isolation, and protocol bridging between chat platforms and agent CLIs.
 
 ---
 
-### The Pillars of Structural Integrity
+## Data Flow
 
-<div class="audience-section">
-  <div class="audience-card">
-    <h3>Continuity Layer</h3>
-    <p>We solve the "Amnesia Problem." By treating state as a first-class citizen, HotPlex ensures that agents remain context-aware across platforms and restarts.</p>
-  </div>
-  
-  <div class="audience-card">
-    <h3>Sovereign Isolation</h3>
-    <p>Agents need tools, but tools are dangerous. Our multi-layered sandbox provides the freedom of local execution with the safety of a zero-trust environment.</p>
-  </div>
+To understand HotPlex, follow a user message through the system:
 
-  <div class="audience-card">
-    <h3>Engine Reactivity</h3>
-    <p>Built in Go, our binary-powered core is designed for sub-millisecond event loops. In HotPlex, performance is the foundation of intelligence.</p>
-  </div>
-</div>
+```
+User Message → Access Layer → Engine Layer → Process Layer → Response
+```
+
+### Step-by-Step:
+
+1. **Input**: A message arrives via WebSocket, REST API, or ChatApp (Slack/DingTalk)
+2. **Authentication**: Credentials are validated, session is retrieved or created
+3. **Security Check**: WAF validates the request against dangerous patterns
+4. **Execution**: The message is sent to the CLI process (Claude Code / OpenCode)
+5. **Streaming**: Output is streamed back in real-time via events
+6. **State Update**: Session state is persisted for continuity
 
 ---
 
-### High-Level Topology
+## Architecture Overview
 
-![Architecture Overview](/images/topology.svg)
+![Architecture Flow](/images/architecture-flow.svg)
 
-- **The Engine**: The beating heart that orchestrates the agent lifecycle.
-- **Hooks & Plugins**: The nervous system's extensions where you inject custom "reflexes."
-- **ChatApp Adapters**: The sensory organs that connect to the outside world.
+### Layer Responsibilities
+
+| Layer | Components | Purpose |
+|-------|------------|---------|
+| **Access** | WebSocket Gateway, HTTP Gateway, Auth | Protocol translation and authentication |
+| **Engine** | Session Pool, WAF Security, Event Router | Request routing and security enforcement |
+| **Process** | CLI Providers (Claude/OpenCode), PGID Isolation | Actual agent execution |
 
 ---
 
-### Technical Rigor: Built for Scale
+## Core Components
 
-HotPlex is optimized for high-throughput, ensuring that your agent infrastructure can scale alongside your user base without sacrificing the "magic" of low-latency interaction.
+### Session Pool
 
-[Continue to the Hooks API](/reference/hooks-api) or [Master the Protocol](/reference/protocol).
+Manages concurrent agent sessions with lifecycle control:
+
+- **GetOrCreate**: Retrieves existing or creates new session
+- **Terminate**: Clean shutdown via PGID kill
+- **Stats**: Runtime metrics per session
+
+### Security (WAF)
+
+Multi-layer defense against malicious commands:
+
+1. **Tool Whitelist**: Restricts available CLI tools
+2. **Regex Detection**: Blocks dangerous patterns (`rm -rf`, `dd`, etc.)
+3. **Path Restriction**: Limits file system access to WorkDir
+
+### Process Isolation
+
+Each session runs in an isolated process group:
+
+```bash
+# Session process hierarchy
+hotplexd (parent)
+  ├── cli (child, PGID=same)
+  │   └── claude (grandchild)
+  └── security-monitor
+```
+
+> [!TIP]
+> Use `kill -PGID <pid>` to terminate the entire group safely.
+
+---
+
+## Session Lifecycle
+
+![Session Lifecycle](/images/session-lifecycle.svg)
+
+A session transitions through states:
+
+| State | Description |
+|-------|-------------|
+| `starting` | Process spawning, CLI initializing (~1-2s) |
+| `ready` | Awaiting commands, stdin/stdout piped |
+| `busy` | Processing request, streaming events |
+| `dead` | Terminated, cleanup in progress |
+
+---
+
+## Security Layers
+
+![Security Layers](/images/security-layers.svg)
+
+HotPlex implements defense in depth:
+
+1. **Input Validation**: Regex WAF blocks known dangerous patterns
+2. **Tool Governance**: Whitelist of allowed CLI tools
+3. **Process Isolation**: PGID-based termination prevents zombies
+4. **WorkDir Jail**: File access restricted to configured directory
+
+---
+
+## Performance Characteristics
+
+| Metric | Value |
+|--------|-------|
+| Event Latency | < 100ms |
+| Session Startup | ~1-2s |
+| Concurrent Sessions | 1000+ |
+| Memory/Session | ~50-100MB |
+
+---
+
+## Related Topics
+
+- [State Management](/guide/state) - Session persistence
+- [Security Guide](/guide/security) - WAF patterns
+- [API Reference](/reference/api) - Protocol details
+- [Protocol Spec](/reference/protocol) - DMP format

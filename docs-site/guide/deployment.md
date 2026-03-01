@@ -53,3 +53,16 @@ GET /health
 ```
 
 [View the Docker Deployment Guide on GitHub](https://github.com/hrygo/hotplex/blob/main/docs/docker-deployment.md)
+
+## Alternative: Local Docker Build
+
+```bash
+# Build locally
+docker build -t hotplex:local .
+
+# Run with persistent storage
+docker run -p 8080:8080 \
+  -v hotplex-data:/data \
+  -e HOTPLEX_STATE_DB="sqlite:///data/hotplex.db" \
+  hotplex:local
+```
