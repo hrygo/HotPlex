@@ -1,5 +1,5 @@
 <div align="center">
-  <img src=".github/assets/hotplex-logo.svg" alt="hotplex" width="160" style="background: #0D1117; border-radius: 24px; padding: 20px;"/>
+  <img src=".github/assets/hotplex-og.png" alt="hotplex" width="160"/>
   <h1>hotplex</h1>
   <p><b>Transforming AI CLI Agents into Production-Ready Interactive Services</b></p>
   <p><i>Break the limits of one-off CLI tasks. Leverage full-duplex, stateful sessions for instant interaction, secure isolation, and effortless system integration.</i></p>
