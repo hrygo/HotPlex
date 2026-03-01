@@ -10,15 +10,14 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
-	intengine "github.com/hrygo/hotplex/internal/engine"
 	eng "github.com/hrygo/hotplex/internal/engine"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
 )
 
-// sessionWrapper wraps intengine.Session to implement chatapps.Session interface
+// sessionWrapper wraps eng.Session to implement chatapps.Session interface
 type sessionWrapper struct {
-	sess *intengine.Session
+	sess *eng.Session
 }
 
 func (w *sessionWrapper) ID() string {
