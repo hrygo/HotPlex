@@ -24,53 +24,53 @@ export default defineConfig({
       { text: 'GitHub', link: 'https://github.com/hrygo/hotplex' }
     ],
 
-
     sidebar: {
       '/guide/': [
         {
           text: 'Introduction',
           collapsed: false,
           items: [
-            { text: 'Getting Started', link: '/guide/getting-started' },
-            { text: 'What is HotPlex?', link: '/guide/introduction' },
+            { text: 'Philosophy & Vision', link: '/guide/introduction' },
+            { text: 'Quick Start Journey', link: '/guide/getting-started' },
           ]
         },
         {
           text: 'Core Concepts',
           collapsed: false,
           items: [
-            { text: 'Architecture Overview', link: '/guide/architecture' },
-            { text: 'State Management', link: '/guide/state' },
-            { text: 'Hooks System', link: '/guide/hooks' },
+            { text: 'Architecture of the Bridge', link: '/guide/architecture' },
+            { text: 'State & Persistence', link: '/guide/state' },
+            { text: 'The Hooks System', link: '/guide/hooks' },
           ]
         },
         {
-          text: 'User Guides',
+          text: 'Ecosystem & Integration',
           collapsed: false,
           items: [
-            { text: 'ChatApps Overview', link: '/guide/chatapps' },
-            { text: 'Slack Integration', link: '/guide/chatapps-slack' },
-            { text: 'Observability', link: '/guide/observability' },
+            { text: 'Ecosystem Manifesto', link: '/guide/chatapps' },
+            { text: 'Slack Mastery Guide', link: '/guide/chatapps-slack' },
+            { text: 'Observability & Telemetry', link: '/guide/observability' },
             { text: 'Production Deployment', link: '/guide/deployment' },
+          ]
+        },
+        {
+          text: 'SDK Mastery Guides',
+          collapsed: false,
+          items: [
+            { text: 'Go SDK', link: '/sdks/go-sdk' },
+            { text: 'Python SDK', link: '/sdks/python-sdk' },
+            { text: 'TypeScript SDK', link: '/sdks/typescript-sdk' },
           ]
         }
       ],
       '/reference/': [
         {
-          text: 'Development Reference',
+          text: 'Technical Soul',
           items: [
-            { text: 'System Architecture', link: '/reference/architecture' },
-            { text: 'API Reference', link: '/reference/api' },
-            { text: 'Protocol Specification', link: '/reference/protocol' },
-            { text: 'Hooks API', link: '/reference/hooks-api' },
-          ]
-        },
-        {
-          text: 'SDKs',
-          items: [
-            { text: 'Go SDK', link: '/sdks/go-sdk' },
-            { text: 'Python SDK', link: '/sdks/python-sdk' },
-            { text: 'TypeScript SDK', link: '/sdks/typescript-sdk' },
+            { text: 'The Anatomy of Agency', link: '/reference/architecture' },
+            { text: 'API Specification', link: '/reference/api' },
+            { text: 'Protocol: The Conversation', link: '/reference/protocol' },
+            { text: 'Hooks Specification', link: '/reference/hooks-api' },
           ]
         }
       ],
@@ -112,4 +112,3 @@ export default defineConfig({
     }
   }
 })
-

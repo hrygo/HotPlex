@@ -1,49 +1,53 @@
 # ChatApps Ecosystem
 
-## Bringing Agents to Where Users Live
+## The Manifestation of Interaction
 
-The true power of an AI agent is realized when it interacts with users in their natural environment. **ChatApps** are the specialized adapters that bridge the HotPlex engine to mainstream communication platforms.
-
----
-
-### Supported Platforms
-
-We aim to cover the spectrum of enterprise and community platforms:
-
-| Platform       | Type       | Status       | Features                           |
-| :------------- | :--------- | :----------- | :--------------------------------- |
-| **Slack**      | Enterprise | ✅ Production | Rich Markdown, Reactions, App Home |
-| **DingTalk**   | Enterprise | 🔄 Beta       | Corporate approvals, AI Cards      |
-| **Discord**    | Community  | 🔄 Beta       | Guild management, Threaded bots    |
-| **Web Portal** | Custom     | ✅ Production | Full-Duplex UI, Custom branding    |
+The true power of an AI agent is not found in the code alone, but in its ability to manifest where the user lives. **ChatApps** are the specialized receptors that bridge the HotPlex engine to the world's most powerful communication platforms.
 
 ---
 
-### How ChatApps Work
+### The Ecosystem Map
 
-Unlike simple webhooks, HotPlex ChatApps maintain a **continuous duplex connection** to the engine. This allows for:
+We prioritize platforms where conversation and work converge. Our adapters are designed to be more than just "chatbots"—they are native extensions of the host environment.
 
-- **Real-time Thinking Updates**: Show the user precisely what the agent is "thinking" and which tools it is using.
-- **Interactive Action Zones**: Embed buttons, selectors, and complex forms directly into the chat interface.
-- **Cross-Platform State**: Start a session on Slack and resume it on the Web Portal without losing context.
-
----
-
-### Binding Your First App
-
-Connecting a platform to HotPlex is a simple "Binding" operation:
-
-1.  **Register App**: Create an app entry on the target platform (e.g., Slack Developer Portal).
-2.  **Configure Credentials**: Provide the API tokens to `hotplexd`.
-3.  **Establish Bind**:
-    ```bash
-    hotplexd bind slack --name "my-agent-bot" --token "[SLACK_BOT_TOKEN]"
-    ```
+| Platform       | Soul                    | Status       | Capabilities                        |
+| :------------- | :---------------------- | :----------- | :---------------------------------- |
+| **Slack**      | **Primary Receptor**    | ✅ Production | Full Block Kit, Real-time Reactions |
+| **DingTalk**   | Enterprise Control      | 🔄 Beta       | AI Action Cards, Approval Flow      |
+| **Discord**    | Community Synchronicity | 🔄 Beta       | Threaded Reasoning, Guild Ops       |
+| **Web Portal** | Absolute Sovereignty    | ✅ Production | Glassmorphism UI, Custom Branding   |
 
 ---
 
-### Looking Ahead
+### The "Sovereign Interaction" Model
 
-Our vision is a **Write-Once-Deploy-Everywhere** experience for agents. You build the logic; HotPlex ensures the UI is perfectly adapted for the specific constraints and capabilities of each platform.
+Unlike traditional webhooks that suffer from statelessness, HotPlex ChatApps maintain a **Continuous Duplex Stream**. This ensures:
 
-[Learn about Slack Integration](/guide/chatapps-slack) or [See the Ecosystem Gallery](/ecosystem/).
+- **Cognitive Transparency**: Users see the agent's internal reasoning (`thinking`) and tool selections in real-time.
+- **Visual Action Zones**: Complex interactions—like code diffs or permission requests—are rendered as interactive visual blocks.
+- **Stateful Mobility**: Conversations are persistent. A session born in Slack can be resumed in the Web Portal with zero context loss.
+
+---
+
+### The Anatomy of a Binding
+
+Integrating a platform is no longer a matter of complex boilerplate. It is a declaration of intent via environment configuration.
+
+1.  **Identity**: Register your app on the target platform (e.g., Slack App Portal).
+2.  **Continuity**: Provide the platform tokens to your HotPlex environment.
+3.  **Activation**: The `hotplexd` daemon automatically initializes the receptors based on your `.env` configuration.
+
+```bash
+# Activation is driven by environmental variables
+# See the Slack Mastery Guide for details.
+HOTPLEX_SLACK_ENABLED=true
+HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
+```
+
+---
+
+### The Vision: Ubiquitous Intelligence
+
+Our goal is a **Unified Agentic Surface**. You build the logic once; HotPlex ensures that every interaction is perfectly tailored to the unique aesthetics and capabilities of the platform.
+
+[Master the Slack Integration](/guide/chatapps-slack) or [Explore the Protocol](/reference/protocol)

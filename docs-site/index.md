@@ -24,12 +24,18 @@ features:
   - icon: 🛡️
     title: Enterprise Security
     details: Built with security-first principles, supporting fine-grained access control and auditing.
+  - icon: 💬
+    title: Native Slack Experience
+    details: Production-ready Slack integration with Block Kit mapping, real-time typing indicators, and session summaries.
   - icon: ⚡
     title: High Performance
     details: Optimized for low-latency agent interactions and high-throughput event processing.
   - icon: 🔌
-    title: Extensible Hooks
-    details: Custom logic injection at every lifecycle stage via a powerful hooks system.
+    title: Extensible Ecosystem
+    details: Bridge the engine to DingTalk, Discord, and custom portals via a unified binding layer.
+  - icon: 🛠️
+    title: Developer First
+    details: Integrate effortlessly using our artisanal Go, Python, and TypeScript SDKs.
 
 ---
 
