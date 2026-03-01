@@ -47,7 +47,9 @@ func (m *AdapterManager) Unregister(platform string) error {
 	defer m.mu.Unlock()
 
 	if adapter, ok := m.adapters[platform]; ok {
-		_ = adapter.Stop()
+		if err := adapter.Stop(); err != nil {
+			m.logger.Warn("Adapter stop failed during unregister", "platform", platform, "error", err)
+		}
 		delete(m.adapters, platform)
 		m.logger.Info("Adapter unregistered", "platform", platform)
 	}
@@ -175,7 +177,7 @@ func (m *AdapterManager) RegisterRoutes(router *mux.Router) {
 
 			m.logger.Info("Registered webhooks", "platform", platform, "prefix", prefix)
 		} else {
-			m.logger.Warn("Adapter does not support webhooks", "platform", platform)
+			m.logger.Debug("Adapter does not implement WebhookProvider (may be serverless mode)", "platform", platform)
 		}
 	}
 }

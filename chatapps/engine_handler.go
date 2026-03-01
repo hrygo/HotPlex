@@ -404,7 +404,7 @@ func (c *StreamCallback) handleThinking(data any) error {
 	c.mu.Unlock()
 
 	if !sessionStartSent {
-		c.logger.Warn("thinking event received before session_start - proceeding anyway",
+		c.logger.Debug("thinking event received before session_start - proceeding anyway",
 			"session_id", c.sessionID,
 			"thinking_content", thinkingContent)
 	}

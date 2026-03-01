@@ -132,7 +132,11 @@ func (e *ResetExecutor) deleteClaudeCodeSessionFile(providerSessionID string) in
 	// Derive workspace directory from workDir
 	cwd := e.workDir
 	if cwd == "" {
-		cwd, _ = os.Getwd()
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			cwd = os.TempDir() // Fallback to temp directory
+		}
 	}
 	workspaceKey := strings.ReplaceAll(cwd, "/", "-")
 	workspaceDir := filepath.Join(projectsDir, workspaceKey)
