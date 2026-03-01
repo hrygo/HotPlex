@@ -1,6 +1,7 @@
 package base
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -10,6 +11,9 @@ type PendingMessageStore struct {
 	messages map[string]*PendingMessage // sessionID -> PendingMessage
 	mu       sync.RWMutex
 	ttl      time.Duration
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 // PendingMessage represents a message pending approval
@@ -28,12 +32,17 @@ func NewPendingMessageStore(ttl time.Duration) *PendingMessageStore {
 		ttl = 5 * time.Minute // Default 5 minute TTL
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	store := &PendingMessageStore{
 		messages: make(map[string]*PendingMessage),
 		ttl:      ttl,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
 	// Start cleanup goroutine
+	store.wg.Add(1)
 	go store.cleanupLoop()
 
 	return store
@@ -76,12 +85,25 @@ func (s *PendingMessageStore) Delete(sessionID string) {
 
 // cleanupLoop periodically removes expired pending messages
 func (s *PendingMessageStore) cleanupLoop() {
+	defer s.wg.Done()
+
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.cleanup()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.cleanup()
+		}
 	}
+}
+
+// Stop stops the cleanup goroutine
+func (s *PendingMessageStore) Stop() {
+	s.cancel()
+	s.wg.Wait()
 }
 
 // cleanup removes expired pending messages

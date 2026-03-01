@@ -197,5 +197,19 @@ func (c *ProcessorChain) Order() int {
 	return 0 // Chain doesn't have a specific order, it contains processors with orders
 }
 
+// Close stops all processors that have background goroutines
+func (c *ProcessorChain) Close() {
+	c.mu.RLock()
+	processors := make([]MessageProcessor, len(c.processors))
+	copy(processors, c.processors)
+	c.mu.RUnlock()
+
+	for _, p := range processors {
+		if stoppable, ok := p.(interface{ Stop() }); ok {
+			stoppable.Stop()
+		}
+	}
+}
+
 // Verify ProcessorChain implements MessageProcessor at compile time
 var _ MessageProcessor = (*ProcessorChain)(nil)

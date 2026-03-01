@@ -1,6 +1,7 @@
 package chatapps
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -38,7 +39,8 @@ type InteractionManager struct {
 	pending         map[string]*PendingInteraction // interaction_id -> PendingInteraction
 	cleanupInterval time.Duration
 	defaultTTL      time.Duration
-	stopCleanup     chan struct{}
+	ctx             context.Context
+	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 }
 
@@ -62,12 +64,15 @@ func NewInteractionManager(logger *slog.Logger, opts InteractionManagerOptions) 
 		opts.TTL = 10 * time.Minute
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	m := &InteractionManager{
 		logger:          logger,
 		pending:         make(map[string]*PendingInteraction),
 		cleanupInterval: opts.CleanupInterval,
 		defaultTTL:      opts.TTL,
-		stopCleanup:     make(chan struct{}),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	// Start cleanup goroutine
@@ -181,7 +186,7 @@ func (m *InteractionManager) HandleCallback(interactionID, userID, actionID, cal
 
 // Stop stops the cleanup goroutine.
 func (m *InteractionManager) Stop() {
-	close(m.stopCleanup)
+	m.cancel()
 	m.wg.Wait()
 	m.logger.Debug("InteractionManager: stopped")
 }
@@ -195,7 +200,7 @@ func (m *InteractionManager) cleanupLoop() {
 
 	for {
 		select {
-		case <-m.stopCleanup:
+		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
 			m.cleanup()

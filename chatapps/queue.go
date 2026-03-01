@@ -25,6 +25,7 @@ type MessageQueue struct {
 	workers int
 	ctx     context.Context
 	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 func NewMessageQueue(logger *slog.Logger, maxSize, dlqSize, workers int) *MessageQueue {
@@ -108,11 +109,14 @@ func (q *MessageQueue) Size() int {
 
 func (q *MessageQueue) Start(adapterGetter func(string) (ChatAdapter, bool), sendFn func(context.Context, string, string, *ChatMessage) error) {
 	for i := 0; i < q.workers; i++ {
+		q.wg.Add(1)
 		go q.worker(i, adapterGetter, sendFn)
 	}
 }
 
 func (q *MessageQueue) worker(_ int, _ func(string) (ChatAdapter, bool), sendFn func(context.Context, string, string, *ChatMessage) error) {
+	defer q.wg.Done()
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -156,6 +160,7 @@ func (q *MessageQueue) Requeue(msg *QueuedMessage) error {
 
 func (q *MessageQueue) Stop() {
 	q.cancel()
+	q.wg.Wait()
 }
 
 var ErrQueueFull = &QueueError{Message: "queue is full"}

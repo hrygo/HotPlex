@@ -17,7 +17,8 @@ type ThreadProcessor struct {
 	threads         sync.Map // sessionID -> ThreadInfo
 	cleanupInterval time.Duration
 	ttl             time.Duration
-	stopCleanup     chan struct{}
+	ctx             context.Context
+	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 }
 
@@ -48,11 +49,14 @@ func NewThreadProcessor(logger *slog.Logger, opts ThreadProcessorOptions) *Threa
 		opts.TTL = 30 * time.Minute
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	p := &ThreadProcessor{
 		logger:          logger,
 		cleanupInterval: opts.CleanupInterval,
 		ttl:             opts.TTL,
-		stopCleanup:     make(chan struct{}),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	// Start cleanup goroutine
@@ -187,7 +191,7 @@ func (p *ThreadProcessor) Delete(sessionID string) {
 
 // Stop stops the cleanup goroutine.
 func (p *ThreadProcessor) Stop() {
-	close(p.stopCleanup)
+	p.cancel()
 	p.wg.Wait()
 	p.logger.Debug("ThreadProcessor: stopped")
 }
@@ -201,7 +205,7 @@ func (p *ThreadProcessor) cleanupLoop() {
 
 	for {
 		select {
-		case <-p.stopCleanup:
+		case <-p.ctx.Done():
 			return
 		case <-ticker.C:
 			p.cleanup()

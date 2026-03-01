@@ -47,8 +47,10 @@ type Adapter struct {
 	running        bool
 	runningMu      sync.Mutex // Protects running state
 	sessionTimeout time.Duration
-	cleanupDone    chan struct{}
-	cleanupOnce    sync.Once // Prevents double-close of cleanupDone
+	ctx            context.Context
+	cancel         context.CancelFunc
+	cleanupWg      sync.WaitGroup // Wait for cleanup goroutine to finish
+	cleanupOnce    sync.Once      // Prevents double-cancel
 
 	// Platform-specific implementations
 	platformName    string
@@ -79,13 +81,16 @@ func NewAdapter(
 		config.ServerAddr = ":8080"
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	a := &Adapter{
 		config:                config,
 		logger:                logger,
 		sessions:              make(map[string]*Session),
 		sessionsByUserChannel: make(map[string]*Session),
 		sessionTimeout:        30 * time.Minute,
-		cleanupDone:           make(chan struct{}),
+		ctx:                   ctx,
+		cancel:                cancel,
 		platformName:          platform,
 		httpHandlers:          make(map[string]http.HandlerFunc),
 		sessionIDGenerator:    NewUUID5Generator("hotplex"), // Default to UUID5 generator
@@ -206,6 +211,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 
 	// Serverless mode: skip HTTP server, just start session cleanup
 	if a.disableServer {
+		a.cleanupWg.Add(1)
 		go a.cleanupSessions()
 		a.running = true
 		a.logger.Debug("Adapter started (serverless mode)", "platform", a.platformName)
@@ -232,6 +238,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}()
 
 	// Start session cleanup goroutine
+	a.cleanupWg.Add(1)
 	go a.cleanupSessions()
 
 	a.running = true
@@ -247,10 +254,11 @@ func (a *Adapter) Stop() error {
 		return nil
 	}
 
-	// Signal cleanup goroutine to stop (use Once to prevent double-close)
+	// Signal cleanup goroutine to stop (use Once to prevent double-cancel)
 	a.cleanupOnce.Do(func() {
-		close(a.cleanupDone)
+		a.cancel()
 	})
+	a.cleanupWg.Wait() // Wait for cleanup goroutine to finish
 
 	// Skip server shutdown in serverless mode
 	if a.disableServer {
@@ -340,12 +348,14 @@ func (a *Adapter) GetOrCreateSession(userID, botUserID, channelID string) string
 
 // cleanupSessions periodically removes expired sessions
 func (a *Adapter) cleanupSessions() {
+	defer a.cleanupWg.Done()
+
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-a.cleanupDone:
+		case <-a.ctx.Done():
 			a.logger.Info("Session cleanup stopped", "platform", a.platformName)
 			return
 		case <-ticker.C:

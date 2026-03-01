@@ -233,6 +233,13 @@ type StreamCallback struct {
 	sessionOps SessionOperations
 }
 
+// Close releases resources held by the callback
+func (c *StreamCallback) Close() {
+	if c.processor != nil {
+		c.processor.Close()
+	}
+}
+
 // msgRecord tracks a sent message for later deletion or sliding window management.
 type msgRecord struct {
 	ChannelID string
@@ -1382,6 +1389,13 @@ func NewEngineMessageHandler(engine *engine.Engine, adapters *AdapterManager, op
 	return h
 }
 
+// Close releases resources held by the handler
+func (h *EngineMessageHandler) Close() {
+	if h.pendingStore != nil {
+		h.pendingStore.Stop()
+	}
+}
+
 // EngineMessageHandlerOption configures the EngineMessageHandler
 type EngineMessageHandlerOption func(*EngineMessageHandler)
 
@@ -1472,6 +1486,8 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 
 	// Create stream callback with injected dependencies
 	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, msg.Metadata, messageOps, sessionOps, turnState)
+	defer callback.Close() // Ensure processor resources are released
+
 	wrappedCallback := func(eventType string, data any) error {
 		return callback.Handle(eventType, data)
 	}
