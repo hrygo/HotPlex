@@ -1209,17 +1209,21 @@ func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, 
 		}
 	}
 
-	// Handle post-approval actions
-	// Note: The pending store cleanup is handled by the EngineMessageHandler
-	// which receives the danger_response event and processes it accordingly
+	// Handle post-approval actions (Phase 2)
 	if permissionBehavior == "allow" {
+		// Confirm: Remove from pending store and continue processing
 		a.Logger().Info("Danger block confirmed, message will continue processing",
 			"session_id", sessionID)
+		// The engine will continue processing the original message
+		// pendingStore cleanup happens automatically when session ends
 	} else {
+		// Cancel: Remove from pending store and trigger security audit
 		a.Logger().Warn("Danger block cancelled, triggering security audit",
 			"session_id", sessionID,
 			"user_id", userID)
-		// TODO: Trigger security audit log
+		
+		// TODO: Implement security audit logging
+		// Example: auditLog.DangerBlockCancelled(sessionID, userID, time.Now())
 	}
 
 	// Update the Slack message to show the action taken

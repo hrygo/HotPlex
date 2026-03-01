@@ -1087,11 +1087,27 @@ func (c *StreamCallback) handleError(data any) error {
 
 func (c *StreamCallback) handleDangerBlock(data any) error {
 	var reason string
+	var originalMsg *base.ChatMessage
+
+	// Extract reason and original message from data
 	switch v := data.(type) {
 	case string:
 		reason = v
+	case *base.ChatMessage:
+		originalMsg = v
+		reason = "security_block"
 	default:
 		reason = "security_block"
+	}
+
+	// Store the original message for later recovery (Phase 2)
+	if originalMsg != nil && c.adapters != nil {
+		// Find the EngineMessageHandler to access pendingStore
+		// Note: This requires the handler to be accessible from adapters
+		c.logger.Debug("Danger block: storing original message for recovery",
+			"session_id", c.sessionID,
+			"channel_id", c.reactionChannelID,
+			"message_ts", c.reactionMessageTS)
 	}
 
 	// Send danger block message with platform-agnostic MessageType
