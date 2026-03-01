@@ -19,7 +19,7 @@ func TestZoneOrderProcessor_AnnotatesZoneIndex(t *testing.T) {
 		{"tool_use", ZoneAction},
 		{"tool_result", ZoneAction},
 		{"permission_request", ZoneAction},
-		{"session_start", ZoneAction},
+		{"session_start", ZoneInitialization},
 		{"answer", ZoneOutput},
 		{"error", ZoneOutput},
 		{"ask_user_question", ZoneOutput},
@@ -50,29 +50,21 @@ func TestZoneOrderProcessor_AnnotatesZoneIndex(t *testing.T) {
 	}
 }
 
-func TestZoneOrderProcessor_AnchorFirstThinking(t *testing.T) {
+func TestZoneOrderProcessor_MultipleThinkingEvents(t *testing.T) {
 	proc := NewZoneOrderProcessor(nil)
 
-	// First thinking event should be marked as anchor
-	msg1 := &base.ChatMessage{
-		Platform:  "slack",
-		SessionID: "s1",
-		Metadata:  map[string]any{"event_type": "thinking"},
-	}
-	result, _ := proc.Process(context.Background(), msg1)
-	if anchor, ok := result.Metadata["zone_anchor"].(bool); !ok || !anchor {
-		t.Error("First thinking event should have zone_anchor=true")
-	}
-
-	// Second thinking event should NOT have anchor
-	msg2 := &base.ChatMessage{
-		Platform:  "slack",
-		SessionID: "s1",
-		Metadata:  map[string]any{"event_type": "thinking"},
-	}
-	result2, _ := proc.Process(context.Background(), msg2)
-	if _, ok := result2.Metadata["zone_anchor"]; ok {
-		t.Error("Second thinking event should NOT have zone_anchor")
+	// Multiple thinking events should all get zone_index=0
+	for i := 0; i < 3; i++ {
+		msg := &base.ChatMessage{
+			Platform:  "slack",
+			SessionID: "s1",
+			Metadata:  map[string]any{"event_type": "thinking"},
+		}
+		result, _ := proc.Process(context.Background(), msg)
+		got, ok := result.Metadata["zone_index"].(int)
+		if !ok || got != ZoneThinking {
+			t.Errorf("thinking event %d: zone_index=%d, want %d", i, got, ZoneThinking)
+		}
 	}
 }
 
@@ -109,15 +101,16 @@ func TestZoneOrderProcessor_ResetSession(t *testing.T) {
 	// Reset the session
 	proc.ResetSession("slack", "s1")
 
-	// Next thinking should be anchor again
+	// After reset, thinking should still get zone_index=0
 	msg2 := &base.ChatMessage{
 		Platform:  "slack",
 		SessionID: "s1",
 		Metadata:  map[string]any{"event_type": "thinking"},
 	}
 	result, _ := proc.Process(context.Background(), msg2)
-	if anchor, ok := result.Metadata["zone_anchor"].(bool); !ok || !anchor {
-		t.Error("After reset, first thinking should be anchor again")
+	got, ok := result.Metadata["zone_index"].(int)
+	if !ok || got != ZoneThinking {
+		t.Errorf("After reset: zone_index=%d, want %d", got, ZoneThinking)
 	}
 }
 
@@ -135,15 +128,12 @@ func TestZoneOrderProcessor_TurnBoundaryReset(t *testing.T) {
 	proc := NewZoneOrderProcessor(nil)
 	ctx := context.Background()
 
-	// Turn 1: thinking (anchor) → session_stats (Turn end)
+	// Turn 1: thinking → session_stats (Turn end)
 	msg1 := &base.ChatMessage{
 		Platform: "slack", SessionID: "s1",
 		Metadata: map[string]any{"event_type": "thinking"},
 	}
-	result1, _ := proc.Process(ctx, msg1)
-	if anchor, ok := result1.Metadata["zone_anchor"].(bool); !ok || !anchor {
-		t.Fatal("Turn 1: first thinking should be anchor")
-	}
+	_, _ = proc.Process(ctx, msg1)
 
 	stats := &base.ChatMessage{
 		Platform: "slack", SessionID: "s1",
@@ -151,13 +141,14 @@ func TestZoneOrderProcessor_TurnBoundaryReset(t *testing.T) {
 	}
 	_, _ = proc.Process(ctx, stats)
 
-	// Turn 2: thinking should get anchor again (state was reset)
+	// Turn 2: thinking should still get zone_index=0
 	msg2 := &base.ChatMessage{
 		Platform: "slack", SessionID: "s1",
 		Metadata: map[string]any{"event_type": "thinking"},
 	}
 	result2, _ := proc.Process(ctx, msg2)
-	if anchor, ok := result2.Metadata["zone_anchor"].(bool); !ok || !anchor {
-		t.Fatal("Turn 2: first thinking after session_stats should be anchor again")
+	got, ok := result2.Metadata["zone_index"].(int)
+	if !ok || got != ZoneThinking {
+		t.Errorf("Turn 2: zone_index=%d, want %d", got, ZoneThinking)
 	}
 }

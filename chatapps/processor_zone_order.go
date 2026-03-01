@@ -4,26 +4,32 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
 )
 
 // Zone indices – fixed ordering for message areas.
 const (
-	ZoneThinking = 0 // Thinking Zone (思考区)
-	ZoneAction   = 1 // Action Zone (行动区)
-	ZoneOutput   = 2 // Output Zone (展示区)
-	ZoneSummary  = 3 // Summary Zone (总结区)
+	ZoneInitialization = 0 // Initialization Zone (初始化) - session_start, engine_starting
+	ZoneThinking       = 1 // Thinking Zone (思考区) - thinking, plan_mode
+	ZoneAction         = 2 // Action Zone (行动区) - tool_use, tool_result, etc.
+	ZoneOutput         = 3 // Output Zone (展示区) - answer, ask_user_question
+	ZoneSummary        = 4 // Summary Zone (总结区) - session_stats
 )
 
 // eventToZone maps event_type strings to their zone index.
 // Events not in this map are allowed through without zone enforcement.
 var eventToZone = map[string]int{
-	// Zone 0 – Thinking
+	// Zone 0 – Initialization
+	"session_start":   ZoneInitialization,
+	"engine_starting": ZoneInitialization,
+
+	// Zone 1 – Thinking
 	"thinking":  ZoneThinking,
 	"plan_mode": ZoneThinking,
 
-	// Zone 1 – Action
+	// Zone 2 – Action
 	"tool_use":           ZoneAction,
 	"tool_result":        ZoneAction,
 	"permission_request": ZoneAction,
@@ -32,16 +38,14 @@ var eventToZone = map[string]int{
 	"command_complete":   ZoneAction,
 	"step_start":         ZoneAction,
 	"step_finish":        ZoneAction,
-	"session_start":      ZoneAction,
-	"engine_starting":    ZoneAction,
 
-	// Zone 2 – Output
+	// Zone 3 – Output
 	"answer":            ZoneOutput,
 	"ask_user_question": ZoneOutput,
 	"error":             ZoneOutput,
 	"exit_plan_mode":    ZoneOutput,
 
-	// Zone 3 – Summary
+	// Zone 4 – Summary
 	"session_stats": ZoneSummary,
 }
 
@@ -51,15 +55,27 @@ var eventToZone = map[string]int{
 // allowed through (late arrival is better than lost messages).
 type ZoneOrderProcessor struct {
 	logger *slog.Logger
-	// Per-session tracking of highest zone seen so far.
+	// Per-session tracking for initialization synchronization.
 	// Key: platform:sessionID
 	sessions map[string]*zoneState
 	mu       sync.Mutex
 }
 
 type zoneState struct {
-	highestZone int  // Highest zone index seen so far
-	anchorSet   bool // Whether Zone 0 anchor (first thinking msg) has been recorded
+	initReceived chan struct{}
+	once         sync.Once
+}
+
+func newZoneState() *zoneState {
+	return &zoneState{
+		initReceived: make(chan struct{}),
+	}
+}
+
+func (s *zoneState) markInitReceived() {
+	s.once.Do(func() {
+		close(s.initReceived)
+	})
 }
 
 // NewZoneOrderProcessor creates a new ZoneOrderProcessor.
@@ -85,7 +101,7 @@ func (p *ZoneOrderProcessor) Order() int {
 
 // Process validates zone ordering. It annotates messages with their zone index
 // in metadata for downstream processors (e.g., aggregator) to use.
-func (p *ZoneOrderProcessor) Process(_ context.Context, msg *base.ChatMessage) (*base.ChatMessage, error) {
+func (p *ZoneOrderProcessor) Process(ctx context.Context, msg *base.ChatMessage) (*base.ChatMessage, error) {
 	if msg == nil || msg.Metadata == nil {
 		return msg, nil
 	}
@@ -93,7 +109,6 @@ func (p *ZoneOrderProcessor) Process(_ context.Context, msg *base.ChatMessage) (
 	eventType, _ := msg.Metadata["event_type"].(string)
 	zone, known := eventToZone[eventType]
 	if !known {
-		// Unknown events pass through without zone enforcement.
 		return msg, nil
 	}
 
@@ -105,35 +120,34 @@ func (p *ZoneOrderProcessor) Process(_ context.Context, msg *base.ChatMessage) (
 	p.mu.Lock()
 	state, exists := p.sessions[sessionKey]
 	if !exists {
-		state = &zoneState{highestZone: -1}
+		state = newZoneState()
 		p.sessions[sessionKey] = state
 	}
 
-	// Track highest zone seen.
-	if zone > state.highestZone {
-		state.highestZone = zone
+	// If this is initialization, mark it and proceed immediately.
+	if zone == ZoneInitialization {
+		state.markInitReceived()
+		p.mu.Unlock()
+		return msg, nil
 	}
 
-	// Track Index 0 anchor for Thinking Zone.
-	if zone == ZoneThinking && !state.anchorSet {
-		state.anchorSet = true
-		msg.Metadata["zone_anchor"] = true // Mark as anchor – should never be evicted.
-	}
-
-	// Auto-reset on Turn boundary: session_stats marks end of a Turn.
-	// Reset AFTER processing this event so the next Turn starts clean.
-	if eventType == "session_stats" {
-		state.highestZone = -1
-		state.anchorSet = false
-	}
-
+	// session_stats marks turn end; initialization state persists until session ends.
 	p.mu.Unlock()
 
-	// Log zone transitions for debugging.
-	p.logger.Debug("Zone order check",
-		"event_type", eventType,
-		"zone", zone,
-		"session_key", sessionKey)
+	// For all other zones, wait briefly for Initialization.
+	// This ensures "Starting session" always appears at the top.
+	select {
+	case <-state.initReceived:
+		// Initialization arrived, proceed.
+	case <-time.After(500 * time.Millisecond):
+		// Safety timeout, proceed anyway.
+		p.logger.Debug("Zone order: timeout waiting for initialization",
+			"event_type", eventType,
+			"session", sessionKey)
+	case <-ctx.Done():
+		// Context cancelled, stop waiting.
+		return nil, ctx.Err()
+	}
 
 	return msg, nil
 }

@@ -72,10 +72,13 @@ func (c *ProcessorChain) Process(ctx context.Context, msg *base.ChatMessage) (*b
 		return nil, nil
 	}
 
-	c.mu.RLock()
-	processors := make([]MessageProcessor, len(c.processors))
-	copy(processors, c.processors)
-	c.mu.RUnlock()
+	processors := func() []MessageProcessor {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		res := make([]MessageProcessor, len(c.processors))
+		copy(res, c.processors)
+		return res
+	}()
 
 	current := msg
 	for _, processor := range processors {
@@ -90,6 +93,23 @@ func (c *ProcessorChain) Process(ctx context.Context, msg *base.ChatMessage) (*b
 		}
 	}
 	return current, nil
+}
+
+// ResetSession propagate session reset to all processors that support it
+func (c *ProcessorChain) ResetSession(platform, sessionID string) {
+	processors := func() []MessageProcessor {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		res := make([]MessageProcessor, len(c.processors))
+		copy(res, c.processors)
+		return res
+	}()
+
+	for _, p := range processors {
+		if r, ok := p.(interface{ ResetSession(string, string) }); ok {
+			r.ResetSession(platform, sessionID)
+		}
+	}
 }
 
 // sortProcessors sorts processors by Order() - not thread-safe, caller must hold lock

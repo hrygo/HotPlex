@@ -24,10 +24,11 @@ type ZoneConfig struct {
 
 // zoneConfigs maps zone index to its configuration.
 var zoneConfigs = map[int]ZoneConfig{
-	ZoneThinking: {MaxMsgs: 5, MaxBytes: 1500}, // 思考区: 5 messages, 1500 bytes
-	ZoneAction:   {MaxMsgs: 8, MaxBytes: 2000}, // 行动区: 8 messages, 2000 bytes
-	ZoneOutput:   {MaxMsgs: 0, MaxBytes: 4000}, // 展示区: no msg limit, 4000 byte pages
-	ZoneSummary:  {MaxMsgs: 1, MaxBytes: 0},    // 总结区: only latest
+	ZoneInitialization: {MaxMsgs: 2, MaxBytes: 1000}, // 初始化: 2 messages (start + engine_starting)
+	ZoneThinking:       {MaxMsgs: 5, MaxBytes: 1500}, // 思考区: 5 messages
+	ZoneAction:         {MaxMsgs: 8, MaxBytes: 2000}, // 行动区: 8 messages
+	ZoneOutput:         {MaxMsgs: 0, MaxBytes: 4000}, // 展示区: no msg limit, 4000 byte pages
+	ZoneSummary:        {MaxMsgs: 1, MaxBytes: 0},    // 总结区: only latest
 }
 
 // EventConfig defines aggregation behavior for specific event types
@@ -281,34 +282,6 @@ func (p *MessageAggregatorProcessor) bufferMessage(_ context.Context, msg *base.
 		sessionKey = sessionKey + ":" + eventType
 	}
 
-	// Helper function to handle buffer overflow flush
-	// Returns the buffer after flush (may be nil or new)
-	handleOverflowFlush := func(buf *messageBuffer, overflowType string) *messageBuffer {
-		p.logger.Warn("Buffer overflow ("+overflowType+"), forcing flush",
-			"session_key", sessionKey)
-
-		// Record dropped metrics for overflow
-		for _, droppedMsg := range buf.messages {
-			droppedEventType, _ := droppedMsg.Metadata["event_type"].(string)
-			if droppedEventType == "" {
-				droppedEventType = "unknown"
-			}
-			MessagesDroppedTotal.WithLabelValues(droppedEventType, msg.Platform, "overflow").Inc()
-		}
-
-		// Stop the timer to prevent double flush
-		if buf.timer != nil {
-			buf.timer.Stop()
-		}
-
-		// Clear buffer messages (they will be dropped)
-		buf.messages = nil
-		buf.totalBytes = 0
-
-		// Return nil so a new buffer will be created
-		return nil
-	}
-
 	p.mu.Lock()
 
 	buf, exists := p.buffers[sessionKey]
@@ -332,37 +305,56 @@ func (p *MessageAggregatorProcessor) bufferMessage(_ context.Context, msg *base.
 
 	// Check buffer limits before adding new message
 	newMsgBytes := len(msg.Content)
-	needNewBuffer := false
 
 	// Get zone-aware limits (falls back to processor-level defaults)
 	zoneMsgs, zoneBytes := p.getZoneLimits(msg)
 
-	// Check message count limit (skip if 0 = unlimited)
+	// Sliding window: evict oldest messages when zone limit is reached
+	// This keeps the most recent N messages visible in the UI
 	if zoneMsgs > 0 && len(buf.messages) >= zoneMsgs {
-		buf = handleOverflowFlush(buf, "message count")
-		needNewBuffer = true
-	}
-
-	// Check byte limit (only if we still have a buffer and limit is set)
-	if buf != nil && zoneBytes > 0 && buf.totalBytes+newMsgBytes > zoneBytes {
-		buf = handleOverflowFlush(buf, "bytes")
-		needNewBuffer = true
-	}
-
-	// Create new buffer if needed
-	if needNewBuffer || buf == nil {
-		buf = &messageBuffer{
-			messages:   make([]*base.ChatMessage, 0, 10),
-			createdAt:  time.Now(),
-			done:       make(chan *base.ChatMessage, 1),
-			eventType:  eventType,
-			messageTS:  "",
-			totalBytes: 0,
+		// Evict oldest message to make room
+		evicted := buf.messages[0]
+		buf.messages = buf.messages[1:]
+		evictedBytes := len(evicted.Content)
+		buf.totalBytes -= evictedBytes
+		if buf.totalBytes < 0 {
+			buf.totalBytes = 0
 		}
-		buf.timer = time.AfterFunc(p.window, func() {
-			p.flushBufferByTimer(sessionKey)
-		})
-		p.buffers[sessionKey] = buf
+
+		// Record eviction metrics
+		evictedEventType := "unknown"
+		if evicted.Metadata != nil {
+			if et, ok := evicted.Metadata["event_type"].(string); ok && et != "" {
+				evictedEventType = et
+			}
+		}
+		MessagesDroppedTotal.WithLabelValues(evictedEventType, msg.Platform, "sliding_window").Inc()
+
+		p.logger.Debug("Sliding window eviction (message count)",
+			"session_key", sessionKey,
+			"evicted_bytes", evictedBytes,
+			"remaining_msgs", len(buf.messages))
+	}
+
+	// Sliding window for byte limit: evict oldest until under threshold
+	if zoneBytes > 0 {
+		for len(buf.messages) > 0 && buf.totalBytes+newMsgBytes > zoneBytes {
+			evicted := buf.messages[0]
+			buf.messages = buf.messages[1:]
+			evictedBytes := len(evicted.Content)
+			buf.totalBytes -= evictedBytes
+			if buf.totalBytes < 0 {
+				buf.totalBytes = 0
+			}
+
+			evictedEventType := "unknown"
+			if evicted.Metadata != nil {
+				if et, ok := evicted.Metadata["event_type"].(string); ok && et != "" {
+					evictedEventType = et
+				}
+			}
+			MessagesDroppedTotal.WithLabelValues(evictedEventType, msg.Platform, "sliding_window_bytes").Inc()
+		}
 	}
 
 	// Capture messageTS from first message if use_update is enabled
@@ -631,6 +623,34 @@ func (p *MessageAggregatorProcessor) mergeRichContent(messages []*base.ChatMessa
 	}
 
 	return merged
+}
+
+// ResetSession clears all buffers for a specific session.
+func (p *MessageAggregatorProcessor) ResetSession(platform, sessionID string) {
+	sessionKey := platform + ":" + sessionID
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	buf, exists := p.buffers[sessionKey]
+	if !exists {
+		return
+	}
+
+	if buf.timer != nil {
+		buf.timer.Stop()
+	}
+
+	// Record dropped messages
+	for _, msg := range buf.messages {
+		eventType, _ := msg.Metadata["event_type"].(string)
+		if eventType == "" {
+			eventType = "unknown"
+		}
+		MessagesDroppedTotal.WithLabelValues(eventType, msg.Platform, "reset").Inc()
+	}
+
+	delete(p.buffers, sessionKey)
+	p.logger.Debug("Message aggregator: session buffers cleared", "platform", platform, "session_id", sessionID)
 }
 
 // Stop stops the aggregator and cleans up buffers
