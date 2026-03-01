@@ -531,7 +531,6 @@ func (c *StreamCallback) scheduleDeleteStartingMessage() {
 	})
 }
 
-const maxSlidingMessages = 5
 
 // trackMessage records a message for sliding window management and final cleanup.
 func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
