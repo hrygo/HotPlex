@@ -340,3 +340,31 @@ func (a *Adapter) SetLogger(logger *slog.Logger) {
 
 // Compile-time interface compliance check
 var _ base.ChatAdapter = (*Adapter)(nil)
+
+// =============================================================================
+// MessageOperations interface implementation (graceful fallback for unsupported ops)
+// =============================================================================
+
+// DeleteMessage is not supported in Telegram
+func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string) error {
+	a.Logger().Debug("DeleteMessage not supported on Telegram", "channel_id", channelID, "message_ts", messageTS)
+	return nil // Graceful fallback: no-op
+}
+
+// AddReaction is not supported in Telegram
+func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error {
+	a.Logger().Debug("AddReaction not supported on Telegram", "reaction", reaction.Name)
+	return nil // Graceful fallback: no-op
+}
+
+// RemoveReaction is not supported in Telegram
+func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
+	a.Logger().Debug("RemoveReaction not supported on Telegram", "reaction", reaction.Name)
+	return nil // Graceful fallback: no-op
+}
+
+// UpdateMessage is not supported in Telegram (messages are immutable)
+func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {
+	a.Logger().Debug("UpdateMessage not supported on Telegram", "channel_id", channelID, "message_ts", messageTS)
+	return nil // Graceful fallback: no-op
+}

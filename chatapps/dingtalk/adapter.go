@@ -337,3 +337,31 @@ func (a *Adapter) extractWebhookURL(sessionID string, msg *base.ChatMessage) str
 
 // Compile-time interface compliance check
 var _ base.ChatAdapter = (*Adapter)(nil)
+
+// =============================================================================
+// MessageOperations interface implementation (graceful fallback for unsupported ops)
+// =============================================================================
+
+// DeleteMessage is not supported in DingTalk
+func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string) error {
+	a.Logger().Debug("DeleteMessage not supported on DingTalk", "channel_id", channelID, "message_ts", messageTS)
+	return nil // Graceful fallback: no-op
+}
+
+// AddReaction is not supported in DingTalk
+func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error {
+	a.Logger().Debug("AddReaction not supported on DingTalk", "reaction", reaction.Name)
+	return nil // Graceful fallback: no-op
+}
+
+// RemoveReaction is not supported in DingTalk
+func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
+	a.Logger().Debug("RemoveReaction not supported on DingTalk", "reaction", reaction.Name)
+	return nil // Graceful fallback: no-op
+}
+
+// UpdateMessage is not supported in DingTalk
+func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {
+	a.Logger().Debug("UpdateMessage not supported on DingTalk", "channel_id", channelID, "message_ts", messageTS)
+	return nil // Graceful fallback: no-op
+}

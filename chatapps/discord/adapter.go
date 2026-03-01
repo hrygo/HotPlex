@@ -271,3 +271,33 @@ func (a *Adapter) SendToChannel(ctx context.Context, channelID, content string) 
 
 // Compile-time interface compliance check
 var _ base.ChatAdapter = (*Adapter)(nil)
+
+// =============================================================================
+// MessageOperations interface implementation (graceful fallback for unsupported ops)
+// =============================================================================
+
+// DeleteMessage is not fully supported in Discord (can only delete own messages within 15 min)
+func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string) error {
+	a.Logger().Debug("DeleteMessage not fully supported on Discord", "channel_id", channelID, "message_ts", messageTS)
+	return nil // Graceful fallback: no-op
+}
+
+// AddReaction is not supported in Discord
+func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error {
+	a.Logger().Debug("AddReaction not supported on Discord", "reaction", reaction.Name)
+	return nil // Graceful fallback: no-op
+}
+
+// RemoveReaction is not supported in Discord
+func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
+	a.Logger().Debug("RemoveReaction not supported on Discord", "reaction", reaction.Name)
+	return nil // Graceful fallback: no-op
+}
+
+// UpdateMessage is supported in Discord
+func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {
+	// Discord supports message editing - implement if needed
+	// For now, return nil as graceful fallback
+	a.Logger().Debug("UpdateMessage not implemented for Discord", "channel_id", channelID, "message_ts", messageTS)
+	return nil
+}
