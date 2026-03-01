@@ -18,13 +18,14 @@ cp $GITHUB_ASSETS/hotplex-logo.png $DOC_IMAGES_PNG/logo.png
 
 echo "2/4: 生成 Open Graph 社交预览图 (1200x630)..."
 # 使用透明背景或根据需要设置背景 (这里维持 SSOT 逻辑)
-magick -size 1200x630 xc:"#FFFFFF" \
+# Note: 使用 `convert` 命令兼容 ImageMagick 6.x (Ubuntu 24.04 默认版本)
+convert -size 1200x630 xc:"#FFFFFF" \
   \( $GITHUB_ASSETS/hotplex-logo.png -resize 600x600 \) \
   -gravity center -composite \
   $GITHUB_ASSETS/hotplex-og.png
 
 echo "3/4: 生成多尺寸 favicon.ico..."
-magick -background none $GITHUB_ASSETS/hotplex-logo.png -define icon:auto-resize=256,128,64,48,32,16 $GITHUB_ASSETS/favicon.ico
+convert -background none $GITHUB_ASSETS/hotplex-logo.png -define icon:auto-resize=256,128,64,48,32,16 $GITHUB_ASSETS/favicon.ico
 
 echo "4/4: 同步到文档站点演示目录..."
 # 同步源 SVG 到 public 根目录 (用于 site logo)
