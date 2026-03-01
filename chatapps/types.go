@@ -5,6 +5,53 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/event"
+	"github.com/hrygo/hotplex/types"
+)
+
+// Engine abstracts the engine functionality for dependency inversion
+type Engine interface {
+	Execute(ctx context.Context, cfg *types.Config, prompt string, callback event.Callback) error
+	GetSession(sessionID string) (Session, bool)
+	Close() error
+	GetSessionStats(sessionID string) *SessionStats
+	ValidateConfig(cfg *types.Config) error
+	StopSession(sessionID string, reason string) error
+	ResetSessionProvider(sessionID string)
+	SetDangerAllowPaths(paths []string)
+	SetDangerBypassEnabled(token string, enabled bool) error
+	SetAllowedTools(tools []string)
+	SetDisallowedTools(tools []string)
+	GetAllowedTools() []string
+	GetDisallowedTools() []string
+}
+
+// Session abstracts session state and operations
+type Session interface {
+	ID() string
+	Status() string
+	CreatedAt() time.Time
+}
+
+// SessionStats holds session statistics
+type SessionStats struct {
+	SessionID     string
+	Status        string
+	TotalTokens   int64
+	InputTokens   int64
+	OutputTokens  int64
+	CacheRead     int64
+	CacheWrite    int64
+	TotalCost     float64
+	Duration      time.Duration
+	ToolCallCount int
+	ErrorCount    int
+}
+
+// Re-export interfaces from base for convenience
+type (
+	MessageOperations = base.MessageOperations
+	SessionOperations = base.SessionOperations
 )
 
 type ParseMode = base.ParseMode

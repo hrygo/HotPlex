@@ -10,14 +10,118 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/chatapps/slack"
 	"github.com/hrygo/hotplex/engine"
+	intengine "github.com/hrygo/hotplex/internal/engine"
 	"github.com/hrygo/hotplex/event"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
 )
 
+// sessionWrapper wraps intengine.Session to implement chatapps.Session interface
+type sessionWrapper struct {
+	sess *intengine.Session
+}
+
+func (w *sessionWrapper) ID() string {
+	if w.sess == nil {
+		return ""
+	}
+	return w.sess.ID
+}
+
+func (w *sessionWrapper) Status() string {
+	if w.sess == nil {
+		return ""
+	}
+	return "active"
+}
+
+func (w *sessionWrapper) CreatedAt() time.Time {
+	if w.sess == nil {
+		return time.Time{}
+	}
+	return w.sess.CreatedAt
+}
+
+// engineWrapper wraps engine.Engine to implement chatapps.Engine interface
+type engineWrapper struct {
+	eng *engine.Engine
+}
+
+func (w *engineWrapper) Execute(ctx context.Context, cfg *types.Config, prompt string, callback event.Callback) error {
+	return w.eng.Execute(ctx, cfg, prompt, callback)
+}
+
+func (w *engineWrapper) GetSession(sessionID string) (Session, bool) {
+	sess, ok := w.eng.GetSession(sessionID)
+	if !ok || sess == nil {
+		return nil, false
+	}
+	return &sessionWrapper{sess: sess}, true
+}
+
+func (w *engineWrapper) Close() error {
+	return w.eng.Close()
+}
+
+func (w *engineWrapper) GetSessionStats(sessionID string) *SessionStats {
+	stats := w.eng.GetSessionStats(sessionID)
+	if stats == nil {
+		return nil
+	}
+	return &SessionStats{
+		SessionID:     stats.SessionID,
+		Status:        stats.SessionID,
+		TotalTokens:   int64(stats.InputTokens + stats.OutputTokens + stats.CacheReadTokens + stats.CacheWriteTokens),
+		InputTokens:   int64(stats.InputTokens),
+		OutputTokens:  int64(stats.OutputTokens),
+		CacheRead:     int64(stats.CacheReadTokens),
+		CacheWrite:    int64(stats.CacheWriteTokens),
+		TotalCost:     0,
+		Duration:      time.Duration(stats.TotalDurationMs) * time.Millisecond,
+		ToolCallCount: int(stats.ToolCallCount),
+		ErrorCount:    0,
+	}
+}
+
+func (w *engineWrapper) ValidateConfig(cfg *types.Config) error {
+	return w.eng.ValidateConfig(cfg)
+}
+
+func (w *engineWrapper) StopSession(sessionID string, reason string) error {
+	return w.eng.StopSession(sessionID, reason)
+}
+
+func (w *engineWrapper) ResetSessionProvider(sessionID string) {
+	w.eng.ResetSessionProvider(sessionID)
+}
+
+func (w *engineWrapper) SetDangerAllowPaths(paths []string) {
+	w.eng.SetDangerAllowPaths(paths)
+}
+
+func (w *engineWrapper) SetDangerBypassEnabled(token string, enabled bool) error {
+	return w.eng.SetDangerBypassEnabled(token, enabled)
+}
+
+func (w *engineWrapper) SetAllowedTools(tools []string) {
+	w.eng.SetAllowedTools(tools)
+}
+
+func (w *engineWrapper) SetDisallowedTools(tools []string) {
+	w.eng.SetDisallowedTools(tools)
+}
+
+func (w *engineWrapper) GetAllowedTools() []string {
+	return w.eng.GetAllowedTools()
+}
+
+func (w *engineWrapper) GetDisallowedTools() []string {
+	return w.eng.GetDisallowedTools()
+}
+
 // EngineHolder holds the Engine instance and configuration for ChatApps integration
 type EngineHolder struct {
-	engine           *engine.Engine
+	engine           Engine
 	logger           *slog.Logger
 	adapters         *AdapterManager
 	defaultWorkDir   string
@@ -53,8 +157,11 @@ func NewEngineHolder(opts EngineHolderOptions) (*EngineHolder, error) {
 		return nil, fmt.Errorf("create engine: %w", err)
 	}
 
+	// Wrap engine.Engine to implement chatapps.Engine interface
+	wrappedEngine := &engineWrapper{eng: eng}
+
 	return &EngineHolder{
-		engine:           eng,
+		engine:           wrappedEngine,
 		logger:           logger,
 		adapters:         opts.Adapters,
 		defaultWorkDir:   opts.DefaultWorkDir,
@@ -77,7 +184,7 @@ type EngineHolderOptions struct {
 }
 
 // GetEngine returns the underlying Engine instance
-func (h *EngineHolder) GetEngine() *engine.Engine {
+func (h *EngineHolder) GetEngine() Engine {
 	return h.engine
 }
 
