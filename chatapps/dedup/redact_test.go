@@ -1,6 +1,7 @@
 package dedup
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -58,5 +59,43 @@ func BenchmarkRedactSensitiveData(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		RedactSensitiveData(input)
+	}
+}
+
+func TestRedactSensitiveData_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains string // Should contain this (redacted)
+	}{
+		{
+			name:     "Token at start",
+			input:    "xoxb-abc def",
+			contains: "xoxb-***REDACTED***",
+		},
+		{
+			name:     "Token at end",
+			input:    "def xoxb-abc",
+			contains: "xoxb-***REDACTED***",
+		},
+		{
+			name:     "Token in middle",
+			input:    "def xoxb-abc ghi",
+			contains: "xoxb-***REDACTED***",
+		},
+		{
+			name:     "Token with quotes",
+			input:    `"xoxb-abc"`,
+			contains: "xoxb-***REDACTED***",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := RedactSensitiveData(tt.input)
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("RedactSensitiveData(%q) should contain %q, got %q", tt.input, tt.contains, result)
+			}
+		})
 	}
 }
