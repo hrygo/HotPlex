@@ -135,6 +135,9 @@ func setupPlatform(
 	// Only adapters that implement EngineSupport will receive the engine
 	if engineSupport, ok := adapter.(base.EngineSupport); ok {
 		engineSupport.SetEngine(eng)
+		logger.Debug("Engine injected", "platform", platform)
+	} else {
+		logger.Debug("Adapter does not implement EngineSupport", "platform", platform)
 	}
 
 	// 3. Create EngineMessageHandler
