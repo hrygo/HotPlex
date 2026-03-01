@@ -88,7 +88,14 @@ convert_svg() {
     cmd="$cmd -o \"$output_file\" \"$svg_file\""
 
     echo -e "  ${BLUE}→${NC} $filename"
-    eval $cmd
+    # Execute and capture error without exiting script
+    if ! eval $cmd 2>/tmp/svg_err; then
+        echo -e "  ${RED}⚠ Warning:${NC} Failed to convert $filename. Skipping..."
+        if [ -s /tmp/svg_err ]; then
+            echo -e "    ${RED}Error:${NC} $(cat /tmp/svg_err)"
+        fi
+        return 0
+    fi
 }
 
 # Main
