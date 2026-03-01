@@ -1852,11 +1852,11 @@ func (a *Adapter) PostEphemeralSDK(ctx context.Context, channelID, userID, text 
 
 // Compile-time interface compliance checks
 var (
-	_ base.ChatAdapter        = (*Adapter)(nil)
-	_ base.EngineSupport      = (*Adapter)(nil)
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.EngineSupport     = (*Adapter)(nil)
 	_ base.MessageOperations = (*Adapter)(nil)
 	_ base.SessionOperations = (*Adapter)(nil)
-	_ base.WebhookProvider     = (*Adapter)(nil)
+	_ base.WebhookProvider   = (*Adapter)(nil)
 )
 
 // MessageOperations implementation for Slack

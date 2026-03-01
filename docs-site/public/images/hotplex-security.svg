@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 350" width="100%" height="100%">
+  <defs>
+    <style>
+      .font-main { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .font-code { font-family: monospace; font-size: 13px; }
+      
+      .box { fill: #fff; stroke-width: 2; stroke: #e1e4e8; }
+      .sandbox { fill: rgba(225, 228, 232, 0.3); stroke: #24292e; stroke-width: 3; stroke-dasharray: 8; }
+      .waf { fill: #fff; stroke: #d73a49; stroke-width: 3; }
+      
+      @keyframes moveMalicious {
+        0% { transform: translateX(0); opacity: 1; }
+        45% { transform: translateX(200px); opacity: 1; }
+        50% { transform: translateX(230px); opacity: 0; }
+        100% { transform: translateX(230px); opacity: 0; }
+      }
+      
+      @keyframes moveSafe {
+        0% { transform: translateX(0); opacity: 0; }
+        50% { transform: translateX(0); opacity: 0; }
+        55% { transform: translateX(0); opacity: 1; }
+        100% { transform: translateX(450px); opacity: 1; }
+      }
+      
+      @keyframes pulseWAF {
+        0%, 45%, 55%, 100% { filter: drop-shadow(0 0 0 rgba(215,58,73,0)); }
+        50% { filter: drop-shadow(0 0 15px rgba(215,58,73,1)); }
+      }
+
+      .packet-red { fill: #d73a49; animation: moveMalicious 4s infinite; }
+      .packet-green { fill: #28a745; animation: moveSafe 4s infinite; }
+      .waf-group { animation: pulseWAF 4s infinite; }
+    </style>
+  </defs>
+
+  <line x1="150" y1="175" x2="650" y2="175" stroke="#e1e4e8" stroke-width="4" stroke-linecap="round" />
+
+  <rect x="50" y="135" width="120" height="80" rx="8" class="box" />
+  <text x="110" y="170" text-anchor="middle" class="font-main" style="font-weight:bold; font-size:16px; fill:#24292e;">Engine</text>
+  <text x="110" y="190" text-anchor="middle" class="font-code" style="fill:#666;">Execute()</text>
+
+  <g class="waf-group">
+    <rect x="330" y="115" width="140" height="120" rx="8" class="waf" />
+    <path d="M 385 145 L 400 135 L 415 145 L 415 165 C 415 180 400 190 400 190 C 400 190 385 180 385 165 Z" fill="#d73a49" />
+    <text x="400" y="210" text-anchor="middle" class="font-main" style="font-weight:bold; fill:#d73a49; font-size:14px;">Danger WAF</text>
+    <text x="400" y="225" text-anchor="middle" class="font-code" style="fill:#d73a49; font-size:10px;">Regex Auditing</text>
+  </g>
+
+  <rect x="580" y="75" width="280" height="200" rx="12" class="sandbox" />
+  <text x="720" y="105" text-anchor="middle" class="font-main" style="font-weight:bold; font-size:16px;">PGID Hard Isolation</text>
+  <text x="720" y="125" text-anchor="middle" class="font-code" style="fill:#666;">Session: "user_123"</text>
+  
+  <rect x="640" y="145" width="160" height="50" rx="8" class="box" style="stroke: #24292e;" />
+  <text x="720" y="175" text-anchor="middle" class="font-code" style="font-weight:bold;">Agent Process</text>
+  
+  <rect x="670" y="215" width="100" height="30" rx="8" class="box" stroke-dasharray="4" />
+  <text x="720" y="235" text-anchor="middle" class="font-code" style="font-size:11px;">Child Script</text>
+  <path d="M 720 195 L 720 215" stroke="#24292e" stroke-width="2" fill="none" />
+
+  <g class="packet-red" transform="translate(0, 0)">
+    <circle cx="170" cy="175" r="15" />
+    <text x="170" y="145" text-anchor="middle" class="font-code" style="fill:#d73a49; font-weight:bold;">rm -rf /</text>
+  </g>
+
+  <g class="packet-green" transform="translate(0, 0)">
+    <circle cx="170" cy="175" r="15" />
+    <text x="170" y="145" text-anchor="middle" class="font-code" style="fill:#28a745; font-weight:bold;">Safe Prompt</text>
+  </g>
+</svg>

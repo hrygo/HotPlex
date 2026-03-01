@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800" width="1000" height="800">
+  <defs>
+    <style>
+      .bg { fill: #f8f9fa; }
+      .layer-bg { fill: #ffffff; stroke: #e1e4e8; stroke-width: 2; }
+      .layer-sandbox { fill: #f1f3f5; stroke: #cfd4da; stroke-width: 2; }
+      .box { rx: 8; fill: #fff; stroke-width: 2; stroke: #e1e4e8; }
+      
+      /* New Branding Accent Colors */
+      .box-accent { fill: rgba(88, 166, 255, 0.05); stroke: #58A6FF; stroke-width: 2; rx: 8; }
+      .box-amber { fill: rgba(255, 171, 112, 0.05); stroke: #FFAB70; stroke-width: 2; rx: 8; }
+      .box-success { fill: rgba(40, 167, 69, 0.05); stroke: #28a745; stroke-width: 2; rx: 8; }
+      .box-warning { fill: rgba(248, 81, 73, 0.05); stroke: #F85149; stroke-width: 2; rx: 8; }
+      .box-purple { fill: rgba(210, 168, 255, 0.05); stroke: #D2A8FF; stroke-width: 2; rx: 8; }
+      
+      .text-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: bold; font-size: 22px; fill: #24292e; }
+      .text-layer { font-family: -apple-system, sans-serif; font-weight: bold; font-size: 16px; fill: #586069; }
+      .text-label { font-family: -apple-system, sans-serif; font-weight: bold; font-size: 14px; fill: #24292e; }
+      .text-sub { font-family: -apple-system, sans-serif; font-size: 12px; fill: #6a737d; }
+      .text-code { font-family: monospace; font-size: 12px; fill: #444; }
+      
+      .arrow { fill: none; stroke: #58A6FF; stroke-width: 2; stroke-linecap: round; }
+    </style>
+    <linearGradient id="hat-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#79C0FF" />
+      <stop offset="100%" stop-color="#58A6FF" />
+    </linearGradient>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#58A6FF" />
+    </marker>
+  </defs>
+
+  <rect width="100%" height="100%" class="bg" rx="16"/>
+  <text x="500" y="45" text-anchor="middle" class="text-title">
+    <tspan font-family="monospace" font-weight="900" font-size="28px" fill="#FFAB70">hot</tspan><tspan font-family="monospace" font-weight="900" font-size="28px" fill="#58A6FF">plex</tspan>
+    <tspan dy="-2"> System Topology</tspan>
+  </text>
+
+  <!-- Layer 1: Entrance Layer -->
+  <rect x="50" y="80" width="900" height="140" rx="12" class="layer-bg"/>
+  <text x="70" y="105" class="text-layer">1. Access &amp; Interface Layer</text>
+
+  <g transform="translate(80, 125)">
+    <rect width="200" height="70" rx="8" class="box-accent" />
+    <text x="100" y="30" text-anchor="middle" class="text-label" style="fill:#58A6FF">Multi-Language SDKs</text>
+    <text x="100" y="52" text-anchor="middle" class="text-code">Go | Python | TS</text>
+  </g>
+
+  <g transform="translate(300, 125)">
+    <rect width="200" height="70" rx="8" class="box-amber" />
+    <text x="100" y="30" text-anchor="middle" class="text-label" style="fill:#FFAB70">hotplex Proxy</text>
+    <text x="100" y="52" text-anchor="middle" class="text-sub">WS &amp; OpenCode HTTP</text>
+  </g>
+
+  <g transform="translate(520, 125)">
+    <rect width="200" height="70" rx="8" class="box-amber" />
+    <text x="100" y="30" text-anchor="middle" class="text-label" style="fill:#FFAB70">ChatApp (Slack)</text>
+    <text x="100" y="52" text-anchor="middle" class="text-sub">Socket Mode / Webhook</text>
+  </g>
+
+  <g transform="translate(740, 125)">
+    <rect width="180" height="70" rx="8" class="box-purple" />
+    <text x="90" y="30" text-anchor="middle" class="text-label" style="fill:#D2A8FF">Observability</text>
+    <text x="90" y="52" text-anchor="middle" class="text-code">/metrics | /health</text>
+  </g>
+
+  <!-- Layer 2: Core Engine -->
+  <rect x="50" y="240" width="900" height="340" rx="12" class="layer-bg"/>
+  <text x="70" y="265" class="text-layer">2. Core Orchestration Engine</text>
+
+  <g transform="translate(100, 300)">
+    <rect width="800" height="80" rx="8" class="box-accent" style="stroke-width: 3;"/>
+    <text x="400" y="35" text-anchor="middle" class="text-title" style="font-size: 18px; fill:#58A6FF">Engine (internal/engine/runner.go)</text>
+    <text x="400" y="60" text-anchor="middle" class="text-sub">The concrete implementation of HotPlexClient Contract</text>
+  </g>
+
+  <g transform="translate(100, 410)">
+    <rect width="170" height="140" rx="8" class="box-success" />
+    <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#28a745">SessionController</text>
+    <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#28a745" stroke-width="1"/>
+    <text x="85" y="102" text-anchor="middle" class="text-code">Process Pool &amp; GC</text>
+  </g>
+
+  <g transform="translate(310, 410)">
+    <rect width="170" height="140" rx="8" class="box-warning" />
+    <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#F85149">SafetyManager</text>
+    <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#F85149" stroke-width="1"/>
+    <text x="85" y="95" text-anchor="middle" class="text-code">Regex WAF</text>
+    <text x="85" y="110" text-anchor="middle" class="text-code">AllowList</text>
+  </g>
+
+  <g transform="translate(520, 410)">
+    <rect width="170" height="140" rx="8" class="box-purple" />
+    <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#D2A8FF">Event Hooks</text>
+    <rect x="15" y="75" width="140" height="45" rx="4" fill="#fff" stroke="#D2A8FF" stroke-width="1"/>
+    <text x="85" y="95" text-anchor="middle" class="text-code">Webhooks &amp; Audit</text>
+    <text x="85" y="110" text-anchor="middle" class="text-code">OTel Tracing</text>
+  </g>
+
+  <g transform="translate(730, 410)">
+    <rect width="170" height="140" rx="8" class="box-amber" />
+    <text x="85" y="30" text-anchor="middle" class="text-label" style="fill:#FFAB70">Provider</text>
+    <rect x="5" y="75" width="160" height="45" rx="4" fill="#fff" stroke="#FFAB70" stroke-width="1"/>
+    <text x="85" y="95" text-anchor="middle" class="text-code">Event Normalizer</text>
+    <text x="85" y="110" text-anchor="middle" class="text-code" style="font-weight: bold; fill: #FFAB70; font-size: 11px;">Claude Code | OpenCode</text>
+  </g>
+
+  <!-- Layer 3: OS Layer -->
+  <rect x="50" y="600" width="900" height="160" rx="12" class="layer-sandbox"/>
+  <text x="500" y="625" text-anchor="middle" class="text-layer">3. OS Process Layer (Isolated Sandbox)</text>
+
+  <g transform="translate(100, 650)">
+    <rect width="800" height="80" rx="10" fill="#fff" stroke="#212529" stroke-width="2" />
+    <text x="400" y="35" text-anchor="middle" class="text-title" style="fill:#212529; font-size: 18px;">OS Process Group (PGID)</text>
+    <text x="400" y="60" text-anchor="middle" class="text-sub" style="fill:#495057;">Node.js Runtime | Persistent SQLite Context</text>
+  </g>
+
+  <!-- Connecting Lines -->
+  <path d="M 180 230 L 830 230" class="arrow" />
+  <path d="M 180 195 L 180 230" class="arrow" />
+  <path d="M 400 195 L 400 230" class="arrow" />
+  <path d="M 620 195 L 620 230" class="arrow" />
+  <path d="M 830 195 L 830 230" class="arrow" />
+  <path d="M 500 230 L 500 295" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <path d="M 185 380 L 185 410" class="arrow" />
+  <path d="M 395 380 L 395 410" class="arrow" />
+  <path d="M 605 380 L 605 410" class="arrow" />
+  <path d="M 815 380 L 815 410" class="arrow" />
+
+  <path d="M 185 550 L 185 645" class="arrow" marker-end="url(#arrowhead)"/>
+  <path d="M 815 550 L 815 645" class="arrow" marker-end="url(#arrowhead)"/>
+</svg>

@@ -24,8 +24,12 @@ ZOOM=4
 BACKGROUND=""
 
 # Source directories (relative to project root)
-IMAGE_DIR="docs-site/public/images"
-PUBLIC_DIR="docs-site/public"
+SOURCE_DIR="docs/images"
+OUTPUT_DIR="docs/images/png"
+
+# Target directories for synchronization
+DOCS_SITE_PNG="docs-site/public/images/png"
+DOCS_SITE_PUBLIC="docs-site/public"
 GITHUB_ASSETS=".github/assets"
 
 # Colors for output (only if TTY)
@@ -103,47 +107,41 @@ main() {
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    # Convert docs-site/public/images/*.svg
-    if [ -d "$IMAGE_DIR" ]; then
-        echo -e "${BLUE}Converting diagram images...${NC}"
-        mkdir -p "${IMAGE_DIR}/png"
-        for svg_file in "$IMAGE_DIR"/*.svg; do
-            if [ -f "$svg_file" ]; then
-                local filename=$(basename "$svg_file" .svg)
-                convert_svg "$svg_file" "${IMAGE_DIR}/png/${filename}.png"
-                ((total++))
-            fi
+    # 1. 核心转换逻辑：docs/images/*.svg -> docs/images/png/*.png
+    if [ -d "$SOURCE_DIR" ]; then
+        echo -e "${BLUE}Generating high-res PNGs in $OUTPUT_DIR...${NC}"
+        mkdir -p "$OUTPUT_DIR"
+        for svg_file in "$SOURCE_DIR"/*.svg; do
+            [ -e "$svg_file" ] || continue
+            local filename=$(basename "$svg_file" .svg)
+            convert_svg "$svg_file" "${OUTPUT_DIR}/${filename}.png"
+            ((total++))
         done
         echo ""
     fi
 
-    # Convert docs-site/public/*.svg (logo, avatar)
-    if [ -d "$PUBLIC_DIR" ]; then
-        echo -e "${BLUE}Converting brand assets...${NC}"
-        for svg_file in "$PUBLIC_DIR"/*.svg; do
-            if [ -f "$svg_file" ]; then
-                local filename=$(basename "$svg_file" .svg)
-                convert_svg "$svg_file" "${PUBLIC_DIR}/${filename}.png"
-                ((total++))
-            fi
+    # 2. 同步到文档站点 (用于 Favicon/OG 或潜在的下载链接)
+    if [ -d "docs-site/public" ]; then
+        echo -e "${BLUE}Synchronizing assets to docs-site...${NC}"
+        
+        # 同步所有 SVG (SSOT)
+        mkdir -p "docs-site/public/images"
+        cp "$SOURCE_DIR"/*.svg "docs-site/public/images/"
+        
+        # 同步所有 PNG 预览图
+        mkdir -p "$DOCS_SITE_PNG"
+        cp "$OUTPUT_DIR"/*.png "$DOCS_SITE_PNG/"
+        
+        # 复制品牌核心资产到根目录
+        for asset in "logo.png" "author-avatar.png" "mascot_primary.png"; do
+            [ -f "$OUTPUT_DIR/$asset" ] && cp "$OUTPUT_DIR/$asset" "$DOCS_SITE_PUBLIC/"
         done
+        
+        echo -e "  ${GREEN}✓${NC} Assets synced to docs-site/public"
         echo ""
     fi
 
-    # Convert .github/assets/*.svg (social preview)
-    if [ -d "$GITHUB_ASSETS" ]; then
-        echo -e "${BLUE}Converting GitHub assets...${NC}"
-        for svg_file in "$GITHUB_ASSETS"/*.svg; do
-            if [ -f "$svg_file" ]; then
-                local filename=$(basename "$svg_file" .svg)
-                convert_svg "$svg_file" "${GITHUB_ASSETS}/${filename}.png"
-                ((total++))
-            fi
-        done
-        echo ""
-    fi
-
-    echo -e "${GREEN}✓ Done! $total files converted${NC}"
+    echo -e "${GREEN}✓ Success! $total files processed.${NC}"
     echo ""
 }
 

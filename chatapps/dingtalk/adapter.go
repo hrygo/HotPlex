@@ -337,8 +337,8 @@ func (a *Adapter) extractWebhookURL(sessionID string, msg *base.ChatMessage) str
 
 // Compile-time interface compliance checks
 var (
-	_ base.ChatAdapter            = (*Adapter)(nil)
-	_ base.MessageOperations      = (*Adapter)(nil)
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.MessageOperations = (*Adapter)(nil)
 )
 
 // =============================================================================

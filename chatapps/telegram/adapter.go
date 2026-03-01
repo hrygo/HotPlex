@@ -340,8 +340,8 @@ func (a *Adapter) SetLogger(logger *slog.Logger) {
 
 // Compile-time interface compliance checks
 var (
-	_ base.ChatAdapter            = (*Adapter)(nil)
-	_ base.MessageOperations      = (*Adapter)(nil)
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.MessageOperations = (*Adapter)(nil)
 )
 
 // =============================================================================

@@ -48,10 +48,17 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      - name: Sync Images from docs/images (SSOT)
+      - name: Install System Dependencies
         run: |
-          mkdir -p docs-site/public/images
-          cp -rp docs/images/* docs-site/public/images/
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin imagemagick python3-pip
+          pip3 install cairosvg --break-system-packages || pip3 install cairosvg
+
+      - name: Generate and Sync Assets (SSOT)
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/generate_assets.sh
+          ./scripts/svg2png.sh -z 4
 
       - name: Install dependencies
         working-directory: docs-site

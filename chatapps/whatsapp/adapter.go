@@ -240,8 +240,8 @@ func (a *Adapter) handleMessage(w http.ResponseWriter, r *http.Request) {
 
 // Compile-time interface compliance checks
 var (
-	_ base.ChatAdapter            = (*Adapter)(nil)
-	_ base.MessageOperations      = (*Adapter)(nil)
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.MessageOperations = (*Adapter)(nil)
 )
 
 // =============================================================================

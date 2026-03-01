@@ -271,8 +271,8 @@ func (a *Adapter) SendToChannel(ctx context.Context, channelID, content string) 
 
 // Compile-time interface compliance checks
 var (
-	_ base.ChatAdapter            = (*Adapter)(nil)
-	_ base.MessageOperations      = (*Adapter)(nil)
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.MessageOperations = (*Adapter)(nil)
 )
 
 // =============================================================================
