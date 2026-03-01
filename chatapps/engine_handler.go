@@ -588,8 +588,16 @@ func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
 }
 
 // enforceSlidingWindow deletes oldest messages when the limit is exceeded.
+// Uses turnState for concurrent turn support, falls back to legacy cleanupMsgRecords
 // NOTE: Caller must hold c.mu lock before calling this method
 func (c *StreamCallback) enforceSlidingWindow(zone int) {
+	// Use turnState if available (concurrent turn support)
+	if c.turnState != nil {
+		c.enforceSlidingWindowWithTurnState(zone)
+		return
+	}
+
+	// Legacy fallback
 	var zoneRecords []msgRecord
 	var otherRecords []msgRecord
 
@@ -645,9 +653,29 @@ func (c *StreamCallback) enforceSlidingWindow(zone int) {
 	}()
 }
 
+// enforceSlidingWindowWithTurnState enforces sliding window using turnState
+func (c *StreamCallback) enforceSlidingWindowWithTurnState(zone int) {
+	c.turnState.EnforceSlidingWindow(zone, func(rec eng.CleanupMsgRecord) {
+		if c.messageOps == nil {
+			return
+		}
+		go func() {
+			_ = c.messageOps.DeleteMessage(context.Background(), rec.ChannelID, rec.MessageTS)
+		}()
+	})
+}
+
 // scheduleDeleteActionMessages schedules 3-second delayed deletion
 // of all tracked Thinking and Action Zone messages.
+// Uses turnState for concurrent turn support, falls back to legacy cleanupMsgRecords
 func (c *StreamCallback) scheduleDeleteActionMessages() {
+	// Use turnState if available (concurrent turn support)
+	if c.turnState != nil {
+		c.scheduleDeleteActionMessagesWithTurnState()
+		return
+	}
+
+	// Legacy fallback
 	c.mu.Lock()
 	if len(c.cleanupMsgRecords) == 0 {
 		c.mu.Unlock()
@@ -656,6 +684,26 @@ func (c *StreamCallback) scheduleDeleteActionMessages() {
 	records := c.cleanupMsgRecords
 	c.cleanupMsgRecords = nil // Clear immediately
 	c.mu.Unlock()
+
+	time.AfterFunc(3*time.Second, func() {
+		if c.messageOps == nil {
+			c.logger.Debug("Message operations not supported", "platform", c.platform)
+			return
+		}
+		for _, rec := range records {
+			if err := c.messageOps.DeleteMessage(context.Background(), rec.ChannelID, rec.MessageTS); err != nil {
+				c.logger.Debug("Failed to delete tracked message", "ts", rec.MessageTS, "error", err)
+			}
+		}
+	})
+}
+
+// scheduleDeleteActionMessagesWithTurnState schedules deletion using turnState
+func (c *StreamCallback) scheduleDeleteActionMessagesWithTurnState() {
+	if c.turnState.Len() == 0 {
+		return
+	}
+	records := c.turnState.GetAllAndClear()
 
 	time.AfterFunc(3*time.Second, func() {
 		if c.messageOps == nil {
