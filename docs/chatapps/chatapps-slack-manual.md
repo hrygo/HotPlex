@@ -9,50 +9,67 @@
 这是最推荐的安装方式。你无需手动点击几十个按钮，只需复制以下代码即可一键配置。
 
 1.  访问 [Slack API 控制台](https://api.slack.com/apps) -> **Create New App** -> **From an app manifest**。
-2.  选择你的 Workspace，在 YAML 输入框中粘贴以下内容：
+2.  选择你的 Workspace，在 JSON 选项卡中粘贴以下内容：
 
-```yaml
-display_information:
-  name: HotPlex
-  description: HotPlex AI Agent
-  background_color: "#000000"
-features:
-  app_home:
-    home_tab_enabled: false
-    messages_tab_enabled: true
-    messages_tab_read_only_enabled: false
-  bot_user:
-    display_name: HotPlex
-    always_online: true
-  slash_commands:
-    - command: /reset
-      description: 重置当前会话上下文并冷启动
-      should_escape: false
-    - command: /dc
-      description: 强制终止后台 CLI 进程但保留进度
-      should_escape: false
-oauth_config:
-  scopes:
-    bot:
-      - app_mentions:read
-      - chat:write
-      - chat:write.public
-      - reactions:write
-      - im:history
-      - channels:history
-      - groups:history
-      - mpim:history
-      - files:write
-      - commands
-settings:
-  event_subscriptions:
-    bot_events:
-      - app_mention
-      - message.channels
-      - message.groups
-      - message.im
-  org_deploy_enabled: false
-  socket_mode_enabled: true
+```json
+{
+  "display_information": {
+    "name": "HotPlex",
+    "description": "HotPlex AI Agent",
+    "background_color": "#000000"
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": false,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "bot_user": {
+      "display_name": "HotPlex",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/reset",
+        "description": "重置当前会话上下文并冷启动",
+        "should_escape": false
+      },
+      {
+        "command": "/dc",
+        "description": "强制终止后台 CLI 进程但保留进度",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "chat:write",
+        "chat:write.public",
+        "reactions:write",
+        "im:history",
+        "channels:history",
+        "groups:history",
+        "mpim:history",
+        "files:write",
+        "commands"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "app_mention",
+        "message.channels",
+        "message.groups",
+        "message.im"
+      ]
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true
+  }
+}
 ```
 ---
 
@@ -62,64 +79,81 @@ settings:
 
 此版本开启了**App Home 主页控制台**、**深度的权限分离**以及**全功能的扩展命令**。
 
-```yaml
-display_information:
-  name: HotPlex (Governance)
-  description: Agentic Craw Layer & Execution Engine
-  background_color: "#1e293b" # Slate dark theme
-features:
-  app_home:
-    home_tab_enabled: true # [新增] 开启监控与治理主页
-    messages_tab_enabled: true
-    messages_tab_read_only_enabled: false
-  bot_user:
-    display_name: HotPlex Engine
-    always_online: true
-  slash_commands:
-    # 基础管控
-    - command: /reset
-      description: 彻底销毁当前 Session 的 PGID 及上下文
-      should_escape: false
-    - command: /dc
-      description: 对当前执行进程发送 SIGTERM (暂停执行)
-      should_escape: false
-    # [新增] 高级治理
-    - command: /pgid
-      description: 打印当前会话底层的 CPU/内存 及进程树状态
-      should_escape: false
-    - command: /approve
-      description: 批准挂起中的高危工具操作 (HITL 审批)
-      should_escape: false
-oauth_config:
-  scopes:
-    bot:
-      # 基础对话与消息流
-      - app_mentions:read
-      - chat:write
-      - chat:write.public
-      - reactions:write
-      - im:history
-      - channels:history
-      - groups:history
-      - mpim:history
-      - commands
-      # [新增] 双向文件注入与富产物回传
-      - files:read
-      - files:write
-      # [新增] 团队协作与主页互动
-      - users:read # 用于识别指令发起人身份 (HITL溯源)
-      - team:read  # 跨通道状态校验
-settings:
-  event_subscriptions:
-    bot_events:
-      - app_mention
-      - message.channels
-      - message.groups
-      - message.im
-      - app_home_opened # [新增] 触发为主界面渲染仪表盘
-  interactivity:
-    is_enabled: true
-  socket_mode_enabled: true
+```json
+{
+  "display_information": {
+    "name": "HotPlex (Governance)",
+    "description": "Agentic Craw Layer & Execution Engine",
+    "background_color": "#1e293b"
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "bot_user": {
+      "display_name": "HotPlex Engine",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/reset",
+        "description": "彻底销毁当前 Session 的 PGID 及上下文",
+        "should_escape": false
+      },
+      {
+        "command": "/dc",
+        "description": "对当前执行进程发送 SIGTERM (暂停执行)",
+        "should_escape": false
+      },
+      {
+        "command": "/pgid",
+        "description": "打印当前会话底层的 CPU/内存 及进程树状态",
+        "should_escape": false
+      },
+      {
+        "command": "/approve",
+        "description": "批准挂起中的高危工具操作 (HITL 审批)",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "chat:write",
+        "chat:write.public",
+        "reactions:write",
+        "im:history",
+        "channels:history",
+        "groups:history",
+        "mpim:history",
+        "commands",
+        "files:read",
+        "files:write",
+        "users:read",
+        "team:read"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "app_mention",
+        "message.channels",
+        "message.groups",
+        "message.im",
+        "app_home_opened"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true
+    },
+    "socket_mode_enabled": true
+  }
+}
 ```
 
 ### 进阶版配置带来的新能力：
