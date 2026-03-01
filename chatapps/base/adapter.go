@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/hrygo/hotplex/engine"
 )
 
 // Config is the common configuration for all adapters
@@ -436,5 +438,5 @@ func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string
 
 // EngineSupport defines optional interface for adapters that need engine integration
 type EngineSupport interface {
-	SetEngine(eng any)
+	SetEngine(eng *engine.Engine)
 }
