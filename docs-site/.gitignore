@@ -1,7 +1,4 @@
 node_modules/
 .vitepress/dist/
 .vitepress/cache/
-public/images/png
-public/*.png
-public/*.svg
-# package-lock.json
+public

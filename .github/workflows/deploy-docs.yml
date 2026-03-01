@@ -57,8 +57,7 @@ jobs:
       - name: Generate and Sync Assets (SSOT)
         run: |
           chmod +x scripts/*.sh
-          ./scripts/generate_assets.sh
-          ./scripts/svg2png.sh -z 4
+          ./scripts/generate_assets.sh --all-pngs
 
       - name: Install dependencies
         working-directory: docs-site

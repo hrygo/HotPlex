@@ -29,10 +29,10 @@ LOG_FILE      := $(LOG_DIR)/daemon.log
 all: help
 
 svg2png: ## Manual utility: Convert all SVG files to 4K PNG (for external use)
-	@printf "${CYAN}🖼️  Converting SVG to PNG...${NC}\n"
-	@chmod +x scripts/svg2png.sh 2>/dev/null || true
-	@./scripts/svg2png.sh
-	@printf "${GREEN}✅ PNG assets generated in docs/images/png/${NC}\n"
+	@printf "${CYAN}🖼️  Orchestrating SVG to PNG conversion...${NC}\n"
+	@chmod +x scripts/generate_assets.sh 2>/dev/null || true
+	@./scripts/generate_assets.sh --all-pngs
+	@printf "${GREEN}✅ PNG assets generated and synced.${NC}\n"
 
 ## 📋 Help: Show available commands
 help: ## Show this help message

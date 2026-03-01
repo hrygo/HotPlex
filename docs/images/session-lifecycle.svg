@@ -34,15 +34,15 @@
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap');
     
     .layer-title { font: 700 20px 'Inter', sans-serif; fill: #fff; }
-    .layer-subtitle { font: 500 11px 'Inter', sans-serif; fill: rgba(255,255,255,0.8); text-transform: uppercase; letter-spacing: 1px; }
-    .node-title { font: 600 13px 'Inter', sans-serif; fill: #1e293b; }
-    .node-text { font: 400 11px 'Inter', sans-serif; fill: #64748b; }
+    .layer-subtitle { font: 500 11px 'Inter', sans-serif; fill: rgba(255,255,255,0.85); text-transform: uppercase; letter-spacing: 1px; }
+    .node-title { font: 600 14px 'Inter', sans-serif; fill: #1e293b; }
+    .node-text { font: 400 12px 'Inter', sans-serif; fill: #64748b; }
     .id-text { font: 500 10px 'JetBrains Mono', monospace; fill: #6366f1; }
-    .flow-label { font: 700 12px 'Inter', sans-serif; }
+    .flow-label { font: 700 11px 'Inter', sans-serif; letter-spacing: 0.5px; }
     .section-title { font: 700 18px 'Inter', sans-serif; fill: #0f172a; }
-    .card-label { font: 600 10px 'Inter', sans-serif; fill: #94a3b8; text-transform: uppercase; }
-    .logic-text { font: 600 9px 'JetBrains Mono', monospace; fill: #94a3b8; }
-    .state-text { font: 700 9px 'Inter', sans-serif; }
+    .card-label { font: 600 11px 'Inter', sans-serif; fill: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+    .logic-text { font: 600 10px 'JetBrains Mono', monospace; fill: #94a3b8; }
+    .state-text { font: 700 10px 'Inter', sans-serif; }
     
     .glass-rect { fill: rgba(255, 255, 255, 0.9); stroke: rgba(255, 255, 255, 0.4); stroke-width: 1.5; }
     .sandbox-border { fill: none; stroke: rgba(244, 63, 94, 0.15); stroke-width: 2; stroke-dasharray: 8,4; }
@@ -53,8 +53,8 @@
 
   <!-- Header -->
   <g transform="translate(600, 45)">
-    <text text-anchor="middle" class="section-title" font-size="24">HotPlex Session Lifecycle</text>
-    <text y="25" text-anchor="middle" class="node-text" font-size="14">End-to-End Bidirectional Async Pipeline &amp; Process Isolation</text>
+    <text text-anchor="middle" class="section-title" font-size="28" fill="#1e293b">HotPlex Session Lifecycle</text>
+    <text y="28" text-anchor="middle" class="node-text" font-size="14" fill="#64748b">End-to-End Bidirectional Async Pipeline &amp; Process Isolation</text>
   </g>
 
   <!-- ==================== CORE LAYERS ==================== -->
@@ -206,7 +206,7 @@
       <!-- Stage 1 -->
       <rect width="260" height="90" rx="14" fill="#eef2ff" stroke="#4338ca" stroke-width="1.5"/>
       <text x="130" y="25" text-anchor="middle" class="node-title" fill="#4338ca">1. Chat Source</text>
-      <text x="130" y="48" text-anchor="middle" class="node-text">UserID + PlatformID</text>
+      <text x="130" y="48" text-anchor="middle" class="node-text" fill="#4338ca">UserID + PlatformID</text>
       <text x="130" y="68" text-anchor="middle" class="id-text">UUID5 Mapping</text>
 
       <g transform="translate(260, 45)">
@@ -218,7 +218,7 @@
       <g transform="translate(350, 0)">
         <rect width="260" height="90" rx="14" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
         <text x="130" y="25" text-anchor="middle" class="node-title" fill="#065f46">2. Engine Handle</text>
-        <text x="130" y="48" text-anchor="middle" class="node-text">In-Memory Active Session</text>
+        <text x="130" y="48" text-anchor="middle" class="node-text" fill="#065f46">In-Memory Active Session</text>
         <text x="130" y="68" text-anchor="middle" class="id-text">Pool Lookup Key</text>
         
         <g transform="translate(260, 45)">
@@ -231,7 +231,7 @@
       <g transform="translate(700, 0)">
         <rect width="300" height="90" rx="14" fill="#fff1f2" stroke="#e11d48" stroke-width="1.5"/>
         <text x="150" y="25" text-anchor="middle" class="node-title" fill="#9f1239">3. Provider Instance</text>
-        <text x="150" y="48" text-anchor="middle" class="node-text">CLI Resume / State Key</text>
+        <text x="150" y="48" text-anchor="middle" class="node-text" fill="#9f1239">CLI Resume / State Key</text>
         <text x="150" y="68" text-anchor="middle" class="id-text">Persistent SQLite Identity</text>
       </g>
     </g>
@@ -245,11 +245,11 @@
     
     <!-- LEFT COLUMN: Atomic Termination Action -->
     <g transform="translate(70, 95)">
-      <rect width="220" height="130" rx="12" fill="#fee2e2" stroke="#dc2626" stroke-width="2" stroke-dasharray="4,2"/>
-      <text x="110" y="25" text-anchor="middle" class="node-title" fill="#991b1b">ATOMIC KILL SIGNAL</text>
-      <circle cx="110" cy="65" r="22" fill="white" stroke="#dc2626"/>
-      <text x="110" y="73" text-anchor="middle" font-size="24">⚡</text>
-      <text x="110" y="110" text-anchor="middle" class="id-text" font-size="14" fill="#dc2626">kill(-PGID)</text>
+      <rect width="220" height="150" rx="12" fill="#fff1f2" stroke="#f43f5e" stroke-width="2" stroke-dasharray="4,2"/>
+      <text x="110" y="25" text-anchor="middle" class="node-title" fill="#e11d48">ATOMIC TERMINATION</text>
+      <circle cx="110" cy="75" r="32" fill="#f43f5e" filter="url(#softShadow)"/>
+      <text x="110" y="86" text-anchor="middle" font-size="32" fill="white">⚡</text>
+      <text x="110" y="132" text-anchor="middle" class="id-text" font-size="14" fill="#be123c">kill(-PGID, SIGKILL)</text>
     </g>
 
     <!-- CENTER COLUMN: Process Hierarchy Tree -->
@@ -263,43 +263,52 @@
       
       <!-- Group Leader -->
       <g transform="translate(0, 60)">
-        <rect width="250" height="50" rx="10" fill="#dcfce7" stroke="#10b981" stroke-width="3"/>
-        <text x="125" y="22" text-anchor="middle" class="node-title">Session (Leader)</text>
-        <text x="125" y="40" text-anchor="middle" class="id-text" fill="#059669">PGID: 1024</text>
+        <rect width="250" height="55" rx="12" fill="url(#engineGrad)" stroke="#059669" stroke-width="2"/>
+        <text x="125" y="24" text-anchor="middle" class="layer-title" font-size="14" fill="#fff">Session Leader (PGID)</text>
+        <text x="125" y="44" text-anchor="middle" class="id-text" fill="rgba(255,255,255,0.9)">PID == PGID</text>
         
         <!-- Children Branching -->
-        <path d="M 125 50 L 125 85" fill="none" stroke="#10b981" stroke-width="2"/>
-        <path d="M 40 85 L 210 85" fill="none" stroke="#10b981" stroke-width="2"/>
-        <path d="M 40 85 L 40 100" fill="none" stroke="#10b981" stroke-width="2"/>
-        <path d="M 210 85 L 210 100" fill="none" stroke="#10b981" stroke-width="2"/>
+        <path d="M 125 55 L 125 85" fill="none" stroke="#10b981" stroke-width="2"/>
+        <path d="M 45 85 L 205 85" fill="none" stroke="#10b981" stroke-width="2"/>
+        <path d="M 45 85 L 45 100" fill="none" stroke="#10b981" stroke-width="2"/>
+        <path d="M 205 85 L 205 100" fill="none" stroke="#10b981" stroke-width="2"/>
 
         <!-- Children Nodes -->
-        <g transform="translate(-10, 100)">
-          <rect width="100" height="35" rx="6" class="glass-rect" stroke="#fb7185"/>
-          <text x="50" y="22" text-anchor="middle" class="node-title">Claude CLI</text>
+        <g transform="translate(0, 100)">
+          <rect x="-5" y="0" width="100" height="40" rx="8" class="glass-rect" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="45" y="20" text-anchor="middle" class="node-title">Agent CLI</text>
+          <text x="45" y="34" text-anchor="middle" class="id-text" font-size="9">(Claude/OpenCode)</text>
           
-          <rect x="170" y="0" width="100" height="35" rx="6" class="glass-rect" stroke="#fb7185"/>
-          <text x="220" y="22" text-anchor="middle" class="node-title">Tool Child</text>
+          <rect x="155" y="0" width="100" height="40" rx="8" class="glass-rect" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="205" y="20" text-anchor="middle" class="node-title">Tool Processes</text>
+          <text x="205" y="34" text-anchor="middle" class="id-text" font-size="9">(Bash/Linter/etc)</text>
         </g>
       </g>
     </g>
 
-    <!-- RIGHT COLUMN: Isolation Policy Details -->
+    <!-- RIGHT COLUMN: Isolation Policy -->
     <g transform="translate(830, 95)">
-      <rect width="220" height="130" rx="12" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
-      <text x="110" y="25" text-anchor="middle" class="node-title" fill="#0369a1">ISOLATION POLICY</text>
+      <rect width="230" height="150" rx="12" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+      <text x="115" y="25" text-anchor="middle" class="node-title" fill="#166534">ISOLATION POLICY</text>
       
-      <g transform="translate(20, 45)">
-        <text y="0" class="node-text" fill="#0369a1">🛡️ No Zombie Retention</text>
-        <text y="22" class="node-text" fill="#0369a1">🛡️ Subtree Ownership</text>
-        <text y="44" class="node-text" fill="#0369a1">🛡️ Resource Grouping</text>
-        <text y="66" class="node-text" fill="#0369a1">🛡️ SIGKILL Inheritance</text>
+      <g transform="translate(20, 50)">
+        <circle cx="5" cy="-4" r="3" fill="#22c55e"/>
+        <text x="15" y="0" class="node-text" fill="#166534" font-weight="500">Zero Zombie Leaks</text>
+        
+        <circle cx="5" cy="18" r="3" fill="#22c55e"/>
+        <text x="15" y="22" class="node-text" fill="#166534" font-weight="500">Atomic Subtree Ownership</text>
+        
+        <circle cx="5" cy="40" r="3" fill="#22c55e"/>
+        <text x="15" y="44" class="node-text" fill="#166534" font-weight="500">Recursive Signal Propagation</text>
+        
+        <circle cx="5" cy="62" r="3" fill="#22c55e"/>
+        <text x="15" y="66" class="node-text" fill="#166534" font-weight="500">No Resource Hangover</text>
       </g>
     </g>
 
     <!-- Footer Security Text -->
-    <text x="560" y="315" text-anchor="middle" class="node-text" fill="#dc2626" font-weight="600">
-      Unified Group Signaling prevents lingering processes across all isolated session channels.
+    <text x="560" y="315" text-anchor="middle" class="node-text" fill="#64748b" font-weight="500">
+      Deterministic process discovery allows HotPlex to guarantee absolute cleanup of all complex agent worker trees.
     </text>
   </g>
 </svg>

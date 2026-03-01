@@ -62,7 +62,7 @@ release_notes_*.txt
 
 # Generated PNG assets (Optional/Manual via svg2png.sh)
 docs/images/png/
-
+.github/assets
 
 # Documentation Site (Generated)
 .loki

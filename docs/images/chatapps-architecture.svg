@@ -28,6 +28,17 @@
       <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#E2E8F0" stroke-width="0.5" />
     </pattern>
 
+    <!-- Standard Typography -->
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@500&amp;display=swap');
+      .text-title { font: 900 36px 'Inter', sans-serif; fill: #0f172a; }
+      .text-sub { font: 500 18px 'Inter', sans-serif; fill: #64748b; }
+      .zone-label { font: 800 11px 'Inter', sans-serif; fill: #94a3b8; letter-spacing: 1px; text-transform: uppercase; }
+      .node-heading { font: 700 16px 'Inter', sans-serif; fill: #0f172a; }
+      .node-body { font: 400 12px 'Inter', sans-serif; fill: #64748b; }
+      .code-display { font: 500 11px 'JetBrains Mono', monospace; fill: #0f172a; }
+    </style>
+
     <!-- UNIFIED ARROWHEADS -->
     <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
       <polygon points="0 0, 10 3.5, 0 7" fill="#3B82F6" />
@@ -43,46 +54,46 @@
 
   <!-- Title Section -->
   <g transform="translate(600, 60)">
-    <text font-family="Inter, system-ui, sans-serif" font-size="36" font-weight="900" fill="#0F172A" text-anchor="middle">HotPlex ChatApps Architecture</text>
-    <text y="35" font-family="Inter, sans-serif" font-size="18" font-weight="500" fill="#64748B" text-anchor="middle">Standardized Bidirectional AI Gateway Flow</text>
+    <text text-anchor="middle" class="text-title">HotPlex ChatApps Architecture</text>
+    <text y="35" text-anchor="middle" class="text-sub">Standardized Bidirectional AI Gateway Flow</text>
   </g>
 
   <!-- ZONE 1 EXTERNAL -->
   <g transform="translate(60, 140)">
     <rect width="1080" height="160" rx="24" fill="white" fill-opacity="0.6" stroke="#E2E8F0" stroke-width="1" />
-    <text x="20" y="25" font-family="Inter" font-size="11" font-weight="800" fill="#94A3B8">EXTERNAL CHAT ECOSYSTEM</text>
+    <text x="20" y="25" class="zone-label" fill="#94a3b8">EXTERNAL CHAT ECOSYSTEM</text>
     <g transform="translate(40, 55)">
       <rect width="230" height="85" rx="16" fill="white" filter="url(#glass-shadow)" />
       <rect x="15" y="17" width="50" height="50" rx="12" fill="#E0F2FE" />
-      <text x="80" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">DingTalk</text>
-      <text x="80" y="60" font-family="Inter" font-size="11" fill="#64748B">Enterprise Callback</text>
+      <text x="80" y="40" class="node-heading" fill="#0F172A">DingTalk</text>
+      <text x="80" y="60" class="node-body">Enterprise Callback</text>
 
       <rect x="250" width="230" height="85" rx="16" fill="white" filter="url(#glass-shadow)" />
       <rect x="265" y="17" width="50" height="50" rx="12" fill="#F0F9FF" />
-      <text x="330" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">Telegram</text>
-      <text x="330" y="60" font-family="Inter" font-size="11" fill="#64748B">Bot API / Webhook</text>
+      <text x="330" y="40" class="node-heading" fill="#0F172A">Telegram</text>
+      <text x="330" y="60" class="node-body">Bot API / Webhook</text>
 
       <rect x="500" width="230" height="85" rx="16" fill="white" filter="url(#glass-shadow)" />
       <rect x="515" y="17" width="50" height="50" rx="12" fill="#FDF2F8" />
-      <text x="580" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">Slack</text>
-      <text x="580" y="60" font-family="Inter" font-size="11" fill="#64748B">Socket Mode</text>
+      <text x="580" y="40" class="node-heading" fill="#0F172A">Slack</text>
+      <text x="580" y="60" class="node-body">Socket Mode</text>
 
       <rect x="750" width="230" height="85" rx="16" fill="white" filter="url(#glass-shadow)" />
       <rect x="765" y="17" width="50" height="50" rx="12" fill="#EEF2FF" />
-      <text x="830" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">Discord</text>
-      <text x="830" y="60" font-family="Inter" font-size="11" fill="#64748B">Gateway / Bot</text>
+      <text x="830" y="40" class="node-heading" fill="#0F172A">Discord</text>
+      <text x="830" y="60" class="node-body">Gateway / Bot</text>
     </g>
   </g>
 
   <!-- ZONE 2 LOGICAL -->
   <g transform="translate(60, 380)">
     <rect width="1080" height="300" rx="24" fill="white" filter="url(#glass-shadow)" stroke="#BFDBFE" stroke-width="1.5" />
-    <text x="20" y="25" font-family="Inter" font-size="11" font-weight="800" fill="#3B82F6">LOGICAL ADAPTER LAYER</text>
+    <text x="20" y="25" class="zone-label" fill="#3B82F6">LOGICAL ADAPTER LAYER</text>
     <g transform="translate(30, 45)">
       <rect width="360" height="230" rx="20" fill="url(#card-grad-blue)" />
-      <text x="180" y="45" font-family="Inter" font-size="22" font-weight="800" fill="white" text-anchor="middle">Adapter Manager</text>
+      <text x="180" y="45" class="node-heading" font-size="22" fill="white" text-anchor="middle">Adapter Manager</text>
       <rect x="40" y="65" width="280" height="1" fill="white" opacity="0.3" />
-      <g transform="translate(45, 100)" font-family="Inter" font-size="13" font-weight="500" fill="white">
+      <g transform="translate(45, 100)" class="node-body" fill="white">
         <text>• Unified Payload Dispatcher</text>
         <text y="30">• Async Event Broadcast</text>
         <text y="60">• Platform Lifecycle Hooks</text>
@@ -91,16 +102,16 @@
     </g>
     <g transform="translate(415, 45)">
       <rect width="300" height="105" rx="16" fill="#F8FAFC" stroke="#E2E8F0" />
-      <text x="20" y="35" font-family="Inter" font-size="14" font-weight="700" fill="#1E293B">Telegram Integration</text>
-      <text x="20" y="60" font-family="Inter" font-size="11" fill="#64748B">• Bot API Communication</text>
-      <text x="20" y="78" font-family="Inter" font-size="11" fill="#64748B">• Markdown Formatting</text>
+      <text x="20" y="35" class="node-heading">Telegram Integration</text>
+      <text x="20" y="60" class="node-body">• Bot API Communication</text>
+      <text x="20" y="78" class="node-body">• Markdown Formatting</text>
       <rect y="125" width="300" height="105" rx="16" fill="#F8FAFC" stroke="#E2E8F0" />
-      <text x="20" y="160" font-family="Inter" font-size="14" font-weight="700" fill="#1E293B">DingTalk Integration</text>
-      <text x="20" y="185" font-family="Inter" font-size="11" fill="#64748B">• Callback Verification</text>
-      <text x="20" y="203" font-family="Inter" font-size="11" fill="#64748B">• Message Splitting</text>
+      <text x="20" y="160" class="node-heading">DingTalk Integration</text>
+      <text x="20" y="185" class="node-body">• Callback Verification</text>
+      <text x="20" y="203" class="node-body">• Message Splitting</text>
       <rect x="325" y="0" width="310" height="230" rx="16" fill="#F1F5F9" stroke="#94A3B8" stroke-dasharray="6 4" />
-      <text x="480" y="40" font-family="Inter" font-size="16" font-weight="800" fill="#475569" text-anchor="middle">ChatAdapter Interface</text>
-      <g transform="translate(350, 85)" font-family="monospace" font-size="11" fill="#0F172A">
+      <text x="480" y="40" class="node-heading" text-anchor="middle" fill="#475569">ChatAdapter Interface</text>
+      <g transform="translate(350, 85)" class="code-display">
         <text>Platform() string</text>
         <text y="28">Start(ctx) error</text>
         <text y="56">SendMessage() error</text>
@@ -112,29 +123,29 @@
   <!-- ZONE 3 CORE -->
   <g transform="translate(60, 750)">
     <rect width="1080" height="180" rx="24" fill="white" stroke="#6EE7B7" stroke-width="1.5" />
-    <text x="20" y="25" font-family="Inter" font-size="11" font-weight="800" fill="#059669">CORE ENGINE SYSTEM</text>
+    <text x="20" y="25" class="zone-label" fill="#059669">CORE ENGINE SYSTEM</text>
     <g transform="translate(30, 40)">
       <rect width="320" height="110" rx="20" fill="#F0FDF4" stroke="#10B981" stroke-width="1" />
-      <text x="160" y="35" font-family="Inter" font-size="18" font-weight="800" fill="#065F46" text-anchor="middle">Session Manager</text>
+      <text x="160" y="35" class="node-heading" font-size="18" fill="#065F46" text-anchor="middle">Session Manager</text>
       <rect x="40" y="55" width="240" height="30" rx="8" fill="white" stroke="#10B981" />
-      <text x="160" y="75" font-family="Inter" font-size="11" font-weight="600" fill="#1E293B" text-anchor="middle">UserID ↔ WorkDir</text>
+      <text x="160" y="75" class="node-heading" font-size="11" fill="#1E293B" text-anchor="middle">UserID ↔ WorkDir</text>
     </g>
     <g transform="translate(370, 40)">
       <rect width="450" height="110" rx="20" fill="url(#card-grad-emerald)" />
-      <text x="225" y="35" font-family="Inter" font-size="22" font-weight="900" fill="white" text-anchor="middle">Execution Core</text>
+      <text x="225" y="35" class="node-heading" font-size="22" fill="white" text-anchor="middle">Execution Core</text>
       <g transform="translate(25, 55)">
         <rect width="125" height="40" rx="10" fill="white" fill-opacity="0.15" stroke="white" stroke-opacity="0.5" />
-        <text x="62" y="25" font-family="Inter" font-size="11" font-weight="800" fill="white" text-anchor="middle">Claude Code</text>
+        <text x="62" y="25" class="zone-label" fill="white" text-anchor="middle">Claude Code</text>
         <rect x="140" width="125" height="40" rx="10" fill="white" fill-opacity="0.15" stroke="white" stroke-opacity="0.5" />
-        <text x="202" y="25" font-family="Inter" font-size="11" font-weight="800" fill="white" text-anchor="middle">OpenCode</text>
+        <text x="202" y="25" class="zone-label" fill="white" text-anchor="middle">OpenCode</text>
         <rect x="280" width="115" height="40" rx="10" fill="white" fill-opacity="0.15" stroke="white" stroke-opacity="0.5" />
-        <text x="337" y="25" font-family="Inter" font-size="11" font-weight="800" fill="white" text-anchor="middle">Hooks API</text>
+        <text x="337" y="25" class="zone-label" fill="white" text-anchor="middle">Hooks API</text>
       </g>
     </g>
     <g transform="translate(840, 40)">
       <rect width="210" height="110" rx="20" fill="#F8FAFC" stroke="#E2E8F0" />
-      <text x="105" y="25" font-family="Inter" font-size="12" font-weight="800" fill="#475569" text-anchor="middle">Event Stream (SSE)</text>
-      <g transform="translate(30, 40)" font-family="Inter" font-size="10" font-weight="600" fill="#4B5563">
+      <text x="105" y="25" class="zone-label" fill="#475569" text-anchor="middle">Event Stream (SSE)</text>
+      <g transform="translate(30, 40)" class="node-body" font-weight="600" fill="#4B5563">
         <circle cx="5" cy="10" r="4" fill="#3B82F6" />
         <text x="18" y="14">Reasoning / Progress</text>
         <circle cx="5" cy="35" r="4" fill="#F59E0B" />
@@ -176,6 +187,6 @@
   </g>
 
   <!-- Footer -->
-  <text x="600" y="980" font-family="Inter, sans-serif" font-size="12" fill="#94A3B8" text-anchor="middle">HotPlex Agentic Control Plane | High-Fidelity Architecture Definition</text>
+  <text x="600" y="980" class="node-body" fill="#94A3B8" text-anchor="middle">HotPlex ChatApps Adapter Framework | Standardized Multi-Platform Control Plane</text>
 
 </svg>
