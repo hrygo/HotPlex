@@ -51,10 +51,80 @@ settings:
       - message.channels
       - message.groups
       - message.im
+---
+
+## 3. (进阶) HotPlex “Craw 层”高级治理版配置
+
+如果您的团队希望完全释放 HotPlex 作为**底层执行引擎 (Craw Layer)** 的能力（如：沙盒审批、产物回传、全局监控），请使用以下增强版 App Manifest。
+
+此版本开启了**App Home 主页控制台**、**深度的权限分离**以及**全功能的扩展命令**。
+
+```yaml
+display_information:
+  name: HotPlex (Governance)
+  description: Agentic Craw Layer & Execution Engine
+  background_color: "#1e293b" # Slate dark theme
+features:
+  app_home:
+    home_tab_enabled: true # [新增] 开启监控与治理主页
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: HotPlex Engine
+    always_online: true
+  slash_commands:
+    # 基础管控
+    - command: /reset
+      description: 彻底销毁当前 Session 的 PGID 及上下文
+      should_escape: false
+    - command: /dc
+      description: 对当前执行进程发送 SIGTERM (暂停执行)
+      should_escape: false
+    # [新增] 高级治理
+    - command: /pgid
+      description: 打印当前会话底层的 CPU/内存 及进程树状态
+      should_escape: false
+    - command: /approve
+      description: 批准挂起中的高危工具操作 (HITL 审批)
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      # 基础对话与消息流
+      - app_mentions:read
+      - chat:write
+      - chat:write.public
+      - reactions:write
+      - im:history
+      - channels:history
+      - groups:history
+      - mpim:history
+      - commands
+      # [新增] 双向文件注入与富产物回传
+      - files:read
+      - files:write
+      # [新增] 团队协作与主页互动
+      - users:read # 用于识别指令发起人身份 (HITL溯源)
+      - team:read  # 跨通道状态校验
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - app_home_opened # [新增] 触发为主界面渲染仪表盘
   interactivity:
     is_enabled: true
   socket_mode_enabled: true
 ```
+
+### 进阶版配置带来的新能力：
+
+1.  **全局监控中心 (`home_tab_enabled: true`)**：允许开发者在打开 Bot 时，渲染出包含“活跃会话数”、“安全拦截日志”和“ MCP 挂载状态”的 Dashboard。
+2.  **审批守门员 (`/approve`)**：结合互动消息能力 (Interactivity)，在执行写库、删除等敏感调用前强制拦截并要求核心开发者确认。
+3.  **富产物挂载 (`files:read` / `files:write`)**：允许工程师直接向 Slack 丢报错日志附件，HotPlex 将其自动注入正在执行的沙盒文件系统中；Agent 也可直接生成并推送补丁包 (`.patch` 或 `zip`) 给团队。
+4.  **运行时状态透视 (`/pgid`)**：一键穿透 LLM 迷雾，直接查询对应操作系统的资源开销，提供极客级别的排障手段。
 
 3.  点击 **Create** 并 **Install to Workspace**。完成！
 

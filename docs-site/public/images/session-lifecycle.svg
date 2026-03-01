@@ -1,0 +1,314 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1100" width="100%" height="auto">
+  <defs>
+    <!-- Premium Gradients -->
+    <linearGradient id="chatappGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4f46e5"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="engineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#059669"/>
+      <stop offset="100%" style="stop-color:#10b981"/>
+    </linearGradient>
+    <linearGradient id="processGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e11d48"/>
+      <stop offset="100%" style="stop-color:#fb7185"/>
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8fafc"/>
+      <stop offset="100%" style="stop-color:#f1f5f9"/>
+    </linearGradient>
+
+    <!-- Professional Shadows -->
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.08"/>
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.05"/>
+    </filter>
+
+    <!-- Arrow Markers -->
+    <marker id="arrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap');
+    
+    .layer-title { font: 700 20px 'Inter', sans-serif; fill: #fff; }
+    .layer-subtitle { font: 500 11px 'Inter', sans-serif; fill: rgba(255,255,255,0.85); text-transform: uppercase; letter-spacing: 1px; }
+    .node-title { font: 600 14px 'Inter', sans-serif; fill: #1e293b; }
+    .node-text { font: 400 12px 'Inter', sans-serif; fill: #64748b; }
+    .id-text { font: 500 10px 'JetBrains Mono', monospace; fill: #6366f1; }
+    .flow-label { font: 700 11px 'Inter', sans-serif; letter-spacing: 0.5px; }
+    .section-title { font: 700 18px 'Inter', sans-serif; fill: #0f172a; }
+    .card-label { font: 600 11px 'Inter', sans-serif; fill: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+    .logic-text { font: 600 10px 'JetBrains Mono', monospace; fill: #94a3b8; }
+    .state-text { font: 700 10px 'Inter', sans-serif; }
+    
+    .glass-rect { fill: rgba(255, 255, 255, 0.9); stroke: rgba(255, 255, 255, 0.4); stroke-width: 1.5; }
+    .sandbox-border { fill: none; stroke: rgba(244, 63, 94, 0.15); stroke-width: 2; stroke-dasharray: 8,4; }
+  </style>
+
+  <!-- Background -->
+  <rect width="1200" height="1100" fill="url(#bgGrad)"/>
+
+  <!-- Header -->
+  <g transform="translate(600, 45)">
+    <text text-anchor="middle" class="section-title" font-size="28" fill="#1e293b">HotPlex Session Lifecycle</text>
+    <text y="28" text-anchor="middle" class="node-text" font-size="14" fill="#64748b">End-to-End Bidirectional Async Pipeline &amp; Process Isolation</text>
+  </g>
+
+  <!-- ==================== CORE LAYERS ==================== -->
+  
+  <!-- ChatApp Layer -->
+  <g transform="translate(40, 100)">
+    <rect width="280" height="340" rx="18" fill="url(#chatappGrad)" filter="url(#softShadow)"/>
+    <text x="140" y="35" text-anchor="middle" class="layer-title">ChatApp Layer</text>
+    <text x="140" y="52" text-anchor="middle" class="layer-subtitle">Platform Adapters</text>
+    
+    <g transform="translate(20, 75)">
+      <rect width="240" height="75" rx="10" class="glass-rect"/>
+      <text x="120" y="25" text-anchor="middle" class="node-title">SDK Hub</text>
+      <text x="120" y="45" text-anchor="middle" class="node-text">Slack · Discord · Telegram</text>
+      <text x="120" y="60" text-anchor="middle" class="id-text">Unified Handler</text>
+    </g>
+
+    <g transform="translate(20, 170)">
+      <rect width="240" height="150" rx="10" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.2)"/>
+      <text x="120" y="25" text-anchor="middle" class="layer-subtitle">Engine Client</text>
+      <g transform="translate(15, 35)">
+        <rect width="210" height="100" rx="10" class="glass-rect" stroke="#6366f1" stroke-width="2"/>
+        <text x="105" y="28" text-anchor="middle" class="node-title">Execute()</text>
+        <path d="M 20 40 L 190 40" stroke="#e2e8f0" stroke-width="1"/>
+        <text x="105" y="60" text-anchor="middle" class="node-text">Async Message Turn</text>
+        <text x="105" y="80" text-anchor="middle" class="id-text">ResultCallback(Events)</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Engine Layer -->
+  <g transform="translate(460, 100)">
+    <rect width="280" height="340" rx="18" fill="url(#engineGrad)" filter="url(#softShadow)"/>
+    <text x="140" y="22" text-anchor="middle" class="layer-title">Engine Layer</text>
+    <text x="140" y="40" text-anchor="middle" class="layer-subtitle">Control Plane</text>
+
+    <!-- Memory Pool -->
+    <g transform="translate(15, 60)">
+      <rect width="250" height="110" rx="10" class="glass-rect" stroke="#10b981" stroke-width="2"/>
+      <text x="125" y="25" text-anchor="middle" class="node-title">Session Persistence Pool</text>
+      
+      <!-- Mini State Flow -->
+      <g transform="translate(25, 45)">
+        <rect width="40" height="18" rx="4" fill="#fef3c7" stroke="#d97706"/>
+        <text x="20" y="12" text-anchor="middle" class="state-text" fill="#92400e">Idle</text>
+        <path d="M 40 9 L 60 9" stroke="#cbd5e1" stroke-width="1" marker-end="url(#arrowHead)"/>
+        <rect x="60" y="0" width="40" height="18" rx="4" fill="#bbf7d0" stroke="#059669"/>
+        <text x="80" y="12" text-anchor="middle" class="state-text" fill="#065f46">Ready</text>
+        <path d="M 100 9 L 120 9" stroke="#cbd5e1" stroke-width="1" marker-end="url(#arrowHead)"/>
+        <rect x="120" y="0" width="45" height="18" rx="4" fill="#fed7aa" stroke="#c2410c"/>
+        <text x="142.5" y="12" text-anchor="middle" class="state-text" fill="#9a3412">Active</text>
+      </g>
+      <text x="125" y="85" text-anchor="middle" class="id-text">GetOrCreateSession(ID)</text>
+      <text x="125" y="98" text-anchor="middle" class="node-text">Hot-Multiplexing Engine</text>
+    </g>
+
+    <!-- IO Dispatcher -->
+    <g transform="translate(15, 185)">
+      <rect width="250" height="135" rx="10" class="glass-rect"/>
+      <text x="125" y="25" text-anchor="middle" class="node-title">Stream Dispatcher</text>
+      
+      <g transform="translate(15, 40)">
+        <rect width="105" height="35" rx="6" fill="#fff1f2" stroke="#ef4444" stroke-width="1.5"/>
+        <text x="52.5" y="22" text-anchor="middle" class="node-title" fill="#be123c">🛡️ WAF</text>
+        
+        <rect x="115" y="0" width="105" height="35" rx="6" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/>
+        <text x="167.5" y="22" text-anchor="middle" class="node-title" fill="#0369a1">🔗 Bridge</text>
+      </g>
+
+      <g transform="translate(15, 85)">
+        <rect width="220" height="35" rx="6" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+        <text x="110" y="22" text-anchor="middle" class="node-title" fill="#6d28d9">🔀 Pipe Manager (I/O)</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Provider Layer -->
+  <g transform="translate(880, 100)">
+    <rect width="280" height="340" rx="18" fill="url(#processGrad)" filter="url(#softShadow)"/>
+    <text x="140" y="35" text-anchor="middle" class="layer-title">Provider Layer</text>
+    <text x="140" y="52" text-anchor="middle" class="layer-subtitle">CLI Isolation Sandbox</text>
+
+    <g transform="translate(20, 75)">
+      <rect width="240" height="130" rx="10" class="glass-rect"/>
+      <text x="120" y="25" text-anchor="middle" class="node-title">Agent Runners</text>
+      <g transform="translate(15, 40)">
+        <rect width="210" height="30" rx="6" fill="#fff1f2" stroke="#fb7185"/>
+        <text x="105" y="20" text-anchor="middle" class="id-text" fill="#9f1239">exec.Command(claude)</text>
+        <rect y="45" width="210" height="30" rx="6" fill="#fff1f2" stroke="#fb7185"/>
+        <text x="105" y="65" text-anchor="middle" class="id-text" fill="#9f1239">exec.Command(opencode)</text>
+      </g>
+    </g>
+
+    <g transform="translate(20, 220)">
+      <rect width="240" height="100" rx="10" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.4)"/>
+      <text x="120" y="25" text-anchor="middle" class="layer-subtitle" fill="#fff">OS Foundation</text>
+      <g transform="translate(15, 40)">
+        <rect width="210" height="45" rx="8" class="glass-rect" stroke="#be123c" stroke-width="2"/>
+        <text x="105" y="20" text-anchor="middle" class="node-title">PGID Lock</text>
+        <text x="105" y="36" text-anchor="middle" class="id-text" fill="#e11d48">Setpgid(true)</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ==================== SYMMETRICAL DATA FLOWS ==================== -->
+  
+  <!-- Inbound Flow (Top) -->
+  <g color="#6366f1">
+    <path id="pathInA" d="M 320 230 Q 390 230 460 230" fill="none" stroke="currentColor" stroke-width="3" marker-end="url(#arrowHead)"/>
+    <rect x="350" y="205" width="80" height="18" rx="4" fill="white" stroke="currentColor" stroke-width="0.5"/>
+    <text x="390" y="219" text-anchor="middle" class="flow-label" fill="currentColor">REQUEST</text>
+    
+    <path id="pathInB" d="M 740 230 Q 810 230 880 230" fill="none" stroke="#10b981" stroke-width="3" marker-end="url(#arrowHead)"/>
+    <rect x="770" y="205" width="80" height="18" rx="4" fill="white" stroke="#10b981" stroke-width="0.5"/>
+    <text x="810" y="219" text-anchor="middle" class="flow-label" fill="#059669">STDIN / JSON</text>
+    
+    <circle r="5" fill="currentColor">
+      <animateMotion dur="2s" repeatCount="indefinite"><mpath href="#pathInA"/></animateMotion>
+    </circle>
+    <circle r="5" fill="#10b981">
+      <animateMotion dur="1.5s" repeatCount="indefinite"><mpath href="#pathInB"/></animateMotion>
+    </circle>
+  </g>
+
+  <!-- Outbound Flow (Bottom) -->
+  <g color="#f43f5e">
+    <path id="pathOutB" d="M 880 370 Q 810 370 740 370" fill="none" stroke="currentColor" stroke-width="3" marker-end="url(#arrowHead)"/>
+    <rect x="770" y="375" width="80" height="18" rx="4" fill="white" stroke="currentColor" stroke-width="0.5"/>
+    <text x="810" y="389" text-anchor="middle" class="flow-label" fill="currentColor">STDOUT</text>
+    
+    <path id="pathOutA" d="M 460 370 Q 390 370 320 370" fill="none" stroke="#8b5cf6" stroke-width="3" marker-end="url(#arrowHead)"/>
+    <rect x="350" y="375" width="80" height="18" rx="4" fill="white" stroke="#8b5cf6" stroke-width="0.5"/>
+    <text x="390" y="389" text-anchor="middle" class="flow-label" fill="#7c3aed">EVENTS</text>
+    
+    <circle r="5" fill="currentColor">
+      <animateMotion dur="1.5s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href="#pathOutB"/></animateMotion>
+    </circle>
+    <circle r="5" fill="#8b5cf6">
+      <animateMotion dur="2s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href="#pathOutA"/></animateMotion>
+    </circle>
+  </g>
+
+  <!-- ==================== IDENTITY PIPELINE ==================== -->
+  <g transform="translate(40, 480)">
+    <rect width="1120" height="185" rx="20" class="glass-rect" filter="url(#softShadow)"/>
+    <text x="40" y="35" class="section-title">Deterministic Identity Flow</text>
+    
+    <g transform="translate(60, 65)">
+      <!-- Stage 1 -->
+      <rect width="260" height="90" rx="14" fill="#eef2ff" stroke="#4338ca" stroke-width="1.5"/>
+      <text x="130" y="25" text-anchor="middle" class="node-title" fill="#4338ca">1. Chat Source</text>
+      <text x="130" y="48" text-anchor="middle" class="node-text" fill="#4338ca">UserID + PlatformID</text>
+      <text x="130" y="68" text-anchor="middle" class="id-text">UUID5 Mapping</text>
+
+      <g transform="translate(260, 45)">
+        <path d="M 10 0 L 80 0" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrowHead)"/>
+        <text x="45" y="-8" text-anchor="middle" class="logic-text">Derive</text>
+      </g>
+
+      <!-- Stage 2 -->
+      <g transform="translate(350, 0)">
+        <rect width="260" height="90" rx="14" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+        <text x="130" y="25" text-anchor="middle" class="node-title" fill="#065f46">2. Engine Handle</text>
+        <text x="130" y="48" text-anchor="middle" class="node-text" fill="#065f46">In-Memory Active Session</text>
+        <text x="130" y="68" text-anchor="middle" class="id-text">Pool Lookup Key</text>
+        
+        <g transform="translate(260, 45)">
+          <path d="M 10 0 L 80 0" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrowHead)"/>
+          <text x="45" y="-8" text-anchor="middle" class="logic-text">UUID-SHA1</text>
+        </g>
+      </g>
+
+      <!-- Stage 3 -->
+      <g transform="translate(700, 0)">
+        <rect width="300" height="90" rx="14" fill="#fff1f2" stroke="#e11d48" stroke-width="1.5"/>
+        <text x="150" y="25" text-anchor="middle" class="node-title" fill="#9f1239">3. Provider Instance</text>
+        <text x="150" y="48" text-anchor="middle" class="node-text" fill="#9f1239">CLI Resume / State Key</text>
+        <text x="150" y="68" text-anchor="middle" class="id-text">Persistent SQLite Identity</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ==================== PGID SYMMETRICAL DASHBOARD ==================== -->
+  <g transform="translate(40, 710)">
+    <rect width="1120" height="340" rx="20" class="glass-rect" filter="url(#softShadow)"/>
+    <rect x="30" y="55" width="1060" height="230" rx="16" class="sandbox-border"/>
+    <text x="40" y="35" class="section-title">Process PGID Isolation (Symmetrical Dashboard)</text>
+    
+    <!-- LEFT COLUMN: Atomic Termination Action -->
+    <g transform="translate(70, 95)">
+      <rect width="220" height="150" rx="12" fill="#fff1f2" stroke="#f43f5e" stroke-width="2" stroke-dasharray="4,2"/>
+      <text x="110" y="25" text-anchor="middle" class="node-title" fill="#e11d48">ATOMIC TERMINATION</text>
+      <circle cx="110" cy="75" r="32" fill="#f43f5e" filter="url(#softShadow)"/>
+      <text x="110" y="86" text-anchor="middle" font-size="32" fill="white">⚡</text>
+      <text x="110" y="132" text-anchor="middle" class="id-text" font-size="14" fill="#be123c">kill(-PGID, SIGKILL)</text>
+    </g>
+
+    <!-- CENTER COLUMN: Process Hierarchy Tree -->
+    <g transform="translate(435, 75)">
+      <!-- Parent -->
+      <rect x="40" y="0" width="170" height="35" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+      <text x="125" y="22" text-anchor="middle" class="node-title">hotplexd (Owner)</text>
+      
+      <!-- Connection Path -->
+      <path d="M 125 35 L 125 60" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4,2"/>
+      
+      <!-- Group Leader -->
+      <g transform="translate(0, 60)">
+        <rect width="250" height="55" rx="12" fill="url(#engineGrad)" stroke="#059669" stroke-width="2"/>
+        <text x="125" y="24" text-anchor="middle" class="layer-title" font-size="14" fill="#fff">Session Leader (PGID)</text>
+        <text x="125" y="44" text-anchor="middle" class="id-text" fill="rgba(255,255,255,0.9)">PID == PGID</text>
+        
+        <!-- Children Branching -->
+        <path d="M 125 55 L 125 85" fill="none" stroke="#10b981" stroke-width="2"/>
+        <path d="M 45 85 L 205 85" fill="none" stroke="#10b981" stroke-width="2"/>
+        <path d="M 45 85 L 45 100" fill="none" stroke="#10b981" stroke-width="2"/>
+        <path d="M 205 85 L 205 100" fill="none" stroke="#10b981" stroke-width="2"/>
+
+        <!-- Children Nodes -->
+        <g transform="translate(0, 100)">
+          <rect x="-5" y="0" width="100" height="40" rx="8" class="glass-rect" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="45" y="20" text-anchor="middle" class="node-title">Agent CLI</text>
+          <text x="45" y="34" text-anchor="middle" class="id-text" font-size="9">(Claude/OpenCode)</text>
+          
+          <rect x="155" y="0" width="100" height="40" rx="8" class="glass-rect" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="205" y="20" text-anchor="middle" class="node-title">Tool Processes</text>
+          <text x="205" y="34" text-anchor="middle" class="id-text" font-size="9">(Bash/Linter/etc)</text>
+        </g>
+      </g>
+    </g>
+
+    <!-- RIGHT COLUMN: Isolation Policy -->
+    <g transform="translate(830, 95)">
+      <rect width="230" height="150" rx="12" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+      <text x="115" y="25" text-anchor="middle" class="node-title" fill="#166534">ISOLATION POLICY</text>
+      
+      <g transform="translate(20, 50)">
+        <circle cx="5" cy="-4" r="3" fill="#22c55e"/>
+        <text x="15" y="0" class="node-text" fill="#166534" font-weight="500">Zero Zombie Leaks</text>
+        
+        <circle cx="5" cy="18" r="3" fill="#22c55e"/>
+        <text x="15" y="22" class="node-text" fill="#166534" font-weight="500">Atomic Subtree Ownership</text>
+        
+        <circle cx="5" cy="40" r="3" fill="#22c55e"/>
+        <text x="15" y="44" class="node-text" fill="#166534" font-weight="500">Recursive Signal Propagation</text>
+        
+        <circle cx="5" cy="62" r="3" fill="#22c55e"/>
+        <text x="15" y="66" class="node-text" fill="#166534" font-weight="500">No Resource Hangover</text>
+      </g>
+    </g>
+
+    <!-- Footer Security Text -->
+    <text x="560" y="315" text-anchor="middle" class="node-text" fill="#64748b" font-weight="500">
+      Deterministic process discovery allows HotPlex to guarantee absolute cleanup of all complex agent worker trees.
+    </text>
+  </g>
+</svg>

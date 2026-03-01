@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" width="1000" height="650">
+  <defs>
+    <style>
+      .bg { fill: #f8f9fa; }
+      .box { stroke-width: 2; fill: #fff; stroke: #e1e4e8; }
+      .text-title { font-family: -apple-system, sans-serif; font-weight: bold; font-size: 18px; fill: #24292e; }
+      .text-sub { font-family: -apple-system, sans-serif; font-size: 13px; fill: #586069; }
+      .text-code { font-family: monospace; font-size: 11px; fill: #444; }
+      
+      /* 
+         Animation Logic:
+         1. Direction: flowForward (L->R), flowBackward (R->L)
+         2. Path Uniformity: All paths are drawn from Left to Right
+      */
+      @keyframes flowForward { from { stroke-dashoffset: 40; } to { stroke-dashoffset: 0; } }
+      @keyframes flowBackward { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 40; } }
+      
+      .pipe { fill: none; stroke-width: 4; stroke-linecap: round; }
+      .data-blue { stroke: #0366d6; stroke-dasharray: 10 10; animation: flowForward 1s linear infinite; }
+      .data-green { stroke: #28a745; stroke-dasharray: 10 10; animation: flowBackward 1s linear infinite; }
+      .data-red { stroke: #d73a49; stroke-dasharray: 5 15; animation: flowBackward 0.7s linear infinite; }
+
+      .box-highlight { fill: rgba(3, 102, 214, 0.04); stroke: #0366d6; stroke-dasharray: 4; }
+      .box-success { fill: rgba(40, 167, 69, 0.04); stroke: #28a745; }
+      .box-warning { fill: rgba(215, 58, 73, 0.05); stroke: #d73a49; }
+      .box-purple { fill: rgba(111, 66, 193, 0.04); stroke: #6f42c1; }
+      .box-sandbox { fill: #f1f3f5; stroke: #cfd4da; stroke-dasharray: 4; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" class="bg" rx="16"/>
+
+  <!-- Column Labels -->
+  <text x="140" y="30" text-anchor="middle" class="text-sub" style="font-weight:bold; letter-spacing:1px;">INTEGRATION LAYER</text>
+  <text x="500" y="30" text-anchor="middle" class="text-sub" style="font-weight:bold; letter-spacing:1px;">HOTPLEX CORE ENGINE</text>
+  <text x="860" y="30" text-anchor="middle" class="text-sub" style="font-weight:bold; letter-spacing:1px;">OS RUNTIME</text>
+
+  <!-- Application Section -->
+  <rect x="40" y="60" width="200" height="560" rx="10" class="box" />
+  <text x="140" y="95" text-anchor="middle" class="text-title">Application</text>
+  <text x="140" y="115" text-anchor="middle" class="text-sub">Web AI / IDE / DevOps</text>
+  
+  <g transform="translate(60, 185)">
+    <rect width="160" height="70" rx="8" class="box-highlight" />
+    <text x="80" y="35" text-anchor="middle" class="text-label" style="font-weight:bold; font-size:13px;">Execute()</text>
+    <text x="80" y="55" text-anchor="middle" class="text-code">HotPlexClient</text>
+  </g>
+
+  <g transform="translate(60, 420)">
+    <rect width="160" height="160" rx="8" class="box-success" />
+    <text x="80" y="30" text-anchor="middle" class="text-label" style="font-weight:bold; font-size:13px;">Event Receiver</text>
+    <text x="80" y="140" text-anchor="middle" class="text-code" style="fill:#28a745;">Async Callback Dispatch</text>
+  </g>
+
+  <!-- Engine Section -->
+  <rect x="280" y="60" width="440" height="560" rx="10" class="box" />
+  
+  <g transform="translate(300, 80)">
+    <rect width="400" height="60" rx="8" class="box-warning" />
+    <path d="M 40 15 L 50 10 L 60 15 L 60 30 C 60 40 50 45 50 45 C 50 45 40 40 40 30 Z" fill="#d73a49" opacity="0.6"/>
+    <text x="200" y="35" text-anchor="middle" class="text-title" style="font-size: 14px; fill:#d73a49;">Security WAF Detector</text>
+  </g>
+
+  <g transform="translate(300, 150)">
+    <rect width="400" height="120" rx="8" class="box-highlight" style="stroke-dasharray:0;"/>
+    <text x="200" y="30" text-anchor="middle" class="text-title" style="font-size: 14px; fill:#0366d6;">Upstream Pipeline</text>
+    <path d="M 10 70 L 390 70" class="pipe" stroke="#e1e4e8" />
+    <path d="M 10 70 L 390 70" class="pipe data-blue" />
+    <text x="200" y="105" text-anchor="middle" class="text-code">JSON Message -> session.stdin</text>
+  </g>
+
+  <g transform="translate(300, 290)">
+    <rect width="400" height="310" rx="8" class="box-success" style="stroke-dasharray:0;"/>
+    <text x="200" y="30" text-anchor="middle" class="text-title" style="font-size: 14px; fill:#28a745;">Downstream Scanners</text>
+    
+    <rect x="20" y="60" width="360" height="60" rx="6" class="box-purple" />
+    <text x="200" y="85" text-anchor="middle" class="text-label" style="font-weight:bold; font-size:13px; fill:#6f42c1;">Protocol Mapping</text>
+    <text x="200" y="105" text-anchor="middle" class="text-code">Raw Line -> MapEvent()</text>
+
+    <path d="M 10 170 L 390 170" class="pipe" stroke="#e1e4e8" />
+    <path d="M 10 170 L 390 170" class="pipe data-green" />
+    <text x="200" y="160" text-anchor="middle" class="text-code">session.ReadStdout()</text>
+
+    <path d="M 10 250 L 390 250" class="pipe" stroke="#e1e4e8" />
+    <path d="M 10 250 L 390 250" class="pipe data-red" />
+    <text x="200" y="240" text-anchor="middle" class="text-code">session.ReadStderr()</text>
+  </g>
+
+  <!-- Managed Agent Section (Lightened) -->
+  <rect x="760" y="60" width="200" height="560" rx="10" class="box-sandbox" />
+  <text x="860" y="95" text-anchor="middle" class="text-title">Managed Agent</text>
+  <text x="860" y="115" text-anchor="middle" class="text-sub">Sandbox: PGID Isolation</text>
+  
+  <rect x="780" y="200" width="160" height="40" rx="4" fill="#fff" stroke="#cfd4da" />
+  <text x="860" y="225" text-anchor="middle" class="text-code" style="fill: #0366d6; font-weight:bold;">STDIN (FD:0)</text>
+
+  <rect x="780" y="310" width="160" height="90" rx="6" fill="#fff" stroke="#cfd4da" />
+  <text x="860" y="340" text-anchor="middle" class="text-sub" style="font-weight:bold;">Context</text>
+  <text x="860" y="370" text-anchor="middle" class="text-code">Persistent States</text>
+
+  <rect x="780" y="440" width="160" height="40" rx="4" fill="#fff" stroke="#cfd4da" />
+  <text x="860" y="465" text-anchor="middle" class="text-code" style="fill: #28a745; font-weight:bold;">STDOUT (FD:1)</text>
+
+  <rect x="780" y="520" width="160" height="40" rx="4" fill="#fff" stroke="#cfd4da" />
+  <text x="860" y="545" text-anchor="middle" class="text-code" style="fill: #d73a49; font-weight:bold;">STDERR (FD:2)</text>
+
+  <!-- External Connections -->
+  <path d="M 220 220 L 310 220" class="pipe data-blue" />
+  <path d="M 710 220 L 760 220" class="pipe data-blue" />
+
+  <path d="M 220 460 L 310 460" class="pipe data-green" />
+  <path d="M 710 460 L 760 460" class="pipe data-green" />
+
+  <path d="M 220 540 L 310 540" class="pipe data-red" />
+  <path d="M 710 540 L 760 540" class="pipe data-red" />
+
+</svg>

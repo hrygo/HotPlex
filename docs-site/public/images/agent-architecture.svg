@@ -1,0 +1,188 @@
+<svg width="1400" height="1200" viewBox="0 0 1400 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 全局自定义字体与滤镜 -->
+  <defs>
+    <style type="text/css">
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500&amp;display=swap');
+      .text-base { font-family: 'Inter', sans-serif; }
+      .title { font-weight: 700; fill: #FFFFFF; }
+      .desc { font-weight: 400; fill: #94a3b8; font-size: 13px; }
+      .tier-label { font-weight: 700; font-size: 15px; letter-spacing: 1.5px; text-transform: uppercase; }
+      .code-text { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; }
+    </style>
+    <filter id="card-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feFlood flood-color="#000000" flood-opacity="0.5" result="color" />
+      <feComposite in="color" in2="blur" operator="in" result="shadow" />
+      <feOffset dx="0" dy="4" in="shadow" />
+      <feComposite in="SourceGraphic" operator="over" />
+    </filter>
+    <linearGradient id="grad-oracle" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#7C3AED"/><stop offset="100%" stop-color="#4C1D95"/></linearGradient>
+    <linearGradient id="grad-plan" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#F59E0B"/><stop offset="100%" stop-color="#B45309"/></linearGradient>
+    <linearGradient id="grad-exec" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#10B981"/><stop offset="100%" stop-color="#064E3B"/></linearGradient>
+    <linearGradient id="grad-tool" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3B82F6"/><stop offset="100%" stop-color="#1E3A8A"/></linearGradient>
+    <linearGradient id="grad-infra" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4B5563"/><stop offset="100%" stop-color="#111827"/></linearGradient>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="1400" height="1200" rx="32" fill="#0F1117" />
+  
+  <!-- 标题 -->
+  <text x="700" y="80" class="text-base title" font-size="32" text-anchor="middle">HotPlex Agent Orchestration Panorama</text>
+  <rect x="620" y="100" width="160" height="4" fill="#6366f1" rx="2" />
+
+  <!-- ========================================== -->
+  <!-- TIER 1: CORE INTELLECT (STRATEGY & ANALYSIS) -->
+  <!-- ========================================== -->
+  <g transform="translate(100, 160)">
+    <rect x="-40" y="-20" width="1280" height="240" rx="24" fill="#1A1D25" stroke="#374151" stroke-width="1.5" stroke-dasharray="8 4" />
+    <text x="-15" y="10" class="text-base tier-label" fill="#7C3AED">TIER 1: CORE INTELLECT (核心决策层)</text>
+    
+    <!-- Oracle Card -->
+    <g transform="translate(0, 40)" filter="url(#card-shadow)">
+      <rect width="380" height="140" rx="16" fill="#1e293b" stroke="url(#grad-oracle)" stroke-width="2" />
+      <text x="20" y="35" class="text-base title" font-size="20">Oracle (Architect)</text>
+      <text x="20" y="65" class="text-base desc">
+        <tspan x="20" dy="0">High-level design, complex debugging, performance</tspan>
+        <tspan x="20" dy="20">analysis. The high-IQ consultant for edge cases.</tspan>
+      </text>
+      <text x="20" y="115" class="code-text" fill="#a78bfa">Model: Gemini 1.5 Pro</text>
+    </g>
+
+    <!-- Metis Card -->
+    <g transform="translate(410, 40)" filter="url(#card-shadow)">
+      <rect width="380" height="140" rx="16" fill="#1e293b" stroke="#a78bfa" stroke-width="1" />
+      <text x="20" y="35" class="text-base title" font-size="20">Metis (Analyst)</text>
+      <text x="20" y="65" class="text-base desc">
+        <tspan x="20" dy="0">Pre-planning, intent recognition, disambiguation.</tspan>
+        <tspan x="20" dy="20">Feasibility check to prevent AI failure loops.</tspan>
+      </text>
+      <text x="20" y="115" class="code-text" fill="#a78bfa">Model: Gemini 1.5 Pro</text>
+    </g>
+
+    <!-- Atlas Card -->
+    <g transform="translate(820, 40)" filter="url(#card-shadow)">
+      <rect width="380" height="140" rx="16" fill="#1e293b" stroke="#38bdf8" stroke-width="1" />
+      <text x="20" y="35" class="text-base title" font-size="20">Atlas (Knowledge)</text>
+      <text x="20" y="65" class="text-base desc">
+        <tspan x="20" dy="0">Project knowledge graph construction &amp; maintenance.</tspan>
+        <tspan x="20" dy="20">Doc indexing, provides context for other agents.</tspan>
+      </text>
+      <text x="20" y="115" class="code-text" fill="#38bdf8">Model: Gemini 1.5 Flash</text>
+    </g>
+  </g>
+
+  <!-- ========================================== -->
+  <!-- TIER 1.5: ORCHESTRATION (PLANNING & QA)    -->
+  <!-- ========================================== -->
+  <g transform="translate(100, 430)">
+    <rect x="-40" y="-20" width="1280" height="200" rx="24" fill="#1A1D25" stroke="#F59E0B" stroke-width="1.5" opacity="0.8" />
+    <text x="-15" y="10" class="text-base tier-label" fill="#F59E0B">PLANNING &amp; ORCHESTRATION (任务编排层)</text>
+    
+    <!-- Prometheus & Momus Group -->
+    <g transform="translate(0, 40)">
+      <rect width="585" height="110" rx="16" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5" />
+      <text x="20" y="35" class="text-base title" font-size="18" fill="#f59e0b">Prometheus (Planner)</text>
+      <text x="20" y="65" class="text-base desc">Decomposes complex tasks into execution steps; generates plans.</text>
+      <text x="20" y="90" class="code-text" fill="#fbbf24">Model: GPT-4o / Claude 3.5</text>
+    </g>
+
+    <g transform="translate(615, 40)">
+      <rect width="585" height="110" rx="16" fill="#1e293b" stroke="#ef4444" stroke-width="1.5" />
+      <text x="20" y="35" class="text-base title" font-size="18" fill="#ef4444">Momus (Reviewer)</text>
+      <text x="20" y="65" class="text-base desc">Evaluates plan clarity, verifiability and completeness before execution.</text>
+      <text x="20" y="90" class="code-text" fill="#f87171">Model: GPT-4o / Claude 3.5</text>
+    </g>
+  </g>
+
+  <!-- ========================================== -->
+  <!-- TIER 2: SPECIALIZED TOOLS (EXECUTION)      -->
+  <!-- ========================================== -->
+  <g transform="translate(100, 660)">
+    <rect x="-40" y="-20" width="1280" height="280" rx="24" fill="#1A1D25" stroke="#3B82F6" stroke-width="1.5" />
+    <text x="-15" y="10" class="text-base tier-label" fill="#3B82F6">TIER 2 &amp; EXECUTION: SPECIALIZED TOOLS (执行与工具层)</text>
+    
+    <!-- Sisyphus - Main coding -->
+    <g transform="translate(0, 40)" filter="url(#card-shadow)">
+      <rect width="380" height="180" rx="16" fill="#1e293b" stroke="#10b981" stroke-width="2" />
+      <text x="20" y="35" class="text-base title" font-size="22" fill="#10b981">Sisyphus (Coder)</text>
+      <text x="20" y="65" class="text-base desc">
+        <tspan x="20" dy="0">Daily coding, script execution, verification.</tspan>
+        <tspan x="20" dy="20">High-speed response for development tasks.</tspan>
+      </text>
+      <rect x="20" y="115" width="340" height="40" rx="8" fill="#064e3b" opacity="0.4" />
+      <text x="35" y="140" class="code-text" fill="#6ee7b7">Model: Llama 3.1 / DeepSeek</text>
+    </g>
+
+    <!-- Tool Grid -->
+    <g transform="translate(410, 40)">
+      <!-- Tool Row 1 -->
+      <rect width="250" height="80" rx="12" fill="#1e293b" stroke="#3b82f6" stroke-opacity="0.5" />
+      <text x="15" y="25" class="text-base title" font-size="14">Frontend-UI-UX</text>
+      <text x="15" y="45" class="text-base desc">Design, Animation, Visuals</text>
+      <text x="15" y="65" class="code-text" fill="#a78bfa">Gemini 1.5 Pro (Vision)</text>
+
+      <rect x="265" width="250" height="80" rx="12" fill="#1e293b" stroke="#3b82f6" stroke-opacity="0.5" />
+      <text x="280" y="25" class="text-base title" font-size="14">Explore (Repo)</text>
+      <text x="280" y="45" class="text-base desc">Pattern discovery, modules</text>
+      <text x="280" y="65" class="code-text" fill="#10b981">Hot-Multiplex Pool</text>
+
+      <rect x="530" width="250" height="80" rx="12" fill="#1e293b" stroke="#3b82f6" stroke-opacity="0.5" />
+      <text x="545" y="25" class="text-base title" font-size="14">Librarian (Docs)</text>
+      <text x="545" y="45" class="text-base desc">APIs, OSS, Best Practices</text>
+      <text x="545" y="65" class="code-text" fill="#10b981">RAG Engine</text>
+
+      <!-- Tool Row 2 -->
+      <rect y="100" width="250" height="80" rx="12" fill="#1e293b" stroke="#3b82f6" stroke-opacity="0.5" />
+      <text x="15" y="125" class="text-base title" font-size="14">Doc-Writer</text>
+      <text x="15" y="145" class="text-base desc">Markdown &amp; Tech optimization</text>
+      <text x="15" y="165" class="code-text" fill="#10b981">Local LLM</text>
+
+      <rect x="265" y="100" width="515" height="80" rx="12" fill="#1e293b" stroke="#a855f7" stroke-opacity="0.5" />
+      <text x="280" y="125" class="text-base title" font-size="14">Multimodal-Vision</text>
+      <text x="280" y="145" class="text-base desc">Screenshots, charts, PDF analysis. Full visual capability.</text>
+      <text x="280" y="165" class="code-text" fill="#a855f7">Gemini 1.5 Pro / Claude 3.5</text>
+    </g>
+  </g>
+
+  <!-- ========================================== -->
+  <!-- TIER 4: INFRASTRUCTURE (MODELS)           -->
+  <!-- ========================================== -->
+  <g transform="translate(100, 970)">
+    <rect x="-40" y="-20" width="1280" height="180" rx="24" fill="url(#grad-infra)" stroke="#4B5563" />
+    <text x="-15" y="10" class="text-base tier-label" fill="#9CA3AF">INFRASTRUCTURE LAYER (模型基座层)</text>
+    
+    <g transform="translate(20, 40)">
+      <!-- Gemini Block -->
+      <rect width="380" height="100" rx="12" fill="#111827" stroke="#9D4EDD" stroke-width="1.5" />
+      <text x="20" y="35" class="text-base title" font-size="16" fill="#BB86FC">Google Gemini Series</text>
+      <text x="20" y="60" class="text-base desc">1M Context Window • Multi-modal • Strong Logic</text>
+      <text x="20" y="80" class="text-base" font-size="10" fill="#9D4EDD">Capabilities: Pro (High Reasoning) / Flash (Knowledge)</text>
+
+      <!-- Zhipu Block -->
+      <rect x="410" width="380" height="100" rx="12" fill="#111827" stroke="#F59E0B" stroke-width="1.5" />
+      <text x="430" y="35" class="text-base title" font-size="16" fill="#FFB74D">Zhipu AI (GLM)</text>
+      <text x="430" y="60" class="text-base desc">Strong Coding benchmarks • Balanced Orchestration</text>
+      <text x="430" y="80" class="text-base" font-size="10" fill="#F59E0B">Capabilities: GLM-5 (Planner) / 4.6V (Vision) / 4.5-Flash</text>
+
+      <!-- MiniMax Block -->
+      <rect x="820" width="380" height="100" rx="12" fill="#111827" stroke="#10B981" stroke-width="1.5" />
+      <text x="840" y="35" class="text-base title" font-size="16" fill="#6EE7B7">MiniMax M2.5</text>
+      <text x="840" y="60" class="text-base desc">State-of-the-art Speed • Cost-effective Execution</text>
+      <text x="840" y="80" class="text-base" font-size="10" fill="#10B981">Capabilities: Highspeed Coding / Large Scale Text Processing</text>
+    </g>
+  </g>
+
+  <!-- 连接箭头 (Implicit flow) -->
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#4B5563" />
+    </marker>
+  </defs>
+  <!-- Vertical Flow Lines -->
+  <path d="M700 400 V430" stroke="#4B5563" stroke-width="2" marker-end="url(#arrow)" />
+  <path d="M700 600 V660" stroke="#4B5563" stroke-width="2" marker-end="url(#arrow)" />
+  <path d="M700 940 V970" stroke="#4B5563" stroke-width="2" marker-end="url(#arrow)" />
+
+  <!-- Footer -->
+  <text x="700" y="1175" class="text-base desc" text-anchor="middle">© 2026 HotPlex Control Plane | High-Fidelity Agentic Architecture Definition</text>
+</svg>
