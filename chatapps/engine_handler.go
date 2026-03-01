@@ -531,7 +531,6 @@ func (c *StreamCallback) scheduleDeleteStartingMessage() {
 	})
 }
 
-
 // trackMessage records a message for sliding window management and final cleanup.
 func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
 	if msg == nil || msg.Metadata == nil {
