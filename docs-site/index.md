@@ -1,5 +1,4 @@
 ---
-<!-- CI Trigger: Checking asset generation permissions -->
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
@@ -42,8 +41,71 @@ features:
 
 <style>
 :root {
+  --hp-primary: #6366f1;
+  --hp-primary-soft: rgba(99, 102, 241, 0.1);
+  --hp-secondary: #10b981;
+  --hp-text-main: #1e293b;
+  --hp-text-dim: #64748b;
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #bd34fe 30%, #41d1ff);
+  --vp-home-hero-name-background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+}
+
+.audience-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  margin: 48px 0;
+}
+
+.audience-card {
+  padding: 32px;
+  border-radius: 16px;
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.audience-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--hp-primary);
+  box-shadow: 0 12px 24px -8px rgba(99, 102, 241, 0.2);
+}
+
+.audience-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 20px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--hp-text-main) 0%, var(--hp-text-dim) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.audience-card p {
+  margin: 0 0 24px 0;
+  line-height: 1.6;
+  color: var(--hp-text-dim);
+  font-size: 15px;
+}
+
+.audience-btn {
+  display: inline-block;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  text-align: center;
+  background: var(--hp-primary-soft);
+  color: var(--hp-primary) !important;
+  text-decoration: none !important;
+  transition: all 0.2s ease;
+}
+
+.audience-btn:hover {
+  background: var(--hp-primary);
+  color: white !important;
 }
 </style>
 
@@ -78,8 +140,14 @@ features:
   </p>
 </div>
 
+<div align="center">
+
 [![Architecture Overview](/images/topology.svg)](/guide/architecture)
+
+</div>
 
 ---
 
-[Explore the Architecture](/guide/architecture) · [Quick Start Guide](/guide/getting-started) · [Join the Community](https://github.com/hrygo/hotplex/discussions)
+<p align="center">
+  [Explore the Architecture](/guide/architecture) · [Quick Start Guide](/guide/getting-started) · [Join the Community](https://github.com/hrygo/hotplex/discussions)
+</p>
