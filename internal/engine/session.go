@@ -42,9 +42,29 @@ type Session struct {
 	mu     sync.RWMutex
 	closed bool
 
+	// Turn management for concurrent turn support
+	turns map[string]*TurnState // turnID -> TurnState
+
 	callback Callback
 	logger   *slog.Logger
 	ext      any // Extension payload for consumer packages
+}
+
+// GetOrCreateTurn retrieves or creates a TurnState for the given turn ID
+// This allows concurrent turns to maintain independent cleanup records
+func (s *Session) GetOrCreateTurn(turnID string) *TurnState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.turns == nil {
+		s.turns = make(map[string]*TurnState)
+	}
+
+	if _, ok := s.turns[turnID]; !ok {
+		s.turns[turnID] = NewTurnState(turnID)
+	}
+
+	return s.turns[turnID]
 }
 
 // IsAlive checks if the process is still running.
