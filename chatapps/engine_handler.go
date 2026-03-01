@@ -10,14 +10,14 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
-	eng "github.com/hrygo/hotplex/internal/engine"
+	intengine "github.com/hrygo/hotplex/internal/engine"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
 )
 
-// sessionWrapper wraps eng.Session to implement chatapps.Session interface
+// sessionWrapper wraps intengine.Session to implement chatapps.Session interface
 type sessionWrapper struct {
-	sess *eng.Session
+	sess *intengine.Session
 }
 
 func (w *sessionWrapper) ID() string {
@@ -226,7 +226,7 @@ type StreamCallback struct {
 	startingMsgRecords []msgRecord
 
 	// Turn state for concurrent turn support - stores cleanup records per turn
-	turnState *eng.TurnState
+	turnState *intengine.TurnState
 
 	// Platform-specific operations (dependency injection for testability and platform agnosticism)
 	messageOps MessageOperations
@@ -258,7 +258,7 @@ func NewStreamCallback(
 	metadata map[string]any,
 	messageOps MessageOperations,
 	sessionOps SessionOperations,
-	turnState *eng.TurnState,
+	turnState *intengine.TurnState,
 ) *StreamCallback {
 	cb := &StreamCallback{
 		ctx:        ctx,
@@ -560,7 +560,7 @@ func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
 
 	// Record the message to turn state (for concurrent turn support)
 	if c.turnState != nil {
-		c.turnState.AddCleanupMsg(eng.CleanupMsgRecord{
+		c.turnState.AddCleanupMsg(intengine.CleanupMsgRecord{
 			ChannelID: ch,
 			MessageTS: ts,
 			ZoneIndex: zone,
@@ -590,7 +590,7 @@ func (c *StreamCallback) enforceSlidingWindow(zone int) {
 
 // enforceSlidingWindowWithTurnState enforces sliding window using turnState
 func (c *StreamCallback) enforceSlidingWindowWithTurnState(zone int) {
-	c.turnState.EnforceSlidingWindow(zone, func(rec eng.CleanupMsgRecord) {
+	c.turnState.EnforceSlidingWindow(zone, func(rec intengine.CleanupMsgRecord) {
 		if c.messageOps == nil {
 			return
 		}
@@ -1450,8 +1450,12 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 
 	// Get or create turn state for concurrent turn support
 	// Each turn maintains independent cleanup records to prevent message leakage
-	sess, _ := h.engine.GetSession(msg.SessionID)
-	turnState := sess.GetOrCreateTurn(msg.SessionID + ":" + time.Now().Format("150405.000"))
+	var turnState *intengine.TurnState
+	if sess, ok := h.engine.GetSession(msg.SessionID); ok && sess != nil {
+		turnState = sess.GetOrCreateTurn(msg.SessionID + ":" + time.Now().Format("150405.000"))
+	} else {
+		h.logger.Debug("Session not found, skipping turn state creation", "session_id", msg.SessionID)
+	}
 
 	// Create stream callback with injected dependencies
 	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, msg.Metadata, messageOps, sessionOps, turnState)
