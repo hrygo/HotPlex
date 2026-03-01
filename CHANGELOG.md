@@ -1,5 +1,29 @@
 # CHANGELOG.md
 
+## [v0.15.5] - 2026-03-01
+
+### 🏗️ Interface-Based Architecture Refactoring
+
+This release delivers a major architectural refactoring of the ChatApps layer, eliminating platform-specific type assertions through dependency injection and interface-based design.
+
+### Added
+- **MessageOperations Interface** - New interface for platform-agnostic message operations (DeleteMessage, AddReaction, RemoveReaction, UpdateMessage).
+- **SessionOperations Interface** - Abstracted session management operations for better testability.
+- **Engine Interface Abstraction** - Decoupled ChatApps from concrete engine implementation via dependency injection.
+- **Interface Compliance Tests** - Comprehensive test suite (278 lines) verifying interface implementations across all adapters.
+- **Security & Troubleshooting Guides** - New documentation for security overview and operational troubleshooting.
+- **Architecture Diagrams** - Added architecture-flow, security-layers, and session-lifecycle SVG diagrams.
+
+### Changed
+- **Type Assertions Eliminated** - Removed 16+ platform-specific type assertions (`adapter.(*slack.Adapter)`) in favor of interface-based dependency injection.
+- **SOLID Compliance** - Achieved full SOLID principle compliance (5/5) with dependency inversion and interface segregation.
+- **Documentation Restructure** - Reorganized docs-site navigation with improved sidebar structure and enhanced SDK guides.
+
+### Fixed
+- **Code Formatting** - Corrected indentation issues in engine_handler.go and interface_test.go after merge.
+
+---
+
 ## [v0.15.4] - 2026-03-01
 
 ### 📚 Documentation & Script Refinements
