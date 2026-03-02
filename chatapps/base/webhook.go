@@ -123,5 +123,12 @@ func (r *WebhookRunner) WaitDefault() bool {
 
 // Stop is an alias for WaitDefault for API consistency with adapters.
 func (r *WebhookRunner) Stop() bool {
-	return r.WaitDefault()
+	result := r.WaitDefault()
+	
+	// Shutdown deduplicator to stop cleanup goroutine
+	if r.deduplicator != nil {
+		r.deduplicator.Shutdown()
+	}
+	
+	return result
 }
