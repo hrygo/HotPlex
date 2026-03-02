@@ -252,7 +252,8 @@ macos_restart() {
 macos_status() {
     if launchctl list "$SERVICE_NAME" &>/dev/null; then
         local pid
-        pid=$(launchctl list "$SERVICE_NAME" 2>/dev/null | grep -oE '^[0-9]+' || echo "")
+        # Use concise format: "PID\tExitCode\tLabel"
+        pid=$(launchctl list | grep "^ *[0-9]*.*${SERVICE_NAME}" | grep -oE '^[0-9]+' || echo "")
         if [[ -n "$pid" && "$pid" != "0" ]]; then
             printf "${GREEN}✅ HotPlex service is running (PID: $pid)${NC}\n"
         else
