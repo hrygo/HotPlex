@@ -52,6 +52,10 @@ This release focuses on ChatApps user experience refinements, goroutine safety i
 - **macOS Launchctl** - Corrected PID extraction logic in launch daemon scripts for reliable process management.
 - **CI Arithmetic** - Fixed arithmetic evaluation failures under `set -e` in SVG-to-PNG conversion scripts.
 
+#### Daemon & Session Management
+- **Make Restart POSIX Compliance** - Replaced `nohup` with POSIX-compliant stdin redirection (`< /dev/null`) in daemon restart target to ensure background process survives Ctrl+C and works across all Unix platforms.
+- **Reset Command Race Condition** - Fixed `/reset` command execution order (terminate process → delete marker → delete session file) to prevent "Session ID is already in use" errors caused by concurrent message processing recreating markers after deletion.
+
 ### Documentation
 
 - **Slack Architecture** - Fixed broken link to `slack-architecture.md` in developer documentation.
