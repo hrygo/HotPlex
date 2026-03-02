@@ -390,13 +390,14 @@ func (c *StreamCallback) handleThinking(data any) error {
 		"thinking_channel_id", c.thinkingChannelID,
 		"thinking_message_ts", c.thinkingMessageTS)
 
+	// Reaction lifecycle: 📥 → 🧠
+	// Always update reaction state regardless of content (reaction shows processing progress)
+	c.setReaction("brain")
+
 	// Skip empty thinking content if not the first event
 	if thinkingContent == "" && !c.isFirst {
 		return nil
 	}
-
-	// Reaction lifecycle: 📥 → 🧠
-	c.setReaction("brain")
 
 	c.mu.Lock()
 	sessionStartSent := c.sessionStartSent
