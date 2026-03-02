@@ -842,9 +842,10 @@ func (a *Adapter) handleSocketModeSlashCommand(evt socketmode.Event) {
 	result, err := a.cmdRegistry.Execute(context.Background(), req, callback)
 	if err != nil {
 		a.Logger().Error("Command execution failed", "command", cmd.Command, "error", err)
-	} else if result != nil && result.Message != "" {
-		_ = a.sendCommandResponse(cmd.ResponseURL, cmd.ChannelID, "", result.Message)
 	}
+	// Issue #130: Don't send result.Message separately when using progress callback
+	// The command executor already sends completion message via emitter.Complete()
+	// Sending result.Message would cause duplicate messages
 }
 
 // handleSocketModeInteractive handles interactive events via Socket Mode
@@ -1499,10 +1500,9 @@ func (a *Adapter) processSlashCommand(cmd SlashCommand) {
 		return
 	}
 
-	// Send response
-	if result != nil && result.Message != "" {
-		_ = a.sendCommandResponse(cmd.ResponseURL, cmd.ChannelID, cmd.ThreadTS, result.Message)
-	}
+	// Issue #130: Don't send result.Message separately when using progress callback
+	// The command executor already sends completion message via emitter.Complete()
+	// Sending result.Message would cause duplicate messages
 }
 
 // =============================================================================
@@ -1598,10 +1598,8 @@ func (a *Adapter) processHashCommand(cmd string, userID, channelID, threadTS str
 			a.Logger().Error("Command execution failed", "command", cmd, "error", err)
 			return
 		}
-		// Send response if needed
-		if result != nil && result.Message != "" {
-			_ = a.sendCommandResponse("", channelID, threadTS, result.Message)
-		}
+		// Issue #130: Don't send result.Message separately when using progress callback
+		// The command executor already sends completion message via emitter.Complete()
 	})
 
 	return true
