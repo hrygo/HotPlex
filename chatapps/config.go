@@ -21,7 +21,39 @@ type PlatformConfig struct {
 	TaskInstructions string                  `yaml:"task_instructions"`
 	Engine           EngineConfig            `yaml:"engine"`
 	Provider         provider.ProviderConfig `yaml:"provider"`
+	Security         SecurityConfig          `yaml:"security"`
+	DingTalk         DingTalkConfig          `yaml:"dingtalk"`
+	WhatsApp         WhatsAppConfig          `yaml:"whatsapp"`
 	Options          map[string]any          `yaml:"options,omitempty"`
+}
+
+type SecurityConfig struct {
+	VerifySignature bool             `yaml:"verify_signature"`
+	Permission      PermissionConfig `yaml:"permission"`
+}
+
+type PermissionConfig struct {
+	DMPolicy              string   `yaml:"dm_policy"`
+	GroupPolicy           string   `yaml:"group_policy"`
+	BotUserID             string   `yaml:"bot_user_id"`
+	AllowedUsers          []string `yaml:"allowed_users"`
+	BlockedUsers          []string `yaml:"blocked_users"`
+	SlashCommandRateLimit float64  `yaml:"slash_command_rate_limit"`
+}
+
+type DingTalkConfig struct {
+	AppID         string `yaml:"app_id"`
+	AppSecret     string `yaml:"app_secret"`
+	CallbackToken string `yaml:"callback_token"`
+	CallbackKey   string `yaml:"callback_key"`
+	MaxMessageLen int    `yaml:"max_message_len"`
+}
+
+type WhatsAppConfig struct {
+	PhoneNumberID string `yaml:"phone_number_id"`
+	AccessToken   string `yaml:"access_token"`
+	VerifyToken   string `yaml:"verify_token"`
+	APIVersion    string `yaml:"api_version"`
 }
 
 type EngineConfig struct {

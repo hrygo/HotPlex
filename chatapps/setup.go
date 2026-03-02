@@ -37,65 +37,143 @@ func Setup(ctx context.Context, logger *slog.Logger) (http.Handler, *AdapterMana
 	manager := NewAdapterManager(logger)
 
 	// Telegram
-	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
-		setupPlatform(ctx, "telegram", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-			return telegram.NewAdapter(telegram.Config{
-				BotToken:    token,
-				WebhookURL:  os.Getenv("TELEGRAM_WEBHOOK_URL"),
-				SecretToken: os.Getenv("TELEGRAM_SECRET_TOKEN"),
-			}, logger, base.WithoutServer())
-		})
-	}
+	setupPlatform(ctx, "telegram", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
+		token := os.Getenv("TELEGRAM_BOT_TOKEN")
+		if token == "" {
+			return nil
+		}
+		cfg := telegram.Config{
+			BotToken:    token,
+			WebhookURL:  os.Getenv("TELEGRAM_WEBHOOK_URL"),
+			SecretToken: os.Getenv("TELEGRAM_SECRET_TOKEN"),
+		}
+		if pc != nil {
+			cfg.SystemPrompt = pc.SystemPrompt
+		}
+		return telegram.NewAdapter(cfg, logger, base.WithoutServer())
+	})
 
 	// Discord
-	if token := os.Getenv("DISCORD_BOT_TOKEN"); token != "" {
-		setupPlatform(ctx, "discord", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-			return discord.NewAdapter(discord.Config{
-				BotToken:  token,
-				PublicKey: os.Getenv("DISCORD_PUBLIC_KEY"),
-			}, logger, base.WithoutServer())
-		})
-	}
+	setupPlatform(ctx, "discord", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
+		token := os.Getenv("DISCORD_BOT_TOKEN")
+		if token == "" {
+			return nil
+		}
+		cfg := discord.Config{
+			BotToken:  token,
+			PublicKey: os.Getenv("DISCORD_PUBLIC_KEY"),
+		}
+		if pc != nil {
+			cfg.SystemPrompt = pc.SystemPrompt
+		}
+		return discord.NewAdapter(cfg, logger, base.WithoutServer())
+	})
 
 	// Slack
-	if token := os.Getenv("SLACK_BOT_TOKEN"); token != "" {
-		setupPlatform(ctx, "slack", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-			mode := os.Getenv("SLACK_MODE")
-			if mode == "" {
-				mode = "http" // default to http
+	setupPlatform(ctx, "slack", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
+		token := os.Getenv("SLACK_BOT_TOKEN")
+		if token == "" {
+			return nil
+		}
+
+		mode := os.Getenv("SLACK_MODE")
+		if mode == "" {
+			mode = "http" // default to http
+		}
+		config := &slack.Config{
+			BotToken:      token,
+			AppToken:      os.Getenv("SLACK_APP_TOKEN"),
+			SigningSecret: os.Getenv("SLACK_SIGNING_SECRET"),
+			Mode:          mode,
+			ServerAddr:    os.Getenv("SLACK_SERVER_ADDR"),
+		}
+
+		// Apply YAML config if available
+		if pc != nil {
+			config.SystemPrompt = pc.SystemPrompt
+
+			// Map Security & Permission from YAML
+			config.BotUserID = pc.Security.Permission.BotUserID
+			config.DMPolicy = pc.Security.Permission.DMPolicy
+			config.GroupPolicy = pc.Security.Permission.GroupPolicy
+			config.AllowedUsers = pc.Security.Permission.AllowedUsers
+			config.BlockedUsers = pc.Security.Permission.BlockedUsers
+			config.SlashCommandRateLimit = pc.Security.Permission.SlashCommandRateLimit
+
+			// AppToken fallback
+			if config.AppToken == "" && pc.Options != nil {
+				if appToken, ok := pc.Options["app_token"].(string); ok {
+					config.AppToken = os.ExpandEnv(appToken)
+				}
 			}
-			return slack.NewAdapter(&slack.Config{
-				BotToken:      token,
-				AppToken:      os.Getenv("SLACK_APP_TOKEN"),
-				SigningSecret: os.Getenv("SLACK_SIGNING_SECRET"),
-				Mode:          mode,
-				ServerAddr:    os.Getenv("SLACK_SERVER_ADDR"),
-			}, logger, base.WithoutServer())
-		})
-	}
+		}
+
+		return slack.NewAdapter(config, logger, base.WithoutServer())
+	})
 
 	// DingTalk
-	if appID := os.Getenv("DINGTALK_APP_ID"); appID != "" {
-		setupPlatform(ctx, "dingtalk", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-			return dingtalk.NewAdapter(dingtalk.Config{
-				AppID:         appID,
-				AppSecret:     os.Getenv("DINGTALK_APP_SECRET"),
-				CallbackToken: os.Getenv("DINGTALK_CALLBACK_TOKEN"),
-				CallbackKey:   os.Getenv("DINGTALK_CALLBACK_KEY"),
-			}, logger, base.WithoutServer())
-		})
-	}
+	setupPlatform(ctx, "dingtalk", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
+		appID := os.Getenv("DINGTALK_APP_ID")
+		appSecret := os.Getenv("DINGTALK_APP_SECRET")
+		if pc != nil && pc.DingTalk.AppID != "" {
+			appID = pc.DingTalk.AppID
+			appSecret = pc.DingTalk.AppSecret
+		}
+
+		if appID == "" {
+			return nil
+		}
+
+		cfg := dingtalk.Config{
+			AppID:         appID,
+			AppSecret:     appSecret,
+			CallbackToken: os.Getenv("DINGTALK_CALLBACK_TOKEN"),
+			CallbackKey:   os.Getenv("DINGTALK_CALLBACK_KEY"),
+		}
+		if pc != nil {
+			cfg.SystemPrompt = pc.SystemPrompt
+			if pc.DingTalk.CallbackToken != "" {
+				cfg.CallbackToken = pc.DingTalk.CallbackToken
+			}
+			if pc.DingTalk.CallbackKey != "" {
+				cfg.CallbackKey = pc.DingTalk.CallbackKey
+			}
+			if pc.DingTalk.MaxMessageLen > 0 {
+				cfg.MaxMessageLen = pc.DingTalk.MaxMessageLen
+			}
+		}
+		return dingtalk.NewAdapter(cfg, logger, base.WithoutServer())
+	})
 
 	// WhatsApp
-	if phoneID := os.Getenv("WHATSAPP_PHONE_NUMBER_ID"); phoneID != "" {
-		setupPlatform(ctx, "whatsapp", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-			return whatsapp.NewAdapter(whatsapp.Config{
-				PhoneNumberID: phoneID,
-				AccessToken:   os.Getenv("WHATSAPP_ACCESS_TOKEN"),
-				VerifyToken:   os.Getenv("WHATSAPP_VERIFY_TOKEN"),
-			}, logger, base.WithoutServer())
-		})
-	}
+	setupPlatform(ctx, "whatsapp", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
+		phoneID := os.Getenv("WHATSAPP_PHONE_NUMBER_ID")
+		accessToken := os.Getenv("WHATSAPP_ACCESS_TOKEN")
+		if pc != nil && pc.WhatsApp.PhoneNumberID != "" {
+			phoneID = pc.WhatsApp.PhoneNumberID
+			accessToken = pc.WhatsApp.AccessToken
+		}
+
+		if phoneID == "" {
+			return nil
+		}
+
+		cfg := whatsapp.Config{
+			PhoneNumberID: phoneID,
+			AccessToken:   accessToken,
+			VerifyToken:   os.Getenv("WHATSAPP_VERIFY_TOKEN"),
+		}
+		if pc != nil {
+			cfg.SystemPrompt = pc.SystemPrompt
+			if pc.WhatsApp.VerifyToken != "" {
+				cfg.VerifyToken = pc.WhatsApp.VerifyToken
+			}
+			if pc.WhatsApp.APIVersion != "" {
+				cfg.APIVersion = pc.WhatsApp.APIVersion
+			}
+		}
+		return whatsapp.NewAdapter(cfg, logger, base.WithoutServer())
+	})
 
 	if err := manager.StartAll(ctx); err != nil {
 		return nil, nil, fmt.Errorf("start all adapters: %w", err)

@@ -274,6 +274,6 @@ func TestAdapterManager_GetSessionOperations(t *testing.T) {
 // Helper Functions
 // =============================================================================
 
-func newTestLogger(t *testing.T) *slog.Logger {
+func newTestLogger(_ *testing.T) *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

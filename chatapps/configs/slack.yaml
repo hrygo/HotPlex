@@ -18,9 +18,9 @@ provider:
 # Workspace & Engine Settings
 # -----------------------------------------------------------------------------
 engine:
-  work_dir: ~/HotPlex              # Agent's working directory
-  # timeout: 30m                   # Max wait for AI response
-  # idle_timeout: 30m              # Session persistence time
+  work_dir: ~/.slack/BOT_U0AHRCL1KCM/hotplex    # Agent's working directory
+  # timeout: 30m                                # Max wait for AI response
+  # idle_timeout: 30m                           # Session persistence time
 
 # -----------------------------------------------------------------------------
 # Connection Settings
@@ -97,7 +97,7 @@ security:
     group_policy: allow
     
     # [Required] Bot's own User ID (e.g., U12345678) for mention detection
-    bot_user_id: "U0AGR5U9JMB"
+    bot_user_id: "U0AHRCL1KCM"
     
     # Whitelist/Blacklist (Leave empty to skip)
     allowed_users: []      # Example: ["U12345", "U67890"]
