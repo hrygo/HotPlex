@@ -839,13 +839,11 @@ func (a *Adapter) handleSocketModeSlashCommand(evt socketmode.Event) {
 	// Execute command via registry
 	// Note: Using context.Background() is acceptable here as commands run asynchronously
 	// and should not be cancelled if the original HTTP request context is cancelled
-	result, err := a.cmdRegistry.Execute(context.Background(), req, callback)
+	// Issue #130: Don't send result.Message separately - emitter.Complete() already sends it
+	_, err := a.cmdRegistry.Execute(context.Background(), req, callback)
 	if err != nil {
 		a.Logger().Error("Command execution failed", "command", cmd.Command, "error", err)
 	}
-	// Issue #130: Don't send result.Message separately when using progress callback
-	// The command executor already sends completion message via emitter.Complete()
-	// Sending result.Message would cause duplicate messages
 }
 
 // handleSocketModeInteractive handles interactive events via Socket Mode
@@ -1493,16 +1491,13 @@ func (a *Adapter) processSlashCommand(cmd SlashCommand) {
 	}
 
 	// Execute command via registry
-	result, err := a.cmdRegistry.Execute(context.Background(), req, callback)
+	// Issue #130: Don't send result.Message separately - emitter.Complete() already sends it
+	_, err := a.cmdRegistry.Execute(context.Background(), req, callback)
 	if err != nil {
 		a.Logger().Error("Command execution failed", "command", cmd.Command, "error", err)
 		_ = a.sendCommandResponse(cmd.ResponseURL, cmd.ChannelID, cmd.ThreadTS, "Command execution failed: "+err.Error())
 		return
 	}
-
-	// Issue #130: Don't send result.Message separately when using progress callback
-	// The command executor already sends completion message via emitter.Complete()
-	// Sending result.Message would cause duplicate messages
 }
 
 // =============================================================================
@@ -1593,13 +1588,12 @@ func (a *Adapter) processHashCommand(cmd string, userID, channelID, threadTS str
 
 	// Execute command via registry (async)
 	panicx.SafeGo(a.Logger(), func() {
-		result, err := a.cmdRegistry.Execute(context.Background(), req, callback)
+		// Issue #130: Don't send result.Message separately - emitter.Complete() already sends it
+		_, err := a.cmdRegistry.Execute(context.Background(), req, callback)
 		if err != nil {
 			a.Logger().Error("Command execution failed", "command", cmd, "error", err)
 			return
 		}
-		// Issue #130: Don't send result.Message separately when using progress callback
-		// The command executor already sends completion message via emitter.Complete()
 	})
 
 	return true
