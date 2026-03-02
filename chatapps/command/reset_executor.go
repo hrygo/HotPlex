@@ -49,9 +49,9 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 	// Define progress steps
 	steps := []ProgressStep{
 		{Name: "find_session", Message: "Finding session...", Status: "pending"},
-		{Name: "delete_claude", Message: "Deleting session file...", Status: "pending"},
-		{Name: "delete_marker", Message: "Deleting marker...", Status: "pending"},
 		{Name: "terminate", Message: "Terminating process...", Status: "pending"},
+		{Name: "delete_marker", Message: "Deleting marker...", Status: "pending"},
+		{Name: "delete_claude", Message: "Deleting session file...", Status: "pending"},
 	}
 
 	emitter := NewProgressEmitter(e.Command(), callback, steps)
@@ -75,11 +75,23 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 
 	_ = emitter.Success(0, "Session located")
 
-	// Step 2: Delete Claude Code session file (40%)
+	// Step 2: Terminate session FIRST (40%)
+	// This prevents race conditions where new messages could recreate the marker
 	_ = emitter.Running(1)
 
-	deletedCount := e.deleteClaudeCodeSessionFile(providerSessionID)
-	_ = emitter.Success(1, fmt.Sprintf("Deleted %d file(s)", deletedCount))
+	// Note: Adapter cleanup is handled by engine.StopSession callback
+	// Adapters will clean up their own state (aggregator buffers, etc.)
+
+	if err := e.engine.StopSession(sessionID, "user_requested_reset"); err != nil {
+		_ = emitter.Error(1, fmt.Sprintf("Failed: %v", err))
+		_ = emitter.Emit("Reset Failed")
+		return &Result{
+			Success: false,
+			Message: fmt.Sprintf("Failed to terminate session: %v", err),
+		}, nil
+	}
+
+	_ = emitter.Success(1, "Process terminated")
 
 	// Step 3: Delete HotPlex marker (60%)
 	_ = emitter.Running(2)
@@ -91,25 +103,14 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 		_ = emitter.Success(2, "Marker cleanup done")
 	}
 
-	// Step 4: Terminate session (80%)
+	// Step 4: Delete Claude Code session file (80%)
 	_ = emitter.Running(3)
 
-	// Note: Adapter cleanup is handled by engine.StopSession callback
-	// Adapters will clean up their own state (aggregator buffers, etc.)
-
-	if err := e.engine.StopSession(sessionID, "user_requested_reset"); err != nil {
-		_ = emitter.Error(3, fmt.Sprintf("Failed: %v", err))
-		_ = emitter.Emit("Reset Failed")
-		return &Result{
-			Success: false,
-			Message: fmt.Sprintf("Failed to terminate session: %v", err),
-		}, nil
-	}
-
-	_ = emitter.Success(3, "Process terminated")
-	_ = emitter.Emit("Resetting Context")
+	deletedCount := e.deleteClaudeCodeSessionFile(providerSessionID)
+	_ = emitter.Success(3, fmt.Sprintf("Deleted %d file(s)", deletedCount))
 
 	// Complete
+	_ = emitter.Emit("Resetting Context")
 	_ = emitter.Complete("Context reset. Ready for fresh start!")
 
 	return &Result{
@@ -123,7 +124,7 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 	}, nil
 }
 
-// deleteClaudeCodeSessionFile renames the Claude Code session file
+// deleteClaudeCodeSessionFile deletes the Claude Code session file
 func (e *ResetExecutor) deleteClaudeCodeSessionFile(providerSessionID string) int {
 	if providerSessionID == "" {
 		return 0
@@ -144,10 +145,9 @@ func (e *ResetExecutor) deleteClaudeCodeSessionFile(providerSessionID string) in
 	workspaceDir := filepath.Join(projectsDir, workspaceKey)
 
 	sessionPath := filepath.Join(workspaceDir, providerSessionID+".jsonl")
-	deletedPath := sessionPath + ".deleted"
 
 	if _, err := os.Stat(sessionPath); err == nil {
-		if err := os.Rename(sessionPath, deletedPath); err == nil {
+		if err := os.Remove(sessionPath); err == nil {
 			return 1
 		}
 	}
@@ -166,10 +166,9 @@ func (e *ResetExecutor) deleteHotPlexMarker(providerSessionID string) bool {
 	}
 
 	markerPath := filepath.Join(homeDir, ".hotplex", "sessions", providerSessionID+".lock")
-	deletedPath := markerPath + ".deleted"
 
 	if _, err := os.Stat(markerPath); err == nil {
-		if err := os.Rename(markerPath, deletedPath); err == nil {
+		if err := os.Remove(markerPath); err == nil {
 			return true
 		}
 	}
