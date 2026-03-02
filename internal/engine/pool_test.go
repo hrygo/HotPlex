@@ -138,7 +138,10 @@ func TestSessionPool_buildCLIArgs(t *testing.T) {
 		BaseSystemPrompt: "You are helpful",
 	}, "/tmp/claude", prv)
 
-	args := pool.buildCLIArgs("test-session-id", logger, "unit test prompt", "unit test instructions")
+	args := pool.buildCLIArgs("test-session-id", logger, "unit test prompt", SessionConfig{
+		TaskInstructions: "unit test instructions",
+		WorkDir:          "/tmp/test",
+	})
 
 	// Check essential args
 	if !containsInSlice(args, "--print") {
@@ -180,7 +183,7 @@ func TestSessionPool_buildCLIArgs_Resume(t *testing.T) {
 	}
 	defer func() { _ = pool.markerStore.Delete("existing-session") }()
 
-	args := pool.buildCLIArgs("existing-session", logger, "unit test resume prompt", "")
+	args := pool.buildCLIArgs("existing-session", logger, "unit test resume prompt", SessionConfig{})
 
 	// Should have --resume for existing sessions
 	if !containsInSlice(args, "--resume") {
@@ -227,7 +230,7 @@ func TestStartSession_ResolvesRelativeWorkDir(t *testing.T) {
 			sessCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			args := pool.buildCLIArgs("test-session", logger, "test", "")
+			args := pool.buildCLIArgs("test-session", logger, "test", SessionConfig{WorkDir: tc.workDir})
 			cmd := exec.CommandContext(sessCtx, "/tmp/claude", args...)
 
 			// Apply the same path resolution logic as in startSession

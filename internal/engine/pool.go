@@ -237,7 +237,7 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 		"provider_session_id", providerSessionID,
 	)
 
-	args := sm.buildCLIArgs(providerSessionID, sessLog, prompt, cfg.TaskInstructions)
+	args := sm.buildCLIArgs(providerSessionID, sessLog, prompt, cfg)
 	cmd := exec.CommandContext(sessCtx, sm.cliPath, args...)
 
 	// Clear CLAUDECODE env var to allow nested CLI sessions
@@ -345,14 +345,15 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 	return sess, nil
 }
 
-func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logger, prompt string, taskInstructions string) []string {
+func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logger, prompt string, cfg SessionConfig) []string {
 	// Build ProviderSessionOptions
 	opts := &provider.ProviderSessionOptions{
+		WorkDir:          cfg.WorkDir,
 		PermissionMode:   sm.opts.PermissionMode,
 		AllowedTools:     sm.opts.AllowedTools,
 		DisallowedTools:  sm.opts.DisallowedTools,
 		BaseSystemPrompt: sm.opts.BaseSystemPrompt,
-		TaskInstructions: taskInstructions,
+		TaskInstructions: cfg.TaskInstructions,
 		InitialPrompt:    prompt,
 		SessionID:        providerSessionID,
 	}
@@ -364,11 +365,51 @@ func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logg
 		sessLog.Info("Resuming existing persistent CLI session")
 	} else {
 		opts.ProviderSessionID = providerSessionID
+
+		// Critical: Delete stale CLI session file before creating new marker
+		// This prevents "Session ID is already in use" errors when:
+		// - /reset deleted the marker but not the CLI session file (old bug)
+		// - Daemon restart with stale CLI session files on disk
+		if err := sm.deleteCLISessionFile(providerSessionID, cfg.WorkDir); err != nil {
+			sessLog.Debug("Cleaned up stale CLI session file", "error", err)
+		}
+
 		_ = sm.markerStore.Create(providerSessionID)
 		sessLog.Info("Creating new persistent CLI session")
 	}
 
 	return sm.provider.BuildCLIArgs(providerSessionID, opts)
+}
+
+// deleteCLISessionFile deletes the CLI session file from disk.
+// This is necessary when starting a fresh session to prevent "Session ID is already in use" errors
+// from CLI providers that check for existing session files on disk.
+func (sm *SessionPool) deleteCLISessionFile(providerSessionID string, workDir string) error {
+	if providerSessionID == "" {
+		return nil
+	}
+
+	// Derive workspace directory from workDir
+	cwd := workDir
+	if cwd == "" {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			cwd = os.TempDir()
+		}
+	}
+
+	// Claude Code stores sessions in ~/.claude/projects/<workspace-key>/<session-id>.jsonl
+	projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
+	workspaceKey := strings.ReplaceAll(cwd, "/", "-")
+	sessionPath := filepath.Join(projectsDir, workspaceKey, providerSessionID+".jsonl")
+
+	// Best effort deletion - ignore errors if file doesn't exist
+	if err := os.Remove(sessionPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove CLI session file: %w", err)
+	}
+
+	return nil
 }
 
 func setupCmdPipes(cmd *exec.Cmd) (io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {
