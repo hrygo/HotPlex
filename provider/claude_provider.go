@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -430,6 +432,37 @@ func (p *ClaudeCodeProvider) ValidateBinary() (string, error) {
 // GetMarkerDir returns the session marker directory path.
 func (p *ClaudeCodeProvider) GetMarkerDir() string {
 	return p.markerStore.Dir()
+}
+
+// CleanupSession overrides ProviderBase to delete Claude Code's project session file.
+// This is necessary when starting a fresh session to prevent "Session ID is already in use" errors
+// or when executing a /reset command to completely scrub the context.
+func (p *ClaudeCodeProvider) CleanupSession(providerSessionID string, workDir string) error {
+	if providerSessionID == "" {
+		return nil
+	}
+
+	cwd := workDir
+	if cwd == "" {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			cwd = os.TempDir()
+		}
+	}
+
+	// Claude Code stores sessions in ~/.claude/projects/<workspace-key>/<providerSessionID>.jsonl
+	projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
+	workspaceKey := strings.ReplaceAll(cwd, "/", "-")
+	sessionPath := filepath.Join(projectsDir, workspaceKey, providerSessionID+".jsonl")
+
+	// Best effort deletion
+	if err := os.Remove(sessionPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove Claude Code session file: %w", err)
+	}
+
+	p.logger.Debug("Cleaned up Claude Code session file", "path", sessionPath)
+	return nil
 }
 
 // CheckSessionMarker checks if a session marker exists for the given ID.

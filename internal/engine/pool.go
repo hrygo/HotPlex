@@ -165,6 +165,22 @@ func (sm *SessionPool) ListActiveSessions() []*Session {
 	return list
 }
 
+// DeleteMarker removes the HotPlex session marker file, preventing future resumption.
+func (sm *SessionPool) DeleteMarker(providerSessionID string) error {
+	if providerSessionID == "" {
+		return nil
+	}
+	return sm.markerStore.Delete(providerSessionID)
+}
+
+// CleanupSessionFiles proxies the cleanup call to the underlying provider.
+func (sm *SessionPool) CleanupSessionFiles(providerSessionID string, workDir string) error {
+	if sm.provider != nil {
+		return sm.provider.CleanupSession(providerSessionID, workDir)
+	}
+	return nil
+}
+
 // cleanupSessionLocked stops the process and removes from map. Caller must hold lock.
 func (sm *SessionPool) cleanupSessionLocked(sessionID string) error {
 	sess, ok := sm.sessions[sessionID]
@@ -370,8 +386,8 @@ func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logg
 		// This prevents "Session ID is already in use" errors when:
 		// - /reset deleted the marker but not the CLI session file (old bug)
 		// - Daemon restart with stale CLI session files on disk
-		if err := sm.deleteCLISessionFile(providerSessionID, cfg.WorkDir); err != nil {
-			sessLog.Debug("Cleaned up stale CLI session file", "error", err)
+		if err := sm.provider.CleanupSession(providerSessionID, cfg.WorkDir); err != nil {
+			sessLog.Warn("Failed to cleanup stale CLI session file", "error", err)
 		}
 
 		_ = sm.markerStore.Create(providerSessionID)
@@ -379,37 +395,6 @@ func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logg
 	}
 
 	return sm.provider.BuildCLIArgs(providerSessionID, opts)
-}
-
-// deleteCLISessionFile deletes the CLI session file from disk.
-// This is necessary when starting a fresh session to prevent "Session ID is already in use" errors
-// from CLI providers that check for existing session files on disk.
-func (sm *SessionPool) deleteCLISessionFile(providerSessionID string, workDir string) error {
-	if providerSessionID == "" {
-		return nil
-	}
-
-	// Derive workspace directory from workDir
-	cwd := workDir
-	if cwd == "" {
-		var err error
-		cwd, err = os.Getwd()
-		if err != nil {
-			cwd = os.TempDir()
-		}
-	}
-
-	// Claude Code stores sessions in ~/.claude/projects/<workspace-key>/<session-id>.jsonl
-	projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
-	workspaceKey := strings.ReplaceAll(cwd, "/", "-")
-	sessionPath := filepath.Join(projectsDir, workspaceKey, providerSessionID+".jsonl")
-
-	// Best effort deletion - ignore errors if file doesn't exist
-	if err := os.Remove(sessionPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove CLI session file: %w", err)
-	}
-
-	return nil
 }
 
 func setupCmdPipes(cmd *exec.Cmd) (io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {

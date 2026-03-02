@@ -58,6 +58,9 @@ type Provider interface {
 	// ValidateBinary checks if the CLI binary is available and returns its path.
 	ValidateBinary() (string, error)
 
+	// CleanupSession cleans up provider-specific session files from disk (e.g. for /reset).
+	CleanupSession(providerSessionID string, workDir string) error
+
 	// Name returns the provider name for logging and identification.
 	Name() string
 }
@@ -215,4 +218,10 @@ func (p *ProviderBase) ValidateBinary() (string, error) {
 		return p.binaryPath, nil
 	}
 	return exec.LookPath(p.meta.BinaryName)
+}
+
+// CleanupSession provides a default no-op implementation for cleaning up session files.
+// Providers that store session files on disk (like Claude Code) should override this.
+func (p *ProviderBase) CleanupSession(providerSessionID string, workDir string) error {
+	return nil
 }

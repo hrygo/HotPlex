@@ -108,7 +108,7 @@ func TestChatAppsWorkDirFunction(t *testing.T) {
 		t.Fatalf("Failed to get current working directory: %v", err)
 	}
 
-	workDirFn := func(sessionID string, configWorkDir string) string {
+	workDirFn := func(configWorkDir string) string {
 		if configWorkDir != "" {
 			workDir := expandPathFixed(configWorkDir)
 			return workDir
@@ -129,7 +129,7 @@ func TestChatAppsWorkDirFunction(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			workDir := workDirFn("test-session", tc.configWorkDir)
+			workDir := workDirFn(tc.configWorkDir)
 
 			if workDir != tc.expectedWorkDir {
 				t.Errorf("workDirFn(%q) = %q, want %q", tc.configWorkDir, workDir, tc.expectedWorkDir)

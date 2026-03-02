@@ -716,6 +716,21 @@ func (r *Engine) ResetSessionProvider(sessionID string) {
 	}
 }
 
+// CleanupSessionFiles deletes all session files associated with the provider session.
+// This handles the complete removal of context on disk for commands like /reset.
+func (r *Engine) CleanupSessionFiles(sessionID string) error {
+	if pool, ok := r.manager.(*intengine.SessionPool); ok {
+		if sess, exists := pool.GetSession(sessionID); exists {
+			// Also delete the hotplex lock/marker so it won't be resumed next time
+			if err := pool.DeleteMarker(sess.ProviderSessionID); err != nil {
+				r.logger.Warn("Failed to delete session marker", "error", err)
+			}
+			return pool.CleanupSessionFiles(sess.ProviderSessionID, sess.Config.WorkDir)
+		}
+	}
+	return nil
+}
+
 // GetSession retrieves an active session by sessionID.
 // Returns the session and true if found, or nil and false if not found.
 func (r *Engine) GetSession(sessionID string) (*intengine.Session, bool) {

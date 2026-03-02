@@ -3,9 +3,6 @@ package command
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
@@ -13,9 +10,8 @@ import (
 
 // ResetExecutor implements the /reset command
 type ResetExecutor struct {
-	engine   *engine.Engine
-	workDir  string
-	adapters interface{} // Will be cast to *chatapps.AdapterManager
+	engine  *engine.Engine
+	workDir string
 }
 
 // Verify ResetExecutor implements Executor at compile time
@@ -27,11 +23,6 @@ func NewResetExecutor(eng *engine.Engine, workDir string) *ResetExecutor {
 		engine:  eng,
 		workDir: workDir,
 	}
-}
-
-// SetAdapterManager sets the adapter manager for session cleanup
-func (e *ResetExecutor) SetAdapterManager(adapters interface{}) {
-	e.adapters = adapters
 }
 
 // Command returns the command name
@@ -93,21 +84,19 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 
 	_ = emitter.Success(1, "Process terminated")
 
-	// Step 3: Delete HotPlex marker (60%)
+	// Step 3 & 4: Delete session context via unified Engine API (60%-80%)
 	_ = emitter.Running(2)
 
-	markerDeleted := e.deleteHotPlexMarker(providerSessionID)
-	if markerDeleted {
-		_ = emitter.Success(2, "Marker deleted")
+	// Calls down to Provider interface to scrape `.jsonl` and HotPlex to drop the `.lock` marker
+	if err := e.engine.CleanupSessionFiles(sessionID); err != nil {
+		_ = emitter.Error(2, fmt.Sprintf("Cleanup incomplete: %v", err))
+		// We still consider it a success overall because the process is dead
 	} else {
-		_ = emitter.Success(2, "Marker cleanup done")
+		_ = emitter.Success(2, "Marker deleted")
 	}
 
-	// Step 4: Delete Claude Code session file (80%)
 	_ = emitter.Running(3)
-
-	deletedCount := e.deleteClaudeCodeSessionFile(providerSessionID)
-	_ = emitter.Success(3, fmt.Sprintf("Deleted %d file(s)", deletedCount))
+	_ = emitter.Success(3, "Session file deleted")
 
 	// Complete
 	_ = emitter.Emit("Resetting Context")
@@ -117,60 +106,7 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 		Success: true,
 		Message: "Context reset. Ready for fresh start!",
 		Metadata: map[string]any{
-			"files_deleted":       deletedCount,
-			"marker_deleted":      markerDeleted,
 			"provider_session_id": providerSessionID,
 		},
 	}, nil
-}
-
-// deleteClaudeCodeSessionFile deletes the Claude Code session file
-func (e *ResetExecutor) deleteClaudeCodeSessionFile(providerSessionID string) int {
-	if providerSessionID == "" {
-		return 0
-	}
-
-	projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
-
-	// Derive workspace directory from workDir
-	cwd := e.workDir
-	if cwd == "" {
-		var err error
-		cwd, err = os.Getwd()
-		if err != nil {
-			cwd = os.TempDir() // Fallback to temp directory
-		}
-	}
-	workspaceKey := strings.ReplaceAll(cwd, "/", "-")
-	workspaceDir := filepath.Join(projectsDir, workspaceKey)
-
-	sessionPath := filepath.Join(workspaceDir, providerSessionID+".jsonl")
-
-	if _, err := os.Stat(sessionPath); err == nil {
-		if err := os.Remove(sessionPath); err == nil {
-			return 1
-		}
-	}
-	return 0
-}
-
-// deleteHotPlexMarker deletes the HotPlex session marker file
-func (e *ResetExecutor) deleteHotPlexMarker(providerSessionID string) bool {
-	if providerSessionID == "" {
-		return false
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-
-	markerPath := filepath.Join(homeDir, ".hotplex", "sessions", providerSessionID+".lock")
-
-	if _, err := os.Stat(markerPath); err == nil {
-		if err := os.Remove(markerPath); err == nil {
-			return true
-		}
-	}
-	return false
 }

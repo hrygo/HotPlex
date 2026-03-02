@@ -37,7 +37,6 @@ print("\n=== Comparison ===")
 print("""
 | Command | Session File | Marker | Process | Next Message |
 |---------|-------------|--------|---------|--------------|
-| Normal  | Keep        | Keep   | Keep    | Resume       |
 | /dc     | Keep        | Keep   | Kill    | Resume       |
 | /reset  | DELETE      | DELETE | Kill    | COLD START   |
 """)
