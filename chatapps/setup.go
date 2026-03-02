@@ -223,7 +223,9 @@ func setupPlatform(
 	}
 
 	// 3. Create EngineMessageHandler
-	msgHandler := NewEngineMessageHandler(eng, manager,
+	// Wrap engine.Engine to implement chatapps.Engine interface
+	wrappedEng := &engineWrapper{eng: eng}
+	msgHandler := NewEngineMessageHandler(wrappedEng, manager,
 		WithConfigLoader(loader),
 		WithLogger(logger),
 		WithWorkDirFn(func(sessionID string) string {

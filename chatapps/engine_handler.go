@@ -1533,6 +1533,12 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, isHot, msg.Metadata, messageOps, sessionOps)
 	defer callback.Close() // Ensure processor resources are released
 
+	// Send user_message_received event FIRST to set initial reaction (📥 inbox_tray)
+	// This must happen before engine.Execute to ensure reaction lifecycle starts correctly
+	if err := callback.Handle(string(provider.EventTypeUserMessageReceived), nil); err != nil {
+		h.logger.Warn("Failed to send user_message_received event", "error", err)
+	}
+
 	wrappedCallback := func(eventType string, data any) error {
 		return callback.Handle(eventType, data)
 	}
