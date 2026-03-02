@@ -147,6 +147,6 @@ HotPlex 定义了 21 种标准事件类型：
 ---
 
 ## 7. 相关文档 (Reference)
-- [Slack 接口映射规范](./slack-block-mapping.md)
+- [Slack 接口映射规范](./chatapps-slack-architecture.md)
 - [交互中心设计详情](./interaction-manager.md)
 - [事件聚合算法规格](../engine/event-aggregation.md)

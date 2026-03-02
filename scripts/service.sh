@@ -25,16 +25,32 @@ BINARY_NAME="hotplexd"
 SERVICE_NAME="com.hotplex.daemon"
 DISPLAY_NAME="HotPlex Daemon"
 
-# Detect project root
+# Detect project root (for building only)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-BINARY_PATH="$PROJECT_ROOT/dist/$BINARY_NAME"
-CONFIG_PATH="$PROJECT_ROOT/configs"
 
-# Log directory
-LOG_DIR="$PROJECT_ROOT/.logs"
-LOG_FILE="$LOG_DIR/daemon.log"
-PID_FILE="$PROJECT_ROOT/.hotplexd.pid"
+# --- Installation Directories (independent of project) ---
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    # macOS: Use user-local paths
+    INSTALL_BIN="$HOME/.local/bin"
+    INSTALL_ETC="$HOME/.config/hotplex"
+    INSTALL_LOG="$HOME/.local/share/hotplex/logs"
+else
+    # Linux: Use system paths (requires sudo)
+    INSTALL_BIN="/usr/local/bin"
+    INSTALL_ETC="/etc/hotplex"
+    INSTALL_LOG="/var/log/hotplex"
+fi
+
+# Installed paths
+BINARY_PATH="$INSTALL_BIN/$BINARY_NAME"
+ENV_FILE="$INSTALL_ETC/.env"
+LOG_FILE="$INSTALL_LOG/daemon.log"
+
+# Source paths (for installation)
+SOURCE_BINARY="$PROJECT_ROOT/dist/$BINARY_NAME"
+SOURCE_ENV="$PROJECT_ROOT/.env"
+SOURCE_ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
 
 # Colors
 RED='\033[0;31m'
@@ -61,14 +77,74 @@ success() { printf "${GREEN}✅ %s${NC}\n" "$1"; }
 warn() { printf "${YELLOW}⚠️  %s${NC}\n" "$1"; }
 error() { printf "${RED}❌ %s${NC}\n" "$1"; exit 1; }
 
-check_binary() {
-    if [[ ! -x "$BINARY_PATH" ]]; then
-        error "Binary not found: $BINARY_PATH\nRun 'make build' first."
+check_source_binary() {
+    if [[ ! -x "$SOURCE_BINARY" ]]; then
+        error "Source binary not found: $SOURCE_BINARY\nRun 'make build' first."
     fi
 }
 
-ensure_log_dir() {
-    mkdir -p "$LOG_DIR"
+check_installed_binary() {
+    if [[ ! -x "$BINARY_PATH" ]]; then
+        error "HotPlex not installed. Run 'make service-install' first."
+    fi
+}
+
+ensure_dirs() {
+    mkdir -p "$INSTALL_BIN" "$INSTALL_ETC" "$INSTALL_LOG"
+}
+
+install_files() {
+    ensure_dirs
+
+    info "Installing binary to $BINARY_PATH..."
+    cp "$SOURCE_BINARY" "$BINARY_PATH"
+    chmod +x "$BINARY_PATH"
+
+    # Install .env if not exists
+    if [[ ! -f "$ENV_FILE" ]]; then
+        if [[ -f "$SOURCE_ENV" ]]; then
+            info "Installing config to $ENV_FILE..."
+            cp "$SOURCE_ENV" "$ENV_FILE"
+        elif [[ -f "$SOURCE_ENV_EXAMPLE" ]]; then
+            info "Creating config from example..."
+            cp "$SOURCE_ENV_EXAMPLE" "$ENV_FILE"
+            warn "Please edit $ENV_FILE with your settings"
+        else
+            warn "No .env or .env.example found. Please create $ENV_FILE manually"
+        fi
+    else
+        info "Config already exists at $ENV_FILE (preserved)"
+    fi
+}
+
+uninstall_files() {
+    info "Removing installed files..."
+
+    # Stop service first
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        launchctl stop "$SERVICE_NAME" 2>/dev/null || true
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    else
+        sudo systemctl stop hotplexd 2>/dev/null || true
+    fi
+
+    # Remove binary
+    rm -f "$BINARY_PATH"
+
+    # Ask about config and logs
+    read -p "Remove config directory ($INSTALL_ETC)? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -rf "$INSTALL_ETC"
+    fi
+
+    read -p "Remove log directory ($INSTALL_LOG)? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -rf "$INSTALL_LOG"
+    fi
+
+    success "Files removed"
 }
 
 # --- macOS launchd Functions ---
@@ -87,7 +163,7 @@ generate_plist() {
         <string>${BINARY_PATH}</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>${PROJECT_ROOT}</string>
+    <string>${INSTALL_ETC}</string>
     <key>StandardOutPath</key>
     <string>${LOG_FILE}</string>
     <key>StandardErrorPath</key>
@@ -99,7 +175,9 @@ generate_plist() {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:${HOME}/.local/bin</string>
+        <key>ENV_FILE</key>
+        <string>${ENV_FILE}</string>
     </dict>
 </dict>
 </plist>
@@ -109,36 +187,44 @@ EOF
 PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_NAME}.plist"
 
 macos_install() {
-    check_binary
-    ensure_log_dir
+    check_source_binary
 
     info "Installing HotPlex as launchd service..."
 
-    # Generate plist
+    # Install files to system locations
+    install_files
+
+    # Generate and load plist
     generate_plist > "$PLIST_PATH"
     success "Created plist: $PLIST_PATH"
 
-    # Load the service
     launchctl load "$PLIST_PATH" 2>/dev/null || true
     success "Service loaded"
+
+    echo ""
+    info "Installation complete:"
+    printf "  ${CYAN}Binary:${NC}   $BINARY_PATH\n"
+    printf "  ${CYAN}Config:${NC}   $ENV_FILE\n"
+    printf "  ${CYAN}Logs:${NC}     $LOG_FILE\n"
+    echo ""
     info "Run 'make service-start' to start the daemon"
 }
 
 macos_uninstall() {
     info "Uninstalling HotPlex service..."
 
-    # Stop if running
-    macos_stop >/dev/null 2>&1 || true
-
-    # Unload and remove plist
+    # Unload plist
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     rm -f "$PLIST_PATH"
-    success "Service removed"
+    success "Service unloaded"
+
+    # Remove installed files
+    uninstall_files
+    success "Uninstall complete"
 }
 
 macos_start() {
-    check_binary
-    ensure_log_dir
+    check_installed_binary
 
     info "Starting HotPlex service..."
     launchctl start "$SERVICE_NAME" 2>/dev/null || {
@@ -232,7 +318,7 @@ After=network.target
 [Service]
 Type=simple
 User=${USER}
-WorkingDirectory=${PROJECT_ROOT}
+WorkingDirectory=${INSTALL_ETC}
 ExecStart=${BINARY_PATH}
 Restart=on-failure
 RestartSec=5
@@ -241,11 +327,10 @@ StandardError=append:${LOG_FILE}
 
 # Environment
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="ENV_FILE=${ENV_FILE}"
 
-# Security (optional hardening)
-# NoNewPrivileges=true
-# ProtectSystem=strict
-# ProtectHome=true
+# Load .env file if exists
+EnvironmentFile=-${ENV_FILE}
 
 [Install]
 WantedBy=multi-user.target
@@ -253,18 +338,48 @@ EOF
 }
 
 linux_install() {
-    check_binary
-    ensure_log_dir
+    check_source_binary
 
     info "Installing HotPlex as systemd service..."
 
-    # Generate service file (requires sudo)
+    # Create directories with proper permissions
+    sudo mkdir -p "$INSTALL_BIN" "$INSTALL_ETC" "$INSTALL_LOG"
+    sudo chown "$USER" "$INSTALL_ETC" "$INSTALL_LOG"
+
+    # Install binary
+    info "Installing binary to $BINARY_PATH..."
+    sudo cp "$SOURCE_BINARY" "$BINARY_PATH"
+    sudo chmod +x "$BINARY_PATH"
+
+    # Install .env
+    if [[ ! -f "$ENV_FILE" ]]; then
+        if [[ -f "$SOURCE_ENV" ]]; then
+            info "Installing config to $ENV_FILE..."
+            sudo cp "$SOURCE_ENV" "$ENV_FILE"
+            sudo chown "$USER" "$ENV_FILE"
+        elif [[ -f "$SOURCE_ENV_EXAMPLE" ]]; then
+            info "Creating config from example..."
+            sudo cp "$SOURCE_ENV_EXAMPLE" "$ENV_FILE"
+            sudo chown "$USER" "$ENV_FILE"
+            warn "Please edit $ENV_FILE with your settings"
+        fi
+    else
+        info "Config already exists at $ENV_FILE (preserved)"
+    fi
+
+    # Generate service file
     generate_systemd_unit | sudo tee "$SERVICE_FILE" > /dev/null
     success "Created service file: $SERVICE_FILE"
 
-    # Reload systemd
     sudo systemctl daemon-reload
     success "Systemd daemon reloaded"
+
+    echo ""
+    info "Installation complete:"
+    printf "  ${CYAN}Binary:${NC}   $BINARY_PATH\n"
+    printf "  ${CYAN}Config:${NC}   $ENV_FILE\n"
+    printf "  ${CYAN}Logs:${NC}     $LOG_FILE\n"
+    echo ""
     info "Run 'sudo systemctl start hotplexd' to start the daemon"
 }
 
@@ -275,13 +390,29 @@ linux_uninstall() {
     sudo systemctl disable hotplexd 2>/dev/null || true
     sudo rm -f "$SERVICE_FILE"
     sudo systemctl daemon-reload
-
     success "Service removed"
+
+    # Remove binary
+    sudo rm -f "$BINARY_PATH"
+
+    # Ask about config and logs
+    read -p "Remove config directory ($INSTALL_ETC)? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        sudo rm -rf "$INSTALL_ETC"
+    fi
+
+    read -p "Remove log directory ($INSTALL_LOG)? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        sudo rm -rf "$INSTALL_LOG"
+    fi
+
+    success "Uninstall complete"
 }
 
 linux_start() {
-    check_binary
-    ensure_log_dir
+    check_installed_binary
 
     info "Starting HotPlex service..."
     sudo systemctl start hotplexd
@@ -385,10 +516,16 @@ ${BOLD}Commands:${NC}
     enable      Enable auto-start on boot/login
     disable     Disable auto-start on boot/login
 
-${BOLD}Current System:${NC}    $SYSTEM
-${BOLD}Service Type:${NC}      $([ "$SYSTEM" = "macos" ] && echo "launchd (LaunchAgent)" || echo "systemd")
-${BOLD}Binary Path:${NC}       $BINARY_PATH
-${BOLD}Log File:${NC}          $LOG_FILE
+${BOLD}System:${NC}         $SYSTEM ($([ "$SYSTEM" = "macos" ] && echo "launchd" || echo "systemd"))
+${BOLD}Install Paths:${NC}
+  Binary:        $BINARY_PATH
+  Config:        $ENV_FILE
+  Logs:          $LOG_FILE
+
+${BOLD}Notes:${NC}
+    - Service runs independently of project directory
+    - Config (.env) is copied during install
+    - Edit $ENV_FILE to change settings
 EOF
 }
 

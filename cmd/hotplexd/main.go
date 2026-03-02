@@ -22,9 +22,18 @@ import (
 
 func main() {
 	// 0. Load .env file
-	if err := godotenv.Load(); err != nil {
-		// It's okay if .env doesn't exist, we'll use environmental variables or defaults
-		_ = err
+	// Priority: ENV_FILE env var > .env in working directory
+	envFile := os.Getenv("ENV_FILE")
+	if envFile != "" {
+		if err := godotenv.Load(envFile); err != nil {
+			// Log warning but continue
+			fmt.Fprintf(os.Stderr, "Warning: Failed to load ENV_FILE=%s: %v\n", envFile, err)
+		}
+	} else {
+		if err := godotenv.Load(); err != nil {
+			// It's okay if .env doesn't exist, we'll use environmental variables or defaults
+			_ = err
+		}
 	}
 
 	// 1. Configure logging
