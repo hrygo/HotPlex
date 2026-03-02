@@ -55,6 +55,11 @@ This release focuses on ChatApps user experience refinements, goroutine safety i
 #### Daemon & Session Management
 - **Make Restart POSIX Compliance** - Replaced `nohup` with POSIX-compliant stdin redirection (`< /dev/null`) in daemon restart target to ensure background process survives Ctrl+C and works across all Unix platforms.
 - **Reset Command Race Condition** - Fixed `/reset` command execution order (terminate process → delete marker → delete session file) to prevent "Session ID is already in use" errors caused by concurrent message processing recreating markers after deletion.
+- **Session Cleanup Consolidation** - Refactored session file deletion into unified Engine API, removing duplicated cleanup code across ResetExecutor and SessionPool. Added `CleanupSession` method to Provider interface for extensible session file management.
+
+#### Engine Session File Management
+- **Stale Session File Cleanup** - Added automatic deletion of stale CLI session files (`.jsonl`) on session start to prevent "Session ID is already in use" errors after daemon restart.
+- **Provider Abstraction** - Added `CleanupSession` to Provider interface with default no-op implementation; ClaudeCodeProvider now properly deletes `.jsonl` files.
 
 ### Documentation
 

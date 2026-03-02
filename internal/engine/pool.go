@@ -275,15 +275,6 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 		// For absolute paths, also clean to resolve . and .. elements
 		cmd.Dir = filepath.Clean(cfg.WorkDir)
 	}
-	if cfg.WorkDir == "." || !filepath.IsAbs(cfg.WorkDir) {
-		if absPath, err := filepath.Abs(cfg.WorkDir); err == nil {
-			cmd.Dir = absPath
-		} else {
-			cmd.Dir = cfg.WorkDir // Fallback to original if error
-		}
-	} else {
-		cmd.Dir = cfg.WorkDir
-	}
 
 	// Setup process attributes and get job handle (Windows) or zero (Unix)
 	jobHandle, err := sys.SetupCmdSysProcAttr(cmd)
