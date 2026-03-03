@@ -51,9 +51,10 @@ func TestCircuitBreaker_ManualReset(t *testing.T) {
 	cb := NewCircuitBreaker(config)
 
 	// Fail once to open circuit
-	cb.Execute(context.Background(), func() error {
+	err := cb.Execute(context.Background(), func() error {
 		return errors.New("test error")
 	})
+	assert.Error(t, err)
 	assert.Equal(t, CircuitOpen, cb.GetState())
 
 	// Manual reset
@@ -86,9 +87,10 @@ func TestCircuitBreaker_ForceClose(t *testing.T) {
 	cb := NewCircuitBreaker(config)
 
 	// Fail to open circuit
-	cb.Execute(context.Background(), func() error {
+	err := cb.Execute(context.Background(), func() error {
 		return errors.New("test error")
 	})
+	assert.Error(t, err)
 	assert.Equal(t, CircuitOpen, cb.GetState())
 
 	// Force close
@@ -96,7 +98,7 @@ func TestCircuitBreaker_ForceClose(t *testing.T) {
 	assert.Equal(t, CircuitClosed, cb.GetState())
 
 	// Execute should succeed
-	err := cb.Execute(context.Background(), func() error {
+	err = cb.Execute(context.Background(), func() error {
 		return nil
 	})
 	assert.NoError(t, err)
@@ -108,7 +110,7 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 
 	// Execute some requests
 	for i := 0; i < 5; i++ {
-		cb.Execute(context.Background(), func() error {
+		_ = cb.Execute(context.Background(), func() error {
 			if i%2 == 0 {
 				return errors.New("error")
 			}
@@ -133,7 +135,7 @@ func TestCircuitBreaker_Concurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				cb.Execute(context.Background(), func() error {
+				_ = cb.Execute(context.Background(), func() error {
 					return nil
 				})
 			}

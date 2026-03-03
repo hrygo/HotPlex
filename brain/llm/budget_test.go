@@ -35,8 +35,10 @@ func TestBudgetTracker_BudgetExceeded(t *testing.T) {
 	tracker := NewBudgetTracker(config, "test-session")
 
 	// Track within budget
-	tracker.TrackRequest(2.0)
-	tracker.TrackRequest(2.0)
+	err := tracker.TrackRequest(2.0)
+	assert.NoError(t, err)
+	err = tracker.TrackRequest(2.0)
+	assert.NoError(t, err)
 
 	// Try to exceed budget
 	allowed, cost, err := tracker.CheckBudget(2.0)
@@ -56,7 +58,8 @@ func TestBudgetTracker_SoftLimit(t *testing.T) {
 	tracker := NewBudgetTracker(config, "test-session")
 
 	// Track within budget
-	tracker.TrackRequest(4.0)
+	err := tracker.TrackRequest(4.0)
+	assert.NoError(t, err)
 
 	// Try to exceed with soft limit - should allow
 	allowed, cost, err := tracker.CheckBudget(2.0)
@@ -84,7 +87,9 @@ func TestBudgetTracker_Alerts(t *testing.T) {
 	})
 
 	// Track to 80%
-	tracker.TrackRequest(8.0)
+	var err error
+	err = tracker.TrackRequest(8.0)
+	assert.NoError(t, err)
 
 	assert.True(t, alertTriggered)
 	assert.InDelta(t, 80.0, triggeredAlert.Percentage, 0.01)
@@ -92,7 +97,8 @@ func TestBudgetTracker_Alerts(t *testing.T) {
 
 	// Track to 90%
 	alertTriggered = false
-	tracker.TrackRequest(1.0)
+	err = tracker.TrackRequest(1.0)
+	assert.NoError(t, err)
 
 	assert.True(t, alertTriggered)
 	assert.InDelta(t, 90.0, triggeredAlert.Percentage, 0.01)
@@ -104,13 +110,16 @@ func TestBudgetTracker_PeriodReset(t *testing.T) {
 	config.Period = BudgetDaily
 
 	tracker := NewBudgetTracker(config, "test-session")
-	tracker.TrackRequest(5.0)
+	var err error
+	err = tracker.TrackRequest(5.0)
+	assert.NoError(t, err)
 
 	// Manually trigger period reset by changing period start
 	tracker.periodStart.Store(time.Now().AddDate(0, 0, 2)) // 2 days in future
 
 	// Track another request - should trigger reset
-	tracker.TrackRequest(2.0)
+	err = tracker.TrackRequest(2.0)
+	assert.NoError(t, err)
 
 	stats := tracker.GetStats()
 	assert.InDelta(t, 2.0, stats.CurrentCost, 0.01) // Should have reset
@@ -122,7 +131,8 @@ func TestBudgetTracker_ManualReset(t *testing.T) {
 	config.Period = BudgetSession
 
 	tracker := NewBudgetTracker(config, "test-session")
-	tracker.TrackRequest(5.0)
+	err := tracker.TrackRequest(5.0)
+	assert.NoError(t, err)
 
 	// Manual reset
 	tracker.Reset()
@@ -138,7 +148,8 @@ func TestBudgetTracker_SetLimit(t *testing.T) {
 	config.Period = BudgetSession
 
 	tracker := NewBudgetTracker(config, "test-session")
-	tracker.TrackRequest(5.0)
+	err := tracker.TrackRequest(5.0)
+	assert.NoError(t, err)
 
 	// Update limit
 	tracker.SetLimit(20.0)
@@ -159,8 +170,11 @@ func TestBudgetManager_MultipleSessions(t *testing.T) {
 	tracker1 := manager.GetTracker("session-1")
 	tracker2 := manager.GetTracker("session-2")
 
-	tracker1.TrackRequest(3.0)
-	tracker2.TrackRequest(5.0)
+	var err error
+	err = tracker1.TrackRequest(3.0)
+	assert.NoError(t, err)
+	err = tracker2.TrackRequest(5.0)
+	assert.NoError(t, err)
 
 	stats1 := tracker1.GetStats()
 	stats2 := tracker2.GetStats()
@@ -169,8 +183,10 @@ func TestBudgetManager_MultipleSessions(t *testing.T) {
 	assert.InDelta(t, 5.0, stats2.CurrentCost, 0.01)
 
 	// Track via manager to update global cost
-	manager.TrackRequest("session-1", 0) // Already tracked
-	manager.TrackRequest("session-2", 0) // Already tracked
+	err = manager.TrackRequest("session-1", 0) // Already tracked
+	assert.NoError(t, err)
+	err = manager.TrackRequest("session-2", 0) // Already tracked
+	assert.NoError(t, err)
 	
 	// Global stats
 	globalStats := manager.GetGlobalStats()

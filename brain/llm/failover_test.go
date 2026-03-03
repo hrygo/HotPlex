@@ -58,14 +58,15 @@ func TestFailoverManager_Failback(t *testing.T) {
 	fm := NewFailoverManager(config)
 	
 	// Force failover to backup
-	fm.ManualFailover("backup")
+	err := fm.ManualFailover("backup")
+	assert.NoError(t, err)
 	assert.Equal(t, "backup", fm.GetCurrentProvider().Name)
 
 	// Wait for cooldown
 	time.Sleep(100 * time.Millisecond)
 
 	// Execute successfully with backup - should trigger failback
-	err := fm.ExecuteWithFailover(context.Background(), func(p *ProviderConfig) error {
+	err = fm.ExecuteWithFailover(context.Background(), func(p *ProviderConfig) error {
 		return nil
 	})
 	assert.NoError(t, err)
@@ -84,7 +85,8 @@ func TestFailoverManager_Stats(t *testing.T) {
 	fm := NewFailoverManager(config)
 
 	// Manual failover
-	fm.ManualFailover("backup")
+	err := fm.ManualFailover("backup")
+	assert.NoError(t, err)
 
 	stats := fm.GetStats()
 	assert.True(t, stats.IsActive)
@@ -101,7 +103,8 @@ func TestFailoverManager_Reset(t *testing.T) {
 	}
 
 	fm := NewFailoverManager(config)
-	fm.ManualFailover("backup")
+	err := fm.ManualFailover("backup")
+	assert.NoError(t, err)
 	assert.Equal(t, "backup", fm.GetCurrentProvider().Name)
 
 	// Reset

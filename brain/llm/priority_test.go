@@ -57,17 +57,20 @@ func TestPriorityScheduler_EnqueueDequeue(t *testing.T) {
 	defer scheduler.Shutdown()
 
 	// Enqueue requests
-	scheduler.Enqueue(context.Background(), "req-1", PriorityMedium, func() error {
+	err := scheduler.Enqueue(context.Background(), "req-1", PriorityMedium, func() error {
 		return nil
 	}, time.Minute)
+	assert.NoError(t, err)
 
-	scheduler.Enqueue(context.Background(), "req-2", PriorityHigh, func() error {
+	err = scheduler.Enqueue(context.Background(), "req-2", PriorityHigh, func() error {
 		return nil
 	}, time.Minute)
+	assert.NoError(t, err)
 
-	scheduler.Enqueue(context.Background(), "req-3", PriorityLow, func() error {
+	err = scheduler.Enqueue(context.Background(), "req-3", PriorityLow, func() error {
 		return nil
 	}, time.Minute)
+	assert.NoError(t, err)
 
 	// Dequeue should return highest priority first
 	req := scheduler.TryDequeue()
@@ -95,12 +98,15 @@ func TestPriorityScheduler_LowPriorityDrop(t *testing.T) {
 	defer scheduler.Shutdown()
 
 	// Fill queue
-	scheduler.Enqueue(context.Background(), "req-1", PriorityHigh, func() error { return nil }, time.Minute)
-	scheduler.Enqueue(context.Background(), "req-2", PriorityHigh, func() error { return nil }, time.Minute)
-	scheduler.Enqueue(context.Background(), "req-3", PriorityHigh, func() error { return nil }, time.Minute)
+	err := scheduler.Enqueue(context.Background(), "req-1", PriorityHigh, func() error { return nil }, time.Minute)
+	assert.NoError(t, err)
+	err = scheduler.Enqueue(context.Background(), "req-2", PriorityHigh, func() error { return nil }, time.Minute)
+	assert.NoError(t, err)
+	err = scheduler.Enqueue(context.Background(), "req-3", PriorityHigh, func() error { return nil }, time.Minute)
+	assert.NoError(t, err)
 
 	// Try to add low priority - should be dropped
-	err := scheduler.Enqueue(context.Background(), "req-low", PriorityLow, func() error { return nil }, time.Minute)
+	err = scheduler.Enqueue(context.Background(), "req-low", PriorityLow, func() error { return nil }, time.Minute)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "dropped")
 
@@ -118,12 +124,15 @@ func TestPriorityScheduler_Stats(t *testing.T) {
 	defer scheduler.Shutdown()
 
 	// Enqueue and dequeue some requests
+	var err error
 	for i := 0; i < 5; i++ {
-		scheduler.Enqueue(context.Background(), "high-"+string(rune(i)), PriorityHigh, func() error { return nil }, time.Minute)
+		err = scheduler.Enqueue(context.Background(), "high-"+string(rune(i)), PriorityHigh, func() error { return nil }, time.Minute)
+		assert.NoError(t, err)
 	}
 
 	for i := 0; i < 3; i++ {
-		scheduler.Enqueue(context.Background(), "medium-"+string(rune(i)), PriorityMedium, func() error { return nil }, time.Minute)
+		err = scheduler.Enqueue(context.Background(), "medium-"+string(rune(i)), PriorityMedium, func() error { return nil }, time.Minute)
+		assert.NoError(t, err)
 	}
 
 	// Dequeue all
@@ -160,8 +169,10 @@ func TestPriorityScheduler_Clear(t *testing.T) {
 	defer scheduler.Shutdown()
 
 	// Add some requests
+	var err error
 	for i := 0; i < 10; i++ {
-		scheduler.Enqueue(context.Background(), "req-"+string(rune(i)), PriorityMedium, func() error { return nil }, time.Minute)
+		err = scheduler.Enqueue(context.Background(), "req-"+string(rune(i)), PriorityMedium, func() error { return nil }, time.Minute)
+		assert.NoError(t, err)
 	}
 
 	assert.Equal(t, 10, scheduler.Size())
@@ -183,16 +194,20 @@ func TestPriorityScheduler_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	
 	// Concurrent enqueue
+	var err error
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				scheduler.Enqueue(context.Background(), 
+				err = scheduler.Enqueue(context.Background(), 
 					"req-"+string(rune(id))+"-"+string(rune(j)), 
 					PriorityMedium, 
 					func() error { return nil }, 
 					time.Minute)
+				if err != nil {
+					return
+				}
 			}
 		}(i)
 	}
@@ -208,7 +223,8 @@ func TestPriorityScheduler_ExpiredRequests(t *testing.T) {
 	defer scheduler.Shutdown()
 
 	// Add request with very short max wait
-	scheduler.Enqueue(context.Background(), "req-1", PriorityLow, func() error { return nil }, 10*time.Millisecond)
+	err := scheduler.Enqueue(context.Background(), "req-1", PriorityLow, func() error { return nil }, 10*time.Millisecond)
+	assert.NoError(t, err)
 
 	// Wait for expiration
 	time.Sleep(50 * time.Millisecond)
