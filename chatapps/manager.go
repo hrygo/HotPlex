@@ -231,3 +231,26 @@ func (m *AdapterManager) GetSessionOperations(platform string) SessionOperations
 	m.logger.Debug("Adapter does not implement SessionOperations", "platform", platform)
 	return nil
 }
+
+// NewStreamWriter creates a platform-agnostic streaming writer for the given platform
+// Returns nil if the platform doesn't support streaming or adapter not found
+func (m *AdapterManager) NewStreamWriter(ctx context.Context, platform, channelID, threadTS string) base.StreamWriter {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	adapter, ok := m.adapters[platform]
+	if !ok {
+		m.logger.Debug("Adapter not found", "platform", platform)
+		return nil
+	}
+
+	// Check if adapter supports streaming via MessageOperations interface
+	if streamProvider, ok := adapter.(interface {
+		NewStreamWriter(context.Context, string, string) base.StreamWriter
+	}); ok {
+		m.logger.Debug("Creating StreamWriter", "platform", platform)
+		return streamProvider.NewStreamWriter(ctx, channelID, threadTS)
+	}
+	m.logger.Debug("Adapter does not support streaming", "platform", platform)
+	return nil
+}
