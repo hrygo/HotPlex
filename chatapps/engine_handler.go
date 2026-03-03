@@ -473,6 +473,18 @@ func (c *StreamCallback) sendMessageAndGetTS(msg *ChatMessage) error {
 	return nil
 }
 
+// buildChatMessage creates a ChatMessage with merged metadata and sends it
+// Helper function to reduce duplication in event handlers
+func (c *StreamCallback) buildChatMessage(msgType base.MessageType, content string, extraMetadata map[string]any) error {
+	msg := &base.ChatMessage{
+		Type:    msgType,
+		Content: content,
+		Metadata: extraMetadata,
+	}
+	msg.Metadata = c.mergeMetadata(msg.Metadata)
+	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+}
+
 // setReaction sets a reaction on the user's trigger message.
 // Removes previous reaction before adding new one for clean status transitions.
 
@@ -1204,15 +1216,9 @@ func (c *StreamCallback) handleSystem(data any) error {
 		return nil
 	}
 
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeSystem,
-		Content: content,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeSystem),
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	return c.buildChatMessage(base.MessageTypeSystem, content, map[string]any{
+		"event_type": string(provider.EventTypeSystem),
+	})
 }
 
 // handleUser handles user message reflection
@@ -1228,15 +1234,9 @@ func (c *StreamCallback) handleUser(data any) error {
 		return nil
 	}
 
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeUser,
-		Content: content,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeUser),
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	return c.buildChatMessage(base.MessageTypeUser, content, map[string]any{
+		"event_type": string(provider.EventTypeUser),
+	})
 }
 
 // handleStepStart handles step start events (OpenCode specific)
@@ -1327,15 +1327,9 @@ func (c *StreamCallback) handleRaw(data any) error {
 		return nil
 	}
 
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeRaw,
-		Content: content,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeRaw),
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	return c.buildChatMessage(base.MessageTypeRaw, content, map[string]any{
+		"event_type": string(provider.EventTypeRaw),
+	})
 }
 
 // copyMessageMetadata copies important metadata from original message
@@ -1657,15 +1651,9 @@ func (c *StreamCallback) handlePlanMode(data any) error {
 	}
 
 	// Send plan mode message with platform-agnostic MessageType
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypePlanMode,
-		Content: planContent,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypePlanMode),
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	return c.buildChatMessage(base.MessageTypePlanMode, planContent, map[string]any{
+		"event_type": string(provider.EventTypePlanMode),
+	})
 }
 
 // handleExitPlanMode handles exit plan mode requests (tool_use with name=ExitPlanMode)
@@ -1685,16 +1673,10 @@ func (c *StreamCallback) handleExitPlanMode(data any) error {
 	}
 
 	// Send exit plan mode message with platform-agnostic MessageType
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeExitPlanMode,
-		Content: planSummary,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeExitPlanMode),
-			"session_id": c.sessionID,
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	return c.buildChatMessage(base.MessageTypeExitPlanMode, planSummary, map[string]any{
+		"event_type": string(provider.EventTypeExitPlanMode),
+		"session_id": c.sessionID,
+	})
 }
 
 // =============================================================================

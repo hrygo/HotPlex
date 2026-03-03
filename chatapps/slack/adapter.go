@@ -50,6 +50,9 @@ type Adapter struct {
 	socketModeMu      sync.Mutex         // Protects socketModeRunning
 }
 
+// Compile-time check: ensure Adapter implements StatusProvider
+var _ base.StatusProvider = (*Adapter)(nil)
+
 func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption) *Adapter {
 	// Validate config
 	if err := config.Validate(); err != nil {
@@ -1814,6 +1817,51 @@ func (a *Adapter) SetAssistantStatus(ctx context.Context, channelID, threadTS, s
 	}
 
 	return a.client.SetAssistantThreadsStatusContext(ctx, params)
+}
+
+// SetStatus implements base.StatusProvider
+// Tries native Slack status first, falls back to bubble message
+func (a *Adapter) SetStatus(ctx context.Context, channelID, threadTS string, status base.StatusType, text string) error {
+	// Try native Slack status API first
+	if a.client != nil {
+		err := a.SetAssistantStatus(ctx, channelID, threadTS, text)
+		if err == nil {
+			return nil
+		}
+		a.Logger().Debug("Native status failed, falling back to bubble", "error", err)
+	}
+
+	// Fallback: send bubble message
+	return a.sendStatusBubble(ctx, channelID, threadTS, status, text)
+}
+
+// ClearStatus implements base.StatusProvider
+func (a *Adapter) ClearStatus(ctx context.Context, channelID, threadTS string) error {
+	// Try native Slack status API first
+	if a.client != nil {
+		err := a.SetAssistantStatus(ctx, channelID, threadTS, "")
+		if err == nil {
+			return nil
+		}
+		a.Logger().Debug("Native status clear failed, falling back", "error", err)
+	}
+
+	// Fallback: bubble will be cleared when next status is set or message ends
+	return nil
+}
+
+// sendStatusBubble sends a status bubble message as fallback
+func (a *Adapter) sendStatusBubble(ctx context.Context, channelID, threadTS string, status base.StatusType, text string) error {
+	// Build the message with blocks
+	blocks := a.messageBuilder.BuildStatusBubble(status, text)
+	if blocks == nil {
+		// Fallback to plain text if builder returns nil
+		return a.SendToChannelSDK(ctx, channelID, text, threadTS)
+	}
+
+	// Send as blocks
+	_, err := a.sendBlocksSDK(ctx, channelID, blocks, threadTS, text)
+	return err
 }
 
 // StartStream starts a native streaming message and returns message_ts as anchor for subsequent updates

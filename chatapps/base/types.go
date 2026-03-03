@@ -139,3 +139,25 @@ type StreamWriter interface {
 	// MessageTS returns the message timestamp after stream starts
 	MessageTS() string
 }
+
+// StatusType defines AI working states
+type StatusType string
+
+const (
+	StatusThinking   StatusType = "thinking"
+	StatusToolUse    StatusType = "tool_use"
+	StatusToolResult StatusType = "tool_result"
+	StatusAnswering  StatusType = "answering"
+	StatusIdle       StatusType = "idle"
+)
+
+// StatusProvider defines the abstraction for status notification
+// Follows Dependency Inversion Principle - adapters decide the concrete implementation
+type StatusProvider interface {
+	// SetStatus sets current status, adapter converts to native API or bubble message
+	// channelID and threadTS specify where to display the status
+	SetStatus(ctx context.Context, channelID, threadTS string, status StatusType, text string) error
+
+	// ClearStatus clears status indicator
+	ClearStatus(ctx context.Context, channelID, threadTS string) error
+}

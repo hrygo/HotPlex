@@ -418,5 +418,34 @@ level=WARN source=chatapps/engine_handler.go:923 msg="Failed to write to stream"
 
 ---
 
+## 8. 待办事项
+
+### 8.1 已完成 (Phase 1.5.1)
+
+- [x] Task 1: 抽取 StatusProvider 接口 (`chatapps/base/types.go`)
+- [x] Task 2: 抽取 StatusManager (`chatapps/internal/status_manager.go`)
+- [x] Task 3: Slack Adapter 实现 StatusProvider (`chatapps/slack/adapter.go`)
+- [x] Task 4: 统一消息构建 - 添加 `buildChatMessage()` 辅助函数
+- [x] Task 5: 单元测试 (`chatapps/internal/status_manager_test.go`)
+
+**PR**: `feat/slack-native-assistant-150`
+
+### 8.2 待处理 (Phase 1.5.2+)
+
+- [ ] StreamCallback 集成 StatusManager
+  - 注入 StatusManager 依赖到 StreamCallback
+  - 将 `updateStatusMessage()` 改为调用 StatusManager
+- [ ] 迁移剩余 handler 到 `buildChatMessage()`
+  - handleToolUse
+  - handleToolResult
+  - handleAnswer
+  - handleError
+  - handleSessionStats
+  - 等
+- [ ] 排查流式写入失败 `invalid_arguments` 问题
+
+---
+
 **文档状态**: Draft
 **创建时间**: 2026-03-03
+**更新时间**: 2026-03-03
