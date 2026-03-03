@@ -189,8 +189,9 @@ restart: build ## @runtime Restart daemon with logs
 	@PID=$$(pgrep -f $(BINARY_NAME)); \
 	printf "${GREEN}✅ Daemon started in background with PID: $$PID${NC}\n"; \
 	printf "${CYAN}📋 Tailing logs (Ctrl+C to stop tailing, daemon will keep running):${NC}\n"; \
-	printf "${DIM}💡 Use 'make stop' to stop the daemon${NC}\n"
-	@tail -f $(LOG_FILE)
+	printf "${DIM}💡 Use 'make stop' to stop the daemon${NC}\n"; \
+	trap 'printf "\n${GREEN}✅ Log tailing stopped (daemon still running)${NC}\n"; exit 0' INT; \
+	tail -f $(LOG_FILE)
 
 # =============================================================================
 # 📦 SERVICE (System Service)
