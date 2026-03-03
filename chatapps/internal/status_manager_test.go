@@ -85,10 +85,10 @@ func TestStatusManager_Notify_Deduplication(t *testing.T) {
 	ctx := context.Background()
 
 	// First notification
-	manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
+	_ = manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
 
 	// Second notification with same status - should be deduplicated
-	manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Still thinking...")
+	_ = manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Still thinking...")
 
 	if len(provider.calls) != 1 {
 		t.Fatalf("expected 1 call (deduplicated), got %d", len(provider.calls))
@@ -103,10 +103,10 @@ func TestStatusManager_Notify_StatusChange(t *testing.T) {
 	ctx := context.Background()
 
 	// First notification - thinking
-	manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
+	_ = manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
 
 	// Status change - should trigger new call
-	manager.Notify(ctx, "C123", "T100", base.StatusToolUse, "Using tool...")
+	_ = manager.Notify(ctx, "C123", "T100", base.StatusToolUse, "Using tool...")
 
 	if len(provider.calls) != 2 {
 		t.Fatalf("expected 2 calls, got %d", len(provider.calls))
@@ -125,7 +125,7 @@ func TestStatusManager_Clear(t *testing.T) {
 	ctx := context.Background()
 
 	// Set a status first
-	manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
+	_ = manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
 
 	// Clear status
 	err := manager.Clear(ctx, "C123", "T100")
@@ -155,13 +155,13 @@ func TestStatusManager_Current(t *testing.T) {
 	}
 
 	// After notify, should be updated
-	manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
+	_ = manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
 	if manager.Current() != base.StatusThinking {
 		t.Errorf("expected StatusThinking, got %s", manager.Current())
 	}
 
 	// After clear, should be idle
-	manager.Clear(ctx, "C123", "T100")
+	_ = manager.Clear(ctx, "C123", "T100")
 	if manager.Current() != base.StatusIdle {
 		t.Errorf("expected StatusIdle after clear, got %s", manager.Current())
 	}
