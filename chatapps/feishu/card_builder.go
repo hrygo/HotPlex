@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/hrygo/hotplex/chatapps/base"
 )
 
 // CardBuilder builds Feishu interactive cards for HotPlex events
@@ -76,7 +78,7 @@ func (b *CardBuilder) BuildToolUseCard(toolName, toolInput string) (string, erro
 					{
 						Type: ElementMarkdown,
 						Text: &Text{
-							Content: fmt.Sprintf("输入：%s", truncateString(toolInput, 200)),
+							Content: fmt.Sprintf("输入：%s", base.TruncateWithEllipsis(toolInput, 200)),
 							Tag:     TextTypeLarkMD,
 						},
 					},
@@ -283,16 +285,4 @@ func (b *CardBuilder) marshalCard(card *CardTemplate) (string, error) {
 		return "", err
 	}
 	return string(data), nil
-}
-
-// truncateString truncates a string to max length with ellipsis (rune-based)
-func truncateString(s string, maxLen int) string {
-	if maxLen <= 0 {
-		return ""
-	}
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen-3]) + "..."
 }

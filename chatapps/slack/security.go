@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
+	"github.com/hrygo/hotplex/chatapps/base"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -170,29 +170,10 @@ func ValidateOptionValue(value string) error {
 	return nil
 }
 
-// RuneCount counts Unicode runes (characters) instead of bytes
-func RuneCount(s string) int {
-	return utf8.RuneCountInString(s)
-}
-
-// TruncateByRune truncates string by rune count, not byte count
-func TruncateByRune(s string, maxRunes int) string {
-	if RuneCount(s) <= maxRunes {
-		return s
-	}
-
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
-		return s
-	}
-
-	return string(runes[:maxRunes])
-}
-
 // SanitizeForDisplay removes potentially dangerous content for display
 func SanitizeForDisplay(content string, maxLength int) string {
 	// Truncate first
-	content = TruncateByRune(content, maxLength)
+	content = base.TruncateByRune(content, maxLength)
 
 	// Remove null bytes
 	content = strings.ReplaceAll(content, "\x00", "")
@@ -243,8 +224,8 @@ func SanitizeCommand(command string) string {
 	command = strings.ReplaceAll(command, "<#", "&lt;#")
 
 	// Truncate if too long
-	if RuneCount(command) > 2000 {
-		command = TruncateByRune(command, 1997) + "..."
+	if base.RuneCount(command) > 2000 {
+		command = base.TruncateWithEllipsis(command, 2000)
 	}
 
 	return command
@@ -267,8 +248,8 @@ func ValidateBlockID(blockID string) string {
 // ValidatePlainText validates plain_text object content
 func ValidatePlainText(text string, withEmoji bool) string {
 	// Truncate to max length
-	if RuneCount(text) > MaxPlainTextLen {
-		text = TruncateByRune(text, MaxPlainTextLen-3) + "..."
+	if base.RuneCount(text) > MaxPlainTextLen {
+		text = base.TruncateWithEllipsis(text, MaxPlainTextLen)
 	}
 
 	// Remove null bytes
@@ -286,8 +267,8 @@ func ValidatePlainText(text string, withEmoji bool) string {
 // ValidateMrkdwnText validates mrkdwn text content
 func ValidateMrkdwnText(text string) string {
 	// Truncate to max length
-	if RuneCount(text) > MaxSectionTextLen {
-		text = TruncateByRune(text, MaxSectionTextLen-3) + "..."
+	if base.RuneCount(text) > MaxSectionTextLen {
+		text = base.TruncateWithEllipsis(text, MaxSectionTextLen)
 	}
 
 	// Remove null bytes
@@ -331,8 +312,8 @@ func IsAllowedScheme(scheme string) bool {
 
 // ValidateInitialValue validates initial_value for input elements
 func ValidateInitialValue(initialValue string, maxLength int) string {
-	if RuneCount(initialValue) > maxLength {
-		initialValue = TruncateByRune(initialValue, maxLength-3) + "..."
+	if base.RuneCount(initialValue) > maxLength {
+		initialValue = base.TruncateWithEllipsis(initialValue, maxLength)
 	}
 	return SanitizeForDisplay(initialValue, maxLength)
 }
@@ -340,10 +321,10 @@ func ValidateInitialValue(initialValue string, maxLength int) string {
 // ValidateConfirmationDialog validates confirmation dialog fields
 func ValidateConfirmationDialog(title, text, confirmText, denyText string) (string, string, string, string) {
 	// All fields limited to 75 chars per Slack spec
-	title = TruncateByRune(title, 75)
-	text = TruncateByRune(text, 75)
-	confirmText = TruncateByRune(confirmText, 75)
-	denyText = TruncateByRune(denyText, 75)
+	title = base.TruncateByRune(title, 75)
+	text = base.TruncateByRune(text, 75)
+	confirmText = base.TruncateByRune(confirmText, 75)
+	denyText = base.TruncateByRune(denyText, 75)
 
 	return title, text, confirmText, denyText
 }
@@ -366,8 +347,8 @@ func ValidateButtonURL(buttonURL string) error {
 	}
 
 	// Button URLs limited to 3000 chars
-	if RuneCount(buttonURL) > 3000 {
-		return fmt.Errorf("button URL too long: %d chars (max 3000)", RuneCount(buttonURL))
+	if base.RuneCount(buttonURL) > 3000 {
+		return fmt.Errorf("button URL too long: %d chars (max 3000)", base.RuneCount(buttonURL))
 	}
 
 	return nil
@@ -460,10 +441,10 @@ func ValidateConfirmationDialogText(title, text, confirmText, denyText string) (
 	// Slack limits these fields to 75 characters
 	maxLen := 75
 
-	title = TruncateByRune(title, maxLen)
-	text = TruncateByRune(text, maxLen)
-	confirmText = TruncateByRune(confirmText, maxLen)
-	denyText = TruncateByRune(denyText, maxLen)
+	title = base.TruncateByRune(title, maxLen)
+	text = base.TruncateByRune(text, maxLen)
+	confirmText = base.TruncateByRune(confirmText, maxLen)
+	denyText = base.TruncateByRune(denyText, maxLen)
 
 	return title, text, confirmText, denyText
 }
@@ -476,7 +457,7 @@ func ValidateInitialValueForInput(initialValue string, maxLength int) string {
 
 	// Sanitize and truncate
 	initialValue = SanitizeForDisplay(initialValue, maxLength)
-	initialValue = TruncateByRune(initialValue, maxLength)
+	initialValue = base.TruncateByRune(initialValue, maxLength)
 
 	return initialValue
 }

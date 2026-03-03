@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hrygo/hotplex/chatapps/base"
 )
 
 func TestBuildThinkingCard(t *testing.T) {
@@ -283,9 +285,9 @@ func TestTruncateString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := truncateString(tt.input, tt.maxLen)
+		got := base.TruncateWithEllipsis(tt.input, tt.maxLen)
 		if got != tt.want {
-			t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			t.Errorf("TruncateWithEllipsis(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
 		}
 	}
 }

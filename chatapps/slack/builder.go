@@ -1108,8 +1108,8 @@ func (b *MessageBuilder) BuildPermissionRequestMessageFromChat(msg *base.ChatMes
 	// Sanitize and truncate commands for preview
 	safeInput := SanitizeCommand(input)
 	displayInput := safeInput
-	if RuneCount(displayInput) > 500 {
-		displayInput = TruncateByRune(displayInput, 497) + "..."
+	if base.RuneCount(displayInput) > 500 {
+		displayInput = base.TruncateWithEllipsis(displayInput, 500)
 	}
 
 	var blocks []slack.Block
