@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/hrygo/hotplex/chatapps/base"
 )
 
 // NativeStreamingWriter 实现 io.Writer 接口，封装 Slack 原生流式消息的生命周期管理
@@ -123,3 +125,6 @@ func (w *NativeStreamingWriter) IsClosed() bool {
 
 // Ensure NativeStreamingWriter implements io.WriteCloser at compile time
 var _ io.WriteCloser = (*NativeStreamingWriter)(nil)
+
+// Ensure NativeStreamingWriter implements base.StreamWriter at compile time
+var _ base.StreamWriter = (*NativeStreamingWriter)(nil)

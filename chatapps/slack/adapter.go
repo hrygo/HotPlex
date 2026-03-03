@@ -1866,6 +1866,12 @@ func (a *Adapter) StopStream(ctx context.Context, channelID, messageTS string) e
 	return nil
 }
 
+// NewStreamWriter creates a platform-specific streaming writer
+// Returns StreamWriter interface for platform-agnostic abstraction
+func (a *Adapter) NewStreamWriter(ctx context.Context, channelID, threadTS string) base.StreamWriter {
+	return NewNativeStreamingWriter(ctx, a, channelID, threadTS, nil)
+}
+
 // Compile-time interface compliance checks
 var (
 	_ base.ChatAdapter       = (*Adapter)(nil)
