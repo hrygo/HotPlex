@@ -88,15 +88,18 @@ func (w *NativeStreamingWriter) Close() error {
 	}
 
 	// 结束流
-	if err := w.adapter.StopStream(w.ctx, w.channelID, w.messageTS); err != nil {
-		return fmt.Errorf("stop stream: %w", err)
-	}
+	stopErr := w.adapter.StopStream(w.ctx, w.channelID, w.messageTS)
 
+	// 无论 StopStream 是否成功，都标记为已关闭
 	w.closed = true
 
-	// 调用完成回调，传递最终的 messageTS
+	// 调用完成回调，传递最终的 messageTS（即使 StopStream 失败）
 	if w.onComplete != nil {
 		w.onComplete(w.messageTS)
+	}
+
+	if stopErr != nil {
+		return fmt.Errorf("stop stream: %w", stopErr)
 	}
 
 	return nil
