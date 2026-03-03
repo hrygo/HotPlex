@@ -1,7 +1,7 @@
 # Slack Chat App 顶级体验优化方案：AI Assistant 原生化演进
 
-**版本**: v2.1 (已更新)
-**更新日期**: 2026-03-03
+**版本**: v2.1 (Official Release)
+**最后更新**: 2026-03-03
 **验证状态**: ✅ API 真实性已核验
 
 本文本着"近细远粗"的原则，结合 Slack 2026 最新 API 与 OpenClaw 最佳实践，制定 HotPlex Slack 端的原生化体验升级路线。
@@ -20,7 +20,7 @@
 | **原生状态反馈 (Assistant Status)**      | `assistant.threads.setStatus` API                                 | ✅ 官方 GA |
 | **流式输出 (Text Streaming)**            | `slack-go/slack` 库的 `StartStream/AppendStream/StopStream`       | ✅ 库支持  |
 
-> **重要说明**: 原文档中提到的 `chat.startStream/appendStream/stopStream` 并非 Slack Web API 方法名，而是 `slack-go/slack` 库封装的方法。实际调用时通过库的 `StartStream()` / `AppendStream()` / `StopStream()` 方法实现，底层通信协议由库处理。
+> **技术实现细节**: 官方 Slack Web API 并不直接提供名为 `chat.startStream` 的方法。HotPlex 采用 `slack-go/slack` 库封装的流式接口，通过库提供的 `StartStream()` / `AppendStream()` / `StopStream()` 方法实现与 Slack 平台的高级通信协议交互。
 
 ---
 
