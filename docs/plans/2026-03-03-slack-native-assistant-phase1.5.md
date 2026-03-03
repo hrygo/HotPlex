@@ -378,5 +378,45 @@ StatusManager      →     Brain.EventHandler
 
 ---
 
+## 7. 待排查问题
+
+### 问题: 流式写入失败 `invalid_arguments`
+
+**发现时间**: 2026-03-03
+
+**现象**: 日志中反复出现以下警告：
+```
+level=WARN source=chatapps/engine_handler.go:923 msg="Failed to write to stream" error="start stream: start stream: invalid_arguments"
+```
+
+**影响**:
+- 消息无法实时流式显示到 Slack
+- 降级为聚合器批量发送（延迟约 500ms）
+
+**问题定位**:
+| 位置 | 代码 |
+|------|------|
+| `streaming_writer.go:59` | `w.adapter.StartStream(w.ctx, w.channelID, w.threadTS)` |
+| `adapter.go:1821` | `a.client.StartStreamContext(ctx, channelID, ...)` |
+
+**可能原因**:
+1. `channelID` 或 `threadTS` 参数格式不正确
+2. Slack API `StartStreamContext` 缺少必填参数（如 `subtype`）
+3. Slack App 权限不足（需要 `chat:write` 等）
+4. Slack SDK 版本不兼容
+
+**排查步骤**:
+1. 打印 `channelID` 和 `threadTS` 确认值正确
+2. 检查 Slack API 文档确认 `StartStreamContext` 完整参数
+3. 验证 Slack App Token 权限
+4. 对比 Slack SDK 示例代码
+
+**相关文件**:
+- `chatapps/slack/streaming_writer.go`
+- `chatapps/slack/adapter.go`
+- `chatapps/engine_handler.go`
+
+---
+
 **文档状态**: Draft
 **创建时间**: 2026-03-03
