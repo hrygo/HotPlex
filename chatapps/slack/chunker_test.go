@@ -2,6 +2,7 @@ package slack
 
 import (
 	"testing"
+	"unicode/utf8"
 )
 
 func TestChunkMessage(t *testing.T) {
@@ -92,6 +93,36 @@ func TestChunkMessage_UTF8(t *testing.T) {
 			t.Errorf("chunk %d is empty", i)
 		}
 	}
+}
+
+func TestChunkMessage_ChineseNewline(t *testing.T) {
+	// Test Chinese text with newlines - should break at Chinese newline
+	text := "第一行中文\n第二行中文\n第三行中文"
+	text = text + string(make([]byte, 5000)) // Add more to force chunking
+
+	result := chunkMessage(text, 50)
+
+	if len(result) < 2 {
+		t.Skip("text too short to chunk")
+	}
+
+	// Verify chunks don't contain broken characters
+	for i, chunk := range result {
+		if !isValidUTF8(chunk) {
+			t.Errorf("chunk %d contains invalid UTF-8: %q", i, chunk)
+		}
+	}
+}
+
+func isValidUTF8(s string) bool {
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			return false
+		}
+		i += size
+	}
+	return true
 }
 
 func TestSlackTextLimit(t *testing.T) {

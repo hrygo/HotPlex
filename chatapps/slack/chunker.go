@@ -30,16 +30,31 @@ func chunkMessage(text string, limit int) []string {
 			end = totalRunes
 		}
 
-		// Try to break at word boundary
+		// Try to break at word boundary using rune indices
 		if end < totalRunes {
-			chunk := string(runes[i:end])
-			lastSpace := strings.LastIndex(chunk, "\n")
-			if lastSpace > 0 {
+			chunkRunes := runes[i:end]
+
+			// Find last newline in chunk (use rune-based search)
+			lastNewline := -1
+			for j := len(chunkRunes) - 1; j >= 0; j-- {
+				if chunkRunes[j] == '\n' {
+					lastNewline = j
+					break
+				}
+			}
+			if lastNewline > 0 {
 				// Break at newline if possible
-				end = i + lastSpace + 1
+				end = i + lastNewline + 1
 			} else {
-				lastSpace = strings.LastIndex(chunk, " ")
-				if lastSpace > chunkSize/2 {
+				// Find last space in chunk
+				lastSpace := -1
+				for j := len(chunkRunes) - 1; j >= 0; j-- {
+					if chunkRunes[j] == ' ' {
+						lastSpace = j
+						break
+					}
+				}
+				if lastSpace > len(chunkRunes)/2 {
 					// Only break at space if more than half the chunk is used
 					end = i + lastSpace
 				}
