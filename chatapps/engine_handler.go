@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/chatapps/internal"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
 	intengine "github.com/hrygo/hotplex/internal/engine"
@@ -232,6 +233,7 @@ type StreamCallback struct {
 	// Platform-specific operations (dependency injection for testability and platform agnosticism)
 	messageOps MessageOperations
 	sessionOps SessionOperations
+	statusMgr  *internal.StatusManager // Status notification manager
 
 	// Native streaming state - platform-agnostic streaming output
 	streamWriter       base.StreamWriter // Platform-agnostic streaming writer
@@ -284,6 +286,14 @@ func NewStreamCallback(
 		processor:  NewDefaultProcessorChain(ctx, logger),
 		messageOps: messageOps,
 		sessionOps: sessionOps,
+	}
+
+	// Initialize StatusManager if StatusProvider is available
+	if adapters != nil {
+		if statusProvider := adapters.GetStatusProvider(platform); statusProvider != nil {
+			cb.statusMgr = internal.NewStatusManager(statusProvider, logger)
+			logger.Debug("StatusManager initialized", "platform", platform)
+		}
 	}
 
 	// Set callback as the sender for aggregated messages
@@ -618,9 +628,59 @@ func (c *StreamCallback) scheduleDeleteActionMessages() {
 }
 
 // updateStatusMessage updates the status indicator message in-place
-// It sends a base.ChatMessage with the appropriate MessageType
-// The Adapter's MessageBuilder will handle conversion to platform-specific blocks
+// It uses StatusManager if available, otherwise falls back to bubble message
 func (c *StreamCallback) updateStatusMessage(statusType base.MessageType, displayText string) error {
+	// If StatusManager is available, use it
+	if c.statusMgr != nil {
+		return c.updateStatusMessageViaManager(statusType, displayText)
+	}
+
+	// Fallback to legacy bubble message logic
+	return c.updateStatusMessageLegacy(statusType, displayText)
+}
+
+// updateStatusMessageViaManager uses StatusManager for status notifications
+func (c *StreamCallback) updateStatusMessageViaManager(statusType base.MessageType, displayText string) error {
+	// Convert MessageType to StatusType
+	status := base.MessageTypeToStatusType(statusType)
+
+	// Get channel and thread info from metadata
+	c.mu.Lock()
+	channelID, _ := c.metadata["channel_id"].(string)
+	threadTS, _ := c.metadata["thread_ts"].(string)
+
+	// Skip if status hasn't changed (avoid redundant updates)
+	if c.currentStatus == statusType && statusType != base.MessageTypeThinking {
+		c.mu.Unlock()
+		return nil
+	}
+
+	// Throttle repetitive status updates
+	if c.currentStatus == statusType && time.Since(c.lastStatusUpdate) < time.Second {
+		c.mu.Unlock()
+		return nil
+	}
+	c.lastStatusUpdate = time.Now()
+
+	// Update local status tracking
+	if c.isFirst {
+		c.isFirst = false
+	}
+	c.currentStatus = statusType
+	c.mu.Unlock()
+
+	// Use StatusManager for status notification
+	err := c.statusMgr.Notify(c.ctx, channelID, threadTS, status, displayText)
+	if err != nil {
+		c.logger.Warn("StatusManager Notify failed", "error", err, "status", status)
+		// Don't return error - StatusManager handles fallback internally
+	}
+	return nil
+}
+
+// updateStatusMessageLegacy is the original bubble message implementation
+// Used as fallback when StatusManager is not available
+func (c *StreamCallback) updateStatusMessageLegacy(statusType base.MessageType, displayText string) error {
 	c.mu.Lock()
 	// If native streaming is active, suppress legacy thinking bubble
 	if c.streamWriterActive && statusType == base.MessageTypeThinking {
@@ -758,24 +818,14 @@ func (c *StreamCallback) handleToolUse(data any) error {
 
 	c.logger.Debug("Sending tool use message", "tool_name", toolName, "input_len", len(input))
 
-	// Send tool use message with platform-agnostic MessageType
-	// The Adapter's MessageBuilder will convert to platform-specific blocks
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeToolUse,
-		Content: toolName,
-		Metadata: map[string]any{
-			"input":         input,
-			"input_summary": inputSummary,
-			"truncated":     truncated,
-			"event_type":    string(provider.EventTypeToolUse),
-			"stream":        true, // Mark as stream to allow aggregation window
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
-		return err
-	}
-	return nil
+	// Use buildChatMessage helper for consistency
+	return c.buildChatMessage(base.MessageTypeToolUse, toolName, map[string]any{
+		"input":         input,
+		"input_summary": inputSummary,
+		"truncated":     truncated,
+		"event_type":    string(provider.EventTypeToolUse),
+		"stream":        true,
+	})
 }
 
 func (c *StreamCallback) handleToolResult(data any) error {
@@ -831,25 +881,16 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		"duration_ms", durationMs,
 		"output_len", len(output))
 
-	// Send tool result message with platform-agnostic MessageType
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeToolResult,
-		Content: output,
-		Metadata: map[string]any{
-			"success":        success,
-			"duration_ms":    durationMs,
-			"tool_name":      toolName,
-			"file_path":      filePath,
-			"content_length": contentLength,
-			"event_type":     string(provider.EventTypeToolResult),
-			"stream":         true, // Consistency with other flow events
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
-		return err
-	}
-	return nil
+	// Use buildChatMessage helper for consistency
+	return c.buildChatMessage(base.MessageTypeToolResult, output, map[string]any{
+		"success":        success,
+		"duration_ms":    durationMs,
+		"tool_name":      toolName,
+		"file_path":      filePath,
+		"content_length": contentLength,
+		"event_type":     string(provider.EventTypeToolResult),
+		"stream":         true,
+	})
 }
 
 func (c *StreamCallback) handleAnswer(data any) error {
@@ -1013,16 +1054,10 @@ func (c *StreamCallback) handleError(data any) error {
 		errMsg = fmt.Sprintf("%v", data)
 	}
 
-	// Send error message with platform-agnostic MessageType
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeError,
-		Content: errMsg,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeError),
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
+	// Use buildChatMessage helper for consistency
+	if err := c.buildChatMessage(base.MessageTypeError, errMsg, map[string]any{
+		"event_type": string(provider.EventTypeError),
+	}); err != nil {
 		return err
 	}
 
@@ -1048,17 +1083,11 @@ func (c *StreamCallback) handleDangerBlock(data any) error {
 		"session_id", c.sessionID,
 		"reason", reason)
 
-	// Send danger block message with platform-agnostic MessageType
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeDangerBlock,
-		Content: reason,
-		Metadata: map[string]any{
-			"event_type": "security_block",
-			"session_id": c.sessionID,
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	// Use buildChatMessage helper for consistency
+	return c.buildChatMessage(base.MessageTypeDangerBlock, reason, map[string]any{
+		"event_type": "security_block",
+		"session_id": c.sessionID,
+	})
 }
 
 // handleSessionStats handles session statistics events
@@ -1093,27 +1122,21 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 	// This applies a 3s delayed deletion for a clean end-state UX
 	c.scheduleDeleteActionMessages()
 
-	// Send stats message with platform-agnostic MessageType
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeSessionStats,
-		Content: "",
-		Metadata: map[string]any{
-			"event_type":           "session_stats",
-			"session_id":           stats.SessionID,
-			"total_duration_ms":    stats.TotalDurationMs,
-			"thinking_duration_ms": stats.ThinkingDurationMs,
-			"tool_duration_ms":     stats.ToolDurationMs,
-			"input_tokens":         int64(stats.InputTokens),
-			"output_tokens":        int64(stats.OutputTokens),
-			"total_tokens":         stats.TotalTokens,
-			"tool_call_count":      int64(stats.ToolCallCount),
-			"tools_used":           stats.ToolsUsed,
-			"files_modified":       int64(stats.FilesModified),
-			"file_paths":           stats.FilePaths,
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
+	// Use buildChatMessage helper for consistency
+	if err := c.buildChatMessage(base.MessageTypeSessionStats, "", map[string]any{
+		"event_type":           "session_stats",
+		"session_id":           stats.SessionID,
+		"total_duration_ms":    stats.TotalDurationMs,
+		"thinking_duration_ms": stats.ThinkingDurationMs,
+		"tool_duration_ms":     stats.ToolDurationMs,
+		"input_tokens":         int64(stats.InputTokens),
+		"output_tokens":        int64(stats.OutputTokens),
+		"total_tokens":         stats.TotalTokens,
+		"tool_call_count":      int64(stats.ToolCallCount),
+		"tools_used":           stats.ToolsUsed,
+		"files_modified":       int64(stats.FilesModified),
+		"file_paths":           stats.FilePaths,
+	}); err != nil {
 		return err
 	}
 
@@ -1149,18 +1172,11 @@ func (c *StreamCallback) handleCommandProgress(data any) error {
 		title = "Processing..."
 	}
 
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeCommandProgress,
-		Content: title,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeCommandProgress),
-		},
-	}
-	for k, v := range metadata {
-		msg.Metadata[k] = v
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	// Add event_type to metadata
+	metadata["event_type"] = string(provider.EventTypeCommandProgress)
+
+	// Use buildChatMessage helper for consistency
+	return c.buildChatMessage(base.MessageTypeCommandProgress, title, metadata)
 }
 
 // handleCommandComplete handles command completion events
@@ -1189,18 +1205,11 @@ func (c *StreamCallback) handleCommandComplete(data any) error {
 		title = "Command completed"
 	}
 
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeCommandComplete,
-		Content: title,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeCommandComplete),
-		},
-	}
-	for k, v := range metadata {
-		msg.Metadata[k] = v
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	// Add event_type to metadata
+	metadata["event_type"] = string(provider.EventTypeCommandComplete)
+
+	// Use buildChatMessage helper for consistency
+	return c.buildChatMessage(base.MessageTypeCommandComplete, title, metadata)
 }
 
 // handleSystem handles system-level messages
@@ -1262,18 +1271,11 @@ func (c *StreamCallback) handleStepStart(data any) error {
 		content = "Starting step..."
 	}
 
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeStepStart,
-		Content: content,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeStepStart),
-		},
-	}
-	for k, v := range metadata {
-		msg.Metadata[k] = v
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	// Add event_type to metadata
+	metadata["event_type"] = string(provider.EventTypeStepStart)
+
+	// Use buildChatMessage helper for consistency
+	return c.buildChatMessage(base.MessageTypeStepStart, content, metadata)
 }
 
 // handleStepFinish handles step finish events (OpenCode specific)
@@ -1300,18 +1302,11 @@ func (c *StreamCallback) handleStepFinish(data any) error {
 		content = "Step completed"
 	}
 
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeStepFinish,
-		Content: content,
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeStepFinish),
-		},
-	}
-	for k, v := range metadata {
-		msg.Metadata[k] = v
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	// Add event_type to metadata
+	metadata["event_type"] = string(provider.EventTypeStepFinish)
+
+	// Use buildChatMessage helper for consistency
+	return c.buildChatMessage(base.MessageTypeStepFinish, content, metadata)
 }
 
 // handleRaw handles raw/unparsed output

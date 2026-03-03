@@ -161,3 +161,20 @@ type StatusProvider interface {
 	// ClearStatus clears status indicator
 	ClearStatus(ctx context.Context, channelID, threadTS string) error
 }
+
+// MessageTypeToStatusType converts MessageType to StatusType for status notification
+// Returns StatusIdle for unrecognized types
+func MessageTypeToStatusType(msgType MessageType) StatusType {
+	switch msgType {
+	case MessageTypeThinking:
+		return StatusThinking
+	case MessageTypeToolUse:
+		return StatusToolUse
+	case MessageTypeToolResult:
+		return StatusToolResult
+	case MessageTypeAnswer, MessageTypeExitPlanMode:
+		return StatusAnswering
+	default:
+		return StatusIdle
+	}
+}

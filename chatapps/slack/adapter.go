@@ -1871,8 +1871,11 @@ func (a *Adapter) StartStream(ctx context.Context, channelID, threadTS string) (
 		return "", fmt.Errorf("slack client not initialized")
 	}
 
+	a.Logger().Debug("Starting native stream", "channel_id", channelID, "thread_ts", threadTS)
+
 	// Build message options with thread support
-	options := []slack.MsgOption{slack.MsgOptionText("", false)}
+	// Note: Slack API requires non-empty text for StartStream
+	options := []slack.MsgOption{slack.MsgOptionText(" ", false)}
 	if threadTS != "" {
 		options = append(options, slack.MsgOptionTS(threadTS))
 	}
@@ -1880,9 +1883,11 @@ func (a *Adapter) StartStream(ctx context.Context, channelID, threadTS string) (
 	// Start streaming message
 	_, ts, err := a.client.StartStreamContext(ctx, channelID, options...)
 	if err != nil {
+		a.Logger().Error("StartStream failed", "channel_id", channelID, "error", err)
 		return "", fmt.Errorf("start stream: %w", err)
 	}
 
+	a.Logger().Debug("Native stream started", "channel_id", channelID, "message_ts", ts)
 	return ts, nil
 }
 
@@ -1893,10 +1898,13 @@ func (a *Adapter) AppendStream(ctx context.Context, channelID, messageTS, conten
 		return fmt.Errorf("slack client not initialized")
 	}
 
+	a.Logger().Debug("Appending to stream", "channel_id", channelID, "message_ts", messageTS, "content_len", len(content))
+
 	_, _, err := a.client.AppendStreamContext(ctx, channelID, messageTS,
 		slack.MsgOptionText(content, false),
 	)
 	if err != nil {
+		a.Logger().Error("AppendStream failed", "channel_id", channelID, "message_ts", messageTS, "error", err)
 		return fmt.Errorf("append stream: %w", err)
 	}
 
