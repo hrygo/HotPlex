@@ -910,9 +910,15 @@ func (c *StreamCallback) handleAnswer(data any) error {
 	// Schedule deletion of all tracked Thinking/Action messages (3s delay)
 	c.scheduleDeleteActionMessages()
 
+	// Copy writer reference while locked to avoid race condition
+	c.mu.Lock()
+	writer := c.streamWriter
+	active := c.streamWriterActive
+	c.mu.Unlock()
+
 	// Use native streaming if available
-	if c.streamWriterActive && c.streamWriter != nil {
-		_, err := c.streamWriter.Write([]byte(content))
+	if active && writer != nil {
+		_, err := writer.Write([]byte(content))
 		if err != nil {
 			c.logger.Warn("Failed to write to stream", "error", err)
 		}
