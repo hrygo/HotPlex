@@ -25,8 +25,9 @@ HotPlex 支持的特定 AI CLI 智能体深度指南。
 - **[OpenCode 提供商](providers/opencode_zh.md)**: 与 OpenCode CLI 生态系统集成。
 
 ## 💬 ChatApps 集成
-- **[ChatApps Guide](chatapps/chatapps-architecture.md)**: Architecture design and user manual for chat platform integration.
-- **[Slack Block 映射](chatapps/engine-events-slack-ux-spec.md)**: Engine 事件到 Slack Block Kit 映射的最佳实践深度解析。
+- **[ChatApps 架构指南](chatapps/chatapps-architecture.md)**: 聊天应用集成的架构设计与用户手册。
+- **[Slack 适配器手册](chatapps/chatapps-slack.md)**: Slack 全双工通信集成手册。
+- **[Slack 原生演进方案](plans/slack-ai-native-evolution-plan.md)**: 深度解析下一代 Slack AI 原生交互体验。
 
 ## 🛠️ 开发者迁移
 - *即将推出*
