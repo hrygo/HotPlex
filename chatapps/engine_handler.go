@@ -649,13 +649,8 @@ func (c *StreamCallback) updateStatusMessageViaManager(statusType base.MessageTy
 	channelID, _ := c.metadata["channel_id"].(string)
 	threadTS, _ := c.metadata["thread_ts"].(string)
 
-	// Skip if status hasn't changed (avoid redundant updates)
-	if c.currentStatus == statusType && statusType != base.MessageTypeThinking {
-		c.mu.Unlock()
-		return nil
-	}
-
 	// Throttle repetitive status updates
+	// Note: StatusManager also handles deduplication internally
 	if c.currentStatus == statusType && time.Since(c.lastStatusUpdate) < time.Second {
 		c.mu.Unlock()
 		return nil
@@ -669,7 +664,7 @@ func (c *StreamCallback) updateStatusMessageViaManager(statusType base.MessageTy
 	c.currentStatus = statusType
 	c.mu.Unlock()
 
-	// Use StatusManager for status notification
+	// Use StatusManager for status notification (handles deduplication internally)
 	err := c.statusMgr.Notify(c.ctx, channelID, threadTS, status, displayText)
 	if err != nil {
 		c.logger.Warn("StatusManager Notify failed", "error", err, "status", status)
