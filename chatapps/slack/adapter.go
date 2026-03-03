@@ -1823,10 +1823,14 @@ func (a *Adapter) StartStream(ctx context.Context, channelID, threadTS string) (
 		return "", fmt.Errorf("slack client not initialized")
 	}
 
-	// Start streaming message (empty content to begin)
-	_, ts, err := a.client.StartStreamContext(ctx, channelID,
-		slack.MsgOptionText("", false),
-	)
+	// Build message options with thread support
+	options := []slack.MsgOption{slack.MsgOptionText("", false)}
+	if threadTS != "" {
+		options = append(options, slack.MsgOptionTS(threadTS))
+	}
+
+	// Start streaming message
+	_, ts, err := a.client.StartStreamContext(ctx, channelID, options...)
 	if err != nil {
 		return "", fmt.Errorf("start stream: %w", err)
 	}

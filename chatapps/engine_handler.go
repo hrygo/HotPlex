@@ -920,14 +920,16 @@ func (c *StreamCallback) handleAnswer(data any) error {
 	if active && writer != nil {
 		_, err := writer.Write([]byte(content))
 		if err != nil {
-			c.logger.Warn("Failed to write to stream", "error", err)
+			c.logger.Warn("Failed to write to stream, falling back to legacy streaming", "error", err)
+			// Fall through to legacy streaming path - do NOT clear session state here
+		} else {
+			// Clear processor session state only on successful answer
+			c.processor.ResetSession(c.platform, c.sessionID)
+			return nil
 		}
-		// Clear processor session state on successful answer
-		c.processor.ResetSession(c.platform, c.sessionID)
-		return nil
 	}
 
-	// Fallback to legacy throttled streaming update
+	// Fallback to legacy throttled streaming update (also used when native streaming fails)
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeAnswer,
 		Content: content,
