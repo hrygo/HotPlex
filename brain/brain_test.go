@@ -54,13 +54,13 @@ func TestConfig_LoadFromEnv(t *testing.T) {
 	config := LoadConfigFromEnv()
 
 	assert.True(t, config.Enabled)
-	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-4o-mini", config.Model)
-	assert.Equal(t, 30, config.TimeoutS)
-	assert.Equal(t, 500, config.CacheSize)
-	assert.Equal(t, 5, config.MaxRetries)
-	assert.Equal(t, 200, config.RetryMinWaitMs)
-	assert.Equal(t, 3000, config.RetryMaxWaitMs)
+	assert.Equal(t, "openai", config.Model.Provider)
+	assert.Equal(t, "gpt-4o-mini", config.Model.Model)
+	assert.Equal(t, 30, config.Model.TimeoutS)
+	assert.Equal(t, 500, config.Cache.Size)
+	assert.Equal(t, 5, config.Retry.MaxAttempts)
+	assert.Equal(t, 200, config.Retry.MinWaitMs)
+	assert.Equal(t, 3000, config.Retry.MaxWaitMs)
 }
 
 func TestConfig_DefaultValues(t *testing.T) {
@@ -77,13 +77,13 @@ func TestConfig_DefaultValues(t *testing.T) {
 	config := LoadConfigFromEnv()
 
 	assert.False(t, config.Enabled)
-	assert.Equal(t, "openai", config.Provider)
-	assert.Equal(t, "gpt-4o-mini", config.Model)
-	assert.Equal(t, 10, config.TimeoutS)
-	assert.Equal(t, 1000, config.CacheSize)
-	assert.Equal(t, 3, config.MaxRetries)
-	assert.Equal(t, 100, config.RetryMinWaitMs)
-	assert.Equal(t, 5000, config.RetryMaxWaitMs)
+	assert.Equal(t, "openai", config.Model.Provider)
+	assert.Equal(t, "gpt-4o-mini", config.Model.Model)
+	assert.Equal(t, 10, config.Model.TimeoutS)
+	assert.Equal(t, 1000, config.Cache.Size)
+	assert.Equal(t, 3, config.Retry.MaxAttempts)
+	assert.Equal(t, 100, config.Retry.MinWaitMs)
+	assert.Equal(t, 5000, config.Retry.MaxWaitMs)
 }
 
 func TestGlobalBrain_Access(t *testing.T) {
