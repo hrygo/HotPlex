@@ -595,7 +595,6 @@ func (p *MessageAggregatorProcessor) mergeRichContent(messages []*base.ChatMessa
 	if firstRichContent == nil {
 		return &base.RichContent{
 			Attachments: make([]base.Attachment, 0),
-			Reactions:   make([]base.Reaction, 0),
 			Blocks:      make([]any, 0),
 			Embeds:      make([]any, 0),
 		}
@@ -604,13 +603,10 @@ func (p *MessageAggregatorProcessor) mergeRichContent(messages []*base.ChatMessa
 	merged := &base.RichContent{
 		ParseMode:      firstRichContent.ParseMode,
 		Attachments:    make([]base.Attachment, 0),
-		Reactions:      make([]base.Reaction, 0),
 		Blocks:         make([]any, 0),
 		Embeds:         make([]any, 0),
 		InlineKeyboard: firstRichContent.InlineKeyboard,
 	}
-
-	seenReactions := make(map[string]bool)
 
 	for _, msg := range messages {
 		if msg.RichContent == nil {
@@ -619,15 +615,6 @@ func (p *MessageAggregatorProcessor) mergeRichContent(messages []*base.ChatMessa
 
 		// Merge attachments
 		merged.Attachments = append(merged.Attachments, msg.RichContent.Attachments...)
-
-		// Merge reactions (deduplicate)
-		for _, reaction := range msg.RichContent.Reactions {
-			key := reaction.Name
-			if !seenReactions[key] {
-				merged.Reactions = append(merged.Reactions, reaction)
-				seenReactions[key] = true
-			}
-		}
 
 		// Merge blocks
 		merged.Blocks = append(merged.Blocks, msg.RichContent.Blocks...)

@@ -226,11 +226,6 @@ type StreamCallback struct {
 	streamState      *StreamState
 	lastStatusUpdate time.Time // Throttle tracker for thinking/status messages
 
-	// Reaction lifecycle state — tracks the user's trigger message for emoji status
-	reactionChannelID string // Channel for reactions (from user msg)
-	reactionMessageTS string // User's message TS for reactions
-	currentReaction   string // Currently active reaction emoji name
-
 	// Cleanup records for sliding window management and final deletion
 	cleanupMsgRecords []msgRecord
 
@@ -285,16 +280,6 @@ func NewStreamCallback(
 		processor:  NewDefaultProcessorChain(ctx, logger),
 		messageOps: messageOps,
 		sessionOps: sessionOps,
-	}
-
-	// Extract user message coordinates for reaction lifecycle
-	if metadata != nil {
-		if ch, ok := metadata["channel_id"].(string); ok {
-			cb.reactionChannelID = ch
-		}
-		if ts, ok := metadata["message_ts"].(string); ok {
-			cb.reactionMessageTS = ts
-		}
 	}
 
 	// Set callback as the sender for aggregated messages
@@ -400,9 +385,7 @@ func (c *StreamCallback) handleThinking(data any) error {
 		"thinking_channel_id", c.thinkingChannelID,
 		"thinking_message_ts", c.thinkingMessageTS)
 
-	// Reaction lifecycle: 📥 → 🧠
 	// Always update reaction state regardless of content (reaction shows processing progress)
-	c.setReaction("brain")
 
 	// Skip empty thinking content if not the first event
 	if thinkingContent == "" && !c.isFirst {
@@ -488,55 +471,6 @@ func (c *StreamCallback) sendMessageAndGetTS(msg *ChatMessage) error {
 
 // setReaction sets a reaction on the user's trigger message.
 // Removes previous reaction before adding new one for clean status transitions.
-func (c *StreamCallback) setReaction(emoji string) {
-	c.logger.Debug("setReaction called",
-		"emoji", emoji,
-		"reactionChannelID", c.reactionChannelID,
-		"reactionMessageTS", c.reactionMessageTS,
-		"messageOps", fmt.Sprintf("%T", c.messageOps),
-		"currentReaction", c.currentReaction)
-
-	if c.reactionChannelID == "" || c.reactionMessageTS == "" {
-		c.logger.Warn("setReaction: missing reaction coordinates, skipping")
-		return
-	}
-
-	// Use injected message operations interface (no type assertion needed)
-	if c.messageOps == nil {
-		c.logger.Warn("setReaction: message operations not supported on this platform", "platform", c.platform)
-		return
-	}
-
-	c.mu.Lock()
-	prevReaction := c.currentReaction
-	if prevReaction == emoji {
-		c.mu.Unlock()
-		return
-	}
-	c.mu.Unlock()
-
-	// Remove previous reaction (ignore errors — may not exist)
-	if prevReaction != "" {
-		_ = c.messageOps.RemoveReaction(c.ctx, base.Reaction{
-			Name:      prevReaction,
-			Channel:   c.reactionChannelID,
-			Timestamp: c.reactionMessageTS,
-		})
-	}
-
-	// Add new reaction
-	if err := c.messageOps.AddReaction(c.ctx, base.Reaction{
-		Name:      emoji,
-		Channel:   c.reactionChannelID,
-		Timestamp: c.reactionMessageTS,
-	}); err == nil {
-		c.mu.Lock()
-		c.currentReaction = emoji
-		c.mu.Unlock()
-	} else {
-		c.logger.Warn("Failed to set reaction", "emoji", emoji, "error", err)
-	}
-}
 
 // trackMessage records a message for sliding window management and final cleanup.
 func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
@@ -794,9 +728,6 @@ func (c *StreamCallback) handleToolUse(data any) error {
 		}
 	}
 
-	// Reaction lifecycle: 🧠 → 🔨
-	c.setReaction("hammer_and_wrench")
-
 	// Update status indicator to show current tool being used
 	if err := c.updateStatusMessage(base.MessageTypeToolUse, toolName); err != nil {
 		c.logger.Warn("Failed to update status for tool_use", "error", err)
@@ -993,8 +924,6 @@ func (c *StreamCallback) handleAnswer(data any) error {
 }
 
 func (c *StreamCallback) handleError(data any) error {
-	// Reaction lifecycle: set ❌ on error
-	c.setReaction("x")
 
 	// Clear thinking state on first non-thinking event
 	if c.thinkingSent {
@@ -1050,9 +979,6 @@ func (c *StreamCallback) handleDangerBlock(data any) error {
 		reason = "security_block"
 	}
 
-	// Reaction lifecycle: set 🚫 on security block
-	c.setReaction("no_entry_sign")
-
 	// Log danger block event (INFO level for security events)
 	c.logger.Info("Danger block detected",
 		"session_id", c.sessionID,
@@ -1074,8 +1000,6 @@ func (c *StreamCallback) handleDangerBlock(data any) error {
 // handleSessionStats handles session statistics events
 // Implements EventTypeResult (Turn Complete)
 func (c *StreamCallback) handleSessionStats(data any) error {
-	// Reaction lifecycle: set ✅ on turn complete
-	c.setReaction("white_check_mark")
 
 	stats, ok := data.(*event.SessionStatsData)
 	if !ok {
@@ -1149,9 +1073,6 @@ func (c *StreamCallback) handleCommandProgress(data any) error {
 	} else {
 		title = "Processing..."
 	}
-
-	// Reaction lifecycle: ensure 🔨 on progress
-	c.setReaction("hammer_and_wrench")
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeCommandProgress,
@@ -1735,9 +1656,6 @@ func (c *StreamCallback) handleAskUserQuestion(data any) error {
 		return nil
 	}
 
-	// Reaction lifecycle: set ⏳ on question
-	c.setReaction("hourglass_flowing_sand")
-
 	// Send ask user question message with platform-agnostic MessageType
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeAskUserQuestion,
@@ -1765,9 +1683,6 @@ func (c *StreamCallback) handleSessionStart(data any) error {
 	}
 	c.sessionStartSent = true
 	c.mu.Unlock()
-
-	// Reaction lifecycle: set 📥 on session start
-	c.setReaction("inbox_tray")
 
 	var content string
 
@@ -1830,20 +1745,10 @@ func (c *StreamCallback) handleEngineStarting(data any) error {
 // Implements EventTypeUserMessageReceived per spec (0.6)
 // Triggered immediately after user message is received
 func (c *StreamCallback) handleUserMessageReceived(_ any) error {
-	// Reaction lifecycle: set 📥 on acknowledgment
-	c.setReaction("inbox_tray")
 
-	// Per spec: context block with :inbox: emoji
-	// Content must not be empty to avoid "no_text" error
-	msg := &base.ChatMessage{
-		Type:    base.MessageTypeUserMessageReceived,
-		Content: "Message received",
-		Metadata: map[string]any{
-			"event_type": string(provider.EventTypeUserMessageReceived),
-		},
-	}
-	msg.Metadata = c.mergeMetadata(msg.Metadata)
-	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+	// Immediately send a Thinking placeholder to show active processing with the animated avatar
+	// Use updateStatusMessage to properly capture and store message_ts for subsequent streaming updates
+	return c.updateStatusMessage(base.MessageTypeThinking, "Thinking...")
 }
 
 // handlePermissionRequest handles permission request events
@@ -1890,9 +1795,6 @@ func (c *StreamCallback) handlePermissionRequest(data any) error {
 
 	// Get tool and input for display
 	tool, input := req.GetToolAndInput()
-
-	// Reaction lifecycle: set ⏳ on permission wait
-	c.setReaction("hourglass_flowing_sand")
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypePermissionRequest,

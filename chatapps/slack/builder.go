@@ -92,8 +92,8 @@ func (b *MessageBuilder) BuildThinkingMessage(msg *base.ChatMessage) []slack.Blo
 		content = "... " + string(runes[len(runes)-60:])
 	}
 
-	// Per spec: context block with :brain: emoji and italic text
-	text := slack.NewTextBlockObject("mrkdwn", ":brain: _"+content+"_", false, false)
+	// Use an avatar block with animated WebP for the Thinking State as per new UX design
+	text := slack.NewTextBlockObject("mrkdwn", ":hourglass_flowing_sand: _"+content+"_", false, false)
 	return []slack.Block{
 		slack.NewContextBlock("", text),
 	}

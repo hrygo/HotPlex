@@ -255,18 +255,6 @@ func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string
 	return nil // Graceful fallback: no-op
 }
 
-// AddReaction is not supported in WhatsApp
-func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error {
-	a.Logger().Debug("AddReaction not supported on WhatsApp", "reaction", reaction.Name)
-	return nil // Graceful fallback: no-op
-}
-
-// RemoveReaction is not supported in WhatsApp
-func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
-	a.Logger().Debug("RemoveReaction not supported on WhatsApp", "reaction", reaction.Name)
-	return nil // Graceful fallback: no-op
-}
-
 // UpdateMessage is not supported in WhatsApp
 func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {
 	a.Logger().Debug("UpdateMessage not supported on WhatsApp", "channel_id", channelID, "message_ts", messageTS)

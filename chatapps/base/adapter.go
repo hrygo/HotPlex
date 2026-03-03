@@ -444,16 +444,6 @@ func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string
 	return nil
 }
 
-// AddReaction is a no-op by default, overridden by platforms that support it
-func (a *Adapter) AddReaction(ctx context.Context, reaction Reaction) error {
-	return nil
-}
-
-// RemoveReaction is a no-op by default, overridden by platforms that support it
-func (a *Adapter) RemoveReaction(ctx context.Context, reaction Reaction) error {
-	return nil
-}
-
 // UpdateMessage is a no-op by default, overridden by platforms that support it
 func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *ChatMessage) error {
 	return nil
