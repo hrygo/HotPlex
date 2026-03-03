@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -352,16 +353,10 @@ func calculatePercentile(data []int64, percentile float64) int64 {
 		return 0
 	}
 
-	// 排序
+	// 排序（使用标准库，O(n log n)）
 	sorted := make([]int64, len(data))
 	copy(sorted, data)
-	for i := 0; i < len(sorted)-1; i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[i] > sorted[j] {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
-		}
-	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
 	// 计算百分位
 	index := int(float64(len(sorted)) * percentile)
