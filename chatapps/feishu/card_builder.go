@@ -285,10 +285,14 @@ func (b *CardBuilder) marshalCard(card *CardTemplate) (string, error) {
 	return string(data), nil
 }
 
-// truncateString truncates a string to max length with ellipsis
+// truncateString truncates a string to max length with ellipsis (rune-based)
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return string(runes[:maxLen-3]) + "..."
 }
