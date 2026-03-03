@@ -232,6 +232,10 @@ type StreamCallback struct {
 	// Platform-specific operations (dependency injection for testability and platform agnosticism)
 	messageOps MessageOperations
 	sessionOps SessionOperations
+
+	// Native streaming state - platform-agnostic streaming output
+	streamWriter       base.StreamWriter // Platform-agnostic streaming writer
+	streamWriterActive bool              // Whether native streaming is active
 }
 
 // Close releases resources held by the callback
@@ -606,6 +610,13 @@ func (c *StreamCallback) scheduleDeleteActionMessages() {
 // The Adapter's MessageBuilder will handle conversion to platform-specific blocks
 func (c *StreamCallback) updateStatusMessage(statusType base.MessageType, displayText string) error {
 	c.mu.Lock()
+	// If native streaming is active, suppress legacy thinking bubble
+	if c.streamWriterActive && statusType == base.MessageTypeThinking {
+		c.logger.Debug("Native streaming active, suppressing thinking bubble")
+		c.mu.Unlock()
+		return nil
+	}
+
 	// Skip if status hasn't changed (avoid redundant updates)
 	if c.currentStatus == statusType && statusType != base.MessageTypeThinking {
 		c.mu.Unlock()
@@ -830,7 +841,43 @@ func (c *StreamCallback) handleToolResult(data any) error {
 }
 
 func (c *StreamCallback) handleAnswer(data any) error {
+	// Capture answer content
+	var content string
+	var metadata map[string]any
+	if m, ok := data.(*event.EventWithMeta); ok {
+		content = m.EventData
+		if m.Meta != nil {
+			metadata = map[string]any{
+				"duration_ms": m.Meta.DurationMs,
+				"status":      m.Meta.Status,
+			}
+		}
+	} else if s, ok := data.(string); ok {
+		content = s
+	}
+
 	c.mu.Lock()
+	// Initialize native streaming on first answer
+	if !c.streamWriterActive && c.streamWriter == nil {
+		channelID := ""
+		threadTS := ""
+		if c.metadata != nil {
+			if ch, ok := c.metadata["channel_id"].(string); ok {
+				channelID = ch
+			}
+			if ts, ok := c.metadata["thread_ts"].(string); ok {
+				threadTS = ts
+			}
+		}
+		if channelID != "" {
+			c.streamWriter = c.adapters.NewStreamWriter(c.ctx, c.platform, channelID, threadTS)
+			if c.streamWriter != nil {
+				c.streamWriterActive = true
+				c.logger.Debug("Native streaming initialized", "channel_id", channelID)
+			}
+		}
+	}
+
 	// Schedule 3-second delayed deletion of thinking message for smooth UX transition
 	if c.thinkingSent && c.thinkingMessageTS != "" && c.thinkingChannelID != "" {
 		c.logger.Debug("Scheduling delayed thinking message deletion for answer",
@@ -863,21 +910,18 @@ func (c *StreamCallback) handleAnswer(data any) error {
 	// Schedule deletion of all tracked Thinking/Action messages (3s delay)
 	c.scheduleDeleteActionMessages()
 
-	// Capture answer content
-	var content string
-	var metadata map[string]any
-	if m, ok := data.(*event.EventWithMeta); ok {
-		content = m.EventData
-		if m.Meta != nil {
-			metadata = map[string]any{
-				"duration_ms": m.Meta.DurationMs,
-				"status":      m.Meta.Status,
-			}
+	// Use native streaming if available
+	if c.streamWriterActive && c.streamWriter != nil {
+		_, err := c.streamWriter.Write([]byte(content))
+		if err != nil {
+			c.logger.Warn("Failed to write to stream", "error", err)
 		}
-	} else if s, ok := data.(string); ok {
-		content = s
+		// Clear processor session state on successful answer
+		c.processor.ResetSession(c.platform, c.sessionID)
+		return nil
 	}
 
+	// Fallback to legacy throttled streaming update
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeAnswer,
 		Content: content,
@@ -1006,6 +1050,17 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 		c.logger.Debug("session_stats: invalid data type", "type", fmt.Sprintf("%T", data))
 		return nil
 	}
+
+	// Close native streaming if active
+	c.mu.Lock()
+	if c.streamWriter != nil {
+		if err := c.streamWriter.Close(); err != nil {
+			c.logger.Warn("Failed to close stream", "error", err)
+		}
+		c.streamWriter = nil
+		c.streamWriterActive = false
+	}
+	c.mu.Unlock()
 
 	// Flush any pending stream state before sending session stats
 	// This ensures the last answer message is sent before the turn completes
