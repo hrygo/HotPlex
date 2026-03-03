@@ -20,7 +20,7 @@ import (
 
 // 压力测试配置
 const (
-	pressureConcurrency    = 100  // 并发数
+	pressureConcurrency    = 100 // 并发数
 	pressureDuration       = 1 * time.Minute
 	pressureMessageLength  = 1024 // 消息长度（字节）
 	pressureReportInterval = 10 * time.Second
