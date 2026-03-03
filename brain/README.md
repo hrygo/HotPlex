@@ -12,7 +12,7 @@ This package provides production-ready LLM client capabilities for HotPlex, impl
 4. **⏱️ Timeout Control**
 5. **🏥 Health Check**
 
-### Phase 2: Observability & Cost Optimization ✨ NEW
+### Phase 2: Observability & Cost Optimization ✅
 
 6. **📊 Metrics Tracking (OpenTelemetry)**
    - Request latency histogram
@@ -38,6 +38,36 @@ This package provides production-ready LLM client capabilities for HotPlex, impl
    - Per-model independent rate limiting
    - Queue waiting mechanism
    - Configurable burst size and queue timeout
+
+### Phase 3: High Availability & Cost Control ✨ NEW
+
+10. **⚡ Circuit Breaker Pattern**
+    - Three-state circuit: Closed → Open → Half-Open
+    - Automatic trip on failure threshold
+    - Half-open state for recovery detection
+    - Manual reset interface
+    - Force open/close for maintenance
+
+11. **🔄 Multi-Provider Failover**
+    - Primary/backup provider configuration
+    - Automatic failover on timeout/errors
+    - Failback mechanism (primary recovery detection)
+    - Failover history tracking
+    - Manual failover override
+
+12. **💰 Token Budget Control**
+    - Daily/weekly/monthly budget limits
+    - Session-level budget tracking
+    - Budget alerts at 80%/90% thresholds
+    - Hard limit (reject) or soft limit (warn) policies
+    - Automatic period reset
+
+13. **⚡ Request Priority Queue**
+    - High/Medium/Low priority levels
+    - Priority-based scheduling algorithm
+    - Low priority request dropping under load
+    - High priority reservation slots
+    - Expiration-based cleanup
 
 ## Configuration
 
@@ -83,6 +113,39 @@ HOTPLEX_BRAIN_ROUTER_MODELS="gpt-4o-mini:openai:0.00015:0.0006:200;gpt-4o:openai
 ```
 
 Format: `name:provider:cost_per_1k_input:cost_per_1k_output:avg_latency_ms`
+
+### High Availability & Cost Control (Phase 3) ✨ NEW
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOTPLEX_BRAIN_CIRCUIT_BREAKER_ENABLED` | `false` | Enable circuit breaker |
+| `HOTPLEX_BRAIN_CIRCUIT_BREAKER_MAX_FAILURES` | `5` | Failures before opening |
+| `HOTPLEX_BRAIN_CIRCUIT_BREAKER_TIMEOUT` | `30s` | Open state duration |
+| `HOTPLEX_BRAIN_CIRCUIT_BREAKER_INTERVAL` | `60s` | Failure counting window |
+| `HOTPLEX_BRAIN_FAILOVER_ENABLED` | `false` | Enable multi-provider failover |
+| `HOTPLEX_BRAIN_FAILOVER_PROVIDERS` | (see below) | Provider configurations |
+| `HOTPLEX_BRAIN_FAILOVER_ENABLE_AUTO` | `true` | Enable automatic failover |
+| `HOTPLEX_BRAIN_FAILOVER_ENABLE_FAILBACK` | `true` | Enable automatic failback |
+| `HOTPLEX_BRAIN_FAILOVER_COOLDOWN` | `5m` | Failback cooldown period |
+| `HOTPLEX_BRAIN_BUDGET_ENABLED` | `false` | Enable budget control |
+| `HOTPLEX_BRAIN_BUDGET_PERIOD` | `daily` | Budget period (daily/weekly/monthly/session) |
+| `HOTPLEX_BRAIN_BUDGET_LIMIT` | `10.0` | Budget limit in USD |
+| `HOTPLEX_BRAIN_BUDGET_ENABLE_HARD_LIMIT` | `false` | Reject requests over budget |
+| `HOTPLEX_BRAIN_BUDGET_ALERT_THRESHOLDS` | `80,90` | Alert percentages |
+| `HOTPLEX_BRAIN_PRIORITY_ENABLED` | `false` | Enable priority queue |
+| `HOTPLEX_BRAIN_PRIORITY_MAX_QUEUE_SIZE` | `1000` | Maximum queue size |
+| `HOTPLEX_BRAIN_PRIORITY_ENABLE_LOW_PRIORITY_DROP` | `true` | Drop low priority when full |
+| `HOTPLEX_BRAIN_PRIORITY_HIGH_PRIORITY_RESERVE` | `100` | Reserve slots for high priority |
+
+### Failover Providers Format
+
+Configure multiple providers for failover:
+
+```bash
+HOTPLEX_BRAIN_FAILOVER_PROVIDERS="openai:key1::1;dashscope:key2:https://dashscope.aliyuncs.com:2"
+```
+
+Format: `name:api_key:endpoint:priority` (endpoint is optional)
 
 ## Usage Examples
 
@@ -194,6 +257,123 @@ model, _ := router.SelectModel(ctx, llm.ScenarioReasoning, llm.StrategyQualityPr
 
 // Balanced: cost-effective for chat, quality for analysis
 model, _ := router.SelectModel(ctx, llm.ScenarioChat, llm.StrategyBalanced)
+```
+
+### Circuit Breaker ✨ NEW
+
+```go
+// Access circuit breaker
+if resilient, ok := brain.Global().(brain.ResilientBrain); ok {
+    cb := resilient.GetCircuitBreaker()
+    
+    // Check state
+    state := cb.GetState()
+    log.Printf("Circuit state: %s", state)
+    
+    // Get stats
+    stats := cb.GetStats()
+    log.Printf("Total requests: %d, Failures: %d", 
+        stats.TotalRequests, stats.FailRequests)
+    
+    // Manual reset (after fixing issues)
+    resilient.ResetCircuitBreaker()
+    
+    // Force open (for maintenance)
+    cb.ForceOpen()
+    
+    // Force close (override protection)
+    cb.ForceClose()
+}
+```
+
+### Multi-Provider Failover ✨ NEW
+
+```go
+// Access failover manager
+if resilient, ok := brain.Global().(brain.ResilientBrain); ok {
+    fm := resilient.GetFailoverManager()
+    
+    // Get current provider
+    provider := fm.GetCurrentProvider()
+    log.Printf("Current provider: %s", provider.Name)
+    
+    // Get stats
+    stats := fm.GetStats()
+    log.Printf("Failover count: %d", stats.FailoverCount)
+    log.Printf("Healthy providers: %v", stats.HealthyProviders)
+    
+    // Manual failover
+    err := fm.ManualFailover("dashscope")
+    if err != nil {
+        log.Printf("Failover failed: %v", err)
+    }
+    
+    // Reset to initial state
+    fm.Reset()
+}
+```
+
+### Budget Control ✨ NEW
+
+```go
+// Access budget manager
+if budgetCtrl, ok := brain.Global().(brain.BudgetControlledBrain); ok {
+    bm := budgetCtrl.GetBudgetManager()
+    
+    // Get tracker for session
+    tracker := bm.GetTracker("session-123")
+    
+    // Check budget before request
+    allowed, cost, err := tracker.CheckBudget(0.005) // Estimated $0.005
+    if err != nil {
+        log.Printf("Budget exceeded: %v", err)
+        return
+    }
+    
+    // Track actual cost after request
+    tracker.TrackRequest(0.004) // Actual $0.004
+    
+    // Get stats
+    stats := tracker.GetStats()
+    log.Printf("Budget: $%.2f used / $%.2f limit (%.1f%%)",
+        stats.CurrentCost, stats.Limit, stats.PercentageUsed)
+    log.Printf("Remaining: $%.2f", stats.Remaining)
+    
+    // Set alert callback
+    tracker.SetAlertCallback(func(alert llm.BudgetAlert) {
+        log.Printf("Budget alert: %s (%.1f%%)", alert.Message, alert.Percentage)
+    })
+}
+```
+
+### Priority Queue ✨ NEW
+
+```go
+// Access priority scheduler
+if priority, ok := brain.Global().(brain.PriorityBrain); ok {
+    scheduler := priority.GetPriorityScheduler()
+    
+    // Submit high priority request
+    err := scheduler.Enqueue(ctx, "req-1", llm.PriorityHigh, 
+        func() error {
+            // Execute request
+            return nil
+        }, 5*time.Minute)
+    
+    // Submit low priority request (may be dropped under load)
+    err = scheduler.Enqueue(ctx, "req-2", llm.PriorityLow,
+        func() error {
+            return nil
+        }, 5*time.Minute)
+    
+    // Get stats
+    stats := scheduler.GetStats()
+    log.Printf("Queue size: %d", stats.QueueSize)
+    log.Printf("Processed: %d (High: %d, Med: %d, Low: %d)",
+        stats.Processed, stats.HighProcessed, 
+        stats.MediumProcessed, stats.LowProcessed)
+    log.Printf("Dropped: %d", stats.Dropped)
+}
 ```
 
 ### Pre-configured Models
@@ -332,10 +512,14 @@ go test -short ./...
 - `github.com/sashabaranov/go-openai` - OpenAI SDK
 - `github.com/stretchr/testify` - Testing framework
 
-### Phase 2 ✨ NEW
+### Phase 2 ✅
 - `go.opentelemetry.io/otel` - OpenTelemetry metrics
 - `go.opentelemetry.io/otel/metric` - Metrics API
 - `golang.org/x/time/rate` - Rate limiting (token bucket)
+
+### Phase 3 ✨ NEW
+- `github.com/sony/gobreaker` - Circuit breaker pattern
+- `go.uber.org/atomic` - Atomic operations for thread safety
 
 ## Performance Considerations
 
@@ -402,18 +586,16 @@ Phase 2 is **fully backward compatible** with Phase 1. All existing code continu
    export HOTPLEX_BRAIN_ROUTER_MODELS="gpt-4o-mini:openai:0.00015:0.0006:200;qwen-plus:dashscope:0.0006:0.0012:300"
    ```
 
-## Future Enhancements (Phase 3)
+## Future Enhancements
 
-- [ ] Circuit breaker pattern
-- [ ] Multi-provider failover
 - [ ] Request/response logging (opt-in)
 - [ ] Prometheus metrics exporter
 - [ ] Distributed tracing integration
-- [ ] Model fallback on errors
 - [ ] A/B testing framework
+- [ ] Adaptive rate limiting based on provider feedback
 
 ---
 
-**Status:** ✅ Production Ready (Phase 2)  
+**Status:** ✅ Production Ready (Phase 3)  
 **Last Updated:** 2026-03-04  
 **PR:** #177 (feat/nativebrain-production-enhancements)

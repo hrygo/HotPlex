@@ -63,6 +63,49 @@ type Config struct {
 	// RouterModels is a comma-separated list of model configurations.
 	// Format: "name1:provider1:input_cost:output_cost,latency;name2:..."
 	RouterModels string
+
+	// === Phase 3: High Availability & Cost Control ===
+
+	// CircuitBreakerEnabled enables circuit breaker pattern.
+	CircuitBreakerEnabled bool
+	// CircuitBreakerMaxFailures is failures before opening circuit.
+	CircuitBreakerMaxFailures int
+	// CircuitBreakerTimeout is how long circuit stays open.
+	CircuitBreakerTimeout time.Duration
+	// CircuitBreakerInterval is the failure counting window.
+	CircuitBreakerInterval time.Duration
+
+	// FailoverEnabled enables multi-provider failover.
+	FailoverEnabled bool
+	// FailoverProviders is the list of provider configurations.
+	// Format: "name:apikey:endpoint:priority;name2:..."
+	FailoverProviders string
+	// FailoverEnableAuto enables automatic failover.
+	FailoverEnableAuto bool
+	// FailoverEnableFailback enables automatic failback.
+	FailoverEnableFailback bool
+	// FailoverCooldown is the failback cooldown period.
+	FailoverCooldown time.Duration
+
+	// BudgetEnabled enables budget control.
+	BudgetEnabled bool
+	// BudgetPeriod is the budget period (daily/weekly/monthly/session).
+	BudgetPeriod string
+	// BudgetLimit is the budget limit in USD.
+	BudgetLimit float64
+	// BudgetEnableHardLimit enables hard limit (reject over budget).
+	BudgetEnableHardLimit bool
+	// BudgetAlertThresholds is comma-separated alert percentages.
+	BudgetAlertThresholds string
+
+	// PriorityEnabled enables priority queue.
+	PriorityEnabled bool
+	// PriorityMaxQueueSize is the maximum queue size.
+	PriorityMaxQueueSize int
+	// PriorityEnableLowPriorityDrop enables dropping low priority.
+	PriorityEnableLowPriorityDrop bool
+	// PriorityHighPriorityReserve reserves slots for high priority.
+	PriorityHighPriorityReserve int
 }
 
 // LoadConfigFromEnv loads the brain configuration from environment variables.
@@ -92,6 +135,25 @@ func LoadConfigFromEnv() Config {
 		RouterEnabled:      getBoolEnv("HOTPLEX_BRAIN_ROUTER_ENABLED", false),
 		RouterStrategy:     getEnv("HOTPLEX_BRAIN_ROUTER_STRATEGY", "cost_priority"),
 		RouterModels:       os.Getenv("HOTPLEX_BRAIN_ROUTER_MODELS"),
+		// Phase 3: High Availability & Cost Control
+		CircuitBreakerEnabled:     getBoolEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_ENABLED", false),
+		CircuitBreakerMaxFailures: getIntEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_MAX_FAILURES", 5),
+		CircuitBreakerTimeout:     getDurationEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval:    getDurationEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		FailoverEnabled:           getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLED", false),
+		FailoverProviders:         os.Getenv("HOTPLEX_BRAIN_FAILOVER_PROVIDERS"),
+		FailoverEnableAuto:        getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLE_AUTO", true),
+		FailoverEnableFailback:    getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLE_FAILBACK", true),
+		FailoverCooldown:          getDurationEnv("HOTPLEX_BRAIN_FAILOVER_COOLDOWN", 5*time.Minute),
+		BudgetEnabled:             getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLED", false),
+		BudgetPeriod:              getEnv("HOTPLEX_BRAIN_BUDGET_PERIOD", "daily"),
+		BudgetLimit:               getFloatEnv("HOTPLEX_BRAIN_BUDGET_LIMIT", 10.0),
+		BudgetEnableHardLimit:     getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLE_HARD_LIMIT", false),
+		BudgetAlertThresholds:     os.Getenv("HOTPLEX_BRAIN_BUDGET_ALERT_THRESHOLDS"),
+		PriorityEnabled:           getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLED", false),
+		PriorityMaxQueueSize:      getIntEnv("HOTPLEX_BRAIN_PRIORITY_MAX_QUEUE_SIZE", 1000),
+		PriorityEnableLowPriorityDrop: getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLE_LOW_PRIORITY_DROP", true),
+		PriorityHighPriorityReserve:   getIntEnv("HOTPLEX_BRAIN_PRIORITY_HIGH_PRIORITY_RESERVE", 100),
 	}
 
 	return cfg
