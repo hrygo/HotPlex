@@ -30,6 +30,28 @@ type StreamingBrain interface {
 	ChatStream(ctx context.Context, prompt string) (<-chan string, error)
 }
 
+// RoutableBrain extends Brain with model routing capability.
+type RoutableBrain interface {
+	Brain
+
+	// ChatWithModel generates a response using a specific model.
+	ChatWithModel(ctx context.Context, model string, prompt string) (string, error)
+
+	// AnalyzeWithModel performs analysis using a specific model.
+	AnalyzeWithModel(ctx context.Context, model string, prompt string, target any) error
+}
+
+// ObservableBrain provides observability and metrics access.
+type ObservableBrain interface {
+	Brain
+
+	// GetMetrics returns current metrics statistics.
+	GetMetrics() llm.MetricsStats
+
+	// GetCostCalculator returns the cost calculator.
+	GetCostCalculator() *llm.CostCalculator
+}
+
 // HealthStatus represents the health status of the Brain service.
 // Re-exported from llm package for convenience.
 type HealthStatus = llm.HealthStatus
@@ -47,4 +69,20 @@ func Global() Brain {
 // SetGlobal sets the global Brain instance.
 func SetGlobal(b Brain) {
 	globalBrain = b
+}
+
+// GetRouter returns the global router if the brain supports routing.
+func GetRouter() *llm.Router {
+	if rb, ok := globalBrain.(interface{ GetRouter() *llm.Router }); ok {
+		return rb.GetRouter()
+	}
+	return nil
+}
+
+// GetRateLimiter returns the global rate limiter if available.
+func GetRateLimiter() *llm.RateLimiter {
+	if rb, ok := globalBrain.(interface{ GetRateLimiter() *llm.RateLimiter }); ok {
+		return rb.GetRateLimiter()
+	}
+	return nil
 }

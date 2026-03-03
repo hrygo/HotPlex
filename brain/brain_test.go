@@ -10,13 +10,23 @@ import (
 )
 
 func TestBrainInterface_Compatibility(t *testing.T) {
-	// Test that brainWrapper satisfies the Brain interface
-	var _ Brain = (*brainWrapper)(nil)
+	// Test that enhancedBrainWrapper satisfies the Brain interface
+	var _ Brain = (*enhancedBrainWrapper)(nil)
 }
 
 func TestStreamingBrainInterface_Extension(t *testing.T) {
-	// Test that brainWrapper satisfies the StreamingBrain interface
-	var _ StreamingBrain = (*brainWrapper)(nil)
+	// Test that enhancedBrainWrapper satisfies the StreamingBrain interface
+	var _ StreamingBrain = (*enhancedBrainWrapper)(nil)
+}
+
+func TestRoutableBrainInterface(t *testing.T) {
+	// Test that enhancedBrainWrapper satisfies the RoutableBrain interface
+	var _ RoutableBrain = (*enhancedBrainWrapper)(nil)
+}
+
+func TestObservableBrainInterface(t *testing.T) {
+	// Test that enhancedBrainWrapper satisfies the ObservableBrain interface
+	var _ ObservableBrain = (*enhancedBrainWrapper)(nil)
 }
 
 func TestConfig_LoadFromEnv(t *testing.T) {
