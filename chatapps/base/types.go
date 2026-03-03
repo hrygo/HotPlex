@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"time"
 )
@@ -128,4 +129,13 @@ type MessageOperations interface {
 type SessionOperations interface {
 	GetSession(key string) (*Session, bool)
 	FindSessionByUserAndChannel(userID, channelID string) *Session
+}
+
+// StreamWriter defines the interface for streaming message writes
+// Platform-agnostic abstraction for native streaming support
+type StreamWriter interface {
+	io.Writer
+	io.Closer
+	// MessageTS returns the message timestamp after stream starts
+	MessageTS() string
 }
