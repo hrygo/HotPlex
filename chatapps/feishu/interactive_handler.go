@@ -68,9 +68,13 @@ type ActionValue struct {
 
 // NewInteractiveHandler creates a new interactive handler
 func NewInteractiveHandler(adapter *Adapter) *InteractiveHandler {
+	logger := adapter.Logger()
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &InteractiveHandler{
 		adapter: adapter,
-		logger:  adapter.Logger(),
+		logger:  logger,
 	}
 }
 

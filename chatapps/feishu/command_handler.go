@@ -84,6 +84,9 @@ type CommandContent struct {
 
 // NewCommandHandler creates a new command handler
 func NewCommandHandler(adapter *Adapter, registry *command.Registry) *CommandHandler {
+	if adapter == nil {
+		adapter = &Adapter{}
+	}
 	return &CommandHandler{
 		adapter:     adapter,
 		registry:    registry,

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/chatapps/command"
 )
 
 // Adapter implements the Feishu (Lark) chat adapter
@@ -25,6 +26,13 @@ type Adapter struct {
 	appToken    string
 	tokenExpire time.Time
 	tokenMu     sync.RWMutex
+
+	// Command handler (Phase 2.3)
+	commandHandler *CommandHandler
+	// Interactive handler (Phase 2.2)
+	interactiveHandler *InteractiveHandler
+	// Command registry
+	commandRegistry *command.Registry
 }
 
 // NewAdapter creates a new Feishu adapter
@@ -44,6 +52,9 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 	// Initialize API client (concrete implementation of FeishuAPIClient)
 	a.client = NewClient(config.AppID, config.AppSecret, logger)
 
+	// Initialize command registry
+	a.commandRegistry = command.NewRegistry()
+
 	// Prepare HTTP handlers
 	httpOpts := []base.AdapterOption{
 		base.WithHTTPHandler(a.webhookPath, a.handleEvent),
@@ -57,6 +68,12 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 		ServerAddr:   config.ServerAddr,
 		SystemPrompt: config.SystemPrompt,
 	}, logger, allOpts...)
+
+	// Initialize interactive handler (Phase 2.2) after base adapter is created
+	a.interactiveHandler = NewInteractiveHandler(a)
+
+	// Initialize command handler (Phase 2.3) after base adapter is created
+	a.commandHandler = NewCommandHandler(a, a.commandRegistry)
 
 	// Set default sender
 	a.sender.SetSender(a.defaultSender)
