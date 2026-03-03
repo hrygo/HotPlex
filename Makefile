@@ -184,14 +184,14 @@ restart: build ## @runtime Restart daemon with logs
 	fi
 	@mkdir -p $(LOG_DIR)
 	@printf "${PURPLE}🔥 Starting HotPlex Daemon (logs: $(LOG_FILE))...${NC}\n"
-	@./$(DIST_DIR)/$(BINARY_NAME) < /dev/null > $(LOG_FILE) 2>&1 &
+	@nohup ./$(DIST_DIR)/$(BINARY_NAME) > $(LOG_FILE) 2>&1 &
+	@disown 2>/dev/null || true
 	@sleep 0.5
-	@PID=$$(pgrep -f $(BINARY_NAME)); \
+	@PID=$$(pgrep -f $(BINARY_NAME) | head -1); \
 	printf "${GREEN}✅ Daemon started in background with PID: $$PID${NC}\n"; \
 	printf "${CYAN}📋 Tailing logs (Ctrl+C to stop tailing, daemon will keep running):${NC}\n"; \
-	printf "${DIM}💡 Use 'make stop' to stop the daemon${NC}\n"; \
-	trap 'printf "\n${GREEN}✅ Log tailing stopped (daemon still running)${NC}\n"; exit 0' INT; \
-	tail -f $(LOG_FILE)
+	printf "${DIM}💡 Use 'make stop' to stop the daemon${NC}\n"
+	@tail -f $(LOG_FILE)
 
 # =============================================================================
 # 📦 SERVICE (System Service)
