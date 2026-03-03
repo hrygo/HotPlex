@@ -1,0 +1,20 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - ineffassign
+    - staticcheck
+    - unused
+    - govet
+
+issues:
+  exclude-rules:
+    - path: _test\.go$
+      linters:
+        - errcheck
