@@ -1795,6 +1795,77 @@ func (a *Adapter) PostEphemeralSDK(ctx context.Context, channelID, userID, text 
 	return nil
 }
 
+// =============================================================================
+// Native Streaming API - Slack Assistant Threads Support
+// =============================================================================
+
+// SetAssistantStatus sets the native assistant status text at the bottom of the thread
+// Used for driving dynamic status prompts (e.g., "Thinking...", "Searching code...")
+// Slack API: assistant.threads.setStatus
+func (a *Adapter) SetAssistantStatus(ctx context.Context, channelID, threadTS, status string) error {
+	if a.client == nil {
+		return fmt.Errorf("slack client not initialized")
+	}
+
+	params := slack.AssistantThreadsSetStatusParameters{
+		ChannelID: channelID,
+		ThreadTS:  threadTS,
+		Status:    status,
+	}
+
+	return a.client.SetAssistantThreadsStatusContext(ctx, params)
+}
+
+// StartStream starts a native streaming message and returns message_ts as anchor for subsequent updates
+// Slack API: via slack-go library's StartStreamContext
+func (a *Adapter) StartStream(ctx context.Context, channelID, threadTS string) (string, error) {
+	if a.client == nil {
+		return "", fmt.Errorf("slack client not initialized")
+	}
+
+	// Start streaming message (empty content to begin)
+	_, ts, err := a.client.StartStreamContext(ctx, channelID,
+		slack.MsgOptionText("", false),
+	)
+	if err != nil {
+		return "", fmt.Errorf("start stream: %w", err)
+	}
+
+	return ts, nil
+}
+
+// AppendStream incrementally pushes content to an existing stream
+// Slack API: via slack-go library's AppendStreamContext
+func (a *Adapter) AppendStream(ctx context.Context, channelID, messageTS, content string) error {
+	if a.client == nil {
+		return fmt.Errorf("slack client not initialized")
+	}
+
+	_, _, err := a.client.AppendStreamContext(ctx, channelID, messageTS,
+		slack.MsgOptionText(content, false),
+	)
+	if err != nil {
+		return fmt.Errorf("append stream: %w", err)
+	}
+
+	return nil
+}
+
+// StopStream ends the stream and finalizes the message
+// Slack API: via slack-go library's StopStreamContext
+func (a *Adapter) StopStream(ctx context.Context, channelID, messageTS string) error {
+	if a.client == nil {
+		return fmt.Errorf("slack client not initialized")
+	}
+
+	_, _, err := a.client.StopStreamContext(ctx, channelID, messageTS)
+	if err != nil {
+		return fmt.Errorf("stop stream: %w", err)
+	}
+
+	return nil
+}
+
 // Compile-time interface compliance checks
 var (
 	_ base.ChatAdapter       = (*Adapter)(nil)
