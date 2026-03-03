@@ -79,6 +79,7 @@ type BudgetTracker struct {
 	currentCost   *atomic.Float64
 	requestCount  *atomic.Int64
 	periodStart   *atomic.Time
+	periodEndCached *atomic.Time
 	lastAlert     *atomic.Time
 	alertsTriggered map[float64]bool
 	
@@ -109,6 +110,7 @@ func NewBudgetTracker(config BudgetConfig, sessionID string) *BudgetTracker {
 		currentCost:     atomic.NewFloat64(0),
 		requestCount:    atomic.NewInt64(0),
 		periodStart:     atomic.NewTime(time.Now()),
+		periodEndCached: atomic.NewTime(time.Time{}),
 		lastAlert:       atomic.NewTime(time.Time{}),
 		alertsTriggered: make(map[float64]bool),
 	}
@@ -219,6 +221,8 @@ func (bt *BudgetTracker) checkPeriodReset() {
 		bt.requestCount.Store(0)
 		bt.alertsTriggered = make(map[float64]bool)
 		bt.resetPeriodStart()
+		// Cache the period end
+		bt.periodEndCached.Store(bt.calculatePeriodEnd())
 
 		if bt.config.Logger != nil {
 			bt.config.Logger.Info("budget period reset",
@@ -235,6 +239,13 @@ func (bt *BudgetTracker) checkAlerts() {
 
 	for _, threshold := range bt.config.AlertThresholds {
 		if percentage >= threshold.Percentage && !bt.alertsTriggered[threshold.Percentage] {
+			// Limit alertsTriggered map size to prevent memoryLeak
+			const maxAlerts = 100
+			if len(bt.alertsTriggered) >= maxAlerts {
+				// Clear old alerts and start fresh
+				bt.alertsTriggered = make(map[float64]bool)
+			}
+			
 			bt.alertsTriggered[threshold.Percentage] = true
 			bt.lastAlert.Store(time.Now())
 
@@ -284,8 +295,6 @@ func (bt *BudgetTracker) GetStats() BudgetStats {
 		alertsTriggered = append(alertsTriggered, percentage)
 	}
 
-	periodEnd := bt.calculatePeriodEnd()
-
 	return BudgetStats{
 		CurrentCost:     currentCost,
 		Limit:           bt.config.Limit,
@@ -293,7 +302,7 @@ func (bt *BudgetTracker) GetStats() BudgetStats {
 		PercentageUsed:  percentage,
 		RequestCount:    bt.requestCount.Load(),
 		PeriodStart:     bt.periodStart.Load(),
-		PeriodEnd:       periodEnd,
+		PeriodEnd:       bt.periodEndCached.Load(),
 		IsExceeded:      currentCost > bt.config.Limit,
 		AlertsTriggered: alertsTriggered,
 	}
@@ -348,6 +357,13 @@ func (bt *BudgetTracker) GetRemaining() float64 {
 // IsExceeded returns true if budget is exceeded.
 func (bt *BudgetTracker) IsExceeded() bool {
 	return bt.currentCost.Load() > bt.config.Limit
+}
+
+// CheckAlerts checks and triggers budget alerts (public for testing).
+func (bt *BudgetTracker) CheckAlerts() {
+	bt.mu.Lock()
+	defer bt.mu.Unlock()
+	bt.checkAlerts()
 }
 
 // BudgetManager manages multiple budget trackers (e.g., per user/session).
