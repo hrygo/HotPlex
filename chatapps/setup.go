@@ -286,6 +286,10 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 		Namespace:        pc.Platform,
 		BaseSystemPrompt: pc.SystemPrompt,
 		Provider:         prv,
+		// Pass permission settings from YAML config
+		PermissionMode:  pc.Provider.DefaultPermissionMode,
+		AllowedTools:    pc.Provider.AllowedTools,
+		DisallowedTools: pc.Provider.DisallowedTools,
 	}
 
 	return engine.NewEngine(opts)

@@ -62,7 +62,7 @@ func TestCommandHandler_mapCommand(t *testing.T) {
 			default:
 				got = ""
 			}
-			
+
 			if got != tt.want {
 				t.Errorf("mapCommand(%q) = %q, want %q", tt.feishuCmd, got, tt.want)
 			}

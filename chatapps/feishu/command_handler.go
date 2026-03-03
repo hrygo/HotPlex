@@ -49,9 +49,9 @@ func (r *RateLimiter) Allow(key string) bool {
 
 // CommandEvent represents a Feishu command event
 type CommandEvent struct {
-	Header *CommandHeader      `json:"header"`
-	Event  *CommandEventData   `json:"event"`
-	Token  string              `json:"token"`
+	Header *CommandHeader    `json:"header"`
+	Event  *CommandEventData `json:"event"`
+	Token  string            `json:"token"`
 }
 
 // CommandHeader represents the command event header
@@ -185,7 +185,6 @@ func (h *CommandHandler) handleCommandInvocationInternal(event *CommandEvent) er
 
 	return nil
 }
-
 
 // mapCommand maps Feishu command names to internal commands
 func (h *CommandHandler) mapCommand(feishuCmd string) string {

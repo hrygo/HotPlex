@@ -184,8 +184,6 @@ func (h *InteractiveHandler) handlePermissionCallbackInternal(event *Interactive
 	}()
 }
 
-
-
 // UpdatePermissionCard updates a permission card with the result
 func (h *InteractiveHandler) UpdatePermissionCard(ctx context.Context, messageID, chatID, result string) error {
 	token, err := h.adapter.GetAppTokenWithContext(ctx)

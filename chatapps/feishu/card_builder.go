@@ -246,7 +246,7 @@ func (b *CardBuilder) BuildSessionStatsCard(duration string, tokenUsage int, oth
 	// Build stats text
 	var statsBuilder strings.Builder
 	_, _ = fmt.Fprintf(&statsBuilder, "⏱️ %s • ⚡ %d tokens", duration, tokenUsage)
-	
+
 	// Add additional stats if provided
 	for key, value := range otherStats {
 		_, _ = fmt.Fprintf(&statsBuilder, " • %s: %s", key, value)
