@@ -33,7 +33,7 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, prompt string) (<-chan st
 
 	go func() {
 		defer close(ch)
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 
 		for {
 			response, err := stream.Recv()

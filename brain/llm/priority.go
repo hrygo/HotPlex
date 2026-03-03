@@ -52,7 +52,6 @@ type PriorityRequest struct {
 // PriorityQueue implements a priority queue for requests.
 type PriorityQueue struct {
 	items []*PriorityRequest
-	mu    sync.RWMutex
 }
 
 // Len returns the number of items in the queue.

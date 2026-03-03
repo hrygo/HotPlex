@@ -162,10 +162,8 @@ func (rl *RateLimiter) processQueue() {
 
 		// Wait for rate limiter
 		limiter := rl.limiter
-		if rl.config.PerModel {
-			// For per-model, we'd need to track model in queuedRequest
-			// Simplified: use global limiter for queue processing
-		}
+		// Note: Per-model rate limiting requires tracking model in queuedRequest
+		// Currently using global limiter for queue processing
 
 		err := limiter.Wait(req.ctx)
 		if err != nil {

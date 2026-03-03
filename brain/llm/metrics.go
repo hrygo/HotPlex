@@ -204,9 +204,6 @@ func (mc *MetricsCollector) RecordRequest(
 
 // RecordRoutingDecision records a routing decision.
 func (mc *MetricsCollector) RecordRoutingDecision(scenario Scenario, strategy RouteStrategy, model string) {
-	mc.mu.Lock()
-	mc.mu.Unlock()
-
 	if mc.meter != nil {
 		attrs := []attribute.KeyValue{
 			attribute.String("scenario", string(scenario)),
