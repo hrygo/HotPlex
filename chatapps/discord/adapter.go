@@ -286,16 +286,8 @@ func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string
 }
 
 // AddReaction is not supported in Discord
-func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error {
-	a.Logger().Debug("AddReaction not supported on Discord", "reaction", reaction.Name)
-	return nil // Graceful fallback: no-op
-}
 
 // RemoveReaction is not supported in Discord
-func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
-	a.Logger().Debug("RemoveReaction not supported on Discord", "reaction", reaction.Name)
-	return nil // Graceful fallback: no-op
-}
 
 // UpdateMessage is supported in Discord
 func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {

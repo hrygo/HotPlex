@@ -10,7 +10,7 @@ import (
 func TestMessageFilterProcessor_FilterHiddenEvents(t *testing.T) {
 	filter := NewMessageFilterProcessor(nil)
 
-	hidden := []string{"system", "user", "raw", "user_message_received"}
+	hidden := []string{"system", "user", "raw"}
 	for _, ev := range hidden {
 		msg := &base.ChatMessage{
 			Platform:  "slack",
@@ -31,7 +31,7 @@ func TestMessageFilterProcessor_FilterHiddenEvents(t *testing.T) {
 func TestMessageFilterProcessor_PassNonHiddenEvents(t *testing.T) {
 	filter := NewMessageFilterProcessor(nil)
 
-	allowed := []string{"thinking", "tool_use", "tool_result", "answer", "error", "session_stats", "permission_request"}
+	allowed := []string{"thinking", "tool_use", "tool_result", "answer", "error", "session_stats", "permission_request", "user_message_received"}
 	for _, ev := range allowed {
 		msg := &base.ChatMessage{
 			Platform:  "slack",

@@ -173,17 +173,6 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 		}
 	}
 
-	// Send reactions if present
-	if msg.RichContent != nil && len(msg.RichContent.Reactions) > 0 {
-		for _, reaction := range msg.RichContent.Reactions {
-			reaction.Channel = channelID
-			if err := a.AddReactionSDK(ctx, reaction); err != nil {
-				a.Logger().Error("Failed to add reaction", "error", err, "reaction", reaction.Name)
-			}
-		}
-	}
-
-	// Send media/attachments if present
 	if msg.RichContent != nil && len(msg.RichContent.Attachments) > 0 {
 		for _, attachment := range msg.RichContent.Attachments {
 			if err := a.SendAttachmentSDK(ctx, channelID, threadTS, attachment); err != nil {
@@ -1405,10 +1394,6 @@ func (a *Adapter) SendToChannel(ctx context.Context, channelID, text, threadTS s
 }
 
 // AddReaction adds a reaction to a message
-func (a *Adapter) AddReaction(ctx context.Context, reaction base.Reaction) error {
-	// Use SDK implementation
-	return a.AddReactionSDK(ctx, reaction)
-}
 
 // SlashCommand represents a Slack slash command
 type SlashCommand struct {
@@ -1724,56 +1709,6 @@ func (a *Adapter) UpdateMessageSDK(ctx context.Context, channelID, messageTS str
 	return nil
 }
 
-// AddReactionSDK adds a reaction using Slack SDK
-func (a *Adapter) AddReactionSDK(ctx context.Context, reaction base.Reaction) error {
-	if a.client == nil {
-		return fmt.Errorf("slack client not initialized")
-	}
-
-	if reaction.Channel == "" || reaction.Timestamp == "" {
-		return fmt.Errorf("channel and timestamp are required for reaction")
-	}
-
-	err := a.client.AddReactionContext(ctx,
-		reaction.Name,
-		slack.ItemRef{
-			Channel:   reaction.Channel,
-			Timestamp: reaction.Timestamp,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("add reaction: %w", err)
-	}
-
-	a.Logger().Debug("Reaction added via SDK", "channel", reaction.Channel, "ts", reaction.Timestamp)
-	return nil
-}
-
-// RemoveReactionSDK removes a reaction using Slack SDK
-func (a *Adapter) RemoveReactionSDK(ctx context.Context, reaction base.Reaction) error {
-	if a.client == nil {
-		return fmt.Errorf("slack client not initialized")
-	}
-
-	if reaction.Channel == "" || reaction.Timestamp == "" {
-		return fmt.Errorf("channel and timestamp are required for reaction")
-	}
-
-	err := a.client.RemoveReactionContext(ctx,
-		reaction.Name,
-		slack.ItemRef{
-			Channel:   reaction.Channel,
-			Timestamp: reaction.Timestamp,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("remove reaction: %w", err)
-	}
-
-	a.Logger().Debug("Reaction removed via SDK", "channel", reaction.Channel, "ts", reaction.Timestamp)
-	return nil
-}
-
 // =============================================================================
 // Typing Indicator (0.1 Slack UX Feature)
 // Note: Slack's typing indicator is not directly supported by the slack-go SDK.
@@ -1874,11 +1809,6 @@ var (
 // DeleteMessage implements base.MessageOperations interface
 func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string) error {
 	return a.DeleteMessageSDK(ctx, channelID, messageTS)
-}
-
-// RemoveReaction implements base.MessageOperations interface
-func (a *Adapter) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
-	return a.RemoveReactionSDK(ctx, reaction)
 }
 
 // UpdateMessage implements base.MessageOperations interface

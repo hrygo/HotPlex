@@ -10,10 +10,9 @@ import (
 // hiddenEvents lists event types that should be filtered out (noise for the user).
 // Per design: https://docs/chatapps/slack-message-grouping-design.md
 var hiddenEvents = map[string]bool{
-	"system":                true, // System-level info
-	"user":                  true, // User message reflection (redundant)
-	"raw":                   true, // Unparsed content
-	"user_message_received": true, // Receipt acknowledgment (redundant)
+	"system": true, // System-level info
+	"user":   true, // User message reflection (redundant)
+	"raw":    true, // Unparsed content
 }
 
 // MessageFilterProcessor drops noise events before they enter the rest of the chain.

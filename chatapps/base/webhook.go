@@ -22,7 +22,7 @@ type WebhookRunner struct {
 // NewWebhookRunner creates a new WebhookRunner with deduplication.
 func NewWebhookRunner(logger *slog.Logger) *WebhookRunner {
 	return &WebhookRunner{
-		logger:       logger,
+		logger: logger,
 		// Issue #129: Reduce TTL from 30s to 5s to prevent normal messages being skipped
 		// Short window is sufficient to prevent network jitter/button double-click duplicates
 		deduplicator: dedup.NewDeduplicator(5*time.Second, 10*time.Second),

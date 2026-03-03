@@ -72,14 +72,6 @@ type RichContent struct {
 	Blocks         []any
 	Embeds         []any
 	Attachments    []Attachment
-	Reactions      []Reaction
-}
-
-// Reaction represents a reaction to add to a message
-type Reaction struct {
-	Name      string // emoji name (e.g., "thumbsup", "+1")
-	Channel   string
-	Timestamp string // message timestamp to react to
 }
 
 type Attachment struct {
@@ -119,8 +111,6 @@ type WebhookProvider interface {
 // MessageOperations defines platform-specific message operations
 type MessageOperations interface {
 	DeleteMessage(ctx context.Context, channelID, messageTS string) error
-	AddReaction(ctx context.Context, reaction Reaction) error
-	RemoveReaction(ctx context.Context, reaction Reaction) error
 	UpdateMessage(ctx context.Context, channelID, messageTS string, msg *ChatMessage) error
 }
 

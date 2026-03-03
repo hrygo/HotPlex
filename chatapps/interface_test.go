@@ -140,29 +140,13 @@ func (m *MockEngine) GetDisallowedTools() []string {
 
 // MockMessageOperations implements MessageOperations for testing
 type MockMessageOperations struct {
-	DeleteMessageFunc  func(ctx context.Context, channelID, messageTS string) error
-	AddReactionFunc    func(ctx context.Context, reaction base.Reaction) error
-	RemoveReactionFunc func(ctx context.Context, reaction base.Reaction) error
-	UpdateMessageFunc  func(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error
+	DeleteMessageFunc func(ctx context.Context, channelID, messageTS string) error
+	UpdateMessageFunc func(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error
 }
 
 func (m *MockMessageOperations) DeleteMessage(ctx context.Context, channelID, messageTS string) error {
 	if m.DeleteMessageFunc != nil {
 		return m.DeleteMessageFunc(ctx, channelID, messageTS)
-	}
-	return nil
-}
-
-func (m *MockMessageOperations) AddReaction(ctx context.Context, reaction base.Reaction) error {
-	if m.AddReactionFunc != nil {
-		return m.AddReactionFunc(ctx, reaction)
-	}
-	return nil
-}
-
-func (m *MockMessageOperations) RemoveReaction(ctx context.Context, reaction base.Reaction) error {
-	if m.RemoveReactionFunc != nil {
-		return m.RemoveReactionFunc(ctx, reaction)
 	}
 	return nil
 }

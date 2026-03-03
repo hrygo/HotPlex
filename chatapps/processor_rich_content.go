@@ -47,14 +47,6 @@ func (p *RichContentProcessor) Process(ctx context.Context, msg *base.ChatMessag
 	}
 
 	// Process reactions - ensure they have required metadata
-	if len(rc.Reactions) > 0 {
-		p.processReactions(msg)
-	}
-
-	// Process blocks for platforms that support them (Slack, Discord)
-	if len(rc.Blocks) > 0 {
-		p.processBlocks(msg)
-	}
 
 	// Process embeds for platforms that support them (Discord)
 	if len(rc.Embeds) > 0 {
@@ -71,45 +63,6 @@ func (p *RichContentProcessor) processAttachments(msg *base.ChatMessage) {
 	p.logger.Debug("Processing attachments",
 		"platform", msg.Platform,
 		"count", len(msg.RichContent.Attachments))
-}
-
-// processReactions ensures reactions have required metadata
-func (p *RichContentProcessor) processReactions(msg *base.ChatMessage) {
-	// Reactions need channel and timestamp to be added
-	// These will be populated from message metadata or platform-specific info
-	for i := range msg.RichContent.Reactions {
-		reaction := &msg.RichContent.Reactions[i]
-
-		// Try to populate channel from metadata if not set
-		if reaction.Channel == "" {
-			if channelID, ok := msg.Metadata["channel_id"].(string); ok {
-				reaction.Channel = channelID
-			}
-		}
-
-		// Try to populate timestamp from metadata if not set
-		if reaction.Timestamp == "" {
-			if ts, ok := msg.Metadata["message_ts"].(string); ok {
-				reaction.Timestamp = ts
-			} else if ts, ok := msg.Metadata["thread_ts"].(string); ok {
-				// Fallback to thread_ts if message_ts not available
-				reaction.Timestamp = ts
-			}
-		}
-	}
-
-	p.logger.Debug("Processing reactions",
-		"platform", msg.Platform,
-		"count", len(msg.RichContent.Reactions))
-}
-
-// processBlocks processes blocks for platforms like Slack
-func (p *RichContentProcessor) processBlocks(msg *base.ChatMessage) {
-	// Blocks are platform-agnostic (map[string]any)
-	// Slack adapter will convert to Slack Block Kit format
-	p.logger.Debug("Processing blocks",
-		"platform", msg.Platform,
-		"count", len(msg.RichContent.Blocks))
 }
 
 // processEmbeds processes embeds for platforms like Discord
