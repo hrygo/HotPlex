@@ -32,12 +32,12 @@ type ProviderConfig struct {
 
 // FailoverRecord represents a failover event record.
 type FailoverRecord struct {
-	Timestamp   time.Time
+	Timestamp    time.Time
 	FromProvider string
 	ToProvider   string
-	Reason      string
-	Duration    time.Duration
-	Success     bool
+	Reason       string
+	Duration     time.Duration
+	Success      bool
 }
 
 // FailoverConfig holds configuration for multi-provider failover.
@@ -63,13 +63,13 @@ type FailoverConfig struct {
 // DefaultFailoverConfig returns sensible defaults.
 func DefaultFailoverConfig() FailoverConfig {
 	return FailoverConfig{
-		EnableAutoFailover:    true,
-		EnableFailback:        true,
-		FailbackCooldown:      5 * time.Minute,
-		HealthCheckInterval:   30 * time.Second,
-		MaxFailoverAttempts:   3,
-		HistorySize:           100,
-		Logger:                nil, // Set by caller if needed
+		EnableAutoFailover:  true,
+		EnableFailback:      true,
+		FailbackCooldown:    5 * time.Minute,
+		HealthCheckInterval: 30 * time.Second,
+		MaxFailoverAttempts: 3,
+		HistorySize:         100,
+		Logger:              nil, // Set by caller if needed
 	}
 }
 
@@ -119,45 +119,48 @@ func (h *FailoverHistory) GetRecent(count int) []FailoverRecord {
 
 // FailoverManager manages multi-provider failover logic.
 type FailoverManager struct {
-	config        FailoverConfig
-	providers     map[string]*ProviderConfig
-	providerOrder []*ProviderConfig
+	config          FailoverConfig
+	providers       map[string]*ProviderConfig
+	providerOrder   []*ProviderConfig
 	currentProvider *ProviderConfig
 	circuitBreakers map[string]*CircuitBreaker
-	
+
 	// State
 	isFailoverActive *atomic.Bool
 	failoverCount    *atomic.Int32
 	lastFailoverTime *atomic.Time
 	currentIndex     *atomic.Int32
-	
+
 	// Health monitoring
 	healthStatus map[string]bool
 	healthMu     sync.RWMutex
-	
+
 	// History
 	history *FailoverHistory
-	
+
+	// Lifecycle
+	stopCh chan struct{}
+
 	mu sync.RWMutex
 }
 
 // FailoverStats holds failover statistics.
 type FailoverStats struct {
-	IsActive          bool
-	CurrentProvider   string
-	FailoverCount     int32
-	LastFailoverTime  time.Time
-	HealthyProviders  []string
+	IsActive           bool
+	CurrentProvider    string
+	FailoverCount      int32
+	LastFailoverTime   time.Time
+	HealthyProviders   []string
 	UnhealthyProviders []string
-	RecentFailovers   []FailoverRecord
+	RecentFailovers    []FailoverRecord
 }
 
 // NewFailoverManager creates a new failover manager.
 func NewFailoverManager(config FailoverConfig) *FailoverManager {
 	fm := &FailoverManager{
-		config:          config,
-		providers:       make(map[string]*ProviderConfig),
-		circuitBreakers: make(map[string]*CircuitBreaker),
+		config:           config,
+		providers:        make(map[string]*ProviderConfig),
+		circuitBreakers:  make(map[string]*CircuitBreaker),
 		isFailoverActive: atomic.NewBool(false),
 		failoverCount:    atomic.NewInt32(0),
 		lastFailoverTime: atomic.NewTime(time.Time{}),
@@ -171,7 +174,7 @@ func NewFailoverManager(config FailoverConfig) *FailoverManager {
 		provider := &config.Providers[i]
 		if provider.Enabled {
 			fm.providers[provider.Name] = provider
-			
+
 			// Create circuit breaker for each provider
 			cbConfig := DefaultCircuitBreakerConfig()
 			cbConfig.Name = fmt.Sprintf("failover-%s", provider.Name)
@@ -190,6 +193,7 @@ func NewFailoverManager(config FailoverConfig) *FailoverManager {
 
 	// Start health check if configured
 	if config.HealthCheckInterval > 0 {
+		fm.stopCh = make(chan struct{})
 		go fm.startHealthCheck()
 	}
 
@@ -218,8 +222,13 @@ func (fm *FailoverManager) startHealthCheck() {
 	ticker := time.NewTicker(fm.config.HealthCheckInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		fm.checkProviderHealth()
+	for {
+		select {
+		case <-ticker.C:
+			fm.checkProviderHealth()
+		case <-fm.stopCh:
+			return
+		}
 	}
 }
 
@@ -235,19 +244,28 @@ func (fm *FailoverManager) checkProviderHealth() {
 
 // ExecuteWithFailover executes a function with automatic failover.
 func (fm *FailoverManager) ExecuteWithFailover(ctx context.Context, fn func(provider *ProviderConfig) error) error {
-	fm.mu.RLock()
-	defer fm.mu.RUnlock()
-
 	if fm.currentProvider == nil {
 		return fmt.Errorf("no providers configured")
 	}
 
 	attempts := 0
-	startProvider := fm.currentProvider
+	var startProvider *ProviderConfig
+
+	// Get initial provider
+	fm.mu.RLock()
+	startProvider = fm.currentProvider
+	fm.mu.RUnlock()
 
 	for attempts < fm.config.MaxFailoverAttempts {
+		// Get current provider
+		fm.mu.RLock()
 		provider := fm.currentProvider
-		
+		fm.mu.RUnlock()
+
+		if provider == nil {
+			return fmt.Errorf("no provider available")
+		}
+
 		// Check if provider is healthy
 		if !fm.isProviderHealthy(provider.Name) {
 			if fm.config.Logger != nil {
@@ -269,7 +287,7 @@ func (fm *FailoverManager) ExecuteWithFailover(ctx context.Context, fn func(prov
 
 		if err == nil {
 			// Success - check if we should failback to primary
-			if fm.config.EnableFailback && fm.currentProvider != startProvider {
+			if fm.config.EnableFailback && provider != startProvider {
 				fm.tryFailback(startProvider)
 			}
 			return nil
@@ -282,7 +300,7 @@ func (fm *FailoverManager) ExecuteWithFailover(ctx context.Context, fn func(prov
 					"provider", provider.Name,
 					"error", err)
 			}
-			
+
 			if fm.failoverToNextProvider(provider.Name) {
 				attempts++
 				continue
@@ -301,7 +319,7 @@ func (fm *FailoverManager) failoverToNextProvider(fromProvider string) bool {
 	defer fm.mu.Unlock()
 
 	currentIdx := int(fm.currentIndex.Load())
-	
+
 	for i := 1; i < len(fm.providerOrder); i++ {
 		nextIdx := (currentIdx + i) % len(fm.providerOrder)
 		nextProvider := fm.providerOrder[nextIdx]
@@ -499,4 +517,12 @@ func (fm *FailoverManager) SetCurrentProvider(name string) {
 // SetLastFailoverTime sets the last failover time (for testing).
 func (fm *FailoverManager) SetLastFailoverTime(t time.Time) {
 	fm.lastFailoverTime.Store(t)
+}
+
+// Close stops the health check goroutine and cleans up resources.
+// Should be called when the FailoverManager is no longer needed.
+func (fm *FailoverManager) Close() {
+	if fm.stopCh != nil {
+		close(fm.stopCh)
+	}
 }
