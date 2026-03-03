@@ -31,24 +31,24 @@ func TestObservableBrainInterface(t *testing.T) {
 
 func TestConfig_LoadFromEnv(t *testing.T) {
 	// Set test environment variables
-	os.Setenv("HOTPLEX_BRAIN_API_KEY", "test-key")
-	os.Setenv("HOTPLEX_BRAIN_PROVIDER", "openai")
-	os.Setenv("HOTPLEX_BRAIN_MODEL", "gpt-4o-mini")
-	os.Setenv("HOTPLEX_BRAIN_TIMEOUT_S", "30")
-	os.Setenv("HOTPLEX_BRAIN_CACHE_SIZE", "500")
-	os.Setenv("HOTPLEX_BRAIN_MAX_RETRIES", "5")
-	os.Setenv("HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS", "200")
-	os.Setenv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS", "3000")
+	_ = os.Setenv("HOTPLEX_BRAIN_API_KEY", "test-key")
+	_ = os.Setenv("HOTPLEX_BRAIN_PROVIDER", "openai")
+	_ = os.Setenv("HOTPLEX_BRAIN_MODEL", "gpt-4o-mini")
+	_ = os.Setenv("HOTPLEX_BRAIN_TIMEOUT_S", "30")
+	_ = os.Setenv("HOTPLEX_BRAIN_CACHE_SIZE", "500")
+	_ = os.Setenv("HOTPLEX_BRAIN_MAX_RETRIES", "5")
+	_ = os.Setenv("HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS", "200")
+	_ = os.Setenv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS", "3000")
 
 	defer func() {
-		os.Unsetenv("HOTPLEX_BRAIN_API_KEY")
-		os.Unsetenv("HOTPLEX_BRAIN_PROVIDER")
-		os.Unsetenv("HOTPLEX_BRAIN_MODEL")
-		os.Unsetenv("HOTPLEX_BRAIN_TIMEOUT_S")
-		os.Unsetenv("HOTPLEX_BRAIN_CACHE_SIZE")
-		os.Unsetenv("HOTPLEX_BRAIN_MAX_RETRIES")
-		os.Unsetenv("HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS")
-		os.Unsetenv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS")
+		_ = os.Unsetenv("HOTPLEX_BRAIN_API_KEY")
+		_ = os.Unsetenv("HOTPLEX_BRAIN_PROVIDER")
+		_ = os.Unsetenv("HOTPLEX_BRAIN_MODEL")
+		_ = os.Unsetenv("HOTPLEX_BRAIN_TIMEOUT_S")
+		_ = os.Unsetenv("HOTPLEX_BRAIN_CACHE_SIZE")
+		_ = os.Unsetenv("HOTPLEX_BRAIN_MAX_RETRIES")
+		_ = os.Unsetenv("HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS")
+		_ = os.Unsetenv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS")
 	}()
 
 	config := LoadConfigFromEnv()
@@ -65,14 +65,14 @@ func TestConfig_LoadFromEnv(t *testing.T) {
 
 func TestConfig_DefaultValues(t *testing.T) {
 	// Clear environment variables
-	os.Unsetenv("HOTPLEX_BRAIN_API_KEY")
-	os.Unsetenv("HOTPLEX_BRAIN_PROVIDER")
-	os.Unsetenv("HOTPLEX_BRAIN_MODEL")
-	os.Unsetenv("HOTPLEX_BRAIN_TIMEOUT_S")
-	os.Unsetenv("HOTPLEX_BRAIN_CACHE_SIZE")
-	os.Unsetenv("HOTPLEX_BRAIN_MAX_RETRIES")
-	os.Unsetenv("HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS")
-	os.Unsetenv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS")
+	_ = os.Unsetenv("HOTPLEX_BRAIN_API_KEY")
+	_ = os.Unsetenv("HOTPLEX_BRAIN_PROVIDER")
+	_ = os.Unsetenv("HOTPLEX_BRAIN_MODEL")
+	_ = os.Unsetenv("HOTPLEX_BRAIN_TIMEOUT_S")
+	_ = os.Unsetenv("HOTPLEX_BRAIN_CACHE_SIZE")
+	_ = os.Unsetenv("HOTPLEX_BRAIN_MAX_RETRIES")
+	_ = os.Unsetenv("HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS")
+	_ = os.Unsetenv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS")
 
 	config := LoadConfigFromEnv()
 

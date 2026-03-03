@@ -15,9 +15,9 @@ func TestBudgetTracker_BasicTracking(t *testing.T) {
 	tracker := NewBudgetTracker(config, "test-session")
 
 	// Track some requests
-	tracker.TrackRequest(2.0)
-	tracker.TrackRequest(3.0)
-	tracker.TrackRequest(1.5)
+	_ = tracker.TrackRequest(2.0)
+	_ = tracker.TrackRequest(3.0)
+	_ = tracker.TrackRequest(1.5)
 
 	stats := tracker.GetStats()
 	assert.InDelta(t, 6.5, stats.CurrentCost, 0.01)

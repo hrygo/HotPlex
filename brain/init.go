@@ -213,7 +213,7 @@ func (w *enhancedBrainWrapper) ChatWithModel(ctx context.Context, model string, 
 		cost := 0.0
 		if w.costCalculator != nil {
 			cost, _ = w.costCalculator.CalculateCost(model, inputTokens, outputTokens)
-			w.costCalculator.TrackRequest("default", model, inputTokens, outputTokens)
+			_ = w.costCalculator.TrackRequest("default", model, inputTokens, outputTokens)
 		}
 		timer.Record(int64(inputTokens), int64(outputTokens), cost, err)
 	}
@@ -272,7 +272,7 @@ func (w *enhancedBrainWrapper) AnalyzeWithModel(ctx context.Context, model strin
 		cost := 0.0
 		if w.costCalculator != nil {
 			cost, _ = w.costCalculator.CalculateCost(model, inputTokens, outputTokens)
-			w.costCalculator.TrackRequest("default", model, inputTokens, outputTokens)
+			_ = w.costCalculator.TrackRequest("default", model, inputTokens, outputTokens)
 		}
 		timer.Record(int64(inputTokens), int64(outputTokens), cost, err)
 	}
