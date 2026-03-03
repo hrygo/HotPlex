@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"golang.org/x/time/rate"
 )
 
@@ -32,6 +33,7 @@ type RateLimiter struct {
 	models   map[string]*rate.Limiter
 	modelsMu sync.RWMutex
 	stats    RateLimitStats
+	atomics  AtomicRateLimitStats
 }
 
 // queuedRequest represents a request waiting in queue.
@@ -49,6 +51,14 @@ type RateLimitStats struct {
 	RejectedRequests int64
 	AvgWaitTimeMs   float64
 	LastReset       time.Time
+}
+
+// AtomicRateLimitStats holds atomic stats for concurrent access.
+type AtomicRateLimitStats struct {
+	TotalRequests   atomic.Int64
+	QueuedRequests  atomic.Int64
+	RejectedRequests atomic.Int64
+	AvgWaitTimeMs   atomic.Float64
 }
 
 // NewRateLimiter creates a new rate limiter.
@@ -73,10 +83,7 @@ func NewRateLimiter(config RateLimitConfig) *RateLimiter {
 
 // Allow checks if a request can proceed immediately.
 func (rl *RateLimiter) Allow() bool {
-	rl.mu.RLock()
-	defer rl.mu.RUnlock()
-
-	rl.stats.TotalRequests++
+	rl.atomics.TotalRequests.Inc()
 	return rl.limiter.Allow()
 }
 
@@ -87,9 +94,7 @@ func (rl *RateLimiter) Wait(ctx context.Context) error {
 
 // WaitModel waits for a specific model's rate limit.
 func (rl *RateLimiter) WaitModel(ctx context.Context, model string) error {
-	rl.mu.Lock()
-	rl.stats.TotalRequests++
-	rl.mu.Unlock()
+	rl.atomics.TotalRequests.Inc()
 
 	var limiter *rate.Limiter
 
@@ -113,9 +118,7 @@ func (rl *RateLimiter) WaitModel(ctx context.Context, model string) error {
 	rl.mu.RUnlock()
 
 	if queueSize >= maxQueue {
-		rl.mu.Lock()
-		rl.stats.RejectedRequests++
-		rl.mu.Unlock()
+		rl.atomics.RejectedRequests.Inc()
 		return fmt.Errorf("rate limit queue full (max: %d)", maxQueue)
 	}
 
@@ -129,9 +132,7 @@ func (rl *RateLimiter) WaitModel(ctx context.Context, model string) error {
 	// Try to enqueue with timeout
 	select {
 	case rl.queue <- req:
-		rl.mu.Lock()
-		rl.stats.QueuedRequests++
-		rl.mu.Unlock()
+		rl.atomics.QueuedRequests.Inc()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -141,10 +142,13 @@ func (rl *RateLimiter) WaitModel(ctx context.Context, model string) error {
 	case <-req.done:
 		return req.err
 	case <-ctx.Done():
+		req.err = ctx.Err()
+		close(req.done) // 关闭done防止goroutine泄漏
 		return ctx.Err()
 	case <-time.After(rl.config.QueueTimeout):
-		// Remove from queue if possible
-		return fmt.Errorf("queue timeout exceeded (%v)", rl.config.QueueTimeout)
+		req.err = fmt.Errorf("queue timeout exceeded (%v)", rl.config.QueueTimeout)
+		close(req.done) // 关闭done防止goroutine泄漏
+		return req.err
 	}
 }
 
@@ -174,14 +178,7 @@ func (rl *RateLimiter) processQueue() {
 
 		// Calculate wait time
 		waitTime := time.Since(req.enqueued).Milliseconds()
-		rl.mu.Lock()
-		// Update average wait time (simple moving average)
-		if rl.stats.AvgWaitTimeMs == 0 {
-			rl.stats.AvgWaitTimeMs = float64(waitTime)
-		} else {
-			rl.stats.AvgWaitTimeMs = (rl.stats.AvgWaitTimeMs*0.9 + float64(waitTime)*0.1)
-		}
-		rl.mu.Unlock()
+		rl.atomics.AvgWaitTimeMs.Add(float64(waitTime))
 
 		close(req.done)
 	}
@@ -220,6 +217,9 @@ func (rl *RateLimiter) SetRate(requestsPerSecond float64, burstSize int) {
 	rl.limiter.SetBurst(burstSize)
 	rl.config.RequestsPerSecond = requestsPerSecond
 	rl.config.BurstSize = burstSize
+	
+	// Update atomic stats for consistency
+	rl.atomics.AvgWaitTimeMs.Store(0)
 }
 
 // SetModelRate sets rate limit for a specific model.
@@ -240,18 +240,22 @@ func (rl *RateLimiter) SetModelRate(model string, requestsPerSecond float64, bur
 
 // GetStats returns current rate limiting statistics.
 func (rl *RateLimiter) GetStats() RateLimitStats {
-	rl.mu.RLock()
-	defer rl.mu.RUnlock()
-	return rl.stats
+	return RateLimitStats{
+		TotalRequests:    rl.atomics.TotalRequests.Load(),
+		QueuedRequests:   rl.atomics.QueuedRequests.Load(),
+		RejectedRequests: rl.atomics.RejectedRequests.Load(),
+		AvgWaitTimeMs:    rl.atomics.AvgWaitTimeMs.Load(),
+		LastReset:        rl.stats.LastReset,
+	}
 }
 
 // ResetStats resets the statistics.
 func (rl *RateLimiter) ResetStats() {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	rl.stats = RateLimitStats{
-		LastReset: time.Now(),
-	}
+	rl.atomics.TotalRequests.Store(0)
+	rl.atomics.QueuedRequests.Store(0)
+	rl.atomics.RejectedRequests.Store(0)
+	rl.atomics.AvgWaitTimeMs.Store(0)
+	rl.stats.LastReset = time.Now()
 }
 
 // Remaining returns the number of requests remaining in the current burst.
