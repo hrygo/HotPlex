@@ -428,24 +428,27 @@ level=WARN source=chatapps/engine_handler.go:923 msg="Failed to write to stream"
 - [x] Task 4: 统一消息构建 - 添加 `buildChatMessage()` 辅助函数
 - [x] Task 5: 单元测试 (`chatapps/internal/status_manager_test.go`)
 
-**PR**: `feat/slack-native-assistant-150`
+### 8.2 已完成 (Phase 1.5.2)
 
-### 8.2 待处理 (Phase 1.5.2+)
-
-- [ ] StreamCallback 集成 StatusManager
+- [x] StreamCallback 集成 StatusManager
   - 注入 StatusManager 依赖到 StreamCallback
   - 将 `updateStatusMessage()` 改为调用 StatusManager
-- [ ] 迁移剩余 handler 到 `buildChatMessage()`
-  - handleToolUse
-  - handleToolResult
-  - handleAnswer
-  - handleError
-  - handleSessionStats
-  - 等
-- [ ] 排查流式写入失败 `invalid_arguments` 问题
+- [x] 迁移剩余 handler 到 `buildChatMessage()`
+  - handleToolUse, handleToolResult, handleError, handleSessionStats
+  - handleCommandProgress, handleCommandComplete, handleStepStart
+  - handleStepFinish, handleDangerBlock
+- [x] 排查流式写入失败 `invalid_arguments` 问题
+  - 修复: StartStream 使用非空文本 `" "` 满足 Slack API 要求
+  - 添加调试日志
+
+### 8.3 待处理 (Phase 2)
+
+- [ ] 移除重复的 currentStatus 追踪 (StatusManager vs StreamCallback)
+- [ ] 拆分 StreamCallback 为更小的组件 (SRP)
+- [ ] Brain 集成 (见 `native-brain-architecture_zh.md`)
 
 ---
 
-**文档状态**: Draft
+**文档状态**: Completed
 **创建时间**: 2026-03-03
-**更新时间**: 2026-03-03
+**更新时间**: 2026-03-04
