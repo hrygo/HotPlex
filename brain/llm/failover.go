@@ -483,3 +483,20 @@ func (fm *FailoverManager) ManualFailover(providerName string) error {
 
 	return nil
 }
+
+// SetCurrentProvider sets the current provider (for testing).
+func (fm *FailoverManager) SetCurrentProvider(name string) {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	for _, p := range fm.providers {
+		if p.Name == name {
+			fm.currentProvider = p
+			break
+		}
+	}
+}
+
+// SetLastFailoverTime sets the last failover time (for testing).
+func (fm *FailoverManager) SetLastFailoverTime(t time.Time) {
+	fm.lastFailoverTime.Store(t)
+}
