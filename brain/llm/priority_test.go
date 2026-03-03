@@ -12,7 +12,7 @@ import (
 
 func TestPriorityQueue_BasicOrdering(t *testing.T) {
 	pq := &PriorityQueue{}
-	
+
 	// Add items in mixed priority order
 	items := []*PriorityRequest{
 		{ID: "low-1", Priority: PriorityLow},
@@ -27,7 +27,7 @@ func TestPriorityQueue_BasicOrdering(t *testing.T) {
 
 	// Initialize heap
 	heap.Init(pq)
-	
+
 	// Push items
 	for _, item := range items {
 		heap.Push(pq, item)
@@ -116,7 +116,7 @@ func TestPriorityScheduler_LowPriorityDrop(t *testing.T) {
 
 	// Wait for scheduler to process
 	time.Sleep(10 * time.Millisecond)
-	
+
 	stats := scheduler.GetStats()
 	assert.GreaterOrEqual(t, stats.LowDropped, int64(1))
 }
@@ -195,18 +195,17 @@ func TestPriorityScheduler_Concurrent(t *testing.T) {
 	defer scheduler.Shutdown()
 
 	var wg sync.WaitGroup
-	
+
 	// Concurrent enqueue
-	var err error
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				err = scheduler.Enqueue(context.Background(), 
-					"req-"+string(rune(id))+"-"+string(rune(j)), 
-					PriorityMedium, 
-					func() error { return nil }, 
+				err := scheduler.Enqueue(context.Background(),
+					"req-"+string(rune(id))+"-"+string(rune(j)),
+					PriorityMedium,
+					func() error { return nil },
 					time.Minute)
 				if err != nil {
 					return
