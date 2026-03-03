@@ -140,8 +140,12 @@ func (m *MockEngine) GetDisallowedTools() []string {
 
 // MockMessageOperations implements MessageOperations for testing
 type MockMessageOperations struct {
-	DeleteMessageFunc func(ctx context.Context, channelID, messageTS string) error
-	UpdateMessageFunc func(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error
+	DeleteMessageFunc      func(ctx context.Context, channelID, messageTS string) error
+	UpdateMessageFunc      func(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error
+	SetAssistantStatusFunc func(ctx context.Context, channelID, threadTS, status string) error
+	StartStreamFunc        func(ctx context.Context, channelID, threadTS string) (string, error)
+	AppendStreamFunc       func(ctx context.Context, channelID, messageTS, content string) error
+	StopStreamFunc         func(ctx context.Context, channelID, messageTS string) error
 }
 
 func (m *MockMessageOperations) DeleteMessage(ctx context.Context, channelID, messageTS string) error {
@@ -154,6 +158,34 @@ func (m *MockMessageOperations) DeleteMessage(ctx context.Context, channelID, me
 func (m *MockMessageOperations) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {
 	if m.UpdateMessageFunc != nil {
 		return m.UpdateMessageFunc(ctx, channelID, messageTS, msg)
+	}
+	return nil
+}
+
+func (m *MockMessageOperations) SetAssistantStatus(ctx context.Context, channelID, threadTS, status string) error {
+	if m.SetAssistantStatusFunc != nil {
+		return m.SetAssistantStatusFunc(ctx, channelID, threadTS, status)
+	}
+	return nil
+}
+
+func (m *MockMessageOperations) StartStream(ctx context.Context, channelID, threadTS string) (string, error) {
+	if m.StartStreamFunc != nil {
+		return m.StartStreamFunc(ctx, channelID, threadTS)
+	}
+	return "", nil
+}
+
+func (m *MockMessageOperations) AppendStream(ctx context.Context, channelID, messageTS, content string) error {
+	if m.AppendStreamFunc != nil {
+		return m.AppendStreamFunc(ctx, channelID, messageTS, content)
+	}
+	return nil
+}
+
+func (m *MockMessageOperations) StopStream(ctx context.Context, channelID, messageTS string) error {
+	if m.StopStreamFunc != nil {
+		return m.StopStreamFunc(ctx, channelID, messageTS)
 	}
 	return nil
 }

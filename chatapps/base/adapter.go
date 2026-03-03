@@ -449,6 +449,26 @@ func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string
 	return nil
 }
 
+// SetAssistantStatus is a no-op by default, overridden by platforms that support it
+func (a *Adapter) SetAssistantStatus(ctx context.Context, channelID, threadTS, status string) error {
+	return nil
+}
+
+// StartStream is a no-op by default, overridden by platforms that support it
+func (a *Adapter) StartStream(ctx context.Context, channelID, threadTS string) (string, error) {
+	return "", nil
+}
+
+// AppendStream is a no-op by default, overridden by platforms that support it
+func (a *Adapter) AppendStream(ctx context.Context, channelID, messageTS, content string) error {
+	return nil
+}
+
+// StopStream is a no-op by default, overridden by platforms that support it
+func (a *Adapter) StopStream(ctx context.Context, channelID, messageTS string) error {
+	return nil
+}
+
 // EngineSupport defines optional interface for adapters that need engine integration
 type EngineSupport interface {
 	SetEngine(eng *engine.Engine)
