@@ -14,11 +14,11 @@
 
 ### 1.1 核心视觉与交互特效
 
-| 特效 | 实现方式 | 状态 |
-|------|---------|------|
-| **名字流光渐变 (Flowing Gradient Name)** | Slack Dashboard 开启 "Agents & AI Apps" + `assistant:write` Scope | ✅ 可行 |
-| **原生状态反馈 (Assistant Status)** | `assistant.threads.setStatus` API | ✅ 官方 GA |
-| **流式输出 (Text Streaming)** | `slack-go/slack` 库的 `StartStream/AppendStream/StopStream` | ✅ 库支持 |
+| 特效                                     | 实现方式                                                          | 状态      |
+| ---------------------------------------- | ----------------------------------------------------------------- | --------- |
+| **名字流光渐变 (Flowing Gradient Name)** | Slack Dashboard 开启 "Agents & AI Apps" + `assistant:write` Scope | ✅ 可行    |
+| **原生状态反馈 (Assistant Status)**      | `assistant.threads.setStatus` API                                 | ✅ 官方 GA |
+| **流式输出 (Text Streaming)**            | `slack-go/slack` 库的 `StartStream/AppendStream/StopStream`       | ✅ 库支持  |
 
 > **重要说明**: 原文档中提到的 `chat.startStream/appendStream/stopStream` 并非 Slack Web API 方法名，而是 `slack-go/slack` 库封装的方法。实际调用时通过库的 `StartStream()` / `AppendStream()` / `StopStream()` 方法实现，底层通信协议由库处理。
 
@@ -28,12 +28,12 @@
 
 本方案并非隔离的 UI 优化，而是依赖于 HotPlex 核心模块升级的"感官体现"：
 
-| 相关任务 | 核心价值 | 对 Slack UX 的具体增强 |
+| 相关任务                          | 核心价值             | 对 Slack UX 的具体增强                                                                                                                 |
 | :-------------------------------- | :------------------- | :------------------------------------------------------------------------------------------------------------------------------------- |
-| **`issues/124` (Native Brain)** | 统一 LLM 调用抽象 | `LLMAdapter` 抛出的中间推理事件（Reasoning Chunks）将直接驱动 `AssistantStatus` 的微光文字切换，实现"脑中思考，眼见跳动"。 |
-| **`issues/125` (Native Brain)** | 上下文记忆与压缩 | 基于 `MemoryManager` 的会话摘要，智能生成 `Suggested Prompts`，让推荐问题与对话历史强相关。 |
-| **`issues/126` (Native Brain)** | 安全守卫与内容过滤 | 在消息发送前由 Brain Guard 审查输出内容，过滤敏感信息（API Keys、内部路径），确保 Slack 消息安全性。 |
-| **`issues/127` (Native Brain)** | 意图预处理与路由 | 入口层意图识别，轻量请求（如状态查询）直接 Brain 响应，跳过 Engine 启动，实现毫秒级响应。 |
+| **`issues/124` (Native Brain)**   | 统一 LLM 调用抽象    | `LLMAdapter` 抛出的中间推理事件（Reasoning Chunks）将直接驱动 `AssistantStatus` 的微光文字切换，实现"脑中思考，眼见跳动"。             |
+| **`issues/125` (Native Brain)**   | 上下文记忆与压缩     | 基于 `MemoryManager` 的会话摘要，智能生成 `Suggested Prompts`，让推荐问题与对话历史强相关。                                            |
+| **`issues/126` (Native Brain)**   | 安全守卫与内容过滤   | 在消息发送前由 Brain Guard 审查输出内容，过滤敏感信息（API Keys、内部路径），确保 Slack 消息安全性。                                   |
+| **`issues/127` (Native Brain)**   | 意图预处理与路由     | 入口层意图识别，轻量请求（如状态查询）直接 Brain 响应，跳过 Engine 启动，实现毫秒级响应。                                              |
 | **`issues/151` (Storage Plugin)** | 结构化消息与持久会话 | 基于存储插件提供的历史 Context，驱动回复后的 `Suggested Prompts` 生成。同时，利用 Session 状态判定何时触发 `AssistantTitle` 自动命名。 |
 
 ---
@@ -187,6 +187,17 @@
 
 > **安全价值**：确保 HotPlex 输出的每条 Slack 消息都经过内容安全审查，避免内部信息泄露。
 
+### 4.4 平台自驱管理 (Chat2Config)
+
+结合 **`issues/124`** 的高级能力，管理员可直接在 Slack 中通过自然语言管理平台：
+
+* **典型指令**：
+    - "将当前频道的默认模型切换为 GPT-4o"
+    - "开启此会话的安全拦截等级为 High"
+    - "查看当前系统的流控配置"
+* **集成方式**：`brain.IntentRouter` 识别管理意图 -> 解析为指令对象 -> 调用 `config.Manager` 热更新或内存应用。
+* **优势**：消除对繁琐 YAML 修改的直接依赖，降低平台运维门槛。
+
 ---
 
 ## 5. 第三阶段：深度生产力协作 (远期 - 宏观)
@@ -206,15 +217,17 @@
 
 ## 6. 落地实施路线图 (Roadmap)
 
-| 节点 | 核心任务 | 状态 | 相关依赖 |
+| 节点   | 核心任务                                     | 状态   | 相关依赖               |
 | :----- | :------------------------------------------- | :----- | :--------------------- |
-| **P1** | Dashboard 配置 + `base` 接口扩展 | 规划中 | - |
-| **P1** | Adapter 封装 `SetAssistantStatus` 与原生流式 | 进行中 | `slack-go v0.18.0` |
-| **P2** | Engine 逻辑重构，启用流式感知流转 | 待办 | `issues/124` (Brain) |
-| **P2** | 连贯对话：Suggested Prompts & Thread Titling | 待办 | `issues/151` (Storage) |
-| **P2** | 记忆驱动智能推荐 (Issue #125) | 待办 | `issues/125` (Memory) |
-| **P2** | Brain Guard 消息发送前安全审查 | 待办 | `issues/126` (Guard) |
-| **P3** | 深度协作：Canvas 画布与 File v2 集成 | 待办 | `issues/124` |
+| **P1** | Dashboard 配置 + `base` 接口扩展             | 规划中 | -                      |
+| **P1** | Adapter 封装 `SetAssistantStatus` 与原生流式 | 进行中 | `slack-go v0.18.0`     |
+| **P2** | Engine 逻辑重构，启用流式感知流转            | 待办   | `issues/124` (Brain)   |
+| **P2** | 连贯对话：Suggested Prompts & Thread Titling | 待办   | `issues/151` (Storage) |
+| **P2** | 记忆驱动智能推荐 (Issue #125)                | 待办   | `issues/125` (Memory)  |
+| **P2** | Brain Guard 消息发送前安全审查               | 待办   | `issues/126` (Guard)   |
+| **P2** | Chat2Config 平台自驱配置能力                 | 待办   | `issues/124` (Ops)     |
+| **P3** | 深度协作：Canvas 画布与 File v2 集成         | 待办   | `issues/124`           |
+
 
 ---
 
@@ -222,28 +235,28 @@
 
 ### 7.1 官方 API 核验
 
-| API 方法 | Slack Web API | slack-go 库 | 状态 |
-|:--------|:-------------|:-----------|:-----|
-| `assistant.threads.setStatus` | ✅ | `SetAssistantThreadsStatusContext` | ✅ GA |
-| `assistant.threads.setTitle` | ✅ | `SetAssistantThreadsTitleContext` | ✅ GA |
-| `assistant.threads.setSuggestedPrompts` | ✅ | `SetAssistantThreadsSuggestedPromptsContext` | ✅ GA |
-| `chat.startStream` | ❌ (非官方 API 名) | `StartStreamContext` | ✅ 库方法 |
-| `chat.appendStream` | ❌ (非官方 API 名) | `AppendStreamContext` | ✅ 库方法 |
-| `chat.stopStream` | ❌ (非官方 API 名) | `StopStreamContext` | ✅ 库方法 |
+| API 方法                                | Slack Web API     | slack-go 库                                  | 状态     |
+| :-------------------------------------- | :---------------- | :------------------------------------------- | :------- |
+| `assistant.threads.setStatus`           | ✅                 | `SetAssistantThreadsStatusContext`           | ✅ GA     |
+| `assistant.threads.setTitle`            | ✅                 | `SetAssistantThreadsTitleContext`            | ✅ GA     |
+| `assistant.threads.setSuggestedPrompts` | ✅                 | `SetAssistantThreadsSuggestedPromptsContext` | ✅ GA     |
+| `chat.startStream`                      | ❌ (非官方 API 名) | `StartStreamContext`                         | ✅ 库方法 |
+| `chat.appendStream`                     | ❌ (非官方 API 名) | `AppendStreamContext`                        | ✅ 库方法 |
+| `chat.stopStream`                       | ❌ (非官方 API 名) | `StopStreamContext`                          | ✅ 库方法 |
 
 ### 7.2 所需 Scopes
 
-| Scope | 用途 | 状态 |
-|:-----|:-----|:-----|
+| Scope             | 用途                       | 状态   |
+| :---------------- | :------------------------- | :----- |
 | `assistant:write` | 驱动 Assistant Threads API | ✅ 必需 |
-| `chat:write` | 基础消息发送 | ✅ 已有 |
+| `chat:write`      | 基础消息发送               | ✅ 已有 |
 
 ### 7.3 Rate Limits
 
-| API | Rate Limit | 备注 |
-|:----|:-----------|:-----|
-| `assistant.threads.*` | Special | 特殊限制，按线程计 |
-| `StartStream/AppendStream/StopStream` | Tier 4 | 标准消息操作 |
+| API                                   | Rate Limit | 备注               |
+| :------------------------------------ | :--------- | :----------------- |
+| `assistant.threads.*`                 | Special    | 特殊限制，按线程计 |
+| `StartStream/AppendStream/StopStream` | Tier 4     | 标准消息操作       |
 
 ---
 
