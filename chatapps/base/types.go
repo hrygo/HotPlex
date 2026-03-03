@@ -112,6 +112,15 @@ type WebhookProvider interface {
 type MessageOperations interface {
 	DeleteMessage(ctx context.Context, channelID, messageTS string) error
 	UpdateMessage(ctx context.Context, channelID, messageTS string, msg *ChatMessage) error
+	// SetAssistantStatus sets the native assistant status text at the bottom of the thread
+	// Used to drive dynamic status hints (e.g., "Thinking...", "Searching code...")
+	SetAssistantStatus(ctx context.Context, channelID, threadTS, status string) error
+	// StartStream starts a native streaming message, returns message_ts as anchor for subsequent updates
+	StartStream(ctx context.Context, channelID, threadTS string) (string, error)
+	// AppendStream incrementally pushes content to an existing stream
+	AppendStream(ctx context.Context, channelID, messageTS, content string) error
+	// StopStream ends the stream and finalizes the message
+	StopStream(ctx context.Context, channelID, messageTS string) error
 }
 
 // SessionOperations defines platform-specific session operations
