@@ -43,6 +43,11 @@
 ### 5) "Chat2Config" - 平台自驱配置 (Operational Intelligence)
 * 允许管理员通过自然语言对话，自动变更 HotPlex 的通道配置、权限策略或流控参数，无需手动修改 YAML。
 
+### 6) 视觉推理透视 (Visual Reasoning Chunks)
+* **需求场景**：在等待 Engine 响应的漫长过程中（如正在扫描大型项目），Native Brain 监听 Engine 的中间状态事件，并将其转化为“人类可理解”的微光文字。
+* **具体体现**：在 Slack 的 `AssistantStatus` 中实时展示：“正在从 12 个文件中检索上下文...”、“关联历史会话主题：API 认证重构...”、“正在计算最佳工具链...”。
+* **价值**：极大缓解用户的等待焦虑，提供更透明、更具“智力感”的交互体验。
+
 ---
 
 ## 4. 架构设计与重构建议 (Proposed Changes)
