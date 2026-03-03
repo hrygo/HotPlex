@@ -217,11 +217,11 @@
 
 ## 6. 落地实施路线图 (Roadmap)
 
-| 节点   | 核心任务                                     | 状态   | 相关依赖               |
-| :----- | :------------------------------------------- | :----- | :--------------------- |
-| **P1** | Dashboard 配置 + `base` 接口扩展             | 规划中 | -                      |
-| **P1** | Adapter 封装 `SetAssistantStatus` 与原生流式 | 进行中 | `slack-go v0.18.0`     |
-| **P2** | Engine 逻辑重构，启用流式感知流转            | 待办   | `issues/124` (Brain)   |
+| 节点   | 核心任务                                     | 状态     | 相关依赖               |
+| :----- | :------------------------------------------- | :------- | :--------------------- |
+| **P1** | Dashboard 配置 + `base` 接口扩展             | ✅ 完成   | -                      |
+| **P1** | Adapter 封装 `SetAssistantStatus` 与原生流式 | ✅ 完成   | `slack-go v0.18.0`     |
+| **P2** | Engine 逻辑重构，启用流式感知流转            | ✅ 完成   | `issues/124` (Brain)   |
 | **P2** | 连贯对话：Suggested Prompts & Thread Titling | 待办   | `issues/151` (Storage) |
 | **P2** | 记忆驱动智能推荐 (Issue #125)                | 待办   | `issues/125` (Memory)  |
 | **P2** | Brain Guard 消息发送前安全审查               | 待办   | `issues/126` (Guard)   |
