@@ -566,25 +566,25 @@ Run: `git commit -m "test(slack): add NativeStreamingWriter unit tests"`
 ## Task 7: 文档更新
 
 **Files:**
-- Modify: `docs/chatapps/slack-ai-native-evolution-plan.md`
+- Modify: `docs/plans/slack-ai-native-evolution-plan.md`
 
 ### Step 1: 更新实施状态
 
-Edit: `docs/chatapps/slack-ai-native-evolution-plan.md`
+Edit: `docs/plans/slack-ai-native-evolution-plan.md`
 
 更新第 6 节 "落地实施路线图" 中的状态：
 
 ```markdown
-| 节点   | 核心任务                                     | 状态   | 相关依赖               |
-| :----- | :------------------------------------------- | :----- | :--------------------- |
-| **P1** | Dashboard 配置 + `base` 接口扩展             | ✅ 完成 | -                      |
-| **P1** | Adapter 封装 `SetAssistantStatus` 与原生流式 | ✅ 完成 | `slack-go v0.18.0`     |
-| **P2** | Engine 逻辑重构，启用流式感知流转            | 🔄 进行中 | `issues/124` (Brain)   |
+| 节点   | 核心任务                                     | 状态     | 相关依赖             |
+| :----- | :------------------------------------------- | :------- | :------------------- |
+| **P1** | Dashboard 配置 + `base` 接口扩展             | ✅ 完成   | -                    |
+| **P1** | Adapter 封装 `SetAssistantStatus` 与原生流式 | ✅ 完成   | `slack-go v0.18.0`   |
+| **P2** | Engine 逻辑重构，启用流式感知流转            | 🔄 进行中 | `issues/124` (Brain) |
 ```
 
 ### Step 2: 提交
 
-Run: `git add docs/chatapps/slack-ai-native-evolution-plan.md`
+Run: `git add docs/plans/slack-ai-native-evolution-plan.md`
 
 Run: `git commit -m "docs(slack): update roadmap status for Phase 1 completion"`
 

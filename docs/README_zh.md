@@ -5,7 +5,7 @@
 欢迎使用 HotPlex 文档。本目录包含了为开发者、架构师和用户准备的 HotPlex 控制平面完整指南。
 
 ## 🏗️ 核心概念
-- **[架构概览](architecture_zh.md)**: 高层系统设计、安全模型（PGID 隔离）以及性能原则。
+- **[架构概览](plans/native-brain-architecture_zh.md)**: 高层系统设计、安全模型（PGID 隔离）以及性能原则。
 - **[SDK 指南](sdk-guide_zh.md)**: 如何将 HotPlex 集成到您的 Go 应用程序中。
 - **[快速开始](quick-start_zh.md)**: HotPlex 快速入门教程。
 
