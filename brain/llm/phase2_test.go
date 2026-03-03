@@ -138,10 +138,11 @@ func TestCostCalculator_TrackSession(t *testing.T) {
 	assert.Equal(t, int64(2000), session.TotalOutput)
 	assert.Equal(t, int64(1), session.RequestCount)
 
-	// Second request
+	// Second request (incremental cost: 500 input + 1000 output)
 	session, cost, err = cc.TrackRequest("session-1", "gpt-4o-mini", 500, 1000)
 	require.NoError(t, err)
-	assert.InDelta(t, 0.00205, cost, 0.00001) // Updated expected cost
+	// Incremental cost: 500*0.00015/1000 + 1000*0.0006/1000 = 0.000075 + 0.0006 = 0.000675
+	assert.InDelta(t, 0.000675, cost, 0.00001)
 	assert.Equal(t, int64(1500), session.TotalInput)
 	assert.Equal(t, int64(3000), session.TotalOutput)
 	assert.Equal(t, int64(2), session.RequestCount)

@@ -18,7 +18,7 @@ func Init(logger *slog.Logger) error {
 		return nil
 	}
 
-	switch config.Provider {
+	switch config.Model.Provider {
 	case "openai":
 		// This uses OpenAI SDK for OpenAI, DeepSeek, Groq, etc.
 		var client interface {
@@ -28,48 +28,48 @@ func Init(logger *slog.Logger) error {
 			HealthCheck(ctx context.Context) llm.HealthStatus
 		}
 
-		baseClient := llm.NewOpenAIClient(config.APIKey, config.Endpoint, config.Model, logger)
+		baseClient := llm.NewOpenAIClient("", config.Model.Endpoint, config.Model.Model, logger)
 
 		// === Phase 2: Initialize observability components ===
 
 		// Initialize metrics collector
 		var metricsCollector *llm.MetricsCollector
-		if config.MetricsEnabled {
+		if config.Metrics.Enabled {
 			metricsCollector = llm.NewMetricsCollector(llm.MetricsConfig{
 				Enabled:           true,
-				ServiceName:       config.MetricsServiceName,
+				ServiceName:       config.Metrics.ServiceName,
 				MaxLatencySamples: 1000,
 			})
-			logger.Info("Metrics collection enabled", "service", config.MetricsServiceName)
+			logger.Info("Metrics collection enabled", "service", config.Metrics.ServiceName)
 		}
 
 		// Initialize cost calculator
 		var costCalculator *llm.CostCalculator
-		if config.CostTrackingEnabled {
+		if config.Cost.Enabled {
 			costCalculator = llm.NewCostCalculator()
 			logger.Info("Cost tracking enabled")
 		}
 
 		// Initialize rate limiter
 		var rateLimiter *llm.RateLimiter
-		if config.RateLimitEnabled {
+		if config.RateLimit.Enabled {
 			rateLimiter = llm.NewRateLimiter(llm.RateLimitConfig{
-				RequestsPerSecond: config.RateLimitRPS,
-				BurstSize:         config.RateLimitBurst,
-				MaxQueueSize:      config.RateLimitQueueSize,
-				QueueTimeout:      config.RateLimitQueueTimeout,
-				PerModel:          config.RateLimitPerModel,
+				RequestsPerSecond: config.RateLimit.RPS,
+				BurstSize:         config.RateLimit.Burst,
+				MaxQueueSize:      config.RateLimit.QueueSize,
+				QueueTimeout:      config.RateLimit.QueueTimeout,
+				PerModel:          config.RateLimit.PerModel,
 			})
 			logger.Info("Rate limiting enabled",
-				"rps", config.RateLimitRPS,
-				"burst", config.RateLimitBurst,
-				"queue_size", config.RateLimitQueueSize)
+				"rps", config.RateLimit.RPS,
+				"burst", config.RateLimit.Burst,
+				"queue_size", config.RateLimit.QueueSize)
 		}
 
 		// Initialize model router
 		var router *llm.Router
-		if config.RouterEnabled {
-			modelConfigs := config.ParseRouterModels()
+		if config.Router.Enabled {
+			modelConfigs := config.Router.Models
 			if len(modelConfigs) == 0 {
 				// Use default models if not configured (convert from pricing to config)
 				pricing := llm.DefaultModelPricing()
@@ -85,23 +85,23 @@ func Init(logger *slog.Logger) error {
 			}
 
 			router = llm.NewRouter(llm.RouterConfig{
-				DefaultStrategy:    llm.RouteStrategy(config.RouterStrategy),
+				DefaultStrategy:    llm.RouteStrategy(config.Router.DefaultStage),
 				Models:             modelConfigs,
 				ScenarioModelMap:   make(map[llm.Scenario]string),
-				FallbackModel:      config.Model,
+				FallbackModel:      config.Model.Model,
 				Logger:             logger,
 			}, metricsCollector)
 
 			logger.Info("Model routing enabled",
-				"strategy", config.RouterStrategy,
+				"strategy", config.Router.DefaultStage,
 				"models", len(modelConfigs))
 		}
 
 		// Wrap with production features: retry, cache, streaming
-		client = llm.NewRetryClient(baseClient, config.MaxRetries, config.RetryMinWaitMs, config.RetryMaxWaitMs)
+		client = llm.NewRetryClient(baseClient, config.Retry.MaxAttempts, config.Retry.MinWaitMs, config.Retry.MaxWaitMs)
 
-		if config.CacheSize > 0 {
-			client = llm.NewCachedClient(client, config.CacheSize)
+		if config.Cache.Enabled && config.Cache.Size > 0 {
+			client = llm.NewCachedClient(client, config.Cache.Size)
 		}
 
 		// Wrap with rate limiting if enabled
@@ -121,18 +121,19 @@ func Init(logger *slog.Logger) error {
 		})
 
 		logger.Info("Native Brain initialized (Phase 2)",
-			"provider", config.Provider,
-			"model", config.Model,
-			"timeout_s", config.TimeoutS,
-			"cache_size", config.CacheSize,
-			"max_retries", config.MaxRetries,
-			"metrics_enabled", config.MetricsEnabled,
-			"cost_tracking_enabled", config.CostTrackingEnabled,
-			"rate_limit_enabled", config.RateLimitEnabled,
-			"router_enabled", config.RouterEnabled)
+			"provider", config.Model.Provider,
+			"model", config.Model.Model,
+			"timeout_s", config.Model.TimeoutS,
+			"cache_enabled", config.Cache.Enabled,
+			"cache_size", config.Cache.Size,
+			"max_retries", config.Retry.MaxAttempts,
+			"metrics_enabled", config.Metrics.Enabled,
+			"cost_tracking_enabled", config.Cost.Enabled,
+			"rate_limit_enabled", config.RateLimit.Enabled,
+			"router_enabled", config.Router.Enabled)
 	default:
 		// Fallback for unknown provider
-		logger.Warn("Unknown brain provider specified. Brain disabled.", "provider", config.Provider)
+		logger.Warn("Unknown brain provider specified. Brain disabled.", "provider", config.Model.Provider)
 	}
 
 	return nil
@@ -164,9 +165,9 @@ func (w *enhancedBrainWrapper) Analyze(ctx context.Context, prompt string, targe
 
 func (w *enhancedBrainWrapper) ChatWithModel(ctx context.Context, model string, prompt string) (string, error) {
 	// Apply timeout from config
-	if w.config.TimeoutS > 0 {
+	if w.config.Model.TimeoutS > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(w.config.TimeoutS)*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(w.config.Model.TimeoutS)*time.Second)
 		defer cancel()
 	}
 
@@ -187,7 +188,7 @@ func (w *enhancedBrainWrapper) ChatWithModel(ctx context.Context, model string, 
 
 	// Use default model if still empty
 	if model == "" {
-		model = w.config.Model
+		model = w.config.Model.Model
 	}
 
 	// Apply rate limiting
@@ -223,9 +224,9 @@ func (w *enhancedBrainWrapper) ChatWithModel(ctx context.Context, model string, 
 
 func (w *enhancedBrainWrapper) AnalyzeWithModel(ctx context.Context, model string, prompt string, target any) error {
 	// Apply timeout from config
-	if w.config.TimeoutS > 0 {
+	if w.config.Model.TimeoutS > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(w.config.TimeoutS)*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(w.config.Model.TimeoutS)*time.Second)
 		defer cancel()
 	}
 
@@ -246,7 +247,7 @@ func (w *enhancedBrainWrapper) AnalyzeWithModel(ctx context.Context, model strin
 
 	// Use default model if still empty
 	if model == "" {
-		model = w.config.Model
+		model = w.config.Model.Model
 	}
 
 	// Apply rate limiting
@@ -282,15 +283,15 @@ func (w *enhancedBrainWrapper) AnalyzeWithModel(ctx context.Context, model strin
 
 func (w *enhancedBrainWrapper) ChatStream(ctx context.Context, prompt string) (<-chan string, error) {
 	// Apply timeout from config
-	if w.config.TimeoutS > 0 {
+	if w.config.Model.TimeoutS > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(w.config.TimeoutS)*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(w.config.Model.TimeoutS)*time.Second)
 		defer cancel()
 	}
 
 	// Apply rate limiting
 	if w.rateLimiter != nil {
-		if err := w.rateLimiter.WaitModel(ctx, w.config.Model); err != nil {
+		if err := w.rateLimiter.WaitModel(ctx, w.config.Model.Model); err != nil {
 			return nil, err
 		}
 	}

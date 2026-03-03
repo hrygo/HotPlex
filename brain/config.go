@@ -9,155 +9,241 @@ import (
 	"github.com/hrygo/hotplex/brain/llm"
 )
 
+// === Model Configuration ===
+
+type ModelConfig struct {
+	Provider string
+	Model    string
+	Endpoint string
+	TimeoutS int
+}
+
+// === Cache Configuration ===
+
+type CacheConfig struct {
+	Enabled  bool
+	Size     int
+}
+
+// === Retry Configuration ===
+
+type RetryConfig struct {
+	Enabled     bool
+	MaxAttempts int
+	MinWaitMs   int
+	MaxWaitMs   int
+}
+
+// === Metrics Configuration ===
+
+type MetricsConfig struct {
+	Enabled         bool
+	ServiceName     string
+	Endpoint        string
+	ExportInterval  time.Duration
+}
+
+// === Cost Configuration ===
+
+type CostConfig struct {
+	Enabled      bool
+	EnableBudget bool
+}
+
+// === Rate Limit Configuration ===
+
+type RateLimitConfig struct {
+	Enabled         bool
+	RPS             float64
+	Burst           int
+	QueueSize       int
+	QueueTimeout    time.Duration
+	PerModel        bool
+}
+
+// === Router Configuration ===
+
+type RouterConfig struct {
+	Enabled      bool
+	DefaultStage string
+	Models       []llm.ModelConfig
+}
+
+// === Circuit Breaker Configuration ===
+
+type CircuitBreakerConfig struct {
+	Enabled      bool
+	MaxFailures  int
+	Timeout      time.Duration
+	Interval     time.Duration
+}
+
+// === Failover Configuration ===
+
+type FailoverConfig struct {
+	Enabled        bool
+	Providers      []llm.ProviderConfig
+	EnableAuto     bool
+	EnableFailback bool
+	Cooldown       time.Duration
+}
+
+// === Budget Configuration ===
+
+type BudgetConfig struct {
+	Enabled          bool
+	Period           string
+	Limit            float64
+	EnableHardLimit  bool
+	AlertThresholds  []float64
+}
+
+// === Priority Configuration ===
+
+type PriorityConfig struct {
+	Enabled              bool
+	MaxQueueSize         int
+	EnableLowPriorityDrop bool
+	HighPriorityReserve  int
+}
+
+// === Main Config ===
+
 // Config holds the configuration for the Global Brain.
 type Config struct {
 	// Enabled is automatically determined based on APIKey presence.
 	Enabled bool
-	// Provider supports "openai" (default), "anthropic", "gemini".
-	Provider string
-	// APIKey is the secret for accessing the provider API.
-	APIKey string
-	// Endpoint is the optional base URL for the API (e.g. for DeepSeek/Groq).
-	Endpoint string
-	// Model is the specific model to use (default: gpt-4o-mini).
-	Model string
-	// Timeout is the maximum duration for a brain request.
-	// Defaults to 10 seconds for standard requests.
-	TimeoutS int
-	// CacheSize is the LRU cache capacity (default: 1000 entries).
-	// Set to 0 to disable caching.
-	CacheSize int
-	// MaxRetries is the maximum number of retry attempts (default: 3).
-	// Set to 0 to disable retries.
-	MaxRetries int
-	// RetryMinWait is the minimum wait time between retries (default: 100ms).
-	RetryMinWaitMs int
-	// RetryMaxWait is the maximum wait time between retries (default: 5s).
-	RetryMaxWaitMs int
-
-	// === Phase 2: Observability & Cost Optimization ===
-
-	// MetricsEnabled enables OpenTelemetry metrics collection.
-	MetricsEnabled bool
-	// MetricsServiceName is the service name for metrics.
-	MetricsServiceName string
-	// CostTrackingEnabled enables cost calculation and tracking.
-	CostTrackingEnabled bool
-	// RateLimitEnabled enables rate limiting.
-	RateLimitEnabled bool
-	// RateLimitRPS is the requests per second limit.
-	RateLimitRPS float64
-	// RateLimitBurst is the burst size for rate limiting.
-	RateLimitBurst int
-	// RateLimitQueueSize is the maximum queue size for waiting requests.
-	RateLimitQueueSize int
-	// RateLimitQueueTimeout is the maximum queue wait time.
-	RateLimitQueueTimeout time.Duration
-	// RateLimitPerModel enables per-model rate limiting.
-	RateLimitPerModel bool
-
-	// RouterEnabled enables multi-model routing.
-	RouterEnabled bool
-	// RouterStrategy is the default routing strategy.
-	RouterStrategy string
-	// RouterModels is a comma-separated list of model configurations.
-	// Format: "name1:provider1:input_cost:output_cost,latency;name2:..."
-	RouterModels string
-
-	// === Phase 3: High Availability & Cost Control ===
-
-	// CircuitBreakerEnabled enables circuit breaker pattern.
-	CircuitBreakerEnabled bool
-	// CircuitBreakerMaxFailures is failures before opening circuit.
-	CircuitBreakerMaxFailures int
-	// CircuitBreakerTimeout is how long circuit stays open.
-	CircuitBreakerTimeout time.Duration
-	// CircuitBreakerInterval is the failure counting window.
-	CircuitBreakerInterval time.Duration
-
-	// FailoverEnabled enables multi-provider failover.
-	FailoverEnabled bool
-	// FailoverProviders is the list of provider configurations.
-	// Format: "name:apikey:endpoint:priority;name2:..."
-	FailoverProviders string
-	// FailoverEnableAuto enables automatic failover.
-	FailoverEnableAuto bool
-	// FailoverEnableFailback enables automatic failback.
-	FailoverEnableFailback bool
-	// FailoverCooldown is the failback cooldown period.
-	FailoverCooldown time.Duration
-
-	// BudgetEnabled enables budget control.
-	BudgetEnabled bool
-	// BudgetPeriod is the budget period (daily/weekly/monthly/session).
-	BudgetPeriod string
-	// BudgetLimit is the budget limit in USD.
-	BudgetLimit float64
-	// BudgetEnableHardLimit enables hard limit (reject over budget).
-	BudgetEnableHardLimit bool
-	// BudgetAlertThresholds is comma-separated alert percentages.
-	BudgetAlertThresholds string
-
-	// PriorityEnabled enables priority queue.
-	PriorityEnabled bool
-	// PriorityMaxQueueSize is the maximum queue size.
-	PriorityMaxQueueSize int
-	// PriorityEnableLowPriorityDrop enables dropping low priority.
-	PriorityEnableLowPriorityDrop bool
-	// PriorityHighPriorityReserve reserves slots for high priority.
-	PriorityHighPriorityReserve int
+	// Model is the model configuration.
+	Model ModelConfig
+	// Cache is the cache configuration.
+	Cache CacheConfig
+	// Retry is the retry configuration.
+	Retry RetryConfig
+	// Metrics is the metrics configuration.
+	Metrics MetricsConfig
+	// Cost is the cost configuration.
+	Cost CostConfig
+	// RateLimit is the rate limit configuration.
+	RateLimit RateLimitConfig
+	// Router is the router configuration.
+	Router RouterConfig
+	// CircuitBreaker is the circuit breaker configuration.
+	CircuitBreaker CircuitBreakerConfig
+	// Failover is the failover configuration.
+	Failover FailoverConfig
+	// Budget is the budget configuration.
+	Budget BudgetConfig
+	// Priority is the priority configuration.
+	Priority PriorityConfig
 }
 
 // LoadConfigFromEnv loads the brain configuration from environment variables.
 func LoadConfigFromEnv() Config {
 	apiKey := os.Getenv("HOTPLEX_BRAIN_API_KEY")
 
-	cfg := Config{
-		Enabled:            apiKey != "",
-		Provider:           getEnv("HOTPLEX_BRAIN_PROVIDER", "openai"),
-		APIKey:             apiKey,
-		Endpoint:           os.Getenv("HOTPLEX_BRAIN_ENDPOINT"),
-		Model:              getEnv("HOTPLEX_BRAIN_MODEL", "gpt-4o-mini"),
-		TimeoutS:           getIntEnv("HOTPLEX_BRAIN_TIMEOUT_S", 10),
-		CacheSize:          getIntEnv("HOTPLEX_BRAIN_CACHE_SIZE", 1000),
-		MaxRetries:         getIntEnv("HOTPLEX_BRAIN_MAX_RETRIES", 3),
-		RetryMinWaitMs:     getIntEnv("HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS", 100),
-		RetryMaxWaitMs:     getIntEnv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS", 5000),
-		MetricsEnabled:     getBoolEnv("HOTPLEX_BRAIN_METRICS_ENABLED", true),
-		MetricsServiceName: getEnv("HOTPLEX_BRAIN_METRICS_SERVICE_NAME", "hotplex-brain"),
-		CostTrackingEnabled: getBoolEnv("HOTPLEX_BRAIN_COST_TRACKING_ENABLED", true),
-		RateLimitEnabled:   getBoolEnv("HOTPLEX_BRAIN_RATE_LIMIT_ENABLED", false),
-		RateLimitRPS:       getFloatEnv("HOTPLEX_BRAIN_RATE_LIMIT_RPS", 10.0),
-		RateLimitBurst:     getIntEnv("HOTPLEX_BRAIN_RATE_LIMIT_BURST", 20),
-		RateLimitQueueSize: getIntEnv("HOTPLEX_BRAIN_RATE_LIMIT_QUEUE_SIZE", 100),
-		RateLimitQueueTimeout: getDurationEnv("HOTPLEX_BRAIN_RATE_LIMIT_QUEUE_TIMEOUT", 30*time.Second),
-		RateLimitPerModel:  getBoolEnv("HOTPLEX_BRAIN_RATE_LIMIT_PER_MODEL", false),
-		RouterEnabled:      getBoolEnv("HOTPLEX_BRAIN_ROUTER_ENABLED", false),
-		RouterStrategy:     getEnv("HOTPLEX_BRAIN_ROUTER_STRATEGY", "cost_priority"),
-		RouterModels:       os.Getenv("HOTPLEX_BRAIN_ROUTER_MODELS"),
-		// Phase 3: High Availability & Cost Control
-		CircuitBreakerEnabled:     getBoolEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_ENABLED", false),
-		CircuitBreakerMaxFailures: getIntEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_MAX_FAILURES", 5),
-		CircuitBreakerTimeout:     getDurationEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval:    getDurationEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
-		FailoverEnabled:           getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLED", false),
-		FailoverProviders:         os.Getenv("HOTPLEX_BRAIN_FAILOVER_PROVIDERS"),
-		FailoverEnableAuto:        getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLE_AUTO", true),
-		FailoverEnableFailback:    getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLE_FAILBACK", true),
-		FailoverCooldown:          getDurationEnv("HOTPLEX_BRAIN_FAILOVER_COOLDOWN", 5*time.Minute),
-		BudgetEnabled:             getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLED", false),
-		BudgetPeriod:              getEnv("HOTPLEX_BRAIN_BUDGET_PERIOD", "daily"),
-		BudgetLimit:               getFloatEnv("HOTPLEX_BRAIN_BUDGET_LIMIT", 10.0),
-		BudgetEnableHardLimit:     getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLE_HARD_LIMIT", false),
-		BudgetAlertThresholds:     os.Getenv("HOTPLEX_BRAIN_BUDGET_ALERT_THRESHOLDS"),
-		PriorityEnabled:           getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLED", false),
-		PriorityMaxQueueSize:      getIntEnv("HOTPLEX_BRAIN_PRIORITY_MAX_QUEUE_SIZE", 1000),
-		PriorityEnableLowPriorityDrop: getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLE_LOW_PRIORITY_DROP", true),
-		PriorityHighPriorityReserve:   getIntEnv("HOTPLEX_BRAIN_PRIORITY_HIGH_PRIORITY_RESERVE", 100),
+	return Config{
+		Enabled: apiKey != "",
+		Model: ModelConfig{
+			Provider: getEnv("HOTPLEX_BRAIN_PROVIDER", "openai"),
+			Model:    getEnv("HOTPLEX_BRAIN_MODEL", "gpt-4o-mini"),
+			Endpoint: os.Getenv("HOTPLEX_BRAIN_ENDPOINT"),
+			TimeoutS: getIntEnv("HOTPLEX_BRAIN_TIMEOUT_S", 10),
+		},
+		Cache: CacheConfig{
+			Enabled: true,
+			Size:    getIntEnv("HOTPLEX_BRAIN_CACHE_SIZE", 1000),
+		},
+		Retry: RetryConfig{
+			Enabled:     true,
+			MaxAttempts: getIntEnv("HOTPLEX_BRAIN_MAX_RETRIES", 3),
+			MinWaitMs:   getIntEnv("HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS", 100),
+			MaxWaitMs:   getIntEnv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS", 5000),
+		},
+		Metrics: MetricsConfig{
+			Enabled:         getBoolEnv("HOTPLEX_BRAIN_METRICS_ENABLED", true),
+			ServiceName:     getEnv("HOTPLEX_BRAIN_METRICS_SERVICE_NAME", "hotplex-brain"),
+			ExportInterval:  getDurationEnv("HOTPLEX_BRAIN_METRICS_EXPORT_INTERVAL", 10*time.Second),
+		},
+		Cost: CostConfig{
+			Enabled:      getBoolEnv("HOTPLEX_BRAIN_COST_TRACKING_ENABLED", true),
+			EnableBudget: getBoolEnv("HOTPLEX_BRAIN_COST_ENABLE_BUDGET", false),
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:         getBoolEnv("HOTPLEX_BRAIN_RATE_LIMIT_ENABLED", false),
+			RPS:             getFloatEnv("HOTPLEX_BRAIN_RATE_LIMIT_RPS", 10.0),
+			Burst:           getIntEnv("HOTPLEX_BRAIN_RATE_LIMIT_BURST", 20),
+			QueueSize:       getIntEnv("HOTPLEX_BRAIN_RATE_LIMIT_QUEUE_SIZE", 100),
+			QueueTimeout:    getDurationEnv("HOTPLEX_BRAIN_RATE_LIMIT_QUEUE_TIMEOUT", 30*time.Second),
+			PerModel:        getBoolEnv("HOTPLEX_BRAIN_RATE_LIMIT_PER_MODEL", false),
+		},
+		Router: RouterConfig{
+			Enabled:      getBoolEnv("HOTPLEX_BRAIN_ROUTER_ENABLED", false),
+			DefaultStage: getEnv("HOTPLEX_BRAIN_ROUTER_STRATEGY", "cost_priority"),
+			Models:       parseRouterModels(getEnv("HOTPLEX_BRAIN_ROUTER_MODELS", "")),
+		},
+		CircuitBreaker: CircuitBreakerConfig{
+			Enabled:     getBoolEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_ENABLED", false),
+			MaxFailures: getIntEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_MAX_FAILURES", 5),
+			Timeout:     getDurationEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+			Interval:    getDurationEnv("HOTPLEX_BRAIN_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		},
+		Failover: FailoverConfig{
+			Enabled:        getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLED", false),
+			EnableAuto:     getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLE_AUTO", true),
+			EnableFailback: getBoolEnv("HOTPLEX_BRAIN_FAILOVER_ENABLE_FAILBACK", true),
+			Cooldown:       getDurationEnv("HOTPLEX_BRAIN_FAILOVER_COOLDOWN", 5*time.Minute),
+		},
+		Budget: BudgetConfig{
+			Enabled:          getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLED", false),
+			Period:           getEnv("HOTPLEX_BRAIN_BUDGET_PERIOD", "daily"),
+			Limit:            getFloatEnv("HOTPLEX_BRAIN_BUDGET_LIMIT", 10.0),
+			EnableHardLimit:  getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLE_HARD_LIMIT", false),
+		},
+		Priority: PriorityConfig{
+			Enabled:              getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLED", false),
+			MaxQueueSize:         getIntEnv("HOTPLEX_BRAIN_PRIORITY_MAX_QUEUE_SIZE", 1000),
+			EnableLowPriorityDrop: getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLE_LOW_PRIORITY_DROP", true),
+			HighPriorityReserve:  getIntEnv("HOTPLEX_BRAIN_PRIORITY_HIGH_PRIORITY_RESERVE", 100),
+		},
+	}
+}
+
+func parseRouterModels(s string) []llm.ModelConfig {
+	if s == "" {
+		return nil
 	}
 
-	return cfg
+	var models []llm.ModelConfig
+	parts := strings.Split(s, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		fields := strings.Split(part, ":")
+		if len(fields) < 5 {
+			continue
+		}
+
+		costInput, _ := strconv.ParseFloat(fields[2], 64)
+		costOutput, _ := strconv.ParseFloat(fields[3], 64)
+		latency, _ := strconv.ParseInt(fields[4], 10, 64)
+
+		models = append(models, llm.ModelConfig{
+			Name:            fields[0],
+			Provider:        fields[1],
+			CostPer1KInput:  costInput,
+			CostPer1KOutput: costOutput,
+			AvgLatencyMs:    latency,
+			Enabled:         true,
+		})
+	}
+
+	return models
 }
+
+// Helper functions for loading config from environment variables
 
 func getEnv(key, fallback string) string {
 	if val := os.Getenv(key); val != "" {
@@ -206,41 +292,4 @@ func getDurationEnv(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
-}
-
-// ParseRouterModels parses the RouterModels string into llm.ModelConfig slices.
-func (c *Config) ParseRouterModels() []llm.ModelConfig {
-	if c.RouterModels == "" {
-		return nil
-	}
-
-	var models []llm.ModelConfig
-	// Format: "name1:provider:input_cost:output_cost:latency;name2:..."
-	parts := strings.Split(c.RouterModels, ";")
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-
-		fields := strings.Split(part, ":")
-		if len(fields) < 5 {
-			continue
-		}
-
-		costInput, _ := strconv.ParseFloat(fields[2], 64)
-		costOutput, _ := strconv.ParseFloat(fields[3], 64)
-		latency, _ := strconv.ParseInt(fields[4], 10, 64)
-
-		models = append(models, llm.ModelConfig{
-			Name:            fields[0],
-			Provider:        fields[1],
-			CostPer1KInput:  costInput,
-			CostPer1KOutput: costOutput,
-			AvgLatencyMs:    latency,
-			Enabled:         true,
-		})
-	}
-
-	return models
 }
