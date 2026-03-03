@@ -2,6 +2,8 @@ package brain
 
 import (
 	"context"
+
+	"github.com/hrygo/hotplex/brain/llm"
 )
 
 // Brain represents the core "System 1" intelligence for HotPlex.
@@ -16,6 +18,21 @@ type Brain interface {
 	// Useful for intent routing, safety checks, and complex data extraction.
 	Analyze(ctx context.Context, prompt string, target any) error
 }
+
+// StreamingBrain extends Brain with streaming capabilities.
+// It provides token-by-token streaming for real-time responses.
+type StreamingBrain interface {
+	Brain
+
+	// ChatStream returns a channel that streams tokens as they are generated.
+	// The channel is closed when the stream completes or an error occurs.
+	// Best used for long responses, real-time UI updates, or progressive rendering.
+	ChatStream(ctx context.Context, prompt string) (<-chan string, error)
+}
+
+// HealthStatus represents the health status of the Brain service.
+// Re-exported from llm package for convenience.
+type HealthStatus = llm.HealthStatus
 
 var (
 	globalBrain Brain

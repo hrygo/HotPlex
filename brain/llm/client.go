@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/sashabaranov/go-openai"
 )
@@ -16,6 +17,21 @@ type OpenAIClient struct {
 	client *openai.Client
 	model  string
 	logger *slog.Logger
+}
+
+// HealthStatus represents the health status of an LLM client.
+// Exported for use by the brain package.
+type HealthStatus struct {
+	Healthy   bool
+	Provider  string
+	Model     string
+	LatencyMs int64
+	Error     string
+}
+
+// HealthChecker provides health check capability.
+type HealthChecker interface {
+	HealthCheck(ctx context.Context) HealthStatus
 }
 
 // NewOpenAIClient creates a new OpenAI compatible client.
@@ -30,6 +46,30 @@ func NewOpenAIClient(apiKey, endpoint, model string, logger *slog.Logger) *OpenA
 		model:  model,
 		logger: logger,
 	}
+}
+
+// HealthCheck performs a simple health check by making a minimal API call.
+func (c *OpenAIClient) HealthCheck(ctx context.Context) HealthStatus {
+	start := time.Now()
+	
+	// Simple ping with minimal prompt
+	_, err := c.Chat(ctx, "ping")
+	latency := time.Since(start).Milliseconds()
+	
+	status := HealthStatus{
+		Provider:  "openai",
+		Model:     c.model,
+		LatencyMs: latency,
+	}
+	
+	if err != nil {
+		status.Healthy = false
+		status.Error = err.Error()
+	} else {
+		status.Healthy = true
+	}
+	
+	return status
 }
 
 // Chat generates a simple plain text completion.
