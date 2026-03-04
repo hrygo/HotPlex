@@ -26,7 +26,7 @@ HotPlex 支持的特定 AI CLI 智能体深度指南。
 
 ## 💬 ChatApps 集成
 - **[ChatApps 架构指南](chatapps/chatapps-architecture.md)**: 聊天应用集成的架构设计与用户手册。
-- **[Slack 适配器手册](chatapps/chatapps-slack.md)**: Slack 全双工通信集成手册。
+- **[Slack 适配器手册](chatapps/chatapps-slack-manual.md)**: Slack 全双工通信集成手册 (2026 最新版)。
 - **[Slack 原生演进方案](plans/slack-ai-native-evolution-plan.md)**: 深度解析下一代 Slack AI 原生交互体验。
 
 ## 🛠️ 开发者迁移
@@ -34,4 +34,4 @@ HotPlex 支持的特定 AI CLI 智能体深度指南。
 
 ---
 
-*最近更新: 2026-02-26*
+*最近更新: 2026-03-04*

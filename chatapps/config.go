@@ -57,9 +57,11 @@ type WhatsAppConfig struct {
 }
 
 type EngineConfig struct {
-	Timeout     time.Duration `yaml:"timeout"`
-	IdleTimeout time.Duration `yaml:"idle_timeout"`
-	WorkDir     string        `yaml:"work_dir"`
+	Timeout         time.Duration `yaml:"timeout"`
+	IdleTimeout     time.Duration `yaml:"idle_timeout"`
+	WorkDir         string        `yaml:"work_dir"`
+	AllowedTools    []string      `yaml:"allowed_tools"`
+	DisallowedTools []string      `yaml:"disallowed_tools"`
 }
 
 type Logger = slog.Logger

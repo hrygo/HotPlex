@@ -279,6 +279,16 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 		idleTimeout = 30 * time.Minute
 	}
 
+	// Tool Filtering Logic: Provider-level takes precedence over Engine-level
+	allowedTools := pc.Provider.AllowedTools
+	if len(allowedTools) == 0 {
+		allowedTools = pc.Engine.AllowedTools
+	}
+	disallowedTools := pc.Provider.DisallowedTools
+	if len(disallowedTools) == 0 {
+		disallowedTools = pc.Engine.DisallowedTools
+	}
+
 	opts := engine.EngineOptions{
 		Timeout:          timeout,
 		IdleTimeout:      idleTimeout,
@@ -288,8 +298,8 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 		Provider:         prv,
 		// Pass permission settings from YAML config
 		PermissionMode:  pc.Provider.DefaultPermissionMode,
-		AllowedTools:    pc.Provider.AllowedTools,
-		DisallowedTools: pc.Provider.DisallowedTools,
+		AllowedTools:    allowedTools,
+		DisallowedTools: disallowedTools,
 	}
 
 	return engine.NewEngine(opts)

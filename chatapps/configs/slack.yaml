@@ -10,9 +10,30 @@ platform: slack
 # AI Provider Settings
 # -----------------------------------------------------------------------------
 provider:
-  type: claude-code                # AI backend: claude-code or opencode
-  default_model: sonnet            # Model: sonnet, haiku, opus
+  # AI backend type:
+  # - claude-code: Anthropic's Claude Code CLI (Default)
+  # - opencode: OpenCode (supports multiple LLM backends via its own config)
+  type: claude-code
+
+  # Global settings (applied to all providers)
+  enabled: true
+  default_model: sonnet            # Model: sonnet, haiku, opus (Claude); or any model ID (OpenCode)
   default_permission_mode: bypass-permissions # bypass-permissions or ask
+  # binary_path: /usr/local/bin/claude        # Optional: override binary lookup path
+
+  # Tool filtering (Provider-level override)
+  # allowed_tools: ["Bash", "Edit"]
+  # disallowed_tools: ["Bash"]
+
+  # ---------------------------------------------------------------------------
+  # OpenCode Specific Settings (Only active if type is 'opencode')
+  # ---------------------------------------------------------------------------
+  # opencode:
+  #   use_http_api: false          # Set true to use OpenCode's SSE HTTP API
+  #   port: 4096                   # HTTP API port (default: 4096)
+  #   plan_mode: false             # Enable planning mode (Architect role)
+  #   provider: openai             # OpenCode LLM provider (openai, anthropic, deepseek, etc.)
+  #   model: gpt-4o                # Specific model ID for the selected provider
 
 # -----------------------------------------------------------------------------
 # Workspace & Engine Settings
@@ -21,6 +42,10 @@ engine:
   work_dir: ~/.slack/BOT_U0AHRCL1KCM/hotplex    # Agent's working directory
   # timeout: 30m                                # Max wait for AI response
   # idle_timeout: 30m                           # Session persistence time
+
+  # Tool filtering (Optional: Whitelist or Blacklist)
+  # allowed_tools: ["Bash", "Edit"]    # If set, ONLY these tools can be used
+  # disallowed_tools: ["Bash"]         # If set, these tools are forbidden
 
 # -----------------------------------------------------------------------------
 # Connection Settings
@@ -94,7 +119,7 @@ security:
     dm_policy: allow
     
     # Group Policy: "allow" (all), "mention" (only when @bot), "block"
-    group_policy: allow
+    group_policy: mention
     
     # [Required] Bot's own User ID (e.g., U12345678) for mention detection
     bot_user_id: "U0AHRCL1KCM"

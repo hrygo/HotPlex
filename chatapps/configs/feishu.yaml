@@ -14,6 +14,10 @@ provider:
   default_model: sonnet            # Model: sonnet, haiku, opus
   default_permission_mode: bypass-permissions # bypass-permissions or ask
 
+  # Tool filtering (Provider-level override)
+  # allowed_tools: ["Bash", "Edit"]
+  # disallowed_tools: ["Bash"]
+
 # -----------------------------------------------------------------------------
 # Workspace & Engine Settings
 # -----------------------------------------------------------------------------
@@ -21,6 +25,10 @@ engine:
   work_dir: ~/.feishu/BOT_cli_a1b2c3d4/hotplex  # Agent's working directory
   # timeout: 30m                                # Max wait for AI response
   # idle_timeout: 30m                           # Session persistence time
+
+  # Tool filtering (Optional: Whitelist or Blacklist)
+  # allowed_tools: ["Bash", "Edit"]    # If set, ONLY these tools can be used
+  # disallowed_tools: ["Bash"]         # If set, these tools are forbidden
 
 # -----------------------------------------------------------------------------
 # Connection Settings
