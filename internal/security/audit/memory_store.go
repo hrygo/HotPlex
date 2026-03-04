@@ -3,11 +3,15 @@ package audit
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/security"
 )
+
+// Compile-time interface verification
+var _ security.AuditStore = (*MemoryAuditStore)(nil)
 
 // MemoryAuditStore provides in-memory audit storage with a circular buffer.
 type MemoryAuditStore struct {
@@ -38,7 +42,16 @@ func (m *MemoryAuditStore) Save(ctx context.Context, event *security.AuditEvent)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.events[m.index] = *event
+	// Deep copy to prevent external mutation
+	copied := *event
+	if event.Metadata != nil {
+		copied.Metadata = make(map[string]any, len(event.Metadata))
+		for k, v := range event.Metadata {
+			copied.Metadata[k] = v
+		}
+	}
+
+	m.events[m.index] = copied
 	m.index = (m.index + 1) % m.capacity
 	if m.count < m.capacity {
 		m.count++
@@ -183,13 +196,9 @@ func (m *MemoryAuditStore) Stats(ctx context.Context) (security.AuditStats, erro
 	}
 
 	// Sort time series
-	for i := 0; i < len(stats.TimeSeries)-1; i++ {
-		for j := i + 1; j < len(stats.TimeSeries); j++ {
-			if stats.TimeSeries[j].Timestamp.Before(stats.TimeSeries[i].Timestamp) {
-				stats.TimeSeries[i], stats.TimeSeries[j] = stats.TimeSeries[j], stats.TimeSeries[i]
-			}
-		}
-	}
+	sort.Slice(stats.TimeSeries, func(i, j int) bool {
+		return stats.TimeSeries[i].Timestamp.Before(stats.TimeSeries[j].Timestamp)
+	})
 
 	// Top patterns
 	for pattern, count := range patternCounts {
@@ -199,13 +208,9 @@ func (m *MemoryAuditStore) Stats(ctx context.Context) (security.AuditStats, erro
 		})
 	}
 	// Sort by count descending
-	for i := 0; i < len(stats.TopPatterns)-1; i++ {
-		for j := i + 1; j < len(stats.TopPatterns); j++ {
-			if stats.TopPatterns[j].Count > stats.TopPatterns[i].Count {
-				stats.TopPatterns[i], stats.TopPatterns[j] = stats.TopPatterns[j], stats.TopPatterns[i]
-			}
-		}
-	}
+	sort.Slice(stats.TopPatterns, func(i, j int) bool {
+		return stats.TopPatterns[i].Count > stats.TopPatterns[j].Count
+	})
 	// Keep top 10
 	if len(stats.TopPatterns) > 10 {
 		stats.TopPatterns = stats.TopPatterns[:10]

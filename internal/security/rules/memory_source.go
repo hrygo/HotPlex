@@ -3,12 +3,17 @@ package rules
 import (
 	"context"
 	"regexp"
+	"sync"
 
 	"github.com/hrygo/hotplex/internal/security"
 )
 
+// Compile-time interface verification
+var _ security.RuleSource = (*MemoryRuleSource)(nil)
+
 // MemoryRuleSource provides in-memory security rules.
 type MemoryRuleSource struct {
+	mu    sync.RWMutex
 	rules []security.SecurityRule
 	name  string
 }
@@ -23,16 +28,24 @@ func NewMemoryRuleSource(name string, rules []security.SecurityRule) *MemoryRule
 
 // LoadRules returns the rules loaded in memory.
 func (m *MemoryRuleSource) LoadRules(ctx context.Context) ([]security.SecurityRule, error) {
-	return m.rules, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]security.SecurityRule, len(m.rules))
+	copy(result, m.rules)
+	return result, nil
 }
 
 // Name returns the name of this rule source.
 func (m *MemoryRuleSource) Name() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.name
 }
 
 // AddRule adds a new rule to the source.
 func (m *MemoryRuleSource) AddRule(rule security.SecurityRule) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.rules = append(m.rules, rule)
 }
 

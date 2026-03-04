@@ -11,6 +11,9 @@ import (
 	"github.com/hrygo/hotplex/internal/security"
 )
 
+// Compile-time interface verification
+var _ security.RuleSource = (*FileRuleSource)(nil)
+
 // FileRuleSource loads security rules from a file.
 type FileRuleSource struct {
 	filename string
@@ -163,9 +166,16 @@ func parseLineRule(line string) (RuleDefinition, error) {
 func splitLineRule(line string) []string {
 	var parts []string
 	var current []rune
+	escapeNext := false
 
 	for _, r := range line {
+		if escapeNext {
+			current = append(current, r)
+			escapeNext = false
+			continue
+		}
 		if r == '\\' {
+			escapeNext = true
 			continue
 		}
 		if r == '|' {

@@ -644,11 +644,15 @@ func (dd *Detector) saveAuditEvent(input string, block *DangerBlockEvent, action
 		return
 	}
 
+	// Capture reference to avoid race condition
+	store := dd.auditStore
+
 	event := &AuditEvent{
 		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
 		Timestamp: time.Now(),
 		Input:     strutil.Truncate(input, MaxInputLogLength),
 		Action:    action,
+		Source:    "detector",
 	}
 
 	if block != nil {
@@ -660,7 +664,7 @@ func (dd *Detector) saveAuditEvent(input string, block *DangerBlockEvent, action
 
 	// Save asynchronously to avoid blocking
 	go func() {
-		if err := dd.auditStore.Save(context.Background(), event); err != nil {
+		if err := store.Save(context.Background(), event); err != nil {
 			dd.logger.Error("Failed to save audit event", "error", err)
 		}
 	}()

@@ -1,8 +1,52 @@
-# Binaries
-/cmd/hotplexd/hotplexd
+# ------------------------------------------------------------------------------
+# 🛠 OS & IDE Files (操作系统与编辑器)
+# ------------------------------------------------------------------------------
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+
+# JetBrains (IntelliJ, GoLand, etc.)
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Other editors
+*.swp
+*.swo
+*~
+
+
+# ------------------------------------------------------------------------------
+# 🏗 Binaries & Build Artifacts (二进制文件与构建产物)
+# ------------------------------------------------------------------------------
+
+# Output Directories
 dist/
 bin/
 build/
+out/
+
+# Go Binaries
+# Fix: Using /hotplexd to target root binary without ignoring cmd/hotplexd/ folder
+/hotplexd
+/cmd/hotplexd/hotplexd
+
+# Generic Binaries
 *.exe
 *.exe~
 *.dll
@@ -10,8 +54,11 @@ build/
 *.dylib
 *.test
 *.out
-*.log
-hotplexd
+
+
+# ------------------------------------------------------------------------------
+# 🐹 Language Specific (编程语言相关)
+# ------------------------------------------------------------------------------
 
 # Go
 go.work
@@ -26,51 +73,75 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+env/
+ENV/
 
-# Node/Frontend
+# Node.js / Frontend
 node_modules/
 .npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# IDE & OS Files
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-Thumbs.db
-.claude/
-!.claude/skills
-!.claude/rules
-!.claude/workflows
-.agent/
-!.agent/rules
-!.agent/skills
-!.agent/workflows
 
-# Environment & Secrets
+# ------------------------------------------------------------------------------
+# 🔑 Environment & Secrets (项目环境与敏感信息)
+# ------------------------------------------------------------------------------
+
 .env
 .env.local
 .env.*.local
 *.pem
 *.key
+cert.log
 
-# Release Notes temporary files
-RELEASE_NOTES.md
-release_notes_*.txt
-.serena
+
+# ------------------------------------------------------------------------------
+# 🤖 Agent & Assistant States (AI 助手与工具状态)
+# ------------------------------------------------------------------------------
+
+# Claude / Serena / HotPlex Agents
+.claude/
+!.claude/skills
+!.claude/rules
+!.claude/workflows
+
+.agent/
+!.agent/rules
+!.agent/skills
+!.agent/workflows
+
+# .serena is used for workspace state (project.yml is usually tracked, others ignored)
+# We keep current behavior but make it cleaner
+.serena/cache/
+.serena/memories/
+
+
+# ------------------------------------------------------------------------------
+# 📝 Documentation & Project Specific (文档与项目特定)
+# ------------------------------------------------------------------------------
+
+# Documentation Site (Generated / Search Index)
+.loki/
+/.logs/
+/logs/
 
 # Worktrees
 .worktrees/
 
-# Generated PNG assets (Optional/Manual via svg2png.sh)
+# Generated Assets
 docs/images/png/
 
+# Release Process
+RELEASE_NOTES.md
+release_notes_*.txt
 
-# Documentation Site (Generated)
-.loki
-logs
 
-# Temporary files
+# ------------------------------------------------------------------------------
+# 🧹 Temporary Files & Logs (临时文件与日志)
+# ------------------------------------------------------------------------------
+
+*.log
 *.bak
 *.tmp
 *.temp

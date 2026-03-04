@@ -8,11 +8,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/security"
 )
+
+// Compile-time interface verification
+var _ security.AuditStore = (*FileAuditStore)(nil)
 
 // FileAuditStore provides file-based audit storage in JSON Lines format.
 type FileAuditStore struct {
@@ -234,13 +238,9 @@ func (f *FileAuditStore) Stats(ctx context.Context) (security.AuditStats, error)
 	}
 
 	// Sort time series
-	for i := 0; i < len(stats.TimeSeries)-1; i++ {
-		for j := i + 1; j < len(stats.TimeSeries); j++ {
-			if stats.TimeSeries[j].Timestamp.Before(stats.TimeSeries[i].Timestamp) {
-				stats.TimeSeries[i], stats.TimeSeries[j] = stats.TimeSeries[j], stats.TimeSeries[i]
-			}
-		}
-	}
+	sort.Slice(stats.TimeSeries, func(i, j int) bool {
+		return stats.TimeSeries[i].Timestamp.Before(stats.TimeSeries[j].Timestamp)
+	})
 
 	// Top patterns
 	for pattern, count := range patternCounts {
@@ -250,13 +250,9 @@ func (f *FileAuditStore) Stats(ctx context.Context) (security.AuditStats, error)
 		})
 	}
 	// Sort by count descending
-	for i := 0; i < len(stats.TopPatterns)-1; i++ {
-		for j := i + 1; j < len(stats.TopPatterns); j++ {
-			if stats.TopPatterns[j].Count > stats.TopPatterns[i].Count {
-				stats.TopPatterns[i], stats.TopPatterns[j] = stats.TopPatterns[j], stats.TopPatterns[i]
-			}
-		}
-	}
+	sort.Slice(stats.TopPatterns, func(i, j int) bool {
+		return stats.TopPatterns[i].Count > stats.TopPatterns[j].Count
+	})
 	if len(stats.TopPatterns) > 10 {
 		stats.TopPatterns = stats.TopPatterns[:10]
 	}
