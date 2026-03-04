@@ -23,18 +23,22 @@ import (
 // Setup initializes all enabled ChatApps and their dedicated Engines.
 // It returns an http.Handler that handles all webhook routes.
 func Setup(ctx context.Context, logger *slog.Logger) (http.Handler, *AdapterManager, error) {
-	// 配置目录搜索优先级：
-	// 1. CHATAPPS_CONFIG_DIR (向后兼容)
-	// 2. ~/.hotplex/configs (用户配置)
-	// 3. ./chatapps/configs (默认)
+	// Config directory search priority:
+	// 1. CHATAPPS_CONFIG_DIR (backward compatibility)
+	// 2. ~/.hotplex/configs (user config)
+	// 3. ./chatapps/configs (default)
 	configDir := os.Getenv("CHATAPPS_CONFIG_DIR")
 
 	if configDir == "" {
-		// 尝试用户配置目录
+		// Try user config directory
 		homeDir, err := os.UserHomeDir()
-		if err == nil {
+		if err != nil {
+			logger.Debug("Could not determine user home directory", "error", err)
+		} else {
 			userConfigDir := filepath.Join(homeDir, ".hotplex", "configs")
-			if _, err := os.Stat(userConfigDir); err == nil {
+			if _, err := os.Stat(userConfigDir); err != nil {
+				logger.Debug("User config directory does not exist", "path", userConfigDir, "error", err)
+			} else {
 				configDir = userConfigDir
 				logger.Debug("Using user config directory", "path", configDir)
 			}
@@ -43,12 +47,21 @@ func Setup(ctx context.Context, logger *slog.Logger) (http.Handler, *AdapterMana
 
 	if configDir == "" {
 		configDir = "chatapps/configs"
+		// Check if default config directory exists
+		if _, err := os.Stat(configDir); os.IsNotExist(err) {
+			logger.Debug("Default config directory not found, skipping config loading", "path", configDir)
+			configDir = ""
+		}
 	}
 
-	loader, err := NewConfigLoader(configDir, logger)
-	if err != nil {
-		logger.Warn("Failed to load platform configs, using defaults", "error", err)
-		// Don't fail completely, try to continue with env-based config
+	var loader *ConfigLoader
+	var err error
+	if configDir != "" {
+		loader, err = NewConfigLoader(configDir, logger)
+		if err != nil {
+			logger.Warn("Failed to load platform configs, using defaults", "error", err)
+			// Don't fail completely, try to continue with env-based config
+		}
 	}
 
 	manager := NewAdapterManager(logger)
