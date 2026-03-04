@@ -81,60 +81,8 @@ func (b *MessageBuilder) Build(msg *base.ChatMessage) []slack.Block {
 // =============================================================================
 
 // =============================================================================
-// Thinking Message (AI is reasoning) - DEPRECATED for Status API
+// Status Messaging - DEPRECATED for Native Assistant Status API
 // =============================================================================
-
-// BuildStatusBubble builds a status bubble message from StatusType
-func (b *MessageBuilder) BuildStatusBubble(status base.StatusType, text string) []slack.Block {
-	if text == "" {
-		text = getDefaultStatusText(status)
-	}
-
-	// Map StatusType to emoji
-	emoji := getStatusEmoji(status)
-
-	// Truncate to 64 chars
-	runes := []rune(text)
-	if len(runes) > 64 {
-		text = "... " + string(runes[len(runes)-60:])
-	}
-
-	formatted := fmt.Sprintf("%s _%s_", emoji, text)
-	textObj := slack.NewTextBlockObject("mrkdwn", formatted, false, false)
-	return []slack.Block{
-		slack.NewContextBlock("", textObj),
-	}
-}
-
-func getStatusEmoji(status base.StatusType) string {
-	switch status {
-	case base.StatusThinking:
-		return ":hourglass_flowing_sand:"
-	case base.StatusToolUse:
-		return ":toolbox:"
-	case base.StatusToolResult:
-		return ":white_check_mark:"
-	case base.StatusAnswering:
-		return ":speech_balloon:"
-	default:
-		return ":bell:"
-	}
-}
-
-func getDefaultStatusText(status base.StatusType) string {
-	switch status {
-	case base.StatusThinking:
-		return "Thinking..."
-	case base.StatusToolUse:
-		return "Using tool..."
-	case base.StatusToolResult:
-		return "Tool completed"
-	case base.StatusAnswering:
-		return "Answering..."
-	default:
-		return "Processing..."
-	}
-}
 
 // =============================================================================
 // Tool Use Message (Tool invocation started)

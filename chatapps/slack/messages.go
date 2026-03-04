@@ -380,32 +380,20 @@ func (a *Adapter) SetAssistantStatus(ctx context.Context, channelID, threadTS, s
 }
 
 // SetStatus implements base.StatusProvider
-// Tries native Slack status first, falls back to bubble message
+// Exclusively uses native Slack Assistant Status API. No fallback.
 func (a *Adapter) SetStatus(ctx context.Context, channelID, threadTS string, status base.StatusType, text string) error {
-
-	if a.client != nil {
-		err := a.SetAssistantStatus(ctx, channelID, threadTS, text)
-		if err == nil {
-			return nil
-		}
-		a.Logger().Debug("Native status failed, falling back to bubble", "error", err)
+	if a.client == nil {
+		return fmt.Errorf("slack client not initialized")
 	}
-
-	return a.sendStatusBubble(ctx, channelID, threadTS, status, text)
+	return a.SetAssistantStatus(ctx, channelID, threadTS, text)
 }
 
 // ClearStatus implements base.StatusProvider
 func (a *Adapter) ClearStatus(ctx context.Context, channelID, threadTS string) error {
-
-	if a.client != nil {
-		err := a.SetAssistantStatus(ctx, channelID, threadTS, "")
-		if err == nil {
-			return nil
-		}
-		a.Logger().Debug("Native status clear failed, falling back", "error", err)
+	if a.client == nil {
+		return fmt.Errorf("slack client not initialized")
 	}
-
-	return nil
+	return a.SetAssistantStatus(ctx, channelID, threadTS, "")
 }
 
 // StartStream starts a native streaming message and returns message_ts as anchor for subsequent updates
@@ -417,11 +405,12 @@ func (a *Adapter) StartStream(ctx context.Context, channelID, threadTS string) (
 
 	a.Logger().Debug("Starting native stream", "channel_id", channelID, "thread_ts", threadTS)
 
-	options := []slack.MsgOption{slack.MsgOptionText(" ", false)}
+	options := []slack.MsgOption{slack.MsgOptionMarkdownText(" ")}
 	if threadTS != "" {
 		options = append(options, slack.MsgOptionTS(threadTS))
 	}
 
+	a.Logger().Debug("Calling Slack StartStream", "channel_id", channelID, "options_count", len(options))
 	_, ts, err := a.client.StartStreamContext(ctx, channelID, options...)
 	if err != nil {
 		a.Logger().Error("StartStream failed", "channel_id", channelID, "error", err)
@@ -441,8 +430,9 @@ func (a *Adapter) AppendStream(ctx context.Context, channelID, messageTS, conten
 
 	a.Logger().Debug("Appending to stream", "channel_id", channelID, "message_ts", messageTS, "content_len", len(content))
 
+	a.Logger().Debug("Calling Slack AppendStream", "channel_id", channelID, "message_ts", messageTS, "content_len", len(content))
 	_, _, err := a.client.AppendStreamContext(ctx, channelID, messageTS,
-		slack.MsgOptionText(content, false),
+		slack.MsgOptionMarkdownText(content),
 	)
 	if err != nil {
 		a.Logger().Error("AppendStream failed", "channel_id", channelID, "message_ts", messageTS, "error", err)

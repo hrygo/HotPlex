@@ -146,11 +146,12 @@ type StreamWriter interface {
 type StatusType string
 
 const (
-	StatusThinking   StatusType = "thinking"
-	StatusToolUse    StatusType = "tool_use"
-	StatusToolResult StatusType = "tool_result"
-	StatusAnswering  StatusType = "answering"
-	StatusIdle       StatusType = "idle"
+	StatusInitializing StatusType = "initializing"
+	StatusThinking     StatusType = "thinking"
+	StatusToolUse      StatusType = "tool_use"
+	StatusToolResult   StatusType = "tool_result"
+	StatusAnswering    StatusType = "answering"
+	StatusIdle         StatusType = "idle"
 )
 
 // StatusProvider defines the abstraction for status notification
@@ -168,6 +169,8 @@ type StatusProvider interface {
 // Returns StatusIdle for unrecognized types
 func MessageTypeToStatusType(msgType MessageType) StatusType {
 	switch msgType {
+	case MessageTypeSessionStart, MessageTypeEngineStarting:
+		return StatusInitializing
 	case MessageTypeThinking:
 		return StatusThinking
 	case MessageTypeToolUse:

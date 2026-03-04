@@ -15,6 +15,7 @@ type StatusManager struct {
 	logger   *slog.Logger
 	mu       sync.Mutex
 	current  base.StatusType
+	lastText string
 }
 
 // NewStatusManager 创建StatusManager
@@ -32,10 +33,11 @@ func (m *StatusManager) Notify(ctx context.Context, channelID, threadTS string, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.current == status {
-		return nil // 避免重复
+	if m.current == status && m.lastText == text {
+		return nil // Avoid repetitive updates if both type and text are same
 	}
 	m.current = status
+	m.lastText = text
 
 	return m.provider.SetStatus(ctx, channelID, threadTS, status, text)
 }
@@ -46,6 +48,7 @@ func (m *StatusManager) Clear(ctx context.Context, channelID, threadTS string) e
 	defer m.mu.Unlock()
 
 	m.current = base.StatusIdle
+	m.lastText = ""
 	return m.provider.ClearStatus(ctx, channelID, threadTS)
 }
 
