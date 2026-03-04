@@ -2,6 +2,7 @@ package security
 
 import (
 	"bufio"
+	"context"
 	"crypto/subtle"
 	"fmt"
 	"log/slog"
@@ -31,7 +32,7 @@ const (
 
 // RuleSource defines an interface for loading security rules.
 type RuleSource interface {
-	LoadRules(ctx interface{ Done() <-chan struct{} }) ([]SecurityRule, error)
+	LoadRules(ctx context.Context) ([]SecurityRule, error)
 	Name() string
 }
 
@@ -117,9 +118,9 @@ type TimeBucket struct {
 
 // AuditStore defines an interface for storing audit logs.
 type AuditStore interface {
-	Save(ctx interface{ Done() <-chan struct{} }, event *AuditEvent) error
-	Query(ctx interface{ Done() <-chan struct{} }, filter AuditFilter) ([]AuditEvent, error)
-	Stats(ctx interface{ Done() <-chan struct{} }) (AuditStats, error)
+	Save(ctx context.Context, event *AuditEvent) error
+	Query(ctx context.Context, filter AuditFilter) ([]AuditEvent, error)
+	Stats(ctx context.Context) (AuditStats, error)
 	Close() error
 }
 
@@ -209,6 +210,12 @@ type Detector struct {
 	logger *slog.Logger   // Event logger for security forensics
 	mu     sync.RWMutex   // Protects concurrent configuration updates
 
+	// ruleSource provides extensible rule loading (optional)
+	ruleSource RuleSource
+
+	// auditStore provides audit logging (optional)
+	auditStore AuditStore
+
 	// allowPaths defines a whitelist of directories where file operations are permitted.
 	allowPaths []string
 
@@ -232,6 +239,9 @@ func NewDetector(logger *slog.Logger) *Detector {
 	// Load default dangerous patterns
 	dd.loadDefaultPatterns()
 
+	// Load safe patterns (allowlisted commands)
+	dd.loadSafePatterns()
+
 	return dd
 }
 
@@ -247,6 +257,38 @@ func (dd *Detector) SetAdminToken(token string) {
 	dd.mu.Lock()
 	defer dd.mu.Unlock()
 	dd.adminToken = token
+}
+
+// SetRuleSource sets the rule source for extensible rule loading.
+func (dd *Detector) SetRuleSource(source RuleSource) {
+	dd.mu.Lock()
+	defer dd.mu.Unlock()
+	dd.ruleSource = source
+	if source != nil {
+		dd.loadRulesFromSource(source)
+	}
+}
+
+// SetAuditStore sets the audit store for logging security events.
+func (dd *Detector) SetAuditStore(store AuditStore) {
+	dd.mu.Lock()
+	defer dd.mu.Unlock()
+	dd.auditStore = store
+}
+
+// loadRulesFromSource loads rules from the provided RuleSource.
+func (dd *Detector) loadRulesFromSource(source RuleSource) {
+	rules, err := source.LoadRules(context.Background())
+	if err != nil {
+		dd.logger.Error("Failed to load rules from source",
+			"source", source.Name(),
+			"error", err)
+		return
+	}
+	dd.rules = append(dd.rules, rules...)
+	dd.logger.Info("Loaded rules from source",
+		"source", source.Name(),
+		"count", len(rules))
 }
 
 // loadDefaultPatterns initializes the built-in dangerous command patterns.
@@ -429,6 +471,59 @@ func (dd *Detector) loadDefaultPatterns() {
 	}
 }
 
+// loadSafePatterns initializes the built-in safe command patterns (allowlist).
+// These patterns are checked first and will bypass the WAF if matched.
+func (dd *Detector) loadSafePatterns() {
+	patterns := []struct {
+		pattern     string
+		description string
+		category    string
+	}{
+		// Go commands (Allowlist)
+		{`^go\s+(build|run|test|vet|fmt|mod|get|install|list|version|env|tool|bug|clean|doc|generate|help|init|link)\b`, "Go build tool", "develop-tools"},
+		{`^go\s+mod\s+(download|init|tidy|graph|why|verify)\b`, "Go mod command", "develop-tools"},
+
+		// Node commands (Allowlist)
+		{`^(npm|yarn|pnpm)\s+(install|run|test|build|start|dev|serve|lint|format|add|remove|update)\b`, "Node package manager", "develop-tools"},
+		{`^node\s+[^\-]`, "Node.js runtime (safe invocation)", "develop-tools"},
+		{`^npx\s+`, "Node package executor", "develop-tools"},
+
+		// Python commands (Allowlist - only safe invocations)
+		{`^python[23]?\s+(file\.py|script\.py|module| -m )\b`, "Python safe invocation", "develop-tools"},
+		{`^pip[23]?\s+(install|uninstall|freeze|list|show|check)\b`, "Python pip", "develop-tools"},
+		{`^poetry\s+(install|run|build|publish)\b`, "Python Poetry", "develop-tools"},
+		{`^pipenv\s+(install|run|shell)\b`, "Python Pipenv", "develop-tools"},
+
+		// Docker commands (Allowlist - specific safe operations)
+		{`^docker\s+(build|ps|logs|images|volume|network|inspect|exec)\s+`, "Docker container", "develop-tools"},
+		{`^docker-compose\s+`, "Docker Compose", "develop-tools"},
+
+		// Git commands (Allowlist - safe operations only)
+		{`^git\s+(status|log|diff|show|branch|checkout|fetch|pull|push|clone|init|add|commit|merge|rebase|stash|cherry-pick)\b`, "Git version control", "develop-tools"},
+
+		// System tools (Allowlist - read-only/safe operations only)
+		{`^(ls|cd|pwd|mkdir|rmdir|touch|head|tail|grep|find|awk|sed|sort|uniq|wc|cut|tr)\b`, "Unix utilities", "develop-tools"},
+		{`^(date|time|which|whoami|id|hostname|uname|uptime)\b`, "System utilities", "develop-tools"},
+	}
+
+	for _, p := range patterns {
+		re, err := regexp.Compile(p.pattern)
+		if err != nil {
+			dd.logger.Warn("Failed to compile safe pattern - skipping",
+				"pattern", p.pattern,
+				"description", p.description,
+				"error", err)
+			continue
+		}
+		dd.rules = append(dd.rules, &SafePatternRule{
+			Pattern:     re,
+			Description: p.description,
+			Category:    p.category,
+		})
+	}
+	dd.logger.Debug("Loaded safe command patterns", "count", len(patterns))
+}
+
 // stripMarkdownCodeBlocks removes markdown code blocks and inline code from input
 // to reduce false positives when users paste documentation or code examples.
 func stripMarkdownCodeBlocks(input string) string {
@@ -451,6 +546,7 @@ func stripMarkdownCodeBlocks(input string) string {
 
 // CheckInput checks if the input contains any dangerous operations.
 // Returns a DangerBlockEvent if a dangerous operation is detected, nil otherwise.
+// Safe patterns are checked first - if matched, input is allowed through.
 func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 	dd.mu.RLock()
 	defer dd.mu.RUnlock()
@@ -458,6 +554,7 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 	// If bypass is enabled (admin/Evolution mode), skip checks
 	if dd.bypassEnabled {
 		dd.logger.Warn("Danger detection bypassed", "input", strutil.Truncate(input, MaxInputLogLength))
+		dd.saveAuditEvent(input, nil, AuditActionBypassed)
 		return nil
 	}
 
@@ -472,7 +569,7 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 			dd.logger.Warn("Null byte detected in input - potential bypass attempt",
 				"position", i,
 				"input", strutil.Truncate(input, MaxPatternLogLength))
-			return &DangerBlockEvent{
+			block := &DangerBlockEvent{
 				Operation:      strutil.Truncate(input, MaxDisplayLength),
 				Reason:         "Null byte (\\x00) detected - potential WAF bypass attempt",
 				PatternMatched: "null_byte",
@@ -481,6 +578,8 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 				BypassAllowed:  false,
 				Suggestions:    []string{"Remove null bytes from input", "Validate input encoding"},
 			}
+			dd.saveAuditEvent(input, block, AuditActionBlocked)
+			return block
 		}
 		// Check for other dangerous control characters (except common whitespace)
 		if r < 0x20 && r != '\t' && r != '\n' && r != '\r' {
@@ -488,7 +587,7 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 				"position", i,
 				"char_code", r,
 				"input", strutil.Truncate(input, MaxPatternLogLength))
-			return &DangerBlockEvent{
+			block := &DangerBlockEvent{
 				Operation:      strutil.Truncate(input, MaxDisplayLength),
 				Reason:         fmt.Sprintf("Control character (0x%02X) detected - potential WAF bypass attempt", r),
 				PatternMatched: "control_char",
@@ -497,11 +596,32 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 				BypassAllowed:  false,
 				Suggestions:    []string{"Remove control characters from input", "Validate input encoding"},
 			}
+			dd.saveAuditEvent(input, block, AuditActionBlocked)
+			return block
 		}
 	}
 
-	// Check each registered rule
+	// First, check safe patterns (allowlist) - these bypass WAF
 	for _, rule := range dd.rules {
+		if safeRule, ok := rule.(*SafePatternRule); ok {
+			if block := safeRule.Evaluate(input); block != nil {
+				dd.logger.Info("Safe command detected - allowing",
+					"reason", block.Reason,
+					"category", block.Category,
+					"input", strutil.Truncate(input, MaxPatternLogLength),
+				)
+				dd.saveAuditEvent(input, block, AuditActionApproved)
+				return nil // Safe command - bypass WAF
+			}
+		}
+	}
+
+	// Then check dangerous patterns
+	for _, rule := range dd.rules {
+		// Skip safe pattern rules in dangerous check
+		if _, ok := rule.(*SafePatternRule); ok {
+			continue
+		}
 		if block := rule.Evaluate(input); block != nil {
 			dd.logger.Warn("Dangerous operation detected",
 				"reason", block.Reason,
@@ -509,11 +629,41 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 				"category", block.Category,
 				"input", strutil.Truncate(input, MaxPatternLogLength),
 			)
+			dd.saveAuditEvent(input, block, AuditActionBlocked)
 			return block
 		}
 	}
 
+	dd.saveAuditEvent(input, nil, AuditActionApproved)
 	return nil
+}
+
+// saveAuditEvent saves an audit event to the audit store if configured.
+func (dd *Detector) saveAuditEvent(input string, block *DangerBlockEvent, action AuditAction) {
+	if dd.auditStore == nil {
+		return
+	}
+
+	event := &AuditEvent{
+		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
+		Timestamp: time.Now(),
+		Input:     strutil.Truncate(input, MaxInputLogLength),
+		Action:    action,
+	}
+
+	if block != nil {
+		event.Operation = block.Operation
+		event.Reason = block.Reason
+		event.Level = block.Level
+		event.Category = block.Category
+	}
+
+	// Save asynchronously to avoid blocking
+	go func() {
+		if err := dd.auditStore.Save(context.Background(), event); err != nil {
+			dd.logger.Error("Failed to save audit event", "error", err)
+		}
+	}()
 }
 
 // extractCommand extracts the relevant command portion from the input using pre-compiled regex.
@@ -745,6 +895,8 @@ func (dd *Detector) LoadCustomPatterns(filename string) error {
 // String returns a string representation of the danger level.
 func (d DangerLevel) String() string {
 	switch d {
+	case DangerLevelSafe:
+		return "safe"
 	case DangerLevelCritical:
 		return "critical"
 	case DangerLevelHigh:
