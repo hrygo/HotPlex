@@ -144,6 +144,8 @@ func (a *Adapter) handleEventCallback(ctx context.Context, eventData json.RawMes
 	threadID := msgEvent.ThreadTS
 
 	processedText, conversionMetadata := preprocessMessageText(msgEvent.Text)
+	// Defense-in-depth: sanitize user input before passing to engine
+	processedText = sanitizeUserInput(processedText)
 	if _, converted := conversionMetadata["converted_from_hash"]; converted {
 		a.Logger().Debug("Converted # prefix to / prefix", "original", msgEvent.Text, "converted", processedText)
 

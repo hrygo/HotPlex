@@ -236,3 +236,22 @@ func preprocessMessageText(originalText string) (string, map[string]any) {
 	}
 	return processed, metadata
 }
+
+// sanitizeUserInput removes potentially dangerous characters from user input
+// while preserving the core message content. This provides defense-in-depth
+// alongside the engine-level WAF.
+func sanitizeUserInput(text string) string {
+	// Remove null bytes and other control characters except newlines/tabs
+	var result strings.Builder
+	for _, r := range text {
+		switch {
+		case r == 0: // null byte
+			continue
+		case r < 32 && r != '\t' && r != '\n' && r != '\r': // control chars except tab, LF, CR
+			continue
+		default:
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}

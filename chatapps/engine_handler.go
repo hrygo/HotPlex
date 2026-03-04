@@ -574,7 +574,7 @@ func (c *StreamCallback) enforceSlidingWindow(zone int) {
 	// Delete evicted message
 	if c.messageOps != nil {
 		go func() {
-			_ = c.messageOps.DeleteMessage(context.Background(), toEvict.ChannelID, toEvict.MessageTS)
+			_ = c.messageOps.DeleteMessage(c.ctx, toEvict.ChannelID, toEvict.MessageTS)
 		}()
 	}
 }
@@ -603,7 +603,7 @@ func (c *StreamCallback) scheduleDeleteActionMessagesLocked() {
 			return
 		}
 		for _, rec := range records {
-			if err := c.messageOps.DeleteMessage(context.Background(), rec.ChannelID, rec.MessageTS); err != nil {
+			if err := c.messageOps.DeleteMessage(c.ctx, rec.ChannelID, rec.MessageTS); err != nil {
 				c.logger.Debug("Failed to delete tracked message", "ts", rec.MessageTS, "error", err)
 			}
 		}
@@ -771,7 +771,7 @@ func (c *StreamCallback) handleToolResult(data any) error {
 				threadMsg := fmt.Sprintf("📋 *%s* 完整输出 (%s):\n```\n%s\n```", toolName, formatDataLength(contentLength), threadContent)
 				go func() {
 					// Use a 30s timeout context for background thread reply
-					ctxBody, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					ctxBody, cancel := context.WithTimeout(c.ctx, 30*time.Second)
 					defer cancel()
 					if err := c.messageOps.SendThreadReply(ctxBody, channelID, threadTS, threadMsg); err != nil {
 						c.logger.Warn("Space Folding: failed to send thread reply", "error", err)

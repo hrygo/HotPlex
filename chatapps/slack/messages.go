@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/slack-go/slack"
@@ -164,9 +167,32 @@ func (a *Adapter) sendFileFromURL(ctx context.Context, payload map[string]any) e
 	return nil
 }
 
+func validateResponseURL(responseURL string) error {
+	parsedURL, err := url.Parse(responseURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if parsedURL.Scheme != "https" {
+		return fmt.Errorf("only HTTPS allowed")
+	}
+	host := strings.ToLower(parsedURL.Hostname())
+	if host == "slack.com" || host == "slack-msgs.com" || strings.HasSuffix(host, ".slack.com") {
+		return nil
+	}
+	return fmt.Errorf("invalid domain: %s", host)
+}
+
+var ssrfSafeClient = &http.Client{Timeout: 10 * time.Second}
+
 // sendEphemeralMessage sends a message visible only to the user who issued the command
 // via the Slack response_url (typically used in slash command responses)
 func (a *Adapter) sendEphemeralMessage(responseURL, text string) error {
+	// SSRF protection: validate URL before making request
+	if err := validateResponseURL(responseURL); err != nil {
+		a.Logger().Error("SSRF validation failed", "error", err)
+		return fmt.Errorf("response URL validation failed: %w", err)
+	}
+
 	payload := map[string]any{
 		"response_type": "ephemeral",
 		"text":          text,
@@ -178,7 +204,7 @@ func (a *Adapter) sendEphemeralMessage(responseURL, text string) error {
 		return err
 	}
 
-	resp, err := http.Post(responseURL, "application/json", bytes.NewReader(body))
+	resp, err := ssrfSafeClient.Post(responseURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		a.Logger().Error("Failed to send ephemeral message", "error", err)
 		return err
