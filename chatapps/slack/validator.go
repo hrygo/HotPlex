@@ -1,3 +1,5 @@
+// Package slack provides the Slack adapter implementation for the hotplex engine.
+// Validation rules for Slack Block Kit to ensure payloads meet API constraints.
 package slack
 
 import (

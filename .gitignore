@@ -57,6 +57,7 @@ Thumbs.db
 # Release Notes temporary files
 RELEASE_NOTES.md
 release_notes_*.txt
+.serena
 
 # Worktrees
 .worktrees/

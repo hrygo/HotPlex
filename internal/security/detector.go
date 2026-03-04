@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/strutil"
 )
@@ -24,10 +25,133 @@ const (
 	MaxDisplayLength = 100
 )
 
+// ========================================
+// RuleSource Interfaces (for extensibility)
+// ========================================
+
+// RuleSource defines an interface for loading security rules.
+type RuleSource interface {
+	LoadRules(ctx interface{ Done() <-chan struct{} }) ([]SecurityRule, error)
+	Name() string
+}
+
+// RuleUpdate represents a rule change event.
+type RuleUpdate struct {
+	Type      RuleUpdateType
+	Rule      SecurityRule
+	Timestamp time.Time
+}
+
+// RuleUpdateType represents the type of rule update.
+type RuleUpdateType string
+
+const (
+	RuleAdd      RuleUpdateType = "add"
+	RuleRemove   RuleUpdateType = "remove"
+	RuleUpdateOp RuleUpdateType = "update"
+)
+
+// ========================================
+// AuditStore Interfaces (for observability)
+// ========================================
+
+// AuditAction represents the action taken on an input.
+type AuditAction string
+
+const (
+	AuditActionBlocked  AuditAction = "blocked"
+	AuditActionApproved AuditAction = "approved"
+	AuditActionBypassed AuditAction = "bypassed"
+)
+
+// AuditEvent represents a security audit log entry.
+type AuditEvent struct {
+	ID        string         `json:"id"`
+	Timestamp time.Time      `json:"timestamp"`
+	Input     string         `json:"input"` // Truncated input
+	Operation string         `json:"operation"`
+	Reason    string         `json:"reason"`
+	Level     DangerLevel    `json:"level"`
+	Category  string         `json:"category"`
+	Action    AuditAction    `json:"action"`
+	UserID    string         `json:"user_id,omitempty"`
+	SessionID string         `json:"session_id,omitempty"`
+	Source    string         `json:"source"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+// AuditFilter for querying audit events.
+type AuditFilter struct {
+	StartTime  time.Time
+	EndTime    time.Time
+	Levels     []DangerLevel
+	Categories []string
+	Actions    []AuditAction
+	UserID     string
+	SessionID  string
+	Limit      int
+}
+
+// AuditStats contains aggregated statistics.
+type AuditStats struct {
+	TotalBlocked  int64            `json:"total_blocked"`
+	TotalApproved int64            `json:"total_approved"`
+	ByLevel       map[string]int64 `json:"by_level"`
+	ByCategory    map[string]int64 `json:"by_category"`
+	BySource      map[string]int64 `json:"by_source"`
+	TopPatterns   []PatternStat    `json:"top_patterns"`
+	TimeSeries    []TimeBucket     `json:"time_series"`
+}
+
+// PatternStat represents a pattern and its hit count.
+type PatternStat struct {
+	Pattern string `json:"pattern"`
+	Count   int64  `json:"count"`
+}
+
+// TimeBucket represents a time bucket for time-series data.
+type TimeBucket struct {
+	Timestamp time.Time `json:"timestamp"`
+	Count     int64     `json:"count"`
+}
+
+// AuditStore defines an interface for storing audit logs.
+type AuditStore interface {
+	Save(ctx interface{ Done() <-chan struct{} }, event *AuditEvent) error
+	Query(ctx interface{ Done() <-chan struct{} }, filter AuditFilter) ([]AuditEvent, error)
+	Stats(ctx interface{ Done() <-chan struct{} }) (AuditStats, error)
+	Close() error
+}
+
+// SafePatternRule implements SecurityRule for allowlisted safe commands.
+type SafePatternRule struct {
+	Pattern     *regexp.Regexp
+	Description string
+	Category    string
+}
+
+// Evaluate checks if the input matches the safe pattern.
+func (r *SafePatternRule) Evaluate(input string) *DangerBlockEvent {
+	if r.Pattern.MatchString(input) {
+		return &DangerBlockEvent{
+			Operation:      extractCommand(input, r.Pattern),
+			Reason:         r.Description,
+			PatternMatched: r.Pattern.String(),
+			Level:          DangerLevelSafe,
+			Category:       r.Category,
+			BypassAllowed:  true,
+			Suggestions:    nil,
+		}
+	}
+	return nil
+}
+
 // DangerLevel classifies the severity of a detected potentially harmful operation.
 type DangerLevel int
 
 const (
+	// DangerLevelSafe represents safe commands that are allowlisted.
+	DangerLevelSafe DangerLevel = -1
 	// DangerLevelCritical represents irreparable damage (e.g., recursive root deletion or disk wiping).
 	DangerLevelCritical DangerLevel = iota
 	// DangerLevelHigh represents significant damage potential (e.g., deleting user home or system config).
@@ -305,6 +429,26 @@ func (dd *Detector) loadDefaultPatterns() {
 	}
 }
 
+// stripMarkdownCodeBlocks removes markdown code blocks and inline code from input
+// to reduce false positives when users paste documentation or code examples.
+func stripMarkdownCodeBlocks(input string) string {
+	// Pattern 1: Remove fenced code blocks (```...```)
+	// Matches triple backticks with optional language identifier
+	fencedCodeBlock := regexp.MustCompile("(?s)```[\\s\\S]*?```")
+	input = fencedCodeBlock.ReplaceAllString(input, "")
+
+	// Pattern 2: Remove indented code blocks (4+ spaces at line start)
+	indentedBlock := regexp.MustCompile("(?m)^    .*$")
+	input = indentedBlock.ReplaceAllString(input, "")
+
+	// Note: We intentionally do NOT strip inline code (single backticks) here
+	// because distinguishing between documentation (`code`) and actual commands (`whoami`)
+	// is error-prone and could create security gaps.
+	// The fenced and indented code blocks are clear documentation markers.
+
+	return input
+}
+
 // CheckInput checks if the input contains any dangerous operations.
 // Returns a DangerBlockEvent if a dangerous operation is detected, nil otherwise.
 func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
@@ -316,6 +460,10 @@ func (dd *Detector) CheckInput(input string) *DangerBlockEvent {
 		dd.logger.Warn("Danger detection bypassed", "input", strutil.Truncate(input, MaxInputLogLength))
 		return nil
 	}
+
+	// Pre-process: Remove markdown code blocks to reduce false positives
+	// This helps with prompts that contain documentation or examples
+	input = stripMarkdownCodeBlocks(input)
 
 	// Pre-check: Detect null bytes and dangerous control characters
 	// These are often used to bypass regex-based WAF

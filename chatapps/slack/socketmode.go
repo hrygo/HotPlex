@@ -1,0 +1,316 @@
+package slack
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/chatapps/command"
+	"github.com/hrygo/hotplex/internal/panicx"
+	"github.com/slack-go/slack"
+	"github.com/slack-go/slack/slackevents"
+	"github.com/slack-go/slack/socketmode"
+)
+
+// startSocketMode starts the Socket Mode event loop
+func (a *Adapter) startSocketMode(ctx context.Context) {
+	a.socketModeMu.Lock()
+	if a.socketModeRunning {
+		a.socketModeMu.Unlock()
+		a.Logger().Warn("Socket Mode already running")
+		return
+	}
+	a.socketModeRunning = true
+	a.socketModeCtx, a.socketModeCancel = context.WithCancel(ctx)
+	a.socketModeMu.Unlock()
+
+	go func() {
+		defer panicx.Recover(a.Logger(), "Slack Socket Mode")
+		defer func() {
+			a.socketModeMu.Lock()
+			a.socketModeRunning = false
+			a.socketModeMu.Unlock()
+		}()
+
+		for {
+			select {
+			case <-a.socketModeCtx.Done():
+				a.Logger().Info("Socket Mode event loop stopped")
+				return
+			case evt, ok := <-a.socketModeClient.Events:
+				if !ok {
+					a.Logger().Info("Socket Mode events channel closed")
+					return
+				}
+				a.handleSocketModeEvent(evt)
+			}
+		}
+	}()
+
+	go func() {
+		defer panicx.Recover(a.Logger(), "Slack Socket Mode Run")
+		if err := a.socketModeClient.RunContext(a.socketModeCtx); err != nil {
+			a.Logger().Error("Socket Mode client error", "error", err)
+		}
+	}()
+
+	a.Logger().Info("Socket Mode started")
+}
+
+// handleSocketModeEvent dispatches Socket Mode events
+func (a *Adapter) handleSocketModeEvent(evt socketmode.Event) {
+	switch evt.Type {
+	case socketmode.EventTypeHello:
+		a.Logger().Info("Socket Mode connected")
+
+	case socketmode.EventTypeConnecting:
+		a.Logger().Info("Connecting to Slack with Socket Mode...")
+
+	case socketmode.EventTypeConnected:
+		a.Logger().Info("Connected to Slack with Socket Mode")
+
+	case socketmode.EventTypeConnectionError:
+		a.Logger().Error("Socket Mode connection error")
+
+	case socketmode.EventTypeEventsAPI:
+		a.handleSocketModeEventsAPI(evt)
+
+	case socketmode.EventTypeSlashCommand:
+		a.handleSocketModeSlashCommand(evt)
+
+	case socketmode.EventTypeInteractive:
+		a.handleSocketModeInteractive(evt)
+
+	default:
+		a.Logger().Debug("Unhandled Socket Mode event", "type", evt.Type)
+	}
+}
+
+// handleSocketModeEventsAPI handles Events API events from Socket Mode
+func (a *Adapter) handleSocketModeEventsAPI(evt socketmode.Event) {
+	eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
+	if !ok {
+		a.Logger().Error("Failed to cast EventsAPI event")
+		return
+	}
+
+	a.socketModeClient.Ack(*evt.Request)
+
+	switch eventsAPIEvent.Type {
+	case slackevents.CallbackEvent:
+		innerEvent := eventsAPIEvent.InnerEvent
+		switch ev := innerEvent.Data.(type) {
+		case *slackevents.AppMentionEvent:
+			a.handleAppMentionEvent(ev)
+		case *slackevents.MessageEvent:
+			a.handleSocketModeMessageEvent(ev)
+		}
+	default:
+		a.Logger().Debug("Unhandled EventsAPI type", "type", eventsAPIEvent.Type)
+	}
+}
+
+// handleAppMentionEvent handles app_mention events
+func (a *Adapter) handleAppMentionEvent(ev *slackevents.AppMentionEvent) {
+	a.Logger().Debug("App mention received", "user", ev.User, "channel", ev.Channel)
+
+	if !a.config.IsUserAllowed(ev.User) {
+		a.Logger().Debug("User blocked", "user_id", ev.User)
+		return
+	}
+
+	threadID := ev.ThreadTimeStamp
+	if threadID == "" {
+		threadID = ev.TimeStamp
+	}
+	sessionID := a.GetOrCreateSession(ev.User, a.config.BotUserID, ev.Channel, threadID)
+	userText := a.stripBotMention(ev.Text)
+
+	msg := &base.ChatMessage{
+		Platform:  "slack",
+		SessionID: sessionID,
+		UserID:    ev.User,
+		Content:   userText,
+		MessageID: ev.TimeStamp,
+		Timestamp: time.Now(),
+		Metadata: map[string]any{
+			"channel_id":   ev.Channel,
+			"channel_type": "channel",
+			"message_ts":   ev.TimeStamp,
+			"thread_ts":    ev.ThreadTimeStamp,
+		},
+	}
+
+	a.webhook.Run(a.socketModeCtx, a.Handler(), msg)
+}
+
+// handleSocketModeMessageEvent handles message events via Socket Mode
+func (a *Adapter) handleSocketModeMessageEvent(ev *slackevents.MessageEvent) {
+
+	if ev.BotID != "" || ev.User == a.config.BotUserID {
+		return
+	}
+
+	switch ev.SubType {
+	case "message_changed", "message_deleted", "thread_broadcast", "bot_message":
+		return
+	}
+
+	if ev.Text == "" {
+		return
+	}
+
+	if !a.config.IsUserAllowed(ev.User) {
+		a.Logger().Debug("User blocked", "user_id", ev.User)
+		return
+	}
+
+	if !a.config.ShouldProcessChannel(ev.ChannelType, ev.Channel) {
+		a.Logger().Debug("Channel blocked by policy", "channel_type", ev.ChannelType)
+		return
+	}
+
+	threadID := ev.ThreadTimeStamp
+
+	processedText, conversionMetadata := preprocessMessageText(ev.Text)
+	if _, converted := conversionMetadata["converted_from_hash"]; converted {
+		a.Logger().Debug("Converted # prefix to / prefix (Socket Mode)",
+			"original", ev.Text, "converted", processedText)
+
+		if a.processHashCommand(processedText, ev.User, ev.Channel, threadID) {
+			return
+		}
+	}
+
+	sessionID := a.GetOrCreateSession(ev.User, a.config.BotUserID, ev.Channel, threadID)
+	userText := processedText
+
+	msg := &base.ChatMessage{
+		Platform:  "slack",
+		SessionID: sessionID,
+		UserID:    ev.User,
+		Content:   userText,
+		MessageID: ev.TimeStamp,
+		Timestamp: time.Now(),
+		Metadata: map[string]any{
+			"channel_id":   ev.Channel,
+			"channel_type": ev.ChannelType,
+			"message_ts":   ev.TimeStamp,
+		},
+	}
+
+	if ev.ThreadTimeStamp != "" {
+		msg.Metadata["thread_ts"] = ev.ThreadTimeStamp
+	}
+
+	for k, v := range conversionMetadata {
+		msg.Metadata[k] = v
+	}
+
+	if ev.ThreadTimeStamp != "" {
+		msg.Metadata["thread_ts"] = ev.ThreadTimeStamp
+	}
+
+	a.webhook.Run(a.socketModeCtx, a.Handler(), msg)
+}
+
+// handleSocketModeSlashCommand handles slash commands via Socket Mode
+func (a *Adapter) handleSocketModeSlashCommand(evt socketmode.Event) {
+	cmd, ok := evt.Data.(slack.SlashCommand)
+	if !ok {
+		a.Logger().Error("Failed to cast SlashCommand")
+		return
+	}
+
+	a.Logger().Debug("Slash command via Socket Mode", "command", cmd.Command, "text", cmd.Text)
+
+	if !a.rateLimiter.Allow(cmd.UserID) {
+		a.Logger().Warn("Rate limit exceeded", "user_id", cmd.UserID)
+		a.socketModeClient.Ack(*evt.Request, map[string]interface{}{
+			"text": "⚠️ Rate limit exceeded. Please wait a moment.",
+		})
+		return
+	}
+
+	a.socketModeClient.Ack(*evt.Request, map[string]interface{}{
+		"text": "Processing command...",
+	})
+
+	baseSession := a.FindSessionByUserAndChannel(cmd.UserID, cmd.ChannelID)
+	var sessionID string
+	if baseSession != nil {
+		sessionID = baseSession.SessionID
+	}
+
+	req := &command.Request{
+		Command:     cmd.Command,
+		Text:        cmd.Text,
+		UserID:      cmd.UserID,
+		ChannelID:   cmd.ChannelID,
+		ThreadTS:    "",
+		SessionID:   sessionID,
+		ResponseURL: cmd.ResponseURL,
+	}
+
+	// Create callback for progress events
+	var progressTS string
+	callback := func(eventType string, data any) error {
+		return a.handleCommandProgress(cmd.ChannelID, "", &progressTS, eventType, data)
+	}
+
+	_, err := a.cmdRegistry.Execute(context.Background(), req, callback)
+	if err != nil {
+		a.Logger().Error("Command execution failed", "command", cmd.Command, "error", err)
+	}
+}
+
+// handleSocketModeInteractive handles interactive events via Socket Mode
+func (a *Adapter) handleSocketModeInteractive(evt socketmode.Event) {
+	callback, ok := evt.Data.(slack.InteractionCallback)
+	if !ok {
+		a.Logger().Error("Failed to cast InteractionCallback")
+		return
+	}
+
+	a.Logger().Debug("Interactive via Socket Mode", "type", callback.Type)
+
+	a.socketModeClient.Ack(*evt.Request)
+
+	switch callback.Type {
+	case slack.InteractionTypeBlockActions:
+
+		for _, action := range callback.ActionCallback.BlockActions {
+			if action.ActionID == "perm_allow" || action.ActionID == "perm_deny" {
+
+				slackCallback := &SlackInteractionCallback{
+					Type:    "block_actions",
+					User:    CallbackUser{ID: callback.User.ID},
+					Channel: CallbackChannel{ID: callback.Channel.ID},
+					Message: CallbackMessage{Ts: callback.Message.Timestamp},
+					Actions: []SlackAction{
+						{
+							ActionID: action.ActionID,
+							BlockID:  action.BlockID,
+							Value:    action.Value,
+						},
+					},
+				}
+				a.handlePermissionCallback(slackCallback, slackCallback.Actions[0], nil)
+				return
+			}
+		}
+	default:
+		a.Logger().Debug("Unhandled interaction type", "type", callback.Type)
+	}
+}
+
+// stripBotMention removes bot mention from text
+func (a *Adapter) stripBotMention(text string) string {
+	if a.config.BotUserID == "" {
+		return text
+	}
+	mention := fmt.Sprintf("<@%s>", a.config.BotUserID)
+	return strings.TrimSpace(strings.ReplaceAll(text, mention, ""))
+}

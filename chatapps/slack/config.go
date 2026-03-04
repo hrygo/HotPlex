@@ -1,3 +1,5 @@
+// Package slack provides the Slack adapter implementation for the hotplex engine.
+// Configuration structures and validation logic for the Slack adapter.
 package slack
 
 import (

@@ -1,3 +1,5 @@
+// Package slack provides the Slack adapter implementation for the hotplex engine.
+// Per-user rate limiting for Slack commands to prevent API abuse.
 package slack
 
 import (

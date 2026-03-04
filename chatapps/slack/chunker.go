@@ -1,3 +1,5 @@
+// Package slack provides the Slack adapter implementation for the hotplex engine.
+// Logic for splitting large messages to respect Slack's 4000-character limit.
 package slack
 
 import (

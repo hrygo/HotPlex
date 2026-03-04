@@ -477,3 +477,76 @@ func TestDetector_LoadCustomPatterns_InvalidFormat(t *testing.T) {
 		t.Errorf("LoadCustomPatterns() error: %v", err)
 	}
 }
+
+func TestDetector_MarkdownFalsePositives(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	detector := NewDetector(logger)
+
+	tests := []struct {
+		name     string
+		input    string
+		isDanger bool
+		desc     string
+	}{
+		{
+			name:     "Markdown code block with dangerous content",
+			input:    "```bash\nrm -rf /\n```",
+			isDanger: false,
+			desc:     "Fenced code block should be stripped",
+		},
+		{
+			name:     "Indented code block",
+			input:    "    rm -rf /",
+			isDanger: false,
+			desc:     "Indented code should be stripped",
+		},
+		{
+			name:     "Real dangerous command (not in markdown)",
+			input:    "rm -rf /",
+			isDanger: true,
+			desc:     "Actual dangerous command should still be caught",
+		},
+		{
+			name:     "Mixed content - safe text with dangerous in code block",
+			input:    "How do I delete files?\n```bash\nrm -rf /tmp\n```",
+			isDanger: false,
+			desc:     "Code block should be stripped, only safe content remains",
+		},
+		{
+			name:     "Python code block with socket",
+			input:    "```python\nimport socket\nsocket.connect()\n```",
+			isDanger: false,
+			desc:     "Python code blocks should be stripped",
+		},
+		{
+			name:     "$(...) command substitution - actual command",
+			input:    "echo $(whoami)",
+			isDanger: true,
+			desc:     "$(...) in actual command context should be detected",
+		},
+		{
+			name:     "Backtick command substitution - actual command",
+			input:    "echo `whoami`",
+			isDanger: true,
+			desc:     "Backtick in actual command context should be detected",
+		},
+		{
+			name:     "Inline code with dangerous content - NOT stripped",
+			input:    "How do I use `rm -rf /` safely?",
+			isDanger: true,
+			desc:     "Inline code is intentionally NOT stripped to preserve security",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := detector.CheckInput(tt.input)
+			if tt.isDanger && event == nil {
+				t.Errorf("Expected danger detected for %s, but got nil. Desc: %s", tt.name, tt.desc)
+			}
+			if !tt.isDanger && event != nil {
+				t.Errorf("Expected NO danger for %s, but got: %s. Desc: %s", tt.name, event.Reason, tt.desc)
+			}
+		})
+	}
+}

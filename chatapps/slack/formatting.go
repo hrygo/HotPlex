@@ -1,3 +1,5 @@
+// Package slack provides the Slack adapter implementation for the hotplex engine.
+// Markdown to Slack mrkdwn conversion utilities with CommonMark support.
 package slack
 
 import (

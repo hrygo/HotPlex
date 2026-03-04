@@ -1,3 +1,5 @@
+// Package slack provides the Slack adapter implementation for the hotplex engine.
+// Detailed message construction logic using Slack Block Kit.
 package slack
 
 import (
@@ -10,7 +12,8 @@ import (
 	"github.com/slack-go/slack"
 )
 
-// MessageBuilder builds Slack-specific messages from platform-agnostic ChatMessage
+// MessageBuilder translates platform-agnostic base.ChatMessage objects into
+// rich Slack Block Kit structures, ensuring consistent UX across different message types.
 type MessageBuilder struct {
 	formatter *MrkdwnFormatter
 }
