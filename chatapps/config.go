@@ -130,8 +130,32 @@ func (c *ConfigLoader) GetConfig(platform string) *PlatformConfig {
 
 	if cfg, ok := c.configs[platform]; ok {
 		// Return a deep copy to prevent external mutation without holding locks
-		copy := *cfg
-		return &copy
+		cfgCopy := *cfg
+		// Deep copy slices
+		if cfg.Engine.AllowedTools != nil {
+			cfgCopy.Engine.AllowedTools = make([]string, len(cfg.Engine.AllowedTools))
+			copy(cfgCopy.Engine.AllowedTools, cfg.Engine.AllowedTools)
+		}
+		if cfg.Engine.DisallowedTools != nil {
+			cfgCopy.Engine.DisallowedTools = make([]string, len(cfg.Engine.DisallowedTools))
+			copy(cfgCopy.Engine.DisallowedTools, cfg.Engine.DisallowedTools)
+		}
+		if cfg.Security.Permission.AllowedUsers != nil {
+			cfgCopy.Security.Permission.AllowedUsers = make([]string, len(cfg.Security.Permission.AllowedUsers))
+			copy(cfgCopy.Security.Permission.AllowedUsers, cfg.Security.Permission.AllowedUsers)
+		}
+		if cfg.Security.Permission.BlockedUsers != nil {
+			cfgCopy.Security.Permission.BlockedUsers = make([]string, len(cfg.Security.Permission.BlockedUsers))
+			copy(cfgCopy.Security.Permission.BlockedUsers, cfg.Security.Permission.BlockedUsers)
+		}
+		// Deep copy map
+		if cfg.Options != nil {
+			cfgCopy.Options = make(map[string]any, len(cfg.Options))
+			for k, v := range cfg.Options {
+				cfgCopy.Options[k] = v
+			}
+		}
+		return &cfgCopy
 	}
 	return nil
 }

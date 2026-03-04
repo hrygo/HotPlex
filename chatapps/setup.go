@@ -23,15 +23,45 @@ import (
 // Setup initializes all enabled ChatApps and their dedicated Engines.
 // It returns an http.Handler that handles all webhook routes.
 func Setup(ctx context.Context, logger *slog.Logger) (http.Handler, *AdapterManager, error) {
+	// Config directory search priority:
+	// 1. CHATAPPS_CONFIG_DIR (backward compatibility)
+	// 2. ~/.hotplex/configs (user config)
+	// 3. ./chatapps/configs (default)
 	configDir := os.Getenv("CHATAPPS_CONFIG_DIR")
+
 	if configDir == "" {
-		configDir = "chatapps/configs"
+		// Try user config directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			logger.Debug("Could not determine user home directory", "error", err)
+		} else {
+			userConfigDir := filepath.Join(homeDir, ".hotplex", "configs")
+			if _, err := os.Stat(userConfigDir); err != nil {
+				logger.Debug("User config directory does not exist", "path", userConfigDir, "error", err)
+			} else {
+				configDir = userConfigDir
+				logger.Debug("Using user config directory", "path", configDir)
+			}
+		}
 	}
 
-	loader, err := NewConfigLoader(configDir, logger)
-	if err != nil {
-		logger.Warn("Failed to load platform configs, using defaults", "error", err)
-		// Don't fail completely, try to continue with env-based config
+	if configDir == "" {
+		configDir = "chatapps/configs"
+		// Check if default config directory exists
+		if _, err := os.Stat(configDir); os.IsNotExist(err) {
+			logger.Debug("Default config directory not found, skipping config loading", "path", configDir)
+			configDir = ""
+		}
+	}
+
+	var loader *ConfigLoader
+	var err error
+	if configDir != "" {
+		loader, err = NewConfigLoader(configDir, logger)
+		if err != nil {
+			logger.Warn("Failed to load platform configs, using defaults", "error", err)
+			// Don't fail completely, try to continue with env-based config
+		}
 	}
 
 	manager := NewAdapterManager(logger)
