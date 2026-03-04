@@ -193,5 +193,11 @@ func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string
 	return a.UpdateMessageSDK(ctx, channelID, messageTS, blocks, msg.Content)
 }
 
+// SendThreadReply implements base.MessageOperations interface (Space Folding)
+// Sends a plain text message as a reply inside a thread
+func (a *Adapter) SendThreadReply(ctx context.Context, channelID, threadTS, text string) error {
+	return a.SendToChannelSDK(ctx, channelID, text, threadTS)
+}
+
 // Note: SessionOperations methods (GetSession, FindSessionByUserAndChannel)
 // are inherited from base.Adapter and should not be overridden here

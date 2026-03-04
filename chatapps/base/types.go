@@ -116,6 +116,8 @@ type MessageOperations interface {
 	// SetAssistantStatus sets the native assistant status text at the bottom of the thread
 	// Used to drive dynamic status hints (e.g., "Thinking...", "Searching code...")
 	SetAssistantStatus(ctx context.Context, channelID, threadTS, status string) error
+	// SendThreadReply sends a message as a reply inside a thread (Space Folding)
+	SendThreadReply(ctx context.Context, channelID, threadTS, text string) error
 	// StartStream starts a native streaming message, returns message_ts as anchor for subsequent updates
 	StartStream(ctx context.Context, channelID, threadTS string) (string, error)
 	// AppendStream incrementally pushes content to an existing stream

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/slack-go/slack"
 )
 
@@ -162,13 +163,29 @@ func (a *Adapter) handlePermissionCallback(callback *SlackInteractionCallback, a
 		}
 	}
 
-	// Use MessageBuilder for creating response blocks
-	var slackBlocks []slack.Block
+	// Build high-fidelity post-decision card (greyed-out state with audit trail)
+	var decisionEmoji, decisionText string
 	if permissionBehavior == "allow" {
-		slackBlocks = a.messageBuilder.BuildPermissionApprovedMessage("", "")
+		decisionEmoji = "✅"
+		decisionText = "已批准"
 	} else {
-		slackBlocks = a.messageBuilder.BuildPermissionDeniedMessage("", "", "User denied permission")
+		decisionEmoji = "🚫"
+		decisionText = "已拒绝"
 	}
+
+	// Extract tool info from the original message for context retention
+	origTool := ""
+	if len(callback.Message.Text) > 0 {
+		origTool = callback.Message.Text
+	}
+
+	// Compact audit trail: decision + user + original context
+	auditLine := fmt.Sprintf("%s *提权请求 — %s* | 操作人: <@%s>", decisionEmoji, decisionText, userID)
+	if origTool != "" && len(origTool) < 80 {
+		auditLine += fmt.Sprintf(" | %s", origTool)
+	}
+	auditText := slack.NewTextBlockObject("mrkdwn", auditLine, false, false)
+	slackBlocks := []slack.Block{slack.NewContextBlock("", auditText)}
 
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
 		a.Logger().Error("Update message failed", "error", err)
@@ -240,16 +257,23 @@ func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, act
 		}
 	}
 
-	// Use MessageBuilder for creating response blocks
-	var slackBlocks []slack.Block
+	// Build high-fidelity post-decision card (audit trail)
+	var decisionEmoji, decisionText string
 	switch actionType {
 	case "approve":
-		slackBlocks = a.messageBuilder.BuildPlanApprovedBlock()
+		decisionEmoji = "✅"
+		decisionText = "已批准执行"
 	case "modify":
-		slackBlocks = a.messageBuilder.BuildPlanCancelledBlock("User requested changes")
-	case "deny", "cancel":
-		slackBlocks = a.messageBuilder.BuildPlanCancelledBlock("User cancelled")
+		decisionEmoji = "✏️"
+		decisionText = "已请求修改"
+	default: // deny, cancel
+		decisionEmoji = "🚫"
+		decisionText = "已取消"
 	}
+
+	auditLine := fmt.Sprintf("%s *作战计划 — %s* | 操作人: <@%s>", decisionEmoji, decisionText, userID)
+	auditText := slack.NewTextBlockObject("mrkdwn", auditLine, false, false)
+	slackBlocks := []slack.Block{slack.NewContextBlock("", auditText)}
 
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
 		a.Logger().Error("Update message failed", "error", err)
@@ -290,51 +314,32 @@ func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, 
 	actionType := parts[0]
 	sessionID := parts[1]
 
-	// Map behavior to actual response
-	var permissionBehavior string
-	if actionType == "confirm" {
-		permissionBehavior = "allow"
-	} else {
-		permissionBehavior = "deny"
-	}
-
-	if a.eng != nil {
-		if sess, ok := a.eng.GetSession(sessionID); ok {
-			response := map[string]any{
-				"type":     "danger_response",
-				"behavior": permissionBehavior,
-			}
-			if err := sess.WriteInput(response); err != nil {
-				a.Logger().Error("Failed to send danger response to engine", "error", err)
-			} else {
-				a.Logger().Info("Sent danger response to engine",
-					"session_id", sessionID,
-					"behavior", permissionBehavior)
-			}
-		} else {
-			a.Logger().Warn("Session not found for danger response", "session_id", sessionID)
-		}
-	}
-
-	if permissionBehavior == "allow" {
-
-		a.Logger().Info("Danger block confirmed, message will continue processing",
-			"session_id", sessionID)
-
-	} else {
-
-		a.Logger().Warn("Danger block cancelled, triggering security audit",
+	// Resolve the pending WAF approval via DangerApprovalRegistry
+	// This unblocks the handler goroutine waiting in engine_handler.go
+	approved := actionType == "confirm"
+	if resolved := base.GlobalDangerRegistry.Resolve(sessionID, approved); resolved {
+		a.Logger().Info("WAF approval resolved via DangerApprovalRegistry",
 			"session_id", sessionID,
-			"user_id", userID)
-
+			"approved", approved)
+	} else {
+		a.Logger().Warn("No pending WAF approval found for session",
+			"session_id", sessionID)
 	}
 
-	statusText := ":white_check_mark: Confirmed"
-	if permissionBehavior == "deny" {
-		statusText = ":x: Cancelled"
+	// Build high-fidelity post-decision card (greyed-out state with audit trail)
+	var decisionEmoji, decisionText string
+	if approved {
+		decisionEmoji = "✅"
+		decisionText = "已确认执行"
+	} else {
+		decisionEmoji = "🛑"
+		decisionText = "已阻止执行"
 	}
-	statusObj := slack.NewTextBlockObject("mrkdwn", statusText, false, false)
-	slackBlocks := []slack.Block{slack.NewSectionBlock(statusObj, nil, nil)}
+
+	// Compact audit trail: decision + user + reason
+	auditLine := fmt.Sprintf("%s *高危操作 — %s* | 操作人: <@%s>", decisionEmoji, decisionText, userID)
+	auditText := slack.NewTextBlockObject("mrkdwn", auditLine, false, false)
+	slackBlocks := []slack.Block{slack.NewContextBlock("", auditText)}
 
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
 		a.Logger().Error("Update message failed", "error", err)
@@ -345,6 +350,7 @@ func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, 
 
 // handleAskUserQuestionCallback handles ask user question option selection
 // ActionID format: question_option_{i}
+// Value format: {index}:{sessionID}:{optionText} (when sessionID is available)
 func (a *Adapter) handleAskUserQuestionCallback(callback *SlackInteractionCallback, action SlackAction, w http.ResponseWriter) {
 	userID := callback.User.ID
 	channelID := callback.Channel.ID
@@ -360,21 +366,25 @@ func (a *Adapter) handleAskUserQuestionCallback(callback *SlackInteractionCallba
 		"value", value,
 	)
 
+	// Parse value: try {index}:{sessionID}:{optionText} format first
 	selectedOption := value
-	if selectedOption == "" {
-
+	sessionID := ""
+	parts := strings.SplitN(value, ":", 3)
+	if len(parts) >= 3 {
+		// Full format: index:sessionID:optionText
+		sessionID = parts[1]
+		selectedOption = parts[2]
+	} else if len(parts) == 1 {
+		// Simple index-only fallback
 		if opt, found := strings.CutPrefix(actionID, "question_option_"); found {
 			selectedOption = opt
 		}
 	}
 
-	baseSession := a.FindSessionByUserAndChannel(userID, channelID)
-	if baseSession == nil {
-		a.Logger().Warn("No active session found for question response",
-			"user_id", userID,
-			"channel_id", channelID)
-	} else if a.eng != nil {
-		if sess, ok := a.eng.GetSession(baseSession.SessionID); ok {
+	// Try direct session lookup via sessionID first (reliable)
+	// Falls back to FindSessionByUserAndChannel if sessionID is empty
+	if sessionID != "" && a.eng != nil {
+		if sess, ok := a.eng.GetSession(sessionID); ok {
 			response := map[string]any{
 				"type":    "question_response",
 				"option":  selectedOption,
@@ -384,15 +394,41 @@ func (a *Adapter) handleAskUserQuestionCallback(callback *SlackInteractionCallba
 				a.Logger().Error("Failed to send question response to engine", "error", err)
 			} else {
 				a.Logger().Info("Sent question response to engine",
-					"session_id", baseSession.SessionID,
+					"session_id", sessionID,
 					"option", selectedOption)
+			}
+		} else {
+			a.Logger().Warn("Session not found for question response", "session_id", sessionID)
+		}
+	} else {
+		// Fallback: find session by user+channel (fragile but backward-compatible)
+		baseSession := a.FindSessionByUserAndChannel(userID, channelID)
+		if baseSession == nil {
+			a.Logger().Warn("No active session found for question response",
+				"user_id", userID,
+				"channel_id", channelID)
+		} else if a.eng != nil {
+			if sess, ok := a.eng.GetSession(baseSession.SessionID); ok {
+				response := map[string]any{
+					"type":    "question_response",
+					"option":  selectedOption,
+					"user_id": userID,
+				}
+				if err := sess.WriteInput(response); err != nil {
+					a.Logger().Error("Failed to send question response to engine", "error", err)
+				} else {
+					a.Logger().Info("Sent question response to engine",
+						"session_id", baseSession.SessionID,
+						"option", selectedOption)
+				}
 			}
 		}
 	}
 
-	statusText := fmt.Sprintf(":white_check_mark: Selected: %s", selectedOption)
-	statusObj := slack.NewTextBlockObject("mrkdwn", statusText, false, false)
-	slackBlocks := []slack.Block{slack.NewSectionBlock(statusObj, nil, nil)}
+	// Build high-fidelity post-decision card (audit trail)
+	auditLine := fmt.Sprintf("✅ *已选择: %s* | 操作人: <@%s>", selectedOption, userID)
+	auditText := slack.NewTextBlockObject("mrkdwn", auditLine, false, false)
+	slackBlocks := []slack.Block{slack.NewContextBlock("", auditText)}
 
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
 		a.Logger().Error("Update message failed", "error", err)

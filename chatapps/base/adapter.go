@@ -454,6 +454,11 @@ func (a *Adapter) SetAssistantStatus(ctx context.Context, channelID, threadTS, s
 	return nil
 }
 
+// SendThreadReply is a no-op by default, overridden by platforms that support it (Space Folding)
+func (a *Adapter) SendThreadReply(ctx context.Context, channelID, threadTS, text string) error {
+	return nil
+}
+
 // StartStream is a no-op by default, overridden by platforms that support it
 func (a *Adapter) StartStream(ctx context.Context, channelID, threadTS string) (string, error) {
 	return "", nil

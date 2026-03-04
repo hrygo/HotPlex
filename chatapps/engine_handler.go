@@ -58,6 +58,10 @@ func (w *engineWrapper) Execute(ctx context.Context, cfg *types.Config, prompt s
 	return w.eng.Execute(ctx, cfg, prompt, callback)
 }
 
+func (w *engineWrapper) CheckDanger(prompt string) (blocked bool, operation, reason string) {
+	return w.eng.CheckDanger(prompt)
+}
+
 func (w *engineWrapper) GetSession(sessionID string) (Session, bool) {
 	sess, ok := w.eng.GetSession(sessionID)
 	if !ok || sess == nil {
@@ -352,21 +356,25 @@ func (c *StreamCallback) Handle(eventType string, data any) error {
 	case provider.EventTypeCommandComplete:
 		return c.handleCommandComplete(data)
 	case provider.EventTypeSystem:
-		return c.handleSystem(data)
+		// [Black Hole] Absolute silent drop: internal system messages are noise for developers
+		return nil
 	case provider.EventTypeUser:
-		return c.handleUser(data)
+		// [Black Hole] Absolute silent drop: user message reflection is redundant on Slack
+		return nil
 	case provider.EventTypeStepStart:
 		return c.handleStepStart(data)
 	case provider.EventTypeStepFinish:
 		return c.handleStepFinish(data)
 	case provider.EventTypeRaw:
-		return c.handleRaw(data)
+		// [Black Hole] Absolute silent drop: unparsed raw output is noise for developers
+		return nil
 	case provider.EventTypeSessionStart:
 		return c.handleSessionStart(data)
 	case provider.EventTypeEngineStarting:
 		return c.handleEngineStarting(data)
 	case provider.EventTypeUserMessageReceived:
-		return c.handleUserMessageReceived(data)
+		// [Black Hole] Absolute silent drop: no "message received" acknowledgment needed for CLI agents
+		return nil
 	case provider.EventTypePermissionRequest:
 		return c.handlePermissionRequest(data)
 	default:
@@ -855,11 +863,42 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		// Calculate real content length even if we use a placeholder
 		contentLength = int64(len(m.EventData))
 
-		// Only use EventData as output if we don't have an error message
-		// This prevents large file contents from being used as output
-		if output == "" && m.EventData != "" {
-			// For tool_result, we only need a brief summary, not the full content
-			// The content length is shown in the message, but not the actual content
+		// =====================================================================
+		// Space Folding: Large outputs (>2KB) are diverted to thread replies
+		// The main channel gets a compact indicator instead of the raw output.
+		// =====================================================================
+		const spaceFoldingThreshold = 2048 // 2KB
+
+		if contentLength > spaceFoldingThreshold && m.EventData != "" && c.messageOps != nil {
+			// Send full output as a thread reply (folded into the conversation thread)
+			c.mu.Lock()
+			channelID, _ := c.metadata["channel_id"].(string)
+			threadTS, _ := c.metadata["thread_ts"].(string)
+			c.mu.Unlock()
+
+			if channelID != "" && threadTS != "" {
+				// Truncate extremely large outputs (>32KB) even in thread replies
+				threadContent := m.EventData
+				if len(threadContent) > 32768 {
+					threadContent = threadContent[:32768] + "\n\n... (output truncated at 32KB)"
+				}
+
+				// Send to thread as a code block for readability
+				threadMsg := fmt.Sprintf("📋 *%s* 完整输出 (%s):\n```\n%s\n```", toolName, formatDataLength(contentLength), threadContent)
+				go func() {
+					// Use a 30s timeout context for background thread reply
+					ctxBody, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					if err := c.messageOps.SendThreadReply(ctxBody, channelID, threadTS, threadMsg); err != nil {
+						c.logger.Warn("Space Folding: failed to send thread reply", "error", err)
+					}
+				}()
+
+				output = "📋 输出过长，已收纳至回复"
+			} else {
+				output = "Output generated"
+			}
+		} else if output == "" && m.EventData != "" {
 			output = "Output generated"
 		}
 	}
@@ -876,6 +915,8 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		"duration_ms", durationMs,
 		"output_len", len(output))
 
+	spaceFolded := output == "📋 输出过长，已收纳至回复"
+
 	// Use buildChatMessage helper for consistency
 	return c.buildChatMessage(base.MessageTypeToolResult, output, map[string]any{
 		"success":        success,
@@ -883,6 +924,7 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		"tool_name":      toolName,
 		"file_path":      filePath,
 		"content_length": contentLength,
+		"space_folded":   spaceFolded,
 		"event_type":     string(provider.EventTypeToolResult),
 		"stream":         true,
 	})
@@ -904,7 +946,14 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		content = s
 	}
 
+	// Update status indicator to show answer generation
+	if err := c.updateStatusMessage(base.MessageTypeAnswer, "正在组织最终回答..."); err != nil {
+		c.logger.Warn("Failed to update status for answer", "error", err)
+	}
+
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	// Initialize native streaming on first answer
 	if !c.streamWriterActive && c.streamWriter == nil {
 		channelID := ""
@@ -935,7 +984,6 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		c.thinkingSent = false
 		c.thinkingMessageTS = ""
 		c.thinkingChannelID = ""
-		c.mu.Unlock()
 
 		time.AfterFunc(3*time.Second, func() {
 			if c.messageOps == nil {
@@ -950,19 +998,14 @@ func (c *StreamCallback) handleAnswer(data any) error {
 	} else if c.thinkingSent {
 		c.thinkingSent = false
 		c.logger.Debug("Clearing thinking state for answer")
-		c.mu.Unlock()
-	} else {
-		c.mu.Unlock()
 	}
 
 	// Schedule deletion of all tracked Thinking/Action messages (3s delay)
 	c.scheduleDeleteActionMessages()
 
 	// Copy writer reference while locked to avoid race condition
-	c.mu.Lock()
 	writer := c.streamWriter
 	active := c.streamWriterActive
-	c.mu.Unlock()
 
 	// Use native streaming if available
 	if active && writer != nil {
@@ -1065,10 +1108,27 @@ func (c *StreamCallback) handleError(data any) error {
 func (c *StreamCallback) handleDangerBlock(data any) error {
 	var reason string
 
-	// Extract reason from data
+	// Extract reason from data — supports multiple formats:
+	// 1. string (legacy/simple)
+	// 2. map[string]any from WAF pre-flight (contains "operation" and "reason")
+	// 3. *security.DangerBlockEvent from Engine-level WAF
 	switch v := data.(type) {
 	case string:
 		reason = v
+	case map[string]any:
+		if r, ok := v["reason"].(string); ok && r != "" {
+			reason = r
+		}
+		if op, ok := v["operation"].(string); ok && op != "" {
+			if reason != "" {
+				reason = reason + "\n" + op
+			} else {
+				reason = op
+			}
+		}
+		if reason == "" {
+			reason = "security_block"
+		}
 	default:
 		reason = "security_block"
 	}
@@ -1077,6 +1137,11 @@ func (c *StreamCallback) handleDangerBlock(data any) error {
 	c.logger.Info("Danger block detected",
 		"session_id", c.sessionID,
 		"reason", reason)
+
+	// Update status indicator — AI is waiting for user decision
+	if err := c.updateStatusMessage(base.MessageTypeDangerBlock, "⚠️ 拦截到高危操作，等待确认..."); err != nil {
+		c.logger.Warn("Failed to update status for danger_block", "error", err)
+	}
 
 	// Use buildChatMessage helper for consistency
 	return c.buildChatMessage(base.MessageTypeDangerBlock, reason, map[string]any{
@@ -1167,6 +1232,11 @@ func (c *StreamCallback) handleCommandProgress(data any) error {
 		title = "Processing..."
 	}
 
+	// Update status indicator
+	if err := c.updateStatusMessage(base.MessageTypeCommandProgress, "正在执行后台任务..."); err != nil {
+		c.logger.Warn("Failed to update status for command_progress", "error", err)
+	}
+
 	// Add event_type to metadata
 	metadata["event_type"] = string(provider.EventTypeCommandProgress)
 
@@ -1207,42 +1277,6 @@ func (c *StreamCallback) handleCommandComplete(data any) error {
 	return c.buildChatMessage(base.MessageTypeCommandComplete, title, metadata)
 }
 
-// handleSystem handles system-level messages
-// Implements EventTypeSystem per spec - uses context block for low visual weight
-func (c *StreamCallback) handleSystem(data any) error {
-	var content string
-
-	if m, ok := data.(*event.EventWithMeta); ok {
-		content = m.EventData
-	} else if s, ok := data.(string); ok {
-		content = s
-	} else {
-		return nil
-	}
-
-	return c.buildChatMessage(base.MessageTypeSystem, content, map[string]any{
-		"event_type": string(provider.EventTypeSystem),
-	})
-}
-
-// handleUser handles user message reflection
-// Implements EventTypeUser per spec
-func (c *StreamCallback) handleUser(data any) error {
-	var content string
-
-	if m, ok := data.(*event.EventWithMeta); ok {
-		content = m.EventData
-	} else if s, ok := data.(string); ok {
-		content = s
-	} else {
-		return nil
-	}
-
-	return c.buildChatMessage(base.MessageTypeUser, content, map[string]any{
-		"event_type": string(provider.EventTypeUser),
-	})
-}
-
 // handleStepStart handles step start events (OpenCode specific)
 // Implements EventTypeStepStart per spec
 func (c *StreamCallback) handleStepStart(data any) error {
@@ -1264,6 +1298,11 @@ func (c *StreamCallback) handleStepStart(data any) error {
 		content = s
 	} else {
 		content = "Starting step..."
+	}
+
+	// Update status indicator
+	if err := c.updateStatusMessage(base.MessageTypeStepStart, "正在分析执行轨迹..."); err != nil {
+		c.logger.Warn("Failed to update status for step_start", "error", err)
 	}
 
 	// Add event_type to metadata
@@ -1302,24 +1341,6 @@ func (c *StreamCallback) handleStepFinish(data any) error {
 
 	// Use buildChatMessage helper for consistency
 	return c.buildChatMessage(base.MessageTypeStepFinish, content, metadata)
-}
-
-// handleRaw handles raw/unparsed output
-// Implements EventTypeRaw per spec - shows only type and length
-func (c *StreamCallback) handleRaw(data any) error {
-	var content string
-
-	if m, ok := data.(*event.EventWithMeta); ok {
-		content = m.EventData
-	} else if s, ok := data.(string); ok {
-		content = s
-	} else {
-		return nil
-	}
-
-	return c.buildChatMessage(base.MessageTypeRaw, content, map[string]any{
-		"event_type": string(provider.EventTypeRaw),
-	})
 }
 
 // copyMessageMetadata copies important metadata from original message
@@ -1511,6 +1532,60 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 		return callback.Handle(eventType, data)
 	}
 
+	// ========================================
+	// WAF Pre-flight Check (Option C)
+	// Check for dangerous prompts BEFORE calling Engine.Execute().
+	// If blocked: render card → block on approval channel → resume or abort.
+	// ========================================
+	if blocked, operation, reason := h.engine.CheckDanger(msg.Content); blocked {
+		h.logger.Warn("WAF pre-flight: dangerous prompt intercepted",
+			"session_id", msg.SessionID,
+			"operation", operation,
+			"reason", reason)
+
+		// Render danger block card via the callback (reuses existing handleDangerBlock)
+		dangerData := map[string]any{
+			"operation": operation,
+			"reason":    reason,
+		}
+		if err := callback.Handle("danger_block", dangerData); err != nil {
+			h.logger.Error("Failed to render danger block card", "error", err)
+		}
+
+		// Register pending approval and block on user decision
+		approvalCh := base.GlobalDangerRegistry.Register(msg.SessionID)
+		defer base.GlobalDangerRegistry.Cancel(msg.SessionID)
+
+		h.logger.Info("WAF pre-flight: blocking on user approval",
+			"session_id", msg.SessionID)
+
+		select {
+		case approved := <-approvalCh:
+			if approved {
+				h.logger.Info("WAF pre-flight: user approved dangerous prompt",
+					"session_id", msg.SessionID)
+				cfg.WAFApproved = true
+				// Fall through to Engine.Execute() below
+			} else {
+				h.logger.Info("WAF pre-flight: user denied dangerous prompt",
+					"session_id", msg.SessionID)
+				// Clear assistant status — operation cancelled
+				if messageOps != nil {
+					channelID, _ := msg.Metadata["channel_id"].(string)
+					threadTS, _ := msg.Metadata["thread_ts"].(string)
+					if channelID != "" && threadTS != "" {
+						_ = messageOps.SetAssistantStatus(ctx, channelID, threadTS, "")
+					}
+				}
+				return nil // User denied — no error, operation simply cancelled
+			}
+		case <-ctx.Done():
+			h.logger.Warn("WAF pre-flight: context cancelled while waiting for approval",
+				"session_id", msg.SessionID)
+			return ctx.Err()
+		}
+	}
+
 	// Execute with Engine
 	h.logger.Info("Executing prompt via Engine",
 		"session_id", msg.SessionID,
@@ -1640,6 +1715,11 @@ func (c *StreamCallback) handlePlanMode(data any) error {
 		return nil
 	}
 
+	// Update status indicator
+	if err := c.updateStatusMessage(base.MessageTypePlanMode, "正在制定作战计划..."); err != nil {
+		c.logger.Warn("Failed to update status for plan_mode", "error", err)
+	}
+
 	// Send plan mode message with platform-agnostic MessageType
 	return c.buildChatMessage(base.MessageTypePlanMode, planContent, map[string]any{
 		"event_type": string(provider.EventTypePlanMode),
@@ -1660,6 +1740,11 @@ func (c *StreamCallback) handleExitPlanMode(data any) error {
 	// Use default message if empty
 	if planSummary == "" {
 		planSummary = "Plan content will be executed upon approval."
+	}
+
+	// Update status indicator that we're waiting for user
+	if err := c.updateStatusMessage(base.MessageTypeExitPlanMode, "作战计划就绪，等待您的批准..."); err != nil {
+		c.logger.Warn("Failed to update status for exit_plan_mode", "error", err)
 	}
 
 	// Send exit plan mode message with platform-agnostic MessageType
@@ -1691,12 +1776,18 @@ func (c *StreamCallback) handleAskUserQuestion(data any) error {
 		return nil
 	}
 
+	// Update status indicator
+	if err := c.updateStatusMessage(base.MessageTypeAskUserQuestion, "等待您提供更多信息..."); err != nil {
+		c.logger.Warn("Failed to update status for ask_user_question", "error", err)
+	}
+
 	// Send ask user question message with platform-agnostic MessageType
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeAskUserQuestion,
 		Content: question,
 		Metadata: map[string]any{
 			"event_type": string(provider.EventTypeAskUserQuestion),
+			"session_id": c.sessionID,
 		},
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
@@ -1739,6 +1830,18 @@ func (c *StreamCallback) handleSessionStart(data any) error {
 			"session_id": sessionID,
 		},
 	}
+
+	// Determine start status message based on whether it is hot or cold
+	statusMsg := "初始化上下文..."
+	if c.isHot {
+		statusMsg = "重新连接并恢复上下文..."
+	}
+
+	// Update status indicator
+	if err := c.updateStatusMessage(base.MessageTypeSessionStart, statusMsg); err != nil {
+		c.logger.Warn("Failed to update status for session_start", "error", err)
+	}
+
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
 	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 		return err
@@ -1768,22 +1871,18 @@ func (c *StreamCallback) handleEngineStarting(data any) error {
 			"event_type": string(provider.EventTypeEngineStarting),
 		},
 	}
+
+	// Update status indicator
+	if err := c.updateStatusMessage(base.MessageTypeEngineStarting, "正在唤醒推演引擎..."); err != nil {
+		c.logger.Warn("Failed to update status for engine_starting", "error", err)
+	}
+
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
 	if err := c.sendMessageAndGetTS(c.convertToChatMessage(msg)); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-// handleUserMessageReceived handles user message received acknowledgment
-// Implements EventTypeUserMessageReceived per spec (0.6)
-// Triggered immediately after user message is received
-func (c *StreamCallback) handleUserMessageReceived(_ any) error {
-
-	// Immediately send a Thinking placeholder to show active processing with the animated avatar
-	// Use updateStatusMessage to properly capture and store message_ts for subsequent streaming updates
-	return c.updateStatusMessage(base.MessageTypeThinking, "Thinking...")
 }
 
 // handlePermissionRequest handles permission request events
@@ -1831,6 +1930,12 @@ func (c *StreamCallback) handlePermissionRequest(data any) error {
 	// Get tool and input for display
 	tool, input := req.GetToolAndInput()
 
+	// Apply SetAssistantStatus to wait for permission
+	// This ensures the AI isn't just hanging silently while waiting
+	if err := c.updateStatusMessage(base.MessageTypePermissionRequest, "拦截到高危操作，等待提权审批..."); err != nil {
+		c.logger.Warn("Failed to update status for permission_request", "error", err)
+	}
+
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypePermissionRequest,
 		Content: "", // Content is built by MessageBuilder from metadata
@@ -1846,4 +1951,14 @@ func (c *StreamCallback) handlePermissionRequest(data any) error {
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)
 	return c.sendMessageAndGetTS(c.convertToChatMessage(msg))
+}
+
+// formatDataLength formats byte count into human-readable size string
+func formatDataLength(bytes int64) string {
+	if bytes > 1024*1024 {
+		return fmt.Sprintf("%.1fMB", float64(bytes)/(1024*1024))
+	} else if bytes > 1024 {
+		return fmt.Sprintf("%.1fKB", float64(bytes)/1024)
+	}
+	return fmt.Sprintf("%d bytes", bytes)
 }

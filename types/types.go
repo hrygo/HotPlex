@@ -108,4 +108,5 @@ type Config struct {
 	WorkDir          string // Absolute path to the isolated sandbox directory where CLI operations occur
 	SessionID        string // Unique identifier used to route the request to a persistent process in the pool
 	TaskInstructions string // Per-task instructions or objective prepended to the user prompt
+	WAFApproved      bool   // When true, Engine skips WAF check (already approved by chatapps layer)
 }

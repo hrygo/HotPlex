@@ -12,6 +12,7 @@ import (
 // Engine abstracts the engine functionality for dependency inversion
 type Engine interface {
 	Execute(ctx context.Context, cfg *types.Config, prompt string, callback event.Callback) error
+	CheckDanger(prompt string) (blocked bool, operation, reason string)
 	GetSession(sessionID string) (Session, bool)
 	Close() error
 	GetSessionStats(sessionID string) *SessionStats
