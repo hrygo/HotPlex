@@ -487,8 +487,8 @@ func (c *StreamCallback) sendMessageAndGetTS(msg *ChatMessage) error {
 // Helper function to reduce duplication in event handlers
 func (c *StreamCallback) buildChatMessage(msgType base.MessageType, content string, extraMetadata map[string]any) error {
 	msg := &base.ChatMessage{
-		Type:    msgType,
-		Content: content,
+		Type:     msgType,
+		Content:  content,
 		Metadata: extraMetadata,
 	}
 	msg.Metadata = c.mergeMetadata(msg.Metadata)

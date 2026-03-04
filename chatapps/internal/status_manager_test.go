@@ -11,11 +11,11 @@ import (
 // mockStatusProvider is a mock implementation of StatusProvider for testing
 type mockStatusProvider struct {
 	calls []struct {
-		method   string
+		method    string
 		channelID string
-		threadTS string
-		status   base.StatusType
-		text     string
+		threadTS  string
+		status    base.StatusType
+		text      string
 	}
 }
 

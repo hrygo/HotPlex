@@ -27,6 +27,10 @@ LOG_FILE      := $(LOG_DIR)/daemon.log
 
 .PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable
 
+# Custom interrupt handler - works with GNU Make 3.81+
+.INTERRUPT:
+	@printf "\n${YELLOW}⚠️  Cancelled - daemon may still be running${NC}\n" 1>&2; exit 130
+
 # Default target
 all: help
 
@@ -171,22 +175,26 @@ stop: ## @runtime Stop the running daemon
 	fi
 
 restart: build ## @runtime Restart daemon with logs
-	@printf "${YELLOW}🛑 Stopping old daemon (if running)...${NC}\n"
-	@if pgrep -f $(BINARY_NAME) > /dev/null 2>&1; then \
-		pkill -f $(BINARY_NAME); \
-		sleep 1; \
+	@stop_daemon() { \
+		printf "${YELLOW}🛑 Stopping old daemon (if running)...${NC}\n"; \
 		if pgrep -f $(BINARY_NAME) > /dev/null 2>&1; then \
-			pkill -9 -f $(BINARY_NAME); \
+			pkill -f $(BINARY_NAME); \
+			sleep 1; \
+			if pgrep -f $(BINARY_NAME) > /dev/null 2>&1; then \
+				pkill -9 -f $(BINARY_NAME); \
+			fi; \
+			printf "${GREEN}✅ Old daemon stopped${NC}\n"; \
+		else \
+			printf "${CYAN}ℹ️  No running daemon found (fresh start)${NC}\n"; \
 		fi; \
-		printf "${GREEN}✅ Old daemon stopped${NC}\n"; \
-	else \
-		printf "${CYAN}ℹ️  No running daemon found (fresh start)${NC}\n"; \
-	fi
-	@mkdir -p $(LOG_DIR)
-	@printf "${PURPLE}🔥 Starting HotPlex Daemon (logs: $(LOG_FILE))...${NC}\n"
-	@nohup ./$(DIST_DIR)/$(BINARY_NAME) > $(LOG_FILE) 2>&1 &
-	@disown 2>/dev/null || true
-	@sleep 0.5
+	}; \
+	trap 'printf "\n${YELLOW}⚠️  Cancelled - daemon may still be running${NC}\n" 1>&2; exit 130' INT; \
+	stop_daemon; \
+	mkdir -p $(LOG_DIR); \
+	printf "${PURPLE}🔥 Starting HotPlex Daemon (logs: $(LOG_FILE))...${NC}\n"; \
+	nohup ./$(DIST_DIR)/$(BINARY_NAME) > $(LOG_FILE) 2>&1 & \
+	disown 2>/dev/null || true; \
+	sleep 0.5
 	@PID=$$(pgrep -f $(BINARY_NAME) | head -1); \
 	printf "${GREEN}✅ Daemon started in background with PID: $$PID${NC}\n"; \
 	printf "${CYAN}📋 Tailing logs (Ctrl+C to stop tailing, daemon will keep running):${NC}\n"; \
