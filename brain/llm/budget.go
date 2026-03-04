@@ -50,10 +50,10 @@ type BudgetConfig struct {
 // DefaultBudgetConfig returns sensible defaults.
 func DefaultBudgetConfig() BudgetConfig {
 	return BudgetConfig{
-		Period:            BudgetDaily,
-		Limit:             10.0, // $10 daily
-		EnableHardLimit:   false,
-		EnableSoftLimit:   true,
+		Period:          BudgetDaily,
+		Limit:           10.0, // $10 daily
+		EnableHardLimit: false,
+		EnableSoftLimit: true,
 		AlertThresholds: []BudgetAlertThreshold{
 			{Percentage: 80.0, Message: "Budget 80% consumed"},
 			{Percentage: 90.0, Message: "Budget 90% consumed"},
@@ -74,18 +74,18 @@ type BudgetAlert struct {
 
 // BudgetTracker tracks budget usage and enforces limits.
 type BudgetTracker struct {
-	config        BudgetConfig
-	sessionID     string
-	currentCost   *atomic.Float64
-	requestCount  *atomic.Int64
-	periodStart   *atomic.Time
+	config          BudgetConfig
+	sessionID       string
+	currentCost     *atomic.Float64
+	requestCount    *atomic.Int64
+	periodStart     *atomic.Time
 	periodEndCached *atomic.Time
-	lastAlert     *atomic.Time
+	lastAlert       *atomic.Time
 	alertsTriggered map[float64]bool
-	
+
 	// Callback for alerts
 	alertCallback func(alert BudgetAlert)
-	
+
 	mu sync.RWMutex
 }
 
@@ -159,7 +159,7 @@ func (bt *BudgetTracker) CheckBudget(estimatedCost float64) (bool, float64, erro
 		if bt.config.EnableHardLimit {
 			return false, 0, fmt.Errorf("budget exceeded: $%.4f > $%.4f limit", newCost, bt.config.Limit)
 		}
-		
+
 		if bt.config.EnableSoftLimit {
 			// Log warning but allow
 			if bt.config.Logger != nil {
@@ -245,7 +245,7 @@ func (bt *BudgetTracker) checkAlerts() {
 				// Clear old alerts and start fresh
 				bt.alertsTriggered = make(map[float64]bool)
 			}
-			
+
 			bt.alertsTriggered[threshold.Percentage] = true
 			bt.lastAlert.Store(time.Now())
 
@@ -368,10 +368,10 @@ func (bt *BudgetTracker) CheckAlerts() {
 
 // BudgetManager manages multiple budget trackers (e.g., per user/session).
 type BudgetManager struct {
-	config   BudgetConfig
-	trackers map[string]*BudgetTracker
+	config     BudgetConfig
+	trackers   map[string]*BudgetTracker
 	globalCost *atomic.Float64
-	mu       sync.RWMutex
+	mu         sync.RWMutex
 }
 
 // NewBudgetManager creates a new budget manager.

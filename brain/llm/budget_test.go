@@ -187,7 +187,7 @@ func TestBudgetManager_MultipleSessions(t *testing.T) {
 	assert.NoError(t, err)
 	err = manager.TrackRequest("session-2", 2.0)
 	assert.NoError(t, err)
-	
+
 	// Global stats should include costs tracked via manager
 	// Note: tracker.TrackRequest does NOT update globalCost, only manager.TrackRequest does
 	globalStats := manager.GetGlobalStats()

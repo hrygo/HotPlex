@@ -85,11 +85,11 @@ func Init(logger *slog.Logger) error {
 			}
 
 			router = llm.NewRouter(llm.RouterConfig{
-				DefaultStrategy:    llm.RouteStrategy(config.Router.DefaultStage),
-				Models:             modelConfigs,
-				ScenarioModelMap:   make(map[llm.Scenario]string),
-				FallbackModel:      config.Model.Model,
-				Logger:             logger,
+				DefaultStrategy:  llm.RouteStrategy(config.Router.DefaultStage),
+				Models:           modelConfigs,
+				ScenarioModelMap: make(map[llm.Scenario]string),
+				FallbackModel:    config.Model.Model,
+				Logger:           logger,
 			}, metricsCollector)
 
 			logger.Info("Model routing enabled",

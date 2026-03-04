@@ -21,8 +21,8 @@ type ModelConfig struct {
 // === Cache Configuration ===
 
 type CacheConfig struct {
-	Enabled  bool
-	Size     int
+	Enabled bool
+	Size    int
 }
 
 // === Retry Configuration ===
@@ -37,10 +37,10 @@ type RetryConfig struct {
 // === Metrics Configuration ===
 
 type MetricsConfig struct {
-	Enabled         bool
-	ServiceName     string
-	Endpoint        string
-	ExportInterval  time.Duration
+	Enabled        bool
+	ServiceName    string
+	Endpoint       string
+	ExportInterval time.Duration
 }
 
 // === Cost Configuration ===
@@ -53,12 +53,12 @@ type CostConfig struct {
 // === Rate Limit Configuration ===
 
 type RateLimitConfig struct {
-	Enabled         bool
-	RPS             float64
-	Burst           int
-	QueueSize       int
-	QueueTimeout    time.Duration
-	PerModel        bool
+	Enabled      bool
+	RPS          float64
+	Burst        int
+	QueueSize    int
+	QueueTimeout time.Duration
+	PerModel     bool
 }
 
 // === Router Configuration ===
@@ -72,10 +72,10 @@ type RouterConfig struct {
 // === Circuit Breaker Configuration ===
 
 type CircuitBreakerConfig struct {
-	Enabled      bool
-	MaxFailures  int
-	Timeout      time.Duration
-	Interval     time.Duration
+	Enabled     bool
+	MaxFailures int
+	Timeout     time.Duration
+	Interval    time.Duration
 }
 
 // === Failover Configuration ===
@@ -91,20 +91,20 @@ type FailoverConfig struct {
 // === Budget Configuration ===
 
 type BudgetConfig struct {
-	Enabled          bool
-	Period           string
-	Limit            float64
-	EnableHardLimit  bool
-	AlertThresholds  []float64
+	Enabled         bool
+	Period          string
+	Limit           float64
+	EnableHardLimit bool
+	AlertThresholds []float64
 }
 
 // === Priority Configuration ===
 
 type PriorityConfig struct {
-	Enabled              bool
-	MaxQueueSize         int
+	Enabled               bool
+	MaxQueueSize          int
 	EnableLowPriorityDrop bool
-	HighPriorityReserve  int
+	HighPriorityReserve   int
 }
 
 // === Main Config ===
@@ -160,21 +160,21 @@ func LoadConfigFromEnv() Config {
 			MaxWaitMs:   getIntEnv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS", 5000),
 		},
 		Metrics: MetricsConfig{
-			Enabled:         getBoolEnv("HOTPLEX_BRAIN_METRICS_ENABLED", true),
-			ServiceName:     getEnv("HOTPLEX_BRAIN_METRICS_SERVICE_NAME", "hotplex-brain"),
-			ExportInterval:  getDurationEnv("HOTPLEX_BRAIN_METRICS_EXPORT_INTERVAL", 10*time.Second),
+			Enabled:        getBoolEnv("HOTPLEX_BRAIN_METRICS_ENABLED", true),
+			ServiceName:    getEnv("HOTPLEX_BRAIN_METRICS_SERVICE_NAME", "hotplex-brain"),
+			ExportInterval: getDurationEnv("HOTPLEX_BRAIN_METRICS_EXPORT_INTERVAL", 10*time.Second),
 		},
 		Cost: CostConfig{
 			Enabled:      getBoolEnv("HOTPLEX_BRAIN_COST_TRACKING_ENABLED", true),
 			EnableBudget: getBoolEnv("HOTPLEX_BRAIN_COST_ENABLE_BUDGET", false),
 		},
 		RateLimit: RateLimitConfig{
-			Enabled:         getBoolEnv("HOTPLEX_BRAIN_RATE_LIMIT_ENABLED", false),
-			RPS:             getFloatEnv("HOTPLEX_BRAIN_RATE_LIMIT_RPS", 10.0),
-			Burst:           getIntEnv("HOTPLEX_BRAIN_RATE_LIMIT_BURST", 20),
-			QueueSize:       getIntEnv("HOTPLEX_BRAIN_RATE_LIMIT_QUEUE_SIZE", 100),
-			QueueTimeout:    getDurationEnv("HOTPLEX_BRAIN_RATE_LIMIT_QUEUE_TIMEOUT", 30*time.Second),
-			PerModel:        getBoolEnv("HOTPLEX_BRAIN_RATE_LIMIT_PER_MODEL", false),
+			Enabled:      getBoolEnv("HOTPLEX_BRAIN_RATE_LIMIT_ENABLED", false),
+			RPS:          getFloatEnv("HOTPLEX_BRAIN_RATE_LIMIT_RPS", 10.0),
+			Burst:        getIntEnv("HOTPLEX_BRAIN_RATE_LIMIT_BURST", 20),
+			QueueSize:    getIntEnv("HOTPLEX_BRAIN_RATE_LIMIT_QUEUE_SIZE", 100),
+			QueueTimeout: getDurationEnv("HOTPLEX_BRAIN_RATE_LIMIT_QUEUE_TIMEOUT", 30*time.Second),
+			PerModel:     getBoolEnv("HOTPLEX_BRAIN_RATE_LIMIT_PER_MODEL", false),
 		},
 		Router: RouterConfig{
 			Enabled:      getBoolEnv("HOTPLEX_BRAIN_ROUTER_ENABLED", false),
@@ -194,16 +194,16 @@ func LoadConfigFromEnv() Config {
 			Cooldown:       getDurationEnv("HOTPLEX_BRAIN_FAILOVER_COOLDOWN", 5*time.Minute),
 		},
 		Budget: BudgetConfig{
-			Enabled:          getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLED", false),
-			Period:           getEnv("HOTPLEX_BRAIN_BUDGET_PERIOD", "daily"),
-			Limit:            getFloatEnv("HOTPLEX_BRAIN_BUDGET_LIMIT", 10.0),
-			EnableHardLimit:  getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLE_HARD_LIMIT", false),
+			Enabled:         getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLED", false),
+			Period:          getEnv("HOTPLEX_BRAIN_BUDGET_PERIOD", "daily"),
+			Limit:           getFloatEnv("HOTPLEX_BRAIN_BUDGET_LIMIT", 10.0),
+			EnableHardLimit: getBoolEnv("HOTPLEX_BRAIN_BUDGET_ENABLE_HARD_LIMIT", false),
 		},
 		Priority: PriorityConfig{
-			Enabled:              getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLED", false),
-			MaxQueueSize:         getIntEnv("HOTPLEX_BRAIN_PRIORITY_MAX_QUEUE_SIZE", 1000),
+			Enabled:               getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLED", false),
+			MaxQueueSize:          getIntEnv("HOTPLEX_BRAIN_PRIORITY_MAX_QUEUE_SIZE", 1000),
 			EnableLowPriorityDrop: getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLE_LOW_PRIORITY_DROP", true),
-			HighPriorityReserve:  getIntEnv("HOTPLEX_BRAIN_PRIORITY_HIGH_PRIORITY_RESERVE", 100),
+			HighPriorityReserve:   getIntEnv("HOTPLEX_BRAIN_PRIORITY_HIGH_PRIORITY_RESERVE", 100),
 		},
 	}
 }
