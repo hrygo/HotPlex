@@ -23,7 +23,24 @@ import (
 // Setup initializes all enabled ChatApps and their dedicated Engines.
 // It returns an http.Handler that handles all webhook routes.
 func Setup(ctx context.Context, logger *slog.Logger) (http.Handler, *AdapterManager, error) {
+	// 配置目录搜索优先级：
+	// 1. CHATAPPS_CONFIG_DIR (向后兼容)
+	// 2. ~/.hotplex/configs (用户配置)
+	// 3. ./chatapps/configs (默认)
 	configDir := os.Getenv("CHATAPPS_CONFIG_DIR")
+
+	if configDir == "" {
+		// 尝试用户配置目录
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			userConfigDir := filepath.Join(homeDir, ".hotplex", "configs")
+			if _, err := os.Stat(userConfigDir); err == nil {
+				configDir = userConfigDir
+				logger.Debug("Using user config directory", "path", configDir)
+			}
+		}
+	}
+
 	if configDir == "" {
 		configDir = "chatapps/configs"
 	}
