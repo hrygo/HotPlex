@@ -120,29 +120,29 @@ type ChatMessage struct {
 
 HotPlex 定义了 21 种标准事件类型：
 
-| 事件类型                | 所属 Zone          | 渲染建议                            |
-| :---------------------- | :----------------- | :---------------------------------- |
-| `session_start`         | Initialization (0) | Welcome Banner / Cold Start Info    |
-| `engine_starting`       | Initialization (0) | Initialization Status Context       |
-| `thinking`              | Thinking (1)       | Context Block + Loading Animation   |
-| `plan_mode`             | Thinking (1)       | Blockquotes / Collapsible           |
-| `tool_use`              | Action (2)         | Code Snippet + Icon (e.g. 🛠️)        |
-| `tool_result`           | Action (2)         | Log Container (Auto-scroll)         |
-| `permission_request`    | Action (2)         | Header + Approve/Reject Buttons     |
-| `danger_block`          | Action (2)         | Interactive Modal / Buttons         |
-| `command_progress`      | Action (2)         | ProgressBar / Dynamic Context Block |
-| `command_complete`      | Action (2)         | Success Icon + Execution Summary    |
-| `step_start`            | Action (2)         | Milestone Header (OpenCode)         |
-| `step_finish`           | Action (2)         | Completion Milestone (OpenCode)     |
-| `answer`                | Output (3)         | Main Message Body (Streaming)       |
-| `ask_user_question`     | Output (3)         | Highlighted Question + Input Field  |
-| `exit_plan_mode`        | Output (3)         | Plan Summary + Confirmation Actions |
-| `error`                 | Output (3)         | Warning Alert Block                 |
-| `session_stats`         | Summary (4)        | Metadata Section (Small Text)       |
-| `user_message_received` | (Filtered)         | Acknowledgment Receipt (Noise)      |
-| `system`                | (Filtered)         | System Event Notification (Noise)   |
-| `user`                  | (Filtered)         | User Message Reflection (Noise)     |
-| `raw`                   | (Filtered)         | Unformatted Raw Output Fallback     |
+| 事件类型                | 渲染建议                            |
+| :---------------------- | :---------------------------------- |
+| `session_start`         | Welcome Banner / Cold Start Info    |
+| `engine_starting`       | Initialization Status Context       |
+| `thinking`              | Context Block + Loading Animation   |
+| `plan_mode`             | Blockquotes / Collapsible           |
+| `tool_use`              | Code Snippet + Icon (e.g. 🛠️)        |
+| `tool_result`           | Log Container (Auto-scroll)         |
+| `permission_request`    | Header + Approve/Reject Buttons     |
+| `danger_block`          | Interactive Modal / Buttons         |
+| `command_progress`      | ProgressBar / Dynamic Context Block |
+| `command_complete`      | Success Icon + Execution Summary    |
+| `step_start`            | Milestone Header (OpenCode)         |
+| `step_finish`           | Completion Milestone (OpenCode)     |
+| `answer`                | Main Message Body (Streaming)       |
+| `ask_user_question`     | Highlighted Question + Input Field  |
+| `exit_plan_mode`        | Plan Summary + Confirmation Actions |
+| `error`                 | Warning Alert Block                 |
+| `session_stats`         | Metadata Section (Small Text)       |
+| `user_message_received` | Acknowledgment Receipt (Noise)      |
+| `system`                | System Event Notification (Noise)   |
+| `user`                  | User Message Reflection (Noise)     |
+| `raw`                   | Unformatted Raw Output Fallback     |
 
 ---
 
