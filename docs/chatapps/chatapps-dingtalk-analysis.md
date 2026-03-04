@@ -1,6 +1,8 @@
 # 钉钉双向全双工通讯技术方案
 
-> 本文档深入分析 HotPlex 钉钉适配器的技术实现方案，包括 API 调用、认证机制、消息格式等细节。
+> 📅 最后更新: 2026-03-04 | 状态: **Alpha / 技术分析中**
+>
+> 本文档深入分析 HotPlex 钉钉适配器的技术实现方案，包括 API 调用、认证机制、消息格式等细节。2026 年新特性（如 WAF 闭环、Status API）正在规划中。
 
 ---
 
@@ -24,14 +26,14 @@
 
 ### 1.2 当前实现状态
 
-| 功能 | 状态 | 说明 |
-|------|------|------|
-| 消息接收 (Webhook) | ✅ 已实现 | handleCallback |
-| 消息发送 (API) | ✅ 已实现 | SendMessage |
-| 签名验证 | ✅ 已实现 | verifySignature |
-| Access Token 管理 | ✅ 已实现 | Token 缓存与刷新 |
-| Session 管理 | ✅ 已实现 | 会话创建与清理 |
-| 消息分片 | ✅ 已实现 | chunkMessage |
+| 功能               | 状态     | 说明             |
+| ------------------ | -------- | ---------------- |
+| 消息接收 (Webhook) | ✅ 已实现 | handleCallback   |
+| 消息发送 (API)     | ✅ 已实现 | SendMessage      |
+| 签名验证           | ✅ 已实现 | verifySignature  |
+| Access Token 管理  | ✅ 已实现 | Token 缓存与刷新 |
+| Session 管理       | ✅ 已实现 | 会话创建与清理   |
+| 消息分片           | ✅ 已实现 | chunkMessage     |
 
 ---
 
@@ -39,10 +41,10 @@
 
 ### 2.1 当前使用的 API
 
-| 用途 | API 端点 | 认证方式 | 代码位置 |
-|------|---------|---------|----------|
-| 获取 Access Token | `POST /v1.0/oauth2/oAuth2/accessToken` | AppKey + AppSecret | dingtalk.go:352 |
-| 发送消息 | `POST /v1.0/robot/oToMessages/batchSend` | Access Token | dingtalk.go:282 |
+| 用途              | API 端点                                 | 认证方式           | 代码位置        |
+| ----------------- | ---------------------------------------- | ------------------ | --------------- |
+| 获取 Access Token | `POST /v1.0/oauth2/oAuth2/accessToken`   | AppKey + AppSecret | dingtalk.go:352 |
+| 发送消息          | `POST /v1.0/robot/oToMessages/batchSend` | Access Token       | dingtalk.go:282 |
 
 ### 2.2 Access Token 获取
 
@@ -175,12 +177,12 @@ type DingTalkCallbackRequest struct {
 
 **关键字段映射**:
 
-| 回调字段 | 用途 | 保存位置 |
-|---------|------|---------|
-| `senderId` | 用户 ID | `msg.UserID` |
-| `conversationId` | 会话 ID | `msg.Metadata.conversation_id` |
-| `robotCode` | 机器人编码 | `msg.Metadata.robot_code` (发送时使用) |
-| `text.content` | 消息内容 | `msg.Content` |
+| 回调字段         | 用途       | 保存位置                               |
+| ---------------- | ---------- | -------------------------------------- |
+| `senderId`       | 用户 ID    | `msg.UserID`                           |
+| `conversationId` | 会话 ID    | `msg.Metadata.conversation_id`         |
+| `robotCode`      | 机器人编码 | `msg.Metadata.robot_code` (发送时使用) |
+| `text.content`   | 消息内容   | `msg.Content`                          |
 
 ---
 
@@ -316,11 +318,11 @@ type DingTalkConfig struct {
 
 ### 7.1 当前限制
 
-| 问题 | 严重程度 | 说明 |
-|------|---------|------|
-| 仅支持 text 消息接收 | 中 | 无法接收图片、文件等 |
-| markdown 发送需要 rich content | 低 | 需要正确设置 RichContent |
-| robotCode 依赖配置正确 | 高 | 必须确保消息能获取到 robotCode |
+| 问题                           | 严重程度 | 说明                           |
+| ------------------------------ | -------- | ------------------------------ |
+| 仅支持 text 消息接收           | 中       | 无法接收图片、文件等           |
+| markdown 发送需要 rich content | 低       | 需要正确设置 RichContent       |
+| robotCode 依赖配置正确         | 高       | 必须确保消息能获取到 robotCode |
 
 ### 7.2 改进建议
 

@@ -69,25 +69,25 @@ type ChatMessage struct {
 
 ### 3.1 处理器顺序 (Processing Order)
 
-| 处理器             | 职责           | 代表性逻辑                                                               |
-| :----------------- | :------------- | :----------------------------------------------------------------------- |
-| **1. Filter**      | 噪音过滤       | 丢弃如 `step_start`/`step_finish` 等对终端用户不必要的原始事件。         |
-| **2. RateLimit**   | 接入频率控制   | 确保同一会话的更新频率不超过平台阈值（如 Slack 1s/次）。                 |
-| **3. ZoneOrder**   | 分区时序控制   | 强制消息按 `思考 -> 行动 -> 输出 -> 总结` 的顺序展示，防止流式输出乱序。 |
-| **4. Thread**      | 线程上下文维护 | 自动关联 `thread_ts`，确保同一个 Turn 的消息聚类在一个回复链中。         |
-| **5. Aggregator**  | 智能聚合       | 将多个微小的工具调用（tool_use）聚合为一个 UI Block，避免消息刷屏。      |
-| **6. RichContent** | 富文本增强     | 处理 Reaction 点赞、交互式按钮、附件图片等。                             |
-| **7. Format**      | 平台格式转换   | 将 Markdown 转换为 Slack mrkdwn, Telegram HTML, 或钉钉 ActionCard。      |
-| **8. Chunk**       | 长文本切片     | 突破平台单条消息长度限制（如 Slack 4000 字符），自动分段发送。           |
+| 处理器             | 职责           | 代表性逻辑                                                                        |
+| :----------------- | :------------- | :-------------------------------------------------------------------------------- |
+| **1. Filter**      | 噪音过滤       | [绝对黑洞策略] 丢弃 `raw`, `system`, `user`, `user_message_received` 等冗余事件。 |
+| **2. RateLimit**   | 接入频率控制   | 确保同一会话的更新频率不超过平台阈值（如 Slack 1s/次）。                          |
+| **3. ZoneOrder**   | 分区时序控制   | 强制消息按 `思考 -> 行动 -> 输出 -> 总结` 的顺序展示，防止流式输出乱序。          |
+| **4. Thread**      | 线程上下文维护 | 自动关联 `thread_ts`，确保同一个 Turn 的消息聚类在一个回复链中。                  |
+| **5. Aggregator**  | 智能聚合       | 将多个微小的工具调用（tool_use）聚合为一个 UI Block，避免消息刷屏。               |
+| **6. RichContent** | 富文本增强     | 处理 Reaction 点赞、交互式按钮、附件图片等。                                      |
+| **7. Format**      | 平台格式转换   | 将 Markdown 转换为 Slack mrkdwn, Telegram HTML, 或钉钉 ActionCard。               |
+| **8. Chunk**       | 长文本切片     | 突破平台单条消息长度限制（如 Slack 4000 字符），自动分段发送。                    |
 
 ### 3.2 区域化交互 (Zone-based Interaction)
 下行消息依据 `ZoneIndex` 被划分为五个横跨会话生命周期的控制区：
 
-- **Zone 0: Initialization (初始化区)** - 占据首帧提示 `session_start`, `engine_starting`，会在最终结果送达后被自动销毁。
-- **Zone 1: Thinking (思维修炼区)** - 游牧态块，展示 Agent 内部推演 `thinking`，仅保留最新一条并在进入 Output 时销毁。
-- **Zone 2: Action (行动交互区)** - 半持久呈现 `tool_use`, `permission_request`, `danger_block` 等工作流活动，支持窗口滑动。
-- **Zone 3: Output (最终展示区)** - 永久保留 `answer`, `ask_user_question`, `error` 的核心结论。
-- **Zone 4: Summary (数据结算区)** - 作为 Turn 收尾标志的 `session_stats` 卡片，触发生态组件清理和时序复位。
+- **Zone 0: Initialization (初始化区)** - 基于 `Assistant Status API` 提供即时反馈，Turn 结束或解答生成后复位。
+- **Zone 1: Thinking (思维修炼区)** - 实时更新 `assistant_status`，仅在必要时通过 Context Block 展示轻量化推演。
+- **Zone 2: Action (行动交互区)** - 半持久呈现 `tool_use`, `permission_request`, `danger_block`（高危审批）等，支持窗口滑动。
+- **Zone 3: Output (最终展示区)** - 永久保留 `answer`, `ask_user_question`, `error` 的核心结论，支持 Native Streaming。
+- **Zone 4: Summary (数据结算区)** - 作为 Turn 收尾标志的 `session_stats` 卡片，触发 UI 清理和时序复位。
 
 ---
 
@@ -120,29 +120,29 @@ type ChatMessage struct {
 
 HotPlex 定义了 21 种标准事件类型：
 
-| 事件类型                | 渲染建议                            |
-| :---------------------- | :---------------------------------- |
-| `session_start`         | Welcome Banner / Cold Start Info    |
-| `engine_starting`       | Initialization Status Context       |
-| `thinking`              | Context Block + Loading Animation   |
-| `plan_mode`             | Blockquotes / Collapsible           |
-| `tool_use`              | Code Snippet + Icon (e.g. 🛠️)        |
-| `tool_result`           | Log Container (Auto-scroll)         |
-| `permission_request`    | Header + Approve/Reject Buttons     |
-| `danger_block`          | Interactive Modal / Buttons         |
-| `command_progress`      | ProgressBar / Dynamic Context Block |
-| `command_complete`      | Success Icon + Execution Summary    |
-| `step_start`            | Milestone Header (OpenCode)         |
-| `step_finish`           | Completion Milestone (OpenCode)     |
-| `answer`                | Main Message Body (Streaming)       |
-| `ask_user_question`     | Highlighted Question + Input Field  |
-| `exit_plan_mode`        | Plan Summary + Confirmation Actions |
-| `error`                 | Warning Alert Block                 |
-| `session_stats`         | Metadata Section (Small Text)       |
-| `user_message_received` | Acknowledgment Receipt (Noise)      |
-| `system`                | System Event Notification (Noise)   |
-| `user`                  | User Message Reflection (Noise)     |
-| `raw`                   | Unformatted Raw Output Fallback     |
+| 事件类型                | 渲染建议                                        |
+| :---------------------- | :---------------------------------------------- |
+| `session_start`         | Welcome Banner / Cold Start Info                |
+| `engine_starting`       | Initialization Status Context                   |
+| `thinking`              | Context Block + Loading Animation               |
+| `plan_mode`             | Blockquotes / Collapsible                       |
+| `tool_use`              | Code Snippet + Icon (e.g. 🛠️)                    |
+| `tool_result`           | Log Container (Auto-scroll)                     |
+| `permission_request`    | Header + Approve/Reject Buttons                 |
+| `danger_block`          | Interactive Modal / Buttons                     |
+| `command_progress`      | ProgressBar / Dynamic Context Block             |
+| `command_complete`      | Success Icon + Execution Summary                |
+| `step_start`            | Milestone Header (OpenCode)                     |
+| `step_finish`           | Completion Milestone (OpenCode)                 |
+| `answer`                | Main Message Body (Streaming)                   |
+| `ask_user_question`     | Highlighted Question + Input Field              |
+| `exit_plan_mode`        | Plan Summary + Confirmation Actions             |
+| `error`                 | Warning Alert Block                             |
+| `session_stats`         | Metadata Section (Small Text)                   |
+| `user_message_received` | [绝对黑洞] 语义通过 Reaction 反馈，不再发送消息 |
+| `system`                | [绝对黑洞] 内部日志，不干扰 UI                  |
+| `user`                  | [绝对黑洞] 冗余反射，直接忽略                   |
+| `raw`                   | [绝对黑洞] 未定义原始输出，直接忽略             |
 
 ---
 

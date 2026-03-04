@@ -289,15 +289,17 @@ To solve Slack's native limitation of not supporting slash commands in **Threads
 
 ### 1. Reaction Semantics (Reactions)
 The bot will inform you of progress through reactions on your messages:
-- 📥 (`:inbox:`): Request queued, preparing compute environment.
-- 🧠 (`:brain:`): Deep logical reasoning or large codebase scanning in progress.
-- ✅ (`:white_check_mark:`): Logic complete, task successfully finished.
-- ❌ (`:x:`): Internal error or timeout, see detailed error Block.
+- 📥 (`:inbox:`): **First Perception**. Request queued, preparing compute environment.
+- 🧠 (`:brain:`): **Thought Perception**. Engine has taken over, logical reasoning in progress.
+- ⚠️ (`:warning:`): **Risk Perception**. Triggered WAF interception or high-risk operation approval.
+- ✅ (`:white_check_mark:`): **Finality Perception**. Task successfully finished.
+- ❌ (`:x:`): **Failure Perception**. Internal error or execution timeout.
 
 ### 2. Message Zones
-You will see a single message containing multiple changing zones:
-- **Thinking Zone**: Shows reasoning path (previous records auto-fold, only first anchor preserved).
-- **Action Zone**: Shows tool call status like `Bash`, `FileRead`.
+HotPlex adopts a zoned rendering architecture to ensure clear and orderly complex execution logic:
+- **Status Perception Zone**: Instant descriptions based on `assistant_status` (e.g., "Thinking...", "Executing bash..."), making you feel the AI is "alive".
+- **Thinking Zone**: Only preserves key Plan anchors (Context Block), avoiding long reasoning logs.
+- **Action Zone**: Shows tool calls. Supports **Space Folding**, where extra-long output is auto-saved in Thread replies.
 - **Display Zone**: AI's core response, supports typewriter streaming effect.
 
 ### 3. 2026 New Feature: AI Streaming Response
@@ -311,7 +313,15 @@ You will see a single message containing multiple changing zones:
 
 > 🤖 HotPlex supports typewriter effect through `chat.postMessage` + real-time updates for smooth streaming output.
 
-### 4. 2026 New Feature: MCP Server Integration
+### 4. 2026 New Feature: Assistant Status Feedback
+
+In 2026, Slack allows AI apps to update instant status via the `assistant:write` permission. HotPlex deeply integrates this capability:
+
+- **Instant Feedback**: The moment you send a message, the status bar at the bottom of the bot will show `Thinking...`.
+- **Dynamic Perception**: When the AI starts scanning the entire repository or running time-consuming tools, the status automatically switches to `Analyzing codebase...` or `Executing bash...`, so you always feel the AI is "alive".
+- **Low Noise**: Status updates do not create new messages, keeping the channel clean.
+
+### 5. 2026 New Feature: MCP Server Integration
 Slack released official MCP Server on February 17, 2026, supporting:
 - AI agents real-time access to workspace data
 - User-authorized data operations
