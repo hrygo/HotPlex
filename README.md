@@ -33,7 +33,7 @@ Developers no longer need to endure the multi-second latency of restarting CLI e
 - 🧩 **Ease of Integration**: A unified Go SDK and protocol gateway that plugs top-tier Agent capabilities into your product instantly.
 - 🚀 **Zero Spin-up Overhead**: Eliminate the long wait times for Node.js/Python runtimes to provide sub-second user feedback.
 - 🛡️ **Fast & Balanced Security**: Command-level WAF and PGID isolation provide a "protective glove" for AI shell operations.
-- 💬 **ChatApps Integration**: Connect HotPlex to platforms like **Slack** (native Block Kit support), enabling AI collaboration directly in your team's workspace.
+- 💬 **ChatApps Integration**: Connect HotPlex to platforms like **Slack** (native Block Kit, streaming, Assistant Status API) and **DingTalk**, enabling AI collaboration directly in your team's workspace.
 - 🔌 **Ready for Scale**: Support for native Go embedding or standalone Proxy mode with WebSocket and OpenCode-compatible protocols.
 
 ---
@@ -62,76 +62,59 @@ Unlike standard RPC or REST request-response cycles, hotplex taps directly into 
 
 ## 🚀 Quick Start
 
-### Option A: Embed as a Go Library (SDK)
-Drop into your Go backend for zero-overhead, memory-level orchestration of CLI agents.
+### Recommended: ChatApps Platform (Slack, Telegram, Feishu, etc.)
 
-**Install:**
+The primary access channel for production environments. Interact with AI agents directly through messaging platforms.
+
+| Platform | Status |
+|----------|--------|
+| **Slack** | ✅ Stable - Block Kit, Streaming, Assistant Status |
+| **Telegram** | ✅ Stable |
+| **Feishu** | ✅ Stable |
+| **DingTalk** | ✅ Stable |
+
+**Get started in minutes:**
+```bash
+# 1. Run with --config flag (recommended, highest priority)
+hotplexd --config chatapps/configs
+
+# 2. Or use environment variables
+export CHATAPPS_ENABLED=true
+export CHATAPPS_CONFIG_DIR=chatapps/configs
+hotplexd
+```
+
+→ **[Full ChatApps Guide](docs/quick-start.md)** - Step-by-step tutorial for all platforms
+
+---
+
+### Alternative: Go SDK or Standalone Server
+
+For custom integrations or microservice architectures.
+
+| Method | Use Case |
+|--------|----------|
+| **Go SDK** | Embedded integration, zero-overhead |
+| **Standalone Server** | Multi-language clients via WebSocket |
+
+**Quick example (Go SDK):**
 ```bash
 go get github.com/hrygo/hotplex
 ```
 
-**Usage Snippet:**
 ```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "time"
-    "github.com/hrygo/hotplex"
-)
-
-func main() {
-    // 1. Initialize engine singleton
-    opts := hotplex.EngineOptions{
-        Timeout:         5 * time.Minute,
-        PermissionMode:  "bypass-permissions",
-        AllowedTools:    []string{"Bash", "Edit", "Read", "FileSearch"},
-    }
-    engine, _ := hotplex.NewEngine(opts)
-    defer engine.Close()
-
-    // 2. Configure persistent session routing
-    cfg := &hotplex.Config{
-        WorkDir:          "/tmp/ai-sandbox",
-        SessionID:        "user-123", // Automatically routes to the correct hot process
-        TaskInstructions: "You are a senior Go systems engineer.",
-    }
-
-    // 3. Execute with streaming callback
-    ctx := context.Background()
-    err := engine.Execute(ctx, cfg, "Refactor the main.go to improve error handling", 
-        func(eventType string, data any) error {
-            if eventType == "answer" {
-                fmt.Printf("🤖 Agent -> %v\n", data)
-            }
-            return nil
-        })
-    if err != nil {
-        fmt.Printf("Execution failed: %v\n", err)
-    }
-}
+engine, _ := hotplex.NewEngine(hotplex.EngineOptions{Timeout: 5 * time.Minute})
+engine.Execute(ctx, cfg, "Your prompt here", callback)
 ```
 
-### Option B: Standalone HotPlex Proxy Server
-Operate `hotplexd` as an infrastructure daemon to serve cross-language clients (React, Node, Python, Rust) via WebSocket or OpenCode HTTP/SSE.
-
-**Build & Run:**
-```bash
-make build
-PORT=8080 ./dist/hotplexd
-```
-
-**Connect & Control:**
-- **WebSocket**: Connect to `ws://localhost:8080/ws/v1/agent`.
-- **OpenCode (HTTP/SSE)**: Configure your OpenCode client with `baseURL: "http://localhost:8080"`.
+→ **[Full SDK Guide](docs/quick-start.md#option-2-go-sdk)** for detailed documentation
 
 ---
 
 ## 📖 Detailed Documentation
 
 ### Core Technical Manuals
-- **[ChatApps Manual](chatapps/README.md)**: Multi-platform connector (Slack, Feishu, etc.) and message pipeline.
+- **[ChatApps Manual](chatapps/README.md)**: Multi-platform connector (Slack, DingTalk, Feishu) with native Block Kit support and AI-native UX patterns.
 - **[Engine Manual](engine/README.md)**: Core control plane, process hot-multiplexing, and execution logic.
 - **[Provider Manual](provider/README.md)**: AI agent abstraction (Claude Code, OpenCode) and event normalization.
 - **[Internal Subsystems](internal/README.md)**: Foundational security WAF, session pooling, and system utilities.
@@ -139,8 +122,7 @@ PORT=8080 ./dist/hotplexd
 ### Guides & Manuals
 - **[Architecture Deep Dive](docs/architecture.md)**: Explore the inner workings, security protocols, and session management logic.
 - **[SDK Developer Guide](docs/sdk-guide.md)**: A comprehensive manual for integrating HotPlex into your Go applications.
-- **[Slack Integration Manual](docs/chatapps/chatapps-slack-manual.md)**: Comprehensive guide for connecting HotPlex to Slack (Chinese).
-- **[Quick Start Guide](docs/quick-start.md)**: Step-by-step tutorial for getting started.
+- **[Slack Integration Guide](docs-site/guide/chatapps-slack.md)**: Comprehensive guide for connecting HotPlex to Slack with native streaming.
 - **[Observability Guide](docs/observability-guide.md)**: OpenTelemetry and Prometheus integration.
 - **[Docker Deployment](docs/docker-deployment.md)**: Container and Kubernetes deployment.
 - **[Production Guide](docs/production-guide.md)**: Production deployment best practices.
@@ -193,9 +175,12 @@ CLI Agents run raw shell commands generated by LLMs. **Security must not be an a
 
 We are actively evolving hotplex to become the definitive execution engine for the Local AI ecosystem.
 
-### 🚀 Future (H2 2026)
+### 🚀 Future Enhancements
 
-- [ ] **L2/L3 Isolation**: Integrating Linux Namespaces (PID/Net) and WASM-based execution sandboxes.
+- [ ] **Persistent Storage**: Session state persistence across restarts for true long-lived agents.
+- [ ] **Native LLM Brain**: Built-in memory and context management for autonomous agent behavior.
+- [ ] **Advanced Isolation**: Exploring Linux Namespaces (PID/Net) and WASM-based execution sandboxes.
+- [ ] **Enhanced ChatApps**: Expanding platform support (Discord, Teams) with richer UI components.
 
 ---
 

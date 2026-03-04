@@ -157,19 +157,6 @@ func (a *Adapter) Start(ctx context.Context) error {
 	return a.Adapter.Start(ctx)
 }
 
-func (a *Adapter) sendStatusBubble(ctx context.Context, channelID, threadTS string, status base.StatusType, text string) error {
-	// Build the message with blocks
-	blocks := a.messageBuilder.BuildStatusBubble(status, text)
-	if blocks == nil {
-		// Fallback to plain text if builder returns nil
-		return a.SendToChannelSDK(ctx, channelID, text, threadTS)
-	}
-
-	// Send as blocks
-	_, err := a.sendBlocksSDK(ctx, channelID, blocks, threadTS, text)
-	return err
-}
-
 // Compile-time interface compliance checks
 var (
 	_ base.ChatAdapter       = (*Adapter)(nil)
@@ -191,6 +178,12 @@ func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string
 	builder := NewMessageBuilder()
 	blocks := builder.Build(msg)
 	return a.UpdateMessageSDK(ctx, channelID, messageTS, blocks, msg.Content)
+}
+
+// SendThreadReply implements base.MessageOperations interface (Space Folding)
+// Sends a plain text message as a reply inside a thread
+func (a *Adapter) SendThreadReply(ctx context.Context, channelID, threadTS, text string) error {
+	return a.SendToChannelSDK(ctx, channelID, text, threadTS)
 }
 
 // Note: SessionOperations methods (GetSession, FindSessionByUserAndChannel)

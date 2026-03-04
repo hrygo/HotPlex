@@ -14,7 +14,7 @@ type RateLimitProcessor struct {
 	logger *slog.Logger
 
 	// Per-session rate limiting
-	sessionLimits map[string]*time.Time
+	sessionLimits map[string]time.Time
 	mu            sync.Mutex
 
 	// Configuration
@@ -49,7 +49,7 @@ func NewRateLimitProcessor(logger *slog.Logger, opts RateLimitProcessorOptions) 
 
 	return &RateLimitProcessor{
 		logger:        logger,
-		sessionLimits: make(map[string]*time.Time),
+		sessionLimits: make(map[string]time.Time),
 		minInterval:   opts.MinInterval,
 		maxBurst:      opts.MaxBurst,
 		burstWindow:   opts.BurstWindow,
@@ -82,16 +82,14 @@ func (p *RateLimitProcessor) Process(ctx context.Context, msg *base.ChatMessage)
 
 	// Calculate wait time if needed
 	var waitDuration time.Duration
-	if lastSend != nil {
-		elapsed := now.Sub(*lastSend)
-		if elapsed < p.minInterval {
-			waitDuration = p.minInterval - elapsed
-		}
+	elapsed := now.Sub(lastSend)
+	if elapsed < p.minInterval {
+		waitDuration = p.minInterval - elapsed
 	}
 
 	// Update last send time (accounting for wait)
 	targetTime := now.Add(waitDuration)
-	p.sessionLimits[sessionKey] = &targetTime
+	p.sessionLimits[sessionKey] = targetTime
 	p.mu.Unlock()
 
 	// Wait outside the lock to allow other sessions to proceed
@@ -143,7 +141,7 @@ func (p *RateLimitProcessor) GetSessionStats(platform, sessionID string) (lastSe
 	if !ok {
 		return time.Time{}, false
 	}
-	return *lastTime, true
+	return lastTime, true
 }
 
 // Verify RateLimitProcessor implements MessageProcessor at compile time

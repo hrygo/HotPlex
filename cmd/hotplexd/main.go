@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -21,6 +22,10 @@ import (
 )
 
 func main() {
+	// Parse command line flags
+	configDir := flag.String("config", "", "ChatApps config directory (takes priority over CHATAPPS_CONFIG_DIR env var)")
+	flag.Parse()
+
 	// 0. Load .env file
 	// Priority: ENV_FILE env var > .env in working directory
 	envFile := os.Getenv("ENV_FILE")
@@ -184,7 +189,8 @@ func main() {
 	if chatappsEnabled == "true" {
 		var chatappsHandler http.Handler
 		var err error
-		chatappsHandler, chatappsMgr, err = chatapps.Setup(context.Background(), logger)
+		// configDir from --config flag takes priority over env var
+		chatappsHandler, chatappsMgr, err = chatapps.Setup(context.Background(), logger, *configDir)
 		if err != nil {
 			logger.Error("Failed to setup chatapps", "error", err)
 		} else {

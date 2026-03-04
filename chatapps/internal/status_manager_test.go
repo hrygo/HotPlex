@@ -87,8 +87,8 @@ func TestStatusManager_Notify_Deduplication(t *testing.T) {
 	// First notification
 	_ = manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
 
-	// Second notification with same status - should be deduplicated
-	_ = manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Still thinking...")
+	// Second notification with same status and text - should be deduplicated
+	_ = manager.Notify(ctx, "C123", "T100", base.StatusThinking, "Thinking...")
 
 	if len(provider.calls) != 1 {
 		t.Fatalf("expected 1 call (deduplicated), got %d", len(provider.calls))

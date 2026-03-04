@@ -83,7 +83,40 @@ HotPlex supports two modes of existence. Define your preference in the `.env` co
 
 ### ✨ The Visual Language of Agency
 
-#### 1. The Pulse of Progress (Reactions)
+#### 1. Native Assistant Status (2026 AI-Native UX)
+
+HotPlex leverages Slack's **Assistant Threads API** for real-time progress indication—a premium experience that keeps chat history clean:
+
+| Status | Visual | Description |
+|--------|--------|-------------|
+| `in_progress` | 🧠 *Thinking...* | Agent is reasoning or planning |
+| `tool_use` | 🔧 *Using tool...* | Agent is executing a tool/command |
+| `tool_error` | ⚠️ *Tool error* | Tool execution failed |
+
+This replaces legacy "typing indicator" and bubble simulations with native Slack functionality.
+
+#### 2. WAF Closed Loop (Danger Block)
+
+When the engine's Regex WAF detects a dangerous command, execution pauses for human approval:
+
+```
+User: "Delete all files with rm -rf /"
+  → WAF blocks → [Interactive Danger Card appears]
+  → User clicks "Confirm" or "Cancel"
+  → Execution resumes or terminates
+```
+
+The interactive confirmation uses Slack Block Kit with `danger` style buttons for clear visual hierarchy.
+
+#### 3. Space Folding (Threaded Output)
+
+High-volume tool outputs are automatically folded into thread replies:
+
+- Main channel shows only tool call summary
+- Full output lives in thread (expandable)
+- Prevents channel pollution while preserving audit trail
+
+#### 4. The Pulse of Progress (Reactions)
 The agent communicates its internal state via a subtle language of emojis:
 - 📥 (`:inbox_tray:`): The request has been queued and acknowledged in the session pool.
 - 🧠 (`:brain:`): The engine is performing deep cognitive reasoning or planning.
@@ -101,6 +134,16 @@ Every agent message sequence is divided into atomic **Zones** to ensure clarity 
 - **Zone 3 (Display):** The final intellectual artifact, auto-paginated using divider blocks every ~3500 bytes for unlimited fluid streaming.
 - **Zone 4 (Interaction):** Blocking wait state containing interactive prompt elements (HITL approvals, questions).
 - **Zone 5 (Summary):** Session-end statistics indicating token and duration metrics.
+
+#### 5. Absolute Black Hole Policy
+
+HotPlex implements a strict noise-filtering philosophy:
+
+- **Silences system-level logs** within the integration layer
+- **Drops redundant user reflections** (duplicate confirmations)
+- **Filters boilerplate AI responses** before they reach Slack UI
+
+This ensures users see only meaningful content, not implementation artifacts.
 
 ---
 

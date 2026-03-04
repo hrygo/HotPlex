@@ -37,6 +37,7 @@ func TestSessionOperationsInterface_Compliance(t *testing.T) {
 // MockEngine implements Engine interface for testing
 type MockEngine struct {
 	ExecuteFunc                func(ctx context.Context, cfg *types.Config, prompt string, callback event.Callback) error
+	CheckDangerFunc            func(prompt string) (bool, string, string)
 	GetSessionFunc             func(sessionID string) (Session, bool)
 	CloseFunc                  func() error
 	GetSessionStatsFunc        func(sessionID string) *SessionStats
@@ -56,6 +57,13 @@ func (m *MockEngine) Execute(ctx context.Context, cfg *types.Config, prompt stri
 		return m.ExecuteFunc(ctx, cfg, prompt, callback)
 	}
 	return nil
+}
+
+func (m *MockEngine) CheckDanger(prompt string) (bool, string, string) {
+	if m.CheckDangerFunc != nil {
+		return m.CheckDangerFunc(prompt)
+	}
+	return false, "", ""
 }
 
 func (m *MockEngine) GetSession(sessionID string) (Session, bool) {
@@ -143,6 +151,7 @@ type MockMessageOperations struct {
 	DeleteMessageFunc      func(ctx context.Context, channelID, messageTS string) error
 	UpdateMessageFunc      func(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error
 	SetAssistantStatusFunc func(ctx context.Context, channelID, threadTS, status string) error
+	SendThreadReplyFunc    func(ctx context.Context, channelID, threadTS, text string) error
 	StartStreamFunc        func(ctx context.Context, channelID, threadTS string) (string, error)
 	AppendStreamFunc       func(ctx context.Context, channelID, messageTS, content string) error
 	StopStreamFunc         func(ctx context.Context, channelID, messageTS string) error
@@ -165,6 +174,13 @@ func (m *MockMessageOperations) UpdateMessage(ctx context.Context, channelID, me
 func (m *MockMessageOperations) SetAssistantStatus(ctx context.Context, channelID, threadTS, status string) error {
 	if m.SetAssistantStatusFunc != nil {
 		return m.SetAssistantStatusFunc(ctx, channelID, threadTS, status)
+	}
+	return nil
+}
+
+func (m *MockMessageOperations) SendThreadReply(ctx context.Context, channelID, threadTS, text string) error {
+	if m.SendThreadReplyFunc != nil {
+		return m.SendThreadReplyFunc(ctx, channelID, threadTS, text)
 	}
 	return nil
 }

@@ -27,19 +27,81 @@ Our **First Principle** is to leverage and bridge existing elite AI CLI tools (l
 
 ## 🛠 Development Setup
 
-1. Install Go 1.25 or later.
-2. Install Required AI CLI tools (e.g., `Claude Code` or `OpenCode`).
-3. Clone your fork: `git clone https://github.com/YOUR_USERNAME/HotPlex.git`.
+### Prerequisites
+- Go 1.25 or later
+- Required AI CLI tools (e.g., `Claude Code` or `OpenCode`)
+- Make
+
+### Clone the Repository
+```bash
+git clone https://github.com/hrygo/HotPlex.git
+cd HotPlex
+```
 
 ### Useful Commands
 We use a `Makefile` to standardize development workflows:
-- `make build`: Compiles the `hotplexd` binary to `dist/`.
-- `make test`: Runs unit tests.
-- `make lint`: Runs `golangci-lint` to ensure code quality.
-- `make run`: Builds and starts the daemon locally.
 
-### Documentation Policy
-We follow a **"Docs-First"** mentality for releases. Any PR modifying public APIs or core behavior *must* update the relevant documentation in `docs/` and the README files.
+| Command | Description |
+|---------|-------------|
+| `make build` | Compiles the `hotplexd` binary to `dist/` |
+| `make test` | Runs unit tests with race detection |
+| `make lint` | Runs `golangci-lint` to ensure code quality |
+| `make run` | Builds and starts the daemon locally |
+| `make clean` | Removes build artifacts |
+| `make verify` | Runs all verification checks (fmt, lint, test) |
 
-## 📜 Code of Conduct
+### Running Individual Components
+
+```bash
+# Run the daemon
+go run cmd/hotplexd/main.go
+
+# Run tests for a specific package
+go test ./chatapps/...
+
+# Run with race detector
+go test -race ./...
+```
+
+## 📜 Documentation Policy
+
+We follow a **"Docs-First"** mentality for releases. Any PR modifying public APIs or core behavior *must* update the relevant documentation:
+
+- **API Changes**: Update `docs/server/api.md` and SDK documentation
+- **New Features**: Add to appropriate manual in `docs/` or `docs-site/`
+- **User-Facing Changes**: Update README.md if necessary
+
+### Building Documentation Site
+```bash
+cd docs-site
+npm install
+npm run dev
+```
+
+## 🔄 CI/CD Pipeline
+
+All pull requests must pass the following checks:
+
+1. **Code Format**: `go fmt ./...`
+2. **Linting**: `golangci-lint run`
+3. **Tests**: `go test -race ./...`
+4. **Build**: `go build ./...`
+
+## 📝 Commit Convention
+
+We follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <description>
+
+Types: feat, fix, refactor, docs, test, chore, wip
+```
+
+Example:
+```
+feat(slack): add native streaming support for Assistant Status API
+```
+
+## 📄 Code of Conduct
+
 Please note that this project is released with a Contributor Code of Conduct. By participating in this project you agree to abide by its terms.

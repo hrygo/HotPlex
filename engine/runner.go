@@ -108,21 +108,23 @@ func (r *Engine) Close() error {
 // Execute runs Claude Code CLI with the given configuration and streams
 func (r *Engine) Execute(ctx context.Context, cfg *types.Config, prompt string, callback event.Callback) error {
 	// Security check: Detect dangerous operations before execution
-	// All prompts now undergo WAF checking regardless of origin
-	if dangerEvent := r.dangerDetector.CheckInput(prompt); dangerEvent != nil {
-		r.logger.Warn("Dangerous operation blocked by regex firewall",
-			"operation", dangerEvent.Operation,
-			"reason", dangerEvent.Reason,
-			"level", dangerEvent.Level,
-		)
-		// Send danger block event to client (non-critical - error already being returned)
-		if callbackSafe := event.WrapSafe(r.logger, callback); callbackSafe != nil {
-			_ = callbackSafe("danger_block", dangerEvent)
-			// Track danger block in telemetry
-			telemetry.GetMetrics().IncDangersBlocked()
+	// Skip if chatapps layer already approved this prompt (WAFApproved flag)
+	if !cfg.WAFApproved {
+		if dangerEvent := r.dangerDetector.CheckInput(prompt); dangerEvent != nil {
+			r.logger.Warn("Dangerous operation blocked by regex firewall",
+				"operation", dangerEvent.Operation,
+				"reason", dangerEvent.Reason,
+				"level", dangerEvent.Level,
+			)
+			// Send danger block event to client (non-critical - error already being returned)
+			if callbackSafe := event.WrapSafe(r.logger, callback); callbackSafe != nil {
+				_ = callbackSafe("danger_block", dangerEvent)
+				// Track danger block in telemetry
+				telemetry.GetMetrics().IncDangersBlocked()
+			}
+			return types.ErrDangerBlocked
 		}
-		return types.ErrDangerBlocked
-	}
+	} // end WAFApproved guard
 
 	// Validate configuration
 	if err := r.ValidateConfig(cfg); err != nil {
@@ -162,6 +164,16 @@ func (r *Engine) Execute(ctx context.Context, cfg *types.Config, prompt string, 
 		"session_id", cfg.SessionID)
 
 	return nil
+}
+
+// CheckDanger exposes the WAF danger detector to the chatapps layer.
+// Returns blocked=true if the prompt matches dangerous patterns.
+// chatapps uses this for pre-flight WAF checks before calling Execute.
+func (r *Engine) CheckDanger(prompt string) (blocked bool, operation, reason string) {
+	if evt := r.dangerDetector.CheckInput(prompt); evt != nil {
+		return true, evt.Operation, evt.Reason
+	}
+	return false, "", ""
 }
 
 // GetSessionStats returns a copy of the accumulated session stats.

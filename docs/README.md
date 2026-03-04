@@ -25,10 +25,24 @@ Deep-dive guides for specific AI CLI agents supported by HotPlex.
 - **[OpenCode Provider](providers/opencode.md)**: Integration with the OpenCode CLI ecosystem.
 
 ## 💬 ChatApps Integration
-- **[ChatApps Guide](chatapps/chatapps-architecture.md)**: Architecture design and user manual for chat platform integration.
-- **[Slack Adapter](chatapps/chatapps-slack.md)**: User & developer manual for Slack full-duplex communication.
-- **[Slack Native Evolution](plans/slack-ai-native-evolution-plan.md)**: Deep dive into the next generation of Slack AI native experience.
+- **[ChatApps Architecture](chatapps/chatapps-architecture.md)**: Architecture design and platform adapter patterns.
+- **[Slack Adapter Manual](chatapps/chatapps-slack-manual.md)**: Comprehensive Slack integration guide (2026 AI-Native Edition).
+- **[Slack Architecture Deep Dive](chatapps/chatapps-slack-architecture.md)**: Technical architecture analysis.
+- **[DingTalk Integration](chatapps/chatapps-dingtalk-analysis.md)**: DingTalk adapter analysis and design.
+- **[Feishu (飞书) Manual](chatapps/chatapps-feishu-manual.md)**: Feishu bot integration guide.
+- **[Feishu Production Checklist](chatapps/chatapps-feishu-production-checklist.md)**: Deployment checklist for Feishu.
+- **[Slack AI-Native Evolution](plans/slack-ai-native-evolution-plan.md)**: Next-generation Slack AI native experience.
+
+## 🔐 Security
+- **[Hooks Architecture](hooks-architecture.md)**: Event hooks system for extensibility.
+
+## 📋 Design & Implementation Records
+- **[Native Brain Architecture](plans/native-brain-architecture_zh.md)**: AI native UX architecture design.
+- **[Session Storage Design](plans/chatapp-message-storage-design.md)**: Message persistence design.
+- **[HotPlex Storage Plugin](plans/hotplex-storage-plugin-design.md)**: Storage extensibility design.
+- **[Slack Channel Workdir Design](plans/2026-03-03-slack-channel-workdir-design.md)**: Per-channel working directory design.
 
 ---
 
-*Last Updated: 2026-02-26*
+*Last Updated: 2026-03-04*
+*Version: v0.17.0*

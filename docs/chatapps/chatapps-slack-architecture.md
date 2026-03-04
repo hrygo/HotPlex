@@ -93,13 +93,13 @@
 下行消息依据逻辑功能被划分为五个功能区，由 `ZoneOrderProcessor` 保证其视觉顺序：
 
 ### 3.1 区域定义与策略
-| 区域                          | 索引 | 包含事件                                        | 更新/清理策略                                                                                     |
-| :---------------------------- | :--- | :---------------------------------------------- | :------------------------------------------------------------------------------------------------ |
-| **Initialization (初始化区)** | 0    | `session_start`, `engine_starting`              | **临时锚点**：最先出现，提供极速响应感（如 "Initializing..."），Turn 结束或解答生成后 3 秒自毁。  |
-| **Thinking (思维修炼区)**     | 1    | `thinking`, `plan_mode`                         | **游牧态更新**：In-place 更新，UI 上采用 Loading 特效，最多保留 1 条记录，最终出结果前销毁。      |
-| **Action (行动交互区)**       | 2    | `tool_use`, `tool_result`, `permission_request` | **半持久/摘要**：工具调用使用摘要。支持滑动窗口逻辑。                                             |
-| **Output (最终展示区)**       | 3    | `answer`, `ask_user_question`, `error`          | **流式覆盖**：全文保持单消息打字机效果。它是对话核心，长久保留。                                  |
-| **Summary (数据结算区)**      | 4    | `session_stats`                                 | **结尾标志**：最后追加，显示 耗时、Token 统计。它的出现标志着 Turn 终结并触发全体前置 Zone 清理。 |
+| 区域                          | 索引 | 包含事件                                         | 更新/清理策略                                                                     |
+| :---------------------------- | :--- | :----------------------------------------------- | :-------------------------------------------------------------------------------- |
+| **Initialization (初始化区)** | 0    | `session_start`, `engine_starting`               | **即时状态感知**：基于 `assistant.write` API 更新实时状态，不再发送多余消息。     |
+| **Thinking (思维修炼区)**     | 1    | `thinking`, `plan_mode`                          | **动态状态流**：在状态栏通过打字机效果反馈思路，保留首条锚点 Context Block。      |
+| **Action (行动交互区)**       | 2    | `tool_use`, `permission_request`, `danger_block` | **工作流控制**：支持 **Space Folding (空间折叠)** 机制，超大输出自动存入 Thread。 |
+| **Output (最终展示区)**       | 3    | `answer`, `ask_user_question`, `error`           | **原生流式响应**：全文保持单消息打字机效果。它是对话核心，长久保留。              |
+| **Summary (数据结算区)**      | 4    | `session_stats`                                  | **结尾标志**：最后追加耗时、Token 统计。触发全体前置 Zone 清理。                  |
 
 ### 3.2 运行模式比较
 - **Socket Mode**：通过 WebSocket 长连接（`xapp` token），无需公网 IP，最适合内网部署与开发调试。
@@ -109,15 +109,15 @@
 
 ## 4. 插件化消息处理流水线 (Processor Chain)
 
-| 顺序 | 处理器名称     | 核心职责                                                                 |
-| :--- | :------------- | :----------------------------------------------------------------------- |
-| 1    | **Filter**     | 丢弃噪音事件（如 `system`, `user_message_received`, `raw` 等）。         |
-| 2    | **ZoneOrder**  | 强制执行 Zone 0-4 的空间时序，避免乱序，确保 `ZoneInitialization` 先行。 |
-| 3    | **RateLimit**  | 会话级消息节流（100ms 最小间隔，1s 内最大更新 1 次）。                   |
-| 4    | **Thread**     | 自动发现并关联 `thread_ts` 缓存。                                        |
-| 5    | **Aggregator** | 执行各区域的滑动窗口逻辑（如超过 8 个 Action 后自动剔除旧项）。          |
-| 6    | **Format**     | 将 Markdown 链接、图片、代码块转换为 `mrkdwn` 语法。                     |
-| 7    | **Chunk**      | 当单条内容 > 4000 字符时，自动切分为多个 Block 发送。                    |
+| 顺序 | 处理器名称     | 核心职责                                                                          |
+| :--- | :------------- | :-------------------------------------------------------------------------------- |
+| 1    | **Filter**     | [绝对黑洞策略] 丢弃 `raw`, `system`, `user`, `user_message_received` 等冗余事件。 |
+| 2    | **ZoneOrder**  | 强制执行 Zone 0-4 的空间时序，避免乱序，确保 `ZoneInitialization` 先行。          |
+| 3    | **RateLimit**  | 会话级消息节流（100ms 最小间隔，1s 内最大更新 1 次）。                            |
+| 4    | **Thread**     | 自动发现并关联 `thread_ts` 缓存。                                                 |
+| 5    | **Aggregator** | 执行各区域的滑动窗口逻辑（如超过 8 个 Action 后自动剔除旧项）。                   |
+| 6    | **Format**     | 将 Markdown 链接、图片、代码块转换为 `mrkdwn` 语法。                              |
+| 7    | **Chunk**      | 当单条内容 > 4000 字符时，自动切分为多个 Block 发送。                             |
 
 ---
 
@@ -135,14 +135,15 @@
 
 ### 5.2 交互按钮 (Interaction) 协议
 所有交互式组件的 `action_id` 遵循以下格式：`prefix:session_id:original_msg_id`。
-- **审批**：`plan_approve`, `plan_deny`, `perm_allow`, `perm_deny`
+- **审批与拦截**：`plan_approve`, `plan_deny`, `perm_allow`, `perm_deny`, `danger_confirm`, `danger_cancel`
 - **控制**：`cmd_cancel`
 
 ### 5.3 状态反馈 (Reactions)
-- `:inbox:` - 接收成功。
-- `:brain:` - 推理中。
-- `:white_check_mark:` - 任务成功。
-- `:x:` - 任务失败。
+- `:inbox:` - **第一感知**：ACK 确认。
+- `:brain:` - **思维感知**：进入 Engine 执行。
+- ✅ - **终态感知**：任务成功。
+- ❌ - **故障感知**：任务失败。
+- ⚠️ - **风险感知**：触发 WAF 拦截或交互挂起。
 
 ---
 

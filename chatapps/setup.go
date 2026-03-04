@@ -22,15 +22,27 @@ import (
 
 // Setup initializes all enabled ChatApps and their dedicated Engines.
 // It returns an http.Handler that handles all webhook routes.
-func Setup(ctx context.Context, logger *slog.Logger) (http.Handler, *AdapterManager, error) {
+// The configDir parameter takes priority over CHATAPPS_CONFIG_DIR environment variable.
+func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.Handler, *AdapterManager, error) {
 	// Config directory search priority:
-	// 1. CHATAPPS_CONFIG_DIR (backward compatibility)
-	// 2. ~/.hotplex/configs (user config)
-	// 3. ./chatapps/configs (default)
-	configDir := os.Getenv("CHATAPPS_CONFIG_DIR")
+	// 1. configDir parameter (--config flag, highest)
+	// 2. CHATAPPS_CONFIG_DIR environment variable
+	// 3. ~/.hotplex/configs (user config)
+	// 4. ./chatapps/configs (default)
+	dir := ""
 
-	if configDir == "" {
-		// Try user config directory
+	// 1. configDir parameter (highest priority)
+	if len(configDir) > 0 && configDir[0] != "" {
+		dir = configDir[0]
+	}
+
+	// 2. CHATAPPS_CONFIG_DIR env var
+	if dir == "" {
+		dir = os.Getenv("CHATAPPS_CONFIG_DIR")
+	}
+
+	// 3. User config directory
+	if dir == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			logger.Debug("Could not determine user home directory", "error", err)
@@ -39,25 +51,26 @@ func Setup(ctx context.Context, logger *slog.Logger) (http.Handler, *AdapterMana
 			if _, err := os.Stat(userConfigDir); err != nil {
 				logger.Debug("User config directory does not exist", "path", userConfigDir, "error", err)
 			} else {
-				configDir = userConfigDir
-				logger.Debug("Using user config directory", "path", configDir)
+				dir = userConfigDir
+				logger.Debug("Using user config directory", "path", dir)
 			}
 		}
 	}
 
-	if configDir == "" {
-		configDir = "chatapps/configs"
+	// 4. Default config directory
+	if dir == "" {
+		dir = "chatapps/configs"
 		// Check if default config directory exists
-		if _, err := os.Stat(configDir); os.IsNotExist(err) {
-			logger.Debug("Default config directory not found, skipping config loading", "path", configDir)
-			configDir = ""
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			logger.Debug("Default config directory not found, skipping config loading", "path", dir)
+			dir = ""
 		}
 	}
 
 	var loader *ConfigLoader
 	var err error
-	if configDir != "" {
-		loader, err = NewConfigLoader(configDir, logger)
+	if dir != "" {
+		loader, err = NewConfigLoader(dir, logger)
 		if err != nil {
 			logger.Warn("Failed to load platform configs, using defaults", "error", err)
 			// Don't fail completely, try to continue with env-based config
