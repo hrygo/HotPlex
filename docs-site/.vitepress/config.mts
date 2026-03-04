@@ -78,7 +78,16 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Ecosystem', link: '/guide/chatapps' },
-      { text: 'Reference', link: '/reference/api' },
+      {
+        text: 'Manuals',
+        items: [
+          { text: 'ChatApps Manual', link: '/reference/chatapps' },
+          { text: 'Engine Manual', link: '/reference/engine' },
+          { text: 'Provider Manual', link: '/reference/provider' },
+          { text: 'Internal Reference', link: '/reference/internal' },
+          { text: 'API Specification', link: '/reference/api' },
+        ]
+      },
       { text: 'Blog', link: '/blog/' },
       { text: 'GitHub', link: 'https://github.com/hrygo/hotplex' }
     ],
@@ -93,6 +102,15 @@ export default defineConfig({
             { text: 'API Specification', link: '/reference/api' },
             { text: 'Protocol', link: '/reference/protocol' },
             { text: 'Hooks API', link: '/reference/hooks-api' },
+          ]
+        },
+        {
+          text: 'Package Manuals',
+          items: [
+            { text: 'ChatApps', link: '/reference/chatapps' },
+            { text: 'Engine', link: '/reference/engine' },
+            { text: 'Provider', link: '/reference/provider' },
+            { text: 'Internal Subsystems', link: '/reference/internal' },
           ]
         }
       ],

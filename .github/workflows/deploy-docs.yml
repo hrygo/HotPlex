@@ -8,6 +8,7 @@ on:
     paths:
       - 'docs-site/**'
       - 'docs/images/**'
+      - '**/README.md'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 

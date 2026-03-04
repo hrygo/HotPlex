@@ -131,6 +131,28 @@ features:
   </div>
 </div>
 
+## Artisanal Manuals
+
+<div class="audience-section">
+  <div class="audience-card">
+    <h3>ChatApps Manual</h3>
+    <p>Deep dive into multi-platform connectors, Block Kit mapping, and message pipelines.</p>
+    <a href="/reference/chatapps" class="audience-btn">Explore ChatApps</a>
+  </div>
+  
+  <div class="audience-card">
+    <h3>Engine Manual</h3>
+    <p>Understand the core control plane, hot-multiplexing pool, and session isolation.</p>
+    <a href="/reference/engine" class="audience-btn">Master the Engine</a>
+  </div>
+
+  <div class="audience-card">
+    <h3>Provider Manual</h3>
+    <p>Learn how to abstract and integrate any AI CLI agent into the HotPlex ecosystem.</p>
+    <a href="/reference/provider" class="audience-btn">Extend Providers</a>
+  </div>
+</div>
+
 <div style="text-align: center; margin: 60px 0;">
   <h2>Engineering Excellence</h2>
   <p style="max-width: 600px; margin: 0 auto; opacity: 0.8;">
