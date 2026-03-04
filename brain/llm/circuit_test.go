@@ -40,7 +40,7 @@ func TestCircuitBreaker_StateTransitions(t *testing.T) {
 		return nil
 	})
 	assert.NoError(t, err)
-	
+
 	// Circuit should be closed now
 	assert.Equal(t, CircuitClosed, cb.GetState())
 }
@@ -120,7 +120,7 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 
 	stats := cb.GetStats()
 	assert.Equal(t, uint64(5), stats.TotalRequests)
-	assert.Equal(t, uint64(3), stats.FailRequests) // 0, 2, 4 failed
+	assert.Equal(t, uint64(3), stats.FailRequests)    // 0, 2, 4 failed
 	assert.Equal(t, uint64(2), stats.SuccessRequests) // 1, 3 succeeded
 }
 

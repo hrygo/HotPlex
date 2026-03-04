@@ -9,7 +9,7 @@ import (
 
 // RetryClient wraps an LLM client with retry and backoff logic.
 type RetryClient struct {
-	client       interface {
+	client interface {
 		Chat(ctx context.Context, prompt string) (string, error)
 		Analyze(ctx context.Context, prompt string, target any) error
 		ChatStream(ctx context.Context, prompt string) (<-chan string, error)

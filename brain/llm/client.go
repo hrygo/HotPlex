@@ -51,24 +51,24 @@ func NewOpenAIClient(apiKey, endpoint, model string, logger *slog.Logger) *OpenA
 // HealthCheck performs a simple health check by making a minimal API call.
 func (c *OpenAIClient) HealthCheck(ctx context.Context) HealthStatus {
 	start := time.Now()
-	
+
 	// Simple ping with minimal prompt
 	_, err := c.Chat(ctx, "ping")
 	latency := time.Since(start).Milliseconds()
-	
+
 	status := HealthStatus{
 		Provider:  "openai",
 		Model:     c.model,
 		LatencyMs: latency,
 	}
-	
+
 	if err != nil {
 		status.Healthy = false
 		status.Error = err.Error()
 	} else {
 		status.Healthy = true
 	}
-	
+
 	return status
 }
 

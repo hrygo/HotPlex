@@ -59,14 +59,14 @@ type CircuitBreaker struct {
 	config  CircuitBreakerConfig
 	state   *atomic.String
 	mu      sync.RWMutex
-	
+
 	// Metrics
-	totalRequests     *atomic.Uint64
-	successRequests   *atomic.Uint64
-	failRequests      *atomic.Uint64
-	circuitOpens      *atomic.Uint64
-	lastStateChange   *atomic.Time
-	
+	totalRequests   *atomic.Uint64
+	successRequests *atomic.Uint64
+	failRequests    *atomic.Uint64
+	circuitOpens    *atomic.Uint64
+	lastStateChange *atomic.Time
+
 	// Manual control
 	forceOpen   *atomic.Bool
 	forceClosed *atomic.Bool

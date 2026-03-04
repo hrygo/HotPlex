@@ -34,14 +34,14 @@ type MetricsCollector struct {
 	activeRequestsGauge metric.Int64UpDownCounter
 
 	// Local counters for aggregation (fallback if OTel not available)
-	mu                    sync.RWMutex
-	totalInputTokens      int64
-	totalOutputTokens     int64
-	totalCost             float64
-	totalErrors           int64
-	totalRequests         int64
-	requestLatencies      []float64
-	maxLatencySamples     int
+	mu                sync.RWMutex
+	totalInputTokens  int64
+	totalOutputTokens int64
+	totalCost         float64
+	totalErrors       int64
+	totalRequests     int64
+	requestLatencies  []float64
+	maxLatencySamples int
 }
 
 // MetricsConfig holds configuration for metrics collection.

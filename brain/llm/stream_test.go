@@ -48,7 +48,7 @@ func TestChatStream_ContextCancellation(t *testing.T) {
 	client := NewOpenAIClient(apiKey, "", "gpt-4o-mini", nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	stream, err := client.ChatStream(ctx, "Write a long story")
 	assert.NoError(t, err)
 

@@ -27,13 +27,13 @@ type CostCalculator struct {
 
 // ModelPricing represents pricing for a model.
 type ModelPricing struct {
-	ModelName        string
-	Provider         string
-	CostPer1KInput   float64 // USD per 1K input tokens
-	CostPer1KOutput  float64 // USD per 1K output tokens
-	CostPer1KCache   float64 // USD per 1K cached input tokens (if applicable)
-	Currency         string
-	EffectiveDate    time.Time
+	ModelName       string
+	Provider        string
+	CostPer1KInput  float64 // USD per 1K input tokens
+	CostPer1KOutput float64 // USD per 1K output tokens
+	CostPer1KCache  float64 // USD per 1K cached input tokens (if applicable)
+	Currency        string
+	EffectiveDate   time.Time
 }
 
 // SessionCost tracks costs for a single session.
@@ -52,11 +52,11 @@ type SessionCost struct {
 
 // ModelUsage tracks usage for a specific model within a session.
 type ModelUsage struct {
-	ModelName     string
-	InputTokens   int64
-	OutputTokens  int64
-	Cost          float64
-	RequestCount  int64
+	ModelName    string
+	InputTokens  int64
+	OutputTokens int64
+	Cost         float64
+	RequestCount int64
 }
 
 // DefaultModelPricing returns default pricing for common models.

@@ -112,7 +112,7 @@ func TestCostCalculator_CountTokens(t *testing.T) {
 	cc := NewCostCalculator()
 
 	tests := []struct {
-		text     string
+		text      string
 		minTokens int
 		maxTokens int
 	}{
@@ -229,15 +229,15 @@ func TestRateLimiter_QueueFull(t *testing.T) {
 	err = rl.Wait(ctx)
 	assert.Error(t, err)
 	// Error should be either "queue full" or timeout
-	assert.True(t, 
-		containsSubstring(err.Error(), "queue full") || 
-		containsSubstring(err.Error(), "timeout"),
+	assert.True(t,
+		containsSubstring(err.Error(), "queue full") ||
+			containsSubstring(err.Error(), "timeout"),
 		"expected queue full or timeout error, got: %v", err)
 }
 
 func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && 
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
+		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
 			findSubstring(s, substr)))
 }
 

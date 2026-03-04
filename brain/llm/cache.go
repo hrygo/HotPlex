@@ -10,8 +10,8 @@ import (
 
 // CacheKey represents a unique cache key for LLM requests.
 type CacheKey struct {
-	Prompt  string
-	Model   string
+	Prompt    string
+	Model     string
 	IsAnalyze bool
 }
 

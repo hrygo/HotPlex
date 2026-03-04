@@ -128,27 +128,27 @@ func DefaultPriorityConfig() PriorityConfig {
 
 // PriorityScheduler manages priority-based request scheduling.
 type PriorityScheduler struct {
-	config     PriorityConfig
-	queue      *PriorityQueue
-	queueSize  *atomic.Int32
-	dropped    *atomic.Int64
-	processed  *atomic.Int64
-	
+	config    PriorityConfig
+	queue     *PriorityQueue
+	queueSize *atomic.Int32
+	dropped   *atomic.Int64
+	processed *atomic.Int64
+
 	// Per-priority stats
-	highProcessed    *atomic.Int64
-	mediumProcessed  *atomic.Int64
-	lowProcessed     *atomic.Int64
-	highDropped      *atomic.Int64
-	mediumDropped    *atomic.Int64
-	lowDropped       *atomic.Int64
-	
+	highProcessed   *atomic.Int64
+	mediumProcessed *atomic.Int64
+	lowProcessed    *atomic.Int64
+	highDropped     *atomic.Int64
+	mediumDropped   *atomic.Int64
+	lowDropped      *atomic.Int64
+
 	// Condition for waiting
 	cond *sync.Cond
-	
+
 	// Shutdown
 	shutdown   *atomic.Bool
 	shutdownCh chan struct{}
-	
+
 	mu sync.RWMutex
 }
 
@@ -184,13 +184,13 @@ func NewPriorityScheduler(config PriorityConfig) *PriorityScheduler {
 		shutdown:        atomic.NewBool(false),
 		shutdownCh:      make(chan struct{}),
 	}
-	
+
 	ps.cond = sync.NewCond(&ps.mu)
 	heap.Init(ps.queue)
-	
+
 	// Start cleanup goroutine
 	go ps.startCleanup()
-	
+
 	return ps
 }
 
@@ -279,13 +279,13 @@ func (ps *PriorityScheduler) Enqueue(ctx context.Context, id string, priority Pr
 
 	// Check queue size
 	currentSize := ps.queueSize.Load()
-	
+
 	// Check if we need to drop low priority requests
 	if int(currentSize) >= ps.config.MaxQueueSize {
 		if ps.config.EnableLowPriorityDrop && priority == PriorityLow {
 			ps.recordDrop(priority)
 			ps.lowDropped.Inc()
-			
+
 			if ps.config.Logger != nil {
 				ps.config.Logger.Warn("low priority request dropped (queue full)",
 					"id", id)
@@ -325,7 +325,7 @@ func (ps *PriorityScheduler) Dequeue(ctx context.Context) (*PriorityRequest, err
 		if ps.shutdown.Load() {
 			return nil, fmt.Errorf("scheduler is shutdown")
 		}
-		
+
 		// Wait with context
 		done := make(chan struct{})
 		go func() {
@@ -456,9 +456,9 @@ func (ps *PriorityScheduler) Clear() {
 
 // PriorityClient wraps a scheduler with execution capabilities.
 type PriorityClient struct {
-	scheduler  *PriorityScheduler
-	timeout    time.Duration
-	logger     *slog.Logger
+	scheduler *PriorityScheduler
+	timeout   time.Duration
+	logger    *slog.Logger
 }
 
 // NewPriorityClient creates a new priority client.

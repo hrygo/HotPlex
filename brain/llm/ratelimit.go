@@ -46,19 +46,19 @@ type queuedRequest struct {
 
 // RateLimitStats holds rate limiting statistics.
 type RateLimitStats struct {
-	TotalRequests   int64
-	QueuedRequests  int64
+	TotalRequests    int64
+	QueuedRequests   int64
 	RejectedRequests int64
-	AvgWaitTimeMs   float64
-	LastReset       time.Time
+	AvgWaitTimeMs    float64
+	LastReset        time.Time
 }
 
 // AtomicRateLimitStats holds atomic stats for concurrent access.
 type AtomicRateLimitStats struct {
-	TotalRequests   atomic.Int64
-	QueuedRequests  atomic.Int64
+	TotalRequests    atomic.Int64
+	QueuedRequests   atomic.Int64
 	RejectedRequests atomic.Int64
-	AvgWaitTimeMs   atomic.Float64
+	AvgWaitTimeMs    atomic.Float64
 }
 
 // NewRateLimiter creates a new rate limiter.
@@ -217,7 +217,7 @@ func (rl *RateLimiter) SetRate(requestsPerSecond float64, burstSize int) {
 	rl.limiter.SetBurst(burstSize)
 	rl.config.RequestsPerSecond = requestsPerSecond
 	rl.config.BurstSize = burstSize
-	
+
 	// Update atomic stats for consistency
 	rl.atomics.AvgWaitTimeMs.Store(0)
 }
