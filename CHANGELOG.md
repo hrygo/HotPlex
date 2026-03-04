@@ -1,5 +1,98 @@
 # CHANGELOG.md
 
+## [v0.18.0] - 2026-03-04
+
+### 🚀 Native Brain & ChatApps Platform Expansion
+
+This release introduces the **Native Brain** system for intelligent LLM routing, complete **Feishu (飞书) adapter** support, **Slack Native Streaming**, and comprehensive **Danger Block WAF** security闭环. ChatApps is now positioned as the primary access channel.
+
+### Added
+
+#### Native Brain System (#177)
+- **LLM Router** - Intelligent multi-LLM routing with priority-based failover, circuit breaker, and rate limiting.
+- **Budget Management** - Token budget tracking and cost control across multiple LLM providers.
+- **Health Monitoring** - Provider health checks with automatic failover and recovery.
+- **Cache Layer** - Multi-tier caching (Redis-compatible) for LLM responses.
+- **Retry & Circuit Breaker** - Exponential backoff retry with configurable circuit breaker patterns.
+- **Metrics & Observability** - Comprehensive metrics collection for LLM calls, costs, and performance.
+
+#### Feishu (飞书) Adapter
+- **Complete Adapter Implementation** - Full-featured Feishu custom bot integration.
+- **Card Builder** - Rich card message templates (Thinking, ToolUse, Permission, Answer, Error, SessionStats).
+- **Interactive Handler** - Button callbacks, URL verification, permission dialogs.
+- **Command Handler** - `/reset`, `/help` and other slash commands support.
+- **Signature Verification** - HMAC-SHA256 webhook signature validation.
+- **Pressure Testing Framework** - Load testing tools for production readiness.
+
+#### Slack Native Features
+- **Native Streaming** - Real-time token-by-token streaming using Slack Block Kit.
+- **Assistant Status API** - Visual indicator showing AI thinking/responding state.
+- **Socket Mode** - Full Socket Mode support for real-time bidirectional communication.
+- **Slash Commands** - `/ai`, `/reset`, `/help` command support.
+- **Interactive Messages** - Button interactions, modal dialogs, block actions.
+
+#### Security Enhancements
+- **Danger Block WAF 闭环** - Interactive security confirmation blocks requiring user approval before executing dangerous commands.
+- **Rate Limiting** - Per-user and per-channel rate limiting to prevent abuse.
+- **Security Hardening** - Enhanced permission policies and user filtering.
+
+#### CLI Enhancements
+- **--config Flag** - New command-line parameter to specify ChatApps config directory (highest priority).
+
+### Changed
+
+#### Documentation & Quick Start
+- **ChatApps as Primary Channel** - Updated Quick Start and README to position ChatApps as the recommended access method.
+- **Platform-First Documentation** - Comprehensive manuals for Slack, Feishu, and other platforms.
+- **Quick Start Simplification** - Streamlined README with links to detailed docs.
+
+#### Architecture Refactoring
+- **Engine Handler Simplification** - Refactored `engine_handler.go` for cleaner separation of concerns.
+- **Processor Chain Cleanup** - Removed redundant processors and streamlined the chain.
+- **Status Manager** - New internal status management for AI state tracking.
+
+### Fixed
+
+#### Rate Limiting
+- **Dedup TTL Adjustment** - Reduced deduplication TTL from 30s to 5s to prevent normal messages being skipped.
+- **Rate Limit Bug** - Fixed rate limiting logic to properly handle burst traffic.
+
+#### Session Management
+- **Session Cleanup Race Condition** - Fixed race condition in `/reset` command by ensuring process termination before marker deletion.
+- **Stale Session Files** - Added automatic deletion of stale CLI session files to prevent "Session ID is already in use" errors.
+- **Engine API Consolidation** - Unified session cleanup into Engine API, removing duplicated code.
+
+#### Bug Fixes
+- **Issue #130** - Removed unused result variable.
+- **Lint Errors** - Fixed various lint warnings across Feishu adapter.
+
+### Documentation
+
+- **Quick Start Guides** - English and Chinese quick start documentation with ChatApps as primary method.
+- **Slack Manual** - Comprehensive Slack integration manual with Socket Mode, streaming, and Assistant Status.
+- **Feishu Manual** - Complete Feishu (飞书) adapter documentation in both languages.
+- **Production Checklists** - Platform-specific production deployment checklists.
+- **Architecture Docs** - Updated architecture documentation reflecting Native Brain and ChatApps-first design.
+- **AI Native UX Plan** - v3.0 AI Native UX implementation plan with black hole and space folding concepts.
+
+### Resolved Issues
+
+- Closes #177 - NativeBrain production-grade enhancements (Phase 1)
+- Closes #150/#168 - Slack native assistant integration and security enhancements
+- Closes #168 - Feishu configuration fix
+- Closes #167 - Feishu manual creation
+- Closes #166 - Feishu bilingual documentation
+- Closes #165/#141/#143 - Feishu Phase 3 production readiness
+- Closes #149 - ChatApp message storage plugin design
+- Closes #148/#140 - Feishu Phase 2.3 command handler
+- Closes #147 - Session cleanup v0.17.0
+- Closes #146/#138 - Feishu Phase 2 card builder
+- Closes #144/#134 - Feishu Phase 1 adapter
+- Closes #132 - Dedup TTL fix
+- Closes #129 - Dedup TTL optimization
+
+---
+
 ## [v0.17.0] - 2026-03-02
 
 ### 🚀 ChatApps UX & Stability Enhancements
