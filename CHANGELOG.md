@@ -1,5 +1,22 @@
 # CHANGELOG.md
 
+## [v0.20.0] - 2026-03-05
+
+### 🐳 Docker Multi-Bot Isolation & Config Optimization
+
+This release focuses on hardening the Docker deployment model, specifically addressing multi-bot isolation and providing flexible configuration loading strategies for diversified Slack bot instances.
+
+### Added
+- **Docker Multi-Bot Isolation** - Modified `docker-compose.yml` to provide isolated host paths for different bot instances (`~/.slack/BOT_<ID>`).
+- **Config Loading Differentiation** - Optimized loading strategy:
+  - Primary bot: Now relies on user-level default configurations (`~/.hotplex/configs`) synchronized via `make docker-sync`.
+  - Secondary bot: Uses explicit environment override (`HOTPLEX_CHATAPPS_CONFIG_DIR`) for decoupled configuration.
+
+### Fixed
+- **Docker Path Resolution** - Fixed a critical typo in `docker-compose.yml` (`${HOME}.slack` instead of `${HOME}/.slack`) that prevented proper volume mounting.
+- **Work Directory Mapping** - Unified container work directory to `/home/hotplex/projects/hotplex` to ensure consistency with host-side isolated bot paths.
+
+
 ## [v0.19.0] - 2026-03-05
 
 ### 🚀 Processor Chain Refactoring & Configuration Optimization

@@ -1,0 +1,103 @@
+# =============================================================================
+# HotPlex Slack Adapter Configuration (Secondary Bot)
+# =============================================================================
+# Detailed Setup Guide: docs/chatapps/chatapps-slack.md
+
+# [Required] Platform identifier
+platform: slack
+
+# -----------------------------------------------------------------------------
+# AI Provider Settings
+# -----------------------------------------------------------------------------
+provider:
+  # AI backend type:
+  type: claude-code
+
+  # Global settings
+  enabled: true
+  default_model: sonnet
+  default_permission_mode: bypass-permissions
+  dangerously_skip_permissions: true
+
+# -----------------------------------------------------------------------------
+# Workspace & Engine Settings
+# -----------------------------------------------------------------------------
+engine:
+  # Isolated work directory for the secondary bot (Bot ID: U0AJVRH4YF6)
+  work_dir: /home/hotplex/projects/hotplex
+
+# -----------------------------------------------------------------------------
+# Connection Settings
+# -----------------------------------------------------------------------------
+mode: ${HOTPLEX_SLACK_MODE:-socket}
+server_addr: ${HOTPLEX_SLACK_SERVER_ADDR:-:8080}
+
+# -----------------------------------------------------------------------------
+# AI Identity & Behavior (Sync with primary bot)
+# -----------------------------------------------------------------------------
+system_prompt: |
+  You are HotPlex AI (Secondary), an expert software engineer in a Slack conversation.
+
+  ## Environment
+  - Running under HotPlex engine (stdin/stdout)
+  - Headless mode - cannot prompt for user input
+
+  ## Slack Context
+  - Replies go to thread automatically
+  - Keep answers concise - user expects quick responses
+
+  ## Output
+  - Be concise - short messages preferred
+  - Use bullet lists over paragraphs
+  - Use code blocks for code snippets
+  - Avoid tables - use lists instead
+
+task_instructions: |
+  1. Understand before acting
+  2. Avoid operations requiring user input
+  3. Summarize tool output - don't dump raw data
+  4. Write detailed content to docs/ directory
+
+# -----------------------------------------------------------------------------
+# Feature Toggles
+# -----------------------------------------------------------------------------
+features:
+  chunking:
+    enabled: true
+    max_chars: 4000
+    
+  threading:
+    enabled: true
+
+  rate_limit:
+    enabled: true
+    max_attempts: 3
+    base_delay_ms: 500
+    max_delay_ms: 5000
+
+  markdown:
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Security & Access Control
+# -----------------------------------------------------------------------------
+security:
+  verify_signature: true
+
+  permission:
+    dm_policy: allow
+    group_policy: mention
+    
+    # [Required] Secondary Bot's own User ID
+    bot_user_id: "U0AJVRH4YF6"
+    
+    allowed_users: []
+    blocked_users: []
+    slash_command_rate_limit: 10.0
+
+# -----------------------------------------------------------------------------
+# Session Lifecycle
+# -----------------------------------------------------------------------------
+session:
+  timeout_minutes: 30
+  cleanup_interval_minutes: 5

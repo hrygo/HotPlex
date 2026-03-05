@@ -69,6 +69,9 @@ help: ## Show this help message
 	@$(call SECTION_HEADER,🛠️ Utils)
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## .*$$/ && /@util/ {gsub(/@util /, "", $$2); printf "  ${GREEN}%-20s${NC} %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
 	@$(call SECTION_FOOTER)
+	@$(call SECTION_HEADER,🐳 Docker)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## .*$$/ && /@docker/ {gsub(/@docker /, "", $$2); printf "  ${GREEN}%-20s${NC} %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
+	@$(call SECTION_FOOTER)
 	@printf "\n${DIM}💡 Tip: Use 'make <target> V=1' for verbose output${NC}\n\n"
 
 # =============================================================================
@@ -83,7 +86,11 @@ build: fmt vet tidy ## @build Compile the hotplexd daemon
 # =============================================================================
 # 🔧 INSTALL
 # =============================================================================
-install: build ## @runtime Install and run with config info
+install: build config-info ## @runtime Install and run with config info
+	@printf "${PURPLE}🔥 Starting HotPlex Daemon...${NC}\n"
+	@./$(DIST_DIR)/$(BINARY_NAME)
+
+config-info: ## @util Display current configuration status
 	@printf "\n${BOLD}${CYAN}╭─ 🔧 Configuration Files ─────────────────────────────${NC}\n"
 	@printf "  ${BOLD}📋 Configuration Priority (effective):${NC}\n"
 	@printf "\n"
@@ -123,8 +130,6 @@ install: build ## @runtime Install and run with config info
 		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
 	fi
 	@printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────${NC}\n\n"
-	@printf "${PURPLE}🔥 Starting HotPlex Daemon...${NC}\n"
-	@./$(DIST_DIR)/$(BINARY_NAME)
 
 build-all: fmt vet tidy ## @build Compile for all platforms (Linux/macOS/Windows)
 	@printf "${GREEN}🚀 Building HotPlex Daemon for all platforms (${VERSION})...${NC}\n"
@@ -199,46 +204,7 @@ install-hooks: ## @dev Install Git hooks
 # =============================================================================
 # 🚀 RUNTIME
 # =============================================================================
-run: build ## @runtime Build and start daemon in foreground
-	@printf "\n${BOLD}${CYAN}╭─ 🔧 Configuration Files ─────────────────────────────${NC}\n"
-	@printf "  ${BOLD}📋 Configuration Priority (effective):${NC}\n"
-	@printf "\n"
-	@printf "  ${GREEN}1. Main Config (.env)${NC}\n"
-	@if [ -f .env ]; then \
-		printf "     ${GREEN}✓${NC} Active\n"; \
-		printf "     ${CYAN}Path:${NC} $$(pwd)/.env\n"; \
-	else \
-		printf "     ${YELLOW}⚠${NC} Not found\n"; \
-		printf "     ${CYAN}Template:${NC} $$(pwd)/.env.example\n"; \
-	fi
-	@printf "\n"
-	@printf "  ${GREEN}2. ChatApps Configs (priority order)${NC}\n"
-	@printf "     ${CYAN}a) --config flag / HOTPLEX_CHATAPPS_CONFIG_DIR:${NC}\n"
-	@if [ -n "$$HOTPLEX_CHATAPPS_CONFIG_DIR" ]; then \
-		printf "         ${GREEN}✓${NC} Using: $$HOTPLEX_CHATAPPS_CONFIG_DIR\n"; \
-	else \
-		printf "         ${YELLOW}Not set${NC}\n"; \
-	fi
-	@printf "     ${CYAN}b) User config (~/.hotplex/configs):${NC}\n"
-	@if [ -d "$HOME/.hotplex/configs" ]; then \
-		printf "         ${GREEN}✓${NC} Active\n"; \
-		printf "         ${CYAN}Path:${NC} $$HOME/.hotplex/configs/\n"; \
-	else \
-		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
-	fi
-	@printf "     ${CYAN}c) Default (./chatapps/configs):${NC}\n"
-	@if [ -d "chatapps/configs" ]; then \
-		printf "         ${GREEN}✓${NC} Active\n"; \
-		printf "         ${CYAN}Path:${NC} $$(pwd)/chatapps/configs/\n"; \
-		for f in chatapps/configs/*.yaml; do \
-			if [ -f "$$f" ]; then \
-				printf "            - $$(basename $$f)\n"; \
-			fi; \
-		done; \
-	else \
-		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
-	fi
-	@printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────${NC}\n\n"
+run: build config-info ## @runtime Build and start daemon in foreground
 	@printf "${PURPLE}🔥 Starting HotPlex Daemon...${NC}\n"
 	@./$(DIST_DIR)/$(BINARY_NAME)
 
@@ -260,47 +226,8 @@ stop: ## @runtime Stop the running daemon and all its child processes
 		printf "${YELLOW}⚠️  No running daemon found${NC}\n"; \
 	fi
 
-restart: build ## @runtime Restart daemon with latest source code
+restart: build config-info ## @runtime Restart daemon with latest source code
 	@mkdir -p $(LOG_DIR)
-	@printf "\n${BOLD}${CYAN}╭─ 🔧 Configuration Files ─────────────────────────────${NC}\n"
-	@printf "  ${BOLD}📋 Configuration Priority (effective):${NC}\n"
-	@printf "\n"
-	@printf "  ${GREEN}1. Main Config (.env)${NC}\n"
-	@if [ -f .env ]; then \
-		printf "     ${GREEN}✓${NC} Active\n"; \
-		printf "     ${CYAN}Path:${NC} $$(pwd)/.env\n"; \
-	else \
-		printf "     ${YELLOW}⚠${NC} Not found\n"; \
-		printf "     ${CYAN}Template:${NC} $$(pwd)/.env.example\n"; \
-	fi
-	@printf "\n"
-	@printf "  ${GREEN}2. ChatApps Configs (priority order)${NC}\n"
-	@printf "     ${CYAN}a) --config flag / HOTPLEX_CHATAPPS_CONFIG_DIR:${NC}\n"
-	@if [ -n "$$HOTPLEX_CHATAPPS_CONFIG_DIR" ]; then \
-		printf "         ${GREEN}✓${NC} Using: $$HOTPLEX_CHATAPPS_CONFIG_DIR\n"; \
-	else \
-		printf "         ${YELLOW}Not set${NC}\n"; \
-	fi
-	@printf "     ${CYAN}b) User config (~/.hotplex/configs):${NC}\n"
-	@if [ -d "$HOME/.hotplex/configs" ]; then \
-		printf "         ${GREEN}✓${NC} Active\n"; \
-		printf "         ${CYAN}Path:${NC} $$HOME/.hotplex/configs/\n"; \
-	else \
-		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
-	fi
-	@printf "     ${CYAN}c) Default (./chatapps/configs):${NC}\n"
-	@if [ -d "chatapps/configs" ]; then \
-		printf "         ${GREEN}✓${NC} Active\n"; \
-		printf "         ${CYAN}Path:${NC} $$(pwd)/chatapps/configs/\n"; \
-		for f in chatapps/configs/*.yaml; do \
-			if [ -f "$$f" ]; then \
-				printf "            - $$(basename $$f)\n"; \
-			fi; \
-		done; \
-	else \
-		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
-	fi
-	@printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────${NC}\n\n"
 	@./scripts/restart_helper.sh "$$(pwd)/$(DIST_DIR)/$(BINARY_NAME)" "$(LOG_FILE)"
 
 # =============================================================================
@@ -367,27 +294,42 @@ DOCKER_TAG      ?= latest
 DOCKER_REGISTRY ?= ghcr.io/hrygo
 HOST_UID        ?= $(shell id -u)
 
-docker-build:
-	docker build \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg HOST_UID=$(HOST_UID) \
-		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+docker-build: ## @docker Build image using docker-compose
+	@printf "${CYAN}🐳 Building Docker images via Compose...${NC}\n"
+	HOST_UID=$(HOST_UID) VERSION=$(VERSION) docker compose build
 
-docker-build-tag:
-	docker build \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg HOST_UID=$(HOST_UID) \
-		-t $(DOCKER_IMAGE):$(DOCKER_TAG) \
-		-t $(DOCKER_IMAGE):$(VERSION) .
+docker-build-tag: docker-build ## @docker Build and tag image
+	@printf "${GREEN}✅ Build complete.${NC}\n"
 
-docker-run:
-	docker run -d --name hotplex \
-		-p 18080:8080 \
-		-v $(HOME)/.hotplex:/.hotplex \
-		-v $(HOME)/.claude:/home/hotplex/.claude:rw \
-		-v $(HOME)/.claude.json:/home/hotplex/.claude.json:rw \
-		-v $(HOME)/projects:/home/hotplex/projects:rw \
-		$(DOCKER_IMAGE):$(DOCKER_TAG)
+docker-sync: ## @docker Sync project configs to ~/.hotplex
+	@printf "${CYAN}🔄 Synchronizing project configs...${NC}\n"
+	@mkdir -p $(HOME)/.hotplex/configs
+	@# Sync chatapps configs (YAML files)
+	@cp chatapps/configs/*.yaml $(HOME)/.hotplex/configs/ 2>/dev/null || true
+	@printf "${GREEN}✅ Configuration sync complete.${NC}\n"
+
+docker-run: docker-up ## @docker Run daemon using docker-compose (alias for docker-up)
+
+docker-up: docker-sync ## @docker Start with docker-compose
+	@printf "${PURPLE}🚀 Starting HotPlex via Docker Compose...${NC}\n"
+	@printf "${DIM}Note: Ensure your proxy software has 'Allow LAN' enabled.${NC}\n"
+	HOST_UID=$(HOST_UID) docker compose up -d
+	@printf "${GREEN}✅ HotPlex is running!${NC}\n"
+	@printf "${DIM}Use 'make docker-logs' to see logs or 'make docker-down' to stop.${NC}\n"
+
+docker-down: ## @docker Stop and remove docker-compose containers
+	@printf "${YELLOW}🛑 Stopping HotPlex containers...${NC}\n"
+	docker compose down
+	@printf "${GREEN}✅ Done.${NC}\n"
+
+docker-logs: ## @docker Tail docker-compose logs
+	docker compose logs -f
+
+docker-check-net: ## @docker Verify container network connectivity
+	@printf "${CYAN}🔍 Checking container network...${NC}\n"
+	@docker exec hotplex nc -zv host.docker.internal 15721 || printf "${RED}✗ LLM Proxy (15721) Unreachable${NC}\n"
+	@docker exec hotplex nc -zv host.docker.internal 7897 || printf "${RED}✗ General Proxy (7897) Unreachable${NC}\n"
+	@printf "${GREEN}✅ Connectivity check finished.${NC}\n"
 
 docker-push:
 	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
@@ -407,4 +349,4 @@ docker-buildx:
 docker-clean:
 	docker rmi $(DOCKER_IMAGE):$(DOCKER_TAG) || true
 
-.PHONY: docker-build docker-build-tag docker-run docker-push docker-push-tag docker-buildx docker-clean
+.PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable config-info docker-build docker-build-tag docker-run docker-sync docker-up docker-down docker-logs docker-push docker-push-tag docker-buildx docker-clean

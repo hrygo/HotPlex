@@ -1,5 +1,3 @@
-version: '3.8'
-
 # HotPlex Docker Compose Deployment
 # Start with: docker compose up -d
 
@@ -11,26 +9,70 @@ services:
     build:
       context: .
       args:
-        # Pass current host UID to match permissions
         - HOST_UID=${HOST_UID:-1000}
+        - VERSION=${VERSION:-dev}
     image: ghcr.io/hrygo/hotplex:latest
     container_name: hotplex
     ports:
       - "18080:8080"
     volumes:
       # Map host configurations into the container for seamless transition
-      - ${HOME}/.hotplex:/.hotplex
+      # Note: Home in container is /home/hotplex
+      - ${HOME}/.hotplex:/home/hotplex/.hotplex
       - ${HOME}/.claude:/home/hotplex/.claude:rw
       - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
-      - ${HOME}/projects:/home/hotplex/projects:rw
+      - ${HOME}/.slack/BOT_U0AHRCL1KCM:/home/hotplex/projects:rw
+      # Optional: mount project specific ChatApp configs if needed
+    env_file:
+      - .env
     environment:
+      - HOST_UID=${HOST_UID:-1000}
       - HOTPLEX_PORT=8080
-      - HOTPLEX_LOG_LEVEL=info
-      - HOTPLEX_IDLE_TIMEOUT=30m
-      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      # Dedicated LLM Proxy for Claude Code
+      - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
+      # General Network Access via Clash Verge (Detected port: 7897)
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8080/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+    restart: unless-stopped
+
+  # ---------------------------------------------------------
+  # Secondary Bot Build: Using different tokens
+  # ---------------------------------------------------------
+  hotplex-secondary:
+    image: ghcr.io/hrygo/hotplex:latest
+    container_name: hotplex-secondary
+    ports:
+      - "18081:8080"
+    volumes:
+      - ${HOME}/.hotplex:/home/hotplex/.hotplex
+      - ${HOME}/.claude:/home/hotplex/.claude:rw
+      - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
+      - ${HOME}/.slack/BOT_U0AJVRH4YF6:/home/hotplex/projects:rw
+      # Override the default slack config with secondary one
+      - ./chatapps/configs/slack_secondary.yaml:/app/chatapps/configs/slack.yaml:ro
+    env_file:
+      - .env.secondary
+    environment:
+      - HOST_UID=${HOST_UID:-1000}
+      - HOTPLEX_PORT=8080
+      - HOTPLEX_CHATAPPS_CONFIG_DIR=/app/chatapps/configs
+      - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped

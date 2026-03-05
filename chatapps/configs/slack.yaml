@@ -19,7 +19,7 @@ provider:
   enabled: true
   default_model: sonnet            # Model: sonnet, haiku, opus (Claude); or any model ID (OpenCode)
   default_permission_mode: bypass-permissions # bypassPermissions, acceptEdits, default, dontAsk, plan
-
+  dangerously_skip_permissions: true
   # [Docker/Container Environment - Recommended]
   # In containerized environments (Docker, Kubernetes), it is recommended to enable:
   # dangerously_skip_permissions: true
@@ -48,7 +48,7 @@ provider:
 # Workspace & Engine Settings
 # -----------------------------------------------------------------------------
 engine:
-  work_dir: ~/.slack/BOT_U0AHRCL1KCM/hotplex    # Agent's working directory
+  work_dir: /home/hotplex/projects/hotplex      # Agent's working directory
   # timeout: 30m                                # Max wait for AI response
   # idle_timeout: 30m                           # Session persistence time
 

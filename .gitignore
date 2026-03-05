@@ -90,6 +90,7 @@ yarn-error.log*
 
 .env
 .env.local
+.env.secondary
 .env.*.local
 *.pem
 *.key
