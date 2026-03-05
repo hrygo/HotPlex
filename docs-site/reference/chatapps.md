@@ -5,7 +5,7 @@ The `chatapps` package provides the bridge between HotPlex's core engine and var
 ## 🔄 End-to-End Bidirectional Flow
 
 <div class="architecture-diagram" style="margin: 2rem 0; border-radius: 16px; overflow: hidden; background: #0F172A; box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);">
-  <img src="/hotplex/images/chatapps_flow.svg" alt="HotPlex Architecture Flow" style="display: block; width: 100%; height: auto;" />
+  <img src="/images/chatapps_flow.svg" alt="HotPlex Architecture Flow" style="display: block; width: 100%; height: auto;" />
 </div>
 
 ## 🏛 Architecture Overview

@@ -84,6 +84,7 @@ The edit tool tracks file state. Sequential edits without re-reading cause dupli
 2. **Safety Check**: Check `git status` and architectural constraints in this document.
 3. **Atomic Execution**: Write code in verifiable steps.
 4. **Validation**: `go build ./...` and `go test` must pass before task completion.
+5. **PR Creation**: **MANDATORY** to include `Resolves #<issue-id>` or `Refs #<issue-id>` in PR description body. This links the PR to the issue and enables automatic closure on merge.
 
 ---
 
