@@ -79,10 +79,11 @@ security:
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
 | `HOTPLEX_PORT` | HTTP server port | `8080` |
+| `HOTPLEX_API_KEY` | Primary API Key for control plane authentication | - |
+| `HOTPLEX_API_KEYS` | Multiple API Keys (comma-separated, takes precedence) | - |
 | `HOTPLEX_LOG_LEVEL` | Log level (debug/info/warn/error) | `info` |
+| `HOTPLEX_ALLOWED_ORIGINS` | Comma-separated allowed origins for CORS | `localhost` |
 | `HOTPLEX_CONFIG_DIR` | Configuration directory | `./configs` |
 | `HOTPLEX_METRICS_PATH` | Metrics endpoint path | `/metrics` |
 

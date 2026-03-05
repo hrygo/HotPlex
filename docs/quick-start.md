@@ -8,12 +8,12 @@ Get up and running with HotPlex in 5 minutes.
 
 HotPlex is an **AI Agent Runtime** with multiple access channels:
 
-| Access Channel | Use Case | Recommendation |
-|---------------|----------|----------------|
+| Access Channel                            | Use Case                                    | Recommendation  |
+| ----------------------------------------- | ------------------------------------------- | --------------- |
 | **ChatApps (Slack/Telegram/Feishu/etc.)** | Production, Multi-user, Natural Interaction | ⭐⭐⭐ Recommended |
-| Go SDK | Embedded Integration, Custom Workflows | ⭐⭐ |
-| Standalone Server | Multi-language Clients, Microservices | ⭐⭐ |
-| Python SDK | Quick Prototyping, Data Science | ⭐ |
+| Go SDK                                    | Embedded Integration, Custom Workflows      | ⭐⭐              |
+| Standalone Server                         | Multi-language Clients, Microservices       | ⭐⭐              |
+| Python SDK                                | Quick Prototyping, Data Science             | ⭐               |
 
 **ChatApps is HotPlex's primary access channel**: Through platforms like Slack, Telegram, and Feishu, users can interact with AI agents just like chatting with colleagues - no installation or configuration needed.
 
@@ -54,14 +54,14 @@ Interact with AI agents directly through Slack, Telegram, Feishu, and other mess
 
 ### Supported Platforms
 
-| Platform | Protocol | Status |
-|----------|----------|--------|
-| **Slack** | Socket Mode + Web API | ✅ Stable |
-| **Telegram** | Bot API | ✅ Stable |
-| **Feishu** | Custom Bot | ✅ Stable |
-| **DingTalk** | Callback + Webhook | ✅ Stable |
-| **Discord** | Bot API | 🔄 In Development |
-| **WhatsApp** | Business API | 🔄 In Development |
+| Platform     | Protocol              | Status           |
+| ------------ | --------------------- | ---------------- |
+| **Slack**    | Socket Mode + Web API | ✅ Stable         |
+| **Telegram** | Bot API               | ✅ Stable         |
+| **Feishu**   | Custom Bot            | ✅ Stable         |
+| **DingTalk** | Callback + Webhook    | ✅ Stable         |
+| **Discord**  | Bot API               | 🔄 In Development |
+| **WhatsApp** | Business API          | 🔄 In Development |
 
 ### Step 1: Configure Environment Variables
 
@@ -183,8 +183,11 @@ make build
 ```
 
 ### Step 2: Run
-
 ```bash
+# Generate a secret token
+# export HOTPLEX_API_KEY=$(openssl rand -hex 32)
+export HOTPLEX_API_KEY=your-secret-token
+
 PORT=8080 ./dist/hotplexd
 ```
 
@@ -192,8 +195,9 @@ PORT=8080 ./dist/hotplexd
 
 **WebSocket (any language):**
 ```
-ws://localhost:8080/ws/v1/agent
+ws://localhost:8080/ws/v1/agent?api_key=your-secret-token
 ```
+Or use the `X-API-Key` header.
 
 **OpenCode HTTP/SSE:**
 ```

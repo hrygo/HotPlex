@@ -79,10 +79,11 @@ security:
 
 ### 环境变量
 
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
 | `HOTPLEX_PORT` | HTTP 服务端口 | `8080` |
+| `HOTPLEX_API_KEY` | 用于控制平面身份验证的主 API Key | - |
+| `HOTPLEX_API_KEYS` | 多个 API Key（逗号分隔，优先于 HOTPLEX_API_KEY） | - |
 | `HOTPLEX_LOG_LEVEL` | 日志级别 (debug/info/warn/error) | `info` |
+| `HOTPLEX_ALLOWED_ORIGINS` | 允许的跨域来源（逗号分隔） | `localhost` |
 | `HOTPLEX_CONFIG_DIR` | 配置目录 | `./configs` |
 | `HOTPLEX_METRICS_PATH` | 指标端点路径 | `/metrics` |
 

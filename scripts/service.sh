@@ -202,10 +202,27 @@ macos_install() {
     success "Service loaded"
 
     echo ""
-    info "Installation complete:"
-    printf "  ${CYAN}Binary:${NC}   $BINARY_PATH\n"
-    printf "  ${CYAN}Config:${NC}   $ENV_FILE\n"
-    printf "  ${CYAN}Logs:${NC}     $LOG_FILE\n"
+    printf "${BOLD}${CYAN}╭─ 📦 Installation Complete ─────────────────────────────${NC}\n"
+    printf "  ${GREEN}✓${NC} Binary installed\n"
+    printf "    ${CYAN}Path:${NC} $BINARY_PATH\n"
+    printf "  ${GREEN}✓${NC} Configuration Files\n"
+    printf "    ${CYAN}Main config:${NC}\n"
+    printf "      ${CYAN}Path:${NC} $ENV_FILE\n"
+    if [[ -f "$ENV_FILE" ]]; then
+        printf "      ${GREEN}Status:${NC} Active\n"
+    else
+        printf "      ${YELLOW}Status:${NC} Please create this file\n"
+    fi
+    printf "    ${CYAN}ChatApps configs:${NC}\n"
+    printf "      ${CYAN}Source:${NC} $PROJECT_ROOT/chatapps/configs/\n"
+    for f in "$PROJECT_ROOT"/chatapps/configs/*.yaml; do
+        if [[ -f "$f" ]]; then
+            printf "      - $(basename "$f")\n"
+        fi
+    done
+    printf "  ${GREEN}✓${NC} Logs\n"
+    printf "    ${CYAN}Path:${NC} $LOG_FILE\n"
+    printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────────${NC}\n"
     echo ""
     info "Run 'make service-start' to start the daemon"
 }
@@ -234,6 +251,24 @@ macos_start() {
         launchctl start "$SERVICE_NAME"
     }
     success "Service started"
+
+    printf "\n${BOLD}${CYAN}╭─ 🚀 Service Started ─────────────────────────────────${NC}\n"
+    printf "  ${GREEN}✓${NC} Configuration Files in use\n"
+    printf "    ${CYAN}Main config:${NC}\n"
+    printf "      ${CYAN}Path:${NC} $ENV_FILE\n"
+    printf "    ${CYAN}ChatApps configs:${NC}\n"
+    printf "      ${CYAN}Source:${NC} $PROJECT_ROOT/chatapps/configs/\n"
+    for f in "$PROJECT_ROOT"/chatapps/configs/*.yaml; do
+        if [[ -f "$f" ]]; then
+            printf "      - $(basename "$f")\n"
+        fi
+    done
+    printf "  ${GREEN}✓${NC} Binary\n"
+    printf "    ${CYAN}Path:${NC} $BINARY_PATH\n"
+    printf "  ${GREEN}✓${NC} Logs\n"
+    printf "    ${CYAN}Path:${NC} $LOG_FILE\n"
+    printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────────${NC}\n"
+
     macos_status
 }
 
@@ -376,10 +411,27 @@ linux_install() {
     success "Systemd daemon reloaded"
 
     echo ""
-    info "Installation complete:"
-    printf "  ${CYAN}Binary:${NC}   $BINARY_PATH\n"
-    printf "  ${CYAN}Config:${NC}   $ENV_FILE\n"
-    printf "  ${CYAN}Logs:${NC}     $LOG_FILE\n"
+    printf "${BOLD}${CYAN}╭─ 📦 Installation Complete ─────────────────────────────${NC}\n"
+    printf "  ${GREEN}✓${NC} Binary installed\n"
+    printf "    ${CYAN}Path:${NC} $BINARY_PATH\n"
+    printf "  ${GREEN}✓${NC} Configuration Files\n"
+    printf "    ${CYAN}Main config:${NC}\n"
+    printf "      ${CYAN}Path:${NC} $ENV_FILE\n"
+    if [[ -f "$ENV_FILE" ]]; then
+        printf "      ${GREEN}Status:${NC} Active\n"
+    else
+        printf "      ${YELLOW}Status:${NC} Please create this file\n"
+    fi
+    printf "    ${CYAN}ChatApps configs:${NC}\n"
+    printf "      ${CYAN}Source:${NC} $PROJECT_ROOT/chatapps/configs/\n"
+    for f in "$PROJECT_ROOT"/chatapps/configs/*.yaml; do
+        if [[ -f "$f" ]]; then
+            printf "      - $(basename "$f")\n"
+        fi
+    done
+    printf "  ${GREEN}✓${NC} Logs\n"
+    printf "    ${CYAN}Path:${NC} $LOG_FILE\n"
+    printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────────${NC}\n"
     echo ""
     info "Run 'sudo systemctl start hotplexd' to start the daemon"
 }
@@ -418,6 +470,24 @@ linux_start() {
     info "Starting HotPlex service..."
     sudo systemctl start hotplexd
     success "Service started"
+
+    printf "\n${BOLD}${CYAN}╭─ 🚀 Service Started ─────────────────────────────────${NC}\n"
+    printf "  ${GREEN}✓${NC} Configuration Files in use\n"
+    printf "    ${CYAN}Main config:${NC}\n"
+    printf "      ${CYAN}Path:${NC} $ENV_FILE\n"
+    printf "    ${CYAN}ChatApps configs:${NC}\n"
+    printf "      ${CYAN}Source:${NC} $PROJECT_ROOT/chatapps/configs/\n"
+    for f in "$PROJECT_ROOT"/chatapps/configs/*.yaml; do
+        if [[ -f "$f" ]]; then
+            printf "      - $(basename "$f")\n"
+        fi
+    done
+    printf "  ${GREEN}✓${NC} Binary\n"
+    printf "    ${CYAN}Path:${NC} $BINARY_PATH\n"
+    printf "  ${GREEN}✓${NC} Logs\n"
+    printf "    ${CYAN}Path:${NC} $LOG_FILE\n"
+    printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────────${NC}\n"
+
     linux_status
 }
 
@@ -431,6 +501,24 @@ linux_restart() {
     info "Restarting HotPlex service..."
     sudo systemctl restart hotplexd
     success "Service restarted"
+
+    printf "\n${BOLD}${CYAN}╭─ 🚀 Service Restarted ───────────────────────────────${NC}\n"
+    printf "  ${GREEN}✓${NC} Configuration Files in use\n"
+    printf "    ${CYAN}Main config:${NC}\n"
+    printf "      ${CYAN}Path:${NC} $ENV_FILE\n"
+    printf "    ${CYAN}ChatApps configs:${NC}\n"
+    printf "      ${CYAN}Source:${NC} $PROJECT_ROOT/chatapps/configs/\n"
+    for f in "$PROJECT_ROOT"/chatapps/configs/*.yaml; do
+        if [[ -f "$f" ]]; then
+            printf "      - $(basename "$f")\n"
+        fi
+    done
+    printf "  ${GREEN}✓${NC} Binary\n"
+    printf "    ${CYAN}Path:${NC} $BINARY_PATH\n"
+    printf "  ${GREEN}✓${NC} Logs\n"
+    printf "    ${CYAN}Path:${NC} $LOG_FILE\n"
+    printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────────${NC}\n"
+
     linux_status
 }
 

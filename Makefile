@@ -80,6 +80,52 @@ build: fmt vet tidy ## @build Compile the hotplexd daemon
 	@go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME) $(CMD_PATH)
 	@printf "${GREEN}✅ Build complete: ${DIST_DIR}/$(BINARY_NAME)${NC}\n"
 
+# =============================================================================
+# 🔧 INSTALL
+# =============================================================================
+install: build ## @runtime Install and run with config info
+	@printf "\n${BOLD}${CYAN}╭─ 🔧 Configuration Files ─────────────────────────────${NC}\n"
+	@printf "  ${BOLD}📋 Configuration Priority (effective):${NC}\n"
+	@printf "\n"
+	@printf "  ${GREEN}1. Main Config (.env)${NC}\n"
+	@if [ -f .env ]; then \
+		printf "     ${GREEN}✓${NC} Active\n"; \
+		printf "     ${CYAN}Path:${NC} $$(pwd)/.env\n"; \
+	else \
+		printf "     ${YELLOW}⚠${NC} Not found\n"; \
+		printf "     ${CYAN}Template:${NC} $$(pwd)/.env.example\n"; \
+	fi
+	@printf "\n"
+	@printf "  ${GREEN}2. ChatApps Configs (priority order)${NC}\n"
+	@printf "     ${CYAN}a) --config flag / CHATAPPS_CONFIG_DIR:${NC}\n"
+	@if [ -n "$$CHATAPPS_CONFIG_DIR" ]; then \
+		printf "         ${GREEN}✓${NC} Using: $$CHATAPPS_CONFIG_DIR\n"; \
+	else \
+		printf "         ${YELLOW}Not set${NC}\n"; \
+	fi
+	@printf "     ${CYAN}b) User config (~/.hotplex/configs):${NC}\n"
+	@if [ -d "$HOME/.hotplex/configs" ]; then \
+		printf "         ${GREEN}✓${NC} Active\n"; \
+		printf "         ${CYAN}Path:${NC} $$HOME/.hotplex/configs/\n"; \
+	else \
+		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
+	fi
+	@printf "     ${CYAN}c) Default (./chatapps/configs):${NC}\n"
+	@if [ -d "chatapps/configs" ]; then \
+		printf "         ${GREEN}✓${NC} Active\n"; \
+		printf "         ${CYAN}Path:${NC} $$(pwd)/chatapps/configs/\n"; \
+		for f in chatapps/configs/*.yaml; do \
+			if [ -f "$$f" ]; then \
+				printf "            - $$(basename $$f)\n"; \
+			fi; \
+		done; \
+	else \
+		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
+	fi
+	@printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────${NC}\n\n"
+	@printf "${PURPLE}🔥 Starting HotPlex Daemon...${NC}\n"
+	@./$(DIST_DIR)/$(BINARY_NAME)
+
 build-all: fmt vet tidy ## @build Compile for all platforms (Linux/macOS/Windows)
 	@printf "${GREEN}🚀 Building HotPlex Daemon for all platforms (${VERSION})...${NC}\n"
 	@mkdir -p $(DIST_DIR)
@@ -154,8 +200,48 @@ install-hooks: ## @dev Install Git hooks
 # 🚀 RUNTIME
 # =============================================================================
 run: build ## @runtime Build and start daemon in foreground
+	@printf "\n${BOLD}${CYAN}╭─ 🔧 Configuration Files ─────────────────────────────${NC}\n"
+	@printf "  ${BOLD}📋 Configuration Priority (effective):${NC}\n"
+	@printf "\n"
+	@printf "  ${GREEN}1. Main Config (.env)${NC}\n"
+	@if [ -f .env ]; then \
+		printf "     ${GREEN}✓${NC} Active\n"; \
+		printf "     ${CYAN}Path:${NC} $$(pwd)/.env\n"; \
+	else \
+		printf "     ${YELLOW}⚠${NC} Not found\n"; \
+		printf "     ${CYAN}Template:${NC} $$(pwd)/.env.example\n"; \
+	fi
+	@printf "\n"
+	@printf "  ${GREEN}2. ChatApps Configs (priority order)${NC}\n"
+	@printf "     ${CYAN}a) --config flag / CHATAPPS_CONFIG_DIR:${NC}\n"
+	@if [ -n "$$CHATAPPS_CONFIG_DIR" ]; then \
+		printf "         ${GREEN}✓${NC} Using: $$CHATAPPS_CONFIG_DIR\n"; \
+	else \
+		printf "         ${YELLOW}Not set${NC}\n"; \
+	fi
+	@printf "     ${CYAN}b) User config (~/.hotplex/configs):${NC}\n"
+	@if [ -d "$HOME/.hotplex/configs" ]; then \
+		printf "         ${GREEN}✓${NC} Active\n"; \
+		printf "         ${CYAN}Path:${NC} $$HOME/.hotplex/configs/\n"; \
+	else \
+		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
+	fi
+	@printf "     ${CYAN}c) Default (./chatapps/configs):${NC}\n"
+	@if [ -d "chatapps/configs" ]; then \
+		printf "         ${GREEN}✓${NC} Active\n"; \
+		printf "         ${CYAN}Path:${NC} $$(pwd)/chatapps/configs/\n"; \
+		for f in chatapps/configs/*.yaml; do \
+			if [ -f "$$f" ]; then \
+				printf "            - $$(basename $$f)\n"; \
+			fi; \
+		done; \
+	else \
+		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
+	fi
+	@printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────${NC}\n\n"
 	@printf "${PURPLE}🔥 Starting HotPlex Daemon...${NC}\n"
 	@./$(DIST_DIR)/$(BINARY_NAME)
+
 
 stop: ## @runtime Stop the running daemon
 	@printf "${YELLOW}🛑 Stopping HotPlex Daemon...${NC}\n"
@@ -183,6 +269,45 @@ restart: build ## @runtime Restart daemon
 		printf "${CYAN}ℹ️  No running daemon found${NC}\n"; \
 	fi
 	@mkdir -p $(LOG_DIR)
+	@printf "\n${BOLD}${CYAN}╭─ 🔧 Configuration Files ─────────────────────────────${NC}\n"
+	@printf "  ${BOLD}📋 Configuration Priority (effective):${NC}\n"
+	@printf "\n"
+	@printf "  ${GREEN}1. Main Config (.env)${NC}\n"
+	@if [ -f .env ]; then \
+		printf "     ${GREEN}✓${NC} Active\n"; \
+		printf "     ${CYAN}Path:${NC} $$(pwd)/.env\n"; \
+	else \
+		printf "     ${YELLOW}⚠${NC} Not found\n"; \
+		printf "     ${CYAN}Template:${NC} $$(pwd)/.env.example\n"; \
+	fi
+	@printf "\n"
+	@printf "  ${GREEN}2. ChatApps Configs (priority order)${NC}\n"
+	@printf "     ${CYAN}a) --config flag / CHATAPPS_CONFIG_DIR:${NC}\n"
+	@if [ -n "$$CHATAPPS_CONFIG_DIR" ]; then \
+		printf "         ${GREEN}✓${NC} Using: $$CHATAPPS_CONFIG_DIR\n"; \
+	else \
+		printf "         ${YELLOW}Not set${NC}\n"; \
+	fi
+	@printf "     ${CYAN}b) User config (~/.hotplex/configs):${NC}\n"
+	@if [ -d "$HOME/.hotplex/configs" ]; then \
+		printf "         ${GREEN}✓${NC} Active\n"; \
+		printf "         ${CYAN}Path:${NC} $$HOME/.hotplex/configs/\n"; \
+	else \
+		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
+	fi
+	@printf "     ${CYAN}c) Default (./chatapps/configs):${NC}\n"
+	@if [ -d "chatapps/configs" ]; then \
+		printf "         ${GREEN}✓${NC} Active\n"; \
+		printf "         ${CYAN}Path:${NC} $$(pwd)/chatapps/configs/\n"; \
+		for f in chatapps/configs/*.yaml; do \
+			if [ -f "$$f" ]; then \
+				printf "            - $$(basename $$f)\n"; \
+			fi; \
+		done; \
+	else \
+		printf "         ${YELLOW}⚠${NC} Not found${NC}\n"; \
+	fi
+	@printf "${BOLD}${CYAN}╰─────────────────────────────────────────────────────${NC}\n\n"
 	@printf "${PURPLE}🔥 Starting HotPlex Daemon...${NC}\n"
 	@DAEMON_PATH="$$(pwd)/$(DIST_DIR)/$(BINARY_NAME)"; \
 		nohup ./$(DIST_DIR)/$(BINARY_NAME) > $(LOG_FILE) 2>&1 & \
