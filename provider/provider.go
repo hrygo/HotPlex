@@ -13,12 +13,13 @@ type ProviderType string
 const (
 	ProviderTypeClaudeCode ProviderType = "claude-code"
 	ProviderTypeOpenCode   ProviderType = "opencode"
+	ProviderTypePi         ProviderType = "pi"
 )
 
 // Valid checks if the provider type is a known valid type.
 func (t ProviderType) Valid() bool {
 	switch t {
-	case ProviderTypeClaudeCode, ProviderTypeOpenCode:
+	case ProviderTypeClaudeCode, ProviderTypeOpenCode, ProviderTypePi:
 		return true
 	default:
 		return false
@@ -167,6 +168,9 @@ type ProviderConfig struct {
 
 	// OpenCode-specific options
 	OpenCode *OpenCodeConfig `json:"opencode,omitempty" koanf:"opencode"`
+
+	// Pi-specific options
+	Pi *PiConfig `json:"pi,omitempty" koanf:"pi"`
 }
 
 // OpenCodeConfig contains OpenCode-specific configuration.
@@ -187,6 +191,28 @@ type OpenCodeConfig struct {
 	Model string `json:"model,omitempty" koanf:"model"`
 }
 
+// PiConfig contains pi-mono (pi-coding-agent) specific configuration.
+// Pi supports multiple LLM providers through a unified API.
+type PiConfig struct {
+	// Provider is the LLM provider to use (anthropic, openai, google, etc.)
+	Provider string `json:"provider,omitempty" koanf:"provider"`
+
+	// Model is the model ID or pattern (supports provider/id format)
+	Model string `json:"model,omitempty" koanf:"model"`
+
+	// Thinking level: off, minimal, low, medium, high, xhigh
+	Thinking string `json:"thinking,omitempty" koanf:"thinking"`
+
+	// UseRPC enables RPC mode for process integration (stdin/stdout)
+	UseRPC bool `json:"use_rpc,omitempty" koanf:"use_rpc"`
+
+	// SessionDir custom session storage directory
+	SessionDir string `json:"session_dir,omitempty" koanf:"session_dir"`
+
+	// NoSession enables ephemeral mode (don't save session)
+	NoSession bool `json:"no_session,omitempty" koanf:"no_session"`
+}
+
 // Validate validates the provider configuration.
 // Returns an error if required fields are missing or invalid.
 func (c *ProviderConfig) Validate() error {
@@ -198,6 +224,15 @@ func (c *ProviderConfig) Validate() error {
 	}
 	if c.OpenCode != nil && c.OpenCode.Port < 0 {
 		return fmt.Errorf("invalid port number: %d", c.OpenCode.Port)
+	}
+	if c.Pi != nil && c.Pi.Thinking != "" {
+		validThinking := map[string]bool{
+			"off": true, "minimal": true, "low": true,
+			"medium": true, "high": true, "xhigh": true,
+		}
+		if !validThinking[c.Pi.Thinking] {
+			return fmt.Errorf("invalid thinking level: %s", c.Pi.Thinking)
+		}
 	}
 	return nil
 }

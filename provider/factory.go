@@ -50,6 +50,10 @@ func NewProviderFactory(logger *slog.Logger) *ProviderFactory {
 		return NewOpenCodeProvider(cfg, logger)
 	})
 
+	f.Register(ProviderTypePi, func(cfg ProviderConfig, logger *slog.Logger) (Provider, error) {
+		return NewPiProvider(cfg, logger)
+	})
+
 	return f
 }
 
@@ -277,6 +281,9 @@ func MergeProviderConfigs(base, overlay ProviderConfig) ProviderConfig {
 	}
 	if overlay.OpenCode != nil {
 		result.OpenCode = overlay.OpenCode
+	}
+	if overlay.Pi != nil {
+		result.Pi = overlay.Pi
 	}
 
 	return result
