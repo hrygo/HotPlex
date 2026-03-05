@@ -40,7 +40,7 @@ dockers:
   - image_templates:
       - ghcr.io/hrygo/hotplex:{{ .Version }}
       - ghcr.io/hrygo/hotplex:latest
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.release
     build_flag_templates:
       - --build-arg=VERSION={{ .Version }}
       - --build-arg=HOST_UID=1000
