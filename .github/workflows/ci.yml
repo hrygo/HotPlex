@@ -31,6 +31,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,14 +53,15 @@ jobs:
           chmod +x $HOME/.local/bin/claude
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Run Unit Tests
-        run: make test-unit
+      - name: Run Unit Tests (CI optimized)
+        run: make test-ci
 
   test-integration:
     name: Integration Tests
     needs: changes
     if: needs.changes.outputs.go == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

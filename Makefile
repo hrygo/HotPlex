@@ -25,7 +25,7 @@ LDFLAGS       := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'mai
 LOG_DIR       := .logs
 LOG_FILE      := $(LOG_DIR)/daemon.log
 
-.PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable
+.PHONY: all help build build-all fmt vet test test-unit test-ci test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable
 
 # Default target
 all: help
@@ -145,6 +145,11 @@ test-unit: ## @test Run unit tests (fast, no race detection)
 	@printf "${CYAN}🧪 Running fast unit tests...${NC}\n"
 	@go test -v -short ./...
 	@printf "${GREEN}✅ Unit tests passed!${NC}\n"
+
+test-ci: ## @test Run tests optimized for CI (parallel, timeout, short mode)
+	@printf "${CYAN}🧪 Running CI-optimized tests...${NC}\n"
+	@go test -v -short -timeout=5m -parallel=4 ./...
+	@printf "${GREEN}✅ CI tests passed!${NC}\n"
 
 test-race: ## @test Run unit tests with race detection
 	@printf "${CYAN}🧪 Running unit tests with race detection...${NC}\n"
