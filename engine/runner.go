@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -319,7 +320,34 @@ func (r *Engine) executeWithMultiplex(
 	}
 
 	if err := r.waitForSession(ctx, sess, cfg.SessionID); err != nil {
-		return err
+		// Auto-recovery: if session is dead, retry once with a fresh session
+		if errors.Is(err, types.ErrSessionDead) {
+			r.logger.Warn("Session died, attempting auto-recovery",
+				"namespace", r.opts.Namespace,
+				"session_id", cfg.SessionID)
+
+			// GetOrCreateSession will clean up the dead session and create a new one
+			sess, created, err = r.manager.GetOrCreateSession(ctx, cfg.SessionID, sessionCfg, prompt)
+			if err != nil {
+				return fmt.Errorf("auto-recovery failed: %w", err)
+			}
+
+			// Re-initialize stats for the new session
+			stats = &SessionStats{
+				SessionID: cfg.SessionID,
+				StartTime: time.Now(),
+				ToolsUsed: make(map[string]bool),
+				FilePaths: make([]string, 0),
+			}
+			sess.SetExt(stats)
+
+			// Wait for the new session to be ready
+			if err := r.waitForSession(ctx, sess, cfg.SessionID); err != nil {
+				return fmt.Errorf("auto-recovery wait failed: %w", err)
+			}
+		} else {
+			return err
+		}
 	}
 
 	// Create doneChan for this turn
@@ -365,7 +393,7 @@ func (r *Engine) waitForSession(ctx context.Context, sess *intengine.Session, se
 			return nil
 		}
 		if status == intengine.SessionStatusDead {
-			return fmt.Errorf("session %s is dead, cannot execute", sessionID)
+			return fmt.Errorf("session %s is dead: %w", sessionID, types.ErrSessionDead)
 		}
 
 		select {
@@ -376,7 +404,7 @@ func (r *Engine) waitForSession(ctx context.Context, sess *intengine.Session, se
 				return nil
 			}
 			if s == intengine.SessionStatusDead {
-				return fmt.Errorf("session %s is dead, cannot execute", sessionID)
+				return fmt.Errorf("session %s is dead: %w", sessionID, types.ErrSessionDead)
 			}
 		}
 	}
