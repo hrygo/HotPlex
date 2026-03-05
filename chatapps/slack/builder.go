@@ -8,30 +8,57 @@ import (
 	"github.com/slack-go/slack"
 )
 
+// =============================================================================
+// MessageBuilder - Slack Block Kit Message Builder
+// =============================================================================
+//
+// MessageBuilder provides two usage patterns:
+//
+//  1. Build(msg) - Automatic routing via MessageType (recommended)
+//     This is the primary API for most use cases. The builder automatically
+//     routes to the appropriate sub-builder based on msg.Type.
+//
+//  2. Direct method Calls - For backward compatibility and special cases
+//     Only BuildSessionStatsMessage is exposed for direct calls, as it's
+//     used by integration tests and external code.
+//
+// Architecture:
+//
+//	MessageBuilder (routing layer, ~170 lines)
+//	├── ToolMessageBuilder      - ToolUse, ToolResult messages
+//	├── AnswerMessageBuilder    - Answer, Error messages
+//	├── PlanMessageBuilder      - PlanMode, ExitPlanMode, AskUserQuestion
+//	├── InteractiveMessageBuilder - DangerBlock, PermissionRequest
+//	├── StatsMessageBuilder     - SessionStats, CommandProgress, CommandComplete
+//	└── SystemMessageBuilder    - System, User, Step*, Raw, etc.
+//
+// Sub-builders are internal (not exported) and may change without notice.
+// For extensions, add new message types via base.MessageType and update Build().
+//
 // MessageBuilder translates platform-agnostic base.ChatMessage objects into
 // rich Slack Block Kit structures, ensuring consistent UX across different message types.
 // Now delegates to specialized sub-builders for better maintainability.
 type MessageBuilder struct {
-	formatter  *MrkdwnFormatter
-	tool       *ToolMessageBuilder
-	answer     *AnswerMessageBuilder
-	plan       *PlanMessageBuilder
+	formatter   *MrkdwnFormatter
+	tool        *ToolMessageBuilder
+	answer      *AnswerMessageBuilder
+	plan        *PlanMessageBuilder
 	interactive *InteractiveMessageBuilder
-	stats      *StatsMessageBuilder
-	system     *SystemMessageBuilder
+	stats       *StatsMessageBuilder
+	system      *SystemMessageBuilder
 }
 
 // NewMessageBuilder creates a new MessageBuilder
 func NewMessageBuilder() *MessageBuilder {
 	formatter := NewMrkdwnFormatter()
 	return &MessageBuilder{
-		formatter:  formatter,
-		tool:       NewToolMessageBuilder(formatter),
-		answer:     NewAnswerMessageBuilder(formatter),
-		plan:       NewPlanMessageBuilder(),
+		formatter:   formatter,
+		tool:        NewToolMessageBuilder(formatter),
+		answer:      NewAnswerMessageBuilder(formatter),
+		plan:        NewPlanMessageBuilder(),
 		interactive: NewInteractiveMessageBuilder(),
-		stats:      NewStatsMessageBuilder(),
-		system:     NewSystemMessageBuilder(),
+		stats:       NewStatsMessageBuilder(),
+		system:      NewSystemMessageBuilder(),
 	}
 }
 

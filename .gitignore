@@ -92,6 +92,7 @@ yarn-error.log*
 .env.local
 .env.secondary
 .env.*.local
+.env.secondary
 *.pem
 *.key
 cert.log
