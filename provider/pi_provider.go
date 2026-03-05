@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 )
@@ -590,7 +591,7 @@ func (p *PiProvider) CleanupSession(providerSessionID string, workDir string) er
 
 	// Pi stores sessions in ~/.pi/agent/sessions/
 	// Session files are named with timestamp and UUID
-	homeDir, err := filepath.Abs("~")
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("get home directory: %w", err)
 	}
@@ -619,5 +620,5 @@ func (p *PiProvider) CleanupSession(providerSessionID string, workDir string) er
 
 // removeFile is a helper to remove a file.
 func removeFile(path string) error {
-	return exec.Command("rm", "-f", path).Run()
+	return os.Remove(path)
 }
