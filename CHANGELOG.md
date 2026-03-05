@@ -1,6 +1,25 @@
 # CHANGELOG.md
 
-## [v0.18.3] - 2026-03-05
+## [v0.19.0] - 2026-03-05
+
+### 🚀 Processor Chain Refactoring & Configuration Optimization
+
+This release delivers significant architectural simplifications to the Processor Chain, improves platform initialization efficiency, and introduces comprehensive documentation updates.
+
+### Added
+- **Slack Free Plan Compatibility** - Added `docs/plans/slack_free_plan_compatibility.md` documenting compatibility considerations for Slack's free tier limitations.
+- **Architecture SVG Diagram** - Enhanced `docs-site/reference/chatapps.md` with a polished SVG-based architecture visualization for better documentation clarity.
+
+### Changed
+- **DRY/SOLID Processor Chain** - Removed redundant processors (`processor_aggregator`, `processor_rate_limit`, `processor_zone_order`, `processor_chain`) and consolidated logic into cleaner, single-purpose components.
+- **Efficient Platform Initialization** - Platforms now skip initialization when required environment variables are missing, avoiding unnecessary YAML config loading and engine creation.
+- **Transient Message Tracking** - Refactored message tracking to use explicit `is_transient` metadata flag instead of zone-based filtering, improving clarity and maintainability.
+- **Enhanced Initialization Logging** - Added detailed startup logs showing which platforms were initialized and from which source (config file vs environment variables).
+- **Config Key Renaming** - Renamed `MaxBytes` to `MaxRunes` in all configurations for semantic accuracy with CJK content support.
+
+### Fixed
+- **Config Loading Priority** - Fixed environment variable override behavior to properly respect the intended precedence order.
+- **Status Label Consistency** - Consolidated all AI status labels into named constants in `engine_handler.go` for better maintainability.
 
 ### 🚀 Processor Chain Optimization & Rune-based Buffering
 
