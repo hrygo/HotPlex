@@ -357,3 +357,54 @@ svg2png: ## @util Convert SVG to 4K PNG
 	@chmod +x scripts/svg2png.sh 2>/dev/null || true
 	@./scripts/svg2png.sh
 	@printf "${GREEN}✅ PNG assets generated in docs/images/png/${NC}\n"
+
+# =============================================================================
+# 🐳 DOCKER
+# =============================================================================
+
+DOCKER_IMAGE    ?= hotplex
+DOCKER_TAG      ?= latest
+DOCKER_REGISTRY ?= ghcr.io/hrygo
+HOST_UID        ?= $(shell id -u)
+
+docker-build:
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg HOST_UID=$(HOST_UID) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+
+docker-build-tag:
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg HOST_UID=$(HOST_UID) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) \
+		-t $(DOCKER_IMAGE):$(VERSION) .
+
+docker-run:
+	docker run -d --name hotplex \
+		-p 8080:8080 \
+		-v $(HOME)/.hotplex:/.hotplex \
+		-v $(HOME)/.claude/settings.json:/home/hotplex/.claude/settings.json:ro \
+		-v $(HOME)/.claude/projects:/home/hotplex/.claude/projects:rw \
+		-v $(HOME)/projects:/home/hotplex/projects:rw \
+		$(DOCKER_IMAGE):$(DOCKER_TAG)
+
+docker-push:
+	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
+
+docker-push-tag:
+	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
+	docker push $(DOCKER_IMAGE):$(VERSION)
+
+docker-buildx:
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		--build-arg VERSION=$(VERSION) \
+		--tag $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(DOCKER_TAG) \
+		--tag $(DOCKER_REGISTRY)/$(DOCKER_IMAGE):$(VERSION) \
+		--push .
+
+docker-clean:
+	docker rmi $(DOCKER_IMAGE):$(DOCKER_TAG) || true
+
+.PHONY: docker-build docker-build-tag docker-run docker-push docker-push-tag docker-buildx docker-clean
