@@ -1,20 +1,37 @@
 # CHANGELOG.md
 
-## [v0.20.0] - 2026-03-05
+## [v0.20.0] - 2026-03-06
 
-### 🐳 Docker Multi-Bot Isolation & Config Optimization
+### 🐳 Docker All-in-One Deployment & Multi-Bot Architecture
 
-This release focuses on hardening the Docker deployment model, specifically addressing multi-bot isolation and providing flexible configuration loading strategies for diversified Slack bot instances.
+This release introduces a comprehensive Docker all-in-one deployment model with full Claude Code integration, multi-bot isolation support, and GHCR publishing pipeline.
 
 ### Added
-- **Docker Multi-Bot Isolation** - Modified `docker-compose.yml` to provide isolated host paths for different bot instances (`~/.slack/BOT_<ID>`).
-- **Config Loading Differentiation** - Optimized loading strategy:
-  - Primary bot: Now relies on user-level default configurations (`~/.hotplex/configs`) synchronized via `make docker-sync`.
-  - Secondary bot: Uses explicit environment override (`HOTPLEX_CHATAPPS_CONFIG_DIR`) for decoupled configuration.
+
+#### Docker All-in-One Image
+- **Complete Development Toolchain** - Single image includes Go 1.25, Node.js, Claude Code CLI, golangci-lint, air (hot reload), delve (debugger), and essential CLI tools (ripgrep, fd, fzf, eza, jq, yq, etc.).
+- **Claude Code Integration** - Pre-installed `@anthropic-ai/claude-code@latest` for seamless AI-assisted development inside containers.
+- **WebSocket Debugging** - Included `websocat` for WebSocket gateway debugging.
+- **Go Cache Persistence** - Named volumes for `go/pkg/mod` and `.cache/go-build` to accelerate repeated builds.
+
+#### Multi-Bot Support
+- **Secondary Bot Instance** - `docker-compose.yml` now defines both `hotplex` (primary) and `hotplex-secondary` services.
+- **Bot Isolation** - Each bot uses isolated project directories (`~/.slack/BOT_<ID>`) and separate Git configurations.
+- **Environment Separation** - Primary bot uses `.env`, secondary bot uses `.env.secondary` for independent Slack credentials.
+
+#### CI/CD & Publishing
+- **GHCR Integration** - Automated Docker image publishing to GitHub Container Registry via GoReleaser.
+- **Docker Makefile Targets** - New targets: `docker-build`, `docker-up`, `docker-down`, `docker-logs`, `docker-sync`.
 
 ### Fixed
-- **Docker Path Resolution** - Fixed a critical typo in `docker-compose.yml` (`${HOME}.slack` instead of `${HOME}/.slack`) that prevented proper volume mounting.
-- **Work Directory Mapping** - Unified container work directory to `/home/hotplex/projects/hotplex` to ensure consistency with host-side isolated bot paths.
+- **ENTRYPOINT Path** - Fixed container startup failure by using absolute path `/app/hotplexd` instead of relative `hotplexd`.
+- **Secondary Bot Token** - Fixed `hotplex-secondary` to correctly load `.env.secondary` instead of `.env`, ensuring each bot connects with its own Slack credentials.
+- **Docker Path Resolution** - Fixed critical typo in volume mount (`${HOME}.slack` → `${HOME}/.slack`).
+- **Work Directory Mapping** - Unified container work directory to `/home/hotplex/projects/hotplex`.
+
+### Changed
+- **Config Loading Strategy** - Primary bot relies on user-level configs (`~/.hotplex/configs`) synchronized via `make docker-sync`.
+- **State Persistence** - Full `.claude/` and `.claude.json` mounting for complete conversation and preferences persistence.
 
 
 ## [v0.19.0] - 2026-03-05
