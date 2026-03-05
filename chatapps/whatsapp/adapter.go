@@ -190,10 +190,8 @@ func (a *Adapter) handleVerify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Adapter) handleMessage(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		a.Logger().Error("Read body failed", "error", err)
-		http.Error(w, "Bad request", http.StatusBadRequest)
+	body, ok := base.ReadBodyWithLog(w, r, a.Logger())
+	if !ok {
 		return
 	}
 
