@@ -2,6 +2,8 @@
 
 # Docker 部署指南
 
+![Docker Deployment Architecture](../images/docker-deployment-arch.png)
+
 ## 快速入门
 
 ### 1. 构建镜像

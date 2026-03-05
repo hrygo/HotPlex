@@ -14,6 +14,8 @@
 
 ### 2.1 架构全景图
 
+![Defense in Depth Architecture](../images/defense-in-depth-arch.png)
+
 ```mermaid
 graph TD
     User([用户/ChatApps]) --> L5[Layer 5: AI Safety Guard]
