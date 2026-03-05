@@ -6,13 +6,29 @@
 
 ### 1. Build the Image
 
+HotPlex provides two ways to build Docker images:
+
+#### Option A: Pure Build (hotplex-only)
+Minimal image containing only the hotplexd binary (~20MB).
+
 ```bash
-docker build -t hotplex:latest .
+make docker-build
+```
+
+#### Option B: All-in-One Build
+Includes hotplexd and Claude Code CLI, ready to use out of the box with host volume mappings.
+
+```bash
+make docker-build DOCKER_IMAGE=hotplex-ai
 ```
 
 ### 2. Run the Container
 
+#### Pure Build Usage
+
 ```bash
+make docker-run
+# or
 docker run -d \
   --name hotplex \
   -p 8080:8080 \
@@ -20,6 +36,40 @@ docker run -d \
   -e CLAUDE_API_KEY=your-key \
   hotplex:latest
 ```
+
+#### All-in-One Build Usage (Recommended)
+
+This method seamlessly integrates with your host machine's configuration:
+
+```bash
+# Using Makefile
+make docker-run DOCKER_IMAGE=hotplex-ai
+# or manually
+docker run -d \
+  --name hotplex-ai \
+  -p 8080:8080 \
+  -v $HOME/.hotplex:/.hotplex \
+  -v $HOME/.claude/settings.json:/home/hotplex/.claude/settings.json:ro \
+  -v $HOME/.claude/projects:/home/hotplex/.claude/projects:rw \
+  -v $HOME/projects:/home/hotplex/projects:rw \
+  hotplex-ai:latest
+```
+
+**Volume Mapping Explanation**:
+| Host Path                     | Container Path                        | Mode       | Description          |
+| ----------------------------- | ------------------------------------- | ---------- | -------------------- |
+| `$HOME/.claude/settings.json` | `/home/hotplex/.claude/settings.json` | Read-only  | Claude Code settings |
+| `$HOME/.claude/projects`      | `/home/hotplex/.claude/projects`      | Read/Write | Chat histories       |
+| `$HOME/.hotplex`              | `/.hotplex`                           | Read/Write | HotPlex config       |
+| `$HOME/projects`              | `/home/hotplex/projects`              | Read/Write | Workspace            |
+
+### 3. Multi-Platform Build (amd64 + arm64)
+
+```bash
+make docker-buildx
+```
+
+
 
 ## Docker Compose
 
@@ -104,10 +154,10 @@ spec:
 
 ## Configuration
 
-| Variable      | Default | Description             |
-| ------------- | ------- | ----------------------- |
-| HOTPLEX_PORT          | 8080    | Server port             |
-| HOTPLEX_LOG_LEVEL     | info    | Log level               |
-| HOTPLEX_IDLE_TIMEOUT  | 30m     | Session idle timeout    |
-| OTEL_ENDPOINT | -       | OpenTelemetry endpoint  |
-| MAX_SESSIONS  | 1000    | Max concurrent sessions |
+| Variable             | Default | Description             |
+| -------------------- | ------- | ----------------------- |
+| HOTPLEX_PORT         | 8080    | Server port             |
+| HOTPLEX_LOG_LEVEL    | info    | Log level               |
+| HOTPLEX_IDLE_TIMEOUT | 30m     | Session idle timeout    |
+| OTEL_ENDPOINT        | -       | OpenTelemetry endpoint  |
+| MAX_SESSIONS         | 1000    | Max concurrent sessions |

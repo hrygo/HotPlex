@@ -4,21 +4,69 @@
 
 ## 快速入门
 
-### 1. 构建镜像
+### 1. 构建方式
+
+HotPlex 提供两种 Docker 镜像构建方式：
+
+#### 方式 1: 纯净构建 (hotplex-only)
+仅包含 hotplexd 二进制文件，镜像体积极小（约 20MB）。
 
 ```bash
-docker build -t hotplex:latest .
+make docker-build
+```
+
+#### 方式 2: All-in-One 构建
+包含 hotplexd 和 Claude Code CLI，支持直接映射宿主机的配置文件，开箱即用。
+
+```bash
+make docker-build DOCKER_IMAGE=hotplex-ai
 ```
 
 ### 2. 运行容器
 
+#### 纯净构建运行方案
+
 ```bash
+make docker-run
+# 或手动运行
 docker run -d \
   --name hotplex \
   -p 8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e CLAUDE_API_KEY=your-key \
   hotplex:latest
+```
+
+#### All-in-One 构建运行方案 (推荐)
+
+此方案可以无缝集成您宿主机已有的配置文件与模型：
+
+```bash
+# 使用 Makefile 运行
+make docker-run DOCKER_IMAGE=hotplex-ai
+# 或手动运行
+docker run -d \
+  --name hotplex-ai \
+  -p 8080:8080 \
+  -v $HOME/.hotplex:/.hotplex \
+  -v $HOME/.claude/settings.json:/home/hotplex/.claude/settings.json:ro \
+  -v $HOME/.claude/projects:/home/hotplex/.claude/projects:rw \
+  -v $HOME/projects:/home/hotplex/projects:rw \
+  hotplex-ai:latest
+```
+
+**目录映射说明**：
+| 宿主机路径                    | 容器内路径                            | 模式 | 说明                 |
+| ----------------------------- | ------------------------------------- | ---- | -------------------- |
+| `$HOME/.claude/settings.json` | `/home/hotplex/.claude/settings.json` | 只读 | Claude Code 配置文件 |
+| `$HOME/.claude/projects`      | `/home/hotplex/.claude/projects`      | 读写 | 会话历史记录         |
+| `$HOME/.hotplex`              | `/.hotplex`                           | 读写 | HotPlex 服务配置     |
+| `$HOME/projects`              | `/home/hotplex/projects`              | 读写 | 项目工作目录         |
+
+### 3. 多平台构建 (amd64 + arm64)
+
+```bash
+make docker-buildx
 ```
 
 ## Docker Compose 配置
@@ -104,13 +152,13 @@ spec:
 
 ## 配置参数
 
-| 变量          | 默认值 | 描述                   |
-| ------------- | ------ | ---------------------- |
-| HOTPLEX_PORT          | 8080   | 服务端口               |
-| HOTPLEX_LOG_LEVEL     | info   | 日志级别               |
-| HOTPLEX_IDLE_TIMEOUT  | 30m    | 会话空闲超时时间       |
-| OTEL_ENDPOINT | -      | OpenTelemetry 接口地址 |
-| MAX_SESSIONS  | 1000   | 最大并发会话数         |
+| 变量                 | 默认值 | 描述                   |
+| -------------------- | ------ | ---------------------- |
+| HOTPLEX_PORT         | 8080   | 服务端口               |
+| HOTPLEX_LOG_LEVEL    | info   | 日志级别               |
+| HOTPLEX_IDLE_TIMEOUT | 30m    | 会话空闲超时时间       |
+| OTEL_ENDPOINT        | -      | OpenTelemetry 接口地址 |
+| MAX_SESSIONS         | 1000   | 最大并发会话数         |
 
 ## 配置管理
 
