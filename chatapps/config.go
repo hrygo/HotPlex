@@ -25,6 +25,7 @@ type PlatformConfig struct {
 	DingTalk         DingTalkConfig          `yaml:"dingtalk"`
 	WhatsApp         WhatsAppConfig          `yaml:"whatsapp"`
 	Options          map[string]any          `yaml:"options,omitempty"`
+	SourceFile       string                  `yaml:"-"` // Tracks which file this config was loaded from
 }
 
 type SecurityConfig struct {
@@ -101,15 +102,16 @@ func (c *ConfigLoader) Load(configDir string) error {
 		filename := filepath.Join(configDir, entry.Name())
 		data, err := os.ReadFile(filename)
 		if err != nil {
-			c.logger.Debug("Failed to read config file", "file", filename, "error", err)
+			c.logger.Debug("Could not read config file, skipping", "file", filename, "cause", err)
 			continue
 		}
 
 		var cfg PlatformConfig
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			c.logger.Error("Failed to parse config file", "file", filename, "error", err)
+			c.logger.Warn("Failed to parse config file", "file", filename, "error", err)
 			continue
 		}
+		cfg.SourceFile = filename
 
 		if cfg.Platform == "" {
 			c.logger.Warn("Config missing platform field", "file", filename)
@@ -119,7 +121,7 @@ func (c *ConfigLoader) Load(configDir string) error {
 		c.mu.Lock()
 		c.configs[cfg.Platform] = &cfg
 		c.mu.Unlock()
-		c.logger.Info("Loaded platform config", "platform", cfg.Platform)
+		c.logger.Info("Loaded platform configuration", "platform", cfg.Platform, "file", filename)
 	}
 	return nil
 }
@@ -155,6 +157,7 @@ func (c *ConfigLoader) GetConfig(platform string) *PlatformConfig {
 				cfgCopy.Options[k] = v
 			}
 		}
+		cfgCopy.SourceFile = cfg.SourceFile
 		return &cfgCopy
 	}
 	return nil

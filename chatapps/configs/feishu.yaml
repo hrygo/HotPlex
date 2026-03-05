@@ -12,7 +12,7 @@ platform: feishu
 provider:
   type: claude-code                # AI backend: claude-code or opencode
   default_model: sonnet            # Model: sonnet, haiku, opus
-  default_permission_mode: bypass-permissions # bypass-permissions or ask
+  default_permission_mode: bypass-permissions # bypassPermissions, acceptEdits, default, dontAsk, plan
 
   # Tool filtering (Provider-level override)
   # allowed_tools: ["Bash", "Edit"]

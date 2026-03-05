@@ -98,6 +98,11 @@ func (p *ClaudeCodeProvider) BuildCLIArgs(providerSessionID string, opts *Provid
 		args = append(args, "--permission-mode", permMode)
 	}
 
+	// DangerouslySkipPermissions bypasses all permission checks
+	if opts.DangerouslySkipPermissions || p.opts.DangerouslySkipPermissions {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+
 	// Tool restrictions (merge provider-level and session-level)
 	allowedTools := mergeStringSlices(p.opts.AllowedTools, opts.AllowedTools)
 	if len(allowedTools) > 0 {

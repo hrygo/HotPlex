@@ -51,21 +51,6 @@ func (c *ProcessorChain) AddProcessor(processor MessageProcessor) {
 	c.sortProcessorsLocked()
 }
 
-// SetAggregatorSender sets the sender for MessageAggregatorProcessor if present
-func (c *ProcessorChain) SetAggregatorSender(sender AggregatedMessageSender) {
-	c.mu.RLock()
-	processors := make([]MessageProcessor, len(c.processors))
-	copy(processors, c.processors)
-	c.mu.RUnlock()
-
-	for _, p := range processors {
-		if aggregator, ok := p.(*MessageAggregatorProcessor); ok {
-			aggregator.SetSender(sender)
-			return
-		}
-	}
-}
-
 // Process executes all processors in order
 func (c *ProcessorChain) Process(ctx context.Context, msg *base.ChatMessage) (*base.ChatMessage, error) {
 	if msg == nil {
@@ -128,51 +113,22 @@ func (c *ProcessorChain) sortProcessorsLocked() {
 type ProcessorOrder int
 
 const (
-	// OrderRateLimit should run first to prevent abuse
-	OrderRateLimit ProcessorOrder = 1
-	// OrderZoneOrder ensures messages respect zone ordering (thinking→action→output→summary)
-	OrderZoneOrder ProcessorOrder = 5
 	// OrderFilter drops noise events before anything else
 	OrderFilter ProcessorOrder = 10
 	// OrderThread manages thread_ts caching for message chunking
 	OrderThread ProcessorOrder = 15
-	// OrderAggregation groups messages together
-	OrderAggregation ProcessorOrder = 20
 	// OrderFormatConversion converts markdown to platform-specific format
 	OrderFormatConversion ProcessorOrder = 40
 	// OrderChunk splits long messages for Slack API limits
 	OrderChunk ProcessorOrder = 50
 )
 
-// Compile-time ordering guard: ZoneOrderProcessor MUST run before MessageFilterProcessor.
-// session_start/engine_starting events pass through ZoneOrder (to trigger markInitReceived)
-// and are then dropped by Filter. If this ordering is reversed, Zone synchronization breaks silently.
-var _ = func() int {
-	if OrderZoneOrder >= OrderFilter {
-		panic("INVARIANT VIOLATION: OrderZoneOrder must be less than OrderFilter")
-	}
-	return 0
-}()
-
 // NewDefaultProcessorChain creates a default processor chain with all standard processors
 func NewDefaultProcessorChain(ctx context.Context, logger *slog.Logger) *ProcessorChain {
 	filter := NewMessageFilterProcessor(logger)
 
-	rateLimit := NewRateLimitProcessor(logger, RateLimitProcessorOptions{
-		MinInterval: 100 * time.Millisecond,
-		MaxBurst:    5,
-		BurstWindow: time.Second,
-	})
-
-	zoneOrder := NewZoneOrderProcessor(logger)
-
 	thread := NewThreadProcessor(logger, ThreadProcessorOptions{
 		TTL: 30 * time.Minute,
-	})
-
-	aggregator := NewMessageAggregatorProcessor(ctx, logger, MessageAggregatorProcessorOptions{
-		Window:     500 * time.Millisecond, // 500ms window for tool_use aggregation
-		MinContent: 50,                     // Lower threshold for short tool inputs
 	})
 
 	formatConv := NewFormatConversionProcessor(logger)
@@ -183,10 +139,7 @@ func NewDefaultProcessorChain(ctx context.Context, logger *slog.Logger) *Process
 
 	return NewProcessorChain(
 		filter,
-		rateLimit,
-		zoneOrder,
 		thread,
-		aggregator,
 		formatConv,
 		chunk,
 	)

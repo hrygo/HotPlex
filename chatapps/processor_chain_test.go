@@ -7,26 +7,6 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 )
 
-func TestProcessorChain_SortProcessors(t *testing.T) {
-	formatConv := NewFormatConversionProcessor(nil)
-	rateLimit := NewRateLimitProcessor(nil, RateLimitProcessorOptions{})
-	aggregator := NewMessageAggregatorProcessor(context.Background(), nil, MessageAggregatorProcessorOptions{})
-
-	chain := NewProcessorChain(formatConv, rateLimit, aggregator)
-
-	expectedOrder := []int{
-		int(OrderRateLimit),
-		int(OrderAggregation),
-		int(OrderFormatConversion),
-	}
-
-	for i, processor := range chain.processors {
-		if processor.Order() != expectedOrder[i] {
-			t.Errorf("Processor %d has order %d, expected %d", i, processor.Order(), expectedOrder[i])
-		}
-	}
-}
-
 func TestProcessorChain_Process(t *testing.T) {
 	chain := NewDefaultProcessorChain(context.Background(), nil)
 
@@ -77,17 +57,16 @@ func TestDefaultProcessorChain_Creation(t *testing.T) {
 		t.Fatal("NewDefaultProcessorChain returned nil")
 	}
 
-	// Now we have 7 processors: filter, rateLimit, zoneOrder, thread, aggregator, formatConv, chunk
-	if len(chain.processors) != 7 {
-		t.Errorf("Expected 7 processors, got %d", len(chain.processors))
+	// 4 processors: filter, thread, formatConv, chunk
+	// (rateLimit & zoneOrder removed: rate limiting is at Slack API layer;
+	//  zone ordering is no longer needed after AI Native tool redesign)
+	if len(chain.processors) != 4 {
+		t.Errorf("Expected 4 processors, got %d", len(chain.processors))
 	}
 
 	expectedOrders := []ProcessorOrder{
-		OrderRateLimit,
-		OrderZoneOrder,
 		OrderFilter,
 		OrderThread,
-		OrderAggregation,
 		OrderFormatConversion,
 		OrderChunk,
 	}
@@ -107,7 +86,7 @@ func TestProcessorChain_AddProcessor(t *testing.T) {
 	chain := NewProcessorChain()
 
 	chain.AddProcessor(NewFormatConversionProcessor(nil))
-	chain.AddProcessor(NewRateLimitProcessor(nil, RateLimitProcessorOptions{}))
+	chain.AddProcessor(NewMessageFilterProcessor(nil))
 
 	if len(chain.processors) != 2 {
 		t.Errorf("Expected 2 processors, got %d", len(chain.processors))
@@ -166,27 +145,4 @@ func TestFormatConversionProcessor_CodeBlockProtection(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestRateLimitProcessor_Basic tests basic rate limiting functionality
-func TestRateLimitProcessor_Basic(t *testing.T) {
-	processor := NewRateLimitProcessor(nil, RateLimitProcessorOptions{
-		MinInterval: 50 * 1e6, // 50ms in nanoseconds
-	})
-
-	ctx := context.Background()
-	msg := &base.ChatMessage{
-		Platform:  "slack",
-		SessionID: "test-session",
-		Content:   "test",
-	}
-
-	// First message should pass immediately
-	_, err := processor.Process(ctx, msg)
-	if err != nil {
-		t.Fatalf("First process failed: %v", err)
-	}
-
-	// Cleanup
-	processor.Cleanup()
 }

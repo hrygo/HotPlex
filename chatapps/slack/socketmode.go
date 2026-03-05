@@ -183,7 +183,15 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 		return
 	}
 
+	if ev.ChannelType != "dm" && a.config.ContainsBotMention(ev.Text) {
+		a.Logger().Debug("Skipping 'message' event with mention (handled by 'app_mention')", "ts", ev.TimeStamp)
+		return
+	}
+
 	threadID := ev.ThreadTimeStamp
+	if threadID == "" {
+		threadID = ev.TimeStamp
+	}
 
 	processedText, conversionMetadata := preprocessMessageText(ev.Text)
 	if _, converted := conversionMetadata["converted_from_hash"]; converted {

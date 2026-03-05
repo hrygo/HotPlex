@@ -96,6 +96,9 @@ type ProviderSessionOptions struct {
 	// Permission mode (e.g., "bypass-permissions", "auto-accept")
 	PermissionMode string
 
+	// DangerouslySkipPermissions bypasses all permission checks
+	DangerouslySkipPermissions bool
+
 	// Tool restrictions
 	AllowedTools    []string
 	DisallowedTools []string
@@ -141,6 +144,11 @@ type ProviderConfig struct {
 
 	// DefaultPermissionMode is the default permission mode
 	DefaultPermissionMode string `json:"default_permission_mode,omitempty" koanf:"default_permission_mode"`
+
+	// DangerouslySkipPermissions bypasses all permission checks.
+	// Equivalent to --permission-mode bypassPermissions but skips permission prompts entirely.
+	// Recommended only for sandboxes with no internet access.
+	DangerouslySkipPermissions bool `json:"dangerously_skip_permissions,omitempty" koanf:"dangerously_skip_permissions"`
 
 	// AllowedTools restricts available tools (provider-level override)
 	AllowedTools []string `json:"allowed_tools,omitempty" koanf:"allowed_tools"`

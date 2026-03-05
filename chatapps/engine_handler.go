@@ -17,6 +17,35 @@ import (
 	"github.com/hrygo/hotplex/types"
 )
 
+const (
+	// Metadata keys
+	MetadataKeyTransient = "is_transient"
+)
+
+// UI Status indicator labels for AI Native experience
+const (
+	StatusThinkingLabel       = "🧠 深度推演规划中..."
+	StatusToolExecutingLabel  = "🛠️ 正在执行工具 [%s]..."
+	StatusResultParsingLabel  = "🧠 正在解析执行结果..."
+	StatusErrorLabel          = "❌ 执行过程中发生错误"
+	StatusDangerBlockLabel    = "⚠️ 拦截到高危操作，等待确认..."
+	StatusProgressLabel       = "⏳ 正在执行后台任务..."
+	StatusProgressDoneLabel   = "✅ 后台任务执行完毕"
+	StatusStepStartLabel      = "🔍 正在分析执行轨迹..."
+	StatusStepFinishLabel     = "✅ 当前任务阶段构建完成"
+	StatusPlanModeLabel       = "📝 正在制定作战计划..."
+	StatusExitPlanModeLabel   = "📝 作战计划就绪，等待您的批准..."
+	StatusAskUserLabel        = "⏳ 等待您提供更多信息..."
+	StatusEngineStartingLabel = "🚀 正在唤醒推演引擎..."
+	StatusPermissionLabel     = "🛡️ 拦截到高危操作，等待提权审批..."
+
+	// Contextual labels
+	StatusToolResultThinkingLabel = "🧠 正在解析执行结果 (耗时: %dms)..."
+	StatusSessionStartColdLabel   = "🚀 正在初始化上下文..."
+	StatusSessionStartHotLabel    = "🚀 重新连接并恢复上下文..."
+	StatusAnswerLabel             = "✍️ 正在生成回答..."
+)
+
 // sessionWrapper wraps intengine.Session to implement chatapps.Session interface
 type sessionWrapper struct {
 	sess *intengine.Session
@@ -155,13 +184,14 @@ func NewEngineHolder(opts EngineHolderOptions) (*EngineHolder, error) {
 	}
 
 	engineOpts := engine.EngineOptions{
-		Timeout:         opts.Timeout,
-		IdleTimeout:     opts.IdleTimeout,
-		Namespace:       opts.Namespace,
-		PermissionMode:  opts.PermissionMode,
-		AllowedTools:    opts.AllowedTools,
-		DisallowedTools: opts.DisallowedTools,
-		Logger:          logger,
+		Timeout:                    opts.Timeout,
+		IdleTimeout:                opts.IdleTimeout,
+		Namespace:                  opts.Namespace,
+		PermissionMode:             opts.PermissionMode,
+		DangerouslySkipPermissions: opts.DangerouslySkipPermissions,
+		AllowedTools:               opts.AllowedTools,
+		DisallowedTools:            opts.DisallowedTools,
+		Logger:                     logger,
 	}
 
 	eng, err := engine.NewEngine(engineOpts)
@@ -183,16 +213,17 @@ func NewEngineHolder(opts EngineHolderOptions) (*EngineHolder, error) {
 
 // EngineHolderOptions configures the EngineHolder
 type EngineHolderOptions struct {
-	Logger           *slog.Logger
-	Adapters         *AdapterManager
-	Timeout          time.Duration
-	IdleTimeout      time.Duration
-	Namespace        string
-	PermissionMode   string
-	AllowedTools     []string
-	DisallowedTools  []string
-	DefaultWorkDir   string
-	DefaultTaskInstr string
+	Logger                     *slog.Logger
+	Adapters                   *AdapterManager
+	Timeout                    time.Duration
+	IdleTimeout                time.Duration
+	Namespace                  string
+	PermissionMode             string
+	DangerouslySkipPermissions bool
+	AllowedTools               []string
+	DisallowedTools            []string
+	DefaultWorkDir             string
+	DefaultTaskInstr           string
 }
 
 // GetEngine returns the underlying Engine instance
@@ -261,7 +292,6 @@ func (c *StreamCallback) Close() {
 type msgRecord struct {
 	ChannelID string
 	MessageTS string
-	ZoneIndex int    // Zone index (0-3) for filtering and sliding window
 	EventType string // Event type (tool_use, session_start, etc.) to protection markers
 }
 
@@ -298,31 +328,7 @@ func NewStreamCallback(
 		}
 	}
 
-	// Set callback as the sender for aggregated messages
-	cb.processor.SetAggregatorSender(cb)
-
 	return cb
-}
-
-// SendAggregatedMessage implements AggregatedMessageSender interface
-// This is called by the MessageAggregatorProcessor when timer flushes buffered messages
-func (c *StreamCallback) SendAggregatedMessage(ctx context.Context, msg *ChatMessage) error {
-	c.logger.Info("SendAggregatedMessage called", "session_id", c.sessionID, "content_len", len(msg.Content))
-
-	if c.adapters == nil {
-		c.logger.Warn("No adapters in SendAggregatedMessage", "platform", c.platform)
-		return nil
-	}
-
-	if err := c.adapters.SendMessage(ctx, c.platform, c.sessionID, msg); err != nil {
-		return err
-	}
-
-	// Track action/thinking zone messages for sliding window and cleanup.
-	// Aggregated messages bypass the normal path because the aggregator buffers them.
-	c.trackMessage((*base.ChatMessage)(msg))
-
-	return nil
 }
 
 // Handle implements event.Callback
@@ -396,7 +402,7 @@ func (c *StreamCallback) handleThinking(data any) error {
 
 	// Apply default status if empty
 	if content == "" {
-		content = "🧠 深度推演规划中..."
+		content = StatusThinkingLabel
 	} else if !strings.HasPrefix(content, "🧠") {
 		content = "🧠 " + content
 	}
@@ -476,13 +482,16 @@ func (c *StreamCallback) buildChatMessage(msgType base.MessageType, content stri
 // Removes previous reaction before adding new one for clean status transitions.
 
 // trackMessage records a message for sliding window management and final cleanup.
+// Only tracks transient messages that should be auto-deleted at session end.
+// Transient status is determined by the "is_transient" metadata flag.
 func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
 	if msg == nil || msg.Metadata == nil {
 		return
 	}
 
-	zone, hasZone := msg.Metadata["zone_index"].(int)
-	if !hasZone || (zone != ZoneInitialization && zone != ZoneThinking && zone != ZoneAction) {
+	// Only track messages explicitly marked as transient.
+	isTransient, _ := msg.Metadata[MetadataKeyTransient].(bool)
+	if !isTransient {
 		return
 	}
 
@@ -503,80 +512,13 @@ func (c *StreamCallback) trackMessage(msg *base.ChatMessage) {
 		}
 	}
 
+	c.logger.Debug("Tracking transient message for cleanup", "ts", ts, "type", eventType)
 	// Record the message for cleanup
 	c.cleanupMsgRecords = append(c.cleanupMsgRecords, msgRecord{
 		ChannelID: ch,
 		MessageTS: ts,
-		ZoneIndex: zone,
 		EventType: eventType,
 	})
-
-	// Enforce sliding window independently for Thinking and Action zones
-	c.enforceSlidingWindow(zone)
-}
-
-// enforceSlidingWindow deletes oldest messages when the limit is exceeded.
-// NOTE: Caller must hold c.mu lock before calling this method
-func (c *StreamCallback) enforceSlidingWindow(zone int) {
-	maxMsgs := 5 // Default for other zones
-	switch zone {
-	case ZoneThinking:
-		maxMsgs = 1 // Only 1 thinking message allowed
-	case ZoneAction:
-		maxMsgs = 2 // Keeping latest 2 Actions
-	}
-
-	var zoneRecords []msgRecord
-	var otherRecords []msgRecord
-
-	// Split records into current zone and others
-	for _, rec := range c.cleanupMsgRecords {
-		if rec.ZoneIndex == zone {
-			zoneRecords = append(zoneRecords, rec)
-		} else {
-			otherRecords = append(otherRecords, rec)
-		}
-	}
-
-	if len(zoneRecords) <= maxMsgs {
-		return
-	}
-
-	// Find the oldest evictable record (skip startup messages in Zone 1)
-	var toEvict msgRecord
-	var remainingInZone []msgRecord
-	found := false
-
-	for _, rec := range zoneRecords {
-		if !found && zone > 0 {
-			// Protection: never evict startup markers from sliding window
-			if rec.EventType == "session_start" || rec.EventType == "engine_starting" {
-				remainingInZone = append(remainingInZone, rec)
-				continue
-			}
-		}
-
-		if !found {
-			toEvict = rec
-			found = true
-			continue
-		}
-		remainingInZone = append(remainingInZone, rec)
-	}
-
-	if !found {
-		return
-	}
-
-	// Rebuild the final records slice
-	c.cleanupMsgRecords = append(remainingInZone, otherRecords...)
-
-	// Delete evicted message
-	if c.messageOps != nil {
-		go func() {
-			_ = c.messageOps.DeleteMessage(c.ctx, toEvict.ChannelID, toEvict.MessageTS)
-		}()
-	}
 }
 
 // scheduleDeleteActionMessages schedules 3-second delayed deletion
@@ -603,6 +545,7 @@ func (c *StreamCallback) scheduleDeleteActionMessagesLocked() {
 			return
 		}
 		for _, rec := range records {
+			c.logger.Debug("Cleaning up transient message", "platform", c.platform, "ts", rec.MessageTS, "type", rec.EventType)
 			if err := c.messageOps.DeleteMessage(c.ctx, rec.ChannelID, rec.MessageTS); err != nil {
 				c.logger.Debug("Failed to delete tracked message", "ts", rec.MessageTS, "error", err)
 			}
@@ -680,39 +623,20 @@ func (c *StreamCallback) convertToChatMessage(msg *base.ChatMessage) *ChatMessag
 
 func (c *StreamCallback) handleToolUse(data any) error {
 	toolName := string(provider.EventTypeToolUse)
-	input := ""
-	truncated := false
-	var inputSummary string
-
 	if m, ok := data.(*event.EventWithMeta); ok {
 		if m.Meta != nil && m.Meta.ToolName != "" {
 			toolName = m.Meta.ToolName
-			inputSummary = m.Meta.InputSummary
-		}
-		if m.EventData != "" {
-			input = m.EventData
-			if len(input) > 100 {
-				truncated = true
-			}
 		}
 	}
 
-	// Update status indicator to show current tool being used
-	statusText := fmt.Sprintf("🛠️ 正在执行 %s...", toolName)
+	// UI Native: tool_use is now status-only
+	statusText := fmt.Sprintf(StatusToolExecutingLabel, toolName)
 	if err := c.updateStatusMessage(base.MessageTypeToolUse, statusText); err != nil {
 		c.logger.Warn("Failed to update status for tool_use", "error", err)
 	}
 
-	c.logger.Debug("Sending tool use message", "tool_name", toolName, "input_len", len(input))
-
-	// Use buildChatMessage helper for consistency
-	return c.buildChatMessage(base.MessageTypeToolUse, toolName, map[string]any{
-		"input":         input,
-		"input_summary": inputSummary,
-		"truncated":     truncated,
-		"event_type":    string(provider.EventTypeToolUse),
-		"stream":        true,
-	})
+	c.logger.Debug("Processed tool use (status-only)", "tool_name", toolName)
+	return nil
 }
 
 func (c *StreamCallback) handleToolResult(data any) error {
@@ -799,25 +723,27 @@ func (c *StreamCallback) handleToolResult(data any) error {
 		"duration_ms", durationMs,
 		"output_len", len(output))
 
-	spaceFolded := output == "📋 输出过长，已收纳至回复"
-
-	// Update status indicator to show tool execution result
-	statusText := fmt.Sprintf("📥 解析执行结果 (耗时: %dms)...", durationMs)
+	// Update status indicator to show tool execution result with 🧠 emoji (AI processing state)
+	statusText := fmt.Sprintf(StatusToolResultThinkingLabel, durationMs)
 	if err := c.updateStatusMessage(base.MessageTypeToolResult, statusText); err != nil {
 		c.logger.Warn("Failed to update status for tool_result", "error", err)
 	}
 
-	// Use buildChatMessage helper for consistency
-	return c.buildChatMessage(base.MessageTypeToolResult, output, map[string]any{
-		"success":        success,
-		"duration_ms":    durationMs,
-		"tool_name":      toolName,
-		"file_path":      filePath,
-		"content_length": contentLength,
-		"space_folded":   spaceFolded,
-		"event_type":     string(provider.EventTypeToolResult),
-		"stream":         true,
-	})
+	// Silent Success: only send message to main channel if there's an error
+	if !success {
+		return c.buildChatMessage(base.MessageTypeToolResult, output, map[string]any{
+			"success":        success,
+			"duration_ms":    durationMs,
+			"tool_name":      toolName,
+			"file_path":      filePath,
+			"content_length": contentLength,
+			"event_type":     string(provider.EventTypeToolResult),
+			"stream":         true,
+		})
+	}
+
+	c.logger.Debug("Tool result processed silently (success)", "tool_name", toolName)
+	return nil
 }
 
 func (c *StreamCallback) handleAnswer(data any) error {
@@ -853,8 +779,8 @@ func (c *StreamCallback) handleAnswer(data any) error {
 				// Clear the status indicator immediately now that text is physically appearing in the chat box.
 				// This is only called ONCE upon initialization to avoid useless API calls per byte.
 				go func() {
-					if err := c.updateStatusMessage(base.MessageTypeAnswer, ""); err != nil {
-						c.logger.Warn("Failed to clear status for answer", "error", err)
+					if err := c.updateStatusMessage(base.MessageTypeAnswer, StatusAnswerLabel); err != nil {
+						c.logger.Warn("Failed to update status for answer", "error", err)
 					}
 				}()
 			}
@@ -910,7 +836,7 @@ func (c *StreamCallback) handleError(data any) error {
 	}
 
 	// Update status to show error state for better visibility
-	if err := c.updateStatusMessage(base.MessageTypeError, "❌ 执行过程中发生错误"); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeError, StatusErrorLabel); err != nil {
 		c.logger.Warn("Failed to update status for handle_error", "error", err)
 	}
 
@@ -961,7 +887,7 @@ func (c *StreamCallback) handleDangerBlock(data any) error {
 		"reason", reason)
 
 	// Update status indicator — AI is waiting for user decision
-	if err := c.updateStatusMessage(base.MessageTypeDangerBlock, "⚠️ 拦截到高危操作，等待确认..."); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeDangerBlock, StatusDangerBlockLabel); err != nil {
 		c.logger.Warn("Failed to update status for danger_block", "error", err)
 	}
 
@@ -1049,11 +975,11 @@ func (c *StreamCallback) handleCommandProgress(data any) error {
 	} else if s, ok := data.(string); ok {
 		title = s
 	} else {
-		title = "Processing..."
+		title = fmt.Sprintf("Command Progress: %v", data)
 	}
 
 	// Update status indicator
-	if err := c.updateStatusMessage(base.MessageTypeCommandProgress, "⏳ 正在执行后台任务..."); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeCommandProgress, StatusProgressLabel); err != nil {
 		c.logger.Warn("Failed to update status for command_progress", "error", err)
 	}
 
@@ -1087,11 +1013,11 @@ func (c *StreamCallback) handleCommandComplete(data any) error {
 	} else if s, ok := data.(string); ok {
 		title = s
 	} else {
-		title = "Command completed"
+		title = fmt.Sprintf("Command Complete: %v", data)
 	}
 
 	// Update status to show command completion
-	if err := c.updateStatusMessage(base.MessageTypeCommandComplete, "✅ 后台任务执行完毕"); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeCommandComplete, StatusProgressDoneLabel); err != nil {
 		c.logger.Warn("Failed to update status for command_complete", "error", err)
 	}
 
@@ -1122,11 +1048,11 @@ func (c *StreamCallback) handleStepStart(data any) error {
 	} else if s, ok := data.(string); ok {
 		content = s
 	} else {
-		content = "Starting step..."
+		content = fmt.Sprintf("Step Start: %v", data)
 	}
 
 	// Update status indicator
-	if err := c.updateStatusMessage(base.MessageTypeStepStart, "🔍 正在分析执行轨迹..."); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeStepStart, StatusStepStartLabel); err != nil {
 		c.logger.Warn("Failed to update status for step_start", "error", err)
 	}
 
@@ -1158,11 +1084,11 @@ func (c *StreamCallback) handleStepFinish(data any) error {
 	} else if s, ok := data.(string); ok {
 		content = s
 	} else {
-		content = "Step completed"
+		content = fmt.Sprintf("Step Finish: %v", data)
 	}
 
 	// Update status to show step completion
-	if err := c.updateStatusMessage(base.MessageTypeStepFinish, "✅ 当前任务阶段构建完成"); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeStepFinish, StatusStepFinishLabel); err != nil {
 		c.logger.Warn("Failed to update status for step_finish", "error", err)
 	}
 
@@ -1423,7 +1349,7 @@ func (c *StreamCallback) handlePlanMode(data any) error {
 	}
 
 	// Update status indicator
-	if err := c.updateStatusMessage(base.MessageTypePlanMode, "📝 正在制定作战计划..."); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypePlanMode, StatusPlanModeLabel); err != nil {
 		c.logger.Warn("Failed to update status for plan_mode", "error", err)
 	}
 
@@ -1450,7 +1376,7 @@ func (c *StreamCallback) handleExitPlanMode(data any) error {
 	}
 
 	// Update status indicator that we're waiting for user
-	if err := c.updateStatusMessage(base.MessageTypeExitPlanMode, "📝 作战计划就绪，等待您的批准..."); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeExitPlanMode, StatusExitPlanModeLabel); err != nil {
 		c.logger.Warn("Failed to update status for exit_plan_mode", "error", err)
 	}
 
@@ -1484,7 +1410,7 @@ func (c *StreamCallback) handleAskUserQuestion(data any) error {
 	}
 
 	// Update status indicator
-	if err := c.updateStatusMessage(base.MessageTypeAskUserQuestion, "⏳ 等待您提供更多信息..."); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeAskUserQuestion, StatusAskUserLabel); err != nil {
 		c.logger.Warn("Failed to update status for ask_user_question", "error", err)
 	}
 
@@ -1518,9 +1444,9 @@ func (c *StreamCallback) handleSessionStart(_ any) error {
 	c.mu.Unlock()
 
 	// Determine start status message based on whether it is hot or cold
-	statusMsg := "🚀 正在初始化上下文..."
+	statusMsg := StatusSessionStartColdLabel
 	if c.isHot {
-		statusMsg = "🚀 重新连接并恢复上下文..."
+		statusMsg = StatusSessionStartHotLabel
 	}
 
 	// ℹ️ DEVELOPER NOTE: Even though this is an "Absolute Black Hole" event (no physical message),
@@ -1536,19 +1462,15 @@ func (c *StreamCallback) handleSessionStart(_ any) error {
 	})
 }
 
-// handleEngineStarting handles engine starting events (CLI cold start in progress)
-// Implements EventTypeEngineStarting per spec (0.5)
-// Triggered during CLI cold start when engine is being initialized
+// handleEngineStarting handles engine starting event
 func (c *StreamCallback) handleEngineStarting(_ any) error {
-	// ℹ️ DEVELOPER NOTE: Even though this is an "Absolute Black Hole" event (no physical message),
-	// we MUST call updateStatusMessage to drive the native Slack Assistant Status bar.
-	if err := c.updateStatusMessage(base.MessageTypeEngineStarting, "🚀 正在唤醒推演引擎..."); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypeEngineStarting, StatusEngineStartingLabel); err != nil {
 		c.logger.Warn("Failed to update status for engine_starting", "error", err)
 	}
 
 	// Dispatch to processor chain to ensure state synchronization (ZoneOrder, etc.)
 	// FilterProcessor will prevent this from being physically sent as a message.
-	return c.buildChatMessage(base.MessageTypeEngineStarting, "🚀 正在唤醒推演引擎...", map[string]any{
+	return c.buildChatMessage(base.MessageTypeEngineStarting, StatusEngineStartingLabel, map[string]any{
 		"event_type": "engine_starting",
 	})
 }
@@ -1600,7 +1522,7 @@ func (c *StreamCallback) handlePermissionRequest(data any) error {
 
 	// Apply SetAssistantStatus to wait for permission
 	// This ensures the AI isn't just hanging silently while waiting
-	if err := c.updateStatusMessage(base.MessageTypePermissionRequest, "🛡️ 拦截到高危操作，等待提权审批..."); err != nil {
+	if err := c.updateStatusMessage(base.MessageTypePermissionRequest, StatusPermissionLabel); err != nil {
 		c.logger.Warn("Failed to update status for permission_request", "error", err)
 	}
 

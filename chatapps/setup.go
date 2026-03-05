@@ -45,11 +45,11 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 	if dir == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			logger.Debug("Could not determine user home directory", "error", err)
+			logger.Debug("Could not determine user home directory", "cause", err)
 		} else {
 			userConfigDir := filepath.Join(homeDir, ".hotplex", "configs")
 			if _, err := os.Stat(userConfigDir); err != nil {
-				logger.Debug("User config directory does not exist", "path", userConfigDir, "error", err)
+				logger.Debug("User config directory does not exist", "path", userConfigDir, "cause", err)
 			} else {
 				dir = userConfigDir
 				logger.Debug("Using user config directory", "path", dir)
@@ -72,7 +72,7 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 	if dir != "" {
 		loader, err = NewConfigLoader(dir, logger)
 		if err != nil {
-			logger.Warn("Failed to load platform configs, using defaults", "error", err)
+			logger.Debug("Could not load configuration from directory", "path", dir, "cause", err)
 			// Don't fail completely, try to continue with env-based config
 		}
 	}
@@ -94,7 +94,7 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 			cfg.SystemPrompt = pc.SystemPrompt
 		}
 		return telegram.NewAdapter(cfg, logger, base.WithoutServer())
-	})
+	}, "HOTPLEX_TELEGRAM_BOT_TOKEN")
 
 	// Discord
 	setupPlatform(ctx, "discord", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
@@ -110,7 +110,7 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 			cfg.SystemPrompt = pc.SystemPrompt
 		}
 		return discord.NewAdapter(cfg, logger, base.WithoutServer())
-	})
+	}, "HOTPLEX_DISCORD_BOT_TOKEN")
 
 	// Slack
 	setupPlatform(ctx, "slack", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
@@ -152,7 +152,7 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 		}
 
 		return slack.NewAdapter(config, logger, base.WithoutServer())
-	})
+	}, "HOTPLEX_SLACK_BOT_TOKEN")
 
 	// DingTalk
 	setupPlatform(ctx, "dingtalk", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
@@ -222,6 +222,12 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 		return nil, nil, fmt.Errorf("start all adapters: %w", err)
 	}
 
+	if len(manager.ListPlatforms()) == 0 {
+		logger.Error("No ChatApp platforms were successfully initialized. Please check your configuration.")
+	} else {
+		logger.Info("ChatApps setup completed", "platforms", manager.ListPlatforms())
+	}
+
 	return manager.Handler(), manager, nil
 }
 
@@ -232,7 +238,24 @@ func setupPlatform(
 	manager *AdapterManager,
 	logger *slog.Logger,
 	adapterFactory func(*PlatformConfig) ChatAdapter,
+	requiredEnvVars ...string,
 ) {
+	// Early exit if required environment variables are not set
+	// This avoids unnecessary YAML config loading and engine creation
+	if len(requiredEnvVars) > 0 {
+		missing := false
+		for _, envVar := range requiredEnvVars {
+			if os.Getenv(envVar) == "" {
+				missing = true
+				break
+			}
+		}
+		if missing {
+			logger.Debug("Platform skipped (missing required env vars)", "platform", platform, "required", requiredEnvVars)
+			return
+		}
+	}
+
 	var pc *PlatformConfig
 	if loader != nil {
 		pc = loader.GetConfig(platform)
@@ -296,6 +319,12 @@ func setupPlatform(
 
 	if err := manager.Register(adapter); err != nil {
 		logger.Error("Failed to register adapter", "platform", platform, "error", err)
+	} else {
+		if pc != nil && pc.SourceFile != "" {
+			logger.Info("Platform successfully initialized from configuration file", "platform", platform, "file", pc.SourceFile)
+		} else {
+			logger.Info("Platform successfully initialized from environment variables", "platform", platform)
+		}
 	}
 }
 
@@ -340,9 +369,10 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 		BaseSystemPrompt: pc.SystemPrompt,
 		Provider:         prv,
 		// Pass permission settings from YAML config
-		PermissionMode:  pc.Provider.DefaultPermissionMode,
-		AllowedTools:    allowedTools,
-		DisallowedTools: disallowedTools,
+		PermissionMode:             pc.Provider.DefaultPermissionMode,
+		DangerouslySkipPermissions: pc.Provider.DangerouslySkipPermissions,
+		AllowedTools:               allowedTools,
+		DisallowedTools:            disallowedTools,
 	}
 
 	return engine.NewEngine(opts)

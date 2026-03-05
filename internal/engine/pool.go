@@ -355,14 +355,15 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logger, prompt string, cfg SessionConfig) []string {
 	// Build ProviderSessionOptions
 	opts := &provider.ProviderSessionOptions{
-		WorkDir:          cfg.WorkDir,
-		PermissionMode:   sm.opts.PermissionMode,
-		AllowedTools:     sm.opts.AllowedTools,
-		DisallowedTools:  sm.opts.DisallowedTools,
-		BaseSystemPrompt: sm.opts.BaseSystemPrompt,
-		TaskInstructions: cfg.TaskInstructions,
-		InitialPrompt:    prompt,
-		SessionID:        providerSessionID,
+		WorkDir:                    cfg.WorkDir,
+		PermissionMode:             sm.opts.PermissionMode,
+		DangerouslySkipPermissions: sm.opts.DangerouslySkipPermissions,
+		AllowedTools:               sm.opts.AllowedTools,
+		DisallowedTools:            sm.opts.DisallowedTools,
+		BaseSystemPrompt:           sm.opts.BaseSystemPrompt,
+		TaskInstructions:           cfg.TaskInstructions,
+		InitialPrompt:              prompt,
+		SessionID:                  providerSessionID,
 	}
 
 	// Check if we need to resume using marker store

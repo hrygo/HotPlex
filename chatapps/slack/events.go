@@ -150,7 +150,15 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 		}
 	}
 
+	if msgEvent.Type == "message" && msgEvent.ChannelType != "dm" && a.config.ContainsBotMention(msgEvent.Text) {
+		a.Logger().Debug("Skipping 'message' event with mention (handled by 'app_mention')", "ts", msgEvent.TS)
+		return
+	}
+
 	threadID := msgEvent.ThreadTS
+	if threadID == "" {
+		threadID = msgEvent.TS
+	}
 
 	processedText, conversionMetadata := preprocessMessageText(msgEvent.Text)
 	// Defense-in-depth: sanitize user input before passing to engine

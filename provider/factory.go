@@ -251,6 +251,10 @@ func MergeProviderConfigs(base, overlay ProviderConfig) ProviderConfig {
 	if overlay.DefaultPermissionMode != "" {
 		result.DefaultPermissionMode = overlay.DefaultPermissionMode
 	}
+	// DangerouslySkipPermissions: if overlay sets it to true, use that value
+	if overlay.DangerouslySkipPermissions {
+		result.DangerouslySkipPermissions = true
+	}
 	if len(overlay.AllowedTools) > 0 {
 		result.AllowedTools = overlay.AllowedTools
 	}

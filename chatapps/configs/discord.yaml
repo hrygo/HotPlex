@@ -2,7 +2,7 @@ platform: discord
 provider:
   type: claude-code
   default_model: sonnet
-  default_permission_mode: bypass-permissions
+  default_permission_mode: bypass-permissions # bypassPermissions, acceptEdits, default, dontAsk, plan
 
 # -----------------------------------------------------------------------------
 # Engine Configuration

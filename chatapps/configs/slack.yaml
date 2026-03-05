@@ -18,7 +18,16 @@ provider:
   # Global settings (applied to all providers)
   enabled: true
   default_model: sonnet            # Model: sonnet, haiku, opus (Claude); or any model ID (OpenCode)
-  default_permission_mode: bypass-permissions # bypass-permissions or ask
+  default_permission_mode: bypass-permissions # bypassPermissions, acceptEdits, default, dontAsk, plan
+
+  # [Docker/Container Environment - Recommended]
+  # In containerized environments (Docker, Kubernetes), it is recommended to enable:
+  # dangerously_skip_permissions: true
+  # This bypasses all permission checks, enabling fully autonomous mode.
+  # Use only in sandboxed environments with no internet access or read-only filesystem.
+  # docker run -e HOTPLEX_PROVIDER_DANGEROUSLY_SKIP_PERMISSIONS=true ...
+  # dangerously_skip_permissions: true
+
   # binary_path: /usr/local/bin/claude        # Optional: override binary lookup path
 
   # Tool filtering (Provider-level override)

@@ -55,10 +55,11 @@ type EngineOptions struct {
 	Namespace string
 
 	// Foundational Security & Context (Engine-level boundaries)
-	PermissionMode   string   // Controls CLI permissions (e.g., "bypass-permissions"). Defaults to strict mode.
-	BaseSystemPrompt string   // Foundational instructions injected at CLI startup for all sessions.
-	AllowedTools     []string // Explicit list of tools allowed (whitelist). If empty, all tools are allowed.
-	DisallowedTools  []string // Explicit list of tools forbidden (blacklist).
+	PermissionMode             string   // Controls CLI permissions (e.g., "bypass-permissions"). Defaults to strict mode.
+	DangerouslySkipPermissions bool     // Bypasses all permission checks. Equivalent to --dangerously-skip-permissions.
+	BaseSystemPrompt           string   // Foundational instructions injected at CLI startup for all sessions.
+	AllowedTools               []string // Explicit list of tools allowed (whitelist). If empty, all tools are allowed.
+	DisallowedTools            []string // Explicit list of tools forbidden (blacklist).
 
 	// AdminToken is the secret required to toggle security bypass mode.
 	// If empty, bypass will be disabled for security.
