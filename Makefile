@@ -382,10 +382,10 @@ docker-build-tag:
 
 docker-run:
 	docker run -d --name hotplex \
-		-p 8080:8080 \
+		-p 18080:8080 \
 		-v $(HOME)/.hotplex:/.hotplex \
-		-v $(HOME)/.claude/settings.json:/home/hotplex/.claude/settings.json:ro \
-		-v $(HOME)/.claude/projects:/home/hotplex/.claude/projects:rw \
+		-v $(HOME)/.claude:/home/hotplex/.claude:rw \
+		-v $(HOME)/.claude.json:/home/hotplex/.claude.json:rw \
 		-v $(HOME)/projects:/home/hotplex/projects:rw \
 		$(DOCKER_IMAGE):$(DOCKER_TAG)
 

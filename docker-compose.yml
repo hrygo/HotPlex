@@ -1,0 +1,36 @@
+version: '3.8'
+
+# HotPlex Docker Compose Deployment
+# Start with: docker compose up -d
+
+services:
+  # ---------------------------------------------------------
+  # All-in-One Build: hotplexd + Claude Code
+  # ---------------------------------------------------------
+  hotplex:
+    build:
+      context: .
+      args:
+        # Pass current host UID to match permissions
+        - HOST_UID=${HOST_UID:-1000}
+    image: ghcr.io/hrygo/hotplex:latest
+    container_name: hotplex
+    ports:
+      - "18080:8080"
+    volumes:
+      # Map host configurations into the container for seamless transition
+      - ${HOME}/.hotplex:/.hotplex
+      - ${HOME}/.claude:/home/hotplex/.claude:rw
+      - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
+      - ${HOME}/projects:/home/hotplex/projects:rw
+    environment:
+      - HOTPLEX_PORT=8080
+      - HOTPLEX_LOG_LEVEL=info
+      - HOTPLEX_IDLE_TIMEOUT=30m
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped

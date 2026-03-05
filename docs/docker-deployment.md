@@ -6,62 +6,39 @@
 
 ### 1. Build the Image
 
-HotPlex provides two ways to build Docker images:
-
-#### Option A: Pure Build (hotplex-only)
-Minimal image containing only the hotplexd binary (~20MB).
-
 ```bash
+# Build the All-in-One image (includes Claude Code CLI)
 make docker-build
 ```
 
-#### Option B: All-in-One Build
-Includes hotplexd and Claude Code CLI, ready to use out of the box with host volume mappings.
-
-```bash
-make docker-build DOCKER_IMAGE=hotplex-ai
-```
-
-### 2. Run the Container
-
-#### Pure Build Usage
-
-```bash
-make docker-run
-# or
-docker run -d \
-  --name hotplex \
-  -p 8080:8080 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e CLAUDE_API_KEY=your-key \
-  hotplex:latest
-```
-
-#### All-in-One Build Usage (Recommended)
+### 2. Run the Container (Recommended)
 
 This method seamlessly integrates with your host machine's configuration:
 
 ```bash
 # Using Makefile
-make docker-run DOCKER_IMAGE=hotplex-ai
+make docker-run
 # or manually
 docker run -d \
-  --name hotplex-ai \
-  -p 8080:8080 \
+  --name hotplex \
+  -p 18080:8080 \
   -v $HOME/.hotplex:/.hotplex \
-  -v $HOME/.claude/settings.json:/home/hotplex/.claude/settings.json:ro \
-  -v $HOME/.claude/projects:/home/hotplex/.claude/projects:rw \
+  -v $HOME/.claude:/home/hotplex/.claude:rw \
+  -v $HOME/.claude.json:/home/hotplex/.claude.json:rw \
   -v $HOME/projects:/home/hotplex/projects:rw \
-  hotplex-ai:latest
+  hotplex:latest
 ```
 
+> [!NOTE]
+> **Slack App Compatibility**: Changing the host port to `18080` does **not** affect Slack connectivity. HotPlex defaults to **Socket Mode**, which uses outbound WebSocket connections. Host port mapping is only used for local Health Checks (`http://localhost:18080/health`) and internal metrics.
+
 **Volume Mapping Explanation**:
-| Host Path                     | Container Path                        | Mode       | Description          |
-| ----------------------------- | ------------------------------------- | ---------- | -------------------- |
-| `$HOME/.claude/settings.json` | `/home/hotplex/.claude/settings.json` | Read-only  | Claude Code settings |
-| `$HOME/.claude/projects`      | `/home/hotplex/.claude/projects`      | Read/Write | Chat histories       |
-| `$HOME/.hotplex`              | `/.hotplex`                           | Read/Write | HotPlex config       |
-| `$HOME/projects`              | `/home/hotplex/projects`              | Read/Write | Workspace            |
+| Host Path            | Container Path               | Mode       | Description                            |
+| -------------------- | ---------------------------- | ---------- | -------------------------------------- |
+| `$HOME/.claude`      | `/home/hotplex/.claude`      | Read/Write | History, skills, plugins, and settings |
+| `$HOME/.claude.json` | `/home/hotplex/.claude.json` | Read/Write | Authentication and MCP servers         |
+| `$HOME/.hotplex`     | `/.hotplex`                  | Read/Write | HotPlex config                         |
+| `$HOME/projects`     | `/home/hotplex/projects`     | Read/Write | Workspace                              |
 
 ### 3. Multi-Platform Build (amd64 + arm64)
 
@@ -69,34 +46,26 @@ docker run -d \
 make docker-buildx
 ```
 
+## Docker Compose (Recommended)
 
+To simplify management, we provide a `docker-compose.yml`.
 
-## Docker Compose
-
-```yaml
-version: '3.8'
-services:
-  hotplex:
-    image: hotplex:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - hotplex-data:/data
-    environment:
-      - HOTPLEX_PORT=8080
-      - HOTPLEX_LOG_LEVEL=info
-      - HOTPLEX_IDLE_TIMEOUT=30m
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
-volumes:
-  hotplex-data:
+### Start the Container
+```bash
+docker compose up -d
 ```
+
+### View Logs
+```bash
+docker compose logs -f
+```
+
+### Stop Containers
+```bash
+docker compose down
+```
+
+**Note:** Ensure your `.claude/settings.json` and `.hotplex` directories exist on your host before running the composed setup to prevent Docker from creating them as `root` directories.
 
 ## Kubernetes Deployment
 
