@@ -45,13 +45,13 @@ We believe that for an AI agent to be truly useful, it must be **Stateful**, **S
   <div class="audience-card">
     <h3>End Users</h3>
     <p>Deploy pre-built HotPlex agents to Slack or local portals in minutes.</p>
-    <a href="/guide/getting-started" class="audience-btn">Start Journey</a>
+    <a href="/hotplex/guide/getting-started" class="audience-btn">Start Journey</a>
   </div>
   
   <div class="audience-card">
     <h3>Developers</h3>
     <p>Build custom agent behaviors with our Go, Python, and TS SDKs.</p>
-    <a href="/guide/architecture" class="audience-btn">View Architecture</a>
+    <a href="/hotplex/guide/architecture" class="audience-btn">View Architecture</a>
   </div>
 
   <div class="audience-card">

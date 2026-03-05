@@ -118,12 +118,12 @@ The `SessionStats` object provides high-fidelity tracking of AI performance:
   <div class="audience-card" style="padding: 24px; min-width: 200px;">
     <h3>Provider Guide</h3>
     <p>Learn how the Engine abstracts AI agents via Strategy Adapters.</p>
-    <a href="/reference/provider" class="audience-btn">View Provider</a>
+    <a href="/hotplex/reference/provider" class="audience-btn">View Provider</a>
   </div>
   <div class="audience-card" style="padding: 24px; min-width: 200px;">
     <h3>API Reference</h3>
     <p>Master the Control and Streaming data planes.</p>
-    <a href="/reference/api" class="audience-btn">View API</a>
+    <a href="/hotplex/reference/api" class="audience-btn">View API Reference</a>
   </div>
 </div>
 

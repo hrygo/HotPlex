@@ -115,13 +115,13 @@ features:
   <div class="audience-card">
     <h3>End Users</h3>
     <p>Deploy HotPlex agents to Slack, DingTalk, or internal portals in minutes.</p>
-    <a href="/guide/getting-started" class="audience-btn">Start Deploying</a>
+    <a href="/hotplex/guide/getting-started" class="audience-btn">Start Deploying</a>
   </div>
   
   <div class="audience-card">
     <h3>Developers</h3>
     <p>Build custom agent behaviors with our powerful Go, Python, and TS SDKs.</p>
-    <a href="/reference/api" class="audience-btn">View API Reference</a>
+    <a href="/hotplex/reference/api" class="audience-btn">View API Reference</a>
   </div>
 
   <div class="audience-card">
@@ -137,19 +137,19 @@ features:
   <div class="audience-card">
     <h3>ChatApps Manual</h3>
     <p>Deep dive into multi-platform connectors, Block Kit mapping, and message pipelines.</p>
-    <a href="/reference/chatapps" class="audience-btn">Explore ChatApps</a>
+    <a href="/hotplex/reference/chatapps" class="audience-btn">Explore ChatApps</a>
   </div>
   
   <div class="audience-card">
     <h3>Engine Manual</h3>
     <p>Understand the core control plane, hot-multiplexing pool, and session isolation.</p>
-    <a href="/reference/engine" class="audience-btn">Master the Engine</a>
+    <a href="/hotplex/reference/engine" class="audience-btn">Master the Engine</a>
   </div>
 
   <div class="audience-card">
     <h3>Provider Manual</h3>
     <p>Learn how to abstract and integrate any AI CLI agent into the HotPlex ecosystem.</p>
-    <a href="/reference/provider" class="audience-btn">Extend Providers</a>
+    <a href="/hotplex/reference/provider" class="audience-btn">Extend Providers</a>
   </div>
 </div>
 
@@ -167,7 +167,7 @@ features:
 </div>
 
 <div style="width: 100%; overflow: hidden; border-radius: 12px; margin: 40px 0;">
-  <img src="/images/hotplex_beaver_banner.webp" alt="HotPlex Mascot Banner" style="width: 100%; height: auto; object-fit: cover;" />
+  <img src="/hotplex/images/hotplex_beaver_banner.webp" alt="HotPlex Mascot Banner" style="width: 100%; height: auto; object-fit: cover;" />
 </div>
 
 ---

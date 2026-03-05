@@ -63,15 +63,15 @@ While the API is the foundation, our official SDKs provide an artisanal layer of
 <div class="audience-section">
   <div class="audience-card" style="padding: 24px; min-width: 200px;">
     <h3>Go SDK</h3>
-    <a href="/sdks/go-sdk" class="audience-btn">Go Deep</a>
+    <a href="/hotplex/sdks/go-sdk" class="audience-btn">Go Deep</a>
   </div>
   <div class="audience-card" style="padding: 24px; min-width: 200px;">
     <h3>Python SDK</h3>
-    <a href="/sdks/python-sdk" class="audience-btn">Go Rapid</a>
+    <a href="/hotplex/sdks/python-sdk" class="audience-btn">Go Rapid</a>
   </div>
   <div class="audience-card" style="padding: 24px; min-width: 200px;">
     <h3>TS SDK</h3>
-    <a href="/sdks/typescript-sdk" class="audience-btn">Go Flux</a>
+    <a href="/hotplex/sdks/typescript-sdk" class="audience-btn">Go Flux</a>
   </div>
 </div>
 
