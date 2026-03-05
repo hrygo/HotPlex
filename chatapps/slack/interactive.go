@@ -128,7 +128,9 @@ func (a *Adapter) handlePermissionCallback(callback *SlackInteractionCallback, a
 	parts := strings.Split(actionID, ":")
 	if len(parts) < 3 {
 		a.Logger().Error("Invalid permission action_id format", "action_id", actionID)
-		w.WriteHeader(http.StatusOK)
+		if w != nil {
+			w.WriteHeader(http.StatusOK)
+		}
 		return
 	}
 
@@ -152,7 +154,7 @@ func (a *Adapter) handlePermissionCallback(callback *SlackInteractionCallback, a
 				"behavior":   permissionBehavior,
 			}
 			if err := sess.WriteInput(response); err != nil {
-				a.Logger().Error("Failed to send permission response to engine", "error", err)
+				a.Logger().Error("Failed to send permission response to engine", "cause", err)
 			} else {
 				a.Logger().Info("Sent permission response to engine",
 					"session_id", sessionID,
@@ -188,7 +190,7 @@ func (a *Adapter) handlePermissionCallback(callback *SlackInteractionCallback, a
 	slackBlocks := []slack.Block{slack.NewContextBlock("", auditText)}
 
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
-		a.Logger().Error("Update message failed", "error", err)
+		a.Logger().Error("Update message failed", "cause", err)
 	}
 
 	a.Logger().Info("Permission request processed",
@@ -219,7 +221,9 @@ func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, act
 	parts := strings.Split(value, ":")
 	if len(parts) < 2 {
 		a.Logger().Error("Invalid plan mode button value", "value", value)
-		w.WriteHeader(http.StatusOK)
+		if w != nil {
+			w.WriteHeader(http.StatusOK)
+		}
 		return
 	}
 
@@ -246,7 +250,7 @@ func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, act
 				"behavior": behavior,
 			}
 			if err := sess.WriteInput(response); err != nil {
-				a.Logger().Error("Failed to send plan response to engine", "error", err)
+				a.Logger().Error("Failed to send plan response to engine", "cause", err)
 			} else {
 				a.Logger().Info("Sent plan response to engine",
 					"session_id", sessionID,
@@ -276,7 +280,7 @@ func (a *Adapter) handlePlanModeCallback(callback *SlackInteractionCallback, act
 	slackBlocks := []slack.Block{slack.NewContextBlock("", auditText)}
 
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
-		a.Logger().Error("Update message failed", "error", err)
+		a.Logger().Error("Update message failed", "cause", err)
 	}
 
 	a.Logger().Info("Plan mode request processed",
@@ -307,7 +311,9 @@ func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, 
 	parts := strings.Split(value, ":")
 	if len(parts) < 2 {
 		a.Logger().Error("Invalid danger button value", "value", value)
-		w.WriteHeader(http.StatusOK)
+		if w != nil {
+			w.WriteHeader(http.StatusOK)
+		}
 		return
 	}
 
@@ -342,10 +348,12 @@ func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, 
 	slackBlocks := []slack.Block{slack.NewContextBlock("", auditText)}
 
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
-		a.Logger().Error("Update message failed", "error", err)
+		a.Logger().Error("Update message failed", "cause", err)
 	}
 
-	w.WriteHeader(http.StatusOK)
+	if w != nil {
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 // handleAskUserQuestionCallback handles ask user question option selection
@@ -391,7 +399,7 @@ func (a *Adapter) handleAskUserQuestionCallback(callback *SlackInteractionCallba
 				"user_id": userID,
 			}
 			if err := sess.WriteInput(response); err != nil {
-				a.Logger().Error("Failed to send question response to engine", "error", err)
+				a.Logger().Error("Failed to send question response to engine", "cause", err)
 			} else {
 				a.Logger().Info("Sent question response to engine",
 					"session_id", sessionID,
@@ -415,7 +423,7 @@ func (a *Adapter) handleAskUserQuestionCallback(callback *SlackInteractionCallba
 					"user_id": userID,
 				}
 				if err := sess.WriteInput(response); err != nil {
-					a.Logger().Error("Failed to send question response to engine", "error", err)
+					a.Logger().Error("Failed to send question response to engine", "cause", err)
 				} else {
 					a.Logger().Info("Sent question response to engine",
 						"session_id", baseSession.SessionID,
@@ -431,10 +439,12 @@ func (a *Adapter) handleAskUserQuestionCallback(callback *SlackInteractionCallba
 	slackBlocks := []slack.Block{slack.NewContextBlock("", auditText)}
 
 	if err := a.UpdateMessageSDK(context.Background(), channelID, messageTS, slackBlocks, ""); err != nil {
-		a.Logger().Error("Update message failed", "error", err)
+		a.Logger().Error("Update message failed", "cause", err)
 	}
 
-	w.WriteHeader(http.StatusOK)
+	if w != nil {
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 // SlackInteractionCallback represents a Slack interaction callback payload.

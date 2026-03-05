@@ -45,26 +45,29 @@ sequenceDiagram
 
 The `chatapps` layer normalizes raw provider events into a standard "Chat Language" using the **`base.MessageType`** Go type. While the underlying values often share names with Engine events, they represent **UI Rendering Intents** documented in [base/types.go](file:///Users/huangzhonghui/HotPlex/chatapps/base/types.go).
 
-| Provider/Engine Event | `base.MessageType` Constant    | UI Presentation                                 |
-| :-------------------- | :----------------------------- | :---------------------------------------------- |
-| `thinking`            | `MessageTypeThinking`          | Status indicators / Thinking bubbles            |
-| `tool_use`            | `MessageTypeToolUse`           | Tool invocation block (e.g., "Running `ls`...") |
-| `tool_result`         | `MessageTypeToolResult`        | Collapsible tool output block                   |
-| `answer`              | `MessageTypeAnswer`            | Standard Markdown text message                  |
-| `error`               | `MessageTypeError`             | Red-themed alert block                          |
-| `plan_mode`           | `MessageTypePlanMode`          | Planning phase indicator (Claude Code)          |
-| `permission_request`  | `MessageTypePermissionRequest` | Interactive Allow/Deny buttons                  |
-| `session_stats`       | `MessageTypeSessionStats`      | Usage summary (Tokens, Cost, Duration)          |
-| `danger_block`        | `MessageTypeDangerBlock`       | Critical warning with confirmation              |
-|                       |
+| Provider/Engine Event | `base.MessageType` Constant    | UI Presentation                                  |
+| :-------------------- | :----------------------------- | :----------------------------------------------- |
+| `thinking`            | `MessageTypeThinking`          | [Status Only] Thinking indicators / Bubbles      |
+| `tool_use`            | `MessageTypeToolUse`           | [Status Only] "Executing tool..." indicator      |
+| `tool_result`         | `MessageTypeToolResult`        | [Silent Success] Status only; Errors show blocks |
+| `answer`              | `MessageTypeAnswer`            | Standard Markdown text / Streaming output        |
+| `error`               | `MessageTypeError`             | Red-themed alert block                           |
+| `plan_mode`           | `MessageTypePlanMode`          | Planning phase indicator (Status + Text)         |
+| `permission_request`  | `MessageTypePermissionRequest` | Interactive Allow/Deny buttons                   |
+| `session_stats`       | `MessageTypeSessionStats`      | Usage summary (Tokens, Duration)                 |
+| `danger_block`        | `MessageTypeDangerBlock`       | Critical warning with confirmation               |
+|                       |                                |                                                  |
+
+> [!NOTE]
+> **Slack Free Plan Compatibility**: Some advanced features (Streaming, Status Bar) require a paid plan or [Developer Sandbox](https://api.slack.com/developer/program). See [docs/plans/slack_free_plan_compatibility.md](file:///Users/huangzhonghui/HotPlex/docs/plans/slack_free_plan_compatibility.md) for current tracking of fallback optimizations.
 
 ### Key Architectural Concepts
 -   **`ProcessorChain`**: A middleware-style pipeline that processes messages before they are sent or after they are received. Standard processors include:
-    -   **`Filter`**: Drops noise/bot events.
-    -   **`ZoneOrder`**: Ensures UI blocks (Thinking -> Action -> Answer) are displayed in the correct order.
-    -   **`RateLimit`**: Protects against message bursts.
+    -   **`Filter`**: [Black Hole] Silently drops noise events, unparsed raw outputs, and redundant user reflections within the integration layer.
+    -   **`Thread`**: Manages thread state and caching for multi-step responses to maintain context.
     -   **`FormatConversion`**: Converts Standard Markdown to platform-specific formats (e.g., Slack Block Kit, Feishu Card).
     -   **`Chunking`**: Splits long messages to respect platform API limits.
+-   **`Space Folding`**: A policy where high-volume tool outputs (>2KB) are automatically diverted to thread replies or collapsed, preventing main channel pollution while preserving "Geek Transparency".
 -   **`EngineMessageHandler`**: The main business logic that connects normalized chat events to the HotPlex Engine.
 
 ---

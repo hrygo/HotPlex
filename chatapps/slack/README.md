@@ -47,16 +47,18 @@ The following diagram illustrates how signals flow from the Engine through the i
 ### 💬 Messaging & UI
 - **[messages.go](messages.go)**: Core messaging logic, including standard posts, updates, and **Native Assistant Status** API calls (`assistant.threads.setStatus`).
 - **[builder.go](builder.go)**: A sophisticated factory that translates engine `ChatMessage` objects into Slack Block Kit components. It follows an **"Absolute Black Hole"** policy to filter out redundant system noise.
-- **[chunker.go](chunker.go)**: Safely splits large messages to respect Slack's character limits.
+- **[formatting.go](formatting.go)**: Advanced Markdown-to-Mrkdwn converter with support for Slack-specific escapes and blocks.
 - **[streaming_writer.go](streaming_writer.go)**: Implements `io.Writer` for character-by-character output via Slack's native streaming UI.
 
 ### ⚡ Interactions
-- **[slash_commands.go](slash_commands.go)**: Processes slash commands (e.g., `/reset`, `/dc`) with rate limiting.
+- **[slash_commands.go](slash_commands.go)**: Processes slash commands (e.g., `/reset`, `/dc`) with rate limiting and context awareness.
 - **[interactive.go](interactive.go)**: Handles interactive callbacks for **WAF Danger Blocks** and permission requests, enabling Human-in-the-loop (HITL) workflows.
 
 ### 🛡️ Security & Reliability
-- **[config.go](config.go)**: Handles workspace configuration and permission policies.
-- **[rate_limiter.go](rate_limiter.go)**: Per-user token-bucket rate limiting.
+- **[security.go](security.go)**: Implements request signature verification, URL sanitization, and PII masking for error messages.
+- **[validator.go](validator.go)**: Strict Block Kit schema validation to prevent API errors during complex card rendering.
+- **[config.go](config.go)**: Workspace-level configuration including DMPolicy and GroupPolicy enforcement.
+- **[rate_limiter.go](rate_limiter.go)**: Per-user token-bucket rate limiting for interactive elements.
 
 ## Key Features
 
