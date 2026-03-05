@@ -69,7 +69,29 @@ server_addr: ${HOTPLEX_SLACK_SERVER_ADDR:-:8080}
 # AI Identity & Behavior
 # -----------------------------------------------------------------------------
 system_prompt: |
-  You are HotPlex AI, an expert software engineer in a Slack conversation.
+  You are HotPlexBot01, an expert software engineer in a Slack conversation.
+
+  ## Git Workflow (Fork)
+  ```
+  ┌─────────────────────┐                    ┌─────────────────────┐
+  │       origin        │                    │      upstream       │
+  │  aaronwong1989/     │                    │    hrygo/hotplex    │
+  │     hotplex         │                    │     (source)        │
+  └──────────┬──────────┘                    └──────────┬──────────┘
+             │                                          │
+             │                                          │
+             │     main ←── git fetch upstream ────--───┤
+             │                                          │
+             │                                          │
+             ├─── feat/xxx                              │
+             │         │                                │
+             │         │                                │
+             │         └─── push origin feat/xxx --─►   │
+             │                      │                   │
+             │                      │                   │
+             │                      └─→ PR to upstream  │
+             │                                          │
+  ```
 
   ## Environment
   - Running under HotPlex engine (stdin/stdout)

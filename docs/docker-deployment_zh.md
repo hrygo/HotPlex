@@ -11,6 +11,9 @@
 make docker-build
 ```
 
+**💡 提示：自定义您的开发环境**
+本项目提供的 `Dockerfile` 是一个基础模板。由于 AI 编码工具在执行具体任务（例如打包前端、运行 Python 脚本或执行特定的 CLI 命令）时依赖相应的系统环境，我们强烈建议您在构建镜像前，**打开 `Dockerfile` 并加入您自己技术栈所需的依赖库或语言环境**（例如 `Node.js`, `Python`, `Rust` 或特定的构建工具）。然后再执行上方的构建命令。
+
 ### 2. 运行容器 (推荐)
 
 此方案可以无缝集成您宿主机已有的配置文件与模型：
@@ -90,20 +93,49 @@ docker compose down
 
 **运行前提:** 在启动前，请确保宿主机上已存在 `.claude/settings.json` 和 `.hotplex` 目录，否则 Docker 可能会以 `root` 权限创建这些目录。
 
-## 网络与代理配置 (针对 macOS/Windows)
+## 网络与代理配置 (全平台支持：macOS / Windows / Linux)
 
-在 Docker 容器内访问宿主机代理需要特殊配置。
+由于 Docker 的网络隔离机制，在容器内访问宿主机（您的物理机）的网络代理需要特定配置。
 
-### 1. 核心概念
-- **`host.docker.internal`**: Docker 提供的特殊 DNS 名称，用于在容器内访问宿主机。
-- **允许局域网连接 (Allow LAN)**: **必须**在您的代理软件（Clash, V2Ray 等）中开启此选项，否则宿主机会拒绝来自容器虚拟网卡的连接。
+我们在项目提供的 `docker-compose.yml` 中，已经通过加入 `extra_hosts: - "host.docker.internal:host-gateway"` 配置打通了底层通道。这一机制使得原本只有 macOS / Windows (Docker Desktop) 支持的 `host.docker.internal` 魔法域名，在 **Linux 环境下也能完美兼容生效。**
 
-### 2. 代理区分
-为了获得最佳体验，我们建议在环境或 `docker-compose.yml` 中区分两类代理：
-- **LLM 专用代理 (`ANTHROPIC_BASE_URL`)**: 指向您的 AI 接口专用通道（如端口 15721）。
-- **通用系统代理 (`HTTP_PROXY`)**: 指向您的常规上网插件（如 Clash 端口 7897）。
+请核对您的网络需求类型，并在您的环境配置或 `docker-compose.yml` 中做出对应设置：
 
-### 3. 验证网络
+### 第一类用户：标准网络用户（无代理需求）
+**您不需要翻墙，只需访问国内公共网络（如百度）或局域网内网接口。**
+- **操作**：什么都不用做，直接启动容器即可，默认网桥会自动提供出网能力。
+- **排错建议**：如果您在无代理状态下依然遇到网络奇慢或请求国内接口超时失败，大概率是默认 DNS 解析异常。您可以手动为容器指定国内优质 DNS：
+  ```yaml
+  dns:
+    - 223.5.5.5
+    - 114.114.114.114
+  ```
+
+### 第二类用户：全局代理用户（装有 Clash/V2Ray 等梯子）
+**您的宿主机运行了全局代理软件，希望容器也能通过该代理访问类似 Google、GitHub 等外部资源。**
+- **关键操作 1**：必须去宿主机的代理软件设置中开启 **“允许局域网连接 (Allow LAN)”**，否则宿主机会因安全策略拒绝容器的访问请求。
+- **操作 2**：注入标准系统代理变量，通过魔法域名跳出沙盒：
+  ```yaml
+  environment:
+    - HTTP_PROXY=http://host.docker.internal:<您的代理端口>
+    - HTTPS_PROXY=http://host.docker.internal:<您的代理端口>
+  ```
+
+### 第三类用户：高阶用户（使用独立 LLM 专用代理通道）
+**您的网络环境比较复杂，除了需要全局代理用于上网插件外，还需要为大模型（LLM）API 指派非常专用的定制节点路由或端口。**
+- **操作**：HotPlex 支持精细化的代理剥离策略。您可以同时并存两者，互不干扰：
+  ```yaml
+  environment:
+    # 1. LLM 专属定制通道网关 (例如仅加速 Claude 接口)
+    - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
+    # 2. 覆盖其它网络抓取插件的通用系统代理
+    - HTTP_PROXY=http://host.docker.internal:7897
+    - HTTPS_PROXY=http://host.docker.internal:7897
+    # 3. 拦截本地回环，防止死因循环的报错
+    - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+  ```
+
+### 验证网络
 ```bash
 # 检查容器是否能连通宿主机代理
 make docker-check-net

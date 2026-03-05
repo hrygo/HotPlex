@@ -11,6 +11,9 @@
 make docker-build
 ```
 
+**💡 Tip: Customize Your Development Environment**
+The provided `Dockerfile` serves as a foundation. Since AI coding tools (like Claude Code) rely on the container's OS environment to execute specific tasks—such as building frontends, running Python scripts, or using specific CLI tools—we highly recommend that you **open the `Dockerfile` and install the specific dependencies or languages needed for your tech stack** (e.g., `Node.js`, `Python`, `Rust`) before running the build command above.
+
 ### 2. Run the Container (Recommended)
 
 This method seamlessly integrates with your host machine's configuration:
@@ -91,22 +94,51 @@ docker compose down
 
 **Prerequisite:** Ensure your `.claude/settings.json` and `.hotplex` directories exist on your host before running the setup to prevent Docker from creating them as `root` directories.
 
-## Networking and Proxy Configuration (macOS/Windows)
+## Networking and Proxy Configuration (macOS/Windows/Linux)
 
-Accessing host proxies from within a Docker container requires specific configuration.
+Due to Docker's network isolation, accessing your host machine's proxy from within the container requires specific configuration.
 
-### 1. Core Concepts
-- **`host.docker.internal`**: A special DNS name provided by Docker to access the host from within a container.
-- **Allow LAN**: You **must** enable this option in your proxy software (Clash, V2Ray, etc.), otherwise the host will reject connections from the container's virtual network.
+In the provided `docker-compose.yml`, we have configured `extra_hosts: - "host.docker.internal:host-gateway"`. This ensures that the `host.docker.internal` DNS name—which is natively available on macOS and Windows via Docker Desktop—is **fully compatible and functional on Linux systems as well.**
 
-### 2. Proxy Separation
-For the best experience, we recommend separating two types of proxies in your environment or `docker-compose.yml`:
-- **Dedicated LLM Proxy (`ANTHROPIC_BASE_URL`)**: Points to your AI API gateway (e.g., port 15721).
-- **General System Proxy (`HTTP_PROXY`)**: Points to your regular VPN/Proxy (e.g., Clash port 7897).
+Please identify your user profile and apply the corresponding proxy variables in your `.env` or `docker-compose.yml`:
 
-### 3. Verify Connectivity
+### Profile 1: Standard Network User (No Proxy Needed)
+**You only need to access domestic public networks (e.g., Baidu) or internal APIs.**
+- **Action**: Do nothing. Container networks are NAT-bridged by default. 
+- **Troubleshooting**: If you experience extreme slowness or timeout, it may be a local DNS issue. You can manually inject public DNS servers into your `docker-compose.yml`:
+  ```yaml
+  dns:
+    - 223.5.5.5
+    - 114.114.114.114
+  ```
+
+### Profile 2: Global Proxy User (Standard VPN/Clash)
+**You run a proxy tool (e.g., Clash, V2Ray) on your host machine to access restricted overseas networks (e.g., Google).**
+- **Action 1 (Crucial)**: Open your proxy client's settings on your host machine and enable **"Allow LAN (允许局域网连接)"**.
+- **Action 2**: Inject the general proxy variable. HotPlex will map `host.docker.internal` dynamically.
+  ```yaml
+  environment:
+    - HTTP_PROXY=http://host.docker.internal:<YOUR_PROXY_PORT>
+    - HTTPS_PROXY=http://host.docker.internal:<YOUR_PROXY_PORT>
+  ```
+
+### Profile 3: Advanced User (Dedicated LLM Proxy)
+**You have complex network environments locally, splitting general proxy for internet browsing and a dedicated proxy strictly for LLM (Large Language Model) API requests.**
+- **Action**: HotPlex provides granular proxy control via `ANTHROPIC_BASE_URL` independent of standard HTTP proxies. Set them up concurrently without conflict:
+  ```yaml
+  environment:
+    # 1. Dedicated tunnel strictly for the LLM API gateway
+    - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
+    # 2. General proxy for standard web plugins or crawling
+    - HTTP_PROXY=http://host.docker.internal:7897
+    - HTTPS_PROXY=http://host.docker.internal:7897
+    # 3. Prevent proxy loopback issues
+    - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+  ```
+
+### Verify Connectivity
 ```bash
-# Verify if the container can reach host proxies
+# Verify if the container can reach your host proxy
 make docker-check-net
 ```
 

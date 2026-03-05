@@ -322,6 +322,11 @@ docker-down: ## @docker Stop and remove docker-compose containers
 	docker compose down
 	@printf "${GREEN}✅ Done.${NC}\n"
 
+docker-restart: docker-sync ## @docker Sync configs → restart containers
+	@printf "${YELLOW}🔄 Restarting HotPlex containers...${NC}\n"
+	docker compose down && docker compose up -d
+	@printf "${GREEN}✅ Restart complete.${NC}\n"
+
 docker-logs: ## @docker Tail docker-compose logs
 	docker compose logs -f
 

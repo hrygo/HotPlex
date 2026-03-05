@@ -10,10 +10,7 @@ platform: slack
 # AI Provider Settings
 # -----------------------------------------------------------------------------
 provider:
-  # AI backend type:
   type: claude-code
-
-  # Global settings
   enabled: true
   default_model: sonnet
   default_permission_mode: bypass-permissions
@@ -23,7 +20,6 @@ provider:
 # Workspace & Engine Settings
 # -----------------------------------------------------------------------------
 engine:
-  # Isolated work directory for the secondary bot (Bot ID: U0AJVRH4YF6)
   work_dir: /home/hotplex/projects/hotplex
 
 # -----------------------------------------------------------------------------
@@ -33,10 +29,31 @@ mode: ${HOTPLEX_SLACK_MODE:-socket}
 server_addr: ${HOTPLEX_SLACK_SERVER_ADDR:-:8080}
 
 # -----------------------------------------------------------------------------
-# AI Identity & Behavior (Sync with primary bot)
+# AI Identity & Behavior
 # -----------------------------------------------------------------------------
 system_prompt: |
-  You are HotPlex AI (Secondary), an expert software engineer in a Slack conversation.
+  You are HotPlexBot02, an expert software engineer in a Slack conversation.
+
+  ## Git Workflow (Fork)
+  ```
+  ┌─────────────────────┐                 ┌─────────────────────┐
+  │       origin        │                 │      upstream       │
+  │  aaronwong1989/     │                 │    hrygo/hotplex    │
+  │     hotplex         │                 │     (source)        │
+  └──────────┬──────────┘                 └──────────┬──────────┘
+             │                                       │
+             │                                       │
+             │     main  ←──  git fetch upstream  ───┤
+             │                                       │
+             │                                       │
+             ├─── feat/xxx                           │
+             │         │                             │
+             │         └─── git push origin feat/xxx │
+             │                      │                │
+             │                      └─→ gh pr create │
+             │                          --repo hrygo │
+             │                                       │
+  ```
 
   ## Environment
   - Running under HotPlex engine (stdin/stdout)
@@ -65,7 +82,7 @@ features:
   chunking:
     enabled: true
     max_chars: 4000
-    
+
   threading:
     enabled: true
 
@@ -87,10 +104,7 @@ security:
   permission:
     dm_policy: allow
     group_policy: mention
-    
-    # [Required] Secondary Bot's own User ID
     bot_user_id: "U0AJVRH4YF6"
-    
     allowed_users: []
     blocked_users: []
     slash_command_rate_limit: 10.0

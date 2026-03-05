@@ -22,15 +22,17 @@ services:
       - ${HOME}/.claude:/home/hotplex/.claude:rw
       - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
       - ${HOME}/.slack/BOT_U0AHRCL1KCM:/home/hotplex/projects:rw
-      # Optional: mount project specific ChatApp configs if needed
+      # Bot 01 Git config (HotPlexBot01)
+      - ${HOME}/.gitconfig-hotplex:/home/hotplex/.gitconfig:ro
+      # Go development cache (persist dependencies and build cache)
+      - hotplex-go-mod:/home/hotplex/go/pkg/mod
+      - hotplex-go-build:/home/hotplex/.cache/go-build
     env_file:
       - .env
     environment:
+      # Only override values that differ from .env
       - HOST_UID=${HOST_UID:-1000}
-      - HOTPLEX_PORT=8080
-      # Dedicated LLM Proxy for Claude Code
       - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
-      # General Network Access via Clash Verge (Detected port: 7897)
       - HTTP_PROXY=http://host.docker.internal:7897
       - HTTPS_PROXY=http://host.docker.internal:7897
       - NO_PROXY=localhost,127.0.0.1,host.docker.internal
@@ -49,7 +51,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------
-  # Secondary Bot Build: Using different tokens
+  # Secondary Bot Build: Research Assistant Robot
   # ---------------------------------------------------------
   hotplex-secondary:
     image: ghcr.io/hrygo/hotplex:latest
@@ -63,12 +65,16 @@ services:
       - ${HOME}/.slack/BOT_U0AJVRH4YF6:/home/hotplex/projects:rw
       # Override the default slack config with secondary one
       - ./chatapps/configs/slack_secondary.yaml:/app/chatapps/configs/slack.yaml:ro
+      # Bot 02 Git config (HotPlexBot02)
+      - ${HOME}/.gitconfig-hotplex-secondary:/home/hotplex/.gitconfig:ro
+      # Go development cache (shared with primary)
+      - hotplex-go-mod:/home/hotplex/go/pkg/mod
+      - hotplex-go-build:/home/hotplex/.cache/go-build
     env_file:
       - .env.secondary
     environment:
+      # Only override values that differ from .env
       - HOST_UID=${HOST_UID:-1000}
-      - HOTPLEX_PORT=8080
-      - HOTPLEX_CHATAPPS_CONFIG_DIR=/app/chatapps/configs
       - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
       - HTTP_PROXY=http://host.docker.internal:7897
       - HTTPS_PROXY=http://host.docker.internal:7897
@@ -76,3 +82,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+
+# Named volumes for Go cache persistence
+volumes:
+  hotplex-go-mod:
+    name: hotplex-go-mod
+  hotplex-go-build:
+    name: hotplex-go-build
