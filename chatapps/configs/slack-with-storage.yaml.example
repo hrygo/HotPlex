@@ -1,0 +1,51 @@
+# HotPlex ChatApp 配置示例 - 消息存储插件 (Phase 3)
+
+platform: slack
+system_prompt: "You are a helpful assistant."
+
+# 消息存储配置
+message_store:
+  enabled: true
+  type: sqlite  # sqlite | postgres | memory
+  
+  # SQLite 配置 (Level 1: <10M 行)
+  sqlite:
+    path: ~/.hotplex/chatapp_messages.db
+    max_size_mb: 512
+  
+  # PostgreSQL 配置 (Level 2: 亿级，分区表)
+  # postgres:
+  #   dsn: postgres://user:pass@localhost:5432/hotplex
+  #   max_connections: 25
+  #   level: 1  # 1=百万级，2=亿级
+  
+  # 存储策略
+  strategy: default  # default | debug
+  
+  # 流式消息配置
+  streaming:
+    enabled: true
+    buffer_size: 100
+    timeout_seconds: 300
+    storage_policy: complete_only  # complete_only | all_chunks
+
+engine:
+  timeout: 5m
+  idle_timeout: 10m
+  work_dir: /tmp/hotplex
+  allowed_tools: []
+  disallowed_tools: []
+
+provider:
+  type: anthropic
+  model: claude-sonnet-4-20250514
+  api_key: ${ANTHROPIC_API_KEY}
+
+security:
+  verify_signature: true
+  permission:
+    dm_policy: allow
+    group_policy: allow
+    bot_user_id: U0123456789
+    allowed_users: []
+    blocked_users: []

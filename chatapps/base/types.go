@@ -12,6 +12,16 @@ import (
 // does not support the requested operation.
 var ErrNotSupported = errors.New("operation not supported on this platform")
 
+// 消息存储相关错误定义
+var (
+	ErrNilStore                 = errors.New("storage store is nil")
+	ErrNilSessionManager        = errors.New("session manager is nil")
+	ErrMissingChatSessionID     = errors.New("chat_session_id is required")
+	ErrMissingEngineSessionID   = errors.New("engine_session_id is required")
+	ErrMissingProviderSessionID = errors.New("provider_session_id is required")
+	ErrMissingContent           = errors.New("content is required")
+)
+
 // MessageType defines the normalized message types across all chat platforms
 type MessageType string
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hrygo/hotplex/chatapps/session"
 	"github.com/hrygo/hotplex/engine"
 )
 
@@ -69,6 +70,11 @@ type Adapter struct {
 	// Secondary index for O(1) session lookup by user+channel
 	sessionsByUserChannel map[string]*Session // key: "userID:channelID"
 	indexMu               sync.RWMutex        // Protects sessionsByUserChannel
+
+	// Message storage plugin (Phase 3)
+	messageStore *MessageStorePlugin
+	sessionMgr   session.SessionManager
+	providerType string // e.g., "openai", "anthropic"
 }
 
 // NewAdapter creates a new base adapter
@@ -165,6 +171,27 @@ func (a *Adapter) SetHandler(handler MessageHandler) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.handler = handler
+}
+
+// SetMessageStore sets the message storage plugin (thread-safe)
+func (a *Adapter) SetMessageStore(store *MessageStorePlugin) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.messageStore = store
+}
+
+// SetSessionManager sets the session manager (thread-safe)
+func (a *Adapter) SetSessionManager(mgr session.SessionManager) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sessionMgr = mgr
+}
+
+// SetProviderType sets the provider type for storage (thread-safe)
+func (a *Adapter) SetProviderType(providerType string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.providerType = providerType
 }
 
 // Handler returns the message handler (thread-safe)

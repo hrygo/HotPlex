@@ -22,6 +22,7 @@ type PlatformConfig struct {
 	Engine           EngineConfig            `yaml:"engine"`
 	Provider         provider.ProviderConfig `yaml:"provider"`
 	Security         SecurityConfig          `yaml:"security"`
+	MessageStore     MessageStoreConfig      `yaml:"message_store,omitempty"`
 	DingTalk         DingTalkConfig          `yaml:"dingtalk"`
 	WhatsApp         WhatsAppConfig          `yaml:"whatsapp"`
 	Options          map[string]any          `yaml:"options,omitempty"`
@@ -63,6 +64,34 @@ type EngineConfig struct {
 	WorkDir         string        `yaml:"work_dir"`
 	AllowedTools    []string      `yaml:"allowed_tools"`
 	DisallowedTools []string      `yaml:"disallowed_tools"`
+}
+
+// MessageStoreConfig 消息存储配置 (Phase 3)
+type MessageStoreConfig struct {
+	Enabled   bool            `yaml:"enabled"`
+	Type      string          `yaml:"type"` // sqlite | postgres | memory
+	SQLite    SQLiteConfig    `yaml:"sqlite"`
+	Postgres  PostgresConfig  `yaml:"postgres"`
+	Strategy  string          `yaml:"strategy"`
+	Streaming StreamingConfig `yaml:"streaming"`
+}
+
+type SQLiteConfig struct {
+	Path      string `yaml:"path"`
+	MaxSizeMB int    `yaml:"max_size_mb"`
+}
+
+type PostgresConfig struct {
+	DSN            string `yaml:"dsn"`
+	MaxConnections int    `yaml:"max_connections"`
+	Level          int    `yaml:"level"` // 1=百万级，2=亿级
+}
+
+type StreamingConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	BufferSize     int    `yaml:"buffer_size"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	StoragePolicy  string `yaml:"storage_policy"` // complete_only | all_chunks
 }
 
 type Logger = slog.Logger
