@@ -30,6 +30,7 @@ func NewPluginRegistry() *PluginRegistry {
 	r := &PluginRegistry{factories: make(map[string]PluginFactory)}
 	r.Register("memory", &MemoryFactory{})
 	r.Register("sqlite", &SQLiteFactory{})
+	r.Register("postgresql", &PostgreFactory{})
 	return r
 }
 
