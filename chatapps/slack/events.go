@@ -3,7 +3,6 @@ package slack
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"time"
 
@@ -39,15 +38,12 @@ type MessageEvent struct {
 }
 
 func (a *Adapter) handleEvent(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !base.CheckMethodPOST(w, r) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		a.Logger().Error("Read body failed", "error", err)
-		http.Error(w, "Bad request", http.StatusBadRequest)
+	body, ok := base.ReadBodyWithLog(w, r, a.Logger())
+	if !ok {
 		return
 	}
 

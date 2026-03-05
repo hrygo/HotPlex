@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -180,15 +179,12 @@ type Msg struct {
 }
 
 func (a *Adapter) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !base.CheckMethodPOST(w, r) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		a.Adapter.Logger().Error("Read body failed", "error", err)
-		http.Error(w, "Bad request", http.StatusBadRequest)
+	body, ok := base.ReadBodyWithLog(w, r, a.Adapter.Logger())
+	if !ok {
 		return
 	}
 

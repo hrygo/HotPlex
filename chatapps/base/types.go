@@ -2,10 +2,15 @@ package base
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"time"
 )
+
+// ErrNotSupported is returned by optional interface methods when the platform
+// does not support the requested operation.
+var ErrNotSupported = errors.New("operation not supported on this platform")
 
 // MessageType defines the normalized message types across all chat platforms
 type MessageType string
@@ -91,6 +96,17 @@ const (
 	ParseModeHTML     ParseMode = "html"
 )
 
+// ChatAdapter is the core interface that ALL platform adapters MUST implement.
+// This defines the minimum contract for a chat platform integration.
+//
+// Required implementations:
+//   - Platform() - Returns platform identifier
+//   - SystemPrompt() - Returns system prompt for AI
+//   - Start(ctx) - Starts the adapter
+//   - Stop() - Stops the adapter
+//   - SendMessage(ctx, sessionID, msg) - Sends a message
+//   - HandleMessage(ctx, msg) - Handles incoming messages
+//   - SetHandler(handler) - Sets the message handler
 type ChatAdapter interface {
 	Platform() string
 	SystemPrompt() string
@@ -101,15 +117,28 @@ type ChatAdapter interface {
 	SetHandler(MessageHandler)
 }
 
+// MessageHandler is the function signature for handling incoming messages.
 type MessageHandler func(ctx context.Context, msg *ChatMessage) error
 
-// WebhookProvider exposes HTTP handlers for unified server integration
+// WebhookProvider is an OPTIONAL interface for adapters that use webhooks.
+// Implement this if your platform receives events via HTTP webhooks.
+//
+// Platforms NOT requiring this: Socket Mode (Slack), long polling (Telegram)
 type WebhookProvider interface {
 	WebhookPath() string
 	WebhookHandler() http.Handler
 }
 
-// MessageOperations defines platform-specific message operations
+// MessageOperations is an OPTIONAL interface for advanced message operations.
+// Implement this if your platform supports:
+//   - Deleting messages
+//   - Updating/editing messages
+//   - Native streaming (start/append/stop)
+//   - Thread replies
+//   - Assistant status indicators
+//
+// Platforms with limited support can implement partial methods and return
+// ErrNotSupported for unsupported operations.
 type MessageOperations interface {
 	DeleteMessage(ctx context.Context, channelID, messageTS string) error
 	UpdateMessage(ctx context.Context, channelID, messageTS string, msg *ChatMessage) error
@@ -126,8 +155,8 @@ type MessageOperations interface {
 	StopStream(ctx context.Context, channelID, messageTS string) error
 }
 
-// SessionOperations defines platform-specific session operations
-// Note: Session is defined in base/adapter.go to avoid circular dependencies
+// SessionOperations is an OPTIONAL interface for session management.
+// Implement this if your platform needs direct session access.
 type SessionOperations interface {
 	GetSession(key string) (*Session, bool)
 	FindSessionByUserAndChannel(userID, channelID string) *Session

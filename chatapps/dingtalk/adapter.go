@@ -8,10 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -107,10 +105,8 @@ func (a *Adapter) handleCallbackVerify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Adapter) handleCallbackMessage(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		a.Logger().Error("Read body failed", "error", err)
-		http.Error(w, "Bad request", http.StatusBadRequest)
+	body, ok := base.ReadBodyWithLog(w, r, a.Logger())
+	if !ok {
 		return
 	}
 
@@ -213,47 +209,11 @@ func (a *Adapter) ChunkMessage(content string) []string {
 		maxLen = 5000
 	}
 
-	if len(content) <= maxLen {
-		return []string{content}
-	}
-
-	var chunks []string
-	lines := strings.Split(content, "\n")
-	var currentChunk strings.Builder
-
-	for _, line := range lines {
-		if len(line) > maxLen {
-			if currentChunk.Len() > 0 {
-				chunks = append(chunks, currentChunk.String())
-				currentChunk.Reset()
-			}
-			for len(line) > maxLen {
-				chunks = append(chunks, line[:maxLen])
-				line = line[maxLen:]
-			}
-			if len(line) > 0 {
-				currentChunk.WriteString(line)
-				currentChunk.WriteString("\n")
-			}
-			continue
-		}
-
-		if currentChunk.Len()+len(line)+1 > maxLen {
-			if currentChunk.Len() > 0 {
-				chunks = append(chunks, currentChunk.String())
-				currentChunk.Reset()
-			}
-		}
-
-		currentChunk.WriteString(line)
-		currentChunk.WriteString("\n")
-	}
-
-	if currentChunk.Len() > 0 {
-		chunks = append(chunks, currentChunk.String())
-	}
-
-	return chunks
+	return base.ChunkMessage(content, base.ChunkerConfig{
+		MaxLen:        maxLen,
+		PreserveWords: true,
+		AddNumbering:  false,
+	})
 }
 
 // Stop stops the adapter and waits for pending webhook goroutines
