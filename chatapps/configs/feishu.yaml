@@ -38,10 +38,10 @@ engine:
 mode: http
 
 # HTTP server address (Webhook events)
-server_addr: ${HOTPLEX_FEISHU_SERVER_ADDR}
+server_addr: :8082
 
 # -----------------------------------------------------------------------------
-# Feishu API Credentials (Required)
+# Feishu API Credentials (Required - from environment)
 # -----------------------------------------------------------------------------
 # Obtain from Feishu Developer Console: https://open.feishu.cn/app
 credentials:

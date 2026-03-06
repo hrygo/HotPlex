@@ -65,10 +65,12 @@ session:
 # Connection Settings
 # -----------------------------------------------------------------------------
 # Mode: "socket" (local/dev - no public IP) or "http" (production - webhook)
-mode: ${HOTPLEX_SLACK_MODE}
+# Socket mode is recommended for development and local use.
+mode: socket
 
-# HTTP server address (Webhook events or health check)
-server_addr: ${HOTPLEX_SLACK_SERVER_ADDR}
+# HTTP server address (for webhook mode or health check)
+# Only used when mode is "http"
+server_addr: :8080
 
 # -----------------------------------------------------------------------------
 # AI Identity & Behavior
@@ -159,7 +161,7 @@ security:
     # - "mention": Only respond when bot is @mentioned
     # - "multibot": Multi-bot mode - @mentioned bot responds, no @ = all bots respond
     # - "block": Block all group messages
-    group_policy: mention
+    group_policy: multibot
 
     # [Required] Bot's own User ID (e.g., U12345678) for mention detection
     bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID}
