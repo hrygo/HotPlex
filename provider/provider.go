@@ -16,14 +16,24 @@ const (
 	ProviderTypePi         ProviderType = "pi"
 )
 
-// Valid checks if the provider type is a known valid type.
+// Valid checks if the provider type is registered in the global factory.
+// This method delegates to IsRegistered for consistency with the plugin system.
+// Deprecated: Use IsRegistered() instead for clearer semantics.
 func (t ProviderType) Valid() bool {
+	return t.IsRegistered()
+}
+
+// IsRegistered checks if the provider type is registered in the global factory.
+// This is the preferred method for checking provider availability.
+// It checks both built-in providers and registered plugins.
+func (t ProviderType) IsRegistered() bool {
+	// First check built-in types for fast path
 	switch t {
 	case ProviderTypeClaudeCode, ProviderTypeOpenCode, ProviderTypePi:
 		return true
-	default:
-		return false
 	}
+	// Then check plugin registry
+	return IsPluginRegistered(t)
 }
 
 // Provider defines the interface for AI CLI agent providers.
