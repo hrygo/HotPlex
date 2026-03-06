@@ -1,14 +1,76 @@
 # MultiBot Mention Routing Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Status:** ✅ COMPLETED (2026-03-06)
 
-**Goal:** Implement @ routing for multiple hotplex bots in one Slack channel - only respond when @'d, or broadcast when no @ present.
+**Goal:** Implement @ routing for multiple hotplex bots in one Slack channel - only respond when @'d, or broadcast with polite response when no @ present.
 
-**Architecture:** Add `multibot` option to `GroupPolicy`. Extract mentioned users from message text via regex `<@USER_ID>`. Check if self is in mention list.
+**Architecture:** Add `multibot` option to `GroupPolicy`. Extract mentioned users from message text via regex `<@USER_ID>`. Check if self is in mention list. For broadcast (no @), send polite response via BroadcastResponder interface.
 
 **Tech Stack:** Go 1.25, slack-go SDK, regexp
 
 ---
+
+## Commits
+
+1. `dfb7f3d` - feat(slack): add ExtractMentionedUsers and ShouldRespondInMultibotMode helpers
+2. `4acbb2d` - feat(slack): add multibot filter in HTTP mode (events.go)
+3. `eb23de1` - feat(slack): add multibot filter in Socket Mode (socketmode.go)
+4. `b4a626c` - feat(slack): add BroadcastResponder interface for multibot broadcast mode
+5. `f879eec` - feat(slack): integrate BroadcastResponder for multibot broadcast messages
+
+---
+
+## Implementation Summary
+
+### New Files
+- `chatapps/slack/broadcast_responder.go` - BroadcastResponder interface and StaticBroadcastResponder
+- `chatapps/slack/broadcast_responder_test.go` - Unit tests
+
+### Modified Files
+- `chatapps/slack/config.go` - Added multibot helpers and BroadcastResponder integration
+- `chatapps/slack/config_test.go` - Added tests for new functions
+- `chatapps/slack/events.go` - Added multibot filter and broadcast response
+- `chatapps/slack/socketmode.go` - Added multibot filter and broadcast response
+
+---
+
+## Usage
+
+```yaml
+# In your slack adapter config
+group_policy: multibot
+bot_user_id: "U1234567890"  # Your bot's user ID
+
+# Optional: custom broadcast response
+# broadcast_response: "Hello! How can I help?"
+```
+
+### Behavior
+
+| Message | @BotA? | @BotB? | BotA Response | BotB Response |
+|---------|--------|--------|---------------|---------------|
+| `hello` | No | No | Polite response | Polite response |
+| `@BotA help` | Yes | No | Process normally | Ignore |
+| `@BotB help` | No | Yes | Ignore | Process normally |
+| `@BotA @BotB hi` | Yes | Yes | Process normally | Process normally |
+
+---
+
+## Future Integration
+
+The BroadcastResponder interface allows future integration with native brain:
+
+```go
+// Example: Brain-powered responder
+type BrainBroadcastResponder struct {
+    brain brain.Brain
+}
+
+func (r *BrainBroadcastResponder) Respond(ctx context.Context, userMessage string) (string, error) {
+    prompt := fmt.Sprintf("Generate a brief, friendly greeting for: %s", userMessage)
+    return r.brain.Chat(ctx, prompt)
+}
+```
 
 ## Task 1: Add Helper Functions in config.go
 
