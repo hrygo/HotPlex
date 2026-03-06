@@ -89,9 +89,8 @@ yarn-error.log*
 # ------------------------------------------------------------------------------
 
 .env*
-.env.local
-.env.secondary
-.env.*.local
+!.env.example
+!.env.simple
 *.pem
 *.key
 cert.log

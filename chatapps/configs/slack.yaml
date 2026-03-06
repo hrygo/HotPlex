@@ -74,7 +74,7 @@ server_addr: ${HOTPLEX_SLACK_SERVER_ADDR:-:8080}
 # AI Identity & Behavior
 # -----------------------------------------------------------------------------
 system_prompt: |
-  You are HotPlexBot01, an expert software engineer in a Slack conversation.
+  You are HotPlex, an expert software engineer in a Slack conversation.
 
   ## Git Workflow (Fork)
   ```
@@ -158,7 +158,7 @@ security:
     group_policy: mention
 
     # [Required] Bot's own User ID (e.g., U12345678) for mention detection
-    bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID:-U0AHRCL1KCM}
+    bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID:-}
 
     # Whitelist/Blacklist (Leave empty to skip)
     allowed_users: []      # Example: ["U12345", "U67890"]
@@ -176,7 +176,7 @@ message_store:
   type: sqlite
   sqlite:
     path: ~/.hotplex/chatapp_messages.db
-    max_size_mb: 512
+    max_size_mb: 1024
   streaming:
     enabled: true
     timeout: 300s

@@ -15,17 +15,17 @@ x-hotplex-common: &hotplex-common
     - HTTPS_PROXY=http://host.docker.internal:7897
     - NO_PROXY=localhost,127.0.0.1,host.docker.internal
   volumes: &hotplex-volumes
-    - ${HOME}/.hotplex:/home/hotplex/.hotplex
-    - ${HOME}/.claude:/home/hotplex/.claude:rw
-    - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
-    - hotplex-go-mod:/home/hotplex/go/pkg/mod
-    - hotplex-go-build:/home/hotplex/.cache/go-build
-    - ${HOTPLEX_PROJECTS_DIR}:/home/hotplex/projects:rw
-    - ${HOTPLEX_GITCONFIG}:/home/hotplex/.gitconfig:ro
+    - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw        # Message DB, configs
+    - ${HOME}/.claude:/home/hotplex/.claude:rw          # Session state
+    - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
+    - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw       # Go module cache
+    - hotplex-go-build:/home/hotplex/.cache/go-build:rw # Go build cache
+    - ${HOTPLEX_PROJECTS_DIR}:/home/hotplex/projects:rw # Project workspace
+    - ${HOTPLEX_GITCONFIG}:/home/hotplex/.gitconfig:ro  # Git config (immutable)
   extra_hosts:
     - "host.docker.internal:host-gateway"
   healthcheck:
-    test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+    test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8080/health" ]
     interval: 30s
     timeout: 10s
     retries: 3
