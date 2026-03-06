@@ -202,6 +202,17 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 			a.Logger().Debug("Message ignored - other bot mentioned", "channel_type", ev.ChannelType, "policy", "multibot")
 			return
 		}
+		// If broadcast (no @), send polite response instead of processing
+		if a.config.IsBroadcastMessage(ev.Text) {
+			threadID := ev.ThreadTimeStamp
+			if threadID == "" {
+				threadID = ev.TimeStamp
+			}
+			a.Logger().Debug("Broadcast message - sending polite response", "channel", ev.Channel)
+			response := a.config.GetBroadcastResponse(a.socketModeCtx, ev.Text)
+			_ = a.SendToChannel(a.socketModeCtx, ev.Channel, response, threadID)
+			return
+		}
 	}
 
 	// Fallback: skip message events with bot mention (handled by app_mention event)

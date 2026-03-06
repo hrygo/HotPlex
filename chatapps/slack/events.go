@@ -156,6 +156,17 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 				a.Logger().Debug("Message ignored - other bot mentioned", "channel_type", msgEvent.ChannelType, "policy", "multibot")
 				return
 			}
+			// If broadcast (no @), send polite response instead of processing
+			if a.config.IsBroadcastMessage(msgEvent.Text) {
+				threadID := msgEvent.ThreadTS
+				if threadID == "" {
+					threadID = msgEvent.TS
+				}
+				a.Logger().Debug("Broadcast message - sending polite response", "channel", msgEvent.Channel)
+				response := a.config.GetBroadcastResponse(ctx, msgEvent.Text)
+				_ = a.SendToChannel(ctx, msgEvent.Channel, response, threadID)
+				return
+			}
 		}
 	}
 

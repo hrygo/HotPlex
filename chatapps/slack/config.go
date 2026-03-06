@@ -3,6 +3,7 @@
 package slack
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"slices"
@@ -36,6 +37,7 @@ type Config struct {
 	// Permission Policy for Group Messages
 	// "allow" - Allow all group messages (default)
 	// "mention" - Only allow when bot is mentioned
+	// "multibot" - Multi-bot routing: broadcast if no @, respond only if @self
 	// "block" - Block all group messages
 	GroupPolicy string
 
@@ -52,6 +54,10 @@ type Config struct {
 
 	// pairing holds runtime pairing state (pointer for thread safety)
 	pairing *pairingState
+
+	// BroadcastResponder generates responses for broadcast messages (no @ mention).
+	// If nil, uses DefaultBroadcastResponse.
+	BroadcastResponder BroadcastResponder
 }
 
 // Token format patterns - supports both legacy 3-part and new 4-part Slack token formats
@@ -244,4 +250,23 @@ func (c *Config) ShouldRespondInMultibotMode(text string) bool {
 // Only meaningful in multibot mode.
 func (c *Config) IsBroadcastMessage(text string) bool {
 	return len(ExtractMentionedUsers(text)) == 0
+}
+
+// SetBroadcastResponse sets a static response for broadcast messages.
+// Creates a StaticBroadcastResponder internally.
+func (c *Config) SetBroadcastResponse(text string) {
+	c.BroadcastResponder = NewStaticBroadcastResponder(text)
+}
+
+// GetBroadcastResponse returns the response for broadcast messages.
+// Uses configured BroadcastResponder or DefaultBroadcastResponse if not set.
+func (c *Config) GetBroadcastResponse(ctx context.Context, userMessage string) string {
+	if c.BroadcastResponder == nil {
+		return DefaultBroadcastResponse
+	}
+	resp, err := c.BroadcastResponder.Respond(ctx, userMessage)
+	if err != nil {
+		return DefaultBroadcastResponse
+	}
+	return resp
 }
