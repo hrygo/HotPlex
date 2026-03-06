@@ -178,6 +178,11 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 					config.AppToken = os.ExpandEnv(appToken)
 				}
 			}
+
+			// Mode from YAML overrides env var (if set)
+			if pc.Mode != "" {
+				config.Mode = pc.Mode
+			}
 		}
 
 		var opts []base.AdapterOption

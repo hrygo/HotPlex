@@ -17,6 +17,7 @@ import (
 
 type PlatformConfig struct {
 	Platform         string                  `yaml:"platform"`
+	Mode             string                  `yaml:"mode"`
 	SystemPrompt     string                  `yaml:"system_prompt"`
 	TaskInstructions string                  `yaml:"task_instructions"`
 	Engine           EngineConfig            `yaml:"engine"`
