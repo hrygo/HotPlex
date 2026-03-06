@@ -15,6 +15,7 @@ import (
 	"github.com/hrygo/hotplex/event"
 	intengine "github.com/hrygo/hotplex/internal/engine"
 	"github.com/hrygo/hotplex/internal/security"
+	"github.com/hrygo/hotplex/internal/sys"
 	"github.com/hrygo/hotplex/internal/telemetry"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
@@ -205,15 +206,18 @@ func (r *Engine) ValidateConfig(cfg *types.Config) error {
 		return fmt.Errorf("%w: session_id is required", types.ErrInvalidConfig)
 	}
 
+	// Expand home directory tilde
+	expandedPath := sys.ExpandPath(cfg.WorkDir)
+
 	// Security: Validate WorkDir to prevent path traversal attacks (#8)
-	cleanPath := filepath.Clean(cfg.WorkDir)
+	cleanPath := filepath.Clean(expandedPath)
 
 	// Check for path traversal attempts - block any path containing ".."
 	// Note: filepath.Clean resolves ".." in the middle of paths,
 	// but we still check to catch edge cases and log attempts
-	if strings.Contains(cfg.WorkDir, "..") {
+	if strings.Contains(expandedPath, "..") {
 		r.logger.Warn("Path traversal attempt blocked",
-			"work_dir", cfg.WorkDir,
+			"work_dir", expandedPath,
 			"cleaned_path", cleanPath)
 		return fmt.Errorf("%w: work_dir contains path traversal sequence", types.ErrInvalidConfig)
 	}

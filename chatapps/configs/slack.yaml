@@ -46,7 +46,7 @@ provider:
 # Workspace & Engine Settings
 # -----------------------------------------------------------------------------
 engine:
-  work_dir: ~/.slack/BOT_${HOTPLEX_SLACK_BOT_USER_ID:-U0AHRCL1KCM}/hotplex    # Agent's working directory
+  work_dir: ~/projects/hotplex    # Agent's working directory
   timeout: 30m                                # Max wait for AI response
   idle_timeout: 60m                           # Session persistence time
 
@@ -175,7 +175,7 @@ message_store:
   enabled: true
   type: sqlite
   sqlite:
-    path: ~/.slack/BOT_${HOTPLEX_SLACK_BOT_USER_ID:-U0AHRCL1KCM}/chatapp_messages.db
+    path: ~/.hotplex/chatapp_messages.db
     max_size_mb: 512
   streaming:
     enabled: true

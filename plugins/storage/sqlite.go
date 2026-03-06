@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hrygo/hotplex/internal/sys"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -34,6 +35,9 @@ func (s *SQLiteStorage) Initialize(ctx context.Context) error {
 	if path == "" {
 		path = "~/.hotplex/chatapp_messages.db"
 	}
+	// Expand home directory tilde
+	path = sys.ExpandPath(path)
+
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return err
