@@ -34,6 +34,12 @@ type PostgreStorage struct {
 // PostgreFactory PostgreSQL 工厂
 type PostgreFactory struct{}
 
+// Compile-time interface compliance checks
+var (
+	_ ChatAppMessageStore = (*PostgreStorage)(nil)
+	_ PluginFactory       = (*PostgreFactory)(nil)
+)
+
 func (f *PostgreFactory) Create(config PluginConfig) (ChatAppMessageStore, error) {
 	pgConfig := getPostgreConfig(config)
 	return NewPostgreStorage(pgConfig, config)
