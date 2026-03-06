@@ -6,6 +6,52 @@ This guide explains how to run multiple HotPlex bot instances with separate Slac
 
 Slack Socket Mode only supports **one active WebSocket connection** per App Token. If you try to use the same token in multiple containers, Slack will only send messages to one of them.
 
+## MultiBot @ Routing Mode (Recommended)
+
+When running multiple bots in the same channel, use `group_policy: multibot` for intelligent routing.
+
+### How It Works
+
+| Message | BotA Response | BotB Response |
+|---------|---------------|---------------|
+| `hello` | Polite response | Polite response |
+| `@BotA help` | Processes normally | Ignores |
+| `@BotB help` | Ignores | Processes normally |
+| `@BotA @BotB hi` | Processes normally | Processes normally |
+
+### Configuration
+
+In `chatapps/configs/slack.yaml`:
+
+```yaml
+security:
+  permission:
+    group_policy: multibot
+    bot_user_id: UXXXXXXXXXX  # Each bot's own ID
+
+    # Optional: Custom broadcast response
+    broadcast_response: |
+      Hello! I'm ready to help.
+      Please @mention me if you'd like me to respond specifically to you.
+```
+
+### Broadcast Response
+
+When a message has no @ mentions (broadcast), all bots send a polite response. This is handled by `BroadcastResponder`:
+
+- **Default**: "Hello! I'm ready to help. Please @mention me if you'd like me to respond specifically to you."
+- **Custom**: Set via `broadcast_response` in YAML config
+- **Future**: Will integrate with native brain for intelligent responses
+
+### Comparison with Other Policies
+
+| Policy | Broadcast (no @) | @BotA | @OtherBot |
+|--------|------------------|-------|-----------|
+| `allow` | Respond | Respond | Respond |
+| `mention` | Ignore | Respond | Ignore |
+| `multibot` | Polite response | Respond | Ignore |
+| `block` | Ignore | Ignore | Ignore |
+
 ## Step 1: Create Secondary Slack App
 
 1. Go to https://api.slack.com/apps
