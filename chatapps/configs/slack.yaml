@@ -46,9 +46,9 @@ provider:
 # Workspace & Engine Settings
 # -----------------------------------------------------------------------------
 engine:
-  work_dir: ~/projects/hotplex    # Agent's working directory
+  work_dir: ~/projects/hotplex                # Agent's working directory
   timeout: 30m                                # Max wait for AI response
-  idle_timeout: 60m                           # Session persistence time
+  idle_timeout: 1h                           # Session persistence time
 
   # Tool filtering (Optional: Whitelist or Blacklist)
   # allowed_tools: ["Bash", "Edit"]    # If set, ONLY these tools can be used
@@ -58,8 +58,8 @@ engine:
 # Session Lifecycle
 # -----------------------------------------------------------------------------
 session:
-  timeout_minutes: 30            # Minutes of inactivity before cleanup
-  cleanup_interval_minutes: 5    # Frequency of scanning for expired sessions
+  timeout: 30m                   # Inactivity before cleanup
+  cleanup_interval: 5m          # Frequency of scanning for expired sessions
 
 # -----------------------------------------------------------------------------
 # Connection Settings
@@ -179,5 +179,5 @@ message_store:
     max_size_mb: 512
   streaming:
     enabled: true
-    timeout_seconds: 300
+    timeout: 300s
     storage_policy: complete_only

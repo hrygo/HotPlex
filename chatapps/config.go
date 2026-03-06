@@ -22,6 +22,7 @@ type PlatformConfig struct {
 	Engine           EngineConfig            `yaml:"engine"`
 	Provider         provider.ProviderConfig `yaml:"provider"`
 	Security         SecurityConfig          `yaml:"security"`
+	Session          SessionConfig           `yaml:"session"`
 	MessageStore     MessageStoreConfig      `yaml:"message_store,omitempty"`
 	DingTalk         DingTalkConfig          `yaml:"dingtalk"`
 	WhatsApp         WhatsAppConfig          `yaml:"whatsapp"`
@@ -58,6 +59,11 @@ type WhatsAppConfig struct {
 	APIVersion    string `yaml:"api_version"`
 }
 
+type SessionConfig struct {
+	Timeout         time.Duration `yaml:"timeout"`
+	CleanupInterval time.Duration `yaml:"cleanup_interval"`
+}
+
 type EngineConfig struct {
 	Timeout         time.Duration `yaml:"timeout"`
 	IdleTimeout     time.Duration `yaml:"idle_timeout"`
@@ -88,10 +94,10 @@ type PostgresConfig struct {
 }
 
 type StreamingConfig struct {
-	Enabled        bool   `yaml:"enabled"`
-	BufferSize     int    `yaml:"buffer_size"`
-	TimeoutSeconds int    `yaml:"timeout_seconds"`
-	StoragePolicy  string `yaml:"storage_policy"` // complete_only | all_chunks
+	Enabled       bool          `yaml:"enabled"`
+	BufferSize    int           `yaml:"buffer_size"`
+	Timeout       time.Duration `yaml:"timeout"`
+	StoragePolicy string        `yaml:"storage_policy"` // complete_only | all_chunks
 }
 
 type Logger = slog.Logger

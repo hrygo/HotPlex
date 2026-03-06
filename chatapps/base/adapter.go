@@ -40,19 +40,20 @@ type MessageSender func(ctx context.Context, sessionID string, msg *ChatMessage)
 
 // Adapter is the base adapter implementing common functionality
 type Adapter struct {
-	config         Config
-	logger         *slog.Logger
-	server         *http.Server
-	sessions       map[string]*Session
-	mu             sync.RWMutex
-	handler        MessageHandler
-	running        bool
-	runningMu      sync.Mutex // Protects running state
-	sessionTimeout time.Duration
-	ctx            context.Context
-	cancel         context.CancelFunc
-	cleanupWg      sync.WaitGroup // Wait for cleanup goroutine to finish
-	cleanupOnce    sync.Once      // Prevents double-cancel
+	config          Config
+	logger          *slog.Logger
+	server          *http.Server
+	sessions        map[string]*Session
+	mu              sync.RWMutex
+	handler         MessageHandler
+	running         bool
+	runningMu       sync.Mutex // Protects running state
+	sessionTimeout  time.Duration
+	cleanupInterval time.Duration
+	ctx             context.Context
+	cancel          context.CancelFunc
+	cleanupWg       sync.WaitGroup // Wait for cleanup goroutine to finish
+	cleanupOnce     sync.Once      // Prevents double-cancel
 
 	// Platform-specific implementations
 	platformName    string
@@ -96,6 +97,7 @@ func NewAdapter(
 		sessions:              make(map[string]*Session),
 		sessionsByUserChannel: make(map[string]*Session),
 		sessionTimeout:        30 * time.Minute,
+		cleanupInterval:       5 * time.Minute,
 		ctx:                   ctx,
 		cancel:                cancel,
 		platformName:          platform,
@@ -116,7 +118,18 @@ type AdapterOption func(*Adapter)
 // WithSessionTimeout sets the session timeout
 func WithSessionTimeout(timeout time.Duration) AdapterOption {
 	return func(a *Adapter) {
-		a.sessionTimeout = timeout
+		if timeout > 0 {
+			a.sessionTimeout = timeout
+		}
+	}
+}
+
+// WithCleanupInterval sets the session cleanup interval
+func WithCleanupInterval(interval time.Duration) AdapterOption {
+	return func(a *Adapter) {
+		if interval > 0 {
+			a.cleanupInterval = interval
+		}
 	}
 }
 
@@ -381,7 +394,7 @@ func (a *Adapter) GetOrCreateSession(userID, botUserID, channelID, threadID stri
 func (a *Adapter) cleanupSessions() {
 	defer a.cleanupWg.Done()
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(a.cleanupInterval)
 	defer ticker.Stop()
 
 	for {

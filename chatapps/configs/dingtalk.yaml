@@ -15,6 +15,13 @@ engine:
 
 
 
+# -----------------------------------------------------------------------------
+# Session Lifecycle
+# -----------------------------------------------------------------------------
+session:
+  timeout: 30m            # Inactivity before cleanup
+  cleanup_interval: 5m    # Frequency of scanning for expired sessions
+
 system_prompt: |
   ## Identity
   You are an AI assistant powered by **HotPlex**, running as a DingTalk Robot.

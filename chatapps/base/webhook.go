@@ -10,10 +10,11 @@ import (
 	"github.com/hrygo/hotplex/internal/panicx"
 )
 
-// Default deduplication configuration
+// DefaultDedupWindow 默去重配置 (reduced from 30s to 5s per Issue #129)
+// 30 second TTL was too long, causing legitimate messages to be incorrectly filtered as duplicates
 const (
-	DefaultDedupWindow   = 30 * time.Second
-	DefaultDedupCleanup  = 10 * time.Second
+	DefaultDedupWindow  = 5 * time.Second
+	DefaultDedupCleanup = 10 * time.Second
 )
 
 // WebhookRunner manages the lifecycle of webhook processing goroutines.
@@ -124,11 +125,11 @@ func (r *WebhookRunner) WaitDefault() bool {
 // Stop is an alias for WaitDefault for API consistency with adapters.
 func (r *WebhookRunner) Stop() bool {
 	result := r.WaitDefault()
-	
+
 	// Shutdown deduplicator to stop cleanup goroutine
 	if r.deduplicator != nil {
 		r.deduplicator.Shutdown()
 	}
-	
+
 	return result
 }

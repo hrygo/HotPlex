@@ -138,8 +138,8 @@ security:
 # Session Lifecycle
 # -----------------------------------------------------------------------------
 session:
-  timeout_minutes: 30            # Minutes of inactivity before cleanup
-  cleanup_interval_minutes: 5    # Frequency of scanning for expired sessions
+  timeout: 30m            # Inactivity before cleanup
+  cleanup_interval: 5m    # Frequency of scanning for expired sessions
 
 # -----------------------------------------------------------------------------
 # Advanced Settings (Optional)
