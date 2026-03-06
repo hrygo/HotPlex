@@ -130,6 +130,15 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 	}
 	telemetry.GetMetrics().IncSlackPermissionAllowed()
 
+	// Channel/DM policy check (must happen before GroupPolicy check)
+	if !a.config.ShouldProcessChannel(msgEvent.ChannelType, msgEvent.Channel) {
+		if msgEvent.ChannelType == "dm" {
+			telemetry.GetMetrics().IncSlackPermissionBlockedDM()
+		}
+		a.Logger().Debug("Channel blocked by policy", "channel_type", msgEvent.ChannelType, "channel_id", msgEvent.Channel)
+		return
+	}
+
 	// Group policy check: if GroupPolicy is "mention", only process messages that mention the bot
 	// Note: HTTP mode does not receive app_mention events, so we must handle mentions here
 	if msgEvent.ChannelType == "channel" || msgEvent.ChannelType == "group" {

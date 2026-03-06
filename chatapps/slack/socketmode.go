@@ -178,6 +178,12 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 		return
 	}
 
+	// Channel/DM policy check (must happen before GroupPolicy check)
+	if !a.config.ShouldProcessChannel(ev.ChannelType, ev.Channel) {
+		a.Logger().Debug("Channel blocked by policy", "channel_type", ev.ChannelType)
+		return
+	}
+
 	// Group policy check: if GroupPolicy is "mention", only process messages that mention the bot
 	// Note: app_mention events are handled separately by handleAppMentionEvent
 	if (ev.ChannelType == "channel" || ev.ChannelType == "group") && a.config.GroupPolicy == "mention" {
