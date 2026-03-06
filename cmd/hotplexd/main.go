@@ -104,7 +104,7 @@ func main() {
 	}
 
 	// 2. Initialize HotPlex Core Engine
-	idleTimeout := 30 * time.Minute
+	idleTimeout := 1 * time.Hour
 	if val := os.Getenv("HOTPLEX_IDLE_TIMEOUT"); val != "" {
 		if d, err := time.ParseDuration(val); err == nil {
 			idleTimeout = d
