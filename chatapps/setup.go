@@ -167,6 +167,11 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 			config.BlockedUsers = pc.Security.Permission.BlockedUsers
 			config.SlashCommandRateLimit = pc.Security.Permission.SlashCommandRateLimit
 
+			// Set broadcast response for multibot mode
+			if pc.Security.Permission.BroadcastResponse != "" {
+				config.SetBroadcastResponse(pc.Security.Permission.BroadcastResponse)
+			}
+
 			// AppToken fallback
 			if config.AppToken == "" && pc.Options != nil {
 				if appToken, ok := pc.Options["app_token"].(string); ok {

@@ -39,6 +39,7 @@ type PermissionConfig struct {
 	DMPolicy              string   `yaml:"dm_policy"`
 	GroupPolicy           string   `yaml:"group_policy"`
 	BotUserID             string   `yaml:"bot_user_id"`
+	BroadcastResponse     string   `yaml:"broadcast_response"` // Response for broadcast messages (multibot mode)
 	AllowedUsers          []string `yaml:"allowed_users"`
 	BlockedUsers          []string `yaml:"blocked_users"`
 	SlashCommandRateLimit float64  `yaml:"slash_command_rate_limit"`
@@ -141,8 +142,11 @@ func (c *ConfigLoader) Load(configDir string) error {
 			continue
 		}
 
+		// Expand environment variables in config file
+		expanded := os.ExpandEnv(string(data))
+
 		var cfg PlatformConfig
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
+		if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 			c.logger.Warn("Failed to parse config file", "file", filename, "error", err)
 			continue
 		}
