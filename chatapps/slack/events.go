@@ -130,25 +130,17 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 	}
 	telemetry.GetMetrics().IncSlackPermissionAllowed()
 
-	if !a.config.ShouldProcessChannel(msgEvent.ChannelType, msgEvent.Channel) {
-		if msgEvent.ChannelType == "dm" {
-			telemetry.GetMetrics().IncSlackPermissionBlockedDM()
-		}
-		a.Logger().Debug("Channel blocked by policy", "channel_type", msgEvent.ChannelType, "channel_id", msgEvent.Channel)
-		return
-	}
-
+	// Group policy check: if GroupPolicy is "mention", only process messages that mention the bot
+	// Note: HTTP mode does not receive app_mention events, so we must handle mentions here
 	if msgEvent.ChannelType == "channel" || msgEvent.ChannelType == "group" {
-		if a.config.GroupPolicy == "mention" && !a.config.ContainsBotMention(msgEvent.Text) {
-			telemetry.GetMetrics().IncSlackPermissionBlockedMention()
-			a.Logger().Debug("Message ignored - bot not mentioned", "channel_type", msgEvent.ChannelType, "policy", "mention")
-			return
+		if a.config.GroupPolicy == "mention" {
+			if !a.config.ContainsBotMention(msgEvent.Text) {
+				telemetry.GetMetrics().IncSlackPermissionBlockedMention()
+				a.Logger().Debug("Message ignored - bot not mentioned", "channel_type", msgEvent.ChannelType, "policy", "mention")
+				return
+			}
+			// Bot is mentioned in channel/group - process this message
 		}
-	}
-
-	if msgEvent.Type == "message" && msgEvent.ChannelType != "dm" && a.config.ContainsBotMention(msgEvent.Text) {
-		a.Logger().Debug("Skipping 'message' event with mention (handled by 'app_mention')", "ts", msgEvent.TS)
-		return
 	}
 
 	threadID := msgEvent.ThreadTS
