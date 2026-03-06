@@ -36,11 +36,19 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Tag }}-next"
 
-dockers:
-  - image_templates:
-      - ghcr.io/hrygo/hotplex:{{ .Version }}
-      - ghcr.io/hrygo/hotplex:latest
+dockers_v2:
+  - id: hotplex
+    ids:
+      - hotplexd
+    images:
+      - ghcr.io/hrygo/hotplex
+    tags:
+      - "{{ .Version }}"
+      - latest
     dockerfile: Dockerfile.release
-    build_flag_templates:
-      - --build-arg=VERSION={{ .Version }}
-      - --build-arg=HOST_UID=1000
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    build_args:
+      VERSION: "{{ .Version }}"
+      HOST_UID: "1000"
