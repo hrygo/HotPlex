@@ -28,7 +28,7 @@ func TestToolMessageBuilder_BuildToolUseMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildToolUseMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 	assert.GreaterOrEqual(t, len(blocks), 1)
@@ -47,7 +47,7 @@ func TestToolMessageBuilder_BuildToolResultMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildToolResultMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 	assert.GreaterOrEqual(t, len(blocks), 1)
@@ -68,7 +68,7 @@ func TestAnswerMessageBuilder_BuildAnswerMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildAnswerMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 	assert.GreaterOrEqual(t, len(blocks), 1)
@@ -85,7 +85,7 @@ func TestAnswerMessageBuilder_BuildErrorMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildErrorMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 	assert.GreaterOrEqual(t, len(blocks), 1)
@@ -109,7 +109,7 @@ func TestPlanMessageBuilder_BuildPlanModeMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildPlanModeMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -123,7 +123,7 @@ func TestPlanMessageBuilder_BuildExitPlanModeMessage(t *testing.T) {
 		Metadata: map[string]any{},
 	}
 
-	blocks := builder.BuildExitPlanModeMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -139,7 +139,7 @@ func TestPlanMessageBuilder_BuildAskUserQuestionMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildAskUserQuestionMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -162,7 +162,7 @@ func TestInteractiveMessageBuilder_BuildDangerBlockMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildDangerBlockMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -212,7 +212,7 @@ func TestStatsMessageBuilder_BuildCommandProgressMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildCommandProgressMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -230,7 +230,7 @@ func TestStatsMessageBuilder_BuildCommandCompleteMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildCommandCompleteMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -250,7 +250,7 @@ func TestSystemMessageBuilder_BuildSystemMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildSystemMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -266,7 +266,7 @@ func TestSystemMessageBuilder_BuildUserMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildUserMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -283,7 +283,7 @@ func TestSystemMessageBuilder_BuildStepStartMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildStepStartMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -301,7 +301,7 @@ func TestSystemMessageBuilder_BuildStepFinishMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildStepFinishMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -319,7 +319,7 @@ func TestSystemMessageBuilder_BuildRawMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildRawMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
@@ -335,7 +335,7 @@ func TestSystemMessageBuilder_BuildUserMessageReceivedMessage(t *testing.T) {
 		},
 	}
 
-	blocks := builder.BuildUserMessageReceivedMessage(msg)
+	blocks := builder.Build(msg)
 
 	assert.NotNil(t, blocks)
 }
