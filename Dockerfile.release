@@ -65,8 +65,9 @@ RUN ARCH=$(uname -m) && \
 # Install Claude Code
 RUN npm install -g @anthropic-ai/claude-code@latest
 
-# Copy pre-built binary from GoReleaser
-COPY hotplexd /app/hotplexd
+# Copy pre-built binary from GoReleaser (multi-platform path)
+ARG TARGETARCH
+COPY linux/${TARGETARCH}/hotplexd /app/hotplexd
 RUN chmod +x /app/hotplexd
 
 # Verify installations
