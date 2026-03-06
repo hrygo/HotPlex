@@ -23,6 +23,9 @@ type UUID5Generator struct {
 	namespace string
 }
 
+// Compile-time interface compliance check
+var _ SessionIDGenerator = (*UUID5Generator)(nil)
+
 // NewUUID5Generator creates a new UUID5 generator with the given namespace
 func NewUUID5Generator(namespace string) *UUID5Generator {
 	return &UUID5Generator{
@@ -46,6 +49,9 @@ func (g *UUID5Generator) Generate(platform, userID, botUserID, channelID, thread
 // SimpleKeyGenerator generates session IDs using a simple concatenated key
 // This is useful for debugging or when you don't need UUID format
 type SimpleKeyGenerator struct{}
+
+// Compile-time interface compliance check
+var _ SessionIDGenerator = (*SimpleKeyGenerator)(nil)
 
 // NewSimpleKeyGenerator creates a new simple key generator
 func NewSimpleKeyGenerator() *SimpleKeyGenerator {

@@ -20,6 +20,12 @@ type MemoryStorage struct {
 
 type MemoryFactory struct{}
 
+// Compile-time interface compliance checks
+var (
+	_ ChatAppMessageStore = (*MemoryStorage)(nil)
+	_ PluginFactory       = (*MemoryFactory)(nil)
+)
+
 func (f *MemoryFactory) Create(config PluginConfig) (ChatAppMessageStore, error) {
 	return &MemoryStorage{
 		messages: make(map[string]*ChatAppMessage),

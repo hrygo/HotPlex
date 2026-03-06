@@ -19,6 +19,12 @@ type SQLiteStorage struct {
 
 type SQLiteFactory struct{}
 
+// Compile-time interface compliance checks
+var (
+	_ ChatAppMessageStore = (*SQLiteStorage)(nil)
+	_ PluginFactory       = (*SQLiteFactory)(nil)
+)
+
 func (f *SQLiteFactory) Create(config PluginConfig) (ChatAppMessageStore, error) {
 	return &SQLiteStorage{config: config, strategy: NewDefaultStrategy()}, nil
 }
@@ -85,11 +91,13 @@ func (s *SQLiteStorage) Get(ctx context.Context, messageID string) (*ChatAppMess
 }
 
 func (s *SQLiteStorage) List(ctx context.Context, query *MessageQuery) ([]*ChatAppMessage, error) {
-	sql := `SELECT id, chat_session_id, chat_user_id, content, message_type, created_at FROM messages WHERE deleted = 0`
+	sqlQuery := `SELECT id, chat_session_id, chat_user_id, content, message_type, created_at FROM messages WHERE deleted = 0`
+	var args []any
 	if query.ChatSessionID != "" {
-		sql += " AND chat_session_id = '" + query.ChatSessionID + "'"
+		sqlQuery += " AND chat_session_id = ?"
+		args = append(args, query.ChatSessionID)
 	}
-	rows, err := s.db.QueryContext(ctx, sql)
+	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -104,12 +112,14 @@ func (s *SQLiteStorage) List(ctx context.Context, query *MessageQuery) ([]*ChatA
 }
 
 func (s *SQLiteStorage) Count(ctx context.Context, query *MessageQuery) (int64, error) {
-	sql := `SELECT COUNT(*) FROM messages WHERE deleted = 0`
+	sqlQuery := `SELECT COUNT(*) FROM messages WHERE deleted = 0`
+	var args []any
 	if query.ChatSessionID != "" {
-		sql += " AND chat_session_id = '" + query.ChatSessionID + "'"
+		sqlQuery += " AND chat_session_id = ?"
+		args = append(args, query.ChatSessionID)
 	}
 	var count int64
-	err := s.db.QueryRowContext(ctx, sql).Scan(&count)
+	err := s.db.QueryRowContext(ctx, sqlQuery, args...).Scan(&count)
 	return count, err
 }
 

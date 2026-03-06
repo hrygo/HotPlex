@@ -35,6 +35,12 @@ type Adapter struct {
 	commandRegistry *command.Registry
 }
 
+// Compile-time interface compliance checks
+var (
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.MessageOperations = (*Adapter)(nil)
+)
+
 // NewAdapter creates a new Feishu adapter
 func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption) (*Adapter, error) {
 	// Validate config

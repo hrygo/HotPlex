@@ -100,6 +100,9 @@ type StorageStrategy interface {
 // DefaultStrategy 默认策略
 type DefaultStrategy struct{}
 
+// Compile-time interface compliance check
+var _ StorageStrategy = (*DefaultStrategy)(nil)
+
 func NewDefaultStrategy() *DefaultStrategy { return &DefaultStrategy{} }
 func (s *DefaultStrategy) ShouldStore(msg *ChatAppMessage) bool {
 	return msg.MessageType.IsStorable()
