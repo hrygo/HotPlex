@@ -1,5 +1,55 @@
 # CHANGELOG.md
 
+## [v0.21.0] - 2026-03-06
+
+### 🤖 MultiBot @ Routing & Configuration Optimization
+
+This release introduces intelligent @ routing for multiple bot instances in the same Slack channel, along with comprehensive configuration cleanup separating sensitive credentials from behavior settings.
+
+### Added
+
+#### MultiBot Mode
+- **@ Routing** - New `multibot` GroupPolicy for intelligent message routing:
+  - `@BotA` → BotA responds, BotB ignores
+  - `@BotA @BotB` → Both respond
+  - No @ → All bots send polite broadcast response
+- **BroadcastResponder Interface** - Extensible interface for generating polite responses to broadcast messages:
+  - `StaticBroadcastResponder` - Default implementation with fixed response
+  - Future integration with native brain for intelligent responses
+- **Mention Extraction** - `ExtractMentionedUsers()` function to parse `<@USER_ID>` mentions from message text
+- **Multibot Decision Logic** - `ShouldRespondInMultibotMode()` and `IsBroadcastMessage()` helper methods
+
+### Changed
+
+#### Configuration Optimization
+- **Credential/Behavior Separation** - `.env` files now contain only sensitive credentials (tokens, secrets, keys)
+- **YAML for Behavior** - Non-sensitive settings (mode, timeout, policy) moved to `chatapps/configs/*.yaml`
+- **Simplified .env.example** - Reduced from ~200 lines to ~80 lines with clear documentation
+- **Removed Redundancy** - Deleted `.env.simple` (redundant with `.env.example`)
+
+### Configuration Example
+
+```yaml
+# chatapps/configs/slack.yaml
+security:
+  permission:
+    group_policy: multibot
+    bot_user_id: U1234567890
+    broadcast_response: |
+      Hello! I'm ready to help. Please @mention me if you'd like me to respond.
+```
+
+Reference commits:
+- dfb7f3d feat(slack): add ExtractMentionedUsers and ShouldRespondInMultibotMode helpers
+- 4acbb2d feat(slack): add multibot filter in HTTP mode (events.go)
+- eb23de1 feat(slack): add multibot filter in Socket Mode (socketmode.go)
+- b4a626c feat(slack): add BroadcastResponder interface
+- f879eec feat(slack): integrate BroadcastResponder
+- 68c8dc2 feat(config): add BroadcastResponse config option
+- f80adc5 chore(config): update YAML configs for multibot mode
+- e93f9eb refactor(config): separate sensitive credentials from behavior config
+- 3e3a881 chore: remove redundant .env.simple
+
 ## [v0.20.0] - 2026-03-06
 
 ### 🐳 Docker All-in-One Deployment & Multi-Bot Architecture
