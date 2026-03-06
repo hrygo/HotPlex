@@ -6,80 +6,22 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/hrygo/hotplex/chatapps/base"
 )
 
 // SlackTextLimit is the maximum character limit for a single Slack message
 const SlackTextLimit = 4000
 
 // chunkMessage splits a text message into chunks that fit within Slack's limit.
-// It attempts to split at word boundaries to avoid breaking words.
+// It delegates to base.ChunkMessage for the core logic.
 // Each chunk is prefixed with [chunkNum/totalChunks] for reference.
 func chunkMessage(text string, limit int) []string {
-	if text == "" || utf8.RuneCountInString(text) <= limit {
-		return []string{text}
-	}
-
-	// Calculate approximate number of chunks
-	runes := []rune(text)
-	totalRunes := len(runes)
-
-	var chunks []string
-	chunkSize := limit - 15 // Reserve space for "[999/999]\n" prefix
-
-	for i := 0; i < totalRunes; i += chunkSize {
-		end := i + chunkSize
-		if end > totalRunes {
-			end = totalRunes
-		}
-
-		// Try to break at word boundary using rune indices
-		if end < totalRunes {
-			chunkRunes := runes[i:end]
-
-			// Find last newline in chunk (use rune-based search)
-			lastNewline := -1
-			for j := len(chunkRunes) - 1; j >= 0; j-- {
-				if chunkRunes[j] == '\n' {
-					lastNewline = j
-					break
-				}
-			}
-			if lastNewline > 0 {
-				// Break at newline if possible
-				end = i + lastNewline + 1
-			} else {
-				// Find last space in chunk
-				lastSpace := -1
-				for j := len(chunkRunes) - 1; j >= 0; j-- {
-					if chunkRunes[j] == ' ' {
-						lastSpace = j
-						break
-					}
-				}
-				if lastSpace > len(chunkRunes)/2 {
-					// Only break at space if more than half the chunk is used
-					end = i + lastSpace
-				}
-			}
-		}
-
-		chunkStr := string(runes[i:end])
-		chunkStr = strings.TrimRight(chunkStr, " \t")
-
-		chunks = append(chunks, chunkStr)
-	}
-
-	// Add chunk numbering
-	result := make([]string, len(chunks))
-	for i, chunk := range chunks {
-		if len(chunks) > 1 {
-			result[i] = fmt.Sprintf("[%d/%d]\n%s", i+1, len(chunks), chunk)
-		} else {
-			result[i] = chunk
-		}
-	}
-
-	return result
+	return base.ChunkMessage(text, base.ChunkerConfig{
+		MaxLen:        limit,
+		PreserveWords: true,
+		AddNumbering:  true,
+	})
 }
 
 // chunkMessageMarkdown splits a markdown message into chunks,

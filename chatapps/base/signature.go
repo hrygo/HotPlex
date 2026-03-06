@@ -15,6 +15,20 @@ type SignatureVerifier interface {
 	Verify(r *http.Request, body []byte) bool
 }
 
+// MessageFormat defines the message format for signature computation
+type MessageFormat string
+
+const (
+	// FormatBody uses only the request body
+	FormatBody MessageFormat = "body"
+	// FormatSlack uses Slack's format: v0:timestamp:body
+	FormatSlack MessageFormat = "slack"
+	// FormatDingTalk uses DingTalk's format: timestamp+token+nonce (via Query params)
+	FormatDingTalk MessageFormat = "dingtalk"
+	// FormatFeishu uses Feishu's format: timestamp+secret+body
+	FormatFeishu MessageFormat = "feishu"
+)
+
 // HMACSHA256Verifier implements HMAC-SHA256 signature verification.
 // Used by: Slack, DingTalk, Feishu
 type HMACSHA256Verifier struct {
@@ -30,8 +44,11 @@ type HMACSHA256Verifier struct {
 	// Prefix is the signature prefix (e.g., "v0" for Slack, "" for others)
 	Prefix string
 
-	// IncludeTimestamp whether to include timestamp in signature computation
-	IncludeTimestamp bool
+	// Format defines the message format for signature computation
+	Format MessageFormat
+
+	// NonceParam is the query parameter name for nonce (used in DingTalk)
+	NonceParam string
 }
 
 // Verify implements SignatureVerifier for HMAC-SHA256.
@@ -46,19 +63,38 @@ func (v *HMACSHA256Verifier) Verify(r *http.Request, body []byte) bool {
 		signature = signature[len(v.Prefix):]
 	}
 
-	var message string
-	if v.IncludeTimestamp && v.TimestampHeader != "" {
-		timestamp := r.Header.Get(v.TimestampHeader)
-		message = "v0:" + timestamp + ":" + string(body)
-	} else {
-		message = string(body)
-	}
+	// Build message based on format
+	message := v.buildMessage(r, body)
 
 	mac := hmac.New(sha256.New, []byte(v.Secret))
 	mac.Write([]byte(message))
 	expectedSignature := hex.EncodeToString(mac.Sum(nil))
 
 	return hmac.Equal([]byte(signature), []byte(expectedSignature))
+}
+
+// buildMessage constructs the message string based on the format
+func (v *HMACSHA256Verifier) buildMessage(r *http.Request, body []byte) string {
+	switch v.Format {
+	case FormatSlack:
+		timestamp := r.Header.Get(v.TimestampHeader)
+		if timestamp != "" {
+			return "v0:" + timestamp + ":" + string(body)
+		}
+	case FormatDingTalk:
+		timestamp := r.URL.Query().Get("timestamp")
+		nonce := r.URL.Query().Get(v.NonceParam)
+		if timestamp != "" {
+			return timestamp + v.Secret + nonce
+		}
+	case FormatFeishu:
+		timestamp := r.Header.Get(v.TimestampHeader)
+		if timestamp != "" {
+			return timestamp + v.Secret + string(body)
+		}
+	}
+	// Default: FormatBody
+	return string(body)
 }
 
 // NoOpVerifier is a verifier that always returns true.
