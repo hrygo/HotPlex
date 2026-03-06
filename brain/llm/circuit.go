@@ -288,3 +288,56 @@ func (cb *CircuitBreaker) GetFailureRate() float64 {
 	fails := cb.failRequests.Load()
 	return float64(fails) / float64(total)
 }
+
+// CircuitClient wraps an LLM client with circuit breaker protection.
+type CircuitClient struct {
+	client  LLMClient
+	breaker *CircuitBreaker
+}
+
+// NewCircuitClient creates a new circuit breaker protected client wrapper.
+func NewCircuitClient(client LLMClient, breaker *CircuitBreaker) *CircuitClient {
+	return &CircuitClient{
+		client:  client,
+		breaker: breaker,
+	}
+}
+
+// Chat implements the Chat method with circuit breaker protection.
+func (c *CircuitClient) Chat(ctx context.Context, prompt string) (string, error) {
+	var result string
+	err := c.breaker.Execute(ctx, func() error {
+		var err error
+		result, err = c.client.Chat(ctx, prompt)
+		return err
+	})
+	return result, err
+}
+
+// Analyze implements the Analyze method with circuit breaker protection.
+func (c *CircuitClient) Analyze(ctx context.Context, prompt string, target any) error {
+	return c.breaker.Execute(ctx, func() error {
+		return c.client.Analyze(ctx, prompt, target)
+	})
+}
+
+// ChatStream implements the ChatStream method with circuit breaker protection.
+func (c *CircuitClient) ChatStream(ctx context.Context, prompt string) (<-chan string, error) {
+	var result <-chan string
+	err := c.breaker.Execute(ctx, func() error {
+		var err error
+		result, err = c.client.ChatStream(ctx, prompt)
+		return err
+	})
+	return result, err
+}
+
+// HealthCheck implements the HealthCheck method.
+func (c *CircuitClient) HealthCheck(ctx context.Context) HealthStatus {
+	return c.client.HealthCheck(ctx)
+}
+
+// GetCircuitBreaker returns the underlying circuit breaker for monitoring.
+func (c *CircuitClient) GetCircuitBreaker() *CircuitBreaker {
+	return c.breaker
+}

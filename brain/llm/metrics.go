@@ -304,3 +304,53 @@ func (rt *RequestTimer) Record(inputTokens, outputTokens int64, cost float64, er
 	rt.metrics.RecordRequest(rt.model, rt.scenario, inputTokens, outputTokens, cost, latencyMs, err)
 	rt.metrics.EndRequest()
 }
+
+// MetricsClient wraps an LLM client with metrics collection.
+type MetricsClient struct {
+	client   LLMClient
+	metrics  *MetricsCollector
+	model    string
+}
+
+// NewMetricsClient creates a new metrics-enabled client wrapper.
+func NewMetricsClient(client LLMClient, metrics *MetricsCollector, model string) *MetricsClient {
+	return &MetricsClient{
+		client:  client,
+		metrics: metrics,
+		model:   model,
+	}
+}
+
+// Chat implements the Chat method with metrics collection.
+func (m *MetricsClient) Chat(ctx context.Context, prompt string) (string, error) {
+	timer := NewRequestTimer(m.metrics, m.model, "chat")
+	result, err := m.client.Chat(ctx, prompt)
+	timer.Record(0, 0, 0, err) // Token counts estimated elsewhere
+	return result, err
+}
+
+// Analyze implements the Analyze method with metrics collection.
+func (m *MetricsClient) Analyze(ctx context.Context, prompt string, target any) error {
+	timer := NewRequestTimer(m.metrics, m.model, "analyze")
+	err := m.client.Analyze(ctx, prompt, target)
+	timer.Record(0, 0, 0, err)
+	return err
+}
+
+// ChatStream implements the ChatStream method with metrics collection.
+func (m *MetricsClient) ChatStream(ctx context.Context, prompt string) (<-chan string, error) {
+	timer := NewRequestTimer(m.metrics, m.model, "stream")
+	result, err := m.client.ChatStream(ctx, prompt)
+	timer.Record(0, 0, 0, err)
+	return result, err
+}
+
+// HealthCheck implements the HealthCheck method.
+func (m *MetricsClient) HealthCheck(ctx context.Context) HealthStatus {
+	return m.client.HealthCheck(ctx)
+}
+
+// GetMetrics returns the underlying metrics collector for stats retrieval.
+func (m *MetricsClient) GetMetrics() *MetricsCollector {
+	return m.metrics
+}
