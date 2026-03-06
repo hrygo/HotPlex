@@ -38,7 +38,7 @@ engine:
 mode: http
 
 # HTTP server address (Webhook events)
-server_addr: ${HOTPLEX_FEISHU_SERVER_ADDR:-:8082}
+server_addr: ${HOTPLEX_FEISHU_SERVER_ADDR}
 
 # -----------------------------------------------------------------------------
 # Feishu API Credentials (Required)

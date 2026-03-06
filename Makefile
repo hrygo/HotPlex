@@ -309,6 +309,8 @@ docker-build-tag: docker-build ## @docker Build and tag image
 docker-sync: ## @docker Sync project configs to ~/.hotplex
 	@printf "${CYAN}🔄 Synchronizing project configs...${NC}\n"
 	@mkdir -p $(HOME)/.hotplex/configs
+	@# Remove stale configs before sync (prevents deleted files from lingering)
+	@rm -f $(HOME)/.hotplex/configs/*.yaml 2>/dev/null || true
 	@# Sync chatapps configs (YAML files)
 	@cp chatapps/configs/*.yaml $(HOME)/.hotplex/configs/ 2>/dev/null || true
 	@printf "${GREEN}✅ Configuration sync complete.${NC}\n"

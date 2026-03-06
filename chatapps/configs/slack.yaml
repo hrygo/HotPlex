@@ -65,10 +65,10 @@ session:
 # Connection Settings
 # -----------------------------------------------------------------------------
 # Mode: "socket" (local/dev - no public IP) or "http" (production - webhook)
-mode: ${HOTPLEX_SLACK_MODE:-socket}
+mode: ${HOTPLEX_SLACK_MODE}
 
 # HTTP server address (Webhook events or health check)
-server_addr: ${HOTPLEX_SLACK_SERVER_ADDR:-:8080}
+server_addr: ${HOTPLEX_SLACK_SERVER_ADDR}
 
 # -----------------------------------------------------------------------------
 # AI Identity & Behavior
@@ -154,11 +154,21 @@ security:
     # DM Policy: "allow" (all), "pairing" (active users only), "block"
     dm_policy: allow
 
-    # Group Policy: "allow" (all), "mention" (only when @bot), "block"
+    # Group Policy options:
+    # - "allow": Respond to all group messages (default)
+    # - "mention": Only respond when bot is @mentioned
+    # - "multibot": Multi-bot mode - @mentioned bot responds, no @ = all bots respond
+    # - "block": Block all group messages
     group_policy: mention
 
     # [Required] Bot's own User ID (e.g., U12345678) for mention detection
-    bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID:-}
+    bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID}
+
+    # [Optional] Broadcast response for multibot mode
+    # When group_policy is "multibot" and message has no @ mentions,
+    # this response is sent to politely inform users how to get help.
+    # broadcast_response: |
+    #   Hello! I'm ready to help. Please @mention me if you'd like me to respond.
 
     # Whitelist/Blacklist (Leave empty to skip)
     allowed_users: []      # Example: ["U12345", "U67890"]
