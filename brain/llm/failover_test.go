@@ -9,6 +9,7 @@ import (
 )
 
 func TestFailoverManager_BasicFailover(t *testing.T) {
+	t.Parallel()
 	config := DefaultFailoverConfig()
 	config.HealthCheckInterval = 0 // Disable health check for unit tests
 	config.EnableAutoFailover = true
@@ -33,6 +34,7 @@ func TestFailoverManager_BasicFailover(t *testing.T) {
 }
 
 func TestFailoverManager_ManualFailover(t *testing.T) {
+	t.Parallel()
 	config := DefaultFailoverConfig()
 	config.HealthCheckInterval = 0 // Disable health check for unit tests
 	config.Providers = []ProviderConfig{
@@ -52,6 +54,7 @@ func TestFailoverManager_ManualFailover(t *testing.T) {
 }
 
 func TestFailoverManager_Failback(t *testing.T) {
+	t.Parallel()
 	config := DefaultFailoverConfig()
 	config.HealthCheckInterval = 0 // Disable health check for unit tests
 	config.EnableAutoFailover = true
@@ -82,6 +85,7 @@ func TestFailoverManager_Failback(t *testing.T) {
 }
 
 func TestFailoverManager_Stats(t *testing.T) {
+	t.Parallel()
 	config := DefaultFailoverConfig()
 	config.HealthCheckInterval = 0 // Disable health check for unit tests
 	config.Providers = []ProviderConfig{
@@ -104,6 +108,7 @@ func TestFailoverManager_Stats(t *testing.T) {
 }
 
 func TestFailoverManager_Reset(t *testing.T) {
+	t.Parallel()
 	config := DefaultFailoverConfig()
 	config.HealthCheckInterval = 0 // Disable health check for unit tests
 	config.Providers = []ProviderConfig{
@@ -128,6 +133,7 @@ func TestFailoverManager_Reset(t *testing.T) {
 }
 
 func TestFailoverManager_NoHealthyProviders(t *testing.T) {
+	t.Parallel()
 	config := DefaultFailoverConfig()
 	config.HealthCheckInterval = 0 // Disable health check to avoid goroutine leak
 	config.Providers = []ProviderConfig{
@@ -150,6 +156,7 @@ func TestFailoverManager_NoHealthyProviders(t *testing.T) {
 }
 
 func TestFailoverHistory(t *testing.T) {
+	t.Parallel()
 	history := NewFailoverHistory(5)
 
 	// Add 7 records

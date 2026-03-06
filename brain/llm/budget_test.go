@@ -8,6 +8,7 @@ import (
 )
 
 func TestBudgetTracker_BasicTracking(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 10.0
 	config.Period = BudgetSession
@@ -27,6 +28,7 @@ func TestBudgetTracker_BasicTracking(t *testing.T) {
 }
 
 func TestBudgetTracker_BudgetExceeded(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 5.0
 	config.EnableHardLimit = true
@@ -49,6 +51,7 @@ func TestBudgetTracker_BudgetExceeded(t *testing.T) {
 }
 
 func TestBudgetTracker_SoftLimit(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 5.0
 	config.EnableHardLimit = false
@@ -69,6 +72,7 @@ func TestBudgetTracker_SoftLimit(t *testing.T) {
 }
 
 func TestBudgetTracker_Alerts(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 10.0
 	config.AlertThresholds = []BudgetAlertThreshold{
@@ -105,6 +109,7 @@ func TestBudgetTracker_Alerts(t *testing.T) {
 }
 
 func TestBudgetTracker_PeriodReset(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 10.0
 	config.Period = BudgetDaily
@@ -126,6 +131,7 @@ func TestBudgetTracker_PeriodReset(t *testing.T) {
 }
 
 func TestBudgetTracker_ManualReset(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 10.0
 	config.Period = BudgetSession
@@ -143,6 +149,7 @@ func TestBudgetTracker_ManualReset(t *testing.T) {
 }
 
 func TestBudgetTracker_SetLimit(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 10.0
 	config.Period = BudgetSession
@@ -160,6 +167,7 @@ func TestBudgetTracker_SetLimit(t *testing.T) {
 }
 
 func TestBudgetManager_MultipleSessions(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 10.0
 	config.Period = BudgetSession
@@ -195,6 +203,7 @@ func TestBudgetManager_MultipleSessions(t *testing.T) {
 }
 
 func TestBudgetManager_RemoveTracker(t *testing.T) {
+	t.Parallel()
 	config := DefaultBudgetConfig()
 	config.Limit = 10.0
 	config.Period = BudgetSession
@@ -213,6 +222,7 @@ func TestBudgetManager_RemoveTracker(t *testing.T) {
 }
 
 func TestBudgetPeriod_String(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "daily", string(BudgetDaily))
 	assert.Equal(t, "weekly", string(BudgetWeekly))
 	assert.Equal(t, "monthly", string(BudgetMonthly))

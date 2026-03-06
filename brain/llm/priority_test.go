@@ -11,6 +11,7 @@ import (
 )
 
 func TestPriorityQueue_BasicOrdering(t *testing.T) {
+	t.Parallel()
 	pq := &PriorityQueue{}
 
 	// Add items in mixed priority order
@@ -52,6 +53,7 @@ func TestPriorityQueue_BasicOrdering(t *testing.T) {
 }
 
 func TestPriorityScheduler_EnqueueDequeue(t *testing.T) {
+	t.Parallel()
 	config := DefaultPriorityConfig()
 	scheduler := NewPriorityScheduler(config)
 	defer scheduler.Shutdown()
@@ -90,6 +92,7 @@ func TestPriorityScheduler_EnqueueDequeue(t *testing.T) {
 }
 
 func TestPriorityScheduler_LowPriorityDrop(t *testing.T) {
+	t.Parallel()
 	config := DefaultPriorityConfig()
 	config.MaxQueueSize = 3
 	config.EnableLowPriorityDrop = true
@@ -122,6 +125,7 @@ func TestPriorityScheduler_LowPriorityDrop(t *testing.T) {
 }
 
 func TestPriorityScheduler_Stats(t *testing.T) {
+	t.Parallel()
 	config := DefaultPriorityConfig()
 	scheduler := NewPriorityScheduler(config)
 	defer scheduler.Shutdown()
@@ -151,6 +155,7 @@ func TestPriorityScheduler_Stats(t *testing.T) {
 }
 
 func TestPriorityScheduler_Shutdown(t *testing.T) {
+	t.Parallel()
 	config := DefaultPriorityConfig()
 	scheduler := NewPriorityScheduler(config)
 
@@ -167,6 +172,7 @@ func TestPriorityScheduler_Shutdown(t *testing.T) {
 }
 
 func TestPriorityScheduler_Clear(t *testing.T) {
+	t.Parallel()
 	config := DefaultPriorityConfig()
 	scheduler := NewPriorityScheduler(config)
 	defer scheduler.Shutdown()
@@ -189,6 +195,7 @@ func TestPriorityScheduler_Clear(t *testing.T) {
 }
 
 func TestPriorityScheduler_Concurrent(t *testing.T) {
+	t.Parallel()
 	config := DefaultPriorityConfig()
 	config.MaxQueueSize = 1000
 	scheduler := NewPriorityScheduler(config)
@@ -219,6 +226,7 @@ func TestPriorityScheduler_Concurrent(t *testing.T) {
 }
 
 func TestPriorityScheduler_ExpiredRequests(t *testing.T) {
+	t.Parallel()
 	config := DefaultPriorityConfig()
 	config.MaxQueueSize = 10
 	scheduler := NewPriorityScheduler(config)
@@ -237,6 +245,7 @@ func TestPriorityScheduler_ExpiredRequests(t *testing.T) {
 }
 
 func TestPriorityClient_Submit(t *testing.T) {
+	t.Parallel()
 	config := DefaultPriorityConfig()
 	scheduler := NewPriorityScheduler(config)
 	defer scheduler.Shutdown()
@@ -258,6 +267,7 @@ func TestPriorityClient_Submit(t *testing.T) {
 }
 
 func TestPriority_String(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "high", PriorityHigh.String())
 	assert.Equal(t, "medium", PriorityMedium.String())
 	assert.Equal(t, "low", PriorityLow.String())

@@ -10,6 +10,7 @@ import (
 )
 
 func TestRouter_SelectModel_ByCost(t *testing.T) {
+	t.Parallel()
 	router := NewRouter(RouterConfig{
 		DefaultStrategy: StrategyCostPriority,
 		Models: []ModelConfig{
@@ -25,6 +26,7 @@ func TestRouter_SelectModel_ByCost(t *testing.T) {
 }
 
 func TestRouter_SelectModel_ByLatency(t *testing.T) {
+	t.Parallel()
 	router := NewRouter(RouterConfig{
 		DefaultStrategy: StrategyLatencyPriority,
 		Models: []ModelConfig{
@@ -40,6 +42,7 @@ func TestRouter_SelectModel_ByLatency(t *testing.T) {
 }
 
 func TestRouter_SelectModel_ScenarioMapping(t *testing.T) {
+	t.Parallel()
 	router := NewRouter(RouterConfig{
 		DefaultStrategy: StrategyCostPriority,
 		Models: []ModelConfig{
@@ -64,6 +67,7 @@ func TestRouter_SelectModel_ScenarioMapping(t *testing.T) {
 }
 
 func TestRouter_DetectScenario(t *testing.T) {
+	t.Parallel()
 	router := NewRouter(RouterConfig{}, nil)
 
 	tests := []struct {
@@ -88,6 +92,7 @@ func TestRouter_DetectScenario(t *testing.T) {
 }
 
 func TestRouter_NoEnabledModels(t *testing.T) {
+	t.Parallel()
 	router := NewRouter(RouterConfig{
 		DefaultStrategy: StrategyCostPriority,
 		Models: []ModelConfig{
@@ -100,6 +105,7 @@ func TestRouter_NoEnabledModels(t *testing.T) {
 }
 
 func TestCostCalculator_CalculateCost(t *testing.T) {
+	t.Parallel()
 	cc := NewCostCalculator()
 
 	cost, err := cc.CalculateCost("gpt-4o-mini", 1000, 2000)
@@ -109,6 +115,7 @@ func TestCostCalculator_CalculateCost(t *testing.T) {
 }
 
 func TestCostCalculator_CountTokens(t *testing.T) {
+	t.Parallel()
 	cc := NewCostCalculator()
 
 	tests := []struct {
@@ -129,6 +136,7 @@ func TestCostCalculator_CountTokens(t *testing.T) {
 }
 
 func TestCostCalculator_TrackSession(t *testing.T) {
+	t.Parallel()
 	cc := NewCostCalculator()
 
 	session, cost, err := cc.TrackRequest("session-1", "gpt-4o-mini", 1000, 2000)
@@ -149,6 +157,7 @@ func TestCostCalculator_TrackSession(t *testing.T) {
 }
 
 func TestCostCalculator_BudgetAlert(t *testing.T) {
+	t.Parallel()
 	cc := NewCostCalculator()
 
 	// Set very low budget
@@ -161,6 +170,7 @@ func TestCostCalculator_BudgetAlert(t *testing.T) {
 }
 
 func TestRateLimiter_Allow(t *testing.T) {
+	t.Parallel()
 	rl := NewRateLimiter(RateLimitConfig{
 		RequestsPerSecond: 10,
 		BurstSize:         5,
@@ -179,6 +189,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 }
 
 func TestRateLimiter_Wait(t *testing.T) {
+	t.Parallel()
 	rl := NewRateLimiter(RateLimitConfig{
 		RequestsPerSecond: 100, // High rate for fast test
 		BurstSize:         2,
@@ -202,6 +213,7 @@ func TestRateLimiter_Wait(t *testing.T) {
 }
 
 func TestRateLimiter_QueueFull(t *testing.T) {
+	t.Parallel()
 	rl := NewRateLimiter(RateLimitConfig{
 		RequestsPerSecond: 0.1, // Very slow
 		BurstSize:         1,
@@ -251,6 +263,7 @@ func findSubstring(s, substr string) bool {
 }
 
 func TestRateLimiter_GetStats(t *testing.T) {
+	t.Parallel()
 	rl := NewRateLimiter(RateLimitConfig{
 		RequestsPerSecond: 10,
 		BurstSize:         5,
@@ -270,6 +283,7 @@ func TestRateLimiter_GetStats(t *testing.T) {
 }
 
 func TestMetricsCollector_RecordRequest(t *testing.T) {
+	t.Parallel()
 	mc := NewMetricsCollector(MetricsConfig{
 		Enabled:           false, // Disable OTel for unit test
 		ServiceName:       "test",
@@ -290,6 +304,7 @@ func TestMetricsCollector_RecordRequest(t *testing.T) {
 }
 
 func TestMetricsCollector_ErrorTracking(t *testing.T) {
+	t.Parallel()
 	mc := NewMetricsCollector(MetricsConfig{
 		Enabled:           false,
 		ServiceName:       "test",
@@ -308,6 +323,7 @@ func TestMetricsCollector_ErrorTracking(t *testing.T) {
 }
 
 func TestRequestTimer(t *testing.T) {
+	t.Parallel()
 	mc := NewMetricsCollector(MetricsConfig{
 		Enabled:           false,
 		ServiceName:       "test",
@@ -324,6 +340,7 @@ func TestRequestTimer(t *testing.T) {
 }
 
 func TestDefaultModelPricing(t *testing.T) {
+	t.Parallel()
 	pricing := DefaultModelPricing()
 	assert.Greater(t, len(pricing), 10)
 

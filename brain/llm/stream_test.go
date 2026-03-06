@@ -9,6 +9,7 @@ import (
 )
 
 func TestChatStream_ReceivesTokens(t *testing.T) {
+	t.Parallel()
 	// This test requires a real API key, so we'll skip it in CI
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -36,6 +37,7 @@ func TestChatStream_ReceivesTokens(t *testing.T) {
 }
 
 func TestChatStream_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
