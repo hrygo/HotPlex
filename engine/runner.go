@@ -40,6 +40,11 @@ type Engine struct {
 	mu sync.RWMutex
 }
 
+// GetOptions returns the current engine options.
+func (e *Engine) GetOptions() EngineOptions {
+	return e.opts
+}
+
 // NewEngine creates a new HotPlex Engine instance.
 func NewEngine(options EngineOptions) (*Engine, error) {
 	logger := options.Logger

@@ -52,7 +52,7 @@ func TestStreamMessageStore_OnStreamChunk(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	mockStore := &mockStorage{}
-	store := NewStreamMessageStore(mockStore, 5*time.Minute, 100)
+	store := NewStreamMessageStore(mockStore, 5*time.Minute, 100, nil)
 	defer store.Close()
 
 	sessionID := "test-session-1"
@@ -78,7 +78,7 @@ func TestStreamMessageStore_OnStreamComplete(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	mockStore := &mockStorage{}
-	store := NewStreamMessageStore(mockStore, 5*time.Minute, 100)
+	store := NewStreamMessageStore(mockStore, 5*time.Minute, 100, nil)
 	defer store.Close()
 
 	sessionID := "test-session-2"
@@ -116,7 +116,7 @@ func TestStreamMessageStore_CleanupExpired(t *testing.T) {
 	ctx := context.Background()
 	mockStore := &mockStorage{}
 	// Very short timeout for testing
-	store := NewStreamMessageStore(mockStore, 100*time.Millisecond, 100)
+	store := NewStreamMessageStore(mockStore, 100*time.Millisecond, 100, nil)
 	defer store.Close()
 
 	sessionID := "test-session-expired"

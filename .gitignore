@@ -88,7 +88,7 @@ yarn-error.log*
 # 🔑 Environment & Secrets (项目环境与敏感信息)
 # ------------------------------------------------------------------------------
 
-.env
+.env*
 .env.local
 .env.secondary
 .env.*.local

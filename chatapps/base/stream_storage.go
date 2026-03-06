@@ -2,6 +2,8 @@ package base
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -61,17 +63,25 @@ type StreamMessageStore struct {
 	store       storage.ChatAppMessageStore
 	timeout     time.Duration
 	maxBuffers  int
+	logger      *slog.Logger
 	cleanupStop chan struct{}
 	cleanupWg   sync.WaitGroup
 }
 
+// ErrBufferFull 缓冲区已满错误
+var ErrBufferFull = errors.New("stream buffer full, cannot accept new chunks")
+
 // NewStreamMessageStore 创建流式消息存储管理器
-func NewStreamMessageStore(store storage.ChatAppMessageStore, timeout time.Duration, maxBuffers int) *StreamMessageStore {
+func NewStreamMessageStore(store storage.ChatAppMessageStore, timeout time.Duration, maxBuffers int, logger *slog.Logger) *StreamMessageStore {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s := &StreamMessageStore{
 		buffers:     make(map[string]*StreamBuffer),
 		store:       store,
 		timeout:     timeout,
 		maxBuffers:  maxBuffers,
+		logger:      logger,
 		cleanupStop: make(chan struct{}),
 	}
 	s.startCleanup()
@@ -120,12 +130,26 @@ func (s *StreamMessageStore) OnStreamChunk(ctx context.Context, sessionID, chunk
 
 	// 限制缓冲区数量
 	if len(s.buffers) >= s.maxBuffers {
-		// 简单策略：丢弃最旧的 (实际可用 LRU)
+		// 查找并删除过期的缓冲区
+		evicted := false
 		for id, buf := range s.buffers {
 			if buf.IsExpired(s.timeout) {
+				// 记录警告：过期缓冲区的数据将被丢弃
+				s.logger.Warn("evicting expired stream buffer, data will be lost",
+					"session_id", id,
+					"chunk_count", len(buf.Chunks),
+					"reason", "buffer overflow")
 				delete(s.buffers, id)
+				evicted = true
 				break
 			}
+		}
+		// 如果没有过期的缓冲区可删除，返回错误而不是静默丢弃
+		if !evicted {
+			s.logger.Error("stream buffer full, cannot accept new chunks",
+				"max_buffers", s.maxBuffers,
+				"session_id", sessionID)
+			return ErrBufferFull
 		}
 	}
 

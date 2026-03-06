@@ -164,6 +164,20 @@ security:
     slash_command_rate_limit: 10.0
 
 # -----------------------------------------------------------------------------
+# Message Persistence (Storage)
+# -----------------------------------------------------------------------------
+message_store:
+  enabled: true
+  type: sqlite
+  sqlite:
+    path: ~/.slack/BOT_U0AHRCL1KCM/chatapp_messages.db
+    max_size_mb: 512
+  streaming:
+    enabled: true
+    timeout_seconds: 300
+    storage_policy: complete_only
+
+# -----------------------------------------------------------------------------
 # Session Lifecycle
 # -----------------------------------------------------------------------------
 session:

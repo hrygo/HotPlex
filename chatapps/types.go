@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
 	"github.com/hrygo/hotplex/types"
 )
@@ -25,6 +26,7 @@ type Engine interface {
 	SetDisallowedTools(tools []string)
 	GetAllowedTools() []string
 	GetDisallowedTools() []string
+	GetOptions() engine.EngineOptions
 }
 
 // Session abstracts session state and operations

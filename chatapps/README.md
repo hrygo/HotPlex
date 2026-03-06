@@ -72,6 +72,87 @@ The `chatapps` layer normalizes raw provider events into a standard "Chat Langua
 
 ---
 
+## 🗄️ Message Storage Plugin
+
+The Message Storage Plugin provides a robust system for persisting chat history across platforms, supporting both one-off messages and real-time streams with memory-efficient buffering.
+
+### 🏗️ Storage Architecture
+
+```mermaid
+graph TD
+    Adapter[ChatAdapter] --> Plugin[MessageStorePlugin]
+    Plugin --> Stream[StreamMessageStore]
+    Stream --> Buffer[Memory Buffer]
+    Plugin --> Backend[Storage Backend]
+    Stream -- Final Merge --> Backend
+    Backend --> DB[(SQLite / PostgreSQL / Memory)]
+```
+
+**Stream Handling Flow:**
+1.  **User Message**: Stored immediately via `MessageStorePlugin`.
+2.  **Bot Stream**: Incremental chunks are accumulated in `StreamMessageStore` (Memory Buffer).
+3.  **Completion**: Merged content is persisted to the backend; transient chunks are discarded to prevent DB bloat.
+
+### 🔧 Configuration
+
+Add the `message_store` block to your platform configuration (e.g., `config.yaml`):
+
+```yaml
+message_store:
+  enabled: true
+  type: sqlite          # sqlite | postgres | memory
+  sqlite:
+    path: ~/.hotplex/chatapp_messages.db
+    max_size_mb: 512
+  streaming:
+    enabled: true
+    timeout_seconds: 300
+    storage_policy: complete_only # Only store the final merged response
+```
+
+### 🚀 Integration Guide
+
+1.  **Initialize the Plugin**:
+    ```go
+    // 1. Create storage backend
+    store, _ := base.CreateStorageFromType("sqlite", map[string]any{
+        "path": "~/.hotplex/messages.db",
+    })
+
+    // 2. Create MessageStorePlugin
+    msgPlugin, _ := base.NewMessageStorePlugin(base.MessageStorePluginConfig{
+        Store:          store,
+        SessionManager: base.CreateSessionManager("hotplex"), // Injected for lookup
+        Strategy:       base.CreateDefaultStrategy(),
+        StreamEnabled:  true,
+        StreamTimeout:  5 * time.Minute,
+    })
+    ```
+
+2.  **Enable in ChatAdapter**:
+    ```go
+    // Inject the plugin and metadata into your platform adapter
+    adapter.SetMessageStore(msgPlugin)
+    adapter.SetSessionManager(sessionMgr)
+    adapter.SetProviderType("anthropic")
+    ```
+
+---
+
+## 🛡️ Reliability & Deduplication
+
+HotPlex ensures message delivery and security through dedicated middleware layers.
+
+### 🔄 Event Deduplication
+The `dedup` package prevents processing the same IM event multiple times (e.g., when a platform retries a webhook).
+- **Redaction**: Automatically masks sensitive data (Slack/GitHub tokens, API keys) in logs using `dedup.RedactSensitiveData`.
+
+### 📨 Message Queue & DLQ
+The `MessageQueue` provides asynchronous delivery with retry logic:
+- **Automatic Retries**: Messages that fail to send are automatically re-queued (up to 3 attempts).
+- **Dead Letter Queue (DLQ)**: Persistently failed messages are moved to the DLQ for manual inspection or recovery.
+
+
 ## 🛠 Developer Guide
 
 ### 1. Implementing a New Platform Adapter
@@ -128,6 +209,14 @@ Implement these optional interfaces to provide a premium experience:
 -   **`base.StatusProvider`**: Handles "Thinking..." or "Running tool X..." visual indicators.
 -   **`base.MessageOperations`**: Supports updating/deleting existing messages (critical for streaming and UI updates).
 -   **`base.StreamWriter`**: A standard `io.Writer` interface for real-time token streaming.
+
+#### Phase D: Storage & Session Support
+Enable conversational persistence by implementing these hooks:
+
+```go
+func (a *WhatsAppAdapter) SetMessageStore(s *base.MessageStorePlugin) { a.store = s }
+func (a *WhatsAppAdapter) SetSessionManager(m session.SessionManager) { a.sess = m }
+```
 
 ### 2. Message Processor Pipeline
 

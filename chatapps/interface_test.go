@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
 	"github.com/hrygo/hotplex/types"
 )
@@ -50,6 +51,7 @@ type MockEngine struct {
 	SetDisallowedToolsFunc     func(tools []string)
 	GetAllowedToolsFunc        func() []string
 	GetDisallowedToolsFunc     func() []string
+	GetOptionsFunc             func() engine.EngineOptions
 }
 
 func (m *MockEngine) Execute(ctx context.Context, cfg *types.Config, prompt string, callback event.Callback) error {
@@ -146,6 +148,13 @@ func (m *MockEngine) GetDisallowedTools() []string {
 	return nil
 }
 
+func (m *MockEngine) GetOptions() engine.EngineOptions {
+	if m.GetOptionsFunc != nil {
+		return m.GetOptionsFunc()
+	}
+	return engine.EngineOptions{}
+}
+
 // MockMessageOperations implements MessageOperations for testing
 type MockMessageOperations struct {
 	DeleteMessageFunc      func(ctx context.Context, channelID, messageTS string) error
@@ -235,10 +244,11 @@ func TestStreamCallback_WithNilMessageOps(t *testing.T) {
 	ctx := context.Background()
 	logger := newTestLogger(t)
 	adapters := NewAdapterManager(logger)
+	mockEngine := &MockEngine{}
 
 	callback := NewStreamCallback(
 		ctx, "test-session", "test-platform",
-		adapters, logger, false, nil,
+		adapters, logger, mockEngine, false, nil,
 		nil, nil,
 	)
 
@@ -256,6 +266,7 @@ func TestStreamCallback_WithMessageOps(t *testing.T) {
 	ctx := context.Background()
 	logger := newTestLogger(t)
 	adapters := NewAdapterManager(logger)
+	mockEngine := &MockEngine{}
 
 	mockOps := &MockMessageOperations{
 		DeleteMessageFunc: func(ctx context.Context, channelID, messageTS string) error {
@@ -265,7 +276,7 @@ func TestStreamCallback_WithMessageOps(t *testing.T) {
 
 	callback := NewStreamCallback(
 		ctx, "test-session", "slack",
-		adapters, logger, false, map[string]any{},
+		adapters, logger, mockEngine, false, map[string]any{},
 		mockOps,
 		nil,
 	)

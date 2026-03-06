@@ -1,9 +1,45 @@
 # HotPlex Docker Compose Deployment
 # Start with: docker compose up -d
+#
+# Architecture Notes:
+# - YAML Anchors (&anchor / *alias / <<: merge) reduce configuration duplication
+# - Bot 01 builds the image; Bot 02 reuses it (same image, different env)
+# - Each bot reads its own .env file for isolated paths (projects dir, gitconfig)
+
+# Shared configuration using YAML anchors
+x-hotplex-common: &hotplex-common
+  environment:
+    - HOST_UID=${HOST_UID:-1000}
+    - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
+    - HTTP_PROXY=http://host.docker.internal:7897
+    - HTTPS_PROXY=http://host.docker.internal:7897
+    - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+  volumes: &hotplex-volumes
+    - ${HOME}/.hotplex:/home/hotplex/.hotplex
+    - ${HOME}/.claude:/home/hotplex/.claude:rw
+    - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
+    - hotplex-go-mod:/home/hotplex/go/pkg/mod
+    - hotplex-go-build:/home/hotplex/.cache/go-build
+    - ${HOTPLEX_PROJECTS_DIR}:/home/hotplex/projects:rw
+    - ${HOTPLEX_GITCONFIG}:/home/hotplex/.gitconfig:ro
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  healthcheck:
+    test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+        cpus: '2.0'
+  restart: unless-stopped
 
 services:
   # ---------------------------------------------------------
-  # All-in-One Build: hotplexd + Claude Code
+  # Bot 01: Primary Bot (builds image + runs)
+  # env file: .env
   # ---------------------------------------------------------
   hotplex:
     build:
@@ -15,49 +51,21 @@ services:
     container_name: hotplex
     ports:
       - "18080:8080"
-    volumes:
-      # Map host configurations into the container for seamless transition
-      # Note: Home in container is /home/hotplex
-      - ${HOME}/.hotplex:/home/hotplex/.hotplex
-      - ${HOME}/.claude:/home/hotplex/.claude:rw
-      - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
-      - ${HOME}/.slack/BOT_U0AHRCL1KCM:/home/hotplex/projects:rw
-      # Bot 01 Git config (HotPlexBot01)
-      - ${HOME}/.gitconfig-hotplex:/home/hotplex/.gitconfig:ro
-      # Go development cache (persist dependencies and build cache)
-      - hotplex-go-mod:/home/hotplex/go/pkg/mod
-      - hotplex-go-build:/home/hotplex/.cache/go-build
     env_file:
       - .env
-    environment:
-      # Only override values that differ from .env
-      - HOST_UID=${HOST_UID:-1000}
-      - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
-      - HTTP_PROXY=http://host.docker.internal:7897
-      - HTTPS_PROXY=http://host.docker.internal:7897
-      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8080/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2.0'
-    restart: unless-stopped
+    <<: *hotplex-common
 
   # ---------------------------------------------------------
-  # Secondary Bot Build: Research Assistant Robot
+  # Bot 02: Secondary Bot (reuses built image)
+  # env file: .env.secondary
   # ---------------------------------------------------------
   hotplex-secondary:
     image: ghcr.io/hrygo/hotplex:latest
     container_name: hotplex-secondary
     ports:
       - "18081:8080"
+    env_file:
+      - .env.secondary
     volumes:
       - ${HOME}/.hotplex:/home/hotplex/.hotplex
       - ${HOME}/.claude:/home/hotplex/.claude:rw
@@ -70,18 +78,7 @@ services:
       # Go development cache (shared with primary)
       - hotplex-go-mod:/home/hotplex/go/pkg/mod
       - hotplex-go-build:/home/hotplex/.cache/go-build
-    env_file:
-      - .env.secondary
-    environment:
-      # Only override values that differ from .env
-      - HOST_UID=${HOST_UID:-1000}
-      - ANTHROPIC_BASE_URL=http://host.docker.internal:15721
-      - HTTP_PROXY=http://host.docker.internal:7897
-      - HTTPS_PROXY=http://host.docker.internal:7897
-      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+    <<: *hotplex-common
 
 # Named volumes for Go cache persistence
 volumes:

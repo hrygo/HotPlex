@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -123,6 +124,7 @@ type MessageStorePlugin struct {
 	sessionMgr  session.SessionManager
 	strategy    storage.StorageStrategy
 	streamStore *StreamMessageStore
+	logger      *slog.Logger
 }
 
 // MessageStorePluginConfig 配置
@@ -133,6 +135,7 @@ type MessageStorePluginConfig struct {
 	StreamEnabled    bool
 	StreamTimeout    time.Duration
 	StreamMaxBuffers int
+	Logger           *slog.Logger
 }
 
 // NewMessageStorePlugin 创建消息存储插件
@@ -144,10 +147,16 @@ func NewMessageStorePlugin(cfg MessageStorePluginConfig) (*MessageStorePlugin, e
 		return nil, ErrNilSessionManager
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	plugin := &MessageStorePlugin{
 		store:      cfg.Store,
 		sessionMgr: cfg.SessionManager,
 		strategy:   cfg.Strategy,
+		logger:     logger,
 	}
 
 	if cfg.StreamEnabled {
@@ -159,7 +168,7 @@ func NewMessageStorePlugin(cfg MessageStorePluginConfig) (*MessageStorePlugin, e
 		if maxBuffers == 0 {
 			maxBuffers = 1000
 		}
-		plugin.streamStore = NewStreamMessageStore(cfg.Store, timeout, maxBuffers)
+		plugin.streamStore = NewStreamMessageStore(cfg.Store, timeout, maxBuffers, logger)
 	}
 
 	return plugin, nil

@@ -160,6 +160,10 @@ func (w *engineWrapper) GetDisallowedTools() []string {
 	return w.eng.GetDisallowedTools()
 }
 
+func (w *engineWrapper) GetOptions() engine.EngineOptions {
+	return w.eng.GetOptions()
+}
+
 // EngineHolder holds the Engine instance and configuration for ChatApps integration
 type EngineHolder struct {
 	engine           Engine
@@ -243,6 +247,7 @@ type StreamCallback struct {
 	platform  string
 	adapters  *AdapterManager
 	logger    *slog.Logger
+	engine    Engine
 	mu        sync.Mutex
 	isHot     bool // Tracks if session is hot-multiplexed (active)
 	isFirst   bool
@@ -251,6 +256,8 @@ type StreamCallback struct {
 
 	// Session lifecycle state - ensures correct event ordering
 	sessionStartSent bool // Tracks if session_start event has been sent
+
+	lastToolName string // Track the last tool name for error context
 
 	// Status message state for dynamic event type indicator
 	currentStatus base.MessageType // Current status type (thinking, tool_use, answer)
@@ -306,26 +313,29 @@ type msgRecord struct {
 // NewStreamCallback creates a new StreamCallback with injected platform-specific operations
 func NewStreamCallback(
 	ctx context.Context,
-	sessionID, platform string,
+	sessionID string,
+	platform string,
 	adapters *AdapterManager,
 	logger *slog.Logger,
+	engine Engine,
 	isHot bool,
 	metadata map[string]any,
 	messageOps MessageOperations,
 	sessionOps SessionOperations,
 ) *StreamCallback {
 	cb := &StreamCallback{
-		ctx:        ctx,
-		sessionID:  sessionID,
-		platform:   platform,
-		adapters:   adapters,
-		logger:     logger,
-		isHot:      isHot,
-		isFirst:    true,
-		metadata:   metadata,
-		processor:  NewDefaultProcessorChain(ctx, logger),
-		messageOps: messageOps,
-		sessionOps: sessionOps,
+		ctx:              ctx,
+		sessionID:        sessionID,
+		platform:         platform,
+		adapters:         adapters,
+		logger:           logger,
+		engine:           engine,
+		isHot:            isHot,
+		isFirst:          true,
+		metadata:         metadata,
+		messageOps:       messageOps,
+		sessionOps:       sessionOps,
+		lastStatusUpdate: time.Now(),
 	}
 
 	// Initialize StatusManager if StatusProvider is available
@@ -337,6 +347,10 @@ func NewStreamCallback(
 	}
 
 	return cb
+}
+
+func (c *StreamCallback) getEngine() Engine {
+	return c.engine
 }
 
 // resetIdleTimer resets the 3-second generic thinking fallback timer
@@ -666,6 +680,9 @@ func (c *StreamCallback) handleToolUse(data any) error {
 	if m, ok := data.(*event.EventWithMeta); ok {
 		if m.Meta != nil && m.Meta.ToolName != "" {
 			toolName = m.Meta.ToolName
+			c.mu.Lock()
+			c.lastToolName = toolName
+			c.mu.Unlock()
 		}
 	}
 
@@ -879,6 +896,20 @@ func (c *StreamCallback) handleError(data any) error {
 		}
 	default:
 		errMsg = fmt.Sprintf("%v", data)
+	}
+
+	// Localize and enrich timeout error messages for a better user experience
+	if strings.Contains(strings.ToLower(errMsg), "timeout") {
+		waitTime := "30分钟" // Default standard
+		if engine := c.getEngine(); engine != nil {
+			waitTime = engine.GetOptions().Timeout.String()
+		}
+
+		if c.lastToolName != "" {
+			errMsg = fmt.Sprintf("抱歉，由于任务过于复杂，处理超出了预设的时间（%s）。机器人卡在执行 `%s` 工具的过程中。建议您可以尝试拆解任务后再重试。", waitTime, c.lastToolName)
+		} else {
+			errMsg = fmt.Sprintf("抱歉，任务执行时间过长（超过 %s），为了系统安全已自动终止。建议您可以尝试缩小任务范围后再试一次。", waitTime)
+		}
 	}
 
 	// Update status to show error state for better visibility
@@ -1297,7 +1328,7 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 	isHot := exists && sess != nil && (sess.Status() == "ready" || sess.Status() == "busy")
 
 	// Create stream callback with injected dependencies
-	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, isHot, msg.Metadata, messageOps, sessionOps)
+	callback := NewStreamCallback(ctx, msg.SessionID, msg.Platform, h.adapters, h.logger, h.engine, isHot, msg.Metadata, messageOps, sessionOps)
 	defer callback.Close() // Ensure processor resources are released
 
 	// Send user_message_received event FIRST to set initial reaction (📥 inbox_tray)

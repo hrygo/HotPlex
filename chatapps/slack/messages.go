@@ -107,63 +107,47 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 	return a.SendToChannelSDK(ctx, channelID, msg.Content, threadTS)
 }
 
-// SendAttachment sends an attachment to a Slack channel
+// SendAttachment sends an attachment to a Slack channel using the Slack SDK
 func (a *Adapter) SendAttachment(ctx context.Context, channelID, threadTS string, attachment base.Attachment) error {
-
-	payload := map[string]any{
-		"channel": channelID,
+	if attachment.URL == "" {
+		a.Logger().Debug("Attachment has no URL, skipping", "title", attachment.Title)
+		return nil
 	}
 
-	if attachment.URL != "" {
-		payload["url"] = attachment.URL
-		payload["title"] = attachment.Title
-		if threadTS != "" {
-			payload["thread_ts"] = threadTS
-		}
-		return a.sendFileFromURL(ctx, payload)
-	}
+	a.Logger().Debug("Sending attachment via Slack SDK", "channel", channelID, "title", attachment.Title)
 
-	a.Logger().Debug("Attachment received", "type", attachment.Type, "title", attachment.Title)
-	return nil
-}
-
-// sendFileFromURL sends a file from URL to Slack
-func (a *Adapter) sendFileFromURL(ctx context.Context, payload map[string]any) error {
-	body, err := json.Marshal(payload)
+	// Download the file from URL
+	resp, err := http.DefaultClient.Get(attachment.URL)
 	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://slack.com/api/files.upload", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.config.BotToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to download attachment: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("file upload failed: %d %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("failed to download attachment: HTTP %d", resp.StatusCode)
 	}
 
-	var slackResp struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error,omitempty"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&slackResp); err != nil {
-		return fmt.Errorf("parse response: %w", err)
+	// Read the file content
+	content, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read attachment content: %w", err)
 	}
 
-	if !slackResp.OK {
-		return fmt.Errorf("slack API error: %s", slackResp.Error)
+	// Use Slack SDK to upload the file
+	params := slack.UploadFileParameters{
+		Filename:        attachment.Title,
+		Title:           attachment.Title,
+		Reader:          bytes.NewReader(content),
+		Channel:         channelID,
+		ThreadTimestamp: threadTS,
 	}
 
+	file, err := a.client.UploadFileContext(ctx, params)
+	if err != nil {
+		return fmt.Errorf("failed to upload file via Slack SDK: %w", err)
+	}
+
+	a.Logger().Debug("Attachment uploaded successfully", "file_id", file.ID, "title", file.Title)
 	return nil
 }
 
