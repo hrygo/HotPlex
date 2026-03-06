@@ -198,8 +198,14 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 
 	// Multibot mode: respond if no mentions (broadcast) or mentioned self
 	if (ev.ChannelType == "channel" || ev.ChannelType == "group") && a.config.GroupPolicy == "multibot" {
+		a.Logger().Info("Multibot mode processing",
+			"channel_type", ev.ChannelType,
+			"bot_user_id", a.config.BotUserID,
+			"message_text", ev.Text,
+			"mentioned_users", ExtractMentionedUsers(ev.Text))
+
 		if !a.config.ShouldRespondInMultibotMode(ev.Text) {
-			a.Logger().Debug("Message ignored - other bot mentioned", "channel_type", ev.ChannelType, "policy", "multibot")
+			a.Logger().Info("Message ignored - other bot mentioned", "channel_type", ev.ChannelType, "policy", "multibot")
 			return
 		}
 		// If broadcast (no @), send polite response instead of processing
@@ -208,11 +214,12 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 			if threadID == "" {
 				threadID = ev.TimeStamp
 			}
-			a.Logger().Debug("Broadcast message - sending polite response", "channel", ev.Channel)
+			a.Logger().Info("Broadcast message - sending polite response", "channel", ev.Channel, "bot_user_id", a.config.BotUserID)
 			response := a.config.GetBroadcastResponse(a.socketModeCtx, ev.Text)
 			_ = a.SendToChannel(a.socketModeCtx, ev.Channel, response, threadID)
 			return
 		}
+		a.Logger().Info("Multibot mode - bot mentioned, processing message", "bot_user_id", a.config.BotUserID)
 	}
 
 	// Fallback: skip message events with bot mention (handled by app_mention event)

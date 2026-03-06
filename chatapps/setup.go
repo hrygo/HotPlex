@@ -167,6 +167,12 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 			config.BlockedUsers = pc.Security.Permission.BlockedUsers
 			config.SlashCommandRateLimit = pc.Security.Permission.SlashCommandRateLimit
 
+			// Debug: Log GroupPolicy value
+			logger.Info("Slack config loaded from YAML",
+				"group_policy", config.GroupPolicy,
+				"bot_user_id", config.BotUserID,
+				"dm_policy", config.DMPolicy)
+
 			// Set broadcast response for multibot mode
 			if pc.Security.Permission.BroadcastResponse != "" {
 				config.SetBroadcastResponse(pc.Security.Permission.BroadcastResponse)
