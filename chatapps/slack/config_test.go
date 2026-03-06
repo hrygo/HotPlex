@@ -436,3 +436,148 @@ func TestConfig_ConcurrentAccess(t *testing.T) {
 		<-done
 	}
 }
+
+func TestExtractMentionedUsers(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected []string
+	}{
+		{
+			name:     "no mentions",
+			text:     "hello world",
+			expected: nil,
+		},
+		{
+			name:     "single mention",
+			text:     "<@U1234567890> hello",
+			expected: []string{"U1234567890"},
+		},
+		{
+			name:     "multiple mentions",
+			text:     "<@U1111111111> <@U2222222222> hi",
+			expected: []string{"U1111111111", "U2222222222"},
+		},
+		{
+			name:     "mention with bang prefix",
+			text:     "<@!U1234567890> hello",
+			expected: []string{"U1234567890"},
+		},
+		{
+			name:     "mixed mentions",
+			text:     "<@U1111111111> <@!U2222222222> hi",
+			expected: []string{"U1111111111", "U2222222222"},
+		},
+		{
+			name:     "duplicate mentions",
+			text:     "<@U1234567890> <@U1234567890> hi",
+			expected: []string{"U1234567890", "U1234567890"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtractMentionedUsers(tt.text)
+			if !equalSlices(result, tt.expected) {
+				t.Errorf("ExtractMentionedUsers() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestShouldRespondInMultibotMode(t *testing.T) {
+	cfg := &Config{BotUserID: "U9999999999"}
+
+	tests := []struct {
+		name     string
+		text     string
+		expected bool
+	}{
+		{
+			name:     "no mentions - broadcast",
+			text:     "hello world",
+			expected: true,
+		},
+		{
+			name:     "mentioned self",
+			text:     "<@U9999999999> help me",
+			expected: true,
+		},
+		{
+			name:     "mentioned self with bang",
+			text:     "<@!U9999999999> help me",
+			expected: true,
+		},
+		{
+			name:     "mentioned other bot",
+			text:     "<@U8888888888> help me",
+			expected: false,
+		},
+		{
+			name:     "mentioned multiple including self",
+			text:     "<@U8888888888> <@U9999999999> help",
+			expected: true,
+		},
+		{
+			name:     "mentioned multiple excluding self",
+			text:     "<@U7777777777> <@U8888888888> help",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cfg.ShouldRespondInMultibotMode(tt.text)
+			if result != tt.expected {
+				t.Errorf("ShouldRespondInMultibotMode() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsBroadcastMessage(t *testing.T) {
+	cfg := &Config{BotUserID: "U9999999999"}
+
+	tests := []struct {
+		name     string
+		text     string
+		expected bool
+	}{
+		{
+			name:     "no mentions - broadcast",
+			text:     "hello world",
+			expected: true,
+		},
+		{
+			name:     "has mention - not broadcast",
+			text:     "<@U9999999999> hello",
+			expected: false,
+		},
+		{
+			name:     "multiple mentions - not broadcast",
+			text:     "<@U1111111111> <@U2222222222> hi",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cfg.IsBroadcastMessage(tt.text)
+			if result != tt.expected {
+				t.Errorf("IsBroadcastMessage() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

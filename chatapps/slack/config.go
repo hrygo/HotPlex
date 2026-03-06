@@ -5,6 +5,7 @@ package slack
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -203,4 +204,44 @@ func (c *Config) ContainsBotMention(text string) bool {
 	mentionPattern := "<@!?" + regexp.QuoteMeta(c.BotUserID) + ">"
 	matched, _ := regexp.MatchString(mentionPattern, text)
 	return matched
+}
+
+// mentionUserRegex matches <@USERID> or <@!USERID> format
+var mentionUserRegex = regexp.MustCompile(`<@!?([A-Z][A-Z0-9]+)>`)
+
+// ExtractMentionedUsers extracts all mentioned user IDs from message text.
+// Slack mention format: <@U1234567890> or <@!U1234567890>
+func ExtractMentionedUsers(text string) []string {
+	matches := mentionUserRegex.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	users := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) > 1 {
+			users = append(users, m[1])
+		}
+	}
+	return users
+}
+
+// ShouldRespondInMultibotMode determines if this bot should respond in multibot mode.
+// Returns true if:
+// - No mentions in message (broadcast mode - all bots respond)
+// - Bot is explicitly mentioned
+// Returns false if:
+// - Other bots are mentioned but not this one
+func (c *Config) ShouldRespondInMultibotMode(text string) bool {
+	mentioned := ExtractMentionedUsers(text)
+	if len(mentioned) == 0 {
+		return true // Broadcast: no @ means all bots respond
+	}
+	// Check if we are in the mention list
+	return slices.Contains(mentioned, c.BotUserID)
+}
+
+// IsBroadcastMessage returns true if this is a broadcast message (no @ mentions).
+// Only meaningful in multibot mode.
+func (c *Config) IsBroadcastMessage(text string) bool {
+	return len(ExtractMentionedUsers(text)) == 0
 }
