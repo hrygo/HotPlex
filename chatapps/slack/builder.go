@@ -1,5 +1,57 @@
 // Package slack provides the Slack adapter implementation for the hotplex engine.
 // Detailed message construction logic using Slack Block Kit.
+//
+// =============================================================================
+// API Contract - MessageBuilder
+// =============================================================================
+//
+// This file provides two usage patterns for building Slack messages:
+//
+// Pattern 1: Build Routing (Recommended)
+//
+//	blocks := builder.Build(msg) // Automatically routes to correct sub-builder
+//
+// Pattern 2: Direct Sub-Builder Calls (For specialized control)
+//
+//	blocks := builder.ToolMessageBuilder.BuildToolUseMessage(msg)
+//	blocks := builder.AnswerMessageBuilder.BuildAnswerMessage(msg)
+//
+// Architecture:
+//
+//	┌─────────────────────────────────────────────────────────────┐
+//	│                     MessageBuilder                            │
+//	│                   (Routing Layer - 171 lines)                │
+//	└─────────────────────────┬───────────────────────────────────┘
+//	                          │ Routes based on msg.Type
+//	      ┌───────────────────┼───────────────────┐
+//	      ▼                   ▼                   ▼
+//	┌───────────┐       ┌───────────┐       ┌───────────┐
+//	│   Tool    │       │  Answer   │       │   Plan    │
+//	│  Builder  │       │  Builder  │       │  Builder  │
+//	└───────────┘       └───────────┘       └───────────┘
+//	      │                   │                   │
+//	      └───────────────────┼───────────────────┘
+//	                          ▼
+//	                ┌─────────────────┐
+//	                │  slack.Block   │
+//	                └─────────────────┘
+//
+// Public API (MessageBuilder):
+//   - Build(msg *base.ChatMessage) []slack.Block (main entry)
+//   - ToolMessageBuilder, AnswerMessageBuilder, PlanMessageBuilder,
+//     InteractiveMessageBuilder, StatsMessageBuilder, SystemMessageBuilder
+//
+// Internal API (Sub-builders):
+//   - ToolMessageBuilder: BuildToolUseMessage, BuildToolResultMessage
+//   - AnswerMessageBuilder: BuildAnswerMessage, BuildErrorMessage
+//   - PlanMessageBuilder: BuildPlanModeMessage, BuildExitPlanModeMessage, BuildAskUserQuestionMessage
+//   - InteractiveMessageBuilder: BuildDangerBlockMessage, BuildPermissionRequestMessageFromChat
+//   - StatsMessageBuilder: BuildSessionStatsMessage, BuildCommandProgressMessage, BuildCommandCompleteMessage
+//   - SystemMessageBuilder: BuildSystemMessage, BuildUserMessage, BuildStepStartMessage,
+//     BuildStepFinishMessage, BuildRawMessage, BuildUserMessageReceivedMessage
+//
+// Note: Sub-builders are internal (lowercase) and accessed via MessageBuilder delegates.
+// =============================================================================
 package slack
 
 import (
