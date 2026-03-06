@@ -27,6 +27,13 @@ type Adapter struct {
 	tokenMu     sync.Mutex
 }
 
+// Compile-time interface compliance check
+var (
+	_ base.ChatAdapter       = (*Adapter)(nil)
+	_ base.MessageOperations = (*Adapter)(nil)
+	_ base.WebhookProvider   = (*Adapter)(nil)
+)
+
 func NewAdapter(config Config, logger *slog.Logger, opts ...base.AdapterOption) *Adapter {
 	a := &Adapter{
 		config:      config,

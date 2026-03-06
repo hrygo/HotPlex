@@ -22,6 +22,12 @@ type Adapter struct {
 	webhook     *base.WebhookRunner
 }
 
+// Compile-time interface compliance checks
+var (
+	_ base.ChatAdapter     = (*Adapter)(nil)
+	_ base.WebhookProvider = (*Adapter)(nil)
+)
+
 func NewAdapter(config Config, logger *slog.Logger, opts ...base.AdapterOption) *Adapter {
 	a := &Adapter{
 		config:      config,
