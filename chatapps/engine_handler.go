@@ -336,6 +336,7 @@ func NewStreamCallback(
 		messageOps:       messageOps,
 		sessionOps:       sessionOps,
 		lastStatusUpdate: time.Now(),
+		processor:        NewDefaultProcessorChain(ctx, logger),
 	}
 
 	// Initialize StatusManager if StatusProvider is available
