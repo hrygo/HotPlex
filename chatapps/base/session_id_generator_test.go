@@ -10,6 +10,7 @@ import (
 )
 
 func TestGetOrCreateSession_CreatesNewSession(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	sessionID := adapter.GetOrCreateSession("U001", "bot123", "C12345", "")
@@ -45,6 +46,7 @@ func TestGetOrCreateSession_CreatesNewSession(t *testing.T) {
 }
 
 func TestGetOrCreateSession_ReturnsExistingSession(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create initial session
@@ -76,6 +78,7 @@ func TestGetOrCreateSession_ReturnsExistingSession(t *testing.T) {
 }
 
 func TestGetOrCreateSession_Deterministic(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Call multiple times with same inputs
@@ -94,6 +97,7 @@ func TestGetOrCreateSession_Deterministic(t *testing.T) {
 }
 
 func TestGetOrCreateSession_EmptyBotUserID(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create session with empty botUserID (DM scenario)
@@ -114,6 +118,7 @@ func TestGetOrCreateSession_EmptyBotUserID(t *testing.T) {
 }
 
 func TestGetOrCreateSession_EmptyChannelID(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("telegram", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create session with empty channelID (DM scenario)
@@ -140,6 +145,7 @@ func TestGetOrCreateSession_EmptyChannelID(t *testing.T) {
 }
 
 func TestGetOrCreateSession_DifferentUsers(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	sessionID1 := adapter.GetOrCreateSession("U001", "bot123", "C12345", "")
@@ -151,6 +157,7 @@ func TestGetOrCreateSession_DifferentUsers(t *testing.T) {
 }
 
 func TestGetOrCreateSession_DifferentBots(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	sessionID1 := adapter.GetOrCreateSession("U001", "bot123", "C12345", "")
@@ -162,6 +169,7 @@ func TestGetOrCreateSession_DifferentBots(t *testing.T) {
 }
 
 func TestGetOrCreateSession_DifferentChannels(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	sessionID1 := adapter.GetOrCreateSession("U001", "bot123", "C12345", "")
@@ -173,6 +181,7 @@ func TestGetOrCreateSession_DifferentChannels(t *testing.T) {
 }
 
 func TestGetOrCreateSession_DifferentPlatforms(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	sessionID1 := adapter.GetOrCreateSession("U001", "bot123", "C12345", "")
@@ -187,6 +196,7 @@ func TestGetOrCreateSession_DifferentPlatforms(t *testing.T) {
 }
 
 func TestGetOrCreateSession_SessionRetrieval(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("discord", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create a session
@@ -214,6 +224,7 @@ func TestGetOrCreateSession_SessionRetrieval(t *testing.T) {
 
 // Table-driven tests for edge cases
 func TestGetOrCreateSession_EdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		platform  string
@@ -252,6 +263,7 @@ func TestGetOrCreateSession_EdgeCases(t *testing.T) {
 }
 
 func TestGetOrCreateSession_MultipleSessions(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create multiple different sessions
@@ -292,6 +304,7 @@ func TestGetOrCreateSession_MultipleSessions(t *testing.T) {
 }
 
 func TestUUID5Generator_Deterministic(t *testing.T) {
+	t.Parallel()
 	gen := NewUUID5Generator("hotplex")
 
 	// Same inputs should produce same outputs
@@ -304,6 +317,7 @@ func TestUUID5Generator_Deterministic(t *testing.T) {
 }
 
 func TestUUID5Generator_DifferentInputs(t *testing.T) {
+	t.Parallel()
 	gen := NewUUID5Generator("hotplex")
 
 	// Different user should produce different ID
@@ -334,6 +348,7 @@ func TestUUID5Generator_DifferentInputs(t *testing.T) {
 }
 
 func TestUUID5Generator_DMChannel(t *testing.T) {
+	t.Parallel()
 	gen := NewUUID5Generator("hotplex")
 
 	// DM (empty channel) should work
@@ -352,6 +367,7 @@ func TestUUID5Generator_DMChannel(t *testing.T) {
 }
 
 func TestSimpleKeyGenerator(t *testing.T) {
+	t.Parallel()
 	gen := NewSimpleKeyGenerator()
 
 	id := gen.Generate("slack", "U001", "bot123", "C12345", "")
@@ -363,6 +379,7 @@ func TestSimpleKeyGenerator(t *testing.T) {
 }
 
 func TestSimpleKeyGenerator_DMChannel(t *testing.T) {
+	t.Parallel()
 	gen := NewSimpleKeyGenerator()
 
 	id := gen.Generate("slack", "U001", "bot123", "", "")
@@ -378,6 +395,7 @@ func TestSimpleKeyGenerator_DMChannel(t *testing.T) {
 // =============================================================================
 
 func TestFindSessionByUserAndChannel_FindsExisting(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create a session
@@ -396,6 +414,7 @@ func TestFindSessionByUserAndChannel_FindsExisting(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_NotFound(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create a session
@@ -410,6 +429,7 @@ func TestFindSessionByUserAndChannel_NotFound(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_MultipleSessions(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create sessions for different users in same channel
@@ -436,6 +456,7 @@ func TestFindSessionByUserAndChannel_MultipleSessions(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_DifferentChannels(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create sessions for same user in different channels
@@ -466,6 +487,7 @@ func TestFindSessionByUserAndChannel_DifferentChannels(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_EmptyBotID(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create session with empty botUserID (DM scenario)
@@ -485,6 +507,7 @@ func TestFindSessionByUserAndChannel_EmptyBotID(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_EmptyChannelID(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create session with empty channelID (DM scenario)
@@ -503,6 +526,7 @@ func TestFindSessionByUserAndChannel_EmptyChannelID(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_BothEmptyBotAndChannel(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create session with both empty botUserID and channelID
@@ -521,6 +545,7 @@ func TestFindSessionByUserAndChannel_BothEmptyBotAndChannel(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_DifferentBots(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create sessions for same user with different bots in same channel
@@ -542,6 +567,7 @@ func TestFindSessionByUserAndChannel_DifferentBots(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_EmptySessions(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Try to find session in empty adapter
@@ -554,6 +580,7 @@ func TestFindSessionByUserAndChannel_EmptySessions(t *testing.T) {
 
 // Table-driven tests for FindSessionByUserAndChannel
 func TestFindSessionByUserAndChannel_TableDriven(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		userID       string
@@ -599,6 +626,7 @@ func TestFindSessionByUserAndChannel_TableDriven(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_ThreadSafety(t *testing.T) {
+	t.Parallel()
 	adapter := NewAdapter("slack", Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Create multiple sessions
@@ -651,6 +679,7 @@ func TestFindSessionByUserAndChannel_ThreadSafety(t *testing.T) {
 }
 
 func TestFindSessionByUserAndChannel_RaceDetector(t *testing.T) {
+	t.Parallel()
 	// This test is specifically designed to be run with -race flag
 	// It creates race conditions between reads and writes
 	if testing.Short() {

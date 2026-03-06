@@ -35,6 +35,7 @@ func (m *MockLLMClient) HealthCheck(ctx context.Context) HealthStatus {
 }
 
 func TestRetryClient_SuccessOnFirstTry(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	mockClient.On("Chat", mock.Anything, "test prompt").Return("success", nil)
 
@@ -48,6 +49,7 @@ func TestRetryClient_SuccessOnFirstTry(t *testing.T) {
 }
 
 func TestRetryClient_SuccessAfterRetry(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	mockClient.On("Chat", mock.Anything, "test prompt").Return("", assert.AnError).Once()
 	mockClient.On("Chat", mock.Anything, "test prompt").Return("success", nil)
@@ -62,6 +64,7 @@ func TestRetryClient_SuccessAfterRetry(t *testing.T) {
 }
 
 func TestRetryClient_ExhaustsRetries(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	mockClient.On("Chat", mock.Anything, "test prompt").Return("", assert.AnError).Times(4)
 
@@ -74,6 +77,7 @@ func TestRetryClient_ExhaustsRetries(t *testing.T) {
 }
 
 func TestRetryClient_NoRetriesWhenDisabled(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	mockClient.On("Chat", mock.Anything, "test prompt").Return("", assert.AnError).Once()
 
@@ -86,6 +90,7 @@ func TestRetryClient_NoRetriesWhenDisabled(t *testing.T) {
 }
 
 func TestCachedClient_CacheHit(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	mockClient.On("Chat", mock.Anything, "test prompt").Return("cached response", nil).Once()
 
@@ -105,6 +110,7 @@ func TestCachedClient_CacheHit(t *testing.T) {
 }
 
 func TestCachedClient_CacheMiss(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	mockClient.On("Chat", mock.Anything, "prompt1").Return("response1", nil)
 	mockClient.On("Chat", mock.Anything, "prompt2").Return("response2", nil)
@@ -120,6 +126,7 @@ func TestCachedClient_CacheMiss(t *testing.T) {
 }
 
 func TestCachedClient_ClearCache(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	mockClient.On("Chat", mock.Anything, "test prompt").Return("response", nil).Twice()
 
@@ -138,6 +145,7 @@ func TestCachedClient_ClearCache(t *testing.T) {
 }
 
 func TestHealthMonitor_CachesHealthStatus(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	status := HealthStatus{Healthy: true, LatencyMs: 50}
 	mockClient.On("HealthCheck", mock.Anything).Return(status).Once()
@@ -157,6 +165,7 @@ func TestHealthMonitor_CachesHealthStatus(t *testing.T) {
 }
 
 func TestHealthMonitor_IsHealthy(t *testing.T) {
+	t.Parallel()
 	mockClient := new(MockLLMClient)
 	mockClient.On("HealthCheck", mock.Anything).Return(HealthStatus{Healthy: true}).Once()
 

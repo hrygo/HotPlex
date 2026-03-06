@@ -11,6 +11,7 @@ import (
 )
 
 func TestCircuitBreaker_StateTransitions(t *testing.T) {
+	t.Parallel()
 	config := DefaultCircuitBreakerConfig()
 	config.MaxFailures = 3
 	config.Timeout = 50 * time.Millisecond
@@ -46,6 +47,7 @@ func TestCircuitBreaker_StateTransitions(t *testing.T) {
 }
 
 func TestCircuitBreaker_ManualReset(t *testing.T) {
+	t.Parallel()
 	config := DefaultCircuitBreakerConfig()
 	config.MaxFailures = 1
 	cb := NewCircuitBreaker(config)
@@ -63,6 +65,7 @@ func TestCircuitBreaker_ManualReset(t *testing.T) {
 }
 
 func TestCircuitBreaker_ForceOpen(t *testing.T) {
+	t.Parallel()
 	config := DefaultCircuitBreakerConfig()
 	cb := NewCircuitBreaker(config)
 
@@ -82,6 +85,7 @@ func TestCircuitBreaker_ForceOpen(t *testing.T) {
 }
 
 func TestCircuitBreaker_ForceClose(t *testing.T) {
+	t.Parallel()
 	config := DefaultCircuitBreakerConfig()
 	config.MaxFailures = 1
 	cb := NewCircuitBreaker(config)
@@ -105,6 +109,7 @@ func TestCircuitBreaker_ForceClose(t *testing.T) {
 }
 
 func TestCircuitBreaker_Stats(t *testing.T) {
+	t.Parallel()
 	config := DefaultCircuitBreakerConfig()
 	cb := NewCircuitBreaker(config)
 
@@ -125,6 +130,7 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 }
 
 func TestCircuitBreaker_Concurrent(t *testing.T) {
+	t.Parallel()
 	config := DefaultCircuitBreakerConfig()
 	config.MaxFailures = 100
 	cb := NewCircuitBreaker(config)

@@ -10,6 +10,7 @@ import (
 )
 
 func TestStreamBuffer_Append(t *testing.T) {
+	t.Parallel()
 	buf := &StreamBuffer{
 		SessionID:   "test-session",
 		Chunks:      make([]string, 0),
@@ -31,6 +32,7 @@ func TestStreamBuffer_Append(t *testing.T) {
 }
 
 func TestStreamBuffer_IsExpired(t *testing.T) {
+	t.Parallel()
 	buf := &StreamBuffer{
 		SessionID:   "test-session",
 		Chunks:      make([]string, 0),
@@ -47,6 +49,7 @@ func TestStreamBuffer_IsExpired(t *testing.T) {
 }
 
 func TestStreamMessageStore_OnStreamChunk(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockStore := &mockStorage{}
 	store := NewStreamMessageStore(mockStore, 5*time.Minute, 100)
@@ -72,6 +75,7 @@ func TestStreamMessageStore_OnStreamChunk(t *testing.T) {
 }
 
 func TestStreamMessageStore_OnStreamComplete(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockStore := &mockStorage{}
 	store := NewStreamMessageStore(mockStore, 5*time.Minute, 100)
@@ -108,6 +112,7 @@ func TestStreamMessageStore_OnStreamComplete(t *testing.T) {
 }
 
 func TestStreamMessageStore_CleanupExpired(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mockStore := &mockStorage{}
 	// Very short timeout for testing
