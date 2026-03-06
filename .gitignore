@@ -90,7 +90,6 @@ yarn-error.log*
 
 .env*
 !.env.example
-!.env.simple
 *.pem
 *.key
 cert.log
