@@ -159,9 +159,9 @@ security:
     # Group Policy options:
     # - "allow": Respond to all group messages (default)
     # - "mention": Only respond when bot is @mentioned
-    # - "multibot": Multi-bot mode - @mentioned bot responds, no @ = all bots respond
+    # - "multibot": Multi-bot mode - @mentioned bot responds, no @ = all bots send polite response
     # - "block": Block all group messages
-    group_policy: multibot
+    group_policy: multibot  # Change from 'mention' to 'multibot' for multi-bot setups
 
     # [Required] Bot's own User ID (e.g., U12345678) for mention detection
     bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID}
@@ -169,8 +169,10 @@ security:
     # [Optional] Broadcast response for multibot mode
     # When group_policy is "multibot" and message has no @ mentions,
     # this response is sent to politely inform users how to get help.
-    # broadcast_response: |
-    #   Hello! I'm ready to help. Please @mention me if you'd like me to respond.
+    # Leave empty to use default response.
+    broadcast_response: |
+      👋 Hello! I'm ready to help.
+      Please @mention me if you'd like me to respond specifically to you.
 
     # Whitelist/Blacklist (Leave empty to skip)
     allowed_users: []      # Example: ["U12345", "U67890"]
@@ -179,17 +181,3 @@ security:
     # Slash Command rate limit (requests per second per user)
     # Default: 10.0
     slash_command_rate_limit: 10.0
-
-# -----------------------------------------------------------------------------
-# Message Persistence (Storage)
-# -----------------------------------------------------------------------------
-message_store:
-  enabled: true
-  type: sqlite
-  sqlite:
-    path: ~/.hotplex/chatapp_messages.db
-    max_size_mb: 1024
-  streaming:
-    enabled: true
-    timeout: 300s
-    storage_policy: complete_only
