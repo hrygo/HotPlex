@@ -150,6 +150,13 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 			}
 			// Bot is mentioned in channel/group - process this message
 		}
+		// Multibot mode: respond if no mentions (broadcast) or mentioned self
+		if a.config.GroupPolicy == "multibot" {
+			if !a.config.ShouldRespondInMultibotMode(msgEvent.Text) {
+				a.Logger().Debug("Message ignored - other bot mentioned", "channel_type", msgEvent.ChannelType, "policy", "multibot")
+				return
+			}
+		}
 	}
 
 	threadID := msgEvent.ThreadTS
