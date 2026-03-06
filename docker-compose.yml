@@ -14,6 +14,14 @@ x-hotplex-common: &hotplex-common
     - HTTP_PROXY=http://host.docker.internal:7897
     - HTTPS_PROXY=http://host.docker.internal:7897
     - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+  volumes: &hotplex-volumes
+    - ${HOME}/.hotplex:/home/hotplex/.hotplex
+    - ${HOME}/.claude:/home/hotplex/.claude:rw
+    - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
+    - hotplex-go-mod:/home/hotplex/go/pkg/mod
+    - hotplex-go-build:/home/hotplex/.cache/go-build
+    - ${HOTPLEX_PROJECTS_DIR}:/home/hotplex/projects:rw
+    - ${HOTPLEX_GITCONFIG}:/home/hotplex/.gitconfig:ro
   extra_hosts:
     - "host.docker.internal:host-gateway"
   healthcheck:
@@ -45,14 +53,6 @@ services:
       - "18080:8080"
     env_file:
       - .env
-    volumes:
-      - ${HOME}/.hotplex:/home/hotplex/.hotplex
-      - ${HOME}/.claude:/home/hotplex/.claude:rw
-      - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
-      - hotplex-go-mod:/home/hotplex/go/pkg/mod
-      - hotplex-go-build:/home/hotplex/.cache/go-build
-      - ${HOTPLEX_PROJECTS_DIR}:/home/hotplex/projects:rw
-      - ${HOTPLEX_GITCONFIG}:/home/hotplex/.gitconfig:ro
     <<: *hotplex-common
 
   # ---------------------------------------------------------
@@ -66,18 +66,6 @@ services:
       - "18081:8080"
     env_file:
       - .env.secondary
-    volumes:
-      - ${HOME}/.hotplex:/home/hotplex/.hotplex
-      - ${HOME}/.claude:/home/hotplex/.claude:rw
-      - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
-      - ${HOME}/.slack/BOT_U0AJVRH4YF6:/home/hotplex/projects:rw
-      # Override the default slack config with secondary one
-      - ./chatapps/configs/slack_secondary.yaml:/app/chatapps/configs/slack.yaml:ro
-      # Bot 02 Git config (HotPlexBot02)
-      - ${HOME}/.gitconfig-hotplex-secondary:/home/hotplex/.gitconfig:ro
-      # Go development cache (shared with primary)
-      - hotplex-go-mod:/home/hotplex/go/pkg/mod
-      - hotplex-go-build:/home/hotplex/.cache/go-build
     <<: *hotplex-common
 
 # Named volumes for Go cache persistence
