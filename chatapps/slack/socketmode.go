@@ -196,6 +196,14 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 		return
 	}
 
+	// Multibot mode: respond if no mentions (broadcast) or mentioned self
+	if (ev.ChannelType == "channel" || ev.ChannelType == "group") && a.config.GroupPolicy == "multibot" {
+		if !a.config.ShouldRespondInMultibotMode(ev.Text) {
+			a.Logger().Debug("Message ignored - other bot mentioned", "channel_type", ev.ChannelType, "policy", "multibot")
+			return
+		}
+	}
+
 	// Fallback: skip message events with bot mention (handled by app_mention event)
 	if ev.ChannelType != "dm" && a.config.ContainsBotMention(ev.Text) {
 		a.Logger().Debug("Skipping 'message' event with mention (handled by 'app_mention')", "ts", ev.TimeStamp)
