@@ -18,6 +18,8 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -v v0.21.0
 ```
 
+> 说明：`--` 用于分隔 bash 参数和脚本参数。没有它，`-v` 会被 bash 解析而非脚本。
+
 ### 自定义安装目录
 
 ```bash

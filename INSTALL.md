@@ -15,8 +15,11 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 ### Install Specific Version
 
 ```bash
+# Download and run with version flag
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -v v0.21.0
 ```
+
+> Note: `--` separates bash options from script options. Without it, `-v` would be interpreted by bash instead of the script.
 
 ### Custom Install Directory
 
