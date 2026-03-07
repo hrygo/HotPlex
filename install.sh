@@ -665,6 +665,90 @@ wizard_claude_code() {
             echo ""
         fi
     fi
+
+    # 代理配置
+    echo ""
+    echo -e "${CYAN}代理配置 (可选)${NC}"
+
+    local current_proxy="${HTTPS_PROXY:-${HTTP_PROXY:-}}"
+    if [[ -n "$current_proxy" ]]; then
+        success "代理已配置: ${GREEN}$current_proxy${NC}"
+        if confirm "是否修改代理设置?" "n"; then
+            configure_proxy "$current_proxy"
+        fi
+    else
+        if confirm "是否配置 HTTP 代理?" "n"; then
+            configure_proxy ""
+        fi
+    fi
+}
+
+# 配置代理
+configure_proxy() {
+    local current_proxy="$1"
+    local proxy_url
+
+    echo ""
+    echo "  ${DIM}代理地址格式: http://host:port 或 http://user:pass@host:port${NC}"
+    echo "  ${DIM}示例: http://127.0.0.1:7890${NC}"
+    echo ""
+
+    proxy_url=$(prompt_input "请输入代理地址" "$current_proxy")
+
+    if [[ -n "$proxy_url" ]]; then
+        # 验证格式
+        if [[ "$proxy_url" =~ ^https?:// ]]; then
+            local shell_rc=""
+            if [[ -f "${HOME}/.zshrc" ]]; then
+                shell_rc="${HOME}/.zshrc"
+            elif [[ -f "${HOME}/.bashrc" ]]; then
+                shell_rc="${HOME}/.bashrc"
+            fi
+
+            if [[ -n "$shell_rc" ]]; then
+                # 检查是否已存在代理配置
+                if grep -q "HTTP_PROXY" "$shell_rc" 2>/dev/null; then
+                    # 更新现有配置
+                    sed -i.bak "s|export HTTP_PROXY=.*|export HTTP_PROXY='${proxy_url}'|" "$shell_rc"
+                    sed -i.bak "s|export HTTPS_PROXY=.*|export HTTPS_PROXY='${proxy_url}'|" "$shell_rc"
+                else
+                    # 添加新配置
+                    echo "" >> "$shell_rc"
+                    echo "# Proxy settings (Added by HotPlex installer)" >> "$shell_rc"
+                    echo "export HTTP_PROXY='${proxy_url}'" >> "$shell_rc"
+                    echo "export HTTPS_PROXY='${proxy_url}'" >> "$shell_rc"
+                fi
+
+                export HTTP_PROXY="$proxy_url"
+                export HTTPS_PROXY="$proxy_url"
+                rm -f "${shell_rc}.bak"
+                success "代理已配置: $proxy_url"
+                info "请运行: source $shell_rc"
+            fi
+        else
+            warn "代理地址格式无效，应以 http:// 或 https:// 开头"
+        fi
+    elif [[ -n "$current_proxy" ]]; then
+        # 用户输入为空，询问是否清除
+        if confirm "是否清除现有代理配置?" "n"; then
+            local shell_rc=""
+            if [[ -f "${HOME}/.zshrc" ]]; then
+                shell_rc="${HOME}/.zshrc"
+            elif [[ -f "${HOME}/.bashrc" ]]; then
+                shell_rc="${HOME}/.bashrc"
+            fi
+
+            if [[ -n "$shell_rc" ]]; then
+                sed -i.bak "/^export HTTP_PROXY=/d" "$shell_rc"
+                sed -i.bak "/^export HTTPS_PROXY=/d" "$shell_rc"
+                sed -i.bak "/^# Proxy settings/d" "$shell_rc"
+                rm -f "${shell_rc}.bak"
+                unset HTTP_PROXY
+                unset HTTPS_PROXY
+                success "代理配置已清除"
+            fi
+        fi
+    fi
 }
 
 # 向导：配置 Slack Bot 凭据
