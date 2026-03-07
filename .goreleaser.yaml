@@ -31,6 +31,8 @@ archives:
       - LICENSE
       - README.md
       - README_zh.md
+      - INSTALL.md
+      - install.sh
 
 checksum:
   name_template: 'checksums.txt'
