@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -207,14 +208,10 @@ func (fm *FailoverManager) sortProvidersByPriority() {
 		fm.providerOrder = append(fm.providerOrder, p)
 	}
 
-	// Simple bubble sort by priority
-	for i := 0; i < len(fm.providerOrder)-1; i++ {
-		for j := 0; j < len(fm.providerOrder)-i-1; j++ {
-			if fm.providerOrder[j].Priority > fm.providerOrder[j+1].Priority {
-				fm.providerOrder[j], fm.providerOrder[j+1] = fm.providerOrder[j+1], fm.providerOrder[j]
-			}
-		}
-	}
+	// Use slices.SortFunc for O(n log n) instead of bubble sort O(n²)
+	slices.SortFunc(fm.providerOrder, func(a, b *ProviderConfig) int {
+		return a.Priority - b.Priority
+	})
 }
 
 // startHealthCheck periodically checks provider health.

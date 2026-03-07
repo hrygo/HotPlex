@@ -16,16 +16,18 @@ func TestNewPiProvider(t *testing.T) {
         {
             name: "default config",
             config: ProviderConfig{
-                Type:    ProviderTypePi,
-                Enabled: true,
+                Type:       ProviderTypePi,
+                Enabled:    true,
+                BinaryPath: "/usr/local/bin/pi", // Provide BinaryPath to avoid PATH lookup
             },
             wantErr: false,
         },
         {
             name: "with pi config",
             config: ProviderConfig{
-                Type:    ProviderTypePi,
-                Enabled: true,
+                Type:       ProviderTypePi,
+                Enabled:    true,
+                BinaryPath: "/usr/local/bin/pi",
                 Pi: &PiConfig{
                     Provider: "anthropic",
                     Model:    "claude-sonnet-4-20250514",
@@ -63,8 +65,9 @@ func TestNewPiProvider(t *testing.T) {
 
 func TestPiProvider_Metadata(t *testing.T) {
     provider, err := NewPiProvider(ProviderConfig{
-        Type:    ProviderTypePi,
-        Enabled: true,
+        Type:       ProviderTypePi,
+        Enabled:    true,
+        BinaryPath: "/usr/local/bin/pi",
     }, nil)
     require.NoError(t, err)
 
@@ -93,8 +96,9 @@ func TestPiProvider_BuildCLIArgs(t *testing.T) {
         {
             name: "basic config with prompt",
             config: ProviderConfig{
-                Type:    ProviderTypePi,
-                Enabled: true,
+                Type:       ProviderTypePi,
+                Enabled:    true,
+                BinaryPath: "/usr/local/bin/pi",
                 Pi: &PiConfig{
                     Provider: "anthropic",
                     Model:    "claude-sonnet-4-20250514",
@@ -109,8 +113,9 @@ func TestPiProvider_BuildCLIArgs(t *testing.T) {
         {
             name: "with thinking level",
             config: ProviderConfig{
-                Type:    ProviderTypePi,
-                Enabled: true,
+                Type:       ProviderTypePi,
+                Enabled:    true,
+                BinaryPath: "/usr/local/bin/pi",
                 Pi: &PiConfig{
                     Provider: "anthropic",
                     Model:    "claude-sonnet-4-20250514",
@@ -126,8 +131,9 @@ func TestPiProvider_BuildCLIArgs(t *testing.T) {
         {
             name: "with session resume",
             config: ProviderConfig{
-                Type:    ProviderTypePi,
-                Enabled: true,
+                Type:       ProviderTypePi,
+                Enabled:    true,
+                BinaryPath: "/usr/local/bin/pi",
                 Pi: &PiConfig{
                     Provider: "anthropic",
                 },
@@ -141,8 +147,9 @@ func TestPiProvider_BuildCLIArgs(t *testing.T) {
         {
             name: "with no-session flag",
             config: ProviderConfig{
-                Type:    ProviderTypePi,
-                Enabled: true,
+                Type:       ProviderTypePi,
+                Enabled:    true,
+                BinaryPath: "/usr/local/bin/pi",
                 Pi: &PiConfig{
                     Provider:  "anthropic",
                     NoSession: true,
@@ -155,8 +162,9 @@ func TestPiProvider_BuildCLIArgs(t *testing.T) {
         {
             name: "with model override from opts",
             config: ProviderConfig{
-                Type:    ProviderTypePi,
-                Enabled: true,
+                Type:       ProviderTypePi,
+                Enabled:    true,
+                BinaryPath: "/usr/local/bin/pi",
                 Pi: &PiConfig{
                     Provider: "anthropic",
                     Model:    "claude-sonnet-4-20250514",
@@ -171,8 +179,9 @@ func TestPiProvider_BuildCLIArgs(t *testing.T) {
         {
             name: "with task instructions",
             config: ProviderConfig{
-                Type:    ProviderTypePi,
-                Enabled: true,
+                Type:       ProviderTypePi,
+                Enabled:    true,
+                BinaryPath: "/usr/local/bin/pi",
                 Pi: &PiConfig{
                     Provider: "anthropic",
                 },
@@ -199,8 +208,9 @@ func TestPiProvider_BuildCLIArgs(t *testing.T) {
 
 func TestPiProvider_BuildInputMessage(t *testing.T) {
     provider, err := NewPiProvider(ProviderConfig{
-        Type:    ProviderTypePi,
-        Enabled: true,
+        Type:       ProviderTypePi,
+        Enabled:    true,
+        BinaryPath: "/usr/local/bin/pi",
     }, nil)
     require.NoError(t, err)
 
@@ -220,8 +230,9 @@ func TestPiProvider_BuildInputMessage(t *testing.T) {
 
 func TestPiProvider_ParseEvent(t *testing.T) {
     provider, err := NewPiProvider(ProviderConfig{
-        Type:    ProviderTypePi,
-        Enabled: true,
+        Type:       ProviderTypePi,
+        Enabled:    true,
+        BinaryPath: "/usr/local/bin/pi",
     }, nil)
     require.NoError(t, err)
 
@@ -317,8 +328,9 @@ func TestPiProvider_ParseEvent(t *testing.T) {
 
 func TestPiProvider_DetectTurnEnd(t *testing.T) {
     provider, err := NewPiProvider(ProviderConfig{
-        Type:    ProviderTypePi,
-        Enabled: true,
+        Type:       ProviderTypePi,
+        Enabled:    true,
+        BinaryPath: "/usr/local/bin/pi",
     }, nil)
     require.NoError(t, err)
 

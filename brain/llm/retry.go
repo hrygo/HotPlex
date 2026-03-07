@@ -9,12 +9,7 @@ import (
 
 // RetryClient wraps an LLM client with retry and backoff logic.
 type RetryClient struct {
-	client interface {
-		Chat(ctx context.Context, prompt string) (string, error)
-		Analyze(ctx context.Context, prompt string, target any) error
-		ChatStream(ctx context.Context, prompt string) (<-chan string, error)
-		HealthCheck(ctx context.Context) HealthStatus
-	}
+	client         LLMClient
 	maxRetries     int
 	retryMinWaitMs int
 	retryMaxWaitMs int
@@ -22,12 +17,7 @@ type RetryClient struct {
 
 // NewRetryClient creates a new retry client wrapper.
 // Set maxRetries to 0 to disable retries.
-func NewRetryClient(client interface {
-	Chat(ctx context.Context, prompt string) (string, error)
-	Analyze(ctx context.Context, prompt string, target any) error
-	ChatStream(ctx context.Context, prompt string) (<-chan string, error)
-	HealthCheck(ctx context.Context) HealthStatus
-}, maxRetries, retryMinWaitMs, retryMaxWaitMs int) *RetryClient {
+func NewRetryClient(client LLMClient, maxRetries, retryMinWaitMs, retryMaxWaitMs int) *RetryClient {
 	return &RetryClient{
 		client:         client,
 		maxRetries:     maxRetries,

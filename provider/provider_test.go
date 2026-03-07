@@ -204,8 +204,9 @@ func TestClaudeCodeProvider_DetectTurnEnd(t *testing.T) {
 
 func TestOpenCodeProvider_Metadata(t *testing.T) {
 	provider, err := NewOpenCodeProvider(ProviderConfig{
-		Type:    ProviderTypeOpenCode,
-		Enabled: true,
+		Type:       ProviderTypeOpenCode,
+		Enabled:    true,
+		BinaryPath: "/usr/local/bin/opencode",
 	}, nil)
 	if err != nil {
 		t.Fatalf("Failed to create OpenCode provider: %v", err)
@@ -225,8 +226,9 @@ func TestOpenCodeProvider_Metadata(t *testing.T) {
 
 func TestOpenCodeProvider_BuildCLIArgs(t *testing.T) {
 	provider, err := NewOpenCodeProvider(ProviderConfig{
-		Type:    ProviderTypeOpenCode,
-		Enabled: true,
+		Type:       ProviderTypeOpenCode,
+		Enabled:    true,
+		BinaryPath: "/usr/local/bin/opencode",
 		OpenCode: &OpenCodeConfig{
 			Provider: "anthropic",
 			Model:    "claude-3-5-sonnet",
@@ -252,7 +254,7 @@ func TestOpenCodeProvider_BuildCLIArgs(t *testing.T) {
 }
 
 func TestOpenCodeProvider_BuildInputMessage(t *testing.T) {
-	provider, _ := NewOpenCodeProvider(ProviderConfig{Type: ProviderTypeOpenCode, Enabled: true}, nil)
+	provider, _ := NewOpenCodeProvider(ProviderConfig{Type: ProviderTypeOpenCode, Enabled: true, BinaryPath: "/usr/local/bin/opencode"}, nil)
 
 	msg, _ := provider.BuildInputMessage("Hello!", "Be specific")
 	prompt := msg["prompt"].(string)
@@ -268,7 +270,7 @@ func TestOpenCodeProvider_BuildInputMessage(t *testing.T) {
 }
 
 func TestOpenCodeProvider_DetectTurnEnd(t *testing.T) {
-	provider, _ := NewOpenCodeProvider(ProviderConfig{Type: ProviderTypeOpenCode, Enabled: true}, nil)
+	provider, _ := NewOpenCodeProvider(ProviderConfig{Type: ProviderTypeOpenCode, Enabled: true, BinaryPath: "/usr/local/bin/opencode"}, nil)
 
 	tests := []struct {
 		event *ProviderEvent
@@ -289,8 +291,9 @@ func TestOpenCodeProvider_DetectTurnEnd(t *testing.T) {
 
 func TestOpenCodeProvider_ParseEvent(t *testing.T) {
 	provider, err := NewOpenCodeProvider(ProviderConfig{
-		Type:    ProviderTypeOpenCode,
-		Enabled: true,
+		Type:       ProviderTypeOpenCode,
+		Enabled:    true,
+		BinaryPath: "/usr/local/bin/opencode",
 	}, nil)
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
@@ -383,8 +386,9 @@ func TestProviderFactory(t *testing.T) {
 
 	// Test create OpenCode provider
 	ocProvider, err := factory.Create(ProviderConfig{
-		Type:    ProviderTypeOpenCode,
-		Enabled: true,
+		Type:       ProviderTypeOpenCode,
+		Enabled:    true,
+		BinaryPath: "/usr/local/bin/opencode",
 	})
 	if err != nil {
 		t.Fatalf("Failed to create OpenCode provider: %v", err)

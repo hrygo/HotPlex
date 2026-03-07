@@ -23,24 +23,14 @@ type CacheEntry struct {
 
 // CachedClient wraps an LLM client with LRU caching.
 type CachedClient struct {
-	client interface {
-		Chat(ctx context.Context, prompt string) (string, error)
-		Analyze(ctx context.Context, prompt string, target any) error
-		ChatStream(ctx context.Context, prompt string) (<-chan string, error)
-		HealthCheck(ctx context.Context) HealthStatus
-	}
-	cache *lru.Cache[string, CacheEntry]
-	mu    sync.RWMutex
+	client LLMClient
+	cache  *lru.Cache[string, CacheEntry]
+	mu     sync.RWMutex
 }
 
 // NewCachedClient creates a new cached client wrapper.
 // Set cacheSize to 0 to disable caching.
-func NewCachedClient(client interface {
-	Chat(ctx context.Context, prompt string) (string, error)
-	Analyze(ctx context.Context, prompt string, target any) error
-	ChatStream(ctx context.Context, prompt string) (<-chan string, error)
-	HealthCheck(ctx context.Context) HealthStatus
-}, cacheSize int) *CachedClient {
+func NewCachedClient(client LLMClient, cacheSize int) *CachedClient {
 	cache, _ := lru.New[string, CacheEntry](cacheSize)
 	return &CachedClient{
 		client: client,
@@ -137,4 +127,10 @@ func (c *CachedClient) CacheStats() (keys int, hits int, misses int) {
 	// Note: golang-lru doesn't expose hit/miss stats by default
 	// You can extend this if needed
 	return c.cache.Len(), 0, 0
+}
+
+// UnderlyingClient returns the underlying client.
+// Used for component extraction in observable chains.
+func (c *CachedClient) UnderlyingClient() LLMClient {
+	return c.client
 }

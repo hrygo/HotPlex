@@ -20,9 +20,10 @@ import (
 //   - Session management with JSONL storage
 type PiProvider struct {
 	ProviderBase
-	opts    ProviderConfig
-	piCfg   *PiConfig
-	pkgName string // npm package name for pi CLI
+	opts          ProviderConfig
+	piCfg         *PiConfig
+	pkgName       string // npm package name for pi CLI
+	promptBuilder *PromptBuilder
 }
 
 // Pi event types from the JSON output stream.
@@ -137,24 +138,23 @@ func NewPiProvider(cfg ProviderConfig, logger *slog.Logger) (*PiProvider, error)
 		Type:        ProviderTypePi,
 		DisplayName: "Pi (pi-coding-agent)",
 		BinaryName:  "pi",
+		InstallHint: "npm install -g @mariozechner/pi-coding-agent",
 		Features: ProviderFeatures{
-			SupportsResume:             true,  // Supports --continue and --resume
-			SupportsStreamJSON:         true,  // JSON mode via --mode json
+			SupportsResume:             true,
+			SupportsStreamJSON:         true,
 			SupportsSSE:                false,
 			SupportsHTTPAPI:            false,
-			SupportsSessionID:          true,  // Supports --session
-			SupportsPermissions:        false, // No built-in permission popups
+			SupportsSessionID:          true,
+			SupportsPermissions:        false,
 			MultiTurnReady:             true,
-			RequiresInitialPromptAsArg: true, // Prompt passed as CLI arg
+			RequiresInitialPromptAsArg: true,
 		},
 	}
 
-	// Determine binary path
-	binaryPath := cfg.BinaryPath
-	if binaryPath == "" {
-		if path, err := exec.LookPath(meta.BinaryName); err == nil {
-			binaryPath = path
-		}
+	// Resolve binary path using helper
+	binaryPath, err := ResolveBinaryPath(cfg, meta)
+	if err != nil {
+		return nil, err
 	}
 
 	// Extract pi-specific config
@@ -171,9 +171,10 @@ func NewPiProvider(cfg ProviderConfig, logger *slog.Logger) (*PiProvider, error)
 			binaryPath: binaryPath,
 			logger:     logger.With("provider", "pi"),
 		},
-		opts:    cfg,
-		piCfg:   piCfg,
-		pkgName: "@mariozechner/pi-coding-agent",
+		opts:          cfg,
+		piCfg:         piCfg,
+		pkgName:       "@mariozechner/pi-coding-agent",
+		promptBuilder: NewPromptBuilder(false), // Pi doesn't need CDATA
 	}, nil
 }
 
@@ -245,11 +246,7 @@ func (p *PiProvider) BuildCLIArgs(providerSessionID string, opts *ProviderSessio
 // BuildInputMessage constructs the input for pi.
 // Note: Pi typically takes the prompt as a CLI argument, not stdin.
 func (p *PiProvider) BuildInputMessage(prompt string, taskInstructions string) (map[string]any, error) {
-	finalPrompt := prompt
-	if taskInstructions != "" {
-		finalPrompt = fmt.Sprintf("<context>\n%s\n</context>\n\n<user_query>\n%s\n</user_query>",
-			taskInstructions, prompt)
-	}
+	finalPrompt := p.promptBuilder.Build(prompt, taskInstructions)
 
 	return map[string]any{
 		"prompt": finalPrompt,

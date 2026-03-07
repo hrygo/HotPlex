@@ -16,8 +16,9 @@ import (
 // - Supports multiple LLM providers
 type OpenCodeProvider struct {
 	ProviderBase
-	opts        ProviderConfig
-	opencodeCfg *OpenCodeConfig
+	opts          ProviderConfig
+	opencodeCfg   *OpenCodeConfig
+	promptBuilder *PromptBuilder
 }
 
 // OpenCode Part types (from research results)
@@ -75,24 +76,23 @@ func NewOpenCodeProvider(cfg ProviderConfig, logger *slog.Logger) (*OpenCodeProv
 		Type:        ProviderTypeOpenCode,
 		DisplayName: "OpenCode",
 		BinaryName:  "opencode",
+		InstallHint: "go install github.com/opencode-ai/opencode@latest",
 		Features: ProviderFeatures{
-			SupportsResume:             false, // OpenCode doesn't have explicit resume
-			SupportsStreamJSON:         false, // Uses different format
-			SupportsSSE:                true,  // HTTP API mode uses SSE
-			SupportsHTTPAPI:            true,  // Has HTTP API mode
-			SupportsSessionID:          false, // Uses different session model
-			SupportsPermissions:        true,  // Plan/Build modes
+			SupportsResume:             false,
+			SupportsStreamJSON:         false,
+			SupportsSSE:                true,
+			SupportsHTTPAPI:            true,
+			SupportsSessionID:          false,
+			SupportsPermissions:        true,
 			MultiTurnReady:             true,
 			RequiresInitialPromptAsArg: true,
 		},
 	}
 
-	// Determine binary path
-	binaryPath := cfg.BinaryPath
-	if binaryPath == "" {
-		if path, err := exec.LookPath(meta.BinaryName); err == nil {
-			binaryPath = path
-		}
+	// Resolve binary path using helper
+	binaryPath, err := ResolveBinaryPath(cfg, meta)
+	if err != nil {
+		return nil, err
 	}
 
 	// Extract OpenCode-specific config
@@ -109,8 +109,9 @@ func NewOpenCodeProvider(cfg ProviderConfig, logger *slog.Logger) (*OpenCodeProv
 			binaryPath: binaryPath,
 			logger:     logger.With("provider", "opencode"),
 		},
-		opts:        cfg,
-		opencodeCfg: opencodeCfg,
+		opts:          cfg,
+		opencodeCfg:   opencodeCfg,
+		promptBuilder: NewPromptBuilder(true), // Use CDATA for OpenCode
 	}, nil
 }
 
@@ -172,12 +173,7 @@ func (p *OpenCodeProvider) BuildCLIArgs(providerSessionID string, opts *Provider
 // Note: OpenCode typically takes the prompt as a CLI argument, not stdin.
 // For multi-turn sessions, this method may be used differently.
 func (p *OpenCodeProvider) BuildInputMessage(prompt string, taskInstructions string) (map[string]any, error) {
-	// Inject task-level constraints using XML tags and CDATA.
-	finalPrompt := prompt
-	if taskInstructions != "" {
-		finalPrompt = fmt.Sprintf("<context>\n<![CDATA[\n%s\n]]>\n</context>\n\n<user_query>\n<![CDATA[\n%s\n]]>\n</user_query>",
-			taskInstructions, prompt)
-	}
+	finalPrompt := p.promptBuilder.Build(prompt, taskInstructions)
 
 	// OpenCode CLI takes prompt as argument, but we structure this
 	// for potential future stdin support or HTTP API mode

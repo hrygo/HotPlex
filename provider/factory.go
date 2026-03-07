@@ -11,6 +11,7 @@ import (
 type ProviderFactory struct {
 	mu       sync.RWMutex
 	creators map[ProviderType]ProviderCreator
+	plugins  map[ProviderType]ProviderPlugin // Plugin metadata for introspection
 	logger   *slog.Logger
 }
 
@@ -38,6 +39,7 @@ func NewProviderFactory(logger *slog.Logger) *ProviderFactory {
 
 	f := &ProviderFactory{
 		creators: make(map[ProviderType]ProviderCreator),
+		plugins:  make(map[ProviderType]ProviderPlugin),
 		logger:   logger,
 	}
 
@@ -64,6 +66,37 @@ func (f *ProviderFactory) Register(t ProviderType, creator ProviderCreator) {
 	defer f.mu.Unlock()
 	f.creators[t] = creator
 	f.logger.Debug("Provider registered", "type", t)
+}
+
+// GetPlugin retrieves a registered plugin by type.
+// Returns nil if the plugin is not registered.
+func (f *ProviderFactory) GetPlugin(t ProviderType) ProviderPlugin {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.plugins[t]
+}
+
+// registerPlugin registers a provider plugin with the factory.
+// This is an internal method called by RegisterPlugin.
+func (f *ProviderFactory) registerPlugin(p ProviderPlugin) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	pt := p.Type()
+	if pt == "" {
+		f.logger.Warn("RegisterPlugin called with empty type")
+		return
+	}
+
+	// Store plugin metadata
+	f.plugins[pt] = p
+
+	// Create creator wrapper that delegates to the plugin
+	f.creators[pt] = func(cfg ProviderConfig, logger *slog.Logger) (Provider, error) {
+		return p.New(cfg, logger)
+	}
+
+	f.logger.Info("Provider plugin registered", "type", pt)
 }
 
 // Create creates a new Provider instance based on the configuration.

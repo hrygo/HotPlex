@@ -18,8 +18,9 @@ import (
 // with the existing HotPlex implementation.
 type ClaudeCodeProvider struct {
 	ProviderBase
-	opts        ProviderConfig
-	markerStore persistence.SessionMarkerStore
+	opts          ProviderConfig
+	markerStore   persistence.SessionMarkerStore
+	promptBuilder *PromptBuilder
 }
 
 // NewClaudeCodeProvider creates a new Claude Code provider instance.
@@ -32,6 +33,7 @@ func NewClaudeCodeProvider(cfg ProviderConfig, logger *slog.Logger) (*ClaudeCode
 		Type:        ProviderTypeClaudeCode,
 		DisplayName: "Claude Code",
 		BinaryName:  "claude",
+		InstallHint: "npm install -g @anthropic-ai/claude-code",
 		Features: ProviderFeatures{
 			SupportsResume:      true,
 			SupportsStreamJSON:  true,
@@ -43,12 +45,10 @@ func NewClaudeCodeProvider(cfg ProviderConfig, logger *slog.Logger) (*ClaudeCode
 		},
 	}
 
-	// Determine binary path
-	binaryPath := cfg.BinaryPath
-	if binaryPath == "" {
-		if path, err := exec.LookPath(meta.BinaryName); err == nil {
-			binaryPath = path
-		}
+	// Resolve binary path using helper
+	binaryPath, err := ResolveBinaryPath(cfg, meta)
+	if err != nil {
+		return nil, err
 	}
 
 	// Initialize marker store for session persistence
@@ -62,6 +62,7 @@ func NewClaudeCodeProvider(cfg ProviderConfig, logger *slog.Logger) (*ClaudeCode
 		},
 		opts:        cfg,
 		markerStore: markerStore,
+		promptBuilder: NewPromptBuilder(true), // Use CDATA for Claude
 	}, nil
 }
 
@@ -138,13 +139,7 @@ func (p *ClaudeCodeProvider) BuildCLIArgs(providerSessionID string, opts *Provid
 
 // BuildInputMessage constructs the stream-json input message.
 func (p *ClaudeCodeProvider) BuildInputMessage(prompt string, taskInstructions string) (map[string]any, error) {
-	// Inject task-level constraints into the prompt for Hot-Multiplexing using XML tags and CDATA.
-	// This follows Anthropic's best practices for clear delineation.
-	finalPrompt := prompt
-	if taskInstructions != "" {
-		finalPrompt = fmt.Sprintf("<context>\n<![CDATA[\n%s\n]]>\n</context>\n\n<user_query>\n<![CDATA[\n%s\n]]>\n</user_query>",
-			taskInstructions, prompt)
-	}
+	finalPrompt := p.promptBuilder.Build(prompt, taskInstructions)
 
 	return map[string]any{
 		"type": "user",

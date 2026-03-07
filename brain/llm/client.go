@@ -11,6 +11,26 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+// LLMClient defines the interface for LLM interactions.
+// All client wrappers must implement this interface.
+type LLMClient interface {
+	Chat(ctx context.Context, prompt string) (string, error)
+	Analyze(ctx context.Context, prompt string, target any) error
+	ChatStream(ctx context.Context, prompt string) (<-chan string, error)
+	HealthCheck(ctx context.Context) HealthStatus
+}
+
+// Compile-time interface compliance verification.
+var (
+	_ LLMClient = (*OpenAIClient)(nil)
+	_ LLMClient = (*RateLimitedClient)(nil)
+	_ LLMClient = (*CachedClient)(nil)
+	_ LLMClient = (*RetryClient)(nil)
+	_ LLMClient = (*CircuitClient)(nil)
+	_ LLMClient = (*MetricsClient)(nil)
+	_ LLMClient = (*BudgetClient)(nil)
+)
+
 // OpenAIClient implements OpenAI-compatible LLM interactions.
 // It can be used for OpenAI, DeepSeek, Groq, etc.
 type OpenAIClient struct {
