@@ -143,6 +143,80 @@ func ControlledSession(sessionID string) {
 
 ---
 
+## 🔧 Client Builder Pattern (Issue #217)
+
+The `llm` subpackage provides a fluent Builder API for composing middleware layers.
+
+### Wrapping Order (Innermost to Outermost)
+
+```
+Metrics → Circuit → RateLimit → Retry → Cache → OpenAI
+```
+
+| Layer | Purpose |
+|-------|---------|
+| Cache | LRU response caching |
+| Retry | Exponential backoff retries |
+| Rate Limit | Token bucket rate limiting |
+| Circuit Breaker | Fail-fast on repeated errors |
+| Metrics | Observability and cost tracking |
+
+### Preset Configurations
+
+```go
+// Production: all capabilities
+client, _ := llm.ProductionClient(apiKey, "gpt-4")
+
+// Development: minimal overhead
+client, _ := llm.DevelopmentClient(apiKey, "gpt-4")
+
+// High throughput: aggressive caching
+client, _ := llm.HighThroughputClient(apiKey, "gpt-4")
+
+// Maximum reliability: aggressive retries
+client, _ := llm.ReliableClient(apiKey, "gpt-4")
+```
+
+### Custom Configuration
+
+```go
+client, _ := llm.NewClientBuilder().
+    WithAPIKey(apiKey).
+    WithEndpoint("https://api.deepseek.com/v1").
+    WithModel("deepseek-chat").
+    WithCache(5000).
+    WithRetry(5).
+    WithCircuitBreaker(llm.CircuitBreakerConfig{...}).
+    WithRateLimit(100).
+    WithMetrics().
+    Build()
+```
+
+### Independent Features (Non-Builder)
+
+Budget tracking and priority scheduling are standalone:
+
+```go
+// Budget Control
+client, _ := llm.NewBudgetManagedClient(apiKey, "gpt-4", 10.0) // $10/day
+
+// Priority Scheduling
+scheduler, client := llm.PrioritySchedulerWithClient(5*time.Minute, nil)
+client.Submit(ctx, "req-1", llm.PriorityHigh, func() error { ... })
+```
+
+### ObservableClient
+
+Extract runtime statistics:
+
+```go
+obs := llm.AsObservable(client)
+health := obs.GetClientHealth(ctx)
+// health.CircuitState, health.CacheHitRate, health.TotalRequests
+```
+
+---
+
 ## 📊 Observability & Metrics
 
 The system tracks enterprise-level metrics using OpenTelemetry:
