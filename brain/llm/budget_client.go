@@ -19,10 +19,10 @@ func DefaultCostEstimator(prompt string, model string) float64 {
 // BudgetClient wraps an LLM client with budget tracking.
 // It checks budget before each request and tracks costs after.
 type BudgetClient struct {
-	client        LLMClient
-	tracker       *BudgetTracker
-	estimator     CostEstimator
-	model         string
+	client    LLMClient
+	tracker   *BudgetTracker
+	estimator CostEstimator
+	model     string
 }
 
 // NewBudgetClient creates a new budget-aware client wrapper.
@@ -38,82 +38,65 @@ func NewBudgetClient(client LLMClient, tracker *BudgetTracker, model string, est
 	}
 }
 
+// checkAndTrackBudget validates budget before request and tracks cost after.
+// This helper eliminates duplicate budget checking logic across methods.
+func (b *BudgetClient) checkAndTrackBudget(prompt string) (float64, error) {
+	estimatedCost := b.estimator(prompt, b.model)
+	allowed, _, err := b.tracker.CheckBudget(estimatedCost)
+	if err != nil {
+		return 0, err
+	}
+	if !allowed {
+		return 0, fmt.Errorf("budget exceeded for session")
+	}
+	return estimatedCost, nil
+}
+
 // Chat implements the Chat method with budget tracking.
 func (b *BudgetClient) Chat(ctx context.Context, prompt string) (string, error) {
-	// Estimate cost
-	estimatedCost := b.estimator(prompt, b.model)
-
-	// Check budget
-	allowed, _, err := b.tracker.CheckBudget(estimatedCost)
+	estimatedCost, err := b.checkAndTrackBudget(prompt)
 	if err != nil {
 		return "", err
 	}
-	if !allowed {
-		return "", fmt.Errorf("budget exceeded for session")
-	}
 
-	// Make request
 	result, err := b.client.Chat(ctx, prompt)
 	if err != nil {
 		return "", err
 	}
 
-	// Track actual cost (using estimate for now)
-	// In production, you would parse response to get actual token usage
 	_ = b.tracker.TrackRequest(estimatedCost)
-
 	return result, nil
 }
 
 // Analyze implements the Analyze method with budget tracking.
 func (b *BudgetClient) Analyze(ctx context.Context, prompt string, target any) error {
-	// Estimate cost
-	estimatedCost := b.estimator(prompt, b.model)
-
-	// Check budget
-	allowed, _, err := b.tracker.CheckBudget(estimatedCost)
+	estimatedCost, err := b.checkAndTrackBudget(prompt)
 	if err != nil {
 		return err
 	}
-	if !allowed {
-		return fmt.Errorf("budget exceeded for session")
-	}
 
-	// Make request
 	err = b.client.Analyze(ctx, prompt, target)
 	if err != nil {
 		return err
 	}
 
-	// Track actual cost
 	_ = b.tracker.TrackRequest(estimatedCost)
-
 	return nil
 }
 
 // ChatStream implements the ChatStream method with budget tracking.
 func (b *BudgetClient) ChatStream(ctx context.Context, prompt string) (<-chan string, error) {
-	// Estimate cost
-	estimatedCost := b.estimator(prompt, b.model)
-
-	// Check budget
-	allowed, _, err := b.tracker.CheckBudget(estimatedCost)
+	estimatedCost, err := b.checkAndTrackBudget(prompt)
 	if err != nil {
 		return nil, err
 	}
-	if !allowed {
-		return nil, fmt.Errorf("budget exceeded for session")
-	}
 
-	// Make request
 	result, err := b.client.ChatStream(ctx, prompt)
 	if err != nil {
 		return nil, err
 	}
 
-	// Track cost (estimate for streaming)
 	_ = b.tracker.TrackRequest(estimatedCost)
-
 	return result, nil
 }
 
