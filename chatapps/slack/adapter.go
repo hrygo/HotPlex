@@ -5,8 +5,10 @@ package slack
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/hrygo/hotplex/chatapps/base"
@@ -283,6 +285,62 @@ func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, th
 	if err := a.storePlugin.OnBotResponse(ctx, msgCtx); err != nil {
 		a.Logger().Debug("Failed to store bot response", "error", err)
 	}
+}
+
+// GetThreadHistory retrieves message history for a thread session
+// Returns messages in chronological order (oldest first)
+func (a *Adapter) GetThreadHistory(ctx context.Context, channelID, threadTS string, limit int) ([]*storage.ChatAppMessage, error) {
+	if a.storePlugin == nil {
+		return nil, fmt.Errorf("storage not enabled")
+	}
+
+	// Generate session ID for this thread
+	sessionMgr := session.NewSessionManager("hotplex")
+	sessionID := sessionMgr.GetChatSessionID("slack", "", a.config.BotUserID, channelID, threadTS)
+
+	// Query messages
+	if limit <= 0 {
+		limit = 100
+	}
+	query := &storage.MessageQuery{
+		ChatSessionID: sessionID,
+		Limit:         limit,
+		Ascending:     true, // Oldest first for conversation context
+	}
+
+	messages, err := a.storePlugin.ListMessages(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	return messages, nil
+}
+
+// GetThreadHistoryAsString returns thread history as a formatted string
+// Useful for providing context to AI models
+func (a *Adapter) GetThreadHistoryAsString(ctx context.Context, channelID, threadTS string, limit int) (string, error) {
+	messages, err := a.GetThreadHistory(ctx, channelID, threadTS, limit)
+	if err != nil {
+		return "", err
+	}
+
+	if len(messages) == 0 {
+		return "", nil
+	}
+
+	var sb strings.Builder
+	for _, msg := range messages {
+		timestamp := msg.CreatedAt.Format("2006-01-02 15:04:05")
+		var role string
+		if msg.MessageType == types.MessageTypeUserInput {
+			role = "User"
+		} else {
+			role = "Assistant"
+		}
+		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", timestamp, role, msg.Content))
+	}
+
+	return sb.String(), nil
 }
 
 // Start starts the adapter

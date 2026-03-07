@@ -274,6 +274,11 @@ func (p *MessageStorePlugin) ListUserSessions(ctx context.Context, platform, use
 	return p.store.ListUserSessions(ctx, platform, userID)
 }
 
+// ListMessages 列出会话的消息列表
+func (p *MessageStorePlugin) ListMessages(ctx context.Context, query *storage.MessageQuery) ([]*storage.ChatAppMessage, error) {
+	return p.store.List(ctx, query)
+}
+
 // Close 关闭插件
 func (p *MessageStorePlugin) Close() error {
 	if p.streamStore != nil {
