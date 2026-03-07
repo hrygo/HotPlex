@@ -442,7 +442,6 @@ func (p *PostgreStorage) buildCountQuery(query *MessageQuery) (string, []interfa
 	if query.ChatUserID != "" {
 		conditions = append(conditions, fmt.Sprintf("chat_user_id = $%d", argNum))
 		args = append(args, query.ChatUserID)
-		argNum++
 	}
 	if !query.IncludeDeleted {
 		conditions = append(conditions, "(deleted = FALSE OR deleted IS NULL)")
