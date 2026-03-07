@@ -72,6 +72,8 @@ type StorageConfig struct {
 	Type string
 	// SQLite specific config
 	SQLitePath string
+	// PostgreSQL connection URL (e.g., "postgres://user:pass@localhost:5432/hotplex")
+	PostgreSQLURL string
 	// StreamEnabled enables streaming message buffering
 	StreamEnabled bool
 	// StreamTimeout is the timeout for streaming buffer (default 5min)

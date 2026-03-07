@@ -124,7 +124,8 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 	// Initialize message storage plugin if enabled
 	if config.Storage != nil && config.Storage.Enabled {
 		if err := a.initStoragePlugin(config.Storage, logger); err != nil {
-			logger.Error("Failed to initialize storage plugin", "error", err)
+			logger.Error("Failed to initialize storage plugin, continuing without persistence",
+				"error", err, "type", config.Storage.Type)
 		} else {
 			logger.Info("Message storage plugin initialized", "type", config.Storage.Type)
 		}
@@ -146,6 +147,12 @@ func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) err
 			pluginConfig["path"] = cfg.SQLitePath
 		} else {
 			pluginConfig["path"] = "data/slack_messages.db"
+		}
+	case "postgresql":
+		if cfg.PostgreSQLURL != "" {
+			pluginConfig["url"] = cfg.PostgreSQLURL
+		} else {
+			return fmt.Errorf("postgresql storage requires PostgreSQLURL config")
 		}
 	case "memory":
 		// No additional config needed
@@ -320,16 +327,10 @@ func (a *Adapter) GetThreadHistory(ctx context.Context, channelID, threadTS stri
 	return messages, nil
 }
 
-// GetThreadHistoryAsString returns thread history as a formatted string
-// Useful for providing context to AI models
-func (a *Adapter) GetThreadHistoryAsString(ctx context.Context, channelID, threadTS string, limit int) (string, error) {
-	messages, err := a.GetThreadHistory(ctx, channelID, threadTS, limit)
-	if err != nil {
-		return "", err
-	}
-
+// formatMessagesAsString formats messages as a human-readable string
+func formatMessagesAsString(messages []*storage.ChatAppMessage) string {
 	if len(messages) == 0 {
-		return "", nil
+		return ""
 	}
 
 	var sb strings.Builder
@@ -344,7 +345,17 @@ func (a *Adapter) GetThreadHistoryAsString(ctx context.Context, channelID, threa
 		fmt.Fprintf(&sb, "[%s] %s: %s\n", timestamp, role, msg.Content)
 	}
 
-	return sb.String(), nil
+	return sb.String()
+}
+
+// GetThreadHistoryAsString returns thread history as a formatted string
+// Useful for providing context to AI models
+func (a *Adapter) GetThreadHistoryAsString(ctx context.Context, channelID, threadTS string, limit int) (string, error) {
+	messages, err := a.GetThreadHistory(ctx, channelID, threadTS, limit)
+	if err != nil {
+		return "", err
+	}
+	return formatMessagesAsString(messages), nil
 }
 
 // GetThreadHistoryByUser retrieves message history for a thread session, filtered by user ID
@@ -382,24 +393,7 @@ func (a *Adapter) GetThreadHistoryByUserAsString(ctx context.Context, channelID,
 	if err != nil {
 		return "", err
 	}
-
-	if len(messages) == 0 {
-		return "", nil
-	}
-
-	var sb strings.Builder
-	for _, msg := range messages {
-		timestamp := msg.CreatedAt.Format("2006-01-02 15:04:05")
-		var role string
-		if msg.MessageType == types.MessageTypeUserInput {
-			role = "User"
-		} else {
-			role = "Assistant"
-		}
-		fmt.Fprintf(&sb, "[%s] %s: %s\n", timestamp, role, msg.Content)
-	}
-
-	return sb.String(), nil
+	return formatMessagesAsString(messages), nil
 }
 
 // Start starts the adapter
