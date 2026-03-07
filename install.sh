@@ -667,13 +667,13 @@ wizard_claude_code() {
     fi
 }
 
-# 向导：配置 Slack Bot
-wizard_slack_config() {
+# 向导：配置 Slack Bot 凭据
+wizard_slack_credentials() {
     local env_file="${CONFIG_DIR}/.env"
 
     echo ""
     raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    raw "${BOLD}  Step 2/2: Slack Bot 配置${NC}"
+    raw "${BOLD}  Step 2/3: Slack 凭据配置${NC}"
     raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
@@ -804,6 +804,240 @@ wizard_slack_config() {
     fi
 }
 
+# 向导：配置 Slack YAML
+wizard_slack_yaml() {
+    local yaml_file="${CONFIG_DIR}/slack.yaml"
+    local yaml_source=""
+
+    # 查找源配置文件
+    if [[ -f "${INSTALL_DIR}/../chatapps/configs/slack.yaml" ]]; then
+        yaml_source="${INSTALL_DIR}/../chatapps/configs/slack.yaml"
+    elif [[ -f "/usr/local/share/hotplex/chatapps/configs/slack.yaml" ]]; then
+        yaml_source="/usr/local/share/hotplex/chatapps/configs/slack.yaml"
+    fi
+
+    echo ""
+    raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    raw "${BOLD}  Step 3/3: ChatApps 行为配置${NC}"
+    raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    # 复制默认配置（如果不存在）
+    if [[ ! -f "$yaml_file" ]]; then
+        if [[ -n "$yaml_source" ]] && [[ -f "$yaml_source" ]]; then
+            mkdir -p "$(dirname "$yaml_file")"
+            cp "$yaml_source" "$yaml_file"
+            success "已创建配置文件: $yaml_file"
+        else
+            # 生成默认配置
+            generate_slack_yaml "$yaml_file"
+        fi
+    else
+        success "配置文件已存在: $yaml_file"
+    fi
+
+    echo ""
+    echo "  ${BOLD}${CYAN}ChatApps 配置选项:${NC}"
+    echo ""
+
+    # 读取当前配置
+    local current_work_dir=$(grep -E "^  work_dir:" "$yaml_file" 2>/dev/null | awk '{print $2}' || echo "~/projects")
+    local current_mode=$(grep "^mode:" "$yaml_file" 2>/dev/null | awk '{print $2}' || echo "socket")
+    local current_group_policy=$(grep -E "    group_policy:" "$yaml_file" 2>/dev/null | awk '{print $2}' || echo "multibot")
+    local current_model=$(grep -E "  default_model:" "$yaml_file" 2>/dev/null | awk '{print $2}' || echo "sonnet")
+
+    echo "  ${DIM}当前设置:${NC}"
+    echo "    工作目录:     ${GREEN}$current_work_dir${NC}"
+    echo "    连接模式:     ${GREEN}$current_mode${NC}"
+    echo "    群组策略:     ${GREEN}$current_group_policy${NC}"
+    echo "    AI 模型:      ${GREEN}$current_model${NC}"
+    echo ""
+
+    if ! confirm "是否修改 ChatApps 配置?" "n"; then
+        return 0
+    fi
+
+    # 工作目录
+    echo ""
+    echo -e "${CYAN}工作目录 (work_dir)${NC}"
+    echo "  ${DIM}Agent 执行代码的工作空间${NC}"
+    local work_dir
+    work_dir=$(prompt_input "请输入路径" "$current_work_dir")
+    if [[ -n "$work_dir" ]] && [[ "$work_dir" != "$current_work_dir" ]]; then
+        sed -i.bak "s|  work_dir:.*|  work_dir: ${work_dir}|" "$yaml_file"
+        # 确保目录存在
+        mkdir -p "$work_dir" 2>/dev/null || true
+    fi
+
+    # 连接模式
+    echo ""
+    echo -e "${CYAN}连接模式 (mode)${NC}"
+    echo "  ${DIM}socket${NC} - 本地开发，无需公网 IP (推荐)"
+    echo "  ${DIM}http${NC}   - 生产环境，使用 Webhook"
+    echo ""
+    local mode
+    if confirm "使用 Socket Mode?" "y"; then
+        mode="socket"
+    else
+        mode="http"
+    fi
+    if [[ "$mode" != "$current_mode" ]]; then
+        sed -i.bak "s/^mode:.*/mode: ${mode}/" "$yaml_file"
+    fi
+
+    # 群组策略
+    echo ""
+    echo -e "${CYAN}群组响应策略 (group_policy)${NC}"
+    echo "  ${DIM}allow${NC}     - 响应所有消息"
+    echo "  ${DIM}mention${NC}   - 仅 @提及 时响应"
+    echo "  ${DIM}multibot${NC}  - 多 Bot 模式，@提及时响应，无 @ 时广播提示"
+    echo ""
+    echo "  选择群组策略:"
+    echo "    1) allow"
+    echo "    2) mention"
+    echo "    3) multibot (默认)"
+    local policy_choice
+    policy_choice=$(prompt_input "请选择 [1-3]" "3")
+    local group_policy="multibot"
+    case "$policy_choice" in
+        1) group_policy="allow" ;;
+        2) group_policy="mention" ;;
+        3) group_policy="multibot" ;;
+    esac
+    if [[ "$group_policy" != "$current_group_policy" ]]; then
+        sed -i.bak "s/    group_policy:.*/    group_policy: ${group_policy}/" "$yaml_file"
+    fi
+
+    # AI 模型
+    echo ""
+    echo -e "${CYAN}AI 模型 (default_model)${NC}"
+    echo "  ${DIM}sonnet${NC} - 平衡性能与成本 (推荐)"
+    echo "  ${DIM}haiku${NC}  - 快速响应，低成本"
+    echo "  ${DIM}opus${NC}   - 最强性能，较高成本"
+    echo ""
+    echo "  选择 AI 模型:"
+    echo "    1) sonnet (默认)"
+    echo "    2) haiku"
+    echo "    3) opus"
+    local model_choice
+    model_choice=$(prompt_input "请选择 [1-3]" "1")
+    local model="sonnet"
+    case "$model_choice" in
+        1) model="sonnet" ;;
+        2) model="haiku" ;;
+        3) model="opus" ;;
+    esac
+    if [[ "$model" != "$current_model" ]]; then
+        sed -i.bak "s/  default_model:.*/  default_model: ${model}/" "$yaml_file"
+    fi
+
+    # 清理备份
+    rm -f "${yaml_file}.bak"
+
+    echo ""
+    success "ChatApps 配置已更新"
+    echo ""
+    echo "  ${DIM}完整配置文件: ${yaml_file}${NC}"
+    echo "  ${DIM}配置文档: https://github.com/hrygo/hotplex/blob/main/docs/chatapps/chatapps-slack.md${NC}"
+}
+
+# 生成默认 Slack YAML 配置
+generate_slack_yaml() {
+    local yaml_file="$1"
+    local work_dir="${HOME}/projects"
+
+    mkdir -p "$(dirname "$yaml_file")"
+
+    cat > "$yaml_file" << 'EOF'
+# =============================================================================
+# HotPlex Slack Adapter Configuration
+# 由安装向导生成
+# =============================================================================
+
+platform: slack
+
+# AI Provider
+provider:
+  type: claude-code
+  enabled: true
+  default_model: sonnet
+  default_permission_mode: bypass-permissions
+  dangerously_skip_permissions: true
+
+# Engine
+engine:
+  work_dir: ~/projects
+  timeout: 30m
+  idle_timeout: 1h
+
+# Session
+session:
+  timeout: 1h
+  cleanup_interval: 5m
+
+# Connection
+mode: socket
+server_addr: :8080
+
+# AI Identity
+system_prompt: |
+  You are HotPlex, an expert software engineer in a Slack conversation.
+
+  ## Environment
+  - Running under HotPlex engine (stdin/stdout)
+  - Headless mode - cannot prompt for user input
+
+  ## Slack Context
+  - Replies go to thread automatically
+  - Keep answers concise - user expects quick responses
+
+  ## Output
+  - Be concise - short messages preferred
+  - Use bullet lists over paragraphs
+  - Use code blocks for code snippets
+  - Avoid tables - use lists instead
+
+task_instructions: |
+  1. Understand before acting
+  2. Avoid operations requiring user input
+  3. Summarize tool output - don't dump raw data
+
+# Features
+features:
+  chunking:
+    enabled: true
+    max_chars: 4000
+  threading:
+    enabled: true
+  rate_limit:
+    enabled: true
+    max_attempts: 3
+    base_delay_ms: 500
+    max_delay_ms: 5000
+  markdown:
+    enabled: true
+
+# Security
+security:
+  verify_signature: true
+  permission:
+    dm_policy: allow
+    group_policy: multibot
+    bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID}
+    broadcast_response: |
+      👋 Hello! I'm ready to help.
+      Please @mention me if you'd like me to respond specifically to you.
+    allowed_users: []
+    blocked_users: []
+    slash_command_rate_limit: 10.0
+EOF
+
+    # 替换工作目录
+    sed -i "s|  work_dir: ~/projects|  work_dir: ${work_dir}|" "$yaml_file"
+
+    success "已生成配置文件: $yaml_file"
+}
+
 # 运行安装向导
 run_setup_wizard() {
     # 检查是否跳过向导
@@ -826,7 +1060,8 @@ run_setup_wizard() {
     raw "${BOLD}════════════════════════════════════════════════════════════${NC}"
 
     wizard_claude_code
-    wizard_slack_config
+    wizard_slack_credentials
+    wizard_slack_yaml
 
     # 完成提示
     echo ""
