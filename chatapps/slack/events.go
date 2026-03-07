@@ -217,6 +217,9 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 		msg.Metadata[k] = v
 	}
 
+	// Store user message if storage is enabled
+	a.storeUserMessage(ctx, msg)
+
 	a.webhook.Run(ctx, a.Handler(), msg)
 }
 

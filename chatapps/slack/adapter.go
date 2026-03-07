@@ -11,7 +11,10 @@ import (
 
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/chatapps/command"
+	"github.com/hrygo/hotplex/chatapps/session"
 	"github.com/hrygo/hotplex/engine"
+	"github.com/hrygo/hotplex/plugins/storage"
+	"github.com/hrygo/hotplex/types"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
@@ -34,6 +37,9 @@ type Adapter struct {
 
 	// Command registry
 	cmdRegistry *command.Registry
+
+	// Message storage plugin (optional)
+	storePlugin *base.MessageStorePlugin
 
 	channelToTeam sync.Map // Map channelID to TeamID for streaming functions
 	channelToUser sync.Map // Map channelID to UserID for streaming functions
@@ -110,7 +116,72 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 		a.sender.SetSender(a.defaultSender)
 	}
 
+	// Initialize message storage plugin if enabled
+	if config.Storage != nil && config.Storage.Enabled {
+		if err := a.initStoragePlugin(config.Storage, logger); err != nil {
+			logger.Error("Failed to initialize storage plugin", "error", err)
+		} else {
+			logger.Info("Message storage plugin initialized", "type", config.Storage.Type)
+		}
+	}
+
 	return a
+}
+
+// initStoragePlugin initializes the message storage plugin
+func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) error {
+	// Create storage backend using factory
+	registry := storage.GlobalRegistry()
+	pluginConfig := storage.PluginConfig{}
+
+	// Set storage-specific config
+	switch cfg.Type {
+	case "sqlite":
+		if cfg.SQLitePath != "" {
+			pluginConfig["path"] = cfg.SQLitePath
+		} else {
+			pluginConfig["path"] = "data/slack_messages.db"
+		}
+	case "memory":
+		// No additional config needed
+	default:
+		logger.Warn("Unknown storage type, falling back to memory", "type", cfg.Type)
+		cfg.Type = "memory"
+	}
+
+	store, err := registry.Get(cfg.Type, pluginConfig)
+	if err != nil {
+		return err
+	}
+	if store == nil {
+		logger.Warn("Storage plugin not found, using memory", "type", cfg.Type)
+		store, _ = registry.Get("memory", nil)
+	}
+
+	// Initialize storage
+	if err := store.Initialize(context.Background()); err != nil {
+		return err
+	}
+
+	// Create session manager
+	sessionMgr := session.NewSessionManager("hotplex")
+
+	// Create message store plugin
+	pluginCfg := base.MessageStorePluginConfig{
+		Store:          store,
+		SessionManager: sessionMgr,
+		StreamEnabled:  cfg.StreamEnabled,
+		StreamTimeout:  cfg.StreamTimeout,
+		Logger:         logger,
+	}
+
+	plugin, err := base.NewMessageStorePlugin(pluginCfg)
+	if err != nil {
+		return err
+	}
+
+	a.storePlugin = plugin
+	return nil
 }
 
 // SetEngine sets the engine for the adapter (used for slash commands)
@@ -145,8 +216,73 @@ func (a *Adapter) Stop() error {
 		a.rateLimiter.Stop()
 	}
 
+	// Close storage plugin
+	if a.storePlugin != nil {
+		if err := a.storePlugin.Close(); err != nil {
+			a.Logger().Error("Failed to close storage plugin", "error", err)
+		}
+	}
+
 	a.webhook.Stop()
 	return a.Adapter.Stop()
+}
+
+// storeUserMessage stores user message if storage is enabled
+func (a *Adapter) storeUserMessage(ctx context.Context, msg *base.ChatMessage) {
+	if a.storePlugin == nil {
+		return
+	}
+
+	channelID, _ := msg.Metadata["channel_id"].(string)
+	threadTS, _ := msg.Metadata["thread_ts"].(string)
+
+	// Generate a session context for storage
+	sessionMgr := session.NewSessionManager("hotplex")
+	sessionCtx := sessionMgr.CreateSessionContext("slack", msg.UserID, a.config.BotUserID, channelID, threadTS, "claude")
+
+	msgCtx, err := base.NewMessageContextBuilder().
+		WithChatSession(sessionCtx.ChatSessionID, sessionCtx.ChatPlatform, sessionCtx.ChatUserID,
+			sessionCtx.ChatBotUserID, sessionCtx.ChatChannelID, sessionCtx.ChatThreadID).
+		WithEngineSession(sessionCtx.EngineSessionID, sessionCtx.EngineNamespace).
+		WithProviderSession(sessionCtx.ProviderSessionID, sessionCtx.ProviderType).
+		WithMessage(types.MessageTypeUserInput, base.DirectionUserToBot, msg.Content).
+		Build()
+
+	if err != nil {
+		a.Logger().Debug("Failed to build message context", "error", err)
+		return
+	}
+
+	if err := a.storePlugin.OnUserMessage(ctx, msgCtx); err != nil {
+		a.Logger().Debug("Failed to store user message", "error", err)
+	}
+}
+
+// storeBotResponse stores bot response if storage is enabled
+func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, threadTS, content string) {
+	if a.storePlugin == nil {
+		return
+	}
+
+	// Generate a session context for storage
+	sessionMgr := session.NewSessionManager("hotplex")
+	sessionCtx := sessionMgr.CreateSessionContext("slack", "", a.config.BotUserID, channelID, threadTS, "claude")
+
+	msgCtx, err := base.NewMessageContextBuilder().
+		WithChatSession(sessionID, "slack", "", sessionCtx.ChatBotUserID, channelID, threadTS).
+		WithEngineSession(sessionCtx.EngineSessionID, sessionCtx.EngineNamespace).
+		WithProviderSession(sessionCtx.ProviderSessionID, sessionCtx.ProviderType).
+		WithMessage(types.MessageTypeFinalResponse, base.DirectionBotToUser, content).
+		Build()
+
+	if err != nil {
+		a.Logger().Debug("Failed to build message context", "error", err)
+		return
+	}
+
+	if err := a.storePlugin.OnBotResponse(ctx, msgCtx); err != nil {
+		a.Logger().Debug("Failed to store bot response", "error", err)
+	}
 }
 
 // Start starts the adapter

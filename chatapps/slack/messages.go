@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/types"
 	"github.com/slack-go/slack"
 )
 
@@ -86,6 +87,10 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 			if messageTS != "" {
 				err := a.UpdateMessageSDK(ctx, channelID, messageTS, blocks, fallbackText)
 				if err == nil {
+					// Store bot response for final responses
+					if types.MessageType(msg.Type).IsStorable() {
+						a.storeBotResponse(ctx, sessionID, channelID, threadTS, fallbackText)
+					}
 					return nil
 				}
 
@@ -100,11 +105,22 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 			if ts != "" && msg.Metadata != nil {
 				msg.Metadata["message_ts"] = ts
 			}
+
+			// Store bot response for final responses
+			if types.MessageType(msg.Type).IsStorable() {
+				a.storeBotResponse(ctx, sessionID, channelID, threadTS, fallbackText)
+			}
 			return nil
 		}
 	}
 
-	return a.SendToChannelSDK(ctx, channelID, msg.Content, threadTS)
+	// Store bot response for plain text messages
+	err := a.SendToChannelSDK(ctx, channelID, msg.Content, threadTS)
+	if err == nil {
+		// For plain text messages without explicit type, store as final response
+		a.storeBotResponse(ctx, sessionID, channelID, threadTS, msg.Content)
+	}
+	return err
 }
 
 // SendAttachment sends an attachment to a Slack channel using the Slack SDK

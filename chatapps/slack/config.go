@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // pairingState holds runtime pairing state with thread-safe access
@@ -58,6 +59,23 @@ type Config struct {
 	// BroadcastResponder generates responses for broadcast messages (no @ mention).
 	// If nil, uses DefaultBroadcastResponse.
 	BroadcastResponder BroadcastResponder
+
+	// Storage configuration for message persistence
+	Storage *StorageConfig
+}
+
+// StorageConfig holds message storage configuration for Slack adapter
+type StorageConfig struct {
+	// Enabled enables message storage
+	Enabled bool
+	// Type: "memory", "sqlite", "postgresql"
+	Type string
+	// SQLite specific config
+	SQLitePath string
+	// StreamEnabled enables streaming message buffering
+	StreamEnabled bool
+	// StreamTimeout is the timeout for streaming buffer (default 5min)
+	StreamTimeout time.Duration
 }
 
 // Token format patterns - supports both legacy 3-part and new 4-part Slack token formats
