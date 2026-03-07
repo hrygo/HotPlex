@@ -43,6 +43,9 @@ type Adapter struct {
 	// Message storage plugin (optional)
 	storePlugin *base.MessageStorePlugin
 
+	// Session manager for consistent session ID generation
+	sessionMgr session.SessionManager
+
 	channelToTeam sync.Map // Map channelID to TeamID for streaming functions
 	channelToUser sync.Map // Map channelID to UserID for streaming functions
 
@@ -183,6 +186,7 @@ func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) err
 	}
 
 	a.storePlugin = plugin
+	a.sessionMgr = sessionMgr
 	return nil
 }
 
@@ -238,12 +242,12 @@ func (a *Adapter) storeUserMessage(ctx context.Context, msg *base.ChatMessage) {
 	channelID, _ := msg.Metadata["channel_id"].(string)
 	threadTS, _ := msg.Metadata["thread_ts"].(string)
 
-	// Generate a session context for storage
-	sessionMgr := session.NewSessionManager("hotplex")
-	sessionCtx := sessionMgr.CreateSessionContext("slack", msg.UserID, a.config.BotUserID, channelID, threadTS, "claude")
+	// Use stored session manager for consistent session ID generation
+	// Note: sessionID is thread-based (empty userID) to ensure user and bot messages share the same session
+	sessionCtx := a.sessionMgr.CreateSessionContext("slack", "", a.config.BotUserID, channelID, threadTS, "claude")
 
 	msgCtx, err := base.NewMessageContextBuilder().
-		WithChatSession(sessionCtx.ChatSessionID, sessionCtx.ChatPlatform, sessionCtx.ChatUserID,
+		WithChatSession(sessionCtx.ChatSessionID, sessionCtx.ChatPlatform, msg.UserID,
 			sessionCtx.ChatBotUserID, sessionCtx.ChatChannelID, sessionCtx.ChatThreadID).
 		WithEngineSession(sessionCtx.EngineSessionID, sessionCtx.EngineNamespace).
 		WithProviderSession(sessionCtx.ProviderSessionID, sessionCtx.ProviderType).
@@ -251,12 +255,12 @@ func (a *Adapter) storeUserMessage(ctx context.Context, msg *base.ChatMessage) {
 		Build()
 
 	if err != nil {
-		a.Logger().Debug("Failed to build message context", "error", err)
+		a.Logger().Warn("Failed to build message context", "error", err)
 		return
 	}
 
 	if err := a.storePlugin.OnUserMessage(ctx, msgCtx); err != nil {
-		a.Logger().Debug("Failed to store user message", "error", err)
+		a.Logger().Warn("Failed to store user message", "error", err)
 	}
 }
 
@@ -266,9 +270,9 @@ func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, th
 		return
 	}
 
-	// Generate a session context for storage
-	sessionMgr := session.NewSessionManager("hotplex")
-	sessionCtx := sessionMgr.CreateSessionContext("slack", "", a.config.BotUserID, channelID, threadTS, "claude")
+	// Use stored session manager for consistent session ID generation
+	// Note: userID is empty for bot responses, matching sessionID generation in GetThreadHistory
+	sessionCtx := a.sessionMgr.CreateSessionContext("slack", "", a.config.BotUserID, channelID, threadTS, "claude")
 
 	msgCtx, err := base.NewMessageContextBuilder().
 		WithChatSession(sessionID, "slack", "", sessionCtx.ChatBotUserID, channelID, threadTS).
@@ -278,12 +282,12 @@ func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, th
 		Build()
 
 	if err != nil {
-		a.Logger().Debug("Failed to build message context", "error", err)
+		a.Logger().Warn("Failed to build message context", "error", err)
 		return
 	}
 
 	if err := a.storePlugin.OnBotResponse(ctx, msgCtx); err != nil {
-		a.Logger().Debug("Failed to store bot response", "error", err)
+		a.Logger().Warn("Failed to store bot response", "error", err)
 	}
 }
 
@@ -294,9 +298,9 @@ func (a *Adapter) GetThreadHistory(ctx context.Context, channelID, threadTS stri
 		return nil, fmt.Errorf("storage not enabled")
 	}
 
-	// Generate session ID for this thread
-	sessionMgr := session.NewSessionManager("hotplex")
-	sessionID := sessionMgr.GetChatSessionID("slack", "", a.config.BotUserID, channelID, threadTS)
+	// Use stored session manager for consistent session ID generation
+	// Empty userID for thread-based session (matches storeUserMessage/storeBotResponse)
+	sessionID := a.sessionMgr.GetChatSessionID("slack", "", a.config.BotUserID, channelID, threadTS)
 
 	// Query messages
 	if limit <= 0 {

@@ -116,8 +116,8 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 
 	// Store bot response for plain text messages
 	err := a.SendToChannelSDK(ctx, channelID, msg.Content, threadTS)
-	if err == nil {
-		// For plain text messages without explicit type, store as final response
+	if err == nil && types.MessageType(msg.Type).IsStorable() {
+		// Only store if message type is storable (user_input or final_response)
 		a.storeBotResponse(ctx, sessionID, channelID, threadTS, msg.Content)
 	}
 	return err
