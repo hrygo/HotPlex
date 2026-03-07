@@ -271,10 +271,10 @@ func (r *IntentRouter) buildContextualPrompt(msg string, history []string) strin
 	}
 
 	for i, h := range history {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, h))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, h)
 	}
 
-	sb.WriteString(fmt.Sprintf("\nCurrent message: %s", msg))
+	fmt.Fprintf(&sb, "\nCurrent message: %s", msg)
 	return sb.String()
 }
 
