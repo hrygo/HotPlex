@@ -341,7 +341,7 @@ func (a *Adapter) GetThreadHistoryAsString(ctx context.Context, channelID, threa
 		} else {
 			role = "Assistant"
 		}
-		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", timestamp, role, msg.Content))
+		fmt.Fprintf(&sb, "[%s] %s: %s\n", timestamp, role, msg.Content)
 	}
 
 	return sb.String(), nil
