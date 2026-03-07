@@ -42,6 +42,11 @@ type NativeStreamingWriter struct {
 	// Fallback 机制：累积所有内容用于最终 fallback
 	accumulatedContent bytes.Buffer
 	fallbackUsed       bool // 标记是否使用了 fallback
+
+	// 完整性校验：追踪发送和确认的字节数
+	bytesWritten      int64 // 成功写入的总字节数
+	bytesFlushed      int64 // 成功 flush 的总字节数
+	failedFlushChunks []string // 失败的 flush 块（用于潜在恢复）
 }
 
 // NewNativeStreamingWriter 创建新的原生流式写入器
@@ -97,6 +102,7 @@ func (w *NativeStreamingWriter) flushBuffer() {
 	}
 
 	content := w.buf.String()
+	contentLen := len(content)
 	w.buf.Reset()
 	started := w.started
 	w.mu.Unlock()
@@ -123,11 +129,18 @@ func (w *NativeStreamingWriter) flushBuffer() {
 			}
 			continue
 		}
-		// 成功，清除错误并返回
+		// 成功：更新已 flush 字节数
+		w.mu.Lock()
+		w.bytesFlushed += int64(contentLen)
+		w.mu.Unlock()
 		return
 	}
 
-	// 所有重试都失败，记录错误但保留内容用于 fallback
+	// 所有重试都失败：记录失败块用于潜在恢复
+	w.mu.Lock()
+	w.failedFlushChunks = append(w.failedFlushChunks, content)
+	w.mu.Unlock()
+
 	w.adapter.Logger().Error("AppendStream failed after all retries",
 		"channel_id", w.channelID,
 		"message_ts", w.messageTS,
@@ -161,6 +174,7 @@ func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
 
 	w.buf.Write(p)
 	w.accumulatedContent.Write(p) // 累积内容用于潜在 fallback
+	w.bytesWritten += int64(len(p)) // 追踪写入字节数
 
 	// 如果超过 rune 阈值，立即触发一次 flush
 	if utf8.RuneCount(w.buf.Bytes()) >= flushSize {
@@ -185,6 +199,9 @@ func (w *NativeStreamingWriter) Close() error {
 	w.closed = true
 	started := w.started
 	accumulated := w.accumulatedContent.String()
+	bytesWritten := w.bytesWritten
+	bytesFlushed := w.bytesFlushed
+	failedChunks := w.failedFlushChunks
 	w.mu.Unlock()
 
 	// 停止处理并等待残留缓冲区发送完成
@@ -195,6 +212,17 @@ func (w *NativeStreamingWriter) Close() error {
 		return nil
 	}
 
+	// 完整性校验：检查是否有失败的内容块
+	integrityOK := len(failedChunks) == 0 && bytesWritten == bytesFlushed
+
+	if !integrityOK {
+		w.adapter.Logger().Warn("Stream integrity check failed",
+			"channel_id", w.channelID,
+			"bytes_written", bytesWritten,
+			"bytes_flushed", bytesFlushed,
+			"failed_chunks", len(failedChunks))
+	}
+
 	// 结束远端流
 	stopErr := w.adapter.StopStream(w.ctx, w.channelID, w.messageTS)
 
@@ -203,19 +231,25 @@ func (w *NativeStreamingWriter) Close() error {
 		w.onComplete(w.messageTS)
 	}
 
-	// Fallback 机制：如果流失败且有累积内容，尝试直接发送完整消息
-	if stopErr != nil && len(accumulated) > 0 {
-		w.adapter.Logger().Warn("Stream stop failed, attempting fallback message",
+	// Fallback 机制触发条件：
+	// 1. StopStream 失败
+	// 2. 完整性校验失败（有失败的内容块或字节不匹配）
+	if (stopErr != nil || !integrityOK) && len(accumulated) > 0 {
+		w.adapter.Logger().Warn("Attempting fallback message",
 			"channel_id", w.channelID,
 			"content_len", len(accumulated),
-			"original_error", stopErr)
+			"stop_error", stopErr,
+			"integrity_ok", integrityOK)
 
 		// 使用 SendThreadReply 作为 fallback
 		if fallbackErr := w.adapter.SendThreadReply(w.ctx, w.channelID, w.threadTS, accumulated); fallbackErr != nil {
 			w.adapter.Logger().Error("Fallback message also failed",
 				"channel_id", w.channelID,
 				"error", fallbackErr)
-			return fmt.Errorf("stream stop failed: %w; fallback also failed: %w", stopErr, fallbackErr)
+			if stopErr != nil {
+				return fmt.Errorf("stream stop failed: %w; fallback also failed: %w", stopErr, fallbackErr)
+			}
+			return fmt.Errorf("integrity check failed; fallback also failed: %w", fallbackErr)
 		}
 
 		w.adapter.Logger().Info("Fallback message sent successfully",
@@ -267,6 +301,31 @@ func (w *NativeStreamingWriter) GetAccumulatedContent() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.accumulatedContent.String()
+}
+
+// Stats 返回流的统计信息（用于完整性校验和监控）
+type StreamStats struct {
+	BytesWritten      int64    // 成功写入的总字节数
+	BytesFlushed      int64    // 成功 flush 的总字节数
+	FailedChunkCount  int      // 失败的 flush 块数量
+	IntegrityOK       bool     // 完整性校验是否通过
+	FallbackUsed      bool     // 是否使用了 fallback
+	ContentLength     int      // 累积内容总长度
+}
+
+// GetStats 返回流的统计信息
+func (w *NativeStreamingWriter) GetStats() StreamStats {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return StreamStats{
+		BytesWritten:     w.bytesWritten,
+		BytesFlushed:     w.bytesFlushed,
+		FailedChunkCount: len(w.failedFlushChunks),
+		IntegrityOK:      len(w.failedFlushChunks) == 0 && w.bytesWritten == w.bytesFlushed,
+		FallbackUsed:     w.fallbackUsed,
+		ContentLength:    w.accumulatedContent.Len(),
+	}
 }
 
 // Ensure NativeStreamingWriter implements io.WriteCloser at compile time
