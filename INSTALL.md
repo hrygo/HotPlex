@@ -1,81 +1,83 @@
-# HotPlex 安装指南
+# HotPlex Installation Guide
 
-本文档介绍如何在各种平台上安装和配置 HotPlex。
+This guide covers installation and configuration on various platforms.
 
-## 快速开始
+[简体中文](INSTALL_zh.md)
 
-### 一键安装 (Linux / macOS)
+## Quick Start
+
+### One-Click Install (Linux / macOS / WSL)
 
 ```bash
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 ```
 
-### 指定版本安装
+### Install Specific Version
 
 ```bash
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -v v0.21.0
 ```
 
-### 自定义安装目录
+### Custom Install Directory
 
 ```bash
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -d ~/bin
 ```
 
-### 干运行模式
+### Dry Run Mode
 
 ```bash
-# 预览安装操作而不实际执行
+# Preview actions without executing
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -n
 ```
 
-### 强制重新安装
+### Force Reinstall
 
 ```bash
-# 覆盖已安装的相同版本
+# Overwrite existing same version
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -f
 ```
 
-### 详细输出
+### Verbose Output
 
 ```bash
-# 显示详细调试信息
+# Show detailed debug info
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -V
 ```
 
-## 系统要求
+## System Requirements
 
-| 平台 | 架构 | 支持 |
-|------|------|------|
+| Platform | Architecture | Support |
+|----------|--------------|---------|
 | Linux | amd64, arm64 | ✅ |
 | macOS | amd64 (Intel), arm64 (Apple Silicon) | ✅ |
 | Windows | WSL2 | ✅ |
 
-**依赖项**:
-- `curl` 或 `wget`
-- `tar` (Linux/macOS) 或 `unzip` (Windows)
+**Dependencies**:
+- `curl` or `wget`
+- `tar` (Linux/macOS) or `unzip` (Windows)
 
-## 安装选项
+## Install Options
 
-| 选项 | 说明 |
-|------|------|
-| `-v, --version` | 指定版本 (默认: 最新) |
-| `-d, --dir` | 安装目录 (默认: `/usr/local/bin`) |
-| `-c, --config` | 仅生成配置文件 |
-| `-u, --uninstall` | 卸载 HotPlex |
-| `-f, --force` | 强制重新安装 |
-| `-n, --dry-run` | 干运行模式，显示将执行的操作 |
-| `-q, --quiet` | 静默模式 |
-| `-V, --verbose` | 详细输出 |
-| `--skip-wizard` | 跳过安装后配置向导 |
-| `--non-interactive` | 非交互模式 |
-| `-h, --help` | 显示帮助 |
+| Option | Description |
+|--------|-------------|
+| `-v, --version` | Specify version (default: latest) |
+| `-d, --dir` | Install directory (default: `/usr/local/bin`) |
+| `-c, --config` | Generate config files only |
+| `-u, --uninstall` | Uninstall HotPlex |
+| `-f, --force` | Force reinstall |
+| `-n, --dry-run` | Dry run mode, show actions without executing |
+| `-q, --quiet` | Quiet mode |
+| `-V, --verbose` | Verbose output |
+| `--skip-wizard` | Skip post-install setup wizard |
+| `--non-interactive` | Non-interactive mode |
+| `-h, --help` | Show help |
 
-## 手动安装
+## Manual Install
 
-### 1. 下载二进制文件
+### 1. Download Binary
 
-从 [Releases](https://github.com/hrygo/hotplex/releases) 页面下载对应平台的压缩包：
+Download from [Releases](https://github.com/hrygo/hotplex/releases):
 
 ```bash
 # Linux amd64
@@ -85,7 +87,7 @@ curl -LO https://github.com/hrygo/hotplex/releases/download/v0.21.0/hotplex_0.21
 curl -LO https://github.com/hrygo/hotplex/releases/download/v0.21.0/hotplex_0.21.0_darwin_arm64.tar.gz
 ```
 
-### 2. 解压并安装
+### 2. Extract and Install
 
 ```bash
 tar -xzf hotplex_0.21.0_linux_amd64.tar.gz
@@ -93,71 +95,71 @@ sudo mv hotplexd /usr/local/bin/
 sudo chmod +x /usr/local/bin/hotplexd
 ```
 
-### 3. 验证安装
+### 3. Verify
 
 ```bash
 hotplexd -version
 ```
 
-## 配置
+## Configuration
 
-### 生成配置模板
+### Generate Config Template
 
 ```bash
-# 仅生成配置文件
+# Generate config files only
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -c
 ```
 
-配置文件将生成在 `~/.hotplex/.env`
+Config file will be created at `~/.hotplex/.env`
 
-### 必要配置项
+### Required Settings
 
-编辑 `~/.hotplex/.env`，填写以下必要配置：
+Edit `~/.hotplex/.env`:
 
 ```bash
-# API 安全令牌 (生产环境必填)
+# API security token (required for production)
 HOTPLEX_API_KEY=your-secure-api-key
 
-# Slack Bot 配置
+# Slack Bot config
 HOTPLEX_SLACK_BOT_USER_ID=UXXXXXXXXXX
 HOTPLEX_SLACK_BOT_TOKEN=xoxb-your-token
 HOTPLEX_SLACK_APP_TOKEN=xapp-your-token
 
-# GitHub Token (用于 Git 操作)
+# GitHub Token (for Git operations)
 GITHUB_TOKEN=ghp_your-token
 ```
 
-### 配置文件位置
+### Config File Location
 
-HotPlex 按以下顺序查找配置文件：
+HotPlex searches for config in this order:
 
-1. `-env` 参数指定的路径
-2. 当前目录的 `.env` 文件
+1. Path specified by `-env` flag
+2. `.env` in current directory
 3. `~/.hotplex/.env`
 
-## 启动服务
+## Start Service
 
 ```bash
-# 使用默认配置
+# Default config
 hotplexd
 
-# 指定配置文件
+# Specify config file
 hotplexd -env ~/.hotplex/.env
 
-# 指定端口
+# Specify port
 hotplexd -port 9090
 
-# 查看帮助
+# Show help
 hotplexd -h
 ```
 
-## Docker 部署
+## Docker Deployment
 
 ```bash
-# 拉取镜像
+# Pull image
 docker pull ghcr.io/hrygo/hotplex:latest
 
-# 运行容器
+# Run container
 docker run -d \
   --name hotplex \
   -p 8080:8080 \
@@ -166,55 +168,55 @@ docker run -d \
   ghcr.io/hotplex:latest
 ```
 
-## 卸载
+## Uninstall
 
 ```bash
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -u
 ```
 
-或手动删除：
+Or manual removal:
 
 ```bash
 sudo rm /usr/local/bin/hotplexd
-# 可选：删除配置
+# Optional: remove config
 rm -rf ~/.hotplex
 ```
 
-## 故障排除
+## Troubleshooting
 
-### 权限问题
+### Permission Issues
 
-如果安装到 `/usr/local/bin` 遇到权限问题：
+If installing to `/usr/local/bin` fails:
 
 ```bash
-# 使用 sudo 安装
+# Use sudo
 curl -sL ... | sudo bash
 
-# 或安装到用户目录
+# Or install to user directory
 curl -sL ... | bash -s -- -d ~/.local/bin
 ```
 
-### 找不到命令
+### Command Not Found
 
-确保安装目录在 `PATH` 中：
+Ensure install directory is in `PATH`:
 
 ```bash
 echo $PATH
-# 如果没有，添加到 ~/.bashrc 或 ~/.zshrc
+# Add to ~/.bashrc or ~/.zshrc if missing
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### 版本不匹配
+### Version Mismatch
 
-清理缓存后重新下载：
+Clear cache and reinstall:
 
 ```bash
 rm -rf /tmp/hotplex-*
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 ```
 
-## 下一步
+## Next Steps
 
-- [配置 Slack Bot](./chatapps/configs/slack.yaml)
-- [查看 API 文档](./README.md)
-- [贡献指南](./CONTRIBUTING.md)
+- [Configure Slack Bot](./chatapps/configs/slack.yaml)
+- [API Documentation](./README.md)
+- [Contributing Guide](./CONTRIBUTING.md)
