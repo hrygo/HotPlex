@@ -56,14 +56,17 @@ HotPlex transforms AI CLI tools (Claude Code, OpenCode) from "run-and-exit" comm
 ### Install
 
 ```bash
-# From source
-git clone https://github.com/hrygo/hotplex.git
-cd hotplex
-make build
+# One-click install (Linux / macOS / WSL)
+curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 
-# Or download binary from releases
-# https://github.com/hrygo/hotplex/releases
+# Or specify version
+curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -v v0.21.0
+
+# Or custom directory
+curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -d ~/bin
 ```
+
+See [INSTALL.md](INSTALL.md) for all options (dry-run, force reinstall, uninstall).
 
 ### Configure
 
