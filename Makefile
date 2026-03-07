@@ -299,10 +299,6 @@ DOCKER_TAG      ?= latest
 DOCKER_REGISTRY ?= ghcr.io/hrygo
 HOST_UID        ?= $(shell id -u)
 
-# Dynamically discover services from docker-compose.yml
-# Uses explicit list as fallback if docker compose command fails
-COMPOSE_SERVICES ?= $(shell docker compose config --services 2>/dev/null || echo "hotplex hotplex-secondary")
-
 docker-build: ## @docker Build image using docker-compose
 	@printf "${CYAN}🐳 Building Docker images via Compose...${NC}\n"
 	HOST_UID=$(HOST_UID) VERSION=$(VERSION) docker compose build
@@ -329,15 +325,10 @@ docker-sync: ## @docker Sync project configs to ~/.hotplex
 
 docker-run: docker-up ## @docker Run daemon using docker-compose (alias for docker-up)
 
-docker-up: docker-sync ## @docker Start with docker-compose
+docker-up: docker-sync ## @docker Start all services via docker-compose
 	@printf "${PURPLE}🚀 Starting HotPlex via Docker Compose...${NC}\n"
-	@# Verify COMPOSE_SERVICES is not empty
-	@if [ -z "$(COMPOSE_SERVICES)" ]; then \
-		printf "${RED}❌ No services found. Is Docker running?${NC}\n"; \
-		exit 1; \
-	fi
 	@printf "${DIM}Note: Ensure your proxy software has 'Allow LAN' enabled.${NC}\n"
-	HOST_UID=$(HOST_UID) docker compose up -d $(COMPOSE_SERVICES)
+	HOST_UID=$(HOST_UID) docker compose up -d
 	@printf "${GREEN}✅ HotPlex is running!${NC}\n"
 	@printf "${DIM}Use 'make docker-logs' to see logs or 'make docker-down' to stop.${NC}\n"
 
@@ -346,11 +337,11 @@ docker-down: ## @docker Stop and remove docker-compose containers (graceful)
 	docker compose down --timeout 30
 	@printf "${GREEN}✅ Done.${NC}\n"
 
-docker-restart: docker-sync ## @docker Sync configs → restart containers (graceful)
+docker-restart: docker-sync ## @docker Sync configs → restart all containers (graceful)
 	@printf "${YELLOW}🔄 Restarting HotPlex containers...${NC}\n"
 	docker compose down --timeout 30
 	@sleep 2
-	HOST_UID=$(HOST_UID) docker compose up -d $(COMPOSE_SERVICES)
+	HOST_UID=$(HOST_UID) docker compose up -d
 	@printf "${GREEN}✅ Restart complete.${NC}\n"
 
 docker-logs: ## @docker Tail docker-compose logs
@@ -358,7 +349,7 @@ docker-logs: ## @docker Tail docker-compose logs
 
 docker-check-net: ## @docker Verify container network connectivity
 	@printf "${CYAN}🔍 Checking container network...${NC}\n"
-	@for svc in $(COMPOSE_SERVICES); do \
+	@for svc in $$(docker compose ps --services 2>/dev/null); do \
 		printf "  ${DIM}$$svc:${NC}\n"; \
 		docker exec $$svc nc -zv host.docker.internal 15721 2>&1 | grep -q succeeded && \
 			printf "    ${GREEN}✓${NC} LLM Proxy (15721)\n" || \
@@ -370,7 +361,7 @@ docker-check-net: ## @docker Verify container network connectivity
 
 docker-health: ## @docker Check health status of all containers
 	@printf "${CYAN}🏥 Container Health Status:${NC}\n"
-	@for svc in $(COMPOSE_SERVICES); do \
+	@for svc in $$(docker compose ps --services 2>/dev/null); do \
 		status=$$(docker inspect --format='{{.State.Health.Status}}' $$svc 2>/dev/null || echo "not_found"); \
 		case $$status in \
 			healthy) printf "  ${GREEN}✅ $$svc${NC}: $$status\n" ;; \
@@ -381,7 +372,7 @@ docker-health: ## @docker Check health status of all containers
 
 docker-upgrade: ## @docker Pull latest image and restart
 	@printf "${CYAN}⬆️  Upgrading HotPlex...${NC}\n"
-	docker pull ghcr.io/hrygo/hotplex:latest
+	docker compose pull
 	@$(MAKE) docker-restart
 	@sleep 10
 	@$(MAKE) docker-health

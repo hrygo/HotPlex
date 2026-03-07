@@ -16,16 +16,18 @@
 
 set -e
 
+# Bot configurations - add new bots here
 BOT_CONFIGS=(
   "hotplex:HotPlexBot01"
   "hotplex-secondary:HotPlexBot02"
 )
 
 # ------------------------------------------------------------------------------
-# Generate a gitconfig file for a bot
+# Generate a gitconfig file for a bot (idempotent - skips if already correct)
 # Arguments:
 #   $1 - suffix (e.g., "hotplex", "hotplex-secondary")
 #   $2 - bot_name (e.g., "HotPlexBot01")
+# Returns: 0 on success, 1 on failure
 # ------------------------------------------------------------------------------
 generate_config() {
   local suffix="${1:-}"
@@ -43,6 +45,16 @@ generate_config() {
   fi
 
   target="$HOME/.gitconfig-${suffix}"
+
+  # Idempotency check: skip if already correct
+  if [[ -f "$target" ]]; then
+    local current_name
+    current_name=$(grep -A1 '\[user\]' "$target" | grep '^[[:space:]]*name[[:space:]]*=' | sed 's/.*=[[:space:]]*//' 2>/dev/null || echo "")
+    if [[ "$current_name" == "$bot_name" ]]; then
+      echo "⏭️  Skipped: $target (already correct: $bot_name)"
+      return 0
+    fi
+  fi
 
   cat > "$target" << EOF
 [user]
@@ -90,7 +102,7 @@ verify_config() {
   fi
 
   local actual_name
-  actual_name=$(grep -A1 '\[user\]' "$target" | grep 'name' | sed 's/.*= //')
+  actual_name=$(grep -A1 '\[user\]' "$target" | grep '^[[:space:]]*name[[:space:]]*=' | sed 's/.*=[[:space:]]*//' 2>/dev/null || echo "")
 
   if [[ "$actual_name" == "$expected_name" ]]; then
     echo "✅ $target: name=$actual_name"
@@ -108,13 +120,13 @@ main() {
   local failed=0
 
   if [[ "${1:-}" == "--verify" ]]; then
-    echo "Verifying bot gitconfig files..."
+    echo "🔍 Verifying bot gitconfig files..."
     for config in "${BOT_CONFIGS[@]}"; do
       IFS=':' read -r suffix bot_name <<< "$config"
       verify_config "$suffix" "$bot_name" || ((failed++))
     done
   else
-    echo "Generating bot gitconfig files..."
+    echo "📝 Generating bot gitconfig files..."
     for config in "${BOT_CONFIGS[@]}"; do
       IFS=':' read -r suffix bot_name <<< "$config"
       generate_config "$suffix" "$bot_name" || ((failed++))

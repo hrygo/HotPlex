@@ -1,0 +1,76 @@
+# ==============================================================================
+# HotPlex Docker Ignore
+# ==============================================================================
+# Prevents sensitive files and unnecessary files from being included in Docker
+# build context. This improves build speed and prevents secret leakage.
+# ==============================================================================
+
+# Secrets - NEVER include in image
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets/
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts (built inside container)
+dist/
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Logs
+.logs/
+*.log
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Development files
+.agent/
+.github/
+.serena/
+.claude/
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# Test files
+*_test.go
+testdata/
+tests/
+
+# CI/CD (CI scripts not needed in container)
+Makefile
+scripts/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.docker/
