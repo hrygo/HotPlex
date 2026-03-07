@@ -38,6 +38,7 @@ type CompressionConfig struct {
 	MaxSummaryTokens  int           `json:"max_summary_tokens"` // Max tokens for summary
 	CompressionRatio  float64       `json:"compression_ratio"`  // Target compression ratio (0.0-1.0)
 	SessionTTL        time.Duration `json:"session_ttl"`        // Session memory TTL
+	CleanupInterval   time.Duration `json:"cleanup_interval"`  // Background cleanup interval
 }
 
 // DefaultCompressionConfig returns default compression configuration.
@@ -50,6 +51,7 @@ func DefaultCompressionConfig() CompressionConfig {
 		MaxSummaryTokens: 500,   // Summary should be ~500 tokens
 		CompressionRatio: 0.25,  // Target 25% of original
 		SessionTTL:       24 * time.Hour,
+		CleanupInterval:  1 * time.Hour, // Clean up expired sessions every hour
 	}
 }
 
@@ -63,6 +65,11 @@ type ContextCompressor struct {
 	sessions map[string]*SessionHistory
 	mu       sync.RWMutex
 
+	// Background cleanup
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	// Metrics
 	totalCompressions   int64
 	totalTokensSaved    int64
@@ -71,12 +78,22 @@ type ContextCompressor struct {
 
 // NewContextCompressor creates a new ContextCompressor.
 func NewContextCompressor(brain Brain, config CompressionConfig, logger *slog.Logger) *ContextCompressor {
-	return &ContextCompressor{
+	ctx, cancel := context.WithCancel(context.Background())
+	compressor := &ContextCompressor{
 		brain:    brain,
 		config:   config,
 		logger:   logger,
 		sessions: make(map[string]*SessionHistory),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
+
+	// Start background cleanup daemon
+	if config.CleanupInterval > 0 {
+		compressor.startCleanupDaemon()
+	}
+
+	return compressor
 }
 
 // RecordTurn records a conversation turn in session history.
@@ -329,6 +346,34 @@ func (c *ContextCompressor) updateCompressionRatio(ratio float64) {
 		// Simple moving average
 		c.averageCompressionRatio = (c.averageCompressionRatio*float64(c.totalCompressions-1) + ratio) / float64(c.totalCompressions)
 	}
+}
+
+// startCleanupDaemon starts a background goroutine to clean up expired sessions.
+func (c *ContextCompressor) startCleanupDaemon() {
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		ticker := time.NewTicker(c.config.CleanupInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			case <-ticker.C:
+				cleared := c.ClearExpired()
+				if cleared > 0 {
+					c.logger.Debug("Cleaned up expired sessions", "count", cleared)
+				}
+			}
+		}
+	}()
+}
+
+// Stop stops the background cleanup daemon.
+func (c *ContextCompressor) Stop() {
+	c.cancel()
+	c.wg.Wait()
 }
 
 // ForceCompress forces compression of a session regardless of threshold.

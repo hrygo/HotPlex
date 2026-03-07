@@ -103,34 +103,36 @@ type SafetyGuard struct {
 }
 
 // NewSafetyGuard creates a new SafetyGuard instance.
-func NewSafetyGuard(brain Brain, config GuardConfig, logger *slog.Logger) *SafetyGuard {
+func NewSafetyGuard(brain Brain, config GuardConfig, logger *slog.Logger) (*SafetyGuard, error) {
 	guard := &SafetyGuard{
 		brain:  brain,
 		config: config,
 		logger: logger,
 	}
 
-	// Compile ban patterns
-	guard.compileBanPatterns()
+	// Compile ban patterns - fail fast on error
+	if err := guard.compileBanPatterns(); err != nil {
+		return nil, fmt.Errorf("failed to compile ban patterns: %w", err)
+	}
 
 	// Initialize sensitive patterns for output filtering
 	guard.initSensitivePatterns()
 
-	return guard
+	return guard, nil
 }
 
 // compileBanPatterns compiles regex patterns for input filtering.
-func (g *SafetyGuard) compileBanPatterns() {
+func (g *SafetyGuard) compileBanPatterns() error {
 	g.banPatterns = make([]*regexp.Regexp, 0, len(g.config.BanPatterns))
 
 	for _, pattern := range g.config.BanPatterns {
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			g.logger.Warn("Invalid ban pattern", "pattern", pattern, "error", err)
-			continue
+			return fmt.Errorf("invalid pattern %q: %w", pattern, err)
 		}
 		g.banPatterns = append(g.banPatterns, re)
 	}
+	return nil
 }
 
 // initSensitivePatterns initializes patterns for output sanitization.
@@ -416,6 +418,37 @@ func (g *SafetyGuard) AddBanPattern(pattern string) error {
 	return nil
 }
 
+// ReloadPatterns reloads ban patterns from config.
+func (g *SafetyGuard) ReloadPatterns() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Validate all patterns before applying
+	for _, pattern := range g.config.BanPatterns {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("invalid pattern %q: %w", pattern, err)
+		}
+	}
+
+	// Re-compile all patterns
+	g.compileBanPatternsLocked()
+	g.logger.Info("Ban patterns reloaded", "count", len(g.banPatterns))
+	return nil
+}
+
+// compileBanPatternsLocked compiles patterns with lock held.
+func (g *SafetyGuard) compileBanPatternsLocked() {
+	g.banPatterns = make([]*regexp.Regexp, 0, len(g.config.BanPatterns))
+	for _, pattern := range g.config.BanPatterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			g.logger.Error("Invalid ban pattern (should not happen)", "pattern", pattern, "error", err)
+			continue
+		}
+		g.banPatterns = append(g.banPatterns, re)
+	}
+}
+
 // === Chat2Config System ===
 
 // ConfigIntent represents a configuration change intent.
@@ -599,20 +632,28 @@ func GlobalGuard() *SafetyGuard {
 }
 
 // InitGuard initializes the global SafetyGuard.
-func InitGuard(config GuardConfig, logger *slog.Logger) {
+func InitGuard(config GuardConfig, logger *slog.Logger) error {
+	var initErr error
 	guardOnce.Do(func() {
 		if Global() == nil {
-			logger.Debug("Cannot init Guard: Brain not configured")
+			initErr = fmt.Errorf("brain not configured")
 			return
 		}
 
-		globalGuard = NewSafetyGuard(Global(), config, logger)
+		guard, err := NewSafetyGuard(Global(), config, logger)
+		if err != nil {
+			initErr = fmt.Errorf("failed to create SafetyGuard: %w", err)
+			return
+		}
+
+		globalGuard = guard
 		logger.Info("SafetyGuard initialized",
 			"enabled", config.Enabled,
 			"input_guard", config.InputGuardEnabled,
 			"output_guard", config.OutputGuardEnabled,
 			"chat2config", config.Chat2ConfigEnabled)
 	})
+	return initErr
 }
 
 // CheckInputSafe is a convenience function for input checking.

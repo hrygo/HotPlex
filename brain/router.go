@@ -2,6 +2,8 @@ package brain
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -278,14 +280,13 @@ func (r *IntentRouter) buildContextualPrompt(msg string, history []string) strin
 	return sb.String()
 }
 
-// cacheKey generates a cache key for a message.
+// cacheKey generates a cache key for a message using SHA256 hash.
 func (r *IntentRouter) cacheKey(msg string) string {
-	// Simple hash based on content
+	// Normalize message
 	msg = strings.TrimSpace(strings.ToLower(msg))
-	if len(msg) > 100 {
-		msg = msg[:100]
-	}
-	return msg
+	// Use SHA256 hash for unique cache key
+	hash := sha256.Sum256([]byte(msg))
+	return hex.EncodeToString(hash[:])
 }
 
 // getFromCache retrieves a cached intent result.
