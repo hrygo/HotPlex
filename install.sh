@@ -35,16 +35,16 @@ SKIP_WIZARD=false
 FORCE=false
 INTERACTIVE=true
 
-# 颜色定义
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly CYAN='\033[0;36m'
-readonly MAGENTA='\033[0;35m'
-readonly BOLD='\033[1m'
-readonly DIM='\033[2m'
-readonly NC='\033[0m'
+# 颜色定义 (非 readonly，允许 init_colors 修改)
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
 
 # 临时文件
 TEMP_DIR=""
@@ -515,7 +515,7 @@ parse_args() {
             -h|--help)        show_help ;;
             --version)        show_version ;;
             -*)               error "未知选项: $1\n使用 -h 查看帮助" ;;
-            *)                error "未知参数: $1" ;;
+            *)                break ;;
         esac
     done
 
