@@ -150,12 +150,32 @@ func (b *SystemMessageBuilder) BuildUserMessageReceivedMessage(msg *base.ChatMes
 	}
 }
 
-// FormatDuration formats duration for display
+// FormatDuration formats duration for display with smart human-readable output
+// Examples: 500ms, 12s, 1m 30s, 30m, 1h 15m
 func FormatDuration(durationMs int64) string {
-	if durationMs > 1000 {
-		return fmt.Sprintf("%.2fs", float64(durationMs)/1000)
+	if durationMs < 1000 {
+		return fmt.Sprintf("%dms", durationMs)
 	}
-	return fmt.Sprintf("%dms", durationMs)
+
+	totalSeconds := durationMs / 1000
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+
+	switch {
+	case hours > 0:
+		if minutes > 0 {
+			return fmt.Sprintf("%dh %dm", hours, minutes)
+		}
+		return fmt.Sprintf("%dh", hours)
+	case minutes > 0:
+		if seconds > 0 {
+			return fmt.Sprintf("%dm %ds", minutes, seconds)
+		}
+		return fmt.Sprintf("%dm", minutes)
+	default:
+		return fmt.Sprintf("%ds", seconds)
+	}
 }
 
 // TimeToSlackTimestamp converts time.Time to Slack timestamp format

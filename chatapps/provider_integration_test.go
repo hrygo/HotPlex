@@ -75,7 +75,7 @@ func TestProviderToSlackTokenDisplay(t *testing.T) {
 
 	// Verify all expected stats are present
 	assert.Contains(t, textElem.Text, "⏱️")
-	assert.Contains(t, textElem.Text, "2.00s")
+	assert.Contains(t, textElem.Text, "2s")
 	assert.Contains(t, textElem.Text, "⚡")
 	assert.Contains(t, textElem.Text, "1.2K/350")
 	assert.Contains(t, textElem.Text, "📝")
@@ -134,7 +134,7 @@ func TestProviderToSlackTokenDisplay_NoUsage(t *testing.T) {
 
 	// Should contain duration but NOT tokens
 	assert.Contains(t, textElem.Text, "⏱️")
-	assert.Contains(t, textElem.Text, "1000ms")
+	assert.Contains(t, textElem.Text, "1s")
 	// Should NOT contain tokens emoji since both are 0
 	assert.NotContains(t, textElem.Text, "⚡")
 }

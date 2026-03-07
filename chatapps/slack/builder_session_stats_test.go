@@ -115,7 +115,7 @@ func TestBuildSessionStatsMessage_WithAllFields(t *testing.T) {
 
 	// Check all expected stats are present in the text
 	assert.Contains(t, textElem.Text, "⏱️")
-	assert.Contains(t, textElem.Text, "12.50s")
+	assert.Contains(t, textElem.Text, "12s")
 
 	assert.Contains(t, textElem.Text, "⚡")
 	assert.Contains(t, textElem.Text, "1.2K/350")

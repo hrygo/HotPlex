@@ -393,3 +393,44 @@ func TestBuild_DefaultToAnswerForUnknownType(t *testing.T) {
 	// Should fallback to answer message
 	assert.NotNil(t, blocks)
 }
+
+// =============================================================================
+// FormatDuration Tests
+// =============================================================================
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		input    int64
+		expected string
+	}{
+		// Milliseconds
+		{0, "0ms"},
+		{100, "100ms"},
+		{500, "500ms"},
+		{999, "999ms"},
+		// Seconds
+		{1000, "1s"},
+		{5000, "5s"},
+		{30000, "30s"},
+		{59000, "59s"},
+		// Minutes
+		{60000, "1m"},
+		{90000, "1m 30s"},
+		{120000, "2m"},
+		{1800000, "30m"},
+		{3540000, "59m"},
+		// Hours
+		{3600000, "1h"},
+		{4500000, "1h 15m"},
+		{5400000, "1h 30m"},
+		{7200000, "2h"},
+		{18000000, "5h"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := FormatDuration(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
