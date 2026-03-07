@@ -4,7 +4,7 @@
 
 ### 🔧 Patch Release
 
-This release fixes multi-bot volume isolation issues, refactors Docker Compose configuration using YAML anchors, and unifies ChunkMessage implementation across chatapps.
+This release fixes multi-bot volume isolation issues, refactors Docker Compose configuration using YAML anchors, unifies ChunkMessage implementation, and adds comprehensive system_prompt customization guidance.
 
 ### Fixed
 
@@ -28,6 +28,14 @@ This release fixes multi-bot volume isolation issues, refactors Docker Compose c
 - **.dockerignore** - Prevents sensitive files (`.env`, credentials, IDE configs) from being included in Docker build context
 - **Gitconfig Setup Script** - `scripts/setup_gitconfig.sh` with input validation and idempotency checks for generating bot git identities
 
+### Docs
+
+#### System Prompt Customization Guidance
+- **Config Warning** - Added prominent `⚠️ CUSTOMIZE THIS PROMPT` notice in `chatapps/configs/slack.yaml`
+- **Manual Updates** - Added "自定义 AI 身份与行为" section in both EN/ZH Slack manuals
+- **Beginner Tutorials** - Added reminder for customizing `system_prompt` in beginner setup guides
+- **Git Workflow** - Enhanced Git workflow section with Fork + Feature Branch pattern, sync-only main branch, and safety rules
+
 ### Technical Notes
 
 ```yaml
@@ -42,7 +50,19 @@ services:
     build: .              # Override: build from local source
 ```
 
+```yaml
+# Main Branch: SYNC-ONLY (no development)
+git checkout main
+git fetch upstream
+git reset --hard upstream/main    # Force sync
+git push origin main --force
+```
+
 ### Reference Commits
+- 8180353 docs(chatapps): add system_prompt customization guidance
+- 9804ab9 docs(config): reorganize system_prompt chapter order
+- 9253f1d docs(config): main branch is SYNC-ONLY with upstream
+- ff57dac docs(config): enhance Git Workflow in slack.yaml system_prompt
 - fb279d4 refactor(docker): migrate to YAML anchors and simplify Makefile
 - a51f64f refactor(docker): improve compose config with YAML anchors
 - aa113d5 fix(docker): fix multi-bot volume isolation in docker-compose
