@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	flushInterval = 150 * time.Millisecond
-	flushSize     = 20 // rune count threshold for immediate flush
+	flushInterval    = 150 * time.Millisecond
+	flushSize        = 20 // rune count threshold for immediate flush
+	maxAppendRetries = 3  // max retry attempts for AppendStream
+	retryDelay       = 50 * time.Millisecond
 )
 
 // NativeStreamingWriter 实现 io.Writer 接口，封装 Slack 原生流式消息的生命周期管理
@@ -36,6 +38,10 @@ type NativeStreamingWriter struct {
 	flushTrigger chan struct{}
 	closeChan    chan struct{}
 	wg           sync.WaitGroup
+
+	// Fallback 机制：累积所有内容用于最终 fallback
+	accumulatedContent bytes.Buffer
+	fallbackUsed       bool // 标记是否使用了 fallback
 }
 
 // NewNativeStreamingWriter 创建新的原生流式写入器
@@ -100,14 +106,33 @@ func (w *NativeStreamingWriter) flushBuffer() {
 		return
 	}
 
-	// 增量推送到流
-	if err := w.adapter.AppendStream(w.ctx, w.channelID, w.messageTS, content); err != nil {
-		w.adapter.Logger().Warn("AppendStream failed, content may be lost",
-			"channel_id", w.channelID,
-			"message_ts", w.messageTS,
-			"content_runes", utf8.RuneCountInString(content),
-			"error", err)
+	// 增量推送到流（带重试机制）
+	var lastErr error
+	for attempt := 1; attempt <= maxAppendRetries; attempt++ {
+		if err := w.adapter.AppendStream(w.ctx, w.channelID, w.messageTS, content); err != nil {
+			lastErr = err
+			w.adapter.Logger().Warn("AppendStream failed, will retry",
+				"channel_id", w.channelID,
+				"message_ts", w.messageTS,
+				"content_runes", utf8.RuneCountInString(content),
+				"attempt", attempt,
+				"max_retries", maxAppendRetries,
+				"error", err)
+			if attempt < maxAppendRetries {
+				time.Sleep(retryDelay * time.Duration(attempt))
+			}
+			continue
+		}
+		// 成功，清除错误并返回
+		return
 	}
+
+	// 所有重试都失败，记录错误但保留内容用于 fallback
+	w.adapter.Logger().Error("AppendStream failed after all retries",
+		"channel_id", w.channelID,
+		"message_ts", w.messageTS,
+		"content_runes", utf8.RuneCountInString(content),
+		"error", lastErr)
 }
 
 // Write 实现 io.Writer 接口
@@ -135,6 +160,7 @@ func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
 	}
 
 	w.buf.Write(p)
+	w.accumulatedContent.Write(p) // 累积内容用于潜在 fallback
 
 	// 如果超过 rune 阈值，立即触发一次 flush
 	if utf8.RuneCount(w.buf.Bytes()) >= flushSize {
@@ -148,6 +174,7 @@ func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
 }
 
 // Close 结束流，清理并固化消息
+// 如果流失败，会尝试 fallback 到普通消息发送
 func (w *NativeStreamingWriter) Close() error {
 	w.mu.Lock()
 	if w.closed {
@@ -157,6 +184,7 @@ func (w *NativeStreamingWriter) Close() error {
 
 	w.closed = true
 	started := w.started
+	accumulated := w.accumulatedContent.String()
 	w.mu.Unlock()
 
 	// 停止处理并等待残留缓冲区发送完成
@@ -173,6 +201,30 @@ func (w *NativeStreamingWriter) Close() error {
 	// 调用完成回调
 	if w.onComplete != nil {
 		w.onComplete(w.messageTS)
+	}
+
+	// Fallback 机制：如果流失败且有累积内容，尝试直接发送完整消息
+	if stopErr != nil && len(accumulated) > 0 {
+		w.adapter.Logger().Warn("Stream stop failed, attempting fallback message",
+			"channel_id", w.channelID,
+			"content_len", len(accumulated),
+			"original_error", stopErr)
+
+		// 使用 SendThreadReply 作为 fallback
+		if fallbackErr := w.adapter.SendThreadReply(w.ctx, w.channelID, w.threadTS, accumulated); fallbackErr != nil {
+			w.adapter.Logger().Error("Fallback message also failed",
+				"channel_id", w.channelID,
+				"error", fallbackErr)
+			return fmt.Errorf("stream stop failed: %w; fallback also failed: %w", stopErr, fallbackErr)
+		}
+
+		w.adapter.Logger().Info("Fallback message sent successfully",
+			"channel_id", w.channelID,
+			"content_len", len(accumulated))
+		w.mu.Lock()
+		w.fallbackUsed = true
+		w.mu.Unlock()
+		return nil
 	}
 
 	if stopErr != nil {
@@ -201,6 +253,20 @@ func (w *NativeStreamingWriter) IsClosed() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.closed
+}
+
+// FallbackUsed 返回是否使用了 fallback 机制
+func (w *NativeStreamingWriter) FallbackUsed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.fallbackUsed
+}
+
+// GetAccumulatedContent 返回累积的所有内容（用于调试）
+func (w *NativeStreamingWriter) GetAccumulatedContent() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.accumulatedContent.String()
 }
 
 // Ensure NativeStreamingWriter implements io.WriteCloser at compile time

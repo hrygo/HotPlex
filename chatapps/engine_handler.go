@@ -276,6 +276,9 @@ type StreamCallback struct {
 	streamWriter       base.StreamWriter // Platform-agnostic streaming writer
 	streamWriterActive bool              // Whether native streaming is active
 
+	// Fallback mechanism - accumulate content when streaming unavailable
+	accumulatedContent strings.Builder // Accumulated answer content for fallback
+
 	// Idle state detection
 	idleTimer  *time.Timer
 	isFinished bool
@@ -814,7 +817,14 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		content = v
 	}
 
+	if content == "" {
+		return nil
+	}
+
 	c.mu.Lock()
+
+	// Always accumulate content for potential fallback
+	c.accumulatedContent.WriteString(content)
 
 	// Initialize native streaming on the FIRST answer chunk
 	if !c.streamWriterActive && c.streamWriter == nil {
@@ -841,6 +851,9 @@ func (c *StreamCallback) handleAnswer(data any) error {
 						c.logger.Warn("Failed to update status for answer", "error", err)
 					}
 				}()
+			} else {
+				c.logger.Warn("Native streaming unavailable, will use fallback at session end",
+					"channel_id", channelID)
 			}
 		}
 	}
@@ -859,16 +872,22 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		// PRIORITIZE UI: Write to stream immediately so user sees progress
 		n, err := writer.Write([]byte(content))
 		if err != nil {
-			c.logger.Error("Failed to write to native stream, answering completely failed", "error", err)
-			return err
+			c.logger.Error("Failed to write to native stream",
+				"error", err,
+				"content_len", len(content))
+			// Don't return error - content is still accumulated for fallback
+			// The Close() method will handle fallback
+			return nil
 		}
 
 		c.logger.Debug("Successfully wrote to native stream", "bytes", n)
 		return nil
 	}
 
-	c.logger.Error("Native streaming could not be initialized, dropping answer")
-	return fmt.Errorf("native streaming unavailable")
+	// Streaming unavailable - content is accumulated for fallback at session end
+	c.logger.Debug("Answer chunk accumulated for fallback",
+		"chunk_len", len(content))
+	return nil
 }
 
 func (c *StreamCallback) handleError(data any) error {
@@ -992,14 +1011,44 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 	if c.idleTimer != nil {
 		c.idleTimer.Stop()
 	}
-	if c.streamWriter != nil {
-		if err := c.streamWriter.Close(); err != nil {
+
+	// Capture accumulated content and streaming state BEFORE closing writer
+	accumulatedContent := c.accumulatedContent.String()
+	streamWasActive := c.streamWriterActive
+	streamWriter := c.streamWriter
+
+	if streamWriter != nil {
+		if err := streamWriter.Close(); err != nil {
 			c.logger.Warn("Failed to close stream", "error", err)
 		}
 		c.streamWriter = nil
 		c.streamWriterActive = false
 	}
 	c.mu.Unlock()
+
+	// Fallback mechanism: if streaming was never active but we have accumulated content,
+	// send the content via direct message
+	if !streamWasActive && len(accumulatedContent) > 0 {
+		c.logger.Info("Streaming was inactive, sending accumulated content via fallback",
+			"content_len", len(accumulatedContent))
+
+		channelID, _ := c.metadata["channel_id"].(string)
+		threadTS, _ := c.metadata["thread_ts"].(string)
+
+		if channelID != "" && c.messageOps != nil {
+			if err := c.messageOps.SendThreadReply(c.ctx, channelID, threadTS, accumulatedContent); err != nil {
+				c.logger.Error("Fallback message send failed",
+					"channel_id", channelID,
+					"content_len", len(accumulatedContent),
+					"error", err)
+				// Don't return error - session stats are still valuable
+			} else {
+				c.logger.Info("Fallback message sent successfully",
+					"channel_id", channelID,
+					"content_len", len(accumulatedContent))
+			}
+		}
+	}
 
 	// Final cleanup of transient transition messages (Thinking + Action Zone)
 	// This applies a 3s delayed deletion for a clean end-state UX
