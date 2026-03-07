@@ -30,6 +30,7 @@ DRY_RUN=false
 VERBOSE=false
 QUIET=false
 SKIP_VERIFY=false
+SKIP_WIZARD=false
 FORCE=false
 
 # 颜色定义
@@ -328,6 +329,7 @@ HotPlex 一键安装脚本 v2.0
   -q, --quiet            静默模式
   -V, --verbose          详细输出
   --skip-verify          跳过校验和验证
+  --skip-wizard          跳过安装后配置向导
   -h, --help             显示帮助信息
   --version              显示脚本版本
 
@@ -366,6 +368,7 @@ parse_args() {
             -q|--quiet)       QUIET=true; shift ;;
             -V|--verbose)     VERBOSE=true; shift ;;
             --skip-verify)    SKIP_VERIFY=true; shift ;;
+            --skip-wizard)    SKIP_WIZARD=true; shift ;;
             -h|--help)        show_help ;;
             --version)        show_version ;;
             -*)               error "未知选项: $1\n使用 -h 查看帮助" ;;
@@ -488,6 +491,147 @@ EOF
     warn "请编辑配置文件并填写必要凭据!"
 }
 
+# ==============================================================================
+# 安装后向导
+# ==============================================================================
+
+# 向导：配置 Claude Code
+wizard_claude_code() {
+    echo ""
+    raw "${BOLD}${CYAN}[1/2] Claude Code 配置${NC}"
+    echo ""
+
+    # 检查 claude 是否已安装
+    if command_exists claude; then
+        local claude_version
+        claude_version=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+        success "已检测到 Claude Code: $claude_version"
+
+        # 检查 ANTHROPIC_API_KEY
+        if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+            success "ANTHROPIC_API_KEY 已设置"
+        else
+            warn "ANTHROPIC_API_KEY 未设置"
+            echo ""
+            echo "  Claude Code 需要设置 ANTHROPIC_API_KEY 环境变量"
+            echo "  获取 API Key: https://console.anthropic.com/"
+            echo ""
+            echo "  设置方法 (添加到 ~/.bashrc 或 ~/.zshrc):"
+            echo "    export ANTHROPIC_API_KEY='your-api-key-here'"
+        fi
+        return 0
+    fi
+
+    echo "  Claude Code 是 HotPlex 的推荐 AI 引擎"
+    echo "  安装方法:"
+    echo ""
+    echo "    npm install -g @anthropic-ai/claude-code"
+    echo ""
+    echo "  或使用 Homebrew (macOS):"
+    echo "    brew install claude"
+    echo ""
+    echo "  安装后请设置环境变量:"
+    echo "    export ANTHROPIC_API_KEY='your-api-key'"
+    echo ""
+}
+
+# 向导：配置 Slack Bot
+wizard_slack_config() {
+    local env_file="${CONFIG_DIR}/.env"
+
+    echo ""
+    raw "${BOLD}${CYAN}[2/2] Slack Bot 配置${NC}"
+    echo ""
+
+    if [[ ! -f "$env_file" ]]; then
+        warn "配置文件不存在，请先运行安装"
+        return 1
+    fi
+
+    # 检查当前配置状态
+    local has_slack_token=false
+    local has_slack_app_token=false
+    local has_github_token=false
+
+    grep -q "HOTPLEX_SLACK_BOT_TOKEN=xoxb-" "$env_file" 2>/dev/null && has_slack_token=true
+    grep -q "HOTPLEX_SLACK_APP_TOKEN=xapp-" "$env_file" 2>/dev/null && has_slack_app_token=true
+    grep -q "GITHUB_TOKEN=ghp_" "$env_file" 2>/dev/null && has_github_token=true
+
+    echo "  配置状态:"
+    echo "    Slack Bot Token:   $([[ "$has_slack_token" == "true" ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
+    echo "    Slack App Token:   $([[ "$has_slack_app_token" == "true" ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
+    echo "    GitHub Token:      $([[ "$has_github_token" == "true" ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
+    echo ""
+
+    # 如果都已配置，跳过
+    if [[ "$has_slack_token" == "true" ]] && [[ "$has_slack_app_token" == "true" ]]; then
+        success "Slack 配置已完成"
+        return 0
+    fi
+
+    echo "  ${BOLD}如何获取 Slack 凭据:${NC}"
+    echo ""
+    echo "  1. 访问 https://api.slack.com/apps"
+    echo "  2. 创建新 App 或选择现有 App"
+    echo "  3. 获取以下信息:"
+    echo ""
+    echo "     Bot User OAuth Token (xoxb-...):"
+    echo "       → OAuth & Permissions → Bot User OAuth Token"
+    echo ""
+    echo "     App-Level Token (xapp-...):"
+    echo "       → Basic Information → App-Level Tokens"
+    echo ""
+    echo "     Bot User ID (U...):"
+    echo "       → 点击机器人头像，查看 Member ID"
+    echo ""
+    echo "  4. 编辑配置文件:"
+    echo "     ${CONFIG_DIR}/.env"
+    echo ""
+}
+
+# 运行安装向导
+run_setup_wizard() {
+    # 检查是否跳过向导
+    if [[ "$SKIP_WIZARD" == "true" ]]; then
+        debug "跳过配置向导"
+        # 显示简单的完成信息
+        echo ""
+        raw "${GREEN}${BOLD}🎉 HotPlex 安装成功!${NC}"
+        echo ""
+        echo "后续步骤:"
+        echo "  1. 配置 Claude Code (如尚未): npm install -g @anthropic-ai/claude-code"
+        echo "  2. 编辑配置: ${CONFIG_DIR}/.env"
+        echo "  3. 启动服务: ${BINARY_NAME} -env ${CONFIG_DIR}/.env"
+        echo ""
+        return 0
+    fi
+
+    # 检查是否是非交互模式
+    if [[ ! -t 0 ]] || [[ "$QUIET" == "true" ]] || [[ "$DRY_RUN" == "true" ]]; then
+        debug "非交互模式，跳过向导"
+        return 0
+    fi
+
+    echo ""
+    raw "${BOLD}════════════════════════════════════════════════════════════${NC}"
+    raw "${BOLD}                    🧙 安装后配置向导                        ${NC}"
+    raw "${BOLD}════════════════════════════════════════════════════════════${NC}"
+
+    wizard_claude_code
+    wizard_slack_config
+
+    echo ""
+    raw "${BOLD}────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    raw "${GREEN}✓ 配置向导完成${NC}"
+    echo ""
+    echo "  下一步:"
+    echo "    1. 完成上述配置（如尚未完成）"
+    echo "    2. 编辑配置: ${CONFIG_DIR}/.env"
+    echo "    3. 启动服务: ${BINARY_NAME} -env ${CONFIG_DIR}/.env"
+    echo ""
+}
+
 # 安装
 do_install() {
     local os arch version archive_name archive_url archive_path checksums_path
@@ -593,16 +737,8 @@ do_install() {
     # 生成配置
     generate_config
 
-    # 完成
-    echo ""
-    raw "${GREEN}${BOLD}🎉 HotPlex 安装成功!${NC}"
-    echo ""
-    echo "后续步骤:"
-    echo "  1. 编辑配置: ${CONFIG_DIR}/.env"
-    echo "  2. 启动服务: ${BINARY_NAME} -env ${CONFIG_DIR}/.env"
-    echo "  3. 查看帮助: ${BINARY_NAME} -h"
-    echo ""
-    echo "文档: https://github.com/hrygo/hotplex#readme"
+    # 运行配置向导
+    run_setup_wizard
 
     # 清理备份标记
     CLEANUP_PENDING=false
