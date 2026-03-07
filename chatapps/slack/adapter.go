@@ -134,7 +134,17 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 	return a
 }
 
-// initStoragePlugin initializes the message storage plugin
+// initStoragePlugin initializes the message storage plugin based on config.
+//
+// Supported Storage Types:
+//   - "memory": In-memory storage (default, no persistence)
+//   - "sqlite": SQLite file storage (requires CGO)
+//   - "postgresql": PostgreSQL storage (requires PostgreSQLURL)
+//
+// Graceful Degradation:
+//   - Unknown types fall back to "memory"
+//   - Initialization failure is logged but doesn't prevent adapter startup
+//   - storePlugin remains nil if initialization fails
 func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) error {
 	// Create storage backend using factory
 	registry := storage.GlobalRegistry()
@@ -170,12 +180,12 @@ func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) err
 		store, _ = registry.Get("memory", nil)
 	}
 
-	// Initialize storage
+	// Initialize storage backend (creates tables if needed)
 	if err := store.Initialize(context.Background()); err != nil {
 		return err
 	}
 
-	// Create session manager
+	// Create session manager for consistent session ID generation
 	sessionMgr := session.NewSessionManager("hotplex")
 
 	// Create message store plugin
@@ -240,7 +250,13 @@ func (a *Adapter) Stop() error {
 	return a.Adapter.Stop()
 }
 
-// storeUserMessage stores user message if storage is enabled
+// storeUserMessage stores a user message to the persistent storage if enabled.
+//
+// Session ID Design:
+//   - SessionID is derived from (platform, botUserID, channelID, threadTS) - NOT userID
+//   - This ensures all messages in a thread share the same session, regardless of sender
+//   - ChatUserID in MessageContext is set to msg.UserID to identify the actual sender
+//   - This enables: (1) thread-based history retrieval, (2) user-filtered queries
 func (a *Adapter) storeUserMessage(ctx context.Context, msg *base.ChatMessage) {
 	if a.storePlugin == nil {
 		return
@@ -249,8 +265,7 @@ func (a *Adapter) storeUserMessage(ctx context.Context, msg *base.ChatMessage) {
 	channelID, _ := msg.Metadata["channel_id"].(string)
 	threadTS, _ := msg.Metadata["thread_ts"].(string)
 
-	// Use stored session manager for consistent session ID generation
-	// Note: sessionID is thread-based (empty userID) to ensure user and bot messages share the same session
+	// Generate session context with empty userID - session is thread-based, not user-based
 	sessionCtx := a.sessionMgr.CreateSessionContext("slack", "", a.config.BotUserID, channelID, threadTS, "claude")
 
 	msgCtx, err := base.NewMessageContextBuilder().
@@ -271,14 +286,18 @@ func (a *Adapter) storeUserMessage(ctx context.Context, msg *base.ChatMessage) {
 	}
 }
 
-// storeBotResponse stores bot response if storage is enabled
+// storeBotResponse stores a bot response to the persistent storage if enabled.
+//
+// Session ID Design (same as storeUserMessage):
+//   - SessionID is derived from (platform, botUserID, channelID, threadTS) - NOT userID
+//   - Empty ChatUserID in MessageContext indicates bot as sender
+//   - This ensures bot responses are grouped with user messages in the same thread session
 func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, threadTS, content string) {
 	if a.storePlugin == nil {
 		return
 	}
 
-	// Use stored session manager for consistent session ID generation
-	// Note: userID is empty for bot responses, matching sessionID generation in GetThreadHistory
+	// Generate session context with empty userID for consistent session ID
 	sessionCtx := a.sessionMgr.CreateSessionContext("slack", "", a.config.BotUserID, channelID, threadTS, "claude")
 
 	msgCtx, err := base.NewMessageContextBuilder().
@@ -298,18 +317,21 @@ func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, th
 	}
 }
 
-// GetThreadHistory retrieves message history for a thread session
-// Returns messages in chronological order (oldest first)
+// GetThreadHistory retrieves message history for a thread session.
+// Returns messages in chronological order (oldest first) for AI context building.
+//
+// Query Design:
+//   - SessionID is generated with empty userID to match how messages are stored
+//   - This retrieves ALL messages in the thread (both user and bot)
+//   - Use GetThreadHistoryByUser for user-filtered queries
 func (a *Adapter) GetThreadHistory(ctx context.Context, channelID, threadTS string, limit int) ([]*storage.ChatAppMessage, error) {
 	if a.storePlugin == nil {
 		return nil, fmt.Errorf("storage not enabled")
 	}
 
-	// Use stored session manager for consistent session ID generation
-	// Empty userID for thread-based session (matches storeUserMessage/storeBotResponse)
+	// Generate session ID with empty userID - must match storeUserMessage/storeBotResponse
 	sessionID := a.sessionMgr.GetChatSessionID("slack", "", a.config.BotUserID, channelID, threadTS)
 
-	// Query messages
 	if limit <= 0 {
 		limit = 100
 	}
@@ -358,23 +380,29 @@ func (a *Adapter) GetThreadHistoryAsString(ctx context.Context, channelID, threa
 	return formatMessagesAsString(messages), nil
 }
 
-// GetThreadHistoryByUser retrieves message history for a thread session, filtered by user ID
-// This provides database-level filtering by ChatUserID for efficient queries
+// GetThreadHistoryByUser retrieves message history filtered by a specific user ID.
+//
+// Use Case:
+//   - Query messages from a specific user in a multi-user thread
+//   - Database-level filtering for better performance than in-memory filtering
+//
+// Design:
+//   - SessionID matches GetThreadHistory (thread-based, empty userID)
+//   - ChatUserID filter is applied at database level for efficiency
 func (a *Adapter) GetThreadHistoryByUser(ctx context.Context, channelID, threadTS, userID string, limit int) ([]*storage.ChatAppMessage, error) {
 	if a.storePlugin == nil {
 		return nil, fmt.Errorf("storage not enabled")
 	}
 
-	// Use stored session manager for consistent session ID generation
+	// Generate session ID with empty userID for thread-level session
 	sessionID := a.sessionMgr.GetChatSessionID("slack", "", a.config.BotUserID, channelID, threadTS)
 
-	// Query messages with ChatUserID filter
 	if limit <= 0 {
 		limit = 100
 	}
 	query := &storage.MessageQuery{
 		ChatSessionID: sessionID,
-		ChatUserID:    userID, // Filter by actual user ID at database level
+		ChatUserID:    userID, // Database-level filter by actual sender
 		Limit:         limit,
 		Ascending:     true,
 	}

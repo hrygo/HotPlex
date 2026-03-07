@@ -60,19 +60,34 @@ type Config struct {
 	// If nil, uses DefaultBroadcastResponse.
 	BroadcastResponder BroadcastResponder
 
-	// Storage configuration for message persistence
+	// Storage configuration for message persistence (optional)
+	// When enabled, stores user messages and bot responses for history retrieval
 	Storage *StorageConfig
 }
 
-// StorageConfig holds message storage configuration for Slack adapter
+// StorageConfig holds message storage configuration for Slack adapter.
+//
+// Storage Architecture:
+//   - Session ID is derived from (platform, botUserID, channelID, threadTS)
+//   - Messages are grouped by thread, enabling conversation history retrieval
+//   - ChatUserID field distinguishes message sender for user-filtered queries
+//
+// Example Usage:
+//
+//	&StorageConfig{
+//	    Enabled:   true,
+//	    Type:      "sqlite",
+//	    SQLitePath: "data/slack_messages.db",
+//	}
 type StorageConfig struct {
 	// Enabled enables message storage
 	Enabled bool
-	// Type: "memory", "sqlite", "postgresql"
+	// Type: "memory" (default), "sqlite", "postgresql"
 	Type string
-	// SQLite specific config
+	// SQLitePath: Path to SQLite database file (only for type="sqlite")
 	SQLitePath string
-	// PostgreSQL connection URL (e.g., "postgres://user:pass@localhost:5432/hotplex")
+	// PostgreSQLURL: Connection URL for PostgreSQL (only for type="postgresql")
+	// Format: "postgres://user:pass@host:port/dbname"
 	PostgreSQLURL string
 	// StreamEnabled enables streaming message buffering
 	StreamEnabled bool
