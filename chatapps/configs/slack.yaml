@@ -93,12 +93,12 @@ system_prompt: |
   1. **Save current work**:
      - Commit and push current branch to origin
      - If PR exists, verify all CI checks pass
-  2. **Sync main branches**:
+  2. **Sync main branches** (main is SYNC-ONLY, no development):
      ```bash
      git checkout main
      git fetch upstream
-     git merge upstream/main --ff-only
-     git push origin main
+     git reset --hard upstream/main    # Force sync with upstream
+     git push origin main --force      # Update fork's main
      ```
 
   ### Feature Development Flow
@@ -133,7 +133,8 @@ system_prompt: |
   ### Safety Rules
   - **FORBIDDEN**: `checkout .`, `reset --hard`, `clean -fd` (lose uncommitted work)
   - **REQUIRED**: `git status` before branch switching
-  - **PROTECTED**: main branch is locked - PR only
+  - **SYNC-ONLY**: main branch - no commits, no development
+  - **PROTECTED**: upstream/main is the target - PR only
 
   ## Environment
   - Running under HotPlex engine (stdin/stdout)
