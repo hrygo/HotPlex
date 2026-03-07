@@ -36,6 +36,7 @@ type ChatAppMessage struct {
 // MessageQuery 消息查询条件
 type MessageQuery struct {
 	ChatSessionID     string
+	ChatUserID        string         // 按用户ID过滤
 	EngineSessionID   uuid.UUID
 	ProviderType      string
 	ProviderSessionID string

@@ -101,6 +101,10 @@ func (s *SQLiteStorage) List(ctx context.Context, query *MessageQuery) ([]*ChatA
 		sqlQuery += " AND chat_session_id = ?"
 		args = append(args, query.ChatSessionID)
 	}
+	if query.ChatUserID != "" {
+		sqlQuery += " AND chat_user_id = ?"
+		args = append(args, query.ChatUserID)
+	}
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, err
@@ -121,6 +125,10 @@ func (s *SQLiteStorage) Count(ctx context.Context, query *MessageQuery) (int64, 
 	if query.ChatSessionID != "" {
 		sqlQuery += " AND chat_session_id = ?"
 		args = append(args, query.ChatSessionID)
+	}
+	if query.ChatUserID != "" {
+		sqlQuery += " AND chat_user_id = ?"
+		args = append(args, query.ChatUserID)
 	}
 	var count int64
 	err := s.db.QueryRowContext(ctx, sqlQuery, args...).Scan(&count)

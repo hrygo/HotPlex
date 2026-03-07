@@ -61,6 +61,9 @@ func (m *MemoryStorage) List(ctx context.Context, query *MessageQuery) ([]*ChatA
 		if query.ChatSessionID != "" && msg.ChatSessionID != query.ChatSessionID {
 			continue
 		}
+		if query.ChatUserID != "" && msg.ChatUserID != query.ChatUserID {
+			continue
+		}
 		results = append(results, msg)
 	}
 	return results, nil
@@ -75,6 +78,9 @@ func (m *MemoryStorage) Count(ctx context.Context, query *MessageQuery) (int64, 
 			continue
 		}
 		if query.ChatSessionID != "" && msg.ChatSessionID != query.ChatSessionID {
+			continue
+		}
+		if query.ChatUserID != "" && msg.ChatUserID != query.ChatUserID {
 			continue
 		}
 		count++

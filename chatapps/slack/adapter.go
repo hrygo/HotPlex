@@ -347,6 +347,61 @@ func (a *Adapter) GetThreadHistoryAsString(ctx context.Context, channelID, threa
 	return sb.String(), nil
 }
 
+// GetThreadHistoryByUser retrieves message history for a thread session, filtered by user ID
+// This provides database-level filtering by ChatUserID for efficient queries
+func (a *Adapter) GetThreadHistoryByUser(ctx context.Context, channelID, threadTS, userID string, limit int) ([]*storage.ChatAppMessage, error) {
+	if a.storePlugin == nil {
+		return nil, fmt.Errorf("storage not enabled")
+	}
+
+	// Use stored session manager for consistent session ID generation
+	sessionID := a.sessionMgr.GetChatSessionID("slack", "", a.config.BotUserID, channelID, threadTS)
+
+	// Query messages with ChatUserID filter
+	if limit <= 0 {
+		limit = 100
+	}
+	query := &storage.MessageQuery{
+		ChatSessionID: sessionID,
+		ChatUserID:    userID, // Filter by actual user ID at database level
+		Limit:         limit,
+		Ascending:     true,
+	}
+
+	messages, err := a.storePlugin.ListMessages(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	return messages, nil
+}
+
+// GetThreadHistoryByUserAsString returns user-filtered thread history as a formatted string
+func (a *Adapter) GetThreadHistoryByUserAsString(ctx context.Context, channelID, threadTS, userID string, limit int) (string, error) {
+	messages, err := a.GetThreadHistoryByUser(ctx, channelID, threadTS, userID, limit)
+	if err != nil {
+		return "", err
+	}
+
+	if len(messages) == 0 {
+		return "", nil
+	}
+
+	var sb strings.Builder
+	for _, msg := range messages {
+		timestamp := msg.CreatedAt.Format("2006-01-02 15:04:05")
+		var role string
+		if msg.MessageType == types.MessageTypeUserInput {
+			role = "User"
+		} else {
+			role = "Assistant"
+		}
+		fmt.Fprintf(&sb, "[%s] %s: %s\n", timestamp, role, msg.Content)
+	}
+
+	return sb.String(), nil
+}
+
 // Start starts the adapter
 func (a *Adapter) Start(ctx context.Context) error {
 	// Start Socket Mode if enabled (preferred mode)
