@@ -303,22 +303,22 @@ func (w *NativeStreamingWriter) GetAccumulatedContent() string {
 	return w.accumulatedContent.String()
 }
 
-// Stats 返回流的统计信息（用于完整性校验和监控）
-type StreamStats struct {
-	BytesWritten      int64    // 成功写入的总字节数
-	BytesFlushed      int64    // 成功 flush 的总字节数
-	FailedChunkCount  int      // 失败的 flush 块数量
-	IntegrityOK       bool     // 完整性校验是否通过
-	FallbackUsed      bool     // 是否使用了 fallback
-	ContentLength     int      // 累积内容总长度
+// StreamWriterStats returns stream statistics for integrity validation and monitoring
+type StreamWriterStats struct {
+	BytesWritten     int64  // Total bytes successfully written
+	BytesFlushed     int64  // Total bytes successfully flushed
+	FailedChunkCount int    // Number of failed flush chunks
+	IntegrityOK      bool   // Whether integrity check passed
+	FallbackUsed     bool   // Whether fallback mechanism was used
+	ContentLength    int    // Total length of accumulated content
 }
 
-// GetStats 返回流的统计信息
-func (w *NativeStreamingWriter) GetStats() StreamStats {
+// GetStats returns stream statistics
+func (w *NativeStreamingWriter) GetStats() StreamWriterStats {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	return StreamStats{
+	return StreamWriterStats{
 		BytesWritten:     w.bytesWritten,
 		BytesFlushed:     w.bytesFlushed,
 		FailedChunkCount: len(w.failedFlushChunks),
