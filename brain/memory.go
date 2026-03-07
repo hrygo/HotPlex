@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // Turn represents a single conversation turn (user + assistant exchange).
@@ -196,7 +199,7 @@ func (c *ContextCompressor) generateSummary(ctx context.Context, turns []Turn) (
 	var sb strings.Builder
 	sb.WriteString("Previous conversation:\n\n")
 	for i, t := range turns {
-		sb.WriteString(fmt.Sprintf("%s: %s\n", strings.Title(t.Role), t.Content))
+		sb.WriteString(fmt.Sprintf("%s: %s\n", cases.Title(language.English).String(t.Role), t.Content))
 		if i > 20 { // Limit context for summary generation
 			sb.WriteString("... (earlier messages omitted)\n")
 			break
