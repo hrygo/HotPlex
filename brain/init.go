@@ -120,7 +120,51 @@ func Init(logger *slog.Logger) error {
 			logger:         logger,
 		})
 
-		logger.Info("Native Brain initialized (Phase 2)",
+		// === Phase 3: Initialize feature components ===
+
+		// Initialize Intent Router
+		if config.IntentRouter.Enabled {
+			InitIntentRouter(IntentRouterConfig{
+				Enabled:             config.IntentRouter.Enabled,
+				ConfidenceThreshold: config.IntentRouter.ConfidenceThreshold,
+				CacheSize:           config.IntentRouter.CacheSize,
+			}, logger)
+		}
+
+		// Initialize Memory Compression
+		if config.Memory.Enabled {
+			sessionTTL, _ := time.ParseDuration(config.Memory.SessionTTL)
+			if sessionTTL == 0 {
+				sessionTTL = 24 * time.Hour
+			}
+			InitMemory(CompressionConfig{
+				Enabled:          config.Memory.Enabled,
+				TokenThreshold:   config.Memory.TokenThreshold,
+				TargetTokenCount: config.Memory.TargetTokenCount,
+				PreserveTurns:    config.Memory.PreserveTurns,
+				MaxSummaryTokens: config.Memory.MaxSummaryTokens,
+				CompressionRatio: config.Memory.CompressionRatio,
+				SessionTTL:       sessionTTL,
+			}, logger)
+		}
+
+		// Initialize Safety Guard
+		if config.Guard.Enabled {
+			InitGuard(GuardConfig{
+				Enabled:            config.Guard.Enabled,
+				InputGuardEnabled:  config.Guard.InputGuardEnabled,
+				OutputGuardEnabled: config.Guard.OutputGuardEnabled,
+				Chat2ConfigEnabled: config.Guard.Chat2ConfigEnabled,
+				MaxInputLength:     config.Guard.MaxInputLength,
+				ScanDepth:          config.Guard.ScanDepth,
+				Sensitivity:        config.Guard.Sensitivity,
+				AdminUsers:         config.Guard.AdminUsers,
+				AdminChannels:      config.Guard.AdminChannels,
+				ResponseTimeout:    config.Guard.ResponseTimeout,
+			}, logger)
+		}
+
+		logger.Info("Native Brain initialized (Phase 3)",
 			"provider", config.Model.Provider,
 			"model", config.Model.Model,
 			"timeout_s", config.Model.TimeoutS,
@@ -130,7 +174,10 @@ func Init(logger *slog.Logger) error {
 			"metrics_enabled", config.Metrics.Enabled,
 			"cost_tracking_enabled", config.Cost.Enabled,
 			"rate_limit_enabled", config.RateLimit.Enabled,
-			"router_enabled", config.Router.Enabled)
+			"router_enabled", config.Router.Enabled,
+			"intent_router_enabled", config.IntentRouter.Enabled,
+			"memory_enabled", config.Memory.Enabled,
+			"guard_enabled", config.Guard.Enabled)
 	default:
 		// Fallback for unknown provider
 		logger.Warn("Unknown brain provider specified. Brain disabled.", "provider", config.Model.Provider)

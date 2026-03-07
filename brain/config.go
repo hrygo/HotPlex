@@ -107,6 +107,41 @@ type PriorityConfig struct {
 	HighPriorityReserve   int
 }
 
+// === Intent Router Configuration ===
+
+type IntentRouterFeatureConfig struct {
+	Enabled             bool
+	ConfidenceThreshold float64
+	CacheSize           int
+}
+
+// === Memory Compression Configuration ===
+
+type MemoryCompressionConfig struct {
+	Enabled          bool
+	TokenThreshold   int
+	TargetTokenCount int
+	PreserveTurns    int
+	MaxSummaryTokens int
+	CompressionRatio float64
+	SessionTTL       string
+}
+
+// === Safety Guard Configuration ===
+
+type SafetyGuardFeatureConfig struct {
+	Enabled            bool          `json:"enabled"`
+	InputGuardEnabled  bool          `json:"input_guard_enabled"`
+	OutputGuardEnabled bool          `json:"output_guard_enabled"`
+	Chat2ConfigEnabled bool          `json:"chat2config_enabled"`
+	MaxInputLength     int           `json:"max_input_length"`
+	ScanDepth          int           `json:"scan_depth"`
+	Sensitivity        string        `json:"sensitivity"`
+	AdminUsers         []string      `json:"admin_users"`
+	AdminChannels      []string      `json:"admin_channels"`
+	ResponseTimeout    time.Duration `json:"response_timeout"`
+}
+
 // === Main Config ===
 
 // Config holds the configuration for the Global Brain.
@@ -135,6 +170,12 @@ type Config struct {
 	Budget BudgetConfig
 	// Priority is the priority configuration.
 	Priority PriorityConfig
+	// IntentRouter is the intent router feature configuration.
+	IntentRouter IntentRouterFeatureConfig
+	// Memory is the memory compression feature configuration.
+	Memory MemoryCompressionConfig
+	// Guard is the safety guard feature configuration.
+	Guard SafetyGuardFeatureConfig
 }
 
 // LoadConfigFromEnv loads the brain configuration from environment variables.
@@ -205,6 +246,32 @@ func LoadConfigFromEnv() Config {
 			EnableLowPriorityDrop: getBoolEnv("HOTPLEX_BRAIN_PRIORITY_ENABLE_LOW_PRIORITY_DROP", true),
 			HighPriorityReserve:   getIntEnv("HOTPLEX_BRAIN_PRIORITY_HIGH_PRIORITY_RESERVE", 100),
 		},
+		IntentRouter: IntentRouterFeatureConfig{
+			Enabled:             getBoolEnv("HOTPLEX_BRAIN_INTENT_ROUTER_ENABLED", true),
+			ConfidenceThreshold: getFloatEnv("HOTPLEX_BRAIN_INTENT_ROUTER_CONFIDENCE", 0.7),
+			CacheSize:           getIntEnv("HOTPLEX_BRAIN_INTENT_ROUTER_CACHE_SIZE", 1000),
+		},
+		Memory: MemoryCompressionConfig{
+			Enabled:          getBoolEnv("HOTPLEX_BRAIN_MEMORY_ENABLED", true),
+			TokenThreshold:   getIntEnv("HOTPLEX_BRAIN_MEMORY_TOKEN_THRESHOLD", 8000),
+			TargetTokenCount: getIntEnv("HOTPLEX_BRAIN_MEMORY_TARGET_TOKENS", 2000),
+			PreserveTurns:    getIntEnv("HOTPLEX_BRAIN_MEMORY_PRESERVE_TURNS", 5),
+			MaxSummaryTokens: getIntEnv("HOTPLEX_BRAIN_MEMORY_MAX_SUMMARY_TOKENS", 500),
+			CompressionRatio: getFloatEnv("HOTPLEX_BRAIN_MEMORY_COMPRESSION_RATIO", 0.25),
+			SessionTTL:       getEnv("HOTPLEX_BRAIN_MEMORY_SESSION_TTL", "24h"),
+		},
+		Guard: SafetyGuardFeatureConfig{
+			Enabled:            getBoolEnv("HOTPLEX_BRAIN_GUARD_ENABLED", true),
+			InputGuardEnabled:  getBoolEnv("HOTPLEX_BRAIN_GUARD_INPUT_ENABLED", true),
+			OutputGuardEnabled: getBoolEnv("HOTPLEX_BRAIN_GUARD_OUTPUT_ENABLED", true),
+			Chat2ConfigEnabled: getBoolEnv("HOTPLEX_BRAIN_CHAT2CONFIG_ENABLED", false),
+			MaxInputLength:     getIntEnv("HOTPLEX_BRAIN_GUARD_MAX_INPUT_LENGTH", 100000),
+			ScanDepth:          getIntEnv("HOTPLEX_BRAIN_GUARD_SCAN_DEPTH", 3),
+			Sensitivity:        getEnv("HOTPLEX_BRAIN_GUARD_SENSITIVITY", "medium"),
+			AdminUsers:         parseStringList(getEnv("HOTPLEX_BRAIN_ADMIN_USERS", "")),
+			AdminChannels:      parseStringList(getEnv("HOTPLEX_BRAIN_ADMIN_CHANNELS", "")),
+			ResponseTimeout:    getDurationEnv("HOTPLEX_BRAIN_GUARD_RESPONSE_TIMEOUT", 10*time.Second),
+		},
 	}
 }
 
@@ -241,6 +308,22 @@ func parseRouterModels(s string) []llm.ModelConfig {
 	}
 
 	return models
+}
+
+func parseStringList(s string) []string {
+	if s == "" {
+		return nil
+	}
+
+	var result []string
+	parts := strings.Split(s, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
 }
 
 // Helper functions for loading config from environment variables
