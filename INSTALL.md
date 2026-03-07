@@ -22,6 +22,27 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -d ~/bin
 ```
 
+### 干运行模式
+
+```bash
+# 预览安装操作而不实际执行
+curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -n
+```
+
+### 强制重新安装
+
+```bash
+# 覆盖已安装的相同版本
+curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -f
+```
+
+### 详细输出
+
+```bash
+# 显示详细调试信息
+curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -V
+```
+
 ## 系统要求
 
 | 平台 | 架构 | 支持 |
@@ -42,6 +63,11 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 | `-d, --dir` | 安装目录 (默认: `/usr/local/bin`) |
 | `-c, --config` | 仅生成配置文件 |
 | `-u, --uninstall` | 卸载 HotPlex |
+| `-f, --force` | 强制重新安装 |
+| `-n, --dry-run` | 干运行模式，显示将执行的操作 |
+| `-q, --quiet` | 静默模式 |
+| `-V, --verbose` | 详细输出 |
+| `--skip-verify` | 跳过校验和验证 |
 | `-h, --help` | 显示帮助 |
 
 ## 手动安装
