@@ -36,6 +36,12 @@ type NativeStreamingWriter struct {
 	flushTrigger chan struct{}
 	closeChan    chan struct{}
 	wg           sync.WaitGroup
+
+	// 完整内容累积（用于存储）
+	fullContent bytes.Buffer
+
+	// 存储回调（可选）
+	storeCallback func(content string)
 }
 
 // NewNativeStreamingWriter 创建新的原生流式写入器
@@ -59,6 +65,14 @@ func NewNativeStreamingWriter(
 	go w.flushLoop()
 
 	return w
+}
+
+// SetStoreCallback sets the callback to store the complete message content
+// when the stream is closed. This enables persistent storage of streaming responses.
+func (w *NativeStreamingWriter) SetStoreCallback(callback func(content string)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.storeCallback = callback
 }
 
 func (w *NativeStreamingWriter) flushLoop() {
@@ -135,6 +149,7 @@ func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
 	}
 
 	w.buf.Write(p)
+	w.fullContent.Write(p) // 累积完整内容用于存储
 
 	// 如果超过 rune 阈值，立即触发一次 flush
 	if utf8.RuneCount(w.buf.Bytes()) >= flushSize {
@@ -157,6 +172,8 @@ func (w *NativeStreamingWriter) Close() error {
 
 	w.closed = true
 	started := w.started
+	fullContent := w.fullContent.String()
+	storeCallback := w.storeCallback
 	w.mu.Unlock()
 
 	// 停止处理并等待残留缓冲区发送完成
@@ -173,6 +190,11 @@ func (w *NativeStreamingWriter) Close() error {
 	// 调用完成回调
 	if w.onComplete != nil {
 		w.onComplete(w.messageTS)
+	}
+
+	// 存储完整内容（如果有存储回调）
+	if storeCallback != nil && fullContent != "" {
+		storeCallback(fullContent)
 	}
 
 	if stopErr != nil {

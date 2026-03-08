@@ -498,6 +498,17 @@ func (a *Adapter) StopStream(ctx context.Context, channelID, messageTS string) e
 
 // NewStreamWriter creates a platform-specific streaming writer
 // Returns StreamWriter interface for platform-agnostic abstraction
+// The writer automatically stores the final response when closed (if storage is enabled)
 func (a *Adapter) NewStreamWriter(ctx context.Context, channelID, threadTS string) base.StreamWriter {
-	return NewNativeStreamingWriter(ctx, a, channelID, threadTS, nil)
+	writer := NewNativeStreamingWriter(ctx, a, channelID, threadTS, nil)
+
+	// Set up storage callback to persist the final response when stream closes
+	if a.storePlugin != nil && a.sessionMgr != nil {
+		sessionID := a.sessionMgr.GetChatSessionID("slack", "", a.config.BotUserID, channelID, threadTS)
+		writer.SetStoreCallback(func(content string) {
+			a.storeBotResponse(ctx, sessionID, channelID, threadTS, content)
+		})
+	}
+
+	return writer
 }

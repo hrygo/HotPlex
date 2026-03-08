@@ -292,7 +292,7 @@ func (a *Adapter) storeUserMessage(ctx context.Context, msg *base.ChatMessage) {
 //   - SessionID is derived from (platform, botUserID, channelID, threadTS) - NOT userID
 //   - Empty ChatUserID in MessageContext indicates bot as sender
 //   - This ensures bot responses are grouped with user messages in the same thread session
-func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, threadTS, content string) {
+func (a *Adapter) storeBotResponse(ctx context.Context, _ string, channelID, threadTS, content string) {
 	if a.storePlugin == nil {
 		return
 	}
@@ -301,7 +301,7 @@ func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, th
 	sessionCtx := a.sessionMgr.CreateSessionContext("slack", "", a.config.BotUserID, channelID, threadTS, "claude")
 
 	msgCtx, err := base.NewMessageContextBuilder().
-		WithChatSession(sessionID, "slack", "", sessionCtx.ChatBotUserID, channelID, threadTS).
+		WithChatSession(sessionCtx.ChatSessionID, "slack", "", sessionCtx.ChatBotUserID, channelID, threadTS).
 		WithEngineSession(sessionCtx.EngineSessionID, sessionCtx.EngineNamespace).
 		WithProviderSession(sessionCtx.ProviderSessionID, sessionCtx.ProviderType).
 		WithMessage(types.MessageTypeFinalResponse, base.DirectionBotToUser, content).
@@ -327,6 +327,9 @@ func (a *Adapter) storeBotResponse(ctx context.Context, sessionID, channelID, th
 func (a *Adapter) GetThreadHistory(ctx context.Context, channelID, threadTS string, limit int) ([]*storage.ChatAppMessage, error) {
 	if a.storePlugin == nil {
 		return nil, fmt.Errorf("storage not enabled")
+	}
+	if a.sessionMgr == nil {
+		return nil, fmt.Errorf("session manager not initialized")
 	}
 
 	// Generate session ID with empty userID - must match storeUserMessage/storeBotResponse
@@ -392,6 +395,9 @@ func (a *Adapter) GetThreadHistoryAsString(ctx context.Context, channelID, threa
 func (a *Adapter) GetThreadHistoryByUser(ctx context.Context, channelID, threadTS, userID string, limit int) ([]*storage.ChatAppMessage, error) {
 	if a.storePlugin == nil {
 		return nil, fmt.Errorf("storage not enabled")
+	}
+	if a.sessionMgr == nil {
+		return nil, fmt.Errorf("session manager not initialized")
 	}
 
 	// Generate session ID with empty userID for thread-level session
