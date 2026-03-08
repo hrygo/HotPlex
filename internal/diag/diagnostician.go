@@ -22,12 +22,6 @@ type Diagnostician struct {
 	historyStore persistence.MessageHistoryStore
 	logger       *slog.Logger
 
-	// Cache for deduplication
-	cache *DiagnosisCache
-
-	// Metrics collection
-	metrics *Metrics
-
 	// Track pending diagnoses awaiting confirmation
 	pending sync.Map // map[string]*pendingDiag
 }

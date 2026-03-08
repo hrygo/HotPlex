@@ -124,7 +124,7 @@ func (c *Collector) collectConversation(ctx context.Context, sessionID string) (
 		}
 		// Redact sensitive content
 		content := c.redactor.Redact(msg.Content)
-		buf.WriteString(fmt.Sprintf("[%s] %s: %s\n", msg.CreatedAt.Format(time.RFC3339), role, content))
+		fmt.Fprintf(&buf, "[%s] %s: %s\n", msg.CreatedAt.Format(time.RFC3339), role, content)
 	}
 
 	rawContent := buf.String()
@@ -189,9 +189,9 @@ func (c *Collector) collectLogs() []byte {
 func FormatConversationForIssue(conv *ConversationData) string {
 	var buf bytes.Buffer
 
-	buf.WriteString(fmt.Sprintf("### Conversation History\n"))
-	buf.WriteString(fmt.Sprintf("- Messages: %d\n", conv.MessageCount))
-	buf.WriteString(fmt.Sprintf("- Raw Size: %d bytes\n", conv.RawSize))
+	buf.WriteString("### Conversation History\n")
+	fmt.Fprintf(&buf, "- Messages: %d\n", conv.MessageCount)
+	fmt.Fprintf(&buf, "- Raw Size: %d bytes\n", conv.RawSize)
 	if conv.IsSummarized {
 		buf.WriteString("- *Summarized due to size*\n")
 	}
@@ -210,13 +210,13 @@ func FormatErrorForIssue(err *ErrorInfo) string {
 
 	var buf strings.Builder
 
-	buf.WriteString(fmt.Sprintf("### Error Details\n"))
-	buf.WriteString(fmt.Sprintf("- **Type**: %s\n", err.Type))
-	buf.WriteString(fmt.Sprintf("- **Message**: %s\n", err.Message))
-	buf.WriteString(fmt.Sprintf("- **Time**: %s\n", err.Timestamp.Format(time.RFC3339)))
+	buf.WriteString("### Error Details\n")
+	fmt.Fprintf(&buf, "- **Type**: %s\n", err.Type)
+	fmt.Fprintf(&buf, "- **Message**: %s\n", err.Message)
+	fmt.Fprintf(&buf, "- **Time**: %s\n", err.Timestamp.Format(time.RFC3339))
 
 	if err.ExitCode != 0 {
-		buf.WriteString(fmt.Sprintf("- **Exit Code**: %d\n", err.ExitCode))
+		fmt.Fprintf(&buf, "- **Exit Code**: %d\n", err.ExitCode)
 	}
 
 	if err.StackTrace != "" {
@@ -228,7 +228,7 @@ func FormatErrorForIssue(err *ErrorInfo) string {
 	if len(err.Context) > 0 {
 		buf.WriteString("\n**Context:**\n")
 		for k, v := range err.Context {
-			buf.WriteString(fmt.Sprintf("- %s: %v\n", k, v))
+			fmt.Fprintf(&buf, "- %s: %v\n", k, v)
 		}
 	}
 
@@ -240,16 +240,16 @@ func FormatEnvForIssue(env *EnvInfo) string {
 	var buf strings.Builder
 
 	buf.WriteString("### Environment\n")
-	buf.WriteString(fmt.Sprintf("| Field | Value |\n"))
-	buf.WriteString(fmt.Sprintf("|-------|-------|\n"))
-	buf.WriteString(fmt.Sprintf("| HotPlex Version | %s |\n", env.HotPlexVersion))
-	buf.WriteString(fmt.Sprintf("| Go Version | %s |\n", env.GoVersion))
-	buf.WriteString(fmt.Sprintf("| OS | %s |\n", env.OS))
-	buf.WriteString(fmt.Sprintf("| Arch | %s |\n", env.Arch))
+	buf.WriteString("| Field | Value |\n")
+	buf.WriteString("|-------|-------|\n")
+	fmt.Fprintf(&buf, "| HotPlex Version | %s |\n", env.HotPlexVersion)
+	fmt.Fprintf(&buf, "| Go Version | %s |\n", env.GoVersion)
+	fmt.Fprintf(&buf, "| OS | %s |\n", env.OS)
+	fmt.Fprintf(&buf, "| Arch | %s |\n", env.Arch)
 	if env.CLIVersion != "" {
-		buf.WriteString(fmt.Sprintf("| CLI Version | %s |\n", env.CLIVersion))
+		fmt.Fprintf(&buf, "| CLI Version | %s |\n", env.CLIVersion)
 	}
-	buf.WriteString(fmt.Sprintf("| Uptime | %s |\n", env.Uptime.Round(time.Second)))
+	fmt.Fprintf(&buf, "| Uptime | %s |\n", env.Uptime.Round(time.Second))
 
 	return buf.String()
 }

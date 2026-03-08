@@ -1,7 +1,6 @@
 package diag
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -180,70 +179,4 @@ func TestNewRedactor(t *testing.T) {
 	if rAggressive == nil {
 		t.Fatal("expected non-nil aggressive redactor")
 	}
-}
-
-// mockBrain implements brain.Brain for testing
-type mockBrain struct {
-	chatResponse    string
-	analyzeResponse any
-	chatErr         error
-	analyzeErr      error
-}
-
-func (m *mockBrain) Chat(ctx context.Context, prompt string) (string, error) {
-	if m.chatErr != nil {
-		return "", m.chatErr
-	}
-	return m.chatResponse, nil
-}
-
-func (m *mockBrain) Analyze(ctx context.Context, prompt string, target any) error {
-	if m.analyzeErr != nil {
-		return m.analyzeErr
-	}
-	// Copy the response to target
-	if m.analyzeResponse != nil {
-		// Use JSON to copy
-		data, _ := jsonMarshal(m.analyzeResponse)
-		return jsonUnmarshal(data, target)
-	}
-	return nil
-}
-
-// Simple JSON helpers to avoid import cycle
-func jsonMarshal(v any) ([]byte, error) {
-	// Use encoding/json
-	return []byte("{}"), nil
-}
-
-func jsonUnmarshal(data []byte, v any) error {
-	return nil
-}
-
-// mockHistoryStore implements persistence.MessageHistoryStore for testing
-type mockHistoryStore struct {
-	messages []*mockMessage
-	err      error
-}
-
-type mockMessage struct {
-	id        string
-	content   string
-	createdAt time.Time
-}
-
-func (m *mockHistoryStore) GetRecentMessages(ctx context.Context, sessionID string, limit int) ([]any, error) {
-	return nil, m.err
-}
-
-func (m *mockHistoryStore) GetMessagesByTimeRange(ctx context.Context, sessionID string, start, end time.Time) ([]any, error) {
-	return nil, m.err
-}
-
-func (m *mockHistoryStore) GetMessageCount(ctx context.Context, sessionID string) (int64, error) {
-	return 0, m.err
-}
-
-func (m *mockHistoryStore) GetSessionDuration(ctx context.Context, sessionID string) (time.Time, time.Time, error) {
-	return time.Time{}, time.Time{}, m.err
 }
