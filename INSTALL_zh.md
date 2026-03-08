@@ -71,9 +71,11 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 | `-n, --dry-run` | 干运行模式，显示将执行的操作 |
 | `-q, --quiet` | 静默模式 |
 | `-V, --verbose` | 详细输出 |
+| `--skip-verify` | 跳过校验和验证 |
 | `--skip-wizard` | 跳过安装后配置向导 |
 | `--non-interactive` | 非交互模式 |
 | `-h, --help` | 显示帮助 |
+| `--version` | 显示脚本版本 |
 
 ## 手动安装
 
