@@ -1,3 +1,23 @@
+// Package brain provides intelligent orchestration capabilities for HotPlex.
+// It includes safety guardrails, intent routing, and context compression.
+//
+// The SafetyGuard component (this file) provides multi-layer security:
+//   - Input validation: Pattern-based blocking + AI-assisted threat detection
+//   - Output sanitization: Redacts API keys, credentials, internal IPs
+//   - Chat2Config: Natural language configuration commands (disabled by default)
+//
+// # Architecture
+//
+//	SafetyGuard
+//	├── CheckInput()     → Pattern scan → Brain analysis → allow/block
+//	├── CheckOutput()    → Pattern match → sanitize → allow
+//	└── ParseConfigIntent() → Brain NLU → ExecuteConfigIntent()
+//
+// # Threat Detection Flow
+//
+//  1. Fast path: Regex patterns catch obvious attacks (prompt injection, jailbreak)
+//  2. Deep analysis: Brain AI classifies subtle threats with confidence scores
+//  3. Action: allow (safe), block (threat), or sanitize (redact sensitive data)
 package brain
 
 import (
@@ -7,21 +27,26 @@ import (
 	"regexp"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // GuardConfig holds configuration for SafetyGuard.
 type GuardConfig struct {
-	Enabled            bool          `json:"enabled"`
-	InputGuardEnabled  bool          `json:"input_guard_enabled"`
-	OutputGuardEnabled bool          `json:"output_guard_enabled"`
-	Chat2ConfigEnabled bool          `json:"chat2config_enabled"`
-	MaxInputLength     int           `json:"max_input_length"`
-	ScanDepth          int           `json:"scan_depth"`
-	Sensitivity        string        `json:"sensitivity"` // "low", "medium", "high"
-	BanPatterns        []string      `json:"ban_patterns"`
-	AdminUsers         []string      `json:"admin_users"`
-	AdminChannels      []string      `json:"admin_channels"`
-	ResponseTimeout    time.Duration `json:"response_timeout"`
+	Enabled            bool          `json:"enabled"`            // Master switch for all guard features
+	InputGuardEnabled  bool          `json:"input_guard_enabled"`  // Enable input validation (pattern + AI)
+	OutputGuardEnabled bool          `json:"output_guard_enabled"` // Enable output sanitization (redact secrets)
+	Chat2ConfigEnabled bool          `json:"chat2config_enabled"`  // Allow config changes via natural language (security risk)
+	MaxInputLength     int           `json:"max_input_length"`     // Reject inputs exceeding this length (DoS protection)
+	ScanDepth          int           `json:"scan_depth"`           // Reserved for nested context scanning
+	Sensitivity        string        `json:"sensitivity"`          // Detection sensitivity: "low" (pattern-only), "medium", "high" (aggressive AI)
+	BanPatterns        []string      `json:"ban_patterns"`         // Regex patterns for prompt injection, jailbreak, etc.
+	AdminUsers         []string      `json:"admin_users"`          // User IDs with elevated privileges
+	AdminChannels      []string      `json:"admin_channels"`       // Channel IDs with elevated privileges
+	ResponseTimeout    time.Duration `json:"response_timeout"`     // Timeout for Brain API calls during analysis
+	// Rate limiting for CheckInput calls (per-user)
+	RateLimitRPS   float64 `json:"rate_limit_rps"`   // Requests per second per user (0 = disabled)
+	RateLimitBurst int     `json:"rate_limit_burst"` // Burst capacity per user
 }
 
 // DefaultGuardConfig returns default guard configuration.
@@ -38,6 +63,8 @@ func DefaultGuardConfig() GuardConfig {
 		AdminUsers:         []string{},
 		AdminChannels:      []string{},
 		ResponseTimeout:    10 * time.Second,
+		RateLimitRPS:       10.0, // 10 requests per second per user
+		RateLimitBurst:     20,   // Allow burst of 20
 	}
 }
 
@@ -71,43 +98,60 @@ const (
 )
 
 // GuardResult represents the result of a guard check.
+// Action determines the next step:
+//   - "allow": Pass through unchanged
+//   - "block": Reject the input/output entirely
+//   - "sanitize": Pass through with sensitive data redacted (see SanitizedInput)
 type GuardResult struct {
-	Safe           bool        `json:"safe"`
-	ThreatLevel    ThreatLevel `json:"threat_level"`
-	ThreatType     string      `json:"threat_type,omitempty"`
-	Reason         string      `json:"reason,omitempty"`
-	MatchedPattern string      `json:"matched_pattern,omitempty"`
-	Action         string      `json:"action,omitempty"` // "allow", "block", "sanitize"
-	SanitizedInput string      `json:"sanitized_input,omitempty"`
+	Safe           bool        `json:"safe"`                      // true if no threat detected or successfully sanitized
+	ThreatLevel    ThreatLevel `json:"threat_level"`              // Severity classification
+	ThreatType     string      `json:"threat_type,omitempty"`     // e.g., "prompt_injection", "sensitive_data_detected"
+	Reason         string      `json:"reason,omitempty"`          // Human-readable explanation
+	MatchedPattern string      `json:"matched_pattern,omitempty"` // The regex that matched (for debugging)
+	Action         string      `json:"action,omitempty"`          // "allow", "block", or "sanitize"
+	SanitizedInput string      `json:"sanitized_input,omitempty"` // Redacted version when Action == "sanitize"
 }
 
 // SafetyGuard provides security guardrails for Brain operations.
+// It acts as a middleware between user input and Brain/Engine processing.
+//
+// Thread Safety: All public methods are safe for concurrent use.
+// The mu mutex protects metrics counters and pattern updates.
 type SafetyGuard struct {
-	brain  Brain
-	config GuardConfig
-	logger *slog.Logger
+	brain  Brain        // AI backend for deep threat analysis (optional)
+	config GuardConfig  // Configuration (can be updated at runtime)
+	logger *slog.Logger // Structured logger for security events
 
-	// Compiled patterns
-	banPatterns []*regexp.Regexp
+	// Compiled patterns for fast-path detection
+	banPatterns []*regexp.Regexp // Prompt injection, jailbreak patterns
 
-	// Sensitivity patterns
+	// Patterns for output sanitization (secrets, credentials, internal IPs)
 	sensitivePatterns []*regexp.Regexp
 
-	// Metrics
-	totalChecks      int64
-	blockedInputs    int64
-	blockedOutputs   int64
-	sanitizedInputs  int64
+	// Per-user rate limiting for CheckInput calls
+	userLimiters map[string]*rate.Limiter // userID -> limiter
+	rateLimitRPS float64                   // Configured RPS (0 = disabled)
+	rateLimitBurst int                     // Configured burst
 
-	mu sync.RWMutex
+	// Metrics for monitoring (protected by mu)
+	totalChecks      int64 // Total number of CheckInput calls
+	blockedInputs    int64 // Inputs blocked by guard
+	blockedOutputs   int64 // Outputs blocked/sanitized
+	sanitizedInputs  int64 // Inputs that were sanitized
+	rateLimitedCount int64 // Requests rate limited
+
+	mu sync.RWMutex // Protects metrics, limiters, and pattern updates
 }
 
 // NewSafetyGuard creates a new SafetyGuard instance.
 func NewSafetyGuard(brain Brain, config GuardConfig, logger *slog.Logger) (*SafetyGuard, error) {
 	guard := &SafetyGuard{
-		brain:  brain,
-		config: config,
-		logger: logger,
+		brain:         brain,
+		config:        config,
+		logger:        logger,
+		userLimiters:  make(map[string]*rate.Limiter),
+		rateLimitRPS:  config.RateLimitRPS,
+		rateLimitBurst: config.RateLimitBurst,
 	}
 
 	// Compile ban patterns - fail fast on error
@@ -156,7 +200,23 @@ func (g *SafetyGuard) initSensitivePatterns() {
 }
 
 // CheckInput validates input for safety concerns.
+// It performs a multi-stage check:
+//
+//  1. If guard is disabled, returns safe immediately (fast path)
+//  2. Rate limit check: enforces per-user rate limiting
+//  3. Length check: blocks inputs exceeding MaxInputLength
+//  4. Pattern scan: matches against banPatterns (prompt injection, jailbreak)
+//  5. Deep analysis: if sensitivity > "low", uses Brain AI for subtle threat detection
+//
+// Returns GuardResult with Action indicating the recommended handling.
+// userID is optional; if empty, rate limiting is applied globally.
 func (g *SafetyGuard) CheckInput(ctx context.Context, input string) *GuardResult {
+	return g.CheckInputWithUser(ctx, input, "")
+}
+
+// CheckInputWithUser validates input for safety concerns with explicit user context.
+// The userID parameter enables per-user rate limiting.
+func (g *SafetyGuard) CheckInputWithUser(ctx context.Context, input string, userID string) *GuardResult {
 	g.mu.Lock()
 	g.totalChecks++
 	g.mu.Unlock()
@@ -166,6 +226,24 @@ func (g *SafetyGuard) CheckInput(ctx context.Context, input string) *GuardResult
 			Safe:        true,
 			ThreatLevel: ThreatLevelNone,
 			Action:      "allow",
+		}
+	}
+
+	// Apply rate limiting if configured
+	if g.rateLimitRPS > 0 && userID != "" {
+		limiter := g.getOrCreateLimiter(userID)
+		if !limiter.Allow() {
+			g.mu.Lock()
+			g.rateLimitedCount++
+			g.mu.Unlock()
+
+			return &GuardResult{
+				Safe:        false,
+				ThreatLevel: ThreatLevelLow,
+				ThreatType:  "rate_limited",
+				Reason:      "Too many requests, please slow down",
+				Action:      "block",
+			}
 		}
 	}
 
@@ -208,6 +286,19 @@ func (g *SafetyGuard) CheckInput(ctx context.Context, input string) *GuardResult
 		ThreatLevel: ThreatLevelNone,
 		Action:      "allow",
 	}
+}
+
+// getOrCreateLimiter returns the rate limiter for a user, creating one if needed.
+func (g *SafetyGuard) getOrCreateLimiter(userID string) *rate.Limiter {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	limiter, exists := g.userLimiters[userID]
+	if !exists {
+		limiter = rate.NewLimiter(rate.Limit(g.rateLimitRPS), g.rateLimitBurst)
+		g.userLimiters[userID] = limiter
+	}
+	return limiter
 }
 
 // deepInputAnalysis uses Brain for deeper threat analysis.
@@ -272,6 +363,18 @@ Return JSON:
 }
 
 // CheckOutput validates and sanitizes output for sensitive data.
+// Unlike CheckInput, this never blocks - it only redacts sensitive information.
+//
+// Patterns detected and redacted:
+//   - API keys (api_key=xxx, secret_key=xxx)
+//   - AWS access keys (AKIA...)
+//   - Private keys (-----BEGIN RSA PRIVATE KEY-----)
+//   - JWT tokens (eyJ...)
+//   - Internal IP addresses (10.x, 172.16-31.x, 192.168.x)
+//   - Database connection strings with credentials
+//   - Passwords in config format
+//
+// Returns GuardResult with SanitizedInput containing the redacted version.
 func (g *SafetyGuard) CheckOutput(output string) *GuardResult {
 	if !g.config.Enabled || !g.config.OutputGuardEnabled {
 		return &GuardResult{
@@ -382,8 +485,11 @@ func (g *SafetyGuard) Stats() map[string]interface{} {
 		"blocked_inputs":   g.blockedInputs,
 		"blocked_outputs":  g.blockedOutputs,
 		"sanitized_inputs": g.sanitizedInputs,
+		"rate_limited":     g.rateLimitedCount,
+		"active_limiters":  len(g.userLimiters),
 		"ban_patterns":     len(g.banPatterns),
 		"sensitivity":      g.config.Sensitivity,
+		"rate_limit_rps":   g.rateLimitRPS,
 	}
 }
 

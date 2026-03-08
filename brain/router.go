@@ -1,6 +1,37 @@
+// Package brain provides intelligent orchestration capabilities for HotPlex.
+//
+// The IntentRouter component (this file) classifies incoming messages to determine
+// the optimal processing path:
+//
+//	┌─────────────┐     ┌──────────────┐
+//	│ User Message │────▶│ IntentRouter │
+//	└─────────────┘     └──────┬───────┘
+//	                           │
+//	            ┌──────────────┼──────────────┐
+//	            ▼              ▼              ▼
+//	        [chat]        [command]       [task]
+//	      Brain handles   Brain handles   Engine handles
+//	      casual chat     status/config   code, debugging
+//
+// # Intent Types
+//
+//   - chat: Casual conversation, greetings, small talk → Brain generates response
+//   - command: Status queries, config commands → Brain generates response
+//   - task: Code operations, debugging, analysis → Forward to Engine Provider
+//   - unknown: Ambiguous intent → Default to Engine for safety
+//
+// # Optimization
+//
+// Fast-path detection handles obvious cases without Brain API calls:
+//   - Greetings ("hi", "hello") → chat
+//   - Status commands ("ping", "status") → command
+//   - Code keywords ("function", "debug") → task
+//
+// Cache reduces repeated Brain API calls for similar messages.
 package brain
 
 import (
+	"container/list"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,6 +56,20 @@ const (
 	IntentTypeUnknown IntentType = "unknown"
 )
 
+// Intent detection thresholds and limits.
+const (
+	// MinMessageLength is the minimum message length for fast-path detection.
+	// Messages shorter than this are classified as chat.
+	MinMessageLength = 3
+	// MaxQuickMessageLength is the maximum length for quick classification.
+	// Messages longer than this require deeper analysis.
+	MaxQuickMessageLength = 50
+	// MaxThankMessageLength is the max length for gratitude detection.
+	MaxThankMessageLength = 30
+	// MaxContextHistory is the maximum number of history items to include.
+	MaxContextHistory = 5
+)
+
 // IntentResult represents the result of intent detection.
 type IntentResult struct {
 	Type     IntentType `json:"type"`
@@ -36,22 +81,28 @@ type IntentResult struct {
 // IntentRouter performs intent detection for incoming messages.
 // It determines whether a message should be handled by the Brain
 // (for chat/commands) or forwarded to the Engine Provider (for tasks).
+//
+// Thread Safety: All public methods are safe for concurrent use.
+// The cache is protected by a dedicated mutex.
 type IntentRouter struct {
-	brain  Brain
-	logger *slog.Logger
+	brain  Brain        // AI backend for intelligent classification
+	logger *slog.Logger // Structured logger for routing decisions
 
 	// Configuration
-	enabled         bool
-	confidenceThreshold float64
-	cacheSize       int
+	enabled             bool    // Master switch (disabled → all messages go to Engine)
+	confidenceThreshold float64 // Minimum confidence for Brain classification (0.0-1.0)
+	cacheSize           int     // Maximum cached intent results
 
-	// Cache for recent intent results to improve performance
+	// LRU Cache for recent intent results
+	// Key: SHA256 hash of normalized message, Value: IntentResult
 	cache    map[string]*IntentResult
+	lruList  *list.List          // List of cache keys, front = most recent, back = LRU
+	lruIndex map[string]*list.Element // Quick lookup for list elements
 	cacheMu  sync.RWMutex
 
-	// Metrics
-	totalProcessed int64
-	cacheHits      int64
+	// Metrics for monitoring
+	totalProcessed int64 // Total messages classified
+	cacheHits      int64 // Cache hit count (avoided Brain API calls)
 }
 
 // IntentRouterConfig holds configuration for IntentRouter.
@@ -77,12 +128,22 @@ func NewIntentRouter(brain Brain, config IntentRouterConfig, logger *slog.Logger
 		confidenceThreshold: config.ConfidenceThreshold,
 		cacheSize:           config.CacheSize,
 		cache:               make(map[string]*IntentResult),
+		lruList:             list.New(),
+		lruIndex:            make(map[string]*list.Element),
 	}
 }
 
 // Route determines the intent of a message and returns the routing decision.
-// If the Brain is disabled or unavailable, it returns IntentTypeTask to ensure
-// the message is processed by the Engine.
+// It performs a two-stage classification:
+//
+//  1. Fast path: Rule-based detection for obvious cases (greetings, status commands)
+//     → Returns immediately without Brain API call
+//
+//  2. Brain analysis: Sends prompt to Brain for intelligent classification
+//     → Returns intent type with confidence score
+//
+// If the Brain is disabled or unavailable, returns IntentTypeTask to ensure
+// the message is processed by the Engine (safe default).
 func (r *IntentRouter) Route(ctx context.Context, msg string) *IntentResult {
 	if !r.enabled || r.brain == nil {
 		return &IntentResult{
@@ -168,12 +229,22 @@ func (r *IntentRouter) detectIntent(ctx context.Context, msg string) *IntentResu
 }
 
 // fastPathDetection performs rule-based detection for obvious cases.
+// This avoids Brain API calls for trivial classifications.
+//
+// Patterns detected (returns immediately):
+//   - Very short messages (<3 chars) → chat
+//   - Greetings ("hi", "hello", "hey") → chat
+//   - Thank you messages → chat
+//   - Status commands ("ping", "status") → command
+//   - Help requests → command
+//
 // Returns nil if the case is not clear-cut and needs Brain analysis.
+// Code keywords ("function", "debug", etc.) force Brain analysis for accuracy.
 func (r *IntentRouter) fastPathDetection(msg string) *IntentResult {
 	msg = strings.TrimSpace(strings.ToLower(msg))
 
 	// Empty or very short messages
-	if len(msg) < 3 {
+	if len(msg) < MinMessageLength {
 		return &IntentResult{
 			Type:       IntentTypeChat,
 			Confidence: 0.9,
@@ -198,7 +269,7 @@ func (r *IntentRouter) fastPathDetection(msg string) *IntentResult {
 	// Thank you messages
 	thanks := []string{"thank", "thanks", "thx", "ty"}
 	for _, t := range thanks {
-		if strings.Contains(msg, t) && len(msg) < 30 {
+		if strings.Contains(msg, t) && len(msg) < MaxThankMessageLength {
 			return &IntentResult{
 				Type:       IntentTypeChat,
 				Confidence: 0.9,
@@ -222,7 +293,7 @@ func (r *IntentRouter) fastPathDetection(msg string) *IntentResult {
 	}
 
 	// Help requests
-	if strings.Contains(msg, "help") && len(msg) < 50 {
+	if strings.Contains(msg, "help") && len(msg) < MaxQuickMessageLength {
 		return &IntentResult{
 			Type:       IntentTypeCommand,
 			Confidence: 0.85,
@@ -267,9 +338,8 @@ func (r *IntentRouter) buildContextualPrompt(msg string, history []string) strin
 	var sb strings.Builder
 	sb.WriteString("Recent conversation context:\n")
 
-	maxHistory := 5
-	if len(history) > maxHistory {
-		history = history[len(history)-maxHistory:]
+	if len(history) > MaxContextHistory {
+		history = history[len(history)-MaxContextHistory:]
 	}
 
 	for i, h := range history {
@@ -289,31 +359,51 @@ func (r *IntentRouter) cacheKey(msg string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// getFromCache retrieves a cached intent result.
+// getFromCache retrieves a cached intent result and updates LRU position.
 func (r *IntentRouter) getFromCache(key string) *IntentResult {
-	r.cacheMu.RLock()
-	defer r.cacheMu.RUnlock()
-	return r.cache[key]
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+
+	result, exists := r.cache[key]
+	if !exists {
+		return nil
+	}
+
+	// Move to front (most recently used)
+	if elem, ok := r.lruIndex[key]; ok {
+		r.lruList.MoveToFront(elem)
+	}
+
+	return result
 }
 
-// addToCache adds a result to the cache with LRU eviction.
+// addToCache adds a result to the cache with proper LRU eviction.
 func (r *IntentRouter) addToCache(key string, result *IntentResult) {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 
-	// Simple eviction: clear half if full
+	// Check if already exists (update case)
+	if elem, exists := r.lruIndex[key]; exists {
+		r.cache[key] = result
+		r.lruList.MoveToFront(elem)
+		return
+	}
+
+	// Evict LRU entry if cache is full
 	if len(r.cache) >= r.cacheSize {
-		count := 0
-		for k := range r.cache {
-			delete(r.cache, k)
-			count++
-			if count >= r.cacheSize/2 {
-				break
-			}
+		// Remove least recently used (back of list)
+		if elem := r.lruList.Back(); elem != nil {
+			lruKey := elem.Value.(string)
+			delete(r.cache, lruKey)
+			r.lruList.Remove(elem)
+			delete(r.lruIndex, lruKey)
 		}
 	}
 
+	// Add new entry
 	r.cache[key] = result
+	elem := r.lruList.PushFront(key)
+	r.lruIndex[key] = elem
 }
 
 // IsRelevant checks if a message in a group chat is relevant to the bot.
@@ -431,6 +521,8 @@ func (r *IntentRouter) ClearCache() {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 	r.cache = make(map[string]*IntentResult)
+	r.lruList = list.New()
+	r.lruIndex = make(map[string]*list.Element)
 }
 
 // DefaultIntentRouterConfig returns default configuration.

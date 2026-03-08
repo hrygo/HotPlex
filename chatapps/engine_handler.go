@@ -1027,7 +1027,13 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 	c.mu.Unlock()
 
 	// Fallback mechanism: if streaming was never active but we have accumulated content,
-	// send the content via direct message
+	// send the content via direct message.
+	//
+	// NOTE: This fallback handles the case where StartStream() failed or streaming was unavailable.
+	// The NativeStreamingWriter.Close() handles a DIFFERENT case: when streaming was active but
+	// failed mid-stream (integrity check failure or StopStream error). These two fallbacks are
+	// MUTUALLY EXCLUSIVE - this one triggers when !streamWasActive, Close() triggers when started.
+	// This prevents duplicate message sends.
 	if !streamWasActive && len(accumulatedContent) > 0 {
 		c.logger.Info("Streaming was inactive, sending accumulated content via fallback",
 			"content_len", len(accumulatedContent))

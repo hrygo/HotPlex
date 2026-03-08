@@ -10,6 +10,13 @@ import (
 
 // Init initializes the global Brain from environmental variables.
 // It detects the provider and sets the Global Brain instance.
+//
+// IMPORTANT: This function MUST be called before using any Brain-dependent features:
+//   - GlobalIntentRouter() requires Global() to be non-nil
+//   - GlobalCompressor() requires Global() to be non-nil
+//   - GlobalGuard() requires Global() to be non-nil
+//
+// If HOTPLEX_BRAIN_API_KEY is not set, Brain is disabled and features gracefully degrade.
 func Init(logger *slog.Logger) error {
 	config := LoadConfigFromEnv()
 

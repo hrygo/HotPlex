@@ -1,3 +1,48 @@
+// Package brain provides intelligent orchestration capabilities for HotPlex.
+//
+// The ContextCompressor component (this file) manages conversation context
+// to prevent context window overflow while preserving important information.
+//
+// # Problem
+//
+// Long conversations exceed LLM context limits, causing:
+//   - API errors (context length exceeded)
+//   - Loss of earlier conversation context
+//   - Increased token costs
+//
+// # Solution
+//
+// Context compression reduces context size while preserving key information:
+//
+//	┌────────────────────────────────────────────────────────┐
+//	│ Session History (before: 8000+ tokens)                 │
+//	│ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐       │
+//	│ │Turn1│ │Turn2│ │ ... │ │Turn8│ │Turn9│ │Turn10│       │
+//	│ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘       │
+//	└────────────────────────────────────────────────────────┘
+//	                         │
+//	                         ▼ Compression (threshold reached)
+//	┌────────────────────────────────────────────────────────┐
+//	│ Compressed Session (after: ~2000 tokens)               │
+//	│ ┌─────────────────┐ ┌─────┐ ┌─────┐ ┌─────┐           │
+//	│ │ Summary of 1-7  │ │Turn8│ │Turn9│ │Turn10│           │
+//	│ │ (~500 tokens)   │ └─────┘ └─────┘ └─────┘           │
+//	│ └─────────────────┘                                   │
+//	└────────────────────────────────────────────────────────┘
+//
+// # Compression Algorithm
+//
+//  1. Wait until token count exceeds TokenThreshold (default: 8000)
+//  2. Keep last PreserveTurns (default: 5) turns intact
+//  3. Summarize older turns using Brain AI (max MaxSummaryTokens)
+//  4. Replace old turns with summary, update total token count
+//
+// # MemoryManager
+//
+// Extends ContextCompressor with user preference tracking:
+//   - Stores user preferences across sessions (programming language, style)
+//   - Extracts preferences from conversations using Brain AI
+//   - Injects preferences into Engine prompts for personalization
 package brain
 
 import (
@@ -31,14 +76,14 @@ type SessionHistory struct {
 
 // CompressionConfig holds configuration for context compression.
 type CompressionConfig struct {
-	Enabled           bool          `json:"enabled"`
-	TokenThreshold    int           `json:"token_threshold"`    // Trigger compression at this token count
-	TargetTokenCount  int           `json:"target_token_count"` // Target tokens after compression
-	PreserveTurns     int           `json:"preserve_turns"`     // Number of recent turns to preserve
-	MaxSummaryTokens  int           `json:"max_summary_tokens"` // Max tokens for summary
-	CompressionRatio  float64       `json:"compression_ratio"`  // Target compression ratio (0.0-1.0)
-	SessionTTL        time.Duration `json:"session_ttl"`        // Session memory TTL
-	CleanupInterval   time.Duration `json:"cleanup_interval"`  // Background cleanup interval
+	Enabled           bool          `json:"enabled"`            // Master switch for compression
+	TokenThreshold    int           `json:"token_threshold"`    // Trigger compression at this token count (default: 8000)
+	TargetTokenCount  int           `json:"target_token_count"` // Target tokens after compression (default: 2000)
+	PreserveTurns     int           `json:"preserve_turns"`     // Number of recent turns to keep intact (default: 5)
+	MaxSummaryTokens  int           `json:"max_summary_tokens"` // Max tokens for summary (default: 500)
+	CompressionRatio  float64       `json:"compression_ratio"`  // Target compression ratio 0.0-1.0 (default: 0.25)
+	SessionTTL        time.Duration `json:"session_ttl"`        // Session memory TTL (default: 24h)
+	CleanupInterval   time.Duration `json:"cleanup_interval"`   // Background cleanup interval (default: 1h)
 }
 
 // DefaultCompressionConfig returns default compression configuration.
@@ -56,24 +101,35 @@ func DefaultCompressionConfig() CompressionConfig {
 }
 
 // ContextCompressor manages context compression for sessions.
+// It tracks conversation turns per session and compresses when threshold is reached.
+//
+// Thread Safety: All public methods are safe for concurrent use.
+// The mu mutex protects sessions map and metrics.
+//
+// Lifecycle:
+//  1. Create with NewContextCompressor()
+//  2. Record turns with RecordTurn()
+//  3. Check compression with CheckAndCompress()
+//  4. Stop background cleanup with Stop()
 type ContextCompressor struct {
 	brain  Brain
 	config CompressionConfig
 	logger *slog.Logger
 
-	// Session storage
+	// Session storage (protected by mu)
+	// Key: sessionID, Value: conversation history
 	sessions map[string]*SessionHistory
 	mu       sync.RWMutex
 
-	// Background cleanup
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	// Background cleanup goroutine management
+	ctx    context.Context    // Context for cancellation
+	cancel context.CancelFunc // Cancels cleanup goroutine
+	wg     sync.WaitGroup     // Waits for cleanup goroutine to exit
 
-	// Metrics
-	totalCompressions   int64
-	totalTokensSaved    int64
-	averageCompressionRatio float64
+	// Metrics for monitoring compression effectiveness
+	totalCompressions         int64   // Total compression operations performed
+	totalTokensSaved          int64   // Tokens saved by compression
+	averageCompressionRatio   float64 // Running average of compression ratios
 }
 
 // NewContextCompressor creates a new ContextCompressor.
@@ -127,6 +183,15 @@ func (c *ContextCompressor) RecordTurn(sessionID, role, content string, tokenCou
 
 // CheckAndCompress checks if compression is needed and performs it.
 // Returns the compressed history or nil if no compression occurred.
+//
+// Compression triggers when:
+//   - Total tokens >= TokenThreshold
+//   - Not already compressed recently (prevents repeated compression)
+//
+// Returns:
+//   - (*SessionHistory, nil): Compression performed successfully
+//   - (nil, nil): No compression needed (below threshold)
+//   - (nil, error): Compression failed
 func (c *ContextCompressor) CheckAndCompress(ctx context.Context, sessionID string) (*SessionHistory, error) {
 	if !c.config.Enabled || c.brain == nil {
 		return nil, nil
@@ -217,7 +282,7 @@ func (c *ContextCompressor) generateSummary(ctx context.Context, turns []Turn) (
 	sb.WriteString("Previous conversation:\n\n")
 	for i, t := range turns {
 		fmt.Fprintf(&sb, "%s: %s\n", cases.Title(language.English).String(t.Role), t.Content)
-		if i > 20 { // Limit context for summary generation
+		if i > MaxTurnsForSummary { // Limit context for summary generation
 			sb.WriteString("... (earlier messages omitted)\n")
 			break
 		}
@@ -237,7 +302,7 @@ Do not include pleasantries or small talk.`, sb.String(), c.config.MaxSummaryTok
 
 	summary, err := c.brain.Chat(ctx, prompt)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("brain chat: %w", err)
 	}
 
 	return summary, nil
@@ -332,10 +397,55 @@ func (c *ContextCompressor) Stats() map[string]interface{} {
 	}
 }
 
-// estimateTokens estimates token count for a string.
+// Token estimation constants based on GPT tokenizer characteristics.
+const (
+	// ASCII characters (English, numbers, basic punctuation) average ~4 chars per token.
+	tokenCharsPerASCII = 4.0
+	// CJK characters (Chinese, Japanese, Korean) average ~1.5 chars per token.
+	tokenCharsPerCJK = 1.5
+	// Other Unicode characters average ~3 chars per token.
+	tokenCharsPerOther = 3.0
+)
+
+// Context compression limits.
+const (
+	// MaxTurnsForSummary is the maximum number of turns to include in summary generation.
+	// Prevents excessive token usage when building summary prompts.
+	MaxTurnsForSummary = 20
+)
+
+// estimateTokens estimates token count for a string using character-type-aware estimation.
+// This provides better accuracy than simple length division, especially for mixed-language text.
 func (c *ContextCompressor) estimateTokens(text string) int {
-	// Rough estimation: ~4 characters per token
-	return len(text) / 4
+	if len(text) == 0 {
+		return 0
+	}
+
+	var asciiCount, cjkCount, otherCount float64
+
+	for _, r := range text {
+		switch {
+		case r < 128: // ASCII range
+			asciiCount++
+		case r >= 0x4E00 && r <= 0x9FFF: // CJK Unified Ideographs
+			cjkCount++
+		case r >= 0x3040 && r <= 0x30FF: // Japanese Hiragana/Katakana
+			cjkCount++
+		case r >= 0xAC00 && r <= 0xD7AF: // Korean Hangul
+			cjkCount++
+		default:
+			otherCount++
+		}
+	}
+
+	// Calculate estimated tokens for each character type
+	asciiTokens := asciiCount / tokenCharsPerASCII
+	cjkTokens := cjkCount / tokenCharsPerCJK
+	otherTokens := otherCount / tokenCharsPerOther
+
+	// Round up to ensure we don't underestimate
+	total := asciiTokens + cjkTokens + otherTokens
+	return int(total + 0.5)
 }
 
 // updateCompressionRatio updates the running average compression ratio.
