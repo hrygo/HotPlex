@@ -179,6 +179,9 @@ type StreamWriter interface {
 	io.Closer
 	// MessageTS returns the message timestamp after stream starts
 	MessageTS() string
+	// FallbackUsed returns true if the stream used fallback mechanism
+	// This prevents duplicate message sends from multiple fallback triggers
+	FallbackUsed() bool
 }
 
 // StatusType defines AI working states

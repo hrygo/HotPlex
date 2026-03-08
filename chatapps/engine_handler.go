@@ -895,6 +895,13 @@ func (c *StreamCallback) handleAnswer(data any) error {
 				return fmt.Errorf("streaming failed: %w, fallback failed: %v", err, sendErr)
 			}
 
+			// CRITICAL: Mark fallback as used to prevent duplicate sends from handleSessionStats
+			// This coordinates with the Close() fallback mechanism
+			c.mu.Lock()
+			c.streamWriterActive = false
+			c.accumulatedContent.Reset() // Clear accumulated content to prevent re-sending
+			c.mu.Unlock()
+
 			c.logger.Info("Fallback to non-streaming succeeded", "content_runes", len([]rune(fullContent)))
 			return nil
 		}
@@ -1045,6 +1052,10 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 	}
 	c.mu.Unlock()
 
+	// Check if Close() already triggered its fallback mechanism
+	// This prevents duplicate sends when both Close() and handleSessionStats could trigger
+	streamUsedFallback := streamWriter != nil && streamWriter.FallbackUsed()
+
 	// Fallback mechanism: if streaming was never active but we have accumulated content,
 	// send the content via direct message.
 	//
@@ -1052,8 +1063,10 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 	// The NativeStreamingWriter.Close() handles a DIFFERENT case: when streaming was active but
 	// failed mid-stream (integrity check failure or StopStream error). These two fallbacks are
 	// MUTUALLY EXCLUSIVE - this one triggers when !streamWasActive, Close() triggers when started.
+	// Additionally, we check FallbackUsed() to handle the edge case where handleAnswer already
+	// sent a fallback message before the stream was properly initialized.
 	// This prevents duplicate message sends.
-	if !streamWasActive && len(accumulatedContent) > 0 {
+	if !streamWasActive && !streamUsedFallback && len(accumulatedContent) > 0 {
 		c.logger.Info("Streaming was inactive, sending accumulated content via fallback",
 			"content_len", len(accumulatedContent))
 

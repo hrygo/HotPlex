@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -17,6 +18,10 @@ const (
 	flushSize        = 20 // rune count threshold for immediate flush
 	maxAppendRetries = 3  // max retry attempts for AppendStream
 	retryDelay       = 50 * time.Millisecond
+
+	// StreamTTL is the maximum duration a Slack stream can live (~5 min TTL)
+	// We use 4 minutes to leave a safety buffer before the actual timeout
+	StreamTTL = 4 * time.Minute
 )
 
 // NativeStreamingWriter 实现 io.Writer 接口，封装 Slack 原生流式消息的生命周期管理
@@ -47,6 +52,10 @@ type NativeStreamingWriter struct {
 	bytesWritten      int64    // 成功写入的总字节数
 	bytesFlushed      int64    // 成功 flush 的总字节数
 	failedFlushChunks []string // 失败的 flush 块（用于潜在恢复）
+
+	// TTL 监控：检测流超时
+	streamStartTime time.Time // 流启动时间
+	streamExpired   bool      // 流是否已超时
 
 	// 存储回调（可选）
 	storeCallback func(content string)
@@ -116,10 +125,27 @@ func (w *NativeStreamingWriter) flushBuffer() {
 	contentLen := len(content)
 	w.buf.Reset()
 	started := w.started
+	streamExpired := w.streamExpired
+	streamStartTime := w.streamStartTime
 	w.mu.Unlock()
 
 	// 理论上只要有内容必然 started，前置拦截防空指针
 	if !started {
+		return
+	}
+
+	// TTL 检测：如果流已超时，不再尝试 AppendStream，直接记录失败
+	if streamExpired || time.Since(streamStartTime) > StreamTTL {
+		w.adapter.Logger().Warn("Stream TTL exceeded, marking as expired",
+			"channel_id", w.channelID,
+			"message_ts", w.messageTS,
+			"stream_age", time.Since(streamStartTime),
+			"ttl", StreamTTL)
+
+		w.mu.Lock()
+		w.streamExpired = true
+		w.failedFlushChunks = append(w.failedFlushChunks, content)
+		w.mu.Unlock()
 		return
 	}
 
@@ -128,6 +154,22 @@ func (w *NativeStreamingWriter) flushBuffer() {
 	for attempt := 1; attempt <= maxAppendRetries; attempt++ {
 		if err := w.adapter.AppendStream(w.ctx, w.channelID, w.messageTS, content); err != nil {
 			lastErr = err
+
+			// 检测流状态错误：如果是 message_not_in_streaming_state，立即停止重试
+			// 这表示流已经超时或被服务端关闭
+			if isStreamStateError(err) {
+				w.adapter.Logger().Warn("Stream state error detected, marking stream as expired",
+					"channel_id", w.channelID,
+					"message_ts", w.messageTS,
+					"error", err)
+
+				w.mu.Lock()
+				w.streamExpired = true
+				w.failedFlushChunks = append(w.failedFlushChunks, content)
+				w.mu.Unlock()
+				return
+			}
+
 			w.adapter.Logger().Warn("AppendStream failed, will retry",
 				"channel_id", w.channelID,
 				"message_ts", w.messageTS,
@@ -159,6 +201,17 @@ func (w *NativeStreamingWriter) flushBuffer() {
 		"error", lastErr)
 }
 
+// isStreamStateError checks if the error indicates the stream is no longer in streaming state
+func isStreamStateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "message_not_in_streaming_state") ||
+		strings.Contains(errStr, "streaming_state") ||
+		strings.Contains(errStr, "not_in_streaming")
+}
+
 // Write 实现 io.Writer 接口
 // 首次调用执行 StartStream 获取 TS；后续调用将内容追加到缓冲区并触发异步 AppendStream
 func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
@@ -181,6 +234,7 @@ func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
 		}
 		w.messageTS = messageTS
 		w.started = true
+		w.streamStartTime = time.Now() // 记录流启动时间用于 TTL 检测
 	}
 
 	w.buf.Write(p)
@@ -213,6 +267,7 @@ func (w *NativeStreamingWriter) Close() error {
 	bytesWritten := w.bytesWritten
 	bytesFlushed := w.bytesFlushed
 	failedChunks := w.failedFlushChunks
+	streamExpired := w.streamExpired
 	storeCallback := w.storeCallback
 	w.mu.Unlock()
 
@@ -225,14 +280,16 @@ func (w *NativeStreamingWriter) Close() error {
 	}
 
 	// 完整性校验：检查是否有失败的内容块
-	integrityOK := len(failedChunks) == 0 && bytesWritten == bytesFlushed
+	// 改进：即使 bytesWritten == bytesFlushed，如果有失败的 chunk 或流超时，也认为不完整
+	integrityOK := len(failedChunks) == 0 && bytesWritten == bytesFlushed && !streamExpired
 
 	if !integrityOK {
 		w.adapter.Logger().Warn("Stream integrity check failed",
 			"channel_id", w.channelID,
 			"bytes_written", bytesWritten,
 			"bytes_flushed", bytesFlushed,
-			"failed_chunks", len(failedChunks))
+			"failed_chunks", len(failedChunks),
+			"stream_expired", streamExpired)
 	}
 
 	// 结束远端流
@@ -353,7 +410,7 @@ func (w *NativeStreamingWriter) GetStats() StreamWriterStats {
 		BytesWritten:     w.bytesWritten,
 		BytesFlushed:     w.bytesFlushed,
 		FailedChunkCount: len(w.failedFlushChunks),
-		IntegrityOK:      len(w.failedFlushChunks) == 0 && w.bytesWritten == w.bytesFlushed,
+		IntegrityOK:      len(w.failedFlushChunks) == 0 && w.bytesWritten == w.bytesFlushed && !w.streamExpired,
 		FallbackUsed:     w.fallbackUsed,
 		ContentLength:    w.accumulatedContent.Len(),
 	}
