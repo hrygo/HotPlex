@@ -77,16 +77,10 @@ func TestNewPiProvider(t *testing.T) {
 }
 
 func TestPiProvider_Metadata(t *testing.T) {
-
-	provider, err := NewPiProvider(ProviderConfig{
-		Type:       ProviderTypePi,
-		Enabled:    &enabledTrue,
-
 	enabled := true
 	provider, err := NewPiProvider(ProviderConfig{
 		Type:       ProviderTypePi,
 		Enabled:    &enabled,
-
 		BinaryPath: "/usr/local/bin/pi",
 	}, nil)
 	require.NoError(t, err)
@@ -255,16 +249,10 @@ func TestPiProvider_BuildCLIArgs(t *testing.T) {
 }
 
 func TestPiProvider_BuildInputMessage(t *testing.T) {
-
-	provider, err := NewPiProvider(ProviderConfig{
-		Type:       ProviderTypePi,
-		Enabled:    &enabledTrue,
-
 	enabledTrue := true
 	provider, err := NewPiProvider(ProviderConfig{
 		Type:       ProviderTypePi,
 		Enabled:    &enabledTrue,
-
 		BinaryPath: "/usr/local/bin/pi",
 	}, nil)
 	require.NoError(t, err)
@@ -288,12 +276,6 @@ func TestPiProvider_ParseEvent(t *testing.T) {
 	provider, err := NewPiProvider(ProviderConfig{
 		Type:       ProviderTypePi,
 		Enabled:    &enabledTrue,
-
-	enabled := true
-	provider, err := NewPiProvider(ProviderConfig{
-		Type:       ProviderTypePi,
-		Enabled:    &enabled,
-
 		BinaryPath: "/usr/local/bin/pi",
 	}, nil)
 	require.NoError(t, err)
@@ -389,16 +371,10 @@ func TestPiProvider_ParseEvent(t *testing.T) {
 }
 
 func TestPiProvider_DetectTurnEnd(t *testing.T) {
-
-	provider, err := NewPiProvider(ProviderConfig{
-		Type:       ProviderTypePi,
-		Enabled:    &enabledTrue,
-
 	enabledTrue := true
 	provider, err := NewPiProvider(ProviderConfig{
 		Type:       ProviderTypePi,
 		Enabled:    &enabledTrue,
-
 		BinaryPath: "/usr/local/bin/pi",
 	}, nil)
 	require.NoError(t, err)
