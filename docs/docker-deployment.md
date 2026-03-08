@@ -8,7 +8,9 @@
 
 ```bash
 # Build the All-in-One image (includes Claude Code CLI)
-make docker-build
+make docker-build       # No cache, ensures fresh binary
+# Or for faster iteration:
+make docker-build-cache # Uses Docker cache
 ```
 
 **💡 Tip: Customize Your Development Environment**

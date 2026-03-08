@@ -14,7 +14,7 @@ import (
 // =============================================================================
 
 func TestToolMessageBuilder_BuildToolUseMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeToolUse,
@@ -35,7 +35,7 @@ func TestToolMessageBuilder_BuildToolUseMessage(t *testing.T) {
 }
 
 func TestToolMessageBuilder_BuildToolResultMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeToolResult,
@@ -58,7 +58,7 @@ func TestToolMessageBuilder_BuildToolResultMessage(t *testing.T) {
 // =============================================================================
 
 func TestAnswerMessageBuilder_BuildAnswerMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeAnswer,
@@ -75,7 +75,7 @@ func TestAnswerMessageBuilder_BuildAnswerMessage(t *testing.T) {
 }
 
 func TestAnswerMessageBuilder_BuildErrorMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeError,
@@ -96,7 +96,7 @@ func TestAnswerMessageBuilder_BuildErrorMessage(t *testing.T) {
 // =============================================================================
 
 func TestPlanMessageBuilder_BuildPlanModeMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypePlanMode,
@@ -115,7 +115,7 @@ func TestPlanMessageBuilder_BuildPlanModeMessage(t *testing.T) {
 }
 
 func TestPlanMessageBuilder_BuildExitPlanModeMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:     base.MessageTypeExitPlanMode,
@@ -129,7 +129,7 @@ func TestPlanMessageBuilder_BuildExitPlanModeMessage(t *testing.T) {
 }
 
 func TestPlanMessageBuilder_BuildAskUserQuestionMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeAskUserQuestion,
@@ -149,7 +149,7 @@ func TestPlanMessageBuilder_BuildAskUserQuestionMessage(t *testing.T) {
 // =============================================================================
 
 func TestInteractiveMessageBuilder_BuildDangerBlockMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeDangerBlock,
@@ -172,7 +172,7 @@ func TestInteractiveMessageBuilder_BuildDangerBlockMessage(t *testing.T) {
 // =============================================================================
 
 func TestStatsMessageBuilder_BuildSessionStatsMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeSessionStats,
@@ -200,7 +200,7 @@ func TestStatsMessageBuilder_BuildSessionStatsMessage(t *testing.T) {
 }
 
 func TestStatsMessageBuilder_BuildCommandProgressMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeCommandProgress,
@@ -218,7 +218,7 @@ func TestStatsMessageBuilder_BuildCommandProgressMessage(t *testing.T) {
 }
 
 func TestStatsMessageBuilder_BuildCommandCompleteMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeCommandComplete,
@@ -240,7 +240,7 @@ func TestStatsMessageBuilder_BuildCommandCompleteMessage(t *testing.T) {
 // =============================================================================
 
 func TestSystemMessageBuilder_BuildSystemMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeSystem,
@@ -256,7 +256,7 @@ func TestSystemMessageBuilder_BuildSystemMessage(t *testing.T) {
 }
 
 func TestSystemMessageBuilder_BuildUserMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeUser,
@@ -272,7 +272,7 @@ func TestSystemMessageBuilder_BuildUserMessage(t *testing.T) {
 }
 
 func TestSystemMessageBuilder_BuildStepStartMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeStepStart,
@@ -289,7 +289,7 @@ func TestSystemMessageBuilder_BuildStepStartMessage(t *testing.T) {
 }
 
 func TestSystemMessageBuilder_BuildStepFinishMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeStepFinish,
@@ -307,7 +307,7 @@ func TestSystemMessageBuilder_BuildStepFinishMessage(t *testing.T) {
 }
 
 func TestSystemMessageBuilder_BuildRawMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeRaw,
@@ -325,7 +325,7 @@ func TestSystemMessageBuilder_BuildRawMessage(t *testing.T) {
 }
 
 func TestSystemMessageBuilder_BuildUserMessageReceivedMessage(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeUserMessageReceived,
@@ -345,7 +345,7 @@ func TestSystemMessageBuilder_BuildUserMessageReceivedMessage(t *testing.T) {
 // =============================================================================
 
 func TestBuild_RoutesToCorrectSubBuilder(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	testCases := []struct {
 		msgType    base.MessageType
@@ -381,7 +381,7 @@ func TestBuild_RoutesToCorrectSubBuilder(t *testing.T) {
 }
 
 func TestBuild_DefaultToAnswerForUnknownType(t *testing.T) {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageType("unknown_type"),

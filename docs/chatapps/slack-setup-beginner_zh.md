@@ -4,7 +4,7 @@
 > 跟着以下保姆级图文步骤，带你截图级完成所有必要的手动点击操作！
 >
 > 如果你需要进阶功能、高级全量参数说明、权限详解或 JSON 清单详情，请参阅：
-> 👉 [Slack App 核心技术配置手册](./chatapps/chatapps-slack-manual-zh.md)
+> 👉 [Slack App 核心技术配置手册](./chatapps-slack-manual-zh.md)
 
 ---
 
@@ -32,7 +32,7 @@
 5. **粘贴“魔法代码”**：
    - 此时你会看到一个满是代码的文本框（注意：上方标签选 "JSON"）。
    - **把框里原有的代码全部删除清空**。
-   - **前往 👉 [这里（高级手册中的“应用配置清单”一节）](./chatapps/chatapps-slack-manual-zh.md#⚡-快捷集成使用应用配置清单-app-manifest) 复制那一段完整的 JSON 代码，原封不动地粘贴到你的框里！**
+   - **前往 👉 [这里（高级手册中的“应用配置清单”一节）](./chatapps-slack-manual-zh.md#⚡-应用配置清单-app-manifest) 复制那一段完整的 JSON 代码，原封不动地粘贴到你的框里！**
    - 点击右下角的 **"Next"**。
    - 确认无误后，再点击 **"Create"**。
    - 🎉 **恭喜第一步完成！机器人账号已经在后台建好了！**
@@ -120,6 +120,6 @@ HOTPLEX_SLACK_APP_TOKEN=xapp-在这里粘贴你复制的内容
 > - 怎么开启 2026 年最新版的审查日志面板？
 > - **怎么自定义 AI 的身份和工作流程？** ⚠️ 这一步很重要！
 >
-> 请直接翻看核心架构宝典 👉 [Slack App 核心技术配置手册](./chatapps/chatapps-slack-manual-zh.md)。
+> 请直接翻看核心架构宝典 👉 [Slack App 核心技术配置手册](./chatapps-slack-manual-zh.md)。
 >
 > 🔔 **特别提醒**：`chatapps/configs/slack.yaml` 中的 `system_prompt` 是示例模板，你需要根据自己的项目需求定制 AI 的身份、Git 工作流程和输出规范！

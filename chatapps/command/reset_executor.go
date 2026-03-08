@@ -55,11 +55,12 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 
 	sess, exists := e.engine.GetSession(sessionID)
 	if !exists {
-		_ = emitter.Error(0, "No active session found")
-		_ = emitter.Emit("Reset Failed")
+		_ = emitter.Error(0, "No conversation to reset")
+		_ = emitter.Emit("Nothing to Reset")
+		_ = emitter.Complete("No active conversation found.")
 		return &Result{
-			Success: false,
-			Message: "No active session found",
+			Success: true, // Not an error - just nothing to do
+			Message: "No active conversation found. Start chatting first!",
 		}, nil
 	}
 	providerSessionID = sess.ProviderSessionID
@@ -74,11 +75,12 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 	// Adapters will clean up their own state (aggregator buffers, etc.)
 
 	if err := e.engine.StopSession(sessionID, "user_requested_reset"); err != nil {
-		_ = emitter.Error(1, fmt.Sprintf("Failed: %v", err))
-		_ = emitter.Emit("Reset Failed")
+		_ = emitter.Error(1, fmt.Sprintf("Termination error: %v", err))
+		_ = emitter.Emit("Reset Incomplete")
+		_ = emitter.Complete(fmt.Sprintf("Could not fully reset. (%v)", err))
 		return &Result{
 			Success: false,
-			Message: fmt.Sprintf("Failed to terminate session: %v", err),
+			Message: fmt.Sprintf("Could not fully reset. Please try again or use /disconnect first. (%v)", err),
 		}, nil
 	}
 
@@ -88,13 +90,19 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 	_ = emitter.Running(2)
 
 	// Calls down to Provider interface to scrape `.jsonl` and HotPlex to drop the `.lock` marker
-	if err := e.engine.CleanupSessionFiles(sessionID); err != nil {
-		_ = emitter.Error(2, fmt.Sprintf("Cleanup incomplete: %v", err))
-		// We still consider it a success overall because the process is dead
-	} else {
-		_ = emitter.Success(2, "Marker deleted")
+	cleanupErr := e.engine.CleanupSessionFiles(sessionID)
+	if cleanupErr != nil {
+		_ = emitter.Error(2, fmt.Sprintf("Cleanup incomplete: %v", cleanupErr))
+		_ = emitter.Error(3, fmt.Sprintf("Cleanup incomplete: %v", cleanupErr))
+		_ = emitter.Emit("Reset Incomplete")
+		_ = emitter.Complete(fmt.Sprintf("Process terminated, but cleanup failed. Try /dc then /reset. (%v)", cleanupErr))
+		return &Result{
+			Success: false,
+			Message: fmt.Sprintf("Process terminated, but context cleanup failed. Try /dc then /reset. (%v)", cleanupErr),
+		}, nil
 	}
 
+	_ = emitter.Success(2, "Marker deleted")
 	_ = emitter.Running(3)
 	_ = emitter.Success(3, "Session file deleted")
 

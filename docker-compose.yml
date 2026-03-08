@@ -121,13 +121,13 @@ x-hotplex-common: &hotplex-common
     HTTPS_PROXY: http://host.docker.internal:7897
     NO_PROXY: localhost,127.0.0.1,host.docker.internal
   extra_hosts:
-    - "host.docker.internal:host-gateway"  # Allows container to reach host
+    - "host.docker.internal:host-gateway" # Allows container to reach host
   healthcheck: &common-healthcheck
     test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8080/health" ]
     interval: 30s
     timeout: 10s
     retries: 3
-    start_period: 60s  # Grace period for slow startup
+    start_period: 60s # Grace period for slow startup
   logging: &common-logging
     driver: json-file
     options:
@@ -165,7 +165,7 @@ services:
   hotplex:
     <<: *hotplex-common
     build:
-      context: .  # Build from local source code (remove to use remote image)
+      context: . # Build from local source code (remove to use remote image)
       args:
         HOST_UID: ${HOST_UID:-1000}
         VERSION: ${VERSION:-dev}
@@ -175,12 +175,11 @@ services:
     env_file:
       - .env
     volumes:
-      # Shared volumes (common to all bots)
-      - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw           # Message DB, configs
-      - ${HOME}/.claude:/home/hotplex/.claude:rw             # Session state
+      - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw # Message DB, configs
+      - ${HOME}/.claude:/home/hotplex/.claude:rw # Session state
       - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
-      - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw           # Go module cache
-      - hotplex-go-build:/home/hotplex/.cache/go-build:rw   # Go build cache
+      - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw # Go module cache
+      - hotplex-go-build:/home/hotplex/.cache/go-build:rw # Go build cache
       # Bot-specific volumes (MUST be unique per bot - no variables!)
       - ${HOME}/.slack/BOT_U0AHRCL1KCM:/home/hotplex/projects:rw
       - ${HOME}/.gitconfig-hotplex:/home/hotplex/.gitconfig:ro
@@ -201,7 +200,7 @@ services:
     container_name: hotplex-secondary
     depends_on:
       hotplex:
-        condition: service_started  # Wait for hotplex to build the image first
+        condition: service_started # Wait for hotplex to build the image first
     ports:
       - "127.0.0.1:18081:8080"
     env_file:
@@ -211,6 +210,7 @@ services:
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
       - ${HOME}/.claude:/home/hotplex/.claude:rw
       - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
+      - ${HOME}/.claude.json:/home/hotplex/.claude.json:rw
       - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw
       - hotplex-go-build:/home/hotplex/.cache/go-build:rw
       # Bot-specific volumes (MUST be unique per bot - no variables!)

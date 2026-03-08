@@ -161,22 +161,73 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 
 			// Map Security & Permission from YAML
 			config.BotUserID = pc.Security.Permission.BotUserID
+			config.VerifySignature = pc.Security.VerifySignature
 			config.DMPolicy = pc.Security.Permission.DMPolicy
 			config.GroupPolicy = pc.Security.Permission.GroupPolicy
 			config.AllowedUsers = pc.Security.Permission.AllowedUsers
 			config.BlockedUsers = pc.Security.Permission.BlockedUsers
 			config.SlashCommandRateLimit = pc.Security.Permission.SlashCommandRateLimit
 
+			// Map Owner Configuration (Phase 1: Bot Behavior Spec)
+			if pc.Security.Owner != nil {
+				config.Owner = &slack.OwnerConfig{
+					Primary: pc.Security.Owner.Primary,
+					Trusted: pc.Security.Owner.Trusted,
+					Policy:  slack.OwnerPolicy(pc.Security.Owner.Policy),
+				}
+			}
+
+			// Map Thread Ownership Configuration (Phase 1: Bot Behavior Spec)
+			if pc.Security.Permission.ThreadOwnership != nil {
+				config.ThreadOwnership = &slack.ThreadOwnershipConfig{
+					Enabled: pc.Security.Permission.ThreadOwnership.Enabled,
+					TTL:     pc.Security.Permission.ThreadOwnership.TTL,
+					Persist: pc.Security.Permission.ThreadOwnership.Persist,
+				}
+			}
+
+			// Map Features (Phase 2)
+			config.Features = slack.FeaturesConfig{
+				Chunking: slack.ChunkingConfig{
+					Enabled:  pc.Features.Chunking.Enabled,
+					MaxChars: pc.Features.Chunking.MaxChars,
+				},
+				Threading: slack.ThreadingConfig{
+					Enabled: pc.Features.Threading.Enabled,
+				},
+				RateLimit: slack.RateLimitConfig{
+					Enabled:     pc.Features.RateLimit.Enabled,
+					MaxAttempts: pc.Features.RateLimit.MaxAttempts,
+					BaseDelayMs: pc.Features.RateLimit.BaseDelayMs,
+					MaxDelayMs:  pc.Features.RateLimit.MaxDelayMs,
+				},
+				Markdown: slack.MarkdownConfig{
+					Enabled: pc.Features.Markdown.Enabled,
+				},
+			}
+
+			// Map Message Storage (Phase 3)
+			if pc.MessageStore.Enabled != nil {
+				config.Storage = &slack.StorageConfig{
+					Enabled:       pc.MessageStore.Enabled,
+					Type:          pc.MessageStore.Type,
+					SQLitePath:    pc.MessageStore.SQLite.Path,
+					PostgreSQLURL: pc.MessageStore.Postgres.DSN,
+					StreamEnabled: pc.MessageStore.Streaming.Enabled,
+					StreamTimeout: pc.MessageStore.Streaming.Timeout,
+				}
+			}
+
 			// Debug: Log GroupPolicy value
 			logger.Info("Slack config loaded from YAML",
 				"group_policy", config.GroupPolicy,
 				"bot_user_id", config.BotUserID,
-				"dm_policy", config.DMPolicy)
+				"dm_policy", config.DMPolicy,
+				"owner_policy", config.GetOwnerPolicy(),
+				"thread_ownership", config.IsThreadOwnershipEnabled())
 
-			// Set broadcast response for multibot mode
-			if pc.Security.Permission.BroadcastResponse != "" {
-				config.SetBroadcastResponse(pc.Security.Permission.BroadcastResponse)
-			}
+			// Set broadcast response for multibot mode (Empty string means silence)
+			config.SetBroadcastResponse(pc.Security.Permission.BroadcastResponse)
 
 			// AppToken fallback
 			if config.AppToken == "" && pc.Options != nil {
@@ -390,7 +441,10 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 	if pCfg.Type == "" {
 		pCfg.Type = provider.ProviderTypeClaudeCode
 	}
-	pCfg.Enabled = true // Ensure it's enabled
+	if pCfg.Enabled == nil {
+		enabled := true
+		pCfg.Enabled = &enabled
+	}
 
 	prv, err := provider.CreateProvider(pCfg)
 	if err != nil {
@@ -426,7 +480,7 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 		Provider:         prv,
 		// Pass permission settings from YAML config
 		PermissionMode:             pc.Provider.DefaultPermissionMode,
-		DangerouslySkipPermissions: pc.Provider.DangerouslySkipPermissions,
+		DangerouslySkipPermissions: BoolValue(pc.Provider.DangerouslySkipPermissions, true),
 		AllowedTools:               allowedTools,
 		DisallowedTools:            disallowedTools,
 	}

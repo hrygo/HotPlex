@@ -1,6 +1,6 @@
 # 🤖 HotPlex: AI Agent Engineering Protocol
 
-**Project Status**: v0.19.0 | **Core Role**: High-performance AI Agent Control Plane (Cli-as-a-Service).
+**Project Status**: v0.22.x | **Core Role**: High-performance AI Agent Control Plane (Cli-as-a-Service).
 This document defines the operational boundaries and technical DNA for AI agents working on **hotplex**.
 
 ---
@@ -20,6 +20,12 @@ make test         # 运行单元测试
 make test-race    # 运行竞态检测测试
 make run          # 构建并前台运行
 make lint         # 运行 golangci-lint
+
+# Docker 部署
+make docker-build # 构建镜像
+make docker-up    # 启动服务
+make docker-logs  # 查看日志
+make docker-down  # 停止服务
 ```
 
 环境配置：复制 `.env.example` 到 `.env` 并填写凭证。
@@ -63,8 +69,11 @@ make lint         # 运行 golangci-lint
     - `internal/server/`: WebSocket & HTTP Gateway implementations.
     - `internal/security/`: `detector.go` (Regex WAF).
     - `internal/persistence/`: `marker.go` (Session durability).
+    - `internal/secrets/`: Secrets provider (API key management).
+    - `internal/telemetry/`: OpenTelemetry integration.
 - **Systems**: `internal/sys/` (OS Signals), `internal/config/` (Watchers), `internal/strutil/` (High-perf utils).
 - **Domain**: `types/` & `event/` (The "Universal Language" of the system).
+- **Plugins**: `plugins/storage/` (Message persistence backends: SQLite, PostgreSQL).
 
 ---
 

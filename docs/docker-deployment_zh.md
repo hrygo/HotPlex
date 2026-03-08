@@ -10,7 +10,9 @@
 
 ```bash
 # 构建 All-in-One 镜像（包含 Claude Code CLI）
-make docker-build
+make docker-build       # 无缓存，确保最新二进制
+# 或快速迭代构建：
+make docker-build-cache # 使用 Docker 缓存
 ```
 
 **💡 提示：自定义您的开发环境**

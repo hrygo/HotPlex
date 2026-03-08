@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+// PtrBool returns a pointer to the given bool value.
+func PtrBool(b bool) *bool {
+	return &b
+}
+
 // ProviderType defines the type of AI CLI provider.
 type ProviderType string
 
@@ -141,7 +146,7 @@ type ProviderConfig struct {
 	Type ProviderType `json:"type" koanf:"type"`
 
 	// Enabled controls whether this provider is available
-	Enabled bool `json:"enabled" koanf:"enabled"`
+	Enabled *bool `json:"enabled" koanf:"enabled"`
 
 	// ExplicitDisable explicitly disables the provider, overriding base config's Enabled=true.
 	// This is needed because bool zero value (false) cannot be distinguished from "not set"
@@ -160,7 +165,7 @@ type ProviderConfig struct {
 	// DangerouslySkipPermissions bypasses all permission checks.
 	// Equivalent to --permission-mode bypassPermissions but skips permission prompts entirely.
 	// Recommended only for sandboxes with no internet access.
-	DangerouslySkipPermissions bool `json:"dangerously_skip_permissions,omitempty" koanf:"dangerously_skip_permissions"`
+	DangerouslySkipPermissions *bool `json:"dangerously_skip_permissions,omitempty" koanf:"dangerously_skip_permissions"`
 
 	// AllowedTools restricts available tools (provider-level override)
 	AllowedTools []string `json:"allowed_tools,omitempty" koanf:"allowed_tools"`

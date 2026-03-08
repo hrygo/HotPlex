@@ -332,6 +332,11 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 		IsResuming:        isResuming,
 	}
 
+	// Open session log file for stderr persistence
+	if err := sess.OpenLogFile(); err != nil {
+		sessLog.Warn("Failed to open session log file", "error", err)
+	}
+
 	go sess.ReadStdout()
 	go sess.ReadStderr()
 

@@ -109,7 +109,7 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (Provider, error) {
 		return nil, fmt.Errorf("unknown provider type: %s", cfg.Type)
 	}
 
-	if !cfg.Enabled {
+	if cfg.Enabled != nil && !*cfg.Enabled {
 		return nil, fmt.Errorf("provider %s is disabled", cfg.Type)
 	}
 
@@ -123,10 +123,19 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (Provider, error) {
 
 // CreateDefault creates a Provider with default configuration.
 func (f *ProviderFactory) CreateDefault(t ProviderType) (Provider, error) {
+	enabled := true
 	return f.Create(ProviderConfig{
 		Type:    t,
-		Enabled: true,
+		Enabled: &enabled,
 	})
+}
+
+// BoolValue returns the value of a bool pointer if not nil, otherwise returns defaultVal.
+func BoolValue(pb *bool, defaultVal bool) bool {
+	if pb == nil {
+		return defaultVal
+	}
+	return *pb
 }
 
 // ListRegistered returns a list of registered provider types.
@@ -214,9 +223,10 @@ func (r *ProviderRegistry) Get(t ProviderType, cfg ProviderConfig) (Provider, er
 
 // GetOrCreate retrieves a cached provider or creates one with default config.
 func (r *ProviderRegistry) GetOrCreate(t ProviderType) (Provider, error) {
+	enabled := true
 	return r.Get(t, ProviderConfig{
 		Type:    t,
-		Enabled: true,
+		Enabled: &enabled,
 	})
 }
 
@@ -275,8 +285,9 @@ func MergeProviderConfigs(base, overlay ProviderConfig) ProviderConfig {
 	}
 	// Use ExplicitDisable to override a true base.Enabled with false
 	if overlay.ExplicitDisable {
-		result.Enabled = false
-	} else if overlay.Enabled {
+		enabled := false
+		result.Enabled = &enabled
+	} else if overlay.Enabled != nil {
 		result.Enabled = overlay.Enabled
 	}
 	if overlay.BinaryPath != "" {
@@ -289,8 +300,9 @@ func MergeProviderConfigs(base, overlay ProviderConfig) ProviderConfig {
 		result.DefaultPermissionMode = overlay.DefaultPermissionMode
 	}
 	// DangerouslySkipPermissions: if overlay sets it to true, use that value
-	if overlay.DangerouslySkipPermissions {
-		result.DangerouslySkipPermissions = true
+	if overlay.DangerouslySkipPermissions != nil && *overlay.DangerouslySkipPermissions {
+		val := true
+		result.DangerouslySkipPermissions = &val
 	}
 	if len(overlay.AllowedTools) > 0 {
 		result.AllowedTools = overlay.AllowedTools

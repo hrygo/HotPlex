@@ -64,6 +64,7 @@ import (
 // rich Slack Block Kit structures, ensuring consistent UX across different message types.
 // Now delegates to specialized sub-builders for better maintainability.
 type MessageBuilder struct {
+	config      *Config
 	formatter   *MrkdwnFormatter
 	tool        *ToolMessageBuilder
 	answer      *AnswerMessageBuilder
@@ -74,12 +75,13 @@ type MessageBuilder struct {
 }
 
 // NewMessageBuilder creates a new MessageBuilder
-func NewMessageBuilder() *MessageBuilder {
+func NewMessageBuilder(config *Config) *MessageBuilder {
 	formatter := NewMrkdwnFormatter()
 	return &MessageBuilder{
+		config:      config,
 		formatter:   formatter,
 		tool:        NewToolMessageBuilder(formatter),
-		answer:      NewAnswerMessageBuilder(formatter),
+		answer:      NewAnswerMessageBuilder(config, formatter),
 		plan:        NewPlanMessageBuilder(),
 		interactive: NewInteractiveMessageBuilder(),
 		stats:       NewStatsMessageBuilder(),

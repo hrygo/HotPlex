@@ -826,10 +826,19 @@ func (c *StreamCallback) handleAnswer(data any) error {
 	// Always accumulate content for potential fallback
 	c.accumulatedContent.WriteString(content)
 
-	// Initialize native streaming on the FIRST answer chunk
+	// Guard: If content is pure whitespace, skip native stream update to avoid Slack API errors.
+	// We still accumulate it, so it will be included in the NEXT real text chunk or final fallback.
+	if strings.TrimSpace(content) == "" {
+		c.logger.Debug("Accumulating whitespace-only chunk without stream update", "len", len(content))
+		c.mu.Unlock()
+		return nil
+	}
+
+	// Initialize native streaming on the FIRST real answer chunk
 	if !c.streamWriterActive && c.streamWriter == nil {
 		channelID := ""
 		threadTS := ""
+		userID := ""
 		if c.metadata != nil {
 			if ch, ok := c.metadata["channel_id"].(string); ok {
 				channelID = ch
@@ -837,9 +846,12 @@ func (c *StreamCallback) handleAnswer(data any) error {
 			if ts, ok := c.metadata["thread_ts"].(string); ok {
 				threadTS = ts
 			}
+			if uid, ok := c.metadata["user_id"].(string); ok {
+				userID = uid
+			}
 		}
 		if channelID != "" {
-			c.streamWriter = c.adapters.NewStreamWriter(c.ctx, c.platform, channelID, threadTS)
+			c.streamWriter = c.adapters.NewStreamWriter(c.ctx, c.platform, userID, channelID, threadTS)
 			if c.streamWriter != nil {
 				c.streamWriterActive = true
 				c.logger.Debug("Native streaming initialized", "channel_id", channelID)
@@ -1045,7 +1057,9 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 
 	if streamWriter != nil {
 		if err := streamWriter.Close(); err != nil {
-			c.logger.Warn("Failed to close stream", "error", err)
+			c.logger.Error("Failed to close stream during finalization", "error", err)
+			c.mu.Unlock()
+			return fmt.Errorf("failed to close stream: %w", err)
 		}
 		c.streamWriter = nil
 		c.streamWriterActive = false
@@ -1066,7 +1080,8 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 	// Additionally, we check FallbackUsed() to handle the edge case where handleAnswer already
 	// sent a fallback message before the stream was properly initialized.
 	// This prevents duplicate message sends.
-	if !streamWasActive && !streamUsedFallback && len(accumulatedContent) > 0 {
+	// Fallback mechanism for inactive streams
+	if !streamWasActive && !streamUsedFallback && strings.TrimSpace(accumulatedContent) != "" {
 		c.logger.Info("Streaming was inactive, sending accumulated content via fallback",
 			"content_len", len(accumulatedContent))
 
@@ -1075,17 +1090,18 @@ func (c *StreamCallback) handleSessionStats(data any) error {
 
 		if channelID != "" && c.messageOps != nil {
 			if err := c.messageOps.SendThreadReply(c.ctx, channelID, threadTS, accumulatedContent); err != nil {
-				c.logger.Error("Fallback message send failed",
+				c.logger.Error("Final fallback message send failed",
 					"channel_id", channelID,
 					"content_len", len(accumulatedContent),
 					"error", err)
-				// Don't return error - session stats are still valuable
-			} else {
-				c.logger.Info("Fallback message sent successfully",
-					"channel_id", channelID,
-					"content_len", len(accumulatedContent))
+				return fmt.Errorf("final fallback failed: %w", err)
 			}
+			c.logger.Info("Fallback message sent successfully",
+				"channel_id", channelID,
+				"content_len", len(accumulatedContent))
 		}
+	} else if len(accumulatedContent) > 0 && strings.TrimSpace(accumulatedContent) == "" {
+		c.logger.Debug("Skipping fallback for pure whitespace content", "len", len(accumulatedContent))
 	}
 
 	// Final cleanup of transient transition messages (Thinking + Action Zone)

@@ -47,7 +47,7 @@ func (a *Adapter) handleEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.config.SigningSecret != "" {
+	if a.config.SigningSecret != "" && BoolValue(a.config.VerifySignature, true) {
 		if !a.verifySignature(r, body) {
 			a.Logger().Warn("Invalid signature")
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -158,24 +158,58 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 			}
 			// If broadcast (no @), send polite response instead of processing
 			if a.config.IsBroadcastMessage(msgEvent.Text) {
-				threadID := msgEvent.ThreadTS
-				if threadID == "" {
-					threadID = msgEvent.TS
-				}
-				a.Logger().Debug("Broadcast message - sending polite response", "channel", msgEvent.Channel)
 				response := a.config.GetBroadcastResponse(ctx, msgEvent.Text)
-				_ = a.SendToChannel(ctx, msgEvent.Channel, response, threadID)
+				// Only send if response is not empty. If empty, stay silent (as requested via config)
+				if response != "" {
+					threadID := msgEvent.ThreadTS
+					if threadID == "" {
+						threadID = msgEvent.TS
+					}
+					a.Logger().Debug("Broadcast message - sending polite response", "channel", msgEvent.Channel)
+					_ = a.SendToChannel(ctx, msgEvent.Channel, response, threadID)
+					return
+				}
+				// If response is empty, continue to thread ownership logic or return
+				a.Logger().Debug("Broadcast message - broadcast_response is empty, staying silent", "channel", msgEvent.Channel)
 				return
 			}
+
 		}
 	}
+
+	// Thread ownership decision (Phase 1: Bot Behavior Spec)
+	// This replaces and enhances the previous GroupPolicy checks when ThreadOwnership is enabled
+	if a.config.IsThreadOwnershipEnabled() {
+		shouldRespond, reason := a.ShouldRespondToMessage(
+			msgEvent.ChannelType,
+			msgEvent.Channel,
+			msgEvent.ThreadTS,
+			msgEvent.Text,
+			msgEvent.User,
+		)
+		if !shouldRespond {
+			a.Logger().Debug("Message ignored by thread ownership policy",
+				"reason", reason,
+				"channel", msgEvent.Channel,
+				"thread_ts", msgEvent.ThreadTS,
+				"user", msgEvent.User)
+			return
+		}
+		a.Logger().Debug("Message accepted by thread ownership policy",
+			"reason", reason,
+			"channel", msgEvent.Channel,
+			"thread_ts", msgEvent.ThreadTS)
+	}
+
+	// Strip bot mention if present (standardize across modes)
+	msgText := a.stripBotMention(msgEvent.Text)
 
 	threadID := msgEvent.ThreadTS
 	if threadID == "" {
 		threadID = msgEvent.TS
 	}
 
-	processedText, conversionMetadata := preprocessMessageText(msgEvent.Text)
+	processedText, conversionMetadata := preprocessMessageText(msgText)
 	// Defense-in-depth: sanitize user input before passing to engine
 	processedText = sanitizeUserInput(processedText)
 	if _, converted := conversionMetadata["converted_from_hash"]; converted {

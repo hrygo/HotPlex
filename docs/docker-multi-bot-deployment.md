@@ -20,10 +20,10 @@
 
 ### Required Environment
 
-| Tool | Version | Check Command |
-|------|---------|---------------|
-| Docker | 20.10+ | `docker --version` |
-| Docker Compose | v2+ | `docker compose version` |
+| Tool           | Version | Check Command            |
+| -------------- | ------- | ------------------------ |
+| Docker         | 20.10+  | `docker --version`       |
+| Docker Compose | v2+     | `docker compose version` |
 
 ### Get Slack Credentials
 
@@ -85,11 +85,11 @@ Each bot needs a separate Slack App created at [Slack API](https://api.slack.com
 
 **Each bot requires 3 credentials:**
 
-| Credential | Format | Source |
-|------------|--------|--------|
-| `BOT_USER_ID` | `UXXXXXXXXXX` | App Home page |
-| `BOT_TOKEN` | `xoxb-...` | OAuth & Permissions page |
-| `APP_TOKEN` | `xapp-...` | Socket Mode page |
+| Credential    | Format        | Source                   |
+| ------------- | ------------- | ------------------------ |
+| `BOT_USER_ID` | `UXXXXXXXXXX` | App Home page            |
+| `BOT_TOKEN`   | `xoxb-...`    | OAuth & Permissions page |
+| `APP_TOKEN`   | `xapp-...`    | Socket Mode page         |
 
 ---
 
@@ -233,12 +233,12 @@ services:
 
 ### ⚠️ Critical Isolation Rules
 
-| Isolation Item | Reason | Config Location |
-|----------------|--------|-----------------|
-| **projects dir** | Each bot has independent workspace | volumes `.slack/BOT_xxx` |
-| **gitconfig** | Each bot has independent Git identity | volumes `.gitconfig-xxx` |
-| **port** | Avoid port conflicts | ports `18080/18081` |
-| **env_file** | Each bot has independent credentials | `.env` / `.env.secondary` |
+| Isolation Item   | Reason                                | Config Location           |
+| ---------------- | ------------------------------------- | ------------------------- |
+| **projects dir** | Each bot has independent workspace    | volumes `.slack/BOT_xxx`  |
+| **gitconfig**    | Each bot has independent Git identity | volumes `.gitconfig-xxx`  |
+| **port**         | Avoid port conflicts                  | ports `18080/18081`       |
+| **env_file**     | Each bot has independent credentials  | `.env` / `.env.secondary` |
 
 **❌ Wrong (causes conflicts):**
 
@@ -426,12 +426,12 @@ docker compose logs hotplex | tail -50
 # 3. Common causes
 ```
 
-| Error Message | Cause | Solution |
-|---------------|-------|----------|
-| `invalid bot_user_id` | Invalid `HOTPLEX_SLACK_BOT_USER_ID` | Check User ID format |
-| `invalid_auth` | Invalid token | Reinstall App to get new token |
-| `missing scope` | Insufficient permissions | Add required OAuth Scopes |
-| `connection refused` | Socket Mode not enabled | Enable Socket Mode and generate App Token |
+| Error Message         | Cause                               | Solution                                  |
+| --------------------- | ----------------------------------- | ----------------------------------------- |
+| `invalid bot_user_id` | Invalid `HOTPLEX_SLACK_BOT_USER_ID` | Check User ID format                      |
+| `invalid_auth`        | Invalid token                       | Reinstall App to get new token            |
+| `missing scope`       | Insufficient permissions            | Add required OAuth Scopes                 |
+| `connection refused`  | Socket Mode not enabled             | Enable Socket Mode and generate App Token |
 
 ### Q2: Multi-Bot Message Confusion
 
@@ -543,7 +543,7 @@ ports:
 - [Docker Deployment Guide](docker-deployment.md) - Single bot deployment
 - [Production Guide](production-guide.md) - Production best practices
 - [Slack Beginner Guide](chatapps/slack-setup-beginner.md) - Slack configuration details
-- [CONFIGURATION.md](CONFIGURATION.md) - Complete configuration reference
+- [configuration.md](configuration.md) - Complete configuration reference
 
 ---
 

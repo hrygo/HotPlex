@@ -23,6 +23,7 @@ type PlatformConfig struct {
 	Engine           EngineConfig            `yaml:"engine"`
 	Provider         provider.ProviderConfig `yaml:"provider"`
 	Security         SecurityConfig          `yaml:"security"`
+	Features         FeaturesConfig          `yaml:"features"`
 	Session          SessionConfig           `yaml:"session"`
 	MessageStore     MessageStoreConfig      `yaml:"message_store,omitempty"`
 	DingTalk         DingTalkConfig          `yaml:"dingtalk"`
@@ -32,18 +33,62 @@ type PlatformConfig struct {
 }
 
 type SecurityConfig struct {
-	VerifySignature bool             `yaml:"verify_signature"`
+	VerifySignature *bool            `yaml:"verify_signature"`
 	Permission      PermissionConfig `yaml:"permission"`
+	Owner           *OwnerConfig     `yaml:"owner,omitempty"`
 }
 
 type PermissionConfig struct {
-	DMPolicy              string   `yaml:"dm_policy"`
-	GroupPolicy           string   `yaml:"group_policy"`
-	BotUserID             string   `yaml:"bot_user_id"`
-	BroadcastResponse     string   `yaml:"broadcast_response"` // Response for broadcast messages (multibot mode)
-	AllowedUsers          []string `yaml:"allowed_users"`
-	BlockedUsers          []string `yaml:"blocked_users"`
-	SlashCommandRateLimit float64  `yaml:"slash_command_rate_limit"`
+	DMPolicy              string                 `yaml:"dm_policy"`
+	GroupPolicy           string                 `yaml:"group_policy"`
+	BotUserID             string                 `yaml:"bot_user_id"`
+	BroadcastResponse     string                 `yaml:"broadcast_response"` // Response for broadcast messages (multibot mode)
+	AllowedUsers          []string               `yaml:"allowed_users"`
+	BlockedUsers          []string               `yaml:"blocked_users"`
+	SlashCommandRateLimit float64                `yaml:"slash_command_rate_limit"`
+	ThreadOwnership       *ThreadOwnershipConfig `yaml:"thread_ownership,omitempty"`
+}
+
+// FeaturesConfig contains feature toggles for UI/UX experience.
+type FeaturesConfig struct {
+	Chunking  ChunkingConfig  `yaml:"chunking"`
+	Threading ThreadingConfig `yaml:"threading"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	Markdown  MarkdownConfig  `yaml:"markdown"`
+}
+
+type ChunkingConfig struct {
+	Enabled  *bool `yaml:"enabled"`
+	MaxChars int   `yaml:"max_chars"`
+}
+
+type ThreadingConfig struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+type RateLimitConfig struct {
+	Enabled     *bool `yaml:"enabled"`
+	MaxAttempts int   `yaml:"max_attempts"`
+	BaseDelayMs int   `yaml:"base_delay_ms"`
+	MaxDelayMs  int   `yaml:"max_delay_ms"`
+}
+
+type MarkdownConfig struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+// OwnerConfig defines bot ownership and access control (Phase 1: Bot Behavior Spec)
+type OwnerConfig struct {
+	Primary string   `yaml:"primary"` // slack user ID
+	Trusted []string `yaml:"trusted"`
+	Policy  string   `yaml:"policy"` // owner_only | trusted | public
+}
+
+// ThreadOwnershipConfig defines thread ownership tracking behavior (Phase 1: Bot Behavior Spec)
+type ThreadOwnershipConfig struct {
+	Enabled *bool         `yaml:"enabled"`
+	TTL     time.Duration `yaml:"ttl"`
+	Persist *bool         `yaml:"persist"`
 }
 
 type DingTalkConfig struct {
@@ -76,7 +121,7 @@ type EngineConfig struct {
 
 // MessageStoreConfig 消息存储配置 (Phase 3)
 type MessageStoreConfig struct {
-	Enabled   bool            `yaml:"enabled"`
+	Enabled   *bool           `yaml:"enabled"`
 	Type      string          `yaml:"type"` // sqlite | postgres | memory
 	SQLite    SQLiteConfig    `yaml:"sqlite"`
 	Postgres  PostgresConfig  `yaml:"postgres"`
@@ -96,10 +141,18 @@ type PostgresConfig struct {
 }
 
 type StreamingConfig struct {
-	Enabled       bool          `yaml:"enabled"`
+	Enabled       *bool         `yaml:"enabled"`
 	BufferSize    int           `yaml:"buffer_size"`
 	Timeout       time.Duration `yaml:"timeout"`
 	StoragePolicy string        `yaml:"storage_policy"` // complete_only | all_chunks
+}
+
+// BoolValue returns the value of a bool pointer if not nil, otherwise returns defaultVal.
+func BoolValue(pb *bool, defaultVal bool) bool {
+	if pb == nil {
+		return defaultVal
+	}
+	return *pb
 }
 
 type Logger = slog.Logger

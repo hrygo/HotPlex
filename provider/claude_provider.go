@@ -100,7 +100,7 @@ func (p *ClaudeCodeProvider) BuildCLIArgs(providerSessionID string, opts *Provid
 	}
 
 	// DangerouslySkipPermissions bypasses all permission checks
-	if opts.DangerouslySkipPermissions || p.opts.DangerouslySkipPermissions {
+	if opts.DangerouslySkipPermissions || BoolValue(p.opts.DangerouslySkipPermissions, false) {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 

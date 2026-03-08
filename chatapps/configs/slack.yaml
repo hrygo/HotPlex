@@ -1,83 +1,56 @@
 # =============================================================================
-# HotPlex Slack Adapter Configuration
+# HotPlex Slack Adapter Configuration [BETA]
 # =============================================================================
-# Detailed Setup Guide: docs/chatapps/chatapps-slack.md
+# 详细的高级配置和选项，见用户手册的章节：
+# - 中文手册: docs/chatapps/chatapps-slack-manual-zh.md
+# - English Manual: docs/chatapps/chatapps-slack-manual.md
+# =============================================================================
 
-# [Required] Platform identifier
+# 1. PLATFORM & CONNECTION
 platform: slack
+mode: socket                       # "socket" (Recommended) or "http"
+server_addr: :8080                 # Used for health checks or HTTP mode
 
-# -----------------------------------------------------------------------------
-# AI Provider Settings
-# -----------------------------------------------------------------------------
+# 2. AI PROVIDER & ENGINE
 provider:
-  # AI backend type:
-  # - claude-code: Anthropic's Claude Code CLI (Default)
-  # - opencode: OpenCode (supports multiple LLM backends via its own config)
-  type: claude-code
-
-  # Global settings (applied to all providers)
-  enabled: true
-  default_model: sonnet            # Model: sonnet, haiku, opus (Claude); or any model ID (OpenCode)
-  default_permission_mode: bypass-permissions # bypassPermissions, acceptEdits, default, dontAsk, plan
+  type: claude-code                # claude-code | opencode
+  default_model: sonnet
+  default_permission_mode: bypass-permissions
   dangerously_skip_permissions: true
-  # [Docker/Container Environment - Recommended]
-  # In containerized environments (Docker, Kubernetes), it is recommended to enable:
-  # dangerously_skip_permissions: true
-  # This bypasses all permission checks, enabling fully autonomous mode.
-  # Use only in sandboxed environments with no internet access or read-only filesystem.
-  # docker run -e HOTPLEX_PROVIDER_DANGEROUSLY_SKIP_PERMISSIONS=true ...
 
-  # binary_path: /usr/local/bin/claude        # Optional: override binary lookup path
-  # Tool filtering (Provider-level override)
-  # allowed_tools: ["Bash", "Edit"]
-  # disallowed_tools: ["Bash"]
-
-  # ---------------------------------------------------------------------------
-  # OpenCode Specific Settings (Only active if type is 'opencode')
-  # ---------------------------------------------------------------------------
-  # opencode:
-  #   use_http_api: false          # Set true to use OpenCode's SSE HTTP API
-  #   port: 4096                   # HTTP API port (default: 4096)
-  #   plan_mode: false             # Enable planning mode (Architect role)
-  #   provider: openai             # OpenCode LLM provider (openai, anthropic, deepseek, etc.)
-  #   model: gpt-4o                # Specific model ID for the selected provider
-
-# -----------------------------------------------------------------------------
-# Workspace & Engine Settings
-# -----------------------------------------------------------------------------
 engine:
-  work_dir: ~/projects/hotplex                # Agent's working directory
-  timeout: 30m                                # Max wait for AI response
-  idle_timeout: 1h                           # Session persistence time
+  work_dir: ~/projects/hotplex
+  timeout: 30m
+  idle_timeout: 1h
 
-  # Tool filtering (Optional: Whitelist or Blacklist)
-  # allowed_tools: ["Bash", "Edit"]    # If set, ONLY these tools can be used
-  # disallowed_tools: ["Bash"]         # If set, these tools are forbidden
+# 3. SECURITY & ACCESS
+security:
+  verify_signature: true
+  owner:
+    primary: ${HOTPLEX_SLACK_PRIMARY_OWNER}  # Your Slack User ID (e.g. U12345678)
+    policy: trusted                         # owner_only | trusted | public
 
-# -----------------------------------------------------------------------------
-# Session Lifecycle
-# -----------------------------------------------------------------------------
-session:
-  timeout: 1h                   # Inactivity before cleanup
-  cleanup_interval: 5m          # Frequency of scanning for expired sessions
+  permission:
+    dm_policy: allow
+    group_policy: multibot                  # allow | mention | multibot | block
+    bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID}
+    # Tracks and continues responding in active threads for conversation continuity.
+    thread_ownership:
+      enabled: true
 
-# -----------------------------------------------------------------------------
-# Connection Settings
-# -----------------------------------------------------------------------------
-# Mode: "socket" (local/dev - no public IP) or "http" (production - webhook)
-# Socket mode is recommended for development and local use.
-mode: socket
+# 4. STORAGE
+message_store:
+  enabled: true
+  type: sqlite
+  sqlite:
+    path: ~/.hotplex/slack_messages.db
 
-# HTTP server address (for webhook mode or health check)
-# Only used when mode is "http"
-server_addr: :8080
-
+# 5. AI IDENTITY & BEHAVIOR
 # -----------------------------------------------------------------------------
-# AI Identity & Behavior
-# -----------------------------------------------------------------------------
-# ⚠️  CUSTOMIZE THIS PROMPT for your project! ⚠️
-# The system_prompt below is an EXAMPLE for the HotPlex project.
-# Define your own AI identity, workflow, and conventions.
+# ⚠️ [ACTION REQUIRED]
+# [Recommended] The Core System Identity
+# 以下是系统身份模板（完整示例）。你需要根据自己的项目需求、工作流和角色进行深度定制！
+# 此 Prompt 定义了 AI 的技能、Git 规范、输出风格以及安全规则。
 # -----------------------------------------------------------------------------
 system_prompt: |
   You are HotPlex, an expert software engineer in a Slack conversation.
@@ -154,92 +127,10 @@ system_prompt: |
   - Use code blocks for code snippets
   - Avoid tables - use lists instead
 
+# [Optional] Specialized Task Instructions
+# 每个会话 turn 都会追加这些指令，用于维持任务质量（示例）。
 task_instructions: |
   1. Understand before acting
   2. Avoid operations requiring user input
   3. Summarize tool output - don't dump raw data
   4. Write detailed content to docs/ directory
-
-# -----------------------------------------------------------------------------
-# Feature Toggles
-# -----------------------------------------------------------------------------
-features:
-  # Split messages > 4000 chars (Slack limit)
-  chunking:
-    enabled: true
-    max_chars: 4000
-
-  # Reply in threads to keep channels clean
-  threading:
-    enabled: true
-
-  # Auto-retry on Slack API rate limits (HTTP 429)
-  rate_limit:
-    enabled: true
-    max_attempts: 3
-    base_delay_ms: 500
-    max_delay_ms: 5000
-
-  # Convert standard Markdown to Slack mrkdwn
-  markdown:
-    enabled: true
-
-# -----------------------------------------------------------------------------
-# Security & Access Control
-# -----------------------------------------------------------------------------
-security:
-  # Verify Slack request signatures (mandatory for HTTP mode)
-  verify_signature: true
-
-  # User & Channel Permissions
-  permission:
-    # DM Policy: "allow" (all), "pairing" (active users only), "block"
-    dm_policy: allow
-
-    # Group Policy options:
-    # - "allow": Respond to all group messages (default)
-    # - "mention": Only respond when bot is @mentioned
-    # - "multibot": Multi-bot mode - @mentioned bot responds, no @ = all bots send polite response
-    # - "block": Block all group messages
-    group_policy: multibot  # Change from 'mention' to 'multibot' for multi-bot setups
-
-    # [Required] Bot's own User ID (e.g., U12345678) for mention detection
-    bot_user_id: ${HOTPLEX_SLACK_BOT_USER_ID}
-
-    # [Optional] Broadcast response for multibot mode
-    # When group_policy is "multibot" and message has no @ mentions,
-    # this response is sent to politely inform users how to get help.
-    # Leave empty to use default response.
-    broadcast_response: |
-      👋 Hello! I'm ready to help.
-      Please @mention me if you'd like me to respond specifically to you.
-
-    # Whitelist/Blacklist (Leave empty to skip)
-    allowed_users: []      # Example: ["U12345", "U67890"]
-    blocked_users: []
-
-    # Slash Command rate limit (requests per second per user)
-    # Default: 10.0
-    slash_command_rate_limit: 10.0
-
-# -----------------------------------------------------------------------------
-# Message Storage (Optional)
-# -----------------------------------------------------------------------------
-# Persist chat history for conversation retrieval and analytics.
-# Disabled by default - uncomment to enable.
-# -----------------------------------------------------------------------------
-# message_store:
-#   enabled: true
-#   type: sqlite                    # sqlite | postgres | memory
-#   sqlite:
-#     path: ~/.hotplex/slack_messages.db
-#     max_size_mb: 512
-#   # postgres:                      # Uncomment for PostgreSQL
-#   #   dsn: postgres://user:pass@localhost:5432/hotplex
-#   #   max_connections: 10
-#   #   level: 1                     # 1=million, 2=hundred million
-#   strategy: default                # default | verbose | minimal
-#   streaming:
-#     enabled: true                  # Buffer streaming messages
-#     timeout: 5m                    # Max wait for stream completion
-#     storage_policy: complete_only  # complete_only | all_chunks

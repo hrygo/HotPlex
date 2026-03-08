@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -10,6 +11,78 @@ import (
 	"github.com/hrygo/hotplex/plugins/storage"
 	"github.com/hrygo/hotplex/types"
 )
+
+// RetryConfig 重试配置
+type RetryConfig struct {
+	MaxAttempts  int
+	InitialDelay time.Duration
+	MaxDelay     time.Duration
+	Multiplier   float64
+}
+
+// DefaultRetryConfig 默认重试配置
+var DefaultRetryConfig = RetryConfig{
+	MaxAttempts:  3,
+	InitialDelay: 100 * time.Millisecond,
+	MaxDelay:     2 * time.Second,
+	Multiplier:   2.0,
+}
+
+// ErrStorageRetryExhausted 存储重试次数耗尽
+var ErrStorageRetryExhausted = errors.New("storage retry exhausted")
+
+// withRetry 带重试的存储操作 (接受 Logger 接口)
+func withRetry(ctx context.Context, logger Logger, op string, fn func() error) error {
+	cfg := DefaultRetryConfig
+	delay := cfg.InitialDelay
+
+	var lastErr error
+	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		logger.Warn("storage operation failed, will retry",
+			"op", op,
+			"attempt", attempt,
+			"max_attempts", cfg.MaxAttempts,
+			"error", err.Error(),
+			"next_delay", delay.String())
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+
+		delay = time.Duration(float64(delay) * cfg.Multiplier)
+		if delay > cfg.MaxDelay {
+			delay = cfg.MaxDelay
+		}
+	}
+
+	logger.Error("storage retry exhausted",
+		"op", op,
+		"attempts", cfg.MaxAttempts,
+		"last_error", lastErr.Error())
+
+	return errors.Join(ErrStorageRetryExhausted, lastErr)
+}
+
+// slogLogger 实现 Logger 接口
+type slogLogger struct {
+	logger *slog.Logger
+}
+
+func (l *slogLogger) Warn(msg string, args ...any) {
+	l.logger.Warn(msg, args...)
+}
+
+func (l *slogLogger) Error(msg string, args ...any) {
+	l.logger.Error(msg, args...)
+}
 
 // MessageDirection 消息方向
 type MessageDirection string
@@ -21,7 +94,6 @@ const (
 
 // MessageContext 消息存储上下文
 type MessageContext struct {
-	// ChatApp 层信息
 	ChatSessionID     string
 	ChatPlatform      string
 	ChatUserID        string
@@ -32,14 +104,12 @@ type MessageContext struct {
 	EngineNamespace   string
 	ProviderSessionID string
 	ProviderType      string
-	// 消息信息
-	MessageType types.MessageType
-	Direction   MessageDirection
-	Content     string
-	Metadata    map[string]any
-	// 可选追踪信息
-	RequestID string
-	TraceID   string
+	MessageType       types.MessageType
+	Direction         MessageDirection
+	Content           string
+	Metadata          map[string]any
+	RequestID         string
+	TraceID           string
 }
 
 // MessageContextBuilder 构建器模式
@@ -47,14 +117,12 @@ type MessageContextBuilder struct {
 	ctx *MessageContext
 }
 
-// NewMessageContextBuilder 创建构建器
 func NewMessageContextBuilder() *MessageContextBuilder {
 	return &MessageContextBuilder{
 		ctx: &MessageContext{Metadata: make(map[string]any)},
 	}
 }
 
-// WithChatSession 设置 ChatApp 层 Session 信息
 func (b *MessageContextBuilder) WithChatSession(sessionID, platform, userID, botUserID, channelID, threadID string) *MessageContextBuilder {
 	b.ctx.ChatSessionID = sessionID
 	b.ctx.ChatPlatform = platform
@@ -65,21 +133,18 @@ func (b *MessageContextBuilder) WithChatSession(sessionID, platform, userID, bot
 	return b
 }
 
-// WithEngineSession 设置 Engine 层 Session 信息
 func (b *MessageContextBuilder) WithEngineSession(sessionID uuid.UUID, namespace string) *MessageContextBuilder {
 	b.ctx.EngineSessionID = sessionID
 	b.ctx.EngineNamespace = namespace
 	return b
 }
 
-// WithProviderSession 设置 Provider 层 Session 信息
 func (b *MessageContextBuilder) WithProviderSession(sessionID, providerType string) *MessageContextBuilder {
 	b.ctx.ProviderSessionID = sessionID
 	b.ctx.ProviderType = providerType
 	return b
 }
 
-// WithMessage 设置消息信息
 func (b *MessageContextBuilder) WithMessage(msgType types.MessageType, direction MessageDirection, content string) *MessageContextBuilder {
 	b.ctx.MessageType = msgType
 	b.ctx.Direction = direction
@@ -87,13 +152,11 @@ func (b *MessageContextBuilder) WithMessage(msgType types.MessageType, direction
 	return b
 }
 
-// WithMetadata 添加元数据
 func (b *MessageContextBuilder) WithMetadata(key string, value any) *MessageContextBuilder {
 	b.ctx.Metadata[key] = value
 	return b
 }
 
-// Build 构建并验证
 func (b *MessageContextBuilder) Build() (*MessageContext, error) {
 	if err := b.ctx.Validate(); err != nil {
 		return nil, err
@@ -101,7 +164,6 @@ func (b *MessageContextBuilder) Build() (*MessageContext, error) {
 	return b.ctx, nil
 }
 
-// Validate 验证必填字段
 func (mc *MessageContext) Validate() error {
 	if mc.ChatSessionID == "" {
 		return ErrMissingChatSessionID
@@ -124,7 +186,7 @@ type MessageStorePlugin struct {
 	sessionMgr  session.SessionManager
 	strategy    storage.StorageStrategy
 	streamStore *StreamMessageStore
-	logger      *slog.Logger
+	logger      Logger
 }
 
 // MessageStorePluginConfig 配置
@@ -138,7 +200,6 @@ type MessageStorePluginConfig struct {
 	Logger           *slog.Logger
 }
 
-// NewMessageStorePlugin 创建消息存储插件
 func NewMessageStorePlugin(cfg MessageStorePluginConfig) (*MessageStorePlugin, error) {
 	if cfg.Store == nil {
 		return nil, ErrNilStore
@@ -156,7 +217,7 @@ func NewMessageStorePlugin(cfg MessageStorePluginConfig) (*MessageStorePlugin, e
 		store:      cfg.Store,
 		sessionMgr: cfg.SessionManager,
 		strategy:   cfg.Strategy,
-		logger:     logger,
+		logger:     &slogLogger{logger: logger},
 	}
 
 	if cfg.StreamEnabled {
@@ -174,75 +235,55 @@ func NewMessageStorePlugin(cfg MessageStorePluginConfig) (*MessageStorePlugin, e
 	return plugin, nil
 }
 
-// OnUserMessage 处理用户消息存储
 func (p *MessageStorePlugin) OnUserMessage(ctx context.Context, msgCtx *MessageContext) error {
 	if msgCtx.MessageType != types.MessageTypeUserInput {
-		return nil // 只存储用户输入
+		return nil
 	}
 
-	chatMsg := &storage.ChatAppMessage{
-		ChatSessionID:     msgCtx.ChatSessionID,
-		ChatPlatform:      msgCtx.ChatPlatform,
-		ChatUserID:        msgCtx.ChatUserID,
-		ChatBotUserID:     msgCtx.ChatBotUserID,
-		ChatChannelID:     msgCtx.ChatChannelID,
-		ChatThreadID:      msgCtx.ChatThreadID,
-		EngineSessionID:   msgCtx.EngineSessionID,
-		EngineNamespace:   msgCtx.EngineNamespace,
-		ProviderSessionID: msgCtx.ProviderSessionID,
-		ProviderType:      msgCtx.ProviderType,
-		MessageType:       msgCtx.MessageType,
-		FromUserID:        msgCtx.ChatUserID,
-		Content:           msgCtx.Content,
-		Metadata:          msgCtx.Metadata,
+	transformer := NewMessageTransformer()
+	if err := transformer.Handle(ctx, msgCtx); err != nil {
+		return err
 	}
+
+	chatMsg := transformer.ToStorageMessage(msgCtx, true)
 
 	if p.strategy != nil && !p.strategy.ShouldStore(chatMsg) {
 		return nil
 	}
 
-	return p.store.StoreUserMessage(ctx, chatMsg)
+	return withRetry(ctx, p.logger, "StoreUserMessage", func() error {
+		return p.store.StoreUserMessage(ctx, chatMsg)
+	})
 }
 
-// OnBotResponse 处理机器人响应存储
 func (p *MessageStorePlugin) OnBotResponse(ctx context.Context, msgCtx *MessageContext) error {
 	if msgCtx.MessageType != types.MessageTypeFinalResponse {
-		return nil // 只存储最终响应
+		return nil
 	}
 
-	chatMsg := &storage.ChatAppMessage{
-		ChatSessionID:     msgCtx.ChatSessionID,
-		ChatPlatform:      msgCtx.ChatPlatform,
-		ChatUserID:        msgCtx.ChatUserID,
-		ChatBotUserID:     msgCtx.ChatBotUserID,
-		ChatChannelID:     msgCtx.ChatChannelID,
-		ChatThreadID:      msgCtx.ChatThreadID,
-		EngineSessionID:   msgCtx.EngineSessionID,
-		EngineNamespace:   msgCtx.EngineNamespace,
-		ProviderSessionID: msgCtx.ProviderSessionID,
-		ProviderType:      msgCtx.ProviderType,
-		MessageType:       msgCtx.MessageType,
-		FromUserID:        msgCtx.ChatBotUserID,
-		Content:           msgCtx.Content,
-		Metadata:          msgCtx.Metadata,
+	transformer := NewMessageTransformer()
+	if err := transformer.Handle(ctx, msgCtx); err != nil {
+		return err
 	}
+
+	chatMsg := transformer.ToStorageMessage(msgCtx, false)
 
 	if p.strategy != nil && !p.strategy.ShouldStore(chatMsg) {
 		return nil
 	}
 
 	if p.streamStore != nil {
-		// 流式模式：先缓存 chunk，等待完成信号
 		return p.streamStore.OnStreamChunk(ctx, msgCtx.ChatSessionID, msgCtx.Content)
 	}
 
-	return p.store.StoreBotResponse(ctx, chatMsg)
+	return withRetry(ctx, p.logger, "StoreBotResponse", func() error {
+		return p.store.StoreBotResponse(ctx, chatMsg)
+	})
 }
 
-// OnStreamComplete 标记流式消息完成并存储
 func (p *MessageStorePlugin) OnStreamComplete(ctx context.Context, sessionID string, msgCtx *MessageContext) error {
 	if p.streamStore == nil {
-		return nil // 流式未启用
+		return nil
 	}
 
 	chatMsg := &storage.ChatAppMessage{
@@ -264,22 +305,18 @@ func (p *MessageStorePlugin) OnStreamComplete(ctx context.Context, sessionID str
 	return p.streamStore.OnStreamComplete(ctx, sessionID, chatMsg)
 }
 
-// GetSessionMeta 获取会话元数据
 func (p *MessageStorePlugin) GetSessionMeta(ctx context.Context, chatSessionID string) (*storage.SessionMeta, error) {
 	return p.store.GetSessionMeta(ctx, chatSessionID)
 }
 
-// ListUserSessions 列出用户的所有会话
 func (p *MessageStorePlugin) ListUserSessions(ctx context.Context, platform, userID string) ([]string, error) {
 	return p.store.ListUserSessions(ctx, platform, userID)
 }
 
-// ListMessages 列出会话的消息列表
 func (p *MessageStorePlugin) ListMessages(ctx context.Context, query *storage.MessageQuery) ([]*storage.ChatAppMessage, error) {
 	return p.store.List(ctx, query)
 }
 
-// Close 关闭插件
 func (p *MessageStorePlugin) Close() error {
 	if p.streamStore != nil {
 		p.streamStore.Close()
@@ -287,7 +324,6 @@ func (p *MessageStorePlugin) Close() error {
 	return p.store.Close()
 }
 
-// Initialize 初始化插件
 func (p *MessageStorePlugin) Initialize(ctx context.Context) error {
 	return p.store.Initialize(ctx)
 }

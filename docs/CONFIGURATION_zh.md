@@ -1,9 +1,9 @@
 # HotPlex 配置参考
 
 > 完整的配置选项参考。
-> 快速开始请参阅 [DEVELOPMENT_zh.md](DEVELOPMENT_zh.md)。
+> 快速开始请参阅 [development_zh.md](development_zh.md)。
 >
-> **中文版** | **[English](CONFIGURATION.md)**
+> **中文版** | **[English](configuration.md)**
 
 ## 目录
 
@@ -28,9 +28,9 @@ HotPlex 使用分层配置系统，优先级从高到低：
 
 ### 各层用途
 
-| 层级 | 内容 |
-|------|------|
-| **`.env`** | 全局参数、bot 凭证、密钥、持久化配置 |
+| 层级          | 内容                                    |
+| ------------- | --------------------------------------- |
+| **`.env`**    | 全局参数、bot 凭证、密钥、持久化配置    |
 | **YAML 文件** | 平台行为、权限策略、功能开关、AI 提示词 |
 
 ---
@@ -39,67 +39,67 @@ HotPlex 使用分层配置系统，优先级从高到低：
 
 ### 核心服务器
 
-| 变量 | 默认值 | 描述 |
-|------|--------|------|
-| `HOTPLEX_PORT` | `8080` | 服务器监听端口 |
-| `HOTPLEX_LOG_LEVEL` | `INFO` | 日志级别：DEBUG, INFO, WARN, ERROR |
-| `HOTPLEX_LOG_FORMAT` | `json` | 日志格式：json, text |
-| `HOTPLEX_API_KEY` | *(必填)* | API 安全令牌 |
-| `HOTPLEX_API_KEYS` | *(可选)* | 多个 API 密钥（逗号分隔） |
+| 变量                 | 默认值   | 描述                               |
+| -------------------- | -------- | ---------------------------------- |
+| `HOTPLEX_PORT`       | `8080`   | 服务器监听端口                     |
+| `HOTPLEX_LOG_LEVEL`  | `INFO`   | 日志级别：DEBUG, INFO, WARN, ERROR |
+| `HOTPLEX_LOG_FORMAT` | `json`   | 日志格式：json, text               |
+| `HOTPLEX_API_KEY`    | *(必填)* | API 安全令牌                       |
+| `HOTPLEX_API_KEYS`   | *(可选)* | 多个 API 密钥（逗号分隔）          |
 
 ### 引擎
 
-| 变量 | 默认值 | 描述 |
-|------|--------|------|
-| `HOTPLEX_EXECUTION_TIMEOUT` | `30m` | AI 响应最大等待时间 |
-| `HOTPLEX_IDLE_TIMEOUT` | `1h` | 会话空闲超时 |
+| 变量                        | 默认值 | 描述                |
+| --------------------------- | ------ | ------------------- |
+| `HOTPLEX_EXECUTION_TIMEOUT` | `30m`  | AI 响应最大等待时间 |
+| `HOTPLEX_IDLE_TIMEOUT`      | `1h`   | 会话空闲超时        |
 
 ### Provider
 
-| 变量 | 默认值 | 描述 |
-|------|--------|------|
-| `HOTPLEX_PROVIDER_TYPE` | `claude-code` | Provider：claude-code, opencode |
-| `HOTPLEX_PROVIDER_MODEL` | `sonnet` | 默认模型：sonnet, haiku, opus |
-| `HOTPLEX_PROVIDER_BINARY` | *(自动检测)* | CLI 二进制路径 |
-| `HOTPLEX_PROVIDER_DANGEROUSLY_SKIP_PERMISSIONS` | `false` | 跳过所有权限检查 |
-| `HOTPLEX_OPENCODE_COMPAT_ENABLED` | `true` | 启用 OpenCode HTTP API 兼容 |
+| 变量                                            | 默认值        | 描述                            |
+| ----------------------------------------------- | ------------- | ------------------------------- |
+| `HOTPLEX_PROVIDER_TYPE`                         | `claude-code` | Provider：claude-code, opencode |
+| `HOTPLEX_PROVIDER_MODEL`                        | `sonnet`      | 默认模型：sonnet, haiku, opus   |
+| `HOTPLEX_PROVIDER_BINARY`                       | *(自动检测)*  | CLI 二进制路径                  |
+| `HOTPLEX_PROVIDER_DANGEROUSLY_SKIP_PERMISSIONS` | `false`       | 跳过所有权限检查                |
+| `HOTPLEX_OPENCODE_COMPAT_ENABLED`               | `true`        | 启用 OpenCode HTTP API 兼容     |
 
 ### 项目目录 (Docker)
 
-| 变量 | 描述 |
-|------|------|
-| `HOTPLEX_PROJECTS_DIR` | 项目工作空间目录 |
-| `HOTPLEX_GITCONFIG` | git 配置路径（用于 bot 身份） |
+| 变量                   | 描述                          |
+| ---------------------- | ----------------------------- |
+| `HOTPLEX_PROJECTS_DIR` | 项目工作空间目录              |
+| `HOTPLEX_GITCONFIG`    | git 配置路径（用于 bot 身份） |
 
 ### Native Brain（可选）
 
-| 变量 | 默认值 | 描述 |
-|------|--------|------|
-| `HOTPLEX_BRAIN_API_KEY` | *(未设置)* | Brain API 密钥（设置后启用） |
-| `HOTPLEX_BRAIN_PROVIDER` | `openai` | Brain provider：openai, anthropic 等 |
-| `HOTPLEX_BRAIN_MODEL` | `gpt-4o-mini` | Brain 模型 |
-| `HOTPLEX_BRAIN_ENDPOINT` | *(可选)* | 自定义 API 端点 |
-| `HOTPLEX_BRAIN_TIMEOUT_S` | `10` | 请求超时（秒） |
-| `HOTPLEX_BRAIN_CACHE_SIZE` | `1000` | 缓存大小 |
-| `HOTPLEX_BRAIN_MAX_RETRIES` | `3` | 最大重试次数 |
-| `HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS` | `100` | 最小重试等待 |
-| `HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS` | `5000` | 最大重试等待 |
+| 变量                              | 默认值        | 描述                                 |
+| --------------------------------- | ------------- | ------------------------------------ |
+| `HOTPLEX_BRAIN_API_KEY`           | *(未设置)*    | Brain API 密钥（设置后启用）         |
+| `HOTPLEX_BRAIN_PROVIDER`          | `openai`      | Brain provider：openai, anthropic 等 |
+| `HOTPLEX_BRAIN_MODEL`             | `gpt-4o-mini` | Brain 模型                           |
+| `HOTPLEX_BRAIN_ENDPOINT`          | *(可选)*      | 自定义 API 端点                      |
+| `HOTPLEX_BRAIN_TIMEOUT_S`         | `10`          | 请求超时（秒）                       |
+| `HOTPLEX_BRAIN_CACHE_SIZE`        | `1000`        | 缓存大小                             |
+| `HOTPLEX_BRAIN_MAX_RETRIES`       | `3`           | 最大重试次数                         |
+| `HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS` | `100`         | 最小重试等待                         |
+| `HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS` | `5000`        | 最大重试等待                         |
 
 ### 消息存储
 
-| 变量 | 默认值 | 描述 |
-|------|--------|------|
-| `HOTPLEX_MESSAGE_STORE_ENABLED` | `true` | 启用消息持久化 |
-| `HOTPLEX_MESSAGE_STORE_TYPE` | `sqlite` | 存储：sqlite, postgres, memory |
-| `HOTPLEX_MESSAGE_STORE_SQLITE_PATH` | `~/.hotplex/chatapp_messages.db` | SQLite 数据库路径 |
-| `HOTPLEX_MESSAGE_STORE_SQLITE_MAX_SIZE_MB` | `1024` | 最大数据库大小 |
-| `HOTPLEX_MESSAGE_STORE_STREAMING_ENABLED` | `true` | 启用流式存储 |
-| `HOTPLEX_MESSAGE_STORE_STREAMING_TIMEOUT` | `5m` | 流式超时 |
+| 变量                                       | 默认值                           | 描述                           |
+| ------------------------------------------ | -------------------------------- | ------------------------------ |
+| `HOTPLEX_MESSAGE_STORE_ENABLED`            | `true`                           | 启用消息持久化                 |
+| `HOTPLEX_MESSAGE_STORE_TYPE`               | `sqlite`                         | 存储：sqlite, postgres, memory |
+| `HOTPLEX_MESSAGE_STORE_SQLITE_PATH`        | `~/.hotplex/chatapp_messages.db` | SQLite 数据库路径              |
+| `HOTPLEX_MESSAGE_STORE_SQLITE_MAX_SIZE_MB` | `1024`                           | 最大数据库大小                 |
+| `HOTPLEX_MESSAGE_STORE_STREAMING_ENABLED`  | `true`                           | 启用流式存储                   |
+| `HOTPLEX_MESSAGE_STORE_STREAMING_TIMEOUT`  | `5m`                             | 流式超时                       |
 
 ### CORS
 
-| 变量 | 描述 |
-|------|------|
+| 变量                      | 描述                 |
+| ------------------------- | -------------------- |
 | `HOTPLEX_ALLOWED_ORIGINS` | 允许的源（逗号分隔） |
 
 ---
@@ -108,60 +108,60 @@ HotPlex 使用分层配置系统，优先级从高到低：
 
 ### Slack
 
-| 变量 | 必填 | 描述 |
-|------|------|------|
-| `HOTPLEX_SLACK_BOT_USER_ID` | **是** | Bot 用户 ID (UXXXXXXXXXX) |
-| `HOTPLEX_SLACK_BOT_TOKEN` | **是** | Bot Token (xoxb-...) |
-| `HOTPLEX_SLACK_APP_TOKEN` | Socket Mode | App Token (xapp-...) |
-| `HOTPLEX_SLACK_SIGNING_SECRET` | HTTP Mode | 签名验证密钥 |
+| 变量                           | 必填        | 描述                      |
+| ------------------------------ | ----------- | ------------------------- |
+| `HOTPLEX_SLACK_BOT_USER_ID`    | **是**      | Bot 用户 ID (UXXXXXXXXXX) |
+| `HOTPLEX_SLACK_BOT_TOKEN`      | **是**      | Bot Token (xoxb-...)      |
+| `HOTPLEX_SLACK_APP_TOKEN`      | Socket Mode | App Token (xapp-...)      |
+| `HOTPLEX_SLACK_SIGNING_SECRET` | HTTP Mode   | 签名验证密钥              |
 
 ### Telegram
 
-| 变量 | 描述 |
-|------|------|
-| `HOTPLEX_TELEGRAM_BOT_TOKEN` | 来自 @BotFather 的 bot token |
-| `HOTPLEX_TELEGRAM_WEBHOOK_URL` | Webhook URL（生产环境） |
-| `HOTPLEX_TELEGRAM_SECRET_TOKEN` | Webhook 密钥 |
+| 变量                            | 描述                         |
+| ------------------------------- | ---------------------------- |
+| `HOTPLEX_TELEGRAM_BOT_TOKEN`    | 来自 @BotFather 的 bot token |
+| `HOTPLEX_TELEGRAM_WEBHOOK_URL`  | Webhook URL（生产环境）      |
+| `HOTPLEX_TELEGRAM_SECRET_TOKEN` | Webhook 密钥                 |
 
 ### Discord
 
-| 变量 | 描述 |
-|------|------|
-| `HOTPLEX_DISCORD_BOT_TOKEN` | Bot token |
-| `HOTPLEX_DISCORD_PUBLIC_KEY` | 应用公钥 |
+| 变量                         | 描述      |
+| ---------------------------- | --------- |
+| `HOTPLEX_DISCORD_BOT_TOKEN`  | Bot token |
+| `HOTPLEX_DISCORD_PUBLIC_KEY` | 应用公钥  |
 
 ### 钉钉
 
-| 变量 | 描述 |
-|------|------|
-| `HOTPLEX_DINGTALK_APP_ID` | App ID |
-| `HOTPLEX_DINGTALK_APP_SECRET` | App secret |
+| 变量                              | 描述       |
+| --------------------------------- | ---------- |
+| `HOTPLEX_DINGTALK_APP_ID`         | App ID     |
+| `HOTPLEX_DINGTALK_APP_SECRET`     | App secret |
 | `HOTPLEX_DINGTALK_CALLBACK_TOKEN` | 回调 token |
-| `HOTPLEX_DINGTALK_CALLBACK_KEY` | 回调 key |
+| `HOTPLEX_DINGTALK_CALLBACK_KEY`   | 回调 key   |
 
 ### 飞书
 
-| 变量 | 描述 |
-|------|------|
-| `HOTPLEX_FEISHU_APP_ID` | App ID |
-| `HOTPLEX_FEISHU_APP_SECRET` | App secret |
+| 变量                                | 描述       |
+| ----------------------------------- | ---------- |
+| `HOTPLEX_FEISHU_APP_ID`             | App ID     |
+| `HOTPLEX_FEISHU_APP_SECRET`         | App secret |
 | `HOTPLEX_FEISHU_VERIFICATION_TOKEN` | 验证 token |
-| `HOTPLEX_FEISHU_ENCRYPT_KEY` | 加密 key |
+| `HOTPLEX_FEISHU_ENCRYPT_KEY`        | 加密 key   |
 
 ### WhatsApp
 
-| 变量 | 描述 |
-|------|------|
-| `HOTPLEX_WHATSAPP_PHONE_NUMBER_ID` | 电话号码 ID |
-| `HOTPLEX_WHATSAPP_ACCESS_TOKEN` | Access token |
-| `HOTPLEX_WHATSAPP_VERIFY_TOKEN` | Webhook 验证 token |
+| 变量                               | 描述               |
+| ---------------------------------- | ------------------ |
+| `HOTPLEX_WHATSAPP_PHONE_NUMBER_ID` | 电话号码 ID        |
+| `HOTPLEX_WHATSAPP_ACCESS_TOKEN`    | Access token       |
+| `HOTPLEX_WHATSAPP_VERIFY_TOKEN`    | Webhook 验证 token |
 
 ### 告警
 
-| 变量 | 描述 |
-|------|------|
-| `HOTPLEX_DINGTALK_WEBHOOK_URL` | 钉钉告警 webhook |
-| `HOTPLEX_DINGTALK_SECRET` | Webhook secret |
+| 变量                             | 描述                 |
+| -------------------------------- | -------------------- |
+| `HOTPLEX_DINGTALK_WEBHOOK_URL`   | 钉钉告警 webhook     |
+| `HOTPLEX_DINGTALK_SECRET`        | Webhook secret       |
 | `HOTPLEX_DINGTALK_FILTER_EVENTS` | 过滤事件（逗号分隔） |
 
 ---
@@ -221,51 +221,51 @@ security:
 
 ### Provider 部分
 
-| 字段 | 描述 |
-|------|------|
-| `type` | Provider 类型：`claude-code`, `opencode` |
-| `enabled` | 启用/禁用 provider |
-| `default_model` | 默认模型 ID |
-| `default_permission_mode` | 权限模式：`bypass-permissions`, `acceptEdits`, `default`, `dontAsk`, `plan` |
-| `dangerously_skip_permissions` | 跳过所有权限检查（Docker/CI） |
-| `binary_path` | 自定义二进制路径 |
-| `allowed_tools` | 工具白名单 |
-| `disallowed_tools` | 工具黑名单 |
+| 字段                           | 描述                                                                        |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| `type`                         | Provider 类型：`claude-code`, `opencode`                                    |
+| `enabled`                      | 启用/禁用 provider                                                          |
+| `default_model`                | 默认模型 ID                                                                 |
+| `default_permission_mode`      | 权限模式：`bypass-permissions`, `acceptEdits`, `default`, `dontAsk`, `plan` |
+| `dangerously_skip_permissions` | 跳过所有权限检查（Docker/CI）                                               |
+| `binary_path`                  | 自定义二进制路径                                                            |
+| `allowed_tools`                | 工具白名单                                                                  |
+| `disallowed_tools`             | 工具黑名单                                                                  |
 
 ### Engine 部分
 
-| 字段 | 描述 |
-|------|------|
-| `work_dir` | Agent 工作目录 |
-| `timeout` | 最大执行时间 |
-| `idle_timeout` | 会话空闲超时 |
-| `allowed_tools` | 引擎级工具白名单 |
+| 字段               | 描述             |
+| ------------------ | ---------------- |
+| `work_dir`         | Agent 工作目录   |
+| `timeout`          | 最大执行时间     |
+| `idle_timeout`     | 会话空闲超时     |
+| `allowed_tools`    | 引擎级工具白名单 |
 | `disallowed_tools` | 引擎级工具黑名单 |
 
 ### Features 部分
 
-| 功能 | 描述 |
-|------|------|
-| `chunking.enabled` | 分割长消息 |
-| `chunking.max_chars` | 每块最大字符数（Slack: 4000） |
-| `threading.enabled` | 在线程中回复 |
-| `rate_limit.enabled` | 启用速率限制处理 |
-| `rate_limit.max_attempts` | 最大重试次数 |
-| `rate_limit.base_delay_ms` | 初始重试延迟 |
-| `rate_limit.max_delay_ms` | 最大重试延迟 |
-| `markdown.enabled` | 转换 Markdown 为平台格式 |
+| 功能                       | 描述                          |
+| -------------------------- | ----------------------------- |
+| `chunking.enabled`         | 分割长消息                    |
+| `chunking.max_chars`       | 每块最大字符数（Slack: 4000） |
+| `threading.enabled`        | 在线程中回复                  |
+| `rate_limit.enabled`       | 启用速率限制处理              |
+| `rate_limit.max_attempts`  | 最大重试次数                  |
+| `rate_limit.base_delay_ms` | 初始重试延迟                  |
+| `rate_limit.max_delay_ms`  | 最大重试延迟                  |
+| `markdown.enabled`         | 转换 Markdown 为平台格式      |
 
 ### Security 部分
 
-| 字段 | 描述 |
-|------|------|
-| `verify_signature` | 验证平台签名（HTTP 模式） |
-| `permission.dm_policy` | 私聊策略：`allow`, `pairing`, `block` |
-| `permission.group_policy` | 群聊策略：`allow`, `mention`, `multibot`, `block` |
-| `permission.bot_user_id` | Bot 用户 ID（必填） |
-| `permission.allowed_users` | 用户白名单 |
-| `permission.blocked_users` | 用户黑名单 |
-| `permission.slash_command_rate_limit` | 每用户速率限制 |
+| 字段                                  | 描述                                              |
+| ------------------------------------- | ------------------------------------------------- |
+| `verify_signature`                    | 验证平台签名（HTTP 模式）                         |
+| `permission.dm_policy`                | 私聊策略：`allow`, `pairing`, `block`             |
+| `permission.group_policy`             | 群聊策略：`allow`, `mention`, `multibot`, `block` |
+| `permission.bot_user_id`              | Bot 用户 ID（必填）                               |
+| `permission.allowed_users`            | 用户白名单                                        |
+| `permission.blocked_users`            | 用户黑名单                                        |
+| `permission.slash_command_rate_limit` | 每用户速率限制                                    |
 
 ---
 
@@ -387,7 +387,7 @@ features:
 
 ## 相关文档
 
-- [DEVELOPMENT_zh.md](DEVELOPMENT_zh.md) - 开发指南
+- [development_zh.md](development_zh.md) - 开发指南
 - [architecture_zh.md](architecture_zh.md) - 架构概览
 - [docker-deployment_zh.md](docker-deployment_zh.md) - Docker 部署
 - [chatapps/slack-setup-beginner_zh.md](chatapps/slack-setup-beginner_zh.md) - Slack 设置指南
