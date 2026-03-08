@@ -317,7 +317,7 @@ func (s *Session) ReadStderr() {
 		// Write to session log file for persistence
 		if s.logFile != nil {
 			if _, err := fmt.Fprintf(s.logFile, "[%s] %s\n", time.Now().Format(time.RFC3339), line); err != nil && s.logger != nil {
-				s.logger.Warn("Failed to write to session log", "error", err)
+				s.logger.Warn("Failed to write to session log file", "error", err)
 			}
 		}
 	}
