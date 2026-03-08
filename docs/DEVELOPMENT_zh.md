@@ -340,7 +340,8 @@ make service-uninstall  # 移除服务
 ### Docker 开发
 
 ```bash
-make docker-build       # 构建镜像
+make docker-build       # 构建镜像（无缓存，确保最新二进制）
+make docker-build-cache # 构建镜像（有缓存，快速迭代）
 make docker-up          # 启动容器
 make docker-logs        # 查看日志
 make docker-down        # 停止容器
