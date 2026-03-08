@@ -523,9 +523,8 @@ func findSubstring(s, substr string) bool {
 func TestAdapter_Storage_PostgreSQLWithURL(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	// Test that PostgreSQL URL is correctly parsed and passed to storage plugin
-	// Note: This will fail to connect without a real database, but we're testing
-	// that the configuration is correctly passed through
+	// Test that PostgreSQL URL is correctly configured in storage config
+	testURL := "postgres://testuser:testpass@localhost:5432/testdb?sslmode=disable"
 	adapter := NewAdapter(&Config{
 		BotToken:      "xoxb-123456-789012-abcdef123456",
 		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
@@ -533,15 +532,27 @@ func TestAdapter_Storage_PostgreSQLWithURL(t *testing.T) {
 		Storage: &StorageConfig{
 			Enabled:       true,
 			Type:          "postgresql",
-			PostgreSQLURL: "postgres://testuser:testpass@localhost:5432/testdb?sslmode=disable",
+			PostgreSQLURL: testURL,
 		},
 	}, logger, base.WithoutServer())
+	defer func() { _ = adapter.Stop() }()
 
-	// Should fail to connect (no real DB), but config should be processed
-	// storePlugin will be nil because connection fails
+	// Verify storage config is properly set
+	if adapter.config.Storage == nil {
+		t.Fatal("Storage config is nil")
+	}
+	if adapter.config.Storage.Type != "postgresql" {
+		t.Errorf("Expected storage type 'postgresql', got %q", adapter.config.Storage.Type)
+	}
+	if adapter.config.Storage.PostgreSQLURL != testURL {
+		t.Errorf("Expected PostgreSQLURL %q, got %q", testURL, adapter.config.Storage.PostgreSQLURL)
+	}
+
+	// Note: storePlugin will be nil because connection fails without a real DB.
+	// DSN parsing is tested in plugins/storage/postgres_test.go.
 	if adapter.storePlugin != nil {
-		// If by chance a real DB is available, clean up
-		_ = adapter.Stop()
+		// If by chance a real DB is available, verify storePlugin is initialized
+		t.Log("PostgreSQL connection succeeded, storePlugin initialized")
 	}
 }
 

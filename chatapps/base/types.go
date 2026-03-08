@@ -260,6 +260,12 @@ type ThreadHistoryProvider interface {
 
 // ThreadMessage represents a message in a thread history.
 // This is a platform-agnostic representation of stored messages.
+//
+// Note on Metadata field:
+//   - Uses map[string]any for flexibility with different storage backends
+//   - When serializing (e.g., JSON), ensure values are JSON-serializable
+//   - For cross-platform compatibility, prefer simple types (string, int, bool)
+//   - Complex types may require custom marshaling in adapters
 type ThreadMessage struct {
 	ID         string
 	SessionID  string
@@ -273,5 +279,5 @@ type ThreadMessage struct {
 	FromUser   string
 	ToUser     string
 	CreatedAt  time.Time
-	Metadata   map[string]any
+	Metadata   map[string]any // Platform-specific metadata; use JSON-serializable values
 }

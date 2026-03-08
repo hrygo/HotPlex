@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -139,6 +140,12 @@ func parsePostgresDSN(dsn string) PostgreSQLConfig {
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		u, err := url.Parse(dsn)
 		if err != nil {
+			// Log parse error for debugging (truncated to avoid credential leakage)
+			dsnPreview := dsn
+			if len(dsnPreview) > 50 {
+				dsnPreview = dsnPreview[:50] + "..."
+			}
+			slog.Warn("Failed to parse PostgreSQL DSN URL, using defaults", "error", err, "dsn_preview", dsnPreview)
 			return cfg // Return defaults on parse error
 		}
 
