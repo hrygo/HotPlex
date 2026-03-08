@@ -179,6 +179,8 @@ type SafetyGuardFeatureConfig struct {
 	AdminUsers         []string      // User IDs with admin privileges
 	AdminChannels      []string      // Channel IDs with admin privileges
 	ResponseTimeout    time.Duration // Timeout for Brain API calls
+	RateLimitRPS       float64       // Requests per second per user (0 = disabled)
+	RateLimitBurst     int           // Burst capacity per user
 }
 
 // === Main Config ===
@@ -319,6 +321,8 @@ func LoadConfigFromEnv() Config {
 			AdminUsers:         parseStringList(getEnv("HOTPLEX_BRAIN_ADMIN_USERS", "")),
 			AdminChannels:      parseStringList(getEnv("HOTPLEX_BRAIN_ADMIN_CHANNELS", "")),
 			ResponseTimeout:    getDurationEnv("HOTPLEX_BRAIN_GUARD_RESPONSE_TIMEOUT", 10*time.Second),
+			RateLimitRPS:       getFloatEnv("HOTPLEX_BRAIN_GUARD_RATE_LIMIT_RPS", 10.0),
+			RateLimitBurst:     getIntEnv("HOTPLEX_BRAIN_GUARD_RATE_LIMIT_BURST", 20),
 		},
 	}
 }

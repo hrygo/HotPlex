@@ -157,7 +157,7 @@ func Init(logger *slog.Logger) error {
 
 		// Initialize Safety Guard
 		if config.Guard.Enabled {
-			InitGuard(GuardConfig{
+			if err := InitGuard(GuardConfig{
 				Enabled:            config.Guard.Enabled,
 				InputGuardEnabled:  config.Guard.InputGuardEnabled,
 				OutputGuardEnabled: config.Guard.OutputGuardEnabled,
@@ -168,7 +168,11 @@ func Init(logger *slog.Logger) error {
 				AdminUsers:         config.Guard.AdminUsers,
 				AdminChannels:      config.Guard.AdminChannels,
 				ResponseTimeout:    config.Guard.ResponseTimeout,
-			}, logger)
+				RateLimitRPS:       config.Guard.RateLimitRPS,
+				RateLimitBurst:     config.Guard.RateLimitBurst,
+			}, logger); err != nil {
+				logger.Warn("Failed to initialize SafetyGuard", "error", err)
+			}
 		}
 
 		logger.Info("Native Brain initialized (Phase 3)",

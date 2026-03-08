@@ -501,12 +501,15 @@ func (g *SafetyGuard) SetEnabled(enabled bool) {
 }
 
 // UpdateBanPatterns updates the ban patterns.
-func (g *SafetyGuard) UpdateBanPatterns(patterns []string) {
+func (g *SafetyGuard) UpdateBanPatterns(patterns []string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	g.config.BanPatterns = patterns
-	g.compileBanPatterns()
+	if err := g.compileBanPatterns(); err != nil {
+		return fmt.Errorf("failed to compile ban patterns: %w", err)
+	}
+	return nil
 }
 
 // AddBanPattern adds a new ban pattern.
