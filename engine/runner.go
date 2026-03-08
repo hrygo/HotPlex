@@ -155,7 +155,12 @@ func (r *Engine) Execute(ctx context.Context, cfg *types.Config, prompt string, 
 
 	r.logger.Info("Engine: starting execution pipeline",
 		"namespace", r.opts.Namespace,
-		"session_id", cfg.SessionID)
+		"session_id", cfg.SessionID,
+		"platform", cfg.Platform,
+		"user_id", cfg.UserID,
+		"channel_id", cfg.ChannelID,
+		"task_type", cfg.TaskType,
+		"trace_id", cfg.TraceID)
 
 	// Execute via multiplexed persistent session
 	if err := r.executeWithMultiplex(ctx, cfg, prompt, callback); err != nil {
@@ -168,7 +173,10 @@ func (r *Engine) Execute(ctx context.Context, cfg *types.Config, prompt string, 
 
 	r.logger.Info("Engine: Session completed",
 		"namespace", r.opts.Namespace,
-		"session_id", cfg.SessionID)
+		"session_id", cfg.SessionID,
+		"platform", cfg.Platform,
+		"task_type", cfg.TaskType,
+		"trace_id", cfg.TraceID)
 
 	return nil
 }
