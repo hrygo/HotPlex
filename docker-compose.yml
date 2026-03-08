@@ -169,6 +169,8 @@ services:
       args:
         HOST_UID: ${HOST_UID:-1000}
         VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     container_name: hotplex
     ports:
       - "127.0.0.1:18080:8080"
