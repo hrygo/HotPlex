@@ -154,6 +154,9 @@ func (a *Adapter) handleAppMentionEvent(teamID string, ev *slackevents.AppMentio
 		}
 	}
 
+	// Store user message if storage is enabled
+	a.storeUserMessage(a.socketModeCtx, msg)
+
 	a.webhook.Run(a.socketModeCtx, a.Handler(), msg)
 }
 
@@ -285,6 +288,9 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 			a.channelToUser.Store(ev.Channel, ev.User)
 		}
 	}
+
+	// Store user message if storage is enabled
+	a.storeUserMessage(a.socketModeCtx, msg)
 
 	a.webhook.Run(a.socketModeCtx, a.Handler(), msg)
 }

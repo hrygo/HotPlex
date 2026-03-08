@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // pairingState holds runtime pairing state with thread-safe access
@@ -58,6 +59,40 @@ type Config struct {
 	// BroadcastResponder generates responses for broadcast messages (no @ mention).
 	// If nil, uses DefaultBroadcastResponse.
 	BroadcastResponder BroadcastResponder
+
+	// Storage configuration for message persistence (optional)
+	// When enabled, stores user messages and bot responses for history retrieval
+	Storage *StorageConfig
+}
+
+// StorageConfig holds message storage configuration for Slack adapter.
+//
+// Storage Architecture:
+//   - Session ID is derived from (platform, botUserID, channelID, threadTS)
+//   - Messages are grouped by thread, enabling conversation history retrieval
+//   - ChatUserID field distinguishes message sender for user-filtered queries
+//
+// Example Usage:
+//
+//	&StorageConfig{
+//	    Enabled:   true,
+//	    Type:      "sqlite",
+//	    SQLitePath: "data/slack_messages.db",
+//	}
+type StorageConfig struct {
+	// Enabled enables message storage
+	Enabled bool
+	// Type: "memory" (default), "sqlite", "postgresql"
+	Type string
+	// SQLitePath: Path to SQLite database file (only for type="sqlite")
+	SQLitePath string
+	// PostgreSQLURL: Connection URL for PostgreSQL (only for type="postgresql")
+	// Format: "postgres://user:pass@host:port/dbname"
+	PostgreSQLURL string
+	// StreamEnabled enables streaming message buffering
+	StreamEnabled bool
+	// StreamTimeout is the timeout for streaming buffer (default 5min)
+	StreamTimeout time.Duration
 }
 
 // Token format patterns - supports both legacy 3-part and new 4-part Slack token formats

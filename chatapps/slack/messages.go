@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/types"
 	"github.com/slack-go/slack"
 )
 
@@ -86,6 +87,10 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 			if messageTS != "" {
 				err := a.UpdateMessageSDK(ctx, channelID, messageTS, blocks, fallbackText)
 				if err == nil {
+					// Store bot response for final responses
+					if types.MessageType(msg.Type).IsStorable() {
+						a.storeBotResponse(ctx, sessionID, channelID, threadTS, fallbackText)
+					}
 					return nil
 				}
 
@@ -100,11 +105,22 @@ func (a *Adapter) defaultSender(ctx context.Context, sessionID string, msg *base
 			if ts != "" && msg.Metadata != nil {
 				msg.Metadata["message_ts"] = ts
 			}
+
+			// Store bot response for final responses
+			if types.MessageType(msg.Type).IsStorable() {
+				a.storeBotResponse(ctx, sessionID, channelID, threadTS, fallbackText)
+			}
 			return nil
 		}
 	}
 
-	return a.SendToChannelSDK(ctx, channelID, msg.Content, threadTS)
+	// Store bot response for plain text messages
+	err := a.SendToChannelSDK(ctx, channelID, msg.Content, threadTS)
+	if err == nil && types.MessageType(msg.Type).IsStorable() {
+		// Only store if message type is storable (user_input or final_response)
+		a.storeBotResponse(ctx, sessionID, channelID, threadTS, msg.Content)
+	}
+	return err
 }
 
 // SendAttachment sends an attachment to a Slack channel using the Slack SDK
@@ -482,6 +498,17 @@ func (a *Adapter) StopStream(ctx context.Context, channelID, messageTS string) e
 
 // NewStreamWriter creates a platform-specific streaming writer
 // Returns StreamWriter interface for platform-agnostic abstraction
+// The writer automatically stores the final response when closed (if storage is enabled)
 func (a *Adapter) NewStreamWriter(ctx context.Context, channelID, threadTS string) base.StreamWriter {
-	return NewNativeStreamingWriter(ctx, a, channelID, threadTS, nil)
+	writer := NewNativeStreamingWriter(ctx, a, channelID, threadTS, nil)
+
+	// Set up storage callback to persist the final response when stream closes
+	if a.storePlugin != nil && a.sessionMgr != nil {
+		sessionID := a.sessionMgr.GetChatSessionID("slack", "", a.config.BotUserID, channelID, threadTS)
+		writer.SetStoreCallback(func(content string) {
+			a.storeBotResponse(ctx, sessionID, channelID, threadTS, content)
+		})
+	}
+
+	return writer
 }

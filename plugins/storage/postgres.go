@@ -362,6 +362,11 @@ func (p *PostgreStorage) buildListQuery(query *MessageQuery) (string, []interfac
 		args = append(args, query.ChatSessionID)
 		argNum++
 	}
+	if query.ChatUserID != "" {
+		conditions = append(conditions, fmt.Sprintf("chat_user_id = $%d", argNum))
+		args = append(args, query.ChatUserID)
+		argNum++
+	}
 	if query.EngineSessionID != uuid.Nil {
 		conditions = append(conditions, fmt.Sprintf("engine_session_id = $%d", argNum))
 		args = append(args, query.EngineSessionID)
@@ -427,10 +432,16 @@ func (p *PostgreStorage) buildListQuery(query *MessageQuery) (string, []interfac
 func (p *PostgreStorage) buildCountQuery(query *MessageQuery) (string, []interface{}) {
 	conditions := []string{}
 	var args []interface{}
+	argNum := 1
 
 	if query.ChatSessionID != "" {
-		conditions = append(conditions, fmt.Sprintf("chat_session_id = $%d", 1))
+		conditions = append(conditions, fmt.Sprintf("chat_session_id = $%d", argNum))
 		args = append(args, query.ChatSessionID)
+		argNum++
+	}
+	if query.ChatUserID != "" {
+		conditions = append(conditions, fmt.Sprintf("chat_user_id = $%d", argNum))
+		args = append(args, query.ChatUserID)
 	}
 	if !query.IncludeDeleted {
 		conditions = append(conditions, "(deleted = FALSE OR deleted IS NULL)")

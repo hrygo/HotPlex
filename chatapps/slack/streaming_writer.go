@@ -44,9 +44,12 @@ type NativeStreamingWriter struct {
 	fallbackUsed       bool // 标记是否使用了 fallback
 
 	// 完整性校验：追踪发送和确认的字节数
-	bytesWritten      int64 // 成功写入的总字节数
-	bytesFlushed      int64 // 成功 flush 的总字节数
+	bytesWritten      int64    // 成功写入的总字节数
+	bytesFlushed      int64    // 成功 flush 的总字节数
 	failedFlushChunks []string // 失败的 flush 块（用于潜在恢复）
+
+	// 存储回调（可选）
+	storeCallback func(content string)
 }
 
 // NewNativeStreamingWriter 创建新的原生流式写入器
@@ -70,6 +73,14 @@ func NewNativeStreamingWriter(
 	go w.flushLoop()
 
 	return w
+}
+
+// SetStoreCallback sets the callback to store the complete message content
+// when the stream is closed. This enables persistent storage of streaming responses.
+func (w *NativeStreamingWriter) SetStoreCallback(callback func(content string)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.storeCallback = callback
 }
 
 func (w *NativeStreamingWriter) flushLoop() {
@@ -173,7 +184,7 @@ func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
 	}
 
 	w.buf.Write(p)
-	w.accumulatedContent.Write(p) // 累积内容用于潜在 fallback
+	w.accumulatedContent.Write(p)  // 累积内容用于潜在 fallback
 	w.bytesWritten += int64(len(p)) // 追踪写入字节数
 
 	// 如果超过 rune 阈值，立即触发一次 flush
@@ -202,6 +213,7 @@ func (w *NativeStreamingWriter) Close() error {
 	bytesWritten := w.bytesWritten
 	bytesFlushed := w.bytesFlushed
 	failedChunks := w.failedFlushChunks
+	storeCallback := w.storeCallback
 	w.mu.Unlock()
 
 	// 停止处理并等待残留缓冲区发送完成
@@ -229,6 +241,11 @@ func (w *NativeStreamingWriter) Close() error {
 	// 调用完成回调
 	if w.onComplete != nil {
 		w.onComplete(w.messageTS)
+	}
+
+	// 存储完整内容（如果有存储回调）
+	if storeCallback != nil && accumulated != "" {
+		storeCallback(accumulated)
 	}
 
 	// Fallback 机制触发条件：
