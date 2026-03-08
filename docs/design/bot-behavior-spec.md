@@ -23,6 +23,132 @@ This document defines the behavioral specification for HotPlex bots in Slack cha
 
 These are essential behaviors that every HotPlex bot MUST implement.
 
+---
+
+### 1.0 Channel Behavior (Required)
+
+主频道（Main Channel）是所有成员可见的公共对话区域。以下是必须实现的行为规范。
+
+#### 1.0.1 频道场景定义
+
+```
+Channel C1:
+├── Humans: UserA, UserB, UserC
+├── Bots: BotA (owner=UserA), BotB (owner=UserB), BotC (owner=UserC)
+└── 所有成员自由发言
+```
+
+#### 1.0.2 主频道消息类型
+
+| 消息类型 | 判断条件 | 示例 |
+|---------|---------|------|
+| **频道消息** | `thread_ts == null` | "大家好" |
+| **Thread 回复** | `thread_ts != null` | 在某消息下回复 |
+
+#### 1.0.3 主频道必须行为
+
+**规则 C1：@ 提及必须响应**
+
+```
+UserA: "@BotA 分析这段代码"
+→ BotA: 必须响应
+→ BotB, BotC: 保持沉默（未被提及）
+```
+
+**规则 C2：无 @ 保持沉默**
+
+```
+UserA: "有人能帮我看看这个问题吗？"
+→ BotA, BotB, BotC: 全部保持沉默
+→ 等待人类回应或明确 @ 提及
+```
+
+**规则 C3：Bot 响应创建 Thread**
+
+```
+UserA: "@BotA 帮我分析"
+→ BotA: 响应发送为 Thread Reply（非主频道新消息）
+→ Slack API: PostMessage with thread_ts=原消息ts
+```
+
+**规则 C4：多 Bot @ 提及**
+
+```
+UserA: "@BotA @BotB 你们怎么看？"
+→ BotA: 必须响应
+→ BotB: 必须响应
+→ BotC: 保持沉默
+```
+
+**规则 C5：混合 @ 提及**
+
+```
+UserA: "@UserB @BotA 请你们看看"
+→ BotA: 必须响应（被 @）
+→ UserB: 人类自行决定是否响应
+```
+
+#### 1.0.4 Bot 主人关注规则
+
+**规则 C6：Bot 默认只关注主人的消息**
+
+| 消息来源 | Bot 行为 |
+|---------|---------|
+| 主人 @ 提及 | 必须响应 |
+| 主人无 @ | 保持沉默（除非在已拥有的 thread 中） |
+| 他人 @ 提及 | 可配置：默认沉默 / 可选响应 |
+| 他人无 @ | 保持沉默 |
+
+**规则 C7：主人可以 @ 其他 Bot**
+
+```
+UserA: "@BotB 来帮我"  （UserA 是 BotA 的主人）
+→ BotA: 保持沉默（未提及自己）
+→ BotB: 响应（被 @ 提及）
+```
+
+#### 1.0.5 主频道决策流程
+
+```
+主频道消息接收 (thread_ts == null)
+              │
+              ▼
+    ┌─────────────────┐
+    │ 是否被 @ 提及？  │
+    └────────┬────────┘
+             │
+     ┌───────┴───────┐
+     ▼               ▼
+   YES              NO
+     │               │
+     ▼               ▼
+┌──────────┐   ┌──────────────┐
+│ 必须响应  │   │ 保持沉默      │
+│ 创建thread│   │ 等待 @ 提及   │
+└──────────┘   └──────────────┘
+```
+
+#### 1.0.6 他人 @ 提及响应配置
+
+Bot 是否响应非主人的 @ 提及，通过配置控制：
+
+```yaml
+bot:
+  # 响应他人的 @ 提及策略
+  respond_to_others: false  # 默认：只响应主人
+
+  # 可选值：
+  # - false: 仅响应主人的 @ 提及
+  # - true: 响应所有人的 @ 提及
+```
+
+| 配置 | 主人 @ | 他人 @ | 说明 |
+|------|-------|-------|------|
+| `false` | ✓ 响应 | ✗ 沉默 | 默认，Bot 专属主人 |
+| `true` | ✓ 响应 | ✓ 响应 | 共享 Bot 模式 |
+
+---
+
 ### 1.1 Mention Response Rules
 
 | Trigger | Behavior | Priority |
@@ -295,8 +421,14 @@ bot:
 
 ### Phase 1: MVP (Required)
 
+**Channel Behavior:**
+- [ ] @mention detection and response
+- [ ] Respond in thread (not new channel message)
+- [ ] Owner-only response mode
+- [ ] `respond_to_others` config flag
+
+**Thread Ownership:**
 - [ ] Thread ownership tracking
-- [ ] @mention response rules
 - [ ] Ownership transfer on @mention
 - [ ] Multi-owner support
 - [ ] Basic TTL for ownership
@@ -381,8 +513,14 @@ bot:
 
 | Category | Capabilities |
 |----------|--------------|
-| **Basic (Required)** | @mention response, thread ownership, ownership transfer, TTL |
-| **Enhanced UX** | Implicit triggers, response modes, silence control, lifecycle |
-| **Advanced** | Multi-bot coordination, role specialization, proactive behavior |
+| **Basic - Channel** | @mention 响应、Thread 回复、主人关注、他人响应开关 |
+| **Basic - Thread** | 所有权跟踪、所有权转移、TTL 过期 |
+| **Enhanced UX** | 隐式触发、响应模式、静音控制、生命周期 |
+| **Advanced** | 多 Bot 协调、角色分工、主动行为 |
+
+**核心原则**:
+1. 主频道：无 @ 不响应，有 @ 必响应
+2. Thread：所有者响应，@ 转移所有权
+3. Bot 默认专属主人，可配置共享
 
 **Key Insight**: Start with clear ownership rules (Phase 1), then layer on intelligence (Phase 2-3). The goal is predictable bot behavior that users can control.
