@@ -15,7 +15,7 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 ### 指定版本安装
 
 ```bash
-curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -v v0.21.0
+curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -v v0.22.0
 ```
 
 > 说明：`--` 用于分隔 bash 参数和脚本参数。没有它，`-v` 会被 bash 解析而非脚本。
@@ -85,16 +85,16 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 
 ```bash
 # Linux amd64
-curl -LO https://github.com/hrygo/hotplex/releases/download/v0.21.0/hotplex_0.21.0_linux_amd64.tar.gz
+curl -LO https://github.com/hrygo/hotplex/releases/download/v0.22.0/hotplex_0.22.0_linux_amd64.tar.gz
 
 # macOS arm64 (Apple Silicon)
-curl -LO https://github.com/hrygo/hotplex/releases/download/v0.21.0/hotplex_0.21.0_darwin_arm64.tar.gz
+curl -LO https://github.com/hrygo/hotplex/releases/download/v0.22.0/hotplex_0.22.0_darwin_arm64.tar.gz
 ```
 
 ### 2. 解压并安装
 
 ```bash
-tar -xzf hotplex_0.21.0_linux_amd64.tar.gz
+tar -xzf hotplex_0.22.0_linux_amd64.tar.gz
 sudo mv hotplexd /usr/local/bin/
 sudo chmod +x /usr/local/bin/hotplexd
 ```

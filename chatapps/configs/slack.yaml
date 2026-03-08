@@ -221,3 +221,25 @@ security:
     # Slash Command rate limit (requests per second per user)
     # Default: 10.0
     slash_command_rate_limit: 10.0
+
+# -----------------------------------------------------------------------------
+# Message Storage (Optional)
+# -----------------------------------------------------------------------------
+# Persist chat history for conversation retrieval and analytics.
+# Disabled by default - uncomment to enable.
+# -----------------------------------------------------------------------------
+# message_store:
+#   enabled: true
+#   type: sqlite                    # sqlite | postgres | memory
+#   sqlite:
+#     path: ~/.hotplex/slack_messages.db
+#     max_size_mb: 512
+#   # postgres:                      # Uncomment for PostgreSQL
+#   #   dsn: postgres://user:pass@localhost:5432/hotplex
+#   #   max_connections: 10
+#   #   level: 1                     # 1=million, 2=hundred million
+#   strategy: default                # default | verbose | minimal
+#   streaming:
+#     enabled: true                  # Buffer streaming messages
+#     timeout: 5m                    # Max wait for stream completion
+#     storage_policy: complete_only  # complete_only | all_chunks

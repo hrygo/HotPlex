@@ -106,7 +106,7 @@ message_store:
     max_size_mb: 512
   streaming:
     enabled: true
-    timeout_seconds: 300
+    timeout: 5m
     storage_policy: complete_only # Only store the final merged response
 ```
 

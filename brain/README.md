@@ -9,7 +9,7 @@ The system is designed with a layered "Enhanced Brain" architecture. It decorate
 ```mermaid
 graph TD
     User([Application]) --> Inter[Brain Interface]
-    
+
     subgraph Layers [Production Layers]
         Inter --> Priority[Priority Scheduler]
         Priority --> Router[Model Router]
@@ -19,14 +19,127 @@ graph TD
         Cache --> RL[Rate Limiter]
         RL --> Obs[Observability: Metrics / Cost]
     end
-    
+
     subgraph Providers [LLM Providers]
         Obs --> OpenAI[OpenAI SDK]
         Obs --> Custom[Custom Providers]
     end
 ```
 
-### Core Components
+---
+
+## 🧠 Native Brain Core Components (v0.22.0)
+
+### 1. IntentRouter
+
+Classifies incoming messages to determine the optimal processing path.
+
+```
+┌─────────────┐     ┌──────────────┐
+│ User Message │────▶│ IntentRouter │
+└─────────────┘     └──────┬───────┘
+                           │
+            ┌──────────────┼──────────────┐
+            ▼              ▼              ▼
+        [chat]        [command]       [task]
+      Brain handles   Brain handles   Engine handles
+      casual chat     status/config   code, debugging
+```
+
+**Intent Types**:
+| Intent | Description | Handler |
+|--------|-------------|---------|
+| `chat` | Casual conversation, greetings | Brain generates response |
+| `command` | Status queries, config commands | Brain generates response |
+| `task` | Code operations, debugging | Forward to Engine Provider |
+| `unknown` | Ambiguous intent | Default to Engine for safety |
+
+**Fast-Path Optimization**: Obvious cases are handled without Brain API calls:
+- Greetings ("hi", "hello") → `chat`
+- Status commands ("ping", "status") → `command`
+- Code keywords ("function", "debug") → `task`
+
+```go
+router := brain.NewIntentRouter(brainClient)
+result, err := router.Classify(ctx, "Write a Python function")
+// result.Type == IntentTypeTask
+```
+
+### 2. ContextCompressor
+
+Manages conversation context to prevent context window overflow while preserving important information.
+
+```
+┌────────────────────────────────────────────────────────┐
+│ Session History (before: 8000+ tokens)                 │
+│ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐       │
+│ │Turn1│ │Turn2│ │ ... │ │Turn8│ │Turn9│ │Turn10│       │
+│ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘       │
+└────────────────────────────────────────────────────────┘
+                         │
+                         ▼ Compression (threshold reached)
+┌────────────────────────────────────────────────────────┐
+│ Compressed Session (after: ~2000 tokens)               │
+│ ┌─────────────────┐ ┌─────┐ ┌─────┐ ┌─────┐           │
+│ │ Summary of 1-7  │ │Turn8│ │Turn9│ │Turn10│           │
+│ │ (~500 tokens)   │ └─────┘ └─────┘ └─────┘           │
+│ └─────────────────┘                                   │
+└────────────────────────────────────────────────────────┘
+```
+
+**Compression Algorithm**:
+1. Wait until token count exceeds `TokenThreshold` (default: 8000)
+2. Keep last `PreserveTurns` (default: 5) turns intact
+3. Summarize older turns using Brain AI
+4. Replace old turns with summary, update total token count
+
+```go
+compressor := brain.NewContextCompressor(brainClient, brain.CompressionConfig{
+    Enabled:        true,
+    TokenThreshold: 8000,
+    PreserveTurns:  5,
+    MaxSummaryTokens: 500,
+})
+compressed := compressor.Compress(ctx, sessionHistory)
+```
+
+### 3. SafetyGuard
+
+Multi-layer security for input validation and output sanitization.
+
+```
+SafetyGuard
+├── CheckInput()     → Pattern scan → Brain analysis → allow/block
+├── CheckOutput()    → Pattern match → sanitize → allow
+└── ParseConfigIntent() → Brain NLU → ExecuteConfigIntent()
+```
+
+**Threat Detection Flow**:
+1. **Fast path**: Regex patterns catch obvious attacks (prompt injection, jailbreak)
+2. **Deep analysis**: Brain AI classifies subtle threats with confidence scores
+3. **Action**: `allow` (safe), `block` (threat), or `sanitize` (redact sensitive data)
+
+**Default Blocked Patterns**:
+- Prompt injection (`ignore previous instructions`)
+- Jailbreak attempts (`DAN mode`, `developer mode`)
+- System override attempts (`you are now admin`)
+
+```go
+guard := brain.NewSafetyGuard(brainClient, brain.DefaultGuardConfig())
+
+// Input validation
+result := guard.CheckInput(ctx, userInput)
+if result.Action == brain.GuardActionBlock {
+    return errors.New("blocked: " + result.Reason)
+}
+
+// Output sanitization
+sanitized := guard.CheckOutput(ctx, llmResponse)
+```
+
+---
+
+### Core Components (Continued)
 
 - **Brain Interface**: Unified API for high-level reasoning (`Chat`, `Analyze`) and streaming (`ChatStream`).
 - **Resiliency Engine**: Implements exponential backoff retries and the Circuit Breaker pattern to handle transient failures and provider outages.

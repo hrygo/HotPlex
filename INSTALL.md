@@ -16,7 +16,7 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 
 ```bash
 # Download and run with version flag
-curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -v v0.21.0
+curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -v v0.22.0
 ```
 
 > Note: `--` separates bash options from script options. Without it, `-v` would be interpreted by bash instead of the script.
@@ -86,16 +86,16 @@ Download from [Releases](https://github.com/hrygo/hotplex/releases):
 
 ```bash
 # Linux amd64
-curl -LO https://github.com/hrygo/hotplex/releases/download/v0.21.0/hotplex_0.21.0_linux_amd64.tar.gz
+curl -LO https://github.com/hrygo/hotplex/releases/download/v0.22.0/hotplex_0.22.0_linux_amd64.tar.gz
 
 # macOS arm64 (Apple Silicon)
-curl -LO https://github.com/hrygo/hotplex/releases/download/v0.21.0/hotplex_0.21.0_darwin_arm64.tar.gz
+curl -LO https://github.com/hrygo/hotplex/releases/download/v0.22.0/hotplex_0.22.0_darwin_arm64.tar.gz
 ```
 
 ### 2. Extract and Install
 
 ```bash
-tar -xzf hotplex_0.21.0_linux_amd64.tar.gz
+tar -xzf hotplex_0.22.0_linux_amd64.tar.gz
 sudo mv hotplexd /usr/local/bin/
 sudo chmod +x /usr/local/bin/hotplexd
 ```

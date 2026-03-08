@@ -1,5 +1,49 @@
 # CHANGELOG.md
 
+## [v0.22.0] - 2026-03-08
+
+### 🚀 Minor Release - Native Brain & Message Persistence
+
+This release introduces **Native Brain** core orchestration features and **message persistence** for Slack, along with a cross-platform installer.
+
+### Added
+
+#### 🧠 Native Brain Core Features (#228)
+- **IntentRouter** - Intent classification and routing to appropriate handlers
+- **ContextCompressor** - Context compression for efficient LLM token usage
+- **SafetyGuard** - Safety guardrails for AI responses
+
+#### 💾 Message Persistence (#227)
+- **MessageStorePlugin Integration** - Slack adapter now supports persistent message storage
+- **Multiple Storage Backends** - SQLite, PostgreSQL, and in-memory storage options
+- **StorageConfig** - New configuration struct for storage settings in `chatapps/configs/*.yaml`
+
+#### 📦 Installation Experience (#226)
+- **Cross-Platform Installer** - `install.sh` supports Linux/macOS/Windows(WSL)
+- **Post-Install Wizard** - Guided setup for Claude Code, Slack Bot credentials, and ChatApps YAML
+- **Version Selection** - Install specific versions with `-v v0.x.x`
+- **Dry-Run Mode** - Preview installation without changes (`-n`)
+
+#### 🏗️ Brain LLM Architecture (#224)
+- **Builder Pattern** - Composable LLM client construction with middleware chain
+- **Plugin System** - Extensible provider architecture for custom LLM backends
+- **RateLimiter Close()** - Proper resource cleanup interface
+
+### Fixed
+
+- **Streaming Fallback** - Added content recovery when `StartStream` fails (#225 related)
+- **Install Script** - Cross-platform compatibility (macOS/Linux)
+- **Slack Token Validation** - Improved token format validation in installer
+
+### Reference Commits
+- feat(brain): implement Native Brain core features (#228)
+- feat(slack): integrate MessageStorePlugin for message persistence (#227)
+- feat(install): 平台一键安装脚本 + Release 打包配置 (#226)
+- feat(brain/llm+provider): add Builder pattern and plugin system (#224)
+- fix(streaming): add fallback for content lost when StartStream fails
+- fix(ci): make install.sh cross-platform compatible (macOS/Linux)
+- fix(install): improve Slack token validation and sync docs
+
 ## [v0.21.5] - 2026-03-07
 
 ### 🔧 Patch Release
