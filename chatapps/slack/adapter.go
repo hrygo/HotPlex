@@ -49,6 +49,10 @@ type Adapter struct {
 	// Thread ownership tracker (Phase 1: Bot Behavior Spec)
 	ownershipTracker *ThreadOwnershipTracker
 
+	// Background cleanup for thread ownership
+	ownershipCleanupCtx    context.Context
+	ownershipCleanupCancel context.CancelFunc
+
 	channelToTeam sync.Map // Map channelID to TeamID for streaming functions
 	channelToUser sync.Map // Map channelID to UserID for streaming functions
 
@@ -137,6 +141,7 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 	// Initialize thread ownership tracker if enabled (Phase 1: Bot Behavior Spec)
 	if config.IsThreadOwnershipEnabled() {
 		a.ownershipTracker = NewThreadOwnershipTracker(config.GetThreadOwnershipTTL(), logger)
+		a.ownershipCleanupCtx, a.ownershipCleanupCancel = context.WithCancel(context.Background())
 		logger.Info("Thread ownership tracker initialized",
 			"ttl", config.GetThreadOwnershipTTL(),
 			"persist", config.ThreadOwnership.Persist)
@@ -245,6 +250,11 @@ func (a *Adapter) registerCommands() {
 
 // Stop waits for pending webhook goroutines to complete
 func (a *Adapter) Stop() error {
+	// Stop ownership cleanup goroutine
+	if a.ownershipCleanupCancel != nil {
+		a.ownershipCleanupCancel()
+	}
+
 	// Stop rate limiter cleanup goroutine
 	if a.rateLimiter != nil {
 		a.rateLimiter.Stop()
@@ -581,6 +591,15 @@ func (a *Adapter) shouldRespondToThreadMessage(channelType, channelID, threadTS,
 		return false, "no_ownership_tracking"
 	}
 
+	// R5: Ownership release - if other bots are @mentioned but not us, release ownership
+	if len(mentioned) > 0 {
+		if a.ownershipTracker.IsOwner(threadKey, a.config.BotUserID) {
+			a.ownershipTracker.ReleaseOwnership(threadKey, a.config.BotUserID)
+			a.Logger().Debug("Thread ownership released (R5)", "thread_key", threadKey, "mentioned", mentioned)
+		}
+		return false, "ownership_released_other_mentioned"
+	}
+
 	// Check if we own this thread
 	if a.ownershipTracker.IsOwner(threadKey, a.config.BotUserID) {
 		a.ownershipTracker.UpdateLastActive(threadKey)
@@ -589,10 +608,6 @@ func (a *Adapter) shouldRespondToThreadMessage(channelType, channelID, threadTS,
 
 	// Check if thread has no owner (unowned thread)
 	if !a.ownershipTracker.HasOwner(threadKey) {
-		// Other bots mentioned - don't claim
-		if len(mentioned) > 0 {
-			return false, "unowned_other_mentioned"
-		}
 		// No mentions at all in unowned thread - stay silent
 		return false, "unowned_no_mention_silent"
 	}

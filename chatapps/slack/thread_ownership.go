@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
@@ -35,22 +36,46 @@ type ThreadOwner struct {
 //   - R4: @BotA @BotB creates shared ownership
 //   - R5: @mentions excluding current owner releases ownership
 type ThreadOwnershipTracker struct {
-	mu      sync.RWMutex
-	threads map[ThreadKey]*ThreadOwner
-	ttl     time.Duration
-	logger  *slog.Logger
+	mu         sync.RWMutex
+	threads    map[ThreadKey]*ThreadOwner
+	ttl        time.Duration
+	logger     *slog.Logger
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	cleanupInt time.Duration
 }
 
 // NewThreadOwnershipTracker creates a new thread ownership tracker.
+// The tracker automatically cleans up expired ownerships every TTL/2 interval.
 func NewThreadOwnershipTracker(ttl time.Duration, logger *slog.Logger) *ThreadOwnershipTracker {
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
-	return &ThreadOwnershipTracker{
-		threads: make(map[ThreadKey]*ThreadOwner),
-		ttl:     ttl,
-		logger:  logger,
+	cleanupInt := ttl / 2
+	if cleanupInt < time.Minute {
+		cleanupInt = time.Minute
 	}
+	if cleanupInt > time.Hour {
+		cleanupInt = time.Hour
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	t := &ThreadOwnershipTracker{
+		threads:    make(map[ThreadKey]*ThreadOwner),
+		ttl:        ttl,
+		logger:     logger,
+		ctx:        ctx,
+		cancel:     cancel,
+		cleanupInt: cleanupInt,
+	}
+
+	// Start background cleanup goroutine
+	t.wg.Add(1)
+	go t.cleanupLoop()
+
+	return t
 }
 
 // ClaimOwnership claims ownership of a thread for the specified bot.
@@ -240,4 +265,30 @@ func (t *ThreadOwnershipTracker) CleanupExpired() int {
 		t.logger.Debug("Cleaned up expired thread ownerships", "count", expired)
 	}
 	return expired
+}
+
+// cleanupLoop runs periodically to clean up expired ownerships.
+func (t *ThreadOwnershipTracker) cleanupLoop() {
+	defer t.wg.Done()
+
+	ticker := time.NewTicker(t.cleanupInt)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-t.ctx.Done():
+			t.logger.Debug("Thread ownership cleanup loop stopped")
+			return
+		case <-ticker.C:
+			t.CleanupExpired()
+		}
+	}
+}
+
+// Stop stops the background cleanup goroutine.
+func (t *ThreadOwnershipTracker) Stop() {
+	if t.cancel != nil {
+		t.cancel()
+	}
+	t.wg.Wait()
 }
