@@ -405,7 +405,7 @@ func setupPlatform(
 			// Use work_dir from config if specified
 			if pc.Engine.WorkDir != "" {
 				// Expand ~ to home directory and resolve . to absolute path
-				workDir := expandPath(pc.Engine.WorkDir)
+				workDir := ExpandPath(pc.Engine.WorkDir)
 				logger.Debug("Using work_dir from config",
 					"platform", platform,
 					"config_value", pc.Engine.WorkDir,
@@ -488,10 +488,10 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 	return engine.NewEngine(opts)
 }
 
-// expandPath expands ~ to the user's home directory and cleans the path.
+// ExpandPath expands ~ to the user's home directory and cleans the path.
 // Supports both ~ and ~/path formats.
 // Returns an empty string if the path contains traversal attacks.
-func expandPath(path string) string {
+func ExpandPath(path string) string {
 	if len(path) == 0 {
 		return path
 	}

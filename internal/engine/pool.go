@@ -343,7 +343,16 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 	panicx.SafeGo(sessLog, func() {
 		err := cmd.Wait()
 		if sess.GetStatus() != SessionStatusDead {
-			sessLog.Warn("Session OS process exited unexpectedly", "exit_error", err)
+			sessLog.Warn("Session OS process exited unexpectedly", "exit_error", err, "is_resuming", isResuming)
+			// If this was a resume attempt that failed, delete the stale marker
+			// This allows the next request to create a fresh session instead of retrying with a dead session
+			if isResuming {
+				if delErr := sm.markerStore.Delete(providerSessionID); delErr != nil {
+					sessLog.Warn("Failed to delete stale session marker", "error", delErr)
+				} else {
+					sessLog.Info("Deleted stale session marker after failed resume", "provider_session_id", providerSessionID)
+				}
+			}
 			// Update status to Dead and notify callback
 			sess.SetStatus(SessionStatusDead)
 			if cb := sess.GetCallback(); cb != nil {

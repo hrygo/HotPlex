@@ -16,9 +16,9 @@ import (
 	"github.com/hrygo/hotplex/chatapps/command"
 	"github.com/hrygo/hotplex/chatapps/session"
 	"github.com/hrygo/hotplex/engine"
+	"github.com/hrygo/hotplex/internal/sys"
 	"github.com/hrygo/hotplex/plugins/storage"
 	"github.com/hrygo/hotplex/types"
-
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 )
@@ -194,7 +194,7 @@ func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) err
 	switch storageType {
 	case "sqlite":
 		if cfg != nil && cfg.SQLitePath != "" {
-			pluginConfig["path"] = cfg.SQLitePath
+			pluginConfig["path"] = sys.ExpandPath(cfg.SQLitePath)
 		} else {
 			pluginConfig["path"] = "data/slack_messages.db"
 		}

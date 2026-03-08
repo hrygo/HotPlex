@@ -88,9 +88,9 @@ func TestExpandPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			want := tt.wantFunc()
-			got := expandPath(tt.input)
+			got := ExpandPath(tt.input)
 			if got != want {
-				t.Errorf("expandPath(%q) = %q, want %q", tt.input, got, want)
+				t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, got, want)
 			}
 		})
 	}
@@ -131,7 +131,7 @@ func TestExpandPath_PathTraversal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			expanded := expandPath(tt.input)
+			expanded := ExpandPath(tt.input)
 
 			// Clean the path to resolve any .. elements
 			cleaned := filepath.Clean(expanded)
@@ -178,7 +178,7 @@ func TestExpandPath_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Just verify it doesn't panic
-			_ = expandPath(tt.input)
+			_ = ExpandPath(tt.input)
 		})
 	}
 }
@@ -267,12 +267,12 @@ func TestExpandPath_SensitivePaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := expandPath(tt.input)
+			got := ExpandPath(tt.input)
 			if tt.wantEmpty && got != "" {
-				t.Errorf("expandPath(%q) should be blocked (return empty), got %q", tt.input, got)
+				t.Errorf("ExpandPath(%q) should be blocked (return empty), got %q", tt.input, got)
 			}
 			if !tt.wantEmpty && got == "" && tt.input[0] == '/' {
-				t.Errorf("expandPath(%q) should not be blocked, got empty string", tt.input)
+				t.Errorf("ExpandPath(%q) should not be blocked, got empty string", tt.input)
 			}
 		})
 	}

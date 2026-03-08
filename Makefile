@@ -302,7 +302,7 @@ HOST_UID        ?= $(shell id -u)
 docker-build: ## @docker Build image (multi-stage, hotplexd always rebuilt)
 	@printf "${CYAN}🐳 Building Docker image (multi-stage)...${NC}\n"
 	@printf "${DIM}Builder stage always rebuilds, runtime stages cached.${NC}\n"
-	HOST_UID=$(HOST_UID) VERSION=$(VERSION) docker compose build
+	HOST_UID=$(HOST_UID) VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_TIME=$(BUILD_TIME) docker compose build
 
 docker-build-cache: ## @docker Build image (legacy, full cache - for debugging)
 	@printf "${CYAN}🐳 Building Docker image (legacy mode)...${NC}\n"

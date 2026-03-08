@@ -239,6 +239,17 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 
 		if !a.config.ShouldRespondInMultibotMode(ev.Text) {
 			a.Logger().Info("Message ignored - other bot mentioned", "channel_type", ev.ChannelType, "policy", "multibot")
+			// R5: Release thread ownership if others are @mentioned but not us
+			if a.config.IsThreadOwnershipEnabled() && a.ownershipTracker != nil && ev.ThreadTimeStamp != "" {
+				threadKey := NewThreadKey(ev.Channel, ev.ThreadTimeStamp)
+				if a.ownershipTracker.Owns(threadKey) {
+					a.ownershipTracker.Release(threadKey)
+					a.Logger().Debug("Thread ownership released (R5) - other bot mentioned",
+						"thread_key", threadKey,
+						"channel", ev.Channel,
+						"thread_ts", ev.ThreadTimeStamp)
+				}
+			}
 			return
 		}
 		// Broadcast response only for top-level channel messages (not threads)

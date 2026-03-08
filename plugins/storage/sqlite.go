@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hrygo/hotplex/internal/sys"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // SQLiteStorage SQLite 存储实现
@@ -38,7 +38,7 @@ func (s *SQLiteStorage) Initialize(ctx context.Context) error {
 	// Expand home directory tilde
 	path = sys.ExpandPath(path)
 
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return err
 	}
@@ -157,10 +157,46 @@ func (s *SQLiteStorage) storeMessage(ctx context.Context, msg *ChatAppMessage) e
 	msg.CreatedAt = now
 	msg.UpdatedAt = now
 	metadataJSON, _ := json.Marshal(msg.Metadata)
-	query := `INSERT OR REPLACE INTO messages (id, chat_session_id, chat_platform, chat_user_id, content, message_type, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, query, msg.ID, msg.ChatSessionID, msg.ChatPlatform, msg.ChatUserID, msg.Content, string(msg.MessageType), string(metadataJSON), msg.CreatedAt, msg.UpdatedAt)
+
+	query := `INSERT OR REPLACE INTO messages (
+		id, chat_session_id, chat_platform, chat_user_id, chat_bot_user_id, chat_channel_id, chat_thread_id,
+		engine_session_id, engine_namespace, provider_session_id, provider_type,
+		message_type, from_user_id, from_user_name, to_user_id, content, metadata, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	_, err := s.db.ExecContext(ctx, query,
+		msg.ID, msg.ChatSessionID, msg.ChatPlatform, msg.ChatUserID,
+		msg.ChatBotUserID, msg.ChatChannelID, msg.ChatThreadID,
+		msg.EngineSessionID.String(), msg.EngineNamespace,
+		msg.ProviderSessionID, msg.ProviderType,
+		string(msg.MessageType), msg.FromUserID, msg.FromUserName, msg.ToUserID,
+		msg.Content, string(metadataJSON), msg.CreatedAt, msg.UpdatedAt,
+	)
+
+	if err == nil {
+		s.updateSessionMeta(ctx, msg)
+	}
+
 	return err
+}
+
+// updateSessionMeta updates session metadata after storing a message
+func (s *SQLiteStorage) updateSessionMeta(ctx context.Context, msg *ChatAppMessage) {
+	query := `
+		INSERT INTO session_metadata (chat_session_id, chat_platform, chat_user_id, last_message_id, last_message_at, message_count, updated_at)
+		VALUES (?, ?, ?, ?, ?, 1, ?)
+		ON CONFLICT(chat_session_id) DO UPDATE SET
+			last_message_id = excluded.last_message_id,
+			last_message_at = excluded.last_message_at,
+			message_count = message_count + 1,
+			updated_at = excluded.updated_at
+	`
+	_, err := s.db.ExecContext(ctx, query,
+		msg.ChatSessionID, msg.ChatPlatform, msg.ChatUserID,
+		msg.ID, msg.CreatedAt, msg.UpdatedAt,
+	)
+	// Ignore errors to ensure main flow is not affected
+	_ = err
 }
 
 func (s *SQLiteStorage) GetSessionMeta(ctx context.Context, chatSessionID string) (*SessionMeta, error) {

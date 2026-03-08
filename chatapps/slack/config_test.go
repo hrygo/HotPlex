@@ -581,3 +581,95 @@ func equalSlices(a, b []string) bool {
 	}
 	return true
 }
+
+func TestConfig_CanRespond(t *testing.T) {
+	tests := []struct {
+		name     string
+		owner    *OwnerConfig
+		userID   string
+		expected bool
+	}{
+		{
+			name:     "no_owner_config_defaults_to_public",
+			owner:    nil,
+			userID:   "U1",
+			expected: true,
+		},
+		{
+			name: "primary_owner_always_allowed",
+			owner: &OwnerConfig{
+				Primary: "U1",
+				Policy:  "owner_only",
+			},
+			userID:   "U1",
+			expected: true,
+		},
+		{
+			name: "trusted_user_allowed_in_trusted_policy",
+			owner: &OwnerConfig{
+				Primary: "U1",
+				Trusted: []string{"U2", "U3"},
+				Policy:  "trusted",
+			},
+			userID:   "U2",
+			expected: true,
+		},
+		{
+			name: "non_trusted_user_blocked_in_trusted_policy",
+			owner: &OwnerConfig{
+				Primary: "U1",
+				Trusted: []string{"U2"},
+				Policy:  "trusted",
+			},
+			userID:   "U3",
+			expected: false,
+		},
+		{
+			name: "public_policy_allows_all",
+			owner: &OwnerConfig{
+				Primary: "U1",
+				Policy:  "public",
+			},
+			userID:   "U99",
+			expected: true,
+		},
+		{
+			name: "owner_only_blocks_others",
+			owner: &OwnerConfig{
+				Primary: "U1",
+				Trusted: []string{"U2"}, // Even if in trusted list, policy is owner_only
+				Policy:  "owner_only",
+			},
+			userID:   "U2",
+			expected: false,
+		},
+		{
+			name: "unknown_policy_fails_secure",
+			owner: &OwnerConfig{
+				Primary: "U1",
+				Policy:  "something_else",
+			},
+			userID:   "U1",
+			expected: true, // Owner still allowed
+		},
+		{
+			name: "unknown_policy_fails_secure_for_others",
+			owner: &OwnerConfig{
+				Primary: "U1",
+				Policy:  "something_else",
+			},
+			userID:   "U2",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Owner: tt.owner}
+			result := cfg.CanRespond(tt.userID)
+			if result != tt.expected {
+				t.Errorf("CanRespond(%q) = %v, want %v", tt.userID, result, tt.expected)
+			}
+		})
+	}
+}

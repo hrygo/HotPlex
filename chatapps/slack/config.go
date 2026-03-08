@@ -78,7 +78,7 @@ type OwnerConfig struct {
 	// Primary is the bot owner's Slack User ID (e.g., "U1234567890")
 	Primary string `yaml:"primary"`
 	// Trusted is a list of trusted user IDs who can also command the bot
-	Trusted []string `yaml:"trusted"`
+	Trusted []string `yaml:"trusted_users"`
 	// Policy defines access control: owner_only, trusted, or public
 	Policy OwnerPolicy `yaml:"policy"`
 }
@@ -427,7 +427,8 @@ func (c *Config) CanRespond(userID string) bool {
 		return true
 	}
 
-	switch c.Owner.Policy {
+	policy := c.GetOwnerPolicy()
+	switch policy {
 	case OwnerPolicyPublic:
 		return true
 	case OwnerPolicyTrusted:

@@ -29,6 +29,7 @@ security:
   owner:
     primary: ${HOTPLEX_SLACK_PRIMARY_OWNER}  # Your Slack User ID (e.g. U12345678)
     policy: trusted                         # owner_only | trusted | public
+    trusted_users: []
 
   permission:
     dm_policy: allow

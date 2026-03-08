@@ -80,7 +80,7 @@ type MarkdownConfig struct {
 // OwnerConfig defines bot ownership and access control (Phase 1: Bot Behavior Spec)
 type OwnerConfig struct {
 	Primary string   `yaml:"primary"` // slack user ID
-	Trusted []string `yaml:"trusted"`
+	Trusted []string `yaml:"trusted_users"`
 	Policy  string   `yaml:"policy"` // owner_only | trusted | public
 }
 
