@@ -96,8 +96,8 @@ type RateLimitConfig struct {
 
 // RouterConfig configures intelligent model routing.
 type RouterConfig struct {
-	Enabled      bool             // Enable model routing
-	DefaultStage string           // Default routing strategy: "cost_priority", "latency_priority"
+	Enabled      bool              // Enable model routing
+	DefaultStage string            // Default routing strategy: "cost_priority", "latency_priority"
 	Models       []llm.ModelConfig // Available models with cost/latency info
 }
 
@@ -115,11 +115,11 @@ type CircuitBreakerConfig struct {
 
 // FailoverConfig configures provider failover behavior.
 type FailoverConfig struct {
-	Enabled        bool               // Enable failover
+	Enabled        bool                 // Enable failover
 	Providers      []llm.ProviderConfig // Backup providers
-	EnableAuto     bool               // Enable automatic failover
-	EnableFailback bool               // Enable automatic failback when primary recovers
-	Cooldown       time.Duration      // Cooldown period before failback
+	EnableAuto     bool                 // Enable automatic failover
+	EnableFailback bool                 // Enable automatic failback when primary recovers
+	Cooldown       time.Duration        // Cooldown period before failback
 }
 
 // === Budget Configuration ===

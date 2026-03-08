@@ -60,8 +60,8 @@ func NewClaudeCodeProvider(cfg ProviderConfig, logger *slog.Logger) (*ClaudeCode
 			binaryPath: binaryPath,
 			logger:     logger.With("provider", "claude-code"),
 		},
-		opts:        cfg,
-		markerStore: markerStore,
+		opts:          cfg,
+		markerStore:   markerStore,
 		promptBuilder: NewPromptBuilder(true), // Use CDATA for Claude
 	}, nil
 }

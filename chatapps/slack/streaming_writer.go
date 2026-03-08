@@ -238,7 +238,7 @@ func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
 	}
 
 	w.buf.Write(p)
-	w.accumulatedContent.Write(p)  // 累积内容用于潜在 fallback
+	w.accumulatedContent.Write(p)   // 累积内容用于潜在 fallback
 	w.bytesWritten += int64(len(p)) // 追踪写入字节数
 
 	// 如果超过 rune 阈值，立即触发一次 flush
@@ -393,12 +393,12 @@ func (w *NativeStreamingWriter) GetAccumulatedContent() string {
 
 // StreamWriterStats returns stream statistics for integrity validation and monitoring
 type StreamWriterStats struct {
-	BytesWritten     int64  // Total bytes successfully written
-	BytesFlushed     int64  // Total bytes successfully flushed
-	FailedChunkCount int    // Number of failed flush chunks
-	IntegrityOK      bool   // Whether integrity check passed
-	FallbackUsed     bool   // Whether fallback mechanism was used
-	ContentLength    int    // Total length of accumulated content
+	BytesWritten     int64 // Total bytes successfully written
+	BytesFlushed     int64 // Total bytes successfully flushed
+	FailedChunkCount int   // Number of failed flush chunks
+	IntegrityOK      bool  // Whether integrity check passed
+	FallbackUsed     bool  // Whether fallback mechanism was used
+	ContentLength    int   // Total length of accumulated content
 }
 
 // GetStats returns stream statistics

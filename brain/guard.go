@@ -33,7 +33,7 @@ import (
 
 // GuardConfig holds configuration for SafetyGuard.
 type GuardConfig struct {
-	Enabled            bool          `json:"enabled"`            // Master switch for all guard features
+	Enabled            bool          `json:"enabled"`              // Master switch for all guard features
 	InputGuardEnabled  bool          `json:"input_guard_enabled"`  // Enable input validation (pattern + AI)
 	OutputGuardEnabled bool          `json:"output_guard_enabled"` // Enable output sanitization (redact secrets)
 	Chat2ConfigEnabled bool          `json:"chat2config_enabled"`  // Allow config changes via natural language (security risk)
@@ -90,10 +90,10 @@ func DefaultBanPatterns() []string {
 type ThreatLevel string
 
 const (
-	ThreatLevelNone    ThreatLevel = "none"
-	ThreatLevelLow     ThreatLevel = "low"
-	ThreatLevelMedium  ThreatLevel = "medium"
-	ThreatLevelHigh    ThreatLevel = "high"
+	ThreatLevelNone     ThreatLevel = "none"
+	ThreatLevelLow      ThreatLevel = "low"
+	ThreatLevelMedium   ThreatLevel = "medium"
+	ThreatLevelHigh     ThreatLevel = "high"
 	ThreatLevelCritical ThreatLevel = "critical"
 )
 
@@ -129,9 +129,9 @@ type SafetyGuard struct {
 	sensitivePatterns []*regexp.Regexp
 
 	// Per-user rate limiting for CheckInput calls
-	userLimiters map[string]*rate.Limiter // userID -> limiter
-	rateLimitRPS float64                   // Configured RPS (0 = disabled)
-	rateLimitBurst int                     // Configured burst
+	userLimiters   map[string]*rate.Limiter // userID -> limiter
+	rateLimitRPS   float64                  // Configured RPS (0 = disabled)
+	rateLimitBurst int                      // Configured burst
 
 	// Metrics for monitoring (protected by mu)
 	totalChecks      int64 // Total number of CheckInput calls
@@ -146,11 +146,11 @@ type SafetyGuard struct {
 // NewSafetyGuard creates a new SafetyGuard instance.
 func NewSafetyGuard(brain Brain, config GuardConfig, logger *slog.Logger) (*SafetyGuard, error) {
 	guard := &SafetyGuard{
-		brain:         brain,
-		config:        config,
-		logger:        logger,
-		userLimiters:  make(map[string]*rate.Limiter),
-		rateLimitRPS:  config.RateLimitRPS,
+		brain:          brain,
+		config:         config,
+		logger:         logger,
+		userLimiters:   make(map[string]*rate.Limiter),
+		rateLimitRPS:   config.RateLimitRPS,
 		rateLimitBurst: config.RateLimitBurst,
 	}
 
@@ -562,11 +562,11 @@ func (g *SafetyGuard) compileBanPatternsLocked() {
 
 // ConfigIntent represents a configuration change intent.
 type ConfigIntent struct {
-	Action    string                 `json:"action"`    // "get", "set", "list"
-	Target    string                 `json:"target"`    // "model", "provider", "limit", etc.
-	Value     string                 `json:"value"`     // New value for "set" actions
-	Extra     map[string]interface{} `json:"extra"`     // Additional context
-	Confidence float64               `json:"confidence"`
+	Action     string                 `json:"action"` // "get", "set", "list"
+	Target     string                 `json:"target"` // "model", "provider", "limit", etc.
+	Value      string                 `json:"value"`  // New value for "set" actions
+	Extra      map[string]interface{} `json:"extra"`  // Additional context
+	Confidence float64                `json:"confidence"`
 }
 
 // ParseConfigIntent parses a natural language config command.
@@ -731,8 +731,8 @@ Keep response concise and actionable.`, err, eventContext)
 // === Global instance ===
 
 var (
-	globalGuard     *SafetyGuard
-	guardOnce       sync.Once
+	globalGuard *SafetyGuard
+	guardOnce   sync.Once
 )
 
 // GlobalGuard returns the global SafetyGuard instance.

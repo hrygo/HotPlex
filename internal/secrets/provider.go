@@ -10,10 +10,10 @@ import (
 type Provider interface {
 	// Get retrieves a secret by key
 	Get(ctx context.Context, key string) (string, error)
-	
+
 	// Set stores a secret
 	Set(ctx context.Context, key, value string) error
-	
+
 	// Delete removes a secret
 	Delete(ctx context.Context, key string) error
 }

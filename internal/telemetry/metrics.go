@@ -17,10 +17,10 @@ type Metrics struct {
 
 	// Dimensioned metrics (platform, task_type)
 	sessionDurationBuckets map[sessionKey]durationBucket
-	sessionTurns          map[sessionKey]int64
-	sessionErrors         map[sessionKey]int64
-	toolsInvokedByType   map[sessionKey]int64
-	sessionTokens        map[sessionKey]int64
+	sessionTurns           map[sessionKey]int64
+	sessionErrors          map[sessionKey]int64
+	toolsInvokedByType     map[sessionKey]int64
+	sessionTokens          map[sessionKey]int64
 
 	// Slack permission metrics
 	slackPermissionAllowed        int64
@@ -51,12 +51,12 @@ func NewMetrics(logger *slog.Logger) *Metrics {
 		logger = slog.Default()
 	}
 	return &Metrics{
-		logger:                  logger,
-		sessionDurationBuckets:  make(map[sessionKey]durationBucket),
-		sessionTurns:            make(map[sessionKey]int64),
-		sessionErrors:           make(map[sessionKey]int64),
+		logger:                 logger,
+		sessionDurationBuckets: make(map[sessionKey]durationBucket),
+		sessionTurns:           make(map[sessionKey]int64),
+		sessionErrors:          make(map[sessionKey]int64),
 		toolsInvokedByType:     make(map[sessionKey]int64),
-		sessionTokens:           make(map[sessionKey]int64),
+		sessionTokens:          make(map[sessionKey]int64),
 	}
 }
 
