@@ -255,7 +255,7 @@ func (m *AdapterManager) GetStatusProvider(platform string) base.StatusProvider 
 
 // NewStreamWriter creates a platform-agnostic streaming writer for the given platform
 // Returns nil if the platform doesn't support streaming or adapter not found
-func (m *AdapterManager) NewStreamWriter(ctx context.Context, platform, channelID, threadTS string) base.StreamWriter {
+func (m *AdapterManager) NewStreamWriter(ctx context.Context, platform, userID, channelID, threadTS string) base.StreamWriter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -267,10 +267,10 @@ func (m *AdapterManager) NewStreamWriter(ctx context.Context, platform, channelI
 
 	// Check if adapter supports streaming via MessageOperations interface
 	if streamProvider, ok := adapter.(interface {
-		NewStreamWriter(context.Context, string, string) base.StreamWriter
+		NewStreamWriter(context.Context, string, string, string) base.StreamWriter
 	}); ok {
 		m.logger.Debug("Creating StreamWriter", "platform", platform)
-		return streamProvider.NewStreamWriter(ctx, channelID, threadTS)
+		return streamProvider.NewStreamWriter(ctx, userID, channelID, threadTS)
 	}
 	m.logger.Debug("Adapter does not support streaming", "platform", platform)
 	return nil

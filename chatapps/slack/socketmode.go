@@ -2,7 +2,6 @@ package slack
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -123,10 +122,31 @@ func (a *Adapter) handleAppMentionEvent(teamID string, ev *slackevents.AppMentio
 		return
 	}
 
+	// Owner policy check (Phase 1: Bot Behavior Spec)
+	if !a.config.CanRespond(ev.User) {
+		a.Logger().Debug("User not allowed by owner policy",
+			"user_id", ev.User,
+			"policy", a.config.GetOwnerPolicy())
+		return
+	}
+
 	threadID := ev.ThreadTimeStamp
 	if threadID == "" {
 		threadID = ev.TimeStamp
 	}
+
+	// Claim thread ownership (Phase 1: Bot Behavior Spec)
+	// Note: ownershipTracker may be nil if initialization failed
+	if a.config.IsThreadOwnershipEnabled() && a.ownershipTracker != nil {
+		threadKey := NewThreadKey(ev.Channel, threadID)
+		// R3/R4: This bot claims ownership when @mentioned
+		// Each bot in multi-bot scenarios independently tracks its own owned threads
+		a.ownershipTracker.Claim(threadKey)
+		a.Logger().Debug("Thread ownership claimed",
+			"channel", ev.Channel,
+			"thread_ts", threadID)
+	}
+
 	sessionID := a.GetOrCreateSession(ev.User, a.config.BotUserID, ev.Channel, threadID)
 	userText := a.stripBotMention(ev.Text)
 
@@ -142,6 +162,8 @@ func (a *Adapter) handleAppMentionEvent(teamID string, ev *slackevents.AppMentio
 			"channel_type": "channel",
 			"message_ts":   ev.TimeStamp,
 			"thread_ts":    threadID, // Fallbacks to TimeStamp if ThreadTimeStamp is empty
+			"event_type":   "app_mention",
+			"event_ts":     ev.TimeStamp,
 		},
 	}
 
@@ -187,15 +209,23 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 		return
 	}
 
+	// =========================================================================
+	// Strict Collision Avoidance (Airtight Filter)
+	// =========================================================================
+	// If message contains bot mention in a non-DM channel, ALWAYS skip it here.
+	// It is guaranteed to be handled by handleAppMentionEvent.
+	// This is critical for multibot mode to avoid dual-processing same user request.
+	if ev.ChannelType != "dm" && a.config.ContainsBotMention(ev.Text) {
+		a.Logger().Debug("Skipping 'message' event with mention (delegating to 'app_mention')", "ts", ev.TimeStamp)
+		return
+	}
+
 	// Group policy check: if GroupPolicy is "mention", only process messages that mention the bot
 	// Note: app_mention events are handled separately by handleAppMentionEvent
 	if (ev.ChannelType == "channel" || ev.ChannelType == "group") && a.config.GroupPolicy == "mention" {
-		if !a.config.ContainsBotMention(ev.Text) {
-			a.Logger().Debug("Message ignored - bot not mentioned", "channel_type", ev.ChannelType, "policy", "mention")
-			return
-		}
-		// Bot is mentioned - skip here, let app_mention handler process it
-		a.Logger().Debug("Skipping 'message' event with mention (handled by 'app_mention')", "ts", ev.TimeStamp)
+		// Already checked for lack of mention above? No, the block above only skips if mention IS PRESENT.
+		// So if we reach here, there is no mention.
+		a.Logger().Debug("Message ignored - bot not mentioned", "channel_type", ev.ChannelType, "policy", "mention")
 		return
 	}
 
@@ -209,6 +239,17 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 
 		if !a.config.ShouldRespondInMultibotMode(ev.Text) {
 			a.Logger().Info("Message ignored - other bot mentioned", "channel_type", ev.ChannelType, "policy", "multibot")
+			// R5: Release thread ownership if others are @mentioned but not us
+			if a.config.IsThreadOwnershipEnabled() && a.ownershipTracker != nil && ev.ThreadTimeStamp != "" {
+				threadKey := NewThreadKey(ev.Channel, ev.ThreadTimeStamp)
+				if a.ownershipTracker.Owns(threadKey) {
+					a.ownershipTracker.Release(threadKey)
+					a.Logger().Debug("Thread ownership released (R5) - other bot mentioned",
+						"thread_key", threadKey,
+						"channel", ev.Channel,
+						"thread_ts", ev.ThreadTimeStamp)
+				}
+			}
 			return
 		}
 		// Broadcast response only for top-level channel messages (not threads)
@@ -227,14 +268,32 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 		if ev.ThreadTimeStamp != "" {
 			a.Logger().Info("Multibot mode - thread message without @mention, processing", "bot_user_id", a.config.BotUserID, "thread_ts", ev.ThreadTimeStamp)
 		} else {
-			a.Logger().Info("Multibot mode - bot mentioned, processing message", "bot_user_id", a.config.BotUserID)
+			a.Logger().Info("Multibot mode - bot self-mention (or broadcast), processing message", "bot_user_id", a.config.BotUserID)
 		}
 	}
 
-	// Fallback: skip message events with bot mention (handled by app_mention event)
-	if ev.ChannelType != "dm" && a.config.ContainsBotMention(ev.Text) {
-		a.Logger().Debug("Skipping 'message' event with mention (handled by 'app_mention')", "ts", ev.TimeStamp)
-		return
+	// Thread ownership decision (Phase 1: Bot Behavior Spec)
+	// This replaces and enhances the previous GroupPolicy checks when ThreadOwnership is enabled
+	if a.config.IsThreadOwnershipEnabled() {
+		shouldRespond, reason := a.ShouldRespondToMessage(
+			ev.ChannelType,
+			ev.Channel,
+			ev.ThreadTimeStamp,
+			ev.Text,
+			ev.User,
+		)
+		if !shouldRespond {
+			a.Logger().Debug("Message ignored by thread ownership policy",
+				"reason", reason,
+				"channel", ev.Channel,
+				"thread_ts", ev.ThreadTimeStamp,
+				"user", ev.User)
+			return
+		}
+		a.Logger().Debug("Message accepted by thread ownership policy",
+			"reason", reason,
+			"channel", ev.Channel,
+			"thread_ts", ev.ThreadTimeStamp)
 	}
 
 	threadID := ev.ThreadTimeStamp
@@ -266,6 +325,8 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 			"channel_id":   ev.Channel,
 			"channel_type": ev.ChannelType,
 			"message_ts":   ev.TimeStamp,
+			"event_type":   "message",
+			"event_ts":     ev.TimeStamp,
 		},
 	}
 
@@ -442,13 +503,4 @@ func (a *Adapter) handleSocketModeInteractive(evt socketmode.Event) {
 	default:
 		a.Logger().Debug("Unhandled interaction type", "type", callback.Type)
 	}
-}
-
-// stripBotMention removes bot mention from text
-func (a *Adapter) stripBotMention(text string) string {
-	if a.config.BotUserID == "" {
-		return text
-	}
-	mention := fmt.Sprintf("<@%s>", a.config.BotUserID)
-	return strings.TrimSpace(strings.ReplaceAll(text, mention, ""))
 }

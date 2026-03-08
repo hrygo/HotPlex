@@ -1,5 +1,134 @@
 # CHANGELOG.md
 
+## [v0.23.4] - 2026-03-09
+
+### 🔧 Patch Release
+
+This release fixes thread ownership behavior when multiple bots are in the same channel.
+
+### Fixed
+
+#### 🤖 Thread Ownership
+- **Release Ownership on Other Bot Mention** - Bot now releases thread ownership when another bot is @mentioned in the same thread
+- **Multi-Bot Coexistence** - Enables seamless handoff between multiple bots in shared channels
+
+---
+
+## [v0.23.3] - 2026-03-08
+
+### 🔧 Patch Release
+
+This release fixes SQLite storage plugin initialization and data persistence issues.
+
+### Fixed
+
+#### 🗄️ SQLite Storage Plugin
+- **Pure-Go Driver** - Switch from `go-sqlite3` (CGO) to `modernc.org/sqlite` for CGO-free Docker builds
+- **Driver Name** - Use correct driver name `sqlite` instead of `sqlite3`
+- **Complete INSERT** - Include all NOT NULL fields in INSERT statement (engine_session_id, provider_session_id, provider_type)
+- **Session Metadata** - Add `updateSessionMeta` function to track session statistics
+
+#### 📂 Path Expansion
+- **Tilde Expansion** - Use `sys.ExpandPath` to resolve `~/.hotplex/` paths correctly
+- **Fixed import cycle** - Use `internal/sys.ExpandPath` instead of `chatapps.ExpandPath`
+
+---
+
+## [v0.23.2] - 2026-03-08
+
+### 🔧 Patch Release
+
+This release fixes stale session markers and Docker build metadata.
+
+### Fixed
+
+#### 🔄 Session Resume Failure Handling
+- **Stale Marker Cleanup** - Delete session marker when resume fails with "No conversation found"
+- **Auto-Recovery** - Next request creates fresh session instead of retrying with dead session
+
+#### 🐳 Docker Build Metadata
+- **Version Embedding** - Pass COMMIT and BUILD_TIME to docker build for proper version info
+- **Fix** - `hotplexd --version` now shows correct commit and build time instead of "unknown"
+
+---
+
+## [v0.23.0] - 2026-03-08
+
+### 🚀 Minor Release
+
+This release introduces Docker container isolation, config layer refactoring, and Phase 1 bot behavior implementation.
+
+### Added
+
+#### 🐳 Docker Container Isolation
+- **docker-entrypoint.sh** - New entrypoint script for container initialization
+  - Auto-creates `.claude.json` on container start
+  - Enables per-container config isolation (no host file mounting needed)
+- **ENTRYPOINT + CMD Pattern** - Flexible container startup with exec signal handling
+
+#### ⚙️ Config Layer Refactoring
+- **Code-Level Defaults** - Slack config now falls back to sensible defaults in Go code
+- **Environment Variable Overrides** - Preserved and prioritized over config file values
+- **Multi-Bot Support** - Provider factory improvements for running multiple bots
+
+#### 🤖 Phase 1 Bot Behavior Spec (#242)
+- **Thread Ownership** - Bot only responds in threads it owns (started by mentioning bot)
+- **Thread Recycling** - Reuse existing threads for follow-up messages
+- **Implicit Acknowledgment** - Skip "thinking" indicator for quick responses
+- **Context Preservation** - Maintain conversation context within owned threads
+
+#### 📦 Storage Plugin Enhancement
+- **SOLID Compliance** - Refactored for better separation of concerns
+- **Reliability Improvements** - Enhanced error handling and state management
+
+#### 📊 Bot Logging
+- **Container Mining** - Enhanced bot logging for debugging containerized sessions
+- **Session Log Persistence** - Write session logs to files for post-mortem analysis
+
+### Fixed
+
+#### 🐳 Docker
+- **Comment Markers** - Removed corrupted comment markers in docker-compose.yml
+- **Claude Code Installation** - Use npm instead of curl for reliable installation
+
+#### 💬 Commands
+- **UI Feedback** - Ensure proper feedback on `/reset` error paths
+- **Event Emission** - Add missing `Emit` calls for `/dc` command
+- **User Messages** - Improved reset/disconnect message clarity
+
+### Docs
+- **ChatApps Slack Manual** - Added comprehensive documentation (EN/ZH)
+
+---
+
+## [v0.22.2] - 2026-03-08
+
+### 🔧 Patch Release
+
+This release improves streaming reliability and Docker installation.
+
+### Fixed
+
+#### 🌊 Streaming Improvements
+- **Increased StreamTTL** - Extended from 4m to 10m for complex AI tasks
+- **Whitespace Handling** - Skip whitespace-only chunks from native stream updates
+- **Close() Ordering** - Fix state capture ordering for proper integrity validation
+- **Simplified Integrity Check** - Removed redundant `streamExpired` check
+
+#### 🤖 Multibot Mode Fixes
+- **Collision Avoidance** - Strict filter to prevent duplicate processing
+- **Event Delegation** - Skip message events with bot mention (delegate to app_mention)
+- **Debug Logging** - Added event_type/event_ts for better traceability
+
+#### 🐳 Docker Improvements
+- **Official Installer** - Use `curl -fsSL https://claude.ai/install.sh | bash`
+- **PATH Fix** - Move claude binary to `/usr/local/bin` for global access
+
+### Docs
+- **CLAUDE.md Update** - Version bump to v0.22.x, added Docker commands, documented new directories
+
+---
+
 ## [v0.22.1] - 2026-03-08
 
 ### 🔧 Patch Release

@@ -20,10 +20,10 @@
 
 ### 必需环境
 
-| 工具 | 版本 | 检查命令 |
-|------|------|----------|
-| Docker | 20.10+ | `docker --version` |
-| Docker Compose | v2+ | `docker compose version` |
+| 工具           | 版本   | 检查命令                 |
+| -------------- | ------ | ------------------------ |
+| Docker         | 20.10+ | `docker --version`       |
+| Docker Compose | v2+    | `docker compose version` |
 
 ### 获取 Slack 凭证
 
@@ -85,11 +85,11 @@
 
 **每个 Bot 需要获取的 3 个凭证：**
 
-| 凭证 | 格式 | 来源 |
-|------|------|------|
-| `BOT_USER_ID` | `UXXXXXXXXXX` | App Home 页面 |
-| `BOT_TOKEN` | `xoxb-...` | OAuth & Permissions 页面 |
-| `APP_TOKEN` | `xapp-...` | Socket Mode 页面 |
+| 凭证          | 格式          | 来源                     |
+| ------------- | ------------- | ------------------------ |
+| `BOT_USER_ID` | `UXXXXXXXXXX` | App Home 页面            |
+| `BOT_TOKEN`   | `xoxb-...`    | OAuth & Permissions 页面 |
+| `APP_TOKEN`   | `xapp-...`    | Socket Mode 页面         |
 
 ---
 
@@ -233,12 +233,12 @@ services:
 
 ### ⚠️ 关键隔离规则
 
-| 隔离项 | 原因 | 配置位置 |
-|--------|------|----------|
-| **projects 目录** | 每个 Bot 有独立工作空间 | volumes 中的 `.slack/BOT_xxx` |
-| **gitconfig** | 每个 Bot 有独立 Git 身份 | volumes 中的 `.gitconfig-xxx` |
-| **端口** | 避免端口冲突 | ports 中的 `18080/18081` |
-| **env_file** | 每个 Bot 有独立凭证 | `.env` / `.env.secondary` |
+| 隔离项            | 原因                     | 配置位置                      |
+| ----------------- | ------------------------ | ----------------------------- |
+| **projects 目录** | 每个 Bot 有独立工作空间  | volumes 中的 `.slack/BOT_xxx` |
+| **gitconfig**     | 每个 Bot 有独立 Git 身份 | volumes 中的 `.gitconfig-xxx` |
+| **端口**          | 避免端口冲突             | ports 中的 `18080/18081`      |
+| **env_file**      | 每个 Bot 有独立凭证      | `.env` / `.env.secondary`     |
 
 **❌ 错误示例（会导致冲突）：**
 
@@ -426,12 +426,12 @@ docker compose logs hotplex | tail -50
 # 3. 常见原因
 ```
 
-| 错误信息 | 原因 | 解决方案 |
-|----------|------|----------|
-| `invalid bot_user_id` | `HOTPLEX_SLACK_BOT_USER_ID` 错误 | 检查 User ID 格式 |
-| `invalid_auth` | Token 无效 | 重新安装 App 获取新 Token |
-| `missing scope` | 权限不足 | 添加所需 OAuth Scope |
-| `connection refused` | Socket Mode 未启用 | 启用 Socket Mode 并生成 App Token |
+| 错误信息              | 原因                             | 解决方案                          |
+| --------------------- | -------------------------------- | --------------------------------- |
+| `invalid bot_user_id` | `HOTPLEX_SLACK_BOT_USER_ID` 错误 | 检查 User ID 格式                 |
+| `invalid_auth`        | Token 无效                       | 重新安装 App 获取新 Token         |
+| `missing scope`       | 权限不足                         | 添加所需 OAuth Scope              |
+| `connection refused`  | Socket Mode 未启用               | 启用 Socket Mode 并生成 App Token |
 
 ### Q2: 多 Bot 消息混乱
 
@@ -543,7 +543,7 @@ ports:
 - [Docker 部署指南](docker-deployment_zh.md) - 单 Bot 部署
 - [生产环境指南](production-guide_zh.md) - 生产最佳实践
 - [Slack 新手指南](chatapps/slack-setup-beginner_zh.md) - Slack 配置详解
-- [CONFIGURATION_zh.md](CONFIGURATION_zh.md) - 完整配置参考
+- [configuration_zh.md](configuration_zh.md) - 完整配置参考
 
 ---
 

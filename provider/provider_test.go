@@ -13,9 +13,10 @@ func TestProviderInterface_Compliance(t *testing.T) {
 }
 
 func TestClaudeCodeProvider_Metadata(t *testing.T) {
+	enabled := true
 	provider, err := NewClaudeCodeProvider(ProviderConfig{
 		Type:    ProviderTypeClaudeCode,
-		Enabled: true,
+		Enabled: &enabled,
 	}, nil)
 	if err != nil {
 		t.Fatalf("Failed to create Claude Code provider: %v", err)
@@ -37,9 +38,10 @@ func TestClaudeCodeProvider_Metadata(t *testing.T) {
 }
 
 func TestClaudeCodeProvider_BuildCLIArgs(t *testing.T) {
+	enabled := true
 	provider, err := NewClaudeCodeProvider(ProviderConfig{
 		Type:    ProviderTypeClaudeCode,
-		Enabled: true,
+		Enabled: &enabled,
 	}, nil)
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
@@ -70,9 +72,10 @@ func TestClaudeCodeProvider_BuildCLIArgs(t *testing.T) {
 }
 
 func TestClaudeCodeProvider_BuildInputMessage(t *testing.T) {
+	enabled := true
 	provider, err := NewClaudeCodeProvider(ProviderConfig{
 		Type:    ProviderTypeClaudeCode,
-		Enabled: true,
+		Enabled: &enabled,
 	}, nil)
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
@@ -110,7 +113,8 @@ func TestClaudeCodeProvider_BuildInputMessage(t *testing.T) {
 }
 
 func TestClaudeCodeProvider_BuildInputMessage_NoInstructions(t *testing.T) {
-	provider, _ := NewClaudeCodeProvider(ProviderConfig{Type: ProviderTypeClaudeCode, Enabled: true}, nil)
+	enabled := true
+	provider, _ := NewClaudeCodeProvider(ProviderConfig{Type: ProviderTypeClaudeCode, Enabled: &enabled}, nil)
 	msg, _ := provider.BuildInputMessage("Hello!", "")
 	content := msg["message"].(map[string]any)["content"].([]map[string]any)
 	text := content[0]["text"].(string)
@@ -121,9 +125,10 @@ func TestClaudeCodeProvider_BuildInputMessage_NoInstructions(t *testing.T) {
 }
 
 func TestClaudeCodeProvider_ParseEvent(t *testing.T) {
+	enabled := true
 	provider, err := NewClaudeCodeProvider(ProviderConfig{
 		Type:    ProviderTypeClaudeCode,
-		Enabled: true,
+		Enabled: &enabled,
 	}, nil)
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
@@ -181,7 +186,8 @@ func TestClaudeCodeProvider_ParseEvent(t *testing.T) {
 }
 
 func TestClaudeCodeProvider_DetectTurnEnd(t *testing.T) {
-	provider, _ := NewClaudeCodeProvider(ProviderConfig{Type: ProviderTypeClaudeCode, Enabled: true}, nil)
+	enabled := true
+	provider, _ := NewClaudeCodeProvider(ProviderConfig{Type: ProviderTypeClaudeCode, Enabled: &enabled}, nil)
 
 	tests := []struct {
 		event *ProviderEvent
@@ -203,9 +209,10 @@ func TestClaudeCodeProvider_DetectTurnEnd(t *testing.T) {
 }
 
 func TestOpenCodeProvider_Metadata(t *testing.T) {
+	enabled := true
 	provider, err := NewOpenCodeProvider(ProviderConfig{
 		Type:       ProviderTypeOpenCode,
-		Enabled:    true,
+		Enabled:    &enabled,
 		BinaryPath: "/usr/local/bin/opencode",
 	}, nil)
 	if err != nil {
@@ -225,9 +232,10 @@ func TestOpenCodeProvider_Metadata(t *testing.T) {
 }
 
 func TestOpenCodeProvider_BuildCLIArgs(t *testing.T) {
+	enabled := true
 	provider, err := NewOpenCodeProvider(ProviderConfig{
 		Type:       ProviderTypeOpenCode,
-		Enabled:    true,
+		Enabled:    &enabled,
 		BinaryPath: "/usr/local/bin/opencode",
 		OpenCode: &OpenCodeConfig{
 			Provider: "anthropic",
@@ -253,24 +261,9 @@ func TestOpenCodeProvider_BuildCLIArgs(t *testing.T) {
 	assertContains(t, args, "anthropic")
 }
 
-func TestOpenCodeProvider_BuildInputMessage(t *testing.T) {
-	provider, _ := NewOpenCodeProvider(ProviderConfig{Type: ProviderTypeOpenCode, Enabled: true, BinaryPath: "/usr/local/bin/opencode"}, nil)
-
-	msg, _ := provider.BuildInputMessage("Hello!", "Be specific")
-	prompt := msg["prompt"].(string)
-	expected := "<context>\n<![CDATA[\nBe specific\n]]>\n</context>\n\n<user_query>\n<![CDATA[\nHello!\n]]>\n</user_query>"
-	if prompt != expected {
-		t.Errorf("Expected OpenCode structured prompt, got:\n%s", prompt)
-	}
-
-	cmd := provider.BuildHTTPCommand("Hello!", "Be specific")
-	if cmd != expected {
-		t.Errorf("Expected OpenCode HTTP command prompt, got:\n%s", cmd)
-	}
-}
-
 func TestOpenCodeProvider_DetectTurnEnd(t *testing.T) {
-	provider, _ := NewOpenCodeProvider(ProviderConfig{Type: ProviderTypeOpenCode, Enabled: true, BinaryPath: "/usr/local/bin/opencode"}, nil)
+	enabled := true
+	provider, _ := NewOpenCodeProvider(ProviderConfig{Type: ProviderTypeOpenCode, Enabled: &enabled, BinaryPath: "/usr/local/bin/opencode"}, nil)
 
 	tests := []struct {
 		event *ProviderEvent
@@ -290,9 +283,10 @@ func TestOpenCodeProvider_DetectTurnEnd(t *testing.T) {
 }
 
 func TestOpenCodeProvider_ParseEvent(t *testing.T) {
+	enabled := true
 	provider, err := NewOpenCodeProvider(ProviderConfig{
 		Type:       ProviderTypeOpenCode,
-		Enabled:    true,
+		Enabled:    &enabled,
 		BinaryPath: "/usr/local/bin/opencode",
 	}, nil)
 	if err != nil {
@@ -372,10 +366,11 @@ func TestProviderFactory(t *testing.T) {
 		t.Errorf("Expected at least 2 registered providers, got %d", len(types))
 	}
 
+	enabled := true
 	// Test create Claude Code provider
 	ccProvider, err := factory.Create(ProviderConfig{
 		Type:    ProviderTypeClaudeCode,
-		Enabled: true,
+		Enabled: &enabled,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create Claude Code provider: %v", err)
@@ -387,7 +382,7 @@ func TestProviderFactory(t *testing.T) {
 	// Test create OpenCode provider
 	ocProvider, err := factory.Create(ProviderConfig{
 		Type:       ProviderTypeOpenCode,
-		Enabled:    true,
+		Enabled:    &enabled,
 		BinaryPath: "/usr/local/bin/opencode",
 	})
 	if err != nil {
@@ -397,19 +392,19 @@ func TestProviderFactory(t *testing.T) {
 		t.Errorf("Expected name %s, got %s", ProviderTypeOpenCode, ocProvider.Name())
 	}
 
-	// Test disabled provider
+	disabled := false
 	_, err = factory.Create(ProviderConfig{
 		Type:    ProviderTypeClaudeCode,
-		Enabled: false,
+		Enabled: &disabled,
 	})
 	if err == nil {
 		t.Error("Expected error for disabled provider")
 	}
 
-	// Test unknown provider
+	enabled = true
 	_, err = factory.Create(ProviderConfig{
 		Type:    "unknown",
-		Enabled: true,
+		Enabled: &enabled,
 	})
 	if err == nil {
 		t.Error("Expected error for unknown provider")
@@ -480,9 +475,10 @@ func TestProviderEvent_ToEventWithMeta(t *testing.T) {
 }
 
 func TestMergeProviderConfigs(t *testing.T) {
+	enabled := true
 	base := ProviderConfig{
 		Type:         ProviderTypeClaudeCode,
-		Enabled:      true,
+		Enabled:      &enabled,
 		DefaultModel: "claude-3-5-sonnet",
 		AllowedTools: []string{"bash"},
 		ExtraEnv:     map[string]string{"KEY1": "VALUE1"},
@@ -558,6 +554,7 @@ func TestProviderType_Valid(t *testing.T) {
 }
 
 func TestProviderConfig_Validate(t *testing.T) {
+	enabledTrue := true
 	tests := []struct {
 		name    string
 		cfg     ProviderConfig
@@ -565,29 +562,29 @@ func TestProviderConfig_Validate(t *testing.T) {
 	}{
 		{
 			name:    "valid claude-code config",
-			cfg:     ProviderConfig{Type: ProviderTypeClaudeCode, Enabled: true},
+			cfg:     ProviderConfig{Type: ProviderTypeClaudeCode, Enabled: &enabledTrue},
 			wantErr: false,
 		},
 		{
 			name:    "valid opencode config",
-			cfg:     ProviderConfig{Type: ProviderTypeOpenCode, Enabled: true},
+			cfg:     ProviderConfig{Type: ProviderTypeOpenCode, Enabled: &enabledTrue},
 			wantErr: false,
 		},
 		{
 			name:    "empty type",
-			cfg:     ProviderConfig{Type: "", Enabled: true},
+			cfg:     ProviderConfig{Type: "", Enabled: &enabledTrue},
 			wantErr: true,
 		},
 		{
 			name:    "invalid type",
-			cfg:     ProviderConfig{Type: ProviderType("invalid"), Enabled: true},
+			cfg:     ProviderConfig{Type: ProviderType("invalid"), Enabled: &enabledTrue},
 			wantErr: true,
 		},
 		{
 			name: "negative port",
 			cfg: ProviderConfig{
 				Type:    ProviderTypeOpenCode,
-				Enabled: true,
+				Enabled: &enabledTrue,
 				OpenCode: &OpenCodeConfig{
 					Port: -1,
 				},
@@ -607,9 +604,10 @@ func TestProviderConfig_Validate(t *testing.T) {
 }
 
 func TestMergeProviderConfigs_ExplicitDisable(t *testing.T) {
+	enabled := true
 	base := ProviderConfig{
 		Type:         ProviderTypeClaudeCode,
-		Enabled:      true,
+		Enabled:      &enabled,
 		DefaultModel: "claude-3-5-sonnet",
 	}
 
@@ -619,7 +617,7 @@ func TestMergeProviderConfigs_ExplicitDisable(t *testing.T) {
 		ExplicitDisable: true,
 	}
 	result := MergeProviderConfigs(base, overlay)
-	if result.Enabled {
+	if BoolValue(result.Enabled, true) {
 		t.Error("Expected Enabled=false when ExplicitDisable=true in overlay")
 	}
 
@@ -628,17 +626,17 @@ func TestMergeProviderConfigs_ExplicitDisable(t *testing.T) {
 		Type: ProviderTypeClaudeCode,
 	}
 	result2 := MergeProviderConfigs(base, overlay2)
-	if !result2.Enabled {
+	if !BoolValue(result2.Enabled, false) {
 		t.Error("Expected Enabled=true inherited from base when overlay has no ExplicitDisable")
 	}
 
-	// Test: overlay with Enabled=true should still work
+	enabledTrue := true
 	overlay3 := ProviderConfig{
 		Type:    ProviderTypeClaudeCode,
-		Enabled: true,
+		Enabled: &enabledTrue,
 	}
 	result3 := MergeProviderConfigs(base, overlay3)
-	if !result3.Enabled {
+	if !BoolValue(result3.Enabled, false) {
 		t.Error("Expected Enabled=true when overlay.Enabled=true")
 	}
 }

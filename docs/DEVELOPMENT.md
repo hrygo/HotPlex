@@ -3,7 +3,7 @@
 > This guide covers local development setup, testing, and common workflows.
 > For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 >
-> **[中文版](DEVELOPMENT_zh.md)** | **English**
+> **[中文版](development_zh.md)** | **English**
 
 ## Table of Contents
 
@@ -22,19 +22,19 @@
 
 ### Required
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Go | 1.25+ | Primary language |
-| Make | Any | Build automation |
-| Git | 2.x | Version control |
+| Tool | Version | Purpose          |
+| ---- | ------- | ---------------- |
+| Go   | 1.25+   | Primary language |
+| Make | Any     | Build automation |
+| Git  | 2.x     | Version control  |
 
 ### Optional
 
-| Tool | Purpose |
-|------|---------|
+| Tool          | Purpose          |
+| ------------- | ---------------- |
 | golangci-lint | Advanced linting |
-| Docker | Container builds |
-| claude CLI | Local AI testing |
+| Docker        | Container builds |
+| claude CLI    | Local AI testing |
 
 ### Environment Setup
 
@@ -304,12 +304,12 @@ tail -f .logs/daemon.log
 
 ### Common Issues
 
-| Issue | Solution |
-|-------|----------|
+| Issue                       | Solution                                            |
+| --------------------------- | --------------------------------------------------- |
 | "command not found: claude" | Install Claude CLI or set `HOTPLEX_PROVIDER_BINARY` |
-| "permission denied" | Check `work_dir` permissions |
-| Session not persisting | Check `idle_timeout` setting |
-| Slack not responding | Verify `HOTPLEX_SLACK_BOT_USER_ID` is correct |
+| "permission denied"         | Check `work_dir` permissions                        |
+| Session not persisting      | Check `idle_timeout` setting                        |
+| Slack not responding        | Verify `HOTPLEX_SLACK_BOT_USER_ID` is correct       |
 
 ---
 
@@ -395,6 +395,6 @@ make lint test
 ## Related Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
-- [CONFIGURATION.md](CONFIGURATION.md) - Configuration reference
-- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
+- [configuration.md](configuration.md) - Configuration reference
+- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guidelines
 - [sdk-guide.md](sdk-guide.md) - SDK developer guide

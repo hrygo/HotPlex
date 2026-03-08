@@ -12,11 +12,85 @@ import (
 	"time"
 )
 
+// PtrBool returns a pointer to the given bool value.
+func PtrBool(b bool) *bool {
+	return &b
+}
+
+// BoolValue returns the value of a bool pointer if not nil, otherwise returns defaultVal.
+func BoolValue(pb *bool, defaultVal bool) bool {
+	if pb == nil {
+		return defaultVal
+	}
+	return *pb
+}
+
+// FeaturesConfig contains feature toggles for UI/UX experience.
+type FeaturesConfig struct {
+	Chunking  ChunkingConfig
+	Threading ThreadingConfig
+	RateLimit RateLimitConfig
+	Markdown  MarkdownConfig
+}
+
+type ChunkingConfig struct {
+	Enabled  *bool
+	MaxChars int
+}
+
+type ThreadingConfig struct {
+	Enabled *bool
+}
+
+type RateLimitConfig struct {
+	Enabled     *bool
+	MaxAttempts int
+	BaseDelayMs int
+	MaxDelayMs  int
+}
+
+type MarkdownConfig struct {
+	Enabled *bool
+}
+
 // pairingState holds runtime pairing state with thread-safe access
 type pairingState struct {
 	mu    sync.RWMutex
 	once  sync.Once
 	users map[string]bool
+}
+
+// OwnerPolicy defines who can interact with the bot.
+// owner_only: Only primary owner can interact
+// trusted: Primary owner + trusted users can interact
+// public: Anyone can interact
+type OwnerPolicy string
+
+const (
+	OwnerPolicyOwnerOnly OwnerPolicy = "owner_only"
+	OwnerPolicyTrusted   OwnerPolicy = "trusted"
+	OwnerPolicyPublic    OwnerPolicy = "public"
+)
+
+// OwnerConfig defines bot ownership and access control.
+// See docs/design/bot-behavior-spec.md for detailed behavior specification.
+type OwnerConfig struct {
+	// Primary is the bot owner's Slack User ID (e.g., "U1234567890")
+	Primary string `yaml:"primary"`
+	// Trusted is a list of trusted user IDs who can also command the bot
+	Trusted []string `yaml:"trusted_users"`
+	// Policy defines access control: owner_only, trusted, or public
+	Policy OwnerPolicy `yaml:"policy"`
+}
+
+// ThreadOwnershipConfig defines thread ownership tracking behavior.
+type ThreadOwnershipConfig struct {
+	// Enabled enables thread ownership tracking
+	Enabled *bool `yaml:"enabled"`
+	// TTL is the time-to-live for thread ownership (default: 24h)
+	TTL time.Duration `yaml:"ttl"`
+	// Persist enables persistence of ownership state (default: false)
+	Persist *bool `yaml:"persist"`
 }
 
 type Config struct {
@@ -48,6 +122,19 @@ type Config struct {
 	BlockedUsers []string
 	// BotUserID: Bot's user ID (e.g., "U1234567890") - used for mention detection
 	BotUserID string
+
+	// Owner defines bot ownership and access control (Phase 1: Bot Behavior Spec)
+	Owner *OwnerConfig `yaml:"owner"`
+
+	// ThreadOwnership defines thread ownership tracking (Phase 1: Bot Behavior Spec)
+	ThreadOwnership *ThreadOwnershipConfig `yaml:"thread_ownership"`
+
+	// VerifySignature enables Slack request signature verification.
+	// Default: true
+	VerifySignature *bool
+
+	// Features contains UI/UX feature toggles
+	Features FeaturesConfig `yaml:"features"`
 
 	// SlashCommandRateLimit: Maximum requests per second per user for slash commands
 	// Default: 10.0 requests/second
@@ -81,7 +168,7 @@ type Config struct {
 //	}
 type StorageConfig struct {
 	// Enabled enables message storage
-	Enabled bool
+	Enabled *bool
 	// Type: "memory" (default), "sqlite", "postgresql"
 	Type string
 	// SQLitePath: Path to SQLite database file (only for type="sqlite")
@@ -90,7 +177,7 @@ type StorageConfig struct {
 	// Format: "postgres://user:pass@host:port/dbname"
 	PostgreSQLURL string
 	// StreamEnabled enables streaming message buffering
-	StreamEnabled bool
+	StreamEnabled *bool
 	// StreamTimeout is the timeout for streaming buffer (default 5min)
 	StreamTimeout time.Duration
 }
@@ -304,4 +391,78 @@ func (c *Config) GetBroadcastResponse(ctx context.Context, userMessage string) s
 		return DefaultBroadcastResponse
 	}
 	return resp
+}
+
+// --- Owner Policy Methods (Phase 1: Bot Behavior Spec) ---
+
+// IsOwner checks if the given user ID is the primary owner.
+func (c *Config) IsOwner(userID string) bool {
+	if c.Owner == nil {
+		return false
+	}
+	return c.Owner.Primary == userID
+}
+
+// IsTrusted checks if the given user ID is a trusted user.
+func (c *Config) IsTrusted(userID string) bool {
+	if c.Owner == nil {
+		return false
+	}
+	return slices.Contains(c.Owner.Trusted, userID)
+}
+
+// CanRespond checks if the user can trigger bot response based on owner policy.
+// Returns true if:
+// - Policy is "public" (anyone can interact)
+// - User is the primary owner
+// - Policy is "trusted" and user is in trusted list
+func (c *Config) CanRespond(userID string) bool {
+	// If no owner config, default to public access
+	if c.Owner == nil {
+		return true
+	}
+
+	// Primary owner always has access
+	if c.Owner.Primary == userID {
+		return true
+	}
+
+	policy := c.GetOwnerPolicy()
+	switch policy {
+	case OwnerPolicyPublic:
+		return true
+	case OwnerPolicyTrusted:
+		return slices.Contains(c.Owner.Trusted, userID)
+	case OwnerPolicyOwnerOnly:
+		return false
+	default:
+		// Unknown policy - fail secure: treat as owner_only
+		// This prevents accidental public access due to config typos
+		return false
+	}
+}
+
+// GetOwnerPolicy returns the configured owner policy, defaults to public.
+func (c *Config) GetOwnerPolicy() OwnerPolicy {
+	if c.Owner == nil || c.Owner.Policy == "" {
+		return OwnerPolicyPublic
+	}
+	return c.Owner.Policy
+}
+
+// GetThreadOwnershipTTL returns the thread ownership TTL, defaults to 24h.
+func (c *Config) GetThreadOwnershipTTL() time.Duration {
+	if c.ThreadOwnership == nil || c.ThreadOwnership.TTL <= 0 {
+		return 24 * time.Hour
+	}
+	return c.ThreadOwnership.TTL
+}
+
+// IsThreadOwnershipEnabled returns true if thread ownership tracking is enabled.
+func (c *Config) IsThreadOwnershipEnabled() bool {
+	if c.ThreadOwnership == nil {
+		return true // Default to true if missing from config
+	}
+	// Explicitly handle Enabled pointer
+	return BoolValue(c.ThreadOwnership.Enabled, true)
 }

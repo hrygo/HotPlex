@@ -4,7 +4,7 @@
 > Just follow these click-by-click steps and you won't miss any manual configurations!
 >
 > If you need advanced features, full parameters documentation, granular permission controls, or details of the App Manifest JSON, please refer to:
-> 👉 [Slack App Core Configuration Manual](./chatapps/chatapps-slack-manual.md)
+> 👉 [Slack App Core Configuration Manual](./chatapps-slack-manual.md)
 
 ---
 
@@ -32,7 +32,7 @@ We don't need to manually configure the avatar, name, and permissions one by one
 5. **Paste the Magic Spell**:
    - You will see a text box containing some boilerplate code (ensure the "JSON" tab is selected at the top).
    - **Delete everything** inside the text box so it's completely empty.
-   - **Go to 👉 [Here (App Manifest section in the Advanced Manual)](./chatapps/chatapps-slack-manual.md#⚡-quick-integration-app-manifest) and copy the entire JSON code block. Paste it exactly as is into your empty box!**
+   - **Go to 👉 [Here (App Manifest section in the Advanced Manual)](./chatapps-slack-manual.md#⚡-app-manifest) and copy the entire JSON code block. Paste it exactly as is into your empty box!**
    - Click the **"Next"** button at the bottom.
    - Review the summary, then click **"Create"**.
    - 🎉 **Congratulations on finishing Step 1! The bot account is successfully created in the backend!**
@@ -120,6 +120,6 @@ HOTPLEX_SLACK_APP_TOKEN=xapp-paste_your_copied_secret_here
 > - How to deploy the shiny new 2026 Admin Dashboard?
 > - **How to customize AI's identity and workflow?** ⚠️ This is important!
 >
-> When you're ready, consult the engineering bible 👉 [Slack App Core Configuration Manual](./chatapps/chatapps-slack-manual.md).
+> When you're ready, consult the engineering bible 👉 [Slack App Core Configuration Manual](./chatapps-slack-manual.md).
 >
 > 🔔 **Reminder**: The `system_prompt` in `chatapps/configs/slack.yaml` is an example template. You MUST customize it for your project's identity, Git workflow, and output requirements!

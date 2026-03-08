@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,10 @@ import (
 	"github.com/hrygo/hotplex/internal/panicx"
 	"github.com/hrygo/hotplex/internal/sys"
 )
+
+// SessionLogDir is the directory for session log files.
+// Defaults to ~/.hotplex/logs/
+var SessionLogDir = filepath.Join(os.Getenv("HOME"), ".hotplex", "logs")
 
 // Session represents a persistent, hot-multiplexed instance of an AI CLI agent.
 // It manages the underlying OS process group, handles streaming I/O via full-duplex pipes,
@@ -44,8 +50,9 @@ type Session struct {
 
 	callback   Callback
 	logger     *slog.Logger
-	ext        any  // Extension payload for consumer packages
-	IsResuming bool // True if session was resumed from persistent marker
+	logFile    *os.File // Session-specific log file for stderr persistence
+	ext        any      // Extension payload for consumer packages
+	IsResuming bool     // True if session was resumed from persistent marker
 }
 
 // IsAlive checks if the process is still running.
@@ -186,6 +193,12 @@ func (s *Session) close() {
 		_ = s.stderr.Close()
 	}
 
+	// Close session log file
+	if s.logFile != nil {
+		_ = s.logFile.Close()
+		s.logFile = nil
+	}
+
 	if !s.closed {
 		s.closed = true
 		close(s.statusChange)
@@ -293,13 +306,26 @@ func (s *Session) ReadStderr() {
 		if line == "" {
 			continue
 		}
+		// Structured logging with session context
 		if s.logger != nil {
-			s.logger.Warn("Session stderr", "stderr", line)
+			s.logger.Warn("session_stderr",
+				"session_id", s.ID,
+				"provider_session_id", s.ProviderSessionID,
+				"workdir", s.Config.WorkDir,
+				"content", line)
+		}
+		// Write to session log file for persistence
+		if s.logFile != nil {
+			if _, err := fmt.Fprintf(s.logFile, "[%s] %s\n", time.Now().Format(time.RFC3339), line); err != nil && s.logger != nil {
+				s.logger.Warn("Failed to write to session log", "error", err)
+			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil && s.logger != nil && !isExpectedCloseError(err) {
-		s.logger.Error("Session stderr scanner error", "error", err)
+		s.logger.Error("Session stderr scanner error",
+			"session_id", s.ID,
+			"error", err)
 	}
 }
 
@@ -312,4 +338,28 @@ func NewTestSession(id string, status SessionStatus) *Session {
 		Status:            status,
 		statusChange:      make(chan SessionStatus, 10),
 	}
+}
+
+// OpenLogFile opens a log file for this session in SessionLogDir.
+func (s *Session) OpenLogFile() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.logFile != nil {
+		return nil
+	}
+	if err := os.MkdirAll(SessionLogDir, 0755); err != nil {
+		return fmt.Errorf("create log dir: %w", err)
+	}
+	logPath := filepath.Join(SessionLogDir, s.ID+".log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+	s.logFile = f
+	return nil
+}
+
+// GetLogPath returns the path to the session log file.
+func (s *Session) GetLogPath() string {
+	return filepath.Join(SessionLogDir, s.ID+".log")
 }

@@ -307,9 +307,9 @@ func (rt *RequestTimer) Record(inputTokens, outputTokens int64, cost float64, er
 
 // MetricsClient wraps an LLM client with metrics collection.
 type MetricsClient struct {
-	client   LLMClient
-	metrics  *MetricsCollector
-	model    string
+	client  LLMClient
+	metrics *MetricsCollector
+	model   string
 }
 
 // Client returns the underlying client for component extraction.

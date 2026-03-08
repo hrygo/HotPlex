@@ -10,14 +10,15 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/chatapps/command"
 	"github.com/hrygo/hotplex/chatapps/session"
 	"github.com/hrygo/hotplex/engine"
+	"github.com/hrygo/hotplex/internal/sys"
 	"github.com/hrygo/hotplex/plugins/storage"
 	"github.com/hrygo/hotplex/types"
-
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 )
@@ -46,6 +47,13 @@ type Adapter struct {
 	// Session manager for consistent session ID generation
 	sessionMgr session.SessionManager
 
+	// Thread ownership tracker (Phase 1: Bot Behavior Spec)
+	ownershipTracker *ThreadOwnershipTracker
+
+	// Background cleanup for thread ownership
+	ownershipCleanupCtx    context.Context
+	ownershipCleanupCancel context.CancelFunc
+
 	channelToTeam sync.Map // Map channelID to TeamID for streaming functions
 	channelToUser sync.Map // Map channelID to UserID for streaming functions
 
@@ -63,9 +71,18 @@ type Adapter struct {
 var _ base.StatusProvider = (*Adapter)(nil)
 
 func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption) *Adapter {
-	// Validate config
+	// Validate config - fail fast on invalid configuration
 	if err := config.Validate(); err != nil {
 		logger.Error("Invalid Slack config", "error", err)
+		// Return minimal but valid adapter to prevent nil pointer panics
+		return &Adapter{
+			Adapter:     base.NewAdapter("slack", base.Config{}, logger),
+			config:      config,
+			webhook:     base.NewWebhookRunner(logger),
+			sender:      base.NewSenderWithMutex(),
+			rateLimiter: NewSlashCommandRateLimiterWithConfig(config.SlashCommandRateLimit, rateBurst),
+			cmdRegistry: command.NewRegistry(),
+		}
 	}
 
 	// Initialize base adapter fields
@@ -77,7 +94,7 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 		sender:           base.NewSenderWithMutex(),
 		webhook:          base.NewWebhookRunner(logger),
 		rateLimiter:      NewSlashCommandRateLimiterWithConfig(config.SlashCommandRateLimit, rateBurst),
-		messageBuilder:   NewMessageBuilder(), // Converts base.ChatMessage to Slack blocks using official SDK
+		messageBuilder:   NewMessageBuilder(config), // Converts base.ChatMessage to Slack blocks using official SDK
 		cmdRegistry:      command.NewRegistry(),
 	}
 
@@ -121,14 +138,32 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 		a.sender.SetSender(a.defaultSender)
 	}
 
-	// Initialize message storage plugin if enabled
-	if config.Storage != nil && config.Storage.Enabled {
+	// Initialize message storage plugin if enabled (default: false)
+	storageEnabled := config.Storage != nil && BoolValue(config.Storage.Enabled, false)
+	if storageEnabled {
 		if err := a.initStoragePlugin(config.Storage, logger); err != nil {
 			logger.Error("Failed to initialize storage plugin, continuing without persistence",
-				"error", err, "type", config.Storage.Type)
+				"error", err)
 		} else {
-			logger.Info("Message storage plugin initialized", "type", config.Storage.Type)
+			storageType := "memory"
+			if config.Storage != nil {
+				storageType = config.Storage.Type
+			}
+			logger.Info("Message storage plugin initialized", "type", storageType)
 		}
+	}
+
+	// Initialize thread ownership tracker if enabled (Phase 1: Bot Behavior Spec)
+	if config.IsThreadOwnershipEnabled() {
+		a.ownershipTracker = NewThreadOwnershipTracker(config.GetThreadOwnershipTTL(), logger)
+		a.ownershipCleanupCtx, a.ownershipCleanupCancel = context.WithCancel(context.Background())
+		persist := false
+		if config.ThreadOwnership != nil && config.ThreadOwnership.Persist != nil {
+			persist = *config.ThreadOwnership.Persist
+		}
+		logger.Info("Thread ownership tracker initialized",
+			"ttl", config.GetThreadOwnershipTTL(),
+			"persist", persist)
 	}
 
 	return a
@@ -150,16 +185,21 @@ func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) err
 	registry := storage.GlobalRegistry()
 	pluginConfig := storage.PluginConfig{}
 
+	storageType := "memory"
+	if cfg != nil && cfg.Type != "" {
+		storageType = cfg.Type
+	}
+
 	// Set storage-specific config
-	switch cfg.Type {
+	switch storageType {
 	case "sqlite":
-		if cfg.SQLitePath != "" {
-			pluginConfig["path"] = cfg.SQLitePath
+		if cfg != nil && cfg.SQLitePath != "" {
+			pluginConfig["path"] = sys.ExpandPath(cfg.SQLitePath)
 		} else {
 			pluginConfig["path"] = "data/slack_messages.db"
 		}
 	case "postgresql":
-		if cfg.PostgreSQLURL != "" {
+		if cfg != nil && cfg.PostgreSQLURL != "" {
 			pluginConfig["url"] = cfg.PostgreSQLURL
 		} else {
 			return fmt.Errorf("postgresql storage requires PostgreSQLURL config")
@@ -167,16 +207,16 @@ func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) err
 	case "memory":
 		// No additional config needed
 	default:
-		logger.Warn("Unknown storage type, falling back to memory", "type", cfg.Type)
-		cfg.Type = "memory"
+		logger.Warn("Unknown storage type, falling back to memory", "type", storageType)
+		storageType = "memory"
 	}
 
-	store, err := registry.Get(cfg.Type, pluginConfig)
+	store, err := registry.Get(storageType, pluginConfig)
 	if err != nil {
 		return err
 	}
 	if store == nil {
-		logger.Warn("Storage plugin not found, using memory", "type", cfg.Type)
+		logger.Warn("Storage plugin not found, using memory", "type", storageType)
 		store, _ = registry.Get("memory", nil)
 	}
 
@@ -189,11 +229,18 @@ func (a *Adapter) initStoragePlugin(cfg *StorageConfig, logger *slog.Logger) err
 	sessionMgr := session.NewSessionManager("hotplex")
 
 	// Create message store plugin
+	var streamEnabled *bool
+	var streamTimeout time.Duration
+	if cfg != nil {
+		streamEnabled = cfg.StreamEnabled
+		streamTimeout = cfg.StreamTimeout
+	}
+
 	pluginCfg := base.MessageStorePluginConfig{
 		Store:          store,
 		SessionManager: sessionMgr,
-		StreamEnabled:  cfg.StreamEnabled,
-		StreamTimeout:  cfg.StreamTimeout,
+		StreamEnabled:  BoolValue(streamEnabled, false),
+		StreamTimeout:  streamTimeout,
 		Logger:         logger,
 	}
 
@@ -234,6 +281,16 @@ func (a *Adapter) registerCommands() {
 
 // Stop waits for pending webhook goroutines to complete
 func (a *Adapter) Stop() error {
+	// Stop thread ownership tracker first (waits for cleanup goroutine)
+	if a.ownershipTracker != nil {
+		a.ownershipTracker.Stop()
+	}
+
+	// Stop ownership cleanup context (legacy, kept for compatibility)
+	if a.ownershipCleanupCancel != nil {
+		a.ownershipCleanupCancel()
+	}
+
 	// Stop rate limiter cleanup goroutine
 	if a.rateLimiter != nil {
 		a.rateLimiter.Stop()
@@ -246,7 +303,10 @@ func (a *Adapter) Stop() error {
 		}
 	}
 
-	a.webhook.Stop()
+	// Stop webhook runner (may be nil if adapter init failed)
+	if a.webhook != nil {
+		a.webhook.Stop()
+	}
 	return a.Adapter.Stop()
 }
 
@@ -459,7 +519,7 @@ func (a *Adapter) DeleteMessage(ctx context.Context, channelID, messageTS string
 
 // UpdateMessage implements base.MessageOperations interface
 func (a *Adapter) UpdateMessage(ctx context.Context, channelID, messageTS string, msg *base.ChatMessage) error {
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(a.config)
 	blocks := builder.Build(msg)
 	return a.UpdateMessageSDK(ctx, channelID, messageTS, blocks, msg.Content)
 }
@@ -472,3 +532,133 @@ func (a *Adapter) SendThreadReply(ctx context.Context, channelID, threadTS, text
 
 // Note: SessionOperations methods (GetSession, FindSessionByUserAndChannel)
 // are inherited from base.Adapter and should not be overridden here
+
+// --- Thread Ownership Methods (Phase 1: Bot Behavior Spec) ---
+
+// GetOwnershipTracker returns the thread ownership tracker.
+// Returns nil if thread ownership is not enabled.
+func (a *Adapter) GetOwnershipTracker() *ThreadOwnershipTracker {
+	return a.ownershipTracker
+}
+
+// ShouldRespondToMessage determines if this bot should respond to a message.
+// This implements the unified decision flow from docs/design/bot-behavior-spec.md.
+//
+// Decision Flow:
+//  1. DM → always treat as @mention (owner policy still applies)
+//  2. @mentioned → check owner policy, claim ownership, respond
+//  3. Own thread → update last active, respond
+//  4. Not own thread → silent
+func (a *Adapter) ShouldRespondToMessage(channelType, channelID, threadTS, text, userID string) (shouldRespond bool, reason string) {
+	// Get or create thread key
+	threadID := threadTS
+	if threadID == "" {
+		// Main channel message - will create new thread
+		return a.shouldRespondToMainChannel(channelType, text, userID)
+	}
+
+	// Thread message
+	return a.shouldRespondToThreadMessage(channelType, channelID, threadID, text, userID)
+}
+
+// shouldRespondToMainChannel handles decision for main channel messages (no thread).
+func (a *Adapter) shouldRespondToMainChannel(channelType, text, userID string) (bool, string) {
+	// DM handling
+	if channelType == "dm" || channelType == "im" {
+		if a.config.CanRespond(userID) {
+			return true, "dm_as_mention"
+		}
+		return false, "dm_blocked_by_policy"
+	}
+
+	// Channel/Group handling
+	mentioned := ExtractMentionedUsers(text)
+	isBotMentioned := a.config.ContainsBotMention(text)
+
+	if isBotMentioned {
+		// Bot is @mentioned - check owner policy
+		if a.config.CanRespond(userID) {
+			return true, "mentioned_allowed"
+		}
+		return false, "mentioned_blocked_by_policy"
+	}
+
+	// Not mentioned - must stay silent in main channel
+	if len(mentioned) > 0 {
+		return false, "other_mentioned"
+	}
+	return false, "no_mention_silent"
+}
+
+// shouldRespondToThreadMessage handles decision for thread messages.
+func (a *Adapter) shouldRespondToThreadMessage(channelType, channelID, threadTS, text, userID string) (bool, string) {
+	// DM handling
+	if channelType == "dm" || channelType == "im" {
+		if a.config.CanRespond(userID) {
+			return true, "dm_thread_as_mention"
+		}
+		return false, "dm_thread_blocked_by_policy"
+	}
+
+	// Check if bot is @mentioned
+	isBotMentioned := a.config.ContainsBotMention(text)
+	mentioned := ExtractMentionedUsers(text)
+	threadKey := NewThreadKey(channelID, threadTS)
+
+	if isBotMentioned {
+		// Bot is @mentioned - check owner policy
+		if !a.config.CanRespond(userID) {
+			return false, "thread_mentioned_blocked_by_policy"
+		}
+
+		// R3/R4: This bot claims ownership when @mentioned
+		// In multi-bot scenarios, each bot independently tracks its owned threads
+		if a.ownershipTracker != nil {
+			a.ownershipTracker.Claim(threadKey)
+		}
+		return true, "thread_mentioned_claimed"
+	}
+
+	// Not @mentioned - check thread ownership
+	if a.ownershipTracker == nil {
+		// No ownership tracking - stay silent
+		return false, "no_ownership_tracking"
+	}
+
+	// R5: Ownership release - if others are @mentioned but not us, release ownership
+	if len(mentioned) > 0 {
+		if a.ownershipTracker.Owns(threadKey) {
+			a.ownershipTracker.Release(threadKey)
+			a.Logger().Debug("Thread ownership released (R5)", "thread_key", threadKey, "mentioned", mentioned)
+		}
+		return false, "ownership_released_other_mentioned"
+	}
+
+	// Check if we own this thread
+	if a.ownershipTracker.Owns(threadKey) {
+		a.ownershipTracker.UpdateLastActive(threadKey)
+		return true, "thread_owner"
+	}
+
+	// We don't own this thread - stay silent
+	return false, "not_owner_silent"
+}
+
+// ClaimThreadOwnership claims ownership of a thread after responding.
+// This should be called after a successful response is sent.
+func (a *Adapter) ClaimThreadOwnership(channelID, threadTS string) {
+	if a.ownershipTracker == nil {
+		return
+	}
+	threadKey := NewThreadKey(channelID, threadTS)
+	a.ownershipTracker.Claim(threadKey)
+}
+
+// stripBotMention removes bot mention from text
+func (a *Adapter) stripBotMention(text string) string {
+	if a.config.BotUserID == "" {
+		return text
+	}
+	mention := fmt.Sprintf("<@%s>", a.config.BotUserID)
+	return strings.TrimSpace(strings.ReplaceAll(text, mention, ""))
+}

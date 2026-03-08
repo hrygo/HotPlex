@@ -19,9 +19,9 @@ const (
 	maxAppendRetries = 3  // max retry attempts for AppendStream
 	retryDelay       = 50 * time.Millisecond
 
-	// StreamTTL is the maximum duration a Slack stream can live (~5 min TTL)
-	// We use 4 minutes to leave a safety buffer before the actual timeout
-	StreamTTL = 4 * time.Minute
+	// StreamTTL is the maximum duration a Slack stream can live (~10 min TTL)
+	// Improved: Increased from 4m to 10m to support complex AI tasks
+	StreamTTL = 10 * time.Minute
 )
 
 // NativeStreamingWriter 实现 io.Writer 接口，封装 Slack 原生流式消息的生命周期管理
@@ -30,6 +30,7 @@ type NativeStreamingWriter struct {
 	ctx       context.Context
 	adapter   *Adapter
 	channelID string
+	userID    string
 	threadTS  string
 	messageTS string
 
@@ -65,12 +66,13 @@ type NativeStreamingWriter struct {
 func NewNativeStreamingWriter(
 	ctx context.Context,
 	adapter *Adapter,
-	channelID, threadTS string,
+	userID, channelID, threadTS string,
 	onComplete func(string),
 ) *NativeStreamingWriter {
 	w := &NativeStreamingWriter{
 		ctx:          ctx,
 		adapter:      adapter,
+		userID:       userID,
 		channelID:    channelID,
 		threadTS:     threadTS,
 		onComplete:   onComplete,
@@ -238,7 +240,7 @@ func (w *NativeStreamingWriter) Write(p []byte) (n int, err error) {
 	}
 
 	w.buf.Write(p)
-	w.accumulatedContent.Write(p)  // 累积内容用于潜在 fallback
+	w.accumulatedContent.Write(p)   // 累积内容用于潜在 fallback
 	w.bytesWritten += int64(len(p)) // 追踪写入字节数
 
 	// 如果超过 rune 阈值，立即触发一次 flush
@@ -262,6 +264,14 @@ func (w *NativeStreamingWriter) Close() error {
 	}
 
 	w.closed = true
+	w.mu.Unlock()
+
+	// 停止处理并等待残留缓冲区发送完成 (必须在捕获状态前完成)
+	close(w.closeChan)
+	w.wg.Wait()
+
+	// 在停止所有后台活动后，最后一次捕获所有状态
+	w.mu.Lock()
 	started := w.started
 	accumulated := w.accumulatedContent.String()
 	bytesWritten := w.bytesWritten
@@ -271,17 +281,12 @@ func (w *NativeStreamingWriter) Close() error {
 	storeCallback := w.storeCallback
 	w.mu.Unlock()
 
-	// 停止处理并等待残留缓冲区发送完成
-	close(w.closeChan)
-	w.wg.Wait()
-
 	if !started {
 		return nil
 	}
 
-	// 完整性校验：检查是否有失败的内容块
-	// 改进：即使 bytesWritten == bytesFlushed，如果有失败的 chunk 或流超时，也认为不完整
-	integrityOK := len(failedChunks) == 0 && bytesWritten == bytesFlushed && !streamExpired
+	// 完整性校验：检查是否所有写入的内容都成功送达了 Slack
+	integrityOK := len(failedChunks) == 0 && bytesWritten == bytesFlushed
 
 	if !integrityOK {
 		w.adapter.Logger().Warn("Stream integrity check failed",
@@ -300,43 +305,54 @@ func (w *NativeStreamingWriter) Close() error {
 		w.onComplete(w.messageTS)
 	}
 
-	// 存储完整内容（如果有存储回调）
+	// 存储完整内容
 	if storeCallback != nil && accumulated != "" {
 		storeCallback(accumulated)
 	}
 
-	// Fallback 机制触发条件：
-	// 1. StopStream 失败
-	// 2. 完整性校验失败（有失败的内容块或字节不匹配）
-	if (stopErr != nil || !integrityOK) && len(accumulated) > 0 {
-		w.adapter.Logger().Warn("Attempting fallback message",
-			"channel_id", w.channelID,
-			"content_len", len(accumulated),
-			"stop_error", stopErr,
-			"integrity_ok", integrityOK)
+	// =========================================================================
+	// 智能化回退逻辑 (Optimized Fallback)
+	// =========================================================================
 
-		// 使用 SendThreadReply 作为 fallback
-		if fallbackErr := w.adapter.SendThreadReply(w.ctx, w.channelID, w.threadTS, accumulated); fallbackErr != nil {
-			w.adapter.Logger().Error("Fallback message also failed",
+	// 如果数据层面已全达，禁止回退，但若 StopStream 报错仍需上报 metadata 异常
+	if integrityOK {
+		if stopErr != nil {
+			w.adapter.Logger().Debug("StopStream failed but content arrived. Skipping fallback.",
 				"channel_id", w.channelID,
-				"error", fallbackErr)
-			if stopErr != nil {
-				return fmt.Errorf("stream stop failed: %w; fallback also failed: %w", stopErr, fallbackErr)
-			}
-			return fmt.Errorf("integrity check failed; fallback also failed: %w", fallbackErr)
+				"error", stopErr)
+			return fmt.Errorf("stop stream failed: %w", stopErr)
 		}
-
-		w.adapter.Logger().Info("Fallback message sent successfully",
-			"channel_id", w.channelID,
-			"content_len", len(accumulated))
-		w.mu.Lock()
-		w.fallbackUsed = true
-		w.mu.Unlock()
 		return nil
 	}
 
-	if stopErr != nil {
-		return fmt.Errorf("stop stream: %w", stopErr)
+	// 如果内容确实没发齐，且积累了内容，则尝试补发
+	if len(accumulated) > 0 {
+		var fallbackText string
+		if bytesFlushed > 0 {
+			// 如果部分送达，重写时带上状态提示，避免看起来像随机重复
+			fallbackText = "⚠️ *Stream interrupted, sending complete response below:*\n\n" + accumulated
+		} else {
+			fallbackText = accumulated
+		}
+
+		w.adapter.Logger().Warn("Attempting fallback message due to incomplete stream (leakage prevention)",
+			"channel_id", w.channelID,
+			"written", bytesWritten,
+			"flushed", bytesFlushed,
+			"failed_chunks", len(failedChunks),
+			"content_len", len(accumulated))
+
+		if fallbackErr := w.adapter.SendThreadReply(w.ctx, w.channelID, w.threadTS, fallbackText); fallbackErr != nil {
+			w.adapter.Logger().Error("Critical: Fallback message failed during stream closure",
+				"channel_id", w.channelID,
+				"error", fallbackErr)
+			return fmt.Errorf("stream integrity check failed (%d/%d bytes); fallback send also failed: %w",
+				bytesFlushed, bytesWritten, fallbackErr)
+		}
+
+		w.mu.Lock()
+		w.fallbackUsed = true
+		w.mu.Unlock()
 	}
 
 	return nil
@@ -393,12 +409,12 @@ func (w *NativeStreamingWriter) GetAccumulatedContent() string {
 
 // StreamWriterStats returns stream statistics for integrity validation and monitoring
 type StreamWriterStats struct {
-	BytesWritten     int64  // Total bytes successfully written
-	BytesFlushed     int64  // Total bytes successfully flushed
-	FailedChunkCount int    // Number of failed flush chunks
-	IntegrityOK      bool   // Whether integrity check passed
-	FallbackUsed     bool   // Whether fallback mechanism was used
-	ContentLength    int    // Total length of accumulated content
+	BytesWritten     int64 // Total bytes successfully written
+	BytesFlushed     int64 // Total bytes successfully flushed
+	FailedChunkCount int   // Number of failed flush chunks
+	IntegrityOK      bool  // Whether integrity check passed
+	FallbackUsed     bool  // Whether fallback mechanism was used
+	ContentLength    int   // Total length of accumulated content
 }
 
 // GetStats returns stream statistics

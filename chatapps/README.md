@@ -8,38 +8,9 @@ HotPlex uses an **Adapter-based Pipeline** architecture to achieve platform neut
 
 ### 🔄 End-to-End Bidirectional Flow
 
+![ChatApps Message Flow](../docs/images/chatapps_flow.svg)
+
 From the client terminal's perspective, HotPlex operates as a reactive streaming system.
-
-```mermaid
-sequenceDiagram
-    participant User as 👤 User Terminal
-    participant Platform as ☁️ Chat Platform (Slack/Feishu)
-    participant Adapter as 🔌 Platform Adapter
-    participant Pipeline as ⛓️ Processor Pipeline
-    participant Handler as 🧠 Engine Handler
-    participant Engine as 🔥 HotPlex Engine
-
-    Note over User, Engine: 🟢 Phase 1: Request (C2S)
-    User->>Platform: Sends message/command
-    Platform->>Adapter: Webhook Event (JSON)
-    Adapter->>Adapter: Parse & Normalize to base.ChatMessage
-    Adapter->>Handler: Handle(ctx, msg)
-    Handler->>Engine: Execute(ctx, prompt)
-
-    Note over User, Engine: 🔵 Phase 2: Response Streaming (S2C)
-    Engine-->>Handler: Stream Token/Event
-    Handler->>Pipeline: Process(msg)
-    Pipeline->>Pipeline: Filter -> RateLimit -> Format -> Chunk
-    Pipeline->>Adapter: SendMessage/UpdateMessage
-    Adapter->>Platform: Platform API Call (e.g., chat.update)
-    Platform-->>User: Visual Update (Real-time)
-    
-    Note over User, Engine: ⚪ Phase 3: Finalization
-    Engine-->>Handler: Execution Complete
-    Handler->>Adapter: Send Session Stats/UI Controls
-    Adapter->>Platform: Final Message Render
-    Platform-->>User: Session Result
-```
 
 ### Data Normalization (Event to Message Mapping)
 
@@ -77,6 +48,8 @@ The `chatapps` layer normalizes raw provider events into a standard "Chat Langua
 The Message Storage Plugin provides a robust system for persisting chat history across platforms, supporting both one-off messages and real-time streams with memory-efficient buffering.
 
 ### 🏗️ Storage Architecture
+
+![Session Lifecycle](../docs/images/session-lifecycle.svg)
 
 ```mermaid
 graph TD

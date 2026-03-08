@@ -59,42 +59,42 @@ import (
 
 // Turn represents a single conversation turn (user + assistant exchange).
 type Turn struct {
-	Role      string    `json:"role"`       // "user" or "assistant"
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
-	TokenCount int      `json:"token_count"`
+	Role       string    `json:"role"` // "user" or "assistant"
+	Content    string    `json:"content"`
+	Timestamp  time.Time `json:"timestamp"`
+	TokenCount int       `json:"token_count"`
 }
 
 // SessionHistory represents the conversation history of a session.
 type SessionHistory struct {
-	SessionID   string  `json:"session_id"`
-	Turns       []Turn  `json:"turns"`
-	TotalTokens int     `json:"total_tokens"`
-	Compressed  bool    `json:"compressed"`
-	Summary     string  `json:"summary,omitempty"`
+	SessionID   string `json:"session_id"`
+	Turns       []Turn `json:"turns"`
+	TotalTokens int    `json:"total_tokens"`
+	Compressed  bool   `json:"compressed"`
+	Summary     string `json:"summary,omitempty"`
 }
 
 // CompressionConfig holds configuration for context compression.
 type CompressionConfig struct {
-	Enabled           bool          `json:"enabled"`            // Master switch for compression
-	TokenThreshold    int           `json:"token_threshold"`    // Trigger compression at this token count (default: 8000)
-	TargetTokenCount  int           `json:"target_token_count"` // Target tokens after compression (default: 2000)
-	PreserveTurns     int           `json:"preserve_turns"`     // Number of recent turns to keep intact (default: 5)
-	MaxSummaryTokens  int           `json:"max_summary_tokens"` // Max tokens for summary (default: 500)
-	CompressionRatio  float64       `json:"compression_ratio"`  // Target compression ratio 0.0-1.0 (default: 0.25)
-	SessionTTL        time.Duration `json:"session_ttl"`        // Session memory TTL (default: 24h)
-	CleanupInterval   time.Duration `json:"cleanup_interval"`   // Background cleanup interval (default: 1h)
+	Enabled          bool          `json:"enabled"`            // Master switch for compression
+	TokenThreshold   int           `json:"token_threshold"`    // Trigger compression at this token count (default: 8000)
+	TargetTokenCount int           `json:"target_token_count"` // Target tokens after compression (default: 2000)
+	PreserveTurns    int           `json:"preserve_turns"`     // Number of recent turns to keep intact (default: 5)
+	MaxSummaryTokens int           `json:"max_summary_tokens"` // Max tokens for summary (default: 500)
+	CompressionRatio float64       `json:"compression_ratio"`  // Target compression ratio 0.0-1.0 (default: 0.25)
+	SessionTTL       time.Duration `json:"session_ttl"`        // Session memory TTL (default: 24h)
+	CleanupInterval  time.Duration `json:"cleanup_interval"`   // Background cleanup interval (default: 1h)
 }
 
 // DefaultCompressionConfig returns default compression configuration.
 func DefaultCompressionConfig() CompressionConfig {
 	return CompressionConfig{
 		Enabled:          true,
-		TokenThreshold:   8000,  // Compress when approaching 8K tokens
-		TargetTokenCount: 2000,  // Target ~2K tokens after compression
-		PreserveTurns:    5,     // Keep last 5 turns intact
-		MaxSummaryTokens: 500,   // Summary should be ~500 tokens
-		CompressionRatio: 0.25,  // Target 25% of original
+		TokenThreshold:   8000, // Compress when approaching 8K tokens
+		TargetTokenCount: 2000, // Target ~2K tokens after compression
+		PreserveTurns:    5,    // Keep last 5 turns intact
+		MaxSummaryTokens: 500,  // Summary should be ~500 tokens
+		CompressionRatio: 0.25, // Target 25% of original
 		SessionTTL:       24 * time.Hour,
 		CleanupInterval:  1 * time.Hour, // Clean up expired sessions every hour
 	}
@@ -127,9 +127,9 @@ type ContextCompressor struct {
 	wg     sync.WaitGroup     // Waits for cleanup goroutine to exit
 
 	// Metrics for monitoring compression effectiveness
-	totalCompressions         int64   // Total compression operations performed
-	totalTokensSaved          int64   // Tokens saved by compression
-	averageCompressionRatio   float64 // Running average of compression ratios
+	totalCompressions       int64   // Total compression operations performed
+	totalTokensSaved        int64   // Tokens saved by compression
+	averageCompressionRatio float64 // Running average of compression ratios
 }
 
 // NewContextCompressor creates a new ContextCompressor.
@@ -263,7 +263,7 @@ func (c *ContextCompressor) compress(ctx context.Context, sessionID string) (*Se
 	// Update metrics
 	c.totalCompressions++
 	c.totalTokensSaved += int64(oldTokens - summaryTokens)
-	c.updateCompressionRatio(float64(history.TotalTokens) / float64(oldTokens + history.TotalTokens))
+	c.updateCompressionRatio(float64(history.TotalTokens) / float64(oldTokens+history.TotalTokens))
 
 	c.logger.Info("Context compressed",
 		"session_id", sessionID,
@@ -388,12 +388,12 @@ func (c *ContextCompressor) Stats() map[string]interface{} {
 	c.mu.RUnlock()
 
 	return map[string]interface{}{
-		"enabled":                  c.config.Enabled,
-		"session_count":            sessionCount,
-		"total_compressions":       c.totalCompressions,
-		"total_tokens_saved":       c.totalTokensSaved,
+		"enabled":                   c.config.Enabled,
+		"session_count":             sessionCount,
+		"total_compressions":        c.totalCompressions,
+		"total_tokens_saved":        c.totalTokensSaved,
 		"average_compression_ratio": c.averageCompressionRatio,
-		"token_threshold":          c.config.TokenThreshold,
+		"token_threshold":           c.config.TokenThreshold,
 	}
 }
 
@@ -639,9 +639,9 @@ func (m *MemoryManager) GetCompressor() *ContextCompressor {
 
 // Global memory manager instance
 var (
-	globalCompressor  *ContextCompressor
-	globalMemoryMgr   *MemoryManager
-	memoryOnce        sync.Once
+	globalCompressor *ContextCompressor
+	globalMemoryMgr  *MemoryManager
+	memoryOnce       sync.Once
 )
 
 // GlobalCompressor returns the global ContextCompressor instance.

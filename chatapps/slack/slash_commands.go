@@ -61,6 +61,16 @@ func (a *Adapter) handleSlashCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check owner policy permission
+	if !a.config.CanRespond(cmd.UserID) {
+		a.Logger().Warn("Unauthorized slash command attempt",
+			"user_id", cmd.UserID,
+			"command", cmd.Command,
+			"policy", a.config.GetOwnerPolicy())
+		_ = a.sendEphemeralMessage(cmd.ResponseURL, "🚫 You are not authorized to use this command.")
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 
 	go a.processSlashCommand(cmd)
@@ -145,6 +155,15 @@ func convertHashPrefixToSlash(text string) (string, bool) {
 func (a *Adapter) processHashCommand(cmd string, userID, channelID, threadTS string) bool {
 
 	if !isSupportedCommand(cmd) {
+		return false
+	}
+
+	// Check owner policy permission
+	if !a.config.CanRespond(userID) {
+		a.Logger().Warn("Unauthorized hash command attempt",
+			"user_id", userID,
+			"command", cmd,
+			"policy", a.config.GetOwnerPolicy())
 		return false
 	}
 

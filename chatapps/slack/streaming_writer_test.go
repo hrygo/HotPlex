@@ -31,7 +31,7 @@ func createTestAdapterWithNilClient() *Adapter {
 // TestNativeStreamingWriter_NilClient tests that Write fails with nil client
 func TestNativeStreamingWriter_NilClient(t *testing.T) {
 	adapter := &Adapter{client: nil}
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Write should fail with nil client
 	_, err := writer.Write([]byte("test"))
@@ -41,8 +41,8 @@ func TestNativeStreamingWriter_NilClient(t *testing.T) {
 
 // TestNativeStreamingWriter_NilClient_Stop tests that StopStream fails with nil client
 func TestNativeStreamingWriter_NilClient_Stop(t *testing.T) {
-	adapter := &Adapter{client: nil}
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	adapter := createTestAdapterWithNilClient()
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Simulate a scenario where stream is already started (manually set)
 	writer.mu.Lock()
@@ -50,7 +50,7 @@ func TestNativeStreamingWriter_NilClient_Stop(t *testing.T) {
 	writer.messageTS = "1234567890.123456"
 	writer.mu.Unlock()
 
-	// Close should fail when trying to stop stream
+	// Close should fail when trying to stop stream due to nil client internally
 	err := writer.Close()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "stop stream")
@@ -63,7 +63,7 @@ func TestNativeStreamingWriter_NilClient_Stop(t *testing.T) {
 // TestNativeStreamingWriter_DoubleClose tests that Close() can be called multiple times without error
 func TestNativeStreamingWriter_DoubleClose(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// First close - should succeed (even without starting stream)
 	err1 := writer.Close()
@@ -80,7 +80,7 @@ func TestNativeStreamingWriter_DoubleClose(t *testing.T) {
 // TestNativeStreamingWriter_MultipleClose tests multiple consecutive Close() calls
 func TestNativeStreamingWriter_MultipleClose(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Call Close multiple times
 	for i := 0; i < 5; i++ {
@@ -94,7 +94,7 @@ func TestNativeStreamingWriter_MultipleClose(t *testing.T) {
 // TestNativeStreamingWriter_CloseAfterStart tests Close() after stream started
 func TestNativeStreamingWriter_CloseAfterStart(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Manually simulate started stream (to avoid real API calls)
 	writer.mu.Lock()
@@ -119,7 +119,7 @@ func TestNativeStreamingWriter_CloseAfterStart(t *testing.T) {
 // TestNativeStreamingWriter_Lifecycle tests Write -> Close -> Write (should error)
 func TestNativeStreamingWriter_Lifecycle(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Simulate started stream (to avoid real API calls)
 	writer.mu.Lock()
@@ -141,7 +141,7 @@ func TestNativeStreamingWriter_Lifecycle(t *testing.T) {
 // TestNativeStreamingWriter_WriteAfterClose tests writing to a closed stream
 func TestNativeStreamingWriter_WriteAfterClose(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Close without starting
 	err := writer.Close()
@@ -156,7 +156,7 @@ func TestNativeStreamingWriter_WriteAfterClose(t *testing.T) {
 // TestNativeStreamingWriter_EmptyContent tests writing empty content
 func TestNativeStreamingWriter_EmptyContent(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Write empty content - should succeed without starting stream
 	n, err := writer.Write([]byte(""))
@@ -176,7 +176,7 @@ func TestNativeStreamingWriter_EmptyContent(t *testing.T) {
 // TestNativeStreamingWriter_StateTransitions tests state machine transitions
 func TestNativeStreamingWriter_StateTransitions(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Initial state: not started, not closed
 	assert.False(t, writer.IsStarted())
@@ -203,7 +203,7 @@ func TestNativeStreamingWriter_StateTransitions(t *testing.T) {
 // TestNativeStreamingWriter_MessageTS tests MessageTS getter
 func TestNativeStreamingWriter_MessageTS(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Initially empty
 	assert.Empty(t, writer.MessageTS())
@@ -220,7 +220,7 @@ func TestNativeStreamingWriter_MessageTS(t *testing.T) {
 // TestNativeStreamingWriter_ConcurrentAccess tests thread safety
 func TestNativeStreamingWriter_ConcurrentAccess(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	done := make(chan bool)
 
@@ -267,7 +267,7 @@ func TestNativeStreamingWriter_CompleteCallback(t *testing.T) {
 	}
 
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", onComplete)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", onComplete)
 
 	// Simulate started stream
 	writer.mu.Lock()
@@ -288,7 +288,7 @@ func TestNativeStreamingWriter_CompleteCallback(t *testing.T) {
 // TestNativeStreamingWriter_EmptyCloseWithoutStart tests Close on never-started stream
 func TestNativeStreamingWriter_EmptyCloseWithoutStart(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Close without ever starting - should succeed immediately
 	err := writer.Close()
@@ -300,7 +300,7 @@ func TestNativeStreamingWriter_EmptyCloseWithoutStart(t *testing.T) {
 // TestNativeStreamingWriter_InterfaceCompliance tests compile-time interface compliance
 func TestNativeStreamingWriter_InterfaceCompliance(t *testing.T) {
 	adapter := createTestAdapterWithNilClient()
-	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
+	writer := NewNativeStreamingWriter(context.Background(), adapter, "U123", "C123", "T123", nil)
 
 	// Verify io.WriteCloser compliance
 	var _ io.WriteCloser = writer

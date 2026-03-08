@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/plugins/storage"
+	"github.com/hrygo/hotplex/types"
 )
 
 // StreamBuffer 流式消息缓冲区 (内存)
@@ -60,7 +61,7 @@ func (b *StreamBuffer) Clear() {
 type StreamMessageStore struct {
 	buffers     map[string]*StreamBuffer
 	mu          sync.RWMutex
-	store       storage.ChatAppMessageStore
+	store       storage.WriteOnlyStore
 	timeout     time.Duration
 	maxBuffers  int
 	logger      *slog.Logger
@@ -72,7 +73,7 @@ type StreamMessageStore struct {
 var ErrBufferFull = errors.New("stream buffer full, cannot accept new chunks")
 
 // NewStreamMessageStore 创建流式消息存储管理器
-func NewStreamMessageStore(store storage.ChatAppMessageStore, timeout time.Duration, maxBuffers int, logger *slog.Logger) *StreamMessageStore {
+func NewStreamMessageStore(store storage.WriteOnlyStore, timeout time.Duration, maxBuffers int, logger *slog.Logger) *StreamMessageStore {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -123,19 +124,19 @@ func (s *StreamMessageStore) Close() {
 	s.cleanupWg.Wait()
 }
 
-// OnStreamChunk 接收流式消息块 (不存储，仅缓存)
+// OnStreamChunk 接收流式消息块 (不存储,仅缓存)
+// 如果缓冲区满,降级为直接存储模式,防止数据丢失
 func (s *StreamMessageStore) OnStreamChunk(ctx context.Context, sessionID, chunk string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 限制缓冲区数量
+	// 如果缓冲区已满且无法清理,降级为直接存储
 	if len(s.buffers) >= s.maxBuffers {
 		// 查找并删除过期的缓冲区
 		evicted := false
 		for id, buf := range s.buffers {
 			if buf.IsExpired(s.timeout) {
-				// 记录警告：过期缓冲区的数据将被丢弃
-				s.logger.Warn("evicting expired stream buffer, data will be lost",
+				s.logger.Warn("evicting expired stream buffer",
 					"session_id", id,
 					"chunk_count", len(buf.Chunks),
 					"reason", "buffer overflow")
@@ -144,12 +145,19 @@ func (s *StreamMessageStore) OnStreamChunk(ctx context.Context, sessionID, chunk
 				break
 			}
 		}
-		// 如果没有过期的缓冲区可删除，返回错误而不是静默丢弃
+		// 如果没有过期的缓冲区可删除,降级为直接存储
 		if !evicted {
-			s.logger.Error("stream buffer full, cannot accept new chunks",
+			s.logger.Warn("stream buffer full, falling back to direct storage",
 				"max_buffers", s.maxBuffers,
-				"session_id", sessionID)
-			return ErrBufferFull
+				"session_id", sessionID,
+				"fallback", "direct_store")
+			// 降级:直接存储chunk,不缓存(防止数据丢失)
+			return s.store.StoreBotResponse(ctx, &storage.ChatAppMessage{
+				ChatSessionID: sessionID,
+				Content:       chunk,
+				MessageType:   types.MessageTypeFinalResponse,
+				CreatedAt:     time.Now(),
+			})
 		}
 	}
 
@@ -177,7 +185,7 @@ func (s *StreamMessageStore) OnStreamComplete(ctx context.Context, sessionID str
 	s.mu.Unlock()
 
 	if !exists {
-		// 没有缓冲区，直接存储 (非流式消息)
+		// 没有缓冲区,直接存储 (非流式消息)
 		return s.store.StoreBotResponse(ctx, msg)
 	}
 

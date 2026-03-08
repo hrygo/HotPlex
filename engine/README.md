@@ -6,29 +6,7 @@ The `engine` package is the core orchestration layer of HotPlex. It transforms l
 
 The Engine operates as a **Stateful Multi-Session Controller**. It manages a pool of persistent CLI processes to eliminate the overhead of repeated cold starts.
 
-```mermaid
-graph TD
-    API[Application API / ChatApps] --> Engine[HotPlex Engine]
-    
-    subgraph EngineCore [Engine Control Plane]
-        Manager[Session Manager / Pool]
-        WAF[Danger Detector / Firewall]
-        Telemetry[Stats & Metrics]
-    end
-
-    Engine --> Manager
-    Engine --> WAF
-    
-    subgraph ProcessPool [Hot-Multiplexed Process Pool]
-        S1[Session 1: Claude CLI]
-        S2[Session 2: Claude CLI]
-        Sn[Session N: Claude CLI]
-    end
-
-    Manager --> S1
-    Manager --> S2
-    Manager --> Sn
-```
+![Agent Architecture](../docs/images/agent-architecture.svg)
 
 ### Key Architectural Concepts
 

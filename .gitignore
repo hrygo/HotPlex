@@ -144,3 +144,5 @@ release_notes_*.txt
 *.bak
 *.tmp
 *.temp
+main
+!cmd/hotplexd/main.go

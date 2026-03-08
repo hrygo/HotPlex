@@ -49,11 +49,11 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 
 ## 系统要求
 
-| 平台 | 架构 | 支持 |
-|------|------|------|
-| Linux | amd64, arm64 | ✅ |
-| macOS | amd64 (Intel), arm64 (Apple Silicon) | ✅ |
-| Windows | WSL2 | ✅ |
+| 平台    | 架构                                 | 支持 |
+| ------- | ------------------------------------ | ---- |
+| Linux   | amd64, arm64                         | ✅    |
+| macOS   | amd64 (Intel), arm64 (Apple Silicon) | ✅    |
+| Windows | WSL2                                 | ✅    |
 
 **依赖项**:
 - `curl` 或 `wget`
@@ -61,21 +61,21 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 
 ## 安装选项
 
-| 选项 | 说明 |
-|------|------|
-| `-v, --version` | 指定版本 (默认: 最新) |
-| `-d, --dir` | 安装目录 (默认: `/usr/local/bin`) |
-| `-c, --config` | 仅生成配置文件 |
-| `-u, --uninstall` | 卸载 HotPlex |
-| `-f, --force` | 强制重新安装 |
-| `-n, --dry-run` | 干运行模式，显示将执行的操作 |
-| `-q, --quiet` | 静默模式 |
-| `-V, --verbose` | 详细输出 |
-| `--skip-verify` | 跳过校验和验证 |
-| `--skip-wizard` | 跳过安装后配置向导 |
-| `--non-interactive` | 非交互模式 |
-| `-h, --help` | 显示帮助 |
-| `--version` | 显示脚本版本 |
+| 选项                | 说明                              |
+| ------------------- | --------------------------------- |
+| `-v, --version`     | 指定版本 (默认: 最新)             |
+| `-d, --dir`         | 安装目录 (默认: `/usr/local/bin`) |
+| `-c, --config`      | 仅生成配置文件                    |
+| `-u, --uninstall`   | 卸载 HotPlex                      |
+| `-f, --force`       | 强制重新安装                      |
+| `-n, --dry-run`     | 干运行模式，显示将执行的操作      |
+| `-q, --quiet`       | 静默模式                          |
+| `-V, --verbose`     | 详细输出                          |
+| `--skip-verify`     | 跳过校验和验证                    |
+| `--skip-wizard`     | 跳过安装后配置向导                |
+| `--non-interactive` | 非交互模式                        |
+| `-h, --help`        | 显示帮助                          |
+| `--version`         | 显示脚本版本                      |
 
 ## 手动安装
 

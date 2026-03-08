@@ -50,10 +50,12 @@ func (e *DisconnectExecutor) Execute(ctx context.Context, req *Request, callback
 
 	sess, exists := e.engine.GetSession(sessionID)
 	if !exists {
-		_ = emitter.Error(0, "No active session found")
+		_ = emitter.Error(0, "No conversation to disconnect")
+		_ = emitter.Emit("Nothing to Disconnect")
+		_ = emitter.Complete("No active conversation. Already idle.")
 		return &Result{
-			Success: false,
-			Message: "No active session found",
+			Success: true, // Not an error - already disconnected
+			Message: "No active conversation. Already idle.",
 		}, nil
 	}
 
@@ -64,10 +66,12 @@ func (e *DisconnectExecutor) Execute(ctx context.Context, req *Request, callback
 
 	// StopSession preserves the marker file, allowing resume on next message
 	if err := e.engine.StopSession(sessionID, "user_requested_disconnect"); err != nil {
-		_ = emitter.Error(1, fmt.Sprintf("Failed: %v", err))
+		_ = emitter.Error(1, fmt.Sprintf("Termination error: %v", err))
+		_ = emitter.Emit("Disconnect Incomplete")
+		_ = emitter.Complete(fmt.Sprintf("Could not fully disconnect. (%v)", err))
 		return &Result{
 			Success: false,
-			Message: fmt.Sprintf("Failed to disconnect: %v", err),
+			Message: fmt.Sprintf("Could not fully disconnect. Please try again. (%v)", err),
 		}, nil
 	}
 

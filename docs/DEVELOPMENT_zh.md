@@ -3,7 +3,7 @@
 > 本指南涵盖本地开发设置、测试和常用工作流。
 > 架构详情请参阅 [architecture_zh.md](architecture_zh.md)。
 >
-> **中文版** | **[English](DEVELOPMENT.md)**
+> **中文版** | **[English](development.md)**
 
 ## 目录
 
@@ -22,19 +22,19 @@
 
 ### 必需
 
-| 工具 | 版本 | 用途 |
-|------|------|------|
-| Go | 1.25+ | 主语言 |
-| Make | 任意 | 构建自动化 |
-| Git | 2.x | 版本控制 |
+| 工具 | 版本  | 用途       |
+| ---- | ----- | ---------- |
+| Go   | 1.25+ | 主语言     |
+| Make | 任意  | 构建自动化 |
+| Git  | 2.x   | 版本控制   |
 
 ### 可选
 
-| 工具 | 用途 |
-|------|------|
+| 工具          | 用途         |
+| ------------- | ------------ |
 | golangci-lint | 高级代码检查 |
-| Docker | 容器构建 |
-| claude CLI | 本地 AI 测试 |
+| Docker        | 容器构建     |
+| claude CLI    | 本地 AI 测试 |
 
 ### 环境设置
 
@@ -304,12 +304,12 @@ tail -f .logs/daemon.log
 
 ### 常见问题
 
-| 问题 | 解决方案 |
-|------|----------|
+| 问题                        | 解决方案                                         |
+| --------------------------- | ------------------------------------------------ |
 | "command not found: claude" | 安装 Claude CLI 或设置 `HOTPLEX_PROVIDER_BINARY` |
-| "permission denied" | 检查 `work_dir` 权限 |
-| 会话不持久 | 检查 `idle_timeout` 设置 |
-| Slack 无响应 | 验证 `HOTPLEX_SLACK_BOT_USER_ID` 正确 |
+| "permission denied"         | 检查 `work_dir` 权限                             |
+| 会话不持久                  | 检查 `idle_timeout` 设置                         |
+| Slack 无响应                | 验证 `HOTPLEX_SLACK_BOT_USER_ID` 正确            |
 
 ---
 
@@ -395,6 +395,6 @@ make lint test
 ## 相关文档
 
 - [architecture_zh.md](architecture_zh.md) - 系统架构
-- [CONFIGURATION_zh.md](CONFIGURATION_zh.md) - 配置参考
+- [configuration_zh.md](configuration_zh.md) - 配置参考
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - 贡献指南
 - [sdk-guide_zh.md](sdk-guide_zh.md) - SDK 开发指南

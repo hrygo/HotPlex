@@ -129,7 +129,7 @@ func main() {
 
 	prv, err := provider.CreateProvider(provider.ProviderConfig{
 		Type:         providerType,
-		Enabled:      true,
+		Enabled:      provider.PtrBool(true),
 		BinaryPath:   providerBinary,
 		DefaultModel: providerModel,
 	})

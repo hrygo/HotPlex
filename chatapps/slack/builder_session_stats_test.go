@@ -11,7 +11,7 @@ import (
 func TestBuildSessionStatsMessage_Int32Types(t *testing.T) {
 	// This test verifies that BuildSessionStatsMessage correctly handles
 	// int32 types from SessionStatsData (the actual types used in production)
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeSessionStats,
@@ -40,7 +40,7 @@ func TestBuildSessionStatsMessage_Int32Types(t *testing.T) {
 
 func TestBuildSessionStatsMessage_Int64Types(t *testing.T) {
 	// This test verifies backward compatibility with int64 types
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeSessionStats,
@@ -63,7 +63,7 @@ func TestBuildSessionStatsMessage_Int64Types(t *testing.T) {
 
 func TestBuildSessionStatsMessage_Empty(t *testing.T) {
 	// When no stats are available, should return empty/nil blocks
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeSessionStats,
@@ -81,7 +81,7 @@ func TestBuildSessionStatsMessage_Empty(t *testing.T) {
 
 func TestBuildSessionStatsMessage_WithAllFields(t *testing.T) {
 	// Full test with all stats fields populated
-	builder := NewMessageBuilder()
+	builder := NewMessageBuilder(&Config{})
 
 	msg := &base.ChatMessage{
 		Type:    base.MessageTypeSessionStats,

@@ -1,9 +1,9 @@
 # HotPlex Configuration Reference
 
 > Complete reference for all configuration options.
-> For quick start, see [DEVELOPMENT.md](DEVELOPMENT.md).
+> For quick start, see [development.md](development.md).
 >
-> **[中文版](CONFIGURATION_zh.md)** | **English**
+> **[中文版](configuration_zh.md)** | **English**
 
 ## Table of Contents
 
@@ -28,10 +28,10 @@ HotPlex uses a layered configuration system with the following priority (highest
 
 ### Layer Purposes
 
-| Layer | Contents |
-|-------|----------|
-| **`.env`** | Global parameters, bot credentials, secrets, persistence config |
-| **YAML files** | Platform behavior, permissions, features, AI prompts |
+| Layer          | Contents                                                        |
+| -------------- | --------------------------------------------------------------- |
+| **`.env`**     | Global parameters, bot credentials, secrets, persistence config |
+| **YAML files** | Platform behavior, permissions, features, AI prompts            |
 
 ---
 
@@ -39,67 +39,67 @@ HotPlex uses a layered configuration system with the following priority (highest
 
 ### Core Server
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HOTPLEX_PORT` | `8080` | Server listen port |
-| `HOTPLEX_LOG_LEVEL` | `INFO` | Log level: DEBUG, INFO, WARN, ERROR |
-| `HOTPLEX_LOG_FORMAT` | `json` | Log format: json, text |
-| `HOTPLEX_API_KEY` | *(required)* | API security token |
-| `HOTPLEX_API_KEYS` | *(optional)* | Multiple API keys (comma-separated) |
+| Variable             | Default      | Description                         |
+| -------------------- | ------------ | ----------------------------------- |
+| `HOTPLEX_PORT`       | `8080`       | Server listen port                  |
+| `HOTPLEX_LOG_LEVEL`  | `INFO`       | Log level: DEBUG, INFO, WARN, ERROR |
+| `HOTPLEX_LOG_FORMAT` | `json`       | Log format: json, text              |
+| `HOTPLEX_API_KEY`    | *(required)* | API security token                  |
+| `HOTPLEX_API_KEYS`   | *(optional)* | Multiple API keys (comma-separated) |
 
 ### Engine
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HOTPLEX_EXECUTION_TIMEOUT` | `30m` | Max wait for AI response |
-| `HOTPLEX_IDLE_TIMEOUT` | `1h` | Session inactivity timeout |
+| Variable                    | Default | Description                |
+| --------------------------- | ------- | -------------------------- |
+| `HOTPLEX_EXECUTION_TIMEOUT` | `30m`   | Max wait for AI response   |
+| `HOTPLEX_IDLE_TIMEOUT`      | `1h`    | Session inactivity timeout |
 
 ### Provider
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HOTPLEX_PROVIDER_TYPE` | `claude-code` | Provider: claude-code, opencode |
-| `HOTPLEX_PROVIDER_MODEL` | `sonnet` | Default model: sonnet, haiku, opus |
-| `HOTPLEX_PROVIDER_BINARY` | *(auto-detect)* | Path to CLI binary |
-| `HOTPLEX_PROVIDER_DANGEROUSLY_SKIP_PERMISSIONS` | `false` | Skip all permission checks |
-| `HOTPLEX_OPENCODE_COMPAT_ENABLED` | `true` | Enable OpenCode HTTP API compatibility |
+| Variable                                        | Default         | Description                            |
+| ----------------------------------------------- | --------------- | -------------------------------------- |
+| `HOTPLEX_PROVIDER_TYPE`                         | `claude-code`   | Provider: claude-code, opencode        |
+| `HOTPLEX_PROVIDER_MODEL`                        | `sonnet`        | Default model: sonnet, haiku, opus     |
+| `HOTPLEX_PROVIDER_BINARY`                       | *(auto-detect)* | Path to CLI binary                     |
+| `HOTPLEX_PROVIDER_DANGEROUSLY_SKIP_PERMISSIONS` | `false`         | Skip all permission checks             |
+| `HOTPLEX_OPENCODE_COMPAT_ENABLED`               | `true`          | Enable OpenCode HTTP API compatibility |
 
 ### Projects (Docker)
 
-| Variable | Description |
-|----------|-------------|
-| `HOTPLEX_PROJECTS_DIR` | Project workspace directory |
-| `HOTPLEX_GITCONFIG` | Path to git config for bot identity |
+| Variable               | Description                         |
+| ---------------------- | ----------------------------------- |
+| `HOTPLEX_PROJECTS_DIR` | Project workspace directory         |
+| `HOTPLEX_GITCONFIG`    | Path to git config for bot identity |
 
 ### Native Brain (Optional)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HOTPLEX_BRAIN_API_KEY` | *(unset)* | Brain API key (enables brain when set) |
-| `HOTPLEX_BRAIN_PROVIDER` | `openai` | Brain provider: openai, anthropic, etc. |
-| `HOTPLEX_BRAIN_MODEL` | `gpt-4o-mini` | Brain model |
-| `HOTPLEX_BRAIN_ENDPOINT` | *(optional)* | Custom API endpoint |
-| `HOTPLEX_BRAIN_TIMEOUT_S` | `10` | Request timeout in seconds |
-| `HOTPLEX_BRAIN_CACHE_SIZE` | `1000` | Cache size |
-| `HOTPLEX_BRAIN_MAX_RETRIES` | `3` | Max retry attempts |
-| `HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS` | `100` | Min retry wait |
-| `HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS` | `5000` | Max retry wait |
+| Variable                          | Default       | Description                             |
+| --------------------------------- | ------------- | --------------------------------------- |
+| `HOTPLEX_BRAIN_API_KEY`           | *(unset)*     | Brain API key (enables brain when set)  |
+| `HOTPLEX_BRAIN_PROVIDER`          | `openai`      | Brain provider: openai, anthropic, etc. |
+| `HOTPLEX_BRAIN_MODEL`             | `gpt-4o-mini` | Brain model                             |
+| `HOTPLEX_BRAIN_ENDPOINT`          | *(optional)*  | Custom API endpoint                     |
+| `HOTPLEX_BRAIN_TIMEOUT_S`         | `10`          | Request timeout in seconds              |
+| `HOTPLEX_BRAIN_CACHE_SIZE`        | `1000`        | Cache size                              |
+| `HOTPLEX_BRAIN_MAX_RETRIES`       | `3`           | Max retry attempts                      |
+| `HOTPLEX_BRAIN_RETRY_MIN_WAIT_MS` | `100`         | Min retry wait                          |
+| `HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS` | `5000`        | Max retry wait                          |
 
 ### Message Store
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HOTPLEX_MESSAGE_STORE_ENABLED` | `true` | Enable message persistence |
-| `HOTPLEX_MESSAGE_STORE_TYPE` | `sqlite` | Storage: sqlite, postgres, memory |
-| `HOTPLEX_MESSAGE_STORE_SQLITE_PATH` | `~/.hotplex/chatapp_messages.db` | SQLite database path |
-| `HOTPLEX_MESSAGE_STORE_SQLITE_MAX_SIZE_MB` | `1024` | Max database size |
-| `HOTPLEX_MESSAGE_STORE_STREAMING_ENABLED` | `true` | Enable streaming storage |
-| `HOTPLEX_MESSAGE_STORE_STREAMING_TIMEOUT` | `5m` | Streaming timeout |
+| Variable                                   | Default                          | Description                       |
+| ------------------------------------------ | -------------------------------- | --------------------------------- |
+| `HOTPLEX_MESSAGE_STORE_ENABLED`            | `true`                           | Enable message persistence        |
+| `HOTPLEX_MESSAGE_STORE_TYPE`               | `sqlite`                         | Storage: sqlite, postgres, memory |
+| `HOTPLEX_MESSAGE_STORE_SQLITE_PATH`        | `~/.hotplex/chatapp_messages.db` | SQLite database path              |
+| `HOTPLEX_MESSAGE_STORE_SQLITE_MAX_SIZE_MB` | `1024`                           | Max database size                 |
+| `HOTPLEX_MESSAGE_STORE_STREAMING_ENABLED`  | `true`                           | Enable streaming storage          |
+| `HOTPLEX_MESSAGE_STORE_STREAMING_TIMEOUT`  | `5m`                             | Streaming timeout                 |
 
 ### CORS
 
-| Variable | Description |
-|----------|-------------|
+| Variable                  | Description                       |
+| ------------------------- | --------------------------------- |
 | `HOTPLEX_ALLOWED_ORIGINS` | Allowed origins (comma-separated) |
 
 ---
@@ -108,60 +108,60 @@ HotPlex uses a layered configuration system with the following priority (highest
 
 ### Slack
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `HOTPLEX_SLACK_BOT_USER_ID` | **Yes** | Bot User ID (UXXXXXXXXXX) |
-| `HOTPLEX_SLACK_BOT_TOKEN` | **Yes** | Bot Token (xoxb-...) |
-| `HOTPLEX_SLACK_APP_TOKEN` | Socket Mode | App Token (xapp-...) |
-| `HOTPLEX_SLACK_SIGNING_SECRET` | HTTP Mode | Signing secret for verification |
+| Variable                       | Required    | Description                     |
+| ------------------------------ | ----------- | ------------------------------- |
+| `HOTPLEX_SLACK_BOT_USER_ID`    | **Yes**     | Bot User ID (UXXXXXXXXXX)       |
+| `HOTPLEX_SLACK_BOT_TOKEN`      | **Yes**     | Bot Token (xoxb-...)            |
+| `HOTPLEX_SLACK_APP_TOKEN`      | Socket Mode | App Token (xapp-...)            |
+| `HOTPLEX_SLACK_SIGNING_SECRET` | HTTP Mode   | Signing secret for verification |
 
 ### Telegram
 
-| Variable | Description |
-|----------|-------------|
-| `HOTPLEX_TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
-| `HOTPLEX_TELEGRAM_WEBHOOK_URL` | Webhook URL (production) |
-| `HOTPLEX_TELEGRAM_SECRET_TOKEN` | Webhook secret token |
+| Variable                        | Description               |
+| ------------------------------- | ------------------------- |
+| `HOTPLEX_TELEGRAM_BOT_TOKEN`    | Bot token from @BotFather |
+| `HOTPLEX_TELEGRAM_WEBHOOK_URL`  | Webhook URL (production)  |
+| `HOTPLEX_TELEGRAM_SECRET_TOKEN` | Webhook secret token      |
 
 ### Discord
 
-| Variable | Description |
-|----------|-------------|
-| `HOTPLEX_DISCORD_BOT_TOKEN` | Bot token |
+| Variable                     | Description            |
+| ---------------------------- | ---------------------- |
+| `HOTPLEX_DISCORD_BOT_TOKEN`  | Bot token              |
 | `HOTPLEX_DISCORD_PUBLIC_KEY` | Application public key |
 
 ### DingTalk
 
-| Variable | Description |
-|----------|-------------|
-| `HOTPLEX_DINGTALK_APP_ID` | App ID |
-| `HOTPLEX_DINGTALK_APP_SECRET` | App secret |
+| Variable                          | Description    |
+| --------------------------------- | -------------- |
+| `HOTPLEX_DINGTALK_APP_ID`         | App ID         |
+| `HOTPLEX_DINGTALK_APP_SECRET`     | App secret     |
 | `HOTPLEX_DINGTALK_CALLBACK_TOKEN` | Callback token |
-| `HOTPLEX_DINGTALK_CALLBACK_KEY` | Callback key |
+| `HOTPLEX_DINGTALK_CALLBACK_KEY`   | Callback key   |
 
 ### Feishu
 
-| Variable | Description |
-|----------|-------------|
-| `HOTPLEX_FEISHU_APP_ID` | App ID |
-| `HOTPLEX_FEISHU_APP_SECRET` | App secret |
+| Variable                            | Description        |
+| ----------------------------------- | ------------------ |
+| `HOTPLEX_FEISHU_APP_ID`             | App ID             |
+| `HOTPLEX_FEISHU_APP_SECRET`         | App secret         |
 | `HOTPLEX_FEISHU_VERIFICATION_TOKEN` | Verification token |
-| `HOTPLEX_FEISHU_ENCRYPT_KEY` | Encryption key |
+| `HOTPLEX_FEISHU_ENCRYPT_KEY`        | Encryption key     |
 
 ### WhatsApp
 
-| Variable | Description |
-|----------|-------------|
-| `HOTPLEX_WHATSAPP_PHONE_NUMBER_ID` | Phone number ID |
-| `HOTPLEX_WHATSAPP_ACCESS_TOKEN` | Access token |
-| `HOTPLEX_WHATSAPP_VERIFY_TOKEN` | Webhook verify token |
+| Variable                           | Description          |
+| ---------------------------------- | -------------------- |
+| `HOTPLEX_WHATSAPP_PHONE_NUMBER_ID` | Phone number ID      |
+| `HOTPLEX_WHATSAPP_ACCESS_TOKEN`    | Access token         |
+| `HOTPLEX_WHATSAPP_VERIFY_TOKEN`    | Webhook verify token |
 
 ### Alerts
 
-| Variable | Description |
-|----------|-------------|
-| `HOTPLEX_DINGTALK_WEBHOOK_URL` | DingTalk alert webhook |
-| `HOTPLEX_DINGTALK_SECRET` | Webhook secret |
+| Variable                         | Description                     |
+| -------------------------------- | ------------------------------- |
+| `HOTPLEX_DINGTALK_WEBHOOK_URL`   | DingTalk alert webhook          |
+| `HOTPLEX_DINGTALK_SECRET`        | Webhook secret                  |
 | `HOTPLEX_DINGTALK_FILTER_EVENTS` | Filter events (comma-separated) |
 
 ---
@@ -221,51 +221,51 @@ security:
 
 ### Provider Section
 
-| Field | Description |
-|-------|-------------|
-| `type` | Provider type: `claude-code`, `opencode` |
-| `enabled` | Enable/disable provider |
-| `default_model` | Default model ID |
-| `default_permission_mode` | Permission mode: `bypass-permissions`, `acceptEdits`, `default`, `dontAsk`, `plan` |
-| `dangerously_skip_permissions` | Skip all permission checks (Docker/CI) |
-| `binary_path` | Custom binary path |
-| `allowed_tools` | Tool whitelist |
-| `disallowed_tools` | Tool blacklist |
+| Field                          | Description                                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------------- |
+| `type`                         | Provider type: `claude-code`, `opencode`                                           |
+| `enabled`                      | Enable/disable provider                                                            |
+| `default_model`                | Default model ID                                                                   |
+| `default_permission_mode`      | Permission mode: `bypass-permissions`, `acceptEdits`, `default`, `dontAsk`, `plan` |
+| `dangerously_skip_permissions` | Skip all permission checks (Docker/CI)                                             |
+| `binary_path`                  | Custom binary path                                                                 |
+| `allowed_tools`                | Tool whitelist                                                                     |
+| `disallowed_tools`             | Tool blacklist                                                                     |
 
 ### Engine Section
 
-| Field | Description |
-|-------|-------------|
-| `work_dir` | Agent's working directory |
-| `timeout` | Max execution time |
-| `idle_timeout` | Session idle timeout |
-| `allowed_tools` | Engine-level tool whitelist |
+| Field              | Description                 |
+| ------------------ | --------------------------- |
+| `work_dir`         | Agent's working directory   |
+| `timeout`          | Max execution time          |
+| `idle_timeout`     | Session idle timeout        |
+| `allowed_tools`    | Engine-level tool whitelist |
 | `disallowed_tools` | Engine-level tool blacklist |
 
 ### Features Section
 
-| Feature | Description |
-|---------|-------------|
-| `chunking.enabled` | Split long messages |
-| `chunking.max_chars` | Max chars per chunk (Slack: 4000) |
-| `threading.enabled` | Reply in threads |
-| `rate_limit.enabled` | Enable rate limit handling |
-| `rate_limit.max_attempts` | Max retry attempts |
-| `rate_limit.base_delay_ms` | Initial retry delay |
-| `rate_limit.max_delay_ms` | Max retry delay |
-| `markdown.enabled` | Convert Markdown to platform format |
+| Feature                    | Description                         |
+| -------------------------- | ----------------------------------- |
+| `chunking.enabled`         | Split long messages                 |
+| `chunking.max_chars`       | Max chars per chunk (Slack: 4000)   |
+| `threading.enabled`        | Reply in threads                    |
+| `rate_limit.enabled`       | Enable rate limit handling          |
+| `rate_limit.max_attempts`  | Max retry attempts                  |
+| `rate_limit.base_delay_ms` | Initial retry delay                 |
+| `rate_limit.max_delay_ms`  | Max retry delay                     |
+| `markdown.enabled`         | Convert Markdown to platform format |
 
 ### Security Section
 
-| Field | Description |
-|-------|-------------|
-| `verify_signature` | Verify platform signatures (HTTP mode) |
-| `permission.dm_policy` | DM policy: `allow`, `pairing`, `block` |
-| `permission.group_policy` | Group policy: `allow`, `mention`, `multibot`, `block` |
-| `permission.bot_user_id` | Bot's User ID (required) |
-| `permission.allowed_users` | User whitelist |
-| `permission.blocked_users` | User blacklist |
-| `permission.slash_command_rate_limit` | Rate limit per user |
+| Field                                 | Description                                           |
+| ------------------------------------- | ----------------------------------------------------- |
+| `verify_signature`                    | Verify platform signatures (HTTP mode)                |
+| `permission.dm_policy`                | DM policy: `allow`, `pairing`, `block`                |
+| `permission.group_policy`             | Group policy: `allow`, `mention`, `multibot`, `block` |
+| `permission.bot_user_id`              | Bot's User ID (required)                              |
+| `permission.allowed_users`            | User whitelist                                        |
+| `permission.blocked_users`            | User blacklist                                        |
+| `permission.slash_command_rate_limit` | Rate limit per user                                   |
 
 ---
 
@@ -387,7 +387,7 @@ features:
 
 ## Related Documentation
 
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Development guide
+- [development.md](development.md) - Development guide
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Architecture overview
 - [docker-deployment.md](docker-deployment.md) - Docker deployment
 - [chatapps/slack-setup-beginner.md](chatapps/slack-setup-beginner.md) - Slack setup guide

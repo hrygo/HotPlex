@@ -11,12 +11,14 @@ import (
 
 // AnswerMessageBuilder builds answer-related Slack messages
 type AnswerMessageBuilder struct {
+	config    *Config
 	formatter *MrkdwnFormatter
 }
 
 // NewAnswerMessageBuilder creates a new AnswerMessageBuilder
-func NewAnswerMessageBuilder(formatter *MrkdwnFormatter) *AnswerMessageBuilder {
+func NewAnswerMessageBuilder(config *Config, formatter *MrkdwnFormatter) *AnswerMessageBuilder {
 	return &AnswerMessageBuilder{
+		config:    config,
 		formatter: formatter,
 	}
 }
@@ -28,13 +30,22 @@ func (b *AnswerMessageBuilder) BuildAnswerMessage(msg *base.ChatMessage) []slack
 		return nil
 	}
 
-	// Convert Markdown to mrkdwn
-	formattedContent := b.formatter.Format(content)
+	// 1. Process Markdown if enabled (default: true)
+	formattedContent := content
+	markdownEnabled := BoolValue(b.config.Features.Markdown.Enabled, true)
+	if markdownEnabled {
+		formattedContent = b.formatter.Format(content)
+	}
 
-	// Check if content is too long for a single message
-	if len(formattedContent) > 4000 {
-		// Split into chunks
-		return b.buildChunkedAnswerBlocks(formattedContent)
+	// 2. Check if chunking is enabled (default: true)
+	chunkingEnabled := BoolValue(b.config.Features.Chunking.Enabled, true)
+	maxChars := b.config.Features.Chunking.MaxChars
+	if maxChars <= 0 {
+		maxChars = 3500 // Default safe limit
+	}
+
+	if chunkingEnabled && len(formattedContent) > maxChars {
+		return b.buildChunkedAnswerBlocks(formattedContent, maxChars)
 	}
 
 	mrkdwn := slack.NewTextBlockObject("mrkdwn", formattedContent, false, false)
@@ -44,10 +55,10 @@ func (b *AnswerMessageBuilder) BuildAnswerMessage(msg *base.ChatMessage) []slack
 }
 
 // buildChunkedAnswerBlocks splits long content into chunks
-func (b *AnswerMessageBuilder) buildChunkedAnswerBlocks(content string) []slack.Block {
+func (b *AnswerMessageBuilder) buildChunkedAnswerBlocks(content string, maxChars int) []slack.Block {
 	var blocks []slack.Block
 
-	chunks := b.chunkText(content, 3500)
+	chunks := b.chunkText(content, maxChars)
 	for i, chunk := range chunks {
 		if i > 0 {
 			// Add divider between chunks

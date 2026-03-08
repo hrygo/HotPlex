@@ -29,21 +29,21 @@ type PiProvider struct {
 // Pi event types from the JSON output stream.
 // Reference: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/json.md
 const (
-	PiEventTypeAgentStart            = "agent_start"
-	PiEventTypeAgentEnd              = "agent_end"
-	PiEventTypeTurnStart             = "turn_start"
-	PiEventTypeTurnEnd               = "turn_end"
-	PiEventTypeMessageStart          = "message_start"
-	PiEventTypeMessageUpdate         = "message_update"
-	PiEventTypeMessageEnd            = "message_end"
-	PiEventTypeToolExecutionStart    = "tool_execution_start"
-	PiEventTypeToolExecutionUpdate   = "tool_execution_update"
-	PiEventTypeToolExecutionEnd      = "tool_execution_end"
-	PiEventTypeSession               = "session"
-	PiEventTypeAutoCompactionStart   = "auto_compaction_start"
-	PiEventTypeAutoCompactionEnd     = "auto_compaction_end"
-	PiEventTypeAutoRetryStart        = "auto_retry_start"
-	PiEventTypeAutoRetryEnd          = "auto_retry_end"
+	PiEventTypeAgentStart          = "agent_start"
+	PiEventTypeAgentEnd            = "agent_end"
+	PiEventTypeTurnStart           = "turn_start"
+	PiEventTypeTurnEnd             = "turn_end"
+	PiEventTypeMessageStart        = "message_start"
+	PiEventTypeMessageUpdate       = "message_update"
+	PiEventTypeMessageEnd          = "message_end"
+	PiEventTypeToolExecutionStart  = "tool_execution_start"
+	PiEventTypeToolExecutionUpdate = "tool_execution_update"
+	PiEventTypeToolExecutionEnd    = "tool_execution_end"
+	PiEventTypeSession             = "session"
+	PiEventTypeAutoCompactionStart = "auto_compaction_start"
+	PiEventTypeAutoCompactionEnd   = "auto_compaction_end"
+	PiEventTypeAutoRetryStart      = "auto_retry_start"
+	PiEventTypeAutoRetryEnd        = "auto_retry_end"
 )
 
 // Pi content block types.
@@ -65,22 +65,22 @@ type PiSessionEvent struct {
 
 // PiAgentEvent represents agent lifecycle events.
 type PiAgentEvent struct {
-	Type     string          `json:"type"`
+	Type     string           `json:"type"`
 	Messages []PiAgentMessage `json:"messages,omitempty"`
-	Message  *PiAgentMessage `json:"message,omitempty"`
+	Message  *PiAgentMessage  `json:"message,omitempty"`
 }
 
 // PiAgentMessage represents a message in the pi event stream.
 type PiAgentMessage struct {
-	Role      string            `json:"role"`
-	Content   []PiContentBlock  `json:"content,omitempty"`
-	Timestamp int64             `json:"timestamp,omitempty"`
-	Provider  string            `json:"provider,omitempty"`
-	Model     string            `json:"model,omitempty"`
-	API       string            `json:"api,omitempty"`
-	Usage     *PiUsage          `json:"usage,omitempty"`
-	StopReason string           `json:"stopReason,omitempty"`
-	ErrorMessage string         `json:"errorMessage,omitempty"`
+	Role         string           `json:"role"`
+	Content      []PiContentBlock `json:"content,omitempty"`
+	Timestamp    int64            `json:"timestamp,omitempty"`
+	Provider     string           `json:"provider,omitempty"`
+	Model        string           `json:"model,omitempty"`
+	API          string           `json:"api,omitempty"`
+	Usage        *PiUsage         `json:"usage,omitempty"`
+	StopReason   string           `json:"stopReason,omitempty"`
+	ErrorMessage string           `json:"errorMessage,omitempty"`
 }
 
 // PiContentBlock represents a content block in a pi message.
@@ -109,9 +109,9 @@ type PiAssistantMessageEvent struct {
 
 // PiMessageUpdateEvent represents a message_update event.
 type PiMessageUpdateEvent struct {
-	Type                   string                   `json:"type"`
-	Message                *PiAgentMessage          `json:"message"`
-	AssistantMessageEvent  *PiAssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
+	Type                  string                   `json:"type"`
+	Message               *PiAgentMessage          `json:"message"`
+	AssistantMessageEvent *PiAssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
 }
 
 // PiToolExecutionEvent represents tool execution events.
@@ -344,10 +344,10 @@ func (p *PiProvider) parseSessionEvent(line string) ([]*ProviderEvent, error) {
 	}
 
 	return []*ProviderEvent{{
-		Type:       EventTypeSystem,
-		RawType:    event.Type,
-		SessionID:  event.ID,
-		RawLine:    line,
+		Type:      EventTypeSystem,
+		RawType:   event.Type,
+		SessionID: event.ID,
+		RawLine:   line,
 	}}, nil
 }
 

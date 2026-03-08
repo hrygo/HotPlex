@@ -299,13 +299,14 @@ DOCKER_TAG      ?= latest
 DOCKER_REGISTRY ?= ghcr.io/hrygo
 HOST_UID        ?= $(shell id -u)
 
-docker-build: ## @docker Build image using docker-compose (no cache)
-	@printf "${CYAN}🐳 Building Docker images via Compose (no cache)...${NC}\n"
-	HOST_UID=$(HOST_UID) VERSION=$(VERSION) docker compose build --no-cache
+docker-build: ## @docker Build image (multi-stage, hotplexd always rebuilt)
+	@printf "${CYAN}🐳 Building Docker image (multi-stage)...${NC}\n"
+	@printf "${DIM}Builder stage always rebuilds, runtime stages cached.${NC}\n"
+	HOST_UID=$(HOST_UID) VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_TIME=$(BUILD_TIME) docker compose build
 
-docker-build-cache: ## @docker Build image using docker-compose (with cache, faster)
-	@printf "${CYAN}🐳 Building Docker images via Compose (cached)...${NC}\n"
-	HOST_UID=$(HOST_UID) VERSION=$(VERSION) docker compose build
+docker-build-cache: ## @docker Build image (legacy, full cache - for debugging)
+	@printf "${CYAN}🐳 Building Docker image (legacy mode)...${NC}\n"
+	HOST_UID=$(HOST_UID) VERSION=$(VERSION) docker build --cache-from $(DOCKER_IMAGE):latest -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 docker-build-tag: docker-build ## @docker Build and tag image
 	@printf "${GREEN}✅ Build complete.${NC}\n"
