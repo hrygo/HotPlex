@@ -572,15 +572,14 @@ func (a *Adapter) shouldRespondToThreadMessage(channelType, channelID, threadTS,
 			return false, "thread_mentioned_blocked_by_policy"
 		}
 
-		// Claim/update ownership
+		// R3/R4: Ownership management
+		// Note: We only set ourselves as owner because we cannot distinguish
+		// human users from bot users in the mention list. In multi-bot scenarios,
+		// each bot will set itself as owner when it sees the mention.
 		if a.ownershipTracker != nil {
-			if len(mentioned) > 1 {
-				// Multi-bot mention - set multiple owners
-				a.ownershipTracker.SetOwners(threadKey, mentioned)
-			} else {
-				// Single bot mention - claim ownership
-				a.ownershipTracker.ClaimOwnership(threadKey, a.config.BotUserID)
-			}
+			// Use ClaimOwnership to add ourselves to the owner set
+			// This supports multi-bot shared ownership (R4) without including human users
+			a.ownershipTracker.ClaimOwnership(threadKey, a.config.BotUserID)
 		}
 		return true, "thread_mentioned_claimed"
 	}
