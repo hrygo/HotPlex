@@ -50,8 +50,8 @@ func TestStorageConfig_PostgreSQL(t *testing.T) {
 func TestAdapter_StorageDisabled(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage:       nil, // No storage config
 	}, logger, base.WithoutServer())
@@ -64,8 +64,8 @@ func TestAdapter_StorageDisabled(t *testing.T) {
 func TestAdapter_StorageEnabled_Memory(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage: &StorageConfig{
 			Enabled: true,
@@ -91,8 +91,8 @@ func TestAdapter_Storage_SQLite(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage: &StorageConfig{
 			Enabled:    true,
@@ -115,8 +115,8 @@ func TestAdapter_Storage_SQLite(t *testing.T) {
 func TestAdapter_Storage_PostgreSQL_MissingURL(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage: &StorageConfig{
 			Enabled:       true,
@@ -134,8 +134,8 @@ func TestAdapter_Storage_PostgreSQL_MissingURL(t *testing.T) {
 func TestAdapter_Storage_UnknownType(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage: &StorageConfig{
 			Enabled: true,
@@ -161,8 +161,8 @@ func TestAdapter_Storage_UnknownType(t *testing.T) {
 func TestAdapter_GetThreadHistory_StorageDisabled(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage:       nil,
 	}, logger, base.WithoutServer())
@@ -180,8 +180,8 @@ func TestAdapter_GetThreadHistory_StorageDisabled(t *testing.T) {
 func TestAdapter_GetThreadHistory_EmptyResult(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage: &StorageConfig{
 			Enabled: true,
@@ -205,8 +205,8 @@ func TestAdapter_GetThreadHistory_EmptyResult(t *testing.T) {
 func TestAdapter_GetThreadHistoryAsString_EmptyResult(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage: &StorageConfig{
 			Enabled: true,
@@ -314,8 +314,8 @@ func TestFormatMessagesAsString_Multiple(t *testing.T) {
 func TestAdapter_StoreUserMessage_StorageDisabled(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage:       nil,
 	}, logger, base.WithoutServer())
@@ -336,8 +336,8 @@ func TestAdapter_StoreUserMessage_StorageDisabled(t *testing.T) {
 func TestAdapter_StoreBotResponse_StorageDisabled(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage:       nil,
 	}, logger, base.WithoutServer())
@@ -354,8 +354,8 @@ func TestAdapter_StoreBotResponse_StorageDisabled(t *testing.T) {
 func TestAdapter_StoreAndRetrieve_RoundTrip(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		BotUserID:     "B123",
 		Storage: &StorageConfig{
@@ -428,8 +428,8 @@ func TestAdapter_StoreAndRetrieve_RoundTrip(t *testing.T) {
 func TestAdapter_StoreAndRetrieveByUser_RoundTrip(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		BotUserID:     "B123",
 		Storage: &StorageConfig{
@@ -519,8 +519,8 @@ func TestAdapter_StoreAndRetrieveByUser_RoundTrip(t *testing.T) {
 func TestAdapter_GetThreadHistoryByUser_StorageDisabled(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage:       nil,
 	}, logger, base.WithoutServer())
@@ -538,8 +538,8 @@ func TestAdapter_GetThreadHistoryByUser_StorageDisabled(t *testing.T) {
 func TestAdapter_GetThreadHistoryByUser_EmptyResult(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		Storage: &StorageConfig{
 			Enabled: true,
@@ -563,8 +563,8 @@ func TestAdapter_GetThreadHistoryByUser_EmptyResult(t *testing.T) {
 func TestAdapter_GetThreadHistoryByUserAsString(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	adapter := NewAdapter(&Config{
-		BotToken:      "xoxb-test-bot-token-123456789012-abcdef",
-		SigningSecret: "test-signing-secret-123456789012345",
+		BotToken:      "xoxb-123456-789012-abcdef123456",
+		SigningSecret: "abcdefghijklmnopqrstuvwxyz123456",
 		Mode:          "http",
 		BotUserID:     "B123",
 		Storage: &StorageConfig{

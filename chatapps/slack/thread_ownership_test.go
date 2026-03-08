@@ -24,7 +24,19 @@ func TestNewThreadKey(t *testing.T) {
 			name:      "empty thread ts",
 			channelID: "C12345",
 			threadTS:  "",
-			expected:  "C12345:",
+			expected:  "", // Empty key to prevent collisions
+		},
+		{
+			name:      "empty channel id",
+			channelID: "",
+			threadTS:  "1234567890.123456",
+			expected:  "", // Empty key to prevent collisions
+		},
+		{
+			name:      "both empty",
+			channelID: "",
+			threadTS:  "",
+			expected:  "", // Empty key
 		},
 	}
 	for _, tt := range tests {

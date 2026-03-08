@@ -73,9 +73,14 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 	// Validate config - fail fast on invalid configuration
 	if err := config.Validate(); err != nil {
 		logger.Error("Invalid Slack config", "error", err)
+		// Return minimal but valid adapter to prevent nil pointer panics
 		return &Adapter{
-			Adapter: base.NewAdapter("slack", base.Config{}, logger),
-			config:  config,
+			Adapter:   base.NewAdapter("slack", base.Config{}, logger),
+			config:    config,
+			webhook:   base.NewWebhookRunner(logger),
+			sender:    base.NewSenderWithMutex(),
+			rateLimiter: NewSlashCommandRateLimiterWithConfig(config.SlashCommandRateLimit, rateBurst),
+			cmdRegistry: command.NewRegistry(),
 		}
 	}
 
@@ -276,7 +281,10 @@ func (a *Adapter) Stop() error {
 		}
 	}
 
-	a.webhook.Stop()
+	// Stop webhook runner (may be nil if adapter init failed)
+	if a.webhook != nil {
+		a.webhook.Stop()
+	}
 	return a.Adapter.Stop()
 }
 
