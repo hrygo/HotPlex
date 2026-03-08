@@ -72,10 +72,10 @@ const (
 
 // IntentResult represents the result of intent detection.
 type IntentResult struct {
-	Type     IntentType `json:"type"`
-	Confidence float64  `json:"confidence"`
-	Response  string    `json:"response,omitempty"`
-	Reason    string    `json:"reason,omitempty"`
+	Type       IntentType `json:"type"`
+	Confidence float64    `json:"confidence"`
+	Response   string     `json:"response,omitempty"`
+	Reason     string     `json:"reason,omitempty"`
 }
 
 // IntentRouter performs intent detection for incoming messages.
@@ -96,7 +96,7 @@ type IntentRouter struct {
 	// LRU Cache for recent intent results
 	// Key: SHA256 hash of normalized message, Value: IntentResult
 	cache    map[string]*IntentResult
-	lruList  *list.List          // List of cache keys, front = most recent, back = LRU
+	lruList  *list.List               // List of cache keys, front = most recent, back = LRU
 	lruIndex map[string]*list.Element // Quick lookup for list elements
 	cacheMu  sync.RWMutex
 
@@ -546,8 +546,8 @@ func GlobalIntentRouter() *IntentRouter {
 }
 
 var (
-	globalIntentRouter     *IntentRouter
-	globalRouterOnce       sync.Once
+	globalIntentRouter *IntentRouter
+	globalRouterOnce   sync.Once
 )
 
 // InitIntentRouter initializes the global intent router.

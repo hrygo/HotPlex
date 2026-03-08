@@ -6,9 +6,9 @@
 
 ---
 
-## ⚡ Quick Integration: App Manifest
+## ⚡ App Manifest
 
-This is the recommended installation method. No need to click dozens of buttons manually—just copy the code below for one-click configuration.
+This is the recommended installation method. No need to click dozens of buttons manually—just copy the complete code below for one-click configuration. This version includes basic chat capabilities, **App Home Dashboard**, **Interactive Approvals (HITL)**, and **AI Assistant Status Feedback**.
 
 > ⚠️ **2026 Important Reminder**: Classic Apps will be deprecated on **November 16, 2026**. Please ensure you use the new App Manifest version.
 
@@ -23,115 +23,13 @@ This is the recommended installation method. No need to click dozens of buttons 
   },
   "display_information": {
     "name": "HotPlex",
-    "long_description": "HotPlex is a high-performance AI Agent control plane that bridges powerful AI CLIs (Claude Code, OpenCode) into production-ready interactive services. It provides long-lived process sessions, WebSocket gateway, regex WAF, and PGID process group isolation for safe execution. Supports real-time streaming response, native AI assistant status feedback, and Block Kit rich text interactions. Perfect for development teams seeking AI-powered coding assistance with full control in Slack team collaboration environments, and organizations requiring enterprise-grade AI automation workflows.",
+    "long_description": "HotPlex is a high-performance AI Agent control plane with advanced governance features. It provides long-lived process sessions, PGID process group isolation, and regex WAF security. Includes sandbox approval workflows, artifact mounting, global monitoring, and observability logs. Supports App Home dashboard and MCP Server integration. Perfect for Slack team organizations requiring controlled AI execution environments, enterprise AI automation workflows, and deep security audits.",
     "description": "HotPlex AI Assistant - High-performance CLI Automation",
-    "background_color": "#000000"
-  },
-  "features": {
-    "assistant_view": {
-      "assistant_description": "HotPlex is a high-performance AI Agent Control Plane (Cli-as-a-Service). It bridges Claude Code and OpenCode into interactive Slack services with long-lived sessions, PGID isolation, and regex WAF security. Perfect for teams wanting AI-powered development with full control.",
-      "suggested_prompts": [
-        {
-          "title": "💡 Brainstorm",
-          "message": "In brainstorming mode, analyze the current project architecture, identify three areas for improvement, and explain the value and implementation approach"
-        },
-        {
-          "title": "📝 Create Issue",
-          "message": "Create a GitHub Issue using the project's defined Issue template, describing an important bug or feature request in the project"
-        },
-        {
-          "title": "🔀 Create PR",
-          "message": "Create a pull request based on current code changes using the project's defined PR template"
-        },
-        {
-          "title": "🔍 Code Review",
-          "message": "Conduct a comprehensive code review of the current branch, including DRY principles, SOLID principles, clean architecture, code quality, security vulnerabilities, and performance optimization"
-        }
-      ]
-    },
-    "app_home": {
-      "home_tab_enabled": false,
-      "messages_tab_enabled": true,
-      "messages_tab_read_only_enabled": false
-    },
-    "bot_user": {
-      "display_name": "HotPlex",
-      "always_online": true
-    },
-    "slash_commands": [
-      {
-        "command": "/reset",
-        "description": "Reset current session context and cold start",
-        "should_escape": false
-      },
-      {
-        "command": "/dc",
-        "description": "Force terminate background CLI process but preserve progress",
-        "should_escape": false
-      }
-    ]
-  },
-  "oauth_config": {
-    "scopes": {
-      "bot": [
-        "assistant:write",
-        "app_mentions:read",
-        "chat:write",
-        "chat:write.public",
-        "channels:read",
-        "groups:read",
-        "im:read",
-        "im:write",
-        "reactions:write",
-        "im:history",
-        "channels:history",
-        "groups:history",
-        "mpim:history",
-        "files:write",
-        "commands"
-      ]
-    }
-  },
-  "settings": {
-    "event_subscriptions": {
-      "bot_events": [
-        "app_mention",
-        "message.channels",
-        "message.groups",
-        "message.im",
-        "assistant_thread_started",
-        "assistant_thread_context_changed"
-      ]
-    },
-    "org_deploy_enabled": false,
-    "socket_mode_enabled": true
-  }
-}
-```
-
----
-
-### (Advanced) HotPlex Craw Layer Advanced Governance Configuration
-
-If your team wants to fully leverage HotPlex as a **Craw Layer** (e.g., sandbox approval, artifact mounting, global monitoring), use the enhanced App Manifest below.
-
-This version enables **App Home Dashboard**, **Deep Permission Separation**, and **Full-featured Extended Commands**.
-
-```json
-{
-  "_metadata": {
-    "major_version": 2,
-    "minor_version": 1
-  },
-  "display_information": {
-    "name": "HotPlex",
-    "long_description": "HotPlex is a high-performance AI Agent control plane with advanced governance features. It provides long-lived process sessions, PGID process group isolation, and regex WAF security. Includes sandbox approval workflows, artifact mounting, global monitoring, observability logs, and full runtime state inspection via /pgid command. Supports App Home dashboard and MCP Server integration. Perfect for Slack team organizations requiring controlled AI execution environments, enterprise AI automation workflows, and deep security audits.",
-    "description": "Agentic Craw Layer & Execution Engine",
     "background_color": "#1e293b"
   },
   "features": {
     "assistant_view": {
-      "assistant_description": "HotPlex is a high-performance AI Agent Control Plane (Cli-as-a-Service) with advanced governance. Features include: long-lived sessions with PGID isolation, regex WAF security, sandbox approval workflows, and full runtime state inspection via /pgid command.",
+      "assistant_description": "HotPlex is a high-performance AI Agent Control Plane (Cli-as-a-Service) with advanced governance. Features include: long-lived sessions with PGID isolation, regex WAF security, and sandbox approval workflows.",
       "suggested_prompts": [
         {
           "title": "💡 Brainstorm",
@@ -169,16 +67,6 @@ This version enables **App Home Dashboard**, **Deep Permission Separation**, and
       {
         "command": "/dc",
         "description": "When AI falls into an abnormal or unknown state, immediately terminate the current execution process",
-        "should_escape": false
-      },
-      {
-        "command": "/pgid",
-        "description": "Print CPU/memory and process tree status of the underlying current session",
-        "should_escape": false
-      },
-      {
-        "command": "/approve",
-        "description": "Approve pending high-risk tool operations (HITL approval)",
         "should_escape": false
       }
     ]
@@ -227,12 +115,13 @@ This version enables **App Home Dashboard**, **Deep Permission Separation**, and
 }
 ```
 
-### New Capabilities with Advanced Configuration:
+### Key Capabilities with this Configuration:
 
-1.  **Global Monitoring Center (`home_tab_enabled: true`)**: Allows developers to render a Dashboard with "Active Sessions", "Security Block Logs", and "MCP Mount Status" when opening the Bot. Requires listening to `app_home_opened` events.
-2.  **High-Risk Operation Interception & Approval**: When WAF intercepts high-risk Prompts (e.g., deleting files, modifying core configs), the bot will send a **red warning card**. Users must click **"Confirm Execution"** to proceed, or **"Cancel"** to safely terminate.
-3.  **Rich Artifact Mounting (`files:read` / `files:write`)**: Allows engineers to directly drop error log attachments to Slack, which HotPlex automatically injects into the running sandbox filesystem; Agents can also directly generate and push patch packages (`.patch` or `zip`) to the team.
-4.  **Runtime State Transparency (`/pgid`)**: One-click penetration through LLM fog, directly querying OS resource overhead, providing geek-level troubleshooting capabilities.
+1.  **Global Monitoring Center (`home_tab_enabled: true`)**: Allows developers to render a Dashboard with "Active Sessions", "Security Block Logs", and "MCP Status" when opening the Bot.
+2.  **High-Risk Operation Interception & Approval**: When WAF intercepts high-risk operations, the bot will send an interactive card. Users must click **"Confirm Execution"** to proceed.
+3.  **Rich Artifact Mounting (`files:read` / `files:write`)**: Supports automatic injection of error log attachments and direct generation of Agent patches.
+
+
 
 ---
 
@@ -281,7 +170,9 @@ To solve Slack's native limitation of not supporting slash commands in **Threads
 | **Thread/Sidebar**  | **`#reset`** | Due to Slack limitations, manually input `#` command, adapter will auto-intercept. |
 
 > [!NOTE]
-> `/dc` and `#dc` work the same way. Used to forcefully interrupt AI background workflows when running time-consuming tasks (like scanning the entire repository).
+> `/dc` and `#dc` work the same way. Used to forcefully interrupt AI background workflows.
+> Approval operations (Approve/Deny) are currently handled via interactive buttons on message cards, no manual command input required.
+
 
 ---
 
@@ -377,12 +268,12 @@ system_prompt: |
 ```
 
 **Customization Points**:
-| Section | Description |
-|---------|-------------|
-| **Identity** | Tell AI who it is and what project it's working on |
-| **Environment** | Runtime constraints (headless mode, timeouts, etc.) |
-| **Git Workflow** | Your team's Git workflow conventions |
-| **Output** | Message format requirements (concise, code blocks, etc.) |
+| Section          | Description                                              |
+| ---------------- | -------------------------------------------------------- |
+| **Identity**     | Tell AI who it is and what project it's working on       |
+| **Environment**  | Runtime constraints (headless mode, timeouts, etc.)      |
+| **Git Workflow** | Your team's Git workflow conventions                     |
+| **Output**       | Message format requirements (concise, code blocks, etc.) |
 
 > 💡 **Best Practice**: Refer to the example in `chatapps/configs/slack.yaml` and modify the identity, workflow, and output specifications according to your project's actual needs.
 

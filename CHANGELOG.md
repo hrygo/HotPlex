@@ -1,5 +1,33 @@
 # CHANGELOG.md
 
+## [v0.22.2] - 2026-03-08
+
+### 🔧 Patch Release
+
+This release improves streaming reliability and Docker installation.
+
+### Fixed
+
+#### 🌊 Streaming Improvements
+- **Increased StreamTTL** - Extended from 4m to 10m for complex AI tasks
+- **Whitespace Handling** - Skip whitespace-only chunks from native stream updates
+- **Close() Ordering** - Fix state capture ordering for proper integrity validation
+- **Simplified Integrity Check** - Removed redundant `streamExpired` check
+
+#### 🤖 Multibot Mode Fixes
+- **Collision Avoidance** - Strict filter to prevent duplicate processing
+- **Event Delegation** - Skip message events with bot mention (delegate to app_mention)
+- **Debug Logging** - Added event_type/event_ts for better traceability
+
+#### 🐳 Docker Improvements
+- **Official Installer** - Use `curl -fsSL https://claude.ai/install.sh | bash`
+- **PATH Fix** - Move claude binary to `/usr/local/bin` for global access
+
+### Docs
+- **CLAUDE.md Update** - Version bump to v0.22.x, added Docker commands, documented new directories
+
+---
+
 ## [v0.22.1] - 2026-03-08
 
 ### 🔧 Patch Release

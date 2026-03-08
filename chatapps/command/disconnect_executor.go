@@ -50,10 +50,10 @@ func (e *DisconnectExecutor) Execute(ctx context.Context, req *Request, callback
 
 	sess, exists := e.engine.GetSession(sessionID)
 	if !exists {
-		_ = emitter.Error(0, "No active session found")
+		_ = emitter.Error(0, "No conversation to disconnect")
 		return &Result{
-			Success: false,
-			Message: "No active session found",
+			Success: true, // Not an error - already disconnected
+			Message: "No active conversation. Already idle.",
 		}, nil
 	}
 

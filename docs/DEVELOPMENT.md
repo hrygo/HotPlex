@@ -340,7 +340,8 @@ make service-uninstall  # Remove service
 ### Docker Development
 
 ```bash
-make docker-build       # Build image
+make docker-build       # Build image (no cache, ensures fresh binary)
+make docker-build-cache # Build image (cached, faster for iteration)
 make docker-up          # Start containers
 make docker-logs        # View logs
 make docker-down        # Stop containers

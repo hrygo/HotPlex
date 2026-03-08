@@ -6,9 +6,9 @@
 
 ---
 
-## ⚡ 快捷集成：使用应用配置清单 (App Manifest)
+## ⚡ 应用配置清单 (App Manifest)
 
-这是最推荐的安装方式。你无需手动点击几十个按钮，只需复制以下代码即可一键配置。
+这是最推荐的安装方式。你无需手动点击几十个按钮，只需复制以下完整版代码即可一键配置。此版本不仅包含基础聊天能力，还开启了**App Home 面板**、**交互式审批 (HITL)** 以及 **AI 助手状态感知**。
 
 > ⚠️ **2026 重要提醒**：Classic Apps 将于 **2026年11月16日** 停用，请确保使用新版 App Manifest。
 
@@ -23,115 +23,13 @@
   },
   "display_information": {
     "name": "HotPlex",
-    "long_description": "HotPlex 是一个高性能 AI Agent 控制平面，桥接强大的 AI CLI（Claude Code、OpenCode）到生产级交互服务。它提供长生命周期进程会话、WebSocket 网关、正则表达式 WAF 和 PGID 进程组隔离，确保安全执行；支持实时流式响应、原生 AI 助手状态反馈、Block Kit 富文本交互。非常适合想要在 Slack 团队协作环境中获得 AI 驱动的编码辅助且完全掌控的开发团队和需要企业级 AI 自动化流程的组织。",
+    "long_description": "HotPlex 是一个高性能 AI Agent 控制平面，提供长生命周期进程会话、PGID 进程组隔离和正则表达式 WAF 安全保护。它包含沙盒审批工作流、产物挂载、全局监控、可观测性日志；支持 App Home 主页控制台和 MCP Server 集成。非常适合需要受控 AI 执行环境、企业级 AI 自动化工作流和深度安全审计的 Slack 团队组织。",
     "description": "HotPlex AI 助手 - 高性能 CLI 自动化助手",
-    "background_color": "#000000"
-  },
-  "features": {
-    "assistant_view": {
-      "assistant_description": "HotPlex 是一个高性能 AI Agent 控制平面（Cli-as-a-Service）。它将 Claude Code 和 OpenCode 桥接到交互式 Slack 服务，提供长生命周期会话、PGID 隔离和正则表达式 WAF 安全保护。非常适合想要 AI 驱动开发且完全掌控的团队。",
-      "suggested_prompts": [
-        {
-          "title": "💡 创意激发",
-          "message": "以头脑风暴模式，帮我分析当前项目架构，识别三个可以改进的方向，说明改进价值和实现思路"
-        },
-        {
-          "title": "📝 创建 Issue",
-          "message": "创建一个 GitHub Issue，必须使用项目定义的 Issue 模板，描述项目中一个重要的 bug 或功能需求"
-        },
-        {
-          "title": "🔀 创建 PR",
-          "message": "基于当前代码改动创建 pull request，必须使用项目定义的 PR 模板"
-        },
-        {
-          "title": "🔍 代码审查",
-          "message": "对当前分支进行全面的代码审查，包括 DRY 原则、SOLID 原则、整洁架构、代码质量、安全漏洞和性能优化"
-        }
-      ]
-    },
-    "app_home": {
-      "home_tab_enabled": false,
-      "messages_tab_enabled": true,
-      "messages_tab_read_only_enabled": false
-    },
-    "bot_user": {
-      "display_name": "HotPlex",
-      "always_online": true
-    },
-    "slash_commands": [
-      {
-        "command": "/reset",
-        "description": "重置当前会话上下文并冷启动",
-        "should_escape": false
-      },
-      {
-        "command": "/dc",
-        "description": "强制终止后台 CLI 进程但保留进度",
-        "should_escape": false
-      }
-    ]
-  },
-  "oauth_config": {
-    "scopes": {
-      "bot": [
-        "assistant:write",
-        "app_mentions:read",
-        "chat:write",
-        "chat:write.public",
-        "channels:read",
-        "groups:read",
-        "im:read",
-        "im:write",
-        "reactions:write",
-        "im:history",
-        "channels:history",
-        "groups:history",
-        "mpim:history",
-        "files:write",
-        "commands"
-      ]
-    }
-  },
-  "settings": {
-    "event_subscriptions": {
-      "bot_events": [
-        "app_mention",
-        "message.channels",
-        "message.groups",
-        "message.im",
-        "assistant_thread_started",
-        "assistant_thread_context_changed"
-      ]
-    },
-    "org_deploy_enabled": false,
-    "socket_mode_enabled": true
-  }
-}
-```
-
----
-
-### (进阶) HotPlex "Craw 层"高级治理版配置
-
-如果您的团队希望完全释放 HotPlex 作为**底层执行引擎 (Craw Layer)** 的能力（如：沙盒审批、产物回传、全局监控），请使用以下增强版 App Manifest。
-
-此版本开启了**App Home 主页控制台**、**深度的权限分离**以及**全功能的扩展命令**。
-
-```json
-{
-  "_metadata": {
-    "major_version": 2,
-    "minor_version": 1
-  },
-  "display_information": {
-    "name": "HotPlex",
-    "long_description": "HotPlex 是一个具有高级治理功能的高性能 AI Agent 控制平面，提供长生命周期进程会话、PGID 进程组隔离和正则表达式 WAF 安全保护。它包含沙盒审批工作流、产物挂载、全局监控、可观测性日志，以及通过 /pgid 命令进行完整运行时状态检查；支持 App Home 主页控制台和 MCP Server 集成。非常适合需要受控 AI 执行环境、企业级 AI 自动化工作流和深度安全审计的 Slack 团队组织。",
-    "description": "Agentic Craw 层 & 执行引擎",
     "background_color": "#1e293b"
   },
   "features": {
     "assistant_view": {
-      "assistant_description": "HotPlex 是一个具有高级治理功能的高性能 AI Agent 控制平面（Cli-as-a-Service）。功能包括：PGID 隔离的长生命周期会话、正则表达式 WAF 安全、沙盒审批工作流，以及通过 /pgid 命令进行完整运行时状态检查。",
+      "assistant_description": "HotPlex 是一个高性能 AI Agent 控制平面（Cli-as-a-Service）。它将 Claude Code 和 OpenCode 桥接到交互式 Slack 服务，提供长生命周期会话、PGID 隔离和正则表达式 WAF 安全保护。非常适合想要 AI 驱动开发且完全掌控的团队。",
       "suggested_prompts": [
         {
           "title": "💡 创意激发",
@@ -169,16 +67,6 @@
       {
         "command": "/dc",
         "description": "当 AI 陷入异常或不可知状态时，立即终止当前执行进程",
-        "should_escape": false
-      },
-      {
-        "command": "/pgid",
-        "description": "打印当前会话底层的 CPU/内存 及进程树状态",
-        "should_escape": false
-      },
-      {
-        "command": "/approve",
-        "description": "批准挂起中的高危工具操作 (HITL 审批)",
         "should_escape": false
       }
     ]
@@ -227,12 +115,14 @@
 }
 ```
 
-### 进阶版配置带来的新能力：
+### 此配置带来的核心能力：
 
-1.  **全局监控中心 (`home_tab_enabled: true`)**：允许开发者在打开 Bot 时，渲染出包含"活跃会话数"、"安全拦截日志"和" MCP 挂载状态"的 Dashboard。需要监听 `app_home_opened` 事件。
-2.  **高危操作拦截与审批**：当 WAF 拦截到高危 Prompt（如删除文件、修改核心配置）时，机器人将发送一张**红色高危卡片**。用户必须点击卡片上的 **"确认执行"** 按钮，任务才会继续执行；点击 **"取消"** 则安全终止。
-3.  **富产物挂载 (`files:read` / `files:write`)**：允许工程师直接向 Slack 丢报错日志附件，HotPlex 将其自动注入正在执行的沙盒文件系统中；Agent 也可直接生成并推送补丁包 (`.patch` 或 `zip`) 给团队。
-4.  **运行时状态透视 (`/pgid`)**：一键穿透 LLM 迷雾，直接查询对应操作系统的资源开销，提供极客级别的排障手段。
+1.  **全局监控中心 (`home_tab_enabled: true`)**：允许开发者在打开 Bot 时，渲染出包含"活跃会话数"、"安全拦截日志"和" MCP 挂载状态"的 Dashboard。
+2.  **高危操作拦截与审批**：当 WAF 拦截到高危操作时，机器人将发送一张交互式卡片。用户必须点击 **"确认执行"** 按钮，任务才会继续执行。
+3.  **富产物挂载 (`files:read` / `files:write`)**：支持日志附件的自动注入与 Agent 补丁包的直接生成推送。
+4.  **高可用通讯架构**：支持 Socket Mode 与 HTTP Mode 动态切换，确保不同网络环境下的稳定连接。
+
+
 
 ---
 
@@ -282,6 +172,8 @@ HotPlex 支持两种通信模式，请在 `.env` 中通过 `HOTPLEX_SLACK_MODE` 
 
 > [!NOTE]
 > `/dc` 与 `#dc` 同理。用于在 AI 运行耗时任务（如扫描全库）时强制中断其后台工作流。
+> 审批操作（Approve/Deny）目前通过消息卡片上的交互式按钮完成，无需手动输入命令。
+
 
 ---
 
@@ -377,12 +269,12 @@ system_prompt: |
 ```
 
 **定制要点**：
-| 部分 | 说明 |
-|------|------|
-| **身份定义** | 告诉 AI 它是谁，负责什么项目 |
-| **Environment** | 运行环境约束（无头模式、超时等） |
-| **Git Workflow** | 你的团队 Git 工作流程规范 |
-| **Output** | 消息格式要求（简洁、代码块等） |
+| 部分             | 说明                             |
+| ---------------- | -------------------------------- |
+| **身份定义**     | 告诉 AI 它是谁，负责什么项目     |
+| **Environment**  | 运行环境约束（无头模式、超时等） |
+| **Git Workflow** | 你的团队 Git 工作流程规范        |
+| **Output**       | 消息格式要求（简洁、代码块等）   |
 
 > 💡 **最佳实践**：参考 `chatapps/configs/slack.yaml` 中的示例，根据你的项目实际情况修改身份、工作流程和输出规范。
 

@@ -95,8 +95,8 @@ func TestAdapter_Storage_SQLite(t *testing.T) {
 		SigningSecret: "test-signing-secret-123456789012345",
 		Mode:          "http",
 		Storage: &StorageConfig{
-			Enabled:   true,
-			Type:      "sqlite",
+			Enabled:    true,
+			Type:       "sqlite",
 			SQLitePath: t.TempDir() + "/test.db",
 		},
 	}, logger, base.WithoutServer())

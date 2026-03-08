@@ -55,11 +55,11 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 
 	sess, exists := e.engine.GetSession(sessionID)
 	if !exists {
-		_ = emitter.Error(0, "No active session found")
-		_ = emitter.Emit("Reset Failed")
+		_ = emitter.Error(0, "No conversation to reset")
+		_ = emitter.Emit("Nothing to Reset")
 		return &Result{
-			Success: false,
-			Message: "No active session found",
+			Success: true, // Not an error - just nothing to do
+			Message: "No active conversation found. Start chatting first!",
 		}, nil
 	}
 	providerSessionID = sess.ProviderSessionID
@@ -74,11 +74,11 @@ func (e *ResetExecutor) Execute(ctx context.Context, req *Request, callback even
 	// Adapters will clean up their own state (aggregator buffers, etc.)
 
 	if err := e.engine.StopSession(sessionID, "user_requested_reset"); err != nil {
-		_ = emitter.Error(1, fmt.Sprintf("Failed: %v", err))
-		_ = emitter.Emit("Reset Failed")
+		_ = emitter.Error(1, fmt.Sprintf("Termination error: %v", err))
+		_ = emitter.Emit("Reset Incomplete")
 		return &Result{
 			Success: false,
-			Message: fmt.Sprintf("Failed to terminate session: %v", err),
+			Message: fmt.Sprintf("Could not fully reset. Please try again or use /disconnect first. (%v)", err),
 		}, nil
 	}
 

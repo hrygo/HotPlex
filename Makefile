@@ -299,9 +299,14 @@ DOCKER_TAG      ?= latest
 DOCKER_REGISTRY ?= ghcr.io/hrygo
 HOST_UID        ?= $(shell id -u)
 
-docker-build: ## @docker Build image using docker-compose
-	@printf "${CYAN}🐳 Building Docker images via Compose...${NC}\n"
+docker-build: ## @docker Build image (multi-stage, hotplexd always rebuilt)
+	@printf "${CYAN}🐳 Building Docker image (multi-stage)...${NC}\n"
+	@printf "${DIM}Builder stage always rebuilds, runtime stages cached.${NC}\n"
 	HOST_UID=$(HOST_UID) VERSION=$(VERSION) docker compose build
+
+docker-build-cache: ## @docker Build image (legacy, full cache - for debugging)
+	@printf "${CYAN}🐳 Building Docker image (legacy mode)...${NC}\n"
+	HOST_UID=$(HOST_UID) VERSION=$(VERSION) docker build --cache-from $(DOCKER_IMAGE):latest -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 docker-build-tag: docker-build ## @docker Build and tag image
 	@printf "${GREEN}✅ Build complete.${NC}\n"
@@ -395,4 +400,4 @@ docker-buildx:
 docker-clean:
 	docker rmi $(DOCKER_IMAGE):$(DOCKER_TAG) || true
 
-.PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable config-info docker-build docker-build-tag docker-run docker-sync docker-up docker-down docker-restart docker-logs docker-check-net docker-health docker-upgrade docker-push docker-push-tag docker-buildx docker-clean
+.PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable config-info docker-build docker-build-cache docker-build-tag docker-run docker-sync docker-up docker-down docker-restart docker-logs docker-check-net docker-health docker-upgrade docker-push docker-push-tag docker-buildx docker-clean

@@ -470,7 +470,11 @@ func (r *Engine) handleStreamRawLine(line string, cfg *types.Config, stats *Sess
 	for _, pevt := range pevtSlice {
 		// Detect if this event indicates the turn is over
 		if r.provider.DetectTurnEnd(pevt) {
-			r.handleNormalizedResult(pevt, stats, cfg, callback)
+			if err := r.handleNormalizedResult(pevt, stats, cfg, callback); err != nil {
+				r.logger.Error("Engine: failed to handle final result", "error", err)
+				closeDoneChan(doneChan)
+				return err
+			}
 			closeDoneChan(doneChan)
 			return nil
 		}
@@ -501,7 +505,7 @@ func closeDoneChan(doneChan chan struct{}) {
 }
 
 // handleNormalizedResult processes the final turn event and finalizes stats
-func (r *Engine) handleNormalizedResult(pevt *provider.ProviderEvent, stats *SessionStats, cfg *types.Config, callback event.Callback) {
+func (r *Engine) handleNormalizedResult(pevt *provider.ProviderEvent, stats *SessionStats, cfg *types.Config, callback event.Callback) error {
 	stats.mu.Lock()
 	defer stats.mu.Unlock()
 
@@ -550,8 +554,10 @@ func (r *Engine) handleNormalizedResult(pevt *provider.ProviderEvent, stats *Ses
 
 	// Dispatch stats event
 	if callback != nil {
-		callbackSafe := event.WrapSafe(r.logger, callback)
-		_ = callbackSafe("session_stats", &event.SessionStatsData{
+		// CRITICAL: We DO NOT use event.WrapSafe here anymore.
+		// Any error in handleSessionStats (like fallback failure) must bubble up
+		// to the Engine so that Execute() returns an error.
+		if err := callback("session_stats", &event.SessionStatsData{
 			SessionID:       cfg.SessionID,
 			StartTime:       stats.StartTime.Unix(),
 			EndTime:         time.Now().Unix(),
@@ -567,13 +573,16 @@ func (r *Engine) handleNormalizedResult(pevt *provider.ProviderEvent, stats *Ses
 			TotalCostUSD:    costUSD,
 			IsError:         pevt.IsError,
 			ErrorMessage:    pevt.Error,
-		})
+		}); err != nil {
+			return err
+		}
 	}
 
 	// Set session back to Ready
 	if sess, ok := r.manager.GetSession(cfg.SessionID); ok {
 		sess.SetStatus(intengine.SessionStatusReady)
 	}
+	return nil
 }
 
 // dispatchNormalizedCallback dispatches normalized provider events to the client callback
