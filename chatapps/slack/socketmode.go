@@ -142,6 +142,8 @@ func (a *Adapter) handleAppMentionEvent(teamID string, ev *slackevents.AppMentio
 			"channel_type": "channel",
 			"message_ts":   ev.TimeStamp,
 			"thread_ts":    threadID, // Fallbacks to TimeStamp if ThreadTimeStamp is empty
+			"event_type":   "app_mention",
+			"event_ts":     ev.TimeStamp,
 		},
 	}
 
@@ -187,15 +189,23 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 		return
 	}
 
+	// =========================================================================
+	// Strict Collision Avoidance (Airtight Filter)
+	// =========================================================================
+	// If message contains bot mention in a non-DM channel, ALWAYS skip it here.
+	// It is guaranteed to be handled by handleAppMentionEvent.
+	// This is critical for multibot mode to avoid dual-processing same user request.
+	if ev.ChannelType != "dm" && a.config.ContainsBotMention(ev.Text) {
+		a.Logger().Debug("Skipping 'message' event with mention (delegating to 'app_mention')", "ts", ev.TimeStamp)
+		return
+	}
+
 	// Group policy check: if GroupPolicy is "mention", only process messages that mention the bot
 	// Note: app_mention events are handled separately by handleAppMentionEvent
 	if (ev.ChannelType == "channel" || ev.ChannelType == "group") && a.config.GroupPolicy == "mention" {
-		if !a.config.ContainsBotMention(ev.Text) {
-			a.Logger().Debug("Message ignored - bot not mentioned", "channel_type", ev.ChannelType, "policy", "mention")
-			return
-		}
-		// Bot is mentioned - skip here, let app_mention handler process it
-		a.Logger().Debug("Skipping 'message' event with mention (handled by 'app_mention')", "ts", ev.TimeStamp)
+		// Already checked for lack of mention above? No, the block above only skips if mention IS PRESENT.
+		// So if we reach here, there is no mention.
+		a.Logger().Debug("Message ignored - bot not mentioned", "channel_type", ev.ChannelType, "policy", "mention")
 		return
 	}
 
@@ -227,14 +237,8 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 		if ev.ThreadTimeStamp != "" {
 			a.Logger().Info("Multibot mode - thread message without @mention, processing", "bot_user_id", a.config.BotUserID, "thread_ts", ev.ThreadTimeStamp)
 		} else {
-			a.Logger().Info("Multibot mode - bot mentioned, processing message", "bot_user_id", a.config.BotUserID)
+			a.Logger().Info("Multibot mode - bot self-mention (or broadcast), processing message", "bot_user_id", a.config.BotUserID)
 		}
-	}
-
-	// Fallback: skip message events with bot mention (handled by app_mention event)
-	if ev.ChannelType != "dm" && a.config.ContainsBotMention(ev.Text) {
-		a.Logger().Debug("Skipping 'message' event with mention (handled by 'app_mention')", "ts", ev.TimeStamp)
-		return
 	}
 
 	threadID := ev.ThreadTimeStamp
@@ -266,6 +270,8 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 			"channel_id":   ev.Channel,
 			"channel_type": ev.ChannelType,
 			"message_ts":   ev.TimeStamp,
+			"event_type":   "message",
+			"event_ts":     ev.TimeStamp,
 		},
 	}
 

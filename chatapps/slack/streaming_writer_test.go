@@ -41,7 +41,7 @@ func TestNativeStreamingWriter_NilClient(t *testing.T) {
 
 // TestNativeStreamingWriter_NilClient_Stop tests that StopStream fails with nil client
 func TestNativeStreamingWriter_NilClient_Stop(t *testing.T) {
-	adapter := &Adapter{client: nil}
+	adapter := createTestAdapterWithNilClient()
 	writer := NewNativeStreamingWriter(context.Background(), adapter, "C123", "T123", nil)
 
 	// Simulate a scenario where stream is already started (manually set)
@@ -50,7 +50,7 @@ func TestNativeStreamingWriter_NilClient_Stop(t *testing.T) {
 	writer.messageTS = "1234567890.123456"
 	writer.mu.Unlock()
 
-	// Close should fail when trying to stop stream
+	// Close should fail when trying to stop stream due to nil client internally
 	err := writer.Close()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "stop stream")
