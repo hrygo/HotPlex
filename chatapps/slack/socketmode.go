@@ -123,10 +123,35 @@ func (a *Adapter) handleAppMentionEvent(teamID string, ev *slackevents.AppMentio
 		return
 	}
 
+	// Owner policy check (Phase 1: Bot Behavior Spec)
+	if !a.config.CanRespond(ev.User) {
+		a.Logger().Debug("User not allowed by owner policy",
+			"user_id", ev.User,
+			"policy", a.config.GetOwnerPolicy())
+		return
+	}
+
 	threadID := ev.ThreadTimeStamp
 	if threadID == "" {
 		threadID = ev.TimeStamp
 	}
+
+	// Claim thread ownership (Phase 1: Bot Behavior Spec)
+	if a.config.IsThreadOwnershipEnabled() {
+		threadKey := NewThreadKey(ev.Channel, threadID)
+		mentioned := ExtractMentionedUsers(ev.Text)
+		if len(mentioned) > 1 {
+			// Multi-bot mention - set multiple owners
+			a.ownershipTracker.SetOwners(threadKey, mentioned)
+		} else {
+			// Single bot mention - claim ownership
+			a.ownershipTracker.ClaimOwnership(threadKey, a.config.BotUserID)
+		}
+		a.Logger().Debug("Thread ownership claimed",
+			"channel", ev.Channel,
+			"thread_ts", threadID)
+	}
+
 	sessionID := a.GetOrCreateSession(ev.User, a.config.BotUserID, ev.Channel, threadID)
 	userText := a.stripBotMention(ev.Text)
 
@@ -229,6 +254,30 @@ func (a *Adapter) handleSocketModeMessageEvent(teamID string, ev *slackevents.Me
 		} else {
 			a.Logger().Info("Multibot mode - bot mentioned, processing message", "bot_user_id", a.config.BotUserID)
 		}
+	}
+
+	// Thread ownership decision (Phase 1: Bot Behavior Spec)
+	// This replaces and enhances the previous GroupPolicy checks when ThreadOwnership is enabled
+	if a.config.IsThreadOwnershipEnabled() {
+		shouldRespond, reason := a.ShouldRespondToMessage(
+			ev.ChannelType,
+			ev.Channel,
+			ev.ThreadTimeStamp,
+			ev.Text,
+			ev.User,
+		)
+		if !shouldRespond {
+			a.Logger().Debug("Message ignored by thread ownership policy",
+				"reason", reason,
+				"channel", ev.Channel,
+				"thread_ts", ev.ThreadTimeStamp,
+				"user", ev.User)
+			return
+		}
+		a.Logger().Debug("Message accepted by thread ownership policy",
+			"reason", reason,
+			"channel", ev.Channel,
+			"thread_ts", ev.ThreadTimeStamp)
 	}
 
 	// Fallback: skip message events with bot mention (handled by app_mention event)

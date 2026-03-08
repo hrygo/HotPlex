@@ -46,6 +46,9 @@ type Adapter struct {
 	// Session manager for consistent session ID generation
 	sessionMgr session.SessionManager
 
+	// Thread ownership tracker (Phase 1: Bot Behavior Spec)
+	ownershipTracker *ThreadOwnershipTracker
+
 	channelToTeam sync.Map // Map channelID to TeamID for streaming functions
 	channelToUser sync.Map // Map channelID to UserID for streaming functions
 
@@ -129,6 +132,14 @@ func NewAdapter(config *Config, logger *slog.Logger, opts ...base.AdapterOption)
 		} else {
 			logger.Info("Message storage plugin initialized", "type", config.Storage.Type)
 		}
+	}
+
+	// Initialize thread ownership tracker if enabled (Phase 1: Bot Behavior Spec)
+	if config.IsThreadOwnershipEnabled() {
+		a.ownershipTracker = NewThreadOwnershipTracker(config.GetThreadOwnershipTTL(), logger)
+		logger.Info("Thread ownership tracker initialized",
+			"ttl", config.GetThreadOwnershipTTL(),
+			"persist", config.ThreadOwnership.Persist)
 	}
 
 	return a
@@ -472,3 +483,131 @@ func (a *Adapter) SendThreadReply(ctx context.Context, channelID, threadTS, text
 
 // Note: SessionOperations methods (GetSession, FindSessionByUserAndChannel)
 // are inherited from base.Adapter and should not be overridden here
+
+// --- Thread Ownership Methods (Phase 1: Bot Behavior Spec) ---
+
+// GetOwnershipTracker returns the thread ownership tracker.
+// Returns nil if thread ownership is not enabled.
+func (a *Adapter) GetOwnershipTracker() *ThreadOwnershipTracker {
+	return a.ownershipTracker
+}
+
+// ShouldRespondToMessage determines if this bot should respond to a message.
+// This implements the unified decision flow from docs/design/bot-behavior-spec.md.
+//
+// Decision Flow:
+//  1. DM → always treat as @mention (owner policy still applies)
+//  2. @mentioned → check owner policy, claim ownership, respond
+//  3. Own thread → update last active, respond
+//  4. Not own thread → silent
+func (a *Adapter) ShouldRespondToMessage(channelType, channelID, threadTS, text, userID string) (shouldRespond bool, reason string) {
+	// Get or create thread key
+	threadID := threadTS
+	if threadID == "" {
+		// Main channel message - will create new thread
+		return a.shouldRespondToMainChannel(channelType, channelID, text, userID)
+	}
+
+	// Thread message
+	return a.shouldRespondToThreadMessage(channelType, channelID, threadID, text, userID)
+}
+
+// shouldRespondToMainChannel handles decision for main channel messages (no thread).
+func (a *Adapter) shouldRespondToMainChannel(channelType, channelID, text, userID string) (bool, string) {
+	// DM handling
+	if channelType == "dm" || channelType == "im" {
+		if a.config.CanRespond(userID) {
+			return true, "dm_as_mention"
+		}
+		return false, "dm_blocked_by_policy"
+	}
+
+	// Channel/Group handling
+	mentioned := ExtractMentionedUsers(text)
+	isBotMentioned := a.config.ContainsBotMention(text)
+
+	if isBotMentioned {
+		// Bot is @mentioned - check owner policy
+		if a.config.CanRespond(userID) {
+			return true, "mentioned_allowed"
+		}
+		return false, "mentioned_blocked_by_policy"
+	}
+
+	// Not mentioned - must stay silent in main channel
+	if len(mentioned) > 0 {
+		return false, "other_mentioned"
+	}
+	return false, "no_mention_silent"
+}
+
+// shouldRespondToThreadMessage handles decision for thread messages.
+func (a *Adapter) shouldRespondToThreadMessage(channelType, channelID, threadTS, text, userID string) (bool, string) {
+	// DM handling
+	if channelType == "dm" || channelType == "im" {
+		if a.config.CanRespond(userID) {
+			return true, "dm_thread_as_mention"
+		}
+		return false, "dm_thread_blocked_by_policy"
+	}
+
+	// Check if bot is @mentioned
+	isBotMentioned := a.config.ContainsBotMention(text)
+	mentioned := ExtractMentionedUsers(text)
+	threadKey := NewThreadKey(channelID, threadTS)
+
+	if isBotMentioned {
+		// Bot is @mentioned - check owner policy
+		if !a.config.CanRespond(userID) {
+			return false, "thread_mentioned_blocked_by_policy"
+		}
+
+		// Claim/update ownership
+		if a.ownershipTracker != nil {
+			if len(mentioned) > 1 {
+				// Multi-bot mention - set multiple owners
+				a.ownershipTracker.SetOwners(threadKey, mentioned)
+			} else {
+				// Single bot mention - claim ownership
+				a.ownershipTracker.ClaimOwnership(threadKey, a.config.BotUserID)
+			}
+		}
+		return true, "thread_mentioned_claimed"
+	}
+
+	// Not @mentioned - check thread ownership
+	if a.ownershipTracker == nil {
+		// No ownership tracking - stay silent
+		return false, "no_ownership_tracking"
+	}
+
+	// Check if we own this thread
+	if a.ownershipTracker.IsOwner(threadKey, a.config.BotUserID) {
+		a.ownershipTracker.UpdateLastActive(threadKey)
+		return true, "thread_owner"
+	}
+
+	// Check if thread has no owner (unowned thread)
+	if !a.ownershipTracker.HasOwner(threadKey) {
+		// Other bots mentioned - don't claim
+		if len(mentioned) > 0 {
+			return false, "unowned_other_mentioned"
+		}
+		// No mentions at all in unowned thread - stay silent
+		return false, "unowned_no_mention_silent"
+	}
+
+	// Thread has other owner - stay silent
+	return false, "other_owner_silent"
+}
+
+// ClaimThreadOwnership claims ownership of a thread after responding.
+// This should be called after a successful response is sent.
+func (a *Adapter) ClaimThreadOwnership(channelID, threadTS string) {
+	if a.ownershipTracker == nil {
+		return
+	}
+	threadKey := NewThreadKey(channelID, threadTS)
+	a.ownershipTracker.ClaimOwnership(threadKey, a.config.BotUserID)
+}
+

@@ -170,6 +170,30 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 		}
 	}
 
+	// Thread ownership decision (Phase 1: Bot Behavior Spec)
+	// This replaces and enhances the previous GroupPolicy checks when ThreadOwnership is enabled
+	if a.config.IsThreadOwnershipEnabled() {
+		shouldRespond, reason := a.ShouldRespondToMessage(
+			msgEvent.ChannelType,
+			msgEvent.Channel,
+			msgEvent.ThreadTS,
+			msgEvent.Text,
+			msgEvent.User,
+		)
+		if !shouldRespond {
+			a.Logger().Debug("Message ignored by thread ownership policy",
+				"reason", reason,
+				"channel", msgEvent.Channel,
+				"thread_ts", msgEvent.ThreadTS,
+				"user", msgEvent.User)
+			return
+		}
+		a.Logger().Debug("Message accepted by thread ownership policy",
+			"reason", reason,
+			"channel", msgEvent.Channel,
+			"thread_ts", msgEvent.ThreadTS)
+	}
+
 	threadID := msgEvent.ThreadTS
 	if threadID == "" {
 		threadID = msgEvent.TS
