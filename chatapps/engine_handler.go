@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 	intengine "github.com/hrygo/hotplex/internal/engine"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
+	"github.com/hrygo/hotplex/internal/trace"
 )
 
 const (
@@ -1418,6 +1420,26 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 		TaskInstructions: fullInstructions,
 	}
 
+	// Fill observability fields from message context
+	cfg.Platform = msg.Platform
+	cfg.UserID = msg.UserID
+	if channelID, ok := msg.Metadata["channel_id"].(string); ok {
+		cfg.ChannelID = channelID
+	}
+	if teamID, ok := msg.Metadata["team_id"].(string); ok {
+		cfg.TeamID = teamID
+	}
+	// Task type detection based on prompt content
+	cfg.TaskType = detectTaskType(msg.Content)
+	// Generate trace ID for distributed tracing
+	cfg.TraceID = trace.GenerateSimple()
+	// Summarize first prompt for debugging
+	if len(msg.Content) > 100 {
+		cfg.PromptSummary = msg.Content[:100] + "..."
+	} else {
+		cfg.PromptSummary = msg.Content
+	}
+
 	// Get platform-specific operations from AdapterManager
 	messageOps := h.adapters.GetMessageOperations(msg.Platform)
 	sessionOps := h.adapters.GetSessionOperations(msg.Platform)
@@ -1732,4 +1754,40 @@ func formatDataLength(bytes int64) string {
 		return fmt.Sprintf("%.1fKB", float64(bytes)/1024)
 	}
 	return fmt.Sprintf("%d bytes", bytes)
+}
+
+// Task type detection patterns
+var (
+	codePatterns = regexp.MustCompile(`(?i)(write|create|fix|debug|implement|refactor|add|remove|update|code|function|class|method|script|api|endpoint|query|sql|test|spec|deploy|build|compile|run|execute)`)
+	gitPatterns  = regexp.MustCompile(`(?i)(git|commit|push|pull|merge|branch|checkout|rebase|clone|fetch|status|log|diff|reset|cherry|tag|stash|init)`)
+	debugPatterns = regexp.MustCompile(`(?i)(debug|error|bug|exception|stack|trace|issue|problem|fail|crash|broken|fix|repair)`)
+	analysisPatterns = regexp.MustCompile(`(?i)(analyze|analyse|review|explain|describe|what|how|why|compare|summary|extract|parse|crawl|fetch|fetch|get|list|search|find|look)`)
+)
+
+// detectTaskType detects the task type based on prompt content
+func detectTaskType(prompt string) string {
+	lowerPrompt := strings.ToLower(prompt)
+
+	// Check for code-related tasks
+	if codePatterns.MatchString(lowerPrompt) && !gitPatterns.MatchString(lowerPrompt) {
+		return "code"
+	}
+
+	// Check for git tasks
+	if gitPatterns.MatchString(lowerPrompt) {
+		return "git"
+	}
+
+	// Check for debug tasks
+	if debugPatterns.MatchString(lowerPrompt) {
+		return "debug"
+	}
+
+	// Check for analysis/review tasks
+	if analysisPatterns.MatchString(lowerPrompt) {
+		return "analysis"
+	}
+
+	// Default to chat
+	return "chat"
 }
