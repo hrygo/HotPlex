@@ -859,8 +859,31 @@ func (c *StreamCallback) handleAnswer(data any) error {
 		// PRIORITIZE UI: Write to stream immediately so user sees progress
 		n, err := writer.Write([]byte(content))
 		if err != nil {
-			c.logger.Error("Failed to write to native stream, answering completely failed", "error", err)
-			return err
+			c.logger.Error("Failed to write to native stream, attempting fallback", "error", err)
+
+			// Fallback: try to send as non-streaming message
+			// Check if writer has buffered content from failed StartStream
+			var bufferedContent string
+			if sw, ok := writer.(interface{ BufferContent() string }); ok {
+				bufferedContent = sw.BufferContent()
+			}
+
+			// Combine buffered content with current content
+			fullContent := bufferedContent + content
+
+			// Send as non-streaming message via adapter
+			msg := &base.ChatMessage{
+				Platform:  c.platform,
+				SessionID: c.sessionID,
+				Content:   fullContent,
+			}
+			if sendErr := c.adapters.SendMessage(c.ctx, c.platform, c.sessionID, msg); sendErr != nil {
+				c.logger.Error("Fallback also failed", "fallback_error", sendErr)
+				return fmt.Errorf("streaming failed: %w, fallback failed: %v", err, sendErr)
+			}
+
+			c.logger.Info("Fallback to non-streaming succeeded", "content_runes", len([]rune(fullContent)))
+			return nil
 		}
 
 		c.logger.Debug("Successfully wrote to native stream", "bytes", n)

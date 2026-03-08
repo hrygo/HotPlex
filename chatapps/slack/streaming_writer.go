@@ -211,6 +211,20 @@ func (w *NativeStreamingWriter) MessageTS() string {
 	return w.messageTS
 }
 
+// BufferContent 返回当前缓存的内容，用于 fallback 恢复
+func (w *NativeStreamingWriter) BufferContent() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// IsStartFailed 检查流是否启动失败（有缓存内容但未启动）
+func (w *NativeStreamingWriter) IsStartFailed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return !w.started && w.buf.Len() > 0
+}
+
 // IsStarted 返回流是否已启动
 func (w *NativeStreamingWriter) IsStarted() bool {
 	w.mu.Lock()

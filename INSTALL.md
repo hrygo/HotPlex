@@ -72,9 +72,11 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 | `-n, --dry-run` | Dry run mode, show actions without executing |
 | `-q, --quiet` | Quiet mode |
 | `-V, --verbose` | Verbose output |
+| `--skip-verify` | Skip checksum verification |
 | `--skip-wizard` | Skip post-install setup wizard |
 | `--non-interactive` | Non-interactive mode |
 | `-h, --help` | Show help |
+| `--version` | Show script version |
 
 ## Manual Install
 

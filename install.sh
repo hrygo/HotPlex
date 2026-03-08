@@ -44,6 +44,7 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 DIM='\033[2m'
+UNDERLINE='\033[4m'
 NC='\033[0m'
 
 # 临时文件
@@ -57,7 +58,7 @@ CLEANUP_PENDING=true
 # 初始化颜色
 init_colors() {
     if [[ ! -t 1 ]] || [[ "${NO_COLOR:-}" == "true" ]]; then
-        RED="" GREEN="" YELLOW="" BLUE="" CYAN="" MAGENTA="" BOLD="" DIM="" NC=""
+        RED="" GREEN="" YELLOW="" BLUE="" CYAN="" MAGENTA="" BOLD="" DIM="" UNDERLINE="" NC=""
     fi
 }
 
@@ -198,7 +199,6 @@ check_dependencies() {
     fi
 
     # 可选工具（用于向导）
-    command_exists npm || optional_missing+=("npm (安装 Claude Code 需要)")
     command_exists jq || optional_missing+=("jq (API 验证)")
     command_exists openssl || optional_missing+=("openssl (生成密钥)")
 
@@ -294,12 +294,16 @@ get_latest_version() {
 
     # 方法1: GitHub API
     if command_exists curl; then
-        version=$(curl -fsSL "${GITHUB_API}/${REPO}/releases/latest" 2>/dev/null | grep -oP '"tag_name":\s*"v?\K[^"]+' || true)
-        [[ -n "$version" ]] && { echo "$version"; return 0; }
+        version=$(curl -fsSL "${GITHUB_API}/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | cut -d'"' -f4 | sed 's/v//' || true)
+        if [[ -n "$version" ]]; then
+            echo "$version"
+            return 0
+        fi
     fi
 
+
     # 方法2: 重定向解析
-    version=$(http_get "https://github.com/${REPO}/releases/latest" 2>/dev/null | grep -oP 'tag/v?\K[^"]+' | head -1 || true)
+    version=$(http_get "https://github.com/${REPO}/releases/latest" 2>/dev/null | grep -oE 'tag/v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's|tag/||' | sed 's|^v||' || true)
     [[ -n "$version" ]] && { echo "$version"; return 0; }
 
     # 方法3: curl 头信息
@@ -316,7 +320,7 @@ get_installed_version() {
     local binary="${1:-${INSTALL_DIR}}/${BINARY_NAME}"
 
     if [[ -x "$binary" ]]; then
-        "$binary" -version 2>/dev/null | head -1 | grep -oP 'v?\d+\.\d+\.\d+' || echo "unknown"
+        "$binary" -version 2>/dev/null | head -1 | sed -E 's/v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || echo "unknown"
     fi
 }
 
@@ -402,21 +406,30 @@ check_existing_installation() {
 # ==============================================================================
 
 # 验证 Slack Token 格式
+# 格式: xoxb-{team_id}-{app_id}-{secret} 或 xoxb-{team_id}-{secret}
+# 长度要求: >= 20 字符
 validate_slack_token() {
     local token="$1"
-    [[ "$token" =~ ^xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+$ ]]
+    # 放宽验证：只检查前缀和基本结构
+    [[ "$token" =~ ^xoxb-[a-zA-Z0-9_-]+$ ]] && [[ ${#token} -ge 20 ]]
 }
 
 # 验证 Slack App Token 格式
+# 格式: xapp-1-{install_id}-{secret}
+# 长度要求: >= 30 字符
 validate_slack_app_token() {
     local token="$1"
-    [[ "$token" =~ ^xapp-[0-9]+-[0-9]+-[a-zA-Z0-9]+$ ]]
+    # 放宽验证：检查前缀、版本号和基本结构
+    [[ "$token" =~ ^xapp-[0-9]+-[a-zA-Z0-9]+$ ]] && [[ ${#token} -ge 30 ]]
 }
 
 # 验证 Slack User ID 格式
+# 前缀: U (用户), B (Bot), W (Enterprise/Workspace 用户)
+# 长度要求: 9-15 字符
 validate_slack_user_id() {
     local user_id="$1"
-    [[ "$user_id" =~ ^[UBW][A-Z0-9]+$ ]]
+    # 放宽验证：支持 U/B/W 前缀 + 字母数字，长度 9-15
+    [[ "$user_id" =~ ^[UBW][A-Z0-9]+$ ]] && [[ ${#user_id} -ge 9 ]] && [[ ${#user_id} -le 15 ]]
 }
 
 # 验证 GitHub Token 格式
@@ -443,7 +456,7 @@ test_slack_connection() {
     if echo "$response" | grep -q '"ok":true'; then
         return 0
     else
-        local error=$(echo "$response" | grep -oP '"error":\s*"\K[^"]+' || echo "unknown")
+        local error=$(echo "$response" | grep -oE '"error"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "unknown")
         debug "Slack API 错误: $error"
         return 1
     fi
@@ -523,7 +536,7 @@ parse_args() {
     INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 
     # 冲突检查
-    [[ "$QUIET" == "true" ]] && [[ "$VERBOSE" == "true" ]] && warn "同时设置了 -q 和 -V，忽略 -q"
+    [[ "$QUIET" == "true" ]] && [[ "$VERBOSE" == "true" ]] && warn "同时设置了 -q 和 -V，忽略 -q" || true
 }
 
 # 卸载
@@ -589,175 +602,13 @@ do_uninstall() {
 # 配置向导
 # ==============================================================================
 
-# 向导：配置 Claude Code
-wizard_claude_code() {
-    echo ""
-    raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    raw "${BOLD}  Step 1/2: Claude Code 配置${NC}"
-    raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-
-    # 检查 claude 是否已安装
-    if command_exists claude; then
-        local claude_version
-        claude_version=$(claude --version 2>/dev/null | head -1 || echo "unknown")
-        success "Claude Code 已安装: ${GREEN}$claude_version${NC}"
-        echo ""
-    else
-        echo "  ${DIM}Claude Code 是 HotPlex 的推荐 AI 引擎${NC}"
-        echo ""
-
-        if command_exists npm; then
-            if confirm "是否现在安装 Claude Code?" "y"; then
-                step "正在安装 Claude Code..."
-                if npm install -g @anthropic-ai/claude-code 2>/dev/null; then
-                    success "Claude Code 安装成功"
-                else
-                    warn "安装失败，请手动执行: npm install -g @anthropic-ai/claude-code"
-                fi
-            fi
-        else
-            echo "  ${YELLOW}安装方法:${NC}"
-            echo ""
-            echo "    npm install -g @anthropic-ai/claude-code"
-            echo ""
-            echo "  ${DIM}或使用 Homebrew (macOS):${NC}"
-            echo "    ${DIM}brew install claude${NC}"
-            echo ""
-        fi
-    fi
-
-    # 检查 ANTHROPIC_API_KEY
-    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-        success "ANTHROPIC_API_KEY 已设置"
-    else
-        echo ""
-        warn "ANTHROPIC_API_KEY 未设置"
-        echo ""
-
-        if [[ "$INTERACTIVE" == "true" ]] && [[ -t 0 ]]; then
-            local api_key
-            api_key=$(prompt_input "请输入 ANTHROPIC_API_KEY" "" "true")
-
-            if [[ -n "$api_key" ]]; then
-                # 添加到 shell 配置文件
-                local shell_rc=""
-                if [[ -f "${HOME}/.zshrc" ]]; then
-                    shell_rc="${HOME}/.zshrc"
-                elif [[ -f "${HOME}/.bashrc" ]]; then
-                    shell_rc="${HOME}/.bashrc"
-                fi
-
-                if [[ -n "$shell_rc" ]]; then
-                    echo "" >> "$shell_rc"
-                    echo "# Added by HotPlex installer" >> "$shell_rc"
-                    echo "export ANTHROPIC_API_KEY='${api_key}'" >> "$shell_rc"
-                    export ANTHROPIC_API_KEY="$api_key"
-                    success "已添加到 $shell_rc"
-                    info "请运行: source $shell_rc"
-                fi
-            fi
-        else
-            echo "  ${DIM}获取 API Key: https://console.anthropic.com/${NC}"
-            echo ""
-            echo "  设置方法 (添加到 ~/.bashrc 或 ~/.zshrc):"
-            echo "    export ANTHROPIC_API_KEY='your-api-key'"
-            echo ""
-        fi
-    fi
-
-    # 代理配置
-    echo ""
-    echo -e "${CYAN}代理配置 (可选)${NC}"
-
-    local current_proxy="${HTTPS_PROXY:-${HTTP_PROXY:-}}"
-    if [[ -n "$current_proxy" ]]; then
-        success "代理已配置: ${GREEN}$current_proxy${NC}"
-        if confirm "是否修改代理设置?" "n"; then
-            configure_proxy "$current_proxy"
-        fi
-    else
-        if confirm "是否配置 HTTP 代理?" "n"; then
-            configure_proxy ""
-        fi
-    fi
-}
-
-# 配置代理
-configure_proxy() {
-    local current_proxy="$1"
-    local proxy_url
-
-    echo ""
-    echo "  ${DIM}代理地址格式: http://host:port 或 http://user:pass@host:port${NC}"
-    echo "  ${DIM}示例: http://127.0.0.1:7890${NC}"
-    echo ""
-
-    proxy_url=$(prompt_input "请输入代理地址" "$current_proxy")
-
-    if [[ -n "$proxy_url" ]]; then
-        # 验证格式
-        if [[ "$proxy_url" =~ ^https?:// ]]; then
-            local shell_rc=""
-            if [[ -f "${HOME}/.zshrc" ]]; then
-                shell_rc="${HOME}/.zshrc"
-            elif [[ -f "${HOME}/.bashrc" ]]; then
-                shell_rc="${HOME}/.bashrc"
-            fi
-
-            if [[ -n "$shell_rc" ]]; then
-                # 检查是否已存在代理配置
-                if grep -q "HTTP_PROXY" "$shell_rc" 2>/dev/null; then
-                    # 更新现有配置
-                    sed -i.bak "s|export HTTP_PROXY=.*|export HTTP_PROXY='${proxy_url}'|" "$shell_rc"
-                    sed -i.bak "s|export HTTPS_PROXY=.*|export HTTPS_PROXY='${proxy_url}'|" "$shell_rc"
-                else
-                    # 添加新配置
-                    echo "" >> "$shell_rc"
-                    echo "# Proxy settings (Added by HotPlex installer)" >> "$shell_rc"
-                    echo "export HTTP_PROXY='${proxy_url}'" >> "$shell_rc"
-                    echo "export HTTPS_PROXY='${proxy_url}'" >> "$shell_rc"
-                fi
-
-                export HTTP_PROXY="$proxy_url"
-                export HTTPS_PROXY="$proxy_url"
-                rm -f "${shell_rc}.bak"
-                success "代理已配置: $proxy_url"
-                info "请运行: source $shell_rc"
-            fi
-        else
-            warn "代理地址格式无效，应以 http:// 或 https:// 开头"
-        fi
-    elif [[ -n "$current_proxy" ]]; then
-        # 用户输入为空，询问是否清除
-        if confirm "是否清除现有代理配置?" "n"; then
-            local shell_rc=""
-            if [[ -f "${HOME}/.zshrc" ]]; then
-                shell_rc="${HOME}/.zshrc"
-            elif [[ -f "${HOME}/.bashrc" ]]; then
-                shell_rc="${HOME}/.bashrc"
-            fi
-
-            if [[ -n "$shell_rc" ]]; then
-                sed -i.bak "/^export HTTP_PROXY=/d" "$shell_rc"
-                sed -i.bak "/^export HTTPS_PROXY=/d" "$shell_rc"
-                sed -i.bak "/^# Proxy settings/d" "$shell_rc"
-                rm -f "${shell_rc}.bak"
-                unset HTTP_PROXY
-                unset HTTPS_PROXY
-                success "代理配置已清除"
-            fi
-        fi
-    fi
-}
-
 # 向导：配置 Slack Bot 凭据
 wizard_slack_credentials() {
     local env_file="${CONFIG_DIR}/.env"
 
     echo ""
     raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    raw "${BOLD}  Step 2/3: Slack 凭据配置${NC}"
+    raw "${BOLD}  Step 1/2: Slack 凭据配置${NC}"
     raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
@@ -776,12 +627,12 @@ wizard_slack_credentials() {
     local has_valid_slack=false
     [[ "$current_bot_token" =~ ^xoxb- ]] && has_valid_slack=true
 
-    echo "  ${BOLD}当前配置状态:${NC}"
+    echo -e "  ${BOLD}当前配置状态:${NC}"
     echo ""
-    echo "    Slack Bot Token:    $([[ "$current_bot_token" =~ ^xoxb- ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
-    echo "    Slack App Token:    $([[ "$current_app_token" =~ ^xapp- ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
-    echo "    Slack Bot User ID:  $([[ "$current_user_id" =~ ^[UBW][A-Z0-9]+$ ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
-    echo "    GitHub Token:       $([[ "$current_github" =~ ^ghp_ ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
+    echo -e "    Slack Bot Token:    $([[ "$current_bot_token" =~ ^xoxb- ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
+    echo -e "    Slack App Token:    $([[ "$current_app_token" =~ ^xapp- ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
+    echo -e "    Slack Bot User ID:  $([[ "$current_user_id" =~ ^[UBW][A-Z0-9]+$ ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
+    echo -e "    GitHub Token:       $([[ "$current_github" =~ ^ghp_ ]] && echo "${GREEN}✓ 已配置${NC}" || echo "${YELLOW}○ 未配置${NC}")"
     echo ""
 
     # 如果都已配置，询问是否重新配置
@@ -792,11 +643,11 @@ wizard_slack_credentials() {
         fi
     fi
 
-    echo "  ${BOLD}${CYAN}如何获取 Slack 凭据:${NC}"
+    echo -e "  ${BOLD}${CYAN}如何获取 Slack 凭据:${NC}"
     echo ""
-    echo "  ${DIM}1. 访问${NC} ${UNDERLINE}https://api.slack.com/apps${NC}"
-    echo "  ${DIM}2. 创建新 App 或选择现有 App${NC}"
-    echo "  ${DIM}3. 启用 Socket Mode (推荐)${NC}"
+    echo -e "  ${DIM}1. 访问${NC} ${UNDERLINE}https://api.slack.com/apps${NC}"
+    echo -e "  ${DIM}2. 创建新 App 或选择现有 App${NC}"
+    echo -e "  ${DIM}3. 启用 Socket Mode (推荐)${NC}"
     echo ""
 
     # 交互式配置
@@ -806,7 +657,7 @@ wizard_slack_credentials() {
 
         # Bot Token
         echo -e "${CYAN}Bot User OAuth Token (xoxb-...)${NC}"
-        echo "  ${DIM}→ OAuth & Permissions → Bot User OAuth Token${NC}"
+        echo -e "  ${DIM}→ OAuth & Permissions → Bot User OAuth Token${NC}"
         bot_token=$(prompt_input "请输入" "$current_bot_token" "true")
 
         if [[ -n "$bot_token" ]]; then
@@ -830,7 +681,7 @@ wizard_slack_credentials() {
         # App Token
         echo ""
         echo -e "${CYAN}App-Level Token (xapp-...)${NC}"
-        echo "  ${DIM}→ Basic Information → App-Level Tokens${NC}"
+        echo -e "  ${DIM}→ Basic Information → App-Level Tokens${NC}"
         app_token=$(prompt_input "请输入" "$current_app_token" "true")
 
         if [[ -n "$app_token" ]]; then
@@ -844,8 +695,9 @@ wizard_slack_credentials() {
 
         # Bot User ID
         echo ""
-        echo -e "${CYAN}Bot User ID (U... 或 B...)${NC}"
-        echo "  ${DIM}→ 点击机器人头像，查看 Member ID${NC}"
+        echo -e "${CYAN}Bot User ID (U... 或 B... 或 W...)${NC}"
+        echo -e "  ${DIM}→ 点击机器人头像，查看 Member ID${NC}"
+        echo -e "  ${DIM}  U=用户 B=Bot W=企业用户${NC}"
         user_id=$(prompt_input "请输入" "$current_user_id")
 
         if [[ -n "$user_id" ]]; then
@@ -861,7 +713,7 @@ wizard_slack_credentials() {
         echo ""
         if confirm "是否配置 GitHub Token?" "$([[ "$current_github" =~ ^ghp_ ]] && echo "n" || echo "y")"; then
             echo -e "${CYAN}GitHub Personal Access Token (ghp_...)${NC}"
-            echo "  ${DIM}→ https://github.com/settings/tokens${NC}"
+            echo -e "  ${DIM}→ https://github.com/settings/tokens${NC}"
             github_token=$(prompt_input "请输入" "$current_github" "true")
 
             if [[ -n "$github_token" ]]; then
@@ -882,7 +734,7 @@ wizard_slack_credentials() {
         fi
     else
         # 非交互模式，显示指南
-        echo "  ${BOLD}请手动编辑配置文件:${NC}"
+        echo -e "  ${BOLD}请手动编辑配置文件:${NC}"
         echo "    ${CONFIG_DIR}/.env"
         echo ""
     fi
@@ -902,7 +754,7 @@ wizard_slack_yaml() {
 
     echo ""
     raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    raw "${BOLD}  Step 3/3: ChatApps 行为配置${NC}"
+    raw "${BOLD}  Step 2/2: ChatApps 行为配置${NC}"
     raw "${BOLD}${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
@@ -921,7 +773,7 @@ wizard_slack_yaml() {
     fi
 
     echo ""
-    echo "  ${BOLD}${CYAN}ChatApps 配置选项:${NC}"
+    echo -e "  ${BOLD}${CYAN}ChatApps 配置选项:${NC}"
     echo ""
 
     # 读取当前配置
@@ -930,11 +782,11 @@ wizard_slack_yaml() {
     local current_group_policy=$(grep -E "    group_policy:" "$yaml_file" 2>/dev/null | awk '{print $2}' || echo "multibot")
     local current_model=$(grep -E "  default_model:" "$yaml_file" 2>/dev/null | awk '{print $2}' || echo "sonnet")
 
-    echo "  ${DIM}当前设置:${NC}"
-    echo "    工作目录:     ${GREEN}$current_work_dir${NC}"
-    echo "    连接模式:     ${GREEN}$current_mode${NC}"
-    echo "    群组策略:     ${GREEN}$current_group_policy${NC}"
-    echo "    AI 模型:      ${GREEN}$current_model${NC}"
+    echo -e "  ${DIM}当前设置:${NC}"
+    echo -e "    工作目录:     ${GREEN}$current_work_dir${NC}"
+    echo -e "    连接模式:     ${GREEN}$current_mode${NC}"
+    echo -e "    群组策略:     ${GREEN}$current_group_policy${NC}"
+    echo -e "    AI 模型:      ${GREEN}$current_model${NC}"
     echo ""
 
     if ! confirm "是否修改 ChatApps 配置?" "n"; then
@@ -943,8 +795,8 @@ wizard_slack_yaml() {
 
     # 工作目录
     echo ""
-    echo -e "${CYAN}工作目录 (work_dir)${NC}"
-    echo "  ${DIM}Agent 执行代码的工作空间${NC}"
+    echo -e "  ${DIM}工作目录 (work_dir)${NC}"
+    echo -e "  ${DIM}Agent 执行代码的工作空间${NC}"
     local work_dir
     work_dir=$(prompt_input "请输入路径" "$current_work_dir")
     if [[ -n "$work_dir" ]] && [[ "$work_dir" != "$current_work_dir" ]]; then
@@ -956,8 +808,8 @@ wizard_slack_yaml() {
     # 连接模式
     echo ""
     echo -e "${CYAN}连接模式 (mode)${NC}"
-    echo "  ${DIM}socket${NC} - 本地开发，无需公网 IP (推荐)"
-    echo "  ${DIM}http${NC}   - 生产环境，使用 Webhook"
+    echo -e "  ${DIM}socket${NC} - 本地开发，无需公网 IP (推荐)"
+    echo -e "  ${DIM}http${NC}   - 生产环境，使用 Webhook"
     echo ""
     local mode
     if confirm "使用 Socket Mode?" "y"; then
@@ -972,9 +824,9 @@ wizard_slack_yaml() {
     # 群组策略
     echo ""
     echo -e "${CYAN}群组响应策略 (group_policy)${NC}"
-    echo "  ${DIM}allow${NC}     - 响应所有消息"
-    echo "  ${DIM}mention${NC}   - 仅 @提及 时响应"
-    echo "  ${DIM}multibot${NC}  - 多 Bot 模式，@提及时响应，无 @ 时广播提示"
+    echo -e "  ${DIM}allow${NC}     - 响应所有消息"
+    echo -e "  ${DIM}mention${NC}   - 仅 @提及 时响应"
+    echo -e "  ${DIM}multibot${NC}  - 多 Bot 模式，@提及时响应，无 @ 时广播提示"
     echo ""
     echo "  选择群组策略:"
     echo "    1) allow"
@@ -995,9 +847,9 @@ wizard_slack_yaml() {
     # AI 模型
     echo ""
     echo -e "${CYAN}AI 模型 (default_model)${NC}"
-    echo "  ${DIM}sonnet${NC} - 平衡性能与成本 (推荐)"
-    echo "  ${DIM}haiku${NC}  - 快速响应，低成本"
-    echo "  ${DIM}opus${NC}   - 最强性能，较高成本"
+    echo -e "  ${DIM}sonnet${NC} - 平衡性能与成本 (推荐)"
+    echo -e "  ${DIM}haiku${NC}  - 快速响应，低成本"
+    echo -e "  ${DIM}opus${NC}   - 最强性能，较高成本"
     echo ""
     echo "  选择 AI 模型:"
     echo "    1) sonnet (默认)"
@@ -1021,8 +873,8 @@ wizard_slack_yaml() {
     echo ""
     success "ChatApps 配置已更新"
     echo ""
-    echo "  ${DIM}完整配置文件: ${yaml_file}${NC}"
-    echo "  ${DIM}配置文档: https://github.com/hrygo/hotplex/blob/main/docs/chatapps/chatapps-slack.md${NC}"
+    echo -e "  ${DIM}完整配置文件: ${yaml_file}${NC}"
+    echo -e "  ${DIM}配置文档: https://github.com/hrygo/hotplex/blob/main/docs/chatapps/chatapps-slack.md${NC}"
 }
 
 # 生成默认 Slack YAML 配置
@@ -1117,7 +969,8 @@ security:
 EOF
 
     # 替换工作目录
-    sed -i "s|  work_dir: ~/projects|  work_dir: ${work_dir}|" "$yaml_file"
+    sed -i.bak "s|  work_dir: ~/projects|  work_dir: ${work_dir}|" "$yaml_file"
+    rm -f "${yaml_file}.bak"
 
     success "已生成配置文件: $yaml_file"
 }
@@ -1143,7 +996,6 @@ run_setup_wizard() {
     raw "${BOLD}                    🧙 配置向导                              ${NC}"
     raw "${BOLD}════════════════════════════════════════════════════════════${NC}"
 
-    wizard_claude_code
     wizard_slack_credentials
     wizard_slack_yaml
 
@@ -1162,19 +1014,19 @@ show_quick_start() {
     echo ""
     raw "${GREEN}${BOLD}🎉 HotPlex 安装成功!${NC}"
     echo ""
-    echo "  ${BOLD}快速开始:${NC}"
+    echo -e "  ${BOLD}快速开始:${NC}"
     echo ""
     echo "    1. 编辑配置 (如需要):"
-    echo "       ${DIM}${CONFIG_DIR}/.env${NC}"
+    echo -e "       ${DIM}${CONFIG_DIR}/.env${NC}"
     echo ""
     echo "    2. 启动服务:"
-    echo "       ${GREEN}${BINARY_NAME} -env ${CONFIG_DIR}/.env${NC}"
+    echo -e "       ${GREEN}${BINARY_NAME} -env ${CONFIG_DIR}/.env${NC}"
     echo ""
     echo "    3. 查看帮助:"
-    echo "       ${DIM}${BINARY_NAME} -h${NC}"
+    echo -e "       ${DIM}${BINARY_NAME} -h${NC}"
     echo ""
-    echo "  ${DIM}文档: https://github.com/hrygo/hotplex#readme${NC}"
-    echo "  ${DIM}问题: https://github.com/hrygo/hotplex/issues${NC}"
+    echo -e "  ${DIM}文档: https://github.com/hrygo/hotplex#readme${NC}"
+    echo -e "  ${DIM}问题: https://github.com/hrygo/hotplex/issues${NC}"
     echo ""
 }
 
@@ -1216,7 +1068,7 @@ generate_config() {
     cat > "$env_file" << EOF
 # ==============================================================================
 # HotPlex 环境配置
-# 生成时间: $(date -Iseconds)
+# 生成时间: $(date '+%Y-%m-%d %H:%M:%S %z')
 # 完整配置参考: https://github.com/hrygo/hotplex/blob/main/.env.example
 # ==============================================================================
 
