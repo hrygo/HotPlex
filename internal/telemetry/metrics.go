@@ -15,12 +15,30 @@ type Metrics struct {
 	dangersBlocked  int64
 	requestDuration time.Duration
 
+	// Dimensioned metrics (platform, task_type)
+	sessionDurationBuckets map[sessionKey]durationBucket
+	sessionTurns           map[sessionKey]int64
+	sessionErrors          map[sessionKey]int64
+	toolsInvokedByType     map[sessionKey]int64
+	sessionTokens          map[sessionKey]int64
+
 	// Slack permission metrics
 	slackPermissionAllowed        int64
 	slackPermissionBlockedUser    int64
 	slackPermissionBlockedDM      int64
 	slackPermissionBlockedMention int64
 	mu                            sync.RWMutex
+}
+
+type sessionKey struct {
+	platform  string
+	taskType  string
+	direction string // input/output for tokens
+}
+
+type durationBucket struct {
+	sum   time.Duration
+	count int64
 }
 
 var (
@@ -32,7 +50,14 @@ func NewMetrics(logger *slog.Logger) *Metrics {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Metrics{logger: logger}
+	return &Metrics{
+		logger:                 logger,
+		sessionDurationBuckets: make(map[sessionKey]durationBucket),
+		sessionTurns:           make(map[sessionKey]int64),
+		sessionErrors:          make(map[sessionKey]int64),
+		toolsInvokedByType:     make(map[sessionKey]int64),
+		sessionTokens:          make(map[sessionKey]int64),
+	}
 }
 
 func (m *Metrics) IncSessionsActive() {
@@ -132,6 +157,52 @@ func (m *Metrics) IncSlackPermissionBlockedMention() {
 	m.mu.Lock()
 	m.slackPermissionBlockedMention++
 	m.mu.Unlock()
+}
+
+// Dimensioned Metrics Methods
+
+// RecordSessionDuration records session duration with platform and task_type dimensions.
+func (m *Metrics) RecordSessionDuration(platform, taskType string, duration time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := sessionKey{platform: platform, taskType: taskType}
+	bucket := m.sessionDurationBuckets[key]
+	bucket.sum += duration
+	bucket.count++
+	m.sessionDurationBuckets[key] = bucket
+}
+
+// IncSessionTurns increments turn count with platform and task_type dimensions.
+func (m *Metrics) IncSessionTurns(platform, taskType string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := sessionKey{platform: platform, taskType: taskType}
+	m.sessionTurns[key]++
+}
+
+// IncSessionErrorsByType increments error count with platform and task_type dimensions.
+func (m *Metrics) IncSessionErrorsByType(platform, taskType string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := sessionKey{platform: platform, taskType: taskType}
+	m.sessionErrors[key]++
+}
+
+// IncToolsInvokedByType increments tools invoked with platform and task_type dimensions.
+func (m *Metrics) IncToolsInvokedByType(platform, taskType string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := sessionKey{platform: platform, taskType: taskType}
+	m.toolsInvokedByType[key]++
+}
+
+// RecordTokens records token consumption with platform and task_type dimensions.
+// direction should be "input" or "output".
+func (m *Metrics) RecordTokens(platform, taskType, direction string, tokens int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := sessionKey{platform: platform, taskType: taskType, direction: direction}
+	m.sessionTokens[key] += tokens
 }
 
 func InitMetrics(logger *slog.Logger) {

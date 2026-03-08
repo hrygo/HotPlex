@@ -70,7 +70,10 @@ func ExportToJSON(store ChatAppMessageStore, outputPath string, query *MessageQu
 		return fmt.Errorf("failed to marshal messages: %w", err)
 	}
 
-	return os.WriteFile(outputPath, data, 0644)
+	if err := os.WriteFile(outputPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write export file: %w", err)
+	}
+	return nil
 }
 
 // ImportFromJSON 从 JSON 导入消息
@@ -129,5 +132,8 @@ func BackupStorage(store ChatAppMessageStore, backupPath string) error {
 		return fmt.Errorf("failed to marshal backup: %w", err)
 	}
 
-	return os.WriteFile(backupPath, data, 0644)
+	if err := os.WriteFile(backupPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write backup file: %w", err)
+	}
+	return nil
 }
