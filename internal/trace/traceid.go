@@ -29,17 +29,7 @@ func (g *Generator) Generate() string {
 
 	// Generate 8 random bytes (16 hex chars)
 	randomBytes := make([]byte, 8)
-	if _, err := rand.Read(randomBytes); err != nil {
-		// Fallback to time-based random on error
-		randomBytes[0] = byte(timestamp >> 24)
-		randomBytes[1] = byte(timestamp >> 16)
-		randomBytes[2] = byte(timestamp >> 8)
-		randomBytes[3] = byte(timestamp)
-		randomBytes[4] = byte(timestamp >> 20)
-		randomBytes[5] = byte(timestamp >> 12)
-		randomBytes[6] = byte(timestamp >> 4)
-		randomBytes[7] = byte(timestamp)
-	}
+	rand.Read(randomBytes)
 	randomHex := hex.EncodeToString(randomBytes)[:8]
 
 	ts := strings.TrimLeft(hex.EncodeToString([]byte{byte(timestamp >> 24), byte(timestamp >> 16), byte(timestamp >> 8), byte(timestamp)}), "0")
@@ -49,12 +39,6 @@ func (g *Generator) Generate() string {
 // GenerateSimple generates a simple 16-character hex trace ID.
 func GenerateSimple() string {
 	bytes := make([]byte, 8)
-	if _, err := rand.Read(bytes); err != nil {
-		// Fallback to time-based random on error
-		timestamp := time.Now().UnixNano()
-		for i := range bytes {
-			bytes[i] = byte(timestamp >> (i * 8))
-		}
-	}
+	rand.Read(bytes)
 	return hex.EncodeToString(bytes)[:16]
 }

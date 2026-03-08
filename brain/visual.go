@@ -97,19 +97,3 @@ func (v *Visualizer) GetTaskTypeSummary(taskType string) string {
 		return "❓ Unknown"
 	}
 }
-
-// Global visualizer instance
-var globalVisualizer *Visualizer
-
-// GlobalVisualizer returns the global Visualizer instance.
-func GlobalVisualizer() *Visualizer {
-	if globalVisualizer == nil {
-		globalVisualizer = NewVisualizer()
-	}
-	return globalVisualizer
-}
-
-// InitVisualizer initializes the global Visualizer.
-func InitVisualizer() {
-	globalVisualizer = NewVisualizer()
-}
