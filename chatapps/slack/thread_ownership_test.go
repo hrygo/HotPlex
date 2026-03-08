@@ -1,8 +1,8 @@
 package slack
 
 import (
+	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -28,19 +28,18 @@ func TestNewThreadKey(t *testing.T) {
 			expected:  "C12345:",
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := NewThreadKey(tt.channelID, tt.threadTS)
 			if result != tt.expected {
-				t.Errorf("NewThreadKey() = %v, want %v", result, tt.expected)
-			}
-		})
-	}
+                t.Errorf("NewThreadKey() = %v, want %v", result, tt.expected)
+            }
+        })
+    }
 }
 
 func TestThreadOwnershipTracker_ClaimOwnership(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	tracker := NewThreadOwnershipTracker(24*time.Hour, logger)
 	key := NewThreadKey("C12345", "1234567890.123456")
 
@@ -74,7 +73,7 @@ func TestThreadOwnershipTracker_ClaimOwnership(t *testing.T) {
 }
 
 func TestThreadOwnershipTracker_ReleaseOwnership(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	tracker := NewThreadOwnershipTracker(24*time.Hour, logger)
 	key := NewThreadKey("C12345", "1234567890.123456")
 
@@ -94,7 +93,7 @@ func TestThreadOwnershipTracker_ReleaseOwnership(t *testing.T) {
 }
 
 func TestThreadOwnershipTracker_TransferOwnership(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	tracker := NewThreadOwnershipTracker(24*time.Hour, logger)
 	key := NewThreadKey("C12345", "1234567890.123456")
 
@@ -116,7 +115,7 @@ func TestThreadOwnershipTracker_TransferOwnership(t *testing.T) {
 }
 
 func TestThreadOwnershipTracker_SetOwners(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	tracker := NewThreadOwnershipTracker(24*time.Hour, logger)
 	key := NewThreadKey("C12345", "1234567890.123456")
 
@@ -138,7 +137,7 @@ func TestThreadOwnershipTracker_SetOwners(t *testing.T) {
 }
 
 func TestThreadOwnershipTracker_TTL(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	// Use very short TTL for testing
 	tracker := NewThreadOwnershipTracker(100*time.Millisecond, logger)
 	key := NewThreadKey("C12345", "1234567890.123456")
@@ -166,7 +165,7 @@ func TestThreadOwnershipTracker_TTL(t *testing.T) {
 }
 
 func TestThreadOwnershipTracker_CleanupExpired(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	tracker := NewThreadOwnershipTracker(100*time.Millisecond, logger)
 
 	// Create multiple threads
@@ -189,7 +188,7 @@ func TestThreadOwnershipTracker_CleanupExpired(t *testing.T) {
 }
 
 func TestThreadOwnershipTracker_UpdateLastActive(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	tracker := NewThreadOwnershipTracker(100*time.Millisecond, logger)
 	key := NewThreadKey("C12345", "1234567890.123456")
 
@@ -224,7 +223,7 @@ func TestOwnerPolicy(t *testing.T) {
 		{
 			name: "no owner config - public access",
 			config: &Config{
-				BotToken:   "xoxb-123-456-abc",
+				BotToken:      "xoxb-123-456-abc",
 				SigningSecret: strings.Repeat("a", 32),
 			},
 			userID:         "U12345",
@@ -234,7 +233,7 @@ func TestOwnerPolicy(t *testing.T) {
 		{
 			name: "owner_only - primary owner",
 			config: &Config{
-				BotToken:   "xoxb-123-456-abc",
+				BotToken:      "xoxb-123-456-abc",
 				SigningSecret: strings.Repeat("a", 32),
 				Owner: &OwnerConfig{
 					Primary: "U12345",
@@ -248,7 +247,7 @@ func TestOwnerPolicy(t *testing.T) {
 		{
 			name: "owner_only - non-owner blocked",
 			config: &Config{
-				BotToken:   "xoxb-123-456-abc",
+				BotToken:      "xoxb-123-456-abc",
 				SigningSecret: strings.Repeat("a", 32),
 				Owner: &OwnerConfig{
 					Primary: "U12345",
@@ -262,7 +261,7 @@ func TestOwnerPolicy(t *testing.T) {
 		{
 			name: "trusted - primary owner",
 			config: &Config{
-				BotToken:   "xoxb-123-456-abc",
+				BotToken:      "xoxb-123-456-abc",
 				SigningSecret: strings.Repeat("a", 32),
 				Owner: &OwnerConfig{
 					Primary: "U12345",
@@ -277,7 +276,7 @@ func TestOwnerPolicy(t *testing.T) {
 		{
 			name: "trusted - trusted user",
 			config: &Config{
-				BotToken:   "xoxb-123-456-abc",
+				BotToken:      "xoxb-123-456-abc",
 				SigningSecret: strings.Repeat("a", 32),
 				Owner: &OwnerConfig{
 					Primary: "U12345",
@@ -292,7 +291,7 @@ func TestOwnerPolicy(t *testing.T) {
 		{
 			name: "trusted - non-trusted blocked",
 			config: &Config{
-				BotToken:   "xoxb-123-456-abc",
+				BotToken:      "xoxb-123-456-abc",
 				SigningSecret: strings.Repeat("a", 32),
 				Owner: &OwnerConfig{
 					Primary: "U12345",
@@ -307,7 +306,7 @@ func TestOwnerPolicy(t *testing.T) {
 		{
 			name: "public - anyone can access",
 			config: &Config{
-				BotToken:   "xoxb-123-456-abc",
+				BotToken:      "xoxb-123-456-abc",
 				SigningSecret: strings.Repeat("a", 32),
 				Owner: &OwnerConfig{
 					Primary: "U12345",
@@ -319,45 +318,41 @@ func TestOwnerPolicy(t *testing.T) {
 			expectedPolicy: OwnerPolicyPublic,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			canRespond := tt.config.CanRespond(tt.userID)
-			if canRespond != tt.expectedCan {
-				t.Errorf("CanRespond() = %v, want %v", canRespond, tt.expectedCan)
-			}
+            if canRespond != tt.expectedCan {
+                t.Errorf("CanRespond() = %v, want %v", canRespond, tt.expectedCan)
+            }
 
-			policy := tt.config.GetOwnerPolicy()
-			if policy != tt.expectedPolicy {
-				t.Errorf("GetOwnerPolicy() = %v, want %v", policy, tt.expectedPolicy)
-			}
-		})
-	}
+            policy := tt.config.GetOwnerPolicy()
+            if policy != tt.expectedPolicy {
+                t.Errorf("GetOwnerPolicy() = %v, want %v", policy, tt.expectedPolicy)
+            }
+        })
+    }
 }
 
 func TestIsOwner(t *testing.T) {
 	config := &Config{
-		BotToken:   "xoxb-123-456-abc",
+		BotToken:      "xoxb-123-456-abc",
 		SigningSecret: strings.Repeat("a", 32),
 		Owner: &OwnerConfig{
 			Primary: "U12345",
 		},
 	}
-
 	if !config.IsOwner("U12345") {
 		t.Error("U12345 should be owner")
 	}
-
 	if config.IsOwner("U67890") {
 		t.Error("U67890 should not be owner")
 	}
 
 	// No owner config
 	noOwnerConfig := &Config{
-		BotToken:   "xoxb-123-456-abc",
+		BotToken:      "xoxb-123-456-abc",
 		SigningSecret: strings.Repeat("a", 32),
 	}
-
 	if noOwnerConfig.IsOwner("U12345") {
 		t.Error("Should return false when no owner config")
 	}
@@ -365,21 +360,18 @@ func TestIsOwner(t *testing.T) {
 
 func TestIsTrusted(t *testing.T) {
 	config := &Config{
-		BotToken:   "xoxb-123-456-abc",
+		BotToken:      "xoxb-123-456-abc",
 		SigningSecret: strings.Repeat("a", 32),
 		Owner: &OwnerConfig{
 			Trusted: []string{"U11111", "U22222"},
 		},
 	}
-
 	if !config.IsTrusted("U11111") {
 		t.Error("U11111 should be trusted")
 	}
-
 	if !config.IsTrusted("U22222") {
 		t.Error("U22222 should be trusted")
 	}
-
 	if config.IsTrusted("U99999") {
 		t.Error("U99999 should not be trusted")
 	}
@@ -388,32 +380,29 @@ func TestIsTrusted(t *testing.T) {
 func TestThreadOwnershipConfig(t *testing.T) {
 	// With config
 	config := &Config{
-		BotToken:   "xoxb-123-456-abc",
+		BotToken:      "xoxb-123-456-abc",
 		SigningSecret: strings.Repeat("a", 32),
 		ThreadOwnership: &ThreadOwnershipConfig{
 			Enabled: true,
 			TTL:     12 * time.Hour,
+			Persist: true,
 		},
 	}
-
 	if !config.IsThreadOwnershipEnabled() {
 		t.Error("Thread ownership should be enabled")
 	}
-
 	if config.GetThreadOwnershipTTL() != 12*time.Hour {
 		t.Errorf("TTL should be 12h, got %v", config.GetThreadOwnershipTTL())
 	}
 
 	// Without config
 	noConfig := &Config{
-		BotToken:   "xoxb-123-456-abc",
+		BotToken:      "xoxb-123-456-abc",
 		SigningSecret: strings.Repeat("a", 32),
 	}
-
 	if noConfig.IsThreadOwnershipEnabled() {
 		t.Error("Thread ownership should be disabled by default")
 	}
-
 	if noConfig.GetThreadOwnershipTTL() != 24*time.Hour {
 		t.Errorf("Default TTL should be 24h, got %v", noConfig.GetThreadOwnershipTTL())
 	}
