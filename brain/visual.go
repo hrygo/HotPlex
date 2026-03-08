@@ -2,6 +2,7 @@ package brain
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/hrygo/hotplex/provider"
 )
@@ -99,17 +100,23 @@ func (v *Visualizer) GetTaskTypeSummary(taskType string) string {
 }
 
 // Global visualizer instance
-var globalVisualizer *Visualizer
+var (
+	globalVisualizer *Visualizer
+	globalVisualOnce sync.Once
+)
 
 // GlobalVisualizer returns the global Visualizer instance.
 func GlobalVisualizer() *Visualizer {
-	if globalVisualizer == nil {
+	globalVisualOnce.Do(func() {
 		globalVisualizer = NewVisualizer()
-	}
+	})
 	return globalVisualizer
 }
 
 // InitVisualizer initializes the global Visualizer.
+// Deprecated: Use GlobalVisualizer() which auto-initializes.
 func InitVisualizer() {
-	globalVisualizer = NewVisualizer()
+	globalVisualOnce.Do(func() {
+		globalVisualizer = NewVisualizer()
+	})
 }

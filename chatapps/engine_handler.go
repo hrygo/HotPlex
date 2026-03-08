@@ -14,9 +14,9 @@ import (
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
 	intengine "github.com/hrygo/hotplex/internal/engine"
+	"github.com/hrygo/hotplex/internal/trace"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
-	"github.com/hrygo/hotplex/internal/trace"
 )
 
 const (

@@ -3,6 +3,7 @@ package trace
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -31,6 +32,7 @@ func (g *Generator) Generate() string {
 	randomBytes := make([]byte, 8)
 	if _, err := rand.Read(randomBytes); err != nil {
 		// Fallback to time-based random on error
+		slog.Warn("trace: rand.Read failed, using time-based fallback", "error", err)
 		randomBytes[0] = byte(timestamp >> 24)
 		randomBytes[1] = byte(timestamp >> 16)
 		randomBytes[2] = byte(timestamp >> 8)
@@ -51,6 +53,7 @@ func GenerateSimple() string {
 	bytes := make([]byte, 8)
 	if _, err := rand.Read(bytes); err != nil {
 		// Fallback to time-based random on error
+		slog.Warn("trace: rand.Read failed in GenerateSimple, using time-based fallback", "error", err)
 		timestamp := time.Now().UnixNano()
 		for i := range bytes {
 			bytes[i] = byte(timestamp >> (i * 8))
