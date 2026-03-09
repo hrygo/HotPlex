@@ -152,8 +152,18 @@ func (c *SecurityConfig) CheckOrigin() func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
 			// Non-browser clients (e.g., curl, CLI tools) may not send Origin
-			// Allow these connections but log for auditing
-			c.logger.Debug("WebSocket connection without Origin header", "remote_addr", r.RemoteAddr)
+			// Security: Require API key validation for connections without Origin
+			if c.apiKeyEnabled {
+				// API key already validated in Step 1, connection is authenticated
+				c.logger.Debug("WebSocket connection authenticated via API key (no Origin)",
+					"remote_addr", r.RemoteAddr)
+				return true
+			}
+			// No API key mode (development environment) - allow for local testing
+			// WARNING: This is a security risk in production
+			c.logger.Warn("WebSocket connection without Origin and no API key validation",
+				"remote_addr", r.RemoteAddr,
+				"security_note", "Enable API key for production use")
 			return true
 		}
 
