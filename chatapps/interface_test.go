@@ -249,7 +249,7 @@ func TestStreamCallback_WithNilMessageOps(t *testing.T) {
 	callback := NewStreamCallback(
 		ctx, "test-session", "test-platform",
 		adapters, logger, mockEngine, false, nil,
-		nil, nil,
+		nil, nil, false,
 	)
 
 	if callback == nil {
@@ -279,6 +279,7 @@ func TestStreamCallback_WithMessageOps(t *testing.T) {
 		adapters, logger, mockEngine, false, map[string]any{},
 		mockOps,
 		nil,
+		false,
 	)
 
 	if callback == nil {

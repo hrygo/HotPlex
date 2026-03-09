@@ -152,8 +152,18 @@ func (c *SecurityConfig) CheckOrigin() func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
 			// Non-browser clients (e.g., curl, CLI tools) may not send Origin
-			// Allow these connections but log for auditing
-			c.logger.Debug("WebSocket connection without Origin header", "remote_addr", r.RemoteAddr)
+			// Security: Require API key validation for connections without Origin
+			if c.apiKeyEnabled {
+				// API key already validated in Step 1, connection is authenticated
+				c.logger.Debug("WebSocket connection authenticated via API key (no Origin)",
+					"remote_addr", r.RemoteAddr)
+				return true
+			}
+			// No API key mode (development environment) - allow for local testing
+			// WARNING: This is a security risk in production
+			c.logger.Warn("WebSocket connection without Origin and no API key validation",
+				"remote_addr", r.RemoteAddr,
+				"security_note", "Enable API key for production use")
 			return true
 		}
 
@@ -172,14 +182,35 @@ func (c *SecurityConfig) CheckOrigin() func(r *http.Request) bool {
 }
 
 // validateAPIKey checks for a valid API key in the request.
-// Supports both X-API-Key header and api_key query parameter.
+// Security priority: Header > WebSocket Protocol > Query Parameter (deprecated)
 func (c *SecurityConfig) validateAPIKey(r *http.Request) bool {
-	// Try header first
+	// Try header first (preferred method)
 	apiKey := r.Header.Get("X-API-Key")
 
-	// Fall back to query parameter
+	// Try WebSocket subprotocol (for native WebSocket clients)
+	// Format: Sec-WebSocket-Protocol: hotplex, hotplex-api-<token>
+	if apiKey == "" {
+		if protocols := r.Header.Get("Sec-WebSocket-Protocol"); protocols != "" {
+			for _, p := range strings.Split(protocols, ",") {
+				p = strings.TrimSpace(p)
+				if token, found := strings.CutPrefix(p, "hotplex-api-"); found {
+					apiKey = token
+					c.logger.Debug("API key extracted from WebSocket subprotocol")
+					break
+				}
+			}
+		}
+	}
+
+	// Fall back to query parameter (DEPRECATED - for backward compatibility only)
+	// WARNING: Query parameters are visible in server logs and browser history
 	if apiKey == "" {
 		apiKey = r.URL.Query().Get("api_key")
+		if apiKey != "" {
+			c.logger.Warn("API key passed via query parameter (DEPRECATED - use X-API-Key header)",
+				"remote_addr", r.RemoteAddr,
+				"recommendation", "Migrate to X-API-Key header or WebSocket subprotocol")
+		}
 	}
 
 	if apiKey == "" {
