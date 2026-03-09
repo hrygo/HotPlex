@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/hrygo/hotplex/brain"
 )
@@ -79,9 +80,9 @@ func (bi *BrainIntegration) confirmIntent(ctx context.Context, prompt string) (b
 		return false, fmt.Errorf("brain chat: %w", err)
 	}
 
-	// Parse response
+	// Parse response (case-insensitive match)
 	bi.logger.Debug("Intent confirmation response", "response", response)
-	return response == "yes" || response == "Yes" || response == "YES", nil
+	return strings.EqualFold(strings.TrimSpace(response), "yes"), nil
 }
 
 // compressContext uses Brain to compress the context.

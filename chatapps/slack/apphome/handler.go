@@ -138,10 +138,11 @@ func (h *Handler) HandleCapabilityClick(ctx context.Context, callback *slack.Int
 }
 
 // HandleViewSubmission handles Modal form submission.
-// This executes the capability with the submitted parameters.
-func (h *Handler) HandleViewSubmission(ctx context.Context, callback *slack.InteractionCallback) error {
+// Returns ViewSubmissionResponse for validation errors, nil for success.
+// The error return is for unexpected errors (not validation failures).
+func (h *Handler) HandleViewSubmission(ctx context.Context, callback *slack.InteractionCallback) (*slack.ViewSubmissionResponse, error) {
 	if h.client == nil {
-		return fmt.Errorf("slack client not configured")
+		return nil, fmt.Errorf("slack client not configured")
 	}
 
 	capID := callback.View.PrivateMetadata
@@ -154,7 +155,7 @@ func (h *Handler) HandleViewSubmission(ctx context.Context, callback *slack.Inte
 	// Get capability definition
 	cap, ok := h.registry.Get(capID)
 	if !ok {
-		return fmt.Errorf("capability not found: %s", capID)
+		return nil, fmt.Errorf("capability not found: %s", capID)
 	}
 
 	// Extract parameters
@@ -166,8 +167,8 @@ func (h *Handler) HandleViewSubmission(ctx context.Context, callback *slack.Inte
 			"user", userID,
 			"capability", capID,
 			"errors", errors)
-		// Return validation errors in response
-		return h.buildValidationResponse(callback, errors)
+		// Return validation errors as Slack ViewSubmissionResponse
+		return slack.NewErrorsViewSubmissionResponse(errors), nil
 	}
 
 	h.logger.Info("Executing capability",
@@ -192,21 +193,8 @@ func (h *Handler) HandleViewSubmission(ctx context.Context, callback *slack.Inte
 			"capability", capID)
 	}
 
-	// Return empty response to close the Modal
-	return nil
-}
-
-// buildValidationResponse builds an error response for validation failures.
-func (h *Handler) buildValidationResponse(callback *slack.InteractionCallback, errors map[string]string) error {
-	// Build error message
-	var errorLines []string
-	for _, errMsg := range errors {
-		errorLines = append(errorLines, fmt.Sprintf("• %s", errMsg))
-	}
-
-	// Log validation errors (actual response would need slack.ResponseAction)
-	h.logger.Warn("Validation errors", "errors", strings.Join(errorLines, "\n"))
-	return fmt.Errorf("validation failed: %s", strings.Join(errorLines, ", "))
+	// Return nil to close the Modal successfully
+	return nil, nil
 }
 
 // IsCapabilityAction checks if an action ID is a capability click action.
