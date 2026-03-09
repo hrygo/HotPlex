@@ -55,8 +55,9 @@ type NativeStreamingWriter struct {
 	failedFlushChunks []string // 失败的 flush 块（用于潜在恢复）
 
 	// TTL 监控：检测流超时
-	streamStartTime time.Time // 流启动时间
-	streamExpired   bool      // 流是否已超时
+	streamStartTime  time.Time // 流启动时间
+	streamExpired    bool      // 流是否已超时
+	ttlWarningLogged bool      // TTL 警告是否已记录（防止重复日志）
 
 	// 存储回调（可选）
 	storeCallback func(content string)
@@ -138,13 +139,15 @@ func (w *NativeStreamingWriter) flushBuffer() {
 
 	// TTL 检测：如果流已超时，不再尝试 AppendStream，直接记录失败
 	if streamExpired || time.Since(streamStartTime) > StreamTTL {
-		w.adapter.Logger().Warn("Stream TTL exceeded, marking as expired",
-			"channel_id", w.channelID,
-			"message_ts", w.messageTS,
-			"stream_age", time.Since(streamStartTime),
-			"ttl", StreamTTL)
-
 		w.mu.Lock()
+		if !w.ttlWarningLogged {
+			w.adapter.Logger().Warn("Stream TTL exceeded, marking as expired",
+				"channel_id", w.channelID,
+				"message_ts", w.messageTS,
+				"stream_age", time.Since(streamStartTime),
+				"ttl", StreamTTL)
+			w.ttlWarningLogged = true
+		}
 		w.streamExpired = true
 		w.failedFlushChunks = append(w.failedFlushChunks, content)
 		w.mu.Unlock()
