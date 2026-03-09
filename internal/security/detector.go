@@ -504,6 +504,11 @@ func (dd *Detector) loadSafePatterns() {
 		// System tools (Allowlist - read-only/safe operations only)
 		{`^(ls|cd|pwd|mkdir|rmdir|touch|head|tail|grep|find|awk|sed|sort|uniq|wc|cut|tr)\b`, "Unix utilities", "develop-tools"},
 		{`^(date|time|which|whoami|id|hostname|uname|uptime)\b`, "System utilities", "develop-tools"},
+
+		// Loki Mode / Claude Code file reference patterns (Allowlist)
+		// These patterns appear in prompts and should not be treated as shell injection
+		{"@`[^`]+`", "Loki mode file reference", "develop-tools"},
+		{`@[a-zA-Z0-9_./-]+(?:\s|$)`, "File reference notation", "develop-tools"},
 	}
 
 	for _, p := range patterns {
