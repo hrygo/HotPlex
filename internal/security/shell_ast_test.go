@@ -272,11 +272,11 @@ func TestAnalyzeHeuristics(t *testing.T) {
 	analyzer := NewSemanticAnalyzer(testLogger(t))
 
 	// Test with invalid input that can't be parsed
-	result, err := analyzer.Analyze("")
+	_, err := analyzer.Analyze("")
 	assert.Error(t, err) // Empty input should error
 
 	// Test command substitution in unparseable format
-	result, err = analyzer.Analyze("$()")
+	result, err := analyzer.Analyze("$()")
 	if err == nil {
 		assert.NotNil(t, result)
 	}

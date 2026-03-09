@@ -307,7 +307,7 @@ func TestCommandTaintChecker(t *testing.T) {
 	tracker.Validate(taint.ID)
 
 	// Now should be allowed
-	allowed, reason = checker.CheckCommandTaint(cmd, []string{taint.ID})
+	allowed, _ := checker.CheckCommandTaint(cmd, []string{taint.ID})
 	assert.True(t, allowed)
 }
 

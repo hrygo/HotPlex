@@ -334,7 +334,7 @@ func (w *alertWorker) sendWebhook(alert *Alert) error {
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
@@ -430,14 +430,12 @@ func NewThreatDetectedAlert(detection *ThreatDetectionEvent) *Alert {
 
 // NewDangerBlockAlert creates a new danger block alert.
 func NewDangerBlockAlert(detection *DangerDetectionEvent) *Alert {
-	severity := AlertSeverityWarning
+	severity := AlertSeverityInfo
 	switch detection.Level {
 	case 0: // Critical
 		severity = AlertSeverityCritical
 	case 1: // High
 		severity = AlertSeverityWarning
-	default:
-		severity = AlertSeverityInfo
 	}
 
 	return &Alert{

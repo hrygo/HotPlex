@@ -146,7 +146,7 @@ func (le *LandlockEnforcer) CheckPath(path string) error {
 		allowed = filepath.Clean(allowed)
 
 		// Check if path is within allowed directory
-		if absPath == allowed || filepath.HasPrefix(absPath, allowed+string(filepath.Separator)) {
+		if absPath == allowed || (strings.HasPrefix(absPath, allowed) && len(absPath) > len(allowed) && absPath[len(allowed)] == filepath.Separator) {
 			// Check extension restrictions
 			if le.isExtensionDenied(absPath) {
 				return fmt.Errorf("file extension denied: %s", filepath.Ext(absPath))
@@ -278,7 +278,7 @@ func (ptp *PathTraversalPrevention) CheckPath(path string) error {
 		allowed := false
 		for _, root := range ptp.allowedRoots {
 			root = filepath.Clean(root)
-			if absPath == root || filepath.HasPrefix(absPath, root+string(filepath.Separator)) {
+			if absPath == root || (strings.HasPrefix(absPath, root) && len(absPath) > len(root) && absPath[len(root)] == filepath.Separator) {
 				allowed = true
 				break
 			}

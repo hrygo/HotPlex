@@ -176,6 +176,7 @@ func TestWorkspaceManager_UpdateQuota(t *testing.T) {
 
 	ws, err := wm.CreateWorkspace(ctx, cfg)
 	require.NoError(t, err)
+	_ = ws // ws will be retrieved after quota update
 
 	newQuota := ResourceQuota{
 		MemoryLimit:       4 * 1024 * 1024 * 1024, // 4GB
