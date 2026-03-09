@@ -29,7 +29,7 @@ jobs:
   test-unit:
     name: Unit Tests
     needs: changes
-    if: needs.changes.outputs.go == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.go == 'true' || github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -75,7 +75,7 @@ jobs:
   test-integration:
     name: Integration Tests
     needs: changes
-    if: needs.changes.outputs.go == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.go == 'true' || github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
