@@ -13,6 +13,7 @@ import (
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/event"
 	intengine "github.com/hrygo/hotplex/internal/engine"
+	"github.com/hrygo/hotplex/internal/strutil"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/hrygo/hotplex/types"
 )
@@ -1447,7 +1448,7 @@ func (h *EngineMessageHandler) Handle(ctx context.Context, msg *ChatMessage) err
 	if isLongTask {
 		h.logger.Info("Long-running task detected, disabling native streaming",
 			"session_id", msg.SessionID,
-			"prompt_preview", truncateString(msg.Content, 50))
+			"prompt_preview", strutil.Truncate(msg.Content, 50))
 	}
 
 	// Create stream callback with injected dependencies
@@ -1784,19 +1785,4 @@ func isLongTaskPrompt(prompt string) bool {
 		}
 	}
 	return false
-}
-
-// truncateString truncates a string to maxLen runes, appending "..." if truncated
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	runes := []rune(s)
-	if len(runes) > maxLen {
-		return string(runes[:maxLen-3]) + "..."
-	}
-	return s
 }
