@@ -1,0 +1,155 @@
+# ============================================
+# HotPlex + Node.js Stack
+# ============================================
+# Extends base HotPlex with Node.js/TypeScript productivity tools
+# Build: docker build -f Dockerfile.node -t hotplex:node .
+# ============================================
+
+FROM golang:1.25-alpine
+
+LABEL maintainer="HotPlex Team"
+LABEL description="HotPlex AI Agent with Go + Node.js/TypeScript stack"
+
+WORKDIR /app
+
+# ============================================
+# Core System Dependencies
+# ============================================
+RUN apk add --no-cache \
+    # Version control
+    git \
+    github-cli \
+    # Build tools
+    make \
+    bash \
+    # Modern file tools (Claude Code recommended)
+    ripgrep \
+    fd \
+    bat \
+    fzf \
+    eza \
+    # Network debugging
+    curl \
+    jq \
+    wget \
+    netcat-openbsd \
+    openssl \
+    # Node.js (for Claude Code)
+    nodejs \
+    npm \
+    # Process management
+    procps \
+    htop \
+    # Config processing
+    yq \
+    # Script runtime
+    python3 \
+    # Editor
+    vim \
+    # Timezone support
+    tzdata \
+    # Archive tools
+    zip \
+    unzip \
+    # Build essentials (for native npm modules)
+    gcc \
+    g++ \
+    make \
+    musl-dev \
+    # Runtime deps
+    ca-certificates
+
+# ============================================
+# Go Toolchain (HotPlex native)
+# ============================================
+RUN go install github.com/air-verse/air@latest && \
+    go install github.com/go-delve/delve/cmd/dlv@latest && \
+    go install golang.org/x/tools/cmd/goimports@latest && \
+    go install mvdan.cc/gofumpt@latest && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
+    go install github.com/securego/gosec/v2/cmd/gosec@latest && \
+    go install golang.org/x/vuln/cmd/govulncheck@latest && \
+    go install github.com/golang/mock/mockgen@latest && \
+    go install gotest.tools/gotestsum@latest && \
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# ============================================
+# Node.js Stack Extensions
+# ============================================
+# Package managers
+RUN corepack enable && \
+    corepack prepare pnpm@latest --activate && \
+    corepack prepare yarn@stable --activate
+
+# Bun (ultra-fast runtime)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV BUN_INSTALL="/root/.bun"
+ENV PATH="${BUN_INSTALL}/bin:${PATH}"
+
+# Global npm tools
+RUN npm install -g \
+    # TypeScript
+    typescript ts-node tsx \
+    # Linting & Formatting
+    eslint prettier @biomejs/biome \
+    # Testing
+    jest vitest \
+    # Build
+    esbuild \
+    # Frameworks
+    @nestjs/cli create-next-app create-vite \
+    # Dev tools
+    nodemon pm2 \
+    # Utilities
+    http-server serve concurrently cross-env
+
+# ============================================
+# WebSocket & Claude Code
+# ============================================
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then ARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; fi && \
+    wget -qO /usr/local/bin/websocat \
+    "https://github.com/vi/websocat/releases/download/v1.14.1/websocat.${ARCH}-unknown-linux-musl" && \
+    chmod +x /usr/local/bin/websocat
+
+RUN npm install -g @anthropic-ai/claude-code@latest
+
+# ============================================
+# HotPlex Binary
+# ============================================
+ARG TARGETARCH
+COPY linux/${TARGETARCH}/hotplexd /app/hotplexd
+RUN chmod +x /app/hotplexd
+
+# ============================================
+# Verification
+# ============================================
+RUN go version && \
+    node --version && \
+    pnpm --version && \
+    bun --version && \
+    tsc --version && \
+    websocat --version && \
+    claude --version 2>/dev/null || true
+
+# ============================================
+# User Setup
+# ============================================
+ARG HOST_UID=1000
+RUN adduser -D -u ${HOST_UID} hotplex && \
+    mkdir -p /home/hotplex/go/pkg/mod \
+             /home/hotplex/.cache/go-build \
+             /home/hotplex/.npm \
+             /home/hotplex/.cache && \
+    chown -R hotplex:hotplex /home/hotplex
+
+ENV GOPATH=/home/hotplex/go
+ENV GOCACHE=/home/hotplex/.cache/go-build
+ENV NPM_CONFIG_PREFIX=/home/hotplex/.npm-global
+ENV PATH="${GOPATH}/bin:${NPM_CONFIG_PREFIX}/bin:${BUN_INSTALL}/bin:${PATH}"
+
+USER hotplex
+
+EXPOSE 8080
+ENTRYPOINT ["/app/hotplexd"]

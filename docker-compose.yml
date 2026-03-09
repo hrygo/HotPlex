@@ -103,6 +103,24 @@
 # ------------------------------------------------------------------------------
 x-hotplex-common: &hotplex-common
   image: ghcr.io/hrygo/hotplex:latest
+  # ============================================
+  # Container Security Hardening
+  # ============================================
+  security_opt:
+    - no-new-privileges:true
+    - seccomp:build/docker/seccomp.json
+  # Read-only root filesystem
+  read_only: true
+  # Temporary files in tmpfs (for /tmp, /var/tmp)
+  tmpfs:
+    - /tmp:size=100m,mode=1777
+    - /var/tmp:size=50m,mode=1777
+  # Drop all capabilities (only keep minimal required)
+  cap_drop:
+    - ALL
+  # ============================================
+  # End Security Hardening
+  # ============================================
   environment: &common-env
     HOST_UID: ${HOST_UID:-1000}
     # ─────────────────────────────────────────────────────────────────

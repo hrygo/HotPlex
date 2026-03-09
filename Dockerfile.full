@@ -1,0 +1,209 @@
+# ============================================
+# HotPlex Full Stack (All-in-One)
+# ============================================
+# HotPlex with Go + Node.js + Python + Java/Kotlin + Rust
+# Build: docker build -f Dockerfile.full -t hotplex:full .
+# ============================================
+
+FROM golang:1.25-alpine
+
+LABEL maintainer="HotPlex Team"
+LABEL description="HotPlex AI Agent with full multi-stack toolchain"
+
+WORKDIR /app
+
+# ============================================
+# Core System Dependencies
+# ============================================
+RUN apk add --no-cache \
+    # Version control
+    git \
+    github-cli \
+    # Build tools
+    make \
+    bash \
+    cmake \
+    # Modern file tools (Claude Code recommended)
+    ripgrep \
+    fd \
+    bat \
+    fzf \
+    eza \
+    # Network debugging
+    curl \
+    jq \
+    wget \
+    netcat-openbsd \
+    openssl \
+    # Node.js (for Claude Code)
+    nodejs \
+    npm \
+    # Process management
+    procps \
+    htop \
+    # Config processing
+    yq \
+    # Script runtime
+    python3 \
+    py3-pip \
+    py3-venv \
+    # Editor
+    vim \
+    # Timezone support
+    tzdata \
+    # Archive tools
+    zip \
+    unzip \
+    tar \
+    # Build essentials
+    gcc \
+    g++ \
+    musl-dev \
+    libffi-dev \
+    openssl-dev \
+    openssl-libs \
+    # Database
+    postgresql-dev \
+    sqlite-dev \
+    # Protobuf (for gRPC)
+    protobuf-dev \
+    # Java
+    openjdk25 \
+    fontconfig \
+    ttf-dejavu \
+    # Runtime deps
+    ca-certificates
+
+# ============================================
+# Go Toolchain (HotPlex native)
+# ============================================
+RUN go install github.com/air-verse/air@latest && \
+    go install github.com/go-delve/delve/cmd/dlv@latest && \
+    go install golang.org/x/tools/cmd/goimports@latest && \
+    go install mvdan.cc/gofumpt@latest && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
+    go install github.com/securego/gosec/v2/cmd/gosec@latest && \
+    go install golang.org/x/vuln/cmd/govulncheck@latest && \
+    go install github.com/golang/mock/mockgen@latest && \
+    go install gotest.tools/gotestsum@latest && \
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# ============================================
+# Node.js Stack
+# ============================================
+RUN corepack enable && \
+    corepack prepare pnpm@latest --activate && \
+    corepack prepare yarn@stable --activate
+
+RUN curl -fsSL https://bun.sh/install | bash
+ENV BUN_INSTALL="/root/.bun"
+ENV PATH="${BUN_INSTALL}/bin:${PATH}"
+
+RUN npm install -g \
+    typescript ts-node tsx \
+    eslint prettier @biomejs/biome \
+    jest vitest \
+    esbuild \
+    @nestjs/cli create-next-app create-vite \
+    nodemon pm2
+
+# ============================================
+# Python Stack
+# ============================================
+RUN pip3 install --upgrade pip setuptools wheel --break-system-packages && \
+    pip3 install --break-system-packages \
+    poetry uv pipx \
+    ruff black isort mypy \
+    pytest pytest-cov pytest-asyncio \
+    ipython \
+    fastapi uvicorn httpx
+
+# ============================================
+# Rust Stack
+# ============================================
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+RUN rustup component add clippy rustfmt rust-analyzer rust-src && \
+    cargo install cargo-watch cargo-nextest trunk
+
+# ============================================
+# Java/Kotlin Stack
+# ============================================
+ENV GRADLE_VERSION=9.4
+RUN wget -q https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip && \
+    unzip gradle-${GRADLE_VERSION}-bin.zip -d /opt && \
+    rm gradle-${GRADLE_VERSION}-bin.zip
+ENV GRADLE_HOME=/opt/gradle-${GRADLE_VERSION}
+ENV PATH="${GRADLE_HOME}/bin:${PATH}"
+
+ENV MAVEN_VERSION=3.9.13
+RUN wget -q https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz && \
+    tar -xzf apache-maven-${MAVEN_VERSION}-bin.tar.gz -C /opt && \
+    rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
+ENV MAVEN_HOME=/opt/apache-maven-${MAVEN_VERSION}
+ENV PATH="${MAVEN_HOME}/bin:${PATH}"
+
+RUN wget -qO /usr/local/bin/ktlint \
+    "https://github.com/pinterest/ktlint/releases/download/1.5.0/ktlint" && \
+    chmod +x /usr/local/bin/ktlint
+
+# ============================================
+# WebSocket & Claude Code
+# ============================================
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then ARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; fi && \
+    wget -qO /usr/local/bin/websocat \
+    "https://github.com/vi/websocat/releases/download/v1.14.1/websocat.${ARCH}-unknown-linux-musl" && \
+    chmod +x /usr/local/bin/websocat
+
+RUN npm install -g @anthropic-ai/claude-code@latest
+
+# ============================================
+# HotPlex Binary
+# ============================================
+ARG TARGETARCH
+COPY linux/${TARGETARCH}/hotplexd /app/hotplexd
+RUN chmod +x /app/hotplexd
+
+# ============================================
+# Verification
+# ============================================
+RUN echo "=== HotPlex Full Stack ===" && \
+    go version && \
+    node --version && \
+    python3 --version && \
+    rustc --version && \
+    java --version && \
+    echo "=== All stacks ready ===" && \
+    websocat --version && \
+    claude --version 2>/dev/null || true
+
+# ============================================
+# User Setup
+# ============================================
+ARG HOST_UID=1000
+RUN adduser -D -u ${HOST_UID} hotplex && \
+    mkdir -p /home/hotplex/go/pkg/mod \
+             /home/hotplex/.cache/go-build \
+             /home/hotplex/.cargo \
+             /home/hotplex/.rustup \
+             /home/hotplex/.npm \
+             /home/hotplex/.gradle \
+             /home/hotplex/.m2 && \
+    chown -R hotplex:hotplex /home/hotplex /usr/local/rustup /usr/local/cargo
+
+ENV GOPATH=/home/hotplex/go
+ENV GOCACHE=/home/hotplex/.cache/go-build
+ENV CARGO_HOME=/home/hotplex/.cargo
+ENV RUSTUP_HOME=/home/hotplex/.rustup
+ENV GRADLE_USER_HOME=/home/hotplex/.gradle
+ENV PATH="${GOPATH}/bin:${CARGO_HOME}/bin:${BUN_INSTALL}/bin:${PATH}"
+
+USER hotplex
+
+EXPOSE 8080
+ENTRYPOINT ["/app/hotplexd"]

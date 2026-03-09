@@ -323,6 +323,18 @@ docker-build-cache: ## @docker Build image (legacy, full cache - for debugging)
 docker-build-tag: docker-build ## @docker Build and tag image
 	@printf "${GREEN}✅ Build complete.${NC}\n"
 
+docker-build-distroless: ## @docker Build distroless image (minimal attack surface)
+	@printf "${CYAN}🐳 Building Distroless Docker image (container hardened)...${NC}\n"
+	@printf "${DIM}Using gcr.io/distroless/cc-debian12:nonroot base${NC}\n"
+	HOST_UID=$(HOST_UID) VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_TIME=$(BUILD_TIME) \
+		docker build -f build/docker/Dockerfile \
+		--build-arg HOST_UID=$(HOST_UID) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		-t hotplex:distroless -t hotplex:distroless-$(VERSION) .
+	@printf "${GREEN}✅ Distroless build complete: hotplex:distroless${NC}\n"
+
 docker-sync: ## @docker Sync project configs to ~/.hotplex
 	@printf "${CYAN}🔄 Synchronizing project configs...${NC}\n"
 	@# Verify source configs exist
@@ -491,4 +503,4 @@ stack-clean: ## @docker Remove all stack images
 	docker rmi -f hotplex:go hotplex:node hotplex:python hotplex:java hotplex:rust hotplex:full 2>/dev/null || true
 	@printf "${GREEN}✅ Cleaned${NC}\n"
 
-.PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable config-info docker-build docker-build-cache docker-build-tag docker-run docker-sync docker-up docker-down docker-restart docker-logs docker-check-net docker-health docker-upgrade docker-push docker-push-tag docker-buildx docker-clean stack-go stack-node stack-python stack-java stack-rust stack-full stack-all stack-clean
+.PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable config-info docker-build docker-build-cache docker-build-tag docker-build-distroless docker-run docker-sync docker-up docker-down docker-restart docker-logs docker-check-net docker-health docker-upgrade docker-push docker-push-tag docker-buildx docker-clean stack-go stack-node stack-python stack-java stack-rust stack-full stack-all stack-clean

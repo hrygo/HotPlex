@@ -1,0 +1,172 @@
+# ============================================
+# HotPlex + Rust Stack
+# ============================================
+# Extends base HotPlex with Rust productivity tools
+# Build: docker build -f Dockerfile.rust -t hotplex:rust .
+# ============================================
+
+FROM golang:1.25-alpine
+
+LABEL maintainer="HotPlex Team"
+LABEL description="HotPlex AI Agent with Go + Rust stack"
+
+WORKDIR /app
+
+# ============================================
+# Core System Dependencies
+# ============================================
+RUN apk add --no-cache \
+    # Version control
+    git \
+    github-cli \
+    # Build tools
+    make \
+    bash \
+    cmake \
+    # Modern file tools (Claude Code recommended)
+    ripgrep \
+    fd \
+    bat \
+    fzf \
+    eza \
+    # Network debugging
+    curl \
+    jq \
+    wget \
+    netcat-openbsd \
+    openssl \
+    # Node.js (for Claude Code)
+    nodejs \
+    npm \
+    # Process management
+    procps \
+    htop \
+    # Config processing
+    yq \
+    # Script runtime
+    python3 \
+    # Editor
+    vim \
+    # Timezone support
+    tzdata \
+    # Archive tools
+    zip \
+    # Build essentials (for Rust crates)
+    gcc \
+    g++ \
+    musl-dev \
+    # Additional deps for common crates
+    openssl-dev \
+    openssl-libs \
+    libffi-dev \
+    # Database
+    postgresql-dev \
+    sqlite-dev \
+    # Protobuf (for gRPC)
+    protobuf-dev \
+    # Runtime deps
+    ca-certificates
+
+# ============================================
+# Go Toolchain (HotPlex native)
+# ============================================
+RUN go install github.com/air-verse/air@latest && \
+    go install github.com/go-delve/delve/cmd/dlv@latest && \
+    go install golang.org/x/tools/cmd/goimports@latest && \
+    go install mvdan.cc/gofumpt@latest && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
+    go install github.com/securego/gosec/v2/cmd/gosec@latest && \
+    go install golang.org/x/vuln/cmd/govulncheck@latest && \
+    go install github.com/golang/mock/mockgen@latest && \
+    go install gotest.tools/gotestsum@latest && \
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# ============================================
+# Rust Stack Extensions
+# ============================================
+# Rustup
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Rust components
+RUN rustup component add clippy rustfmt rust-analyzer rust-src llvm-tools-preview
+
+# Essential cargo tools
+RUN cargo install \
+    # Hot reload
+    cargo-watch \
+    # Better test runner
+    cargo-nextest \
+    # Code coverage
+    cargo-tarpaulin \
+    cargo-llvm-cov \
+    # Security
+    cargo-audit \
+    cargo-deny \
+    # Dependency management
+    cargo-edit \
+    # Code inspection
+    cargo-expand \
+    cargo-tree \
+    cargo-modules \
+    # WebAssembly
+    trunk \
+    wasm-pack \
+    # Database
+    sqlx-cli \
+    # Benchmarking
+    criterion \
+    hyperfine
+
+# ============================================
+# WebSocket & Claude Code
+# ============================================
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then ARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; fi && \
+    wget -qO /usr/local/bin/websocat \
+    "https://github.com/vi/websocat/releases/download/v1.14.1/websocat.${ARCH}-unknown-linux-musl" && \
+    chmod +x /usr/local/bin/websocat
+
+RUN npm install -g @anthropic-ai/claude-code@latest
+
+# ============================================
+# HotPlex Binary
+# ============================================
+ARG TARGETARCH
+COPY linux/${TARGETARCH}/hotplexd /app/hotplexd
+RUN chmod +x /app/hotplexd
+
+# ============================================
+# Verification
+# ============================================
+RUN go version && \
+    rustc --version && \
+    cargo clippy --version && \
+    cargo nextest --version && \
+    websocat --version && \
+    claude --version 2>/dev/null || true
+
+# ============================================
+# User Setup
+# ============================================
+ARG HOST_UID=1000
+RUN adduser -D -u ${HOST_UID} hotplex && \
+    mkdir -p /home/hotplex/go/pkg/mod \
+             /home/hotplex/.cache/go-build \
+             /home/hotplex/.cargo \
+             /home/hotplex/.rustup && \
+    chown -R hotplex:hotplex /home/hotplex /usr/local/rustup /usr/local/cargo
+
+ENV GOPATH=/home/hotplex/go
+ENV GOCACHE=/home/hotplex/.cache/go-build
+ENV CARGO_HOME=/home/hotplex/.cargo
+ENV RUSTUP_HOME=/home/hotplex/.rustup
+ENV PATH="${CARGO_HOME}/bin:${GOPATH}/bin:${PATH}"
+
+USER hotplex
+
+EXPOSE 8080
+ENTRYPOINT ["/app/hotplexd"]
