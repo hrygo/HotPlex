@@ -158,7 +158,7 @@ func (tt *TaintTracker) MarkUntrusted(value string, source TaintSource) *Taint {
 		Tag: TaintTag{
 			Source:   source,
 			Level:    TaintLevelUntrusted,
-			Path:     []string{source.String()},
+			Path:     []string{string(source)},
 			Metadata: make(map[string]any),
 		},
 		ID: generateTaintID(),

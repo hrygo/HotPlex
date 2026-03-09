@@ -12,6 +12,80 @@ import (
 )
 
 // ========================================
+// Alert Event Types (mirrored from telemetry for self-containment)
+// ========================================
+
+// ThreatDetectionEvent contains details about an AI Guard threat detection.
+type ThreatDetectionEvent struct {
+	InputType string
+	Category  string
+	Score     float64
+	Blocked   bool
+	Verdict   string
+	SessionID string
+	Details   string
+}
+
+// DangerDetectionEvent contains details about a detected dangerous operation.
+type DangerDetectionEvent struct {
+	Operation      string
+	Reason         string
+	PatternMatched string
+	Level          int
+	Category       string
+	BypassAllowed  bool
+	SessionID      string
+	UserID         string
+	WorkspaceID    string
+}
+
+// BypassAttemptEvent contains details about a security bypass attempt.
+type BypassAttemptEvent struct {
+	TargetRule  string
+	Success     bool
+	AttemptedBy string
+	SessionID   string
+}
+
+// PermissionDeniedEvent contains details about a permission denial.
+type PermissionDeniedEvent struct {
+	Resource  string
+	Operation string
+	Reason    string
+	SessionID string
+	UserID    string
+}
+
+// WorkspaceAccessEvent contains details about workspace access operations.
+type WorkspaceAccessEvent struct {
+	WorkspaceID string
+	Operation   string
+	Path        string
+	Allowed     bool
+	SessionID   string
+	UserID      string
+}
+
+// LandlockEventType represents types of Landlock filesystem enforcement events.
+type LandlockEventType string
+
+const (
+	LandlockEventAccessDenied  LandlockEventType = "access_denied"
+	LandlockEventPathViolation LandlockEventType = "path_violation"
+	LandlockEventRuleApplied   LandlockEventType = "rule_applied"
+)
+
+// LandlockEvent contains details about a Landlock enforcement event.
+type LandlockEvent struct {
+	EventType   LandlockEventType
+	Operation   string
+	Path        string
+	Allowed     bool
+	WorkspaceID string
+	AccessMask  []string
+}
+
+// ========================================
 // Alert Configuration
 // ========================================
 

@@ -948,7 +948,7 @@ func (s *HTMLSanitizer) basicSanitize(input string) string {
 	input = styleRe.ReplaceAllString(input, "")
 
 	// Remove on* event handlers
-	eventRe := regexp.MustCompile(`(?i)\bon\w+\s*=`)
+	_ = regexp.MustCompile(`(?i)\bon\w+\s*=`)
 
 	// Note: This is a basic fallback, the full parser is more reliable
 	return input
