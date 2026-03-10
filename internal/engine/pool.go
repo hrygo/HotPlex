@@ -253,6 +253,10 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 		"provider_session_id", providerSessionID,
 	)
 
+	// Check if this is a resume BEFORE building CLI args
+	// This is critical because buildCLIArgs may create the marker
+	isResuming := sm.markerStore.Exists(providerSessionID)
+
 	args := sm.buildCLIArgs(providerSessionID, sessLog, prompt, cfg)
 	cmd := exec.CommandContext(sessCtx, sm.cliPath, args...)
 
@@ -309,9 +313,6 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 	sessLog.Info("OS Process started (Cold Start)",
 		"pid", cmd.Process.Pid,
 		"pgid", cmd.Process.Pid)
-
-	// Check if this was a resume from persistent store
-	isResuming := sm.markerStore.Exists(providerSessionID)
 
 	sess := &Session{
 		ID:                sessionID,
