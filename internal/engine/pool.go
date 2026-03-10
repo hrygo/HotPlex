@@ -308,6 +308,17 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 		}
 	}
 
+	// Create marker AFTER CLI process successfully starts
+	// This prevents creating markers for failed session starts
+	if !isResuming {
+		if err := sm.markerStore.Create(providerSessionID); err != nil {
+			sessLog.Warn("Failed to create session marker after successful start", "error", err)
+			// Don't fail the session - marker is optional for operation
+		} else {
+			sessLog.Info("Created session marker after successful CLI start", "provider_session_id", providerSessionID)
+		}
+	}
+
 	startedCh <- nil
 
 	sessLog.Info("OS Process started (Cold Start)",
@@ -403,7 +414,7 @@ func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logg
 	} else {
 		opts.ProviderSessionID = providerSessionID
 
-		// Critical: Delete stale CLI session file before creating new marker
+		// Critical: Delete stale CLI session file before starting new session
 		// This prevents "Session ID is already in use" errors when:
 		// - /reset deleted the marker but not the CLI session file (old bug)
 		// - Daemon restart with stale CLI session files on disk
@@ -411,8 +422,8 @@ func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logg
 			sessLog.Warn("Failed to cleanup stale CLI session file", "error", err)
 		}
 
-		_ = sm.markerStore.Create(providerSessionID)
 		sessLog.Info("Creating new persistent CLI session")
+		// NOTE: Marker will be created AFTER CLI successfully starts in startSession()
 	}
 
 	return sm.provider.BuildCLIArgs(providerSessionID, opts)

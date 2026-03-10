@@ -83,11 +83,10 @@ func (p *ClaudeCodeProvider) BuildCLIArgs(providerSessionID string, opts *Provid
 		p.logger.Debug("Resuming existing Claude Code session", "session_id", providerSessionID)
 	} else {
 		args = append(args, "--session-id", providerSessionID)
-		// Create marker for persistence detection
-		if err := p.markerStore.Create(providerSessionID); err != nil {
-			p.logger.Warn("Failed to create session marker", "session_id", providerSessionID, "error", err)
-		}
 		p.logger.Debug("Creating new Claude Code session", "session_id", providerSessionID)
+		// NOTE: Marker is NOT created here anymore!
+		// It will be created in pool.go AFTER the CLI process successfully starts.
+		// This prevents creating markers for failed session starts.
 	}
 
 	// Permission mode
