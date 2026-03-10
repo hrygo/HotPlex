@@ -234,15 +234,27 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 	go monitorStartup(startupCtx, startedCh, cancel)
 
 	uniqueStr := fmt.Sprintf("%s:session:%s", sm.opts.Namespace, sessionID)
-	// Check if session needs new ProviderSessionID (for /clear command)
+
+	// Check if session needs new ProviderSessionID (for /clear command or failed resume)
 	var providerSessionID string
+	var oldProviderSessionID string // Track old ID for cleanup
 	if sm.resetSessions[sessionID] {
+		// Calculate old ID for cleanup
+		oldProviderSessionID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(uniqueStr)).String()
+
 		// Generate random UUID for fresh session
 		providerSessionID = uuid.New().String()
 		delete(sm.resetSessions, sessionID) // Clear the flag
-		sm.logger.Info("Generated new random ProviderSessionID for cleared session",
+		sm.logger.Info("Generated new random ProviderSessionID for reset session",
 			"session_id", sessionID,
-			"provider_session_id", providerSessionID)
+			"old_provider_session_id", oldProviderSessionID,
+			"new_provider_session_id", providerSessionID)
+
+		// Cleanup old marker and CLI session files to prevent "Session ID is already in use"
+		_ = sm.markerStore.Delete(oldProviderSessionID)
+		if err := sm.provider.CleanupSession(oldProviderSessionID, cfg.WorkDir); err != nil {
+			sm.logger.Warn("Failed to cleanup old CLI session after reset", "error", err)
+		}
 	} else {
 		// Use deterministic SHA1 for consistent session resumption
 		providerSessionID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(uniqueStr)).String()
@@ -372,6 +384,12 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 				} else {
 					sessLog.Info("Cleaned up CLI session file after failed resume", "provider_session_id", providerSessionID)
 				}
+				// Mark this session for fresh provider_session_id regeneration on next retry
+				// This ensures we get a completely new CLI session instead of retrying with the same ID
+				sm.mu.Lock()
+				sm.resetSessions[sessionID] = true
+				sm.mu.Unlock()
+				sessLog.Info("Marked session for fresh ProviderSessionID after failed resume", "session_id", sessionID)
 			}
 			// Update status to Dead and notify callback
 			sess.SetStatus(SessionStatusDead)
