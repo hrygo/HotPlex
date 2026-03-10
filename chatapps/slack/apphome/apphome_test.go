@@ -1,6 +1,9 @@
 package apphome
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/slack-go/slack"
@@ -262,4 +265,206 @@ func TestBuilder_BuildFullHomeView(t *testing.T) {
 	require.NotNil(t, view)
 	assert.Equal(t, slack.VTHomeTab, view.Type)
 	assert.NotEmpty(t, view.Blocks.BlockSet)
+}
+
+func TestIsCapabilityAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		actionID string
+		want     bool
+	}{
+		{
+			name:     "capability action",
+			actionID: "cap_click:test_cap",
+			want:     true,
+		},
+		{
+			name:     "non-capability action",
+			actionID: "other_action",
+			want:     false,
+		},
+		{
+			name:     "empty action",
+			actionID: "",
+			want:     false,
+		},
+		{
+			name:     "prefix only",
+			actionID: ActionIDPrefix,
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsCapabilityAction(tt.actionID)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestExtractCapabilityID(t *testing.T) {
+	tests := []struct {
+		name     string
+		actionID string
+		want     string
+	}{
+		{
+			name:     "extract capability ID",
+			actionID: "cap_click:code_review",
+			want:     "code_review",
+		},
+		{
+			name:     "no prefix",
+			actionID: "other",
+			want:     "other",
+		},
+		{
+			name:     "empty",
+			actionID: "",
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractCapabilityID(tt.actionID)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestExecutor_RenderPrompt(t *testing.T) {
+	executor := NewExecutor()
+
+	cap := Capability{
+		ID:             "test",
+		Name:           "Test",
+		PromptTemplate: "Hello {{.name}}, your score is {{.score}}",
+	}
+
+	prompt, err := executor.renderPrompt(cap, map[string]string{
+		"name":  "Alice",
+		"score": "100",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Hello Alice, your score is 100", prompt)
+}
+
+func TestExecutor_RenderPrompt_InvalidTemplate(t *testing.T) {
+	executor := NewExecutor()
+
+	cap := Capability{
+		ID:             "test",
+		Name:           "Test",
+		PromptTemplate: "Hello {{.name}",
+	}
+
+	_, err := executor.renderPrompt(cap, map[string]string{"name": "Alice"})
+	assert.Error(t, err)
+}
+
+func TestExecutor_RenderPrompt_MissingParam(t *testing.T) {
+	executor := NewExecutor()
+
+	cap := Capability{
+		ID:             "test",
+		Name:           "Test",
+		PromptTemplate: "Hello {{.name}}",
+	}
+
+	prompt, err := executor.renderPrompt(cap, map[string]string{})
+	require.NoError(t, err)
+	assert.Contains(t, prompt, "Hello")
+}
+
+func TestBrainIntegration_PreparePrompt_NoBrain(t *testing.T) {
+	bi := &BrainIntegration{brain: nil}
+
+	prompt, err := bi.PreparePrompt(context.Background(), Capability{}, map[string]string{}, "test prompt")
+	require.NoError(t, err)
+	assert.Equal(t, "test prompt", prompt)
+}
+
+func TestBrainIntegration_CompressContext_NoBrain(t *testing.T) {
+	bi := &BrainIntegration{brain: nil}
+
+	compressed, err := bi.compressContext(context.Background(), "long prompt")
+	require.NoError(t, err)
+	assert.Equal(t, "long prompt", compressed)
+}
+
+func TestBrainIntegration_EnhancePrompt_NoBrain(t *testing.T) {
+	bi := &BrainIntegration{brain: nil}
+
+	enhanced, err := bi.EnhancePrompt(context.Background(), "original", "context")
+	require.NoError(t, err)
+	assert.Equal(t, "original", enhanced)
+}
+
+func TestBrainIntegration_ConfirmIntent_NoBrain(t *testing.T) {
+	bi := &BrainIntegration{brain: nil}
+
+	confirmed, err := bi.confirmIntent(context.Background(), "test prompt")
+	require.NoError(t, err)
+	assert.True(t, confirmed)
+}
+
+func TestLoadDefaultCapabilities(t *testing.T) {
+	registry := NewRegistry()
+	err := LoadDefaultCapabilities(registry)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, registry.Count())
+
+	cap, ok := registry.Get("code_review")
+	require.True(t, ok)
+	assert.Equal(t, "代码审查", cap.Name)
+	assert.Equal(t, "code", cap.Category)
+	assert.Len(t, cap.Parameters, 1)
+}
+
+func TestSetup_Disabled(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	handler, registry, executor := Setup(nil, nil, Config{Enabled: false}, logger)
+	assert.Nil(t, handler)
+	assert.Nil(t, registry)
+	assert.Nil(t, executor)
+}
+
+func TestDefaultCategories(t *testing.T) {
+	categories := DefaultCategories()
+	assert.Len(t, categories, 6)
+
+	// Check some expected categories
+	catMap := make(map[string]CategoryInfo)
+	for _, c := range categories {
+		catMap[c.ID] = c
+	}
+
+	assert.Equal(t, "代码", catMap["code"].Name)
+	assert.Equal(t, ":computer:", catMap["code"].Icon)
+	assert.Equal(t, "调试", catMap["debug"].Name)
+	assert.Equal(t, ":bug:", catMap["debug"].Icon)
+}
+
+func TestCapability_BrainOptions(t *testing.T) {
+	cap := Capability{
+		ID:             "test",
+		Name:           "Test",
+		PromptTemplate: "Test",
+		BrainOpts: BrainOptions{
+			IntentConfirm:   true,
+			CompressContext: true,
+			PreferredModel:  "claude-3",
+		},
+	}
+
+	err := cap.Validate()
+	assert.NoError(t, err)
+	assert.True(t, cap.BrainOpts.IntentConfirm)
+	assert.True(t, cap.BrainOpts.CompressContext)
+	assert.Equal(t, "claude-3", cap.BrainOpts.PreferredModel)
 }
