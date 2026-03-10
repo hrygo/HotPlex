@@ -422,6 +422,22 @@ func (sm *SessionPool) buildCLIArgs(providerSessionID string, sessLog *slog.Logg
 	if sm.markerStore.Exists(providerSessionID) {
 		opts.ResumeSession = true
 		opts.ProviderSessionID = providerSessionID
+
+		// CRITICAL: Cleanup CLI session file BEFORE resume attempt
+		// This handles "zombie markers" from old code that created markers before CLI started.
+		//
+		// Why this is safe:
+		// - If CLI process is dead: cleanup allows fresh start
+		// - If CLI process is alive: it will recreate the file as needed
+		//
+		// This prevents "Session ID is already in use" errors on the FIRST attempt,
+		// eliminating the need for retry with new ProviderSessionID.
+		if err := sm.provider.CleanupSession(providerSessionID, cfg.WorkDir); err != nil {
+			sessLog.Warn("Failed to cleanup CLI session file before resume", "error", err)
+		} else {
+			sessLog.Debug("Cleaned up CLI session file before resume attempt", "provider_session_id", providerSessionID)
+		}
+
 		sessLog.Info("Resuming existing persistent CLI session")
 	} else {
 		opts.ProviderSessionID = providerSessionID
