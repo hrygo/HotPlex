@@ -1,20 +1,12 @@
 package security
 
 import (
-	"context"
 	"log/slog"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// testLogger returns a logger for testing.
-func testLogger(t *testing.T) *slog.Logger {
-	t.Helper()
-	return slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelDebug}))
-}
 
 // ========================================
 // Landlock Tests

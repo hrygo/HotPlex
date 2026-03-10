@@ -8,12 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testLogger returns a logger for testing.
-func testLogger(t *testing.T) *slog.Logger {
-	t.Helper()
-	return slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelDebug}))
-}
-
 // ========================================
 // Shell AST Parser Tests
 // ========================================
@@ -120,8 +114,6 @@ func TestParseCommandSubstitution(t *testing.T) {
 }
 
 func TestTokenize(t *testing.T) {
-	parser := NewShellASTParser(testLogger(t))
-
 	tests := []struct {
 		name     string
 		input    string
