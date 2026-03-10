@@ -20,7 +20,7 @@ provider:
 
 engine:
   # 支持环境变量，灵活配置工作目录
-  work_dir: ${HOTPLEX_WORK_DIR:-/home/hotplex/projects}
+  work_dir: ${HOTPLEX_WORK_DIR:~/workspace/hotplex-workspace}
   timeout: 30m
   idle_timeout: 1h
 
