@@ -1,5 +1,32 @@
 # CHANGELOG.md
 
+## [v0.24.1] - 2026-03-11
+
+### 🔧 Patch Release - Cleanup & Testing Infrastructure
+
+This release removes deprecated chatapp adapters, adds Claude Code skills, and introduces thinking tag verification test scripts.
+
+### Changed
+
+#### 🧹 Code Cleanup
+- **Deprecated Adapters** - Removed unused chatapp adapters (dingtalk, discord, telegram, whatsapp)
+- **Claude Code Skills** - Added skills for container operations, data management, and diagnostics
+- **Docker Configuration** - Updated Dockerfiles and docker-compose configurations
+
+### Added
+
+#### 🧪 Testing Infrastructure
+- **Thinking Tag Verification** - Added test scripts to verify Claude CLI's thinking tag behavior:
+  - `test_claude_thinking.py` - Check for thinking tags in events
+  - `test_thinking_simple.py` - Simplified WebSocket-based test
+  - `test_thinking_via_ws.py` - Direct WebSocket testing
+
+#### 📚 Example Enhancement
+- **Java HTTP Client** - Added Java examples (`SimpleClient.java`, `HotPlexWsClient.java`)
+- **Example Verification** - Verified all Go/Python/Node.js examples compile with current codebase
+
+---
+
 ## [v0.24.0] - 2026-03-10
 
 ### 🚀 Minor Release - System Prompt Injection & API Docs Expansion
