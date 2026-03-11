@@ -45,8 +45,9 @@ type Session struct {
 	Status       SessionStatus
 	statusChange chan SessionStatus
 
-	mu     sync.RWMutex
-	closed bool
+	mu                 sync.RWMutex
+	closed             bool
+	firstOutputReceived bool // Tracks if we've received valid stdout output
 
 	callback   Callback
 	logger     *slog.Logger
@@ -112,13 +113,14 @@ func (s *Session) GetStatusChange() <-chan SessionStatus {
 }
 
 // waitForReady monitors the session and transitions from Starting to Ready
-// when the process is confirmed alive and responsive.
+// when the process is confirmed alive, responsive, and has produced valid output.
+// This prevents false-ready states where the process starts but immediately fails.
 func (s *Session) waitForReady(ctx context.Context, timeout time.Duration) {
 	panicx.SafeGo(s.logger, func() {
 		deadlineTimer := time.NewTimer(timeout)
 		defer deadlineTimer.Stop()
 
-		ticker := time.NewTicker(500 * time.Millisecond)
+		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 
 		for {
@@ -138,7 +140,9 @@ func (s *Session) waitForReady(ctx context.Context, timeout time.Duration) {
 					s.mu.Unlock()
 					return
 				}
-				if s.isAliveLocked() {
+				// Check both: process is alive AND we've received valid output
+				// This prevents false-ready when process starts but immediately fails
+				if s.isAliveLocked() && s.firstOutputReceived {
 					s.mu.Unlock()
 					s.SetStatus(SessionStatusReady)
 					return
@@ -278,6 +282,16 @@ func (s *Session) ReadStdout() {
 		if line == "" {
 			continue
 		}
+
+		// Mark that we've received valid output - session is truly ready
+		// This is used by waitForReady to distinguish between:
+		// - Process briefly starts then fails (not ready)
+		// - Process starts and is actually serving requests (ready)
+		s.mu.Lock()
+		if !s.firstOutputReceived {
+			s.firstOutputReceived = true
+		}
+		s.mu.Unlock()
 
 		cb := s.GetCallback()
 		if cb != nil {

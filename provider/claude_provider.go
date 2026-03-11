@@ -451,17 +451,29 @@ func (p *ClaudeCodeProvider) CleanupSession(providerSessionID string, workDir st
 		}
 	}
 
-	// Claude Code stores sessions in ~/.claude/projects/<workspace-key>/<providerSessionID>.jsonl
+	// Claude Code stores sessions in ~/.claude/projects/<workspace-key>/
+	// - <providerSessionID>.jsonl (conversation history)
+	// - <providerSessionID>/ (working directory with tool state, memory locks, etc.)
 	projectsDir := filepath.Join(os.Getenv("HOME"), ".claude", "projects")
 	workspaceKey := strings.ReplaceAll(cwd, "/", "-")
-	sessionPath := filepath.Join(projectsDir, workspaceKey, providerSessionID+".jsonl")
+	sessionDir := filepath.Join(projectsDir, workspaceKey)
 
-	// Best effort deletion
+	// 1. Delete session file: <providerSessionID>.jsonl
+	sessionPath := filepath.Join(sessionDir, providerSessionID+".jsonl")
 	if err := os.Remove(sessionPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove Claude Code session file: %w", err)
 	}
-
 	p.logger.Debug("Cleaned up Claude Code session file", "path", sessionPath)
+
+	// 2. Delete session working directory: <providerSessionID>/
+	// This directory contains tool state, memory locks, and other artifacts
+	// that cause "Session ID is already in use" errors if not cleaned
+	sessionWorkingDir := filepath.Join(sessionDir, providerSessionID)
+	if err := os.RemoveAll(sessionWorkingDir); err != nil {
+		return fmt.Errorf("remove Claude Code session working directory: %w", err)
+	}
+	p.logger.Debug("Cleaned up Claude Code session working directory", "path", sessionWorkingDir)
+
 	return nil
 }
 
