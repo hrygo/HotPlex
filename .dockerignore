@@ -1,85 +1,32 @@
-# ==============================================================================
-# HotPlex Docker Build Context Filter
-# ==============================================================================
-# Excludes non-essential files to speed up build context transfer.
-# Only Go source, go.mod/go.sum, docker/ and docker-entrypoint.sh are needed.
-# ==============================================================================
-
-# --- Secrets & Environment (NEVER include in image) ---
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-credentials.json
-secrets/
-
-# --- Version Control ---
+# Git
 .git
-.github
 .gitignore
-.gitattributes
 
-# --- AI Agent State ---
-.claude
-.agent
-.serena
+# Go
+bin/
+dist/
+vendor/
+.logs/
+coverage.*
+*.log
 
-# --- IDE ---
-.vscode
-.idea
-*.swp
-*.swo
-*~
+# Node
+node_modules/
+npm-debug.log
+.claude/
+.gemini/
 
-# --- OS ---
+# Docker
+docker/Dockerfile*
+
+# OS
 .DS_Store
-.AppleDouble
-.LSOverride
-._*
 Thumbs.db
 
-# --- Build Artifacts (built inside container) ---
-dist/
-bin/
-out/
-*.exe
-*.dll
-*.so
-*.dylib
-
-# --- Documentation (not needed in container) ---
+# Documentation
 docs/
-*.md
-!README.md
-
-# --- Compose & Makefile (not needed inside build context) ---
-docker-compose*.yml
-Makefile
-
-# --- Project Config & Scripts ---
-scripts/
-configs/
-
-# --- Logs & Temp ---
-.logs/
-logs/
-*.log
-*.tmp
-*.temp
-*.bak
-
-# --- Test artifacts ---
-coverage.*
-cover.out
-
-# --- Language runtimes ---
-node_modules/
-__pycache__/
-.venv/
-
-# --- Misc ---
-.loki/
-.worktrees/
-.docker/
-RELEASE_NOTES.md
+CHANGELOG.md
+README.md
+LICENSE
+IMAGE_VARIANTS.md
+CLAUDE.md

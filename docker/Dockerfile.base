@@ -1,77 +1,37 @@
 # ==============================================================================
-# HotPlex Base Image (Foundation for all tech stacks)
-# ==============================================================================
-# Includes: OS (Alpine), Core Tools, Go Toolchain, Claude Code, and hotplexd binary
+# HotPlex Base Image (Parallelized Multi-Stage Architecture)
 # ==============================================================================
 
-# --- Stage 1: Build hotplexd ---
-FROM golang:1.25-alpine AS builder
-
-ARG VERSION=dev
-ARG COMMIT=unknown
-ARG BUILD_TIME=unknown
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG GOPROXY=https://goproxy.cn,direct
-ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
-
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
-        sed -i "s/dl-cdn.alpinelinux.org/$ALPINE_MIRROR/g" /etc/apk/repositories; \
-    fi && \
-    go env -w GOPROXY=$GOPROXY && \
-    go mod download && go mod verify
-
-COPY . .
-RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_TIME} -X main.builtBy=docker" \
-    -o hotplexd ./cmd/hotplexd
-
-FROM golang:1.25-alpine AS base
+# --- Stage 1: System Base (Static OS & Packages) ---
+FROM golang:1.25-alpine AS sys-base
 
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
-ARG GOPROXY=https://goproxy.cn,direct
 ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
-ARG NPM_MIRROR
-ARG GITHUB_PROXY
 
-WORKDIR /app
-
-# System packages (Common to all stacks)
 RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
         sed -i "s/dl-cdn.alpinelinux.org/$ALPINE_MIRROR/g" /etc/apk/repositories; \
     fi && \
     apk add --no-cache \
-    # Version control
     git github-cli \
-    # Build tools
     make bash cmake gcc g++ musl-dev binutils \
-    # Modern file tools (Claude Code recommended)
     ripgrep fd bat fzf eza \
-    # Network debugging
     curl jq wget netcat-openbsd openssl \
-    # Node.js (for Claude Code)
     nodejs npm \
-    # Process management
     procps htop \
-    # User management & Privilege drop
     shadow util-linux \
-    # Config processing
     yq \
-    # Script runtime
     python3 \
-    # Editor
     vim \
-    # Timezone support
     tzdata \
-    # Archive tools
     zip unzip tar \
-    # Runtime deps
     ca-certificates
 
-# --- Stage 3: Go tools ---
+# --- Stage 2: Go Toolchain & Tools ---
+FROM sys-base AS go-tools-builder
+
+ARG GOPROXY=https://goproxy.cn,direct
+
 RUN go env -w GOPROXY=$GOPROXY && \
     go install github.com/air-verse/air@latest && \
     go install github.com/go-delve/delve/cmd/dlv@latest && \
@@ -82,10 +42,14 @@ RUN go env -w GOPROXY=$GOPROXY && \
     go install golang.org/x/vuln/cmd/govulncheck@latest && \
     go install go.uber.org/mock/mockgen@latest && \
     go install gotest.tools/gotestsum@latest && \
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5 && \
-    go clean -cache -modcache
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5
 
-# --- Stage 4: Third-party tools & Claude Code ---
+# --- Stage 3: NPM Tools & Claude Code ---
+FROM sys-base AS npm-tools-builder
+
+ARG GITHUB_PROXY
+ARG NPM_MIRROR
+
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then ARCH="x86_64"; \
     elif [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; fi && \
@@ -96,27 +60,43 @@ RUN ARCH=$(uname -m) && \
 RUN if [ -n "$NPM_MIRROR" ]; then \
         npm config set registry "$NPM_MIRROR"; \
     fi && \
-    npm install -g @anthropic-ai/claude-code@latest --fetch-retries=3 --fetch-retry-mintimeout=2000 && \
+    npm install -g @anthropic-ai/claude-code@latest \
+    opencode-ai \
+    @mariozechner/pi-coding-agent \
+    --fetch-retries=3 --fetch-retry-mintimeout=2000 && \
     npm cache clean --force
 
-# --- Stage 5: Final Base Assembly ---
-FROM base AS final
+# --- Stage 4: HotPlex Daemon Builder ---
+FROM golang:1.25-alpine AS hotplexd-builder
 
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG GOPROXY=https://goproxy.cn,direct
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go env -w GOPROXY=$GOPROXY && go mod download && go mod verify
+
+COPY . .
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_TIME} -X main.builtBy=docker" \
+    -o hotplexd ./cmd/hotplexd
+
+# --- Stage 5: Final Base Assembly ---
+FROM sys-base AS final
 
 LABEL org.opencontainers.image.title="HotPlex Base"
-LABEL org.opencontainers.image.description="Base environment for all HotPlex AI Agent tech stacks"
-LABEL org.opencontainers.image.version="${VERSION}"
-LABEL org.opencontainers.image.revision="${COMMIT}"
-LABEL org.opencontainers.image.created="${BUILD_TIME}"
-LABEL org.opencontainers.image.source="https://github.com/hrygo/hotplex"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.description="Optimized Base environment for HotPlex AI Agent"
 
-# Copy binary from builder
-COPY --from=builder /build/hotplexd /app/hotplexd
-# Copy entrypoint script
+WORKDIR /app
+
+# Copy binaries from previous stages
+# Note: /usr/local/bin/ copy already includes all npm-installed symlinks (claude, opencode, etc.)
+COPY --from=go-tools-builder /go/bin/ /usr/local/bin/
+COPY --from=npm-tools-builder /usr/local/bin/ /usr/local/bin/
+COPY --from=npm-tools-builder /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
+COPY --from=hotplexd-builder /build/hotplexd /app/hotplexd
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # User setup
@@ -126,10 +106,10 @@ RUN adduser -D -u ${HOST_UID} hotplex && \
     chmod +x /app/docker-entrypoint.sh && \
     chown -R hotplex:hotplex /home/hotplex /app
 
-# Environment
+# Final Environment
 ENV GOPATH=/home/hotplex/go
 ENV GOCACHE=/home/hotplex/.cache/go-build
-ENV PATH="${GOPATH}/bin:${PATH}"
+ENV PATH="${GOPATH}/bin:${PATH}:/usr/local/bin"
 
 USER hotplex
 EXPOSE 8080

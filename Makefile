@@ -342,110 +342,169 @@ DOCKER_BUILD_PROXY_ARGS := --build-arg HTTP_PROXY=$(HTTP_PROXY) \
                            --build-arg RUSTUP_DIST_SERVER=$(RUSTUP_DIST_SERVER) \
                            --build-arg GITHUB_PROXY=$(GITHUB_PROXY)
 
-# DRY 构建函数
-define do_stack_build
-	@printf "${CYAN}🔨 Building HotPlex + $(1) stack...${NC}\n"
-	@if [ "$(1)" = "go" ]; then \
+# =============================================================================
+# 🐳 DOCKER — BUILD TARGETS
+# =============================================================================
+
+DOCKER_IMAGE    ?= hotplex
+DOCKER_TAG      ?= latest
+DOCKER_REGISTRY ?= ghcr.io/hrygo
+HOST_UID        ?= $(shell id -u)
+STACK_TAG       ?= latest
+
+VALID_STACKS := go node python java rust full
+STACK_VERSION_go     := 1.26
+STACK_VERSION_node   := 24
+STACK_VERSION_python := 3.14
+STACK_VERSION_java   := 21
+STACK_VERSION_rust   := 1.94
+
+# Proxy & mirror config (optimized for mainland China)
+HTTP_PROXY         ?= http://host.docker.internal:7897
+HTTPS_PROXY        ?= http://host.docker.internal:7897
+ALPINE_MIRROR      ?= mirrors.aliyun.com
+NPM_MIRROR         ?= https://registry.npmmirror.com
+PYTHON_MIRROR      ?= https://pypi.tuna.tsinghua.edu.cn/simple
+GOPROXY            ?= https://goproxy.cn,direct
+RUSTUP_DIST_SERVER ?= https://rsproxy.cn
+GITHUB_PROXY       ?= https://mirror.ghproxy.com/
+
+# Reusable build arg blocks
+DOCKER_BUILD_COMMON_ARGS := \
+	--build-arg HOST_UID=$(HOST_UID) \
+	--build-arg VERSION=$(VERSION) \
+	--build-arg COMMIT=$(COMMIT) \
+	--build-arg BUILD_TIME=$(BUILD_TIME)
+
+DOCKER_BUILD_PROXY_ARGS := \
+	--build-arg HTTP_PROXY=$(HTTP_PROXY) \
+	--build-arg HTTPS_PROXY=$(HTTPS_PROXY) \
+	--build-arg ALPINE_MIRROR=$(ALPINE_MIRROR) \
+	--build-arg NPM_MIRROR=$(NPM_MIRROR) \
+	--build-arg PYTHON_MIRROR=$(PYTHON_MIRROR) \
+	--build-arg GOPROXY=$(GOPROXY) \
+	--build-arg RUSTUP_DIST_SERVER=$(RUSTUP_DIST_SERVER) \
+	--build-arg GITHUB_PROXY=$(GITHUB_PROXY)
+
+# --- Build ---
+
+docker-build-base: ## @docker Build the shared base image (hotplex:base)
+	@printf "${CYAN}🏗️  Building hotplex:base...${NC}\n"
+	@docker build -f docker/Dockerfile.base \
+		$(DOCKER_BUILD_COMMON_ARGS) \
+		--build-arg HTTP_PROXY=$(HTTP_PROXY) \
+		--build-arg HTTPS_PROXY=$(HTTPS_PROXY) \
+		--build-arg GOPROXY=$(GOPROXY) \
+		--build-arg ALPINE_MIRROR=$(ALPINE_MIRROR) \
+		--build-arg NPM_MIRROR=$(NPM_MIRROR) \
+		--build-arg GITHUB_PROXY=$(GITHUB_PROXY) \
+		-t hotplex:base .
+	@printf "${GREEN}✅ Built hotplex:base${NC}\n"
+
+docker-build-app: docker-build-base ## @docker Build the default app image (go stack, depends on base)
+	@printf "${CYAN}🔨 Building hotplex (go stack)...${NC}\n"
+	@docker build -f docker/Dockerfile \
+		$(DOCKER_BUILD_COMMON_ARGS) \
+		$(DOCKER_BUILD_PROXY_ARGS) \
+		-t hotplex:$(STACK_TAG) -t hotplex:go -t hotplex:go-$(STACK_VERSION_go) .
+	@printf "${GREEN}✅ Built hotplex:go${NC}\n"
+
+docker-build-stack: docker-build-base ## @docker Build a specific tech-stack image. Usage: make docker-build-stack S=node
+	@if [ -z "$(S)" ]; then \
+		printf "${RED}❌ Error: S=<stack> is required. Options: $(VALID_STACKS)${NC}\n"; \
+		exit 1; \
+	fi
+	@printf "${CYAN}🔨 Building hotplex:$(S)...${NC}\n"
+	@if [ "$(S)" = "go" ]; then \
 		docker build -f docker/Dockerfile \
 			$(DOCKER_BUILD_COMMON_ARGS) \
 			$(DOCKER_BUILD_PROXY_ARGS) \
 			-t hotplex:$(STACK_TAG) -t hotplex:go -t hotplex:go-$(STACK_VERSION_go) .; \
 	else \
-		docker build -f docker/Dockerfile.$(1) \
+		docker build -f docker/Dockerfile.$(S) \
 			$(DOCKER_BUILD_COMMON_ARGS) \
 			$(DOCKER_BUILD_PROXY_ARGS) \
-			-t hotplex:$(1) $(if $(2),-t hotplex:$(1)-$(2),) .; \
+			-t hotplex:$(S) .; \
 	fi
-	@printf "${GREEN}✅ Built hotplex:$(1)${NC}\n"
-endef
+	@printf "${GREEN}✅ Built hotplex:$(S)${NC}\n"
 
-db: ## @docker Container build (T=<type> [S=<stack>]). T: app, base, stack, all, cache
-	@case "$(T)" in \
-		base) \
-			printf "${CYAN}🏗️  Building hotplex:base फाउंडेशन...${NC}\n"; \
-			docker build -t hotplex:base $(DOCKER_BUILD_COMMON_ARGS) --build-arg HTTP_PROXY=$(HTTP_PROXY) --build-arg HTTPS_PROXY=$(HTTPS_PROXY) -f docker/Dockerfile.base . ;; \
-		stack) \
-			if [ -z "$(S)" ]; then printf "${RED}❌ Error: Use S=<name> (Options: $(VALID_STACKS))${NC}\n"; exit 1; fi; \
-			case "$(S)" in \
-				go|node|python|java|rust|full) $(call do_stack_build,$(S),$(STACK_VERSION_$(S))) ;; \
-				*) printf "${RED}❌ Invalid stack '$(S)'${NC}\n"; exit 1 ;; \
-			esac ;; \
-		all) \
-			$(MAKE) db T=base; \
-			for s in $(VALID_STACKS); do $(MAKE) db T=stack S=$$s; done; \
-			printf "${GREEN}🎉 All stacks built!${NC}\n" ;; \
-		cache) \
-			printf "${CYAN}🐳 Building with cache...${NC}\n"; \
-			docker build --cache-from $(DOCKER_IMAGE):latest $(DOCKER_BUILD_COMMON_ARGS) -t $(DOCKER_IMAGE):$(DOCKER_TAG) . ;; \
-		app|*) \
-			printf "${CYAN}🐳 Building app image...${NC}\n"; \
-			$(MAKE) db T=base; \
-			COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml HOST_UID=$(HOST_UID) VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_TIME=$(BUILD_TIME) docker compose build hotplex ;; \
-	esac
+docker-build-all: docker-build-base ## @docker Build base + all tech-stack images sequentially
+	@printf "${CYAN}🔨 Building all stacks...${NC}\n"
+	@for s in $(VALID_STACKS); do \
+		printf "${CYAN}  → Building hotplex:$$s...${NC}\n"; \
+		if [ "$$s" = "go" ]; then \
+			docker build -f docker/Dockerfile \
+				$(DOCKER_BUILD_COMMON_ARGS) $(DOCKER_BUILD_PROXY_ARGS) \
+				-t hotplex:$(STACK_TAG) -t hotplex:go -t hotplex:go-$(STACK_VERSION_go) . || exit 1; \
+		else \
+			docker build -f docker/Dockerfile.$$s \
+				$(DOCKER_BUILD_COMMON_ARGS) $(DOCKER_BUILD_PROXY_ARGS) \
+				-t hotplex:$$s . || exit 1; \
+		fi; \
+	done
+	@printf "${GREEN}🎉 All stacks built!${NC}\n"
 
-d: ## @docker Lifecycle management (C=<cmd>). C: up, down, restart, logs, health, check-net, sync, upgrade, clean
-	@case "$(C)" in \
-		sync) \
-			printf "${CYAN}🔄 Syncing configs...${NC}\n"; \
-			mkdir -p $(HOME)/.hotplex/configs; \
-			cp configs/chatapps/*.yaml $(HOME)/.hotplex/configs/ ;; \
-		up) \
-			$(MAKE) d C=sync; \
-			IMG=$${HOTPLEX_IMAGE}; \
-			if [ -z "$$IMG" ]; then \
-				IMG=$$(grep "^HOTPLEX_IMAGE=" .env 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//' || echo ""); \
-			fi; \
-			[ -z "$$IMG" ] && IMG="ghcr.io/hrygo/hotplex:latest (default)"; \
-			printf "${PURPLE}🐳 Image: ${BOLD}$$IMG${NC}\n"; \
-			HOST_UID=$(HOST_UID) VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_TIME=$(BUILD_TIME) docker compose up -d ;; \
-		down) \
-			docker compose down --timeout 30 ;; \
-		restart) \
-			$(MAKE) d C=down; sleep 2; $(MAKE) d C=up ;; \
-		logs) \
-			docker compose logs -f ;; \
-		health) \
-			for svc in $$(docker compose ps --services 2>/dev/null); do \
-				status=$$(docker inspect --format='{{.State.Health.Status}}' $$svc 2>/dev/null || echo "not_found"); \
-				printf "  $$svc: $$status\n"; \
-			done ;; \
-		check-net) \
-			for svc in $$(docker compose ps --services 2>/dev/null); do \
-				printf "  $$svc: "; \
-				docker exec $$svc nc -zv host.docker.internal 15721 2>&1 | grep -q succeeded && printf "LLM Proxy OK, " || printf "LLM Proxy FAIL, "; \
-				docker exec $$svc nc -zv host.docker.internal 7897 2>&1 | grep -q succeeded && printf "General Proxy OK\n" || printf "General Proxy FAIL\n"; \
-			done ;; \
-		upgrade) \
-			printf "${CYAN}🚀 Pulling latest images...${NC}\n"; \
-			docker compose pull; $(MAKE) d C=restart ;; \
-		clean) \
-			for s in $(VALID_STACKS); do docker rmi -f hotplex:$$s 2>/dev/null || true; done; \
-			docker rmi -f hotplex:$(STACK_TAG) 2>/dev/null || true ;; \
-		*) \
-			printf "${RED}❌ Error: Please specify command C=<up|down|restart|logs|health|sync|upgrade|clean>${NC}\n"; exit 1 ;; \
-	esac
+# --- Runtime ---
 
-# Convenience Aliases
-docker-up: ## @docker Start services
-	@$(MAKE) d C=up
-docker-down: ## @docker Stop services
-	@$(MAKE) d C=down
-docker-restart: ## @docker Sync & Restart
-	@$(MAKE) d C=restart
-docker-logs: ## @docker View logs
-	@$(MAKE) d C=logs
-docker-sync: ## @docker Sync configs
-	@$(MAKE) d C=sync
-docker-health: ## @docker Check health
-	@$(MAKE) d C=health
-docker-check-net: ## @docker Check network
-	@$(MAKE) d C=check-net
+docker-up: ## @docker Sync configs and start services
+	@mkdir -p $(HOME)/.hotplex/configs
+	@cp configs/chatapps/*.yaml $(HOME)/.hotplex/configs/ 2>/dev/null || true
+	@printf "${CYAN}🔄 Configs synced${NC}\n"
+	@IMG=$${HOTPLEX_IMAGE:-$$(grep "^HOTPLEX_IMAGE=" .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' ')}; \
+	[ -z "$$IMG" ] && IMG="ghcr.io/hrygo/hotplex:latest (default)"; \
+	printf "${PURPLE}🐳 Image: ${BOLD}$$IMG${NC}\n"
+	@HOST_UID=$(HOST_UID) VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_TIME=$(BUILD_TIME) docker compose up -d
 
-stack: ## @docker Build specific stack (S=node)
-	@$(MAKE) db T=stack S=$(S)
-stack-all: ## @docker Build all stacks
-	@$(MAKE) db T=all
-stack-clean: ## @docker Remove stacks
-	@$(MAKE) d C=clean
+docker-down: ## @docker Stop and remove services
+	@docker compose down --timeout 30
 
-.PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean install-hooks run stop restart docs svg2png service-install service-uninstall service-start service-stop service-restart service-status service-logs service-enable service-disable config-info d db docker-up docker-down docker-restart docker-logs docker-sync docker-health docker-check-net stack stack-all stack-clean
+docker-restart: ## @docker Restart services (down → sync → up)
+	@$(MAKE) docker-down
+	@sleep 2
+	@$(MAKE) docker-up
+
+docker-logs: ## @docker Follow container logs (Ctrl+C to stop)
+	@docker compose logs -f
+
+docker-sync: ## @docker Sync local configs to ~/.hotplex/configs/
+	@mkdir -p $(HOME)/.hotplex/configs
+	@cp configs/chatapps/*.yaml $(HOME)/.hotplex/configs/
+	@printf "${GREEN}✅ Configs synced to ~/.hotplex/configs/${NC}\n"
+
+docker-health: ## @docker Show health status of all services
+	@for svc in $$(docker compose ps --services 2>/dev/null); do \
+		status=$$(docker inspect --format='{{.State.Health.Status}}' $$svc 2>/dev/null || echo "not_found"); \
+		printf "  $$svc: $$status\n"; \
+	done
+
+docker-check-net: ## @docker Test proxy connectivity from inside containers
+	@for svc in $$(docker compose ps --services 2>/dev/null); do \
+		printf "  $$svc: "; \
+		docker exec $$svc nc -zv host.docker.internal 15721 2>&1 | grep -q succeeded && printf "LLM Proxy OK, " || printf "LLM Proxy FAIL, "; \
+		docker exec $$svc nc -zv host.docker.internal 7897 2>&1 | grep -q succeeded && printf "General Proxy OK\n" || printf "General Proxy FAIL\n"; \
+	done
+
+docker-upgrade: ## @docker Pull latest images and restart services
+	@printf "${CYAN}🚀 Pulling latest images...${NC}\n"
+	@docker compose pull
+	@$(MAKE) docker-restart
+
+docker-clean: ## @docker Remove all local hotplex stack images
+	@for s in $(VALID_STACKS); do docker rmi -f hotplex:$$s 2>/dev/null || true; done
+	@docker rmi -f hotplex:$(STACK_TAG) hotplex:base 2>/dev/null || true
+	@printf "${GREEN}✅ Local images removed${NC}\n"
+
+# Short aliases
+stack: docker-build-stack
+stack-all: docker-build-all
+stack-clean: docker-clean
+
+.PHONY: all help build build-all fmt vet test test-unit test-race test-integration test-all lint tidy clean \
+        install-hooks run stop restart docs svg2png config-info \
+        service-install service-uninstall service-start service-stop service-restart \
+        service-status service-logs service-enable service-disable \
+        docker-build-base docker-build-app docker-build-stack docker-build-all \
+        docker-up docker-down docker-restart docker-logs docker-sync \
+        docker-health docker-check-net docker-upgrade docker-clean \
+        stack stack-all stack-clean
+
