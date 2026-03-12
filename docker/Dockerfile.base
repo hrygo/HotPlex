@@ -1,117 +1,66 @@
 # ==============================================================================
-# HotPlex Base Image (Parallelized Multi-Stage Architecture)
+# HotPlex Static Foundation (2026 Core Environment)
+# ==============================================================================
+# This image contains the 99% stable OS baseline and shared tools.
+# It does NOT contain hotplexd, enabling massive caching for SDK stacks.
 # ==============================================================================
 
-# --- Stage 1: System Base (Static OS & Packages) ---
-FROM golang:1.25-alpine AS sys-base
+# --- Stage 1: Shared Tools Collector ---
+FROM debian:bookworm-slim AS tools-collector
+ARG GITHUB_PROXY=https://mirror.ghproxy.com/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget ca-certificates xz-utils libatomic1 unzip && \
+    rm -rf /var/lib/apt/lists/*
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then BIN="websocat.x86_64-unknown-linux-musl"; \
+    elif [ "$ARCH" = "aarch64" ]; then BIN="websocat.aarch64-unknown-linux-musl"; fi && \
+    curl -sSfL -o /usr/local/bin/websocat \
+    "https://github.com/vi/websocat/releases/download/v1.14.1/$BIN" && \
+    chmod +x /usr/local/bin/websocat
+
+# --- Stage 2: NPM Tools Collector ---
+FROM node:24-bookworm-slim AS npm-tools-collector
+ARG NPM_MIRROR=https://registry.npmmirror.com
+RUN if [ -n "$NPM_MIRROR" ]; then npm config set registry "$NPM_MIRROR"; fi && \
+    npm install -g @anthropic-ai/claude-code@latest opencode-ai @mariozechner/pi-coding-agent && \
+    npm cache clean --force
+
+# --- Final Stage: Shared Foundation ---
+FROM debian:bookworm-slim
 
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
-ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
-
-RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
-        sed -i "s/dl-cdn.alpinelinux.org/$ALPINE_MIRROR/g" /etc/apk/repositories; \
-    fi && \
-    apk add --no-cache \
-    git github-cli \
-    make bash cmake gcc g++ musl-dev binutils \
-    ripgrep fd bat fzf eza \
-    curl jq wget netcat-openbsd openssl \
-    nodejs npm \
-    procps htop \
-    shadow util-linux \
-    yq \
-    python3 \
-    vim \
-    tzdata \
-    zip unzip tar \
-    ca-certificates
-
-# --- Stage 2: Go Toolchain & Tools ---
-FROM sys-base AS go-tools-builder
-
-ARG GOPROXY=https://goproxy.cn,direct
-
-RUN go env -w GOPROXY=$GOPROXY && \
-    go install github.com/air-verse/air@latest && \
-    go install github.com/go-delve/delve/cmd/dlv@latest && \
-    go install golang.org/x/tools/cmd/goimports@latest && \
-    go install mvdan.cc/gofumpt@latest && \
-    go install honnef.co/go/tools/cmd/staticcheck@latest && \
-    go install github.com/securego/gosec/v2/cmd/gosec@latest && \
-    go install golang.org/x/vuln/cmd/govulncheck@latest && \
-    go install go.uber.org/mock/mockgen@latest && \
-    go install gotest.tools/gotestsum@latest && \
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5
-
-# --- Stage 3: NPM Tools & Claude Code ---
-FROM sys-base AS npm-tools-builder
-
-ARG GITHUB_PROXY
-ARG NPM_MIRROR
-
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then ARCH="x86_64"; \
-    elif [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; fi && \
-    wget -qO /usr/local/bin/websocat -t 3 \
-    "${GITHUB_PROXY}https://github.com/vi/websocat/releases/download/v1.14.1/websocat.${ARCH}-unknown-linux-musl" && \
-    chmod +x /usr/local/bin/websocat
-
-RUN if [ -n "$NPM_MIRROR" ]; then \
-        npm config set registry "$NPM_MIRROR"; \
-    fi && \
-    npm install -g @anthropic-ai/claude-code@latest \
-    opencode-ai \
-    @mariozechner/pi-coding-agent \
-    --fetch-retries=3 --fetch-retry-mintimeout=2000 && \
-    npm cache clean --force
-
-# --- Stage 4: HotPlex Daemon Builder ---
-FROM golang:1.25-alpine AS hotplexd-builder
-
-ARG VERSION=dev
-ARG COMMIT=unknown
-ARG BUILD_TIME=unknown
-ARG GOPROXY=https://goproxy.cn,direct
-
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go env -w GOPROXY=$GOPROXY && go mod download && go mod verify
-
-COPY . .
-RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_TIME} -X main.builtBy=docker" \
-    -o hotplexd ./cmd/hotplexd
-
-# --- Stage 5: Final Base Assembly ---
-FROM sys-base AS final
-
-LABEL org.opencontainers.image.title="HotPlex Base"
-LABEL org.opencontainers.image.description="Optimized Base environment for HotPlex AI Agent"
-
-WORKDIR /app
-
-# Copy binaries from previous stages
-# Note: /usr/local/bin/ copy already includes all npm-installed symlinks (claude, opencode, etc.)
-COPY --from=go-tools-builder /go/bin/ /usr/local/bin/
-COPY --from=npm-tools-builder /usr/local/bin/ /usr/local/bin/
-COPY --from=npm-tools-builder /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
-COPY --from=hotplexd-builder /build/hotplexd /app/hotplexd
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-
-# User setup
+ARG DEBIAN_MIRROR=mirrors.aliyun.com
 ARG HOST_UID=1000
-RUN adduser -D -u ${HOST_UID} hotplex && \
-    mkdir -p /home/hotplex/go/pkg/mod /home/hotplex/.cache/go-build && \
-    chmod +x /app/docker-entrypoint.sh && \
+
+# 1. Global OS Baseline & Mirrors
+RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ] && [ -n "$DEBIAN_MIRROR" ]; then \
+        sed -i "s/deb.debian.org/$DEBIAN_MIRROR/g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    curl wget ca-certificates git make bash jq gettext-base \
+    procps netcat-openbsd openssl libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. HotPlex User & Workspace Setup
+RUN useradd -m -u ${HOST_UID} -s /bin/bash hotplex && \
+    mkdir -p /app /home/hotplex/.cache && \
     chown -R hotplex:hotplex /home/hotplex /app
 
-# Final Environment
-ENV GOPATH=/home/hotplex/go
-ENV GOCACHE=/home/hotplex/.cache/go-build
-ENV PATH="${GOPATH}/bin:${PATH}:/usr/local/bin"
+# 3. Static Tool Injection
+COPY --from=tools-collector /usr/local/bin/websocat /usr/local/bin/websocat
+COPY --from=npm-tools-collector /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
+COPY --from=npm-tools-collector /usr/local/bin/ /usr/local/bin/
 
-USER hotplex
-EXPOSE 8080
+# 4. Standard Metadata & Entrypoint
+WORKDIR /app
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+ENV PATH="/usr/local/bin:${PATH}"
+
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["/app/hotplexd"]
+# default CMD (can be overridden by stacks)
+CMD ["bash"]
+
+LABEL org.opencontainers.image.vendor="HotPlex"
+LABEL org.opencontainers.image.title="HotPlex Foundation (Static)"

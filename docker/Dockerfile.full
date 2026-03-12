@@ -1,97 +1,58 @@
-# ============================================
-# HotPlex Full Stack (All Tech Stacks)
-# ============================================
+# ==============================================================================
+# HotPlex Full Stack Development Environment (2026)
+# ==============================================================================
 
-ARG BASE_IMAGE=hotplex:base
-FROM ${BASE_IMAGE}
+# 1. Source the binary provider
+FROM hotplex:artifacts AS binary-provider
+
+# 2. Source SDKs (Cached Official Images)
+FROM golang:1.26-bookworm AS go-sdk
+FROM python:3.14-bookworm AS python-sdk
+FROM eclipse-temurin:25-jdk-bookworm AS java-sdk
+FROM rust:1.94-bookworm AS rust-sdk
+
+# 3. Target Foundation
+FROM hotplex:base
 
 USER root
-ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
-ARG NPM_MIRROR
-ARG PYTHON_MIRROR
-ARG RUSTUP_DIST_SERVER=https://rsproxy.cn
-ARG RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
 
-# ============================================
-# Combined Tech Stacks
-# ============================================
+# Inject SDKs (Aggregated & Cached)
+COPY --from=go-sdk /usr/local/go /usr/local/go
+ENV GOPATH=/home/hotplex/go
+ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
 
-# 1. Node.js Stack
-RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
-        sed -i "s/dl-cdn.alpinelinux.org/$ALPINE_MIRROR/g" /etc/apk/repositories; \
-    fi && \
-    npm install -g corepack && \
-    corepack enable && \
-    corepack prepare pnpm@latest --activate && \
-    corepack prepare yarn@stable --activate && \
-    if [ -n "$NPM_MIRROR" ]; then \
-        npm config set registry "$NPM_MIRROR" && \
-        pnpm config set registry "$NPM_MIRROR"; \
-    fi && \
-    curl -fsSL https://bun.sh/install | bash && \
-    npm install -g typescript ts-node tsx eslint prettier @biomejs/biome jest vitest esbuild @nestjs/cli nodemon pm2 && \
-    npm cache clean --force
-ENV BUN_INSTALL="/home/hotplex/.bun"
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+    apt-get install -y nodejs && \
+    corepack enable && corepack prepare pnpm@latest --activate && \
+    curl -fsSL https://bun.sh/install | bash && mv /root/.bun /usr/local/bun
+ENV BUN_INSTALL="/usr/local/bun"
+ENV PATH="${BUN_INSTALL}/bin:${PATH}"
 
-# 2. Python Stack
-RUN apk add --no-cache py3-pip libffi-dev openssl-dev postgresql-dev sqlite-dev && \
-    if [ -n "$PYTHON_MIRROR" ]; then \
-        pip3 config set global.index-url "$PYTHON_MIRROR"; \
-    fi && \
-    pip3 install --upgrade pip setuptools wheel --break-system-packages && \
-    pip3 install --break-system-packages poetry uv pipx ruff black isort mypy pytest ipython fastapi uvicorn httpx && \
-    rm -rf /root/.cache/pip
+COPY --from=python-sdk /usr/local /usr/local
+RUN ldconfig
 
-# 3. Rust Stack
+COPY --from=java-sdk /opt/java/openjdk /opt/java/openjdk
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    rustup component add clippy rustfmt rust-analyzer rust-src && \
-    if [ "$RUSTUP_DIST_SERVER" = "https://rsproxy.cn" ]; then \
-        mkdir -p ${CARGO_HOME} && \
-        echo '[source.crates-io]' > ${CARGO_HOME}/config.toml && \
-        echo 'replace-with = "rsproxy-sparse"' >> ${CARGO_HOME}/config.toml && \
-        echo '[source.rsproxy]' >> ${CARGO_HOME}/config.toml && \
-        echo 'registry = "https://rsproxy.cn/crates.io-index"' >> ${CARGO_HOME}/config.toml && \
-        echo '[source.rsproxy-sparse]' >> ${CARGO_HOME}/config.toml && \
-        echo 'registry = "sparse+https://rsproxy.cn/index/"' >> ${CARGO_HOME}/config.toml && \
-        echo '[registries.rsproxy]' >> ${CARGO_HOME}/config.toml && \
-        echo 'index = "https://rsproxy.cn/crates.io-index"' >> ${CARGO_HOME}/config.toml && \
-        echo '[net]' >> ${CARGO_HOME}/config.toml && \
-        echo 'git-fetch-with-cli = true' >> ${CARGO_HOME}/config.toml; \
-    fi && \
-    cargo install cargo-watch cargo-nextest trunk && \
-    rm -rf ${CARGO_HOME}/registry
+COPY --from=rust-sdk /usr/local/rustup /usr/local/rustup
+COPY --from=rust-sdk /usr/local/cargo /usr/local/cargo
 
-# 4. Java/Kotlin Stack
-RUN apk add --no-cache openjdk25 fontconfig ttf-dejavu
-ENV GRADLE_VERSION=8.14
-RUN wget -q https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip && \
-    unzip gradle-${GRADLE_VERSION}-bin.zip -d /opt && \
-    rm gradle-${GRADLE_VERSION}-bin.zip
-ENV GRADLE_HOME=/opt/gradle-${GRADLE_VERSION}
-ENV MAVEN_VERSION=3.9.13
-RUN wget -q https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz && \
-    tar -xzf apache-maven-${MAVEN_VERSION}-bin.tar.gz -C /opt && \
-    rm apache-maven-${MAVEN_VERSION}-bin.tar.gz
-ENV MAVEN_HOME=/opt/apache-maven-${MAVEN_VERSION}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    lsb-release zip unzip tree htop ripgrep fd-find bat && \
+    rm -rf /var/lib/apt/lists/* && \
+    chown -R hotplex:hotplex /home/hotplex /app /usr/local/cargo /usr/local/rustup
 
-# Verification
-RUN go version && node --version && python3 --version && rustc --version && java --version
-
-# User setup
-RUN mkdir -p /home/hotplex/.npm /home/hotplex/.cache /home/hotplex/.local /home/hotplex/.cargo /home/hotplex/.rustup /home/hotplex/.gradle /home/hotplex/.m2 && \
-    chown -R hotplex:hotplex /home/hotplex /usr/local/rustup /usr/local/cargo
-
-ENV GOPATH=/home/hotplex/go
-ENV GOCACHE=/home/hotplex/.cache/go-build
-ENV CARGO_HOME=/home/hotplex/.cargo
-ENV RUSTUP_HOME=/home/hotplex/.rustup
-ENV GRADLE_USER_HOME=/home/hotplex/.gradle
-ENV PATH="${GOPATH}/bin:${CARGO_HOME}/bin:${BUN_INSTALL}/bin:${GRADLE_HOME}/bin:${MAVEN_HOME}/bin:/home/hotplex/.local/bin:${PATH}"
-
-LABEL org.opencontainers.image.title="HotPlex Full"
-LABEL org.opencontainers.image.description="HotPlex AI Agent with full multi-stack toolchain"
+# ==============================================================================
+# 🔥 Late Injection: The Binary (Changes frequently)
+# ==============================================================================
+COPY --from=binary-provider /hotplexd /usr/local/bin/hotplexd
+# ==============================================================================
 
 USER hotplex
+WORKDIR /app
+CMD ["/usr/local/bin/hotplexd"]
+LABEL org.opencontainers.image.title="HotPlex Full"

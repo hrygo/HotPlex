@@ -96,57 +96,59 @@ volumes:
 
 services:
   # ============================================================================
-  # Bot 01: Primary Bot
-  # ============================================================================
-  # Role: Production bot with Claude Opus
-  # Config: .env
-  # Port:  127.0.0.1:18080 → 8080 (localhost only for security)
-  # Build: Defined in docker-compose.build.yml (activated via COMPOSE_FILE)
+  # Bot 01: Primary Bot (U0AHRCL1KCM)
   # ============================================================================
   hotplex:
     <<: *hotplex-common
     container_name: hotplex
     ports:
       - "127.0.0.1:18080:8080"
+    environment:
+      # Override data root for container isolation, mapped to instance-specific host path
+      HOTPLEX_DATA_ROOT: /home/hotplex/.hotplex
+      # Align with the volume mount point below
+      HOTPLEX_PROJECTS_DIR: /home/hotplex/projects
+      HOTPLEX_MESSAGE_STORE_SQLITE_PATH: /home/hotplex/.hotplex/chatapp_messages.db
     env_file:
       - .env
     volumes:
-      - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw # Message DB, configs
-      - ${HOME}/.claude:/home/hotplex/.claude:rw # Session state
-      - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
-      - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw # Go module cache
-      - hotplex-go-build:/home/hotplex/.cache/go-build:rw # Go build cache
-      # Bot-specific volumes (MUST be unique per bot - no variables!)
-      - ${HOME}/.slack/BOT_U0AHRCL1KCM:/home/hotplex/projects:rw
+      # Instance Isolation: Host Dir → Container Standard Dir
+      - ${HOME}/.hotplex/instances/U0AHRCL1KCM/storage:/home/hotplex/.hotplex:rw
+      - ${HOME}/.hotplex/instances/U0AHRCL1KCM/claude:/home/hotplex/.claude:rw
+      - ${HOME}/.hotplex/instances/U0AHRCL1KCM/projects:/home/hotplex/projects:rw
+      # Claude Seed: Host Standard Dir → Container Read-Only Seed
+      - ${HOME}/.claude:/home/hotplex/.claude_seed:ro
+      # Build Cache (Shared for efficiency)
+      - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw
+      - hotplex-go-build:/home/hotplex/.cache/go-build:rw
     labels:
+      - "hotplex.bot.id=U0AHRCL1KCM"
       - "hotplex.bot.role=primary"
-      - "hotplex.bot.config=.env"
 
   # ============================================================================
-  # Bot 02: Secondary Bot
-  # ============================================================================
-  # Role: Test/Staging bot with Claude Sonnet
-  # Config: .env.secondary
-  # Port:  127.0.0.1:18081 → 8080 (localhost only for security)
-  # Note:  Reuses image built by hotplex service (no separate build needed)
+  # Bot 02: Secondary Bot (U0AJVRH4YF6)
   # ============================================================================
   hotplex-secondary:
     <<: *hotplex-common
-    image: ${HOTPLEX_IMAGE_SECONDARY:-${HOTPLEX_IMAGE:-ghcr.io/hrygo/hotplex:latest}}
     container_name: hotplex-secondary
     ports:
       - "127.0.0.1:18081:8080"
+    environment:
+      HOTPLEX_DATA_ROOT: /home/hotplex/.hotplex
+      HOTPLEX_PROJECTS_DIR: /home/hotplex/projects
+      HOTPLEX_MESSAGE_STORE_SQLITE_PATH: /home/hotplex/.hotplex/chatapp_messages.db
     env_file:
       - .env.secondary
     volumes:
-      # Shared volumes (common to all bots)
-      - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
-      - ${HOME}/.claude:/home/hotplex/.claude:rw
-      - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
+      # Instance Isolation: Host Dir → Container Standard Dir
+      - ${HOME}/.hotplex/instances/U0AJVRH4YF6/storage:/home/hotplex/.hotplex:rw
+      - ${HOME}/.hotplex/instances/U0AJVRH4YF6/claude:/home/hotplex/.claude:rw
+      - ${HOME}/.hotplex/instances/U0AJVRH4YF6/projects:/home/hotplex/projects:rw
+      # Claude Seed: Host Standard Dir → Container Read-Only Seed
+      - ${HOME}/.claude:/home/hotplex/.claude_seed:ro
+      # Build Cache (Shared for efficiency)
       - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw
       - hotplex-go-build:/home/hotplex/.cache/go-build:rw
-      # Bot-specific volumes (MUST be unique per bot - no variables!)
-      - ${HOME}/.slack/BOT_U0AJVRH4YF6:/home/hotplex/projects:rw
     labels:
+      - "hotplex.bot.id=U0AJVRH4YF6"
       - "hotplex.bot.role=secondary"
-      - "hotplex.bot.config=.env.secondary"

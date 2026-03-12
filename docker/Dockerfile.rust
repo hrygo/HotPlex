@@ -1,73 +1,35 @@
-# ============================================
-# HotPlex Rust Stack
-# ============================================
+# ==============================================================================
+# HotPlex Rust Development Stack (2026)
+# ==============================================================================
 
-ARG BASE_IMAGE=hotplex:base
-FROM ${BASE_IMAGE}
+# 1. Source the binary provider
+FROM hotplex:artifacts AS binary-provider
 
+# 2. SDK Layer
+FROM rust:1.94-bookworm AS sdk-source
+
+# 3. Target Foundation
+FROM hotplex:base
+
+# Inject Rust SDK (Cached)
 USER root
-ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
-ARG RUSTUP_DIST_SERVER=https://rsproxy.cn
-ARG RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
-
-# ============================================
-# Rust Stack Extensions
-# ============================================
-RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
-        sed -i "s/dl-cdn.alpinelinux.org/$ALPINE_MIRROR/g" /etc/apk/repositories; \
-    fi && \
-    apk add --no-cache \
-    cmake \
-    libffi-dev \
-    openssl-dev \
-    postgresql-dev \
-    sqlite-dev \
-    protobuf-dev
-
-# Rustup & Toolchain
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
+COPY --from=sdk-source /usr/local/rustup /usr/local/rustup
+COPY --from=sdk-source /usr/local/cargo /usr/local/cargo
 
-# configure cargo to use rsproxy if RUSTUP_DIST_SERVER is set to rsproxy
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    rustup component add clippy rustfmt rust-analyzer rust-src llvm-tools-preview && \
-    if [ "$RUSTUP_DIST_SERVER" = "https://rsproxy.cn" ]; then \
-        mkdir -p ${CARGO_HOME} && \
-        echo '[source.crates-io]' > ${CARGO_HOME}/config.toml && \
-        echo 'replace-with = "rsproxy-sparse"' >> ${CARGO_HOME}/config.toml && \
-        echo '[source.rsproxy]' >> ${CARGO_HOME}/config.toml && \
-        echo 'registry = "https://rsproxy.cn/crates.io-index"' >> ${CARGO_HOME}/config.toml && \
-        echo '[source.rsproxy-sparse]' >> ${CARGO_HOME}/config.toml && \
-        echo 'registry = "sparse+https://rsproxy.cn/index/"' >> ${CARGO_HOME}/config.toml && \
-        echo '[registries.rsproxy]' >> ${CARGO_HOME}/config.toml && \
-        echo 'index = "https://rsproxy.cn/crates.io-index"' >> ${CARGO_HOME}/config.toml && \
-        echo '[net]' >> ${CARGO_HOME}/config.toml && \
-        echo 'git-fetch-with-cli = true' >> ${CARGO_HOME}/config.toml; \
-    fi
+# Development Tools (Cached)
+RUN rustup component add clippy rustfmt rust-analyzer rust-src && \
+    cargo install cargo-watch cargo-nextest trunk && \
+    chown -R hotplex:hotplex /usr/local/cargo /usr/local/rustup
 
-# Essential Cargo tools
-RUN cargo install \
-    cargo-watch cargo-nextest cargo-tarpaulin cargo-llvm-cov \
-    cargo-audit cargo-deny \
-    cargo-edit cargo-expand cargo-tree cargo-modules \
-    trunk wasm-pack sqlx-cli criterion hyperfine && \
-    rm -rf ${CARGO_HOME}/registry
-
-# Verification
-RUN rustc --version && \
-    cargo --version && \
-    cargo nextest --version
-
-# User setup
-RUN mkdir -p /home/hotplex/.cargo /home/hotplex/.rustup && \
-    chown -R hotplex:hotplex /home/hotplex /usr/local/rustup /usr/local/cargo
-
-ENV CARGO_HOME=/home/hotplex/.cargo
-ENV RUSTUP_HOME=/home/hotplex/.rustup
-ENV PATH="${CARGO_HOME}/bin:${PATH}"
-
-LABEL org.opencontainers.image.title="HotPlex Rust"
-LABEL org.opencontainers.image.description="HotPlex AI Agent with Go + Rust stack"
+# ==============================================================================
+# 🔥 Late Injection: The Binary (Changes frequently)
+# ==============================================================================
+COPY --from=binary-provider /hotplexd /usr/local/bin/hotplexd
+# ==============================================================================
 
 USER hotplex
+CMD ["/usr/local/bin/hotplexd"]
+LABEL org.opencontainers.image.title="HotPlex Rust"

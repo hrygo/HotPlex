@@ -14,10 +14,10 @@ import (
 
 // Executor executes capabilities with the given parameters.
 type Executor struct {
-	client         *slack.Client
-	brain          brain.Brain
+	client           *slack.Client
+	brain            brain.Brain
 	brainIntegration *BrainIntegration
-	logger         *slog.Logger
+	logger           *slog.Logger
 
 	// MessageHandler is called to trigger engine execution.
 	// This is a callback to avoid circular dependencies with the adapter.

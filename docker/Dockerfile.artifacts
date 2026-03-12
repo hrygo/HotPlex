@@ -1,0 +1,22 @@
+# ==============================================================================
+# HotPlex Artifacts Builder (Binary Provider)
+# ==============================================================================
+# Dedicated to fast compilation of the HotPlex daemon.
+# ==============================================================================
+
+FROM golang:1.26-bookworm AS builder
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+ARG GOPROXY=https://goproxy.cn,direct
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go env -w GOPROXY=$GOPROXY && go mod download && go mod verify
+COPY . .
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_TIME} -X main.builtBy=docker" \
+    -o hotplexd ./cmd/hotplexd
+
+FROM scratch
+COPY --from=builder /build/hotplexd /hotplexd

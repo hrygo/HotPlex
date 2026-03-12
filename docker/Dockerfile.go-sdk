@@ -1,28 +1,30 @@
 # ==============================================================================
-# HotPlex Python Development Stack (2026)
+# HotPlex Go Development Stack (2026)
 # ==============================================================================
 
 # 1. Source the binary provider
 FROM hotplex:artifacts AS binary-provider
 
 # 2. SDK Layer
-FROM python:3.14-bookworm AS sdk-source
+FROM golang:1.26-bookworm AS sdk-source
 
 # 3. Target Foundation
 FROM hotplex:base
 
-ARG PYTHON_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
+# Inject Go SDK (Cached)
+COPY --from=sdk-source /usr/local/go /usr/local/go
+ENV GOPATH=/home/hotplex/go
+ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
 
-# Inject Python 3.14 SDK (Cached)
+# Go Development Tools (Cached)
+RUN go env -w GOPROXY=https://goproxy.cn,direct && \
+    go install github.com/air-verse/air@latest && \
+    go install github.com/go-delve/delve/cmd/dlv@latest && \
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5
+
+# Permissions setup
 USER root
-COPY --from=sdk-source /usr/local /usr/local
-RUN ldconfig
-
-# Development Tools (Cached)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.local/bin/uv /usr/local/bin/uv && \
-    if [ -n "$PYTHON_MIRROR" ]; then pip config set global.index-url "$PYTHON_MIRROR"; fi && \
-    pip install --break-system-packages poetry ruff black isort mypy pytest fastapi uvicorn httpx
+RUN mkdir -p ${GOPATH}/bin && chown -R hotplex:hotplex ${GOPATH}
 
 # ==============================================================================
 # 🔥 Late Injection: The Binary (Changes frequently)
@@ -32,4 +34,4 @@ COPY --from=binary-provider /hotplexd /usr/local/bin/hotplexd
 
 USER hotplex
 CMD ["/usr/local/bin/hotplexd"]
-LABEL org.opencontainers.image.title="HotPlex Python"
+LABEL org.opencontainers.image.title="HotPlex Go"

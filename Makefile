@@ -362,6 +362,7 @@ STACK_VERSION_rust   := 1.94
 # Proxy & mirror config (optimized for mainland China)
 HTTP_PROXY         ?= http://host.docker.internal:7897
 HTTPS_PROXY        ?= http://host.docker.internal:7897
+DEBIAN_MIRROR      ?= mirrors.aliyun.com
 ALPINE_MIRROR      ?= mirrors.aliyun.com
 NPM_MIRROR         ?= https://registry.npmmirror.com
 PYTHON_MIRROR      ?= https://pypi.tuna.tsinghua.edu.cn/simple
@@ -384,63 +385,53 @@ DOCKER_BUILD_PROXY_ARGS := \
 	--build-arg PYTHON_MIRROR=$(PYTHON_MIRROR) \
 	--build-arg GOPROXY=$(GOPROXY) \
 	--build-arg RUSTUP_DIST_SERVER=$(RUSTUP_DIST_SERVER) \
+	--build-arg DEBIAN_MIRROR=$(DEBIAN_MIRROR) \
 	--build-arg GITHUB_PROXY=$(GITHUB_PROXY)
 
 # --- Build ---
 
-docker-build-base: ## @docker Build the shared base image (hotplex:base)
-	@printf "${CYAN}🏗️  Building hotplex:base...${NC}\n"
+docker-build-artifacts: ## @docker Build the HotPlex binary provider
+	@printf "${CYAN}🏗️  Building hotplex:artifacts...${NC}\n"
+	@docker build -f docker/Dockerfile.artifacts \
+		$(DOCKER_BUILD_COMMON_ARGS) \
+		--build-arg GOPROXY=$(GOPROXY) \
+		-t hotplex:artifacts .
+	@printf "${GREEN}✅ Built hotplex:artifacts${NC}\n"
+
+docker-build-foundation: ## @docker Build the shared foundation image (hotplex:base)
+	@printf "${CYAN}🏗️  Building hotplex:base (Foundation)...${NC}\n"
 	@docker build -f docker/Dockerfile.base \
 		$(DOCKER_BUILD_COMMON_ARGS) \
-		--build-arg HTTP_PROXY=$(HTTP_PROXY) \
-		--build-arg HTTPS_PROXY=$(HTTPS_PROXY) \
-		--build-arg GOPROXY=$(GOPROXY) \
-		--build-arg ALPINE_MIRROR=$(ALPINE_MIRROR) \
-		--build-arg NPM_MIRROR=$(NPM_MIRROR) \
-		--build-arg GITHUB_PROXY=$(GITHUB_PROXY) \
+		$(DOCKER_BUILD_PROXY_ARGS) \
 		-t hotplex:base .
 	@printf "${GREEN}✅ Built hotplex:base${NC}\n"
 
-docker-build-app: docker-build-base ## @docker Build the default app image (go stack, depends on base)
-	@printf "${CYAN}🔨 Building hotplex (go stack)...${NC}\n"
-	@docker build -f docker/Dockerfile \
+docker-build-base: docker-build-foundation ## @docker Alias for foundation build
+
+docker-build-go: docker-build-foundation docker-build-artifacts ## @docker Build the Go stack
+	@printf "${CYAN}🏗️  Building hotplex:go...${NC}\n"
+	@docker build -f docker/Dockerfile.go-sdk \
 		$(DOCKER_BUILD_COMMON_ARGS) \
-		$(DOCKER_BUILD_PROXY_ARGS) \
-		-t hotplex:$(STACK_TAG) -t hotplex:go -t hotplex:go-$(STACK_VERSION_go) .
+		-t hotplex:go .
 	@printf "${GREEN}✅ Built hotplex:go${NC}\n"
 
-docker-build-stack: docker-build-base ## @docker Build a specific tech-stack image. Usage: make docker-build-stack S=node
+docker-build-stack: docker-build-foundation docker-build-artifacts ## @docker Build a tech-stack image. Usage: make docker-build-stack S=node
 	@if [ -z "$(S)" ]; then \
 		printf "${RED}❌ Error: S=<stack> is required. Options: $(VALID_STACKS)${NC}\n"; \
 		exit 1; \
 	fi
 	@printf "${CYAN}🔨 Building hotplex:$(S)...${NC}\n"
-	@if [ "$(S)" = "go" ]; then \
-		docker build -f docker/Dockerfile \
-			$(DOCKER_BUILD_COMMON_ARGS) \
-			$(DOCKER_BUILD_PROXY_ARGS) \
-			-t hotplex:$(STACK_TAG) -t hotplex:go -t hotplex:go-$(STACK_VERSION_go) .; \
-	else \
-		docker build -f docker/Dockerfile.$(S) \
-			$(DOCKER_BUILD_COMMON_ARGS) \
-			$(DOCKER_BUILD_PROXY_ARGS) \
-			-t hotplex:$(S) .; \
-	fi
+	@docker build -f docker/Dockerfile.$(S) \
+		$(DOCKER_BUILD_COMMON_ARGS) \
+		$(DOCKER_BUILD_PROXY_ARGS) \
+		-t hotplex:$(S) .
 	@printf "${GREEN}✅ Built hotplex:$(S)${NC}\n"
 
-docker-build-all: docker-build-base ## @docker Build base + all tech-stack images sequentially
+docker-build-all: docker-build-artifacts ## @docker Build all tech-stack images sequentially
 	@printf "${CYAN}🔨 Building all stacks...${NC}\n"
 	@for s in $(VALID_STACKS); do \
 		printf "${CYAN}  → Building hotplex:$$s...${NC}\n"; \
-		if [ "$$s" = "go" ]; then \
-			docker build -f docker/Dockerfile \
-				$(DOCKER_BUILD_COMMON_ARGS) $(DOCKER_BUILD_PROXY_ARGS) \
-				-t hotplex:$(STACK_TAG) -t hotplex:go -t hotplex:go-$(STACK_VERSION_go) . || exit 1; \
-		else \
-			docker build -f docker/Dockerfile.$$s \
-				$(DOCKER_BUILD_COMMON_ARGS) $(DOCKER_BUILD_PROXY_ARGS) \
-				-t hotplex:$$s . || exit 1; \
-		fi; \
+		$(MAKE) docker-build-stack S=$$s || exit 1; \
 	done
 	@printf "${GREEN}🎉 All stacks built!${NC}\n"
 

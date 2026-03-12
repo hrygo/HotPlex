@@ -11,11 +11,11 @@ import (
 
 // Registry manages capability definitions with thread-safe access.
 type Registry struct {
-	mu          sync.RWMutex
+	mu           sync.RWMutex
 	capabilities map[string]Capability
-	categories  []CategoryInfo
-	configPath  string
-	logger      *slog.Logger
+	categories   []CategoryInfo
+	configPath   string
+	logger       *slog.Logger
 }
 
 // RegistryOption configures a Registry.

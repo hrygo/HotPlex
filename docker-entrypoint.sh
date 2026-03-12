@@ -21,27 +21,60 @@ run_as_hotplex() {
 }
 
 # ------------------------------------------------------------------------------
-# 1. Fix Permissions (if running as root)
-#    Solves EACCES issues with host-mounted volumes
+# 1. Fix Permissions & Create Directories (if running as root)
+#    Solves EACCES issues with host-mounted volumes and ensures paths exist
 # ------------------------------------------------------------------------------
 if [ "$(id -u)" = "0" ]; then
-    echo "--> Fixing permissions for mounted volumes..."
+    echo "--> Ensuring directories exist and fixing permissions..."
+    mkdir -p "$CONFIG_DIR" "$HOTPLEX_HOME/.claude" "$HOTPLEX_HOME/projects"
+    
     chown -R hotplex:hotplex "$CONFIG_DIR" 2>/dev/null || true
     chown -R hotplex:hotplex "$HOTPLEX_HOME/.claude" 2>/dev/null || true
     chown -R hotplex:hotplex "$HOTPLEX_HOME/projects" 2>/dev/null || true
 fi
 
 # ------------------------------------------------------------------------------
-# 2. Claude Code Configuration - create if not exists
+# 2. HotPlex Bot Identity & Logging
 # ------------------------------------------------------------------------------
-CLAUDE_CONFIG="$HOTPLEX_HOME/.claude.json"
-if [ ! -f "$CLAUDE_CONFIG" ]; then
-    run_as_hotplex sh -c "echo '{}' > '$CLAUDE_CONFIG'"
-    echo "[entrypoint] Created $CLAUDE_CONFIG"
+echo "==> HotPlex Bot Instance: ${HOTPLEX_BOT_ID:-unknown}"
+
+# ------------------------------------------------------------------------------
+# 3. Claude Code Configuration - Seeding & Isolation
+# ------------------------------------------------------------------------------
+CLAUDE_DIR="$HOTPLEX_HOME/.claude"
+CLAUDE_SEED="/home/hotplex/.claude_seed"
+
+# Ensure container-private .claude directory exists
+run_as_hotplex mkdir -p "$CLAUDE_DIR"
+
+if [ -d "$CLAUDE_SEED" ]; then
+    echo "--> Seeding Claude configurations from host..."
+    
+    # 1. Sync critical capabilities (skills, teams) - Copy only if not exists to avoid overwriting instance-specific changes
+    for item in "skills" "teams"; do
+        if [ -d "$CLAUDE_SEED/$item" ]; then
+             echo "    - Syncing $item..."
+             run_as_hotplex cp -rn "$CLAUDE_SEED/$item" "$CLAUDE_DIR/"
+        fi
+    done
+
+    # 2. Sync core configuration files
+    for cfg in "settings.json" "settings.local.json" "config.json"; do
+        if [ -f "$CLAUDE_SEED/$cfg" ] && [ ! -f "$CLAUDE_DIR/$cfg" ]; then
+            echo "    - Seeding $cfg..."
+            run_as_hotplex cp "$CLAUDE_SEED/$cfg" "$CLAUDE_DIR/"
+            
+            # 3. Dynamic Patching: Only replace 127.0.0.1 with host.docker.internal for Docker network compatibility
+            if [ "$cfg" = "settings.json" ]; then
+                echo "    - Patching 127.0.0.1 -> host.docker.internal in $cfg"
+                run_as_hotplex sed -i 's/127.0.0.1/host.docker.internal/g' "$CLAUDE_DIR/$cfg"
+            fi
+        fi
+    done
 fi
 
 # ------------------------------------------------------------------------------
-# 3. Git Identity Injection (from environment variables)
+# 4. Git Identity Injection (from environment variables)
 #    Allows configuring Git identity via .env without host .gitconfig dependency
 # ------------------------------------------------------------------------------
 if [ -n "${GIT_USER_NAME:-}" ]; then
@@ -62,10 +95,10 @@ if [ -d "$HOTPLEX_HOME/projects" ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 4. Execute CMD (drop privileges if root)
+# 5. Execute CMD (drop privileges if root)
 #    Ensures all files created by the app belong to 'hotplex' user
 # ------------------------------------------------------------------------------
-echo "==> Starting HotPlex..."
+echo "==> Starting HotPlex Engine..."
 if [ "$(id -u)" = "0" ]; then
     exec runuser -u hotplex -- "$@"
 else

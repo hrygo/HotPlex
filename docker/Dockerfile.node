@@ -1,60 +1,36 @@
-# ============================================
-# HotPlex Node.js/TypeScript Stack
-# ============================================
+# ==============================================================================
+# HotPlex Node.js Development Stack (2026)
+# ==============================================================================
 
-ARG BASE_IMAGE=hotplex:base
-FROM ${BASE_IMAGE}
+# 1. Source the binary provider
+FROM hotplex:artifacts AS binary-provider
+
+# 2. Target Foundation
+FROM hotplex:base
+
+ARG NPM_MIRROR=https://registry.npmmirror.com
 
 USER root
-ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
-ARG NPM_MIRROR
 
-# ============================================
-# Node.js Stack Extensions
-# ============================================
-# Package managers
-RUN if [ "$ALPINE_MIRROR" != "dl-cdn.alpinelinux.org" ]; then \
-        sed -i "s/dl-cdn.alpinelinux.org/$ALPINE_MIRROR/g" /etc/apk/repositories; \
-    fi && \
-    npm install -g corepack && \
-    corepack enable && \
-    corepack prepare pnpm@latest --activate && \
-    corepack prepare yarn@stable --activate && \
-    if [ -n "$NPM_MIRROR" ]; then \
-        npm config set registry "$NPM_MIRROR" && \
-        pnpm config set registry "$NPM_MIRROR"; \
-    fi
+# Install Node.js 24 (Cached)
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
-# Bun (ultra-fast runtime)
-RUN curl -fsSL https://bun.sh/install | bash
-ENV BUN_INSTALL="/home/hotplex/.bun"
-
-# Global npm tools
-RUN npm install -g \
-    typescript ts-node tsx \
-    eslint prettier @biomejs/biome \
-    jest vitest \
-    esbuild \
-    @nestjs/cli create-next-app create-vite \
-    nodemon pm2 \
-    http-server serve concurrently cross-env && \
+# Development Tools (Cached)
+RUN if [ -n "$NPM_MIRROR" ]; then npm config set registry "$NPM_MIRROR"; fi && \
+    npm install -g pnpm@latest bun@latest typescript ts-node tsx eslint prettier @biomejs/biome && \
     npm cache clean --force
 
-# Verification
-RUN node --version && \
-    pnpm --version && \
-    tsc --version && \
-    # Verify bun installation (needs to be in path or full path)
-    ${BUN_INSTALL}/bin/bun --version
+ENV BUN_INSTALL="/usr/local/bun"
+ENV PATH="${BUN_INSTALL}/bin:${PATH}"
 
-# User setup (Add stack-specific directories)
-RUN mkdir -p /home/hotplex/.npm /home/hotplex/.cache && \
-    chown -R hotplex:hotplex /home/hotplex
-
-ENV NPM_CONFIG_PREFIX=/home/hotplex/.npm-global
-ENV PATH="${NPM_CONFIG_PREFIX}/bin:${BUN_INSTALL}/bin:${PATH}"
-
-LABEL org.opencontainers.image.title="HotPlex Node"
-LABEL org.opencontainers.image.description="HotPlex AI Agent with Go + Node.js/TypeScript stack"
+# ==============================================================================
+# 🔥 Late Injection: The Binary (Changes frequently)
+# ==============================================================================
+COPY --from=binary-provider /hotplexd /usr/local/bin/hotplexd
+# ==============================================================================
 
 USER hotplex
+CMD ["/usr/local/bin/hotplexd"]
+LABEL org.opencontainers.image.title="HotPlex Node"
