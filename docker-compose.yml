@@ -116,8 +116,8 @@ services:
       - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
       - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw # Go module cache
       - hotplex-go-build:/home/hotplex/.cache/go-build:rw # Go build cache
-      # Bot-specific volumes (MUST be unique per bot - no variables!)
-      - ${HOME}/.slack/BOT_U0AHRCL1KCM:/home/hotplex/projects:rw
+      # Working directory mount - must match or contain HOTPLEX_WORK_DIR value
+      - ${HOME}/workspace/hotplex-workspace:/home/hotplex/projects:rw
     labels:
       - "hotplex.bot.role=primary"
       - "hotplex.bot.config=.env"
@@ -145,8 +145,8 @@ services:
       - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
       - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw
       - hotplex-go-build:/home/hotplex/.cache/go-build:rw
-      # Bot-specific volumes (MUST be unique per bot - no variables!)
-      - ${HOME}/.slack/BOT_U0AJVRH4YF6:/home/hotplex/projects:rw
+      # Working directory mount - must match or contain HOTPLEX_WORK_DIR value
+      - ${HOME}/workspace/hotplex-workspace-secondary:/home/hotplex/projects:rw
     labels:
       - "hotplex.bot.role=secondary"
       - "hotplex.bot.config=.env.secondary"
