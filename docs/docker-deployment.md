@@ -6,12 +6,25 @@
 
 ### 1. Build the Image
 
+HotPlex uses a high-efficiency **1+n** Docker architecture: 1 shared **Base** image + language-specific **Stacks**.
+
 ```bash
-# Build the All-in-One image (includes Claude Code CLI)
-make docker-build       # No cache, ensures fresh binary
-# Or for faster iteration:
-make docker-build-cache # Uses Docker cache
+# Step 1: Build the foundational base image
+make db T=base
+
+# Step 2: Build specific language stack (e.g., node, python, rust, java, or 'full' for all)
+make stack S=node
+# Or build all stacks in one go:
+make stack-all
 ```
+
+**💡 Available Image Variants:**
+- `hotplex:base`: Core engine + Go toolchain.
+- `hotplex:node`: Base + Node.js/TypeScript (v24).
+- `hotplex:python`: Base + Python (v3.14).
+- `hotplex:java`: Base + Java (v21).
+- `hotplex:rust`: Base + Rust (v1.94).
+- `hotplex:full`: All languages included.
 
 **💡 Tip: Customize Your Development Environment**
 The provided `Dockerfile` serves as a foundation. Since AI coding tools (like Claude Code) rely on the container's OS environment to execute specific tasks—such as building frontends, running Python scripts, or using specific CLI tools—we highly recommend that you **open the `Dockerfile` and install the specific dependencies or languages needed for your tech stack** (e.g., `Node.js`, `Python`, `Rust`) before running the build command above.
@@ -22,7 +35,7 @@ This method seamlessly integrates with your host machine's configuration:
 
 ```bash
 # Using Makefile
-make docker-run
+make docker-up
 # or manually (replace 15721/7897 with your actual ports)
 docker run -d \
   --name hotplex \

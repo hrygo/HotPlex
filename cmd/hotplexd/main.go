@@ -52,8 +52,23 @@ func main() {
 
 	// 1. Configure logging
 	logLevel := slog.LevelInfo
-	if val := os.Getenv("HOTPLEX_LOG_LEVEL"); val != "" {
-		switch strings.ToUpper(val) {
+	logFormat := "text"
+
+	// 1.2 Load server configuration from YAML
+	serverConfigPath := config.ResolveConfigPath(*serverConfig)
+	var serverCfg *config.ServerLoader
+	if serverConfigPath != "" {
+		var err error
+		serverCfg, err = config.NewServerLoader(serverConfigPath, nil) // Logging not yet initialized
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to load server config: %v\n", err)
+		}
+	}
+
+	if serverCfg != nil {
+		cfg := serverCfg.Get()
+		// Log Level
+		switch strings.ToUpper(cfg.Server.LogLevel) {
 		case "DEBUG":
 			logLevel = slog.LevelDebug
 		case "WARN":
@@ -61,9 +76,10 @@ func main() {
 		case "ERROR":
 			logLevel = slog.LevelError
 		}
+		// Log Format
+		logFormat = strings.ToLower(cfg.Server.LogFormat)
 	}
 
-	logFormat := strings.ToLower(os.Getenv("HOTPLEX_LOG_FORMAT"))
 	var handler slog.Handler
 	logOpts := &slog.HandlerOptions{
 		Level:     logLevel,
@@ -105,40 +121,20 @@ func main() {
 		logger.Warn("Native Brain initialization error (fail-open)", "error", err)
 	}
 
-	// 1.2 Load server configuration from YAML
-	serverConfigPath := config.ResolveConfigPath(*serverConfig)
-	var serverCfg *config.ServerLoader
-	if serverConfigPath != "" {
-		var err error
-		serverCfg, err = config.NewServerLoader(serverConfigPath, logger)
-		if err != nil {
-			logger.Warn("Failed to load server config, using defaults", "error", err)
-		}
+	// Update loader with initialized logger
+	if serverCfg != nil {
+		// Re-initialize with proper logger
+		serverCfg, _ = config.NewServerLoader(serverConfigPath, logger)
 	}
 
 	// 2. Initialize HotPlex Core Engine
-	// Priority: environment variables > YAML config > defaults
 	idleTimeout := 1 * time.Hour
-	if val := os.Getenv("HOTPLEX_IDLE_TIMEOUT"); val != "" {
-		if d, err := time.ParseDuration(val); err == nil {
-			idleTimeout = d
-		}
-	} else if serverCfg != nil {
-		idleTimeout = serverCfg.GetIdleTimeout()
-	}
-
 	executionTimeout := 30 * time.Minute
-	if val := os.Getenv("HOTPLEX_EXECUTION_TIMEOUT"); val != "" {
-		if d, err := time.ParseDuration(val); err == nil {
-			executionTimeout = d
-		}
-	} else if serverCfg != nil {
-		executionTimeout = serverCfg.GetTimeout()
-	}
-
-	// Get base system prompt from config
 	var baseSystemPrompt string
+
 	if serverCfg != nil {
+		idleTimeout = serverCfg.GetIdleTimeout()
+		executionTimeout = serverCfg.GetTimeout()
 		baseSystemPrompt = serverCfg.GetSystemPrompt()
 	}
 
@@ -163,9 +159,9 @@ func main() {
 	}
 
 	// Load API key for admin operations
-	adminToken := os.Getenv("HOTPLEX_API_KEY")
-	if keys := os.Getenv("HOTPLEX_API_KEYS"); keys != "" {
-		adminToken = strings.Split(keys, ",")[0]
+	var adminToken string
+	if serverCfg != nil {
+		adminToken = serverCfg.Get().Security.APIKey
 	}
 
 	// Warn if admin token is not configured
@@ -193,7 +189,11 @@ func main() {
 	}
 
 	// 2. Initialize CORS configuration and WebSocket handler
-	corsConfig := server.NewSecurityConfig(logger)
+	var securityKeys []string
+	if serverCfg != nil {
+		securityKeys = append(securityKeys, serverCfg.Get().Security.APIKey)
+	}
+	corsConfig := server.NewSecurityConfig(logger, securityKeys...)
 	wsHandler := server.NewHotPlexWSHandler(engine, logger, corsConfig)
 	http.Handle("/ws/v1/agent", wsHandler)
 
@@ -251,13 +251,9 @@ func main() {
 	}()
 
 	// 4. Start HTTP server
-	// Priority: environment variables > YAML config > defaults
-	port := os.Getenv("HOTPLEX_PORT")
-	if port == "" && serverCfg != nil {
+	port := "8080"
+	if serverCfg != nil {
 		port = serverCfg.GetPort()
-	}
-	if port == "" {
-		port = "8080"
 	}
 
 	stop := make(chan os.Signal, 1)

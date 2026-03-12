@@ -21,11 +21,7 @@ HotPlex follows a layered architecture with strict visibility rules, separating 
 - **`event/`**: Unified event protocol and callback definitions (`Callback`, `EventWithMeta`).
 - **`chatapps/`**: **Platform Access Layer**. Connects HotPlex to social platforms with multi-adapter support:
   - **Slack Adapter** (`chatapps/slack/`): Block Kit UI, Socket Mode, Native Streaming, Assistant Status API
-  - **Telegram Adapter** (`chatapps/telegram/`): Bot API integration
-  - **DingTalk Adapter** (`chatapps/dingtalk/`): Enterprise messaging with callback verification
   - **Feishu Adapter** (`chatapps/feishu/`): Lark/Feishu custom bot support
-  - **Discord Adapter** (`chatapps/discord/`): Discord bot integration
-  - **WhatsApp Adapter** (`chatapps/whatsapp/`): WhatsApp Business API
   - Core components:
     - `engine_handler.go`: Bridges platform messages to Engine commands
     - `manager.go`: Lifecycle management for bot adapters
@@ -45,7 +41,7 @@ HotPlex follows a layered architecture with strict visibility rules, separating 
 2.  **Strategy Pattern (Provider)**: Decouples the engine from specific AI tools. `provider.Provider` allows switching backends without changing execution logic.
 3.  **PGID-First Security**: Security is not an afterthought; every execution is wrapped in a dedicated process group to prevent orphan leaks.
 4.  **IO-Driven State Machine**: `internal/engine` manages process states (Starting, Ready, Busy, Dead) using IO markers rather than fixed sleeps.
-5.  **SDK-First**: All platform integrations use official SDKs (slack-go, telegram-bot-api, etc.), no manual protocol implementation.
+5.  **SDK-First**: All platform integrations use official SDKs (slack-go, etc.), no manual protocol implementation.
 
 ---
 
@@ -80,11 +76,7 @@ Multi-platform support with consistent architecture:
 | Platform | Protocol | Key Features |
 |----------|----------|--------------|
 | **Slack** | Socket Mode + Web API | Block Kit, Native Streaming, Assistant Status, Slash Commands |
-| **Telegram** | Bot API | Inline keyboards, commands |
-| **DingTalk** | Callback + Webhook | Signature verification, enterprise security |
 | **Feishu** | Custom Bot | Card messages, interactive callbacks |
-| **Discord** | Bot API | Rich embeds, slash commands |
-| **WhatsApp** | Business API | Template messages, media |
 
 #### Core Interfaces
 - **ChatAdapter**: Base interface for all platform adapters
@@ -103,7 +95,7 @@ Multi-platform support with consistent architecture:
 
 ```mermaid
 sequenceDiagram
-    participant Social as "Slack / Telegram / DingTalk"
+    participant Social as "Slack / Feishu"
     participant ChatApps as "chatapps.Adapter"
     participant Client as "Client (WebSocket/SDK)"
     participant Server as "internal/server"
@@ -170,7 +162,7 @@ sequenceDiagram
 - [x] Multi-platform PGID management (Windows Job Objects / Unix PGID)
 - [x] Regex-based Security WAF with Danger Block closed-loop
 - [x] **Dual Protocol Gateway**: Native WebSocket and OpenCode-compatible REST/SSE API
-- [x] **Multi-Platform Adapters**: Slack, Telegram, DingTalk, Feishu, Discord, WhatsApp
+- [x] **Multi-Platform Adapters**: Slack, Feishu
 - [x] **Slack Native Features**: Block Kit UI, Streaming, Assistant Status, Slash Commands
 - [x] **Event Hooks**: Plugin system for Webhooks and custom audit sinks
 - [x] **Observability**: OpenTelemetry native tracing and Prometheus metrics (`/metrics`)
@@ -178,14 +170,14 @@ sequenceDiagram
 
 ### Platform-Specific Features
 
-| Feature | Slack | Telegram | DingTalk | Feishu | Discord | WhatsApp |
-|---------|-------|----------|----------|--------|---------|----------|
-| Block Kit UI | ✅ | - | - | Cards | Embeds | - |
-| Native Streaming | ✅ | - | - | - | - | - |
-| Assistant Status | ✅ | - | - | - | - | - |
-| Slash Commands | ✅ | Commands | - | - | Slash | - |
-| Signature Verification | ✅ | - | ✅ | ✅ | - | - |
-| Interactive Buttons | ✅ | Inline KB | ActionCard | Card | Buttons | CTA |
+| Feature | Slack | Feishu |
+|---------|-------|--------|
+| Block Kit UI | ✅ | - |
+| Native Streaming | ✅ | - |
+| Assistant Status | ✅ | - |
+| Slash Commands | ✅ | - |
+| Signature Verification | ✅ | ✅ |
+| Interactive Buttons | ✅ | Card |
 
 ### Planned Enhancements
 - **L2/L3 Isolation**: Integrating Linux Namespaces (PID/Net) and WASM sandboxing

@@ -8,12 +8,25 @@
 
 ### 1. 构建镜像
 
+HotPlex 采用了高效的 **1+n** Docker 架构：1 个共享的 **Base** (基础) 镜像 + 多个语言专用的 **Stacks** (扩展栈)。
+
 ```bash
-# 构建 All-in-One 镜像（包含 Claude Code CLI）
-make docker-build       # 无缓存，确保最新二进制
-# 或快速迭代构建：
-make docker-build-cache # 使用 Docker 缓存
+# 第一步：构建基础镜像 (包含核心引擎与 Go 环境)
+make db T=base
+
+# 第二步：构建特定语言栈 (可选: node, python, rust, java, 或包含全部环境的 full)
+make stack S=node
+# 或者一次性构建所有镜像：
+make stack-all
 ```
+
+**💡 镜像版本说明:**
+- `hotplex:base`: 核心引擎 + Go 工具链。
+- `hotplex:node`: 基础镜像 + Node.js/TypeScript (v24)。
+- `hotplex:python`: 基础镜像 + Python (v3.14)。
+- `hotplex:java`: 基础镜像 + Java (v21)。
+- `hotplex:rust`: 基础镜像 + Rust (v1.94)。
+- `hotplex:full`: 包含上述所有语言环境。
 
 **💡 提示：自定义您的开发环境**
 本项目提供的 `Dockerfile` 是一个基础模板。由于 AI 编码工具在执行具体任务（例如打包前端、运行 Python 脚本或执行特定的 CLI 命令）时依赖相应的系统环境，我们强烈建议您在构建镜像前，**打开 `Dockerfile` 并加入您自己技术栈所需的依赖库或语言环境**（例如 `Node.js`, `Python`, `Rust` 或特定的构建工具）。然后再执行上方的构建命令。
@@ -24,7 +37,7 @@ make docker-build-cache # 使用 Docker 缓存
 
 ```bash
 # 使用 Makefile 运行
-make docker-run
+make docker-up
 # 或手动运行 (请根据实际端口替换 15721/7897)
 docker run -d \
   --name hotplex \

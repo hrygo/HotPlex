@@ -33,11 +33,11 @@ var DefaultAllowedOrigins = []string{
 	"http://127.0.0.1:8080",
 }
 
-// NewSecurityConfig creates a new SecurityConfig from environment variables.
+// NewSecurityConfig creates a new SecurityConfig from environment variables and optional configuration.
 // - HOTPLEX_ALLOWED_ORIGINS: Comma-separated list of allowed origins (defaults to localhost)
 // - HOTPLEX_API_KEY: Single API key for authentication
 // - HOTPLEX_API_KEYS: Multiple API keys (comma-separated, takes precedence over HOTPLEX_API_KEY)
-func NewSecurityConfig(logger *slog.Logger) *SecurityConfig {
+func NewSecurityConfig(logger *slog.Logger, cfgKeys ...string) *SecurityConfig {
 	c := &SecurityConfig{
 		allowedOrigins: make(map[string]bool),
 		apiKeys:        make(map[string]bool),
@@ -56,14 +56,24 @@ func NewSecurityConfig(logger *slog.Logger) *SecurityConfig {
 		c.allowedOrigins[strings.TrimSpace(origin)] = true
 	}
 
-	// Load API keys (optional)
+	// Load API keys from config first
+	for _, key := range cfgKeys {
+		if key != "" {
+			c.apiKeys[key] = true
+		}
+	}
+
+	// Then load from environment variables (overrides or complements)
 	apiKeys := parseAPIKeysFromEnv()
 	if len(apiKeys) > 0 {
-		c.apiKeyEnabled = true
 		for _, key := range apiKeys {
 			c.apiKeys[key] = true
 		}
-		logger.Info("API key authentication enabled", "key_count", len(apiKeys))
+	}
+
+	if len(c.apiKeys) > 0 {
+		c.apiKeyEnabled = true
+		logger.Info("API key authentication enabled", "key_count", len(c.apiKeys))
 	} else {
 		// SECURITY WARNING: No API keys configured - authentication is disabled
 		if isProductionMode() {

@@ -30,7 +30,7 @@
          ┌──────────────────┴──────────────────┐
          ▼                                     ▼
    ┌──────────┐                         ┌──────────┐
-   │  Slack   │                         │ DingTalk │
+   │  Slack   │                         │  Feishu  │
    │  Alerts  │                         │  Alerts  │
    └──────────┘                         └──────────┘
 ```
@@ -171,22 +171,11 @@ groups:
 - [x] Enable TLS termination at LB
 - [x] Configure network policies
 - [x] Enable rate limiting per platform
-- [x] Enable signature verification (Slack/DingTalk/Feishu)
+- [x] Enable signature verification (Slack/Feishu)
 - [x] Set resource limits
 - [x] Enable audit logging
 - [x] Configure WAF patterns
 - [x] Set AllowedTools whitelist
-
-### Platform-Specific Security
-
-#### Slack
-- Verify request signature (`X-Slack-Signature`)
-- Use Socket Mode for real-time events
-- Configure OAuth scopes properly
-
-#### DingTalk
-- Verify callback signature
-- Validate timestamp to prevent replay attacks
 
 #### Feishu
 - Verify signature with SHA256
@@ -259,17 +248,10 @@ curl http://hotplex:8080/metrics | grep hotplex_engine_sessions_active
 ps aux | grep -E "(claude-code|opencode)" | grep defunct
 ```
 
-### Platform Integration Issues
-
-#### Slack
-- Verify App Token and Bot Token validity
-- Check Socket Mode connection status
-- Review Slack API rate limits
-
-#### DingTalk
+#### Feishu
 - Validate AppID and AppSecret
 - Check callback URL accessibility
-- Verify callback token configuration
+- Verify signature configuration
 
 ## Docker Deployment
 

@@ -126,6 +126,7 @@ Edit `~/.hotplex/.env`:
 HOTPLEX_API_KEY=your-secure-api-key
 
 # Slack Bot config
+HOTPLEX_SLACK_PRIMARY_OWNER=UXXXXXXXXXX
 HOTPLEX_SLACK_BOT_USER_ID=UXXXXXXXXXX
 HOTPLEX_SLACK_BOT_TOKEN=xoxb-your-token
 HOTPLEX_SLACK_APP_TOKEN=xapp-your-token
@@ -161,8 +162,8 @@ hotplexd -h
 ## Docker Deployment
 
 ```bash
-# Pull image
-docker pull ghcr.io/hrygo/hotplex:latest
+# Pull image (choose your stack: base, node, python, rust, java, or full)
+docker pull ghcr.io/hrygo/hotplex:node
 
 # Run container
 docker run -d \
@@ -170,7 +171,7 @@ docker run -d \
   -p 8080:8080 \
   -v ~/.hotplex:/root/.hotplex \
   -v ~/projects:/root/projects \
-  ghcr.io/hotplex:latest
+  ghcr.io/hrygo/hotplex:node
 ```
 
 ## Uninstall

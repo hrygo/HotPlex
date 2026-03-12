@@ -1,0 +1,208 @@
+name: Docker Publish
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'docker/Dockerfile*'
+      - 'docker-entrypoint.sh'
+      - 'Makefile'
+      - 'docker-compose.yml'
+      - '.github/workflows/docker-publish.yml'
+    tags: [ 'v*' ]
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# 并发控制：如果同一个分支上有新的运行，则取消正在进行的运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 预准备阶段：确定版本、镜像名及构建决策
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_build: ${{ steps.check.outputs.should_build }}
+      image_name: ${{ steps.info.outputs.image_name }}
+    steps:
+      - name: Fetch repository info & version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RESPONSE=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/hrygo/hotplex/releases/latest")
+          VERSION=$(echo "$RESPONSE" | jq -r '.tag_name')
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "::warning title=API Error::Failed to fetch latest release, falling back to v0.0.0"
+            VERSION="v0.0.0"
+          fi
+          # Strip 'v' prefix if present
+          VERSION=${VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Normalize Image Name
+        id: info
+        run: |
+          LOWER_IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image_name=${LOWER_IMAGE_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if image Already Exists
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_PATH="${{ env.REGISTRY }}/${{ steps.info.outputs.image_name }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          EVENT="${{ github.event_name }}"
+
+          echo "Build Reason Logic Audit:"
+          echo "  - Event Type: $EVENT"
+          echo "  - Target Tag: ${IMAGE_PATH}:${VERSION}"
+
+          if [[ "$EVENT" == "push" || "$EVENT" == "workflow_dispatch" ]]; then
+            echo "Decision: Code/Manual trigger detected. Proceeding with build."
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            if docker manifest inspect "${IMAGE_PATH}:${VERSION}" > /dev/null 2>&1; then
+              echo "Decision: Version ${VERSION} already exists in registry. Skipping..."
+              echo "should_build=false" >> $GITHUB_OUTPUT
+            else
+              echo "Decision: New version or first-time build. Proceeding."
+              echo "should_build=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  # 核心构建阶段 - 基础镜像 (Base)
+  build-base:
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push base
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.base
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image_name }}:base
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 二进制构建阶段 (Artifacts)
+  build-artifacts:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push artifacts
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.artifacts
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image_name }}:artifacts
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 变体镜像构建 (Variants)
+  build-variants:
+    needs: [prepare, build-base, build-artifacts]
+    if: needs.prepare.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - { name: go, dockerfile: Dockerfile.go, suffix: '-go' }
+          - { name: node, dockerfile: Dockerfile.node, suffix: '-node' }
+          - { name: python, dockerfile: Dockerfile.python, suffix: '-python' }
+          - { name: java, dockerfile: Dockerfile.java, suffix: '-java' }
+          - { name: rust, dockerfile: Dockerfile.rust, suffix: '-rust' }
+          - { name: full, dockerfile: Dockerfile.full, suffix: '-full' }
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image_name }}
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}${{ matrix.variant.suffix }}
+            type=raw,value=latest${{ matrix.variant.suffix }},enable=${{ github.ref == 'refs/heads/main' }}
+            # === Multi-Tag Logic for go-default ===
+            type=raw,value=${{ needs.prepare.outputs.version }}-go,enable=${{ matrix.variant.name == 'go-default' }}
+            type=raw,value=latest-go,enable=${{ github.ref == 'refs/heads/main' && matrix.variant.name == 'go-default' }}
+
+      - name: Build and push ${{ matrix.variant.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.variant.dockerfile }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-contexts: |
+            hotplex:artifacts=docker-image://${{ env.REGISTRY }}/${{ needs.prepare.outputs.image_name }}:artifacts
+          # ... build contexts ...
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+            COMMIT=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -10,6 +10,10 @@ permissions:
   packages: write
   id-token: write  # Required for SBOM/Provenance attestation
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
@@ -40,92 +44,3 @@ jobs:
           args: release --clean --release-notes=RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  docker:
-    runs-on: ubuntu-latest
-    needs: goreleaser
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-
-      # Strip 'v' prefix from tag (v0.21.1 -> 0.21.1)
-      # GoReleaser archives use version without 'v' prefix
-      - name: Prepare version string
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Download release assets (linux/amd64)
-        uses: robinraju/release-downloader@v1
-        with:
-          repository: ${{ github.repository }}
-          tag: ${{ github.ref_name }}
-          fileName: "hotplex_${{ steps.version.outputs.VERSION }}_linux_amd64.tar.gz"
-          out-file-path: ./downloads
-
-      - name: Download release assets (linux/arm64)
-        uses: robinraju/release-downloader@v1
-        with:
-          repository: ${{ github.repository }}
-          tag: ${{ github.ref_name }}
-          fileName: "hotplex_${{ steps.version.outputs.VERSION }}_linux_arm64.tar.gz"
-          out-file-path: ./downloads
-
-      - name: Extract binaries
-        env:
-          VERSION: ${{ steps.version.outputs.VERSION }}
-        run: |
-          # Extract to match Dockerfile.release expected path: linux/${TARGETARCH}/hotplexd
-          mkdir -p linux/amd64 linux/arm64
-          tar -xzf ./downloads/hotplex_${VERSION}_linux_amd64.tar.gz -C linux/amd64
-          tar -xzf ./downloads/hotplex_${VERSION}_linux_arm64.tar.gz -C linux/arm64
-          # Verify extraction
-          echo "--- Extracted binaries ---"
-          ls -la linux/amd64/ linux/arm64/
-
-      - name: Build and push Docker image
-        id: build-push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/Dockerfile.release
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ github.ref_name }}
-            HOST_UID=1000
-          sbom: true
-          provenance: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Output digest
-        env:
-          DIGEST: ${{ steps.build-push.outputs.digest }}
-        run: |
-          echo "Pushed image digest:"
-          echo "$DIGEST"

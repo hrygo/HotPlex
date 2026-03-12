@@ -30,7 +30,7 @@
          ┌──────────────────┴──────────────────┐
          ▼                                     ▼
    ┌──────────┐                         ┌──────────┐
-   │  Slack   │                         │ DingTalk │
+   │  Slack   │                         │  飞书    │
    │  告警    │                         │  告警    │
    └──────────┘                         └──────────┘
 ```
@@ -171,22 +171,11 @@ groups:
 - [x] 在负载均衡器启用 TLS 终止
 - [x] 配置网络策略 (Network Policies)
 - [x] 启用平台级频率限制
-- [x] 启用签名验证 (Slack/DingTalk/飞书)
+- [x] 启用签名验证 (Slack/飞书)
 - [x] 配置资源限额 (Resource Limits)
 - [x] 启用审计日志
 - [x] 配置 WAF 正则规则
 - [x] 设置 AllowedTools 白名单
-
-### 平台特定安全
-
-#### Slack
-- 验证请求签名 (`X-Slack-Signature`)
-- 使用 Socket Mode 处理实时事件
-- 正确配置 OAuth 权限范围
-
-#### DingTalk
-- 验证回调签名
-- 验证时间戳防止重放攻击
 
 #### 飞书
 - 使用 SHA256 验证签名
@@ -259,17 +248,10 @@ curl http://hotplex:8080/metrics | grep hotplex_engine_sessions_active
 ps aux | grep -E "(claude-code|opencode)" | grep defunct
 ```
 
-### 平台集成问题
-
-#### Slack
-- 验证 App Token 和 Bot Token 有效性
-- 检查 Socket Mode 连接状态
-- 查看 Slack API 速率限制
-
-#### DingTalk
+#### 飞书
 - 验证 AppID 和 AppSecret
 - 检查回调 URL 可访问性
-- 验证回调 token 配置
+- 验证签名配置
 
 ## Docker 部署
 

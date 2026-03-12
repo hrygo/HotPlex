@@ -1,6 +1,6 @@
 # ChatApps 接入层：架构协议与集成规范
 
-HotPlex ChatApps 接入层是系统与外部通讯生态集成的核心协议层。它将 HotPlex 引擎的能力抽象为 **ChatApps-as-a-Service**，通过标准化的适配器模式与 **插件化消息处理流水线 (Processor Chain)** 实现不同平台（Slack, Telegram, 钉钉等）的无缝接入。
+HotPlex ChatApps 接入层是系统与外部通讯生态集成的核心协议层。它将 HotPlex 引擎的能力抽象为 **ChatApps-as-a-Service**，通过标准化的适配器模式与 **插件化消息处理流水线 (Processor Chain)** 实现不同平台（Slack, 飞书等）的无缝接入。
 
 ---
 
@@ -77,7 +77,7 @@ type ChatMessage struct {
 | **4. Thread**      | 线程上下文维护 | 自动关联 `thread_ts`，确保同一个 Turn 的消息聚类在一个回复链中。                  |
 | **5. Aggregator**  | 智能聚合       | 将多个微小的工具调用（tool_use）聚合为一个 UI Block，避免消息刷屏。               |
 | **6. RichContent** | 富文本增强     | 处理 Reaction 点赞、交互式按钮、附件图片等。                                      |
-| **7. Format**      | 平台格式转换   | 将 Markdown 转换为 Slack mrkdwn, Telegram HTML, 或钉钉 ActionCard。               |
+| **7. Format**      | 平台格式转换   | 将 Markdown 转换为 Slack mrkdwn 或 飞书格式。                                     |
 | **8. Chunk**       | 长文本切片     | 突破平台单条消息长度限制（如 Slack 4000 字符），自动分段发送。                    |
 
 ### 3.2 区域化交互 (Zone-based Interaction)
@@ -91,15 +91,10 @@ type ChatMessage struct {
 
 ---
 
-## 4. 平台集成矩阵 (Integration Matrix)
-
 | 平台         | 联通协议                  | 交互分级             | 架构优势                                                   |
 | :----------- | :------------------------ | :------------------- | :--------------------------------------------------------- |
 | **Slack**    | **Socket Mode**           | L3 (Block Kit)       | **旗舰体验**：支持流式局部更新、复杂交互组件与线程自动化。 |
-| **Telegram** | Bot API (Polling/Webhook) | L2 (Inline Keyboard) | **响应最快**：API 限制最少，支持 MarkdownV2 高级渲染。     |
-| **钉钉**     | Webhook / Callback        | L2 (ActionCard)      | **企业增强**：支持 ActionCard 交互，适配企业内网环境。     |
-| **WhatsApp** | Cloud API (Webhook)       | L1 (Interactive)     | **广泛触达**：支持按钮模板，适合高并发移动端场景。         |
-| **Discord**  | WebSocket Gateway         | L3 (Embeds)          | **社区化**：支持高性能多节点 Sharding 分片方案。           |
+| **Feishu**   | **Webhook / Callback**    | L3 (Message Card)    | **协同增强**：支持富文本消息卡片，深度集成企业工作流。     |
 
 ---
 

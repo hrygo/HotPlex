@@ -1,6 +1,4 @@
-# HotPlex Examples
-
-🌐 [中文版 (Chinese)](README_zh.md)
+# HotPlex Examples v0.24.x
 
 This directory contains examples of how to use the HotPlex SDK and Proxy Server.
 
@@ -16,26 +14,38 @@ A comprehensive Go demo showing the end-to-end lifecycle of a Claude session:
 - **Process Recovery**: How HotPlex resumes sessions after a "crash" or restart using marker files.
 - **Manual Termination**: Explicitly stopping a session.
 
-### 3. [OpenCode Basic (Go)](./go_opencode_basic)
+### 3. [Error Handling (Go)](./go_error_handling)
+Demonstrates proper error handling patterns with HotPlex:
+- WAF security blocks
+- Session errors
+- Timeout handling
+- Context cancellation
+
+### 4. [OpenCode Basic (Go)](./go_opencode_basic)
 Demonstrates how to use HotPlex with the **OpenCode** CLI agent:
 - **Provider Switching**: Seamlessly swapping the underlying AI agent.
 - **Plan/Build Modes**: Configuring OpenCode-specific operational modes.
 - **Model Configuration**: Overriding default models for the provider.
 
-### 4. [OpenCode Lifecycle (Go)](./go_opencode_lifecycle)
+### 5. [OpenCode Lifecycle (Go)](./go_opencode_lifecycle)
 A comprehensive Go demo showing the end-to-end lifecycle of an OpenCode session:
 - **Cold Start**: Initializing a new persistent process with GLM-5 model.
 - **Multi-turn Interaction**: Continuing conversations within the same session.
 - **Session Persistence**: How HotPlex maintains provider-specific session state.
 - **Warm Start Recovery**: Resuming previous sessions using SessionID.
 
-### 5. [OpenCode HTTP Client (Python)](./python_opencode_http)
+### 6. [OpenCode HTTP Client (Python)](./python_opencode_http)
 A Python client demonstrating the REST + SSE interaction pattern for the OpenCode compatibility layer:
 - **SSE Listening**: Real-time event streaming using `requests`.
 - **Session Management**: RESTful session creation and message posting.
 - **Event Mapping**: Mapping OpenCode "Parts" to human-readable console output.
 
-### 6. [Claude WebSocket Client (Node.js)](./node_claude_websocket)
+### 7. [Java HTTP & WebSocket Client](./java_opencode_http)
+Java clients demonstrating both HTTP REST and WebSocket protocols:
+- **SimpleClient.java**: Basic HTTP client with SSE support
+- **HotPlexWsClient.java**: Enterprise WebSocket client with reconnection and metrics
+
+### 8. [Claude WebSocket Client (Node.js)](./node_claude_websocket)
 
 | File                   | Description                                                                                                |
 | :--------------------- | :--------------------------------------------------------------------------------------------------------- |
@@ -82,6 +92,9 @@ claude auth
 
 ### Running the Go Examples
 ```bash
+# Error Handling Demo
+go run _examples/go_error_handling/main.go
+
 # Claude Basic Demo
 go run _examples/go_claude_basic/main.go
 
@@ -100,6 +113,20 @@ go run _examples/go_opencode_lifecycle/main.go
 cd _examples/python_opencode_http
 pip install requests
 python client.py
+```
+
+### Running the Java Examples
+
+```bash
+cd _examples/java_opencode_http
+
+# HTTP Client
+javac SimpleClient.java
+java SimpleClient
+
+# WebSocket Client
+javac HotPlexWsClient.java
+java com.hotplex.example.HotPlexWsClient
 ```
 
 ### Running the WebSocket Examples

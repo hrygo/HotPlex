@@ -50,9 +50,9 @@ The following diagram illustrates how signals flow from the Engine through the i
 - **[formatting.go](formatting.go)**: Advanced Markdown-to-Mrkdwn converter with support for Slack-specific escapes and blocks.
 - **[streaming_writer.go](streaming_writer.go)**: Implements `io.Writer` for character-by-character output via Slack's native streaming UI.
 
-### ⚡ Interactions
-- **[slash_commands.go](slash_commands.go)**: Processes slash commands (e.g., `/reset`, `/dc`) with rate limiting and context awareness.
-- **[interactive.go](interactive.go)**: Handles interactive callbacks for **WAF Danger Blocks** and permission requests, enabling Human-in-the-loop (HITL) workflows.
+### 🏠 App Home & Capabilities
+- **[apphome/](apphome)**: Implements the Slack App Home "Capability Center". Provides a form-based interface for running predefined AI tasks (Code Review, Debugging, etc.).
+- **[interactive.go](interactive.go)**: Handles interactive callbacks for **WAF Danger Blocks**, permission requests, and **App Home form submissions**.
 
 ### 🛡️ Security & Reliability
 - **[security.go](security.go)**: Implements request signature verification, URL sanitization, and PII masking for error messages.

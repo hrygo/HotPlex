@@ -13,7 +13,7 @@ HotPlex 的核心哲学是 **"利用胜于构建 (Leverage vs Build)"**。我们
 - **热复用 (Hot-Multiplexing)**：消除进程冷启动延迟，实现毫秒级响应。
 - **安全隔离**：提供进程组 (PGID) 隔离和指令级 WAF 审计，包含 danger block 闭环确认。
 - **协议标准化**：将多样化的 CLI 输出归一化为统一的流式事件。
-- **多平台支持**：原生适配器支持 Slack、Telegram、DingTalk、飞书、Discord、WhatsApp。
+- **多平台支持**：原生适配器支持 Slack、飞书。
 
 ---
 
@@ -236,7 +236,7 @@ HotPlex 默认提供以下安全特性：
 2. **Danger Block 闭环**：交互式安全确认，包含用户批准工作流。
 3. **进程组隔离**：确保智能体及其产生的任何子进程都能被强制清理。
 4. **能力约束**：通过 `AllowedTools` 在语义层面限制智能体的能力。
-5. **签名验证**：内置 Slack/DingTalk/飞书 Webhook 的 HMAC 验证。
+5. **签名验证**：内置 Slack、飞书 Webhook 的 HMAC 验证。
 
 ---
 
@@ -270,11 +270,7 @@ adapter.Start(ctx)
 | 平台 | 关键特性 |
 |------|----------|
 | **Slack** | Block Kit UI、原生流式输出、Assistant Status、斜杠命令、Socket Mode |
-| **Telegram** | 内联键盘、命令、消息格式化 |
-| **DingTalk** | ActionCard、签名验证、企业安全 |
 | **飞书** | 卡片消息、交互回调 |
-| **Discord** | 富文本嵌入、斜杠命令 |
-| **WhatsApp** | 模板消息、媒体支持 |
 
 ---
 

@@ -125,6 +125,7 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 HOTPLEX_API_KEY=your-secure-api-key
 
 # Slack Bot 配置
+HOTPLEX_SLACK_PRIMARY_OWNER=UXXXXXXXXXX
 HOTPLEX_SLACK_BOT_USER_ID=UXXXXXXXXXX
 HOTPLEX_SLACK_BOT_TOKEN=xoxb-your-token
 HOTPLEX_SLACK_APP_TOKEN=xapp-your-token
@@ -160,8 +161,8 @@ hotplexd -h
 ## Docker 部署
 
 ```bash
-# 拉取镜像
-docker pull ghcr.io/hrygo/hotplex:latest
+# 拉取镜像 (根据需求选择: base, node, python, rust, java, 或包含全部环境的 full)
+docker pull ghcr.io/hrygo/hotplex:node
 
 # 运行容器
 docker run -d \
@@ -169,7 +170,7 @@ docker run -d \
   -p 8080:8080 \
   -v ~/.hotplex:/root/.hotplex \
   -v ~/projects:/root/projects \
-  ghcr.io/hotplex:latest
+  ghcr.io/hrygo/hotplex:node
 ```
 
 ## 卸载

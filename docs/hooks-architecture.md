@@ -7,7 +7,7 @@
 The Event Hooks system provides a plugin-based architecture for reacting to events in HotPlex. It enables:
 
 - **Audit Logging**: Record all session events for compliance
-- **Notifications**: Send alerts to Slack, Feishu, DingTalk
+- **Notifications**: Send alerts to Slack and Feishu
 - **Webhooks**: Forward events to external services
 - **Custom Logic**: Implement custom reactions to events
 

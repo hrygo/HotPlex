@@ -84,37 +84,6 @@ type InlineKeyboardMarkup struct {
 
 type SlackBlock map[string]any
 
-type DiscordEmbed struct {
-	Title       string                 `json:"title,omitempty"`
-	Description string                 `json:"description,omitempty"`
-	URL         string                 `json:"url,omitempty"`
-	Color       int                    `json:"color,omitempty"`
-	Fields      []DiscordEmbedField    `json:"fields,omitempty"`
-	Footer      *DiscordEmbedFooter    `json:"footer,omitempty"`
-	Thumbnail   *DiscordEmbedThumbnail `json:"thumbnail,omitempty"`
-	Image       *DiscordEmbedImage     `json:"image,omitempty"`
-	Timestamp   string                 `json:"timestamp,omitempty"`
-}
-
-type DiscordEmbedField struct {
-	Name   string `json:"name"`
-	Value  string `json:"value"`
-	Inline bool   `json:"inline,omitempty"`
-}
-
-type DiscordEmbedFooter struct {
-	Text    string `json:"text"`
-	IconURL string `json:"icon_url,omitempty"`
-}
-
-type DiscordEmbedThumbnail struct {
-	URL string `json:"url"`
-}
-
-type DiscordEmbedImage struct {
-	URL string `json:"url"`
-}
-
 type StreamHandler func(ctx context.Context, sessionID string, chunk string, isFinal bool) error
 
 type StreamAdapter interface {

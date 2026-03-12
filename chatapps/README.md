@@ -1,6 +1,6 @@
 # ChatApps: Multi-Platform Connector
 
-The `chatapps` package provides the bridge between HotPlex's core engine and various chat platforms (Slack, Feishu/Lark, Telegram, Discord, etc.). It normalizes platform-specific events and messages into a unified format for the engine to process.
+The `chatapps` package provides the bridge between HotPlex's core engine and various chat platforms (Slack and Feishu/Lark). It normalizes platform-specific events and messages into a unified format for the engine to process.
 
 ## 🏛 Architecture Overview
 

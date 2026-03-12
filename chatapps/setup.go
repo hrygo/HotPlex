@@ -11,11 +11,8 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
-	"github.com/hrygo/hotplex/chatapps/dingtalk"
-	"github.com/hrygo/hotplex/chatapps/discord"
+	"github.com/hrygo/hotplex/chatapps/feishu"
 	"github.com/hrygo/hotplex/chatapps/slack"
-	"github.com/hrygo/hotplex/chatapps/telegram"
-	"github.com/hrygo/hotplex/chatapps/whatsapp"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/provider"
 )
@@ -96,45 +93,6 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 	}
 
 	manager := NewAdapterManager(logger)
-
-	// Telegram
-	setupPlatform(ctx, "telegram", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-		token := os.Getenv("HOTPLEX_TELEGRAM_BOT_TOKEN")
-		if token == "" {
-			return nil
-		}
-		cfg := telegram.Config{
-			BotToken:    token,
-			WebhookURL:  os.Getenv("HOTPLEX_TELEGRAM_WEBHOOK_URL"),
-			SecretToken: os.Getenv("HOTPLEX_TELEGRAM_SECRET_TOKEN"),
-		}
-		var opts []base.AdapterOption
-		if pc != nil {
-			opts = append(opts, base.WithSessionTimeout(pc.Session.Timeout))
-			opts = append(opts, base.WithCleanupInterval(pc.Session.CleanupInterval))
-		}
-		opts = append(opts, base.WithoutServer())
-		return telegram.NewAdapter(cfg, logger, opts...)
-	}, "HOTPLEX_TELEGRAM_BOT_TOKEN")
-
-	// Discord
-	setupPlatform(ctx, "discord", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-		token := os.Getenv("HOTPLEX_DISCORD_BOT_TOKEN")
-		if token == "" {
-			return nil
-		}
-		cfg := discord.Config{
-			BotToken:  token,
-			PublicKey: os.Getenv("HOTPLEX_DISCORD_PUBLIC_KEY"),
-		}
-		var opts []base.AdapterOption
-		if pc != nil {
-			opts = append(opts, base.WithSessionTimeout(pc.Session.Timeout))
-			opts = append(opts, base.WithCleanupInterval(pc.Session.CleanupInterval))
-		}
-		opts = append(opts, base.WithoutServer())
-		return discord.NewAdapter(cfg, logger, opts...)
-	}, "HOTPLEX_DISCORD_BOT_TOKEN")
 
 	// Slack
 	setupPlatform(ctx, "slack", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
@@ -250,80 +208,33 @@ func Setup(ctx context.Context, logger *slog.Logger, configDir ...string) (http.
 		opts = append(opts, base.WithoutServer())
 		return slack.NewAdapter(config, logger, opts...)
 	}, "HOTPLEX_SLACK_BOT_TOKEN")
-
-	// DingTalk
-	setupPlatform(ctx, "dingtalk", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-		appID := os.Getenv("HOTPLEX_DINGTALK_APP_ID")
-		appSecret := os.Getenv("HOTPLEX_DINGTALK_APP_SECRET")
-		if pc != nil && pc.DingTalk.AppID != "" {
-			appID = pc.DingTalk.AppID
-			appSecret = pc.DingTalk.AppSecret
-		}
-
+	// Feishu
+	setupPlatform(ctx, "feishu", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
+		appID := os.Getenv("HOTPLEX_FEISHU_APP_ID")
 		if appID == "" {
 			return nil
 		}
+		config := &feishu.Config{
+			AppID:             appID,
+			AppSecret:         os.Getenv("HOTPLEX_FEISHU_APP_SECRET"),
+			VerificationToken: os.Getenv("HOTPLEX_FEISHU_VERIFICATION_TOKEN"),
+			EncryptKey:        os.Getenv("HOTPLEX_FEISHU_ENCRYPT_KEY"),
+			ServerAddr:        os.Getenv("HOTPLEX_FEISHU_SERVER_ADDR"),
+		}
 
-		cfg := dingtalk.Config{
-			AppID:         appID,
-			AppSecret:     appSecret,
-			CallbackToken: os.Getenv("HOTPLEX_DINGTALK_CALLBACK_TOKEN"),
-			CallbackKey:   os.Getenv("HOTPLEX_DINGTALK_CALLBACK_KEY"),
-		}
 		if pc != nil {
-			cfg.SystemPrompt = pc.SystemPrompt
-			if pc.DingTalk.CallbackToken != "" {
-				cfg.CallbackToken = pc.DingTalk.CallbackToken
-			}
-			if pc.DingTalk.CallbackKey != "" {
-				cfg.CallbackKey = pc.DingTalk.CallbackKey
-			}
-			if pc.DingTalk.MaxMessageLen > 0 {
-				cfg.MaxMessageLen = pc.DingTalk.MaxMessageLen
-			}
+			config.SystemPrompt = pc.SystemPrompt
 		}
+
 		var opts []base.AdapterOption
 		if pc != nil {
 			opts = append(opts, base.WithSessionTimeout(pc.Session.Timeout))
 			opts = append(opts, base.WithCleanupInterval(pc.Session.CleanupInterval))
 		}
-		return dingtalk.NewAdapter(cfg, logger, opts...)
-	})
-
-	// WhatsApp
-	setupPlatform(ctx, "whatsapp", loader, manager, logger, func(pc *PlatformConfig) ChatAdapter {
-		phoneID := os.Getenv("HOTPLEX_WHATSAPP_PHONE_NUMBER_ID")
-		accessToken := os.Getenv("HOTPLEX_WHATSAPP_ACCESS_TOKEN")
-		if pc != nil && pc.WhatsApp.PhoneNumberID != "" {
-			phoneID = pc.WhatsApp.PhoneNumberID
-			accessToken = pc.WhatsApp.AccessToken
-		}
-
-		if phoneID == "" {
-			return nil
-		}
-
-		cfg := whatsapp.Config{
-			PhoneNumberID: phoneID,
-			AccessToken:   accessToken,
-			VerifyToken:   os.Getenv("HOTPLEX_WHATSAPP_VERIFY_TOKEN"),
-		}
-		if pc != nil {
-			cfg.SystemPrompt = pc.SystemPrompt
-			if pc.WhatsApp.VerifyToken != "" {
-				cfg.VerifyToken = pc.WhatsApp.VerifyToken
-			}
-			if pc.WhatsApp.APIVersion != "" {
-				cfg.APIVersion = pc.WhatsApp.APIVersion
-			}
-		}
-		var opts []base.AdapterOption
-		if pc != nil {
-			opts = append(opts, base.WithSessionTimeout(pc.Session.Timeout))
-			opts = append(opts, base.WithCleanupInterval(pc.Session.CleanupInterval))
-		}
-		return whatsapp.NewAdapter(cfg, logger, opts...)
-	})
+		opts = append(opts, base.WithoutServer())
+		adapter, _ := feishu.NewAdapter(config, logger, opts...)
+		return adapter
+	}, "HOTPLEX_FEISHU_APP_ID")
 
 	if err := manager.StartAll(ctx); err != nil {
 		return nil, nil, fmt.Errorf("start all adapters: %w", err)

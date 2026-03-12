@@ -102,15 +102,15 @@ cert.log
 # ------------------------------------------------------------------------------
 
 # Claude / Serena / HotPlex Agents
-.claude/
+.claude/*
 !.claude/skills
 !.claude/rules
 !.claude/workflows
 
-.agent/
+.agent/*
 !.agent/rules
-!.agent/skills
-!.agent/workflows
+!.agent/skills/
+!.agent/workflows/
 
 # .serena is used for workspace state (project.yml is usually tracked, others ignored)
 # We keep current behavior but make it cleaner

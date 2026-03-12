@@ -10,12 +10,12 @@ HotPlex is an **AI Agent Runtime** with multiple access channels:
 
 | Access Channel                            | Use Case                                    | Recommendation  |
 | ----------------------------------------- | ------------------------------------------- | --------------- |
-| **ChatApps (Slack/Telegram/Feishu/etc.)** | Production, Multi-user, Natural Interaction | ⭐⭐⭐ Recommended |
+| **ChatApps (Slack/Feishu)** | Production, Multi-user, Natural Interaction | ⭐⭐⭐ Recommended |
 | Go SDK                                    | Embedded Integration, Custom Workflows      | ⭐⭐              |
 | Standalone Server                         | Multi-language Clients, Microservices       | ⭐⭐              |
 | Python SDK                                | Quick Prototyping, Data Science             | ⭐               |
 
-**ChatApps is HotPlex's primary access channel**: Through platforms like Slack, Telegram, and Feishu, users can interact with AI agents just like chatting with colleagues - no installation or configuration needed.
+**ChatApps is HotPlex's primary access channel**: Through platforms like Slack and Feishu, users can interact with AI agents just like chatting with colleagues - no installation or configuration needed.
 
 ---
 
@@ -48,9 +48,7 @@ brew install opencode
 
 ---
 
-## Option 1: ChatApps Platform Integration (Recommended ⭐)
-
-Interact with AI agents directly through Slack, Telegram, Feishu, and other messaging platforms. This is HotPlex's **primary access method**, ideal for production environments.
+Interact with AI agents directly through Slack, Feishu, and other messaging platforms. This is HotPlex's **primary access method**, ideal for production environments.
 
 > 🌈 **Slack Setup for Beginners**: First time setting up a Slack bot? Check out our **[Zero-to-Hero Slack Setup Guide](chatapps/slack-setup-beginner.md)** for a simple, step-by-step tutorial.
 
@@ -59,16 +57,13 @@ Interact with AI agents directly through Slack, Telegram, Feishu, and other mess
 | Platform     | Protocol              | Status           |
 | ------------ | --------------------- | ---------------- |
 | **Slack**    | Socket Mode + Web API | ✅ Stable         |
-| **Telegram** | Bot API               | ✅ Stable         |
 | **Feishu**   | Custom Bot            | ✅ Stable         |
-| **DingTalk** | Callback + Webhook    | ✅ Stable         |
-| **Discord**  | Bot API               | 🔄 In Development |
-| **WhatsApp** | Business API          | 🔄 In Development |
 
 ### Step 1: Configure Environment Variables
 
 ```bash
 # Example: Slack
+export HOTPLEX_SLACK_PRIMARY_OWNER=UXXXXXXXXXX
 export HOTPLEX_SLACK_BOT_TOKEN=xoxb-xxx-xxx-xxx
 export HOTPLEX_SLACK_APP_TOKEN=xapp-xxx-xxx-xxx
 export HOTPLEX_SLACK_SIGNING_SECRET=xxx

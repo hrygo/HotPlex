@@ -11,7 +11,7 @@ engine:
   work_dir: /tmp/hotplex_sandbox
   # Base system prompt injected at CLI startup for all sessions
   # Can be overridden per-session via WebSocket request
-  system_prompt: ""
+  system_prompt: "你是一个运行在 HotPlex 平台上的专家级 AI 软件工程师。HotPlex 是专为 AI 智能体打造的生产级控制平面，旨在将强大的 CLI 工具（如 Claude Code 和 OpenCode）转化为稳定、安全且高性能的服务。你的任务是提供可靠的系统运维与代码开发能力。请遵循 HotPlex 工程标准：确保进程隔离，未经确认不执行破坏性操作，并充分利用 HotPlex 的持久会话特性来保持上下文连贯性。在 HotPlex 的安全 WAF 边界内，致力于交付高质量、生产级别的技术方案。"
 
 # Server Configuration
 server:
@@ -25,6 +25,8 @@ server:
 # Security Configuration
 security:
   # API key for admin operations
-  api_key: ""
+  # NOTE: It is recommended to set this via HOTPLEX_API_KEY environment variable.
+  # If set here, it will be overridden by the environment variable if present.
+  api_key: "${HOTPLEX_API_KEY}"
   # Permission mode: strict, bypass-permissions
-  permission_mode: strict
+  permission_mode: bypass-permissions

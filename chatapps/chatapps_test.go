@@ -92,7 +92,7 @@ func TestMessageQueue_EnqueueDequeue(t *testing.T) {
 	q := NewMessageQueue(logger, 10, 0, 1)
 
 	msg := &ChatMessage{Content: "test"}
-	err := q.Enqueue("telegram", "session-1", msg)
+	err := q.Enqueue("slack", "session-1", msg)
 	if err != nil {
 		t.Fatalf("Enqueue failed: %v", err)
 	}
@@ -105,8 +105,8 @@ func TestMessageQueue_EnqueueDequeue(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected to dequeue message")
 	}
-	if dequeued.Platform != "telegram" {
-		t.Errorf("Expected platform telegram, got %s", dequeued.Platform)
+	if dequeued.Platform != "slack" {
+		t.Errorf("Expected platform slack, got %s", dequeued.Platform)
 	}
 
 	if q.Size() != 0 {
@@ -121,15 +121,15 @@ func TestMessageQueue_QueueFull(t *testing.T) {
 	msg := &ChatMessage{Content: "test"}
 
 	// Fill the queue
-	if err := q.Enqueue("telegram", "s1", msg); err != nil {
+	if err := q.Enqueue("slack", "s1", msg); err != nil {
 		t.Fatalf("Enqueue 1 failed: %v", err)
 	}
-	if err := q.Enqueue("telegram", "s2", msg); err != nil {
+	if err := q.Enqueue("slack", "s2", msg); err != nil {
 		t.Fatalf("Enqueue 2 failed: %v", err)
 	}
 
 	// Queue is full, should get error
-	err := q.Enqueue("telegram", "s3", msg)
+	err := q.Enqueue("slack", "s3", msg)
 	if err != ErrQueueFull {
 		t.Errorf("Expected ErrQueueFull, got %v", err)
 	}
@@ -141,7 +141,7 @@ func TestMessageQueue_DLQ(t *testing.T) {
 	q := NewMessageQueue(logger, 10, 5, 0) // DLQ size 5
 
 	msg := &QueuedMessage{
-		Platform:  "telegram",
+		Platform:  "slack",
 		SessionID: "session-1",
 		Message:   &ChatMessage{Content: "test"},
 		Retries:   3,
@@ -159,8 +159,8 @@ func TestMessageQueue_DLQ(t *testing.T) {
 	if len(dlq) != 1 {
 		t.Errorf("Expected 1 message in DLQ, got %d", len(dlq))
 	}
-	if dlq[0].Platform != "telegram" {
-		t.Errorf("Expected platform telegram, got %s", dlq[0].Platform)
+	if dlq[0].Platform != "slack" {
+		t.Errorf("Expected platform slack, got %s", dlq[0].Platform)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestMessageQueue_DLQOverflow(t *testing.T) {
 	// Add more than DLQ size
 	for i := 0; i < 3; i++ {
 		msg := &QueuedMessage{
-			Platform:  "telegram",
+			Platform:  "slack",
 			SessionID: "session-1",
 			Message:   &ChatMessage{Content: "test"},
 			Retries:   3,

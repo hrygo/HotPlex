@@ -110,34 +110,11 @@ HotPlex uses a layered configuration system with the following priority (highest
 
 | Variable                       | Required    | Description                     |
 | ------------------------------ | ----------- | ------------------------------- |
+| `HOTPLEX_SLACK_PRIMARY_OWNER` | **Yes**     | Slack User ID of the primary owner |
 | `HOTPLEX_SLACK_BOT_USER_ID`    | **Yes**     | Bot User ID (UXXXXXXXXXX)       |
 | `HOTPLEX_SLACK_BOT_TOKEN`      | **Yes**     | Bot Token (xoxb-...)            |
 | `HOTPLEX_SLACK_APP_TOKEN`      | Socket Mode | App Token (xapp-...)            |
 | `HOTPLEX_SLACK_SIGNING_SECRET` | HTTP Mode   | Signing secret for verification |
-
-### Telegram
-
-| Variable                        | Description               |
-| ------------------------------- | ------------------------- |
-| `HOTPLEX_TELEGRAM_BOT_TOKEN`    | Bot token from @BotFather |
-| `HOTPLEX_TELEGRAM_WEBHOOK_URL`  | Webhook URL (production)  |
-| `HOTPLEX_TELEGRAM_SECRET_TOKEN` | Webhook secret token      |
-
-### Discord
-
-| Variable                     | Description            |
-| ---------------------------- | ---------------------- |
-| `HOTPLEX_DISCORD_BOT_TOKEN`  | Bot token              |
-| `HOTPLEX_DISCORD_PUBLIC_KEY` | Application public key |
-
-### DingTalk
-
-| Variable                          | Description    |
-| --------------------------------- | -------------- |
-| `HOTPLEX_DINGTALK_APP_ID`         | App ID         |
-| `HOTPLEX_DINGTALK_APP_SECRET`     | App secret     |
-| `HOTPLEX_DINGTALK_CALLBACK_TOKEN` | Callback token |
-| `HOTPLEX_DINGTALK_CALLBACK_KEY`   | Callback key   |
 
 ### Feishu
 
@@ -147,22 +124,6 @@ HotPlex uses a layered configuration system with the following priority (highest
 | `HOTPLEX_FEISHU_APP_SECRET`         | App secret         |
 | `HOTPLEX_FEISHU_VERIFICATION_TOKEN` | Verification token |
 | `HOTPLEX_FEISHU_ENCRYPT_KEY`        | Encryption key     |
-
-### WhatsApp
-
-| Variable                           | Description          |
-| ---------------------------------- | -------------------- |
-| `HOTPLEX_WHATSAPP_PHONE_NUMBER_ID` | Phone number ID      |
-| `HOTPLEX_WHATSAPP_ACCESS_TOKEN`    | Access token         |
-| `HOTPLEX_WHATSAPP_VERIFY_TOKEN`    | Webhook verify token |
-
-### Alerts
-
-| Variable                         | Description                     |
-| -------------------------------- | ------------------------------- |
-| `HOTPLEX_DINGTALK_WEBHOOK_URL`   | DingTalk alert webhook          |
-| `HOTPLEX_DINGTALK_SECRET`        | Webhook secret                  |
-| `HOTPLEX_DINGTALK_FILTER_EVENTS` | Filter events (comma-separated) |
 
 ---
 
@@ -302,28 +263,6 @@ server_addr: :8080
 
 security:
   verify_signature: true
-```
-
-### Telegram
-
-```yaml
-platform: telegram
-
-provider:
-  type: claude-code
-
-engine:
-  work_dir: ~/projects/telegram-bot
-```
-
-### DingTalk
-
-```yaml
-platform: dingtalk
-
-security:
-  permission:
-    dm_policy: allow
 ```
 
 ---

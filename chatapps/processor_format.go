@@ -66,16 +66,6 @@ func (p *FormatConversionProcessor) Process(ctx context.Context, msg *base.ChatM
 				"session_id", msg.SessionID,
 				"content_len", len(msg.Content))
 		}
-	case "discord":
-		// Discord uses standard markdown, no conversion needed
-		// But we can enhance if needed
-	case "telegram":
-		// Telegram supports HTML or Markdown v2
-		if parseMode == base.ParseModeHTML {
-			// Content already in HTML format
-			p.logger.Debug("Using HTML parse mode for Telegram",
-				"session_id", msg.SessionID)
-		}
 	}
 
 	return msg, nil

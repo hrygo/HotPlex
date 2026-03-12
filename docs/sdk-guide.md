@@ -13,7 +13,7 @@ HotPlex follows the **"Leverage vs Build"** philosophy. Instead of reinventing A
 - **Hot-Multiplexing**: Eliminates cold-start latency, achieving millisecond response times.
 - **Security Hardening**: Provides Process Group (PGID) isolation and instruction-level WAF auditing with danger block closed-loop.
 - **Protocol Normalization**: Standardizes diverse CLI outputs into unified streaming events.
-- **Multi-Platform Support**: Native adapters for Slack, Telegram, DingTalk, Feishu, Discord, and WhatsApp.
+- **Multi-Platform Support**: Native adapters for Slack and Feishu.
 
 ---
 
@@ -233,7 +233,7 @@ HotPlex provides out-of-the-box security:
 2. **Danger Block Closed-Loop**: Interactive security confirmation with user approval workflow.
 3. **Process Group Isolation**: Ensures any child processes spawned by the agent are properly cleaned up.
 4. **Capability Constraints**: Restricts tool usage at the semantic level using `AllowedTools`.
-5. **Signature Verification**: Built-in HMAC verification for Slack/DingTalk/Feishu webhooks.
+5. **Signature Verification**: Built-in HMAC verification for Slack and Feishu webhooks.
 
 ---
 
@@ -267,11 +267,7 @@ adapter.Start(ctx)
 | Platform | Key Features |
 |----------|--------------|
 | **Slack** | Block Kit UI, Native Streaming, Assistant Status, Slash Commands, Socket Mode |
-| **Telegram** | Inline Keyboards, Commands, Message Formatting |
-| **DingTalk** | ActionCard, Signature Verification, Enterprise Security |
 | **Feishu** | Card Messages, Interactive Callbacks |
-| **Discord** | Rich Embeds, Slash Commands |
-| **WhatsApp** | Template Messages, Media Support |
 
 ---
 

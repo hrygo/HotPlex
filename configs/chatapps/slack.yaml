@@ -19,7 +19,7 @@ provider:
   dangerously_skip_permissions: true
 
 engine:
-  work_dir: ~/projects/hotplex
+  work_dir: ${HOTPLEX_PROJECTS_DIR}
   timeout: 30m
   idle_timeout: 1h
 
@@ -27,7 +27,7 @@ engine:
 security:
   verify_signature: true
   owner:
-    primary: ${HOTPLEX_SLACK_PRIMARY_OWNER}  # Your Slack User ID (e.g. U12345678)
+    primary: ${HOTPLEX_SLACK_PRIMARY_OWNER}  # Primary owner's Slack User ID
     policy: trusted                         # owner_only | trusted | public
     trusted_users: []
 
@@ -44,7 +44,7 @@ message_store:
   enabled: true
   type: sqlite
   sqlite:
-    path: ~/.hotplex/slack_messages.db
+    path: ${HOTPLEX_MESSAGE_STORE_SQLITE_PATH}
 
 # 5. AI IDENTITY & BEHAVIOR
 # -----------------------------------------------------------------------------

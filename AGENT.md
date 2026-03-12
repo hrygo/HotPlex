@@ -1,6 +1,6 @@
 # 🤖 HotPlex: AI Agent Engineering Protocol
 
-**Project Status**: v0.22.x | **Core Role**: High-performance AI Agent Control Plane (Cli-as-a-Service).
+**Project Status**: v0.24.x | **Core Role**: High-performance AI Agent Control Plane (Cli-as-a-Service).
 This document defines the operational boundaries and technical DNA for AI agents working on **hotplex**.
 
 ---
@@ -109,6 +109,17 @@ The edit tool tracks file state. Sequential edits without re-reading cause dupli
 3. **Atomic Execution**: Write code in verifiable steps.
 4. **Validation**: `go build ./...` and `go test` must pass before task completion.
 5. **PR Creation**: **MANDATORY** to include `Resolves #<issue-id>` or `Refs #<issue-id>` in PR description body. This links the PR to the issue and enables automatic closure on merge.
+
+## 8. Gotchas & Lessons Learned
+
+### Configuration Pitfalls
+- **Shell Default Syntax**: Go's `os.ExpandEnv` does NOT support shell-style defaults (`${VAR:-default}`). Use `${VAR}` only.
+  - ❌ `${HOTPLEX_SLACK_BOT_USER_ID:-}` → Treated as literal variable name
+  - ✅ `${HOTPLEX_SLACK_BOT_USER_ID}` → Works correctly
+
+### Configuration Layering
+- **Priority**: `.env` (bot credentials) → `chatapps/configs/*.yaml` (behavior) → `docker-compose.yml`
+- **bot_user_id**: Each bot MUST have unique `bot_user_id` in .env, otherwise session IDs collide
 
 ---
 

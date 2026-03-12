@@ -10,12 +10,12 @@ HotPlex 是一个 **AI 智能体运行时 (Agent Runtime)**，支持多种接入
 
 | 接入方式                             | 适用场景                       | 推荐度   |
 | ------------------------------------ | ------------------------------ | -------- |
-| **ChatApps (Slack/Telegram/飞书等)** | 生产环境、多用户协作、自然交互 | ⭐⭐⭐ 推荐 |
+| **ChatApps (Slack/飞书)** | 生产环境、多用户协作、自然交互 | ⭐⭐⭐ 推荐 |
 | Go SDK                               | 嵌入式集成、自定义工作流       | ⭐⭐       |
 | 独立服务端                           | 多语言客户端、微服务架构       | ⭐⭐       |
 | Python SDK                           | 快速原型、数据科学集成         | ⭐        |
 
-**ChatApps 是 HotPlex 的主要接入渠道**：通过 Slack、Telegram、飞书等即时通讯平台，用户可以像与同事聊天一样与 AI 智能体交互，无需任何安装配置。
+**ChatApps 是 HotPlex 的主要接入渠道**：通过 Slack 和飞书等即时通讯平台，用户可以像与同事聊天一样与 AI 智能体交互，无需任何安装配置。
 
 ---
 
@@ -48,9 +48,7 @@ brew install opencode
 
 ---
 
-## 选项 1：ChatApps 平台接入 (推荐 ⭐)
-
-通过 Slack、Telegram、飞书等即时通讯平台直接与 AI 智能体对话。这是 HotPlex 的**主要接入方式**，适合生产环境使用。
+通过 Slack、飞书等即时通讯平台直接与 AI 智能体对话。这是 HotPlex 的**主要接入方式**，适合生产环境使用。
 
 > 🌈 **Slack 新手特别推荐**：初次配置 Slack 机器人？请先阅读 **[Slack 零基础保姆级接入教程](chatapps/slack-setup-beginner_zh.md)**，5 分钟完成手动点击操作。
 
@@ -59,16 +57,13 @@ brew install opencode
 | 平台         | 协议                  | 状态     |
 | ------------ | --------------------- | -------- |
 | **Slack**    | Socket Mode + Web API | ✅ 稳定   |
-| **Telegram** | Bot API               | ✅ 稳定   |
 | **飞书**     | 自定义机器人          | ✅ 稳定   |
-| **DingTalk** | 回调 + Webhook        | ✅ 稳定   |
-| **Discord**  | Bot API               | 🔄 开发中 |
-| **WhatsApp** | Business API          | 🔄 开发中 |
 
 ### 第一步：配置环境变量
 
 ```bash
 # Slack 为例
+export HOTPLEX_SLACK_PRIMARY_OWNER=UXXXXXXXXXX
 export HOTPLEX_SLACK_BOT_TOKEN=xoxb-xxx-xxx-xxx
 export HOTPLEX_SLACK_APP_TOKEN=xapp-xxx-xxx-xxx
 export HOTPLEX_SLACK_SIGNING_SECRET=xxx

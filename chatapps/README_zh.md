@@ -1,6 +1,6 @@
 # ChatApps: 多平台连接器
 
-`chatapps` 包提供 HotPlex 核心引擎与各聊天平台（Slack、飞书/Lark、Telegram、Discord 等）之间的桥梁。它将平台特定的事件和消息标准化为统一格式，供引擎处理。
+`chatapps` 包提供 HotPlex 核心引擎与各聊天平台（Slack、飞书/Lark）之间的桥梁。它将平台特定的事件和消息标准化为统一格式，供引擎处理。
 
 [English](README.md)
 

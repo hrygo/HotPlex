@@ -1,211 +1,35 @@
-# ============================================
+# ==============================================================================
+# HotPlex Python Development Stack (2026)
+# ==============================================================================
 
-FROM golang:1.25-alpine
+# 1. Source the binary provider
+FROM hotplex:artifacts AS binary-provider
 
-ARG VERSION=dev
-ARG COMMIT=unknown
-ARG BUILD_TIME=unknown
+# 2. SDK Layer
+FROM python:3.14-bookworm AS sdk-source
 
-LABEL org.opencontainers.image.title="HotPlex Python"
-LABEL org.opencontainers.image.description="HotPlex AI Agent with Go + Python stack"
-LABEL org.opencontainers.image.version="${VERSION}"
-LABEL org.opencontainers.image.revision="${COMMIT}"
-LABEL org.opencontainers.image.created="${BUILD_TIME}"
-LABEL org.opencontainers.image.source="https://github.com/hrygo/hotplex"
-LABEL org.opencontainers.image.licenses="MIT"
+# 3. Target Foundation
+FROM hotplex:base
 
-LABEL maintainer="HotPlex Team"
-LABEL description="HotPlex AI Agent with Go + Python stack"
+ARG PYTHON_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
 
-WORKDIR /app
+# Inject Python 3.14 SDK (Cached)
+USER root
+COPY --from=sdk-source /usr/local /usr/local
+RUN ldconfig
 
-# ============================================
-# Core System Dependencies
-# ============================================
-RUN apk add --no-cache \
-    # Version control
-    git \
-    github-cli \
-    # Build tools
-    make \
-    bash \
-    # Modern file tools (Claude Code recommended)
-    ripgrep \
-    fd \
-    bat \
-    fzf \
-    eza \
-    # Network debugging
-    curl \
-    jq \
-    wget \
-    netcat-openbsd \
-    openssl \
-    # Node.js (for Claude Code)
-    nodejs \
-    npm \
-    # Process management
-    procps \
-    htop \
-    # Config processing
-    yq \
-    # Python
-    python3 \
-    py3-pip \
-    py3-venv \
-    # Editor
-    vim \
-    # Timezone support
-    tzdata \
-    # Archive tools
-    zip \
-    # Build essentials (for Python packages)
-    gcc \
-    g++ \
-    musl-dev \
-    libffi-dev \
-    openssl-dev \
-    # Database
-    postgresql-dev \
-    sqlite-dev \
-    # Runtime deps
-    ca-certificates
+# Development Tools (Cached)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    mv /root/.local/bin/uv /usr/local/bin/uv && \
+    if [ -n "$PYTHON_MIRROR" ]; then pip config set global.index-url "$PYTHON_MIRROR"; fi && \
+    pip install --break-system-packages poetry ruff black isort mypy pytest fastapi uvicorn httpx
 
-# ============================================
-# Go Toolchain (HotPlex native)
-# ============================================
-RUN go install github.com/air-verse/air@latest && \
-    go install github.com/go-delve/delve/cmd/dlv@latest && \
-    go install golang.org/x/tools/cmd/goimports@latest && \
-    go install mvdan.cc/gofumpt@latest && \
-    go install honnef.co/go/tools/cmd/staticcheck@latest && \
-    go install github.com/securego/gosec/v2/cmd/gosec@latest && \
-    go install golang.org/x/vuln/cmd/govulncheck@latest && \
-    go install github.com/golang/mock/mockgen@latest && \
-    go install gotest.tools/gotestsum@latest && \
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-# ============================================
-# Python Stack Extensions
-# ============================================
-RUN pip3 install --upgrade pip setuptools wheel --break-system-packages
-
-# Package managers
-RUN pip3 install --break-system-packages \
-    poetry \
-    uv \
-    pipx
-
-# Development tools
-RUN pip3 install --break-system-packages \
-    # Linting & Formatting
-    ruff \
-    black \
-    isort \
-    mypy \
-    pyright \
-    pylint \
-    flake8 \
-    # Testing
-    pytest \
-    pytest-cov \
-    pytest-asyncio \
-    pytest-mock \
-    hypothesis \
-    coverage \
-    # Debugging
-    ipython \
-    ipdb \
-    debugpy \
-    # Type stubs
-    types-requests \
-    types-python-dateutil \
-    types-PyYAML
-
-# Web frameworks
-RUN pip3 install --break-system-packages \
-    fastapi \
-    uvicorn \
-    gunicorn \
-    httpx \
-    requests \
-    aiohttp \
-    typer \
-    rich
-
-# Data & ML basics
-RUN pip3 install --break-system-packages \
-    pandas \
-    numpy \
-    polars
-
-# Jupyter
-RUN pip3 install --break-system-packages \
-    jupyter \
-    jupyterlab \
-    notebook
-
-# Documentation
-RUN pip3 install --break-system-packages \
-    mkdocs \
-    mkdocs-material
-
-# Security
-RUN pip3 install --break-system-packages \
-    bandit \
-    safety \
-    pip-audit
-
-# ============================================
-# WebSocket & Claude Code
-# ============================================
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then ARCH="x86_64"; \
-    elif [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; fi && \
-    wget -qO /usr/local/bin/websocat \
-    "https://github.com/vi/websocat/releases/download/v1.14.1/websocat.${ARCH}-unknown-linux-musl" && \
-    chmod +x /usr/local/bin/websocat
-
-RUN npm install -g @anthropic-ai/claude-code@latest
-
-# ============================================
-# HotPlex Binary & Entrypoint
-# ============================================
-ARG TARGETARCH
-COPY linux/${TARGETARCH}/hotplexd /app/hotplexd
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/hotplexd /app/docker-entrypoint.sh
-
-# ============================================
-# Verification
-# ============================================
-RUN go version && \
-    python3 --version && \
-    poetry --version && \
-    ruff --version && \
-    pytest --version && \
-    websocat --version && \
-    claude --version 2>/dev/null || true
-
-# ============================================
-# User Setup
-# ============================================
-ARG HOST_UID=1000
-RUN adduser -D -u ${HOST_UID} hotplex && \
-    mkdir -p /home/hotplex/go/pkg/mod \
-    /home/hotplex/.cache/go-build \
-    /home/hotplex/.cache \
-    /home/hotplex/.local && \
-    chown -R hotplex:hotplex /home/hotplex
-
-ENV GOPATH=/home/hotplex/go
-ENV GOCACHE=/home/hotplex/.cache/go-build
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PATH="/home/hotplex/.local/bin:${GOPATH}/bin:${PATH}"
+# ==============================================================================
+# 🔥 Late Injection: The Binary (Changes frequently)
+# ==============================================================================
+COPY --from=binary-provider /hotplexd /usr/local/bin/hotplexd
+# ==============================================================================
 
 USER hotplex
-
-EXPOSE 8080
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["/app/hotplexd"]
+CMD ["/usr/local/bin/hotplexd"]
+LABEL org.opencontainers.image.title="HotPlex Python"

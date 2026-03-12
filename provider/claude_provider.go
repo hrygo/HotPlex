@@ -184,6 +184,9 @@ func (p *ClaudeCodeProvider) ParseEvent(line string) ([]*ProviderEvent, error) {
 	// Map Claude Code types to normalized types
 	switch msg.Type {
 	case "result":
+		if msg.Result == "" && msg.Content == nil && len(msg.ModelUsage) == 0 {
+			p.logger.Warn("[PROVIDER] received empty result event", "line", line)
+		}
 		event := newBaseEvent(EventTypeResult)
 		event.Content = msg.Result
 		// Always create metadata for result events to ensure tokens are tracked
@@ -233,6 +236,9 @@ func (p *ClaudeCodeProvider) ParseEvent(line string) ([]*ProviderEvent, error) {
 		events = append(events, event)
 
 	case "error":
+		if msg.Error == "" {
+			msg.Error = "Unknown provider error (empty error field)"
+		}
 		event := newBaseEvent(EventTypeError)
 		event.Content = msg.Error
 		events = append(events, event)

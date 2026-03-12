@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -81,12 +82,15 @@ func (l *ServerLoader) Load() error {
 		return fmt.Errorf("read config file: %w", err)
 	}
 
-	// Expand environment variables
+	// Expand environment variables in the YAML content itself
 	expanded := os.ExpandEnv(string(data))
 
 	if err := yaml.Unmarshal([]byte(expanded), l.config); err != nil {
 		return fmt.Errorf("parse config: %w", err)
 	}
+
+	// Override with environment variables (higher priority)
+	l.populateFromEnv()
 
 	// Validate configuration
 	if err := l.validate(); err != nil {
@@ -97,10 +101,37 @@ func (l *ServerLoader) Load() error {
 	return nil
 }
 
+// populateFromEnv overrides configuration values with environment variables.
+func (l *ServerLoader) populateFromEnv() {
+	if val := os.Getenv("HOTPLEX_API_KEY"); val != "" {
+		l.config.Security.APIKey = val
+	}
+	if val := os.Getenv("HOTPLEX_PORT"); val != "" {
+		l.config.Server.Port = val
+	}
+	if val := os.Getenv("HOTPLEX_LOG_LEVEL"); val != "" {
+		l.config.Server.LogLevel = val
+	}
+	if val := os.Getenv("HOTPLEX_LOG_FORMAT"); val != "" {
+		l.config.Server.LogFormat = val
+	}
+	if val := os.Getenv("HOTPLEX_IDLE_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			l.config.Engine.IdleTimeout = d
+		}
+	}
+	if val := os.Getenv("HOTPLEX_EXECUTION_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			l.config.Engine.Timeout = d
+		}
+	}
+}
+
 // validate validates the server configuration.
 func (l *ServerLoader) validate() error {
 	// Validate permission mode
-	switch l.config.Security.PermissionMode {
+	lowerPerm := strings.ToLower(l.config.Security.PermissionMode)
+	switch lowerPerm {
 	case "", "strict", "bypass-permissions":
 		// valid
 	default:
@@ -108,7 +139,8 @@ func (l *ServerLoader) validate() error {
 	}
 
 	// Validate log level
-	switch l.config.Server.LogLevel {
+	lowerLevel := strings.ToLower(l.config.Server.LogLevel)
+	switch lowerLevel {
 	case "", "debug", "info", "warn", "error":
 		// valid
 	default:

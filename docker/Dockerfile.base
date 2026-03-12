@@ -1,0 +1,66 @@
+# ==============================================================================
+# HotPlex Static Foundation (2026 Core Environment)
+# ==============================================================================
+# This image contains the 99% stable OS baseline and shared tools.
+# It does NOT contain hotplexd, enabling massive caching for SDK stacks.
+# ==============================================================================
+
+# --- Stage 1: Shared Tools Collector ---
+FROM debian:bookworm-slim AS tools-collector
+ARG GITHUB_PROXY=https://mirror.ghproxy.com/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget ca-certificates xz-utils libatomic1 unzip && \
+    rm -rf /var/lib/apt/lists/*
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then BIN="websocat.x86_64-unknown-linux-musl"; \
+    elif [ "$ARCH" = "aarch64" ]; then BIN="websocat.aarch64-unknown-linux-musl"; fi && \
+    curl -sSfL -o /usr/local/bin/websocat \
+    "https://github.com/vi/websocat/releases/download/v1.14.1/$BIN" && \
+    chmod +x /usr/local/bin/websocat
+
+# --- Stage 2: NPM Tools Collector ---
+FROM node:24-bookworm-slim AS npm-tools-collector
+ARG NPM_MIRROR=https://registry.npmmirror.com
+RUN if [ -n "$NPM_MIRROR" ]; then npm config set registry "$NPM_MIRROR"; fi && \
+    npm install -g @anthropic-ai/claude-code@latest opencode-ai @mariozechner/pi-coding-agent && \
+    npm cache clean --force
+
+# --- Final Stage: Shared Foundation ---
+FROM debian:bookworm-slim
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG DEBIAN_MIRROR=mirrors.aliyun.com
+ARG HOST_UID=1000
+
+# 1. Global OS Baseline & Mirrors
+RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ] && [ -n "$DEBIAN_MIRROR" ]; then \
+        sed -i "s/deb.debian.org/$DEBIAN_MIRROR/g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    curl wget ca-certificates git make bash jq gettext-base \
+    procps netcat-openbsd openssl libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. HotPlex User & Workspace Setup
+RUN useradd -m -u ${HOST_UID} -s /bin/bash hotplex && \
+    mkdir -p /app /home/hotplex/.cache && \
+    chown -R hotplex:hotplex /home/hotplex /app
+
+# 3. Static Tool Injection
+COPY --from=tools-collector /usr/local/bin/websocat /usr/local/bin/websocat
+COPY --from=npm-tools-collector /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
+COPY --from=npm-tools-collector /usr/local/bin/ /usr/local/bin/
+
+# 4. Standard Metadata & Entrypoint
+WORKDIR /app
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+ENV PATH="/usr/local/bin:${PATH}"
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# default CMD (can be overridden by stacks)
+CMD ["bash"]
+
+LABEL org.opencontainers.image.vendor="HotPlex"
+LABEL org.opencontainers.image.title="HotPlex Foundation (Static)"

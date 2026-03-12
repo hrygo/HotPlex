@@ -52,7 +52,8 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 # Or build from source
 make build
 
-# Start with Slack (or any platform)
+# Start with Slack or Feishu
+export HOTPLEX_SLACK_PRIMARY_OWNER=U...
 export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 ./hotplexd --config configs/chatapps/slack.yaml
@@ -75,11 +76,11 @@ export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 | 🌊 **Full-Duplex Streaming** | Sub-second token delivery via Go channels |
 | 🛡️ **Regex WAF** | Block destructive commands (`rm -rf /`, `mkfs`, etc.) |
 | 🔒 **PGID Isolation** | Clean process termination, no zombies |
-| 💬 **Multi-Platform** | Slack · Telegram · Feishu · DingTalk |
+| 💬 **Multi-Platform** | Slack · Feishu |
 | 📦 **Go SDK** | Embed directly in your Go app with zero overhead |
 | 🔌 **WebSocket Gateway** | Language-agnostic access via `hotplexd` daemon |
 | 📊 **OpenTelemetry** | Built-in metrics and tracing support |
-| 🐳 **Docker Ready** | Run multiple isolated bots with one command |
+| 🐳 **Docker 1+n** | 1 Base + n Stacks (`node`, `python`, `java`, `rust`, `full`) |
 
 ---
 
@@ -92,7 +93,7 @@ export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 | AI agents spin up fresh each request | **Persistent sessions** - CLI stays alive, reuses context |
 | No safety for destructive commands | **Regex WAF** - Programmable firewall for shell instructions |
 | Hard to scale AI interactions | **Process multiplexing** - Hundreds of concurrent sessions |
-| Integration complexity | **ChatApps** - One codebase, multiple platforms |
+| Integration complexity | **ChatApps** - One codebase, Slack / Feishu support |
 | Enterprise-grade security | **PGID isolation** + filesystem jail + container sandbox |
 
 ---
@@ -100,9 +101,8 @@ export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 ## 🏛 Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
 │                        ChatApps Layer                           │
-│              Slack · Telegram · Feishu · DingTalk               │
+│                       Slack · Feishu                            │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
@@ -228,7 +228,7 @@ ws.send(JSON.stringify({
 | | |
 | :--- | :--- |
 | [🚀 Deployment Guide](https://hrygo.github.io/hotplex/guide/deployment) | Docker, production setup |
-| [💬 ChatApps Manual](chatapps/README.md) | Slack, Telegram, Feishu, DingTalk |
+| [💬 ChatApps Manual](chatapps/README.md) | Slack & Feishu integration |
 | [🛠 Go SDK Reference](https://hrygo.github.io/hotplex/sdks/go-sdk) | Complete SDK documentation |
 | [🔒 Security Guide](https://hrygo.github.io/hotplex/guide/security) | WAF, isolation, best practices |
 | [📊 Observability](https://hrygo.github.io/hotplex/guide/observability) | Metrics, tracing, logging |
@@ -242,6 +242,11 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 ```bash
 # Development setup
 go mod download   # Install dependencies
+# Build the Node.js language stack
+make stack S=node
+
+# Build all language stacks
+make stack-all
 make test         # Run tests
 make lint         # Run linter
 make build        # Build binary

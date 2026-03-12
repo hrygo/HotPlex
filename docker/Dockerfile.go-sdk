@@ -1,0 +1,37 @@
+# ==============================================================================
+# HotPlex Go Development Stack (2026)
+# ==============================================================================
+
+# 1. Source the binary provider
+FROM hotplex:artifacts AS binary-provider
+
+# 2. SDK Layer
+FROM golang:1.26-bookworm AS sdk-source
+
+# 3. Target Foundation
+FROM hotplex:base
+
+# Inject Go SDK (Cached)
+COPY --from=sdk-source /usr/local/go /usr/local/go
+ENV GOPATH=/home/hotplex/go
+ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
+
+# Go Development Tools (Cached)
+RUN go env -w GOPROXY=https://goproxy.cn,direct && \
+    go install github.com/air-verse/air@latest && \
+    go install github.com/go-delve/delve/cmd/dlv@latest && \
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5
+
+# Permissions setup
+USER root
+RUN mkdir -p ${GOPATH}/bin && chown -R hotplex:hotplex ${GOPATH}
+
+# ==============================================================================
+# 🔥 Late Injection: The Binary (Changes frequently)
+# ==============================================================================
+COPY --from=binary-provider /hotplexd /usr/local/bin/hotplexd
+# ==============================================================================
+
+USER hotplex
+CMD ["/usr/local/bin/hotplexd"]
+LABEL org.opencontainers.image.title="HotPlex Go"

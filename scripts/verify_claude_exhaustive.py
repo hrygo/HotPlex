@@ -10,6 +10,8 @@ It can be used to:
 """
 
 import json
+import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -208,8 +210,6 @@ class ProtocolVerifier:
 
 def main():
     import argparse
-    import os
-    import re
     parser = argparse.ArgumentParser()
     parser.add_argument("--export", help="Path to export JSON examples for Go tests")
     parser.add_argument("--analyze-log", help="Path to daemon.log to discover new structures")

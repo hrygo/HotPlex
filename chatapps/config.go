@@ -26,8 +26,6 @@ type PlatformConfig struct {
 	Features         FeaturesConfig          `yaml:"features"`
 	Session          SessionConfig           `yaml:"session"`
 	MessageStore     MessageStoreConfig      `yaml:"message_store,omitempty"`
-	DingTalk         DingTalkConfig          `yaml:"dingtalk"`
-	WhatsApp         WhatsAppConfig          `yaml:"whatsapp"`
 	Options          map[string]any          `yaml:"options,omitempty"`
 	SourceFile       string                  `yaml:"-"` // Tracks which file this config was loaded from
 }
@@ -89,21 +87,6 @@ type ThreadOwnershipConfig struct {
 	Enabled *bool         `yaml:"enabled"`
 	TTL     time.Duration `yaml:"ttl"`
 	Persist *bool         `yaml:"persist"`
-}
-
-type DingTalkConfig struct {
-	AppID         string `yaml:"app_id"`
-	AppSecret     string `yaml:"app_secret"`
-	CallbackToken string `yaml:"callback_token"`
-	CallbackKey   string `yaml:"callback_key"`
-	MaxMessageLen int    `yaml:"max_message_len"`
-}
-
-type WhatsAppConfig struct {
-	PhoneNumberID string `yaml:"phone_number_id"`
-	AccessToken   string `yaml:"access_token"`
-	VerifyToken   string `yaml:"verify_token"`
-	APIVersion    string `yaml:"api_version"`
 }
 
 type SessionConfig struct {

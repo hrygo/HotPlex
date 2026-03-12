@@ -50,10 +50,12 @@
 # 一键安装
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 
-# 或从源码构建
-make build
+# 构建 Node.js 语言栈
+make stack S=node
 
-# 启动 Slack（或其他平台）
+# 构建所有语言栈
+make stack-all
+export HOTPLEX_SLACK_PRIMARY_OWNER=U...
 export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 ./hotplexd --config configs/chatapps/slack.yaml
@@ -76,11 +78,11 @@ export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 | 🌊 **全双工流** | 亚秒级 token 投递 via Go channels |
 | 🛡️ **正则 WAF** | 拦截破坏性命令（`rm -rf /`、`mkfs` 等） |
 | 🔒 **PGID 隔离** | 干净的进程终止，无僵尸进程 |
-| 💬 **多平台** | Slack · Telegram · 飞书 · 钉钉 |
+| 💬 **多平台** | Slack · 飞书 |
 | 📦 **Go SDK** | 零开销直接嵌入 Go 应用 |
 | 🔌 **WebSocket 网关** | 通过 `hotplexd` 守护进程实现语言无关访问 |
 | 📊 **OpenTelemetry** | 内置指标和追踪支持 |
-| 🐳 **Docker 支持** | 一条命令运行多个隔离机器人 |
+| 🐳 **Docker 1+n 架构** | 1 个基础镜像 + n 个语言栈 (`node`, `python`, `java`, `rust`, `full`) |
 
 ---
 
@@ -93,7 +95,7 @@ export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 | AI 每次请求都重新启动 | **持久会话** - CLI 保持存活，复用上下文 |
 | 缺乏破坏性命令安全防护 | **正则 WAF** - 可编程防火墙拦截危险指令 |
 | 难以扩展 AI 交互 | **进程复用** - 支持数百个并发会话 |
-| 集成复杂度高 | **ChatApps** - 一个代码库，多个平台 |
+| 集成复杂度高 | **ChatApps** - 一个代码库，支持 Slack / 飞书 |
 | 企业级安全需求 | **PGID 隔离** + 文件系统沙箱 + 容器隔离 |
 
 ---
@@ -101,9 +103,8 @@ export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 ## 🏛 架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
 │                        ChatApps 层                               │
-│              Slack · Telegram · 飞书 · 钉钉                     │
+│                       Slack · 飞书                              │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
@@ -205,9 +206,6 @@ export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 ./hotplexd --config configs/chatapps/slack.yaml
 ```
-export HOTPLEX_SLACK_APP_TOKEN=xapp-...
-./hotplexd --config configs/chatapps/slack.yaml
-```
 
 ### WebSocket API
 
@@ -232,7 +230,7 @@ ws.send(JSON.stringify({
 | | |
 | :--- | :--- |
 | [🚀 部署指南](https://hrygo.github.io/hotplex/guide/deployment) | Docker、生产环境配置 |
-| [💬 ChatApps 手册](chatapps/README.md) | Slack、飞书、钉钉集成 |
+| [💬 ChatApps 手册](chatapps/README.md) | Slack、飞书集成 |
 | [🛠 Go SDK 参考](https://hrygo.github.io/hotplex/sdks/go-sdk) | 完整 SDK 文档 |
 | [🔒 安全指南](https://hrygo.github.io/hotplex/guide/security) | WAF、隔离、最佳实践 |
 | [📊 可观测性](https://hrygo.github.io/hotplex/guide/observability) | 指标、追踪、日志 |

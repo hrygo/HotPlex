@@ -21,6 +21,13 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w
+      - -X main.version=v{{ .Version }}
+      - -X github.com/hrygo/hotplex.Version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+      - -X main.builtBy=goreleaser
 
 archives:
   - name_template: "hotplex_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

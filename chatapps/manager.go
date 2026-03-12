@@ -160,7 +160,7 @@ func (m *AdapterManager) SendMessage(ctx context.Context, platform, sessionID st
 }
 
 // RegisterRoutes registers all adapter webhooks to a unified router
-// Path format: /webhook/{platform} (e.g., /webhook/telegram, /webhook/discord)
+// Path format: /webhook/{platform} (e.g., /webhook/slack, /webhook/feishu)
 func (m *AdapterManager) RegisterRoutes(router *mux.Router) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

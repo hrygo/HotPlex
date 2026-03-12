@@ -1,11 +1,12 @@
 # ==============================================================================
-# HotPlex Docker Compose Deployment
+# 🐳 HotPlex Docker Compose (1+n Architecture)
 # ==============================================================================
 # Quick Start:
-#   make docker-up                                    # 启动所有 Bot
-#   docker compose logs -f hotplex                    # 查看主 Bot 日志
-#   make docker-down                                  # 停止所有 Bot
-#
+#   make docker-up      # Start all bots
+#   make docker-logs    # View logs
+#   make docker-down    # Stop all bots
+# ==============================================================================
+
 # ------------------------------------------------------------------------------
 # Architecture Overview
 # ------------------------------------------------------------------------------
@@ -23,104 +24,13 @@
 #                    │   • ~/.claude      │  ← Session state
 #                    │   • Go cache       │  ← Named volumes
 #                    └───────────────────┘
-#
-# ------------------------------------------------------------------------------
-# Key Concepts
-# ------------------------------------------------------------------------------
-#
-# 1. YAML Anchors (&anchor / *anchor / <<: merge)
-#    ─────────────────────────────────────────────
-#    x-hotplex-common: &hotplex-common   # 定义 anchor（命名模板）
-#      image: xxx
-#      ...
-#
-#    hotplex:
-#      <<: *hotplex-common               # 引用 anchor，合并 map 配置
-#      build: ...                         # 追加/覆盖特定配置
-#
-#    NOTE: YAML anchors only work for maps (<<:), NOT for lists (volumes).
-#          That's why volumes are duplicated per service.
-#
-# 2. build vs image
-#    ─────────────────────────────────────────────
-#    image: ghcr.io/hrygo/hotplex:latest  # 拉取远程预构建镜像
-#    build: .                              # 使用本地代码构建（开发时）
-#
-#    When both exist, `build:` takes priority. The built image is tagged
-#    with the `image:` name. This allows:
-#      - Local dev: builds from your latest code
-#      - CI/CD: uses pre-built image if build context missing
-#
-# 3. Port Binding (127.0.0.1:HOST:CONTAINER)
-#    ─────────────────────────────────────────────
-#    ports:
-#      - "127.0.0.1:18080:8080"  # Only localhost can access (security)
-#      - "18080:8080"             # ⚠️ Exposed on ALL interfaces (avoid)
-#
-# 4. Volume Types
-#    ─────────────────────────────────────────────
-#    - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw    # Host path → container (rw)
-#    - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw   # Named volume (persists)
-#
-# ------------------------------------------------------------------------------
-# Multi-Bot Isolation (CRITICAL)
-# ------------------------------------------------------------------------------
-# Bot-specific volumes MUST be defined inline per-service, NOT via variables.
-#
-# WHY: Docker Compose substitutes ${VAR} at compose-time from shell/default .env,
-#      NOT from each service's env_file. Using shared variables would cause all
-#      bots to mount the same directory, leading to session conflicts.
-#
-# WRONG (will cause conflicts):
-#   - ${HOTPLEX_PROJECTS_DIR}:/home/hotplex/projects   # Same for all bots!
-#
-# CORRECT (hardcoded per service):
-#   hotplex:
-#     volumes:
-#       - ${HOME}/.slack/BOT_U0AHRCL1KCM:/home/hotplex/projects
-#   hotplex-secondary:
-#     volumes:
-#       - ${HOME}/.slack/BOT_U0AJVRH4YF6:/home/hotplex/projects
-#
-# ------------------------------------------------------------------------------
-# Adding a New Bot
-# ------------------------------------------------------------------------------
-# 1. Copy hotplex-secondary service block, rename to hotplex-tertiary
-# 2. Create .env.tertiary with unique:
-#    - HOTPLEX_SLACK_BOT_USER_ID
-#    - HOTPLEX_SLACK_BOT_TOKEN
-#    - HOTPLEX_SLACK_APP_TOKEN
-# 3. Update volumes to use new bot's directory:
-#    - ${HOME}/.slack/BOT_XXXXXXXXXX:/home/hotplex/projects
-#    - ${HOME}/.gitconfig-hotplex-tertiary:/home/hotplex/.gitconfig
-# 4. Add to scripts/setup_gitconfig.sh BOT_CONFIGS array
-# 5. Run: ./scripts/setup_gitconfig.sh
-# ==============================================================================
 
 # ------------------------------------------------------------------------------
-# YAML Anchors for DRY Configuration
-# These define shared settings that services can inherit via <<: *anchor
+# 🛠️ Common Configurations (YAML Anchors)
 # ------------------------------------------------------------------------------
 x-hotplex-common: &hotplex-common
-  image: ghcr.io/hrygo/hotplex:latest
-  # ============================================
-  # Container Security Hardening
-  # ============================================
-  security_opt:
-    - no-new-privileges:true
-    - seccomp:build/docker/seccomp.json
-  # Read-only root filesystem
-  read_only: true
-  # Temporary files in tmpfs (for /tmp, /var/tmp)
-  tmpfs:
-    - /tmp:size=100m,mode=1777
-    - /var/tmp:size=50m,mode=1777
-  # Drop all capabilities (only keep minimal required)
-  cap_drop:
-    - ALL
-  # ============================================
-  # End Security Hardening
-  # ============================================
+  image: ${HOTPLEX_IMAGE:-ghcr.io/hrygo/hotplex:latest}
+  init: true # Proper PID 1 signal handling
   environment: &common-env
     HOST_UID: ${HOST_UID:-1000}
     # ─────────────────────────────────────────────────────────────────
@@ -138,8 +48,21 @@ x-hotplex-common: &hotplex-common
     HTTP_PROXY: http://host.docker.internal:7897
     HTTPS_PROXY: http://host.docker.internal:7897
     NO_PROXY: localhost,127.0.0.1,host.docker.internal
+    # ─────────────────────────────────────────────────────────────────
+    # Git Identity Defaults
+    # ─────────────────────────────────────────────────────────────────
+    GIT_USER_NAME: ${GIT_USER_NAME:-HotPlexBot}
+    GIT_USER_EMAIL: ${GIT_USER_EMAIL:-noreply@hotplex.dev}
   extra_hosts:
     - "host.docker.internal:host-gateway" # Allows container to reach host
+  # ─────────────────────────────────────────────────────────────────
+  # Security Hardening
+  # ─────────────────────────────────────────────────────────────────
+  cap_drop:
+    - NET_RAW
+    - NET_ADMIN
+  security_opt:
+    - no-new-privileges:true
   healthcheck: &common-healthcheck
     test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8080/health" ]
     interval: 30s
@@ -173,69 +96,59 @@ volumes:
 
 services:
   # ============================================================================
-  # Bot 01: Primary Bot
-  # ============================================================================
-  # Role: Production bot with Claude Opus
-  # Config: .env
-  # Port:  127.0.0.1:18080 → 8080 (localhost only for security)
-  # Note:  build: . means use local code (dev mode), remove to use remote image
+  # Bot 01: Primary Bot (U0AHRCL1KCM)
   # ============================================================================
   hotplex:
     <<: *hotplex-common
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      args:
-        HOST_UID: ${HOST_UID:-1000}
-        VERSION: ${VERSION:-dev}
-        COMMIT: ${COMMIT:-unknown}
-        BUILD_TIME: ${BUILD_TIME:-unknown}
     container_name: hotplex
     ports:
       - "127.0.0.1:18080:8080"
+    environment:
+      # Override data root for container isolation, mapped to instance-specific host path
+      HOTPLEX_DATA_ROOT: /home/hotplex/.hotplex
+      # Align with the volume mount point below
+      HOTPLEX_PROJECTS_DIR: /home/hotplex/projects
+      HOTPLEX_MESSAGE_STORE_SQLITE_PATH: /home/hotplex/.hotplex/chatapp_messages.db
     env_file:
       - .env
     volumes:
-      - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw # Message DB, configs
-      - ${HOME}/.claude:/home/hotplex/.claude:rw # Session state
-      - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
-      - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw # Go module cache
-      - hotplex-go-build:/home/hotplex/.cache/go-build:rw # Go build cache
-      # Bot-specific volumes (MUST be unique per bot - no variables!)
-      - ${HOME}/.slack/BOT_U0AHRCL1KCM:/home/hotplex/projects:rw
-      - ${HOME}/.gitconfig-hotplex:/home/hotplex/.gitconfig:ro
+      # Instance Isolation: Host Dir → Container Standard Dir
+      - ${HOME}/.hotplex/instances/U0AHRCL1KCM/storage:/home/hotplex/.hotplex:rw
+      - ${HOME}/.hotplex/instances/U0AHRCL1KCM/claude:/home/hotplex/.claude:rw
+      - ${HOME}/.hotplex/instances/U0AHRCL1KCM/projects:/home/hotplex/projects:rw
+      # Claude Seed: Host Standard Dir → Container Read-Only Seed
+      - ${HOME}/.claude:/home/hotplex/.claude_seed:ro
+      # Build Cache (Shared for efficiency)
+      - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw
+      - hotplex-go-build:/home/hotplex/.cache/go-build:rw
     labels:
+      - "hotplex.bot.id=U0AHRCL1KCM"
       - "hotplex.bot.role=primary"
-      - "hotplex.bot.config=.env"
 
   # ============================================================================
-  # Bot 02: Secondary Bot
-  # ============================================================================
-  # Role: Test/Staging bot with Claude Sonnet
-  # Config: .env.secondary
-  # Port:  127.0.0.1:18081 → 8080 (localhost only for security)
-  # Note:  Reuses image built by hotplex service (no separate build needed)
+  # Bot 02: Secondary Bot (U0AJVRH4YF6)
   # ============================================================================
   hotplex-secondary:
     <<: *hotplex-common
     container_name: hotplex-secondary
-    depends_on:
-      hotplex:
-        condition: service_started # Wait for hotplex to build the image first
     ports:
       - "127.0.0.1:18081:8080"
+    environment:
+      HOTPLEX_DATA_ROOT: /home/hotplex/.hotplex
+      HOTPLEX_PROJECTS_DIR: /home/hotplex/projects
+      HOTPLEX_MESSAGE_STORE_SQLITE_PATH: /home/hotplex/.hotplex/chatapp_messages.db
     env_file:
       - .env.secondary
     volumes:
-      # Shared volumes (common to all bots)
-      - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
-      - ${HOME}/.claude:/home/hotplex/.claude:rw
-      - ${HOME}/.claude/settings.json:/home/hotplex/.claude/settings.json:ro
+      # Instance Isolation: Host Dir → Container Standard Dir
+      - ${HOME}/.hotplex/instances/U0AJVRH4YF6/storage:/home/hotplex/.hotplex:rw
+      - ${HOME}/.hotplex/instances/U0AJVRH4YF6/claude:/home/hotplex/.claude:rw
+      - ${HOME}/.hotplex/instances/U0AJVRH4YF6/projects:/home/hotplex/projects:rw
+      # Claude Seed: Host Standard Dir → Container Read-Only Seed
+      - ${HOME}/.claude:/home/hotplex/.claude_seed:ro
+      # Build Cache (Shared for efficiency)
       - hotplex-go-mod:/home/hotplex/go/pkg/mod:rw
       - hotplex-go-build:/home/hotplex/.cache/go-build:rw
-      # Bot-specific volumes (MUST be unique per bot - no variables!)
-      - ${HOME}/.slack/BOT_U0AJVRH4YF6:/home/hotplex/projects:rw
-      - ${HOME}/.gitconfig-hotplex-secondary:/home/hotplex/.gitconfig:ro
     labels:
+      - "hotplex.bot.id=U0AJVRH4YF6"
       - "hotplex.bot.role=secondary"
-      - "hotplex.bot.config=.env.secondary"

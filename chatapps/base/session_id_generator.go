@@ -9,7 +9,7 @@ import (
 // SessionIDGenerator generates deterministic session IDs
 type SessionIDGenerator interface {
 	// Generate creates a deterministic session ID based on:
-	// - platform: the platform name (e.g., "slack", "telegram")
+	// - platform: the platform name (e.g., "slack", "feishu")
 	// - userID: the user's ID on the platform
 	// - botUserID: the bot's user ID (for multi-bot scenarios)
 	// - channelID: the channel/room ID (empty for DM)
