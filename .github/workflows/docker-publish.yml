@@ -20,6 +20,7 @@ on:
 env:
   REGISTRY: ghcr.io
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  GOPROXY: https://goproxy.cn,direct
 
 # 并发控制：如果同一个分支上有新的运行，则取消正在进行的运行
 concurrency:
@@ -140,6 +141,8 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image_name }}:artifacts
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            GOPROXY=${{ env.GOPROXY }}
 
   # 变体镜像构建 (Variants)
   build-variants:
