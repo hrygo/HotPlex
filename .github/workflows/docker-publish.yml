@@ -159,7 +159,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - { name: go, dockerfile: Dockerfile.go, suffix: '-go' }
+          - { name: go, dockerfile: Dockerfile.golang, suffix: '-go' }
           - { name: node, dockerfile: Dockerfile.node, suffix: '-node' }
           - { name: python, dockerfile: Dockerfile.python, suffix: '-python' }
           - { name: java, dockerfile: Dockerfile.java, suffix: '-java' }
@@ -211,6 +211,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.prepare.outputs.version }}
             COMMIT=${{ github.sha }}
+            GOPROXY=${{ env.GOPROXY }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
