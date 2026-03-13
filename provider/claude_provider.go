@@ -243,7 +243,7 @@ func (p *ClaudeCodeProvider) ParseEvent(line string) ([]*ProviderEvent, error) {
 		event.Content = msg.Error
 		events = append(events, event)
 
-	case "thinking", "status":
+	case "thinking", "think", "think_delta", "status":
 		blocks := msg.GetContentBlocks()
 		if len(blocks) > 0 {
 			for _, block := range blocks {
