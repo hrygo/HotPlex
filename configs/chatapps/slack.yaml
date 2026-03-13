@@ -135,3 +135,14 @@ task_instructions: |
   2. Avoid operations requiring user input
   3. Summarize tool output - don't dump raw data
   4. Write detailed content to docs/ directory
+
+# 6. APP HOME CAPABILITY CENTER (Optional)
+# -----------------------------------------------------------------------------
+# Enables the App Home tab as a form-based interface for running predefined AI tasks.
+# When enabled, users can access the Capability Center from the App Home tab.
+# -----------------------------------------------------------------------------
+apphome:
+  enabled: false                       # Set to true to enable
+  # capabilities_path: ""               # Path to custom capabilities YAML file (optional)
+                                        # If not set, uses embedded default capabilities
+

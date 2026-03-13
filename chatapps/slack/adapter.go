@@ -12,9 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hrygo/hotplex/brain"
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/chatapps/command"
 	"github.com/hrygo/hotplex/chatapps/session"
+	"github.com/hrygo/hotplex/chatapps/slack/apphome"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/internal/sys"
 	"github.com/hrygo/hotplex/plugins/storage"
@@ -43,6 +45,11 @@ type Adapter struct {
 
 	// Message storage plugin (optional)
 	storePlugin *base.MessageStorePlugin
+
+	// App Home capability center (optional)
+	appHomeHandler   *apphome.Handler
+	appHomeRegistry  *apphome.Registry
+	appHomeExecutor  *apphome.Executor
 
 	// Session manager for consistent session ID generation
 	sessionMgr session.SessionManager
@@ -260,6 +267,43 @@ func (a *Adapter) SetEngine(eng *engine.Engine) {
 
 	// Register command executors after engine is set
 	a.registerCommands()
+
+	// Initialize App Home capability center if configured
+	a.initAppHome()
+}
+
+// initAppHome initializes the App Home capability center
+func (a *Adapter) initAppHome() {
+	if a.config.AppHome == nil || !BoolValue(a.config.AppHome.Enabled, false) {
+		return
+	}
+
+	if a.client == nil {
+		a.Logger().Warn("Cannot initialize AppHome: Slack client is nil")
+		return
+	}
+
+	// Get Brain from engine if available
+	var brainInst brain.Brain
+	if a.eng != nil {
+		// Try to get brain from engine options - for now, pass nil
+		// Brain can be set later via SetBrain on executor if needed
+	}
+
+	appHomeConfig := apphome.Config{
+		Enabled:           BoolValue(a.config.AppHome.Enabled, false),
+		CapabilitiesPath:  a.config.AppHome.CapabilitiesPath,
+	}
+
+	handler, registry, executor := apphome.Setup(a.client, brainInst, appHomeConfig, a.Logger())
+	a.appHomeHandler = handler
+	a.appHomeRegistry = registry
+	a.appHomeExecutor = executor
+
+	if handler != nil {
+		a.Logger().Info("App Home capability center initialized",
+			"capabilities", registry.Count())
+	}
 }
 
 // registerCommands registers all command executors to the registry

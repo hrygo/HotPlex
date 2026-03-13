@@ -7,6 +7,7 @@ import (
 
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/chatapps/command"
+	"github.com/hrygo/hotplex/chatapps/slack/apphome"
 	"github.com/hrygo/hotplex/internal/panicx"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -107,6 +108,8 @@ func (a *Adapter) handleSocketModeEventsAPI(evt socketmode.Event) {
 			a.handleAppMentionEvent(teamID, ev)
 		case *slackevents.MessageEvent:
 			a.handleSocketModeMessageEvent(teamID, ev)
+		case *slackevents.AppHomeOpenedEvent:
+			a.handleAppHomeOpenedEvent(teamID, ev)
 		}
 	default:
 		a.Logger().Debug("Unhandled EventsAPI type", "type", eventsAPIEvent.Type)
@@ -180,6 +183,25 @@ func (a *Adapter) handleAppMentionEvent(teamID string, ev *slackevents.AppMentio
 	a.storeUserMessage(a.socketModeCtx, msg)
 
 	a.webhook.Run(a.socketModeCtx, a.Handler(), msg)
+}
+
+// handleAppHomeOpenedEvent handles the app_home_opened event
+func (a *Adapter) handleAppHomeOpenedEvent(teamID string, ev *slackevents.AppHomeOpenedEvent) {
+	a.Logger().Debug("App Home opened", "user", ev.User, "channel", ev.Channel)
+
+	// Delegate to AppHome handler if available
+	if a.appHomeHandler != nil {
+		event := &apphome.HomeOpenedEvent{
+			User:    ev.User,
+			Channel: ev.Channel,
+			Tab:     ev.Tab,
+		}
+		if err := a.appHomeHandler.HandleHomeOpened(a.socketModeCtx, event); err != nil {
+			a.Logger().Error("Failed to handle App Home opened event",
+				"user", ev.User,
+				"error", err)
+		}
+	}
 }
 
 // handleSocketModeMessageEvent handles message events via Socket Mode

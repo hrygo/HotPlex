@@ -53,6 +53,10 @@ func (a *Adapter) handleInteractive(w http.ResponseWriter, r *http.Request) {
 	switch callback.Type {
 	case "block_actions":
 		a.handleBlockActions(&callback, w)
+	case "view_submission":
+		a.handleViewSubmission(&callback, w)
+	case "view_closed":
+		a.handleViewClosed(&callback, w)
 	default:
 		a.Logger().Warn("Unknown interaction type", "type", callback.Type)
 		w.WriteHeader(http.StatusOK)
@@ -352,6 +356,57 @@ func (a *Adapter) handleDangerBlockCallback(callback *SlackInteractionCallback, 
 	}
 }
 
+// handleViewSubmission handles view_submission callbacks from Slack Modal forms
+func (a *Adapter) handleViewSubmission(callback *SlackInteractionCallback, w http.ResponseWriter) {
+	a.Logger().Debug("View submission received",
+		"user", callback.User.ID,
+		"view_id", callback.View.ID,
+		"view_type", callback.View.Type)
+
+	// Delegate to AppHome handler if available
+	if a.appHomeHandler != nil {
+		// Convert to Slack SDK InteractionCallback
+		slackCallback := &slack.InteractionCallback{
+			Type:       slack.InteractionType(callback.Type),
+			CallbackID: callback.View.CallbackID,
+			User:       slack.User{ID: callback.User.ID, Name: callback.User.Username},
+			Team:       slack.Team{ID: callback.Team.ID},
+			TriggerID:  callback.TriggerID,
+			View:       *callback.View,
+		}
+
+		response, err := a.appHomeHandler.HandleViewSubmission(context.Background(), slackCallback)
+		if err != nil {
+			a.Logger().Error("Failed to handle view submission",
+				"user", callback.User.ID,
+				"error", err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+
+		// If response has validation errors, return them
+		if response != nil {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				a.Logger().Error("Failed to encode view submission response", "error", err)
+			}
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleViewClosed handles view_closed callbacks
+func (a *Adapter) handleViewClosed(callback *SlackInteractionCallback, w http.ResponseWriter) {
+	a.Logger().Debug("View closed received",
+		"user", callback.User.ID,
+		"view_id", callback.View.ID,
+		"notify_on_close", callback.View.NotifyOnClose)
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleAskUserQuestionCallback handles ask user question option selection
 // ActionID format: question_option_{i}
 // Value format: {index}:{sessionID}:{optionText} (when sessionID is available)
@@ -453,6 +508,7 @@ type SlackInteractionCallback struct {
 	TriggerID   string          `json:"trigger_id"`
 	Actions     []SlackAction   `json:"actions"`
 	Team        CallbackTeam    `json:"team"`
+	View        *slack.View     `json:"view"`
 }
 
 // CallbackUser represents the user in a Slack callback.
