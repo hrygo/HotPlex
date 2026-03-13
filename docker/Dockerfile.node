@@ -8,7 +8,7 @@ FROM hotplex:artifacts AS binary-provider
 # 2. Target Foundation
 FROM hotplex:base
 
-ARG NPM_MIRROR=https://registry.npmmirror.com
+ARG NPM_MIRROR
 
 USER root
 

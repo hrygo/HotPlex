@@ -16,11 +16,21 @@ COPY --from=sdk-source /usr/local/go /usr/local/go
 ENV GOPATH=/home/hotplex/go
 ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
 
+ARG GOPROXY
 # Go Development Tools (Cached)
-RUN go env -w GOPROXY=https://goproxy.cn,direct && \
+RUN if [ -n "$GOPROXY" ]; then go env -w GOPROXY=$GOPROXY; fi && \
     go install github.com/air-verse/air@latest && \
     go install github.com/go-delve/delve/cmd/dlv@latest && \
+    go install github.com/goreleaser/goreleaser/v2@latest && \
+    go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest && \
     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5
+
+# Protocol Buffers Compiler
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    protobuf-compiler && \
+    rm -rf /var/lib/apt/lists/*
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 # Permissions setup
 USER root

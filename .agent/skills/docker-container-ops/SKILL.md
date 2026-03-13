@@ -94,7 +94,7 @@ Note: Scaling requires proper configuration in docker-compose.yml for port confl
 
 ## Configuration
 
-The skill uses the docker-compose.yml file in the HotPlex project root. All commands run in the project directory.
+The skill uses the docker-compose.yml file at `docker/matrix/`. All commands run in that directory.
 
 ## Troubleshooting
 
@@ -106,7 +106,9 @@ The skill uses the docker-compose.yml file in the HotPlex project root. All comm
 
 ### Reference Files
 
-- **`docker-compose.yml`** - Container deployment configuration
+- **`docker/matrix/docker-compose.yml`** - Container deployment configuration
+- **`docker/matrix/.env.primary`** - Bot1 credentials
+- **`docker/matrix/.env.secondary`** - Bot2 credentials
 - **`references/docker-commands.md`** - Complete Docker CLI reference
 
 ### Related Skills

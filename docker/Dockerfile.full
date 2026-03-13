@@ -28,6 +28,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 ENV BUN_INSTALL="/usr/local/bun"
 ENV PATH="${BUN_INSTALL}/bin:${PATH}"
 
+ARG GOPROXY
+RUN if [ -n "$GOPROXY" ]; then go env -w GOPROXY=$GOPROXY; fi && \
+    go install github.com/air-verse/air@latest && \
+    go install github.com/go-delve/delve/cmd/dlv@latest && \
+    go install github.com/goreleaser/goreleaser/v2@latest && \
+    go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest && \
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5
+
 COPY --from=python-sdk /usr/local /usr/local
 RUN ldconfig
 
@@ -42,7 +52,7 @@ COPY --from=rust-sdk /usr/local/rustup /usr/local/rustup
 COPY --from=rust-sdk /usr/local/cargo /usr/local/cargo
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    lsb-release zip unzip tree htop ripgrep fd-find bat && \
+    protobuf-compiler lsb-release zip unzip tree htop ripgrep fd-find bat && \
     rm -rf /var/lib/apt/lists/* && \
     chown -R hotplex:hotplex /home/hotplex /app /usr/local/cargo /usr/local/rustup
 

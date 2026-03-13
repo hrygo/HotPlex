@@ -11,7 +11,7 @@ FROM python:3.14-bookworm AS sdk-source
 # 3. Target Foundation
 FROM hotplex:base
 
-ARG PYTHON_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PYTHON_MIRROR
 
 # Inject Python 3.14 SDK (Cached)
 USER root

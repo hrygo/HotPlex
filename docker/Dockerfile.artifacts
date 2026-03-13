@@ -8,7 +8,7 @@ FROM golang:1.26-bookworm AS builder
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
-ARG GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY
 
 WORKDIR /build
 COPY go.mod go.sum ./

@@ -118,7 +118,7 @@ The edit tool tracks file state. Sequential edits without re-reading cause dupli
   - ✅ `${HOTPLEX_SLACK_BOT_USER_ID}` → Works correctly
 
 ### Configuration Layering
-- **Priority**: `.env` (bot credentials) → `chatapps/configs/*.yaml` (behavior) → `docker-compose.yml`
+- **Priority**: `.env` (host process) → `docker/matrix/.env.primary` (Bot1 Docker) → `docker/matrix/.env.secondary` (Bot2 Docker) → `chatapps/configs/*.yaml` (behavior) → `docker/matrix/docker-compose.yml`
 - **bot_user_id**: Each bot MUST have unique `bot_user_id` in .env, otherwise session IDs collide
 
 ---

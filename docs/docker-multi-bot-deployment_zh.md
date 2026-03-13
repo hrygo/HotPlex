@@ -178,9 +178,11 @@ docker compose ps
 
 ```
 hotplex/
-├── docker-compose.yml     # 多 Bot 编排配置
-├── .env                   # Bot 01 环境变量
-├── .env.secondary         # Bot 02 环境变量
+├── docker/
+│   └── matrix/
+│       ├── docker-compose.yml     # 多 Bot 编排配置
+│       ├── .env.primary           # Bot 01 环境变量
+│       └── .env.secondary        # Bot 02 环境变量
 ├── configs/chatapps/
 │   ├── slack.yaml         # Slack 平台配置
 │   └── ...
@@ -205,7 +207,7 @@ services:
     ports:
       - "127.0.0.1:18080:8080"
     env_file:
-      - .env                # Bot 01 的环境变量
+      - .env.primary           # Bot 01 的环境变量
     volumes:
       # 共享目录
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
@@ -238,7 +240,7 @@ services:
 | **projects 目录** | 每个 Bot 有独立工作空间  | volumes 中的 `.slack/BOT_xxx` |
 | **gitconfig**     | 每个 Bot 有独立 Git 身份 | volumes 中的 `.gitconfig-xxx` |
 | **端口**          | 避免端口冲突             | ports 中的 `18080/18081`      |
-| **env_file**      | 每个 Bot 有独立凭证      | `.env` / `.env.secondary`     |
+| **env_file**      | 每个 Bot 有独立凭证      | `.env.primary` / `.env.secondary`     |
 
 **❌ 错误示例（会导致冲突）：**
 

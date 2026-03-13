@@ -7,7 +7,7 @@
 
 # --- Stage 1: Shared Tools Collector ---
 FROM debian:bookworm-slim AS tools-collector
-ARG GITHUB_PROXY=https://mirror.ghproxy.com/
+ARG GITHUB_PROXY
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl wget ca-certificates xz-utils libatomic1 unzip && \
     rm -rf /var/lib/apt/lists/*
@@ -20,7 +20,7 @@ RUN ARCH=$(uname -m) && \
 
 # --- Stage 2: NPM Tools Collector ---
 FROM node:24-bookworm-slim AS npm-tools-collector
-ARG NPM_MIRROR=https://registry.npmmirror.com
+ARG NPM_MIRROR
 RUN if [ -n "$NPM_MIRROR" ]; then npm config set registry "$NPM_MIRROR"; fi && \
     npm install -g @anthropic-ai/claude-code@latest opencode-ai @mariozechner/pi-coding-agent && \
     npm cache clean --force
@@ -30,7 +30,7 @@ FROM debian:bookworm-slim
 
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
-ARG DEBIAN_MIRROR=mirrors.aliyun.com
+ARG DEBIAN_MIRROR
 ARG HOST_UID=1000
 
 # 1. Global OS Baseline & Mirrors

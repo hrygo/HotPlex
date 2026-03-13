@@ -178,9 +178,11 @@ docker compose ps
 
 ```
 hotplex/
-├── docker-compose.yml     # Multi-bot orchestration
-├── .env                   # Bot 01 environment
-├── .env.secondary         # Bot 02 environment
+├── docker/
+│   └── matrix/
+│       ├── docker-compose.yml     # Multi-bot orchestration
+│       ├── .env.primary           # Bot 01 environment
+│       └── .env.secondary        # Bot 02 environment
 ├── configs/chatapps/
 │   ├── slack.yaml         # Slack platform config
 │   └── ...
@@ -205,7 +207,7 @@ services:
     ports:
       - "127.0.0.1:18080:8080"
     env_file:
-      - .env                # Bot 01's environment
+      - .env.primary           # Bot 01's environment
     volumes:
       # Shared directories
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
@@ -238,7 +240,7 @@ services:
 | **projects dir** | Each bot has independent workspace    | volumes `.slack/BOT_xxx`  |
 | **gitconfig**    | Each bot has independent Git identity | volumes `.gitconfig-xxx`  |
 | **port**         | Avoid port conflicts                  | ports `18080/18081`       |
-| **env_file**     | Each bot has independent credentials  | `.env` / `.env.secondary` |
+| **env_file**     | Each bot has independent credentials  | `.env.primary` / `.env.secondary` |
 
 **❌ Wrong (causes conflicts):**
 
