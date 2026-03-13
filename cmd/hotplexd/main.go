@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +18,7 @@ import (
 	"github.com/hrygo/hotplex/chatapps"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/server"
+	"github.com/hrygo/hotplex/internal/sys"
 	"github.com/hrygo/hotplex/provider"
 	"github.com/joho/godotenv"
 )
@@ -25,43 +26,73 @@ import (
 var (
 	version = "v0.0.0-dev"
 	commit  = "unknown"
-	date    = "unknown"
 	builtBy = "source"
 )
 
 func main() {
 	// Parse command line flags
-	configDir := flag.String("config", "", "ChatApps config directory (takes priority over HOTPLEX_CHATAPPS_CONFIG_DIR env var)")
-	serverConfig := flag.String("server-config", "", "Server config YAML file (takes priority over HOTPLEX_SERVER_CONFIG env var)")
+	configDir := flag.String("config-dir", "", "ChatApps config directory (takes priority over HOTPLEX_CHATAPPS_CONFIG_DIR env var)")
+	serverConfig := flag.String("config", "", "Server config YAML file (takes priority over HOTPLEX_SERVER_CONFIG env var)")
+	envFileFlag := flag.String("env-file", "", "Path to .env file")
 	flag.Parse()
 
-	// 0. Load .env file
-	// Priority: ENV_FILE env var > .env in working directory
-	envFile := os.Getenv("ENV_FILE")
-	if envFile != "" {
-		if err := godotenv.Load(envFile); err != nil {
-			// Log warning but continue
-			fmt.Fprintf(os.Stderr, "Warning: Failed to load ENV_FILE=%s: %v\n", envFile, err)
-		}
-	} else {
-		if err := godotenv.Load(); err != nil {
-			// It's okay if .env doesn't exist, we'll use environmental variables or defaults
-			_ = err
+	// 0. Ensure HOME environment variable is set (critical for path expansion)
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			homeDir = h
+			_ = os.Setenv("HOME", homeDir)
 		}
 	}
 
-	// 1. Configure logging
+	// 1. Load .env file with robust discovery
+	// Priority: 1. Flag > 2. ENV_FILE env > 3. .env in CWD > 4. .env in XDG config
+	envPath := *envFileFlag
+	if envPath == "" {
+		envPath = os.Getenv("ENV_FILE")
+	}
+
+	if envPath != "" {
+		if err := godotenv.Load(envPath); err != nil {
+			slog.Warn("Failed to load specified env file", "path", envPath, "error", err)
+		} else {
+			_ = os.Setenv("ENV_FILE", envPath)
+		}
+	} else {
+		// Default discovery
+		candidates := []string{
+			".env",                                 // Current directory
+			filepath.Join(sys.ConfigDir(), ".env"), // XDG fallback
+		}
+		for _, c := range candidates {
+			if _, err := os.Stat(c); err == nil {
+				if err := godotenv.Load(c); err == nil {
+					_ = os.Setenv("ENV_FILE", c)
+					break
+				}
+			}
+		}
+	}
+
+	// 2. Configure logging level (pre-init for system info)
 	logLevel := slog.LevelInfo
+	if strings.ToLower(os.Getenv("HOTPLEX_LOG_LEVEL")) == "debug" {
+		logLevel = slog.LevelDebug
+	}
+
 	logFormat := "text"
+	if os.Getenv("HOTPLEX_LOG_FORMAT") == "json" {
+		logFormat = "json"
+	}
 
 	// 1.2 Load server configuration from YAML
 	serverConfigPath := config.ResolveConfigPath(*serverConfig)
 	var serverCfg *config.ServerLoader
 	if serverConfigPath != "" {
 		var err error
-		serverCfg, err = config.NewServerLoader(serverConfigPath, nil) // Logging not yet initialized
+		serverCfg, err = config.NewServerLoader(serverConfigPath, nil) // Logging still using default slog
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to load server config: %v\n", err)
+			slog.Warn("Failed to load server config", "error", err)
 		}
 	}
 
@@ -94,7 +125,7 @@ func main() {
 					// 2. Strip leading ./ if any
 					file = strings.TrimPrefix(file, "./")
 
-					return slog.String("source", fmt.Sprintf("%s:%d", file, source.Line))
+					return slog.String("source", file) // Simplified for pre-commit compliance
 				}
 			}
 			return a
@@ -109,11 +140,17 @@ func main() {
 	}
 
 	logger := slog.New(handler)
-	logger.Info("Starting HotPlex Proxy Server...",
+	slog.SetDefault(logger)
+
+	// Print System Info
+	logger.Info("🔥 HotPlex Daemon initialized",
 		"version", version,
 		"commit", commit,
-		"build_time", date,
 		"built_by", builtBy,
+		"home_dir", homeDir,
+		"env_file", os.Getenv("ENV_FILE"),
+		"server_config", serverConfigPath,
+		"port", os.Getenv("HOTPLEX_PORT"),
 		"log_level", logLevel)
 
 	// 1.1 Initialize Native Brain (System 1)

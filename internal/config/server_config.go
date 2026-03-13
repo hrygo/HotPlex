@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/hrygo/hotplex/internal/sys"
 )
 
 // ServerConfig represents the YAML configuration for the hotplexd server.
@@ -213,32 +215,46 @@ func (l *ServerLoader) GetPort() string {
 }
 
 // ResolveConfigPath resolves the config file path from various sources.
-// Priority: explicit path > HOTPLEX_SERVER_CONFIG env > ./configs/server.yaml
+// Search order:
+// 1. Explicit path passed as argument
+// 2. HOTPLEX_SERVER_CONFIG environment variable
+// 3. XDG standard config directory (~/.config/hotplex/server.yaml)
+// 4. Current working directory (./configs/server.yaml)
+// 5. Project root fallback (../configs/server.yaml)
 func ResolveConfigPath(explicitPath string) string {
+	// 1. Explicit path
 	if explicitPath != "" {
-		return explicitPath
+		if _, err := os.Stat(explicitPath); err == nil {
+			return explicitPath
+		}
 	}
 
+	// 2. Env variable
 	if envPath := os.Getenv("HOTPLEX_SERVER_CONFIG"); envPath != "" {
-		return envPath
+		if _, err := os.Stat(envPath); err == nil {
+			return envPath
+		}
 	}
 
-	// Try ./configs/server.yaml relative to current working directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		// If we can't get cwd, fall back to empty string
-		return ""
-	}
-	defaultPath := filepath.Join(cwd, "configs", "server.yaml")
-	if _, err := os.Stat(defaultPath); err == nil {
-		return defaultPath
+	// 3. XDG Config Directory
+	xdgPath := filepath.Join(sys.ConfigDir(), "server.yaml")
+	if _, err := os.Stat(xdgPath); err == nil {
+		return xdgPath
 	}
 
-	// Try from project root (assuming we're in a subdirectory)
-	// This handles the case when running from cmd/hotplexd/
-	projectRoot := filepath.Join(cwd, "..", "configs", "server.yaml")
-	if _, err := os.Stat(projectRoot); err == nil {
-		return projectRoot
+	// 4. Current working directory default
+	cwd, _ := os.Getwd()
+	if cwd != "" {
+		cwdPath := filepath.Join(cwd, "configs", "server.yaml")
+		if _, err := os.Stat(cwdPath); err == nil {
+			return cwdPath
+		}
+
+		// 5. Project root fallback
+		projectRoot := filepath.Join(cwd, "..", "configs", "server.yaml")
+		if _, err := os.Stat(projectRoot); err == nil {
+			return projectRoot
+		}
 	}
 
 	return ""

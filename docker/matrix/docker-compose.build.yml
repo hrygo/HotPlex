@@ -2,20 +2,20 @@
 # HotPlex Docker Compose Build Configuration
 # ==============================================================================
 # This file is intended to be merged with docker-compose.yml via the COMPOSE_FILE
-# environment variable in .env.primary when local building is required.
+# environment variable in .env-01 when local building is required.
 #
 # Usage:
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml docker compose up -d
 #
-# Or set in .env.primary:
+# Or set in .env-01:
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml
 # ==============================================================================
 
 services:
-  hotplex:
+  hotplex-01:
     build: &bot-build
       context: ../..
-      dockerfile: docker/Dockerfile.go
+      dockerfile: docker/Dockerfile.golang
       args:
         HOST_UID: ${HOST_UID:-1000}
         VERSION: ${VERSION:-dev}
@@ -30,5 +30,5 @@ services:
         RUSTUP_DIST_SERVER: ${RUSTUP_DIST_SERVER:-https://rsproxy.cn}
         GITHUB_PROXY: ${GITHUB_PROXY:-https://mirror.ghproxy.com/}
 
-  hotplex-secondary:
+  hotplex-02:
     build: *bot-build

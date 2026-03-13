@@ -1,50 +1,4 @@
 # ------------------------------------------------------------------------------
-# 🛠️ Common Configurations (YAML Anchors)
-# ------------------------------------------------------------------------------
-x-hotplex-common: &hotplex-common
-  image: ${HOTPLEX_IMAGE:-ghcr.io/hrygo/hotplex:latest}
-  init: true # Proper PID 1 signal handling
-  environment: &common-env
-    HOST_UID: ${HOST_UID:-1000}
-    # ─────────────────────────────────────────────────────────────────
-    # Proxy Configuration (OPTIONAL)
-    # ─────────────────────────────────────────────────────────────────
-    ANTHROPIC_BASE_URL: http://host.docker.internal:15721
-    HTTP_PROXY: http://host.docker.internal:7897
-    HTTPS_PROXY: http://host.docker.internal:7897
-    NO_PROXY: localhost,127.0.0.1,host.docker.internal
-    # ─────────────────────────────────────────────────────────────────
-    # Git Identity Defaults
-    # ─────────────────────────────────────────────────────────────────
-    GIT_USER_NAME: ${GIT_USER_NAME:-HotPlexBot}
-    GIT_USER_EMAIL: ${GIT_USER_EMAIL:-noreply@hotplex.dev}
-    # ─────────────────────────────────────────────────────────────────
-    # ChatApp Core Paths (Standardized for Container)
-    # ─────────────────────────────────────────────────────────────────
-    HOTPLEX_DATA_ROOT: /home/hotplex/.hotplex
-    HOTPLEX_PROJECTS_DIR: /home/hotplex/projects
-    HOTPLEX_MESSAGE_STORE_SQLITE_PATH: /home/hotplex/.hotplex/chatapp_messages.db
-    HOTPLEX_CHATAPPS_CONFIG_DIR: /home/hotplex/configs/chatapps
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
-  cap_drop: [ NET_RAW, NET_ADMIN ]
-  security_opt: [ no-new-privileges:true ]
-  healthcheck: &common-healthcheck
-    test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8080/health" ]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-    start_period: 60s
-  logging: &common-logging
-    driver: json-file
-    options: { max-size: "10m", max-file: "3" }
-  deploy: &common-deploy
-    resources:
-      limits: { memory: 2G, cpus: '2.0' }
-      reservations: { memory: 512M, cpus: '0.25' }
-  restart: unless-stopped
-
-# ------------------------------------------------------------------------------
 # Named Volumes (Shared across instances)
 # ------------------------------------------------------------------------------
 volumes:
@@ -52,26 +6,19 @@ volumes:
   matrix-go-build: { name: matrix-go-build }
 
 # ------------------------------------------------------------------------------
-# 🛠️ Shared Service Template (Service-Level DRY)
+# 🚀 Active Services
 # ------------------------------------------------------------------------------
 services:
-  hotplex-base:
-    <<: *hotplex-common
-    volumes:
-      # Shared Resources (Common to all instances)
-      - ${HOTPLEX_HOST_CONFIGS_DIR:-~/.hotplex/configs}:/home/hotplex/configs:rw
-      - ~/.claude:/home/hotplex/.claude_seed:ro
-      - matrix-go-mod:/home/hotplex/go/pkg/mod:rw
-      - matrix-go-build:/home/hotplex/.cache/go-build:rw
-
   # ============================================================================
   # Bot 01: Primary Bot (Multi-Bot Matrix)
   # ============================================================================
-  hotplex:
-    extends: hotplex-base
-    container_name: hotplex
+  hotplex-01:
+    extends:
+      file: common.yml
+      service: hotplex-base
+    container_name: hotplex-01
     ports: [ "127.0.0.1:18080:8080" ]
-    env_file: [ .env.primary ]
+    env_file: [ .env-01 ]
     volumes:
       # Instance Isolation (Merged with base volumes)
       - ~/.hotplex/instances/U0AHRCL1KCM/storage:/home/hotplex/.hotplex:rw
@@ -84,11 +31,13 @@ services:
   # ============================================================================
   # Bot 02: Secondary Bot (Multi-Bot Matrix)
   # ============================================================================
-  hotplex-secondary:
-    extends: hotplex-base
-    container_name: hotplex-secondary
+  hotplex-02:
+    extends:
+      file: common.yml
+      service: hotplex-base
+    container_name: hotplex-02
     ports: [ "127.0.0.1:18081:8080" ]
-    env_file: [ .env.secondary ]
+    env_file: [ .env-02 ]
     volumes:
       # Instance Isolation (Merged with base volumes)
       - ~/.hotplex/instances/U0AJVRH4YF6/storage:/home/hotplex/.hotplex:rw
@@ -96,4 +45,22 @@ services:
       - ~/.hotplex/instances/U0AJVRH4YF6/projects:/home/hotplex/projects:rw
     labels:
       - "hotplex.bot.id=U0AJVRH4YF6"
+      - "hotplex.bot.role=secondary"
+
+  # ============================================================================
+  # Bot 03: Secondary Instance (Auto-added)
+  # ============================================================================
+  hotplex-03:
+    extends:
+      file: common.yml
+      service: hotplex-base
+    container_name: hotplex-03
+    ports: [ "127.0.0.1:18082:8080" ]
+    env_file: [ .env-03 ]
+    volumes:
+      - ~/.hotplex/instances/U0AL7H8UU75/storage:/home/hotplex/.hotplex:rw
+      - ~/.hotplex/instances/U0AL7H8UU75/claude:/home/hotplex/.claude:rw
+      - ~/.hotplex/instances/U0AL7H8UU75/projects:/home/hotplex/projects:rw
+    labels:
+      - "hotplex.bot.id=U0AL7H8UU75"
       - "hotplex.bot.role=secondary"

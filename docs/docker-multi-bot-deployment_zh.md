@@ -181,8 +181,8 @@ hotplex/
 ├── docker/
 │   └── matrix/
 │       ├── docker-compose.yml     # 多 Bot 编排配置
-│       ├── .env.primary           # Bot 01 环境变量
-│       └── .env.secondary        # Bot 02 环境变量
+│       ├── .env-01                # Bot 01 环境变量
+│       └── .env-02                # Bot 02 环境变量
 ├── configs/chatapps/
 │   ├── slack.yaml         # Slack 平台配置
 │   └── ...
@@ -201,13 +201,13 @@ x-hotplex-common: &hotplex-common
 
 services:
   # Bot 01 - 主 Bot
-  hotplex:
+  hotplex-01:
     <<: *hotplex-common     # 引用共享配置
-    container_name: hotplex
+    container_name: hotplex-01
     ports:
       - "127.0.0.1:18080:8080"
     env_file:
-      - .env.primary           # Bot 01 的环境变量
+      - .env-01           # Bot 01 的环境变量
     volumes:
       # 共享目录
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
@@ -217,13 +217,13 @@ services:
       - ${HOME}/.gitconfig-hotplex:/home/hotplex/.gitconfig:ro
 
   # Bot 02 - 副 Bot
-  hotplex-secondary:
+  hotplex-02:
     <<: *hotplex-common
-    container_name: hotplex-secondary
+    container_name: hotplex-02
     ports:
       - "127.0.0.1:18081:8080"
     env_file:
-      - .env.secondary      # Bot 02 的环境变量
+      - .env-02      # Bot 02 的环境变量
     volumes:
       # 共享目录（同上）
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
@@ -240,7 +240,7 @@ services:
 | **projects 目录** | 每个 Bot 有独立工作空间  | volumes 中的 `.slack/BOT_xxx` |
 | **gitconfig**     | 每个 Bot 有独立 Git 身份 | volumes 中的 `.gitconfig-xxx` |
 | **端口**          | 避免端口冲突             | ports 中的 `18080/18081`      |
-| **env_file**      | 每个 Bot 有独立凭证      | `.env.primary` / `.env.secondary`     |
+| **env_file**      | 每个 Bot 有独立凭证      | `.env-01` / `.env-02`     |
 
 **❌ 错误示例（会导致冲突）：**
 
@@ -271,13 +271,13 @@ volumes:
 
 ```bash
 # 复制模板
-cp .env .env.tertiary
+cp .env .env-03
 
 # 编辑新配置
-vim .env.tertiary
+vim .env-03
 ```
 
-**修改 `.env.tertiary`：**
+**修改 `.env-03`：**
 
 ```bash
 # Bot 03 凭证（与新 Slack App 对应）
@@ -308,16 +308,16 @@ EOF
   # ============================================================================
   # Bot 03: Tertiary Bot
   # ============================================================================
-  hotplex-tertiary:
+  hotplex-03:
     <<: *hotplex-common
-    container_name: hotplex-tertiary
+    container_name: hotplex-03
     depends_on:
       hotplex:
         condition: service_started
     ports:
       - "127.0.0.1:18082:8080"      # 新端口
     env_file:
-      - .env.tertiary               # 新环境变量
+      - .env-03               # 新环境变量
     volumes:
       # 共享目录
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
@@ -339,9 +339,9 @@ EOF
 
 ```bash
 BOT_CONFIGS=(
-  "hotplex:HotPlex Bot:bot@example.com"
-  "hotplex-secondary:HotPlex Bot 02:bot02@example.com"
-  "hotplex-tertiary:HotPlex Bot 03:bot03@example.com"  # 新增
+  "hotplex-01:HotPlex Bot:bot@example.com"
+  "hotplex-02:HotPlex Bot 02:bot02@example.com"
+  "hotplex-03:HotPlex Bot 03:bot03@example.com"  # 新增
 )
 ```
 
@@ -510,7 +510,7 @@ ports:
 │  │  (Bot 01)          │    │  (Bot 02)          │    │ (Bot 03)       │ │
 │  │                    │    │                    │    │                │ │
 │  │  Port: 18080       │    │  Port: 18081       │    │ Port: 18082    │ │
-│  │  .env              │    │  .env.secondary    │    │ .env.tertiary  │ │
+│  │  .env-01           │    │  .env-02           │    │ .env-03        │ │
 │  │                    │    │                    │    │                │ │
 │  │  projects/         │    │  projects/         │    │ projects/      │ │
 │  │  BOT_U0AHRCL1KCM   │    │  BOT_U0AJVRH4YF6   │    │ BOT_UYYYYYYYYYY│ │

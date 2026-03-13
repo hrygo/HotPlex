@@ -1,5 +1,22 @@
 # CHANGELOG.md
 
+## [v0.26.2] - 2026-03-13
+
+### Added
+- **XDG Compliance** - Standardized configuration, data, and log paths (`~/.config/hotplex`, `~/.local/share/hotplex`).
+- **CLI Flags** - New explicit `--config`, `--env-file`, and `--config-dir` flags for robust configuration control.
+- **Startup Visibility** - Professional system info header in logs showing version, environment, and effective configuration paths.
+
+### Changed
+- **Service Management** - Improved `scripts/service.sh` with automated reload and explicit flag-based startup for macOS and Linux.
+- **Robust Path Expansion** - Enhanced `ExpandPath` with dynamic `HOME` fallback and sensitive path protection (WAF).
+- **Configuration Discovery** - Consolidated `server.yaml` and `.env` search logic with clear precedence (Explicit > Env > XDG > Root).
+
+### Fixed
+- **Read-Only Filesystem Error** - Resolved the "failed to create work directory: mkdir /.hotplex" error by ensuring correct `HOME` resolution in service environments.
+
+---
+
 ## [v0.26.1] - 2026-03-12
 
 ### Changed

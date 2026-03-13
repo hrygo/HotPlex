@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/images/logo.svg" alt="HotPlex" width="120"/>
+  <img src="docs/images/hotplex_beaver_banner.webp" alt="HotPlex 横幅"/>
 
   # HotPlex
 
@@ -34,9 +34,9 @@
   <p>
     <a href="README.md">English</a> ·
     <b>简体中文</b> ·
-    <a href="#-快速开始">快速开始</a> ·
-    <a href="#-特性">特性</a> ·
-    <a href="#-架构">架构</a> ·
+    <a href="docs/quick-start_zh.md">快速开始</a> ·
+    <a href="https://hrygo.github.io/hotplex/zh/guide/features">特性</a> ·
+    <a href="docs/architecture_zh.md">架构</a> ·
     <a href="https://hrygo.github.io/hotplex/">文档</a> ·
     <a href="https://github.com/hrygo/hotplex/discussions">讨论</a>
   </p>
@@ -55,10 +55,8 @@ make stack S=node
 
 # 构建所有语言栈
 make stack-all
-export HOTPLEX_SLACK_PRIMARY_OWNER=U...
-export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 export HOTPLEX_SLACK_APP_TOKEN=xapp-...
-./hotplexd --config configs/chatapps/slack.yaml
+./hotplexd --config configs/server.yaml --config-dir configs/chatapps
 ```
 
 ### 前置要求
@@ -201,10 +199,8 @@ assistant:
 ```
 
 ```bash
-export HOTPLEX_SLACK_BOT_USER_ID=B12345
-export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 export HOTPLEX_SLACK_APP_TOKEN=xapp-...
-./hotplexd --config configs/chatapps/slack.yaml
+./hotplexd --config configs/server.yaml --config-dir configs/chatapps
 ```
 
 ### WebSocket API
@@ -263,7 +259,7 @@ MIT License © 2024-present [HotPlex 贡献者](https://github.com/hrygo/hotplex
 ---
 
 <div align="center">
-  <img src="docs/images/hotplex_beaver_final.png" alt="HotPlex 吉祥物" width="100"/>
+  <img src="docs/images/logo.svg" alt="HotPlex 图标" width="100"/>
   <br/>
   <sub>为 AI 工程化社区倾力构建</sub>
 </div>

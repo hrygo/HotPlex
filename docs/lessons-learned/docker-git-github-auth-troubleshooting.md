@@ -5,8 +5,8 @@
 
 ## 问题现象
 
-- **机器人1 (hotplex)**：能成功创建 PR
-- **机器人2 (hotplex-secondary)**：报错缺少 GitHub 凭证
+- **机器人 1 (hotplex-01)**：能成功创建 PR
+- **机器人 2 (hotplex-02)**：报错缺少 GitHub 凭证
 
 ## 排查过程
 
@@ -21,8 +21,8 @@ GITHUB_TOKEN=ghp_xxx...
 ### 2. 检查 gh CLI 认证状态
 
 ```bash
-docker exec hotplex gh auth status
-docker exec hotplex-secondary gh auth status
+docker exec hotplex-01 gh auth status
+docker exec hotplex-02 gh auth status
 ```
 
 **结果**：两个容器都显示认证成功！
@@ -35,8 +35,8 @@ github.com
 ### 3. 检查 SSH 目录
 
 ```bash
-docker exec hotplex ls -la ~/.ssh
-docker exec hotplex-secondary ls -la ~/.ssh
+docker exec hotplex-01 ls -la ~/.ssh
+docker exec hotplex-02 ls -la ~/.ssh
 ```
 
 **结果**：两个容器都没有 SSH 目录（预期行为，未挂载）。
@@ -44,16 +44,16 @@ docker exec hotplex-secondary ls -la ~/.ssh
 ### 4. 检查 Git Remote 配置（关键！）
 
 ```bash
-docker exec hotplex bash -c "cd /home/hotplex/projects/hotplex && git remote -v"
-docker exec hotplex-secondary bash -c "cd /home/hotplex/projects/hotplex && git remote -v"
+docker exec hotplex-01 bash -c "cd /home/hotplex/projects/hotplex && git remote -v"
+docker exec hotplex-02 bash -c "cd /home/hotplex/projects/hotplex && git remote -v"
 ```
 
 **结果**：
 
 | 容器 | origin URL |
 |------|-----------|
-| hotplex | `https://x-access-token:ghp_xxx@github.com/...` ✅ |
-| hotplex-secondary | `https://github.com/...` ❌ |
+| hotplex-01 | `https://x-access-token:ghp_xxx@github.com/...` ✅ |
+| hotplex-02 | `https://github.com/...` ❌ |
 
 ## 根本原因
 
@@ -67,7 +67,7 @@ docker exec hotplex-secondary bash -c "cd /home/hotplex/projects/hotplex && git 
 ## 解决方案
 
 ```bash
-docker exec hotplex-secondary bash -c \
+docker exec hotplex-02 bash -c \
   "cd /home/hotplex/projects/hotplex && \
    git remote set-url origin https://x-access-token:\${GITHUB_TOKEN}@github.com/aaronwong1989/hotplex.git"
 ```
@@ -84,7 +84,7 @@ git remote set-url origin https://x-access-token:ghp_xxx@github.com/owner/repo.g
 
 ```yaml
 services:
-  hotplex-secondary:
+  hotplex-02:
     entrypoint:
       - /bin/sh
       - -c
@@ -125,5 +125,5 @@ volumes:
 ## 相关文件
 
 - `docker-compose.yml` - 容器编排配置
-- `.env` / `.env.secondary` - 环境变量
+- `.env-01` / `.env-02` - 环境变量
 - `~/.gitconfig-hotplex*` - Git 全局配置挂载

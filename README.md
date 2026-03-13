@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/images/logo.svg" alt="HotPlex" width="120"/>
+  <img src="docs/images/hotplex_beaver_banner.webp" alt="HotPlex Banner"/>
 
   # HotPlex
 
@@ -32,9 +32,9 @@
   </p>
 
   <p>
-    <a href="#-quick-start">Quick Start</a> ·
-    <a href="#-features">Features</a> ·
-    <a href="#-architecture">Architecture</a> ·
+    <a href="docs/quick-start.md">Quick Start</a> ·
+    <a href="https://hrygo.github.io/hotplex/guide/features">Features</a> ·
+    <a href="docs/architecture.md">Architecture</a> ·
     <a href="https://hrygo.github.io/hotplex/">Docs</a> ·
     <a href="https://github.com/hrygo/hotplex/discussions">Discussions</a> ·
     <a href="README_zh.md">简体中文</a>
@@ -56,7 +56,7 @@ make build
 export HOTPLEX_SLACK_PRIMARY_OWNER=U...
 export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 export HOTPLEX_SLACK_APP_TOKEN=xapp-...
-./hotplexd --config configs/chatapps/slack.yaml
+./hotplexd --config configs/server.yaml --config-dir configs/chatapps
 ```
 
 ### Requirements
@@ -202,7 +202,7 @@ assistant:
 export HOTPLEX_SLACK_BOT_USER_ID=B12345
 export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 export HOTPLEX_SLACK_APP_TOKEN=xapp-...
-./hotplexd --config configs/chatapps/slack.yaml
+./hotplexd --config configs/server.yaml --config-dir configs/chatapps
 ```
 
 ### WebSocket API
@@ -266,7 +266,7 @@ MIT License © 2024-present [HotPlex Contributors](https://github.com/hrygo/hotp
 ---
 
 <div align="center">
-  <img src="docs/images/hotplex_beaver_final.png" alt="HotPlex Mascot" width="100"/>
+  <img src="docs/images/logo.svg" alt="HotPlex Logo" width="100"/>
   <br/>
   <sub>Built for the AI Engineering community</sub>
 </div>

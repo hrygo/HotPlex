@@ -179,8 +179,15 @@ func (c *ConfigLoader) Load(configDir string) error {
 			continue
 		}
 
-		// Expand environment variables in config file
-		expanded := os.ExpandEnv(string(data))
+		// Expand environment variables in config file with fallback for HOME
+		expanded := os.Expand(string(data), func(vars string) string {
+			val := os.Getenv(vars)
+			if vars == "HOME" && val == "" {
+				homeDir, _ := os.UserHomeDir()
+				return homeDir
+			}
+			return val
+		})
 
 		var cfg PlatformConfig
 		if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {

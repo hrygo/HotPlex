@@ -1,4 +1,9 @@
-# HotPlex 安装指南
+<div align="center">
+  <img src="docs/images/hotplex_beaver_banner.webp" alt="HotPlex 横幅"/>
+
+  # HotPlex 安装指南
+</div>
+
 
 本文档介绍如何在各种平台上安装和配置 HotPlex。
 
@@ -114,7 +119,7 @@ hotplexd -version
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -c
 ```
 
-配置文件将生成在 `~/.hotplex/.env`
+配置文件默认生成在 `~/.config/hotplex/.env` (XDG 标准路径)
 
 ### 必要配置项
 
@@ -134,28 +139,29 @@ HOTPLEX_SLACK_APP_TOKEN=xapp-your-token
 GITHUB_TOKEN=ghp_your-token
 ```
 
-### 配置文件位置
+### 配置文件搜索优先级
 
-HotPlex 按以下顺序查找配置文件：
+HotPlex 遵循 XDG 规范，按以下顺序查找配置文件：
 
-1. `-env` 参数指定的路径
-2. 当前目录的 `.env` 文件
-3. `~/.hotplex/.env`
+1. `--env-file` 参数指定的路径
+2. `ENV_FILE` 环境变量指定的路径
+3. 当前执行目录下的 `.env`
+4. `~/.config/hotplex/.env` (macOS/Linux 标准路径)
 
 ## 启动服务
 
 ```bash
-# 使用默认配置
+# 使用默认配置 (自动搜索 .env 和 server.yaml)
 hotplexd
 
-# 指定配置文件
-hotplexd -env ~/.hotplex/.env
+# 显式指定配置文件
+hotplexd --env-file ~/.config/hotplex/.env --config ~/.config/hotplex/server.yaml
 
-# 指定端口
-hotplexd -port 9090
+# 指定 ChatApps 配置目录
+hotplexd --config-dir ~/.config/hotplex/configs
 
 # 查看帮助
-hotplexd -h
+hotplexd --help
 ```
 
 ## Docker 部署
@@ -225,3 +231,12 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 - [配置 Slack Bot](./configs/chatapps/slack.yaml)
 - [查看 API 文档](./README_zh.md)
 - [贡献指南](./CONTRIBUTING.md)
+
+---
+
+<div align="center">
+  <img src="docs/images/logo.svg" alt="HotPlex 图标" width="100"/>
+  <br/>
+  <sub>为 AI 工程化社区倾力构建</sub>
+</div>
+

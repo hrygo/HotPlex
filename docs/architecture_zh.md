@@ -2,6 +2,11 @@
 
 *查看其他语言: [English](architecture.md), [简体中文](architecture_zh.md).*
 
+<div align="center">
+  <img src="images/hotplex_beaver_banner.webp" alt="HotPlex 横幅"/>
+</div>
+
+
 HotPlex 是一个高性能的 **AI 智能体运行时 (Agent Runtime)**，旨在将原本"单次运行"的 AI CLI 工具（如 Claude Code, OpenCode）转化为生产就绪的长生命周期交互服务。它的核心哲学是"利用胜于构建 (Leverage vs Build)"，通过维护持久化的、具备安全围栏的全双工进程池，彻底消灭 Headless 模式下的冷启动代价，实现毫秒级的指令响应。
 
 **版本**: v0.17.0 | **核心角色**: AI 智能体工程协议 (Cli-as-a-Service)
@@ -182,3 +187,12 @@ sequenceDiagram
 ### 规划增强
 - **L2/L3 级隔离**：集成 Linux Namespace (PID/Net) 与 WASM 沙箱
 - **多智能体总线**：在单一命名空间下编排多个专业化智能体
+
+---
+
+<div align="center">
+  <img src="images/logo.svg" alt="HotPlex 图标" width="100"/>
+  <br/>
+  <sub>为 AI 工程化社区倾力构建</sub>
+</div>
+

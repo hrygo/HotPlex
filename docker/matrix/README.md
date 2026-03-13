@@ -1,6 +1,6 @@
 # 🤖 HotPlex Matrix: 1+n 机器人编排
 
-HotPlex Matrix 是一个支持 1+n 机器人协作的编排架构，允许一个主机器人 (Primary) 与多个从机器人 (Secondary/Instance) 隔离运行。该架构实现了**自动化部署 (Automation)**、**实例隔离 (Isolation)** 与 **配置便携性 (Portability)**。
+HotPlex Matrix 是一个支持 1+n 机器人协作的编排架构，允许一个主机器人 (hotplex-01) 与多个从机器人 (hotplex-nn) 隔离运行。该架构实现了**自动化部署 (Automation)**、**实例隔离 (Isolation)** 与 **配置便携性 (Portability)**。
 
 ---
 
@@ -38,7 +38,7 @@ HotPlex Matrix 是一个支持 1+n 机器人协作的编排架构，允许一个
         │
         ▼
 3. 容器启动 (docker compose)  ──► [ 加载从服务继承基础模板 (extends) ]
-                             ──► [ 顺序启动 Primary 及 n 个 Secondary 容器 ]
+                             ──► [ 顺序启动 hotplex-01 及 n 个 hotplex-nn 容器 ]
         │
         ▼
 4. 容器内初始化 (Boot)        ──► [ 环境变量插值 (仅限白名单变量) ]
@@ -50,6 +50,7 @@ HotPlex Matrix 是一个支持 1+n 机器人协作的编排架构，允许一个
 | 指令 | 作用 |
 | :--- | :--- |
 | `make docker-prepare` | **预备阶段**: 动态发现所有机器人实例并初始化宿主机目录树。 |
+| `./add-bot.sh` | **新增机器人**: 交互式向导，快速添加并配置新的机器人实例。 |
 | `make docker-sync` | **同步阶段**: 将宿主机 `configs/` 目录下的 YAML 规则同步至运行目录。 |
 | `make docker-up` | **启动全流程**: 自动执行准备与同步过程，随后拉起所有机器人容器。 |
 | `make docker-down` | **关停环境**: 停止并移除所有容器。 |
@@ -60,8 +61,8 @@ HotPlex Matrix 是一个支持 1+n 机器人协作的编排架构，允许一个
 
 | 机器人角色 | 外部访问 (Host) | 容器内部 (Container) | 物理路径说明 |
 | :--- | :--- | :--- | :--- |
-| **主机器人** | `127.0.0.1:18080` | `8080` | `~/.hotplex/instances/U0AHRCL1KCM/` |
-| **从机器人** | `127.0.0.1:18081` | `8080` | `~/.hotplex/instances/U0AJVRH4YF6/` |
+| **hotplex-01** | `127.0.0.1:18080` | `8080` | `~/.hotplex/instances/U0AHRCL1KCM/` |
+| **hotplex-02** | `127.0.0.1:18081` | `8080` | `~/.hotplex/instances/U0AJVRH4YF6/` |
 | **共享资源** | 不适用 | `/home/hotplex/configs` | `~/.hotplex/configs/` (全局配置) |
 
 ---
@@ -70,8 +71,8 @@ HotPlex Matrix 是一个支持 1+n 机器人协作的编排架构，允许一个
 
 - **`docker-compose.yml`**: 生产环境运行定义，默认使用远程预构建镜像。
 - **`docker-compose.build.yml`**: 本地开发/构建定义，用于源码编译与调试。
-- **`.env.primary`**: 主机器人的环境变量，控制主节点的身份与行为。
-- **`.env.secondary`**: 从机器人的环境变量，用于横向扩展节点。
+- **`.env-01`**: 主机器人的环境变量，控制主节点的身份与行为。
+- **`.env-02`**: 从机器人的环境变量，用于横向扩展节点。
 
 ---
 

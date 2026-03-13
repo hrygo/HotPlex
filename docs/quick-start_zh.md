@@ -1,5 +1,10 @@
 *Read this in other languages: [English](quick-start.md), [简体中文](quick-start_zh.md).*
 
+<div align="center">
+  <img src="images/hotplex_beaver_banner.webp" alt="HotPlex 横幅"/>
+</div>
+
+
 # 快速入门指南
 
 在 5 分钟内快速启动并运行 HotPlex。
@@ -269,7 +274,8 @@ mkdir -p /tmp/hotplex-demo
 
 ---
 
-## 需要帮助？
-
-- [GitHub Issues](https://github.com/hrygo/hotplex/issues)
-- [Discussions](https://github.com/hrygo/hotplex/discussions)
+<div align="center">
+  <img src="images/logo.svg" alt="HotPlex 图标" width="100"/>
+  <br/>
+  <sub>为 AI 工程化社区倾力构建</sub>
+</div>

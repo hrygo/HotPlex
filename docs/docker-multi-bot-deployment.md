@@ -177,12 +177,11 @@ docker compose ps
 ### Directory Structure
 
 ```
-hotplex/
 ├── docker/
 │   └── matrix/
 │       ├── docker-compose.yml     # Multi-bot orchestration
-│       ├── .env.primary           # Bot 01 environment
-│       └── .env.secondary        # Bot 02 environment
+│       ├── .env-01                # Bot 01 environment
+│       └── .env-02                # Bot 02 environment
 ├── configs/chatapps/
 │   ├── slack.yaml         # Slack platform config
 │   └── ...
@@ -201,13 +200,13 @@ x-hotplex-common: &hotplex-common
 
 services:
   # Bot 01 - Primary Bot
-  hotplex:
+  hotplex-01:
     <<: *hotplex-common     # Reference shared config
-    container_name: hotplex
+    container_name: hotplex-01
     ports:
       - "127.0.0.1:18080:8080"
     env_file:
-      - .env.primary           # Bot 01's environment
+      - .env-01           # Bot 01's environment
     volumes:
       # Shared directories
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
@@ -217,13 +216,13 @@ services:
       - ${HOME}/.gitconfig-hotplex:/home/hotplex/.gitconfig:ro
 
   # Bot 02 - Secondary Bot
-  hotplex-secondary:
+  hotplex-02:
     <<: *hotplex-common
-    container_name: hotplex-secondary
+    container_name: hotplex-02
     ports:
       - "127.0.0.1:18081:8080"
     env_file:
-      - .env.secondary      # Bot 02's environment
+      - .env-02      # Bot 02's environment
     volumes:
       # Shared directories (same as above)
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
@@ -240,7 +239,7 @@ services:
 | **projects dir** | Each bot has independent workspace    | volumes `.slack/BOT_xxx`  |
 | **gitconfig**    | Each bot has independent Git identity | volumes `.gitconfig-xxx`  |
 | **port**         | Avoid port conflicts                  | ports `18080/18081`       |
-| **env_file**     | Each bot has independent credentials  | `.env.primary` / `.env.secondary` |
+| **env_file**     | Each bot has independent credentials  | `.env-01` / `.env-02` |
 
 **❌ Wrong (causes conflicts):**
 
@@ -271,13 +270,13 @@ Follow [Prerequisites](#prerequisites) to create a new Slack App and get credent
 
 ```bash
 # Copy template
-cp .env .env.tertiary
+cp .env .env-03
 
 # Edit new config
-vim .env.tertiary
+vim .env-03
 ```
 
-**Update `.env.tertiary`:**
+**Update `.env-03`:**
 
 ```bash
 # Bot 03 Credentials (matching new Slack App)
@@ -308,16 +307,16 @@ EOF
   # ============================================================================
   # Bot 03: Tertiary Bot
   # ============================================================================
-  hotplex-tertiary:
+  hotplex-03:
     <<: *hotplex-common
-    container_name: hotplex-tertiary
+    container_name: hotplex-03
     depends_on:
       hotplex:
         condition: service_started
     ports:
       - "127.0.0.1:18082:8080"      # New port
     env_file:
-      - .env.tertiary               # New environment
+      - .env-03               # New environment
     volumes:
       # Shared directories
       - ${HOME}/.hotplex:/home/hotplex/.hotplex:rw
@@ -339,9 +338,9 @@ Edit `scripts/setup_gitconfig.sh`, add new bot:
 
 ```bash
 BOT_CONFIGS=(
-  "hotplex:HotPlex Bot:bot@example.com"
-  "hotplex-secondary:HotPlex Bot 02:bot02@example.com"
-  "hotplex-tertiary:HotPlex Bot 03:bot03@example.com"  # New
+  "hotplex-01:HotPlex Bot:bot@example.com"
+  "hotplex-02:HotPlex Bot 02:bot02@example.com"
+  "hotplex-03:HotPlex Bot 03:bot03@example.com"  # New
 )
 ```
 
@@ -506,11 +505,11 @@ ports:
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  ┌────────────────────┐    ┌────────────────────┐    ┌────────────────┐ │
-│  │  hotplex           │    │  hotplex-secondary │    │ hotplex-tertiary│ │
+│  │  hotplex-01          │    │  hotplex-02         │    │ hotplex-03      │ │
 │  │  (Bot 01)          │    │  (Bot 02)          │    │ (Bot 03)       │ │
 │  │                    │    │                    │    │                │ │
 │  │  Port: 18080       │    │  Port: 18081       │    │ Port: 18082    │ │
-│  │  .env              │    │  .env.secondary    │    │ .env.tertiary  │ │
+│  │  .env-01           │    │  .env-02           │    │ .env-03        │ │
 │  │                    │    │                    │    │                │ │
 │  │  projects/         │    │  projects/         │    │ projects/      │ │
 │  │  BOT_U0AHRCL1KCM   │    │  BOT_U0AJVRH4YF6   │    │ BOT_UYYYYYYYYYY│ │

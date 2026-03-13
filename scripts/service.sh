@@ -100,20 +100,36 @@ install_files() {
     cp "$SOURCE_BINARY" "$BINARY_PATH"
     chmod +x "$BINARY_PATH"
 
-    # Install .env if not exists
-    if [[ ! -f "$ENV_FILE" ]]; then
-        if [[ -f "$SOURCE_ENV" ]]; then
-            info "Installing config to $ENV_FILE..."
-            cp "$SOURCE_ENV" "$ENV_FILE"
-        elif [[ -f "$SOURCE_ENV_EXAMPLE" ]]; then
-            info "Creating config from example..."
-            cp "$SOURCE_ENV_EXAMPLE" "$ENV_FILE"
-            warn "Please edit $ENV_FILE with your settings"
-        else
-            warn "No .env or .env.example found. Please create $ENV_FILE manually"
-        fi
-    else
-        info "Config already exists at $ENV_FILE (preserved)"
+    # Install .env (Update if exists to ensure prefixes are correct)
+    if [[ -f "$ENV_FILE" ]]; then
+        info "Backing up existing .env to .env.bak..."
+        cp "$ENV_FILE" "$ENV_FILE.bak"
+    fi
+
+    if [[ -f "$SOURCE_ENV" ]]; then
+        info "Updating config from $SOURCE_ENV to $ENV_FILE..."
+        cp "$SOURCE_ENV" "$ENV_FILE"
+    elif [[ -f "$SOURCE_ENV_EXAMPLE" ]]; then
+        info "Creating config from example..."
+        cp "$SOURCE_ENV_EXAMPLE" "$ENV_FILE"
+        warn "Please edit $ENV_FILE with your settings"
+    fi
+
+    # Install server.yaml if not exists
+    SERVER_YAML="$INSTALL_ETC/server.yaml"
+    SOURCE_SERVER_YAML="$PROJECT_ROOT/configs/server.yaml"
+    if [[ ! -f "$SERVER_YAML" ]] && [[ -f "$SOURCE_SERVER_YAML" ]]; then
+        info "Installing server config to $SERVER_YAML..."
+        cp "$SOURCE_SERVER_YAML" "$SERVER_YAML"
+    fi
+
+    # Install ChatApps configs
+    INSTALL_CONFIGS="$INSTALL_ETC/configs"
+    SOURCE_CONFIGS="$PROJECT_ROOT/configs/chatapps"
+    if [[ -d "$SOURCE_CONFIGS" ]]; then
+        info "Installing ChatApps configs to $INSTALL_CONFIGS..."
+        mkdir -p "$INSTALL_CONFIGS"
+        cp -r "$SOURCE_CONFIGS"/* "$INSTALL_CONFIGS/"
     fi
 }
 
@@ -161,6 +177,12 @@ generate_plist() {
     <key>ProgramArguments</key>
     <array>
         <string>${BINARY_PATH}</string>
+        <string>--config</string>
+        <string>${INSTALL_ETC}/server.yaml</string>
+        <string>--env-file</string>
+        <string>${ENV_FILE}</string>
+        <string>--config-dir</string>
+        <string>${INSTALL_ETC}/configs</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${INSTALL_ETC}</string>
@@ -176,6 +198,8 @@ generate_plist() {
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:${HOME}/.local/bin</string>
+        <key>HOME</key>
+        <string>${HOME}</string>
         <key>ENV_FILE</key>
         <string>${ENV_FILE}</string>
     </dict>
@@ -198,6 +222,8 @@ macos_install() {
     generate_plist > "$PLIST_PATH"
     success "Created plist: $PLIST_PATH"
 
+    # Reload to apply changes if already exists
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
     launchctl load "$PLIST_PATH" 2>/dev/null || true
     success "Service loaded"
 
@@ -355,7 +381,7 @@ After=network.target
 Type=simple
 User=${USER}
 WorkingDirectory=${INSTALL_ETC}
-ExecStart=${BINARY_PATH}
+ExecStart=${BINARY_PATH} --config ${INSTALL_ETC}/server.yaml --env-file ${ENV_FILE} --config-dir ${INSTALL_ETC}/configs
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${LOG_FILE}
@@ -363,6 +389,7 @@ StandardError=append:${LOG_FILE}
 
 # Environment
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=${HOME}"
 Environment="ENV_FILE=${ENV_FILE}"
 
 # Load .env file if exists

@@ -19,7 +19,7 @@ provider:
   dangerously_skip_permissions: true
 
 engine:
-  work_dir: ${HOTPLEX_PROJECTS_DIR}
+  work_dir: ${HOTPLEX_PROJECTS_DIR}/hotplex
   timeout: 30m
   idle_timeout: 1h
 

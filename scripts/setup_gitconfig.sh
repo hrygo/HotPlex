@@ -18,14 +18,14 @@ set -e
 
 # Bot configurations - add new bots here
 BOT_CONFIGS=(
-  "hotplex:HotPlexBot01"
-  "hotplex-secondary:HotPlexBot02"
+  "hotplex-01:HotPlexBot01"
+  "hotplex-02:HotPlexBot02"
 )
 
 # ------------------------------------------------------------------------------
 # Generate a gitconfig file for a bot (idempotent - skips if already correct)
 # Arguments:
-#   $1 - suffix (e.g., "hotplex", "hotplex-secondary")
+#   $1 - suffix (e.g., "hotplex-01", "hotplex-02")
 #   $2 - bot_name (e.g., "HotPlexBot01")
 # Returns: 0 on success, 1 on failure
 # ------------------------------------------------------------------------------
@@ -75,7 +75,7 @@ EOF
 # ------------------------------------------------------------------------------
 # Verify a gitconfig file exists and has correct bot name
 # Arguments:
-#   $1 - suffix (e.g., "hotplex", "hotplex-secondary")
+#   $1 - suffix (e.g., "hotplex-01", "hotplex-02")
 #   $2 - expected bot_name (e.g., "HotPlexBot01")
 # Returns: 0 on success, 1 on failure
 # ------------------------------------------------------------------------------

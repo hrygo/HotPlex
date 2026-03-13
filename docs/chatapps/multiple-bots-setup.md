@@ -103,7 +103,7 @@ Click "Install to Workspace" to generate the Bot User OAuth Token (`xoxb-*`)
 2. Copy the **Signing Secret**
 3. Get Bot User ID from "App Home" or via API
 
-## Step 5: Configure .env.secondary
+## Step 5: Configure .env-02
 
 ```bash
 # Slack Secondary Bot Configuration
@@ -166,7 +166,7 @@ docker compose up -d
 
 ### Connection errors in logs
 ```bash
-docker logs hotplex-secondary 2>&1 | grep -i "error\|fail"
+docker logs hotplex-02 2>&1 | grep -i "error\|fail"
 ```
 
 ### Messages going to wrong bot

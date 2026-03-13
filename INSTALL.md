@@ -115,7 +115,7 @@ hotplexd -version
 curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash -s -- -c
 ```
 
-Config file will be created at `~/.hotplex/.env`
+Config file is created by default at `~/.config/hotplex/.env` (XDG standard path)
 
 ### Required Settings
 
@@ -135,28 +135,33 @@ HOTPLEX_SLACK_APP_TOKEN=xapp-your-token
 GITHUB_TOKEN=ghp_your-token
 ```
 
-### Config File Location
+# GitHub Token (for Git operations)
+GITHUB_TOKEN=ghp_your-token
+```
 
-HotPlex searches for config in this order:
+### Config File Search Order
 
-1. Path specified by `-env` flag
-2. `.env` in current directory
-3. `~/.hotplex/.env`
+HotPlex follows the XDG specification and searches for config in this order:
+
+1. Path specified by `--env-file` flag
+2. Path specified by `ENV_FILE` environment variable
+3. `.env` in current directory
+4. `~/.config/hotplex/.env` (standard path on macOS/Linux)
 
 ## Start Service
 
 ```bash
-# Default config
+# Default config (auto-searches for .env and server.yaml)
 hotplexd
 
-# Specify config file
-hotplexd -env ~/.hotplex/.env
+# Specify config files explicitly
+hotplexd --env-file ~/.config/hotplex/.env --config ~/.config/hotplex/server.yaml
 
-# Specify port
-hotplexd -port 9090
+# Specify ChatApps config directory
+hotplexd --config-dir ~/.config/hotplex/configs
 
 # Show help
-hotplexd -h
+hotplexd --help
 ```
 
 ## Docker Deployment
