@@ -74,6 +74,20 @@ func main() {
 		}
 	}
 
+	// Expand tilde (~) in path environment variables after loading .env
+	// godotenv.Load does not expand ~, so we use sys.ExpandPath
+	pathEnvVars := []string{
+		"HOTPLEX_PROJECTS_DIR",
+		"HOTPLEX_DATA_ROOT",
+		"HOTPLEX_MESSAGE_STORE_SQLITE_PATH",
+		"HOTPLEX_CHATAPPS_CONFIG_DIR",
+	}
+	for _, envVar := range pathEnvVars {
+		if val := os.Getenv(envVar); val != "" {
+			_ = os.Setenv(envVar, sys.ExpandPath(val)) // errcheck: ignore error
+		}
+	}
+
 	// 2. Configure logging level (pre-init for system info)
 	logLevel := slog.LevelInfo
 	if strings.ToLower(os.Getenv("HOTPLEX_LOG_LEVEL")) == "debug" {

@@ -23,6 +23,7 @@ RUN if [ -n "$GOPROXY" ]; then go env -w GOPROXY=$GOPROXY; fi && \
     go install github.com/go-delve/delve/cmd/dlv@latest && \
     go install github.com/goreleaser/goreleaser/v2@latest && \
     go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5
 
 # Protocol Buffers Compiler

@@ -39,8 +39,19 @@ RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ] && [ -n "$DEBIAN_MIRROR" ]; then
     fi && \
     apt-get update && apt-get install -y --no-install-recommends \
     curl wget ca-certificates git make bash jq gettext-base \
-    procps netcat-openbsd openssl libatomic1 \
+    procps netcat-openbsd openssl libatomic1 unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI (gh)
+RUN gh_install_version="2.63.0" && \
+    gh_arch=$(uname -m) && \
+    case "$gh_arch" in \
+        x86_64) gh_arch="amd64" ;; \
+        aarch64) gh_arch="arm64" ;; \
+    esac && \
+    curl -sSL "https://github.com/cli/cli/releases/download/v${gh_install_version}/gh_${gh_install_version}_linux_${gh_arch}.tar.gz" | tar xz -C /tmp && \
+    mv /tmp/gh_${gh_install_version}_linux_${gh_arch}/bin/gh /usr/local/bin/ && \
+    rm -rf /tmp/gh_${gh_install_version}_linux_${gh_arch}
 
 # 2. HotPlex User & Workspace Setup
 RUN useradd -m -u ${HOST_UID} -s /bin/bash hotplex && \
