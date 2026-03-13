@@ -404,11 +404,17 @@ func createEngineForPlatform(pc *PlatformConfig, logger *slog.Logger) (*engine.E
 // Supports both ~ and ~/path formats.
 // Returns an empty string if the path contains traversal attacks.
 func ExpandPath(path string) string {
+	if path == "" {
+		return ""
+	}
 	expanded := sys.ExpandPath(path)
+	if expanded == "" {
+		return ""
+	}
 	if strings.HasPrefix(expanded, "/") && isSensitivePath(expanded) {
 		return "" // Block access to sensitive paths
 	}
-	return expanded
+	return filepath.Clean(expanded)
 }
 
 // isSensitivePath checks if a path points to a sensitive system location
