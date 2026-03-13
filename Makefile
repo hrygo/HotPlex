@@ -57,7 +57,7 @@ NC            := $(shell printf '\033[0m')
 BINARY_NAME   := hotplexd
 CMD_PATH      := ./cmd/hotplexd
 DIST_DIR      := dist
-VERSION       ?= 0.26.1
+VERSION       ?= 0.26.2
 COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME    ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 

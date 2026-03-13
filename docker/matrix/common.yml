@@ -1,6 +1,9 @@
 # ------------------------------------------------------------------------------
 # 🛠️ Common Configurations (YAML Anchors)
 # ------------------------------------------------------------------------------
+# Convention over Configuration: All default values are defined here.
+# Only override in .env-* files when necessary.
+# ------------------------------------------------------------------------------
 x-hotplex-common: &hotplex-common
   image: ${HOTPLEX_IMAGE:-ghcr.io/hrygo/hotplex:latest}
   init: true # Proper PID 1 signal handling
@@ -13,18 +16,36 @@ x-hotplex-common: &hotplex-common
     HTTP_PROXY: http://host.docker.internal:7897
     HTTPS_PROXY: http://host.docker.internal:7897
     NO_PROXY: localhost,127.0.0.1,host.docker.internal
+    HOTPLEX_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
     # ─────────────────────────────────────────────────────────────────
     # Git Identity Defaults
     # ─────────────────────────────────────────────────────────────────
     GIT_USER_NAME: ${GIT_USER_NAME:-HotPlexBot}
     GIT_USER_EMAIL: ${GIT_USER_EMAIL:-noreply@hotplex.dev}
     # ─────────────────────────────────────────────────────────────────
-    # ChatApp Core Paths (Standardized for Container)
+    # ChatApp Core Paths (Container Paths - DO NOT CHANGE)
     # ─────────────────────────────────────────────────────────────────
     HOTPLEX_DATA_ROOT: /home/hotplex/.hotplex
     HOTPLEX_PROJECTS_DIR: /home/hotplex/projects
     HOTPLEX_MESSAGE_STORE_SQLITE_PATH: /home/hotplex/.hotplex/chatapp_messages.db
     HOTPLEX_CHATAPPS_CONFIG_DIR: /home/hotplex/configs/chatapps
+    # ─────────────────────────────────────────────────────────────────
+    # Engine Timeouts (Convention: sensible defaults)
+    # ─────────────────────────────────────────────────────────────────
+    HOTPLEX_EXECUTION_TIMEOUT: ${HOTPLEX_EXECUTION_TIMEOUT:-30m}
+    HOTPLEX_IDLE_TIMEOUT: ${HOTPLEX_IDLE_TIMEOUT:-1h}
+    # ─────────────────────────────────────────────────────────────────
+    # OpenCode Compatibility (Default: enabled)
+    # ─────────────────────────────────────────────────────────────────
+    HOTPLEX_OPENCODE_COMPAT_ENABLED: ${HOTPLEX_OPENCODE_COMPAT_ENABLED:-true}
+    # ─────────────────────────────────────────────────────────────────
+    # Message Store (Default: enabled with streaming)
+    # ─────────────────────────────────────────────────────────────────
+    HOTPLEX_MESSAGE_STORE_ENABLED: ${HOTPLEX_MESSAGE_STORE_ENABLED:-true}
+    HOTPLEX_MESSAGE_STORE_TYPE: ${HOTPLEX_MESSAGE_STORE_TYPE:-sqlite}
+    HOTPLEX_MESSAGE_STORE_SQLITE_MAX_SIZE_MB: ${HOTPLEX_MESSAGE_STORE_SQLITE_MAX_SIZE_MB:-1024}
+    HOTPLEX_MESSAGE_STORE_STREAMING_ENABLED: ${HOTPLEX_MESSAGE_STORE_STREAMING_ENABLED:-true}
+    HOTPLEX_MESSAGE_STORE_STREAMING_TIMEOUT: ${HOTPLEX_MESSAGE_STORE_STREAMING_TIMEOUT:-5m}
   extra_hosts:
     - "host.docker.internal:host-gateway"
   cap_drop: [ NET_RAW, NET_ADMIN ]
