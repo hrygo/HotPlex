@@ -16,7 +16,7 @@ User Message → Access Layer → Engine Layer → Process Layer → Response
 
 ### Step-by-Step:
 
-1. **Input**: A message arrives via WebSocket, REST API, or ChatApp (Slack/DingTalk)
+1. **Input**: A message arrives via WebSocket, REST API, or ChatApp (Slack/Feishu)
 2. **Authentication**: Credentials are validated, session is retrieved or created
 3. **Security Check**: WAF validates the request against dangerous patterns
 4. **Execution**: The message is sent to the CLI process (Claude Code / OpenCode)

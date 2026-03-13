@@ -35,7 +35,7 @@ Communication between agents, tools, and users must be instantaneous. Our propri
 
 - **The Engine**: Orchestrates the agent lifecycle and executes core logic.
 - **Plugins/Hooks**: The extensibility layer where developers inject custom behaviors.
-- **ChatApps**: Adapters that bridge the engine to user-facing platforms like Slack or DingTalk.
+- **ChatApps**: Adapters that bridge the engine to user-facing platforms like Slack or Feishu.
 
 ---
 

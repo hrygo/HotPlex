@@ -21,12 +21,7 @@ COPY --from=go-sdk /usr/local/go /usr/local/go
 ENV GOPATH=/home/hotplex/go
 ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
 
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-    apt-get install -y nodejs && \
-    corepack enable && corepack prepare pnpm@latest --activate && \
-    curl -fsSL https://bun.sh/install | bash && mv /root/.bun /usr/local/bun
-ENV BUN_INSTALL="/usr/local/bun"
-ENV PATH="${BUN_INSTALL}/bin:${PATH}"
+# Note: Node.js, Bun, and Pnpm are already provided by hotplex:base.
 
 ARG GOPROXY
 RUN if [ -n "$GOPROXY" ]; then go env -w GOPROXY=$GOPROXY; fi && \

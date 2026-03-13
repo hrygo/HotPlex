@@ -34,7 +34,7 @@ We believe that for an AI agent to be truly useful, it must be **Stateful**, **S
 ### Our Engineering Ethos
 
 - **Zero-Trust by Design**: We assume the agent might try to escape. We build the walls accordingly.
-- **Protocol First**: Whether it's Slack, Discord, or a custom portal, the agent speaks one unified language.
+- **Protocol First**: Whether it's Slack, Feishu, or a custom portal, the agent speaks one unified language.
 - **Performance is a Feature**: Every millisecond of latency is a millisecond of lost "intelligence."
 
 ---

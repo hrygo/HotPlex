@@ -32,7 +32,7 @@ features:
     details: Optimized for low-latency agent interactions and high-throughput event processing.
   - icon: 🔌
     title: Extensible Ecosystem
-    details: Bridge the engine to DingTalk, Discord, and custom portals via a unified binding layer.
+    details: Bridge the engine to Slack, Feishu, and custom portals via a unified binding layer.
   - icon: 🛠️
     title: Developer First
     details: Integrate effortlessly using our artisanal Go, Python, and TypeScript SDKs.
@@ -114,7 +114,7 @@ features:
 <div class="audience-section">
   <div class="audience-card">
     <h3>End Users</h3>
-    <p>Deploy HotPlex agents to Slack, DingTalk, or internal portals in minutes.</p>
+    <p>Deploy HotPlex agents to Slack, Feishu, or internal portals in minutes.</p>
     <a href="/hotplex/guide/getting-started.html" class="audience-btn">Start Deploying</a>
   </div>
   

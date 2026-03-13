@@ -1,6 +1,12 @@
-# HotPlex Docker 生态系统
+# 🐳 HotPlex Docker 生态系统 (2026)
 
-## 🚀 架构图
+HotPlex 提供了针对 AI Agent 开发优化的全技术栈容器化环境。通过**延迟注入架构**与**多运行时基础层**，实现了极速的开发反馈循环与跨语言工具支持。
+
+---
+
+## 🏗️ 核心架构：延迟注入 (Late-Injection)
+
+为了缩短“代码到容器”的反馈循环，我们将稳定的语言环境（SDK）与易变的应用程序二进制文件 (`hotplexd`) 解耦。
 
 ```text
     [ 官方 SDK 镜像 ]           [ HotPlex 源码 ]
@@ -11,7 +17,7 @@
                │                └─────────┬─────────┘
                ▼                          │
     ┌───────────────────┐                 │
-    │  Dockerfile.base  │ (静态 OS 层)    │
+    │  Dockerfile.base  │ (多运行时基础)   │
     └─────────┬─────────┘                 │
               │                           │
               ▼                           │
@@ -25,79 +31,75 @@
     └───────────────────┘
 ```
 
-## 🚀 延迟注入架构 (Late-Injection)
-
-为了缩短“代码到容器”的反馈循环，我们将稳定的语言环境（SDK）与易变的应用程序二进制文件 (`hotplexd`) 解耦。
-
-1.  **静态基础层 (`hotplex:base`)**: 通用基础（Debian Bookworm），包含系统工具和环境设置。一次构建，长期缓存。
-2.  **二进制提供者 (`hotplex:artifacts`)**: 极速 Go 构建器，仅编译 `hotplexd` 二进制文件。
-3.  **技术栈变体 (`hotplex:go`, `:node` 等)**: 继承自 `base` 并安装特定 SDK。
-4.  **延迟注入**: `hotplexd` 二进制文件从 `artifacts` 提供者复制而来，作为每个变体的**最后一个层**。
-
-**优势**: 修改 Go 代码只会使镜像的最后几 MB 失效。在代码更改后，重新构建 2GB 的 Java 镜像只需 **< 10 秒**。
+### 优势 (The Advantage)
+- **极速构建**: 修改代码仅会使镜像最后几 MB 失效。即使是 2GB 的 Java 镜像，代码更新后的重构只需 **< 10 秒**。
+- **多运行时协同**: 所有镜像均继承自 `hotplex:base`，内置 **Python 3** 与 **Node.js 24**，支持跨语言 Agent 工具（如 MCP Server）。
 
 ---
 
-## 📦 可用镜像
+## 📦 可用镜像矩阵
 
-| 镜像           | 标签                | 描述                                                       |
-| :------------- | :------------------ | :--------------------------------------------------------- |
-| **基础层**     | `hotplex:base`      | 共享 OS 基线 + `websocat` + NPM 全局工具。                 |
-| **产出物**     | `hotplex:artifacts` | `hotplexd` 二进制文件的内部提供者。                        |
-| **Go**         | `hotplex:go`        | **默认。** Go 1.26 SDK + `air` + `dlv` + `golangci-lint`。 |
-| **Node**       | `hotplex:node`      | Node.js 24 + `pnpm` + `bun` + `typescript`。               |
-| **Python**     | `hotplex:python`    | Python 3.14 + `uv` + `poetry` + `ruff`。                   |
-| **Java**       | `hotplex:java`      | Temurin 25 JDK + `gradle` + `maven`。                      |
-| **Rust**       | `hotplex:rust`      | Rust 1.94 + `cargo-watch` + `nextest`。                    |
-| **全量版**     | `hotplex:full`      | 包含上述所有 SDK 的全功能技术栈。                          |
+| 镜像 | 标签 | 核心技术栈 | 描述 |
+| :--- | :--- | :--- | :--- |
+| **基础层** | `hotplex:base` | Debian 12 + Node + Py | 共享 OS 基线，内置全镜像通用工具集。 |
+| **Go** | `hotplex:go` | **Go 1.26** | **默认推荐**。集成 `air` 热重载、`dlv` 调试及 `gofumpt`。 |
+| **Node** | `hotplex:node` | **Node.js 24** | 集成 `pnpm`, `bun`, `typescript`, `biome`。 |
+| **Python** | `hotplex:python` | **Python 3.14** | 集成 `uv`, `poetry`, `ruff`, `pydantic-ai`。 |
+| **Rust** | `hotplex:rust` | **Rust 1.94** | 集成 `cargo-nextest`, `cargo-expand`, `cargo-deny`。 |
+| **Java** | `hotplex:java` | **JDK 25** | 集成 `gradle`, `maven`, `jbang`, `arthas`。 |
+| **全量版** | `hotplex:full` | **All-in-One** | 包含上述所有 SDK，适合复杂跨语言调试场景。 |
 
 ---
 
-## 🛠️ 构建与执行
+## 🛠️ 2026 核心工具集 (Tooling Showcase)
 
-管理这些镜像最简单的方法是通过根目录下的 `Makefile`:
+### 🧬 通用能力 (Foundation)
+- **AI/Agent**: `claude-code`, `opencode-ai`, **MCP Ready**.
+- **开发运维**: `gh` (GitHub CLI), `lazygit` (终端 Git UI), `websocat`, `jq`.
+- **安全合规**: **`trivy`** (内置安全审计), `envsubst` (环境变量安全插值)。
+- **包管理**: `uv` (Python), `bun`, `pnpm`.
 
-### 基础指令
+### ⚡ 特定栈工具
+- **Go**: `air`, `dlv`, `gofumpt`, `golangci-lint`, `sqlc`, `buf`.
+- **Python**: `pydantic-ai`, `ruff`, `poetry`, `mypy`.
+- **Rust**: `cargo-nextest`, `cargo-expand`, `cargo-deny`, `cargo-watch`.
+- **Java**: `jbang`, `arthas`, `async-profiler`.
+
+---
+
+## 🌐 网络与代理配置 (Networking & Proxy)
+
+由于 Docker 的网络隔离，在容器内访问宿主机的代理（如 Clash, V2Ray）需要额外配置：
+
+### 1. 基础配置 (macOS/Windows/Linux)
+所有镜像均预配置了 `extra_hosts: ["host.docker.internal:host-gateway"]`。这意味着在容器内可以通过 `host.docker.internal` 访问宿主机。
+
+### 2. 代理注入场景
+| 用户场景 | 操作建议 |
+| :--- | :--- |
+| **标准网络** | 无需任何操作。 |
+| **全量代理** | 1. 开启代理软件的 **"允许局域网连接 (Allow LAN)"**。<br>2. 在 `.env` 或 Compose 中注入代理变量：<br> `HTTP_PROXY=http://host.docker.internal:<PORT>` |
+| **大模型专用** | 通过 `ANTHROPIC_BASE_URL=http://host.docker.internal:<PORT>` 独立接管 LLM 流量。 |
+
+---
+
+## 🚀 快速上手
+
+管理镜像的最简单方式是通过根目录下的 `Makefile`:
+
 ```bash
-# 构建默认的 Go 技术栈
+# 1. 构建默认 Go 环境
 make docker-build-go
 
-# 构建特定技术栈 (例如 node)
-make docker-build-stack S=node
+# 2. 构建特定环境 (例如 python)
+make docker-build-stack S=python
 
-# 构建所有技术栈
-make docker-build-all
+# 3. 环境变量切换镜像 (编辑 .env)
+HOTPLEX_IMAGE=hotplex:python
 ```
 
-### 环境配置
-更新 `.env` 文件来选择激活的镜像：
-```bash
-HOTPLEX_IMAGE=hotplex:go
-```
-
-## 🎛️ 容器编排：HotPlex Matrix
-
-HotPlex Matrix 是默认的多机器人编排方案，支持 1+n 机器人协作模式。该架构通过以下设计确保环境的稳健性：
-
-- **组合式继承 (`extends`)**: 利用 Docker Compose 的原生继承机制合并公共配置（网络、资源限制）与实例特有配置（端口、标识）。
-- **物理隔离**: 每一个机器人实例拥有独立的宿主机挂载路径 `~/.hotplex/instances/${HOTPLEX_BOT_ID}/`，确保数据与状态的物理隔离。
-- **自动化预备**: 通过 `make docker-prepare` 自动扫描环境配置并初始化所有机器人的宿主机目录树，实现“约定大于配置”的部署流程。
-
-详细的架构描述与工作流，请参阅 [Matrix 说明文档](./matrix/README.md)。
+### 🎛️ 多机器人编排 (Matrix)
+对于需要 1+n 机器人协作的场景，请参考 [**HotPlex Matrix 说明文档**](./matrix/README.md)。
 
 ---
-
-## 🛠️ 运行时环境
-
-所有运行镜像均集成了以下核心组件与机制：
-
-### 1. 核心工具集
-- `websocat`: WebSocket 调试工具。
-- `claude-code` & `opencode-ai`: 智能编码助理与 Agent 工具。
-- `jq`, `yq`, `curl`, `git`: 基础运维工具。
-
-### 2. 安全变量插值 (`envsubst`)
-容器启动时会自动处理配置文件中的环境变量。为防止破坏系统提示词（System Prompt）中的代码示例（如 `${issue_id}`），系统通过白名单机制仅处理 `HOTPLEX_`, `GIT_`, `GITHUB_`, `HOST_` 前缀的变量。
-
----
-*由 HotPlex 构建系统生成 - 2026*
+*由 HotPlex 构建系统生成 - 2026-03*

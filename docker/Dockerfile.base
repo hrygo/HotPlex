@@ -40,6 +40,9 @@ RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ] && [ -n "$DEBIAN_MIRROR" ]; then
     apt-get update && apt-get install -y --no-install-recommends \
     curl wget ca-certificates git make bash jq gettext-base \
     procps netcat-openbsd openssl libatomic1 unzip \
+    python3 python3-pip python3-venv \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI (gh)
@@ -52,6 +55,27 @@ RUN gh_install_version="2.63.0" && \
     curl -sSL "https://github.com/cli/cli/releases/download/v${gh_install_version}/gh_${gh_install_version}_linux_${gh_arch}.tar.gz" | tar xz -C /tmp && \
     mv /tmp/gh_${gh_install_version}_linux_${gh_arch}/bin/gh /usr/local/bin/ && \
     rm -rf /tmp/gh_${gh_install_version}_linux_${gh_arch}
+    
+# Install uv (Python), bun & pnpm (Node)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && mv /root/.local/bin/uv /usr/local/bin/uv && \
+    npm install -g pnpm@latest bun@latest && \
+    npm cache clean --force
+
+# Install trivy (Security) & lazygit (DX)
+RUN TRIVY_VERSION="0.59.1" && \
+    ARCH=$(uname -m) && \
+    case "$ARCH" in \
+        x86_64) ARCH="64bit" ;; \
+        aarch64) ARCH="ARM64" ;; \
+    esac && \
+    curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${ARCH}.tar.gz" | tar xz -C /usr/local/bin trivy && \
+    LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | jq -r .tag_name | sed "s/v//") && \
+    ARCH=$(uname -m) && \
+    case "$ARCH" in \
+        x86_64) ARCH="x86_64" ;; \
+        aarch64) ARCH="arm64" ;; \
+    esac && \
+    curl -sSL "https://github.com/jesseduffield/lazygit/releases/download/v${LAZYGIT_VERSION}/lazygit_${LAZYGIT_VERSION}_Linux_${ARCH}.tar.gz" | tar xz -C /usr/local/bin lazygit
 
 # 2. HotPlex User & Workspace Setup
 RUN useradd -m -u ${HOST_UID} -s /bin/bash hotplex && \

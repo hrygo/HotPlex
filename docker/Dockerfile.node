@@ -12,10 +12,8 @@ ARG NPM_MIRROR
 
 USER root
 
-# Install Node.js 24 (Cached)
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
+# Shared Node.js runtime is already in hotplex:base.
+# We only install stack-specific development tools here.
 
 # Development Tools (Cached)
 RUN if [ -n "$NPM_MIRROR" ]; then npm config set registry "$NPM_MIRROR"; fi && \

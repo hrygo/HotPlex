@@ -26,7 +26,7 @@ message_store:
   enabled: true
   type: sqlite
   sqlite:
-    path: ~/.hotplex/chatapp_messages.db
+    path: ~/.config/hotplex/chatapp_messages.db
     max_size_mb: 512
 ```
 

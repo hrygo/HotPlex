@@ -1,6 +1,6 @@
 # 🤖 HotPlex: AI Agent Engineering Protocol
 
-**Project Status**: v0.26.1 | **Core Role**: High-performance AI Agent Control Plane (Cli-as-a-Service).
+**Project Status**: v0.26.2 | **Core Role**: High-performance AI Agent Control Plane (Cli-as-a-Service).
 This document defines the operational boundaries and technical DNA for AI agents working on **hotplex**.
 
 ---

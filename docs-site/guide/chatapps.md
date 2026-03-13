@@ -13,8 +13,6 @@ We prioritize platforms where conversation and work converge. Our adapters are d
 | Platform       | Soul                    | Status       | Capabilities                        |
 | :------------- | :---------------------- | :----------- | :---------------------------------- |
 | **Slack**      | **Primary Receptor**    | ✅ Production | Full Block Kit, Real-time Reactions |
-| **DingTalk**   | Enterprise Control      | 🔄 Beta       | AI Action Cards, Approval Flow      |
-| **Discord**    | Community Synchronicity | 🔄 Beta       | Threaded Reasoning, Guild Ops       |
 | **Web Portal** | Absolute Sovereignty    | ✅ Production | Glassmorphism UI, Custom Branding   |
 
 ---

@@ -51,26 +51,17 @@
   <g transform="translate(60, 140)">
     <rect width="1080" height="160" rx="24" fill="white" fill-opacity="0.6" stroke="#E2E8F0" stroke-width="1" />
     <text x="20" y="25" font-family="Inter" font-size="11" font-weight="800" fill="#94A3B8">EXTERNAL CHAT ECOSYSTEM</text>
-    <g transform="translate(40, 55)">
-      <rect width="230" height="85" rx="16" fill="white" filter="url(#glass-shadow)" />
-      <rect x="15" y="17" width="50" height="50" rx="12" fill="#E0F2FE" />
-      <text x="80" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">DingTalk</text>
-      <text x="80" y="60" font-family="Inter" font-size="11" fill="#64748B">Enterprise Callback</text>
-
       <rect x="250" width="230" height="85" rx="16" fill="white" filter="url(#glass-shadow)" />
       <rect x="265" y="17" width="50" height="50" rx="12" fill="#F0F9FF" />
-      <text x="330" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">Telegram</text>
-      <text x="330" y="60" font-family="Inter" font-size="11" fill="#64748B">Bot API / Webhook</text>
+      <text x="330" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">Feishu</text>
+      <text x="330" y="60" font-family="Inter" font-size="11" fill="#64748B">Open Platform API</text>
 
       <rect x="500" width="230" height="85" rx="16" fill="white" filter="url(#glass-shadow)" />
       <rect x="515" y="17" width="50" height="50" rx="12" fill="#FDF2F8" />
       <text x="580" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">Slack</text>
       <text x="580" y="60" font-family="Inter" font-size="11" fill="#64748B">Socket Mode</text>
 
-      <rect x="750" width="230" height="85" rx="16" fill="white" filter="url(#glass-shadow)" />
-      <rect x="765" y="17" width="50" height="50" rx="12" fill="#EEF2FF" />
-      <text x="830" y="40" font-family="Inter" font-size="16" font-weight="700" fill="#0F172A">Discord</text>
-      <text x="830" y="60" font-family="Inter" font-size="11" fill="#64748B">Gateway / Bot</text>
+    </g>
     </g>
   </g>
 
@@ -90,14 +81,10 @@
       </g>
     </g>
     <g transform="translate(415, 45)">
-      <rect width="300" height="105" rx="16" fill="#F8FAFC" stroke="#E2E8F0" />
-      <text x="20" y="35" font-family="Inter" font-size="14" font-weight="700" fill="#1E293B">Telegram Integration</text>
-      <text x="20" y="60" font-family="Inter" font-size="11" fill="#64748B">• Bot API Communication</text>
-      <text x="20" y="78" font-family="Inter" font-size="11" fill="#64748B">• Markdown Formatting</text>
       <rect y="125" width="300" height="105" rx="16" fill="#F8FAFC" stroke="#E2E8F0" />
-      <text x="20" y="160" font-family="Inter" font-size="14" font-weight="700" fill="#1E293B">DingTalk Integration</text>
-      <text x="20" y="185" font-family="Inter" font-size="11" fill="#64748B">• Callback Verification</text>
-      <text x="20" y="203" font-family="Inter" font-size="11" fill="#64748B">• Message Splitting</text>
+      <text x="20" y="160" font-family="Inter" font-size="14" font-weight="700" fill="#1E293B">Feishu Integration</text>
+      <text x="20" y="185" font-family="Inter" font-size="11" fill="#64748B">• Open Platform API</text>
+      <text x="20" y="203" font-family="Inter" font-size="11" fill="#64748B">• Card Messages</text>
       <rect x="325" y="0" width="310" height="230" rx="16" fill="#F1F5F9" stroke="#94A3B8" stroke-dasharray="6 4" />
       <text x="480" y="40" font-family="Inter" font-size="16" font-weight="800" fill="#475569" text-anchor="middle">ChatAdapter Interface</text>
       <g transform="translate(350, 85)" font-family="monospace" font-size="11" fill="#0F172A">

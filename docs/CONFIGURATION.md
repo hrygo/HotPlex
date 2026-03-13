@@ -91,7 +91,7 @@ HotPlex uses a layered configuration system with the following priority (highest
 | ------------------------------------------ | -------------------------------- | --------------------------------- |
 | `HOTPLEX_MESSAGE_STORE_ENABLED`            | `true`                           | Enable message persistence        |
 | `HOTPLEX_MESSAGE_STORE_TYPE`               | `sqlite`                         | Storage: sqlite, postgres, memory |
-| `HOTPLEX_MESSAGE_STORE_SQLITE_PATH`        | `~/.hotplex/chatapp_messages.db` | SQLite database path              |
+| `HOTPLEX_MESSAGE_STORE_SQLITE_PATH`        | `~/.config/hotplex/chatapp_messages.db` | SQLite database path              |
 | `HOTPLEX_MESSAGE_STORE_SQLITE_MAX_SIZE_MB` | `1024`                           | Max database size                 |
 | `HOTPLEX_MESSAGE_STORE_STREAMING_ENABLED`  | `true`                           | Enable streaming storage          |
 | `HOTPLEX_MESSAGE_STORE_STREAMING_TIMEOUT`  | `5m`                             | Streaming timeout                 |

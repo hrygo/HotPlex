@@ -36,18 +36,7 @@ The `chatapps` layer normalizes raw provider events into standard UI components.
 
 ### 1. Implementing a New Platform Adapter
 
-To add a platform (e.g., `discord`), implement the `base.ChatAdapter` interface:
-
-```go
-type DiscordAdapter struct {
-    client  *discord.Client
-    handler base.MessageHandler
-}
-
-func (a *DiscordAdapter) SendMessage(ctx context.Context, sessionID string, msg *base.ChatMessage) error {
-    // Convert to Discord format and POST
-}
-```
+To add a new platform adapter, implement the `base.ChatAdapter` interface:
 
 ---
 

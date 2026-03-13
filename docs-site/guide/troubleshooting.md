@@ -90,7 +90,7 @@ stats, err := engine.GetSessionStats("my-session")
 
 **Solutions**:
 1. Use consistent `SessionID`
-2. Check marker files: `ls ~/.hotplex/sessions/`
+2. Check marker files: `ls ~/.config/hotplex/sessions/`
 3. Ensure process wasn't force-killed
 
 ### Zombie Processes
@@ -308,7 +308,6 @@ curl http://localhost:8080/metrics
 ### Community Support
 
 - GitHub Discussions: https://github.com/hrygo/hotplex/discussions
-- Discord: Join our community server
 - Issues: https://github.com/hrygo/hotplex/issues
 
 ---

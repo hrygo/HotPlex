@@ -14,6 +14,7 @@ FROM hotplex:base
 ARG PYTHON_MIRROR
 
 # Inject Python 3.14 SDK (Cached)
+# Note: A stable Python 3 runtime is already provided by hotplex:base.
 USER root
 COPY --from=sdk-source /usr/local /usr/local
 RUN ldconfig
@@ -22,7 +23,7 @@ RUN ldconfig
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     if [ -n "$PYTHON_MIRROR" ]; then pip config set global.index-url "$PYTHON_MIRROR"; fi && \
-    pip install --break-system-packages poetry ruff black isort mypy pytest fastapi uvicorn httpx
+    pip install --break-system-packages poetry ruff black isort mypy pytest fastapi uvicorn httpx pydantic-ai
 
 # ==============================================================================
 # 🔥 Late Injection: The Binary (Changes frequently)

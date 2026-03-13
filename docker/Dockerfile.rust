@@ -22,7 +22,7 @@ COPY --from=sdk-source /usr/local/cargo /usr/local/cargo
 # Development Tools (Cached)
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/* && \
     rustup component add clippy rustfmt rust-analyzer rust-src && \
-    cargo install cargo-watch cargo-nextest trunk && \
+    cargo install cargo-watch cargo-nextest trunk cargo-expand cargo-deny && \
     chown -R hotplex:hotplex /usr/local/cargo /usr/local/rustup
 
 # ==============================================================================

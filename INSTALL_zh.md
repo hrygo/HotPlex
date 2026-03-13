@@ -123,7 +123,7 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 
 ### 必要配置项
 
-编辑 `~/.hotplex/.env`，填写以下必要配置：
+编辑 `~/.config/hotplex/.env`，填写以下必要配置：
 
 ```bash
 # API 安全令牌 (生产环境必填)
@@ -174,7 +174,7 @@ docker pull ghcr.io/hrygo/hotplex:node
 docker run -d \
   --name hotplex \
   -p 8080:8080 \
-  -v ~/.hotplex:/root/.hotplex \
+  -v ~/.config/hotplex:/root/.hotplex \
   -v ~/projects:/root/projects \
   ghcr.io/hrygo/hotplex:node
 ```
@@ -190,7 +190,7 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash 
 ```bash
 sudo rm /usr/local/bin/hotplexd
 # 可选：删除配置
-rm -rf ~/.hotplex
+rm -rf ~/.config/hotplex
 ```
 
 ## 故障排除

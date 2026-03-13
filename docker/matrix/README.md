@@ -1,82 +1,64 @@
-# 🤖 HotPlex Matrix: 1+n 机器人编排
+# 🤖 HotPlex Matrix: 1+n 多机器人编排
 
-HotPlex Matrix 是一个支持 1+n 机器人协作的编排架构，允许一个主机器人 (hotplex-01) 与多个从机器人 (hotplex-nn) 隔离运行。该架构实现了**自动化部署 (Automation)**、**实例隔离 (Isolation)** 与 **配置便携性 (Portability)**。
-
----
-
-## 🏗️ 技术架构
-
-### 1. 组合式继承模型
-为了杜绝配置冗余并保证列表合并的正确性，我们采用了 Docker Compose 原生的 `extends` 机制：
-- **`hotplex-base`**: 核心抽象层，定义了所有机器人的公共配置（环境变量白名单、健康检查、日志策略、计算资源限制）以及共享卷（配置种子、构建缓存）。
-- **具体机器人服务**: 通过 `extends` 继承基础层，并在此基础上叠加特有的容器名称、端口映射及**物理隔离路径**。
-
-### 2. 物理隔离协议
-每个机器人拥有独立的宿主机工作目录，防止数据交叉污染：
-- **存储隔离**: `~/.hotplex/instances/${HOTPLEX_BOT_ID}/storage` -> `/home/hotplex/.hotplex`
-- **工作区隔离**: `~/.hotplex/instances/${HOTPLEX_BOT_ID}/projects` -> `/home/hotplex/projects`
-- **配置隔离**: 每个机器人通过各自的 `.env.xxx` 文件注入不同的 `HOTPLEX_BOT_ID` 与各平台凭据。
-
-### 3. 多层安全性设计
-- **`envsubst` 白名单**: 容器入口点 (`docker-entrypoint.sh`) 仅会对 `HOTPLEX_`, `GIT_`, `GITHUB_`, `HOST_` 前缀的环境变量进行插值，从而**完美保留**系统提示词中的 Shell 示例（如 `${issue_id}`）。
-- **权限自动纠偏**: 采用“约定大于配置”方案，所有挂载目录在容器启动前由 `Makefile` 以宿主机用户权限预先创建，避免 Docker 自动创建 `root` 权限目录。
+HotPlex Matrix 是默认的容器编排方案，支持一个主机器人 (hotplex-01) 与多个从机器人 (hotplex-nn) 的隔离运行与协同。
 
 ---
 
-## 🚀 启动工作流程
+## 🏗️ 核心设计原则
 
-系统通过 `Makefile` 实现三阶段启动流水线：
+### 1. 组合式继承 (Extends)
+我们利用 Docker Compose 的 `extends` 机制实现了“原子化”配置：
+- **`hotplex-base`**: 定义公共网络、计算资源限制、环境变量白名单及共享卷。
+- **实例定义**: 每个机器人服务仅声明其特有的端口映射与**物理隔离路径**。
+
+### 2. 物理隔离 (Isolation)
+为了确保数据安全与状态一致性，每个机器人实例拥有完全独立的宿主机目录：
+- **路径格式**: `~/.hotplex/instances/${HOTPLEX_BOT_ID}/`
+- **隔离内容**: 包含 `storage` (数据库/会话)、`projects` (代码仓库) 与 `claude` (Agent 配置)。
+
+---
+
+## 🚀 自动化启动流水线
+
+通过 `make docker-up` 一键触发以下流程：
 
 ```text
-[ 执行 make docker-up ]
-        │
-        ▼
-1. 环境准备 (docker-prepare)  ──► [ 扫描 .env.* 提取 Bot ID ]
-        │                    ──► [ 创建 ~/.hotplex/instances/ID/{storage,claude,projects} ]
-        ▼
-2. 配置同步 (docker-sync)     ──► [ 同步项目 configs/ 到宿主机运行目录 ]
-        │
-        ▼
-3. 容器启动 (docker compose)  ──► [ 加载从服务继承基础模板 (extends) ]
-                             ──► [ 顺序启动 hotplex-01 及 n 个 hotplex-nn 容器 ]
-        │
-        ▼
-4. 容器内初始化 (Boot)        ──► [ 环境变量插值 (仅限白名单变量) ]
-                             ──► [ 关键配置注入 (配置种子、技能、团队) ]
-                             ──► [ 最终拉起 HotPlex Engine ]
+1. 准备阶段 (Prepare) ──► 扫描 .env.* 自动创建宿主机隔离目录树
+2. 同步阶段 (Sync)    ──► 将全局 configs/ 规则下发至各机器人实例
+3. 编排阶段 (Compose) ──► 加载继承模板，拉起多容器集群
+4. 初始化阶段 (Boot)   ──► 环境变量插值、Git 身份注入、拉起核心引擎
 ```
 
-### 关键指令
-| 指令 | 作用 |
+### 运维指令表
+| 指令 | 描述 |
 | :--- | :--- |
-| `make docker-prepare` | **预备阶段**: 动态发现所有机器人实例并初始化宿主机目录树。 |
-| `./add-bot.sh` | **新增机器人**: 交互式向导，快速添加并配置新的机器人实例。 |
-| `make docker-sync` | **同步阶段**: 将宿主机 `configs/` 目录下的 YAML 规则同步至运行目录。 |
-| `make docker-up` | **启动全流程**: 自动执行准备与同步过程，随后拉起所有机器人容器。 |
-| `make docker-down` | **关停环境**: 停止并移除所有容器。 |
+| `make docker-up` | **全流程启动**: 自动完成准备、同步并拉起所有容器。 |
+| `./add-bot.sh` | **横向扩展**: 快速引导添加第 n 个机器人实例。 |
+| `make docker-sync` | **规则热更新**: 仅同步 `configs/` 变更（无需重启容器）。 |
+| `make docker-down` | **关停环境**: 停止并清理集群资源。 |
 
 ---
 
-## 📂 端口与目录映射矩阵
+## 📂 部署矩阵示例
 
-| 机器人角色 | 外部访问 (Host) | 容器内部 (Container) | 物理路径说明 |
+| 实例名称 | 外部端口 | 隔离路径 (宿主机) | 镜像版本 (示例) |
 | :--- | :--- | :--- | :--- |
-| **hotplex-01** | `127.0.0.1:18080` | `8080` | `~/.hotplex/instances/U0AHRCL1KCM/` |
-| **hotplex-02** | `127.0.0.1:18081` | `8080` | `~/.hotplex/instances/U0AJVRH4YF6/` |
-| **共享资源** | 不适用 | `/home/hotplex/configs` | `~/.hotplex/configs/` (全局配置) |
+| **hotplex-01** | `18080` | `~/.hotplex/instances/ID_A/` | `hotplex:go` |
+| **hotplex-02** | `18081` | `~/.hotplex/instances/ID_B/` | `hotplex:python` |
 
 ---
 
-## 📄 配置文件说明
+## 📄 配置文件管理
 
-- **`docker-compose.yml`**: 生产环境运行定义，默认使用远程预构建镜像。
-- **`docker-compose.build.yml`**: 本地开发/构建定义，用于源码编译与调试。
-- **`.env-01`**: 主机器人的环境变量，控制主节点的身份与行为。
-- **`.env-02`**: 从机器人的环境变量，用于横向扩展节点。
+- **`.env` (根目录)**: 存储敏感信息（Token, API Keys），实现全局凭据管理。
+- **`.env-01`, `.env-02`**: 定义各机器人的身份 ID (Bot ID) 与特有行为。
+- **`configs/`**: 存储非敏感的业务规则与智控逻辑，由所有实例共享。
 
 ---
 
-> [!IMPORTANT]
-> **配置习惯**：
-> - **行为规则**：Slack/Feishu 的 AI 身份、工作流逻辑等非敏感规则存储在 `configs/` 中，修改后运行 `make docker-sync` 即可同步。
-> - **敏感信息**：各平台 Token、密钥等敏感凭据均通过项目根目录的 `.env` 文件进行管理，实现规则与凭据的物理分离。
+### 💡 提示
+- 容器入口点会自动处理环境变量插值，但**仅限** `HOTPLEX_`, `GIT_`, `GITHUB_` 等前缀变量，以保护 Prompt 中的原生脚本。
+- 更多镜像技术细节，请参阅 [**HotPlex Docker 生态概览**](../README.md)。
+
+---
+*由 HotPlex 构建系统生成 - 2026-03*

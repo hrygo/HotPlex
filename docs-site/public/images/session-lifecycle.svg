@@ -68,7 +68,7 @@
     <g transform="translate(20, 75)">
       <rect width="240" height="75" rx="10" class="glass-rect"/>
       <text x="120" y="25" text-anchor="middle" class="node-title">SDK Hub</text>
-      <text x="120" y="45" text-anchor="middle" class="node-text">Slack · Discord · Telegram</text>
+      <text x="120" y="45" text-anchor="middle" class="node-text">Slack · Feishu</text>
       <text x="120" y="60" text-anchor="middle" class="id-text">Unified Handler</text>
     </g>
 

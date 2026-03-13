@@ -50,13 +50,14 @@ A HotPlex session goes through well-defined lifecycle states:
 
 HotPlex uses a **marker-based persistence system** to track resumable sessions:
 
-1. **Marker Creation**: When a session starts, a marker file is created in `~/.hotplex/sessions/`
+1. **Marker Creation**: When a session starts, a marker file is created in `~/.config/hotplex/sessions/`
 2. **Session Resume**: On next request, HotPlex checks for existing markers and resumes if found
 3. **Marker Cleanup**: When a session terminates, its marker is deleted
 
 ```go
 // Default marker location
-~/.hotplex/sessions/
+```
+~/.config/hotplex/sessions/
 ├── session-abc123.lock    # Marker for "session-abc123"
 ├── session-def456.lock    # Marker for "session-def456"
 └── ...

@@ -548,7 +548,7 @@ message_store:
   
   # Database configuration
   sqlite:
-    path: ~/.hotplex/slack_messages.db
+    path: ~/.config/hotplex/slack_messages.db
     max_size_mb: 512
     
   # postgres:

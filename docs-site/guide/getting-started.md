@@ -288,7 +288,7 @@ Now that you have a running instance, explore further:
 
 1. **Customize the prompt**: Modify `TaskInstructions` for your use case
 2. **Add security**: Configure `AllowedTools` and WAF rules
-3. **Enable webhooks**: Get notified on events via Slack, Discord, etc.
+3. **Enable webhooks**: Get notified on events via Slack, Feishu, etc.
 4. **Monitor**: Set up Prometheus metrics and OpenTelemetry traces
 
 ---

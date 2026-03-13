@@ -91,7 +91,7 @@ HotPlex 使用分层配置系统，优先级从高到低：
 | ------------------------------------------ | -------------------------------- | ------------------------------ |
 | `HOTPLEX_MESSAGE_STORE_ENABLED`            | `true`                           | 启用消息持久化                 |
 | `HOTPLEX_MESSAGE_STORE_TYPE`               | `sqlite`                         | 存储：sqlite, postgres, memory |
-| `HOTPLEX_MESSAGE_STORE_SQLITE_PATH`        | `~/.hotplex/chatapp_messages.db` | SQLite 数据库路径              |
+| `HOTPLEX_MESSAGE_STORE_SQLITE_PATH`        | `~/.config/hotplex/chatapp_messages.db` | SQLite 数据库路径              |
 | `HOTPLEX_MESSAGE_STORE_SQLITE_MAX_SIZE_MB` | `1024`                           | 最大数据库大小                 |
 | `HOTPLEX_MESSAGE_STORE_STREAMING_ENABLED`  | `true`                           | 启用流式存储                   |
 | `HOTPLEX_MESSAGE_STORE_STREAMING_TIMEOUT`  | `5m`                             | 流式超时                       |

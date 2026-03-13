@@ -119,7 +119,7 @@ Config file is created by default at `~/.config/hotplex/.env` (XDG standard path
 
 ### Required Settings
 
-Edit `~/.hotplex/.env`:
+Edit `~/.config/hotplex/.env`:
 
 ```bash
 # API security token (required for production)
@@ -135,9 +135,6 @@ HOTPLEX_SLACK_APP_TOKEN=xapp-your-token
 GITHUB_TOKEN=ghp_your-token
 ```
 
-# GitHub Token (for Git operations)
-GITHUB_TOKEN=ghp_your-token
-```
 
 ### Config File Search Order
 
@@ -174,7 +171,7 @@ docker pull ghcr.io/hrygo/hotplex:node
 docker run -d \
   --name hotplex \
   -p 8080:8080 \
-  -v ~/.hotplex:/root/.hotplex \
+  -v ~/.config/hotplex:/root/.hotplex \
   -v ~/projects:/root/projects \
   ghcr.io/hrygo/hotplex:node
 ```
@@ -190,7 +187,7 @@ Or manual removal:
 ```bash
 sudo rm /usr/local/bin/hotplexd
 # Optional: remove config
-rm -rf ~/.hotplex
+rm -rf ~/.config/hotplex
 ```
 
 ## Troubleshooting

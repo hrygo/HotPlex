@@ -72,7 +72,7 @@
     <circle cx="100" cy="50" r="12" class="icon-stroke c-amber" />
     <circle cx="116" cy="62" r="10" class="icon-stroke c-amber" />
     <text x="108" y="115" text-anchor="middle" class="text-title">ChatApps</text>
-    <text x="108" y="135" text-anchor="middle" class="text-sub">Slack, TG, Discord</text>
+    <text x="108" y="135" text-anchor="middle" class="text-sub">Slack, Feishu</text>
   </g>
 
   <g transform="translate(285, 230)">

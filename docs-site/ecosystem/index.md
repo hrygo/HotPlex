@@ -45,8 +45,6 @@ Slack is the premier ChatApp for HotPlex, offering the most refined and feature-
 | ChatApp             | Platform | Category  | Capabilities                                              |
 | :------------------ | :------- | :-------- | :-------------------------------------------------------- |
 | **Standard Oracle** | Web      | General   | The default HotPlex experience. Clean, fast, and flexible. |
-| **DingTalk AI**     | DingTalk | Business  | Corporate approvals and internal toolsets integration.    |
-| **Discord Oracle**  | Discord  | Community | High-volume server management with threaded AI assistance. |
 
 ---
 

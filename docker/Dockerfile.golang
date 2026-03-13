@@ -21,6 +21,7 @@ ARG GOPROXY
 RUN if [ -n "$GOPROXY" ]; then go env -w GOPROXY=$GOPROXY; fi && \
     go install github.com/air-verse/air@latest && \
     go install github.com/go-delve/delve/cmd/dlv@latest && \
+    go install mvdan.cc/gofumpt@latest && \
     go install github.com/goreleaser/goreleaser/v2@latest && \
     go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest && \
     go install honnef.co/go/tools/cmd/staticcheck@latest && \

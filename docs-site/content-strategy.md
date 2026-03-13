@@ -447,7 +447,7 @@ If a diagram has more elements:
 | Hook | 钩子 | Event interception |
 | Sandbox | 沙箱 | Security isolation |
 | Provider | 提供商 | CLI tool adapter |
-| ChatApp | 聊天应用 | Slack, DingTalk, etc. |
+| ChatApp | 聊天应用 | Slack, Feishu |
 | WorkDir | 工作目录 | Working directory |
 | Full-duplex | 全双工 | Bidirectional streaming |
 | Stateful | 有状态的 | Persistent context |
@@ -581,7 +581,7 @@ HotPlex is an integration layer that connects AI CLI tools (like Claude Code and
 
 | User Type | Use Case |
 |-----------|----------|
-| Product teams | Add AI agents to Slack, Discord, websites |
+| Product teams | Add AI agents to Slack, Feishu, websites |
 | DevOps engineers | Automate CLI-based workflows |
 | Platform builders | Embed AI capabilities into products |
 
