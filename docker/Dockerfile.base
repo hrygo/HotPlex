@@ -63,13 +63,13 @@ RUN npm install -g pnpm@latest bun@latest && \
 
 # Install trivy (Security) & lazygit (DX)
 RUN TRIVY_VERSION="0.59.1" && \
+    LAZYGIT_VERSION="0.48.0" && \
     ARCH=$(uname -m) && \
     case "$ARCH" in \
-        x86_64) ARCH="64bit" ;; \
-        aarch64) ARCH="ARM64" ;; \
+        x86_64) TRIVY_ARCH="64bit" ;; \
+        aarch64) TRIVY_ARCH="ARM64" ;; \
     esac && \
-    curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${ARCH}.tar.gz" | tar xz -C /usr/local/bin trivy && \
-    LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | jq -r .tag_name | sed "s/v//") && \
+    curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz" | tar xz -C /usr/local/bin trivy && \
     ARCH=$(uname -m) && \
     case "$ARCH" in \
         x86_64) ARCH="x86_64" ;; \
