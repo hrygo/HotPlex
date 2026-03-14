@@ -5,7 +5,7 @@
 
   **High-Performance AI Agent Runtime**
 
-  HotPlex is a high-performance AI Agent execution runtime designed to transform terminal AI tools like Claude Code into production-grade interactive services. Built with Go using the Cli-as-a-Service paradigm, it eliminates CLI startup latency through persistent process pooling and ensures execution safety via PGID isolation and Regex WAF. The system supports WebSocket and HTTP/SSE communication through a dual-protocol gateway, with Python and TypeScript SDKs for developer integration. At the application layer, HotPlex deeply integrates with Slack and Feishu, supporting native streaming output, interactive cards, and multi-bot collaboration protocols. Following Uber Go coding standards, the project offers comprehensive event hooks, monitoring statistics, and Docker containerization, building a complete Agent ecosystem from the underlying execution layer to the upper application layer.
+  HotPlex transforms terminal AI tools (Claude Code, OpenCode) into production services. Built with Go using the Cli-as-a-Service paradigm, it eliminates CLI startup latency through persistent process pooling and ensures execution safety via PGID isolation and Regex WAF. The system supports WebSocket/HTTP/SSE communication with Python and TypeScript SDKs. At the application layer, HotPlex integrates with Slack and Feishu, supporting streaming output, interactive cards, and multi-bot protocols.
 
   <p>
     <a href="https://github.com/hrygo/hotplex/releases/latest">
@@ -161,9 +161,20 @@ type ChatAdapter interface {
     HandleEvent(event Event) error
     // Unified message format
     SendMessage(msg *ChatMessage) error
-}</nosp>
-\nosp
-### MessageOperations (Optional)\n\nAdvanced platforms implement streaming and message management:\n\n```go\ntype MessageOperations interface {\n    StartStream(ctx, channelID, threadTS) (messageTS, error)\n    AppendStream(ctx, channelID, messageTS, content) error\n    StopStream(ctx, channelID, messageTS) error\n    UpdateMessage(ctx, channelID, messageTS, msg) error\n    DeleteMessage(ctx, channelID, messageTS) error\n}</nosp>
+}
+
+### MessageOperations (Optional)
+
+Advanced platforms implement streaming and message management:
+
+```go
+type MessageOperations interface {
+    StartStream(ctx, channelID, threadTS) (messageTS, error)
+    AppendStream(ctx, channelID, messageTS, content) error
+    StopStream(ctx, channelID, messageTS) error
+    UpdateMessage(ctx, channelID, messageTS, msg) error
+    DeleteMessage(ctx, channelID, messageTS) error
+}
 ```
 
 ---

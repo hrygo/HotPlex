@@ -5,7 +5,7 @@
 
   **高性能 AI Agent 执行运行时**
 
-  HotPlex 是一个高性能的 AI Agent 执行运行时，旨在将 Claude Code 等终端 AI 工具转化为生产级的交互式服务。其核心架构基于 Go 语言开发，采用 Cli-as-a-Service 理念，通过持久化进程池消除 CLI 启动延迟，并利用 PGID 隔离与 Regex WAF 确保执行安全。该系统通过双协议网关支持 WebSocket 与 HTTP/SSE 通信，并提供 Python 和 TypeScript SDK 供开发者集成。在应用层，HotPlex 深度适配了 Slack 与飞书，支持原生流式输出、交互式卡片及多机器人协作协议。此外，项目遵循 Uber Go 编码规范，具备完善的事件钩子、监控统计与 Docker 容器化部署能力，构建了从底层执行到上层应用的完整 Agent 生态。
+  HotPlex 将终端 AI 工具（Claude Code、OpenCode）转化为生产级服务。核心基于 Go 语言开发，采用 Cli-as-a-Service 理念，通过持久化进程池消除 CLI 启动延迟，并利用 PGID 隔离与 Regex WAF 确保执行安全。系统支持 WebSocket/HTTP/SSE 通信，提供 Python 和 TypeScript SDK。在应用层，HotPlex 适配了 Slack 与飞书，支持流式输出、交互式卡片及多机器人协议。
 
   <p>
     <a href="https://github.com/hrygo/hotplex/releases/latest">
