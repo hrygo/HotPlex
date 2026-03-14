@@ -70,10 +70,10 @@ RUN useradd -m -u ${HOST_UID} -s /bin/bash hotplex && \
 COPY --from=tools-collector /usr/local/bin/websocat /usr/local/bin/websocat
 # Injection from npm-tools-collector (Claude Code, etc.)
 COPY --from=npm-tools-collector /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
-# Link binaries manually to avoid overwriting /usr/local/bin
-RUN ln -s /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude /usr/local/bin/claude && \
-    ln -s /usr/local/lib/node_modules/opencode-ai/bin/opencode /usr/local/bin/opencode && \
-    ln -s /usr/local/lib/node_modules/@mariozechner/pi-coding-agent/bin/pi /usr/local/bin/pi
+# Copy npm-generated symlinks (auto-resolves to correct bin paths from package.json)
+COPY --from=npm-tools-collector /usr/local/bin/claude /usr/local/bin/claude
+COPY --from=npm-tools-collector /usr/local/bin/opencode /usr/local/bin/opencode
+COPY --from=npm-tools-collector /usr/local/bin/pi /usr/local/bin/pi
 
 # 4. Standard Metadata & Entrypoint
 WORKDIR /app
