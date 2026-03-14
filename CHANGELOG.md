@@ -1,5 +1,17 @@
 # CHANGELOG.md
 
+## [v0.27.2] - 2026-03-14
+
+### Changed
+- **GitHub Actions Optimization** - Comprehensive workflow improvements following 2026 best practices:
+  - Added `permissions` declarations for principle of least privilege
+  - Added `timeout-minutes` to all jobs to prevent hanging
+  - Created composite action for mock CLI setup (DRY principle)
+  - Added concurrency control to pr-checks workflow
+  - Simplified CI conditions for consistent skip behavior
+
+---
+
 ## [v0.27.1] - 2026-03-14
 
 ### Added
