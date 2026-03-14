@@ -3,9 +3,9 @@
 
   # HotPlex
 
-  **Turn AI CLIs into Production-Ready Services**
+  **High-Performance AI Agent Runtime**
 
-  Bridge powerful AI CLIs (Claude Code, OpenCode) into persistent, secure, production-grade interactive services.
+  HotPlex is a high-performance AI Agent execution runtime designed to transform terminal AI tools like Claude Code into production-grade interactive services. Built with Go using the Cli-as-a-Service paradigm, it eliminates CLI startup latency through persistent process pooling and ensures execution safety via PGID isolation and Regex WAF. The system supports WebSocket and HTTP/SSE communication through a dual-protocol gateway, with Python and TypeScript SDKs for developer integration. At the application layer, HotPlex deeply integrates with Slack and Feishu, supporting native streaming output, interactive cards, and multi-bot collaboration protocols. Following Uber Go coding standards, the project offers comprehensive event hooks, monitoring statistics, and Docker containerization, building a complete Agent ecosystem from the underlying execution layer to the upper application layer.
 
   <p>
     <a href="https://github.com/hrygo/hotplex/releases/latest">
@@ -43,6 +43,20 @@
 
 ---
 
+## Table of Contents
+
+- [Quick Start](#-quick-start)
+- [Core Concepts](#-core-concepts)
+- [Project Structure](#-project-structure)
+- [Features](#-features)
+- [Architecture](#-architecture)
+- [Usage Examples](#-usage-examples)
+- [Development Guide](#-development-guide)
+- [Documentation](#-documentation)
+- [Contributing](#-contributing)
+
+---
+
 ## ⚡ Quick Start
 
 ```bash
@@ -52,67 +66,201 @@ curl -sL https://raw.githubusercontent.com/hrygo/hotplex/main/install.sh | bash
 # Or build from source
 make build
 
-# Start with Slack or Feishu
-export HOTPLEX_SLACK_PRIMARY_OWNER=U...
+# Start with Slack
+export HOTPLEX_SLACK_BOT_USER_ID=B12345
 export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 export HOTPLEX_SLACK_APP_TOKEN=xapp-...
 ./hotplexd --config configs/server.yaml --config-dir configs/chatapps
+
+# Or start with WebSocket gateway only
+./hotplexd --config configs/server.yaml
 ```
 
 ### Requirements
 
-| Component | Version |
-| :-------- | :------ |
-| Go | 1.25+ |
-| AI CLI | [Claude Code](https://github.com/anthropics/claude-code) or [OpenCode](https://github.com/hrygo/opencode) |
+| Component | Version | Notes |
+| :-------- | :------ | :-----|
+| Go | 1.25+ | Runtime & SDK |
+| AI CLI | [Claude Code](https://github.com/anthropics/claude-code) or [OpenCode](https://github.com/hrygo/opencode) | Execution target |
+| Docker | 24.0+ | Optional, for container deployment |
+
+### First Run Checklist
+
+```bash
+# 1. Clone and build
+git clone https://github.com/hrygo/hotplex.git
+cd hotplex
+make build
+
+# 2. Copy environment template
+cp .env.example .env
+
+# 3. Configure your AI CLI
+# Ensure Claude Code or OpenCode is in PATH
+
+# 4. Run the daemon
+./hotplexd --config configs/server.yaml
+```
+
+---
+
+## 🧠 Core Concepts
+
+Understanding these concepts is essential for effective HotPlex development.
+
+### Session Pooling
+
+HotPlex maintains **long-lived CLI processes** instead of spawning fresh instances per request. This eliminates:
+- Cold start latency (typically 2-5 seconds per invocation)
+- Context loss between requests
+- Resource waste from repeated initialization
+
+```
+Request 1 → CLI Process 1 (spawned, persistent)
+Request 2 → CLI Process 1 (reused, instant)
+Request 3 → CLI Process 1 (reused, instant)
+```
+
+### I/O Multiplexing
+
+The `Runner` component handles bidirectional communication between:
+- **Upstream**: User requests (WebSocket/HTTP/ChatApp events)
+- **Downstream**: CLI stdin/stdout/stderr streams
+
+```go
+// Each session has dedicated I/O channels
+type Session struct {
+    Stdin  io.Writer
+    Stdout io.Reader
+    Stderr io.Reader
+    Events chan *Event  // Internal event bus
+}
+```
+
+### PGID Isolation
+
+Process Group ID (PGID) isolation ensures **clean termination**:
+- CLI processes are spawned with `Setpgid: true`
+- Termination sends signal to entire process group (`kill -PGID`)
+- No orphaned or zombie processes
+
+### Regex WAF
+
+Web Application Firewall layer intercepts dangerous commands before they reach the CLI:
+- Block patterns: `rm -rf /`, `mkfs`, `dd`, `:(){:|:&};:`
+- Configurable via `security.danger_waf` in config
+- Works alongside CLI's native tool restrictions (`AllowedTools`)
+
+### ChatApps Abstraction
+
+Unified interface for multi-platform bot integration:
+
+```go
+type ChatAdapter interface {
+    // Platform-specific event handling
+    HandleEvent(event Event) error
+    // Unified message format
+    SendMessage(msg *ChatMessage) error
+}</nosp>
+\nosp
+### MessageOperations (Optional)\n\nAdvanced platforms implement streaming and message management:\n\n```go\ntype MessageOperations interface {\n    StartStream(ctx, channelID, threadTS) (messageTS, error)\n    AppendStream(ctx, channelID, messageTS, content) error\n    StopStream(ctx, channelID, messageTS) error\n    UpdateMessage(ctx, channelID, messageTS, msg) error\n    DeleteMessage(ctx, channelID, messageTS) error\n}</nosp>
+```
+
+---
+
+## 📂 Project Structure
+
+```
+hotplex/
+├── cmd/
+│   └── hotplexd/           # Daemon entrypoint
+├── internal/               # Core implementation (private)
+│   ├── engine/             # Session pool & runner
+│   ├── server/             # WebSocket & HTTP gateway
+│   ├── security/           # WAF & isolation
+│   ├── config/             # Configuration loading
+│   ├── sys/                # OS signals
+│   ├── telemetry/          # OpenTelemetry
+│   └── ...
+├── brain/                  # Native Brain orchestration
+├── cache/                  # Caching layer
+├── provider/               # AI provider adapters
+│   ├── claudecode/         # Claude Code protocol
+│   ├── opencode/           # OpenCode protocol
+│   └── ...
+├── chatapps/               # Platform adapters
+│   ├── slack/              # Slack Bot
+│   ├── feishu/             # Feishu Bot
+│   └── base/               # Common interfaces
+├── types/                  # Public type definitions
+├── event/                  # Event system
+├── plugins/                # Extension points
+│   └── storage/            # Message persistence
+├── sdks/                   # Language bindings
+│   ├── go/                 # Go SDK (embedded)
+│   ├── python/             # Python SDK
+│   └── typescript/         # TypeScript SDK
+├── docker/                 # Container definitions
+├── configs/                # Configuration examples
+└── docs/                  # Architecture docs
+```
+
+### Key Directories
+
+| Directory | Purpose | Public API |
+|-----------|---------|-----------|
+| `types/` | Core types & interfaces | ✅ Yes |
+| `event/` | Event definitions | ✅ Yes |
+| `hotplex.go` | SDK entry point | ✅ Yes |
+| `internal/engine/` | Session management | ❌ Internal |
+| `internal/server/` | Network protocols | ❌ Internal |
+| `provider/` | CLI adapters | ⚠️ Provider interface |
 
 ---
 
 ## ✨ Features
 
-| | |
-| :--- | :--- |
-| 🔄 **Session Pooling** | Long-lived CLI processes with instant reconnection |
-| 🌊 **Full-Duplex Streaming** | Sub-second token delivery via Go channels |
-| 🛡️ **Regex WAF** | Block destructive commands (`rm -rf /`, `mkfs`, etc.) |
-| 🔒 **PGID Isolation** | Clean process termination, no zombies |
-| 💬 **Multi-Platform** | Slack · Feishu |
-| 📦 **Go SDK** | Embed directly in your Go app with zero overhead |
-| 🔌 **WebSocket Gateway** | Language-agnostic access via `hotplexd` daemon |
-| 📊 **OpenTelemetry** | Built-in metrics and tracing support |
-| 🐳 **Docker 1+n** | 1 Base + n Stacks (`node`, `python`, `java`, `rust`, `full`) |
-
----
-
-## 🎯 Why HotPlex?
-
-> **The missing control plane for AI agents in production**
-
-| Challenge | HotPlex Solution |
-| :-------- | :--------------- |
-| AI agents spin up fresh each request | **Persistent sessions** - CLI stays alive, reuses context |
-| No safety for destructive commands | **Regex WAF** - Programmable firewall for shell instructions |
-| Hard to scale AI interactions | **Process multiplexing** - Hundreds of concurrent sessions |
-| Integration complexity | **ChatApps** - One codebase, Slack / Feishu support |
-| Enterprise-grade security | **PGID isolation** + filesystem jail + container sandbox |
+| Feature | Description | Use Case |
+| :------ | :---------- | :------- |
+| 🔄 **Session Pooling** | Long-lived CLI processes with instant reconnection | High-frequency AI interactions |
+| 🌊 **Full-Duplex Streaming** | Sub-second token delivery via Go channels | Real-time UI updates |
+| 🛡️ **Regex WAF** | Block destructive commands (`rm -rf /`, `mkfs`, etc.) | Security hardening |
+| 🔒 **PGID Isolation** | Clean process termination, no zombies | Production reliability |
+| 💬 **Multi-Platform** | Slack · Feishu | Team communication |
+| 📦 **Go SDK** | Embed directly in your Go app with zero overhead | Custom integrations |
+| 🔌 **WebSocket Gateway** | Language-agnostic access via `hotplexd` daemon | Web frontend |
+| 📊 **OpenTelemetry** | Built-in metrics and tracing support | Observability |
+| 🐳 **Docker 1+n** | 1 Base + n Stacks (`node`, `python`, `java`, `rust`, `full`) | Multi-language |
 
 ---
 
 ## 🏛 Architecture
 
 ```
-│                        ChatApps Layer                           │
-│                       Slack · Feishu                            │
+┌─────────────────────────────────────────────────────────────────┐
+│                      ChatApps Layer                              │
+│                 Slack Bot · Feishu Bot · Web                    │
+│            (Event → ChatMessage → Session ID)                  │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
-│                      WebSocket Gateway                          │
-│                  (hotplexd daemon / Go SDK)                     │
+│                    WebSocket Gateway                            │
+│              hotplexd daemon / Go SDK / HTTP                   │
+│         (Protocol translation, Rate limiting, Auth)            │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
 │                      Engine / Runner                            │
-│         I/O Multiplexing · Session Pool · Events               │
+│    ┌─────────────────────────────────────────────────────┐    │
+│    │  Session Pool (map[SessionID]*Session)              │    │
+│    │  - Lifecycle management                              │    │
+│    │  - Idle timeout & GC                                 │    │
+│    └─────────────────────────────────────────────────────┘    │
+│    ┌─────────────────────────────────────────────────────┐    │
+│    │  Runner (I/O Multiplexer)                           │    │
+│    │  - stdin/stdout/stderr piping                       │    │
+│    │  - Event serialization                               │    │
+│    └─────────────────────────────────────────────────────┘    │
 └────────────────────────────┬────────────────────────────────────┘
                              │
         ┌────────────────────┼────────────────────┐
@@ -123,21 +271,28 @@ export HOTPLEX_SLACK_APP_TOKEN=xapp-...
    └─────────┘         └─────────┘         └─────────┘
 ```
 
+### Data Flow: Request to Response
+
+```
+User → Gateway → Session Pool → Runner → CLI
+CLI → Runner → Gateway → User (streaming)
+```
+
 ### Security Layers
 
-| Layer | Implementation |
-| :---- | :------------- |
-| Tool Governance | `AllowedTools` config - restrict agent capabilities |
-| Danger WAF | Regex interception - block `rm -rf /`, `mkfs`, `dd` |
-| Process Isolation | PGID-based termination - no orphaned processes |
-| Filesystem Jail | `WorkDir` lockdown - confined to project root |
-| Container Sandbox | Docker (BaaS) - OS-level isolation & limits |
+| Layer | Implementation | Configuration |
+| :---- | :------------- | :------------ |
+| Tool Governance | `AllowedTools` config | `security.allowed_tools` |
+| Danger WAF | Regex interception | `security.danger_waf` |
+| Process Isolation | PGID-based termination | Automatic |
+| Filesystem Jail | `WorkDir` lockdown | `engine.work_dir` |
+| Container Sandbox | Docker (BaaS) | `docker/` |
 
 ---
 
 ## 📖 Usage Examples
 
-### Go SDK
+### Go SDK (Embeddable)
 
 ```go
 import (
@@ -149,29 +304,44 @@ import (
     "github.com/hrygo/hotplex/types"
 )
 
-engine, err := hotplex.NewEngine(hotplex.EngineOptions{
-    Timeout:     5 * time.Minute,
-    IdleTimeout: 30 * time.Minute,
-})
-if err != nil {
-    panic(err)
-}
-defer engine.Close()
-
-cfg := &types.Config{
-    WorkDir:   "/path/to/project",
-    SessionID: "user-session-123",
-}
-
-engine.Execute(context.Background(), cfg, "Refactor this function", func(eventType string, data any) error {
-    if msg, ok := data.(*types.StreamMessage); ok {
-        fmt.Print(msg.Content) // Streaming response
+func main() {
+    // Initialize engine
+    engine, err := hotplex.NewEngine(hotplex.EngineOptions{
+        Timeout:     5 * time.Minute,
+        IdleTimeout: 30 * time.Minute,
+    })
+    if err != nil {
+        panic(err)
     }
-    return nil
-})
+    defer engine.Close()
+
+    // Execute prompt
+    cfg := &types.Config{
+        WorkDir:   "/path/to/project",
+        SessionID: "user-session-123",
+    }
+
+    engine.Execute(context.Background(), cfg, "Explain this function", func(eventType string, data any) error {
+        switch eventType {
+        case "message":
+            if msg, ok := data.(*types.StreamMessage); ok {
+                fmt.Print(msg.Content)  // Streaming output
+            }
+        case "error":
+            if errMsg, ok := data.(string); ok {
+                fmt.Printf("Error: %s\n", errMsg)
+            }
+        case "usage":
+            if stats, ok := data.(*types.UsageStats); ok {
+                fmt.Printf("Tokens: %d input, %d output\n", stats.InputTokens, stats.OutputTokens)
+            }
+        }
+        return nil
+    })
+}
 ```
 
-### Slack Bot
+### Slack Bot Configuration
 
 ```yaml
 # configs/chatapps/slack.yaml
@@ -181,6 +351,12 @@ mode: socket
 provider:
   type: claude-code
   default_model: sonnet
+  allowed_tools:
+    - Read
+    - Edit
+    - Glob
+    - Grep
+    - Bash
 
 engine:
   work_dir: ~/projects/hotplex
@@ -198,64 +374,179 @@ assistant:
   group_policy: multibot
 ```
 
-```bash
-export HOTPLEX_SLACK_BOT_USER_ID=B12345
-export HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
-export HOTPLEX_SLACK_APP_TOKEN=xapp-...
-./hotplexd --config configs/server.yaml --config-dir configs/chatapps
-```
-
 ### WebSocket API
 
 ```javascript
+// Connect
 const ws = new WebSocket('ws://localhost:8080/ws/v1/agent');
 
+// Listen for messages
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
-  console.log(data.type, data.content);
+  switch (data.type) {
+    case 'message':
+      console.log(data.content);
+      break;
+    case 'error':
+      console.error(data.error);
+      break;
+    case 'done':
+      console.log('Execution complete');
+      break;
+  }
 };
 
+// Execute prompt
 ws.send(JSON.stringify({
   type: 'execute',
-  prompt: 'Hello, AI!'
+  session_id: 'optional-session-id',
+  prompt: 'List files in current directory'
 }));
+```
+
+### HTTP SSE API
+
+```bash
+curl -N -X POST http://localhost:8080/api/v1/execute \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Hello, AI!", "session_id": "session-123"}'
+```
+
+---
+
+## 💻 Development Guide
+
+### Common Tasks
+
+```bash
+# Run tests
+make test
+
+# Run with race detector
+make test-race
+
+# Build binary
+make build
+
+# Run linter
+make lint
+
+# Build Docker images
+make docker-build
+
+# Start Docker stack
+make docker-up
+```
+
+### Adding a New ChatApp Platform
+
+1. **Implement the adapter interface** in `chatapps/<platform>/`:
+
+```go
+type Adapter struct {
+    client *platform.Client
+    engine *engine.Engine
+}
+
+// Implement base.ChatAdapter interface
+var _ base.ChatAdapter = (*Adapter)(nil)
+
+func (a *Adapter) HandleEvent(event base.Event) error {
+    // Platform-specific event parsing
+}
+
+func (a *Adapter) SendMessage(msg *base.ChatMessage) error {
+    // Platform-specific message sending
+}
+```
+
+2. **Register in** `chatapps/setup.go`:
+
+```go
+func init() {
+    registry.Register("platform-name", NewAdapter)
+}
+```
+
+3. **Add configuration** in `configs/chatapps/`:
+
+```yaml
+platform: platform-name
+mode: socket  # or http
+# ... platform-specific config
+```
+
+### Adding a New Provider
+
+1. **Implement** `provider/<name>/parser.go`:
+
+```go
+type Parser struct{}
+
+func (p *Parser) ParseStream(line string) (*types.StreamMessage, error) {
+    // Provider-specific output parsing
+}
+```
+
+2. **Register** in `provider/factory.go`:
+
+```go
+func init() {
+    providers.Register("provider-name", NewProvider)
+}
 ```
 
 ---
 
 ## 📚 Documentation
 
-| | |
-| :--- | :--- |
-| [🚀 Deployment Guide](https://hrygo.github.io/hotplex/guide/deployment) | Docker, production setup |
-| [💬 ChatApps Manual](chatapps/README.md) | Slack & Feishu integration |
-| [🛠 Go SDK Reference](https://hrygo.github.io/hotplex/sdks/go-sdk) | Complete SDK documentation |
-| [🔒 Security Guide](https://hrygo.github.io/hotplex/guide/security) | WAF, isolation, best practices |
-| [📊 Observability](https://hrygo.github.io/hotplex/guide/observability) | Metrics, tracing, logging |
+| Guide | Description |
+| :---- | :---------- |
+| [🚀 Deployment](https://hrygo.github.io/hotplex/guide/deployment) | Docker, production setup |
+| [💬 ChatApps](chatapps/README.md) | Slack & Feishu integration |
+| [🛠 Go SDK](https://hrygo.github.io/hotplex/sdks/go-sdk) | SDK reference |
+| [🔒 Security](https://hrygo.github.io/hotplex/guide/security) | WAF, isolation |
+| [📊 Observability](https://hrygo.github.io/hotplex/guide/observability) | Metrics, tracing |
+| [⚙️ Configuration](docs/configuration.md) | Full config reference |
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+We welcome contributions! Please follow these steps:
 
 ```bash
-# Development setup
-go mod download   # Install dependencies
-# Build the Node.js language stack
-make stack S=node
+# 1. Fork and clone
+git clone https://github.com/hrygo/hotplex.git
 
-# Build all language stacks
-make stack-all
-make test         # Run tests
-make lint         # Run linter
-make build        # Build binary
-
-# Submit a PR
+# 2. Create a feature branch
 git checkout -b feat/your-feature
-git commit -m "feat: add awesome feature"
+
+# 3. Make changes and test
+make test
+make lint
+
+# 4. Commit with conventional format
+git commit -m "feat(engine): add session priority support"
+
+# 5. Submit PR
 gh pr create --fill
 ```
+
+### Commit Message Format
+
+```
+<type>(<scope>): <description>
+
+Types: feat, fix, refactor, docs, test, chore
+Scope: engine, server, chatapps, provider, etc.
+```
+
+### Code Standards
+
+- Follow [Uber Go Style Guide](.agent/rules/uber-go-style-guide.md)
+- All interfaces require compile-time verification
+- Run `make test-race` before submitting
 
 ---
 
