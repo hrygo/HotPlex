@@ -61,19 +61,6 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 RUN npm install -g pnpm@latest bun@latest && \
     npm cache clean --force
 
-# Install trivy (Security) & lazygit (DX)
-# Use TARGETARCH build arg for multi-platform builds
-ARG TARGETARCH
-RUN TRIVY_VERSION="0.59.1" && \
-    LAZYGIT_VERSION="0.48.0" && \
-    case "$TARGETARCH" in \
-        amd64) TRIVY_ARCH="64bit" && ARCH="x86_64" ;; \
-        arm64) TRIVY_ARCH="ARM64" && ARCH="arm64" ;; \
-        *) echo "Unsupported architecture: $TARGETARCH" && exit 1 ;; \
-    esac && \
-    curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz" | tar xz -C /usr/local/bin trivy && \
-    curl -sSL "https://github.com/jesseduffield/lazygit/releases/download/v${LAZYGIT_VERSION}/lazygit_${LAZYGIT_VERSION}_Linux_${ARCH}.tar.gz" | tar xz -C /usr/local/bin lazygit
-
 # 2. HotPlex User & Workspace Setup
 RUN useradd -m -u ${HOST_UID} -s /bin/bash hotplex && \
     mkdir -p /app /home/hotplex/.cache && \
