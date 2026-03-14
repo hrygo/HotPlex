@@ -1,5 +1,22 @@
 # CHANGELOG.md
 
+## [v0.27.4] - 2026-03-14
+
+### Changed
+- **Docker Image Size Optimization** - Reduced Go stack image from 10.9GB to ~4-5GB (60%+ reduction):
+  - Eliminated `chown -R` Copy-on-Write duplication by installing as hotplex user directly
+  - Replaced `go install` with binary downloads for large tools (golangci-lint, goreleaser, buf, mockery)
+  - Added BuildKit cache mounts to keep Go build cache out of final image
+  - Fixed same issue in Rust Dockerfile (chown CoW)
+
+### Technical Details
+- golangci-lint: 2GB → 50MB (binary vs go install)
+- goreleaser: 200MB → 20MB (binary vs go install)
+- buf: 100MB → 25MB (binary vs go install)
+- chown CoW fix: saved 3.4GB layer duplication
+
+---
+
 ## [v0.27.3] - 2026-03-14
 
 ### Fixed

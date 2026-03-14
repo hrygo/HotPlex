@@ -14,16 +14,29 @@ FROM hotplex:base
 # Inject Rust SDK (Cached)
 USER root
 ENV RUSTUP_HOME=/usr/local/rustup
-ENV CARGO_HOME=/usr/local/cargo
+ENV CARGO_HOME=/home/hotplex/.cargo
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
-COPY --from=sdk-source /usr/local/rustup /usr/local/rustup
-COPY --from=sdk-source /usr/local/cargo /usr/local/cargo
 
-# Development Tools (Cached)
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/* && \
+# Copy Rust SDK with correct ownership from the start
+COPY --from=sdk-source --chown=hotplex:hotplex /usr/local/rustup /usr/local/rustup
+COPY --from=sdk-source --chown=hotplex:hotplex /usr/local/cargo /home/hotplex/.cargo-init
+
+# Setup cargo home and move initial cargo
+RUN mkdir -p ${CARGO_HOME} && \
+    chown -R hotplex:hotplex ${CARGO_HOME} /usr/local/rustup && \
+    if [ -d /home/hotplex/.cargo-init ]; then \
+        cp -a /home/hotplex/.cargo-init/. ${CARGO_HOME}/ 2>/dev/null || true; \
+        rm -rf /home/hotplex/.cargo-init; \
+    fi
+
+# Development Tools - install as hotplex user to avoid chown CoW
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+
+USER hotplex
+RUN --mount=type=cache,target=/home/hotplex/.cargo/registry,uid=1000 \
+    --mount=type=cache,target=/home/hotplex/.cargo/git,uid=1000 \
     rustup component add clippy rustfmt rust-analyzer rust-src && \
-    cargo install cargo-watch --locked && \
-    chown -R hotplex:hotplex /usr/local/cargo /usr/local/rustup
+    cargo install cargo-watch --locked
 
 # ==============================================================================
 # 🔥 Late Injection: The Binary (Changes frequently)

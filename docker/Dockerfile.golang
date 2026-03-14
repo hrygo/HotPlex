@@ -1,6 +1,14 @@
 # ==============================================================================
-# HotPlex Go Development Stack (2026)
+# HotPlex Go Development Stack (2026) - Optimized
 # ==============================================================================
+# Optimization Strategy:
+# 1. Binary direct download instead of go install (saves ~3GB build cache)
+# 2. BuildKit cache mounts (keeps cache out of image)
+# 3. Install as hotplex user (avoids chown CoW)
+# 4. Cleanup after installation
+# ==============================================================================
+
+# syntax=docker/dockerfile:1.7-labs
 
 # 1. Source the binary provider
 FROM hotplex:artifacts AS binary-provider
@@ -17,31 +25,80 @@ ENV GOPATH=/home/hotplex/go
 ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
 
 ARG GOPROXY
-# Go Development Tools (Cached)
-RUN if [ -n "$GOPROXY" ]; then go env -w GOPROXY=$GOPROXY; fi && \
+ARG TARGETARCH
+ARG TARGETOS
+ENV GOPROXY=${GOPROXY:-https://proxy.golang.org,direct}
+
+# Detect architecture
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then echo "amd64" > /tmp/arch; \
+    elif [ "$ARCH" = "aarch64" ]; then echo "arm64" > /tmp/arch; fi
+
+# ==============================================================================
+# Phase 1: Go Tools via Binary (No Build Cache)
+# These tools are large and have pre-built binaries available
+# ==============================================================================
+USER root
+
+# golangci-lint (Binary: ~50MB vs go install: ~2GB)
+RUN ARCH=$(cat /tmp/arch) && \
+    GOLANGCI_VERSION="1.64.5" && \
+    curl -sSfL "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_VERSION}/golangci-lint-${GOLANGCI_VERSION}-linux-${ARCH}.tar.gz" | \
+    tar xz -C /tmp && \
+    mv /tmp/golangci-lint-${GOLANGCI_VERSION}-linux-${ARCH}/golangci-lint /usr/local/bin/ && \
+    rm -rf /tmp/golangci-lint-*
+
+# goreleaser (Binary: ~20MB vs go install: ~200MB)
+RUN ARCH=$(cat /tmp/arch) && \
+    GORELEASER_VERSION="2.7.0" && \
+    curl -sSfL "https://github.com/goreleaser/goreleaser/releases/download/v${GORELEASER_VERSION}/goreleaser_${GORELEASER_VERSION}_linux_${ARCH}.tar.gz" | \
+    tar xz -C /usr/local/bin goreleaser
+
+# buf (Binary: ~25MB vs go install: ~100MB)
+RUN ARCH=$(cat /tmp/arch) && \
+    BUF_VERSION="1.50.0" && \
+    curl -sSfL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-linux-${ARCH}" -o /usr/local/bin/buf && \
+    chmod +x /usr/local/bin/buf
+
+# mockery (Binary: ~15MB vs go install: ~50MB)
+RUN ARCH=$(cat /tmp/arch) && \
+    MOCKERY_VERSION="2.53.2" && \
+    curl -sSfL "https://github.com/vektra/mockery/releases/download/v${MOCKERY_VERSION}/mockery_${MOCKERY_VERSION}_linux_${ARCH}.tar.gz" | \
+    tar xz -C /usr/local/bin mockery
+
+# ==============================================================================
+# Phase 2: Go Tools via go install (with BuildKit cache mount)
+# These tools don't have convenient binaries or are small
+# Cache is NOT included in final image
+# ==============================================================================
+USER hotplex
+WORKDIR /home/hotplex
+
+# Go Development Tools - with cache mount to keep build cache out of image
+RUN --mount=type=cache,target=/home/hotplex/.cache/go-build,uid=1000 \
+    --mount=type=cache,target=/home/hotplex/go/pkg/mod,uid=1000 \
     go install github.com/air-verse/air@latest && \
     go install github.com/go-delve/delve/cmd/dlv@latest && \
     go install mvdan.cc/gofumpt@latest && \
-    go install github.com/goreleaser/goreleaser/v2@latest && \
     go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest && \
     go install honnef.co/go/tools/cmd/staticcheck@latest && \
     go install golang.org/x/vuln/cmd/govulncheck@latest && \
-    go install github.com/bufbuild/buf/cmd/buf@latest && \
-    go install github.com/vektra/mockery/v2@latest && \
     go install gotest.tools/gotestsum@latest && \
-    go install github.com/swaggo/swag/cmd/swag@latest && \
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.5
+    go install github.com/swaggo/swag/cmd/swag@latest
 
-# Protocol Buffers Compiler
+# ==============================================================================
+# Phase 3: Protocol Buffers (requires apt)
+# ==============================================================================
+USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler && \
     rm -rf /var/lib/apt/lists/*
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-# Permissions setup
-USER root
-RUN mkdir -p ${GOPATH}/bin && chown -R hotplex:hotplex ${GOPATH}
+USER hotplex
+RUN --mount=type=cache,target=/home/hotplex/.cache/go-build,uid=1000 \
+    --mount=type=cache,target=/home/hotplex/go/pkg/mod,uid=1000 \
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 # ==============================================================================
 # 🔥 Late Injection: The Binary (Changes frequently)
@@ -51,4 +108,4 @@ COPY --from=binary-provider /hotplexd /usr/local/bin/hotplexd
 
 USER hotplex
 CMD ["/usr/local/bin/hotplexd"]
-LABEL org.opencontainers.image.title="HotPlex Go"
+LABEL org.opencontainers.image.title="HotPlex Go (Optimized)"
