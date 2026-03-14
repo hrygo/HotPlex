@@ -468,3 +468,501 @@ func TestCapability_BrainOptions(t *testing.T) {
 	assert.True(t, cap.BrainOpts.CompressContext)
 	assert.Equal(t, "claude-3", cap.BrainOpts.PreferredModel)
 }
+
+func TestFormBuilder_ExtractParams(t *testing.T) {
+	fb := NewFormBuilder()
+	cap := Capability{
+		ID:             "test",
+		Name:           "Test",
+		PromptTemplate: "Test",
+		Parameters: []Parameter{
+			{ID: "text_field", Label: "Text", Type: "text"},
+			{ID: "select_field", Label: "Select", Type: "select", Options: []string{"a", "b"}},
+			{ID: "with_default", Label: "Default", Type: "text", Default: "default_value"},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		state    *slack.ViewState
+		expected map[string]string
+	}{
+		{
+			name:     "nil state returns empty map",
+			state:    nil,
+			expected: map[string]string{},
+		},
+		{
+			name:     "nil values returns empty map",
+			state:    &slack.ViewState{Values: nil},
+			expected: map[string]string{},
+		},
+		{
+			name: "extract text value",
+			state: &slack.ViewState{
+				Values: map[string]map[string]slack.BlockAction{
+					"input_text_field": {"text_field_value": {Value: "hello"}},
+				},
+			},
+			expected: map[string]string{
+				"text_field":   "hello",
+				"with_default": "default_value",
+			},
+		},
+		{
+			name: "extract select value",
+			state: &slack.ViewState{
+				Values: map[string]map[string]slack.BlockAction{
+					"input_select_field": {"select_field_value": {SelectedOption: slack.OptionBlockObject{Value: "option_a"}}},
+				},
+			},
+			expected: map[string]string{
+				"select_field": "option_a",
+				"with_default": "default_value",
+			},
+		},
+		{
+			name: "empty select falls back to default",
+			state: &slack.ViewState{
+				Values: map[string]map[string]slack.BlockAction{
+					"input_select_field": {"select_field_value": {SelectedOption: slack.OptionBlockObject{Value: ""}}},
+				},
+			},
+			expected: map[string]string{"with_default": "default_value"},
+		},
+		{
+			name: "value overrides default",
+			state: &slack.ViewState{
+				Values: map[string]map[string]slack.BlockAction{
+					"input_with_default": {"with_default_value": {Value: "user_value"}},
+				},
+			},
+			expected: map[string]string{"with_default": "user_value"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := fb.ExtractParams(tt.state, cap)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormBuilder_BuildBlocks(t *testing.T) {
+	fb := NewFormBuilder()
+
+	t.Run("with description adds header and divider", func(t *testing.T) {
+		cap := Capability{
+			ID:             "test",
+			Name:           "Test",
+			Description:    "Test description",
+			PromptTemplate: "Test",
+			Parameters:     []Parameter{{ID: "p1", Label: "P1", Type: "text"}},
+		}
+		blocks := fb.BuildBlocks(cap)
+		require.GreaterOrEqual(t, len(blocks), 3) // header + divider + input
+	})
+
+	t.Run("without description skips header", func(t *testing.T) {
+		cap := Capability{
+			ID:             "test",
+			Name:           "Test",
+			PromptTemplate: "Test",
+			Parameters:     []Parameter{{ID: "p1", Label: "P1", Type: "text"}},
+		}
+		blocks := fb.BuildBlocks(cap)
+		assert.Equal(t, 1, len(blocks)) // just input
+	})
+}
+
+func TestFormBuilder_BuildInputBlock_Types(t *testing.T) {
+	fb := NewFormBuilder()
+
+	t.Run("multiline type creates textarea", func(t *testing.T) {
+		param := Parameter{ID: "desc", Label: "Description", Type: "multiline"}
+		block := fb.buildInputBlock(param)
+		require.NotNil(t, block)
+		inputBlock, ok := block.(*slack.InputBlock)
+		require.True(t, ok)
+		_, isTextarea := inputBlock.Element.(*slack.PlainTextInputBlockElement)
+		assert.True(t, isTextarea)
+	})
+
+	t.Run("select type creates select element", func(t *testing.T) {
+		param := Parameter{ID: "choice", Label: "Choice", Type: "select", Options: []string{"a", "b"}}
+		block := fb.buildInputBlock(param)
+		require.NotNil(t, block)
+		inputBlock, ok := block.(*slack.InputBlock)
+		require.True(t, ok)
+		_, isSelect := inputBlock.Element.(*slack.SelectBlockElement)
+		assert.True(t, isSelect)
+	})
+
+	t.Run("unknown type defaults to text input", func(t *testing.T) {
+		param := Parameter{ID: "custom", Label: "Custom", Type: "unknown_type"}
+		block := fb.buildInputBlock(param)
+		require.NotNil(t, block)
+		inputBlock, ok := block.(*slack.InputBlock)
+		require.True(t, ok)
+		_, isText := inputBlock.Element.(*slack.PlainTextInputBlockElement)
+		assert.True(t, isText)
+	})
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxLen   int
+		expected string
+	}{
+		{"short string unchanged", "hello", 10, "hello"},
+		{"exact length unchanged", "hello", 5, "hello"},
+		{"long string truncated", "hello world", 8, "hello..."},
+		{"empty string", "", 5, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncate(tt.input, tt.maxLen)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHandler_HandleHomeOpened_NoClient(t *testing.T) {
+	registry := NewRegistry()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewHandler(registry, WithHandlerLogger(logger))
+
+	err := handler.HandleHomeOpened(context.Background(), &HomeOpenedEvent{User: "U123"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "slack client not configured")
+}
+
+func TestHandler_HandleCapabilityClick_NoClient(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Capability{
+		ID:             "test_cap",
+		Name:           "Test Capability",
+		PromptTemplate: "Test",
+	}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewHandler(registry, WithHandlerLogger(logger))
+
+	err := handler.HandleCapabilityClick(context.Background(), &slack.InteractionCallback{}, "test_cap")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "slack client not configured")
+}
+
+func TestHandler_HandleCapabilityClick_UnknownCapability(t *testing.T) {
+	registry := NewRegistry()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Create a client with invalid token (won't be called for error case)
+	client := slack.New("xoxb-test", slack.OptionAPIURL("http://localhost:0/"))
+	handler := NewHandler(registry,
+		WithSlackClient(client),
+		WithHandlerLogger(logger))
+
+	err := handler.HandleCapabilityClick(context.Background(), &slack.InteractionCallback{TriggerID: "trig123"}, "unknown_cap")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "capability not found")
+}
+
+func TestHandler_HandleViewSubmission_NoClient(t *testing.T) {
+	registry := NewRegistry()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewHandler(registry, WithHandlerLogger(logger))
+
+	callback := &slack.InteractionCallback{
+		View: slack.View{PrivateMetadata: "test_cap"},
+	}
+	resp, err := handler.HandleViewSubmission(context.Background(), callback)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestHandler_HandleViewSubmission_UnknownCapability(t *testing.T) {
+	registry := NewRegistry()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	client := slack.New("xoxb-test", slack.OptionAPIURL("http://localhost:0/"))
+	handler := NewHandler(registry,
+		WithSlackClient(client),
+		WithHandlerLogger(logger))
+
+	callback := &slack.InteractionCallback{
+		View: slack.View{PrivateMetadata: "unknown_cap"},
+	}
+	resp, err := handler.HandleViewSubmission(context.Background(), callback)
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestHandler_HandleViewSubmission_ValidationFailure(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Capability{
+		ID:             "test_cap",
+		Name:           "Test Capability",
+		PromptTemplate: "Test: {{.input}}",
+		Parameters: []Parameter{
+			{ID: "input", Label: "Input", Type: "text", Required: true},
+		},
+	}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	client := slack.New("xoxb-test", slack.OptionAPIURL("http://localhost:0/"))
+	handler := NewHandler(registry,
+		WithSlackClient(client),
+		WithHandlerLogger(logger))
+
+	callback := &slack.InteractionCallback{
+		User: slack.User{ID: "U123"},
+		View: slack.View{
+			PrivateMetadata: "test_cap",
+			State:           &slack.ViewState{Values: map[string]map[string]slack.BlockAction{}},
+		},
+	}
+	resp, err := handler.HandleViewSubmission(context.Background(), callback)
+	assert.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotNil(t, resp.Errors)
+}
+
+func TestHandler_HandleViewSubmission_SuccessNoExecutor(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Capability{
+		ID:             "test_cap",
+		Name:           "Test Capability",
+		PromptTemplate: "Test: {{.input}}",
+		Parameters: []Parameter{
+			{ID: "input", Label: "Input", Type: "text", Required: true},
+		},
+	}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	client := slack.New("xoxb-test", slack.OptionAPIURL("http://localhost:0/"))
+	handler := NewHandler(registry,
+		WithSlackClient(client),
+		WithHandlerLogger(logger))
+
+	callback := &slack.InteractionCallback{
+		User: slack.User{ID: "U123"},
+		View: slack.View{
+			PrivateMetadata: "test_cap",
+			State: &slack.ViewState{
+				Values: map[string]map[string]slack.BlockAction{
+					"input_input": {"input_value": {Value: "test value"}},
+				},
+			},
+		},
+	}
+	resp, err := handler.HandleViewSubmission(context.Background(), callback)
+	assert.NoError(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestHandler_SetClient(t *testing.T) {
+	registry := NewRegistry()
+	handler := NewHandler(registry)
+
+	assert.Nil(t, handler.client)
+	handler.SetClient(&slack.Client{})
+	assert.NotNil(t, handler.client)
+}
+
+func TestHandler_SetExecutor(t *testing.T) {
+	registry := NewRegistry()
+	handler := NewHandler(registry)
+
+	assert.Nil(t, handler.executor)
+	handler.SetExecutor(NewExecutor())
+	assert.NotNil(t, handler.executor)
+}
+
+func TestBuilder_BuildHomeTab(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Capability{
+		ID:             "code1",
+		Name:           "Code Review",
+		Icon:           ":mag:",
+		Description:    "Review code",
+		Category:       "code",
+		PromptTemplate: "Review: {{.code}}",
+	}))
+
+	builder := NewBuilder(registry)
+	view := builder.BuildHomeTab()
+
+	require.NotNil(t, view)
+	assert.Equal(t, slack.VTHomeTab, view.Type)
+	assert.NotEmpty(t, view.Blocks.BlockSet)
+}
+
+func TestBuilder_BuildBlocks(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Capability{
+		ID:             "code1",
+		Name:           "Code Review",
+		Icon:           ":mag:",
+		Description:    "Review code",
+		Category:       "code",
+		PromptTemplate: "Review: {{.code}}",
+	}))
+	require.NoError(t, registry.Register(Capability{
+		ID:             "debug1",
+		Name:           "Debug",
+		Icon:           ":bug:",
+		Description:    "Debug issues",
+		Category:       "debug",
+		PromptTemplate: "Debug: {{.issue}}",
+	}))
+
+	builder := NewBuilder(registry)
+	blocks := builder.BuildBlocks()
+
+	assert.NotEmpty(t, blocks)
+	// Should have header + category header + capability row + divider + footer
+	assert.GreaterOrEqual(t, len(blocks), 5)
+}
+
+func TestBuilder_BuildCapabilityRow(t *testing.T) {
+	builder := NewBuilder(NewRegistry())
+
+	t.Run("empty caps returns nil", func(t *testing.T) {
+		block := builder.buildCapabilityRow([]Capability{})
+		assert.Nil(t, block)
+	})
+
+	t.Run("single capability", func(t *testing.T) {
+		caps := []Capability{
+			{ID: "test", Name: "Test", Icon: ":test:", Description: "Test cap"},
+		}
+		block := builder.buildCapabilityRow(caps)
+		require.NotNil(t, block)
+		section, ok := block.(*slack.SectionBlock)
+		require.True(t, ok)
+		assert.Len(t, section.Fields, 1)
+	})
+
+	t.Run("multiple capabilities", func(t *testing.T) {
+		caps := []Capability{
+			{ID: "test1", Name: "Test1", Icon: ":t1:", Description: "Test 1"},
+			{ID: "test2", Name: "Test2", Icon: ":t2:", Description: "Test 2"},
+			{ID: "test3", Name: "Test3", Icon: ":t3:", Description: "Test 3"},
+		}
+		block := builder.buildCapabilityRow(caps)
+		require.NotNil(t, block)
+		section, ok := block.(*slack.SectionBlock)
+		require.True(t, ok)
+		assert.Len(t, section.Fields, 3)
+	})
+}
+
+func TestBuilder_BuildCapabilitySection(t *testing.T) {
+	builder := NewBuilder(NewRegistry())
+	cap := Capability{
+		ID:          "test",
+		Name:        "Test Capability",
+		Icon:        ":test:",
+		Description: "Test description",
+	}
+
+	block := builder.BuildCapabilitySection(cap)
+	require.NotNil(t, block)
+
+	section, ok := block.(*slack.SectionBlock)
+	require.True(t, ok)
+	assert.NotNil(t, section.Text)
+	assert.NotNil(t, section.Accessory)
+}
+
+func TestRegistry_Unregister(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Capability{
+		ID:             "test",
+		Name:           "Test",
+		PromptTemplate: "Test",
+	}))
+
+	assert.Equal(t, 1, registry.Count())
+	registry.Unregister("test")
+	assert.Equal(t, 0, registry.Count())
+
+	_, exists := registry.Get("test")
+	assert.False(t, exists)
+}
+
+func TestRegistry_ConfigPath(t *testing.T) {
+	t.Run("default empty path", func(t *testing.T) {
+		registry := NewRegistry()
+		assert.Equal(t, "", registry.ConfigPath())
+	})
+
+	t.Run("custom path", func(t *testing.T) {
+		registry := NewRegistry(WithConfigPath("/custom/path.yaml"))
+		assert.Equal(t, "/custom/path.yaml", registry.ConfigPath())
+	})
+}
+
+func TestRegistry_GetAll(t *testing.T) {
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(Capability{ID: "a", Name: "A", PromptTemplate: "A", Category: "code"}))
+	require.NoError(t, registry.Register(Capability{ID: "b", Name: "B", PromptTemplate: "B", Category: "debug"}))
+
+	all := registry.GetAll()
+	assert.Len(t, all, 2)
+
+	// Verify it's a copy (modifying shouldn't affect registry)
+	all[0].Name = "Modified"
+	original, _ := registry.Get("a")
+	assert.Equal(t, "A", original.Name)
+}
+
+func TestRegistry_Reload(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	registry := NewRegistry(WithLogger(logger), WithConfigPath("nonexistent.yaml"))
+
+	err := registry.Reload()
+	assert.Error(t, err) // Should fail because file doesn't exist
+}
+
+func TestExecutor_Options(t *testing.T) {
+	t.Run("WithExecutorClient", func(t *testing.T) {
+		client := slack.New("xoxb-test")
+		executor := NewExecutor(WithExecutorClient(client))
+		assert.NotNil(t, executor.client)
+	})
+
+	t.Run("WithMessageHandler", func(t *testing.T) {
+		handler := func(ctx context.Context, userID, channelID, message string) error { return nil }
+		executor := NewExecutor(WithMessageHandler(handler))
+		assert.NotNil(t, executor.MessageHandler)
+	})
+
+	t.Run("WithExecutorLogger", func(t *testing.T) {
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		executor := NewExecutor(WithExecutorLogger(logger))
+		assert.NotNil(t, executor.logger)
+	})
+}
+
+func TestExecutor_SetClient(t *testing.T) {
+	executor := NewExecutor()
+	assert.Nil(t, executor.client)
+	executor.SetClient(&slack.Client{})
+	assert.NotNil(t, executor.client)
+}
+
+func TestNewBrainIntegration(t *testing.T) {
+	t.Run("nil brain", func(t *testing.T) {
+		bi := NewBrainIntegration(nil)
+		assert.Nil(t, bi.brain)
+	})
+}
+
+func TestBrainIntegration_SetLogger(t *testing.T) {
+	bi := &BrainIntegration{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bi.SetLogger(logger)
+	assert.NotNil(t, bi.logger)
+}
