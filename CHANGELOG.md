@@ -1,5 +1,15 @@
 # CHANGELOG.md
 
+## [v0.28.1] - 2026-03-15
+
+### Fixed
+- **Docker Entrypoint Mount** - Resolved remote image entrypoint override issues:
+  - Fixed `runuser` HOME environment variable for Debian 12 compatibility
+  - Corrected entrypoint mount relative path
+  - Removed temporary entrypoint mount (remote image now rebuilt with fix)
+
+---
+
 ## [v0.28.0] - 2026-03-15
 
 ### Added
