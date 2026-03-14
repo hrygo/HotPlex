@@ -330,6 +330,13 @@ func (p *ClaudeCodeProvider) ParseEvent(line string) ([]*ProviderEvent, error) {
 		event.ToolID = msg.MessageID // Some use MessageID for result
 		event.ToolName = msg.Name
 
+		// Debug log: track tool name for skill detection
+		if msg.Name != "" {
+			p.logger.Debug("Tool result",
+				"tool_name", msg.Name,
+				"subtype", msg.Subtype)
+		}
+
 		for _, block := range msg.GetContentBlocks() {
 			if block.Type == "tool_result" {
 				if event.ToolID == "" {
