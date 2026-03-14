@@ -44,6 +44,35 @@ HOTPLEX_SLACK_BOT_TOKEN=xoxb-...
 
 ---
 
+### ChatApps Configuration
+
+#### Core Environment Variables
+
+| Variable | Description |
+| :------- | :---------- |
+| `HOTPLEX_CHATAPPS_ENABLED` | Enable/disable all ChatApps |
+| `HOTPLEX_CHATAPPS_CONFIG_DIR` | Directory for platform configs |
+| `HOTPLEX_FEISHU_ENABLED` | Enable Feishu (飞书) adapter |
+| `HOTPLEX_FEISHU_APP_ID` | Feishu App ID |
+| `HOTPLEX_FEISHU_APP_SECRET` | Feishu App Secret |
+| `HOTPLEX_FEISHU_VERIFICATION_TOKEN` | Feishu verification token |
+| `HOTPLEX_DINGTALK_ENABLED` | Enable DingTalk (钉钉) adapter |
+
+#### Configuration Directory
+
+ChatApps can be configured via YAML files in a config directory:
+
+```bash
+export HOTPLEX_CHATAPPS_CONFIG_DIR=/etc/hotplex/chatapps
+```
+
+Place platform-specific configs in this directory:
+- `slack.yaml` - Slack configuration
+- `feishu.yaml` - Feishu configuration
+- `dingtalk.yaml` - DingTalk configuration
+
+---
+
 ### The Vision: Ubiquitous Intelligence
 
 Our goal is a **Unified Agentic Surface**. You build the logic once; HotPlex ensures that every interaction is perfectly tailored to the unique aesthetics and capabilities of the platform.

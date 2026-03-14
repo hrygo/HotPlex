@@ -6,6 +6,89 @@ Moving from local development to a production-grade deployment requires a focus 
 
 ---
 
+### Command Line Options
+
+HotPlex supports the following command line flags:
+
+| Flag | Description |
+| :--- | :---------- |
+| `--config` | Path to server config YAML file |
+| `--config-dir` | ChatApps config directory |
+| `--env-file` | Path to .env file |
+
+```bash
+# Use custom config file
+./hotplexd --config /etc/hotplex/config.yaml
+
+# Use custom env file
+./hotplexd --env-file /etc/hotplex/.env
+
+# Use custom ChatApps config directory
+./hotplexd --config-dir /etc/hotplex/chatapps
+```
+
+---
+
+### Configuration File Discovery
+
+HotPlex automatically discovers configuration files in the following priority order:
+
+#### .env File Discovery
+
+1. **CLI Flag**: `--env-file` parameter
+2. **Environment Variable**: `ENV_FILE`
+3. **Current Directory**: `.env` in working directory
+4. **XDG Config**: `~/.config/hotplex/.env` (fallback)
+
+```bash
+# Priority 1: Explicit flag
+./hotplexd --env-file /path/to/.env
+
+# Priority 2: ENV_FILE environment variable
+export ENV_FILE=/path/to/.env
+./hotplexd
+
+# Priority 3: .env in current directory
+./hotplexd  # looks for .env in CWD
+
+# Priority 4: XDG fallback
+./hotplexd  # looks for ~/.config/hotplex/.env
+```
+
+---
+
+### XDG Base Directory Support
+
+HotPlex follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec.html) for configuration and data files.
+
+| Environment Variable | Default Value | Description |
+| :------------------- | :------------ | :---------- |
+| `XDG_CONFIG_HOME` | `~/.config` | Configuration files directory |
+| `XDG_DATA_HOME` | `~/.local/share` | Data files directory |
+| `XDG_STATE_HOME` | `~/.local/state` | State files directory |
+
+#### HotPlex XDG Paths
+
+| Path | Environment Variable Override | Default Location |
+| :--- | :---------------------------- | :--------------- |
+| Config | `HOTPLEX_CONFIG_DIR` | `~/.config/hotplex` |
+| Data | `HOTPLEX_DATA_ROOT` | `~/.local/share/hotplex` |
+| Logs | - | `~/.local/share/hotplex/logs` |
+| Sessions | - | `~/.config/hotplex/sessions` |
+
+```bash
+# Example: Custom XDG paths
+export XDG_CONFIG_HOME=/opt/hotplex/config
+export XDG_DATA_HOME=/opt/hotplex/data
+./hotplexd
+
+# Or use environment variables directly
+export HOTPLEX_DATA_ROOT=/mnt/hotplex/data
+export HOTPLEX_CONFIG_DIR=/mnt/hotplex/config
+```
+
+---
+
 ### Deployment Strategies
 
 #### 1. 🐳 Containerization (Recommended)
