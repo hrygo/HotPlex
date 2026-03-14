@@ -264,7 +264,7 @@ func TestBuildSessionStatsCard(t *testing.T) {
 	if !strings.Contains(statsContent, "⏱️ 2.3s") {
 		t.Errorf("Expected duration in stats, got %s", statsContent)
 	}
-	if !strings.Contains(statsContent, "⚡ 1200 tokens") {
+	if !strings.Contains(statsContent, "⚡ 1.2K tokens") {
 		t.Errorf("Expected token usage in stats, got %s", statsContent)
 	}
 	if !strings.Contains(statsContent, "步骤") || !strings.Contains(statsContent, "3/5") {
