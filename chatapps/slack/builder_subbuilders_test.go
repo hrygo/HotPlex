@@ -53,6 +53,93 @@ func TestToolMessageBuilder_BuildToolResultMessage(t *testing.T) {
 	assert.GreaterOrEqual(t, len(blocks), 1)
 }
 
+func TestToolMessageBuilder_BuildToolResultMessage_SkillTool(t *testing.T) {
+	builder := NewMessageBuilder(&Config{})
+
+	// Test skill tool with "skill:" prefix - success case
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeToolResult,
+		Content: "Skill output content here",
+		Metadata: map[string]any{
+			"tool_name": "skill:simplify",
+			"success":   true,
+		},
+	}
+
+	blocks := builder.Build(msg)
+
+	assert.NotNil(t, blocks)
+	assert.Equal(t, 1, len(blocks))
+	// Verify the simplified output format (single block for skill)
+	assert.IsType(t, &slack.SectionBlock{}, blocks[0])
+}
+
+func TestToolMessageBuilder_BuildToolResultMessage_SkillToolError(t *testing.T) {
+	builder := NewMessageBuilder(&Config{})
+
+	// Test skill tool with error
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeToolResult,
+		Content: "Error: skill failed",
+		Metadata: map[string]any{
+			"tool_name": "skill:loop",
+			"success":   false,
+		},
+	}
+
+	blocks := builder.Build(msg)
+
+	assert.NotNil(t, blocks)
+	assert.Equal(t, 1, len(blocks))
+	// Verify single block for skill error (no preview)
+	assert.IsType(t, &slack.SectionBlock{}, blocks[0])
+}
+
+func TestToolMessageBuilder_BuildToolResultMessage_LongRunning(t *testing.T) {
+	builder := NewMessageBuilder(&Config{})
+
+	// Test long-running tool with duration > 500ms
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeToolResult,
+		Content: "Large output content",
+		Metadata: map[string]any{
+			"tool_name":     "Bash",
+			"success":       true,
+			"duration_ms":   int64(1500),
+			"content_length": int64(2048),
+		},
+	}
+
+	blocks := builder.Build(msg)
+
+	assert.NotNil(t, blocks)
+	assert.GreaterOrEqual(t, len(blocks), 1)
+	// Verify duration is shown
+	assert.IsType(t, &slack.SectionBlock{}, blocks[0])
+}
+
+func TestToolMessageBuilder_BuildToolResultMessage_ErrorWithPreview(t *testing.T) {
+	builder := NewMessageBuilder(&Config{})
+
+	// Test error with preview content
+	longError := "Error: connection failed" + string(make([]byte, 300))
+	msg := &base.ChatMessage{
+		Type:    base.MessageTypeToolResult,
+		Content: longError,
+		Metadata: map[string]any{
+			"tool_name": "Bash",
+			"success":   false,
+		},
+	}
+
+	blocks := builder.Build(msg)
+
+	assert.NotNil(t, blocks)
+	assert.Equal(t, 2, len(blocks)) // summary + error preview
+	// Verify error preview block exists
+	assert.IsType(t, &slack.ContextBlock{}, blocks[1])
+}
+
 // =============================================================================
 // AnswerMessageBuilder Tests
 // =============================================================================
