@@ -1,5 +1,15 @@
 # CHANGELOG.md
 
+## [v0.27.5] - 2026-03-14
+
+### Changed
+- **GitHub Actions Node.js 24 Upgrade** - Proactively opted into Node.js 24 to eliminate deprecation warnings:
+  - Added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` to all workflows
+  - Node.js 20 actions will be forced to Node.js 24 on June 2nd, 2026
+  - Affected workflows: ci.yml, release.yml, deploy-docs.yml
+
+---
+
 ## [v0.27.4] - 2026-03-14
 
 ### Changed
