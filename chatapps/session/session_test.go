@@ -23,6 +23,7 @@ func TestNewSessionManager(t *testing.T) {
 	sm := NewSessionManager("test-namespace")
 	if sm == nil {
 		t.Error("NewSessionManager should not return nil")
+		return
 	}
 	if sm.namespace != "test-namespace" {
 		t.Errorf("namespace = %s, want test-namespace", sm.namespace)

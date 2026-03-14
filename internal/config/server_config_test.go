@@ -105,6 +105,7 @@ func TestServerLoader_Get(t *testing.T) {
 	cfg := loader.Get()
 	if cfg == nil {
 		t.Error("Get should not return nil")
+		return
 	}
 	
 	if cfg.Server.Port != "9090" {
