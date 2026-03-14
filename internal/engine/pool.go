@@ -233,7 +233,8 @@ func (sm *SessionPool) startSession(ctx context.Context, sessionID string, cfg S
 
 	go monitorStartup(startupCtx, startedCh, cancel)
 
-	uniqueStr := fmt.Sprintf("%s:session:%s", sm.opts.Namespace, sessionID)
+	// Use direct string concatenation for better performance
+	uniqueStr := sm.opts.Namespace + ":session:" + sessionID
 	// Check if session needs new ProviderSessionID (for /clear command)
 	var providerSessionID string
 	if sm.resetSessions[sessionID] {
@@ -451,7 +452,7 @@ func monitorStartup(startupCtx context.Context, startedCh <-chan error, cancel c
 
 // cleanupLoop runs periodic cleanup of idle sessions.
 func (sm *SessionPool) cleanupLoop() {
-	ticker := time.NewTicker(CleanupCheckInterval)
+	ticker := time.NewTicker(sm.cleanupInterval())
 	defer ticker.Stop()
 
 	for {
@@ -462,6 +463,20 @@ func (sm *SessionPool) cleanupLoop() {
 			return
 		}
 	}
+}
+
+// cleanupInterval returns the dynamic interval for cleanup checks.
+// It scales with the session timeout: interval = timeout / 4,
+// clamped to [1min, 5min].
+func (sm *SessionPool) cleanupInterval() time.Duration {
+	interval := sm.timeout / 4
+	if interval > 5*time.Minute {
+		interval = 5 * time.Minute
+	}
+	if interval < 1*time.Minute {
+		interval = 1 * time.Minute
+	}
+	return interval
 }
 
 // cleanupIdleSessions removes sessions that have exceeded the idle timeout.

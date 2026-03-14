@@ -13,6 +13,7 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/chatapps/feishu"
 	"github.com/hrygo/hotplex/chatapps/slack"
+	"github.com/hrygo/hotplex/chatapps/slack/apphome"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/internal/sys"
 	"github.com/hrygo/hotplex/provider"
@@ -339,6 +340,25 @@ func setupPlatform(
 	if err := manager.Register(adapter); err != nil {
 		logger.Error("Failed to register adapter", "platform", platform, "error", err)
 	} else {
+		// Setup AppHome capability center for Slack after registration
+		if platform == "slack" {
+			if slackAdapter, ok := adapter.(*slack.Adapter); ok {
+				client := slackAdapter.GetSlackClient()
+				if client != nil {
+					appHomeConfig := apphome.Config{
+						Enabled:           true,
+						CapabilitiesPath:  os.Getenv("HOTPLEX_SLACK_CAPABILITIES_PATH"),
+					}
+					// Pass nil for brain - can be set later if needed
+					handler, _, _ := apphome.Setup(client, nil, appHomeConfig, logger)
+					if handler != nil {
+						slackAdapter.SetAppHomeHandler(handler)
+						logger.Info("AppHome capability center initialized", "platform", platform)
+					}
+				}
+			}
+		}
+
 		if pc != nil && pc.SourceFile != "" {
 			logger.Info("Platform successfully initialized from configuration file", "platform", platform, "file", pc.SourceFile)
 		} else {

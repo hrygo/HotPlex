@@ -15,6 +15,7 @@ import (
 	"github.com/hrygo/hotplex/chatapps/base"
 	"github.com/hrygo/hotplex/chatapps/command"
 	"github.com/hrygo/hotplex/chatapps/session"
+	"github.com/hrygo/hotplex/chatapps/slack/apphome"
 	"github.com/hrygo/hotplex/engine"
 	"github.com/hrygo/hotplex/internal/sys"
 	"github.com/hrygo/hotplex/plugins/storage"
@@ -53,6 +54,9 @@ type Adapter struct {
 	// Background cleanup for thread ownership
 	ownershipCleanupCtx    context.Context
 	ownershipCleanupCancel context.CancelFunc
+
+	// App Home handler for capability center
+	apphomeHandler *apphome.Handler
 
 	channelToTeam sync.Map // Map channelID to TeamID for streaming functions
 	channelToUser sync.Map // Map channelID to UserID for streaming functions
@@ -260,6 +264,16 @@ func (a *Adapter) SetEngine(eng *engine.Engine) {
 
 	// Register command executors after engine is set
 	a.registerCommands()
+}
+
+// SetAppHomeHandler sets the App Home handler for the capability center
+func (a *Adapter) SetAppHomeHandler(h *apphome.Handler) {
+	a.apphomeHandler = h
+}
+
+// GetSlackClient returns the Slack client for external use
+func (a *Adapter) GetSlackClient() *slack.Client {
+	return a.client
 }
 
 // registerCommands registers all command executors to the registry

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/chatapps/base"
+	"github.com/hrygo/hotplex/chatapps/slack/apphome"
 	"github.com/hrygo/hotplex/internal/telemetry"
 	"github.com/slack-go/slack"
 )
@@ -83,6 +84,22 @@ func (a *Adapter) handleEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventData json.RawMessage) {
+	// First, extract event type to route to appropriate handler
+	var eventType struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(eventData, &eventType); err != nil {
+		a.Logger().Error("Parse event type failed", "error", err)
+		return
+	}
+
+	// Handle app_home_opened event
+	if eventType.Type == "app_home_opened" {
+		a.handleAppHomeOpened(ctx, eventData)
+		return
+	}
+
+	// For all other events, parse as message event
 	var msgEvent MessageEvent
 	if err := json.Unmarshal(eventData, &msgEvent); err != nil {
 		a.Logger().Error("Parse message event failed", "error", err)
@@ -255,6 +272,42 @@ func (a *Adapter) handleEventCallback(ctx context.Context, teamID string, eventD
 	a.storeUserMessage(ctx, msg)
 
 	a.webhook.Run(ctx, a.Handler(), msg)
+}
+
+// handleAppHomeOpened handles the app_home_opened event
+func (a *Adapter) handleAppHomeOpened(ctx context.Context, eventData json.RawMessage) {
+	if a.apphomeHandler == nil {
+		a.Logger().Debug("AppHome handler not configured, skipping app_home_opened event")
+		return
+	}
+
+	var event struct {
+		Type    string `json:"type"`
+		User    string `json:"user"`
+		Channel string `json:"channel"`
+		Tab     string `json:"tab"`
+	}
+	if err := json.Unmarshal(eventData, &event); err != nil {
+		a.Logger().Error("Parse app_home_opened event failed", "error", err)
+		return
+	}
+
+	a.Logger().Debug("Handling app_home_opened event",
+		"user", event.User,
+		"channel", event.Channel,
+		"tab", event.Tab)
+
+	homeEvent := &apphome.HomeOpenedEvent{
+		User:    event.User,
+		Channel: event.Channel,
+		Tab:     event.Tab,
+	}
+
+	if err := a.apphomeHandler.HandleHomeOpened(ctx, homeEvent); err != nil {
+		a.Logger().Error("Failed to handle app_home_opened",
+			"user", event.User,
+			"error", err)
+	}
 }
 
 // verifySignature verifies the request signature using Slack SDK's SecretsVerifier

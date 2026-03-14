@@ -20,14 +20,13 @@ const (
 
 // Scanner buffer sizes for CLI output parsing.
 const (
-	ScannerInitialBufSize = 256 * 1024       // 256 KB
-	ScannerMaxBufSize     = 10 * 1024 * 1024 // 10 MB
+	ScannerInitialBufSize = 4 * 1024   // 4 KB - start small
+	ScannerMaxBufSize    = 512 * 1024 // 512 KB - sufficient for most CLI outputs
 )
 
 // Session lifecycle constants.
 const (
-	DefaultReadyTimeout  = 10 * time.Second // Maximum time to wait for session to be ready
-	CleanupCheckInterval = 1 * time.Minute  // Interval between idle session cleanup checks
+	DefaultReadyTimeout = 10 * time.Second // Maximum time to wait for session to be ready
 )
 
 // SessionConfig contains the minimal configuration needed for session management.
