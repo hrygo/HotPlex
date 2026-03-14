@@ -12,10 +12,11 @@ CONFIG_DIR="${HOTPLEX_HOME}/.hotplex"
 
 # ------------------------------------------------------------------------------
 # Helper: Run commands as the hotplex user if currently root
+# Uses --setenv to explicitly override HOME (avoids -m preserving root's HOME)
 # ------------------------------------------------------------------------------
 run_as_hotplex() {
     if [[ "$(id -u)" = "0" ]]; then
-        runuser -u hotplex -m -- env HOME="${HOTPLEX_HOME}" "$@"
+        runuser -u hotplex --setenv HOME="${HOTPLEX_HOME}" -- "$@"
     else
         "$@"
     fi
@@ -145,10 +146,10 @@ fi
 # ------------------------------------------------------------------------------
 if [[ -n "${GIT_USER_NAME:-}" ]]; then
     echo "--> Setting Git identity: ${GIT_USER_NAME}"
-    run_as_hotplex git config --global user.name "${GIT_USER_NAME}"
+    run_as_hotplex git config --global user.name "${GIT_USER_NAME}" || echo "    Warning: Failed to set git user.name"
 fi
 if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
-    run_as_hotplex git config --global user.email "${GIT_USER_EMAIL}"
+    run_as_hotplex git config --global user.email "${GIT_USER_EMAIL}" || echo "    Warning: Failed to set git user.email"
 fi
 
 # Auto-configure safe.directory for mounted project volumes
