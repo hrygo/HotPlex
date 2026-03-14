@@ -242,12 +242,33 @@ func (b *CardBuilder) BuildErrorCard(errorMsg string) (string, error) {
 	return b.marshalCard(card)
 }
 
+// formatTokenCount formats token count in compact form (1.2K, 1.00M)
+// Uses proper threshold: K for < 1M, M for >= 1M
+func formatTokenCount(count int) string {
+	if count >= 1000000 {
+		return fmt.Sprintf("%.2fM", float64(count)/1000000)
+	}
+	if count >= 1000 {
+		kValue := float64(count) / 1000
+		// If k value >= 999.5, show M to avoid rounding issues
+		if kValue >= 999.5 {
+			return fmt.Sprintf("%.2fM", float64(count)/1000000)
+		}
+		// Use integer for >= 100K
+		if kValue >= 100 {
+			return fmt.Sprintf("%.0fK", kValue)
+		}
+		return fmt.Sprintf("%.1fK", kValue)
+	}
+	return fmt.Sprintf("%d", count)
+}
+
 // BuildSessionStatsCard builds a session statistics card
 // Event: session_stats - Gray note with stats
 func (b *CardBuilder) BuildSessionStatsCard(duration string, tokenUsage int, otherStats map[string]string) (string, error) {
-	// Build stats text
+	// Build stats text with formatted token count
 	var statsBuilder strings.Builder
-	_, _ = fmt.Fprintf(&statsBuilder, "⏱️ %s • ⚡ %d tokens", duration, tokenUsage)
+	_, _ = fmt.Fprintf(&statsBuilder, "⏱️ %s • ⚡ %s tokens", duration, formatTokenCount(tokenUsage))
 
 	// Add additional stats if provided
 	for key, value := range otherStats {

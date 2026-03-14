@@ -32,11 +32,21 @@ func (b *StatsMessageBuilder) BuildSessionStatsMessage(msg *base.ChatMessage) []
 			stats = append(stats, "⏱️ "+FormatDuration(duration))
 		}
 
-		// Tokens (show in/out separately) - using input_tokens/output_tokens from SessionStats.ToSummary
+		// Tokens (show in/out separately with cache info)
+		// input_tokens/output_tokens already include cache tokens from API
 		tokensIn := extractInt64(msg.Metadata, "input_tokens")
 		tokensOut := extractInt64(msg.Metadata, "output_tokens")
+		cacheRead := extractInt64(msg.Metadata, "cache_read_tokens")
+		cacheWrite := extractInt64(msg.Metadata, "cache_write_tokens")
 		if tokensIn > 0 || tokensOut > 0 {
-			stats = append(stats, fmt.Sprintf("⚡ %s/%s", formatTokenCount(tokensIn), formatTokenCount(tokensOut)))
+			// Show cache info if available: "⚡ 100K/50K (cache: 10K/5K)"
+			if cacheRead > 0 || cacheWrite > 0 {
+				stats = append(stats, fmt.Sprintf("⚡ %s/%s (cache: %s/%s)",
+					formatTokenCount(tokensIn), formatTokenCount(tokensOut),
+					formatTokenCount(cacheRead), formatTokenCount(cacheWrite)))
+			} else {
+				stats = append(stats, fmt.Sprintf("⚡ %s/%s", formatTokenCount(tokensIn), formatTokenCount(tokensOut)))
+			}
 		}
 
 		// Files modified
@@ -70,12 +80,23 @@ func extractInt64(metadata map[string]any, key string) int64 {
 }
 
 // formatTokenCount formats token count in compact form (1.2K)
+// formatTokenCount formats token count in compact form (1.2K, 1.00M)
+// Uses proper threshold: K for < 1M, M for >= 1M
 func formatTokenCount(count int64) string {
 	if count >= 1000000 {
-		return fmt.Sprintf("%.1fM", float64(count)/1000000)
+		return fmt.Sprintf("%.2fM", float64(count)/1000000)
 	}
 	if count >= 1000 {
-		return fmt.Sprintf("%.1fK", float64(count)/1000)
+		kValue := float64(count) / 1000
+		// If k value >= 999.5, show M to avoid rounding issues (999.9K -> 1000.0K)
+		if kValue >= 999.5 {
+			return fmt.Sprintf("%.2fM", float64(count)/1000000)
+		}
+		// Use integer for >= 100K
+		if kValue >= 100 {
+			return fmt.Sprintf("%.0fK", kValue)
+		}
+		return fmt.Sprintf("%.1fK", kValue)
 	}
 	return fmt.Sprintf("%d", count)
 }

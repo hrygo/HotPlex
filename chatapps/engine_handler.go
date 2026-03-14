@@ -111,9 +111,14 @@ func (w *engineWrapper) GetSessionStats(sessionID string) *SessionStats {
 		return nil
 	}
 	return &SessionStats{
-		SessionID:     stats.SessionID,
-		Status:        stats.SessionID,
-		TotalTokens:   int64(stats.InputTokens + stats.OutputTokens + stats.CacheReadTokens + stats.CacheWriteTokens),
+		SessionID: stats.SessionID,
+		Status:    stats.SessionID,
+		// Token billing formula:
+		// input_tokens already includes cache_read_tokens
+		// output_tokens already includes cache_write_tokens
+		// Billable = input + output - cache_read*0.9 - cache_write*0.9
+		// (cache is charged at 10%, so we subtract 90% of cache tokens)
+		TotalTokens:   int64(stats.InputTokens) + int64(stats.OutputTokens) - int64(float64(stats.CacheReadTokens)*0.9) - int64(float64(stats.CacheWriteTokens)*0.9),
 		InputTokens:   int64(stats.InputTokens),
 		OutputTokens:  int64(stats.OutputTokens),
 		CacheRead:     int64(stats.CacheReadTokens),

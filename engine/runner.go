@@ -559,21 +559,27 @@ func (r *Engine) handleNormalizedResult(pevt *provider.ProviderEvent, stats *Ses
 		// Any error in handleSessionStats (like fallback failure) must bubble up
 		// to the Engine so that Execute() returns an error.
 		if err := callback("session_stats", &event.SessionStatsData{
-			SessionID:       cfg.SessionID,
-			StartTime:       stats.StartTime.Unix(),
-			EndTime:         time.Now().Unix(),
-			TotalDurationMs: stats.TotalDurationMs,
-			InputTokens:     stats.InputTokens,
-			OutputTokens:    stats.OutputTokens,
-			TotalTokens:     stats.InputTokens + stats.OutputTokens,
-			ToolCallCount:   stats.ToolCallCount,
-			ToolsUsed:       toolsUsed,
-			FilesModified:   stats.FilesModified,
-			FilePaths:       filePaths,
-			ModelUsed:       r.provider.Name(),
-			TotalCostUSD:    costUSD,
-			IsError:         pevt.IsError,
-			ErrorMessage:    pevt.Error,
+			SessionID:        cfg.SessionID,
+			StartTime:        stats.StartTime.Unix(),
+			EndTime:          time.Now().Unix(),
+			TotalDurationMs:  stats.TotalDurationMs,
+			InputTokens:      stats.InputTokens,
+			OutputTokens:     stats.OutputTokens,
+			CacheReadTokens:  stats.CacheReadTokens,
+			CacheWriteTokens: stats.CacheWriteTokens,
+			// Token billing formula:
+			// input_tokens already includes cache_read_tokens
+			// output_tokens already includes cache_write_tokens
+			// Billable = input + output - cache_read*0.9 - cache_write*0.9
+			TotalTokens:   stats.InputTokens + stats.OutputTokens - int32(float64(stats.CacheReadTokens)*0.9) - int32(float64(stats.CacheWriteTokens)*0.9),
+			ToolCallCount: stats.ToolCallCount,
+			ToolsUsed:     toolsUsed,
+			FilesModified: stats.FilesModified,
+			FilePaths:     filePaths,
+			ModelUsed:     r.provider.Name(),
+			TotalCostUSD:  costUSD,
+			IsError:       pevt.IsError,
+			ErrorMessage:  pevt.Error,
 		}); err != nil {
 			return err
 		}
