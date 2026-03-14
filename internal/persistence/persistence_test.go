@@ -195,12 +195,12 @@ func TestInMemoryMarkerStore_Concurrent(t *testing.T) {
 	done := make(chan bool, 20)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			store.Create("session-" + string(rune('0'+id)))
-			store.Exists("session-" + string(rune('0'+id)))
+			_ = store.Create("session-" + string(rune('0'+id)))
+			_, _ = store.Exists("session-" + string(rune('0'+id)))
 			done <- true
 		}(i)
 		go func(id int) {
-			store.Delete("session-" + string(rune('0'+id)))
+			_ = store.Delete("session-" + string(rune('0'+id)))
 			done <- true
 		}(i)
 	}

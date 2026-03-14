@@ -32,12 +32,14 @@ security:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
 	if _, err := tmpFile.WriteString(content); err != nil {
 		t.Fatalf("Failed to write temp file: %v", err)
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -66,12 +68,14 @@ func TestNewServerLoader_InvalidYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
 	if _, err := tmpFile.WriteString("invalid: yaml: content:"); err != nil {
 		t.Fatalf("Failed to write temp file: %v", err)
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	_, err = NewServerLoader(tmpFile.Name(), nil)
 	if err == nil {
@@ -84,10 +88,14 @@ func TestServerLoader_Get(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString("server:\n  port: \"9090\"\n")
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString("server:\n  port: \"9090\"\n"); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -109,14 +117,18 @@ func TestServerLoader_GetSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
 	content := `
 engine:
   system_prompt: "You are a helpful assistant"
 `
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -134,10 +146,14 @@ func TestServerLoader_GetTimeout_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString("server:\n  port: \"8080\"\n")
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString("server:\n  port: \"8080\"\n"); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -156,14 +172,18 @@ func TestServerLoader_GetTimeout_Custom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
 	content := `
 engine:
   timeout: 45m
 `
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -181,10 +201,14 @@ func TestServerLoader_GetIdleTimeout_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString("server:\n  port: \"8080\"\n")
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString("server:\n  port: \"8080\"\n"); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -203,10 +227,14 @@ func TestServerLoader_GetWorkDir_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString("server:\n  port: \"8080\"\n")
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString("server:\n  port: \"8080\"\n"); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -224,10 +252,14 @@ func TestServerLoader_GetPort_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString("server:\n  port: \"\"\n")
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString("server:\n  port: \"\"\n"); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -255,10 +287,14 @@ security:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	_, err = NewServerLoader(tmpFile.Name(), nil)
 	if err == nil {
@@ -275,10 +311,14 @@ server:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	_, err = NewServerLoader(tmpFile.Name(), nil)
 	if err == nil {
@@ -295,10 +335,14 @@ engine:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	_, err = NewServerLoader(tmpFile.Name(), nil)
 	if err == nil {
@@ -315,10 +359,14 @@ engine:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	_, err = NewServerLoader(tmpFile.Name(), nil)
 	if err == nil {
@@ -375,10 +423,14 @@ security:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -403,10 +455,14 @@ server:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -429,10 +485,14 @@ server:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
@@ -456,10 +516,14 @@ engine:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 	
-	tmpFile.WriteString(content)
-	tmpFile.Close()
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 	
 	loader, err := NewServerLoader(tmpFile.Name(), nil)
 	if err != nil {
