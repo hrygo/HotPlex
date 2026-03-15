@@ -1,5 +1,35 @@
 # CHANGELOG.md
 
+## [v0.29.0] - 2026-03-15
+
+### Added
+- **Slack App Home Capability Center** - Interactive form-based interface for predefined AI tasks:
+  - Code Review, Debugging, Documentation, Testing, Refactoring workflows
+  - Native Slack Block Kit modal dialogs with task configuration
+  - Direct message routing to running sessions
+
+### Changed
+- **Message Storage Chain-of-Responsibility** - Refactored storage handlers into modular chain:
+  - Pluggable handler chain for user/bot message processing
+  - Retry mechanism with exponential backoff for transient failures
+  - Configurable retry policy (max attempts, delays, multiplier)
+- **Session ID Documentation** - Clarified sessionID generation components:
+  - `platform:userID:botUserID:channelID:threadID`
+  - Deterministic mapping ensures consistent session identity
+
+### Fixed
+- **Session ID Mapping** - Enforced deterministic session ID mapping in engine:
+  - Fixed stale marker handling that caused session collisions
+  - Resolved race condition in session creation
+- **Engine Concurrency** - Reduced lock scope in `startSession`:
+  - Improved throughput under high request volume
+  - Fixed potential deadlock in session pool
+- **Session Resume Error** - Prevented `no_text` error on failed resume:
+  - Graceful fallback when session context unavailable
+  - Added `.claude.json` for CLI configuration persistence
+
+---
+
 ## [v0.28.1] - 2026-03-15
 
 ### Fixed
