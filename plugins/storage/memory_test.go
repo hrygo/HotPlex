@@ -455,3 +455,44 @@ func BenchmarkMemoryStorage_ConcurrentWrite(b *testing.B) {
 		}
 	})
 }
+
+// TestMemoryStorage_List_NegativeLimit tests List with negative limit
+func TestMemoryStorage_List_NegativeLimit(t *testing.T) {
+	factory := &MemoryFactory{}
+	store, err := factory.Create(PluginConfig{})
+	if err != nil {
+		t.Fatalf("Failed to create memory storage: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Store a message
+	msg := &ChatAppMessage{
+		ChatSessionID:     "neg-limit-test",
+		ChatPlatform:      "slack",
+		ChatUserID:        "U123456",
+		EngineSessionID:   uuid.New(),
+		ProviderSessionID: "provider-1",
+		ProviderType:      "claude-code",
+		MessageType:       "user_input",
+		Content:           "Test message",
+	}
+	err = store.StoreUserMessage(ctx, msg)
+	if err != nil {
+		t.Fatalf("Failed to store message: %v", err)
+	}
+
+	// Test with negative limit - should return all messages
+	messages, err := store.List(ctx, &MessageQuery{
+		ChatSessionID: "neg-limit-test",
+		Limit:         -1,
+	})
+	if err != nil {
+		t.Fatalf("Failed to list messages: %v", err)
+	}
+
+	// Negative limit should return all (or treated as no limit)
+	if len(messages) != 1 {
+		t.Errorf("Expected 1 message with negative limit, got %d", len(messages))
+	}
+}

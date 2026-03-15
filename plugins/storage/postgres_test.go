@@ -47,7 +47,10 @@ func TestGetPostgreConfig(t *testing.T) {
 		"max_lifetime":   600,
 	}
 
-	pgConfig := getPostgreConfig(pluginConfig)
+	pgConfig, err := getPostgreConfig(pluginConfig)
+	if err != nil {
+		t.Fatalf("Failed to get config: %v", err)
+	}
 
 	if pgConfig.Host != "192.168.1.1" {
 		t.Errorf("Expected host 192.168.1.1, got %s", pgConfig.Host)
@@ -76,7 +79,10 @@ func TestGetPostgreConfig(t *testing.T) {
 func TestGetPostgreConfigDefaults(t *testing.T) {
 	pluginConfig := PluginConfig{}
 
-	pgConfig := getPostgreConfig(pluginConfig)
+	pgConfig, err := getPostgreConfig(pluginConfig)
+	if err != nil {
+		t.Fatalf("Failed to get config: %v", err)
+	}
 
 	if pgConfig.Host != "localhost" {
 		t.Errorf("Expected default host localhost, got %s", pgConfig.Host)
@@ -308,7 +314,11 @@ func TestParsePostgresDSN(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parsePostgresDSN(tt.dsn)
+			result, err := parsePostgresDSN(tt.dsn)
+			if err != nil && tt.expected.Host != "localhost" { // Only fail if we expected success
+				t.Errorf("parsePostgresDSN error: %v", err)
+				return
+			}
 
 			if result.Host != tt.expected.Host {
 				t.Errorf("Host: expected %q, got %q", tt.expected.Host, result.Host)
@@ -343,7 +353,10 @@ func TestGetPostgreConfigWithURL(t *testing.T) {
 		"ssl_mode":  "disable",
 	}
 
-	pgConfig := getPostgreConfig(pluginConfig)
+	pgConfig, err := getPostgreConfig(pluginConfig)
+	if err != nil {
+		t.Fatalf("Failed to get config: %v", err)
+	}
 
 	// URL should take precedence
 	if pgConfig.Host != "urlhost" {
@@ -369,7 +382,10 @@ func TestGetPostgreConfigWithDSN(t *testing.T) {
 		"dsn": "postgres://dsnuser@dsnhost:5434/dsndb",
 	}
 
-	pgConfig := getPostgreConfig(pluginConfig)
+	pgConfig, err := getPostgreConfig(pluginConfig)
+	if err != nil {
+		t.Fatalf("Failed to get config: %v", err)
+	}
 
 	if pgConfig.Host != "dsnhost" {
 		t.Errorf("Expected DSN host 'dsnhost', got %q", pgConfig.Host)
@@ -382,5 +398,56 @@ func TestGetPostgreConfigWithDSN(t *testing.T) {
 	}
 	if pgConfig.Port != 5434 {
 		t.Errorf("Expected DSN port 5434, got %d", pgConfig.Port)
+	}
+}
+
+// TestParsePostgresDSN_SpecialChars tests DSN parsing with special characters in password
+func TestParsePostgresDSN_SpecialChars(t *testing.T) {
+	tests := []struct {
+		name     string
+		dsn      string
+		wantUser string
+		wantPass string
+	}{
+		{
+			name:     "password with at sign",
+			dsn:      "postgres://user:p%40ss@host:5432/db",
+			wantUser: "user",
+			wantPass: "p@ss",
+		},
+		{
+			name:     "password with colon",
+			dsn:      "postgres://user:pass%3Aword@host:5432/db",
+			wantUser: "user",
+			wantPass: "pass:word",
+		},
+		{
+			name:     "password with slash",
+			dsn:      "postgres://user:pass%2Fword@host:5432/db",
+			wantUser: "user",
+			wantPass: "pass/word",
+		},
+		{
+			name:     "password with question mark",
+			dsn:      "postgres://user:p%3Fss@host:5432/db",
+			wantUser: "user",
+			wantPass: "p?ss",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parsePostgresDSN(tt.dsn)
+			if err != nil {
+				t.Errorf("parsePostgresDSN error: %v", err)
+				return
+			}
+			if result.User != tt.wantUser {
+				t.Errorf("User: got %q, want %q", result.User, tt.wantUser)
+			}
+			if result.Password != tt.wantPass {
+				t.Errorf("Password: got %q, want %q", result.Password, tt.wantPass)
+			}
+		})
 	}
 }

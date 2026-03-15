@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -66,6 +67,11 @@ func (m *MemoryStorage) List(ctx context.Context, query *MessageQuery) ([]*ChatA
 		}
 		results = append(results, msg)
 	}
+
+	// Sort by CreatedAt DESC (newest first)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].CreatedAt.After(results[j].CreatedAt)
+	})
 
 	// Apply limit
 	if query.Limit > 0 && len(results) > query.Limit {

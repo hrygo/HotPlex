@@ -565,6 +565,7 @@ func convertToThreadMessage(msg *storage.ChatAppMessage) base.ThreadMessage {
 		FromUser:   msg.FromUserName,
 		ToUser:     msg.ToUserID,
 		CreatedAt:  msg.CreatedAt,
+		Metadata:   msg.Metadata,
 	}
 }
 

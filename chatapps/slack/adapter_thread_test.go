@@ -184,3 +184,58 @@ func TestAdapter_GetThreadMessagesByUserAsString(t *testing.T) {
 func TestAdapter_ImplementsThreadHistoryProvider(t *testing.T) {
 	var _ base.ThreadHistoryProvider = (*Adapter)(nil)
 }
+
+// TestConvertToThreadMessage_Metadata tests that Metadata field is properly copied
+func TestConvertToThreadMessage_Metadata(t *testing.T) {
+	storageMsg := &storage.ChatAppMessage{
+		ID:              "msg123",
+		ChatSessionID:   "session456",
+		ChatPlatform:    "slack",
+		ChatUserID:      "U123",
+		ChatBotUserID:   "UBOT",
+		ChatChannelID:   "C123",
+		ChatThreadID:    "T123",
+		MessageType:     types.MessageTypeUser,
+		Content:         "Hello world",
+		FromUserName:    "testuser",
+		ToUserID:        "U456",
+		CreatedAt:       time.Now(),
+		Metadata: map[string]any{
+			"thread_ts":   "1234567890.123456",
+			"channel_id":  "C123",
+			"is_ephemeral": true,
+		},
+	}
+
+	result := convertToThreadMessage(storageMsg)
+
+	if result.Metadata == nil {
+		t.Error("Expected Metadata to be copied, got nil")
+	}
+	if result.Metadata["thread_ts"] != "1234567890.123456" {
+		t.Errorf("Expected thread_ts '1234567890.123456', got %v", result.Metadata["thread_ts"])
+	}
+	if result.Metadata["is_ephemeral"] != true {
+		t.Errorf("Expected is_ephemeral true, got %v", result.Metadata["is_ephemeral"])
+	}
+}
+
+// TestConvertToThreadMessage_MetadataNil tests when source Metadata is nil
+func TestConvertToThreadMessage_MetadataNil(t *testing.T) {
+	storageMsg := &storage.ChatAppMessage{
+		ID:              "msg123",
+		ChatSessionID:   "session456",
+		ChatPlatform:    "slack",
+		MessageType:     types.MessageTypeUser,
+		Content:         "Hello world",
+		CreatedAt:       time.Now(),
+		Metadata:        nil,
+	}
+
+	result := convertToThreadMessage(storageMsg)
+
+	// Should not panic, Metadata can be nil
+	if result.ID != "msg123" {
+		t.Errorf("Expected ID 'msg123', got %s", result.ID)
+	}
+}
