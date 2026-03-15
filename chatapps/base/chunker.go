@@ -2,7 +2,6 @@ package base
 
 import (
 	"fmt"
-	"strings"
 	"unicode/utf8"
 )
 
@@ -82,9 +81,7 @@ func ChunkMessage(text string, cfg ChunkerConfig) []string {
 			}
 		}
 
-		chunkStr := string(runes[i:end])
-		chunkStr = strings.TrimRight(chunkStr, " \t")
-		chunks = append(chunks, chunkStr)
+		chunks = append(chunks, string(runes[i:end]))
 	}
 
 	// Add chunk numbering if enabled

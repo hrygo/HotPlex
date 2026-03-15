@@ -19,6 +19,10 @@ const (
 	maxAppendRetries = 3  // max retry attempts for AppendStream
 	retryDelay       = 50 * time.Millisecond
 
+	// maxAppendSize is the maximum content size per AppendStream call
+	// Slack has a limit per update; we use 3000 to leave safety margin (Slack limit is ~4000)
+	maxAppendSize = 3000
+
 	// StreamTTL is the maximum duration a Slack stream can live (~10 min TTL)
 	// Improved: Increased from 4m to 10m to support complex AI tasks
 	StreamTTL = 10 * time.Minute
@@ -117,6 +121,20 @@ func (w *NativeStreamingWriter) flushLoop() {
 	}
 }
 
+// chunkContent splits content into chunks that fit within maxAppendSize
+func (w *NativeStreamingWriter) chunkContent(content string) []string {
+	if utf8.RuneCountInString(content) <= maxAppendSize {
+		return []string{content}
+	}
+
+	// Use base chunking for large content
+	return base.ChunkMessage(content, base.ChunkerConfig{
+		MaxLen:        maxAppendSize,
+		PreserveWords: true,
+		AddNumbering:  false, // Don't add numbering for streaming updates
+	})
+}
+
 func (w *NativeStreamingWriter) flushBuffer() {
 	w.mu.Lock()
 	if w.buf.Len() == 0 {
@@ -125,7 +143,6 @@ func (w *NativeStreamingWriter) flushBuffer() {
 	}
 
 	content := w.buf.String()
-	contentLen := len(content)
 	w.buf.Reset()
 	started := w.started
 	streamExpired := w.streamExpired
@@ -155,55 +172,68 @@ func (w *NativeStreamingWriter) flushBuffer() {
 	}
 
 	// 增量推送到流（带重试机制）
+	// 如果内容超过 maxAppendSize，需要分块发送
+	chunks := w.chunkContent(content)
 	var lastErr error
-	for attempt := 1; attempt <= maxAppendRetries; attempt++ {
-		if err := w.adapter.AppendStream(w.ctx, w.channelID, w.messageTS, content); err != nil {
-			lastErr = err
+	var bytesSent int // track actual bytes sent
+	for chunkIdx, chunk := range chunks {
+		for attempt := 1; attempt <= maxAppendRetries; attempt++ {
+			if err := w.adapter.AppendStream(w.ctx, w.channelID, w.messageTS, chunk); err != nil {
+				lastErr = err
 
-			// 检测流状态错误：如果是 message_not_in_streaming_state，立即停止重试
-			// 这表示流已经超时或被服务端关闭
-			if isStreamStateError(err) {
-				w.adapter.Logger().Warn("Stream state error detected, marking stream as expired",
+				// 检测流状态错误：如果是 message_not_in_streaming_state，立即停止重试
+				// 这表示流已经超时或被服务端关闭
+				if isStreamStateError(err) {
+					w.adapter.Logger().Warn("Stream state error detected, marking stream as expired",
+						"channel_id", w.channelID,
+						"message_ts", w.messageTS,
+						"error", err)
+
+					w.mu.Lock()
+					w.streamExpired = true
+					// Store remaining chunks as failed
+					w.failedFlushChunks = append(w.failedFlushChunks, chunks[chunkIdx:]...)
+					w.mu.Unlock()
+					return
+				}
+
+				w.adapter.Logger().Warn("AppendStream failed, will retry",
 					"channel_id", w.channelID,
 					"message_ts", w.messageTS,
+					"chunk_index", chunkIdx,
+					"content_runes", utf8.RuneCountInString(chunk),
+					"attempt", attempt,
+					"max_retries", maxAppendRetries,
 					"error", err)
-
-				w.mu.Lock()
-				w.streamExpired = true
-				w.failedFlushChunks = append(w.failedFlushChunks, content)
-				w.mu.Unlock()
-				return
+				if attempt < maxAppendRetries {
+					time.Sleep(retryDelay * time.Duration(attempt))
+				}
+				continue
 			}
+			// 成功：累加已发送字节数
+			bytesSent += len(chunk)
+			break
+		}
+		// 如果某个块所有重试都失败，记录失败并停止
+		if lastErr != nil {
+			w.mu.Lock()
+			w.failedFlushChunks = append(w.failedFlushChunks, chunks[chunkIdx:]...)
+			w.mu.Unlock()
 
-			w.adapter.Logger().Warn("AppendStream failed, will retry",
+			w.adapter.Logger().Error("AppendStream failed after all retries",
 				"channel_id", w.channelID,
 				"message_ts", w.messageTS,
-				"content_runes", utf8.RuneCountInString(content),
-				"attempt", attempt,
-				"max_retries", maxAppendRetries,
-				"error", err)
-			if attempt < maxAppendRetries {
-				time.Sleep(retryDelay * time.Duration(attempt))
-			}
-			continue
+				"chunk_index", chunkIdx,
+				"content_runes", utf8.RuneCountInString(chunk),
+				"error", lastErr)
+			return
 		}
-		// 成功：更新已 flush 字节数
-		w.mu.Lock()
-		w.bytesFlushed += int64(contentLen)
-		w.mu.Unlock()
-		return
 	}
 
-	// 所有重试都失败：记录失败块用于潜在恢复
+	// 所有块都成功发送：更新已 flush 字节数
 	w.mu.Lock()
-	w.failedFlushChunks = append(w.failedFlushChunks, content)
+	w.bytesFlushed += int64(bytesSent)
 	w.mu.Unlock()
-
-	w.adapter.Logger().Error("AppendStream failed after all retries",
-		"channel_id", w.channelID,
-		"message_ts", w.messageTS,
-		"content_runes", utf8.RuneCountInString(content),
-		"error", lastErr)
 }
 
 // isStreamStateError checks if the error indicates the stream is no longer in streaming state

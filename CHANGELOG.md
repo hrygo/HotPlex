@@ -16,8 +16,8 @@
   - Fixed `runuser` HOME environment handling
   - Improved permission fixes for Go cache, pip packages
 
-- **Dockerfile.full Optimization** - Synced binary download pattern from Dockerfile.golang:
-  - Replaced `go install` with pre-built binaries (saves ~3GB build cache)
+- **Dockerfile.full Optimization** - Massive image size reduction (**10GB → 2.3GB, 77% smaller**):
+  - Replaced `go install` with pre-built binaries
   - Added 10 Go tools via binary: golangci-lint, goreleaser, buf, mockery, air, gotestsum, swag, gofumpt, sqlc, staticcheck
   - Architecture auto-detection (amd64/arm64)
   - Organized into 5 phases with clear structure
