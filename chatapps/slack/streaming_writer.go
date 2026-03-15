@@ -15,7 +15,7 @@ import (
 
 const (
 	flushInterval    = 150 * time.Millisecond
-	flushSize        = 20  // rune count threshold for immediate flush
+	flushSize        = 20 // rune count threshold for immediate flush
 	maxAppendRetries = 3  // max retry attempts for AppendStream
 	retryDelay       = 50 * time.Millisecond
 
@@ -143,7 +143,6 @@ func (w *NativeStreamingWriter) flushBuffer() {
 	}
 
 	content := w.buf.String()
-	contentLen := len(content)
 	w.buf.Reset()
 	started := w.started
 	streamExpired := w.streamExpired
@@ -176,6 +175,7 @@ func (w *NativeStreamingWriter) flushBuffer() {
 	// 如果内容超过 maxAppendSize，需要分块发送
 	chunks := w.chunkContent(content)
 	var lastErr error
+	var bytesSent int // track actual bytes sent
 	for chunkIdx, chunk := range chunks {
 		for attempt := 1; attempt <= maxAppendRetries; attempt++ {
 			if err := w.adapter.AppendStream(w.ctx, w.channelID, w.messageTS, chunk); err != nil {
@@ -210,7 +210,8 @@ func (w *NativeStreamingWriter) flushBuffer() {
 				}
 				continue
 			}
-			// 成功：继续下一个块
+			// 成功：累加已发送字节数
+			bytesSent += len(chunk)
 			break
 		}
 		// 如果某个块所有重试都失败，记录失败并停止
@@ -231,7 +232,7 @@ func (w *NativeStreamingWriter) flushBuffer() {
 
 	// 所有块都成功发送：更新已 flush 字节数
 	w.mu.Lock()
-	w.bytesFlushed += int64(contentLen)
+	w.bytesFlushed += int64(bytesSent)
 	w.mu.Unlock()
 }
 
