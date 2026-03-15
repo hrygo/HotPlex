@@ -457,20 +457,30 @@ func TestSession_ReadStderr_LogFileWriteError(t *testing.T) {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
 	tmpPath := tmpFile.Name()
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
 
 	// Open read-only to cause write error
 	se.logFile, err = os.Open(tmpPath)
 	if err != nil {
 		t.Fatalf("Failed to open log file: %v", err)
 	}
-	defer se.logFile.Close()
+	defer func() {
+		if se.logFile != nil {
+			se.logFile.Close()
+		}
+	}()
 	defer os.Remove(tmpPath)
 
 	// Write to pipe and close it to trigger scanner
 	go func() {
-		w.Write([]byte("test error line\n"))
-		w.Close()
+		if _, err := w.Write([]byte("test error line\n")); err != nil {
+			t.Logf("Write error (expected in goroutine): %v", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Logf("Close error (expected in goroutine): %v", err)
+		}
 	}()
 
 	// Call ReadStderr - should handle the write error gracefully
