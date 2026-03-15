@@ -149,19 +149,19 @@ type Config struct {
 
 	// Storage configuration for message persistence (optional)
 	// When enabled, stores user messages and bot responses for history retrieval
-	Storage *StorageConfig
+	Storage *StorageConfig `yaml:"storage"`
 
 	// AppHome configuration for the Capability Center (optional)
 	// When enabled, provides a form-based interface in Slack App Home tab
-	AppHome *AppHomeConfig
+	AppHome *AppHomeConfig `yaml:"apphome"`
 }
 
 // AppHomeConfig holds configuration for the Slack App Home Capability Center.
 type AppHomeConfig struct {
 	// Enabled enables the App Home capability center
-	Enabled *bool
+	Enabled *bool `yaml:"enabled"`
 	// CapabilitiesPath is the path to the capabilities YAML file
-	CapabilitiesPath string
+	CapabilitiesPath string `yaml:"capabilities_path"`
 }
 
 // StorageConfig holds message storage configuration for Slack adapter.

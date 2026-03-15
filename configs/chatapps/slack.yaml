@@ -142,7 +142,10 @@ task_instructions: |
 # When enabled, users can access the Capability Center from the App Home tab.
 # -----------------------------------------------------------------------------
 apphome:
-  enabled: false                       # Set to true to enable
-  # capabilities_path: ""               # Path to custom capabilities YAML file (optional)
-                                        # If not set, uses embedded default capabilities
-
+  # Set to true to enable
+  enabled: true
+  # Path to custom capabilities YAML file (optional)
+  # If not set, uses embedded default capabilities
+  # Container path: /home/hotplex/configs/chatapps/slack/capabilities.yaml
+  capabilities_path: "${HOTPLEX_CHATAPPS_CONFIG_DIR}/slack/capabilities.yaml"
+  
