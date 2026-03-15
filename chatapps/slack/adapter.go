@@ -286,8 +286,12 @@ func (a *Adapter) initAppHome() {
 		return
 	}
 
-	// Brain will be set later via SetBrain on executor if available
+	// Get Brain from engine if available
 	var brainInst brain.Brain
+	if a.eng != nil {
+		// Try to get brain from engine options - for now, pass nil
+		// Brain can be set later via SetBrain on executor if needed
+	}
 
 	appHomeConfig := apphome.Config{
 		Enabled:           BoolValue(a.config.AppHome.Enabled, false),
