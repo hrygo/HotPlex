@@ -340,4 +340,3 @@ func TestHandleAskUserQuestionCallback_No(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
-// Trigger CI
