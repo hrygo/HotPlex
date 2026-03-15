@@ -1,0 +1,21 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    patch:
+      default:
+        target: 30%
+        threshold: 5%
+    project:
+      default:
+        target: auto
+        threshold: 5%
+
+parsers:
+  go:
+    partials_as_hits: true
+
+ignore:
+  - "**/mocks/**"
+  - "**/test/**"
