@@ -1,0 +1,7 @@
+{
+  // 本文件为本地配置，gitignored
+  // 软连接已创建：CLAUDE.md -> AGENT.md, .claude -> .agent
+  "permissions": {
+    "allow": []
+  }
+}
