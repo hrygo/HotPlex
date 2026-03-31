@@ -253,3 +253,111 @@ func TestReadFile_NotFound(t *testing.T) {
 	_, err := ReadFile("/nonexistent/file.yaml")
 	require.Error(t, err)
 }
+
+// ─── Config inheritance tests ──────────────────────────────────────────────────
+
+func TestLoad_Inheritance_CycleDetection(t *testing.T) {
+	t.Parallel()
+
+	// Create two config files that reference each other.
+	baseDir := t.TempDir()
+
+	baseCfg := baseDir + "/base.yaml"
+	if err := os.WriteFile(baseCfg, []byte("gateway:\n  addr: :8080\ninherits: child.yaml\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	childCfg := baseDir + "/child.yaml"
+	if err := os.WriteFile(childCfg, []byte("gateway:\n  addr: :9090\ninherits: base.yaml\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(baseCfg, LoadOptions{})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrConfigCycle)
+}
+
+func TestLoad_Inheritance_SelfReference(t *testing.T) {
+	t.Parallel()
+
+	tmp, err := os.CreateTemp("", "self_cycle_*.yaml")
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.WriteString("gateway:\n  addr: :8080\ninherits: " + tmp.Name() + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	tmp.Close()
+
+	_, err = Load(tmp.Name(), LoadOptions{})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrConfigCycle)
+}
+
+func TestLoad_Inheritance_ThreeLevelChain(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+
+	baseCfg := baseDir + "/base.yaml"
+	if err := os.WriteFile(baseCfg, []byte("gateway:\n  addr: :8080\npool:\n  max_size: 10\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	midCfg := baseDir + "/mid.yaml"
+	if err := os.WriteFile(midCfg, []byte("gateway:\n  addr: :9090\ninherits: base.yaml\npool:\n  max_size: 20\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	leafCfg := baseDir + "/leaf.yaml"
+	if err := os.WriteFile(leafCfg, []byte("gateway:\n  addr: :7070\ninherits: mid.yaml\npool:\n  max_size: 30\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(leafCfg, LoadOptions{})
+	require.NoError(t, err)
+	// Leaf overrides mid, mid overrides base.
+	require.Equal(t, ":7070", cfg.Gateway.Addr)
+	require.Equal(t, 30, cfg.Pool.MaxSize)
+}
+
+func TestLoad_Inheritance_NoInherits(t *testing.T) {
+	t.Parallel()
+
+	tmp, err := os.CreateTemp("", "no_inherit_*.yaml")
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.WriteString("gateway:\n  addr: :6060\npool:\n  max_size: 5\n"); err != nil {
+		t.Fatal(err)
+	}
+	tmp.Close()
+
+	cfg, err := Load(tmp.Name(), LoadOptions{})
+	require.NoError(t, err)
+	require.Equal(t, ":6060", cfg.Gateway.Addr)
+	require.Equal(t, 5, cfg.Pool.MaxSize)
+}
+
+func TestLoad_Inheritance_PathExpansion(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+
+	// Use absolute path for base, relative for child.
+	baseCfg := baseDir + "/base.yaml"
+	if err := os.WriteFile(baseCfg, []byte("gateway:\n  addr: :8000\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	relChild := "child.yaml"
+	childPath := baseDir + "/" + relChild
+	if err := os.WriteFile(childPath, []byte("inherits: "+relChild+"\ngateway:\n  addr: :8001\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Fix: child inherits from base (the parent), not itself.
+	if err := os.WriteFile(childPath, []byte("inherits: "+baseCfg+"\ngateway:\n  addr: :8001\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(childPath, LoadOptions{})
+	require.NoError(t, err)
+	require.Equal(t, ":8001", cfg.Gateway.Addr)
+}

@@ -27,6 +27,7 @@ var (
 	ErrUserQuotaExceeded = errors.New("session: user quota exceeded")
 	ErrOwnershipMismatch = errors.New("session: ownership mismatch")
 	ErrMaxTurnsReached   = errors.New("session: max turns reached")
+	ErrWorkerAttached     = errors.New("session: worker already attached")
 )
 
 // Manager orchestrates session lifecycle, persistence, and GC.
@@ -289,6 +290,9 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	}
 	userID := ms.info.UserID
 
+	if ms.worker != nil {
+		return ErrWorkerAttached
+	}
 	if poolErr := m.pool.Acquire(userID); poolErr != nil {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
@@ -304,6 +308,7 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
 		return ErrPoolExhausted
 	}
+
 	// RES-008: track per-user estimated memory (RLIMIT_AS=512MB per worker).
 	if err := m.pool.AcquireMemory(userID); err != nil {
 		m.pool.Release(userID) // rollback slot quota

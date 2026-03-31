@@ -1,9 +1,12 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -110,12 +113,13 @@ func (c *Config) RequireSecrets() error {
 // Config holds all gateway configuration.
 type Config struct {
 	Gateway  GatewayConfig   `mapstructure:"gateway"`
-	DB       DBConfig        `mapstructure:"db"`
-	Worker   WorkerConfig    `mapstructure:"worker"`
+	DB       DBConfig       `mapstructure:"db"`
+	Worker   WorkerConfig   `mapstructure:"worker"`
 	Security SecurityConfig `mapstructure:"security"`
 	Session  SessionConfig  `mapstructure:"session"`
 	Pool     PoolConfig     `mapstructure:"pool"`
 	Admin    AdminConfig    `mapstructure:"admin"`
+	Inherits string         `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 }
 
 // AdminConfig holds admin API settings.
@@ -181,6 +185,7 @@ type SessionConfig struct {
 	GCScanInterval    time.Duration `mapstructure:"gc_scan_interval"`
 	MaxConcurrent     int           `mapstructure:"max_concurrent"`
 	EventStoreEnabled bool          `mapstructure:"event_store_enabled"`
+	EventStoreType    string        `mapstructure:"event_store_type"` // "sqlite" (default), or custom registered type
 }
 
 // PoolConfig holds session pool settings.
@@ -264,30 +269,85 @@ type LoadOptions struct {
 	SecretsProvider SecretsProvider
 }
 
+// ErrConfigCycle is returned when a config inheritance chain contains a cycle.
+var ErrConfigCycle = errors.New("config: inheritance cycle detected")
+
 // Load reads configuration from the given file path, then applies defaults
 // and secrets.  Configuration strategy: convention over configuration.
 //
 // Load order (later overrides earlier):
 //   1. Sensible defaults (Default())
-//   2. Config file (YAML/JSON/TOML) — canonical source for non-sensitive values
-//   3. Secrets provider — only sensitive fields (JWTSecret, etc.)
+//   2. Parent config file (via inherits field), recursively, with cycle detection
+//   3. Config file (YAML/JSON/TOML) — canonical source for non-sensitive values
+//   4. Secrets provider — only sensitive fields (JWTSecret, etc.)
 //
 // If filePath is empty, only defaults + secrets are used (env-free startup
 // is possible by providing secrets via SecretsProvider).
 func Load(filePath string, opts LoadOptions) (*Config, error) {
+	return loadRecursive(filePath, opts, nil)
+}
+
+// loadRecursive loads a config file and its ancestors, detecting cycles.
+// visited tracks file paths already loaded in the current chain; nil on the root call.
+func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config, error) {
+	// Start with defaults.
 	cfg := Default()
 
+	// Track visited files for cycle detection.
+	var ancestors []string
+	if visited == nil {
+		ancestors = []string{}
+	} else {
+		ancestors = make([]string, len(visited), len(visited)+1)
+		copy(ancestors, visited)
+	}
+
+	var parentFile string
+	var childViper *viper.Viper
+
 	// If a config file is provided, unmarshal it over defaults.
-	// viper merges, so unspecified fields retain defaults.
 	if filePath != "" {
-		v := viper.New()
-		v.SetConfigFile(filePath)
-		if err := v.ReadInConfig(); err != nil {
+		absPath, err := normalizePath(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("config: resolve path %q: %w", filePath, err)
+		}
+		filePath = absPath
+
+		// Check for cycle: if this file is already in the ancestor chain.
+		if slices.Contains(ancestors, filePath) {
+			return nil, fmt.Errorf("%w: %v → %s", ErrConfigCycle, append(ancestors, filePath), filePath)
+		}
+
+		childViper = viper.New()
+		childViper.SetConfigFile(filePath)
+		if err := childViper.ReadInConfig(); err != nil {
 			return nil, fmt.Errorf("config: read %q: %w", filePath, err)
 		}
-		if err := v.Unmarshal(cfg); err != nil {
+		if err := childViper.Unmarshal(cfg); err != nil {
 			return nil, fmt.Errorf("config: unmarshal %q: %w", filePath, err)
 		}
+
+		parentFile = cfg.Inherits
+	}
+
+	// Recursively load parent config if inheritance is specified.
+	// Resolve parentFile relative to the directory of the current file.
+	if parentFile != "" {
+		ancestors = append(ancestors, filePath)
+		// If parentFile is relative, resolve it relative to the current file's directory.
+		if !filepath.IsAbs(parentFile) && filePath != "" {
+			parentFile = filepath.Join(filepath.Dir(filePath), parentFile)
+		}
+		parentCfg, err := loadRecursive(parentFile, opts, ancestors)
+		if err != nil {
+			return nil, fmt.Errorf("config: inherits %q: %w", parentFile, err)
+		}
+		// Apply child values over parent using the already-loaded viper instance.
+		// This avoids a second disk read and eliminates TOCTOU risk.
+		if err := childViper.Unmarshal(parentCfg); err != nil {
+			return nil, fmt.Errorf("config: merge %q: %w", filePath, err)
+		}
+		*cfg = *parentCfg
 	}
 
 	// Apply secrets via provider.  If no provider given, fall back to env vars
@@ -318,6 +378,28 @@ func Load(filePath string, opts LoadOptions) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// normalizePath returns an absolute path, resolving ~ and relative paths.
+func normalizePath(p string) (string, error) {
+	if p == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		p = filepath.Join(home, p[2:])
+	}
+	if !filepath.IsAbs(p) {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return "", err
+		}
+		p = abs
+	}
+	return p, nil
 }
 
 // MustLoad is like Load but panics on error.

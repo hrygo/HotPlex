@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -65,11 +66,20 @@ type Watcher struct {
 
 	mu     sync.Mutex
 	closed bool
-	latest *Config // most recently loaded config (for onChange callback)
 
 	// Audit log of all changes.
 	muAudit sync.Mutex
 	audit   []ConfigChange
+
+	// Config history for rollback. index 0 = oldest, len-1 = latest.
+	// Only full config snapshots are stored (not every diff).
+	// Capped at maxHistoryLen to prevent unbounded memory growth.
+	// latestIdx tracks the current active config within history
+	// (may differ from len-1 after Rollback).
+	muHistory     sync.Mutex
+	history       []*Config
+	latestIdx     int
+	maxHistoryLen int
 }
 
 // NewWatcher creates a file-system watcher for hot config reloading.
@@ -78,6 +88,7 @@ type Watcher struct {
 // onChange: called (in a goroutine) when hot-reloadable fields change.
 // onStatic: called (in a goroutine) when static fields change.
 // The watcher does not start until Start() is called.
+// The caller should pass the initially loaded config via SetInitial after calling NewWatcher.
 func NewWatcher(log *slog.Logger, path string, sp SecretsProvider, onChange func(*Config), onStatic func(string)) *Watcher {
 	if log == nil {
 		log = slog.Default()
@@ -93,6 +104,7 @@ func NewWatcher(log *slog.Logger, path string, sp SecretsProvider, onChange func
 		onChange: onChange,
 		onStatic: onStatic,
 		audit:    make([]ConfigChange, 0, 64),
+		maxHistoryLen: 64,
 	}
 }
 
@@ -169,7 +181,7 @@ func (w *Watcher) reload() {
 	}
 	w.mu.Unlock()
 
-	prev := w.latest
+	prev := w.Latest()
 
 	newCfg, err := Load(w.path, LoadOptions{SecretsProvider: w.sp})
 	if err != nil {
@@ -192,9 +204,18 @@ func (w *Watcher) reload() {
 	}
 	w.muAudit.Unlock()
 
-	w.mu.Lock()
-	w.latest = newCfg
-	w.mu.Unlock()
+	w.muHistory.Lock()
+	w.history = append(w.history, newCfg)
+	if len(w.history) > w.maxHistoryLen {
+		trim := len(w.history) - w.maxHistoryLen
+		w.history = w.history[trim:]
+		w.latestIdx -= trim
+		if w.latestIdx < 0 {
+			w.latestIdx = 0
+		}
+	}
+	w.latestIdx = len(w.history) - 1
+	w.muHistory.Unlock()
 
 	// Notify listeners.
 	for _, c := range changes {
@@ -263,11 +284,44 @@ func (w *Watcher) AuditLog() []ConfigChange {
 	return out
 }
 
+// History returns a copy of the config history.
+// index 0 = oldest snapshot, len-1 = current (identical to Latest()).
+func (w *Watcher) History() []*Config {
+	w.muHistory.Lock()
+	defer w.muHistory.Unlock()
+	out := make([]*Config, len(w.history))
+	copy(out, w.history)
+	return out
+}
+
+// Rollback reverts to a previous config snapshot.
+// version=1 reverts to the immediately previous config; version=2 to two steps back, etc.
+// Returns the rolled-back Config and its index in the history, or an error if
+// the requested version is out of range. The rollback does NOT reload the file
+// from disk — it restores an in-memory snapshot from the history buffer.
+func (w *Watcher) Rollback(version int) (*Config, int, error) {
+	w.muHistory.Lock()
+	defer w.muHistory.Unlock()
+
+	if version < 1 || version > len(w.history)-1 {
+		return nil, -1, fmt.Errorf("config: rollback version %d out of range (history has %d snapshots)",
+			version, len(w.history))
+	}
+	idx := len(w.history) - 1 - version
+	cfg := w.history[idx]
+	w.latestIdx = idx
+
+	return cfg, idx, nil
+}
+
 // Latest returns the most recently loaded config, or nil.
 func (w *Watcher) Latest() *Config {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.latest
+	w.muHistory.Lock()
+	defer w.muHistory.Unlock()
+	if len(w.history) == 0 {
+		return nil
+	}
+	return w.history[w.latestIdx]
 }
 
 // Close stops the watcher and closes the underlying file descriptor.
@@ -284,4 +338,13 @@ func (w *Watcher) Close() error {
 		return w.viper.Close()
 	}
 	return nil
+}
+
+// SetInitial records the initially loaded config in the history buffer.
+// Call this right after NewWatcher, before Start.
+func (w *Watcher) SetInitial(cfg *Config) {
+	w.muHistory.Lock()
+	w.history = []*Config{cfg}
+	w.latestIdx = 0
+	w.muHistory.Unlock()
 }

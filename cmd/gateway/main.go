@@ -78,10 +78,11 @@ func run() error {
 		return err
 	}
 
-	// EVT-004: optional event persistence. Controlled via session.event_store_enabled in config.
+	// EVT-004/EVT-011: optional event persistence via pluggable MessageStore builder.
+	// Controlled via session.event_store_enabled and session.event_store_type in config.
 	var msgStore session.MessageStore
 	if cfg.Session.EventStoreEnabled {
-		msgStore, err = session.NewSQLiteMessageStore(ctx, cfg)
+		msgStore, err = session.NewMessageStore(ctx, cfg)
 		if err != nil {
 			_ = store.Close()
 			return fmt.Errorf("gateway: init message store: %w", err)
@@ -131,6 +132,7 @@ func run() error {
 				)
 			},
 		)
+		configWatcher.SetInitial(cfg)
 		if err := configWatcher.Start(ctx); err != nil {
 			log.Warn("config: watcher start failed, hot reload disabled", "error", err)
 			configWatcher = nil
@@ -158,7 +160,17 @@ func run() error {
 
 	// Register HTTP routes.
 	mux := http.NewServeMux()
-	setupRoutes(mux, log, cfg, hub, sm, auth, handler, bridge)
+	deps := &GatewayDeps{
+		Log:           log,
+		Config:        cfg,
+		Hub:           hub,
+		SessionMgr:    sm,
+		Auth:          auth,
+		Handler:       handler,
+		Bridge:        bridge,
+		ConfigWatcher: configWatcher,
+	}
+	setupRoutes(mux, deps)
 
 	server := &http.Server{
 		Addr:         cfg.Gateway.Addr,
@@ -226,16 +238,30 @@ func loadConfig() *config.Config {
 	return cfg
 }
 
+// GatewayDeps collects the dependencies needed by setupRoutes.
+type GatewayDeps struct {
+	Log           *slog.Logger
+	Config        *config.Config
+	Hub           *gateway.Hub
+	SessionMgr    *session.Manager
+	Auth          *security.Authenticator
+	Handler       *gateway.Handler
+	Bridge        *gateway.Bridge
+	ConfigWatcher *config.Watcher
+}
+
 func setupRoutes(
 	mux *http.ServeMux,
-	log *slog.Logger,
-	cfg *config.Config,
-	hub *gateway.Hub,
-	sm *session.Manager,
-	auth *security.Authenticator,
-	handler *gateway.Handler,
-	bridge *gateway.Bridge,
+	deps *GatewayDeps,
 ) {
+	log := deps.Log
+	cfg := deps.Config
+	hub := deps.Hub
+	sm := deps.SessionMgr
+	auth := deps.Auth
+	handler := deps.Handler
+	bridge := deps.Bridge
+	configWatcher := deps.ConfigWatcher
 	// Health check (no auth).
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -263,6 +289,7 @@ func setupRoutes(
 		sm:     sm,
 		hub:    hub,
 		bridge: bridge,
+		configWatcher: configWatcher,
 	}
 	// Initialize middleware components once at startup.
 	if cfg.Admin.RateLimitEnabled {
@@ -279,6 +306,7 @@ func setupRoutes(
 	adminMux.HandleFunc("GET /admin/health/workers", admin.HandleWorkerHealth)
 	adminMux.HandleFunc("GET /admin/logs", admin.HandleLogs)
 	adminMux.HandleFunc("POST /admin/config/validate", admin.HandleConfigValidate)
+	adminMux.HandleFunc("POST /admin/config/rollback", admin.HandleConfigRollback)
 	adminMux.HandleFunc("GET /admin/debug/sessions/{id}", admin.HandleDebugSession)
 
 	// Session CRUD.
@@ -341,6 +369,7 @@ type AdminAPI struct {
 	sm           *session.Manager
 	hub          *gateway.Hub
 	bridge       *gateway.Bridge
+	configWatcher *config.Watcher // CONFIG-009: for config rollback
 	rateLimiter  *simpleRateLimiter
 	allowedCIDRs []string
 }
@@ -627,7 +656,42 @@ func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// HandleDebugSession returns internal debug state for a session.
+// HandleConfigRollback rolls back the configuration to a previous version.
+// version=1 reverts to the immediately previous config; version=2 to two steps back, etc.
+func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeConfigRead) {
+		http.Error(w, "insufficient scope: need config:read", http.StatusForbidden)
+		return
+	}
+	if a.configWatcher == nil {
+		http.Error(w, "config rollback is not available (no config file specified)", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Version int `json:"version"` // steps back: 1 = previous, 2 = two steps back, etc.
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.Version < 1 {
+		http.Error(w, "version must be a positive integer", http.StatusBadRequest)
+		return
+	}
+
+	_, idx, err := a.configWatcher.Rollback(body.Version)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	a.log.Info("config: rollback applied", "version", body.Version, "history_index", idx)
+	respondJSON(w, map[string]any{
+		"ok":            true,
+		"rolled_back":   body.Version,
+		"history_index": idx,
+	})
+}
 func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminRead) {
 		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
