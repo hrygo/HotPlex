@@ -771,6 +771,7 @@ func TestManager_AttachWorker_Success(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_attach", w)
 	require.NoError(t, err)
 
@@ -808,6 +809,7 @@ func TestManager_AttachWorker_PoolExhausted(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+        w.On("Terminate", mock.Anything).Return(nil)
 
 	// First session exhausts the global pool
 	err = m.AttachWorker("sess_exhaust", w)
@@ -826,6 +828,7 @@ func TestManager_AttachWorker_PoolExhausted(t *testing.T) {
 	m.sessions["sess_exhaust2"] = &managedSession{info: *seed2}
 	m.mu.Unlock()
 	w2 := newMockWorker(worker.TypeClaudeCode, 0)
+	w2.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_exhaust2", w2)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrPoolExhausted))
@@ -859,6 +862,7 @@ func TestManager_AttachWorker_UserQuotaExceeded(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_quota", w)
 	require.NoError(t, err)
 
@@ -875,6 +879,7 @@ func TestManager_AttachWorker_UserQuotaExceeded(t *testing.T) {
 	m.sessions["sess_quota2"] = &managedSession{info: *seed2}
 	m.mu.Unlock()
 	w2 := newMockWorker(worker.TypeClaudeCode, 0)
+	w2.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_quota2", w2)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrUserQuotaExceeded))
@@ -908,6 +913,7 @@ func TestManager_AttachWorker_MemoryExceeded_Rollback(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_mem", w)
 	require.NoError(t, err)
 
@@ -920,6 +926,7 @@ func TestManager_AttachWorker_MemoryExceeded_Rollback(t *testing.T) {
 
 	// Second worker on same session after detach — succeeds since memory is freed
 	w2 := newMockWorker(worker.TypeClaudeCode, 0)
+	w2.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_mem", w2)
 	require.NoError(t, err)
 }
@@ -950,11 +957,13 @@ func TestManager_AttachWorker_AlreadyAttached(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_double", w)
 	require.NoError(t, err)
 
 	// Second attach on same session → ErrWorkerAttached (no quota acquired)
 	w2 := newMockWorker(worker.TypeClaudeCode, 0)
+	w2.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_double", w2)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrWorkerAttached))
@@ -979,6 +988,7 @@ func TestManager_AttachWorker_NotFound(t *testing.T) {
 	defer m.Close()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_missing", w)
 	require.Error(t, err)
 }
@@ -1011,6 +1021,7 @@ func TestManager_DetachWorker_WithWorker(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker("sess_detach", w)
 	require.NoError(t, err)
 
@@ -1121,6 +1132,7 @@ func TestManager_DebugSnapshot_WithWorker(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	_ = m.AttachWorker("sess_debug", w)
 
 	snap, ok := m.DebugSnapshot("sess_debug")
@@ -1208,6 +1220,7 @@ func TestManager_ReleaseWorkerQuota(t *testing.T) {
 
 	// Attach and release
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	_ = m.AttachWorker("sess_quota_rel", w)
 	total, _, _ := m.Stats()
 	require.Equal(t, 1, total)
@@ -1245,6 +1258,7 @@ func TestManager_WorkerHealthStatuses(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	_ = m.AttachWorker("sess_health", w)
 
 	statuses := m.WorkerHealthStatuses()
@@ -1299,6 +1313,7 @@ func TestManager_GC_ZombieDetection(t *testing.T) {
 	m.mu.Unlock()
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
 	w.lastIO = now.Add(-10 * time.Minute) // zombie: no IO in 10 minutes
 	_ = m.AttachWorker("sess_zombie", w)
 

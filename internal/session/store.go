@@ -158,9 +158,9 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*SessionInfo, error) 
 	var createdAt, updatedAt time.Time
 
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, created_at, updated_at, expires_at, idle_expires_at, context_json
+		`SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, created_at, updated_at, expires_at, idle_expires_at, context_json
 		 FROM sessions WHERE id = ?`, id,
-	).Scan(&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State,
+	).Scan(&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State, &info.BotID,
 		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON)
 
 	if err == sql.ErrNoRows {
