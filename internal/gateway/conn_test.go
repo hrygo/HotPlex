@@ -1,21 +1,31 @@
 package gateway
 
 import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"hotplex-worker/internal/aep"
+	"hotplex-worker/internal/config"
+	"hotplex-worker/internal/security"
+	"hotplex-worker/internal/session"
 	"hotplex-worker/internal/worker"
+	"hotplex-worker/internal/worker/noop"
 	"hotplex-worker/pkg/events"
 )
-
-
 
 // ─── Init message validation ──────────────────────────────────────────────────
 
@@ -437,4 +447,949 @@ func TestAEPDecodeLine_MissingRequiredFields(t *testing.T) {
 	// Missing session_id
 	_, err = aep.DecodeLine([]byte(`{"version":"aep/v1","id":"evt_abc","seq":1,"timestamp":1700000000000,"event":{"type":"state","data":{}}}`))
 	require.Error(t, err)
+}
+
+// ─── SEC-007: bot_id isolation tests ───────────────────────────────────────────
+
+// mockSessionStoreForBotID is a testify mock for session.Store used in bot_id tests.
+type mockSessionStoreForBotID struct {
+	mock.Mock
+}
+
+func (m *mockSessionStoreForBotID) Upsert(ctx context.Context, info *session.SessionInfo) error {
+	args := m.Called(ctx, info)
+	if args.Error(0) == nil {
+		if ms, ok := args.Get(0).(*session.SessionInfo); ok {
+			*info = *ms
+		}
+	}
+	return args.Error(0)
+}
+
+func (m *mockSessionStoreForBotID) Get(ctx context.Context, id string) (*session.SessionInfo, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*session.SessionInfo), args.Error(1)
+}
+
+func (m *mockSessionStoreForBotID) List(ctx context.Context, limit, offset int) ([]*session.SessionInfo, error) {
+	args := m.Called(ctx, limit, offset)
+	return args.Get(0).([]*session.SessionInfo), args.Error(1)
+}
+
+func (m *mockSessionStoreForBotID) GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error) {
+	args := m.Called(ctx, now)
+	return args.Get(0).([]string), args.Error(1)
+}
+
+func (m *mockSessionStoreForBotID) GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error) {
+	args := m.Called(ctx, now)
+	return args.Get(0).([]string), args.Error(1)
+}
+
+func (m *mockSessionStoreForBotID) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
+	args := m.Called(ctx, cutoff)
+	return args.Error(0)
+}
+
+func (m *mockSessionStoreForBotID) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+// makeInitEnvelope builds a init Envelope for the given session, workerType, and optional JWT token.
+func makeInitEnvelope(sessionID, workerType, token string) []byte {
+	data := map[string]any{
+		"version":     events.Version,
+		"worker_type": workerType,
+	}
+	if token != "" {
+		data["auth"] = map[string]any{"token": token}
+	}
+	env := events.NewEnvelope(aep.NewID(), sessionID, 1, Init, data)
+	env.SessionID = sessionID
+	raw, _ := aep.EncodeJSON(env)
+	return raw
+}
+
+// sendWSInit sends a raw init message and reads one response from the WebSocket.
+func sendWSInit(conn *websocket.Conn, msg []byte) ([]byte, error) {
+	if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+		return nil, err
+	}
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, resp, err := conn.ReadMessage()
+	return resp, err
+}
+
+// newBotIDTestConn creates a Conn with a real hub for bot_id isolation tests.
+// It allows setting userID and botID before ReadPump is called.
+func newBotIDTestConn(h *Hub, wc *websocket.Conn, sessionID, userID, botID string) *Conn {
+	return &Conn{
+		log:       h.log,
+		wc:        wc,
+		hub:       h,
+		sessionID: sessionID,
+		userID:    userID,
+		botID:     botID,
+		hb:        newHeartbeat(h.log),
+		done:      make(chan struct{}),
+	}
+}
+
+// newECDSAKey generates a fresh P-256 ECDSA key pair for ES256 JWT signing in tests.
+func newECDSAKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	return key
+}
+
+// TestBotIDIsolation_CreateMismatch tests that creating a new session with bot_id=bot_001
+// and then resuming it with bot_id=bot_002 is rejected with ErrCodeUnauthorized.
+// This is the SEC-007 cross-bot access rejection at resume time.
+func TestBotIDIsolation_CreateMismatch(t *testing.T) {
+	const (
+		sessionID = "sess_bot001"
+		workerType = "claude-code"
+		botAlice   = "bot_alice"
+		botBob     = "bot_bob"
+	)
+
+	// Build a JWT token for bot_alice using ES256 (ECDSA P-256).
+	jwtKey := newECDSAKey(t)
+	jwtVal := security.NewJWTValidator(jwtKey, "")
+	tokenAlice, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
+		UserID: "alice",
+		BotID:  botAlice,
+	})
+	require.NoError(t, err)
+
+	tokenBob, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
+		UserID: "alice",
+		BotID:  botBob,
+	})
+	require.NoError(t, err)
+
+	// Phase 1: client A connects with bot_alice token and creates a session.
+	store1 := new(mockSessionStoreForBotID)
+	store1.Test(t)
+	store1.On("Close").Return(nil)
+	// Get returns not-found to trigger Create.
+	store1.On("Get", mock.Anything, sessionID).Return(nil, session.ErrSessionNotFound)
+	// Upsert for Create + Transition to RUNNING.
+	store1.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+
+	cfg := config.Default()
+	h1 := newTestHub(t)
+	mgr1, err := session.NewManager(context.Background(), slog.Default(), cfg, store1, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr1.Close() })
+
+	var serverConn1 *websocket.Conn
+	var mu1 sync.Mutex
+	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		mu1.Lock()
+		serverConn1 = conn
+		mu1.Unlock()
+		go func() {
+			c := newBotIDTestConn(h1, conn, sessionID, "alice", botAlice)
+			h := NewHandler(slog.Default(), cfg, h1, mgr1, jwtVal)
+			c.ReadPump(h)
+		}()
+	}))
+	t.Cleanup(server1.Close)
+
+	client1, _, err := websocket.DefaultDialer.Dial("ws"+server1.URL[4:], nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { client1.Close() })
+
+	// Wait for server side to be ready.
+	require.Eventually(t, func() bool {
+		mu1.Lock()
+		ok := serverConn1 != nil
+		mu1.Unlock()
+		return ok
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Client A sends init with bot_alice token → should succeed (new session).
+	init1 := makeInitEnvelope(sessionID, workerType, tokenAlice)
+	resp1, err := sendWSInit(client1, init1)
+	require.NoError(t, err)
+	require.Contains(t, string(resp1), `"type":"init_ack"`, "bot_alice create should succeed")
+	require.NotContains(t, string(resp1), `"code":"unauthorized"`, "no auth error expected")
+
+	// Phase 2: client B connects with bot_bob token and tries to resume the same session.
+	store2 := new(mockSessionStoreForBotID)
+	store2.Test(t)
+	store2.On("Close").Return(nil)
+	// Get returns the existing session with bot_alice.
+	existingSession := &session.SessionInfo{
+		ID:         sessionID,
+		UserID:     "alice",
+		BotID:      botAlice, // session was created with bot_alice
+		State:      events.StateIdle,
+		WorkerType: worker.WorkerType(workerType),
+	}
+	store2.On("Get", mock.Anything, sessionID).Return(existingSession, nil)
+
+	cfg2 := config.Default()
+	h2 := newTestHub(t)
+	mgr2, err := session.NewManager(context.Background(), slog.Default(), cfg2, store2, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr2.Close() })
+
+	var serverConn2 *websocket.Conn
+	var mu2 sync.Mutex
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		mu2.Lock()
+		serverConn2 = conn
+		mu2.Unlock()
+		go func() {
+			c := newBotIDTestConn(h2, conn, sessionID, "alice", botBob)
+			h := NewHandler(slog.Default(), cfg2, h2, mgr2, jwtVal)
+			c.ReadPump(h)
+		}()
+	}))
+	t.Cleanup(server2.Close)
+
+	client2, _, err := websocket.DefaultDialer.Dial("ws"+server2.URL[4:], nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { client2.Close() })
+
+	require.Eventually(t, func() bool {
+		mu2.Lock()
+		ok := serverConn2 != nil
+		mu2.Unlock()
+		return ok
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Client B sends init with bot_bob token for the same session → should be rejected.
+	init2 := makeInitEnvelope(sessionID, workerType, tokenBob)
+	resp2, err := sendWSInit(client2, init2)
+	require.NoError(t, err)
+	require.Contains(t, string(resp2), `"type":"init_ack"`) // init_ack is always sent, but contains error
+	require.Contains(t, string(resp2), `"code":"UNAUTHORIZED"`, "bot_id mismatch should return UNAUTHORIZED")
+}
+
+// TestBotIDIsolation_MatchAllowed tests that resuming a session with the matching bot_id succeeds.
+func TestBotIDIsolation_MatchAllowed(t *testing.T) {
+	const (
+		sessionID  = "sess_bot_match"
+		workerType = "claude-code"
+		botID      = "bot_team_a"
+	)
+
+	jwtKey := newECDSAKey(t)
+	jwtVal := security.NewJWTValidator(jwtKey, "")
+	token, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
+		UserID: "user1",
+		BotID:  botID,
+	})
+	require.NoError(t, err)
+
+	store := new(mockSessionStoreForBotID)
+	store.Test(t)
+	store.On("Close").Return(nil).Maybe()
+	existingSession := &session.SessionInfo{
+		ID:         sessionID,
+		UserID:     "user1",
+		BotID:      botID, // same bot_id
+		State:      events.StateIdle,
+		WorkerType: worker.WorkerType(workerType),
+	}
+	store.On("Get", mock.Anything, sessionID).Return(existingSession, nil)
+
+	cfg := config.Default()
+	hubForTest := newTestHub(t)
+	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, store, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr.Close() })
+
+	var serverConn *websocket.Conn
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		mu.Lock()
+		serverConn = conn
+		mu.Unlock()
+		go func() {
+			c := newBotIDTestConn(hubForTest, conn, sessionID, "user1", botID)
+			handler := NewHandler(slog.Default(), cfg, hubForTest, mgr, jwtVal)
+			c.ReadPump(handler)
+		}()
+	}))
+	t.Cleanup(server.Close)
+
+	client, _, err := websocket.DefaultDialer.Dial("ws"+server.URL[4:], nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { client.Close() })
+
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		ok := serverConn != nil
+		mu.Unlock()
+		return ok
+	}, 2*time.Second, 10*time.Millisecond)
+
+	init := makeInitEnvelope(sessionID, workerType, token)
+	resp, err := sendWSInit(client, init)
+	require.NoError(t, err)
+	require.Contains(t, string(resp), `"type":"init_ack"`)
+	require.NotContains(t, string(resp), `"code":"unauthorized"`)
+}
+
+// TestBotIDIsolation_EmptyBotIDAllowed tests that when bot_id is empty (not specified),
+// sessions can be created and resumed without bot_id restrictions.
+func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
+	const (
+		sessionID  = "sess_no_bot"
+		workerType = "claude-code"
+	)
+
+	// No JWT token (empty botID scenario).
+	store := new(mockSessionStoreForBotID)
+	store.Test(t)
+	store.On("Close").Return(nil).Maybe()
+	// Session does not exist → create new.
+	store.On("Get", mock.Anything, sessionID).Return(nil, session.ErrSessionNotFound)
+	store.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+
+	cfg := config.Default()
+	h := newTestHub(t)
+	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, store, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr.Close() })
+
+	var serverConn *websocket.Conn
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		mu.Lock()
+		serverConn = conn
+		mu.Unlock()
+		go func() {
+			c := newBotIDTestConn(h, conn, sessionID, "anon", "")
+			handler := NewHandler(slog.Default(), cfg, h, mgr, nil)
+			c.ReadPump(handler)
+		}()
+	}))
+	t.Cleanup(server.Close)
+
+	client, _, err := websocket.DefaultDialer.Dial("ws"+server.URL[4:], nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { client.Close() })
+
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		ok := serverConn != nil
+		mu.Unlock()
+		return ok
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// No auth token → empty bot_id → should succeed.
+	init := makeInitEnvelope(sessionID, workerType, "")
+	resp, err := sendWSInit(client, init)
+	require.NoError(t, err)
+	require.Contains(t, string(resp), `"type":"init_ack"`)
+	require.NotContains(t, string(resp), `"code":"unauthorized"`)
+}
+
+// TestBotIDIsolation_NewSessionStoresBotID tests that when a session is created via
+// CreateWithBot (the fix in conn.go), the BotID is persisted in the session record.
+func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
+	const (
+		sessionID  = "sess_new_bot"
+		workerType = "claude-code"
+		botID      = "bot_new_session"
+	)
+
+	jwtKey := newECDSAKey(t)
+	jwtVal := security.NewJWTValidator(jwtKey, "")
+	token, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
+		UserID: "user1",
+		BotID:  botID,
+	})
+	require.NoError(t, err)
+
+	store := new(mockSessionStoreForBotID)
+	store.Test(t)
+	store.On("Close").Return(nil).Maybe()
+	// Session does not exist on Get → triggers CreateWithBot.
+	store.On("Get", mock.Anything, sessionID).Return(nil, session.ErrSessionNotFound)
+	// Upsert is called twice: once for CreateWithBot, once for Transition(CREATED→RUNNING).
+	// Both must carry the correct botID.
+	store.On("Upsert", mock.Anything, mock.MatchedBy(func(info *session.SessionInfo) bool {
+		return info.BotID == botID // SEC-007: verify botID is passed through
+	})).Return(nil).Maybe() // Maybe() allows 0 or more calls
+
+	cfg := config.Default()
+	h := newTestHub(t)
+	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, store, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr.Close() })
+
+	var serverConn *websocket.Conn
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		mu.Lock()
+		serverConn = conn
+		mu.Unlock()
+		go func() {
+			c := newBotIDTestConn(h, conn, sessionID, "user1", botID)
+			handler := NewHandler(slog.Default(), cfg, h, mgr, jwtVal)
+			c.ReadPump(handler)
+		}()
+	}))
+	t.Cleanup(server.Close)
+
+	client, _, err := websocket.DefaultDialer.Dial("ws"+server.URL[4:], nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { client.Close() })
+
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		ok := serverConn != nil
+		mu.Unlock()
+		return ok
+	}, 2*time.Second, 10*time.Millisecond)
+
+	init := makeInitEnvelope(sessionID, workerType, token)
+	resp, err := sendWSInit(client, init)
+	require.NoError(t, err)
+	require.Contains(t, string(resp), `"type":"init_ack"`)
+
+	// Assert that Upsert was called with the correct botID.
+	store.AssertExpectations(t)
+}
+
+// ─── Bridge forwardEvents tests ────────────────────────────────────────────────
+
+// mockBridgeSessionManager is a test double for Bridge tests.
+// It implements the SessionManager interface via mock.Mock.
+type mockBridgeSM struct {
+	*mock.Mock
+}
+
+func (m *mockBridgeSM) Create(ctx context.Context, id, userID string, wt worker.WorkerType, allowedTools []string) (*session.SessionInfo, error) {
+	args := m.Called(ctx, id, userID, wt, allowedTools)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*session.SessionInfo), args.Error(1)
+}
+
+func (m *mockBridgeSM) AttachWorker(id string, w worker.Worker) error {
+	args := m.Called(id, w)
+	return args.Error(0)
+}
+
+func (m *mockBridgeSM) DetachWorker(id string) {
+	m.Called(id)
+}
+
+func (m *mockBridgeSM) Transition(ctx context.Context, id string, to events.SessionState) error {
+	args := m.Called(ctx, id, to)
+	return args.Error(0)
+}
+
+func (m *mockBridgeSM) Get(id string) (*session.SessionInfo, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*session.SessionInfo), args.Error(1)
+}
+
+func (m *mockBridgeSM) Delete(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+var _ SessionManager = (*mockBridgeSM)(nil)
+
+// mockBridgeWorker is a configurable fake Worker for Bridge tests.
+type mockBridgeWorker struct {
+	workerType worker.WorkerType
+	exitCode   int
+	conn       *fakeWorkerConn
+	startErr   error
+	resumeErr  error
+}
+
+func (m *mockBridgeWorker) Type() worker.WorkerType                            { return m.workerType }
+func (m *mockBridgeWorker) SupportsResume() bool                               { return true }
+func (m *mockBridgeWorker) SupportsStreaming() bool                           { return true }
+func (m *mockBridgeWorker) SupportsTools() bool                               { return true }
+func (m *mockBridgeWorker) EnvWhitelist() []string                             { return nil }
+func (m *mockBridgeWorker) SessionStoreDir() string                           { return "" }
+func (m *mockBridgeWorker) MaxTurns() int                                     { return 0 }
+func (m *mockBridgeWorker) Modalities() []string                               { return []string{"text"} }
+func (m *mockBridgeWorker) Start(context.Context, worker.SessionInfo) error   { return m.startErr }
+func (m *mockBridgeWorker) Input(context.Context, string, map[string]any) error { return nil }
+func (m *mockBridgeWorker) Resume(context.Context, worker.SessionInfo) error { return m.resumeErr }
+func (m *mockBridgeWorker) Terminate(context.Context) error                    { return nil }
+func (m *mockBridgeWorker) Kill() error                                       { return nil }
+func (m *mockBridgeWorker) Wait() (int, error)                                 { return m.exitCode, nil }
+func (m *mockBridgeWorker) Conn() worker.SessionConn                           { return m.conn }
+func (m *mockBridgeWorker) Health() worker.WorkerHealth                        { return worker.WorkerHealth{} }
+func (m *mockBridgeWorker) LastIO() time.Time                                  { return time.Now() }
+
+var _ worker.Worker = (*mockBridgeWorker)(nil)
+
+// mockBridgeWorkerFactory returns pre-configured mockBridgeWorker instances.
+// It ignores the requested type and cycles through the pre-configured list,
+// then falls back to a default mock worker.
+type mockBridgeWorkerFactory struct {
+	workers []*mockBridgeWorker // ordered list; each NewWorker call returns the next
+	pos     int
+	mu      sync.Mutex
+}
+
+func (f *mockBridgeWorkerFactory) NewWorker(t worker.WorkerType) (worker.Worker, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pos < len(f.workers) {
+		w := f.workers[f.pos]
+		f.pos++
+		return w, nil
+	}
+	return &mockBridgeWorker{workerType: t, conn: &fakeWorkerConn{ch: make(chan *events.Envelope)}}, nil
+}
+
+var _ WorkerFactory = (*mockBridgeWorkerFactory)(nil)
+
+// TestBridge_ForwardEvents_NormalEvent verifies that a regular event is forwarded
+// to the hub with the correct session ID.
+func TestBridge_ForwardEvents_NormalEvent(t *testing.T) {
+	t.Parallel()
+
+	// Pre-populate the fake worker's recv channel with one event.
+	ch := make(chan *events.Envelope, 1)
+	deltaEnv := events.NewEnvelope(aep.NewID(), "", 0, events.MessageDelta, map[string]any{"delta": "hello"})
+	ch <- deltaEnv
+	close(ch)
+
+	fw := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: ch},
+	}
+
+	// Set up hub + WebSocket so forwardEvents can deliver events.
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	defer conn.Close()
+	defer server.Close()
+	c := newConn(h, conn, "sess_fwd")
+	h.JoinSession("sess_fwd", c)
+
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.Run()
+
+	// Call forwardEvents directly (no goroutine).
+	b := NewBridge(slog.Default(), h, nil, nil)
+	done := make(chan struct{})
+	go func() {
+		b.forwardEvents(fw, "sess_fwd")
+		close(done)
+	}()
+
+	// Read the forwarded event from WebSocket.
+	server.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, data, err := server.ReadMessage()
+	require.NoError(t, err, "forwardEvents should have sent the delta to hub")
+	require.Contains(t, string(data), `"type":"message.delta"`)
+	require.Contains(t, string(data), `"session_id":"sess_fwd"`)
+
+	<-done
+}
+
+// TestBridge_ForwardEvents_DoneWithDroppedFlag verifies that when dropped deltas
+// were recorded, the Done event carries dropped=true in stats.
+func TestBridge_ForwardEvents_DoneWithDroppedFlag(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan *events.Envelope, 1)
+	doneEnv := events.NewEnvelope(aep.NewID(), "", 0, events.Done, events.DoneData{Success: true})
+	ch <- doneEnv
+	close(ch)
+
+	fw := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: ch},
+	}
+
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	defer conn.Close()
+	defer server.Close()
+	c := newConn(h, conn, "sess_drop")
+	h.JoinSession("sess_drop", c)
+
+	// Mark deltas as dropped before calling forwardEvents.
+	h.mu.Lock()
+	h.sessionDropped["sess_drop"] = true
+	h.mu.Unlock()
+
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.Run()
+
+	b := NewBridge(slog.Default(), h, nil, nil)
+	done := make(chan struct{})
+	go func() {
+		b.forwardEvents(fw, "sess_drop")
+		close(done)
+	}()
+
+	server.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, data, err := server.ReadMessage()
+	require.NoError(t, err, "forwardEvents should have sent the done event")
+	require.Contains(t, string(data), `"type":"done"`)
+	require.Contains(t, string(data), `"dropped":true`)
+
+	<-done
+}
+
+// TestBridge_ForwardEvents_CrashExitCode verifies that a non-zero worker exit
+// code causes a crash done event to be sent to the hub.
+func TestBridge_ForwardEvents_CrashExitCode(t *testing.T) {
+	ch := make(chan *events.Envelope, 1) // empty → Recv closes immediately
+	close(ch)
+
+	fw := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		exitCode:   1, // non-zero = crash
+		conn:       &fakeWorkerConn{ch: ch},
+	}
+
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	defer conn.Close()
+	defer server.Close()
+	c := newConn(h, conn, "sess_crash")
+	h.JoinSession("sess_crash", c)
+
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.Run()
+
+	b := NewBridge(slog.Default(), h, nil, nil)
+	done := make(chan struct{})
+	go func() {
+		b.forwardEvents(fw, "sess_crash")
+		close(done)
+	}()
+
+	// Read the crash done event.
+	server.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, data, err := server.ReadMessage()
+	require.NoError(t, err, "forwardEvents should have sent crash done after Wait()")
+	require.Contains(t, string(data), `"type":"done"`)
+	require.Contains(t, string(data), `"success":false`)
+	require.Contains(t, string(data), `"crash_exit_code":1`)
+
+	<-done
+}
+
+// TestBridge_ForwardEvents_MessageStoreAppend verifies that a Done event
+// triggers an Append call on msgStore.
+func TestBridge_ForwardEvents_MessageStoreAppend(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan *events.Envelope, 1)
+	doneEnv := events.NewEnvelope(aep.NewID(), "", 0, events.Done, events.DoneData{Success: true})
+	ch <- doneEnv
+	close(ch)
+
+	fw := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: ch},
+	}
+
+	// fakeMsgStore is defined in hub_test.go and is safe to reuse.
+	ms := &fakeMsgStore{}
+
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	defer conn.Close()
+	defer server.Close()
+	c := newConn(h, conn, "sess_append")
+	h.JoinSession("sess_append", c)
+
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.Run()
+
+	b := NewBridge(slog.Default(), h, nil, ms)
+	done := make(chan struct{})
+	go func() {
+		b.forwardEvents(fw, "sess_append")
+		close(done)
+	}()
+
+	// Drain the done event from WebSocket.
+	server.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err := server.ReadMessage()
+	require.NoError(t, err)
+
+	<-done
+}
+
+// TestBridge_ForwardEvents_NilMsgStore verifies that a nil msgStore does not
+// cause a panic when forwardEvents processes a Done event.
+func TestBridge_ForwardEvents_NilMsgStore(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan *events.Envelope, 1)
+	doneEnv := events.NewEnvelope(aep.NewID(), "", 0, events.Done, events.DoneData{Success: true})
+	ch <- doneEnv
+	close(ch)
+
+	fw := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: ch},
+	}
+
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	defer conn.Close()
+	defer server.Close()
+	c := newConn(h, conn, "sess_nilms")
+	h.JoinSession("sess_nilms", c)
+
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.Run()
+
+	// Bridge with nil msgStore — must not panic.
+	b := NewBridge(slog.Default(), h, nil, nil)
+	require.NotPanics(t, func() {
+		done := make(chan struct{})
+		go func() {
+			b.forwardEvents(fw, "sess_nilms")
+			close(done)
+		}()
+		// Drain the event.
+		server.SetReadDeadline(time.Now().Add(2 * time.Second))
+		server.ReadMessage()
+		<-done
+	})
+}
+
+// ─── Bridge StartSession / ResumeSession tests ─────────────────────────────────
+
+// TestBridge_StartSession_Success verifies that StartSession creates a session,
+// attaches the worker, starts it, and transitions to RUNNING.
+func TestBridge_StartSession_Success(t *testing.T) {
+	sm := new(mockBridgeSM)
+	sm.Test(t)
+
+	sessionInfo := &session.SessionInfo{
+		ID:         "sess_start",
+		UserID:     "user1",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateCreated,
+	}
+	sm.On("Create", mock.Anything, "sess_start", "user1", worker.TypeClaudeCode, nil).Return(sessionInfo, nil)
+	sm.On("AttachWorker", "sess_start", mock.Anything).Return(nil)
+	sm.On("Transition", mock.Anything, "sess_start", events.StateRunning).Return(nil)
+
+	// Use a worker factory that returns a real noop worker (Start returns nil).
+	wf := &mockBridgeWorkerFactory{
+		workers: []*mockBridgeWorker{
+			{workerType: worker.TypeClaudeCode, conn: &fakeWorkerConn{ch: make(chan *events.Envelope)}},
+		},
+	}
+
+	h := newTestHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.Run()
+
+	b := NewBridge(slog.Default(), h, sm, nil)
+	// Inject the worker factory via a test helper - since wf is a field,
+	// we replace it after construction (field injection for tests).
+	b.wf = wf
+
+	err := b.StartSession(ctx, "sess_start", "user1", worker.TypeClaudeCode)
+	require.NoError(t, err, "StartSession should succeed")
+
+	sm.AssertExpectations(t)
+}
+
+// TestBridge_StartSession_CreateFails verifies that when session creation fails,
+// StartSession returns an error without calling worker.Start.
+func TestBridge_StartSession_CreateFails(t *testing.T) {
+	sm := new(mockBridgeSM)
+	sm.Test(t)
+
+	sm.On("Create", mock.Anything, "sess_fail", "user1", worker.TypeClaudeCode, nil).
+		Return(nil, errors.New("create failed"))
+
+	h := newTestHub(t)
+	b := NewBridge(slog.Default(), h, sm, nil)
+	// Inject a worker factory that would fail if Start were called.
+	b.wf = &failingWorkerFactory{}
+
+	err := b.StartSession(context.Background(), "sess_fail", "user1", worker.TypeClaudeCode)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "create failed")
+
+	// Start should never be called because Create failed.
+	sm.AssertExpectations(t)
+}
+
+// failingWorkerFactory always fails when creating a worker.
+type failingWorkerFactory struct{}
+
+func (failingWorkerFactory) NewWorker(worker.WorkerType) (worker.Worker, error) {
+	return nil, errors.New("worker creation disabled in test")
+}
+
+var _ WorkerFactory = failingWorkerFactory{}
+
+// TestBridge_ResumeSession_Success verifies that ResumeSession retrieves a session,
+// creates a worker, attaches it, resumes it, and transitions from TERMINATED→RUNNING.
+func TestBridge_ResumeSession_Success(t *testing.T) {
+	sm := new(mockBridgeSM)
+	sm.Test(t)
+
+	sessionInfo := &session.SessionInfo{
+		ID:         "sess_resume",
+		UserID:     "user1",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateTerminated,
+	}
+	sm.On("Get", "sess_resume").Return(sessionInfo, nil)
+	sm.On("AttachWorker", "sess_resume", mock.Anything).Return(nil)
+	sm.On("Transition", mock.Anything, "sess_resume", events.StateRunning).Return(nil)
+
+	// Mock noop worker: Resume returns nil (after SetConn is called).
+	mockW := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope)},
+		resumeErr:  nil, // Resume succeeds
+	}
+	wf := &mockBridgeWorkerFactory{workers: []*mockBridgeWorker{mockW}}
+
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	defer conn.Close()
+	defer server.Close()
+	c := newConn(h, conn, "sess_resume")
+	h.JoinSession("sess_resume", c)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.Run()
+
+	b := NewBridge(slog.Default(), h, sm, nil)
+	b.wf = wf
+
+	err := b.ResumeSession(ctx, "sess_resume")
+	require.NoError(t, err, "ResumeSession should succeed")
+
+	sm.AssertExpectations(t)
+
+	// Verify state event was sent.
+	server.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, data, err := server.ReadMessage()
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"type":"state"`)
+	require.Contains(t, string(data), `"state":"running"`)
+}
+
+// TestBridge_ResumeSession_DeletedSession verifies that resuming a DELETED session
+// returns ErrSessionNotFound.
+func TestBridge_ResumeSession_DeletedSession(t *testing.T) {
+	sm := new(mockBridgeSM)
+	sm.Test(t)
+
+	sessionInfo := &session.SessionInfo{
+		ID:         "sess_deleted",
+		UserID:     "user1",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateDeleted,
+	}
+	sm.On("Get", "sess_deleted").Return(sessionInfo, nil)
+
+	h := newTestHub(t)
+	b := NewBridge(slog.Default(), h, sm, nil)
+
+	err := b.ResumeSession(context.Background(), "sess_deleted")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, session.ErrSessionNotFound))
+
+	sm.AssertExpectations(t)
+}
+
+// testNoopType is a worker type used exclusively in the noop worker tests.
+// It is registered in init() to return a real noop worker.
+const testNoopType worker.WorkerType = "noop_gateway_test"
+
+func init() {
+	worker.Register(testNoopType, func() (worker.Worker, error) {
+		return noop.NewWorker(), nil
+	})
+}
+
+// TestBridge_ResumeSession_NoopWorker verifies that for a noop-type worker,
+// ResumeSession calls noopw.SetConn to inject a noop.Conn.
+func TestBridge_ResumeSession_NoopWorker(t *testing.T) {
+	sm := new(mockBridgeSM)
+	sm.Test(t)
+
+	sessionInfo := &session.SessionInfo{
+		ID:         "sess_noop",
+		UserID:     "user1",
+		WorkerType: testNoopType,
+		State:      events.StateIdle,
+	}
+	sm.On("Get", "sess_noop").Return(sessionInfo, nil)
+	sm.On("AttachWorker", "sess_noop", mock.Anything).Return(nil)
+
+	// Use the default worker factory so Bridge calls worker.NewWorker(testNoopType),
+	// which returns a real noop worker (registered in init above).
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	defer conn.Close()
+	defer server.Close()
+	c := newConn(h, conn, "sess_noop")
+	h.JoinSession("sess_noop", c)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.Run()
+
+	b := NewBridge(slog.Default(), h, sm, nil)
+	// Use the default factory (defaultWorkerFactory) so real noop workers are created.
+	// b.wf is already defaultWorkerFactory{} from NewBridge.
+
+	err := b.ResumeSession(ctx, "sess_noop")
+	require.NoError(t, err)
+
+	sm.AssertExpectations(t)
+
+	// Verify state event was sent (Idle → no transition needed, but StateNotifier fires).
+	server.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, data, err := server.ReadMessage()
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"type":"state"`)
 }

@@ -14,6 +14,7 @@ import (
 
 	"hotplex-worker/internal/aep"
 	"hotplex-worker/internal/config"
+	"hotplex-worker/internal/security"
 	"hotplex-worker/internal/session"
 	"hotplex-worker/internal/worker"
 	"hotplex-worker/pkg/events"
@@ -611,3 +612,146 @@ func (*fakeMsgStore) GetOwner(ctx context.Context, sessionID string) (string, er
 func (*fakeMsgStore) Close() error { return nil }
 
 var _ session.MessageStore = (*fakeMsgStore)(nil)
+
+// ─── Bridge forwarding tests ───────────────────────────────────────────────────
+
+// ─── HandleHTTP tests ─────────────────────────────────────────────────────────
+
+// TestHub_HandleHTTP_Success verifies that a request with valid auth and no
+// session_id succeeds with a 101 WebSocket upgrade and the connection is
+// registered with the hub.
+func TestHub_HandleHTTP_Success(t *testing.T) {
+	cfg := config.Default()
+	cfg.Security.APIKeys = []string{"test-api-key"} // require this key
+	cfg.Security.AllowedOrigins = []string{"*"}
+
+	auth := security.NewAuthenticator(&cfg.Security, nil)
+	h := newTestHub(t)
+	handler := NewHandler(slog.Default(), cfg, h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil, nil)
+
+	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
+	server := httptest.NewServer(serveHandler)
+	defer server.Close()
+
+	u := "ws" + server.URL[4:]
+	header := http.Header{}
+	header.Set("X-API-Key", "test-api-key")
+
+	conn, resp, err := websocket.DefaultDialer.Dial(u, header)
+	require.NoError(t, err, "WebSocket upgrade should succeed")
+	defer conn.Close()
+	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+	require.Greater(t, h.ConnectionsOpen(), 0, "hub should have registered the connection")
+}
+
+// TestHub_HandleHTTP_Unauthorized verifies that a request without an API key
+// returns 401 Unauthorized.
+func TestHub_HandleHTTP_Unauthorized(t *testing.T) {
+	cfg := config.Default()
+	cfg.Security.APIKeys = []string{"secret-key"} // require this key
+	cfg.Security.AllowedOrigins = []string{"*"}
+
+	auth := security.NewAuthenticator(&cfg.Security, nil)
+	h := newTestHub(t)
+	handler := NewHandler(slog.Default(), cfg, h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil, nil)
+
+	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
+	server := httptest.NewServer(serveHandler)
+	defer server.Close()
+
+	u := "ws" + server.URL[4:]
+	// No API key header.
+	_, resp, err := websocket.DefaultDialer.Dial(u, nil)
+	require.Error(t, err, "dial should fail without API key")
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestHub_HandleHTTP_WithSessionID verifies that a request with an explicit
+// session_id query parameter results in a connection registered under that ID.
+func TestHub_HandleHTTP_WithSessionID(t *testing.T) {
+	cfg := config.Default()
+	cfg.Security.APIKeys = []string{"test-key"}
+	cfg.Security.AllowedOrigins = []string{"*"}
+
+	auth := security.NewAuthenticator(&cfg.Security, nil)
+	h := newTestHub(t)
+	handler := NewHandler(slog.Default(), cfg, h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil, nil)
+
+	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
+	server := httptest.NewServer(serveHandler)
+	defer server.Close()
+
+	u := "ws" + server.URL[4:] + "?session_id=sess_explicit"
+	header := http.Header{}
+	header.Set("X-API-Key", "test-key")
+
+	conn, resp, err := websocket.DefaultDialer.Dial(u, header)
+	require.NoError(t, err, "WebSocket upgrade should succeed with session_id param")
+	defer conn.Close()
+	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+	// Verify the session has a connection registered.
+	h.mu.RLock()
+	_, hasSession := h.sessions["sess_explicit"]
+	h.mu.RUnlock()
+	require.True(t, hasSession, "hub should have registered session sess_explicit")
+}
+
+// TestHub_HandleHTTP_GeneratesSessionID verifies that when no session_id is
+// provided, a new session ID is auto-generated and the connection is registered.
+func TestHub_HandleHTTP_GeneratesSessionID(t *testing.T) {
+	cfg := config.Default()
+	cfg.Security.APIKeys = []string{"test-key"}
+	cfg.Security.AllowedOrigins = []string{"*"}
+
+	auth := security.NewAuthenticator(&cfg.Security, nil)
+	h := newTestHub(t)
+	handler := NewHandler(slog.Default(), cfg, h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil, nil)
+
+	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
+	server := httptest.NewServer(serveHandler)
+	defer server.Close()
+
+	u := "ws" + server.URL[4:] // no session_id query param
+	header := http.Header{}
+	header.Set("X-API-Key", "test-key")
+
+	conn, resp, err := websocket.DefaultDialer.Dial(u, header)
+	require.NoError(t, err, "WebSocket upgrade should succeed without session_id")
+	defer conn.Close()
+	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+	// Hub should have at least one session registered.
+	h.mu.RLock()
+	sessionCount := len(h.sessions)
+	h.mu.RUnlock()
+	require.Equal(t, 1, sessionCount, "hub should have exactly one auto-generated session")
+}
+
+// TestHub_HandleHTTP_RejectsInvalidAPIKey verifies that a wrong API key is rejected.
+func TestHub_HandleHTTP_RejectsInvalidAPIKey(t *testing.T) {
+	cfg := config.Default()
+	cfg.Security.APIKeys = []string{"correct-key"}
+	cfg.Security.AllowedOrigins = []string{"*"}
+
+	auth := security.NewAuthenticator(&cfg.Security, nil)
+	h := newTestHub(t)
+	handler := NewHandler(slog.Default(), cfg, h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil, nil)
+
+	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
+	server := httptest.NewServer(serveHandler)
+	defer server.Close()
+
+	u := "ws" + server.URL[4:]
+	header := http.Header{}
+	header.Set("X-API-Key", "wrong-key")
+
+	_, resp, err := websocket.DefaultDialer.Dial(u, header)
+	require.Error(t, err, "dial should fail with wrong API key")
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
