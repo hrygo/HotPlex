@@ -97,16 +97,15 @@ func TestConfig_Validate(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			errs := tt.cfg.Validate()
+			// NOT parallel — mutates global env vars
+				errs := tt.cfg.Validate()
 			require.Len(t, errs, tt.errCnt)
 		})
 	}
 }
 
 func TestExpandEnv(t *testing.T) {
-	t.Parallel()
-
+	// NOT parallel — mutates global env vars (HOME, USER, etc.)
 	tests := []struct {
 		name   string
 		input  string
@@ -161,8 +160,8 @@ func TestExpandEnv(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			os.Unsetenv("HOME")
+			// NOT parallel — mutates global env vars
+				os.Unsetenv("HOME")
 			os.Unsetenv("USER")
 			os.Unsetenv("PWD")
 			os.Unsetenv("UNSET_VAR")
