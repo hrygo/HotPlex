@@ -6,7 +6,7 @@ paths:
 # Session 管理规范
 
 > Session 状态机、GC 策略、并发控制、mutex 规范
-> 参考：`docs/SPECS/Acceptance-Criteria.md` §SM-001 ~ §SM-008
+> 参考：`docs/specs/Acceptance-Criteria.md` §SM-001 ~ §SM-008
 
 ## 5 状态机
 

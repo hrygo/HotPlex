@@ -1,4 +1,4 @@
-# SPECS 目录索引
+# specs 目录索引
 
 > 规范文档集中管理
 
@@ -15,20 +15,20 @@
 ### 按优先级查看待办
 ```bash
 # 查看所有 P0 AC
-grep ",P0,TODO," docs/SPECS/AC-Tracking-Matrix.csv
+grep ",P0,TODO," docs/specs/AC-Tracking-Matrix.csv
 
 # 查看某区域的 P0
-grep "AEP v1 协议,P0,TODO" docs/SPECS/AC-Tracking-Matrix.csv
+grep "AEP v1 协议,P0,TODO" docs/specs/AC-Tracking-Matrix.csv
 
 # 统计进度
-grep -c ",P0,PASS," docs/SPECS/AC-Tracking-Matrix.csv
-grep -c ",P0,TODO," docs/SPECS/AC-Tracking-Matrix.csv
+grep -c ",P0,PASS," docs/specs/AC-Tracking-Matrix.csv
+grep -c ",P0,TODO," docs/specs/AC-Tracking-Matrix.csv
 ```
 
 ### 状态分布
 ```bash
 # TODO / IN_PROGRESS / PASS / FAIL 数量
-awk -F',' '{print $5}' docs/SPECS/AC-Tracking-Matrix.csv | sort | uniq -c
+awk -F',' '{print $5}' docs/specs/AC-Tracking-Matrix.csv | sort | uniq -c
 ```
 
 ## 关联规范文档
@@ -44,3 +44,4 @@ awk -F',' '{print $5}' docs/SPECS/AC-Tracking-Matrix.csv | sort | uniq -c
 | 日期 | 版本 | 更新内容 |
 |------|------|----------|
 | 2026-03-31 | v1.0 | 初始版本：157 条 AC，3 个文件（MD 定义 + MD 跟踪 + CSV 跟踪） |
+

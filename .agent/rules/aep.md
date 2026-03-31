@@ -6,7 +6,7 @@ paths:
 # AEP v1 协议规范
 
 > hotplex-worker 对外暴露的统一 WebSocket 全双工通信协议
-> 参考文档：`docs/SPECS/Acceptance-Criteria.md` §AEP-001 ~ §AEP-030
+> 参考文档：`docs/specs/Acceptance-Criteria.md` §AEP-001 ~ §AEP-030
 
 ## Envelope 结构
 每条 AEP v1 消息必须包含以下字段：

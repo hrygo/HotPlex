@@ -72,7 +72,7 @@ make build
 - [Architecture Design](docs/architecture/Worker-Gateway-Design.md)
 - [AEP v1 Protocol Specification](docs/architecture/AEP-v1-Protocol.md)
 - [Testing Strategy](docs/testing/Testing-Strategy.md)
-- [Traceability Matrix](docs/SPECS/TRACEABILITY-MATRIX.md)
+- [Traceability Matrix](docs/specs/TRACEABILITY-MATRIX.md)
 
 ## 🤝 Contributing
 

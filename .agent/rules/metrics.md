@@ -6,7 +6,7 @@ paths:
 # 可观测性规范
 
 > Prometheus 指标、OTel Trace、日志格式
-> 参考：`docs/SPECS/Acceptance-Criteria.md` §OBS-001 ~ §OBS-010
+> 参考：`docs/specs/Acceptance-Criteria.md` §OBS-001 ~ §OBS-010
 
 ## 日志格式（OTel Log Data Model 兼容）
 
