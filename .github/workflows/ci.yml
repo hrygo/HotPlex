@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [master, reorganized]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # 检测文件变更，避免无关 push 触发 CI
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - 'scripts/**'
+
+  lint:
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true'
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: false
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --timeout=10m
+
+  test:
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true'
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - run: go mod download
+
+      - run: go vet ./...
+
+      - run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+      - name: Display code coverage
+        run: go tool cover -func=coverage.out | tail -1
+
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          flags: unittests
+          name: hotplex-worker
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

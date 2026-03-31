@@ -1,0 +1,104 @@
+// Package metrics provides Prometheus metrics for the gateway.
+package metrics
+
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+// All metric vectors are registered once at package init via promauto.
+// The registry is then used by the /admin/metrics handler in gateway.
+
+var (
+	// SessionsActive tracks the number of currently active sessions by state.
+	SessionsActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "hotplex",
+		Name:      "sessions_active",
+		Help:      "Number of active sessions by state (created, running, idle)",
+	}, []string{"state"})
+
+	// SessionsTotal tracks total sessions created (counter).
+	SessionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "sessions_total",
+		Help:      "Total number of sessions created, labeled by worker_type",
+	}, []string{"worker_type"})
+
+	// SessionsTerminated tracks terminated sessions by reason.
+	SessionsTerminated = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "sessions_terminated_total",
+		Help:      "Total sessions terminated by reason (idle_timeout, max_lifetime, client_kill, admin_kill, zombie, crash)",
+	}, []string{"reason"})
+
+	// SessionsDeleted tracks deleted sessions (GC retention).
+	SessionsDeleted = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "sessions_deleted_total",
+		Help:      "Total sessions deleted by the retention GC",
+	})
+
+	// WorkersRunning tracks the number of active worker processes by type.
+	WorkersRunning = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "hotplex",
+		Name:      "workers_running",
+		Help:      "Number of currently running worker processes by type",
+	}, []string{"worker_type"})
+
+	// WorkerStartsTotal tracks worker process starts by type and result.
+	WorkerStartsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "worker_starts_total",
+		Help:      "Total worker process starts by type and result (success, failed)",
+	}, []string{"worker_type", "result"})
+
+	// WorkerExecDuration tracks worker execution duration in seconds.
+	WorkerExecDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "hotplex",
+		Name:      "worker_exec_duration_seconds",
+		Help:      "Worker execution duration in seconds",
+		Buckets:   []float64{1, 5, 15, 30, 60, 120, 300, 600, 1800},
+	}, []string{"worker_type"})
+
+	// GatewayConnectionsOpen tracks currently open WebSocket connections.
+	GatewayConnectionsOpen = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "hotplex",
+		Name:      "gateway_connections_open",
+		Help:      "Number of currently open WebSocket connections",
+	})
+
+	// GatewayMessagesTotal tracks total messages sent/received.
+	GatewayMessagesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "gateway_messages_total",
+		Help:      "Total WebSocket messages by direction and event type",
+	}, []string{"direction", "event_type"})
+
+	// GatewayDeltasDropped tracks dropped message.delta events due to backpressure.
+	GatewayDeltasDropped = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "gateway_deltas_dropped_total",
+		Help:      "Total message.delta events dropped due to backpressure",
+	})
+
+	// GatewayErrorsTotal tracks errors by type.
+	GatewayErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "gateway_errors_total",
+		Help:      "Total gateway errors by error code",
+	}, []string{"error_code"})
+
+	// PoolAcquireTotal tracks pool acquisition attempts by result.
+	PoolAcquireTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "pool_acquire_total",
+		Help:      "Total pool acquire attempts by result (success, pool_exhausted, user_quota_exceeded)",
+	}, []string{"result"})
+
+	// PoolUtilization tracks pool utilization percentage.
+	PoolUtilization = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "hotplex",
+		Name:      "pool_utilization_ratio",
+		Help:      "Current pool utilization as a ratio (0-1) of max concurrent sessions",
+	})
+)

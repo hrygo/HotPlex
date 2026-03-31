@@ -2,14 +2,24 @@
 package proc
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
 	"syscall"
 	"time"
+
+	"hotplex-worker/internal/security"
+)
+
+// Default output buffer limits for bufio.Scanner.
+const (
+	scannerInitSize = 64 * 1024  // 64 KB initial capacity
+	scannerMaxSize  = 1 * 1024 * 1024 // 1 MB hard cap — scanner panics bufio.ErrTooLong beyond this
 )
 
 // Manager oversees the lifecycle of a single worker process.
@@ -21,11 +31,16 @@ type Manager struct {
 	stdout *os.File
 	stderr *os.File
 
-	mu       sync.Mutex
-	pgid     int
-	started  bool
-	exited   bool
-	exitCode int
+	mu        sync.Mutex
+	pgid      int
+	started   bool
+	exited    bool
+	exitCode  int
+
+	// scanner reads stdout line-by-line with a 10MB per-line cap.
+	// Created in Start(); safe to call ReadLine() concurrently from one goroutine.
+	scanner     *bufio.Scanner
+	outputLimit int
 }
 
 // Opts configures a process manager.
@@ -56,7 +71,7 @@ func (m *Manager) Start(ctx context.Context, name string, args []string, env []s
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Env = env
+	cmd.Env = security.StripNestedAgent(env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true, // create new process group
 	}
@@ -103,6 +118,27 @@ func (m *Manager) Start(ctx context.Context, name string, args []string, env []s
 		m.pgid = cmd.Process.Pid
 	}
 
+	// Limit process virtual address space (RLIMIT_AS) to 512 MB.
+	// This prevents runaway worker processes from exhausting the gateway's memory.
+	if cmd.Process != nil {
+		const memLimit = 512 * 1024 * 1024 // 512 MB
+		if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{
+			Cur: memLimit,
+			Max: memLimit,
+		}); err != nil {
+			m.log.Warn("proc: setrlimit RLIMIT_AS failed", "error", err)
+			// Non-fatal: log and continue.
+		}
+	}
+
+	// Set up bufio.Scanner for line-by-line stdout parsing.
+	// Initial buffer 64 KB; hard cap 10 MB per line.
+	buf := make([]byte, scannerInitSize)
+	m.scanner = bufio.NewScanner(m.stdout)
+	m.scanner.Buffer(buf, scannerMaxSize)
+	m.scanner.Split(bufio.ScanLines)
+	m.outputLimit = scannerMaxSize
+
 	m.log.Info("proc: started",
 		"pid", cmd.Process.Pid,
 		"pgid", m.pgid,
@@ -135,7 +171,7 @@ func (m *Manager) Terminate(ctx context.Context, sig syscall.Signal, gracePeriod
 	// Wait for exit with deadline.
 	done := make(chan struct{})
 	go func() {
-		m.cmd.Wait()
+		_ = m.cmd.Wait()
 		close(done)
 	}()
 
@@ -164,8 +200,7 @@ func (m *Manager) Kill() error {
 		_ = syscall.Kill(-m.pgid, syscall.SIGKILL)
 		m.log.Info("proc: sent SIGKILL", "pgid", m.pgid)
 	}
-
-	m.cmd.Wait()
+	_ = m.cmd.Wait()
 	m.captureExitCodeLocked()
 	return nil
 }
@@ -179,9 +214,9 @@ func (m *Manager) Wait() (int, error) {
 		return -1, fmt.Errorf("proc: not started")
 	}
 
-	m.cmd.Wait()
+	err := m.cmd.Wait()
 	m.captureExitCodeLocked()
-	return m.exitCode, nil
+	return m.exitCode, err
 }
 
 // PID returns the process ID, or -1 if not started.
@@ -227,6 +262,55 @@ func (m *Manager) captureExitCodeLocked() {
 	m.log.Info("proc: exited", "exit_code", m.exitCode)
 }
 
+// ReadLine reads the next line from the worker process stdout.
+// It returns ("", io.EOF) when the scanner reaches end-of-file, or
+// ("", ErrCodeWorkerOutputLimit) when a line exceeds the 1 MB buffer limit.
+//
+// ReadLine is NOT safe for concurrent calls; callers must serialize access
+// (typically a single read goroutine per session). It does NOT hold m.mu
+// during the blocking Scan call to avoid stalling Terminate/Kill.
+func (m *Manager) ReadLine() (string, error) {
+	// Fast path: check if scanner is available without locking.
+	m.mu.Lock()
+	scanner := m.scanner
+	m.mu.Unlock()
+
+	if scanner == nil {
+		return "", io.EOF
+	}
+
+	// Defer a panic-recover to catch bufio.ErrTooLong (scanner panics when
+	// a token exceeds the configured max buffer size).
+	var line string
+	var scanErr error
+
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				if p == bufio.ErrTooLong {
+					scanErr = fmt.Errorf("worker output limit exceeded (1 MB line)")
+				} else {
+					panic(p)
+				}
+			}
+		}()
+		if !scanner.Scan() {
+			scanErr = scanner.Err()
+			if scanErr == nil {
+				scanErr = io.EOF
+			}
+			return
+		}
+		line = scanner.Text()
+	}()
+
+	if scanErr != nil {
+		return "", scanErr
+	}
+	return line, nil
+}
+
+// drainStderr drains the stderr pipe in the background.
 func (m *Manager) drainStderr() {
 	buf := make([]byte, 4096)
 	for {

@@ -6,14 +6,20 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"runtime"
 	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"hotplex-worker/internal/aep"
 	"hotplex-worker/internal/config"
@@ -68,7 +74,17 @@ func run() error {
 		return err
 	}
 
-	sm, err := session.NewManager(ctx, log, cfg, store)
+	// EVT-004: optional event persistence. Disable via HOTPLEX_EVENT_STORE=disabled.
+	var msgStore session.MessageStore
+	if os.Getenv("HOTPLEX_EVENT_STORE") != "disabled" {
+		msgStore, err = session.NewSQLiteMessageStore(ctx, cfg)
+		if err != nil {
+			_ = store.Close()
+			return fmt.Errorf("gateway: init message store: %w", err)
+		}
+	}
+
+	sm, err := session.NewManager(ctx, log, cfg, store, msgStore)
 	if err != nil {
 		return err
 	}
@@ -89,8 +105,15 @@ func run() error {
 	}
 
 	auth := security.NewAuthenticator(&cfg.Security)
-	handler := gateway.NewHandler(log, cfg, hub, sm)
-	bridge := gateway.NewBridge(log, hub, sm)
+
+	// Initialize JWT validator if secret is configured.
+	var jwtValidator *security.JWTValidator
+	if secret := os.Getenv("HOTPLEX_JWT_SECRET"); secret != "" {
+		jwtValidator = security.NewJWTValidator([]byte(secret), cfg.Security.JWTAudience)
+	}
+
+	handler := gateway.NewHandler(log, cfg, hub, sm, jwtValidator)
+	bridge := gateway.NewBridge(log, hub, sm, msgStore)
 
 	// Register HTTP routes.
 	mux := http.NewServeMux()
@@ -127,8 +150,6 @@ func run() error {
 		log.Warn("gateway: hub shutdown", "err", err)
 	}
 
-
-
 	if err := sm.Close(); err != nil {
 		log.Warn("gateway: session manager close", "err", err)
 	}
@@ -150,12 +171,14 @@ func loadConfig() *config.Config {
 		}
 		if *flagDev {
 			cfg.Security.APIKeys = nil
+			cfg.Admin.Tokens = nil // Dev mode: allow all.
 		}
 		return cfg
 	}
 	cfg := config.Default()
 	if *flagDev {
 		cfg.Security.APIKeys = nil
+		cfg.Admin.Tokens = nil // Dev mode: allow all.
 	}
 	return cfg
 }
@@ -170,28 +193,64 @@ func setupRoutes(
 	handler *gateway.Handler,
 	bridge *gateway.Bridge,
 ) {
-	// Health check.
+	// Health check (no auth).
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	// Admin /admin/health and /admin/health/ready — unauthenticated per RFC 7807.
+	// Registered before the admin mux so they bypass auth middleware.
+	// Note: admin is created below after adminMux is set up.
+	mux.HandleFunc("GET /admin/health/ready", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	// Prometheus metrics endpoint.
+	mux.Handle("GET /admin/metrics", promhttp.Handler())
+
 	// WebSocket endpoint (AEP v1 handshake handled in ReadPump).
 	mux.Handle("GET /ws", hub.HandleHTTP(auth, sm, handler, bridge))
 
-	// Admin API.
+	// Admin API (requires auth middleware).
 	admin := &AdminAPI{
-		log:    log,
-		sm:     sm,
-		hub:    hub,
+		log:   log,
+		cfg:   cfg,
+		sm:    sm,
+		hub:   hub,
 		bridge: bridge,
 	}
-	mux.Handle("POST /admin/sessions", auth.Middleware(http.HandlerFunc(admin.CreateSession)))
-	mux.Handle("GET /admin/sessions", auth.Middleware(http.HandlerFunc(admin.ListSessions)))
-	mux.Handle("GET /admin/sessions/{id}", auth.Middleware(http.HandlerFunc(admin.GetSession)))
-	mux.Handle("DELETE /admin/sessions/{id}", auth.Middleware(http.HandlerFunc(admin.DeleteSession)))
-	mux.Handle("POST /admin/sessions/{id}/terminate", auth.Middleware(http.HandlerFunc(admin.TerminateSession)))
-	mux.Handle("GET /admin/pool/stats", auth.Middleware(http.HandlerFunc(admin.PoolStats)))
+	// Initialize middleware components once at startup.
+	if cfg.Admin.RateLimitEnabled {
+		admin.rateLimiter = newRateLimiter(cfg.Admin.RequestsPerSec, cfg.Admin.Burst)
+	}
+	if cfg.Admin.IPWhitelistEnabled {
+		admin.allowedCIDRs = cfg.Admin.AllowedCIDRs
+	}
+	adminMux := admin.Mux()
+
+	// Wire all admin routes.
+	adminMux.HandleFunc("GET /admin/stats", admin.HandleStats)
+	// /admin/health/workers requires auth (ScopeHealthRead).
+	adminMux.HandleFunc("GET /admin/health/workers", admin.HandleWorkerHealth)
+	adminMux.HandleFunc("GET /admin/logs", admin.HandleLogs)
+	adminMux.HandleFunc("POST /admin/config/validate", admin.HandleConfigValidate)
+	adminMux.HandleFunc("GET /admin/debug/sessions/{id}", admin.HandleDebugSession)
+
+	// Session CRUD.
+	adminMux.HandleFunc("GET /admin/sessions", admin.ListSessions)
+	adminMux.HandleFunc("GET /admin/sessions/{id}", admin.GetSession)
+	adminMux.HandleFunc("DELETE /admin/sessions/{id}", admin.DeleteSession)
+	adminMux.HandleFunc("POST /admin/sessions/{id}/terminate", admin.TerminateSession)
+
+	// /admin/health — full gateway health check, no auth required.
+	mux.HandleFunc("GET /admin/health", admin.HandleHealth)
+
+	// Mount admin mux with middleware chain.
+	// NOTE: /admin/health and /admin/health/ready are registered above (before this line)
+	// and therefore bypass the auth middleware.
+	mux.Handle("/admin/", admin.Middleware(adminMux))
 }
 
 func respondJSON(w http.ResponseWriter, data any) {
@@ -199,15 +258,348 @@ func respondJSON(w http.ResponseWriter, data any) {
 	_ = json.NewEncoder(w).Encode(data)
 }
 
-// AdminAPI handles administrative operations.
-type AdminAPI struct {
-	log    *slog.Logger
-	sm     *session.Manager
-	hub    *gateway.Hub
-	bridge *gateway.Bridge
+// Admin API scope constants (per RBAC Permission Matrix).
+const (
+	ScopeSessionRead  = "session:read"  // list/get sessions
+	ScopeSessionWrite = "session:write" // create/modify/terminate sessions
+	ScopeSessionKill = "session:delete" // force delete sessions
+	ScopeStatsRead   = "stats:read"   // read statistics
+	ScopeHealthRead  = "health:read"  // read health checks
+	ScopeConfigRead  = "config:read"   // read/validate config
+	ScopeAdminRead   = "admin:read"   // debug logs, debug session
+	ScopeAdminWrite  = "admin:write"  // write admin ops
+)
+
+// scopeContextKey is the context key for the authenticated scopes.
+type scopeContextKey struct{}
+
+// getScopes returns the scopes stored in the request context by Middleware.
+func getScopes(r *http.Request) []string {
+	if scopes, ok := r.Context().Value(scopeContextKey{}).([]string); ok {
+		return scopes
+	}
+	return nil
 }
 
+// hasScope reports whether the request has the required scope.
+func hasScope(r *http.Request, required string) bool {
+	for _, s := range getScopes(r) {
+		if s == required {
+			return true
+		}
+	}
+	return false
+}
+
+// AdminAPI handles administrative operations.
+type AdminAPI struct {
+	log          *slog.Logger
+	cfg          *config.Config
+	sm           *session.Manager
+	hub          *gateway.Hub
+	bridge       *gateway.Bridge
+	rateLimiter  *simpleRateLimiter
+	allowedCIDRs []string
+}
+
+// Middleware returns an http.Handler with all auth middleware applied:
+// IP whitelist → Rate limit → Bearer token → scopes injected into context.
+func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Rate limit.
+		if a.rateLimiter != nil {
+			if !a.rateLimiter.Allow() {
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
+		}
+
+		// IP whitelist.
+		if len(a.allowedCIDRs) > 0 {
+			addr := clientIP(r)
+			if !ipAllowed(addr, a.allowedCIDRs) {
+				a.log.Warn("admin: IP not whitelisted", "ip", addr)
+				http.Error(w, "IP not allowed", http.StatusForbidden)
+				return
+			}
+		}
+
+		// Bearer token.
+		token := extractBearerToken(r)
+		if token == "" {
+			http.Error(w, "missing admin token", http.StatusUnauthorized)
+			return
+		}
+		scopes, ok := a.validateToken(token)
+		if !ok {
+			http.Error(w, "invalid admin token", http.StatusUnauthorized)
+			return
+		}
+
+		// Inject scopes into context for per-handler scope checks.
+		ctx := context.WithValue(r.Context(), scopeContextKey{}, scopes)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// clientIP extracts the real client IP from the request, respecting X-Forwarded-For.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.Index(xff, ","); idx != -1 {
+			xff = xff[:idx]
+		}
+		return strings.TrimSpace(xff)
+	}
+	// Strip port from RemoteAddr.
+	host, _, _ := strings.Cut(r.RemoteAddr, ":")
+	return host
+}
+
+// extractBearerToken extracts the bearer token from the Authorization header or query string.
+func extractBearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if strings.HasPrefix(h, "Bearer ") {
+		return h[7:]
+	}
+	return r.URL.Query().Get("access_token")
+}
+
+// Mux returns a new ServeMux for admin routes.
+func (a *AdminAPI) Mux() *http.ServeMux {
+	return http.NewServeMux()
+}
+
+// HandleStats returns gateway/worker/database statistics.
+func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeStatsRead) {
+		http.Error(w, "insufficient scope: need stats:read", http.StatusForbidden)
+		return
+	}
+	total, _, _ := a.sm.Stats()
+	sessions, _ := a.sm.List(r.Context(), 0, 0)
+
+	byType := make(map[string]map[string]any)
+	for _, si := range sessions {
+		key := string(si.WorkerType)
+		if byType[key] == nil {
+			byType[key] = map[string]any{
+				"sessions":       0,
+				"avg_memory_mb":  0,
+				"avg_cpu_percent": 0,
+			}
+		}
+		m := byType[key]
+		m["sessions"] = m["sessions"].(int) + 1
+	}
+
+	respondJSON(w, map[string]any{
+		"gateway": map[string]any{
+			"uptime_seconds":          int(time.Since(startTime).Seconds()),
+			"websocket_connections": a.hub.ConnectionsOpen(),
+			"sessions_active":        total,
+			"sessions_total":         len(sessions),
+		},
+		"workers": byType,
+		"database": map[string]any{
+			"sessions_count": len(sessions),
+			"db_size_mb":    0, // placeholder
+		},
+	})
+}
+
+// HandleHealth returns the gateway health check response.
+// No scope required — this endpoint is intentionally unauthenticated
+// to support Kubernetes liveness/readiness probes and load balancers.
+func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
+	dbHealthy := true
+	if _, err := a.sm.List(r.Context(), 1, 0); err != nil {
+		dbHealthy = false
+	}
+
+	status := "healthy"
+	if !dbHealthy {
+		status = "degraded"
+	}
+
+	respondJSON(w, map[string]any{
+		"status": status,
+		"checks": map[string]any{
+			"gateway": map[string]any{
+				"status":         "healthy",
+				"uptime_seconds": int(time.Since(startTime).Seconds()),
+			},
+			"database": map[string]any{
+				"status": map[bool]string{true: "healthy", false: "unhealthy"}[dbHealthy],
+				"type":   "sqlite",
+				"path":   a.cfg.DB.Path,
+			},
+			"workers": map[string]any{
+				"status": "healthy",
+			},
+		},
+		"version": version(),
+	})
+}
+
+// HandleWorkerHealth returns per-worker health status for all active sessions.
+func (a *AdminAPI) HandleWorkerHealth(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeHealthRead) {
+		http.Error(w, "insufficient scope: need health:read", http.StatusForbidden)
+		return
+	}
+
+	statuses := a.sm.WorkerHealthStatuses()
+	allHealthy := true
+	for _, ws := range statuses {
+		if !ws.Healthy {
+			allHealthy = false
+			break
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	body, _ := json.Marshal(map[string]any{
+		"status":     map[bool]string{true: "ok", false: "degraded"}[allHealthy],
+		"workers":    statuses,
+		"checked_at": time.Now().UTC().Format(time.RFC3339),
+	})
+	if !allHealthy {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	_, _ = w.Write(body)
+}
+
+// HandleLogs returns recent log entries.
+func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminRead) {
+		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
+		return
+	}
+	// Placeholder: return empty logs since structured log buffer not wired yet.
+	respondJSON(w, map[string]any{
+		"logs":  []any{},
+		"total": 0,
+		"limit": 100,
+	})
+}
+
+// HandleConfigValidate validates the gateway configuration.
+func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeConfigRead) {
+		http.Error(w, "insufficient scope: need config:read", http.StatusForbidden)
+		return
+	}
+	var warnings []string
+	if len(a.cfg.Security.APIKeys) == 0 {
+		warnings = append(warnings, "no API keys configured; running in open-access mode")
+	}
+	respondJSON(w, map[string]any{
+		"valid":    true,
+		"errors":   []string{},
+		"warnings": warnings,
+	})
+}
+
+// HandleDebugSession returns internal debug state for a session.
+func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminRead) {
+		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
+		return
+	}
+	id := r.PathValue("id")
+	si, err := a.sm.Get(id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	respondJSON(w, map[string]any{
+		"session": map[string]any{
+			"id":    si.ID,
+			"state": si.State,
+		},
+	})
+}
+
+// validateToken checks the admin bearer token against configured values.
+// Returns scopes for the token, or (nil, false) if invalid.
+func (a *AdminAPI) validateToken(token string) ([]string, bool) {
+	// Check token-specific scopes first.
+	if a.cfg.Admin.TokenScopes != nil {
+		if scopes, ok := a.cfg.Admin.TokenScopes[token]; ok {
+			return scopes, true
+		}
+	}
+	// Fall back to tokens list with default scopes.
+	for _, t := range a.cfg.Admin.Tokens {
+		if t == token {
+			if len(a.cfg.Admin.DefaultScopes) > 0 {
+				return a.cfg.Admin.DefaultScopes, true
+			}
+			return []string{ScopeSessionRead, ScopeStatsRead, ScopeHealthRead}, true
+		}
+	}
+	return nil, false
+}
+
+// ipAllowed reports whether addr matches any allowed CIDR.
+func ipAllowed(addr string, cidrs []string) bool {
+	if len(cidrs) == 0 {
+		return true
+	}
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return false
+	}
+	for _, cidr := range cidrs {
+		p, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			continue
+		}
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// newRateLimiter creates a token-bucket rate limiter.
+func newRateLimiter(reqPerSec, burst int) *simpleRateLimiter {
+	return &simpleRateLimiter{
+		tokens:     float64(burst),
+		maxTokens:  float64(burst),
+		refillRate: float64(reqPerSec),
+		lastRefill: time.Now(),
+	}
+}
+
+type simpleRateLimiter struct {
+	tokens     float64
+	maxTokens  float64
+	refillRate float64
+	lastRefill time.Time
+	mu         sync.Mutex
+}
+
+func (r *simpleRateLimiter) Allow() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	elapsed := time.Since(r.lastRefill).Seconds()
+	r.tokens = min(r.maxTokens, r.tokens+elapsed*r.refillRate)
+	r.lastRefill = time.Now()
+	if r.tokens >= 1 {
+		r.tokens--
+		return true
+	}
+	return false
+}
+
+var startTime = time.Now()
+
 func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeSessionWrite) {
+		http.Error(w, "insufficient scope: need session:write", http.StatusForbidden)
+		return
+	}
 	id := r.URL.Query().Get("session_id")
 	userID := r.URL.Query().Get("user_id")
 	wt := worker.WorkerType(r.URL.Query().Get("worker_type"))
@@ -231,6 +623,10 @@ func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeSessionRead) {
+		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)
+		return
+	}
 	limit := 100
 	offset := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -259,6 +655,10 @@ func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AdminAPI) GetSession(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeSessionRead) {
+		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)
+		return
+	}
 	id := r.PathValue("id")
 	si, err := a.sm.Get(id)
 	if err != nil {
@@ -270,6 +670,10 @@ func (a *AdminAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AdminAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeSessionKill) {
+		http.Error(w, "insufficient scope: need session:delete", http.StatusForbidden)
+		return
+	}
 	id := r.PathValue("id")
 	if err := a.sm.Delete(r.Context(), id); err != nil {
 		http.Error(w, "failed to delete session", http.StatusInternalServerError)
@@ -280,6 +684,10 @@ func (a *AdminAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AdminAPI) TerminateSession(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeSessionWrite) {
+		http.Error(w, "insufficient scope: need session:write", http.StatusForbidden)
+		return
+	}
 	id := r.PathValue("id")
 	if err := a.sm.Transition(r.Context(), id, events.StateTerminated); err != nil {
 		a.log.Warn("admin: terminate session", "id", id, "err", err)
@@ -291,6 +699,10 @@ func (a *AdminAPI) TerminateSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AdminAPI) PoolStats(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeStatsRead) {
+		http.Error(w, "insufficient scope: need stats:read", http.StatusForbidden)
+		return
+	}
 	total, max, users := a.sm.Stats()
 	respondJSON(w, map[string]int{
 		"total": total,

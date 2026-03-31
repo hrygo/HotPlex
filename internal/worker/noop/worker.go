@@ -26,6 +26,8 @@ func (Capabilities) SupportsStreaming() bool { return false }
 func (Capabilities) SupportsTools() bool     { return false }
 func (Capabilities) EnvWhitelist() []string  { return nil }
 func (Capabilities) SessionStoreDir() string { return "" }
+func (Capabilities) MaxTurns() int          { return 0 }
+func (Capabilities) Modalities() []string    { return nil }
 
 // Conn is a stub SessionConn that drops all messages.
 type Conn struct {
@@ -99,4 +101,15 @@ func (w *Worker) Conn() worker.SessionConn {
 // SetConn sets the SessionConn (used by tests).
 func (w *Worker) SetConn(conn *Conn) {
 	w.conn = conn
+}
+
+// Health returns a stub health report. In production workers this queries
+// the actual subprocess state (PID, running flag, uptime, etc.).
+func (w *Worker) Health() worker.WorkerHealth {
+	return worker.WorkerHealth{
+		Type:    w.Type(),
+		Healthy: true,
+		Running: false,
+		Uptime:  "0s",
+	}
 }

@@ -12,13 +12,13 @@ import (
 
 	"hotplex-worker/internal/aep"
 	"hotplex-worker/internal/config"
+	"hotplex-worker/internal/metrics"
+	"hotplex-worker/internal/security"
 	"hotplex-worker/internal/session"
 	"hotplex-worker/internal/worker"
 	"hotplex-worker/internal/worker/noop"
 	"hotplex-worker/pkg/events"
 )
-
-const ()
 
 // Conn represents a single WebSocket client connection.
 type Conn struct {
@@ -91,6 +91,7 @@ func (c *Conn) ReadPump(handler *Handler) {
 		if err != nil {
 			// Detect missed pong (read deadline exceeded).
 			if isReadTimeout(err) {
+				metrics.GatewayErrorsTotal.WithLabelValues("pong_timeout").Inc()
 				if c.hb.MarkMissed() {
 					c.log.Warn("gateway: max missed pongs, disconnecting",
 						"session_id", c.sessionID)
@@ -100,6 +101,7 @@ func (c *Conn) ReadPump(handler *Handler) {
 			if !errors.Is(err, websocket.ErrCloseSent) {
 				c.log.Debug("gateway: read error", "err", err)
 			}
+			metrics.GatewayErrorsTotal.WithLabelValues("read_error").Inc()
 			return
 		}
 
@@ -109,11 +111,15 @@ func (c *Conn) ReadPump(handler *Handler) {
 		env, err := aep.DecodeLine(data)
 		if err != nil {
 			c.sendError(events.ErrCodeInvalidMessage, err.Error())
+			metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInvalidMessage)).Inc()
 			continue
 		}
 
-		// Stamp session ID and sequence number.
+		metrics.GatewayMessagesTotal.WithLabelValues("incoming", string(env.Event.Type)).Inc()
+
+		// Stamp session ID, sequence number, and owner ID.
 		env.SessionID = c.sessionID
+		env.OwnerID = c.userID
 		env.Seq = c.hub.NextSeq(c.sessionID)
 
 		// Route to handler.
@@ -137,20 +143,40 @@ func (c *Conn) performInit(handler *Handler) error {
 	env, err := aep.DecodeLine(data)
 	if err != nil {
 		c.sendInitError(events.ErrCodeInvalidMessage, "malformed message: "+err.Error())
+		metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInvalidMessage)).Inc()
 		return err
 	}
 
 	// Only accept init message as first message.
 	if env.Event.Type != Init {
 		c.sendInitError(events.ErrCodeProtocolViolation, "expected init as first message, got "+string(env.Event.Type))
+		metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeProtocolViolation)).Inc()
 		return fmt.Errorf("expected init, got %s", env.Event.Type)
 	}
+
+	metrics.GatewayMessagesTotal.WithLabelValues("incoming", Init).Inc()
 
 	// Validate init fields.
 	initData, initErr := ValidateInit(env)
 	if initErr != nil {
 		c.sendInitError(initErr.Code, initErr.Message)
+		metrics.GatewayErrorsTotal.WithLabelValues(string(initErr.Code)).Inc()
 		return initErr
+	}
+
+	// Validate JWT token from init envelope (if provided and validator is configured).
+	if initData.Auth.Token != "" && handler.jwtValidator != nil {
+		claims, err := handler.jwtValidator.Validate(initData.Auth.Token)
+		if err != nil {
+			c.log.Warn("gateway: init JWT validation failed", "err", err)
+			c.sendInitError(events.ErrCodeUnauthorized, "invalid token")
+			metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeUnauthorized)).Inc()
+			return fmt.Errorf("jwt validation: %w", err)
+		}
+		// Bind user_id from JWT subject claim (overrides HTTP auth userID for session ownership).
+		if claims.Subject != "" {
+			c.userID = claims.Subject
+		}
 	}
 
 	// Determine session ID: prefer envelope's session_id, fall back to connection's.
@@ -164,15 +190,17 @@ func (c *Conn) performInit(handler *Handler) error {
 	if err != nil {
 		// Session does not exist → create new.
 		if errors.Is(err, session.ErrSessionNotFound) {
-			si, err = handler.sm.Create(context.Background(), sessionID, c.userID, initData.WorkerType)
+			si, err = handler.sm.Create(context.Background(), sessionID, c.userID, initData.WorkerType, initData.Config.AllowedTools)
 			if err != nil {
 				c.sendInitError(events.ErrCodeInternalError, "failed to create session")
+				metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 				return fmt.Errorf("create session: %w", err)
 			}
 			c.log.Info("gateway: session created via init", "session_id", sessionID,
 				"worker_type", initData.WorkerType)
 		} else {
 			c.sendInitError(events.ErrCodeInternalError, err.Error())
+			metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 			return fmt.Errorf("get session: %w", err)
 		}
 	} else if si.State == events.StateDeleted {
@@ -198,8 +226,10 @@ func (c *Conn) performInit(handler *Handler) error {
 	ack := BuildInitAck(sessionID, si.State, initData.WorkerType)
 	ack.Seq = c.hub.NextSeq(sessionID)
 	if err := c.WriteCtx(context.Background(), ack); err != nil {
+		metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 		return fmt.Errorf("send init_ack: %w", err)
 	}
+	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", InitAck).Inc()
 
 	// If session was CREATED, transition to RUNNING. (StateNotifier will broadcast the state change)
 	if si.State == events.StateCreated {
@@ -257,13 +287,18 @@ func (c *Conn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 		return errors.New("conn closed")
 	}
 
-	data, err := EncodeJSON(env)
+	data, err := aep.EncodeJSON(env)
 	if err != nil {
 		return err
 	}
 
 	_ = c.wc.SetWriteDeadline(time.Now().Add(writeWait))
-	return c.wc.WriteMessage(websocket.TextMessage, data)
+	if err := c.wc.WriteMessage(websocket.TextMessage, data); err != nil {
+		metrics.GatewayErrorsTotal.WithLabelValues("write_error").Inc()
+		return err
+	}
+	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
+	return nil
 }
 
 // WriteMessage writes raw bytes to the connection.
@@ -306,19 +341,21 @@ func (c *Conn) sendError(code events.ErrorCode, msg string) {
 // Handler processes incoming messages from a client connection.
 // It coordinates between the hub, session manager, and pool.
 type Handler struct {
-	log  *slog.Logger
-	cfg  *config.Config
-	hub  *Hub
-	sm   *session.Manager
+	log           *slog.Logger
+	cfg           *config.Config
+	hub           *Hub
+	sm            *session.Manager
+	jwtValidator  *security.JWTValidator
 }
 
 // NewHandler creates a new message handler.
-func NewHandler(log *slog.Logger, cfg *config.Config, hub *Hub, sm *session.Manager) *Handler {
+func NewHandler(log *slog.Logger, cfg *config.Config, hub *Hub, sm *session.Manager, jwtValidator *security.JWTValidator) *Handler {
 	return &Handler{
-		log: log,
-		cfg: cfg,
-		hub: hub,
-		sm:  sm,
+		log:          log,
+		cfg:          cfg,
+		hub:          hub,
+		sm:           sm,
+		jwtValidator: jwtValidator,
 	}
 }
 
@@ -329,6 +366,8 @@ func (h *Handler) Handle(ctx context.Context, env *events.Envelope) error {
 		return h.handleInput(ctx, env)
 	case events.Ping:
 		return h.handlePing(ctx, env)
+	case events.Control:
+		return h.handleControl(ctx, env)
 	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown event type: %s", env.Event.Type)
 	}
@@ -386,6 +425,105 @@ func (h *Handler) handlePing(ctx context.Context, env *events.Envelope) error {
 	return h.hub.SendToSession(ctx, reply)
 }
 
+// handleControl processes client-originated control messages (terminate, delete).
+// Server-originated control messages (reconnect, session_invalid, throttle) are
+// sent via SendControlToSession.
+func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error {
+	data, ok := env.Event.Data.(map[string]any)
+	if !ok {
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "control: invalid data")
+	}
+
+	action, _ := data["action"].(string)
+	h.log.Info("gateway: control received", "action", action, "session_id", env.SessionID)
+
+	switch events.ControlAction(action) {
+	case events.ControlActionTerminate:
+		// Ownership check: only the session owner can terminate.
+		if err := h.sm.ValidateOwnership(ctx, env.SessionID, env.OwnerID, ""); err != nil {
+			if errors.Is(err, session.ErrSessionNotFound) {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
+			}
+			return h.sendErrorf(ctx, env, events.ErrCodeUnauthorized, "ownership required")
+		}
+		// Transition to TERMINATED and kill the worker.
+		if err := h.sm.TransitionWithReason(ctx, env.SessionID, events.StateTerminated, "client_kill"); err != nil {
+			if errors.Is(err, session.ErrSessionNotFound) {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
+			}
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "terminate failed: %v", err)
+		}
+		// Send error + done to client.
+		errEnv := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.Error, events.ErrorData{
+			Code:    events.ErrCodeSessionTerminated,
+			Message: "session terminated by client",
+		})
+		doneEnv := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.Done, events.DoneData{
+			Success: false,
+		})
+		_ = h.hub.SendToSession(ctx, errEnv)
+		_ = h.hub.SendToSession(ctx, doneEnv)
+		return nil
+
+	case events.ControlActionDelete:
+		// Ownership check: only the session owner can delete.
+		if err := h.sm.ValidateOwnership(ctx, env.SessionID, env.OwnerID, ""); err != nil {
+			if errors.Is(err, session.ErrSessionNotFound) {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
+			}
+			return h.sendErrorf(ctx, env, events.ErrCodeUnauthorized, "ownership required")
+		}
+		// Delete the session (bypasses TERMINATED state per design §5).
+		if err := h.sm.Delete(ctx, env.SessionID); err != nil {
+			if errors.Is(err, session.ErrSessionNotFound) {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
+			}
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "delete failed: %v", err)
+		}
+		return nil
+
+	default:
+		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown control action: %s", action)
+	}
+}
+
+// SendControlToSession sends a server-originated control message to the client.
+// Used for reconnect, session_invalid, and throttle notifications.
+func (h *Handler) SendControlToSession(ctx context.Context, sessionID string, action events.ControlAction, reason string, details map[string]any) error {
+	env := events.NewEnvelope(aep.NewID(), sessionID, h.hub.NextSeq(sessionID), events.Control, events.ControlData{
+		Action:  action,
+		Reason:  reason,
+		Details: details,
+	})
+	env.Priority = events.PriorityControl // control messages bypass backpressure
+	return h.hub.SendToSession(ctx, env)
+}
+
+// SendReconnect sends a reconnect control message to the client.
+func (h *Handler) SendReconnect(ctx context.Context, sessionID, reason string, delayMs int) error {
+	return h.SendControlToSession(ctx, sessionID, events.ControlActionReconnect, reason, map[string]any{
+		"delay_ms": delayMs,
+	})
+}
+
+// SendSessionInvalid sends a session_invalid control message to the client.
+func (h *Handler) SendSessionInvalid(ctx context.Context, sessionID, reason string, recoverable bool) error {
+	return h.SendControlToSession(ctx, sessionID, events.ControlActionSessionInvalid, reason, map[string]any{
+		"recoverable": recoverable,
+	})
+}
+
+// SendThrottle sends a throttle control message to the client.
+func (h *Handler) SendThrottle(ctx context.Context, sessionID string, backoffMs int, maxMessageRate int) error {
+	return h.SendControlToSession(ctx, sessionID, events.ControlActionThrottle, "rate limit exceeded", map[string]any{
+		"suggestion": map[string]any{
+			"max_message_rate": maxMessageRate,
+		},
+		"backoff_ms":  backoffMs,
+		"retry_after": backoffMs,
+	})
+}
+
 func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code events.ErrorCode, format string, args ...any) error {
 	err := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.Error, events.ErrorData{
 		Code:    code,
@@ -399,24 +537,26 @@ func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code eve
 // Bridge connects the gateway to the session manager.
 // It runs the read pump in a goroutine and proxies worker events to the hub.
 type Bridge struct {
-	log  *slog.Logger
-	hub  *Hub
-	sm   *session.Manager
+	log      *slog.Logger
+	hub      *Hub
+	sm       *session.Manager
+	msgStore session.MessageStore // EVT-004: optional; nil means event persistence disabled
 }
 
-// NewBridge creates a new bridge.
-func NewBridge(log *slog.Logger, hub *Hub, sm *session.Manager) *Bridge {
+// NewBridge creates a new bridge. msgStore may be nil (event persistence disabled).
+func NewBridge(log *slog.Logger, hub *Hub, sm *session.Manager, msgStore session.MessageStore) *Bridge {
 	return &Bridge{
-		log:  log,
-		hub:  hub,
-		sm:   sm,
+		log:      log,
+		hub:      hub,
+		sm:       sm,
+		msgStore: msgStore,
 	}
 }
 
 // StartSession creates a new session and starts a worker.
 func (b *Bridge) StartSession(ctx context.Context, id, userID string, wt worker.WorkerType) error {
 	// Create session in DB.
-	si, err := b.sm.Create(ctx, id, userID, wt)
+	si, err := b.sm.Create(ctx, id, userID, wt, nil) // AllowedTools set via Update later if needed
 	if err != nil {
 		return fmt.Errorf("bridge: create session: %w", err)
 	}
@@ -436,11 +576,12 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID string, wt worker.
 
 	// Start worker.
 	workerInfo := worker.SessionInfo{
-		SessionID:  id,
-		UserID:     userID,
-		ProjectDir: "",
-		Env:        nil,
-		Args:       nil,
+		SessionID:    id,
+		UserID:       userID,
+		ProjectDir:   "",
+		Env:          nil,
+		Args:         nil,
+		AllowedTools: si.AllowedTools,
 	}
 	if err := w.Start(ctx, workerInfo); err != nil {
 		b.sm.DetachWorker(id)
@@ -487,8 +628,9 @@ func (b *Bridge) ResumeSession(ctx context.Context, id string) error {
 
 	// Start worker.
 	workerInfo := worker.SessionInfo{
-		SessionID: si.ID,
-		UserID:    si.UserID,
+		SessionID:    si.ID,
+		UserID:       si.UserID,
+		AllowedTools: si.AllowedTools,
 	}
 	if err := w.Resume(ctx, workerInfo); err != nil {
 		b.sm.DetachWorker(id)
@@ -513,10 +655,11 @@ func (b *Bridge) ResumeSession(ctx context.Context, id string) error {
 }
 
 // forwardEvents proxies worker events to the hub with seq assignment.
+// EVT-004: if msgStore is configured, it appends to the event log on done events.
 func (b *Bridge) forwardEvents(conn worker.SessionConn, sessionID string) {
 	for env := range conn.Recv() {
 		env.SessionID = sessionID
-		env.Seq = 0 // SendToSession will assign via hub.seqGen automatically
+		// Seq is assigned by hub.SendToSession via SeqGen (seq=0 triggers auto-assignment).
 
 		// UI Reconciliation (Fallback full message if silent dropped)
 		if env.Event.Type == events.Done {
@@ -544,6 +687,16 @@ func (b *Bridge) forwardEvents(conn worker.SessionConn, sessionID string) {
 
 		if err := b.hub.SendToSession(context.Background(), env); err != nil {
 			b.log.Warn("bridge: forward event failed", "err", err, "session_id", sessionID)
+		}
+
+		// EVT-004: append to MessageStore on done events (end of each turn).
+		// The Append call is async and non-blocking; failures are logged but do not
+		// affect the event stream.
+		if b.msgStore != nil && env.Event.Type == events.Done {
+			payload, _ := aep.EncodeJSON(env)
+			if err := b.msgStore.Append(context.Background(), env.SessionID, env.Seq, string(env.Event.Type), payload); err != nil {
+				b.log.Warn("bridge: msgstore append", "err", err, "session_id", sessionID)
+			}
 		}
 	}
 }

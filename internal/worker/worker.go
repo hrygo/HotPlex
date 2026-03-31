@@ -56,6 +56,13 @@ type Capabilities interface {
 	// SessionStoreDir returns the directory where the worker stores session state,
 	// or empty string if the worker does not persist sessions.
 	SessionStoreDir() string
+
+	// MaxTurns returns the maximum number of turns (input/output cycles) allowed
+	// per session, or 0 if unlimited.
+	MaxTurns() int
+
+	// Modalities returns the supported content modalities (e.g. "text", "code", "image").
+	Modalities() []string
 }
 
 // WorkerType is the string identifier for a worker implementation.
@@ -99,13 +106,29 @@ type Worker interface {
 
 	// Conn returns the SessionConn for this worker, or nil if not started.
 	Conn() SessionConn
+
+	// Health returns a snapshot of the worker's runtime health.
+	Health() WorkerHealth
+}
+
+// WorkerHealth reports the runtime health of a worker process.
+type WorkerHealth struct {
+	Type      WorkerType `json:"type"`
+	SessionID string     `json:"session_id"`
+	PID       int        `json:"pid"`
+	Running   bool       `json:"running"`    // process has not exited
+	Healthy   bool       `json:"healthy"`    // running and not in error state
+	Uptime    string     `json:"uptime"`     // human-readable uptime
+	Error     string     `json:"error,omitempty"`
 }
 
 // SessionInfo contains metadata about a session needed by the worker to start/resume.
 type SessionInfo struct {
-	SessionID  string
-	UserID     string
-	ProjectDir string
-	Env        map[string]string
-	Args       []string
+	SessionID     string
+	UserID        string
+	ProjectDir    string
+	Env           map[string]string
+	Args          []string
+	AllowedTools  []string       // tools allowed for this session (from InitConfig.AllowedTools)
+	AllowedModels []string       // models allowed for this session
 }

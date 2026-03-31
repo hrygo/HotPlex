@@ -14,6 +14,7 @@ import (
 
 	"hotplex-worker/internal/aep"
 	"hotplex-worker/internal/config"
+	"hotplex-worker/internal/metrics"
 	"hotplex-worker/internal/security"
 	"hotplex-worker/internal/session"
 	"hotplex-worker/pkg/events"
@@ -116,6 +117,7 @@ func (h *Hub) RegisterConn(conn *Conn) {
 	h.mu.Lock()
 	h.conns[conn] = struct{}{}
 	h.mu.Unlock()
+	metrics.GatewayConnectionsOpen.Inc()
 	h.log.Debug("gateway: conn registered", "remote", conn.RemoteAddr())
 }
 
@@ -131,6 +133,7 @@ func (h *Hub) UnregisterConn(conn *Conn) {
 		}
 	}
 	h.mu.Unlock()
+	metrics.GatewayConnectionsOpen.Dec()
 	h.log.Debug("gateway: conn unregistered", "remote", conn.RemoteAddr())
 }
 
@@ -195,6 +198,7 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope) error {
 			h.mu.Lock()
 			h.sessionDropped[env.SessionID] = true
 			h.mu.Unlock()
+			metrics.GatewayDeltasDropped.Inc()
 			h.log.Debug("gateway: dropped delta (backpressure)", "session_id", env.SessionID)
 			return nil
 		}
@@ -301,6 +305,7 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	}
 
 	for conn := range conns {
+		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(msg.Env.Event.Type)).Inc()
 		if err := conn.WriteMessage(websocket.TextMessage, encoded); err != nil {
 			h.log.Warn("gateway: write failed", "err", err)
 			conn.Close()
@@ -317,6 +322,13 @@ func (h *Hub) drainBroadcast() {
 // NextSeq returns the next sequence number for a session from the central generator.
 func (h *Hub) NextSeq(sessionID string) int64 {
 	return h.seqGen.Next(sessionID)
+}
+
+// ConnectionsOpen returns the number of currently open WebSocket connections.
+func (h *Hub) ConnectionsOpen() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.conns)
 }
 
 // GetAndClearDropped returns true if the session experienced any message.delta drops
@@ -380,10 +392,4 @@ func (g *SeqGen) Next(sessionID string) int64 {
 	n := g.seq[sessionID] + 1
 	g.seq[sessionID] = n
 	return n
-}
-
-// EncodeJSON encodes an envelope to JSON bytes.
-func EncodeJSON(env *events.Envelope) ([]byte, error) {
-	env.Version = events.Version
-	return aep.EncodeJSON(env)
 }
