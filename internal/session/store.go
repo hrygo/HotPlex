@@ -97,18 +97,19 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, seq);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_seq_unique ON events(session_id, seq);
-
--- Migrate: add owner_id column if it doesn't exist (no-op on fresh installs).
--- The column is nullable so existing rows remain valid; application code
--- falls back to user_id when owner_id IS NULL.
-_ = s.db.Exec("ALTER TABLE sessions ADD COLUMN owner_id TEXT");
--- Migrate: add bot_id column for SEC-007 multi-bot isolation.
-_ = s.db.Exec("ALTER TABLE sessions ADD COLUMN bot_id TEXT")
 `
 	_, err := s.db.ExecContext(ctx, schema)
 	if err != nil {
 		return fmt.Errorf("session store: migrate: %w", err)
 	}
+
+	// Migrate: add owner_id column if it doesn't exist (no-op on fresh installs).
+	// The column is nullable so existing rows remain valid; application code
+	// falls back to user_id when owner_id IS NULL.
+	_, _ = s.db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN owner_id TEXT")
+	// Migrate: add bot_id column for SEC-007 multi-bot isolation.
+	_, _ = s.db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN bot_id TEXT")
+
 	return nil
 }
 
