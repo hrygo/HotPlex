@@ -78,9 +78,9 @@ func run() error {
 		return err
 	}
 
-	// EVT-004: optional event persistence. Disable via HOTPLEX_EVENT_STORE=disabled.
+	// EVT-004: optional event persistence. Controlled via session.event_store_enabled in config.
 	var msgStore session.MessageStore
-	if os.Getenv("HOTPLEX_EVENT_STORE") != "disabled" {
+	if cfg.Session.EventStoreEnabled {
 		msgStore, err = session.NewSQLiteMessageStore(ctx, cfg)
 		if err != nil {
 			_ = store.Close()

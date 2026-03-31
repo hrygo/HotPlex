@@ -3,10 +3,94 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
 )
+
+var envVarRe = regexp.MustCompile(`\$\{([^}:]+)(?::-([^}]*))?\}`)
+
+// ExpandEnv expands environment variable references in a string.
+// Supports the ${VAR} and ${VAR:-default} syntax used in config files.
+// Unset variables without defaults are left as-is.
+func ExpandEnv(s string) string {
+	return envVarRe.ReplaceAllStringFunc(s, func(match string) string {
+		parts := envVarRe.FindStringSubmatch(match)
+		if len(parts) < 2 {
+			return match
+		}
+		key := parts[1]
+		val := os.Getenv(key)
+		if val == "" && len(parts) >= 3 {
+			val = parts[2] // Use default.
+		}
+		return val
+	})
+}
+
+// SecretsProvider abstracts how secrets are retrieved.
+type SecretsProvider interface {
+	// Get returns the secret value for the given key, or "" if not found.
+	Get(key string) string
+}
+
+// EnvSecretsProvider retrieves secrets from environment variables.
+type EnvSecretsProvider struct{}
+
+// NewEnvSecretsProvider creates an EnvSecretsProvider.
+func NewEnvSecretsProvider() *EnvSecretsProvider {
+	return &EnvSecretsProvider{}
+}
+
+// Get returns the environment variable value for the given key.
+func (p *EnvSecretsProvider) Get(key string) string {
+	return os.Getenv(key)
+}
+
+// ChainedSecretsProvider tries multiple providers in order until a value is found.
+type ChainedSecretsProvider struct {
+	providers []SecretsProvider
+}
+
+// NewChainedSecretsProvider creates a chained provider from multiple sources.
+func NewChainedSecretsProvider(providers ...SecretsProvider) *ChainedSecretsProvider {
+	return &ChainedSecretsProvider{providers: providers}
+}
+
+// Get returns the first non-empty value from the chained providers.
+func (p *ChainedSecretsProvider) Get(key string) string {
+	for _, provider := range p.providers {
+		if val := provider.Get(key); val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+// Validate checks that all required configuration fields are set.
+// Returns a list of validation errors.
+func (c *Config) Validate() []string {
+	var errs []string
+	if c.Gateway.Addr == "" {
+		errs = append(errs, "gateway.addr is required")
+	}
+	if c.DB.Path == "" {
+		errs = append(errs, "db.path is required")
+	}
+	if c.Session.RetentionPeriod <= 0 {
+		errs = append(errs, "session.retention_period must be positive")
+	}
+	if c.Pool.MaxSize <= 0 {
+		errs = append(errs, "pool.max_size must be positive")
+	}
+	// Check for insecure TLS in non-dev mode.
+	if !c.Security.TLSEnabled && !strings.Contains(c.Gateway.Addr, "localhost") && !strings.Contains(c.Gateway.Addr, "127.0.0.1") {
+		errs = append(errs, "TLS is disabled on non-local address; enable tls_enabled for production")
+	}
+	return errs
+}
 
 // Config holds all gateway configuration.
 type Config struct {
@@ -16,6 +100,21 @@ type Config struct {
 	Security SecurityConfig `mapstructure:"security"`
 	Session  SessionConfig  `mapstructure:"session"`
 	Pool     PoolConfig     `mapstructure:"pool"`
+	Admin    AdminConfig    `mapstructure:"admin"`
+}
+
+// AdminConfig holds admin API settings.
+type AdminConfig struct {
+	Enabled            bool              `mapstructure:"enabled"`
+	Addr               string            `mapstructure:"addr"`
+	Tokens             []string          `mapstructure:"tokens"`
+	TokenScopes        map[string][]string `mapstructure:"token_scopes"` // token → scopes
+	DefaultScopes      []string          `mapstructure:"default_scopes"` // scopes for tokens not in TokenScopes
+	IPWhitelistEnabled bool             `mapstructure:"ip_whitelist_enabled"`
+	AllowedCIDRs       []string          `mapstructure:"allowed_cidrs"`
+	RateLimitEnabled   bool              `mapstructure:"rate_limit_enabled"`
+	RequestsPerSec     int               `mapstructure:"requests_per_sec"`
+	Burst              int               `mapstructure:"burst"`
 }
 
 // GatewayConfig holds WS gateway settings.
@@ -56,13 +155,16 @@ type SecurityConfig struct {
 	TLSCertFile    string   `mapstructure:"tls_cert_file"`
 	TLSKeyFile     string   `mapstructure:"tls_key_file"`
 	AllowedOrigins []string `mapstructure:"allowed_origins"`
+	JWTSecret      []byte   `mapstructure:"-"` // loaded from env or file, not mapstructure
+	JWTAudience    string   `mapstructure:"jwt_audience"`
 }
 
 // SessionConfig holds session lifecycle settings.
 type SessionConfig struct {
-	RetentionPeriod time.Duration `mapstructure:"retention_period"`
-	GCScanInterval  time.Duration `mapstructure:"gc_scan_interval"`
-	MaxConcurrent   int           `mapstructure:"max_concurrent"`
+	RetentionPeriod   time.Duration `mapstructure:"retention_period"`
+	GCScanInterval    time.Duration `mapstructure:"gc_scan_interval"`
+	MaxConcurrent     int           `mapstructure:"max_concurrent"`
+	EventStoreEnabled bool          `mapstructure:"event_store_enabled"`
 }
 
 // PoolConfig holds session pool settings.
@@ -106,17 +208,29 @@ func Default() *Config {
 			AllowedOrigins: []string{"*"},
 		},
 		Session: SessionConfig{
-			RetentionPeriod: 7 * 24 * time.Hour,
-			GCScanInterval:  1 * time.Minute,
-			MaxConcurrent:   1000,
+			RetentionPeriod:   7 * 24 * time.Hour,
+			GCScanInterval:    1 * time.Minute,
+			MaxConcurrent:     1000,
+			EventStoreEnabled: true,
 		},
 		Pool: PoolConfig{
 			MinSize:        0,
 			MaxSize:        100,
 			MaxIdlePerUser: 3,
 		},
-	}
-}
+		Admin: AdminConfig{
+			Enabled:            true,
+			Addr:               ":9080",
+			Tokens:             []string{},
+			TokenScopes:        nil,
+			DefaultScopes:      []string{"session:read", "stats:read", "health:read"},
+			IPWhitelistEnabled: false,
+			AllowedCIDRs:       []string{"127.0.0.0/8", "10.0.0.0/8"},
+			RateLimitEnabled:  true,
+			RequestsPerSec:     10,
+			Burst:              20,
+		},
+	}}
 
 // Load reads configuration from the given file path and environment variables.
 // filePath is the path to the config file (YAML/JSON/TOML). If empty, only env vars are used.
