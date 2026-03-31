@@ -1,0 +1,676 @@
+---
+type: spec
+tags:
+  - project/HotPlex
+  - worker/claude-code
+  - architecture/integration
+---
+
+# Claude Code Worker 集成规格
+
+> 本文档详细定义 Claude Code Worker Adapter 与 Claude Code CLI 的集成规格。
+> 高阶设计见 [[Worker-Gateway-Design]] §8.1。
+
+---
+
+## 1. 概述
+
+| 维度 | 设计 |
+|------|------|
+| **Transport** | stdio（stdin/stdout pipe） |
+| **Protocol** | stream-json（NDJSON） |
+| **进程模型** | 持久进程，多轮复用（Hot-Multiplexing） |
+| **源码路径** | `~/claude-code/src` |
+
+**集成命令**：
+
+```bash
+claude --print \
+  --verbose \                     # stream-json 模式必需
+  --output-format stream-json \
+  --input-format stream-json \
+  --session-id <uuid>
+```
+
+> **注意**：Claude Code 要求 `--output-format stream-json` 模式下必须同时使用 `--verbose` 参数。
+
+---
+
+## 2. CLI 参数
+
+### 2.1 核心参数（v1.0 必须）
+
+| 参数 | 说明 |
+|------|------|
+| `--print` / `-p` | 非交互模式，输出结果后退出 |
+| `--output-format stream-json` | stdout 输出 NDJSON 事件流 |
+| `--input-format stream-json` | stdin 接受 NDJSON 输入 |
+| `--session-id <uuid>` | 指定 session ID（UUID 格式） |
+| `--resume [value]` | 恢复会话（可带 session ID） |
+| `--continue` / `-c` | 继续当前目录的最新会话 |
+| `--permission-mode <mode>` | 权限模式：`default`/`plan`/`auto-accept` |
+| `--dangerously-skip-permissions` | 跳过所有权限检查 |
+| `--allowed-tools <list>` | 允许的工具列表（逗号或空格分隔） |
+| `--disallowed-tools <list>` | 禁止的工具列表 |
+| `--model <model>` | 模型覆盖 |
+| `--system-prompt <prompt>` | 系统提示 |
+| `--append-system-prompt <prompt>` | 追加系统提示 |
+| `--max-turns <n>` | 非交互模式的最大 agentic 轮次 |
+
+### 2.2 扩展参数（v1.1）
+
+| 参数 | 说明 | 优先级 |
+|------|------|--------|
+| `--fork-session` | 恢复时创建新 session ID（而非复用） | P1 |
+| `--resume-session-at <message id>` | 恢复时仅包含到指定 assistant message 的历史 | P2 |
+| `--rewind-files <user-message-id>` | 将文件恢复到指定用户消息时的状态并退出 | P2 |
+| `--mcp-config <configs...>` | 从 JSON 文件加载 MCP 服务器配置 | P1 |
+| `--strict-mcp-config` | 仅使用 `--mcp-config` 指定的 MCP 服务器 | P1 |
+| `--bare` | 最小化模式：跳过 hooks、LSP、插件同步 | P2 |
+| `--add-dir <dirs...>` | 允许工具访问的额外目录 | P2 |
+| `--max-budget-usd <amount>` | API 调用最大花费（USD） | P3 |
+| `--json-schema <schema>` | 结构化输出的 JSON Schema 验证 | P3 |
+| `--include-hook-events` | 在输出流中包含所有 hook 生命周期事件 | P3 |
+| `--include-partial-messages` | 包含到达的部分消息块 | P3 |
+
+---
+
+## 3. 环境变量
+
+> 详见 `src/utils/managedEnvConstants.ts`
+
+### 3.1 供应商托管变量
+
+| 变量 | 说明 |
+|------|------|
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | API 密钥（必需） |
+| `ANTHROPIC_BASE_URL` | API 端点（私有部署时使用） |
+| `ANTHROPIC_BEDROCK_BASE_URL` | Bedrock 端点 |
+| `ANTHROPIC_VERTEX_BASE_URL` | Vertex 端点 |
+| `ANTHROPIC_FOUNDRY_BASE_URL` | Foundry 端点 |
+| `ANTHROPIC_MODEL` | 默认模型 |
+
+### 3.2 安全变量（可在托管设置中使用）
+
+| 变量 | 说明 |
+|------|------|
+| `ANTHROPIC_CUSTOM_HEADERS` | 自定义请求头 |
+| `BASH_MAX_TIMEOUT_MS` | Bash 工具最大超时（ms） |
+| `BASH_MAX_OUTPUT_LENGTH` | Bash 输出最大长度 |
+| `MAX_MCP_OUTPUT_TOKENS` | MCP 输出最大 token 数 |
+| `MAX_THINKING_TOKENS` | Extended Thinking 最大 token 数 |
+| `MCP_TIMEOUT` / `MCP_TOOL_TIMEOUT` | MCP 超时配置 |
+| `OTEL_*` | OpenTelemetry 配置 |
+
+### 3.3 安全集成要求
+
+| 要求 | 说明 |
+|------|------|
+| **移除 `CLAUDECODE=`** | 防止嵌套调用 |
+| **注入 `ANTHROPIC_API_KEY`** | 必需认证 |
+| **可选注入 `ANTHROPIC_BASE_URL`** | 支持私有部署 |
+| **可选注入 MCP 配置** | 通过 `MCP_*` 或 `--mcp-config` |
+
+---
+
+## 4. 输入格式（stdin → Claude Code）
+
+### 4.1 基本格式
+
+每行一个 JSON 对象（必须使用 `\n` 换行）：
+
+```json
+{
+  "type": "user",
+  "message": {
+    "role": "user",
+    "content": [
+      { "type": "text", "text": "user prompt here" }
+    ]
+  }
+}
+```
+
+### 4.2 消息优先级（可选）
+
+```json
+{
+  "type": "user",
+  "message": { "role": "user", "content": [...] },
+  "priority": "now"   // 立即处理
+  "priority": "next" // 排在当前 turn 之后
+  "priority": "later" // 排在队列末尾
+}
+```
+
+### 4.3 任务指令注入
+
+```xml
+<context>
+<![CDATA[
+task instructions here
+]]>
+</context>
+
+<user_query>
+<![CDATA[
+user prompt here
+]]>
+</user_query>
+```
+
+---
+
+## 5. 输出格式（stdout → Worker Adapter）
+
+### 5.1 NDJSON 安全序列化
+
+**必须转义 U+2028（行分隔符）和 U+2029（段分隔符）**，否则解析器会在这些字符处截断。
+
+```typescript
+// 详见 src/cli/ndjsonSafeStringify.ts
+const JS_LINE_TERMINATORS = /\u2028|\u2029/g
+
+export function ndjsonSafeStringify(value: unknown): string {
+  return escapeJsLineTerminators(JSON.stringify(value))
+}
+```
+
+**Worker Adapter 实现**：
+
+```go
+import "regexp"
+
+var lineTerminators = regexp.MustCompile(`[\u2028\u2029]`)
+
+func ndjsonSafeMarshal(v any) (string, error) {
+    data, err := json.Marshal(v)
+    if err != nil {
+        return "", err
+    }
+    // 转义 JS 行终止符
+    safe := lineTerminators.ReplaceAllFunc(data, func(b []byte) []byte {
+        switch {
+        case bytes.Equal(b, []byte{0xE2, 0x80, 0xA8}):
+            return []byte("\\u2028")
+        case bytes.Equal(b, []byte{0xE2, 0x80, 0xA9}):
+            return []byte("\\u2029")
+        }
+        return b
+    })
+    return string(safe) + "\n", nil
+}
+```
+
+### 5.2 SDK 消息类型
+
+| `type` | `subtype` | 说明 | AEP 映射 |
+|--------|-----------|------|----------|
+| `assistant` | — | 完整助手消息 | `message` |
+| `user` | — | 用户消息 | — |
+| `result` | `success` | 执行成功 | `done { success: true }` |
+| `result` | `error` | 执行错误 | `error` + `done { success: false }` |
+| `stream_event` | — | 流式事件 | `message.delta` |
+| `tool_progress` | — | 工具执行进度 | `tool_result` |
+| `control_request` | — | 控制请求 | 见 §6 |
+| `control_response` | — | 控制响应 | — |
+| `system` | `init` | 初始化 | — |
+| `system` | `status` | 状态更新 | `state` |
+| `system` | `compact_boundary` | 上下文压缩边界 | — |
+| `system` | `post_turn_summary` | turn 后摘要 | — |
+| `session_state_changed` | — | 会话状态变更 | `state` |
+| `files_persisted` | — | 文件持久化事件 | — |
+| `hook_started` | — | Hook 启动 | — |
+| `hook_progress` | — | Hook 进度 | — |
+| `hook_response` | — | Hook 响应 | — |
+| `task_notification` | — | 任务通知 | — |
+| `task_started` | — | 任务开始 | — |
+| `task_progress` | — | 任务进度 | — |
+| `rate_limit` | — | 速率限制事件 | — |
+| `tool_use_summary` | — | 工具使用摘要 | `tool_call` |
+| `elicitation_complete` | — | 信息收集完成 | — |
+| `prompt_suggestion` | — | 提示建议 | — |
+| `local_command_output` | — | 本地命令输出 | — |
+
+### 5.3 关键消息示例
+
+**thinking（思考过程）**：
+
+```json
+{
+  "type": "stream_event",
+  "event": {
+    "type": "thinking",
+    "message": {
+      "content": [{ "type": "text", "text": "Let me analyze..." }]
+    }
+  }
+}
+```
+
+**assistant（文本 + 工具调用）**：
+
+```json
+{
+  "type": "assistant",
+  "message": {
+    "role": "assistant",
+    "content": [
+      { "type": "text", "text": "Hello world" },
+      { "type": "tool_use", "id": "call_123", "name": "read_file", "input": { "path": "/app/main.go" } }
+    ]
+  }
+}
+```
+
+**tool_progress（工具结果）**：
+
+```json
+{
+  "type": "tool_progress",
+  "tool_use_id": "call_123",
+  "content": [{ "type": "tool_result", "tool_use_id": "call_123", "content": "file content..." }]
+}
+```
+
+**result（turn 结束）**：
+
+```json
+{
+  "type": "result",
+  "subtype": "success",
+  "duration_ms": 5200,
+  "duration_api_ms": 4800,
+  "is_error": false,
+  "num_turns": 1,
+  "result": "final summary text",
+  "total_cost_usd": 0.05,
+  "usage": {
+    "input_tokens": 1000,
+    "output_tokens": 500,
+    "cache_read_input_tokens": 800,
+    "cache_creation_input_tokens": 200
+  },
+  "modelUsage": {
+    "claude-sonnet-4-6": {
+      "input_tokens": 1000,
+      "output_tokens": 500,
+      "cost_usd": 0.05,
+      "context_window": 200000,
+      "max_output_tokens": 16384
+    }
+  },
+  "permission_denials": [],
+  "uuid": "msg_xxx",
+  "session_id": "session_xxx"
+}
+```
+
+**error（错误）**：
+
+```json
+{
+  "type": "result",
+  "subtype": "error",
+  "is_error": true,
+  "result": "error message"
+}
+```
+
+---
+
+## 6. 控制协议（stdin ↔ stdout）
+
+当 `--output-format stream-json` 时，Claude Code 支持双向控制协议。
+
+### 6.1 控制请求（Claude Code → Worker）
+
+```json
+{ "type": "control_request", "request_id": "req_xxx", "response": { "subtype": "<type>" } }
+```
+
+| `subtype` | 说明 | HotPlex 处理 |
+|-----------|------|-------------|
+| `can_use_tool` | 权限请求 | 转发 Client 或自动决策 |
+| `set_permission_mode` | 设置权限模式 | 更新运行时配置 |
+| `set_model` | 切换模型 | 更新运行时配置 |
+| `set_max_thinking_tokens` | 设置思考 token 上限 | 更新运行时配置 |
+| `mcp_status` | MCP 服务器状态 | 调试/监控 |
+| `mcp_set_servers` | 配置 MCP 服务器 | 更新 MCP 配置 |
+| `mcp_message` | MCP 消息 | 转发 MCP 请求 |
+| `interrupt` | 中断当前执行 | 触发 `control.terminate` |
+| `cancel_async_message` | 取消异步消息 | 取消进行中请求 |
+| `rewind_files` | 文件状态回滚 | 执行文件回滚 |
+| `reload_plugins` | 重新加载插件 | 重载插件配置 |
+
+### 6.2 控制响应（Worker → Claude Code）
+
+```json
+{
+  "type": "control_response",
+  "response": {
+    "subtype": "success",
+    "request_id": "req_xxx",
+    "response": { ... }
+  }
+}
+```
+
+或错误：
+
+```json
+{
+  "type": "control_response",
+  "response": {
+    "subtype": "error",
+    "request_id": "req_xxx",
+    "error": "error message"
+  }
+}
+```
+
+### 6.3 权限请求处理
+
+```go
+func (p *ClaudeCodeParser) handleControlRequest(msg SDKMessage) ([]*WorkerEvent, error) {
+    switch msg.Subtype {
+    case "can_use_tool":
+        // 转发给 Client（同步等待响应）
+        return []*WorkerEvent{
+            {
+                Type:      EventTypePermissionRequest,
+                ToolName:  msg.ToolName,
+                ToolInput: msg.Input,
+                RequestID: msg.RequestID,
+            },
+        }, nil
+
+    case "interrupt":
+        // 内部中断信号（不要转发给 Client）
+        return []*WorkerEvent{
+            { Type: EventTypeInterrupt },
+        }, nil
+
+    default:
+        return nil, nil // 忽略其他控制请求
+    }
+}
+```
+
+---
+
+## 7. 事件映射（Claude Code → AEP）
+
+| Claude Code Event | AEP Event Kind | 说明 |
+|-------------------|---------------|------|
+| `stream_event` + `thinking` | `message.delta { type: "reasoning" }` | 思考过程 |
+| `stream_event` + 其他 | `message.delta { type: "text"\|"tool_use" }` | 流式增量 |
+| `assistant` + text | `message.delta { type: "text" }` | 文本增量 |
+| `assistant` + tool_use | `tool_call` | 工具调用 |
+| `tool_progress` | `tool_result` | 工具结果 |
+| `result` subtype=success | `done { success: true, stats: {...} }` | 执行完成 |
+| `result` subtype=error | `error` + `done { success: false }` | 执行错误 |
+| `control_request` + `can_use_tool` | `permission_request` | 权限请求 |
+| `control_request` + `interrupt` | 内部中断 | 对应 terminate |
+| `system` subtype=`status` | `state` | 状态变更 |
+| `session_state_changed` | `state` | 会话状态 |
+| `files_persisted` | — | 内部事件 |
+| `rate_limit` | — | 内部事件 |
+| `compact_boundary` | — | 上下文压缩 |
+
+---
+
+## 8. Session 管理
+
+### 8.1 Session ID 格式
+
+Claude Code 支持两种格式：
+
+| 格式 | 说明 | HotPlex 处理 |
+|------|------|-------------|
+| `session_*` | v1 兼容格式 | 直接使用 |
+| `cse_*` | v2 基础设施格式 | 转换为 `session_*` |
+
+```typescript
+// 转换函数（src/bridge/sessionIdCompat.ts）
+toCompatSessionId(id: string)   // cse_* → session_*
+toInfraSessionId(id: string)    // session_* → cse_*
+```
+
+### 8.2 Session 持久化
+
+| 项目 | 路径 |
+|------|------|
+| 存储位置 | `~/.claude/projects/<workspace-key>/<session-id>.jsonl` |
+| workspace-key | 路径替换（`/` → `-`，`/.` → `--`） |
+| Gateway 追踪 | `~/.hotplex/sessions/<id>.lock` |
+
+### 8.3 Resume 流程
+
+```
+1. 检查 Marker 文件（~/.hotplex/sessions/<id>.lock）
+2. 检查 session 文件（~/.claude/projects/.../<id>.jsonl）
+3. 两者存在 → --resume 模式
+4. 否则 → 新建 session（--session-id）
+```
+
+---
+
+## 9. 优雅终止（Graceful Shutdown）
+
+### 9.1 Claude Code 内部流程
+
+```
+Gateway SIGTERM
+    ↓
+Claude Code gracefulShutdown()
+    ↓
+┌────────────────────────────────────────┐
+│ 1. failsafeTimer = 5s（超时强制退出）   │
+│ 2. cleanupTerminalModes()              │
+│ 3. runCleanupFunctions()（2s 超时）    │
+│ 4. SessionEnd hooks                     │
+│ 5. 分析数据刷新（500ms 超时）           │
+│ 6. forceExit()                         │
+└────────────────────────────────────────┘
+    ↓ (超时)
+SIGKILL
+```
+
+### 9.2 Worker Adapter 终止流程
+
+```go
+func (w *ClaudeCodeWorker) Terminate(ctx context.Context) error {
+    // Phase 1: SIGTERM（优雅终止）
+    _ = syscall.Kill(-w.cmd.Process.Pid, syscall.SIGTERM)
+
+    // Phase 2: 等待退出（最多 5s）
+    deadline := time.Now().Add(5 * time.Second)
+    for time.Now().Before(deadline) {
+        if !IsProcessAlive(w.cmd.Process) {
+            return nil
+        }
+        time.Sleep(100 * time.Millisecond)
+    }
+
+    // Phase 3: SIGKILL（强制终止）
+    return w.Kill()
+}
+```
+
+---
+
+## 10. MCP 服务器配置
+
+### 10.1 CLI 参数
+
+```bash
+claude --print --session-id <id> \
+  --mcp-config /path/to/mcp-config.json \
+  --strict-mcp-config
+```
+
+### 10.2 MCP 配置格式
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/project"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "xxx"
+      }
+    }
+  }
+}
+```
+
+### 10.3 环境变量配置
+
+| 变量 | 说明 |
+|------|------|
+| `MCP_TIMEOUT` | MCP 总体超时 |
+| `MCP_TOOL_TIMEOUT` | MCP 工具调用超时 |
+
+---
+
+## 11. 实现优先级
+
+### P0（必须实现，v1.0 MVP）
+
+| 项目 | 说明 |
+|------|------|
+| NDJSON 安全序列化 | 转义 U+2028/U+2029 |
+| `stream_event` 处理 | 流式事件解析 |
+| `tool_progress` 映射 | 工具结果 |
+| `control_request` + `can_use_tool` | 权限请求 → `permission_request` |
+| 环境变量白名单 | 移除 `CLAUDECODE=` |
+| 分层终止 | SIGTERM → 5s → SIGKILL |
+
+### P1（重要，v1.0 完整支持）
+
+| 项目 | 说明 |
+|------|------|
+| `--mcp-config` | MCP 服务器配置 |
+| `--fork-session` | 新建 session ID |
+| `control_response` | 发送控制响应 |
+| `session_state_changed` | 会话状态变更 |
+| Session ID 兼容 | `session_*` / `cse_*` |
+
+### P2（增强，v1.1）
+
+| 项目 | 说明 |
+|------|------|
+| `--resume-session-at` | 恢复到指定消息 |
+| `--rewind-files` | 文件回滚 |
+| `--bare` 模式 | 最小化配置 |
+| StructuredIO | 消息预队列 |
+
+---
+
+## 12. 源码关键路径
+
+| 功能 | 源码路径 |
+|------|---------|
+| CLI 参数解析 | `src/main.tsx` |
+| Session ID 兼容 | `src/bridge/sessionIdCompat.ts` |
+| 会话创建 | `src/bridge/createSession.ts` |
+| 结构化 I/O | `src/cli/structuredIO.ts` |
+| NDJSON 序列化 | `src/cli/ndjsonSafeStringify.ts` |
+| 优雅关闭 | `src/utils/gracefulShutdown.ts` |
+| 环境变量 | `src/utils/managedEnvConstants.ts` |
+| SDK 消息 schemas | `src/entrypoints/sdk/coreSchemas.ts` |
+| 控制协议 schemas | `src/entrypoints/sdk/controlSchemas.ts` |
+| SSE 传输 | `src/cli/transports/SSETransport.ts` |
+| Hybrid 传输 | `src/cli/transports/HybridTransport.ts` |
+| Tool 权限 | `src/Tool.ts` |
+
+---
+
+## 13. Worker Adapter 核心代码
+
+### 13.1 事件解析
+
+```go
+type ClaudeCodeParser struct {
+    pendingRequests map[string]chan *ControlResponse
+}
+
+func (p *ClaudeCodeParser) ParseEvent(line string) ([]*WorkerEvent, error) {
+    var msg SDKMessage
+    if err := json.Unmarshal([]byte(line), &msg); err != nil {
+        return nil, err
+    }
+
+    switch msg.Type {
+    case "stream_event":
+        return p.handleStreamEvent(msg)
+    case "assistant":
+        return p.handleAssistant(msg)
+    case "tool_progress":
+        return p.handleToolProgress(msg)
+    case "result":
+        return p.handleResult(msg)
+    case "control_request":
+        return p.handleControlRequest(msg)
+    case "system":
+        return p.handleSystem(msg)
+    case "session_state_changed":
+        return p.handleSessionStateChanged(msg)
+    default:
+        return nil, nil // 忽略未知类型
+    }
+}
+
+func (p *ClaudeCodeParser) handleControlRequest(msg SDKMessage) ([]*WorkerEvent, error) {
+    switch msg.Subtype {
+    case "can_use_tool":
+        return []*WorkerEvent{
+            {
+                Type:      EventTypePermissionRequest,
+                ToolName:  msg.ToolName,
+                ToolInput: msg.Input,
+                RequestID: msg.RequestID,
+            },
+        }, nil
+    case "interrupt":
+        return []*WorkerEvent{{Type: EventTypeInterrupt}}, nil
+    default:
+        return nil, nil
+    }
+}
+```
+
+### 13.2 会话启动
+
+```go
+func (w *ClaudeCodeWorker) BuildCLIArgs(sessionID string, opts *WorkerSessionOptions) []string {
+    args := []string{
+        "claude",
+        "--print",
+        "--verbose",          // stream-json 模式必需
+        "--output-format", "stream-json",
+        "--input-format", "stream-json",
+        "--session-id", sessionID,
+    }
+
+    if opts.ResumeSession {
+        args = append(args, "--resume", sessionID)
+    }
+
+    if opts.PermissionMode != "" {
+        args = append(args, "--permission-mode", opts.PermissionMode)
+    }
+
+    if len(opts.AllowedTools) > 0 {
+        args = append(args, "--allowed-tools", strings.Join(opts.AllowedTools, ","))
+    }
+
+    return args
+}
+```

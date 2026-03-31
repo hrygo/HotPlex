@@ -60,11 +60,11 @@ Gateway 与 Worker Adapter 在同一进程内，Session Manager 通过 Go 接口
 
 ### 4.2 控制面 / 数据面分离
 
-| 类型 | 说明 |
-|------|------|
-| Session 状态 | 内存 + 持久化（SQLite） |
-| Agent 输出 | 不存储（流式透传） |
-| Agent 内部状态 | Worker 自身管理 |
+| 类型           | 说明                    |
+| -------------- | ----------------------- |
+| Session 状态   | 内存 + 持久化（SQLite） |
+| Agent 输出     | 不存储（流式透传）      |
+| Agent 内部状态 | Worker 自身管理         |
 
 ### 4.3 协议最小化
 
@@ -115,30 +115,30 @@ stateDiagram-v2
 
 #### 完整状态转换表
 
-| 从 | 触发 | 到 | 类别 | 事件 |
-|---|------|-----|------|------|
-| `CREATED` | fork+exec 成功 | `RUNNING` | 正常 | `state(running)` |
-| `CREATED` | 启动失败（binary 不存在 / 权限不足） | `TERMINATED` | 异常 | `error(WORKER_START_FAILED)` + `state(terminated)` |
-| `RUNNING` | 执行完毕，等待输入 | `IDLE` | 正常 | `state(idle)` |
-| `IDLE` | 收到新 input | `RUNNING` | 正常 | `state(running)` |
-| `RUNNING` | crash / execution_timeout / kill | `TERMINATED` | 异常 | `error(*)` + `state(terminated)` |
-| `IDLE` | idle_timeout / GC / kill | `TERMINATED` | 异常 | `state(terminated)` |
-| `TERMINATED` | resume（重新启动 runtime） | `RUNNING` | 恢复 | `state(running)` |
-| `TERMINATED` | GC / 生命周期结束 | `DELETED` | 终态 | —（控制面） |
-| `RUNNING` / `IDLE` | admin force kill | `DELETED` | 管理操作 | `error(PROCESS_SIGKILL)` + WS close |
+| 从                 | 触发                                 | 到           | 类别     | 事件                                               |
+| ------------------ | ------------------------------------ | ------------ | -------- | -------------------------------------------------- |
+| `CREATED`          | fork+exec 成功                       | `RUNNING`    | 正常     | `state(running)`                                   |
+| `CREATED`          | 启动失败（binary 不存在 / 权限不足） | `TERMINATED` | 异常     | `error(WORKER_START_FAILED)` + `state(terminated)` |
+| `RUNNING`          | 执行完毕，等待输入                   | `IDLE`       | 正常     | `state(idle)`                                      |
+| `IDLE`             | 收到新 input                         | `RUNNING`    | 正常     | `state(running)`                                   |
+| `RUNNING`          | crash / execution_timeout / kill     | `TERMINATED` | 异常     | `error(*)` + `state(terminated)`                   |
+| `IDLE`             | idle_timeout / GC / kill             | `TERMINATED` | 异常     | `state(terminated)`                                |
+| `TERMINATED`       | resume（重新启动 runtime）           | `RUNNING`    | 恢复     | `state(running)`                                   |
+| `TERMINATED`       | GC / 生命周期结束                    | `DELETED`    | 终态     | —（控制面）                                        |
+| `RUNNING` / `IDLE` | admin force kill                     | `DELETED`    | 管理操作 | `error(PROCESS_SIGKILL)` + WS close                |
 
 > **幂等性**：对已处于 `TERMINATED` 状态的 session 重复执行 terminate → no-op。
 > **DELETED 快捷路径**：Admin API 可绕过 `TERMINATED` 直接将 `RUNNING` / `IDLE` session 标记为 `DELETED`，同时 SIGKILL runtime。
 
 ### 5.2 状态定义
 
-| 状态 | 含义 | AEP event |
-|------|------|-----------|
-| `CREATED` | 已创建，未启动 runtime | `state(created)` |
-| `RUNNING` | 正在执行 | `state(running)` |
-| `IDLE` | 等待输入 | `state(idle)` |
-| `TERMINATED` | 已终止 | `state(terminated)` |
-| `DELETED` | 已清理（控制面，不走 AEP） | — |
+| 状态         | 含义                       | AEP event           |
+| ------------ | -------------------------- | ------------------- |
+| `CREATED`    | 已创建，未启动 runtime     | `state(created)`    |
+| `RUNNING`    | 正在执行                   | `state(running)`    |
+| `IDLE`       | 等待输入                   | `state(idle)`       |
+| `TERMINATED` | 已终止                     | `state(terminated)` |
+| `DELETED`    | 已清理（控制面，不走 AEP） | —                   |
 
 Worker 内部处于 tool 执行阶段时，Gateway 不区分 — 状态仍为 `RUNNING`。Client 通过 `tool_call` / `tool_result` 事件推断 Worker 阶段，无需额外状态。
 
@@ -157,12 +157,12 @@ Worker 内部处于 tool 执行阶段时，Gateway 不区分 — 状态仍为 `R
 
 ### 5.4 竞态防护
 
-| 竞态场景 | 防护策略 |
-|----------|----------|
-| **Resume TOCTOU** — Client 发 `init(session_id)` 同时 Worker crash | Gateway 在 resume 时加读锁检查 session 存活，init 处理和 Worker 状态检测在**同一临界区**内完成 |
-| **done 与 input 竞态** — Client 发 input 时 Worker 刚好发 `done` | input 处理和 state 转换在**同一互斥锁**内完成，确保状态判断的一致性 |
-| **Heartbeat 与 Reconnect 并存** — 旧连接 heartbeat 超时同时新连接 reconnect | Gateway 按 `session_id` 去重连接，只保留最新连接，旧连接自动降级 |
-| **并发 input** — 多个 Client 同时向同一 session 发 input | `SESSION_BUSY` 硬拒绝（非 queue），避免 queue 溢出和顺序保证的复杂性 |
+| 竞态场景                                                                    | 防护策略                                                                                       |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Resume TOCTOU** — Client 发 `init(session_id)` 同时 Worker crash          | Gateway 在 resume 时加读锁检查 session 存活，init 处理和 Worker 状态检测在**同一临界区**内完成 |
+| **done 与 input 竞态** — Client 发 input 时 Worker 刚好发 `done`            | input 处理和 state 转换在**同一互斥锁**内完成，确保状态判断的一致性                            |
+| **Heartbeat 与 Reconnect 并存** — 旧连接 heartbeat 超时同时新连接 reconnect | Gateway 按 `session_id` 去重连接，只保留最新连接，旧连接自动降级                               |
+| **并发 input** — 多个 Client 同时向同一 session 发 input                    | `SESSION_BUSY` 硬拒绝（非 queue），避免 queue 溢出和顺序保证的复杂性                           |
 
 ---
 
@@ -196,11 +196,11 @@ CREATE TABLE sessions (
 
 ### 6.3 GC 策略
 
-| 资源 | 触发条件 | 动作 |
-|------|----------|------|
-| Session | `IDLE` 超过 `idle_timeout`（默认 30min） | → `TERMINATED`，清理 runtime |
-| Session | 总存活超过 `max_lifetime`（默认 24h） | → `TERMINATED` |
-| Session | `TERMINATED` 超过 `retention_period`（默认 7d） | → `DELETED`（删除 DB 记录） |
+| 资源    | 触发条件                                        | 动作                         |
+| ------- | ----------------------------------------------- | ---------------------------- |
+| Session | `IDLE` 超过 `idle_timeout`（默认 30min）        | → `TERMINATED`，清理 runtime |
+| Session | 总存活超过 `max_lifetime`（默认 24h）           | → `TERMINATED`               |
+| Session | `TERMINATED` 超过 `retention_period`（默认 7d） | → `DELETED`（删除 DB 记录）  |
 
 GC 扫描间隔：60s，后台 goroutine 定期执行。
 
@@ -274,12 +274,12 @@ Protocol:    stream-json | ndjson | raw-stdout | json-lines
 Lifecycle:   persistent | ephemeral | managed
 ```
 
-| Worker              | Transport | Protocol   | Lifecycle   | 说明 |
-| ------------------- | --------- | ---------- | ----------- | ---- |
-| Claude Code         | stdio     | stream-json | persistent  | turn 间进程不退出，热复用 |
-| **OpenCode CLI**    | stdio     | json-lines | persistent  | `opencode run --format json`，turn 间热复用 |
-| **OpenCode Server** | HTTP + SSE| SSE/JSON   | managed     | `opencode serve`，单进程多 session |
-| Pi-mono             | stdio     | raw-stdout | ephemeral   | 每次执行完退出 |
+| Worker              | Transport  | Protocol    | Lifecycle  | 说明                                        |
+| ------------------- | ---------- | ----------- | ---------- | ------------------------------------------- |
+| Claude Code         | stdio      | stream-json | persistent | turn 间进程不退出，热复用                   |
+| **OpenCode CLI**    | stdio      | json-lines  | persistent | `opencode run --format json`，turn 间热复用 |
+| **OpenCode Server** | HTTP + SSE | SSE/JSON    | managed    | `opencode serve`，单进程多 session          |
+| Pi-mono             | stdio      | raw-stdout  | ephemeral  | 每次执行完退出                              |
 
 > **Hot-Multiplexing**：persistent Worker 在 turn 结束后**不退出进程**，保持 `idle` 状态等待下一轮 stdin 输入，实现零冷启动。ephemeral Worker 每次执行完毕退出。managed Worker 由外部进程管理生命周期。
 
@@ -303,202 +303,73 @@ Lifecycle:   persistent | ephemeral | managed
 
 ### 8.1 Claude Code（stream-json / stdio / persistent）
 
-#### 集成模式
+#### 概述
 
+| 维度      | 设计                                      |
+| --------- | ----------------------------------------- |
+| Transport | stdio（stdin/stdout pipe）                |
+| Protocol  | stream-json（NDJSON，每行一个 JSON 对象） |
+| 进程模型  | 持久进程，多轮复用（Hot-Multiplexing）    |
+| CLI 源码  | `~/claude-code/src`                       |
+
+**启动命令**：
 ```bash
-claude --print --verbose \
+claude --print \
   --output-format stream-json \
   --input-format stream-json \
   --session-id <uuid>
 ```
 
-| 特性 | 说明 |
-|------|------|
-| Transport | stdio（stdin/stdout pipe） |
-| Protocol | stream-json（每行一个 JSON 对象） |
-| Streaming | 实时流式（token-level） |
-| 进程模型 | 持久进程，多轮复用（hot-multiplexing） |
+#### 核心能力
 
-#### CLI 参数
+| 能力         | 说明                                                                |
+| ------------ | ------------------------------------------------------------------- |
+| Streaming    | token-level 实时流，通过 `stream_event` 发送 thinking / text delta  |
+| Tool 执行    | `tool_use` / `tool_progress` 通知，Worker 自主执行                  |
+| 权限控制     | `control_request` subtype=`can_use_tool`，转发 Client 或按策略决策  |
+| Session 恢复 | `--resume <id>` 恢复历史会话，支持 `session_*` / `cse_*` 双格式兼容 |
+| 优雅关闭     | SIGTERM → 5s failsafe → cleanup → SIGKILL                           |
+| NDJSON 安全  | **必须**转义 U+2028 / U+2029（JS 行分隔符）                         |
+| MCP 配置     | `--mcp-config <json>` / `--strict-mcp-config` 运行时注入            |
+| 环境隔离     | 必须移除 `CLAUDECODE=`，注入 `ANTHROPIC_API_KEY`                    |
 
-| 参数                               | 说明                                         |
-| -------------------------------- | ------------------------------------------ |
-| `--output-format stream-json`    | stdout 输出 JSON 事件流                         |
-| `--input-format stream-json`     | stdin 接受 JSON 输入                           |
-| `--print`                        | 非交互模式                                      |
-| `--verbose`                      | 输出完整事件流（含 thinking）                        |
-| `--session-id <uuid>`            | 新建 session                                 |
-| `--resume <session-id>`          | 恢复已有 session                               |
-| `--permission-mode <mode>`       | 权限模式（`default` / `plan` / `auto-accept` 等） |
-| `--allowed-tools <list>`         | 允许的工具列表                                    |
-| `--disallowed-tools <list>`      | 禁止的工具列表                                    |
-| `--model <model>`                | 模型覆盖                                       |
-| `--append-system-prompt <text>`  | 追加系统提示                                     |
-| `--max-turns <n>`                | 最大轮次                                       |
-| `--dangerously-skip-permissions` | 跳过权限确认                                     |
+#### 关键 SDK 消息类型
 
-#### 输入格式（stdin → Claude Code）
-
-每行一个 JSON 对象：
-
-```json
-{
-  "type": "user",
-  "message": {
-    "role": "user",
-    "content": [
-      { "type": "text", "text": "user prompt here" }
-    ]
-  }
-}
-```
-
-任务指令通过 CDATA 包裹注入：
-
-```xml
-<context>
-<![CDATA[
-task instructions here
-]]>
-</context>
-
-<user_query>
-<![CDATA[
-user prompt here
-]]>
-</user_query>
-```
-
-#### 输出格式（Claude Code → stdout）
-
-每行一个 JSON 对象，事件类型如下：
-
-**thinking（思考过程）**：
-
-```json
-{
-  "type": "thinking",
-  "message": {
-    "content": [{ "type": "text", "text": "Let me analyze..." }]
-  }
-}
-```
-
-**assistant（文本输出 / 工具调用）**：
-
-```json
-{
-  "type": "assistant",
-  "message": {
-    "role": "assistant",
-    "content": [
-      { "type": "text", "text": "Hello world" },
-      { "type": "tool_use", "id": "call_123", "name": "read_file", "input": { "path": "/app/main.go" } }
-    ]
-  }
-}
-```
-
-**tool_result（工具执行结果）**：
-
-```json
-{
-  "type": "tool_result",
-  "content": [{ "type": "tool_result", "tool_use_id": "call_123", "content": "file content..." }]
-}
-```
-
-**result（turn 结束）**：
-
-```json
-{
-  "type": "result",
-  "result": "final summary text",
-  "duration": 5200,
-  "total_cost_usd": 0.05,
-  "usage": {
-    "input_tokens": 1000,
-    "output_tokens": 500,
-    "cache_read_input_tokens": 800,
-    "cache_creation_input_tokens": 200
-  },
-  "modelUsage": {
-    "claude-sonnet-4-6": {
-      "input_tokens": 1000,
-      "output_tokens": 500,
-      "cost_usd": 0.05,
-      "context_window": 200000,
-      "max_output_tokens": 16384
-    }
-  }
-}
-```
-
-**error（错误）**：
-
-```json
-{ "type": "error", "error": "something failed" }
-```
-
-#### 事件映射（Claude Code → AEP）
-
-| Claude Code Event | AEP Event Kind | 说明 |
-|-------------------|---------------|------|
-| `thinking` | `message.delta { type: "text" }` 或 `reasoning` | 思考过程 |
-| `assistant` + text block | `message.delta { type: "text" }` | 文本增量 |
-| `assistant` + tool_use block | `tool_call` | 工具调用通知 |
-| `tool_result` | `tool_result` | 工具执行结果通知 |
-| `result` | `done { success: true, stats: {...} }` | 执行完成 |
-| `error` | `error` | 错误 |
-
-`result` 事件包含的 token usage / cost / duration 信息直接映射到 `done.stats`。
+| type                    | 说明                                 | AEP 映射             |
+| ----------------------- | ------------------------------------ | -------------------- |
+| `stream_event`          | 流式 delta（thinking/text/tool）     | `message.delta`      |
+| `assistant`             | 完整助手消息块                       | `message`            |
+| `tool_progress`         | 工具执行结果                         | `tool_result`        |
+| `result`                | turn 结束（success/error，含 stats） | `done`               |
+| `control_request`       | 控制请求（权限/中断/MCP）            | `permission_request` |
+| `session_state_changed` | 会话状态变更                         | `state`              |
 
 #### Session 管理
 
-**Session ID**：UUID v5 确定性生成（namespace + sessionID）
+- **存储**：`~/.claude/projects/<workspace-key>/<session-id>.jsonl`
+- **Gateway 追踪**：Marker Store（`~/.hotplex/sessions/<id>.lock`）
+- **Resume**：Marker + session 文件都存在 → `--resume` 模式
 
-**Session 持久化**：
-- Claude Code 存储在 `~/.claude/projects/<workspace-key>/<session-id>.jsonl`
-- workspace-key = 路径替换（`/` → `-`，`/.` → `--`）
-- Gateway 通过 Marker Store 追踪 resumable session
-
-**Resume 流程**：
+#### 进程生命周期
 
 ```
-1. 检查 Marker 文件是否存在（~/.hotplex/sessions/<id>.lock）
-2. 检查 Claude Code session 文件是否存在（~/.claude/projects/.../<id>.jsonl）
-3. 两者都存在 → --resume 模式（跳过 system prompt 注入）
-4. 否则 → 新建 session（--session-id + system prompt）
+启动 → ready → busy（执行 turn） → ready → ... → dead
 ```
 
-#### Hot-Multiplexing
+Hot-Multiplexing 优势：消除冷启动（MCP server 只初始化一次），上下文持续累积。需配合 `max_turns` 或内存水印防止状态污染。
 
-Claude Code 进程在 turn 结束后 **不退出**，保持 `ready` 状态等待下一轮 stdin 输入。
-
-```
-启动 → ready → busy（执行 turn）→ ready → busy → ... → dead
-```
-
-优势：
-- 消除冷启动开销（MCP server 只初始化一次）
-- 上下文保持（session 内的对话历史持续累积）
-- 性能：后续 turn 响应更快
-
-风险与治理（Reboot GC）：
-- **进程状态污染**：前一个 turn 的副作用影响后续 turn。
-- **内存累积**：长 session 的 context window 膨胀。
-- **防污染重启机制**：必须配备基于 `max_turns`（如连续执行 50 轮）或基于内存水印的安全重启机制。达到阈值时 Worker 进程退出并由 Gateway 利用 `resume` 重启（打断状态积累），以此配合常规 Idle GC。
+> **详细规格**：[`Worker-ClaudeCode-Spec.md`](../specs/Worker-ClaudeCode-Spec.md) — 完整 CLI 参数表、SDK 消息定义、控制协议 11 种子类型、NDJSON Go 序列化实现、源码关键路径、实现优先级（P0/P1/P2）。
 
 ---
 
 ### 8.2 OpenCode
 
-OpenCode 支持**两种独立的 Worker 模式**，对应两个不同的 CLI 命令，能力完全等价：
+OpenCode 支持**两种独立的 Worker 模式**，对应两个不同的 CLI 命令，能力完全等价。在 HotPlex v1.0 中，**我们将同时实现并支持这两种模式**：
 
-| 模式 | CLI 命令 | Transport | Protocol | 进程数 | 推荐程度 |
-|------|---------|-----------|----------|--------|----------|
-| **OpenCode CLI** | `opencode run --format json` | stdio | json-lines | N（每 session 一个进程） | ✅ **v1.0 推荐** |
-| **OpenCode Server** | `opencode serve` | HTTP + SSE | SSE | 1（所有 session 共享） | ⚙️ v1.1 扩展 |
+| 模式                | CLI 命令                     | Transport  | Protocol   | 进程数                   | 推荐程度        |
+| ------------------- | ---------------------------- | ---------- | ---------- | ------------------------ | --------------- |
+| **OpenCode CLI**    | `opencode run --format json` | stdio      | json-lines | N（每 session 一个进程） | ✅ **v1.0 推荐** |
+| **OpenCode Server** | `opencode serve`             | HTTP + SSE | SSE        | 1（所有 session 共享）   | ✅ **v1.0 实现** |
 
 > **关键区分**：`opencode acp` 命令（JSON-RPC 2.0 over stdio）**仅用于进程生命周期管理**（initialize / session_new / session_update），**不负责消息发送和 streaming 输出**。`opencode run` 才是实际执行任务和流式输出的接口。
 
@@ -526,16 +397,16 @@ opencode run "Next task" \
 
 ##### CLI 参数
 
-| 参数 | 说明 |
-|------|------|
-| `--format json` | 输出每行一个 JSON 对象（必须） |
-| `--continue --session <id>` | 继续已有 session（热复用） |
-| `--fork` | 从当前 session 叉出新 session |
-| `--dir <path>` | 工作目录 |
-| `-m, --model <provider/model>` | 模型选择 |
-| `--agent <name>` | 指定 agent |
-| `--thinking` | 输出推理过程 |
-| `--print-logs` | 打印 stderr 日志 |
+| 参数                           | 说明                           |
+| ------------------------------ | ------------------------------ |
+| `--format json`                | 输出每行一个 JSON 对象（必须） |
+| `--continue --session <id>`    | 继续已有 session（热复用）     |
+| `--fork`                       | 从当前 session 叉出新 session  |
+| `--dir <path>`                 | 工作目录                       |
+| `-m, --model <provider/model>` | 模型选择                       |
+| `--agent <name>`               | 指定 agent                     |
+| `--thinking`                   | 输出推理过程                   |
+| `--print-logs`                 | 打印 stderr 日志               |
 
 > **⚠️ 新建 session 无自定义 ID flag**：opencode 不支持 `--session-id`。Worker 必须从 `step_start` 事件的 `sessionID` 字段提取并存储。
 
@@ -597,13 +468,13 @@ opencode run "Next task" \
 
 ##### 事件映射（OpenCode CLI → AEP）
 
-| OpenCode Event | AEP Event Kind | 说明 |
-|----------------|---------------|------|
-| `step_start` | `state(running)` | 执行开始 |
-| `text` | `message.delta { type: "text" }` | 流式文本输出 |
-| `step_finish.tokens` | `done.stats` | Token 使用统计 |
-| `step_finish.reason=stop` | `done { success: true }` | 正常结束 |
-| `step_finish.reason=error` | `error` + `done(false)` | 异常结束 |
+| OpenCode Event             | AEP Event Kind                   | 说明           |
+| -------------------------- | -------------------------------- | -------------- |
+| `step_start`               | `state(running)`                 | 执行开始       |
+| `text`                     | `message.delta { type: "text" }` | 流式文本输出   |
+| `step_finish.tokens`       | `done.stats`                     | Token 使用统计 |
+| `step_finish.reason=stop`  | `done { success: true }`         | 正常结束       |
+| `step_finish.reason=error` | `error` + `done(false)`          | 异常结束       |
 
 ##### Session 生命周期
 
@@ -626,12 +497,12 @@ Turn N:  opencode run <prompt> --continue --session <sessionID> --format json
 
 ##### `--dir` 行为验证（与 Go cmd.Dir 等价）
 
-| 验证项 | 结果 | 说明 |
-|--------|------|------|
-| 精准控制工作目录 | ✅ | macOS `/tmp` → `/private/tmp`（symlink 正确处理） |
-| 非存在目录 | ✅ 拒绝 | `exit_code=1`，与 Go `cmd.Start()` 失败行为完全一致 |
-| 不自动创建目录 | ✅ | 验证通过 |
-| 相对路径 | ✅ | opencode 内部转为绝对路径 |
+| 验证项             | 结果   | 说明                                                  |
+| ------------------ | ------ | ----------------------------------------------------- |
+| 精准控制工作目录   | ✅      | macOS `/tmp` → `/private/tmp`（symlink 正确处理）     |
+| 非存在目录         | ✅ 拒绝 | `exit_code=1`，与 Go `cmd.Start()` 失败行为完全一致   |
+| 不自动创建目录     | ✅      | 验证通过                                              |
+| 相对路径           | ✅      | opencode 内部转为绝对路径                             |
 | Session 持久化位置 | ✅ 独立 | `~/.local/share/opencode/`（SQLite），与 `--dir` 解耦 |
 
 > **HotPlex 集成结论**：`pool.go` 中的 `os.MkdirAll(cmd.Dir)` 对 opencode 仍然必要——opencode 自身也拒绝非存在目录。
@@ -681,14 +552,14 @@ func (p *OpenCodeCLIWorker) VerifySession(sessionID, workDir string) bool { ... 
 
 ##### 与 Claude Code Worker 对比
 
-| 维度 | Claude Code | OpenCode CLI |
-|------|-------------|-------------|
-| 热复用 flag | `--resume <id>` / `--session-id <id>` | `--continue --session <id>` / 新建无 ID flag |
+| 维度            | Claude Code                              | OpenCode CLI                                         |
+| --------------- | ---------------------------------------- | ---------------------------------------------------- |
+| 热复用 flag     | `--resume <id>` / `--session-id <id>`    | `--continue --session <id>` / 新建无 ID flag         |
 | Session ID 来源 | HotPlex 主键 `id` 注入（`--session-id`） | opencode 自动生成 → 提取并映射至 `worker_session_id` |
-| Event 解析 | `result`/`tool_use`/`thinking` | `step_start`/`text`/`step_finish` |
-| Session 验证 | 检查 `.jsonl` 文件存在 | 检查 `opencode session list` 输出 |
-| 输入格式 | `{"type":"user","message":{...}}` | `{"parts":[{"type":"text","text":"..."}]}` |
-| Session 清理 | 删除 `.jsonl` 文件 | `opencode session delete` |
+| Event 解析      | `result`/`tool_use`/`thinking`           | `step_start`/`text`/`step_finish`                    |
+| Session 验证    | 检查 `.jsonl` 文件存在                   | 检查 `opencode session list` 输出                    |
+| 输入格式        | `{"type":"user","message":{...}}`        | `{"parts":[{"type":"text","text":"..."}]}`           |
+| Session 清理    | 删除 `.jsonl` 文件                       | `opencode session delete`                            |
 
 ---
 
@@ -722,12 +593,12 @@ HotPlex SessionPool
 
 ##### Transport × Protocol × Lifecycle
 
-| 维度 | 设计 |
-|------|------|
-| **Transport** | HTTP（REST API） + SSE（事件流） |
-| **Protocol** | SSE/JSON（Server-Sent Events，每行一个 JSON） |
-| **Lifecycle** | **Managed**（HotPlex 托管进程） |
-| **进程模型** | 1 个 `opencode serve` 进程服务所有 session |
+| 维度          | 设计                                          |
+| ------------- | --------------------------------------------- |
+| **Transport** | HTTP（REST API） + SSE（事件流）              |
+| **Protocol**  | SSE/JSON（Server-Sent Events，每行一个 JSON） |
+| **Lifecycle** | **Managed**（HotPlex 托管进程）               |
+| **进程模型**  | 1 个 `opencode serve` 进程服务所有 session    |
 
 ##### 进程管理器设计
 
@@ -924,14 +795,14 @@ func (s *HTTPSessionStarter) StartSession(
 
 ##### HTTP API 设计
 
-| Endpoint | Method | 用途 | 说明 |
-|----------|--------|------|------|
-| `GET /global/health` | GET | 健康检查 | 返回 `{"healthy": true}` |
-| `GET /event` | GET | SSE 全局事件流 | 订阅所有 session 事件（fan-out） |
-| `POST /session` | POST | 创建 session | 返回 `{id: "ses_xxx"}` |
-| `POST /session/{id}/prompt_async` | POST | 异步发送消息 | 返回 204（streaming via SSE） |
-| `DELETE /session/{id}` | DELETE | 删除 session | 清理 session 资源 |
-| `POST /session/{id}/permissions/{permID}` | POST | 权限响应 | 响应权限请求 |
+| Endpoint                                  | Method | 用途           | 说明                             |
+| ----------------------------------------- | ------ | -------------- | -------------------------------- |
+| `GET /global/health`                      | GET    | 健康检查       | 返回 `{"healthy": true}`         |
+| `GET /event`                              | GET    | SSE 全局事件流 | 订阅所有 session 事件（fan-out） |
+| `POST /session`                           | POST   | 创建 session   | 返回 `{id: "ses_xxx"}`           |
+| `POST /session/{id}/prompt_async`         | POST   | 异步发送消息   | 返回 204（streaming via SSE）    |
+| `DELETE /session/{id}`                    | DELETE | 删除 session   | 清理 session 资源                |
+| `POST /session/{id}/permissions/{permID}` | POST   | 权限响应       | 响应权限请求                     |
 
 **认证**：Basic Auth（`opencode:$PASSWORD`），密码由进程管理器生成或配置注入
 
@@ -939,15 +810,15 @@ func (s *HTTPSessionStarter) StartSession(
 
 ##### SSE Event Types
 
-| SSE Event | 说明 | AEP 映射 | Turn-end |
-|-----------|------|----------|----------|
-| `message.part.updated` | 消息片段更新（text/tool/reasoning） | `message.delta` / `tool_call` / `tool_result` | ❌ |
-| `message.updated` | 完整消息更新（含 token 统计） | `message` + `done.stats`（per-step） | ❌ 中间结果 |
-| `session.status` | 会话状态变更（busy/idle/retry） | `state` | ✅ `status=idle` |
-| `session.idle` | 会话空闲（turn 结束） | `done` | ✅ |
-| `session.error` | 会话错误 | `error` | ✅ |
-| `permission.updated` | 权限请求 | `permission_request` | ❌ |
-| `server.heartbeat` | 服务器心跳（每 10s） | —（内部监控） | ❌ |
+| SSE Event              | 说明                                | AEP 映射                                      | Turn-end        |
+| ---------------------- | ----------------------------------- | --------------------------------------------- | --------------- |
+| `message.part.updated` | 消息片段更新（text/tool/reasoning） | `message.delta` / `tool_call` / `tool_result` | ❌               |
+| `message.updated`      | 完整消息更新（含 token 统计）       | `message` + `done.stats`（per-step）          | ❌ 中间结果      |
+| `session.status`       | 会话状态变更（busy/idle/retry）     | `state`                                       | ✅ `status=idle` |
+| `session.idle`         | 会话空闲（turn 结束）               | `done`                                        | ✅               |
+| `session.error`        | 会话错误                            | `error`                                       | ✅               |
+| `permission.updated`   | 权限请求                            | `permission_request`                          | ❌               |
+| `server.heartbeat`     | 服务器心跳（每 10s）                | —（内部监控）                                 | ❌               |
 
 **Turn-end 检测逻辑**：
 
@@ -969,14 +840,14 @@ func (p *OpenCodeServerWorker) DetectTurnEnd(e *WorkerEvent) bool {
 
 ##### 与 CLI Worker 的关键差异
 
-| 维度 | OpenCode CLI | OpenCode Server |
-|------|-------------|----------------|
-| 进程模型 | N 个独立进程 | 1 个共享进程 |
-| 进程管理 | SessionPool spawn/cleanup | OpenCodeServerManager 托管 |
-| Transport | stdio pipe | HTTP + SSE |
-| 故障隔离 | ✅ 进程级隔离 | ⚠️ serve 崩溃影响全部 session |
+| 维度         | OpenCode CLI              | OpenCode Server                       |
+| ------------ | ------------------------- | ------------------------------------- |
+| 进程模型     | N 个独立进程              | 1 个共享进程                          |
+| 进程管理     | SessionPool spawn/cleanup | OpenCodeServerManager 托管            |
+| Transport    | stdio pipe                | HTTP + SSE                            |
+| 故障隔离     | ✅ 进程级隔离              | ⚠️ serve 崩溃影响全部 session          |
 | Session 恢复 | CLI 进程死 → session 失效 | serve 重启 → session 可恢复（SQLite） |
-| 内存效率 | ~N×100MB | ~100MB 固定 |
+| 内存效率     | ~N×100MB                  | ~100MB 固定                           |
 
 ##### 设计权衡
 
@@ -998,17 +869,17 @@ func (p *OpenCodeServerWorker) DetectTurnEnd(e *WorkerEvent) bool {
 
 #### 8.2.3 架构对比：OpenCode CLI vs OpenCode Server
 
-| 维度 | OpenCode CLI | OpenCode Server |
-|------|-------------|----------------|
-| **进程数** | N（= session 数） | 1（`opencode serve`） |
-| **内存占用** | ~N×100MB | ~100MB 固定 |
-| **故障隔离** | ✅ 单进程崩溃不影响其他 | ❌ serve 崩溃 → 全部中断 |
-| **工作目录隔离** | ✅ OS 级（每个进程独立 workDir） | ⚠️ serve 在固定目录，通过参数隔离 |
-| **网络攻击面** | ✅ 无端口（stdio pipe） | ⚠️ HTTP 端口暴露 |
-| **HotPlex 架构契合** | ✅ 复用 `CLISessionStarter` | ⚠️ 需独立的 `HTTPSessionStarter` |
-| **运维复杂度** | ✅ 按需 spawn/cleanup | ⚠️ 需管理 serve 守护进程 |
-| **启动延迟** | ~50-200ms spawn（仅 Turn 1） | ~0ms（daemon 预热后） |
-| **Turn 1 延迟** | CLI 有 spawn 开销 | Server 即时连接 |
+| 维度                 | OpenCode CLI                    | OpenCode Server                  |
+| -------------------- | ------------------------------- | -------------------------------- |
+| **进程数**           | N（= session 数）               | 1（`opencode serve`）            |
+| **内存占用**         | ~N×100MB                        | ~100MB 固定                      |
+| **故障隔离**         | ✅ 单进程崩溃不影响其他          | ❌ serve 崩溃 → 全部中断          |
+| **工作目录隔离**     | ✅ OS 级（每个进程独立 workDir） | ⚠️ serve 在固定目录，通过参数隔离 |
+| **网络攻击面**       | ✅ 无端口（stdio pipe）          | ⚠️ HTTP 端口暴露                  |
+| **HotPlex 架构契合** | ✅ 复用 `CLISessionStarter`      | ⚠️ 需独立的 `HTTPSessionStarter`  |
+| **运维复杂度**       | ✅ 按需 spawn/cleanup            | ⚠️ 需管理 serve 守护进程          |
+| **启动延迟**         | ~50-200ms spawn（仅 Turn 1）    | ~0ms（daemon 预热后）            |
+| **Turn 1 延迟**      | CLI 有 spawn 开销               | Server 即时连接                  |
 
 > **推荐**：对于 HotPlex 实际规模（1-20 并发 session），**OpenCode CLI 优选**——进程级硬隔离的价值远大于数百 MB 的内存差距。
 
@@ -1020,12 +891,12 @@ func (p *OpenCodeServerWorker) DetectTurnEnd(e *WorkerEvent) bool {
 
 Pi-mono 为 raw stdout Worker，输出为非结构化文本行。
 
-| 特性 | 说明 |
-|------|------|
+| 特性      | 说明                       |
+| --------- | -------------------------- |
 | Transport | stdio（stdin/stdout pipe） |
-| Protocol | raw-stdout（逐行文本） |
-| Streaming | 逐行输出 |
-| 进程模型 | 临时进程，执行完毕退出 |
+| Protocol  | raw-stdout（逐行文本）     |
+| Streaming | 逐行输出                   |
+| 进程模型  | 临时进程，执行完毕退出     |
 
 #### Worker Adapter 转换
 
@@ -1066,17 +937,17 @@ Server → Client event kinds：`init_ack`、`message.delta`、`message`、`tool
 
 ## 10. Session 管理功能
 
-| 操作 | 方向 | 说明 |
-|------|------|------|
-| **Create / Resume** | C→S | `init` 中 `session_id` 存在则 resume，否则创建新 session |
-| **Send** | C→S | 通过 `input` event 发送，状态为 `running` 时拒绝（`SESSION_BUSY`） |
-| **Terminate** | C→S | `control.terminate`，停止 runtime，状态 → `terminated` |
-| **Delete** | C→S | `control.delete`，删除 DB 记录 + 清理 runtime |
-| **Reconnect** | S→C | `control.reconnect`，服务器要求客户端重连（`priority: "control"`） |
-| **Session Invalid** | S→C | `control.session_invalid`，通知 Session 已失效 |
-| **Throttle** | S→C | `control.throttle`，要求客户端降低请求频率 |
-| **List / Query** | — | Admin API（非 AEP 通道） |
-| **Timeout** | — | idle timeout / max lifetime，后台 GC 扫描 `expires_at` 自动 terminate |
+| 操作                | 方向 | 说明                                                                  |
+| ------------------- | ---- | --------------------------------------------------------------------- |
+| **Create / Resume** | C→S  | `init` 中 `session_id` 存在则 resume，否则创建新 session              |
+| **Send**            | C→S  | 通过 `input` event 发送，状态为 `running` 时拒绝（`SESSION_BUSY`）    |
+| **Terminate**       | C→S  | `control.terminate`，停止 runtime，状态 → `terminated`                |
+| **Delete**          | C→S  | `control.delete`，删除 DB 记录 + 清理 runtime                         |
+| **Reconnect**       | S→C  | `control.reconnect`，服务器要求客户端重连（`priority: "control"`）    |
+| **Session Invalid** | S→C  | `control.session_invalid`，通知 Session 已失效                        |
+| **Throttle**        | S→C  | `control.throttle`，要求客户端降低请求频率                            |
+| **List / Query**    | —    | Admin API（非 AEP 通道）                                              |
+| **Timeout**         | —    | idle timeout / max lifetime，后台 GC 扫描 `expires_at` 自动 terminate |
 
 > **控制流设计**：AEP 协议统一管理 session 生命周期（创建/恢复/终止/删除），并支持服务器主动控制（重连/失效通知/降级）。详见 [[architecture/AEP-v1-Protocol]] §3.4。
 
@@ -1236,30 +1107,30 @@ SELECT * FROM sessions WHERE state != 'deleted';
 
 ### 13.2 恢复策略
 
-| 状态 | 操作 |
-|------|------|
-| `RUNNING` | → `TERMINATED`（runtime 已丢失），发送 `error(WORKER_CRASH)` + `done(false)` 如果有活跃 WS 连接 |
-| `IDLE` | 保持（runtime 需重新 attach），标记 `is_active = false` |
-| `CREATED` | 可重启（启动新 runtime） |
-| `TERMINATED` | 保持不变 |
+| 状态         | 操作                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------- |
+| `RUNNING`    | → `TERMINATED`（runtime 已丢失），发送 `error(WORKER_CRASH)` + `done(false)` 如果有活跃 WS 连接 |
+| `IDLE`       | 保持（runtime 需重新 attach），标记 `is_active = false`                                         |
+| `CREATED`    | 可重启（启动新 runtime）                                                                        |
+| `TERMINATED` | 保持不变                                                                                        |
 
 ### 13.3 Worker 持久化职责
 
 > **核心原则**：Gateway 仅管理 session 元数据（控制面），Worker 自身负责业务数据持久化。
 
-| Worker | 持久化位置 | 内容 | Resume 方式 |
-|--------|-----------|------|------------|
-| Claude Code | `~/.claude/projects/<workspace-key>/<session-id>.jsonl` | 完整对话历史 + tool 调用记录 | `--resume <id>` |
-| OpenCode CLI | `~/.local/share/opencode/`（SQLite） | 完整对话历史 + tool 调用记录 | `--continue --session <id>` |
-| OpenCode Server | `~/.local/share/opencode/`（同 CLI，serve 共享 DB） | 同 CLI | HTTP API session 绑定 |
-| Pi-mono | 无（ephemeral） | — | — |
+| Worker          | 持久化位置                                              | 内容                         | Resume 方式                 |
+| --------------- | ------------------------------------------------------- | ---------------------------- | --------------------------- |
+| Claude Code     | `~/.claude/projects/<workspace-key>/<session-id>.jsonl` | 完整对话历史 + tool 调用记录 | `--resume <id>`             |
+| OpenCode CLI    | `~/.local/share/opencode/`（SQLite）                    | 完整对话历史 + tool 调用记录 | `--continue --session <id>` |
+| OpenCode Server | `~/.local/share/opencode/`（同 CLI，serve 共享 DB）     | 同 CLI                       | HTTP API session 绑定       |
+| Pi-mono         | 无（ephemeral）                                         | —                            | —                           |
 
 **两层热复用的持久化分层**：
 
-| 层 | Claude Code | OpenCode CLI | OpenCode Server |
-|----|------------|-------------|----------------|
-| **Pool 层**（进程不退出） | `*exec.Cmd` 常驻，`IsAlive()` | 同左 | HTTP 连接常驻（pool 层不适用） |
-| **Session 层**（上下文连续） | `.jsonl` 写入历史 | opencode SQLite DB | 同左，通过 HTTP API |
+| 层                           | Claude Code                   | OpenCode CLI       | OpenCode Server                |
+| ---------------------------- | ----------------------------- | ------------------ | ------------------------------ |
+| **Pool 层**（进程不退出）    | `*exec.Cmd` 常驻，`IsAlive()` | 同左               | HTTP 连接常驻（pool 层不适用） |
+| **Session 层**（上下文连续） | `.jsonl` 写入历史             | opencode SQLite DB | 同左，通过 HTTP API            |
 
 **Resume 语义**：
 - Gateway reconnect → 仅恢复 WebSocket 连接，不负责 event replay
@@ -1278,11 +1149,11 @@ SELECT * FROM sessions WHERE state != 'deleted';
 
 ### 14.2 WebSocket 认证
 
-| 策略 | 说明 |
-|------|------|
+| 策略                        | 说明                                                                        |
+| --------------------------- | --------------------------------------------------------------------------- |
 | **Upgrade 阶段认证**（MVP） | WebSocket 握手时通过 query param 或 header 携带 API Key，验证通过后建立连接 |
-| **Per-message JWT**（v1.1） | 每个 Envelope 携带 JWT，支持细粒度权限控制 |
-| **Token 刷新**（v1.1） | 通过 `control.refresh_token` 在不断开连接的情况下刷新凭证 |
+| **Per-message JWT**（v1.1） | 每个 Envelope 携带 JWT，支持细粒度权限控制                                  |
+| **Token 刷新**（v1.1）      | 通过 `control.refresh_token` 在不断开连接的情况下刷新凭证                   |
 
 > **参考**: Slack RTM 使用 Upgrade 阶段 token 认证。Discord Gateway 在 init 握手中携带 token。
 
@@ -1336,18 +1207,18 @@ SELECT * FROM sessions WHERE state != 'deleted';
 
 ## 18. 风险点
 
-| 风险               | 严重度 | 描述                                     | 缓解策略                                                                             |
-| ---------------- | --- | -------------------------------------- | -------------------------------------------------------------------------------- |
-| Agent 不可恢复       | 高   | CLI 进程 crash 后无法真正 resume，仅语义恢复        | `VerifySession` 严格检查 session 文件存在性；向 Client 明确区分 "session 可恢复" vs "runtime 不可恢复" |
-| Resume TOCTOU 竞态 | 高   | init 检查存活 + Worker crash 竞态            | init 处理和状态检测在同一临界区（mutex）内完成                                                     |
-| done/input 竞态    | 高   | Client 发 input 时 Worker 刚好发 done       | input 路由和 state 转换在同一互斥锁内完成                                                      |
-| 热复用状态污染          | 高   | persistent Worker 的前 turn 副作用影响后续 turn | idle GC 策略 + 可选 per-turn isolation（v1.1）                                         |
-| 协议不稳定            | 中   | 不同 Agent 版本输出格式可能变化                    | Worker 层防御性编程 + 版本兼容层                                                          |
-| 进程泄漏             | 中   | 未正确 kill 导致 zombie 进程                  | PGID 隔离 + 分层终止 + 进程注册表审计                                                         |
-| 并发问题             | 中   | Session 状态竞争                           | `sync.RWMutex` + defer unlock + `-race` 测试                                       |
-| Stdout OOM       | 中   | 单行输出过大                                 | 10MB buffer 限制 + `WORKER_OUTPUT_LIMIT` error                                     |
-| SQLite 写瓶颈       | 低   | 多 session 并发写入                         | WAL mode + 单写 goroutine 批量化                                                      |
-| Worker 僵死        | 低   | 进程存在但不产出                               | `execution_timeout` 强制终止                                                         |
+| 风险               | 严重度 | 描述                                            | 缓解策略                                                                                               |
+| ------------------ | ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Agent 不可恢复     | 高     | CLI 进程 crash 后无法真正 resume，仅语义恢复    | `VerifySession` 严格检查 session 文件存在性；向 Client 明确区分 "session 可恢复" vs "runtime 不可恢复" |
+| Resume TOCTOU 竞态 | 高     | init 检查存活 + Worker crash 竞态               | init 处理和状态检测在同一临界区（mutex）内完成                                                         |
+| done/input 竞态    | 高     | Client 发 input 时 Worker 刚好发 done           | input 路由和 state 转换在同一互斥锁内完成                                                              |
+| 热复用状态污染     | 高     | persistent Worker 的前 turn 副作用影响后续 turn | idle GC 策略 + 可选 per-turn isolation（v1.1）                                                         |
+| 协议不稳定         | 中     | 不同 Agent 版本输出格式可能变化                 | Worker 层防御性编程 + 版本兼容层                                                                       |
+| 进程泄漏           | 中     | 未正确 kill 导致 zombie 进程                    | PGID 隔离 + 分层终止 + 进程注册表审计                                                                  |
+| 并发问题           | 中     | Session 状态竞争                                | `sync.RWMutex` + defer unlock + `-race` 测试                                                           |
+| Stdout OOM         | 中     | 单行输出过大                                    | 10MB buffer 限制 + `WORKER_OUTPUT_LIMIT` error                                                         |
+| SQLite 写瓶颈      | 低     | 多 session 并发写入                             | WAL mode + 单写 goroutine 批量化                                                                       |
+| Worker 僵死        | 低     | 进程存在但不产出                                | `execution_timeout` 强制终止                                                                           |
 
 ---
 
@@ -1364,3 +1235,167 @@ v1.1 及更高版本规划：
 - SSE fallback（WebSocket 不可达时的降级通道）
 - 运行时动态配置（`config.update` 协议扩展）
 - OpenCode Server 多进程池（负载均衡 / 故障隔离增强）
+
+---
+
+## 20. Claude Code 源码调研发现（补充）
+
+> 基于 `~/claude-code/src` 源码分析，版本截至 2026-03-31。
+
+### 20.1 关键发现
+
+#### ✅ 已验证（与设计文档一致）
+
+| 项目                                     | 说明                       |
+| ---------------------------------------- | -------------------------- |
+| `--print`                                | 非交互模式                 |
+| `--output-format stream-json`            | NDJSON 输出                |
+| `--input-format stream-json`             | NDJSON 输入                |
+| `--session-id <uuid>`                    | Session ID 注入            |
+| `--resume`                               | 会话恢复                   |
+| `--allowed-tools` / `--disallowed-tools` | 工具过滤                   |
+| `--permission-mode`                      | 权限模式                   |
+| `--dangerously-skip-permissions`         | 跳过权限                   |
+| `--model`                                | 模型选择                   |
+| `--max-turns`                            | 轮次限制                   |
+| `result` 事件结构                        | 包含 usage/cost/modelUsage |
+| Hot-Multiplexing                         | 进程不退出复用             |
+| SIGTERM → gracefulShutdown               | 两层终止                   |
+
+#### ⚠️ 需补充（设计文档缺失）
+
+| 项目                           | 说明                    | 优先级 |
+| ------------------------------ | ----------------------- | ------ |
+| `--fork-session`               | 恢复时创建新 session ID | P1     |
+| `--resume-session-at <msg-id>` | 恢复到指定消息          | P2     |
+| `--rewind-files`               | 文件状态回滚            | P2     |
+| `--mcp-config`                 | MCP 服务器配置          | P1     |
+| `--strict-mcp-config`          | 仅使用指定的 MCP        | P1     |
+| `--bare`                       | 最小化模式              | P2     |
+| `--add-dir`                    | 额外允许目录            | P2     |
+| `--max-budget-usd`             | API 花费上限            | P3     |
+| `stream_event` 类型            | 部分消息流              | P1     |
+| `control_request` 协议         | 双向控制协议            | P1     |
+| `control_response` 协议        | 控制响应格式            | P1     |
+| `tool_progress` 类型           | 工具执行进度            | P1     |
+| `session_state_changed`        | 会话状态变更            | P1     |
+| NDJSON 安全序列化              | 转义 U+2028/U+2029      | P1     |
+| 环境变量白名单                 | SAFE_ENV_VARS 等        | P1     |
+| Session ID v1/v2 兼容          | `session_*` / `cse_*`   | P2     |
+| StructuredIO                   | 消息预队列机制          | P2     |
+| SSETransport                   | v2 传输模式             | P3     |
+
+#### ❌ 设计文档错误
+
+| 项目                   | 设计文档              | 实际实现                                                |
+| ---------------------- | --------------------- | ------------------------------------------------------- |
+| `thinking` 事件类型    | `type: "thinking"`    | `type: "stream_event"` + `event.type: "thinking"`       |
+| `tool_result` 事件类型 | `type: "tool_result"` | `type: "tool_progress"`                                 |
+| `result` 事件          | 直接包含 result 字段  | `result.subtype: "success"` + 顶层 result 字段          |
+| Graceful shutdown 等待 | 5s SIGTERM 等待       | 内嵌在 gracefulShutdown（无固定等待，但有 5s failsafe） |
+
+### 20.2 Worker Adapter 实现补充
+
+```go
+// 1. NDJSON 安全序列化（必须）
+import "regexp"
+var lineTerminators = regexp.MustCompile(`[\u2028\u2029]`)
+
+func ndjsonSafeMarshal(v any) (string, error) {
+    data, err := json.Marshal(v)
+    if err != nil {
+        return "", err
+    }
+    safe := lineTerminators.ReplaceAllFunc(data, func(b []byte) []byte {
+        switch {
+        case bytes.Equal(b, []byte{0xE2, 0x80, 0xA8}):
+            return []byte("\\u2028")
+        case bytes.Equal(b, []byte{0xE2, 0x80, 0xA9}):
+            return []byte("\\u2029")
+        }
+        return b
+    })
+    return string(safe) + "\n", nil
+}
+
+// 2. SDK 事件解析（更新）
+func (p *ClaudeCodeParser) ParseEvent(line string) ([]*WorkerEvent, error) {
+    var msg SDKMessage
+    if err := json.Unmarshal([]byte(line), &msg); err != nil {
+        return nil, err
+    }
+
+    switch msg.Type {
+    case "stream_event":
+        return p.handleStreamEvent(msg)
+    case "assistant":
+        return p.handleAssistant(msg)
+    case "tool_progress":
+        return p.handleToolProgress(msg)
+    case "result":
+        return p.handleResult(msg)
+    case "control_request":
+        return p.handleControlRequest(msg)
+    case "system":
+        return p.handleSystem(msg)
+    default:
+        return nil, nil // 忽略未知类型
+    }
+}
+
+// 3. 权限请求处理
+func (p *ClaudeCodeParser) handleControlRequest(msg SDKMessage) ([]*WorkerEvent, error) {
+    if msg.Subtype == "can_use_tool" {
+        // 转发给 Client 或按策略决策
+        return []*WorkerEvent{
+            {
+                Type:      EventTypePermissionRequest,
+                ToolName:  msg.ToolName,
+                ToolInput: msg.Input,
+                RequestID: msg.RequestID,
+            },
+        }, nil
+    }
+    return nil, nil
+}
+```
+
+### 20.3 推荐实现优先级
+
+**P0（必须实现，v1.0 MVP）**：
+1. ✅ NDJSON 安全序列化
+2. ✅ `stream_event` 类型处理
+3. ✅ `tool_progress` 类型映射
+4. ✅ 控制协议 `can_use_tool` → `permission_request`
+5. ✅ 环境变量白名单（移除 `CLAUDECODE=`）
+
+**P1（重要，v1.0 完整支持）**：
+1. `--mcp-config` 支持
+2. `--fork-session` 支持
+3. `control_response` 发送
+4. `session_state_changed` 处理
+5. Session ID v1/v2 兼容层
+
+**P2（增强，v1.1）**：
+1. `--resume-session-at` 支持
+2. `--rewind-files` 支持
+3. `--bare` 模式
+4. `--add-dir` 支持
+5. StructuredIO 消息队列
+
+### 20.4 源码关键路径
+
+| 功能             | 源码路径                                |
+| ---------------- | --------------------------------------- |
+| CLI 参数解析     | `src/main.tsx`                          |
+| Session 管理     | `src/bridge/sessionIdCompat.ts`         |
+| 会话创建         | `src/bridge/createSession.ts`           |
+| 结构化 I/O       | `src/cli/structuredIO.ts`               |
+| NDJSON 序列化    | `src/cli/ndjsonSafeStringify.ts`        |
+| 优雅关闭         | `src/utils/gracefulShutdown.ts`         |
+| 环境变量         | `src/utils/managedEnvConstants.ts`      |
+| SDK 消息 schemas | `src/entrypoints/sdk/coreSchemas.ts`    |
+| 控制协议 schemas | `src/entrypoints/sdk/controlSchemas.ts` |
+| SSE 传输         | `src/cli/transports/SSETransport.ts`    |
+| Hybrid 传输      | `src/cli/transports/HybridTransport.ts` |
+| Tool 权限        | `src/Tool.ts`                           |
