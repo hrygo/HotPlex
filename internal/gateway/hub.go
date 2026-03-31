@@ -4,6 +4,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -74,6 +75,11 @@ type Hub struct {
 	// Shutdown signals.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// LogHandler is an optional callback invoked by routeMessage for each forwarded event.
+	// Use it to capture events into an external ring buffer (e.g. /admin/logs).
+	// If nil, no events are captured.
+	LogHandler func(level, msg, sessionID string)
 }
 
 // EnvelopeWithConn pairs a message with its originating connection.
@@ -318,6 +324,17 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		return
 	}
 
+	// ADMIN-008: capture event to ring buffer if LogHandler is configured.
+	if h.LogHandler != nil {
+		level := "INFO"
+		if msg.Env.Event.Type == events.Error {
+			level = "ERROR"
+		} else if msg.Env.Event.Type == events.State {
+			level = "WARN"
+		}
+		h.LogHandler(level, fmt.Sprintf("event %s seq=%d", msg.Env.Event.Type, msg.Env.Seq), msg.Env.SessionID)
+	}
+
 	encoded, err := aep.EncodeJSON(msg.Env)
 	if err != nil {
 		h.log.Error("gateway: encode failed", "err", err)
@@ -364,8 +381,22 @@ func (h *Hub) GetAndClearDropped(sessionID string) bool {
 }
 
 // Shutdown gracefully shuts down all connections and stops the hub.
+// It drains in-flight messages from the broadcast queue, then closes
+// all WebSocket connections. The ctx deadline controls the maximum wait time.
 func (h *Hub) Shutdown(ctx context.Context) error {
 	h.cancel()
+
+	// Drain in-flight messages with a deadline.
+	drainDone := make(chan struct{})
+	go func() {
+		h.drainBroadcast()
+		close(drainDone)
+	}()
+	select {
+	case <-drainDone:
+	case <-ctx.Done():
+		h.log.Warn("gateway: broadcast drain timed out")
+	}
 
 	// Close all connections.
 	h.mu.RLock()
@@ -380,12 +411,6 @@ func (h *Hub) Shutdown(ctx context.Context) error {
 		if err := c.Close(); err != nil {
 			errs = append(errs, err)
 		}
-	}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
 	}
 
 	if len(errs) > 0 {

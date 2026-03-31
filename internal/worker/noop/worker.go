@@ -3,6 +3,7 @@ package noop
 import (
 	"context"
 	"io"
+	"time"
 
 	"hotplex-worker/internal/worker"
 	"hotplex-worker/pkg/events"
@@ -112,4 +113,9 @@ func (w *Worker) Health() worker.WorkerHealth {
 		Running: false,
 		Uptime:  "0s",
 	}
+}
+
+// LastIO returns the zero time for the noop worker (no I/O tracking).
+func (w *Worker) LastIO() time.Time {
+	return time.Time{}
 }

@@ -618,7 +618,7 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID string, wt worker.
 
 	// Forward worker events to hub. Goroutine exits when conn.Recv() is closed
 	// (happens when the worker is killed via poolMgr.Close).
-	go b.forwardEvents(w.Conn(), id)
+	go b.forwardEvents(w, id)
 
 	return nil
 }
@@ -678,8 +678,10 @@ func (b *Bridge) ResumeSession(ctx context.Context, id string) error {
 
 // forwardEvents proxies worker events to the hub with seq assignment.
 // EVT-004: if msgStore is configured, it appends to the event log on done events.
-func (b *Bridge) forwardEvents(conn worker.SessionConn, sessionID string) {
-	for env := range conn.Recv() {
+// AEP-020: after the recv channel closes, calls Worker.Wait() to determine exit
+// code and sets DoneData.Success accordingly (non-zero exit = crash = success=false).
+func (b *Bridge) forwardEvents(w worker.Worker, sessionID string) {
+	for env := range w.Conn().Recv() {
 		env.SessionID = sessionID
 		// Seq is assigned by hub.SendToSession via SeqGen (seq=0 triggers auto-assignment).
 
@@ -720,5 +722,17 @@ func (b *Bridge) forwardEvents(conn worker.SessionConn, sessionID string) {
 				b.log.Warn("bridge: msgstore append", "err", err, "session_id", sessionID)
 			}
 		}
+	}
+
+	// AEP-020: Worker.Recv() closed — get exit code to determine crash vs normal exit.
+	// Wait() returns immediately since the process has already exited (Terminate was
+	// called before the conn channel was closed). Non-zero exit = crash = success=false.
+	if exitCode, _ := w.Wait(); exitCode != 0 {
+		b.log.Warn("gateway: worker exited with non-zero code, sending crash done", "session_id", sessionID, "exit_code", exitCode)
+		crashDone := events.NewEnvelope(aep.NewID(), sessionID, b.hub.NextSeq(sessionID), events.Done, events.DoneData{
+			Success: false,
+			Stats:   map[string]any{"crash_exit_code": exitCode},
+		})
+		_ = b.hub.SendToSession(context.Background(), crashDone)
 	}
 }

@@ -4,6 +4,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"time"
 
 	"hotplex-worker/pkg/events"
 )
@@ -109,6 +110,11 @@ type Worker interface {
 
 	// Health returns a snapshot of the worker's runtime health.
 	Health() WorkerHealth
+
+	// LastIO returns the time of the last I/O activity (input sent or output received).
+	// Used by GC zombie detection to identify stuck workers.
+	// Implementations that don't track I/O should return the zero time.Time.
+	LastIO() time.Time
 }
 
 // WorkerHealth reports the runtime health of a worker process.

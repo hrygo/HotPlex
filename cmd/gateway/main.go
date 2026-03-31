@@ -100,6 +100,11 @@ func run() error {
 
 	hub := gateway.NewHub(log, cfg)
 
+	// ADMIN-008: wire hub event logging into the ring buffer.
+	hub.LogHandler = func(level, msg, sessionID string) {
+		logRing.Add(level, msg, sessionID)
+	}
+
 	// CONFIG-006/007/008: Start file-system config watcher for hot reload.
 	// Only active when a config file path was provided (flagConfig != "").
 	var configWatcher *config.Watcher
@@ -253,10 +258,10 @@ func setupRoutes(
 
 	// Admin API (requires auth middleware).
 	admin := &AdminAPI{
-		log:   log,
-		cfg:   cfg,
-		sm:    sm,
-		hub:   hub,
+		log:    log,
+		cfg:    cfg,
+		sm:     sm,
+		hub:    hub,
 		bridge: bridge,
 	}
 	// Initialize middleware components once at startup.
@@ -298,14 +303,14 @@ func respondJSON(w http.ResponseWriter, data any) {
 
 // Admin API scope constants (per RBAC Permission Matrix).
 const (
-	ScopeSessionRead  = "session:read"  // list/get sessions
-	ScopeSessionWrite = "session:write" // create/modify/terminate sessions
-	ScopeSessionKill = "session:delete" // force delete sessions
-	ScopeStatsRead   = "stats:read"   // read statistics
-	ScopeHealthRead  = "health:read"  // read health checks
-	ScopeConfigRead  = "config:read"   // read/validate config
-	ScopeAdminRead   = "admin:read"   // debug logs, debug session
-	ScopeAdminWrite  = "admin:write"  // write admin ops
+	ScopeSessionRead  = "session:read"   // list/get sessions
+	ScopeSessionWrite = "session:write"  // create/modify/terminate sessions
+	ScopeSessionKill  = "session:delete" // force delete sessions
+	ScopeStatsRead    = "stats:read"     // read statistics
+	ScopeHealthRead   = "health:read"    // read health checks
+	ScopeConfigRead   = "config:read"    // read/validate config
+	ScopeAdminRead    = "admin:read"     // debug logs, debug session
+	ScopeAdminWrite   = "admin:write"    // write admin ops
 )
 
 // scopeContextKey is the context key for the authenticated scopes.
@@ -421,8 +426,8 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 		key := string(si.WorkerType)
 		if byType[key] == nil {
 			byType[key] = map[string]any{
-				"sessions":       0,
-				"avg_memory_mb":  0,
+				"sessions":        0,
+				"avg_memory_mb":   0,
 				"avg_cpu_percent": 0,
 			}
 		}
@@ -432,15 +437,15 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, map[string]any{
 		"gateway": map[string]any{
-			"uptime_seconds":          int(time.Since(startTime).Seconds()),
+			"uptime_seconds":        int(time.Since(startTime).Seconds()),
 			"websocket_connections": a.hub.ConnectionsOpen(),
-			"sessions_active":        total,
-			"sessions_total":         len(sessions),
+			"sessions_active":       total,
+			"sessions_total":        len(sessions),
 		},
 		"workers": byType,
 		"database": map[string]any{
 			"sessions_count": len(sessions),
-			"db_size_mb":    0, // placeholder
+			"db_size_mb":     0, // placeholder
 		},
 	})
 }
@@ -513,27 +518,111 @@ func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
 		return
 	}
-	// Placeholder: return empty logs since structured log buffer not wired yet.
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 1000 {
+			limit = v
+		}
+	}
+	logs := logRing.Recent(limit)
+	if logs == nil {
+		logs = []logEntry{}
+	}
 	respondJSON(w, map[string]any{
-		"logs":  []any{},
-		"total": 0,
-		"limit": 100,
+		"logs":  logs,
+		"total": logRing.n,
+		"limit": limit,
 	})
 }
 
 // HandleConfigValidate validates the gateway configuration.
+// It parses the request body as a config YAML/JSON fragment and runs
+// structural and business-rule validation against it.
 func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeConfigRead) {
 		http.Error(w, "insufficient scope: need config:read", http.StatusForbidden)
 		return
 	}
+	if r.Body == nil {
+		http.Error(w, "empty request body", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Gateway  *struct {
+			Addr               string `json:"addr"`
+			ReadBufferSize     int    `json:"read_buffer_size"`
+			WriteBufferSize    int    `json:"write_buffer_size"`
+			BroadcastQueueSize  int    `json:"broadcast_queue_size"`
+		} `json:"gateway"`
+		DB *struct {
+			Path string `json:"path"`
+		} `json:"db"`
+		Worker *struct {
+			IdleTimeout      string `json:"idle_timeout"`
+			ExecutionTimeout string `json:"execution_timeout"`
+		} `json:"worker"`
+		Security *struct {
+			TLSEnabled bool `json:"tls_enabled"`
+		} `json:"security"`
+		Session *struct {
+			RetentionPeriod string `json:"retention_period"`
+			GCScanInterval  string `json:"gc_scan_interval"`
+		} `json:"session"`
+		Pool *struct {
+			MaxSize int `json:"max_size"`
+		} `json:"pool"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var validationErrs []string
 	var warnings []string
+
+	// Gateway validation.
+	if body.Gateway != nil {
+		if body.Gateway.ReadBufferSize < 0 {
+			validationErrs = append(validationErrs, "gateway.read_buffer_size must be non-negative")
+		}
+		if body.Gateway.WriteBufferSize < 0 {
+			validationErrs = append(validationErrs, "gateway.write_buffer_size must be non-negative")
+		}
+		if body.Gateway.BroadcastQueueSize < 0 {
+			validationErrs = append(validationErrs, "gateway.broadcast_queue_size must be non-negative")
+		}
+	}
+
+	// DB validation.
+	if body.DB != nil {
+		if body.DB.Path != "" && (len(body.DB.Path) > 4096) {
+			validationErrs = append(validationErrs, "db.path exceeds maximum length")
+		}
+	}
+
+	// Pool validation.
+	if body.Pool != nil {
+		if body.Pool.MaxSize <= 0 {
+			validationErrs = append(validationErrs, "pool.max_size must be positive")
+		}
+		if body.Pool.MaxSize > 10000 {
+			validationErrs = append(validationErrs, "pool.max_size must not exceed 10000")
+		}
+	}
+
+	valid := len(validationErrs) == 0
 	if len(a.cfg.Security.APIKeys) == 0 {
 		warnings = append(warnings, "no API keys configured; running in open-access mode")
 	}
+
+	status := http.StatusOK
+	if !valid {
+		status = http.StatusBadRequest
+	}
+	w.WriteHeader(status)
 	respondJSON(w, map[string]any{
-		"valid":    true,
-		"errors":   []string{},
+		"valid":    valid,
+		"errors":   validationErrs,
 		"warnings": warnings,
 	})
 }
@@ -550,10 +639,39 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+
+	// Collect extended debug info from session manager.
+	ms := a.sm.GetManagedSessionDebug(id)
+	var mutexLocked bool
+	var turnCount int
+	var workerHealth worker.WorkerHealth
+	if ms != nil {
+		ms.Mu.RLock()
+		mutexLocked = true // if we got here, we have a read lock
+		if ms.TurnCount > 0 {
+			turnCount = ms.TurnCount
+		}
+		if ms.Worker != nil {
+			workerHealth = ms.Worker.Health()
+		}
+		ms.Mu.RUnlock()
+	}
+
+	lastSeq := a.hub.NextSeq(id) // returns current seq without incrementing
 	respondJSON(w, map[string]any{
 		"session": map[string]any{
-			"id":    si.ID,
-			"state": si.State,
+			"id":          si.ID,
+			"state":       si.State,
+			"user_id":     si.UserID,
+			"worker_type": si.WorkerType,
+			"created_at":  si.CreatedAt,
+			"updated_at":  si.UpdatedAt,
+		},
+		"debug": map[string]any{
+			"mutex_locked":  mutexLocked,
+			"turn_count":    turnCount,
+			"last_seq_sent": lastSeq,
+			"worker_health": workerHealth,
 		},
 	})
 }
@@ -632,6 +750,63 @@ func (r *simpleRateLimiter) Allow() bool {
 }
 
 var startTime = time.Now()
+
+// logRing is a thread-safe ring buffer for recent log entries served by /admin/logs.
+var logRing = newLogRing(100)
+
+type logEntry struct {
+	Time    string `json:"time"`
+	Level   string `json:"level"`
+	Msg     string `json:"msg"`
+	Session string `json:"session_id,omitempty"`
+}
+
+type logRingBuffer struct {
+	mu   sync.Mutex
+	ent  []logEntry
+	head int
+	n    int // total entries ever added
+}
+
+func newLogRing(cap int) *logRingBuffer {
+	return &logRingBuffer{ent: make([]logEntry, cap)}
+}
+
+func (r *logRingBuffer) Add(level, msg, sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ent[r.head%len(r.ent)] = logEntry{
+		Time:    time.Now().UTC().Format(time.RFC3339Nano),
+		Level:   level,
+		Msg:     msg,
+		Session: sessionID,
+	}
+	r.head++
+	r.n++
+}
+
+func (r *logRingBuffer) Recent(limit int) []logEntry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.n == 0 {
+		return nil
+	}
+	size := len(r.ent)
+	if r.n < size {
+		size = r.n
+	}
+	if limit > 0 && limit < size {
+		size = limit
+	}
+	// start from oldest
+	start := (r.head - size + size*1000) % (len(r.ent))
+	out := make([]logEntry, 0, size)
+	for i := 0; i < size; i++ {
+		idx := (start + i) % len(r.ent)
+		out = append(out, r.ent[idx])
+	}
+	return out
+}
 
 func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionWrite) {
