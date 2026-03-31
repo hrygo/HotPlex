@@ -37,17 +37,28 @@ const (
 type ErrorCode string
 
 const (
-	ErrCodeWorkerStartFailed ErrorCode = "WORKER_START_FAILED"
-	ErrCodeWorkerCrash       ErrorCode = "WORKER_CRASH"
-	ErrCodeWorkerTimeout     ErrorCode = "WORKER_TIMEOUT"
-	ErrCodeWorkerSIGKILL     ErrorCode = "PROCESS_SIGKILL"
-	ErrCodeInvalidMessage    ErrorCode = "INVALID_MESSAGE"
-	ErrCodeSessionNotFound   ErrorCode = "SESSION_NOT_FOUND"
-	ErrCodeSessionBusy       ErrorCode = "SESSION_BUSY"
-	ErrCodeUnauthorized      ErrorCode = "UNAUTHORIZED"
-	ErrCodeInternalError     ErrorCode = "INTERNAL_ERROR"
-	ErrCodeProtocolViolation ErrorCode = "PROTOCOL_VIOLATION"
-	ErrCodeRateLimited       ErrorCode = "RATE_LIMITED"
+	ErrCodeWorkerStartFailed  ErrorCode = "WORKER_START_FAILED"
+	ErrCodeWorkerCrash        ErrorCode = "WORKER_CRASH"
+	ErrCodeWorkerTimeout      ErrorCode = "WORKER_TIMEOUT"
+	ErrCodeWorkerOOM          ErrorCode = "WORKER_OOM"
+	ErrCodeWorkerSIGKILL      ErrorCode = "PROCESS_SIGKILL"
+	ErrCodeInvalidMessage     ErrorCode = "INVALID_MESSAGE"
+	ErrCodeSessionNotFound    ErrorCode = "SESSION_NOT_FOUND"
+	ErrCodeSessionExpired     ErrorCode = "SESSION_EXPIRED"
+	ErrCodeSessionTerminated  ErrorCode = "SESSION_TERMINATED"
+	ErrCodeSessionInvalidated ErrorCode = "SESSION_INVALIDATED"
+	ErrCodeSessionBusy        ErrorCode = "SESSION_BUSY"
+	ErrCodeUnauthorized       ErrorCode = "UNAUTHORIZED"
+	ErrCodeAuthRequired       ErrorCode = "AUTH_REQUIRED"
+	ErrCodeInternalError      ErrorCode = "INTERNAL_ERROR"
+	ErrCodeProtocolViolation  ErrorCode = "PROTOCOL_VIOLATION"
+	ErrCodeVersionMismatch    ErrorCode = "VERSION_MISMATCH"
+	ErrCodeConfigInvalid      ErrorCode = "CONFIG_INVALID"
+	ErrCodeRateLimited        ErrorCode = "RATE_LIMITED"
+	ErrCodeGatewayOverload    ErrorCode = "GATEWAY_OVERLOAD"
+	ErrCodeExecutionTimeout   ErrorCode = "EXECUTION_TIMEOUT"
+	ErrCodeReconnectRequired  ErrorCode = "RECONNECT_REQUIRED"
+	ErrCodeWorkerOutputLimit  ErrorCode = "WORKER_OUTPUT_LIMIT"
 )
 
 // Envelope is the unified AEP v1 message envelope, shared by both client→gateway and gateway→client.
@@ -59,6 +70,10 @@ type Envelope struct {
 	SessionID string   `json:"session_id"`
 	Timestamp int64    `json:"timestamp"`
 	Event     Event    `json:"event"`
+	// OwnerID is the authenticated user who owns this envelope.
+	// Set by the gateway at init time and used for ownership validation.
+	// Not serialized over the wire.
+	OwnerID string `json:"-"`
 }
 
 // Event wraps a kind and its data payload.

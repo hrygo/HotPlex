@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -386,18 +385,6 @@ func envFromData(data map[string]any) *events.Envelope {
 		Timestamp: time.Now().UnixMilli(),
 		Event:     events.Event{Type: Init, Data: data},
 	}
-}
-
-// initDataFromMap builds an InitData from a raw map.
-func initDataFromMap(t *testing.T, data map[string]any) InitData {
-	t.Helper()
-	raw, err := json.Marshal(data)
-	require.NoError(t, err)
-	var env events.Envelope
-	require.NoError(t, json.Unmarshal(raw, &env))
-	initData, err := ValidateInit(&env)
-	require.NoError(t, err)
-	return initData
 }
 
 // ─── AEP Encode/Decode ────────────────────────────────────────────────────────

@@ -20,8 +20,14 @@ type InitData struct {
 	Version    string            `json:"version"`
 	WorkerType worker.WorkerType `json:"worker_type"`
 	SessionID  string            `json:"session_id,omitempty"`
+	Auth       InitAuth          `json:"auth,omitempty"`
 	Config     InitConfig        `json:"config,omitempty"`
 	ClientCaps ClientCaps        `json:"client_caps,omitempty"`
+}
+
+// InitAuth carries authentication data embedded in the init envelope.
+type InitAuth struct {
+	Token string `json:"token,omitempty"`
 }
 
 // InitConfig carries per-session configuration.
@@ -59,6 +65,8 @@ type ServerCaps struct {
 	SupportsToolCall bool              `json:"supports_tool_call"`
 	SupportsPing     bool              `json:"supports_ping"`
 	MaxFrameSize     int64             `json:"max_frame_size"`
+	MaxTurns        int               `json:"max_turns,omitempty"` // 0 = unlimited
+	Modalities       []string          `json:"modalities,omitempty"` // e.g. "text", "code"
 	Tools            []string          `json:"tools,omitempty"`
 }
 
@@ -73,7 +81,7 @@ func (e *InitError) Error() string {
 }
 
 // ErrInitVersionMismatch is returned when the client protocol version is incompatible.
-var ErrInitVersionMismatch = &InitError{Code: events.ErrCodeProtocolViolation, Message: "version mismatch"}
+var ErrInitVersionMismatch = &InitError{Code: events.ErrCodeVersionMismatch, Message: "version mismatch"}
 
 // ErrInitCapacityExceeded is returned when the server cannot accept new sessions.
 var ErrInitCapacityExceeded = &InitError{Code: events.ErrCodeRateLimited, Message: "capacity exceeded"}
@@ -127,7 +135,7 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 		return InitData{}, &InitError{Code: events.ErrCodeInvalidMessage, Message: "init: version required"}
 	}
 	if version != events.Version {
-		return InitData{}, &InitError{Code: events.ErrCodeProtocolViolation,
+		return InitData{}, &InitError{Code: events.ErrCodeVersionMismatch,
 			Message: "init: unsupported version " + version}
 	}
 
@@ -139,16 +147,52 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 
 	sessionID, _ := data["session_id"].(string)
 
+	// Extract auth token (optional; required in production).
+	var auth InitAuth
+	if authData, ok := data["auth"].(map[string]any); ok {
+		if token, ok := authData["token"].(string); ok {
+			auth.Token = token
+		}
+	}
+
+	// Extract InitConfig (AllowedTools, Model, SystemPrompt, etc.).
+	cfg := InitConfig{}
+	if cfgData, ok := data["config"].(map[string]any); ok {
+		if model, ok := cfgData["model"].(string); ok {
+			cfg.Model = model
+		}
+		if sysPrompt, ok := cfgData["system_prompt"].(string); ok {
+			cfg.SystemPrompt = sysPrompt
+		}
+		if allowedTools, ok := cfgData["allowed_tools"].([]any); ok {
+			for _, t := range allowedTools {
+				if s, ok := t.(string); ok {
+					cfg.AllowedTools = append(cfg.AllowedTools, s)
+				}
+			}
+		}
+		if disallowedTools, ok := cfgData["disallowed_tools"].([]any); ok {
+			for _, t := range disallowedTools {
+				if s, ok := t.(string); ok {
+					cfg.DisallowedTools = append(cfg.DisallowedTools, s)
+				}
+			}
+		}
+		if maxTurns, ok := cfgData["max_turns"].(float64); ok {
+			cfg.MaxTurns = int(maxTurns)
+		}
+		if workDir, ok := cfgData["work_dir"].(string); ok {
+			cfg.WorkDir = workDir
+		}
+	}
+
 	return InitData{
 		Version:    version,
 		WorkerType: worker.WorkerType(wt),
 		SessionID:  sessionID,
+		Auth:       auth,
+		Config:     cfg,
 	}, nil
-}
-
-// Seq returns the next sequence number for a session, assigning it to env.
-func AssignSeq(seqGen *SeqGen, env *events.Envelope) {
-	env.Seq = seqGen.Next(env.SessionID)
 }
 
 // DefaultServerCaps returns a ServerCaps with default values.
@@ -161,6 +205,8 @@ func DefaultServerCaps(wt worker.WorkerType) ServerCaps {
 		SupportsToolCall: true,
 		SupportsPing:     true,
 		MaxFrameSize:     32 * 1024,
+		MaxTurns:        0,   // unlimited by default
+		Modalities:       []string{"text", "code"},
 		Tools:            nil,
 	}
 }
@@ -179,12 +225,4 @@ func BackoffDuration(attempt int) time.Duration {
 		return max
 	}
 	return d
-}
-
-// IsSessionRecoverable returns true if a session in state can be resumed.
-func IsSessionRecoverable(state events.SessionState) bool {
-	return state == events.StateCreated ||
-		state == events.StateRunning ||
-		state == events.StateIdle ||
-		state == events.StateTerminated
 }

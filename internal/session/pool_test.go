@@ -96,8 +96,8 @@ func TestPoolRelease_UserCountGoesToZero(t *testing.T) {
 
 	pool := NewPoolManager(nil, 10, 3)
 
-	pool.Acquire("user1")
-	pool.Acquire("user1")
+	require.NoError(t, pool.Acquire("user1"))
+	require.NoError(t, pool.Acquire("user1"))
 	pool.Release("user1")
 	pool.Release("user1")
 
@@ -132,10 +132,10 @@ func TestPoolStats_MultiUser(t *testing.T) {
 
 	pool := NewPoolManager(nil, 100, 5)
 
-	pool.Acquire("user1")
-	pool.Acquire("user1")
-	pool.Acquire("user2")
-	pool.Acquire("user3")
+	require.NoError(t, pool.Acquire("user1"))
+	require.NoError(t, pool.Acquire("user1"))
+	require.NoError(t, pool.Acquire("user2"))
+	require.NoError(t, pool.Acquire("user3"))
 
 	total, _, users := pool.Stats()
 	require.Equal(t, 4, total)
