@@ -745,6 +745,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string) {
 	}
 	if exitCode != 0 {
 		b.log.Warn("gateway: worker exited with non-zero code, sending crash done", "session_id", sessionID, "exit_code", exitCode)
+		metrics.WorkerCrashesTotal.WithLabelValues(string(w.Type()), fmt.Sprintf("%d", exitCode)).Inc()
 		crashDone := events.NewEnvelope(aep.NewID(), sessionID, b.hub.NextSeq(sessionID), events.Done, events.DoneData{
 			Success: false,
 			Stats:   map[string]any{"crash_exit_code": exitCode},

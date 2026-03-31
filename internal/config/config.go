@@ -185,9 +185,10 @@ type SessionConfig struct {
 
 // PoolConfig holds session pool settings.
 type PoolConfig struct {
-	MinSize        int `mapstructure:"min_size"`
-	MaxSize        int `mapstructure:"max_size"`
-	MaxIdlePerUser int `mapstructure:"max_idle_per_user"`
+	MinSize           int   `mapstructure:"min_size"`
+	MaxSize           int   `mapstructure:"max_size"`
+	MaxIdlePerUser    int   `mapstructure:"max_idle_per_user"`
+	MaxMemoryPerUser  int64 `mapstructure:"max_memory_per_user"` // bytes; 0 = unlimited
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
@@ -234,9 +235,10 @@ func Default() *Config {
 			EventStoreEnabled: true,
 		},
 		Pool: PoolConfig{
-			MinSize:        0,
-			MaxSize:        100,
-			MaxIdlePerUser: 3,
+			MinSize:           0,
+			MaxSize:           100,
+			MaxIdlePerUser:    3,
+			MaxMemoryPerUser:  2 << 30, // 2 GB
 		},
 		Admin: AdminConfig{
 			Enabled:            true,

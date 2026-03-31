@@ -86,7 +86,7 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, store
 		store:    store,
 		msgStore: msgStore,
 		cfg:      cfg,
-		pool:     NewPoolManager(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser),
+		pool:     NewPoolManager(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser, cfg.Pool.MaxMemoryPerUser),
 		sessions: make(map[string]*managedSession),
 	}
 
@@ -304,6 +304,12 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
 		return ErrPoolExhausted
 	}
+	// RES-008: track per-user estimated memory (RLIMIT_AS=512MB per worker).
+	if err := m.pool.AcquireMemory(userID); err != nil {
+		m.pool.Release(userID) // rollback slot quota
+		metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
+		return ErrMemoryExceeded
+	}
 	ms.mu.Lock()
 	ms.worker = w
 	ms.startedAt = time.Now()
@@ -350,6 +356,7 @@ func (m *Manager) DetachWorker(id string) {
 	if hasWorker {
 		metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
 		m.pool.Release(uid)
+		m.pool.ReleaseMemory(uid)
 		m.log.Debug("session: worker detached", "session_id", id)
 	}
 }

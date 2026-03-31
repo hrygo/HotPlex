@@ -15,7 +15,7 @@ func TestPoolAcquire_Release(t *testing.T) {
 	t.Parallel()
 
 	_ = config.Default()
-	pool := NewPoolManager(nil, 10, 3)
+	pool := NewPoolManager(nil, 10, 3, 0)
 
 	// First acquire succeeds
 	err := pool.Acquire("user1")
@@ -36,7 +36,7 @@ func TestPoolAcquire_Release(t *testing.T) {
 func TestPoolAcquire_GlobalLimit(t *testing.T) {
 	t.Parallel()
 
-	pool := NewPoolManager(nil, 2, 10)
+	pool := NewPoolManager(nil, 2, 10, 0)
 
 	require.Nil(t, pool.Acquire("user1"))
 	require.Nil(t, pool.Acquire("user2"))
@@ -53,7 +53,7 @@ func TestPoolAcquire_GlobalLimit(t *testing.T) {
 func TestPoolAcquire_UserQuotaLimit(t *testing.T) {
 	t.Parallel()
 
-	pool := NewPoolManager(nil, 10, 2)
+	pool := NewPoolManager(nil, 10, 2, 0)
 
 	require.Nil(t, pool.Acquire("user1"))
 	require.Nil(t, pool.Acquire("user1"))
@@ -75,7 +75,7 @@ func TestPoolAcquire_Unlimited(t *testing.T) {
 	t.Parallel()
 
 	// maxSize=0 means unlimited
-	pool := NewPoolManager(nil, 0, 0)
+	pool := NewPoolManager(nil, 0, 0, 0)
 
 	for i := 0; i < 100; i++ {
 		err := pool.Acquire("user1")
@@ -90,7 +90,7 @@ func TestPoolAcquire_Unlimited(t *testing.T) {
 func TestPoolRelease_UserCountGoesToZero(t *testing.T) {
 	t.Parallel()
 
-	pool := NewPoolManager(nil, 10, 3)
+	pool := NewPoolManager(nil, 10, 3, 0)
 
 	require.NoError(t, pool.Acquire("user1"))
 	require.NoError(t, pool.Acquire("user1"))
@@ -104,7 +104,7 @@ func TestPoolRelease_UserCountGoesToZero(t *testing.T) {
 func TestPoolRelease_Underflow(t *testing.T) {
 	t.Parallel()
 
-	pool := NewPoolManager(nil, 10, 3)
+	pool := NewPoolManager(nil, 10, 3, 0)
 
 	// Release without acquire should be safe
 	pool.Release("user1")
@@ -126,7 +126,7 @@ func TestPoolError_Error(t *testing.T) {
 func TestPoolStats_MultiUser(t *testing.T) {
 	t.Parallel()
 
-	pool := NewPoolManager(nil, 100, 5)
+	pool := NewPoolManager(nil, 100, 5, 0)
 
 	require.NoError(t, pool.Acquire("user1"))
 	require.NoError(t, pool.Acquire("user1"))
@@ -143,7 +143,7 @@ func TestPoolStats_MultiUser(t *testing.T) {
 func TestPoolRelease_AfterGCTransitions(t *testing.T) {
 	t.Parallel()
 
-	pool := NewPoolManager(nil, 100, 3)
+	pool := NewPoolManager(nil, 100, 3, 0)
 
 	// Simulate multiple sessions per user
 	require.Nil(t, pool.Acquire("user1"))
@@ -181,4 +181,84 @@ func TestIsValidTransition_UnknownState(t *testing.T) {
 	// Unknown state should return false
 	ok := events.IsValidTransition(events.SessionState("unknown"), events.StateRunning)
 	require.False(t, ok)
+}
+
+// ─── Memory tracking tests ─────────────────────────────────────────────────────
+
+func TestPoolAcquireMemory_Limit(t *testing.T) {
+	t.Parallel()
+
+	// 1 GB limit, 512 MB per worker → max 2 workers
+	pool := NewPoolManager(nil, 100, 10, 1<<30)
+
+	require.Nil(t, pool.AcquireMemory("user1"))
+	require.Nil(t, pool.AcquireMemory("user1"))
+
+	// Third worker would exceed 1 GB → rejected
+	err := pool.AcquireMemory("user1")
+	require.NotNil(t, err)
+	pe := err.(*PoolError)
+	require.Equal(t, poolErrKindMemoryExceeded, pe.Kind)
+}
+
+func TestPoolAcquireMemory_Unlimited(t *testing.T) {
+	t.Parallel()
+
+	// maxMemoryPerUser=0 → unlimited
+	pool := NewPoolManager(nil, 100, 10, 0)
+
+	for i := 0; i < 10; i++ {
+		require.Nil(t, pool.AcquireMemory("user1"))
+	}
+}
+
+func TestPoolReleaseMemory(t *testing.T) {
+	t.Parallel()
+
+	pool := NewPoolManager(nil, 100, 10, 1<<30)
+
+	require.Nil(t, pool.AcquireMemory("user1"))
+	require.Nil(t, pool.AcquireMemory("user1"))
+
+	// Release one → should allow a third acquire
+	pool.ReleaseMemory("user1")
+	require.Nil(t, pool.AcquireMemory("user1"))
+
+	pool.ReleaseMemory("user1")
+	pool.ReleaseMemory("user1")
+}
+
+func TestPoolMemory_AcrossUsers(t *testing.T) {
+	t.Parallel()
+
+	// 1 GB limit per user
+	pool := NewPoolManager(nil, 100, 10, 1<<30)
+
+	// user1 uses 1 GB
+	require.Nil(t, pool.AcquireMemory("user1"))
+	require.Nil(t, pool.AcquireMemory("user1"))
+	err := pool.AcquireMemory("user1")
+	require.NotNil(t, err)
+
+	// user2 is independent
+	require.Nil(t, pool.AcquireMemory("user2"))
+	require.Nil(t, pool.AcquireMemory("user2"))
+}
+
+func TestPoolAttachMemory_Integrated(t *testing.T) {
+	t.Parallel()
+
+	// Test that memory is tracked alongside session count.
+	// Simulates: Acquire + AcquireMemory → Release + ReleaseMemory.
+	pool := NewPoolManager(nil, 10, 5, 1<<30)
+
+	require.Nil(t, pool.Acquire("user1"))
+	require.Nil(t, pool.AcquireMemory("user1"))
+
+	require.Equal(t, int64(workerMemoryEstimate), pool.UserMemory("user1"))
+
+	pool.Release("user1")
+	pool.ReleaseMemory("user1")
+
+	require.Equal(t, int64(0), pool.UserMemory("user1"))
 }

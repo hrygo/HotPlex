@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"log/slog"
 
 	"hotplex-worker/internal/metrics"
@@ -14,26 +15,34 @@ type PoolManager struct {
 	mu         sync.Mutex
 	totalCount int
 	userCount  map[string]int // userID → active session count
+	userMemory map[string]int64 // userID → total estimated memory bytes (sum of RLIMIT_AS caps)
 
-	maxSize        int // 0 = unlimited
-	maxIdlePerUser int // 0 = unlimited
+	maxSize           int   // 0 = unlimited
+	maxIdlePerUser    int   // 0 = unlimited
+	maxMemoryPerUser  int64 // bytes; 0 = unlimited
 }
+
+// Default per-worker memory estimate (matches RLIMIT_AS in proc/manager.go).
+const workerMemoryEstimate = 512 * 1024 * 1024 // 512 MB
 
 const (
 	poolErrKindExhausted        = "exhausted"
 	poolErrKindUserQuotaExceeded = "user_quota_exceeded"
+	poolErrKindMemoryExceeded    = "memory_exceeded"
 )
 
 // NewPoolManager creates a PoolManager with the given limits.
-func NewPoolManager(log *slog.Logger, maxSize, maxIdlePerUser int) *PoolManager {
+func NewPoolManager(log *slog.Logger, maxSize, maxIdlePerUser int, maxMemoryPerUser int64) *PoolManager {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &PoolManager{
-		log:            log,
+		log:             log,
 		userCount:      make(map[string]int),
+		userMemory:     make(map[string]int64),
 		maxSize:        maxSize,
 		maxIdlePerUser: maxIdlePerUser,
+		maxMemoryPerUser: maxMemoryPerUser,
 	}
 }
 
@@ -44,6 +53,9 @@ type PoolError struct {
 	Current int
 	Max     int
 }
+
+// ErrMemoryExceeded is returned when a user's estimated memory usage would exceed MaxMemoryPerUser.
+var ErrMemoryExceeded = errors.New("pool: memory exceeded")
 
 func (e *PoolError) Error() string {
 	return "pool: " + e.Kind
@@ -95,4 +107,47 @@ func (p *PoolManager) Stats() (total, maxSize, uniqueUsers int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.totalCount, p.maxSize, len(p.userCount)
+}
+
+// AcquireMemory reserves memory quota for a user.
+// It uses workerMemoryEstimate as the per-worker allocation.
+// Returns nil on success, or ErrUserMemoryExceeded if the per-user limit is exceeded.
+func (p *PoolManager) AcquireMemory(userID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.maxMemoryPerUser > 0 {
+		used := p.userMemory[userID]
+		if used+workerMemoryEstimate > p.maxMemoryPerUser {
+			p.log.Warn("pool: memory quota exceeded", "user_id", userID,
+				"used_mb", used/(1024*1024),
+				"limit_mb", p.maxMemoryPerUser/(1024*1024),
+				"worker_mb", workerMemoryEstimate/(1024*1024))
+			return &PoolError{Kind: poolErrKindMemoryExceeded, UserID: userID}
+		}
+		p.userMemory[userID] = used + workerMemoryEstimate
+	}
+	return nil
+}
+
+// ReleaseMemory frees memory quota for a user.
+func (p *PoolManager) ReleaseMemory(userID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.maxMemoryPerUser > 0 {
+		used := p.userMemory[userID]
+		if used >= workerMemoryEstimate {
+			p.userMemory[userID] = used - workerMemoryEstimate
+		} else {
+			p.userMemory[userID] = 0
+		}
+	}
+}
+
+// UserMemory returns the current estimated memory usage for a user in bytes.
+func (p *PoolManager) UserMemory(userID string) int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.userMemory[userID]
 }

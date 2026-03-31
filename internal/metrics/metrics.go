@@ -101,4 +101,20 @@ var (
 		Name:      "pool_utilization_ratio",
 		Help:      "Current pool utilization as a ratio (0-1) of max concurrent sessions",
 	})
+
+	// WorkerCrashesTotal tracks worker process crashes by type and exit code.
+	// Used to compute crash rate SLO: 1 - crashes/(starts+crashes) >= 0.99.
+	WorkerCrashesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "worker_crashes_total",
+		Help:      "Total worker process crashes by worker_type and exit_code",
+	}, []string{"worker_type", "exit_code"})
+
+	// WorkerMemoryBytes tracks estimated memory usage per worker type (set to RLIMIT_AS cap).
+	// Actual RSS should be scraped via node_exporter on the worker host.
+	WorkerMemoryBytes = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "hotplex",
+		Name:      "worker_memory_bytes",
+		Help:      "Estimated worker memory by worker_type (set to RLIMIT_AS limit per active worker)",
+	}, []string{"worker_type"})
 )
