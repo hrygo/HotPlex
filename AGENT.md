@@ -68,6 +68,8 @@ go mod tidy                # 清理依赖
 5 状态：`CREATED → RUNNING ↔ IDLE → TERMINATED → DELETED`
 状态转换和 input 处理**必须在同一互斥锁内完成**。
 
+> 详细状态机、TransitionWithInput、GC 策略见 `.claude/rules/session.md`
+
 ## Worker 适配差异（摘要）
 
 | Worker | CLI / Transport | 关键差异 |
@@ -83,12 +85,16 @@ go mod tidy                # 清理依赖
 - goroutine 必须有 shutdown 路径（ctx cancel / close / WaitGroup）
 - SQLite 写入通过**单写 goroutine** 串行化（WAL mode）
 
+> 详细 mutex 规范、PoolManager 配额、GC shutdown 路径见 `.claude/rules/session.md`
+
 ## 编码风格（详细规则）
 
 > 详细规则见 `.claude/rules/` 下的模块化文件
 
-- `.claude/rules/golang-style.md` — Uber Go Style Guide 完整规则
+- `.claude/rules/golang.md` — Go 通用规范（合并 Uber Go Style + Go 1.26 特性）
+- `.claude/rules/aep.md` — AEP v1 协议规范（编解码/消息路由/Backpressure/Seq 分配）
+- `.claude/rules/security.md` — 安全规范（JWT/SSRF/Env 隔离/命令白名单/AllowedTools）
+- `.claude/rules/session.md` — Session 规范（5 状态机/原子性/SESSION_BUSY/GC/mutex）
 - `.claude/rules/testing.md` — 测试规范（test table、`testify/require`）
-- `.claude/rules/worker-proc.md` — 进程管理规范（PGID 隔离、分层终止）
-
-<!-- maintainer notes: Go 1.26 特性说明见 .agent/rules/go126.md -->
+- `.claude/rules/worker-proc.md` — 进程管理规范（PGID 隔离/分层终止/output 限制）
+- `.claude/rules/metrics.md` — 可观测性规范（Prometheus 命名/OTel Span/SLO）
