@@ -2,30 +2,39 @@ package claudecode
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"hotplex-worker/internal/aep"
+	"hotplex-worker/internal/worker"
 	"hotplex-worker/internal/worker/base"
 	"hotplex-worker/internal/worker/proc"
-
-	"hotplex-worker/internal/worker"
 	"hotplex-worker/pkg/events"
 )
 
 // Compile-time interface compliance checks.
-var (
-	_ worker.Worker = (*Worker)(nil)
-)
+var _ worker.Worker = (*Worker)(nil)
 
 // Env whitelist for Claude Code worker.
 var claudeCodeEnvWhitelist = []string{
 	"HOME", "USER", "SHELL", "PATH", "TERM",
 	"LANG", "LC_ALL", "PWD",
+	// Claude Code CLI vars (兼容前缀)
 	"CLAUDE_API_KEY", "CLAUDE_MODEL", "CLAUDE_BASE_URL",
 	"CLAUDE_CODE_MODE", "CLAUDE_DISABLE_AUTO_PERMISSIONS",
+	// Anthropic SDK vars (部分用户直接设置这些)
+	"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+	"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BEDROCK_BASE_URL",
+	"ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_FOUNDRY_BASE_URL",
+	// 安全配置
+	"BASH_MAX_TIMEOUT_MS", "BASH_MAX_OUTPUT_LENGTH",
+	"MAX_THINKING_TOKENS", "MAX_MCP_OUTPUT_TOKENS",
+	"MCP_TIMEOUT", "MCP_TOOL_TIMEOUT",
 }
 
 // Default session store directory.
@@ -34,9 +43,19 @@ const defaultSessionStoreDir = ".claude/projects"
 // Worker implements the Claude Code worker adapter.
 type Worker struct {
 	*base.BaseWorker
+
 	sessionID string
-	userID    string
-	started   bool
+
+	// Protocol layers
+	parser  *Parser
+	mapper  *Mapper
+	control *ControlHandler
+
+	// Goroutine lifecycle
+	cancel context.CancelFunc
+
+	// Seq generation (atomic, no mutex needed)
+	seq atomic.Int64
 }
 
 // New creates a new Claude Code worker.
@@ -58,54 +77,132 @@ func (w *Worker) SessionStoreDir() string { return defaultSessionStoreDir }
 func (w *Worker) MaxTurns() int           { return 0 }
 func (w *Worker) Modalities() []string    { return []string{"text", "code", "image"} }
 
-// ─── Worker ─────────────────────────────────────────────────────────────────
+// ─── Worker Lifecycle ─────────────────────────────────────────────────────────
 
 func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.Mu.Lock()
 	defer w.Mu.Unlock()
+	return w.startLocked(ctx, session, false)
+}
 
-	if w.Proc != nil {
+func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
+	return w.startLocked(ctx, session, true)
+}
+
+func (w *Worker) startLocked(ctx context.Context, session worker.SessionInfo, resume bool) error {
+	if w.BaseWorker.Proc != nil {
 		return fmt.Errorf("claudecode: already started")
 	}
 
-	// Build command arguments.
+	args := w.buildCLIArgs(session, resume)
+	env := base.BuildEnv(session, claudeCodeEnvWhitelist, "claude-code")
+
+	w.BaseWorker.Proc = proc.New(proc.Opts{
+		Logger:       w.BaseWorker.Log,
+		AllowedTools: session.AllowedTools,
+	})
+
+	stdin, _, _, err := w.BaseWorker.Proc.Start(ctx, "claude", args, env, session.ProjectDir)
+	if err != nil {
+		w.BaseWorker.Proc = nil
+		return fmt.Errorf("claudecode: start: %w", err)
+	}
+
+	childCtx, cancel := context.WithCancel(ctx)
+	w.cancel = cancel
+
+	w.sessionID = session.SessionID
+	w.seq.Store(0)
+
+	w.parser = NewParser(w.BaseWorker.Log)
+	w.mapper = NewMapper(w.BaseWorker.Log, session.SessionID, w.nextSeq)
+	w.control = NewControlHandler(w.BaseWorker.Log, stdin)
+
+	w.SetConnLocked(base.NewConn(w.BaseWorker.Log, stdin, session.UserID, session.SessionID))
+
+	w.BaseWorker.StartTime = time.Now()
+	w.BaseWorker.SetLastIO(w.BaseWorker.StartTime)
+
+	go w.readOutput(childCtx)
+	return nil
+}
+
+// buildCLIArgs constructs the Claude Code CLI argument list.
+func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) []string {
 	args := []string{
 		"--print",
-		"--session-id", session.SessionID,
+		"--verbose", // Required for stream-json mode
+		"--output-format", "stream-json",
+		"--input-format", "stream-json",
+	}
+
+	// --continue: resume latest session in current dir (no --session-id)
+	if session.ContinueSession {
+		args = append(args, "--continue")
+	} else {
+		args = append(args, "--session-id", session.SessionID)
+	}
+
+	if resume {
+		args = append(args, "--resume")
+		if session.ForkSession {
+			args = append(args, "--fork-session")
+		}
+		if session.ResumeSessionAt != "" {
+			args = append(args, "--resume-session-at", session.ResumeSessionAt)
+		}
+	}
+	if session.PermissionMode != "" {
+		args = append(args, "--permission-mode", session.PermissionMode)
+	}
+	if session.SkipPermissions {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+	if len(session.DisallowedTools) > 0 {
+		args = append(args, "--disallowed-tools", joinTools(session.DisallowedTools))
 	}
 	if len(session.AllowedModels) > 0 {
 		args = append(args, "--model", session.AllowedModels[0])
 	}
-
-	// Build environment.
-	env := base.BuildEnv(session, claudeCodeEnvWhitelist, "claude-code")
-
-	// Create process manager.
-	w.Proc = proc.New(proc.Opts{
-		Logger:       w.Log,
-		AllowedTools: session.AllowedTools,
-	})
-
-	// Start the process.
-	stdin, _, _, err := w.Proc.Start(ctx, "claude", args, env, session.ProjectDir)
-	if err != nil {
-		w.Proc = nil
-		return fmt.Errorf("claudecode: start: %w", err)
+	if len(session.AllowedTools) > 0 {
+		args = append(args, "--allowed-tools", joinTools(session.AllowedTools))
+	}
+	if session.SystemPromptReplace != "" {
+		// --system-prompt replaces the default system prompt entirely
+		args = append(args, "--system-prompt", session.SystemPromptReplace)
+	} else if session.SystemPrompt != "" {
+		// --append-system-prompt appends to the existing system prompt
+		args = append(args, "--append-system-prompt", session.SystemPrompt)
+	}
+	if session.MCPConfig != "" {
+		args = append(args, "--mcp-config", session.MCPConfig)
+		if session.StrictMCPConfig {
+			args = append(args, "--strict-mcp-config")
+		}
+	}
+	if session.MaxTurns > 0 {
+		args = append(args, "--max-turns", fmt.Sprintf("%d", session.MaxTurns))
+	}
+	if session.Bare {
+		args = append(args, "--bare")
+	}
+	for _, dir := range session.AllowedDirs {
+		args = append(args, "--add-dir", dir)
+	}
+	if session.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%f", session.MaxBudgetUSD))
+	}
+	if session.JSONSchema != "" {
+		args = append(args, "--json-schema", session.JSONSchema)
+	}
+	if session.IncludeHookEvents {
+		args = append(args, "--include-hook-events")
+	}
+	if session.IncludePartialMessages {
+		args = append(args, "--include-partial-messages")
 	}
 
-	// Create session connection (caller holds w.Mu).
-	w.userID = session.UserID
-	w.sessionID = session.SessionID
-	w.SetConnLocked(base.NewConn(w.Log, stdin, session.UserID, session.SessionID))
-
-	w.StartTime = time.Now()
-	w.SetLastIO(w.StartTime)
-
-	// Start output reader goroutine.
-	go w.readOutput()
-
-	w.started = true
-	return nil
+	return args
 }
 
 func (w *Worker) Input(ctx context.Context, content string, metadata map[string]any) error {
@@ -114,6 +211,24 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return fmt.Errorf("claudecode: not started")
 	}
 
+	// Check if this is a permission response
+	if metadata != nil {
+		if permResp, ok := metadata["permission_response"].(map[string]any); ok {
+			reqID, _ := permResp["request_id"].(string)
+			allowed, _ := permResp["allowed"].(bool)
+			reason, _ := permResp["reason"].(string)
+
+			// Send permission response to Claude Code
+			if err := w.control.SendPermissionResponse(reqID, allowed, reason); err != nil {
+				return fmt.Errorf("claudecode: permission response: %w", err)
+			}
+
+			w.SetLastIO(time.Now())
+			return nil
+		}
+	}
+
+	// Normal input
 	msg := events.NewEnvelope(
 		aep.NewID(),
 		w.sessionID,
@@ -133,73 +248,30 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	return nil
 }
 
-func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
-	w.Mu.Lock()
-	defer w.Mu.Unlock()
-
-	if w.Proc != nil {
-		return fmt.Errorf("claudecode: already started")
+func (w *Worker) Terminate(ctx context.Context) error {
+	// Cancel goroutines first
+	if w.cancel != nil {
+		w.cancel()
 	}
 
-	// Build command arguments for resume.
-	args := []string{
-		"--print",
-		"--resume",
-		"--session-id", session.SessionID,
-	}
-	if len(session.AllowedModels) > 0 {
-		args = append(args, "--model", session.AllowedModels[0])
-	}
-
-	// Build environment.
-	env := base.BuildEnv(session, claudeCodeEnvWhitelist, "claude-code")
-
-	// Create process manager.
-	w.Proc = proc.New(proc.Opts{
-		Logger:       w.Log,
-		AllowedTools: session.AllowedTools,
-	})
-
-	// Start the process.
-	stdin, _, _, err := w.Proc.Start(ctx, "claude", args, env, session.ProjectDir)
-	if err != nil {
-		w.Proc = nil
-		return fmt.Errorf("claudecode: resume: %w", err)
-	}
-
-	// Create session connection.
-	w.userID = session.UserID
-	w.sessionID = session.SessionID
-	w.SetConnLocked(base.NewConn(w.Log, stdin, session.UserID, session.SessionID))
-
-	w.StartTime = time.Now()
-	w.SetLastIO(w.StartTime)
-
-	// Start output reader goroutine.
-	go w.readOutput()
-
-	w.started = true
-	return nil
+	return w.BaseWorker.Terminate(ctx)
 }
 
-// Conn returns the session connection.
 func (w *Worker) Conn() worker.SessionConn {
 	return w.BaseWorker.Conn()
 }
 
-// Health returns a snapshot of the worker's runtime health.
 func (w *Worker) Health() worker.WorkerHealth {
 	return w.BaseWorker.Health(worker.TypeClaudeCode)
 }
 
-// LastIO returns the time of the last I/O activity.
 func (w *Worker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }
 
 // ─── Internal ────────────────────────────────────────────────────────────────
 
-func (w *Worker) readOutput() {
+func (w *Worker) readOutput(ctx context.Context) {
 	defer func() {
 		if c := w.BaseWorker.Conn(); c != nil {
 			c.Close()
@@ -207,19 +279,26 @@ func (w *Worker) readOutput() {
 	}()
 
 	w.Mu.Lock()
-	proc := w.Proc
+	proc := w.BaseWorker.Proc
 	w.Mu.Unlock()
+
 	if proc == nil {
 		return
 	}
 
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		line, err := proc.ReadLine()
 		if err != nil {
 			if err == io.EOF {
 				return
 			}
-			w.Log.Error("claudecode: read line", "error", err)
+			w.BaseWorker.Log.Error("claudecode: read line", "error", err)
 			return
 		}
 
@@ -227,25 +306,97 @@ func (w *Worker) readOutput() {
 			continue
 		}
 
-		env, err := aep.DecodeLine([]byte(line))
+		// Parse SDK message
+		workerEvents, err := w.parser.ParseLine(line)
 		if err != nil {
-			w.Log.Warn("claudecode: decode line", "error", err, "line", line)
+			w.BaseWorker.Log.Warn("claudecode: parse line", "error", err, "line", line)
 			continue
 		}
 
 		w.SetLastIO(time.Now())
 
-		conn := w.BaseWorker.Conn()
-		if conn == nil {
-			return
-		}
+		// Map to AEP envelopes
+		for _, evt := range workerEvents {
+			switch evt.Type {
+			case EventInterrupt:
+				// Claude Code sent an interrupt — terminate gracefully.
+				// Call BaseWorker.Terminate directly; no goroutine needed since
+				// Terminate is not blocking and readOutput is already exiting.
+				w.BaseWorker.Log.Info("claudecode: received interrupt, terminating")
+				_ = w.BaseWorker.Terminate(context.Background())
+				return
 
-		if bc, ok := conn.(*base.Conn); ok {
-			if !bc.TrySend(env) {
-				w.Log.Warn("claudecode: recv channel full, dropping message")
+			case EventControl:
+				if permReq, ok := evt.Payload.(*PermissionRequestPayload); ok {
+					env := w.mapPermissionRequest(permReq)
+					if env != nil {
+						w.trySend(env)
+					}
+				}
+				continue
+
+			default:
+				// Normal event mapping
+				envs, err := w.mapper.Map(evt)
+				if err != nil {
+					w.BaseWorker.Log.Warn("claudecode: map event", "error", err)
+					continue
+				}
+				if len(envs) == 0 {
+					continue // Internal event, skip
+				}
+				for _, env := range envs {
+					w.trySend(env)
+				}
 			}
 		}
 	}
+}
+
+// mapPermissionRequest converts a permission request to AEP event.
+func (w *Worker) mapPermissionRequest(req *PermissionRequestPayload) *events.Envelope {
+	args := []string{}
+	if req.Input != nil {
+		if s, err := json.Marshal(req.Input); err == nil {
+			args = []string{string(s)}
+		}
+	}
+	return events.NewEnvelope(
+		aep.NewID(),
+		w.sessionID,
+		w.nextSeq(),
+		events.PermissionRequest,
+		events.PermissionRequestData{
+			ID:          req.RequestID,
+			ToolName:    req.ToolName,
+			Description: req.ToolName,
+			Args:        args,
+		},
+	)
+}
+
+// trySend non-blocking sends an envelope to the connection.
+func (w *Worker) trySend(env *events.Envelope) {
+	conn := w.BaseWorker.Conn()
+	if conn == nil {
+		return
+	}
+
+	if bc, ok := conn.(*base.Conn); ok {
+		if !bc.TrySend(env) {
+			w.BaseWorker.Log.Warn("claudecode: recv channel full, dropping message")
+		}
+	}
+}
+
+// nextSeq generates the next sequence number.
+func (w *Worker) nextSeq() int64 {
+	return w.seq.Add(1)
+}
+
+// joinTools joins tool names with comma.
+func joinTools(tools []string) string {
+	return strings.Join(tools, ",")
 }
 
 // ─── Init ────────────────────────────────────────────────────────────────────
@@ -254,4 +405,31 @@ func init() {
 	worker.Register(worker.TypeClaudeCode, func() (worker.Worker, error) {
 		return &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}, nil
 	})
+}
+
+// ─── Session ID Compatibility ───────────────────────────────────────────────────
+
+const (
+	// csePrefix is the v2 infrastructure session ID prefix.
+	csePrefix = "cse_"
+	// sessionPrefix is the v1-compatible session ID prefix.
+	sessionPrefix = "session_"
+)
+
+// ToCompatSessionID converts a v2 infrastructure session ID (cse_*) to
+// the v1-compatible format (session_*). Non-cse IDs are returned unchanged.
+func ToCompatSessionID(id string) string {
+	if strings.HasPrefix(id, csePrefix) {
+		return sessionPrefix + id[len(csePrefix):]
+	}
+	return id
+}
+
+// ToInfraSessionID converts a v1-compatible session ID (session_*) to
+// the v2 infrastructure format (cse_*). Non-session IDs are returned unchanged.
+func ToInfraSessionID(id string) string {
+	if strings.HasPrefix(id, sessionPrefix) {
+		return csePrefix + id[len(sessionPrefix):]
+	}
+	return id
 }

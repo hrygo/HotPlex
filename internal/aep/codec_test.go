@@ -1,6 +1,7 @@
 package aep
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -331,4 +332,133 @@ func TestSeqKey(t *testing.T) {
 
 	key := SeqKey("sess_123", "evt_abc")
 	require.Equal(t, "sess_123:evt_abc", key)
+}
+
+func TestEscapeJSTerminators(t *testing.T) {
+	t.Parallel()
+
+	// Use rune literals (\u2028 / \u2029) so Go creates actual Unicode codepoints.
+	tests := []struct {
+		name  string
+		input string // Go rune literals produce real U+2028/U+2029 bytes
+		want  string
+	}{
+		{
+			name:  "no terminators",
+			input: `{"text":"hello world"}`,
+			want:  `{"text":"hello world"}`,
+		},
+		{
+			name:  "line separator U+2028",
+			input: "text\u2028end", // actual U+2028 byte
+			want:  "text\\u2028end",
+		},
+		{
+			name:  "paragraph separator U+2029",
+			input: "text\u2029end", // actual U+2029 byte
+			want:  "text\\u2029end",
+		},
+		{
+			name:  "both terminators",
+			input: "a\u2028b\u2029c",
+			want:  "a\\u2028b\\u2029c",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := string(escapeJSTerminators([]byte(tt.input)))
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestEncode_NDJSONSafe(t *testing.T) {
+	t.Parallel()
+
+	// Content containing U+2028 (JS line separator) in the message.
+	// Claude Code might emit this in thinking/rendering content.
+	env := events.NewEnvelope(
+		NewID(),
+		"sess_ndjson",
+		1,
+		events.MessageDelta,
+		map[string]any{"content": "line1\u2028line2"}, // U+2028 embedded
+	)
+
+	var sb strings.Builder
+	err := Encode(&sb, env)
+	require.NoError(t, err)
+
+	// Output must NOT contain raw U+2028 bytes — they must be \u2028 escaped.
+	output := sb.String()
+	require.NotContains(t, output, "\xe2\x80\xa8", "raw U+2028 must not appear in output")
+	require.Contains(t, output, `\u2028`, "U+2028 must be escaped as \\u2028")
+
+	// Must still decode correctly.
+	decoded, err := Decode(strings.NewReader(output))
+	require.NoError(t, err)
+	require.Equal(t, env.SessionID, decoded.SessionID)
+}
+
+func TestEncodeChunk_NDJSONSafe(t *testing.T) {
+	t.Parallel()
+
+	env := events.NewEnvelope(
+		NewID(),
+		"sess_chunk_ndjson",
+		1,
+		events.MessageDelta,
+		map[string]any{"content": "para1\u2029para2"}, // U+2029 embedded
+	)
+
+	var sb strings.Builder
+	err := EncodeChunk(&sb, env)
+	require.NoError(t, err)
+
+	output := sb.String()
+	require.NotContains(t, output, "\xe2\x80\xa9", "raw U+2029 must not appear in output")
+	require.Contains(t, output, `\u2029`, "U+2029 must be escaped as \\u2029")
+
+	decoded, err := Decode(strings.NewReader(output))
+	require.NoError(t, err)
+	require.Equal(t, env.SessionID, decoded.SessionID)
+}
+
+func TestEncodeJSON_NDJSONSafe(t *testing.T) {
+	t.Parallel()
+
+	// Use actual Unicode codepoints (rune literals) so json.Marshal processes them.
+	env := events.NewEnvelope(
+		NewID(),
+		"sess_json_ndjson",
+		1,
+		events.Input,
+		events.InputData{Content: "test\u2028with\u2029separators"},
+	)
+
+	data, err := EncodeJSON(env)
+	require.NoError(t, err)
+
+	// Verify: raw UTF-8 bytes for U+2028/U+2029 must not appear.
+	require.NotContains(t, data, []byte{0xE2, 0x80, 0xA8})
+	require.NotContains(t, data, []byte{0xE2, 0x80, 0xA9})
+
+	// Verify: output is valid JSON and content round-trips correctly.
+	var decoded struct {
+		Version   string `json:"version"`
+		Event     struct {
+			Type string `json:"type"`
+			Data struct {
+				Content string `json:"content"`
+			} `json:"data"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Equal(t, "input", decoded.Event.Type)
+	// The U+2028 and U+2029 codepoints round-trip through JSON marshaling.
+	require.Contains(t, decoded.Event.Data.Content, "\u2028")
+	require.Contains(t, decoded.Event.Data.Content, "\u2029")
 }

@@ -170,3 +170,313 @@ func TestClaudeCodeWorker_DoubleStart(t *testing.T) {
 
 	_ = w.Kill()
 }
+
+func TestBuildCLIArgs_AllOptions(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:           "test-session",
+		UserID:              "test-user",
+		ProjectDir:          "/tmp",
+		AllowedModels:       []string{"claude-sonnet-4-6"},
+		AllowedTools:        []string{"Read", "Write", "Bash"},
+		DisallowedTools:     []string{"WebSearch", "Edit"},
+		PermissionMode:      "plan",
+		SkipPermissions:    false,
+		SystemPrompt:        "You are a helpful assistant.",
+		SystemPromptReplace: "",
+		MCPConfig:           "/path/to/mcp.json",
+		StrictMCPConfig:     true,
+		ContinueSession:     false,
+		ForkSession:         false,
+		MaxTurns:            10,
+		Bare:                true,
+		AllowedDirs:         []string{"/extra/dir"},
+		MaxBudgetUSD:        0.05,
+		JSONSchema:          "/schemas/output.json",
+		IncludeHookEvents:   true,
+		IncludePartialMessages: true,
+	}
+
+	args := w.buildCLIArgs(session, false)
+
+	require.Contains(t, args, "--print")
+	require.Contains(t, args, "--verbose")
+	require.Contains(t, args, "--output-format", "stream-json")
+	require.Contains(t, args, "--input-format", "stream-json")
+	require.Contains(t, args, "--session-id", "test-session")
+	require.Contains(t, args, "--permission-mode", "plan")
+	require.Contains(t, args, "--disallowed-tools", "WebSearch,Edit")
+	require.Contains(t, args, "--model", "claude-sonnet-4-6")
+	require.Contains(t, args, "--allowed-tools", "Read,Write,Bash")
+	require.Contains(t, args, "--append-system-prompt", "You are a helpful assistant.")
+	require.Contains(t, args, "--mcp-config", "/path/to/mcp.json")
+	require.Contains(t, args, "--strict-mcp-config")
+	require.Contains(t, args, "--max-turns", "10")
+	require.Contains(t, args, "--bare")
+	require.Contains(t, args, "--add-dir", "/extra/dir")
+	require.Contains(t, args, "--max-budget-usd", "0.050000")
+	require.Contains(t, args, "--json-schema", "/schemas/output.json")
+	require.Contains(t, args, "--include-hook-events")
+	require.Contains(t, args, "--include-partial-messages")
+	require.NotContains(t, args, "--resume")
+	require.NotContains(t, args, "--fork-session")
+	require.NotContains(t, args, "--resume-session-at")
+	require.NotContains(t, args, "--dangerously-skip-permissions")
+	require.NotContains(t, args, "--system-prompt") // replace mode not set
+}
+
+func TestBuildCLIArgs_SystemPromptReplace(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:           "test-session",
+		UserID:              "test-user",
+		ProjectDir:          "/tmp",
+		SystemPrompt:        "old prompt",
+		SystemPromptReplace: "completely new system prompt",
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--system-prompt", "completely new system prompt")
+	require.NotContains(t, args, "--append-system-prompt")
+}
+
+func TestBuildCLIArgs_ContinueSession(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:      "should-be-ignored",
+		UserID:         "test-user",
+		ProjectDir:     "/tmp",
+		ContinueSession: true,
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--continue")
+	require.NotContains(t, args, "--session-id")
+	require.NotContains(t, args, "--resume")
+}
+
+func TestBuildCLIArgs_Resume(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID: "resume-session",
+		UserID:    "test-user",
+		ProjectDir: "/tmp",
+	}
+
+	args := w.buildCLIArgs(session, true)
+	require.Contains(t, args, "--resume")
+	require.Contains(t, args, "--session-id", "resume-session")
+}
+
+func TestBuildCLIArgs_ResumeSessionAt(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:       "resume-session",
+		UserID:          "test-user",
+		ProjectDir:      "/tmp",
+		ResumeSessionAt: "msg_abc123",
+	}
+
+	args := w.buildCLIArgs(session, true)
+	require.Contains(t, args, "--resume")
+	require.Contains(t, args, "--resume-session-at", "msg_abc123")
+}
+
+func TestBuildCLIArgs_ForkSession(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:  "fork-session",
+		UserID:     "test-user",
+		ProjectDir: "/tmp",
+		ForkSession: true,
+	}
+
+	args := w.buildCLIArgs(session, true) // resume=true to trigger --fork-session
+	require.Contains(t, args, "--resume")
+	require.Contains(t, args, "--fork-session")
+}
+
+func TestBuildCLIArgs_MaxTurns(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID: "max-turns-session",
+		UserID:    "test-user",
+		ProjectDir: "/tmp",
+		MaxTurns:  5,
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--max-turns", "5")
+}
+
+func TestBuildCLIArgs_MCPConfig(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:       "mcp-session",
+		UserID:          "test-user",
+		ProjectDir:      "/tmp",
+		MCPConfig:       "/etc/mcp.json",
+		StrictMCPConfig: true,
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--mcp-config", "/etc/mcp.json")
+	require.Contains(t, args, "--strict-mcp-config")
+}
+
+func TestBuildCLIArgs_SkipPermissions(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:       "skip-perm-session",
+		UserID:          "test-user",
+		ProjectDir:      "/tmp",
+		SkipPermissions: true,
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--dangerously-skip-permissions")
+	require.NotContains(t, args, "--permission-mode")
+}
+
+func TestBuildCLIArgs_Minimal(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:  "minimal-session",
+		UserID:     "test-user",
+		ProjectDir: "/tmp",
+	}
+
+	args := w.buildCLIArgs(session, false)
+	// Only the required flags (8 tokens total: --print, --verbose, --output-format, stream-json, --input-format, stream-json, --session-id, minimal-session).
+	require.Len(t, args, 8)
+	require.Contains(t, args, "--print")
+	require.Contains(t, args, "--verbose")
+	require.Contains(t, args, "--session-id", "minimal-session")
+}
+
+func TestToCompatSessionID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"cse_v2 format converts to session_", "cse_abc123", "session_abc123"},
+		{"session_v1 format unchanged", "session_xyz789", "session_xyz789"},
+		{"other prefix unchanged", "other_123", "other_123"},
+		{"plain ID unchanged", "plain-id", "plain-id"},
+		{"empty string unchanged", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ToCompatSessionID(tt.id)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestToInfraSessionID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"session_v1 format converts to cse_", "session_abc123", "cse_abc123"},
+		{"cse_v2 format unchanged", "cse_xyz789", "cse_xyz789"},
+		{"other prefix unchanged", "other_123", "other_123"},
+		{"plain ID unchanged", "plain-id", "plain-id"},
+		{"empty string unchanged", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ToInfraSessionID(tt.id)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestBuildCLIArgs_Bare(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:  "bare-session",
+		UserID:     "test-user",
+		ProjectDir:  "/tmp",
+		Bare:       true,
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--bare")
+}
+
+func TestBuildCLIArgs_AllowedDirs(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:   "dirs-session",
+		UserID:      "test-user",
+		ProjectDir:  "/tmp",
+		AllowedDirs: []string{"/project/src", "/project/lib"},
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--add-dir", "/project/src")
+	require.Contains(t, args, "--add-dir", "/project/lib")
+}
+
+func TestBuildCLIArgs_MaxBudgetUSD(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:    "budget-session",
+		UserID:       "test-user",
+		ProjectDir:   "/tmp",
+		MaxBudgetUSD: 0.05,
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--max-budget-usd", "0.050000")
+}
+
+func TestBuildCLIArgs_JSONSchema(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:  "schema-session",
+		UserID:     "test-user",
+		ProjectDir: "/tmp",
+		JSONSchema: "/schemas/output.json",
+	}
+
+	args := w.buildCLIArgs(session, false)
+	require.Contains(t, args, "--json-schema", "/schemas/output.json")
+}

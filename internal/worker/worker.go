@@ -131,10 +131,50 @@ type WorkerHealth struct {
 // SessionInfo contains metadata about a session needed by the worker to start/resume.
 type SessionInfo struct {
 	SessionID     string
-	UserID        string
-	ProjectDir    string
-	Env           map[string]string
-	Args          []string
-	AllowedTools  []string       // tools allowed for this session (from InitConfig.AllowedTools)
-	AllowedModels []string       // models allowed for this session
+	UserID       string
+	ProjectDir   string
+	Env          map[string]string
+	Args         []string
+	AllowedTools  []string // tools allowed for this session (from InitConfig.AllowedTools)
+	AllowedModels []string // models allowed for this session
+
+	// PermissionMode controls how the worker handles permission requests.
+	// Valid values: "default", "plan", "auto-accept".
+	PermissionMode string
+	// SkipPermissions bypasses all permission checks (equivalent to --dangerously-skip-permissions).
+	SkipPermissions bool
+	// DisallowedTools lists tools that the worker should NOT use.
+	DisallowedTools []string
+	// SystemPrompt is appended to the worker's default system prompt (--append-system-prompt).
+	SystemPrompt string
+	// SystemPromptReplace, if non-empty, replaces the default system prompt entirely (--system-prompt).
+	// Takes precedence over SystemPrompt when set.
+	SystemPromptReplace string
+	// MCPConfig is the path to a JSON file with MCP server configuration (--mcp-config).
+	MCPConfig string
+	// StrictMCPConfig restricts MCP servers to only those specified in MCPConfig (--strict-mcp-config).
+	StrictMCPConfig bool
+	// ContinueSession resumes the latest session in the current directory without a session ID.
+	ContinueSession bool
+	// ForkSession, when resuming, creates a new session ID instead of reusing the existing one.
+	ForkSession bool
+	// MaxTurns limits the number of agentic turns in non-interactive mode.
+	MaxTurns int
+	// Bare runs Claude Code in minimal mode, skipping hooks, LSP, and plugin sync.
+	Bare bool
+	// AllowedDirs lists additional directories the worker can access (--add-dir).
+	AllowedDirs []string
+	// MaxBudgetUSD caps API spending per session (--max-budget-usd).
+	MaxBudgetUSD float64
+	// JSONSchema validates structured output against a JSON Schema (--json-schema).
+	JSONSchema string
+	// ResumeSessionAt restores the session up to and including the specified
+	// assistant message ID, discarding later history (--resume-session-at).
+	ResumeSessionAt string
+	// IncludeHookEvents exposes all hook lifecycle events in the output stream
+	// (--include-hook-events).
+	IncludeHookEvents bool
+	// IncludePartialMessages exposes partial message blocks as they arrive
+	// (--include-partial-messages).
+	IncludePartialMessages bool
 }

@@ -1,6 +1,7 @@
 package aep
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,13 +11,23 @@ import (
 	"hotplex-worker/pkg/events"
 )
 
-// Encode writes an Envelope to w as a JSON string followed by a newline.
+// jsLineTerminators holds the UTF-8 encoding of U+2028 and U+2029.
+// These are valid JSON, but invalid JavaScript string literals — NDJSON consumers
+// that parse lines as JS string literals will silently truncate at these codepoints.
+var jsLineTerminators = [...]byte{0xE2, 0x80, 0xA8, 0xE2, 0x80, 0xA9}
+
+// Encode writes an Envelope to w as a newline-delimited JSON record.
+// NDJSON-safe: U+2028 and U+2029 are escaped to prevent JS parsers truncating.
 func Encode(w io.Writer, env *events.Envelope) error {
-	// Always stamp the current version.
 	env.Version = events.Version
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	return enc.Encode(env)
+	data, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("aep: marshal envelope: %w", err)
+	}
+	data = escapeJSTerminators(data)
+	data = append(data, '\n')
+	_, err = w.Write(data)
+	return err
 }
 
 // EncodeChunk is like Encode but for streaming deltas where you want to avoid
@@ -27,9 +38,50 @@ func EncodeChunk(w io.Writer, env *events.Envelope) error {
 	if err != nil {
 		return fmt.Errorf("aep: marshal envelope: %w", err)
 	}
+	data = escapeJSTerminators(data)
 	data = append(data, '\n')
 	_, err = w.Write(data)
 	return err
+}
+
+// NDJSONSpec: https://datatracker.ietf.org/doc/html/rfc7464
+// JS JSON.parse accepts U+2028/U+2029 as valid JSON, but they are NOT valid
+// inside JavaScript string literals. A NDJSON consumer that evaluates lines as JS
+// (e.g. JSON.parse via eval) will silently truncate at these codepoints.
+//
+// escapeJSTerminators converts any raw U+2028/U+2029 bytes already present in
+// the JSON output to the \u2028 / \u2029 escape sequences.
+//
+// NOTE: json.Marshal already emits \u2028 / \u2029 when marshaling Go strings
+// containing those codepoints. This function catches the edge case where the
+// raw UTF-8 bytes somehow survive (e.g. in map[string]any with raw []byte values).
+func escapeJSTerminators(data []byte) []byte {
+	// Fast path: no terminators present
+	if !bytes.Contains(data, jsLineTerminators[:3]) &&
+		!bytes.Contains(data, jsLineTerminators[3:]) {
+		return data
+	}
+	result := make([]byte, 0, len(data)+32)
+	for i := 0; i < len(data); {
+		if i+3 <= len(data) {
+			b0, b1, b2 := data[i], data[i+1], data[i+2]
+			if b0 == 0xE2 && b1 == 0x80 {
+				if b2 == 0xA8 {
+					result = append(result, '\\', 'u', '2', '0', '2', '8')
+					i += 3
+					continue
+				}
+				if b2 == 0xA9 {
+					result = append(result, '\\', 'u', '2', '0', '2', '9')
+					i += 3
+					continue
+				}
+			}
+		}
+		result = append(result, data[i])
+		i++
+	}
+	return result
 }
 
 // Decode reads a single newline-delimited JSON Envelope from r.
@@ -109,9 +161,14 @@ func NewSessionID() string {
 }
 
 // EncodeJSON encodes an envelope to JSON bytes (no trailing newline).
+// NDJSON-safe: U+2028 and U+2029 are escaped.
 func EncodeJSON(env *events.Envelope) ([]byte, error) {
 	env.Version = events.Version
-	return json.Marshal(env)
+	data, err := json.Marshal(env)
+	if err != nil {
+		return nil, fmt.Errorf("aep: marshal envelope: %w", err)
+	}
+	return escapeJSTerminators(data), nil
 }
 
 // MustMarshal is like EncodeJSON but panics on error.
