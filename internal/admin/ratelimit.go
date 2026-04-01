@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// simpleRateLimiter implements a token-bucket rate limiter.
 type simpleRateLimiter struct {
 	tokens     float64
 	maxTokens  float64
@@ -23,7 +22,6 @@ func NewRateLimiter(reqPerSec, burst int) *simpleRateLimiter {
 	}
 }
 
-// Allow returns true if a request is allowed under the rate limit.
 func (r *simpleRateLimiter) Allow() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

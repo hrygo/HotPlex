@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"hotplex-worker/internal/aep"
@@ -198,13 +197,9 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string) {
 	// Wrap Wait() with a 2s timeout to avoid blocking the goroutine if the process
 	// is stuck in an unreported state (e.g. zombie or kernel-level hang).
 	var exitCode int
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		exitCode, _ = w.Wait()
-	})
 	ch := make(chan struct{})
 	go func() {
-		wg.Wait()
+		exitCode, _ = w.Wait()
 		close(ch)
 	}()
 	select {

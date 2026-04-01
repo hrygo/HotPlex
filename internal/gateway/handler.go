@@ -48,52 +48,12 @@ func (h *Handler) Handle(ctx context.Context, env *events.Envelope) error {
 	case events.Control:
 		return h.handleControl(ctx, env)
 	// AEP-011 / AEP-012: pass-through events from worker to all session clients.
-	case events.Reasoning:
-		// AEP-011: reasoning 事件透传
-		if err := h.hub.SendToSession(ctx, env); err != nil {
-			return err
-		}
-		metrics.GatewayEventsTotal.WithLabelValues("reasoning", "s2c").Inc()
-	case events.Step:
-		// AEP-011: step 事件透传
-		if err := h.hub.SendToSession(ctx, env); err != nil {
-			return err
-		}
-		metrics.GatewayEventsTotal.WithLabelValues("step", "s2c").Inc()
-	case events.PermissionRequest:
-		// AEP-011: permission_request 事件透传
-		if err := h.hub.SendToSession(ctx, env); err != nil {
-			return err
-		}
-		metrics.GatewayEventsTotal.WithLabelValues("permission_request", "s2c").Inc()
-	case events.PermissionResponse:
-		// AEP-011: permission_response 事件透传
-		if err := h.hub.SendToSession(ctx, env); err != nil {
-			return err
-		}
-		metrics.GatewayEventsTotal.WithLabelValues("permission_response", "s2c").Inc()
-	case events.Message:
-		// AEP-012: message 完整消息事件透传
-		if err := h.hub.SendToSession(ctx, env); err != nil {
-			return err
-		}
-		metrics.GatewayEventsTotal.WithLabelValues("message", "s2c").Inc()
-	case events.MessageStart:
-		// AEP-012: message.start 事件透传
-		if err := h.hub.SendToSession(ctx, env); err != nil {
-			return err
-		}
-		metrics.GatewayEventsTotal.WithLabelValues("message.start", "s2c").Inc()
-	case events.MessageEnd:
-		// AEP-012: message.end 事件透传
-		if err := h.hub.SendToSession(ctx, env); err != nil {
-			return err
-		}
-		metrics.GatewayEventsTotal.WithLabelValues("message.end", "s2c").Inc()
+	case events.Reasoning, events.Step, events.PermissionRequest, events.PermissionResponse,
+		events.Message, events.MessageStart, events.MessageEnd:
+		return h.passthroughToSession(ctx, env)
 	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown event type: %s", env.Event.Type)
 	}
-	return nil
 }
 
 func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
@@ -146,6 +106,23 @@ func (h *Handler) handlePing(ctx context.Context, env *events.Envelope) error {
 		map[string]any{"state": state},
 	)
 	return h.hub.SendToSession(ctx, reply)
+}
+
+var passthroughMetricLabel = map[events.Kind]string{
+	events.Reasoning:         "reasoning",
+	events.Step:              "step",
+	events.PermissionRequest:  "permission_request",
+	events.PermissionResponse: "permission_response",
+	events.Message:           "message",
+	events.MessageStart:      "message.start",
+	events.MessageEnd:        "message.end",
+}
+
+func (h *Handler) passthroughToSession(ctx context.Context, env *events.Envelope) error {
+	if label, ok := passthroughMetricLabel[env.Event.Type]; ok {
+		metrics.GatewayEventsTotal.WithLabelValues(label, "s2c").Inc()
+	}
+	return h.hub.SendToSession(ctx, env)
 }
 
 // handleControl processes client-originated control messages (terminate, delete).

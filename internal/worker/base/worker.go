@@ -165,6 +165,12 @@ func (w *BaseWorker) SetConn(c *Conn) {
 	w.conn = c
 }
 
+// SetConnLocked sets the session connection without acquiring the mutex.
+// Caller must hold w.Mu.
+func (w *BaseWorker) SetConnLocked(c *Conn) {
+	w.conn = c
+}
+
 // Conn returns the session connection, or nil if not started.
 func (w *BaseWorker) Conn() worker.SessionConn {
 	w.Mu.Lock()

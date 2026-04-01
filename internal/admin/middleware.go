@@ -7,10 +7,8 @@ import (
 	"strings"
 )
 
-// scopeContextKey is the context key for authenticated scopes.
 type scopeContextKey struct{}
 
-// getScopes returns the scopes stored in the request context by Middleware.
 func getScopes(r *http.Request) []string {
 	if scopes, ok := r.Context().Value(scopeContextKey{}).([]string); ok {
 		return scopes
@@ -18,7 +16,6 @@ func getScopes(r *http.Request) []string {
 	return nil
 }
 
-// hasScope reports whether the request has the required scope.
 func hasScope(r *http.Request, required string) bool {
 	return slices.Contains(getScopes(r), required)
 }

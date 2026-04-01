@@ -12,7 +12,6 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "insufficient scope: need stats:read", http.StatusForbidden)
 		return
 	}
-	cfg := a.cfg.Get()
 	total, _, _ := a.sm.Stats()
 	sessions, _ := a.sm.List(r.Context(), 0, 0)
 
@@ -47,7 +46,6 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 			"db_size_mb":     0,
 		},
 	})
-	_ = cfg
 }
 
 func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {

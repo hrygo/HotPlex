@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// logEntry represents a single log entry in the ring buffer.
 type logEntry struct {
 	Time    string `json:"time"`
 	Level   string `json:"level"`
@@ -13,7 +12,6 @@ type logEntry struct {
 	Session string `json:"session_id,omitempty"`
 }
 
-// logRingBuffer is a thread-safe ring buffer for recent log entries.
 type logRingBuffer struct {
 	mu   sync.Mutex
 	ent  []logEntry
@@ -21,12 +19,10 @@ type logRingBuffer struct {
 	n    int // total entries ever added
 }
 
-// newLogRing creates a new ring buffer with the given capacity.
 func newLogRing(cap int) *logRingBuffer {
 	return &logRingBuffer{ent: make([]logEntry, cap)}
 }
 
-// Add adds a new entry to the ring buffer.
 func (r *logRingBuffer) Add(level, msg, sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -40,14 +36,12 @@ func (r *logRingBuffer) Add(level, msg, sessionID string) {
 	r.n++
 }
 
-// Total returns the total number of entries ever added.
 func (r *logRingBuffer) Total() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.n
 }
 
-// Recent returns the most recent entries up to the given limit.
 func (r *logRingBuffer) Recent(limit int) []logEntry {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -69,7 +63,6 @@ func (r *logRingBuffer) Recent(limit int) []logEntry {
 	return out
 }
 
-// LogCollector is the interface for accessing log entries.
 type LogCollector interface {
 	Recent(limit int) []logEntry
 }

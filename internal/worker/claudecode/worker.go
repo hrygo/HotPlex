@@ -93,10 +93,10 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		return fmt.Errorf("claudecode: start: %w", err)
 	}
 
-	// Create session connection.
+	// Create session connection (caller holds w.Mu).
 	w.userID = session.UserID
 	w.sessionID = session.SessionID
-	w.SetConn(base.NewConn(w.Log, stdin, session.UserID, session.SessionID))
+	w.SetConnLocked(base.NewConn(w.Log, stdin, session.UserID, session.SessionID))
 
 	w.StartTime = time.Now()
 	w.SetLastIO(w.StartTime)
@@ -170,7 +170,7 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	// Create session connection.
 	w.userID = session.UserID
 	w.sessionID = session.SessionID
-	w.SetConn(base.NewConn(w.Log, stdin, session.UserID, session.SessionID))
+	w.SetConnLocked(base.NewConn(w.Log, stdin, session.UserID, session.SessionID))
 
 	w.StartTime = time.Now()
 	w.SetLastIO(w.StartTime)
@@ -206,7 +206,9 @@ func (w *Worker) readOutput() {
 		}
 	}()
 
+	w.Mu.Lock()
 	proc := w.Proc
+	w.Mu.Unlock()
 	if proc == nil {
 		return
 	}

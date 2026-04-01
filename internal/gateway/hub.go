@@ -87,6 +87,9 @@ type Hub struct {
 type EnvelopeWithConn struct {
 	Env  *events.Envelope
 	Conn *Conn
+	// afterDrain is called (blocking) by Run after routeMessage finishes processing this item.
+	// Tests use it to synchronize against the drain goroutine.
+	afterDrain func()
 }
 
 // NewHub creates a new Hub.
@@ -183,7 +186,8 @@ func (h *Hub) LeaveSession(sessionID string, conn *Conn) {
 
 // SendToSession delivers a message to all connections subscribed to a session.
 // Control-priority messages bypass the broadcast queue.
-func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope) error {
+// afterDrain functions are called sequentially after the item is routed by Run.
+func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrain ...func()) error {
 	spanCtx, span := tracing.SpanFromContext(ctx).Start(ctx, "hub.send_to_session")
 	defer span.End()
 	span.SetAttributes(
@@ -196,6 +200,11 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope) error {
 	// We skip assignment if seq is already set (eg. by Handler for direct replies).
 	if env.Seq == 0 {
 		env.Seq = h.seqGen.Next(env.SessionID)
+	}
+	// afterDrainCallback is called by Run after the item is routed; nil if not supplied.
+	var afterDrainCallback func()
+	if len(afterDrain) > 0 {
+		afterDrainCallback = afterDrain[0]
 	}
 
 	if env.Priority == events.PriorityControl {
@@ -210,7 +219,7 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope) error {
 	// and send atomic (same as the original code).
 	if isDroppable(env.Event.Type) {
 		select {
-		case h.broadcast <- &EnvelopeWithConn{Env: events.Clone(env)}:
+		case h.broadcast <- &EnvelopeWithConn{Env: events.Clone(env), afterDrain: afterDrainCallback}:
 			return nil
 		default:
 			// Silently drop delta — seq is NOT incremented for dropped events,
@@ -226,7 +235,7 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope) error {
 
 	// Guaranteed delivery path.
 	select {
-	case h.broadcast <- &EnvelopeWithConn{Env: events.Clone(env)}:
+	case h.broadcast <- &EnvelopeWithConn{Env: events.Clone(env), afterDrain: afterDrainCallback}:
 		return nil
 	default:
 		err := errors.New("gateway: broadcast queue full")
@@ -245,8 +254,9 @@ func (h *Hub) sendControlToSession(ctx context.Context, env *events.Envelope) er
 		return nil
 	}
 
+	env = events.Clone(env)
 	for conn := range conns {
-		if err := conn.WriteCtx(ctx, events.Clone(env)); err != nil {
+		if err := conn.WriteCtx(ctx, env); err != nil {
 			h.log.Warn("gateway: send to conn failed", "err", err, "conn", conn.RemoteAddr())
 		}
 	}
@@ -317,6 +327,9 @@ func (h *Hub) Run() {
 			)
 			h.routeMessage(msg)
 			span.End()
+			if msg.afterDrain != nil {
+				msg.afterDrain()
+			}
 		}
 	}
 }
