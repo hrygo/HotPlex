@@ -1,0 +1,122 @@
+# =============================================================================
+# HotPlex Worker Gateway - SLO Definitions
+# =============================================================================
+# Purpose: Define Service Level Objectives using OpenSLO specification
+# Based on: Observability-Design.md §5.2-5.3
+# =============================================================================
+
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: hotplex-session-creation-success-rate
+  displayName: "Session Creation Success Rate"
+  description: >
+    Measures the percentage of successfully created sessions versus failed attempts.
+    Target: 99.5% success rate.
+spec:
+  service: hotplex-gateway
+  sli:
+    thresholdMetric:
+      source: prometheus
+      query: |
+        sum(rate(hotplex_sessions_created_total[5m])) /
+        (sum(rate(hotplex_sessions_created_total[5m])) + sum(rate(hotplex_sessions_create_errors_total[5m])))
+      # Note: Assumes hotplex_sessions_create_errors_total exists for failed sessions
+      # If only total count exists, use: sum(rate(hotplex_sessions_created_total[5m])) - sum(rate(hotplex_sessions_create_errors_total[5m]))
+  objectives:
+    - displayName: "99.5% Success Rate"
+      target: 0.995
+      slice: "status=success"
+  timeWindow:
+    - duration: 30d
+      isRolling: true
+  alerting:
+    name: session-creation-slo-alert
+    descriptions:
+      - "Session creation success rate below target"
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: hotplex-response-latency-p99
+  displayName: "Response Latency P99"
+  description: >
+    Measures the 99th percentile event processing latency.
+    Target: P99 < 5 seconds.
+spec:
+  service: hotplex-gateway
+  sli:
+    thresholdMetric:
+      source: prometheus
+      query: |
+        histogram_quantile(0.99, rate(hotplex_event_duration_seconds_bucket[5m]))
+  objectives:
+    - displayName: "P99 < 5s"
+      target: 5.0
+      op: lt  # Less than operator for latency SLOs
+  timeWindow:
+    - duration: 30d
+      isRolling: true
+  alerting:
+    name: latency-slo-alert
+    descriptions:
+      - "P99 response latency exceeds 5 seconds"
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: hotplex-worker-availability
+  displayName: "Worker Availability"
+  description: >
+    Measures the percentage of active workers versus total (active + crashed).
+    Target: 99% worker availability.
+spec:
+  service: hotplex-gateway
+  sli:
+    thresholdMetric:
+      source: prometheus
+      query: |
+        sum(rate(hotplex_worker_processes_active[5m])) /
+        (sum(rate(hotplex_worker_processes_active[5m])) + sum(rate(hotplex_worker_crashes_total[5m])))
+      # Alternative if using gauge instead of rate:
+      # hotplex_worker_processes_active / (hotplex_worker_processes_active + hotplex_worker_crashes_total)
+  objectives:
+    - displayName: "99% Availability"
+      target: 0.99
+      slice: "status=active"
+  timeWindow:
+    - duration: 30d
+      isRolling: true
+  alerting:
+    name: worker-availability-slo-alert
+    descriptions:
+      - "Worker availability below target"
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: hotplex-waf-accuracy
+  displayName: "WAF Accuracy"
+  description: >
+    Measures Web Application Firewall accuracy (block rate vs false positives).
+    Target: > 99.9% accuracy.
+spec:
+  service: hotplex-gateway
+  sli:
+    thresholdMetric:
+      source: prometheus
+      query: |
+        sum(rate(hotplex_waf_blocked_attacks_total[5m])) /
+        (sum(rate(hotplex_waf_blocked_attacks_total[5m])) + sum(rate(hotplex_waf_false_positives_total[5m])))
+      # Note: Assumes hotplex_waf_blocked_attacks_total and hotplex_waf_false_positives_total metrics exist
+  objectives:
+    - displayName: "99.9% Accuracy"
+      target: 0.999
+      slice: "type=accuracy"
+  timeWindow:
+    - duration: 30d
+      isRolling: true
+  alerting:
+    name: waf-accuracy-slo-alert
+    descriptions:
+      - "WAF accuracy below target"

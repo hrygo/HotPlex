@@ -202,12 +202,15 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope) error {
 		return h.sendControlToSession(spanCtx, env)
 	}
 
-	// Backpressure strategy (per AEP spec §11.5):
-	// - Droppable events (message.delta): try non-blocking send; drop silently if full.
-	// - Guaranteed events (message/done/error/state): try non-blocking send; return error if full.
+	// Clone before broadcast: Bridge.forwardEvents holds a reference to the
+	// original envelope and may call aep.EncodeJSON(env) concurrently (e.g.,
+	// for msgStore.Append). Cloning here ensures the channel holds an
+	// independent copy, eliminating the race with Bridge.forwardEvents.
+	// The clone is created inside the select to keep the backpressure check
+	// and send atomic (same as the original code).
 	if isDroppable(env.Event.Type) {
 		select {
-		case h.broadcast <- &EnvelopeWithConn{Env: env}:
+		case h.broadcast <- &EnvelopeWithConn{Env: events.Clone(env)}:
 			return nil
 		default:
 			// Silently drop delta — seq is NOT incremented for dropped events,
@@ -223,7 +226,7 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope) error {
 
 	// Guaranteed delivery path.
 	select {
-	case h.broadcast <- &EnvelopeWithConn{Env: env}:
+	case h.broadcast <- &EnvelopeWithConn{Env: events.Clone(env)}:
 		return nil
 	default:
 		err := errors.New("gateway: broadcast queue full")
@@ -243,7 +246,7 @@ func (h *Hub) sendControlToSession(ctx context.Context, env *events.Envelope) er
 	}
 
 	for conn := range conns {
-		if err := conn.WriteCtx(ctx, env); err != nil {
+		if err := conn.WriteCtx(ctx, events.Clone(env)); err != nil {
 			h.log.Warn("gateway: send to conn failed", "err", err, "conn", conn.RemoteAddr())
 		}
 	}
@@ -338,12 +341,10 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		h.LogHandler(level, fmt.Sprintf("event %s seq=%d", msg.Env.Event.Type, msg.Env.Seq), msg.Env.SessionID)
 	}
 
-	// Clone the envelope before encoding to prevent a data race with
-	// Bridge.forwardEvents which holds a reference to the original envelope
-	// and may encode it concurrently (e.g., for msgStore.Append on Done events).
-	cloned := events.Clone(msg.Env)
-
-	encoded, err := aep.EncodeJSON(cloned)
+	// Note: msg.Env is already a clone created by SendToSession before
+	// placing it on the broadcast channel, so aep.EncodeJSON can safely
+	// mutate its Version field without racing with Bridge.forwardEvents.
+	encoded, err := aep.EncodeJSON(msg.Env)
 	if err != nil {
 		h.log.Error("gateway: encode failed", "err", err)
 		return

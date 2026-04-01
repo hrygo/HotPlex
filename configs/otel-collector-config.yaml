@@ -1,0 +1,116 @@
+# =============================================================================
+# HotPlex Worker Gateway - OpenTelemetry Collector Configuration
+# =============================================================================
+# Purpose: Production-grade OTel Collector config with tail-based sampling
+# Based on: Observability-Design.md §4.3
+# =============================================================================
+
+receivers:
+  # OTLP receiver supports both gRPC (traces) and HTTP (metrics) protocols
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        # Transport encryption (disable for internal-only deployments)
+        # tls:
+        #   cert_file: /path/to/cert.pem
+        #   key_file: /path/to/key.pem
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # -----------------------------------------------------------------------------
+  # Tail Sampling Processor
+  # -----------------------------------------------------------------------------
+  # Implements intelligent sampling by examining traces AFTER they're complete.
+  # This allows capturing:
+  #   - 100% of error traces
+  #   - 100% of slow traces (>5s)
+  #   - 1% of normal traces (cost optimization)
+  # -----------------------------------------------------------------------------
+  tail_sampling:
+    decision_wait: 10s                    # Wait time for trace completion
+    num_traces: 100000                    # Max traces to keep in memory
+    expected_new_traces_per_sec: 100      # Expected trace ingestion rate
+    policies:
+      # Policy 1: Always capture ERROR traces
+      # Rationale: Errors are critical for debugging and RCA
+      - name: errors-policy
+        type: status_code
+        status_code:
+          status_codes:
+            - ERROR
+
+      # Policy 2: Always capture slow traces (>5s)
+      # Rationale: Latency outliers often indicate performance issues
+      - name: slow-traces-policy
+        type: latency
+        latency:
+          threshold_ms: 5000
+
+      # Policy 3: Probabilistic sampling for normal traces
+      # Rationale: 1% sampling sufficient for trend analysis
+      - name: probabilistic-policy
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 1
+
+  # -----------------------------------------------------------------------------
+  # Batch Processor (optional, for high-throughput scenarios)
+  # -----------------------------------------------------------------------------
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+exporters:
+  # -----------------------------------------------------------------------------
+  # OTLP Exporter to Grafana Tempo
+  # -----------------------------------------------------------------------------
+  otlp:
+    endpoint: tempo:4317
+    tls:
+      insecure: true  # Set to false with proper certs in production
+    # Retry settings
+    retry_on_failure:
+      enabled: true
+      initial_interval: 500ms
+      max_interval: 30s
+      max_elapsed_time: 5m
+
+  # -----------------------------------------------------------------------------
+  # Prometheus Metrics Exporter
+  # -----------------------------------------------------------------------------
+  # Exposes metrics for Prometheus scraping at :8889
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: hotplex
+    # Metric labels
+    const_labels:
+      service: hotplex-gateway
+      env: production
+
+  # -----------------------------------------------------------------------------
+  # Logging Exporter (for debugging)
+  # -----------------------------------------------------------------------------
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    # Trace pipeline: OTLP receiver -> tail sampling -> Tempo
+    traces:
+      receivers: [otlp]
+      processors: [tail_sampling, batch]
+      exporters: [otlp]
+
+    # Metrics pipeline: OTLP receiver -> Prometheus
+    metrics:
+      receivers: [otlp]
+      exporters: [prometheus]
+
+  # Telemetry configuration for the collector itself
+  telemetry:
+    logs:
+      level: info

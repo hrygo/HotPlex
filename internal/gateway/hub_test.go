@@ -57,15 +57,6 @@ func newTestWSConnPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	return client, conn
 }
 
-// startHub starts h.Run() in a background goroutine and registers
-// cancellation via t.Cleanup so the goroutine exits when the test ends.
-func startHub(t *testing.T, h *Hub) {
-	t.Helper()
-	_, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go h.Run()
-}
-
 func newTestHub(t *testing.T) *Hub {
 	t.Helper()
 	cfg := config.Default()
@@ -564,35 +555,35 @@ type fakeWorkerConn struct {
 func (f *fakeWorkerConn) Send(ctx context.Context, msg *events.Envelope) error { return nil }
 func (f *fakeWorkerConn) Recv() <-chan *events.Envelope                        { return f.ch }
 func (f *fakeWorkerConn) Close() error                                         { return nil }
-func (f *fakeWorkerConn) UserID() string                                        { return "test_user" }
-func (f *fakeWorkerConn) SessionID() string                                     { return "test_session" }
+func (f *fakeWorkerConn) UserID() string                                       { return "test_user" }
+func (f *fakeWorkerConn) SessionID() string                                    { return "test_session" }
 
 var _ worker.SessionConn = (*fakeWorkerConn)(nil)
 
 // fakeWorker is a minimal worker.Worker implementation for Bridge tests.
 type fakeWorker struct {
 	workerType worker.WorkerType
-	exitCode  int
-	conn      *fakeWorkerConn
+	exitCode   int
+	conn       *fakeWorkerConn
 }
 
-func (f *fakeWorker) Type() worker.WorkerType           { return f.workerType }
-func (f *fakeWorker) SupportsResume() bool              { return true }
-func (f *fakeWorker) SupportsStreaming() bool           { return true }
-func (f *fakeWorker) SupportsTools() bool               { return true }
-func (f *fakeWorker) EnvWhitelist() []string           { return nil }
-func (f *fakeWorker) SessionStoreDir() string           { return "" }
-func (f *fakeWorker) MaxTurns() int                    { return 0 }
-func (f *fakeWorker) Modalities() []string             { return []string{"text", "code"} }
-func (f *fakeWorker) Start(context.Context, worker.SessionInfo) error { return nil }
+func (f *fakeWorker) Type() worker.WorkerType                             { return f.workerType }
+func (f *fakeWorker) SupportsResume() bool                                { return true }
+func (f *fakeWorker) SupportsStreaming() bool                             { return true }
+func (f *fakeWorker) SupportsTools() bool                                 { return true }
+func (f *fakeWorker) EnvWhitelist() []string                              { return nil }
+func (f *fakeWorker) SessionStoreDir() string                             { return "" }
+func (f *fakeWorker) MaxTurns() int                                       { return 0 }
+func (f *fakeWorker) Modalities() []string                                { return []string{"text", "code"} }
+func (f *fakeWorker) Start(context.Context, worker.SessionInfo) error     { return nil }
 func (f *fakeWorker) Input(context.Context, string, map[string]any) error { return nil }
-func (f *fakeWorker) Resume(context.Context, worker.SessionInfo) error { return nil }
-func (f *fakeWorker) Terminate(context.Context) error { return nil }
-func (f *fakeWorker) Kill() error                      { return nil }
-func (f *fakeWorker) Wait() (int, error)               { return f.exitCode, nil }
-func (f *fakeWorker) Conn() worker.SessionConn         { return f.conn }
-func (f *fakeWorker) Health() worker.WorkerHealth      { return worker.WorkerHealth{} }
-func (f *fakeWorker) LastIO() time.Time                { return time.Now() }
+func (f *fakeWorker) Resume(context.Context, worker.SessionInfo) error    { return nil }
+func (f *fakeWorker) Terminate(context.Context) error                     { return nil }
+func (f *fakeWorker) Kill() error                                         { return nil }
+func (f *fakeWorker) Wait() (int, error)                                  { return f.exitCode, nil }
+func (f *fakeWorker) Conn() worker.SessionConn                            { return f.conn }
+func (f *fakeWorker) Health() worker.WorkerHealth                         { return worker.WorkerHealth{} }
+func (f *fakeWorker) LastIO() time.Time                                   { return time.Now() }
 
 var _ worker.Worker = (*fakeWorker)(nil)
 var _ session.MessageStore = (*fakeMsgStore)(nil)
@@ -604,6 +595,9 @@ func (*fakeMsgStore) Append(ctx context.Context, sessionID string, seq int64, ev
 	return nil
 }
 func (*fakeMsgStore) GetBySession(ctx context.Context, sessionID string, fromSeq int64) ([]*session.EventRecord, error) {
+	return nil, nil
+}
+func (*fakeMsgStore) Query(ctx context.Context, sessionID string, fromSeq int64) ([]*events.Envelope, error) {
 	return nil, nil
 }
 func (*fakeMsgStore) GetOwner(ctx context.Context, sessionID string) (string, error) {
