@@ -40,7 +40,7 @@ func TestNewID_Uniqueness(t *testing.T) {
 func TestEncodeDecode(t *testing.T) {
 	t.Parallel()
 
-	env := events.NewEnvelope(
+	env := NewEnvelope(
 		NewID(),
 		"sess_test",
 		42,
@@ -62,7 +62,7 @@ func TestEncodeDecode(t *testing.T) {
 func TestEncodeChunk(t *testing.T) {
 	t.Parallel()
 
-	env := events.NewEnvelope(
+	env := NewEnvelope(
 		NewID(),
 		"sess_chunk",
 		1,
@@ -213,7 +213,7 @@ func TestValidate_ValidEnvelope(t *testing.T) {
 func TestEncodeJSON(t *testing.T) {
 	t.Parallel()
 
-	env := events.NewEnvelope(
+	env := NewEnvelope(
 		NewID(),
 		"sess_json",
 		1,
@@ -230,7 +230,7 @@ func TestEncodeJSON(t *testing.T) {
 func TestMustMarshal(t *testing.T) {
 	t.Parallel()
 
-	env := events.NewEnvelope(NewID(), "sess_must", 1, events.Input, events.InputData{Content: "test"})
+	env := NewEnvelope(NewID(), "sess_must", 1, events.Input, events.InputData{Content: "test"})
 	data := MustMarshal(env)
 	require.NotEmpty(t, data)
 }
@@ -245,16 +245,15 @@ func TestIsSessionBusy(t *testing.T) {
 	}{
 		{
 			name: "session busy error",
-			env: events.NewEnvelope(
+			env: NewEnvelope(
 				NewID(), "sess_123", 1, events.Error,
-				// IsSessionBusy checks map[string]any, so use map here
 				map[string]any{"code": string(events.ErrCodeSessionBusy), "message": "busy"},
 			),
 			want: true,
 		},
 		{
 			name: "other error",
-			env: events.NewEnvelope(
+			env: NewEnvelope(
 				NewID(), "sess_123", 1, events.Error,
 				map[string]any{"code": string(events.ErrCodeInternalError), "message": "internal"},
 			),
@@ -262,7 +261,7 @@ func TestIsSessionBusy(t *testing.T) {
 		},
 		{
 			name: "not an error event",
-			env: events.NewEnvelope(
+			env: NewEnvelope(
 				NewID(), "sess_123", 1, events.Input,
 				events.InputData{Content: "hello"},
 			),
@@ -380,7 +379,7 @@ func TestEncode_NDJSONSafe(t *testing.T) {
 
 	// Content containing U+2028 (JS line separator) in the message.
 	// Claude Code might emit this in thinking/rendering content.
-	env := events.NewEnvelope(
+	env := NewEnvelope(
 		NewID(),
 		"sess_ndjson",
 		1,
@@ -406,7 +405,7 @@ func TestEncode_NDJSONSafe(t *testing.T) {
 func TestEncodeChunk_NDJSONSafe(t *testing.T) {
 	t.Parallel()
 
-	env := events.NewEnvelope(
+	env := NewEnvelope(
 		NewID(),
 		"sess_chunk_ndjson",
 		1,
@@ -431,7 +430,7 @@ func TestEncodeJSON_NDJSONSafe(t *testing.T) {
 	t.Parallel()
 
 	// Use actual Unicode codepoints (rune literals) so json.Marshal processes them.
-	env := events.NewEnvelope(
+	env := NewEnvelope(
 		NewID(),
 		"sess_json_ndjson",
 		1,

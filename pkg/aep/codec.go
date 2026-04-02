@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"hotplex-worker/pkg/events"
@@ -23,6 +24,9 @@ var jsLineTerminators = [...]byte{0xE2, 0x80, 0xA8, 0xE2, 0x80, 0xA9}
 // NDJSON-safe: U+2028 and U+2029 are escaped to prevent JS parsers truncating.
 func Encode(w io.Writer, env *events.Envelope) error {
 	env.Version = events.Version
+	if env.Timestamp == 0 {
+		env.Timestamp = nowMillis()
+	}
 	data, err := json.Marshal(env)
 	if err != nil {
 		return fmt.Errorf("aep: marshal envelope: %w", err)
@@ -37,6 +41,9 @@ func Encode(w io.Writer, env *events.Envelope) error {
 // re-allocating the encoder on each call. Caller must call w.Flush() when done.
 func EncodeChunk(w io.Writer, env *events.Envelope) error {
 	env.Version = events.Version
+	if env.Timestamp == 0 {
+		env.Timestamp = nowMillis()
+	}
 	data, err := json.Marshal(env)
 	if err != nil {
 		return fmt.Errorf("aep: marshal envelope: %w", err)
@@ -271,7 +278,7 @@ func nowMillis() int64 {
 	return nowFunc()
 }
 
-// nowFunc allows overriding for testing.
+// nowFunc allows overriding for testing. Defaults to real wall-clock time.
 var nowFunc = func() int64 {
-	return 0 // Will be set by events package if needed
+	return time.Now().UnixMilli()
 }
