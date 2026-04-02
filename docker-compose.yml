@@ -1,0 +1,150 @@
+# HotPlex Worker Gateway - Docker Compose
+#
+# Usage:
+#   Development:
+#     docker-compose up -d
+#
+#   Production:
+#     docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Environment variables:
+#   HOTPLEX_JWT_SECRET     - JWT secret (required)
+#   HOTPLEX_ADMIN_TOKEN    - Admin API token (required)
+#
+
+version: '3.8'
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+        GO_VERSION: ${GO_VERSION:-go1.26.0}
+    image: hotplex-worker:latest
+    container_name: hotplex-worker
+    restart: unless-stopped
+
+    ports:
+      - "8080:8080"   # WebSocket gateway
+      - "9080:9080"   # Admin API
+
+    environment:
+      # Required secrets
+      - HOTPLEX_JWT_SECRET=${HOTPLEX_JWT_SECRET:?HOTPLEX_JWT_SECRET is required}
+      - HOTPLEX_ADMIN_TOKEN_1=${HOTPLEX_ADMIN_TOKEN:-admin-token-dev}
+      - HOTPLEX_ADMIN_TOKEN_2=${HOTPLEX_ADMIN_TOKEN_2:-}
+
+      # Optional configuration
+      - HOTPLEX_LOG_LEVEL=${HOTPLEX_LOG_LEVEL:-info}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - TZ=${TZ:-UTC}
+
+    volumes:
+      # Configuration
+      - ./configs:/etc/hotplex:ro
+
+      # Persistent data (SQLite database)
+      - hotplex-data:/var/lib/hotplex/data
+
+      # Logs
+      - hotplex-logs:/var/log/hotplex
+
+      # TLS certificates (optional)
+      - ./tls:/etc/hotplex/tls:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9080/admin/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+    networks:
+      - hotplex-network
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Optional: Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hotplex-prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+
+    networks:
+      - hotplex-network
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hotplex-grafana
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./configs/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./configs/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+
+    depends_on:
+      - prometheus
+
+    networks:
+      - hotplex-network
+
+volumes:
+  hotplex-data:
+    driver: local
+  hotplex-logs:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  hotplex-network:
+    driver: bridge

@@ -1,0 +1,110 @@
+# HotPlex Worker Gateway - Production Docker Compose Override
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This file extends docker-compose.yml with production-specific settings:
+#   - TLS enabled
+#   - Stricter resource limits
+#   - External reverse proxy (Traefik)
+#   - Secrets management
+#
+
+version: '3.8'
+
+services:
+  gateway:
+    # Remove port mappings (use Traefik)
+    ports: []
+
+    environment:
+      # Production settings
+      - HOTPLEX_LOG_LEVEL=warn
+      - HOTPLEX_DEV_MODE=false
+
+    volumes:
+      # Production TLS certificates
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+
+    # Production resource limits
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+    # Production labels for Traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.hotplex-gateway.rule=Host(`gateway.hotplex.dev`)"
+      - "traefik.http.routers.hotplex-gateway.entrypoints=websecure"
+      - "traefik.http.routers.hotplex-gateway.tls.certresolver=letsencrypt"
+      - "traefik.http.services.hotplex-gateway.loadbalancer.server.port=8080"
+
+      - "traefik.http.routers.hotplex-admin.rule=Host(`admin.hotplex.dev`)"
+      - "traefik.http.routers.hotplex-admin.entrypoints=websecure"
+      - "traefik.http.routers.hotplex-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.hotplex-admin.loadbalancer.server.port=9080"
+
+    networks:
+      - traefik-network
+
+  # Traefik reverse proxy
+  traefik:
+    image: traefik:v2.10
+    container_name: hotplex-traefik
+    restart: unless-stopped
+
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@hotplex.dev"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8081:8080"  # Traefik dashboard
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+
+    networks:
+      - traefik-network
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.hotplex.dev`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+
+  # Remove Prometheus and Grafana (use external monitoring)
+  prometheus:
+    profiles: []
+
+  grafana:
+    profiles: []
+
+networks:
+  traefik-network:
+    external: true
+
+volumes:
+  traefik-letsencrypt:
+    driver: local

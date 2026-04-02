@@ -61,7 +61,7 @@ func run() error {
 	tracing.Init(ctx, log, "hotplex-worker-gateway")
 
 	log.Info("gateway: starting",
-		"version", version(),
+		"version", versionString(),
 		"go", runtime.Version(),
 		"addr", cfg.Gateway.Addr,
 		"config", *flagConfig,
@@ -263,7 +263,7 @@ func setupRoutes(
 		Hub:           hubAdapter,
 		Bridge:        bridgeAdapter,
 		ConfigWatcher: configWatcherAdapter,
-		Version:       version,
+		Version:       versionString,
 		NewSessionID:  newSessionID,
 	})
 
@@ -386,9 +386,12 @@ func waitForSignal() os.Signal {
 	return <-sig
 }
 
-func version() string {
-	return "v1.0.0"
-}
+const defaultVersion = "v1.0.0"
+
+// version is injected by ldflags: -X main.version=$(GIT_SHA)
+var version = defaultVersion
+
+func versionString() string { return version }
 
 func newSessionID() string {
 	return aep.NewSessionID()

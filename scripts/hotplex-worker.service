@@ -1,0 +1,66 @@
+[Unit]
+Description=HotPlex Worker Gateway
+Documentation=https://github.com/hotplex/hotplex-worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=hotplex
+Group=hotplex
+WorkingDirectory=/var/lib/hotplex
+
+# Load environment variables from secrets file
+EnvironmentFile=/etc/hotplex/secrets.env
+
+# Main executable
+ExecStart=/usr/local/bin/hotplex-worker \
+    -config /etc/hotplex/config.yaml
+
+# Graceful shutdown
+ExecReload=/bin/kill -HUP $MAINPID
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+PrivateDevices=true
+PrivateNetwork=false
+PrivateUsers=true
+
+# Allow write access to data and log directories
+ReadWritePaths=/var/lib/hotplex /var/log/hotplex
+
+# Prevent privilege escalation
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+LimitCORE=0
+
+# OOM Score (higher = less likely to be killed)
+OOMScoreAdjust=-500
+
+# Watchdog (if using systemd watchdog)
+WatchdogSec=30
+
+# Standard output and error
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hotplex-worker
+
+[Install]
+WantedBy=multi-user.target

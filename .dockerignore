@@ -1,0 +1,101 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/*
+
+# Test files
+*_test.go
+testdata/
+coverage.out
+coverage.html
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Config (keep templates only)
+configs/*.yaml
+configs/*.json
+!configs/config.yaml.example
+
+# Scripts (not needed in runtime)
+scripts/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+Makefile
+
+# Docker
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# Kubernetes
+k8s/
+helm/
+
+# Terraform
+*.tf
+*.tfstate
+*.tfvars
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Credentials and secrets
+*.pem
+*.key
+*.crt
+secrets.env
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
