@@ -9,6 +9,7 @@ This directory contains installation and deployment scripts for HotPlex Worker G
 | `install.sh` | Full production installation | `sudo ./scripts/install.sh` |
 | `quickstart.sh` | Quick dev environment setup | `./scripts/quickstart.sh` |
 | `docker-build.sh` | Build Docker image | `./scripts/docker-build.sh` |
+| `uninstall.sh` | Complete uninstallation | `sudo ./scripts/uninstall.sh` |
 | `hotplex-worker.service` | Systemd service unit | Install via `install.sh` |
 
 ## Installation Scripts

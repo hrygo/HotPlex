@@ -53,6 +53,10 @@ JWT_SECRET=""
 ADMIN_TOKEN_1=""
 ADMIN_TOKEN_2=""
 
+# Cleanup tracking
+CLEANUP_ACTIONS=()
+INSTALLATION_STARTED=false
+
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -159,7 +163,100 @@ check_dependencies() {
 
 generate_random_secret() {
     local length="${1:-32}"
-    openssl rand -base64 "$length" | tr -d '\n'
+    openssl rand -base64 "$length" | tr -d '\n+/='
+}
+
+generate_admin_token() {
+    # 32 bytes = 256 bits entropy, no prefix
+    openssl rand -base64 32 | tr -d '\n+/=' | head -c 43
+}
+
+validate_path() {
+    local path="$1"
+    local type="${2:-generic}"
+
+    # Normalize path (resolve . and ..)
+    path=$(cd "$(dirname "$path")" 2>/dev/null && pwd)/$(basename "$path") || {
+        log_error "Invalid path: $path"
+        return 1
+    }
+
+    # Check for dangerous system paths
+    case "$path" in
+        /|/etc|/usr|/bin|/sbin|/lib|/lib64|/var|/home|/root|/boot)
+            log_error "Cannot use system directory: $path"
+            return 1
+            ;;
+    esac
+
+    # Validate path format
+    if [[ ! "$path" =~ ^/[a-zA-Z0-9_./-]+$ ]]; then
+        log_error "Invalid path format: $path"
+        return 1
+    fi
+
+    echo "$path"
+    return 0
+}
+
+validate_hostname() {
+    local hostname="$1"
+    # RFC 1123 hostname validation
+    if [[ ! "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
+        log_error "Invalid hostname: $hostname"
+        return 1
+    fi
+    echo "$hostname"
+    return 0
+}
+
+check_system_requirements() {
+    log_section "Checking System Requirements"
+
+    # Disk space (need 500MB for build + 2GB for data)
+    local available_kb
+    if available_kb=$(df -k "$PREFIX" 2>/dev/null | awk 'NR==2 {print $4}'); then
+        if [[ $available_kb -lt 2500000 ]]; then
+            log_error "Insufficient disk space: need 2.5GB, have $((available_kb/1024))MB"
+            exit 1
+        fi
+        log_info "Disk space: $((available_kb/1024))MB available ✓"
+    fi
+
+    # Memory check (recommend 2GB+)
+    if [[ -f /proc/meminfo ]]; then
+        local total_mem_kb
+        total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        if [[ $total_mem_kb -lt 1048576 ]]; then
+            log_warn "Low memory: recommend 2GB+ for build (have $((total_mem_kb/1024))MB)"
+        else
+            log_info "Memory: $((total_mem_kb/1024))MB ✓"
+        fi
+    fi
+
+    # Architecture check
+    case $(uname -m) in
+        x86_64|aarch64|arm64)
+            log_info "Architecture: $(uname -m) ✓"
+            ;;
+        *)
+            log_error "Unsupported architecture: $(uname -m)"
+            exit 1
+            ;;
+    esac
+}
+
+rollback() {
+    if [[ "$INSTALLATION_STARTED" == false ]]; then
+        return
+    fi
+
+    log_error "Installation failed, rolling back..."
+    for action in "${CLEANUP_ACTIONS[@]}"; do
+        eval "$action" 2>/dev/null || true
+    done
+    log_info "Rollback complete"
+    exit 1
 }
 
 prompt_yes_no() {
@@ -250,6 +347,12 @@ build_binary() {
 
     log_info "Building for $os/$arch..."
 
+    # Verify go.sum integrity
+    if ! go mod verify; then
+        log_error "Go module verification failed"
+        exit 1
+    fi
+
     # Build with ldflags
     GIT_SHA=$(git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
     BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -260,10 +363,17 @@ build_binary() {
         -X main.buildTime=$BUILD_TIME \
         -X main.goVersion=$GO_VERSION"
 
-    go build -trimpath -ldflags="$LDFLAGS" \
-        -o "$PREFIX/bin/$BIN_NAME" ./cmd/worker
+    if ! go build -trimpath -ldflags="$LDFLAGS" \
+        -o "$PREFIX/bin/$BIN_NAME" ./cmd/worker 2>&1; then
+        log_error "Build failed!"
+        log_error "Go version: $(go version)"
+        log_error "Check build logs above for details"
+        exit 1
+    fi
 
     chmod +x "$PREFIX/bin/$BIN_NAME"
+
+    CLEANUP_ACTIONS+=("rm -f $PREFIX/bin/$BIN_NAME")
 
     log_info "Binary installed: $PREFIX/bin/$BIN_NAME ✓"
     log_info "Version: $GIT_SHA"
@@ -276,8 +386,8 @@ generate_secrets() {
     JWT_SECRET=$(generate_random_secret 32)
 
     log_info "Generating admin tokens..."
-    ADMIN_TOKEN_1="hotplex-admin-$(generate_random_secret 16)"
-    ADMIN_TOKEN_2="hotplex-admin-$(generate_random_secret 16)"
+    ADMIN_TOKEN_1=$(generate_admin_token)
+    ADMIN_TOKEN_2=$(generate_admin_token)
 
     # Create secrets file (for reference, not used by binary)
     cat > "$CONFIG_DIR/secrets.env" <<EOF
@@ -298,8 +408,25 @@ EOF
 
     chmod 600 "$CONFIG_DIR/secrets.env"
 
+    # Create admin tokens file (separate from secrets for easier rotation)
+    cat > "$CONFIG_DIR/.admin-tokens" <<EOF
+# HotPlex Admin Tokens
+# Generated on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+#
+# IMPORTANT: Store these tokens in a secure location (vault, password manager)
+# Delete this file after storing tokens securely!
+
+TOKEN_1="$ADMIN_TOKEN_1"
+TOKEN_2="$ADMIN_TOKEN_2"
+EOF
+
+    chmod 600 "$CONFIG_DIR/.admin-tokens"
+
     log_info "Secrets generated: $CONFIG_DIR/secrets.env ✓"
-    log_warn "Keep this file secure and add to .gitignore!"
+    log_info "Admin tokens saved to: $CONFIG_DIR/.admin-tokens ✓"
+    log_warn "Review tokens and delete $CONFIG_DIR/.admin-tokens after storing securely!"
+
+    CLEANUP_ACTIONS+=("rm -f $CONFIG_DIR/secrets.env $CONFIG_DIR/.admin-tokens")
 }
 
 generate_tls_certificates() {
@@ -308,30 +435,58 @@ generate_tls_certificates() {
     if [[ "$DEV_MODE" == true ]]; then
         log_warn "Development mode: generating self-signed certificates"
 
-        # Generate self-signed certificate
-        openssl req -x509 -newkey rsa:2048 -keyout "$CONFIG_DIR/tls/server.key" \
+        # Generate self-signed certificate with ECDSA P-384 (better security + performance)
+        if ! openssl ecparam -genkey -name secp384r1 -out "$CONFIG_DIR/tls/server.key" 2>&1; then
+            log_error "Failed to generate TLS private key"
+            exit 1
+        fi
+
+        if ! openssl req -new -x509 -key "$CONFIG_DIR/tls/server.key" \
             -out "$CONFIG_DIR/tls/server.crt" \
-            -days 365 -nodes \
-            -subj "/C=US/ST=State/L=City/O=HotPlex/CN=localhost" \
-            2>/dev/null
+            -days 365 -subj "/C=US/ST=State/L=City/O=HotPlex/CN=localhost" 2>&1; then
+            log_error "Failed to generate TLS certificate"
+            exit 1
+        fi
+
+        # Verify certificate and key match
+        local cert_mod key_mod
+        cert_mod=$(openssl x509 -noout -modulus -in "$CONFIG_DIR/tls/server.crt" 2>/dev/null | openssl md5)
+        key_mod=$(openssl rsa -noout -modulus -in "$CONFIG_DIR/tls/server.key" 2>/dev/null | openssl md5)
+        if [[ "$cert_mod" != "$key_mod" ]]; then
+            log_error "TLS certificate and key do not match"
+            exit 1
+        fi
 
         chmod 600 "$CONFIG_DIR/tls/server.key"
         chmod 644 "$CONFIG_DIR/tls/server.crt"
 
         log_info "Self-signed certificate generated ✓"
         log_info "  Certificate: $CONFIG_DIR/tls/server.crt"
-        log_info "  Key: $CONFIG_DIR/tls/server.key"
+        log_info "  Key: $CONFIG_DIR/tls/server.key (ECDSA P-384)"
     else
         local generate_certs=$(prompt_yes_no "Generate self-signed TLS certificates?" "n")
 
         if [[ "$generate_certs" == "y" ]]; then
-            local cert_hostname=$(prompt_input "Certificate hostname" "localhost")
+            local cert_hostname
+            cert_hostname=$(prompt_input "Certificate hostname" "localhost")
 
-            openssl req -x509 -newkey rsa:2048 -keyout "$CONFIG_DIR/tls/server.key" \
+            # Validate hostname
+            if ! validate_hostname "$cert_hostname"; then
+                exit 1
+            fi
+
+            # Generate ECDSA certificate
+            if ! openssl ecparam -genkey -name secp384r1 -out "$CONFIG_DIR/tls/server.key" 2>&1; then
+                log_error "Failed to generate TLS private key"
+                exit 1
+            fi
+
+            if ! openssl req -new -x509 -key "$CONFIG_DIR/tls/server.key" \
                 -out "$CONFIG_DIR/tls/server.crt" \
-                -days 365 -nodes \
-                -subj "/C=US/ST=State/L=City/O=HotPlex/CN=$cert_hostname" \
-                2>/dev/null
+                -days 365 -subj "/C=US/ST=State/L=City/O=HotPlex/CN=$cert_hostname" 2>&1; then
+                log_error "Failed to generate TLS certificate"
+                exit 1
+            fi
 
             chmod 600 "$CONFIG_DIR/tls/server.key"
             chmod 644 "$CONFIG_DIR/tls/server.crt"
@@ -592,16 +747,15 @@ ${BLUE}Secrets:${NC}
   $CONFIG_DIR/secrets.env
   ${YELLOW}⚠ Keep this file secure and add to .gitignore!${NC}
 
+${BLUE}Admin Tokens:${NC}
+  Saved to: $CONFIG_DIR/.admin-tokens
+  ${YELLOW}⚠ Review and delete after storing in vault!${NC}
+
 ${BLUE}Data:${NC}
   $DATA_DIR/
 
 ${BLUE}Logs:${NC}
   $LOG_DIR/
-
-${BLUE}Admin Tokens:${NC}
-  Token 1: $ADMIN_TOKEN_1
-  Token 2: $ADMIN_TOKEN_2
-  ${YELLOW}⚠ Store these tokens securely!${NC}
 
 ${BLUE}Quick Start:${NC}
 
@@ -620,10 +774,11 @@ ${BLUE}Quick Start:${NC}
 ${BLUE}Production Checklist:${NC}
 
   ☐ Enable TLS in config.yaml
-  ☐ Use strong, unique admin tokens
+  ☐ Use strong, unique admin tokens (store in vault)
+  ☐ Delete $CONFIG_DIR/.admin-tokens after storing tokens
   ☐ Set up log rotation
   ☐ Configure monitoring (Prometheus + Grafana)
-  ☐ Set up backup for $DATA_DIR/
+  ☐ Set up database backup
   ☐ Review security settings in config.yaml
   ☐ Add HOTPLEX_JWT_SECRET to vault/secrets manager
 
@@ -671,15 +826,25 @@ EOF
         log_warn "Development mode enabled"
     fi
 
+    # Set up rollback trap
+    trap rollback EXIT
+
     check_root
     check_dependencies
+    check_system_requirements
     create_directories
+    INSTALLATION_STARTED=true
     build_binary
     generate_secrets
     generate_tls_certificates
     generate_config
     install_systemd_service
     create_env_example
+
+    # Success - disable rollback trap
+    trap - EXIT
+    INSTALLATION_STARTED=false
+
     print_summary
 }
 
