@@ -1,209 +1,81 @@
+// Package aep provides the gateway's AEP v1 codec implementation.
+// This package re-exports from pkg/aep for backward compatibility.
+// Gateway-specific codec logic should be added here.
 package aep
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"strings"
-
-	"github.com/google/uuid"
-	"hotplex-worker/pkg/events"
+	"hotplex-worker/pkg/aep"
 )
 
-// jsLineTerminators holds the UTF-8 encoding of U+2028 and U+2029.
-// These are valid JSON, but invalid JavaScript string literals — NDJSON consumers
-// that parse lines as JS string literals will silently truncate at these codepoints.
-var jsLineTerminators = [...]byte{0xE2, 0x80, 0xA8, 0xE2, 0x80, 0xA9}
+// Re-export types and functions from pkg/aep for backward compatibility.
+type (
+	WorkerType = aep.WorkerType
+	InitData      = aep.InitData
+	InitAuth      = aep.InitAuth
+	InitConfig    = aep.InitConfig
+	ClientCaps    = aep.ClientCaps
+	InitAckData   = aep.InitAckData
+	ServerCaps    = aep.ServerCaps
+	InitError     = aep.InitError
+)
 
-// Encode writes an Envelope to w as a newline-delimited JSON record.
-// NDJSON-safe: U+2028 and U+2029 are escaped to prevent JS parsers truncating.
-func Encode(w io.Writer, env *events.Envelope) error {
-	env.Version = events.Version
-	data, err := json.Marshal(env)
-	if err != nil {
-		return fmt.Errorf("aep: marshal envelope: %w", err)
-	}
-	data = escapeJSTerminators(data)
-	data = append(data, '\n')
-	_, err = w.Write(data)
-	return err
-}
+const (
+	Init    = aep.Init
+	InitAck = aep.InitAck
+)
 
-// EncodeChunk is like Encode but for streaming deltas where you want to avoid
-// re-allocating the encoder on each call. Caller must call w.Flush() when done.
-func EncodeChunk(w io.Writer, env *events.Envelope) error {
-	env.Version = events.Version
-	data, err := json.Marshal(env)
-	if err != nil {
-		return fmt.Errorf("aep: marshal envelope: %w", err)
-	}
-	data = escapeJSTerminators(data)
-	data = append(data, '\n')
-	_, err = w.Write(data)
-	return err
-}
+var (
+	WorkerClaudeCode  = aep.WorkerClaudeCode
+	WorkerOpenCodeCLI = aep.WorkerOpenCodeCLI
+	WorkerOpenCodeSrv = aep.WorkerOpenCodeSrv
+	WorkerPiMono      = aep.WorkerPiMono
+)
 
-// NDJSONSpec: https://datatracker.ietf.org/doc/html/rfc7464
-// JS JSON.parse accepts U+2028/U+2029 as valid JSON, but they are NOT valid
-// inside JavaScript string literals. A NDJSON consumer that evaluates lines as JS
-// (e.g. JSON.parse via eval) will silently truncate at these codepoints.
-//
-// escapeJSTerminators converts any raw U+2028/U+2029 bytes already present in
-// the JSON output to the \u2028 / \u2029 escape sequences.
-//
-// NOTE: json.Marshal already emits \u2028 / \u2029 when marshaling Go strings
-// containing those codepoints. This function catches the edge case where the
-// raw UTF-8 bytes somehow survive (e.g. in map[string]any with raw []byte values).
-func escapeJSTerminators(data []byte) []byte {
-	// Fast path: no terminators present
-	if !bytes.Contains(data, jsLineTerminators[:3]) &&
-		!bytes.Contains(data, jsLineTerminators[3:]) {
-		return data
-	}
-	result := make([]byte, 0, len(data)+32)
-	for i := 0; i < len(data); {
-		if i+3 <= len(data) {
-			b0, b1, b2 := data[i], data[i+1], data[i+2]
-			if b0 == 0xE2 && b1 == 0x80 {
-				if b2 == 0xA8 {
-					result = append(result, '\\', 'u', '2', '0', '2', '8')
-					i += 3
-					continue
-				}
-				if b2 == 0xA9 {
-					result = append(result, '\\', 'u', '2', '0', '2', '9')
-					i += 3
-					continue
-				}
-			}
-		}
-		result = append(result, data[i])
-		i++
-	}
-	return result
-}
+// Re-export functions from pkg/aep.
+var (
+	Encode           = aep.Encode
+	EncodeChunk      = aep.EncodeChunk
+	Decode           = aep.Decode
+	DecodeLine       = aep.DecodeLine
+	Validate         = aep.Validate
+	ValidateMinimal   = aep.ValidateMinimal
+	NewID            = aep.NewID
+	NewSessionID     = aep.NewSessionID
+	EncodeJSON       = aep.EncodeJSON
+	MustMarshal      = aep.MustMarshal
+	IsSessionBusy    = aep.IsSessionBusy
+	IsTerminalEvent  = aep.IsTerminalEvent
+	ParseSessionID   = aep.ParseSessionID
+	NewEnvelope      = aep.NewEnvelope
+	NewInputEnvelope = aep.NewInputEnvelope
+	NewPingEnvelope  = aep.NewPingEnvelope
+	NewInitEnvelope  = aep.NewInitEnvelope
+	BuildInitAck     = aep.BuildInitAck
+	BuildInitAckError = aep.BuildInitAckError
+	ValidateInit     = aep.ValidateInit
+	DefaultServerCaps = aep.DefaultServerCaps
+	BackoffDuration  = aep.BackoffDuration
+)
 
-// Decode reads a single newline-delimited JSON Envelope from r.
-func Decode(r io.Reader) (*events.Envelope, error) {
-	dec := json.NewDecoder(r)
-	dec.DisallowUnknownFields()
+// Re-export error types.
+var (
+	ErrInitVersionMismatch  = aep.ErrInitVersionMismatch
+	ErrInitCapacityExceeded = aep.ErrInitCapacityExceeded
+	ErrInitSessionNotFound  = aep.ErrInitSessionNotFound
+	ErrInitSessionDeleted   = aep.ErrInitSessionDeleted
+)
 
-	var env events.Envelope
-	if err := dec.Decode(&env); err != nil {
-		return nil, fmt.Errorf("aep: decode envelope: %w", err)
-	}
+// WithSessionID is a functional option for NewInitEnvelope.
+var WithSessionID = aep.WithSessionID
 
-	if err := Validate(&env); err != nil {
-		return nil, fmt.Errorf("aep: validate envelope: %w", err)
-	}
+// WithAuthToken is a functional option for NewInitEnvelope.
+var WithAuthToken = aep.WithAuthToken
 
-	return &env, nil
-}
+// WithConfig is a functional option for NewInitEnvelope.
+var WithConfig = aep.WithConfig
 
-// DecodeLine decodes a single JSON-encoded line (no trailing newline required).
-func DecodeLine(data []byte) (*events.Envelope, error) {
-	var env events.Envelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, fmt.Errorf("aep: unmarshal envelope: %w", err)
-	}
-	if err := Validate(&env); err != nil {
-		return nil, fmt.Errorf("aep: validate envelope: %w", err)
-	}
-	return &env, nil
-}
+// SeqKey is exported for gateway use.
+var SeqKey = aep.SeqKey
 
-// Validate checks that an Envelope has all required fields set correctly.
-func Validate(env *events.Envelope) error {
-	var errs []string
-
-	if env.Version == "" {
-		errs = append(errs, "version is required")
-	} else if env.Version != events.Version {
-		errs = append(errs, fmt.Sprintf("unsupported version: %q (want %q)", env.Version, events.Version))
-	}
-
-	if env.ID == "" {
-		errs = append(errs, "id is required")
-	}
-
-	if env.SessionID == "" {
-		errs = append(errs, "session_id is required")
-	}
-
-	if env.Seq <= 0 {
-		errs = append(errs, "seq must be a positive integer")
-	}
-
-	if env.Timestamp <= 0 {
-		errs = append(errs, "timestamp must be a positive unix-ms value")
-	}
-
-	if env.Event.Type == "" {
-		errs = append(errs, "event.kind is required")
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("validation failed: %s", strings.Join(errs, "; "))
-	}
-
-	return nil
-}
-
-// NewID generates a new event ID using the evt_ prefix.
-func NewID() string {
-	return "evt_" + uuid.NewString()
-}
-
-// NewSessionID generates a new session ID using the sess_ prefix.
-func NewSessionID() string {
-	return "sess_" + uuid.NewString()
-}
-
-// EncodeJSON encodes an envelope to JSON bytes (no trailing newline).
-// NDJSON-safe: U+2028 and U+2029 are escaped.
-func EncodeJSON(env *events.Envelope) ([]byte, error) {
-	env.Version = events.Version
-	data, err := json.Marshal(env)
-	if err != nil {
-		return nil, fmt.Errorf("aep: marshal envelope: %w", err)
-	}
-	return escapeJSTerminators(data), nil
-}
-
-// MustMarshal is like EncodeJSON but panics on error.
-func MustMarshal(env *events.Envelope) []byte {
-	data, err := EncodeJSON(env)
-	if err != nil {
-		panic(err)
-	}
-	return data
-}
-
-// IsSessionBusy checks whether the error data indicates a SESSION_BUSY condition.
-func IsSessionBusy(env *events.Envelope) bool {
-	if env.Event.Type != events.Error {
-		return false
-	}
-	data, ok := env.Event.Data.(map[string]any)
-	if !ok {
-		return false
-	}
-	code, _ := data["code"].(string)
-	return code == string(events.ErrCodeSessionBusy)
-}
-
-// IsTerminalEvent returns true for events that signal a session is done.
-func IsTerminalEvent(kind events.Kind) bool {
-	return kind == events.Done || kind == events.Error
-}
-
-// ParseSessionID strips the "sess_" prefix if present.
-func ParseSessionID(id string) string {
-	return strings.TrimPrefix(id, "sess_")
-}
-
-// SeqKey returns the key used for deduplication (sessionID:eventID).
-func SeqKey(sessionID, eventID string) string {
-	return sessionID + ":" + eventID
-}
+// escapeJSTerminators is re-exported for internal tests.
+var escapeJSTerminators = aep.EscapeJSTerminators

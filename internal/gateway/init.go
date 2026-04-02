@@ -50,24 +50,24 @@ type ClientCaps struct {
 
 // InitAckData is the payload of a gateway → client init_ack message.
 type InitAckData struct {
-	SessionID  string              `json:"session_id"`
-	State      events.SessionState  `json:"state"`
-	ServerCaps ServerCaps           `json:"server_caps"`
-	Error      string              `json:"error,omitempty"`
+	SessionID  string             `json:"session_id"`
+	State      events.SessionState `json:"state"`
+	ServerCaps ServerCaps          `json:"server_caps"`
+	Error      string             `json:"error,omitempty"`
 	Code       events.ErrorCode    `json:"code,omitempty"`
 }
 
 // ServerCaps declares what the gateway / worker supports.
 type ServerCaps struct {
 	ProtocolVersion  string            `json:"protocol_version"`
-	WorkerType       worker.WorkerType `json:"worker_type"`
+	WorkerType      worker.WorkerType `json:"worker_type"`
 	SupportsResume   bool              `json:"supports_resume"`
 	SupportsDelta    bool              `json:"supports_delta"`
 	SupportsToolCall bool              `json:"supports_tool_call"`
 	SupportsPing     bool              `json:"supports_ping"`
 	MaxFrameSize     int64             `json:"max_frame_size"`
-	MaxTurns        int               `json:"max_turns,omitempty"` // 0 = unlimited
-	Modalities       []string          `json:"modalities,omitempty"` // e.g. "text", "code"
+	MaxTurns        int               `json:"max_turns,omitempty"`
+	Modalities       []string          `json:"modalities,omitempty"`
 	Tools            []string          `json:"tools,omitempty"`
 }
 
@@ -81,24 +81,20 @@ func (e *InitError) Error() string {
 	return e.Message
 }
 
-// ErrInitVersionMismatch is returned when the client protocol version is incompatible.
-var ErrInitVersionMismatch = &InitError{Code: events.ErrCodeVersionMismatch, Message: "version mismatch"}
-
-// ErrInitCapacityExceeded is returned when the server cannot accept new sessions.
-var ErrInitCapacityExceeded = &InitError{Code: events.ErrCodeRateLimited, Message: "capacity exceeded"}
-
-// ErrInitSessionNotFound is returned when a resume references a non-existent session.
-var ErrInitSessionNotFound = &InitError{Code: events.ErrCodeSessionNotFound, Message: "session not found"}
-
-// ErrInitSessionDeleted is returned when a resume references a deleted session.
-var ErrInitSessionDeleted = &InitError{Code: events.ErrCodeSessionNotFound, Message: "session was deleted"}
+// Init error sentinels.
+var (
+	ErrInitVersionMismatch  = &InitError{Code: events.ErrCodeVersionMismatch, Message: "version mismatch"}
+	ErrInitCapacityExceeded = &InitError{Code: events.ErrCodeRateLimited, Message: "capacity exceeded"}
+	ErrInitSessionNotFound  = &InitError{Code: events.ErrCodeSessionNotFound, Message: "session not found"}
+	ErrInitSessionDeleted   = &InitError{Code: events.ErrCodeSessionNotFound, Message: "session was deleted"}
+)
 
 // BuildInitAck builds an init_ack envelope from handshake result.
 func BuildInitAck(sessionID string, state events.SessionState, wt worker.WorkerType) *events.Envelope {
 	return events.NewEnvelope(
 		aep.NewID(),
 		sessionID,
-		0, // seq assigned by gateway
+		0,
 		InitAck,
 		InitAckData{
 			SessionID:  sessionID,
@@ -131,7 +127,6 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 		return InitData{}, &InitError{Code: events.ErrCodeInvalidMessage, Message: "init: invalid data"}
 	}
 
-	// Version check.
 	version, _ := data["version"].(string)
 	if version == "" {
 		return InitData{}, &InitError{Code: events.ErrCodeInvalidMessage, Message: "init: version required"}
@@ -141,7 +136,6 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 			Message: "init: unsupported version " + version}
 	}
 
-	// Worker type check.
 	wt, _ := data["worker_type"].(string)
 	if wt == "" {
 		return InitData{}, &InitError{Code: events.ErrCodeInvalidMessage, Message: "init: worker_type required"}
@@ -149,7 +143,6 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 
 	sessionID, _ := data["session_id"].(string)
 
-	// Extract auth token (optional; required in production).
 	var auth InitAuth
 	if authData, ok := data["auth"].(map[string]any); ok {
 		if token, ok := authData["token"].(string); ok {
@@ -157,7 +150,6 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 		}
 	}
 
-	// Extract InitConfig (AllowedTools, Model, SystemPrompt, etc.).
 	cfg := InitConfig{}
 	if cfgData, ok := data["config"].(map[string]any); ok {
 		if model, ok := cfgData["model"].(string); ok {
@@ -207,7 +199,7 @@ func DefaultServerCaps(wt worker.WorkerType) ServerCaps {
 		SupportsToolCall: true,
 		SupportsPing:     true,
 		MaxFrameSize:     32 * 1024,
-		MaxTurns:        0,   // unlimited by default
+		MaxTurns:        0,
 		Modalities:       []string{"text", "code"},
 		Tools:            nil,
 	}
