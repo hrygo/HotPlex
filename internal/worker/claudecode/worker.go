@@ -47,15 +47,23 @@ type Worker struct {
 	sessionID string
 
 	// Protocol layers
-	parser  *Parser
-	mapper  *Mapper
-	control *ControlHandler
+	parser   *Parser
+	mapper   *Mapper
+	control  *ControlHandler
 
 	// Goroutine lifecycle
 	cancel context.CancelFunc
 
 	// Seq generation (atomic, no mutex needed)
 	seq atomic.Int64
+
+	// readLineFn reads the next line from stdout. If nil, readOutput uses
+	// proc.ReadLine. Inject a func for unit testing without a real process.
+	readLineFn func() (string, error)
+
+	// testConn allows tests to inject a mock SessionConn without a real process.
+	// When non-nil, Conn() returns this instead of BaseWorker.Conn().
+	testConn worker.SessionConn
 }
 
 // New creates a new Claude Code worker.
@@ -113,6 +121,11 @@ func (w *Worker) startLocked(ctx context.Context, session worker.SessionInfo, re
 
 	w.sessionID = session.SessionID
 	w.seq.Store(0)
+
+	// readLineFn: use test override if set, otherwise real proc reader.
+	if w.readLineFn == nil {
+		w.readLineFn = w.BaseWorker.Proc.ReadLine
+	}
 
 	w.parser = NewParser(w.BaseWorker.Log)
 	w.mapper = NewMapper(w.BaseWorker.Log, session.SessionID, w.nextSeq)
@@ -206,7 +219,7 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) []string 
 }
 
 func (w *Worker) Input(ctx context.Context, content string, metadata map[string]any) error {
-	conn := w.BaseWorker.Conn()
+	conn := w.Conn()
 	if conn == nil {
 		return fmt.Errorf("claudecode: not started")
 	}
@@ -258,6 +271,9 @@ func (w *Worker) Terminate(ctx context.Context) error {
 }
 
 func (w *Worker) Conn() worker.SessionConn {
+	if w.testConn != nil {
+		return w.testConn
+	}
 	return w.BaseWorker.Conn()
 }
 
@@ -273,16 +289,14 @@ func (w *Worker) LastIO() time.Time {
 
 func (w *Worker) readOutput(ctx context.Context) {
 	defer func() {
-		if c := w.BaseWorker.Conn(); c != nil {
+		if c := w.Conn(); c != nil {
 			c.Close()
 		}
 	}()
 
 	w.Mu.Lock()
-	proc := w.BaseWorker.Proc
-	w.Mu.Unlock()
-
-	if proc == nil {
+	defer w.Mu.Unlock()
+	if w.readLineFn == nil {
 		return
 	}
 
@@ -293,7 +307,7 @@ func (w *Worker) readOutput(ctx context.Context) {
 		default:
 		}
 
-		line, err := proc.ReadLine()
+		line, err := w.readLineFn()
 		if err != nil {
 			if err == io.EOF {
 				return
@@ -377,15 +391,18 @@ func (w *Worker) mapPermissionRequest(req *PermissionRequestPayload) *events.Env
 
 // trySend non-blocking sends an envelope to the connection.
 func (w *Worker) trySend(env *events.Envelope) {
-	conn := w.BaseWorker.Conn()
+	conn := w.Conn()
 	if conn == nil {
 		return
 	}
 
-	if bc, ok := conn.(*base.Conn); ok {
-		if !bc.TrySend(env) {
-			w.BaseWorker.Log.Warn("claudecode: recv channel full, dropping message")
-		}
+	// Duck-typed interface: *base.Conn (production) and mockConn (tests) both satisfy it.
+	ts, ok := conn.(interface{ TrySend(*events.Envelope) bool })
+	if !ok {
+		return
+	}
+	if !ts.TrySend(env) {
+		w.BaseWorker.Log.Warn("claudecode: recv channel full, dropping message")
 	}
 }
 

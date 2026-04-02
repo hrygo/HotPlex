@@ -480,3 +480,52 @@ func TestBuildCLIArgs_JSONSchema(t *testing.T) {
 	args := w.buildCLIArgs(session, false)
 	require.Contains(t, args, "--json-schema", "/schemas/output.json")
 }
+
+// ─── Mock-based integration tests ──────────────────────────────────────────────
+
+func TestStatusToSessionState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		wantOk  bool
+	}{
+		{"idle maps to StateIdle", "idle", true},
+		{"processing maps to StateRunning", "processing", true},
+		{"unknown returns ok=false", "unknown_status", false},
+		{"empty returns ok=false", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := statusToSessionState(tt.input)
+			require.Equal(t, tt.wantOk, ok)
+			if ok {
+				require.NotEmpty(t, got)
+			}
+		})
+	}
+}
+
+func TestMapper_Map_UnknownStatus(t *testing.T) {
+	t.Parallel()
+
+	log := newTestLogger()
+	mapper := NewMapper(log, "session_123", func() int64 { return 1 })
+
+	t.Run("mapSystem unknown status returns nil", func(t *testing.T) {
+		evt := &WorkerEvent{Type: EventSystem, Payload: "unknown_status"}
+		envs, err := mapper.Map(evt)
+		require.NoError(t, err)
+		require.Nil(t, envs)
+	})
+
+	t.Run("mapSessionState unknown returns nil", func(t *testing.T) {
+		evt := &WorkerEvent{Type: EventSessionState, Payload: "unknown_status"}
+		envs, err := mapper.Map(evt)
+		require.NoError(t, err)
+		require.Nil(t, envs)
+	})
+}
+
