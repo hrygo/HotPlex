@@ -1,0 +1,30 @@
+# HotPlex Worker Gateway - Development Configuration
+#
+# Inherits from base config, yml, and overrides for local development.
+# Usage: ./hotplex-worker -config configs/config-dev.yaml
+
+inherits: config.yaml
+
+gateway:
+  addr: ":8888"              # Local development port
+
+admin:
+  addr: ":9999"              # Local admin port
+  rate_limit_enabled: false  # Disable rate limiting for development
+
+security:
+  tls_enabled: false         # No TLS in development
+  allowed_origins:
+    - "*"                    # Allow all origins for local testing
+
+session:
+  retention_period: 24h      # Shorter retention for development
+  max_concurrent: 100        # Lower limit for local dev
+
+pool:
+  max_size: 50               # Smaller pool for development
+  max_memory_per_user: 1073741824  # 1GB limit for dev
+
+worker:
+  idle_timeout: 5m           # Shorter idle timeout for faster cleanup
+  execution_timeout: 5m      # Shorter execution timeout

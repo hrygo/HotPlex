@@ -1,0 +1,150 @@
+# HotPlex Worker Gateway - Default Configuration
+#
+# This file contains all configurable options with production-ready defaults.
+# Sensitive values (JWT secret, admin tokens) should be set via environment variables.
+#
+# Configuration hierarchy (lowest to highest priority):
+#   1. Code defaults (internal/config/config.go:Default())
+#   2. This file (configs/config.yaml)
+#   3. Environment variables (HOTPLEX_*)
+#   4. Secrets provider (if configured)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CORE NETWORK CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# WebSocket gateway address (clients connect here)
+# Production: use TLS (wss://) and proper hostname
+# Development: :8888 (localhost only)
+gateway:
+  addr: ":8888"
+
+  # WebSocket performance tuning
+  read_buffer_size: 4096      # 4KB read buffer per connection
+  write_buffer_size: 4096     # 4KB write buffer per connection
+  ping_interval: 54s          # Send WebSocket ping every 54s
+  pong_timeout: 60s           # Expect pong within 60s (disconnect if missed)
+  write_timeout: 10s          # Maximum time to write a message
+  idle_timeout: 5m            # Disconnect idle clients after 5 minutes
+  max_frame_size: 32768       # 32KB max message size (prevents memory exhaustion)
+  broadcast_queue_size: 256   # Buffer for broadcasting events to connections
+
+# Admin API address (monitoring, session management)
+# Should be firewalled from public access in production
+admin:
+  enabled: true
+  addr: ":9999"
+
+  # Authentication tokens (set via environment for security)
+  # Environment: HOTPLEX_ADMIN_TOKEN_1, HOTPLEX_ADMIN_TOKEN_2
+  tokens: []
+
+  # Token scopes (map token to allowed operations)
+  # Example: token_1: ["session:read", "session:write", "stats:read"]
+  token_scopes: {}
+
+  # Default scopes for tokens without explicit scopes
+  default_scopes:
+    - "session:read"
+    - "stats:read"
+    - "health:read"
+
+  # IP whitelist (disable for Docker/Kubernetes, use network policies instead)
+  ip_whitelist_enabled: false
+  allowed_cidrs:
+    - "127.0.0.0/8"    # Localhost
+    - "10.0.0.0/8"      # Private network (Docker, Kubernetes)
+
+  # Rate limiting (prevent abuse)
+  rate_limit_enabled: true
+  requests_per_sec: 10   # 10 requests/second per IP
+  burst: 20              # Allow short bursts up to 20 requests
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA PERSISTENCE
+# ─────────────────────────────────────────────────────────────────────────────
+
+db:
+  path: "gateway.db"          # SQLite database file path
+  wal_mode: true              # Write-Ahead Logging (better concurrency)
+  busy_timeout: 500ms         # SQLite lock timeout
+  max_open_conns: 1           # Single writer (SQLite limitation)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECURITY CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+security:
+  # API key validation (for client authentication)
+  api_key_header: "X-API-Key"   # HTTP header name for API keys
+  api_keys: []                  # Set via environment: HOTPLEX_API_KEYS
+
+  # TLS configuration (ENABLE IN PRODUCTION!)
+  tls_enabled: false            # Set to true for production
+  tls_cert_file: "/etc/hotplex/tls/server.crt"
+  tls_key_file: "/etc/hotplex/tls/server.key"
+
+  # CORS (Cross-Origin Resource Sharing)
+  allowed_origins:
+    - "*"                      # Development: allow all origins
+    # Production: restrict to your domains
+    # - "https://app.example.com"
+    # - "https://admin.example.com"
+
+  # JWT validation (for session tokens)
+  # Secret MUST be set via environment: HOTPLEX_JWT_SECRET
+  jwt_audience: "hotplex-worker-gateway"  # Expected audience claim
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SESSION LIFECYCLE
+# ─────────────────────────────────────────────────────────────────────────────
+
+session:
+  retention_period: 168h      # 7 days - keep session metadata
+  gc_scan_interval: 1m        # Scan for expired sessions every minute
+  max_concurrent: 1000        # Maximum concurrent sessions across all users
+
+  # Event persistence (message delta, raw I/O, state changes)
+  event_store_enabled: true   # Enable to support replay/debugging
+  event_store_type: "sqlite"  # Storage backend (sqlite, custom)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SESSION POOL MANAGEMENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+pool:
+  min_size: 0                 # Minimum pre-warmed sessions (0 = on-demand)
+  max_size: 100               # Maximum total sessions (adjust based on memory)
+  max_idle_per_user: 3        # Max idle sessions per bot_id
+  max_memory_per_user: 2147483648  # 2GB memory limit per bot_id (0 = unlimited)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKER PROCESS CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+worker:
+  max_lifetime: 24h           # Kill worker processes after 24h (prevent leaks)
+  idle_timeout: 30m           # Terminate idle workers after 30 minutes
+  execution_timeout: 10m      # Maximum time for single tool/operation
+
+  # Environment variable control
+  # Workers inherit a whitelist of safe environment variables
+  allowed_envs: []            # Additional envs to pass through
+  env_whitelist:              # Always-allowed safe envs
+    - "PATH"
+    - "HOME"
+    - "USER"
+    - "LANG"
+    - "LC_ALL"
+    - "TERM"
+    - "TMPDIR"
+    - "TEMP"
+    - "TMP"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INHERITANCE (Advanced)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Inherit from another config file (useful for environment-specific overrides)
+# Example: production.yaml inherits from base.yaml, then overrides specific fields
+# inherits: "base.yaml"  # Uncomment to enable
