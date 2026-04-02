@@ -6,7 +6,6 @@ This module provides functions for encoding/decoding AEP v1 messages
 """
 
 import json
-import re
 import time
 import uuid
 from typing import Any, TypeVar

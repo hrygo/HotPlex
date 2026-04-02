@@ -39,7 +39,6 @@ from hotplex_client import (
     ControlData,
     SessionState,
     WorkerType,
-    MessageDeltaData as MessageDeltaEventData,  # 避免与 MessageDeltaData 冲突
 )
 
 # 配置日志

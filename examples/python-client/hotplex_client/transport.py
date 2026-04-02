@@ -43,12 +43,11 @@ class WebSocketTransport:
     - Basic error handling
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_queue_size: int = 1000) -> None:
         self._ws: WebSocketClientProtocol | None = None
         self._session_id: str = ""
-        self._message_queue: asyncio.Queue[Envelope[Any]] = asyncio.Queue()
+        self._message_queue: asyncio.Queue[Envelope[Any]] = asyncio.Queue(maxsize=max_queue_size)
         self._receive_task: asyncio.Task[None] | None = None
-        self._connected = False
 
     @property
     def session_id(self) -> str:
@@ -58,7 +57,7 @@ class WebSocketTransport:
     @property
     def is_connected(self) -> bool:
         """Check if transport is connected."""
-        return self._connected and self._ws is not None and self._ws.open
+        return self._ws is not None and self._ws.open
 
     async def connect(
         self,
@@ -105,7 +104,10 @@ class WebSocketTransport:
 
             # Wait for init_ack
             response = await self._ws.recv()
-            ack_env = decode_envelope(str(response))
+            # Handle both str and bytes messages
+            if isinstance(response, bytes):
+                response = response.decode("utf-8")
+            ack_env = decode_envelope(response)
 
             if is_error(ack_env):
                 error_data = ack_env.event.data
@@ -118,7 +120,6 @@ class WebSocketTransport:
 
             ack_data = ack_env.event.data
             self._session_id = ack_data.get("session_id", "")
-            self._connected = True
 
             # Start background message receiver
             self._receive_task = asyncio.create_task(self._receive_loop())
@@ -150,7 +151,6 @@ class WebSocketTransport:
             message = encode_envelope(envelope)
             await self._ws.send(message)
         except websockets.ConnectionClosed as e:
-            self._connected = False
             raise ConnectionLostError(f"Connection closed: {e}") from e
         except Exception as e:
             raise TransportError(f"Send failed: {e}") from e
@@ -182,16 +182,17 @@ class WebSocketTransport:
         try:
             async for message in self._ws:
                 try:
-                    env = decode_envelope(str(message))
+                    # Handle both str and bytes messages
+                    if isinstance(message, bytes):
+                        message = message.decode("utf-8")
+                    env = decode_envelope(message)
                     await self._message_queue.put(env)
                 except Exception as e:
                     logger.error(f"Failed to decode message: {e}")
         except websockets.ConnectionClosed as e:
             logger.warning(f"WebSocket closed: {e}")
-            self._connected = False
         except Exception as e:
             logger.error(f"Receive loop error: {e}")
-            self._connected = False
 
     async def _cleanup(self) -> None:
         """Clean up resources."""
@@ -209,8 +210,6 @@ class WebSocketTransport:
             except Exception:
                 pass
             self._ws = None
-
-        self._connected = False
 
     async def __aenter__(self) -> "WebSocketTransport":
         """Support async with context manager."""
