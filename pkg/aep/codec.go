@@ -275,9 +275,3 @@ func nowMillis() int64 {
 var nowFunc = func() int64 {
 	return 0 // Will be set by events package if needed
 }
-
-func init() {
-	nowFunc = func() int64 {
-		return 0 // Placeholder - will be set by calling package
-	}
-}

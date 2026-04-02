@@ -4,7 +4,6 @@ package security
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -304,30 +304,13 @@ func (b *jtiBlacklist) Size() int {
 
 // GenerateJTI generates a cryptographically secure JWT ID.
 func GenerateJTI() (string, error) {
-	b := make([]byte, 16)
-	n, err := rand.Read(b)
-	if err != nil {
-		return "", fmt.Errorf("security: crypto/rand unavailable: %w", err)
-	}
-	if n != 16 {
-		return "", fmt.Errorf("security: crypto/rand read insufficient bytes: got %d, want 16", n)
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%s-%s-%s-%s-%s",
-		fmt.Sprintf("%02x%02x%02x%02x", b[0], b[1], b[2], b[3]),
-		fmt.Sprintf("%02x%02x", b[4], b[5]),
-		fmt.Sprintf("%02x%02x", b[6], b[7]),
-		fmt.Sprintf("%02x%02x", b[8], b[9]),
-		fmt.Sprintf("%02x%02x%02x%02x%02x%02x", b[10], b[11], b[12], b[13], b[14], b[15]),
-	), nil
+	return uuid.New().String(), nil
 }
 
 func mustGenerateJTI() string {
 	jti, err := GenerateJTI()
 	if err != nil {
-		n, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-		return fmt.Sprintf("fallback-%064s", n.Text(16))
+		return "" // crypto/rand should never fail on a healthy system
 	}
 	return jti
 }

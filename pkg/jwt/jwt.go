@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	guuid "github.com/google/uuid"
 )
 
 const (
@@ -263,31 +264,7 @@ func CompareKeys(a, b string) bool {
 
 // GenerateJTI generates a new JWT ID (jti) using crypto/rand.
 func NewJTI() (string, error) {
-	b := make([]byte, 16)
-	_, err := rand.Read(b)
-	if err != nil {
-		return "", fmt.Errorf("jwt: crypto/rand read: %w", err)
-	}
-	return uuid(b), nil
-}
-
-// uuid formats a byte slice as a UUID string.
-func uuid(b []byte) string {
-	const hexChars = "0123456789abcdef"
-	result := make([]byte, 36)
-	for i, j := 0, 0; i < 16; i++ {
-		if i == 4 || i == 6 || i == 8 || i == 10 {
-			result[i+j] = '-'
-			j++
-		}
-		result[i+j] = hexChars[b[i]>>4]
-		result[i+j+1] = hexChars[b[i]&0x0f]
-		if j == 1 {
-			// After first hyphen, adjust i to account for extra position
-			i--
-		}
-	}
-	return string(result)
+	return guuid.New().String(), nil
 }
 
 // GenerateECDSAKey generates a new ECDSA P-256 key pair.
