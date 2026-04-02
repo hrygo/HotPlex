@@ -20,7 +20,6 @@ services:
     environment:
       # Production settings
       - HOTPLEX_LOG_LEVEL=warn
-      - HOTPLEX_DEV_MODE=false
 
     volumes:
       # Production TLS certificates

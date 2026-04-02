@@ -40,9 +40,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags="-s -w \
-        -X main.version=${GIT_SHA} \
-        -X main.buildTime=${BUILD_TIME} \
-        -X main.goVersion=${GO_VERSION}" \
+        -X main.version=${GIT_SHA}" \
     -o /build/bin/hotplex-worker \
     ./cmd/worker
 

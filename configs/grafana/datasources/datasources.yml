@@ -1,0 +1,21 @@
+# Grafana Datasource Provisioning Configuration
+#
+# This file configures data sources for Grafana.
+# In containerized deployments, Prometheus is available at http://prometheus:9090.
+#
+# See: https://grafana.com/docs/grafana/latest/administration/provisioning/#datasources
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+      queryTimeout: 60s

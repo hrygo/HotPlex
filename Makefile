@@ -20,9 +20,7 @@ GOARCH        := $(shell go env GOARCH)
 GIT_SHA       := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME    := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS       := -s -w \
-	-X main.version=$(GIT_SHA) \
-	-X main.buildTime=$(BUILD_TIME) \
-	-X main.goVersion=$(GO_VERSION)
+	-X main.version=$(GIT_SHA)
 
 # Cross-compile platforms
 PLATFORMS     := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64

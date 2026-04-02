@@ -1,0 +1,22 @@
+# Grafana Dashboard Provider Configuration
+#
+# This file configures Grafana to load dashboards from this directory.
+# Dashboards can be JSON files or subdirectories containing JSON files.
+#
+# See: https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards
+
+apiVersion: 1
+
+providers:
+  - name: 'HotPlex Dashboards'
+    orgId: 1
+    folder: ''
+    folderUid: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      # Look for JSON files recursively
+      recursive: false
