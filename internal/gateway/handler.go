@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"hotplex-worker/internal/aep"
+	"hotplex-worker/pkg/aep"
 	"hotplex-worker/internal/config"
 	"hotplex-worker/internal/metrics"
 	"hotplex-worker/internal/security"

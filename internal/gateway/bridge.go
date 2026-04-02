@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"hotplex-worker/internal/aep"
+	"hotplex-worker/pkg/aep"
 	"hotplex-worker/internal/metrics"
 	"hotplex-worker/internal/session"
 	"hotplex-worker/internal/worker"

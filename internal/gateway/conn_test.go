@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"hotplex-worker/internal/aep"
+	"hotplex-worker/pkg/aep"
 	"hotplex-worker/internal/config"
 	"hotplex-worker/internal/security"
 	"hotplex-worker/internal/session"

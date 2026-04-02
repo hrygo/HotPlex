@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	"hotplex-worker/internal/aep"
+	"hotplex-worker/pkg/aep"
 	"hotplex-worker/pkg/events"
 )
 

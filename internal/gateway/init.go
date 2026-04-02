@@ -4,7 +4,7 @@ package gateway
 import (
 	"time"
 
-	"hotplex-worker/internal/aep"
+	"hotplex-worker/pkg/aep"
 	"hotplex-worker/internal/worker"
 	"hotplex-worker/pkg/events"
 )

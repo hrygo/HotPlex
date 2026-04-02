@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"hotplex-worker/internal/admin"
-	"hotplex-worker/internal/aep"
+	"hotplex-worker/pkg/aep"
 	"hotplex-worker/internal/config"
 	"hotplex-worker/internal/gateway"
 	"hotplex-worker/internal/security"

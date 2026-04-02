@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"hotplex-worker/internal/aep"
+	"hotplex-worker/pkg/aep"
 	"hotplex-worker/pkg/events"
 )
 
