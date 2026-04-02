@@ -58,3 +58,5 @@ build/
 .agent/settings.local.json
 
 .vscode
+
+gateway.db*
