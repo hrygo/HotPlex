@@ -5,6 +5,8 @@ BINARY_NAME   := hotplex-worker
 BUILD_DIR     := bin
 MAIN_PATH     := ./cmd/worker
 GO_VERSION    := $(shell go version | cut -d' ' -f3)
+GOOS          := $(shell go env GOOS)
+GOARCH        := $(shell go env GOARCH)
 GIT_SHA       := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME    := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS       := -s -w \
@@ -12,62 +14,62 @@ LDFLAGS       := -s -w \
 	-X main.buildTime=$(BUILD_TIME) \
 	-X main.goVersion=$(GO_VERSION)
 
+# ─── Cross-compile matrix ────────────────────────────────────────────────────────
+PLATFORMS     := linux/amd64 darwin/arm64
+
 # ─── Go parameters ───────────────────────────────────────────────────────────────
 GOCMD     := go
 GOBUILD   := $(GOCMD) build
 GOTEST    := $(GOCMD) test
 GOFMT     := $(GOCMD) fmt
 GOTIDY    := $(GOCMD) mod tidy
-GOMOD     := $(GOCMD) mod
 
-# ─── Directories ─────────────────────────────────────────────────────────────────
+# ─── Output files ────────────────────────────────────────────────────────────────
 COVERAGE_FILE := coverage.out
 HTML_FILE     := coverage.html
 
 # ─── Targets ─────────────────────────────────────────────────────────────────────
-.PHONY: all build build-pgo build-clean test test-short lint lint-fix fmt tidy \
-	clean run run-dev run-verbose coverage coverage-html \
-	build-linux build-darwin build-all \
-	version help setup
+.PHONY: all build build-pgo build-all build-clean test test-short lint lint-fix fmt tidy \
+	clean run run-dev run-verbose coverage coverage-html version help setup
 
-# all should be lint+test+build in CI, but just build locally
 all: lint test build
 
 # ─── Build ───────────────────────────────────────────────────────────────────────
-build: ## Build hotplex-worker (default)
-	@echo "Building $(BINARY_NAME)..."
+# Default: auto-detect OS/ARCH, output as hotplex-worker-<os>-<arch>
+build: ## Build for current platform
+	@echo "Building $(BINARY_NAME) ($(GOOS)/$(GOARCH))..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
+	$(GOBUILD) -trimpath -ldflags="$(LDFLAGS)" \
+		-o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) $(MAIN_PATH)
 
-build-pgo: ## Build with PGO optimization
-	@echo "Building $(BINARY_NAME) with PGO..."
+build-pgo: ## Build for current platform with PGO
+	@echo "Building $(BINARY_NAME) with PGO ($(GOOS)/$(GOARCH))..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -trimpath -pgo=auto -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
+	$(GOBUILD) -trimpath -pgo=auto -ldflags="$(LDFLAGS)" \
+		-o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) $(MAIN_PATH)
 
-# Cross-compile targets
-build-linux: ## Build for linux/amd64
+# Cross-compile all platforms from PLATFORMS matrix
+build-all: ## Build for all platforms (linux/amd64, darwin/arm64)
+	@echo "Cross-compiling for all platforms..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -trimpath -ldflags="$(LDFLAGS)" \
-		-o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(MAIN_PATH)
-
-build-darwin: ## Build for darwin/arm64 (Apple Silicon)
-	@mkdir -p $(BUILD_DIR)
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) -trimpath -ldflags="$(LDFLAGS)" \
-		-o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 $(MAIN_PATH)
-
-build-all: build build-pgo build-linux build-darwin ## Build all platforms
+	@$(foreach platform,$(PLATFORMS), \
+		$(eval _os=$(word 1,$(subst /, ,$(platform)))) \
+		$(eval _arch=$(word 2,$(subst /, ,$(platform)))) \
+		echo "  $(_os)/$(_arch)..."; \
+		GOOS=$(_os) GOARCH=$(_arch) $(GOBUILD) -trimpath -ldflags="$(LDFLAGS)" \
+			-o $(BUILD_DIR)/$(BINARY_NAME)-$(platform) $(MAIN_PATH);)
 
 build-clean: clean build ## Clean + rebuild
 
 # ─── Run ────────────────────────────────────────────────────────────────────────
 run: build ## Build and run hotplex-worker
-	./$(BUILD_DIR)/$(BINARY_NAME)
+	./$(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)
 
 run-dev: build ## Build and run in dev mode
-	./$(BUILD_DIR)/$(BINARY_NAME) -dev
+	./$(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) -dev
 
 run-verbose: build ## Build and run with verbose output
-	./$(BUILD_DIR)/$(BINARY_NAME) -v
+	./$(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) -v
 
 # ─── Test ────────────────────────────────────────────────────────────────────────
 test: ## Run all tests with race detection
@@ -118,11 +120,11 @@ clean: ## Remove build artifacts
 
 # ─── Misc ────────────────────────────────────────────────────────────────────────
 version: ## Print version info
-	@echo "$(BINARY_NAME) version=$(GIT_SHA) go=$(GO_VERSION) time=$(BUILD_TIME)"
+	@echo "$(BINARY_NAME) version=$(GIT_SHA) go=$(GO_VERSION) platform=$(GOOS)/$(GOARCH) time=$(BUILD_TIME)"
 
 setup: ## Install development tools
 	@echo "Installing tools..."
-	$(GOMOD) download
+	$(GOTIDY)
 	@if ! command -v golangci-lint > /dev/null 2>&1; then \
 		echo "Installing golangci-lint v1.64.8..."; \
 		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
