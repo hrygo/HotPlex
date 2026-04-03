@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 func TestValidateInit_Direct(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"hotplex-worker/internal/worker/base"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/worker/base"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 func TestReadOutput_ResultSuccess(t *testing.T) {

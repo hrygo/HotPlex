@@ -9,8 +9,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"hotplex-worker/internal/config"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Authenticator validates API keys and user credentials.

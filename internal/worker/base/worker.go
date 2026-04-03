@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"hotplex-worker/internal/config"
-	"hotplex-worker/internal/worker"
-	"hotplex-worker/internal/worker/proc"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/internal/worker/proc"
 )
 
 // Compile-time interface compliance checks.

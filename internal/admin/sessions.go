@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"hotplex-worker/internal/worker"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {

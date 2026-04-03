@@ -12,8 +12,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"hotplex-worker/internal/config"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Store defines the interface for session persistence.
@@ -34,6 +34,10 @@ type SQLiteStore struct {
 
 // NewSQLiteStore creates and initializes a new SQLiteStore.
 func NewSQLiteStore(ctx context.Context, cfg *config.Config) (*SQLiteStore, error) {
+	if err := ensureDBDir(cfg.DB.Path); err != nil {
+		return nil, err
+	}
+
 	db, err := sql.Open("sqlite3", cfg.DB.Path)
 	if err != nil {
 		return nil, fmt.Errorf("session store: open db: %w", err)
@@ -206,7 +210,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit, offset int) ([]*SessionIn
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, created_at, updated_at, expires_at, idle_expires_at, context_json
+		`SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, created_at, updated_at, expires_at, idle_expires_at, context_json
 		 FROM sessions ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("session store: list: %w", err)
@@ -221,7 +225,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit, offset int) ([]*SessionIn
 		var createdAt, updatedAt time.Time
 
 		err := rows.Scan(&si.ID, &si.UserID, &si.OwnerID, &si.WorkerSessionID, &si.WorkerType, &si.State,
-			&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON)
+			&si.BotID, &createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON)
 		if err != nil {
 			continue
 		}

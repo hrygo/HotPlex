@@ -5,8 +5,8 @@ import (
 	"io"
 	"time"
 
-	"hotplex-worker/internal/worker"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Compile-time interface compliance checks.

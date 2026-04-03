@@ -3,7 +3,7 @@ package gateway
 import (
 	"testing"
 
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 func TestValidateInit_DirectCheck(t *testing.T) {

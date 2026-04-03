@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/internal/worker"
 )
 
 func TestNoOpWorker_Capabilities(t *testing.T) {

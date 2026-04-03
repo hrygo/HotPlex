@@ -17,19 +17,19 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"hotplex-worker/internal/admin"
-	"hotplex-worker/pkg/aep"
-	"hotplex-worker/internal/config"
-	"hotplex-worker/internal/gateway"
-	"hotplex-worker/internal/security"
-	"hotplex-worker/internal/session"
-	"hotplex-worker/internal/tracing"
-	"hotplex-worker/internal/worker"
-	_ "hotplex-worker/internal/worker/claudecode"
-	_ "hotplex-worker/internal/worker/opencodecli"
-	_ "hotplex-worker/internal/worker/opencodeserver"
-	_ "hotplex-worker/internal/worker/pi"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/admin"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/internal/gateway"
+	"github.com/hotplex/hotplex-worker/internal/security"
+	"github.com/hotplex/hotplex-worker/internal/session"
+	"github.com/hotplex/hotplex-worker/internal/tracing"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	_ "github.com/hotplex/hotplex-worker/internal/worker/claudecode"
+	_ "github.com/hotplex/hotplex-worker/internal/worker/opencodecli"
+	_ "github.com/hotplex/hotplex-worker/internal/worker/opencodeserver"
+	_ "github.com/hotplex/hotplex-worker/internal/worker/pi"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 var (

@@ -14,13 +14,13 @@ import (
 	"github.com/gorilla/websocket"
 	"go.opentelemetry.io/otel/codes"
 
-	"hotplex-worker/pkg/aep"
-	"hotplex-worker/internal/config"
-	"hotplex-worker/internal/metrics"
-	"hotplex-worker/internal/security"
-	"hotplex-worker/internal/session"
-	"hotplex-worker/internal/tracing"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/internal/metrics"
+	"github.com/hotplex/hotplex-worker/internal/security"
+	"github.com/hotplex/hotplex-worker/internal/session"
+	"github.com/hotplex/hotplex-worker/internal/tracing"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // isReadTimeout reports whether err is a read deadline exceeded error.

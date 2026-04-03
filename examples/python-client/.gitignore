@@ -1,56 +1,36 @@
-# Python
+# Python Example .gitignore
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+*.egg-info/
+.eggs/
+
+# Distribution
 build/
 develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
 lib/
 lib64/
 parts/
 sdist/
 var/
 wheels/
-*.egg-info/
-.installed.cfg
 *.egg
 
-# Virtual environments
-venv/
-env/
-ENV/
-.venv
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
 # Testing
-.pytest_cache/
-.coverage
-htmlcov/
 .tox/
-
-# Type checking
-.mypy_cache/
 .dmypy.json
 dmypy.json
 
-# Distribution
+# Manifests
 *.manifest
 *.spec
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db

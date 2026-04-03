@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 func TestMapper_Map_StreamEvent(t *testing.T) {

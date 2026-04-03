@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"hotplex-worker/pkg/aep"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Mapper converts WorkerEvents to AEP envelopes.

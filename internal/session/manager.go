@@ -12,10 +12,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"hotplex-worker/internal/config"
-	"hotplex-worker/internal/metrics"
-	"hotplex-worker/internal/worker"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/internal/metrics"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Errors returned by the session manager.

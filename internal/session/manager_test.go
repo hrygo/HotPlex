@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"hotplex-worker/internal/config"
-	"hotplex-worker/internal/worker"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // ─── mockStore implements Store for testing ───────────────────────────────────

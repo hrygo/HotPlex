@@ -12,11 +12,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"hotplex-worker/pkg/aep"
-	"hotplex-worker/internal/metrics"
-	"hotplex-worker/internal/session"
-	"hotplex-worker/internal/tracing"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
+	"github.com/hotplex/hotplex-worker/internal/metrics"
+	"github.com/hotplex/hotplex-worker/internal/session"
+	"github.com/hotplex/hotplex-worker/internal/tracing"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Conn represents a single WebSocket client connection.

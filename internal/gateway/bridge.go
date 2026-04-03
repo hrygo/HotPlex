@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"time"
 
-	"hotplex-worker/pkg/aep"
-	"hotplex-worker/internal/metrics"
-	"hotplex-worker/internal/session"
-	"hotplex-worker/internal/worker"
-	"hotplex-worker/internal/worker/noop"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
+	"github.com/hotplex/hotplex-worker/internal/metrics"
+	"github.com/hotplex/hotplex-worker/internal/session"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/internal/worker/noop"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Bridge connects the gateway to the session manager.

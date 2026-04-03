@@ -1,0 +1,8 @@
+server:
+  port: 8080
+
+hotplex:
+  gateway:
+    url: ws://localhost:8888/ws
+    api-key: dev-api-key
+    jwt-secret: test-secret-key-for-development-32bytes

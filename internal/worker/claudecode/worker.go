@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"hotplex-worker/pkg/aep"
-	"hotplex-worker/internal/worker"
-	"hotplex-worker/internal/worker/base"
-	"hotplex-worker/internal/worker/proc"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/internal/worker/base"
+	"github.com/hotplex/hotplex-worker/internal/worker/proc"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Compile-time interface compliance checks.

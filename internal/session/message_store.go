@@ -12,8 +12,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"hotplex-worker/internal/config"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // ErrEventNotFound is returned when no events exist for a given session.
@@ -87,6 +87,10 @@ const (
 // NewSQLiteMessageStore creates a SQLiteMessageStore backed by the same DB path
 // as the session store. It starts a background goroutine for batch writes.
 func NewSQLiteMessageStore(ctx context.Context, cfg *config.Config) (*SQLiteMessageStore, error) {
+	if err := ensureDBDir(cfg.DB.Path); err != nil {
+		return nil, err
+	}
+
 	db, err := sql.Open("sqlite3", cfg.DB.Path)
 	if err != nil {
 		return nil, fmt.Errorf("session store: open msg db: %w", err)

@@ -7,8 +7,8 @@ import (
 	"os"
 	"sync"
 
-	"hotplex-worker/pkg/aep"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // Conn implements worker.SessionConn for stdin-based workers (claudecode, opencodecli).

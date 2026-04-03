@@ -1,4 +1,4 @@
-module hotplex-worker
+module github.com/hotplex/hotplex-worker
 
 go 1.26
 

@@ -12,12 +12,12 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 
-	"hotplex-worker/pkg/aep"
-	"hotplex-worker/internal/config"
-	"hotplex-worker/internal/security"
-	"hotplex-worker/internal/session"
-	"hotplex-worker/internal/worker"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/internal/security"
+	"github.com/hotplex/hotplex-worker/internal/session"
+	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // ─── WebSocket test helpers ───────────────────────────────────────────────────

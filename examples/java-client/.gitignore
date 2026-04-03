@@ -1,0 +1,25 @@
+# Java / Maven Example .gitignore
+target/
+*.class
+
+# Eclipse
+.project
+.classpath
+.settings/
+.factorypath
+
+# IntelliJ IDEA (in case of local opening)
+.idea/
+*.iml
+
+# NetBeans
+nbproject/private/
+build/
+nbbuild/
+dist/
+nbdist/
+nbactions.xml
+nb-configuration.xml
+
+# VS Code
+.vscode/

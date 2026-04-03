@@ -1,64 +1,49 @@
-# Binaries
-/gateway
+# HotPlex Worker Gateway
+
+# Go backend
 bin/
-*.exe
-*.exe~
-*.dll
+hotplex-worker
+hotplex-worker-*
+worker
+gateway
+hotplex-worker.pid
+*.test
+*.out
+*.html
+coverage.txt
+coverage/
+vendor/
+go.work
 *.so
 *.dylib
 
-# Test binary
-*.test
+# Database & runtime
+*.db
+*.db-shm
+*.db-wal
+hotplex-worker.db*
+*.log
+logs/
 
-# Output of the go coverage tool
-*.out
-coverage.txt
+# Configs & secrets
+*.local.yaml
+*.local.yml
+.env
+.env.*
+.agent/settings.local.json
+*.pem
+*.key
 
-# Dependency directories
-vendor/
-node_modules
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Go workspace file
-go.work
-
-# IDE
+# IDEs
 .idea/
 *.iml
 .vscode/
 *.swp
 *.swo
 *~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Local config (secrets, overrides)
-*.local.yaml
-*.local.yml
-.env
-.env.*
-
-# Runtime
-*.db          # SQLite
-*.db-shm
-*.db-wal
-
-# Logs
-*.log
-
-# Certs
-*.pem
-*.key
-
-# Build artifacts
-dist/
-build/
-
-# agents
-.loki
-.agent/settings.local.json
-
-.vscode
-
-hotplex-worker.db*

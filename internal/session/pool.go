@@ -4,7 +4,7 @@ import (
 	"errors"
 	"log/slog"
 
-	"hotplex-worker/internal/metrics"
+	"github.com/hotplex/hotplex-worker/internal/metrics"
 	"sync"
 )
 

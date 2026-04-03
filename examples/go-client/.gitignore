@@ -1,0 +1,11 @@
+# Go Example .gitignore
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+go.work

@@ -1,0 +1,10 @@
+# Node.js / TypeScript Example .gitignore
+node_modules/
+dist/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.eslintcache
+.vitest-cache/
+coverage/

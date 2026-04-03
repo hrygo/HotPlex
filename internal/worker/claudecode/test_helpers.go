@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
 // newTestLogger creates a logger for testing.

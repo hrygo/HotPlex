@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hotplex-worker/internal/config"
-	"hotplex-worker/pkg/events"
+	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hotplex/hotplex-worker/pkg/events"
 
 	"github.com/stretchr/testify/require"
 )

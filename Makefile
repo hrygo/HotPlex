@@ -44,6 +44,7 @@ COVERAGE_FILE := coverage.out
 HTML_FILE     := coverage.html
 PID_FILE      := /tmp/hotplex-worker.pid
 LOG_FILE      := logs/hotplex-worker.log
+GRACE_PERIOD  := 7  # seconds to wait for graceful shutdown
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PHONY Targets (Grouped by functionality)
@@ -211,22 +212,18 @@ stop: ## Stop background process gracefully (SIGTERM)
 		PID=$$(cat $(PID_FILE)); \
 		if kill -0 $$PID 2>/dev/null; then \
 			echo "🟡 Sending SIGTERM to process $$PID..."; \
-			sleep 2; \
-			if kill -0 $$PID 2>/dev/null; then \
-				echo "⏳ Waiting for graceful shutdown..."; \
-				sleep 5; \
-				if kill -0 $$PID 2>/dev/null; then \
-					echo "✅ Process stopped gracefully"; \
+			kill -TERM $$PID; \
+			for i in $$(seq 1 $(GRACE_PERIOD)); do \
+				sleep 1; \
+				if ! kill -0 $$PID 2>/dev/null; then \
+					echo "✅ Process stopped gracefully after $$i seconds"; \
 					rm -f $(PID_FILE); \
-				else \
-					echo "⚠️  Process still running, use 'make force-kill' to force stop"; \
-				fi \
-			else \
-				echo "✅ Process stopped"; \
-				rm -f $(PID_FILE); \
-			fi \
+					exit 0; \
+				fi; \
+			done; \
+			echo "⚠️  Process still running after $(GRACE_PERIOD) seconds, use 'make force-kill' to force stop"; \
 		else \
-			echo "❌ Process not running (PID: $$PID)"; \
+			echo "✅ Process not running"; \
 			rm -f $(PID_FILE); \
 		fi \
 	else \
@@ -307,6 +304,8 @@ clean: ## Remove build artifacts and temporary files
 	@echo "🧹 Cleaning..."
 	$(GOCMD) clean
 	rm -rf $(BUILD_DIR)
+	rm -f worker gateway
+	rm -f *.db*
 	rm -f $(COVERAGE_FILE) $(HTML_FILE)
 	rm -f $(PID_FILE)
 	@echo "✅ Cleaned"
