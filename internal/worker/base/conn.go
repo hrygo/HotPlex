@@ -67,7 +67,7 @@ func (c *Conn) SendUserMessage(ctx context.Context, content string) error {
 		Text string `json:"text"`
 	}
 	type message struct {
-		Type    string        `json:"type"`
+		Role    string        `json:"role"`
 		Content []textContent `json:"content"`
 	}
 	type userMessage struct {
@@ -78,7 +78,7 @@ func (c *Conn) SendUserMessage(ctx context.Context, content string) error {
 	msg := userMessage{
 		Type: "user",
 		Message: message{
-			Type:    "user",
+			Role:    "user",
 			Content: []textContent{{Type: "text", Text: content}},
 		},
 	}

@@ -156,7 +156,7 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) []string 
 	if session.ContinueSession {
 		args = append(args, "--continue")
 	} else {
-		args = append(args, "--session-id", session.SessionID)
+		args = append(args, "--session-id", aep.ParseSessionID(session.SessionID))
 	}
 
 	if resume {

@@ -170,9 +170,7 @@ HOTPLEX_AUTH_TOKEN=your-token-here
 
 ## Examples
 
-See the `examples/` directory for complete examples:
-
-- `examples/nextjs-chat/` - Next.js App Router example
+See the top-level `web-chat/` directory for a complete Next.js App Router example.
 
 ## License
 
