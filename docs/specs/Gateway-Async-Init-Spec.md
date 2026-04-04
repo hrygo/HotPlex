@@ -43,9 +43,9 @@ Client                     Gateway                          Worker
   │──── init ────────────────▶│                               │
   │                            │ sm.CreateWithBot (DB write)   │
   │                            │ wf.NewWorker (memory alloc)   │
+  │                            │ sm.AttachWorker                │
   │                            │ w.Start() ←───────────────────│ fork+exec
-  │                            │ sm.AttachWorker                │   (cold start 300ms–10s)
-  │                            │ sm.Transition(RUNNING)         │
+  │                            │ sm.Transition(RUNNING)         │   (cold start 300ms–10s)
   │                            │ go forwardEvents()              │
   │◀─── init_ack (state=CREATED)│                              │
   │                            │                               │
@@ -60,8 +60,8 @@ Client                     Gateway                          Worker
 |-------|----------|-----------------|
 | `sm.CreateWithBot` | ~1ms | Yes |
 | `wf.NewWorker` | ~0.5ms | Yes |
-| `w.Start()` | **300ms–10s** | **Yes (primary bottleneck)** |
 | `sm.AttachWorker` | ~1ms | Yes |
+| `w.Start()` | **300ms–10s** | **Yes (primary bottleneck)** |
 | `sm.Transition` | ~1ms | Yes |
 | `go forwardEvents()` | — | No (async) |
 | `send init_ack` | ~1ms | Yes |
@@ -194,9 +194,9 @@ type SessionStarter interface {
 // SetupSession creates the DB record and worker, attaches it, but does not start it.
 // This is the synchronous part of session initialization.
 func (b *Bridge) SetupSession(ctx context.Context, id, userID, botID string,
-    wt worker.WorkerType, allowedTools []string) (*worker.Worker, error) {
+    wt worker.WorkerType, allowedTools []string) (worker.Worker, error) {
 
-    si, err := b.sm.CreateWithBot(ctx, id, userID, botID, wt, allowedTools)
+    _, err := b.sm.CreateWithBot(ctx, id, userID, botID, wt, allowedTools)
     if err != nil {
         return nil, fmt.Errorf("bridge: create session: %w", err)
     }
@@ -224,15 +224,18 @@ func (b *Bridge) LaunchSession(ctx context.Context, w worker.Worker, id string, 
         b.sm.DetachWorker(id)
         _ = b.sm.Delete(ctx, id)
         // Notify client of failure via error + done.
+        // Use PriorityControl to bypass backpressure queue.
         errEnv := events.NewEnvelope(aep.NewID(), id, b.hub.NextSeq(id),
             events.Error, events.ErrorData{
                 Code:    events.ErrCodeWorkerStartFailed,
                 Message: err.Error(),
             })
+        errEnv.Priority = events.PriorityControl
         doneEnv := events.NewEnvelope(aep.NewID(), id, b.hub.NextSeq(id),
             events.Done, events.DoneData{Success: false})
-        _ = b.hub.SendToSession(context.Background(), errEnv, hub.PriorityControl)
-        _ = b.hub.SendToSession(context.Background(), doneEnv, hub.PriorityControl)
+        doneEnv.Priority = events.PriorityControl
+        _ = b.hub.SendToSession(context.Background(), errEnv)
+        _ = b.hub.SendToSession(context.Background(), doneEnv)
         metrics.GatewayErrorsTotal.WithLabelValues("worker_start_failed").Inc()
         return
     }
