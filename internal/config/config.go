@@ -392,6 +392,11 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 		cfg.Security.JWTSecret = []byte(secret)
 	}
 
+	// Numbered environment variables for slices (e.g. HOTPLEX_ADMIN_TOKEN_1..N)
+	// This supports project conventions for secret rotation and .env clarity.
+	cfg.Admin.Tokens = aggregateNumberedEnv(cfg.Admin.Tokens, "HOTPLEX_ADMIN_TOKEN_")
+	cfg.Security.APIKeys = aggregateNumberedEnv(cfg.Security.APIKeys, "HOTPLEX_SECURITY_API_KEY_")
+
 	// Post-process: normalize allowed_envs into env_whitelist.
 	if len(cfg.Worker.AllowedEnvs) > 0 {
 		seen := make(map[string]bool)
@@ -445,6 +450,28 @@ func normalizePath(p string) (string, error) {
 		p = abs
 	}
 	return p, nil
+}
+
+// aggregateNumberedEnv appends values from environment variables like PREFIX_1, PREFIX_2...
+// to the existing slice, deduplicating them.  Supports project's secret rotation convention.
+func aggregateNumberedEnv(existing []string, prefix string) []string {
+	seen := make(map[string]bool)
+	for _, v := range existing {
+		seen[v] = true
+	}
+
+	for i := 1; ; i++ {
+		key := fmt.Sprintf("%s%d", prefix, i)
+		val := os.Getenv(key)
+		if val == "" {
+			break
+		}
+		if !seen[val] {
+			existing = append(existing, val)
+			seen[val] = true
+		}
+	}
+	return existing
 }
 
 // MustLoad is like Load but panics on error.

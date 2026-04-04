@@ -360,3 +360,21 @@ func TestLoad_Inheritance_PathExpansion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ":8001", cfg.Gateway.Addr)
 }
+
+func TestLoad_NumberedEnv(t *testing.T) {
+	os.Setenv("HOTPLEX_ADMIN_TOKEN_1", "token1")
+	os.Setenv("HOTPLEX_ADMIN_TOKEN_2", "token2")
+	os.Setenv("HOTPLEX_SECURITY_API_KEY_1", "key1")
+	defer func() {
+		os.Unsetenv("HOTPLEX_ADMIN_TOKEN_1")
+		os.Unsetenv("HOTPLEX_ADMIN_TOKEN_2")
+		os.Unsetenv("HOTPLEX_SECURITY_API_KEY_1")
+	}()
+
+	cfg, err := Load("", LoadOptions{})
+	require.NoError(t, err)
+
+	require.Contains(t, cfg.Admin.Tokens, "token1")
+	require.Contains(t, cfg.Admin.Tokens, "token2")
+	require.Contains(t, cfg.Security.APIKeys, "key1")
+}

@@ -1,302 +1,211 @@
-# HotPlex Worker Gateway - Configuration
+# HotPlex Worker Gateway - Configuration Guide
 
-本目录包含 HotPlex Worker Gateway 的所有配置文件。
+本目录包含 HotPlex Worker Gateway 的完整配置体系。项目遵循 **Convention Over Configuration** (约定优于配置) 原则，提供生产就绪的默认值，同时支持通过 YAML 和环境变量进行零停机热重载。
 
-## 目录结构
+---
 
-```
+## 📂 目录结构
+
+```text
 configs/
-├── config.yaml                    # 基础配置（生产就绪默认值）
-├── config-dev.yaml                # 开发环境配置
-├── config-prod.yaml               # 生产环境配置
-├── env.example                    # 环境变量模板
-├── README.md                      # 本文件
+├── config.yaml                    # 基础配置 (包含生产环境默认值)
+├── config-dev.yaml                # 开发环境配置 (继承自 config.yaml)
+├── config-prod.yaml               # 生产环境配置 (继承自 config.yaml)
+├── env.example                    # 环境变量模板 (拷贝至 .env 使用)
+├── README.md                      # 本手册
 │
-├── gateway/                       # Gateway 配置（预留扩展）
-│
-└── monitoring/                    # 监控配置
-    ├── prometheus.yml             # Prometheus 抓取配置
-    ├── alerts.yml                 # Prometheus 告警规则
-    ├── slo.yaml                   # SLO 定义
-    ├── otel-collector-config.yaml # OpenTelemetry 采集器配置
-    └── grafana/                   # Grafana 配置
-        ├── dashboards/
-        │   ├── dashboards.yml     # Dashboard provider
-        │   └── dashboard.json     # 主仪表板
-        └── datasources/
-            └── datasources.yml    # Datasource provider (Prometheus)
+└── monitoring/                    # 可观测性协议栈
+    ├── prometheus.yml             # Prometheus 抓取与告警规则
+    ├── grafana/                   # Grafana 看板定义
+    └── otel-collector-config.yaml # OpenTelemetry 采集器配置
 ```
 
-## 快速开始
+---
 
-### 1. 复制环境变量模板
+## 🚀 快速开始 (Quick Start)
 
+通过以下三个步骤，在 1 分钟内完成生产级环境初始化：
+
+### 1. 初始化环境变量
+复制模板并配置核心**安全凭据**：
 ```bash
 cp configs/env.example .env
 ```
+编辑 `.env` 文件，填入以下必填项：
+- `HOTPLEX_JWT_SECRET`: 用于会话鉴权。生成命令：`openssl rand -base64 32`。
+- `HOTPLEX_ADMIN_TOKEN_1`: 主管理端令牌。
+- `HOTPLEX_ADMIN_TOKEN_2`: 备用管理端令牌（用于无损轮转，详见下文）。
+- `HOTPLEX_ADMIN_ADDR`: (可选) 覆盖默认管理端口 `9999`。
 
-### 2. 生成必需密钥
-
+### 2. 准备数据目录
+默认 SQLite 存储路径为 `data/`：
 ```bash
-# JWT 密钥（32+ 字节）
-openssl rand -base64 32 | tr -d '\n'
-
-# Admin API 令牌（43 字符）
-openssl rand -base64 32 | tr -d '/+=' | head -c 43
+mkdir -p data
 ```
 
 ### 3. 启动服务
-
+**开发模式**:
 ```bash
-# 开发环境
 ./hotplex-worker -config configs/config-dev.yaml
+```
 
-# 生产环境
+**生产模式**:
+```bash
+export HOTPLEX_LOG_LEVEL=info
 ./hotplex-worker -config configs/config-prod.yaml
 ```
 
-## 配置继承
+---
 
-配置文件支持继承机制，子配置覆盖父配置的字段：
+## 🏗️ 配置架构与优先级 (Precedence)
+
+系统采用多层覆盖机制，优先级**从高到低**如下：
+
+1.  **Secrets Provider**: 外部注入的**核心凭据**（如 `JWT_SECRET`）。主要用于对接 HashiCorp Vault 等**企业级密钥管理服务 (KMS)**。
+2.  **环境变量 (Environment Variables)**: 以 `HOTPLEX_` 为前缀的所有变量。
+3.  **当前配置文件**: 通过 `-config` 指定的 YAML 文件。
+4.  **父级配置文件**: 通过 `inherits` 字段加载的基准配置。
+5.  **代码默认值**: 编译时内嵌的 `internal/config/config.go:Default()`。
+
+### 环境变量映射公式
+任何 YAML 中的配置项均可通过环境变量覆盖，公式如下：
+`HOTPLEX_<COMPONENT>_<FIELD>` (全大写，通过下划线连接)
+
+*   示例: `gateway.read_buffer_size` -> `HOTPLEX_GATEWAY_READ_BUFFER_SIZE`
+*   示例: `pool.max_size` -> `HOTPLEX_POOL_MAX_SIZE`
+
+### 编号式环境变量 (Numbered Envs)
+为了支持**安全令牌轮转 (Secret Rotation)**，以下字段支持通过编号后缀设置多个值（自动去重）：
+- `admin.tokens` -> `HOTPLEX_ADMIN_TOKEN_1` ... `HOTPLEX_ADMIN_TOKEN_N`
+- `security.api_keys` -> `HOTPLEX_SECURITY_API_KEY_1` ... `HOTPLEX_SECURITY_API_KEY_N`
+
+---
+
+## 🌐 网络与防火墙 (Network & Firewall)
+
+HotPlex Worker Gateway 默认占用两个端口，请根据安全策略配置防火墙：
+
+| 端口 | 服务 | 默认地址 | 建议访问策略 |
+| :--- | :--- | :--- | :--- |
+| **8888** | WebSocket Gateway | `:8888` | **Public/Internal**: 对终端设备或应用层开放。建议挂载在负载均衡器（如 Nginx）后并启用 WSS。 |
+| **9999** | Admin API (Rest) | `:9999` | **Private/Strict**: 仅限内部监控系统或管理内网访问。**严禁暴露在公网**。 |
+
+---
+
+## 📒 完整配置参考 (Full Reference)
+
+### 1. 通用配置 (General)
+| 字段 | 类型 | 环境变量示例 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `inherits` | string | - | 指定父级配置文件路径（递归继承） |
+
+### 2. 日志 (Log)
+| 字段 | 默认值 | 环境变量 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `level` | `info` | `HOTPLEX_LOG_LEVEL` | 级别: `debug`, `info`, `warn`, `error` |
+| `format` | `json` | `HOTPLEX_LOG_FORMAT` | 格式: `json` (生产), `text` (开发) |
+
+### 3. 网关 (Gateway)
+控制 WebSocket 连接行为。
+| 字段 | 默认值 | 环境变量 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `addr` | `:8888` | `HOTPLEX_GATEWAY_ADDR` | 监听地址 |
+| `read_buffer_size` | `4096` | `HOTPLEX_GATEWAY_READ_BUFFER_SIZE` | WS 读取缓冲区 |
+| `write_buffer_size` | `4096` | `HOTPLEX_GATEWAY_WRITE_BUFFER_SIZE` | WS 写入缓冲区 |
+| `ping_interval` | `54s` | `HOTPLEX_GATEWAY_PING_INTERVAL` | 服务端心跳间隔 |
+| `pong_timeout` | `60s` | `HOTPLEX_GATEWAY_PONG_TIMEOUT` | Pong 超时断开 |
+| `write_timeout` | `10s` | `HOTPLEX_GATEWAY_WRITE_TIMEOUT` | 写入消息超时 |
+| `idle_timeout` | `5m` | `HOTPLEX_GATEWAY_IDLE_TIMEOUT` | 物理层连接空闲超时 |
+| `max_frame_size` | `32768` | `HOTPLEX_GATEWAY_MAX_FRAME_SIZE` | 单帧最大字节 (32KB) |
+| `broadcast_queue_size`| `256` | - | 事件广播队列长度 |
+
+### 4. 数据库 (DB)
+| 字段 | 默认值 | 环境变量 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `path` | `data/hotplex-worker.db` | `HOTPLEX_DB_PATH` | SQLite 文件路径 |
+| `wal_mode` | `true` | - | 启用 Write-Ahead Logging |
+| `busy_timeout` | `500ms` | - | 数据库锁重试时长 |
+| `max_open_conns` | `1` | - | 最大并发连接 (SQLite 建议为 1) |
+
+### 5. 安全与认证 (Security)
+> [!CAUTION]
+> `jwt_secret` 必须且只能通过环境变量 `HOTPLEX_JWT_SECRET` 设置，严禁写入 YAML 文件。
+
+| 字段 | 默认值 | 环境变量 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `api_key_header` | `X-API-Key` | - | 客户端检测 API Key 的 HTTP 头 |
+| `api_keys` | `[]` | `HOTPLEX_SECURITY_API_KEY_1...N` | (编号式) 允许访问的 API 密钥列表 |
+| `tls_enabled` | `false` | `HOTPLEX_SECURITY_TLS_ENABLED` | 是否启用 WSS (WebSocket Secure) |
+| `tls_cert_file` | - | - | TLS 证书文件 (.crt) 路径 |
+| `tls_key_file` | - | - | TLS 私钥文件 (.key) 路径 |
+| `allowed_origins` | `["*"]` | - | CORS 跨域允许域名列表 |
+| `jwt_audience` | `hotplex-worker-gateway`| - | 校验 JWT 载荷中的 `aud` 属性 |
+
+### 6. 管理 API (Admin)
+| 字段 | 默认值 | 环境变量 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `enabled` | `true` | - | 是否启用管理端 RESTful 接口 |
+| `addr` | `:9999` | `HOTPLEX_ADMIN_ADDR` | 监听地址 |
+| `tokens` | `[]` | `HOTPLEX_ADMIN_TOKEN_1...N` | (编号式) 管理端授权令牌 |
+| `token_scopes` | `{}` | - | **RBAC**: 针对特定令牌的精细化权限映射 |
+| `default_scopes` | `["session:read", ...]` | - | 默认权限集 (包含 sessions, stats, health) |
+| `ip_whitelist_enabled`| `false` | - | 启用基于物理网络 (CIDR) 的访问限制 |
+| `allowed_cidrs` | `127.0.0.0/8...` | - | 允许访问的受信任网段列表 |
+| `rate_limit_enabled` | `true` | - | 启用对管理接口的速率限制保护 |
+| `requests_per_sec` | `10` | - | 令牌桶容量：每秒允许的请求数 |
+| `burst` | `20` | - | 令牌桶容量：峰值并发请求数 |
+
+### 7. 会话池与执行控制 (Session & Worker)
+| 字段 | 默认值 | 环境变量 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `session.retention_period` | `168h` | - | 历史会话在存储中的保留周期 (7天) |
+| `session.gc_scan_interval` | `1m` | - | 会话清理任务扫描频率 |
+| `session.max_concurrent` | `1000` | - | 整个实例允许的最大并发会话上限 |
+| `pool.min_size` | `0` | - | 预热池最小维持数量 |
+| `pool.max_size` | `100` | `HOTPLEX_POOL_MAX_SIZE` | 预热池总容量 |
+| `pool.max_idle_per_user`| `3` | - | 单个用户/机器人允许留存的最大空闲会话 |
+| `pool.max_memory_per_user`| `2GB` | `HOTPLEX_POOL_MAX_MEMORY_PER_USER` | 单个会话运行时的内存硬配额 (Bytes) |
+| `worker.max_lifetime` | `24h` | - | 容器实例的强制生命周期限制 |
+| `worker.idle_timeout` | `30m` | - | 容器无活动自动关停超长 |
+| `worker.execution_timeout`| `10m` | - | 单条指令执行的最长等待时间 |
+| `worker.env_whitelist` | `[]` | - | 注入到容器内的环境变量白名单 (Security) |
+
+---
+
+## 🛠️ 高阶专题 (Advanced Topics)
+
+### 热重载 (Hot Reload)
+系统监听主配置文件及继承链中所有文件的变化。以下模块支持**即时生效**（不需要重启）：
+- `gateway.*` — 调整超时参数应对网络波动。
+- `pool.*` — 动态缩扩容预热池。
+- `admin.*` — 更新 IP 白名单或限流额度。
+
+> [!NOTE]
+> 基础设施类变更（如 `addr` 监听端口、`tls_enabled` 证书开关、`db.path` 数据库路径）必须重启进程。
+
+### 配置继承案例
+您可以创建一个基础配置，并根据不同环境进行微调：
 
 ```yaml
-# config-dev.yaml
-inherits: config.yaml
+# configs/config-prod.yaml
+inherits: "config.yaml"
 
 gateway:
-  addr: ":8888"        # 覆盖父配置的 gateway.addr
+  idle_timeout: "30m"  # 生产环境允许更长的空闲时间
+
+log:
+  level: "info"
+  format: "json"       # 生产环境使用 JSON 格式对接日志中心
 ```
 
-继承顺序（优先级从低到高）：
+### 生产环境安全建议
+1.  **凭据隔离**: 绝不要在 YAML 中硬编码 `tokens` 或 `api_keys`，使用环境变量进行安全注入。
+2.  **强制 TLS**: 生产环境务必开启 `tls_enabled: true`。
+3.  **管理端加固**: 将 `admin.addr` 绑定到内网 IP，或通过 `allowed_cidrs` 限制访问来源。
 
-1. 代码默认值（`internal/config/config.go:Default()`）
-2. 父配置文件（通过 `inherits` 指定）
-3. 当前配置文件
-4. 环境变量（`HOTPLEX_*`）
+---
 
-## 配置字段说明
-
-### gateway
-
-WebSocket 网关配置。
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `addr` | string | `:8888` | 网关监听地址 |
-| `read_buffer_size` | int | `4096` | 读取缓冲区大小（字节） |
-| `write_buffer_size` | int | `4096` | 写入缓冲区大小（字节） |
-| `ping_interval` | duration | `54s` | WebSocket ping 间隔 |
-| `pong_timeout` | duration | `60s` | pong 超时（超过则断开） |
-| `write_timeout` | duration | `10s` | 写入超时 |
-| `idle_timeout` | duration | `5m` | 空闲超时 |
-| `max_frame_size` | int64 | `32768` | 最大帧大小（字节） |
-| `broadcast_queue_size` | int | `256` | 广播消息队列大小 |
-
-### admin
-
-管理 API 配置。
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `enabled` | bool | `true` | 是否启用管理 API |
-| `addr` | string | `:9999` | 管理 API 监听地址 |
-| `tokens` | []string | `[]` | 认证令牌（建议通过环境变量设置） |
-| `token_scopes` | map | `{}` | 令牌 → 权限范围映射 |
-| `default_scopes` | []string | 见下方 | 默认权限范围 |
-| `ip_whitelist_enabled` | bool | `false` | 是否启用 IP 白名单 |
-| `allowed_cidrs` | []string | 见下方 | 允许的 CIDR 范围 |
-| `rate_limit_enabled` | bool | `true` | 是否启用速率限制 |
-| `requests_per_sec` | int | `10` | 每秒请求数限制 |
-| `burst` | int | `20` | 突发请求配额 |
-
-**默认权限范围：**
-
-```yaml
-default_scopes:
-  - session:read   # 查看会话
-  - stats:read    # 查看统计
-  - health:read   # 查看健康状态
-```
-
-**默认允许的 CIDR：**
-
-```yaml
-allowed_cidrs:
-  - 127.0.0.0/8   # 本地
-  - 10.0.0.0/8    # 私有网络
-```
-
-### db
-
-SQLite 数据库配置。
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `path` | string | `hotplex-worker.db` | 数据库文件路径 |
-| `wal_mode` | bool | `true` | 启用 WAL 模式 |
-| `busy_timeout` | duration | `500ms` | 锁等待超时 |
-| `max_open_conns` | int | `1` | 最大连接数（SQLite 限制为 1） |
-
-### security
-
-安全配置。
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `api_key_header` | string | `X-API-Key` | API 密钥 HTTP 头 |
-| `api_keys` | []string | `[]` | API 密钥列表 |
-| `tls_enabled` | bool | `false` | 是否启用 TLS |
-| `tls_cert_file` | string | - | TLS 证书文件路径 |
-| `tls_key_file` | string | - | TLS 私钥文件路径 |
-| `allowed_origins` | []string | `["*"]` | 允许的 CORS 来源 |
-| `jwt_audience` | string | `hotplex-worker-gateway` | JWT audience 声明 |
-
-> **注意**：`jwt_secret` 必须通过环境变量 `HOTPLEX_JWT_SECRET` 设置。
-
-### session
-
-会话生命周期配置。
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `retention_period` | duration | `168h` (7天) | 会话保留时长 |
-| `gc_scan_interval` | duration | `1m` | 过期会话扫描间隔 |
-| `max_concurrent` | int | `1000` | 最大并发会话数 |
-| `event_store_enabled` | bool | `true` | 是否启用事件存储 |
-| `event_store_type` | string | `sqlite` | 事件存储类型 |
-
-### pool
-
-会话池配置。
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `min_size` | int | `0` | 最小预热会话数 |
-| `max_size` | int | `100` | 最大会话池大小 |
-| `max_idle_per_user` | int | `3` | 每用户最大空闲会话 |
-| `max_memory_per_user` | int64 | `2GB` | 每用户最大内存（字节） |
-
-### worker
-
-Worker 进程配置。
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `max_lifetime` | duration | `24h` | Worker 最大生命周期 |
-| `idle_timeout` | duration | `30m` | 空闲 Worker 清理超时 |
-| `execution_timeout` | duration | `10m` | 单次执行超时 |
-| `allowed_envs` | []string | `[]` | 额外允许的环境变量 |
-| `env_whitelist` | []string | 见下方 | 始终允许的环境变量 |
-
-**默认允许的环境变量：**
-
-```yaml
-env_whitelist:
-  - PATH
-  - HOME
-  - USER
-  - LANG
-  - LC_ALL
-  - TERM
-  - TMPDIR
-  - TEMP
-  - TMP
-```
-
-## 环境变量
-
-必需的环境变量（通过 `env.example` 模板设置）：
-
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `HOTPLEX_JWT_SECRET` | 是 | JWT 签名密钥（32+ 字节） |
-| `HOTPLEX_ADMIN_TOKEN_1` | 是 | 管理 API 令牌 1 |
-| `HOTPLEX_ADMIN_TOKEN_2` | 否 | 管理 API 令牌 2（用于轮换） |
-
-可选的环境变量：
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `HOTPLEX_API_KEYS` | - | 客户端 API 密钥（逗号分隔） |
-| `HOTPLEX_LOG_LEVEL` | `info` | 日志级别 |
-| `HOTPLEX_DB_PATH` | `hotplex-worker.db` | 数据库路径 |
-| `HOTPLEX_GATEWAY_ADDR` | `:8888` | 网关地址 |
-| `HOTPLEX_ADMIN_ADDR` | `:9999` | 管理 API 地址 |
-
-## 环境特定配置
-
-### 开发环境 (config-dev.yaml)
-
-- 禁用 TLS
-- 禁用速率限制
-- 允许所有 CORS 来源
-- 更短的超时和保留期
-- 较小的资源限制
-
-### 生产环境 (config-prod.yaml)
-
-- 启用 TLS（必须配置证书）
-- 启用速率限制
-- 限制 CORS 来源
-- 更长的超时和保留期
-- 更大的资源限制
-- 预热 10 个会话
-
-## 热重载
-
-以下配置项支持热重载（无需重启服务）：
-
-- `gateway.ping_interval`
-- `gateway.pong_timeout`
-- `gateway.write_timeout`
-- `gateway.idle_timeout`
-- `gateway.broadcast_queue_size`
-- `session.retention_period`
-- `session.gc_scan_interval`
-- `session.max_concurrent`
-- `pool.*`
-- `admin.*`
-
-以下配置项修改后需要重启服务：
-
-- `gateway.addr`（网络地址）
-- `security.tls_*`（TLS 设置）
-- `db.path`（数据库路径）
-- `worker.*`（Worker 配置）
-
-## 监控配置
-
-监控组件通过 Docker Compose 启用：
-
-```bash
-# 启动监控栈
-docker-compose --profile monitoring up -d
-```
-
-### Prometheus
-
-- 配置：`configs/monitoring/prometheus.yml`
-- 告警规则：`configs/monitoring/alerts.yml`
-- SLO 定义：`configs/monitoring/slo.yaml`
-- 端口：9090
-
-### Grafana
-
-- 配置：`configs/monitoring/grafana/`
-- Dashboard：`configs/monitoring/grafana/dashboards/dashboard.json`
-- Datasource：自动配置指向 Prometheus
-- 端口：3000（默认账号 admin/admin）
-
-### OpenTelemetry
-
-- 采集器配置：`configs/monitoring/otel-collector-config.yaml`
-- Gateway 支持通过 `OTEL_EXPORTER_OTLP_ENDPOINT` 环境变量配置
-
-## 配置验证
-
-启动时会自动验证配置：
-
-```bash
-./hotplex-worker -config configs/config.yaml
-# 缺少必需配置时会输出错误
-```
+## ✅ 验证与监控
+- **配置语法校验**: `hotplex-worker -config <file> -test` (预留)
+- **监控指标**: `http://<admin_addr>/admin/metrics` 提供 Prometheus 格式指标。
+- **健康检查**: `http://<admin_addr>/admin/health` 返回 `200 OK`。
