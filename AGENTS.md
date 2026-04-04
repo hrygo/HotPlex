@@ -1,47 +1,40 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-04-01
-**Commit:** 781f758
-**Branch:** reorganized
+**Generated:** 2026-04-04
+**Commit:** 9df601a
+**Branch:** feature/opencode-chatbot-#4
 
 ## OVERVIEW
 
 HotPlex Worker Gateway — Go 1.26 unified access layer for AI Coding Agent sessions.
 WebSocket gateway (AEP v1) abstracting Claude Code, OpenCode CLI/Server, Pi-mono protocol differences.
+Multi-language client SDKs (TS, Python, Java, Go) + AI SDK transport adapter + web chat UI.
 
 ## STRUCTURE
 
 ```
-cmd/gateway/         # main.go (~395 lines): flags, DI wire, signal handling
+cmd/worker/          # main.go (~410 lines): flags, DI wire, signal handling
 internal/
-  admin/             # Admin API package: handlers, middleware, rate-limit, log buffer
+  admin/             # Admin API: handlers, middleware, rate-limit, log buffer
   aep/               # AEP v1 codec (JSON envelope encode/decode/validate)
   config/            # Viper config loading + file watcher + hot-reload
   gateway/           # WS gateway: Hub (broadcast), Conn (read/write pump), Handler, Bridge
-    conn.go          # Conn struct: WebSocket lifecycle, ReadPump/WritePump
-    handler.go       # Handler struct: AEP event dispatch, SessionManager/WorkerFactory interfaces
-    hub.go           # Hub struct: broadcast, session routing, seq gen
-    bridge.go        # Bridge struct: session ↔ worker lifecycle, event forwarding
   session/           # Session Manager (5-state machine), Pool manager, GC
-    manager.go       # Manager struct: state machine, transitions, GC
-    store.go         # Store interface + SQLiteStore: session CRUD, audit
-    message_store.go # MessageStore interface + SQLiteMessageStore: event persistence, async writer
-  worker/            # Worker interface + registry + base package + 4 adapters
+  worker/            # Worker interface + registry + base + 4 adapters (claudecode, opencodecli, opencodeserver, pi)
     base/            # Shared BaseWorker + Conn + BuildEnv for CLI-based adapters
-      worker.go      # BaseWorker: Terminate/Kill/Wait/Health/LastIO/Conn
-      conn.go        # stdin-based Conn: Send/Recv/Close (NDJSON over stdio)
-      env.go         # BuildEnv: whitelist + session env + StripNestedAgent
-    claudecode/      # Claude Code adapter (~255 lines, embeds BaseWorker)
-    opencodecli/     # OpenCode CLI adapter (~279 lines, embeds BaseWorker)
-    opencodeserver/  # OpenCode Server adapter (~508 lines, embeds BaseWorker, custom HTTP conn)
-    pi/              # Pi-mono adapter (stub)
     proc/            # Process lifecycle (PGID isolation, layered termination)
   security/          # JWT (ES256), SSRF, command whitelist, env isolation, path safety, tool policy
   metrics/           # Prometheus counters/gauges/histograms
   tracing/           # OTel setup (idempotent)
-pkg/events/          # Shared types: Envelope, Event, SessionState, all data structs
+pkg/
+  events/            # Shared types: Envelope, Event, SessionState, all data structs
+  aep/               # AEP v1 codec
+client/              # Go client SDK (standalone module)
+packages/
+  ai-sdk-transport/  # TS package: Vercel AI SDK ChatTransport adapter for AEP v1
+web-chat/            # Next.js web chat UI (uses @hotplex/ai-sdk-transport)
+examples/            # Multi-language client SDKs (typescript-client, python-client, java-client)
 docs/                # Architecture, specs, security, testing, management docs
-configs/             # Config templates (currently empty)
 scripts/             # Build/validation scripts
 ```
 
@@ -62,8 +55,8 @@ scripts/             # Build/validation scripts
 
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
-| `main` | func | `cmd/gateway/main.go:40` | Entry: flags → config → wire → serve → shutdown |
-| `GatewayDeps` | struct | `cmd/gateway/main.go:215` | DI container for all gateway dependencies |
+| `main` | func | `cmd/worker/main.go:40` | Entry: flags → config → wire → serve → shutdown |
+| `GatewayDeps` | struct | `cmd/worker/main.go:227` | DI container for all gateway dependencies |
 | `admin.AdminAPI` | struct | `internal/admin/admin.go` | Admin endpoints (stats, health, session CRUD, config) |
 | `Hub` | struct | `internal/gateway/hub.go:57` | WS broadcast hub: conn registry, session routing, seq gen |
 | `Conn` | struct | `internal/gateway/conn.go:27` | Single WS connection: read/write pumps, init, heartbeat |
@@ -83,7 +76,8 @@ scripts/             # Build/validation scripts
 | `JWTValidator` | struct | `internal/security/jwt.go:27` | ES256 JWT validation + JTI blacklist + token generation |
 | `Envelope` | struct | `pkg/events/events.go:73` | AEP v1 message envelope (id, version, seq, session_id, event) |
 | `SessionState` | type | `pkg/events/events.go:240` | 5 states: Created/Running/Idle/Terminated/Deleted |
-| `Config` | struct | `internal/config/config.go:114` | All config: Gateway, DB, Worker, Security, Session, Pool, Admin |
+| `Config` | struct | `internal/config/config.go:118` | All config: Gateway, DB, Worker, Security, Session, Pool, Admin |
+| `client.Client` | struct | `client/client.go:33` | Go client SDK: Connect/Resume/SendInput/Close |
 
 ## CONVENTIONS
 
@@ -130,7 +124,7 @@ make test-short               # Quick test pass (-short)
 make lint                     # golangci-lint v1.64.5
 make coverage                 # Coverage report
 gofmt -s -w .                 # Format
-go build -pgo=auto ./cmd/gateway  # PGO-optimized build
+go build -pgo=auto ./cmd/worker  # PGO-optimized build
 go mod tidy                   # Clean deps
 ```
 

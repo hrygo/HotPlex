@@ -51,3 +51,4 @@ Desktop.ini
 .playwright-mcp
 .loki/
 .playwright-cli
+.ruff_cache
