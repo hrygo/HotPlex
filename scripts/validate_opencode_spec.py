@@ -170,7 +170,7 @@ def http_post(
 
     url = f"{OPENCODE_SERVER_URL}{path}"
     try:
-        req_data = json.dumps(data).encode("utf-8") if data else None
+        req_data = json.dumps(data).encode("utf-8") if data is not None else None
         req = urllib.request.Request(
             url,
             data=req_data,
@@ -700,7 +700,7 @@ class CLICoreArgsP2Validator(Validator):
 class ServerHealthValidator(Validator):
     name = "server_health"
     priority = Priority.P0
-    description = "OpenCode Server /health endpoint"
+    description = "OpenCode Server /global/health endpoint (ACP)"
 
     def run(self) -> ValidationResult:
         if not is_opencode_server_running():
@@ -708,27 +708,37 @@ class ServerHealthValidator(Validator):
                 "OpenCode Server not running (start: opencode serve --port 18789)"
             )
 
-        result = http_get("/health", timeout=5.0)
+        result = http_get("/global/health", timeout=5.0)
         if "error" in result:
-            return self._fail(f"/health failed: {result['error']}")
-        return self._pass(f"/health returned: {json.dumps(result)[:200]}")
+            return self._fail(f"/global/health failed: {result['error']}")
+        if "healthy" not in result:
+            return self._fail(
+                f"/global/health missing 'healthy' field. Got: {json.dumps(result)[:200]}"
+            )
+        return self._pass(
+            f"healthy={result.get('healthy')}, version={result.get('version', 'unknown')}"
+        )
 
 
 class ServerSessionCreateValidator(Validator):
     name = "server_session_create"
     priority = Priority.P0
-    description = "OpenCode Server POST /sessions"
+    description = "OpenCode Server POST /session (ACP)"
 
     def run(self) -> ValidationResult:
         if not is_opencode_server_running():
             return self._skip("OpenCode Server not running")
 
-        result = http_post("/sessions", {}, timeout=10.0)
+        result = http_post("/session", {}, timeout=10.0)
         if "error" in result:
-            return self._fail(f"POST /sessions failed: {result['error']}")
-        checks = [f"POST /sessions returned: {json.dumps(result)[:200]}"]
-        if "session_id" in result:
-            checks.append(f"session_id: {result['session_id']}")
+            return self._fail(f"POST /session failed: {result['error']}")
+        if "id" not in result:
+            return self._fail(
+                f"POST /session missing 'id' field. Got: {json.dumps(result)[:200]}"
+            )
+        checks = [
+            f"session id={result.get('id')}, slug={result.get('slug', 'unknown')}"
+        ]
         return self._pass("\n".join(checks))
 
 

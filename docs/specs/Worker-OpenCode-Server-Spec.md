@@ -53,6 +53,28 @@ opencode serve --port 18789
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
+│                    opencode serve进程                         │
+│                   (localhost:18789)                             │
+│                                                                 │
+│   HTTP POST /session ────────────► 创建会话                      │
+│   HTTP POST /session/{id}/input ──► 发送输入                    │
+│   HTTP GET /global/event?session_id={id} ◄── SSE 事件流         │
+│   HTTP GET /global/health ◄───────── 健康检查                    │
+└─────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ HTTP + SSE
+                              │
+┌─────────────────────────────────────────────────────────────────┐
+│                 OpenCode Server Worker                          │
+│              (internal/worker/opencodeserver/)                  │
+│                                                                 │
+│   • 启动 opencode serve 子进程                                  │
+│   • 轮询 /global/health 等待就绪                                │
+│   • 通过 HTTP REST API 发送命令                                 │
+│   • 通过 SSE 订阅事件                                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+┌─────────────────────────────────────────────────────────────────┐
 │                    opencode serve 进程                         │
 │                   (localhost:18789)                             │
 │                                                                 │
@@ -79,28 +101,42 @@ opencode serve --port 18789
 
 ## 3. API 端点
 
+> ⚠️ **实际端点与文档不符**：OpenCode Server 使用 ACP 协议，端点为 `/global/health`、`/session` 等，而非文档中早期设计的 `/health`、`/sessions`。
+
 ### 3.1 健康检查
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/health` | GET | 服务器就绪检查 |
+| `/global/health` | GET | 服务器就绪检查（ACP 协议） |
 
-**响应**：`200 OK`（服务器就绪）
+**响应**：
+```json
+{
+  "healthy": true,
+  "version": "1.3.13"
+}
+```
 
 ### 3.2 会话管理
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/sessions` | POST | 创建新会话 |
-| `/sessions/{session_id}` | GET | 获取会话信息 |
-| `/sessions/{session_id}` | DELETE | 删除会话 |
-| `/sessions/{session_id}/input` | POST | 发送输入 |
+| `/session` | POST | 创建新会话（ACP 协议） |
+| `/session/{session_id}` | GET | 获取会话信息 |
+| `/session/{session_id}` | DELETE | 删除会话 |
+| `/session/{session_id}/input` | POST | 发送输入 |
+| `/session/{session_id}/status` | GET | 获取会话状态 |
+| `/session/{session_id}/fork` | POST | Fork 会话 |
+| `/session/{session_id}/abort` | POST | 中止会话 |
+| `/session/{session_id}/share` | POST | 分享会话 |
+| `/session/{session_id}/diff` | GET | 获取会话差异 |
 
 ### 3.3 事件流
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/events` | GET | SSE 事件流（`session_id` 查询参数） |
+| `/global/event` | GET | SSE 事件流（`session_id` 查询参数，ACP 协议） |
+| `/global/sync-event` | GET | 同步事件流 |
 
 ---
 
@@ -109,7 +145,7 @@ opencode serve --port 18789
 ### 4.1 请求
 
 ```http
-POST /sessions HTTP/1.1
+POST /session HTTP/1.1
 Content-Type: application/json
 
 {
@@ -121,7 +157,16 @@ Content-Type: application/json
 
 ```json
 {
-  "session_id": "sess_xxx"
+  "id": "ses_xxx",
+  "slug": "friendly-name",
+  "version": "1.3.13",
+  "projectID": "b57f73cb...",
+  "directory": "/path/to/project",
+  "title": "New session - 2026-04-04T10:40:55.324Z",
+  "time": {
+    "created": 1775299255324,
+    "updated": 1775299255324
+  }
 }
 ```
 
@@ -131,7 +176,7 @@ Content-Type: application/json
 // worker.go:311-336
 func (w *Worker) createSession(ctx context.Context, projectDir string) (string, error) {
     reqBody := strings.NewReader(fmt.Sprintf(`{"project_dir": %q}`, projectDir))
-    req, err := http.NewRequestWithContext(ctx, "POST", w.httpAddr+"/sessions", reqBody)
+    req, err := http.NewRequestWithContext(ctx, "POST", w.httpAddr+"/session", reqBody)
     req.Header.Set("Content-Type", "application/json")
 
     resp, err := w.client.Do(req)
@@ -156,7 +201,7 @@ func (w *Worker) createSession(ctx context.Context, projectDir string) (string, 
 ### 5.1 请求
 
 ```http
-POST /sessions/{session_id}/input HTTP/1.1
+POST /session/{session_id}/input HTTP/1.1
 Content-Type: application/json
 
 {
@@ -212,7 +257,7 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 ### 6.1 请求
 
 ```http
-GET /events?session_id={session_id} HTTP/1.1
+GET /global/event?session_id={session_id} HTTP/1.1
 Accept: text/event-stream
 Cache-Control: no-cache
 ```
@@ -222,8 +267,9 @@ Cache-Control: no-cache
 SSE 格式，每行以 `data: ` 前缀：
 
 ```
-data: {"id":"evt_xxx","version":"aep/v1","seq":1,"session_id":"sess_xxx",...}
-data: {"id":"evt_xxx","version":"aep/v1","seq":2,"session_id":"sess_xxx",...}
+data: {"type":"step_start","data":{...}}
+data: {"type":"text","data":{"role":"assistant","content":[...]}}
+data: {"type":"step_finish","data":{...}}
 ```
 
 ### 6.3 实现
@@ -231,7 +277,7 @@ data: {"id":"evt_xxx","version":"aep/v1","seq":2,"session_id":"sess_xxx",...}
 ```go
 // worker.go:338-415 - readSSE goroutine
 func (w *Worker) readSSE(sessionID string) {
-    url := fmt.Sprintf("%s/events?session_id=%s", w.httpAddr, sessionID)
+    url := fmt.Sprintf("%s/global/event?session_id=%s", w.httpAddr, sessionID)
     req, err := http.NewRequest("GET", url, nil)
     req.Header.Set("Accept", "text/event-stream")
     req.Header.Set("Cache-Control", "no-cache")
@@ -347,29 +393,29 @@ Start
   │
   ├─► 启动 opencode serve 子进程（端口 18789）
   │
-  ├─► 轮询 /health 直到 200 OK
+  ├─► 轮询 /global/health 直到 200 OK
   │
-  ├─► POST /sessions → session_id
+  ├─► POST /session → session_id
   │
   ├─► 创建 conn{recvCh}
   │
-  └─► goroutine: GET /events?session_id=xxx (SSE)
+  └─► goroutine: GET /global/event?session_id=xxx (SSE)
            │
            ▼
       运行时
            │
-  ◄────────┴─────────►
-  │                   │
-  │  POST /sessions/{id}/input
-  │  (通过 recvCh 接收 SSE 事件)
-  │
-  └─► Close() → close(recvCh)
-           │
-           ▼
-      Terminate
-           │
-  ├─► BaseWorker.Terminate() → SIGTERM → SIGKILL
-  └─► 进程清理
+   ◄────────┴─────────►
+   │                   │
+   │  POST /session/{id}/input
+   │  (通过 recvCh 接收 SSE 事件)
+   │
+   └─► Close() → close(recvCh)
+            │
+            ▼
+       Terminate
+            │
+   ├─► BaseWorker.Terminate() → SIGTERM → SIGKILL
+   └─► 进程清理
 ```
 
 ### 9.2 Resume 支持
@@ -528,7 +574,7 @@ func (w *Worker) waitForServer(ctx context.Context) error {
         case <-ctx.Done():
             return ctx.Err()
         case <-ticker.C:
-            req, err := http.NewRequestWithContext(ctx, "GET", w.httpAddr+"/health", nil)
+            req, err := http.NewRequestWithContext(ctx, "GET", w.httpAddr+"/global/health", nil)
             if err != nil {
                 continue
             }
@@ -571,11 +617,11 @@ func (w *Worker) waitForServer(ctx context.Context) error {
 | 项目 | 说明 |
 |------|------|
 | `opencode serve` 进程启动 | 端口 18789 |
-| `/health` 轮询 | 服务器就绪检测 |
-| `/sessions` POST | 会话创建 |
-| SSE 事件读取 | `GET /events?session_id=xxx` |
+| `/global/health` 轮询 | 服务器就绪检测 |
+| `/session` POST | 会话创建（ACP 协议） |
+| SSE 事件读取 | `GET /global/event?session_id=xxx` |
 | AEP v1 编解码 | NDJSON over SSE |
-| `/sessions/{id}/input` POST | 输入发送 |
+| `/session/{id}/input` POST | 输入发送 |
 
 ### P1（重要，v1.0 完整支持）
 
