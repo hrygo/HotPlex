@@ -216,14 +216,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	// Initialize HTTP connection with buffered channel for backpressure
-	w.httpConn = &conn{
-		userID:    session.UserID,
-		sessionID: sessionID,
-		httpAddr:  w.httpAddr,
-		client:    w.client,
-		recvCh:    make(chan *events.Envelope, recvChannelSize),
-		log:       w.Log,
-	}
+	w.initHTTPConn(session.UserID, sessionID)
 
 	// Record startup time
 	w.Mu.Lock()
@@ -314,14 +307,7 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	// Reuse existing session ID (session.SessionID provided by caller)
-	w.httpConn = &conn{
-		userID:    session.UserID,
-		sessionID: session.SessionID,
-		httpAddr:  w.httpAddr,
-		client:    w.client,
-		recvCh:    make(chan *events.Envelope, recvChannelSize),
-		log:       w.Log,
-	}
+	w.initHTTPConn(session.UserID, session.SessionID)
 
 	// Record resume time
 	w.Mu.Lock()
@@ -499,6 +485,18 @@ func (w *Worker) createSession(ctx context.Context, projectDir string) (string, 
 	return result.SessionID, nil
 }
 
+// initHTTPConn creates and assigns the HTTP connection for a session.
+func (w *Worker) initHTTPConn(userID, sessionID string) {
+	w.httpConn = &conn{
+		userID:    userID,
+		sessionID: sessionID,
+		httpAddr:  w.httpAddr,
+		client:    w.client,
+		recvCh:    make(chan *events.Envelope, recvChannelSize),
+		log:       w.Log,
+	}
+}
+
 // readSSE subscribes to the Server-Sent Events stream for a session.
 //
 // This method runs in a goroutine and reads SSE events from the server.
@@ -513,17 +511,11 @@ func (w *Worker) createSession(ctx context.Context, projectDir string) (string, 
 // # Goroutine Lifecycle
 //
 //   - Started by Start() and Resume()
-//   - Exits on: connection error, EOF, context cancellation, or conn closed
-//   - Closes recvCh on exit to signal termination to receivers
+//   - Exits on: HTTP response error, non-200 status, EOF, or conn closed
+//   - Does NOT close recvCh — conn.Close() is responsible for cleanup (uses sync.Once)
 func (w *Worker) readSSE(sessionID string) {
-	// Ensure recvCh is closed on exit to prevent goroutine leak
-	defer func() {
-		w.Mu.Lock()
-		if w.httpConn != nil {
-			close(w.httpConn.recvCh)
-		}
-		w.Mu.Unlock()
-	}()
+	// Note: recvCh is closed by conn.Close(), not here, to avoid double-close.
+	// conn.Close uses sync.Once for thread-safe idempotent cleanup.
 
 	// Build SSE URL
 	url := fmt.Sprintf("%s/events?session_id=%s", w.httpAddr, sessionID)
@@ -587,16 +579,16 @@ func (w *Worker) readSSE(sessionID string) {
 		// Ensure session ID is set
 		env.SessionID = sessionID
 
-		// Update last I/O timestamp
+		// Update last I/O timestamp (SetLastIO uses atomic, no lock needed)
 		w.SetLastIO(time.Now())
 
-		// Get current connection (under lock)
+		// Get current connection and check if closed (single lock acquisition)
 		w.Mu.Lock()
 		conn := w.httpConn
+		closed := conn == nil
 		w.Mu.Unlock()
 
-		// Check if connection was closed
-		if conn == nil {
+		if closed {
 			w.Log.Debug("opencodeserver: connection closed, stopping SSE reader")
 			return
 		}
@@ -626,6 +618,7 @@ type conn struct {
 	log       *slog.Logger
 	mu        sync.Mutex
 	closed    bool
+	closeOnce sync.Once // Prevent double-close panic on recvCh
 }
 
 // Send posts an input message to the OpenCode server.
@@ -695,22 +688,19 @@ func (c *conn) Recv() <-chan *events.Envelope {
 
 // Close closes the connection and releases resources.
 //
+// Uses sync.Once to ensure idempotent behavior — safe to call multiple times.
+//
 // # Thread Safety
 //
-// Safe to call multiple times. Idempotent.
+// Safe to call concurrently from multiple goroutines.
 func (c *conn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return nil // Already closed
-	}
-	c.closed = true
-
-	// Close recvCh to signal termination to receivers
-	// Note: recvCh is also closed by readSSE on exit, but we close it here
-	// as a safety net in case readSSE goroutine is stuck
-	close(c.recvCh)
+	c.closeOnce.Do(func() {
+		c.closed = true
+		close(c.recvCh) // Safe: sync.Once ensures single close
+	})
 
 	return nil
 }
