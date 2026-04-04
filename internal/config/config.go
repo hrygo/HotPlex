@@ -215,7 +215,7 @@ func Default() *Config {
 			BroadcastQueueSize: 256,
 		},
 		DB: DBConfig{
-			Path:         "~/.hotplex/hotplex-worker.db",
+			Path:         "data/hotplex-worker.db",
 			WALMode:      true,
 			BusyTimeout:  500 * time.Millisecond,
 			MaxOpenConns: 1,

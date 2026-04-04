@@ -18,6 +18,7 @@ go.work
 *.dylib
 
 # Database & runtime
+data/
 *.db
 *.db-shm
 *.db-wal
