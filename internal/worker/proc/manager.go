@@ -87,6 +87,7 @@ func (m *Manager) Start(ctx context.Context, name string, args []string, env []s
 
 	// Create pipes for stdio.
 	// os.Pipe returns (r, w, err) where r=read-end, w=write-end.
+	// Parent reads from r, writes to w. Subprocess reads from r, writes to w.
 	var stdinR, stdoutW, stderrW *os.File
 	if stdinR, m.stdin, err = os.Pipe(); err != nil {
 		return nil, nil, nil, fmt.Errorf("proc: stdin pipe: %w", err)
@@ -103,21 +104,24 @@ func (m *Manager) Start(ctx context.Context, name string, args []string, env []s
 		return nil, nil, nil, fmt.Errorf("proc: stderr pipe: %w", err)
 	}
 
-	// stdinR, stdoutW, stderrW are only needed for SetStdout/SetStderr; close unused ends.
-	stdinR.Close()
-	stdoutW.Close()
-	stderrW.Close()
-
-	cmd.Stdin = m.stdin
-	cmd.Stdout = m.stdout
-	cmd.Stderr = m.stderr
+	cmd.Stdin = stdinR
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 
 	if err := cmd.Start(); err != nil {
+		stdinR.Close()
+		stdoutW.Close()
+		stderrW.Close()
 		m.stdin.Close()
 		m.stdout.Close()
 		m.stderr.Close()
 		return nil, nil, nil, fmt.Errorf("proc: start %s: %w", name, err)
 	}
+
+	// Close parent's ends of subprocess stdin/stdout/stderr - subprocess inherited copies.
+	stdinR.Close()
+	stdoutW.Close()
+	stderrW.Close()
 
 	m.cmd = cmd
 	m.started = true

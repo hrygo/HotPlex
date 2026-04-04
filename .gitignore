@@ -50,4 +50,4 @@ Desktop.ini
 *~
 .playwright-mcp
 .loki/
-main
+.playwright-cli
