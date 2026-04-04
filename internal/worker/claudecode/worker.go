@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hotplex/hotplex-worker/pkg/aep"
 	"github.com/hotplex/hotplex-worker/internal/worker"
 	"github.com/hotplex/hotplex-worker/internal/worker/base"
 	"github.com/hotplex/hotplex-worker/internal/worker/proc"
+	"github.com/hotplex/hotplex-worker/pkg/aep"
 	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
@@ -50,9 +50,9 @@ type Worker struct {
 	sessionID string
 
 	// Protocol layers
-	parser   *Parser
-	mapper   *Mapper
-	control  *ControlHandler
+	parser  *Parser
+	mapper  *Mapper
+	control *ControlHandler
 
 	// Goroutine lifecycle
 	cancel context.CancelFunc
@@ -247,20 +247,27 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		}
 	}
 
-	// Normal input
-	msg := events.NewEnvelope(
-		aep.NewID(),
-		w.sessionID,
-		0, // seq assigned by hub
-		events.Input,
-		events.InputData{
-			Content:  content,
-			Metadata: metadata,
-		},
-	)
-
-	if err := conn.Send(ctx, msg); err != nil {
-		return fmt.Errorf("claudecode: input: %w", err)
+	// Normal input: use SendUserMessage for Claude Code's stream-json format
+	// instead of AEP envelope format
+	if baseConn, ok := conn.(*base.Conn); ok {
+		if err := baseConn.SendUserMessage(ctx, content); err != nil {
+			return fmt.Errorf("claudecode: input: %w", err)
+		}
+	} else {
+		// Fallback to AEP envelope for tests with mock connections
+		msg := events.NewEnvelope(
+			aep.NewID(),
+			w.sessionID,
+			0, // seq assigned by hub
+			events.Input,
+			events.InputData{
+				Content:  content,
+				Metadata: metadata,
+			},
+		)
+		if err := conn.Send(ctx, msg); err != nil {
+			return fmt.Errorf("claudecode: input: %w", err)
+		}
 	}
 
 	w.SetLastIO(time.Now())

@@ -11,6 +11,8 @@
 | [Worker-Gateway-Framework-Design.md](./Worker-Gateway-Framework-Design.md) | HotPlex Worker Gateway 应用框架设计 — 完整基础设施层 | ✅ Implemented | 2026-03-30 | 100% |
 | [Gateway-Async-Init-Spec.md](./Gateway-Async-Init-Spec.md) | Gateway 异步初始化 — Session Start 异步化设计 | 📝 Draft | 2026-04-04 | 0% |
 | [Worker-ClaudeCode-Spec.md](./Worker-ClaudeCode-Spec.md) | Claude Code Worker 集成规格 | ✅ Implemented | 2026-04-01 | 100% |
+| [Worker-OpenCode-CLI-Spec.md](./Worker-OpenCode-CLI-Spec.md) | OpenCode CLI Worker 集成规格 | ✅ Implemented | 2026-04-04 | 100% |
+| [Worker-OpenCode-Server-Spec.md](./Worker-OpenCode-Server-Spec.md) | OpenCode Server Worker 集成规格 | ✅ Implemented | 2026-04-04 | 100% |
 | [Worker-ACPX-Spec.md](./Worker-ACPX-Spec.md) | ACPX Worker 集成规格 — 支持 16+ AI 编程 Agent | 📝 Draft | 2026-04-04 | 0% |
 
 ### 客户端 SDK 设计
@@ -48,9 +50,11 @@
 
 ### 按状态分类
 
-- ✅ **Implemented**: 5 个（已完成实现）
+- ✅ **Implemented**: 7 个（已完成实现）
   - Worker-Gateway-Framework-Design
   - Worker-ClaudeCode-Spec
+  - Worker-OpenCode-CLI-Spec
+  - Worker-OpenCode-Server-Spec
   - Python-Client-Design
   - Go-Client-Example-Design
   - AI-SDK-Chatbot-Integration-Design
@@ -68,7 +72,7 @@
 
 ### 按类型分类
 
-- **架构设计**: 4 个
+- **架构设计**: 6 个
 - **客户端 SDK**: 2 个
 - **前端集成**: 1 个
 - **验收标准**: 4 个

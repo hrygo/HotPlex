@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -48,6 +49,49 @@ func (c *Conn) Send(ctx context.Context, msg *events.Envelope) error {
 	// Write NDJSON to stdin.
 	if err := aep.Encode(c.stdin, msg); err != nil {
 		return fmt.Errorf("base: encode: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Conn) SendUserMessage(ctx context.Context, content string) error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return fmt.Errorf("base: connection closed")
+	}
+	c.mu.Unlock()
+
+	type textContent struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	type message struct {
+		Type    string        `json:"type"`
+		Content []textContent `json:"content"`
+	}
+	type userMessage struct {
+		Type    string  `json:"type"`
+		Message message `json:"message"`
+	}
+
+	msg := userMessage{
+		Type: "user",
+		Message: message{
+			Type:    "user",
+			Content: []textContent{{Type: "text", Text: content}},
+		},
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("base: marshal user message: %w", err)
+	}
+	data = append(data, '\n')
+
+	_, err = c.stdin.Write(data)
+	if err != nil {
+		return fmt.Errorf("base: write user message: %w", err)
 	}
 
 	return nil
