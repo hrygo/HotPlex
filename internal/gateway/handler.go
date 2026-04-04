@@ -241,7 +241,7 @@ func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code eve
 // SessionManager abstracts the session.Manager methods used by Bridge.
 // It allows Bridge to be tested without a real Manager instance.
 type SessionManager interface {
-	Create(ctx context.Context, id, userID string, wt worker.WorkerType, allowedTools []string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string) (*session.SessionInfo, error)
 	AttachWorker(id string, w worker.Worker) error
 	DetachWorker(id string)
 	Transition(ctx context.Context, id string, to events.SessionState) error

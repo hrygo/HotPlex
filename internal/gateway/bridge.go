@@ -36,13 +36,12 @@ func NewBridge(log *slog.Logger, hub *Hub, sm SessionManager, msgStore session.M
 }
 
 // StartSession creates a new session and starts a worker.
-func (b *Bridge) StartSession(ctx context.Context, id, userID string, wt worker.WorkerType) error {
-	// Create session in DB.
-	si, err := b.sm.Create(ctx, id, userID, wt, nil)
+func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string) error {
+	// Create session in DB with bot_id and allowed_tools.
+	si, err := b.sm.CreateWithBot(ctx, id, userID, botID, wt, allowedTools)
 	if err != nil {
 		return fmt.Errorf("bridge: create session: %w", err)
 	}
-	_ = si // session created; allowed_tools handled by performInit's CreateWithBot call
 
 	// Create worker.
 	w, err := b.wf.NewWorker(wt)

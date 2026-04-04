@@ -218,22 +218,28 @@ func (c *Conn) performInit(handler *Handler) error {
 	// Resolve session: create new or resume existing.
 	si, err := handler.sm.Get(sessionID)
 	if err != nil {
-		// Session does not exist → create new.
+		// Session does not exist → create and start via Bridge.
 		if errors.Is(err, session.ErrSessionNotFound) {
-			si, err = handler.sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools)
-			if err != nil {
-				c.sendInitError(events.ErrCodeInternalError, "failed to create session")
-				metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
-				return fmt.Errorf("create session: %w", err)
-			}
-			c.log.Info("gateway: session created via init", "session_id", sessionID,
-				"worker_type", initData.WorkerType)
-			// Start the worker for the new session. Bridge.StartSession creates the worker,
-			// attaches it, starts it, transitions to RUNNING, and starts forwarding events.
+			// Bridge.StartSession creates the DB record, worker, transitions to RUNNING,
+			// and starts forwarding events. Log after it succeeds.
 			if c.bridge != nil {
-				if err := c.bridge.StartSession(context.Background(), sessionID, c.userID, initData.WorkerType); err != nil {
-					c.log.Warn("gateway: bridge start session", "session_id", sessionID, "err", err)
+				if err := c.bridge.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools); err != nil {
+					c.sendInitError(events.ErrCodeInternalError, "failed to create session")
+					metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
+					return fmt.Errorf("create session: %w", err)
 				}
+				c.log.Info("gateway: session created via init", "session_id", sessionID,
+					"worker_type", initData.WorkerType)
+			} else {
+				// No bridge (test mode) — create session without starting worker.
+				si, err = handler.sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools)
+				if err != nil {
+					c.sendInitError(events.ErrCodeInternalError, "failed to create session")
+					metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
+					return fmt.Errorf("create session: %w", err)
+				}
+				c.log.Info("gateway: session created via init (no bridge)", "session_id", sessionID,
+					"worker_type", initData.WorkerType)
 			}
 		} else {
 			c.sendInitError(events.ErrCodeInternalError, err.Error())

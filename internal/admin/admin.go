@@ -40,7 +40,7 @@ type HubProvider interface {
 }
 
 type BridgeProvider interface {
-	StartSession(ctx context.Context, id, userID string, wt worker.WorkerType) error
+	StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string) error
 }
 
 type ConfigProvider interface {

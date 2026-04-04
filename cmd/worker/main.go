@@ -357,8 +357,8 @@ type bridgeAdapter struct {
 	bridge *gateway.Bridge
 }
 
-func (a *bridgeAdapter) StartSession(ctx context.Context, id, userID string, wt worker.WorkerType) error {
-	return a.bridge.StartSession(ctx, id, userID, wt)
+func (a *bridgeAdapter) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string) error {
+	return a.bridge.StartSession(ctx, id, userID, botID, wt, allowedTools)
 }
 
 type configAdapter struct {
