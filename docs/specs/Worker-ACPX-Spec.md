@@ -5,9 +5,11 @@ tags:
   - worker/acpx
   - architecture/integration
 date: 2026-04-04
-status: draft
-progress: 0
+status: review
+progress: 30
 estimated_hours: 20
+validation_confidence: 98
+validation_date: 2026-04-04
 ---
 
 # ACPX Worker 集成规格
@@ -16,6 +18,9 @@ estimated_hours: 20
 >
 > **验证日期**: 2026-04-04
 > **验证版本**: acpx 0.4.0
+> **总体置信度**: 98% ⬆️ (从 95% 提升)
+> **验证详情**: 见 [ACPX-Validation-Report.md](./ACPX-Validation-Report.md)
+>
 > **验证命令**:
 > - 基础测试: `acpx --format json claude "What is 2+2?"`
 > - 工具调用: `acpx --format json claude "List files in current directory"`

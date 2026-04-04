@@ -9,22 +9,22 @@
 | 文档 | 描述 | 状态 | 日期 | 进度 |
 |------|------|------|------|------|
 | [Worker-Gateway-Framework-Design.md](./Worker-Gateway-Framework-Design.md) | HotPlex Worker Gateway 应用框架设计 — 完整基础设施层 | ✅ Implemented | 2026-03-30 | 100% |
-| [Gateway-Async-Init-Spec.md](./Gateway-Async-Init-Spec.md) | Gateway 异步初始化 — Session Start 异步化设计 | 📝 Draft | 2026-04-04 | - |
-| [Worker-ClaudeCode-Spec.md](./Worker-ClaudeCode-Spec.md) | Claude Code Worker 集成规格 | - | - | - |
-| [Worker-ACPX-Spec.md](./Worker-ACPX-Spec.md) | ACPX Worker 集成规格 — 支持 16+ AI 编程 Agent | - | - | - |
+| [Gateway-Async-Init-Spec.md](./Gateway-Async-Init-Spec.md) | Gateway 异步初始化 — Session Start 异步化设计 | 📝 Draft | 2026-04-04 | 0% |
+| [Worker-ClaudeCode-Spec.md](./Worker-ClaudeCode-Spec.md) | Claude Code Worker 集成规格 | ✅ Implemented | 2026-04-01 | 100% |
+| [Worker-ACPX-Spec.md](./Worker-ACPX-Spec.md) | ACPX Worker 集成规格 — 支持 16+ AI 编程 Agent | 📝 Draft | 2026-04-04 | 0% |
 
 ### 客户端 SDK 设计
 
-| 文档 | 描述 | 状态 | 日期 | 预计工时 |
-|------|------|------|------|----------|
-| [Python-Client-Design.md](./Python-Client-Design.md) | Python 客户端示例模块设计 — 第三方开发者集成指南 | ✅ Approved | 2026-04-02 | 16h |
-| [Go-Client-Example-Design.md](./Go-Client-Example-Design.md) | Go 客户端示例模块设计 — WebSocket + AEP v1 演示 | ✅ Approved | 2026-04-03 | 12h |
+| 文档 | 描述 | 状态 | 日期 | 进度 |
+|------|------|------|------|------|
+| [Python-Client-Design.md](./Python-Client-Design.md) | Python 客户端示例模块设计 — 第三方开发者集成指南 | ✅ Implemented | 2026-04-02 | 100% |
+| [Go-Client-Example-Design.md](./Go-Client-Example-Design.md) | Go 客户端示例模块设计 — WebSocket + AEP v1 演示 | ✅ Implemented | 2026-04-03 | 100% |
 
 ### 前端集成设计
 
-| 文档 | 描述 | 状态 | 日期 | 优先级 | 预计工时 |
-|------|------|------|------|--------|----------|
-| [AI-SDK-Chatbot-Integration-Design.md](./AI-SDK-Chatbot-Integration-Design.md) | AI SDK Chatbot 集成设计 — Transport 适配器方案 | 📝 Draft | 2026-04-03 | 🔴 High | 16h |
+| 文档 | 描述 | 状态 | 日期 | 进度 |
+|------|------|------|------|------|
+| [AI-SDK-Chatbot-Integration-Design.md](./AI-SDK-Chatbot-Integration-Design.md) | AI SDK Chatbot 集成设计 — Transport 适配器方案 | ✅ Implemented | 2026-04-03 | 100% |
 
 ### 验收标准与跟踪
 
@@ -48,10 +48,23 @@
 
 ### 按状态分类
 
-- ✅ **Implemented**: 1 个（已完成实现）
-- ✅ **Approved**: 2 个（已批准，待实现）
-- 📝 **Draft**: 2 个（草稿，设计中）
-- ⚪ **未标记**: 8 个（需要添加 metadata）
+- ✅ **Implemented**: 5 个（已完成实现）
+  - Worker-Gateway-Framework-Design
+  - Worker-ClaudeCode-Spec
+  - Python-Client-Design
+  - Go-Client-Example-Design
+  - AI-SDK-Chatbot-Integration-Design
+- 📝 **Draft**: 3 个（设计中）
+  - Gateway-Async-Init-Spec
+  - Worker-ACPX-Spec
+  - AI-SDK-Chatbot-AC
+- 🔵 **Active**: 2 个（活跃维护）
+  - AC-Tracking-Matrix
+  - TRACEABILITY-MATRIX
+- ✅ **Completed**: 1 个（已完成审查）
+  - Review-Gateway-Async-Init
+- 📋 **Draft**: 1 个（已完成定义）
+  - Acceptance-Criteria
 
 ### 按类型分类
 

@@ -5,8 +5,9 @@ tags:
   - client/go
   - example
 date: 2026-04-03
-status: approved
-progress: 0
+status: implemented
+progress: 100
+completion_date: 2026-04-03
 estimated_hours: 12
 ---
 

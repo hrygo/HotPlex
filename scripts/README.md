@@ -10,6 +10,7 @@ This directory contains installation and deployment scripts for HotPlex Worker G
 | `quickstart.sh` | Quick dev environment setup | `./scripts/quickstart.sh` |
 | `docker-build.sh` | Build Docker image | `./scripts/docker-build.sh` |
 | `uninstall.sh` | Complete uninstallation | `sudo ./scripts/uninstall.sh` |
+| `validate-acpx-spec.sh` | Validate ACPX spec via acpx CLI | `./scripts/validate-acpx-spec.sh` |
 | `hotplex-worker.service` | Systemd service unit | Install via `install.sh` |
 
 ## Installation Scripts
@@ -208,6 +209,71 @@ sudo journalctl -u hotplex-worker -f
 # Resource usage
 systemctl show hotplex-worker -p MemoryCurrent,CPUUsageNSec
 ```
+
+### validate-acpx-spec.sh
+
+**ACPX spec validation script** that validates Worker-ACPX-Spec.md against actual acpx CLI behavior.
+
+**Purpose:**
+
+- Validates JSON-RPC 2.0 protocol format
+- Checks initialization handshake flow
+- Verifies streaming events (agent_thought_chunk, agent_message_chunk, usage_update)
+- Tests tool call events (tool_call, tool_call_update)
+- Validates named session management
+- Tests resume flow with context preservation
+- Checks error handling format
+
+**Requirements:**
+
+- acpx CLI installed (`npm install -g acpx`)
+- Claude Code CLI configured (`claude` command available)
+- Valid Claude API key
+
+**Usage:**
+
+```bash
+# Run all validation checks
+./scripts/validate-acpx-spec.sh
+
+# Output shows pass/fail for each test
+# Summary includes overall validation status
+```
+
+**What it validates:**
+
+1. **Protocol Format** - JSON-RPC 2.0 structure, Request/Response matching
+2. **Initialization Flow** - initialize, session/new, session/prompt
+3. **Streaming Events** - Thought/message streams, usage updates
+4. **Tool Calls** - Tool call lifecycle, identifiers, input/output
+5. **Session Management** - Named sessions, listing, closing
+6. **Error Handling** - JSON-RPC error format
+
+**Sample output:**
+
+```
+🔍 ACPX Spec 功能快速检查
+================================
+
+✅ 检查 1: JSON-RPC 2.0 协议格式
+   ✓ JSON-RPC 2.0 格式正确
+
+✅ 检查 2: 初始化流程
+   ✓ session/prompt 方法存在
+
+...
+
+================================
+✅ 快速检查完成
+
+📊 详细验证报告: docs/specs/ACPX-Validation-Report.md
+📄 Spec 文档: docs/specs/Worker-ACPX-Spec.md
+🎯 总体置信度: 98%
+```
+
+**Validation report:**
+
+After running, see `docs/specs/ACPX-Validation-Report.md` for detailed results.
 
 ## Docker Compose
 
