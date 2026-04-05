@@ -162,6 +162,7 @@ tags:
     │                │                     │                   │
     │◄─ {init_ack} ──│                     │                   │
     │    session_id  │                     │                   │
+    │   (server-gen) │  ← P0: Server generates session_id         │
     │                │                     │                   │
     │══ 3.User Input (Full-Duplex) ══════════════════════════════════════════════│
     │                │                     │                   │
@@ -193,13 +194,32 @@ tags:
     │══ 5.Heartbeat Keep-Alive ═════════════════════════════════════════════════│
     │                │                     │                   │
     │── {ping} ─────►│                     │                   │
+    │                │  ← P2: No seq consumed (heartbeat control)│
     │◄─ {pong} ◄─────│                     │                   │
     │                │                     │                   │
-    │══ 6.Connection Close ══════════════════════════════════════════════════════│
+    │══ 6.Connection Close & Reconnect ════════════════════════════════════════│
     │                │                     │                   │
-    │── close ──────►│── cleanup ─────────►│── terminate ────►│
+    │── close ──────►│── Transition ──────►│                   │
+    │                │   to StateIdle      │  ← P1: Session    │
+    │                │                     │     orphan fix    │
     │                │                     │                   │
     │◄─ FIN ◄────────│                     │                   │
+    │                │                     │                   │
+    │══ 7.Reconnect (Session Resume) ═════════════════════════════════════════│
+    │                │                     │                   │
+    │── WS Upgrade ──│                     │                   │
+    │   (same sess)  │                     │                   │
+    │                │                     │                   │
+    │── {init} ─────►│── Detect ──────────►│                   │
+    │   (session_id) │   StateIdle         │                   │
+    │                │                     │                   │
+    │                │── ResumeSession ───►│  ← P1: Worker     │
+    │                │   (Bridge)          │     reattach      │
+    │                │                     │                   │
+    │◄─ {init_ack} ──│── StateIdle ────────│                   │
+    │                │   → StateRunning    │                   │
+    │                │                     │                   │
+    │══ 8.Graceful Termination ═══════════════════════════════════════════════│
 ```
 
 ---
@@ -302,6 +322,7 @@ tags:
 | Session CRUD | Create, read, update, delete sessions |
 | State Transitions | Atomic state machine transitions with mutex protection |
 | GC | Expired session cleanup |
+| **Nil Guards** | P1: Returns safely when called on nil Manager (test mode) |
 
 ### 5.4 Worker Adapter (`internal/worker/`)
 
@@ -311,6 +332,7 @@ tags:
 | `ClaudeCodeWorker` | Claude CLI adapter with stream-json protocol |
 | `OpenCodeCLIWorker` | OpenCode CLI adapter with json-lines protocol |
 | `OpenCodeSrvWorker` | OpenCode server adapter with HTTP+SSE |
+| **Platform Compatibility** | P3: `proc.Manager` skips RLIMIT_AS on macOS (not reliably supported) |
 
 ---
 
@@ -384,8 +406,66 @@ pool:
 
 ---
 
-## 9. Changelog
+---
+
+---
+
+## 9. Bug Fixes & Improvements (2026-04-05)
+
+### P0: Session ID Mismatch (Fixed)
+
+**Problem**: Browser client generated session_id on WebSocket open, causing mismatch with server-generated ID from `init_ack`.
+
+**Solution**:
+- Removed client-side session ID generation
+- Server generates session ID during init handshake
+- Client receives session ID from `init_ack` and uses it for subsequent messages
+
+**Files**: `packages/ai-sdk-transport/src/client/browser-client.ts`
+
+### P1: Session Orphan on WebSocket Close (Fixed)
+
+**Problem**: When WebSocket closed unexpectedly (network issue, browser tab close), worker process continued running, causing resource leak.
+
+**Solution**:
+- ReadPump transitions session to `StateIdle` on close (instead of `StateTerminated`)
+- Worker is paused (not killed), waiting for potential reconnect
+- On reconnect with same session_id, `ResumeSession`:
+  - Terminates stale worker (from previous connection)
+  - Creates new worker instance
+  - Transitions back to `StateRunning`
+- Client can resume conversation without losing context
+
+**Files**: `internal/gateway/conn.go`, `internal/gateway/bridge.go`
+
+### P2: Ping Sequence Number Consumption (Fixed)
+
+**Problem**: `ping` events consumed sequence numbers, causing gaps in message ordering.
+
+**Solution**:
+- Ping/pong events are now skip sequence number assignment
+- These are heartbeat control messages, not part of the message stream
+- Prevents duplicate sequence consumption
+
+**Files**: `internal/gateway/conn.go`
+
+### P3: macOS RLIMIT_AS Warning (Fixed)
+
+**Problem**: `RLIMIT_AS` system call failed silently on macOS, causing spurious warnings in logs.
+
+**Solution**:
+- Added platform detection (`runtime.GOOS != "darwin"`)
+- Skip `RLIMIT_AS` setting on macOS
+- Still applies on Linux/POSIX systems where it's reliably supported
+
+**Files**: `internal/worker/proc/manager.go`
+
+---
+
+## 10. Changelog
+
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-04-05 | 1.1 | **P0-P3 Bug Fixes**:<br/>• P0: Server-side session_id generation (removed client-side ID assignment)<br>• P1: Session orphan prevention via StateIdle transition on WS close + ResumeSession on reconnect<br>• P2: Skip seq number for ping/pong heartbeat messages<br>• P3: macOS RLIMIT_AS warning suppression |
 | 2026-04-05 | 1.0 | Initial document creation |
