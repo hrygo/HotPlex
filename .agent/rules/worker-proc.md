@@ -14,11 +14,11 @@ cmd.Env = append(os.Environ(), extraEnv...)
 // 移除 CLAUDECODE= 防止嵌套
 ```
 
-### P3: macOS 平台兼容性
+### 内存限制设置
 
-**内存限制设置需要平台检测**：
+**平台兼容性**：
 ```go
-// P3 Fix: RLIMIT_AS 只在支持的平台上设置
+// RLIMIT_AS 只在支持的平台上设置
 if runtime.GOOS != "darwin" && cmd.Process != nil {
     const memLimit = 512 * 1024 * 1024 // 512 MB
     if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{
@@ -31,11 +31,17 @@ if runtime.GOOS != "darwin" && cmd.Process != nil {
 }
 ```
 
-**设计原因**：
-- macOS 不支持 `RLIMIT_AS`（地址空间限制）
-- 在 macOS 上调用会返回 `invalid argument` 错误
-- 只在 Linux/POSIX 系统上设置（ Darwin 除外）
-- 警告级别日志，不影响进程启动
+**平台差异**：
+- **Linux/POSIX**: 支持 `RLIMIT_AS`，限制进程地址空间
+- **macOS (Darwin)**: 不支持 `RLIMIT_AS`（实现不符合 POSIX）
+  - 调用会返回 `EINVAL` (invalid argument)
+  - 通过 `runtime.GOOS != "darwin"` 检测并跳过
+- **其他平台**: Windows 不支持 POSIX `setrlimit`
+
+**设计原则**：
+- 内存限制是**优化特性**，失败不阻止进程启动
+- 警告级别日志，不中断流程
+- 平台检测优先于错误处理
 
 **相关文件**：`internal/worker/proc/manager.go:138`
 
