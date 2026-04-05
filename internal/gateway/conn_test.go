@@ -630,13 +630,18 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	store2.On("Close").Return(nil)
 	// Get returns the existing session with bot_alice.
 	existingSession := &session.SessionInfo{
-		ID:         sessionID,
-		UserID:     "alice",
-		BotID:      botAlice, // session was created with bot_alice
-		State:      events.StateIdle,
-		WorkerType: worker.WorkerType(workerType),
+		ID:            sessionID,
+		UserID:        "alice",
+		BotID:         botAlice, // session was created with bot_alice
+		State:         events.StateIdle,
+		WorkerType:    worker.WorkerType(workerType),
+		AllowedTools:  []string{},
 	}
 	store2.On("Get", mock.Anything, sessionID).Return(existingSession, nil)
+	// Transition to RUNNING (called by ResumeSession for StateIdle→RUNNING).
+	store2.On("Transition", mock.Anything, sessionID, events.StateRunning).Return(nil)
+	// AttachWorker called by ResumeSession.
+	store2.On("AttachWorker", mock.Anything, sessionID, mock.Anything).Return(nil)
 
 	cfg2 := config.Default()
 	h2 := newTestHub(t)
@@ -914,6 +919,14 @@ func (m *mockBridgeSM) Get(id string) (*session.SessionInfo, error) {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*session.SessionInfo), args.Error(1)
+}
+
+func (m *mockBridgeSM) GetWorker(id string) worker.Worker {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(worker.Worker)
 }
 
 func (m *mockBridgeSM) Delete(ctx context.Context, id string) error {
@@ -1279,6 +1292,7 @@ func TestBridge_ResumeSession_Success(t *testing.T) {
 		State:      events.StateTerminated,
 	}
 	sm.On("Get", "sess_resume").Return(sessionInfo, nil)
+	sm.On("GetWorker", "sess_resume").Return(nil) // P1: no stale worker
 	sm.On("AttachWorker", "sess_resume", mock.Anything).Return(nil)
 	sm.On("Transition", mock.Anything, "sess_resume", events.StateRunning).Return(nil)
 
@@ -1364,6 +1378,8 @@ func TestBridge_ResumeSession_NoopWorker(t *testing.T) {
 		State:      events.StateIdle,
 	}
 	sm.On("Get", "sess_noop").Return(sessionInfo, nil)
+	sm.On("GetWorker", "sess_noop").Return(nil) // P1: no stale worker
+	sm.On("Transition", mock.Anything, "sess_noop", events.StateRunning).Return(nil) // StateIdle → Running
 	sm.On("AttachWorker", "sess_noop", mock.Anything).Return(nil)
 
 	// Use the default worker factory so Bridge calls worker.NewWorker(testNoopType),

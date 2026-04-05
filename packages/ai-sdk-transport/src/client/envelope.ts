@@ -105,10 +105,6 @@ export function createInitEnvelope(
     config,
   };
 
-  if (sessionId) {
-    data.session_id = sessionId;
-  }
-
   if (authToken) {
     data.auth = { token: authToken };
   }

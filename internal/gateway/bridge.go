@@ -93,6 +93,32 @@ func (b *Bridge) ResumeSession(ctx context.Context, id string) error {
 		return session.ErrSessionNotFound
 	}
 
+	if existing := b.sm.GetWorker(id); existing != nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					b.log.Warn("bridge: GetWorker panicked", "err", r, "session_id", id)
+				}
+			}()
+			_ = existing.Terminate(context.Background())
+		}()
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					b.log.Warn("bridge: DetachWorker panicked", "err", r, "session_id", id)
+				}
+			}()
+			b.sm.DetachWorker(id)
+		}()
+	}
+
+	// Transition IDLE/RESUMED sessions to RUNNING. (TERMINATED was already handled above.)
+	if si.State != events.StateRunning {
+		if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
+			return err
+		}
+	}
+
 	// Create worker.
 	w, err := b.wf.NewWorker(si.WorkerType)
 	if err != nil {
@@ -107,6 +133,13 @@ func (b *Bridge) ResumeSession(ctx context.Context, id string) error {
 		return fmt.Errorf("bridge: attach worker: %w", err)
 	}
 
+	// Transition IDLE/RESUMED sessions to RUNNING. (TERMINATED was already handled above.)
+	if si.State != events.StateRunning {
+		if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
+			return err
+		}
+	}
+
 	// Start worker.
 	workerInfo := worker.SessionInfo{
 		SessionID:    si.ID,
@@ -118,15 +151,9 @@ func (b *Bridge) ResumeSession(ctx context.Context, id string) error {
 		return fmt.Errorf("bridge: resume start: %w", err)
 	}
 
-	if si.State == events.StateTerminated {
-		if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
-			return err
-		}
-	}
-
 	// Notify client of current state.
 	stateToNotify := si.State
-	if stateToNotify == events.StateTerminated {
+	if stateToNotify == events.StateTerminated || stateToNotify == events.StateIdle {
 		stateToNotify = events.StateRunning // We just transitioned it
 	}
 	stateEvt := events.NewEnvelope(aep.NewID(), id, b.hub.NextSeq(id), events.State, events.StateData{

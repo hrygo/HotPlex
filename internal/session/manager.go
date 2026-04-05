@@ -234,6 +234,9 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 // Both the in-memory state and the DB are updated.
 // When transitioning to IDLE, sets idle_expires_at = now + IdleTimeout.
 func (m *Manager) Transition(ctx context.Context, id string, to events.SessionState) error {
+	if m == nil {
+		return ErrSessionNotFound
+	}
 	return m.TransitionWithReason(ctx, id, to, "client_kill")
 }
 
@@ -241,6 +244,9 @@ func (m *Manager) Transition(ctx context.Context, id string, to events.SessionSt
 // termReason is used as the label value for SessionsTerminated when transitioning
 // to StateTerminated (e.g., "idle_timeout", "max_lifetime", "zombie", "admin_kill").
 func (m *Manager) TransitionWithReason(ctx context.Context, id string, to events.SessionState, termReason string) error {
+	if m == nil {
+		return ErrSessionNotFound
+	}
 	ms := m.getManagedSession(id)
 	if ms == nil {
 		return ErrSessionNotFound
@@ -260,6 +266,9 @@ func (m *Manager) TransitionWithReason(ctx context.Context, id string, to events
 // TransitionWithInput performs a state transition and processes user input
 // atomically (both under the same mutex).
 func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.SessionState, content string, metadata map[string]any) error {
+	if m == nil {
+		return ErrSessionNotFound
+	}
 	ms := m.getManagedSession(id)
 	if ms == nil {
 		return ErrSessionNotFound
@@ -293,6 +302,9 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 
 // AttachWorker attempts to allocate concurrency quota and pair the worker runtime to the session.
 func (m *Manager) AttachWorker(id string, w worker.Worker) error {
+	if m == nil {
+		return ErrSessionNotFound
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -340,6 +352,9 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 
 // GetWorker returns the worker for a session.
 func (m *Manager) GetWorker(id string) worker.Worker {
+	if m == nil {
+		return nil
+	}
 	ms := m.getManagedSession(id)
 	if ms == nil {
 		return nil
@@ -358,6 +373,9 @@ func (m *Manager) releaseWorkerQuota(ms *managedSession) {
 // It is safe to call even if no worker is attached.
 // Acquires ms.mu then pool lock to avoid deadlock with Delete.
 func (m *Manager) DetachWorker(id string) {
+	if m == nil {
+		return
+	}
 	ms := m.getManagedSession(id)
 	if ms == nil {
 		return

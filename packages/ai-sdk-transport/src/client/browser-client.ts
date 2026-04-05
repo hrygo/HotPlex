@@ -167,11 +167,9 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     const id = sessionId || this._sessionId || undefined;
     if (id) {
       this._sessionId = id;
-      return this._doConnect(id);
     }
-    const newId = newSessionId();
-    this._sessionId = newId;
-    return this._doConnect(newId);
+    // Pass undefined for new sessions — wait for init_ack to get the gateway-assigned session ID.
+    return this._doConnect(id);
   }
 
   async resume(existingSessionId: string): Promise<InitAckData> {
@@ -209,9 +207,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
         const onOpen = () => {
           if (!this.ws) return;
-          // Update session ID eagerly so sendInput calls made immediately after
-          // connect() resolves (but before init_ack is received) use the correct ID.
-          this._sessionId = sessionId;
+          // sessionId will be set from init_ack; don't set eagerly.
           this.ws.send(serializeEnvelope(initEnv));
         };
 

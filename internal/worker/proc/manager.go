@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -133,7 +134,8 @@ func (m *Manager) Start(ctx context.Context, name string, args []string, env []s
 
 	// Limit process virtual address space (RLIMIT_AS) to 512 MB.
 	// This prevents runaway worker processes from exhausting the gateway's memory.
-	if cmd.Process != nil {
+	// P3: RLIMIT_AS is not reliably supported on macOS — skip silently.
+	if runtime.GOOS != "darwin" && cmd.Process != nil {
 		const memLimit = 512 * 1024 * 1024 // 512 MB
 		if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{
 			Cur: memLimit,

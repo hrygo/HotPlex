@@ -25,6 +25,7 @@ import (
 type SessionStarter interface {
 	StartSession(ctx context.Context, id, userID, botID string,
 		wt worker.WorkerType, allowedTools []string) error
+	ResumeSession(ctx context.Context, id string) error
 }
 
 var _ SessionStarter = (*Bridge)(nil) // compile-time: Bridge implements SessionStarter
@@ -82,6 +83,14 @@ func (c *Conn) ReadPump(handler *Handler) {
 	defer func() {
 		c.hb.Stop()
 		c.Close()
+		c.hub.UnregisterConn(c)
+		// Transition to IDLE so idle_timeout GC can clean up the worker.
+		// On reconnect, performInit will detect StateIdle and call ResumeSession.
+		if c.sessionID != "" {
+			if err := handler.sm.Transition(context.Background(), c.sessionID, events.StateIdle); err != nil {
+				c.log.Debug("gateway: conn close transition to idle", "session_id", c.sessionID, "err", err)
+			}
+		}
 		c.hub.LeaveSession(c.sessionID, c)
 	}()
 
@@ -138,7 +147,10 @@ func (c *Conn) ReadPump(handler *Handler) {
 		// Stamp session ID, sequence number, and owner ID.
 		env.SessionID = c.sessionID
 		env.OwnerID = c.userID
-		env.Seq = c.hub.NextSeq(c.sessionID)
+		// P2: ping/pong are heartbeat control messages — don't consume seq.
+		if env.Event.Type != events.Ping {
+			env.Seq = c.hub.NextSeq(c.sessionID)
+		}
 
 		// Route to handler with tracing span.
 		_, span := tracing.SpanFromContext(context.Background()).Start(context.Background(), "conn.recv")
@@ -267,6 +279,17 @@ func (c *Conn) performInit(handler *Handler) error {
 		// Deleted session → reject.
 		c.sendInitError(events.ErrCodeSessionNotFound, "session was deleted")
 		return ErrInitSessionDeleted
+	} else if si.State == events.StateIdle {
+		// Idle session → resume worker (reattach to existing session/worker).
+		c.log.Info("gateway: resuming idle session", "session_id", sessionID)
+		// P1: ResumeSession requires a valid SessionStarter (Bridge). In test mode,
+		// starter may be nil; skip resumption and let bot_id validation proceed.
+		if c.starter != nil {
+			if err := c.starter.ResumeSession(context.Background(), sessionID); err != nil {
+				c.sendInitError(events.ErrCodeInternalError, "failed to resume session")
+				return fmt.Errorf("resume session: %w", err)
+			}
+		}
 	} else if si.State == events.StateTerminated {
 		// Terminated → attempt resume (restart worker).
 		c.log.Info("gateway: resuming terminated session", "session_id", sessionID)
