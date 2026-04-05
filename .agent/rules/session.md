@@ -12,17 +12,93 @@ paths:
 
 ```
 CREATED → RUNNING → IDLE → TERMINATED → DELETED
-   ↑                    ↓
-   └─── RESUME ←────────┘
+   ↑                    ↓            ↑
+   └─── RESUME ←────────┘    │
+          └──────────────────────┘
 ```
 
 | 状态 | IsActive() | 说明 |
 |------|-----------|------|
 | `CREATED` | true | Session 创建，未开始执行 |
 | `RUNNING` | true | 正在执行 Worker |
-| `IDLE` | true | Turn 结束，等待下一个 input |
+| `IDLE` | true | **P1 Fix**: WebSocket 关闭时转入此状态，等待重连恢复 |
 | `TERMINATED` | false | 结束，保留元数据 |
 | `DELETED` | false | 终态，DB 记录已删除 |
+
+### P1: Session Orphan 防护规则
+
+**WebSocket 关闭时**：
+```go
+// conn.go ReadPump defer
+defer func() {
+    c.hb.Stop()
+    c.Close()
+    c.hub.UnregisterConn(c)
+    
+    // P1 Fix: Transition to IDLE instead of TERMINATED
+    if c.sessionID != "" {
+        if err := handler.sm.Transition(ctx, c.sessionID, events.StateIdle); err != nil {
+            c.log.Debug("gateway: conn close transition to idle", "session_id", c.sessionID, "err", err)
+        }
+    }
+    c.hub.LeaveSession(c.sessionID, c)
+}()
+```
+
+**重连恢复时 (ResumeSession)**：
+```go
+// bridge.go ResumeSession
+func (b *Bridge) ResumeSession(ctx context.Context, id string) error {
+    si, err := b.sm.Get(id)
+    
+    // P1 Fix: Clean up stale worker from previous connection
+    if existing := b.sm.GetWorker(id); existing != nil {
+        // Terminate with panic recovery
+        func() {
+            defer func() {
+                if r := recover(); r != nil {
+                    b.log.Warn("bridge: GetWorker panicked", "err", r, "session_id", id)
+                }
+            }()
+            _ = existing.Terminate(ctx)
+        }()
+        b.sm.DetachWorker(id)
+    }
+    
+    // Create and attach new worker
+    w, err := b.wf.NewWorker(si.WorkerType)
+    b.sm.AttachWorker(id, w)
+    
+    // Transition IDLE → RUNNING
+    b.sm.Transition(ctx, id, events.StateRunning)
+    
+    return b.hub.SendToSession(ctx, stateEvt)
+}
+```
+
+**关键原则**：
+- StateIdle 是"暂停"状态，worker 暂停但未终止
+- StateTerminated 是"终止"状态，需要完全重启
+- 重连时检测 StateIdle 会触发 ResumeSession
+- ResumeSession 先清理旧 worker（防止泄漏），再创建新 worker
+
+### P0: Session ID 生成规则
+
+**客户端禁止生成 session_id**：
+- 客户端在 WebSocket open 时不生成 session_id
+- 服务器在 `init` 握手时生成 session_id
+- `init_ack` 返回服务器生成的 session_id
+- 客户端使用 `init_ack` 中的 session_id 进行后续通信
+
+```go
+// browser-client.ts
+// ❌ 错误: 客户端不生成 session_id
+// const sessionId = generateSessionId()
+
+// ✅ 正确: 从 init_ack 获取
+const initAck = await init(sessionId)
+this.sessionId = initAck.session_id
+```
 
 ### 合法转换规则
 ```go

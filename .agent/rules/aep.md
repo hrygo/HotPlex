@@ -57,6 +57,39 @@ func EncodeLine(w io.Writer, env *Envelope) error {
 - `control`：reconnect / throttle（Server 发起）
 
 ## Seq 分配与去重
+
+### P2: Ping/Pong 序号规则
+
+**心跳消息不消耗序号**：
+- `ping` 事件：心跳请求，不分配 seq
+- `pong` 事件：心跳响应，不分配 seq
+- 这些是控制消息，不属于消息流
+
+```go
+// conn.go ReadPump
+env, err := aep.DecodeLine(data)
+if err != nil {
+    c.sendError(events.ErrCodeInvalidMessage, err.Error())
+    continue
+}
+
+env.SessionID = c.sessionID
+env.OwnerID = c.userID
+
+// P2 Fix: Skip sequence number for heartbeat messages
+if env.Event.Type != events.Ping {
+    env.Seq = c.hub.NextSeq(c.sessionID)
+}
+```
+
+**设计原因**：
+- Ping/pong 是 WebSocket 层面的心跳机制
+- 与业务消息（input/delta/done）无关
+- 不消耗 seq 可以避免序号跳跃，保持序号连续性
+- 客户端收到 ping/pong 不需要按序处理
+
+### 常规消息的 Seq 分配
+
 ```go
 // hub.NextSeq 原子分配，保证 session 内单调递增
 func (g *SeqGen) NextSeq(sessionID string) int64 {
