@@ -7,14 +7,7 @@ import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import ThinkingIndicator from './ThinkingIndicator';
 import ErrorMessage from './ErrorMessage';
-
-// Types for AI SDK compatible messages
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  createdAt?: Date;
-}
+import type { Message } from '@/types/message';
 
 interface UseChatState {
   messages: Message[];

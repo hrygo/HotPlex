@@ -2,13 +2,7 @@
 
 import { useMemo } from 'react';
 import MessageContent from './MessageContent';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  createdAt?: Date;
-}
+import type { Message } from '@/types/message';
 
 interface MessageBubbleProps {
   message: Message;
