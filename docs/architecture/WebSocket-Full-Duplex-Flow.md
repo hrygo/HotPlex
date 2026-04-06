@@ -287,13 +287,13 @@ tags:
   Admin Shortcut: RUNNING / IDLE ──admin kill──► DELETED (bypass TERMINATED)
 ```
 
-| State       | Meaning                | AEP Event        |
-| ----------- | ---------------------- | ---------------- |
-| `CREATED`   | Created, not started   | `state(created)` |
-| `RUNNING`   | Executing              | `state(running)` |
-| `IDLE`      | Waiting for input      | `state(idle)`    |
-| `TERMINATED`| Terminated             | `state(terminated)` |
-| `DELETED`   | Cleaned up (control plane) | —           |
+| State        | Meaning                    | AEP Event           |
+| ------------ | -------------------------- | ------------------- |
+| `CREATED`    | Created, not started       | `state(created)`    |
+| `RUNNING`    | Executing                  | `state(running)`    |
+| `IDLE`       | Waiting for input          | `state(idle)`       |
+| `TERMINATED` | Terminated                 | `state(terminated)` |
+| `DELETED`    | Cleaned up (control plane) | —                   |
 
 ---
 
@@ -301,37 +301,37 @@ tags:
 
 ### 5.1 WebSocket Layer (`internal/gateway/conn.go`)
 
-| Component | Responsibility |
-|-----------|----------------|
-| `Conn` | WebSocket connection lifecycle, read/write pumps |
-| `Hub` | Connection registry, session routing, sequence number generation |
-| `Handler` | AEP event dispatch (input, ping, control) |
+| Component | Responsibility                                                   |
+| --------- | ---------------------------------------------------------------- |
+| `Conn`    | WebSocket connection lifecycle, read/write pumps                 |
+| `Hub`     | Connection registry, session routing, sequence number generation |
+| `Handler` | AEP event dispatch (input, ping, control)                        |
 
 ### 5.2 Bridge Layer (`internal/gateway/bridge.go`)
 
-| Responsibility | Description |
-|----------------|-------------|
+| Responsibility             | Description                                                 |
+| -------------------------- | ----------------------------------------------------------- |
 | Session ↔ Worker Lifecycle | Orchestrates session creation, worker attachment/detachment |
-| Event Transformation | Converts AEP events to worker input and vice versa |
-| Error Propagation | Maps worker errors to AEP error events |
+| Event Transformation       | Converts AEP events to worker input and vice versa          |
+| Error Propagation          | Maps worker errors to AEP error events                      |
 
 ### 5.3 Session Manager (`internal/session/manager.go`)
 
-| Responsibility | Description |
-|----------------|-------------|
-| Session CRUD | Create, read, update, delete sessions |
+| Responsibility    | Description                                            |
+| ----------------- | ------------------------------------------------------ |
+| Session CRUD      | Create, read, update, delete sessions                  |
 | State Transitions | Atomic state machine transitions with mutex protection |
-| GC | Expired session cleanup |
-| Nil Guards | Returns safely when called on nil Manager (test mode) |
+| GC                | Expired session cleanup                                |
+| Nil Guards        | Returns safely when called on nil Manager (test mode)  |
 
 ### 5.4 Worker Adapter (`internal/worker/`)
 
-| Component | Description |
-|-----------|-------------|
-| `base.BaseWorker` | Shared lifecycle (Terminate, Kill, Wait, Health) |
-| `ClaudeCodeWorker` | Claude CLI adapter with stream-json protocol |
-| `OpenCodeCLIWorker` | OpenCode CLI adapter with json-lines protocol |
-| `OpenCodeSrvWorker` | OpenCode server adapter with HTTP+SSE |
+| Component              | Description                                             |
+| ---------------------- | ------------------------------------------------------- |
+| `base.BaseWorker`      | Shared lifecycle (Terminate, Kill, Wait, Health)        |
+| `ClaudeCodeWorker`     | Claude CLI adapter with stream-json protocol            |
+| `OpenCodeCLIWorker`    | OpenCode CLI adapter with json-lines protocol           |
+| `OpenCodeSrvWorker`    | OpenCode server adapter with HTTP+SSE                   |
 | Platform Compatibility | `proc.Manager` skips RLIMIT_AS on macOS (not supported) |
 
 ---
@@ -340,26 +340,26 @@ tags:
 
 ### 6.1 Client → Server Events
 
-| Event Type | Description | Payload |
-|------------|-------------|---------|
-| `init` | Connection handshake | `{session_id, worker_type, config, auth}` |
-| `input` | User message | `{content, attachments?}` |
-| `ping` | Heartbeat request | `{}` |
-| `control` | Control action | `{action: "terminate"\|"delete"}` |
+| Event Type | Description          | Payload                                   |
+| ---------- | -------------------- | ----------------------------------------- |
+| `init`     | Connection handshake | `{session_id, worker_type, config, auth}` |
+| `input`    | User message         | `{content, attachments?}`                 |
+| `ping`     | Heartbeat request    | `{}`                                      |
+| `control`  | Control action       | `{action: "terminate"\|"delete"}`         |
 
 ### 6.2 Server → Client Events
 
-| Event Type | Description | Payload |
-|------------|-------------|---------|
-| `init_ack` | Handshake acknowledgment | `{session_id, capabilities}` |
-| `state` | Session state change | `{state: "running"\|"idle"\|"terminated"}` |
-| `message.delta` | Streaming text | `{content}` |
-| `message.done` | Message complete | `{usage?}` |
-| `reasoning` | Thinking process | `{content}` |
-| `error` | Error occurred | `{code, message}` |
-| `pong` | Heartbeat response | `{}` |
-| `control` | Server control | `{action: "throttle"\|"reconnect"}` |
-| `raw` | Passthrough | `{data}` |
+| Event Type      | Description              | Payload                                    |
+| --------------- | ------------------------ | ------------------------------------------ |
+| `init_ack`      | Handshake acknowledgment | `{session_id, capabilities}`               |
+| `state`         | Session state change     | `{state: "running"\|"idle"\|"terminated"}` |
+| `message.delta` | Streaming text           | `{content}`                                |
+| `message.done`  | Message complete         | `{usage?}`                                 |
+| `reasoning`     | Thinking process         | `{content}`                                |
+| `error`         | Error occurred           | `{code, message}`                          |
+| `pong`          | Heartbeat response       | `{}`                                       |
+| `control`       | Server control           | `{action: "throttle"\|"reconnect"}`        |
+| `raw`           | Passthrough              | `{data}`                                   |
 
 ---
 
@@ -389,11 +389,11 @@ pool:
 
 ### 7.2 Client Config
 
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `NEXT_PUBLIC_HOTPLEX_WS_URL` | `ws://localhost:8888/ws` | WebSocket endpoint |
-| `NEXT_PUBLIC_HOTPLEX_WORKER_TYPE` | `claude_code` | Worker type |
-| `NEXT_PUBLIC_HOTPLEX_API_KEY` | `dev` | API key for authentication |
+| Environment Variable              | Default                  | Description                |
+| --------------------------------- | ------------------------ | -------------------------- |
+| `NEXT_PUBLIC_HOTPLEX_WS_URL`      | `ws://localhost:8888/ws` | WebSocket endpoint         |
+| `NEXT_PUBLIC_HOTPLEX_WORKER_TYPE` | `claude_code`            | Worker type                |
+| `NEXT_PUBLIC_HOTPLEX_API_KEY`     | `dev`                    | API key for authentication |
 
 ---
 
@@ -403,10 +403,6 @@ pool:
 - [[architecture/Worker-Gateway-Design]] - Worker adapter architecture
 - [[specs/Worker-ClaudeCode-Spec]] - Claude Code worker implementation
 - [[management/Admin-API-Design]] - Administrative API design
-
----
-
----
 
 ---
 
@@ -564,7 +560,7 @@ if runtime.GOOS != "darwin" && cmd.Process != nil {
 ## 10. Changelog
 
 
-| Date | Version | Change |
-|------|---------|--------|
-| 2026-04-05 | 1.1 | **Protocol & Session Improvements**:<br/>• Session ID: Server-side generation with client-side assignment<br/>• Session Resume: StateIdle transition on disconnect + ResumeSession on reconnect<br/>• Heartbeat: Ping/pong messages skip sequence numbering<br/>• Platform: macOS compatibility for RLIMIT_AS |
-| 2026-04-05 | 1.0 | Initial document creation |
+| Date       | Version | Change                                                                                                                                                                                                                                                                                                        |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-04-05 | 1.1     | **Protocol & Session Improvements**:<br/>• Session ID: Server-side generation with client-side assignment<br/>• Session Resume: StateIdle transition on disconnect + ResumeSession on reconnect<br/>• Heartbeat: Ping/pong messages skip sequence numbering<br/>• Platform: macOS compatibility for RLIMIT_AS |
+| 2026-04-05 | 1.0     | Initial document creation                                                                                                                                                                                                                                                                                     |

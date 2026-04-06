@@ -179,7 +179,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     return this._doConnect(existingSessionId);
   }
 
-  private _doConnect(sessionId: string): Promise<InitAckData> {
+  private _doConnect(sessionId: string | undefined): Promise<InitAckData> {
     return new Promise((resolve, reject) => {
       try {
         // Mute any pending onclose handler on the previous WebSocket instance
