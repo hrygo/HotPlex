@@ -11,7 +11,7 @@ The most straightforward way to try HotPlex — just connect and chat with AI co
 ## Setup
 
 ```bash
-cd web-chat
+cd webchat
 pnpm install
 cp .env.example .env.local
 pnpm dev

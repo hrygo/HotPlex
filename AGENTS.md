@@ -32,7 +32,7 @@ pkg/
 client/              # Go client SDK (standalone module)
 packages/
   ai-sdk-transport/  # TS package: Vercel AI SDK ChatTransport adapter for AEP v1
-web-chat/            # Next.js web chat UI (uses @hotplex/ai-sdk-transport)
+webchat/            # Next.js web chat UI (uses @hotplex/ai-sdk-transport)
 examples/            # Multi-language client SDKs (typescript-client, python-client, java-client)
 docs/                # Architecture, specs, security, testing, management docs
 scripts/             # Build/validation scripts

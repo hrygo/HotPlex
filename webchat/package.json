@@ -1,5 +1,5 @@
 {
-  "name": "hotplex-web-chat",
+  "name": "hotplex-webchat",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.0-beta.64",
+    "@assistant-ui/react": "^0.12.23",
     "@hotplex/ai-sdk-transport": "file:../packages/ai-sdk-transport",
     "@tailwindcss/postcss": "^4.2.2",
     "@tailwindcss/vite": "^4.2.2",
@@ -21,7 +22,8 @@
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
-    "tailwindcss": "^4.2.2"
+    "tailwindcss": "^4.2.2",
+    "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",

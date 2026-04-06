@@ -63,9 +63,9 @@ WORKER_PID     := /tmp/hotplex-worker.pid
 WORKER_LOG     := $(LOG_DIR)/hotplex-worker.log
 WORKER_SOCK    := /tmp/hotplex-worker.sock
 
-WEB_CHAT_DIR   := web-chat
-WEB_CHAT_PID   := /tmp/hotplex-web-chat.pid
-WEB_CHAT_LOG   := $(LOG_DIR)/web-chat.log
+WEB_CHAT_DIR   := webchat
+WEB_CHAT_PID   := /tmp/hotplex-webchat.pid
+WEB_CHAT_LOG   := $(LOG_DIR)/webchat.log
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 🎨 Premium Color Palette & Symbols
@@ -159,8 +159,8 @@ DOT            := ‣
 .PHONY: worker-start worker-stop worker-status worker-logs worker-tail worker-restart
 
 # Web chat
-.PHONY: web-chat-install web-chat-build web-chat-dev web-chat-start
-.PHONY: web-chat-stop web-chat-status web-chat-logs web-chat-tail web-chat-clean
+.PHONY: webchat-install webchat-build webchat-dev webchat-start
+.PHONY: webchat-stop webchat-status webchat-logs webchat-tail webchat-clean
 
 # Utilities
 .PHONY: clean clean-all clean-logs clean-cache reset
@@ -260,7 +260,7 @@ health: ## 🏥 Run comprehensive health check
 	@echo ""
 	@echo "$(BOLD)Services:$(RESET)"
 	@-$(MAKE) --no-print-directory worker-status 2>/dev/null || echo "  $(DIM)$(BULLET) Gateway: not running$(RESET)"
-	@-$(MAKE) --no-print-directory web-chat-status 2>/dev/null || echo "  $(DIM)$(BULLET) Web-chat: not running$(RESET)"
+	@-$(MAKE) --no-print-directory webchat-status 2>/dev/null || echo "  $(DIM)$(BULLET) Web-chat: not running$(RESET)"
 	@echo ""
 	@echo "$(BOLD)Resources:$(RESET)"
 	@echo "  $(BULLET) Disk:       $(shell df -h . | tail -1 | awk '{print $$4}') available"
@@ -589,22 +589,22 @@ reload: ## 🔃 Reload config (SIGHUP)
 # 💬 Web Chat
 # ════════════════════════════════════════════════════════════════════════════
 
-web-chat-install: ## 📦 Install web-chat dependencies
-	@echo "$(CYAN)$(PACKAGE) Installing web-chat dependencies...$(RESET)"
+webchat-install: ## 📦 Install webchat dependencies
+	@echo "$(CYAN)$(PACKAGE) Installing webchat dependencies...$(RESET)"
 	@cd $(WEB_CHAT_DIR) && pnpm install
 	@echo "$(GREEN)$(OK) Dependencies installed$(RESET)"
 
-web-chat-build: web-chat-install ## 🔨 Build web-chat
-	@echo "$(CYAN)$(BUILD) Building web-chat...$(RESET)"
+webchat-build: webchat-install ## 🔨 Build webchat
+	@echo "$(CYAN)$(BUILD) Building webchat...$(RESET)"
 	@cd $(WEB_CHAT_DIR) && pnpm build
 	@echo "$(GREEN)$(OK) Built$(RESET)"
 
-web-chat-dev: web-chat-install ## 🛠️  Start web-chat dev server (background)
+webchat-dev: webchat-install ## 🛠️  Start webchat dev server (background)
 	@mkdir -p $(LOG_DIR)
 	@if [ -f $(WEB_CHAT_PID) ] && kill -0 $$(cat $(WEB_CHAT_PID)) 2>/dev/null; then \
 		echo "$(YELLOW)$(WARN) Web-chat already running (PID: $$(cat $(WEB_CHAT_PID)))$(RESET)"; \
 	else \
-		echo "$(CYAN)$(ROCKET) Starting web-chat dev...$(RESET)"; \
+		echo "$(CYAN)$(ROCKET) Starting webchat dev...$(RESET)"; \
 		cd $(WEB_CHAT_DIR) && pnpm dev > $(WEB_CHAT_LOG) 2>&1 & \
 		echo $$! > $(WEB_CHAT_PID); \
 		sleep 2; \
@@ -617,12 +617,12 @@ web-chat-dev: web-chat-install ## 🛠️  Start web-chat dev server (background
 		fi; \
 	fi
 
-web-chat-start: web-chat-build ## 🚀 Start web-chat production (background)
+webchat-start: webchat-build ## 🚀 Start webchat production (background)
 	@mkdir -p $(LOG_DIR)
 	@if [ -f $(WEB_CHAT_PID) ] && kill -0 $$(cat $(WEB_CHAT_PID)) 2>/dev/null; then \
 		echo "$(YELLOW)$(WARN) Web-chat already running$(RESET)"; \
 	else \
-		echo "$(CYAN)$(ROCKET) Starting web-chat production...$(RESET)"; \
+		echo "$(CYAN)$(ROCKET) Starting webchat production...$(RESET)"; \
 		cd $(WEB_CHAT_DIR) && pnpm start > $(WEB_CHAT_LOG) 2>&1 & \
 		echo $$! > $(WEB_CHAT_PID); \
 		sleep 2; \
@@ -635,11 +635,11 @@ web-chat-start: web-chat-build ## 🚀 Start web-chat production (background)
 		fi; \
 	fi
 
-web-chat-stop: ## 🛑 Stop web-chat
+webchat-stop: ## 🛑 Stop webchat
 	@if [ -f $(WEB_CHAT_PID) ]; then \
 		PID=$$(cat $(WEB_CHAT_PID)); \
 		if kill -0 $$PID 2>/dev/null; then \
-			echo "$(CYAN)$(STOP) Stopping web-chat...$(RESET)"; \
+			echo "$(CYAN)$(STOP) Stopping webchat...$(RESET)"; \
 			kill -TERM $$PID 2>/dev/null; \
 			sleep 1; \
 			kill -0 $$PID 2>/dev/null && kill -9 $$PID 2>/dev/null || true; \
@@ -650,7 +650,7 @@ web-chat-stop: ## 🛑 Stop web-chat
 		echo "$(DIM)$(INFO) Not running$(RESET)"; \
 	fi
 
-web-chat-status: ## 📊 Check web-chat status
+webchat-status: ## 📊 Check webchat status
 	@if [ -f $(WEB_CHAT_PID) ]; then \
 		PID=$$(cat $(WEB_CHAT_PID)); \
 		if kill -0 $$PID 2>/dev/null; then \
@@ -663,23 +663,23 @@ web-chat-status: ## 📊 Check web-chat status
 		echo "$(DIM)⚪ Web-chat not running$(RESET)"; \
 	fi
 
-web-chat-logs: ## 📋 Show web-chat logs
+webchat-logs: ## 📋 Show webchat logs
 	@if [ -f $(WEB_CHAT_LOG) ]; then \
 		cat $(WEB_CHAT_LOG); \
 	else \
 		echo "$(DIM)$(INFO) No log file: $(WEB_CHAT_LOG)$(RESET)"; \
 	fi
 
-web-chat-tail: ## 👁️  Tail web-chat logs
+webchat-tail: ## 👁️  Tail webchat logs
 	@if [ -f $(WEB_CHAT_LOG) ]; then \
-		echo "$(CYAN)$(LOGS) Tailing web-chat logs...$(RESET)"; \
+		echo "$(CYAN)$(LOGS) Tailing webchat logs...$(RESET)"; \
 		tail -f $(WEB_CHAT_LOG); \
 	else \
 		echo "$(DIM)$(INFO) No log file: $(WEB_CHAT_LOG)$(RESET)"; \
 	fi
 
-web-chat-clean: ## 🧹 Clean web-chat build artifacts
-	@echo "$(CYAN)$(CLEAN) Cleaning web-chat...$(RESET)"
+webchat-clean: ## 🧹 Clean webchat build artifacts
+	@echo "$(CYAN)$(CLEAN) Cleaning webchat...$(RESET)"
 	@cd $(WEB_CHAT_DIR) && rm -rf .next node_modules
 	@echo "$(GREEN)$(OK) Cleaned$(RESET)"
 
@@ -689,7 +689,7 @@ web-chat-clean: ## 🧹 Clean web-chat build artifacts
 
 dev: dev-start ## 🚀 Start development environment (alias)
 
-dev-start: worker-start web-chat-dev ## 🚀 Start full dev environment
+dev-start: worker-start webchat-dev ## 🚀 Start full dev environment
 	@echo ""
 	@echo "$(GREEN)$(BOLD)$(SPARKLE) Development Environment Ready!$(RESET)"
 	@echo ""
@@ -704,12 +704,12 @@ dev-start: worker-start web-chat-dev ## 🚀 Start full dev environment
 	@echo "  $(DIM)make dev-stop$(RESET)    Stop all services"
 	@echo ""
 
-dev-stop: worker-stop web-chat-stop ## 🛑 Stop development environment
+dev-stop: worker-stop webchat-stop ## 🛑 Stop development environment
 	@echo "$(GREEN)$(OK) Development environment stopped$(RESET)"
 
-dev-status: worker-status web-chat-status ## 📊 Check development status
+dev-status: worker-status webchat-status ## 📊 Check development status
 
-dev-logs: worker-logs web-chat-logs ## 📋 Show all development logs
+dev-logs: worker-logs webchat-logs ## 📋 Show all development logs
 
 dev-reset: dev-stop clean dev-start ## 🔄 Reset development environment
 
@@ -870,7 +870,7 @@ help: ## 📖 Show interactive help (this screen)
 	@echo "  $(GREEN)check$(RESET)           Full quality check (lint + test + build)"
 	@echo ""
 	@echo "$(BOLD)$(CYAN)🔧 Development$(RESET)"
-	@echo "  $(CYAN)dev-start$(RESET)       Start gateway + web-chat"
+	@echo "  $(CYAN)dev-start$(RESET)       Start gateway + webchat"
 	@echo "  $(CYAN)dev-stop$(RESET)        Stop all services"
 	@echo "  $(CYAN)dev-status$(RESET)      Check service status"
 	@echo "  $(CYAN)dev-logs$(RESET)        View all logs"
@@ -900,11 +900,11 @@ help: ## 📖 Show interactive help (this screen)
 	@echo "  $(CYAN)tail$(RESET)            Tail logs (live)"
 	@echo ""
 	@echo "$(BOLD)$(CYAN)💬 Web Chat$(RESET)"
-	@echo "  $(CYAN)web-chat-dev$(RESET)    Start web-chat dev server"
-	@echo "  $(CYAN)web-chat-build$(RESET)   Build web-chat for production"
-	@echo "  $(CYAN)web-chat-start$(RESET)   Start web-chat (production)"
-	@echo "  $(CYAN)web-chat-stop$(RESET)    Stop web-chat"
-	@echo "  $(CYAN)web-chat-status$(RESET)   Check web-chat status"
+	@echo "  $(CYAN)webchat-dev$(RESET)    Start webchat dev server"
+	@echo "  $(CYAN)webchat-build$(RESET)   Build webchat for production"
+	@echo "  $(CYAN)webchat-start$(RESET)   Start webchat (production)"
+	@echo "  $(CYAN)webchat-stop$(RESET)    Stop webchat"
+	@echo "  $(CYAN)webchat-status$(RESET)   Check webchat status"
 	@echo ""
 	@echo "$(BOLD)$(CYAN)🧹 Maintenance$(RESET)"
 	@echo "  $(CYAN)clean$(RESET)           Clean build artifacts"
@@ -958,8 +958,8 @@ help-dev: ## 📖 Development workflow commands
 	@echo "  $(CYAN)worker-logs$(RESET)       View logs"
 	@echo ""
 	@echo "$(BOLD)Web Chat:$(RESET)"
-	@echo "  $(CYAN)web-chat-dev$(RESET)      Start dev server"
-	@echo "  $(CYAN)web-chat-build$(RESET)    Production build"
+	@echo "  $(CYAN)webchat-dev$(RESET)      Start dev server"
+	@echo "  $(CYAN)webchat-build$(RESET)    Production build"
 	@echo ""
 
 help-test: ## 📖 Testing & quality commands
@@ -1034,19 +1034,19 @@ help-web: ## 📖 Web chat commands
 	@echo "$(CYAN)$(BOLD)💬 Web Chat Commands$(RESET)"
 	@echo ""
 	@echo "$(BOLD)Development:$(RESET)"
-	@echo "  $(CYAN)web-chat-dev$(RESET)      Start dev server"
-	@echo "  $(CYAN)web-chat-install$(RESET)  Install deps"
+	@echo "  $(CYAN)webchat-dev$(RESET)      Start dev server"
+	@echo "  $(CYAN)webchat-install$(RESET)  Install deps"
 	@echo ""
 	@echo "$(BOLD)Production:$(RESET)"
-	@echo "  $(CYAN)web-chat-build$(RESET)    Build"
-	@echo "  $(CYAN)web-chat-start$(RESET)    Start production"
+	@echo "  $(CYAN)webchat-build$(RESET)    Build"
+	@echo "  $(CYAN)webchat-start$(RESET)    Start production"
 	@echo ""
 	@echo "$(BOLD)Lifecycle:$(RESET)"
-	@echo "  $(CYAN)web-chat-stop$(RESET)     Stop"
-	@echo "  $(CYAN)web-chat-status$(RESET)   Status"
-	@echo "  $(CYAN)web-chat-logs$(RESET)     Logs"
-	@echo "  $(CYAN)web-chat-tail$(RESET)     Tail logs"
-	@echo "  $(CYAN)web-chat-clean$(RESET)    Clean"
+	@echo "  $(CYAN)webchat-stop$(RESET)     Stop"
+	@echo "  $(CYAN)webchat-status$(RESET)   Status"
+	@echo "  $(CYAN)webchat-logs$(RESET)     Logs"
+	@echo "  $(CYAN)webchat-tail$(RESET)     Tail logs"
+	@echo "  $(CYAN)webchat-clean$(RESET)    Clean"
 	@echo ""
 
 help-advanced: ## 📖 Advanced commands
