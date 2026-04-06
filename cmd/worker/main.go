@@ -255,10 +255,21 @@ func setupRoutes(
 
 	// Browser-accessible session API (auth via api_key query param).
 	gatewayAPI := gateway.NewGatewayAPI(auth, sm, bridge)
+
+	// CORS preflight handler (OPTIONS)
+	corsPreflight := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key")
+		w.WriteHeader(http.StatusOK)
+	}
+
 	mux.HandleFunc("GET /api/sessions", gatewayAPI.ListSessions)
 	mux.HandleFunc("POST /api/sessions", gatewayAPI.CreateSession)
 	mux.HandleFunc("GET /api/sessions/", gatewayAPI.GetSession)
 	mux.HandleFunc("DELETE /api/sessions/", gatewayAPI.DeleteSession)
+	mux.HandleFunc("OPTIONS /api/sessions", corsPreflight)
+	mux.HandleFunc("OPTIONS /api/sessions/", corsPreflight)
 
 	mux.HandleFunc("GET /admin/health/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

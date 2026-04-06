@@ -53,3 +53,4 @@ Desktop.ini
 .playwright-cli
 .ruff_cache
 __pycache__
+./*.png

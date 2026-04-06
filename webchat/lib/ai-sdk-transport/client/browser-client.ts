@@ -102,6 +102,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   private _sessionId: string | null = null;
   private _state: SessionState = SessionState.Deleted;
   private _connected: boolean = false;
+  private _connecting: boolean = false;
   private _reconnecting: boolean = false;
 
   private reconnectAttempt = 0;
@@ -115,6 +116,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
   private pendingInput: { content: string; resolve: () => void; reject: (err: Error) => void } | null = null;
   private inputRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingConnectReject: ((err: Error) => void) | null = null;
 
   private closed = false;
 
@@ -153,6 +155,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   get sessionId(): string | null { return this._sessionId; }
   get state(): SessionState { return this._state; }
   get connected(): boolean { return this._connected; }
+  /** True while a connection handshake is in progress (awaiting init_ack). */
+  get connecting(): boolean { return this._connecting; }
   get reconnecting(): boolean { return this._reconnecting; }
 
   // ============================================================================
@@ -177,11 +181,15 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   }
 
   private _doConnect(sessionId: string | undefined): Promise<InitAckData> {
+    this._connecting = true;
     return new Promise((resolve, reject) => {
+      this.pendingConnectReject = reject;
       try {
         const prevWs = this.ws;
         if (prevWs) {
+          // Detach handler AND close the socket to avoid server having two active connections
           prevWs.onclose = null;
+          prevWs.close();
         }
 
         let url = this.config.url;
@@ -230,6 +238,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           this._handleClose(event.code, event.reason || 'Connection closed');
         });
       } catch (err) {
+        this._connecting = false;
+        this.pendingConnectReject = null;
         reject(err);
       }
     });
@@ -243,8 +253,10 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
       this._sessionId = session_id;
       this._connected = true;
+      this._connecting = false;
       this._reconnecting = false;
       this.reconnectAttempt = 0;
+      this.pendingConnectReject = null;
 
       if (ackData.state) {
         this._state = ackData.state;
@@ -421,6 +433,11 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this._clearReconnectTimer();
     this._clearInputRetry();
 
+    if (this.pendingConnectReject) {
+      this.pendingConnectReject(new Error('Client disconnected'));
+      this.pendingConnectReject = null;
+    }
+
     if (this.ws) {
       const ws = this.ws;
       this.ws = null;
@@ -430,6 +447,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     }
 
     this._connected = false;
+    this._connecting = false;
     this.emit('disconnected', 'Client initiated disconnect');
   }
 
@@ -530,6 +548,12 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     }
 
     if (!wasConnected && !this._reconnecting) {
+      // Connection closed before or during handshake — reject pending connect
+      if (this._connecting && this.pendingConnectReject) {
+        this._connecting = false;
+        this.pendingConnectReject(new Error(`WebSocket closed during handshake: ${reason}`));
+        this.pendingConnectReject = null;
+      }
       return;
     }
 

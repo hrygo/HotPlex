@@ -5,7 +5,11 @@
  * using api_key query param for auth.
  */
 
-const BASE = process.env.NEXT_PUBLIC_HOTPLEX_WS_URL?.replace('ws://', 'http://').replace('wss://', 'https://') ?? 'http://localhost:8888';
+const BASE = process.env.NEXT_PUBLIC_HOTPLEX_WS_URL
+  ?.replace(/^ws:\/\//, 'http://')
+  .replace(/^wss:\/\//, 'https://')
+  .replace(/\/ws\/?$/, '') // strip trailing /ws from WebSocket URL
+  ?? 'http://localhost:8888';
 
 function authParams() {
   const key = process.env.NEXT_PUBLIC_HOTPLEX_API_KEY ?? 'dev';

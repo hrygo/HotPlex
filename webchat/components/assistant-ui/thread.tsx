@@ -216,7 +216,7 @@ function ChainOfThoughtWrapper() {
           borderRadius: "0 6px 6px 0",
         }}
       >
-        <ChainOfThoughtPrimitive.Parts components={{ Text: ReasoningPart }} />
+        <ChainOfThoughtPrimitive.Parts />
       </div>
     </ChainOfThoughtPrimitive.Root>
   );
