@@ -371,6 +371,42 @@ func (w *Worker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }
 
+// ResetContext clears the worker runtime context in-place via HTTP API.
+// OpenCode Server supports in-place context clearing, so we send a reset request
+// without terminating the server process. The Gateway layer has already called
+// sm.ClearContext() to clear SessionInfo.Context.
+func (w *Worker) ResetContext(ctx context.Context) error {
+	w.Mu.Lock()
+	sessionID := ""
+	if w.httpConn != nil {
+		sessionID = w.httpConn.sessionID
+	}
+	httpAddr := w.httpAddr
+	client := w.client
+	w.Mu.Unlock()
+
+	if sessionID == "" || httpAddr == "" {
+		return fmt.Errorf("opencodeserver: reset: worker not started")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", httpAddr+"/session/"+sessionID+"/reset", nil)
+	if err != nil {
+		return fmt.Errorf("opencodeserver: reset: new request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("opencodeserver: reset: http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return fmt.Errorf("opencodeserver: reset: status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 // ─── Internal Methods ─────────────────────────────────────────────────────────
 
 // startServerProcess launches the opencode serve subprocess.

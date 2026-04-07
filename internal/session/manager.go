@@ -461,6 +461,27 @@ func (m *Manager) ValidateOwnership(ctx context.Context, sessionID, userID strin
 	return nil
 }
 
+// ClearContext clears the session context map.
+// Used by control.reset: Gateway layer clears SessionInfo.Context.
+// Worker runtime context clearing is delegated to Worker.ResetContext (in-place or terminate+start).
+func (m *Manager) ClearContext(ctx context.Context, sessionID string) error {
+	if m == nil {
+		return ErrSessionNotFound
+	}
+	ms := m.getManagedSession(sessionID)
+	if ms == nil {
+		return ErrSessionNotFound
+	}
+
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	ms.info.Context = map[string]any{}
+	ms.info.UpdatedAt = time.Now()
+
+	return m.store.Upsert(ctx, &ms.info)
+}
+
 // DebugSessionSnapshot holds safe-to-expose debug info for a managed session.
 // Exists to prevent callers from acquiring the per-session mutex directly,
 // which would violate lock ordering invariants and risk deadlocks.

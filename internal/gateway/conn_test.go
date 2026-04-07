@@ -504,6 +504,7 @@ func makeInitEnvelope(sessionID, workerType, token string) []byte {
 	data := map[string]any{
 		"version":     events.Version,
 		"worker_type": workerType,
+		"session_id":  sessionID,
 	}
 	if token != "" {
 		data["auth"] = map[string]any{"token": token}
@@ -552,11 +553,13 @@ func newECDSAKey(t *testing.T) *ecdsa.PrivateKey {
 // This is the SEC-007 cross-bot access rejection at resume time.
 func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	const (
-		sessionID  = "sess_bot001"
-		workerType = "claude-code"
-		botAlice   = "bot_alice"
-		botBob     = "bot_bob"
+		sessionIDConst = "sess_bot001"
+		workerType     = "claude-code"
+		botAlice       = "bot_alice"
+		botBob         = "bot_bob"
 	)
+	// Derive the server session ID using the same algorithm as conn.go:DeriveSessionKey.
+	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst)
 
 	// Build a JWT token for bot_alice using ES256 (ECDSA P-256).
 	jwtKey := newECDSAKey(t)
@@ -578,7 +581,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	store1.Test(t)
 	store1.On("Close").Return(nil)
 	// Get returns not-found to trigger Create.
-	store1.On("Get", mock.Anything, sessionID).Return(nil, session.ErrSessionNotFound)
+	store1.On("Get", mock.Anything, derivedSID).Return(nil, session.ErrSessionNotFound)
 	// Upsert for Create + Transition to RUNNING.
 	store1.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
 
@@ -598,7 +601,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 		serverConn1 = conn
 		mu1.Unlock()
 		go func() {
-			c := newBotIDTestConn(h1, conn, sessionID, "alice", botAlice)
+			c := newBotIDTestConn(h1, conn, derivedSID, "alice", botAlice)
 			h := NewHandler(slog.Default(), cfg, h1, mgr1, jwtVal)
 			c.ReadPump(h)
 		}()
@@ -618,7 +621,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Client A sends init with bot_alice token → should succeed (new session).
-	init1 := makeInitEnvelope(sessionID, workerType, tokenAlice)
+	init1 := makeInitEnvelope(sessionIDConst, workerType, tokenAlice)
 	resp1, err := sendWSInit(client1, init1)
 	require.NoError(t, err)
 	require.Contains(t, string(resp1), `"type":"init_ack"`, "bot_alice create should succeed")
@@ -630,18 +633,18 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	store2.On("Close").Return(nil)
 	// Get returns the existing session with bot_alice.
 	existingSession := &session.SessionInfo{
-		ID:            sessionID,
+		ID:            derivedSID,
 		UserID:        "alice",
 		BotID:         botAlice, // session was created with bot_alice
 		State:         events.StateIdle,
 		WorkerType:    worker.WorkerType(workerType),
 		AllowedTools:  []string{},
 	}
-	store2.On("Get", mock.Anything, sessionID).Return(existingSession, nil)
+	store2.On("Get", mock.Anything, derivedSID).Return(existingSession, nil)
 	// Transition to RUNNING (called by ResumeSession for StateIdle→RUNNING).
-	store2.On("Transition", mock.Anything, sessionID, events.StateRunning).Return(nil)
+	store2.On("Transition", mock.Anything, derivedSID, events.StateRunning).Return(nil)
 	// AttachWorker called by ResumeSession.
-	store2.On("AttachWorker", mock.Anything, sessionID, mock.Anything).Return(nil)
+	store2.On("AttachWorker", mock.Anything, derivedSID, mock.Anything).Return(nil)
 
 	cfg2 := config.Default()
 	h2 := newTestHub(t)
@@ -659,7 +662,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 		serverConn2 = conn
 		mu2.Unlock()
 		go func() {
-			c := newBotIDTestConn(h2, conn, sessionID, "alice", botBob)
+			c := newBotIDTestConn(h2, conn, derivedSID, "alice", botBob)
 			h := NewHandler(slog.Default(), cfg2, h2, mgr2, jwtVal)
 			c.ReadPump(h)
 		}()
@@ -678,7 +681,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Client B sends init with bot_bob token for the same session → should be rejected.
-	init2 := makeInitEnvelope(sessionID, workerType, tokenBob)
+	init2 := makeInitEnvelope(sessionIDConst, workerType, tokenBob)
 	resp2, err := sendWSInit(client2, init2)
 	require.NoError(t, err)
 	require.Contains(t, string(resp2), `"type":"init_ack"`) // init_ack is always sent, but contains error
@@ -688,10 +691,11 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 // TestBotIDIsolation_MatchAllowed tests that resuming a session with the matching bot_id succeeds.
 func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 	const (
-		sessionID  = "sess_bot_match"
-		workerType = "claude-code"
-		botID      = "bot_team_a"
+		sessionIDConst = "sess_bot_match"
+		workerType     = "claude-code"
+		botID          = "bot_team_a"
 	)
+	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst)
 
 	jwtKey := newECDSAKey(t)
 	jwtVal := security.NewJWTValidator(jwtKey, "")
@@ -705,13 +709,13 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 	store.Test(t)
 	store.On("Close").Return(nil).Maybe()
 	existingSession := &session.SessionInfo{
-		ID:         sessionID,
+		ID:         derivedSID,
 		UserID:     "user1",
 		BotID:      botID, // same bot_id
 		State:      events.StateIdle,
 		WorkerType: worker.WorkerType(workerType),
 	}
-	store.On("Get", mock.Anything, sessionID).Return(existingSession, nil)
+	store.On("Get", mock.Anything, derivedSID).Return(existingSession, nil)
 
 	cfg := config.Default()
 	hubForTest := newTestHub(t)
@@ -729,7 +733,7 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 		serverConn = conn
 		mu.Unlock()
 		go func() {
-			c := newBotIDTestConn(hubForTest, conn, sessionID, "user1", botID)
+			c := newBotIDTestConn(hubForTest, conn, derivedSID, "user1", botID)
 			handler := NewHandler(slog.Default(), cfg, hubForTest, mgr, jwtVal)
 			c.ReadPump(handler)
 		}()
@@ -747,7 +751,7 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 		return ok
 	}, 2*time.Second, 10*time.Millisecond)
 
-	init := makeInitEnvelope(sessionID, workerType, token)
+	init := makeInitEnvelope(sessionIDConst, workerType, token)
 	resp, err := sendWSInit(client, init)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)
@@ -758,16 +762,18 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 // sessions can be created and resumed without bot_id restrictions.
 func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 	const (
-		sessionID  = "sess_no_bot"
-		workerType = "claude-code"
+		sessionIDConst = "sess_no_bot"
+		workerType     = "claude-code"
 	)
+	// When no JWT is provided, c.userID defaults to "anon" (from newBotIDTestConn).
+	derivedSID := session.DeriveSessionKey("anon", worker.WorkerType(workerType), sessionIDConst)
 
 	// No JWT token (empty botID scenario).
 	store := new(mockSessionStoreForBotID)
 	store.Test(t)
 	store.On("Close").Return(nil).Maybe()
 	// Session does not exist → create new.
-	store.On("Get", mock.Anything, sessionID).Return(nil, session.ErrSessionNotFound)
+	store.On("Get", mock.Anything, derivedSID).Return(nil, session.ErrSessionNotFound)
 	store.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
 
 	cfg := config.Default()
@@ -786,7 +792,7 @@ func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 		serverConn = conn
 		mu.Unlock()
 		go func() {
-			c := newBotIDTestConn(h, conn, sessionID, "anon", "")
+			c := newBotIDTestConn(h, conn, derivedSID, "anon", "")
 			handler := NewHandler(slog.Default(), cfg, h, mgr, nil)
 			c.ReadPump(handler)
 		}()
@@ -805,7 +811,7 @@ func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// No auth token → empty bot_id → should succeed.
-	init := makeInitEnvelope(sessionID, workerType, "")
+	init := makeInitEnvelope(sessionIDConst, workerType, "")
 	resp, err := sendWSInit(client, init)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)
@@ -816,10 +822,11 @@ func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 // CreateWithBot (the fix in conn.go), the BotID is persisted in the session record.
 func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 	const (
-		sessionID  = "sess_new_bot"
-		workerType = "claude-code"
-		botID      = "bot_new_session"
+		sessionIDConst = "sess_new_bot"
+		workerType     = "claude-code"
+		botID          = "bot_new_session"
 	)
+	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst)
 
 	jwtKey := newECDSAKey(t)
 	jwtVal := security.NewJWTValidator(jwtKey, "")
@@ -833,7 +840,7 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 	store.Test(t)
 	store.On("Close").Return(nil).Maybe()
 	// Session does not exist on Get → triggers CreateWithBot.
-	store.On("Get", mock.Anything, sessionID).Return(nil, session.ErrSessionNotFound)
+	store.On("Get", mock.Anything, derivedSID).Return(nil, session.ErrSessionNotFound)
 	// Upsert is called twice: once for CreateWithBot, once for Transition(CREATED→RUNNING).
 	// Both must carry the correct botID.
 	store.On("Upsert", mock.Anything, mock.MatchedBy(func(info *session.SessionInfo) bool {
@@ -856,7 +863,7 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 		serverConn = conn
 		mu.Unlock()
 		go func() {
-			c := newBotIDTestConn(h, conn, sessionID, "user1", botID)
+			c := newBotIDTestConn(h, conn, derivedSID, "user1", botID)
 			handler := NewHandler(slog.Default(), cfg, h, mgr, jwtVal)
 			c.ReadPump(handler)
 		}()
@@ -874,7 +881,7 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 		return ok
 	}, 2*time.Second, 10*time.Millisecond)
 
-	init := makeInitEnvelope(sessionID, workerType, token)
+	init := makeInitEnvelope(sessionIDConst, workerType, token)
 	resp, err := sendWSInit(client, init)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)
@@ -968,8 +975,9 @@ func (m *mockBridgeWorker) Terminate(context.Context) error                     
 func (m *mockBridgeWorker) Kill() error                                         { return nil }
 func (m *mockBridgeWorker) Wait() (int, error)                                  { return m.exitCode, nil }
 func (m *mockBridgeWorker) Conn() worker.SessionConn                            { return m.conn }
-func (m *mockBridgeWorker) Health() worker.WorkerHealth                         { return worker.WorkerHealth{} }
+func (m *mockBridgeWorker) Health() worker.WorkerHealth                        { return worker.WorkerHealth{} }
 func (m *mockBridgeWorker) LastIO() time.Time                                   { return time.Now() }
+func (m *mockBridgeWorker) ResetContext(context.Context) error                   { return nil }
 
 var _ worker.Worker = (*mockBridgeWorker)(nil)
 

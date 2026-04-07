@@ -298,6 +298,38 @@ func (w *Worker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }
 
+// ResetContext clears the worker runtime context.
+// Claude Code does not support in-place context clearing, so this terminates the
+// current process and starts a fresh one with --resume to recreate session files.
+// The Gateway layer has already called sm.ClearContext() to clear SessionInfo.Context.
+func (w *Worker) ResetContext(ctx context.Context) error {
+	w.Mu.Lock()
+	sessionID := w.sessionID
+	w.Mu.Unlock()
+
+	if err := w.Terminate(ctx); err != nil {
+		return fmt.Errorf("claudecode: reset terminate: %w", err)
+	}
+
+	// Reconstruct session info from current worker state.
+	conn := w.BaseWorker.Conn()
+	var userID, projectDir string
+	if conn != nil {
+		userID = conn.UserID()
+		projectDir = conn.SessionID() // same as sessionID for claudecode
+	}
+	if projectDir == "" {
+		projectDir = sessionID
+	}
+
+	session := worker.SessionInfo{
+		SessionID:  sessionID,
+		UserID:     userID,
+		ProjectDir: projectDir,
+	}
+	return w.Start(ctx, session)
+}
+
 // ─── Internal ────────────────────────────────────────────────────────────────
 
 func (w *Worker) readOutput(ctx context.Context) {

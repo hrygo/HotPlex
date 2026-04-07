@@ -332,6 +332,65 @@ func (w *Worker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }
 
+// ResetContext clears the worker runtime context.
+// OpenCode CLI does not support in-place context clearing, so this terminates the
+// current process and starts a fresh one with the same session ID.
+// The Gateway layer has already called sm.ClearContext() to clear SessionInfo.Context.
+func (w *Worker) ResetContext(ctx context.Context) error {
+	w.Mu.Lock()
+	session := w.sessionInfo
+	w.Mu.Unlock()
+
+	if err := w.Terminate(ctx); err != nil {
+		return fmt.Errorf("opencodecli: reset terminate: %w", err)
+	}
+
+	openCodeSID := ""
+	if v := w.openCodeSessionID.Load(); v != nil {
+		openCodeSID, _ = v.(string)
+	}
+	// Start fresh with same opencode session ID (causes opencode to create fresh context).
+	args := w.buildCLIArgs(session, openCodeSID)
+	env := base.BuildEnv(session, openCodeEnvWhitelist, "opencode-cli")
+
+	w.Mu.Lock()
+	w.Proc = proc.New(proc.Opts{
+		Logger:       w.Log,
+		AllowedTools: session.AllowedTools,
+	})
+
+	var err error
+	w.stdin, _, _, err = w.Proc.Start(ctx, "opencode", args, env, session.ProjectDir)
+	if err != nil {
+		w.Proc = nil
+		w.Mu.Unlock()
+		return fmt.Errorf("opencodecli: reset start: %w", err)
+	}
+
+	if err := w.writeStdin(session.Args...); err != nil {
+		_ = w.Proc.Kill()
+		_ = w.Proc.Close()
+		w.Proc = nil
+		w.stdin = nil
+		w.Mu.Unlock()
+		return fmt.Errorf("opencodecli: reset stdin: %w", err)
+	}
+
+	childCtx, cancel := context.WithCancel(ctx)
+	w.cancel = cancel
+
+	w.parser = NewParser(w.Log)
+	w.mapper = NewMapper(w.Log, session.SessionID, w.nextSeq)
+
+	w.BaseWorker.StartTime = time.Now()
+	w.BaseWorker.SetLastIO(w.BaseWorker.StartTime)
+
+	w.Mu.Unlock()
+
+	go w.readOutput(childCtx)
+	return nil
+}
+
 // ─── CLI Arguments ────────────────────────────────────────────────────────────
 
 func (w *Worker) buildCLIArgs(session worker.SessionInfo, openCodeSessionID string) []string {

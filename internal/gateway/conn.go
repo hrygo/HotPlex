@@ -231,11 +231,10 @@ func (c *Conn) performInit(handler *Handler) error {
 		}
 	}
 
-	// Determine session ID: prefer envelope's session_id, fall back to connection's.
-	sessionID := initData.SessionID
-	if sessionID == "" {
-		sessionID = c.sessionID
-	}
+	// Determine session ID via deterministic UUIDv5 mapping from client session ID.
+	// DeriveSessionKey(ownerID, workerType, clientSessionID) is always deterministic
+	// for the same (ownerID, workerType, clientSessionID) tuple.
+	sessionID := session.DeriveSessionKey(c.userID, initData.WorkerType, initData.SessionID)
 
 	// Resolve session: create new or resume existing.
 	si, err := handler.sm.Get(sessionID)

@@ -115,6 +115,13 @@ type Worker interface {
 	// Used by GC zombie detection to identify stuck workers.
 	// Implementations that don't track I/O should return the zero time.Time.
 	LastIO() time.Time
+
+	// ResetContext clears the worker's runtime context.
+	// The worker decides the implementation:
+	//   - Workers that support in-place reset: send internal reset signal
+	//   - Others: terminate + start (physically deletes session files)
+	// Note: Gateway layer has already called sm.ClearContext() to clear SessionInfo.Context.
+	ResetContext(ctx context.Context) error
 }
 
 // WorkerHealth reports the runtime health of a worker process.

@@ -575,7 +575,126 @@ func (h *Handler) handleGC(ctx context.Context, env *events.Envelope) error {
 
 ---
 
-## 8. 测试用例
+## 8. 验收标准（AC）
+
+### AC-1：Session ID 确定性映射
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-1.1 | `DeriveSessionKey("u1", "claude_code", "s1")` 连续调用 N 次（≥1000），返回完全相同的 UUIDv5 字符串 | 单元测试 loop |
+| AC-1.2 | `DeriveSessionKey("u1", "claude_code", "s1")` ≠ `DeriveSessionKey("u2", "claude_code", "s1")` | 单元测试 |
+| AC-1.3 | `DeriveSessionKey("u1", "claude_code", "s1")` ≠ `DeriveSessionKey("u1", "opencode_cli", "s1")` | 单元测试 |
+| AC-1.4 | `DeriveSessionKey("u1", "claude_code", "s1")` ≠ `DeriveSessionKey("u1", "claude_code", "s2")` | 单元测试 |
+| AC-1.5 | 输出格式匹配正则 `/[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/` | 单元测试 |
+| AC-1.6 | 不同机器（不同主机名/IP）上相同三元组生成相同 UUID | 多机验证脚本 |
+
+**通过标准**：AC-1.1–AC-1.5 全通过；AC-1.6 为可选（RFC 4122 UUIDv5 算法保证）
+
+### AC-2：init 流程使用 DeriveSessionKey
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-2.1 | `init{client_session_id: "my-chat-001", worker_type: "claude_code"}` → `DeriveSessionKey` 计算 sessionID | 集成测试：mock/拦截 `DeriveSessionKey` 调用，验证传入参数 |
+| AC-2.2 | 相同 `(owner_id, worker_type, client_session_id)` 两次 init → 同一服务端 session（幂等） | 集成测试：创建后立即再次 init，验证 session 数量不增加 |
+| AC-2.3 | 相同 `client_session_id` 不同 `worker_type` → 不同 session | 集成测试 |
+| AC-2.4 | `client_session_id` 为空字符串 → `DeriveSessionKey` 仍返回合法 UUID（空串参与哈希） | 单元测试 |
+| AC-2.5 | 新建 session 的初始状态为 `created` | 集成测试 |
+
+**通过标准**：AC-2.1–AC-2.5 全通过
+
+### AC-3：ClearContext
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-3.1 | 有 Context 的 session 调用 `ClearContext` → `Context = {}`（空 map） | 单元测试 |
+| AC-3.2 | `ClearContext` 后 `UpdatedAt` 更新为当前时间 | 单元测试 |
+| AC-3.3 | `ClearContext` 持久化到 Store（重启后仍为空） | 集成测试：ClearContext → 重启 → Get → Context 为空 |
+| AC-3.4 | 对不存在的 sessionID 调用 `ClearContext` → 返回 `ErrSessionNotFound` | 单元测试 |
+| AC-3.5 | Context 中原有 key 全部消失（`len(ctx) == 0`） | 单元测试 |
+| AC-3.6 | `ClearContext` 不会改变 Session 的其他字段（State, OwnerID 等） | 单元测试 |
+
+**通过标准**：AC-3.1–AC-3.6 全通过
+
+### AC-4：control.reset
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-4.1 | 向 `RUNNING` 状态 session 发送 `control.reset` → 状态变为 `running` | 集成测试 |
+| AC-4.2 | `control.reset` 后 `Session.Context = {}` | 集成测试 |
+| AC-4.3 | `control.reset` 调用 `Worker.ResetContext()` | mock 测试：验证该方法被调用 |
+| AC-4.4 | `control.reset` 后发送 `input` → 收到 `done`，Worker 输出无历史对话内容 | 集成测试 |
+| AC-4.5 | 非 owner 发送 `control.reset` → 返回 `UNAUTHORIZED`，状态不变 | 集成测试 |
+| AC-4.6 | 向 `TERMINATED` 状态发送 `control.reset` → 返回错误（前置条件不满足） | 集成测试 |
+| AC-4.7 | 响应消息为 `event.type="state"`，`data.state="running"`，`data.message="context_reset"` | 集成测试：检查 WS 响应 |
+| AC-4.8 | `control.reset` 期间 Worker.ResetContext 失败 → 状态不变，返回 `INTERNAL_ERROR` | mock 测试 |
+| AC-4.9 | 无 attached Worker 时 `control.reset` 仍成功（只清 Context） | 集成测试 |
+
+**通过标准**：AC-4.1–AC-4.9 全通过
+
+### AC-5：control.gc
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-5.1 | 向 `RUNNING` 状态 session 发送 `control.gc` → 状态变为 `terminated` | 集成测试 |
+| AC-5.2 | `control.gc` 调用 `Worker.Terminate()` | mock 测试：验证该方法被调用 |
+| AC-5.3 | `control.gc` 后 `sm.GetWorker(sessionID)` 返回 `nil`（Worker 已 detach） | 集成测试 |
+| AC-5.4 | `control.gc` 后 Worker 进程已退出 | 集成测试：检查进程表 |
+| AC-5.5 | `control.gc` 后同一 `(owner_id, worker_type, client_session_id)` 再次 init → session 可恢复（TERMINATED → RUNNING） | 集成测试 |
+| AC-5.6 | 非 owner 发送 `control.gc` → 返回 `UNAUTHORIZED`，状态不变 | 集成测试 |
+| AC-5.7 | 响应消息为 `event.type="state"`，`data.state="terminated"`，`data.message="session_archived"` | 集成测试：检查 WS 响应 |
+| AC-5.8 | 向 `TERMINATED` 状态再次发送 `control.gc` → 幂等：仍返回成功（idempotent） | 集成测试 |
+| AC-5.9 | 向 `DELETED` 状态发送 `control.gc` → 返回 `SESSION_NOT_FOUND` | 集成测试 |
+
+**通过标准**：AC-5.1–AC-5.9 全通过
+
+### AC-6：状态流转
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-6.1 | `reset`: `RUNNING` → `RUNNING`（Context 清空，Worker 重建） | 集成测试 |
+| AC-6.2 | `gc`: `RUNNING` → `TERMINATED` | 集成测试 |
+| AC-6.3 | `gc`: `IDLE` → `TERMINATED` | 集成测试 |
+| AC-6.4 | `resume`: `TERMINATED` → `RUNNING`（init 时自动触发） | 集成测试 |
+| AC-6.5 | 所有非法状态转换被拒绝（ValidTransitions 表之外的转换） | 单元测试：遍历 ValidTransitions |
+
+**通过标准**：AC-6.1–AC-6.5 全通过
+
+### AC-7：Worker.ResetContext 接口
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-7.1 | `Worker` interface 新增 `ResetContext(ctx context.Context) error` 方法 | 编译检查 |
+| AC-7.2 | ClaudeCodeWorker: `ResetContext` 执行 `Terminate()` + `Start()` | mock 测试 |
+| AC-7.3 | OpenCodeCLIWorker: `ResetContext` 执行 `Terminate()` + `Start()` | mock 测试 |
+| AC-7.4 | OpenCodeSrvWorker: `ResetContext` 发送 HTTP POST `/session/<id>/reset` | mock 测试 |
+| AC-7.5 | 所有 Worker adapter 实现 `var _ Worker = (*Worker)(nil)` 编译验证 | 编译检查 |
+
+**通过标准**：AC-7.1–AC-7.5 全通过
+
+### AC-8：新增常量
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-8.1 | `pkg/events/events.go` 包含 `ControlActionReset = "reset"` | 编译检查 |
+| AC-8.2 | `pkg/events/events.go` 包含 `ControlActionGC = "gc"` | 编译检查 |
+| AC-8.3 | `handleControl` 对未知 action 返回 `PROTOCOL_VIOLATION` | 单元测试 |
+
+**通过标准**：AC-8.1–AC-8.3 全通过
+
+### AC-9：全流程端到端
+
+| ID | 描述 | 验证方法 |
+|----|------|---------|
+| AC-9.1 | reset 后 input：init → input("Q1") → done("A1") → reset → input("Q2") → done("A2") → "Q2"回答中无"A1"内容 | E2E 测试 |
+| AC-9.2 | gc 后 resume：init → input → done → gc → init(resume) → 历史消息全部恢复 | E2E 测试 |
+| AC-9.3 | 并发 reset 请求（同 session）：第二次 reset 在第一次完成后执行，状态最终一致 | 并发测试 |
+| AC-9.4 | reset/gc 后 WS 连接保持，客户端收到确认 state 事件 | E2E 测试 |
+
+**通过标准**：AC-9.1–AC-9.4 全通过
+
+---
+
+## 9. 测试用例
 
 ### 8.1 单元测试
 
@@ -603,7 +722,9 @@ func (h *Handler) handleGC(ctx context.Context, env *events.Envelope) error {
 
 ---
 
-## 9. 实现计划
+## 10. 实现计划
+
+> **验收依据**：第 8 节 AC（Acceptance Criteria），实现完成须通过全部 AC-1 至 AC-9
 
 ### 阶段一：核心变更
 - [ ] `pkg/events/events.go` — 新增 `ControlActionReset` / `ControlActionGC`
@@ -619,17 +740,18 @@ func (h *Handler) handleGC(ctx context.Context, env *events.Envelope) error {
 
 ---
 
-## 10. Changelog
+## 11. Changelog
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
+| 2026-04-07 | 1.3 | 新增第 8 节 AC（Acceptance Criteria），共 9 组 44 条验收标准；章节重新编号 |
 | 2026-04-06 | 1.2 | 移除向后兼容逻辑；改用 UUIDv5 算法替代 SHA-256 hex |
 | 2026-04-06 | 1.1 | 交叉复核源码，精确到文件/行号；明确 minimal change set |
 | 2026-04-06 | 1.0 | 初始版本 |
 
 ---
 
-## 11. 相关文档
+## 12. 相关文档
 
 - [[architecture/AEP-v1-Protocol]] — AEP v1 协议规范
 - [[architecture/WebSocket-Full-Duplex-Flow]] — WebSocket 全双工通信流程
