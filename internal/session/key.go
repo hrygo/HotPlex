@@ -12,10 +12,10 @@ import (
 var hotplexNamespace = uuid.MustParse("urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 // DeriveSessionKey generates a deterministic server-side session ID using UUIDv5.
-// Same (ownerID, workerType, clientSessionID) always maps to the same session.
-func DeriveSessionKey(ownerID string, wt worker.WorkerType, clientSessionID string) string {
+// Same (ownerID, workerType, clientSessionID, workDir) always maps to the same session.
+func DeriveSessionKey(ownerID string, wt worker.WorkerType, clientSessionID string, workDir string) string {
 	// UUIDv5 = SHA-1(namespace+name) — deterministic, no randomness.
-	name := ownerID + "|" + string(wt) + "|" + clientSessionID
+	name := ownerID + "|" + string(wt) + "|" + clientSessionID + "|" + workDir
 	id := uuid.NewHash(sha1.New(), hotplexNamespace, []byte(name), 5)
 	return id.String()
 }

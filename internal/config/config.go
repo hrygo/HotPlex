@@ -176,6 +176,7 @@ type WorkerConfig struct {
 	ExecutionTimeout time.Duration `mapstructure:"execution_timeout"`
 	AllowedEnvs      []string      `mapstructure:"allowed_envs"`
 	EnvWhitelist     []string      `mapstructure:"env_whitelist"`
+	DefaultWorkDir   string        `mapstructure:"default_work_dir"`
 }
 
 // SecurityConfig holds auth and input validation settings.
@@ -238,6 +239,7 @@ func Default() *Config {
 			ExecutionTimeout: 10 * time.Minute,
 			AllowedEnvs:      nil,
 			EnvWhitelist:     nil,
+			DefaultWorkDir:   "/tmp/hotplex/workspace",
 		},
 		Security: SecurityConfig{
 			APIKeyHeader:   "X-API-Key",

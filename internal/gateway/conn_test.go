@@ -559,7 +559,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 		botBob         = "bot_bob"
 	)
 	// Derive the server session ID using the same algorithm as conn.go:DeriveSessionKey.
-	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst)
+	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, config.Default().Worker.DefaultWorkDir)
 
 	// Build a JWT token for bot_alice using ES256 (ECDSA P-256).
 	jwtKey := newECDSAKey(t)
@@ -695,7 +695,7 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 		workerType     = "claude-code"
 		botID          = "bot_team_a"
 	)
-	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst)
+	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst, config.Default().Worker.DefaultWorkDir)
 
 	jwtKey := newECDSAKey(t)
 	jwtVal := security.NewJWTValidator(jwtKey, "")
@@ -766,7 +766,7 @@ func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 		workerType     = "claude-code"
 	)
 	// When no JWT is provided, c.userID defaults to "anon" (from newBotIDTestConn).
-	derivedSID := session.DeriveSessionKey("anon", worker.WorkerType(workerType), sessionIDConst)
+	derivedSID := session.DeriveSessionKey("anon", worker.WorkerType(workerType), sessionIDConst, config.Default().Worker.DefaultWorkDir)
 
 	// No JWT token (empty botID scenario).
 	store := new(mockSessionStoreForBotID)
@@ -826,7 +826,7 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 		workerType     = "claude-code"
 		botID          = "bot_new_session"
 	)
-	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst)
+	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst, config.Default().Worker.DefaultWorkDir)
 
 	jwtKey := newECDSAKey(t)
 	jwtVal := security.NewJWTValidator(jwtKey, "")
@@ -1263,7 +1263,7 @@ func TestBridge_StartSession_Success(t *testing.T) {
 	// we replace it after construction (field injection for tests).
 	b.wf = wf
 
-	err := b.StartSession(ctx, "sess_start", "user1", "", worker.TypeClaudeCode, nil)
+	err := b.StartSession(ctx, "sess_start", "user1", "", worker.TypeClaudeCode, nil, "")
 	require.NoError(t, err, "StartSession should succeed")
 
 	sm.AssertExpectations(t)
@@ -1283,7 +1283,7 @@ func TestBridge_StartSession_CreateFails(t *testing.T) {
 	// Inject a worker factory that would fail if Start were called.
 	b.wf = &failingWorkerFactory{}
 
-	err := b.StartSession(context.Background(), "sess_fail", "user1", "", worker.TypeClaudeCode, nil)
+	err := b.StartSession(context.Background(), "sess_fail", "user1", "", worker.TypeClaudeCode, nil, "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "create failed")
 

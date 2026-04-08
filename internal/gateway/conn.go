@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hotplex/hotplex-worker/internal/metrics"
+	"github.com/hotplex/hotplex-worker/internal/security"
 	"github.com/hotplex/hotplex-worker/internal/session"
 	"github.com/hotplex/hotplex-worker/internal/tracing"
 	"github.com/hotplex/hotplex-worker/internal/worker"
@@ -24,7 +25,7 @@ import (
 // used by Conn (called once during the AEP init handshake).
 type SessionStarter interface {
 	StartSession(ctx context.Context, id, userID, botID string,
-		wt worker.WorkerType, allowedTools []string) error
+		wt worker.WorkerType, allowedTools []string, workDir string) error
 	ResumeSession(ctx context.Context, id string) error
 }
 
@@ -231,10 +232,21 @@ func (c *Conn) performInit(handler *Handler) error {
 		}
 	}
 
+	// Resolve work dir: use client-provided value or default from config.
+	workDir := initData.Config.WorkDir
+	if workDir == "" {
+		workDir = handler.cfg.Worker.DefaultWorkDir
+	}
+	if err := security.ValidateWorkDir(workDir); err != nil {
+		c.sendInitError(events.ErrCodeInvalidMessage, err.Error())
+		metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInvalidMessage)).Inc()
+		return err
+	}
+
 	// Determine session ID via deterministic UUIDv5 mapping from client session ID.
-	// DeriveSessionKey(ownerID, workerType, clientSessionID) is always deterministic
-	// for the same (ownerID, workerType, clientSessionID) tuple.
-	sessionID := session.DeriveSessionKey(c.userID, initData.WorkerType, initData.SessionID)
+	// DeriveSessionKey(ownerID, workerType, clientSessionID, workDir) is always deterministic
+	// for the same (ownerID, workerType, clientSessionID, workDir) tuple.
+	sessionID := session.DeriveSessionKey(c.userID, initData.WorkerType, initData.SessionID, workDir)
 
 	// Resolve session: create new or resume existing.
 	si, err := handler.sm.Get(sessionID)
@@ -244,7 +256,7 @@ func (c *Conn) performInit(handler *Handler) error {
 			// starter.StartSession creates the DB record, worker, transitions to RUNNING,
 			// and starts forwarding events. nil starter means test mode.
 			if c.starter != nil {
-				if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools); err != nil {
+				if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir); err != nil {
 					c.sendInitError(events.ErrCodeInternalError, "failed to create session")
 					metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 					return fmt.Errorf("create session: %w", err)

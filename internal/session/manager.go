@@ -234,9 +234,6 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 // Both the in-memory state and the DB are updated.
 // When transitioning to IDLE, sets idle_expires_at = now + IdleTimeout.
 func (m *Manager) Transition(ctx context.Context, id string, to events.SessionState) error {
-	if m == nil {
-		return ErrSessionNotFound
-	}
 	return m.TransitionWithReason(ctx, id, to, "client_kill")
 }
 

@@ -36,7 +36,7 @@ func NewBridge(log *slog.Logger, hub *Hub, sm SessionManager, msgStore session.M
 }
 
 // StartSession creates a new session and starts a worker.
-func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string) error {
+func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string) error {
 	// Create session in DB with bot_id and allowed_tools.
 	si, err := b.sm.CreateWithBot(ctx, id, userID, botID, wt, allowedTools)
 	if err != nil {
@@ -59,7 +59,7 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 	workerInfo := worker.SessionInfo{
 		SessionID:    id,
 		UserID:       userID,
-		ProjectDir:   "",
+		ProjectDir:   workDir,
 		Env:          nil,
 		Args:         nil,
 		AllowedTools: si.AllowedTools,
@@ -94,22 +94,8 @@ func (b *Bridge) ResumeSession(ctx context.Context, id string) error {
 	}
 
 	if existing := b.sm.GetWorker(id); existing != nil {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					b.log.Warn("bridge: GetWorker panicked", "err", r, "session_id", id)
-				}
-			}()
-			_ = existing.Terminate(context.Background())
-		}()
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					b.log.Warn("bridge: DetachWorker panicked", "err", r, "session_id", id)
-				}
-			}()
-			b.sm.DetachWorker(id)
-		}()
+		_ = existing.Terminate(context.Background())
+		b.sm.DetachWorker(id)
 	}
 
 	// Create worker.
