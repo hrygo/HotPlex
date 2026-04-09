@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"sync"
 	"syscall"
 
@@ -55,16 +56,17 @@ func (c *Conn) Send(ctx context.Context, msg *events.Envelope) error {
 	return nil
 }
 
-// writeAll loops syscall.Write until all data is written, handling partial
+// WriteAll loops syscall.Write until all data is written, handling partial
 // writes and EAGAIN (non-blocking pipe on macOS). Go's stdlib File.Write does
 // not retry EAGAIN for syscall-backed files, so we must use raw syscall.
-func writeAll(fd int, data []byte) error {
+func WriteAll(fd int, data []byte) error {
 	n := 0
 	for n < len(data) {
 		nn, err := syscall.Write(fd, data[n:])
 		if err != nil {
 			if err == syscall.EAGAIN {
-				continue // pipe buffer full; retry
+				runtime.Gosched()
+				continue
 			}
 			return err
 		}
@@ -111,7 +113,7 @@ func (c *Conn) SendUserMessage(ctx context.Context, content string) error {
 	}
 	data = append(data, '\n')
 
-	err = writeAll(int(c.stdin.Fd()), data)
+	err = WriteAll(int(c.stdin.Fd()), data)
 	if err != nil {
 		return fmt.Errorf("base: write user message: %w", err)
 	}
