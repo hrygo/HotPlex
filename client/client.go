@@ -263,13 +263,18 @@ func (c *Client) Close() error {
 	conn := c.conn
 	c.mu.Unlock()
 
+	// Cancel context to unblock sendPump (select on ctx.Done) and pingPump.
 	c.cancel()
+	// Close the WebSocket connection to unblock recvPump (NextReader).
+	// This must happen before wg.Wait() to avoid deadlock.
+	if conn != nil {
+		_ = conn.Close()
+	}
+	// Close sendCh to unblock sendPump (range c.sendCh).
+	// Safe because c.closed=true prevents new writes to sendCh.
+	close(c.sendCh)
 	c.wg.Wait()
 	close(c.eventsCh)
-	close(c.sendCh)
-	if conn != nil {
-		return conn.Close()
-	}
 	return nil
 }
 

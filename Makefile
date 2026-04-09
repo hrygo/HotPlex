@@ -147,7 +147,7 @@ DOT            := ‣
 .PHONY: build build-pgo build-all build-clean build-docker build-optimize
 
 # Test & Quality
-.PHONY: test test-short test-integration test-verbose test-race
+.PHONY: test test-short test-integration test-e2e test-verbose test-race
 .PHONY: coverage coverage-html coverage-func benchmark
 .PHONY: lint lint-fix lint-verbose fmt fmt-check vet tidy quality
 
@@ -362,6 +362,11 @@ test-integration: ## 🔗 Run integration tests
 	@echo "$(CYAN)$(TEST) Running integration tests...$(RESET)"
 	@$(GOTEST) -run Integration -timeout 20m ./...
 	@echo "$(GREEN)$(OK) Integration tests passed$(RESET)"
+
+test-e2e: ## 🧪 Run end-to-end tests (client SDK → gateway → worker)
+	@echo "$(CYAN)$(TEST) Running E2E tests...$(RESET)"
+	@$(GOTEST) -race -v -timeout 2m ./e2e/...
+	@echo "$(GREEN)$(OK) E2E tests passed$(RESET)"
 
 test-verbose: ## 🔍 Run tests with verbose output
 	@echo "$(CYAN)$(TEST) Running tests (verbose)...$(RESET)"
@@ -969,6 +974,7 @@ help-test: ## 📖 Testing & quality commands
 	@echo "  $(CYAN)test$(RESET)              All tests (race detection)"
 	@echo "  $(CYAN)test-short$(RESET)        Quick tests"
 	@echo "  $(CYAN)test-integration$(RESET)  Integration tests"
+	@echo "  $(CYAN)test-e2e$(RESET)          E2E tests (client→gateway→worker)"
 	@echo "  $(CYAN)test-verbose$(RESET)      Verbose output"
 	@echo "  $(CYAN)benchmark$(RESET)         Run benchmarks"
 	@echo ""

@@ -35,6 +35,12 @@ func NewBridge(log *slog.Logger, hub *Hub, sm SessionManager, msgStore session.M
 	}
 }
 
+// SetWorkerFactory replaces the default worker factory. Used by tests to inject
+// simulated workers without requiring external CLI binaries.
+func (b *Bridge) SetWorkerFactory(wf WorkerFactory) {
+	b.wf = wf
+}
+
 // StartSession creates a new session and starts a worker.
 func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string) error {
 	// Create session in DB with bot_id and allowed_tools.
