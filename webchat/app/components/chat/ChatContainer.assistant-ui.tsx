@@ -44,36 +44,17 @@ export default function ChatContainer() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen" style={{ background: "var(--bg-base)" }}>
+    <div className="flex flex-col h-screen bg-[var(--bg-base)]">
       {/* Header */}
       <header className="app-header">
-        <div style={{ maxWidth: "46rem", margin: "0 auto", padding: "0.75rem 1.5rem" }}>
+        <div className="header-inner">
           <div className="flex items-center justify-between">
+            {/* Brand */}
             <div className="flex items-center gap-3">
               <BrandIcon size={36} />
               <div>
-                <h1
-                  style={{
-                    fontSize: "0.9375rem",
-                    fontWeight: 600,
-                    color: "var(--text-primary)",
-                    fontFamily: "var(--font-display)",
-                    lineHeight: 1.3,
-                  }}
-                >
-                  HotPlex AI
-                </h1>
-                <p
-                  style={{
-                    fontSize: "0.6875rem",
-                    color: "var(--text-faint)",
-                    fontFamily: "var(--font-mono)",
-                    letterSpacing: "0.04em",
-                    lineHeight: 1.3,
-                  }}
-                >
-                  AEP v1 · gateway
-                </p>
+                <h1 className="header-title">HotPlex AI</h1>
+                <p className="header-subtitle">AEP v1 · gateway</p>
               </div>
             </div>
 
@@ -86,7 +67,7 @@ export default function ChatContainer() {
         </div>
       </header>
 
-      {/* Thread */}
+      {/* Thread — key remount reconnects to new session */}
       <div className="flex-1 overflow-hidden">
         <ChatInterface
           key={activeSessionId ?? '__new__'}

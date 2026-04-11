@@ -65,6 +65,7 @@ WORKER_SOCK    := /tmp/hotplex-worker.sock
 
 WEB_CHAT_DIR   := webchat
 WEB_CHAT_PID   := /tmp/hotplex-webchat.pid
+WEB_CHAT_PORT  := 3000
 WEB_CHAT_LOG   := $(LOG_DIR)/webchat.log
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -297,7 +298,7 @@ env: ## 🌍 Show environment variables
 
 build: ## 🔨 Build gateway binary (optimized)
 	@echo "$(CYAN)$(BUILD) Building $(BINARY_NAME) ($(GOOS)/$(GOARCH))...$(RESET)"
-	@mkdir -p $(BUILD_DIR) $(LOG_DIR)
+	@mkdir -p $(BUILD_DIR) $(CURDIR)/$(LOG_DIR)
 	@$(GOBUILD) $(BUILD_OPTS) -ldflags="$(LDFLAGS)" \
 		-o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) $(MAIN_PATH)
 	@echo "$(GREEN)$(OK) Built: $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(RESET)"
@@ -480,14 +481,14 @@ watch: ## 👀 Watch for file changes and auto-rebuild (requires reflex)
 GRACE_PERIOD := 7
 
 worker-start: build ## 🚀 Start gateway in background
-	@mkdir -p $(LOG_DIR)
+	@mkdir -p $(CURDIR)/$(LOG_DIR)
 	@if [ -f $(WORKER_PID) ] && kill -0 $$(cat $(WORKER_PID)) 2>/dev/null; then \
 		echo "$(YELLOW)$(WARN) Gateway already running (PID: $$(cat $(WORKER_PID)))$(RESET)"; \
 	else \
 		echo "$(CYAN)$(ROCKET) Starting gateway...$(RESET)"; \
 		./$(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) \
 			-config $(or $(CONFIG),$(CONFIG_DIR)/config.yaml) \
-			> $(WORKER_LOG) 2>&1 & \
+			> $(CURDIR)/$(WORKER_LOG) 2>&1 & \
 		echo $$! > $(WORKER_PID); \
 		sleep 1; \
 		if kill -0 $$(cat $(WORKER_PID)) 2>/dev/null; then \
@@ -495,7 +496,7 @@ worker-start: build ## 🚀 Start gateway in background
 			echo "$(DIM)Logs: $(WORKER_LOG)$(RESET)"; \
 		else \
 			echo "$(RED)$(ERR) Failed to start$(RESET)"; \
-			cat $(WORKER_LOG); \
+			cat $(CURDIR)/$(WORKER_LOG); \
 			exit 1; \
 		fi; \
 	fi
@@ -600,58 +601,78 @@ webchat-install: ## 📦 Install webchat dependencies
 	@echo "$(GREEN)$(OK) Dependencies installed$(RESET)"
 
 webchat-build: webchat-install ## 🔨 Build webchat
+	@mkdir -p $(CURDIR)/$(LOG_DIR)
 	@echo "$(CYAN)$(BUILD) Building webchat...$(RESET)"
 	@cd $(WEB_CHAT_DIR) && pnpm build
 	@echo "$(GREEN)$(OK) Built$(RESET)"
 
 webchat-dev: webchat-install ## 🛠️  Start webchat dev server (background)
-	@mkdir -p $(LOG_DIR)
+	@mkdir -p $(CURDIR)/$(LOG_DIR)
 	@if [ -f $(WEB_CHAT_PID) ] && kill -0 $$(cat $(WEB_CHAT_PID)) 2>/dev/null; then \
 		echo "$(YELLOW)$(WARN) Web-chat already running (PID: $$(cat $(WEB_CHAT_PID)))$(RESET)"; \
 	else \
 		echo "$(CYAN)$(ROCKET) Starting webchat dev...$(RESET)"; \
-		cd $(WEB_CHAT_DIR) && pnpm dev > $(WEB_CHAT_LOG) 2>&1 & \
+		cd $(WEB_CHAT_DIR) && pnpm dev > $(CURDIR)/$(WEB_CHAT_LOG) 2>&1 & \
 		echo $$! > $(WEB_CHAT_PID); \
 		sleep 2; \
 		if kill -0 $$(cat $(WEB_CHAT_PID)) 2>/dev/null; then \
 			echo "$(GREEN)$(OK) Started (PID: $$(cat $(WEB_CHAT_PID)))$(RESET)"; \
 		else \
 			echo "$(RED)$(ERR) Failed to start$(RESET)"; \
-			cat $(WEB_CHAT_LOG); \
+			cat $(CURDIR)/$(WEB_CHAT_LOG); \
 			exit 1; \
 		fi; \
 	fi
 
 webchat-start: webchat-build ## 🚀 Start webchat production (background)
-	@mkdir -p $(LOG_DIR)
+	@mkdir -p $(CURDIR)/$(LOG_DIR)
 	@if [ -f $(WEB_CHAT_PID) ] && kill -0 $$(cat $(WEB_CHAT_PID)) 2>/dev/null; then \
 		echo "$(YELLOW)$(WARN) Web-chat already running$(RESET)"; \
 	else \
 		echo "$(CYAN)$(ROCKET) Starting webchat production...$(RESET)"; \
-		cd $(WEB_CHAT_DIR) && pnpm start > $(WEB_CHAT_LOG) 2>&1 & \
+		cd $(WEB_CHAT_DIR) && pnpm start > $(CURDIR)/$(WEB_CHAT_LOG) 2>&1 & \
 		echo $$! > $(WEB_CHAT_PID); \
 		sleep 2; \
 		if kill -0 $$(cat $(WEB_CHAT_PID)) 2>/dev/null; then \
 			echo "$(GREEN)$(OK) Started (PID: $$(cat $(WEB_CHAT_PID)))$(RESET)"; \
 		else \
 			echo "$(RED)$(ERR) Failed to start$(RESET)"; \
-			cat $(WEB_CHAT_LOG); \
+			cat $(CURDIR)/$(WEB_CHAT_LOG); \
 			exit 1; \
 		fi; \
 	fi
 
-webchat-stop: ## 🛑 Stop webchat
-	@if [ -f $(WEB_CHAT_PID) ]; then \
+webchat-stop: ## Stop webchat
+	@STOPPED=true; \
+	if [ -f $(WEB_CHAT_PID) ]; then \
 		PID=$$(cat $(WEB_CHAT_PID)); \
 		if kill -0 $$PID 2>/dev/null; then \
-			echo "$(CYAN)$(STOP) Stopping webchat...$(RESET)"; \
+			echo "$(CYAN)$(STOP) Stopping webchat (PID: $$PID)...$(RESET)"; \
 			kill -TERM $$PID 2>/dev/null; \
 			sleep 1; \
 			kill -0 $$PID 2>/dev/null && kill -9 $$PID 2>/dev/null || true; \
 			echo "$(GREEN)$(OK) Stopped$(RESET)"; \
+			STOPPED=false; \
 		fi; \
 		rm -f $(WEB_CHAT_PID); \
-	else \
+	fi; \
+	if $$STOPPED; then \
+		PORT_PIDS=$$(lsof -ti:$(WEB_CHAT_PORT) 2>/dev/null || true); \
+		if [ -n "$$PORT_PIDS" ]; then \
+			echo "$(YELLOW)$(WARN) PID file stale, found processes on port $(WEB_CHAT_PORT)$(RESET)"; \
+			for PID in $$PORT_PIDS; do \
+				echo "$(CYAN)$(STOP) Stopping webchat (PID: $$PID)...$(RESET)"; \
+				kill -TERM $$PID 2>/dev/null || true; \
+			done; \
+			sleep 1; \
+			for PID in $$PORT_PIDS; do \
+				kill -0 $$PID 2>/dev/null && kill -9 $$PID 2>/dev/null || true; \
+			done; \
+			echo "$(GREEN)$(OK) Stopped$(RESET)"; \
+			STOPPED=false; \
+		fi; \
+	fi; \
+	if $$STOPPED; then \
 		echo "$(DIM)$(INFO) Not running$(RESET)"; \
 	fi
 
