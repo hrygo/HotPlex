@@ -1,14 +1,16 @@
 # HotPlex Gateway 消息平台扩展架构方案
 
 > **状态**: 草案（2026-04-16 SDK 源码验证修订）
-> **版本**: 1.1 — 修订版（基于 slack-go/slack v0.18.0+ Streaming API 和 larksuite/oapi-sdk-go/v3 CardKit 源码验证）
+> **版本**: 1.2 — 精华迭代版（借鉴 ~/hotplex chatapps/slack 生产级模式）
 > **日期**: 2026-04-16
 > **作者**: 架构设计师
 
-**v1.1 修订要点**:
-- Slack: 确认 Go SDK 原生支持 `StartStream/AppendStream/StopStream`（`chat.go:1117-1168`）
-- 飞书: 确认 SDK v3 支持 `ws.Client` 长连接 + `CardKit v1` 流式 API
-- SDK 版本: 飞书 v2 → v3，所有 import 路径已更新
+**v1.2 修订要点**:
+- 流式消息: `NativeStreamingWriter` 封装 `io.WriteCloser`，完整性校验 + TTL 检测 + Fallback
+- 速率限制: `golang.org/x/time/rate` token bucket 替代简单 buffer
+- 线程所有权: 多 Bot 场景下 `ThreadOwnershipTracker`（R1-R5 规则）
+- 编译时检查: 所有接口实现添加 `_ Interface = (*Adapter)(nil)` 校验
+- Session ID: `{platform}:{team/chat}:{channel}:{thread_ts}:{user_id}` 同时包含线程和用户标识
 
 ---
 
@@ -309,9 +311,10 @@ func (b *Bridge) JoinSession(sessionID string, pc PlatformConn) {
 // MakeSlackEnvelope converts a Slack message to an AEP input envelope.
 func (b *Bridge) MakeSlackEnvelope(teamID, channelID, userID, text string) *events.Envelope {
 	// Build a stable session ID from platform identity:
-	//   slack:{team_id}:{channel_id}:{user_id}
-	// This maps a Slack DM thread or channel to a gateway session.
-	sessionID := fmt.Sprintf("slack:%s:%s:%s", teamID, channelID, userID)
+	//   slack:{team_id}:{channel_id}:{thread_ts}:{user_id}
+	// thread_ts is empty for DMs (no thread). Including both thread_ts and user_id
+	// enables thread-level session sharing while tracking the initiating user.
+	sessionID := fmt.Sprintf("slack:%s:%s:%s:%s", teamID, channelID, threadTS, userID)
 
 	return &events.Envelope{
 		Version:   events.Version,
@@ -336,7 +339,7 @@ func (b *Bridge) MakeSlackEnvelope(teamID, channelID, userID, text string) *even
 
 // MakeFeishuEnvelope converts a Feishu message to an AEP input envelope.
 func (b *Bridge) MakeFeishuEnvelope(chatID, userID, text string) *events.Envelope {
-	sessionID := fmt.Sprintf("feishu:%s:%s", chatID, userID)
+	sessionID := fmt.Sprintf("feishu:%s:%s:%s", chatID, threadTS, userID)
 	return &events.Envelope{
 		Version:   events.Version,
 		ID:        aep.NewID(),
@@ -465,6 +468,12 @@ type Adapter struct {
 	msgIDs  map[string]bool // dedup: message ID → seen
 }
 
+// Compile-time interface compliance checks
+var (
+	_ messaging.PlatformAdapterInterface = (*Adapter)(nil)
+	_ messaging.PlatformConn             = (*Adapter)(nil)
+)
+
 func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformSlack }
 
 func (a *Adapter) Start(ctx context.Context) error {
@@ -540,13 +549,14 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 // ─── Outbound: send AEP events to Slack ─────────────────────────────────
 
 func (a *Adapter) WriteCtx(ctx context.Context, env *events.Envelope) error {
-	// Parse session ID to extract channel_id
-	// Format: slack:{team_id}:{channel_id}:{user_id}
-	parts := strings.SplitN(env.SessionID, ":", 4)
-	if len(parts) < 4 {
+	// Parse session ID to extract channel_id and thread_ts
+	// Format: slack:{team_id}:{channel_id}:{thread_ts}:{user_id}
+	parts := strings.SplitN(env.SessionID, ":", 5)
+	if len(parts) < 5 {
 		return nil // not a slack session
 	}
 	channelID := parts[2]
+	threadTS := parts[3]
 
 	switch env.Event.Type {
 	case events.MessageDelta, events.Raw:
@@ -570,50 +580,299 @@ func (a *Adapter) Close() error {
 
 ### 5.4 流式消息策略
 
-**原生 Streaming API**（已验证 SDK 支持）：
+**NativeStreamingWriter — `io.Writer` 封装**：
+
+借鉴 ~/hotplex chatapps/slack/streaming_writer.go (473 行) 的成熟模式，将 Slack 三阶段流式 API 封装为标准 `io.WriteCloser`：
 
 ```go
-// Stream a message via Slack's native streaming API
-func (a *Adapter) streamMessage(ctx context.Context, channelID string) error {
-	// Phase 1: Start the stream
-	_, streamTS, err := a.client.StartStream(
-		channelID,
-		slack.MsgOptionMarkdownText(":thought_balloon: Thinking..."),
-	)
-	if err != nil {
-		return err
+// internal/messaging/slack/stream.go
+
+package slack
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/slack-go/slack"
+)
+
+const (
+	flushInterval    = 150 * time.Millisecond
+	flushSize        = 20 // rune count threshold for immediate flush
+	maxAppendRetries = 3
+	retryDelay       = 50 * time.Millisecond
+	maxAppendSize    = 3000 // Slack limit ~4000, safety margin
+	StreamTTL        = 10 * time.Minute
+)
+
+// NativeStreamingWriter wraps Slack's three-phase streaming API
+// into a standard io.WriteCloser. First Write() starts the stream,
+// subsequent calls buffer content, Close() ends it with fallback.
+type NativeStreamingWriter struct {
+	ctx       context.Context
+	client    *slack.Client
+	channelID string
+	threadTS  string
+	messageTS string
+
+	mu         sync.Mutex
+	started    bool
+	closed     bool
+	onComplete func(string)
+
+	// 缓冲流控
+	buf          bytes.Buffer
+	flushTrigger chan struct{}
+	closeChan    chan struct{}
+	wg           sync.WaitGroup
+
+	// 完整性校验
+	bytesWritten      int64
+	bytesFlushed      int64
+	failedFlushChunks []string
+
+	// Fallback: 累积内容用于流失败时补发
+	accumulatedContent bytes.Buffer
+	fallbackUsed       bool
+
+	// TTL 监控
+	streamStartTime  time.Time
+	streamExpired    bool
+	ttlWarningLogged bool
+}
+
+// Write starts the stream on first call, buffers content on subsequent calls.
+func (w *NativeStreamingWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.closed {
+		return 0, fmt.Errorf("stream already closed")
+	}
+	if len(p) == 0 {
+		return 0, nil
 	}
 
-	// Phase 2: Append content as deltas arrive from Worker
-	go func() {
-		for env := range a.deltaChan {
-			text := extractDeltaText(env)
-			_, _, _ = a.client.AppendStream(
-				channelID, streamTS,
-				slack.MsgOptionMarkdownText(text),
-			)
+	// 首次调用：同步启动流
+	if !w.started {
+		_, streamTS, err := w.client.StartStream(
+			w.channelID,
+			slack.MsgOptionMarkdownText(":thought_balloon: Thinking..."),
+		)
+		if err != nil {
+			return 0, fmt.Errorf("start stream: %w", err)
 		}
-	}()
+		w.messageTS = streamTS
+		w.started = true
+		w.streamStartTime = time.Now()
+	}
 
-	// Phase 3: Stop with feedback buttons
-	_, _, err = a.client.StopStream(
-		channelID, streamTS,
-		slack.MsgOptionBlocks(feedbackButtons...),
-	)
-	return err
+	w.buf.Write(p)
+	w.accumulatedContent.Write(p)
+	w.bytesWritten += int64(len(p))
+
+	// 超过阈值触发即时 flush
+	if utf8.RuneCount(w.buf.Bytes()) >= flushSize {
+		select {
+		case w.flushTrigger <- struct{}{}:
+		default:
+		}
+	}
+	return len(p), nil
 }
+
+// flushLoop background goroutine: periodic + threshold-triggered flush
+func (w *NativeStreamingWriter) flushLoop() {
+	defer w.wg.Done()
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-w.ctx.Done():
+			w.flushBuffer()
+			return
+		case <-w.closeChan:
+			w.flushBuffer()
+			return
+		case <-w.flushTrigger:
+			w.flushBuffer()
+		case <-ticker.C:
+			w.flushBuffer()
+		}
+	}
+}
+
+// Close ends the stream, runs integrity check, and fallbacks if needed.
+func (w *NativeStreamingWriter) Close() error {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return nil
+	}
+	w.closed = true
+	w.mu.Unlock()
+
+	close(w.closeChan)
+	w.wg.Wait()
+
+	// 最后一次捕获状态
+	w.mu.Lock()
+	started := w.started
+	accumulated := w.accumulatedContent.String()
+	bytesWritten := w.bytesWritten
+	bytesFlushed := w.bytesFlushed
+	failedChunks := w.failedFlushChunks
+	w.mu.Unlock()
+
+	if !started {
+		return nil
+	}
+
+	// 完整性校验
+	integrityOK := len(failedChunks) == 0 && bytesWritten == bytesFlushed
+
+	// 结束远端流
+	_ = w.client.StopStream(w.channelID, w.messageTS)
+
+	if w.onComplete != nil {
+		w.onComplete(w.messageTS)
+	}
+
+	// Fallback: 流失败时用普通消息补发
+	if !integrityOK && len(accumulated) > 0 {
+		fallbackText := accumulated
+		if bytesFlushed > 0 {
+			fallbackText = "⚠️ *Stream interrupted*\n\n" + accumulated
+		}
+		w.client.PostMessage(w.channelID, slack.MsgOptionText(fallbackText, false))
+		w.fallbackUsed = true
+	}
+	return nil
+}
+
+// Compile-time check
+var _ io.WriteCloser = (*NativeStreamingWriter)(nil)
 ```
 
-**流式节流**：SDK 的 `chat.appendStream` 需注意 Slack API 速率限制（~50 次/分钟）。
-实现 buffer 机制：累积 20 字符或 500ms 超时后调用 `AppendStream`，避免超限。
+**关键设计点**：
+
+| 特性 | 实现 | 价值 |
+|------|------|------|
+| `io.WriteCloser` | 标准接口，与 Worker 输出无缝对接 | 零适配成本 |
+| 完整性校验 | `bytesWritten` vs `bytesFlushed` 追踪 | 数据不丢失 |
+| TTL 检测 | 10 分钟超时自动标记 expired | 防止无效重试 |
+| 流状态错误 | 识别 `message_not_in_streaming_state` | 立即停止重试 |
+| Fallback | 流失败时 `PostMessage` 补发完整内容 | 优雅降级 |
+| 分块发送 | 超过 3000 字符自动分块 | 突破 Slack 单消息限制 |
 
 ### 5.5 速率限制缓解
 
+使用 `golang.org/x/time/rate` token bucket 算法每 channel 速率限制：
+
+```go
+import "golang.org/x/time/rate"
+
+// per-channel rate limiter with TTL-based cleanup
+type ChannelRateLimiter struct {
+	mu       sync.RWMutex
+	limiters map[string]*rate.Limiter
+	lastUsed map[string]time.Time
+	done     chan struct{}
+}
+
+const (
+	rlRate     = 1.0  // 1 request per second (~50/min for appendStream)
+	rlBurst    = 3    // allow short bursts
+	rlTTL      = 10 * time.Minute
+	rlCleanup  = 5 * time.Minute
+)
+
+func (r *ChannelRateLimiter) Allow(channelID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	limiter, exists := r.limiters[channelID]
+	if !exists {
+		limiter = rate.NewLimiter(rlRate, rlBurst)
+		r.limiters[channelID] = limiter
+	}
+	r.lastUsed[channelID] = time.Now()
+	return limiter.Allow()
+}
+```
+
+后台 goroutine 定期清理超过 TTL 未使用的 limiter，防止内存泄漏。
+
 | 限制 | 缓解策略 |
 |------|---------|
-| `chat.appendStream` ~50/min | Buffer 机制：累积 20 字符或 500ms 超时后调用，单 channel token bucket |
+| `chat.appendStream` ~50/min | `golang.org/x/time/rate` token bucket (1rps, burst=3)，per-channel 独立限流 |
 | `chat.stopStream` 无特殊限制 | 仅在 Worker 完成/错误时调用一次 |
 | Socket Mode 连接数 | 单进程单连接，SDK 自动重连 |
+
+### 5.6 线程所有权追踪（多 Bot 场景）
+
+借鉴 ~/hotplex chatapps/slack/thread_ownership.go (202 行) 的成熟模式，在多 Bot 共存时避免响应冲突：
+
+```go
+// internal/messaging/slack/thread_ownership.go
+
+type ThreadKey string
+
+func NewThreadKey(channelID, threadTS string) ThreadKey {
+	return ThreadKey(channelID + ":" + threadTS)
+}
+
+type ThreadOwnershipTracker struct {
+	mu           sync.RWMutex
+	ownedThreads map[ThreadKey]*time.Time
+	ttl          time.Duration
+	logger       *slog.Logger
+	ctx          context.Context
+	cancel       context.CancelFunc
+}
+
+// 所有权规则（R1-R5）：
+// R1: 首次响应 → 声明所有权
+// R2: 仅所有者响应非 @ 消息
+// R3: @BotB 在 BotA 的线程中 → BotB 抢占，BotA 释放
+// R4: @BotA @BotB → 双方独立声明所有权
+// R5: @其他人（不含本 Bot）→ 释放所有权
+
+func (t *ThreadOwnershipTracker) Claim(key ThreadKey) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, exists := t.ownedThreads[key]; !exists {
+		now := time.Now()
+		t.ownedThreads[key] = &now
+		return true // 新声明
+	}
+	now := time.Now()
+	t.ownedThreads[key] = &now
+	return false // 已有所有权，更新活跃时间
+}
+
+func (t *ThreadOwnershipTracker) Release(key ThreadKey) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.ownedThreads, key)
+}
+
+func (t *ThreadOwnershipTracker) Owns(key ThreadKey) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	ts, exists := t.ownedThreads[key]
+	return exists && time.Since(*ts) <= t.ttl
+}
+```
+
+后台 goroutine 定期清理超过 TTL（默认 24h）的所有权记录。Adapter 在处理每条消息前调用 `ShouldRespond(channelType, threadTS, text, userID)` 决策是否响应。
 
 ---
 
@@ -696,6 +955,12 @@ type Adapter struct {
 	cards sync.Map // chatID → cardUpdateID
 }
 
+// Compile-time interface compliance checks
+var (
+	_ messaging.PlatformAdapterInterface = (*Adapter)(nil)
+	_ messaging.PlatformConn             = (*Adapter)(nil)
+)
+
 func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformFeishu }
 
 func (a *Adapter) Start(ctx context.Context) error {
@@ -767,11 +1032,12 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, chatID, userID, text st
 // ─── Outbound: CardKit 流式更新（不受 5 QPS 限制）──────────────────────────
 
 func (a *Adapter) WriteCtx(ctx context.Context, env *events.Envelope) error {
-	parts := strings.SplitN(env.SessionID, ":", 2)
-	if len(parts) < 2 {
+	parts := strings.SplitN(env.SessionID, ":", 3)
+	if len(parts) < 3 {
 		return nil
 	}
-	chatID := parts[1] // feishu:{chat_id}:{user_id}
+	chatID := parts[1]  // feishu:{chat_id}:{thread_ts}:{user_id}
+	threadTS := parts[2]
 
 	switch env.Event.Type {
 	case events.MessageDelta, events.Raw:
@@ -876,7 +1142,7 @@ func (a *Adapter) streamCardContent(ctx context.Context, cardID, elementID, text
   └─ Adapter.HandleTextMessage()
         │
         ├─ Bridge.Make{Platform}Envelope() ──▶ AEP Envelope (Input event)
-        │     ├─ SessionID = "{platform}:{chat_id}:{user_id}"
+        │     ├─ SessionID = "{platform}:{chat_id}:{thread_ts}:{user_id}"
         │     ├─ OwnerID = platform_user_id
         │     └─ Data.content = message text
         │
@@ -949,7 +1215,7 @@ func (a *Adapter) streamCardContent(ctx context.Context, cardID, elementID, text
 |------|-----------------|-------|------|
 | 连接建立 | 客户端主动 WS 握手 | Socket Mode SDK 连接 Slack | larkws SDK 连接飞书 |
 | 认证 | JWT 握手（网关层） | App Token（SDK 层） | App Token + Token 刷新 |
-| 会话 ID | client 生成 UUID | `slack:{team}:{channel}:{user}` | `feishu:{chat_id}:{user_id}` |
+| 会话 ID | client 生成 UUID | `slack:{team}:{channel}:{thread_ts}:{user}` | `feishu:{chat_id}:{thread_ts}:{user_id}` |
 | 消息去重 | WebSocket 本身无重复 | ClientMsgID dedup | message_id dedup |
 | 流式更新 | WebSocket 实时推送 | SDK 原生 `StartStream/AppendStream/StopStream` | CardKit `v1` 流式 API（50 次/秒） |
 | 心跳 | WS ping/pong | Socket Mode 自动 | SDK 自动 |
@@ -1097,3 +1363,129 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc PlatformConn) {
 | 自注册 | `init()` + `worker.Register` | `init()` + `messaging.Register` |
 | 基座类 | `base.BaseWorker` | `messaging.PlatformAdapter` |
 | 连接接口 | `SessionConn` | `PlatformConn` |
+
+---
+
+## 附录 C: 验收标准（AC）与跟踪矩阵
+
+### C.1 验收标准（Acceptance Criteria）
+
+#### AC-1: PlatformConn 接口
+
+| ID | 验收标准 | 验证方式 |
+|----|---------|---------|
+| AC-1.1 | `PlatformConn` 定义 `WriteCtx(ctx, env) error` + `Close() error` | 编译通过 |
+| AC-1.2 | Slack Adapter 实现 `PlatformConn` 接口 | `_ PlatformConn = (*Adapter)(nil)` |
+| AC-1.3 | Feishu Adapter 实现 `PlatformConn` 接口 | `_ PlatformConn = (*Adapter)(nil)` |
+| AC-1.4 | `Hub.JoinPlatformSession` 接受 `PlatformConn` 并注册到 `h.sessions` | Mock 单元测试 |
+
+#### AC-2: PlatformAdapter 基座与自注册
+
+| ID | 验收标准 | 验证方式 |
+|----|---------|---------|
+| AC-2.1 | `PlatformAdapterInterface` 定义 `Platform()` / `Start()` / `HandleTextMessage()` / `Close()` | 编译通过 |
+| AC-2.2 | `init()` 自注册: `Register(PlatformSlack, ...)` 和 `Register(PlatformFeishu, ...)` | 单元测试: `New()` 返回正确类型 |
+| AC-2.3 | 未知 platform 类型返回错误 `messaging: unknown platform %q` | 单元测试 |
+| AC-2.4 | `SetHub` / `SetSessionManager` / `SetHandler` / `SetBridge` 注入依赖 | 集成测试 |
+
+#### AC-3: PlatformBridge 编排
+
+| ID | 验收标准 | 验证方式 |
+|----|---------|---------|
+| AC-3.1 | `Bridge.Handle()` 验证 `OwnerID` 非空后调用 `handler.Handle()` | 单元测试: OwnerID 空返回错误 |
+| AC-3.2 | `MakeSlackEnvelope` 生成 session ID: `slack:{team}:{channel}:{thread_ts}:{user_id}` | 单元测试: 验证格式 |
+| AC-3.3 | `MakeFeishuEnvelope` 生成 session ID: `feishu:{chat_id}:{thread_ts}:{user_id}` | 单元测试: 验证格式 |
+| AC-3.4 | Envelope `Data.content` 去首尾空白，`Data.metadata` 含 platform 标识 | 单元测试 |
+
+#### AC-4: Hub.JoinPlatformSession
+
+| ID | 验收标准 | 验证方式 |
+|----|---------|---------|
+| AC-4.1 | 新 session 自动创建 `map[*Conn]bool` | 单元测试 |
+| AC-4.2 | `pcEntry` wrapper 的 `WriteCtx` 委托到 `pc.WriteCtx` | 单元测试 |
+| AC-4.3 | `pcEntry` wrapper 的 `Close` 委托到 `pc.Close` | 单元测试 |
+| AC-4.4 | `JoinPlatformSession` 不注册到 `h.conns`（不跟踪 WS 连接） | 单元测试: `h.conns` 不变 |
+| AC-4.5 | 现有 `JoinSession` 行为零变化 | 回归测试: 所有现有 gateway 测试通过 |
+
+#### AC-5: Slack 适配器
+
+| ID | 验收标准 | 验证方式 |
+|----|---------|---------|
+| AC-5.1 | Socket Mode 启动后接收 `EventsAPI` 事件 | E2E: 发送 Slack 消息 |
+| AC-5.2 | 消息去重: 同一 `ClientMsgID` 不重复处理 | 单元测试 |
+| AC-5.3 | 过滤非 @mention 和 bot 消息（main channel） | 单元测试 |
+| AC-5.4 | 线程内非 @mention 消息由所有者响应（R2） | 单元测试: ThreadOwnershipTracker |
+| AC-5.5 | `NativeStreamingWriter` 首次 Write 调用 `StartStream` | 单元测试 |
+| AC-5.6 | `NativeStreamingWriter` 每 150ms 或 20 字符触发 `AppendStream` | 单元测试 |
+| AC-5.7 | `NativeStreamingWriter` Close 时调用 `StopStream` | 单元测试 |
+| AC-5.8 | 流完整性校验: `bytesWritten == bytesFlushed` 时不 fallback | 单元测试: 模拟失败流 |
+| AC-5.9 | 流失败时 fallback 到 `PostMessage` 发送完整内容 | 单元测试: 模拟 `message_not_in_streaming_state` |
+| AC-5.10 | 流 TTL 10 分钟超时后标记 expired，停止重试 | 单元测试: mock 超时 |
+| AC-5.11 | 超过 3000 字符自动分块 | 单元测试 |
+| AC-5.12 | `golang.org/x/time/rate` 限流: 1rps, burst=3 | 单元测试: 快速请求被限流 |
+| AC-5.13 | 限流器 TTL 10 分钟未使用自动清理 | 单元测试: 模拟时间流逝 |
+| AC-5.14 | `ThreadOwnershipTracker`: @BotB 在 BotA 线程中 → BotB 抢占 | 单元测试: R3 |
+| AC-5.15 | `ThreadOwnershipTracker`: @其他人 → 释放所有权 | 单元测试: R5 |
+| AC-5.16 | `ThreadOwnershipTracker`: 24h 未活跃自动过期 | 单元测试: 模拟时间流逝 |
+
+#### AC-6: 飞书适配器
+
+| ID | 验收标准 | 验证方式 |
+|----|---------|---------|
+| AC-6.1 | `ws.Client.Start(ctx)` 建立 WebSocket 长连接 | E2E: 飞书消息可达 |
+| AC-6.2 | 自动重连: 断开后 SDK 自动恢复 | 手动测试: 断开网络 |
+| AC-6.3 | 消息去重: 同一 `message_id` 不重复处理 | 单元测试 |
+| AC-6.4 | 过滤非文本消息 | 单元测试: 图片/文件消息被忽略 |
+| AC-6.5 | CardKit 流式更新: `ContentCardElement` PUT 成功 | E2E: 打字机效果可见 |
+| AC-6.6 | CardKit `Uuid` 幂等去重 | 单元测试: 相同 Uuid 不重复 |
+| AC-6.7 | CardKit `Sequence` 顺序控制 | 单元测试: 乱序不导致内容错乱 |
+| AC-6.8 | CardKit 50 次/秒: 直接推送 delta 无需 debounce | E2E: 监控 API 调用频率 |
+| AC-6.9 | Token 自动刷新: SDK 后台 goroutine 处理 2h 过期 | 手动测试: 等待 token 过期 |
+
+#### AC-7: 端到端集成
+
+| ID | 验收标准 | 验证方式 |
+|----|---------|---------|
+| AC-7.1 | Slack DM → Worker → Slack 流式回复（含 Feedback 按钮） | E2E 测试 |
+| AC-7.2 | Slack 线程多轮对话: 上下文完整传递 | E2E 测试 |
+| AC-7.3 | 飞书单聊 → Worker → CardKit 打字机效果 | E2E 测试 |
+| AC-7.4 | WS 客户端和平台消息共享同一 session 输出 | E2E: 同时打开 WS 和 Slack |
+| AC-7.5 | 多 session 并发: 不同 channel 独立处理 | 集成测试: 2 并发 session |
+| AC-7.6 | 背压: broadcast channel 满时 delta 丢弃，done/error 不丢 | 压力测试 |
+| AC-7.7 | 优雅关闭: `ctx cancel` → Slack disconnect → Feishu disconnect | 集成测试 |
+
+### C.2 跟踪矩阵（Traceability Matrix）
+
+| 需求 | 设计章节 | 实现文件 | ~行 | 测试类型 | Phase |
+|------|---------|---------|-----|---------|-------|
+| PlatformConn 接口 | §4.1 | `messaging/platform_conn.go` | 40 | 单元 | P1 |
+| PlatformAdapter 基座 | §4.2 | `messaging/platform_adapter.go` | 60 | 单元 | P1 |
+| PlatformBridge 编排 | §4.3 | `messaging/bridge.go` | 80 | 单元 | P1 |
+| Hub.JoinPlatformSession | §4.4, 附录A | `gateway/hub.go` (+20) | 20 | 单元 | P1 |
+| Hub.pcEntry wrapper | 附录A | `gateway/hub.go` (+15) | 15 | 单元 | P1 |
+| cmd/worker 初始化 | §3 | `cmd/worker/main.go` (+30) | 30 | 集成 | P1 |
+| Mock 适配器验证 | §8 Phase 1 | `messaging/mock/adapter_test.go` | 80 | 单元 | P1 |
+| Slack Socket Mode 接入 | §5.1-5.3 | `messaging/slack/adapter.go` | 200 | 集成 | P2 |
+| Slack 事件映射 | §5.3 | `messaging/slack/events.go` | 60 | 单元 | P2 |
+| NativeStreamingWriter | §5.4 | `messaging/slack/stream.go` | 120 | 单元 | P2 |
+| Slack 速率限制 | §5.5 | `messaging/slack/rate_limiter.go` | 40 | 单元 | P2 |
+| ThreadOwnershipTracker | §5.6 | `messaging/slack/thread_ownership.go` | 80 | 单元 | P2 |
+| Slack 代码骨架校验 | §5.3 | `messaging/slack/adapter.go` | — | 编译 | P2 |
+| 飞书 ws.Client 接入 | §6.1-6.3 | `messaging/feishu/adapter.go` | 200 | 集成 | P3 |
+| 飞书事件映射 | §6.3 | `messaging/feishu/events.go` | 60 | 单元 | P3 |
+| CardKit 流式更新 | §6.4 | `messaging/feishu/card.go` | 80 | E2E | P3 |
+| 飞书代码骨架校验 | §6.3 | `messaging/feishu/adapter.go` | — | 编译 | P3 |
+| Slack E2E: DM → Worker → Reply | §8 Phase 2 | `messaging/slack/e2e_test.go` | 60 | E2E | P2 |
+| 飞书 E2E: 单聊 → CardKit | §8 Phase 3 | `messaging/feishu/e2e_test.go` | 60 | E2E | P3 |
+| 多平台并发测试 | §8 Phase 4 | `messaging/integration_test.go` | 100 | 集成 | P4 |
+| Prometheus 指标 | §8 Phase 4 | `messaging/metrics.go` | 40 | 集成 | P4 |
+
+### C.3 覆盖率目标
+
+| 维度 | 目标 | 测量方式 |
+|------|------|---------|
+| 单元测试覆盖率 | ≥ 80% (messaging 包) | `go test -cover ./internal/messaging/...` |
+| 接口实现检查 | 100% (所有 adapter + writer) | 编译时 `_ Interface = (*T)(nil)` |
+| E2E 路径覆盖 | 入向 + 出向 + 并发 + 关闭 | E2E 测试通过 |
+| 核心文件改动 | 0 行修改（仅新增） | `git diff --stat main` |
+| 回归测试 | 100% 现有 gateway 测试通过 | `make test` 全绿 |
