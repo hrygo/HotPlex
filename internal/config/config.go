@@ -152,6 +152,11 @@ type FeishuConfig struct {
 	AppSecret  string `mapstructure:"app_secret"`
 	WorkerType string `mapstructure:"worker_type"`
 	WorkDir    string `mapstructure:"work_dir"`
+
+	DMPolicy       string   `mapstructure:"dm_policy"`
+	GroupPolicy    string   `mapstructure:"group_policy"`
+	RequireMention bool     `mapstructure:"require_mention"`
+	AllowFrom      []string `mapstructure:"allow_from"`
 }
 
 // AdminConfig holds admin API settings.
@@ -541,6 +546,18 @@ func applyMessagingEnv(cfg *Config) {
 	}
 	if v := os.Getenv("HOTPLEX_MESSAGING_SLACK_WORK_DIR"); v != "" {
 		cfg.Messaging.Slack.WorkDir = v
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_FEISHU_DM_POLICY"); v != "" {
+		cfg.Messaging.Feishu.DMPolicy = v
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_FEISHU_GROUP_POLICY"); v != "" {
+		cfg.Messaging.Feishu.GroupPolicy = v
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_FEISHU_REQUIRE_MENTION"); v != "" {
+		cfg.Messaging.Feishu.RequireMention = strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM"); v != "" {
+		cfg.Messaging.Feishu.AllowFrom = strings.Split(v, ",")
 	}
 }
 

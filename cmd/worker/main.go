@@ -478,6 +478,13 @@ func startMessagingAdapters(ctx context.Context, log *slog.Logger, cfg *config.C
 		case messaging.PlatformFeishu:
 			if fa, ok := adapter.(*feishu.Adapter); ok {
 				fa.Configure(cfg.Messaging.Feishu.AppID, cfg.Messaging.Feishu.AppSecret, msgBridge)
+				gate := feishu.NewGate(
+					cfg.Messaging.Feishu.DMPolicy,
+					cfg.Messaging.Feishu.GroupPolicy,
+					cfg.Messaging.Feishu.RequireMention,
+					cfg.Messaging.Feishu.AllowFrom,
+				)
+				fa.SetGate(gate)
 				msgBridge.SetConnFactory(func(sessionID string) messaging.PlatformConn {
 					chatID := feishu.ExtractChatID(sessionID)
 					if chatID == "" {

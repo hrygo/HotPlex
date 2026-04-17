@@ -62,3 +62,7 @@ messaging:
     app_secret: ""
     worker_type: "claude_code"
     work_dir: ""
+    dm_policy: "open"
+    group_policy: "open"
+    require_mention: true
+    allow_from: []

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +25,6 @@ func init() {
 	})
 }
 
-// Adapter implements messaging.PlatformAdapterInterface for Feishu WebSocket.
 type Adapter struct {
 	messaging.PlatformAdapter
 
@@ -34,18 +34,20 @@ type Adapter struct {
 	wsClient   *ws.Client
 	larkClient *lark.Client
 	bridge     *messaging.Bridge
+	botOpenID  string
 
 	mu          sync.RWMutex
-	dedup       map[string]time.Time // messageID -> seenAt
+	dedup       *Dedup
 	activeConns map[string]*FeishuConn
+	gate        *Gate
+	chatQueue   *ChatQueue
+	rateLimiter *FeishuRateLimiter
 	dedupDone   chan struct{}
 	dedupWg     sync.WaitGroup
 }
 
 func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformFeishu }
 
-// ExtractChatID parses the chat_id from a Feishu session ID.
-// Format: feishu:{chat_id}:{thread_ts}:{user_id}
 func ExtractChatID(sessionID string) string {
 	parts := strings.SplitN(sessionID, ":", 4)
 	if len(parts) < 4 || parts[0] != "feishu" {
@@ -54,16 +56,18 @@ func ExtractChatID(sessionID string) string {
 	return parts[1]
 }
 
-// Configure sets credentials before Start.
 func (a *Adapter) Configure(appID, appSecret string, bridge *messaging.Bridge) {
 	a.appID = appID
 	a.appSecret = appSecret
 	a.bridge = bridge
 }
 
-// SetBridge stores the bridge for later use.
 func (a *Adapter) SetBridge(b *messaging.Bridge) {
 	a.bridge = b
+}
+
+func (a *Adapter) SetGate(gate *Gate) {
+	a.gate = gate
 }
 
 func (a *Adapter) Start(ctx context.Context) error {
@@ -71,13 +75,14 @@ func (a *Adapter) Start(ctx context.Context) error {
 		return fmt.Errorf("feishu: appID and appSecret required")
 	}
 
-	a.dedup = make(map[string]time.Time)
+	a.dedup = NewDedup(dedupDefaultMaxEntries, dedupDefaultTTL)
 	a.activeConns = make(map[string]*FeishuConn)
+	a.chatQueue = NewChatQueue(a.log)
+	a.rateLimiter = NewFeishuRateLimiter()
 	a.dedupDone = make(chan struct{})
 	a.dedupWg.Add(1)
 	go a.dedupCleanupLoop()
 
-	// Build event handler — ws.Client dispatches as P2 protocol.
 	eventHandler := dispatcher.NewEventDispatcher("", "").
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 			return a.handleMessage(ctx, event)
@@ -110,59 +115,122 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 
 	msg := event.Event.Message
 
-	// Only handle text messages
-	if msg.MessageType == nil || *msg.MessageType != "text" {
-		return nil
+	// Step 2: Bot self-message defense.
+	if event.Event.Sender != nil {
+		senderType := ptrStr(event.Event.Sender.SenderType)
+		if senderType == "app" {
+			return nil
+		}
 	}
 
-	// Extract message ID for dedup
+	// Step 3: Message expiry check (30 minutes).
+	if msg.CreateTime != nil && *msg.CreateTime != "" {
+		createTimeMs, err := strconv.ParseInt(*msg.CreateTime, 10, 64)
+		if err == nil && IsMessageExpired(createTimeMs) {
+			return nil
+		}
+	}
+
+	// Step 4: Dedup.
 	messageID := ptrStr(msg.MessageId)
 	if messageID == "" {
 		return nil
 	}
-	a.mu.Lock()
-	if _, seen := a.dedup[messageID]; seen {
-		a.mu.Unlock()
-		return nil
-	}
-	a.dedup[messageID] = time.Now()
-	a.mu.Unlock()
-
-	// Parse content: {"text":"hello"}
-	text := extractTextFromContent(ptrStr(msg.Content))
-	if text == "" {
+	if !a.dedup.TryRecord(messageID) {
 		return nil
 	}
 
+	// Step 5: Message type conversion.
+	msgType := ptrStr(msg.MessageType)
+	text, ok := ConvertMessage(msgType, ptrStr(msg.Content), msg.Mentions, a.botOpenID)
+	if !ok || text == "" {
+		return nil
+	}
+
+	// Step 6: @Mention resolution is done inside ConvertMessage for text/post types.
+
+	// Extract routing info.
+	chatType := ptrStr(msg.ChatType)
 	chatID := ptrStr(msg.ChatId)
+	rootID := ptrStr(msg.RootId)
+	parentID := ptrStr(msg.ParentId)
+	threadKey := rootID
+	if threadKey == "" {
+		threadKey = ptrStr(msg.ThreadId)
+	}
 	userID := ""
 	if event.Event.Sender != nil && event.Event.Sender.SenderId != nil {
 		userID = ptrStr(event.Event.Sender.SenderId.OpenId)
 	}
 
+	// Step 7: Access control.
+	botMentioned := isBotMentioned(msg.Mentions, a.botOpenID)
+	if a.gate != nil {
+		result := a.gate.Check(chatType, userID, botMentioned)
+		if !result.Allowed {
+			a.log.Debug("feishu: gate rejected", "reason", result.Reason, "chat", chatID, "user", userID)
+			return nil
+		}
+	}
+
+	// Step 8: Abort fast-path.
+	if IsAbortCommand(text) {
+		a.chatQueue.Abort(chatID)
+		return nil
+	}
+
+	replyToMsgID := parentID
+	if replyToMsgID == "" {
+		replyToMsgID = rootID
+	}
+
 	a.log.Debug("feishu: handling message",
+		"chat_type", chatType,
 		"chat", chatID,
 		"user", userID,
+		"thread_key", threadKey,
 		"text_len", len(text),
 	)
 
-	return a.HandleTextMessage(ctx, messageID, chatID, userID, text)
+	return a.chatQueue.Enqueue(chatID, func(qtx context.Context) error {
+		return a.handleTextMessage(qtx, messageID, chatID, userID, text, threadKey, replyToMsgID)
+	})
 }
 
-func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelID, userID, text string) error {
+func isBotMentioned(mentions []*larkim.MentionEvent, botOpenID string) bool {
+	if botOpenID == "" {
+		return false
+	}
+	for _, m := range mentions {
+		if m.Id != nil && m.Id.OpenId != nil && *m.Id.OpenId == botOpenID {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelID, userID, text, threadKey, replyToMsgID string) error {
 	if a.bridge == nil {
 		return nil
 	}
 
-	envelope := a.bridge.MakeFeishuEnvelope(channelID, "", userID, text)
+	envelope := a.bridge.MakeFeishuEnvelope(channelID, threadKey, userID, text)
 	if envelope == nil {
 		return fmt.Errorf("feishu: failed to build envelope")
+	}
+
+	if md, ok := envelope.Event.Data.(map[string]any); ok {
+		md["platform_msg_id"] = platformMsgID
+		md["reply_to_msg_id"] = replyToMsgID
 	}
 
 	return a.bridge.Handle(ctx, envelope)
 }
 
-// GetOrCreateConn returns or creates a FeishuConn for the given chat.
+func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelID, userID, text string) error {
+	return a.handleTextMessage(ctx, platformMsgID, channelID, userID, text, "", "")
+}
+
 func (a *Adapter) GetOrCreateConn(chatID string) *FeishuConn {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -176,7 +244,6 @@ func (a *Adapter) GetOrCreateConn(chatID string) *FeishuConn {
 	return conn
 }
 
-// Close gracefully terminates the platform connection.
 func (a *Adapter) Close(ctx context.Context) error {
 	if a.log != nil {
 		a.log.Info("feishu: adapter closing")
@@ -195,18 +262,26 @@ func (a *Adapter) Close(ctx context.Context) error {
 	return nil
 }
 
-// FeishuConn wraps the adapter with chat routing info to satisfy messaging.PlatformConn.
 type FeishuConn struct {
-	adapter *Adapter
-	chatID  string
+	adapter      *Adapter
+	chatID       string
+	replyToMsgID string
+	streamCtrl   *StreamingCardController
+	typingRid    string
 }
 
-// NewFeishuConn creates a platform connection bound to a chat.
 func NewFeishuConn(adapter *Adapter, chatID string) *FeishuConn {
 	return &FeishuConn{adapter: adapter, chatID: chatID}
 }
 
-// WriteCtx sends an AEP envelope to the bound Feishu chat.
+func (c *FeishuConn) EnableStreaming(ctrl *StreamingCardController) {
+	c.streamCtrl = ctrl
+}
+
+func (c *FeishuConn) SetTypingReactionID(rid string) {
+	c.typingRid = rid
+}
+
 func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if env == nil {
 		return fmt.Errorf("feishu: nil envelope")
@@ -217,11 +292,26 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 		return nil
 	}
 
+	if c.streamCtrl != nil {
+		if env.Event.Type == events.Done {
+			return c.streamCtrl.Close(ctx)
+		}
+		return c.streamCtrl.Write(text)
+	}
+
+	if c.replyToMsgID != "" {
+		return c.adapter.replyMessage(ctx, c.replyToMsgID, text, false)
+	}
 	return c.adapter.sendTextMessage(ctx, c.chatID, text)
 }
 
-// Close removes the connection from the adapter's active sessions.
 func (c *FeishuConn) Close() error {
+	if c.streamCtrl != nil {
+		_ = c.streamCtrl.Abort(context.Background())
+	}
+	if c.typingRid != "" && c.adapter.larkClient != nil {
+		_ = c.adapter.RemoveTypingIndicator(context.Background(), "", c.typingRid)
+	}
 	c.adapter.mu.Lock()
 	defer c.adapter.mu.Unlock()
 	delete(c.adapter.activeConns, c.chatID)
@@ -230,7 +320,6 @@ func (c *FeishuConn) Close() error {
 
 var _ messaging.PlatformConn = (*FeishuConn)(nil)
 
-// sendTextMessage sends a plain text message to a Feishu chat.
 func (a *Adapter) sendTextMessage(ctx context.Context, chatID, text string) error {
 	if a.larkClient == nil {
 		return fmt.Errorf("feishu: lark client not initialized")
@@ -260,10 +349,37 @@ func (a *Adapter) sendTextMessage(ctx context.Context, chatID, text string) erro
 	return nil
 }
 
-// dedupCleanupLoop periodically removes expired entries from the dedup map.
+func (a *Adapter) replyMessage(ctx context.Context, messageID, content string, replyInThread bool) error {
+	if a.larkClient == nil {
+		return fmt.Errorf("feishu: lark client not initialized")
+	}
+
+	textJSON, _ := json.Marshal(map[string]string{"text": content})
+
+	body := larkim.NewReplyMessageReqBodyBuilder().
+		MsgType(larkim.MsgTypeText).
+		Content(string(textJSON)).
+		ReplyInThread(replyInThread).
+		Build()
+
+	req := larkim.NewReplyMessageReqBuilder().
+		MessageId(messageID).
+		Body(body).
+		Build()
+
+	resp, err := a.larkClient.Im.V1.Message.Reply(ctx, req)
+	if err != nil {
+		return fmt.Errorf("feishu: reply message: %w", err)
+	}
+	if !resp.Success() {
+		return fmt.Errorf("feishu: reply message failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
 func (a *Adapter) dedupCleanupLoop() {
 	defer a.dedupWg.Done()
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(dedupSweepInterval)
 	defer ticker.Stop()
 
 	for {
@@ -271,19 +387,11 @@ func (a *Adapter) dedupCleanupLoop() {
 		case <-a.dedupDone:
 			return
 		case <-ticker.C:
-			a.mu.Lock()
-			cutoff := time.Now().Add(-10 * time.Minute)
-			for k, v := range a.dedup {
-				if v.Before(cutoff) {
-					delete(a.dedup, k)
-				}
-			}
-			a.mu.Unlock()
+			a.dedup.Sweep()
 		}
 	}
 }
 
-// ptrStr safely dereferences a *string, returning "" for nil.
 func ptrStr(p *string) string {
 	if p == nil {
 		return ""
@@ -291,12 +399,10 @@ func ptrStr(p *string) string {
 	return *p
 }
 
-// textContent holds the JSON structure of a Feishu text message.
 type textContent struct {
 	Text string `json:"text"`
 }
 
-// extractTextFromContent parses the text field from Feishu message content JSON.
 func extractTextFromContent(content string) string {
 	if content == "" {
 		return ""

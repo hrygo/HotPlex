@@ -177,4 +177,8 @@ log:
 #     app_id: ""
 #     app_secret: ""
 #     worker_type: "claude_code"
-#     work_dir: ""        # Working directory for worker processes
+#     work_dir: ""
+#     dm_policy: "open"        # open | allowlist | disabled
+#     group_policy: "open"     # open | allowlist | disabled
+#     require_mention: true     # in groups, bot must be @mentioned
+#     allow_from: []            # open_id allowlist for DM/group
