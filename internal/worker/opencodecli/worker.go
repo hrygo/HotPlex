@@ -105,12 +105,12 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, open
 	if w.cancel != nil {
 		w.cancel()
 	}
-	w.readOutputWg.Wait()
 	if w.Proc != nil {
 		_ = w.Proc.Kill()
 		_ = w.Proc.Close()
 		w.Proc = nil
 	}
+	w.readOutputWg.Wait()
 	w.closeStdin()
 
 	args := w.buildCLIArgs(session, openCodeSID)

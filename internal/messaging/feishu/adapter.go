@@ -325,7 +325,10 @@ func (a *Adapter) sendTextMessage(ctx context.Context, chatID, text string) erro
 		return fmt.Errorf("feishu: lark client not initialized")
 	}
 
-	textJSON, _ := json.Marshal(map[string]string{"text": text})
+	textJSON, err := json.Marshal(map[string]string{"text": text})
+	if err != nil {
+		return fmt.Errorf("feishu: marshal text message: %w", err)
+	}
 	body := larkim.NewCreateMessageReqBodyBuilder().
 		ReceiveId(chatID).
 		MsgType(larkim.MsgTypeText).
