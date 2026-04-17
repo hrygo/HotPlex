@@ -40,10 +40,16 @@ import (
 var (
 	flagConfig = flag.String("config", "", "Path to config file (YAML)")
 	flagDev    = flag.Bool("dev", false, "Enable development mode (relaxed security)")
+	flagVersion = flag.Bool("version", false, "Print version and exit")
 )
 
 func main() {
 	flag.Parse()
+
+	if *flagVersion {
+		fmt.Println("hotplex-worker", versionString())
+		return
+	}
 
 	// Load .env file if present (for local development).
 	_ = godotenv.Load()
