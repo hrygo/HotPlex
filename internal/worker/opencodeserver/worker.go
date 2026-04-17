@@ -161,8 +161,17 @@ func (w *Worker) SetWorkerSessionID(id string) {
 func New() *Worker {
 	return &Worker{
 		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
-		client: &http.Client{
-			Timeout: httpClientTimeout,
+		client: newHTTPClient(),
+	}
+}
+
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: httpClientTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 100,
+			IdleConnTimeout:     90 * time.Second,
 		},
 	}
 }
@@ -786,9 +795,7 @@ func init() {
 	worker.Register(worker.TypeOpenCodeSrv, func() (worker.Worker, error) {
 		return &Worker{
 			BaseWorker: base.NewBaseWorker(slog.Default(), nil),
-			client: &http.Client{
-				Timeout: httpClientTimeout,
-			},
+			client:     newHTTPClient(),
 		}, nil
 	})
 }

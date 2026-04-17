@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,6 +56,8 @@ type Worker struct {
 	cancel context.CancelFunc
 	seq    atomic.Int64
 
+	readOutputWg sync.WaitGroup
+
 	readLineFn func() (string, error)
 	testConn   worker.SessionConn
 }
@@ -102,6 +105,7 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, open
 	if w.cancel != nil {
 		w.cancel()
 	}
+	w.readOutputWg.Wait()
 	if w.Proc != nil {
 		_ = w.Proc.Kill()
 		_ = w.Proc.Close()
@@ -150,7 +154,11 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, open
 	w.BaseWorker.SetLastIO(w.BaseWorker.StartTime)
 
 	w.Mu.Unlock()
-	go w.readOutput(childCtx)
+	w.readOutputWg.Add(1)
+	go func() {
+		defer w.readOutputWg.Done()
+		w.readOutput(childCtx)
+	}()
 	return nil
 }
 

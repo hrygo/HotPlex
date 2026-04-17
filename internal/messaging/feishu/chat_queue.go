@@ -4,7 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 )
+
+// chatTaskTimeout bounds the maximum execution time of a single chat task.
+// Prevents goroutine leaks from tasks blocked on external APIs indefinitely.
+const chatTaskTimeout = 10 * time.Minute
 
 type ChatQueue struct {
 	log     *slog.Logger
@@ -35,7 +40,7 @@ func (q *ChatQueue) Enqueue(chatID string, task func(ctx context.Context) error)
 	q.mu.Unlock()
 
 	if !exists {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), chatTaskTimeout)
 		w.mu.Lock()
 		w.cancel = cancel
 		w.mu.Unlock()
@@ -61,7 +66,7 @@ func (q *ChatQueue) Enqueue(chatID string, task func(ctx context.Context) error)
 		q.workers[chatID] = newW
 		q.mu.Unlock()
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), chatTaskTimeout)
 		newW.mu.Lock()
 		newW.cancel = cancel
 		newW.mu.Unlock()

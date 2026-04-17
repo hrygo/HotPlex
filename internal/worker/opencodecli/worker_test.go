@@ -76,7 +76,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 			name:    "base args",
 			session: worker.SessionInfo{},
 			openSID: "",
-			want:    []string{"run", "--format", "json"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions"},
 		},
 		{
 			name: "with session continuation",
@@ -84,7 +84,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				SessionID: "sess_abc123",
 			},
 			openSID: "ses_def456",
-			want:    []string{"run", "--format", "json", "--session", "ses_def456"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--session", "ses_def456"},
 		},
 		{
 			name: "with continue flag",
@@ -92,7 +92,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				ContinueSession: true,
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--continue"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--continue"},
 		},
 		{
 			name: "with MCP config",
@@ -100,7 +100,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				MCPConfig: "/path/to/mcp.json",
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--mcp-config", "/path/to/mcp.json"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--mcp-config", "/path/to/mcp.json"},
 		},
 		{
 			name: "with MCP config and strict",
@@ -109,7 +109,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				StrictMCPConfig: true,
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--mcp-config", "/path/to/mcp.json", "--strict-mcp-config"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--mcp-config", "/path/to/mcp.json", "--strict-mcp-config"},
 		},
 		{
 			name: "with max turns",
@@ -117,7 +117,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				MaxTurns: 5,
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--max-turns", "5"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--max-turns", "5"},
 		},
 		{
 			name: "with bare mode",
@@ -125,7 +125,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				Bare: true,
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--bare"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--bare"},
 		},
 		{
 			name: "with skip permissions",
@@ -133,7 +133,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				SkipPermissions: true,
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--dangerously-skip-permissions"},
 		},
 		{
 			name: "with permission mode",
@@ -141,7 +141,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				PermissionMode: "auto-accept",
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--permission-mode", "auto-accept"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--permission-mode", "auto-accept"},
 		},
 		{
 			name: "with system prompt replace",
@@ -149,7 +149,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				SystemPromptReplace: "You are a helpful assistant.",
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--system-prompt", "You are a helpful assistant."},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--system-prompt", "You are a helpful assistant."},
 		},
 		{
 			name: "with append system prompt",
@@ -157,7 +157,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				SystemPrompt: "Remember to be concise.",
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--append-system-prompt", "Remember to be concise."},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--append-system-prompt", "Remember to be concise."},
 		},
 		{
 			name: "with max budget",
@@ -165,7 +165,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				MaxBudgetUSD: 1.5,
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--max-budget-usd", "1.500000"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--max-budget-usd", "1.500000"},
 		},
 		{
 			name: "with allowed dirs",
@@ -173,7 +173,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				AllowedDirs: []string{"/tmp", "/home/user"},
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--add-dir", "/tmp", "--add-dir", "/home/user"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--add-dir", "/tmp", "--add-dir", "/home/user"},
 		},
 		{
 			name: "with json schema",
@@ -181,7 +181,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				JSONSchema: "/tmp/schema.json",
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--json-schema", "/tmp/schema.json"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--json-schema", "/tmp/schema.json"},
 		},
 		{
 			name: "with include hook events",
@@ -189,7 +189,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				IncludeHookEvents: true,
 			},
 			openSID: "",
-			want:    []string{"run", "--format", "json", "--include-hook-events"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--include-hook-events"},
 		},
 		{
 			name: "session ID takes precedence over continue",
@@ -198,7 +198,7 @@ func TestOpenCodeCLIWorker_BuildCLIArgs(t *testing.T) {
 				SessionID:       "sess_abc123",
 			},
 			openSID: "ses_def456",
-			want:    []string{"run", "--format", "json", "--session", "ses_def456"},
+			want:    []string{"run", "--format", "json", "--dangerously-skip-permissions", "--session", "ses_def456"},
 		},
 	}
 
