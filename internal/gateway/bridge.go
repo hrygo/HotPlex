@@ -62,7 +62,6 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 	}
 
 	// Start worker.
-	b.log.Debug("bridge: about to call w.Start", "session_id", id, "workDir", workDir)
 	workerInfo := worker.SessionInfo{
 		SessionID:    id,
 		UserID:       userID,

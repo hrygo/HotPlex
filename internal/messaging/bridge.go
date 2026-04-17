@@ -14,6 +14,12 @@ import (
 // DefaultWorkerWorkDir is the fallback working directory when workDir is not configured.
 const DefaultWorkerWorkDir = "/tmp/hotplex/workspace"
 
+// Session ID formats for platform-derived sessions.
+const (
+	SessionIDFormatSlack  = "slack:%s:%s:%s:%s"  // teamID:channelID:threadTS:userID
+	SessionIDFormatFeishu = "feishu:%s:%s:%s"    // chatID:threadTS:userID
+)
+
 // ConnFactory creates a PlatformConn for a given platform session.
 // Each adapter registers its own factory during wiring.
 type ConnFactory func(sessionID string) PlatformConn
@@ -39,6 +45,9 @@ type Bridge struct {
 func NewBridge(log *slog.Logger, platform PlatformType, hub HubInterface,
 	sm SessionManager, handler HandlerInterface, starter SessionStarter, workerType, workDir string,
 ) *Bridge {
+	if workDir == "" {
+		workDir = DefaultWorkerWorkDir
+	}
 	return &Bridge{
 		log:        log,
 		platform:   platform,
@@ -63,13 +72,8 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope) error {
 	}
 
 	// Auto-create session if starter is available.
-	workDir := b.workDir
-	if workDir == "" {
-		workDir = DefaultWorkerWorkDir
-	}
-	b.log.Debug("messaging bridge: about to start platform session", "session_id", env.SessionID, "owner_id", env.OwnerID, "worker_type", b.workerType, "work_dir", workDir)
 	if b.starter != nil {
-		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, workDir); err != nil {
+		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir); err != nil {
 			b.log.Debug("messaging bridge: session start skipped or failed",
 				"session_id", env.SessionID, "err", err)
 		}
@@ -117,9 +121,9 @@ func (b *Bridge) makeEnvelope(sessionID, ownerID, text string, metadata map[stri
 // MakeSlackEnvelope converts a Slack message to an AEP input envelope.
 // session ID format: slack:{team_id}:{channel_id}:{thread_ts}:{user_id}
 func (b *Bridge) MakeSlackEnvelope(teamID, channelID, threadTS, userID, text string) *events.Envelope {
-	sessionID := fmt.Sprintf("slack:%s:%s:%s:%s", teamID, channelID, threadTS, userID)
+	sessionID := fmt.Sprintf(SessionIDFormatSlack, teamID, channelID, threadTS, userID)
 	return b.makeEnvelope(sessionID, userID, text, map[string]any{
-		"platform":   "slack",
+		"platform":   string(PlatformSlack),
 		"team_id":    teamID,
 		"channel_id": channelID,
 	})
@@ -128,9 +132,9 @@ func (b *Bridge) MakeSlackEnvelope(teamID, channelID, threadTS, userID, text str
 // MakeFeishuEnvelope converts a Feishu message to an AEP input envelope.
 // session ID format: feishu:{chat_id}:{thread_ts}:{user_id}
 func (b *Bridge) MakeFeishuEnvelope(chatID, threadTS, userID, text string) *events.Envelope {
-	sessionID := fmt.Sprintf("feishu:%s:%s:%s", chatID, threadTS, userID)
+	sessionID := fmt.Sprintf(SessionIDFormatFeishu, chatID, threadTS, userID)
 	return b.makeEnvelope(sessionID, userID, text, map[string]any{
-		"platform": "feishu",
+		"platform": string(PlatformFeishu),
 		"chat_id":  chatID,
 	})
 }

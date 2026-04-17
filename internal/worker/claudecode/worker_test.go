@@ -223,7 +223,7 @@ func TestBuildCLIArgs_AllOptions(t *testing.T) {
 	require.NotContains(t, args, "--resume")
 	require.NotContains(t, args, "--fork-session")
 	require.NotContains(t, args, "--resume-session-at")
-	require.NotContains(t, args, "--dangerously-skip-permissions")
+	require.Contains(t, args, "--dangerously-skip-permissions")
 	require.NotContains(t, args, "--system-prompt") // replace mode not set
 }
 
@@ -367,9 +367,9 @@ func TestBuildCLIArgs_Minimal(t *testing.T) {
 	}
 
 	args := w.buildCLIArgs(session, false)
-	// Only the required flags (6 tokens total: --print, --verbose, --output-format, stream-json, --input-format, stream-json).
+	// Required flags (7 tokens: --print, --verbose, --output-format, stream-json, --input-format, stream-json, --dangerously-skip-permissions).
 	// For new sessions, --session-id is NOT passed - Claude creates one automatically.
-	require.Len(t, args, 6)
+	require.Len(t, args, 7)
 	require.Contains(t, args, "--print")
 	require.Contains(t, args, "--verbose")
 	require.NotContains(t, args, "--session-id")

@@ -25,6 +25,22 @@ type Conn struct {
 	closed    bool
 }
 
+// Claude Code stream-json input message types.
+type claudeUserMessage struct {
+	Type    string         `json:"type"`
+	Message claudeUserMsg  `json:"message"`
+}
+
+type claudeUserMsg struct {
+	Role    string              `json:"role"`
+	Content []claudeTextContent `json:"content"`
+}
+
+type claudeTextContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 // NewConn creates a new stdin-based session connection.
 func NewConn(log *slog.Logger, stdin *os.File, userID, sessionID string) *Conn {
 	if log == nil {
@@ -86,12 +102,12 @@ func (c *Conn) SendUserMessage(ctx context.Context, content string) error {
 	}
 	c.mu.Unlock()
 
-	msg := map[string]any{
-		"type": "user",
-		"message": map[string]any{
-			"role": "user",
-			"content": []map[string]any{
-				{"type": "text", "text": content},
+	msg := claudeUserMessage{
+		Type: "user",
+		Message: claudeUserMsg{
+			Role: "user",
+			Content: []claudeTextContent{
+				{Type: "text", Text: content},
 			},
 		},
 	}
