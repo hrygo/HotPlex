@@ -15,11 +15,20 @@ linters:
     - misspell
     - unconvert
     - unparam
+    - errorlint
+    - gocritic
 
 linters-settings:
   errcheck:
     check-type-assertions: true
     check-blank: true
+    exclude-functions:
+      # Best-effort operations where errors are safe to ignore
+      - (io.Closer).Close
+      - (net.Conn).SetDeadline
+      - (net.Conn).SetReadDeadline
+      - (net.Conn).SetWriteDeadline
+      - (*encoding/json.Encoder).Encode
   govet:
     enable-all: true
   goimports:
@@ -28,8 +37,27 @@ linters-settings:
     checks: ["all"]
   unparam:
     checks: ["all"]
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
 
 issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    # Test files: relax noisy linters
+    - path: _test\.go
+      linters:
+        - errcheck
+        - fieldalignment
+        - gocritic
+        - unparam
+    # E2E test files
+    - path: e2e/
+      linters:
+        - errcheck
+        - fieldalignment
+        - gocritic
+        - unparam
