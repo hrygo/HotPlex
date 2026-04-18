@@ -268,6 +268,15 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string) {
 		})
 		_ = b.hub.SendToSession(context.Background(), crashDone)
 	}
+
+	// Clean up: detach the dead worker and transition session to TERMINATED
+	// so the next message triggers orphan resume instead of silently dropping input.
+	if b.sm != nil {
+		b.sm.DetachWorker(sessionID)
+		if err := b.sm.Transition(context.Background(), sessionID, events.StateTerminated); err != nil {
+			b.log.Debug("bridge: transition to terminated after worker exit", "session_id", sessionID, "err", err)
+		}
+	}
 }
 
 // StartPlatformSession creates a session for a platform message if it doesn't already exist.

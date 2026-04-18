@@ -233,6 +233,11 @@ func (c *StreamingCardController) Flush(ctx context.Context) error {
 }
 
 func (c *StreamingCardController) Close(ctx context.Context) error {
+	// Idempotency: if already in a terminal state, skip.
+	if !c.transition(PhaseCompleted) {
+		return nil
+	}
+
 	c.mu.Lock()
 	content := c.buf.String()
 	c.mu.Unlock()
@@ -261,7 +266,6 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		}
 	}
 
-	c.transition(PhaseCompleted)
 	return nil
 }
 
