@@ -253,6 +253,12 @@ func (c *Conn) performInit(handler *Handler) error {
 	// for the same (ownerID, workerType, clientSessionID, workDir) tuple.
 	sessionID := session.DeriveSessionKey(c.userID, initData.WorkerType, initData.SessionID, workDir)
 
+	// Subscribe to session BEFORE creation/resume so that state events
+	// (e.g., RUNNING transition during StartSession) are delivered to this
+	// connection. Cleanup on error is handled by UnregisterConn in readPump's defer.
+	c.hub.LeaveSession("", c)
+	c.hub.JoinSession(sessionID, c)
+
 	// Resolve session: create new or resume existing.
 	si, err := handler.sm.Get(sessionID)
 	if err != nil {
@@ -320,10 +326,6 @@ func (c *Conn) performInit(handler *Handler) error {
 	c.sessionID = sessionID
 	c.userID = si.UserID
 	c.mu.Unlock()
-
-	// Update hub's session subscription.
-	c.hub.LeaveSession("", c)       // unsubscribe from old (empty) session
-	c.hub.JoinSession(sessionID, c) // subscribe to new session
 
 	// Send init_ack.
 	ack := BuildInitAck(sessionID, si.State, initData.WorkerType)
