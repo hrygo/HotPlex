@@ -138,26 +138,16 @@ func (a *Adapter) SetStatus(ctx context.Context, channelID, threadTS string, sta
 	if text == "" {
 		return a.ClearStatus(ctx, channelID, threadTS)
 	}
-	// Primary: native Assistant API
 	if a.isAssistantCapable.Load() {
 		err := a.SetAssistantStatus(ctx, channelID, threadTS, text)
 		if err == nil {
 			return nil
 		}
-		if isAssistantCapabilityError(err) {
-			a.log.Warn("slack: Assistant API no longer available, switching to emoji fallback",
-				"error", err)
-			a.isAssistantCapable.Store(false)
-		} else {
-			a.log.Debug("slack: Assistant API call failed, trying emoji fallback",
-				"error", err)
-		}
+		a.handleCapabilityError(err)
 	}
-	// Fallback: emoji reaction
 	return a.setStatusWithEmojiFallback(ctx, channelID, threadTS, status)
 }
 
-// ClearStatus clears the status indicator.
 func (a *Adapter) ClearStatus(ctx context.Context, channelID, threadTS string) error {
 	if a.client == nil {
 		return nil
@@ -167,11 +157,20 @@ func (a *Adapter) ClearStatus(ctx context.Context, channelID, threadTS string) e
 		if err == nil {
 			return nil
 		}
-		if isAssistantCapabilityError(err) {
-			a.isAssistantCapable.Store(false)
-		}
+		a.handleCapabilityError(err)
 	}
 	return nil
+}
+
+func (a *Adapter) handleCapabilityError(err error) {
+	if isAssistantCapabilityError(err) {
+		a.log.Warn("slack: Assistant API no longer available, switching to emoji fallback",
+			"error", err)
+		a.isAssistantCapable.Store(false)
+	} else {
+		a.log.Debug("slack: Assistant API call failed, trying emoji fallback",
+			"error", err)
+	}
 }
 
 func (a *Adapter) setStatusWithEmojiFallback(ctx context.Context, channelID, threadTS string, status StatusType) error {
