@@ -19,13 +19,14 @@ type MediaInfo struct {
 
 // ConvertMessage converts a Feishu raw content to AI-friendly text based on message type.
 // Returns ("", false, nil) for unsupported types that should be silently ignored.
-func ConvertMessage(msgType, rawContent string, mentions []*larkim.MentionEvent, botOpenID, messageID string) (string, bool, *MediaInfo) {
+func ConvertMessage(msgType, rawContent string, mentions []*larkim.MentionEvent, botOpenID, messageID string) (string, bool, []*MediaInfo) {
 	switch msgType {
 	case "text":
 		text := extractTextFromContent(rawContent)
 		return ResolveMentions(text, mentions, botOpenID), true, nil
 	case "post":
-		return convertPost(rawContent, mentions, botOpenID), true, nil
+		text, media := convertPost(rawContent, mentions, botOpenID, messageID)
+		return text, true, media
 	case "image":
 		return convertImage(rawContent, messageID)
 	case "file":
@@ -56,14 +57,16 @@ type postElement struct {
 }
 
 // convertPost parses a Feishu post (rich text) message and converts it to markdown.
-func convertPost(rawContent string, mentions []*larkim.MentionEvent, botOpenID string) string {
+// Embedded images are collected as MediaInfo for downstream download.
+func convertPost(rawContent string, mentions []*larkim.MentionEvent, botOpenID, messageID string) (string, []*MediaInfo) {
 	var post postContent
 	if err := json.Unmarshal([]byte(rawContent), &post); err != nil {
-		return ""
+		return "", nil
 	}
 
 	mentionMap := buildMentionMap(mentions)
 	var sb strings.Builder
+	var mediaList []*MediaInfo
 
 	if post.Title != "" {
 		sb.WriteString("## ")
@@ -74,10 +77,17 @@ func convertPost(rawContent string, mentions []*larkim.MentionEvent, botOpenID s
 	for _, paragraph := range post.Content {
 		for _, elem := range paragraph {
 			sb.WriteString(convertPostElement(elem, mentionMap, botOpenID))
+			if elem.Tag == "img" && elem.ImageKey != "" {
+				mediaList = append(mediaList, &MediaInfo{
+					Type:      "image",
+					Key:       elem.ImageKey,
+					MessageID: messageID,
+				})
+			}
 		}
 		sb.WriteString("\n")
 	}
-	return sb.String()
+	return sb.String(), mediaList
 }
 
 // convertPostElement converts a single post element to markdown text.
@@ -99,9 +109,6 @@ func convertPostElement(elem postElement, mentionMap map[string]*larkim.MentionE
 		}
 		return "@" + elem.UserID
 	case "img":
-		if elem.ImageKey != "" {
-			return fmt.Sprintf("![image](%s)", elem.ImageKey)
-		}
 		return "[图片]"
 	default:
 		return ""
@@ -120,41 +127,41 @@ func buildMentionMap(mentions []*larkim.MentionEvent) map[string]*larkim.Mention
 }
 
 // convertImage parses a Feishu image message and returns a descriptive string with media info.
-func convertImage(rawContent, messageID string) (string, bool, *MediaInfo) {
+func convertImage(rawContent, messageID string) (string, bool, []*MediaInfo) {
 	var img struct {
 		ImageKey string `json:"image_key"`
 	}
 	if err := json.Unmarshal([]byte(rawContent), &img); err != nil || img.ImageKey == "" {
 		return "[图片]", true, nil
 	}
-	return "[用户发送了一张图片]", true, &MediaInfo{Type: "image", Key: img.ImageKey, MessageID: messageID}
+	return "[用户发送了一张图片]", true, []*MediaInfo{{Type: "image", Key: img.ImageKey, MessageID: messageID}}
 }
 
 // convertFile parses a Feishu file message and returns a descriptive string with media info.
-func convertFile(rawContent, messageID string) (string, bool, *MediaInfo) {
+func convertFile(rawContent, messageID string) (string, bool, []*MediaInfo) {
 	var f struct {
 		FileName string `json:"file_name"`
-		FileKey  string `json:"file_key"`
+		Filekey  string `json:"file_key"`
 	}
-	if err := json.Unmarshal([]byte(rawContent), &f); err != nil || f.FileKey == "" {
+	if err := json.Unmarshal([]byte(rawContent), &f); err != nil || f.Filekey == "" {
 		return "[文件]", true, nil
 	}
-	return "[用户发送了一个文件]", true, &MediaInfo{Type: "file", Key: f.FileKey, Name: f.FileName, MessageID: messageID}
+	return "[用户发送了一个文件]", true, []*MediaInfo{{Type: "file", Key: f.Filekey, Name: f.FileName, MessageID: messageID}}
 }
 
 // convertAudio parses a Feishu audio message and returns a descriptive string with media info.
-func convertAudio(rawContent, messageID string) (string, bool, *MediaInfo) {
+func convertAudio(rawContent, messageID string) (string, bool, []*MediaInfo) {
 	var a struct {
 		FileKey string `json:"file_key"`
 	}
 	if err := json.Unmarshal([]byte(rawContent), &a); err != nil || a.FileKey == "" {
 		return "[语音]", true, nil
 	}
-	return "[用户发送了一条语音]", true, &MediaInfo{Type: "audio", Key: a.FileKey, MessageID: messageID}
+	return "[用户发送了一条语音]", true, []*MediaInfo{{Type: "audio", Key: a.FileKey, MessageID: messageID}}
 }
 
 // convertVideo parses a Feishu video message and returns a descriptive string with media info.
-func convertVideo(rawContent, messageID string) (string, bool, *MediaInfo) {
+func convertVideo(rawContent, messageID string) (string, bool, []*MediaInfo) {
 	var v struct {
 		FileKey  string `json:"file_key"`
 		FileName string `json:"file_name"`
@@ -162,16 +169,71 @@ func convertVideo(rawContent, messageID string) (string, bool, *MediaInfo) {
 	if err := json.Unmarshal([]byte(rawContent), &v); err != nil || v.FileKey == "" {
 		return "[视频]", true, nil
 	}
-	return "[用户发送了一段视频]", true, &MediaInfo{Type: "video", Key: v.FileKey, Name: v.FileName, MessageID: messageID}
+	return "[用户发送了一段视频]", true, []*MediaInfo{{Type: "video", Key: v.FileKey, Name: v.FileName, MessageID: messageID}}
 }
 
 // convertSticker parses a Feishu sticker message and returns a descriptive string with media info.
-func convertSticker(rawContent, messageID string) (string, bool, *MediaInfo) {
+func convertSticker(rawContent, messageID string) (string, bool, []*MediaInfo) {
 	var s struct {
 		FileKey string `json:"file_key"`
 	}
 	if err := json.Unmarshal([]byte(rawContent), &s); err != nil || s.FileKey == "" {
 		return "[表情]", true, nil
 	}
-	return "[用户发送了一个表情]", true, &MediaInfo{Type: "sticker", Key: s.FileKey, MessageID: messageID}
+	return "[用户发送了一个表情]", true, []*MediaInfo{{Type: "sticker", Key: s.FileKey, MessageID: messageID}}
+}
+
+// BuildMediaPrompt constructs a worker-friendly prompt with media file paths and clear instructions.
+func BuildMediaPrompt(userText string, paths []string, medias []*MediaInfo) string {
+	var sb strings.Builder
+
+	// Count media types for natural language description.
+	var imgCount, fileCount, audioCount, videoCount, stickerCount int
+	for _, m := range medias {
+		switch m.Type {
+		case "image":
+			imgCount++
+		case "file":
+			fileCount++
+		case "audio":
+			audioCount++
+		case "video":
+			videoCount++
+		case "sticker":
+			stickerCount++
+		}
+	}
+
+	var parts []string
+	if imgCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d 张图片", imgCount))
+	}
+	if fileCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d 个文件", fileCount))
+	}
+	if audioCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d 条语音", audioCount))
+	}
+	if videoCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d 段视频", videoCount))
+	}
+	if stickerCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d 个表情贴纸", stickerCount))
+	}
+
+	mediaDesc := strings.Join(parts, "、")
+	fmt.Fprintf(&sb, "[用户发送的消息包含 %s，已下载到本地，请使用 Read 工具查看后再回答]\n", mediaDesc)
+	for _, p := range paths {
+		sb.WriteString("- ")
+		sb.WriteString(p)
+		sb.WriteString("\n")
+	}
+
+	userText = strings.TrimSpace(userText)
+	if userText != "" {
+		sb.WriteString("\n用户的文字内容:\n")
+		sb.WriteString(userText)
+	}
+
+	return sb.String()
 }
