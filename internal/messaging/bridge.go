@@ -89,10 +89,21 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope) error {
 		if !b.joined[env.SessionID] {
 			rawID := ""
 			if md, ok := env.Event.Data.(map[string]any); ok {
+				// Top-level keys: chat_id, channel_id
 				if id, ok := md["chat_id"].(string); ok {
 					rawID = id
 				} else if id, ok := md["channel_id"].(string); ok {
 					rawID = id
+				}
+				// Nested metadata: for platform messages built via makeEnvelope
+				if rawID == "" {
+					if meta, ok := md["metadata"].(map[string]any); ok {
+						if id, ok := meta["chat_id"].(string); ok {
+							rawID = id
+						} else if id, ok := meta["channel_id"].(string); ok {
+							rawID = id
+						}
+					}
 				}
 			}
 			pc := b.connFactory(env.SessionID, rawID)
