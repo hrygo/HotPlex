@@ -1,5 +1,12 @@
 package slack
 
+// Gate policy constants.
+const (
+	PolicyOpen      = "open"
+	PolicyAllowlist = "allowlist"
+	PolicyDisabled  = "disabled"
+)
+
 // Gate controls access to the bot based on channel type and user identity.
 type Gate struct {
 	dmPolicy       string // open | allowlist | disabled

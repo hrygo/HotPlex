@@ -141,12 +141,10 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 		return
 	}
 
-	// Skip all bot messages (prevent bot-to-bot loops)
 	if msgEvent.BotID != "" {
 		return
 	}
 
-	// Skip non-user subtypes
 	switch msgEvent.SubType {
 	case "message_changed", "message_deleted", "channel_join",
 		"channel_leave", "group_join", "group_leave",
@@ -154,7 +152,6 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 		return
 	}
 
-	// Message expiry: skip messages older than 30 minutes
 	if msgEvent.TimeStamp != "" {
 		if ts, err := parseSlackTS(msgEvent.TimeStamp); err == nil {
 			if time.Since(ts) > 30*time.Minute {
@@ -171,15 +168,7 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 	if !ok {
 		return
 	}
-	teamID := event.TeamID // workspace identity from EventsAPIEvent
-
-	// Resolve user mentions: <@UID> → @DisplayName, remove bot self-mentions
-	text = a.userCache.ResolveMentions(ctx, text, a.botID)
-	text = strings.TrimSpace(text)
-
-	if text == "" && len(media) == 0 {
-		return
-	}
+	teamID := event.TeamID
 
 	// Thread ownership check
 	channelType := "channel"
@@ -199,7 +188,7 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 		return
 	}
 
-	// Access control gate
+	// Access control gate (must be before ResolveMentions, which strips <@BOTID>)
 	if a.gate != nil {
 		botMentioned := strings.Contains(text, "<@"+a.botID+">")
 		result := a.gate.Check(channelType, userID, botMentioned)
@@ -207,6 +196,14 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 			a.log.Debug("slack: gate rejected", "reason", result.Reason, "user", userID)
 			return
 		}
+	}
+
+	// Resolve user mentions: <@UID> → @DisplayName, remove bot self-mentions
+	text = a.userCache.ResolveMentions(ctx, text, a.botID)
+	text = strings.TrimSpace(text)
+
+	if text == "" && len(media) == 0 {
+		return
 	}
 
 	// Download media files and append paths to text
@@ -233,7 +230,6 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 		"text_len", len(text),
 	)
 
-	// Abort detection
 	if IsAbortCommand(text) {
 		a.log.Info("slack: abort command received", "channel", channelID)
 		return
