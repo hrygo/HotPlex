@@ -211,7 +211,6 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc messaging.PlatformConn) {
 		h.sessions[sessionID] = make(map[SessionWriter]bool)
 	}
 	h.sessions[sessionID][&pcEntry{pc: pc}] = true
-	h.log.Debug("gateway: platform conn joined session", "session_id", sessionID)
 }
 
 // sendBroadcast sends to the broadcast channel. Returns false if the hub is

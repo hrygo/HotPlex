@@ -147,7 +147,15 @@ func (b *Bridge) ResumeSession(ctx context.Context, id, workDir string) error {
 	stateEvt := events.NewEnvelope(aep.NewID(), id, b.hub.NextSeq(id), events.State, events.StateData{
 		State: stateToNotify,
 	})
-	return b.hub.SendToSession(ctx, stateEvt)
+	if err := b.hub.SendToSession(ctx, stateEvt); err != nil {
+		b.log.Warn("bridge: resume state notify failed", "id", id, "err", err)
+	}
+
+	// Forward worker events to hub. Same as StartSession — goroutine exits when
+	// conn.Recv() closes (worker killed via poolMgr.Close or worker exit).
+	go b.forwardEvents(w, id)
+
+	return nil
 }
 
 // copyEnvelope delegates to events.Clone, which performs a deep copy of
