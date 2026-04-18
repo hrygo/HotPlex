@@ -6,6 +6,21 @@ HotPlex Worker Gateway — Go 1.26 unified access layer for AI Coding Agent sess
 WebSocket gateway (AEP v1) abstracting Claude Code, OpenCode CLI/Server, Pi-mono protocol differences.
 Multi-language client SDKs (TS, Python, Java, Go) + AI SDK transport adapter + web chat UI.
 
+## ENVIRONMENT
+
+**Setup** (first time):
+```bash
+cp configs/env.example .env
+# edit .env with your API keys
+```
+
+**Dev** (`make dev`):
+- Gateway → http://localhost:8888
+- Webchat → http://localhost:3000
+- Admin API → http://localhost:9999
+
+**Logs**: `./logs/` · **PIDs**: `~/.hotplex/.pids/`
+
 ## STRUCTURE
 
 ### Entry
@@ -130,6 +145,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - `JWTValidator` → `security/jwt.go:27` — ES256 + JTI blacklist
 - `client.Client` → `client/client.go:33` — Go SDK: Connect/Resume/SendInput/Close
 - `admin.AdminAPI` → `admin/admin.go` — stats, health, config, session CRUD
+
 ## CONVENTIONS
 
 - **Mutex**: Explicit `mu` field, zero-value, no embedding, no pointer passing
