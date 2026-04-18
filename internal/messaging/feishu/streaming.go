@@ -127,7 +127,8 @@ func (c *StreamingCardController) EnsureCard(ctx context.Context, chatID, chatTy
 	c.mu.Unlock()
 
 	// Step 1: Send card message with initial content.
-	msgID, err := c.sendCardMessage(ctx, chatID, initialContent)
+	sanitized := SanitizeForCard(initialContent)
+	msgID, err := c.sendCardMessage(ctx, chatID, sanitized)
 	if err != nil {
 		c.log.Warn("feishu: send card message failed, degrading to static",
 			"error", err)
@@ -179,6 +180,9 @@ func (c *StreamingCardController) Flush(ctx context.Context) error {
 	c.mu.Lock()
 	content := c.buf.String()
 	c.mu.Unlock()
+
+	// Proactively sanitize to prevent CardKit table-limit errors.
+	content = SanitizeForCard(content)
 
 	if content == c.lastFlushed {
 		c.log.Debug("feishu: streaming flush skipped, content unchanged")
@@ -232,6 +236,9 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 	c.mu.Lock()
 	content := c.buf.String()
 	c.mu.Unlock()
+
+	// Final content: sanitize and optimize for best rendering.
+	content = SanitizeForCard(OptimizeMarkdownStyle(content))
 
 	c.log.Debug("feishu: streaming card close",
 		"card_kit_ok", c.cardKitOK,
