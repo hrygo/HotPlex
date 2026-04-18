@@ -185,18 +185,26 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 
 	// Step 5: Message type conversion.
 	msgType := ptrStr(msg.MessageType)
-	text, ok, media := ConvertMessage(msgType, ptrStr(msg.Content), msg.Mentions, a.botOpenID, messageID)
+	text, ok, medias := ConvertMessage(msgType, ptrStr(msg.Content), msg.Mentions, a.botOpenID, messageID)
 	if !ok || text == "" {
 		return nil
 	}
 
-	// Download media to local file and append path to text.
-	if media != nil {
-		path, err := a.downloadMedia(ctx, media)
-		if err == nil && path != "" {
-			text = text + ": " + path
-		} else {
-			a.log.Warn("feishu: media download failed, sending text only", "type", media.Type, "key", media.Key, "error", err)
+	// Download media to local files and build structured prompt.
+	if len(medias) > 0 {
+		var paths []string
+		for _, m := range medias {
+			path, err := a.downloadMedia(ctx, m)
+			if err != nil {
+				a.log.Warn("feishu: media download failed", "type", m.Type, "key", m.Key, "error", err)
+				continue
+			}
+			if path != "" {
+				paths = append(paths, path)
+			}
+		}
+		if len(paths) > 0 {
+			text = BuildMediaPrompt(text, paths, medias)
 		}
 	}
 
@@ -280,6 +288,17 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 	// Pre-create conn so its fields are ready before the bridge forwards to the handler.
 	conn := a.GetOrCreateConn(channelID)
 	conn.mu.Lock()
+	// Clean up stale reactions from previous message before switching platformMsgID.
+	if conn.platformMsgID != "" && conn.platformMsgID != platformMsgID {
+		if conn.toolRid != "" {
+			_ = a.removeReaction(context.Background(), conn.platformMsgID, conn.toolRid)
+			conn.toolRid = ""
+		}
+		if conn.typingRid != "" {
+			_ = a.RemoveTypingIndicator(context.Background(), conn.platformMsgID, conn.typingRid)
+			conn.typingRid = ""
+		}
+	}
 	conn.replyToMsgID = replyToMsgID
 	conn.platformMsgID = platformMsgID
 	conn.chatType = chatType
