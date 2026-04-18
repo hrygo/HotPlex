@@ -56,3 +56,4 @@ __pycache__
 ./*.png
 test-results/
 e2e/test-results/
+/.worktrees/
