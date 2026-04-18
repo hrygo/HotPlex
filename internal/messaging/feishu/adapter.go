@@ -367,6 +367,40 @@ func (c *FeishuConn) SetTypingReactionID(rid string) {
 	c.typingRid = rid
 }
 
+// cycleReaction removes the current tool reaction (if any) and adds a new one.
+// Also removes the typing indicator on first tool activity.
+func (c *FeishuConn) cycleReaction(ctx context.Context, emoji string) {
+	c.mu.Lock()
+	typingRid := c.typingRid
+	toolRid := c.toolRid
+	platformMsgID := c.platformMsgID
+	c.typingRid = ""
+	c.mu.Unlock()
+
+	if platformMsgID == "" {
+		return
+	}
+
+	// Remove typing indicator on first tool activity.
+	if typingRid != "" {
+		_ = c.adapter.RemoveTypingIndicator(ctx, platformMsgID, typingRid)
+	}
+
+	// Remove previous tool reaction.
+	if toolRid != "" {
+		_ = c.adapter.removeReaction(ctx, platformMsgID, toolRid)
+	}
+
+	// Add new reaction.
+	if rid, err := c.adapter.addReaction(ctx, platformMsgID, emoji); err == nil && rid != "" {
+		c.mu.Lock()
+		c.toolRid = rid
+		c.mu.Unlock()
+	} else if err != nil {
+		c.adapter.log.Debug("feishu: tool reaction failed (non-fatal)", "error", err)
+	}
+}
+
 func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if env == nil {
 		return fmt.Errorf("feishu: nil envelope")
@@ -395,22 +429,15 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 		return nil
 	}
 
-	// Handle tool_call: add 🔧 reaction on first tool execution.
+	// Handle tool_call: remove current reaction, add random tool emoji.
 	if env.Event.Type == events.ToolCall {
-		c.mu.Lock()
-		toolRid := c.toolRid
-		platformMsgID := c.platformMsgID
-		c.mu.Unlock()
+		c.cycleReaction(ctx, randomToolEmoji())
+		return nil
+	}
 
-		if toolRid == "" && platformMsgID != "" {
-			if rid, err := c.adapter.addReaction(ctx, platformMsgID, toolEmoji); err == nil && rid != "" {
-				c.mu.Lock()
-				c.toolRid = rid
-				c.mu.Unlock()
-			} else if err != nil {
-				c.adapter.log.Debug("feishu: tool reaction failed (non-fatal)", "error", err)
-			}
-		}
+	// Handle tool_result: remove current reaction, add Done emoji.
+	if env.Event.Type == events.ToolResult {
+		c.cycleReaction(ctx, doneEmoji)
 		return nil
 	}
 

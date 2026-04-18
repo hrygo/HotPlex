@@ -14,6 +14,7 @@ const (
 	EventStream       EventType = "stream"
 	EventAssistant    EventType = "assistant"
 	EventToolProgress EventType = "tool_progress"
+	EventToolResult   EventType = "tool_result" // tool completed (from user type messages)
 	EventResult       EventType = "result"
 	EventControl      EventType = "control"
 	EventSystem       EventType = "system"
@@ -119,6 +120,10 @@ func (p *Parser) ParseLine(line string) ([]*WorkerEvent, error) {
 		return p.parseSystem(&msg)
 	case "session_state_changed":
 		return p.parseSessionState(&msg)
+	case "user":
+		// Claude Code echoes tool results as user type messages.
+		// Emit as signal event for activity feedback (no payload needed).
+		return []*WorkerEvent{{Type: EventToolResult}}, nil
 	default:
 		// Ignore unknown types (files_persisted, hook_*, task_*, rate_limit, etc.)
 		p.log.Debug("parser: ignoring unknown message type", "type", msg.Type)

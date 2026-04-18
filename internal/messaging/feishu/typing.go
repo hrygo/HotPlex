@@ -3,14 +3,23 @@ package feishu
 import (
 	"context"
 	"fmt"
+	"math/rand"
 
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
 const (
 	typingEmoji = "Typing"
-	toolEmoji   = "Fire" // 🔥 tool activity indicator
+	doneEmoji   = "Done"
 )
+
+// toolEmojis are randomly cycled on each tool_call to show activity.
+var toolEmojis = []string{"THINKING", "BLACKFACE", "ColdSweat", "YEAH", "YAWN"}
+
+// randomToolEmoji returns a random emoji from the tool pool.
+func randomToolEmoji() string {
+	return toolEmojis[rand.Intn(len(toolEmojis))]
+}
 
 // addReaction adds an emoji reaction to a message. Returns the reaction ID.
 func (a *Adapter) addReaction(ctx context.Context, messageID, emoji string) (string, error) {
