@@ -154,36 +154,77 @@ if platformMsgID == "" {
 
 #### 2.2.2 实现
 
-在 `adapter.go` 中添加去重 map（最小实现，无需新文件）：
+在 `adapter.go` 中添加去重 map（bounded + TTL 清理 goroutine）：
 
 ```go
 // adapter.go Adapter struct 增加字段
 type Adapter struct {
     // ... existing fields ...
-    seen   map[string]bool
+    dedup *Dedup  // 有界 TTL dedup map
 }
 
-// Start() 中初始化
-a.seen = make(map[string]bool)
+// Dedup 有界去重 map：超过 maxEntries 时 FIFO 淘汰，TTL 过期后自动清理
+type Dedup struct {
+    mu         sync.Mutex
+    entries    map[string]time.Time
+    order      []string  // FIFO 淘汰顺序
+    maxEntries int
+    ttl        time.Duration
+}
 
-// handleEventsAPI() 中，生成 platformMsgID 之后、HandleTextMessage 之前：
-if a.seen[platformMsgID] {
+func NewDedup(maxEntries int, ttl time.Duration) *Dedup {
+    return &Dedup{
+        entries:    make(map[string]time.Time),
+        maxEntries: maxEntries,
+        ttl:        ttl,
+    }
+}
+
+// TryRecord returns false if id was already seen (duplicate)
+func (d *Dedup) TryRecord(id string) bool {
+    d.mu.Lock()
+    defer d.mu.Unlock()
+    if _, seen := d.entries[id]; seen {
+        return false
+    }
+    for len(d.entries) >= d.maxEntries && len(d.order) > 0 {
+        oldest := d.order[0]
+        d.order = d.order[1:]
+        delete(d.entries, oldest)
+    }
+    d.entries[id] = time.Now()
+    d.order = append(d.order, id)
+    return true
+}
+
+// handleEventsAPI() 中，生成 platformMsgID 之后：
+if !a.dedup.TryRecord(platformMsgID) {
     return
 }
-a.seen[platformMsgID] = true
 ```
 
-**无需新文件**：map 在 `Close()` 中清空即可。如果未来需要 TTL 清理，再引入 FIFO dedup。
+**Close() 中停止清理 goroutine**，避免 goroutine 泄漏：
+```go
+func (a *Adapter) Close() error {
+    if a.dedup != nil {
+        a.dedup.Close()  // 关闭 cleanup goroutine
+    }
+    // ...
+}
+```
+
+**⚠️ 有界 vs 无界**：无界 map 在长会话中会持续增长直到 OOM。上述实现将条目数上限设为 `maxEntries`（默认 5000），超出后 FIFO 淘汰最旧条目。
 
 #### 2.2.3 验收标准
 
 | ID | AC | 验证方式 |
 |----|-----|---------|
-| 2.2-1 | 相同 `ClientMsgID` 的消息 60 分钟内仅处理一次 | 单元测试 |
+| 2.2-1 | 相同 `ClientMsgID` 的消息在 dedup map 中仅处理一次 | 单元测试 |
 | 2.2-2 | `ClientMsgID` 为空时 fallback 到 `TimeStamp` | 单元测试 |
 | 2.2-3 | 不同消息正常处理 | 单元测试 |
 | 2.2-4 | WebSocket 重连后重推的旧消息被过滤 | 集成测试 |
-| 2.2-5 | `Close()` 后 seen map 被清空 | 单元测试 |
+| 2.2-5 | 超过 maxEntries 时 FIFO 淘汰最旧条目 | 单元测试 |
+| 2.2-6 | `Close()` 后 dedup goroutine 退出（无泄漏） | 单元测试 |
 
 ---
 
@@ -767,7 +808,9 @@ func (g *Gate) Check(channelType, userID string, botMentioned bool) *GateResult 
 
 ```go
 // Access control gate
-botMentioned := strings.Contains(msgEvent.Text, "<@"+a.botID+">")
+// ⚠️ msgEvent.Text 仅是 plain-text fallback。Block Kit 消息中的 @mention 出现在 blocks.elements 中。
+// 因此 require_mention=true 在纯 Block Kit 消息上会静默失效。修复方案：复用 extractText（含 blocks 遍历）。
+botMentioned := strings.Contains(extractText(msgEvent), "<@"+a.botID+">")
 result := a.gate.Check(channelType, userID, botMentioned)
 if !result.Allowed {
     a.log.Debug("slack: gate rejected", "reason", result.Reason, "user", userID)
@@ -792,6 +835,9 @@ if !result.Allowed {
 | 4.1-11 | 空配置（默认 open）允许所有消息 | 单元测试 |
 | 4.1-12 | gate 被拒时仅 Debug 日志，不发错误消息给用户 | 单元测试 |
 | 4.1-13 | MPIM（channelType="mpim"）与 group 策略一致 | 单元测试 |
+| 4.1-14 | require_mention=true + Block Kit 消息（含 blocks.elements 中的 @mention）也能正确检测 | 单元测试 |
+
+> **⚠️ Block Kit mention 已知限制**：旧版检测仅扫描 `msgEvent.Text`，会漏掉 Block Kit `elements` 中的 @mention。修复方案：集成点改用 `extractText(msgEvent)`（Phase 1.5 扩展后支持 blocks 遍历）。
 
 ---
 
@@ -837,13 +883,696 @@ func parseSlackTS(ts string) (time.Time, error) {
 
 ---
 
-## 5. 文件变动清单
+## 5. Phase 4 — 多媒体消息支持
+
+> 对标 [[Feishu-Adapter-Improvement-Spec]] §2.3（富消息类型支持），模式对齐：解析媒体元信息 → 下载到本地 → 拼接路径到文本 → AI 处理
+>
+> **核心差异**：Slack 的 `Msg.Files[]` 直接内嵌在 `MessageEvent` 中，无需从 JSON content 字段提取；下载使用 `client.GetFile(urlPrivateDownload, writer)`；出站渲染使用 Block Kit Image Block
+
+### 5.1 入站：File 消息处理
+
+#### 5.1.1 问题
+
+**已验证** `adapter.go:123` — `extractText` 仅提取 `Text` 和 `SectionBlock`，`Msg.Files[]`（含 image/file/audio/video）被完全忽略。
+
+#### 5.1.2 消息 SubType 识别
+
+**已验证** `messages.go:49` — `MsgSubTypeFileShare = "file_share"` 是文件分享的标准 SubType：
+
+```go
+// messages.go:49
+MsgSubTypeFileShare = "file_share"  // [Events API, RTM] A file was shared into a channel
+```
+
+当 `msgEvent.SubType == "file_share"` 时，`msgEvent.Message.Files[]` 包含所有附件。
+
+> **⚠️ 关键路径**：`slackevents.MessageEvent` 自身**没有** `Files` 字段（已验证 `slackevents/inner_events.go:301-348`）。`Files` 嵌套在 `MessageEvent.Message`（`*slack.Msg`）中。
+
+#### 5.1.3 File 元信息结构
+
+**已验证** `files.go:26-101` — `slack.File` struct：
+
+```go
+type File struct {
+    ID            string   `json:"id"`
+    Name          string   `json:"name"`
+    Title         string   `json:"title"`
+    Mimetype      string   `json:"mimetype"`
+    Filetype      string   `json:"filetype"`   // "png", "jpg", "gif", "pdf", "mov", "mp4", etc.
+    PrettyType    string   `json:"pretty_type"`
+    Size          int      `json:"size"`        // bytes
+    URLPrivate    string   `json:"url_private"`        // 需要认证
+    URLPrivateDownload string `json:"url_private_download"`  // 直接下载 URL
+    Thumb64       string   `json:"thumb_64"`
+    Thumb160      string   `json:"thumb_160"`
+    Thumb360      string   `json:"thumb_360"`
+    OriginalW     int      `json:"original_w"`
+    OriginalH     int      `json:"original_h"`
+    Permalink     string   `json:"permalink"`    // 公共链接
+}
+```
+
+#### 5.1.4 File 类型分类
+
+```go
+// internal/messaging/slack/converter.go
+
+type MediaInfo struct {
+    Type       string // "image", "video", "audio", "document", "file"
+    FileID     string
+    Name       string
+    MimeType   string
+    Size       int
+    ThumbURL   string  // 缩略图 URL（image/video）
+    DownloadURL string // url_private_download，需认证
+    PublicURL   string  // permalink，无需认证
+}
+
+func fileCategory(f slack.File) string {
+    switch f.Filetype {
+    case "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg":
+        return "image"
+    case "mp4", "mov", "avi", "webm", "flv":
+        return "video"
+    case "mp3", "wav", "ogg", "opus", "m4a":
+        return "audio"
+    case "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "md":
+        return "document"
+    default:
+        return "file"
+    }
+}
+```
+
+#### 5.1.5 ConvertMessage 入口
+
+新增 `internal/messaging/slack/converter.go`：
+
+```go
+// ConvertMessage converts a Slack MessageEvent into text + media info.
+// text: user-facing message text (may be empty if only file was shared)
+// ok: whether to continue processing
+// media: attached media files (nil if none)
+// 实现为 Adapter 方法以访问 a.botID；文件从 msgEvent.Message.Files 提取。
+func (a *Adapter) ConvertMessage(msgEvent slackevents.MessageEvent) (text string, ok bool, media []*MediaInfo) {
+    // 1. 提取主文本
+    text = extractText(msgEvent)  // 现有逻辑
+
+    // 2. 提取文件（⚠️ msgEvent.Message.Files，非 msgEvent.Files）
+    msg := msgEvent.Message
+    if msg != nil && len(msg.Files) > 0 {
+        media = make([]*MediaInfo, 0, len(msg.Files))
+        for _, f := range msg.Files {
+            // 跳过自身 bot 上传的文件
+            if f.User == a.botID {
+                continue
+            }
+            // 跳过 external/remote 文件（无法下载）
+            if f.IsExternal || f.ExternalType != "" {
+                continue
+            }
+            media = append(media, &MediaInfo{
+                Type:        fileCategory(f),
+                FileID:      f.ID,
+                Name:        f.Name,
+                MimeType:    f.Mimetype,
+                Size:        f.Size,
+                ThumbURL:    f.Thumb360,
+                DownloadURL: f.URLPrivateDownload,
+                PublicURL:   f.Permalink,
+            })
+        }
+    }
+
+    // 3. file_share 但无 text → 仅 "[用户分享了一个文件: filename]"
+    if text == "" && len(media) > 0 {
+        var parts []string
+        for _, m := range media {
+            if m.Type == "image" {
+                parts = append(parts, fmt.Sprintf("[用户分享了一张图片: %s]", m.Name))
+            } else {
+                parts = append(parts, fmt.Sprintf("[用户分享了文件: %s]", m.Name))
+            }
+        }
+        text = strings.Join(parts, " ")
+    }
+
+    return text, text != "" || len(media) > 0, media
+}
+```
+
+**集成点**：修改 `adapter.go` 的 `handleEventsAPI`，替换现有 `extractText` 调用：
+
+```go
+// Before:
+text := extractText(msgEvent)
+if text == "" {
+    return
+}
+
+// After:
+text, ok, media := a.ConvertMessage(msgEvent)
+if !ok {
+    return
+}
+
+// Download media after access control passes, before HandleTextMessage
+if len(media) > 0 {
+    for _, m := range media {
+        path, err := a.downloadMedia(ctx, m)
+        if err == nil {
+            text += "\n" + path
+        } else {
+            // 降级：保留纯文本描述，不阻断消息
+            a.log.Warn("slack: download media failed", "file", m.Name, "error", err)
+            text += fmt.Sprintf("\n[%s: %s]", m.Type, m.Name)
+        }
+    }
+}
+```
+
+#### 5.1.6 验收标准
+
+| ID | AC | 验证方式 | 状态 |
+|----|-----|---------|------|
+| 5.1-1 | `file_share` subtype 触发 Files 提取 | 单元测试 | ✅ |
+| 5.1-2 | 图片文件（png/jpg/gif/webp）分类为 image | 单元测试 | ✅ |
+| 5.1-3 | 视频文件（mp4/mov/webm）分类为 video | 单元测试 | ✅ |
+| 5.1-4 | 音频文件（mp3/wav/opus）分类为 audio | 单元测试 | ✅ |
+| 5.1-5 | 文档文件（pdf/doc/txt）分类为 document | 单元测试 | ✅ |
+| 5.1-6 | 仅分享文件无文字时生成占位文本 | 单元测试 | ✅ |
+| 5.1-7 | bot 自己上传的文件被跳过 | 单元测试 | ✅ |
+| 5.1-8 | external/remote 文件被跳过 | 单元测试 | ✅ |
+| 5.1-9 | 下载失败降级为文本描述，不阻断消息 | 单元测试 | ✅ |
+| 5.1-10 | 多个文件均被处理并拼接路径 | 单元测试 | ✅ |
+
+---
+
+### 5.2 下载与存储
+
+#### 5.2.1 实现
+
+**已验证** `files.go:266-275` — SDK 提供 `GetFile(downloadURL, writer)` 方法：
+
+```go
+// GetFile retrieves a given file from its private download URL.
+func (api *Client) GetFile(downloadURL string, writer io.Writer) error {
+    return api.GetFileContext(context.Background(), downloadURL, writer)
+}
+```
+
+**需额外 OAuth scope**：`files:read`（当前 `slack/adapter.go` 的 manifest 可能缺失此 scope）。
+
+```go
+// adapter.go
+const mediaMaxSize = 20 * 1024 * 1024 // 20 MB（Slack 默认限制）
+
+func (a *Adapter) downloadMedia(ctx context.Context, m *MediaInfo) (string, error) {
+    if m.Size > mediaMaxSize {
+        return "", fmt.Errorf("file too large: %d bytes", m.Size)
+    }
+
+    // 确定文件扩展名
+    ext := mimeExt(m.MimeType)
+    if ext == "" {
+        ext = "." + m.Filetype
+    }
+    safeName := sanitizeFilename(m.Name)
+    filename := fmt.Sprintf("%s_%s%s", m.Type, m.FileID, ext)
+
+    dir := fmt.Sprintf("/tmp/hotplex/media/slack/%ss", m.Type)
+    if err := os.MkdirAll(dir, 0o755); err != nil {
+        return "", err
+    }
+    path := filepath.Join(dir, filename)
+
+    f, err := os.Create(path)
+    if err != nil {
+        return "", err
+    }
+    defer f.Close()
+
+    // GetFile needs auth — use the client's token automatically
+    if err := a.client.GetFile(m.DownloadURL, f); err != nil {
+        os.Remove(path)
+        return "", fmt.Errorf("get file: %w", err)
+    }
+
+    return path, nil
+}
+
+func mimeExt(mime string) string {
+    switch mime {
+    case "image/jpeg":   return ".jpg"
+    case "image/png":    return ".png"
+    case "image/gif":    return ".gif"
+    case "image/webp":   return ".webp"
+    case "video/mp4":    return ".mp4"
+    case "video/quicktime": return ".mov"
+    case "video/webm":   return ".webm"
+    case "audio/mpeg":   return ".mp3"
+    case "audio/wav":    return ".wav"
+    case "audio/opus":   return ".opus"
+    case "application/pdf": return ".pdf"
+    }
+    return ""
+}
+
+func sanitizeFilename(name string) string {
+    // 移除路径分隔符和危险字符，保留原始文件名
+    return strings.ReplaceAll(strings.ReplaceAll(name, "/", "_"), "\\", "_")
+}
+```
+
+#### 5.2.2 Rate Limiting 扩展
+
+Slack Files API 遵循标准速率限制（约 1 req/sec），现有 `rate_limiter.go` 已覆盖基础场景。文件下载在现有限流器基础上无需额外调整。
+
+#### 5.2.3 验收标准
+
+| ID | AC | 验证方式 |
+|----|-----|---------|
+| 5.2-1 | 图片下载到 `/tmp/hotplex/media/slack/images/` | 单元测试 |
+| 5.2-2 | 文件按 MIME 类型获得正确扩展名 | 单元测试 |
+| 5.2-3 | 超过 20MB 的文件跳过下载 | 单元测试 |
+| 5.2-4 | 下载失败时返回 error，不创建空文件 | 单元测试 |
+| 5.2-5 | `GetFile` 自动使用 client token 认证 | 集成测试 |
+| 5.2-6 | 同一文件重复下载时覆盖 | 单元测试 |
+
+---
+
+### 5.3 出站：Image Block 渲染
+
+#### 5.3.1 问题
+
+Worker 输出含图片路径时，当前 `SlackConn.WriteCtx` 直接发送原始文本。AI 生成的图片路径（如 `/tmp/hotplex/media/slack/images/xxx.png`）应以 Block Kit Image Block 形式展示。
+
+#### 5.3.2 实现
+
+修改 `adapter.go` 的 `SlackConn.WriteCtx`（参考 `slack/block_image.go:35-43`）：
+
+```go
+// WriteCtx sends an AEP envelope to Slack.
+// text: raw markdown/text from AI
+// Extracts image paths and renders as Block Kit Image Block.
+func (c *SlackConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
+    text, ok := extractResponseText(env)
+    if !ok {
+        return nil
+    }
+
+    // 提取图片路径（支持 AI 输出本地路径或 public URL）
+    parts, remaining := extractImages(text)
+    if len(parts) == 0 {
+        return c.adapter.sendTextMessage(ctx, c.channelID, c.threadTS, text)
+    }
+
+    // 组装 Block Kit 消息
+    blocks := make([]slack.Block, 0, 1+len(parts)+1)
+    // 1. 文本部分（排除图片路径行）
+    if remaining != "" {
+        blocks = append(blocks, slack.NewSectionBlock(
+            slack.NewTextBlockObject(slack.MBTPTypeMrkdwn, remaining, false, false),
+            nil, nil,
+        ))
+    }
+    // 2. 每个图片 → Image Block
+    for _, img := range parts {
+        blocks = append(blocks, slack.NewImageBlock(
+            img.URL,
+            img.AltText,
+            "", // blockID 空
+            nil, // title 可选
+        ))
+    }
+    // 3. 发送
+    return c.adapter.postBlocks(ctx, c.channelID, c.threadTS, blocks)
+}
+
+type imagePart struct {
+    URL     string
+    AltText string
+}
+
+// extractResponseText extracts displayable text from an AEP envelope.
+func extractResponseText(env *events.Envelope) (string, bool) {
+    switch env.Event.Type {
+    case events.Message, events.MessageDelta, events.Raw:
+        if env.Event.Data == nil {
+            return "", false
+        }
+        if s, ok := env.Event.Data.(string); ok {
+            return s, s != ""
+        }
+        return "", false
+    default:
+        return "", false
+    }
+}
+
+// extractImages extracts image paths from AI text and returns cleaned remaining text.
+// Supported patterns:
+//   - Local path: /tmp/hotplex/media/slack/images/xxx.png
+//   - Slack file URL: https://files.slack.com/... (converted to URLPrivateDownload)
+func extractImages(text string) ([]imagePart, string) {
+    var parts []imagePart
+    var lines []string
+
+    for _, line := range strings.Split(text, "\n") {
+        line = strings.TrimSpace(line)
+        if strings.HasPrefix(line, "/tmp/hotplex/media/slack/images/") ||
+            strings.HasPrefix(line, "/tmp/hotplex/media/slack/videos/") {
+            // 本地文件路径 → 转换为 file:// URL 或直接上传
+            imgURL, altText := localFileToImagePart(line)
+            if imgURL != "" {
+                parts = append(parts, imagePart{URL: imgURL, AltText: altText})
+                continue
+            }
+        } else if strings.Contains(line, "files.slack.com") {
+            // Slack 公共文件 URL → 直接作为 Image Block URL
+            parts = append(parts, imagePart{URL: line, AltText: "image"})
+        } else if strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://") {
+            // 通用 URL（imgbb 等图床）→ 直接使用
+            parts = append(parts, imagePart{URL: line, AltText: "image"})
+        }
+        lines = append(lines, line)
+    }
+
+    remaining := strings.TrimSpace(strings.Join(lines, "\n"))
+    return parts, remaining
+}
+
+func localFileToImagePart(path string) (url string, altText string) {
+    // 读取本地文件 → base64 data URL（最简单方案，无需额外服务）
+    // 限制：仅适合小图片（< 5MB）
+    data, err := os.ReadFile(path)
+    if err != nil {
+        return "", ""
+    }
+    if len(data) > 5*1024*1024 {
+        return "", ""
+    }
+    mime := http.DetectContentType(data)
+    if !strings.HasPrefix(mime, "image/") {
+        return "", ""
+    }
+    ext := strings.TrimPrefix(mime, "image/")
+    altText = filepath.Base(path)
+    return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), altText
+}
+```
+
+**`postBlocks` 辅助方法**：
+
+```go
+func (a *Adapter) postBlocks(ctx context.Context, channelID, threadTS string, blocks []slack.Block) error {
+    params := slack.NewPostMessageParameters()
+    params.ThreadTimestamp = threadTS
+    _, _, err := a.client.PostMessageContext(ctx, channelID, slack.MsgOptionBlocks(blocks...), slack.MsgOptionPost())
+    return err
+}
+```
+
+#### 5.3.3 降级策略
+
+若 `PostMessageContext` 因 Block 格式错误失败（返回 `channel_not_found`/`not_authed` 以外错误），降级到纯文本发送：
+
+```go
+if err != nil {
+    a.log.Warn("slack: post blocks failed, falling back to text", "error", err)
+    return c.adapter.sendTextMessage(ctx, c.channelID, c.threadTS, text)
+}
+```
+
+#### 5.3.4 验收标准
+
+| ID | AC | 验证方式 |
+|----|-----|---------|
+| 5.3-1 | AI 输出含 `/tmp/hotplex/media/slack/images/xxx.png` → Image Block 渲染 | 集成测试 |
+| 5.3-2 | 无图片时退化为纯文本发送 | 单元测试 |
+| 5.3-3 | 本地图片 < 5MB 转为 base64 data URL | 单元测试 |
+| 5.3-4 | 本地图片 ≥ 5MB 跳过 Image Block，仅发文本 | 单元测试 |
+| 5.5 | 多个图片均生成独立 Image Block | 单元测试 |
+| 5.3-6 | Block 发送失败降级为纯文本 | 错误测试 |
+| 5.3-7 | Image Block 支持 thread 上下文（threadTS 传递） | 集成测试 |
+
+---
+
+### 5.4 出站：File Upload
+
+#### 5.4.1 背景
+
+当 Worker 输出内容为**大文件**（如 AI 生成了 PDF/CSV/代码文件）时，文本消息不适合承载。应通过 `files.uploadV2` 上传到 Slack。
+
+#### 5.4.2 实现
+
+```go
+// postFile uploads a file to Slack and returns the permalink.
+func (a *Adapter) postFile(ctx context.Context, channelID, threadTS string, path, title string) (string, error) {
+    data, err := os.ReadFile(path)
+    if err != nil {
+        return "", err
+    }
+
+    params := slack.UploadFileParameters{
+        Filename:        filepath.Base(path),
+        Title:           title,
+        Reader:          bytes.NewReader(data),
+        FileSize:        len(data),
+        Channel:         channelID,
+        ThreadTimestamp: threadTS,
+    }
+
+    file, err := a.client.UploadFileContext(ctx, params)
+    if err != nil {
+        return "", fmt.Errorf("upload file: %w", err)
+    }
+
+    // file.ID 可用于后续编辑或引用
+    return file.ID, nil
+}
+```
+
+**触发条件**：当 AI 输出以文件路径结尾且文件存在于 `/tmp/hotplex/media/slack/` 时：
+
+```go
+// 在 WriteCtx 中，extractImages 之后
+if strings.HasSuffix(remaining, ".pdf") || strings.HasSuffix(remaining, ".csv") {
+    filePath := strings.TrimSpace(remaining)
+    if _, err := os.Stat(filePath); err == nil {
+        fileID, err := a.postFile(ctx, c.channelID, c.threadTS, filePath, filepath.Base(filePath))
+        if err == nil {
+            // 文本中移除文件路径，替换为 Slack file ID 引用
+            return c.adapter.postText(ctx, c.channelID, c.threadTS, fmt.Sprintf("📎 已上传文件: %s", fileID))
+        }
+    }
+}
+```
+
+#### 5.4.3 验收标准
+
+| ID | AC | 验证方式 |
+|----|-----|---------|
+| 5.4-1 | PDF/CSV 文件上传到 Slack 并返回 file ID | 集成测试 |
+| 5.4-2 | 上传的文件附加到 thread（threadTS） | 集成测试 |
+| 5.4-3 | 上传失败时降级为文本发送 | 错误测试 |
+| 5.4-4 | 大文件（> 20MB）跳过上传 | 单元测试 |
+
+---
+
+### 5.5 Thread/Reply 上下文保留
+
+#### 5.5.1 问题
+
+多媒体消息的 `threadTS` 在 `ConvertMessage` 提取后传递链路断裂——`HandleTextMessage` 和 `SlackConn.WriteCtx` 已有 `threadTS` 参数，流程与 Phase 1 对齐。
+
+#### 5.5.2 实现
+
+无需新代码。`HandleTextMessage` 签名已含 `threadTS` 参数（Phase 1.1 修复），`SlackConn` 存储 `threadTS` 并在所有出站操作中传递（已对齐）。
+
+#### 5.5.3 验收标准
+
+| ID | AC | 验证方式 |
+|----|-----|---------|
+| 5.5-1 | 图片消息在 thread 中发送时 Image Block 仍在同一 thread | 集成测试 |
+| 5.5-2 | DM 中无 threadTS 时 Image Block 发送正常 | 集成测试 |
+
+---
+
+### 5.6 Block Kit RichText 出站
+
+#### 5.6.1 背景
+
+当前 `WriteCtx` 发送原始文本，mrkdwn 格式由 Slack 自动渲染（Phase 2.1）。对于更复杂的富文本输出（如表格、代码高亮），Block Kit 提供了更强表达力。
+
+#### 5.6.2 实现
+
+复用现有 `format.go`（Phase 2.1）的 Markdown → mrkdwn 转换，通过 `slack.MsgOptionText(text, false)` 发送。**无需额外 Block Kit 实现**：Slack 的原生 mrkdwn 渲染已足够支持粗体/斜体/代码块/列表/链接。
+
+Image Block（5.3节）是唯一需要显式 Block Kit 的场景。
+
+#### 5.6.3 验收标准
+
+| ID | AC | 验证方式 |
+|----|-----|---------|
+| 5.6-1 | Markdown 表格在 Slack 中渲染为格式化的 block quote | 集成测试 |
+| 5.6-2 | 代码块高亮正确 | 集成测试 |
+
+---
+
+### 5.7 Slack OAuth Scope 更新
+
+#### 5.7.1 问题
+
+当前 `slack/adapter.go` 中未声明 `files:read` scope，文件下载会返回 403。
+
+#### 5.7.2 所需 Scopes
+
+```json
+// Slack App manifest scopes 需增加：
+"bot": [
+    // ... 现有 scopes ...
+    "files:read",           // 下载用户分享的文件
+    "files:write"          // 上传 AI 生成的文件（已部分存在）
+]
+```
+
+#### 5.7.3 验收标准
+
+| ID | AC | 验证方式 |
+|----|-----|---------|
+| 5.7-1 | `files:read` scope 申请后用户可分享图片触发下载 | E2E 测试 |
+| 5.7-2 | 缺 scope 时下载返回 403，日志记录并降级 | 错误测试 |
+
+---
+
+## 6. 文件变动清单
+
+### Phase 4 — 多媒体消息支持
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `internal/messaging/slack/converter.go` | 新增 | ConvertMessage 入站转换：提取 Files[] → MediaInfo[] → 拼接文本 |
+| `internal/messaging/slack/media.go` | 新增 | downloadMedia + postFile + extractImages + localFileToImagePart |
+| `internal/messaging/slack/adapter.go` | 修改 | 集成 ConvertMessage + downloadMedia 调用；postBlocks 辅助方法 |
+| `internal/messaging/slack/adapter_test.go` | 修改 | 新增 AC 测试（file_share/File 分类/download/Image Block） |
+| `docs/specs/Slack-Adapter-Improvement-Spec.md` | 修改 | 新增 Phase 4 章节（5.1-5.7） |
+
+---
+
+## 7. handleEventsAPI 处理流水线（Phase 4 完成后）
+
+```
+P2MessageReceiveV1 Event (via Socket Mode)
+    │
+    ├─ 1. InnerEvent → MessageEvent            // :110
+    ├─ 2. Bot 防御 (BotID != "" → skip)        // :115 [Phase 1.3]
+    ├─ 3. Subtype 过滤 (join/leave/change → skip)   [Phase 1]
+    ├─ 4. 消息过期检查 (ts > 30min → skip)      [Phase 3.2]
+    ├─ 5. ConvertMessage → text + MediaInfo[]   [Phase 4, 新增]
+    │       ├─ 5a. 提取主文本（现有 extractText）
+    │       ├─ 5b. 提取 Files[] → MediaInfo[]
+    │       ├─ 5c. 仅文件无文本 → 生成占位符
+    │       └─ 5d. ok = text!="" || len(media)>0
+    ├─ 6. ok=false → return                    [Phase 4, 修改条件]
+    ├─ 7. 去重检查 (seen[platformMsgID])         [Phase 1.2]
+    ├─ 8. 访问控制 (Gate.Check)                  [Phase 3.1]
+    ├─ 9. 媒体下载 (downloadMedia) → 拼接路径   [Phase 4, 新增]
+    │       └─ 下载失败 → 降级为纯文本描述
+    ├─ 10. Thread ownership 检查                 // :134
+    ├─ 11. Abort 快速路径                        [Phase 2.2]
+    ├─ 12. Status reaction ON                   [Phase 2.3]
+    ├─ 13. HandleTextMessage(teamID, channelID, threadTS, userID, text)
+    │       └─ MakeSlackEnvelope
+    │           └─ Bridge.Handle → Session → Worker
+    │               └─ SlackConn.WriteCtx
+    │                   ├─ extractResponseText
+    │                   ├─ extractImages → Image Block? [Phase 4]
+    │                   │   └─ base64 data URL / 降级文本
+    │                   ├─ postFile → files.uploadV2? [Phase 4]
+    │                   └─ postBlocks / sendTextMessage [Phase 4 + 2.1]
+    └─ 14. Status reaction OFF                  [Phase 2.3]
+```
+
+---
+
+## 8. 依赖关系（Phase 4）
+
+```
+Phase 1.1 (threadTS fix) ──→ Phase 5.5 (thread context preserved)
+Phase 4.1 (ConvertMessage) ──→ Phase 4.2 (downloadMedia)
+Phase 4.3 (Image Block) ←── Phase 2.1 (mrkdwn format, optional)
+Phase 4.4 (file upload) ←── Phase 4.3
+Phase 4.2 (download) ←── Phase 4.1
+Phase 4.6 (RichText) ←── Phase 2.1
+Phase 4.7 (scope) ──→ Phase 4.2
+
+独立于其他 Phase，可与 Phase 1-3 并行开发
+```
+
+---
+
+## 9. E2E 用户验收测试（Phase 4 补充）
+
+### 9.1 多媒体场景 (Multimedia)
+
+| ID | 场景 | 操作步骤 | 验收标准 |
+|----|------|---------|---------|
+| **TC-4.1** | 图片分享 | 1. Slack 中截图粘贴发送给 bot<br>2. bot 正在流式回复时再粘贴一张图片 | 1. bot 收到图片本地路径（如 `/tmp/hotplex/media/slack/images/Fxxx.png`）<br>2. AI 能理解并评论图片内容 |
+| **TC-4.2** | 多图消息 | 1. 同时粘贴 3 张截图发送给 bot | bot 按顺序提取 3 个路径，正确理解多图关系 |
+| **TC-4.3** | 仅文件分享 | 1. 上传一个 PDF 文件（无文字）给 bot | bot 回复：`[用户分享了文件: xxx.pdf]`，不报错 |
+| **TC-4.4** | AI 输出图片 | 1. 让 bot 生成并保存一张图片到本地<br>2. bot 回复消息中的图片路径 | Slack 中该路径被渲染为 Image Block（< 5MB） |
+| **TC-4.5** | 大文件上传 | 1. 让 bot 生成一个 CSV 报告<br>2. bot 输出文件路径 | Slack thread 中出现上传的文件，用户可下载 |
+| **TC-4.6** | 文件下载失败 | 1. 模拟网络错误导致下载失败 | bot 降级为 `[用户分享了图片: filename.png]`，消息处理不中断 |
+| **TC-4.7** | 图片 + 文本组合 | 1. 发送图片并附文字「分析这个 UI 设计」 | bot 收到文本 + 图片路径，能同时理解两者 |
+| **TC-4.8** | thread 中图片 | 1. 在 bot 消息上 Reply in thread<br>2. 粘贴图片 | Image Block 出现在 thread 内，不散落到频道主消息流 |
+
+---
+
+## 10. 开发顺序建议
+
+Phase 1-3 内部独立模块均可并行开发。Phase 4 多媒体建议按以下顺序实施：
+
+1. **Phase 4.1** (ConvertMessage) — 先让 AI 能"看到"媒体
+2. **Phase 4.7** (scope 更新) — 上线前申请 `files:read`
+3. **Phase 4.2** (downloadMedia) — 核心依赖
+4. **Phase 4.3** (Image Block 出站) — 提升用户体验
+5. **Phase 4.5** (thread 保留) — 已在 Phase 1.1 修复
+6. **Phase 4.4** (file upload) — 可选优化
+7. **Phase 4.6** (RichText) — 已在 Phase 2.1 覆盖
+
+---
+
+## 附录 A. 飞书 vs Slack 多媒体对比
+
+| 维度 | Feishu | Slack |
+|------|--------|-------|
+| 入站媒体元信息位置 | `content` JSON 字段含 `image_key`/`file_key` | `Msg.Files[]` 直接内嵌在事件中 |
+| 下载 API | `MessageResource` API（需要 file_key） | `GetFile(url_private_download, writer)`（需要 bot token） |
+| 出站图片 | CardKit（需卡片模板） | Block Kit Image Block（更简单） |
+| 媒体类型 | image/file/audio/video/sticker | image/video/audio/document/file |
+| 下载大小限制 | 10 MB | 20 MB（Slack 默认） |
+| SDK 支持 | Lark Go SDK v3 | slack-go SDK v0.22.0 |
+
+---
+
+## 附录 B. 参考来源
+
+- slack-go SDK v0.22.0 源码: `/Users/huangzhonghui/go/pkg/mod/github.com/slack-go/slack@v0.22.0/`
+  - `files.go` — File struct + GetFile/UploadFile/UploadFileContext
+  - `messages.go` — Msg.Files[] + MsgSubTypeFileShare
+  - `block_image.go` — ImageBlock + NewImageBlock
+  - `chat.go` — PostMessageParameters + PostMessageContext
+  - `slackevents/message_events.go` — MessageEvent
+- Feishu 参照: `[[Feishu-Adapter-Improvement-Spec]]` §2.3
+
+## 附录 C. Phase 1-3 文件变动（完整版）
 
 ### Phase 1 — 消息路由修复
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `internal/messaging/slack/adapter.go` | 修改 | teamID 字段 + Start() 保存 teamID + HandleTextMessage 增加 threadTS 参数 + 去重 seen-set + bot 防御增强 |
+| `internal/messaging/slack/adapter.go` | 修改 | teamID 字段 + Start() 保存 teamID + HandleTextMessage 增加 threadTS 参数 + Dedup 类型 + bot 防御增强 |
 | `internal/messaging/slack/events.go` | 修改 | extractText 扩展 RichTextBlock/ContextBlock 支持 |
 | `internal/messaging/slack/mention.go` | 新增 | UserCache + ResolveMentions |
 | `internal/messaging/platform_adapter.go` | 修改 | HandleTextMessage 签名增加 threadTS（接口变更） |
@@ -866,103 +1595,3 @@ func parseSlackTS(ts string) (time.Time, error) {
 | `internal/messaging/slack/gate.go` | 新增 | Gate 访问控制 |
 | `internal/config/config.go` | 修改 | SlackConfig 增加 DM/Group 策略字段 |
 | `configs/config-dev.yaml` | 修改 | 新增 gate 配置项 |
-
----
-
-## 6. handleEventsAPI 处理流水线（完成后）
-
-基于**实际代码** `adapter.go:109-154` 的改造后流程：
-
-```
-runSocketMode (adapter.go:81)
-  │
-  ├─ socketmode.EventTypeEventsAPI
-  │   ├─ Ack(evt.Request)                           // :96
-  │   └─ handleEventsAPI(ctx, eventsAPI)             // :97
-  │       │
-  │       ├─ 1. InnerEvent → MessageEvent            // :110
-  │       ├─ 2. Bot 防御 (BotID != "" → skip)        // :115 [增强]
-  │       ├─ 3. Subtype 过滤 (join/leave/change → skip)  [新增]
-  │       ├─ 4. 消息过期检查 (ts > 30min → skip)      [新增, Phase 3]
-  │       ├─ 5. 提取 channelID/threadTS/userID/text   // :120-123
-  │       ├─ 6. RichText block 提取                   [增强]
-  │       ├─ 7. 用户提及解析 (ResolveMentions)         [新增]
-  │       ├─ 8. text 为空 → return                   // :125
-  │       ├─ 9. 去重检查 (seen[platformMsgID])         [新增]
-  │       ├─ 10. 访问控制 (Gate.Check)                [新增, Phase 3]
-  │       ├─ 11. Thread ownership 检查               // :134
-  │       ├─ 12. Abort 快速路径 (IsAbortCommand)       [新增, Phase 2]
-  │       ├─ 13. Status reaction ON                  [新增, Phase 2]
-  │       ├─ 14. HandleTextMessage(teamID, channelID, threadTS, userID, text) [修复]
-  │       │       └─ MakeSlackEnvelope(teamID, channelID, threadTS, userID, text) [修复]
-  │       │           └─ Bridge.Handle → Session → Worker
-  │       │               └─ SlackConn.WriteCtx
-  │       │                   └─ FormatMrkdwn(text) → PostMessageContext [Phase 2]
-  │       └─ 15. Status reaction OFF                 [新增, Phase 2]
-  │
-  ├─ socketmode.EventTypeConnecting   // :99
-  └─ socketmode.EventTypeConnectionError  // :102
-```
-
----
-
-## 7. 依赖关系
-
-```
-Phase 1.1 (teamID+threadTS fix) ──→ Phase 1.4 (mention, needs botID)
-Phase 1.2 (dedup)
-Phase 1.3 (bot defense)
-Phase 1.5 (rich text extract)
-         ↓ (Phase 1 完成)
-Phase 2.1 (mrkdwn format) ──→ Phase 2.3 (status indicator)
-Phase 2.2 (abort detect)
-         ↓ (Phase 2 完成)
-Phase 3.1 (gate) ──→ Phase 3.2 (message expiry)
-```
-
-Phase 1 内部 1.1/1.2/1.3/1.5 可并行开发。Phase 2 依赖 Phase 1（需要 teamID 和 dedup 先就位）。Phase 3.1 可与 Phase 2 并行。
-
----
-
-## 8. E2E 用户验收测试 (UAT)
-
-测试人员通过 **Slack 桌面/Web 客户端**执行操作，基于**黑盒视角**验证。
-
-### 8.1 核心业务交互 (Happy Paths)
-
-| ID | 场景 | 操作步骤 | 验收标准 |
-|----|------|---------|---------|
-| **TC-1.1** | DM 基础交互 | 1. 在 Slack App 面板搜索 bot 打开 DM<br>2. 发送 `你好，用加粗和代码块回复` | 1. bot 回复中出现粗体文字<br>2. 代码块正确渲染 |
-| **TC-1.2** | 群内 @提及 | 1. 在含 bot 的群中发闲聊（不 @）<br>2. 发送 `@bot 翻译成英文` | 1. 闲聊不被理睬<br>2. @bot 后正确回复，内容无 `<@U123>` 原始 ID |
-| **TC-1.3** | Thread 回复 | 1. 在 bot 消息上点「Reply in thread」<br>2. 线程内发送 `补充说明` | bot 回复**出现在同一 thread 内**，不散落到频道主消息 |
-| **TC-1.4** | 多人提及 | 1. 群内发送 `@bot 评价 @张三 的周报` | bot 理解为 `评价 @张三 的周报`（`<@U111>` → `@张三`） |
-| **TC-1.5** | Rich Text 消息 | 1. 从其他 app 复制带格式的文字粘贴发送给 bot | bot 能提取并处理富文本内容 |
-| **TC-1.6** | 多工作区 | 1. workspace A 和 B 同时安装 bot<br>2. 两边同时发消息 | 两边 session 隔离，回复不串台 |
-
-### 8.2 用户体验 (UX)
-
-| ID | 场景 | 操作步骤 | 验收标准 |
-|----|------|---------|---------|
-| **TC-2.1** | 状态反馈 | 1. 发送需要长时间的问题<br>2. 观察刚发出的消息 | 消息上出现 :eyes: reaction，处理完成后移除 |
-| **TC-2.2** | Markdown 渲染 | 1. 让 bot 输出含标题、列表、链接、代码的内容 | 标题粗体、列表圆点、链接可点击、代码块正确 |
-| **TC-2.3** | 急速停止 | 1. 让 bot 输出长内容<br>2. 过程中发送 `stop` | bot 停止输出 |
-
-### 8.3 边缘场景与安全 (Edge Cases)
-
-| ID | 场景 | 操作步骤 | 验收标准 |
-|----|------|---------|---------|
-| **TC-3.1** | 高频防竞态 | 1. 快速连发 5 条不同消息（1 秒内） | 不产生 5 份并行回复，去重后只处理有效消息 |
-| **TC-3.2** | Bot 互防 | 1. 群内引入另一个自动回复 bot<br>2. 触发另一个 bot 的回复 | 两个 bot 不形成无限互回复循环 |
-| **TC-3.3** | 积压消息重放 | 1. 模拟断连 30+ 分钟后重连 | 超时旧消息被静默忽略 |
-| **TC-3.4** | 越权访问 | 1. 配置 allowlist<br>2. 非白名单用户 @bot | bot 已读不回 |
-| **TC-3.5** | DM 控制 | 1. 配置 dm_policy=allowlist<br>2. 非白名单用户发 DM | bot 不回复 |
-| **TC-3.6** | 自身提及清理 | 1. 群内 `@bot @张三 你好` | bot 收到的文本是 `@张三 你好`（自身提及被移除） |
-| **TC-3.7** | 纯 bot mention | 1. 群内仅发送 `@bot`（无其他内容） | 解析后 text 为空，跳过处理，不报错 |
-| **TC-3.8** | subtype 消息 | 1. 用户加入/离开频道<br>2. 用户编辑/删除消息 | bot 不响应 join/leave/edit/delete 事件 |
-| **TC-3.9** | 未知 block 类型 | 1. 发送含 Slack 新 block 类型的消息（bot 无法解析） | 未知 block 被安全跳过，不 panic |
-
----
-
-## 9. 开发顺序建议
-
-Phase 1 内部可并行（1.1/1.2/1.3/1.5 独立），Phase 2 依赖 Phase 1（需要 teamID 和 dedup 先就位），Phase 3.1 可与 Phase 2 并行。
