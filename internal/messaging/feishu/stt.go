@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	crypto_rand "crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -463,13 +464,11 @@ func audioToPCM(ctx context.Context, audioData []byte) ([]byte, error) {
 // randomAlphaNum returns an n-character lowercase alphanumeric string.
 func randomAlphaNum(n int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	now := time.Now().UnixNano()
 	b := make([]byte, n)
 	for i := range b {
-		// Simple fast generation — file_id is not security-sensitive.
-		// Use uint64 to avoid negative modulo from int64 overflow.
-		now = now*1664525 + 1013904223
-		b[i] = charset[int(uint64(now)%uint64(len(charset)))]
+		var rb [1]byte
+		_, _ = crypto_rand.Read(rb[:])
+		b[i] = charset[int(rb[0])%len(charset)]
 	}
 	return string(b)
 }

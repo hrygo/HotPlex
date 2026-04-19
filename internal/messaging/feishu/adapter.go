@@ -411,6 +411,7 @@ type FeishuConn struct {
 	streamCtrl    *StreamingCardController
 	typingRid     string
 	toolRid       string
+	toolEmoji     string    // current timeline emoji, for dedup
 	startedAt     time.Time // when the user sent the current message
 }
 
@@ -436,10 +437,16 @@ func (c *FeishuConn) SetTypingReactionID(rid string) {
 func (c *FeishuConn) cycleReaction(ctx context.Context, emoji string) {
 	c.mu.Lock()
 	toolRid := c.toolRid
+	toolEmoji := c.toolEmoji
 	platformMsgID := c.platformMsgID
 	c.mu.Unlock()
 
 	if platformMsgID == "" {
+		return
+	}
+
+	// Dedup: skip API calls if the emoji hasn't changed.
+	if toolEmoji == emoji {
 		return
 	}
 
@@ -452,6 +459,7 @@ func (c *FeishuConn) cycleReaction(ctx context.Context, emoji string) {
 	if rid, err := c.adapter.addReaction(ctx, platformMsgID, emoji); err == nil && rid != "" {
 		c.mu.Lock()
 		c.toolRid = rid
+		c.toolEmoji = emoji
 		c.mu.Unlock()
 	} else if err != nil {
 		c.adapter.log.Debug("feishu: tool reaction failed (non-fatal)", "error", err)
@@ -477,6 +485,7 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 		if toolRid != "" {
 			_ = c.adapter.removeReaction(ctx, platformMsgID, toolRid)
 			c.toolRid = ""
+			c.toolEmoji = ""
 		}
 		c.mu.Unlock()
 
