@@ -236,6 +236,10 @@ func run() error {
 		}
 	}
 
+	// Wait for all bridge forwardEvents goroutines to finish before
+	// closing the session store (which would cause "sql: database is closed" errors).
+	bridge.Shutdown()
+
 	if err := sm.Close(); err != nil {
 		log.Warn("gateway: session manager close", "err", err)
 	}

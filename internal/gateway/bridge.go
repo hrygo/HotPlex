@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hotplex/hotplex-worker/internal/metrics"
@@ -23,6 +25,9 @@ type Bridge struct {
 	sm       SessionManager
 	msgStore session.MessageStore // EVT-004: optional; nil means event persistence disabled
 	wf       WorkerFactory
+
+	fwdWg  sync.WaitGroup // tracks active forwardEvents goroutines
+	closed atomic.Bool    // set during shutdown to skip crash detection
 }
 
 // NewBridge creates a new bridge. msgStore may be nil (event persistence disabled).
@@ -44,6 +49,10 @@ func (b *Bridge) SetWorkerFactory(wf WorkerFactory) {
 
 // StartSession creates a new session and starts a worker.
 func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string) error {
+	if b.closed.Load() {
+		return fmt.Errorf("bridge: rejecting new session during shutdown")
+	}
+
 	// Create session in DB with bot_id and allowed_tools.
 	si, err := b.sm.CreateWithBot(ctx, id, userID, botID, wt, allowedTools, platform, platformKey)
 	if err != nil {
@@ -84,7 +93,11 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 
 	// Forward worker events to hub. Goroutine exits when conn.Recv() is closed
 	// (happens when the worker is killed via poolMgr.Close).
-	go b.forwardEvents(w, id, forwardOpts{})
+	b.fwdWg.Add(1)
+	go func() {
+		defer b.fwdWg.Done()
+		b.forwardEvents(w, id, forwardOpts{})
+	}()
 
 	return nil
 }
@@ -105,6 +118,10 @@ func (b *Bridge) ResumeSession(ctx context.Context, id, workDir string) error {
 // resumeWithOpts is the internal implementation of ResumeSession that accepts
 // forwardOpts for controlling retry behavior.
 func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts forwardOpts) error {
+	if b.closed.Load() {
+		return fmt.Errorf("bridge: rejecting resume during shutdown")
+	}
+
 	si, err := b.sm.Get(id)
 	if err != nil {
 		return err
@@ -167,7 +184,11 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 
 	// Forward worker events to hub. Same as StartSession — goroutine exits when
 	// conn.Recv() closes (worker killed via poolMgr.Close or worker exit).
-	go b.forwardEvents(w, id, opts)
+	b.fwdWg.Add(1)
+	go func() {
+		defer b.fwdWg.Done()
+		b.forwardEvents(w, id, opts)
+	}()
 
 	return nil
 }
@@ -259,8 +280,13 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	}
 
 	// AEP-020: Worker.Recv() closed — get exit code to determine crash vs normal exit.
-	// Wrap Wait() with a 2s timeout to avoid blocking the goroutine if the process
+	// Wrap Wait() with a timeout to avoid blocking the goroutine if the process
 	// is stuck in an unreported state (e.g. zombie or kernel-level hang).
+	// Use a longer timeout during shutdown to allow graceful termination.
+	waitTimeout := 2 * time.Second
+	if b.closed.Load() {
+		waitTimeout = 10 * time.Second
+	}
 	var exitCode int
 	ch := make(chan struct{})
 	go func() {
@@ -270,17 +296,26 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	select {
 	case <-ch:
 		// Wait() returned; check exit code.
-	case <-time.After(2 * time.Second):
+	case <-time.After(waitTimeout):
 		b.log.Warn("gateway: Wait() timed out, skipping crash detection", "session_id", sessionID)
 	}
 	// Resume retry: if the resumed worker crashed quickly (within 15s), it likely
 	// failed to restore its conversation state. Retry resume once (limited by
 	// retryDepth) to recover before falling through to normal crash handling.
-	if exitCode != 0 && opts.resumed && opts.retryDepth < 1 && time.Since(startTime) < 15*time.Second {
+	// Skip during shutdown to avoid spawning workers that will be immediately killed.
+	fallbackAttempted := !b.closed.Load() && exitCode != 0 && opts.resumed && opts.retryDepth < 1 && time.Since(startTime) < 15*time.Second
+	if fallbackAttempted {
 		if b.attemptResumeFallback(sessionID, opts.workDir, exitCode, opts.retryDepth) {
 			return // new forwardEvents goroutine took over
 		}
-		// Fallback failed; fall through to normal crash handling.
+		// Fallback already cleaned up (DetachWorker + Transition); skip redundant cleanup below.
+	}
+
+	// During shutdown, skip crash detection — workers are SIGTERM'd by design.
+	// Just clean up without sending crash done events or incrementing crash metrics.
+	if b.closed.Load() {
+		b.cleanupCrashedWorker(sessionID)
+		return
 	}
 
 	if exitCode != 0 {
@@ -295,11 +330,9 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 
 	// Clean up: detach the dead worker and transition session to TERMINATED
 	// so the next message triggers orphan resume instead of silently dropping input.
-	if b.sm != nil {
-		b.sm.DetachWorker(sessionID)
-		if err := b.sm.Transition(context.Background(), sessionID, events.StateTerminated); err != nil {
-			b.log.Debug("bridge: transition to terminated after worker exit", "session_id", sessionID, "err", err)
-		}
+	// Skip when attemptResumeFallback already performed cleanup.
+	if !fallbackAttempted {
+		b.cleanupCrashedWorker(sessionID)
 	}
 }
 
@@ -311,12 +344,7 @@ func (b *Bridge) attemptResumeFallback(sessionID, workDir string, exitCode, retr
 		"session_id", sessionID, "exit_code", exitCode, "retry_depth", retryDepth)
 
 	// Clean up the crashed worker first.
-	if b.sm != nil {
-		b.sm.DetachWorker(sessionID)
-		if err := b.sm.Transition(context.Background(), sessionID, events.StateTerminated); err != nil {
-			b.log.Debug("bridge: transition to terminated for retry", "session_id", sessionID, "err", err)
-		}
-	}
+	b.cleanupCrashedWorker(sessionID)
 
 	// Retry ResumeSession to preserve conversation history.
 	if err := b.resumeWithOpts(context.Background(), sessionID, workDir, forwardOpts{resumed: true, workDir: workDir, retryDepth: retryDepth + 1}); err != nil {
@@ -327,11 +355,23 @@ func (b *Bridge) attemptResumeFallback(sessionID, workDir string, exitCode, retr
 	b.log.Info("gateway: resume retry succeeded", "session_id", sessionID)
 	// Notify the client that a resume retry occurred.
 	warnEvt := events.NewEnvelope(aep.NewID(), sessionID, b.hub.NextSeq(sessionID), events.Error, events.ErrorData{
-		Code:    events.ErrorCode("RESUME_RETRY"),
+		Code:    events.ErrCodeResumeRetry,
 		Message: fmt.Sprintf("Worker crashed after resume (exit %d), retried resume to preserve conversation.", exitCode),
 	})
 	_ = b.hub.SendToSession(context.Background(), warnEvt)
 	return true
+}
+
+// cleanupCrashedWorker detaches the dead worker and transitions the session to TERMINATED
+// so the next message triggers orphan resume instead of silently dropping input.
+func (b *Bridge) cleanupCrashedWorker(sessionID string) {
+	if b.sm == nil {
+		return
+	}
+	b.sm.DetachWorker(sessionID)
+	if err := b.sm.Transition(context.Background(), sessionID, events.StateTerminated); err != nil {
+		b.log.Debug("bridge: transition to terminated after worker exit", "session_id", sessionID, "err", err)
+	}
 }
 
 // StartPlatformSession creates a session for a platform message if it doesn't already exist.
@@ -385,4 +425,12 @@ func (b *Bridge) startOrResumeOnInUse(ctx context.Context, sessionID, ownerID st
 // session files already exist on disk (e.g. from a mid-start crash).
 func isWorkerInUseError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "already in use")
+}
+
+// Shutdown signals the bridge that the gateway is shutting down.
+// It sets the closed flag so forwardEvents goroutines skip crash detection,
+// then waits for all forwardEvents goroutines to complete.
+func (b *Bridge) Shutdown() {
+	b.closed.Store(true)
+	b.fwdWg.Wait()
 }

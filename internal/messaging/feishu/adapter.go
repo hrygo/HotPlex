@@ -185,7 +185,13 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 	if messageID == "" {
 		return nil
 	}
-	if !a.dedup.TryRecord(messageID) {
+	a.mu.RLock()
+	dedup := a.dedup
+	a.mu.RUnlock()
+	if dedup == nil {
+		return nil // adapter is closing
+	}
+	if !dedup.TryRecord(messageID) {
 		return nil
 	}
 
