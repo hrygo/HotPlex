@@ -147,12 +147,16 @@ func (h *Handler) passthroughToSession(ctx context.Context, env *events.Envelope
 // Server-originated control messages (reconnect, session_invalid, throttle) are
 // sent via SendControlToSession.
 func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error {
-	data, ok := env.Event.Data.(map[string]any)
-	if !ok {
+	var action string
+	switch d := env.Event.Data.(type) {
+	case events.ControlData:
+		action = string(d.Action)
+	case map[string]any:
+		action, _ = d["action"].(string)
+	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "control: invalid data")
 	}
 
-	action, _ := data["action"].(string)
 	h.log.Info("gateway: control received", "action", action, "session_id", env.SessionID)
 
 	switch events.ControlAction(action) {
