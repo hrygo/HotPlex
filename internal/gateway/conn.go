@@ -331,14 +331,30 @@ func (c *Conn) performInit(handler *Handler) error {
 		}
 	} else if si.State == events.StateIdle || si.State == events.StateTerminated ||
 		(si.State == events.StateRunning && handler.sm.GetWorker(sessionID) == nil) {
-		// Session exists but needs a worker: IDLE/TERMINATED have none, RUNNING is
-		// an orphan after gateway restart. Resume to reattach a worker and restore
-		// conversation history. RUNNING with an attached worker just subscribes.
-		c.log.Info("gateway: resuming session", "session_id", sessionID, "from_state", si.State)
-		if c.starter != nil {
+		// Session needs a worker. Use worker_session_id to decide:
+		//   - non-empty: Claude session files may exist → Resume (--resume)
+		//   - empty: session was reset or never had a worker → Start (--session-id)
+		if si.WorkerSessionID != "" && c.starter != nil {
+			c.log.Info("gateway: resuming session", "session_id", sessionID, "from_state", si.State)
 			if err := c.starter.ResumeSession(context.Background(), sessionID, workDir); err != nil {
-				c.sendInitError(events.ErrCodeInternalError, "failed to resume session")
-				return fmt.Errorf("resume session: %w", err)
+				// Resume failed (files gone/corrupted) — clear stale worker_session_id
+				// and fall back to Start (--session-id).
+				c.log.Warn("gateway: resume failed, falling back to new session",
+					"session_id", sessionID, "err", err)
+				_ = handler.sm.UpdateWorkerSessionID(context.Background(), sessionID, "")
+				if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
+					initData.WorkerType, initData.Config.AllowedTools, workDir, "", nil); err != nil {
+					c.sendInitError(events.ErrCodeInternalError, "failed to start session after resume fallback")
+					return fmt.Errorf("start session after resume fallback: %w", err)
+				}
+			}
+		} else if c.starter != nil {
+			c.log.Info("gateway: starting fresh session (no worker_session_id)",
+				"session_id", sessionID, "from_state", si.State)
+			if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
+				initData.WorkerType, initData.Config.AllowedTools, workDir, "", nil); err != nil {
+				c.sendInitError(events.ErrCodeInternalError, "failed to start session")
+				return fmt.Errorf("start session: %w", err)
 			}
 		}
 	}
