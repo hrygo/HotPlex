@@ -467,8 +467,9 @@ func randomAlphaNum(n int) string {
 	b := make([]byte, n)
 	for i := range b {
 		// Simple fast generation — file_id is not security-sensitive.
+		// Use uint64 to avoid negative modulo from int64 overflow.
 		now = now*1664525 + 1013904223
-		b[i] = charset[int(now%int64(len(charset)))]
+		b[i] = charset[int(uint64(now)%uint64(len(charset)))]
 	}
 	return string(b)
 }
