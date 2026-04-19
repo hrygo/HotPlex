@@ -218,6 +218,10 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 			if err := ms.worker.Terminate(terminateCtx); err != nil {
 				m.log.Warn("session: worker terminate failed", "id", ms.info.ID, "err", err)
 			}
+			// Nil the pointer to prevent DetachWorker from releasing quota a
+			// second time (e.g. when forwardEvents goroutine exits after the
+			// worker process dies). Without this, pool.totalCount underflows.
+			ms.worker = nil
 		}
 	}
 
@@ -730,11 +734,14 @@ func (m *Manager) gc(ctx context.Context) {
 		}
 	}
 
-	// 3. Delete TERMINATED sessions past retention_period.
-	cutoff := now.Add(-m.cfg.Session.RetentionPeriod)
-	if err := m.store.DeleteTerminated(ctx, cutoff); err != nil {
-		m.log.Error("session: gc (retention) delete", "err", err)
-	}
+	// 3. Retention cleanup is intentionally NOT performed here.
+	// TERMINATED session records serve as "resume decision flags" — their
+	// existence tells the gateway that a previous session existed and that
+	// the worker's session files may still be on disk (e.g. Claude Code's
+	// ~/.claude/projects/<hash>/sessions/), enabling --resume to restore
+	// the conversation. Deleting DB records would force --session-id (new
+	// session) instead of --resume, losing conversation history.
+	// Physical deletion should be an explicit admin action, not automatic GC.
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
