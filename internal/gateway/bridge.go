@@ -223,6 +223,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	b.log.Info("bridge: forwardEvents goroutine started", "session_id", sessionID, "resumed", opts.resumed)
 	startTime := time.Now()
 	firstEvent := true
+	doneReceived := false
 	for env := range w.Conn().Recv() {
 		if env.Event.Type == events.Error {
 			b.log.Warn("bridge: received error from worker", "session_id", sessionID, "data", env.Event.Data)
@@ -242,6 +243,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 
 		// UI Reconciliation (Fallback full message if silent dropped)
 		if env.Event.Type == events.Done {
+			doneReceived = true
 			if b.hub.GetAndClearDropped(sessionID) {
 				b.log.Warn("gateway: handling dropped deltas before done", "session_id", sessionID)
 
@@ -326,6 +328,16 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			Stats:   map[string]any{"crash_exit_code": exitCode},
 		})
 		_ = b.hub.SendToSession(context.Background(), crashDone)
+	} else if !doneReceived {
+		// Worker exited without sending a done event (e.g., ResetContext consumed
+		// the exit code). Send a synthetic done so platform connections clean up
+		// typing indicators, streaming cards, and tool reactions.
+		b.log.Debug("gateway: sending synthetic done for platform cleanup", "session_id", sessionID)
+		syntheticDone := events.NewEnvelope(aep.NewID(), sessionID, b.hub.NextSeq(sessionID), events.Done, events.DoneData{
+			Success: false,
+			Stats:   map[string]any{"synthetic": true},
+		})
+		_ = b.hub.SendToSession(context.Background(), syntheticDone)
 	}
 
 	// Clean up: detach the dead worker and transition session to TERMINATED
