@@ -329,26 +329,16 @@ func (c *Conn) performInit(handler *Handler) error {
 				return fmt.Errorf("start unstarted session: %w", err)
 			}
 		}
-	} else if si.State == events.StateIdle || si.State == events.StateTerminated {
-		// Idle/Terminated session → resume worker (reattach to existing session/worker).
+	} else if si.State == events.StateIdle || si.State == events.StateTerminated ||
+		(si.State == events.StateRunning && handler.sm.GetWorker(sessionID) == nil) {
+		// Session exists but needs a worker: IDLE/TERMINATED have none, RUNNING is
+		// an orphan after gateway restart. Resume to reattach a worker and restore
+		// conversation history. RUNNING with an attached worker just subscribes.
 		c.log.Info("gateway: resuming session", "session_id", sessionID, "from_state", si.State)
-		// ResumeSession requires a valid SessionStarter (Bridge). In test mode,
-		// starter may be nil; skip resumption and let bot_id validation proceed.
 		if c.starter != nil {
 			if err := c.starter.ResumeSession(context.Background(), sessionID, workDir); err != nil {
 				c.sendInitError(events.ErrCodeInternalError, "failed to resume session")
 				return fmt.Errorf("resume session: %w", err)
-			}
-		}
-	} else if si.State == events.StateRunning {
-		// RUNNING session — may be orphan if gateway restarted (no in-memory worker).
-		// If a worker is attached, just subscribe to the running session's events.
-		// If no worker (orphan from crash), resume to reattach a new worker.
-		if c.starter != nil && handler.sm.GetWorker(sessionID) == nil {
-			c.log.Info("gateway: resuming orphan session", "session_id", sessionID, "from_state", si.State)
-			if err := c.starter.ResumeSession(context.Background(), sessionID, workDir); err != nil {
-				c.sendInitError(events.ErrCodeInternalError, "failed to resume session")
-				return fmt.Errorf("resume orphan session: %w", err)
 			}
 		}
 	}

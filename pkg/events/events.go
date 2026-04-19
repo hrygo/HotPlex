@@ -68,6 +68,7 @@ const (
 	ErrCodeExecutionTimeout   ErrorCode = "EXECUTION_TIMEOUT"
 	ErrCodeReconnectRequired  ErrorCode = "RECONNECT_REQUIRED"
 	ErrCodeWorkerOutputLimit  ErrorCode = "WORKER_OUTPUT_LIMIT"
+	ErrCodeResumeRetry        ErrorCode = "RESUME_RETRY"
 )
 
 // Envelope is the unified AEP v1 message envelope, shared by both client→gateway and gateway→client.
