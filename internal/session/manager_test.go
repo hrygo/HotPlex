@@ -1756,7 +1756,7 @@ func TestManager_ClearContext_PreservesOtherFields(t *testing.T) {
 		UserID:     "user_preserve",
 		OwnerID:    "owner_preserve",
 		BotID:      "bot_preserve",
-		WorkerType: worker.TypeOpenCodeCLI,
+		WorkerType: worker.TypeOpenCodeSrv,
 		State:      events.StateRunning,
 		CreatedAt:  now.Add(-30 * time.Minute),
 		UpdatedAt:  now.Add(-30 * time.Minute),
@@ -1779,7 +1779,7 @@ func TestManager_ClearContext_PreservesOtherFields(t *testing.T) {
 	require.Equal(t, "user_preserve", ms.info.UserID)
 	require.Equal(t, "owner_preserve", ms.info.OwnerID)
 	require.Equal(t, "bot_preserve", ms.info.BotID)
-	require.Equal(t, worker.TypeOpenCodeCLI, ms.info.WorkerType)
+	require.Equal(t, worker.TypeOpenCodeSrv, ms.info.WorkerType)
 	require.Equal(t, events.StateRunning, ms.info.State)
 	require.Empty(t, ms.info.Context)
 }

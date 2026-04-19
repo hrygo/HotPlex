@@ -173,5 +173,5 @@ if env.Event.Type != "init" {
 | Worker | 事件映射 |
 |--------|---------|
 | Claude Code | tool_use → tool_call |
-| OpenCode CLI | step_start → 提取 sessionID |
+| | step_start → 提取 sessionID |
 | pi-mono (raw stdout) | 每行 stdout → 一条 message.delta |

@@ -36,9 +36,9 @@ verification: scripts/test_cc_context.py 10/10 passed 2026-04-19
 | 触发路径 | Gateway handler → SM 状态机 | Gateway handler → **直接调 Worker 方法** |
 | Session 状态 | 变化（Running→Terminated 等） | **不变**（始终 Running） |
 | 进程影响 | 杀进程/重启 | **原地**，进程不退出 |
-| 协议层 | AEP Control Event | Claude Code stream-json stdio |
-| Worker 接口 | `Terminate()` `Kill()` | `Input()` `SendControlRequest()` |
-| 适用 Worker | 所有（通用生命周期） | 仅 Claude Code（协议相关） |
+| 协议层 | AEP Control Event | CC: stream-json stdio / OpenCode: HTTP REST API |
+| Worker 接口 | `Terminate()` `Kill()` | `Input()` `SendControlRequest()` / HTTP 调用 |
+| 适用 Worker | 所有（通用生命周期） | Claude Code (10/10) + OpenCode Server (8/10)，其他 Worker 返回 ErrCodeNotSupported |
 
 ### 动机
 
@@ -663,28 +663,455 @@ Worker 层**零改动**即可支持所有 passthrough 命令。
 #### 5.1 接口隔离
 
 ```go
-// ControlRequester is implemented by workers that support CC control requests.
-// Unsupported workers fail the type assertion with ErrCodeNotSupported.
+// ControlRequester is implemented by workers that support structured control queries.
+// Claude Code: stdin control_request/control_response protocol.
+// OpenCode Server: HTTP REST API calls.
 type ControlRequester interface {
     SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error)
 }
 
-// Passthrough commands use the existing Worker.Input() interface — no new method needed.
+// WorkerCommander is implemented by workers that support worker-level commands
+// beyond the basic Input() passthrough. Each method returns an AEP-serializable result.
+type WorkerCommander interface {
+    // Compact performs in-place context compaction.
+    Compact(ctx context.Context, args map[string]any) error
+    // Clear clears conversation context in-place.
+    Clear(ctx context.Context) error
+    // Rewind reverts the last conversation exchange.
+    Rewind(ctx context.Context, targetID string) error
+}
 ```
 
 #### 5.2 Worker 能力矩阵
 
-| Worker | Passthrough (6) | Control Requests (4) | 备注 |
-|--------|----------------|----------------------|------|
-| claudecode | stdin passthrough | SendControlRequest | 完整支持 (10/10) |
-| opencodecli | stdin passthrough | N/A (协议不同) | 取决于 opencode 协议 |
-| opencodeserver | N/A | N/A | HTTP 协议 |
-| acpx | N/A | N/A | stdio 协议不同 |
-| pi | N/A | N/A | 私有协议 |
-| noop | N/A | N/A | 测试用 |
+| Worker | Passthrough (6) | Control Requests (4) | 总计 | 备注 |
+|--------|----------------|----------------------|------|------|
+| claudecode | 6/6 stdin passthrough | 4/4 SendControlRequest | **10/10** | 完整支持 |
+| opencodeserver | 5/6 HTTP API | 3/4 HTTP API | **8/10** | effort ❌, mcp_status ⚠️ 间接 |
+| acpx | 0/6 | 0/4 | **0/10** | stdio 协议不同 |
+| pi | 0/6 | 0/4 | **0/10** | 私有协议 |
+| noop | 0/6 | 0/4 | **0/10** | 测试用 |
 
-Passthrough 命令走 `worker.Input()`（Worker interface 已有），理论上支持所有 stdio worker。
-Control Requests 需要各 worker 独立实现 `ControlRequester` 接口。
+---
+
+### Phase 5B: OpenCode Server Worker 详细设计
+
+OpenCode Server 模式（`opencode serve`）通过 **HTTP REST API** 实现等价能力，
+底层协议与 Claude Code 的 stdin control_request 完全不同，但对外暴露相同的 `ControlRequester` + `WorkerCommander` 接口。
+
+#### 5B.1 架构映射
+
+```
+Claude Code Worker:
+  handleWorkerCommand → w.Input("/compact") → stdin NDJSON → CC 子进程
+  handleWorkerCommand → w.SendControlRequest("get_context_usage") → stdin → stdout 响应
+
+OpenCode Server Worker:
+  handleWorkerCommand → w.Compact(ctx, args) → HTTP POST /session/{id}/summarize → opencode 进程
+  handleWorkerCommand → w.SendControlRequest("get_context_usage") → HTTP GET /session/{id}/message → 聚合 tokens
+```
+
+#### 5B.2 OpenCode Server REST API 对照表
+
+| Worker Stdio Command | OpenCode Server API | HTTP 方法 | 请求体 | 响应 |
+|----------------------|-------------------|-----------|--------|------|
+| `StdioCompact` | `/session/{id}/summarize` | POST | `{providerID, modelID, auto}` | `true` |
+| `StdioClear` | `/session/{id}` DELETE + `/session` POST | DELETE+POST | `{title}` | new session |
+| `StdioModel` | message 的 `model` 字段 | — (存储) | `{providerID, modelID}` | — |
+| `StdioSetModel` | 同 StdioModel | — (存储) | — | — |
+| `StdioEffort` | **无 API 等价** | — | — | **ErrCodeNotSupported** |
+| `StdioRewind` | `/session/{id}/revert` | POST | `{messageID, partID?}` | `{revert, summary}` |
+| `StdioCommit` | `/session/{id}/message` | POST | `{parts: [{text: "/commit"}]}` | streaming message |
+| `StdioContextUsage` | `/session/{id}/message` | GET | `?limit=N` | 聚合 tokens |
+| `StdioMCPStatus` | `/experimental/tool` | GET | — | tool list (无连接状态) |
+| `StdioSetPermMode` | `/session/{id}` | PATCH | `{permission: [...]}` | — |
+
+#### 5B.3 文件：`internal/worker/opencodeserver/commands.go`
+
+```go
+package opencodeserver
+
+import (
+    "context"
+    "fmt"
+    "net/http"
+
+    "github.com/hotplex/hotplex-worker/pkg/events"
+)
+
+// ServerCommander implements ControlRequester + WorkerCommander for OpenCode Server.
+// Routes worker commands to OpenCode's HTTP REST API.
+type ServerCommander struct {
+    client    *http.Client
+    baseURL   string        // e.g. "http://127.0.0.1:4096"
+    sessionID string
+    authToken string        // from OPENCODE_SERVER_PASSWORD
+    // pendingModel stores model selection for subsequent message requests.
+    pendingModel *ModelRef
+}
+
+type ModelRef struct {
+    ProviderID string `json:"providerID"`
+    ModelID    string `json:"modelID"`
+}
+
+// ─── ControlRequester interface ────
+
+func (c *ServerCommander) SendControlRequest(
+    ctx context.Context,
+    subtype string,
+    body map[string]any,
+) (map[string]any, error) {
+    switch subtype {
+    case "get_context_usage":
+        return c.queryContextUsage(ctx)
+    case "set_model":
+        return c.setModel(ctx, body)
+    case "set_permission_mode":
+        return c.setPermissionMode(ctx, body)
+    case "mcp_status":
+        return c.queryMCPStatus(ctx)
+    default:
+        return nil, fmt.Errorf("opencode server: unsupported control request: %s", subtype)
+    }
+}
+
+// ─── WorkerCommander interface ────
+
+func (c *ServerCommander) Compact(ctx context.Context, args map[string]any) error {
+    // POST /session/{id}/summarize
+    reqBody := map[string]any{
+        "auto": false,
+    }
+    if c.pendingModel != nil {
+        reqBody["providerID"] = c.pendingModel.ProviderID
+        reqBody["modelID"] = c.pendingModel.ModelID
+    }
+    var result bool
+    if err := c.doPost(ctx, "/session/"+c.sessionID+"/summarize", reqBody, &result); err != nil {
+        return fmt.Errorf("opencode compact: %w", err)
+    }
+    return nil
+}
+
+func (c *ServerCommander) Clear(ctx context.Context) error {
+    // OpenCode has no in-place clear. Equivalent: delete session, create new one.
+    // NOTE: This changes session ID — caller must update references.
+    if err := c.doDelete(ctx, "/session/"+c.sessionID); err != nil {
+        return fmt.Errorf("opencode clear (delete): %w", err)
+    }
+    // Create new session — returns new session ID
+    var newSession struct{ ID string }
+    if err := c.doPost(ctx, "/session", map[string]any{}, &newSession); err != nil {
+        return fmt.Errorf("opencode clear (create): %w", err)
+    }
+    c.sessionID = newSession.ID
+    return nil
+}
+
+func (c *ServerCommander) Rewind(ctx context.Context, targetID string) error {
+    // POST /session/{id}/revert
+    // OpenCode revert is MORE capable than CC rewind:
+    //   - Reverts file system changes (snapshots + diff)
+    //   - Supports reverting to specific message part
+    //   - Can be undone via /session/{id}/unrevert
+    reqBody := map[string]any{
+        "messageID": targetID,
+    }
+    var result any
+    if err := c.doPost(ctx, "/session/"+c.sessionID+"/revert", reqBody, &result); err != nil {
+        return fmt.Errorf("opencode rewind: %w", err)
+    }
+    return nil
+}
+```
+
+#### 5B.4 Context Usage 查询（间接聚合）
+
+OpenCode Server **无直接 context usage 端点**。通过聚合 message token 数据实现：
+
+```go
+// queryContextUsage aggregates token usage from all session messages.
+// OpenCode stores per-message token counts but has no global context query.
+func (c *ServerCommander) queryContextUsage(ctx context.Context) (map[string]any, error) {
+    var messages []openCodeMessage
+    if err := c.doGet(ctx, "/session/"+c.sessionID+"/message?limit=100", &messages); err != nil {
+        return nil, fmt.Errorf("opencode context query: %w", err)
+    }
+
+    var totalInput, totalOutput, totalReasoning, totalCacheRead, totalCacheWrite int
+    var model string
+    for _, msg := range messages {
+        if msg.Info.Role == "assistant" && msg.Info.Tokens != nil {
+            totalInput += msg.Info.Tokens.Input
+            totalOutput += msg.Info.Tokens.Output
+            totalReasoning += msg.Info.Tokens.Reasoning
+            totalCacheRead += msg.Info.Tokens.Cache.Read
+            totalCacheWrite += msg.Info.Tokens.Cache.Write
+            if msg.Info.Model != nil {
+                model = msg.Info.Model.ProviderID + "/" + msg.Info.Model.ModelID
+            }
+        }
+    }
+
+    totalTokens := totalInput + totalOutput + totalReasoning + totalCacheRead + totalCacheWrite
+
+    // Map to gateway's ContextUsageData structure.
+    // NOTE: maxTokens and percentage are approximations — OpenCode doesn't expose
+    // the model's context window limit via API. Use known model limits.
+    return map[string]any{
+        "totalTokens": totalTokens,
+        "maxTokens":   0,    // unknown from API
+        "percentage":  0,    // unknown from API
+        "model":       model,
+        "categories": []map[string]any{
+            {"name": "Input tokens", "tokens": totalInput},
+            {"name": "Output tokens", "tokens": totalOutput},
+            {"name": "Reasoning tokens", "tokens": totalReasoning},
+            {"name": "Cache read", "tokens": totalCacheRead},
+            {"name": "Cache write", "tokens": totalCacheWrite},
+        },
+    }, nil
+}
+
+type openCodeMessage struct {
+    Info struct {
+        Role   string `json:"role"`
+        Tokens *struct {
+            Input     int `json:"input"`
+            Output    int `json:"output"`
+            Reasoning int `json:"reasoning"`
+            Cache     struct {
+                Read  int `json:"read"`
+                Write int `json:"write"`
+            } `json:"cache"`
+        } `json:"tokens"`
+        Cost  float64 `json:"cost"`
+        Model *struct {
+            ProviderID string `json:"providerID"`
+            ModelID    string `json:"modelID"`
+        } `json:"model"`
+    } `json:"info"`
+}
+```
+
+#### 5B.5 Model 切换（per-message 注入）
+
+OpenCode 不支持全局 model 切换，而是每条 message 独立指定 model。
+
+```go
+// setModel stores the model reference for subsequent message requests.
+// OpenCode uses per-message model selection, not a global session model.
+func (c *ServerCommander) setModel(ctx context.Context, body map[string]any) (map[string]any, error) {
+    providerID, _ := body["providerID"].(string)
+    modelID, _ := body["modelID"].(string)
+    // Also accept single "model" string: "provider/model"
+    if model, ok := body["model"].(string); ok && providerID == "" {
+        parts := strings.SplitN(model, "/", 2)
+        if len(parts) == 2 {
+            providerID, modelID = parts[0], parts[1]
+        } else {
+            modelID = model
+        }
+    }
+    c.pendingModel = &ModelRef{ProviderID: providerID, ModelID: modelID}
+    return map[string]any{"success": true, "model": modelID}, nil
+}
+
+// PendingModel returns the stored model for injection into message requests.
+// Called by the OpenCode Server worker's Input/prompt method.
+func (c *ServerCommander) PendingModel() *ModelRef {
+    return c.pendingModel
+}
+```
+
+#### 5B.6 Permission 模式切换
+
+```go
+// setPermissionMode updates session permission rules via PATCH.
+func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string]any) (map[string]any, error) {
+    mode, _ := body["mode"].(string)
+
+    // Map Gateway permission modes to OpenCode permission rulesets.
+    var rules []map[string]any
+    switch mode {
+    case "bypassPermissions":
+        rules = []map[string]any{
+            {"permission": "*", "action": "allow", "pattern": "*"},
+        }
+    default:
+        rules = []map[string]any{} // default: ask for everything
+    }
+
+    if err := c.doPatch(ctx, "/session/"+c.sessionID, map[string]any{
+        "permission": rules,
+    }); err != nil {
+        return nil, fmt.Errorf("opencode set permission: %w", err)
+    }
+    return map[string]any{"success": true, "mode": mode}, nil
+}
+```
+
+#### 5B.7 Rewind 增强（超越 CC）
+
+OpenCode 的 revert API 比 Claude Code 的 `/rewind` 更强大：
+
+```go
+// OpenCode revert response structure
+type RevertResponse struct {
+    Revert struct {
+        MessageID string `json:"messageID"`
+        PartID    string `json:"partID,omitempty"`
+        Snapshot  string `json:"snapshot"` // File system snapshot before revert
+        Diff      string `json:"diff"`     // Diff of changes being undone
+    } `json:"revert"`
+    Summary struct {
+        Additions int `json:"additions"`
+        Deletions int `json:"deletions"`
+        Files     int `json:"files"`
+    } `json:"summary"`
+}
+```
+
+**对比**：
+
+| 能力 | Claude Code `/rewind` | OpenCode `revert` |
+|------|----------------------|-------------------|
+| 对话回退 | ✅ | ✅ |
+| 文件系统回退 | ❌ | ✅ (snapshot + diff) |
+| 精确到 part | ❌ | ✅ (partID 参数) |
+| 恢复 (undo revert) | ❌ | ✅ (`/unrevert`) |
+| diff 统计 | ❌ | ✅ (additions/deletions/files) |
+
+#### 5B.8 HTTP 辅助方法
+
+```go
+func (c *ServerCommander) doGet(ctx context.Context, path string, result any) error {
+    return c.doRequest(ctx, http.MethodGet, path, nil, result)
+}
+
+func (c *ServerCommander) doPost(ctx context.Context, path string, body any, result any) error {
+    return c.doRequest(ctx, http.MethodPost, path, body, result)
+}
+
+func (c *ServerCommander) doPatch(ctx context.Context, path string, body any) error {
+    return c.doRequest(ctx, http.MethodPatch, path, body, nil)
+}
+
+func (c *ServerCommander) doDelete(ctx context.Context, path string) error {
+    return c.doRequest(ctx, http.MethodDelete, path, nil, nil)
+}
+
+func (c *ServerCommander) doRequest(ctx context.Context, method, path string, body any, result any) error {
+    var bodyReader io.Reader
+    if body != nil {
+        data, err := json.Marshal(body)
+        if err != nil {
+            return err
+        }
+        bodyReader = bytes.NewReader(data)
+    }
+
+    req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
+    if err != nil {
+        return err
+    }
+    req.Header.Set("Content-Type", "application/json")
+    if c.authToken != "" {
+        req.SetBasicAuth("opencode", c.authToken)
+    }
+
+    resp, err := c.client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode >= 300 {
+        return fmt.Errorf("opencode API %s %s: HTTP %d", method, path, resp.StatusCode)
+    }
+    if result != nil {
+        return json.NewDecoder(resp.Body).Decode(result)
+    }
+    return nil
+}
+```
+
+#### 5B.9 Worker adapter 集成
+
+文件：`internal/worker/opencodeserver/worker.go`
+
+```go
+// 在现有 Worker struct 中嵌入 ServerCommander
+type Worker struct {
+    *base.BaseWorker
+    cmd *ServerCommander
+    // ... existing fields ...
+}
+
+// SendControlRequest delegates to ServerCommander (implements ControlRequester).
+func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
+    if w.cmd == nil {
+        return nil, fmt.Errorf("opencode server: commander not initialized")
+    }
+    return w.cmd.SendControlRequest(ctx, subtype, body)
+}
+
+// Compact implements WorkerCommander.
+func (w *Worker) Compact(ctx context.Context, args map[string]any) error {
+    return w.cmd.Compact(ctx, args)
+}
+
+// Clear implements WorkerCommander.
+// NOTE: OpenCode clear creates a new session, changing the session ID.
+func (w *Worker) Clear(ctx context.Context) error {
+    return w.cmd.Clear(ctx)
+}
+
+// Rewind implements WorkerCommander.
+func (w *Worker) Rewind(ctx context.Context, targetID string) error {
+    return w.cmd.Rewind(ctx, targetID)
+}
+```
+
+#### 5B.10 handleWorkerCommand 扩展（适配 OpenCode Server）
+
+Gateway handler 需要区分两种 Worker 类型的不同执行路径：
+
+```go
+// In handleWorkerCommand, Path A (passthrough) 分支扩展:
+
+if cmd.IsPassthrough() {
+    // Claude Code: send as stdin text
+    // OpenCode Server: some commands need API calls instead
+    if commander, ok := w.(WorkerCommander); ok {
+        switch cmd {
+        case events.StdioCompact:
+            return commander.Compact(ctx, extra)
+        case events.StdioClear:
+            if err := commander.Clear(ctx); err != nil {
+                return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "clear: %v", err)
+            }
+            // Notify session of new state (OpenCode clear changes session ID)
+            // ... emit state event ...
+            return nil
+        case events.StdioRewind:
+            return commander.Rewind(ctx, "")  // empty = last exchange
+        case events.StdioEffort:
+            return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+                "effort not supported by this worker type")
+        default:
+            // model, commit — still passthrough via Input()
+        }
+    }
+    // Default: send as Input() text
+    content := "/" + string(cmd)
+    if args != "" {
+        content += " " + args
+    }
+    return w.Input(ctx, content, nil)
+}
+```
 
 ---
 
@@ -746,22 +1173,33 @@ Control Requests 需要各 worker 独立实现 `ControlRequester` 接口。
 
 #### 6.4 Passthrough 命令反馈
 
+**Claude Code Worker**：
 - **compact**：CC 自带 assistant summary 回复，走正常流式管道，无需额外渲染
 - **clear**：CC 发出 `system/init`，平台侧发简短确认消息
 - **model**：CC 输出 `<local-command-stdout>Set model to xxx</local-command-stdout>`，解析后确认
 - **effort**：同 model，CC 输出确认消息
-- **rewind**：CC 原地回退，result 正常返回
+- **rewind**：CC 原地回退对话，result 正常返回（不回退文件）
 - **commit**：CC 触发完整 commit workflow（git status → diff → commit），走正常 assistant 管道
+
+**OpenCode Server Worker**：
+- **compact**：POST /summarize 后通过 SSE 接收 `session.compacted` 事件，平台侧发确认消息
+- **clear**：session 重建后发确认消息（注意 session ID 变化，需通知客户端）
+- **model**：无即时反馈，下次 message 使用的 model 可通过 GET /session 确认
+- **effort**：**不支持**，平台侧直接返回"当前 Worker 不支持此命令"
+- **rewind**：返回 `{additions, deletions, files}` diff 统计，渲染为文件变更卡片（**超越 CC**）
+- **commit**：作为 prompt 发送，走正常 assistant 流式管道
 
 ---
 
 ## 改动范围
 
+### Claude Code Worker (Phase 3-4)
+
 | 文件 | 改动类型 | 说明 |
 |------|---------|------|
 | `pkg/events/events.go` | 修改 | +ContextUsage/MCPStatus/WorkerCmd EventType, +ContextUsageData/MCPStatusData struct, +WorkerStdioCommand type (10 consts) +IsPassthrough(), +WorkerCommandData struct |
 | `internal/messaging/control_command.go` | 修改 | +ParseWorkerCommand, +WorkerCommandResult, +10 项 slash 映射 +14 项 NL 映射 |
-| `internal/gateway/handler.go` | 修改 | +handleWorkerCommand (路径 A + 路径 B), +Handle() WorkerCmd case |
+| `internal/gateway/handler.go` | 修改 | +handleWorkerCommand (路径 A + 路径 B + OpenCode 路径), +Handle() WorkerCmd case |
 | `internal/worker/claudecode/control.go` | 修改 | +SendControlRequest, +DeliverResponse, +pendingRequests |
 | `internal/worker/claudecode/worker.go` | 修改 | +SendControlRequest (delegate to control), +readOutput 扩展 control_response 路由 |
 | `internal/worker/claudecode/mapper.go` | 修改 | +mapContextUsageResponse, +mapMCPStatusResponse |
@@ -769,11 +1207,21 @@ Control Requests 需要各 worker 独立实现 `ControlRequester` 接口。
 | `internal/messaging/slack/adapter.go` | 修改 | +context_usage/mcp_status 事件渲染 |
 | `scripts/test_cc_context.py` | 已存在 | 10/10 验证通过 |
 
+### OpenCode Server Worker (Phase 5B)
+
+| 文件 | 改动类型 | 说明 |
+|------|---------|------|
+| `internal/worker/opencodeserver/commands.go` | **新增** | +ServerCommander, +HTTP 辅助方法, +queryContextUsage, +setModel, +setPermissionMode, +Compact, +Clear, +Rewind |
+| `internal/worker/opencodeserver/worker.go` | 修改 | 嵌入 ServerCommander, 实现 ControlRequester + WorkerCommander 接口 |
+| `internal/gateway/handler.go` | 修改 | handleWorkerCommand passthrough 分支增加 WorkerCommander 类型断言 |
+
 ---
 
 ## 测试策略
 
 ### 单元测试
+
+#### Claude Code Worker
 
 | 测试 | 文件 | 覆盖 |
 |------|------|------|
@@ -789,32 +1237,54 @@ Control Requests 需要各 worker 独立实现 `ControlRequester` 接口。
 | DeliverResponse 路由 | `control_test.go` | pending request_id 匹配 |
 | IsPassthrough | `events_test.go` | passthrough 返回 true, control request 返回 false |
 
+#### OpenCode Server Worker
+
+| 测试 | 文件 | 覆盖 |
+|------|------|------|
+| ServerCommander.queryContextUsage | `commands_test.go` | mock HTTP → 聚合 message tokens → ContextUsageData |
+| ServerCommander.Compact | `commands_test.go` | mock HTTP POST /summarize |
+| ServerCommander.Clear | `commands_test.go` | mock HTTP DELETE + POST → session ID 更新 |
+| ServerCommander.Rewind | `commands_test.go` | mock HTTP POST /revert → diff 统计 |
+| ServerCommander.setModel | `commands_test.go` | 存储 pendingModel → 后续 message 注入 |
+| ServerCommander.setPermissionMode | `commands_test.go` | mock HTTP PATCH → permission ruleset |
+| WorkerCommander 分支路由 | `handler_test.go` | mock WorkerCommander → Compact/Clear/Rewind 路径 |
+| effort 返回 ErrCodeNotSupported | `handler_test.go` | OpenCode Server worker → effort → 错误 |
+
 ### 集成测试
 
-| 测试 | 说明 |
-|------|------|
-| E2E compact | CC worker → handleWorkerCommand(compact) → 验证 context 下降 |
-| E2E context | CC worker → handleWorkerCommand(context) → 验证返回完整结构 |
-| E2E mcp_status | CC worker → handleWorkerCommand(mcp) → 验证 server 列表 |
-| E2E set_model | CC worker → handleWorkerCommand(model sonnet) → 验证 model 变更 |
-| E2E effort | CC worker → handleWorkerCommand(effort high) → 验证命令通过 |
-| 非 CC worker | noop worker → handleWorkerCommand(context) → 验证 ErrCodeNotSupported |
-| compact 后 context | compact → context query → 验证 totalTokens 下降 |
+| 测试 | Worker | 说明 |
+|------|--------|------|
+| E2E compact | CC | handleWorkerCommand(compact) → 验证 context 下降 |
+| E2E context | CC | handleWorkerCommand(context) → 验证返回完整结构 |
+| E2E mcp_status | CC | handleWorkerCommand(mcp) → 验证 server 列表 |
+| E2E set_model | CC | handleWorkerCommand(model sonnet) → 验证 model 变更 |
+| E2E effort | CC | handleWorkerCommand(effort high) → 验证命令通过 |
+| E2E compact | OpenCode Server | POST /summarize → SSE compacted 事件 |
+| E2E rewind | OpenCode Server | POST /revert → diff + file undo |
+| E2E context | OpenCode Server | GET messages → token 聚合 → ContextUsageData |
+| E2E effort | OpenCode Server | 验证返回 ErrCodeNotSupported |
+| 非 CC worker | noop | handleWorkerCommand(context) → 验证 ErrCodeNotSupported |
+| compact 后 context | CC | compact → context query → 验证 totalTokens 下降 |
 
 ---
 
 ## 实施顺序
 
 ```
-Phase 1  类型定义（pkg/events）                       ← 无外部依赖
-Phase 2  Messaging 解析（control_command.go）          ← 无外部依赖
-Phase 3  Worker 层 ControlRequester（claudecode/）     ← 依赖 Phase 1
-Phase 4  Worker 层 readOutput 扩展（claudecode/）      ← 依赖 Phase 3
-Phase 5  Gateway Handler + handleWorkerCommand         ← 依赖 Phase 1 + 4
-Phase 6  Messaging 渲染（feishu/slack adapter.go）     ← 依赖 Phase 5
+Phase 1   类型定义（pkg/events）                          ← 无外部依赖
+Phase 2   Messaging 解析（control_command.go）             ← 无外部依赖
+Phase 3   CC Worker ControlRequester（claudecode/）        ← 依赖 Phase 1
+Phase 4   CC Worker readOutput 扩展（claudecode/）         ← 依赖 Phase 3
+Phase 5   Gateway Handler + handleWorkerCommand            ← 依赖 Phase 1 + 4
+Phase 5B  OpenCode Server Worker commands.go               ← 依赖 Phase 1 (可与 Phase 5 并行)
+Phase 6   Messaging 渲染（feishu/slack adapter.go）        ← 依赖 Phase 5
 ```
 
-Phase 1-2 无依赖可先行。Phase 3-4 是 Worker 层改动。Phase 5 是 Gateway 集成。Phase 6 是 UI 渲染。
+Phase 1-2 无依赖可先行。Phase 3-4 是 CC Worker 层改动。Phase 5 是 Gateway 集成。
+Phase 5B 是 OpenCode Server Worker 独立改动，可与 Phase 5 并行开发。
+Phase 6 是 UI 渲染，最后执行。
+
+**优先级**：CC Worker (Phase 1-5) → OpenCode Server Worker (Phase 5B) → 渲染 (Phase 6)。
 Passthrough 命令（6 项）在 Phase 5 后即可工作。Control Requests（4 项）需 Phase 3-4 完成。
 
 ---
@@ -829,7 +1299,12 @@ Passthrough 命令（6 项）在 Phase 5 后即可工作。Control Requests（4 
 | pendingRequests map 泄漏 | 低 | 内存泄漏 | ctx cancel 时清理；DeliverResponse 后 delete |
 | 多 Worker 并发查询 | 低 | 响应串路 | request_id 前缀 `ctx_` + UUID，per-request channel |
 | `/commit` 在自动化上下文误触发 | 中 | git 污染 | 谨慎暴露给消息平台，或需二次确认 |
-| `/rewind` 只回退对话不回退文件 | 低 | 用户困惑 | 渲染时明确提示 rewind 范围 |
+| `/rewind` CC 只回退对话不回退文件 | 低 | 用户困惑 | 渲染时明确提示 rewind 范围 |
+| OpenCode clear 重建 session ID 变化 | 高 | 连接断开 | clear 后需通知 Gateway 更新 session 映射 |
+| OpenCode context usage 无总量/上限 | 中 | 数据不完整 | 渲染时标注 "累计 token"，不显示百分比 |
+| OpenCode revert 文件系统回退 | 低 | 意外丢失文件 | 确认 revert 是有快照的，可 unrevert 恢复 |
+| OpenCode Server API 版本变化 | 中 | 接口失效 | 基于 OpenAPI spec 生成类型；API 版本检测 |
+| 两类 Worker 共用 handleWorkerCommand 路径 | 低 | 逻辑耦合 | WorkerCommander 接口隔离，handler 只做分发 |
 
 ---
 
@@ -838,8 +1313,10 @@ Passthrough 命令（6 项）在 Phase 5 后即可工作。Control Requests（4 
 1. **自动 context 监控**：Bridge 层定期 SendControlRequest("get_context_usage")，超过阈值自动 compact 或通知用户
 2. **Context budget**：session 配置 `max_context_pct`，到达阈值自动触发 compact
 3. **Done 事件附加 context_pct**：每轮结束查询 context usage，注入 DoneData.Stats
-4. **多 Worker 支持**：opencodecli 实现 ControlRequester 接口（如果协议支持）
-5. **Admin API 暴露**：`GET /api/sessions/:id/context` 调用 SendControlRequest
+4. **Admin API 暴露**：`GET /api/sessions/:id/context` 调用 SendControlRequest
 6. **更多 CC slash command**：CC 原生 slash command（如 `/cost`、`/bug`、`/doctor`、`/help`）均可通过此 passthrough 机制支持
 7. **`/commit` 安全限制**：对 commit 类命令增加二次确认或限制特定场景
 8. **权限模式动态切换**：结合 platform 用户角色，自动 set_permission_mode
+9. **OpenCode revert diff 渲染**：利用 OpenCode revert 返回的 diff 统计，在 Feishu/Slack 展示文件变更明细
+10. **OpenCode context usage 增强**：缓存 model context window limit，计算近似百分比
+11. **OpenCode MCP tool 状态**：`GET /experimental/tool` 返回的工具列表映射为 MCPStatusData

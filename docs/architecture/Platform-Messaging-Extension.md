@@ -139,7 +139,7 @@ internal/worker/          → internal/messaging/
   worker.go (接口)           platform_conn.go (PlatformConn 接口)
   registry.go (自注册)       platform_adapter.go (自注册基座)
   claudecode/ (CLI 进程)     slack/ (WebSocket 长连接)
-  opencodecli/              feishu/
+  feishu/
 ```
 
 ---

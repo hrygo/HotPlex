@@ -141,7 +141,6 @@ jobs:
           THRESHOLDS["internal/worker/base"]=45
           THRESHOLDS["internal/worker"]=70
           THRESHOLDS["internal/worker/claudecode"]=55
-          THRESHOLDS["internal/worker/opencodecli"]=35
           THRESHOLDS["internal/worker/opencodeserver"]=10
           THRESHOLDS["internal/worker/noop"]=80
           THRESHOLDS["internal/messaging/feishu"]=40

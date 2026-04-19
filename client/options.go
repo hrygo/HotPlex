@@ -15,7 +15,7 @@ func URL(rawurl string) Option {
 	}
 }
 
-// WorkerType sets the worker type (e.g. "claude_code", "opencode_cli").
+// WorkerType sets the worker type (e.g. "claude_code", "opencode_server").
 func WorkerType(t string) Option {
 	return func(c *Client) error {
 		c.workerType = t

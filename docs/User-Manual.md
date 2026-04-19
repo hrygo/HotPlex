@@ -1,6 +1,6 @@
 # HotPlex Worker Gateway — User Manual
 
-> HotPlex Worker Gateway is a WebSocket-based access layer for AI Coding Agent sessions, supporting Claude Code, OpenCode CLI, and OpenCode Server adapters.
+> HotPlex Worker Gateway is a WebSocket-based access layer for AI Coding Agent sessions, supporting Claude Code, and OpenCode Server adapters.
 >
 > **Version:** `v1.0.0` (Git SHA injected at build time)
 > **Binary:** `hotplex-worker`
@@ -43,7 +43,6 @@ Client (WebSocket) ──→ Gateway (AEP v1) ──→ Worker (Claude Code / Op
 | Type | Description | Protocol |
 |------|-------------|----------|
 | `claude-code` | Anthropic Claude Code CLI | stdio / NDJSON |
-| `opencode-cli` | OpenCode CLI | stdio / NDJSON |
 | `opencode-server` | OpenCode Server | HTTP / SSE |
 | `pi-mono` | Pi-mono protocol | stdio (stub) |
 
@@ -473,7 +472,6 @@ curl -H "Authorization: Bearer admin-token-1" \
   "status": "ok",
   "workers": [
     { "type": "claude-code", "healthy": true, "sessions": 5 },
-    { "type": "opencode-cli", "healthy": true, "sessions": 3 }
   ]
 }
 ```
@@ -497,7 +495,6 @@ curl -H "Authorization: Bearer admin-token-1" \
   },
   "workers": {
     "claude-code": { "sessions": 5 },
-    "opencode-cli": { "sessions": 3 }
   }
 }
 ```
@@ -869,7 +866,6 @@ Check worker binary is in `PATH`:
 
 ```bash
 which claude     # for claude-code worker
-which opencode   # for opencode-cli worker
 ```
 
 Worker logs go to stderr (not captured by HotPlex). Run worker manually to diagnose:

@@ -5,7 +5,7 @@
 ## OVERVIEW
 
 HotPlex Worker Gateway — Go 1.26 unified access layer for AI Coding Agent sessions.
-WebSocket gateway (AEP v1) abstracting Claude Code, OpenCode CLI/Server, ACPX, Pi-mono protocol differences.
+WebSocket gateway (AEP v1) abstracting Claude Code, OpenCode Server, ACPX, Pi-mono protocol differences.
 Multi-language client SDKs (TS, Python, Java, Go) + AI SDK transport adapter + web chat UI + bidirectional messaging (Slack/Feishu).
 
 ## ENVIRONMENT
@@ -61,9 +61,8 @@ cmd/worker/main.go    (~539 lines) flags, DI, signal, messaging init
 - `scripts/fix_onnx_model.py`  ONNX model Less node type mismatch auto-patch
 - `messaging/mock/`       Mock adapter for testing
 
-**Worker** (6 adapters)
+**Worker** (5 adapters)
 - `worker/claudecode/`    Claude Code adapter
-- `worker/opencodecli/`    OpenCode CLI adapter
 - `worker/opencodeserver/`  OpenCode Server adapter
 - `worker/acpx/`          ACPX: ACP bridge, stdio I/O
 - `worker/pi/`            Pi-mono adapter
@@ -174,7 +173,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 
 - ❌ `sync.Mutex` embedding or pointer passing — always explicit `mu` field
 - ❌ `math/rand` for crypto (JTI, tokens) — use `crypto/rand`
-- ❌ Shell execution — only `claude`/`opencode` binaries, no shell interpreters
+- ❌ Shell execution — only `claude` binary, no shell interpreters
 - ❌ Non-ES256 JWT algorithms
 - ❌ Missing goroutine shutdown path — every goroutine needs ctx cancel / channel close / WaitGroup
 - ❌ `t.Fatal` in tests — use `testify/require`
@@ -188,7 +187,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - **Backpressure**: `message.delta` and `raw` events silently dropped when broadcast channel full; `state`/`done`/`error` never dropped
 - **Seq allocation**: Per-session atomic monotonic counter; dropped deltas don't consume seq
 - **Process termination**: 3-layer: SIGTERM → wait 5s → SIGKILL, PGID isolation for child cleanup
-- **Worker types as constants**: `TypeClaudeCode`, `TypeOpenCodeCLI`, `TypeOpenCodeSrv`, `TypeACPX`, `TypePimon`
+- **Worker types as constants**: `TypeClaudeCode`, `TypeOpenCodeSrv`, `TypeACPX`, `TypePimon`
 - **BaseWorker embedding**: Adapters embed `*base.BaseWorker` for shared lifecycle; each adapter implements only `Start`, `Input`, `Resume` + unique I/O parsing
 - **Admin API extracted to package**: `internal/admin/` with interfaces for SessionManager/Hub/Bridge to avoid circular imports; adapters in main.go bridge concrete types
 - **Gateway split**: conn.go (WebSocket lifecycle), handler.go (AEP dispatch), bridge.go (session orchestration) — same package, separate concerns
@@ -219,6 +218,6 @@ make clean                    # Clean build artifacts
 - `.claude` is symlinked to `.agent` — both directories exist
 - No `api/` directory — project uses JSON over WebSocket, not protobuf
 - Project targets POSIX only (PGID isolation requires `syscall.SysProcAttr{Setpgid: true}`)
-- Largest files: `opencodeserver/worker.go` (802), `manager.go` (765), `hub.go` (575), `config.go` (593), `opencodecli/worker.go` (528)
+- Largest files: `opencodeserver/worker.go` (802), `manager.go` (765), `hub.go` (575), `config.go` (593)
 - STT scripts (`scripts/stt_server.py`, `scripts/fix_onnx_model.py`) are also deployed to `~/.agents/skills/audio-transcribe/scripts/` for Claude Code skill use
 - STT model: `~/.cache/modelscope/hub/models/iic/SenseVoiceSmall` (~900MB), ONNX FP32 non-quantized
