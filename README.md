@@ -10,7 +10,7 @@
 ## Features
 
 - **Unified Protocol** — [AEP v1 (Agent Exchange Protocol)](docs/architecture/AEP-v1-Protocol.md) over WebSockets
-- **5 Worker Adapters** — Claude Code, OpenCode CLI, OpenCode Server, ACPX, Pi-mono
+- **4 Worker Adapters** — Claude Code, OpenCode Server, ACPX, Pi-mono
 - **Session Lifecycle** — Create / Resume / Terminate / GC with SQLite persistence and UUIDv5 session IDs
 - **Process Isolation** — PGID isolation with layered SIGTERM → SIGKILL termination
 - **Security** — ES256 JWT, SSRF protection, command whitelist, env isolation, AI tool policy
@@ -30,7 +30,6 @@ graph TD
         Pool[Worker Pool]
     end
     Pool -- "stdio" --> Claude[Claude Code]
-    Pool -- "stdio" --> OpenCode[OpenCode CLI]
     Pool -- "HTTP" --> OCS[OpenCode Server]
     Pool -- "stdio" --> ACPX[ACPX]
     Pool -- "stdio" --> Pi[Pi-mono]

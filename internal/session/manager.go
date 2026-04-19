@@ -72,7 +72,7 @@ type SessionInfo struct {
 	IdleExpiresAt *time.Time          `json:"idle_expires_at,omitempty"`
 	Context       map[string]any      `json:"context,omitempty"`
 	// WorkerSessionID is the session ID used by the worker runtime itself.
-	// Only populated for workers that auto-generate their own session IDs (OpenCode CLI/Server).
+	// Only populated for workers that auto-generate their own session IDs (OpenCode Server).
 	// For Claude Code this is always empty — the gateway's ID IS the worker's session ID
 	// (passed via --session-id / --resume).
 	WorkerSessionID string `json:"worker_session_id,omitempty"`
@@ -502,7 +502,7 @@ func (m *Manager) ClearContext(ctx context.Context, sessionID string) error {
 }
 
 // UpdateWorkerSessionID persists the worker-internal session ID for resume support.
-// Workers that manage their own session IDs (OpenCode CLI, OpenCode Server) call this
+// Workers that manage their own session IDs (OpenCode Server) call this
 // to store the ID so it can be restored on resume.
 func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
 	if m == nil {

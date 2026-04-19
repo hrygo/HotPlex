@@ -14,7 +14,7 @@ import (
 	"github.com/hotplex/hotplex-worker/pkg/events"
 )
 
-// Conn implements worker.SessionConn for stdin-based workers (claudecode, opencodecli).
+// Conn implements worker.SessionConn for stdin-based workers (claudecode, opencodeserver).
 type Conn struct {
 	userID    string
 	sessionID string
@@ -169,7 +169,7 @@ func (c *Conn) SessionID() string {
 	return c.sessionID
 }
 
-// SetSessionID updates the session identifier (for opencodecli's session ID extraction).
+// SetSessionID updates the session identifier (for opencodeserver's session ID extraction).
 func (c *Conn) SetSessionID(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

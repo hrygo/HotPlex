@@ -62,11 +62,27 @@ estimated_hours: 16
 
 ### 1.3 相关文档
 
+- 用户交互: `docs/specs/Worker-User-Interaction-Spec.md` — 权限请求/问题询问（与本 spec 正交）
+- Worker 会话控制: `docs/specs/Worker-Session-Control-Spec.md` — stdio 直达命令（context 查询等）
 - 架构设计: `docs/specs/Worker-Common-Protocol.md` — Worker 公共协议层
 - Claude Code 集成: `docs/specs/Worker-ClaudeCode-Spec.md` — SDK 输出格式
 - Feishu 改进: `docs/specs/Feishu-Adapter-Improvement-Spec.md` — 卡片结构
 - Slack 改进: `docs/specs/Slack-Adapter-Improvement-Spec.md` — 消息格式
 - Claude Code 源码: `~/claude-code-src/src/utils/context.ts` — context window 计算公式
+
+### 1.4 与 Worker-User-Interaction-Spec 的关系
+
+本 spec（Session Stats）与 Worker-User-Interaction-Spec **完全正交**，解决不同问题：
+
+| 维度 | Worker-User-Interaction-Spec | 本 Spec (Session Stats) |
+|------|------------------------------|------------------------|
+| 核心问题 | Agent **阻塞等待**用户输入（审批/问答） | **只读展示**资源消耗信息 |
+| 交互方向 | 双向（Agent → 用户 → Agent） | 单向（Agent → 用户） |
+| 触发时机 | 工具执行前 / Agent 提问时 | 每轮 done 事件时 |
+| 用户行为 | 需主动操作（点击按钮/输入） | 被动接收，无需操作 |
+| 不实施的后果 | Agent 无法执行需授权的工具，请求被丢弃 | 用户无法感知 token/费用消耗 |
+
+实施顺序：**User-Interaction 优先**（功能性阻塞），本 spec 随后（体验增强）。两者改不同文件/不同逻辑路径，代码冲突风险极低。
 
 ---
 
@@ -330,7 +346,7 @@ func (a *sessionAccumulator) computeContextPct() float64 {
 | Worker | 来源 | 字段路径 | 精确度 |
 |--------|------|---------|--------|
 | **Claude Code** | `modelUsage[modelName].contextWindow` | `DoneData.Stats["model_usage"][name]["contextWindow"]` | 精确值 |
-| **OpenCode CLI** | 不上报 | 无 | 使用内置映射表 |
+| **** | 不上报 | 无 | 使用内置映射表 |
 | **OpenCode Server** | 不上报 | 无 | 使用内置映射表 |
 
 内置映射表（兜底）：
@@ -368,7 +384,7 @@ var defaultContextWindows = map[string]int64{
 │                     Worker 进程                               │
 │  result/step_finish 事件                                      │
 │  Claude Code: usage + modelUsage (含 contextWindow)          │
-│  OpenCode CLI: tokens + cost                                  │
+│: tokens + cost                                  │
 └──────────────────────┬───────────────────────────────────────┘
                        │ NDJSON stdout
                        ▼
@@ -378,7 +394,7 @@ var defaultContextWindows = map[string]int64{
 │  claudecode/mapper.go:mapResult                                │
 │    [改动] 合并 Usage + ModelUsage 到 DoneData.Stats           │
 │                                                                │
-│  opencodecli/worker.go:emitDone                                │
+│  opencodeserver/worker.go:emitDone                                │
 │    [不变] 已将 tokens + cost 放入 Stats                        │
 │                                                                │
 │  opencodeserver/worker.go                                      │
@@ -460,7 +476,7 @@ func (a *sessionAccumulator) computeContextPct() float64 {
 | 优先级 | 来源 | 适用 Worker |
 |--------|------|-------------|
 | 1 | `modelUsage[modelName].contextWindow` | Claude Code（精确值） |
-| 2 | 内置模型窗口映射表 | OpenCode CLI / 兜底 |
+| 2 | 内置模型窗口映射表 | / 兜底 |
 
 内置映射表：
 
@@ -621,11 +637,11 @@ func (a *sessionAccumulator) mergePerTurnStats(data any) {
         }
     }
 
-    // === OpenCode CLI format ===
+    // === format ===
     // OpenCode 源码 tokens.input 是调整后的值（已减去 cache），
     // 因此需加回 cache.read + cache.write 才是真正的 total input。
     // hotplex parser 已将 "cache.read"/"cache.write" 展平为 "cache_read"/"cache_write"
-    // (参见 opencodecli/types.go:41-49 TokenUsage struct tag)
+    // (参见 opencodeserver types)
     if tokens, ok := dd.Stats["tokens"].(map[string]any); ok {
         a.TotalInput += toInt64(tokens["input"]) +
             toInt64(tokens["cache_read"]) +
@@ -640,7 +656,7 @@ func (a *sessionAccumulator) mergePerTurnStats(data any) {
 
     // === Cost (both formats) ===
     // Claude Code: "total_cost_usd"
-    // OpenCode CLI/Server: "cost" (自行计算，基于模型定价表)
+    ///Server: "cost" (自行计算，基于模型定价表)
     a.TotalCostUSD += toFloat64(dd.Stats["total_cost_usd"])
     a.TotalCostUSD += toFloat64(dd.Stats["cost"])
 }
@@ -893,7 +909,7 @@ func extractSessionStats(env *events.Envelope) map[string]any {
 | `internal/worker/claudecode/mapper.go` | 修改 | `mapResult` 合并 Usage + ModelUsage |
 | `internal/gateway/bridge.go` | 修改 | 新增 `sessionAccumulator` + 累加 + 注入 |
 | `internal/gateway/stats.go` | 新增 | 辅助函数 (toInt64, formatTokenCount, extractSessionStats 等) |
-| `internal/worker/opencodecli/worker.go` | 不变 | 已将 tokens + cost 放入 Stats |
+| `worker.go` | 不变 | 已将 tokens + cost 放入 Stats |
 | `internal/worker/opencodeserver/worker.go` | 不变 | SSE 透传，DoneData 结构相同 |
 | `internal/messaging/feishu/adapter.go` | 修改 | done 处理增加 stats footer |
 | `internal/messaging/feishu/streaming.go` | 可能修改 | `AppendContent` 方法（如不存在） |
@@ -902,7 +918,7 @@ func extractSessionStats(env *events.Envelope) map[string]any {
 **不需要改动的文件**：
 - `pkg/events/events.go` — `DoneData.Stats` 已是 `map[string]any`，无需新增类型
 - `internal/worker/claudecode/parser.go` — 已正确提取 Usage/ModelUsage
-- `internal/worker/opencodecli/*` — 已将 tokens/cost 放入 Stats
+- `*` — 已将 tokens/cost 放入 Stats
 - `internal/session/manager.go` — 不持久化 stats，纯内存聚合
 
 ---
@@ -914,7 +930,7 @@ func extractSessionStats(env *events.Envelope) map[string]any {
 | 测试 | 文件 | 描述 |
 |------|------|------|
 | `TestMapResultStatsMerge` | `claudecode/mapper_test.go` | 验证 Usage/ModelUsage 合入 DoneData.Stats |
-| `TestMergePerTurnStats` | `bridge_test.go` | Claude Code 格式 + OpenCode CLI 格式提取 |
+| `TestMergePerTurnStats` | `bridge_test.go` | Claude Code 格式 + 格式提取 |
 | `TestComputeContextPct` | `bridge_test.go` | 对齐 Claude Code 源码公式：只算 input，clamped 0-100 |
 | `TestFormatTokenCount` | `stats_test.go` | K/M 格式化边界 |
 | `TestExtractSessionStats` | `stats_test.go` | 从 Envelope 提取 _session map |

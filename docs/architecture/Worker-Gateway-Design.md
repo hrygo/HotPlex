@@ -14,7 +14,7 @@ tags:
 
 ## 1. 背景与目标
 
-构建一个 **Agent Gateway（统一接入层）**，用于屏蔽不同 AI Coding Agent（Claude Code、OpenCode CLI、OpenCode Server、pi-mono coding-agent）在运行协议、通信方式、生命周期管理上的差异。
+构建一个 **Agent Gateway（统一接入层）**，用于屏蔽不同 AI Coding Agent（Claude Code、OpenCode Server、pi-mono coding-agent）在运行协议、通信方式、生命周期管理上的差异。
 
 ### 核心目标
 
@@ -110,7 +110,7 @@ Client init{session_id: "my-chat-001"}
 
 #### 5.1.3 WorkerSessionIDHandler 接口
 
-> 某些 Worker（OpenCode CLI/Server）内部使用独立的 session ID 系统。Gateway 通过 `WorkerSessionIDHandler` 接口获取该内部 ID 并持久化到 SQLite `sessions.worker_session_id` 字段。
+> 某些 Worker（OpenCode Server）内部使用独立的 session ID 系统。Gateway 通过 `WorkerSessionIDHandler` 接口获取该内部 ID 并持久化到 SQLite `sessions.worker_session_id` 字段。
 
 ```go
 // internal/worker/worker.go
@@ -121,7 +121,6 @@ type WorkerSessionIDHandler interface {
 ```
 
 **实现者**：
-- **OpenCode CLI**：`opencode run` 自动生成 session ID，Worker 从 `step_start` 事件提取
 - **OpenCode Server**：使用 HTTP 连接中的 session ID
 
 **持久化时机**：`bridge.forwardEvents()` 收到第一个 worker 事件时，调用 `persistWorkerSessionID()` 更新 DB。
@@ -323,7 +322,6 @@ Lifecycle:   persistent | ephemeral | managed
 | Worker              | Transport  | Protocol    | Lifecycle  | 说明                                        |
 | ------------------- | ---------- | ----------- | ---------- | ------------------------------------------- |
 | Claude Code         | stdio      | stream-json | persistent | turn 间进程不退出，热复用                   |
-| **OpenCode CLI**    | stdio      | json-lines  | persistent | `opencode run --format json`，turn 间热复用 |
 | **OpenCode Server** | HTTP + SSE | SSE/JSON    | managed    | `opencode serve`，单进程多 session          |
 | Pi-mono             | stdio      | raw-stdout  | ephemeral  | 每次执行完退出                              |
 
@@ -339,7 +337,7 @@ Lifecycle:   persistent | ephemeral | managed
 为了彻底贯彻 SOLID 设计规范的 **OCP（开闭原则）**，网关与 Worker 引擎之间的装配使用了依赖反转与底层包匿名导入（Plugin Registration）的架构。
 
 1. **中央集控**：`internal/worker/adapter.go` 维护线程安全的 `Registry` 字典，对外暴露无状态的门面函数 `worker.NewWorker(wt)`。
-2. **包级自组装**：各 Worker （如 `claudecode`, `opencodecli`, `pi` 等）的独立子包维护私有的 `init()` 回调。子包对核心模块有所有权占领意识。
+2. **包级自组装**：各 Worker （如 `claudecode`, `opencodeserver`, `pi` 等）的独立子包维护私有的 `init()` 回调。子包对核心模块有所有权占领意识。
 3. **空导入编排**：系统执行链唯一的硬接驳点位于 `cmd/gateway/main.go`，通过 `import _ "hotplex-worker/internal/worker/pi"` 唤醒所有合法挂载项。
 4. **安全断言 (Fail Fast)**：请求不合法的或者未经代码编译期验证挂载的引擎，网关将在会话初期强阻断。
 
@@ -414,14 +412,14 @@ OpenCode 支持**两种独立的 Worker 模式**，对应两个不同的 CLI 命
 
 | 模式                | CLI 命令                     | Transport  | Protocol   | 进程数                   | 推荐程度        |
 | ------------------- | ---------------------------- | ---------- | ---------- | ------------------------ | --------------- |
-| **OpenCode CLI**    | `opencode run --format json` | stdio      | json-lines | N（每 session 一个进程） | ✅ **v1.0 推荐** |
+| ****    | `opencode run --format json` | stdio      | json-lines | N（每 session 一个进程） | ✅ **v1.0 推荐** |
 | **OpenCode Server** | `opencode serve`             | HTTP + SSE | SSE        | 1（所有 session 共享）   | ✅ **v1.0 实现** |
 
 > **关键区分**：`opencode acp` 命令（JSON-RPC 2.0 over stdio）**仅用于进程生命周期管理**（initialize / session_new / session_update），**不负责消息发送和 streaming 输出**。`opencode run` 才是实际执行任务和流式输出的接口。
 
 ---
 
-#### 8.2.1 OpenCode CLI（`opencode run --format json`）
+#### 8.2.1（`opencode run --format json`）
 
 ##### 集成模式
 
@@ -512,7 +510,7 @@ opencode run "Next task" \
 
 > **待探索事件类型**：`thinking`（推理输出）、`tool_call`/`tool_result`（工具调用）、`error`
 
-##### 事件映射（OpenCode CLI → AEP）
+##### 事件映射（ → AEP）
 
 | OpenCode Event             | AEP Event Kind                   | 说明           |
 | -------------------------- | -------------------------------- | -------------- |
@@ -563,13 +561,13 @@ Turn N:  opencode run <prompt> --continue --session <sessionID> --format json
 ##### Worker 接口设计
 
 ```go
-type OpenCodeCLIWorker struct {
+type OpenCodeServerWorker struct {
     WorkerBase
     promptBuilder *PromptBuilder
 }
 
 // BuildCLIArgs — 与 ClaudeCodeWorker 框架相同
-func (p *OpenCodeCLIWorker) BuildCLIArgs(sessionID string, opts *WorkerSessionOptions) []string {
+func (p *OpenCodeServerWorker) BuildCLIArgs(sessionID string, opts *WorkerSessionOptions) []string {
     args := []string{"run", "--format", "json"}
 
     if opts.WorkDir != "" {
@@ -590,15 +588,15 @@ func (p *OpenCodeCLIWorker) BuildCLIArgs(sessionID string, opts *WorkerSessionOp
 }
 
 // ParseEvent — 解析 step_start / text / step_finish
-func (p *OpenCodeCLIWorker) ParseEvent(line string) ([]*WorkerEvent, error) { ... }
+func (p *OpenCodeServerWorker) ParseEvent(line string) ([]*WorkerEvent, error) { ... }
 
 // VerifySession — 调用 opencode session list 验证 session 存在
-func (p *OpenCodeCLIWorker) VerifySession(sessionID, workDir string) bool { ... }
+func (p *OpenCodeServerWorker) VerifySession(sessionID, workDir string) bool { ... }
 ```
 
 ##### 与 Claude Code Worker 对比
 
-| 维度            | Claude Code                              | OpenCode CLI                                         |
+| 维度            | Claude Code                              |                                         |
 | --------------- | ---------------------------------------- | ---------------------------------------------------- |
 | 热复用 flag     | `--resume <id>` / `--session-id <id>`    | `--continue --session <id>` / 新建无 ID flag         |
 | Session ID 来源 | HotPlex 主键 `id` 注入（`--session-id`） | opencode 自动生成 → 提取并映射至 `worker_session_id` |
@@ -886,7 +884,7 @@ func (p *OpenCodeServerWorker) DetectTurnEnd(e *WorkerEvent) bool {
 
 ##### 与 CLI Worker 的关键差异
 
-| 维度         | OpenCode CLI              | OpenCode Server                       |
+| 维度         |              | OpenCode Server                       |
 | ------------ | ------------------------- | ------------------------------------- |
 | 进程模型     | N 个独立进程              | 1 个共享进程                          |
 | 进程管理     | SessionPool spawn/cleanup | OpenCodeServerManager 托管            |
@@ -913,9 +911,9 @@ func (p *OpenCodeServerWorker) DetectTurnEnd(e *WorkerEvent) bool {
 
 ---
 
-#### 8.2.3 架构对比：OpenCode CLI vs OpenCode Server
+#### 8.2.3 架构对比： vs OpenCode Server
 
-| 维度                 | OpenCode CLI                    | OpenCode Server                  |
+| 维度                 |                    | OpenCode Server                  |
 | -------------------- | ------------------------------- | -------------------------------- |
 | **进程数**           | N（= session 数）               | 1（`opencode serve`）            |
 | **内存占用**         | ~N×100MB                        | ~100MB 固定                      |
@@ -927,7 +925,7 @@ func (p *OpenCodeServerWorker) DetectTurnEnd(e *WorkerEvent) bool {
 | **启动延迟**         | ~50-200ms spawn（仅 Turn 1）    | ~0ms（daemon 预热后）            |
 | **Turn 1 延迟**      | CLI 有 spawn 开销               | Server 即时连接                  |
 
-> **推荐**：对于 HotPlex 实际规模（1-20 并发 session），**OpenCode CLI 优选**——进程级硬隔离的价值远大于数百 MB 的内存差距。
+> **推荐**：对于 HotPlex 实际规模（1-20 并发 session），** 优选**——进程级硬隔离的价值远大于数百 MB 的内存差距。
 
 ---
 
@@ -1167,13 +1165,13 @@ SELECT * FROM sessions WHERE state != 'deleted';
 | Worker          | 持久化位置                                              | 内容                         | Resume 方式                 |
 | --------------- | ------------------------------------------------------- | ---------------------------- | --------------------------- |
 | Claude Code     | `~/.claude/projects/<workspace-key>/<session-id>.jsonl` | 完整对话历史 + tool 调用记录 | `--resume <id>`             |
-| OpenCode CLI    | `~/.local/share/opencode/`（SQLite）                    | 完整对话历史 + tool 调用记录 | `--continue --session <id>` |
+|    | `~/.local/share/opencode/`（SQLite）                    | 完整对话历史 + tool 调用记录 | `--continue --session <id>` |
 | OpenCode Server | `~/.local/share/opencode/`（同 CLI，serve 共享 DB）     | 同 CLI                       | HTTP API session 绑定       |
 | Pi-mono         | 无（ephemeral）                                         | —                            | —                           |
 
 **两层热复用的持久化分层**：
 
-| 层                           | Claude Code                   | OpenCode CLI       | OpenCode Server                |
+| 层                           | Claude Code                   |       | OpenCode Server                |
 | ---------------------------- | ----------------------------- | ------------------ | ------------------------------ |
 | **Pool 层**（进程不退出）    | `*exec.Cmd` 常驻，`IsAlive()` | 同左               | HTTP 连接常驻（pool 层不适用） |
 | **Session 层**（上下文连续） | `.jsonl` 写入历史             | opencode SQLite DB | 同左，通过 HTTP API            |
@@ -1230,7 +1228,7 @@ SELECT * FROM sessions WHERE state != 'deleted';
 - WebSocket Gateway（AEP v1 协议）
 - SessionManager（SQLite）
 - Claude Code Adapter（stdio / stream-json / persistent / hot-multiplexing）
-- OpenCode CLI Adapter（stdio / json-lines / persistent / hot-multiplexing）
+- Adapter（stdio / json-lines / persistent / hot-multiplexing）
 - OpenCode Server Adapter（HTTP + SSE / 进程托管 / OpenCodeServerManager）
 - Pi-mono Adapter（stdio / raw-stdout / ephemeral）
 - 基础 GC

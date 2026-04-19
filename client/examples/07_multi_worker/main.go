@@ -20,7 +20,6 @@ import (
 
 var workerTypes = []string{
 	"claude_code",
-	"opencode_cli",
 	"opencode_server",
 	"acpx",
 }
