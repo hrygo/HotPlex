@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"os/user"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -56,7 +59,8 @@ const defaultSessionStoreDir = ".claude/projects"
 type Worker struct {
 	*base.BaseWorker
 
-	sessionID string
+	sessionID  string
+	projectDir string // original working directory for the worker process
 
 	// Protocol layers
 	parser  *Parser
@@ -131,6 +135,7 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, resu
 	w.cancel = cancel
 
 	w.sessionID = session.SessionID
+	w.projectDir = session.ProjectDir
 	w.seq.Store(0)
 
 	// readLineFn: use test override if set, otherwise real proc reader.
@@ -323,36 +328,86 @@ func (w *Worker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }
 
-// ResetContext clears the worker runtime context.
-// Claude Code does not support in-place context clearing, so this terminates the
-// current process and starts a fresh one with --resume to recreate session files.
-// The Gateway layer has already called sm.ClearContext() to clear SessionInfo.Context.
+// ResetContext clears the worker runtime context for a fresh start.
+// Claude Code does not support in-place context clearing, so this:
+//  1. Terminates the current process
+//  2. Deletes session files from ~/.claude/projects/*/sessions/<id>*
+//  3. Starts a fresh process with --session-id (same ID, no files to conflict)
+//
+// The caller (Bridge.ResetSession) must set intentionalExit before calling this
+// so that forwardEvents skips crash handling for the old process.
 func (w *Worker) ResetContext(ctx context.Context) error {
 	w.Mu.Lock()
 	sessionID := w.sessionID
+	projectDir := w.projectDir
 	w.Mu.Unlock()
 
 	if err := w.Terminate(ctx); err != nil {
 		return fmt.Errorf("claudecode: reset terminate: %w", err)
 	}
 
-	// Reconstruct session info from current worker state.
-	conn := w.BaseWorker.Conn()
-	var userID, projectDir string
-	if conn != nil {
-		userID = conn.UserID()
-		projectDir = conn.SessionID() // same as sessionID for claudecode
-	}
-	if projectDir == "" {
-		projectDir = sessionID
+	// Delete session files so --session-id won't hit "already in use".
+	if err := w.deleteSessionFiles(); err != nil {
+		w.Log.Warn("claudecode: failed to delete session files, reset may fail", "err", err)
 	}
 
+	// Reconstruct session info preserving original values.
 	session := worker.SessionInfo{
 		SessionID:  sessionID,
-		UserID:     userID,
 		ProjectDir: projectDir,
 	}
+	if conn := w.BaseWorker.Conn(); conn != nil {
+		session.UserID = conn.UserID()
+	}
 	return w.Start(ctx, session)
+}
+
+// deleteSessionFiles removes Claude session files to prevent "already in use" errors on reset.
+// Claude Code stores session data at:
+//   - ~/.claude/projects/<hash>/<uuid>.jsonl  (conversation transcript)
+//   - ~/.claude/projects/<hash>/<uuid>         (session metadata directory)
+//   - ~/.claude/session-env/<uuid>              (session environment)
+//
+// The glob spans all project hashes since the hash algorithm is internal to Claude Code.
+func (w *Worker) deleteSessionFiles() error {
+	currentUser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("get home dir: %w", err)
+	}
+	homeDir := currentUser.HomeDir
+
+	parsedID := aep.ParseSessionID(w.sessionID)
+
+	patterns := []string{
+		filepath.Join(homeDir, ".claude", "projects", "*", parsedID+".jsonl"), // transcript
+		filepath.Join(homeDir, ".claude", "projects", "*", parsedID),          // metadata dir
+		filepath.Join(homeDir, ".claude", "session-env", parsedID),            // env
+	}
+
+	var (
+		firstErr error
+		total    int
+	)
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			w.Log.Warn("claudecode: glob session files", "pattern", pattern, "err", err)
+			continue
+		}
+		for _, m := range matches {
+			if err := os.RemoveAll(m); err != nil && firstErr == nil {
+				firstErr = err
+				w.Log.Warn("claudecode: failed to remove session file", "path", m, "err", err)
+			} else {
+				w.Log.Debug("claudecode: removed session file", "path", m)
+				total++
+			}
+		}
+	}
+	if total > 0 {
+		w.Log.Info("claudecode: deleted session files for reset", "count", total, "session_id", w.sessionID)
+	}
+	return firstErr
 }
 
 // ─── Internal ────────────────────────────────────────────────────────────────
@@ -481,8 +536,8 @@ func (w *Worker) readOutput(ctx context.Context) {
 						ElicitationID   string         `json:"elicitation_id,omitempty"`
 						RequestedSchema map[string]any `json:"requested_schema,omitempty"`
 					}
-					if len(cr.Input) > 0 {
-						_ = json.Unmarshal(cr.Input, &elData)
+					if evt.RawMessage != nil && len(evt.RawMessage.Response) > 0 {
+						_ = json.Unmarshal(evt.RawMessage.Response, &elData)
 					}
 					env := events.NewEnvelope(
 						aep.NewID(),

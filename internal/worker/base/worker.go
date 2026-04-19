@@ -36,6 +36,10 @@ type BaseWorker struct {
 	lastIO    atomic.Int64 // unix nano, use LastIO() and SetLastIO() accessors
 	Mu        sync.Mutex
 	conn      *Conn // stdin-based conn, nil for HTTP-based adapters
+
+	// intentionalExit is set before a deliberate Terminate+Start cycle (e.g. reset)
+	// so forwardEvents knows to skip crash handling.
+	intentionalExit atomic.Bool
 }
 
 // NewBaseWorker creates a new BaseWorker with the given logger and config.
@@ -180,3 +184,10 @@ func (w *BaseWorker) Conn() worker.SessionConn {
 	}
 	return w.conn
 }
+
+// SetIntentionalExit marks the worker for an intentional termination cycle.
+// forwardEvents checks this flag to skip crash handling (crash done, cleanup).
+func (w *BaseWorker) SetIntentionalExit(v bool) { w.intentionalExit.Store(v) }
+
+// IsIntentionalExit reports whether the worker is in an intentional termination cycle.
+func (w *BaseWorker) IsIntentionalExit() bool { return w.intentionalExit.Load() }

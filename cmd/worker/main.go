@@ -174,6 +174,7 @@ func run() error {
 
 	handler := gateway.NewHandler(log, cfg, hub, sm, jwtValidator)
 	bridge := gateway.NewBridge(log, hub, sm, msgStore)
+	handler.SetBridge(bridge)
 
 	mux := http.NewServeMux()
 	deps := &GatewayDeps{

@@ -25,6 +25,7 @@ type Handler struct {
 	hub          *Hub
 	sm           *session.Manager
 	jwtValidator *security.JWTValidator
+	bridge       *Bridge // set via SetBridge; nil during tests
 }
 
 // NewHandler creates a new message handler.
@@ -37,6 +38,10 @@ func NewHandler(log *slog.Logger, cfg *config.Config, hub *Hub, sm *session.Mana
 		jwtValidator: jwtValidator,
 	}
 }
+
+// SetBridge injects the Bridge for lifecycle operations (reset).
+// Must be called after NewHandler and NewBridge.
+func (h *Handler) SetBridge(b *Bridge) { h.bridge = b }
 
 // Handle processes an incoming envelope from a client.
 func (h *Handler) Handle(ctx context.Context, env *events.Envelope) error {
@@ -292,16 +297,19 @@ func (h *Handler) handleReset(ctx context.Context, env *events.Envelope) error {
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "reset not allowed in state: %s", si.State)
 	}
 
-	if err := h.sm.ClearContext(ctx, env.SessionID); err != nil {
-		h.log.Warn("gateway: reset clear context failed", "session_id", env.SessionID, "err", err)
-		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "clear context failed: %v", err)
-	}
-
-	w := h.sm.GetWorker(env.SessionID)
-	if w != nil {
-		if err := w.ResetContext(ctx); err != nil {
-			h.log.Warn("gateway: worker reset context failed", "session_id", env.SessionID, "err", err)
-			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker reset failed: %v", err)
+	// Delegate to Bridge for full lifecycle: intentional exit flag,
+	// worker Terminate → delete files → Start, and new forwardEvents goroutine.
+	if h.bridge != nil {
+		if err := h.bridge.ResetSession(ctx, env.SessionID); err != nil {
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "reset failed: %v", err)
+		}
+	} else {
+		// Test mode (no bridge): reset worker directly.
+		w := h.sm.GetWorker(env.SessionID)
+		if w != nil {
+			if err := w.ResetContext(ctx); err != nil {
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker reset failed: %v", err)
+			}
 		}
 	}
 
