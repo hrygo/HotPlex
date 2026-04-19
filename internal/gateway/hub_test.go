@@ -716,11 +716,13 @@ func TestHub_HandleHTTP_WithSessionID(t *testing.T) {
 	defer conn.Close()
 	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
 
-	// Verify the session has a connection registered.
-	h.mu.RLock()
-	_, hasSession := h.sessions["sess_explicit"]
-	h.mu.RUnlock()
-	require.True(t, hasSession, "hub should have registered session sess_explicit")
+	// Verify the session has a connection registered (async: wait for registration).
+	require.Eventually(t, func() bool {
+		h.mu.RLock()
+		_, ok := h.sessions["sess_explicit"]
+		h.mu.RUnlock()
+		return ok
+	}, 2*time.Second, 10*time.Millisecond, "hub should have registered session sess_explicit")
 }
 
 // TestHub_HandleHTTP_GeneratesSessionID verifies that when no session_id is
