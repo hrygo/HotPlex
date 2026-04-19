@@ -665,7 +665,9 @@ func TestHub_HandleHTTP_Success(t *testing.T) {
 	require.NoError(t, err, "WebSocket upgrade should succeed")
 	defer conn.Close()
 	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
-	require.Greater(t, h.ConnectionsOpen(), 0, "hub should have registered the connection")
+	require.Eventually(t, func() bool {
+		return h.ConnectionsOpen() > 0
+	}, 2*time.Second, 10*time.Millisecond, "hub should have registered the connection")
 }
 
 // TestHub_HandleHTTP_Unauthorized verifies that a request without an API key
