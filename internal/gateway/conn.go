@@ -319,6 +319,16 @@ func (c *Conn) performInit(handler *Handler) error {
 		// Deleted session → reject.
 		c.sendInitError(events.ErrCodeSessionNotFound, "session was deleted")
 		return ErrInitSessionDeleted
+	} else if si.State == events.StateCreated {
+		// Session was created but never started (gateway crashed between
+		// CreateWithBot and worker Start). Start fresh with the same session ID.
+		c.log.Info("gateway: starting unstarted session", "session_id", sessionID)
+		if c.starter != nil {
+			if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, "", nil); err != nil {
+				c.sendInitError(events.ErrCodeInternalError, "failed to start session")
+				return fmt.Errorf("start unstarted session: %w", err)
+			}
+		}
 	} else if si.State == events.StateIdle || si.State == events.StateTerminated {
 		// Idle/Terminated session → resume worker (reattach to existing session/worker).
 		c.log.Info("gateway: resuming session", "session_id", sessionID, "from_state", si.State)
@@ -328,6 +338,17 @@ func (c *Conn) performInit(handler *Handler) error {
 			if err := c.starter.ResumeSession(context.Background(), sessionID, workDir); err != nil {
 				c.sendInitError(events.ErrCodeInternalError, "failed to resume session")
 				return fmt.Errorf("resume session: %w", err)
+			}
+		}
+	} else if si.State == events.StateRunning {
+		// RUNNING session — may be orphan if gateway restarted (no in-memory worker).
+		// If a worker is attached, just subscribe to the running session's events.
+		// If no worker (orphan from crash), resume to reattach a new worker.
+		if c.starter != nil && handler.sm.GetWorker(sessionID) == nil {
+			c.log.Info("gateway: resuming orphan session", "session_id", sessionID, "from_state", si.State)
+			if err := c.starter.ResumeSession(context.Background(), sessionID, workDir); err != nil {
+				c.sendInitError(events.ErrCodeInternalError, "failed to resume session")
+				return fmt.Errorf("resume orphan session: %w", err)
 			}
 		}
 	}
