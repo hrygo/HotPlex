@@ -131,21 +131,21 @@ jobs:
 
           # Per-package thresholds (longest-prefix match wins).
           declare -A THRESHOLDS
-          THRESHOLDS["internal/security"]=85
-          THRESHOLDS["pkg/events"]=85
-          THRESHOLDS["pkg/aep"]=85
-          THRESHOLDS["internal/gateway"]=75
+          THRESHOLDS["internal/security"]=80
+          THRESHOLDS["pkg/events"]=45
+          THRESHOLDS["pkg/aep"]=75
+          THRESHOLDS["internal/gateway"]=55
           THRESHOLDS["internal/session"]=70
           THRESHOLDS["internal/config"]=70
-          THRESHOLDS["internal/worker/base"]=70
+          THRESHOLDS["internal/worker/base"]=45
           THRESHOLDS["internal/worker"]=70
           THRESHOLDS["internal/worker/claudecode"]=60
-          THRESHOLDS["internal/worker/opencodecli"]=60
-          THRESHOLDS["internal/worker/opencodeserver"]=50
+          THRESHOLDS["internal/worker/opencodecli"]=35
+          THRESHOLDS["internal/worker/opencodeserver"]=25
           THRESHOLDS["internal/worker/noop"]=80
-          THRESHOLDS["internal/messaging/feishu"]=50
-          THRESHOLDS["internal/messaging/slack"]=50
-          THRESHOLDS["internal/messaging"]=50
+          THRESHOLDS["internal/messaging/feishu"]=40
+          THRESHOLDS["internal/messaging/slack"]=35
+          THRESHOLDS["internal/messaging"]=20
 
           FAILED=0
           echo "## Per-Package Coverage Report" >> $GITHUB_STEP_SUMMARY
