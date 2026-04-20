@@ -12,6 +12,7 @@ import (
 	"github.com/hotplex/hotplex-worker/internal/metrics"
 	"github.com/hotplex/hotplex-worker/internal/session"
 	"github.com/hotplex/hotplex-worker/internal/worker"
+	"github.com/hotplex/hotplex-worker/internal/worker/base"
 	"github.com/hotplex/hotplex-worker/internal/worker/noop"
 	"github.com/hotplex/hotplex-worker/pkg/aep"
 	"github.com/hotplex/hotplex-worker/pkg/events"
@@ -322,11 +323,18 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 
 	// Resume retry: if the resumed worker crashed quickly (within 15s), it likely
 	// failed to restore its conversation state. Retry resume once (limited by
-	// retryDepth) to recover before falling through to normal crash handling.
+	// retryDepth) to recover, then fall back to fresh start if retry also fails.
 	// Skip during shutdown to avoid spawning workers that will be immediately killed.
-	fallbackAttempted := !b.closed.Load() && exitCode != 0 && opts.resumed && opts.retryDepth < 1 && time.Since(startTime) < 15*time.Second
+	fallbackAttempted := !b.closed.Load() && exitCode != 0 && opts.resumed && opts.retryDepth < 2 && time.Since(startTime) < 15*time.Second
 	if fallbackAttempted {
-		if b.attemptResumeFallback(sessionID, opts.workDir, exitCode, opts.retryDepth, workerType) {
+		// Extract last input from dead worker's conn for re-delivery after fresh start.
+		var lastInput string
+		if conn := w.Conn(); conn != nil {
+			if bc, ok := conn.(*base.Conn); ok {
+				lastInput = bc.LastInput()
+			}
+		}
+		if b.attemptResumeFallback(sessionID, opts.workDir, exitCode, opts.retryDepth, workerType, lastInput) {
 			return // new forwardEvents goroutine took over
 		}
 		// Fallback already cleaned up (DetachWorker + Transition); skip redundant cleanup below.
@@ -381,27 +389,93 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	}
 }
 
-// attemptResumeFallback retries a failed resume to preserve conversation history.
+// attemptResumeFallback handles a crashed resumed worker with a two-step strategy:
+//  1. retryDepth < 1: Retry resume once to preserve conversation history (transient failures).
+//  2. retryDepth >= 1: Fall back to fresh start — conversation data is permanently lost.
+//
 // Returns true if a new forwardEvents goroutine took over.
-// Limits to 1 retry (via retryDepth) to prevent infinite loops on persistent failures.
-func (b *Bridge) attemptResumeFallback(sessionID, workDir string, exitCode, retryDepth int, workerType worker.WorkerType) bool {
-	b.log.Warn("bridge: worker crashed shortly after resume, retrying resume to preserve conversation",
+func (b *Bridge) attemptResumeFallback(sessionID, workDir string, exitCode, retryDepth int, workerType worker.WorkerType, lastInput string) bool {
+	b.log.Warn("bridge: worker crashed shortly after resume",
 		"session_id", sessionID, "worker_type", workerType, "exit_code", exitCode, "retry_depth", retryDepth)
 
 	// Clean up the crashed worker first.
 	b.cleanupCrashedWorker(sessionID)
 
-	// Retry ResumeSession to preserve conversation history.
-	if err := b.resumeWithOpts(context.Background(), sessionID, workDir, forwardOpts{resumed: true, workDir: workDir, retryDepth: retryDepth + 1}); err != nil {
-		b.log.Error("bridge: resume retry failed", "session_id", sessionID, "worker_type", workerType, "err", err)
+	// Step 1: Retry resume once for transient failures (e.g., file lock, timing).
+	if retryDepth == 0 {
+		if err := b.resumeWithOpts(context.Background(), sessionID, workDir, forwardOpts{resumed: true, workDir: workDir, retryDepth: retryDepth + 1}); err != nil {
+			b.log.Error("bridge: resume retry failed synchronously, falling back to fresh start", "session_id", sessionID, "worker_type", workerType, "err", err)
+			// Synchronous failure — fall through to fresh start below.
+		} else {
+			b.log.Info("bridge: resume retry succeeded", "session_id", sessionID, "worker_type", workerType)
+			warnEvt := events.NewEnvelope(aep.NewID(), sessionID, b.hub.NextSeq(sessionID), events.Error, events.ErrorData{
+				Code:    events.ErrCodeResumeRetry,
+				Message: fmt.Sprintf("Worker crashed after resume (exit %d), retried resume to preserve conversation.", exitCode),
+			})
+			_ = b.hub.SendToSession(context.Background(), warnEvt)
+			return true
+		}
+	}
+
+	// Step 2: Resume retry also failed or retryDepth exhausted — start fresh worker.
+	// Conversation data is permanently lost (e.g., "No conversation found").
+	b.log.Info("bridge: starting fresh worker after failed resume", "session_id", sessionID, "worker_type", workerType)
+
+	si, err := b.sm.Get(sessionID)
+	if err != nil {
+		b.log.Error("bridge: session not found for fresh start fallback", "session_id", sessionID, "err", err)
 		return false
 	}
 
-	b.log.Info("bridge: resume retry succeeded", "session_id", sessionID, "worker_type", workerType)
-	// Notify the client that a resume retry occurred.
+	w, err := b.wf.NewWorker(si.WorkerType)
+	if err != nil {
+		b.log.Error("bridge: create worker for fresh start", "session_id", sessionID, "err", err)
+		return false
+	}
+	if noopw, ok := w.(*noop.Worker); ok {
+		noopw.SetConn(noop.NewConn(si.ID, si.UserID))
+	}
+
+	if err := b.sm.AttachWorker(sessionID, w); err != nil {
+		b.log.Error("bridge: attach worker for fresh start", "session_id", sessionID, "err", err)
+		return false
+	}
+
+	if err := b.sm.Transition(context.Background(), sessionID, events.StateRunning); err != nil {
+		b.log.Warn("bridge: transition to running for fresh start", "session_id", sessionID, "err", err)
+	}
+
+	workerInfo := worker.SessionInfo{
+		SessionID:       si.ID,
+		UserID:          si.UserID,
+		AllowedTools:    si.AllowedTools,
+		WorkerSessionID: si.WorkerSessionID,
+		ProjectDir:      workDir,
+	}
+	if err := w.Start(context.Background(), workerInfo); err != nil {
+		b.sm.DetachWorker(sessionID)
+		b.log.Error("bridge: fresh worker start failed", "session_id", sessionID, "err", err)
+		return false
+	}
+
+	b.fwdWg.Add(1)
+	go func() {
+		defer b.fwdWg.Done()
+		b.forwardEvents(w, sessionID, forwardOpts{})
+	}()
+
+	// Re-deliver the original input that was lost when the first worker crashed.
+	if lastInput != "" {
+		b.log.Info("bridge: re-delivering input to fresh worker", "session_id", sessionID, "content_len", len(lastInput))
+		if err := w.Input(context.Background(), lastInput, nil); err != nil {
+			b.log.Warn("bridge: input re-delivery failed", "session_id", sessionID, "err", err)
+		}
+	}
+
+	b.log.Info("bridge: fresh worker started after resume failure", "session_id", sessionID, "worker_type", workerType)
 	warnEvt := events.NewEnvelope(aep.NewID(), sessionID, b.hub.NextSeq(sessionID), events.Error, events.ErrorData{
 		Code:    events.ErrCodeResumeRetry,
-		Message: fmt.Sprintf("Worker crashed after resume (exit %d), retried resume to preserve conversation.", exitCode),
+		Message: fmt.Sprintf("Conversation data lost (exit %d), started fresh session.", exitCode),
 	})
 	_ = b.hub.SendToSession(context.Background(), warnEvt)
 	return true
