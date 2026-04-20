@@ -370,7 +370,7 @@ func (h *Hub) Run() {
 			if msg == nil || msg.Env == nil {
 				continue
 			}
-			go func(msg *EnvelopeWithConn) {
+			func() {
 				defer func() {
 					if r := recover(); r != nil {
 						h.log.Error("hub: panic in routeMessage", "session_id", msg.Env.SessionID, "panic", r, "stack", string(debug.Stack()))
@@ -387,7 +387,7 @@ func (h *Hub) Run() {
 				if msg.afterDrain != nil {
 					msg.afterDrain()
 				}
-			}(msg)
+			}()
 		}
 	}
 }
