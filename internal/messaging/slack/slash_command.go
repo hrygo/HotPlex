@@ -28,6 +28,7 @@ type SlashRateLimiter struct {
 	lastUsed map[string]time.Time
 	done     chan struct{}
 	wg       sync.WaitGroup
+	stopOnce sync.Once
 }
 
 // NewSlashRateLimiter creates a new slash command rate limiter.
@@ -85,7 +86,9 @@ func (r *SlashRateLimiter) sweepLoop() {
 
 // Stop cleanly terminates the sweep goroutine.
 func (r *SlashRateLimiter) Stop() {
-	close(r.done)
+	r.stopOnce.Do(func() {
+		close(r.done)
+	})
 	r.wg.Wait()
 }
 

@@ -427,8 +427,12 @@ func (a *Adapter) Close(ctx context.Context) error {
 	}
 
 	a.mu.Lock()
+
+	// Collect conns, clear map, then close outside lock to avoid deadlock.
+	// FeishuConn.Close() acquires a.mu, so we must not hold it during conn.Close().
+	var conns []*FeishuConn
 	for _, conn := range a.activeConns {
-		_ = conn.Close()
+		conns = append(conns, conn)
 	}
 	a.activeConns = nil
 	a.dedup = nil
@@ -439,6 +443,11 @@ func (a *Adapter) Close(ctx context.Context) error {
 		a.rateLimiter = nil
 	}
 	a.mu.Unlock()
+
+	// Close conns outside lock to prevent deadlock with FeishuConn.Close().
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
 
 	return nil
 }

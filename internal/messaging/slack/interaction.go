@@ -419,6 +419,8 @@ func (a *Adapter) registerInteraction(requestID, sessionID string, kind events.K
 		CreatedAt: getTimeNow(),
 		Timeout:   messaging.DefaultInteractionTimeout,
 		SendResponse: func(metadata map[string]any) {
+			respCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 			env := &events.Envelope{
 				Version:   events.Version,
 				ID:        requestID,
@@ -433,7 +435,7 @@ func (a *Adapter) registerInteraction(requestID, sessionID string, kind events.K
 				OwnerID: "",
 			}
 			if a.bridge != nil {
-				_ = a.bridge.Handle(context.Background(), env, conn)
+				_ = a.bridge.Handle(respCtx, env, conn)
 			}
 		},
 	})

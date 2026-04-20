@@ -47,6 +47,9 @@ func (b *reconnectBackoff) Next() time.Duration {
 	}
 
 	b.attempt++
+	if b.attempt > 30 {
+		b.attempt = 30
+	}
 	return delay
 }
 

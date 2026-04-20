@@ -595,7 +595,11 @@ func (c *StreamingCardController) flushCardKitWithRetry(ctx context.Context, con
 	}
 	// Single retry with 50ms backoff for transient network issues.
 	c.log.Debug("feishu: cardkit flush failed, retrying", "err", err)
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-time.After(50 * time.Millisecond):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	return c.flushCardKit(ctx, content, seq)
 }
 
