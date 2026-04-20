@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,10 +24,13 @@ import (
 )
 
 const (
-	messageExpiry   = 30 * time.Minute
-	dedupMaxEntries = 5000
-	dedupTTL        = 30 * time.Minute
-	mediaPathPrefix = "/tmp/hotplex/media/slack"
+	messageExpiry    = 30 * time.Minute
+	dedupMaxEntries  = 5000
+	dedupTTL         = 30 * time.Minute
+	mediaPathPrefix  = "/tmp/hotplex/media/slack"
+	mediaCleanupInt  = 6 * time.Hour
+	mediaTTL         = 24 * time.Hour
+	maxMessageLength = 3800 // Slack limit is ~4000
 )
 
 // Subtypes that should never be processed.
@@ -153,6 +158,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}()
 
 	go a.runSocketMode(ctx)
+	go a.cleanupMedia(ctx)
 	return nil
 }
 
@@ -620,17 +626,24 @@ func (c *SlackConn) writeWithStreaming(ctx context.Context, text string) error {
 }
 
 // writeWithPostMessage falls back to PostMessageContext.
+// Handles long messages by chunking them into multiple calls.
 func (c *SlackConn) writeWithPostMessage(ctx context.Context, text string, isDelta bool) error {
 	if isDelta && text != "" {
 		text += "\n\n"
 	}
 
-	opts := []slack.MsgOption{slack.MsgOptionText(FormatMrkdwn(text), false)}
-	if c.threadTS != "" {
-		opts = append(opts, slack.MsgOptionTS(c.threadTS))
+	chunks := ChunkContent(text, maxMessageLength)
+	for _, chunk := range chunks {
+		opts := []slack.MsgOption{slack.MsgOptionText(FormatMrkdwn(chunk), false)}
+		if c.threadTS != "" {
+			opts = append(opts, slack.MsgOptionTS(c.threadTS))
+		}
+		_, _, err := c.adapter.client.PostMessageContext(ctx, c.channelID, opts...)
+		if err != nil {
+			return err
+		}
 	}
-	_, _, err := c.adapter.client.PostMessageContext(ctx, c.channelID, opts...)
-	return err
+	return nil
 }
 
 // closeStreamWriter closes and clears the stream writer.
@@ -688,6 +701,35 @@ func extractResponseText(env *events.Envelope) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func (a *Adapter) cleanupMedia(ctx context.Context) {
+	ticker := time.NewTicker(mediaCleanupInt)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.cleanupMediaInDir(mediaPathPrefix)
+		}
+	}
+}
+
+func (a *Adapter) cleanupMediaInDir(dir string) {
+	a.log.Debug("slack: cleaning up media files", "dir", dir)
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && time.Since(info.ModTime()) > mediaTTL {
+			if err := os.Remove(path); err != nil {
+				a.log.Warn("slack: failed to remove old media file", "path", path, "err", err)
+			}
+		}
+		return nil
+	})
 }
 
 var _ messaging.PlatformConn = (*SlackConn)(nil)
