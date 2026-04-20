@@ -65,10 +65,11 @@ type StreamingCardController struct {
 	msgID     string
 	sequence  atomic.Int64
 
-	mu          sync.Mutex
-	buf         strings.Builder
-	lastFlushed string
-	cardKitOK   bool
+	mu              sync.Mutex
+	buf             strings.Builder
+	lastFlushed     string
+	cardKitOK       bool
+	streamingActive bool // true once enableStreaming succeeds; disables on disableStreaming
 
 	chatType     string
 	replyToMsgID string
@@ -172,6 +173,8 @@ func (c *StreamingCardController) EnsureCard(ctx context.Context, chatID, chatTy
 			c.log.Warn("feishu: enable streaming failed, using IM patch fallback",
 				"err", err)
 			c.cardKitOK = false
+		} else {
+			c.streamingActive = true
 		}
 	}
 
@@ -272,10 +275,15 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		if err := c.flushCardKit(ctx, content, seq); err != nil {
 			c.log.Warn("feishu: final cardkit flush failed", "err", err)
 		}
+	}
 
+	// Always disable streaming if it was enabled, even after cardKitOK degraded.
+	// Without this, the card stays in "generating" state permanently.
+	if c.streamingActive && c.cardID != "" {
 		if err := c.disableStreaming(ctx); err != nil {
 			c.log.Warn("feishu: disable streaming failed", "err", err)
 		}
+		c.streamingActive = false
 	}
 
 	return nil
@@ -291,8 +299,9 @@ func (c *StreamingCardController) Abort(ctx context.Context) error {
 	msgID := c.msgID
 	c.mu.Unlock()
 
-	if cardID != "" && c.cardKitOK {
+	if c.streamingActive && cardID != "" {
 		_ = c.disableStreaming(ctx)
+		c.streamingActive = false
 	}
 
 	if msgID != "" {
@@ -453,6 +462,7 @@ func (c *StreamingCardController) disableStreaming(ctx context.Context) error {
 	if !resp.Success() {
 		return fmt.Errorf("cardkit settings disable streaming failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
+	c.log.Debug("feishu: streaming disabled", "card_id", c.cardID)
 	return nil
 }
 
