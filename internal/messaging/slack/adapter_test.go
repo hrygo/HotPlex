@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1143,4 +1144,56 @@ func TestAC16_NonStreamingEventsUsePostMessage(t *testing.T) {
 	require.Equal(t, events.ElicitationRequest, elicitationEnv.Event.Type)
 }
 
-// AC-1.7 & AC-1.8 are verified by running go test and go vet
+func TestCleanupMedia(t *testing.T) {
+	// Creating a logger that discards output for the test
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := &Adapter{log: logger}
+
+	tmpDir := t.TempDir()
+
+	// 1. Create an old file (> 24h)
+	oldFile := filepath.Join(tmpDir, "old.txt")
+	err := os.WriteFile(oldFile, []byte("old content"), 0644)
+	require.NoError(t, err)
+
+	oldTime := time.Now().Add(-48 * time.Hour)
+	err = os.Chtimes(oldFile, oldTime, oldTime)
+	require.NoError(t, err)
+
+	// 2. Create a new file (< 24h)
+	newFile := filepath.Join(tmpDir, "new.txt")
+	err = os.WriteFile(newFile, []byte("new content"), 0644)
+	require.NoError(t, err)
+
+	// 3. Create a directory (should not be removed)
+	subDir := filepath.Join(tmpDir, "subdir")
+	err = os.Mkdir(subDir, 0755)
+	require.NoError(t, err)
+
+	// Run cleanup
+	a.cleanupMediaInDir(tmpDir)
+
+	// Verify
+	_, err = os.Stat(oldFile)
+	require.Error(t, err, "Old file should be removed")
+	require.True(t, os.IsNotExist(err))
+
+	_, err = os.Stat(newFile)
+	require.NoError(t, err, "New file should NOT be removed")
+
+	_, err = os.Stat(subDir)
+	require.NoError(t, err, "Directory should NOT be removed")
+}
+
+func TestChunkContent_Integration(t *testing.T) {
+	t.Parallel()
+
+	// Test that ChunkContent is available and works as expected for the adapter's use case.
+	content := "Line 1\n" + strings.Repeat("a", 1000) + "\nLine 3"
+	chunks := ChunkContent(content, 500)
+
+	require.True(t, len(chunks) >= 2, "Should split content into multiple chunks")
+	for _, chunk := range chunks {
+		require.Contains(t, chunk, "[", "Each chunk should have a [N/M] prefix")
+	}
+}
