@@ -1353,7 +1353,7 @@ func TestManager_GC_ZombieDetection(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	w.lastIO = now.Add(-10 * time.Minute) // zombie: no IO in 10 minutes
+	w.lastIO = now.Add(-31 * time.Minute) // zombie: no IO beyond 30m default execution_timeout
 	_ = m.AttachWorker("sess_zombie", w)
 
 	store.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
