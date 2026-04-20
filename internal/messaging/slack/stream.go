@@ -89,6 +89,8 @@ func containsAny(str string, substrs []string) bool {
 // into a standard io.WriteCloser. First Write() starts the stream,
 // subsequent calls buffer content, Close() ends it with fallback.
 type NativeStreamingWriter struct {
+	// ctx is stored because the writer needs it for the lifecycle of the stream,
+	// and the goroutines spawned by Write/flushBuffer need access to it.
 	ctx       context.Context
 	client    *slack.Client
 	channelID string
@@ -98,6 +100,7 @@ type NativeStreamingWriter struct {
 	started     bool
 	closed      bool
 	onComplete  func(string)
+	onRegister  func(*NativeStreamingWriter)
 	messageTS   string
 	rateLimiter *ChannelRateLimiter
 
@@ -120,13 +123,14 @@ type NativeStreamingWriter struct {
 
 // NewNativeStreamingWriter creates a new streaming writer for Slack.
 func NewNativeStreamingWriter(ctx context.Context, client *slack.Client, channelID, threadTS string,
-	rateLimiter *ChannelRateLimiter, onComplete func(string)) *NativeStreamingWriter {
+	rateLimiter *ChannelRateLimiter, onComplete func(string), onRegister func(*NativeStreamingWriter)) *NativeStreamingWriter {
 	w := &NativeStreamingWriter{
 		ctx:          ctx,
 		client:       client,
 		channelID:    channelID,
 		threadTS:     threadTS,
 		onComplete:   onComplete,
+		onRegister:   onRegister,
 		rateLimiter:  rateLimiter,
 		flushTrigger: make(chan struct{}, 1),
 		closeChan:    make(chan struct{}),
@@ -174,6 +178,9 @@ func (w *NativeStreamingWriter) Write(p []byte) (int, error) {
 		w.messageTS = streamTS
 		w.started = true
 		w.streamStartTime = time.Now()
+		if w.onRegister != nil {
+			w.onRegister(w)
+		}
 	}
 
 	w.buf.Write(p)
@@ -321,7 +328,11 @@ func (w *NativeStreamingWriter) Close() error {
 
 	integrityOK := len(failedChunks) == 0 && bytesWritten == bytesFlushed
 
-	_, _, _ = w.client.StopStreamContext(w.ctx, w.channelID, w.messageTS)
+	// Use a fresh context for cleanup since w.ctx may be cancelled
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, _, _ = w.client.StopStreamContext(cleanupCtx, w.channelID, w.messageTS)
 
 	if w.onComplete != nil {
 		w.onComplete(w.messageTS)
@@ -341,7 +352,7 @@ func (w *NativeStreamingWriter) Close() error {
 			fallbackText += remainingBuf
 		}
 		if fallbackText != "" {
-			_, _, _ = w.client.PostMessageContext(w.ctx, w.channelID, slack.MsgOptionText(fallbackText, false))
+			_, _, _ = w.client.PostMessageContext(cleanupCtx, w.channelID, slack.MsgOptionText(fallbackText, false))
 		}
 	}
 	return nil

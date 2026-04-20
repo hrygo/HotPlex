@@ -114,6 +114,9 @@ func extractFence(line string) string {
 }
 
 func findSafeSplitPoint(runes []rune, start, maxEnd int, inCodeBlock bool) int {
+	if start >= maxEnd || start >= len(runes) {
+		return maxEnd
+	}
 	searchEnd := maxEnd
 	if searchEnd > len(runes) {
 		searchEnd = len(runes)

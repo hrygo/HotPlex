@@ -24,6 +24,7 @@ type FeishuRateLimiter struct {
 
 	done     chan struct{}
 	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 // NewFeishuRateLimiter creates a rate limiter with standard intervals.
@@ -88,10 +89,12 @@ func (r *FeishuRateLimiter) Sweep() {
 
 // Start launches the background sweep goroutine.
 func (r *FeishuRateLimiter) Start() {
+	r.wg.Add(1)
 	go r.sweepLoop()
 }
 
 func (r *FeishuRateLimiter) sweepLoop() {
+	defer r.wg.Done()
 	ticker := time.NewTicker(feishuSweepInterval)
 	defer ticker.Stop()
 
@@ -110,4 +113,5 @@ func (r *FeishuRateLimiter) Stop() {
 	r.stopOnce.Do(func() {
 		close(r.done)
 	})
+	r.wg.Wait()
 }

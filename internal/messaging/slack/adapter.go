@@ -421,10 +421,13 @@ func (a *Adapter) NewStreamingWriter(ctx context.Context, channelID, threadTS st
 		if onComplete != nil {
 			onComplete(ts)
 		}
+	}, func(w *NativeStreamingWriter) {
+		a.mu.Lock()
+		if w.messageTS != "" {
+			a.activeStreams[w.messageTS] = w
+		}
+		a.mu.Unlock()
 	})
-	a.mu.Lock()
-	a.activeStreams[w.messageTS] = w
-	a.mu.Unlock()
 	return w
 }
 
@@ -454,6 +457,7 @@ func (a *Adapter) Close(ctx context.Context) error {
 		a.activeIndicators.CloseAll(ctx)
 	}
 
+	a.mu.Lock()
 	if a.rateLimiter != nil {
 		a.rateLimiter.Stop()
 		a.rateLimiter = nil
@@ -462,6 +466,7 @@ func (a *Adapter) Close(ctx context.Context) error {
 		a.slashLimiter.Stop()
 		a.slashLimiter = nil
 	}
+	a.mu.Unlock()
 	if a.ownership != nil {
 		a.ownership.Stop()
 		a.ownership = nil
@@ -598,10 +603,11 @@ func (c *SlackConn) writeWithStreaming(ctx context.Context, text string) error {
 	// Create new streaming writer if needed
 	if c.streamWriter == nil {
 		writer := c.adapter.NewStreamingWriter(ctx, c.channelID, c.threadTS, func(ts string) {
-			// Update threadTS if stream created a new message
+			c.streamWriterMu.Lock()
 			if c.threadTS == "" && ts != "" {
 				c.threadTS = ts
 			}
+			c.streamWriterMu.Unlock()
 		})
 		if writer == nil {
 			return fmt.Errorf("failed to create streaming writer")

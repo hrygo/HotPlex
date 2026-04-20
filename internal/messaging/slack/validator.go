@@ -3,6 +3,7 @@ package slack
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/slack-go/slack"
 )
@@ -43,9 +44,9 @@ func ValidateBlocks(blocks []slack.Block) error {
 		switch b := block.(type) {
 		case *slack.SectionBlock:
 			// AC-3.2: SectionBlock text ≤ 3000 chars
-			if b.Text != nil && len(b.Text.Text) > maxSectionTextLength {
+			if b.Text != nil && utf8.RuneCountInString(b.Text.Text) > maxSectionTextLength {
 				return fmt.Errorf("block %d (%s): section text length %d exceeds maximum of %d",
-					i, blockType, len(b.Text.Text), maxSectionTextLength)
+					i, blockType, utf8.RuneCountInString(b.Text.Text), maxSectionTextLength)
 			}
 
 		case *slack.ContextBlock:
@@ -57,9 +58,9 @@ func ValidateBlocks(blocks []slack.Block) error {
 			// Context text elements ≤ 3000 chars
 			for j, elem := range b.ContextElements.Elements {
 				if textElem, ok := elem.(*slack.TextBlockObject); ok {
-					if len(textElem.Text) > maxContextTextLength {
+					if utf8.RuneCountInString(textElem.Text) > maxContextTextLength {
 						return fmt.Errorf("block %d (%s) element %d: context text length %d exceeds maximum of %d",
-							i, blockType, j, len(textElem.Text), maxContextTextLength)
+							i, blockType, j, utf8.RuneCountInString(textElem.Text), maxContextTextLength)
 					}
 				}
 			}
@@ -80,9 +81,9 @@ func ValidateBlocks(blocks []slack.Block) error {
 
 		case *slack.ImageBlock:
 			// ImageBlock alt_text ≤ 2000 chars, image_url ≤ 3000 chars
-			if len(b.AltText) > maxImageAltTextLength {
+			if utf8.RuneCountInString(b.AltText) > maxImageAltTextLength {
 				return fmt.Errorf("block %d (%s): image alt_text length %d exceeds maximum of %d",
-					i, blockType, len(b.AltText), maxImageAltTextLength)
+					i, blockType, utf8.RuneCountInString(b.AltText), maxImageAltTextLength)
 			}
 			if len(b.ImageURL) > maxImageURLLength {
 				return fmt.Errorf("block %d (%s): image URL length %d exceeds maximum of %d",
@@ -95,9 +96,9 @@ func ValidateBlocks(blocks []slack.Block) error {
 
 		case *slack.HeaderBlock:
 			// HeaderBlock text ≤ 150 chars (Slack constraint)
-			if b.Text != nil && len(b.Text.Text) > 150 {
+			if b.Text != nil && utf8.RuneCountInString(b.Text.Text) > 150 {
 				return fmt.Errorf("block %d (%s): header text length %d exceeds maximum of 150",
-					i, blockType, len(b.Text.Text))
+					i, blockType, utf8.RuneCountInString(b.Text.Text))
 			}
 
 		default:
@@ -116,9 +117,9 @@ func validateBlockElement(elem slack.BlockElement, blockIdx int, blockType strin
 	switch e := elem.(type) {
 	case *slack.ButtonBlockElement:
 		// ActionID ≤ 255 chars and unique
-		if len(e.ActionID) > maxActionIDLength {
+		if utf8.RuneCountInString(e.ActionID) > maxActionIDLength {
 			return fmt.Errorf("block %d (%s): action_id length %d exceeds maximum of %d",
-				blockIdx, blockType, len(e.ActionID), maxActionIDLength)
+				blockIdx, blockType, utf8.RuneCountInString(e.ActionID), maxActionIDLength)
 		}
 		if actionIDs[e.ActionID] {
 			return fmt.Errorf("block %d (%s): duplicate action_id %q",
@@ -127,21 +128,21 @@ func validateBlockElement(elem slack.BlockElement, blockIdx int, blockType strin
 		actionIDs[e.ActionID] = true
 
 		// Button text ≤ 75 chars
-		if e.Text != nil && len(e.Text.Text) > maxButtonTextLength {
+		if e.Text != nil && utf8.RuneCountInString(e.Text.Text) > maxButtonTextLength {
 			return fmt.Errorf("block %d (%s): button text length %d exceeds maximum of %d",
-				blockIdx, blockType, len(e.Text.Text), maxButtonTextLength)
+				blockIdx, blockType, utf8.RuneCountInString(e.Text.Text), maxButtonTextLength)
 		}
 
 		// Button value ≤ 2000 chars
-		if len(e.Value) > maxButtonValueLength {
+		if utf8.RuneCountInString(e.Value) > maxButtonValueLength {
 			return fmt.Errorf("block %d (%s): button value length %d exceeds maximum of %d",
-				blockIdx, blockType, len(e.Value), maxButtonValueLength)
+				blockIdx, blockType, utf8.RuneCountInString(e.Value), maxButtonValueLength)
 		}
 
 	case *slack.OverflowBlockElement:
-		if len(e.ActionID) > maxActionIDLength {
+		if utf8.RuneCountInString(e.ActionID) > maxActionIDLength {
 			return fmt.Errorf("block %d (%s): overflow action_id length %d exceeds maximum of %d",
-				blockIdx, blockType, len(e.ActionID), maxActionIDLength)
+				blockIdx, blockType, utf8.RuneCountInString(e.ActionID), maxActionIDLength)
 		}
 		if actionIDs[e.ActionID] {
 			return fmt.Errorf("block %d (%s): duplicate action_id %q",
@@ -150,9 +151,9 @@ func validateBlockElement(elem slack.BlockElement, blockIdx int, blockType strin
 		actionIDs[e.ActionID] = true
 
 	case *slack.SelectBlockElement:
-		if len(e.ActionID) > maxActionIDLength {
+		if utf8.RuneCountInString(e.ActionID) > maxActionIDLength {
 			return fmt.Errorf("block %d (%s): select action_id length %d exceeds maximum of %d",
-				blockIdx, blockType, len(e.ActionID), maxActionIDLength)
+				blockIdx, blockType, utf8.RuneCountInString(e.ActionID), maxActionIDLength)
 		}
 		if actionIDs[e.ActionID] {
 			return fmt.Errorf("block %d (%s): duplicate action_id %q",
@@ -172,7 +173,8 @@ func validateUnknownBlock(block slack.Block, idx int) error {
 }
 
 // SanitizeBlocks fixes common violations by truncating/removing.
-// Returns a sanitized copy of the blocks.
+// Returns a new slice containing the sanitized blocks.
+// Note: Block objects may be mutated in-place.
 // AC-3.3: Truncates text exceeding limits
 // AC-3.4: Removes blocks beyond 100 limit
 func SanitizeBlocks(blocks []slack.Block) []slack.Block {
@@ -222,7 +224,7 @@ func SanitizeBlocks(blocks []slack.Block) []slack.Block {
 }
 
 func sanitizeSectionBlock(b *slack.SectionBlock) *slack.SectionBlock {
-	if b.Text != nil && len(b.Text.Text) > maxSectionTextLength {
+	if b.Text != nil && utf8.RuneCountInString(b.Text.Text) > maxSectionTextLength {
 		b.Text.Text = truncateWithSuffix(b.Text.Text, maxSectionTextLength)
 	}
 	return b
@@ -237,7 +239,7 @@ func sanitizeContextBlock(b *slack.ContextBlock) *slack.ContextBlock {
 	// Truncate text elements
 	for _, elem := range b.ContextElements.Elements {
 		if textElem, ok := elem.(*slack.TextBlockObject); ok {
-			if len(textElem.Text) > maxContextTextLength {
+			if utf8.RuneCountInString(textElem.Text) > maxContextTextLength {
 				textElem.Text = truncateWithSuffix(textElem.Text, maxContextTextLength)
 			}
 		}
@@ -275,7 +277,7 @@ func sanitizeBlockElement(elem slack.BlockElement, actionIDs map[string]bool) sl
 	case *slack.ButtonBlockElement:
 		// Truncate action_id if too long and deduplicate
 		actionID := e.ActionID
-		if len(actionID) > maxActionIDLength {
+		if utf8.RuneCountInString(actionID) > maxActionIDLength {
 			actionID = truncateWithSuffix(actionID, maxActionIDLength)
 		}
 
@@ -294,12 +296,12 @@ func sanitizeBlockElement(elem slack.BlockElement, actionIDs map[string]bool) sl
 		e.ActionID = actionID
 
 		// Truncate button text
-		if e.Text != nil && len(e.Text.Text) > maxButtonTextLength {
+		if e.Text != nil && utf8.RuneCountInString(e.Text.Text) > maxButtonTextLength {
 			e.Text.Text = truncateWithSuffix(e.Text.Text, maxButtonTextLength)
 		}
 
 		// Truncate value
-		if len(e.Value) > maxButtonValueLength {
+		if utf8.RuneCountInString(e.Value) > maxButtonValueLength {
 			e.Value = truncateWithSuffix(e.Value, maxButtonValueLength)
 		}
 
@@ -307,7 +309,7 @@ func sanitizeBlockElement(elem slack.BlockElement, actionIDs map[string]bool) sl
 
 	case *slack.OverflowBlockElement:
 		actionID := e.ActionID
-		if len(actionID) > maxActionIDLength {
+		if utf8.RuneCountInString(actionID) > maxActionIDLength {
 			actionID = truncateWithSuffix(actionID, maxActionIDLength)
 		}
 		if actionIDs[actionID] {
@@ -325,7 +327,7 @@ func sanitizeBlockElement(elem slack.BlockElement, actionIDs map[string]bool) sl
 
 	case *slack.SelectBlockElement:
 		actionID := e.ActionID
-		if len(actionID) > maxActionIDLength {
+		if utf8.RuneCountInString(actionID) > maxActionIDLength {
 			actionID = truncateWithSuffix(actionID, maxActionIDLength)
 		}
 		if actionIDs[actionID] {
@@ -346,7 +348,7 @@ func sanitizeBlockElement(elem slack.BlockElement, actionIDs map[string]bool) sl
 }
 
 func sanitizeImageBlock(b *slack.ImageBlock) *slack.ImageBlock {
-	if len(b.AltText) > maxImageAltTextLength {
+	if utf8.RuneCountInString(b.AltText) > maxImageAltTextLength {
 		b.AltText = truncateWithSuffix(b.AltText, maxImageAltTextLength)
 	}
 	if len(b.ImageURL) > maxImageURLLength {
@@ -356,21 +358,22 @@ func sanitizeImageBlock(b *slack.ImageBlock) *slack.ImageBlock {
 }
 
 func sanitizeHeaderBlock(b *slack.HeaderBlock) *slack.HeaderBlock {
-	if b.Text != nil && len(b.Text.Text) > 150 {
+	if b.Text != nil && utf8.RuneCountInString(b.Text.Text) > 150 {
 		b.Text.Text = truncateWithSuffix(b.Text.Text, 150)
 	}
 	return b
 }
 
-// truncateWithSuffix truncates text to maxLen, adding "..." suffix if truncated
+// truncateWithSuffix truncates text to maxLen runes, adding "..." suffix if truncated
 func truncateWithSuffix(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return string(runes[:maxLen])
 	}
-	return s[:maxLen-3] + "..."
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // isInvalidBlocksError checks if a Slack API error is an invalid_blocks rejection.
