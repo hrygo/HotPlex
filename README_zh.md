@@ -23,37 +23,35 @@ Hotplex 是一个高性能的 Go 语言编写的网关，它提供**统一的 We
 
 **一个网关。任意 Agent。全渠道接入。**
 
-![Architecture](assets/architecture.svg)
-
-## 📑 目录
-- [特性](#-特性)
+## 🧭 目录
+- [核心特性](#-核心特性)
 - [快速开始](#-快速开始)
-- [架构设计](#-架构设计)
-- [客户端 SDK](#-客户端-sdk)
+- [系统架构](#-系统架构)
+- [SDK 与客户端库](#-sdk-与客户端库)
 - [配置说明](#-配置说明)
 - [文档中心](#-文档中心)
 - [参与贡献](#-参与贡献)
-- [许可证](#-许可证)
+- [开源协议](#-开源协议)
 
-## ✨ 特性
+## 🚀 核心特性
 
-### 🔌 连接性
-- **统一 AEP v1 协议**: 通过 WebSocket 提供 23+ 种事件类型（流式输出、权限交互、MCP Elicitation）。
-- **多渠道桥接**: 双向支持 **Slack** (Socket Mode) 和 **飞书** (WebSocket)，具备完整的交互能力。
-- **Worker 适配器**: 开箱即用支持 Claude Code、OpenCode Server 和 Pi-mono。
+### 🔌 极致互联
+- 🔹 **统一 AEP v1 协议**: 通过 WebSocket 提供 23+ 种事件类型（流式输出、权限交互、MCP Elicitation）。
+- 🔹 **多渠道桥接**: 双向支持 **Slack** (Socket Mode) 和 **飞书** (WebSocket)，具备完整的交互能力。
+- 🔹 **Worker 适配器**: 开箱即用支持 Claude Code、OpenCode Server 和 Pi-mono。
 
-### 🛡️ 企业级能力
-- **健壮的会话管理**: 5 状态生命周期状态机，支持崩溃恢复和断线重连。
-- **安全至上**: JWT ES256 认证、SSRF 防护以及命令白名单机制。
-- **可观测性**: 内置 Prometheus 指标、OpenTelemetry 链路追踪和结构化 JSON 日志。
-- **管理 API**: 提供专门的 Admin API 用于会话控制和健康监测。
+### 🛡️ 可靠与安全
+- 🔹 **健壮的会话管理**: 5 状态生命周期状态机，支持崩溃恢复和断线重连。
+- 🔹 **安全至上**: JWT ES256 认证、SSRF 防护以及命令白名单机制。
+- 🔹 **可观测性**: 内置 Prometheus 指标、OpenTelemetry 链路追踪和结构化 JSON 日志。
+- 🔹 **管理 API**: 提供专门的 Admin API 用于会话控制和健康监测。
 
-### 🛠️ 开发者体验
-- **即插即用的 Web UI**: 基于 Next.js 15 和 Vercel AI SDK 构建。
-- **配置热重载**: 无需停机即可实时更新网关设置。
-- **多语言 SDK**: 原生支持 Go、TypeScript、Python 和 Java。
+### 💎 开发者体验
+- 🔹 **即插即用的 Web UI**: 基于 Next.js 15 和 Vercel AI SDK 构建。
+- 🔹 **配置热重载**: 无需停机即可实时更新网关设置。
+- 🔹 **多语言 SDK**: 原生支持 Go、TypeScript、Python 和 Java。
 
-## 🚀 快速开始
+## ⚡ 快速开始
 
 ### 1. 安装
 ```bash
@@ -96,24 +94,13 @@ func main() {
 }
 ```
 
-## 🏗️ 架构设计
+## 🧱 系统架构
 
-Hotplex 作为前端客户端与后端 Coding Agent 之间的编排层。
+Hotplex 在前端客户端和后端 Coding Agent 之间充当编排层。
 
-```mermaid
-graph TD
-    A[Web Chat / SDKs] --> G[Hotplex Gateway]
-    B[Slack / 飞书] --> G
-    G --> H[会话管理器]
-    G --> I[WS Hub]
-    H --> S[(SQLite WAL)]
-    G --> W[Worker 适配器]
-    W --> C[Claude Code]
-    W --> O[OpenCode Server]
-    W --> P[Pi-mono]
-```
+![Architecture](assets/architecture.svg)
 
-## 📦 客户端 SDK
+## 📦 SDK 与客户端库
 
 | 语言 | 路径 | 特性 |
 |:---:|:---|:---|
@@ -122,7 +109,7 @@ graph TD
 | **Python** | [`examples/python/`](examples/python-client/) | Asyncio 支持、会话恢复、CLI 友好 |
 | **Java** | [`examples/java/`](examples/java-client/) | 企业级 AEP v1 协议实现 |
 
-## ⚙️ 配置说明
+## 🛠️ 配置说明
 
 Hotplex 使用 Viper 进行配置管理，并支持环境变量覆盖。
 
@@ -136,7 +123,7 @@ Hotplex 使用 Viper 进行配置管理，并支持环境变量覆盖。
 > [!TIP]
 > 完整的环境变量和 YAML 设置请参考 [配置指南](docs/management/Config-Reference.md)。
 
-## 📚 文档中心
+## 📖 文档中心
 
 | 领域 | 指南 |
 |:---|:---|
@@ -145,7 +132,7 @@ Hotplex 使用 Viper 进行配置管理，并支持环境变量覆盖。
 | **内部设计** | [网关架构设计](docs/architecture/Worker-Gateway-Design.md) · [安全认证](docs/security/Security-Authentication.md) |
 | **运维管理** | [Admin API 手册](docs/management/Admin-API-Design.md) · [测试策略](docs/testing/Testing-Strategy.md) |
 
-## 🤝 参与贡献
+## 👥 参与贡献
 
 我们欢迎任何形式的贡献！请阅读 [贡献指南](CONTRIBUTING.md) 了解更多细节。
 
@@ -159,9 +146,9 @@ Hotplex 使用 Viper 进行配置管理，并支持环境变量覆盖。
 
 如果您发现安全漏洞，请不要公开开启 Issue。请通过 [安全政策](SECURITY.md) 中的说明报告漏洞（或直接联系维护者）。
 
-## 📄 许可证
+## 📜 开源协议
 
-本项目基于 Apache License 2.0 协议开源。详情请参阅 [`LICENSE`](LICENSE)。
+本项目采用 Apache License 2.0 协议。更多信息请参阅 [`LICENSE`](LICENSE)。
 
 ---
 
