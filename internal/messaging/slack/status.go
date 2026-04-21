@@ -177,12 +177,14 @@ func (a *Adapter) ClearStatus(ctx context.Context, channelID, threadTS string) e
 	}
 	if a.isAssistantCapable.Load() {
 		err := a.SetAssistantStatus(ctx, channelID, threadTS, "")
-		if err == nil {
-			return nil
+		if err != nil {
+			a.handleCapabilityError(err)
 		}
-		a.handleCapabilityError(err)
 	}
-	// Emoji fallback: statusMgr.Clear handles removal of tracked emoji.
+	// Always clean up reaction emoji, regardless of which status path was used.
+	// When isAssistantCapable=true, SetAssistantStatus clears the Assistant Status
+	// (visible in the workspace's status bar) but does NOT remove the reaction emoji
+	// added via AddReactionContext; statusMgr.Clear handles that.
 	a.statusMgr.Clear(ctx, channelID, threadTS)
 	return nil
 }

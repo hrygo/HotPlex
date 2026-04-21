@@ -1325,3 +1325,31 @@ func TestStatusManager_ClearEmojiLocked_NilAdapter(t *testing.T) {
 	// clearEmojiLocked with nil adapter should not panic.
 	sm.clearEmojiLocked(context.Background(), "C1", "T1")
 }
+
+// TestClearStatus_CleansEmojiEvenWhenAssistantCapable verifies that ClearStatus
+// removes the tracked emoji even when the Assistant API path succeeds (i.e.,
+// isAssistantCapable=true and SetAssistantStatus returns nil).
+// This was the original bug: when SetAssistantStatus succeeded, ClearStatus
+// returned early without ever calling statusMgr.Clear, leaving reaction emoji
+// permanently attached to Slack messages.
+//
+// We cannot test the full ClearStatus path with a nil client (it returns early
+// before reaching statusMgr.Clear), so we test the core invariant directly:
+// Clear() must always remove the tracked emoji regardless of any other state.
+func TestClearStatus_CleansEmojiEvenWhenAssistantCapable(t *testing.T) {
+	t.Parallel()
+
+	sm := NewStatusManager(nil, slog.Default())
+	ch, ts := "C999", "9999.9999"
+	key := ch + ":" + ts
+
+	// Simulate what setStatusWithEmojiFallback does: add emoji and track it.
+	sm.trackEmoji(ch, ts, "brain")
+	require.Equal(t, "brain", sm.emojiState[key], "precondition: emoji must be tracked")
+
+	// Clear must remove emoji unconditionally — this is the invariant that
+	// ClearStatus relies on, regardless of whether Assistant API is available.
+	sm.Clear(context.Background(), ch, ts)
+	require.Equal(t, "", sm.emojiState[key],
+		"Clear must remove tracked emoji regardless of Assistant API state")
+}
