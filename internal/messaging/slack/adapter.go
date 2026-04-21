@@ -195,8 +195,9 @@ func (a *Adapter) runSocketMode(ctx context.Context) {
 					continue
 				}
 			}
-			// Run() returned without error (clean close); reconnect.
-			a.log.Info("slack: socket closed by remote, will reconnect", "attempt", attempt)
+			// Run() returned without error (clean close); reset attempt counter.
+			attempt = 1
+			a.log.Info("slack: socket closed cleanly, reconnecting")
 			select {
 			case <-ctx.Done():
 				return
