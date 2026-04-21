@@ -142,6 +142,15 @@ type InputRecoverer interface {
 	LastInput() string
 }
 
+// InPlaceReseter is an optional interface for workers whose ResetContext
+// resets state in-place without replacing the Conn or restarting the process.
+// Bridge.ResetSession uses this to decide whether to spawn a new forwardEvents
+// goroutine: in-place resets keep the existing goroutine, while process-restart
+// resets (the default) need a new one.
+type InPlaceReseter interface {
+	InPlaceReset() bool
+}
+
 // WorkerSessionIDHandler is an optional interface for workers that manage
 // their own internal session IDs separate from the Gateway session ID.
 // Bridge detects implementations via type assertion and uses them to
