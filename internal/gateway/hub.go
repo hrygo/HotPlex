@@ -9,9 +9,10 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 
@@ -221,15 +222,13 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc messaging.PlatformConn) {
 		h.sessions[sessionID] = make(map[SessionWriter]bool)
 	}
 
-	// Deduplicate: avoid wrapping the same PlatformConn in multiple pcEntries,
-	// which would cause each event to be routed N times (content duplication).
 	for sw := range h.sessions[sessionID] {
 		if pce, ok := sw.(*pcEntry); ok && pce.pc == pc {
 			return
 		}
 	}
 
-	h.sessions[sessionID][&pcEntry{pc: pc}] = true
+	h.sessions[sessionID][newPCEntry(pc, defaultPCEntryConfig(h.cfg))] = true
 }
 
 // sendBroadcast sends to the broadcast channel. Returns false if the hub is
@@ -401,8 +400,6 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
-	// Snapshot connections under RLock to avoid iterating a shared map
-	// that UnregisterConn may modify concurrently.
 	h.mu.RLock()
 	sessionConns := h.sessions[msg.Env.SessionID]
 	conns := make([]SessionWriter, 0, len(sessionConns))
@@ -415,7 +412,6 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		return
 	}
 
-	// ADMIN-008: capture event to ring buffer if LogHandler is configured.
 	if h.LogHandler != nil {
 		level := "INFO"
 		if msg.Env.Event.Type == events.Error {
@@ -426,16 +422,24 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		h.LogHandler(level, fmt.Sprintf("event %s seq=%d", msg.Env.Event.Type, msg.Env.Seq), msg.Env.SessionID)
 	}
 
-	// Note: msg.Env is already a clone created by SendToSession before
-	// placing it on the broadcast channel, so aep.EncodeJSON can safely
-	// mutate its Version field without racing with Bridge.forwardEvents.
-	encoded, err := aep.EncodeJSON(msg.Env)
-	if err != nil {
-		h.log.Error("gateway: encode failed", "err", err)
-		return
+	// Lazy JSON encode: only compute if there are WebSocket conns.
+	var encoded []byte
+	needEncode := false
+	for _, conn := range conns {
+		if _, ok := conn.(*Conn); ok {
+			needEncode = true
+			break
+		}
+	}
+	if needEncode {
+		var err error
+		encoded, err = aep.EncodeJSON(msg.Env)
+		if err != nil {
+			h.log.Error("gateway: encode failed", "err", err)
+			return
+		}
 	}
 
-	// Split by type: *Conn uses raw WriteMessage, platform wrappers use WriteCtx.
 	for _, conn := range conns {
 		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(msg.Env.Event.Type)).Inc()
 		if c, ok := conn.(*Conn); ok {
@@ -445,7 +449,7 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 			}
 		} else {
 			if err := conn.WriteCtx(context.Background(), msg.Env); err != nil {
-				h.log.Warn("gateway: platform write failed", "session_id", msg.Env.SessionID, "err", err)
+				h.log.Warn("gateway: platform write enqueue failed", "session_id", msg.Env.SessionID, "err", err)
 				_ = conn.Close()
 				h.mu.Lock()
 				if sessionConns, ok := h.sessions[msg.Env.SessionID]; ok {
@@ -605,23 +609,206 @@ func (g *SeqGen) Remove(sessionID string) {
 	g.mu.Unlock()
 }
 
-// pcEntry wraps a PlatformConn so it can be stored in the sessions map alongside
-// *Conn entries. It delegates WriteCtx and Close to the underlying PlatformConn.
-// The closed flag prevents stale entries from sending duplicate messages after
-// the underlying PlatformConn has been closed (e.g., due to a write error).
+// pcEntry wraps a PlatformConn with an async writeLoop goroutine and delta
+// coalescing. It satisfies the SessionWriter interface.
+//
+// WriteCtx sends envelopes to a buffered channel; a dedicated writeLoop
+// goroutine reads from the channel, coalesces consecutive droppable events
+// (message.delta / raw), and forwards merged or individual envelopes to the
+// underlying PlatformConn. This decouples Hub.Run() from blocking platform
+// HTTP API calls.
 type pcEntry struct {
-	pc     messaging.PlatformConn
-	closed atomic.Bool
+	pc   messaging.PlatformConn
+	ch   chan *events.Envelope
+	done chan struct{}
+	cfg  pcEntryConfig
 }
 
-func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) error {
-	if e.closed.Load() {
-		return nil // idempotent: ignore writes to closed entries
+type pcEntryConfig struct {
+	WriteBuffer   int
+	DropThreshold int
+	CoalesceIntvl time.Duration
+	CoalesceSize  int
+}
+
+func defaultPCEntryConfig(cfg *config.Config) pcEntryConfig {
+	c := pcEntryConfig{
+		WriteBuffer:   cfg.Gateway.PlatformWriteBuffer,
+		DropThreshold: cfg.Gateway.PlatformDropThreshold,
+		CoalesceIntvl: cfg.Gateway.DeltaCoalesceInterval,
+		CoalesceSize:  cfg.Gateway.DeltaCoalesceSize,
 	}
-	return e.pc.WriteCtx(ctx, env)
+	if c.WriteBuffer <= 0 {
+		c.WriteBuffer = 64
+	}
+	if c.DropThreshold <= 0 {
+		c.DropThreshold = 56
+	}
+	if c.CoalesceIntvl <= 0 {
+		c.CoalesceIntvl = 120 * time.Millisecond
+	}
+	if c.CoalesceSize <= 0 {
+		c.CoalesceSize = 200
+	}
+	return c
 }
 
+func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig) *pcEntry {
+	e := &pcEntry{
+		pc:   pc,
+		ch:   make(chan *events.Envelope, cfg.WriteBuffer),
+		done: make(chan struct{}),
+		cfg:  cfg,
+	}
+	go e.writeLoop()
+	return e
+}
+
+// WriteCtx delivers an envelope to the async writeLoop channel.
+// Droppable events are silently dropped when the buffer exceeds the drop
+// threshold or is full. Guaranteed events block up to 5s waiting for space.
+func (e *pcEntry) WriteCtx(_ context.Context, env *events.Envelope) error {
+	if isDroppable(env.Event.Type) && len(e.ch) >= e.cfg.DropThreshold {
+		metrics.GatewayPlatformDroppedTotal.WithLabelValues(string(env.Event.Type)).Inc()
+		return nil
+	}
+
+	select {
+	case e.ch <- env:
+		return nil
+	default:
+	}
+
+	if isDroppable(env.Event.Type) {
+		metrics.GatewayPlatformDroppedTotal.WithLabelValues(string(env.Event.Type)).Inc()
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	select {
+	case e.ch <- env:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("platform conn write timeout: buffer full")
+	}
+}
+
+// Close signals writeLoop to drain pending deltas and exit, waits for
+// completion, then closes the underlying PlatformConn.
 func (e *pcEntry) Close() error {
-	e.closed.Store(true)
+	close(e.ch)
+	<-e.done
 	return e.pc.Close()
+}
+
+// writeLoop reads envelopes from the channel, coalesces consecutive droppable
+// events into merged deltas, and forwards them to the underlying PlatformConn.
+func (e *pcEntry) writeLoop() {
+	defer close(e.done)
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("pcEntry writeLoop panic", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+
+	var db strings.Builder
+	var sessionID string
+	var timer *time.Timer
+	var timerCh <-chan time.Time
+
+	flush := func() {
+		if db.Len() == 0 {
+			return
+		}
+		merged := &events.Envelope{
+			Version:   events.Version,
+			ID:        aep.NewID(),
+			SessionID: sessionID,
+			Event: events.Event{
+				Type: events.MessageDelta,
+				Data: events.MessageDeltaData{
+					Content: db.String(),
+				},
+			},
+		}
+		metrics.GatewayDeltaFlushTotal.WithLabelValues(sessionID).Inc()
+		db.Reset()
+		if timer != nil {
+			timer.Stop()
+			timerCh = nil
+		}
+		e.writeOne(merged)
+	}
+
+	for {
+		select {
+		case env, ok := <-e.ch:
+			if !ok {
+				flush()
+				return
+			}
+
+			if isDroppable(env.Event.Type) {
+				content := extractDeltaContent(env)
+				if db.Len() == 0 {
+					sessionID = env.SessionID
+				}
+				db.WriteString(content)
+				metrics.GatewayDeltaCoalescedTotal.WithLabelValues(env.SessionID).Inc()
+
+				if utf8.RuneCountInString(db.String()) >= e.cfg.CoalesceSize {
+					flush()
+				} else if timer == nil {
+					timer = time.NewTimer(e.cfg.CoalesceIntvl)
+					timerCh = timer.C
+				} else {
+					timer.Reset(e.cfg.CoalesceIntvl)
+				}
+			} else {
+				flush()
+				e.writeOne(env)
+			}
+
+		case <-timerCh:
+			flush()
+		}
+	}
+}
+
+func (e *pcEntry) writeOne(env *events.Envelope) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := e.pc.WriteCtx(ctx, env); err != nil {
+		slog.Warn("platform async write failed",
+			"event_type", env.Event.Type,
+			"session_id", env.SessionID,
+			"err", err)
+	}
+}
+
+func extractDeltaContent(env *events.Envelope) string {
+	switch env.Event.Type {
+	case events.MessageDelta:
+		if d, ok := env.Event.Data.(events.MessageDeltaData); ok {
+			return d.Content
+		}
+		if m, ok := env.Event.Data.(map[string]any); ok {
+			if c, _ := m["content"].(string); c != "" {
+				return c
+			}
+		}
+	case events.Raw:
+		if d, ok := env.Event.Data.(events.RawData); ok {
+			if m, ok := d.Raw.(map[string]any); ok {
+				if t, _ := m["text"].(string); t != "" {
+					return t
+				}
+			}
+		}
+	}
+	if s, ok := env.Event.Data.(string); ok {
+		return s
+	}
+	return ""
 }

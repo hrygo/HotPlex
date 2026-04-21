@@ -230,6 +230,24 @@ type GatewayConfig struct {
 	IdleTimeout        time.Duration `mapstructure:"idle_timeout"`
 	MaxFrameSize       int64         `mapstructure:"max_frame_size"`
 	BroadcastQueueSize int           `mapstructure:"broadcast_queue_size"`
+
+	// PlatformWriteBuffer is the per-conn channel capacity for async platform writes.
+	// 64 slots accommodate ~8 batches at 120ms coalesce window, providing ample headroom
+	// even under burst conditions without excessive memory overhead.
+	PlatformWriteBuffer int `mapstructure:"platform_write_buffer"`
+	// PlatformDropThreshold is the fill level at which droppable events (delta/raw)
+	// begin being silently dropped. Set to 87.5% of PlatformWriteBuffer to provide
+	// backpressure relief while preserving space for guaranteed events.
+	PlatformDropThreshold int `mapstructure:"platform_drop_threshold"`
+	// DeltaCoalesceInterval is the time window for batching consecutive delta events.
+	// 120ms targets Feishu CardKit's 10 updates/sec per-card rate limit (8.3/sec with margin),
+	// while keeping first-token latency well under the 200ms human perception threshold.
+	// At 100 tok/s input, this yields ~12x API call reduction.
+	DeltaCoalesceInterval time.Duration `mapstructure:"delta_coalesce_interval"`
+	// DeltaCoalesceSize is the rune threshold for immediate delta flush, serving as a
+	// burst safety valve. 200 runes ≈ 40 tokens triggers early flush only during spikes,
+	// while average batches at 100 tok/s / 120ms ≈ 48 runes stay well below this threshold.
+	DeltaCoalesceSize int `mapstructure:"delta_coalesce_size"`
 }
 
 // DBConfig holds SQLite settings.
@@ -318,15 +336,19 @@ type PoolConfig struct {
 func Default() *Config {
 	return &Config{
 		Gateway: GatewayConfig{
-			Addr:               ":8888",
-			ReadBufferSize:     4096,
-			WriteBufferSize:    4096,
-			PingInterval:       54 * time.Second,
-			PongTimeout:        60 * time.Second,
-			WriteTimeout:       10 * time.Second,
-			IdleTimeout:        5 * time.Minute,
-			MaxFrameSize:       32 * 1024,
-			BroadcastQueueSize: 256,
+			Addr:                  ":8888",
+			ReadBufferSize:        4096,
+			WriteBufferSize:       4096,
+			PingInterval:          54 * time.Second,
+			PongTimeout:           60 * time.Second,
+			WriteTimeout:          10 * time.Second,
+			IdleTimeout:           5 * time.Minute,
+			MaxFrameSize:          32 * 1024,
+			BroadcastQueueSize:    256,
+			PlatformWriteBuffer:   64,
+			PlatformDropThreshold: 56,
+			DeltaCoalesceInterval: 120 * time.Millisecond,
+			DeltaCoalesceSize:     200,
 		},
 		DB: DBConfig{
 			Path:         "data/hotplex-worker.db",
