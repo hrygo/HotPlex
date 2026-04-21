@@ -5,17 +5,19 @@ tags:
   - messaging/slack
   - platform-adapter
 date: 2026-04-18
-status: final
-progress: 0
+status: in-progress
+progress: 50
 priority: high
 estimated_hours: 40
+last_updated: 2026-04-21
 ---
 
 # Slack Adapter 改进规格书
 
 > 版本: v1.0
 > 日期: 2026-04-18
-> 状态: Final
+> 状态: In Progress
+> ⚠️ **进度修正**（2026-04-21）：本文档 header 曾标记 `progress: 0`，实际 `internal/messaging/slack/adapter.go` 已包含约 792 行实现代码（远超起草时的 278 行）。进度已更新为估算值 `50`，具体 Phase 进度以实现状态为准。
 > 交叉复核: 已逐行对齐 `internal/messaging/slack/adapter.go`（278 行）、`events.go`（60 行）、`bridge.go`（140 行）源码；已对照 slack-go SDK v0.22.0 源码验证所有 API 签名；已参考 `~/hotplex` 生产实现验证设计模式有效性
 > SDK 版本: `github.com/slack-go/slack@v0.22.0`
 > 原则: SDK first（能用 SDK 的不写新代码）| 消除幻觉（所有引用已交叉验证）| 最佳实践（~/hotplex 参考，非金标准）

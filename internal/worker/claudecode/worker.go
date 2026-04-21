@@ -124,6 +124,7 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, resu
 		Logger:       w.Log,
 		AllowedTools: session.AllowedTools,
 	})
+	w.Proc.SetPIDKey(session.SessionID)
 
 	bgCtx := context.Background()
 	stdin, _, _, err := w.Proc.Start(bgCtx, "claude", args, base.BuildEnv(session, claudeCodeEnvWhitelist, "claude-code"), session.ProjectDir)

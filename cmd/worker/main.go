@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -32,6 +33,7 @@ import (
 	_ "github.com/hotplex/hotplex-worker/internal/worker/claudecode"
 	_ "github.com/hotplex/hotplex-worker/internal/worker/opencodeserver"
 	_ "github.com/hotplex/hotplex-worker/internal/worker/pi"
+	"github.com/hotplex/hotplex-worker/internal/worker/proc"
 	"github.com/hotplex/hotplex-worker/pkg/aep"
 	"github.com/hotplex/hotplex-worker/pkg/events"
 )
@@ -95,6 +97,41 @@ func run() error {
 		"version", versionString(),
 	)
 	slog.SetDefault(log)
+
+	// Initialize PID file tracker for orphan process cleanup.
+	pidDir := cfg.Worker.PIDDir
+	if pidDir == "" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			pidDir = filepath.Join(home, ".hotplex", ".pids")
+		} else {
+			pidDir = "/tmp/hotplex/.pids"
+		}
+	}
+	pidTracker := proc.InitTracker(pidDir, log)
+	if err := pidTracker.EnsureDir(); err != nil {
+		log.Warn("gateway: pid dir setup failed, orphan cleanup disabled", "dir", pidDir, "err", err)
+	} else {
+		// Run cleanup asynchronously (max 3 concurrent, skip files younger than 5s).
+		// This avoids blocking gateway startup while ensuring we don't kill
+		// newly started workers that happened to reuse a filename or PID.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			results := pidTracker.CleanupOrphans(ctx, 3, 5*time.Second)
+			killed := 0
+			for _, r := range results {
+				if r.Err != nil {
+					log.Warn("gateway: orphan cleanup error", "key", r.Key, "pgid", r.PGID, "err", r.Err)
+				} else if r.Killed {
+					log.Info("gateway: killed orphan process", "key", r.Key, "pgid", r.PGID)
+					killed++
+				}
+			}
+			if len(results) > 0 {
+				log.Info("gateway: orphan cleanup complete", "scanned", len(results), "killed", killed)
+			}
+		}()
+	}
 
 	tracing.Init(ctx, log, "hotplex-worker-gateway")
 
@@ -246,6 +283,8 @@ func run() error {
 	// Wait for all bridge forwardEvents goroutines to finish before
 	// closing the session store (which would cause "sql: database is closed" errors).
 	bridge.Shutdown()
+
+	pidTracker.RemoveAll()
 
 	if err := sm.Close(); err != nil {
 		log.Warn("gateway: session manager close", "err", err)

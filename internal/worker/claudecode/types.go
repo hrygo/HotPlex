@@ -28,10 +28,10 @@ type SDKMessage struct {
 	SessionID         string          `json:"session_id,omitempty"`
 
 	// System fields (type="system")
-	Status string `json:"status,omitempty"` // For system.status
+	Status json.RawMessage `json:"status,omitempty"` // For system.status
 
 	// Session state fields (type="session_state_changed")
-	State string `json:"state,omitempty"`
+	State json.RawMessage `json:"state,omitempty"`
 }
 
 // StreamEvent represents a streaming event from Claude Code.

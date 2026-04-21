@@ -191,6 +191,72 @@ func TestParser_ParseLine_ControlRequestMCPStatus(t *testing.T) {
 	require.Equal(t, "mcp_status", cr.Subtype)
 }
 
+func TestParser_ParseLine_SystemStatus(t *testing.T) {
+	log := newTestLogger()
+	parser := NewParser(log)
+
+	line := `{"type":"system","subtype":"status","status":{"user_alive_interval":30,"max_web_socket_frame_size":1048576,"server":{"version":"1.2.3"}}}`
+
+	events, err := parser.ParseLine(line)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, EventSystem, events[0].Type)
+}
+
+func TestParser_ParseLine_SystemNonStatus(t *testing.T) {
+	log := newTestLogger()
+	parser := NewParser(log)
+
+	// Non-status system messages are ignored.
+	line := `{"type":"system","subtype":"other","data":"something"}`
+
+	events, err := parser.ParseLine(line)
+	require.NoError(t, err)
+	require.Nil(t, events)
+}
+
+func TestParser_ParseLine_SessionStateChanged(t *testing.T) {
+	log := newTestLogger()
+	parser := NewParser(log)
+
+	line := `{"type":"session_state_changed","state":{"session_id":"sess_abc","is_resumed":true,"active_form":"Coding"}}`
+
+	events, err := parser.ParseLine(line)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, EventSessionState, events[0].Type)
+}
+
+func TestExtractTextFromContent_String(t *testing.T) {
+	t.Parallel()
+	result := extractTextFromContent([]byte(`"hello world"`))
+	require.Equal(t, "hello world", result)
+}
+
+func TestExtractTextFromContent_Empty(t *testing.T) {
+	t.Parallel()
+	result := extractTextFromContent([]byte{})
+	require.Empty(t, result)
+}
+
+func TestExtractTextFromContent_Array(t *testing.T) {
+	t.Parallel()
+	result := extractTextFromContent([]byte(`[{"type":"text","text":"part1"},{"type":"text","text":"part2"}]`))
+	require.Equal(t, "part1part2", result)
+}
+
+func TestExtractTextFromContent_ArrayMixedTypes(t *testing.T) {
+	t.Parallel()
+	result := extractTextFromContent([]byte(`[{"type":"text","text":"only text"},{"type":"image","data":"skip"}]`))
+	require.Equal(t, "only text", result)
+}
+
+func TestExtractTextFromContent_RawFallback(t *testing.T) {
+	t.Parallel()
+	result := extractTextFromContent([]byte(`not json at all`))
+	require.Equal(t, "not json at all", result)
+}
+
 func TestParser_ParseLine_UnknownType(t *testing.T) {
 	log := newTestLogger()
 	parser := NewParser(log)

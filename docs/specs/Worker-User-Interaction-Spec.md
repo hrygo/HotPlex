@@ -3,10 +3,12 @@ type: spec
 tags: [project/HotPlex, worker/claudecode, worker/opencode-server, messaging, gateway]
 date: 2026-04-19
 status: draft
-progress: 0
+progress: 10
 priority: high
 estimated_hours: 24
 audited: true  # 三源码交叉审查通过 2026-04-19
+last_updated: 2026-04-21
+note: "有关 Session Stats 的详细设计请参考实际 Session Store 实现；有关 Worker Session Control 的最新状态请参考 Worker-Session-Control-Spec.md（status: in-progress）"
 ---
 
 # Worker User Interaction Spec

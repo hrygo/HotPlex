@@ -90,6 +90,27 @@ var (
 		Help:      "Total message.delta events dropped due to backpressure",
 	})
 
+	// GatewayPlatformDroppedTotal tracks events dropped at the per-conn platform buffer level.
+	GatewayPlatformDroppedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "gateway_platform_dropped_total",
+		Help:      "Events dropped at platform conn buffer level",
+	}, []string{"event_type"})
+
+	// GatewayDeltaCoalescedTotal tracks delta events merged by the coalescer.
+	GatewayDeltaCoalescedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "gateway_delta_coalesced_total",
+		Help:      "Number of delta events merged by coalescer",
+	}, []string{"session_id"})
+
+	// GatewayDeltaFlushTotal tracks merged delta flushes sent to platform conns.
+	GatewayDeltaFlushTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "gateway_delta_flush_total",
+		Help:      "Number of merged delta flushes sent to platform",
+	}, []string{"session_id"})
+
 	// GatewayErrorsTotal tracks errors by type.
 	GatewayErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "hotplex",

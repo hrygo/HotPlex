@@ -6,16 +6,18 @@ tags:
   - platform-adapter
 date: 2026-04-19
 status: in-progress
-progress: 70
+progress: 50
 priority: high
 estimated_hours: 40
+last_updated: 2026-04-21
 ---
 
 # Feishu Adapter 改进规格书
 
 > 版本: v1.1
 > 日期: 2026-04-19
-> 状态: Draft
+> 状态: In Progress
+> ⚠️ **进度修正**（2026-04-21）：本文档 header 曾标记 `progress: 70`，实际 `internal/messaging/feishu/adapter.go` 已包含约 976 行实现代码，进度以估算值 `50` 记录，具体 Phase 进度以实现状态为准。
 > 交叉复核: 已对齐 `internal/messaging/feishu/adapter.go`、`internal/messaging/bridge.go`、`internal/config/config.go` 源码，已对照 OpenClaw Lark 官方插件 (`@larksuite/openclaw-lark@2026.4.1`) 源码验证所有 API 调用
 > SDK 版本: `github.com/larksuite/oapi-sdk-go/v3@v3.5.3`
 

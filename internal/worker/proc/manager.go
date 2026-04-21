@@ -44,6 +44,7 @@ type Manager struct {
 	scanner      *bufio.Scanner
 	outputLimit  int
 	allowedTools []string
+	pidKey       string
 }
 
 // Opts configures a process manager.
@@ -141,6 +142,9 @@ func (m *Manager) Start(ctx context.Context, name string, args, env []string, di
 		m.pgid = cmd.Process.Pid
 	}
 
+	// Write PID file if tracker is configured.
+	m.trackPID()
+
 	// Limit process virtual address space (RLIMIT_AS) to 512 MB.
 	// This prevents runaway worker processes from exhausting the gateway's memory.
 	// P3: RLIMIT_AS is not reliably supported on macOS — skip silently.
@@ -184,6 +188,7 @@ func (m *Manager) Terminate(ctx context.Context, sig syscall.Signal, gracePeriod
 		return nil
 	}
 	pgid := m.pgid
+	pidKey := m.pidKey
 	m.mu.Unlock()
 
 	// Send signal to the entire process group.
@@ -202,6 +207,7 @@ func (m *Manager) Terminate(ctx context.Context, sig syscall.Signal, gracePeriod
 	select {
 	case <-done:
 		m.captureExitCode()
+		m.untrackPID(pidKey)
 		return nil
 	case <-time.After(gracePeriod):
 		m.log.Warn("proc: graceful shutdown timeout, sending SIGKILL", "pgid", pgid)
@@ -226,6 +232,7 @@ func (m *Manager) Kill() error {
 	}
 	_ = m.cmd.Wait()
 	m.captureExitCodeLocked()
+	m.untrackPID(m.pidKey)
 	return nil
 }
 
@@ -258,6 +265,30 @@ func (m *Manager) PGID() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.pgid
+}
+
+// SetPIDKey sets the PID file tracking key for this process.
+func (m *Manager) SetPIDKey(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pidKey = key
+}
+
+// trackPID writes the current PGID to the tracker. Must be called after Start()
+// when m.pgid is set. Safe to call even if tracker is nil.
+func (m *Manager) trackPID() {
+	if t := GlobalTracker(); t != nil && m.pidKey != "" {
+		if err := t.Write(m.pidKey, m.pgid); err != nil {
+			m.log.Warn("proc: pidfile write", "key", m.pidKey, "err", err)
+		}
+	}
+}
+
+// untrackPID removes the PID file for key. Safe to call even if tracker is nil.
+func (m *Manager) untrackPID(key string) {
+	if t := GlobalTracker(); t != nil && key != "" {
+		_ = t.Remove(key)
+	}
 }
 
 // IsRunning returns true if the process has been started and has not exited.

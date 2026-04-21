@@ -1,7 +1,9 @@
 package claudecode
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os/exec"
 	"testing"
 
@@ -438,4 +440,87 @@ func TestMapper_Map_UnknownStatus(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, envs)
 	})
+}
+
+func TestControlHandler_HandlePayload_AutoSuccess(t *testing.T) {
+	t.Parallel()
+	log := newTestLogger()
+	var buf bytes.Buffer
+	ch := NewControlHandler(log, &buf)
+
+	payload := &ControlRequestPayload{
+		RequestID: "req_auto1",
+		Subtype:   string(ControlSetPermissionMode),
+	}
+	evt, err := ch.HandlePayload(payload)
+	require.NoError(t, err)
+	require.Nil(t, evt)
+
+	var resp ControlResponse
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Equal(t, "control_response", resp.Type)
+	require.Equal(t, "success", resp.Response.Subtype)
+	require.Equal(t, "req_auto1", resp.Response.RequestID)
+}
+
+func TestControlHandler_HandlePayload_Interrupt(t *testing.T) {
+	t.Parallel()
+	log := newTestLogger()
+	var buf bytes.Buffer
+	ch := NewControlHandler(log, &buf)
+
+	payload := &ControlRequestPayload{
+		RequestID: "req_int1",
+		Subtype:   string(ControlInterrupt),
+	}
+	evt, err := ch.HandlePayload(payload)
+	require.NoError(t, err)
+	require.Nil(t, evt)
+	require.Empty(t, buf.String())
+}
+
+func TestControlHandler_HandlePayload_UnknownSubtype(t *testing.T) {
+	t.Parallel()
+	log := newTestLogger()
+	var buf bytes.Buffer
+	ch := NewControlHandler(log, &buf)
+
+	payload := &ControlRequestPayload{
+		RequestID: "req_unk",
+		Subtype:   "completely_unknown_subtype",
+	}
+	evt, err := ch.HandlePayload(payload)
+	require.NoError(t, err)
+	require.Nil(t, evt)
+	require.Empty(t, buf.String())
+}
+
+func TestControlHandler_SendQuestionResponse(t *testing.T) {
+	t.Parallel()
+	log := newTestLogger()
+	var buf bytes.Buffer
+	ch := NewControlHandler(log, &buf)
+
+	err := ch.SendQuestionResponse("req_q1", map[string]string{"q1": "a1", "q2": "a2"})
+	require.NoError(t, err)
+
+	var resp ControlResponse
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Equal(t, "req_q1", resp.Response.RequestID)
+	require.Equal(t, "allow", resp.Response.Response["behavior"])
+}
+
+func TestControlHandler_SendElicitationResponse(t *testing.T) {
+	t.Parallel()
+	log := newTestLogger()
+	var buf bytes.Buffer
+	ch := NewControlHandler(log, &buf)
+
+	err := ch.SendElicitationResponse("req_e1", "accept", map[string]any{"key": "value"})
+	require.NoError(t, err)
+
+	var resp ControlResponse
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Equal(t, "req_e1", resp.Response.RequestID)
+	require.Equal(t, "accept", resp.Response.Response["action"])
 }

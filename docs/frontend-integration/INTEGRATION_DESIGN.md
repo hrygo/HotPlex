@@ -1,8 +1,11 @@
 # HotPlex Worker 前端集成方案设计
 
-> **文档版本**: 1.0.0
+> **文档版本**: 1.1.0
 > **日期**: 2026-04-03
 > **状态**: Draft
+> **修正**（2026-04-21）：
+> - `examples/typescript-client/` 目录已不存在，前端集成请使用 `webchat/lib/ai-sdk-transport/` 中的 AI SDK Transport 或 `client/` Go SDK
+> - TypeScript 客户端（562 行）描述已过时，当前 webchat 使用 Next.js + AI SDK Transport 架构
 
 ---
 
@@ -58,7 +61,7 @@
 **集成步骤**:
 ```bash
 # 1. 复制客户端代码
-cp -r examples/typescript-client/src your-project/src/hotplex-client
+cp -r examples/typescript-client/src your-project/src/hotplex-client  # ⚠️ 目录不存在，请使用 webchat/lib/ai-sdk-transport/
 
 # 2. 安装依赖
 npm install ws eventemitter3
@@ -164,7 +167,7 @@ npm install ws eventemitter3
 
 ```
 src/
-├── hotplex-client/              # 复制自 examples/typescript-client/src
+├── hotplex-client/              # ⚠️ 目录不存在，请参考 webchat/lib/ai-sdk-transport/
 │   ├── client.ts
 │   ├── types.ts
 │   ├── constants.ts
@@ -990,7 +993,7 @@ client.on('reconnect', (data) => {
 
 - [ ] 复制 TypeScript 客户端到项目
   ```bash
-  cp -r examples/typescript-client/src your-project/src/hotplex-client
+  cp -r examples/typescript-client/src your-project/src/hotplex-client  # ⚠️ 目录不存在，请使用 webchat/lib/ai-sdk-transport/
   ```
 
 - [ ] 安装依赖
@@ -1061,10 +1064,10 @@ client.on('reconnect', (data) => {
 
 | 资源 | 路径 | 用途 |
 |------|------|------|
-| TypeScript 客户端 | `examples/typescript-client/src/client.ts` | 主要集成代码 |
+| TypeScript 客户端 | `examples/typescript-client/src/client.ts` | ⚠️ 目录不存在，请使用 `webchat/lib/ai-sdk-transport/` |
 | 协议规范 | `docs/architecture/aep-v1-Protocol.md` | 协议定义 |
 | 客户端指南 | `examples/README.md` | 集成指南 |
-| 完整示例 | `examples/typescript-client/examples/complete.ts` | 功能演示 |
+| 完整示例 | `examples/typescript-client/examples/complete.ts` | ⚠️ 目录不存在，请参考 webchat/ |
 
 ### 外部依赖
 
