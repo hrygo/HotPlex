@@ -11,7 +11,33 @@ import (
 // sensitiveParams lists URL query keys that must be redacted in logs.
 var sensitiveParams = map[string]bool{
 	"access_key": true,
+	"device_id":  true,
+	"fpid":       true,
+	"service_id": true,
 	"ticket":     true,
+}
+
+// sdkLogFilter rewrites Feishu SDK log messages to be more readable and
+// removes connection noise that carries no actionable information.
+func sdkLogFilter(msg string) string {
+	// Silent noisy routine messages (ping/pong/heartbeat cycles).
+	for _, sub := range sdkDebugSilent {
+		if strings.Contains(msg, sub) {
+			return ""
+		}
+	}
+	// Silent verbose reconnection chatter.
+	for _, prefix := range sdkReconnectSilent {
+		if strings.HasPrefix(msg, prefix) {
+			return ""
+		}
+	}
+	// Improve "receive message failed" error readability.
+	if strings.Contains(msg, "receive message failed") {
+		// Strip the raw TCP errno from the user-facing log.
+		msg = strings.Split(msg, ", err:")[0] + " (connection reset by peer)"
+	}
+	return msg
 }
 
 // redactURL replaces sensitive query parameters with "***" in URLs.
@@ -59,6 +85,15 @@ var sdkDebugSilent = []string{
 	"receive pong",
 }
 
+// sdkReconnectSilent removes verbose reconnection-related log prefixes
+// that carry no actionable information and are part of the SDK's automatic
+// reconnect loop.
+var sdkReconnectSilent = []string{
+	"disconnected to wss://",
+	"trying to reconnect:",
+	"connected to wss://",
+}
+
 // SlogLogger implements larkcore.Logger, wrapping slog.Logger.
 // This ensures all Feishu SDK logs use the same JSON format and level
 // as the application logs, with sensitive URL params redacted.
@@ -67,20 +102,30 @@ var sdkDebugSilent = []string{
 type SlogLogger struct{ *slog.Logger }
 
 func (s SlogLogger) Debug(_ context.Context, args ...any) {
-	msg := fmt.Sprint(args...)
-	for _, sub := range sdkDebugSilent {
-		if strings.Contains(msg, sub) {
-			return
-		}
+	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
+	if msg == "" {
+		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelDebug, redactURL(msg))
+	s.Logger.Log(context.Background(), slog.LevelDebug, msg)
 }
 func (s SlogLogger) Info(_ context.Context, args ...any) {
-	s.Logger.Log(context.Background(), slog.LevelInfo, redactURL(fmt.Sprint(args...)))
+	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
+	if msg == "" {
+		return
+	}
+	s.Logger.Log(context.Background(), slog.LevelInfo, msg)
 }
 func (s SlogLogger) Warn(_ context.Context, args ...any) {
-	s.Logger.Log(context.Background(), slog.LevelWarn, redactURL(fmt.Sprint(args...)))
+	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
+	if msg == "" {
+		return
+	}
+	s.Logger.Log(context.Background(), slog.LevelWarn, msg)
 }
 func (s SlogLogger) Error(_ context.Context, args ...any) {
-	s.Logger.Log(context.Background(), slog.LevelError, redactURL(fmt.Sprint(args...)))
+	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
+	if msg == "" {
+		return
+	}
+	s.Logger.Log(context.Background(), slog.LevelError, msg)
 }

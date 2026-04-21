@@ -491,6 +491,7 @@ func (w *Worker) startServerProcess(ctx context.Context, session worker.SessionI
 		Logger:       w.Log,
 		AllowedTools: session.AllowedTools,
 	})
+	w.Proc.SetPIDKey(session.SessionID)
 
 	// Start the opencode serve process
 	bgCtx := context.Background()

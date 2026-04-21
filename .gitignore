@@ -4,8 +4,8 @@
 bin/
 hotplex-worker
 hotplex-worker-*
-worker
-gateway
+/worker
+/gateway
 hotplex-worker.pid
 *.test
 *.out

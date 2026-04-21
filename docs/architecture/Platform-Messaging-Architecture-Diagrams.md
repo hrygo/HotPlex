@@ -68,9 +68,9 @@
 │                                        │                                           │
 │                                        ▼                                           │
 │   ┌─────────────────────────────────────────────────────────────────────────┐     │
-│   │                      Worker Registry + 5 Adapters                         │     │
-│   │  ClaudeCode │ OpenCodeSrv │ ACPX │ Pi-mono             │     │
-│   │  (stdio)     │  (stdio)     │  (HTTP)      │(NDJSON)│ (stdio)         │     │
+│   │                      Worker Registry + Adapters (ACPX 未实现)               │     │
+│   │  ClaudeCode │ OpenCodeSrv │ ~~ACPX~~ │ Pi-mono           │     │
+│   │  (stdio)     │  (HTTP/SSE) │  (—)        │(raw-out) │ (stdio)         │     │
 │   └─────────────────────────────────────────────────────────────────────────┘     │
 └──────────────────────────────────────────────────────────────────────────────────────┘
                                          │
@@ -102,7 +102,7 @@ internal/
     worker.go    Worker 接口
     registry.go  自注册工厂
     base/        共享生命周期基座
-    claudecode/ opencodesrv/ acpx/ pimon/
+    claudecode/ opencodesrv/ pimon/  (acpx/ — ⚠️ 未实现)
 
   messaging/           ★ NEW (~650 行, 零核心文件改动)
   ├── platform_conn.go       PlatformConn 接口 (WriteCtx + Close)

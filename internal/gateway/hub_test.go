@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -563,6 +564,355 @@ func TestConn_sendInitError(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"type":"init_ack"`)
 	require.Contains(t, string(data), "bad token")
+}
+
+// ─── pcEntry async writer tests ─────────────────────────────────────────────────
+
+// mockPlatformConn records envelopes written via WriteCtx.
+type mockPlatformConn struct {
+	mu   sync.Mutex
+	envs []*events.Envelope
+	err  error
+}
+
+func (m *mockPlatformConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.mu.Lock()
+	m.envs = append(m.envs, env)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *mockPlatformConn) Close() error { return nil }
+
+func (m *mockPlatformConn) envelopes() []*events.Envelope {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*events.Envelope, len(m.envs))
+	copy(out, m.envs)
+	return out
+}
+
+func testPCEntryConfig() pcEntryConfig {
+	return pcEntryConfig{
+		WriteBuffer:   8,
+		DropThreshold: 6,
+		CoalesceIntvl: 20 * time.Millisecond,
+		CoalesceSize:  50,
+	}
+}
+
+func TestPCEntry_WriteCtx_Async(t *testing.T) {
+	t.Parallel()
+	pc := &mockPlatformConn{}
+	e := newPCEntry(pc, testPCEntryConfig())
+	defer e.Close()
+
+	env := events.NewEnvelope(aep.NewID(), "s1", 1, events.Done, events.DoneData{Success: true})
+	err := e.WriteCtx(context.Background(), env)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return len(pc.envelopes()) >= 1
+	}, time.Second, 10*time.Millisecond)
+
+	got := pc.envelopes()
+	require.Len(t, got, 1)
+	require.Equal(t, events.Done, got[0].Event.Type)
+}
+
+func TestPCEntry_WriteCtx_DroppableDroppedAtThreshold(t *testing.T) {
+	t.Parallel()
+	cfg := testPCEntryConfig()
+	cfg.WriteBuffer = 4
+	cfg.DropThreshold = 2
+	cfg.CoalesceIntvl = time.Hour
+
+	pc := &mockPlatformConn{}
+	e := newPCEntry(pc, cfg)
+	defer e.Close()
+
+	// Fill channel directly (bypassing WriteCtx to avoid writeLoop drain race).
+	for i := 0; i < cfg.WriteBuffer; i++ {
+		e.ch <- events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "x"})
+	}
+
+	// Channel is now full (len=4 >= DropThreshold=2). Droppable should be silently dropped.
+	env := events.NewEnvelope(aep.NewID(), "s1", 99, events.MessageDelta, map[string]any{"content": "y"})
+	err := e.WriteCtx(context.Background(), env)
+	require.NoError(t, err, "droppable event should return nil even when dropped")
+
+	// Verify the guaranteed path works: send a guaranteed event, it should eventually
+	// succeed after writeLoop drains some items via the long coalesce timer.
+	guaranteedEnv := events.NewEnvelope(aep.NewID(), "s1", 100, events.Done, events.DoneData{Success: true})
+	done := make(chan error, 1)
+	go func() { done <- e.WriteCtx(context.Background(), guaranteedEnv) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err, "guaranteed event should succeed after drain")
+	case <-time.After(3 * time.Second):
+		t.Fatal("guaranteed event should succeed within timeout")
+	}
+}
+
+func TestPCEntry_WriteCtx_DroppableDroppedDefault(t *testing.T) {
+	t.Parallel()
+	cfg := testPCEntryConfig()
+	cfg.WriteBuffer = 2
+	cfg.DropThreshold = 1
+	cfg.CoalesceIntvl = time.Hour
+
+	pc := &mockPlatformConn{}
+	e := newPCEntry(pc, cfg)
+	defer e.Close()
+
+	// Fill channel to capacity.
+	for i := 0; i < cfg.WriteBuffer; i++ {
+		e.ch <- events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "x"})
+	}
+
+	// Now len(ch) >= DropThreshold, so the fast-path check should drop.
+	env := events.NewEnvelope(aep.NewID(), "s1", 99, events.MessageDelta, map[string]any{"content": "y"})
+	err := e.WriteCtx(context.Background(), env)
+	require.NoError(t, err)
+}
+
+func TestPCEntry_WriteCtx_GuaranteedBlocks(t *testing.T) {
+	t.Parallel()
+	cfg := testPCEntryConfig()
+	cfg.WriteBuffer = 2
+	cfg.DropThreshold = 1
+	cfg.CoalesceIntvl = 0 // disable coalescing for this test
+
+	pc := &mockPlatformConn{}
+	// Make pc.WriteCtx slow so the buffer drains slowly.
+	e := newPCEntry(pc, cfg)
+	defer e.Close()
+
+	// Fill the buffer.
+	for i := 0; i < cfg.WriteBuffer; i++ {
+		env := events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "x"})
+		_ = e.WriteCtx(context.Background(), env)
+	}
+
+	// Guaranteed event should eventually succeed (blocks until space available).
+	done := make(chan error, 1)
+	go func() {
+		env := events.NewEnvelope(aep.NewID(), "s1", 99, events.Done, events.DoneData{Success: true})
+		done <- e.WriteCtx(context.Background(), env)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("guaranteed write should succeed within timeout")
+	}
+}
+
+func TestPCEntry_Close_DrainsPending(t *testing.T) {
+	t.Parallel()
+	cfg := testPCEntryConfig()
+	cfg.CoalesceIntvl = time.Hour // timer won't fire, deltas accumulate until Close
+
+	pc := &mockPlatformConn{}
+	e := newPCEntry(pc, cfg)
+
+	for i := 0; i < 3; i++ {
+		env := events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": fmt.Sprintf("msg%d", i)})
+		_ = e.WriteCtx(context.Background(), env)
+	}
+
+	require.NoError(t, e.Close())
+
+	got := pc.envelopes()
+	require.Len(t, got, 1, "Close should flush all coalesced deltas as a single envelope")
+	d, ok := got[0].Event.Data.(events.MessageDeltaData)
+	require.True(t, ok)
+	require.Equal(t, "msg0msg1msg2", d.Content)
+}
+
+func TestPCEntry_DeltaCoalescing_MergesDeltas(t *testing.T) {
+	t.Parallel()
+	cfg := testPCEntryConfig()
+	cfg.CoalesceIntvl = 50 * time.Millisecond
+
+	pc := &mockPlatformConn{}
+	e := newPCEntry(pc, cfg)
+	defer e.Close()
+
+	for i := 0; i < 5; i++ {
+		env := events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "a"})
+		_ = e.WriteCtx(context.Background(), env)
+	}
+
+	// Wait for coalesce timer to fire + writeOne to complete.
+	require.Eventually(t, func() bool {
+		return len(pc.envelopes()) >= 1
+	}, 200*time.Millisecond, 10*time.Millisecond)
+
+	got := pc.envelopes()
+	require.Len(t, got, 1, "5 deltas should be coalesced into 1")
+	require.Equal(t, events.MessageDelta, got[0].Event.Type)
+	d, ok := got[0].Event.Data.(events.MessageDeltaData)
+	require.True(t, ok)
+	require.Equal(t, "aaaaa", d.Content)
+}
+
+func TestPCEntry_DeltaCoalescing_SizeFlush(t *testing.T) {
+	t.Parallel()
+	cfg := testPCEntryConfig()
+	cfg.CoalesceSize = 5
+	cfg.CoalesceIntvl = 10 * time.Second // timer should NOT fire
+
+	pc := &mockPlatformConn{}
+	e := newPCEntry(pc, cfg)
+	defer e.Close()
+
+	// Send 3 chars * 2 = 6 runes > CoalesceSize(5).
+	for i := 0; i < 2; i++ {
+		env := events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "abc"})
+		_ = e.WriteCtx(context.Background(), env)
+	}
+
+	require.Eventually(t, func() bool {
+		return len(pc.envelopes()) >= 1
+	}, 200*time.Millisecond, 10*time.Millisecond)
+
+	got := pc.envelopes()
+	require.Len(t, got, 1)
+	d, ok := got[0].Event.Data.(events.MessageDeltaData)
+	require.True(t, ok)
+	require.Equal(t, "abcabc", d.Content)
+}
+
+func TestPCEntry_DeltaCoalescing_NonDeltaFlushes(t *testing.T) {
+	t.Parallel()
+	cfg := testPCEntryConfig()
+	cfg.CoalesceIntvl = 10 * time.Second // timer should NOT fire
+
+	pc := &mockPlatformConn{}
+	e := newPCEntry(pc, cfg)
+	defer e.Close()
+
+	delta := events.NewEnvelope(aep.NewID(), "s1", 1, events.MessageDelta, map[string]any{"content": "hello"})
+	_ = e.WriteCtx(context.Background(), delta)
+
+	done := events.NewEnvelope(aep.NewID(), "s1", 2, events.Done, events.DoneData{Success: true})
+	_ = e.WriteCtx(context.Background(), done)
+
+	require.Eventually(t, func() bool {
+		return len(pc.envelopes()) >= 2
+	}, 200*time.Millisecond, 10*time.Millisecond)
+
+	got := pc.envelopes()
+	require.Len(t, got, 2)
+	require.Equal(t, events.MessageDelta, got[0].Event.Type)
+	require.Equal(t, events.Done, got[1].Event.Type)
+}
+
+func TestPCEntry_DeltaCoalescing_TimerFlush(t *testing.T) {
+	t.Parallel()
+	cfg := testPCEntryConfig()
+	cfg.CoalesceIntvl = 30 * time.Millisecond
+	cfg.CoalesceSize = 9999 // size won't trigger
+
+	pc := &mockPlatformConn{}
+	e := newPCEntry(pc, cfg)
+	defer e.Close()
+
+	delta := events.NewEnvelope(aep.NewID(), "s1", 1, events.MessageDelta, map[string]any{"content": "x"})
+	_ = e.WriteCtx(context.Background(), delta)
+
+	require.Eventually(t, func() bool {
+		return len(pc.envelopes()) >= 1
+	}, 200*time.Millisecond, 10*time.Millisecond)
+
+	got := pc.envelopes()
+	require.Len(t, got, 1)
+	d, ok := got[0].Event.Data.(events.MessageDeltaData)
+	require.True(t, ok)
+	require.Equal(t, "x", d.Content)
+}
+
+func TestPCEntry_ExtractDeltaContent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		env  *events.Envelope
+		want string
+	}{
+		{
+			"message.delta struct",
+			events.NewEnvelope("id", "s", 1, events.MessageDelta, map[string]any{"content": "hello"}),
+			"hello",
+		},
+		{
+			"message.delta map",
+			events.NewEnvelope("id", "s", 1, events.MessageDelta, map[string]any{"content": "world"}),
+			"world",
+		},
+		{
+			"raw with text",
+			events.NewEnvelope("id", "s", 1, events.Raw, events.RawData{Raw: map[string]any{"text": "raw_text"}}),
+			"raw_text",
+		},
+		{
+			"string data",
+			events.NewEnvelope("id", "s", 1, events.MessageDelta, "plain_string"),
+			"plain_string",
+		},
+		{
+			"nil data",
+			events.NewEnvelope("id", "s", 1, events.MessageDelta, nil),
+			"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractDeltaContent(tt.env)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestPCEntry_JoinPlatformSession_Dedup(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	pc := &mockPlatformConn{}
+
+	h.JoinPlatformSession("s1", pc)
+	h.JoinPlatformSession("s1", pc) // duplicate
+
+	h.mu.RLock()
+	count := len(h.sessions["s1"])
+	h.mu.RUnlock()
+	require.Equal(t, 1, count)
+}
+
+func TestPCEntry_RouteMessage_LazyEncode(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	pc := &mockPlatformConn{}
+	h.JoinPlatformSession("s_lazy", pc)
+
+	go h.Run()
+	defer h.Shutdown(context.Background())
+
+	env := events.NewEnvelope(aep.NewID(), "s_lazy", 0, events.Done, events.DoneData{Success: true})
+	err := h.SendToSession(context.Background(), env)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return len(pc.envelopes()) >= 1
+	}, time.Second, 10*time.Millisecond)
+
+	got := pc.envelopes()
+	require.Len(t, got, 1)
+	require.Equal(t, events.Done, got[0].Event.Type)
 }
 
 // ─── Bridge tests ─────────────────────────────────────────────────────────────

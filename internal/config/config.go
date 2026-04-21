@@ -230,6 +230,24 @@ type GatewayConfig struct {
 	IdleTimeout        time.Duration `mapstructure:"idle_timeout"`
 	MaxFrameSize       int64         `mapstructure:"max_frame_size"`
 	BroadcastQueueSize int           `mapstructure:"broadcast_queue_size"`
+
+	// PlatformWriteBuffer is the per-conn channel capacity for async platform writes.
+	// 64 slots accommodate ~8 batches at 120ms coalesce window, providing ample headroom
+	// even under burst conditions without excessive memory overhead.
+	PlatformWriteBuffer int `mapstructure:"platform_write_buffer"`
+	// PlatformDropThreshold is the fill level at which droppable events (delta/raw)
+	// begin being silently dropped. Set to 87.5% of PlatformWriteBuffer to provide
+	// backpressure relief while preserving space for guaranteed events.
+	PlatformDropThreshold int `mapstructure:"platform_drop_threshold"`
+	// DeltaCoalesceInterval is the time window for batching consecutive delta events.
+	// 120ms targets Feishu CardKit's 10 updates/sec per-card rate limit (8.3/sec with margin),
+	// while keeping first-token latency well under the 200ms human perception threshold.
+	// At 100 tok/s input, this yields ~12x API call reduction.
+	DeltaCoalesceInterval time.Duration `mapstructure:"delta_coalesce_interval"`
+	// DeltaCoalesceSize is the rune threshold for immediate delta flush, serving as a
+	// burst safety valve. 200 runes ≈ 40 tokens triggers early flush only during spikes,
+	// while average batches at 100 tok/s / 120ms ≈ 48 runes stay well below this threshold.
+	DeltaCoalesceSize int `mapstructure:"delta_coalesce_size"`
 }
 
 // DBConfig holds SQLite settings.
@@ -248,6 +266,7 @@ type WorkerConfig struct {
 	AllowedEnvs      []string        `mapstructure:"allowed_envs"`
 	EnvWhitelist     []string        `mapstructure:"env_whitelist"`
 	DefaultWorkDir   string          `mapstructure:"default_work_dir"`
+	PIDDir           string          `mapstructure:"pid_dir"`
 	AutoRetry        AutoRetryConfig `mapstructure:"auto_retry"`
 }
 
@@ -318,15 +337,19 @@ type PoolConfig struct {
 func Default() *Config {
 	return &Config{
 		Gateway: GatewayConfig{
-			Addr:               ":8888",
-			ReadBufferSize:     4096,
-			WriteBufferSize:    4096,
-			PingInterval:       54 * time.Second,
-			PongTimeout:        60 * time.Second,
-			WriteTimeout:       10 * time.Second,
-			IdleTimeout:        5 * time.Minute,
-			MaxFrameSize:       32 * 1024,
-			BroadcastQueueSize: 256,
+			Addr:                  ":8888",
+			ReadBufferSize:        4096,
+			WriteBufferSize:       4096,
+			PingInterval:          54 * time.Second,
+			PongTimeout:           60 * time.Second,
+			WriteTimeout:          10 * time.Second,
+			IdleTimeout:           5 * time.Minute,
+			MaxFrameSize:          32 * 1024,
+			BroadcastQueueSize:    256,
+			PlatformWriteBuffer:   64,
+			PlatformDropThreshold: 56,
+			DeltaCoalesceInterval: 120 * time.Millisecond,
+			DeltaCoalesceSize:     200,
 		},
 		DB: DBConfig{
 			Path:         "data/hotplex-worker.db",
@@ -341,6 +364,7 @@ func Default() *Config {
 			AllowedEnvs:      nil,
 			EnvWhitelist:     nil,
 			DefaultWorkDir:   "/tmp/hotplex/workspace",
+			PIDDir:           "",
 			AutoRetry:        AutoRetryConfig{Enabled: true, MaxRetries: 3, BaseDelay: 5 * time.Second, MaxDelay: 120 * time.Second, RetryInput: "继续", NotifyUser: true},
 		},
 		Security: SecurityConfig{
@@ -630,6 +654,24 @@ func applyMessagingEnv(cfg *Config) {
 	if v := os.Getenv("HOTPLEX_MESSAGING_SLACK_WORK_DIR"); v != "" {
 		cfg.Messaging.Slack.WorkDir = v
 	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_SLACK_DM_POLICY"); v != "" {
+		cfg.Messaging.Slack.DMPolicy = v
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_SLACK_GROUP_POLICY"); v != "" {
+		cfg.Messaging.Slack.GroupPolicy = v
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_SLACK_REQUIRE_MENTION"); v != "" {
+		cfg.Messaging.Slack.RequireMention = strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_SLACK_ALLOW_FROM"); v != "" {
+		cfg.Messaging.Slack.AllowFrom = strings.Split(v, ",")
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_SLACK_ALLOW_DM_FROM"); v != "" {
+		cfg.Messaging.Slack.AllowDMFrom = strings.Split(v, ",")
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_SLACK_ALLOW_GROUP_FROM"); v != "" {
+		cfg.Messaging.Slack.AllowGroupFrom = strings.Split(v, ",")
+	}
 	if v := os.Getenv("HOTPLEX_MESSAGING_FEISHU_DM_POLICY"); v != "" {
 		cfg.Messaging.Feishu.DMPolicy = v
 	}
@@ -641,6 +683,12 @@ func applyMessagingEnv(cfg *Config) {
 	}
 	if v := os.Getenv("HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM"); v != "" {
 		cfg.Messaging.Feishu.AllowFrom = strings.Split(v, ",")
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_FEISHU_ALLOW_DM_FROM"); v != "" {
+		cfg.Messaging.Feishu.AllowDMFrom = strings.Split(v, ",")
+	}
+	if v := os.Getenv("HOTPLEX_MESSAGING_FEISHU_ALLOW_GROUP_FROM"); v != "" {
+		cfg.Messaging.Feishu.AllowGroupFrom = strings.Split(v, ",")
 	}
 }
 

@@ -26,6 +26,26 @@ import argparse
 import json
 import sys
 
+
+def _setup_pdeathsig():
+    """On Linux, request SIGTERM when parent process dies.
+    
+    This ensures the STT subprocess is automatically terminated if the
+    gateway process crashes or is killed (SIGKILL), preventing orphan
+    processes that would otherwise persist indefinitely.
+    """
+    if sys.platform != "linux":
+        return
+    try:
+        import ctypes
+        PR_SET_PDEATHSIG = 1
+        SIGTERM = 15
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl(PR_SET_PDEATHSIG, SIGTERM)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
@@ -86,6 +106,8 @@ def create_whisper_backend(model_name: str):
 
 
 def main():
+    _setup_pdeathsig()
+    
     parser = argparse.ArgumentParser(description="Persistent STT server")
     parser.add_argument("--backend", default="funasr", choices=["funasr", "whisper"])
     parser.add_argument("--model", default="iic/SenseVoiceSmall")

@@ -76,7 +76,7 @@ cmd/worker/main.go    (~610 lines) flags, DI, signal, messaging init, LLM retry 
 - `worker/noop/`          No-op adapter (testing)
 - `worker/acpx/`          ACPX type constant only (no implementation)
 - `worker/base/`          Shared BaseWorker + Conn + BuildEnv
-- `worker/proc/`          Process lifecycle: PGID isolation, layered SIGTERM→SIGKILL
+- `worker/proc/`          Process lifecycle: PGID isolation, layered SIGTERM→SIGKILL, PID file orphan cleanup
 
 **Support**
 - `security/`   JWT (ES256), SSRF, command whitelist, env isolation, path safety
@@ -153,6 +153,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - `base.Conn` → `base/conn.go` — stdin SessionConn: NDJSON over stdio, exported `WriteAll`, implements `InputRecoverer`
 - `base.BuildEnv` → `base/env.go` — env construction: whitelist + session vars
 - `proc.Manager` → `proc/manager.go:26` — PGID isolation, layered SIGTERM→SIGKILL
+- `proc.Tracker` → `proc/pidfile.go` — PID file orphan cleanup: Write/Remove/RemoveAll/CleanupOrphans, globalTracker, PID recycling defense
 
 **Messaging** (`internal/messaging/`)
 - `Bridge` → `bridge.go` — 3-step: StartSession → Join → handler.Handle
@@ -255,7 +256,7 @@ make clean                    # Clean build artifacts
 - `.claude` is symlinked to `.agent` — both directories exist
 - No `api/` directory — project uses JSON over WebSocket, not protobuf
 - Project targets POSIX only (PGID isolation requires `syscall.SysProcAttr{Setpgid: true}`)
-- Largest files: `opencodeserver/worker.go` (952), `feishu/adapter.go` (971), `bridge.go` (736), `hub.go` (610), `config.go` (676), `slack/adapter.go` (756), `manager.go` (777)
+- Largest files: `opencodeserver/worker.go` (952), `feishu/adapter.go` (976), `bridge.go` (736), `hub.go` (814), `config.go` (676), `slack/adapter.go` (792), `manager.go` (777)
 - STT scripts (`scripts/stt_server.py`, `scripts/fix_onnx_model.py`) are also deployed to `~/.agents/skills/audio-transcribe/scripts/` for Claude Code skill use
 - STT model: `~/.cache/modelscope/hub/models/iic/SenseVoiceSmall` (~900MB), ONNX FP32 non-quantized
 - Zombie IO timeout default: 30 minutes (configurable via `worker.execution_timeout`)

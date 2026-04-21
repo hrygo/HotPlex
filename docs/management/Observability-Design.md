@@ -10,6 +10,8 @@ tags:
 # Observability Design
 
 > HotPlex v1.0 可观测性设计，基于行业最佳实践。
+>
+> ⚠️ **修正**（2026-04-21）：本文档推荐 `zerolog`，但当前代码库使用 Go 标准库 `log/slog`。日志库配置已更新为 `slog`。
 
 ---
 
@@ -28,7 +30,7 @@ tags:
 
 | 层 | 方案 | 理由 |
 |----|------|------|
-| **日志库** | `zerolog` + OTel Log Bridge | 高性能、结构化、vendor-neutral |
+| **日志库** | `log/slog`（标准库） + OTel Log Bridge | 标准库、结构化、vendor-neutral |
 | **日志后端** | Grafana Loki | 与 Prometheus/Tempo 统一生态 |
 | **追踪后端** | Grafana Tempo | 对象存储成本低 |
 | **指标** | Prometheus + Grafana | 业界标准 |
