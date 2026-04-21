@@ -153,7 +153,10 @@ func (a *Adapter) SetAssistantStatus(ctx context.Context, channelID, threadTS, s
 	return a.client.SetAssistantThreadsStatusContext(ctx, params)
 }
 
-// SetStatus is the main entry: tries native Assistant API first, falls back to emoji.
+// SetStatus sets the AI status. It uses Assistant API when available;
+// reaction emoji is a fallback only when Assistant API is unavailable.
+// The two paths are mutually exclusive: if Assistant API succeeds, no emoji
+// is added; if it fails, emoji fallback is used instead.
 func (a *Adapter) SetStatus(ctx context.Context, channelID, threadTS string, status StatusType, text string) error {
 	if a.client == nil {
 		return nil
@@ -167,24 +170,34 @@ func (a *Adapter) SetStatus(ctx context.Context, channelID, threadTS string, sta
 			return nil
 		}
 		a.handleCapabilityError(err)
+		// Assistant API failed; fall through to emoji fallback.
 	}
 	return a.setStatusWithEmojiFallback(ctx, channelID, threadTS, status)
 }
 
+// ClearStatus clears the AI status. It mirrors SetStatus:
+//   - When Assistant API is capable: clears the Assistant Status.
+//     If the call fails, it falls back to clearing the reaction emoji.
+//   - When Assistant API is not capable: clears the tracked reaction emoji.
+//
+// Both cleanup paths are attempted to handle edge cases where the active
+// status mechanism changed during the session (e.g. runtime degradation
+// from Assistant API to emoji, or if the workspace later gains API access).
 func (a *Adapter) ClearStatus(ctx context.Context, channelID, threadTS string) error {
 	if a.client == nil {
 		return nil
 	}
 	if a.isAssistantCapable.Load() {
 		err := a.SetAssistantStatus(ctx, channelID, threadTS, "")
-		if err != nil {
-			a.handleCapabilityError(err)
+		if err == nil {
+			return nil
 		}
+		a.handleCapabilityError(err)
+		// Assistant API call failed; fall through to emoji cleanup as well.
 	}
-	// Always clean up reaction emoji, regardless of which status path was used.
-	// When isAssistantCapable=true, SetAssistantStatus clears the Assistant Status
-	// (visible in the workspace's status bar) but does NOT remove the reaction emoji
-	// added via AddReactionContext; statusMgr.Clear handles that.
+	// Always attempt emoji cleanup. This is safe because setStatusWithEmojiFallback
+	// only adds emoji when the emoji path is used; calling Clear when it wasn't
+	// is a no-op (emojiState[key] is already empty).
 	a.statusMgr.Clear(ctx, channelID, threadTS)
 	return nil
 }
