@@ -1,7 +1,9 @@
 # Hub Platform Conn Async Writer + Delta Coalescing — Integrated Design
 
 > **BUG-1 + PERF-1**: Hub.Run() broadcast loop 阻塞 + Delta 高频 API 调用优化
-> **Status**: Proposed · **Priority**: P0 · **Date**: 2026-04-21
+> **Status**: In Implementation · **Priority**: P0 · **Date**: 2026-04-21 · **Branch**: `feat/hub-async-writer-delta-coalescing`
+>
+> ⚠️ **本文档描述的功能正在实施中**。`pcEntry` + `writeLoop` + delta coalescing 已在 `hub.go` 中实现（`feat/hub-async-writer-delta-coalescing` 分支）。实施完成后请更新本文档状态。
 
 ## 1. Problem
 

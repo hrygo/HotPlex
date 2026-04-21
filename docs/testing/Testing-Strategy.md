@@ -9,6 +9,11 @@ tags:
 # Testing Strategy
 
 > HotPlex v1.0 测试策略，基于行业最佳实践。
+>
+> ⚠️ **修正**（2026-04-21）：
+> - PostgreSQL Store 是 stub（`ErrNotImplemented`），**生产使用 SQLite**；测试应使用内存 SQLite，无需 Testcontainers
+> - 项目极少使用 `testify/mock`，建议改为 `testify/require` 做断言 + 实际依赖（最小化 mock）
+> - 表驱动测试和 `t.Parallel()` 符合当前代码实践
 
 ---
 
@@ -34,7 +39,7 @@ tags:
 └─────────────────────────────────────────────────────────────┘
                           ▲
 ┌─────────────────────────────────────────────────────────────┐
-│  Integration Tests (go test + Testcontainers)                │
+│  Integration Tests (go test + 实际 SQLite)                │
 │  • Session Pool 并发安全                                    │
 │  • PGID 进程隔离                                            │
 │  • WebSocket 消息路由                                       │
@@ -42,7 +47,7 @@ tags:
 └─────────────────────────────────────────────────────────────┘
                           ▲
 ┌─────────────────────────────────────────────────────────────┐
-│  Unit Tests (go test，表驱动)                              │
+│  Unit Tests (go test + testify/require，表驱动)              │
 │  • WAF 正则检测器                                           │
 │  • strutil 工具函数                                         │
 │  • config 解析与验证                                        │

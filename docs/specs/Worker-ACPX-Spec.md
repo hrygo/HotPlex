@@ -5,16 +5,23 @@ tags:
   - worker/acpx
   - architecture/integration
 date: 2026-04-04
-status: review
-progress: 30
+status: draft
+progress: 0
 estimated_hours: 20
-validation_confidence: 98
-validation_date: 2026-04-04
 ---
+
+> ⚠️ **本文档已过时 — ACPX Worker 未实现**
+>
+> `internal/worker/acpx/` 目录当前为空（无任何代码文件）。
+> `TypeACPX` 常量存在于 `worker.go`，但无实现，main.go 也未注册。
+> 本文档保留作为**设计参考**，不代表当前代码状态。
+>
+> 如需实施 ACPX Worker，请重新验证 acpx CLI 协议（当前分支: `feat/hub-async-writer-delta-coalescing`）。
 
 # ACPX Worker 集成规格
 
-> ✅ **已通过实际测试验证**：本文档基于 `acpx v0.4.0` 实际测试结果编写，核心协议和事件格式已 100% 确认。
+> ✅ **历史验证记录**（截至 2026-04-04）：本文档曾基于 `acpx v0.4.0` 实际测试结果编写，核心协议和事件格式已 100% 确认。
+> ⚠️ **注意**：自此日期后代码库中 **ACPX Worker 未被实现**，具体实现时请重新验证 acpx CLI 协议。
 >
 > **验证日期**: 2026-04-04
 > **验证版本**: acpx 0.4.0
