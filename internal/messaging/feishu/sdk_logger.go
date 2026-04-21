@@ -33,7 +33,18 @@ func redactURL(s string) string {
 		}
 	}
 	if changed {
-		u.RawQuery = q.Encode()
+		// Build RawQuery manually to avoid q.Encode() re-encoding "***" as "%2A%2A%2A".
+		var parts []string
+		for k, v := range q {
+			if sensitiveParams[k] {
+				parts = append(parts, k+"=***")
+			} else {
+				for _, val := range v {
+					parts = append(parts, k+"="+url.QueryEscape(val))
+				}
+			}
+		}
+		u.RawQuery = strings.Join(parts, "&")
 		return u.String()
 	}
 	return s

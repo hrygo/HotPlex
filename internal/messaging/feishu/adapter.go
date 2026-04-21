@@ -687,6 +687,15 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, 
 	}
 
 	a.log.Info("feishu: text control command sent", "action", result.Label, "user", userID, "session_id", envelope.SessionID)
+
+	// Reset/GC kills the worker without a guaranteed done event, so stale
+	// pending interactions (permission/question/elicitation) may survive.
+	// Cancel them now to prevent the next user message from being consumed
+	// by checkPendingInteraction as a response to a dead interaction.
+	if result.Action == events.ControlActionReset || result.Action == events.ControlActionGC {
+		a.interactions.CancelAll(envelope.SessionID)
+	}
+
 	if platformMsgID != "" {
 		_ = a.replyMessage(ctx, platformMsgID, controlFeedbackMessageCN(result.Action), false)
 	} else {
