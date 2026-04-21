@@ -52,8 +52,9 @@ import (
 
 // Compile-time interface compliance checks.
 var (
-	_ worker.Worker      = (*Worker)(nil)
-	_ worker.SessionConn = (*conn)(nil)
+	_ worker.Worker         = (*Worker)(nil)
+	_ worker.SessionConn    = (*conn)(nil)
+	_ worker.InPlaceReseter = (*Worker)(nil)
 )
 
 // Environment variable whitelist for OpenCode Server worker.
@@ -466,6 +467,10 @@ func (w *Worker) ResetContext(ctx context.Context) error {
 	}
 	return nil
 }
+
+// InPlaceReset indicates that OpenCode Server resets context in-place via HTTP
+// without replacing the Conn or restarting the process.
+func (w *Worker) InPlaceReset() bool { return true }
 
 // ─── Internal Methods ─────────────────────────────────────────────────────────
 

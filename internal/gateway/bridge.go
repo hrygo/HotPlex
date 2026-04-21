@@ -640,6 +640,13 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("bridge: reset worker: %w", err)
 	}
 
+	// Workers that reset in-place (no process restart, no Conn replacement)
+	// keep their existing forwardEvents goroutine. Spawning a new one would
+	// create two goroutines reading from the same recvCh.
+	if ipr, ok := w.(worker.InPlaceReseter); ok && ipr.InPlaceReset() {
+		return nil
+	}
+
 	// Start new forwardEvents goroutine for the restarted worker.
 	// Track with fwdWg so Shutdown() waits for it (previously missing).
 	b.fwdWg.Add(1)

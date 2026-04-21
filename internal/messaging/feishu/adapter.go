@@ -301,26 +301,29 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 		return nil
 	}
 
-	// Step 9: Control command detection (natural language + /command).
-	if result := messaging.ParseControlCommand(text); result != nil {
-		a.handleTextControlCommand(ctx, chatID, userID, threadKey, messageID, result)
-		return nil
-	}
-
+	// Step 9: All message processing (including control commands) goes through
+	// chatQueue to serialize execution per chatID, preventing races between
+	// reset's Terminate→Start and the next message's Input() call.
 	replyToMsgID := parentID
 	if replyToMsgID == "" {
 		replyToMsgID = rootID
 	}
 
-	a.log.Debug("feishu: handling message",
-		"chat_type", chatType,
-		"chat", chatID,
-		"user", userID,
-		"thread_key", threadKey,
-		"text_len", len(text),
-	)
-
 	return a.chatQueue.Enqueue(chatID, func(qtx context.Context) error {
+		// Control command detection (natural language + /command).
+		if result := messaging.ParseControlCommand(text); result != nil {
+			a.handleTextControlCommand(qtx, chatID, userID, threadKey, messageID, result)
+			return nil
+		}
+
+		a.log.Debug("feishu: handling message",
+			"chat_type", chatType,
+			"chat", chatID,
+			"user", userID,
+			"thread_key", threadKey,
+			"text_len", len(text),
+		)
+
 		return a.handleTextMessage(qtx, messageID, chatID, chatType, userID, text, threadKey, replyToMsgID)
 	})
 }

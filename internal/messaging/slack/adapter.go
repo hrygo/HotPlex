@@ -353,6 +353,11 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 
 	// Control command detection (natural language + /command in text).
 	if result := messaging.ParseControlCommand(text); result != nil {
+		conn := a.GetOrCreateConn(channelID, threadTS)
+		if conn != nil {
+			conn.handlerMu.Lock()
+			defer conn.handlerMu.Unlock()
+		}
 		a.handleTextControlCommand(ctx, teamID, channelID, threadTS, userID, result)
 		return
 	}
@@ -417,6 +422,9 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 	if conn == nil {
 		return fmt.Errorf("slack: adapter closed, dropping message for channel %s", channelID)
 	}
+
+	conn.handlerMu.Lock()
+	defer conn.handlerMu.Unlock()
 	return a.bridge.Handle(ctx, envelope, conn)
 }
 
@@ -555,6 +563,7 @@ type SlackConn struct {
 	threadTS  string
 	messageTS string // anchor message for typing indicator cleanup
 
+	handlerMu      sync.Mutex // serializes control commands and message handling per thread
 	streamWriter   *NativeStreamingWriter
 	streamWriterMu sync.Mutex
 }
