@@ -356,8 +356,9 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 			if err := c.disableStreaming(ctx); err != nil {
 				c.log.Warn("feishu: disable streaming failed", "err", err)
 			} else {
-				c.log.Info("feishu: streaming disabled successfully",
+				c.log.Info("feishu: streaming stopped",
 					"card_id", cardID,
+					"cardkit_mode", c.cardKitOK,
 					"summary_len", len(truncateForSummary(c.lastFlushed)))
 			}
 		} else {
@@ -558,6 +559,7 @@ func (c *StreamingCardController) disableStreaming(ctx context.Context) error {
 		return fmt.Errorf("cardkit settings disable streaming failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	c.log.Debug("feishu: streaming disabled", "card_id", c.cardID)
+
 	return nil
 }
 
