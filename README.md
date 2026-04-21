@@ -23,37 +23,35 @@ Hotplex is a high-performance Go gateway that provides a **single WebSocket inte
 
 **One Gateway. Any Agent. Every Channel.**
 
-![Architecture](assets/architecture.svg)
-
-## 📑 Table of Contents
-- [Features](#-features)
+## 🧭 Table of Contents
+- [Core Features](#-core-features)
 - [Quick Start](#-quick-start)
 - [Architecture](#-architecture)
-- [Client SDKs](#-client-sdks)
+- [SDKs & Libraries](#-sdks--libraries)
 - [Configuration](#-configuration)
 - [Documentation](#-documentation)
 - [Contributing](#-contributing)
 - [License](#-license)
 
-## ✨ Features
+## 🚀 Core Features
 
 ### 🔌 Connectivity
-- **Unified AEP v1 Protocol**: 23+ event types over WebSocket (streaming, permissions, MCP Elicitation).
-- **Multi-Channel Bridge**: Bidirectional support for **Slack** (Socket Mode) and **Feishu** (WebSocket) with full interaction support.
-- **Worker Adapters**: Out-of-the-box support for Claude Code, OpenCode Server, and Pi-mono.
+- 🔹 **Unified AEP v1 Protocol**: 23+ event types over WebSocket (streaming, permissions, MCP Elicitation).
+- 🔹 **Multi-Channel Bridge**: Bidirectional support for **Slack** (Socket Mode) and **Feishu** (WebSocket).
+- 🔹 **Worker Adapters**: Out-of-the-box support for Claude Code, OpenCode Server, and Pi-mono.
 
-### 🛡️ Enterprise Grade
-- **Robust Session Management**: 5-state lifecycle machine with crash recovery and auto-reconnection.
-- **Security First**: JWT ES256 authentication, SSRF protection, and command whitelisting.
-- **Observability**: Prometheus metrics, OpenTelemetry tracing, and structured JSON logging.
-- **Admin API**: Dedicated management interface for session control and health monitoring.
+### 🛡️ Reliability & Security
+- 🔹 **Robust Session Management**: 5-state lifecycle machine with crash recovery and auto-reconnection.
+- 🔹 **Security First**: JWT ES256 authentication, SSRF protection, and command whitelisting.
+- 🔹 **Observability**: Prometheus metrics, OpenTelemetry tracing, and structured JSON logging.
+- 🔹 **Admin API**: Dedicated management interface for session control and health monitoring.
 
-### 🛠️ Developer Experience
-- **Ready-to-use Web UI**: Next.js 15 + Vercel AI SDK integration.
-- **Hot-Reload Config**: Update gateway settings without downtime.
-- **Multi-Language SDKs**: Native support for Go, TypeScript, Python, and Java.
+### 💎 Developer Experience
+- 🔹 **Ready-to-use Web UI**: Next.js 15 + Vercel AI SDK integration.
+- 🔹 **Hot-Reload Config**: Update gateway settings without downtime.
+- 🔹 **Multi-Language SDKs**: Native support for Go, TypeScript, Python, and Java.
 
-## 🚀 Quick Start
+## ⚡ Quick Start
 
 ### 1. Installation
 ```bash
@@ -96,24 +94,13 @@ func main() {
 }
 ```
 
-## 🏗️ Architecture
+## 🧱 Architecture
 
 Hotplex acts as an orchestration layer between frontend clients and backend coding agents.
 
-```mermaid
-graph TD
-    A[Web Chat / SDKs] --> G[Hotplex Gateway]
-    B[Slack / Feishu] --> G
-    G --> H[Session Manager]
-    G --> I[WS Hub]
-    H --> S[(SQLite WAL)]
-    G --> W[Worker Adapters]
-    W --> C[Claude Code]
-    W --> O[OpenCode Server]
-    W --> P[Pi-mono]
-```
+![Architecture](assets/architecture.svg)
 
-## 📦 Client SDKs
+## 📦 SDKs & Libraries
 
 | Language | Path | Features |
 |:---:|:---|:---|
@@ -122,7 +109,7 @@ graph TD
 | **Python** | [`examples/python/`](examples/python-client/) | Asyncio, session resume, CLI ready |
 | **Java** | [`examples/java/`](examples/java-client/) | Enterprise AEP v1 implementation |
 
-## ⚙️ Configuration
+## 🛠️ Configuration
 
 Hotplex uses Viper for configuration with support for environment variable overrides.
 
@@ -136,7 +123,7 @@ Hotplex uses Viper for configuration with support for environment variable overr
 > [!TIP]
 > See [Config Reference](docs/management/Config-Reference.md) for the full list of environment variables and YAML settings.
 
-## 📚 Documentation
+## 📖 Documentation
 
 | Area | Guide |
 |:---|:---|
@@ -145,7 +132,7 @@ Hotplex uses Viper for configuration with support for environment variable overr
 | **Internals** | [Gateway Design](docs/architecture/Worker-Gateway-Design.md) · [Security](docs/security/Security-Authentication.md) |
 | **Management** | [Admin API](docs/management/Admin-API-Design.md) · [Testing](docs/testing/Testing-Strategy.md) |
 
-## 🤝 Contributing
+## 👥 Contributing
 
 We welcome contributions of all kinds! Please see our [Contributing Guide](CONTRIBUTING.md) for more details.
 
@@ -159,7 +146,7 @@ We welcome contributions of all kinds! Please see our [Contributing Guide](CONTR
 
 If you find a security vulnerability, please do NOT open a public issue. Report it via the instructions in our [Security Policy](SECURITY.md) (or contact maintainers directly).
 
-## 📄 License
+## 📜 License
 
 Distributed under the Apache License 2.0. See [`LICENSE`](LICENSE) for more information.
 
