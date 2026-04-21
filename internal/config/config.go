@@ -266,6 +266,7 @@ type WorkerConfig struct {
 	AllowedEnvs      []string        `mapstructure:"allowed_envs"`
 	EnvWhitelist     []string        `mapstructure:"env_whitelist"`
 	DefaultWorkDir   string          `mapstructure:"default_work_dir"`
+	PIDDir           string          `mapstructure:"pid_dir"`
 	AutoRetry        AutoRetryConfig `mapstructure:"auto_retry"`
 }
 
@@ -363,6 +364,7 @@ func Default() *Config {
 			AllowedEnvs:      nil,
 			EnvWhitelist:     nil,
 			DefaultWorkDir:   "/tmp/hotplex/workspace",
+			PIDDir:           "",
 			AutoRetry:        AutoRetryConfig{Enabled: true, MaxRetries: 3, BaseDelay: 5 * time.Second, MaxDelay: 120 * time.Second, RetryInput: "继续", NotifyUser: true},
 		},
 		Security: SecurityConfig{

@@ -929,6 +929,86 @@ func TerminateProcessGroup(cmd *exec.Cmd) {
 
 遍历所有 session → 逐个 terminate（分层终止）。
 
+### 12.7 孤儿进程清理（PID File Orphan Cleanup）
+
+#### 问题
+
+当 Gateway 进程被 `SIGKILL` 或崩溃时，其创建的子进程（Claude Code、OpenCode Server、PersistentSTT 等）无法收到终止信号，成为孤儿进程继续运行，占用资源并可能产生不可预期的行为。
+
+#### 解决方案：PID File Tracker
+
+Gateway 在启动子进程时，将进程的 PGID 写入 PID 文件；下次启动时扫描 PID 目录，清理残留的孤儿进程。
+
+```
+启动流程:
+  main() → proc.InitTracker(pidDir, logger)
+         → proc.GlobalTracker().CleanupOrphans(ctx)  // 扫描并清理上次残留
+         → ...正常启动...
+  
+关闭流程:
+  shutdown → proc.GlobalTracker().RemoveAll()  // 正常关闭时清除所有 PID 文件
+           → sm.Close()                        // Session Manager 清理 runtime
+```
+
+#### PID 文件格式
+
+```
+~/.hotplex/.pids/
+├── <session-id>.pid     # Worker 子进程（每 session 一个）
+└── stt-server.pid       # PersistentSTT 子进程
+```
+
+每个文件内容为纯十进制 PGID + 换行符（Unix 惯例）：
+
+```
+12345\n
+```
+
+#### 关键设计决策
+
+| 决策 | 说明 |
+|------|------|
+| **PGID 而非 PID** | 使用进程组 ID（`-pgid` 信号范围）确保杀死整个进程树（含孙子进程） |
+| **PID 回收防御** | 清理前验证 `Kill(-pgid, 0)` 成功，确认进程仍是组 leader，避免误杀新进程 |
+| **原子写入** | temp 文件 + `os.Rename`，防止写入中断导致损坏 |
+| **分层终止** | 孤儿清理同样遵循 SIGTERM → 5s 等待 → SIGKILL 的分层策略 |
+| **globalTracker** | 包级全局 Tracker，nil-safe，与现有 `init()` + Builder 注册模式一致 |
+| **幂等 Remove** | Remove 操作幂等，Terminate/Kill 双重调用安全 |
+
+#### 集成点
+
+| 组件 | PID Key | 写入时机 | 删除时机 |
+|------|---------|---------|---------|
+| `proc.Manager.Start()` | 由 adapter 通过 `SetPIDKey(key)` 设置 | 进程启动后 | `Terminate()` / `Kill()` |
+| `PersistentSTT.start()` | `"stt-server"` | 子进程启动后 | `terminate()` / `kill()` |
+| `claudecode` adapter | `session.SessionID` | `Proc.Start()` 前 | 由 Manager 自动 |
+| `opencodeserver` adapter | `session.SessionID` | `Proc.Start()` 前 | 由 Manager 自动 |
+
+> **注意**：Pi-mono adapter 不使用 `proc.Manager`（ephemeral 模式），因此不参与 PID 文件跟踪。
+
+#### PersistentSTT 增强防护
+
+`scripts/stt_server.py` 在 Linux 上通过 `ctypes` 调用 `prctl(PR_SET_PDEATHSIG, SIGTERM)`，确保父进程死亡时子进程自动收到 SIGTERM。这是 PID 文件机制的补充（非替代）——仅适用于可修改代码的子进程。
+
+#### 配置
+
+```yaml
+worker:
+  # pid_dir: ""   # 默认空，自动解析为 ~/.hotplex/.pids/
+```
+
+#### Systemd 配合
+
+生产环境 systemd service 文件配置：
+
+```ini
+KillMode=mixed          # SIGTERM 发送至主进程 + control group
+TimeoutStopSec=30       # 30s 优雅关闭窗口
+KillSignal=SIGTERM      # 分层终止起点
+```
+
+`KillMode=mixed` 与 Gateway 的 PGID 隔离 + PID 文件机制互补：systemd 负责进程组级清理，PID 文件负责跨重启孤儿检测。
+
 ---
 
 ## 13. 崩溃恢复

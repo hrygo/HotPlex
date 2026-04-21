@@ -76,7 +76,7 @@ cmd/worker/main.go    (~610 lines) flags, DI, signal, messaging init, LLM retry 
 - `worker/noop/`          No-op adapter (testing)
 - `worker/acpx/`          ACPX type constant only (no implementation)
 - `worker/base/`          Shared BaseWorker + Conn + BuildEnv
-- `worker/proc/`          Process lifecycle: PGID isolation, layered SIGTERM→SIGKILL
+- `worker/proc/`          Process lifecycle: PGID isolation, layered SIGTERM→SIGKILL, PID file orphan cleanup
 
 **Support**
 - `security/`   JWT (ES256), SSRF, command whitelist, env isolation, path safety
@@ -153,6 +153,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - `base.Conn` → `base/conn.go` — stdin SessionConn: NDJSON over stdio, exported `WriteAll`, implements `InputRecoverer`
 - `base.BuildEnv` → `base/env.go` — env construction: whitelist + session vars
 - `proc.Manager` → `proc/manager.go:26` — PGID isolation, layered SIGTERM→SIGKILL
+- `proc.Tracker` → `proc/pidfile.go` — PID file orphan cleanup: Write/Remove/RemoveAll/CleanupOrphans, globalTracker, PID recycling defense
 
 **Messaging** (`internal/messaging/`)
 - `Bridge` → `bridge.go` — 3-step: StartSession → Join → handler.Handle

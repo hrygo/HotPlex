@@ -21,6 +21,8 @@ import (
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkspeech "github.com/larksuite/oapi-sdk-go/v3/service/speech_to_text/v1"
+
+	"github.com/hotplex/hotplex-worker/internal/worker/proc"
 )
 
 // Transcriber converts raw audio bytes to text.
@@ -312,6 +314,13 @@ func (s *PersistentSTT) start(_ context.Context) error {
 	s.pgid = cmd.Process.Pid
 	s.started = true
 
+	// Track PID for orphan cleanup.
+	if proc.GlobalTracker() != nil {
+		if err := proc.GlobalTracker().Write("stt-server", s.pgid); err != nil {
+			s.log.Warn("persistent stt: pidfile write", "err", err)
+		}
+	}
+
 	// Set up line scanner for stdout (64KB init, 10MB cap).
 	buf := make([]byte, 64*1024)
 	s.scanner = bufio.NewScanner(stdoutR)
@@ -373,6 +382,12 @@ func (s *PersistentSTT) terminate(ctx context.Context) {
 
 	_ = s.stdoutR.Close()
 	s.started = false
+
+	// Clean up PID file.
+	if proc.GlobalTracker() != nil {
+		_ = proc.GlobalTracker().Remove("stt-server")
+	}
+
 	s.log.Info("persistent stt: stopped")
 }
 
@@ -394,6 +409,11 @@ func (s *PersistentSTT) kill() {
 	_ = s.stdin.Close()
 	_ = s.stdoutR.Close()
 	s.started = false
+
+	// Clean up PID file.
+	if proc.GlobalTracker() != nil {
+		_ = proc.GlobalTracker().Remove("stt-server")
+	}
 }
 
 // isAlive checks if subprocess is still running (non-blocking).
