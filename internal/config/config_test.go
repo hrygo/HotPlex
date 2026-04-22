@@ -19,7 +19,7 @@ func TestDefault(t *testing.T) {
 	require.Equal(t, ":8888", cfg.Gateway.Addr)
 	require.True(t, cfg.DB.WALMode)
 	require.Equal(t, 100, cfg.Pool.MaxSize)
-	require.Equal(t, 3, cfg.Pool.MaxIdlePerUser)
+	require.Equal(t, 5, cfg.Pool.MaxIdlePerUser)
 	require.Equal(t, 7*24*time.Hour, cfg.Session.RetentionPeriod)
 	require.Equal(t, 1*time.Minute, cfg.Session.GCScanInterval)
 	require.False(t, cfg.Security.TLSEnabled)
@@ -800,7 +800,7 @@ session:
 
 pool:
   max_size: 100
-  max_idle_per_user: 3
+  max_idle_per_user: 5
 
 db:
   path: "data/test.db"
@@ -820,7 +820,7 @@ db:
 	require.Equal(t, 168*time.Hour, cfg.Session.RetentionPeriod)
 	require.Equal(t, 5*time.Minute, cfg.Session.GCScanInterval)
 	require.Equal(t, 100, cfg.Pool.MaxSize)
-	require.Equal(t, 3, cfg.Pool.MaxIdlePerUser)
+	require.Equal(t, 5, cfg.Pool.MaxIdlePerUser)
 	require.True(t, filepath.IsAbs(cfg.DB.Path))
 	require.True(t, strings.HasSuffix(cfg.DB.Path, "/data/test.db"))
 	require.True(t, cfg.DB.WALMode)
