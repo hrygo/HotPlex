@@ -8,7 +8,11 @@
 inherits: config.yaml
 
 admin:
+  addr: "127.0.0.1:9999"
   rate_limit_enabled: false
+
+gateway:
+  addr: "127.0.0.1:8888"
 
 session:
   retention_period: 24h
@@ -23,7 +27,7 @@ worker:
   execution_timeout: 5m
 
 log:
-  level: "debug"
+  level: "info"
   format: "text"
 
 messaging:

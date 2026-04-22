@@ -66,15 +66,15 @@ log:
 
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
-| `addr` | string | `:8888` | ✅ | 网关监听地址。客户端通过此端口建立 WebSocket 连接（AEP v1 协议）。生产环境建议置于反向代理（Nginx/ALB）之后并启用 TLS |
-| `read_buffer_size` | int | `4096` | — | WebSocket 读缓冲区大小（bytes）。`gorilla/websocket.Upgrader` 在 HTTP → WS 升级时分配，影响单连接内存占用。4KB 适合以 JSON 文本为主的消息流 |
-| `write_buffer_size` | int | `4096` | — | WebSocket 写缓冲区大小（bytes）。同上，为写方向预分配的缓冲 |
-| `ping_interval` | duration | `54s` | ✅ | 服务端发送 WebSocket Ping 帧的间隔。必须小于 `pong_timeout`，推荐为其 90%。ReadPump goroutine 在此间隔触发 WritePump 发送 Ping，用于检测半开连接（客户端进程崩溃但 TCP 未关闭） |
+| `addr` | string | `:8888` | ❌ | 网关监听地址。客户端通过此端口建立 WebSocket 连接（AEP v1 协议）。生产环境建议置于反向代理（Nginx/ALB）之后并启用 TLS。**启动后不可变更**——HTTP Server 在启动时绑定端口 |
+| `read_buffer_size` | int | `4096` | ❌ | WebSocket 读缓冲区大小（bytes）。`gorilla/websocket.Upgrader` 在 HTTP → WS 升级时分配，影响单连接内存占用。4KB 适合以 JSON 文本为主的消息流。**启动后不可变更**——Upgrader 在 NewHub 时初始化 |
+| `write_buffer_size` | int | `4096` | ❌ | WebSocket 写缓冲区大小（bytes）。同上，为写方向预分配的缓冲。**启动后不可变更**——同 `read_buffer_size` |
+| `ping_interval` | duration | `54s` | — | 服务端发送 WebSocket Ping 帧的间隔。必须小于 `pong_timeout`，推荐为其 90%。ReadPump goroutine 在此间隔触发 WritePump 发送 Ping，用于检测半开连接（客户端进程崩溃但 TCP 未关闭） |
 | `pong_timeout` | duration | `60s` | — | 等待客户端 Pong 响应的超时。超时后 ReadPump 关闭连接，触发 Hub 注销和 session 清理。此值应略大于客户端的 ping-pong 往返延迟 |
-| `write_timeout` | duration | `10s` | ✅ | 单次 WebSocket 写操作的截止时间。WritePump 在发送每条消息前设置 `SetWriteDeadline`，超时则判定连接已死。防止慢速客户端阻塞其他连接的写操作 |
-| `idle_timeout` | duration | `5m` | ✅ | WebSocket 物理连接空闲超时。如果连接在此时间内没有任何帧（包括 ping/pong），服务端主动断开。用于清理已断开但 TCP 未关闭的僵尸连接 |
+| `write_timeout` | duration | `10s` | — | 单次 WebSocket 写操作的截止时间。WritePump 在发送每条消息前设置 `SetWriteDeadline`，超时则判定连接已死。防止慢速客户端阻塞其他连接的写操作 |
+| `idle_timeout` | duration | `5m` | — | WebSocket 物理连接空闲超时。如果连接在此时间内没有任何帧（包括 ping/pong），服务端主动断开。用于清理已断开但 TCP 未关闭的僵尸连接 |
 | `max_frame_size` | int64 | `32768` | — | 单个 WebSocket 帧最大允许字节数（32KB）。ReadPump 使用此值设置 `SetReadLimit`，超过则立即关闭连接。防止恶意客户端发送超大帧耗尽内存 |
-| `broadcast_queue_size` | int | `256` | ✅ | Hub broadcast channel 的缓冲大小。Hub.Run() 从此 channel 消费事件并路由到各 session 连接。增大可缓解瞬时事件突发，但增加内存占用 |
+| `broadcast_queue_size` | int | `256` | ❌ | Hub broadcast channel 的缓冲大小。Hub.Run() 从此 channel 消费事件并路由到各 session 连接。增大可缓解瞬时事件突发，但增加内存占用。**启动后不可变更**——Go channel 大小在 make 时确定 |
 | `platform_write_buffer` | int | `64` | — | 平台连接（Slack/Feishu）的异步写 channel 容量。每个 platform conn 内部有一个带缓冲 channel 接收待发送事件，WriteCtx 将事件入队后立即返回。64 个槽位在 120ms 合并窗口下可容纳约 8 个批次 |
 | `platform_drop_threshold` | int | `56` | — | 平台连接开始丢弃可丢弃事件的水位线（channel 填充度）。当 channel 使用量超过此阈值（87.5%），`message.delta` 和 `raw` 事件被静默丢弃以缓解反压，但 `state`/`done`/`error` 等关键事件永不丢弃 |
 | `delta_coalesce_interval` | duration | `120ms` | — | 平台连接 Delta 事件的合并窗口。在此时间窗口内的多个 `message.delta` 事件会被合并为一次 API 调用发送给 Slack/Feishu。120ms 约等于每秒 8.3 次更新，适配飞书 CardKit 的 10 次/秒限制，同时保持首 token 延迟在 200ms 感知阈值内 |
@@ -88,7 +88,7 @@ log:
 |:-----|:-----|:-------|:------:|:-----|
 | `enabled` | bool | `true` | — | 是否启动 Admin HTTP 服务。设为 `false` 则不监听管理端口，所有 `/admin/*` 端点不可用 |
 | `addr` | string | `:9999` | — | Admin API 监听地址。生产环境应绑定到内网 IP（如 `10.0.0.1:9999`）或通过 `allowed_cidrs` 限制访问 |
-| `tokens` | []string | `[]` | — | 授权令牌列表。通过 `HOTPLEX_ADMIN_TOKEN_1..N` 编号式环境变量设置。每个请求需携带 `Authorization: Bearer <token>` 头。支持多令牌用于无损轮转 |
+| `tokens` | []string | `[]` | ✅ | 授权令牌列表。通过 `HOTPLEX_ADMIN_TOKEN_1..N` 编号式环境变量设置。每个请求需携带 `Authorization: Bearer <token>` 头。支持多令牌用于无损轮转 |
 | `token_scopes` | map | `{}` | — | 令牌到权限的 RBAC 映射。key 为令牌值，value 为权限列表（如 `["session:read", "session:write"]`）。未映射的令牌使用 `default_scopes` |
 | `default_scopes` | []string | `["session:read", "stats:read", "health:read"]` | — | 未在 `token_scopes` 中显式映射的令牌的默认权限集 |
 | `ip_whitelist_enabled` | bool | `false` | — | 启用 CIDR 白名单。开启后仅 `allowed_cidrs` 中的网段可访问 Admin API。Docker/Kubernetes 环境建议使用网络策略替代 |
@@ -115,11 +115,11 @@ log:
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
 | `api_key_header` | string | `X-API-Key` | — | API Key 认证的 HTTP 头名称。客户端通过此头发送 API Key，Hub 在 WebSocket 升级前校验 |
-| `api_keys` | []string | `[]` | — | 允许访问的 API 密钥列表。通过 `HOTPLEX_SECURITY_API_KEY_1..N` 编号式环境变量设置。为空时不做 API Key 校验（依赖 JWT 或网络策略保护） |
+| `api_keys` | []string | `[]` | ✅ | 允许访问的 API 密钥列表。通过 `HOTPLEX_SECURITY_API_KEY_1..N` 编号式环境变量设置。为空时不做 API Key 校验（依赖 JWT 或网络策略保护）。热重载时原子替换整个 key 集合，不影响进行中的请求 |
 | `tls_enabled` | bool | `false` | — | 启用 TLS（WSS）。生产环境**必须**设为 `true`。启用后网关使用 `tls_cert_file` 和 `tls_key_file` 加载证书 |
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径。仅当 `tls_enabled: true` 时使用 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径。仅当 `tls_enabled: true` 时使用 |
-| `allowed_origins` | []string | `["*"]` | — | CORS 允许的 Origin 列表。WebSocket 升级时 `Upgrader.CheckOrigin` 校验请求的 Origin 头。`["*"]` 允许所有来源（仅开发用），生产应限制为具体域名 |
+| `allowed_origins` | []string | `["*"]` | ✅ | CORS 允许的 Origin 列表。WebSocket 升级时 `Upgrader.CheckOrigin` 校验请求的 Origin 头。`["*"]` 允许所有来源（仅开发用），生产应限制为具体域名。热重载即时生效——每次 WS 升级请求读取最新配置 |
 | `jwt_audience` | string | `hotplex-worker-gateway` | — | JWT `aud` 声明的期望值。用于验证令牌的目标受众，防止令牌跨服务复用 |
 | `jwt_secret` | []byte | — | — | JWT 签名密钥（ES256）。**仅**通过 `HOTPLEX_JWT_SECRET` 环境变量提供（base64 编码），禁止写入 YAML。用于签发和验证 session token |
 
@@ -130,8 +130,8 @@ log:
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
 | `retention_period` | duration | `168h` (7天) | — | TERMINATED 会话在数据库中的保留时长。过期后 GC 扫描将其标记为 DELETED 并从数据库物理删除。较长的保留期支持会话历史回溯和调试 |
-| `gc_scan_interval` | duration | `1m` | ✅ | GC 后台扫描间隔。每次扫描检查：① IDLE 会话的 idle_expires_at 是否到期 → TERMINATED ② 会话的 max_lifetime 是否到期 → TERMINATED ③ TERMINATED 会话的 retention_period 是否到期 → DELETE |
-| `max_concurrent` | int | `1000` | ✅ | 全局最大并发活跃会话数（CREATED + RUNNING + IDLE）。超出时新会话创建请求被拒绝并返回 `POOL_EXHAUSTED` 错误。根据服务器内存和 Worker 资源需求调整 |
+| `gc_scan_interval` | duration | `1m` | ✅ | GC 后台扫描间隔。每次扫描检查：① IDLE 会话的 idle_expires_at 是否到期 → TERMINATED ② 会话的 max_lifetime 是否到期 → TERMINATED ③ TERMINATED 会话的 retention_period 是否到期 → DELETE。热重载通过 channel 信号重置 ticker，不中断正在执行的 GC 周期 |
+| `max_concurrent` | int | `1000` | — | 全局最大并发活跃会话数（CREATED + RUNNING + IDLE）。超出时新会话创建请求被拒绝并返回 `POOL_EXHAUSTED` 错误。根据服务器内存和 Worker 资源需求调整。**非热重载**——实际配额由 `pool.max_size` 控制 |
 | `event_store_enabled` | bool | `true` | — | 启用事件持久化。Bridge 在每个 `done` 事件时将完整 Envelope 写入 MessageStore，用于会话回放、调试和审计。关闭后不写事件日志，减少 I/O |
 | `event_store_type` | string | `sqlite` (代码: `""`) | — | 事件存储后端类型。目前仅支持 `"sqlite"`。空字符串表示未指定，依赖 config.yaml 设置 |
 
@@ -144,7 +144,7 @@ PoolManager 在内存中追踪全局和每用户的会话配额。每个 Worker 
 | `min_size` | int | `0` | — | 预热池最小维持数量。大于 0 时启动后立即预创建指定数量的 Worker 进程，减少首次请求延迟。生产环境建议 `>0` 以消除冷启动 |
 | `max_size` | int | `100` | ✅ | 全局最大活跃会话数（所有用户合计）。PoolManager.Acquire() 在 `totalCount >= maxSize` 时拒绝新会话。与 `session.max_concurrent` 协同工作 |
 | `max_idle_per_user` | int | `10` (代码: `3`) | ✅ | 单个用户（bot_id）允许的最大同时活跃会话数。防止单个用户占用过多资源。0 = 不限 |
-| `max_memory_per_user` | int64 | `8589934592` (8GB, 代码: 2GB) | ✅ | 单个用户的总估算内存配额（bytes）。按每 Worker 512MB 估算，8GB 允许约 16 个并发 Worker。超出时拒绝新会话并返回 `MEMORY_EXCEEDED`。Linux 上 Worker 通过 RLIMIT_AS 硬限制为 512MB，macOS 不支持此机制 |
+| `max_memory_per_user` | int64 | `8589934592` (8GB, 代码: 2GB) | — | 单个用户的总估算内存配额（bytes）。按每 Worker 512MB 估算，8GB 允许约 16 个并发 Worker。超出时拒绝新会话并返回 `MEMORY_EXCEEDED`。Linux 上 Worker 通过 RLIMIT_AS 硬限制为 512MB，macOS 不支持此机制。**非热重载**——内存配额检查使用启动时快照 |
 
 ### worker — Worker 进程
 
@@ -152,9 +152,9 @@ PoolManager 在内存中追踪全局和每用户的会话配额。每个 Worker 
 
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
-| `max_lifetime` | duration | `24h` | ✅ | Worker 进程的强制最大存活时间。到期后 GC 将其标记为 TERMINATED。防止长期运行的 Worker 累积内存泄漏或状态异常。Worker 可通过 resume 机制重新启动 |
-| `idle_timeout` | duration | `60m` | ✅ | Worker 空闲超时。Worker 执行完毕进入 IDLE 状态后，如果在此时间内没有新 input，GC 将其 TERMINATED。较短的超时释放资源更快，但可能导致频繁的 Worker 冷启动 |
-| `execution_timeout` | duration | `30m` | ✅ | 僵尸 IO 超时。如果 RUNNING 状态的 Worker 在此时间内没有任何 stdout 输出（`LastIO()` 超时），判定为僵尸进程并强制终止。防止 Worker 挂死导致会话永久阻塞 |
+| `max_lifetime` | duration | `24h` | — | Worker 进程的强制最大存活时间。到期后 GC 将其标记为 TERMINATED。防止长期运行的 Worker 累积内存泄漏或状态异常。Worker 可通过 resume 机制重新启动。**非热重载**——GC 使用启动时快照判定过期 |
+| `idle_timeout` | duration | `60m` | — | Worker 空闲超时。Worker 执行完毕进入 IDLE 状态后，如果在此时间内没有新 input，GC 将其 TERMINATED。较短的超时释放资源更快，但可能导致频繁的 Worker 冷启动。**非热重载**——同 max_lifetime |
+| `execution_timeout` | duration | `30m` | — | 僵尸 IO 超时。如果 RUNNING 状态的 Worker 在此时间内没有任何 stdout 输出（`LastIO()` 超时），判定为僵尸进程并强制终止。防止 Worker 挂死导致会话永久阻塞。**非热重载**——同 max_lifetime |
 | `default_work_dir` | string | `/tmp/hotplex/workspace` | — | Worker 进程的默认工作目录。当 session 或 platform 未指定 `work_dir` 时使用。目录不存在时自动创建（`mkdir -p`） |
 | `pid_dir` | string | `~/.hotplex/.pids/` | — | PID 文件目录。proc.Manager 在启动 Worker 时写入 PID 文件用于孤儿进程清理。网关重启时自动扫描此目录，杀死不再有父进程的孤儿 Worker |
 | `allowed_envs` | []string | `[]` | — | 额外透传给 Worker 的环境变量名白名单。这些环境变量从网关进程继承到 Worker 子进程。与 `env_whitelist` 合并去重 |
@@ -168,13 +168,13 @@ PoolManager 在内存中追踪全局和每用户的会话配额。每个 Worker 
 
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
-| `enabled` | bool | `true` | — | 启用自动重试。关闭后 Worker 遇到临时错误时直接将错误事件转发给客户端 |
-| `max_retries` | int | `9` | — | 单个会话的最大重试次数。每次 Worker 完成一个 turn（`done` 事件），Bridge 检查输出是否匹配可重试错误模式。达到上限后停止重试，返回提示让用户手动操作。9 次重试在 base_delay=5s 指数退避下总耗时约 5+10+20+40+80+120+120+120+120 ≈ 640s（11 分钟），不会超过网关的 `execution_timeout`（默认 30 分钟） |
-| `base_delay` | duration | `5s` | — | 首次重试的等待时间。采用指数退避：第 1 次等 `base_delay`，第 2 次等 `2×base_delay`，依此类推，直到 `max_delay` |
-| `max_delay` | duration | `120s` | — | 退避延迟上限。即使指数增长超过此值，实际延迟也不会超过 120s |
-| `retry_input` | string | `继续` | — | 重试时发送给 Worker 的文本。Bridge 在 Worker 的 stdin 写入此文本，触发 Worker 重新发起 LLM 请求 |
-| `notify_user` | bool | `true` | — | 重试期间是否通知用户。启用时在重试前发送一条 `message` 事件（如"🔄 正在自动重试 (1/9)..."），替代原始 LLM 错误信息。关闭后用户看不到任何重试提示，但错误信息仍然会被拦截 |
-| `patterns` | []string | `[]` | — | **追加**到内置默认模式的自定义正则表达式。内置模式匹配：`429/rate limit`、`529/overloaded`、`500-503/server error`、`network/connection reset/ECONNREFUSED/timeout`、`API Error.*reject`。自定义模式与内置模式共同生效，不会覆盖 |
+| `enabled` | bool | `true` | ✅ | 启用自动重试。关闭后 Worker 遇到临时错误时直接将错误事件转发给客户端 |
+| `max_retries` | int | `9` | ✅ | 单个会话的最大重试次数。每次 Worker 完成一个 turn（`done` 事件），Bridge 检查输出是否匹配可重试错误模式。达到上限后停止重试，返回提示让用户手动操作。9 次重试在 base_delay=5s 指数退避下总耗时约 5+10+20+40+80+120+120+120+120 ≈ 640s（11 分钟），不会超过网关的 `execution_timeout`（默认 30 分钟） |
+| `base_delay` | duration | `5s` | ✅ | 首次重试的等待时间。采用指数退避：第 1 次等 `base_delay`，第 2 次等 `2×base_delay`，依此类推，直到 `max_delay` |
+| `max_delay` | duration | `120s` | ✅ | 退避延迟上限。即使指数增长超过此值，实际延迟也不会超过 120s |
+| `retry_input` | string | `继续` | ✅ | 重试时发送给 Worker 的文本。Bridge 在 Worker 的 stdin 写入此文本，触发 Worker 重新发起 LLM 请求 |
+| `notify_user` | bool | `true` | ✅ | 重试期间是否通知用户。启用时在重试前发送一条 `message` 事件（如"🔄 正在自动重试 (1/9)..."），替代原始 LLM 错误信息。关闭后用户看不到任何重试提示，但错误信息仍然会被拦截 |
+| `patterns` | []string | `[]` | ✅ | **追加**到内置默认模式的自定义正则表达式。内置模式匹配：`429/rate limit`、`529/overloaded`、`500-503/server error`、`network/connection reset/ECONNREFUSED/timeout`、`API Error.*reject`。自定义模式与内置模式共同生效，不会覆盖 |
 
 ### log — 日志
 
@@ -182,8 +182,8 @@ PoolManager 在内存中追踪全局和每用户的会话配额。每个 Worker 
 
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
-| `level` | string | `info` | — | 最低日志级别。`debug` 输出所有事件流转细节（每个收发的事件），适合开发调试。`info` 仅输出关键生命周期事件（连接注册、会话创建/终止等）。`warn`/`error` 仅输出异常情况 |
-| `format` | string | `json` | — | 日志格式。`json` 为结构化 JSON（适合日志聚合系统如 ELK/Loki）。`text` 为人类可读的 key=value 格式（适合终端直接查看）。Makefile `dev-logs` 使用 `tail -f` 展示 |
+| `level` | string | `info` | ✅ | 最低日志级别。`debug` 输出所有事件流转细节（每个收发的事件），适合开发调试。`info` 仅输出关键生命周期事件（连接注册、会话创建/终止等）。`warn`/`error` 仅输出异常情况。热重载通过 `slog.LevelVar` 即时生效，无需重启 |
+| `format` | string | `json` | ❌ | 日志格式。`json` 为结构化 JSON（适合日志聚合系统如 ELK/Loki）。`text` 为人类可读的 key=value 格式（适合终端直接查看）。Makefile `dev-logs` 使用 `tail -f` 展示。**启动后不可变更**——Handler 在初始化时确定格式 |
 
 ### messaging.slack — Slack Socket Mode
 
@@ -259,14 +259,38 @@ PoolManager 在内存中追踪全局和每用户的会话配额。每个 Worker 
 
 ## 热重载
 
-Watcher 监听 `-config` 指定文件的变更，通过 `configSummary()` 比较以下 7 个字段检测变化：
+Watcher 监听 `-config` 指定文件的变更（500ms 防抖），通过反射逐字段比较检测变化，验证新配置后原子替换 `ConfigStore` 并通知各组件的 observer。
 
-`gateway.addr` · `gateway.broadcast_queue_size` · `session.gc_scan_interval` · `pool.max_size` · `worker.max_lifetime` · `worker.idle_timeout` · `admin.requests_per_sec`
+### 可热重载字段（即时生效，无需重启）
 
-变更检测通过后，新的完整 Config 对象传递给回调，运行时消费者自动使用新值。支持历史快照和回滚（最多 64 个版本）。
+| 模块 | 字段 | 生效机制 |
+|:-----|:-----|:---------|
+| log | `level` | `slog.LevelVar` 动态切换 |
+| security | `api_keys` | Authenticator 原子替换 key map |
+| security | `allowed_origins` | 每次 WS 升级请求读取最新值 |
+| session | `gc_scan_interval` | Channel 信号重置 GC ticker |
+| pool | `max_size` | PoolManager 加锁更新 |
+| pool | `max_idle_per_user` | 同上 |
+| worker.auto_retry | `enabled` / `max_retries` / `base_delay` / `max_delay` / `retry_input` / `notify_user` / `patterns` | LLMRetryController 原子替换配置和编译后的正则 |
+| admin | `requests_per_sec` / `burst` | 令牌桶动态调整填充速率和容量 |
+| admin | `tokens` | Admin API token 列表热更新 |
 
-以下字段变更仅记录日志，需重启生效：
-`security.api_keys` · `security.tls_enabled` · `security.tls_cert_file` · `security.tls_key_file` · `security.jwt_secret` · `db.path` · `db.wal_mode`
+### 不可热重载字段（变更需重启）
+
+以下字段涉及**启动时一次性创建的资源**，运行中无法变更：
+
+| 模块 | 字段 | 原因 |
+|:-----|:-----|:-----|
+| gateway | `addr` | HTTP Server 启动时绑定端口 |
+| gateway | `read_buffer_size` / `write_buffer_size` | WebSocket Upgrader 在 NewHub 时初始化 |
+| gateway | `broadcast_queue_size` | Go channel 大小在 make 时确定 |
+| log | `format` | slog Handler 在初始化时确定格式 |
+| db | `path` / `wal_mode` | SQLite 连接在启动时建立 |
+| security | `tls_*` / `jwt_secret` | TLS 证书和 JWT 密钥在启动时加载 |
+
+> 变更不可热重载字段时，Watcher 会记录日志 `config: static field changed, restart required`，新值存入 ConfigStore 但不产生实际效果，需重启网关才能生效。
+
+支持历史快照和回滚（最多 64 个版本），回滚操作同样通过 ConfigStore 原子传播到所有 observer。
 
 ---
 

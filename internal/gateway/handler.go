@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"runtime/debug"
 
-	"github.com/hotplex/hotplex-worker/internal/config"
 	"github.com/hotplex/hotplex-worker/internal/metrics"
 	"github.com/hotplex/hotplex-worker/internal/security"
 	"github.com/hotplex/hotplex-worker/internal/session"
@@ -22,7 +21,6 @@ import (
 // It coordinates between the hub, session manager, and pool.
 type Handler struct {
 	log          *slog.Logger
-	cfg          *config.Config
 	hub          *Hub
 	sm           *session.Manager
 	jwtValidator *security.JWTValidator
@@ -30,10 +28,9 @@ type Handler struct {
 }
 
 // NewHandler creates a new message handler.
-func NewHandler(log *slog.Logger, cfg *config.Config, hub *Hub, sm *session.Manager, jwtValidator *security.JWTValidator) *Handler {
+func NewHandler(log *slog.Logger, hub *Hub, sm *session.Manager, jwtValidator *security.JWTValidator) *Handler {
 	return &Handler{
 		log:          log.With("component", "handler"),
-		cfg:          cfg,
 		hub:          hub,
 		sm:           sm,
 		jwtValidator: jwtValidator,
