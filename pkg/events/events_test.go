@@ -376,6 +376,23 @@ func TestIsValidTransition_InvalidStateConstant(t *testing.T) {
 	require.False(t, result, "Transition to unknown state should return false")
 }
 
+func TestWorkerStdioCommandIsPassthrough(t *testing.T) {
+	passthrough := []WorkerStdioCommand{
+		StdioCompact, StdioClear, StdioModel,
+		StdioEffort, StdioRewind, StdioCommit,
+	}
+	notPassthrough := []WorkerStdioCommand{
+		StdioContextUsage, StdioMCPStatus,
+		StdioSetModel, StdioSetPermMode,
+	}
+	for _, cmd := range passthrough {
+		require.True(t, cmd.IsPassthrough(), string(cmd))
+	}
+	for _, cmd := range notPassthrough {
+		require.False(t, cmd.IsPassthrough(), string(cmd))
+	}
+}
+
 func TestNewEnvelope_TimestampUniqueness(t *testing.T) {
 	// Create multiple envelopes and ensure timestamps are set independently
 	envelope1 := NewEnvelope("id1", "session1", 1, Ping, nil)

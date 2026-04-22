@@ -299,9 +299,16 @@ func run() error {
 }
 
 func loadConfig() *config.Config {
-	cfg, err := config.Load(*flagConfig, config.LoadOptions{})
+	absPath, err := filepath.Abs(*flagConfig)
 	if err != nil {
-		slog.Error("config: load failed", "path", *flagConfig, "err", err)
+		slog.Error("config: resolve path", "path", *flagConfig, "err", err)
+		os.Exit(1)
+	}
+	*flagConfig = absPath
+
+	cfg, err := config.Load(absPath, config.LoadOptions{})
+	if err != nil {
+		slog.Error("config: load failed", "path", absPath, "err", err)
 		os.Exit(1)
 	}
 	if *flagDev {
