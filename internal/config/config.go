@@ -125,6 +125,7 @@ type Config struct {
 	Pool      PoolConfig      `mapstructure:"pool"`
 	Log       LogConfig       `mapstructure:"log"`
 	Admin     AdminConfig     `mapstructure:"admin"`
+	WebChat   WebChatConfig   `mapstructure:"webchat"`
 	Messaging MessagingConfig `mapstructure:"messaging"`
 	Inherits  string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 }
@@ -133,6 +134,28 @@ type Config struct {
 type MessagingConfig struct {
 	Slack  SlackConfig  `mapstructure:"slack"`
 	Feishu FeishuConfig `mapstructure:"feishu"`
+}
+
+// STT constants for provider and mode values.
+const (
+	STTProviderLocal       = "local"
+	STTProviderFeishu      = "feishu"
+	STTProviderFeishuLocal = "feishu+local"
+	STTModeEphemeral       = "ephemeral"
+	STTModePersistent      = "persistent"
+)
+
+// STTConfig holds speech-to-text configuration shared across messaging adapters.
+type STTConfig struct {
+	// Provider: "local" (external command), "feishu" (cloud API),
+	// "feishu+local" (cloud primary, local fallback), "" (disabled).
+	Provider string `mapstructure:"stt_provider"`
+	// LocalCmd is the command template. {file} is replaced with the audio file path.
+	LocalCmd string `mapstructure:"stt_local_cmd"`
+	// LocalMode: "ephemeral" (per-request process) or "persistent" (long-lived subprocess).
+	LocalMode string `mapstructure:"stt_local_mode"`
+	// LocalIdleTTL controls auto-shutdown of persistent subprocess. 0 = disabled.
+	LocalIdleTTL time.Duration `mapstructure:"stt_local_idle_ttl"`
 }
 
 // SlackConfig holds Slack Socket Mode adapter settings.
@@ -144,23 +167,19 @@ type SlackConfig struct {
 	WorkerType          string   `mapstructure:"worker_type"`
 	WorkDir             string   `mapstructure:"work_dir"`
 	AssistantAPIEnabled *bool    `mapstructure:"assistant_api_enabled"`
-	DMPolicy            string   `mapstructure:"dm_policy"`    // Policy for 1-on-1 chats: open, allowlist, disabled
-	GroupPolicy         string   `mapstructure:"group_policy"` // Policy for channels/groups: open, allowlist, disabled
+	DMPolicy            string   `mapstructure:"dm_policy"`
+	GroupPolicy         string   `mapstructure:"group_policy"`
 	RequireMention      bool     `mapstructure:"require_mention"`
 	AllowFrom           []string `mapstructure:"allow_from"`
 	AllowDMFrom         []string `mapstructure:"allow_dm_from"`
 	AllowGroupFrom      []string `mapstructure:"allow_group_from"`
 
-	// TypingStages configures multi-stage emoji progress indicators for free workspaces.
-	// Empty or nil uses DefaultStages (eyes → clock1 → hourglass → gear → hourglass).
 	TypingStages []TypingStageConfig `mapstructure:"typing_stages"`
 
-	// ReconnectBaseDelay is the initial delay between reconnection attempts.
-	// Default: 1s. The delay doubles with each attempt (exponential backoff).
 	ReconnectBaseDelay time.Duration `mapstructure:"reconnect_base_delay"`
-	// ReconnectMaxDelay is the maximum delay between reconnection attempts.
-	// Default: 60s. The delay will not exceed this value.
-	ReconnectMaxDelay time.Duration `mapstructure:"reconnect_max_delay"`
+	ReconnectMaxDelay  time.Duration `mapstructure:"reconnect_max_delay"`
+
+	STTConfig `mapstructure:",squash"`
 }
 
 // TypingStageConfig defines a single emoji reaction stage for YAML/Viper deserialization.
@@ -177,26 +196,14 @@ type FeishuConfig struct {
 	WorkerType string `mapstructure:"worker_type"`
 	WorkDir    string `mapstructure:"work_dir"`
 
-	DMPolicy       string   `mapstructure:"dm_policy"`    // Policy for 1-on-1 chats: open, allowlist, disabled
-	GroupPolicy    string   `mapstructure:"group_policy"` // Policy for groups: open, allowlist, disabled
+	DMPolicy       string   `mapstructure:"dm_policy"`
+	GroupPolicy    string   `mapstructure:"group_policy"`
 	RequireMention bool     `mapstructure:"require_mention"`
 	AllowFrom      []string `mapstructure:"allow_from"`
 	AllowDMFrom    []string `mapstructure:"allow_dm_from"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from"`
 
-	// Speech-to-text configuration.
-	// Provider: "feishu" (cloud API), "local" (external command),
-	// "feishu+local" (cloud primary, local fallback), "" (disabled).
-	STTProvider string `mapstructure:"stt_provider"`
-	// Local command template. {file} is replaced with the audio file path.
-	// Example: "funasr-onnx --model iic/SenseVoiceSmall --quantize {file}"
-	STTLocalCmd string `mapstructure:"stt_local_cmd"`
-	// Local STT mode: "ephemeral" (default, per-request process) or
-	// "persistent" (long-lived subprocess, model stays in memory).
-	STTLocalMode string `mapstructure:"stt_local_mode"`
-	// Idle timeout for persistent mode. Subprocess auto-shuts down
-	// after this duration with no transcription requests. 0 = disabled.
-	STTLocalIdleTTL time.Duration `mapstructure:"stt_local_idle_ttl"`
+	STTConfig `mapstructure:",squash"`
 }
 
 // AdminConfig holds admin API settings.
@@ -217,6 +224,11 @@ type AdminConfig struct {
 type LogConfig struct {
 	Level  string `mapstructure:"level"`
 	Format string `mapstructure:"format"` // "json" or "text"
+}
+
+// WebChatConfig holds webchat UI address (informational only, gateway does not manage webchat).
+type WebChatConfig struct {
+	Addr string `mapstructure:"addr"`
 }
 
 // GatewayConfig holds WebSocket gateway settings.
@@ -403,13 +415,15 @@ func Default() *Config {
 		},
 		Messaging: MessagingConfig{
 			Feishu: FeishuConfig{
-				RequireMention:  true,
-				DMPolicy:        "allowlist",
-				GroupPolicy:     "allowlist",
-				STTProvider:     "feishu+local",
-				STTLocalCmd:     "python3 scripts/stt_once.py {file}",
-				STTLocalMode:    "ephemeral",
-				STTLocalIdleTTL: time.Hour,
+				RequireMention: true,
+				DMPolicy:       "allowlist",
+				GroupPolicy:    "allowlist",
+				STTConfig: STTConfig{
+					Provider:     "feishu+local",
+					LocalCmd:     "python3 scripts/stt_once.py {file}",
+					LocalMode:    "ephemeral",
+					LocalIdleTTL: time.Hour,
+				},
 			},
 			Slack: SlackConfig{
 				RequireMention: true,

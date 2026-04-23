@@ -27,6 +27,7 @@ import (
 	"github.com/hotplex/hotplex-worker/internal/messaging"
 	"github.com/hotplex/hotplex-worker/internal/messaging/feishu"
 	"github.com/hotplex/hotplex-worker/internal/messaging/slack"
+	"github.com/hotplex/hotplex-worker/internal/messaging/stt"
 	"github.com/hotplex/hotplex-worker/internal/security"
 	"github.com/hotplex/hotplex-worker/internal/session"
 	"github.com/hotplex/hotplex-worker/internal/tracing"
@@ -91,9 +92,9 @@ func run() error {
 		},
 	}
 	if cfg.Log.Format == "text" {
-		logHandler = slog.NewTextHandler(os.Stdout, opts)
+		logHandler = slog.NewTextHandler(os.Stderr, opts)
 	} else {
-		logHandler = slog.NewJSONHandler(os.Stdout, opts)
+		logHandler = slog.NewJSONHandler(os.Stderr, opts)
 	}
 
 	log := slog.New(logHandler).With(
@@ -274,7 +275,7 @@ func run() error {
 	}
 
 	// Initialize messaging platform adapters.
-	msgAdapters := startMessagingAdapters(ctx, log, cfg, hub, sm, handler, bridge)
+	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, log, cfg, hub, sm, handler, bridge)
 
 	setupRoutes(mux, deps)
 
@@ -293,9 +294,26 @@ func run() error {
 
 	serverErr := make(chan error, 1)
 	go func() {
-		log.Info("gateway: listening", "addr", cfg.Gateway.Addr)
 		serverErr <- server.ListenAndServe()
 	}()
+
+	// Print unified startup banner as the "ready" message.
+	adminAddr := cfg.Admin.Addr
+	if !cfg.Admin.Enabled {
+		adminAddr = ""
+	}
+	printStartupBanner(os.Stdout, newBuildInfo(), RuntimeStatus{
+		GatewayAddr:  cfg.Gateway.Addr,
+		AdminAddr:    adminAddr,
+		WebChatAddr:  cfg.WebChat.Addr,
+		DBPath:       cfg.DB.Path,
+		PoolMax:      cfg.Pool.MaxSize,
+		PoolIdle:     cfg.Pool.MaxIdlePerUser,
+		Adapters:     adapterStatuses,
+		RetryEnabled: cfg.Worker.AutoRetry.Enabled,
+		RetryMax:     cfg.Worker.AutoRetry.MaxRetries,
+		RetryDelay:   cfg.Worker.AutoRetry.BaseDelay.String(),
+	}, *flagConfig)
 
 	sig := waitForSignal()
 	log.Info("gateway: shutdown", "signal", sig)
@@ -561,20 +579,23 @@ func (a *configWatcherAdapter) Rollback(version int) (*config.Config, int, error
 // startMessagingAdapters initializes and starts all enabled messaging platform adapters.
 func startMessagingAdapters(ctx context.Context, log *slog.Logger, cfg *config.Config,
 	hub *gateway.Hub, sm *session.Manager, handler *gateway.Handler, gwBridge *gateway.Bridge,
-) []messaging.PlatformAdapterInterface {
+) ([]messaging.PlatformAdapterInterface, []AdapterStatus) {
 	var adapters []messaging.PlatformAdapterInterface
+	var statuses []AdapterStatus
 	for _, pt := range messaging.RegisteredTypes() {
 		// Check if platform is enabled and resolve per-platform config.
 		var workerType, workDir string
 		switch pt {
 		case messaging.PlatformSlack:
 			if !cfg.Messaging.Slack.Enabled {
+				statuses = append(statuses, AdapterStatus{Name: "Slack", Started: false})
 				continue
 			}
 			workerType = cfg.Messaging.Slack.WorkerType
 			workDir = cfg.Messaging.Slack.WorkDir
 		case messaging.PlatformFeishu:
 			if !cfg.Messaging.Feishu.Enabled {
+				statuses = append(statuses, AdapterStatus{Name: "Feishu", Started: false})
 				continue
 			}
 			workerType = cfg.Messaging.Feishu.WorkerType
@@ -612,6 +633,9 @@ func startMessagingAdapters(ctx context.Context, log *slog.Logger, cfg *config.C
 					}
 					sa.SetTypingStages(ts)
 				}
+				if t := buildSlackTranscriber(cfg.Messaging.Slack, log); t != nil {
+					sa.SetTranscriber(t)
+				}
 			}
 		case messaging.PlatformFeishu:
 			if fa, ok := adapter.(*feishu.Adapter); ok {
@@ -645,51 +669,61 @@ func startMessagingAdapters(ctx context.Context, log *slog.Logger, cfg *config.C
 
 		if err := adapter.Start(ctx); err != nil {
 			log.Warn("messaging: start failed", "platform", pt, "err", err)
+			statuses = append(statuses, AdapterStatus{Name: string(pt), Started: false})
 			continue
 		}
 		adapters = append(adapters, adapter)
+		statuses = append(statuses, AdapterStatus{Name: string(pt), Started: true})
 		log.Info("messaging: adapter started", "platform", pt)
 	}
-	return adapters
+	return adapters, statuses
 }
 
 // buildTranscriber creates a speech-to-text transcriber from Feishu config.
 // Returns nil if STT is disabled.
-func buildTranscriber(cfg config.FeishuConfig, log *slog.Logger) feishu.Transcriber {
-	switch cfg.STTProvider {
-	case "feishu":
+func buildTranscriber(cfg config.FeishuConfig, log *slog.Logger) stt.Transcriber {
+	switch cfg.Provider {
+	case config.STTProviderFeishu:
 		client := lark.NewClient(cfg.AppID, cfg.AppSecret)
 		return feishu.NewFeishuSTT(client, log)
-	case "local":
-		if cfg.STTLocalCmd == "" {
-			log.Warn("feishu: stt_provider=local but stt_local_cmd is empty, STT disabled")
-			return nil
-		}
-		if cfg.STTLocalMode == "persistent" {
-			return feishu.NewPersistentSTT(cfg.STTLocalCmd, cfg.STTLocalIdleTTL, log)
-		}
-		return feishu.NewLocalSTT(cfg.STTLocalCmd, log)
-	case "feishu+local":
-		if cfg.STTLocalCmd == "" {
+	case config.STTProviderLocal:
+		return buildLocalSTT("feishu", cfg.STTConfig, log)
+	case config.STTProviderFeishuLocal:
+		if cfg.LocalCmd == "" {
 			log.Warn("feishu: stt_provider=feishu+local but stt_local_cmd is empty, using feishu only")
 			client := lark.NewClient(cfg.AppID, cfg.AppSecret)
 			return feishu.NewFeishuSTT(client, log)
 		}
 		client := lark.NewClient(cfg.AppID, cfg.AppSecret)
-		var local feishu.Transcriber
-		if cfg.STTLocalMode == "persistent" {
-			local = feishu.NewPersistentSTT(cfg.STTLocalCmd, cfg.STTLocalIdleTTL, log)
-		} else {
-			local = feishu.NewLocalSTT(cfg.STTLocalCmd, log)
-		}
-		return feishu.NewFallbackSTT(
+		return stt.NewFallbackSTT(
 			feishu.NewFeishuSTT(client, log),
-			local,
+			buildLocalSTT("feishu", cfg.STTConfig, log),
 			log,
 		)
 	default:
 		return nil
 	}
+}
+
+// buildSlackTranscriber creates a speech-to-text transcriber from Slack config.
+// Returns nil if STT is disabled. Only "local" mode is supported.
+func buildSlackTranscriber(cfg config.SlackConfig, log *slog.Logger) stt.Transcriber {
+	if cfg.Provider != config.STTProviderLocal {
+		return nil
+	}
+	return buildLocalSTT("slack", cfg.STTConfig, log)
+}
+
+// buildLocalSTT creates a local STT transcriber from shared config.
+func buildLocalSTT(platform string, cfg config.STTConfig, log *slog.Logger) stt.Transcriber {
+	if cfg.LocalCmd == "" {
+		log.Warn(platform + ": stt_provider=local but stt_local_cmd is empty, STT disabled")
+		return nil
+	}
+	if cfg.LocalMode == config.STTModePersistent {
+		return stt.NewPersistentSTT(cfg.LocalCmd, cfg.LocalIdleTTL, log)
+	}
+	return stt.NewLocalSTT(cfg.LocalCmd, log)
 }
 
 func waitForSignal() os.Signal {
@@ -702,6 +736,9 @@ const defaultVersion = "v1.0.0"
 
 // version is injected by ldflags: -X main.version=$(GIT_SHA)
 var version = defaultVersion
+
+// buildTime is injected by ldflags: -X main.buildTime=$(BUILD_TIME)
+var buildTime = "unknown"
 
 func versionString() string { return version }
 

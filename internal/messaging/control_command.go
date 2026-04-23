@@ -20,9 +20,8 @@ var slashCommandMap = map[string]ControlCommandResult{
 	"/gc":   {events.ControlActionGC, "gc"},
 	"/park": {events.ControlActionGC, "gc"},
 	// Reset: reuse session ID, everything else starts from scratch.
-	"/reset":   {events.ControlActionReset, "reset"},
-	"/restart": {events.ControlActionReset, "reset"},
-	"/new":     {events.ControlActionReset, "reset"},
+	"/reset": {events.ControlActionReset, "reset"},
+	"/new":   {events.ControlActionReset, "reset"},
 }
 
 // naturalLanguageMap maps normalized natural language triggers to control actions.
@@ -179,7 +178,7 @@ func HelpText() string {
 				Title: "会话控制", Emoji: "🔧",
 				Entries: []helpEntry{
 					{Commands: []string{"/gc", "/park"}, Desc: "休眠会话（停止 Worker，保留会话）"},
-					{Commands: []string{"/reset", "/restart", "/new"}, Desc: "重置上下文（全新开始）"},
+					{Commands: []string{"/reset", "/new"}, Desc: "重置上下文（全新开始）"},
 				},
 			},
 			{
