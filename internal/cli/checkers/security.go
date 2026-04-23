@@ -217,10 +217,15 @@ func (c filePermsChecker) Check(ctx context.Context) cli.Diagnostic {
 	if configPath != "" {
 		checkPerm(filepath.Dir(configPath), 0o700)
 		checkPerm(configPath, 0o600)
-	}
-	checkPerm(".env", 0o600)
-	if configPath != "" {
-		checkPerm("data", 0o700)
+
+		cfg, err := config.Load(configPath, config.LoadOptions{})
+		if err == nil && cfg.DB.Path != "" {
+			checkPerm(filepath.Dir(cfg.DB.Path), 0o700)
+		}
+
+		checkPerm(envFilePath(), 0o600)
+	} else {
+		checkPerm(".env", 0o600)
 	}
 
 	if len(issues) > 0 {
@@ -319,8 +324,16 @@ func init() {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+func envFilePath() string {
+	if configPath != "" {
+		return filepath.Join(filepath.Dir(configPath), ".env")
+	}
+	return ".env"
+}
+
 func writeEnvVar(key, value string) error {
-	f, err := os.OpenFile(".env", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	envPath := envFilePath()
+	f, err := os.OpenFile(envPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open .env: %w", err)
 	}
@@ -332,8 +345,8 @@ func writeEnvVar(key, value string) error {
 }
 
 func unsetEnvVar(key string) error {
-	gitignorePath := ".env"
-	data, err := os.ReadFile(gitignorePath)
+	envPath := envFilePath()
+	data, err := os.ReadFile(envPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -354,5 +367,5 @@ func unsetEnvVar(key string) error {
 
 	result := strings.Join(cleaned, "\n")
 	result = strings.TrimRight(result, "\n") + "\n"
-	return os.WriteFile(gitignorePath, []byte(result), 0o600)
+	return os.WriteFile(envPath, []byte(result), 0o600)
 }

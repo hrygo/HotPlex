@@ -408,7 +408,8 @@ func (c configEnvVarsChecker) Check(ctx context.Context) cli.Diagnostic {
 
 func fixEnvVars() error {
 	existing := make(map[string]bool)
-	if data, err := os.ReadFile(".env"); err == nil {
+	envPath := envFilePath()
+	if data, err := os.ReadFile(envPath); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
@@ -442,7 +443,7 @@ func fixEnvVars() error {
 		return nil
 	}
 
-	f, err := os.OpenFile(".env", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(envPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open .env: %w", err)
 	}
