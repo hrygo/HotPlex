@@ -87,11 +87,11 @@ var sdkDebugSilent = []string{
 
 // sdkReconnectSilent removes verbose reconnection-related log prefixes
 // that carry no actionable information and are part of the SDK's automatic
-// reconnect loop.
+// reconnect loop. "connected to wss://" is NOT silenced so that reconnection
+// success is observable in logs.
 var sdkReconnectSilent = []string{
 	"disconnected to wss://",
 	"trying to reconnect:",
-	"connected to wss://",
 }
 
 // SlogLogger implements larkcore.Logger, wrapping slog.Logger.
