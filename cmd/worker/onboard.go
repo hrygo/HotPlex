@@ -19,7 +19,7 @@ func newOnboardCmd() *cobra.Command {
 		Short: "Interactive configuration wizard",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if configPath == "" {
-				configPath = "configs/config.yaml"
+				configPath = "~/.hotplex/config.yaml"
 			}
 
 			result, err := onboard.Run(context.Background(), onboard.WizardOptions{
@@ -68,6 +68,6 @@ func newOnboardCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "use defaults, no prompts")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing configuration")
-	cmd.Flags().StringVarP(&configPath, "config", "c", "configs/config.yaml", "config file path")
+	cmd.Flags().StringVarP(&configPath, "config", "c", "~/.hotplex/config.yaml", "config file path")
 	return cmd
 }

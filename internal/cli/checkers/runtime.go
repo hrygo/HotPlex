@@ -232,5 +232,5 @@ func init() {
 	cli.DefaultRegistry.Register(diskSpaceChecker{})
 	cli.DefaultRegistry.Register(portAvailableChecker{})
 	cli.DefaultRegistry.Register(orphanPIDsChecker{pidDir: os.ExpandEnv("$HOME/.hotplex/.pids")})
-	cli.DefaultRegistry.Register(dataDirWritableChecker{dataDir: "data"})
+	cli.DefaultRegistry.Register(dataDirWritableChecker{dataDir: filepath.Join(os.ExpandEnv("$HOME"), ".hotplex", "data")})
 }

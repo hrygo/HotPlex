@@ -49,7 +49,7 @@ func newServeCmd() *cobra.Command {
 			return runServe(configPath, devMode)
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "configs/config.yaml", "config file path")
+	cmd.Flags().StringVarP(&configPath, "config", "c", "~/.hotplex/config.yaml", "config file path")
 	cmd.Flags().BoolVar(&devMode, "dev", false, "development mode")
 	return cmd
 }
@@ -90,13 +90,6 @@ func runServe(configPath string, devMode bool) error {
 	slog.SetDefault(log)
 
 	pidDir := cfg.Worker.PIDDir
-	if pidDir == "" {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			pidDir = filepath.Join(home, ".hotplex", ".pids")
-		} else {
-			pidDir = "/tmp/hotplex/.pids"
-		}
-	}
 	pidTracker := proc.InitTracker(pidDir, log)
 	if err := pidTracker.EnsureDir(); err != nil {
 		log.Warn("gateway: pid dir setup failed, orphan cleanup disabled", "dir", pidDir, "err", err)

@@ -140,6 +140,6 @@ func (c networkReachableChecker) Check(ctx context.Context) cli.Diagnostic {
 
 func init() {
 	cli.DefaultRegistry.Register(workerBinaryChecker{})
-	cli.DefaultRegistry.Register(sqlitePathChecker{dbPath: "data/hotplex.db"})
+	cli.DefaultRegistry.Register(sqlitePathChecker{dbPath: filepath.Join(os.ExpandEnv("$HOME"), ".hotplex", "data", "hotplex.db")})
 	cli.DefaultRegistry.Register(networkReachableChecker{})
 }

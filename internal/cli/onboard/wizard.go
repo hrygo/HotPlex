@@ -38,7 +38,7 @@ type StepResult struct {
 func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 	result := &WizardResult{
 		ConfigPath: opts.ConfigPath,
-		EnvPath:    ".env",
+		EnvPath:    filepath.Join(filepath.Dir(opts.ConfigPath), ".env"),
 	}
 
 	var jwtSecret, adminToken, workerType string

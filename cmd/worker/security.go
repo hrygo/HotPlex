@@ -23,7 +23,7 @@ func newSecurityCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, _ := cmd.Flags().GetString("config")
 			if configPath == "" {
-				configPath = "configs/config.yaml"
+				configPath = "~/.hotplex/config.yaml"
 			}
 			checkers.SetConfigPath(configPath)
 
@@ -80,7 +80,7 @@ func newSecurityCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&fix, "fix", false, "automatically fix issues")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show detailed information")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output in JSON format")
-	cmd.Flags().StringP("config", "c", "configs/config.yaml", "config file path")
+	cmd.Flags().StringP("config", "c", "~/.hotplex/config.yaml", "config file path")
 	return cmd
 }
 

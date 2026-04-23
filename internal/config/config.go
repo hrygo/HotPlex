@@ -356,7 +356,7 @@ func Default() *Config {
 			DeltaCoalesceSize:     200,
 		},
 		DB: DBConfig{
-			Path:         "data/hotplex-worker.db",
+			Path:         filepath.Join(HotplexHome(), "data", "hotplex-worker.db"),
 			WALMode:      true,
 			BusyTimeout:  500 * time.Millisecond,
 			MaxOpenConns: 1,
@@ -367,8 +367,8 @@ func Default() *Config {
 			ExecutionTimeout: 30 * time.Minute,
 			AllowedEnvs:      nil,
 			EnvWhitelist:     nil,
-			DefaultWorkDir:   "/tmp/hotplex/workspace",
-			PIDDir:           "",
+			DefaultWorkDir:   filepath.Join(HotplexHome(), "workspace"),
+			PIDDir:           filepath.Join(HotplexHome(), ".pids"),
 			AutoRetry:        AutoRetryConfig{Enabled: true, MaxRetries: 9, BaseDelay: 5 * time.Second, MaxDelay: 120 * time.Second, RetryInput: "继续", NotifyUser: true},
 		},
 		Security: SecurityConfig{
@@ -635,6 +635,17 @@ func normalizePath(p string) (string, error) {
 		p = abs
 	}
 	return p, nil
+}
+
+// HotplexHome returns the base directory for all HotPlex state (~/.hotplex).
+// It does not create the directory — callers should use ensureDir or rely on
+// the components that need the directory to create it on first use.
+func HotplexHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "/tmp/hotplex"
+	}
+	return filepath.Join(home, ".hotplex")
 }
 
 // aggregateNumberedEnv appends values from environment variables like PREFIX_1, PREFIX_2...

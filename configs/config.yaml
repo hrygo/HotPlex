@@ -32,7 +32,7 @@ admin:
 # ─────────────────────────────────────────────────────────────────────────────
 
 db:
-  path: "data/hotplex-worker.db"
+  path: "~/.hotplex/data/hotplex-worker.db"
   wal_mode: true
   busy_timeout: 500ms
 

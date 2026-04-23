@@ -272,7 +272,7 @@ func TestConfigEnvVars_FixFunc(t *testing.T) {
 	require.Contains(t, string(data), "HOTPLEX_ADMIN_TOKEN_1=")
 }
 
-func TestConfigRequired_Missing(t *testing.T) {
+func TestConfigRequired_NoMessaging(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := `gateway:
@@ -291,6 +291,51 @@ db:
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
 
+	require.Equal(t, cli.StatusWarn, d.Status)
+	require.Contains(t, d.Detail, "Slack and Feishu")
+}
+
+func TestConfigRequired_MissingJWT(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	dbDir := filepath.Join(dir, "data")
+	require.NoError(t, os.MkdirAll(dbDir, 0o755))
+	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	defer resetConfigPath()
+	SetConfigPath(path)
+
+	c := configRequiredChecker{}
+	d := c.Check(context.Background())
+
+	require.Equal(t, cli.StatusFail, d.Status)
+	require.Contains(t, d.Detail, "security.jwt_secret")
+}
+
+func TestConfigRequired_AllPresent(t *testing.T) {
+	// t.Setenv — cannot use t.Parallel.
+	// JWTSecret has mapstructure:"-" and is loaded via SecretsProvider, not from
+	// config file. The checker calls config.Load with empty LoadOptions, so
+	// JWTSecret is always empty. This test only verifies that the messaging
+	// check passes when Slack is enabled — JWT will still be reported missing.
+	t.Setenv("JWT_SECRET", "dGVzdC1zZWNyZXQta2V5LWZvci1qd3Q=")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	dbDir := filepath.Join(dir, "data")
+	require.NoError(t, os.MkdirAll(dbDir, 0o755))
+	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	defer resetConfigPath()
+	SetConfigPath(path)
+
+	c := configRequiredChecker{}
+	d := c.Check(context.Background())
+
+	// Messaging is enabled so no messaging warning; JWT is still missing
+	// because the checker has no SecretsProvider.
 	require.Equal(t, cli.StatusFail, d.Status)
 	require.Contains(t, d.Detail, "security.jwt_secret")
 }

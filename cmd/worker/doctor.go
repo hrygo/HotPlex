@@ -23,7 +23,7 @@ func newDoctorCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, _ := cmd.Flags().GetString("config")
 			if configPath == "" {
-				configPath = "configs/config.yaml"
+				configPath = "~/.hotplex/config.yaml"
 			}
 			checkers.SetConfigPath(configPath)
 
@@ -86,7 +86,7 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show detailed information")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output in JSON format")
 	cmd.Flags().StringVarP(&category, "category", "C", "", "only check specified category (environment, config, dependencies, security, runtime, messaging)")
-	cmd.Flags().StringP("config", "c", "configs/config.yaml", "config file path")
+	cmd.Flags().StringP("config", "c", "~/.hotplex/config.yaml", "config file path")
 	return cmd
 }
 

@@ -86,7 +86,7 @@ func fixConfigExists() error {
 admin:
   addr: ":9999"
 db:
-  path: "data/hotplex.db"
+  path: "~/.hotplex/data/hotplex.db"
 worker:
   type: "claude_code"
 log:
@@ -172,7 +172,14 @@ func (c configRequiredChecker) Check(ctx context.Context) cli.Diagnostic {
 
 	hasWorker := cfg.Messaging.Slack.Enabled || cfg.Messaging.Feishu.Enabled
 	if !hasWorker {
-		missing = append(missing, "at least one worker type (slack or feishu) must be enabled")
+		return cli.Diagnostic{
+			Name:     c.Name(),
+			Category: c.Category(),
+			Status:   cli.StatusWarn,
+			Message:  "No messaging platform enabled",
+			Detail:   "Slack and Feishu are both disabled. Enable one to use messaging features.",
+			FixHint:  "Run onboard to configure Slack or Feishu",
+		}
 	}
 
 	if len(missing) > 0 {

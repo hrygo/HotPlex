@@ -12,7 +12,7 @@ admin:
   addr: ":9999"
   enabled: true
 db:
-  path: "data/hotplex.db"
+  path: "~/.hotplex/data/hotplex.db"
 worker:
   type: "claude_code"
   execution_timeout: "30m"
