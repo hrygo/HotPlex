@@ -312,7 +312,7 @@ func TestTruncateStatus(t *testing.T) {
 	require.Equal(t, "hi", truncateWithSuffix("hi", 50))
 	require.Equal(t, "hello world", truncateWithSuffix("hello world", 11))
 	require.Equal(t, "hello...", truncateWithSuffix("hello world", 8))
-	require.Equal(t, "你好世...", truncateWithSuffix("你好世界测试", 13))
+	require.Equal(t, "你好世...", truncateWithSuffix("你好世界测试啊", 6))
 }
 
 func TestIsAssistantCapabilityError(t *testing.T) {

@@ -20,8 +20,8 @@ fi
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-readonly SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
-readonly ROOT_DIR="${SCRIPT_DIR}/.."
+readonly SCRIPT_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
+readonly ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly BIN_NAME="hotplex-worker"
 readonly BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/bin}"
 readonly LOG_DIR="${LOG_DIR:-${ROOT_DIR}/logs}"
