@@ -10,7 +10,7 @@ messaging/
   platform_adapter.go    # PlatformAdapter base + registry (Register/New/RegisteredTypes)
   bridge.go              # Bridge: 3-step join (StartSession → Join → Handle)
   interaction.go         # InteractionManager: user permission/Q&A/elicitation with timeout + auto-deny
-  control_command.go     # Slash commands (/gc, /reset, /park, /restart, /new) + $prefix natural language
+  control_command.go     # Slash commands (/gc, /reset, /park, /new) + $prefix natural language
   sanitize.go            # Text sanitization: control chars, null bytes, BOM, surrogates
   integration_test.go     # Cross-adapter integration tests
   slack/                 # Slack Socket Mode adapter (18 files)

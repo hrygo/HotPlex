@@ -31,7 +31,7 @@ These manage session lifecycle — they do NOT reach the worker process.
 | Commands | Effect |
 |:---------|:-------|
 | `/gc`, `/park` | Hibernate session — stop worker, preserve session for later resume |
-| `/reset`, `/restart`, `/new` | Reset context — same session ID, fresh start from scratch |
+| `/reset`, `/new` | Reset context — same session ID, fresh start from scratch |
 
 ### Worker Operations
 
@@ -44,10 +44,6 @@ These are forwarded to the worker process as in-place operations — session sta
 | `/model <name>` | Switch AI model |
 | `/perm <mode>` | Set permission mode |
 | `/effort <level>` | Set reasoning effort level |
-| `/compact` | Compress conversation history |
-| `/clear` | Clear conversation |
-| `/rewind` | Undo last conversation turn |
-| `/commit` | Create git commit |
 
 Natural language equivalents exist with `$` prefix (e.g., `$gc` = hibernate, `$休眠` = hibernate, `$重置` = reset, `$上下文` = context usage). These prevent accidental activation from normal conversation.
 

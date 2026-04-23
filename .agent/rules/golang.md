@@ -261,12 +261,11 @@ Messaging 通道的控制命令通过两层 map 解析：
 
 ```go
 // control_command.go
-var slashCommandMap = map[string]events.ControlAction{
-    "/gc":      events.ControlActionGC,
-    "/reset":   events.ControlActionReset,
-    "/park":    events.ControlActionPark,
-    "/restart": events.ControlActionRestart,
-    "/new":     events.ControlActionNew,
+var slashCommandMap = map[string]ControlCommandResult{
+    "/gc":   {events.ControlActionGC, "gc"},
+    "/park": {events.ControlActionGC, "gc"},
+    "/reset": {events.ControlActionReset, "reset"},
+    "/new":   {events.ControlActionReset, "reset"},
 }
 
 // 自然语言触发必须带 $ 前缀

@@ -9,7 +9,7 @@ slack/
   adapter.go          # Adapter struct, lifecycle, session mgmt (756 lines)
   stream.go           # SlackStreamingWriter: 150ms flush, 20-rune threshold, 3 retries (362 lines)
   interaction.go      # Permission/Q&A/elicitation block handling (445 lines)
-  slash_command.go    # Slash command handlers (/gc, /reset, /park, /restart, /new) (182 lines)
+  slash_command.go    # Slash command handlers (/gc, /reset, /park, /new) (182 lines)
   status.go           # Session status indicators (222 lines)
   chunker.go          # Long message splitting (Slack ~4000 char limit)
   dedup.go            # TTL-based message deduplication
@@ -33,7 +33,7 @@ slack/
 | Text message handling | `adapter.go` | `handleTextMessage()` → Bridge.Handle → session start |
 | Connection management | `adapter.go` | `GetOrCreateConn()` — dedup + activeConns map |
 | Streaming output | `stream.go` | `SlackStreamingWriter`: 150ms flush, 20-rune threshold, 10min TTL |
-| Slash commands | `slash_command.go` | /gc, /reset, /park, /restart, /new handlers |
+| Slash commands | `slash_command.go` | /gc, /reset, /park, /new handlers |
 | Interaction blocks | `interaction.go` | Permission/Q&A/elicitation via Slack Block Kit |
 | Session status | `status.go` | Visual status indicators in Slack |
 | Image/file blocks | `image_blocks.go` | Construct Slack image blocks for file sharing |
@@ -72,9 +72,8 @@ worker output → chunker (split long messages) → dedup (TTL duplicate filter)
 
 **Slash commands (`slash_command.go`)**
 - `/gc` — archive session, terminate worker
-- `/reset` — clear context, restart worker
+- `/reset` — clear context, fresh start
 - `/park` — idle session, keep for resume
-- `/restart` — restart current session
 - `/new` — create fresh session
 
 ## ANTI-PATTERNS

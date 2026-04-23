@@ -163,7 +163,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - `PlatformConn` (interface) → `platform_conn.go` — WriteCtx + Close
 - `PlatformAdapter` → `platform_adapter.go` — base: SetHub/SetSM/SetHandler/SetBridge
 - `InteractionManager` → `interaction.go` — PendingInteraction registry with timeout + auto-deny (5min default)
-- `ParseControlCommand` → `control_command.go` — slash commands (/gc, /reset, /park, /restart, /new) + $prefix natural language
+- `ParseControlCommand` → `control_command.go` — slash commands (/gc, /reset, /park, /new) + $prefix natural language
 - `SanitizeText` → `sanitize.go` — removes control chars, null bytes, BOM, surrogates
 - `FeishuSTT` → `feishu/stt.go` — cloud transcription via Feishu speech_to_text API
 - `LocalSTT` → `stt/stt.go` — ephemeral per-request external command transcription
@@ -195,7 +195,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - **DI**: Manual constructor injection (no wire/dig), `GatewayDeps` struct in main.go
 - **Shutdown order**: signal → cancel ctx → tracing → hub → configWatcher → sessionMgr → HTTP server
 - **Panic recovery**: Gateway handler + bridge forwardEvents must recover panics, log error, return `handler panic` / `bridge panic` to caller
-- **Control commands**: Natural language triggers require `$` prefix (e.g. `$gc`, `$休眠`) to prevent accidental matches; slash commands (`/gc`, `/reset`, `/park`, `/restart`, `/new`) have no prefix
+- **Control commands**: Natural language triggers require `$` prefix (e.g. `$gc`, `$休眠`) to prevent accidental matches; slash commands (`/gc`, `/reset`, `/park`, `/new`) have no prefix
 - **Text sanitization**: All user-facing text output passes through `SanitizeText()` before delivery to messaging platforms
 - **Interaction timeout**: Permission/Q&A/elicitation requests auto-deny after 5 minutes to prevent indefinite blocking
 - **Session key derivation**: UUIDv5 deterministic mapping from (ownerID, workerType, clientSessionID, workDir) for cross-environment consistency
