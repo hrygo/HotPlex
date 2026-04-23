@@ -92,9 +92,9 @@ func run() error {
 		},
 	}
 	if cfg.Log.Format == "text" {
-		logHandler = slog.NewTextHandler(os.Stdout, opts)
+		logHandler = slog.NewTextHandler(os.Stderr, opts)
 	} else {
-		logHandler = slog.NewJSONHandler(os.Stdout, opts)
+		logHandler = slog.NewJSONHandler(os.Stderr, opts)
 	}
 
 	log := slog.New(logHandler).With(

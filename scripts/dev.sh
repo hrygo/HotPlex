@@ -115,6 +115,8 @@ start_gateway() {
 
     if kill -0 "$(cat "$GATEWAY_PID")" 2>/dev/null; then
         ok "Gateway started (PID $(cat "$GATEWAY_PID"))"
+        # Display startup banner from log.
+        grep -v '^time=' "$GATEWAY_LOG" | grep -v '^$' | tail -15 | sed 's/^/  /'
     else
         err "Gateway failed to start"
         cat "$GATEWAY_LOG" | tail -20

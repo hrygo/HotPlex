@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,11 @@ const (
 	ansiGreen = "\033[32m"
 	ansiRed   = "\033[31m"
 )
+
+//go:embed banner_art.txt
+var bannerArt string
+
+//go:generate go run ../../scripts/gen_banner.go -cols 80
 
 // BuildInfo holds compile-time and runtime metadata.
 type BuildInfo struct {
@@ -112,16 +118,13 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 		return fmt.Sprintf("  %-11s%s", bold(label), value)
 	}
 
-	logo := `@@@'  *@#;   *'  .+@S          +@=  ;+    'S@?  '@@@@@@@@:  *:     %@:  =@@@+  .
-@@@:  *@+  '?S%+   #@???+::;???S@=  :#??:  =@?  '@@@@@@@@:  *S%%%??#@%'  :#*  .?
-=;;.  *@*  :@@@#   #@@@@*  ;@@@@@+  :@#@;  =@?  '@@@@@@@@:  **;==#@@@@@*:  =;+@@
-;::   *@*  :@@@#   #@@@@*  :@@@@@+  ;+    .?@?  '@@@@@@@@:  *+;;;#@@@@@*:=. '+@@
-@@@:  *@+  '%#S*   #@@@@*  :@@@@@+  :#SSSS@@@?  '#%%%%%#@:  *#SSS%%#@%'  ;#=  .?
-@@@'  *@S;   *:   +@@@@@*  :@@@@@+  :@@@@@@@@?  :*     %@:  *:     %@:  =@@@+  .`
-
 	var lines []string
 
-	lines = append(lines, "", cyan(logo), "")
+	if tty {
+		lines = append(lines, "", bannerArt, "")
+	} else {
+		lines = append(lines, "", "HotPlex Worker Gateway", "")
+	}
 
 	// Build info
 	lines = append(lines,
