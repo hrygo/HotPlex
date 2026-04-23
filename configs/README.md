@@ -217,7 +217,6 @@ Worker 进程启动时的工作目录遵循以下优先级覆盖逻辑：
 | `allow_group_from` | []string | `[]` | — | 仅群组白名单。与 `allow_from` 合并去重 |
 | `reconnect_base_delay` | duration | `1s` | — | Socket Mode 连接断开后的首次重连延迟。采用指数退避，每次翻倍直到 `reconnect_max_delay` |
 | `reconnect_max_delay` | duration | `60s` | — | 重连延迟上限。避免在网络故障时过于频繁地重试 |
-| `typing_stages` | []object | 内置 5 阶段 | — | 多阶段表情进度指示器配置（免费 Workspace 无法使用 Slack native typing indicator）。每项含 `after`（延迟）和 `emoji`（表情符号）。默认：eyes → clock1 → hourglass → gear → hourglass |
 | `assistant_api_enabled` | *bool | `nil` | — | 是否启用 Assistant API 模式。`nil`（未设置）= 自动检测。`true` = 强制使用 Assistant API，`false` = 使用标准对话模式 |
 
 ### messaging.feishu — 飞书 WebSocket

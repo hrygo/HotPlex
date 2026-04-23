@@ -12,9 +12,12 @@ import type {
   Envelope,
   MessageDeltaData,
   MessageStartData,
+  MessageData,
   DoneData,
   ErrorData,
   ReasoningData,
+  ToolCallData,
+  ToolResultData,
 } from '@/lib/ai-sdk-transport';
 
 // ThreadSuggestion shape — matches @assistant-ui/core ThreadSuggestion
@@ -43,7 +46,21 @@ interface ReasoningPart {
   text: string;
 }
 
-type MessagePart = TextPart | ReasoningPart;
+interface ToolCallPart {
+  type: 'tool-call';
+  toolName: string;
+  args: any;
+  toolCallId: string;
+}
+
+interface ToolResultPart {
+  type: 'tool-result';
+  toolName: string;
+  result: any;
+  toolCallId: string;
+}
+
+type MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart;
 
 // Internal message format for our store
 interface HotPlexMessage {
@@ -201,6 +218,52 @@ export function useHotPlexRuntime({
       setIsRunning(true);
     };
 
+    const handleMessage = (data: MessageData, env: Envelope) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: data.id || env.id,
+          role: data.role as 'assistant',
+          parts: [{ type: 'text', text: data.content }],
+          createdAt: new Date(env.timestamp || Date.now()),
+          status: 'complete',
+        },
+      ]);
+      setIsRunning(false);
+    };
+
+    const handleToolCall = (data: ToolCallData, env: Envelope) => {
+      setMessages((prev) => {
+        const lastMessage = prev[prev.length - 1];
+        if (lastMessage?.role === 'assistant') {
+          const parts = [...lastMessage.parts, {
+            type: 'tool-call' as const,
+            toolName: data.name,
+            args: data.input,
+            toolCallId: data.id,
+          }];
+          return [...prev.slice(0, -1), { ...lastMessage, parts }];
+        }
+        return prev;
+      });
+    };
+
+    const handleToolResult = (data: ToolResultData, env: Envelope) => {
+      setMessages((prev) => {
+        const lastMessage = prev[prev.length - 1];
+        if (lastMessage?.role === 'assistant') {
+          const parts = [...lastMessage.parts, {
+            type: 'tool-result' as const,
+            toolName: 'result', // ToolResultData doesn't have name, using placeholder or ID
+            result: data.output,
+            toolCallId: data.id,
+          }];
+          return [...prev.slice(0, -1), { ...lastMessage, parts }];
+        }
+        return prev;
+      });
+    };
+
     const handleDone = (data: DoneData, env: Envelope) => {
       console.log('HotPlexRuntimeAdapter: streaming done', data);
 
@@ -271,11 +334,14 @@ export function useHotPlexRuntime({
 
     // Subscribe to events
     client.on('delta', handleDelta);
+    client.on('message', handleMessage);
     client.on('done', handleDone);
     client.on('error', handleError);
     client.on('disconnected', handleDisconnected);
     client.on('reasoning', handleReasoning);
     client.on('messageStart', handleMessageStart);
+    client.on('toolCall', handleToolCall);
+    client.on('toolResult', handleToolResult);
 
     // Connect (resume an existing session or create new one)
     client.connect(sessionId).catch((err) => {
@@ -284,11 +350,14 @@ export function useHotPlexRuntime({
 
     return () => {
       client.off('delta', handleDelta);
+      client.off('message', handleMessage);
       client.off('done', handleDone);
       client.off('error', handleError);
       client.off('disconnected', handleDisconnected);
       client.off('reasoning', handleReasoning);
       client.off('messageStart', handleMessageStart);
+      client.off('toolCall', handleToolCall);
+      client.off('toolResult', handleToolResult);
       pendingReasoningRef.current = '';
       client.disconnect();
       clientRef.current = null;

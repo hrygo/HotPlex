@@ -29,112 +29,103 @@ function SessionRow({
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(e) => e.key === 'Enter' && onSelect()}
-      className={`session-row ${isActive ? 'active' : ''}`}
+      className={`relative group px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer border ${
+        isActive 
+          ? 'bg-[var(--amber-light)] border-[var(--amber-border)] shadow-[0_0_20px_rgba(217,119,6,0.05)]' 
+          : 'bg-transparent border-transparent hover:bg-[var(--bg-elevated)] hover:border-[var(--border-default)]'
+      }`}
     >
-      {/* Icon */}
-      <div
-        className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center session-row-icon"
-        data-active={isActive ? 'true' : undefined}
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-        </svg>
-      </div>
+      <div className="flex items-center gap-3">
+        {/* Status indicator */}
+        <div className="relative">
+          <div className={`w-2 h-2 rounded-full ${
+            session.state === 'running' ? 'bg-[var(--accent-emerald)] shadow-[0_0_8px_var(--accent-emerald)]' :
+            session.state === 'idle' ? 'bg-[var(--accent-gold)]' : 'bg-[var(--text-faint)]'
+          }`} />
+          {session.state === 'running' && (
+            <div className="absolute inset-0 w-2 h-2 rounded-full bg-[var(--accent-emerald)] animate-ping opacity-40" />
+          )}
+        </div>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={`state-dot state-dot-${session.state}`} />
-          <span
-            className="text-xs font-mono truncate session-row-id"
-            data-active={isActive ? 'true' : undefined}
-          >
-            {session.id.slice(0, 16)}…
-          </span>
-          {session.worker_type && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono session-row-worker">
-              {WORKER_DISPLAY[session.worker_type] ?? session.worker_type}
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className={`text-xs font-mono font-medium truncate ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>
+              {session.id.slice(0, 12)}...
             </span>
-          )}
+            {session.worker_type && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-mono uppercase tracking-wider scale-90 origin-right">
+                {WORKER_DISPLAY[session.worker_type] ?? session.worker_type}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] text-[var(--text-muted)] font-medium uppercase tracking-tight">
+              {stateLabel(session.state)}
+            </span>
+            <span className="text-[10px] text-[var(--text-faint)]">•</span>
+            <span className="text-[10px] text-[var(--text-faint)]">
+              {formatRelativeTime(session.updated_at)}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          <span
-            className="text-[11px] session-row-state"
-            data-active={isActive ? 'true' : undefined}
-          >
-            {stateLabel(session.state)}
-          </span>
-          <span className="text-[11px] text-[var(--text-faint)]">·</span>
-          <span className="text-[11px] text-[var(--text-faint)]">
-            {formatRelativeTime(session.updated_at)}
-          </span>
-          {session.turn_count != null && session.turn_count > 0 && (
-            <>
-              <span className="text-[11px] text-[var(--text-faint)]">·</span>
-              <span className="text-[11px] text-[var(--text-faint)]">{session.turn_count} turns</span>
-            </>
+
+        {/* Actions */}
+        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+          {confirmDelete ? (
+            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              <button
+                onClick={() => { onDelete(); setConfirmDelete(false); }}
+                className="p-1 text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.1)] rounded transition-colors"
+                title="Confirm delete"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="p-1 text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] rounded transition-colors"
+                title="Cancel"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+              className="p-1.5 text-[var(--text-faint)] hover:text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.05)] rounded-lg transition-all"
+              aria-label="Delete session"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
           )}
         </div>
       </div>
-
-      {/* Delete */}
-      {confirmDelete ? (
-        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={() => { onDelete(); setConfirmDelete(false); }}
-            className="session-delete-confirm"
-          >
-            删除
-          </button>
-          <button
-            onClick={() => setConfirmDelete(false)}
-            className="session-delete-cancel"
-          >
-            取消
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
-          className="session-delete-btn"
-          aria-label="删除会话"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-        </button>
-      )}
     </div>
   );
 }
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
-      <BrandIcon size={56} />
-      <p className="text-sm mb-1 text-[var(--text-secondary)]">暂无会话</p>
-      <p className="text-xs mb-5 text-[var(--text-muted)]">创建一个新会话来开始</p>
-      <button onClick={onCreate} className="btn-new-session" style={{ width: 'auto' }}>
-        + 新建会话
+    <div className="flex flex-col items-center justify-center py-16 px-6 text-center animate-fade-in">
+      <div className="w-16 h-16 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-center mb-6 shadow-xl">
+        <BrandIcon size={32} className="opacity-40" />
+      </div>
+      <p className="text-sm font-medium mb-1 text-[var(--text-primary)]">No sessions yet</p>
+      <p className="text-xs text-[var(--text-muted)] mb-8 max-w-[180px] mx-auto leading-relaxed">
+        Start a new conversation to begin your AI coding journey.
+      </p>
+      <button 
+        onClick={onCreate} 
+        className="px-6 py-2.5 rounded-full bg-[var(--accent-gold)] text-white text-sm font-bold shadow-[0_8px_20px_rgba(217,119,6,0.2)] hover:scale-105 active:scale-95 transition-all"
+      >
+        New Session
       </button>
-    </div>
-  );
-}
-
-function SkeletonList() {
-  return (
-    <div className="space-y-2 p-4">
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="skeleton-row">
-          <div className="skeleton-circle" />
-          <div className="flex-1 space-y-2">
-            <div className="skeleton-line" style={{ width: '75%' }} />
-            <div className="skeleton-line" style={{ width: '50%', opacity: 0.6 }} />
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -158,13 +149,16 @@ export function SessionPanel({ onSessionSelect, initialSessionId }: SessionPanel
 
   if (!isOpen) {
     return (
-      <button onClick={openPanel} className="session-toggle-btn">
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+      <button 
+        onClick={openPanel} 
+        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent-gold)] transition-all group"
+      >
+        <svg className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--accent-gold)] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
         </svg>
-        会话
+        <span className="text-sm font-bold tracking-tight">SESSIONS</span>
         {sessions.length > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono session-count-badge">
+          <span className="flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--accent-gold)] text-white text-[10px] font-black shadow-[0_2px_8px_rgba(217,119,6,0.3)]">
             {sessions.length}
           </span>
         )}
@@ -174,66 +168,53 @@ export function SessionPanel({ onSessionSelect, initialSessionId }: SessionPanel
 
   return (
     <>
-      <div className="session-panel-backdrop" onClick={closePanel} aria-hidden="true" />
+      <div 
+        className="fixed inset-0 z-[190] bg-black/60 backdrop-blur-sm animate-fade-in" 
+        onClick={closePanel} 
+        aria-hidden="true" 
+      />
 
-      <div className="session-panel" role="dialog" aria-label="会话列表">
+      <div className="side-panel" role="dialog" aria-label="Sessions">
         {/* Header */}
-        <div className="session-panel-header">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg flex items-center justify-center text-[var(--accent-amber)] bg-[var(--amber-light)]">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-              </svg>
-            </div>
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">会话列表</h2>
-            {sessions.length > 0 && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono session-count-badge">
-                {sessions.length}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => createNewSession()}
-              disabled={isLoading}
-              className="panel-icon-btn"
-              aria-label="新建会话"
-              title="新建会话"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-            <button
+        <div className="px-6 py-6 border-b border-[var(--border-subtle)] bg-[var(--bg-base)]">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-lg font-display font-bold tracking-tight text-gradient-gold">Conversations</h2>
+            <button 
               onClick={closePanel}
-              className="panel-icon-btn"
-              aria-label="关闭"
+              className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] rounded-xl transition-all"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
+          <p className="text-[10px] text-[var(--text-faint)] font-mono uppercase tracking-widest">
+            {sessions.length} ACTIVE SESSIONS
+          </p>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto py-2">
-          {isLoading && sessions.length === 0 ? (
-            <SkeletonList />
-          ) : error ? (
-            <div className="px-5 py-8 text-center">
-              <p className="text-sm mb-2 text-[var(--accent-coral)]">{error}</p>
-              <button
+        <div className="flex-1 overflow-y-auto py-4 custom-scrollbar">
+          {error ? (
+            <div className="px-8 py-12 text-center">
+              <div className="w-12 h-12 rounded-full bg-[rgba(244,63,94,0.1)] flex items-center justify-center mx-auto mb-4">
+                <svg className="w-6 h-6 text-[var(--accent-coral)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium mb-2 text-[var(--accent-coral)]">Sync Failed</p>
+              <p className="text-xs text-[var(--text-muted)] mb-6 leading-relaxed">{error}</p>
+              <button 
                 onClick={() => window.location.reload()}
-                className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                className="text-xs font-bold text-[var(--text-primary)] hover:text-[var(--accent-gold)] transition-colors underline underline-offset-4"
               >
-                刷新页面重试
+                Reload Window
               </button>
             </div>
-          ) : sessions.length === 0 ? (
+          ) : sessions.length === 0 && !isLoading ? (
             <EmptyState onCreate={() => createNewSession()} />
           ) : (
-            <div className="space-y-1 px-3 session-list-cascade">
+            <div className="px-3 space-y-1">
               {sessions.map((session) => (
                 <SessionRow
                   key={session.id}
@@ -243,24 +224,32 @@ export function SessionPanel({ onSessionSelect, initialSessionId }: SessionPanel
                   onDelete={() => removeSession(session.id)}
                 />
               ))}
+              {isLoading && (
+                <div className="px-4 py-8 flex justify-center">
+                  <div className="w-5 h-5 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="session-panel-footer">
+        <div className="p-6 border-t border-[var(--border-subtle)] bg-[var(--bg-base)]">
           <button
             onClick={() => createNewSession()}
             disabled={isLoading}
-            className="btn-new-session"
+            className="w-full py-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-default)] text-[var(--text-primary)] font-bold text-sm flex items-center justify-center gap-3 hover:border-[var(--accent-gold)] hover:bg-[var(--amber-light)] active:scale-95 transition-all group shadow-xl"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
-            </svg>
-            新建会话
+            <div className="w-6 h-6 rounded-lg bg-[var(--accent-gold)] flex items-center justify-center text-white group-hover:scale-110 transition-transform">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+              </svg>
+            </div>
+            New Conversation
           </button>
         </div>
       </div>
     </>
   );
 }
+

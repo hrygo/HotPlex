@@ -174,18 +174,10 @@ type SlackConfig struct {
 	AllowDMFrom         []string `mapstructure:"allow_dm_from"`
 	AllowGroupFrom      []string `mapstructure:"allow_group_from"`
 
-	TypingStages []TypingStageConfig `mapstructure:"typing_stages"`
-
 	ReconnectBaseDelay time.Duration `mapstructure:"reconnect_base_delay"`
 	ReconnectMaxDelay  time.Duration `mapstructure:"reconnect_max_delay"`
 
 	STTConfig `mapstructure:",squash"`
-}
-
-// TypingStageConfig defines a single emoji reaction stage for YAML/Viper deserialization.
-type TypingStageConfig struct {
-	After time.Duration `mapstructure:"after"`
-	Emoji string        `mapstructure:"emoji"`
 }
 
 // FeishuConfig holds Feishu WebSocket adapter settings.
@@ -429,6 +421,12 @@ func Default() *Config {
 				RequireMention: true,
 				DMPolicy:       "allowlist",
 				GroupPolicy:    "allowlist",
+				STTConfig: STTConfig{
+					Provider:     "local",
+					LocalCmd:     "python3 scripts/stt_once.py {file}",
+					LocalMode:    "persistent",
+					LocalIdleTTL: time.Hour,
+				},
 			},
 		},
 	}

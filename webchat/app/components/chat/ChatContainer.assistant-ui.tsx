@@ -44,17 +44,20 @@ export default function ChatContainer() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-[var(--bg-base)]">
+    <div className="app-container">
       {/* Header */}
       <header className="app-header">
         <div className="header-inner">
           <div className="flex items-center justify-between">
             {/* Brand */}
             <div className="flex items-center gap-3">
-              <BrandIcon size={36} />
+              <div className="relative">
+                <div className="absolute inset-0 bg-[var(--accent-gold)] opacity-10 blur-xl rounded-full" />
+                <BrandIcon size={36} className="relative z-10" />
+              </div>
               <div>
-                <h1 className="header-title">HotPlex AI</h1>
-                <p className="header-subtitle">AEP v1 · gateway</p>
+                <h1 className="text-sm font-display font-bold tracking-tight text-[var(--text-primary)]">HotPlex AI</h1>
+                <p className="text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-widest">AEP v1 · Gateway</p>
               </div>
             </div>
 

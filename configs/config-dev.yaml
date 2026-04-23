@@ -30,7 +30,7 @@ worker:
   execution_timeout: 30m
 
 log:
-  level: "info"
+  level: "debug"
   format: "text"
 
 messaging:

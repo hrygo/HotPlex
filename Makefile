@@ -99,7 +99,7 @@ build:
 
 run: build
 	@./$(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) \
-		-config $(CONFIG_DIR)/config-dev.yaml
+		serve -c $(CONFIG_DIR)/config-dev.yaml
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test

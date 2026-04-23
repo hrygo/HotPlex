@@ -107,6 +107,10 @@ messaging:
     dm_policy: "allowlist"
     group_policy: "allowlist"
     require_mention: true
+    stt_provider: "local"
+    stt_local_cmd: "python3 scripts/stt_once.py {file}"
+    stt_local_mode: "persistent"
+    stt_local_idle_ttl: 1h
 
   feishu:
     enabled: false
