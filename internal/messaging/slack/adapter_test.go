@@ -198,7 +198,7 @@ func TestAepEventToStatus_ToolCall(t *testing.T) {
 	}
 	status, text := aepEventToStatus(env)
 	require.Equal(t, StatusToolUse, status)
-	require.Equal(t, "Using read_file...", text)
+	require.Equal(t, "read_file", text)
 }
 
 func TestAepEventToStatus_ToolResult(t *testing.T) {
@@ -229,32 +229,90 @@ func TestAepEventToStatus_MessageDelta(t *testing.T) {
 	require.Equal(t, "Composing response...", text)
 }
 
-func TestExtractToolName(t *testing.T) {
+func TestExtractToolCallStatus(t *testing.T) {
 	t.Parallel()
 
-	// Typed data
-	env := &events.Envelope{
-		Event: events.Event{
-			Type: events.ToolCall,
-			Data: &events.ToolCallData{Name: "search_web"},
+	tests := []struct {
+		name string
+		env  *events.Envelope
+		want string
+	}{
+		{
+			"typed name only",
+			&events.Envelope{Event: events.Event{Type: events.ToolCall, Data: &events.ToolCallData{Name: "search_web"}}},
+			"search_web",
+		},
+		{
+			"typed name with input",
+			&events.Envelope{Event: events.Event{Type: events.ToolCall, Data: &events.ToolCallData{Name: "Read", Input: map[string]any{"file_path": "/src/main.go"}}}},
+			"Read(file_path=/src/main.go)",
+		},
+		{
+			"map data",
+			&events.Envelope{Event: events.Event{Type: events.ToolCall, Data: map[string]any{"name": "write_file"}}},
+			"write_file",
+		},
+		{
+			"nil data",
+			&events.Envelope{Event: events.Event{Type: events.ToolCall}},
+			"tool",
+		},
+		{
+			"long value truncated",
+			&events.Envelope{Event: events.Event{Type: events.ToolCall, Data: &events.ToolCallData{Name: "Bash", Input: map[string]any{"command": "go test -race -count=1 -timeout 15m ./internal/..."}}}},
+			"Bash(command=go test -race -co...)",
+		},
+		{
+			"multiple params",
+			&events.Envelope{Event: events.Event{Type: events.ToolCall, Data: &events.ToolCallData{Name: "Grep", Input: map[string]any{"pattern": "aepEventToStatus", "glob": "*.go"}}}},
+			"Grep(glob=*.go, pattern=aepEventToStatus)",
 		},
 	}
-	require.Equal(t, "search_web", extractToolName(env))
 
-	// Map data
-	env2 := &events.Envelope{
-		Event: events.Event{
-			Type: events.ToolCall,
-			Data: map[string]any{"name": "write_file"},
-		},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractToolCallStatus(tt.env)
+			if len(got) > 50 {
+				t.Errorf("status too long (%d chars): %q", len(got), got)
+			}
+			require.Equal(t, tt.want, got)
+		})
 	}
-	require.Equal(t, "write_file", extractToolName(env2))
+}
 
-	// Nil data
-	env3 := &events.Envelope{
-		Event: events.Event{Type: events.ToolCall},
+func TestExtractToolResultStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		env  *events.Envelope
+		want string
+	}{
+		{"nil data", &events.Envelope{Event: events.Event{Type: events.ToolResult}}, "Tool completed"},
+		{"error", &events.Envelope{Event: events.Event{Type: events.ToolResult, Data: &events.ToolResultData{Error: "file not found"}}}, "Error: file not found"},
+		{"output string", &events.Envelope{Event: events.Event{Type: events.ToolResult, Data: &events.ToolResultData{Output: "ok"}}}, "ok"},
+		{"map error", &events.Envelope{Event: events.Event{Type: events.ToolResult, Data: map[string]any{"error": "timeout"}}}, "Error: timeout"},
+		{"map output", &events.Envelope{Event: events.Event{Type: events.ToolResult, Data: map[string]any{"output": 42}}}, "42"},
 	}
-	require.Equal(t, "tool", extractToolName(env3))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractToolResultStatus(tt.env)
+			if len(got) > 50 {
+				t.Errorf("status too long (%d chars): %q", len(got), got)
+			}
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTruncateStatus(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "hi", truncateWithSuffix("hi", 50))
+	require.Equal(t, "hello world", truncateWithSuffix("hello world", 11))
+	require.Equal(t, "hello...", truncateWithSuffix("hello world", 8))
+	require.Equal(t, "你好世...", truncateWithSuffix("你好世界测试啊", 6))
 }
 
 func TestIsAssistantCapabilityError(t *testing.T) {
@@ -1653,4 +1711,221 @@ func TestSlackConn_WriteCtx_ContextUsageWithAllOptionalFields(t *testing.T) {
 
 	err := conn.WriteCtx(ctx, env)
 	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4.3 — Image Block integration in writeWithPostMessage
+// ---------------------------------------------------------------------------
+
+func TestExtractImages_LocalMediaPath(t *testing.T) {
+	t.Parallel()
+	imgDir := filepath.Join(MediaPathPrefix, "images")
+	require.NoError(t, os.MkdirAll(imgDir, 0o755))
+	pngData := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01" +
+		"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde")
+	targetPath := filepath.Join(imgDir, "image_test123.png")
+	require.NoError(t, os.WriteFile(targetPath, pngData, 0o644))
+	t.Cleanup(func() { _ = os.RemoveAll(MediaPathPrefix) })
+
+	text := "Here is the chart:\n" + targetPath
+	parts, remaining := extractImages(text)
+	require.Len(t, parts, 1, "should extract 1 image from local path")
+	require.Contains(t, parts[0].URL, "data:image/")
+	require.Equal(t, "Here is the chart:", remaining)
+}
+
+func TestExtractImages_URLImage(t *testing.T) {
+	t.Parallel()
+	text := "Chart below:\nhttps://example.com/chart.png\nend"
+	parts, remaining := extractImages(text)
+	require.Len(t, parts, 1)
+	require.Equal(t, "https://example.com/chart.png", parts[0].URL)
+	require.Contains(t, remaining, "Chart below:")
+	require.Contains(t, remaining, "end")
+}
+
+func TestExtractImages_MixedContent(t *testing.T) {
+	t.Parallel()
+	text := "Analysis complete.\nhttps://cdn.example.com/result.png\nSee above."
+	parts, remaining := extractImages(text)
+	require.Len(t, parts, 1)
+	require.Contains(t, remaining, "Analysis complete.")
+	require.Contains(t, remaining, "See above.")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4.4 — File upload detection
+// ---------------------------------------------------------------------------
+
+func TestUploadableExtensions_Coverage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		ext      string
+		expected bool
+	}{
+		{".pdf", true},
+		{".csv", true},
+		{".xlsx", true},
+		{".docx", true},
+		{".png", false},
+		{".txt", false},
+		{".jpg", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ext, func(t *testing.T) {
+			t.Parallel()
+			found := false
+			for _, e := range uploadableExtensions {
+				if e == tt.ext {
+					found = true
+					break
+				}
+			}
+			require.Equal(t, tt.expected, found)
+		})
+	}
+}
+
+func TestTryFileUpload_NoUploadablePath(t *testing.T) {
+	t.Parallel()
+	conn := &SlackConn{}
+	require.False(t, conn.tryFileUpload(context.Background(), "hello world"))
+	require.False(t, conn.tryFileUpload(context.Background(), "report.txt"))
+}
+
+func TestTryFileUpload_WithTempFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	pdfPath := filepath.Join(dir, "report.pdf")
+	require.NoError(t, os.WriteFile(pdfPath, []byte("%PDF-1.4 test"), 0o644))
+
+	conn := &SlackConn{}
+	require.False(t, conn.tryFileUpload(context.Background(), pdfPath))
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4.3 — tryImageBlocks with no images
+// ---------------------------------------------------------------------------
+
+func TestTryImageBlocks_NoImages(t *testing.T) {
+	t.Parallel()
+	conn := &SlackConn{adapter: &Adapter{}, channelID: "C_TEST", threadTS: "1234.5678"}
+	err := conn.tryImageBlocks(context.Background(), "plain text only")
+	require.Error(t, err, "should fail when no images found")
+}
+
+// ---------------------------------------------------------------------------
+// StatusManager Notify — dedup + rate limiting
+// ---------------------------------------------------------------------------
+
+func TestNotify_Dedup_SameText(t *testing.T) {
+	t.Parallel()
+
+	sm := NewStatusManager(nil, slog.Default())
+	ctx := context.Background()
+
+	// First call sets state.
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/src/main.go)"))
+	require.Equal(t, "Read(/src/main.go)", sm.threadState["C1:T1"].lastText)
+
+	// Duplicate text — should not update timestamp.
+	prevTime := sm.threadState["C1:T1"].lastTime
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/src/main.go)"))
+	require.Equal(t, prevTime, sm.threadState["C1:T1"].lastTime, "timestamp should not change for same text")
+}
+
+func TestNotify_RateLimit_DifferentText(t *testing.T) {
+	t.Parallel()
+
+	sm := NewStatusManager(nil, slog.Default())
+	ctx := context.Background()
+
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/a.go)"))
+	require.Equal(t, "Read(/a.go)", sm.threadState["C1:T1"].lastText)
+
+	// Different text within 3s — should be skipped, lastText unchanged.
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolResult, "ok"))
+	require.Equal(t, "Read(/a.go)", sm.threadState["C1:T1"].lastText, "rate-limited call should not update state")
+}
+
+func TestNotify_PassesAfterInterval(t *testing.T) {
+	t.Parallel()
+
+	sm := NewStatusManager(nil, slog.Default())
+	ctx := context.Background()
+
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/a.go)"))
+
+	// Backdate lastTime to simulate 4s elapsed.
+	sm.mu.Lock()
+	sm.threadState["C1:T1"].lastTime = time.Now().Add(-4 * time.Second)
+	sm.mu.Unlock()
+
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolResult, "ok"))
+	require.Equal(t, "ok", sm.threadState["C1:T1"].lastText, "call after 3s should update state")
+}
+
+func TestNotify_IndependentThreads(t *testing.T) {
+	t.Parallel()
+
+	sm := NewStatusManager(nil, slog.Default())
+	ctx := context.Background()
+
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/a.go)"))
+	require.NoError(t, sm.Notify(ctx, "C1", "T2", StatusToolUse, "Bash(ls)"))
+
+	require.Equal(t, "Read(/a.go)", sm.threadState["C1:T1"].lastText)
+	require.Equal(t, "Bash(ls)", sm.threadState["C1:T2"].lastText)
+}
+
+func TestNotify_ClearResetsState(t *testing.T) {
+	t.Parallel()
+
+	sm := NewStatusManager(nil, slog.Default())
+	ctx := context.Background()
+
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/a.go)"))
+	sm.Clear(ctx, "C1", "T1")
+	require.Nil(t, sm.threadState["C1:T1"], "Clear should remove threadState")
+
+	// Same text after Clear should create fresh state.
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/a.go)"))
+	require.Equal(t, "Read(/a.go)", sm.threadState["C1:T1"].lastText)
+}
+
+func TestNotify_EmptyText_ClearsState(t *testing.T) {
+	t.Parallel()
+
+	sm := NewStatusManager(nil, slog.Default())
+	ctx := context.Background()
+
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/a.go)"))
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, ""))
+	require.Nil(t, sm.threadState["C1:T1"], "empty text should clear threadState via Clear")
+
+	// After clear, same text should pass.
+	require.NoError(t, sm.Notify(ctx, "C1", "T1", StatusToolUse, "Read(/a.go)"))
+	require.Equal(t, "Read(/a.go)", sm.threadState["C1:T1"].lastText)
+}
+
+func TestShortenPaths(t *testing.T) {
+	t.Parallel()
+
+	// Home dir substitution
+	require.Equal(t, "~/src/main.go", shortenPaths(homeDir+"/src/main.go"))
+	require.Equal(t, "/usr/local/bin", shortenPaths("/usr/local/bin"))
+	require.Equal(t, "no path here", shortenPaths("no path here"))
+
+	// WorkDir substitution takes priority
+	origWorkDir := workDir
+	workDir = "/tmp/hotplex/workspace"
+	t.Cleanup(func() { workDir = origWorkDir })
+
+	require.Equal(t, "$WK/main.go", shortenPaths("/tmp/hotplex/workspace/main.go"))
+	require.Equal(t, "$WK/sub/file.txt", shortenPaths("/tmp/hotplex/workspace/sub/file.txt"))
+
+	// Both: workDir first, then homeDir on remaining
+	workDir = homeDir + "/projects/myapp"
+	require.Equal(t, "$WK/main.go", shortenPaths(homeDir+"/projects/myapp/main.go"))
+	require.Equal(t, "~/other/file.go", shortenPaths(homeDir+"/other/file.go"))
 }

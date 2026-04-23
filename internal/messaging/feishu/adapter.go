@@ -23,6 +23,7 @@ import (
 	"github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	"github.com/hotplex/hotplex-worker/internal/messaging"
+	"github.com/hotplex/hotplex-worker/internal/messaging/stt"
 	"github.com/hotplex/hotplex-worker/pkg/aep"
 	"github.com/hotplex/hotplex-worker/pkg/events"
 )
@@ -44,6 +45,9 @@ type Adapter struct {
 	bridge      *messaging.Bridge
 	botOpenID   string
 	transcriber Transcriber
+
+	backoffBaseDelay time.Duration
+	backoffMaxDelay  time.Duration
 
 	mu           sync.RWMutex
 	dedup        *Dedup
@@ -77,6 +81,11 @@ func (a *Adapter) SetTranscriber(t Transcriber) {
 	a.transcriber = t
 }
 
+func (a *Adapter) SetReconnectDelays(baseDelay, maxDelay time.Duration) {
+	a.backoffBaseDelay = baseDelay
+	a.backoffMaxDelay = maxDelay
+}
+
 func (a *Adapter) Start(ctx context.Context) error {
 	if !a.started.CompareAndSwap(false, true) {
 		a.log.Warn("feishu: adapter already started, skipping")
@@ -96,7 +105,22 @@ func (a *Adapter) Start(ctx context.Context) error {
 	a.dedupWg.Add(1)
 	go a.dedupCleanupLoop()
 
-	eventHandler := dispatcher.NewEventDispatcher("", "").
+	a.larkClient = lark.NewClient(a.appID, a.appSecret,
+		lark.WithLogger(SlogLogger{Logger: a.log}),
+	)
+
+	if err := a.fetchBotOpenID(ctx); err != nil {
+		a.log.Warn("feishu: failed to fetch bot open_id, mention detection disabled", "err", err)
+	}
+
+	a.log.Info("feishu: starting WebSocket connection")
+	go a.runWebSocket(ctx)
+
+	return nil
+}
+
+func (a *Adapter) newEventHandler() *dispatcher.EventDispatcher {
+	return dispatcher.NewEventDispatcher("", "").
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) (err error) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -115,29 +139,59 @@ func (a *Adapter) Start(ctx context.Context) error {
 		OnP2MessageReactionDeletedV1(func(_ context.Context, _ *larkim.P2MessageReactionDeletedV1) error {
 			return nil
 		})
+}
 
-	a.wsClient = ws.NewClient(a.appID, a.appSecret,
-		ws.WithEventHandler(eventHandler),
-		ws.WithAutoReconnect(true),
-		ws.WithLogger(SlogLogger{Logger: a.log}),
-	)
-	a.larkClient = lark.NewClient(a.appID, a.appSecret,
-		lark.WithLogger(SlogLogger{Logger: a.log}),
-	)
-
-	if err := a.fetchBotOpenID(ctx); err != nil {
-		a.log.Warn("feishu: failed to fetch bot open_id, mention detection disabled", "err", err)
+func (a *Adapter) runWebSocket(ctx context.Context) {
+	baseDelay := a.backoffBaseDelay
+	if baseDelay <= 0 {
+		baseDelay = 2 * time.Second
 	}
+	maxDelay := a.backoffMaxDelay
+	if maxDelay <= 0 {
+		maxDelay = 60 * time.Second
+	}
+	backoff := newReconnectBackoff(baseDelay, maxDelay)
 
-	a.log.Info("feishu: starting WebSocket connection")
-
-	go func() {
-		if err := a.wsClient.Start(ctx); err != nil {
-			a.log.Error("feishu: WebSocket connection error", "err", err)
+	attempt := 1
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
-	}()
 
-	return nil
+		client := ws.NewClient(a.appID, a.appSecret,
+			ws.WithEventHandler(a.newEventHandler()),
+			ws.WithAutoReconnect(true),
+			ws.WithLogger(SlogLogger{Logger: a.log}),
+		)
+		a.mu.Lock()
+		a.wsClient = client
+		a.mu.Unlock()
+
+		a.log.Info("feishu: starting WebSocket connection", "attempt", attempt)
+
+		if err := client.Start(ctx); err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff.Next()):
+				a.log.Warn("feishu: WebSocket disconnected, reconnecting...",
+					"err", err, "attempt", attempt)
+				attempt++
+				continue
+			}
+		}
+
+		backoff.Reset()
+		attempt = 1
+		a.log.Info("feishu: WebSocket closed cleanly, reconnecting...")
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff.Next()):
+		}
+	}
 }
 
 func (a *Adapter) fetchBotOpenID(ctx context.Context) error {
@@ -437,9 +491,7 @@ func (a *Adapter) Close(ctx context.Context) error {
 	}
 
 	// Shut down persistent STT subprocess if present.
-	if closer, ok := a.transcriber.(interface {
-		Close(ctx context.Context) error
-	}); ok {
+	if closer, ok := a.transcriber.(stt.Closer); ok {
 		if err := closer.Close(ctx); err != nil {
 			a.log.Warn("feishu: transcriber close", "err", err)
 		}

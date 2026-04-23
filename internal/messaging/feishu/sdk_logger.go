@@ -4,18 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/url"
+	"regexp"
 	"strings"
 )
 
-// sensitiveParams lists URL query keys that must be redacted in logs.
-var sensitiveParams = map[string]bool{
-	"access_key": true,
-	"device_id":  true,
-	"fpid":       true,
-	"service_id": true,
-	"ticket":     true,
-}
+// Sensitive URL query parameter keys redacted in logs: access_key, conn_id,
+// device_id, fpid, service_id, ticket. Keep in sync with sensitiveParamRe.
 
 // sdkLogFilter rewrites Feishu SDK log messages to be more readable and
 // removes connection noise that carries no actionable information.
@@ -40,40 +34,17 @@ func sdkLogFilter(msg string) string {
 	return msg
 }
 
-// redactURL replaces sensitive query parameters with "***" in URLs.
-// Non-URL strings are returned unchanged.
+// sensitiveParamRe matches sensitive=VALUE patterns and captures the key=
+// prefix for replacement. Values are terminated by &, whitespace, [, or ].
+var sensitiveParamRe = regexp.MustCompile(
+	`((?:access_key|conn_id|device_id|fpid|service_id|ticket)=)[^&\s\[\]]+`,
+)
+
+// redactURL replaces sensitive query parameter values with "***" in any string.
+// Works on full URLs, embedded URLs (e.g. "connected to wss://..."), and
+// standalone parameter patterns like [conn_id=...].
 func redactURL(s string) string {
-	if !strings.HasPrefix(s, "ws://") && !strings.HasPrefix(s, "wss://") && !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
-		return s
-	}
-	u, err := url.Parse(s)
-	if err != nil {
-		return s
-	}
-	q := u.Query()
-	changed := false
-	for k := range q {
-		if sensitiveParams[k] {
-			q.Set(k, "***")
-			changed = true
-		}
-	}
-	if changed {
-		// Build RawQuery manually to avoid q.Encode() re-encoding "***" as "%2A%2A%2A".
-		var parts []string
-		for k, v := range q {
-			if sensitiveParams[k] {
-				parts = append(parts, k+"=***")
-			} else {
-				for _, val := range v {
-					parts = append(parts, k+"="+url.QueryEscape(val))
-				}
-			}
-		}
-		u.RawQuery = strings.Join(parts, "&")
-		return u.String()
-	}
-	return s
+	return sensitiveParamRe.ReplaceAllString(s, "${1}***")
 }
 
 // sdkDebugSilent lists Feishu SDK Debug log message substrings that are
@@ -87,11 +58,11 @@ var sdkDebugSilent = []string{
 
 // sdkReconnectSilent removes verbose reconnection-related log prefixes
 // that carry no actionable information and are part of the SDK's automatic
-// reconnect loop.
+// reconnect loop. "connected to wss://" is NOT silenced so that reconnection
+// success is observable in logs.
 var sdkReconnectSilent = []string{
 	"disconnected to wss://",
 	"trying to reconnect:",
-	"connected to wss://",
 }
 
 // SlogLogger implements larkcore.Logger, wrapping slog.Logger.

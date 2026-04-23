@@ -114,7 +114,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - LLM auto-retry → `internal/gateway/llm_retry.go` — retryable error detection + exponential backoff
 - Gateway HTTP API → `internal/gateway/api.go` — session list/get/terminate over HTTP
 - Config structure → `internal/config/config.go` — structs + Default() + Validate()
-- STT config → `internal/config/config.go` — FeishuConfig.STTProvider/STTLocalCmd/STTLocalMode/STTLocalIdleTTL
+- STT config → `internal/config/config.go` — FeishuConfig.STTProvider/STTLocalCmd/STTLocalMode/STTLocalIdleTTL + SlackConfig.STTProvider/STTLocalCmd/STTLocalMode/STTLocalIdleTTL
 - Wire messaging adapter → `cmd/worker/main.go` — `startMessagingAdapters()`: config → New → Configure → SetConnFactory → Start
 
 **Security**
@@ -163,13 +163,13 @@ configs/  config.yaml, config-dev.yaml, env.example
 - `PlatformConn` (interface) → `platform_conn.go` — WriteCtx + Close
 - `PlatformAdapter` → `platform_adapter.go` — base: SetHub/SetSM/SetHandler/SetBridge
 - `InteractionManager` → `interaction.go` — PendingInteraction registry with timeout + auto-deny (5min default)
-- `ParseControlCommand` → `control_command.go` — slash commands (/gc, /reset, /park, /restart, /new) + $prefix natural language
+- `ParseControlCommand` → `control_command.go` — slash commands (/gc, /reset, /park, /new) + $prefix natural language
 - `SanitizeText` → `sanitize.go` — removes control chars, null bytes, BOM, surrogates
-- `FeishuSTT` → `feishu/stt.go:41` — cloud transcription via Feishu speech_to_text API
-- `LocalSTT` → `feishu/stt.go:98` — ephemeral per-request external command transcription
-- `PersistentSTT` → `feishu/stt.go:185` — long-lived subprocess, JSON-over-stdio, PGID isolation
-- `FallbackSTT` → `feishu/stt.go:143` — primary + secondary fallback chain
-- `Transcriber` (interface) → `feishu/stt.go:27` — Transcribe(ctx, audioData) → (text, error)
+- `FeishuSTT` → `feishu/stt.go` — cloud transcription via Feishu speech_to_text API
+- `LocalSTT` → `stt/stt.go` — ephemeral per-request external command transcription
+- `PersistentSTT` → `stt/stt.go` — long-lived subprocess, JSON-over-stdio, PGID isolation
+- `FallbackSTT` → `stt/stt.go` — primary + secondary fallback chain
+- `Transcriber` (interface) → `stt/stt.go` — Transcribe(ctx, audioData) → (text, error), shared by Feishu and Slack
 - `PlatformAdapterInterface` → `platform_adapter.go:21` — Platform/Start/HandleTextMessage/Close
 - Adapter registration → `platform_adapter.go:47` — `Register(t PlatformType, b Builder)`, blank import in main.go
 
@@ -195,7 +195,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - **DI**: Manual constructor injection (no wire/dig), `GatewayDeps` struct in main.go
 - **Shutdown order**: signal → cancel ctx → tracing → hub → configWatcher → sessionMgr → HTTP server
 - **Panic recovery**: Gateway handler + bridge forwardEvents must recover panics, log error, return `handler panic` / `bridge panic` to caller
-- **Control commands**: Natural language triggers require `$` prefix (e.g. `$gc`, `$休眠`) to prevent accidental matches; slash commands (`/gc`, `/reset`, `/park`, `/restart`, `/new`) have no prefix
+- **Control commands**: Natural language triggers require `$` prefix (e.g. `$gc`, `$休眠`) to prevent accidental matches; slash commands (`/gc`, `/reset`, `/park`, `/new`) have no prefix
 - **Text sanitization**: All user-facing text output passes through `SanitizeText()` before delivery to messaging platforms
 - **Interaction timeout**: Permission/Q&A/elicitation requests auto-deny after 5 minutes to prevent indefinite blocking
 - **Session key derivation**: UUIDv5 deterministic mapping from (ownerID, workerType, clientSessionID, workDir) for cross-environment consistency

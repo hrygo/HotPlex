@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,12 +51,12 @@ func TestRedactURL(t *testing.T) {
 		{
 			name:  "ticket redacted",
 			input: "wss://api.feishu.cn/ws?ticket=secret&channel=main",
-			want:  "wss://api.feishu.cn/ws?channel=main&ticket=***",
+			want:  "wss://api.feishu.cn/ws?ticket=***&channel=main",
 		},
 		{
-			name:  "both redacted order varies",
+			name:  "both redacted order preserved",
 			input: "https://api.feishu.cn/v1/messages?access_key=key&ticket=tkt&other=val",
-			want:  "https://api.feishu.cn/v1/messages?other=val&access_key=***&ticket=***",
+			want:  "https://api.feishu.cn/v1/messages?access_key=***&ticket=***&other=val",
 		},
 		{
 			name:  "empty string unchanged",
@@ -69,24 +68,22 @@ func TestRedactURL(t *testing.T) {
 			input: "wss://example.com",
 			want:  "wss://example.com",
 		},
+		{
+			name:  "embedded URL with prefix",
+			input: "connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7631867954884938706&access_key=da66fd33a4640d3451f410be09f00066&service_id=33554678&ticket=8710bbb0-94e7-487e-80d5-393e88505c44",
+			want:  "connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=***&aid=552564&device_id=***&access_key=***&service_id=***&ticket=***",
+		},
+		{
+			name:  "conn_id in brackets redacted",
+			input: "connected to wss://host/ws?ticket=abc123[conn_id=7631867954884938706]",
+			want:  "connected to wss://host/ws?ticket=***[conn_id=***]",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := redactURL(tt.input)
-			// Check that *** appears for sensitive params and non-sensitive params are preserved.
-			if strings.Contains(tt.input, "access_key") {
-				require.Contains(t, got, "access_key=***")
-				require.NotContains(t, got, "access_key=mykey")
-			}
-			if strings.Contains(tt.input, "ticket") {
-				require.Contains(t, got, "ticket=***")
-				require.NotContains(t, got, "ticket=secret")
-			}
-			// Non-URL unchanged
-			if !strings.HasPrefix(tt.input, "http") && !strings.HasPrefix(tt.input, "ws") {
-				require.Equal(t, tt.input, got)
-			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
