@@ -15,6 +15,8 @@ linters:
     - errorlint
     - gocritic
   exclusions:
+    paths:
+      - client # separate Go module with own go.mod
     rules:
       # Exclude test file noise for linters that only flag test patterns
       - path: '_test\.go'
@@ -97,5 +99,3 @@ formatters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-dirs:
-    - client # separate Go module with own go.mod
