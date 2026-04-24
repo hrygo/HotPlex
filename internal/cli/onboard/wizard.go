@@ -41,10 +41,71 @@ type WizardOptions struct {
 	FeishuGroupPolicy string
 }
 
+// ExistingConfig holds detected existing configuration state.
+type ExistingConfig struct {
+	ConfigExists  bool
+	EnvExists     bool
+	SlackEnabled  bool
+	FeishuEnabled bool
+	SlackCreds    bool
+	FeishuCreds   bool
+	ConfigPath    string
+	EnvPath       string
+}
+
+func (ec *ExistingConfig) HasAny() bool      { return ec.ConfigExists || ec.EnvExists }
+func (ec *ExistingConfig) SlackReady() bool  { return ec.SlackEnabled && ec.SlackCreds }
+func (ec *ExistingConfig) FeishuReady() bool { return ec.FeishuEnabled && ec.FeishuCreds }
+
+func detectExistingConfig(configPath, envPath string) *ExistingConfig {
+	ec := &ExistingConfig{ConfigPath: configPath, EnvPath: envPath}
+
+	if data, err := os.ReadFile(configPath); err == nil {
+		ec.ConfigExists = true
+		content := string(data)
+		ec.SlackEnabled = isPlatformEnabled(content, "slack")
+		ec.FeishuEnabled = isPlatformEnabled(content, "feishu")
+	}
+
+	if data, err := os.ReadFile(envPath); err == nil {
+		ec.EnvExists = true
+		content := string(data)
+		ec.SlackCreds = hasEnvValue(content, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN")
+		ec.FeishuCreds = hasEnvValue(content, "HOTPLEX_MESSAGING_FEISHU_APP_ID")
+	}
+
+	return ec
+}
+
+func isPlatformEnabled(yamlContent, platform string) bool {
+	markers := []string{
+		platform + ":\n  enabled: true",
+		platform + ":\n    enabled: true",
+	}
+	for _, m := range markers {
+		if strings.Contains(yamlContent, m) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasEnvValue(content, key string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		prefix := key + "="
+		if strings.HasPrefix(line, prefix) && len(line) > len(prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 type WizardResult struct {
 	ConfigPath string
 	EnvPath    string
 	Steps      []StepResult
+	Action     string // "keep" or "reconfigure"
 }
 
 type StepResult struct {
@@ -63,9 +124,31 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 	var slackCfg, feishuCfg messagingPlatformConfig
 	var configCreated bool
 
+	displayBanner()
+
 	result.add(stepEnvPreCheck())
 	if result.hasFail() {
 		return result, fmt.Errorf("environment pre-check failed, resolve errors above before continuing")
+	}
+
+	existing := detectExistingConfig(opts.ConfigPath, result.EnvPath)
+	if !opts.Force && existing.HasAny() {
+		if opts.NonInteractive {
+			result.Action = "keep"
+			result.add(StepResult{Name: "onboard", Status: "pass", Detail: "kept existing configuration (non-interactive)"})
+			result.add(stepVerify(opts.ConfigPath))
+			return result, nil
+		}
+		displayExistingConfig(existing)
+		if promptKeepOrReconfigure() {
+			result.Action = "keep"
+			result.add(StepResult{Name: "onboard", Status: "pass", Detail: "kept existing configuration"})
+			result.add(stepVerify(opts.ConfigPath))
+			return result, nil
+		}
+		result.Action = "reconfigure"
+		opts.Force = true // overwrite existing config on reconfigure
+		fmt.Fprintln(os.Stderr, "  → Reconfiguring...")
 	}
 
 	if opts.NonInteractive {
@@ -116,6 +199,7 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 	}
 
 	result.add(stepVerify(opts.ConfigPath))
+	result.Action = "reconfigure"
 	return result, nil
 }
 
@@ -154,6 +238,43 @@ func buildPlatformNonInteractive(enabled bool, dmPolicy, groupPolicy string, all
 		allowFrom:      allowFrom,
 		credentials:    map[string]string{},
 	}
+}
+
+// ─── Display helpers ─────────────────────────────────────────────────────────
+
+func displayBanner() {
+	fmt.Fprintf(os.Stderr, "\n  \033[1mHotPlex Worker Gateway\033[0m — Setup Wizard\n")
+	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 45))
+	fmt.Fprintln(os.Stderr, "")
+}
+
+func displayExistingConfig(ec *ExistingConfig) {
+	fmt.Fprintln(os.Stderr, "  \033[1mExisting Configuration Detected\033[0m")
+	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 45))
+	if ec.ConfigExists {
+		fmt.Fprintf(os.Stderr, "    Config: \033[32m%s\033[0m\n", ec.ConfigPath)
+		if ec.SlackEnabled {
+			s := "\033[32m✓ configured\033[0m"
+			if !ec.SlackCreds {
+				s = "\033[33m⚠ missing token in .env\033[0m"
+			}
+			fmt.Fprintf(os.Stderr, "    Slack:  enabled (%s)\n", s)
+		}
+		if ec.FeishuEnabled {
+			s := "\033[32m✓ configured\033[0m"
+			if !ec.FeishuCreds {
+				s = "\033[33m⚠ missing credentials in .env\033[0m"
+			}
+			fmt.Fprintf(os.Stderr, "    Feishu: enabled (%s)\n", s)
+		}
+		if !ec.SlackEnabled && !ec.FeishuEnabled {
+			fmt.Fprintln(os.Stderr, "    Platforms: none enabled")
+		}
+	}
+	if ec.EnvExists && !ec.ConfigExists {
+		fmt.Fprintf(os.Stderr, "    Env file: \033[33m%s (config file missing)\033[0m\n", ec.EnvPath)
+	}
+	fmt.Fprintln(os.Stderr, "")
 }
 
 // ─── Step 1: Environment pre-check ──────────────────────────────────────────
@@ -365,6 +486,13 @@ func stepVerify(configPath string) StepResult {
 }
 
 // ─── Prompt helpers ─────────────────────────────────────────────────────────
+
+func promptKeepOrReconfigure() bool {
+	fmt.Fprintf(os.Stderr, "? Keep existing configuration? \033[1m[Y/n]\033[0m: ")
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line != "n" && line != "no"
+}
 
 func prompt(reader *bufio.Reader, question string) string {
 	fmt.Fprintf(os.Stderr, "? %s: ", question)

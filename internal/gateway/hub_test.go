@@ -58,10 +58,13 @@ func newTestWSConnPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	return client, conn
 }
 
-func newTestHub(t *testing.T) *Hub {
+func newTestHub(t *testing.T, opts ...func(cfg *config.Config)) *Hub {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Gateway.BroadcastQueueSize = 16
+	for _, opt := range opts {
+		opt(cfg)
+	}
 	h := NewHub(slog.Default(), config.NewConfigStore(cfg, nil))
 	t.Cleanup(func() { h.Shutdown(context.Background()) })
 	return h

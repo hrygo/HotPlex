@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -44,8 +45,8 @@ func TestVersionJSON(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result["version"])
 	require.NotEmpty(t, result["go"])
-	require.Equal(t, "darwin", result["os"])
-	require.Equal(t, "arm64", result["arch"])
+	require.Equal(t, runtime.GOOS, result["os"])
+	require.Equal(t, runtime.GOARCH, result["arch"])
 }
 
 func TestLoadEnvFile(t *testing.T) {
