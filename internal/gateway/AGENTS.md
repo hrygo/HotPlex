@@ -17,8 +17,8 @@ testutil/       # WebSocket mock helpers for tests
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Broadcast hub | `hub.go:57` | Hub struct, Run() goroutine, seq gen |
-| Connection pumps | `conn.go:27` | Conn struct, ReadPump/WritePump goroutines |
+| Broadcast hub | `hub.go:68` | Hub struct, Run() goroutine, seq gen |
+| Connection pumps | `conn.go:35` | Conn struct, ReadPump/WritePump goroutines |
 | Event dispatch | `handler.go` | Handler: handleInput, handlePing, handleControl |
 | Session lifecycle | `bridge.go` | Bridge: StartSession, ResumeSession, forwardEvents, InputRecoverer |
 | LLM auto-retry | `llm_retry.go` | LLMRetryController: retryable patterns, per-session backoff |

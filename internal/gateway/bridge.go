@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -40,6 +41,8 @@ type Bridge struct {
 	retryCancelMu sync.Mutex
 	retryCancel   map[string]chan struct{} // sessionID → cancel channel
 
+	agentConfigDir string // agent config directory path; "" = disabled
+
 	accum   map[string]*sessionAccumulator // per-session stats accumulator
 	accumMu sync.Mutex
 }
@@ -66,6 +69,12 @@ func (b *Bridge) SetWorkerFactory(wf WorkerFactory) {
 // SetRetryController enables automatic LLM error retry.
 func (b *Bridge) SetRetryController(ctrl *LLMRetryController) {
 	b.retryCtrl = ctrl
+}
+
+// SetAgentConfigDir sets the directory from which agent personality/context
+// files are loaded. Pass "" to disable agent config loading.
+func (b *Bridge) SetAgentConfigDir(dir string) {
+	b.agentConfigDir = dir
 }
 
 // StartSession creates a new session and starts a worker.
@@ -101,6 +110,7 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 		Args:         nil,
 		AllowedTools: si.AllowedTools,
 	}
+	b.injectAgentConfig(&workerInfo, wt, workDir, platform)
 	if err := w.Start(ctx, workerInfo); err != nil {
 		b.sm.DetachWorker(id)
 		_ = b.sm.Delete(ctx, id)
@@ -186,6 +196,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		WorkerSessionID: si.WorkerSessionID,
 		ProjectDir:      workDir,
 	}
+	b.injectAgentConfig(&workerInfo, si.WorkerType, workDir, si.Platform)
 	if err := w.Resume(ctx, workerInfo); err != nil {
 		b.sm.DetachWorker(id)
 		return fmt.Errorf("bridge: resume start: %w", err)
@@ -563,6 +574,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		WorkerSessionID: si.WorkerSessionID,
 		ProjectDir:      p.workDir,
 	}
+	b.injectAgentConfig(&workerInfo, si.WorkerType, p.workDir, si.Platform)
 	if err := w.Start(context.Background(), workerInfo); err != nil {
 		b.sm.DetachWorker(p.sessionID)
 		b.log.Error("bridge: fresh worker start failed", "session_id", p.sessionID, "err", err)
@@ -722,6 +734,37 @@ func (b *Bridge) CancelRetry(sessionID string) {
 	if ch, ok := b.retryCancel[sessionID]; ok {
 		close(ch)
 		delete(b.retryCancel, sessionID)
+	}
+}
+
+// injectAgentConfig loads agent config files and injects them into the
+// session info according to worker type. A no-op when config dir is empty
+// or agent config is not configured.
+func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, wt worker.WorkerType, workDir, platform string) {
+	if b.agentConfigDir == "" {
+		return
+	}
+	configs, err := agentconfig.Load(b.agentConfigDir, platform)
+	if err != nil {
+		b.log.Warn("bridge: agent config load failed", "dir", b.agentConfigDir, "err", err)
+		return
+	}
+	if configs.IsEmpty() {
+		return
+	}
+
+	switch wt {
+	case worker.TypeClaudeCode:
+		if prompt := agentconfig.BuildCCBPrompt(configs); prompt != "" {
+			info.SystemPrompt = prompt
+		}
+		if err := agentconfig.InjectCRules(workDir, configs); err != nil {
+			b.log.Warn("bridge: inject C-rules failed", "session_id", info.SessionID, "err", err)
+		}
+	case worker.TypeOpenCodeSrv:
+		if prompt := agentconfig.BuildOCSSystemPrompt(configs); prompt != "" {
+			info.SystemPrompt = prompt
+		}
 	}
 }
 

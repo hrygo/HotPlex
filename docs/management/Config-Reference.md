@@ -84,6 +84,7 @@ Result: Gateway listens on `:6667`
 - Security (`security`)
 - Session lifecycle (`session`, `pool`)
 - Worker processes (`worker`)
+- Agent personality/context (`agent_config`)
 
 ### configs/config-dev.yaml
 
@@ -226,6 +227,85 @@ export HOTPLEX_ADMIN_TOKEN_SCOPES='{"token_1": ["session:read", "stats:read"]}'
 
 ---
 
+## Agent Config (Personality & Context Injection)
+
+HotPlex can inject agent personality, workspace rules, tool guides, user profiles, and persistent memory into worker sessions automatically. Configuration files are loaded from a shared directory and injected via two semantic channels:
+
+- **B-channel** (system-level, no hedging): SOUL.md, AGENTS.md, SKILLS.md — injected as system prompt
+- **C-channel** (context-level): USER.md, MEMORY.md — injected as context files (CC) or merged into system prompt (OCS)
+
+Platform-specific variants are automatically appended (e.g., `SOUL.slack.md` when the session originates from Slack).
+
+### Configuration Fields
+
+```yaml
+agent_config:
+  enabled: true                          # Enable agent config loading (default: true)
+  config_dir: "~/.hotplex/agent-configs" # Directory containing config files (default: ~/.hotplex/agent-configs/)
+```
+
+### Config File Reference
+
+Place these files in `agent_config.config_dir`:
+
+| File | Channel | Description | Example Use |
+|------|---------|-------------|-------------|
+| `SOUL.md` | B | Agent persona, tone, values | "You are a senior Go engineer..." |
+| `AGENTS.md` | B | Workspace rules, behavioral constraints | Autonomous actions, anti-patterns |
+| `SKILLS.md` | B | Tool usage guides | Build commands, platform-specific tips |
+| `USER.md` | C | User profile, preferences | Language, timezone, communication style |
+| `MEMORY.md` | C | Persistent cross-session memory | Feedback corrections, project context |
+
+### Platform Variants
+
+Append `.<platform>` before `.md` for platform-specific overrides:
+
+```
+~/.hotplex/agent-configs/
+├── SOUL.md              ← Default persona (all platforms)
+├── SOUL.slack.md        ← Slack-specific additions (appended to SOUL.md)
+├── SOUL.feishu.md       ← Feishu-specific additions
+├── AGENTS.md
+├── AGENTS.slack.md      ← Slack-specific rules
+├── SKILLS.md
+├── USER.md
+└── MEMORY.md
+```
+
+Loading: base file content is loaded first, then platform variant is appended. Either part is optional.
+
+### Size Limits
+
+| Limit | Value | Description |
+|-------|-------|-------------|
+| Per file | 12,000 chars | Individual file truncation limit |
+| Total | 60,000 chars | Combined limit across all files |
+
+YAML frontmatter (`---` blocks) is automatically stripped from files before injection.
+
+### Worker Injection Behavior
+
+| Worker | B-channel Mechanism | C-channel Mechanism |
+|--------|--------------------|--------------------|
+| **Claude Code** | `--append-system-prompt` → S3 tail (no hedging) | `.claude/rules/hotplex-*.md` → M0 (hedged) |
+| **OpenCode Server** | `system` field → S2 per message (no hedging) | Merged into B-channel `system` field (no hedging) |
+
+### Environment Variables
+
+```bash
+HOTPLEX_AGENT_CONFIG_ENABLED=true
+HOTPLEX_AGENT_CONFIG_CONFIG_DIR=~/.hotplex/agent-configs
+```
+
+### Disabling Agent Config
+
+```yaml
+agent_config:
+  enabled: false  # Skip agent config loading entirely
+```
+
+---
+
 ## Speech-to-Text (STT) Configuration
 
 Audio messages received via messaging platforms (Feishu, Slack) are automatically transcribed to text using a local STT engine. The engine runs as a persistent subprocess to avoid per-request model loading overhead (~2-3s cold start).
@@ -310,7 +390,7 @@ When Claude Code encounters temporary errors (429 rate limit, 529 overload, netw
 worker:
   auto_retry:
     enabled: true               # Enable auto-retry (default: true)
-    max_retries: 3             # Maximum retry attempts (default: 3)
+    max_retries: 9             # Maximum retry attempts (default: 9)
     base_delay: 5s              # Initial delay between retries (default: 5s)
     max_delay: 120s             # Maximum delay cap (default: 120s)
     retry_input: "继续"          # Text sent to worker on retry (default: "继续")

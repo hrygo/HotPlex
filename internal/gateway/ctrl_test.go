@@ -62,6 +62,11 @@ func (m *mockStore) DeleteTerminated(ctx context.Context, cutoff time.Time) erro
 	return args.Error(0)
 }
 
+func (m *mockStore) DeletePhysical(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
 func (m *mockStore) Close() error {
 	return m.Called().Error(0)
 }

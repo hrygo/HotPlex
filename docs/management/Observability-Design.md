@@ -61,33 +61,35 @@ tags:
 }
 ```
 
-### 2.2 zerolog 配置
+### 2.2 slog 配置（当前实现）
+
+> ⚠️ 本节已更新为与代码库一致的 `log/slog` 实现。原 zerolog 方案已废弃。
 
 ```go
 import (
-    "github.com/rs/zerolog"
-    "go.opentelemetry.io/otel/trace"
+    "log/slog"
+    "os"
 )
 
-func NewLogger(serviceName, version string) zerolog.Logger {
-    return zerolog.New(os.Stdout).
-        With().
-        Timestamp().
-        Str("service.name", serviceName).
-        Str("service.version", version).
-        Logger()
+func NewLogger(serviceName, version string) *slog.Logger {
+    return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+        Level: slog.LevelInfo,
+    })).With(
+        "service.name", serviceName,
+        "service.version", version,
+    )
 }
 
 // 添加 trace context
-func (l zerolog.Logger) WithTrace(ctx context.Context) zerolog.Logger {
+func WithTrace(ctx context.Context, logger *slog.Logger) *slog.Logger {
     spanCtx := trace.SpanContextFromContext(ctx)
     if spanCtx.HasTraceID() {
-        return l.With().
-            Str("trace_id", spanCtx.TraceID().String()).
-            Str("span_id", spanCtx.SpanID().String()).
-            Logger()
+        return logger.With(
+            "trace_id", spanCtx.TraceID().String(),
+            "span_id", spanCtx.SpanID().String(),
+        )
     }
-    return l
+    return logger
 }
 ```
 

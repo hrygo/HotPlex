@@ -36,19 +36,27 @@ func setupRoutes(
 
 	gatewayAPI := gateway.NewGatewayAPI(auth, sm, bridge)
 
-	corsPreflight := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key")
-		w.WriteHeader(http.StatusOK)
+	// withCORS wraps a handler to inject CORS headers.
+	withCORS := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			h(w, r)
+		}
 	}
 
-	mux.HandleFunc("GET /api/sessions", gatewayAPI.ListSessions)
-	mux.HandleFunc("POST /api/sessions", gatewayAPI.CreateSession)
-	mux.HandleFunc("GET /api/sessions/", gatewayAPI.GetSession)
-	mux.HandleFunc("DELETE /api/sessions/", gatewayAPI.DeleteSession)
-	mux.HandleFunc("OPTIONS /api/sessions", corsPreflight)
-	mux.HandleFunc("OPTIONS /api/sessions/", corsPreflight)
+	mux.HandleFunc("GET /api/sessions", withCORS(gatewayAPI.ListSessions))
+	mux.HandleFunc("POST /api/sessions", withCORS(gatewayAPI.CreateSession))
+	mux.HandleFunc("GET /api/sessions/{id}", withCORS(gatewayAPI.GetSession))
+	mux.HandleFunc("DELETE /api/sessions/{id}", withCORS(gatewayAPI.DeleteSession))
+	mux.HandleFunc("OPTIONS /api/sessions", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("OPTIONS /api/sessions/", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.HandleFunc("OPTIONS /api/sessions/{id}", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
 
 	mux.HandleFunc("GET /admin/health/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -155,6 +163,10 @@ func (a *sessionManagerAdapter) DebugSnapshot(id string) (admin.DebugSessionSnap
 
 func (a *sessionManagerAdapter) Transition(ctx context.Context, id string, to events.SessionState) error {
 	return a.sm.Transition(ctx, id, to)
+}
+
+func (a *sessionManagerAdapter) DeletePhysical(ctx context.Context, id string) error {
+	return a.sm.DeletePhysical(ctx, id)
 }
 
 type hubAdapter struct {

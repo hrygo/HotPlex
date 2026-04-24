@@ -375,7 +375,7 @@ gateway:
   write_buffer_size: 4096
 
 session:
-  idle_timeout: 30m
+  idle_timeout: 60m
   max_lifetime: 24h
   retention_period: 168h  # 7 days
 

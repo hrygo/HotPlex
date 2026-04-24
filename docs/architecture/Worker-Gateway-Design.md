@@ -243,7 +243,7 @@ CREATE TABLE sessions (
 
 | 资源    | 触发条件                                        | 动作                         |
 | ------- | ----------------------------------------------- | ---------------------------- |
-| Session | `IDLE` 超过 `idle_timeout`（默认 30min）        | → `TERMINATED`，清理 runtime |
+| Session | `IDLE` 超过 `idle_timeout`（默认 60min）        | → `TERMINATED`，清理 runtime |
 | Session | 总存活超过 `max_lifetime`（默认 24h）           | → `TERMINATED`               |
 | Session | `TERMINATED` 超过 `retention_period`（默认 7d） | → `DELETED`（删除 DB 记录）  |
 

@@ -198,7 +198,7 @@ version: v1.0
 **描述**: 后台 GC goroutine 定期清理过期 session，防止资源泄漏。
 
 **验收标准**:
-- Given GC 运行, When IDLE session 超过 idle_timeout（默认 30min）, Then → TERMINATED
+- Given GC 运行, When IDLE session 超过 idle_timeout（默认 60min）, Then → TERMINATED
 - Given GC 运行, When session 超过 max_lifetime（默认 24h）, Then → TERMINATED
 - Given GC 运行, When TERMINATED session 超过 retention_period（默认 7d）, Then → DELETED（删除 DB 记录）
 - Given GC 运行, When RUNNING session 超过 execution_timeout 无 IO, Then → TERMINATED（Zombie IO Polling）

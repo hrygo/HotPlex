@@ -6,7 +6,7 @@ Feishu (Lark) platform adapter using ws.Client for P2 event-driven messaging. Ha
 ## STRUCTURE
 ```
 feishu/
-  adapter.go          # Adapter struct, lifecycle, session mgmt (971 lines)
+  adapter.go          # Adapter struct, lifecycle, session mgmt (1228 lines)
   converter.go        # Feishu msg → AEP event extraction (239 lines)
   streaming.go        # Chunked streaming output with intervals (756 lines)
   interaction.go      # Permission/Q&A/elicitation card handling (321 lines)
@@ -27,9 +27,9 @@ feishu/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Message lifecycle | `adapter.go:154` | `handleMessage()` → parse P2 event → dispatch |
-| Text message handling | `adapter.go:273` | `handleTextMessage()` → Bridge.Handle → session start |
-| Connection management | `adapter.go:329` | `GetOrCreateConn()` — dedup + activeConns map |
+| Message lifecycle | `adapter.go:234` | `handleMessage()` → parse P2 event → dispatch |
+| Text message handling | `adapter.go:412` | `handleTextMessage()` → Bridge.Handle → session start |
+| Connection management | `adapter.go:474` | `GetOrCreateConn()` — dedup + activeConns map |
 | Streaming output | `streaming.go` | `FeishuConn.EnableStreaming()` → chunked updates with intervals |
 | Permission/Q&A cards | `interaction.go` | `sendPermissionRequest()`, `sendQuestionRequest()`, `sendElicitationRequest()` |
 | Typing indicator | `typing.go` | Reaction cycle: ⏳ → 🔄 → ✅ based on stream progress |

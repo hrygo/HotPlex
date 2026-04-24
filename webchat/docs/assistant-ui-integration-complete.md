@@ -172,9 +172,10 @@ ThreadPrimitive.Root
 配置文件：`.env.local`
 
 ```env
-NEXT_PUBLIC_HOTPLEX_WS_URL=ws://localhost:8888/ws
-NEXT_PUBLIC_HOTPLEX_WORKER_TYPE=claude_code
-NEXT_PUBLIC_HOTPLEX_API_KEY=dev
+# See lib/config.ts for all options and defaults.
+HOTPLEX_WEBCHAT_WS_URL=ws://localhost:8888/ws
+HOTPLEX_WEBCHAT_WORKER_TYPE=claude_code
+HOTPLEX_WEBCHAT_API_KEY=dev
 ```
 
 ---

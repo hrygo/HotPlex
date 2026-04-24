@@ -63,7 +63,8 @@ func DerivePlatformSessionKey(ownerID string, wt worker.WorkerType, ctx Platform
 	b.WriteString(string(wt))
 	b.WriteByte('|')
 	b.WriteString(ctx.Platform)
-	if ctx.Platform == "slack" {
+	switch ctx.Platform {
+	case "slack":
 		if ctx.TeamID != "" {
 			b.WriteByte('|')
 			b.WriteString(ctx.TeamID)
@@ -76,7 +77,7 @@ func DerivePlatformSessionKey(ownerID string, wt worker.WorkerType, ctx Platform
 			b.WriteByte('|')
 			b.WriteString(ctx.ThreadTS)
 		}
-	} else if ctx.Platform == "feishu" {
+	case "feishu":
 		if ctx.ChatID != "" {
 			b.WriteByte('|')
 			b.WriteString(ctx.ChatID)

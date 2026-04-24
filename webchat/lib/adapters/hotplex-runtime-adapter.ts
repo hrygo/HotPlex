@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExternalStoreAdapter, ThreadMessageLike, AppendMessage } from '@assistant-ui/react';
 import { BrowserHotPlexClient } from '@/lib/ai-sdk-transport';
+import type { InitConfig } from '@/lib/ai-sdk-transport/client/types';
+import { wsUrl, workerType, apiKey, workDir, allowedTools } from '@/lib/config';
 import type {
   Envelope,
   MessageDeltaData,
@@ -28,9 +30,6 @@ type ThreadSuggestion = { title: string; label: string; prompt: string };
 // ============================================================================
 
 export interface UseHotPlexRuntimeConfig {
-  url?: string;
-  workerType?: string;
-  apiKey?: string;
   /** Initial session ID to resume (calls resume() instead of connect()). */
   sessionId?: string;
 }
@@ -51,16 +50,11 @@ interface ToolCallPart {
   toolName: string;
   args: any;
   toolCallId: string;
+  result?: any;
+  isError?: boolean;
 }
 
-interface ToolResultPart {
-  type: 'tool-result';
-  toolName: string;
-  result: any;
-  toolCallId: string;
-}
-
-type MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart;
+type MessagePart = TextPart | ReasoningPart | ToolCallPart;
 
 // Internal message format for our store
 interface HotPlexMessage {
@@ -123,9 +117,6 @@ function convertToThreadMessage(message: HotPlexMessage, idx: number): ThreadMes
  * @returns assistant-ui ExternalStoreAdapter
  */
 export function useHotPlexRuntime({
-  url = 'ws://localhost:8888/ws',
-  workerType = 'claude_code',
-  apiKey = 'dev',
   sessionId,
 }: UseHotPlexRuntimeConfig = {}): ExternalStoreAdapter<HotPlexMessage> {
   // State
@@ -152,10 +143,15 @@ export function useHotPlexRuntime({
       return;
     }
 
+    const initConfig: InitConfig = {};
+    if (workDir) initConfig.work_dir = workDir;
+    if (allowedTools.length > 0) initConfig.allowed_tools = allowedTools;
+
     const client = new BrowserHotPlexClient({
-      url,
-      workerType: workerType as any,
+      url: wsUrl,
+      workerType,
       apiKey,
+      initConfig,
       heartbeat: {
         pingIntervalMs: 10000,
         pongTimeoutMs: 5000,
@@ -180,8 +176,17 @@ export function useHotPlexRuntime({
           }
           return [...prev.slice(0, -1), { ...lastMessage, parts }];
         }
-        // No streaming message — this shouldn't happen with valid gateway
-        return prev;
+        // No streaming message — create one (message.start may not have been sent)
+        return [
+          ...prev,
+          {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant' as const,
+            parts: [{ type: 'text', text: content }],
+            createdAt: new Date(),
+            status: 'streaming' as const,
+          },
+        ];
       });
     };
 
@@ -257,12 +262,11 @@ export function useHotPlexRuntime({
       setMessages((prev) => {
         const lastMessage = prev[prev.length - 1];
         if (lastMessage?.role === 'assistant') {
-          const parts = [...lastMessage.parts, {
-            type: 'tool-result' as const,
-            toolName: 'result', // ToolResultData doesn't have name, using placeholder or ID
-            result: data.output,
-            toolCallId: data.id,
-          }];
+          const parts = lastMessage.parts.map((p) =>
+            p.type === 'tool-call' && p.toolCallId === data.id
+              ? { ...p, result: data.output }
+              : p
+          );
           return [...prev.slice(0, -1), { ...lastMessage, parts }];
         }
         return prev;
@@ -301,15 +305,15 @@ export function useHotPlexRuntime({
 
       const errorMessage = data?.message || 'An unexpected error occurred in the HotPlex gateway.';
 
-      // Add error message to thread
+      // Add error message to thread (use assistant role for assistant-ui compatibility)
       setMessages((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
-          role: 'system',
+          role: 'assistant',
           parts: [{ type: 'text', text: `⚠️ Error: ${errorMessage}` }],
           createdAt: new Date(),
-          status: 'error',
+          status: 'complete',
         },
       ]);
     };
@@ -375,7 +379,7 @@ export function useHotPlexRuntime({
       client.disconnect();
       clientRef.current = null;
     };
-  }, [url, workerType, apiKey, sessionId]);
+  }, [sessionId]);
 
   // Track pending connection-wait state so useEffect cleanup can tear it down
   const connectionWaitRef = useRef<{
@@ -410,7 +414,9 @@ export function useHotPlexRuntime({
       console.log('HotPlexRuntimeAdapter: client not connected, attempting to reconnect...');
       try {
         if (!client.connecting) {
-          client.connect(sessionId).catch(err => {
+          // Don't pass sessionId here — the client internally tracks the latest session ID,
+          // which may have been updated by a SessionNotFound retry in BrowserHotPlexClient.
+          client.connect().catch(err => {
             console.error('HotPlexRuntimeAdapter: auto-connect failed', err);
           });
         }

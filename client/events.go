@@ -65,98 +65,33 @@ const (
 	ErrCodeSessionNotFound = events.ErrCodeSessionNotFound
 )
 
-// DoneData is the payload of a done event.
-type DoneData struct {
-	Success bool           `json:"success"`
-	Stats   map[string]any `json:"stats,omitempty"`
-	Dropped bool           `json:"dropped,omitempty"`
-}
-
-// Stats holds session statistics.
-type Stats struct {
-	DurationMs      int64   `json:"duration_ms,omitempty"`
-	ToolCalls       int     `json:"tool_calls,omitempty"`
-	InputTokens     int     `json:"input_tokens,omitempty"`
-	OutputTokens    int     `json:"output_tokens,omitempty"`
-	TotalTokens     int     `json:"total_tokens,omitempty"`
-	CacheReadTokens int     `json:"cache_read_tokens,omitempty"`
-	CostUSD         float64 `json:"cost_usd,omitempty"`
-	Model           string  `json:"model,omitempty"`
-}
+// Event data types re-exported from pkg/events for type-safe access.
+type (
+	MessageStartData       = events.MessageStartData
+	MessageDeltaData       = events.MessageDeltaData
+	MessageEndData         = events.MessageEndData
+	StateData              = events.StateData
+	ReasoningData          = events.ReasoningData
+	StepData               = events.StepData
+	DoneData               = events.DoneData
+	ToolCallData           = events.ToolCallData
+	ToolResultData         = events.ToolResultData
+	PermissionRequestData  = events.PermissionRequestData
+	PermissionResponseData = events.PermissionResponseData
+	QuestionOption         = events.QuestionOption
+	Question               = events.Question
+	QuestionRequestData    = events.QuestionRequestData
+	QuestionResponseData   = events.QuestionResponseData
+	ElicitationRequestData = events.ElicitationRequestData
+	ElicitationResponseData = events.ElicitationResponseData
+)
 
 // ErrorData is the payload of an error event.
+// Extends events.ErrorData with a Details field for structured error info.
 type ErrorData struct {
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
 	Details any       `json:"details,omitempty"`
-}
-
-// ToolCallData is the payload of a tool_call event.
-type ToolCallData struct {
-	ID    string         `json:"id"`
-	Name  string         `json:"name"`
-	Input map[string]any `json:"input"`
-}
-
-// ToolResultData is the payload of a tool_result event.
-type ToolResultData struct {
-	ID     string      `json:"id"`
-	Output interface{} `json:"output,omitempty"`
-	Error  string      `json:"error,omitempty"`
-}
-
-// PermissionRequestData is the payload of a permission_request event.
-type PermissionRequestData struct {
-	ID          string   `json:"id"`
-	ToolName    string   `json:"tool_name"`
-	Description string   `json:"description,omitempty"`
-	Args        []string `json:"args,omitempty"`
-}
-
-// QuestionOption represents a single selectable option in a question.
-type QuestionOption struct {
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-	Preview     string `json:"preview,omitempty"`
-}
-
-// Question represents a single question with options.
-type Question struct {
-	Question    string           `json:"question"`
-	Header      string           `json:"header"`
-	Options     []QuestionOption `json:"options"`
-	MultiSelect bool             `json:"multi_select"`
-}
-
-// QuestionRequestData is the payload of a question_request event.
-type QuestionRequestData struct {
-	ID        string     `json:"id"`
-	ToolName  string     `json:"tool_name,omitempty"`
-	Questions []Question `json:"questions"`
-}
-
-// QuestionResponseData is the payload of a question_response event.
-type QuestionResponseData struct {
-	ID      string            `json:"id"`
-	Answers map[string]string `json:"answers"`
-}
-
-// ElicitationRequestData is the payload of an elicitation_request event.
-type ElicitationRequestData struct {
-	ID              string         `json:"id"`
-	MCPServerName   string         `json:"mcp_server_name"`
-	Message         string         `json:"message"`
-	Mode            string         `json:"mode,omitempty"`
-	URL             string         `json:"url,omitempty"`
-	ElicitationID   string         `json:"elicitation_id,omitempty"`
-	RequestedSchema map[string]any `json:"requested_schema,omitempty"`
-}
-
-// ElicitationResponseData is the payload of an elicitation_response event.
-type ElicitationResponseData struct {
-	ID      string         `json:"id"`
-	Action  string         `json:"action"` // "accept" | "decline" | "cancel"
-	Content map[string]any `json:"content,omitempty"`
 }
 
 // Priority is the message delivery priority.

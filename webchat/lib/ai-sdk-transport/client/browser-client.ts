@@ -128,6 +128,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       workerType: config.workerType,
       apiKey: config.apiKey,
       authToken: config.authToken,
+      initConfig: config.initConfig,
       reconnect: config.reconnect ?? { enabled: true },
       heartbeat: config.heartbeat ?? {},
     };
@@ -203,7 +204,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         const initEnv = createInitEnvelope(
           sessionId,
           this.config.workerType,
-          undefined,
+          this.config.initConfig,
           this.config.authToken,
         );
 
@@ -255,19 +256,30 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       if (ackData.error || ackData.code) {
         const errorMsg = ackData.error || `Handshake failed with code: ${ackData.code}`;
         console.error('BrowserHotPlexClient: handshake error', errorMsg);
-        
+
+        if (ackData.code === ErrorCode.SessionNotFound) {
+          // Session was deleted on server — retry with the original session ID.
+          // Server uses DeriveSessionKey(userID, workerType, clientSessionID, workDir)
+          // to map client session_id to a deterministic UUIDv5. By retrying with the
+          // same session ID, the auto-created session always maps to the same server-side
+          // session key, providing stable worker-to-session consistency.
+          const retryId = this._sessionId;
+          this._sessionId = null;
+          this._doConnect(retryId ?? undefined).then(resolve, reject);
+          return;
+        }
+
         // Fatal errors shouldn't trigger reconnect
-        if (ackData.code === ErrorCode.SessionNotFound || 
-            ackData.code === ErrorCode.Unauthorized ||
+        if (ackData.code === ErrorCode.Unauthorized ||
             ackData.code === ErrorCode.AuthRequired) {
           this.shouldReconnect = false;
         }
-        
-        this.emit('error', { 
-          code: ackData.code || ErrorCode.InternalError, 
-          message: errorMsg 
+
+        this.emit('error', {
+          code: ackData.code || ErrorCode.InternalError,
+          message: errorMsg
         } as ErrorData, env);
-        
+
         this.disconnect();
         reject(new Error(errorMsg));
         return;

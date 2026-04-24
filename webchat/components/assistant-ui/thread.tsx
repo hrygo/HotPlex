@@ -109,21 +109,25 @@ function WelcomeScreen() {
       </p>
 
       <div className="grid grid-cols-2 gap-3 w-full max-w-xl mx-auto">
-        {SUGGESTIONS.map((s) => (
-          <ThreadPrimitive.Suggestion 
-            key={s.prompt} 
-            prompt={s.prompt} 
-            send 
-            className="suggestion-card flex items-center gap-3"
-          >
-            <div className="w-8 h-8 rounded-lg bg-[var(--bg-elevated)] flex items-center justify-center text-[var(--accent-gold)]">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={ICON_PATHS[s.icon]} />
-              </svg>
-            </div>
-            <span className="font-medium">{s.prompt}</span>
-          </ThreadPrimitive.Suggestion>
-        ))}
+        {SUGGESTIONS.map((s) => {
+          // 自包含的提示词直接发送；需要上下文的填入输入框让用户补充
+          const selfContained = s.icon === "code";
+          return (
+            <ThreadPrimitive.Suggestion
+              key={s.prompt}
+              prompt={s.prompt}
+              {...(selfContained ? { send: true } : {})}
+              className="suggestion-card flex items-center gap-3"
+            >
+              <div className="w-8 h-8 rounded-lg bg-[var(--bg-elevated)] flex items-center justify-center text-[var(--accent-gold)]">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={ICON_PATHS[s.icon]} />
+                </svg>
+              </div>
+              <span className="font-medium">{s.prompt}</span>
+            </ThreadPrimitive.Suggestion>
+          );
+        })}
       </div>
     </div>
   );
@@ -146,10 +150,11 @@ function AssistantMessage() {
       <div className="msg-assistant-body">
         <MessagePrimitive.Parts>
           {({ part }) => {
-            const m = message as any;
             const p = part as any;
-            const isLatest = m.status.type === "running";
-            
+            if (!p) return null;
+            const m = message as any;
+            const isLatest = m.status?.type === "running";
+
             if (p.type === "reasoning") {
               return <ReasoningBlock text={p.text} />;
             }
@@ -157,15 +162,15 @@ function AssistantMessage() {
               return <MarkdownText text={p.text} />;
             }
             if (p.type === "tool-call") {
-              return <ToolCallBlock 
-                key={p.toolCallId} 
-                toolName={p.toolName} 
-                args={p.args} 
-                active={isLatest && !m.content.some((other: any) => other.toolCallId === p.toolCallId && other.type === 'tool-result')} 
+              if (p.result !== undefined) {
+                return <ToolResultBlock key={p.toolCallId} toolName={p.toolName} result={p.result} />;
+              }
+              return <ToolCallBlock
+                key={p.toolCallId}
+                toolName={p.toolName}
+                args={p.args}
+                active={isLatest}
               />;
-            }
-            if (p.type === "tool-result") {
-              return <ToolResultBlock key={p.toolCallId} toolName={p.toolName} result={p.result} />;
             }
             return null;
           }}

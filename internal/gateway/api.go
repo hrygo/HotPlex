@@ -9,6 +9,7 @@ import (
 	"github.com/hrygo/hotplex/internal/worker"
 
 	"github.com/hrygo/hotplex/pkg/aep"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 type GatewayAPI struct {
@@ -70,6 +71,18 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	if userID == "" {
 		userID = "anonymous"
 	}
+
+	// Idempotency check: if session exists and is active, just return it.
+	if si, err := g.sm.Get(id); err == nil {
+		if si.State != events.StateDeleted {
+			respondJSON(w, map[string]string{"session_id": id})
+			return
+		}
+		// If it's deleted, we must physically remove it before re-creating
+		// to avoid StateMachine transition errors and primary key conflicts.
+		_ = g.sm.DeletePhysical(r.Context(), id)
+	}
+
 	if err := g.bridge.StartSession(r.Context(), id, userID, botID, wt, nil, "", "", nil); err != nil {
 		http.Error(w, "failed to create session", http.StatusInternalServerError)
 		return
@@ -105,7 +118,7 @@ func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session id required", http.StatusBadRequest)
 		return
 	}
-	if err := g.sm.Delete(r.Context(), id); err != nil {
+	if err := g.sm.DeletePhysical(r.Context(), id); err != nil {
 		http.Error(w, "failed to delete session", http.StatusInternalServerError)
 		return
 	}

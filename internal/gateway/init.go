@@ -85,7 +85,6 @@ var (
 	ErrInitVersionMismatch  = &InitError{Code: events.ErrCodeVersionMismatch, Message: "version mismatch"}
 	ErrInitCapacityExceeded = &InitError{Code: events.ErrCodeRateLimited, Message: "capacity exceeded"}
 	ErrInitSessionNotFound  = &InitError{Code: events.ErrCodeSessionNotFound, Message: "session not found"}
-	ErrInitSessionDeleted   = &InitError{Code: events.ErrCodeSessionNotFound, Message: "session was deleted"}
 )
 
 // BuildInitAck builds an init_ack envelope from handshake result.
