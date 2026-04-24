@@ -52,7 +52,7 @@ Gateway 默认监听：
 | Python 3.10+ | [`python-client/`](python-client/) | ✅ 生产可用 | [README.md](python-client/README.md) |
 | TypeScript/Node.js | [`typescript-client/`](typescript-client/) | ✅ 生产可用 | [README.md](typescript-client/README.md) |
 | Go 1.21+ | [`../client/`](../client/) | 🚧 开发中 | [README.md](../client/README.md) |
-| Java 17+ | [`java-client/`](java-client/) | 🚧 开发中 | [README.md](java-client/README.md) |
+| Java 17+ | [`java-client/`](java-client/) | ✅ 生产可用 | [README.md](java-client/README.md) |
 
 ---
 
