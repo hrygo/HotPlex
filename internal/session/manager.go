@@ -431,7 +431,8 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	ms, ok := m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		return nil
+		// Session not in memory — remove from database directly.
+		return m.store.DeletePhysical(ctx, id)
 	}
 
 	ms.mu.Lock()

@@ -118,7 +118,7 @@ func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session id required", http.StatusBadRequest)
 		return
 	}
-	if err := g.sm.Delete(r.Context(), id); err != nil {
+	if err := g.sm.DeletePhysical(r.Context(), id); err != nil {
 		http.Error(w, "failed to delete session", http.StatusInternalServerError)
 		return
 	}
