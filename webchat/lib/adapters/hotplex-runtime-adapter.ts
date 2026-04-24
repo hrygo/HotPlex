@@ -147,6 +147,11 @@ export function useHotPlexRuntime({
 
   // Initialize WebSocket client
   useEffect(() => {
+    if (!sessionId) {
+      console.log('HotPlexRuntimeAdapter: No session ID provided, skipping connection.');
+      return;
+    }
+
     const client = new BrowserHotPlexClient({
       url,
       workerType: workerType as any,
@@ -285,16 +290,24 @@ export function useHotPlexRuntime({
     };
 
     const handleError = (data: ErrorData, env: Envelope) => {
-      console.error('HotPlexRuntimeAdapter: error', data);
+      console.error('HotPlexRuntimeAdapter: error received', {
+        code: data?.code,
+        message: data?.message,
+        details: data?.details,
+        eventId: env?.id,
+        raw: data
+      });
       setIsRunning(false);
 
-      // Add error message
+      const errorMessage = data?.message || 'An unexpected error occurred in the HotPlex gateway.';
+
+      // Add error message to thread
       setMessages((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
           role: 'system',
-          parts: [{ type: 'text', text: `⚠️ Error: ${data.message}` }],
+          parts: [{ type: 'text', text: `⚠️ Error: ${errorMessage}` }],
           createdAt: new Date(),
           status: 'error',
         },
@@ -392,25 +405,30 @@ export function useHotPlexRuntime({
       throw new Error('HotPlex client not initialized.');
     }
 
-    // Wait for connection if handshake is still in progress (up to 30s)
+    // Handle disconnected state: attempt to reconnect if not already connecting
     if (!client.connected) {
-      if (client.connecting) {
-        console.log('HotPlexRuntimeAdapter: waiting for connection...');
-        // Register listeners BEFORE checking connected to avoid TOCTOU:
-        // connected may fire between the if-check and listener registration.
+      console.log('HotPlexRuntimeAdapter: client not connected, attempting to reconnect...');
+      try {
+        if (!client.connecting) {
+          client.connect(sessionId).catch(err => {
+            console.error('HotPlexRuntimeAdapter: auto-connect failed', err);
+          });
+        }
+
+        // Wait for connection (up to 30s)
         await new Promise<void>((resolve, reject) => {
           let settled = false;
           const settle = (fn: () => void) => {
             if (settled) return;
             settled = true;
             clearTimeout(timeout);
+            client.off('connected', onConnected);
             client.off('disconnected', onDisconnected);
             connectionWaitRef.current = null;
             fn();
           };
 
           const timeout = setTimeout(() => {
-            client.off('connected', onConnected);
             settle(() => reject(new Error('Connection timeout. Please check your network.')));
           }, 30000);
 
@@ -418,22 +436,20 @@ export function useHotPlexRuntime({
             settle(() => resolve());
           };
           const onDisconnected = (reason: string) => {
-            client.off('connected', onConnected);
-            settle(() => reject(new Error(`Connection lost: ${reason}`)));
+            settle(() => reject(new Error(`Connection failed: ${reason}`)));
           };
 
           connectionWaitRef.current = { timeout, onConnected, onDisconnected };
           client.on('connected', onConnected);
           client.on('disconnected', onDisconnected);
 
-          // If connected flipped true between the outer check and listener registration,
-          // the 'connected' event already fired — call onConnected immediately.
+          // Check if it connected while we were setting up listeners
           if (client.connected) {
             settle(() => resolve());
           }
         });
-      } else {
-        throw new Error('HotPlex client not connected. Please wait for connection...');
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : 'HotPlex client not connected. Please check your network.');
       }
     }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hrygo/hotplex/internal/cli/onboard"
+	"github.com/hrygo/hotplex/internal/cli/output"
 	"github.com/hrygo/hotplex/internal/config"
 )
 
@@ -22,13 +23,15 @@ func newOnboardCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "onboard",
 		Short: "Interactive configuration wizard",
-		Long: `Interactive configuration wizard for first-time setup.
+		Long: `Interactive configuration wizard for first-time setup or reconfiguration.
+
+Detects existing configuration and prompts to keep or reconfigure.
 Guides you through creating config.yaml and .env with sensible defaults.
 Supports non-interactive mode for automated deployments.`,
-		Example: `  hotplex onboard                    # Interactive setup
-  hotplex onboard --non-interactive   # Use defaults, no prompts
-  hotplex onboard --enable-slack --enable-feishu  # Enable all platforms
-  hotplex onboard --force             # Overwrite existing config`,
+		Example: `  hotplex onboard                    # Interactive setup (detects existing config)
+  hotplex onboard --force           # Overwrite existing config
+  hotplex onboard --non-interactive # Auto-generate, no prompts
+  hotplex onboard --enable-slack --enable-feishu  # Enable all platforms`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 			configPath, err = config.ExpandAndAbs(configPath)
@@ -54,19 +57,13 @@ Supports non-interactive mode for automated deployments.`,
 			}
 
 			fmt.Fprintln(os.Stderr)
-			fmt.Fprintf(os.Stderr, "HotPlex Onboard %s\n\n", versionString())
+			fmt.Fprintf(os.Stderr, "  %s %s\n\n", output.Bold("HotPlex Onboard"), output.Dim(versionString()))
 
 			for _, step := range result.Steps {
-				symbol := "?"
-				switch step.Status {
-				case "pass":
-					symbol = "✓"
-				case "skip":
-					symbol = "○"
-				case "fail":
-					symbol = "✗"
-				}
-				fmt.Fprintf(os.Stderr, "  %s %-20s %s\n", symbol, step.Name, step.Detail)
+				fmt.Fprintf(os.Stderr, "  %s %-20s %s\n",
+					output.StatusSymbol(step.Status),
+					output.Bold(step.Name),
+					output.Dim(step.Detail))
 			}
 
 			fmt.Fprintln(os.Stderr)
@@ -79,11 +76,16 @@ Supports non-interactive mode for automated deployments.`,
 				}
 			}
 			if hasFail {
-				fmt.Fprintln(os.Stderr, "  Some steps failed. Review errors above.")
+				fmt.Fprintln(os.Stderr, "  "+output.Red("Some steps failed. Review errors above."))
 				os.Exit(1)
 			}
 
-			fmt.Fprintln(os.Stderr, "  Configuration complete. Run 'hotplex gateway' to start.")
+			switch result.Action {
+			case "keep":
+				fmt.Fprint(os.Stderr, output.CommandBox("hotplex doctor"))
+			default:
+				fmt.Fprint(os.Stderr, output.CommandBox("hotplex gateway start"))
+			}
 			return nil
 		},
 	}

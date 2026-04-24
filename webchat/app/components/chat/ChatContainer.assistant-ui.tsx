@@ -6,6 +6,7 @@ import {
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
 import { useHotPlexRuntime } from '@/lib/adapters/hotplex-runtime-adapter';
+import { useSessions } from '@/lib/hooks/useSessions';
 import { Thread } from '@/components/assistant-ui/thread';
 import { BrandIcon } from '@/components/icons';
 import { SessionPanel } from './SessionPanel';
@@ -44,19 +45,35 @@ export default function ChatContainer() {
     setActiveSessionId(sessionId);
   }, []);
 
+  const {
+    activeSession,
+    isLoading,
+    selectSession,
+    createNewSession,
+    removeSession,
+    sessions,
+  } = useSessions({
+    onSelect: handleSessionSelect,
+    initialSessionId: activeSessionId,
+  });
+
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-base)]">
       {/* PC Sidebar */}
       <aside className={`transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-[280px]' : 'w-0'} overflow-hidden flex-shrink-0 relative z-30`}>
         <SessionPanel
-          onSessionSelect={handleSessionSelect}
-          initialSessionId={activeSessionId}
+          sessions={sessions}
+          activeSession={activeSession}
+          isLoading={isLoading}
+          onSelect={selectSession}
+          onCreate={createNewSession}
+          onDelete={removeSession}
         />
       </aside>
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 relative">
-        {/* Toggle / Header Area */}
+        {/* ... existing header ... */}
         <header className="h-14 flex items-center px-6 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex-shrink-0 z-20">
           <div className="flex items-center gap-4 w-full">
             <button 
@@ -81,8 +98,8 @@ export default function ChatContainer() {
 
             <div className="flex items-center gap-2">
                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent-emerald)] animate-pulse" />
-                  <span className="text-[10px] font-bold text-[var(--text-secondary)]">GATEWAY ONLINE</span>
+                  <div className={`w-1.5 h-1.5 rounded-full ${isLoading ? 'bg-amber-400 animate-pulse' : 'bg-[var(--accent-emerald)] shadow-[0_0_8px_var(--accent-emerald)]'}`} />
+                  <span className="text-[10px] font-bold text-[var(--text-secondary)]">{isLoading ? 'PREPARING...' : 'GATEWAY ONLINE'}</span>
                </div>
             </div>
           </div>
@@ -90,13 +107,39 @@ export default function ChatContainer() {
 
         {/* Chat Thread */}
         <div className="flex-1 relative overflow-hidden">
-          <ChatInterface
-            key={activeSessionId ?? '__new__'}
-            url={url}
-            workerType={workerType}
-            apiKey={apiKey}
-            sessionId={activeSessionId}
-          />
+          {(!activeSessionId && isLoading) ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--bg-base)] z-10 animate-fade-in">
+              <div className="relative mb-6">
+                <div className="absolute inset-0 bg-[var(--accent-gold)] opacity-20 blur-2xl rounded-full animate-pulse" />
+                <BrandIcon size={48} className="relative z-10 animate-float" />
+              </div>
+              <p className="text-sm font-medium text-[var(--text-secondary)] animate-pulse">Starting new session...</p>
+            </div>
+          ) : !activeSessionId ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--bg-base)] p-8 text-center">
+               <div className="w-20 h-20 rounded-3xl bg-white shadow-xl border border-[var(--border-subtle)] flex items-center justify-center mb-8">
+                  <BrandIcon size={40} />
+               </div>
+               <h2 className="text-xl font-display font-bold text-[var(--text-primary)] mb-3">Empower Your Coding</h2>
+               <p className="text-sm text-[var(--text-muted)] max-w-sm mb-10 leading-relaxed">
+                 Select an existing session from the sidebar or start a new high-fidelity coding conversation.
+               </p>
+               <button
+                 onClick={() => createNewSession()}
+                 className="px-8 py-3 rounded-full bg-[var(--text-primary)] text-white text-sm font-bold shadow-2xl hover:scale-105 active:scale-95 transition-all"
+               >
+                 {sessions.length === 0 ? 'Start Your First Project' : 'New Chat'}
+               </button>
+            </div>
+          ) : (
+            <ChatInterface
+              key={activeSessionId}
+              url={url}
+              workerType={workerType}
+              apiKey={apiKey}
+              sessionId={activeSessionId}
+            />
+          )}
         </div>
       </main>
     </div>

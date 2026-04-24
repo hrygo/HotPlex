@@ -15,11 +15,13 @@ import (
 
 	"github.com/hrygo/hotplex/internal/cli"
 	"github.com/hrygo/hotplex/internal/cli/checkers"
+	"github.com/hrygo/hotplex/internal/cli/output"
 	"github.com/hrygo/hotplex/internal/config"
 )
 
 type messagingPlatformConfig struct {
 	enabled        bool
+	kept           bool
 	dmPolicy       string
 	groupPolicy    string
 	requireMention bool
@@ -56,6 +58,15 @@ type ExistingConfig struct {
 func (ec *ExistingConfig) HasAny() bool      { return ec.ConfigExists || ec.EnvExists }
 func (ec *ExistingConfig) SlackReady() bool  { return ec.SlackEnabled && ec.SlackCreds }
 func (ec *ExistingConfig) FeishuReady() bool { return ec.FeishuEnabled && ec.FeishuCreds }
+func (ec *ExistingConfig) PlatformConfigured(platform string) bool {
+	switch strings.ToLower(platform) {
+	case "slack":
+		return ec.SlackEnabled || ec.SlackCreds
+	case "feishu":
+		return ec.FeishuEnabled || ec.FeishuCreds
+	}
+	return false
+}
 
 func detectExistingConfig(configPath, envPath string) *ExistingConfig {
 	ec := &ExistingConfig{ConfigPath: configPath, EnvPath: envPath}
@@ -169,7 +180,7 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 		result.add(StepResult{Name: "messaging", Status: "pass", Detail: messagingDetail(slackCfg.enabled, feishuCfg.enabled)})
 	} else {
 		reader := bufio.NewReader(os.Stdin)
-		slackCfg, feishuCfg, _ = stepMessaging(reader, opts)
+		slackCfg, feishuCfg, _ = stepMessaging(reader, opts, existing)
 	}
 
 	tplOpts := ConfigTemplateOptions{
@@ -184,6 +195,14 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 		FeishuGroupPolicy:    feishuCfg.groupPolicy,
 		FeishuRequireMention: toPtr(feishuCfg.requireMention),
 		FeishuAllowFrom:      feishuCfg.allowFrom,
+	}
+
+	if slackCfg.kept || feishuCfg.kept {
+		tplOpts.KeptPlatforms = map[string]bool{
+			"slack":  slackCfg.kept,
+			"feishu": feishuCfg.kept,
+		}
+		tplOpts.ExistingConfigPath = opts.ConfigPath
 	}
 
 	s5, configCreated := stepConfigGen(opts, tplOpts)
@@ -243,36 +262,40 @@ func buildPlatformNonInteractive(enabled bool, dmPolicy, groupPolicy string, all
 // ─── Display helpers ─────────────────────────────────────────────────────────
 
 func displayBanner() {
-	fmt.Fprintf(os.Stderr, "\n  \033[1mHotPlex Worker Gateway\033[0m — Setup Wizard\n")
+	fmt.Fprintf(os.Stderr, "\n  %s\n", output.Bold("HotPlex Worker Gateway — Setup Wizard"))
+	fmt.Fprintf(os.Stderr, "  %s\n", output.Dim("AI Coding Agent Gateway  v0.36.2"))
 	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 45))
 	fmt.Fprintln(os.Stderr, "")
 }
 
 func displayExistingConfig(ec *ExistingConfig) {
-	fmt.Fprintln(os.Stderr, "  \033[1mExisting Configuration Detected\033[0m")
-	fmt.Fprintln(os.Stderr, "  "+strings.Repeat("─", 45))
+	fmt.Fprintln(os.Stderr, output.NoteBox("Existing Configuration Detected", ""))
 	if ec.ConfigExists {
-		fmt.Fprintf(os.Stderr, "    Config: \033[32m%s\033[0m\n", ec.ConfigPath)
+		fmt.Fprintf(os.Stderr, "    Config: %s\n", output.Green(ec.ConfigPath))
 		if ec.SlackEnabled {
-			s := "\033[32m✓ configured\033[0m"
-			if !ec.SlackCreds {
-				s = "\033[33m⚠ missing token in .env\033[0m"
+			var status string
+			if ec.SlackCreds {
+				status = output.StatusSymbol("pass") + " " + output.Green("configured")
+			} else {
+				status = output.StatusSymbol("warn") + " " + output.Yellow("missing token in .env")
 			}
-			fmt.Fprintf(os.Stderr, "    Slack:  enabled (%s)\n", s)
+			fmt.Fprintf(os.Stderr, "    Slack:  enabled (%s)\n", status)
 		}
 		if ec.FeishuEnabled {
-			s := "\033[32m✓ configured\033[0m"
-			if !ec.FeishuCreds {
-				s = "\033[33m⚠ missing credentials in .env\033[0m"
+			var status string
+			if ec.FeishuCreds {
+				status = output.StatusSymbol("pass") + " " + output.Green("configured")
+			} else {
+				status = output.StatusSymbol("warn") + " " + output.Yellow("missing credentials in .env")
 			}
-			fmt.Fprintf(os.Stderr, "    Feishu: enabled (%s)\n", s)
+			fmt.Fprintf(os.Stderr, "    Feishu: enabled (%s)\n", status)
 		}
 		if !ec.SlackEnabled && !ec.FeishuEnabled {
 			fmt.Fprintln(os.Stderr, "    Platforms: none enabled")
 		}
 	}
 	if ec.EnvExists && !ec.ConfigExists {
-		fmt.Fprintf(os.Stderr, "    Env file: \033[33m%s (config file missing)\033[0m\n", ec.EnvPath)
+		fmt.Fprintf(os.Stderr, "    Env file: %s\n", output.Yellow(ec.EnvPath+" (config file missing)"))
 	}
 	fmt.Fprintln(os.Stderr, "")
 }
@@ -313,7 +336,7 @@ func stepEnvPreCheck() StepResult {
 // ─── Step 2: Required config items ──────────────────────────────────────────
 
 func stepRequiredConfig(reader *bufio.Reader) (jwtSecret, adminToken, workerType string, result StepResult) {
-	fmt.Fprintln(os.Stderr, "\n── Required Configuration ──")
+	fmt.Fprint(os.Stderr, output.SectionHeader("Required Configuration"))
 
 	jwtSecret = prompt(reader, "JWT secret (enter to auto-generate)")
 	if jwtSecret == "" {
@@ -349,20 +372,36 @@ func stepWorkerDep(workerType string) StepResult {
 
 // ─── Step 4: Messaging platform ─────────────────────────────────────────────
 
-func stepMessaging(reader *bufio.Reader, _ WizardOptions) (slackCfg, feishuCfg messagingPlatformConfig, result StepResult) {
-	fmt.Fprintln(os.Stderr, "\n── Messaging Platform (optional) ──")
+func stepMessaging(reader *bufio.Reader, _ WizardOptions, existing *ExistingConfig) (slackCfg, feishuCfg messagingPlatformConfig, result StepResult) {
+	fmt.Fprint(os.Stderr, output.SectionHeader("Messaging Platform (optional)"))
 
-	slackCfg = collectPlatformConfig(reader, "Slack", map[string]string{
+	slackCfg = collectPlatformOrKeep(reader, "Slack", existing, map[string]string{
 		"HOTPLEX_MESSAGING_SLACK_BOT_TOKEN": "Slack Bot Token (xoxb-...)",
 		"HOTPLEX_MESSAGING_SLACK_APP_TOKEN": "Slack App Token (xapp-...)",
 	})
 
-	feishuCfg = collectPlatformConfig(reader, "Feishu", map[string]string{
+	feishuCfg = collectPlatformOrKeep(reader, "Feishu", existing, map[string]string{
 		"HOTPLEX_MESSAGING_FEISHU_APP_ID":     "Feishu App ID",
 		"HOTPLEX_MESSAGING_FEISHU_APP_SECRET": "Feishu App Secret",
 	})
 
 	return slackCfg, feishuCfg, StepResult{Name: "messaging", Status: "pass", Detail: messagingDetail(slackCfg.enabled, feishuCfg.enabled)}
+}
+
+func collectPlatformOrKeep(reader *bufio.Reader, platformName string, existing *ExistingConfig, credPrompts map[string]string) messagingPlatformConfig {
+	if existing != nil && existing.PlatformConfigured(platformName) {
+		if promptKeepPlatform(reader, platformName) {
+			return messagingPlatformConfig{enabled: true, kept: true, credentials: map[string]string{}}
+		}
+	}
+	return collectPlatformConfig(reader, platformName, credPrompts)
+}
+
+func promptKeepPlatform(reader *bufio.Reader, platform string) bool {
+	fmt.Fprintf(os.Stderr, "? Keep existing %s configuration? %s: ", platform, output.Bold("[Y/n]"))
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line != "n" && line != "no"
 }
 
 func collectPlatformConfig(reader *bufio.Reader, platform string, credPrompts map[string]string) messagingPlatformConfig {
@@ -381,7 +420,7 @@ func collectPlatformConfig(reader *bufio.Reader, platform string, credPrompts ma
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "\n  ── Access Policy [Enter = accept defaults] ──")
+	fmt.Fprint(os.Stderr, output.SectionHeader("Access Policy [Enter = accept defaults]"))
 	cfg.dmPolicy = promptWithDefault(reader, "  DM policy", "allowlist")
 	cfg.groupPolicy = promptWithDefault(reader, "  Group policy", "allowlist")
 	cfg.requireMention = promptYesNo(reader, "  Require @mention in groups?")
@@ -412,7 +451,7 @@ func stepConfigGen(opts WizardOptions, tplOpts ConfigTemplateOptions) (StepResul
 // ─── Step 6: Write config ───────────────────────────────────────────────────
 
 func stepWriteConfig(envPath, jwtSecret, adminToken string, slackCfg, feishuCfg messagingPlatformConfig, configCreated bool, opts WizardOptions) StepResult {
-	if err := os.WriteFile(envPath, []byte(buildEnvContent(jwtSecret, adminToken, slackCfg, feishuCfg)), 0o600); err != nil {
+	if err := os.WriteFile(envPath, []byte(buildEnvContent(jwtSecret, adminToken, slackCfg, feishuCfg, envPath)), 0o600); err != nil {
 		return StepResult{Name: "write_config", Status: "fail", Detail: "write .env: " + err.Error()}
 	}
 
@@ -425,27 +464,58 @@ func stepWriteConfig(envPath, jwtSecret, adminToken string, slackCfg, feishuCfg 
 	return StepResult{Name: "write_config", Status: "pass", Detail: envPath}
 }
 
-func buildEnvContent(jwtSecret, adminToken string, slackCfg, feishuCfg messagingPlatformConfig) string {
+func buildEnvContent(jwtSecret, adminToken string, slackCfg, feishuCfg messagingPlatformConfig, existingEnvPath string) string {
 	var b strings.Builder
 	b.WriteString("# HotPlex Worker Gateway - Environment Configuration\n# Generated by onboard wizard\n\n")
 	b.WriteString("# ── Security ──\n")
 	b.WriteString("HOTPLEX_JWT_SECRET=" + jwtSecret + "\n")
 	b.WriteString("HOTPLEX_ADMIN_TOKEN_1=" + adminToken + "\n")
 
-	writePlatformEnv := func(name, enabledEnv string, cfg messagingPlatformConfig) {
+	writePlatformEnv := func(name, enabledEnv string, cfg messagingPlatformConfig, knownCredKeys []string) {
 		if !cfg.enabled {
 			return
 		}
 		fmt.Fprintf(&b, "\n# ── %s ──\n%s=true\n", name, enabledEnv)
+		if cfg.kept {
+			for k, v := range readExistingEnvCredentials(existingEnvPath, knownCredKeys) {
+				fmt.Fprintf(&b, "%s=%s\n", k, v)
+			}
+			return
+		}
 		for _, key := range sortedKeys(cfg.credentials) {
 			fmt.Fprintf(&b, "%s=%s\n", key, cfg.credentials[key])
 		}
 	}
-	writePlatformEnv("Slack", "HOTPLEX_MESSAGING_SLACK_ENABLED", slackCfg)
-	writePlatformEnv("Feishu", "HOTPLEX_MESSAGING_FEISHU_ENABLED", feishuCfg)
+	writePlatformEnv("Slack", "HOTPLEX_MESSAGING_SLACK_ENABLED", slackCfg, []string{
+		"HOTPLEX_MESSAGING_SLACK_BOT_TOKEN",
+		"HOTPLEX_MESSAGING_SLACK_APP_TOKEN",
+	})
+	writePlatformEnv("Feishu", "HOTPLEX_MESSAGING_FEISHU_ENABLED", feishuCfg, []string{
+		"HOTPLEX_MESSAGING_FEISHU_APP_ID",
+		"HOTPLEX_MESSAGING_FEISHU_APP_SECRET",
+	})
 
 	b.WriteByte('\n')
 	return b.String()
+}
+
+func readExistingEnvCredentials(envPath string, keys []string) map[string]string {
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return nil
+	}
+	creds := make(map[string]string, len(keys))
+	content := string(data)
+	for _, key := range keys {
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, key+"=") && len(line) > len(key)+1 {
+				creds[key] = line[len(key)+1:]
+				break
+			}
+		}
+	}
+	return creds
 }
 
 func sortedKeys(m map[string]string) []string {
@@ -460,6 +530,8 @@ func sortedKeys(m map[string]string) []string {
 // ─── Step 7: Verify ─────────────────────────────────────────────────────────
 
 func stepVerify(configPath string) StepResult {
+	// Load .env so env-secret-based checkers can find values
+	loadEnvFile(filepath.Dir(configPath))
 	checkers.SetConfigPath(configPath)
 
 	var allCheckers []cli.Checker
@@ -485,10 +557,40 @@ func stepVerify(configPath string) StepResult {
 	return StepResult{Name: "verify", Status: "pass", Detail: fmt.Sprintf("%d checks passed", passCount)}
 }
 
+func loadEnvFile(dir string) {
+	envPath := filepath.Join(dir, ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return
+	}
+
+	var loaded int
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.Index(line, "=")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		val = strings.Trim(val, `"'`)
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, val)
+			loaded++
+		}
+	}
+	if loaded > 0 {
+		fmt.Fprintf(os.Stderr, "  env loaded %d vars from %s\n", loaded, envPath)
+	}
+}
+
 // ─── Prompt helpers ─────────────────────────────────────────────────────────
 
 func promptKeepOrReconfigure() bool {
-	fmt.Fprintf(os.Stderr, "? Keep existing configuration? \033[1m[Y/n]\033[0m: ")
+	fmt.Fprintf(os.Stderr, "? Keep existing configuration? %s: ", output.Bold("[Y/n]"))
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line != "n" && line != "no"

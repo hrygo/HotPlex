@@ -6,6 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	_ "github.com/hrygo/hotplex/internal/worker/claudecode"
+	_ "github.com/hrygo/hotplex/internal/worker/opencodeserver"
+	_ "github.com/hrygo/hotplex/internal/worker/pi"
 	"github.com/hrygo/hotplex/pkg/aep"
 )
 

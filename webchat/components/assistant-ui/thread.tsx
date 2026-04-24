@@ -43,7 +43,7 @@ export function Thread() {
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 14l-7 7-7-7" />
             </svg>
-            <span>New Messages</span>
+            <span>Jump to Latest</span>
           </button>
         </ThreadPrimitive.ScrollToBottom>
       </ThreadPrimitive.Viewport>
@@ -85,9 +85,19 @@ const ICON_PATHS: Record<SuggestionIcon, string> = {
 function WelcomeScreen() {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center animate-fade-in-up">
-      <div className="relative mb-8">
-        <div className="absolute inset-0 bg-[var(--accent-gold)] opacity-20 blur-3xl rounded-full scale-150" />
-        <BrandIcon size={72} className="relative z-10" />
+      <div className="relative mb-8 flex items-center justify-center">
+        <div className="absolute inset-0 bg-[var(--accent-gold)] opacity-10 blur-3xl rounded-full scale-[2]" />
+        
+        {/* Orbital rings */}
+        <div className="absolute w-32 h-32 border border-[var(--border-gold)] opacity-20 rounded-full animate-[spin_10s_linear_infinite]" />
+        <div className="absolute w-40 h-40 border border-[var(--accent-emerald)] opacity-10 rounded-full animate-[spin_15s_linear_infinite_reverse]" />
+        
+        {/* Orbiting particles */}
+        <div className="absolute w-full h-full animate-[orbit_4s_linear_infinite]">
+           <div className="w-2 h-2 rounded-full bg-[var(--accent-gold)] blur-[1px]" />
+        </div>
+        
+        <BrandIcon size={84} className="relative z-10 animate-float" />
       </div>
 
       <h1 className="text-4xl font-display font-bold tracking-tight mb-3 text-gradient-gold">
@@ -95,7 +105,7 @@ function WelcomeScreen() {
       </h1>
       <p className="text-lg text-[var(--text-secondary)] mb-12 max-w-lg mx-auto">
         Ask me anything about code, debugging, or software architecture. 
-        I'm powered by HotPlex Worker.
+        Empowered by HotPlex Intelligence.
       </p>
 
       <div className="grid grid-cols-2 gap-3 w-full max-w-xl mx-auto">
@@ -136,8 +146,9 @@ function AssistantMessage() {
       <div className="msg-assistant-body">
         <MessagePrimitive.Parts>
           {({ part }) => {
+            const m = message as any;
             const p = part as any;
-            const isLatest = message.status === "in-progress";
+            const isLatest = m.status.type === "running";
             
             if (p.type === "reasoning") {
               return <ReasoningBlock text={p.text} />;
@@ -150,7 +161,7 @@ function AssistantMessage() {
                 key={p.toolCallId} 
                 toolName={p.toolName} 
                 args={p.args} 
-                active={isLatest && !message.parts.some((other: any) => other.toolCallId === p.toolCallId && other.type === 'tool-result')} 
+                active={isLatest && !m.content.some((other: any) => other.toolCallId === p.toolCallId && other.type === 'tool-result')} 
               />;
             }
             if (p.type === "tool-result") {
@@ -179,9 +190,6 @@ function UserMessage() {
       </div>
       
       <ActionBarPrimitive.Root className="flex items-center gap-3 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <ActionBarPrimitive.Edit className="text-[10px] uppercase tracking-wider font-bold text-[var(--text-muted)] hover:text-[var(--accent-gold)] transition-colors">
-          Edit
-        </ActionBarPrimitive.Edit>
         <ActionBarPrimitive.Copy className="text-[10px] uppercase tracking-wider font-bold text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
           Copy
         </ActionBarPrimitive.Copy>
@@ -251,26 +259,39 @@ function ToolResultBlock({ toolName, result }: { toolName: string; result: any }
   const resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
 
   return (
-    <div className="tool-call-block border-[var(--border-bright)] bg-[var(--bg-elevated)]">
-      <div 
-        className="tool-header cursor-pointer hover:bg-[var(--bg-hover)] transition-colors" 
-        onClick={() => setExpanded(!expanded)}
-      >
-        <svg className="w-3.5 h-3.5 text-[var(--accent-emerald)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-        </svg>
-        <span className="text-[var(--accent-emerald)]">RESULT: {toolName.toUpperCase()}</span>
-        <svg
-          className={`ml-auto w-3.5 h-3.5 transition-transform ${expanded ? "rotate-90" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
+    <div className="tool-call-block border-[var(--border-bright)] bg-[var(--bg-elevated)] overflow-hidden">
+      <div className="flex items-center">
+        <div 
+          className="flex-1 tool-header cursor-pointer hover:bg-[var(--bg-hover)] transition-colors" 
+          onClick={() => setExpanded(!expanded)}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
+          <svg className="w-3.5 h-3.5 text-[var(--accent-emerald)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+          </svg>
+          <span className="text-[var(--accent-emerald)]">RESULT: {toolName.toUpperCase()}</span>
+          <svg
+            className={`ml-auto w-3.5 h-3.5 transition-transform ${expanded ? "rotate-90" : ""}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+        
+        <button 
+          onClick={() => navigator.clipboard.writeText(resultStr)}
+          className="p-2 text-[var(--text-faint)] hover:text-[var(--text-primary)] transition-colors border-l border-[var(--border-subtle)]"
+          title="Copy result"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        </button>
       </div>
+
       {expanded && (
-        <div className="p-3 pt-0 font-mono text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap animate-fade-in">
+        <div className="p-3 pt-0 font-mono text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap animate-fade-in border-t border-[var(--border-subtle)] mt-1">
           {resultStr}
         </div>
       )}

@@ -1,14 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { formatRelativeTime, stateLabel, type SessionInfo } from '@/lib/api/sessions';
-import { useSessions } from '@/lib/hooks/useSessions';
+import { formatRelativeTime, type SessionInfo } from '@/lib/api/sessions';
 import { BrandIcon, WORKER_DISPLAY } from '@/components/icons';
-
-interface SessionPanelProps {
-  onSessionSelect: (sessionId: string) => void;
-  initialSessionId?: string | null;
-}
 
 function SessionRow({
   session,
@@ -33,10 +27,13 @@ function SessionRow({
       onKeyDown={(e) => e.key === 'Enter' && onSelect()}
       className={`relative group px-3 py-3 rounded-xl transition-all duration-300 cursor-pointer border ${
         isActive 
-          ? 'bg-white border-[var(--border-gold)] shadow-[0_4px_12px_rgba(217,119,6,0.08)]' 
+          ? 'bg-white border-[var(--accent-gold)] shadow-[0_12px_24px_rgba(217,119,6,0.12)] ring-1 ring-[var(--accent-gold)] ring-opacity-10' 
           : 'bg-transparent border-transparent hover:bg-[var(--bg-elevated)]'
       }`}
     >
+      {isActive && (
+        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-[var(--accent-gold)] rounded-full shadow-[0_0_8px_var(--accent-gold)]" />
+      )}
       <div className="flex items-center gap-3">
         {/* Status indicator */}
         <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
@@ -60,16 +57,35 @@ function SessionRow({
           </div>
         </div>
 
-        {/* Delete button */}
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="opacity-0 group-hover:opacity-100 p-1.5 text-[var(--text-faint)] hover:text-[var(--accent-coral)] hover:bg-white rounded-lg transition-all"
-          title="Delete session"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-        </button>
+        {/* Delete button with confirmation */}
+        <div className="flex items-center gap-1">
+          {confirmDelete ? (
+            <div className="flex items-center gap-1 animate-fade-in">
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                className="px-2 py-1 text-[9px] font-bold bg-[var(--accent-coral)] text-white rounded-md hover:bg-red-600 transition-colors"
+              >
+                Delete
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+                className="px-2 py-1 text-[9px] font-bold bg-[var(--bg-elevated)] text-[var(--text-secondary)] rounded-md hover:bg-[var(--bg-hover)] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+              className="opacity-0 group-hover:opacity-100 p-1.5 text-[var(--text-faint)] hover:text-[var(--accent-coral)] hover:bg-white rounded-lg transition-all"
+              title="Delete session"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -95,22 +111,28 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-export function SessionPanel({ onSessionSelect, initialSessionId }: SessionPanelProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const {
-    sessions,
-    activeSession,
-    isLoading,
-    error,
-    selectSession,
-    createNewSession,
-    removeSession,
-  } = useSessions({
-    onSelect: onSessionSelect,
-    initialSessionId,
-  });
+interface SessionPanelProps {
+  sessions: SessionInfo[];
+  activeSession: SessionInfo | null;
+  isLoading: boolean;
+  onSelect: (session: SessionInfo) => void;
+  onCreate: (workerType?: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}
 
-  const filteredSessions = sessions.filter(s => s.id.toLowerCase().includes(searchQuery.toLowerCase()));
+export function SessionPanel({ 
+  sessions, 
+  activeSession, 
+  isLoading, 
+  onSelect, 
+  onCreate, 
+  onDelete 
+}: SessionPanelProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredSessions = sessions
+    .filter(s => s.id.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
   return (
     <div className="pc-sidebar flex flex-col h-full bg-[var(--bg-base)] border-r border-[var(--border-subtle)] w-[280px]">
@@ -128,13 +150,18 @@ export function SessionPanel({ onSessionSelect, initialSessionId }: SessionPanel
 
         {/* New Session Button */}
         <button
-          onClick={() => createNewSession()}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--text-primary)] text-white hover:bg-[#000] active:scale-95 transition-all shadow-sm font-bold text-xs"
+          onClick={() => onCreate()}
+          disabled={isLoading}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--text-primary)] text-white hover:bg-[#000] active:scale-95 transition-all shadow-sm font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New Chat
+          {isLoading ? (
+            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          )}
+          {isLoading ? 'Creating...' : 'New Chat'}
         </button>
       </div>
 
@@ -166,8 +193,8 @@ export function SessionPanel({ onSessionSelect, initialSessionId }: SessionPanel
               key={session.id}
               session={session}
               isActive={activeSession?.id === session.id}
-              onSelect={() => selectSession(session)}
-              onDelete={() => removeSession(session.id)}
+              onSelect={() => onSelect(session)}
+              onDelete={() => onDelete(session.id)}
             />
           ))}
           

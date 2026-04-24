@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -20,7 +21,9 @@ type ConfigTemplateOptions struct {
 	FeishuRequireMention *bool
 	FeishuAllowFrom      []string
 
-	WorkerType string
+	WorkerType         string
+	KeptPlatforms      map[string]bool
+	ExistingConfigPath string
 }
 
 func DefaultConfigYAML() string {
@@ -154,23 +157,29 @@ log:
 	b.WriteString("# ─────────────────────────────────────────────────────────────────────────────\n\n")
 	b.WriteString("messaging:\n")
 
-	writePlatformBlock(&b, "slack", platformBlockOpts{
-		Enabled:        opts.SlackEnabled,
-		DMPolicy:       defaultStr(opts.SlackDMPolicy, "allowlist"),
-		GroupPolicy:    defaultStr(opts.SlackGroupPolicy, "allowlist"),
-		RequireMention: defaultBool(opts.SlackRequireMention, true),
-		AllowFrom:      opts.SlackAllowFrom,
-		Extra:          "    socket_mode: true\n    worker_type: \"claude_code\"\n    stt_provider: \"local\"\n    stt_local_cmd: \"python3 scripts/stt_once.py {file}\"\n    stt_local_mode: \"persistent\"\n    stt_local_idle_ttl: 1h\n",
-	})
+	// Slack — keep existing block or generate fresh
+	if !writeKeptPlatform(&b, opts, "slack") {
+		writePlatformBlock(&b, "slack", platformBlockOpts{
+			Enabled:        opts.SlackEnabled,
+			DMPolicy:       defaultStr(opts.SlackDMPolicy, "allowlist"),
+			GroupPolicy:    defaultStr(opts.SlackGroupPolicy, "allowlist"),
+			RequireMention: defaultBool(opts.SlackRequireMention, true),
+			AllowFrom:      opts.SlackAllowFrom,
+			Extra:          "    socket_mode: true\n    worker_type: \"claude_code\"\n    stt_provider: \"local\"\n    stt_local_cmd: \"python3 scripts/stt_once.py {file}\"\n    stt_local_mode: \"persistent\"\n    stt_local_idle_ttl: 1h\n",
+		})
+	}
 
-	writePlatformBlock(&b, "feishu", platformBlockOpts{
-		Enabled:        opts.FeishuEnabled,
-		DMPolicy:       defaultStr(opts.FeishuDMPolicy, "allowlist"),
-		GroupPolicy:    defaultStr(opts.FeishuGroupPolicy, "allowlist"),
-		RequireMention: defaultBool(opts.FeishuRequireMention, true),
-		AllowFrom:      opts.FeishuAllowFrom,
-		Extra:          "    worker_type: \"claude_code\"\n    stt_provider: \"feishu+local\"\n    stt_local_mode: \"ephemeral\"\n    stt_local_idle_ttl: 1h\n",
-	})
+	// Feishu — keep existing block or generate fresh
+	if !writeKeptPlatform(&b, opts, "feishu") {
+		writePlatformBlock(&b, "feishu", platformBlockOpts{
+			Enabled:        opts.FeishuEnabled,
+			DMPolicy:       defaultStr(opts.FeishuDMPolicy, "allowlist"),
+			GroupPolicy:    defaultStr(opts.FeishuGroupPolicy, "allowlist"),
+			RequireMention: defaultBool(opts.FeishuRequireMention, true),
+			AllowFrom:      opts.FeishuAllowFrom,
+			Extra:          "    worker_type: \"claude_code\"\n    stt_provider: \"feishu+local\"\n    stt_local_mode: \"ephemeral\"\n    stt_local_idle_ttl: 1h\n",
+		})
+	}
 
 	b.WriteByte('\n')
 	return b.String()
@@ -190,6 +199,66 @@ func writePlatformBlock(b *strings.Builder, name string, o platformBlockOpts) {
 	b.WriteString(o.Extra)
 	fmt.Fprintf(b, "    dm_policy: %q\n    group_policy: %q\n    require_mention: %t\n", o.DMPolicy, o.GroupPolicy, o.RequireMention)
 	writeStringList(b, "allow_from", o.AllowFrom)
+}
+
+func writeKeptPlatform(b *strings.Builder, opts ConfigTemplateOptions, platform string) bool {
+	if !opts.KeptPlatforms[platform] || opts.ExistingConfigPath == "" {
+		return false
+	}
+	block := extractPlatformBlock(opts.ExistingConfigPath, platform)
+	if block == "" {
+		return false
+	}
+	b.WriteString(block)
+	return true
+}
+
+// extractPlatformBlock reads the existing config file and extracts the YAML block
+// for the given platform (e.g., "slack"), preserving custom settings.
+func extractPlatformBlock(configPath, platform string) string {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(data), "\n")
+	marker := "  " + platform + ":"
+
+	start := -1
+	for i, line := range lines {
+		if line == marker || strings.HasPrefix(line, marker+" ") {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return ""
+	}
+
+	// Find block end: next sibling at 2-space indent under "messaging:",
+	// or a top-level key (col 0), or EOF.
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		line := lines[i]
+		if line == "" {
+			continue
+		}
+		// Column 0 = top-level key (end of messaging section)
+		if line[0] != ' ' {
+			end = i
+			break
+		}
+		// Exactly 2-space indent = sibling under messaging: (next platform)
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && line[0] != '#' {
+			trimmed := strings.TrimSpace(line)
+			if idx := strings.Index(trimmed, ":"); idx > 0 && !strings.Contains(trimmed[:idx], " ") {
+				end = i
+				break
+			}
+		}
+	}
+
+	return strings.Join(lines[start:end], "\n") + "\n"
 }
 
 func writeStringList(b *strings.Builder, key string, items []string) {

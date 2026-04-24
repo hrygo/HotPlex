@@ -91,6 +91,9 @@ type Hub struct {
 	// Use it to capture events into an external ring buffer (e.g. /admin/logs).
 	// If nil, no events are captured.
 	LogHandler func(level, msg, sessionID string)
+
+	// InitThrottle prevents handshake loops.
+	InitThrottle *handshakeThrottle
 }
 
 // EnvelopeWithConn pairs a message with its originating connection.
@@ -122,6 +125,7 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 		broadcast:      make(chan *EnvelopeWithConn, broadcastQueueSize(cfg)),
 		ctx:            ctx,
 		cancel:         cancel,
+		InitThrottle:   newHandshakeThrottle(),
 	}
 
 	h.upgrader = websocket.Upgrader{
@@ -374,13 +378,17 @@ func (h *Hub) HandleHTTP(
 // The broadcast channel is never closed — sendBroadcast uses ctx.Done() to
 // detect shutdown, and this function drains remaining messages non-blockingly.
 func (h *Hub) Run() {
-	h.log.Info("gateway: hub running")
+	// Start periodic cleanup for throttler
+	throttleCleanup := time.NewTicker(10 * time.Minute)
+	defer throttleCleanup.Stop()
 
 	for {
 		select {
 		case <-h.ctx.Done():
 			h.drainBroadcast()
 			return
+		case <-throttleCleanup.C:
+			h.InitThrottle.Cleanup()
 		case msg := <-h.broadcast:
 			if msg == nil || msg.Env == nil {
 				continue

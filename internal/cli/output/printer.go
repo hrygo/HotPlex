@@ -12,10 +12,11 @@ import (
 const (
 	ansiReset  = "\033[0m"
 	ansiBold   = "\033[1m"
+	ansiDim    = "\033[2m"
 	ansiGreen  = "\033[32m"
 	ansiYellow = "\033[33m"
 	ansiRed    = "\033[31m"
-	ansiDim    = "\033[2m"
+	ansiCyan   = "\033[36m"
 )
 
 func PrintDiagnostic(out io.Writer, d cli.Diagnostic, verbose bool) {

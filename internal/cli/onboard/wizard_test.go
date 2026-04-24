@@ -111,7 +111,7 @@ func TestBuildEnvContent(t *testing.T) {
 	t.Parallel()
 	t.Run("minimal", func(t *testing.T) {
 		t.Parallel()
-		got := buildEnvContent("jwt", "admin", messagingPlatformConfig{}, messagingPlatformConfig{})
+		got := buildEnvContent("jwt", "admin", messagingPlatformConfig{}, messagingPlatformConfig{}, "")
 		require.Contains(t, got, "HOTPLEX_JWT_SECRET=jwt")
 		require.Contains(t, got, "HOTPLEX_ADMIN_TOKEN_1=admin")
 		require.NotContains(t, got, "HOTPLEX_WORKER_TYPE")
@@ -127,7 +127,7 @@ func TestBuildEnvContent(t *testing.T) {
 				"HOTPLEX_MESSAGING_SLACK_APP_TOKEN": "xapp-test",
 			},
 		}
-		got := buildEnvContent("jwt", "admin", slack, messagingPlatformConfig{})
+		got := buildEnvContent("jwt", "admin", slack, messagingPlatformConfig{}, "")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_ENABLED=true")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=xoxb-test")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_APP_TOKEN=xapp-test")
@@ -144,7 +144,7 @@ func TestBuildEnvContent(t *testing.T) {
 				"HOTPLEX_MESSAGING_FEISHU_APP_SECRET": "secret456",
 			},
 		}
-		got := buildEnvContent("jwt", "admin", messagingPlatformConfig{}, feishu)
+		got := buildEnvContent("jwt", "admin", messagingPlatformConfig{}, feishu, "")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_ENABLED=true")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_APP_ID=cli_123")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_APP_SECRET=secret456")
@@ -165,7 +165,7 @@ func TestBuildEnvContent(t *testing.T) {
 				"HOTPLEX_MESSAGING_FEISHU_APP_ID": "cli_789",
 			},
 		}
-		got := buildEnvContent("jwt", "admin", slack, feishu)
+		got := buildEnvContent("jwt", "admin", slack, feishu, "")
 		require.Contains(t, got, "# ── Slack ──")
 		require.Contains(t, got, "# ── Feishu ──")
 	})
@@ -176,7 +176,7 @@ func TestBuildEnvContent(t *testing.T) {
 			enabled:     true,
 			credentials: map[string]string{},
 		}
-		got := buildEnvContent("jwt", "admin", slack, messagingPlatformConfig{})
+		got := buildEnvContent("jwt", "admin", slack, messagingPlatformConfig{}, "")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_ENABLED=true")
 		require.NotContains(t, got, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=")
 	})
