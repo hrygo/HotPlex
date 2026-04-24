@@ -71,27 +71,29 @@ func main() {
 		for evt := range c.Events() {
 			switch evt.Type {
 			case client.EventMessageDelta:
-				fmt.Print(demo.FieldStr(evt.Data, "content"))
+				if d, ok := evt.AsMessageDeltaData(); ok {
+					fmt.Print(d.Content)
+				}
 			case client.EventDone:
 				fmt.Println("\nDone.")
 				return
 			case client.EventError:
-				errData, ok := evt.AsErrorData()
+				d, ok := evt.AsErrorData()
 				if !ok {
 					fmt.Fprintf(os.Stderr, "\nGeneric Error: %v\n", evt.Data)
 					return
 				}
-				switch errData.Code {
+				switch d.Code {
 				case client.ErrCodeSessionBusy:
-					fmt.Fprintf(os.Stderr, "\nRecoverable: session busy — %s\n", errData.Message)
+					fmt.Fprintf(os.Stderr, "\nRecoverable: session busy — %s\n", d.Message)
 				case client.ErrCodeUnauthorized:
-					fmt.Fprintf(os.Stderr, "\nFatal: unauthorized — %s\n", errData.Message)
+					fmt.Fprintf(os.Stderr, "\nFatal: unauthorized — %s\n", d.Message)
 					return
 				case client.ErrCodeSessionNotFound:
-					fmt.Fprintf(os.Stderr, "\nFatal: session not found — %s\n", errData.Message)
+					fmt.Fprintf(os.Stderr, "\nFatal: session not found — %s\n", d.Message)
 					return
 				default:
-					fmt.Fprintf(os.Stderr, "\nError [%s]: %s\n", errData.Code, errData.Message)
+					fmt.Fprintf(os.Stderr, "\nError [%s]: %s\n", d.Code, d.Message)
 					return
 				}
 			}

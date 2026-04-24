@@ -63,12 +63,15 @@ func main() {
 			switch evt.Type {
 			case client.EventMessageStart:
 				msgCount++
-				fmt.Printf("[message #%d start — role: %s]\n", msgCount, demo.FieldStr(evt.Data, "role"))
+				if d, ok := evt.AsMessageStartData(); ok {
+					fmt.Printf("[message #%d start — role: %s]\n", msgCount, d.Role)
+				}
 			case client.EventMessageDelta:
 				deltaN++
-				content := demo.FieldStr(evt.Data, "content")
-				fmt.Print(content)
-				buf.WriteString(content)
+				if d, ok := evt.AsMessageDeltaData(); ok {
+					fmt.Print(d.Content)
+					buf.WriteString(d.Content)
+				}
 			case client.EventMessageEnd:
 				fmt.Printf("\n[message #%d end — %d deltas received]\n", msgCount, deltaN)
 				deltaN = 0
@@ -76,7 +79,9 @@ func main() {
 				fmt.Printf("\n--- Summary ---\nFull response (%d chars):\n%s\n", buf.Len(), buf.String())
 				return
 			case client.EventError:
-				fmt.Fprintf(os.Stderr, "Error: %s\n", demo.FieldStr(evt.Data, "message"))
+				if d, ok := evt.AsErrorData(); ok {
+					fmt.Fprintf(os.Stderr, "Error: %s\n", d.Message)
+				}
 				return
 			}
 		}

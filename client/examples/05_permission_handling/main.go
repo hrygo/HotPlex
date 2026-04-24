@@ -66,7 +66,9 @@ func main() {
 		for evt := range c.Events() {
 			switch evt.Type {
 			case client.EventMessageDelta:
-				fmt.Print(demo.FieldStr(evt.Data, "content"))
+				if d, ok := evt.AsMessageDeltaData(); ok {
+					fmt.Print(d.Content)
+				}
 			case client.EventToolCall:
 				if d, ok := evt.AsToolCallData(); ok {
 					fmt.Printf("\n  [tool call: %s]\n", d.Name)
@@ -89,8 +91,8 @@ func main() {
 				}
 				return
 			case client.EventError:
-				if errData, ok := evt.AsErrorData(); ok {
-					fmt.Fprintf(os.Stderr, "\nError [%s]: %s\n", errData.Code, errData.Message)
+				if d, ok := evt.AsErrorData(); ok {
+					fmt.Fprintf(os.Stderr, "\nError [%s]: %s\n", d.Code, d.Message)
 				}
 				return
 			}

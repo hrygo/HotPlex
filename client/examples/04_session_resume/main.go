@@ -98,12 +98,16 @@ func runAndPrint(ctx context.Context, c *client.Client, input string) {
 		for evt := range c.Events() {
 			switch evt.Type {
 			case client.EventMessageDelta:
-				fmt.Print(demo.FieldStr(evt.Data, "content"))
+				if d, ok := evt.AsMessageDeltaData(); ok {
+					fmt.Print(d.Content)
+				}
 			case client.EventDone:
 				fmt.Println("\n[done]")
 				return
 			case client.EventError:
-				fmt.Fprintf(os.Stderr, "\nError: %s\n", demo.FieldStr(evt.Data, "message"))
+				if d, ok := evt.AsErrorData(); ok {
+					fmt.Fprintf(os.Stderr, "\nError: %s\n", d.Message)
+				}
 				return
 			}
 		}

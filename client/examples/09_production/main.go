@@ -152,21 +152,27 @@ func handleEvents(c *client.Client, st *sessionStats) {
 	for evt := range c.Events() {
 		switch evt.Type {
 		case client.EventMessageStart:
-			fmt.Printf("\n[%s] ", demo.FieldStr(evt.Data, "role"))
+			if d, ok := evt.AsMessageStartData(); ok {
+				fmt.Printf("\n[%s] ", d.Role)
+			}
 		case client.EventMessageDelta:
-			fmt.Print(demo.FieldStr(evt.Data, "content"))
+			if d, ok := evt.AsMessageDeltaData(); ok {
+				fmt.Print(d.Content)
+			}
 		case client.EventMessageEnd:
 			fmt.Println()
 		case client.EventToolCall:
 			st.toolCalls++
-			fmt.Printf("\n  [tool: %s]\n", demo.FieldStr(evt.Data, "name"))
+			if d, ok := evt.AsToolCallData(); ok {
+				fmt.Printf("\n  [tool: %s]\n", d.Name)
+			}
 		case client.EventToolResult:
-			if output := demo.FieldStr(evt.Data, "output"); output != "" {
-				fmt.Printf("  [result: %s]\n", demo.Truncate(output, 120))
+			if d, ok := evt.AsToolResultData(); ok && d.Output != nil {
+				fmt.Printf("  [result: %s]\n", demo.Truncate(fmt.Sprintf("%v", d.Output), 120))
 			}
 		case client.EventReasoning:
-			if content := demo.FieldStr(evt.Data, "content"); content != "" {
-				fmt.Printf("\n  [reasoning: %s]\n", demo.Truncate(content, 120))
+			if d, ok := evt.AsReasoningData(); ok && d.Content != "" {
+				fmt.Printf("\n  [reasoning: %s]\n", demo.Truncate(d.Content, 120))
 			}
 		case client.EventPermissionRequest:
 			if d, ok := evt.AsPermissionRequestData(); ok {

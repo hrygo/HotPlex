@@ -76,13 +76,17 @@ func testWorker(ctx context.Context, gatewayURL, apiKey, workerType, task string
 		for evt := range c.Events() {
 			switch evt.Type {
 			case client.EventMessageDelta:
-				r.output += demo.FieldStr(evt.Data, "content")
+				if d, ok := evt.AsMessageDeltaData(); ok {
+					r.output += d.Content
+				}
 			case client.EventDone:
 				r.success = true
 				done <- r
 				return
 			case client.EventError:
-				r.err = fmt.Sprintf("%s: %s", demo.FieldStr(evt.Data, "code"), demo.FieldStr(evt.Data, "message"))
+				if d, ok := evt.AsErrorData(); ok {
+					r.err = fmt.Sprintf("%s: %s", d.Code, d.Message)
+				}
 				done <- r
 				return
 			}

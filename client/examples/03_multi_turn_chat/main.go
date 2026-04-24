@@ -61,11 +61,13 @@ func main() {
 		for evt := range c.Events() {
 			switch evt.Type {
 			case client.EventMessageDelta:
-				fmt.Print(demo.FieldStr(evt.Data, "content"))
+				if d, ok := evt.AsMessageDeltaData(); ok {
+					fmt.Print(d.Content)
+				}
 			case client.EventMessageEnd:
 				fmt.Println()
 			case client.EventState:
-				if demo.FieldStr(evt.Data, "state") == string(client.StateIdle) {
+				if d, ok := evt.AsStateData(); ok && d.State == client.StateIdle {
 					select {
 					case ready <- struct{}{}:
 					default:
@@ -78,7 +80,9 @@ func main() {
 				cancel()
 				return
 			case client.EventError:
-				fmt.Fprintf(os.Stderr, "\nError: %s\n", demo.FieldStr(evt.Data, "message"))
+				if d, ok := evt.AsErrorData(); ok {
+					fmt.Fprintf(os.Stderr, "\nError: %s\n", d.Message)
+				}
 				cancel()
 				return
 			}
