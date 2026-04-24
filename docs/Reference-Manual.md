@@ -183,8 +183,8 @@ session:
 pool:
   min_size: 0
   max_size: 100
-  max_idle_per_user: 3
-  max_memory_per_user: 2147483648   # 2 GB
+  max_idle_per_user: 5
+  max_memory_per_user: 3221225472   # 3 GB
 
 agent_config:
   enabled: true                              # Enable agent personality/context injection
@@ -270,7 +270,7 @@ All non-sensitive fields have production defaults. Binary runs with zero config.
 | `db.path` | `hotplex.db` | SQLite path |
 | `db.wal_mode` | `true` | |
 | `worker.max_lifetime` | `24h` | |
-| `worker.idle_timeout` | `30m` | |
+| `worker.idle_timeout` | `60m` | |
 | `worker.execution_timeout` | `10m` | |
 | `security.api_key_header` | `X-API-Key` | |
 | `security.tls_enabled` | `false` | |
@@ -442,7 +442,7 @@ ws.send(JSON.stringify({
 ws.send(JSON.stringify({
   type: "input",
   session_id: "sess_abc123",
-  text: "Write a hello world in Go"
+  content: "Write a hello world in Go"
 }));
 ```
 
@@ -577,7 +577,7 @@ curl -H "Authorization: Bearer admin-token-1" \
 }
 ```
 
-#### `GET /admin/pool`
+#### `GET /admin/pool` (未实现)
 
 Pool statistics. Requires `stats:read`.
 
@@ -648,7 +648,7 @@ curl -X POST \
 
 Returns `204 No Content`.
 
-#### `GET /admin/config/history`
+#### `GET /admin/config/history` (未实现)
 
 Config change audit log. Requires `config:read`.
 

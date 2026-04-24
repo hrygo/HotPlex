@@ -6,8 +6,9 @@ Session lifecycle manager with SQLite persistence, deterministic session IDs (UU
 ## STRUCTURE
 | File | Purpose |
 |------|---------|
-| `manager.go` | Manager, managedSession, SessionInfo, state transitions (777 lines) |
-| `store.go` | Store/MessageStore interfaces, SQLiteStore, SQLiteMessageStore (525 lines) |
+| `manager.go` | Manager, managedSession, SessionInfo, state transitions (825 lines) |
+| `store.go` | Store interface, SQLiteStore (371 lines) |
+| `message_store.go` | MessageStore interface, SQLiteMessageStore (301 lines) |
 | `key.go` | DeriveSessionKey (UUIDv5), PlatformContext, DerivePlatformSessionKey (100 lines) |
 | `pool.go` | PoolManager: global + per-user quota + per-user memory tracking (154 lines) |
 | `pgstore.go` | Postgres stub (ErrNotImplemented) |
@@ -17,14 +18,14 @@ Session lifecycle manager with SQLite persistence, deterministic session IDs (UU
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Session CRUD + state transitions | `manager.go:34` Manager, `manager.go:52` managedSession | Lock ordering: m.mu → ms.mu |
-| SessionInfo struct definition | `manager.go:61` | ID, UserID, OwnerID, BotID, WorkerType, State, timestamps, Context, AllowedTools |
+| Session CRUD + state transitions | `manager.go:34` Manager, `manager.go:54` managedSession | Lock ordering: m.mu → ms.mu |
+| SessionInfo struct definition | `manager.go:64` | ID, UserID, OwnerID, BotID, WorkerType, State, timestamps, Context, AllowedTools, WorkerSessionID, Platform, PlatformKey |
 | Atomic state + input recording | `manager.go:309` TransitionWithInput | Check → transition → input all under ms.mu.Lock() |
 | SESSION_BUSY hard reject | `manager.go:285` | RUNNING state rejects new input, no queuing |
 | Deterministic session ID | `key.go:18` DeriveSessionKey | UUIDv5 from (ownerID, workerType, clientSessionID, workDir) |
 | Platform session key | `key.go` PlatformContext | Platform-specific fields: Slack channel/thread, Feishu chat |
 | SQLite persistence | `store.go:31` SQLiteStore | WAL mode, busy_timeout 5000ms |
-| Message event log | `store.go:327` SQLiteMessageStore | Single-writer goroutine, batch flush 50 items / 100ms |
+| Message event log | `message_store.go:40` MessageStore | Single-writer goroutine, batch flush 50 items / 100ms |
 | Pool quota + memory | `pool.go` PoolManager | MaxPoolSize global, MaxIdlePerUser per-user, 512MB/worker memory estimate |
 | Postgres stub | `pgstore.go` | ErrNotImplemented — not production-ready |
 | GC goroutine lifecycle | `manager.go:34` gcStop/gcDone channels | Ticker-based expired scan |

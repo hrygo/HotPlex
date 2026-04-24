@@ -11,14 +11,14 @@
 | [Worker-Gateway-Framework-Design.md](./Worker-Gateway-Framework-Design.md) | HotPlex Worker Gateway 应用框架设计 — 完整基础设施层 | ✅ Implemented | 2026-03-30 | 100% |
 | [Gateway-Async-Init-Spec.md](./Gateway-Async-Init-Spec.md) | Gateway 异步初始化 — Session Start 异步化设计 | 📝 Draft | 2026-04-04 | 0% |
 | [Worker-ClaudeCode-Spec.md](./Worker-ClaudeCode-Spec.md) | Claude Code Worker 集成规格 | ✅ Implemented | 2026-04-01 | 100% |
-| [Worker-OpenCode-Server-Spec.md](./Worker-OpenCode-Server-Spec.md) | OpenCode Server Worker 集成规格 — WebSocket 传输、Session 管理、Resume 支持 | 🔨 Needs Implementation | 2026-04-04 | 0% |
+| [Worker-OpenCode-Server-Spec.md](./Worker-OpenCode-Server-Spec.md) | OpenCode Server Worker 集成规格 — WebSocket 传输、Session 管理、Resume 支持 | ✅ Implemented | 2026-04-04 | 100% |
 | [Worker-Common-Protocol.md](./Worker-Common-Protocol.md) | Worker 公共协议规范（NDJSON、背压、终止等） | ✅ Implemented | 2026-04-04 | 100% |
 | [Persistent-Session-Mechanism.md](./Persistent-Session-Mechanism.md) | 持久会话机制 — UUIDv5 映射、reset/gc、session 状态机 | ✅ Implemented | 2026-04-07 | 100% |
 | [Worker-ACPX-Spec.md](./Worker-ACPX-Spec.md) | ACPX Worker 集成规格 — 支持 16+ AI 编程 Agent | 📝 Draft | 2026-04-04 | 0% |
 | [Feishu-Adapter-Improvement-Spec.md](./Feishu-Adapter-Improvement-Spec.md) | Feishu Adapter 改进规格 — 流式卡片、访问控制、多消息类型 | 📝 Draft | 2026-04-17 | 0% |
-| [Worker-Session-Control-Spec.md](./Worker-Session-Control-Spec.md) | Worker stdio 直达控制 — 10 项已验证命令（compact/clear/context 等） | ✅ Verified | 2026-04-19 | 0% |
+| [Worker-Session-Control-Spec.md](./Worker-Session-Control-Spec.md) | Worker stdio 直达控制 — 10 项已验证命令（compact/clear/context 等） | ✅ Verified | 2026-04-19 | 100% |
 | [Worker-User-Interaction-Spec.md](./Worker-User-Interaction-Spec.md) | Worker 用户交互集成 — 权限请求/问题询问/MCP Elicitation 转发与响应 | 📝 Draft | 2026-04-19 | 0% |
-| [Session-Stats-Spec.md](./Session-Stats-Spec.md) | Session Stats 展示 — done 事件 token/费用/context 统计 footer | 📝 Draft | 2026-04-19 | 0% |
+| [Session-Stats-Spec.md](./Session-Stats-Spec.md) | Session Stats 展示 — done 事件 token/费用/context 统计 footer | ✅ Implemented | 2026-04-19 | 100% |
 | [Slack-Adapter-Improvement-Spec.md](./Slack-Adapter-Improvement-Spec.md) | Slack Adapter 改进规格 — 流式消息、状态指示器、多消息类型 | 📝 Draft | 2026-04-18 | 0% |
 
 ### 客户端 SDK 设计
@@ -56,25 +56,23 @@
 
 ### 按状态分类
 
-- ✅ **Implemented**: 7 个（已完成实现）
+- ✅ **Implemented**: 9 个（已完成实现）
   - Worker-Gateway-Framework-Design
   - Worker-ClaudeCode-Spec
   - Worker-Common-Protocol
   - Persistent-Session-Mechanism
+  - Worker-OpenCode-Server-Spec
+  - Session-Stats-Spec
   - Python-Client-Design
   - Go-Client-Example-Design
   - AI-SDK-Chatbot-Integration-Design
-- 🔨 **Needs Implementation**: 1 个（规格已完成，待实现）
-  - Worker-OpenCode-Server-Spec
-- ✅ **Verified**: 1 个（已验证，待实现）
+- ✅ **Verified**: 1 个（已验证）
   - Worker-Session-Control-Spec
-- 📝 **Draft**: 6 个（设计中）
+- 📝 **Draft**: 4 个（设计中）
   - Gateway-Async-Init-Spec
   - Worker-ACPX-Spec
-  - AI-SDK-Chatbot-AC
   - Feishu-Adapter-Improvement-Spec
   - Worker-User-Interaction-Spec
-  - Session-Stats-Spec
   - Slack-Adapter-Improvement-Spec
 - 🔵 **Active**: 2 个（活跃维护）
   - AC-Tracking-Matrix

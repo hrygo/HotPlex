@@ -390,7 +390,7 @@ When Claude Code encounters temporary errors (429 rate limit, 529 overload, netw
 worker:
   auto_retry:
     enabled: true               # Enable auto-retry (default: true)
-    max_retries: 3             # Maximum retry attempts (default: 3)
+    max_retries: 9             # Maximum retry attempts (default: 9)
     base_delay: 5s              # Initial delay between retries (default: 5s)
     max_delay: 120s             # Maximum delay cap (default: 120s)
     retry_input: "继续"          # Text sent to worker on retry (default: "继续")

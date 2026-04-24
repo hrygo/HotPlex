@@ -165,8 +165,8 @@ configs/  config.yaml, config-dev.yaml, env.example
 - `GatewayDeps` → `cmd/hotplex/serve.go` — gateway DI container, signal handler, messaging init, LLM retry init
 
 **Gateway** (`internal/gateway/`)
-- `Hub` → `hub.go:57` — WS broadcast hub, conn registry, session routing, seq gen
-- `Conn` → `conn.go:27` — single WS connection, read/write pumps, heartbeat
+- `Hub` → `hub.go:68` — WS broadcast hub, conn registry, session routing, seq gen
+- `Conn` → `conn.go:35` — single WS connection, read/write pumps, heartbeat
 - `Handler` → `handler.go` — AEP event dispatch (input, ping, control) + panic recovery
 - `Bridge` → `bridge.go` — session ↔ worker lifecycle, StartPlatformSession, fresh start fallback, InputRecoverer, LLM retry integration, agent config injection
 - `LLMRetryController` → `llm_retry.go` — retryable error pattern detection, per-session attempt tracking, exponential backoff
@@ -175,7 +175,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 
 **Session** (`internal/session/`)
 - `Manager` → `manager.go:34` — 5-state machine, transitions, GC, worker attach/detach, `DeletePhysical` for forced removal bypassing state machine
-- `managedSession` → `manager.go:52` — per-session state + mutex + worker ref
+- `managedSession` → `manager.go:54` — per-session state + mutex + worker ref
 - `DeriveSessionKey` → `key.go` — UUIDv5 deterministic session ID from (ownerID, workerType, clientSessionID, workDir)
 - `PlatformContext` → `key.go` — platform-specific fields for DerivePlatformSessionKey (Slack channel/thread, Feishu chat)
 - `PoolManager` → `pool.go` — global + per-user quota, per-user memory tracking (512MB per worker estimate)
@@ -325,10 +325,10 @@ make webchat-stop             # Stop webchat dev server
 - `.claude` is symlinked to `.agent` — both directories exist
 - No `api/` directory — project uses JSON over WebSocket, not protobuf
 - Project targets POSIX only (PGID isolation requires `syscall.SysProcAttr{Setpgid: true}`)
-- Largest files: `feishu/adapter.go` (1228), `slack/adapter.go` (1208), `opencodeserver/worker.go` (1002), `bridge.go` (817), `hub.go` (808), `manager.go` (804), `config.go` (772)
+- Largest files: `feishu/adapter.go` (1228), `slack/adapter.go` (1208), `opencodeserver/worker.go` (1011), `bridge.go` (860), `hub.go` (816), `manager.go` (825), `config.go` (783)
 - STT scripts (`scripts/stt_server.py`, `scripts/fix_onnx_model.py`) are also deployed to `~/.agents/skills/audio-transcribe/scripts/` for Claude Code skill use
 - STT model: `~/.cache/modelscope/hub/models/iic/SenseVoiceSmall` (~900MB), ONNX FP32 non-quantized
-- Zombie IO timeout default: 30 minutes (configurable via `worker.execution_timeout`)
+- Zombie IO timeout default: 30 minutes (configurable via `worker.execution_timeout`); worker idle timeout default: 60 minutes (configurable via `worker.idle_timeout`)
 - OpenCode CLI adapter removed — replaced by OpenCode Server adapter
 - ACPX adapter has type constant (`TypeACPX`) but no implementation — `internal/worker/acpx/` is empty
 - Postgres store is stub only (`ErrNotImplemented`) — only SQLite is production-ready

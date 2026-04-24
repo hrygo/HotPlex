@@ -89,7 +89,7 @@ gateway:
   idle_timeout: 5m      # 客户端空闲断开时间
 
 worker:
-  idle_timeout: 30m     # Worker 无活动自动休眠时间
+  idle_timeout: 60m     # Worker 无活动自动休眠时间
   max_lifetime: 24h     # Worker 强制重启周期
 
 security:

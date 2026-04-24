@@ -51,7 +51,7 @@ Gateway 默认监听：
 |------|------|------|------|
 | Python 3.10+ | [`python-client/`](python-client/) | ✅ 生产可用 | [README.md](python-client/README.md) |
 | TypeScript/Node.js | [`typescript-client/`](typescript-client/) | ✅ 生产可用 | [README.md](typescript-client/README.md) |
-| Go 1.21+ | [`../client/`](../client/) | 🚧 开发中 | [README.md](../client/README.md) |
+| Go 1.26+ | [`../client/`](../client/) | ✅ 生产可用 | [README.md](../client/README.md) |
 | Java 17+ | [`java-client/`](java-client/) | ✅ 生产可用 | [README.md](java-client/README.md) |
 
 ---
@@ -164,39 +164,34 @@ import (
     "fmt"
     "time"
 
-    "github.com/hrygo/hotplex/client"
+    client "github.com/hrygo/hotplex/client"
 )
 
 func main() {
     ctx := context.Background()
 
-    cfg := &client.Config{
-        URL:        "ws://localhost:8888",
-        WorkerType: client.WorkerTypeClaudeCode,
-        AuthToken:  "your-api-key",
+    c, err := client.New(ctx,
+        client.URL("ws://localhost:8888/ws"),
+        client.WorkerType("claude_code"),
+        client.APIKey("your-api-key"),
+    )
+    if err != nil {
+        panic(err)
     }
-
-    c := client.New(cfg)
     defer c.Close()
 
-    // 事件处理器
-    c.OnMessageDelta(func(data *client.MessageDeltaData) {
-        fmt.Print(data.Content)
-    })
-
-    c.OnDone(func(data *client.DoneData) {
-        fmt.Printf("\n✅ Done! Success: %v\n", data.Success)
-    })
-
-    // 连接
-    if err := c.Connect(ctx); err != nil {
-        panic(err)
+    // 事件处理
+    for evt := range c.Events() {
+        if data, ok := evt.AsMessageDeltaData(); ok {
+            fmt.Print(data.Content)
+        }
+        if data, ok := evt.AsDoneData(); ok {
+            fmt.Printf("\n✅ Done! Success: %v\n", data.Success)
+        }
     }
 
     // 发送输入
-    if err := c.SendInput(ctx, &client.InputData{
-        Content: "Write a hello world in Go",
-    }); err != nil {
+    if err := c.SendInput(ctx, "Write a hello world in Go"); err != nil {
         panic(err)
     }
 
@@ -217,7 +212,7 @@ func main() {
 <dependency>
     <groupId>dev.hotplex</groupId>
     <artifactId>hotplex-client</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.0-SNAPSHOT</version>
 </dependency>
 ```
 

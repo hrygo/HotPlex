@@ -79,7 +79,8 @@ make quickstart
 ```bash
 make dev
 ```
-- **Gateway**: `http://localhost:8888`
+- **Gateway WebSocket**: `ws://localhost:8888/ws`
+- **Admin API**: `http://localhost:9999`
 - **Web Chat**: `http://localhost:3000`
 
 ### 3. Connect via Go SDK
@@ -93,16 +94,21 @@ import (
 )
 
 func main() {
-    c, _ := client.Connect(context.Background(), "ws://localhost:8888/ws",
-        client.WithToken("<your-jwt-token>"),
+    c, err := client.New(context.Background(),
+        client.URL("ws://localhost:8888/ws"),
+        client.WorkerType("claude_code"),
+        client.APIKey("<your-api-key>"),
     )
+    if err != nil {
+        panic(err)
+    }
     defer c.Close()
 
     c.SendInput(context.Background(), "Explain Hotplex architecture")
 
     for env := range c.Events() {
-        if env.Event.Type == "message.delta" {
-            fmt.Print(env.Event.Data.(map[string]any)["content"])
+        if data, ok := env.AsMessageDeltaData(); ok {
+            fmt.Print(data.Content)
         }
     }
 }
@@ -118,10 +124,10 @@ Hotplex acts as an orchestration layer between frontend clients and backend codi
 
 | Language | Path | Features |
 |:---:|:---|:---|
-| **Go** | [`client/`](client/) | **Full feature**, event-driven, production-grade |
-| **TypeScript** | [`examples/typescript/`](examples/typescript-client/) | Streaming, multi-turn chat, React compatible |
-| **Python** | [`examples/python/`](examples/python-client/) | Asyncio, session resume, CLI ready |
-| **Java** | [`examples/java/`](examples/java-client/) | Enterprise AEP v1 implementation |
+| **Go** | [`client/`](client/) | **Full feature**, channel-based events, production-grade |
+| **TypeScript** | [`examples/typescript-client/`](examples/typescript-client/) | Streaming, multi-turn chat, React compatible |
+| **Python** | [`examples/python-client/`](examples/python-client/) | Asyncio, session resume, CLI ready |
+| **Java** | [`examples/java-client/`](examples/java-client/) | Enterprise AEP v1 implementation |
 
 ## 🛠️ Configuration
 
@@ -133,7 +139,7 @@ Hotplex uses Viper for configuration with support for environment variable overr
 | `agent_config.config_dir` | `~/.hotplex/agent-configs/` | Directory for SOUL.md, AGENTS.md, etc. |
 | `gateway.addr` | `:8888` | WebSocket gateway endpoint |
 | `admin.addr` | `:9999` | Admin API endpoint |
-| `db.path` | `data/hotplex.db` | SQLite database location |
+| `db.path` | `~/.hotplex/data/hotplex.db` | SQLite database location |
 | `log.level` | `info` | debug, info, warn, error |
 
 > [!TIP]
