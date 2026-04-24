@@ -3,6 +3,7 @@ package agentconfig
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -112,7 +113,7 @@ func TestSizeLimits(t *testing.T) {
 	t.Run("per file limit truncates", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		longContent := stringsRepeat("x", MaxFileChars+1000)
+		longContent := strings.Repeat("x", MaxFileChars+1000)
 		writeFile(t, dir, "SOUL.md", longContent)
 
 		cfg, err := Load(dir, "")
@@ -124,7 +125,7 @@ func TestSizeLimits(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		// Write files that individually are under limit but combined exceed total.
-		content := stringsRepeat("a", MaxTotalChars/2+1)
+		content := strings.Repeat("a", MaxTotalChars/2+1)
 		writeFile(t, dir, "SOUL.md", content)
 		writeFile(t, dir, "AGENTS.md", content)
 
@@ -249,12 +250,4 @@ func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644)
 	require.NoError(t, err)
-}
-
-func stringsRepeat(s string, n int) string {
-	result := make([]byte, n)
-	for i := range result {
-		result[i] = s[0]
-	}
-	return string(result)
 }

@@ -318,7 +318,8 @@ func (c *Conn) performInit(handler *Handler) error {
 			}
 		}
 	} else if si.State == events.StateDeleted {
-		// Deleted sessions cannot be resumed. Start fresh directly.
+		// Deleted sessions cannot be resumed. Physically remove then start fresh.
+		_ = handler.sm.DeletePhysical(context.Background(), sessionID)
 		if c.starter != nil {
 			if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
 				initData.WorkerType, initData.Config.AllowedTools, workDir, "", nil); err != nil {

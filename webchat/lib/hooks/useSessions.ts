@@ -57,6 +57,11 @@ export function useSessions({
 
   const isCreating = useRef(false);
   const STORAGE_KEY = 'hotplex_active_session_id';
+  const DEFAULT_WORKER_TYPE = process.env.NEXT_PUBLIC_HOTPLEX_WORKER_TYPE || 'claude_code';
+
+  // Deterministic anchor session ID — ensures the first auto-created session
+  // maps to the same server-side key via DeriveSessionKey(userID, workerType, clientSessionID, workDir).
+  const MAIN_SESSION_ID = 'main';
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -105,10 +110,7 @@ export function useSessions({
       if (!initId && !savedId && filtered.length === 0 && !isCreating.current) {
         isCreating.current = true;
         try {
-          // Deterministic mapping: always try to create/join the 'main' session first.
-          // This ensures "out of control" session creation is replaced by a single stable anchor.
-          const MAIN_SESSION_ID = 'main';
-          const { session_id } = await createSession('claude_code', MAIN_SESSION_ID);
+          const { session_id } = await createSession(DEFAULT_WORKER_TYPE, MAIN_SESSION_ID);
           
           const { sessions: updatedList } = await listSessions(5, 0);
           const newSession = updatedList.find(s => s.id === session_id);
@@ -142,16 +144,14 @@ export function useSessions({
     setIsOpen(false);
   }, []);
 
-  const createNewSession = useCallback(async (workerType = 'claude_code') => {
+  const createNewSession = useCallback(async (workerType?: string) => {
+    const wt = workerType || DEFAULT_WORKER_TYPE;
     if (isCreating.current) return;
     isCreating.current = true;
     setIsLoading(true);
     try {
-      const { session_id } = await createSession(workerType);
-      
-      // Force a slight delay to ensure database consistency
-      await new Promise(r => setTimeout(r, 200));
-      
+      const { session_id } = await createSession(wt);
+
       const { sessions: list } = await listSessions(20, 0);
       const filtered = list.filter(s => s.state !== 'deleted');
       setSessions(filtered);
@@ -180,10 +180,6 @@ export function useSessions({
 
     try {
       await deleteSession(id);
-      // If we deleted the main session, we might want to recreate it on next refresh
-      if (id === 'main') {
-        setTimeout(() => refreshSessions(), 500);
-      }
     } catch (e) {
       console.error('Failed to delete session', e);
       // Revert optimistic remove on failure
