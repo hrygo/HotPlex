@@ -227,6 +227,10 @@ func runGateway(configPath string, devMode bool) (err error) {
 		log.Info("gateway: LLM auto-retry enabled", "max_retries", cfg.Worker.AutoRetry.MaxRetries, "base_delay", cfg.Worker.AutoRetry.BaseDelay)
 	}
 
+	if cfg.AgentConfig.Enabled {
+		bridge.SetAgentConfigDir(cfg.AgentConfig.ConfigDir)
+	}
+
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if !reflect.DeepEqual(prev.Worker.AutoRetry, next.Worker.AutoRetry) {
 			retryCtrl.UpdateConfig(next.Worker.AutoRetry)
