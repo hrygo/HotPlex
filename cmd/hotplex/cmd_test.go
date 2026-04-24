@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 func TestVersionText(t *testing.T) {
@@ -48,7 +50,7 @@ func TestVersionJSON(t *testing.T) {
 	require.Equal(t, "arm64", result["arch"])
 }
 
-func TestExpandPath(t *testing.T) {
+func TestExpandAndAbs(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -72,10 +74,10 @@ func TestExpandPath(t *testing.T) {
 			},
 		},
 		{
-			name:  "relative path unchanged",
+			name:  "relative path resolved to absolute",
 			input: "config.yaml",
 			check: func(t *testing.T, result string) {
-				require.Equal(t, "config.yaml", result)
+				require.True(t, strings.HasPrefix(result, "/"))
 			},
 		},
 	}
@@ -83,7 +85,8 @@ func TestExpandPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := expandPath(tt.input)
+			result, err := config.ExpandAndAbs(tt.input)
+			require.NoError(t, err)
 			tt.check(t, result)
 		})
 	}

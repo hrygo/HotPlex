@@ -517,7 +517,7 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 
 	// If a config file is provided, unmarshal it over defaults.
 	if filePath != "" {
-		absPath, err := normalizePath(filePath)
+		absPath, err := ExpandAndAbs(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("config: resolve path %q: %w", filePath, err)
 		}
@@ -599,7 +599,7 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 
 	// Normalize DB path.
 	if cfg.DB.Path != "" {
-		absPath, err := normalizePath(cfg.DB.Path)
+		absPath, err := ExpandAndAbs(cfg.DB.Path)
 		if err != nil {
 			return nil, fmt.Errorf("config: normalize db path %q: %w", cfg.DB.Path, err)
 		}
@@ -609,11 +609,9 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 	return cfg, nil
 }
 
-// normalizePath returns an absolute path, resolving ~ and relative paths.
-// If the path starts with ~ and $HOME is not set, the original path is returned
-// with a warning logged. This allows tests to run without $HOME while still
-// catching configuration issues in production.
-func normalizePath(p string) (string, error) {
+// ExpandAndAbs returns an absolute path, resolving ~ and relative paths.
+// If the path starts with ~ and $HOME is not set, the original path is returned.
+func ExpandAndAbs(p string) (string, error) {
 	if p == "" {
 		return "", nil
 	}

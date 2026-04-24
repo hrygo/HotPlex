@@ -11,8 +11,11 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/hrygo/hotplex/internal/admin"
 	"github.com/hrygo/hotplex/internal/assets"
@@ -38,6 +41,12 @@ type GatewayDeps struct {
 	ConfigWatcher *config.Watcher
 }
 
+const defaultConfigPath = "~/.hotplex/config.yaml"
+
+func configFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "config", "c", defaultConfigPath, "config file path")
+}
+
 func runGateway(configPath string, devMode bool) (err error) {
 	defer func() {
 		if err != nil {
@@ -45,7 +54,7 @@ func runGateway(configPath string, devMode bool) (err error) {
 		}
 	}()
 
-	configPath = expandPath(configPath)
+	configPath, _ = config.ExpandAndAbs(configPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -92,10 +101,13 @@ func runGateway(configPath string, devMode bool) (err error) {
 
 	pidDir := cfg.Worker.PIDDir
 	pidTracker := proc.InitTracker(pidDir, log)
+	var cleanupWG sync.WaitGroup
 	if err := pidTracker.EnsureDir(); err != nil {
 		log.Warn("gateway: pid dir setup failed, orphan cleanup disabled", "dir", pidDir, "err", err)
 	} else {
+		cleanupWG.Add(1)
 		go func() {
+			defer cleanupWG.Done()
 			cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cleanupCancel()
 			results := pidTracker.CleanupOrphans(cleanupCtx, 3, 5*time.Second)
@@ -242,7 +254,7 @@ func runGateway(configPath string, devMode bool) (err error) {
 		ConfigWatcher: configWatcher,
 	}
 
-	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, log, cfg, hub, sm, handler, bridge)
+	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
 
 	setupRoutes(mux, deps)
 
@@ -312,6 +324,7 @@ func runGateway(configPath string, devMode bool) (err error) {
 
 	bridge.Shutdown()
 
+	cleanupWG.Wait()
 	pidTracker.RemoveAll()
 
 	if err := sm.Close(); err != nil {
@@ -326,18 +339,8 @@ func runGateway(configPath string, devMode bool) (err error) {
 	return ctx.Err()
 }
 
-func expandPath(p string) string {
-	if strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			return filepath.Join(home, p[2:])
-		}
-	}
-	return p
-}
-
 func loadConfig(configPath string, devMode bool) (*config.Config, error) {
-	configPath = expandPath(configPath)
-	absPath, err := filepath.Abs(configPath)
+	absPath, err := config.ExpandAndAbs(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("config: resolve path %q: %w", configPath, err)
 	}

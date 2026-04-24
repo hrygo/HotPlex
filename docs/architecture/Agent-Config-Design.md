@@ -99,7 +99,7 @@ OpenClaw System Prompt 结构:
 | **SOUL.md 特殊处理** | 额外注入 "embody its persona and tone" 指令 | 人格指令得到强化 |
 | **缓存分界线** | 静态文件在 boundary 上方，HEARTBEAT.md 在下方 | 稳定内容可缓存，动态内容不破坏缓存 |
 | **子 Agent 裁剪** | subagent 只加载 AGENTS.md + TOOLS.md + SOUL.md + IDENTITY.md + USER.md | 节省 token，避免子 agent 看到 MEMORY |
-| **文件大小限制** | 单文件 12K chars，总计 60K chars | 防止 context 爆炸 |
+| **文件大小限制** | 单文件 4K chars，总计 20K chars | 防止 context 爆炸 |
 | **MEMORY 隔离** | MEMORY.md 仅主会话加载，不在群聊/共享会话加载 | 防止隐私泄漏 |
 | **排序机制** | `CONTEXT_FILE_ORDER` Map 定义数字优先级 | 确定性顺序，避免随机性 |
 | **frontmatter 剥离** | YAML frontmatter 加载时 strip | 元数据不注入到 prompt |
@@ -738,7 +738,7 @@ HotPlex 的 S2 system field 注入仅影响 **主 Agent 的对话轮次** — OC
   │  加载规则:                                                              │
   │  · 按平台选择变体: SOUL.slack.md > SOUL.md (优先平台特定版本)          │
   │  · frontmatter (YAML) 剥离后注入                                       │
-  │  · 单文件上限 12K chars，总计上限 60K chars                             │
+  │  · 单文件上限 4K chars，总计上限 20K chars                             │
   │  · 文件不存在 → 跳过 (不报错)                                          │
   └─────────────────────────────────────────────────────────────────────────┘
 
@@ -1114,7 +1114,7 @@ description: "HotPlex 用户画像"
 ```
 Phase 1: 共享基础设施 (1-2 天)
 ├── 实现 agent-configs/ 目录的文件加载器 (通用，两种 Worker 共享)
-├── 实现 frontmatter 解析与文件大小限制 (12K / file, 60K total)
+├── 实现 frontmatter 解析与文件大小限制 (4K / file, 20K total)
 ├── 实现 stripYAMLFrontmatter 通用工具函数
 └── 实现 loadAgentConfigs(dir, platform) → AgentConfigs 结构
 
@@ -1256,8 +1256,8 @@ type AgentConfig struct {
     MemoryPath  string `yaml:"memory_path"  mapstructure:"memory_path"`
 
     // 大小限制
-    MaxFileChars  int `yaml:"max_file_chars"  mapstructure:"max_file_chars"`   // 默认 12000
-    MaxTotalChars int `yaml:"max_total_chars" mapstructure:"max_total_chars"`  // 默认 60000
+    MaxFileChars  int `yaml:"max_file_chars"  mapstructure:"max_file_chars"`   // 默认 4000
+    MaxTotalChars int `yaml:"max_total_chars" mapstructure:"max_total_chars"`  // 默认 20000
 
     // Claude Code C 通道清理策略
     CleanupRulesOnExit bool `yaml:"cleanup_rules_on_exit" mapstructure:"cleanup_rules_on_exit"` // 默认 false (保留复用)
@@ -1328,7 +1328,7 @@ type AgentConfig struct {
    AGENTS/SKILLS 同理，不同平台不同规则和工具指南
 
 7. **安全边界**
-   文件大小限制 (12K / file, 60K total)；frontmatter 剥离 (元数据不注入 prompt)
+   文件大小限制 (4K / file, 20K total)；frontmatter 剥离 (元数据不注入 prompt)
    MEMORY.md 仅主会话加载 (防止隐私泄漏)；子 Agent 场景裁剪 (仅加载 SOUL + AGENTS, 跳过 MEMORY)
 
 8. **Worker 路由**

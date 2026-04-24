@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hrygo/hotplex/internal/cli/onboard"
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 func newOnboardCmd() *cobra.Command {
@@ -32,7 +33,7 @@ Supports non-interactive mode for automated deployments.`,
 			if configPath == "" {
 				configPath = "~/.hotplex/config.yaml"
 			}
-			configPath = expandPath(configPath)
+			configPath, _ = config.ExpandAndAbs(configPath)
 
 			result, err := onboard.Run(context.Background(), onboard.WizardOptions{
 				ConfigPath:        configPath,
@@ -88,7 +89,7 @@ Supports non-interactive mode for automated deployments.`,
 
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "use defaults, no prompts")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing configuration")
-	cmd.Flags().StringVarP(&configPath, "config", "c", "~/.hotplex/config.yaml", "config file path")
+	configFlag(cmd, &configPath)
 
 	cmd.Flags().BoolVar(&enableSlack, "enable-slack", false, "enable Slack in non-interactive mode (credentials in .env)")
 	cmd.Flags().BoolVar(&enableFeishu, "enable-feishu", false, "enable Feishu in non-interactive mode (credentials in .env)")

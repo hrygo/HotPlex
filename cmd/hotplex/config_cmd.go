@@ -55,7 +55,7 @@ func newConfigValidateCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "~/.hotplex/config.yaml", "config file path")
+	configFlag(cmd, &configPath)
 	cmd.Flags().BoolVar(&strict, "strict", false, "also verify required secrets are set")
 	return cmd
 }

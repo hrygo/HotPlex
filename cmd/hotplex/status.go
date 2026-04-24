@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -71,13 +72,15 @@ func newStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "~/.hotplex/config.yaml", "config file path")
+	configFlag(cmd, &configPath)
 	cmd.Flags().StringVar(&format, "format", "text", "output format (text, json)")
 	return cmd
 }
 
 func gatewayAddrFromConfig(configPath string) string {
-	cfg, err := config.Load(expandPath(configPath), config.LoadOptions{})
+	absPath, _ := config.ExpandAndAbs(configPath)
+	loadEnvFile(filepath.Dir(absPath))
+	cfg, err := config.Load(absPath, config.LoadOptions{})
 	if err != nil {
 		return "localhost:8888"
 	}

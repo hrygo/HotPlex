@@ -13,12 +13,10 @@ import (
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 
 	"github.com/hrygo/hotplex/internal/config"
-	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/messaging/feishu"
 	"github.com/hrygo/hotplex/internal/messaging/slack"
 	"github.com/hrygo/hotplex/internal/messaging/stt"
-	"github.com/hrygo/hotplex/internal/session"
 )
 
 var (
@@ -37,11 +35,15 @@ func closeSTTCache(ctx context.Context, log *slog.Logger) {
 	}
 }
 
-func startMessagingAdapters(ctx context.Context, log *slog.Logger, cfg *config.Config,
-	hub *gateway.Hub, sm *session.Manager, handler *gateway.Handler, gwBridge *gateway.Bridge,
-) ([]messaging.PlatformAdapterInterface, []AdapterStatus) {
+func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging.PlatformAdapterInterface, []AdapterStatus) {
 	var adapters []messaging.PlatformAdapterInterface
 	var statuses []AdapterStatus
+	log := deps.Log
+	cfg := deps.Config
+	hub := deps.Hub
+	sm := deps.SessionMgr
+	handler := deps.Handler
+	gwBridge := deps.Bridge
 	for _, pt := range messaging.RegisteredTypes() {
 		var workerType, workDir string
 		switch pt {
@@ -214,7 +216,7 @@ func expandCommand(cmd string) string {
 	for i, p := range parts {
 		// 1. Expand ~/ paths
 		if strings.HasPrefix(p, "~/") {
-			parts[i] = expandPath(p)
+			parts[i], _ = config.ExpandAndAbs(p)
 			continue
 		}
 

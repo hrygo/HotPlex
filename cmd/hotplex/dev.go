@@ -24,6 +24,6 @@ func newDevCmd() *cobra.Command {
 			return runGateway(configPath, true)
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "~/.hotplex/config.yaml", "config file path")
+	configFlag(cmd, &configPath)
 	return cmd
 }

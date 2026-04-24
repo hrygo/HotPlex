@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +16,7 @@ import (
 
 func newSecurityCmd() *cobra.Command {
 	var fix, verbose, jsonOutput bool
+	var configPath string
 
 	cmd := &cobra.Command{
 		Use:   "security",
@@ -28,11 +29,8 @@ Use --fix to automatically resolve issues where possible.`,
   hotplex security --fix             # Auto-fix security issues
   hotplex security --json            # JSON output`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, _ := cmd.Flags().GetString("config")
-			if configPath == "" {
-				configPath = "~/.hotplex/config.yaml"
-			}
-			configPath = expandPath(configPath)
+			configPath, _ = config.ExpandAndAbs(configPath)
+			loadEnvFile(filepath.Dir(configPath))
 			checkers.SetConfigPath(configPath)
 
 			checkersToRun := cli.DefaultRegistry.ByCategory("security")
@@ -49,37 +47,7 @@ Use --fix to automatically resolve issues where possible.`,
 			diags = append(diags, checkTLSConfig(ctx, configPath))
 			diags = append(diags, checkSSRFConfig(ctx, configPath))
 
-			if fix {
-				fixed, fixFailed := 0, 0
-				for i, d := range diags {
-					if d.Status != cli.StatusPass && d.FixFunc != nil {
-						if err := d.FixFunc(); err != nil {
-							diags[i].Message = fmt.Sprintf("%s (fix failed: %s)", d.Message, err)
-							fixFailed++
-						} else {
-							if i < len(checkersToRun) {
-								recheck := checkersToRun[i].Check(ctx)
-								diags[i] = recheck
-							}
-							fixed++
-						}
-					}
-				}
-				if fixFailed > 0 {
-					outputResults(os.Stderr, diags, verbose, jsonOutput)
-					fmt.Fprintf(os.Stderr, "\n%d fix(es) applied, %d failed\n", fixed, fixFailed)
-					os.Exit(3)
-				}
-				if fixed > 0 {
-					fmt.Fprintf(os.Stderr, "%d fix(es) applied successfully\n", fixed)
-				}
-			}
-
-			outputResults(os.Stderr, diags, verbose, jsonOutput)
-
-			if fail := countFailures(diags); fail > 0 {
-				os.Exit(1)
-			}
+			fixAndReport(ctx, diags, checkersToRun, fix, verbose, jsonOutput)
 			return nil
 		},
 	}
@@ -87,7 +55,7 @@ Use --fix to automatically resolve issues where possible.`,
 	cmd.Flags().BoolVar(&fix, "fix", false, "automatically fix issues")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show detailed information")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output in JSON format")
-	cmd.Flags().StringP("config", "c", "~/.hotplex/config.yaml", "config file path")
+	configFlag(cmd, &configPath)
 	return cmd
 }
 

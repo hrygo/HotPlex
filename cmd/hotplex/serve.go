@@ -45,7 +45,7 @@ In dev mode (--dev), API key authentication and admin tokens are disabled.`,
 			return runGateway(configPath, devMode)
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "~/.hotplex/config.yaml", "config file path")
+	configFlag(cmd, &configPath)
 	cmd.Flags().BoolVar(&devMode, "dev", false, "development mode")
 	return cmd
 }
@@ -90,7 +90,13 @@ Preserves the same configuration file and mode.`,
 			fmt.Fprintf(os.Stderr, "gateway: stopped PID %d\n", pid)
 			removeGatewayPID()
 
-			time.Sleep(500 * time.Millisecond)
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				if err := syscall.Kill(pid, 0); err != nil {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
 
 			if err := writeGatewayPID(); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not write PID file: %s\n", err)
@@ -98,7 +104,7 @@ Preserves the same configuration file and mode.`,
 			return runGateway(configPath, devMode)
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "~/.hotplex/config.yaml", "config file path")
+	configFlag(cmd, &configPath)
 	cmd.Flags().BoolVar(&devMode, "dev", false, "development mode")
 	return cmd
 }
