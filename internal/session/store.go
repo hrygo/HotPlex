@@ -29,6 +29,7 @@ type Store interface {
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
 	DeleteTerminated(ctx context.Context, cutoff time.Time) error
+	DeletePhysical(ctx context.Context, id string) error
 	Close() error
 }
 
@@ -257,6 +258,11 @@ func (s *SQLiteStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]stri
 
 func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
 	_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cutoff)
+	return err
+}
+
+func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, queries["store.delete_physical"], id)
 	return err
 }
 

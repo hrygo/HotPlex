@@ -493,6 +493,11 @@ func (m *mockSessionStoreForBotID) DeleteTerminated(ctx context.Context, cutoff 
 	return args.Error(0)
 }
 
+func (m *mockSessionStoreForBotID) DeletePhysical(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
 func (m *mockSessionStoreForBotID) Close() error {
 	args := m.Called()
 	return args.Error(0)
@@ -957,6 +962,11 @@ func (m *mockBridgeSM) GetWorker(id string) worker.Worker {
 }
 
 func (m *mockBridgeSM) Delete(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *mockBridgeSM) DeletePhysical(ctx context.Context, id string) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)
 }

@@ -51,16 +51,11 @@ interface ToolCallPart {
   toolName: string;
   args: any;
   toolCallId: string;
+  result?: any;
+  isError?: boolean;
 }
 
-interface ToolResultPart {
-  type: 'tool-result';
-  toolName: string;
-  result: any;
-  toolCallId: string;
-}
-
-type MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart;
+type MessagePart = TextPart | ReasoningPart | ToolCallPart;
 
 // Internal message format for our store
 interface HotPlexMessage {
@@ -257,12 +252,11 @@ export function useHotPlexRuntime({
       setMessages((prev) => {
         const lastMessage = prev[prev.length - 1];
         if (lastMessage?.role === 'assistant') {
-          const parts = [...lastMessage.parts, {
-            type: 'tool-result' as const,
-            toolName: 'result', // ToolResultData doesn't have name, using placeholder or ID
-            result: data.output,
-            toolCallId: data.id,
-          }];
+          const parts = lastMessage.parts.map((p) =>
+            p.type === 'tool-call' && p.toolCallId === data.id
+              ? { ...p, result: data.output }
+              : p
+          );
           return [...prev.slice(0, -1), { ...lastMessage, parts }];
         }
         return prev;
@@ -410,7 +404,9 @@ export function useHotPlexRuntime({
       console.log('HotPlexRuntimeAdapter: client not connected, attempting to reconnect...');
       try {
         if (!client.connecting) {
-          client.connect(sessionId).catch(err => {
+          // Don't pass sessionId here — the client internally tracks the latest session ID,
+          // which may have been updated by a SessionNotFound retry in BrowserHotPlexClient.
+          client.connect().catch(err => {
             console.error('HotPlexRuntimeAdapter: auto-connect failed', err);
           });
         }

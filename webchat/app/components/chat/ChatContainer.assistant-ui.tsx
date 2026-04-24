@@ -38,12 +38,7 @@ export default function ChatContainer() {
   const workerType = process.env.NEXT_PUBLIC_HOTPLEX_WORKER_TYPE || 'claude_code';
   const apiKey = process.env.NEXT_PUBLIC_HOTPLEX_API_KEY || 'dev';
 
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  const handleSessionSelect = useCallback((sessionId: string) => {
-    setActiveSessionId(sessionId);
-  }, []);
 
   const {
     activeSession,
@@ -53,9 +48,10 @@ export default function ChatContainer() {
     removeSession,
     sessions,
   } = useSessions({
-    onSelect: handleSessionSelect,
-    initialSessionId: activeSessionId,
+    onSelect: () => {}, // Handled internally by useSessions
   });
+
+  const activeSessionId = activeSession?.id || null;
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-base)]">

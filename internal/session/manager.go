@@ -466,6 +466,26 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeletePhysical physically removes a session from memory and database.
+// USE WITH CAUTION: this bypasses state machine safety and conversation history.
+func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
+	m.mu.Lock()
+	ms, ok := m.sessions[id]
+	if ok {
+		ms.mu.Lock()
+		m.releaseWorkerQuota(ms)
+		if ms.worker != nil {
+			_ = ms.worker.Kill()
+			metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Dec()
+		}
+		ms.mu.Unlock()
+		delete(m.sessions, id)
+	}
+	m.mu.Unlock()
+
+	return m.store.DeletePhysical(ctx, id)
+}
+
 // ValidateOwnership checks whether the given userID owns the session.
 // Returns nil if the user is the owner, or ErrOwnershipMismatch otherwise.
 // Admin bypass: if adminUserID is non-empty, it bypasses ownership check.

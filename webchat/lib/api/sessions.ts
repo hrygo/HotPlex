@@ -47,11 +47,18 @@ export async function listSessions(limit = 20, offset = 0): Promise<ListSessions
   return res.json();
 }
 
-export async function createSession(workerType = 'claude_code'): Promise<{ session_id: string }> {
-  const res = await fetch(
-    `${BASE}/api/sessions?api_key=${encodeURIComponent(process.env.NEXT_PUBLIC_HOTPLEX_API_KEY ?? 'dev')}&worker_type=${workerType}`,
-    { method: 'POST' }
-  );
+export async function createSession(workerType = 'claude_code', sessionId?: string): Promise<{ session_id: string }> {
+  const url = new URL(`${BASE}/api/sessions`, window.location.origin);
+  const apiKey = process.env.NEXT_PUBLIC_HOTPLEX_API_KEY ?? 'dev';
+  url.searchParams.append('api_key', apiKey);
+  url.searchParams.append('worker_type', workerType);
+  if (sessionId) {
+    url.searchParams.append('session_id', sessionId);
+  }
+
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+  });
   if (!res.ok) throw new Error(`createSession failed: ${res.status}`);
   return res.json();
 }

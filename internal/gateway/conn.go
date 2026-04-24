@@ -309,10 +309,6 @@ func (c *Conn) performInit(handler *Handler) error {
 			c.sendInitError(events.ErrCodeInternalError, err.Error())
 			return fmt.Errorf("get session: %w", err)
 		}
-	} else if si.State == events.StateDeleted {
-		c.hub.InitThrottle.RecordFailure(sessionID)
-		c.sendInitError(events.ErrCodeSessionNotFound, "session was deleted")
-		return ErrInitSessionDeleted
 	} else if si.State == events.StateCreated {
 		if c.starter != nil {
 			if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, "", nil); err != nil {
@@ -321,14 +317,29 @@ func (c *Conn) performInit(handler *Handler) error {
 				return fmt.Errorf("start unstarted session: %w", err)
 			}
 		}
+	} else if si.State == events.StateDeleted {
+		// Deleted sessions cannot be resumed. Start fresh directly.
+		if c.starter != nil {
+			if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
+				initData.WorkerType, initData.Config.AllowedTools, workDir, "", nil); err != nil {
+				c.hub.InitThrottle.RecordFailure(sessionID)
+				msg := fmt.Sprintf("failed to recreate deleted session: %v", err)
+				c.sendInitError(events.ErrCodeInternalError, msg)
+				metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
+				return fmt.Errorf("recreate deleted session: %w", err)
+			}
+		}
 	} else if si.State == events.StateIdle || si.State == events.StateTerminated ||
 		(si.State == events.StateRunning && handler.sm.GetWorker(sessionID) == nil) {
 		if c.starter != nil {
-			if err := c.starter.ResumeSession(context.Background(), sessionID, workDir); err != nil {
+			resumeErr := c.starter.ResumeSession(context.Background(), sessionID, workDir)
+			if resumeErr != nil {
 				if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
 					initData.WorkerType, initData.Config.AllowedTools, workDir, "", nil); err != nil {
 					c.hub.InitThrottle.RecordFailure(sessionID)
-					c.sendInitError(events.ErrCodeInternalError, "failed to start session after resume fallback")
+					msg := fmt.Sprintf("resume failed (%v), then start also failed (%v)", resumeErr, err)
+					c.sendInitError(events.ErrCodeInternalError, msg)
+					metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 					return fmt.Errorf("start session after resume fallback: %w", err)
 				}
 			}
