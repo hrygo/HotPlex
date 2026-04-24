@@ -29,6 +29,7 @@ type SessionManagerProvider interface {
 	List(ctx context.Context, limit, offset int) ([]any, error)
 	Get(id string) (any, error)
 	Delete(ctx context.Context, id string) error
+	DeletePhysical(ctx context.Context, id string) error
 	WorkerHealthStatuses() []worker.WorkerHealth
 	DebugSnapshot(id string) (DebugSessionSnapshot, bool)
 	Transition(ctx context.Context, id string, to events.SessionState) error

@@ -2,8 +2,8 @@
 type: spec
 tags: [project/HotPlex, worker/stdio, worker/claudecode, messaging, gateway]
 date: 2026-04-19
-status: in-progress
-progress: 10
+status: verified
+progress: 100
 priority: high
 estimated_hours: 16
 verification: scripts/test_cc_context.py 10/10 passed 2026-04-19 (CC context commands)

@@ -117,17 +117,18 @@ func (c *Config) RequireSecrets() error {
 
 // Config holds all gateway configuration.
 type Config struct {
-	Gateway   GatewayConfig   `mapstructure:"gateway"`
-	DB        DBConfig        `mapstructure:"db"`
-	Worker    WorkerConfig    `mapstructure:"worker"`
-	Security  SecurityConfig  `mapstructure:"security"`
-	Session   SessionConfig   `mapstructure:"session"`
-	Pool      PoolConfig      `mapstructure:"pool"`
-	Log       LogConfig       `mapstructure:"log"`
-	Admin     AdminConfig     `mapstructure:"admin"`
-	WebChat   WebChatConfig   `mapstructure:"webchat"`
-	Messaging MessagingConfig `mapstructure:"messaging"`
-	Inherits  string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
+	Gateway     GatewayConfig   `mapstructure:"gateway"`
+	DB          DBConfig        `mapstructure:"db"`
+	Worker      WorkerConfig    `mapstructure:"worker"`
+	Security    SecurityConfig  `mapstructure:"security"`
+	Session     SessionConfig   `mapstructure:"session"`
+	Pool        PoolConfig      `mapstructure:"pool"`
+	Log         LogConfig       `mapstructure:"log"`
+	Admin       AdminConfig     `mapstructure:"admin"`
+	WebChat     WebChatConfig   `mapstructure:"webchat"`
+	Messaging   MessagingConfig `mapstructure:"messaging"`
+	AgentConfig AgentConfig     `mapstructure:"agent_config"`
+	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 }
 
 // MessagingConfig holds messaging platform adapter settings.
@@ -333,6 +334,12 @@ type PoolConfig struct {
 	MaxMemoryPerUser int64 `mapstructure:"max_memory_per_user"` // bytes; 0 = unlimited
 }
 
+// AgentConfig holds agent personality/context configuration settings.
+type AgentConfig struct {
+	Enabled   bool   `mapstructure:"enabled"`    // enable agent config loading
+	ConfigDir string `mapstructure:"config_dir"` // default: ~/.hotplex/agent-configs/
+}
+
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 // Default returns a Config with sensible production defaults.
@@ -428,6 +435,10 @@ func Default() *Config {
 					LocalIdleTTL: time.Hour,
 				},
 			},
+		},
+		AgentConfig: AgentConfig{
+			Enabled:   true,
+			ConfigDir: filepath.Join(HotplexHome(), "agent-configs"),
 		},
 	}
 }

@@ -217,6 +217,8 @@ export interface HotPlexClientConfig {
   authToken?: string;
   reconnect?: ReconnectConfig;
   heartbeat?: HeartbeatConfig;
+  /** Per-session init config forwarded to the gateway in the AEP init handshake. */
+  initConfig?: InitConfig;
 }
 
 export interface ReconnectConfig {

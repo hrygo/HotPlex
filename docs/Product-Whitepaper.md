@@ -991,7 +991,7 @@ db:
 
 worker:
   max_lifetime: 24h
-  idle_timeout: 30m
+  idle_timeout: 60m
   execution_timeout: 10m
   env_whitelist:
     - HOME

@@ -89,12 +89,16 @@ gateway:
   idle_timeout: 5m      # 客户端空闲断开时间
 
 worker:
-  idle_timeout: 30m     # Worker 无活动自动休眠时间
+  idle_timeout: 60m     # Worker 无活动自动休眠时间
   max_lifetime: 24h     # Worker 强制重启周期
 
 security:
   api_keys:             # 允许接入的 API Key 列表
     - "sk-my-secret-key"
+
+agent_config:
+  enabled: true         # 启用 Agent 人格/上下文注入
+  config_dir: "~/.hotplex/agent-configs"  # SOUL.md, AGENTS.md, USER.md 等
 
 admin:
   addr: ":9999"         # 管理端口

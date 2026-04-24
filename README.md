@@ -40,6 +40,10 @@ Hotplex is a high-performance Go gateway that provides a **single WebSocket inte
 - 🔹 **Multi-Channel Bridge**: Bidirectional support for **Slack** (Socket Mode) and **Feishu** (WebSocket).
 - 🔹 **Worker Adapters**: Out-of-the-box support for Claude Code, OpenCode Server, and Pi-mono.
 
+### 🤖 Agent Intelligence
+- 🔹 **Agent Config System**: Define agent personality (SOUL.md), workspace rules (AGENTS.md), tool guides (SKILLS.md), user profile (USER.md), and persistent memory (MEMORY.md) — automatically injected into every worker session via B/C dual channels.
+- 🔹 **Platform Variants**: Per-platform config overrides (e.g. `SOUL.slack.md`, `SOUL.feishu.md`) appended automatically for channel-specific behavior.
+
 ### 🛡️ Reliability & Security
 - 🔹 **Robust Session Management**: 5-state lifecycle machine with crash recovery and auto-reconnection.
 - 🔹 **Security First**: JWT ES256 authentication, SSRF protection, and command whitelisting.
@@ -75,7 +79,8 @@ make quickstart
 ```bash
 make dev
 ```
-- **Gateway**: `http://localhost:8888`
+- **Gateway WebSocket**: `ws://localhost:8888/ws`
+- **Admin API**: `http://localhost:9999`
 - **Web Chat**: `http://localhost:3000`
 
 ### 3. Connect via Go SDK
@@ -89,16 +94,21 @@ import (
 )
 
 func main() {
-    c, _ := client.Connect(context.Background(), "ws://localhost:8888/ws",
-        client.WithToken("<your-jwt-token>"),
+    c, err := client.New(context.Background(),
+        client.URL("ws://localhost:8888/ws"),
+        client.WorkerType("claude_code"),
+        client.APIKey("<your-api-key>"),
     )
+    if err != nil {
+        panic(err)
+    }
     defer c.Close()
 
     c.SendInput(context.Background(), "Explain Hotplex architecture")
 
     for env := range c.Events() {
-        if env.Event.Type == "message.delta" {
-            fmt.Print(env.Event.Data.(map[string]any)["content"])
+        if data, ok := env.AsMessageDeltaData(); ok {
+            fmt.Print(data.Content)
         }
     }
 }
@@ -114,10 +124,10 @@ Hotplex acts as an orchestration layer between frontend clients and backend codi
 
 | Language | Path | Features |
 |:---:|:---|:---|
-| **Go** | [`client/`](client/) | **Full feature**, event-driven, production-grade |
-| **TypeScript** | [`examples/typescript/`](examples/typescript-client/) | Streaming, multi-turn chat, React compatible |
-| **Python** | [`examples/python/`](examples/python-client/) | Asyncio, session resume, CLI ready |
-| **Java** | [`examples/java/`](examples/java-client/) | Enterprise AEP v1 implementation |
+| **Go** | [`client/`](client/) | **Full feature**, channel-based events, production-grade |
+| **TypeScript** | [`examples/typescript-client/`](examples/typescript-client/) | Streaming, multi-turn chat, React compatible |
+| **Python** | [`examples/python-client/`](examples/python-client/) | Asyncio, session resume, CLI ready |
+| **Java** | [`examples/java-client/`](examples/java-client/) | Enterprise AEP v1 implementation |
 
 ## 🛠️ Configuration
 
@@ -125,9 +135,11 @@ Hotplex uses Viper for configuration with support for environment variable overr
 
 | Key | Default | Description |
 |:---|:---|:---|
+| `agent_config.enabled` | `true` | Enable agent personality/context injection |
+| `agent_config.config_dir` | `~/.hotplex/agent-configs/` | Directory for SOUL.md, AGENTS.md, etc. |
 | `gateway.addr` | `:8888` | WebSocket gateway endpoint |
 | `admin.addr` | `:9999` | Admin API endpoint |
-| `db.path` | `data/hotplex.db` | SQLite database location |
+| `db.path` | `~/.hotplex/data/hotplex.db` | SQLite database location |
 | `log.level` | `info` | debug, info, warn, error |
 
 > [!TIP]
@@ -139,7 +151,7 @@ Hotplex uses Viper for configuration with support for environment variable overr
 |:---|:---|
 | **Getting Started** | [Quick Start](docs/User-Manual.md) · [Reference Manual](docs/Reference-Manual.md) · [Whitepaper](docs/Product-Whitepaper.md) |
 | **Protocol** | [AEP v1 Specification](docs/architecture/AEP-v1-Protocol.md) |
-| **Internals** | [Gateway Design](docs/architecture/Worker-Gateway-Design.md) · [Security](docs/security/Security-Authentication.md) |
+| **Internals** | [Gateway Design](docs/architecture/Worker-Gateway-Design.md) · [Agent Config Design](docs/architecture/Agent-Config-Design.md) · [Security](docs/security/Security-Authentication.md) |
 | **Management** | [Admin API](docs/management/Admin-API-Design.md) · [Testing](docs/testing/Testing-Strategy.md) |
 
 ## 👥 Contributing

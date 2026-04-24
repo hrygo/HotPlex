@@ -260,7 +260,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	// Initialize HTTP connection with buffered channel for backpressure
-	w.initHTTPConn(session.UserID, sessionID)
+	w.initHTTPConn(session.UserID, sessionID, session.SystemPrompt)
 
 	w.cmd = &ServerCommander{
 		client:    w.client,
@@ -377,7 +377,7 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	// Reuse existing session ID (session.SessionID provided by caller)
-	w.initHTTPConn(session.UserID, session.SessionID)
+	w.initHTTPConn(session.UserID, session.SessionID, session.SystemPrompt)
 
 	w.cmd = &ServerCommander{
 		client:    w.client,
@@ -605,7 +605,7 @@ func (w *Worker) terminateProcess() {
 // createSession creates a new session via HTTP API.
 func (w *Worker) createSession(ctx context.Context, projectDir string) (string, error) {
 	reqBody := strings.NewReader(fmt.Sprintf(`{"project_dir": %q}`, projectDir))
-	req, err := http.NewRequestWithContext(ctx, "POST", w.httpAddr+"/sessions", reqBody)
+	req, err := http.NewRequestWithContext(ctx, "POST", w.httpAddr+"/session", reqBody)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -623,24 +623,25 @@ func (w *Worker) createSession(ctx context.Context, projectDir string) (string, 
 	}
 
 	var result struct {
-		SessionID string `json:"session_id"`
+		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 
-	return result.SessionID, nil
+	return result.ID, nil
 }
 
 // initHTTPConn creates and assigns the HTTP connection for a session.
-func (w *Worker) initHTTPConn(userID, sessionID string) {
+func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string) {
 	w.httpConn = &conn{
-		userID:    userID,
-		sessionID: sessionID,
-		httpAddr:  w.httpAddr,
-		client:    w.client,
-		recvCh:    make(chan *events.Envelope, recvChannelSize),
-		log:       w.Log,
+		userID:       userID,
+		sessionID:    sessionID,
+		httpAddr:     w.httpAddr,
+		client:       w.client,
+		recvCh:       make(chan *events.Envelope, recvChannelSize),
+		log:          w.Log,
+		systemPrompt: systemPrompt,
 	}
 }
 
@@ -888,18 +889,24 @@ func answersToArrays(m map[string]string) [][]string {
 
 // conn implements the worker.SessionConn interface for HTTP-based communication.
 type conn struct {
-	userID    string
-	sessionID string
-	httpAddr  string
-	client    *http.Client
-	recvCh    chan *events.Envelope // Buffered channel for SSE events
-	log       *slog.Logger
+	userID       string
+	sessionID    string
+	httpAddr     string
+	client       *http.Client
+	recvCh       chan *events.Envelope // Buffered channel for SSE events
+	log          *slog.Logger
+	systemPrompt string // Agent config system prompt — attached to every message (OCS has no cross-message persistence)
+
 	mu        sync.Mutex
 	closed    bool
 	closeOnce sync.Once // Prevent double-close panic on recvCh
 }
 
-// Send posts an input message to the OpenCode server.
+// Send posts an input message to the OpenCode server via /session/:id/message.
+//
+// The request body uses the PromptInput format with parts[] and optional system field.
+// IMPORTANT: The system field has no cross-message persistence in OCS — it must be
+// attached to every message, otherwise injected context is lost.
 //
 // # Thread Safety
 //
@@ -912,41 +919,43 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	}
 	c.mu.Unlock()
 
-	// Extract input data from envelope
-	inputData := events.InputData{}
+	// Extract text content from envelope
+	var content string
 	if msg.Event.Data != nil {
 		if data, ok := msg.Event.Data.(map[string]any); ok {
-			if content, ok := data["content"].(string); ok {
-				inputData.Content = content
-			}
-			if metadata, ok := data["metadata"].(map[string]any); ok {
-				inputData.Metadata = metadata
+			if v, ok := data["content"].(string); ok {
+				content = v
 			}
 		}
 	}
 
-	// Marshal request body
-	body, err := json.Marshal(inputData)
+	// Build PromptInput request body
+	body := map[string]any{
+		"parts": []map[string]any{{"type": "text", "text": content}},
+	}
+	if c.systemPrompt != "" {
+		body["system"] = c.systemPrompt
+	}
+
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("opencodeserver: marshal input: %w", err)
 	}
 
-	// Create HTTP request
-	url := fmt.Sprintf("%s/sessions/%s/input", c.httpAddr, c.sessionID)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(body)))
+	// POST /session/:id/message (singular session prefix)
+	url := fmt.Sprintf("%s/session/%s/message", c.httpAddr, c.sessionID)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(payload)))
 	if err != nil {
 		return fmt.Errorf("opencodeserver: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Send request
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("opencodeserver: send input: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Check response status
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("opencodeserver: input failed: status %d, body: %s",

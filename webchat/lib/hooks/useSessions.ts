@@ -17,6 +17,7 @@ import {
   deleteSession,
   type SessionInfo,
 } from '@/lib/api/sessions';
+import { workerType as defaultWorkerType } from '@/lib/config';
 
 export interface UseSessionsOptions {
   /** Called when the active session changes (user selects or creates). */
@@ -37,6 +38,7 @@ export interface UseSessionsReturn {
   createNewSession: (workerType?: string) => Promise<void>;
   removeSession: (id: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
+  handleSessionSelect: (id: string) => void;
 }
 
 export function useSessions({
@@ -54,19 +56,73 @@ export function useSessions({
   const initialRef = useRef(initialSessionId);
   initialRef.current = initialSessionId;
 
+  const isCreating = useRef(false);
+  const STORAGE_KEY = 'hotplex_active_session_id';
+  const DEFAULT_WORKER_TYPE = defaultWorkerType;
+
+  // Deterministic anchor session ID — ensures the first auto-created session
+  // maps to the same server-side key via DeriveSessionKey(userID, workerType, clientSessionID, workDir).
+  const MAIN_SESSION_ID = 'main';
+
   const refreshSessions = useCallback(async () => {
     try {
       setError(null);
       const { sessions: list } = await listSessions(20, 0);
-      setSessions(list.filter(s => s.state !== 'deleted'));
+      const filtered = list.filter(s => s.state !== 'deleted');
+      setSessions(filtered);
 
-      // If we have an initial session, find it in the list
+      // 1. Try to restore from props (initialSessionId)
       const initId = initialRef.current;
       if (initId) {
-        const found = list.find(s => s.id === initId);
+        const found = filtered.find(s => s.id === initId);
         if (found) {
           setActiveSession(found);
           onSelectRef.current(found.id);
+          return;
+        }
+      }
+
+      // 2. Try to restore from localStorage for persistence
+      const savedId = localStorage.getItem(STORAGE_KEY);
+      if (savedId) {
+        const found = filtered.find(s => s.id === savedId);
+        if (found) {
+          setActiveSession(found);
+          onSelectRef.current(found.id);
+          return;
+        } else {
+          // Stale ID found in storage but not in active list -> clear it
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      }
+
+      // 3. Auto-select most recent if existing
+      if (filtered.length > 0) {
+        const mostRecent = filtered.reduce((a, b) =>
+          new Date(a.updated_at) > new Date(b.updated_at) ? a : b
+        );
+        setActiveSession(mostRecent);
+        onSelectRef.current(mostRecent.id);
+        localStorage.setItem(STORAGE_KEY, mostRecent.id);
+        return;
+      }
+
+      // 4. No sessions at all? Auto-create the first one to "map to same session" by default
+      if (!initId && !savedId && filtered.length === 0 && !isCreating.current) {
+        isCreating.current = true;
+        try {
+          const { session_id } = await createSession(DEFAULT_WORKER_TYPE, MAIN_SESSION_ID);
+          
+          const { sessions: updatedList } = await listSessions(5, 0);
+          const newSession = updatedList.find(s => s.id === session_id);
+          if (newSession) {
+            setSessions([newSession]);
+            setActiveSession(newSession);
+            onSelectRef.current(newSession.id);
+            localStorage.setItem(STORAGE_KEY, newSession.id);
+          }
+        } finally {
+          isCreating.current = false;
         }
       }
     } catch (e) {
@@ -82,56 +138,63 @@ export function useSessions({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-select most recent session if no initial and no active
-  useEffect(() => {
-    if (!isLoading && sessions.length > 0 && !activeSession && !initialRef.current) {
-      const mostRecent = sessions.reduce((a, b) =>
-        new Date(a.updated_at) > new Date(b.updated_at) ? a : b
-      );
-      setActiveSession(mostRecent);
-      onSelectRef.current(mostRecent.id);
-    }
-  }, [isLoading, sessions, activeSession]);
-
   const selectSession = useCallback((session: SessionInfo) => {
     setActiveSession(session);
     onSelectRef.current(session.id);
+    localStorage.setItem(STORAGE_KEY, session.id);
     setIsOpen(false);
   }, []);
 
-  const createNewSession = useCallback(async (workerType = 'claude_code') => {
+  const createNewSession = useCallback(async (workerType?: string) => {
+    const wt = workerType || DEFAULT_WORKER_TYPE;
+    if (isCreating.current) return;
+    isCreating.current = true;
     setIsLoading(true);
     try {
-      const { session_id } = await createSession(workerType);
+      const { session_id } = await createSession(wt);
+
+      const { sessions: list } = await listSessions(20, 0);
+      const filtered = list.filter(s => s.state !== 'deleted');
+      setSessions(filtered);
       
-      // Force a slight delay to ensure the database has indexed the new session
-      // (Optional, but helps with consistency in distributed environments)
-      await new Promise(r => setTimeout(r, 100));
-      
-      await refreshSessions();
-      onSelectRef.current(session_id);
+      const newSession = filtered.find(s => s.id === session_id);
+      if (newSession) {
+        setActiveSession(newSession);
+        onSelectRef.current(session_id);
+        localStorage.setItem(STORAGE_KEY, session_id);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create session');
     } finally {
       setIsLoading(false);
+      isCreating.current = false;
     }
-  }, [refreshSessions]);
+  }, []);
 
   const removeSession = useCallback(async (id: string) => {
     // Optimistic remove
-    const prev = sessions;
-    setSessions(sessions => sessions.filter(s => s.id !== id));
+    setSessions((prev) => prev.filter((s) => s.id !== id));
     if (activeSession?.id === id) {
       setActiveSession(null);
+      localStorage.removeItem(STORAGE_KEY);
     }
+
     try {
       await deleteSession(id);
-    } catch {
-      // Rollback
-      setSessions(prev);
-      setError('Failed to delete session');
+    } catch (e) {
+      console.error('Failed to delete session', e);
+      // Revert optimistic remove on failure
+      refreshSessions();
     }
-  }, [sessions, activeSession]);
+  }, [activeSession, refreshSessions]);
+
+  // Handle manual session selection
+  const handleSessionSelect = useCallback((id: string) => {
+    const session = sessions.find(s => s.id === id);
+    if (session) {
+      selectSession(session);
+    }
+  }, [sessions, selectSession]);
 
   return {
     sessions,
@@ -141,9 +204,10 @@ export function useSessions({
     isOpen,
     openPanel: () => setIsOpen(true),
     closePanel: () => setIsOpen(false),
-    selectSession,
+    refreshSessions,
     createNewSession,
     removeSession,
-    refreshSessions,
+    selectSession,
+    handleSessionSelect,
   };
 }

@@ -6,7 +6,7 @@ Slack platform adapter using Socket Mode for real-time messaging. Handles stream
 ## STRUCTURE
 ```
 slack/
-  adapter.go          # Adapter struct, lifecycle, session mgmt (756 lines)
+  adapter.go          # Adapter struct, lifecycle, session mgmt (1208 lines)
   stream.go           # SlackStreamingWriter: 150ms flush, 20-rune threshold, 3 retries (362 lines)
   interaction.go      # Permission/Q&A/elicitation block handling (445 lines)
   slash_command.go    # Slash command handlers (/gc, /reset, /park, /new) (182 lines)

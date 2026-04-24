@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Last updated:** 2026-04-24 · **Commit:** 66631898 · **Branch:** feat/19-cli-self-service
+**Last updated:** 2026-04-25 · **Commit:** eba36f15 · **Branch:** feat/25-agent-config-implementation
 
 ## OVERVIEW
 
@@ -49,21 +49,22 @@ cmd/hotplex/version.go       (~46 lines)  version subcommand
 - `admin/`      Admin API: handlers, middleware, rate-limit, log buffer
 - `aep/`        AEP v1 codec: JSON envelope encode/decode/validate
 - `config/`     Viper config + file watcher + hot-reload
+- `agentconfig/` Agent personality/context loader: B-channel (system prompt) + C-channel (rules injection)
 
 **Gateway** (WebSocket)
 - `gateway/hub.go`     WS broadcast hub: conn registry, session routing, seq gen
 - `gateway/conn.go`    Single WS connection: read/write pumps, heartbeat
 - `gateway/handler.go`  AEP event dispatch (input, ping, control)
-- `gateway/bridge.go`  Session ↔ worker lifecycle orchestration + LLM retry integration
+- `gateway/bridge.go`  Session ↔ worker lifecycle orchestration + LLM retry + agent config injection
 - `gateway/llm_retry.go`  LLMRetryController: exponential backoff on retryable errors
-- `gateway/api.go`     GatewayAPI: HTTP session endpoints (list/get/terminate)
+- `gateway/api.go`     GatewayAPI: HTTP session endpoints (list/get/terminate/create with idempotency)
 - `gateway/init.go`    Init handshake: InitData, InitAckData, caps, 30s timeout
 - `gateway/heartbeat.go` Missed ping counter with stop channel
 - `gateway/session_stats.go` Session statistics tracking
 
 **Session**
-- `session/manager.go`   5-state machine, state transitions, GC
-- `session/store.go`     SQLite persistence (Upsert, Get, List, expired)
+- `session/manager.go`   5-state machine, state transitions, GC, physical delete
+- `session/store.go`     SQLite persistence (Upsert, Get, List, expired, DeletePhysical)
 - `session/message_store.go`  Event log, single-writer goroutine
 - `session/key.go`       DeriveSessionKey (UUIDv5) + PlatformContext for deterministic session IDs
 - `session/pool.go`      PoolManager: global + per-user quota + per-user memory tracking
@@ -138,12 +139,15 @@ configs/  config.yaml, config-dev.yaml, env.example
 - Route registration → `cmd/hotplex/routes.go` — HTTP routes for gateway WS, admin API, health, metrics
 
 **Modify existing**
-- Session lifecycle → `internal/session/manager.go` — state machine + `TransitionWithInput` atomicity
+- Agent config files → `internal/agentconfig/loader.go` — file loading, size limits, frontmatter stripping; `cc_prompt.go` / `ocs_prompt.go` for prompt assembly; `cc_rules.go` for C-channel rules injection
+- Agent config directory → `~/.hotplex/agent-configs/` — place SOUL.md, AGENTS.md, SKILLS.md (B-channel) + USER.md, MEMORY.md (C-channel); platform variants like SOUL.slack.md
+- Session lifecycle → `internal/session/manager.go` — state machine + `TransitionWithInput` atomicity + `DeletePhysical` for forced removal
 - Session key derivation → `internal/session/key.go` — UUIDv5 deterministic session IDs + platform context
 - WebSocket protocol → `internal/gateway/conn.go` — ReadPump/WritePump + Handler dispatch
 - LLM auto-retry → `internal/gateway/llm_retry.go` — retryable error detection + exponential backoff
-- Gateway HTTP API → `internal/gateway/api.go` — session list/get/terminate over HTTP
-- Config structure → `internal/config/config.go` — structs + Default() + Validate()
+- Gateway HTTP API → `internal/gateway/api.go` — session list/get/terminate/create over HTTP (CreateSession has idempotency: reuses active sessions, physically deletes deleted ones)
+- Config structure → `internal/config/config.go` — structs + Default() + Validate() (includes `AgentConfig` for agent personality/context loading)
+- Agent config injection → `internal/gateway/bridge.go` — `injectAgentConfig()` loads configs and applies B/C channels per worker type at Start/Resume/Fresh-start
 - STT config → `internal/config/config.go` — FeishuConfig.STTProvider/STTLocalCmd/STTLocalMode/STTLocalIdleTTL + SlackConfig.STTProvider/STTLocalCmd/STTLocalMode/STTLocalIdleTTL
 - Wire messaging adapter → `cmd/hotplex/serve.go` — `startMessagingAdapters()`: config → New → Configure → SetConnFactory → Start
 
@@ -161,21 +165,21 @@ configs/  config.yaml, config-dev.yaml, env.example
 - `GatewayDeps` → `cmd/hotplex/serve.go` — gateway DI container, signal handler, messaging init, LLM retry init
 
 **Gateway** (`internal/gateway/`)
-- `Hub` → `hub.go:57` — WS broadcast hub, conn registry, session routing, seq gen
-- `Conn` → `conn.go:27` — single WS connection, read/write pumps, heartbeat
+- `Hub` → `hub.go:68` — WS broadcast hub, conn registry, session routing, seq gen
+- `Conn` → `conn.go:35` — single WS connection, read/write pumps, heartbeat
 - `Handler` → `handler.go` — AEP event dispatch (input, ping, control) + panic recovery
-- `Bridge` → `bridge.go` — session ↔ worker lifecycle, StartPlatformSession, fresh start fallback, InputRecoverer, LLM retry integration
+- `Bridge` → `bridge.go` — session ↔ worker lifecycle, StartPlatformSession, fresh start fallback, InputRecoverer, LLM retry integration, agent config injection
 - `LLMRetryController` → `llm_retry.go` — retryable error pattern detection, per-session attempt tracking, exponential backoff
-- `GatewayAPI` → `api.go` — HTTP session endpoints: ListSessions, GetSession, TerminateSession
+- `GatewayAPI` → `api.go` — HTTP session endpoints: ListSessions, GetSession, TerminateSession, CreateSession (idempotent with DeletePhysical fallback)
 - `pcEntry` → `hub.go` — wraps PlatformConn for sessions map
 
 **Session** (`internal/session/`)
-- `Manager` → `manager.go:34` — 5-state machine, transitions, GC, worker attach/detach
-- `managedSession` → `manager.go:52` — per-session state + mutex + worker ref
+- `Manager` → `manager.go:34` — 5-state machine, transitions, GC, worker attach/detach, `DeletePhysical` for forced removal bypassing state machine
+- `managedSession` → `manager.go:54` — per-session state + mutex + worker ref
 - `DeriveSessionKey` → `key.go` — UUIDv5 deterministic session ID from (ownerID, workerType, clientSessionID, workDir)
 - `PlatformContext` → `key.go` — platform-specific fields for DerivePlatformSessionKey (Slack channel/thread, Feishu chat)
 - `PoolManager` → `pool.go` — global + per-user quota, per-user memory tracking (512MB per worker estimate)
-- `Store` (interface) → `store.go:22` — SQLite: Upsert, Get, List, expired queries
+- `Store` (interface) → `store.go:22` — SQLite: Upsert, Get, List, expired queries, DeletePhysical
 - `MessageStore` (interface) → `message_store.go` — event log, single-writer goroutine
 
 **Worker** (`internal/worker/`)
@@ -204,6 +208,13 @@ configs/  config.yaml, config-dev.yaml, env.example
 - `PlatformAdapterInterface` → `platform_adapter.go:21` — Platform/Start/HandleTextMessage/Close
 - Adapter registration → `platform_adapter.go:47` — `Register(t PlatformType, b Builder)`, blank import in main.go
 
+**Agent Config** (`internal/agentconfig/`)
+- `AgentConfigs` → `loader.go` — holds loaded content: Soul/Agents/Skills (B-channel) + User/Memory (C-channel)
+- `Load` → `loader.go` — reads config dir, appends platform variants (e.g. SOUL.slack.md), strips YAML frontmatter, enforces size limits (12K/file, 60K total)
+- `BuildCCBPrompt` → `cc_prompt.go` — assembles B-channel system prompt for Claude Code (--append-system-prompt)
+- `InjectCRules` → `cc_rules.go` — writes C-channel files (USER.md, MEMORY.md) to workdir/.claude/rules/ for CC auto-discovery
+- `BuildOCSSystemPrompt` → `ocs_prompt.go` — assembles B+C combined system prompt for OpenCode Server (system field per message)
+
 **Core**
 - `Envelope` → `pkg/events/events.go:73` — AEP v1 envelope (id, version, seq, session_id, event)
 - `SessionState` → `pkg/events/events.go:240` — Created/Running/Idle/Terminated/Deleted
@@ -231,6 +242,8 @@ configs/  config.yaml, config-dev.yaml, env.example
 - **Interaction timeout**: Permission/Q&A/elicitation requests auto-deny after 5 minutes to prevent indefinite blocking
 - **Session key derivation**: UUIDv5 deterministic mapping from (ownerID, workerType, clientSessionID, workDir) for cross-environment consistency
 - **LLM auto-retry**: Configurable retryable error patterns (429, 5xx, network errors) with exponential backoff; per-session attempt tracking
+- **Agent config injection**: `agentconfig` package loads personality/context from `~/.hotplex/agent-configs/`; B-channel (SOUL.md, AGENTS.md, SKILLS.md) injected as system prompt; C-channel (USER.md, MEMORY.md) injected as rules files; platform variants (e.g. SOUL.slack.md) appended automatically; size limits: 12K/file, 60K total
+- **Session physical delete**: `DeletePhysical` bypasses state machine for forced removal — used by GatewayAPI for idempotent session creation when previous session is in `deleted` state
 - **Documentation**: 增量文档中文优先，重要文档中英双语。技术术语保留英文原文。增量文档（Issue/PR 模板、配置说明、changelog）用中文；重要文档（根 README、架构设计、协议规范）拆分为独立的中英文文件（如 `README.md` + `README_zh.md`），文件头部互相链接跳转
 - **File safety (multi-agent)**: 当前环境存在多 Agent 协同工作，对文件执行还原（`git restore`）、恢复、撤销（`git checkout`）、暂存（`git stash`）等操作前，**必须先在 `/tmp` 下创建备份**（`cp <file> /tmp/<file>.bak.$(date +%s)`），防止其他 Agent 的未提交改动被意外覆盖或丢失
 
@@ -267,6 +280,8 @@ configs/  config.yaml, config-dev.yaml, env.example
 - **LLM auto-retry**: LLMRetryController detects retryable errors via regex patterns (429/5xx/network), exponential backoff (initial 2s, max 60s), per-session attempt counter
 - **Deterministic session IDs**: DeriveSessionKey uses UUIDv5 (SHA-1 namespace+name) for cross-environment consistency; PlatformContext for platform-specific key derivation
 - **Per-user memory tracking**: PoolManager tracks estimated memory per user (512MB/worker) alongside session count quotas
+- **Agent config B/C channel split**: B-channel (system-level: SOUL.md, AGENTS.md, SKILLS.md) reaches model with different hedging per worker type; C-channel (context-level: USER.md, MEMORY.md) injected into CC rules dir for auto-discovery; OCS has no B/C distinction — all content in system field with no cross-message persistence
+- **Webchat session stickiness**: Deterministic "main" session ID via DeriveSessionKey + localStorage persistence for active session across page reloads; auto-creates first session when none exist
 
 ## COMMANDS
 
@@ -310,11 +325,13 @@ make webchat-stop             # Stop webchat dev server
 - `.claude` is symlinked to `.agent` — both directories exist
 - No `api/` directory — project uses JSON over WebSocket, not protobuf
 - Project targets POSIX only (PGID isolation requires `syscall.SysProcAttr{Setpgid: true}`)
-- Largest files: `feishu/adapter.go` (1228), `slack/adapter.go` (1208), `opencodeserver/worker.go` (1002), `bridge.go` (817), `hub.go` (808), `manager.go` (804), `config.go` (772)
+- Largest files: `feishu/adapter.go` (1228), `slack/adapter.go` (1208), `opencodeserver/worker.go` (1011), `bridge.go` (860), `hub.go` (816), `manager.go` (825), `config.go` (783)
 - STT scripts (`scripts/stt_server.py`, `scripts/fix_onnx_model.py`) are also deployed to `~/.agents/skills/audio-transcribe/scripts/` for Claude Code skill use
 - STT model: `~/.cache/modelscope/hub/models/iic/SenseVoiceSmall` (~900MB), ONNX FP32 non-quantized
-- Zombie IO timeout default: 30 minutes (configurable via `worker.execution_timeout`)
+- Zombie IO timeout default: 30 minutes (configurable via `worker.execution_timeout`); worker idle timeout default: 60 minutes (configurable via `worker.idle_timeout`)
 - OpenCode CLI adapter removed — replaced by OpenCode Server adapter
 - ACPX adapter has type constant (`TypeACPX`) but no implementation — `internal/worker/acpx/` is empty
 - Postgres store is stub only (`ErrNotImplemented`) — only SQLite is production-ready
 - `internal/gateway/api.go` provides REST session management alongside the WebSocket gateway
+- Agent config files live in `~/.hotplex/agent-configs/` (configurable via `agent_config.config_dir`): SOUL.md, AGENTS.md, SKILLS.md (B-channel), USER.md, MEMORY.md (C-channel); platform variants like SOUL.slack.md auto-appended
+- `DeletePhysical` in session.Manager bypasses state machine for forced removal — used when recreating sessions that were soft-deleted
