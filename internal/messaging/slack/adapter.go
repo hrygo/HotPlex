@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hotplex/hotplex-worker/internal/messaging"
-	"github.com/hotplex/hotplex-worker/internal/messaging/stt"
-	"github.com/hotplex/hotplex-worker/pkg/aep"
-	"github.com/hotplex/hotplex-worker/pkg/events"
+	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging/stt"
+	"github.com/hrygo/hotplex/pkg/aep"
+	"github.com/hrygo/hotplex/pkg/events"
 
 	"runtime/debug"
 

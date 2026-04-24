@@ -6,7 +6,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
+	"github.com/hrygo/hotplex/internal/cli"
 )
 
 const (

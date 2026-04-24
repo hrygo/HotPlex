@@ -15,7 +15,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hotplex/hotplex-worker/pkg/events"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // --- Phase 1.2: Dedup ---

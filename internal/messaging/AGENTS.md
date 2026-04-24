@@ -38,8 +38,8 @@ messaging/
 func init() { messaging.Register(messaging.PlatformSlack, func() (PlatformAdapterInterface, error) { return New(), nil }) }
 
 // cmd/hotplex/main.go
-_ "hotplex-worker/internal/messaging/slack"
-_ "hotplex-worker/internal/messaging/feishu"
+_ "hotplex/internal/messaging/slack"
+_ "hotplex/internal/messaging/feishu"
 ```
 
 **3-step Bridge lifecycle**

@@ -78,7 +78,7 @@ func (c *Config) Validate() []string {
 		errs = append(errs, "gateway.addr is required (or use default :8080)")
 	}
 	if c.DB.Path == "" {
-		errs = append(errs, "db.path is required (or use default hotplex-worker.db)")
+		errs = append(errs, "db.path is required (or use default hotplex.db)")
 	}
 	if c.Session.RetentionPeriod <= 0 {
 		errs = append(errs, "session.retention_period must be positive")
@@ -356,7 +356,7 @@ func Default() *Config {
 			DeltaCoalesceSize:     200,
 		},
 		DB: DBConfig{
-			Path:         filepath.Join(HotplexHome(), "data", "hotplex-worker.db"),
+			Path:         filepath.Join(HotplexHome(), "data", "hotplex.db"),
 			WALMode:      true,
 			BusyTimeout:  500 * time.Millisecond,
 			MaxOpenConns: 1,
@@ -412,8 +412,8 @@ func Default() *Config {
 				GroupPolicy:    "allowlist",
 				STTConfig: STTConfig{
 					Provider:     "feishu+local",
-					LocalCmd:     "python3 scripts/stt_once.py {file}",
-					LocalMode:    "ephemeral",
+					LocalCmd:     "python3 " + filepath.Join(HotplexHome(), "scripts", "stt_server.py"),
+					LocalMode:    "persistent",
 					LocalIdleTTL: time.Hour,
 				},
 			},
@@ -423,7 +423,7 @@ func Default() *Config {
 				GroupPolicy:    "allowlist",
 				STTConfig: STTConfig{
 					Provider:     "local",
-					LocalCmd:     "python3 scripts/stt_once.py {file}",
+					LocalCmd:     "python3 " + filepath.Join(HotplexHome(), "scripts", "stt_server.py"),
 					LocalMode:    "persistent",
 					LocalIdleTTL: time.Hour,
 				},

@@ -88,7 +88,7 @@ security:
   tls_key_file: "/etc/hotplex/tls/server.key"
   allowed_origins:
     - "*"
-  jwt_audience: "hotplex-worker-gateway"
+  jwt_audience: "hotplex-gateway"
 
 `)
 

@@ -102,7 +102,7 @@ log:
 
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
-| `path` | string | `~/.hotplex/data/hotplex-worker.db` | — | SQLite 数据库文件路径。`~` 自动展开为用户主目录。文件不存在时自动创建。加载时自动转为绝对路径 |
+| `path` | string | `~/.hotplex/data/hotplex.db` | — | SQLite 数据库文件路径。`~` 自动展开为用户主目录。文件不存在时自动创建。加载时自动转为绝对路径 |
 | `wal_mode` | bool | `true` | — | 启用 Write-Ahead Logging 模式。WAL 允许并发读写（读不阻塞写），是单写 goroutine 架构的前提。**禁止关闭**，否则写性能急剧下降且并发读不可用 |
 | `busy_timeout` | duration | `500ms` | — | SQLite 锁等待超时。当另一个写操作持有时，当前操作在此时间内重试。500ms 在单写 goroutine 模型下足够覆盖一次批量刷盘 |
 | `max_open_conns` | int | `1` | — | 最大数据库连接数。SQLite 的并发写入受限于单连接，设为 1 确保所有操作在同一连接上串行化 |
@@ -119,7 +119,7 @@ log:
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径。仅当 `tls_enabled: true` 时使用 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径。仅当 `tls_enabled: true` 时使用 |
 | `allowed_origins` | []string | `["*"]` | ✅ | CORS 允许的 Origin 列表。WebSocket 升级时 `Upgrader.CheckOrigin` 校验请求的 Origin 头。`["*"]` 允许所有来源（仅开发用），生产应限制为具体域名。热重载即时生效——每次 WS 升级请求读取最新配置 |
-| `jwt_audience` | string | `hotplex-worker-gateway` | — | JWT `aud` 声明的期望值。用于验证令牌的目标受众，防止令牌跨服务复用 |
+| `jwt_audience` | string | `hotplex-gateway` | — | JWT `aud` 声明的期望值。用于验证令牌的目标受众，防止令牌跨服务复用 |
 | `jwt_secret` | []byte | — | — | JWT 签名密钥（ES256）。**仅**通过 `HOTPLEX_JWT_SECRET` 环境变量提供（base64 编码），禁止写入 YAML。用于签发和验证 session token |
 
 ### session — 会话生命周期

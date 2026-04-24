@@ -13,7 +13,7 @@ import (
 
 	"github.com/slack-go/slack"
 
-	"github.com/hotplex/hotplex-worker/pkg/events"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // StatusType represents the current AI processing phase.

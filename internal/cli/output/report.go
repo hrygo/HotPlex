@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
+	"github.com/hrygo/hotplex/internal/cli"
 )
 
 type JSONReport struct {

@@ -32,28 +32,40 @@ SystemPromptReplace string  // → --system-prompt
 
 **当前 Worker 使用**:
 ```
-POST /sessions/{id}/input
+POST /sessions/{id}/input          ← 两个错误: /sessions 应为 /session; /input 端点不存在
 Body: {"content": "...", "metadata": {...}}
 ```
 
-**OCS 实际端点** (`packages/opencode/src/server/routes/instance/session.ts:846`):
+**OCS 实际端点** (核实: `~/opencode/packages/opencode/src/server/routes/instance/`):
+- InstanceRoutes (index.ts:58) 挂载 `SessionRoutes()` 在 `/session` 前缀下 (单数)
+- SessionRoutes (session.ts:847) 定义 `POST /:sessionID/message`
+- 完整路径: `POST /session/:sessionID/message`
 ```
-POST /sessions/:sessionID/message
+POST /session/:sessionID/message
 Body: {parts: [{type: "text", text: "..."}], system?: "...", agent?: "...", model?: {...}}
 ```
 
-`/input` 端点在 OCS 源码中**不存在**。需整个请求格式迁移。
+**两个迁移点**:
+1. URL 从 `/sessions/{id}/input` → `/session/{id}/message` (前缀单数 + 路径变更)
+2. 请求体从 `InputData{Content, Metadata}` → `PromptInput{parts[], system?}`
 
-### 2.3 OCS 无 Sticky 行为
+另外: 创建 session 路径也应为 `POST /session` (非 `/sessions`)，
+返回 `Session.Info` 含 `id` 字段 (非 `session_id`)，hotplex 的 `createSession` 需适配。
 
-设计文档声称的 "S2 → S3 Sticky 持久性" 经核实**不存在**。
+### 2.3 OCS System 字段行为 (源码核实修正)
 
-实际行为 (`prompt.ts:1319-1483`):
-- `system` 字段存储在 `MessageV2.User.system` (per-message)
-- `input.user.system` 来自**当前消息**，非历史消息
-- **每条消息必须显式携带 `system` 字段**
+设计文档声称的 "S3 Sticky 持久性" 经源码核实需修正。
 
-影响: 实现更简单 — 不需要担心 sticky 状态或 Compaction 丢失。
+**核实依据**: `~/opencode` 本地源码 `llm.ts` + `prompt.ts` (2026-04-24 核实)
+
+实际行为:
+- `llm.ts` system prompt 组装: `agent.prompt | provider prompt` + `input.system` + `input.user.system`
+- `input.user` 即 `lastUser` — 从消息历史倒序查找的最后一个 user 消息
+- **同一 prompt cycle 内** (tool 迭代): `lastUser` 不变 → system 持续生效
+- **跨消息时**: 新 user 消息成为新 `lastUser` → 若不带 `system` 则旧注入丢失
+- **结论: HotPlex 每条消息都必须携带 `system` 字段** — 不存在跨消息自动继承
+
+影响: 实现方案不变 — 每条 Send() 都附带 system prompt。Compaction 只影响历史回溯，不影响当前轮次。
 
 ## 3. Config 加载架构
 
@@ -214,14 +226,14 @@ POST /sessions/{id}/input
 
 **目标**:
 ```
-POST /sessions/{id}/message
+POST /session/{id}/message
 {
   "parts": [{"type": "text", "text": "..."}],
   "system": "optional system prompt"
 }
 ```
 
-经源码核实 (`prompt.ts:1704-1742`)：`model` 和 `agent` 均为 **optional**。
+经源码核实 (`~/opencode` PromptInput schema, prompt.ts:1704-1729)：`model`、`agent`、`system` 均为 **optional**。
 OCS 自动 fallback: agent → `agents.defaultAgent()`，model → agent 配置 → session 上次使用。
 **HotPlex 只需提供 `parts` + `system`，不传 model/agent。**
 
@@ -252,7 +264,7 @@ B+C 合并组装 (OCS 无 hedging，所有内容同等权重):
 [MEMORY.md]
 ```
 
-**每条消息都附带 `system` 字段** — OCS 无 sticky，不附带则丢失。
+**每条消息都附带 `system` 字段** — OCS 无跨消息持久性，不附带则注入丢失。
 
 ## 6. 实施计划
 

@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
-	"github.com/hotplex/hotplex-worker/internal/cli/checkers"
-	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hrygo/hotplex/internal/cli"
+	"github.com/hrygo/hotplex/internal/cli/checkers"
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 func newSecurityCmd() *cobra.Command {
@@ -20,6 +20,13 @@ func newSecurityCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "security",
 		Short: "Run security audit",
+		Long: `Run a security audit on your HotPlex configuration.
+Checks TLS settings, SSRF protection, JWT configuration, and access policies.
+Use --fix to automatically resolve issues where possible.`,
+		Example: `  hotplex security                   # Run security audit
+  hotplex security -v                # Verbose output
+  hotplex security --fix             # Auto-fix security issues
+  hotplex security --json            # JSON output`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, _ := cmd.Flags().GetString("config")
 			if configPath == "" {
@@ -70,8 +77,7 @@ func newSecurityCmd() *cobra.Command {
 
 			outputResults(os.Stderr, diags, verbose, jsonOutput)
 
-			_, _, fail := countStatuses(diags)
-			if fail > 0 {
+			if fail := countFailures(diags); fail > 0 {
 				os.Exit(1)
 			}
 			return nil

@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/hotplex/hotplex-worker/internal/cli/onboard"
+	"github.com/hrygo/hotplex/internal/cli/onboard"
 )
 
 func newOnboardCmd() *cobra.Command {
@@ -23,16 +21,18 @@ func newOnboardCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "onboard",
 		Short: "Interactive configuration wizard",
+		Long: `Interactive configuration wizard for first-time setup.
+Guides you through creating config.yaml and .env with sensible defaults.
+Supports non-interactive mode for automated deployments.`,
+		Example: `  hotplex onboard                    # Interactive setup
+  hotplex onboard --non-interactive   # Use defaults, no prompts
+  hotplex onboard --enable-slack --enable-feishu  # Enable all platforms
+  hotplex onboard --force             # Overwrite existing config`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if configPath == "" {
 				configPath = "~/.hotplex/config.yaml"
 			}
-			if strings.HasPrefix(configPath, "~/") {
-				home, _ := os.UserHomeDir()
-				if home != "" {
-					configPath = filepath.Join(home, configPath[2:])
-				}
-			}
+			configPath = expandPath(configPath)
 
 			result, err := onboard.Run(context.Background(), onboard.WizardOptions{
 				ConfigPath:        configPath,

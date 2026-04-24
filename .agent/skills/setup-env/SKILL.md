@@ -9,7 +9,7 @@ Standardized workflow to configure the `.env` file for both Slack and Feishu mes
 
 ## Prerequisites
 
-- Project root: `/Users/huangzhonghui/hotplex-worker`
+- Project root: current working directory (the skill runs inside the HotPlex Worker repo)
 - Example file: `configs/env.example`
 - Target file: `.env` (project root, gitignored)
 
@@ -24,6 +24,7 @@ Standardized workflow to configure the `.env` file for both Slack and Feishu mes
 | Section | Required Fields | Status |
 |---------|----------------|--------|
 | Secrets | `HOTPLEX_JWT_SECRET`, `HOTPLEX_ADMIN_TOKEN_1` | Present / Missing |
+| WorkDir | `SLACK_WORK_DIR`, `FEISHU_WORK_DIR` | Configured / Missing |
 | Slack | `BOT_TOKEN`, `APP_TOKEN` | Present / Missing |
 | Feishu | `APP_ID`, `APP_SECRET` | Present / Missing |
 | Slack STT | `STT_PROVIDER` | Configured / Missing |
@@ -67,6 +68,30 @@ curl -s -X POST "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/in
 - `code != 0` → report error to user, ask for correct credentials
 
 If validation fails, report the exact error and re-ask. Do NOT proceed with invalid tokens.
+
+### Step 3.5: Configure Work Directory
+
+Worker processes (e.g. `claude` CLI) need a working directory for each session. WorkDir follows a 3-tier priority: session-level > platform-level > global default (`~/.hotplex/workspace`).
+
+Ask the user where their project code lives for each enabled platform:
+
+```
+Where should the Worker run for Slack sessions? (default: ~/.hotplex/workspace)
+Where should the Worker run for Feishu sessions? (default: ~/.hotplex/workspace)
+```
+
+Typical values:
+- A specific project repo: `/home/user/my-project`
+- A shared workspace: `~/projects`
+- Platform-default (empty = use `worker.default_work_dir`)
+
+Set the corresponding env vars only if the user specifies a non-default path:
+```
+HOTPLEX_MESSAGING_SLACK_WORK_DIR=/path/to/project    # only if Slack enabled and user specified
+HOTPLEX_MESSAGING_FEISHU_WORK_DIR=/path/to/project   # only if Feishu enabled and user specified
+```
+
+If the user accepts the default, leave the variable commented out or unset — the global `worker.default_work_dir` (`~/.hotplex/workspace`) applies automatically.
 
 ### Step 4: Auto-fetch User IDs
 
@@ -139,6 +164,7 @@ HOTPLEX_MESSAGING_SLACK_ENABLED=true
 HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=<token>
 HOTPLEX_MESSAGING_SLACK_APP_TOKEN=<token>
 HOTPLEX_MESSAGING_SLACK_WORKER_TYPE=claude_code
+HOTPLEX_MESSAGING_SLACK_WORK_DIR=<path>  # project dir for worker sessions
 HOTPLEX_MESSAGING_SLACK_DM_POLICY=<policy>
 HOTPLEX_MESSAGING_SLACK_GROUP_POLICY=<policy>
 HOTPLEX_MESSAGING_SLACK_REQUIRE_MENTION=true
@@ -153,6 +179,7 @@ HOTPLEX_MESSAGING_FEISHU_ENABLED=true
 HOTPLEX_MESSAGING_FEISHU_APP_ID=<app_id>
 HOTPLEX_MESSAGING_FEISHU_APP_SECRET=<secret>
 HOTPLEX_MESSAGING_FEISHU_WORKER_TYPE=claude_code
+HOTPLEX_MESSAGING_FEISHU_WORK_DIR=<path>  # project dir for worker sessions
 HOTPLEX_MESSAGING_FEISHU_DM_POLICY=<policy>
 HOTPLEX_MESSAGING_FEISHU_GROUP_POLICY=<policy>
 HOTPLEX_MESSAGING_FEISHU_REQUIRE_MENTION=true
@@ -178,8 +205,10 @@ Present a final configuration summary table:
 |---------|-------|
 | Slack Bot | xoxb-...xxxx (validated) |
 | Slack User ID | U0XXXXX |
+| Slack WorkDir | /path/to/project |
 | Feishu App | cli_xxx (validated) |
 | Feishu User ID | ou_xxx |
+| Feishu WorkDir | /path/to/project |
 | Slack STT | local (persistent) |
 | Feishu STT | feishu+local |
 | Access Policy | allowlist |

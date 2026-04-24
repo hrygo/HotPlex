@@ -16,7 +16,7 @@
 
 set -e
 
-PROJECT_ROOT="/Users/huangzhonghui/hotplex-worker"
+PROJECT_ROOT="/Users/huangzhonghui/hotplex"
 OPENCODE_SRC="${HOME}/opencode"
 WORKER_FILE="$PROJECT_ROOT/internal/worker/opencodeserver/worker.go"
 

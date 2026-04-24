@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
+	"github.com/hrygo/hotplex/internal/cli"
 )
 
 func TestDiskSpace(t *testing.T) {

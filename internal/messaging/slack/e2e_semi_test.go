@@ -15,7 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hotplex/hotplex-worker/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging"
 )
 
 // ---------------------------------------------------------------------------

@@ -161,13 +161,6 @@ dev: dev-start
 	@echo ""
 	@echo "  $(GREEN)✓ Dev environment ready$(RESET)"
 	@echo ""
-	@echo "    Gateway  http://localhost:8888"
-	@if [ -f $(WEB_CHAT_PID) ] && kill -0 $$(cat $(WEB_CHAT_PID)) 2>/dev/null; then \
-		echo "    Webchat  http://localhost:3000"; \
-	else \
-		echo "    Webchat  $(DIM)not running$(RESET)"; fi
-	@echo "    Admin    http://localhost:9999"
-	@echo ""
 	@echo "    make dev-logs     View logs"
 	@echo "    make dev-status  Check status"
 	@echo "    make dev-stop    Stop all"

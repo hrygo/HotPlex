@@ -5,7 +5,7 @@ paths:
 
 # Go 代码规范
 
-> 适用于 hotplex-worker 项目范围的 Go 编码规范
+> 适用于 hotplex 项目范围的 Go 编码规范
 > 通用标准 → 见 `linting.md` | 测试规范 → 见 `testing.md`
 > 本文件聚焦其他规则未覆盖的**项目架构模式**
 

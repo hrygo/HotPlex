@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
+	"github.com/hrygo/hotplex/internal/cli"
 )
 
 func TestPrintDiagnostic(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
+	"github.com/hrygo/hotplex/internal/cli"
 )
 
 func TestNewJSONReport(t *testing.T) {

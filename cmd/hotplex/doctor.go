@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
-	"github.com/hotplex/hotplex-worker/internal/cli/checkers"
-	"github.com/hotplex/hotplex-worker/internal/cli/output"
+	"github.com/hrygo/hotplex/internal/cli"
+	"github.com/hrygo/hotplex/internal/cli/checkers"
+	"github.com/hrygo/hotplex/internal/cli/output"
 )
 
 func newDoctorCmd() *cobra.Command {
@@ -20,6 +20,14 @@ func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run diagnostic checks",
+		Long: `Run diagnostic checks to verify your HotPlex environment is properly configured.
+Checks are organized by category: environment, config, dependencies, security, runtime, messaging.
+Use --fix to automatically resolve issues where possible.`,
+		Example: `  hotplex doctor                     # Run all checks
+  hotplex doctor -v                  # Verbose output with details
+  hotplex doctor --fix               # Auto-fix issues
+  hotplex doctor -C security         # Only security checks
+  hotplex doctor --json              # JSON output for scripting`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, _ := cmd.Flags().GetString("config")
 			if configPath == "" {
@@ -70,13 +78,7 @@ func newDoctorCmd() *cobra.Command {
 
 			outputResults(os.Stderr, diags, verbose, jsonOutput)
 
-			var fail int
-			for _, d := range diags {
-				if d.Status == cli.StatusFail {
-					fail++
-				}
-			}
-			if fail > 0 {
+			if fail := countFailures(diags); fail > 0 {
 				os.Exit(1)
 			}
 			return nil
@@ -91,18 +93,14 @@ func newDoctorCmd() *cobra.Command {
 	return cmd
 }
 
-func countStatuses(diags []cli.Diagnostic) (pass, warn, fail int) {
+func countFailures(diags []cli.Diagnostic) int {
+	var fail int
 	for _, d := range diags {
-		switch d.Status {
-		case cli.StatusPass:
-			pass++
-		case cli.StatusWarn:
-			warn++
-		case cli.StatusFail:
+		if d.Status == cli.StatusFail {
 			fail++
 		}
 	}
-	return
+	return fail
 }
 
 func outputResults(out *os.File, diags []cli.Diagnostic, verbose, jsonOutput bool) {

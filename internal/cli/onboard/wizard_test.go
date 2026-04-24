@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/hotplex/hotplex-worker/internal/cli/checkers"
+	"github.com/hrygo/hotplex/internal/cli/checkers"
 )
 
 func TestStepEnvPreCheck(t *testing.T) {

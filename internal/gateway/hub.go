@@ -16,14 +16,14 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/hotplex/hotplex-worker/internal/config"
-	"github.com/hotplex/hotplex-worker/internal/messaging"
-	"github.com/hotplex/hotplex-worker/internal/metrics"
-	"github.com/hotplex/hotplex-worker/internal/security"
-	"github.com/hotplex/hotplex-worker/internal/session"
-	"github.com/hotplex/hotplex-worker/internal/tracing"
-	"github.com/hotplex/hotplex-worker/pkg/aep"
-	"github.com/hotplex/hotplex-worker/pkg/events"
+	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/security"
+	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/tracing"
+	"github.com/hrygo/hotplex/pkg/aep"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // isReadTimeout reports whether err is a read deadline exceeded error.

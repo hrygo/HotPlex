@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
-	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hrygo/hotplex/internal/cli"
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 type pathPerm struct {

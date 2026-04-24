@@ -99,10 +99,10 @@ jobs:
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: hrygo/hotplex-worker
+          slug: hrygo/hotplex
           files: ./coverage.out
           flags: unittests
-          name: hotplex-worker
+          name: hotplex
           fail_ci_if_error: false
 
   # ── Coverage gate ───────────────────────────────────────────────────────

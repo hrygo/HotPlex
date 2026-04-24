@@ -92,7 +92,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/hotplex/hotplex-worker
+        - github.com/hrygo/hotplex
 
 issues:
   max-issues-per-linter: 0

@@ -123,7 +123,7 @@ doctor 命令执行时通过 blank import 触发注册：
 ```go
 // cmd/hotplex/doctor.go
 
-import _ "github.com/hotplex/hotplex-worker/internal/cli/checkers"
+import _ "github.com/hrygo/hotplex/internal/cli/checkers"
 ```
 
 ## 4. onboard 命令

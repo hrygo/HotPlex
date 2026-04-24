@@ -618,7 +618,7 @@ install_systemd_service() {
     cat > "$service_file" <<EOF
 [Unit]
 Description=HotPlex Worker Gateway
-Documentation=https://github.com/hotplex/hotplex-worker
+Documentation=https://github.com/hrygo/hotplex
 After=network.target
 
 [Service]

@@ -155,7 +155,7 @@ package messaging
 
 import (
 	"context"
-	"github.com/hotplex/hotplex-worker/pkg/events"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // PlatformConn models the write side of a platform connection.
@@ -441,9 +441,9 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/hotplex/hotplex-worker/internal/messaging"
-	"github.com/hotplex/hotplex-worker/internal/security"
-	"github.com/hotplex/hotplex-worker/pkg/events"
+	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/security"
+	"github.com/hrygo/hotplex/pkg/events"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 )
@@ -865,8 +865,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/hotplex/hotplex-worker/internal/messaging"
-	"github.com/hotplex/hotplex-worker/pkg/events"
+	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/pkg/events"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkcardkit "github.com/larksuite/oapi-sdk-go/v3/service/cardkit/v1"

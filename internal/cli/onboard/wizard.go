@@ -13,9 +13,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/hotplex/hotplex-worker/internal/cli"
-	"github.com/hotplex/hotplex-worker/internal/cli/checkers"
-	"github.com/hotplex/hotplex-worker/internal/config"
+	"github.com/hrygo/hotplex/internal/cli"
+	"github.com/hrygo/hotplex/internal/cli/checkers"
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 type messagingPlatformConfig struct {

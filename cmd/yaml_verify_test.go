@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hotplex/hotplex-worker/internal/cli/onboard"
+	"github.com/hrygo/hotplex/internal/cli/onboard"
 )
 
 func main() {
