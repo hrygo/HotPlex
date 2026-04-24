@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -135,7 +136,7 @@ func TestBackoffDuration(t *testing.T) {
 		{10, 30 * time.Second},
 	}
 	for _, tt := range tests {
-		t.Run(string(rune('0'+tt.attempt)), func(t *testing.T) {
+		t.Run(fmt.Sprintf("attempt_%d", tt.attempt), func(t *testing.T) {
 			t.Parallel()
 			got := backoffDuration(tt.attempt)
 			require.Equal(t, tt.want, got)
@@ -232,11 +233,9 @@ func TestParseInitAck(t *testing.T) {
 
 func TestSendInputBeforeConnect(t *testing.T) {
 	t.Parallel()
-	c := &Client{
-		ctx:    func() context.Context { ctx, cancel := context.WithCancel(context.Background()); cancel(); return ctx }(),
-		cancel: func() {},
-		closed: false,
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := &Client{ctx: ctx, cancel: func() {}, closed: false}
 	err := c.SendInput(context.Background(), "test")
 	require.ErrorIs(t, err, ErrNotConnected)
 }
