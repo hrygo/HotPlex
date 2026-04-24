@@ -94,50 +94,34 @@ func (e Event) AsErrorData() (ErrorData, bool) { return decodeAs[ErrorData](e.Da
 func (e Event) AsToolCallData() (ToolCallData, bool) { return decodeAs[ToolCallData](e.Data) }
 
 // AsPermissionRequestData parses event data as PermissionRequestData.
-func (e Event) AsPermissionRequestData() (PermissionRequestData, bool) {
-	return decodeAs[PermissionRequestData](e.Data)
-}
+func (e Event) AsPermissionRequestData() (PermissionRequestData, bool) { return decodeAs[PermissionRequestData](e.Data) }
 
 // AsQuestionRequestData parses event data as QuestionRequestData.
-func (e Event) AsQuestionRequestData() (QuestionRequestData, bool) {
-	return decodeAs[QuestionRequestData](e.Data)
-}
+func (e Event) AsQuestionRequestData() (QuestionRequestData, bool) { return decodeAs[QuestionRequestData](e.Data) }
 
 // AsElicitationRequestData parses event data as ElicitationRequestData.
-func (e Event) AsElicitationRequestData() (ElicitationRequestData, bool) {
-	return decodeAs[ElicitationRequestData](e.Data)
-}
+func (e Event) AsElicitationRequestData() (ElicitationRequestData, bool) { return decodeAs[ElicitationRequestData](e.Data) }
 
 // AsMessageStartData parses event data as MessageStartData.
-func (e Event) AsMessageStartData() (MessageStartData, bool) {
-	return decodeAs[MessageStartData](e.Data)
-}
+func (e Event) AsMessageStartData() (MessageStartData, bool) { return decodeAs[MessageStartData](e.Data) }
 
 // AsMessageDeltaData parses event data as MessageDeltaData.
-func (e Event) AsMessageDeltaData() (MessageDeltaData, bool) {
-	return decodeAs[MessageDeltaData](e.Data)
-}
+func (e Event) AsMessageDeltaData() (MessageDeltaData, bool) { return decodeAs[MessageDeltaData](e.Data) }
 
 // AsMessageEndData parses event data as MessageEndData.
-func (e Event) AsMessageEndData() (MessageEndData, bool) {
-	return decodeAs[MessageEndData](e.Data)
-}
+func (e Event) AsMessageEndData() (MessageEndData, bool) { return decodeAs[MessageEndData](e.Data) }
 
 // AsStateData parses event data as StateData.
 func (e Event) AsStateData() (StateData, bool) { return decodeAs[StateData](e.Data) }
 
 // AsReasoningData parses event data as ReasoningData.
-func (e Event) AsReasoningData() (ReasoningData, bool) {
-	return decodeAs[ReasoningData](e.Data)
-}
+func (e Event) AsReasoningData() (ReasoningData, bool) { return decodeAs[ReasoningData](e.Data) }
 
 // AsStepData parses event data as StepData.
 func (e Event) AsStepData() (StepData, bool) { return decodeAs[StepData](e.Data) }
 
 // AsToolResultData parses event data as ToolResultData.
-func (e Event) AsToolResultData() (ToolResultData, bool) {
-	return decodeAs[ToolResultData](e.Data)
-}
+func (e Event) AsToolResultData() (ToolResultData, bool) { return decodeAs[ToolResultData](e.Data) }
 
 // AsInitAckData parses event data as InitAckData.
 func (e Event) AsInitAckData() (InitAckData, bool) { return decodeAs[InitAckData](e.Data) }
@@ -498,12 +482,10 @@ func (c *Client) recvPump() {
 
 		// Update local state on state events.
 		if env.Event.Type == events.State {
-			if d, ok := env.Event.Data.(map[string]any); ok {
-				if s, ok := d["state"].(string); ok {
-					c.mu.Lock()
-					c.state = SessionState(s)
-					c.mu.Unlock()
-				}
+			if d, ok := decodeAs[StateData](env.Event.Data); ok {
+				c.mu.Lock()
+				c.state = d.State
+				c.mu.Unlock()
 			}
 		}
 
@@ -574,60 +556,19 @@ func (c *Client) deliver(evt Event) {
 	select {
 	case c.eventsCh <- evt:
 	default:
-		c.logger.Warn("events channel full, dropping event", "type", evt.Type)
+		c.logger.Debug("events channel full, dropping event", "type", evt.Type)
 	}
 }
 
 func parseInitAck(env *events.Envelope) *InitAckData {
-	d, ok := env.Event.Data.(map[string]any)
-	if !ok {
-		return &InitAckData{SessionID: env.SessionID, State: StateCreated}
+	ack, _ := decodeAs[InitAckData](env.Event.Data)
+	if ack.SessionID == "" {
+		ack.SessionID = env.SessionID
 	}
-	ack := &InitAckData{SessionID: env.SessionID}
-	if v, ok := d["session_id"].(string); ok {
-		ack.SessionID = v
+	if ack.State == "" {
+		ack.State = StateCreated
 	}
-	if v, ok := d["state"].(string); ok {
-		ack.State = SessionState(v)
-	}
-	if v, ok := d["error"].(string); ok {
-		ack.Error = v
-	}
-	if caps, ok := d["server_caps"].(map[string]any); ok {
-		if v, ok := caps["protocol_version"].(string); ok {
-			ack.ServerCaps.ProtocolVersion = v
-		}
-		if v, ok := caps["worker_type"].(string); ok {
-			ack.ServerCaps.WorkerType = v
-		}
-		if v, ok := caps["supports_resume"].(bool); ok {
-			ack.ServerCaps.SupportsResume = v
-		}
-		if v, ok := caps["supports_delta"].(bool); ok {
-			ack.ServerCaps.SupportsDelta = v
-		}
-		if v, ok := caps["supports_tool_call"].(bool); ok {
-			ack.ServerCaps.SupportsTool = v
-		}
-		if v, ok := caps["supports_ping"].(bool); ok {
-			ack.ServerCaps.SupportsPing = v
-		}
-		if v, ok := caps["max_frame_size"].(float64); ok {
-			ack.ServerCaps.MaxFrameSize = int(v)
-		}
-		if v, ok := caps["max_turns"].(float64); ok {
-			ack.ServerCaps.MaxTurns = int(v)
-		}
-		if tools, ok := caps["tools"].([]any); ok {
-			ack.ServerCaps.Tools = make([]string, len(tools))
-			for i, t := range tools {
-				if s, ok := t.(string); ok {
-					ack.ServerCaps.Tools[i] = s
-				}
-			}
-		}
-	}
-	return ack
+	return &ack
 }
 
 func isClosedWS(err error) bool {
