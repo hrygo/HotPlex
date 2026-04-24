@@ -4,37 +4,37 @@
    Design System — "Obsidian Gold" Premium Theme
    ============================================================ */
 :root {
-  /* Backgrounds — obsidian stone & rich blacks */
-  --bg-base:        #050505;
-  --bg-surface:     #0e0e0e;
-  --bg-elevated:    #161616;
-  --bg-glass:       rgba(10, 10, 10, 0.75);
-  --bg-hover:       rgba(245, 158, 11, 0.04);
-  --bg-input:       #0a0a0a;
+  /* Backgrounds — clean ivory & soft whites */
+  --bg-base:        #fcfcfc;
+  --bg-surface:     #ffffff;
+  --bg-elevated:    #f4f4f5;
+  --bg-glass:       rgba(255, 255, 255, 0.85);
+  --bg-hover:       rgba(0, 0, 0, 0.03);
+  --bg-input:       #fcfcfc;
 
-  /* Borders — sharp & sophisticated */
-  --border-subtle:  rgba(255, 255, 255, 0.03);
-  --border-default: rgba(255, 255, 255, 0.06);
-  --border-bright:  rgba(255, 255, 255, 0.12);
-  --border-gold:    rgba(217, 119, 6, 0.3);
+  /* Borders — delicate & precise */
+  --border-subtle:  rgba(0, 0, 0, 0.04);
+  --border-default: rgba(0, 0, 0, 0.08);
+  --border-bright:  rgba(0, 0, 0, 0.12);
+  --border-gold:    rgba(217, 119, 6, 0.4);
 
-  /* Accent tokens — Warm Gold / Amber */
-  --amber-light:    rgba(217, 119, 6, 0.08);
-  --amber-border:   rgba(217, 119, 6, 0.2);
-  --amber-glow:     rgba(217, 119, 6, 0.15);
+  /* Accent tokens — Vibrant Gold / Amber */
+  --amber-light:    rgba(217, 119, 6, 0.06);
+  --amber-border:   rgba(217, 119, 6, 0.25);
+  --amber-glow:     rgba(217, 119, 6, 0.1);
   
   /* Text — high contrast readability */
-  --text-primary:   #ffffff;
-  --text-secondary: #a1a1aa;
+  --text-primary:   #09090b;
+  --text-secondary: #3f3f46;
   --text-muted:     #71717a;
-  --text-faint:     #3f3f46;
+  --text-faint:     #a1a1aa;
 
   /* Brand Colors */
   --accent-gold:        #d97706;
   --accent-gold-bright: #f59e0b;
-  --accent-emerald:     #10b981;
-  --accent-coral:       #f43f5e;
-  --accent-violet:      #8b5cf6;
+  --accent-emerald:     #059669;
+  --accent-coral:       #e11d48;
+  --accent-violet:      #7c3aed;
 
   /* Typography */
   --font-display: 'Syne', system-ui, sans-serif;
@@ -48,11 +48,11 @@
   --radius-lg: 24px;
   --radius-xl: 32px;
 
-  /* Shadows — deep & layered */
-  --shadow-card:     0 2px 4px rgba(0,0,0,0.4), 0 12px 24px -8px rgba(0,0,0,0.3);
-  --shadow-hover:    0 4px 8px rgba(0,0,0,0.5), 0 24px 48px -12px rgba(0,0,0,0.4);
-  --shadow-elevated: 0 32px 64px -16px rgba(0,0,0,0.6);
-  --shadow-gold:     0 0 40px rgba(217, 119, 6, 0.1);
+  /* Shadows — soft & airy */
+  --shadow-card:     0 2px 8px rgba(0,0,0,0.04), 0 8px 16px -4px rgba(0,0,0,0.02);
+  --shadow-hover:    0 12px 24px rgba(0,0,0,0.06), 0 24px 48px -12px rgba(0,0,0,0.04);
+  --shadow-elevated: 0 32px 64px -16px rgba(0,0,0,0.1);
+  --shadow-gold:     0 8px 30px rgba(217, 119, 6, 0.12);
 }
 
 /* ============================================================
@@ -91,10 +91,10 @@ body {
   z-index: -1;
   background-color: var(--bg-base);
   background-image: 
-    radial-gradient(at 0% 0%, rgba(217, 119, 6, 0.05) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.03) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.02) 0px, transparent 50%),
-    radial-gradient(at 0% 100%, rgba(244, 63, 94, 0.02) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(217, 119, 6, 0.03) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(124, 58, 237, 0.02) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(5, 150, 105, 0.02) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, rgba(225, 29, 72, 0.02) 0px, transparent 50%);
   filter: blur(100px);
 }
 
@@ -260,12 +260,13 @@ body {
   max-width: 85%;
   padding: 0.875rem 1.25rem;
   border-radius: 20px 20px 4px 20px;
-  background: var(--bg-elevated);
+  background: #fdf2f2; /* Subtle warm tint for user */
+  background: linear-gradient(135deg, #fff 0%, #fafafa 100%);
   border: 1px solid var(--border-default);
   color: var(--text-primary);
   font-size: 0.9375rem;
   line-height: 1.5;
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
   position: relative;
 }
 
@@ -305,9 +306,9 @@ body {
 
 .composer-root {
   background: var(--bg-surface);
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-bright);
   border-radius: var(--radius-lg);
-  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
   transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
   display: flex;
   flex-direction: column;
@@ -404,7 +405,7 @@ body {
    Reasoning / Tools
    ============================================================ */
 .reasoning-block {
-  background: rgba(217, 119, 6, 0.03);
+  background: #fffbeb; /* Light amber background */
   border: 1px solid var(--amber-border);
   border-radius: var(--radius-sm);
   margin-bottom: 1rem;
@@ -424,8 +425,8 @@ body {
 }
 
 .tool-call-block {
-  background: rgba(16, 185, 129, 0.03);
-  border: 1px solid rgba(16, 185, 129, 0.15);
+  background: #f0fdf4; /* Light emerald background */
+  border: 1px solid rgba(5, 150, 105, 0.15);
   border-radius: var(--radius-sm);
   margin-bottom: 1rem;
   overflow: hidden;
@@ -474,11 +475,11 @@ body {
   bottom: 0;
   width: 340px;
   background: var(--bg-surface);
-  border-left: 1px solid var(--border-default);
+  border-left: 1px solid var(--border-subtle);
   z-index: 200;
   display: flex;
   flex-direction: column;
-  box-shadow: -40px 0 80px rgba(0,0,0,0.5);
+  box-shadow: -20px 0 60px rgba(0,0,0,0.05);
   animation: slideIn 0.3s cubic-bezier(0.2, 1, 0.2, 1);
 }
 
@@ -514,6 +515,7 @@ body {
 .text-gradient-gold {
   background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -525,9 +527,9 @@ body {
 }
 
 .glass-dark {
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .panel-icon-btn {

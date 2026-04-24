@@ -22,6 +22,8 @@ function SessionRow({
   onDelete: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const displayId = session.id.slice(0, 8);
+  const workerName = WORKER_DISPLAY[session.worker_type] ?? session.worker_type;
 
   return (
     <div
@@ -29,82 +31,45 @@ function SessionRow({
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(e) => e.key === 'Enter' && onSelect()}
-      className={`relative group px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer border ${
+      className={`relative group px-3 py-3 rounded-xl transition-all duration-300 cursor-pointer border ${
         isActive 
-          ? 'bg-[var(--amber-light)] border-[var(--amber-border)] shadow-[0_0_20px_rgba(217,119,6,0.05)]' 
-          : 'bg-transparent border-transparent hover:bg-[var(--bg-elevated)] hover:border-[var(--border-default)]'
+          ? 'bg-white border-[var(--border-gold)] shadow-[0_4px_12px_rgba(217,119,6,0.08)]' 
+          : 'bg-transparent border-transparent hover:bg-[var(--bg-elevated)]'
       }`}
     >
       <div className="flex items-center gap-3">
         {/* Status indicator */}
-        <div className="relative">
-          <div className={`w-2 h-2 rounded-full ${
-            session.state === 'running' ? 'bg-[var(--accent-emerald)] shadow-[0_0_8px_var(--accent-emerald)]' :
-            session.state === 'idle' ? 'bg-[var(--accent-gold)]' : 'bg-[var(--text-faint)]'
-          }`} />
-          {session.state === 'running' && (
-            <div className="absolute inset-0 w-2 h-2 rounded-full bg-[var(--accent-emerald)] animate-ping opacity-40" />
-          )}
-        </div>
+        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+          session.state === 'running' ? 'bg-[var(--accent-emerald)] shadow-[0_0_8px_var(--accent-emerald)]' :
+          session.state === 'idle' ? 'bg-[var(--accent-gold)]' : 'bg-[var(--text-faint)]'
+        }`} />
 
-        {/* Content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <span className={`text-xs font-mono font-medium truncate ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>
-              {session.id.slice(0, 12)}...
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className={`text-xs font-semibold truncate ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>
+              Session {displayId}
             </span>
-            {session.worker_type && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-mono uppercase tracking-wider scale-90 origin-right">
-                {WORKER_DISPLAY[session.worker_type] ?? session.worker_type}
-              </span>
-            )}
+            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-faint)] font-mono font-bold scale-90">
+              {workerName}
+            </span>
           </div>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[10px] text-[var(--text-muted)] font-medium uppercase tracking-tight">
-              {stateLabel(session.state)}
-            </span>
-            <span className="text-[10px] text-[var(--text-faint)]">•</span>
-            <span className="text-[10px] text-[var(--text-faint)]">
-              {formatRelativeTime(session.updated_at)}
-            </span>
+          <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-faint)]">
+            <span className="capitalize">{session.state}</span>
+            <span>•</span>
+            <span>{formatRelativeTime(session.updated_at)}</span>
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-          {confirmDelete ? (
-            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-              <button
-                onClick={() => { onDelete(); setConfirmDelete(false); }}
-                className="p-1 text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.1)] rounded transition-colors"
-                title="Confirm delete"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                </svg>
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="p-1 text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] rounded transition-colors"
-                title="Cancel"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
-              className="p-1.5 text-[var(--text-faint)] hover:text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.05)] rounded-lg transition-all"
-              aria-label="Delete session"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </button>
-          )}
-        </div>
+        {/* Delete button */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="opacity-0 group-hover:opacity-100 p-1.5 text-[var(--text-faint)] hover:text-[var(--accent-coral)] hover:bg-white rounded-lg transition-all"
+          title="Delete session"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
       </div>
     </div>
   );
@@ -137,9 +102,6 @@ export function SessionPanel({ onSessionSelect, initialSessionId }: SessionPanel
     activeSession,
     isLoading,
     error,
-    isOpen,
-    openPanel,
-    closePanel,
     selectSession,
     createNewSession,
     removeSession,
@@ -148,126 +110,97 @@ export function SessionPanel({ onSessionSelect, initialSessionId }: SessionPanel
     initialSessionId,
   });
 
-  if (!isOpen) {
-    return (
-      <button 
-        onClick={openPanel} 
-        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent-gold)] transition-all group"
-      >
-        <svg className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--accent-gold)] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-        <span className="text-sm font-bold tracking-tight">SESSIONS</span>
-        {sessions.length > 0 && (
-          <span className="flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--accent-gold)] text-white text-[10px] font-black shadow-[0_2px_8px_rgba(217,119,6,0.3)]">
-            {sessions.length}
-          </span>
-        )}
-      </button>
-    );
-  }
+  const filteredSessions = sessions.filter(s => s.id.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
-    <>
-      <div 
-        className="fixed inset-0 z-[190] bg-black/60 backdrop-blur-sm animate-fade-in" 
-        onClick={closePanel} 
-        aria-hidden="true" 
-      />
-
-      <div className="side-panel" role="dialog" aria-label="Sessions">
-        {/* Header */}
-        <div className="px-6 py-6 border-b border-[var(--border-subtle)] bg-[var(--bg-base)]">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-display font-bold tracking-tight text-gradient-gold">Conversations</h2>
-            <button 
-              onClick={closePanel}
-              className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] rounded-xl transition-all"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+    <div className="pc-sidebar flex flex-col h-full bg-[var(--bg-base)] border-r border-[var(--border-subtle)] w-[280px]">
+      {/* Sidebar Header */}
+      <div className="px-5 py-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-9 h-9 rounded-xl bg-white shadow-sm border border-[var(--border-default)] flex items-center justify-center">
+            <BrandIcon size={24} />
           </div>
-          
-          {/* Search */}
-          <div className="relative mb-2">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-faint)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input 
-              type="text"
-              placeholder="Search history..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl pl-10 pr-4 py-2.5 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)] transition-all placeholder:text-[var(--text-faint)]"
-            />
+          <div>
+            <h2 className="text-sm font-display font-bold text-[var(--text-primary)]">HotPlex Sessions</h2>
+            <p className="text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-widest">Gateway v1</p>
           </div>
-
-          <p className="text-[10px] text-[var(--text-faint)] font-mono uppercase tracking-widest pl-1 mt-4">
-            {sessions.filter(s => s.id.toLowerCase().includes(searchQuery.toLowerCase())).length} SESSIONS
-          </p>
         </div>
 
-        {/* List */}
-        <div className="flex-1 overflow-y-auto py-4 custom-scrollbar">
-          {error ? (
-            <div className="px-8 py-12 text-center">
-              <div className="w-12 h-12 rounded-full bg-[rgba(244,63,94,0.1)] flex items-center justify-center mx-auto mb-4">
-                <svg className="w-6 h-6 text-[var(--accent-coral)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <p className="text-sm font-medium mb-2 text-[var(--accent-coral)]">Sync Failed</p>
-              <p className="text-xs text-[var(--text-muted)] mb-6 leading-relaxed">{error}</p>
-              <button 
-                onClick={() => window.location.reload()}
-                className="text-xs font-bold text-[var(--text-primary)] hover:text-[var(--accent-gold)] transition-colors underline underline-offset-4"
-              >
-                Reload Window
-              </button>
+        {/* New Session Button */}
+        <button
+          onClick={() => createNewSession()}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--text-primary)] text-white hover:bg-[#000] active:scale-95 transition-all shadow-sm font-bold text-xs"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          New Chat
+        </button>
+      </div>
+
+      {/* Search */}
+      <div className="px-5 mb-4">
+        <div className="relative">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-faint)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input 
+            type="text"
+            placeholder="Search history..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-[var(--bg-elevated)] border border-transparent rounded-xl pl-9 pr-4 py-2 text-xs text-[var(--text-primary)] focus:bg-white focus:border-[var(--border-bright)] transition-all placeholder:text-[var(--text-faint)]"
+          />
+        </div>
+      </div>
+
+      {/* List */}
+      <div className="flex-1 overflow-y-auto px-2 pb-6 custom-scrollbar">
+        <div className="px-3 mb-2 text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest">
+          Recent Conversations
+        </div>
+        
+        <div className="space-y-0.5">
+          {filteredSessions.map((session) => (
+            <SessionRow
+              key={session.id}
+              session={session}
+              isActive={activeSession?.id === session.id}
+              onSelect={() => selectSession(session)}
+              onDelete={() => removeSession(session.id)}
+            />
+          ))}
+          
+          {filteredSessions.length === 0 && !isLoading && (
+            <div className="px-3 py-8 text-center">
+              <p className="text-[11px] text-[var(--text-faint)]">No results found</p>
             </div>
-          ) : sessions.length === 0 && !isLoading ? (
-            <EmptyState onCreate={() => createNewSession()} />
-          ) : (
-            <div className="px-3 space-y-1">
-              {sessions
-                .filter(s => s.id.toLowerCase().includes(searchQuery.toLowerCase()))
-                .map((session) => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  isActive={activeSession?.id === session.id}
-                  onSelect={() => { selectSession(session); closePanel(); }}
-                  onDelete={() => removeSession(session.id)}
-                />
-              ))}
-              {isLoading && (
-                <div className="px-4 py-8 flex justify-center">
-                  <div className="w-5 h-5 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
-                </div>
-              )}
+          )}
+
+          {isLoading && (
+            <div className="px-3 py-4 flex justify-center">
+              <div className="w-4 h-4 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
             </div>
           )}
         </div>
+      </div>
 
-        {/* Footer */}
-        <div className="p-6 border-t border-[var(--border-subtle)] bg-[var(--bg-base)]">
-          <button
-            onClick={() => createNewSession()}
-            disabled={isLoading}
-            className="w-full py-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-default)] text-[var(--text-primary)] font-bold text-sm flex items-center justify-center gap-3 hover:border-[var(--accent-gold)] hover:bg-[var(--amber-light)] active:scale-95 transition-all group shadow-xl"
-          >
-            <div className="w-6 h-6 rounded-lg bg-[var(--accent-gold)] flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-              </svg>
-            </div>
-            New Conversation
-          </button>
+      {/* Sidebar Footer */}
+      <div className="px-5 py-4 border-t border-[var(--border-subtle)]">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-[var(--bg-elevated)] flex items-center justify-center text-[var(--text-secondary)]">
+             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+             </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-bold text-[var(--text-primary)] truncate">Developer Portal</p>
+            <p className="text-[9px] text-[var(--text-faint)] truncate">Manage Keys & API</p>
+          </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
