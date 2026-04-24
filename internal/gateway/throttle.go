@@ -23,7 +23,7 @@ func newHandshakeThrottle() *handshakeThrottle {
 	}
 }
 
-// Check returns true if the handshake for sessionID is allowed, 
+// Check returns true if the handshake for sessionID is allowed,
 // false if it should be throttled.
 func (t *handshakeThrottle) Check(sessionID string) bool {
 	t.mu.Lock()
