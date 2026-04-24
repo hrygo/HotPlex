@@ -5,16 +5,10 @@
  * using api_key query param for auth.
  */
 
-const BASE = process.env.NEXT_PUBLIC_HOTPLEX_WS_URL
-  ?.replace(/^ws:\/\//, 'http://')
-  .replace(/^wss:\/\//, 'https://')
-  .replace(/\/ws\/?$/, '') // strip trailing /ws from WebSocket URL
-  ?? 'http://localhost:8888';
+import { httpBase, apiKey } from "@/lib/config";
 
-function authParams() {
-  const key = process.env.NEXT_PUBLIC_HOTPLEX_API_KEY ?? 'dev';
-  return `?api_key=${encodeURIComponent(key)}`;
-}
+const BASE = httpBase();
+const AUTH = `api_key=${encodeURIComponent(apiKey)}`;
 
 export interface SessionInfo {
   id: string;
@@ -40,7 +34,7 @@ export interface ListSessionsResponse {
 
 export async function listSessions(limit = 20, offset = 0): Promise<ListSessionsResponse> {
   const res = await fetch(
-    `${BASE}/api/sessions?api_key=${encodeURIComponent(process.env.NEXT_PUBLIC_HOTPLEX_API_KEY ?? 'dev')}&limit=${limit}&offset=${offset}`,
+    `${BASE}/api/sessions?${AUTH}&limit=${limit}&offset=${offset}`,
     { headers: { 'Content-Type': 'application/json' } }
   );
   if (!res.ok) throw new Error(`listSessions failed: ${res.status}`);
@@ -48,24 +42,18 @@ export async function listSessions(limit = 20, offset = 0): Promise<ListSessions
 }
 
 export async function createSession(workerType = 'claude_code', sessionId?: string): Promise<{ session_id: string }> {
-  const url = new URL(`${BASE}/api/sessions`, window.location.origin);
-  const apiKey = process.env.NEXT_PUBLIC_HOTPLEX_API_KEY ?? 'dev';
-  url.searchParams.append('api_key', apiKey);
-  url.searchParams.append('worker_type', workerType);
+  let url = `${BASE}/api/sessions?${AUTH}&worker_type=${encodeURIComponent(workerType)}`;
   if (sessionId) {
-    url.searchParams.append('session_id', sessionId);
+    url += `&session_id=${encodeURIComponent(sessionId)}`;
   }
-
-  const res = await fetch(url.toString(), {
-    method: 'POST',
-  });
+  const res = await fetch(url, { method: 'POST' });
   if (!res.ok) throw new Error(`createSession failed: ${res.status}`);
   return res.json();
 }
 
 export async function deleteSession(id: string): Promise<void> {
   const res = await fetch(
-    `${BASE}/api/sessions/${id}?api_key=${encodeURIComponent(process.env.NEXT_PUBLIC_HOTPLEX_API_KEY ?? 'dev')}`,
+    `${BASE}/api/sessions/${id}?${AUTH}`,
     { method: 'DELETE' }
   );
   if (!res.ok) throw new Error(`deleteSession failed: ${res.status}`);

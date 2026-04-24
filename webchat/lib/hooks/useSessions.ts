@@ -17,6 +17,7 @@ import {
   deleteSession,
   type SessionInfo,
 } from '@/lib/api/sessions';
+import { workerType as defaultWorkerType } from '@/lib/config';
 
 export interface UseSessionsOptions {
   /** Called when the active session changes (user selects or creates). */
@@ -57,7 +58,7 @@ export function useSessions({
 
   const isCreating = useRef(false);
   const STORAGE_KEY = 'hotplex_active_session_id';
-  const DEFAULT_WORKER_TYPE = process.env.NEXT_PUBLIC_HOTPLEX_WORKER_TYPE || 'claude_code';
+  const DEFAULT_WORKER_TYPE = defaultWorkerType;
 
   // Deterministic anchor session ID — ensures the first auto-created session
   // maps to the same server-side key via DeriveSessionKey(userID, workerType, clientSessionID, workDir).

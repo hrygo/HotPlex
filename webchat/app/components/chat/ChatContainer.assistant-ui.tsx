@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -10,20 +10,15 @@ import { useSessions } from '@/lib/hooks/useSessions';
 import { Thread } from '@/components/assistant-ui/thread';
 import { BrandIcon } from '@/components/icons';
 import { SessionPanel } from './SessionPanel';
+import { workerType } from '@/lib/config';
 
 function ChatInterface({
-  url,
-  workerType,
-  apiKey,
   sessionId,
 }: {
-  url: string;
-  workerType: string;
-  apiKey: string;
   sessionId: string | null;
 }) {
   const runtime = useExternalStoreRuntime(
-    useHotPlexRuntime({ url, workerType, apiKey, sessionId: sessionId ?? undefined })
+    useHotPlexRuntime({ sessionId: sessionId ?? undefined })
   );
 
   return (
@@ -34,10 +29,6 @@ function ChatInterface({
 }
 
 export default function ChatContainer() {
-  const url = process.env.NEXT_PUBLIC_HOTPLEX_WS_URL || 'ws://localhost:8888/ws';
-  const workerType = process.env.NEXT_PUBLIC_HOTPLEX_WORKER_TYPE || 'claude_code';
-  const apiKey = process.env.NEXT_PUBLIC_HOTPLEX_API_KEY || 'dev';
-
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const {
@@ -130,9 +121,6 @@ export default function ChatContainer() {
           ) : (
             <ChatInterface
               key={activeSessionId}
-              url={url}
-              workerType={workerType}
-              apiKey={apiKey}
               sessionId={activeSessionId}
             />
           )}

@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ExternalStoreAdapter, ThreadMessageLike, AppendMessage } from '@assistant-ui/react';
 import { BrowserHotPlexClient } from '@/lib/ai-sdk-transport';
+import type { InitConfig } from '@/lib/ai-sdk-transport/client/types';
+import { wsUrl, workerType, apiKey, workDir, allowedTools } from '@/lib/config';
 import type {
   Envelope,
   MessageDeltaData,
@@ -28,9 +30,6 @@ type ThreadSuggestion = { title: string; label: string; prompt: string };
 // ============================================================================
 
 export interface UseHotPlexRuntimeConfig {
-  url?: string;
-  workerType?: string;
-  apiKey?: string;
   /** Initial session ID to resume (calls resume() instead of connect()). */
   sessionId?: string;
 }
@@ -118,9 +117,6 @@ function convertToThreadMessage(message: HotPlexMessage, idx: number): ThreadMes
  * @returns assistant-ui ExternalStoreAdapter
  */
 export function useHotPlexRuntime({
-  url = 'ws://localhost:8888/ws',
-  workerType = 'claude_code',
-  apiKey = 'dev',
   sessionId,
 }: UseHotPlexRuntimeConfig = {}): ExternalStoreAdapter<HotPlexMessage> {
   // State
@@ -147,10 +143,15 @@ export function useHotPlexRuntime({
       return;
     }
 
+    const initConfig: InitConfig = {};
+    if (workDir) initConfig.work_dir = workDir;
+    if (allowedTools.length > 0) initConfig.allowed_tools = allowedTools;
+
     const client = new BrowserHotPlexClient({
-      url,
-      workerType: workerType as any,
+      url: wsUrl,
+      workerType,
       apiKey,
+      initConfig,
       heartbeat: {
         pingIntervalMs: 10000,
         pongTimeoutMs: 5000,
@@ -378,7 +379,7 @@ export function useHotPlexRuntime({
       client.disconnect();
       clientRef.current = null;
     };
-  }, [url, workerType, apiKey, sessionId]);
+  }, [sessionId]);
 
   // Track pending connection-wait state so useEffect cleanup can tear it down
   const connectionWaitRef = useRef<{
