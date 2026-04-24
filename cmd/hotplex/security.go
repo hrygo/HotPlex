@@ -25,6 +25,7 @@ func newSecurityCmd() *cobra.Command {
 			if configPath == "" {
 				configPath = "~/.hotplex/config.yaml"
 			}
+			configPath = expandPath(configPath)
 			checkers.SetConfigPath(configPath)
 
 			checkersToRun := cli.DefaultRegistry.ByCategory("security")

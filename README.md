@@ -61,7 +61,19 @@ cp configs/env.example .env
 make quickstart
 ```
 
-### 2. Run Development Servers
+### 2. Configure Environment
+
+```bash
+# Option A: Interactive setup (recommended for Claude Code users)
+# Say "setup-env" or "配置 .env" to your Claude Code session
+# The built-in skill will auto-validate tokens and fetch user IDs
+
+# Option B: Manual setup
+cp configs/env.example .env
+# Edit .env with your Slack/Feishu credentials
+```
+
+### 3. Run Development Servers
 ```bash
 make dev
 ```

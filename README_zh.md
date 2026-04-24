@@ -61,7 +61,19 @@ cp configs/env.example .env
 make quickstart
 ```
 
-### 2. 启动开发服务器
+### 2. 配置环境变量
+
+```bash
+# 方式 A：交互式配置（推荐 Claude Code 用户使用）
+# 在 Claude Code 会话中输入 "配置 .env" 或 "setup-env"
+# 内置 skill 会自动验证 token 并获取用户 ID
+
+# 方式 B：手动配置
+cp configs/env.example .env
+# 编辑 .env，填入 Slack/飞书凭据
+```
+
+### 3. 启动开发服务器
 ```bash
 make dev
 ```

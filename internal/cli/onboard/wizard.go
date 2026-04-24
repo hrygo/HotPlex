@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,10 +18,27 @@ import (
 	"github.com/hotplex/hotplex-worker/internal/config"
 )
 
+type messagingPlatformConfig struct {
+	enabled        bool
+	dmPolicy       string
+	groupPolicy    string
+	requireMention bool
+	allowFrom      []string
+	credentials    map[string]string
+}
+
 type WizardOptions struct {
-	ConfigPath     string
-	NonInteractive bool
-	Force          bool
+	ConfigPath        string
+	NonInteractive    bool
+	Force             bool
+	EnableSlack       bool
+	EnableFeishu      bool
+	SlackAllowFrom    []string
+	SlackDMPolicy     string
+	SlackGroupPolicy  string
+	FeishuAllowFrom   []string
+	FeishuDMPolicy    string
+	FeishuGroupPolicy string
 }
 
 type WizardResult struct {
@@ -31,7 +49,7 @@ type WizardResult struct {
 
 type StepResult struct {
 	Name   string
-	Status string // "pass", "skip", "fail"
+	Status string
 	Detail string
 }
 
@@ -42,22 +60,14 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 	}
 
 	var jwtSecret, adminToken, workerType string
+	var slackCfg, feishuCfg messagingPlatformConfig
+	var configCreated bool
 
-	// Step 1: Environment pre-check
 	result.add(stepEnvPreCheck())
-
 	if result.hasFail() {
 		return result, fmt.Errorf("environment pre-check failed, resolve errors above before continuing")
 	}
 
-	// Step 2: Config file generation
-	s2, configCreated := stepConfigGen(opts)
-	result.add(s2)
-	if s2.Status == "fail" {
-		return result, fmt.Errorf("config generation failed: %s", s2.Detail)
-	}
-
-	// Step 3: Required config items
 	if opts.NonInteractive {
 		jwtSecret = GenerateSecret()
 		adminToken = GenerateSecret()
@@ -65,41 +75,53 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 		result.add(StepResult{Name: "required_config", Status: "pass", Detail: "auto-generated secrets, worker=claude_code"})
 	} else {
 		reader := bufio.NewReader(os.Stdin)
-		var s3 StepResult
-		jwtSecret, adminToken, workerType, s3 = stepRequiredConfig(reader)
-		result.add(s3)
+		jwtSecret, adminToken, workerType, _ = stepRequiredConfig(reader)
 	}
 
-	// Step 4: Worker dependency check
 	result.add(stepWorkerDep(workerType))
 
-	// Step 5: Messaging platform (optional)
-	var slackVars, feishuVars map[string]string
 	if opts.NonInteractive {
-		result.add(StepResult{Name: "messaging", Status: "skip", Detail: "non-interactive mode"})
+		slackCfg = buildPlatformNonInteractive(opts.EnableSlack, opts.SlackDMPolicy, opts.SlackGroupPolicy, opts.SlackAllowFrom)
+		feishuCfg = buildPlatformNonInteractive(opts.EnableFeishu, opts.FeishuDMPolicy, opts.FeishuGroupPolicy, opts.FeishuAllowFrom)
+		result.add(StepResult{Name: "messaging", Status: "pass", Detail: messagingDetail(slackCfg.enabled, feishuCfg.enabled)})
 	} else {
 		reader := bufio.NewReader(os.Stdin)
-		var s5 StepResult
-		slackVars, feishuVars, s5 = stepMessaging(reader)
-		result.add(s5)
+		slackCfg, feishuCfg, _ = stepMessaging(reader, opts)
 	}
 
-	// Step 6: Write config
-	s6 := stepWriteConfig(result.EnvPath, jwtSecret, adminToken, workerType, slackVars, feishuVars, configCreated, opts)
+	tplOpts := ConfigTemplateOptions{
+		WorkerType:           workerType,
+		SlackEnabled:         slackCfg.enabled,
+		SlackDMPolicy:        slackCfg.dmPolicy,
+		SlackGroupPolicy:     slackCfg.groupPolicy,
+		SlackRequireMention:  toPtr(slackCfg.requireMention),
+		SlackAllowFrom:       slackCfg.allowFrom,
+		FeishuEnabled:        feishuCfg.enabled,
+		FeishuDMPolicy:       feishuCfg.dmPolicy,
+		FeishuGroupPolicy:    feishuCfg.groupPolicy,
+		FeishuRequireMention: toPtr(feishuCfg.requireMention),
+		FeishuAllowFrom:      feishuCfg.allowFrom,
+	}
+
+	s5, configCreated := stepConfigGen(opts, tplOpts)
+	result.add(s5)
+	if s5.Status == "fail" {
+		return result, fmt.Errorf("config generation failed: %s", s5.Detail)
+	}
+
+	s6 := stepWriteConfig(result.EnvPath, jwtSecret, adminToken, slackCfg, feishuCfg, configCreated, opts)
 	result.add(s6)
 	if s6.Status == "fail" {
 		return result, fmt.Errorf("config write failed: %s", s6.Detail)
 	}
 
-	// Step 7: Verify
 	result.add(stepVerify(opts.ConfigPath))
-
 	return result, nil
 }
 
-func (r *WizardResult) add(s StepResult) {
-	r.Steps = append(r.Steps, s)
-}
+func toPtr[T any](v T) *T { return &v }
+
+func (r *WizardResult) add(s StepResult) { r.Steps = append(r.Steps, s) }
 
 func (r *WizardResult) hasFail() bool {
 	for _, s := range r.Steps {
@@ -110,18 +132,41 @@ func (r *WizardResult) hasFail() bool {
 	return false
 }
 
+func messagingDetail(slack, feishu bool) string {
+	switch {
+	case slack && feishu:
+		return "slack+feishu"
+	case slack:
+		return "slack"
+	case feishu:
+		return "feishu"
+	default:
+		return "non-interactive"
+	}
+}
+
+func buildPlatformNonInteractive(enabled bool, dmPolicy, groupPolicy string, allowFrom []string) messagingPlatformConfig {
+	return messagingPlatformConfig{
+		enabled:        enabled,
+		dmPolicy:       defaultStr(dmPolicy, "allowlist"),
+		groupPolicy:    defaultStr(groupPolicy, "allowlist"),
+		requireMention: true,
+		allowFrom:      allowFrom,
+		credentials:    map[string]string{},
+	}
+}
+
 // ─── Step 1: Environment pre-check ──────────────────────────────────────────
 
 func stepEnvPreCheck() StepResult {
 	ver := runtime.Version()
 	goOK := false
-	if strings.HasPrefix(ver, "go") {
-		numStr := strings.TrimPrefix(ver, "go")
-		if dotIdx := strings.Index(numStr, "."); dotIdx > 0 {
-			numStr = numStr[:dotIdx]
-		}
-		if n, err := strconv.Atoi(numStr); err == nil {
-			goOK = n >= 26
+	if s, ok := strings.CutPrefix(ver, "go"); ok {
+		parts := strings.Split(s, ".")
+		if len(parts) >= 2 {
+			if minor, err := strconv.Atoi(parts[1]); err == nil {
+				goOK = minor >= 26
+			}
 		}
 	}
 	if !goOK {
@@ -144,35 +189,10 @@ func stepEnvPreCheck() StepResult {
 	return StepResult{Name: "env_precheck", Status: "pass", Detail: fmt.Sprintf("Go %s, %s/%s, %d MB free", ver, runtime.GOOS, runtime.GOARCH, freeMB)}
 }
 
-// ─── Step 2: Config file generation ─────────────────────────────────────────
-
-func stepConfigGen(opts WizardOptions) (StepResult, bool) {
-	created := false
-	_, err := os.Stat(opts.ConfigPath)
-	if err == nil {
-		if !opts.Force {
-			return StepResult{Name: "config_gen", Status: "skip", Detail: "config file already exists (use --force to overwrite)"}, false
-		}
-		// Force: overwrite
-	}
-
-	dir := filepath.Dir(opts.ConfigPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return StepResult{Name: "config_gen", Status: "fail", Detail: "create config dir: " + err.Error()}, false
-	}
-
-	if err := os.WriteFile(opts.ConfigPath, []byte(DefaultConfigYAML()), 0o600); err != nil {
-		return StepResult{Name: "config_gen", Status: "fail", Detail: "write config: " + err.Error()}, false
-	}
-	created = true
-	return StepResult{Name: "config_gen", Status: "pass", Detail: opts.ConfigPath}, created
-}
-
-// ─── Step 3: Required config items ──────────────────────────────────────────
+// ─── Step 2: Required config items ──────────────────────────────────────────
 
 func stepRequiredConfig(reader *bufio.Reader) (jwtSecret, adminToken, workerType string, result StepResult) {
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "── Required Configuration ──")
+	fmt.Fprintln(os.Stderr, "\n── Required Configuration ──")
 
 	jwtSecret = prompt(reader, "JWT secret (enter to auto-generate)")
 	if jwtSecret == "" {
@@ -187,71 +207,94 @@ func stepRequiredConfig(reader *bufio.Reader) (jwtSecret, adminToken, workerType
 	}
 
 	workerType = promptChoice(reader, "Worker type", []string{"claude_code", "opencode_server", "pi"})
-
 	return jwtSecret, adminToken, workerType, StepResult{Name: "required_config", Status: "pass", Detail: "worker=" + workerType}
 }
 
-// ─── Step 4: Worker dependency check ────────────────────────────────────────
+// ─── Step 3: Worker dependency check ────────────────────────────────────────
 
 func stepWorkerDep(workerType string) StepResult {
-	switch workerType {
-	case "claude_code":
-		if p, err := exec.LookPath("claude"); err == nil {
-			return StepResult{Name: "worker_dep", Status: "pass", Detail: "claude binary found: " + p}
-		}
-		return StepResult{Name: "worker_dep", Status: "pass", Detail: "claude binary not found in PATH — install before running serve"}
-	case "opencode_server":
-		if p, err := exec.LookPath("opencode"); err == nil {
-			return StepResult{Name: "worker_dep", Status: "pass", Detail: "opencode binary found: " + p}
-		}
-		return StepResult{Name: "worker_dep", Status: "pass", Detail: "opencode binary not found in PATH — install before running serve"}
-	default:
-		return StepResult{Name: "worker_dep", Status: "skip", Detail: "worker type " + workerType + " has no binary dependency"}
+	binaries := map[string]string{
+		"claude_code":     "claude",
+		"opencode_server": "opencode",
 	}
+	if bin, ok := binaries[workerType]; ok {
+		if p, err := exec.LookPath(bin); err == nil {
+			return StepResult{Name: "worker_dep", Status: "pass", Detail: bin + " binary found: " + p}
+		}
+		return StepResult{Name: "worker_dep", Status: "pass", Detail: bin + " binary not found in PATH — install before running serve"}
+	}
+	return StepResult{Name: "worker_dep", Status: "skip", Detail: "worker type " + workerType + " has no binary dependency"}
 }
 
-// ─── Step 5: Messaging platform ─────────────────────────────────────────────
+// ─── Step 4: Messaging platform ─────────────────────────────────────────────
 
-func stepMessaging(reader *bufio.Reader) (slackVars, feishuVars map[string]string, result StepResult) {
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "── Messaging Platform (optional) ──")
+func stepMessaging(reader *bufio.Reader, _ WizardOptions) (slackCfg, feishuCfg messagingPlatformConfig, result StepResult) {
+	fmt.Fprintln(os.Stderr, "\n── Messaging Platform (optional) ──")
 
-	if promptYesNo(reader, "Configure Slack?") {
-		slackVars = map[string]string{
-			"SLACK_BOT_TOKEN": prompt(reader, "  Slack Bot Token (xoxb-...)"),
-			"SLACK_APP_TOKEN": prompt(reader, "  Slack App Token (xapp-...)"),
+	slackCfg = collectPlatformConfig(reader, "Slack", map[string]string{
+		"HOTPLEX_MESSAGING_SLACK_BOT_TOKEN": "Slack Bot Token (xoxb-...)",
+		"HOTPLEX_MESSAGING_SLACK_APP_TOKEN": "Slack App Token (xapp-...)",
+	})
+
+	feishuCfg = collectPlatformConfig(reader, "Feishu", map[string]string{
+		"HOTPLEX_MESSAGING_FEISHU_APP_ID":     "Feishu App ID",
+		"HOTPLEX_MESSAGING_FEISHU_APP_SECRET": "Feishu App Secret",
+	})
+
+	return slackCfg, feishuCfg, StepResult{Name: "messaging", Status: "pass", Detail: messagingDetail(slackCfg.enabled, feishuCfg.enabled)}
+}
+
+func collectPlatformConfig(reader *bufio.Reader, platform string, credPrompts map[string]string) messagingPlatformConfig {
+	if !promptYesNo(reader, fmt.Sprintf("Configure %s?", platform)) {
+		return messagingPlatformConfig{credentials: map[string]string{}}
+	}
+
+	cfg := messagingPlatformConfig{
+		enabled:     true,
+		credentials: map[string]string{},
+	}
+
+	for envKey, promptText := range credPrompts {
+		if val := prompt(reader, "  "+promptText); val != "" {
+			cfg.credentials[envKey] = val
 		}
 	}
 
-	if promptYesNo(reader, "Configure Feishu?") {
-		feishuVars = map[string]string{
-			"FEISHU_APP_ID":     prompt(reader, "  Feishu App ID"),
-			"FEISHU_APP_SECRET": prompt(reader, "  Feishu App Secret"),
-		}
+	fmt.Fprintln(os.Stderr, "\n  ── Access Policy [Enter = accept defaults] ──")
+	cfg.dmPolicy = promptWithDefault(reader, "  DM policy", "allowlist")
+	cfg.groupPolicy = promptWithDefault(reader, "  Group policy", "allowlist")
+	cfg.requireMention = promptYesNo(reader, "  Require @mention in groups?")
+	cfg.allowFrom = promptCommaList(reader, fmt.Sprintf("  Allowed users for %s", platform))
+
+	fmt.Fprintf(os.Stderr, "  → %s: dm=%s group=%s mention=%t\n", platform, cfg.dmPolicy, cfg.groupPolicy, cfg.requireMention)
+	return cfg
+}
+
+// ─── Step 5: Config file generation ─────────────────────────────────────────
+
+func stepConfigGen(opts WizardOptions, tplOpts ConfigTemplateOptions) (StepResult, bool) {
+	if _, err := os.Stat(opts.ConfigPath); err == nil && !opts.Force {
+		return StepResult{Name: "config_gen", Status: "skip", Detail: "config file already exists (use --force to overwrite)"}, false
 	}
 
-	detail := "none"
-	if len(slackVars) > 0 && len(feishuVars) > 0 {
-		detail = "slack+feishu"
-	} else if len(slackVars) > 0 {
-		detail = "slack"
-	} else if len(feishuVars) > 0 {
-		detail = "feishu"
+	dir := filepath.Dir(opts.ConfigPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return StepResult{Name: "config_gen", Status: "fail", Detail: "create config dir: " + err.Error()}, false
 	}
-	return slackVars, feishuVars, StepResult{Name: "messaging", Status: "pass", Detail: detail}
+
+	if err := os.WriteFile(opts.ConfigPath, []byte(BuildConfigYAML(tplOpts)), 0o600); err != nil {
+		return StepResult{Name: "config_gen", Status: "fail", Detail: "write config: " + err.Error()}, false
+	}
+	return StepResult{Name: "config_gen", Status: "pass", Detail: opts.ConfigPath}, true
 }
 
 // ─── Step 6: Write config ───────────────────────────────────────────────────
 
-func stepWriteConfig(envPath, jwtSecret, adminToken, workerType string, slackVars, feishuVars map[string]string, configCreated bool, opts WizardOptions) StepResult {
-	// When config wasn't generated/overwritten, skip config write but still write .env.
-
-	envContent := buildEnvContent(jwtSecret, adminToken, workerType, slackVars, feishuVars)
-	if err := os.WriteFile(envPath, []byte(envContent), 0o600); err != nil {
+func stepWriteConfig(envPath, jwtSecret, adminToken string, slackCfg, feishuCfg messagingPlatformConfig, configCreated bool, opts WizardOptions) StepResult {
+	if err := os.WriteFile(envPath, []byte(buildEnvContent(jwtSecret, adminToken, slackCfg, feishuCfg)), 0o600); err != nil {
 		return StepResult{Name: "write_config", Status: "fail", Detail: "write .env: " + err.Error()}
 	}
 
-	// If config was generated (step 2), verify it parses.
 	if configCreated {
 		if _, err := config.Load(opts.ConfigPath, config.LoadOptions{}); err != nil {
 			return StepResult{Name: "write_config", Status: "fail", Detail: "config parse error: " + err.Error()}
@@ -261,34 +304,36 @@ func stepWriteConfig(envPath, jwtSecret, adminToken, workerType string, slackVar
 	return StepResult{Name: "write_config", Status: "pass", Detail: envPath}
 }
 
-func buildEnvContent(jwtSecret, adminToken, workerType string, slackVars, feishuVars map[string]string) string {
+func buildEnvContent(jwtSecret, adminToken string, slackCfg, feishuCfg messagingPlatformConfig) string {
 	var b strings.Builder
-	b.WriteString("# HotPlex Worker Gateway - Environment Configuration\n")
-	b.WriteString("# Generated by onboard wizard\n\n")
+	b.WriteString("# HotPlex Worker Gateway - Environment Configuration\n# Generated by onboard wizard\n\n")
+	b.WriteString("# ── Security ──\n")
 	b.WriteString("HOTPLEX_JWT_SECRET=" + jwtSecret + "\n")
 	b.WriteString("HOTPLEX_ADMIN_TOKEN_1=" + adminToken + "\n")
 
-	if workerType != "" {
-		b.WriteString("\n# Worker type\n")
-		b.WriteString("HOTPLEX_WORKER_TYPE=" + workerType + "\n")
-	}
-
-	if len(slackVars) > 0 {
-		b.WriteString("\n# Slack\n")
-		for k, v := range slackVars {
-			b.WriteString(k + "=" + v + "\n")
+	writePlatformEnv := func(name, enabledEnv string, cfg messagingPlatformConfig) {
+		if !cfg.enabled {
+			return
+		}
+		fmt.Fprintf(&b, "\n# ── %s ──\n%s=true\n", name, enabledEnv)
+		for _, key := range sortedKeys(cfg.credentials) {
+			fmt.Fprintf(&b, "%s=%s\n", key, cfg.credentials[key])
 		}
 	}
+	writePlatformEnv("Slack", "HOTPLEX_MESSAGING_SLACK_ENABLED", slackCfg)
+	writePlatformEnv("Feishu", "HOTPLEX_MESSAGING_FEISHU_ENABLED", feishuCfg)
 
-	if len(feishuVars) > 0 {
-		b.WriteString("\n# Feishu\n")
-		for k, v := range feishuVars {
-			b.WriteString(k + "=" + v + "\n")
-		}
-	}
-
-	b.WriteString("\n")
+	b.WriteByte('\n')
 	return b.String()
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // ─── Step 7: Verify ─────────────────────────────────────────────────────────
@@ -296,12 +341,9 @@ func buildEnvContent(jwtSecret, adminToken, workerType string, slackVars, feishu
 func stepVerify(configPath string) StepResult {
 	checkers.SetConfigPath(configPath)
 
-	envCheckers := cli.DefaultRegistry.ByCategory("environment")
-	configCheckers := cli.DefaultRegistry.ByCategory("config")
-
 	var allCheckers []cli.Checker
-	allCheckers = append(allCheckers, envCheckers...)
-	allCheckers = append(allCheckers, configCheckers...)
+	allCheckers = append(allCheckers, cli.DefaultRegistry.ByCategory("environment")...)
+	allCheckers = append(allCheckers, cli.DefaultRegistry.ByCategory("config")...)
 
 	var passCount, failCount int
 	var details []string
@@ -353,4 +395,31 @@ func promptYesNo(reader *bufio.Reader, question string) bool {
 	line, _ := reader.ReadString('\n')
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "y" || line == "yes"
+}
+
+func promptWithDefault(reader *bufio.Reader, question, def string) string { //nolint:unparam // def default varies by caller context
+	fmt.Fprintf(os.Stderr, "? %s [%s]: ", question, def)
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return def
+	}
+	return line
+}
+
+func promptCommaList(reader *bufio.Reader, question string) []string {
+	fmt.Fprintf(os.Stderr, "? %s (comma-separated, Enter to skip): ", question)
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil
+	}
+	parts := strings.Split(line, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }

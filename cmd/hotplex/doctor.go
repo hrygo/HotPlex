@@ -25,6 +25,7 @@ func newDoctorCmd() *cobra.Command {
 			if configPath == "" {
 				configPath = "~/.hotplex/config.yaml"
 			}
+			configPath = expandPath(configPath)
 			checkers.SetConfigPath(configPath)
 
 			var checkersToRun []cli.Checker

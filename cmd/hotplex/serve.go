@@ -128,10 +128,10 @@ func gatewayPIDPath() string {
 
 func writeGatewayPID() error {
 	pidPath := gatewayPIDPath()
-	if err := os.MkdirAll(filepath.Dir(pidPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(pidPath), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	return os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
 }
 
 func readGatewayPID() (int, error) {
@@ -139,17 +139,17 @@ func readGatewayPID() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("gateway not running (no PID file)")
 	}
-	
+
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return 0, fmt.Errorf("invalid PID file content")
 	}
-	
+
 	if syscall.Kill(pid, 0) != nil {
 		removeGatewayPID()
 		return 0, fmt.Errorf("gateway not running (PID %d stale)", pid)
 	}
-	
+
 	return pid, nil
 }
 
@@ -158,6 +158,8 @@ func removeGatewayPID() {
 }
 
 func runGateway(configPath string, devMode bool) error {
+	configPath = expandPath(configPath)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -426,12 +428,24 @@ func runGateway(configPath string, devMode bool) error {
 	return ctx.Err()
 }
 
+func expandPath(p string) string {
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, p[2:])
+		}
+	}
+	return p
+}
+
 func loadConfig(configPath string, devMode bool) *config.Config {
+	configPath = expandPath(configPath)
 	absPath, err := filepath.Abs(configPath)
 	if err != nil {
 		slog.Error("config: resolve path", "path", configPath, "err", err)
 		os.Exit(1)
 	}
+
+	loadEnvFile(filepath.Dir(absPath))
 
 	cfg, err := config.Load(absPath, config.LoadOptions{})
 	if err != nil {
@@ -443,6 +457,36 @@ func loadConfig(configPath string, devMode bool) *config.Config {
 		cfg.Admin.Tokens = nil
 	}
 	return cfg
+}
+
+func loadEnvFile(dir string) {
+	envPath := filepath.Join(dir, ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return
+	}
+
+	var loaded int
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.Index(line, "=")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		val = strings.Trim(val, `"'`)
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, val)
+			loaded++
+		}
+	}
+	if loaded > 0 {
+		fmt.Fprintf(os.Stderr, "  env loaded %d vars from %s\n", loaded, envPath)
+	}
 }
 
 type GatewayDeps struct {
