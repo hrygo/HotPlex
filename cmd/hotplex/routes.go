@@ -54,6 +54,7 @@ func setupRoutes(
 	mux.HandleFunc("POST /api/sessions", withCORS(gatewayAPI.CreateSession))
 	mux.HandleFunc("GET /api/sessions/{id}", withCORS(gatewayAPI.GetSession))
 	mux.HandleFunc("DELETE /api/sessions/{id}", withCORS(gatewayAPI.DeleteSession))
+		mux.HandleFunc("POST /api/sessions/{id}/cd", withCORS(gatewayAPI.SwitchWorkDir))
 	mux.HandleFunc("OPTIONS /api/sessions", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("OPTIONS /api/sessions/", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("OPTIONS /api/sessions/{id}", withCORS(func(w http.ResponseWriter, r *http.Request) {}))

@@ -497,16 +497,6 @@ func (h *Handler) handleCD(ctx context.Context, env *events.Envelope) error {
 	return nil
 }
 
-// expandHome replaces a leading ~ with $HOME.
-func expandHome(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return home + path[1:]
-		}
-	}
-	return path
-}
-
 // ControlRequester is implemented by workers that support structured control queries.
 type ControlRequester interface {
 	SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error)

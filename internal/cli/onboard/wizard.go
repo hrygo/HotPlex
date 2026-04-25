@@ -226,9 +226,7 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 		return result, fmt.Errorf("config write failed: %s", s6.Detail)
 	}
 
-	s6b, agentCreated := stepAgentConfig()
-	result.add(s6b)
-	result.AgentConfigNew = agentCreated
+	runAgentConfigStep()
 
 	result.add(stepVerify(opts.ConfigPath))
 	result.Action = "reconfigure"
@@ -671,7 +669,9 @@ func promptCommaList(reader *bufio.Reader, question string) []string {
 
 func stepAgentConfig() (StepResult, []string) {
 	dir := filepath.Join(config.HotplexHome(), "agent-configs")
-	_ = os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return StepResult{Name: "agent_config", Status: "warn", Detail: "create dir: " + err.Error()}, nil
+	}
 
 	files := []struct {
 		name    string
@@ -687,12 +687,15 @@ func stepAgentConfig() (StepResult, []string) {
 	var created []string
 	for _, f := range files {
 		path := filepath.Join(dir, f.name)
-		if _, err := os.Stat(path); err == nil {
-			continue
-		}
-		if err := os.WriteFile(path, []byte(f.content), 0o644); err != nil {
+		fh, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			if os.IsExist(err) {
+				continue
+			}
 			return StepResult{Name: "agent_config", Status: "warn", Detail: "write " + f.name + ": " + err.Error()}, created
 		}
+		_, _ = fh.WriteString(f.content)
+		_ = fh.Close()
 		created = append(created, f.name)
 	}
 

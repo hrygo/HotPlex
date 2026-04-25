@@ -28,6 +28,7 @@ type SessionStarter interface {
 	StartSession(ctx context.Context, id, userID, botID string,
 		wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string) error
 	ResumeSession(ctx context.Context, id string, workDir string) error
+	SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir string) (*SwitchWorkDirResult, error)
 }
 
 var _ SessionStarter = (*Bridge)(nil) // compile-time: Bridge implements SessionStarter

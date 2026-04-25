@@ -90,7 +90,8 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose }: CommandMe
   return (
     <motion.div
       ref={containerRef}
-      className="absolute bottom-full left-0 right-0 mb-2 z-[100] rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[0_12px_48px_rgba(0,0,0,0.6)] backdrop-blur-2xl overflow-hidden"
+      style={{ zIndex: 99999, pointerEvents: 'auto' }}
+      className="absolute bottom-full left-0 right-0 mb-2 rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[0_12px_48px_rgba(0,0,0,0.6)] backdrop-blur-2xl overflow-hidden"
       initial={{ opacity: 0, y: 8, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 8, scale: 0.98 }}

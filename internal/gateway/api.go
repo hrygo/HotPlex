@@ -3,7 +3,9 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
@@ -17,15 +19,10 @@ type GatewayAPI struct {
 	auth     *security.Authenticator
 	sm       SessionManager
 	bridge   SessionStarter
-	cfgStore configLoader
+	cfgStore *config.ConfigStore
 }
 
-// configLoader mirrors the subset of *config.ConfigStore used by GatewayAPI.
-type configLoader interface {
-	Load() *config.Config
-}
-
-func NewGatewayAPI(auth *security.Authenticator, sm SessionManager, bridge SessionStarter, cfgStore configLoader) *GatewayAPI {
+func NewGatewayAPI(auth *security.Authenticator, sm SessionManager, bridge SessionStarter, cfgStore *config.ConfigStore) *GatewayAPI {
 	return &GatewayAPI{auth: auth, sm: sm, bridge: bridge, cfgStore: cfgStore}
 }
 
@@ -151,4 +148,74 @@ func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
+	userID, _, err := g.auth.AuthenticateRequest(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		WorkDir string `json:"work_dir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if body.WorkDir == "" {
+		http.Error(w, "work_dir is required", http.StatusBadRequest)
+		return
+	}
+
+	// Expand ~ to $HOME.
+	body.WorkDir = expandHome(body.WorkDir)
+
+	// Ownership check.
+	si, err := g.sm.Get(id)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if si.UserID != userID {
+		http.Error(w, "ownership required", http.StatusForbidden)
+		return
+	}
+	if !si.State.IsActive() {
+		http.Error(w, "session not active", http.StatusConflict)
+		return
+	}
+
+	// Delegate to bridge.
+	result, err := g.bridge.SwitchWorkDir(r.Context(), id, body.WorkDir)
+	if err != nil {
+		if strings.Contains(err.Error(), "not a directory") || strings.Contains(err.Error(), "path") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]string{
+		"old_session_id": result.OldSessionID,
+		"new_session_id": result.NewSessionID,
+		"work_dir":       result.WorkDir,
+	})
+}
+
+// expandHome replaces a leading ~ with $HOME.
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home + path[1:]
+		}
+	}
+	return path
 }
