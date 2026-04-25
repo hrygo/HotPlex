@@ -102,23 +102,22 @@ export function Thread() {
               <span>Jump to Latest</span>
             </button>
           </ThreadPrimitive.ScrollToBottom>
-        </div>
-      </ThreadPrimitive.Viewport>
+        </ThreadPrimitive.Viewport>
 
-      {/* Composer wrapper (floating footer) */}
-      <div className="composer-wrapper">
-        <div className="composer-container">
-          <Composer />
-          <div className="mt-2 text-center">
-            <p className="text-[10px] text-[var(--text-faint)] font-mono uppercase tracking-widest">
-              Shift + Enter for new line · Cmd + Enter to send
-            </p>
+        {/* Composer wrapper (floating footer) */}
+        <div className="composer-wrapper">
+          <div className="composer-container">
+            <Composer />
+            <div className="mt-2 text-center">
+              <p className="text-[10px] text-[var(--text-faint)] font-mono uppercase tracking-widest">
+                Shift + Enter for new line · Cmd + Enter to send
+              </p>
+            </div>
           </div>
         </div>
-      </div>
-    </ThreadPrimitive.Root>
-  );
-}
+      </ThreadPrimitive.Root>
+    );
+  }
 
 /* ============================================================
    Welcome Screen
