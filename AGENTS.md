@@ -139,7 +139,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - Route registration → `cmd/hotplex/routes.go` — HTTP routes for gateway WS, admin API, health, metrics
 
 **Modify existing**
-- Agent config files → `internal/agentconfig/loader.go` — file loading, size limits, frontmatter stripping; `prompt.go` for unified system prompt assembly (B+C merged, XML-tagged)
+- Agent config files → `internal/agentconfig/loader.go` — file loading, size limits, frontmatter stripping; `prompt.go` for unified system prompt assembly (nested XML: `<directives>` + `<context>` groups with per-section behavioral directives)
 - Agent config directory → `~/.hotplex/agent-configs/` — place SOUL.md, AGENTS.md, SKILLS.md (B-channel) + USER.md, MEMORY.md (C-channel); platform variants like SOUL.slack.md
 - Session lifecycle → `internal/session/manager.go` — state machine + `TransitionWithInput` atomicity + `DeletePhysical` for forced removal
 - Session key derivation → `internal/session/key.go` — UUIDv5 deterministic session IDs + platform context
@@ -211,7 +211,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 **Agent Config** (`internal/agentconfig/`)
 - `AgentConfigs` → `loader.go` — holds loaded content: Soul/Agents/Skills (B-channel) + User/Memory (C-channel)
 - `Load` → `loader.go` — reads config dir, appends platform variants (e.g. SOUL.slack.md), strips YAML frontmatter, enforces size limits (12K/file, 60K total)
-- `BuildSystemPrompt` → `prompt.go` — assembles unified B+C system prompt with XML tags for both CC and OCS
+- `BuildSystemPrompt` → `prompt.go` — assembles unified B+C system prompt with nested XML tags (`<directives>/<context>`) for both CC and OCS
 
 **Core**
 - `Envelope` → `pkg/events/events.go:73` — AEP v1 envelope (id, version, seq, session_id, event)
@@ -240,7 +240,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - **Interaction timeout**: Permission/Q&A/elicitation requests auto-deny after 5 minutes to prevent indefinite blocking
 - **Session key derivation**: UUIDv5 deterministic mapping from (ownerID, workerType, clientSessionID, workDir) for cross-environment consistency
 - **LLM auto-retry**: Configurable retryable error patterns (429, 5xx, network errors) with exponential backoff; per-session attempt tracking
-- **Agent config injection**: `agentconfig` package loads personality/context from `~/.hotplex/agent-configs/`; B-channel (SOUL.md, AGENTS.md, SKILLS.md) injected as system prompt; C-channel (USER.md, MEMORY.md) injected as rules files; platform variants (e.g. SOUL.slack.md) appended automatically; size limits: 12K/file, 60K total
+- **Agent config injection**: `agentconfig` package loads personality/context from `~/.hotplex/agent-configs/`; B-channel (SOUL.md, AGENTS.md, SKILLS.md) in `<directives>` XML group; C-channel (USER.md, MEMORY.md) in `<context>` XML group; platform variants (e.g. SOUL.slack.md) appended automatically; size limits: 8K/file, 40K total
 - **Session physical delete**: `DeletePhysical` bypasses state machine for forced removal — used by GatewayAPI for idempotent session creation when previous session is in `deleted` state
 - **Documentation**: 增量文档中文优先，重要文档中英双语。技术术语保留英文原文。增量文档（Issue/PR 模板、配置说明、changelog）用中文；重要文档（根 README、架构设计、协议规范）拆分为独立的中英文文件（如 `README.md` + `README_zh.md`），文件头部互相链接跳转
 - **File safety (multi-agent)**: 当前环境存在多 Agent 协同工作，对文件执行还原（`git restore`）、恢复、撤销（`git checkout`）、暂存（`git stash`）等操作前，**必须先在 `/tmp` 下创建备份**（`cp <file> /tmp/<file>.bak.$(date +%s)`），防止其他 Agent 的未提交改动被意外覆盖或丢失
@@ -278,7 +278,7 @@ configs/  config.yaml, config-dev.yaml, env.example
 - **LLM auto-retry**: LLMRetryController detects retryable errors via regex patterns (429/5xx/network), exponential backoff (initial 2s, max 60s), per-session attempt counter
 - **Deterministic session IDs**: DeriveSessionKey uses UUIDv5 (SHA-1 namespace+name) for cross-environment consistency; PlatformContext for platform-specific key derivation
 - **Per-user memory tracking**: PoolManager tracks estimated memory per user (512MB/worker) alongside session count quotas
-- **Agent config unified prompt**: B+C channels merged into single `BuildSystemPrompt` with XML tags; both CC (`--append-system-prompt`) and OCS (`system` field) use identical structure injected via `bridge.injectAgentConfig`; no file-based injection, no hedging
+- **Agent config unified prompt**: B+C channels merged into single `BuildSystemPrompt` with nested XML tags (`<agent-configuration>` → `<directives>` + `<context>`); each section has a 1-line behavioral directive; both CC (`--append-system-prompt`) and OCS (`system` field) use identical structure injected via `bridge.injectAgentConfig`; no file-based injection, no hedging
 - **Webchat session stickiness**: Deterministic "main" session ID via DeriveSessionKey + localStorage persistence for active session across page reloads; auto-creates first session when none exist
 
 ## COMMANDS

@@ -131,14 +131,14 @@ export function useHotPlexRuntime({
   const [isRunning, setIsRunning] = useState(false);
   const clientRef = useRef<BrowserHotPlexClient | null>(null);
 
-  // Welcome suggestions — shown when thread is empty
-  const suggestions: readonly ThreadSuggestion[] = [
+  // Welcome suggestions — shown when thread is empty (stable reference)
+  const suggestions: readonly ThreadSuggestion[] = useMemo(() => [
     { title: '帮我写一个 React 组件', label: '代码', prompt: '帮我写一个 React 组件' },
     { title: '解释这段代码的逻辑', label: '学习', prompt: '解释这段代码的逻辑' },
     { title: '帮我调试这个错误', label: '调试', prompt: '帮我调试这个错误' },
     { title: '重构这段代码让它更简洁', label: '重构', prompt: '重构这段代码让它更简洁' },
     { title: '解释系统架构设计', label: '架构', prompt: '解释系统架构设计' },
-  ];
+  ], []);
 
   // Pending reasoning content accumulated before messageStart
   const pendingReasoningRef = useRef<string>('');
@@ -317,16 +317,22 @@ export function useHotPlexRuntime({
     };
 
     const handleError = (data: ErrorData, env: Envelope) => {
-      console.error('HotPlexRuntimeAdapter: error received', {
-        code: data?.code,
-        message: data?.message,
-        details: data?.details,
-        eventId: env?.id,
-        raw: data
-      });
+      const hasData = data && (data.code || data.message);
+      if (hasData) {
+        console.error('HotPlexRuntimeAdapter: error received', {
+          code: data.code,
+          message: data.message,
+          details: data.details,
+          eventId: env?.id,
+        });
+      } else {
+        console.warn('HotPlexRuntimeAdapter: empty error event received (no code/message)', { env });
+      }
       setIsRunning(false);
 
-      const errorMessage = data?.message || 'An unexpected error occurred in the HotPlex gateway.';
+      const errorMessage = data?.message
+        || (data?.code ? `Error: ${data.code}` : undefined)
+        || 'An unexpected error occurred. The session may have been interrupted.';
 
       // Add error message to thread (use assistant role for assistant-ui compatibility)
       setMessages((prev) => [
@@ -532,16 +538,30 @@ export function useHotPlexRuntime({
     [messages]
   );
 
-  // Return ExternalStoreAdapter
-  return {
+  // Stable setMessages callback to prevent adapter churn
+  const handleSetMessages = useCallback((msgs: readonly HotPlexMessage[]) => {
+    setMessages([...msgs]);
+  }, []);
+
+  // Stable capabilities reference
+  const capabilities = useMemo(() => ({
+    copy: true,
+    edit: true,
+  }), []);
+
+  // Stable extras reference — only changes when metrics change
+  const extras = useMemo(() => ({
+    metrics: sessionMetrics,
+  }), [sessionMetrics]);
+
+  // Return ExternalStoreAdapter — memoized to prevent unnecessary setAdapter calls
+  return useMemo(() => ({
     // State
     isRunning,
     messages,
     threadMessages,
     suggestions,
-    setMessages: (messages: readonly HotPlexMessage[]) => {
-      setMessages([...messages]);
-    },
+    setMessages: handleSetMessages,
 
     // Message conversion
     convertMessage: convertToThreadMessage,
@@ -551,14 +571,12 @@ export function useHotPlexRuntime({
     onCancel: handleCancel,
 
     // Capabilities — Phase 3: branching and editing enabled
-    unstable_capabilities: {
-      copy: true,
-      edit: true,
-    },
+    unstable_capabilities: capabilities,
 
     // Metrics — exposed for session dashboard (spec §4.5)
-    extras: {
-      metrics: sessionMetrics,
-    },
-  } as ExternalStoreAdapter<HotPlexMessage>;
+    extras,
+  } as ExternalStoreAdapter<HotPlexMessage>), [
+    isRunning, messages, threadMessages, suggestions,
+    handleSetMessages, handleNew, handleCancel, capabilities, extras,
+  ]);
 }

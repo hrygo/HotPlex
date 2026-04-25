@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ThreadPrimitive,
   ComposerPrimitive,
@@ -8,6 +8,7 @@ import {
   ActionBarPrimitive,
   useMessage,
 } from "@assistant-ui/react";
+import { useAui, useAuiState } from "@assistant-ui/store";
 import { motion, AnimatePresence } from "framer-motion";
 import { MarkdownText } from "./MarkdownText";
 import { TerminalTool } from "./tools/TerminalTool";
@@ -483,6 +484,42 @@ function ToolResultBlock({ toolName, result }: { toolName: string; result: any }
    Composer
    ============================================================ */
 function Composer() {
+  const composingRef = useRef(false);
+  const aui = useAui();
+  const text = useAuiState((s) => s.composer.text);
+  const [localText, setLocalText] = useState(text || "");
+
+  // Sync global text changes (like clearing after send) back to local state
+  React.useEffect(() => {
+    if (!composingRef.current) {
+      setLocalText(text || "");
+    }
+  }, [text]);
+
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLTextAreaElement>) => {
+    composingRef.current = false;
+    const val = e.currentTarget.value;
+    setLocalText(val);
+    aui.composer().setText(val);
+  }, [aui]);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    // Always update local state immediately so the DOM matches perfectly (prevents IME flicker)
+    setLocalText(val);
+    
+    // Only sync to the global store if we are not actively in a real composition.
+    // Syncing to global store during composition causes asynchronous re-renders that break third-party IMEs.
+    // This also elegantly handles the macOS Chinese IME English-mode bug where compositionStart never fires.
+    if (!composingRef.current) {
+      aui.composer().setText(val);
+    }
+  }, [aui]);
+
   return (
     <ComposerPrimitive.Root className="composer-root">
       <div className="composer-input-row">
@@ -491,6 +528,10 @@ function Composer() {
           rows={1}
           autoFocus
           placeholder="Type a message or '/' for commands..."
+          value={localText}
+          onChange={handleChange}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
         />
 
         <div className="flex items-center gap-2">

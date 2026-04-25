@@ -121,6 +121,15 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, resu
 		return fmt.Errorf("claudecode: already started")
 	}
 
+	// When creating a new session (--session-id), clean up leftover files from
+	// previous sessions to prevent "already in use" errors from Claude Code CLI.
+	if !resume {
+		w.sessionID = session.SessionID
+		if err := w.deleteSessionFiles(); err != nil {
+			w.Log.Warn("claudecode: pre-start session file cleanup failed", "err", err)
+		}
+	}
+
 	args := w.buildCLIArgs(session, resume)
 	w.Proc = proc.New(proc.Opts{
 		Logger:       w.Log,

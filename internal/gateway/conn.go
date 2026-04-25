@@ -320,6 +320,11 @@ func (c *Conn) performInit(handler *Handler) error {
 				c.sendInitError(events.ErrCodeInternalError, "failed to start session")
 				return fmt.Errorf("start unstarted session: %w", err)
 			}
+			si, err = handler.sm.Get(sessionID)
+			if err != nil {
+				c.sendInitError(events.ErrCodeInternalError, "session lost after creation")
+				return fmt.Errorf("get session after start: %w", err)
+			}
 		}
 	} else if si.State == events.StateDeleted {
 		// Deleted sessions cannot be resumed. Physically remove then start fresh.
@@ -332,6 +337,11 @@ func (c *Conn) performInit(handler *Handler) error {
 				c.sendInitError(events.ErrCodeInternalError, msg)
 				metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 				return fmt.Errorf("recreate deleted session: %w", err)
+			}
+			si, err = handler.sm.Get(sessionID)
+			if err != nil {
+				c.sendInitError(events.ErrCodeInternalError, "session lost after recreation")
+				return fmt.Errorf("get session after recreation: %w", err)
 			}
 		}
 	} else if si.State == events.StateIdle || si.State == events.StateTerminated ||

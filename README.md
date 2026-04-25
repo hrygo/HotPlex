@@ -41,7 +41,7 @@ Hotplex is a high-performance Go gateway that provides a **single WebSocket inte
 - 🔹 **Worker Adapters**: Out-of-the-box support for Claude Code, OpenCode Server, and Pi-mono.
 
 ### 🤖 Agent Intelligence
-- 🔹 **Agent Config System**: Define agent personality (SOUL.md), workspace rules (AGENTS.md), tool guides (SKILLS.md), user profile (USER.md), and persistent memory (MEMORY.md) — automatically injected into every worker session via B/C dual channels.
+- 🔹 **Agent Config System**: Define agent personality (SOUL.md), workspace rules (AGENTS.md), tool guides (SKILLS.md), user profile (USER.md), and persistent memory (MEMORY.md) — automatically injected into every worker session via nested XML tags (`<directives>` + `<context>`) with per-section behavioral directives.
 - 🔹 **Platform Variants**: Per-platform config overrides (e.g. `SOUL.slack.md`, `SOUL.feishu.md`) appended automatically for channel-specific behavior.
 
 ### 🛡️ Reliability & Security

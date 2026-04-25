@@ -391,7 +391,8 @@ func (m *Manager) GetWorker(id string) worker.Worker {
 	return ms.worker
 }
 
-// releaseWorkerQuota delegates to PoolManager.Release.
+// releaseWorkerQuota releases both concurrency slot and memory quota.
+// pool.Release now handles both slot and memory under a single lock.
 func (m *Manager) releaseWorkerQuota(ms *managedSession) {
 	m.pool.Release(ms.info.UserID)
 }
@@ -418,7 +419,6 @@ func (m *Manager) DetachWorker(id string) {
 	if hasWorker {
 		metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
 		m.pool.Release(uid)
-		m.pool.ReleaseMemory(uid)
 		m.log.Debug("session: worker detached", "session_id", id)
 	}
 }
@@ -438,6 +438,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	ms.mu.Lock()
 	hasWorker := ms.worker != nil
 	workerType := ms.info.WorkerType
+	uid := ms.info.UserID
 	ms.info.State = events.StateDeleted
 	ms.info.UpdatedAt = time.Now()
 	if err := m.store.Upsert(ctx, &ms.info); err != nil {
@@ -445,14 +446,13 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		m.mu.Unlock()
 		return err
 	}
-	uid := ms.info.UserID
 	ms.mu.Unlock()
 
 	// Release quota and remove from map while still holding m.mu.
 	if hasWorker {
 		metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
+		m.pool.Release(uid)
 	}
-	m.pool.Release(uid)
 	delete(m.sessions, id)
 	m.mu.Unlock()
 
@@ -474,10 +474,10 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 	ms, ok := m.sessions[id]
 	if ok {
 		ms.mu.Lock()
-		m.releaseWorkerQuota(ms)
 		if ms.worker != nil {
 			_ = ms.worker.Kill()
 			metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Dec()
+			m.releaseWorkerQuota(ms)
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)

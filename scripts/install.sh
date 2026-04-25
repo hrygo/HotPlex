@@ -355,7 +355,7 @@ build_binary() {
 
     # Build with ldflags
     GIT_SHA=$(git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
-    BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    BUILD_TIME=$(date '+%Y-%m-%dT%H:%M:%S%z')
     GO_VERSION=$(go version | awk '{print $3}')
 
     LDFLAGS="-s -w \

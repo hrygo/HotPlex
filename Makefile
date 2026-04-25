@@ -20,7 +20,7 @@ GO_VERSION   := $(shell go version | cut -d' ' -f3)
 GOOS         := $(shell go env GOOS)
 GOARCH       := $(shell go env GOARCH)
 GIT_SHA      := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
-BUILD_TIME   := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+BUILD_TIME   := $(shell date '+%Y-%m-%dT%H:%M:%S%z')
 LDFLAGS      := -s -w -X main.version=v1.1.0 -X main.buildTime=$(BUILD_TIME)
 BUILD_OPTS   := -trimpath
 

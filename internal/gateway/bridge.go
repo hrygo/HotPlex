@@ -146,6 +146,7 @@ type forwardOpts struct {
 	resumed    bool   // true if this goroutine was spawned by ResumeSession
 	workDir    string // workDir to use for resume retry
 	retryDepth int    // number of resume retries attempted (limits to 1)
+	lastInput  string // inherited lastInput from previous retry goroutine; used as fallback when retry worker never receives input
 }
 
 // ResumeSession reattaches to an existing session.
@@ -483,11 +484,16 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	fallbackAttempted := !b.closed.Load() && exitCode != 0 && opts.resumed && opts.retryDepth < 2 && time.Since(startTime) < 15*time.Second
 	if fallbackAttempted {
 		// Extract last input from dead worker's conn for re-delivery after fresh start.
+		// Fall back to inherited lastInput from previous retry goroutine when the
+		// retry worker never received any input (conn.LastInput is empty).
 		var lastInput string
 		if conn := w.Conn(); conn != nil {
 			if ir, ok := conn.(worker.InputRecoverer); ok {
 				lastInput = sanitizeLastInput(ir.LastInput())
 			}
+		}
+		if lastInput == "" {
+			lastInput = opts.lastInput
 		}
 		if b.attemptResumeFallback(fallbackParams{
 			sessionID:  sessionID,
@@ -578,7 +584,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 
 	// Step 1: Retry resume once for transient failures (e.g., file lock, timing).
 	if p.retryDepth == 0 {
-		if err := b.resumeWithOpts(context.Background(), p.sessionID, p.workDir, forwardOpts{resumed: true, workDir: p.workDir, retryDepth: p.retryDepth + 1}); err != nil {
+		if err := b.resumeWithOpts(context.Background(), p.sessionID, p.workDir, forwardOpts{resumed: true, workDir: p.workDir, retryDepth: p.retryDepth + 1, lastInput: p.lastInput}); err != nil {
 			b.log.Error("bridge: resume retry failed synchronously, falling back to fresh start", "session_id", p.sessionID, "worker_type", p.workerType, "err", err)
 			// Synchronous failure — fall through to fresh start below.
 		} else {
