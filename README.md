@@ -52,7 +52,7 @@ Hotplex is a high-performance Go gateway that provides a **single WebSocket inte
 
 ### 💎 Developer Experience
 - 🔹 **CLI Self-Service**: Interactive `onboard` wizard, `doctor` diagnostics, `security` audit, `status` check, and `config validate` — all built into a single binary.
-- 🔹 **Ready-to-use Web UI**: Next.js 15 + Vercel AI SDK integration with redesigned light theme and persistent sidebar.
+- 🔹 **Ready-to-use Web UI**: Next.js 16 + Vercel AI SDK integration with Premium UX, Generative UI (GenUI), and Glassmorphism design system.
 - 🔹 **Hot-Reload Config**: Update gateway settings without downtime.
 - 🔹 **Multi-Language SDKs**: Native support for Go, TypeScript, Python, and Java.
 
