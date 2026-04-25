@@ -5,9 +5,6 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'HotPlex AI',
   description: 'AI-powered coding agent — HotPlex Worker Gateway',
-  icons: {
-    icon: "/logo.webp",
-  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -120,6 +120,8 @@ export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
           </label>
           <div className="relative">
             <input
+              id="workdir-input"
+              name="workdir"
               type="text"
               value={workDir}
               onChange={(e) => setWorkDir(e.target.value)}
