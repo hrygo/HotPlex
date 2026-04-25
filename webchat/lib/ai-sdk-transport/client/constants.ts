@@ -78,6 +78,8 @@ export const ErrorCode = {
   ExecutionTimeout: 'EXECUTION_TIMEOUT',
   ReconnectRequired: 'RECONNECT_REQUIRED',
   WorkerOutputLimit: 'WORKER_OUTPUT_LIMIT',
+  TurnTimeout: 'TURN_TIMEOUT',
+  ResumeRetry: 'RESUME_RETRY',
 } as const;
 
 export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];

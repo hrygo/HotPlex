@@ -345,7 +345,7 @@ export function useHotPlexRuntime({
         return prev;
       });
 
-      const isTimeout = data?.code === 'TURN_TIMEOUT';
+      const isTimeout = (data?.code as string) === 'TURN_TIMEOUT';
       const errorMessage = isTimeout 
         ? "Session timeout: The agent took too long to respond (limit: 15m). You may want to break your request into smaller steps."
         : (data?.message || (data?.code ? `Error: ${data.code}` : 'An unexpected error occurred.'));
