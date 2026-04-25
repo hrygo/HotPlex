@@ -116,7 +116,7 @@ type WizardResult struct {
 	ConfigPath     string
 	EnvPath        string
 	Steps          []StepResult
-	Action         string // "keep" or "reconfigure"
+	Action         string   // "keep" or "reconfigure"
 	AgentConfigNew []string // files created by this run
 }
 

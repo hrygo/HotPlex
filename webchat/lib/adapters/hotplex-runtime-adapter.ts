@@ -318,6 +318,7 @@ export function useHotPlexRuntime({
 
     const handleError = (data: ErrorData, env: Envelope) => {
       const isBusy = (data?.code as string) === 'SESSION_BUSY';
+      const isResumeRetry = (data?.code as string) === 'RESUME_RETRY';
       
       // SESSION_BUSY is a transient state handled internally by auto-retry, so do not show it to the user and don't log as error.
       if (isBusy) {
@@ -328,24 +329,30 @@ export function useHotPlexRuntime({
       if (hasData) {
         const detailsStr = data.details ? ` Details: ${JSON.stringify(data.details)}` : '';
         const eventStr = env?.id ? ` EventID: ${env.id}` : '';
-        console.error(`HotPlexRuntimeAdapter: error received. Code: ${data.code || 'unknown'}, Message: ${data.message || 'none'}${detailsStr}${eventStr}`);
+        if (isResumeRetry) {
+          console.warn(`HotPlexRuntimeAdapter: worker recovery triggered. Code: ${data.code}, Message: ${data.message}${detailsStr}${eventStr}`);
+        } else {
+          console.error(`HotPlexRuntimeAdapter: error received. Code: ${data.code || 'unknown'}, Message: ${data.message || 'none'}${detailsStr}${eventStr}`);
+        }
       } else {
         console.warn(`HotPlexRuntimeAdapter: empty error event received (no code/message). EventID: ${env?.id}`);
       }
 
-      setIsRunning(false);
+      // If it's a fatal error, stop the run and complete the streaming message
+      if (!isResumeRetry) {
+        setIsRunning(false);
 
-      // Mark last streaming message as errored/complete to stop loading state
-      setMessages((prev) => {
-        const lastMessage = prev[prev.length - 1];
-        if (lastMessage?.role === 'assistant' && lastMessage.status === 'streaming') {
-          return [
-            ...prev.slice(0, -1),
-            { ...lastMessage, status: 'complete' },
-          ];
-        }
-        return prev;
-      });
+        setMessages((prev) => {
+          const lastMessage = prev[prev.length - 1];
+          if (lastMessage?.role === 'assistant' && lastMessage.status === 'streaming') {
+            return [
+              ...prev.slice(0, -1),
+              { ...lastMessage, status: 'complete' },
+            ];
+          }
+          return prev;
+        });
+      }
 
       let errorMessage = data?.message;
       
@@ -368,6 +375,9 @@ export function useHotPlexRuntime({
           break;
         case 'WORKER_OUTPUT_LIMIT':
           errorMessage = "The agent produced too much output and was terminated. Try to narrow down your request.";
+          break;
+        case 'RESUME_RETRY':
+          errorMessage = `🔄 ${data?.message || 'Recovering session after unexpected crash...'}`;
           break;
         default:
           errorMessage = errorMessage || (data?.code ? `Error: ${data.code}` : 'An unexpected error occurred.');

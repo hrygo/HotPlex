@@ -24,6 +24,7 @@ import (
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/tracing"
+	"github.com/hrygo/hotplex/internal/worker/opencodeserver"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -234,6 +235,9 @@ func runGateway(configPath string, devMode bool) (err error) {
 		bridge.SetTurnTimeout(cfg.Worker.TurnTimeout)
 	}
 
+	// Initialize OpenCode Server singleton process manager.
+	opencodeserver.InitSingleton(log)
+
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if !reflect.DeepEqual(prev.Worker.AutoRetry, next.Worker.AutoRetry) {
 			retryCtrl.UpdateConfig(next.Worker.AutoRetry)
@@ -328,6 +332,7 @@ func runGateway(configPath string, devMode bool) (err error) {
 	closeSTTCache(shutdownCtx, log)
 
 	bridge.Shutdown()
+	opencodeserver.ShutdownSingleton(shutdownCtx)
 
 	cleanupWG.Wait()
 	pidTracker.RemoveAll()
