@@ -23,6 +23,7 @@ var slashCommandMap = map[string]ControlCommandResult{
 	// Reset: reuse session ID, everything else starts from scratch.
 	"/reset": {Action: events.ControlActionReset, Label: "reset"},
 	"/new":   {Action: events.ControlActionReset, Label: "reset"},
+	"/cd":    {Action: events.ControlActionCD, Label: "cd"},
 }
 
 // naturalLanguageMap maps normalized natural language triggers to control actions.

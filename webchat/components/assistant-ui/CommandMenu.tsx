@@ -17,6 +17,7 @@ const COMMANDS: Command[] = [
   { key: "/park", label: "/park", description: "Park the current session to save resources", type: "slash" },
   { key: "/new", label: "/new", description: "Create a fresh new session", type: "slash" },
   { key: "/status", label: "/status", description: "Show current session and worker status", type: "slash" },
+  { key: "/cd", label: "/cd", description: "Switch working directory and create new session", type: "slash" },
   { key: "/help", label: "/help", description: "Show available commands and documentation", type: "slash" },
   
   // Skills

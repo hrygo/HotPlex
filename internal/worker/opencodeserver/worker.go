@@ -535,6 +535,22 @@ func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string) {
 	}
 }
 
+func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, session worker.SessionInfo) {
+	w.initHTTPConn(session.UserID, serverSessionID, session.SystemPrompt)
+	w.cmd = &ServerCommander{
+		client:    w.client,
+		baseURL:   w.httpAddr,
+		sessionID: serverSessionID,
+	}
+	if err := w.applyPermissions(ctx, session); err != nil {
+		w.Log.Warn("opencodeserver: failed to set permissions", "error", err)
+	}
+	w.Mu.Lock()
+	w.StartTime = time.Now()
+	w.SetLastIO(w.StartTime)
+	w.Mu.Unlock()
+}
+
 func (w *Worker) readSSE(sessionID string) {
 	url := fmt.Sprintf("%s/events?session_id=%s", w.httpAddr, sessionID)
 	req, err := http.NewRequest("GET", url, http.NoBody)
