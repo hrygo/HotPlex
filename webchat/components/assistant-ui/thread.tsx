@@ -602,11 +602,6 @@ function Composer() {
             </ComposerPrimitive.Send>
           </div>
         </div>
-        
-        {/* DEBUG INFO */}
-        <div style={{ position: 'absolute', top: '-40px', right: 0, background: 'red', color: 'white', padding: '4px', fontSize: '10px', zIndex: 9999 }}>
-          local: {localText} | global: {text} | menu: {menuOpen ? "YES" : "NO"} | composing: {composingRef.current ? "YES" : "NO"}
-        </div>
       </div>
     </ComposerPrimitive.Root>
   );

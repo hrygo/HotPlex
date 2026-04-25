@@ -491,10 +491,9 @@ func (h *Handler) handleCD(ctx context.Context, env *events.Envelope) error {
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "切换失败：%v", err)
 	}
 
-	// Notify client.
 	msg := fmt.Sprintf("已切换到 %s（新会话 %s）", result.WorkDir, result.NewSessionID)
 	msgEnv := events.NewEnvelope(
-		aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID),
+		aep.NewID(), result.NewSessionID, h.hub.NextSeq(result.NewSessionID),
 		events.Message, events.MessageData{Content: msg},
 	)
 	_ = h.hub.SendToSession(ctx, msgEnv)
