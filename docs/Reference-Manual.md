@@ -16,7 +16,7 @@
 3. [Installation & Build](#3-installation--build)
 4. [Configuration](#4-configuration)
 5. [Agent Config](#5-agent-config)
-6. [CLI Flags](#6-cli-flags)
+6. [CLI Commands](#6-cli-commands)
 7. [AEP WebSocket Protocol](#7-aep-websocket-protocol)
 8. [Admin API Reference](#8-admin-api-reference)
 9. [Session Lifecycle](#9-session-lifecycle)
@@ -78,10 +78,10 @@ hotplex gateway start -c /etc/hotplex/config.yaml
 ### 2.3 Run in Dev Mode
 
 ```bash
-hotplex gateway start --dev
+hotplex dev
 ```
 
-Dev mode disables API key and admin token checks.
+Shortcut for `hotplex gateway start --dev`. Disables API key and admin token checks.
 
 ### 2.4 Docker
 
@@ -253,7 +253,7 @@ Set `HOTPLEX_JWT_SECRET` for JWT authentication:
 
 ```bash
 export HOTPLEX_JWT_SECRET="your-es256-secret-key-base64"
-./hotplex -config config.yaml
+hotplex gateway start -c config.yaml
 ```
 
 ### 4.3 Config Defaults
@@ -277,7 +277,7 @@ All non-sensitive fields have production defaults. Binary runs with zero config.
 | `session.retention_period` | `7d` | |
 | `session.gc_scan_interval` | `1m` | |
 | `pool.max_size` | `100` | |
-| `pool.max_memory_per_user` | `2GB` | |
+| `pool.max_memory_per_user` | `3GB` | |
 | `admin.enabled` | `true` | |
 | `admin.addr` | `:9999` | |
 | `admin.rate_limit_enabled` | `true` | |
@@ -861,7 +861,7 @@ Tracing is disabled by default. Enable via OTEL environment variables:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://collector:4317"
-./hotplex
+hotplex gateway start
 ```
 
 ### 11.4 Health Checks
@@ -915,7 +915,7 @@ Set `HOTPLEX_JWT_SECRET` environment variable:
 
 ```bash
 export HOTPLEX_JWT_SECRET="your-256-bit-secret"
-./hotplex
+hotplex gateway start
 ```
 
 **Error: `config: read "config.yaml": no such file or directory`**
@@ -923,7 +923,7 @@ export HOTPLEX_JWT_SECRET="your-256-bit-secret"
 Verify config file path. Use absolute path:
 
 ```bash
-./hotplex -config /absolute/path/to/config.yaml
+hotplex gateway start -c /absolute/path/to/config.yaml
 ```
 
 **Error: `TLS is disabled on non-local address`**

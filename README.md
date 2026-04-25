@@ -69,10 +69,10 @@ make quickstart
 
 ```bash
 # Interactive setup wizard (detects existing config, supports keep-or-reconfigure)
-./hotplex onboard
+hotplex onboard
 
 # Or quick auto-generate all configs:
-./hotplex onboard --non-interactive --enable-slack --enable-feishu
+hotplex onboard --non-interactive --enable-slack --enable-feishu
 ```
 
 ### 3. Run Development Servers
@@ -83,7 +83,7 @@ make dev
 - **Admin API**: `http://localhost:9999`
 - **Web Chat**: `http://localhost:3000`
 
-### 3. Connect via Go SDK
+### 4. Connect via Go SDK
 ```go
 package main
 
