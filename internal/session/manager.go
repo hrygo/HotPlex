@@ -402,17 +402,35 @@ func (m *Manager) releaseWorkerQuota(ms *managedSession) {
 
 // DetachWorker removes the worker from the session and releases the concurrency quota.
 // It is safe to call even if no worker is attached.
-// Acquires ms.mu then pool lock to avoid deadlock with Delete.
 func (m *Manager) DetachWorker(id string) {
+	m.detachWorkerUnchecked(id, nil)
+}
+
+// DetachWorkerIf removes the worker only if it matches the expected one (CAS semantics).
+// Returns true if detached, false if the current worker differs (another goroutine already replaced it).
+// Use this from stale goroutines (e.g., old forwardEvents) to avoid clobbering a newer worker.
+func (m *Manager) DetachWorkerIf(id string, expected worker.Worker) bool {
+	return m.detachWorkerUnchecked(id, expected)
+}
+
+// detachWorkerUnchecked is the shared implementation.
+// If expected is non-nil, it acts as a CAS guard — only detaches when ms.worker == expected.
+func (m *Manager) detachWorkerUnchecked(id string, expected worker.Worker) bool {
 	if m == nil {
-		return
+		return false
 	}
 	ms := m.getManagedSession(id)
 	if ms == nil {
-		return
+		return false
 	}
 
 	ms.mu.Lock()
+	if expected != nil && ms.worker != expected {
+		// CAS mismatch — another goroutine already replaced the worker.
+		ms.mu.Unlock()
+		m.log.Debug("session: detach skipped, worker replaced", "session_id", id)
+		return false
+	}
 	hasWorker := ms.worker != nil
 	workerType := ms.info.WorkerType
 	ms.worker = nil
@@ -424,6 +442,7 @@ func (m *Manager) DetachWorker(id string) {
 		m.pool.Release(uid)
 		m.log.Debug("session: worker detached", "session_id", id)
 	}
+	return true
 }
 
 // Delete marks a session as DELETED and removes it from the in-memory cache.

@@ -83,7 +83,7 @@ export interface BrowserClientEvents {
 const DEFAULT_RECONNECT_CONFIG = {
   enabled: true,
   maxAttempts: 10,
-  baseDelayMs: ProtocolConstants.ReconnectBaseDelayMs,
+  baseDelayMs: 3000,                    // 3 seconds — avoid reconnection storms
   maxDelayMs: ProtocolConstants.ReconnectMaxDelayMs,
 };
 

@@ -940,6 +940,11 @@ func (m *mockBridgeSM) DetachWorker(id string) {
 	m.Called(id)
 }
 
+func (m *mockBridgeSM) DetachWorkerIf(id string, expected worker.Worker) bool {
+	args := m.Called(id, expected)
+	return args.Bool(0)
+}
+
 func (m *mockBridgeSM) Transition(ctx context.Context, id string, to events.SessionState) error {
 	args := m.Called(ctx, id, to)
 	return args.Error(0)

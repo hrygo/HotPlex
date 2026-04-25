@@ -677,6 +677,7 @@ type SessionManager interface {
 	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir string) (*session.SessionInfo, error)
 	AttachWorker(id string, w worker.Worker) error
 	DetachWorker(id string)
+	DetachWorkerIf(id string, expected worker.Worker) bool
 	Transition(ctx context.Context, id string, to events.SessionState) error
 	Get(id string) (*session.SessionInfo, error)
 	GetWorker(id string) worker.Worker

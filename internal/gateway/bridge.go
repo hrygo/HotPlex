@@ -425,7 +425,10 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		}
 
 		// LLM retry: check after Done is forwarded and persisted.
-		if env.Event.Type == events.Done && b.retryCtrl != nil {
+		// Skip for resumed workers with no output — these are resume failures
+		// (e.g., "No conversation found"), not transient LLM errors. The resume
+		// fallback mechanism handles these cases with its own retry logic.
+		if env.Event.Type == events.Done && b.retryCtrl != nil && !(opts.resumed && turnText.Len() == 0) {
 			if shouldRetry, attempt := b.retryCtrl.ShouldRetry(sessionID, turnText.String(), lastError); shouldRetry {
 				// Suppress buffered error — user sees the notify message instead of raw LLM error.
 				pendingError = nil
@@ -484,7 +487,8 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	// failed to restore its conversation state. Retry resume once (limited by
 	// retryDepth) to recover, then fall back to fresh start if retry also fails.
 	// Skip during shutdown to avoid spawning workers that will be immediately killed.
-	fallbackAttempted := !b.closed.Load() && exitCode != 0 && opts.resumed && opts.retryDepth < 2 && time.Since(startTime) < 15*time.Second
+	// Skip for exit 143 (SIGTERM) — intentional termination by a new connection, not a crash.
+	fallbackAttempted := !b.closed.Load() && exitCode != 0 && exitCode != 143 && opts.resumed && opts.retryDepth < 2 && time.Since(startTime) < 15*time.Second
 	if fallbackAttempted {
 		// Extract last input from dead worker's conn for re-delivery after fresh start.
 		// Fall back to inherited lastInput from previous retry goroutine when the
@@ -499,12 +503,13 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			lastInput = opts.lastInput
 		}
 		if b.attemptResumeFallback(fallbackParams{
-			sessionID:  sessionID,
-			workDir:    opts.workDir,
-			exitCode:   exitCode,
-			retryDepth: opts.retryDepth,
-			workerType: workerType,
-			lastInput:  lastInput,
+			sessionID:     sessionID,
+			workDir:       opts.workDir,
+			exitCode:      exitCode,
+			retryDepth:    opts.retryDepth,
+			workerType:    workerType,
+			lastInput:     lastInput,
+			crashedWorker: w,
 		}) {
 			return // new forwardEvents goroutine took over
 		}
@@ -514,7 +519,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	// During shutdown, skip crash detection — workers are SIGTERM'd by design.
 	// Just clean up without sending crash done events or incrementing crash metrics.
 	if b.closed.Load() {
-		b.cleanupCrashedWorker(sessionID)
+		b.cleanupCrashedWorker(sessionID, w)
 		return
 	}
 
@@ -526,7 +531,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		if smErr == nil && si.State == events.StateTerminated {
 			b.log.Debug("bridge: session already terminated, skipping done for handler-killed worker", "session_id", sessionID, "worker_type", workerType)
 			if !fallbackAttempted {
-				b.cleanupCrashedWorker(sessionID)
+				b.cleanupCrashedWorker(sessionID, w)
 			}
 			return
 		}
@@ -559,18 +564,19 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	// so the next message triggers orphan resume instead of silently dropping input.
 	// Skip when attemptResumeFallback already performed cleanup.
 	if !fallbackAttempted {
-		b.cleanupCrashedWorker(sessionID)
+		b.cleanupCrashedWorker(sessionID, w)
 	}
 }
 
 // fallbackParams carries the context needed by attemptResumeFallback.
 type fallbackParams struct {
-	sessionID  string
-	workDir    string
-	exitCode   int
-	retryDepth int
-	workerType worker.WorkerType
-	lastInput  string
+	sessionID     string
+	workDir       string
+	exitCode      int
+	retryDepth    int
+	workerType    worker.WorkerType
+	lastInput     string
+	crashedWorker worker.Worker
 }
 
 // attemptResumeFallback handles a crashed resumed worker with a two-step strategy:
@@ -583,7 +589,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		"session_id", p.sessionID, "worker_type", p.workerType, "exit_code", p.exitCode, "retry_depth", p.retryDepth)
 
 	// Clean up the crashed worker first.
-	b.cleanupCrashedWorker(p.sessionID)
+	b.cleanupCrashedWorker(p.sessionID, p.crashedWorker)
 
 	// Step 1: Retry resume once for transient failures (e.g., file lock, timing).
 	if p.retryDepth == 0 {
@@ -668,14 +674,23 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 
 // cleanupCrashedWorker detaches the dead worker and transitions the session to TERMINATED
 // so the next message triggers orphan resume instead of silently dropping input.
-func (b *Bridge) cleanupCrashedWorker(sessionID string) {
+// Uses CAS via crashedWorker to avoid detaching a worker that was already replaced
+// by a concurrent ResumeSession or attemptResumeFallback.
+func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Worker) {
 	acc := b.getOrInitAccum(sessionID)
 	b.log.Debug("bridge: cleaning up crashed worker", "session_id", sessionID, "turn_count", acc.TurnCount)
 	b.deleteAccum(sessionID)
 	if b.sm == nil {
 		return
 	}
-	b.sm.DetachWorker(sessionID)
+	if crashedWorker != nil {
+		if !b.sm.DetachWorkerIf(sessionID, crashedWorker) {
+			b.log.Debug("bridge: crashed worker already replaced, skipping cleanup", "session_id", sessionID)
+			return
+		}
+	} else {
+		b.sm.DetachWorker(sessionID)
+	}
 	if err := b.sm.Transition(context.Background(), sessionID, events.StateTerminated); err != nil {
 		b.log.Debug("bridge: transition to terminated after worker exit", "session_id", sessionID, "err", err)
 	}

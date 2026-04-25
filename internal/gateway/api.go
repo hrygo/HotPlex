@@ -11,6 +11,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 
 	"github.com/hrygo/hotplex/pkg/aep"
@@ -75,16 +76,13 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	id := r.URL.Query().Get("session_id")
+	clientSessionID := r.URL.Query().Get("session_id")
 	wt := worker.WorkerType(r.URL.Query().Get("worker_type"))
 	if wt == "" {
 		wt = worker.TypeClaudeCode
 	}
-	if id == "" {
-		id = aep.NewSessionID()
-	}
-	if userID == "" {
-		userID = "anonymous"
+	if clientSessionID == "" {
+		clientSessionID = aep.NewSessionID()
 	}
 
 	// Resolve work dir: use client-provided value or default from config.
@@ -97,6 +95,16 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+	}
+
+	// Derive session ID via UUIDv5 for consistency with WebSocket path.
+	// Both REST and WS use the auth userID ("anonymous" in dev mode, "api_user"
+	// with API keys) so they produce the same derived session ID.
+	id := session.DeriveSessionKey(userID, wt, clientSessionID, workDir)
+
+	// Default userID after derivation — bridge expects non-empty.
+	if userID == "" {
+		userID = "anonymous"
 	}
 
 	// Idempotency check: if session exists and is active, just return it.
