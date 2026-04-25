@@ -265,24 +265,24 @@ type DBConfig struct {
 
 // WorkerConfig holds per-worker defaults.
 type WorkerConfig struct {
-	MaxLifetime      time.Duration       `mapstructure:"max_lifetime"`
-	IdleTimeout      time.Duration       `mapstructure:"idle_timeout"`
-	ExecutionTimeout time.Duration       `mapstructure:"execution_timeout"`
-	TurnTimeout      time.Duration       `mapstructure:"turn_timeout"`
-	AllowedEnvs      []string            `mapstructure:"allowed_envs"`
-	EnvWhitelist     []string            `mapstructure:"env_whitelist"`
-	DefaultWorkDir   string              `mapstructure:"default_work_dir"`
-	PIDDir           string              `mapstructure:"pid_dir"`
-	AutoRetry        AutoRetryConfig     `mapstructure:"auto_retry"`
+	MaxLifetime      time.Duration        `mapstructure:"max_lifetime"`
+	IdleTimeout      time.Duration        `mapstructure:"idle_timeout"`
+	ExecutionTimeout time.Duration        `mapstructure:"execution_timeout"`
+	TurnTimeout      time.Duration        `mapstructure:"turn_timeout"`
+	AllowedEnvs      []string             `mapstructure:"allowed_envs"`
+	EnvWhitelist     []string             `mapstructure:"env_whitelist"`
+	DefaultWorkDir   string               `mapstructure:"default_work_dir"`
+	PIDDir           string               `mapstructure:"pid_dir"`
+	AutoRetry        AutoRetryConfig      `mapstructure:"auto_retry"`
 	OpenCodeServer   OpenCodeServerConfig `mapstructure:"opencode_server"`
 }
 
 // OpenCodeServerConfig holds OpenCode Server singleton process settings.
 type OpenCodeServerConfig struct {
-	IdleDrainPeriod  time.Duration `mapstructure:"idle_drain_period"`
-	ReadyTimeout     time.Duration `mapstructure:"ready_timeout"`
+	IdleDrainPeriod   time.Duration `mapstructure:"idle_drain_period"`
+	ReadyTimeout      time.Duration `mapstructure:"ready_timeout"`
 	ReadyPollInterval time.Duration `mapstructure:"ready_poll_interval"`
-	HTTPTimeout      time.Duration `mapstructure:"http_timeout"`
+	HTTPTimeout       time.Duration `mapstructure:"http_timeout"`
 }
 
 // AutoRetryConfig controls automatic retry behavior when LLM provider returns

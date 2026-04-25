@@ -157,7 +157,7 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	info, err := scanSession(s.db.QueryRowContext(ctx, queries["store.get_session"], id))
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrSessionNotFound
 	}
 	if err != nil {
