@@ -10,6 +10,7 @@ import type { ExternalStoreAdapter, ThreadMessageLike, AppendMessage } from '@as
 import { BrowserHotPlexClient } from '@/lib/ai-sdk-transport';
 import type { InitConfig } from '@/lib/ai-sdk-transport/client/types';
 import { wsUrl, workerType, apiKey, workDir, allowedTools } from '@/lib/config';
+import { useMetrics } from '@/lib/hooks/useMetrics';
 import type {
   Envelope,
   MessageDeltaData,
@@ -135,6 +136,9 @@ export function useHotPlexRuntime({
 
   // Pending reasoning content accumulated before messageStart
   const pendingReasoningRef = useRef<string>('');
+
+  // Metrics tracking (spec §4.5 — Token & latency dashboard)
+  const { sessionMetrics, startTurn, recordTurn } = useMetrics();
 
   // Initialize WebSocket client
   useEffect(() => {
@@ -275,6 +279,13 @@ export function useHotPlexRuntime({
 
     const handleDone = (data: DoneData, env: Envelope) => {
       console.log('HotPlexRuntimeAdapter: streaming done', data);
+
+      // Record turn metrics from done.stats
+      if (data?.stats) {
+        recordTurn(data.stats);
+      } else {
+        recordTurn({});
+      }
 
       // Mark last assistant message as complete
       setMessages((prev) => {
@@ -481,6 +492,7 @@ export function useHotPlexRuntime({
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    startTurn(); // Begin timing for metrics
 
     // Send to HotPlex gateway with error handling
     try {
@@ -526,12 +538,15 @@ export function useHotPlexRuntime({
     onNew: handleNew,
     onCancel: handleCancel,
 
-    // Capabilities — preparing for Phase 3 branching/editing
+    // Capabilities — Phase 3: branching and editing enabled
     unstable_capabilities: {
       copy: true,
-      // TODO: Phase 3 — enable when adapter supports branching
-      // edit: true,
-      // branching: true,
+      edit: true,
+    },
+
+    // Metrics — exposed for session dashboard (spec §4.5)
+    extras: {
+      metrics: sessionMetrics,
     },
   } as ExternalStoreAdapter<HotPlexMessage>;
 }
