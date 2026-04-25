@@ -171,9 +171,13 @@ def test_get_context_usage(proc, responses) -> bool:
         log(f"  {c.get('name', '?')}: {c.get('tokens', 0):,} tokens", "OK")
 
     skills = d.get("skills", {})
+    names = skills.get("names", [])
     log(f"skills: total={skills.get('totalSkills', 0)} "
         f"included={skills.get('includedSkills', 0)} "
-        f"tokens={skills.get('tokens', 0)}", "OK")
+        f"tokens={skills.get('tokens', 0)} "
+        f"names={len(names)}", "OK")
+    if names:
+        log(f"  First 5 skills: {', '.join(names[:5])}", "OK")
     log(f"memory_files={len(d.get('memoryFiles', []))} "
         f"mcp_tools={len(d.get('mcpTools', []))} "
         f"agents={len(d.get('agents', []))}", "OK")

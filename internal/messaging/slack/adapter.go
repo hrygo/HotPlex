@@ -1112,6 +1112,9 @@ func (c *SlackConn) buildContextUsageTable(d events.ContextUsageData, catParts [
 	}
 	if d.Skills.Total > 0 {
 		table.AddRow(richTextCell("⚡ Skills"), richTextCell(fmt.Sprintf("%d (%d included, %d tokens)", d.Skills.Total, d.Skills.Included, d.Skills.Tokens)))
+		if len(d.Skills.Names) > 0 {
+			table.AddRow(richTextCell("📜 Skill List"), richTextCell(strings.Join(d.Skills.Names, ", ")))
+		}
 	}
 	return []slack.Block{table}
 }
@@ -1124,6 +1127,9 @@ func (c *SlackConn) buildContextUsageFallback(d events.ContextUsageData, catPart
 	}
 	if len(catParts) > 0 {
 		parts = append(parts, "📂 "+strings.Join(catParts, " · "))
+	}
+	if len(d.Skills.Names) > 0 {
+		parts = append(parts, "📜 *Skills*: "+strings.Join(d.Skills.Names, ", "))
 	}
 	text := slack.NewTextBlockObject("mrkdwn", strings.Join(parts, "\n"), false, false)
 	return []slack.Block{slack.NewContextBlock("", text)}

@@ -830,7 +830,11 @@ func (c *FeishuConn) sendContextUsage(ctx context.Context, env *events.Envelope)
 		extras = append(extras, fmt.Sprintf("🤖 %d agents", d.Agents))
 	}
 	if d.Skills.Total > 0 {
-		extras = append(extras, fmt.Sprintf("⚡ %d skills (%d included, %d tokens)", d.Skills.Total, d.Skills.Included, d.Skills.Tokens))
+		skillsStr := fmt.Sprintf("⚡ %d skills (%d included, %d tokens)", d.Skills.Total, d.Skills.Included, d.Skills.Tokens)
+		if len(d.Skills.Names) > 0 {
+			skillsStr += "\n📜 " + strings.Join(d.Skills.Names, ", ")
+		}
+		extras = append(extras, skillsStr)
 	}
 	if len(extras) > 0 {
 		sb.WriteString("\n" + strings.Join(extras, " · "))

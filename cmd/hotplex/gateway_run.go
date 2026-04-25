@@ -236,7 +236,7 @@ func runGateway(configPath string, devMode bool) (err error) {
 	}
 
 	// Initialize OpenCode Server singleton process manager.
-	opencodeserver.InitSingleton(log)
+	opencodeserver.InitSingleton(log, cfg.Worker.OpenCodeServer)
 
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if !reflect.DeepEqual(prev.Worker.AutoRetry, next.Worker.AutoRetry) {
