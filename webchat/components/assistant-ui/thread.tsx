@@ -294,6 +294,20 @@ function AssistantMessage() {
             return null;
           }}
         </MessagePrimitive.Parts>
+        
+        {/* Loading indicator when running but no parts yet */}
+        {status?.type === "running" && (!message.content || message.content.length === 0) && (
+          <div className="flex items-center gap-2 py-2">
+            <motion.div 
+              className="w-2 h-2 rounded-full bg-[var(--accent-gold)]"
+              animate={{ opacity: [0.3, 1, 0.3] }}
+              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+            />
+            <span className="text-xs font-mono text-[var(--text-faint)] animate-pulse uppercase tracking-widest">
+              Thinking...
+            </span>
+          </div>
+        )}
 
         <ActionBarPrimitive.Root className="flex items-center gap-2 mt-4 opacity-0 group-hover:opacity-100 transition-opacity">
           <ActionBarPrimitive.Copy className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors px-2 py-1 rounded-[var(--radius-xs)] hover:bg-[var(--bg-hover)]" />
