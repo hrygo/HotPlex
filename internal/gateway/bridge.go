@@ -787,18 +787,15 @@ type SwitchWorkDirResult struct {
 // and creates a new session with the given workDir. The new session inherits
 // the same user, bot, worker type, and platform context.
 func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir string) (*SwitchWorkDirResult, error) {
-	// 1. Get old session info.
 	si, err := b.sm.Get(oldSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("switch-workdir: get session: %w", err)
 	}
 
-	// 2. Validate session is active.
 	if !si.State.IsActive() {
 		return nil, fmt.Errorf("switch-workdir: session not active (state: %s)", si.State)
 	}
 
-	// 3. Validate new workDir exists and is a directory.
 	cleaned := filepath.Clean(newWorkDir)
 	info, err := os.Stat(cleaned)
 	if err != nil {
@@ -811,7 +808,6 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 		return nil, fmt.Errorf("switch-workdir: %w", err)
 	}
 
-	// 4. Terminate old worker + detach.
 	if w := b.sm.GetWorker(oldSessionID); w != nil {
 		if err := w.Terminate(ctx); err != nil {
 			b.log.Warn("switch-workdir: worker terminate failed", "session_id", oldSessionID, "err", err)
@@ -819,12 +815,10 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 		b.sm.DetachWorker(oldSessionID)
 	}
 
-	// 5. Transition old session to idle.
 	if err := b.sm.Transition(ctx, oldSessionID, events.StateIdle); err != nil {
 		b.log.Warn("switch-workdir: transition to idle failed", "session_id", oldSessionID, "err", err)
 	}
 
-	// 6. Derive new session ID.
 	var newID string
 	if si.Platform != "" && len(si.PlatformKey) > 0 {
 		pc := session.PlatformContext{Platform: si.Platform, WorkDir: cleaned}
@@ -847,7 +841,6 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 		newID = aep.NewSessionID()
 	}
 
-	// 7. Start new session.
 	if err := b.StartSession(ctx, newID, si.UserID, si.BotID, si.WorkerType, si.AllowedTools, cleaned, si.Platform, si.PlatformKey); err != nil {
 		return nil, fmt.Errorf("switch-workdir: start session: %w", err)
 	}

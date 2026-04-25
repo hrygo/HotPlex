@@ -3,6 +3,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useCopyToClipboard } from "@/lib/hooks/useCopyToClipboard";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const hljs = require("highlight.js");
 
@@ -16,7 +17,7 @@ function escapeHtml(text: string): string {
 }
 
 function CodeBlock({ raw, lang, highlighted }: { raw: string; lang: string; highlighted: string }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const [isExpanded, setIsExpanded] = useState(false);
   const lineCount = raw.split("\n").length;
   const isExpandable = lineCount > 10;
@@ -24,9 +25,7 @@ function CodeBlock({ raw, lang, highlighted }: { raw: string; lang: string; high
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(raw);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    copy(raw);
   };
 
   return (

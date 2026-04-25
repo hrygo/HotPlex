@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { ToolLoadingSkeleton } from "./ToolLoadingSkeleton";
+import { useCopyToClipboard } from "@/lib/hooks/useCopyToClipboard";
 
 interface FileDiffToolProps {
   toolName: string;
@@ -12,17 +13,9 @@ interface FileDiffToolProps {
 }
 
 export function FileDiffTool({ toolName, filePath, content, status }: FileDiffToolProps) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const lines = content?.split("\n") ?? [];
   const displayPath = filePath || "unknown file";
-
-  const handleCopy = () => {
-    if (content) {
-      navigator.clipboard.writeText(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
 
   return (
     <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
@@ -39,7 +32,7 @@ export function FileDiffTool({ toolName, filePath, content, status }: FileDiffTo
         </span>
         {status === "complete" && content && (
           <button
-            onClick={handleCopy}
+            onClick={() => content && copy(content)}
             className="text-[9px] font-mono font-bold tracking-wider text-[var(--text-muted)] hover:text-[var(--accent-gold)] transition-colors flex items-center gap-1.5 ml-2 bg-[var(--bg-elevated)] px-2 py-0.5 rounded border border-[var(--border-subtle)]"
           >
             {copied ? (

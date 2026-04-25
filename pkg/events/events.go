@@ -307,6 +307,7 @@ const (
 	StdioMCPStatus    WorkerStdioCommand = "mcp_status"
 	StdioSetModel     WorkerStdioCommand = "set_model"
 	StdioSetPermMode  WorkerStdioCommand = "set_permission"
+	StdioSkills       WorkerStdioCommand = "skills"
 
 	// User Message Passthrough (slash command forwarded as user message via Input).
 	StdioCompact WorkerStdioCommand = "compact"

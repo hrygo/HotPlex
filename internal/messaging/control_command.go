@@ -104,6 +104,7 @@ var workerSlashCommandsWithArgs = map[string]bool{
 // workerSlashMap maps slash-form strings to worker stdio commands.
 var workerSlashMap = map[string]events.WorkerStdioCommand{
 	"/context": events.StdioContextUsage,
+	"/skills":  events.StdioSkills,
 	"/mcp":     events.StdioMCPStatus,
 	"/model":   events.StdioSetModel,
 	"/perm":    events.StdioSetPermMode,
@@ -119,6 +120,8 @@ var workerSlashMap = map[string]events.WorkerStdioCommand{
 var workerNLMap = map[string]events.WorkerStdioCommand{
 	"$context": events.StdioContextUsage,
 	"$上下文":     events.StdioContextUsage,
+	"$skills":  events.StdioSkills,
+	"$技能":      events.StdioSkills,
 	"$mcp":     events.StdioMCPStatus,
 	"$model":   events.StdioSetModel,
 	"$切换模型":    events.StdioSetModel,
@@ -219,6 +222,7 @@ func HelpText() string {
 				Title: "信息与状态", Emoji: "📊",
 				Entries: []helpEntry{
 					{Commands: []string{"/context"}, Desc: "查看上下文窗口使用量"},
+					{Commands: []string{"/skills"}, Desc: "查看已加载的技能列表"},
 					{Commands: []string{"/mcp"}, Desc: "查看 MCP 服务器状态"},
 				},
 			},

@@ -402,6 +402,19 @@ def test_commit(proc, responses) -> bool:
     return True
 
 
+def test_skills_command(proc, responses) -> bool:
+    """User Message: /skills"""
+    log("=" * 60, "TEST")
+    log("TEST: /skills (passthrough)", "TEST")
+    log("=" * 60, "TEST")
+
+    send_user_msg(proc, "/skills")
+    wait_idle(10)
+
+    log("PASS: /skills (check logs above for result)", "PASS")
+    return True
+
+
 # ─── Main ──────────────────────────────────────────────────────────────
 
 def main():
@@ -473,6 +486,8 @@ def main():
     # Category 1: User Message Passthrough (may have side effects)
     if "compact" not in args.skip:
         results["compact"] = test_compact(proc, responses)
+    if "skills_cmd" not in args.skip:
+        results["skills_cmd"] = test_skills_command(proc, responses)
     if "model" not in args.skip:
         results["model_cmd"] = test_model_command(proc, responses)
     if "effort" not in args.skip:

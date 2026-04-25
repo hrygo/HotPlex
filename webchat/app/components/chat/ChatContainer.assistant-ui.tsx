@@ -44,7 +44,7 @@ export default function ChatContainer() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(null);
 
-  // nuqs deep link params (spec §5.2)
+  // nuqs deep link params
   const [urlWorker] = useQueryState('worker', parseAsString);
   const [urlDir] = useQueryState('dir', parseAsString);
 
@@ -97,7 +97,7 @@ export default function ChatContainer() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 relative">
-        {/* Header — Workspace Awareness Bar (spec §4.5) */}
+        {/* Header — Workspace Awareness Bar */}
         <header className="h-14 flex items-center px-6 border-b border-[var(--border-subtle)] bg-[rgba(15,15,18,0.6)] backdrop-blur-xl flex-shrink-0 z-20">
           <div className="flex items-center gap-4 w-full">
             <button
@@ -131,7 +131,7 @@ export default function ChatContainer() {
                </div>
             </div>
 
-            {/* MetricsBar — spec §4.5 Token & latency dashboard */}
+            {/* MetricsBar */}
             {sessionMetrics && sessionMetrics.turnCount > 0 && (
               <MetricsBar session={sessionMetrics} />
             )}
@@ -182,7 +182,7 @@ export default function ChatContainer() {
         </div>
       </main>
 
-      {/* New Session Modal (spec §5.1) */}
+      {/* New Session Modal */}
       {showNewModal && (
         <NewSessionModal
           onConfirm={handleModalConfirm}

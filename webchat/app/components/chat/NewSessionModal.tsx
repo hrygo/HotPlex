@@ -25,11 +25,8 @@ const WORKER_OPTIONS: WorkerOption[] = [
   },
 ];
 
-const RECENT_DIRS = [
-  "~/projects/hotplex",
-  "~/projects/my-app",
-  "~/workspace",
-];
+// TODO: derive from session history (useSessions workDir metadata)
+const RECENT_DIRS: string[] = [];
 
 interface NewSessionModalProps {
   onConfirm: (workerType: string, workDir: string) => void;

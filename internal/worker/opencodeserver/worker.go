@@ -204,22 +204,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		return fmt.Errorf("opencodeserver: create session: %w", err)
 	}
 
-	w.initHTTPConn(session.UserID, sessionID, session.SystemPrompt)
-
-	w.cmd = &ServerCommander{
-		client:    w.client,
-		baseURL:   w.httpAddr,
-		sessionID: sessionID,
-	}
-
-	if err := w.applyPermissions(ctx, session); err != nil {
-		w.Log.Warn("opencodeserver: failed to set permissions", "error", err)
-	}
-
-	w.Mu.Lock()
-	w.StartTime = time.Now()
-	w.SetLastIO(w.StartTime)
-	w.Mu.Unlock()
+	w.initSessionConn(ctx, sessionID, session)
 
 	go w.readSSE(sessionID)
 	return nil
@@ -294,22 +279,7 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	w.client = client
 	w.crashSub = crashSub
 
-	w.initHTTPConn(session.UserID, session.SessionID, session.SystemPrompt)
-
-	w.cmd = &ServerCommander{
-		client:    w.client,
-		baseURL:   w.httpAddr,
-		sessionID: session.SessionID,
-	}
-
-	if err := w.applyPermissions(ctx, session); err != nil {
-		w.Log.Warn("opencodeserver: failed to set permissions", "error", err)
-	}
-
-	w.Mu.Lock()
-	w.StartTime = time.Now()
-	w.SetLastIO(w.StartTime)
-	w.Mu.Unlock()
+	w.initSessionConn(ctx, session.SessionID, session)
 
 	go w.readSSE(session.SessionID)
 	return nil

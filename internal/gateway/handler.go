@@ -561,7 +561,7 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 	}
 
 	switch cmd {
-	case events.StdioContextUsage:
+	case events.StdioContextUsage, events.StdioSkills:
 		resp, err := cr.SendControlRequest(ctx, "get_context_usage", nil)
 		if err != nil {
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "context query: %v", err)

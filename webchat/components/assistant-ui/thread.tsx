@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useRef, useState } from "react";
+import { useCopyToClipboard } from "@/lib/hooks/useCopyToClipboard";
 import {
   ThreadPrimitive,
   ComposerPrimitive,
@@ -20,7 +21,7 @@ import { getToolCategory } from "@/lib/tool-categories";
 import { CommandMenu } from "./CommandMenu";
 
 /* ============================================================
-   Animation variants — spec §4.4
+   Animation variants
    ============================================================ */
 const messageVariants = {
   hidden: { opacity: 0, y: 10 },
@@ -440,6 +441,7 @@ function ToolCallBlock({ toolName, args, active }: { toolName: string; args: any
    ============================================================ */
 function ToolResultBlock({ toolName, result }: { toolName: string; result: any }) {
   const [expanded, setExpanded] = useState(false);
+  const { copy } = useCopyToClipboard();
   const resultStr = typeof result === "string" ? result : JSON.stringify(result, null, 2);
 
   return (
@@ -466,7 +468,7 @@ function ToolResultBlock({ toolName, result }: { toolName: string; result: any }
         </div>
 
         <button
-          onClick={() => navigator.clipboard.writeText(resultStr)}
+          onClick={() => copy(resultStr)}
           className="p-2 text-[var(--text-faint)] hover:text-[var(--text-primary)] transition-colors border-l border-[var(--border-subtle)]"
           title="Copy result"
         >
