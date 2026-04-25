@@ -20,20 +20,17 @@ function ChatInterface({
   sessionId,
   overrideWorkDir,
   onMetricsChange,
-  onSkillsChange,
-  skills,
 }: {
   sessionId: string | null;
   overrideWorkDir?: string;
   onMetricsChange?: (metrics: SessionMetrics) => void;
-  onSkillsChange?: (skills: string[]) => void;
-  skills: string[];
 }) {
+  const [skills, setSkills] = useState<string[]>([]);
   const adapter = useHotPlexRuntime({
     sessionId: sessionId ?? undefined,
     overrideWorkDir,
     onMetricsChange,
-    onSkillsChange,
+    onSkillsChange: setSkills,
   });
   const runtime = useExternalStoreRuntime(adapter);
 
@@ -48,7 +45,6 @@ export default function ChatContainer() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
   const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(null);
-  const [skills, setSkills] = useState<string[]>([]);
 
   // nuqs deep link params
   const [urlWorker] = useQueryState('worker', parseAsString);
@@ -183,8 +179,6 @@ export default function ChatContainer() {
               sessionId={activeSessionId}
               overrideWorkDir={urlDir ?? undefined}
               onMetricsChange={setSessionMetrics}
-              onSkillsChange={setSkills}
-              skills={skills}
             />
           )}
         </div>

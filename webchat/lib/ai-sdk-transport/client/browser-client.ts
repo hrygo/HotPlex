@@ -12,6 +12,7 @@ import {
   ErrorCode,
   ControlAction,
   ProtocolConstants,
+  WorkerStdioCommand,
 } from './constants';
 import type {
   HotPlexClientConfig,
@@ -476,7 +477,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this._send(env);
   }
 
-  sendWorkerCommand(command: string, args?: string, extra?: Record<string, unknown>): void {
+  sendWorkerCommand(command: typeof WorkerStdioCommand[keyof typeof WorkerStdioCommand], args?: string, extra?: Record<string, unknown>): void {
     const env = createWorkerCommandEnvelope(this._sessionId!, command, args, extra);
     this._send(env);
   }

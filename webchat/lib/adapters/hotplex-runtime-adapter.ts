@@ -171,6 +171,8 @@ export function useHotPlexRuntime({
       return;
     }
 
+    skillsFetchedRef.current = false;
+
     const initConfig: InitConfig = {};
     const effectiveWorkDir = overrideWorkDir || workDir;
     if (effectiveWorkDir) initConfig.work_dir = effectiveWorkDir;

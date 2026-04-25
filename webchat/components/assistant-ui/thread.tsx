@@ -549,12 +549,7 @@ function Composer({ skills }: { skills?: string[] }) {
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (menuOpen && (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Enter" || e.key === "Escape")) {
-      // These are handled by CommandMenu via global window listener, but we might want to prevent default here
-      // if it conflicts with assistant-ui default composer behavior.
-      if (e.key === "Enter") {
-         // Don't send the message if menu is open and Enter is pressed
-         // CommandMenu's global listener will handle selection
-      }
+      e.preventDefault();
     }
   }, [menuOpen]);
 

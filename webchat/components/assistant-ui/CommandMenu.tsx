@@ -32,7 +32,7 @@ interface CommandMenuProps {
 export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: CommandMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const COMMANDS: Command[] = useMemo(() => [
+  const allCommands: Command[] = useMemo(() => [
     ...SLASH_COMMANDS,
     ...(skills ?? []).map(name => ({
       key: name,
@@ -47,7 +47,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
   const isSlash = inputValue.startsWith("/");
   const filterText = isSlash ? inputValue.slice(1).toLowerCase() : inputValue.toLowerCase();
 
-  const filtered = COMMANDS.filter(cmd => {
+  const filtered = allCommands.filter(cmd => {
     if (isSlash) {
       if (cmd.type !== "slash") return false;
       if (!filterText) return true; // Show all slash commands if only '/' is typed
