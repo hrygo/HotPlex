@@ -261,6 +261,16 @@ func (a *Adapter) runSocketMode(ctx context.Context) {
 					}()
 					a.handleInteractionEvent(ctx, evt)
 				}()
+
+			case socketmode.EventTypeSlashCommand:
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							a.log.Error("slack: panic in slash command handler", "panic", r, "stack", string(debug.Stack()))
+						}
+					}()
+					a.handleSlashCommandEvent(ctx, evt)
+				}()
 			}
 		}
 	}
