@@ -63,7 +63,7 @@ export HOTPLEX_GATEWAY_ADDR=":7777"  # Priority 2 (env var)
 ./hotplex -gateway.addr :6666  # Priority 1 (flag)
 ```
 
-Result: Gateway listens on `:6667`
+Result: Gateway listens on `:6666`
 
 ---
 

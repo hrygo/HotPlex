@@ -1,6 +1,6 @@
 # WebChat UX 深度分析与优化方案
 
-> **日期**: 2026-04-26 · **状态**: 调研阶段 · **范围**: webchat/ 模块全链路 UX
+> **日期**: 2026-04-26 · **状态**: 设计完成，待实现 · **范围**: webchat/ 模块全链路 UX
 
 ---
 
@@ -291,20 +291,199 @@ C) 页面角落 — 小圆点 + hover 详情 (轻量级)
 
 ---
 
-## 四、待讨论决策点
+## 四、设计决策（已确认）
 
-以下是需要在设计阶段确认的方向性问题：
-
-1. **submitted 状态指示器风格**: 三点跳动 vs 脉冲呼吸 vs 骨架气泡？
-2. **连接状态指示器位置**: 输入框上方 vs 顶部横幅 vs 角落小点？
-3. **会话分组粒度**: 仅按时间？还是支持手动分组/标签？
-4. **自动标题策略**: 截取前 N 字符？还是调用 LLM 生成？
-5. **Stop 按钮位置**: 替换发送按钮？还是独立按钮在消息区域？
-6. **是否引入 assistant-ui 的 ThreadListRuntime**: 当前自研 useSessions hook vs 迁移到 assistant-ui 原生线程管理
+| # | 决策点 | 选择 | 理由 |
+|---|--------|------|------|
+| 1 | submitted 指示器 | **B: 脉冲呼吸 + "Thinking..."** | Claude.ai 风格，现代、信息丰富、和 assistant-ui 生态契合 |
+| 2 | 连接状态位置 | **B: 输入框上方** | Cursor 风格，高可见但不妨碍聊天，输入区域本身就是用户关注焦点 |
+| 3 | 会话分组 | **纯时间分组** | Today/Yesterday/7d/Older — 和 ChatGPT/Claude.ai 一致，实现简单 |
+| 4 | 自动标题 | **截取前 N 字符** | 简单可靠、无额外 API 调用，从用户第一条消息取前 50 字符 |
+| 5 | Stop 按钮 | **替换发送按钮** | submitted/streaming 时发送按钮变 Stop，ChatGPT/Claude.ai 均用此方式 |
+| 6 | 线程管理 | **保持自研 useSessions** | 风险低、改动小，仅接入 useExternalStoreRuntime 的消息管理 |
 
 ---
 
-## 五、参考资源
+## 五、P0 视觉方案
+
+### 5.1 submitted 状态指示器
+
+用户发送消息后，assistant 消息位置立即出现脉冲呼吸 avatar + "Thinking..." 文字。
+
+```
+┌─────────────────────────────────────────────┐
+│                                             │
+│  ┌──────────────────────────────────┐       │
+│  │ User: 帮我写一个 HTTP 中间件      │       │
+│  └──────────────────────────────────┘       │
+│                                             │
+│     ◉ Thinking...                           │
+│     ↑                                       │
+│     脉冲呼吸动画                             │
+│     (avatar opacity 0.4↔1.0, 1.5s cycle)    │
+│                                             │
+│  ┌──────────────────────────────────┐       │
+│  │ [输入框]                    [Send]│       │
+│  └──────────────────────────────────┘       │
+└─────────────────────────────────────────────┘
+```
+
+**动画规格：**
+- Avatar: `opacity: 0.4 → 1.0 → 0.4`, `ease-in-out`, `1.5s infinite`
+- 文字 "Thinking...": 同步脉冲，`font-size: 14px`, `color: text-muted`
+- 首个 delta 到达后平滑过渡为正常消息渲染
+- 使用 Framer Motion `animate={{ opacity: [0.4, 1, 0.4] }}`
+
+### 5.2 连接状态指示器
+
+输入框上方显示小圆点 + 状态文字，三种状态：
+
+```
+正常状态（几乎不可见）:
+┌─────────────────────────────────────────────┐
+│  ┌──────────────────────────────────────┐   │
+│  │ ● Connected                          │   │ ← 绿色小点，淡色文字
+│  ├──────────────────────────────────────┤   │
+│  │ [输入框]                        [Send]│   │
+│  └──────────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+
+重连中:
+┌─────────────────────────────────────────────┐
+│  ┌──────────────────────────────────────┐   │
+│  │ ◌ Reconnecting in 3s...              │   │ ← 黄色闪烁圆点
+│  ├──────────────────────────────────────┤   │
+│  │ [输入框 — disabled]             [Send]│   │
+│  └──────────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+
+断开连接:
+┌─────────────────────────────────────────────┐
+│  ┌──────────────────────────────────────┐   │
+│  │ ✕ Connection lost                    │   │ ← 红色圆点 + 红色文字
+│  ├──────────────────────────────────────┤   │
+│  │ [输入框 — disabled]             [Send]│   │
+│  └──────────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+```
+
+**规格：**
+- 圆点: `6×6px`, `rounded-full`
+- 颜色: `bg-green-500` / `bg-yellow-500 animate-pulse` / `bg-red-500`
+- 文字: `text-xs text-muted-foreground`
+- 断开/重连时输入框 `disabled + opacity-50`
+- 使用 `useConnectionState` hook 从 BrowserHotPlexClient 暴露状态
+
+### 5.3 Stop 生成按钮
+
+submitted/streaming 时发送按钮变为 Stop 按钮：
+
+```
+正常状态:
+┌─────────────────────────────────────────────┐
+│  [输入框内容在这里................]  [▶ Send] │
+└─────────────────────────────────────────────┘
+
+生成中:
+┌─────────────────────────────────────────────┐
+│  [输入框 — disabled]            [■ Stop]    │
+└─────────────────────────────────────────────┘
+                                   ↑
+                            红色方块 Stop 按钮
+                            点击后中断流式生成
+```
+
+**规格：**
+- 按钮切换: `isSubmitting || isStreaming ? <StopButton /> : <SendButton />`
+- Stop 按钮: `bg-red-500 hover:bg-red-600`, `rounded-lg`, `■` 图标
+- 点击后调用 `client.sendControl('stop')` 或关闭 stream
+- 过渡动画: `layoutId="composer-button"` 实现平滑切换（Framer Motion）
+
+---
+
+## 六、P1 视觉方案
+
+### 6.1 会话时间分组
+
+```
+┌─────────────────────┐
+│ 🔍 Search sessions  │
+├─────────────────────┤
+│ Today               │
+│  ├ New Chat         │
+│  └ HTTP middleware   │
+│ Yesterday           │
+│  ├ Fix auth bug     │
+│  └ Refactor DB      │
+│ Previous 7 Days     │
+│  ├ Readme update    │
+│  └ Add CI pipeline  │
+│ Older               │
+│  ├ Initial setup    │
+│  └ Hello world      │
+└─────────────────────┘
+```
+
+**分组逻辑：**
+- Today: `createdAt >= startOfDay(now)`
+- Yesterday: `startOfDay(now) - 1d <= createdAt < startOfDay(now)`
+- Previous 7 Days: `now - 7d <= createdAt < now - 1d`
+- Older: `createdAt < now - 7d`
+- 空分组不显示
+- 分组标题: `text-xs font-semibold text-muted-foreground uppercase tracking-wider`
+
+### 6.2 错误 Retry 按钮
+
+```
+┌─────────────────────────────────────────────┐
+│  ┌──────────────────────────────────┐       │
+│  │ User: 帮我写一个 HTTP 中间件      │       │
+│  └──────────────────────────────────┘       │
+│                                             │
+│  ┌──────────────────────────────────┐       │
+│  │ ⚠ Session timeout               │       │
+│  │                                  │       │
+│  │ [🔄 Retry]                       │       │ ← 内联错误消息 + Retry
+│  └──────────────────────────────────┘       │
+│                                             │
+│  ┌──────────────────────────────────┐       │
+│  │ [输入框]                    [Send]│       │
+│  └──────────────────────────────────┘       │
+└─────────────────────────────────────────────┘
+```
+
+### 6.3 发送即时反馈
+
+- 点击 Send 后立即清空输入框（乐观更新）
+- 如果 `sendInput` 失败，恢复输入框内容
+- submitted 期间输入框 `disabled`
+
+---
+
+## 七、实现路径
+
+### Phase 1: P0 核心体验（预计 1-2 天）
+
+| 步骤 | 文件 | 改动 |
+|------|------|------|
+| 1. 状态机扩展 | `hotplex-runtime-adapter.ts` | 新增 `submitted` 状态，在 `sendInput` 后立即触发 |
+| 2. Thinking 指示器 | `thread.tsx` | 新增 `ThinkingIndicator` 组件，`submitted` 时渲染 |
+| 3. 连接状态 hook | `useConnectionState.ts` (新) | 从 BrowserHotPlexClient 暴露 `connected/reconnecting/disconnected` |
+| 4. 连接状态 UI | `thread.tsx` composer 区域 | 输入框上方渲染 `ConnectionIndicator` |
+| 5. Stop 按钮 | `thread.tsx` composer 区域 | `isSubmitting \|\| isStreaming` 时替换 Send 按钮 |
+
+### Phase 2: P1 体验增强（预计 2-3 天）
+
+| 步骤 | 文件 | 改动 |
+|------|------|------|
+| 6. 会话时间分组 | `SessionPanel.tsx` | 新增 `groupByTime()` 工具函数 + 分组头渲染 |
+| 7. 错误 Retry | `thread.tsx` | 错误消息组件增加 Retry 按钮，调用 `sendInput(lastInput)` |
+| 8. 发送即时反馈 | `thread.tsx` composer | 乐观清空 + 失败恢复 |
+| 9. 自动标题 | `ChatContainer.assistant-ui.tsx` | 首次 assistant 回复后截取前 50 字符更新标题 |
+
+---
+
+## 八、参考资源
 
 - [Vercel AI SDK - useChat status state machine](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot)
 - [Vercel AI SDK - Error Handling](https://ai-sdk.dev/docs/ai-sdk-ui/error-handling)
