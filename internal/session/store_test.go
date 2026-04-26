@@ -377,6 +377,199 @@ func TestSQLiteMessageStore_GetOwner_NotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
+// ─── GetSessionsByState Tests ───────────────────────────────────────────────────
+
+func TestSQLiteStore_GetSessionsByState(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now()
+
+	// Insert sessions in various states.
+	for _, s := range []struct {
+		id    string
+		state events.SessionState
+	}{
+		{"sess_run_1", events.StateRunning},
+		{"sess_run_2", events.StateRunning},
+		{"sess_idle_1", events.StateIdle},
+		{"sess_term_1", events.StateTerminated},
+	} {
+		info := &SessionInfo{
+			ID:         s.id,
+			UserID:     "user_001",
+			OwnerID:    "user_001",
+			WorkerType: worker.TypeClaudeCode,
+			State:      s.state,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		err := store.Upsert(ctx, info)
+		require.NoError(t, err)
+	}
+
+	t.Run("returns only RUNNING sessions", func(t *testing.T) {
+		t.Parallel()
+		ids, err := store.GetSessionsByState(ctx, events.StateRunning)
+		require.NoError(t, err)
+		require.Len(t, ids, 2)
+		require.Contains(t, ids, "sess_run_1")
+		require.Contains(t, ids, "sess_run_2")
+	})
+
+	t.Run("returns empty for state with no sessions", func(t *testing.T) {
+		t.Parallel()
+		ids, err := store.GetSessionsByState(ctx, events.StateCreated)
+		require.NoError(t, err)
+		require.Empty(t, ids)
+	})
+}
+
+// ─── WorkDir Round-Trip Tests ───────────────────────────────────────────────────
+
+func TestSQLiteStore_WorkDir_RoundTrip(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now()
+
+	t.Run("persists and retrieves work_dir", func(t *testing.T) {
+		t.Parallel()
+		info := &SessionInfo{
+			ID:         "sess_wd",
+			UserID:     "user_001",
+			OwnerID:    "user_001",
+			WorkerType: worker.TypeClaudeCode,
+			State:      events.StateRunning,
+			WorkDir:    "/home/user/project",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		err := store.Upsert(ctx, info)
+		require.NoError(t, err)
+
+		got, err := store.Get(ctx, "sess_wd")
+		require.NoError(t, err)
+		require.Equal(t, "/home/user/project", got.WorkDir)
+	})
+
+	t.Run("empty work_dir round-trips as empty string", func(t *testing.T) {
+		t.Parallel()
+		info := &SessionInfo{
+			ID:         "sess_wd_empty",
+			UserID:     "user_001",
+			OwnerID:    "user_001",
+			WorkerType: worker.TypeClaudeCode,
+			State:      events.StateRunning,
+			WorkDir:    "",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		err := store.Upsert(ctx, info)
+		require.NoError(t, err)
+
+		got, err := store.Get(ctx, "sess_wd_empty")
+		require.NoError(t, err)
+		require.Equal(t, "", got.WorkDir)
+	})
+
+	t.Run("work_dir not overwritten on state-only upsert", func(t *testing.T) {
+		t.Parallel()
+		info := &SessionInfo{
+			ID:         "sess_wd_update",
+			UserID:     "user_001",
+			OwnerID:    "user_001",
+			WorkerType: worker.TypeClaudeCode,
+			State:      events.StateCreated,
+			WorkDir:    "/initial/path",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		err := store.Upsert(ctx, info)
+		require.NoError(t, err)
+
+		// Subsequent upsert updates state but work_dir stays unchanged (ON CONFLICT does not update work_dir).
+		info.State = events.StateRunning
+		info.UpdatedAt = now.Add(time.Minute)
+		err = store.Upsert(ctx, info)
+		require.NoError(t, err)
+
+		got, err := store.Get(ctx, "sess_wd_update")
+		require.NoError(t, err)
+		require.Equal(t, "/initial/path", got.WorkDir, "work_dir should remain from initial insert")
+		require.Equal(t, events.StateRunning, got.State)
+	})
+
+	t.Run("work_dir included in List results", func(t *testing.T) {
+		t.Parallel()
+		info := &SessionInfo{
+			ID:         "sess_wd_list",
+			UserID:     "user_001",
+			OwnerID:    "user_001",
+			WorkerType: worker.TypeClaudeCode,
+			State:      events.StateRunning,
+			WorkDir:    "/list/path",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		err := store.Upsert(ctx, info)
+		require.NoError(t, err)
+
+		list, err := store.List(ctx, "", "", 10, 0)
+		require.NoError(t, err)
+		found := false
+		for _, s := range list {
+			if s.ID == "sess_wd_list" {
+				require.Equal(t, "/list/path", s.WorkDir)
+				found = true
+			}
+		}
+		require.True(t, found, "sess_wd_list should appear in List results")
+	})
+}
+
+// ─── Migration Idempotency Test ─────────────────────────────────────────────────
+
+func TestSQLiteStore_MigrationIdempotent(t *testing.T) {
+	t.Parallel()
+	// Creating two stores on the same DB file proves migrations are idempotent.
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DB.Path = dbPath
+
+	store1, err := NewSQLiteStore(ctx, cfg)
+	require.NoError(t, err)
+
+	// Insert a session to verify DB is functional after first migration.
+	info := &SessionInfo{
+		ID:         "sess_mig",
+		UserID:     "user_mig",
+		OwnerID:    "user_mig",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateRunning,
+		WorkDir:    "/mig/path",
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	err = store1.Upsert(ctx, info)
+	require.NoError(t, err)
+	require.NoError(t, store1.Close())
+
+	// Second store on same DB — migrations should be no-op.
+	store2, err := NewSQLiteStore(ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store2.Close() })
+
+	got, err := store2.Get(ctx, "sess_mig")
+	require.NoError(t, err)
+	require.Equal(t, "/mig/path", got.WorkDir)
+	require.Equal(t, events.StateRunning, got.State)
+}
+
 // ─── Helper Functions ──────────────────────────────────────────────────────────
 
 func ptrTime(t time.Time) *time.Time {
