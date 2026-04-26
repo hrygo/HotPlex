@@ -268,6 +268,7 @@ func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cutoff time.Time) er
 	for _, id := range ids {
 		_, _ = tx.ExecContext(ctx, queries["events.delete_by_session"], id)
 		_, _ = tx.ExecContext(ctx, queries["store.delete_audit_by_session"], id)
+		_, _ = tx.ExecContext(ctx, queries["conversation.delete_by_session"], id)
 	}
 
 	_, err = tx.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cutoff)
@@ -281,6 +282,7 @@ func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {
 	// Cascade-delete child rows before the parent session.
 	_, _ = s.db.ExecContext(ctx, queries["events.delete_by_session"], id)
 	_, _ = s.db.ExecContext(ctx, queries["store.delete_audit_by_session"], id)
+	_, _ = s.db.ExecContext(ctx, queries["conversation.delete_by_session"], id)
 	_, err := s.db.ExecContext(ctx, queries["store.delete_physical"], id)
 	return err
 }
@@ -295,6 +297,14 @@ func (s *SQLiteStore) DeleteExpiredEvents(ctx context.Context, cutoff time.Time)
 		return 0, fmt.Errorf("session store: delete expired events: %w", err)
 	}
 	n, _ := result.RowsAffected()
+	// Also purge expired conversation records (best-effort).
+	if q, ok := queries["conversation.delete_expired"]; ok {
+		if cn, cerr := s.db.ExecContext(ctx, q, cutoff); cerr == nil {
+			if rows, _ := cn.RowsAffected(); rows > 0 {
+				n += rows
+			}
+		}
+	}
 	return n, nil
 }
 

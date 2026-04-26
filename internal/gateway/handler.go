@@ -28,6 +28,7 @@ type Handler struct {
 	sm           *session.Manager
 	jwtValidator *security.JWTValidator
 	bridge       *Bridge // set via SetBridge; nil during tests
+	convStore    session.ConversationStore
 }
 
 // NewHandler creates a new message handler.
@@ -43,6 +44,9 @@ func NewHandler(log *slog.Logger, hub *Hub, sm *session.Manager, jwtValidator *s
 // SetBridge injects the Bridge for lifecycle operations (reset).
 // Must be called after NewHandler and NewBridge.
 func (h *Handler) SetBridge(b *Bridge) { h.bridge = b }
+
+// SetConvStore injects the conversation store for turn-level persistence.
+func (h *Handler) SetConvStore(cs session.ConversationStore) { h.convStore = cs }
 
 // Handle processes an incoming envelope from a client.
 func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) {
@@ -176,6 +180,17 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 			_ = h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker input failed: %v", err)
 		} else {
 			h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
+			// Record user input to conversation store (best-effort).
+			if h.convStore != nil {
+				_ = h.convStore.Append(ctx, &session.ConversationRecord{
+					SessionID: env.SessionID,
+					Seq:       env.Seq,
+					Role:      session.RoleUser,
+					Content:   content,
+					Platform:  si.Platform,
+					UserID:    env.OwnerID,
+				})
+			}
 		}
 	} else {
 		h.log.Warn("gateway: handleInput no worker found", "session_id", env.SessionID)

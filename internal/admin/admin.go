@@ -52,6 +52,10 @@ type ConfigWatcherProvider interface {
 	Rollback(version int) (*config.Config, int, error)
 }
 
+type MessageStoreProvider interface {
+	SessionStats(ctx context.Context, sessionID string) (any, error)
+}
+
 type DebugSessionSnapshot struct {
 	TurnCount    int
 	WorkerHealth worker.WorkerHealth
@@ -62,6 +66,7 @@ type AdminAPI struct {
 	log           *slog.Logger
 	cfg           ConfigProvider
 	sm            SessionManagerProvider
+	msgStore      MessageStoreProvider
 	hub           HubProvider
 	bridge        BridgeProvider
 	configWatcher ConfigWatcherProvider
@@ -75,6 +80,7 @@ type Deps struct {
 	Log           *slog.Logger
 	Config        ConfigProvider
 	SessionMgr    SessionManagerProvider
+	MsgStore      MessageStoreProvider
 	Hub           HubProvider
 	Bridge        BridgeProvider
 	ConfigWatcher ConfigWatcherProvider
@@ -87,6 +93,7 @@ func New(deps Deps) *AdminAPI {
 		log:           deps.Log,
 		cfg:           deps.Config,
 		sm:            deps.SessionMgr,
+		msgStore:      deps.MsgStore,
 		hub:           deps.Hub,
 		bridge:        deps.Bridge,
 		configWatcher: deps.ConfigWatcher,

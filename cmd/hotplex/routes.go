@@ -73,11 +73,13 @@ func setupRoutes(
 	bridgeAdapter := &bridgeAdapter{bridge: bridge}
 	configAdapter := &configAdapter{cfgStore: deps.ConfigStore}
 	configWatcherAdapter := &configWatcherAdapter{watcher: configWatcher}
+	msgStoreAdapter := &msgStoreAdapter{ms: deps.MsgStore}
 
 	adminAPI := admin.New(admin.Deps{
 		Log:           log,
 		Config:        configAdapter,
 		SessionMgr:    sessionAdapter,
+		MsgStore:      msgStoreAdapter,
 		Hub:           hubAdapter,
 		Bridge:        bridgeAdapter,
 		ConfigWatcher: configWatcherAdapter,
@@ -112,6 +114,7 @@ func setupRoutes(
 	adminMux.HandleFunc("GET /admin/sessions/{id}", adminAPI.GetSession)
 	adminMux.HandleFunc("DELETE /admin/sessions/{id}", adminAPI.DeleteSession)
 	adminMux.HandleFunc("POST /admin/sessions/{id}/terminate", adminAPI.TerminateSession)
+	adminMux.HandleFunc("GET /admin/sessions/{id}/stats", adminAPI.HandleSessionStats)
 
 	mux.HandleFunc("GET /admin/health", adminAPI.HandleHealth)
 
@@ -180,6 +183,14 @@ func (a *hubAdapter) ConnectionsOpen() int {
 
 func (a *hubAdapter) NextSeqPeek(sessionID string) int64 {
 	return a.hub.NextSeqPeek(sessionID)
+}
+
+type msgStoreAdapter struct {
+	ms session.MessageStore
+}
+
+func (a *msgStoreAdapter) SessionStats(ctx context.Context, sessionID string) (any, error) {
+	return a.ms.SessionStats(ctx, sessionID)
 }
 
 type bridgeAdapter struct {

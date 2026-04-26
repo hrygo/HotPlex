@@ -416,6 +416,224 @@ func TestPostgresMessageStore_Stubs(t *testing.T) {
 	_, err = ms.Query(ctx, "", 0)
 	require.ErrorIs(t, err, ErrNotImplemented)
 	require.ErrorIs(t, ms.Close(), ErrNotImplemented)
+	_, err = ms.SessionStats(ctx, "")
+	require.ErrorIs(t, err, ErrNotImplemented)
+}
+
+func TestMessageStore_SessionStats(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+	sessID := "sess_stats_test"
+
+	// Append two done events simulating two turns.
+	done1 := `{"event":{"type":"done","data":{"success":true,"dropped":false,"stats":{"duration_ms":3200,"duration_api_ms":2100,"total_cost_usd":0.016,"usage":{"input_tokens":1500,"output_tokens":620},"model_usage":{"claude-sonnet-4-6":{"input_tokens":1500,"output_tokens":620}}}}}}`
+	done2 := `{"event":{"type":"done","data":{"success":true,"dropped":true,"stats":{"duration_ms":5100,"duration_api_ms":3400,"total_cost_usd":0.028,"usage":{"input_tokens":2800,"output_tokens":940},"model_usage":{"claude-sonnet-4-6":{"input_tokens":2800,"output_tokens":940}}}}}}`
+
+	require.NoError(t, ms.Append(ctx, sessID, 10, "done", []byte(done1)))
+	require.NoError(t, ms.Append(ctx, sessID, 20, "done", []byte(done2)))
+	require.NoError(t, ms.Append(ctx, sessID, 15, "message.delta", []byte(`{}`))) // non-done, ignored
+
+	time.Sleep(200 * time.Millisecond)
+
+	stats, err := ms.SessionStats(ctx, sessID)
+	require.NoError(t, err)
+	require.Equal(t, 2, stats.TotalTurns)
+	require.Equal(t, 2, stats.SuccessTurns)
+	require.Equal(t, 0, stats.FailedTurns)
+	require.Equal(t, 1, stats.DroppedTurns)
+	require.Equal(t, int64(8300), stats.TotalDurationMs)
+	require.Equal(t, int64(5500), stats.TotalAPIDuration)
+	require.InDelta(t, 0.044, stats.TotalCostUSD, 0.001)
+	require.InDelta(t, 4300.0, stats.TotalUsage["input_tokens"], 0.01)
+	require.InDelta(t, 1560.0, stats.TotalUsage["output_tokens"], 0.01)
+	require.Equal(t, 2, len(stats.Turns))
+	require.Equal(t, int64(10), stats.Turns[0].Seq)
+	require.Equal(t, int64(20), stats.Turns[1].Seq)
+
+	// Model usage aggregation
+	require.InDelta(t, 4300.0, stats.TotalModelUsage["claude-sonnet-4-6"]["input_tokens"], 0.01)
+}
+
+func TestMessageStore_SessionStats_Empty(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	_, err := ms.SessionStats(ctx, "nonexistent")
+	require.ErrorIs(t, err, ErrEventNotFound)
+}
+
+func TestMessageStore_SessionStats_FailedTurn(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+	sessID := "sess_stats_fail"
+
+	doneFail := `{"event":{"type":"done","data":{"success":false,"stats":{"duration_ms":1000,"usage":{"input_tokens":500}}}}}`
+	require.NoError(t, ms.Append(ctx, sessID, 5, "done", []byte(doneFail)))
+	time.Sleep(200 * time.Millisecond)
+
+	stats, err := ms.SessionStats(ctx, sessID)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.TotalTurns)
+	require.Equal(t, 0, stats.SuccessTurns)
+	require.Equal(t, 1, stats.FailedTurns)
+	require.False(t, stats.Turns[0].Success)
+	require.InDelta(t, 500.0, stats.TotalUsage["input_tokens"], 0.01)
+}
+
+// ─── ConversationStore helpers ─────────────────────────────────────────────────
+
+func helperStoreWithConv(t *testing.T) (*SQLiteStore, *SQLiteConversationStore) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DB.Path = filepath.Join(t.TempDir(), "conv_test.db")
+	cfg.DB.WALMode = true
+
+	store, err := NewSQLiteStore(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	cs, err := NewSQLiteConversationStore(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+	return store, cs
+}
+
+// ─── ConversationStore: Append + GetBySession ─────────────────────────────────
+
+func TestConversationStore_Append_GetBySession(t *testing.T) {
+	_, cs := helperStoreWithConv(t)
+	ctx := context.Background()
+
+	success := true
+	require.NoError(t, cs.Append(ctx, &ConversationRecord{
+		SessionID: "sess_conv", Seq: 1, Role: RoleUser, Content: "hello",
+		Platform: "slack", UserID: "user1",
+	}))
+	require.NoError(t, cs.Append(ctx, &ConversationRecord{
+		SessionID: "sess_conv", Seq: 2, Role: RoleAssistant, Content: "hi there",
+		Model: "claude-sonnet-4-6", Success: &success, Source: SourceNormal,
+		TokensIn: 100, TokensOut: 50, DurationMs: 3200, CostUSD: 0.01,
+	}))
+	time.Sleep(200 * time.Millisecond)
+
+	records, err := cs.GetBySession(ctx, "sess_conv", 100, 0)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, int64(1), records[0].Seq)
+	require.Equal(t, RoleUser, records[0].Role)
+	require.Equal(t, "hello", records[0].Content)
+	require.Equal(t, RoleAssistant, records[1].Role)
+	require.Equal(t, "claude-sonnet-4-6", records[1].Model)
+	require.True(t, *records[1].Success)
+	require.Equal(t, int64(3200), records[1].DurationMs)
+}
+
+func TestConversationStore_Append_WithToolsAndMeta(t *testing.T) {
+	_, cs := helperStoreWithConv(t)
+	ctx := context.Background()
+
+	require.NoError(t, cs.Append(ctx, &ConversationRecord{
+		SessionID: "sess_tools", Seq: 1, Role: RoleAssistant, Content: "done",
+		Tools: map[string]int{"Read": 3, "Edit": 1}, ToolCallCount: 4,
+		Metadata: map[string]any{"key": "value"},
+	}))
+	time.Sleep(200 * time.Millisecond)
+
+	records, err := cs.GetBySession(ctx, "sess_tools", 100, 0)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, 4, records[0].ToolCallCount)
+	// Metadata round-trips as map[string]any
+	require.NotNil(t, records[0].Metadata)
+	require.Equal(t, "value", records[0].Metadata["key"])
+}
+
+func TestConversationStore_GetBySession_NotFound(t *testing.T) {
+	_, cs := helperStoreWithConv(t)
+	ctx := context.Background()
+
+	_, err := cs.GetBySession(ctx, "nonexistent", 100, 0)
+	require.ErrorIs(t, err, ErrConvNotFound)
+}
+
+func TestConversationStore_Append_AutoID(t *testing.T) {
+	_, cs := helperStoreWithConv(t)
+	ctx := context.Background()
+
+	require.NoError(t, cs.Append(ctx, &ConversationRecord{
+		SessionID: "sess_autoid", Seq: 5, Role: RoleUser, Content: "test",
+	}))
+	time.Sleep(200 * time.Millisecond)
+
+	records, err := cs.GetBySession(ctx, "sess_autoid", 100, 0)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, "conv_sess_autoid_5", records[0].ID)
+}
+
+// ─── ConversationStore: DeleteBySession ────────────────────────────────────────
+
+func TestConversationStore_DeleteBySession(t *testing.T) {
+	_, cs := helperStoreWithConv(t)
+	ctx := context.Background()
+
+	require.NoError(t, cs.Append(ctx, &ConversationRecord{
+		SessionID: "sess_del", Seq: 1, Role: RoleUser, Content: "bye",
+	}))
+	time.Sleep(200 * time.Millisecond)
+
+	require.NoError(t, cs.DeleteBySession(ctx, "sess_del"))
+
+	_, err := cs.GetBySession(ctx, "sess_del", 100, 0)
+	require.ErrorIs(t, err, ErrConvNotFound)
+}
+
+// ─── ConversationStore: DeleteExpired ──────────────────────────────────────────
+
+func TestConversationStore_DeleteExpired(t *testing.T) {
+	_, cs := helperStoreWithConv(t)
+	ctx := context.Background()
+
+	require.NoError(t, cs.Append(ctx, &ConversationRecord{
+		SessionID: "sess_exp", Seq: 1, Role: RoleUser, Content: "old",
+	}))
+	time.Sleep(200 * time.Millisecond)
+
+	n, err := cs.DeleteExpired(ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, n, int64(1))
+
+	_, err = cs.GetBySession(ctx, "sess_exp", 100, 0)
+	require.ErrorIs(t, err, ErrConvNotFound)
+}
+
+func TestConversationStore_DeleteExpired_NoMatch(t *testing.T) {
+	_, cs := helperStoreWithConv(t)
+	ctx := context.Background()
+
+	n, err := cs.DeleteExpired(ctx, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, int64(0), n)
+}
+
+// ─── ConversationStore: cascade delete via Store ──────────────────────────────
+
+func TestConversationStore_CascadeDelete_Physical(t *testing.T) {
+	store, cs := helperStoreWithConv(t)
+	ctx := context.Background()
+	sessID := "sess_cascade"
+
+	helperUpsert(t, store, sessID, "user1", events.StateRunning)
+
+	require.NoError(t, cs.Append(ctx, &ConversationRecord{
+		SessionID: sessID, Seq: 1, Role: RoleUser, Content: "test cascade",
+	}))
+	time.Sleep(200 * time.Millisecond)
+
+	require.NoError(t, store.DeletePhysical(ctx, sessID))
+
+	_, err := cs.GetBySession(ctx, sessID, 100, 0)
+	require.ErrorIs(t, err, ErrConvNotFound)
 }
 
 // ─── Pool: UpdateLimits ──────────────────────────────────────────────────────

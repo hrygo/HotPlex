@@ -35,7 +35,8 @@ type Bridge struct {
 	log       *slog.Logger
 	hub       *Hub
 	sm        SessionManager
-	msgStore  session.MessageStore // EVT-004: optional; nil means event persistence disabled
+	msgStore  session.MessageStore      // EVT-004: optional; nil means event persistence disabled
+	convStore session.ConversationStore // optional; nil means conversation logging disabled
 	wf        WorkerFactory
 	retryCtrl *LLMRetryController
 
@@ -73,6 +74,11 @@ func (b *Bridge) SetWorkerFactory(wf WorkerFactory) {
 // SetRetryController enables automatic LLM error retry.
 func (b *Bridge) SetRetryController(ctrl *LLMRetryController) {
 	b.retryCtrl = ctrl
+}
+
+// SetConvStore injects the conversation store for turn-level persistence.
+func (b *Bridge) SetConvStore(cs session.ConversationStore) {
+	b.convStore = cs
 }
 
 // SetAgentConfigDir sets the directory from which agent personality/context
@@ -270,7 +276,17 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	}()
 	workerType := w.Type()
 	b.log.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID, "worker_type", workerType, "resumed", opts.resumed)
+
+	// Cache session info for conversation store writes (avoids per-turn DB lookup).
+	var sessPlatform, sessOwner string
+	if b.convStore != nil && b.sm != nil {
+		if si, err := b.sm.Get(sessionID); err == nil {
+			sessPlatform = si.Platform
+			sessOwner = si.OwnerID
+		}
+	}
 	startTime := time.Now()
+	turnStartTime := startTime
 	firstEvent := true
 	doneReceived := false
 
@@ -363,6 +379,12 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		case events.ToolCall:
 			acc := b.getOrInitAccum(sessionID)
 			acc.ToolCallCount++
+			if tc, ok := env.Event.Data.(events.ToolCallData); ok {
+				if acc.ToolNames == nil {
+					acc.ToolNames = make(map[string]int)
+				}
+				acc.ToolNames[tc.Name]++
+			}
 		case events.Done:
 			if turnTimer != nil {
 				turnTimer.Stop()
@@ -444,8 +466,38 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 				pendingError = nil
 			}
 			b.retryCtrl.RecordSuccess(sessionID)
-			turnText.Reset()
 			lastError = nil
+		}
+
+		// Record assistant response to conversation store after retry decision.
+		if env.Event.Type == events.Done && b.convStore != nil {
+			dd, _ := env.Event.Data.(events.DoneData)
+			acc := b.getOrInitAccum(sessionID)
+			acc.computePerTurnDeltas()
+			success := dd.Success
+			_ = b.convStore.Append(context.Background(), &session.ConversationRecord{
+				SessionID:     sessionID,
+				Seq:           env.Seq,
+				Role:          session.RoleAssistant,
+				Content:       turnText.String(),
+				Platform:      sessPlatform,
+				UserID:        sessOwner,
+				Model:         acc.ModelName,
+				Success:       &success,
+				Source:        session.SourceNormal,
+				Tools:         acc.ToolNames,
+				ToolCallCount: acc.ToolCallCount,
+				TokensIn:      acc.PerTurnInput,
+				TokensOut:     acc.PerTurnOutput,
+				DurationMs:    time.Since(turnStartTime).Milliseconds(),
+				CostUSD:       acc.PerTurnCost,
+			})
+			acc.resetPerTurn()
+		}
+
+		if env.Event.Type == events.Done {
+			turnText.Reset()
+			turnStartTime = time.Now()
 		}
 	}
 
@@ -559,6 +611,30 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		_ = b.hub.SendToSession(context.Background(), syntheticDone)
 	}
 
+	// Record partial assistant response on crash/timeout (Path 3).
+	workerCrashed := exitCode != 0 || (!doneReceived && turnTimerFired.Load())
+	if b.convStore != nil && turnText.Len() > 0 && workerCrashed {
+		acc := b.getOrInitAccum(sessionID)
+		src := session.SourceCrash
+		if turnTimerFired.Load() {
+			src = session.SourceTimeout
+		}
+		falseVal := false
+		_ = b.convStore.Append(context.Background(), &session.ConversationRecord{
+			SessionID:     sessionID,
+			Seq:           b.hub.NextSeq(sessionID),
+			Role:          session.RoleAssistant,
+			Content:       turnText.String(),
+			Platform:      sessPlatform,
+			UserID:        sessOwner,
+			Model:         acc.ModelName,
+			Success:       &falseVal,
+			Source:        src,
+			Tools:         acc.ToolNames,
+			ToolCallCount: acc.ToolCallCount,
+		})
+	}
+
 	// Clean up: detach the dead worker and transition session to TERMINATED
 	// so the next message triggers orphan resume instead of silently dropping input.
 	// Skip when attemptResumeFallback already performed cleanup.
@@ -659,6 +735,16 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		b.log.Info("bridge: re-delivering input to fresh worker", "session_id", p.sessionID, "content_len", len(p.lastInput))
 		if err := w.Input(context.Background(), p.lastInput, nil); err != nil {
 			b.log.Warn("bridge: input re-delivery failed", "session_id", p.sessionID, "err", err)
+		} else if b.convStore != nil {
+			_ = b.convStore.Append(context.Background(), &session.ConversationRecord{
+				SessionID: p.sessionID,
+				Seq:       b.hub.NextSeq(p.sessionID),
+				Role:      session.RoleUser,
+				Content:   p.lastInput,
+				Platform:  si.Platform,
+				UserID:    si.OwnerID,
+				Source:    session.SourceFreshStart,
+			})
 		}
 	}
 
