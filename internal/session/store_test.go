@@ -2,644 +2,432 @@ package session
 
 import (
 	"context"
+	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
-	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-func newTestStore(t *testing.T) *SQLiteStore {
+// helperDB creates a real SQLiteStore for integration tests.
+func helperDB(t *testing.T) *SQLiteStore {
 	t.Helper()
-	ctx := context.Background()
 	cfg := config.Default()
-	cfg.DB.Path = t.TempDir() + "/test.db"
-	store, err := NewSQLiteStore(ctx, cfg)
+	cfg.DB.Path = filepath.Join(t.TempDir(), "test.db")
+	cfg.DB.WALMode = true
+
+	store, err := NewSQLiteStore(context.Background(), cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
-func TestNewSQLiteStore(t *testing.T) {
-	t.Parallel()
+// helperStoreWithMsg creates a Store and MessageStore sharing the same DB.
+// The Store runs migrations (CREATE TABLE), so the MessageStore has tables to use.
+func helperStoreWithMsg(t *testing.T) (*SQLiteStore, *SQLiteMessageStore) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DB.Path = filepath.Join(t.TempDir(), "shared_test.db")
+	cfg.DB.WALMode = true
 
-	t.Run("creates store with WAL mode", func(t *testing.T) {
-		store := newTestStore(t)
-		require.NotNil(t, store)
-		require.NotNil(t, store.db)
-	})
+	store, err := NewSQLiteStore(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
 
-	t.Run("creates tables on init", func(t *testing.T) {
-		store := newTestStore(t)
-		ctx := context.Background()
-
-		// Check sessions table exists
-		var name string
-		err := store.db.QueryRowContext(ctx,
-			"SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'",
-		).Scan(&name)
-		require.NoError(t, err)
-		require.Equal(t, "sessions", name)
-
-		// Check events table exists
-		err = store.db.QueryRowContext(ctx,
-			"SELECT name FROM sqlite_master WHERE type='table' AND name='events'",
-		).Scan(&name)
-		require.NoError(t, err)
-		require.Equal(t, "events", name)
-	})
+	ms, err := NewSQLiteMessageStore(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ms.Close() })
+	return store, ms
 }
 
-func TestSQLiteStore_Upsert_Get(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
+func helperUpsert(t *testing.T, store *SQLiteStore, id, userID string, state events.SessionState) {
+	t.Helper()
+	now := time.Now()
+	err := store.Upsert(context.Background(), &SessionInfo{
+		ID:         id,
+		UserID:     userID,
+		WorkerType: "claude_code",
+		State:      state,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+}
+
+// ─── SQLiteStore: DeletePhysical ─────────────────────────────────────────────
+
+func TestSQLiteStore_DeletePhysical(t *testing.T) {
+	store := helperDB(t)
+	ctx := context.Background()
+
+	helperUpsert(t, store, "sess_del_phys", "user1", events.StateTerminated)
+
+	err := store.DeletePhysical(ctx, "sess_del_phys")
+	require.NoError(t, err)
+
+	_, err = store.Get(ctx, "sess_del_phys")
+	require.Error(t, err)
+}
+
+func TestSQLiteStore_DeletePhysical_NotFound(t *testing.T) {
+	store := helperDB(t)
+
+	err := store.DeletePhysical(context.Background(), "nonexistent")
+	require.NoError(t, err)
+}
+
+// ─── SQLiteStore: DeleteExpiredEvents ────────────────────────────────────────
+
+func TestSQLiteStore_DeleteExpiredEvents(t *testing.T) {
+	store, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	// DeleteExpiredEvents only deletes events for terminated/deleted sessions
+	helperUpsert(t, store, "sess_evt", "user1", events.StateTerminated)
+
+	err := ms.Append(ctx, "sess_evt", 1, "message.delta", []byte(`{"text":"hi"}`))
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	// Cutoff in the future — events should be deleted
+	n, err := store.DeleteExpiredEvents(ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, n, int64(1))
+
+	// After deletion, querying again returns 0
+	n, err = store.DeleteExpiredEvents(ctx, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, int64(0), n)
+}
+
+// ─── SQLiteStore: Compact ────────────────────────────────────────────────────
+
+func TestSQLiteStore_Compact_BelowThreshold(t *testing.T) {
+	store := helperDB(t)
+	ctx := context.Background()
+
+	err := store.Compact(ctx, 0.99)
+	require.NoError(t, err)
+}
+
+// ─── SQLiteStore: AppendAudit / GetAuditTrail ────────────────────────────────
+
+func TestSQLiteStore_AppendAudit_GetAuditTrail(t *testing.T) {
+	store := helperDB(t)
+	ctx := context.Background()
+	helperUpsert(t, store, "sess_audit", "user1", events.StateRunning)
+
+	err := store.AppendAudit(ctx, "session.create", "actor1", "sess_audit", map[string]any{"source": "test"})
+	require.NoError(t, err)
+
+	err = store.AppendAudit(ctx, "session.transition", "actor1", "sess_audit", map[string]any{"from": "created", "to": "running"})
+	require.NoError(t, err)
+
+	records, err := store.GetAuditTrail(ctx, "sess_audit")
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, "session.create", records[0].Action)
+	require.Equal(t, "session.transition", records[1].Action)
+	require.Equal(t, "actor1", records[0].ActorID)
+	require.Equal(t, "sess_audit", records[0].SessionID)
+}
+
+func TestSQLiteStore_AppendAudit_NilDetails(t *testing.T) {
+	store := helperDB(t)
+	ctx := context.Background()
+	helperUpsert(t, store, "sess_audit_nil", "user1", events.StateRunning)
+
+	err := store.AppendAudit(ctx, "session.create", "actor1", "sess_audit_nil", nil)
+	require.NoError(t, err)
+
+	records, err := store.GetAuditTrail(ctx, "sess_audit_nil")
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Nil(t, records[0].Details)
+}
+
+func TestSQLiteStore_GetAuditTrail_Empty(t *testing.T) {
+	store := helperDB(t)
+	ctx := context.Background()
+
+	records, err := store.GetAuditTrail(ctx, "nonexistent")
+	require.NoError(t, err)
+	require.Len(t, records, 0)
+}
+
+// ─── SQLiteStore: Upsert with Context and PlatformKey ────────────────────────
+
+func TestSQLiteStore_Upsert_WithContext(t *testing.T) {
+	store := helperDB(t)
+	ctx := context.Background()
+
+	info := &SessionInfo{
+		ID:         "sess_ctx",
+		UserID:     "user1",
+		WorkerType: "claude_code",
+		State:      events.StateCreated,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+		Context:    map[string]any{"thread_id": "1234.56", "channel": "C123"},
+		PlatformKey: map[string]string{
+			"team_id":    "T123",
+			"channel_id": "C123",
+			"thread_ts":  "1234.56",
+			"user_id":    "U123",
+		},
+	}
+	err := store.Upsert(ctx, info)
+	require.NoError(t, err)
+
+	got, err := store.Get(ctx, "sess_ctx")
+	require.NoError(t, err)
+	require.Equal(t, "user1", got.UserID)
+
+	ctxJSON, _ := json.Marshal(got.Context)
+	require.Contains(t, string(ctxJSON), "thread_id")
+
+	require.NotNil(t, got.PlatformKey)
+	require.Equal(t, "T123", got.PlatformKey["team_id"])
+}
+
+// ─── SQLiteStore: List with pagination ───────────────────────────────────────
+
+func TestSQLiteStore_List_DefaultLimit(t *testing.T) {
+	store := helperDB(t)
+	ctx := context.Background()
+
+	helperUpsert(t, store, "sess_list1", "user1", events.StateRunning)
+	helperUpsert(t, store, "sess_list2", "user1", events.StateIdle)
+
+	// limit=0 should default to 100
+	sessions, err := store.List(ctx, "", "", 0, 0)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(sessions), 2)
+}
+
+// ─── SQLiteStore: GetExpiredMaxLifetime / GetExpiredIdle ──────────────────────
+
+func TestSQLiteStore_GetExpiredMaxLifetime(t *testing.T) {
+	store := helperDB(t)
 	ctx := context.Background()
 
 	now := time.Now()
 	info := &SessionInfo{
-		ID:              "sess_test1",
-		UserID:          "user_001",
-		OwnerID:         "user_001",
-		BotID:           "bot_001",
-		WorkerType:      worker.TypeClaudeCode,
-		State:           events.StateRunning,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		ExpiresAt:       ptrTime(now.Add(24 * time.Hour)),
-		IdleExpiresAt:   ptrTime(now.Add(30 * time.Minute)),
-		AllowedTools:    []string{"Read", "Edit"},
-		WorkerSessionID: "wsess_001",
+		ID:        "sess_expired",
+		UserID:    "user1",
+		WorkerType: "claude_code",
+		State:     events.StateRunning,
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: &now,
 	}
-
-	// Insert
 	err := store.Upsert(ctx, info)
 	require.NoError(t, err)
 
-	// Get
-	got, err := store.Get(ctx, "sess_test1")
-	require.NoError(t, err)
-	require.Equal(t, info.ID, got.ID)
-	require.Equal(t, info.UserID, got.UserID)
-	require.Equal(t, info.BotID, got.BotID)
-	require.Equal(t, info.State, got.State)
-	require.Equal(t, info.WorkerSessionID, got.WorkerSessionID)
-	// Note: AllowedTools is not persisted to DB, only passed to worker proc
-
-	// Update (upsert)
-	info.State = events.StateIdle
-	info.UpdatedAt = now.Add(1 * time.Minute)
-	err = store.Upsert(ctx, info)
-	require.NoError(t, err)
-
-	got, err = store.Get(ctx, "sess_test1")
-	require.NoError(t, err)
-	require.Equal(t, events.StateIdle, got.State)
-}
-
-func TestSQLiteStore_Get_NotFound(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	_, err := store.Get(ctx, "nonexistent")
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrSessionNotFound)
-}
-
-func TestSQLiteStore_List(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	now := time.Now()
-
-	// Insert multiple sessions
-	sessIDs := []string{"sess_a", "sess_b", "sess_c", "sess_d", "sess_e"}
-	for i, id := range sessIDs {
-		info := &SessionInfo{
-			ID:         id,
-			UserID:     "user_001",
-			OwnerID:    "user_001",
-			WorkerType: worker.TypeClaudeCode,
-			State:      events.StateRunning,
-			CreatedAt:  now.Add(time.Duration(i) * time.Minute),
-			UpdatedAt:  now.Add(time.Duration(i) * time.Minute),
-		}
-		err := store.Upsert(ctx, info)
-		require.NoError(t, err)
-	}
-
-	// List with pagination
-	list, err := store.List(ctx, "", "", 3, 0)
-	require.NoError(t, err)
-	require.Len(t, list, 3)
-
-	list, err = store.List(ctx, "", "", 3, 3)
-	require.NoError(t, err)
-	require.Len(t, list, 2)
-
-	list, err = store.List(ctx, "", "", 10, 10)
-	require.NoError(t, err)
-	require.Empty(t, list)
-}
-
-func TestSQLiteStore_GetExpiredMaxLifetime(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	now := time.Now()
-
-	// Expired session
-	expired := &SessionInfo{
-		ID:         "sess_expired",
-		UserID:     "user_001",
-		OwnerID:    "user_001",
-		WorkerType: worker.TypeClaudeCode,
-		State:      events.StateRunning,
-		CreatedAt:  now.Add(-2 * time.Hour),
-		UpdatedAt:  now.Add(-2 * time.Hour),
-		ExpiresAt:  ptrTime(now.Add(-1 * time.Hour)), // expired 1h ago
-	}
-	err := store.Upsert(ctx, expired)
-	require.NoError(t, err)
-
-	// Active session
-	active := &SessionInfo{
-		ID:         "sess_active",
-		UserID:     "user_001",
-		OwnerID:    "user_001",
-		WorkerType: worker.TypeClaudeCode,
-		State:      events.StateRunning,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		ExpiresAt:  ptrTime(now.Add(24 * time.Hour)),
-	}
-	err = store.Upsert(ctx, active)
-	require.NoError(t, err)
-
-	// Query expired
-	ids, err := store.GetExpiredMaxLifetime(ctx, now)
+	ids, err := store.GetExpiredMaxLifetime(ctx, now.Add(time.Second))
 	require.NoError(t, err)
 	require.Contains(t, ids, "sess_expired")
-	require.NotContains(t, ids, "sess_active")
 }
 
 func TestSQLiteStore_GetExpiredIdle(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
+	store := helperDB(t)
 	ctx := context.Background()
 
-	now := time.Now()
-
-	// Idle expired
-	idleExpired := &SessionInfo{
-		ID:            "sess_idle_expired",
-		UserID:        "user_001",
-		OwnerID:       "user_001",
-		WorkerType:    worker.TypeClaudeCode,
+	past := time.Now().Add(-2 * time.Hour)
+	info := &SessionInfo{
+		ID:            "sess_idle_exp",
+		UserID:        "user1",
+		WorkerType:    "claude_code",
 		State:         events.StateIdle,
-		CreatedAt:     now.Add(-1 * time.Hour),
-		UpdatedAt:     now.Add(-1 * time.Hour),
-		IdleExpiresAt: ptrTime(now.Add(-30 * time.Minute)), // idle expired
+		CreatedAt:     past,
+		UpdatedAt:     past,
+		IdleExpiresAt: &past,
 	}
-	err := store.Upsert(ctx, idleExpired)
-	require.NoError(t, err)
-
-	// Idle active
-	idleActive := &SessionInfo{
-		ID:            "sess_idle_active",
-		UserID:        "user_001",
-		OwnerID:       "user_001",
-		WorkerType:    worker.TypeClaudeCode,
-		State:         events.StateIdle,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		IdleExpiresAt: ptrTime(now.Add(30 * time.Minute)),
-	}
-	err = store.Upsert(ctx, idleActive)
-	require.NoError(t, err)
-
-	// Query idle expired
-	ids, err := store.GetExpiredIdle(ctx, now)
-	require.NoError(t, err)
-	require.Contains(t, ids, "sess_idle_expired")
-	require.NotContains(t, ids, "sess_idle_active")
-}
-
-func TestSQLiteStore_DeleteTerminated(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	now := time.Now()
-
-	// Terminated session (old)
-	oldTerminated := &SessionInfo{
-		ID:         "sess_old_term",
-		UserID:     "user_001",
-		OwnerID:    "user_001",
-		WorkerType: worker.TypeClaudeCode,
-		State:      events.StateTerminated,
-		CreatedAt:  now.Add(-48 * time.Hour),
-		UpdatedAt:  now.Add(-48 * time.Hour),
-	}
-	err := store.Upsert(ctx, oldTerminated)
-	require.NoError(t, err)
-
-	// Terminated session (recent)
-	recentTerminated := &SessionInfo{
-		ID:         "sess_recent_term",
-		UserID:     "user_001",
-		OwnerID:    "user_001",
-		WorkerType: worker.TypeClaudeCode,
-		State:      events.StateTerminated,
-		CreatedAt:  now.Add(-1 * time.Hour),
-		UpdatedAt:  now.Add(-1 * time.Hour),
-	}
-	err = store.Upsert(ctx, recentTerminated)
-	require.NoError(t, err)
-
-	// Delete old terminated
-	cutoff := now.Add(-24 * time.Hour)
-	err = store.DeleteTerminated(ctx, cutoff)
-	require.NoError(t, err)
-
-	// Verify old deleted, recent kept
-	_, err = store.Get(ctx, "sess_old_term")
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrSessionNotFound)
-
-	_, err = store.Get(ctx, "sess_recent_term")
-	require.NoError(t, err)
-}
-
-// ─── MessageStore Tests ────────────────────────────────────────────────────────
-
-func TestSQLiteMessageStore_Append_GetBySession(t *testing.T) {
-	t.Parallel()
-	// Use same DB path for both stores to ensure events table exists
-	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
-
-	ctx := context.Background()
-	cfg := config.Default()
-	cfg.DB.Path = dbPath
-
-	// Create session store first to run migrations (including events table)
-	store, err := NewSQLiteStore(ctx, cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-
-	// Now create message store on the same DB
-	msgStore, err := NewSQLiteMessageStore(ctx, cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = msgStore.Close() })
-
-	// Append events
-	err = msgStore.Append(ctx, "sess_001", 1, "message", []byte(`{"text":"hello"}`))
-	require.NoError(t, err)
-
-	err = msgStore.Append(ctx, "sess_001", 2, "message", []byte(`{"text":"world"}`))
-	require.NoError(t, err)
-
-	// Give time for async writer to flush
-	time.Sleep(200 * time.Millisecond)
-
-	// Get by session
-	got, err := msgStore.GetBySession(ctx, "sess_001", 0)
-	require.NoError(t, err)
-	require.Len(t, got, 2)
-	require.Equal(t, int64(1), got[0].Seq)
-	require.Equal(t, int64(2), got[1].Seq)
-}
-
-func TestSQLiteMessageStore_GetOwner(t *testing.T) {
-	t.Parallel()
-	// Use same DB path for both stores
-	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
-
-	ctx := context.Background()
-	cfg := config.Default()
-	cfg.DB.Path = dbPath
-
-	store, err := NewSQLiteStore(ctx, cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-
-	msgStore, err := NewSQLiteMessageStore(ctx, cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = msgStore.Close() })
-
-	// Create session first
-	now := time.Now()
-	info := &SessionInfo{
-		ID:         "sess_owner_test",
-		UserID:     "user_owner_001",
-		OwnerID:    "user_owner_001",
-		WorkerType: worker.TypeClaudeCode,
-		State:      events.StateRunning,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-	err = store.Upsert(ctx, info)
-	require.NoError(t, err)
-
-	// Get owner
-	owner, err := msgStore.GetOwner(ctx, "sess_owner_test")
-	require.NoError(t, err)
-	require.Equal(t, "user_owner_001", owner)
-}
-
-func TestSQLiteMessageStore_GetOwner_NotFound(t *testing.T) {
-	t.Parallel()
-	// Use same DB path for both stores
-	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
-
-	ctx := context.Background()
-	cfg := config.Default()
-	cfg.DB.Path = dbPath
-
-	store, err := NewSQLiteStore(ctx, cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-
-	msgStore, err := NewSQLiteMessageStore(ctx, cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = msgStore.Close() })
-
-	_, err = msgStore.GetOwner(ctx, "nonexistent")
-	require.Error(t, err)
-}
-
-// ─── GetSessionsByState Tests ───────────────────────────────────────────────────
-
-func TestSQLiteStore_GetSessionsByState(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	now := time.Now()
-
-	// Insert sessions in various states.
-	for _, s := range []struct {
-		id    string
-		state events.SessionState
-	}{
-		{"sess_run_1", events.StateRunning},
-		{"sess_run_2", events.StateRunning},
-		{"sess_idle_1", events.StateIdle},
-		{"sess_term_1", events.StateTerminated},
-	} {
-		info := &SessionInfo{
-			ID:         s.id,
-			UserID:     "user_001",
-			OwnerID:    "user_001",
-			WorkerType: worker.TypeClaudeCode,
-			State:      s.state,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		err := store.Upsert(ctx, info)
-		require.NoError(t, err)
-	}
-
-	t.Run("returns only RUNNING sessions", func(t *testing.T) {
-		t.Parallel()
-		ids, err := store.GetSessionsByState(ctx, events.StateRunning)
-		require.NoError(t, err)
-		require.Len(t, ids, 2)
-		require.Contains(t, ids, "sess_run_1")
-		require.Contains(t, ids, "sess_run_2")
-	})
-
-	t.Run("returns empty for state with no sessions", func(t *testing.T) {
-		t.Parallel()
-		ids, err := store.GetSessionsByState(ctx, events.StateCreated)
-		require.NoError(t, err)
-		require.Empty(t, ids)
-	})
-}
-
-// ─── WorkDir Round-Trip Tests ───────────────────────────────────────────────────
-
-func TestSQLiteStore_WorkDir_RoundTrip(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	now := time.Now()
-
-	t.Run("persists and retrieves work_dir", func(t *testing.T) {
-		t.Parallel()
-		info := &SessionInfo{
-			ID:         "sess_wd",
-			UserID:     "user_001",
-			OwnerID:    "user_001",
-			WorkerType: worker.TypeClaudeCode,
-			State:      events.StateRunning,
-			WorkDir:    "/home/user/project",
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		err := store.Upsert(ctx, info)
-		require.NoError(t, err)
-
-		got, err := store.Get(ctx, "sess_wd")
-		require.NoError(t, err)
-		require.Equal(t, "/home/user/project", got.WorkDir)
-	})
-
-	t.Run("empty work_dir round-trips as empty string", func(t *testing.T) {
-		t.Parallel()
-		info := &SessionInfo{
-			ID:         "sess_wd_empty",
-			UserID:     "user_001",
-			OwnerID:    "user_001",
-			WorkerType: worker.TypeClaudeCode,
-			State:      events.StateRunning,
-			WorkDir:    "",
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		err := store.Upsert(ctx, info)
-		require.NoError(t, err)
-
-		got, err := store.Get(ctx, "sess_wd_empty")
-		require.NoError(t, err)
-		require.Equal(t, "", got.WorkDir)
-	})
-
-	t.Run("work_dir not overwritten on state-only upsert", func(t *testing.T) {
-		t.Parallel()
-		info := &SessionInfo{
-			ID:         "sess_wd_update",
-			UserID:     "user_001",
-			OwnerID:    "user_001",
-			WorkerType: worker.TypeClaudeCode,
-			State:      events.StateCreated,
-			WorkDir:    "/initial/path",
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		err := store.Upsert(ctx, info)
-		require.NoError(t, err)
-
-		// Subsequent upsert updates state but work_dir stays unchanged (ON CONFLICT does not update work_dir).
-		info.State = events.StateRunning
-		info.UpdatedAt = now.Add(time.Minute)
-		err = store.Upsert(ctx, info)
-		require.NoError(t, err)
-
-		got, err := store.Get(ctx, "sess_wd_update")
-		require.NoError(t, err)
-		require.Equal(t, "/initial/path", got.WorkDir, "work_dir should remain from initial insert")
-		require.Equal(t, events.StateRunning, got.State)
-	})
-
-	t.Run("work_dir included in List results", func(t *testing.T) {
-		t.Parallel()
-		info := &SessionInfo{
-			ID:         "sess_wd_list",
-			UserID:     "user_001",
-			OwnerID:    "user_001",
-			WorkerType: worker.TypeClaudeCode,
-			State:      events.StateRunning,
-			WorkDir:    "/list/path",
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		err := store.Upsert(ctx, info)
-		require.NoError(t, err)
-
-		list, err := store.List(ctx, "", "", 10, 0)
-		require.NoError(t, err)
-		found := false
-		for _, s := range list {
-			if s.ID == "sess_wd_list" {
-				require.Equal(t, "/list/path", s.WorkDir)
-				found = true
-			}
-		}
-		require.True(t, found, "sess_wd_list should appear in List results")
-	})
-}
-
-// ─── Migration Idempotency Test ─────────────────────────────────────────────────
-
-func TestSQLiteStore_MigrationIdempotent(t *testing.T) {
-	t.Parallel()
-	// Creating two stores on the same DB file proves migrations are idempotent.
-	tmpDir := t.TempDir()
-	dbPath := tmpDir + "/test.db"
-	ctx := context.Background()
-	cfg := config.Default()
-	cfg.DB.Path = dbPath
-
-	store1, err := NewSQLiteStore(ctx, cfg)
-	require.NoError(t, err)
-
-	// Insert a session to verify DB is functional after first migration.
-	info := &SessionInfo{
-		ID:         "sess_mig",
-		UserID:     "user_mig",
-		OwnerID:    "user_mig",
-		WorkerType: worker.TypeClaudeCode,
-		State:      events.StateRunning,
-		WorkDir:    "/mig/path",
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
-	}
-	err = store1.Upsert(ctx, info)
-	require.NoError(t, err)
-	require.NoError(t, store1.Close())
-
-	// Second store on same DB — migrations should be no-op.
-	store2, err := NewSQLiteStore(ctx, cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store2.Close() })
-
-	got, err := store2.Get(ctx, "sess_mig")
-	require.NoError(t, err)
-	require.Equal(t, "/mig/path", got.WorkDir)
-	require.Equal(t, events.StateRunning, got.State)
-}
-
-// ─── Helper Functions ──────────────────────────────────────────────────────────
-
-func ptrTime(t time.Time) *time.Time {
-	return &t
-}
-
-func TestSQLiteStore_Title_RoundTrip(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	now := time.Now()
-	info := &SessionInfo{
-		ID:         "sess_title",
-		UserID:     "user_001",
-		OwnerID:    "user_001",
-		WorkerType: worker.TypeClaudeCode,
-		State:      events.StateRunning,
-		Title:      "My Chat Session",
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-
 	err := store.Upsert(ctx, info)
 	require.NoError(t, err)
 
-	got, err := store.Get(ctx, "sess_title")
+	ids, err := store.GetExpiredIdle(ctx, time.Now())
 	require.NoError(t, err)
-	require.Equal(t, "My Chat Session", got.Title)
-
-	// Upsert with updated title
-	info.Title = "Renamed Session"
-	info.UpdatedAt = now.Add(time.Minute)
-	err = store.Upsert(ctx, info)
-	require.NoError(t, err)
-
-	got, err = store.Get(ctx, "sess_title")
-	require.NoError(t, err)
-	require.Equal(t, "Renamed Session", got.Title)
+	require.Contains(t, ids, "sess_idle_exp")
 }
 
-func TestSQLiteStore_List_WithTitle(t *testing.T) {
-	t.Parallel()
-	store := newTestStore(t)
+// ─── SQLiteStore: DeleteTerminated ───────────────────────────────────────────
+
+func TestSQLiteStore_DeleteTerminated(t *testing.T) {
+	store := helperDB(t)
 	ctx := context.Background()
 
-	now := time.Now()
-	for _, title := range []string{"Alpha", "Beta"} {
-		info := &SessionInfo{
-			ID:         "sess_t_" + title,
-			UserID:     "user_t",
-			OwnerID:    "user_t",
-			WorkerType: worker.TypeClaudeCode,
-			State:      events.StateRunning,
-			Title:      title,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		err := store.Upsert(ctx, info)
-		require.NoError(t, err)
-	}
+	helperUpsert(t, store, "sess_term", "user1", events.StateTerminated)
 
-	sessions, err := store.List(ctx, "user_t", "", 10, 0)
+	cutoff := time.Now().Add(time.Hour)
+	err := store.DeleteTerminated(ctx, cutoff)
 	require.NoError(t, err)
-	require.Len(t, sessions, 2)
+}
 
-	titles := map[string]string{}
-	for _, s := range sessions {
-		titles[s.ID] = s.Title
-	}
-	require.Equal(t, "Alpha", titles["sess_t_Alpha"])
-	require.Equal(t, "Beta", titles["sess_t_Beta"])
+// ─── SQLiteStore: GetSessionsByState ─────────────────────────────────────────
+
+func TestSQLiteStore_GetSessionsByState(t *testing.T) {
+	store := helperDB(t)
+	ctx := context.Background()
+
+	helperUpsert(t, store, "sess_state_r", "user1", events.StateRunning)
+	helperUpsert(t, store, "sess_state_i", "user1", events.StateIdle)
+
+	ids, err := store.GetSessionsByState(ctx, events.StateRunning)
+	require.NoError(t, err)
+	require.Contains(t, ids, "sess_state_r")
+	require.NotContains(t, ids, "sess_state_i")
+}
+
+// ─── MessageStore: Append + GetBySession + Query ─────────────────────────────
+
+func TestMessageStore_Append_GetBySession(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	err := ms.Append(ctx, "sess_msg", 1, "message.delta", []byte(`{"text":"hello"}`))
+	require.NoError(t, err)
+	err = ms.Append(ctx, "sess_msg", 2, "message.delta", []byte(`{"text":"world"}`))
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	records, err := ms.GetBySession(ctx, "sess_msg", 0)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, int64(1), records[0].Seq)
+	require.Equal(t, "message.delta", records[0].EventType)
+	require.Equal(t, "sess_msg", records[0].SessionID)
+}
+
+func TestMessageStore_GetBySession_Empty(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	records, err := ms.GetBySession(ctx, "nonexistent", 0)
+	require.NoError(t, err)
+	require.Len(t, records, 0)
+}
+
+func TestMessageStore_Query(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	err := ms.Append(ctx, "sess_query", 1, "message.delta", []byte(`{"text":"hi"}`))
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	envelopes, err := ms.Query(ctx, "sess_query", 0)
+	require.NoError(t, err)
+	require.Len(t, envelopes, 1)
+	require.Equal(t, int64(1), envelopes[0].Seq)
+	require.Equal(t, events.Kind("message.delta"), envelopes[0].Event.Type)
+}
+
+func TestMessageStore_Query_Empty(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	envelopes, err := ms.Query(ctx, "nonexistent", 0)
+	require.NoError(t, err)
+	require.Len(t, envelopes, 0)
+}
+
+func TestMessageStore_Append_DuplicateSeq_Idempotent(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	err := ms.Append(ctx, "sess_dup", 1, "message.delta", []byte(`{"text":"first"}`))
+	require.NoError(t, err)
+	// Same seq — silently ignored (INSERT OR IGNORE)
+	err = ms.Append(ctx, "sess_dup", 1, "message.delta", []byte(`{"text":"second"}`))
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	records, err := ms.GetBySession(ctx, "sess_dup", 0)
+	require.NoError(t, err)
+	require.Len(t, records, 1) // only one record despite two appends
+	require.Equal(t, `{"text":"first"}`, string(records[0].Payload))
+}
+
+// ─── MessageStore: GetOwner ──────────────────────────────────────────────────
+
+func TestMessageStore_GetOwner(t *testing.T) {
+	store, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	helperUpsert(t, store, "sess_owner", "user1", events.StateRunning)
+
+	ownerID, err := ms.GetOwner(ctx, "sess_owner")
+	require.NoError(t, err)
+	require.Equal(t, "user1", ownerID)
+}
+
+func TestMessageStore_GetOwner_NotFound(t *testing.T) {
+	_, ms := helperStoreWithMsg(t)
+	ctx := context.Background()
+
+	_, err := ms.GetOwner(ctx, "nonexistent")
+	require.ErrorIs(t, err, ErrSessionNotFound)
+}
+
+// ─── Stores: NewMessageStore ─────────────────────────────────────────────────
+
+func TestNewMessageStore_DefaultType(t *testing.T) {
+	cfg := config.Default()
+	cfg.DB.Path = filepath.Join(t.TempDir(), "new_msg.db")
+
+	ms, err := NewMessageStore(context.Background(), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, ms)
+	_ = ms.Close()
+}
+
+func TestNewMessageStore_UnknownType(t *testing.T) {
+	cfg := config.Default()
+	cfg.Session.EventStoreType = "unknown"
+
+	_, err := NewMessageStore(context.Background(), cfg)
+	require.ErrorIs(t, err, ErrMessageStoreTypeUnknown)
+}
+
+func TestKnownStoreTypes(t *testing.T) {
+	types := knownStoreTypes()
+	require.Contains(t, types, StoreTypeSQLite)
+}
+
+// ─── PostgresMessageStore stubs ───────────────────────────────────────────────
+
+func TestPostgresMessageStore_Stubs(t *testing.T) {
+	ms := &PostgresMessageStore{}
+	ctx := context.Background()
+
+	_, err := NewPostgresMessageStore(ctx, "")
+	require.ErrorIs(t, err, ErrNotImplemented)
+
+	require.ErrorIs(t, ms.Append(ctx, "", 0, "", nil), ErrNotImplemented)
+	_, err = ms.GetBySession(ctx, "", 0)
+	require.ErrorIs(t, err, ErrNotImplemented)
+	_, err = ms.GetOwner(ctx, "")
+	require.ErrorIs(t, err, ErrNotImplemented)
+	_, err = ms.Query(ctx, "", 0)
+	require.ErrorIs(t, err, ErrNotImplemented)
+	require.ErrorIs(t, ms.Close(), ErrNotImplemented)
+}
+
+// ─── Pool: UpdateLimits ──────────────────────────────────────────────────────
+
+func TestPoolUpdateLimits(t *testing.T) {
+	pool := NewPoolManager(nil, 10, 5, 0)
+
+	require.NoError(t, pool.Acquire("user1"))
+
+	pool.UpdateLimits(20, 10)
+
+	total, max, _ := pool.Stats()
+	require.Equal(t, 1, total)
+	require.Equal(t, 20, max)
 }

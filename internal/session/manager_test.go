@@ -2107,3 +2107,161 @@ func TestManager_ClearContext_PreservesOtherFields(t *testing.T) {
 	require.Equal(t, events.StateRunning, ms.info.State)
 	require.Empty(t, ms.info.Context)
 }
+
+// ─── UpdateWorkerSessionID tests ─────────────────────────────────────────────
+
+func TestManager_UpdateWorkerSessionID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+
+	store.On("Close").Return(nil)
+	m, err := NewManager(ctx, nil, cfg, nil, store, nil)
+	require.NoError(t, err)
+	defer m.Close()
+
+	now := time.Now()
+	seed := &SessionInfo{
+		ID:         "sess_wsid",
+		UserID:     "user1",
+		WorkerType: worker.TypeOpenCodeSrv,
+		State:      events.StateRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	m.mu.Lock()
+	m.sessions["sess_wsid"] = &managedSession{info: *seed}
+	m.mu.Unlock()
+
+	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+
+	err = m.UpdateWorkerSessionID(ctx, "sess_wsid", "ocs_internal_123")
+	require.NoError(t, err)
+
+	// Verify in-memory state
+	info, _ := m.Get("sess_wsid")
+	require.Equal(t, "ocs_internal_123", info.WorkerSessionID)
+}
+
+func TestManager_UpdateWorkerSessionID_SameValue_NoUpsert(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+
+	store.On("Close").Return(nil)
+	m, err := NewManager(ctx, nil, cfg, nil, store, nil)
+	require.NoError(t, err)
+	defer m.Close()
+
+	now := time.Now()
+	seed := &SessionInfo{
+		ID:              "sess_wsid_same",
+		UserID:          "user1",
+		WorkerType:      worker.TypeOpenCodeSrv,
+		State:           events.StateRunning,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WorkerSessionID: "existing_id",
+	}
+	m.mu.Lock()
+	m.sessions["sess_wsid_same"] = &managedSession{info: *seed}
+	m.mu.Unlock()
+
+	// Same value — Upsert should NOT be called
+	err = m.UpdateWorkerSessionID(ctx, "sess_wsid_same", "existing_id")
+	require.NoError(t, err)
+}
+
+func TestManager_UpdateWorkerSessionID_NotFound(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+
+	store.On("Get", ctx, "ghost").Return(nil, ErrSessionNotFound)
+	store.On("Close").Return(nil)
+
+	m, err := NewManager(ctx, nil, cfg, nil, store, nil)
+	require.NoError(t, err)
+	defer m.Close()
+
+	err = m.UpdateWorkerSessionID(ctx, "ghost", "any")
+	require.True(t, errors.Is(err, ErrSessionNotFound))
+}
+
+func TestManager_UpdateWorkerSessionID_NilManager(t *testing.T) {
+	t.Parallel()
+
+	m := (*Manager)(nil)
+	err := m.UpdateWorkerSessionID(context.Background(), "any", "id")
+	require.True(t, errors.Is(err, ErrSessionNotFound))
+}
+
+// ─── MessageStore() accessor tests ───────────────────────────────────────────
+
+func TestManager_MessageStore_Nil(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+
+	store.On("Close").Return(nil)
+	m, err := NewManager(ctx, nil, cfg, nil, store, nil)
+	require.NoError(t, err)
+	defer m.Close()
+
+	require.Nil(t, m.MessageStore())
+}
+
+// ─── ResetGCInterval tests ───────────────────────────────────────────────────
+
+func TestManager_ResetGCInterval(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+
+	store.On("Close").Return(nil)
+	m, err := NewManager(ctx, nil, cfg, nil, store, nil)
+	require.NoError(t, err)
+	defer m.Close()
+
+	// Should not panic with valid interval
+	m.ResetGCInterval(30 * time.Second)
+
+	// Zero/negative interval should be ignored
+	m.ResetGCInterval(0)
+	m.ResetGCInterval(-1 * time.Second)
+}
+
+// ─── Pool() accessor tests ───────────────────────────────────────────────────
+
+func TestManager_Pool(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+
+	store.On("Close").Return(nil)
+	m, err := NewManager(ctx, nil, cfg, nil, store, nil)
+	require.NoError(t, err)
+	defer m.Close()
+
+	pool := m.Pool()
+	require.NotNil(t, pool)
+	total, max, _ := pool.Stats()
+	require.Equal(t, 0, total)
+	require.Equal(t, cfg.Pool.MaxSize, max)
+}
