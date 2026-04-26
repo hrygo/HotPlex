@@ -2,7 +2,6 @@ INSERT INTO sessions (id, user_id, owner_id, bot_id, worker_session_id, worker_t
  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
  ON CONFLICT(id) DO UPDATE SET
    state=excluded.state,
-   title=excluded.title,
    updated_at=excluded.updated_at,
    expires_at=excluded.expires_at,
    idle_expires_at=excluded.idle_expires_at,

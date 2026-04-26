@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -240,9 +241,7 @@ func TestCreateSession_BridgeError(t *testing.T) {
 	require.Contains(t, w.Body.String(), "failed to create session")
 }
 
-var errTestBridge = func() error {
-	return json.Unmarshal([]byte(""), nil) //nolint:errcheck // deliberate test sentinel
-}()
+var errTestBridge = fmt.Errorf("test bridge error")
 
 // ─── DeleteSession tests ────────────────────────────────────────────────────────
 

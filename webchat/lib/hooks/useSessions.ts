@@ -112,15 +112,20 @@ export function useSessions({
         isCreating.current = true;
         try {
           const { session_id } = await createSession({ workerType: DEFAULT_WORKER_TYPE, title: MAIN_SESSION_TITLE });
-          
-          const { sessions: updatedList } = await listSessions(5, 0);
-          const newSession = updatedList.find(s => s.id === session_id);
-          if (newSession) {
-            setSessions([newSession]);
-            setActiveSession(newSession);
-            onSelectRef.current(newSession.id);
-            localStorage.setItem(STORAGE_KEY, newSession.id);
-          }
+          const now = new Date().toISOString();
+          const newSession: SessionInfo = {
+            id: session_id,
+            user_id: '',
+            worker_type: DEFAULT_WORKER_TYPE,
+            state: 'created',
+            title: MAIN_SESSION_TITLE,
+            created_at: now,
+            updated_at: now,
+          };
+          setSessions([newSession]);
+          setActiveSession(newSession);
+          onSelectRef.current(newSession.id);
+          localStorage.setItem(STORAGE_KEY, newSession.id);
         } finally {
           isCreating.current = false;
         }
@@ -152,17 +157,21 @@ export function useSessions({
     setIsLoading(true);
     try {
       const { session_id } = await createSession({ workerType: wt, title, workDir });
-
-      const { sessions: list } = await listSessions(20, 0);
-      const filtered = list.filter(s => s.state !== 'deleted');
-      setSessions(filtered);
-      
-      const newSession = filtered.find(s => s.id === session_id);
-      if (newSession) {
-        setActiveSession(newSession);
-        onSelectRef.current(session_id);
-        localStorage.setItem(STORAGE_KEY, session_id);
-      }
+      const now = new Date().toISOString();
+      const newSession: SessionInfo = {
+        id: session_id,
+        user_id: '',
+        worker_type: wt,
+        state: 'created',
+        title,
+        work_dir: workDir || undefined,
+        created_at: now,
+        updated_at: now,
+      };
+      setSessions(prev => [newSession, ...prev.filter(s => s.state !== 'deleted')]);
+      setActiveSession(newSession);
+      onSelectRef.current(session_id);
+      localStorage.setItem(STORAGE_KEY, session_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create session');
     } finally {
