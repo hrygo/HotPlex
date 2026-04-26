@@ -575,3 +575,71 @@ func TestSQLiteStore_MigrationIdempotent(t *testing.T) {
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }
+
+func TestSQLiteStore_Title_RoundTrip(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	info := &SessionInfo{
+		ID:         "sess_title",
+		UserID:     "user_001",
+		OwnerID:    "user_001",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateRunning,
+		Title:      "My Chat Session",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	err := store.Upsert(ctx, info)
+	require.NoError(t, err)
+
+	got, err := store.Get(ctx, "sess_title")
+	require.NoError(t, err)
+	require.Equal(t, "My Chat Session", got.Title)
+
+	// Upsert with updated title
+	info.Title = "Renamed Session"
+	info.UpdatedAt = now.Add(time.Minute)
+	err = store.Upsert(ctx, info)
+	require.NoError(t, err)
+
+	got, err = store.Get(ctx, "sess_title")
+	require.NoError(t, err)
+	require.Equal(t, "Renamed Session", got.Title)
+}
+
+func TestSQLiteStore_List_WithTitle(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	for _, title := range []string{"Alpha", "Beta"} {
+		info := &SessionInfo{
+			ID:         "sess_t_" + title,
+			UserID:     "user_t",
+			OwnerID:    "user_t",
+			WorkerType: worker.TypeClaudeCode,
+			State:      events.StateRunning,
+			Title:      title,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		err := store.Upsert(ctx, info)
+		require.NoError(t, err)
+	}
+
+	sessions, err := store.List(ctx, "user_t", "", 10, 0)
+	require.NoError(t, err)
+	require.Len(t, sessions, 2)
+
+	titles := map[string]string{}
+	for _, s := range sessions {
+		titles[s.ID] = s.Title
+	}
+	require.Equal(t, "Alpha", titles["sess_t_Alpha"])
+	require.Equal(t, "Beta", titles["sess_t_Beta"])
+}
