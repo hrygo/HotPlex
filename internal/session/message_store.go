@@ -100,6 +100,9 @@ func NewSQLiteMessageStore(ctx context.Context, cfg *config.Config) (*SQLiteMess
 
 	// Limit to one connection since writes are serialized by the single writer goroutine.
 	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	ms := &SQLiteMessageStore{
 		db:     db,

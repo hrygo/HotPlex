@@ -6,4 +6,5 @@ INSERT INTO sessions (id, user_id, owner_id, bot_id, worker_session_id, worker_t
    expires_at=excluded.expires_at,
    idle_expires_at=excluded.idle_expires_at,
    is_active=excluded.is_active,
+   title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
    context_json=excluded.context_json;

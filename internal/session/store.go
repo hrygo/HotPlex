@@ -29,6 +29,8 @@ type Store interface {
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
 	DeleteTerminated(ctx context.Context, cutoff time.Time) error
 	DeletePhysical(ctx context.Context, id string) error
+	DeleteExpiredEvents(ctx context.Context, cutoff time.Time) (int64, error)
+	Compact(ctx context.Context, threshold float64) error
 	GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error)
 	Close() error
 }
@@ -54,6 +56,12 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config) (*SQLiteStore, erro
 		return nil, err
 	}
 
+	// Session store is read-heavy: allow 2 concurrent connections.
+	db.SetMaxOpenConns(cfg.DB.MaxOpenConns)
+	db.SetMaxIdleConns(cfg.DB.MaxOpenConns)
+	db.SetConnMaxLifetime(0)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+
 	if err := runMigrations(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -77,6 +85,18 @@ func initSQLiteDB(db *sql.DB, cfg *config.Config, label string) error {
 	}
 	if _, err := db.Exec("PRAGMA synchronous=NORMAL"); err != nil {
 		return fmt.Errorf("session store: %s synchronous: %w", label, err)
+	}
+	if _, err := db.Exec("PRAGMA cache_size=-32000"); err != nil {
+		return fmt.Errorf("session store: %s cache_size: %w", label, err)
+	}
+	if _, err := db.Exec("PRAGMA temp_store=MEMORY"); err != nil {
+		return fmt.Errorf("session store: %s temp_store: %w", label, err)
+	}
+	if _, err := db.Exec("PRAGMA mmap_size=268435456"); err != nil {
+		return fmt.Errorf("session store: %s mmap_size: %w", label, err)
+	}
+	if _, err := db.Exec("PRAGMA wal_autocheckpoint=5000"); err != nil {
+		return fmt.Errorf("session store: %s wal_autocheckpoint: %w", label, err)
 	}
 	return nil
 }
@@ -224,17 +244,79 @@ func (s *SQLiteStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]stri
 }
 
 func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
-	_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cutoff)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("session store: delete terminated begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Collect session IDs to cascade-delete their events and audit entries.
+	rows, err := tx.QueryContext(ctx, "SELECT id FROM sessions WHERE state = ? AND updated_at <= ?",
+		events.StateTerminated, cutoff)
+	if err != nil {
+		return fmt.Errorf("session store: delete terminated query: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	_ = rows.Close()
+
+	for _, id := range ids {
+		_, _ = tx.ExecContext(ctx, queries["events.delete_by_session"], id)
+		_, _ = tx.ExecContext(ctx, queries["store.delete_audit_by_session"], id)
+	}
+
+	_, err = tx.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cutoff)
+	if err != nil {
+		return fmt.Errorf("session store: delete terminated exec: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {
+	// Cascade-delete child rows before the parent session.
+	_, _ = s.db.ExecContext(ctx, queries["events.delete_by_session"], id)
+	_, _ = s.db.ExecContext(ctx, queries["store.delete_audit_by_session"], id)
 	_, err := s.db.ExecContext(ctx, queries["store.delete_physical"], id)
 	return err
 }
 
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
+}
+
+func (s *SQLiteStore) DeleteExpiredEvents(ctx context.Context, cutoff time.Time) (int64, error) {
+	result, err := s.db.ExecContext(ctx, queries["events.delete_expired"], cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("session store: delete expired events: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return n, nil
+}
+
+func (s *SQLiteStore) Compact(ctx context.Context, threshold float64) error {
+	var pageCount, freeCount int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount); err != nil {
+		return fmt.Errorf("session store: compact page_count: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freeCount); err != nil {
+		return fmt.Errorf("session store: compact freelist_count: %w", err)
+	}
+	if pageCount == 0 || float64(freeCount)/float64(pageCount) < threshold {
+		return nil
+	}
+	slog.Info("session store: VACUUM starting",
+		"page_count", pageCount, "free_count", freeCount,
+		"ratio", fmt.Sprintf("%.1f%%", float64(freeCount)/float64(pageCount)*100))
+	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		return fmt.Errorf("session store: compact checkpoint: %w", err)
+	}
+	_, err := s.db.ExecContext(ctx, "VACUUM")
+	return err
 }
 
 func (s *SQLiteStore) GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error) {

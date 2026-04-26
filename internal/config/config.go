@@ -257,10 +257,12 @@ type GatewayConfig struct {
 
 // DBConfig holds SQLite settings.
 type DBConfig struct {
-	Path         string        `mapstructure:"path"`
-	WALMode      bool          `mapstructure:"wal_mode"`
-	BusyTimeout  time.Duration `mapstructure:"busy_timeout"`
-	MaxOpenConns int           `mapstructure:"max_open_conns"`
+	Path            string        `mapstructure:"path"`
+	WALMode         bool          `mapstructure:"wal_mode"`
+	BusyTimeout     time.Duration `mapstructure:"busy_timeout"`
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`
+	EventRetention  time.Duration `mapstructure:"event_retention"`
+	VacuumThreshold float64       `mapstructure:"vacuum_threshold"`
 }
 
 // WorkerConfig holds per-worker defaults.
@@ -373,10 +375,12 @@ func Default() *Config {
 			DeltaCoalesceSize:     200,
 		},
 		DB: DBConfig{
-			Path:         filepath.Join(HotplexHome(), "data", "hotplex.db"),
-			WALMode:      true,
-			BusyTimeout:  500 * time.Millisecond,
-			MaxOpenConns: 1,
+			Path:            filepath.Join(HotplexHome(), "data", "hotplex.db"),
+			WALMode:         true,
+			BusyTimeout:     5 * time.Second,
+			MaxOpenConns:    2,
+			EventRetention:  30 * 24 * time.Hour,
+			VacuumThreshold: 0.2,
 		},
 		Worker: WorkerConfig{
 			MaxLifetime:      24 * time.Hour,

@@ -498,6 +498,16 @@ func (m *mockSessionStoreForBotID) DeletePhysical(ctx context.Context, id string
 	return args.Error(0)
 }
 
+func (m *mockSessionStoreForBotID) DeleteExpiredEvents(ctx context.Context, cutoff time.Time) (int64, error) {
+	args := m.Called(ctx, cutoff)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *mockSessionStoreForBotID) Compact(ctx context.Context, threshold float64) error {
+	args := m.Called(ctx, threshold)
+	return args.Error(0)
+}
+
 func (m *mockSessionStoreForBotID) GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error) {
 	args := m.Called(ctx, state)
 	return args.Get(0).([]string), args.Error(1)

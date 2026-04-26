@@ -842,6 +842,22 @@ func (m *Manager) gc(ctx context.Context) {
 	// the conversation. Deleting DB records would force --session-id (new
 	// session) instead of --resume, losing conversation history.
 	// Physical deletion should be an explicit admin action, not automatic GC.
+
+	// 4. Events TTL cleanup for terminated/deleted sessions.
+	if m.cfg.DB.EventRetention > 0 {
+		cutoff := now.Add(-m.cfg.DB.EventRetention)
+		if n, err := m.store.DeleteExpiredEvents(ctx, cutoff); err != nil {
+			m.log.Warn("session: gc (events TTL) error", "err", err)
+		} else if n > 0 {
+			m.log.Info("session: gc (events TTL) cleaned", "count", n)
+			// 5. Compact if events were reclaimed and free space exceeds threshold.
+			if m.cfg.DB.VacuumThreshold > 0 {
+				if err := m.store.Compact(ctx, m.cfg.DB.VacuumThreshold); err != nil {
+					m.log.Warn("session: gc (compact) error", "err", err)
+				}
+			}
+		}
+	}
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
