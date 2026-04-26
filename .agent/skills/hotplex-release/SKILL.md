@@ -12,6 +12,22 @@ description: Standardized release workflow for HotPlex Worker Gateway. Covers ve
 - All tests passing (`make check`)
 - Clean working directory (no uncommitted changes)
 
+## Branch Guard
+
+**Tags and GitHub Releases MUST only be created on `main` branch.**
+
+1. At the start of the workflow, check the current branch:
+   ```bash
+   git branch --show-current
+   ```
+2. **If on `main`**: proceed with the full workflow (Steps 1–8), including tag creation and release.
+3. **If NOT on `main`** (feature branch, release prep branch, etc.): execute Steps 1–5 only (version determination, change collection, changelog writing, version unification, verification). Then:
+   - Commit the version bump + changelog as a **preparation commit** (e.g. `chore: prepare release vX.X.X`).
+   - **Do NOT** create a git tag.
+   - **Do NOT** push a tag or trigger GitHub Release.
+   - Inform the user: "Release preparation committed on `<branch>`. Tag and publish after merging to main."
+4. **After merge to main**: fast-forward or checkout main, then run Step 6 (tag) and Step 7 (push tag + GitHub Release) only.
+
 ## Step 1: Determine Next Version
 
 Read the current version from `cmd/hotplex/main.go:16` (the `version` variable).
