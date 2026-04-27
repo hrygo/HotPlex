@@ -31,7 +31,7 @@ func (c *SlackConn) sendSkillsList(ctx context.Context, env *events.Envelope) er
 		return c.postSkillsMessage(ctx, "⚡ No skills found.", nil)
 	}
 
-	plainText := fmt.Sprintf("⚡ Skills (%d)", d.Total)
+	plainText := fmt.Sprintf("*⚡ Skills (%d)*", d.Total)
 	var blocks []slack.Block
 
 	header := slack.NewTextBlockObject(slack.PlainTextType, plainText, false, false)
@@ -39,15 +39,11 @@ func (c *SlackConn) sendSkillsList(ctx context.Context, env *events.Envelope) er
 
 	var sb strings.Builder
 	for _, s := range d.Skills {
-		icon := "🌐"
-		if s.Source == "project" {
-			icon = "📁"
-		}
 		desc := s.Description
-		if len([]rune(desc)) > 80 {
-			desc = string([]rune(desc)[:77]) + "..."
+		if len([]rune(desc)) > 120 {
+			desc = string([]rune(desc)[:117]) + "..."
 		}
-		fmt.Fprintf(&sb, "%s *%s* — %s\n", icon, s.Name, desc)
+		fmt.Fprintf(&sb, "*%s*\n%s\n\n", s.Name, desc)
 	}
 
 	body := slack.NewTextBlockObject(slack.MarkdownType, sb.String(), false, false)
