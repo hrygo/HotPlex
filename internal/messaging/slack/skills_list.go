@@ -67,3 +67,32 @@ func (c *SlackConn) postSkillsMessage(ctx context.Context, fallback string, bloc
 	_, _, err := c.adapter.client.PostMessageContext(ctx, c.channelID, opts...)
 	return err
 }
+
+func (c *SlackConn) postSkillsMessageFallback(ctx context.Context, env *events.Envelope) error {
+	var d events.SkillsListData
+	switch v := env.Event.Data.(type) {
+	case events.SkillsListData:
+		d = v
+	case map[string]any:
+		raw, _ := json.Marshal(v)
+		_ = json.Unmarshal(raw, &d)
+	default:
+		return nil
+	}
+
+	if len(d.Skills) == 0 {
+		return c.postSkillsMessage(ctx, "⚡ No skills found.", nil)
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "*⚡ Skills (%d)*\n\n", d.Total)
+	for _, s := range d.Skills {
+		desc := s.Description
+		if len([]rune(desc)) > 120 {
+			desc = string([]rune(desc)[:117]) + "..."
+		}
+		fmt.Fprintf(&sb, "*%s*\n%s\n\n", s.Name, desc)
+	}
+
+	return c.postSkillsMessage(ctx, sb.String(), nil)
+}

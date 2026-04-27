@@ -101,6 +101,10 @@ playwright-report/
 .ruff_cache
 __pycache__
 
+# --- Agent & Session State ---
+.agent/scheduled_tasks.lock
+.agent/source-study-progress.json
+
 # --- Miscellaneous ---
 /.worktrees/
 *.bak

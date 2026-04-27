@@ -757,7 +757,11 @@ func (c *SlackConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 		c.notifyStatus(ctx, "Loading skills...")
 		slErr := c.sendSkillsList(ctx, env)
 		c.clearStatus(ctx)
-		return slErr
+		if slErr == nil || !strings.Contains(slErr.Error(), "invalid_blocks") {
+			return slErr
+		}
+		c.adapter.log.Warn("slack: skills blocks rejected, falling back to plain text", "err", slErr)
+		return c.postSkillsMessageFallback(ctx, env)
 	}
 
 	text, ok := extractResponseText(env)

@@ -108,13 +108,37 @@ func parseSkillFile(path, source string) *Skill {
 	desc := strings.TrimSpace(fm.Description)
 	// Unfold YAML folded/scalar blocks
 	desc = strings.ReplaceAll(desc, "\n", " ")
-	desc = collapseSpaces(desc)
+	desc = CollapseSpaces(desc)
 
 	return &Skill{
 		Name:        fm.Name,
 		Description: desc,
 		Source:      source,
 	}
+}
+
+// ParseFrontmatter reads a SKILL.md file and extracts name + description.
+// Returns ok=false if the file cannot be read, has no frontmatter, or name is empty.
+func ParseFrontmatter(path string) (name, description string, ok bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", false
+	}
+
+	fm := extractFrontmatter(data)
+	if fm == nil || fm.Name == "" {
+		return "", "", false
+	}
+
+	desc := strings.TrimSpace(fm.Description)
+	desc = strings.ReplaceAll(desc, "\n", " ")
+	desc = CollapseSpaces(desc)
+
+	if len([]rune(desc)) > 120 {
+		runes := []rune(desc)
+		desc = string(runes[:117]) + "..."
+	}
+	return fm.Name, desc, true
 }
 
 // extractFrontmatter extracts and parses YAML frontmatter from markdown content.
@@ -157,8 +181,9 @@ func dedup(skills []Skill) []Skill {
 	return result
 }
 
-func collapseSpaces(s string) string {
+func CollapseSpaces(s string) string {
 	var b strings.Builder
+	b.Grow(len(s))
 	prev := false
 	for _, r := range s {
 		if r == ' ' || r == '\t' {

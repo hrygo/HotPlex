@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/hrygo/hotplex/internal/config"
+	skutil "github.com/hrygo/hotplex/internal/skills"
 )
 
 // Source labels for skills.
@@ -75,7 +76,7 @@ func (l *FileSystemSkillsLocator) buildDirs(homeDir, workDir string) []string {
 	return dirs
 }
 
-// scanDir scans a skills directory, skipping symlinks.
+// scanDir scans a skills directory for SKILL.md files, skipping symlinks.
 func (l *FileSystemSkillsLocator) scanDir(dir string, skills *[]Skill, seen map[string]bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -83,23 +84,14 @@ func (l *FileSystemSkillsLocator) scanDir(dir string, skills *[]Skill, seen map[
 	}
 
 	for _, entry := range entries {
-		// Skip symlinks entirely (dedup by name, avoid external links)
-		if entry.Type()&os.ModeSymlink != 0 {
-			continue
-		}
-		if !entry.IsDir() {
+		// Skip symlinks and non-directories
+		if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
 			continue
 		}
 
 		skillDir := filepath.Join(dir, entry.Name())
-
-		// Try SKILL.md first, then README.md
 		skillPath := filepath.Join(skillDir, "SKILL.md")
-		name, desc, ok := parseSkillFile(skillPath)
-		if !ok {
-			skillPath = filepath.Join(skillDir, "README.md")
-			name, desc, ok = parseSkillFile(skillPath)
-		}
+		name, desc, ok := skutil.ParseFrontmatter(skillPath)
 		if !ok {
 			continue
 		}
@@ -122,53 +114,4 @@ func (l *FileSystemSkillsLocator) scanDir(dir string, skills *[]Skill, seen map[
 			Source:      source,
 		})
 	}
-}
-
-// parseSkillFile reads a SKILL.md or README.md and extracts name + description.
-// Panics are recovered by the caller.
-func parseSkillFile(path string) (name, description string, ok bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			ok = false
-		}
-	}()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", "", false
-	}
-	content := string(data)
-
-	// Parse YAML frontmatter
-	if !strings.HasPrefix(content, "---") {
-		return "", "", false
-	}
-
-	endIdx := strings.Index(content[3:], "---")
-	if endIdx < 0 {
-		return "", "", false
-	}
-
-	fm := content[:endIdx+3]
-	var fmName, fmDesc string
-	for _, line := range strings.Split(fm, "\n") {
-		line = strings.TrimSpace(line)
-		if after, ok := strings.CutPrefix(line, "name:"); ok {
-			fmName = strings.Trim(after, " \t\"")
-		} else if after, ok := strings.CutPrefix(line, "description:"); ok {
-			fmDesc = strings.Trim(after, " \t\"")
-		}
-	}
-
-	if fmName == "" {
-		return "", "", false
-	}
-
-	// Truncate to reasonable length using rune count for Unicode safety
-	if len([]rune(fmDesc)) > 120 {
-		runes := []rune(fmDesc)
-		fmDesc = string(runes[:117]) + "..."
-	}
-
-	return fmName, fmDesc, true
 }
