@@ -276,7 +276,7 @@ type openCodeMessage struct {
 		Role       string `json:"role"`
 		ProviderID string `json:"providerID"`
 		ModelID    string `json:"modelID"`
-		Tokens *struct {
+		Tokens     *struct {
 			Input     int `json:"input"`
 			Output    int `json:"output"`
 			Reasoning int `json:"reasoning"`
