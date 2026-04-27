@@ -709,7 +709,7 @@ func (h *Handler) handlePassthroughCommand(ctx context.Context, env *events.Enve
 	return nil
 }
 
-func (h *Handler) sendCommandFeedback(ctx context.Context, sessionID string, msg string) {
+func (h *Handler) sendCommandFeedback(ctx context.Context, sessionID, msg string) {
 	env := events.NewEnvelope(
 		aep.NewID(), sessionID, h.hub.NextSeq(sessionID),
 		events.Message, events.MessageData{Content: msg},
