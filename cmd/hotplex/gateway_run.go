@@ -243,6 +243,7 @@ func runGateway(configPath string, devMode bool) (err error) {
 	handler := gateway.NewHandler(log, hub, sm, jwtValidator)
 	bridge := gateway.NewBridge(log, hub, sm, msgStore)
 	handler.SetBridge(bridge)
+	handler.SetSkillsLocator(gateway.NewFileSystemSkillsLocator(cfg))
 	if convStore != nil {
 		handler.SetConvStore(convStore)
 		bridge.SetConvStore(convStore)
