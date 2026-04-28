@@ -219,6 +219,11 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		return fmt.Errorf("bridge: resume start: %w", err)
 	}
 
+	// Refresh ExpiresAt so a reactivated session isn't immediately killed by GC max_lifetime.
+	if err := b.sm.ResetExpiry(ctx, id); err != nil {
+		b.log.Warn("bridge: resume reset expiry failed", "session_id", id, "err", err)
+	}
+
 	// Notify client of current state.
 	stateToNotify := si.State
 	if stateToNotify == events.StateTerminated || stateToNotify == events.StateIdle {
