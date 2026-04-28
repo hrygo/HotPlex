@@ -2,8 +2,6 @@ package feishu
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"strconv"
 	"testing"
 	"time"
@@ -13,7 +11,6 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
-// ─── handleMessage: early exit paths ────────────────────────────────────────────
 
 func TestHandleMessage_NilEvent(t *testing.T) {
 	t.Parallel()
@@ -96,7 +93,7 @@ func TestHandleMessage_EmptyMessageID(t *testing.T) {
 func TestHandleMessage_DedupDuplicate(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 	sender := larkim.NewEventSenderBuilder().
 		SenderId(larkim.NewUserIdBuilder().OpenId("user_dedup").Build()).
@@ -147,7 +144,7 @@ func TestHandleMessage_UnsupportedType(t *testing.T) {
 func TestHandleMessage_AbortCommand(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 
 	sender := larkim.NewEventSenderBuilder().
@@ -171,7 +168,7 @@ func TestHandleMessage_AbortCommand(t *testing.T) {
 func TestHandleMessage_TextNoBridge(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 
 	sender := larkim.NewEventSenderBuilder().
@@ -196,7 +193,7 @@ func TestHandleMessage_TextNoBridge(t *testing.T) {
 func TestHandleMessage_TextWithGateAllowed(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 	a.gate = NewGate("", "", false, nil, nil, nil) // no restrictions → DM always allowed
 
@@ -222,7 +219,7 @@ func TestHandleMessage_TextWithGateAllowed(t *testing.T) {
 func TestHandleMessage_GateRejected(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 	a.gate = NewGate("allowlist", "allowlist", true, []string{"allowed_user"}, nil, nil)
 
@@ -248,7 +245,7 @@ func TestHandleMessage_GateRejected(t *testing.T) {
 func TestHandleMessage_HelpCommand(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 
 	sender := larkim.NewEventSenderBuilder().
@@ -276,7 +273,7 @@ func TestHandleMessage_HelpCommand(t *testing.T) {
 func TestHandleMessage_ImageNoBridge(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 
 	sender := larkim.NewEventSenderBuilder().
@@ -304,7 +301,7 @@ func TestHandleMessage_ImageNoBridge(t *testing.T) {
 func TestHandleMessage_PostWithThread(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 
 	sender := larkim.NewEventSenderBuilder().
@@ -334,7 +331,7 @@ func TestHandleMessage_PostWithThread(t *testing.T) {
 func TestHandleMessage_NilSenderUserID(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.chatQueue = NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.chatQueue = NewChatQueue(discardLogger)
 	t.Cleanup(func() { a.chatQueue.Close() })
 
 	// Sender with no SenderId → userID stays empty.

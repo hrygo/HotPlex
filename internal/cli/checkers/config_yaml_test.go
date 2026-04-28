@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -76,26 +75,18 @@ func TestReplaceYAMLValue(t *testing.T) {
 }
 
 func TestFixConfigValues(t *testing.T) {
-	dir := t.TempDir()
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
+	setupTestConfigDir(t)
 
-	// Write config with invalid port
 	cfgContent := "gateway:\n  addr: \":99999\"\nadmin:\n  enabled: true\n  addr: \":88888\"\ndb:\n  path: \"\"\n"
 	require.NoError(t, os.WriteFile(configPath, []byte(cfgContent), 0o600))
 
-	// Load config
 	cfg, err := config.Load(configPath, config.LoadOptions{})
 	require.NoError(t, err)
 
 	err = fixConfigValues(cfg)
 	require.NoError(t, err)
 
-	// Should have rewritten the config with valid ports
 	data, err := os.ReadFile(configPath)
 	require.NoError(t, err)
-	content := string(data)
-	// Ports should be replaced with defaults
-	require.Contains(t, content, "gateway")
+	require.Contains(t, string(data), "gateway")
 }

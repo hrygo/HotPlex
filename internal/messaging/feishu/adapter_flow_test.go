@@ -2,8 +2,6 @@ package feishu
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -13,16 +11,10 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-// ─── handleTextMessage paths ──────────────────────────────────────────────────
 
 func TestAdapterFlow_HandleTextMessage_NilBridge(t *testing.T) {
 	t.Parallel()
-	a := &Adapter{
-		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		dedup:       NewDedup(100, time.Hour),
-		activeConns: make(map[string]*FeishuConn),
-		dedupDone:   make(chan struct{}),
-	}
+	a := newTestAdapter(t)
 	// No bridge → early return nil.
 	err := a.handleTextMessage(context.Background(), "msg1", "ch1", "p2p", "user1", "hello", "", "")
 	require.NoError(t, err)
@@ -30,15 +22,10 @@ func TestAdapterFlow_HandleTextMessage_NilBridge(t *testing.T) {
 
 func TestAdapterFlow_HandleTextMessage_WithInteractionConsumed(t *testing.T) {
 	t.Parallel()
-	a := &Adapter{
-		log:          slog.New(slog.NewTextHandler(io.Discard, nil)),
-		bridge:       &messaging.Bridge{},
-		interactions: messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil))),
-		dedup:        NewDedup(100, time.Hour),
-		activeConns:  make(map[string]*FeishuConn),
-		dedupDone:    make(chan struct{}),
-		rateLimiter:  NewFeishuRateLimiter(),
-	}
+	a := newTestAdapter(t)
+	a.bridge = &messaging.Bridge{}
+	a.interactions = messaging.NewInteractionManager(discardLogger)
+	a.rateLimiter = NewFeishuRateLimiter()
 	t.Cleanup(func() { a.rateLimiter.Stop() })
 
 	// Register a pending permission request.
@@ -55,14 +42,13 @@ func TestAdapterFlow_HandleTextMessage_WithInteractionConsumed(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// ─── WriteCtx paths ───────────────────────────────────────────────────────────
 
 func TestAdapterFlow_WriteCtx_DoneEvent_WithStreamCtrl(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
 	conn := NewFeishuConn(a, "chat123", "")
 
-	ctrl := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := newTestStreamingCtrl()
 	// Transition to creating then completed (Close will be a no-op).
 	conn.EnableStreaming(ctrl)
 
@@ -82,10 +68,10 @@ func TestAdapterFlow_WriteCtx_DoneEvent_WithStreamCtrl(t *testing.T) {
 func TestAdapterFlow_WriteCtx_ErrorEvent_WithStreamCtrl(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	conn := NewFeishuConn(a, "chat123", "")
 
-	ctrl := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := newTestStreamingCtrl()
 	conn.EnableStreaming(ctrl)
 
 	env := &events.Envelope{
@@ -218,7 +204,6 @@ func TestAdapterFlow_WriteCtx_SkillsListEvent_NilClient(t *testing.T) {
 	require.Contains(t, err.Error(), "lark client not initialized")
 }
 
-// ─── WriteCtx: message delta with streaming card ──────────────────────────────
 
 func TestAdapterFlow_WriteCtx_MessageDelta_NoStreamingCtrl(t *testing.T) {
 	t.Parallel()
@@ -250,14 +235,13 @@ func TestAdapterFlow_WriteCtx_MessageDelta_NoStreamingCtrl(t *testing.T) {
 	})
 }
 
-// ─── FeishuConn Close ─────────────────────────────────────────────────────────
 
 func TestAdapterFlow_FeishuConn_Close_WithStreamCtrl(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
 	conn := NewFeishuConn(a, "chat123", "")
 
-	ctrl := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := newTestStreamingCtrl()
 	conn.EnableStreaming(ctrl)
 
 	err := conn.Close()
@@ -289,7 +273,6 @@ func TestAdapterFlow_FeishuConn_Close_WithReactionIDs(t *testing.T) {
 	conn.mu.RUnlock()
 }
 
-// ─── clearProcessingReaction ──────────────────────────────────────────────────
 
 func TestAdapterFlow_ClearProcessingReaction_EmptyRID(t *testing.T) {
 	t.Parallel()
@@ -321,7 +304,6 @@ func TestAdapterFlow_ClearProcessingReaction_NilClient(t *testing.T) {
 	conn.clearProcessingReaction(context.Background(), "rid123")
 }
 
-// ─── setProcessingReaction ────────────────────────────────────────────────────
 
 func TestAdapterFlow_SetProcessingReaction_EmptyMsgID(t *testing.T) {
 	t.Parallel()
@@ -345,7 +327,6 @@ func TestAdapterFlow_SetProcessingReaction_NilClient(t *testing.T) {
 	require.Empty(t, rid)
 }
 
-// ─── cycleReaction ────────────────────────────────────────────────────────────
 
 func TestAdapterFlow_CycleReaction_EmptyPlatformMsgID(t *testing.T) {
 	t.Parallel()
@@ -369,11 +350,10 @@ func TestAdapterFlow_CycleReaction_DifferentEmoji_NilClient(t *testing.T) {
 	conn.cycleReaction(context.Background(), "THINKING")
 }
 
-// ─── sendTextMessage / replyMessage nil client ────────────────────────────────
 
 func TestAdapterFlow_SendTextMessage_NilClient(t *testing.T) {
 	t.Parallel()
-	a := &Adapter{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a := newTestAdapter(t)
 	err := a.sendTextMessage(context.Background(), "chat123", "hello")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "lark client not initialized")
@@ -381,18 +361,17 @@ func TestAdapterFlow_SendTextMessage_NilClient(t *testing.T) {
 
 func TestAdapterFlow_ReplyMessage_NilClient(t *testing.T) {
 	t.Parallel()
-	a := &Adapter{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a := newTestAdapter(t)
 	err := a.replyMessage(context.Background(), "msg123", "hello", false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "lark client not initialized")
 }
 
-// ─── dedupCleanupLoop ─────────────────────────────────────────────────────────
 
 func TestAdapterFlow_DedupCleanupLoop_Exit(t *testing.T) {
 	t.Parallel()
 	a := &Adapter{
-		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		log:         discardLogger,
 		dedup:       NewDedup(10, time.Millisecond),
 		activeConns: make(map[string]*FeishuConn),
 		dedupDone:   make(chan struct{}),
@@ -402,14 +381,13 @@ func TestAdapterFlow_DedupCleanupLoop_Exit(t *testing.T) {
 	a.dedupWg.Wait()
 }
 
-// ─── Adapter Close cleanup ────────────────────────────────────────────────────
 
 func TestAdapterFlow_Close_WithConnections(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
 	conn := a.GetOrCreateConn("chat_cleanup", "")
 	conn.mu.Lock()
-	conn.streamCtrl = NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	conn.streamCtrl = newTestStreamingCtrl()
 	conn.mu.Unlock()
 
 	err := a.Close(context.Background())
@@ -421,13 +399,10 @@ func TestAdapterFlow_Close_WithConnections(t *testing.T) {
 	require.False(t, exists)
 }
 
-// ─── Start early exit paths ───────────────────────────────────────────────────
 
 func TestAdapterFlow_Start_AlreadyStarted(t *testing.T) {
 	t.Parallel()
-	a := &Adapter{
-		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
+	a := newTestAdapter(t)
 	a.started.Store(true)
 
 	err := a.Start(context.Background())
@@ -436,16 +411,13 @@ func TestAdapterFlow_Start_AlreadyStarted(t *testing.T) {
 
 func TestAdapterFlow_Start_NoCredentials(t *testing.T) {
 	t.Parallel()
-	a := &Adapter{
-		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
+	a := newTestAdapter(t)
 
 	err := a.Start(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "appID and appSecret required")
 }
 
-// ─── handleTextControlCommand / handleTextWorkerCommand nil envelope ──────────
 
 func TestAdapterFlow_HandleTextControlCommand_NilBridge(t *testing.T) {
 	t.Parallel()
@@ -460,7 +432,6 @@ func TestAdapterFlow_HandleTextWorkerCommand_NilBridge(t *testing.T) {
 	// The function is covered indirectly via handleMessage integration.
 }
 
-// ─── WriteCtx: nil envelope ───────────────────────────────────────────────────
 
 func TestAdapterFlow_WriteCtx_NilEnvelope(t *testing.T) {
 	t.Parallel()
@@ -472,7 +443,6 @@ func TestAdapterFlow_WriteCtx_NilEnvelope(t *testing.T) {
 	require.Contains(t, err.Error(), "nil envelope")
 }
 
-// ─── WriteCtx: PermissionRequest/QuestionRequest/ElicitationRequest extract fail
 
 func TestAdapterFlow_WriteCtx_PermissionRequest_ExtractFail(t *testing.T) {
 	t.Parallel()
@@ -528,12 +498,11 @@ func TestAdapterFlow_WriteCtx_ElicitationRequest_ExtractFail(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ─── WriteCtx: Done/Error without streamCtrl ───────────────────────────────────
 
 func TestAdapterFlow_WriteCtx_Done_NoStreamCtrl(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	conn := NewFeishuConn(a, "chat123", "")
 
 	env := &events.Envelope{
@@ -552,7 +521,7 @@ func TestAdapterFlow_WriteCtx_Done_NoStreamCtrl(t *testing.T) {
 func TestAdapterFlow_WriteCtx_Error_NoStreamCtrl(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	conn := NewFeishuConn(a, "chat123", "")
 
 	env := &events.Envelope{
@@ -568,7 +537,6 @@ func TestAdapterFlow_WriteCtx_Error_NoStreamCtrl(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// ─── WriteCtx: message delta static path ────────────────────────────────────────
 
 func TestAdapterFlow_WriteCtx_MessageDelta_StaticPath(t *testing.T) {
 	t.Parallel()
@@ -618,7 +586,6 @@ func TestAdapterFlow_WriteCtx_Message_StaticPath_NoReplyTo(t *testing.T) {
 	require.Contains(t, err.Error(), "lark client not initialized")
 }
 
-// ─── WriteCtx: raw event with text ─────────────────────────────────────────────
 
 func TestAdapterFlow_WriteCtx_RawEvent_WithText(t *testing.T) {
 	t.Parallel()
@@ -644,7 +611,6 @@ func TestAdapterFlow_WriteCtx_RawEvent_WithText(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ─── WriteCtx: Done/Error with reaction cleanup ─────────────────────────────────
 
 func TestAdapterFlow_WriteCtx_Done_WithReactionCleanup(t *testing.T) {
 	t.Parallel()
@@ -677,7 +643,7 @@ func TestAdapterFlow_WriteCtx_Done_WithReactionCleanup(t *testing.T) {
 func TestAdapterFlow_WriteCtx_Error_WithReactionCleanup(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	conn := NewFeishuConn(a, "chat123", "")
 	conn.mu.Lock()
 	conn.typingRid = "typing_rid"
@@ -704,19 +670,17 @@ func TestAdapterFlow_WriteCtx_Error_WithReactionCleanup(t *testing.T) {
 	conn.mu.RUnlock()
 }
 
-// ─── registerInteraction ───────────────────────────────────────────────────────
 
 func TestAdapterFlow_RegisterInteraction(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	conn := a.GetOrCreateConn("chat_ri", "")
 
 	a.registerInteraction("req-1", "sess-ri", events.PermissionRequest, conn)
 	require.Equal(t, 1, a.interactions.Len())
 }
 
-// ─── WriteCtx: streaming Write+Flush path ────────────────────────────────────────
 
 func TestAdapterFlow_WriteCtx_StreamCtrl_WriteFlush(t *testing.T) {
 	t.Parallel()
@@ -725,7 +689,7 @@ func TestAdapterFlow_WriteCtx_StreamCtrl_WriteFlush(t *testing.T) {
 	t.Cleanup(func() { limiter.Stop() })
 	conn := NewFeishuConn(a, "chat123", "")
 
-	ctrl := NewStreamingCardController(nil, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := NewStreamingCardController(nil, limiter, discardLogger)
 	ctrl.transition(PhaseCreating)
 	ctrl.transition(PhaseStreaming)
 	ctrl.mu.Lock()
@@ -758,12 +722,11 @@ func TestAdapterFlow_RemoveReaction_EmptyReactionID_NilClient(t *testing.T) {
 	require.Contains(t, err.Error(), "lark client not initialized")
 }
 
-// ─── registerInteraction callback via checkPendingInteraction ────────────────────
 
 func TestAdapterFlow_RegisterInteraction_CallbackConsumed(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	conn := a.GetOrCreateConn("chat_ricb", "")
 	conn.mu.Lock()
 	conn.sessionID = "sess-ricb"

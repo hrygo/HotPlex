@@ -2,8 +2,6 @@ package feishu
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -243,15 +241,4 @@ func TestFeishuConn_SendSkillsList_WriteCtxIntegration(t *testing.T) {
 	// WriteCtx dispatches to sendSkillsList which fails at lark client.
 	err := conn.WriteCtx(context.Background(), env)
 	require.Error(t, err)
-}
-
-// newTestAdapterWithLogger creates a test adapter with a real slog logger.
-func newTestAdapterWithLogger(t *testing.T) *Adapter {
-	t.Helper()
-	return &Adapter{
-		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		dedup:       NewDedup(100, 12*60*60*1e9),
-		activeConns: make(map[string]*FeishuConn),
-		dedupDone:   make(chan struct{}),
-	}
 }

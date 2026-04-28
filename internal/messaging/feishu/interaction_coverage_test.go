@@ -3,7 +3,6 @@ package feishu
 import (
 	"context"
 	"io"
-	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,12 +13,11 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-// ─── checkPendingInteraction: uncovered paths ───────────────────────────────────
 
 func TestCheckPendingInteraction_QuestionResponse(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	a.rateLimiter = NewFeishuRateLimiter()
 	t.Cleanup(func() { a.rateLimiter.Stop() })
 
@@ -50,7 +48,7 @@ func TestCheckPendingInteraction_QuestionResponse(t *testing.T) {
 func TestCheckPendingInteraction_ElicitationAccept(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	a.rateLimiter = NewFeishuRateLimiter()
 	t.Cleanup(func() { a.rateLimiter.Stop() })
 
@@ -79,7 +77,7 @@ func TestCheckPendingInteraction_ElicitationAccept(t *testing.T) {
 func TestCheckPendingInteraction_ElicitationDecline(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	a.rateLimiter = NewFeishuRateLimiter()
 	t.Cleanup(func() { a.rateLimiter.Stop() })
 
@@ -108,7 +106,7 @@ func TestCheckPendingInteraction_ElicitationDecline(t *testing.T) {
 func TestCheckPendingInteraction_PermissionDeny(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	a.rateLimiter = NewFeishuRateLimiter()
 	t.Cleanup(func() { a.rateLimiter.Stop() })
 
@@ -138,7 +136,7 @@ func TestCheckPendingInteraction_PermissionDeny(t *testing.T) {
 func TestCheckPendingInteraction_NotPermissionText(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 
 	conn := a.GetOrCreateConn("chat_np", "")
 	conn.mu.Lock()
@@ -160,7 +158,7 @@ func TestCheckPendingInteraction_NotPermissionText(t *testing.T) {
 func TestCheckPendingInteraction_NoMatchingSession(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 
 	conn := a.GetOrCreateConn("chat_nomatch", "")
 	conn.mu.Lock()
@@ -179,11 +177,10 @@ func TestCheckPendingInteraction_NoMatchingSession(t *testing.T) {
 	require.False(t, consumed)
 }
 
-// ─── ChatQueue: task execution paths ────────────────────────────────────────────
 
 func TestChatQueue_TaskExecution(t *testing.T) {
 	t.Parallel()
-	q := NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	q := NewChatQueue(discardLogger)
 	t.Cleanup(func() { q.Close() })
 
 	var executed atomic.Bool
@@ -199,7 +196,7 @@ func TestChatQueue_TaskExecution(t *testing.T) {
 
 func TestChatQueue_TaskError(t *testing.T) {
 	t.Parallel()
-	q := NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	q := NewChatQueue(discardLogger)
 	t.Cleanup(func() { q.Close() })
 
 	err := q.Enqueue("chat_err_1", func(ctx context.Context) error {
@@ -212,18 +209,17 @@ func TestChatQueue_TaskError(t *testing.T) {
 
 func TestChatQueue_AbortNonexistentChat(t *testing.T) {
 	t.Parallel()
-	q := NewChatQueue(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	q := NewChatQueue(discardLogger)
 	t.Cleanup(func() { q.Close() })
 
 	require.NotPanics(t, func() { q.Abort("nonexistent") })
 }
 
-// ─── Elicitation decline variants ──────────────────────────────────────────────
 
 func TestCheckPendingInteraction_ElicitationDecline_CN(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
-	a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.interactions = messaging.NewInteractionManager(discardLogger)
 	a.rateLimiter = NewFeishuRateLimiter()
 	t.Cleanup(func() { a.rateLimiter.Stop() })
 
@@ -249,7 +245,6 @@ func TestCheckPendingInteraction_ElicitationDecline_CN(t *testing.T) {
 	require.Equal(t, "decline", er["action"])
 }
 
-// ─── Permission allow variants ──────────────────────────────────────────────────
 
 func TestCheckPendingInteraction_PermissionAllow_Variants(t *testing.T) {
 	t.Parallel()
@@ -266,7 +261,7 @@ func TestCheckPendingInteraction_PermissionAllow_Variants(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			a := newTestAdapter(t)
-			a.interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			a.interactions = messaging.NewInteractionManager(discardLogger)
 			a.rateLimiter = NewFeishuRateLimiter()
 			t.Cleanup(func() { a.rateLimiter.Stop() })
 

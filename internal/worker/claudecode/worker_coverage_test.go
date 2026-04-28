@@ -4,8 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -350,31 +348,6 @@ func TestDeleteSessionFiles_NoFiles(t *testing.T) {
 	w.sessionID = "nonexistent-session-id"
 	err := w.deleteSessionFiles()
 	require.NoError(t, err)
-}
-
-func TestDeleteSessionFiles_WithTempFiles(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	claudeDir := filepath.Join(tmpDir, ".claude", "projects", "testhash")
-	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
-
-	sessionID := "test-session-file-del"
-	transcriptFile := filepath.Join(claudeDir, sessionID+".jsonl")
-	require.NoError(t, os.WriteFile(transcriptFile, []byte("test"), 0o644))
-
-	envDir := filepath.Join(tmpDir, ".claude", "session-env")
-	require.NoError(t, os.MkdirAll(envDir, 0o755))
-	envFile := filepath.Join(envDir, sessionID)
-	require.NoError(t, os.WriteFile(envFile, []byte("env"), 0o644))
-
-	pattern := filepath.Join(claudeDir, sessionID+".jsonl")
-	matches, err := filepath.Glob(pattern)
-	require.NoError(t, err)
-	require.Len(t, matches, 1)
-
-	require.NoError(t, os.RemoveAll(transcriptFile))
-	require.NoError(t, os.RemoveAll(envFile))
 }
 
 // ─── ResetContext ─────────────────────────────────────────────────────────────

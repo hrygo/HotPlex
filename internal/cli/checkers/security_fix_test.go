@@ -9,15 +9,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFixJWTStrength(t *testing.T) {
+func setupTestConfigDir(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
-	envPath := filepath.Join(dir, ".env")
 	origConfigPath := configPath
 	configPath = filepath.Join(dir, "config.yaml")
 	t.Cleanup(func() { configPath = origConfigPath })
-
-	// Create minimal config so envFilePath resolves correctly
 	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
+	return dir
+}
+
+func setupTestWd(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	origWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	return dir
+}
+
+func TestFixJWTStrength(t *testing.T) {
+	dir := setupTestConfigDir(t)
+	envPath := filepath.Join(dir, ".env")
 
 	require.NoError(t, fixJWTStrength())
 
@@ -25,18 +39,12 @@ func TestFixJWTStrength(t *testing.T) {
 	require.NoError(t, err)
 	content := string(data)
 	require.Contains(t, content, "HOTPLEX_JWT_SECRET=")
-	// Should not contain legacy JWT_SECRET=
 	require.False(t, strings.Contains(content, "JWT_SECRET=") && !strings.Contains(content, "HOTPLEX_JWT_SECRET="))
 }
 
 func TestFixJWTStrength_RemovesLegacy(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupTestConfigDir(t)
 	envPath := filepath.Join(dir, ".env")
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
-
-	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
 	require.NoError(t, os.WriteFile(envPath, []byte("JWT_SECRET=old_value\n"), 0o600))
 
 	require.NoError(t, fixJWTStrength())
@@ -49,13 +57,8 @@ func TestFixJWTStrength_RemovesLegacy(t *testing.T) {
 }
 
 func TestFixAdminToken(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupTestConfigDir(t)
 	envPath := filepath.Join(dir, ".env")
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
-
-	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
 	require.NoError(t, os.WriteFile(envPath, []byte("ADMIN_TOKEN=old\n"), 0o600))
 
 	require.NoError(t, fixAdminToken())
@@ -66,22 +69,19 @@ func TestFixAdminToken(t *testing.T) {
 	require.Contains(t, content, "HOTPLEX_ADMIN_TOKEN_1=")
 	require.NotContains(t, content, "ADMIN_TOKEN=old")
 
-	// Token should be hex
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
+	var token string
+	for _, line := range strings.Split(content, "\n") {
 		if strings.HasPrefix(line, "HOTPLEX_ADMIN_TOKEN_1=") {
-			token := strings.TrimPrefix(line, "HOTPLEX_ADMIN_TOKEN_1=")
-			require.Len(t, token, 64) // 32 bytes = 64 hex chars
+			token = strings.TrimPrefix(line, "HOTPLEX_ADMIN_TOKEN_1=")
+			break
 		}
 	}
+	require.NotEmpty(t, token, "HOTPLEX_ADMIN_TOKEN_1 should be present")
+	require.Len(t, token, 64)
 }
 
 func TestFixEnvInGit_CreatesGitignore(t *testing.T) {
-	dir := t.TempDir()
-	origWd, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	dir := setupTestWd(t)
 
 	require.NoError(t, fixEnvInGit())
 
@@ -91,12 +91,7 @@ func TestFixEnvInGit_CreatesGitignore(t *testing.T) {
 }
 
 func TestFixEnvInGit_Appends(t *testing.T) {
-	dir := t.TempDir()
-	origWd, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-
+	dir := setupTestWd(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0o644))
 
 	require.NoError(t, fixEnvInGit())
@@ -109,12 +104,7 @@ func TestFixEnvInGit_Appends(t *testing.T) {
 }
 
 func TestFixEnvInGit_SkipsIfPresent(t *testing.T) {
-	dir := t.TempDir()
-	origWd, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
-
+	dir := setupTestWd(t)
 	original := "*.log\n.env\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(original), 0o644))
 
@@ -122,15 +112,11 @@ func TestFixEnvInGit_SkipsIfPresent(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
 	require.NoError(t, err)
-	require.Equal(t, original, string(data)) // unchanged
+	require.Equal(t, original, string(data))
 }
 
 func TestWriteEnvVar(t *testing.T) {
-	dir := t.TempDir()
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
-	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
+	dir := setupTestConfigDir(t)
 
 	require.NoError(t, writeEnvVar("TEST_KEY", "test_value"))
 
@@ -141,13 +127,8 @@ func TestWriteEnvVar(t *testing.T) {
 }
 
 func TestWriteEnvVar_AppendsToExisting(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupTestConfigDir(t)
 	envPath := filepath.Join(dir, ".env")
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
-	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
-
 	require.NoError(t, os.WriteFile(envPath, []byte("EXISTING=val\n"), 0o600))
 	require.NoError(t, writeEnvVar("NEW_KEY", "new_val"))
 
@@ -159,13 +140,8 @@ func TestWriteEnvVar_AppendsToExisting(t *testing.T) {
 }
 
 func TestUnsetEnvVar(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupTestConfigDir(t)
 	envPath := filepath.Join(dir, ".env")
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
-	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
-
 	require.NoError(t, os.WriteFile(envPath, []byte("KEEP=this\nREMOVE=that\n"), 0o600))
 
 	require.NoError(t, unsetEnvVar("REMOVE"))
@@ -177,23 +153,13 @@ func TestUnsetEnvVar(t *testing.T) {
 }
 
 func TestUnsetEnvVar_NoFile(t *testing.T) {
-	dir := t.TempDir()
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
-	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
-
+	setupTestConfigDir(t)
 	require.NoError(t, unsetEnvVar("NONEXISTENT"))
 }
 
 func TestUnsetEnvVar_KeyNotFound(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupTestConfigDir(t)
 	envPath := filepath.Join(dir, ".env")
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
-	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
-
 	original := "OTHER=val\n"
 	require.NoError(t, os.WriteFile(envPath, []byte(original), 0o600))
 

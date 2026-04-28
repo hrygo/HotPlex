@@ -2,19 +2,16 @@ package feishu
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-// ─── Write ────────────────────────────────────────────────────────────────────
 
 func TestStreamingCardController_Write(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	err := c.Write("hello")
 	require.NoError(t, err)
@@ -27,7 +24,7 @@ func TestStreamingCardController_Write(t *testing.T) {
 
 func TestStreamingCardController_Write_MultipleAppends(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.NoError(t, c.Write("hello "))
 	require.NoError(t, c.Write("world"))
@@ -40,7 +37,7 @@ func TestStreamingCardController_Write_MultipleAppends(t *testing.T) {
 
 func TestStreamingCardController_Write_TracksBytes(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.NoError(t, c.Write("abc"))
 	require.NoError(t, c.Write("defgh"))
@@ -53,7 +50,7 @@ func TestStreamingCardController_Write_TracksBytes(t *testing.T) {
 
 func TestStreamingCardController_Write_SetsStreamStart(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	// Reset streamStartTime to zero to test that Write sets it.
 	c.mu.Lock()
@@ -70,7 +67,7 @@ func TestStreamingCardController_Write_SetsStreamStart(t *testing.T) {
 
 func TestStreamingCardController_Write_TTLExpiry(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	// Set streamStartTime far enough in the past to exceed TTL.
 	c.mu.Lock()
@@ -84,7 +81,7 @@ func TestStreamingCardController_Write_TTLExpiry(t *testing.T) {
 
 func TestStreamingCardController_Write_SecondWriteAfterExpiry(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	c.mu.Lock()
 	c.streamStartTime = time.Now().Add(-StreamTTL - time.Second)
@@ -99,13 +96,12 @@ func TestStreamingCardController_Write_SecondWriteAfterExpiry(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ─── Flush (paths that don't need lark client) ───────────────────────────────
 
 func TestStreamingCardController_Flush_Unchanged(t *testing.T) {
 	t.Parallel()
 	limiter := NewFeishuRateLimiter()
 	t.Cleanup(func() { limiter.Stop() })
-	c := NewStreamingCardController(nil, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewStreamingCardController(nil, limiter, discardLogger)
 
 	// Write content and set lastFlushed to the same value.
 	c.mu.Lock()
@@ -122,7 +118,7 @@ func TestStreamingCardController_Flush_NoCardKitNoMsgID(t *testing.T) {
 	t.Parallel()
 	limiter := NewFeishuRateLimiter()
 	t.Cleanup(func() { limiter.Stop() })
-	c := NewStreamingCardController(nil, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewStreamingCardController(nil, limiter, discardLogger)
 
 	// Write some content, disable cardKit so it skips to IM patch path.
 	c.mu.Lock()
@@ -140,7 +136,7 @@ func TestStreamingCardController_Flush_WithLimiter_CardKitDegraded(t *testing.T)
 	limiter := NewFeishuRateLimiter()
 	t.Cleanup(func() { limiter.Stop() })
 
-	c := NewStreamingCardController(nil, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewStreamingCardController(nil, limiter, discardLogger)
 
 	c.mu.Lock()
 	c.buf.WriteString("new content")
@@ -152,11 +148,10 @@ func TestStreamingCardController_Flush_WithLimiter_CardKitDegraded(t *testing.T)
 	require.NoError(t, err)
 }
 
-// ─── Expired ──────────────────────────────────────────────────────────────────
 
 func TestStreamingCardController_Expired_ZeroStartTime(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	// Reset to zero start time.
 	c.mu.Lock()
@@ -169,7 +164,7 @@ func TestStreamingCardController_Expired_ZeroStartTime(t *testing.T) {
 
 func TestStreamingCardController_Expired_AfterTTL(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	c.mu.Lock()
 	c.streamStartTime = time.Now().Add(-StreamTTL - time.Minute)
@@ -180,7 +175,7 @@ func TestStreamingCardController_Expired_AfterTTL(t *testing.T) {
 
 func TestStreamingCardController_Expired_JustUnderTTL(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	c.mu.Lock()
 	c.streamStartTime = time.Now().Add(-StreamTTL + time.Minute)
@@ -189,11 +184,10 @@ func TestStreamingCardController_Expired_JustUnderTTL(t *testing.T) {
 	require.False(t, c.Expired())
 }
 
-// ─── MsgID ────────────────────────────────────────────────────────────────────
 
 func TestStreamingCardController_MsgID_Set(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	c.mu.Lock()
 	c.msgID = "msg_abc"
@@ -202,11 +196,10 @@ func TestStreamingCardController_MsgID_Set(t *testing.T) {
 	require.Equal(t, "msg_abc", c.MsgID())
 }
 
-// ─── Close edge cases (paths without lark client) ─────────────────────────────
 
 func TestStreamingCardController_Close_WithBufferContent(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	// Write some content.
 	require.NoError(t, c.Write("Hello world"))
@@ -222,7 +215,7 @@ func TestStreamingCardController_Close_WithBufferContent(t *testing.T) {
 
 func TestStreamingCardController_Close_IntegrityFail(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.True(t, c.transition(PhaseCreating))
 	require.True(t, c.transition(PhaseStreaming))
@@ -240,7 +233,7 @@ func TestStreamingCardController_Close_IntegrityFail(t *testing.T) {
 
 func TestStreamingCardController_Close_IntegrityPass(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.True(t, c.transition(PhaseCreating))
 	require.True(t, c.transition(PhaseStreaming))
@@ -258,7 +251,7 @@ func TestStreamingCardController_Close_IntegrityPass(t *testing.T) {
 
 func TestStreamingCardController_Close_CardKitDegraded_NoCardID_NoMsgID(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.True(t, c.transition(PhaseCreating))
 	require.True(t, c.transition(PhaseStreaming))
@@ -277,7 +270,7 @@ func TestStreamingCardController_Close_CardKitDegraded_NoCardID_NoMsgID(t *testi
 
 func TestStreamingCardController_Close_StreamingActive_NoCardID(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.True(t, c.transition(PhaseCreating))
 	require.True(t, c.transition(PhaseStreaming))
@@ -298,11 +291,10 @@ func TestStreamingCardController_Close_StreamingActive_NoCardID(t *testing.T) {
 	c.mu.Unlock()
 }
 
-// ─── Abort (paths without lark client) ────────────────────────────────────────
 
 func TestStreamingCardController_Abort_FromStreaming(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.True(t, c.transition(PhaseCreating))
 	require.True(t, c.transition(PhaseStreaming))
@@ -314,7 +306,7 @@ func TestStreamingCardController_Abort_FromStreaming(t *testing.T) {
 
 func TestStreamingCardController_Abort_NoCardID_NoStreaming(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.True(t, c.transition(PhaseCreating))
 	require.True(t, c.transition(PhaseStreaming))
@@ -332,7 +324,7 @@ func TestStreamingCardController_Abort_NoCardID_NoStreaming(t *testing.T) {
 
 func TestStreamingCardController_Abort_NoStreamingActive_NoMsgID(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.True(t, c.transition(PhaseCreating))
 	require.True(t, c.transition(PhaseStreaming))
@@ -346,11 +338,10 @@ func TestStreamingCardController_Abort_NoStreamingActive_NoMsgID(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// ─── EnsureCard transitions ───────────────────────────────────────────────────
 
 func TestStreamingCardController_EnsureCard_InvalidPhase(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	// Already in PhaseStreaming, can't transition to Creating.
 	c.phase.Store(int32(PhaseStreaming))
@@ -360,11 +351,10 @@ func TestStreamingCardController_EnsureCard_InvalidPhase(t *testing.T) {
 	require.Contains(t, err.Error(), "cannot transition")
 }
 
-// ─── Concurrent Close ─────────────────────────────────────────────────────────
 
 func TestStreamingCardController_ConcurrentClose(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	require.True(t, c.transition(PhaseCreating))
 	require.True(t, c.transition(PhaseStreaming))
@@ -387,13 +377,12 @@ func TestStreamingCardController_ConcurrentClose(t *testing.T) {
 	require.Equal(t, 5, successCount)
 }
 
-// ─── Write + Flush integration ────────────────────────────────────────────────
 
 func TestStreamingCardController_WriteThenFlush(t *testing.T) {
 	t.Parallel()
 	limiter := NewFeishuRateLimiter()
 	t.Cleanup(func() { limiter.Stop() })
-	c := NewStreamingCardController(nil, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewStreamingCardController(nil, limiter, discardLogger)
 
 	// Disable cardKit so flush skips to IM patch path (no msgID → skip).
 	c.mu.Lock()
@@ -407,13 +396,12 @@ func TestStreamingCardController_WriteThenFlush(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// ─── Flush: early exit paths ────────────────────────────────────────────────────
 
 func TestStreamingCardController_Flush_CardKitDegraded_NoCardID(t *testing.T) {
 	t.Parallel()
 	limiter := NewFeishuRateLimiter()
 	t.Cleanup(func() { limiter.Stop() })
-	c := NewStreamingCardController(nil, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewStreamingCardController(nil, limiter, discardLogger)
 
 	require.NoError(t, c.Write("content"))
 
@@ -430,7 +418,7 @@ func TestStreamingCardController_Flush_IMPatchNoMsgID(t *testing.T) {
 	t.Parallel()
 	limiter := NewFeishuRateLimiter()
 	t.Cleanup(func() { limiter.Stop() })
-	c := NewStreamingCardController(nil, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewStreamingCardController(nil, limiter, discardLogger)
 
 	require.NoError(t, c.Write("data"))
 
@@ -443,13 +431,12 @@ func TestStreamingCardController_Flush_IMPatchNoMsgID(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// ─── EnsureCard: nil client path ────────────────────────────────────────────────
 
 func TestStreamingCardController_EnsureCard_TransitionFail(t *testing.T) {
 	t.Parallel()
 	limiter := NewFeishuRateLimiter()
 	t.Cleanup(func() { limiter.Stop() })
-	c := NewStreamingCardController(nil, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := NewStreamingCardController(nil, limiter, discardLogger)
 
 	// Force to streaming phase so transition to creating fails.
 	c.phase.Store(int32(PhaseCompleted))
@@ -459,32 +446,29 @@ func TestStreamingCardController_EnsureCard_TransitionFail(t *testing.T) {
 	require.Contains(t, err.Error(), "cannot transition")
 }
 
-// ─── Close: more paths ─────────────────────────────────────────────────────────
 
 func TestStreamingCardController_Close_NoContent(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 	// Close with empty buffer and not created.
 	err := c.Close(context.Background())
 	require.NoError(t, err)
 }
 
-// ─── Abort: more paths ─────────────────────────────────────────────────────────
 
 func TestStreamingCardController_Abort_NotStreaming(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 
 	// Not in streaming phase → early return.
 	err := c.Abort(context.Background())
 	require.NoError(t, err)
 }
 
-// ─── transition: edge cases ─────────────────────────────────────────────────────
 
 func TestStreamingCardController_Transition_FromCompleted(t *testing.T) {
 	t.Parallel()
-	c := NewStreamingCardController(nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c := newTestStreamingCtrl()
 	c.phase.Store(int32(PhaseCompleted))
 
 	// Completed → Creating should fail.
