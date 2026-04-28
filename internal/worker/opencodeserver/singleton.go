@@ -336,7 +336,7 @@ func (s *SingletonProcessManager) startIdleDrainLocked() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
-		if s.refs == 0 && s.state == stateRunning {
+		if s.refs == 0 && s.state == stateRunning && s.proc != nil {
 			s.log.Info("opencode-server-singleton: idle drain expired, killing process")
 			_ = s.proc.Kill()
 			// monitorProcess will set state=stateIdle and clean up.
@@ -365,5 +365,6 @@ func InitSingleton(log *slog.Logger, cfg config.OpenCodeServerConfig) {
 func ShutdownSingleton(ctx context.Context) {
 	if defaultSingleton != nil {
 		defaultSingleton.Shutdown(ctx)
+		defaultSingleton = nil
 	}
 }

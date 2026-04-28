@@ -284,3 +284,26 @@ func TestLLMRetryController_MaxRetries(t *testing.T) {
 	ctrl := NewLLMRetryController(config.AutoRetryConfig{Enabled: true, MaxRetries: 5}, log)
 	assert.Equal(t, 5, ctrl.MaxRetries())
 }
+
+func TestLLMRetryController_UpdateConfig(t *testing.T) {
+	log := slog.Default()
+	ctrl := NewLLMRetryController(config.AutoRetryConfig{Enabled: true, MaxRetries: 3, BaseDelay: 2 * time.Second}, log)
+	assert.Equal(t, 3, ctrl.MaxRetries())
+
+	// Update to new config.
+	ctrl.UpdateConfig(config.AutoRetryConfig{Enabled: true, MaxRetries: 5, BaseDelay: 10 * time.Second})
+	assert.Equal(t, 5, ctrl.MaxRetries())
+}
+
+func TestLLMRetryController_UpdateConfig_InvalidPattern(t *testing.T) {
+	log := slog.Default()
+	ctrl := NewLLMRetryController(config.AutoRetryConfig{Enabled: true}, log)
+
+	// Invalid regex pattern should be skipped, not panic.
+	ctrl.UpdateConfig(config.AutoRetryConfig{
+		Enabled:  true,
+		Patterns: []string{"[invalid"},
+	})
+	// Should not panic.
+	assert.True(t, true)
+}
