@@ -438,10 +438,16 @@ func le16(b []byte, v uint16) {
 
 // ─── test helpers ─────────────────────────────────────────────────────────────
 
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+func newTestStreamingCtrl() *StreamingCardController {
+	return NewStreamingCardController(nil, nil, discardLogger)
+}
+
 func newTestAdapter(t *testing.T) *Adapter {
 	t.Helper()
 	return &Adapter{
-		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		log:         discardLogger,
 		dedup:       NewDedup(100, time.Hour),
 		activeConns: make(map[string]*FeishuConn),
 		dedupDone:   make(chan struct{}),
