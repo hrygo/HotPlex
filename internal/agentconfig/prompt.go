@@ -9,6 +9,14 @@ import (
 //go:embed META-COGNITION.md
 var embeddedMetacognition string
 
+var hotplexMetacognition string // computed once at init
+
+func init() {
+	if embeddedMetacognition != "" {
+		hotplexMetacognition = "<hotplex>\n" + embeddedMetacognition + "\n</hotplex>"
+	}
+}
+
 // BuildSystemPrompt assembles the full agent context (B+C channels) into a single
 // system prompt. Used by both Claude Code (--append-system-prompt) and OpenCode
 // Server (system field per message). Two-level XML nesting conveys the B/C priority
@@ -87,7 +95,11 @@ func joinLines(parts []string) string {
 		return parts[0]
 	}
 	b := new(strings.Builder)
-	b.Grow(1024)
+	n := (len(parts) - 1) * 2 // "\n\n" separators
+	for _, p := range parts {
+		n += len(p)
+	}
+	b.Grow(n)
 	for i, p := range parts {
 		if i > 0 {
 			b.WriteString("\n\n")
@@ -97,10 +109,4 @@ func joinLines(parts []string) string {
 	return b.String()
 }
 
-// buildHotplexMetacognition returns the built-in self-knowledge injected into the C channel.
-// Content is embedded at compile time via //go:embed from META-COGNITION.md.
-// The <hotplex> wrapper tag is added here to keep the markdown source clean.
-// It is factually descriptive, not prescriptive — it belongs in <context>, not <directives>.
-func buildHotplexMetacognition() string {
-	return "<hotplex>\n" + embeddedMetacognition + "\n</hotplex>"
-}
+func buildHotplexMetacognition() string { return hotplexMetacognition }
