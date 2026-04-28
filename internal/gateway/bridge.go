@@ -546,6 +546,13 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	// Skip during shutdown to avoid spawning workers that will be immediately killed.
 	// Skip for exit 143 (SIGTERM) — intentional termination by a new connection, not a crash.
 	fallbackAttempted := !b.closed.Load() && exitCode != 0 && exitCode != 143 && opts.resumed && opts.retryDepth < 2 && time.Since(startTime) < 15*time.Second
+	// Session files missing: resumed worker crashed immediately with no output.
+	// Skip the resume retry (guaranteed to fail again) and go directly to fresh start.
+	if fallbackAttempted && turnText.Len() == 0 && time.Since(startTime) < 5*time.Second {
+		b.log.Info("bridge: session files missing after resume, skipping retry",
+			"session_id", sessionID, "worker_type", workerType, "exit_code", exitCode)
+		opts.retryDepth = 1
+	}
 	if fallbackAttempted {
 		// Extract last input from dead worker's conn for re-delivery after fresh start.
 		// Fall back to inherited lastInput from previous retry goroutine when the
@@ -755,11 +762,10 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	}
 
 	b.log.Info("bridge: fresh worker started after resume failure", "session_id", p.sessionID, "worker_type", p.workerType)
-	warnEvt := events.NewEnvelope(aep.NewID(), p.sessionID, b.hub.NextSeq(p.sessionID), events.Error, events.ErrorData{
-		Code:    events.ErrCodeResumeRetry,
-		Message: fmt.Sprintf("Conversation data lost (exit %d), started fresh session.", p.exitCode),
-	})
-	_ = b.hub.SendToSession(context.Background(), warnEvt)
+	notifyMsg := buildNotifyEnvelope(p.sessionID,
+		fmt.Sprintf("Session data lost (exit %d), starting fresh session.", p.exitCode),
+		b.hub.NextSeq(p.sessionID))
+	_ = b.hub.SendToSession(context.Background(), notifyMsg)
 	return true
 }
 
