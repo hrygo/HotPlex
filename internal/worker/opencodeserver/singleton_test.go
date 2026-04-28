@@ -217,35 +217,19 @@ func TestSingletonProcessManager_Acquire_StoppedState(t *testing.T) {
 }
 
 func TestInitSingleton(t *testing.T) {
-	// Save and restore global singleton.
-	orig := defaultSingleton
-	t.Cleanup(func() { defaultSingleton = orig })
-
 	InitSingleton(slog.Default(), config.OpenCodeServerConfig{})
-	require.NotNil(t, defaultSingleton)
+	require.NotNil(t, singleton.Load())
 }
 
 func TestShutdownSingleton_Nil(t *testing.T) {
-	t.Parallel()
-
-	// Save and restore global singleton.
-	orig := defaultSingleton
-	defaultSingleton = nil
-	t.Cleanup(func() { defaultSingleton = orig })
-
-	// ShutdownSingleton with nil global should not panic.
 	ShutdownSingleton(context.Background())
 }
 
 func TestShutdownSingleton_Real(t *testing.T) {
-	// Save and restore global singleton.
-	orig := defaultSingleton
-	t.Cleanup(func() { defaultSingleton = orig })
-
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	InitSingleton(log, config.OpenCodeServerConfig{})
-	require.NotNil(t, defaultSingleton)
+	require.NotNil(t, singleton.Load())
 
 	ShutdownSingleton(context.Background())
-	require.Nil(t, defaultSingleton)
+	require.Nil(t, singleton.Load())
 }

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/config"
@@ -352,19 +353,20 @@ func (s *SingletonProcessManager) buildEnv() []string {
 
 // --- package-level singleton ---
 
-var defaultSingleton *SingletonProcessManager
+var singleton atomic.Pointer[SingletonProcessManager]
 
 // InitSingleton initializes the global singleton process manager.
 // Must be called during gateway startup before any sessions are created.
 func InitSingleton(log *slog.Logger, cfg config.OpenCodeServerConfig) {
-	defaultSingleton = NewSingletonProcessManager(log, cfg)
+	mgr := NewSingletonProcessManager(log, cfg)
+	singleton.Store(mgr)
 }
 
 // ShutdownSingleton shuts down the global singleton process manager.
 // Must be called during gateway shutdown after bridge.Shutdown().
 func ShutdownSingleton(ctx context.Context) {
-	if defaultSingleton != nil {
-		defaultSingleton.Shutdown(ctx)
-		defaultSingleton = nil
+	if m := singleton.Load(); m != nil {
+		m.Shutdown(ctx)
+		singleton.Store((*SingletonProcessManager)(nil))
 	}
 }
