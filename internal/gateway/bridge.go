@@ -797,7 +797,13 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 	si, err := b.sm.Get(sessionID)
 	if err == nil {
 		if w := b.sm.GetWorker(sessionID); w != nil {
-			return nil
+			// Only reuse if session is still active. TERMINATED sessions with a stale
+			// worker pointer must fall through to ResumeSession to ensure the message
+			// is delivered, not silently dropped (bug: worker pointer non-nil after
+			// transitionState nils it, but only after SIGTERM completes asynchronously).
+			if si.State.IsActive() {
+				return nil
+			}
 		}
 		// Orphan: session record exists but worker is gone.
 		if si.State == events.StateCreated {

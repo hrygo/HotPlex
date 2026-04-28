@@ -464,7 +464,16 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 		conn.EnableStreaming(ctrl)
 	}
 
-	return a.bridge.Handle(ctx, envelope, conn)
+	err := a.bridge.Handle(ctx, envelope, conn)
+	if err != nil && conn != nil {
+		notifyErr := a.sendTextMessage(context.Background(), channelID,
+			"抱歉，处理您的请求时遇到问题，请稍后重试。")
+		if notifyErr != nil {
+			a.log.Warn("feishu: failed to send error notification",
+				"chat", channelID, "original_err", err, "notify_err", notifyErr)
+		}
+	}
+	return err
 }
 
 func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelID, teamID, threadTS, userID, text string) error {
