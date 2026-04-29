@@ -389,8 +389,8 @@ func TestValidateURL(t *testing.T) {
 	// Mock DNS resolution to avoid dependency on external DNS servers.
 	prevLookupHost := LookupHost
 	LookupHost = func(host string) ([]string, error) {
-		if host == "example.com" || host == "1.1.1.1" {
-			return []string{"93.184.216.34"}, nil // example.com
+		if host == "example.com" {
+			return []string{"93.184.216.34"}, nil
 		}
 		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
 	}

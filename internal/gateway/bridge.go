@@ -591,7 +591,8 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		}
 	}
 
-	if exitCode != 0 {
+	// SIGTERM (143) and Kill (-1) are intentional, not crashes.
+	if exitCode != 0 && exitCode != 143 && exitCode != -1 {
 		acc := b.getOrInitAccum(sessionID)
 		b.log.Warn("bridge: worker exited with non-zero code, sending crash done",
 			"session_id", sessionID, "worker_type", workerType, "exit_code", exitCode,
@@ -602,6 +603,15 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			Stats:   map[string]any{"crash_exit_code": exitCode},
 		})
 		_ = b.hub.SendToSession(context.Background(), crashDone)
+	} else if exitCode == 143 || exitCode == -1 {
+		// Worker was intentionally terminated (SIGTERM) or killed — not a crash.
+		// Send a clean done so platform connections (Slack/Feishu) clean up
+		// typing indicators and streaming UI.
+		syntheticDone := events.NewEnvelope(aep.NewID(), sessionID, b.hub.NextSeq(sessionID), events.Done, events.DoneData{
+			Success: false,
+			Stats:   map[string]any{"exit_code": exitCode},
+		})
+		_ = b.hub.SendToSession(context.Background(), syntheticDone)
 	} else if !doneReceived {
 		// Worker exited without sending a done event (e.g., ResetContext consumed
 		// the exit code). Send a synthetic done so platform connections clean up
@@ -615,7 +625,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	}
 
 	// Record partial assistant response on crash/timeout (Path 3).
-	workerCrashed := exitCode != 0 || (!doneReceived && turnTimerFired.Load())
+	workerCrashed := (exitCode != 0 && exitCode != 143 && exitCode != -1) || (!doneReceived && turnTimerFired.Load())
 	if b.convStore != nil && turnText.Len() > 0 && workerCrashed {
 		acc := b.getOrInitAccum(sessionID)
 		src := session.SourceCrash

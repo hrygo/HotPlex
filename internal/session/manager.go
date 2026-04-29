@@ -233,11 +233,11 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	}
 
 	info := ms.info
-	ms.mu.Unlock() // Release for DB write.
+	ms.mu.Unlock()
 
 	dbErr := m.store.Upsert(ctx, &info)
 
-	ms.mu.Lock() // Re-acquire for cleanup.
+	ms.mu.Lock()
 	if dbErr != nil {
 		ms.info.State = from
 		ms.info.UpdatedAt = time.Now()
@@ -504,20 +504,17 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	prevState := ms.info.State
 	ms.info.State = events.StateDeleted
 	ms.info.UpdatedAt = time.Now()
-	info := ms.info // snapshot for DB write
+	info := ms.info
 	ms.mu.Unlock()
 	m.mu.Unlock()
 
-	// Persist state change outside all locks.
 	if err := m.store.Upsert(ctx, &info); err != nil {
-		// Rollback in-memory state on DB failure.
 		ms.mu.Lock()
 		ms.info.State = prevState
 		ms.mu.Unlock()
 		return err
 	}
 
-	// Re-acquire m.mu for quota release and map cleanup.
 	m.mu.Lock()
 	if _, exists := m.sessions[id]; exists {
 		if hasWorker {
