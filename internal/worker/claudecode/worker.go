@@ -43,7 +43,7 @@ func InitConfig(cfg config.ClaudeCodeConfig) {
 	parts := strings.Fields(cmd)
 	commandParts.Store(parts)
 	if err := security.RegisterCommand(parts[0]); err != nil {
-		slog.Error("claudecode: failed to register command", "command", parts[0], "err", err)
+		slog.Default().Error("claudecode: failed to register command", "command", parts[0], "err", err)
 	}
 }
 
@@ -417,7 +417,7 @@ func (w *Worker) ResetContext(ctx context.Context) error {
 
 	// Delete session files so --session-id won't hit "already in use".
 	if err := w.deleteSessionFiles(); err != nil {
-		w.Log.Warn("claudecode: failed to delete session files, reset may fail", "err", err)
+		w.Log.Warn("claudecode: failed to delete session files, reset may fail", "session_id", w.sessionID, "err", err)
 	}
 
 	// Reset readLineFn so the next Start() assigns the new Proc.ReadLine.
@@ -463,15 +463,15 @@ func (w *Worker) deleteSessionFiles() error {
 	for _, pattern := range patterns {
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
-			w.Log.Warn("claudecode: glob session files", "pattern", pattern, "err", err)
+			w.Log.Warn("claudecode: glob session files", "session_id", w.sessionID, "pattern", pattern, "err", err)
 			continue
 		}
 		for _, m := range matches {
 			if err := os.RemoveAll(m); err != nil && firstErr == nil {
 				firstErr = err
-				w.Log.Warn("claudecode: failed to remove session file", "path", m, "err", err)
+				w.Log.Warn("claudecode: failed to remove session file", "session_id", w.sessionID, "path", m, "err", err)
 			} else {
-				w.Log.Debug("claudecode: removed session file", "path", m)
+				w.Log.Debug("claudecode: removed session file", "session_id", w.sessionID, "path", m)
 				total++
 			}
 		}
@@ -517,7 +517,7 @@ func (w *Worker) readOutput(ctx context.Context) {
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			w.BaseWorker.Log.Error("claudecode: read line", "error", err)
+			w.BaseWorker.Log.Error("claudecode: read line", "session_id", w.sessionID, "err", err)
 			return
 		}
 
@@ -551,7 +551,7 @@ func (w *Worker) readOutput(ctx context.Context) {
 
 		workerEvents, err := w.parser.ParseLine(line)
 		if err != nil {
-			w.BaseWorker.Log.Warn("claudecode: parse line", "error", err, "line", line)
+			w.BaseWorker.Log.Warn("claudecode: parse line", "session_id", w.sessionID, "err", err, "line", line)
 			continue
 		}
 		if len(workerEvents) == 0 {
@@ -567,7 +567,7 @@ func (w *Worker) readOutput(ctx context.Context) {
 				// Claude Code sent an interrupt — terminate gracefully.
 				// Call BaseWorker.Terminate directly; no goroutine needed since
 				// Terminate is not blocking and readOutput is already exiting.
-				w.BaseWorker.Log.Info("claudecode: received interrupt, terminating")
+				w.BaseWorker.Log.Info("claudecode: received interrupt, terminating", "session_id", w.sessionID)
 				_ = w.BaseWorker.Terminate(context.Background())
 				return
 
@@ -665,7 +665,7 @@ func (w *Worker) readOutput(ctx context.Context) {
 				// Normal event mapping
 				envs, err := w.mapper.Map(evt)
 				if err != nil {
-					w.BaseWorker.Log.Warn("claudecode: map event", "error", err)
+					w.BaseWorker.Log.Warn("claudecode: map event", "session_id", w.sessionID, "err", err)
 					continue
 				}
 				if len(envs) == 0 {

@@ -36,7 +36,6 @@ type Bridge struct {
 	log       *slog.Logger
 	hub       *Hub
 	sm        SessionManager
-	msgStore  session.MessageStore      // EVT-004: optional; nil means event persistence disabled
 	convStore session.ConversationStore // optional; nil means conversation logging disabled
 	wf        WorkerFactory
 	retryCtrl *LLMRetryController
@@ -53,13 +52,12 @@ type Bridge struct {
 	accumMu sync.Mutex
 }
 
-// NewBridge creates a new bridge. msgStore may be nil (event persistence disabled).
-func NewBridge(log *slog.Logger, hub *Hub, sm SessionManager, msgStore session.MessageStore) *Bridge {
+// NewBridge creates a new bridge.
+func NewBridge(log *slog.Logger, hub *Hub, sm SessionManager) *Bridge {
 	return &Bridge{
 		log:         log.With("component", "bridge"),
 		hub:         hub,
 		sm:          sm,
-		msgStore:    msgStore,
 		wf:          defaultWorkerFactory{},
 		retryCancel: make(map[string]chan struct{}),
 		accum:       make(map[string]*sessionAccumulator),
@@ -443,15 +441,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			pendingError = nil
 		}
 
-		// EVT-004: append to MessageStore on done events (end of each turn).
-		if b.msgStore != nil && env.Event.Type == events.Done {
-			payload, _ := aep.EncodeJSON(env)
-			if err := b.msgStore.Append(context.Background(), env.SessionID, env.Seq, string(env.Event.Type), payload); err != nil {
-				b.log.Warn("bridge: msgstore append", "err", err, "session_id", sessionID)
-			}
-		}
-
-		// LLM retry: check after Done is forwarded and persisted.
+		// LLM retry: check after Done is forwarded.
 		// Skip for resumed workers with no output — these are resume failures
 		// (e.g., "No conversation found"), not transient LLM errors. The resume
 		// fallback mechanism handles these cases with its own retry logic.
@@ -682,7 +672,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	// Step 1: Retry resume once for transient failures (e.g., file lock, timing).
 	if p.retryDepth == 0 {
 		if err := b.resumeWithOpts(context.Background(), p.sessionID, p.workDir, forwardOpts{resumed: true, workDir: p.workDir, retryDepth: p.retryDepth + 1, lastInput: p.lastInput}); err != nil {
-			b.log.Error("bridge: resume retry failed synchronously, falling back to fresh start", "session_id", p.sessionID, "worker_type", p.workerType, "err", err)
+			b.log.Warn("bridge: resume retry failed synchronously, falling back to fresh start", "session_id", p.sessionID, "worker_type", p.workerType, "err", err)
 			// Synchronous failure — fall through to fresh start below.
 		} else {
 			b.log.Info("bridge: resume retry succeeded", "session_id", p.sessionID, "worker_type", p.workerType)
@@ -733,7 +723,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	b.injectAgentConfig(&workerInfo, si.Platform)
 	if err := w.Start(context.Background(), workerInfo); err != nil {
 		b.sm.DetachWorker(p.sessionID)
-		b.log.Error("bridge: fresh worker start failed", "session_id", p.sessionID, "err", err)
+		b.log.Warn("bridge: fresh worker start failed", "session_id", p.sessionID, "err", err)
 		return false
 	}
 
@@ -969,6 +959,88 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 		NewSessionID: newID,
 		WorkDir:      cleaned,
 	}, nil
+}
+
+// SwitchWorkDirInPlace switches the workDir of an existing session without
+// creating a new session. Used for platform sessions (Slack/Feishu) where
+// the session ID must remain stable so the platform conn stays valid.
+func (b *Bridge) SwitchWorkDirInPlace(ctx context.Context, sessionID, newWorkDir string) (string, error) {
+	if b.closed.Load() {
+		return "", fmt.Errorf("switch-workdir-inplace: rejecting during shutdown")
+	}
+
+	si, err := b.sm.Get(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("switch-workdir-inplace: get session: %w", err)
+	}
+
+	if !si.State.IsActive() {
+		return "", fmt.Errorf("switch-workdir-inplace: session not active (state: %s)", si.State)
+	}
+
+	cleaned := filepath.Clean(newWorkDir)
+	if err := security.ValidateWorkDir(cleaned); err != nil {
+		return "", fmt.Errorf("switch-workdir-inplace: %w", err)
+	}
+
+	if w := b.sm.GetWorker(sessionID); w != nil {
+		if err := w.Terminate(ctx); err != nil {
+			b.log.Warn("switch-workdir-inplace: worker terminate failed", "session_id", sessionID, "err", err)
+		}
+		b.sm.DetachWorker(sessionID)
+	}
+
+	if err := b.sm.UpdateWorkDir(ctx, sessionID, cleaned); err != nil {
+		return "", fmt.Errorf("switch-workdir-inplace: update workdir: %w", err)
+	}
+
+	w, err := b.wf.NewWorker(si.WorkerType)
+	if err != nil {
+		return "", fmt.Errorf("switch-workdir-inplace: create worker: %w", err)
+	}
+
+	if err := b.sm.AttachWorker(sessionID, w); err != nil {
+		_ = w.Kill()
+		return "", fmt.Errorf("switch-workdir-inplace: attach worker: %w", err)
+	}
+
+	workerInfo := worker.SessionInfo{
+		SessionID:       sessionID,
+		UserID:          si.UserID,
+		ProjectDir:      cleaned,
+		AllowedTools:    si.AllowedTools,
+		WorkerSessionID: si.WorkerSessionID,
+	}
+	b.injectAgentConfig(&workerInfo, si.Platform)
+	if err := w.Start(ctx, workerInfo); err != nil {
+		b.sm.DetachWorker(sessionID)
+		if rollbackErr := b.sm.UpdateWorkDir(ctx, sessionID, si.WorkDir); rollbackErr != nil {
+			b.log.Warn("switch-workdir-inplace: rollback workdir failed", "session_id", sessionID, "err", rollbackErr)
+		}
+		return "", fmt.Errorf("switch-workdir-inplace: start worker: %w", err)
+	}
+
+	// Refresh ExpiresAt so reactivated session isn't killed by GC.
+	if err := b.sm.ResetExpiry(ctx, sessionID); err != nil {
+		b.log.Warn("switch-workdir-inplace: reset expiry failed", "session_id", sessionID, "err", err)
+	}
+
+	if err := b.sm.Transition(ctx, sessionID, events.StateRunning); err != nil {
+		b.log.Warn("switch-workdir-inplace: transition to running failed", "session_id", sessionID, "err", err)
+	}
+
+	b.fwdWg.Add(1)
+	go func() {
+		defer b.fwdWg.Done()
+		b.forwardEvents(w, sessionID, forwardOpts{workDir: cleaned})
+	}()
+
+	b.log.Info("switch-workdir-inplace: switched",
+		"session_id", sessionID,
+		"work_dir", cleaned,
+	)
+
+	return cleaned, nil
 }
 
 // isWorkerInUseError checks if the worker rejected the session because its

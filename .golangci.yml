@@ -14,6 +14,7 @@ linters:
     - unparam
     - errorlint
     - gocritic
+    - sloglint
   exclusions:
     paths:
       - client # separate Go module with own go.mod
@@ -24,6 +25,7 @@ linters:
           - errcheck
           - unparam
           - gocritic
+          - sloglint
       # QF1008: explicit embedded field selectors are intentional to avoid naming
       # conflicts (e.g., larkClient.Im.V1 vs local embedded Im field).
       - path: 'feishu/(adapter|streaming|typing|sdk_logger)\.go'
@@ -76,6 +78,9 @@ linters:
     errcheck:
       check-type-assertions: true
       check-blank: false
+    sloglint:
+      no-mixed-args: true
+      key-naming-case: snake
     gocritic:
       enabled-tags:
         - diagnostic

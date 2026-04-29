@@ -29,7 +29,6 @@ type Store interface {
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
 	DeleteTerminated(ctx context.Context, cutoff time.Time) error
 	DeletePhysical(ctx context.Context, id string) error
-	DeleteExpiredEvents(ctx context.Context, cutoff time.Time) (int64, error)
 	Compact(ctx context.Context, threshold float64) error
 	GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error)
 	Close() error
@@ -37,7 +36,8 @@ type Store interface {
 
 // SQLiteStore implements Store using SQLite.
 type SQLiteStore struct {
-	db *sql.DB
+	db  *sql.DB
+	log *slog.Logger
 }
 
 // NewSQLiteStore creates and initializes a new SQLiteStore.
@@ -67,7 +67,7 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config) (*SQLiteStore, erro
 		return nil, err
 	}
 
-	return &SQLiteStore{db: db}, nil
+	return &SQLiteStore{db: db, log: slog.Default().With("component", "session_store")}, nil
 }
 
 // initSQLiteDB configures a SQLite connection with standard PRAGMAs.
@@ -266,7 +266,6 @@ func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cutoff time.Time) er
 	_ = rows.Close()
 
 	for _, id := range ids {
-		_, _ = tx.ExecContext(ctx, queries["events.delete_by_session"], id)
 		_, _ = tx.ExecContext(ctx, queries["store.delete_audit_by_session"], id)
 		_, _ = tx.ExecContext(ctx, queries["conversation.delete_by_session"], id)
 	}
@@ -280,7 +279,6 @@ func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cutoff time.Time) er
 
 func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {
 	// Cascade-delete child rows before the parent session.
-	_, _ = s.db.ExecContext(ctx, queries["events.delete_by_session"], id)
 	_, _ = s.db.ExecContext(ctx, queries["store.delete_audit_by_session"], id)
 	_, _ = s.db.ExecContext(ctx, queries["conversation.delete_by_session"], id)
 	_, err := s.db.ExecContext(ctx, queries["store.delete_physical"], id)
@@ -289,23 +287,6 @@ func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {
 
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
-}
-
-func (s *SQLiteStore) DeleteExpiredEvents(ctx context.Context, cutoff time.Time) (int64, error) {
-	result, err := s.db.ExecContext(ctx, queries["events.delete_expired"], cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("session store: delete expired events: %w", err)
-	}
-	n, _ := result.RowsAffected()
-	// Also purge expired conversation records (best-effort).
-	if q, ok := queries["conversation.delete_expired"]; ok {
-		if cn, cerr := s.db.ExecContext(ctx, q, cutoff); cerr == nil {
-			if rows, _ := cn.RowsAffected(); rows > 0 {
-				n += rows
-			}
-		}
-	}
-	return n, nil
 }
 
 func (s *SQLiteStore) Compact(ctx context.Context, threshold float64) error {
@@ -319,7 +300,7 @@ func (s *SQLiteStore) Compact(ctx context.Context, threshold float64) error {
 	if pageCount == 0 || float64(freeCount)/float64(pageCount) < threshold {
 		return nil
 	}
-	slog.Info("session store: VACUUM starting",
+	s.log.Info("session store: VACUUM starting",
 		"page_count", pageCount, "free_count", freeCount,
 		"ratio", fmt.Sprintf("%.1f%%", float64(freeCount)/float64(pageCount)*100))
 	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
@@ -438,7 +419,7 @@ func (s *SQLiteStore) GetAuditTrail(ctx context.Context, sessionID string) ([]*A
 		hash := sha256.Sum256([]byte(data))
 		expectedHash := hex.EncodeToString(hash[:])
 		if r.CurrentHash != expectedHash {
-			slog.Error("session store: audit chain broken", "id", r.ID, "session_id", sessionID)
+			s.log.Error("session store: audit chain broken", "id", r.ID, "session_id", sessionID)
 			return records[:i+1], ErrAuditChainInvalid
 		}
 	}

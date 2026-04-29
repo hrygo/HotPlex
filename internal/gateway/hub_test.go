@@ -15,7 +15,6 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
-	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -598,7 +597,7 @@ func testPCEntryConfig() pcEntryConfig {
 func TestPCEntry_WriteCtx_Async(t *testing.T) {
 	t.Parallel()
 	pc := &mockPlatformConn{}
-	e := newPCEntry(pc, testPCEntryConfig())
+	e := newPCEntry(pc, testPCEntryConfig(), slog.Default())
 	defer e.Close()
 
 	env := events.NewEnvelope(aep.NewID(), "s1", 1, events.Done, events.DoneData{Success: true})
@@ -622,7 +621,7 @@ func TestPCEntry_WriteCtx_DroppableDroppedAtThreshold(t *testing.T) {
 	cfg.CoalesceIntvl = time.Hour
 
 	pc := &mockPlatformConn{}
-	e := newPCEntry(pc, cfg)
+	e := newPCEntry(pc, cfg, slog.Default())
 	defer e.Close()
 
 	// Fill channel directly (bypassing WriteCtx to avoid writeLoop drain race).
@@ -657,7 +656,7 @@ func TestPCEntry_WriteCtx_DroppableDroppedDefault(t *testing.T) {
 	cfg.CoalesceIntvl = time.Hour
 
 	pc := &mockPlatformConn{}
-	e := newPCEntry(pc, cfg)
+	e := newPCEntry(pc, cfg, slog.Default())
 	defer e.Close()
 
 	// Fill channel to capacity.
@@ -680,7 +679,7 @@ func TestPCEntry_WriteCtx_GuaranteedBlocks(t *testing.T) {
 
 	pc := &mockPlatformConn{}
 	// Make pc.WriteCtx slow so the buffer drains slowly.
-	e := newPCEntry(pc, cfg)
+	e := newPCEntry(pc, cfg, slog.Default())
 	defer e.Close()
 
 	// Fill the buffer.
@@ -710,7 +709,7 @@ func TestPCEntry_Close_DrainsPending(t *testing.T) {
 	cfg.CoalesceIntvl = time.Hour // timer won't fire, deltas accumulate until Close
 
 	pc := &mockPlatformConn{}
-	e := newPCEntry(pc, cfg)
+	e := newPCEntry(pc, cfg, slog.Default())
 
 	for i := 0; i < 3; i++ {
 		env := events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": fmt.Sprintf("msg%d", i)})
@@ -732,7 +731,7 @@ func TestPCEntry_DeltaCoalescing_MergesDeltas(t *testing.T) {
 	cfg.CoalesceIntvl = 50 * time.Millisecond
 
 	pc := &mockPlatformConn{}
-	e := newPCEntry(pc, cfg)
+	e := newPCEntry(pc, cfg, slog.Default())
 	defer e.Close()
 
 	for i := 0; i < 5; i++ {
@@ -760,7 +759,7 @@ func TestPCEntry_DeltaCoalescing_SizeFlush(t *testing.T) {
 	cfg.CoalesceIntvl = 10 * time.Second // timer should NOT fire
 
 	pc := &mockPlatformConn{}
-	e := newPCEntry(pc, cfg)
+	e := newPCEntry(pc, cfg, slog.Default())
 	defer e.Close()
 
 	// Send 3 chars * 2 = 6 runes > CoalesceSize(5).
@@ -786,7 +785,7 @@ func TestPCEntry_DeltaCoalescing_NonDeltaFlushes(t *testing.T) {
 	cfg.CoalesceIntvl = 10 * time.Second // timer should NOT fire
 
 	pc := &mockPlatformConn{}
-	e := newPCEntry(pc, cfg)
+	e := newPCEntry(pc, cfg, slog.Default())
 	defer e.Close()
 
 	delta := events.NewEnvelope(aep.NewID(), "s1", 1, events.MessageDelta, map[string]any{"content": "hello"})
@@ -812,7 +811,7 @@ func TestPCEntry_DeltaCoalescing_TimerFlush(t *testing.T) {
 	cfg.CoalesceSize = 9999 // size won't trigger
 
 	pc := &mockPlatformConn{}
-	e := newPCEntry(pc, cfg)
+	e := newPCEntry(pc, cfg, slog.Default())
 	defer e.Close()
 
 	delta := events.NewEnvelope(aep.NewID(), "s1", 1, events.MessageDelta, map[string]any{"content": "x"})
@@ -910,7 +909,7 @@ func TestPCEntry_RouteMessage_LazyEncode(t *testing.T) {
 func TestBridge_NewBridge(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)
-	b := NewBridge(slog.Default(), h, nil, nil)
+	b := NewBridge(slog.Default(), h, nil)
 	require.NotNil(t, b)
 	require.Equal(t, h, b.hub)
 }
@@ -955,29 +954,6 @@ func (f *fakeWorker) LastIO() time.Time                                   { retu
 func (f *fakeWorker) ResetContext(context.Context) error                  { return nil }
 
 var _ worker.Worker = (*fakeWorker)(nil)
-var _ session.MessageStore = (*fakeMsgStore)(nil)
-
-// fakeMsgStore is a minimal session.MessageStore for Bridge tests.
-type fakeMsgStore struct{}
-
-func (*fakeMsgStore) Append(ctx context.Context, sessionID string, seq int64, eventType string, payload []byte) error {
-	return nil
-}
-func (*fakeMsgStore) GetBySession(ctx context.Context, sessionID string, fromSeq int64) ([]*session.EventRecord, error) {
-	return nil, nil
-}
-func (*fakeMsgStore) Query(ctx context.Context, sessionID string, fromSeq int64) ([]*events.Envelope, error) {
-	return nil, nil
-}
-func (*fakeMsgStore) GetOwner(ctx context.Context, sessionID string) (string, error) {
-	return "", nil
-}
-func (*fakeMsgStore) SessionStats(ctx context.Context, sessionID string) (*session.SessionStats, error) {
-	return nil, session.ErrNotImplemented
-}
-func (*fakeMsgStore) Close() error { return nil }
-
-var _ session.MessageStore = (*fakeMsgStore)(nil)
 
 // ─── Bridge forwarding tests ───────────────────────────────────────────────────
 
@@ -994,7 +970,7 @@ func TestHub_HandleHTTP_Success(t *testing.T) {
 	auth := security.NewAuthenticator(&cfg.Security, nil)
 	h := newTestHub(t)
 	handler := NewHandler(slog.Default(), h, nil, nil)
-	bridge := NewBridge(slog.Default(), h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil)
 
 	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
 	server := httptest.NewServer(serveHandler)
@@ -1023,7 +999,7 @@ func TestHub_HandleHTTP_Unauthorized(t *testing.T) {
 	auth := security.NewAuthenticator(&cfg.Security, nil)
 	h := newTestHub(t)
 	handler := NewHandler(slog.Default(), h, nil, nil)
-	bridge := NewBridge(slog.Default(), h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil)
 
 	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
 	server := httptest.NewServer(serveHandler)
@@ -1046,7 +1022,7 @@ func TestHub_HandleHTTP_WithSessionID(t *testing.T) {
 	auth := security.NewAuthenticator(&cfg.Security, nil)
 	h := newTestHub(t)
 	handler := NewHandler(slog.Default(), h, nil, nil)
-	bridge := NewBridge(slog.Default(), h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil)
 
 	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
 	server := httptest.NewServer(serveHandler)
@@ -1078,7 +1054,7 @@ func TestHub_HandleHTTP_GeneratesSessionID(t *testing.T) {
 	auth := security.NewAuthenticator(&cfg.Security, nil)
 	h := newTestHub(t)
 	handler := NewHandler(slog.Default(), h, nil, nil)
-	bridge := NewBridge(slog.Default(), h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil)
 
 	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
 	server := httptest.NewServer(serveHandler)
@@ -1111,7 +1087,7 @@ func TestHub_HandleHTTP_RejectsInvalidAPIKey(t *testing.T) {
 	auth := security.NewAuthenticator(&cfg.Security, nil)
 	h := newTestHub(t)
 	handler := NewHandler(slog.Default(), h, nil, nil)
-	bridge := NewBridge(slog.Default(), h, nil, nil)
+	bridge := NewBridge(slog.Default(), h, nil)
 
 	serveHandler := h.HandleHTTP(auth, nil, handler, bridge)
 	server := httptest.NewServer(serveHandler)

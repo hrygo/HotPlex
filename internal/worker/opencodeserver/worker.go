@@ -515,7 +515,7 @@ func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, se
 		sessionID: serverSessionID,
 	}
 	if err := w.applyPermissions(ctx, session); err != nil {
-		w.Log.Warn("opencodeserver: failed to set permissions", "error", err)
+		w.Log.Warn("opencodeserver: failed to set permissions", "session_id", serverSessionID, "err", err)
 	}
 	w.Mu.Lock()
 	w.StartTime = time.Now()
@@ -533,7 +533,7 @@ func (w *Worker) readSSE(sessionID string) {
 	url := fmt.Sprintf("%s/events?session_id=%s", w.httpAddr, sessionID)
 	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
-		w.Log.Error("opencodeserver: create SSE request", "error", err)
+		w.Log.Error("opencodeserver: create SSE request", "session_id", sessionID, "err", err)
 		return
 	}
 	req.Header.Set("Accept", "text/event-stream")
@@ -541,7 +541,7 @@ func (w *Worker) readSSE(sessionID string) {
 
 	resp, err := w.client.Do(req)
 	if err != nil {
-		w.Log.Error("opencodeserver: SSE connect", "error", err)
+		w.Log.Error("opencodeserver: SSE connect", "session_id", sessionID, "err", err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -549,6 +549,7 @@ func (w *Worker) readSSE(sessionID string) {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		w.Log.Error("opencodeserver: SSE status",
+			"session_id", sessionID,
 			"status", resp.StatusCode,
 			"body", string(body))
 		return
@@ -559,10 +560,10 @@ func (w *Worker) readSSE(sessionID string) {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				w.Log.Debug("opencodeserver: SSE stream ended (EOF)")
+				w.Log.Debug("opencodeserver: SSE stream ended (EOF)", "session_id", sessionID)
 				return
 			}
-			w.Log.Error("opencodeserver: SSE read", "error", err)
+			w.Log.Error("opencodeserver: SSE read", "session_id", sessionID, "err", err)
 			return
 		}
 
@@ -593,7 +594,7 @@ func (w *Worker) readSSE(sessionID string) {
 				}
 				continue
 			}
-			w.Log.Warn("opencodeserver: decode SSE data", "error", err, "data", data)
+			w.Log.Warn("opencodeserver: decode SSE data", "session_id", sessionID, "err", err, "data", data)
 			continue
 		}
 
@@ -630,7 +631,7 @@ func (w *Worker) handlePermissionAsked(sessionID string, props json.RawMessage) 
 		Metadata map[string]any `json:"metadata"`
 	}
 	if err := json.Unmarshal(props, &data); err != nil {
-		w.Log.Warn("opencodeserver: parse permission.asked", "error", err)
+		w.Log.Warn("opencodeserver: parse permission.asked", "session_id", sessionID, "err", err)
 		return
 	}
 
@@ -656,7 +657,7 @@ func (w *Worker) handleQuestionAsked(sessionID string, props json.RawMessage) {
 		Questions []events.Question `json:"questions"`
 	}
 	if err := json.Unmarshal(props, &data); err != nil {
-		w.Log.Warn("opencodeserver: parse question.asked", "error", err)
+		w.Log.Warn("opencodeserver: parse question.asked", "session_id", sessionID, "err", err)
 		return
 	}
 

@@ -37,7 +37,6 @@ type GatewayDeps struct {
 	ConfigStore   *config.ConfigStore
 	Hub           *gateway.Hub
 	SessionMgr    *session.Manager
-	MsgStore      session.MessageStore
 	ConvStore     session.ConversationStore
 	Auth          *security.Authenticator
 	Handler       *gateway.Handler
@@ -141,25 +140,13 @@ func runGateway(configPath string, devMode bool) (err error) {
 		return err
 	}
 
-	var msgStore session.MessageStore
-	if cfg.Session.EventStoreEnabled {
-		msgStore, err = session.NewMessageStore(ctx, cfg)
-		if err != nil {
-			_ = store.Close()
-			return fmt.Errorf("gateway: init message store: %w", err)
-		}
+	convStore, err := session.NewSQLiteConversationStore(ctx, cfg)
+	if err != nil {
+		_ = store.Close()
+		return fmt.Errorf("gateway: init conversation store: %w", err)
 	}
 
-	var convStore session.ConversationStore
-	if cfg.Session.EventStoreEnabled {
-		convStore, err = session.NewSQLiteConversationStore(ctx, cfg)
-		if err != nil {
-			_ = store.Close()
-			return fmt.Errorf("gateway: init conversation store: %w", err)
-		}
-	}
-
-	sm, err := session.NewManager(ctx, log, cfg, cfgStore, store, msgStore)
+	sm, err := session.NewManager(ctx, log, cfg, cfgStore, store)
 	if err != nil {
 		return err
 	}
@@ -193,8 +180,8 @@ func runGateway(configPath string, devMode bool) (err error) {
 		configWatcher = config.NewWatcher(log, configPath, nil, cfgStore,
 			func(newCfg *config.Config) {
 				log.Info("config: hot reload applied",
-					"gateway.addr", newCfg.Gateway.Addr,
-					"pool.max_size", newCfg.Pool.MaxSize,
+					"gateway_addr", newCfg.Gateway.Addr,
+					"pool_max_size", newCfg.Pool.MaxSize,
 					"gc_scan_interval", newCfg.Session.GCScanInterval,
 				)
 			},
@@ -245,7 +232,7 @@ func runGateway(configPath string, devMode bool) (err error) {
 	auth := security.NewAuthenticator(&cfg.Security, jwtValidator)
 
 	handler := gateway.NewHandler(log, hub, sm, jwtValidator)
-	bridge := gateway.NewBridge(log, hub, sm, msgStore)
+	bridge := gateway.NewBridge(log, hub, sm)
 	handler.SetBridge(bridge)
 	handler.SetSkillsLocator(gateway.NewSkillsCache(
 		gateway.NewFileSystemSkillsLocator(cfg),
@@ -300,7 +287,6 @@ func runGateway(configPath string, devMode bool) (err error) {
 		ConfigStore:   cfgStore,
 		Hub:           hub,
 		SessionMgr:    sm,
-		MsgStore:      msgStore,
 		ConvStore:     convStore,
 		Auth:          auth,
 		Handler:       handler,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,6 +90,10 @@ func (m *mockAPISM) ResetExpiry(ctx context.Context, id string) error {
 	return m.Called(ctx, id).Error(0)
 }
 
+func (m *mockAPISM) UpdateWorkDir(ctx context.Context, id, workDir string) error {
+	return m.Called(ctx, id, workDir).Error(0)
+}
+
 // ─── Mock SessionStarter for API tests ─────────────────────────────────────────
 
 type mockAPIBridge struct {
@@ -120,7 +125,7 @@ func newTestAuth(t *testing.T) *security.Authenticator {
 
 func newTestAPI(t *testing.T, sm *mockAPISM, bridge *mockAPIBridge) *GatewayAPI {
 	t.Helper()
-	return NewGatewayAPI(newTestAuth(t), sm, bridge, config.NewConfigStore(&config.Config{}, nil))
+	return NewGatewayAPI(slog.Default(), newTestAuth(t), sm, bridge, config.NewConfigStore(&config.Config{}, nil))
 }
 
 func authedReq(method, target string, body io.Reader) *http.Request {

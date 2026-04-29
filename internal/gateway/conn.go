@@ -72,7 +72,7 @@ func newConn(hub *Hub, wc *websocket.Conn, sessionID string, starter SessionStar
 		log = hub.log
 	}
 	return &Conn{
-		log:       log.With("component", "conn"),
+		log:       log.With("component", "conn", "channel", "webchat"),
 		wc:        wc,
 		hub:       hub,
 		starter:   starter,

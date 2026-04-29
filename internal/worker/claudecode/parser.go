@@ -215,7 +215,7 @@ func (p *Parser) parseAssistant(msg *SDKMessage) ([]*WorkerEvent, error) {
 		case "tool_use":
 			var input map[string]any
 			if err := json.Unmarshal(block.Input, &input); err != nil {
-				p.log.Warn("parser: unmarshal tool_use input", "error", err)
+				p.log.Warn("parser: unmarshal tool_use input", "err", err)
 				input = make(map[string]any)
 			}
 			events = append(events, &WorkerEvent{
@@ -245,7 +245,7 @@ func (p *Parser) parseToolProgress(msg *SDKMessage) ([]*WorkerEvent, error) {
 			Error   string `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal(msg.Content, &toolResult); err != nil {
-			p.log.Warn("parser: unmarshal tool_progress content", "error", err)
+			p.log.Warn("parser: unmarshal tool_progress content", "err", err)
 			output = string(msg.Content)
 		} else {
 			output = toolResult.Content

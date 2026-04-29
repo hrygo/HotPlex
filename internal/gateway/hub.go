@@ -116,7 +116,7 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 	cfg := cfgStore.Load()
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Hub{
-		log:            log.With("service.name", "hotplex-gateway"),
+		log:            log,
 		cfgStore:       cfgStore,
 		conns:          make(map[*Conn]struct{}),
 		sessions:       make(map[string]map[SessionWriter]bool),
@@ -240,7 +240,7 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc messaging.PlatformConn) {
 		}
 	}
 
-	h.sessions[sessionID][newPCEntry(pc, defaultPCEntryConfig(h.cfgStore.Load()))] = true
+	h.sessions[sessionID][newPCEntry(pc, defaultPCEntryConfig(h.cfgStore.Load()), h.log)] = true
 }
 
 // sendBroadcast sends to the broadcast channel. Returns false if the hub is
@@ -356,7 +356,7 @@ func (h *Hub) HandleHTTP(
 
 		wc, err := h.upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			h.log.Error("gateway: upgrade failed", "err", err)
+			h.log.Warn("gateway: upgrade failed", "err", err)
 			return
 		}
 
@@ -448,7 +448,7 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 			if encoded == nil {
 				encoded, err = aep.EncodeJSON(msg.Env)
 				if err != nil {
-					h.log.Error("gateway: encode failed", "err", err)
+					h.log.Warn("gateway: encode failed", "err", err)
 					return
 				}
 			}
@@ -625,6 +625,7 @@ type pcEntry struct {
 	ch      chan *events.Envelope
 	done    chan struct{}
 	closeMu sync.Once
+	log     *slog.Logger
 }
 
 type pcEntryConfig struct {
@@ -656,12 +657,13 @@ func defaultPCEntryConfig(cfg *config.Config) pcEntryConfig {
 	return c
 }
 
-func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig) *pcEntry {
+func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) *pcEntry {
 	e := &pcEntry{
 		pc:   pc,
 		ch:   make(chan *events.Envelope, cfg.WriteBuffer),
 		done: make(chan struct{}),
 		cfg:  cfg,
+		log:  log,
 	}
 	go e.writeLoop()
 	return e
@@ -712,7 +714,7 @@ func (e *pcEntry) writeLoop() {
 	defer close(e.done)
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("pcEntry writeLoop panic", "panic", r, "stack", string(debug.Stack()))
+			e.log.Error("pcEntry writeLoop panic", "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
 
@@ -784,7 +786,7 @@ func (e *pcEntry) writeOne(env *events.Envelope) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := e.pc.WriteCtx(ctx, env); err != nil {
-		slog.Warn("platform async write failed",
+		e.log.Warn("platform async write failed",
 			"event_type", env.Event.Type,
 			"session_id", env.SessionID,
 			"err", err)

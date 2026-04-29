@@ -58,7 +58,7 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("session store: goose up: %w", err)
 	}
 	for _, r := range results {
-		slog.Debug("session store: migration applied", "source", r.Source.Path, "duration", r.Duration)
+		slog.Default().Debug("session store: migration applied", "component", "session_store", "source", r.Source.Path, "duration", r.Duration)
 	}
 	return nil
 }

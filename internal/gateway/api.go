@@ -23,10 +23,11 @@ type GatewayAPI struct {
 	sm       SessionManager
 	bridge   SessionStarter
 	cfgStore *config.ConfigStore
+	log      *slog.Logger
 }
 
-func NewGatewayAPI(auth *security.Authenticator, sm SessionManager, bridge SessionStarter, cfgStore *config.ConfigStore) *GatewayAPI {
-	return &GatewayAPI{auth: auth, sm: sm, bridge: bridge, cfgStore: cfgStore}
+func NewGatewayAPI(log *slog.Logger, auth *security.Authenticator, sm SessionManager, bridge SessionStarter, cfgStore *config.ConfigStore) *GatewayAPI {
+	return &GatewayAPI{auth: auth, sm: sm, bridge: bridge, cfgStore: cfgStore, log: log.With("component", "api")}
 }
 
 func respondJSON(w http.ResponseWriter, v any) {
@@ -125,7 +126,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := g.bridge.StartSession(r.Context(), id, userID, botID, wt, nil, workDir, platformWebChat, nil, title); err != nil {
-		slog.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
+		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
 		http.Error(w, "failed to create session", http.StatusInternalServerError)
 		return
 	}
@@ -164,7 +165,7 @@ func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	// Gracefully terminate the worker through the state machine before deleting.
 	// Transition sends SIGTERM → wait → SIGKILL and releases pool quota.
 	if err := g.sm.Transition(r.Context(), id, events.StateTerminated); err != nil {
-		slog.Debug("gateway: pre-delete transition skipped", "session_id", id, "err", err)
+		g.log.Debug("gateway: pre-delete transition skipped", "session_id", id, "err", err)
 	}
 
 	if err := g.sm.DeletePhysical(r.Context(), id); err != nil {

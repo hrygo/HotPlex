@@ -46,7 +46,7 @@ var blockedSubtypes = map[string]bool{
 
 func init() {
 	messaging.Register(messaging.PlatformSlack, func(log *slog.Logger) messaging.PlatformAdapterInterface {
-		return &Adapter{log: log}
+		return &Adapter{log: log.With("channel", "slack")}
 	})
 }
 
@@ -429,7 +429,7 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 	}
 
 	if err := a.HandleTextMessage(ctx, platformMsgID, channelID, teamID, threadTS, userID, text); err != nil {
-		a.log.Error("slack: handle message failed", "err", err, "channel", channelID, "thread", threadTS, "user", userID)
+		a.log.Warn("slack: handle message failed", "err", err, "channel", channelID, "thread", threadTS, "user", userID)
 	}
 }
 
@@ -581,8 +581,13 @@ func (a *Adapter) handleAudioMessage(ctx context.Context, m *MediaInfo) (string,
 func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelID, threadTS, userID string, result *messaging.ControlCommandResult) {
 	env := a.bridge.MakeSlackEnvelope(teamID, channelID, threadTS, userID, "")
 	if env == nil {
-		a.log.Error("slack: text control command failed to derive session", "action", result.Label)
+		a.log.Warn("slack: text control command failed to derive session", "action", result.Label)
 		return
+	}
+
+	ctrlData := events.ControlData{Action: result.Action}
+	if result.Arg != "" {
+		ctrlData.Details = map[string]any{"path": result.Arg}
 	}
 
 	ctrlEnv := &events.Envelope{
@@ -591,7 +596,7 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 		SessionID: env.SessionID,
 		Event: events.Event{
 			Type: events.Control,
-			Data: events.ControlData{Action: result.Action},
+			Data: ctrlData,
 		},
 		OwnerID: userID,
 	}
@@ -602,7 +607,7 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 		return
 	}
 	if err := a.bridge.Handle(ctx, ctrlEnv, conn); err != nil {
-		a.log.Error("slack: text control command failed", "action", result.Label, "err", err)
+		a.log.Warn("slack: text control command failed", "action", result.Label, "err", err)
 		a.sendEphemeralOrPost(ctx, channelID, threadTS, userID, fmt.Sprintf("❌ Failed to execute %s.", result.Label))
 		return
 	}
@@ -627,7 +632,7 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 func (a *Adapter) handleTextWorkerCommand(ctx context.Context, teamID, channelID, threadTS, userID string, result *messaging.WorkerCommandResult) {
 	envelope := a.bridge.MakeSlackEnvelope(teamID, channelID, threadTS, userID, "")
 	if envelope == nil {
-		a.log.Error("slack: worker command failed to derive session", "command", result.Label)
+		a.log.Warn("slack: worker command failed to derive session", "command", result.Label)
 		return
 	}
 
@@ -653,7 +658,7 @@ func (a *Adapter) handleTextWorkerCommand(ctx context.Context, teamID, channelID
 	}
 
 	if err := a.bridge.Handle(ctx, cmdEnv, conn); err != nil {
-		a.log.Error("slack: worker command failed", "command", result.Label, "err", err)
+		a.log.Warn("slack: worker command failed", "command", result.Label, "err", err)
 		a.sendEphemeralOrPost(ctx, channelID, threadTS, userID, fmt.Sprintf("❌ Failed to execute %s.", result.Label))
 		return
 	}
@@ -667,6 +672,8 @@ func controlFeedbackMessage(action events.ControlAction) string {
 		return "🗑️ Session parked. Send a message to resume."
 	case events.ControlActionReset:
 		return "🔄 Context reset."
+	case events.ControlActionCD:
+		return "📁 Switching work directory..."
 	default:
 		return "✅ Done."
 	}
@@ -713,6 +720,14 @@ func (c *SlackConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	// Status update: map AEP event to status indicator
 	if status, text := aepEventToStatus(env); text != "" {
 		_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, status, text)
+	}
+	// Log unregistered tool names for status formatter evolution
+	if env.Event.Type == events.ToolCall {
+		if name := toolNameFromEnvelope(env); name != "" {
+			if _, ok := toolStatusFormatters[name]; !ok {
+				c.adapter.statusMgr.LogOnceUnregistered(name)
+			}
+		}
 	}
 
 	// Clear status indicator on done/error

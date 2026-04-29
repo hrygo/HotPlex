@@ -30,7 +30,7 @@ import (
 
 func init() {
 	messaging.Register(messaging.PlatformFeishu, func(log *slog.Logger) messaging.PlatformAdapterInterface {
-		return &Adapter{log: log}
+		return &Adapter{log: log.With("channel", "feishu")}
 	})
 }
 
@@ -958,8 +958,13 @@ var _ messaging.PlatformConn = (*FeishuConn)(nil)
 func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, threadKey, platformMsgID string, result *messaging.ControlCommandResult) {
 	envelope := a.bridge.MakeFeishuEnvelope(chatID, threadKey, userID, "")
 	if envelope == nil {
-		a.log.Error("feishu: text control command failed to derive session", "action", result.Label)
+		a.log.Warn("feishu: text control command failed to derive session", "action", result.Label)
 		return
+	}
+
+	ctrlData := events.ControlData{Action: result.Action}
+	if result.Arg != "" {
+		ctrlData.Details = map[string]any{"path": result.Arg}
 	}
 
 	ctrlEnv := &events.Envelope{
@@ -968,14 +973,14 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, 
 		SessionID: envelope.SessionID,
 		Event: events.Event{
 			Type: events.Control,
-			Data: events.ControlData{Action: result.Action},
+			Data: ctrlData,
 		},
 		OwnerID: userID,
 	}
 
 	conn := a.GetOrCreateConn(chatID, threadKey)
 	if err := a.bridge.Handle(ctx, ctrlEnv, conn); err != nil {
-		a.log.Error("feishu: text control command failed", "action", result.Label, "err", err)
+		a.log.Warn("feishu: text control command failed", "action", result.Label, "err", err)
 		_ = a.replyMessage(ctx, threadKey, fmt.Sprintf("❌ 执行 %s 失败。", result.Label), false)
 		return
 	}
@@ -1008,7 +1013,7 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, 
 func (a *Adapter) handleTextWorkerCommand(ctx context.Context, chatID, chatType, userID, threadKey, platformMsgID, replyToMsgID string, result *messaging.WorkerCommandResult) {
 	envelope := a.bridge.MakeFeishuEnvelope(chatID, threadKey, userID, "")
 	if envelope == nil {
-		a.log.Error("feishu: worker command failed to derive session", "command", result.Label)
+		a.log.Warn("feishu: worker command failed to derive session", "command", result.Label)
 		return
 	}
 
@@ -1038,7 +1043,7 @@ func (a *Adapter) handleTextWorkerCommand(ctx context.Context, chatID, chatType,
 	conn.mu.Unlock()
 
 	if err := a.bridge.Handle(ctx, cmdEnv, conn); err != nil {
-		a.log.Error("feishu: worker command failed", "command", result.Label, "err", err)
+		a.log.Warn("feishu: worker command failed", "command", result.Label, "err", err)
 		if platformMsgID != "" {
 			_ = a.replyMessage(ctx, platformMsgID, fmt.Sprintf("❌ 执行 %s 失败。", result.Label), false)
 		} else {
@@ -1056,6 +1061,8 @@ func controlFeedbackMessageCN(action events.ControlAction) string {
 		return "✅ 会话已休眠，发消息即可恢复。"
 	case events.ControlActionReset:
 		return "✅ 上下文已重置。"
+	case events.ControlActionCD:
+		return "📁 正在切换工作目录..."
 	default:
 		return "✅ 已完成。"
 	}

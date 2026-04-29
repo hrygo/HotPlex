@@ -34,7 +34,7 @@ func setupRoutes(
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	gatewayAPI := gateway.NewGatewayAPI(auth, sm, bridge, deps.ConfigStore)
+	gatewayAPI := gateway.NewGatewayAPI(log, auth, sm, bridge, deps.ConfigStore)
 
 	// withCORS wraps a handler to inject CORS headers.
 	withCORS := func(h http.HandlerFunc) http.HandlerFunc {
@@ -73,13 +73,13 @@ func setupRoutes(
 	bridgeAdapter := &bridgeAdapter{bridge: bridge}
 	configAdapter := &configAdapter{cfgStore: deps.ConfigStore}
 	configWatcherAdapter := &configWatcherAdapter{watcher: configWatcher}
-	msgStoreAdapter := &msgStoreAdapter{ms: deps.MsgStore}
+	convStoreAdapter := &convStoreAdapter{cs: deps.ConvStore}
 
 	adminAPI := admin.New(admin.Deps{
 		Log:           log,
 		Config:        configAdapter,
 		SessionMgr:    sessionAdapter,
-		MsgStore:      msgStoreAdapter,
+		ConvStore:     convStoreAdapter,
 		Hub:           hubAdapter,
 		Bridge:        bridgeAdapter,
 		ConfigWatcher: configWatcherAdapter,
@@ -189,12 +189,12 @@ func (a *hubAdapter) NextSeqPeek(sessionID string) int64 {
 	return a.hub.NextSeqPeek(sessionID)
 }
 
-type msgStoreAdapter struct {
-	ms session.MessageStore
+type convStoreAdapter struct {
+	cs session.ConversationStore
 }
 
-func (a *msgStoreAdapter) SessionStats(ctx context.Context, sessionID string) (any, error) {
-	return a.ms.SessionStats(ctx, sessionID)
+func (a *convStoreAdapter) SessionStats(ctx context.Context, sessionID string) (*session.ConversationSessionStats, error) {
+	return a.cs.SessionStats(ctx, sessionID)
 }
 
 type bridgeAdapter struct {

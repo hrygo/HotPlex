@@ -35,7 +35,6 @@ var (
 type Manager struct {
 	log      *slog.Logger
 	store    Store
-	msgStore MessageStore // EVT-004: optional event persistence; nil is safe
 	cfg      *config.Config
 	cfgStore *config.ConfigStore // hot-reloadable config; nil = use static cfg
 	pool     *PoolManager
@@ -96,9 +95,9 @@ type SessionInfo struct {
 	Title string `json:"title,omitempty"`
 }
 
-// NewManager creates a new session manager using the provided Store and optional MessageStore.
+// NewManager creates a new session manager using the provided Store.
 // cfgStore is optional; when non-nil, GC and state transitions read the latest config dynamically.
-func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgStore *config.ConfigStore, store Store, msgStore MessageStore) (*Manager, error) {
+func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgStore *config.ConfigStore, store Store) (*Manager, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -106,7 +105,6 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 	m := &Manager{
 		log:      log.With("component", "session"),
 		store:    store,
-		msgStore: msgStore,
 		cfg:      cfg,
 		cfgStore: cfgStore,
 		pool:     NewPoolManager(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser, cfg.Pool.MaxMemoryPerUser),
@@ -120,7 +118,7 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 	m.gcDone = make(chan struct{})
 	go m.runGC(gcCtx)
 
-	m.log.Info("session: manager initialized", "msg_store", msgStore != nil)
+	m.log.Info("session: manager initialized")
 	return m, nil
 }
 
@@ -153,7 +151,7 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, w
 	}
 
 	m.mu.Lock()
-	m.sessions[id] = &managedSession{info: *info, log: m.log.With("worker_type", workerType)}
+	m.sessions[id] = &managedSession{info: *info, log: m.log.With("worker_type", workerType, "channel", info.Platform)}
 	m.mu.Unlock()
 
 	m.log.Info("session: created", "session_id", id, "user_id", userID, "worker_type", workerType, "bot_id", botID)
@@ -182,10 +180,26 @@ func (m *Manager) Get(id string) (*SessionInfo, error) {
 	}
 
 	m.mu.Lock()
-	m.sessions[id] = &managedSession{info: *info, log: m.log.With("worker_type", info.WorkerType)}
+	m.sessions[id] = &managedSession{info: *info, log: m.log.With("worker_type", info.WorkerType, "channel", info.Platform)}
 	m.mu.Unlock()
 
 	return info, nil
+}
+
+// UpdateWorkDir updates the workDir for an active session in memory and persists to DB.
+func (m *Manager) UpdateWorkDir(ctx context.Context, id, workDir string) error {
+	m.mu.RLock()
+	ms, ok := m.sessions[id]
+	if !ok {
+		m.mu.RUnlock()
+		return ErrSessionNotFound
+	}
+	ms.mu.Lock()
+	m.mu.RUnlock()
+	defer ms.mu.Unlock()
+	ms.info.WorkDir = workDir
+	ms.info.UpdatedAt = time.Now()
+	return m.store.Upsert(ctx, &ms.info)
 }
 
 // ─── State transitions ───────────────────────────────────────────────────────
@@ -608,11 +622,6 @@ func (m *Manager) DebugSnapshot(id string) (DebugSessionSnapshot, bool) {
 	return snap, true
 }
 
-// MessageStore returns the configured MessageStore (may be nil).
-func (m *Manager) MessageStore() MessageStore {
-	return m.msgStore
-}
-
 // Lock acquires the per-session mutex for exclusive access.
 // The caller MUST call Unlock when done.
 func (m *Manager) Lock(id string) (release func(), err error) {
@@ -675,12 +684,15 @@ func (m *Manager) Stats() (totalWorkers, maxWorkers, uniqueUsers int) {
 // ResetExpiry updates ExpiresAt to now + retentionPeriod for active sessions.
 // Called after resume so a reactivated session isn't immediately killed by GC max_lifetime.
 func (m *Manager) ResetExpiry(ctx context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
 	ms, ok := m.sessions[id]
 	if !ok {
+		m.mu.RUnlock()
 		return ErrSessionNotFound
 	}
+	ms.mu.Lock()
+	m.mu.RUnlock()
+	defer ms.mu.Unlock()
 	ms.info.ExpiresAt = ptr(time.Now().Add(m.cfg.Session.RetentionPeriod))
 	ms.info.UpdatedAt = time.Now()
 	return m.store.Upsert(ctx, &ms.info)
@@ -730,11 +742,6 @@ func (m *Manager) Close() error {
 
 	if err := m.store.Close(); err != nil {
 		return err
-	}
-	if m.msgStore != nil {
-		if err := m.msgStore.Close(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -867,22 +874,6 @@ func (m *Manager) gc(ctx context.Context) {
 	// the conversation. Deleting DB records would force --session-id (new
 	// session) instead of --resume, losing conversation history.
 	// Physical deletion should be an explicit admin action, not automatic GC.
-
-	// 4. Events TTL cleanup for terminated/deleted sessions.
-	if m.cfg.DB.EventRetention > 0 {
-		cutoff := now.Add(-m.cfg.DB.EventRetention)
-		if n, err := m.store.DeleteExpiredEvents(ctx, cutoff); err != nil {
-			m.log.Warn("session: gc (events TTL) error", "err", err)
-		} else if n > 0 {
-			m.log.Info("session: gc (events TTL) cleaned", "count", n)
-			// 5. Compact if events were reclaimed and free space exceeds threshold.
-			if m.cfg.DB.VacuumThreshold > 0 {
-				if err := m.store.Compact(ctx, m.cfg.DB.VacuumThreshold); err != nil {
-					m.log.Warn("session: gc (compact) error", "err", err)
-				}
-			}
-		}
-	}
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -904,7 +895,7 @@ func (m *Manager) getManagedSession(id string) *managedSession {
 		m.mu.Unlock()
 		return ms
 	}
-	ms = &managedSession{info: *info, log: m.log.With("worker_type", info.WorkerType)}
+	ms = &managedSession{info: *info, log: m.log.With("worker_type", info.WorkerType, "channel", info.Platform)}
 	m.sessions[id] = ms
 	m.mu.Unlock()
 	return ms
