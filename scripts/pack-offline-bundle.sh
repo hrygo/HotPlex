@@ -283,6 +283,7 @@ Create or edit `~/.config/opencode/opencode.json` (global config):
 
 ```json
 {
+  "plugin": ["oh-my-openagent"],
   "provider": {
     "my-vllm": {
       "npm": "@ai-sdk/openai-compatible",
