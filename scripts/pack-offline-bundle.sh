@@ -69,7 +69,7 @@ resolve_platform() {
     case "$raw_os" in
         Darwin*)  os="darwin" ;;
         Linux*)   os="linux" ;;
-        MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+        MINGW*|MSYS*|CYGWIN*) die "Windows is not supported" ;;
         *)        os=$(echo "$raw_os" | tr '[:upper:]' '[:lower:]') ;;
     esac
 
@@ -183,8 +183,7 @@ declare -A PLATFORM_MAP=(
     ["darwin-x64"]="oh-my-opencode-darwin-x64"
     ["darwin-x64-baseline"]="oh-my-opencode-darwin-x64-baseline"
     ["darwin-arm64"]="oh-my-opencode-darwin-arm64"
-    ["windows-x64"]="oh-my-opencode-windows-x64"
-    ["windows-x64-baseline"]="oh-my-opencode-windows-x64-baseline"
+
 )
 
 pack_omo_platform() {
