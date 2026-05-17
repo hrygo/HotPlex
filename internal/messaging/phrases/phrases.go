@@ -149,5 +149,18 @@ func Defaults() *Phrases {
 			{"😌 收工～", WeightDefault},
 			{"🎯 完美收尾！", WeightDefault},
 		},
+		"capabilities": {
+			{"💻 编写、审查、调试代码", WeightDefault},
+			{"📁 管理项目文件和目录", WeightDefault},
+			{"🔍 搜索代码库和分析架构", WeightDefault},
+		},
+		"quick_commands": {
+			{"/help — 查看帮助", WeightDefault},
+			{"/reset — 重置上下文", WeightDefault},
+			{"/cd — 切换工作目录", WeightDefault},
+		},
+		"closing_line": {
+			{"直接发消息即可开始 ✨", WeightDefault},
+		},
 	}}
 }
