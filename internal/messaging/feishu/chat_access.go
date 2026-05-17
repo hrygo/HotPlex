@@ -102,13 +102,15 @@ func (a *Adapter) sendWelcomeCard(ctx context.Context, chatID string, accessType
 func buildWelcomeBody(greeting string, p *phrases.Phrases) string {
 	body := greeting
 	if caps := p.All("capabilities"); len(caps) > 0 {
-		body += "\n\n我可以帮你："
+		header := phraseOr(p, "capabilities_header", "我可以帮你：")
+		body += "\n\n" + header
 		for _, c := range caps {
 			body += "\n• " + c
 		}
 	}
 	if cmds := p.All("quick_commands"); len(cmds) > 0 {
-		body += "\n\n快捷命令："
+		header := phraseOr(p, "commands_header", "快捷命令：")
+		body += "\n\n" + header
 		for i, c := range cmds {
 			if i > 0 {
 				body += " "
@@ -120,6 +122,14 @@ func buildWelcomeBody(greeting string, p *phrases.Phrases) string {
 		body += "\n" + cl
 	}
 	return body
+}
+
+// phraseOr returns the first entry of a category, or fallback if empty/nil.
+func phraseOr(p *phrases.Phrases, category, fallback string) string {
+	if s := p.Random(category); s != "" {
+		return s
+	}
+	return fallback
 }
 
 // chatAccessStore extracts the ChatAccessStore from the adapter extras.

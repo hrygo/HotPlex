@@ -54,7 +54,9 @@ Markdown，`## 分类名` + `- 条目文本`：
 | `status` | 助手状态文本 | Slack assistant status |
 | `welcome` | 首次进入聊天欢迎语 | 飞书 welcome card（支持 `{bot_name}` 占位符） |
 | `welcome_back` | 回访用户欢迎语 | 飞书 welcome card |
+| `capabilities_header` | 能力列表标题 | 飞书 welcome card（默认"我可以帮你："） |
 | `capabilities` | 能力描述列表 | 飞书 welcome card（每条前加 `• `） |
+| `commands_header` | 命令列表标题 | 飞书 welcome card（默认"快捷命令："） |
 | `quick_commands` | 快捷命令列表 | 飞书 welcome card（空格分隔） |
 | `closing_line` | 欢迎卡片结尾语 | 飞书 welcome card |
 

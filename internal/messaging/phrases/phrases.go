@@ -149,10 +149,16 @@ func Defaults() *Phrases {
 			{"😌 收工～", WeightDefault},
 			{"🎯 完美收尾！", WeightDefault},
 		},
+		"capabilities_header": {
+			{"我可以帮你：", WeightDefault},
+		},
 		"capabilities": {
 			{"💻 编写、审查、调试代码", WeightDefault},
 			{"📁 管理项目文件和目录", WeightDefault},
 			{"🔍 搜索代码库和分析架构", WeightDefault},
+		},
+		"commands_header": {
+			{"快捷命令：", WeightDefault},
 		},
 		"quick_commands": {
 			{"/help — 查看帮助", WeightDefault},
