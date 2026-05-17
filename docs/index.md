@@ -30,6 +30,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [Slack 集成](tutorials/slack-integration.md)  | 开发者      | 15 min |
 | [飞书集成](tutorials/feishu-integration.md)   | 开发者      | 15 min |
 | [AI 人格定制](tutorials/agent-personality.md) | 开发者      | 10 min |
+| [Bot 话术定制](tutorials/phrases-customization.md) | 开发者      | 10 min |
 | [定时任务](tutorials/cron-scheduled-tasks.md) | 开发者/用户 | 10 min |
 
 ## 指南
@@ -115,4 +116,5 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [Agent 配置系统](explanation/agent-config-system.md)     | B/C 双通道、命中即终止、热更新      |
 | [Brain LLM 编排](explanation/brain-llm-orchestration.md) | 意图路由、安全审计、上下文压缩      |
 | [Cron 调度器设计](explanation/cron-design.md)            | AI-native 调度、并发槽、投递机制    |
+| [Phrases 系统设计](explanation/phrases-design.md)        | 加权随机话术池、cascade-append 策略 |
 | [安全模型](explanation/security-model.md)                | 7 层安全体系设计决策和权衡          |

@@ -80,6 +80,33 @@ CREATED → RUNNING ⟷ IDLE → TERMINATED → DELETED
 
 **Fast Reconnect 优化**：如果 WebSocket 断线重连时 Worker 进程仍然存活，直接复用，跳过 terminate + resume 周期。
 
+## Session 高级控制（CC Worker）
+
+Claude Code Worker 的 `buildCLIArgs()` 将 `SessionInfo` 字段映射为 CLI flags。以下 4 个字段在 v1.14.0 新增支持：
+
+| 字段 | CLI Flag | 说明 |
+|------|----------|------|
+| `ContinueSession` | `--continue` | 恢复当前目录最新 session，不需要 session ID |
+| `ForkSession` | `--fork-session` | Resume 时 fork 为新 session（保留原始 session） |
+| `ResumeSessionAt` | `--resume-session-at <msg_id>` | 恢复到指定 assistant 消息，丢弃后续历史 |
+| `ConfigEnv` | `--settings '{"env":{...}}'` | 注入环境变量到 Claude Code 的 managed settings |
+
+### 约束
+
+- `ForkSession` 和 `ResumeSessionAt` 仅在 resume 模式下生效（需要 `--resume`），新建 session 时忽略
+- `ContinueSession` 与 `--resume`/`--session-id` 互斥，优先级最高
+- `ForkSession` + `ResumeSessionAt` 可以同时使用：fork 并回滚到特定消息
+- `ConfigEnv` 在所有模式下可用；格式错误的条目（缺少 `=`）被静默跳过
+
+### ConfigEnv 双通道注入
+
+`ConfigEnv` 同时通过两条路径生效：
+
+1. **OS 环境变量**：`base/env.go` 的 `BuildEnv()` 将 `ConfigEnv` 注入到子进程的 `cmd.Env`
+2. **CC managed settings**：`buildCLIArgs()` 将 `ConfigEnv` 序列化为 `--settings '{"env":{"KEY":"VALUE"}}'`
+
+两条路径互补——OS 环境变量影响所有子进程，CC managed settings 能覆盖 Claude Code 内部管理的变量（如 `MAX_THINKING_TOKENS`）。
+
 ## 工作目录管理
 
 使用 `/cd <path>` 切换工作目录：
