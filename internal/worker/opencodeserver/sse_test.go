@@ -299,9 +299,10 @@ func TestReadGlobalSSE_DispatchesPermissionAsked(t *testing.T) {
 	go s.readGlobalSSE(ctx)
 
 	got := collectN(t, ch, 1)
-	require.Equal(t, events.Raw, got[0].Event.Type)
-	data := got[0].Event.Data.(events.RawData)
-	require.Equal(t, "ocs:permission.asked", data.Kind)
+	require.Equal(t, events.PermissionRequest, got[0].Event.Type)
+	data := got[0].Event.Data.(events.PermissionRequestData)
+	require.Equal(t, "perm_1", data.ID)
+	require.Equal(t, "bash", data.ToolName)
 	s.Unsubscribe("ses_1")
 }
 
@@ -700,7 +701,7 @@ func TestForwardBusEvents_MessageDelta(t *testing.T) {
 	require.Equal(t, events.MessageDelta, got[0].Event.Type)
 }
 
-func TestForwardBusEvents_PermissionAsked(t *testing.T) {
+func TestForwardBusEvents_PermissionRequest(t *testing.T) {
 	t.Parallel()
 
 	w, busCh := newWorkerWithBusCh(t)
@@ -709,20 +710,18 @@ func TestForwardBusEvents_PermissionAsked(t *testing.T) {
 	defer cancel()
 	go w.forwardBusEvents(ctx, "ses_test", busCh)
 
-	props, _ := json.Marshal(map[string]any{
-		"id":       "perm_1",
-		"metadata": map[string]any{"tool": "bash"},
-	})
-	// Use json.RawMessage so the Raw field is the correct type after round-trip.
-	rawEnv := events.NewEnvelope("id1", "ses_test", 0, events.Raw,
-		events.RawData{Kind: "ocs:permission.asked", Raw: json.RawMessage(props)})
-	busCh <- rawEnv
+	env := events.NewEnvelope("id1", "ses_test", 0, events.PermissionRequest,
+		events.PermissionRequestData{ID: "perm_1", ToolName: "bash"})
+	busCh <- env
 
 	got := collectN(t, w.httpConn.recvCh, 1)
 	require.Equal(t, events.PermissionRequest, got[0].Event.Type)
+	data := got[0].Event.Data.(events.PermissionRequestData)
+	require.Equal(t, "perm_1", data.ID)
+	require.Equal(t, "bash", data.ToolName)
 }
 
-func TestForwardBusEvents_QuestionAsked(t *testing.T) {
+func TestForwardBusEvents_QuestionRequest(t *testing.T) {
 	t.Parallel()
 
 	w, busCh := newWorkerWithBusCh(t)
@@ -731,16 +730,17 @@ func TestForwardBusEvents_QuestionAsked(t *testing.T) {
 	defer cancel()
 	go w.forwardBusEvents(ctx, "ses_test", busCh)
 
-	props, _ := json.Marshal(map[string]any{
-		"id":        "q_1",
-		"questions": []map[string]any{{"id": "q1", "title": "Confirm?"}},
-	})
-	rawEnv := events.NewEnvelope("id1", "ses_test", 0, events.Raw,
-		events.RawData{Kind: "ocs:question.asked", Raw: json.RawMessage(props)})
-	busCh <- rawEnv
+	env := events.NewEnvelope("id1", "ses_test", 0, events.QuestionRequest,
+		events.QuestionRequestData{
+			ID:        "q_1",
+			Questions: []events.Question{{Question: "Continue?", Header: "Confirm"}},
+		})
+	busCh <- env
 
 	got := collectN(t, w.httpConn.recvCh, 1)
 	require.Equal(t, events.QuestionRequest, got[0].Event.Type)
+	data := got[0].Event.Data.(events.QuestionRequestData)
+	require.Equal(t, "q_1", data.ID)
 }
 
 func TestForwardBusEvents_ChannelClosed_Stops(t *testing.T) {

@@ -634,20 +634,6 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 				return
 			}
 
-			// Handle OCS-specific Raw events (permission/question asks).
-			if env.Event.Type == events.Raw {
-				data, _ := env.Event.Data.(events.RawData)
-				raw := toRawMessage(data.Raw)
-				switch data.Kind {
-				case "ocs:permission.asked":
-					w.handlePermissionAsked(sessionID, raw)
-					continue
-				case "ocs:question.asked":
-					w.handleQuestionAsked(sessionID, raw)
-					continue
-				}
-			}
-
 			w.SetLastIO(time.Now())
 
 			w.Mu.Lock()
@@ -703,74 +689,6 @@ func (w *Worker) release() {
 
 	if conn != nil {
 		_ = conn.Close()
-	}
-}
-
-// ─── OpenCode Bus Event Handlers ──────────────────────────────────────────────
-
-func (w *Worker) handlePermissionAsked(sessionID string, props json.RawMessage) {
-	var data struct {
-		ID       string         `json:"id"`
-		Metadata map[string]any `json:"metadata"`
-	}
-	if err := json.Unmarshal(props, &data); err != nil {
-		w.Log.Warn("opencodeserver: parse permission.asked", "session_id", sessionID, "err", err)
-		return
-	}
-
-	toolName, _ := data.Metadata["tool"].(string)
-	args, _ := json.Marshal(data.Metadata)
-	env := events.NewEnvelope(
-		aep.NewID(), sessionID, 0,
-		events.PermissionRequest,
-		events.PermissionRequestData{
-			ID:          data.ID,
-			ToolName:    toolName,
-			Description: toolName,
-			Args:        []string{string(args)},
-			InputRaw:    json.RawMessage(args),
-		},
-	)
-	w.trySend(env)
-}
-
-func (w *Worker) handleQuestionAsked(sessionID string, props json.RawMessage) {
-	var data struct {
-		ID        string            `json:"id"`
-		Questions []events.Question `json:"questions"`
-	}
-	if err := json.Unmarshal(props, &data); err != nil {
-		w.Log.Warn("opencodeserver: parse question.asked", "session_id", sessionID, "err", err)
-		return
-	}
-
-	env := events.NewEnvelope(
-		aep.NewID(), sessionID, 0,
-		events.QuestionRequest,
-		events.QuestionRequestData{
-			ID:        data.ID,
-			Questions: data.Questions,
-		},
-	)
-	w.trySend(env)
-}
-
-func (w *Worker) trySend(env *events.Envelope) {
-	w.Mu.Lock()
-	c := w.httpConn
-	closed := c == nil
-	w.Mu.Unlock()
-
-	if closed {
-		return
-	}
-
-	w.SetLastIO(time.Now())
-	select {
-	case c.recvCh <- env:
-	default:
-		w.Log.Warn("opencodeserver: recv channel full, dropping bus event",
-			"event_type", env.Event.Type)
 	}
 }
 
@@ -962,24 +880,6 @@ func isServerDownError(err error) bool {
 }
 
 // ─── Init ────────────────────────────────────────────────────────────────────
-
-// toRawMessage safely converts any to json.RawMessage.
-func toRawMessage(v any) json.RawMessage {
-	if v == nil {
-		return nil
-	}
-	switch raw := v.(type) {
-	case json.RawMessage:
-		return raw
-	case []byte:
-		return json.RawMessage(raw)
-	case string:
-		return json.RawMessage(raw)
-	default:
-		b, _ := json.Marshal(v)
-		return json.RawMessage(b)
-	}
-}
 
 func init() {
 	worker.Register(worker.TypeOpenCodeSrv, func() (worker.Worker, error) {

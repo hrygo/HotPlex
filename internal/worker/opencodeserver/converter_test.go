@@ -318,19 +318,25 @@ func TestConverter_PermissionAsked(t *testing.T) {
 	props := rawProps(t, map[string]any{"id": "p1", "metadata": map[string]any{"tool": "bash"}})
 	envs := c.Convert("s1", ocsPermAsked, props)
 	require.Len(t, envs, 1)
-	require.Equal(t, events.Raw, envs[0].Event.Type)
-	data := envs[0].Event.Data.(events.RawData)
-	require.Equal(t, "ocs:permission.asked", data.Kind)
+	require.Equal(t, events.PermissionRequest, envs[0].Event.Type)
+	data := envs[0].Event.Data.(events.PermissionRequestData)
+	require.Equal(t, "p1", data.ID)
+	require.Equal(t, "bash", data.ToolName)
 }
 
 func TestConverter_QuestionAsked(t *testing.T) {
 	c := newTestConverter()
-	props := rawProps(t, map[string]any{"id": "q1"})
+	props := rawProps(t, map[string]any{
+		"id":        "q1",
+		"questions": []map[string]any{{"question": "Continue?", "header": "Confirm", "options": []map[string]any{{"label": "Yes"}}}},
+	})
 	envs := c.Convert("s1", ocsQuestionAsked, props)
 	require.Len(t, envs, 1)
-	require.Equal(t, events.Raw, envs[0].Event.Type)
-	data := envs[0].Event.Data.(events.RawData)
-	require.Equal(t, "ocs:question.asked", data.Kind)
+	require.Equal(t, events.QuestionRequest, envs[0].Event.Type)
+	data := envs[0].Event.Data.(events.QuestionRequestData)
+	require.Equal(t, "q1", data.ID)
+	require.Len(t, data.Questions, 1)
+	require.Equal(t, "Continue?", data.Questions[0].Question)
 }
 
 func TestConverter_V1UnknownEvent(t *testing.T) {

@@ -246,15 +246,9 @@ func (c *Converter) convertV1(sessionID, eventType string, props json.RawMessage
 	case ocsSessionError:
 		return c.handleSessionError(sessionID, props)
 	case ocsPermAsked:
-		return []*events.Envelope{
-			events.NewEnvelope(aep.NewID(), sessionID, 0, events.Raw,
-				events.RawData{Kind: "ocs:permission.asked", Raw: props}),
-		}
+		return c.handlePermAsked(sessionID, props)
 	case ocsQuestionAsked:
-		return []*events.Envelope{
-			events.NewEnvelope(aep.NewID(), sessionID, 0, events.Raw,
-				events.RawData{Kind: "ocs:question.asked", Raw: props}),
-		}
+		return c.handleQuestionAsked(sessionID, props)
 	default:
 		return nil
 	}
@@ -320,6 +314,47 @@ func (c *Converter) handleSessionError(sessionID string, props json.RawMessage) 
 	delete(c.states, sessionID)
 	return []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{Message: msg}),
+	}
+}
+
+func (c *Converter) handlePermAsked(sessionID string, props json.RawMessage) []*events.Envelope {
+	var data struct {
+		ID       string         `json:"id"`
+		Metadata map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal(props, &data); err != nil {
+		return nil
+	}
+
+	toolName, _ := data.Metadata["tool"].(string)
+	args, _ := json.Marshal(data.Metadata)
+	return []*events.Envelope{
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.PermissionRequest,
+			events.PermissionRequestData{
+				ID:          data.ID,
+				ToolName:    toolName,
+				Description: toolName,
+				Args:        []string{string(args)},
+				InputRaw:    json.RawMessage(args),
+			}),
+	}
+}
+
+func (c *Converter) handleQuestionAsked(sessionID string, props json.RawMessage) []*events.Envelope {
+	var data struct {
+		ID        string            `json:"id"`
+		Questions []events.Question `json:"questions"`
+	}
+	if err := json.Unmarshal(props, &data); err != nil {
+		return nil
+	}
+
+	return []*events.Envelope{
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.QuestionRequest,
+			events.QuestionRequestData{
+				ID:        data.ID,
+				Questions: data.Questions,
+			}),
 	}
 }
 
