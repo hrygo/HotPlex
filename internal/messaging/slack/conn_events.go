@@ -16,6 +16,8 @@ type envelopeSendFunc func(ctx context.Context, env *events.Envelope) error
 // notifyStatusFromEvent maps AEP events to processing status indicators.
 func (c *SlackConn) notifyStatusFromEvent(ctx context.Context, env *events.Envelope) {
 	switch env.Event.Type {
+	case events.Reasoning:
+		_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, StatusThinking, "Thinking...")
 	case events.ToolCall:
 		name, input := extractCallNameInput(env)
 		text := toolfmt.FormatCall(name, input)

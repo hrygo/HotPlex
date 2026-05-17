@@ -2,36 +2,36 @@ package feishu
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging/phrases"
 )
 
 // handleChatEntered processes the bot_p2p_chat_entered_v1 event.
 // It sends a welcome card to new/returning users and records analytics.
-func (a *Adapter) handleChatEntered(ctx context.Context, event *larkim.P2ChatAccessEventBotP2pChatEnteredV1) error {
+func (a *Adapter) handleChatEntered(ctx context.Context, event *larkim.P2ChatAccessEventBotP2pChatEnteredV1) {
 	if event.Event == nil {
-		return nil
+		return
 	}
 
 	chatID := ptrStr(event.Event.ChatId)
 	if chatID == "" {
-		return nil
+		return
 	}
 	openID := ptrStr(event.Event.OperatorId.OpenId)
 	if openID == "" {
-		return nil
+		return
 	}
 	eventID := ""
 	if event.EventV2Base != nil && event.EventV2Base.Header != nil {
 		eventID = event.EventV2Base.Header.EventID
 	}
 	if eventID == "" {
-		return nil
+		return
 	}
 
 	var lastMsgMs int64
@@ -43,7 +43,7 @@ func (a *Adapter) handleChatEntered(ctx context.Context, event *larkim.P2ChatAcc
 
 	store := a.chatAccessStore()
 	if store == nil {
-		return nil
+		return
 	}
 
 	accessType := store.Classify(ctx, string(messaging.PlatformFeishu), chatID, a.botOpenID, openID, lastMsgMs)
@@ -67,12 +67,11 @@ func (a *Adapter) handleChatEntered(ctx context.Context, event *larkim.P2ChatAcc
 		WelcomeSent:   welcomeSent,
 	})
 	if err != nil {
-		return fmt.Errorf("feishu: chat access record: %w", err)
+		a.Log.Warn("feishu: chat access record failed", "err", err)
 	}
 	if !inserted {
 		a.Log.Debug("feishu: duplicate chat_entered event", "event_id", eventID)
 	}
-	return nil
 }
 
 // sendWelcomeCard builds and sends a welcome card to the chat.
@@ -87,8 +86,7 @@ func (a *Adapter) sendWelcomeCard(ctx context.Context, chatID string, accessType
 		text = "Hi，我是 {bot_name}，你的 AI 编程助手！"
 	}
 	text = strings.ReplaceAll(text, "{bot_name}", a.resolveBotName())
-
-	body := fmt.Sprintf("%s\n\n我可以帮你：\n• 💻 编写、审查、调试代码\n• 📁 管理项目文件和目录\n• 🔍 搜索代码库和分析架构\n\n快捷命令：/help /reset /cd\n直接发消息即可开始 ✨", text)
+	body := buildWelcomeBody(text, a.phrases)
 
 	cardJSON := buildCard(
 		cardHeader{Title: a.resolveBotName(), Template: headerBlue},
@@ -98,6 +96,30 @@ func (a *Adapter) sendWelcomeCard(ctx context.Context, chatID string, accessType
 
 	_, err := larkCreateMessage(ctx, a.larkClient, chatID, cardJSON)
 	return err
+}
+
+// buildWelcomeBody assembles the welcome card body from phrases.
+func buildWelcomeBody(greeting string, p *phrases.Phrases) string {
+	body := greeting
+	if caps := p.All("capabilities"); len(caps) > 0 {
+		body += "\n\n我可以帮你："
+		for _, c := range caps {
+			body += "\n• " + c
+		}
+	}
+	if cmds := p.All("quick_commands"); len(cmds) > 0 {
+		body += "\n\n快捷命令："
+		for i, c := range cmds {
+			if i > 0 {
+				body += " "
+			}
+			body += c
+		}
+	}
+	if cl := p.Random("closing_line"); cl != "" {
+		body += "\n" + cl
+	}
+	return body
 }
 
 // chatAccessStore extracts the ChatAccessStore from the adapter extras.

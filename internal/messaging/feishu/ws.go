@@ -40,7 +40,8 @@ func (a *Adapter) newEventHandler() *dispatcher.EventDispatcher {
 					err = fmt.Errorf("feishu chat entered panic: %v", r)
 				}
 			}()
-			return a.handleChatEntered(ctx, event)
+			a.handleChatEntered(ctx, event)
+			return nil
 		})
 }
 

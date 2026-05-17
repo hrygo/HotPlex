@@ -77,36 +77,30 @@ func (s *ChatAccessStore) Classify(ctx context.Context, platform, chatID, botID,
 		platform, chatID, botID,
 	).Scan(&lastCreatedAt)
 
-	if err == nil {
-		now := time.Now().Unix()
-		// Within 1 h cooldown — suppress even if we'd otherwise send.
-		if now-lastCreatedAt < cooldown {
-			return ChatAccessActive
-		}
+	if err != nil {
+		// No prior record — first contact, always welcome.
+		return ChatAccessNew
 	}
+
+	// Existing record — check cooldown.
+	now := time.Now().Unix()
+	if now-lastCreatedAt < cooldown {
+		return ChatAccessActive
+	}
+
+	// Outside cooldown — check activity level.
 
 	// Feishu fast-path: use event payload timestamp directly.
 	if lastMessageAtMs > 0 {
 		lastSec := lastMessageAtMs / 1000
-		since := time.Now().Unix() - lastSec
-		if since > 24*3600 {
-			return ChatAccessNew // no prior messages in 24 h
+		since := now - lastSec
+		if since > 3600 {
+			return ChatAccessReturning
 		}
 		return ChatAccessActive
 	}
 
-	// Slack path: check if we've ever seen this user.
-	var cnt int
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM chat_access_events
-		 WHERE platform = ? AND user_id = ? AND bot_id = ?`,
-		platform, userID, botID,
-	).Scan(&cnt)
-	if err != nil || cnt == 0 {
-		return ChatAccessNew
-	}
-
-	// Existing user — check last activity.
+	// Slack path: check user's last recorded activity.
 	var lastAct int64
 	err = s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(created_at), 0) FROM chat_access_events
@@ -114,10 +108,10 @@ func (s *ChatAccessStore) Classify(ctx context.Context, platform, chatID, botID,
 		platform, userID, botID,
 	).Scan(&lastAct)
 	if err != nil {
-		return ChatAccessNew
+		return ChatAccessReturning
 	}
-	since := time.Now().Unix() - lastAct
-	if since > 24*3600 {
+	since := now - lastAct
+	if since > 3600 {
 		return ChatAccessReturning
 	}
 	return ChatAccessActive
