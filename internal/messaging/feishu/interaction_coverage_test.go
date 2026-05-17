@@ -243,6 +243,39 @@ func TestCheckPendingInteraction_ElicitationDecline_CN(t *testing.T) {
 	require.Equal(t, "decline", er["action"])
 }
 
+// TestCheckPendingInteraction_ElicitationDefaultAccept verifies the Feishu design
+// decision: any text that isn't a decline keyword defaults to "accept" action.
+// This is intentional — Feishu lacks interactive button callbacks for cards.
+func TestCheckPendingInteraction_ElicitationDefaultAccept(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter(t)
+	a.Interactions = messaging.NewInteractionManager(discardLogger)
+	a.rateLimiter = NewFeishuRateLimiter()
+	t.Cleanup(func() { a.rateLimiter.Stop() })
+
+	conn := a.GetOrCreateConn("chat_el_default", "")
+	conn.mu.Lock()
+	conn.sessionID = "sess-el-default"
+	conn.mu.Unlock()
+
+	var capturedMetadata map[string]any
+	a.Interactions.Register(&messaging.PendingInteraction{
+		ID:        "el-default",
+		SessionID: "sess-el-default",
+		Type:      events.ElicitationRequest,
+		Timeout:   5 * time.Minute,
+		SendResponse: func(metadata map[string]any) {
+			capturedMetadata = metadata
+		},
+	})
+
+	// Random non-decline text → treated as accept
+	consumed := a.checkPendingInteraction(context.Background(), "some random text", "owner_123", conn)
+	require.True(t, consumed)
+	er := capturedMetadata["elicitation_response"].(map[string]any)
+	require.Equal(t, "accept", er["action"])
+}
+
 func TestCheckPendingInteraction_PermissionAllow_Variants(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

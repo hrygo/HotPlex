@@ -315,20 +315,27 @@ func TestConverter_SessionError_NameOnly(t *testing.T) {
 
 func TestConverter_PermissionAsked(t *testing.T) {
 	c := newTestConverter()
-	props := rawProps(t, map[string]any{"id": "p1", "metadata": map[string]any{"tool": "bash"}})
+	props := rawProps(t, map[string]any{"id": "p1", "metadata": map[string]any{"tool": "bash", "cmd": "ls -la"}})
 	envs := c.Convert("s1", ocsPermAsked, props)
 	require.Len(t, envs, 1)
 	require.Equal(t, events.PermissionRequest, envs[0].Event.Type)
 	data := envs[0].Event.Data.(events.PermissionRequestData)
 	require.Equal(t, "p1", data.ID)
 	require.Equal(t, "bash", data.ToolName)
+	require.Equal(t, "bash", data.Description)
+	require.NotEmpty(t, data.Args, "Args should contain serialized metadata")
+	require.NotEmpty(t, data.InputRaw, "InputRaw should contain serialized metadata")
+	// InputRaw must be valid JSON
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(data.InputRaw, &parsed))
+	require.Equal(t, "bash", parsed["tool"])
 }
 
 func TestConverter_QuestionAsked(t *testing.T) {
 	c := newTestConverter()
 	props := rawProps(t, map[string]any{
 		"id":        "q1",
-		"questions": []map[string]any{{"question": "Continue?", "header": "Confirm", "options": []map[string]any{{"label": "Yes"}}}},
+		"questions": []map[string]any{{"question": "Continue?", "header": "Confirm", "options": []map[string]any{{"label": "Yes"}, {"label": "No"}}}},
 	})
 	envs := c.Convert("s1", ocsQuestionAsked, props)
 	require.Len(t, envs, 1)
@@ -337,6 +344,22 @@ func TestConverter_QuestionAsked(t *testing.T) {
 	require.Equal(t, "q1", data.ID)
 	require.Len(t, data.Questions, 1)
 	require.Equal(t, "Continue?", data.Questions[0].Question)
+	require.Equal(t, "Confirm", data.Questions[0].Header)
+	require.Len(t, data.Questions[0].Options, 2)
+	require.Equal(t, "Yes", data.Questions[0].Options[0].Label)
+	require.Equal(t, "No", data.Questions[0].Options[1].Label)
+}
+
+func TestConverter_PermissionAsked_MalformedJSON(t *testing.T) {
+	c := newTestConverter()
+	envs := c.Convert("s1", ocsPermAsked, json.RawMessage(`{invalid`))
+	require.Empty(t, envs, "malformed JSON should produce nil for permission.asked")
+}
+
+func TestConverter_QuestionAsked_MalformedJSON(t *testing.T) {
+	c := newTestConverter()
+	envs := c.Convert("s1", ocsQuestionAsked, json.RawMessage(`{invalid`))
+	require.Empty(t, envs, "malformed JSON should produce nil for question.asked")
 }
 
 func TestConverter_V1UnknownEvent(t *testing.T) {
