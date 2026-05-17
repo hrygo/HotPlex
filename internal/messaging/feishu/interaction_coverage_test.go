@@ -243,37 +243,78 @@ func TestCheckPendingInteraction_ElicitationDecline_CN(t *testing.T) {
 	require.Equal(t, "decline", er["action"])
 }
 
-// TestCheckPendingInteraction_ElicitationDefaultAccept verifies the Feishu design
-// decision: any text that isn't a decline keyword defaults to "accept" action.
-// This is intentional — Feishu lacks interactive button callbacks for cards.
-func TestCheckPendingInteraction_ElicitationDefaultAccept(t *testing.T) {
+// TestCheckPendingInteraction_ElicitationRejectsNonKeyword verifies that
+// random text is NOT consumed as an elicitation response — consistent with
+// Slack's explicit accept/decline requirement.
+func TestCheckPendingInteraction_ElicitationRejectsNonKeyword(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
 	a.Interactions = messaging.NewInteractionManager(discardLogger)
 	a.rateLimiter = NewFeishuRateLimiter()
 	t.Cleanup(func() { a.rateLimiter.Stop() })
 
-	conn := a.GetOrCreateConn("chat_el_default", "")
+	conn := a.GetOrCreateConn("chat_el_reject", "")
 	conn.mu.Lock()
-	conn.sessionID = "sess-el-default"
+	conn.sessionID = "sess-el-reject"
 	conn.mu.Unlock()
 
-	var capturedMetadata map[string]any
 	a.Interactions.Register(&messaging.PendingInteraction{
-		ID:        "el-default",
-		SessionID: "sess-el-default",
+		ID:        "el-reject",
+		SessionID: "sess-el-reject",
 		Type:      events.ElicitationRequest,
 		Timeout:   5 * time.Minute,
 		SendResponse: func(metadata map[string]any) {
-			capturedMetadata = metadata
+			t.Fatal("should not consume random text as elicitation response")
 		},
 	})
 
-	// Random non-decline text → treated as accept
+	// Random text → NOT consumed
 	consumed := a.checkPendingInteraction(context.Background(), "some random text", "owner_123", conn)
-	require.True(t, consumed)
-	er := capturedMetadata["elicitation_response"].(map[string]any)
-	require.Equal(t, "accept", er["action"])
+	require.False(t, consumed)
+}
+
+// TestCheckPendingInteraction_ElicitationAccept_Variants verifies accept keywords.
+func TestCheckPendingInteraction_ElicitationAccept_Variants(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		text string
+	}{
+		{"accept", "accept"},
+		{"同意", "同意"},
+		{"确认", "确认"},
+		{"ok", "ok"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			a := newTestAdapter(t)
+			a.Interactions = messaging.NewInteractionManager(discardLogger)
+			a.rateLimiter = NewFeishuRateLimiter()
+			t.Cleanup(func() { a.rateLimiter.Stop() })
+
+			conn := a.GetOrCreateConn("chat_el_acc_"+tt.name, "")
+			conn.mu.Lock()
+			conn.sessionID = "sess-el-acc-" + tt.name
+			conn.mu.Unlock()
+
+			var capturedMetadata map[string]any
+			a.Interactions.Register(&messaging.PendingInteraction{
+				ID:        "el-acc-" + tt.name,
+				SessionID: "sess-el-acc-" + tt.name,
+				Type:      events.ElicitationRequest,
+				Timeout:   5 * time.Minute,
+				SendResponse: func(metadata map[string]any) {
+					capturedMetadata = metadata
+				},
+			})
+
+			consumed := a.checkPendingInteraction(context.Background(), tt.text, "owner_123", conn)
+			require.True(t, consumed)
+			er := capturedMetadata["elicitation_response"].(map[string]any)
+			require.Equal(t, "accept", er["action"])
+		})
+	}
 }
 
 func TestCheckPendingInteraction_PermissionAllow_Variants(t *testing.T) {

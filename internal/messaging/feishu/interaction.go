@@ -134,7 +134,7 @@ func (c *FeishuConn) sendElicitationRequest(ctx context.Context, env *events.Env
 	if data.URL != "" {
 		fmt.Fprintf(&footer, "📎 [外部表单](%s)\n", data.URL)
 	}
-	footer.WriteString("💬 回复 **accept** 或 **decline** 来响应此请求")
+	footer.WriteString("💬 回复 **accept/同意** 或 **decline/拒绝** 来响应此请求")
 
 	cardJSON := buildInteractionCard(header, footer.String(), cardHeader{
 		Title:    "MCP Server 请求",
@@ -221,9 +221,14 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, userID stri
 		metadata = messaging.BuildQuestionResponse(matched.ID, text)
 
 	case events.ElicitationRequest:
-		action := "accept"
-		if normalized == "decline" || normalized == "拒绝" || normalized == "cancel" || normalized == "取消" {
+		action := ""
+		if isElicitationAccept(normalized) {
+			action = "accept"
+		} else if isElicitationDecline(normalized) {
 			action = "decline"
+		}
+		if action == "" {
+			return false
 		}
 		metadata = messaging.BuildElicitationResponse(matched.ID, action)
 	}
@@ -305,6 +310,26 @@ func isPermissionDeny(s string) bool {
 	}
 }
 
+// isElicitationAccept checks if the normalized text is an elicitation-accept keyword.
+func isElicitationAccept(s string) bool {
+	switch s {
+	case "accept", "同意", "确认", "ok", "yes", "是", "好", "好的", "allow":
+		return true
+	default:
+		return false
+	}
+}
+
+// isElicitationDecline checks if the normalized text is an elicitation-decline keyword.
+func isElicitationDecline(s string) bool {
+	switch s {
+	case "decline", "拒绝", "取消", "cancel", "no", "否", "不", "不要":
+		return true
+	default:
+		return false
+	}
+}
+
 // truncate shortens a string to maxLen.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -372,6 +397,6 @@ func buildElicitationFallbackText(data *events.ElicitationRequestData) string {
 		fmt.Fprintf(&sb, "\n外部表单: %s\n", data.URL)
 	}
 
-	fmt.Fprintf(&sb, "\n回复 accept 或 decline 来响应此请求")
+	fmt.Fprintf(&sb, "\n回复 accept/同意 或 decline/拒绝 来响应此请求")
 	return sb.String()
 }
