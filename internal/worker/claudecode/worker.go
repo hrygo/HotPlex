@@ -255,13 +255,26 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 		args = append(args, "--permission-prompt-tool", "stdio")
 	}
 
-	// Only two session modes:
-	// - resume=true  → --resume <id>
-	// - resume=false → --session-id <id>
-	if resume {
+	// Session mode selection:
+	// 1. ContinueSession (--continue): resume latest session, no ID needed
+	// 2. resume=true + session ID: --resume <id>
+	// 3. New session: --session-id <id>
+	if session.ContinueSession {
+		args = append(args, "--continue")
+	} else if resume {
 		args = append(args, "--resume", aep.ParseSessionID(session.SessionID))
 	} else {
 		args = append(args, "--session-id", aep.ParseSessionID(session.SessionID))
+	}
+
+	// ForkSession: when resuming, fork into a new session (--fork-session).
+	if session.ForkSession && resume {
+		args = append(args, "--fork-session")
+	}
+
+	// ResumeSessionAt: restore session up to a specific message (--resume-session-at).
+	if session.ResumeSessionAt != "" && resume {
+		args = append(args, "--resume-session-at", session.ResumeSessionAt)
 	}
 
 	// Permission mode: default bypass (preserves existing behavior), configurable override.
@@ -339,6 +352,22 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 	}
 	if session.IncludeHookEvents {
 		args = append(args, "--include-hook-events")
+	}
+	// ConfigEnv: inject environment variables via --settings JSON.
+	if len(session.ConfigEnv) > 0 {
+		envMap := make(map[string]string, len(session.ConfigEnv))
+		for _, kv := range session.ConfigEnv {
+			if k, v, ok := strings.Cut(kv, "="); ok {
+				envMap[k] = v
+			}
+		}
+		if len(envMap) > 0 {
+			settingsJSON, err := json.Marshal(map[string]any{"env": envMap})
+			if err != nil {
+				return nil, fmt.Errorf("marshal settings JSON: %w", err)
+			}
+			args = append(args, "--settings", string(settingsJSON))
+		}
 	}
 	if session.IncludePartialMessages {
 		args = append(args, "--include-partial-messages")
