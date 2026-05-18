@@ -159,6 +159,24 @@ worker:
     ready_poll_interval: 200ms
     http_timeout: 30s
 
+  codex_cli:
+    # Command to start Codex CLI worker. Default: "codex"
+    command: "codex"
+    # Model name. Empty = use Codex default model from ~/.codex/config.toml
+    model: ""
+    # Sandbox mode: read-only, workspace-write, danger-full-access
+    sandbox: "workspace-write"
+    # Approval mode: untrusted, on-request, never
+    approval_mode: "never"
+    # Ephemeral sessions (don't persist to disk)
+    ephemeral: true
+    # Process startup timeout
+    startup_timeout: 30s
+    # Use persistent app-server mode instead of one-shot exec
+    use_app_server: false
+    # Idle drain timeout for app-server mode before killing process
+    idle_drain_period: 30m
+
 # ─────────────────────────────────────────────────────────────────────────────
 # AGENT PERSONALITY & SKILLS (B/C Channels)
 # ─────────────────────────────────────────────────────────────────────────────

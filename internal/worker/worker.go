@@ -72,6 +72,7 @@ type WorkerType string
 const (
 	TypeClaudeCode  WorkerType = "claude_code"
 	TypeOpenCodeSrv WorkerType = "opencode_server"
+	TypeCodexCLI    WorkerType = "codex_cli"
 	TypeACPX        WorkerType = "acpx"
 	TypeUnknown     WorkerType = "unknown"
 )
@@ -212,6 +213,9 @@ type SessionInfo struct {
 	// ResumeSessionAt restores the session up to and including the specified
 	// assistant message ID, discarding later history (--resume-session-at).
 	ResumeSessionAt string
+	// ResumeSessionID is the worker-internal session ID for resuming a previous session.
+	// For one-shot workers (e.g. Codex CLI), this carries the thread ID for resume --last.
+	ResumeSessionID string
 	// MaxTurns limits the number of agentic turns in non-interactive mode.
 	MaxTurns int
 	// Bare runs Claude Code in minimal mode, skipping hooks, LSP, and plugin sync.

@@ -33,6 +33,7 @@ import (
 	"github.com/hrygo/hotplex/internal/tracing"
 	"github.com/hrygo/hotplex/internal/webchat"
 	"github.com/hrygo/hotplex/internal/worker/claudecode"
+	"github.com/hrygo/hotplex/internal/worker/codexcli"
 	"github.com/hrygo/hotplex/internal/worker/opencodeserver"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 	"github.com/hrygo/hotplex/pkg/aep"
@@ -230,6 +231,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	opencodeserver.InitSingleton(log, cfg.Worker.OpenCodeServer)
 	claudecode.InitConfig(cfg.Worker.ClaudeCode)
+	if cfg.Worker.CodexCLI.UseAppServer {
+		codexcli.InitSingleton(log, cfg.Worker.CodexCLI)
+	} else {
+		codexcli.InitConfig(cfg.Worker.CodexCLI)
+	}
 
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if !reflect.DeepEqual(prev.Worker.AutoRetry, next.Worker.AutoRetry) {
@@ -244,6 +250,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if prev.Worker.ClaudeCode.Command != next.Worker.ClaudeCode.Command {
 			claudecode.InitConfig(next.Worker.ClaudeCode)
+		}
+	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		if prev.Worker.CodexCLI.Command != next.Worker.CodexCLI.Command {
+			codexcli.InitConfig(next.Worker.CodexCLI)
 		}
 	})
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
@@ -633,6 +644,7 @@ func shutdownGateway(
 	// goroutines (blocked on worker stdout) can exit.
 	deps.SessionMgr.TerminateAllWorkers()
 	opencodeserver.ShutdownSingleton(shutdownCtx)
+	codexcli.ShutdownSingleton(shutdownCtx)
 
 	deps.Bridge.Shutdown(shutdownCtx)
 

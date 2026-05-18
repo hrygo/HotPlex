@@ -449,6 +449,7 @@ type WorkerConfig struct {
 	AutoRetry        AutoRetryConfig      `mapstructure:"auto_retry"`
 	OpenCodeServer   OpenCodeServerConfig `mapstructure:"opencode_server"`
 	ClaudeCode       ClaudeCodeConfig     `mapstructure:"claude_code"`
+	CodexCLI         CodexCLIConfig       `mapstructure:"codex_cli"`
 	Environment      []string             `mapstructure:"environment"`
 }
 
@@ -477,6 +478,18 @@ type ClaudeCodeConfig struct {
 	PermissionPrompt      bool                        `mapstructure:"permission_prompt"`       // enable --permission-prompt-tool stdio for interaction chain
 	PermissionAutoApprove []string                    `mapstructure:"permission_auto_approve"` // tool names to auto-approve without user interaction
 	MCPServers            map[string]*MCPServerConfig `mapstructure:"mcp_servers"`             // user-configured MCP servers; empty = default discovery
+}
+
+// CodexCLIConfig holds Codex CLI worker startup settings.
+type CodexCLIConfig struct {
+	Command          string        `mapstructure:"command"`           // codex binary path, default "codex"
+	Model            string        `mapstructure:"model"`             // model name, empty = use Codex default
+	Sandbox          string        `mapstructure:"sandbox"`           // sandbox mode, default "workspace-write"
+	ApprovalMode     string        `mapstructure:"approval_mode"`     // approval mode, default "never"
+	Ephemeral        bool          `mapstructure:"ephemeral"`         // ephemeral sessions, default true
+	StartupTimeout   time.Duration `mapstructure:"startup_timeout"`   // process startup timeout, default 30s
+	UseAppServer     bool          `mapstructure:"use_app_server"`    // use persistent app-server mode instead of one-shot exec
+	IdleDrainPeriod  time.Duration `mapstructure:"idle_drain_period"` // idle drain timeout for app-server mode, default 30m
 }
 
 // OpenCodeServerConfig holds OpenCode Server singleton process settings.
@@ -627,6 +640,15 @@ func Default() *Config {
 			},
 			ClaudeCode: ClaudeCodeConfig{
 				Command: "claude",
+			},
+			CodexCLI: CodexCLIConfig{
+				Command:         "codex",
+				Sandbox:         "workspace-write",
+				ApprovalMode:    "never",
+				Ephemeral:       true,
+				StartupTimeout:  30 * time.Second,
+				UseAppServer:    false,
+				IdleDrainPeriod: 30 * time.Minute,
 			},
 		},
 		Security: SecurityConfig{
@@ -1034,6 +1056,7 @@ func (c *Config) normalizePaths() {
 		&c.Worker.ClaudeCode.Command,
 		&c.Worker.OpenCodeServer.Command,
 		&c.Worker.OpenCodeServer.Password,
+		&c.Worker.CodexCLI.Command,
 		&c.Messaging.Slack.LocalCmd,
 		&c.Messaging.Feishu.LocalCmd,
 		&c.Messaging.Feishu.MossModelDir,
