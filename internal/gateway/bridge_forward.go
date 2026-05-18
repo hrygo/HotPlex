@@ -110,6 +110,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		env.OwnerID = sessOwner
 
 		var capturedDeltaContent string
+		var capturedReasoningContent string
 		if env.Event.Type == events.MessageDelta || env.Event.Type == events.Message {
 			if content := extractMessageContent(env); content != "" {
 				turnText.WriteString(content)
@@ -117,6 +118,8 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 					capturedDeltaContent = content
 				}
 			}
+		} else if env.Event.Type == events.Reasoning {
+			capturedReasoningContent = extractReasoningContent(env)
 		}
 
 		// Stats accumulation: track tool calls and merge per-turn stats on done.
@@ -187,7 +190,9 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 
 		if capturedDeltaContent != "" && b.collector != nil {
 			b.collector.CaptureDeltaString(sessionID, env.Seq, capturedDeltaContent)
-		} else if env.Event.Type != events.MessageDelta {
+		} else if capturedReasoningContent != "" && b.collector != nil {
+			b.collector.CaptureReasoningString(sessionID, env.Seq, capturedReasoningContent)
+		} else if env.Event.Type != events.MessageDelta && env.Event.Type != events.Reasoning {
 			b.captureEvent(sessionID, env.Seq, env.Event.Type, env.Event.Data)
 		}
 
@@ -463,6 +468,22 @@ func extractMessageContent(env *events.Envelope) string {
 			if content, ok := m["content"].(string); ok {
 				return content
 			}
+		}
+	}
+	return ""
+}
+
+// extractReasoningContent extracts text content from a reasoning event.
+func extractReasoningContent(env *events.Envelope) string {
+	if env.Event.Type != events.Reasoning {
+		return ""
+	}
+	if d, ok := env.Event.Data.(events.ReasoningData); ok {
+		return d.Content
+	}
+	if m, ok := env.Event.Data.(map[string]any); ok {
+		if content, ok := m["content"].(string); ok {
+			return content
 		}
 	}
 	return ""

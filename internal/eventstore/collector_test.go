@@ -297,3 +297,96 @@ func (s *stallingEventStore) BeginTx(ctx context.Context) (EventTx, error) {
 	}
 	return s.EventStore.BeginTx(ctx)
 }
+
+func TestCollector_CaptureReasoningString(t *testing.T) {
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+
+	c.CaptureReasoningString("s1", 1, "Let me think")
+	c.CaptureReasoningString("s1", 2, " about this")
+	c.Capture("s1", 3, events.Done, json.RawMessage(`{}`), "outbound", SourceNormal)
+
+	require.NoError(t, c.Close())
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 2) // Reasoning + Done
+
+	require.Equal(t, string(events.Reasoning), page.Events[0].Type)
+	require.Equal(t, int64(1), page.Events[0].Seq)
+
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
+	require.Equal(t, "Let me think about this", data["content"])
+	require.Equal(t, float64(2), data["merged_count"])
+}
+
+func TestCollector_ReasoningSizeFlush(t *testing.T) {
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+
+	c.CaptureReasoningString("s1", 1, strings.Repeat("x", 3000))
+	c.CaptureReasoningString("s1", 2, strings.Repeat("y", 1100))
+
+	c.Capture("s1", 3, events.Done, json.RawMessage(`{}`), "outbound", SourceNormal)
+	require.NoError(t, c.Close())
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 2)
+
+	require.Equal(t, string(events.Reasoning), page.Events[0].Type)
+
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
+	require.Equal(t, float64(2), data["merged_count"])
+	content, _ := data["content"].(string)
+	require.Len(t, content, 4100)
+}
+
+func TestCollector_ReasoningDeltaInterleave(t *testing.T) {
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+
+	// Reasoning first, then delta — both should flush at boundaries
+	c.CaptureReasoningString("s1", 1, "thinking...")
+	c.CaptureDeltaString("s1", 2, "Hello")                               // flushes reasoning
+	c.Capture("s1", 3, events.MessageEnd, nil, "outbound", SourceNormal) // flushes delta
+
+	require.NoError(t, c.Close())
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 2) // Reasoning + Message
+
+	require.Equal(t, string(events.Reasoning), page.Events[0].Type)
+	require.Equal(t, string(events.Message), page.Events[1].Type)
+
+	var rData map[string]any
+	require.NoError(t, json.Unmarshal(page.Events[0].Data, &rData))
+	require.Equal(t, "thinking...", rData["content"])
+}
+
+func TestCollector_ReasoningTimerFlush(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timer test in short mode")
+	}
+
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+	defer func() { _ = c.Close() }()
+
+	c.CaptureReasoningString("s1", 1, "think1")
+	c.CaptureReasoningString("s1", 2, "think2")
+
+	time.Sleep(deltaFlushInterval + 200*time.Millisecond)
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 1)
+	require.Equal(t, string(events.Reasoning), page.Events[0].Type)
+
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
+	require.Equal(t, "think1think2", data["content"])
+}
