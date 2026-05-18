@@ -85,6 +85,7 @@ func setupRoutes(
 		ConfigWatcher: configWatcherAdapter,
 		Cron:          cronProvider,
 		BotLister:     &botListerAdapter{registry: messaging.DefaultBotRegistry()},
+		BotConfig:     newBotConfigAdapter(deps.ConfigStore, cfg.AgentConfig.ConfigDir, ""),
 		Version:       versionString,
 		NewSessionID:  newSessionID,
 	})
@@ -144,6 +145,16 @@ func setupRoutes(
 	// Bot status API
 	adminMux.HandleFunc("GET /admin/bots", adminAPI.HandleListBots)
 	adminMux.HandleFunc("GET /admin/bots/{name}", adminAPI.HandleGetBot)
+
+	// Bot config API
+	adminMux.HandleFunc("GET /admin/bots/config", adminAPI.HandleListBotConfigs)
+	adminMux.HandleFunc("GET /admin/bots/{name}/config", adminAPI.HandleGetBotConfig)
+	adminMux.HandleFunc("GET /admin/bots/{name}/config/{file}", adminAPI.HandleGetAgentConfigFile)
+	adminMux.HandleFunc("GET /admin/bots/{name}/preview", adminAPI.HandleSystemPromptPreview)
+	adminMux.HandleFunc("PATCH /admin/bots/{name}", adminAPI.HandleUpdateBotConfig)
+	adminMux.HandleFunc("POST /admin/bots", adminAPI.HandleCreateBot)
+	adminMux.HandleFunc("DELETE /admin/bots/{name}", adminAPI.HandleDeleteBot)
+	adminMux.HandleFunc("PUT /admin/bots/{name}/config/{file}", adminAPI.HandleWriteAgentConfigFile)
 
 	// Documentation
 	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler()))
