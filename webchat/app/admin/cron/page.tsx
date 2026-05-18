@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import type { CronJob } from '@/lib/types/admin';
 
@@ -228,9 +229,12 @@ export default function CronPage() {
               >
                 {/* Name */}
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-xs font-medium text-[var(--text-primary)] truncate">
+                  <Link
+                    href={`/admin/cron/detail?id=${encodeURIComponent(job.id)}`}
+                    className="text-xs font-medium text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] truncate transition-colors"
+                  >
                     {job.name}
-                  </span>
+                  </Link>
                   {job.message && (
                     <span className="text-[10px] text-[var(--text-faint)] truncate" title={job.message}>
                       {job.message}

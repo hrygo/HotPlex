@@ -138,10 +138,10 @@ export function BotConfigEditor({ botName }: { botName: string }) {
         {/* Status message */}
         {message && (
           <div
-            className={`mb-3 px-3 py-2 rounded-lg text-xs ${
+            className={`mb-3 px-4 py-3 rounded-[var(--radius-md)] text-xs ${
               message.type === 'success'
                 ? 'bg-[var(--accent-emerald-glow)] text-[var(--accent-emerald)]'
-                : 'bg-[rgba(244,63,94,0.1)] text-[var(--accent-coral)]'
+                : 'bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] text-[var(--accent-coral)]'
             }`}
           >
             {message.text}
@@ -151,7 +151,7 @@ export function BotConfigEditor({ botName }: { botName: string }) {
         {/* Textarea */}
         {loading ? (
           <div className="flex-1 flex items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
-            <div className="w-4 h-4 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
+            <div className="w-5 h-5 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
           <textarea

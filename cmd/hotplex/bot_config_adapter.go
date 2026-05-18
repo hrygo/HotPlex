@@ -163,6 +163,8 @@ func (a *botConfigAdapter) CreateBot(ctx context.Context, name string, attrs *ad
 	}
 
 	// Determine which platform to create the bot on.
+
+	const maxBotsPerPlatform = 10
 	cfg := a.cfgStore.Load()
 	platform := attrs.Platform
 	if platform == "" {
@@ -177,8 +179,13 @@ func (a *botConfigAdapter) CreateBot(ctx context.Context, name string, attrs *ad
 		}
 	}
 
+	// Enforce max bots per platform limit.
+
 	switch platform {
 	case "feishu":
+		if len(cfg.Messaging.Feishu.Bots) >= maxBotsPerPlatform {
+			return fmt.Errorf("feishu bot limit reached (max %d)", maxBotsPerPlatform)
+		}
 		if !cfg.Messaging.Feishu.Enabled {
 			return fmt.Errorf("feishu platform is not enabled")
 		}
@@ -189,6 +196,9 @@ func (a *botConfigAdapter) CreateBot(ctx context.Context, name string, attrs *ad
 		applyBotAttrsToFeishu(&newBot, attrs)
 		cfg.Messaging.Feishu.Bots = append(cfg.Messaging.Feishu.Bots, newBot)
 	case "slack":
+		if len(cfg.Messaging.Slack.Bots) >= maxBotsPerPlatform {
+			return fmt.Errorf("slack bot limit reached (max %d)", maxBotsPerPlatform)
+		}
 		if !cfg.Messaging.Slack.Enabled {
 			return fmt.Errorf("slack platform is not enabled")
 		}
@@ -226,6 +236,8 @@ func (a *botConfigAdapter) DeleteBot(ctx context.Context, name string) error {
 	}
 
 	cfg := a.cfgStore.Load()
+
+	// Enforce max bots per platform limit.
 
 	switch platform {
 	case "slack":
@@ -278,6 +290,8 @@ func resolvePlatformAndBotID(name string) (platform, botID string, ok bool) {
 // extractBotAttrs builds BotConfigAttrs from the config for a specific bot.
 func extractBotAttrs(cfg *config.Config, platform, name string) *admin.BotConfigAttrs {
 	attrs := &admin.BotConfigAttrs{}
+
+	// Enforce max bots per platform limit.
 
 	switch platform {
 	case "slack":

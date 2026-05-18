@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { getBot } from '@/lib/api/admin-bots';
 import { BotConfigEditor } from '@/components/admin/bot-config-editor';
 import { SystemPromptPreview } from '@/components/admin/system-prompt-preview';
+import { StatusBadge } from '@/components/admin/status-badge';
 import type { BotConfigEntry } from '@/lib/types/admin';
 
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -65,7 +67,10 @@ export function BotDetailView() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="w-5 h-5 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-6 h-6 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-[var(--text-faint)]">Loading bot...</span>
+        </div>
       </div>
     );
   }
@@ -73,7 +78,9 @@ export function BotDetailView() {
   if (error || !bot) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <p className="text-sm text-[var(--accent-coral)]">{error || 'Bot not found'}</p>
+        <div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] p-4">
+          <p className="text-sm text-[var(--accent-coral)]">{error || 'Bot not found'}</p>
+        </div>
       </div>
     );
   }
@@ -83,19 +90,19 @@ export function BotDetailView() {
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       <div className="flex items-center gap-3 mb-6">
+        <Link
+          href="/admin/bots"
+          className="text-[var(--text-faint)] hover:text-[var(--text-secondary)] transition-colors"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="inline">
+            <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
         <h1 className="text-xl font-display font-bold text-[var(--text-primary)]">{name}</h1>
         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)] uppercase">
           {bot.platform}
         </span>
-        <span
-          className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-            bot.status === 'connected'
-              ? 'bg-[var(--accent-emerald-glow)] text-[var(--accent-emerald)]'
-              : 'bg-[rgba(244,63,94,0.1)] text-[var(--accent-coral)]'
-          }`}
-        >
-          {bot.status}
-        </span>
+        <StatusBadge status={bot.status} />
         <SystemPromptPreview botName={name} />
       </div>
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { listSessions, terminateSession, deleteSession } from '@/lib/api/admin-sessions';
 import type { AdminSessionInfo } from '@/lib/types/admin';
 
@@ -293,12 +294,13 @@ export default function SessionsPage() {
                 className="grid grid-cols-[1fr_100px_100px_90px_100px_100px_140px] gap-2 px-4 py-2.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center"
               >
                 {/* ID */}
-                <span
-                  className="text-xs font-mono text-[var(--text-primary)] truncate"
+                <Link
+                  href={`/admin/sessions/detail?id=${encodeURIComponent(session.id)}`}
+                  className="text-xs font-mono text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] truncate transition-colors"
                   title={session.id}
                 >
                   {truncateId(session.id)}
-                </span>
+                </Link>
 
                 {/* Worker type */}
                 <span className="text-xs text-[var(--text-muted)] truncate" title={session.worker_type}>

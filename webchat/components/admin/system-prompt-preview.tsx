@@ -68,7 +68,7 @@ export function SystemPromptPreview({ botName }: { botName: string }) {
                   <div className="w-5 h-5 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : error ? (
-                <div className="px-4 py-3 rounded-lg bg-[rgba(244,63,94,0.1)] text-[var(--accent-coral)] text-sm">
+                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] text-[var(--accent-coral)] text-sm">
                   {error}
                 </div>
               ) : (
