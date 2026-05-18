@@ -7,10 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/worker"
@@ -53,7 +50,6 @@ type ExecWorker struct {
 	parser  *Parser
 	mapper  *Mapper
 	cancel  context.CancelFunc
-	seq     atomic.Int64
 
 	readLineFn func() (string, error)
 	testConn   worker.SessionConn
@@ -72,7 +68,7 @@ func (w *ExecWorker) Type() worker.WorkerType    { return worker.TypeCodexCLI }
 func (w *ExecWorker) SupportsResume() bool       { return true }
 func (w *ExecWorker) SupportsStreaming() bool    { return true }
 func (w *ExecWorker) SupportsTools() bool        { return true }
-func (w *ExecWorker) EnvBlocklist() []string     { return []string{"HOTPLEX_", "CODEX_"} }
+func (w *ExecWorker) EnvBlocklist() []string     { return EnvBlocklist }
 func (w *ExecWorker) SessionStoreDir() string    { return "" }
 func (w *ExecWorker) MaxTurns() int              { return 0 }
 func (w *ExecWorker) Modalities() []string       { return []string{"text", "code"} }
@@ -91,7 +87,6 @@ func (w *ExecWorker) startLocked(session worker.SessionInfo) error {
 	w.cfg = resolveConfig()
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
-	w.seq.Store(0)
 
 	if w.origSession.SessionID == "" {
 		w.origSession = session
@@ -230,7 +225,6 @@ func (w *ExecWorker) ResetContext(ctx context.Context) error {
 	w.mu.Lock()
 	w.started = false
 	w.threadID = ""
-	w.seq.Store(0)
 	w.readLineFn = nil
 	w.mu.Unlock()
 	return nil
@@ -343,10 +337,6 @@ func (w *ExecWorker) trySend(env *events.Envelope) {
 	}
 }
 
-func (w *ExecWorker) nextSeq() int64 {
-	return w.seq.Add(1)
-}
-
 func (w *ExecWorker) HandlePermissionResponse(_ context.Context, reqID string, allowed bool, reason string) error {
 	return fmt.Errorf("codexcli: permission responses not supported in one-shot mode")
 }
@@ -367,27 +357,6 @@ func (w *ExecWorker) SetReadLineFn(fn func() (string, error)) {
 	w.readLineFn = fn
 }
 
-func ensureWorkDir(dir string) error {
-	if dir == "" {
-		return nil
-	}
-	info, err := os.Stat(dir)
-	if err == nil {
-		if !info.IsDir() {
-			return fmt.Errorf("codexcli: work dir is not a directory: %s", dir)
-		}
-		return nil
-	}
-	if os.IsNotExist(err) {
-		return os.MkdirAll(dir, 0o755)
-	}
-	return err
-}
-
-func joinTools(tools []string) string {
-	return strings.Join(tools, ",")
-}
-
 // ─── AppServerWorker (v2 persistent mode) ───────────────────────────────
 
 var _ worker.Worker = (*AppServerWorker)(nil)
@@ -405,6 +374,7 @@ type AppServerWorker struct {
 	commands    *ServerCommander
 	closed      bool
 	sessionID   string
+	conn        *appConn
 }
 
 // appConn implements worker.SessionConn for the app-server mode.
@@ -456,7 +426,7 @@ func (w *AppServerWorker) Type() worker.WorkerType  { return worker.TypeCodexCLI
 func (w *AppServerWorker) SupportsResume() bool     { return true }
 func (w *AppServerWorker) SupportsStreaming() bool  { return true }
 func (w *AppServerWorker) SupportsTools() bool      { return true }
-func (w *AppServerWorker) EnvBlocklist() []string   { return []string{"HOTPLEX_", "CODEX_"} }
+func (w *AppServerWorker) EnvBlocklist() []string   { return EnvBlocklist }
 func (w *AppServerWorker) SessionStoreDir() string  { return "" }
 func (w *AppServerWorker) MaxTurns() int            { return 0 }
 func (w *AppServerWorker) Modalities() []string     { return []string{"text", "code"} }
@@ -506,6 +476,12 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 
 	w.recvCh = w.manager.Subscribe(w.threadID, w.sessionID)
 	w.commands = NewServerCommander(w.manager, w.threadID)
+	w.conn = &appConn{
+		userID:    w.userID,
+		sessionID: w.sessionID,
+		recvCh:    w.recvCh,
+		manager:   w.manager,
+	}
 	w.BaseWorker.StartTime = time.Now()
 	w.BaseWorker.SetLastIO(w.BaseWorker.StartTime)
 
@@ -607,15 +583,7 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 func (w *AppServerWorker) Conn() worker.SessionConn {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.recvCh == nil {
-		return nil
-	}
-	return &appConn{
-		userID:    w.userID,
-		sessionID: w.sessionID,
-		recvCh:    w.recvCh,
-		manager:   w.manager,
-	}
+	return w.conn
 }
 
 func (w *AppServerWorker) Health() worker.WorkerHealth {

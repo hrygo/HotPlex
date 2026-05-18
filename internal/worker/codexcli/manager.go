@@ -88,7 +88,6 @@ type CodexAppServerManager struct {
 	idleTimer *time.Timer
 }
 
-// NewCodexAppServerManager creates a new CodexAppServerManager.
 func NewCodexAppServerManager(log *slog.Logger, cfg config.CodexCLIConfig) *CodexAppServerManager {
 	if cfg.IdleDrainPeriod <= 0 {
 		cfg.IdleDrainPeriod = 30 * time.Minute
@@ -114,13 +113,11 @@ func (m *CodexAppServerManager) Acquire(ctx context.Context) (<-chan struct{}, e
 		return nil, fmt.Errorf("codex-app-server: stopped")
 	}
 
-	// Cancel idle drain timer if one is pending.
 	if m.idleTimer != nil {
 		m.idleTimer.Stop()
 		m.idleTimer = nil
 	}
 
-	// Start process on first reference.
 	if m.state == stateIdle {
 		if err := m.startProcessLocked(ctx); err != nil {
 			return nil, err
@@ -292,8 +289,6 @@ func (m *CodexAppServerManager) IsRunning() bool {
 
 // ─── internal ─────────────────────────────────────────────────────────────
 
-// startProcessLocked forks the codex app-server process and performs the
-// JSON-RPC initialize handshake. Caller must hold m.mu.
 func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 	m.state = stateStarting
 	m.subsClosed.Store(false)
@@ -323,13 +318,11 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 	m.stdin = stdin
 	m.stdout = stdout
 
-	// Start background reader goroutine for stdout.
 	bgCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	go m.readNotifications(bgCtx)
 	go m.monitorProcess()
 
-	// Perform JSON-RPC initialize/initialized handshake.
 	if err := m.handshake(ctx); err != nil {
 		cancel()
 		_ = m.proc.Kill()
@@ -345,8 +338,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 	return nil
 }
 
-// handshake sends the initialize request and waits for the initialized response.
-// Uses the standard Call mechanism; readNotifications must be running before this.
+// handshake performs the JSON-RPC initialize/initialized handshake.
 func (m *CodexAppServerManager) handshake(ctx context.Context) error {
 	type initializeResult struct {
 		Capabilities json.RawMessage `json:"capabilities"`
@@ -432,46 +424,40 @@ func (m *CodexAppServerManager) readNotifications(ctx context.Context) {
 			return
 		}
 
-		line := scanner.Text()
-		if line == "" {
+		data := scanner.Bytes()
+		if len(data) == 0 {
 			continue
 		}
 
-		m.dispatchLine([]byte(line))
+		m.dispatchFrame(data)
 	}
 }
 
-// dispatchLine routes a single JSON line to response or notification handling.
-func (m *CodexAppServerManager) dispatchLine(data []byte) {
-	// Detect response vs notification by checking for "id" field.
-	var raw struct {
-		ID     json.RawMessage `json:"id"`
-		Method string          `json:"method"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+// dispatchFrame parses a single JSON-RPC frame once and routes to response or notification.
+func (m *CodexAppServerManager) dispatchFrame(data []byte) {
+	var resp JSONRPCResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
 		m.log.Warn("codex-app-server: unmarshal frame", "err", err)
 		return
 	}
 
-	if len(raw.ID) > 0 && string(raw.ID) != "null" {
-		// JSON-RPC response.
-		var resp JSONRPCResponse
-		if err := json.Unmarshal(data, &resp); err != nil {
-			m.log.Warn("codex-app-server: unmarshal response", "err", err)
-			return
-		}
+	if resp.ID != 0 {
 		m.dispatchResponse(&resp)
-	} else if raw.Method != "" {
-		// JSON-RPC notification (no ID).
-		var notif JSONRPCNotification
-		if err := json.Unmarshal(data, &notif); err != nil {
-			m.log.Warn("codex-app-server: unmarshal notification", "err", err)
-			return
-		}
+		return
+	}
+
+	if resp.Error != nil {
+		m.dispatchResponse(&resp)
+		return
+	}
+
+	var notif JSONRPCNotification
+	if err := json.Unmarshal(data, &notif); err != nil {
+		m.log.Warn("codex-app-server: unmarshal notification", "err", err)
+		return
+	}
+	if notif.Method != "" {
 		m.dispatchNotification(&notif)
-	} else {
-		m.log.Warn("codex-app-server: unknown frame type",
-			"data", string(data))
 	}
 }
 
@@ -489,8 +475,8 @@ func (m *CodexAppServerManager) dispatchResponse(resp *JSONRPCResponse) {
 	}
 }
 
-// dispatchNotification extracts the thread ID from notification params, converts
-// via the mapper with the correct sessionID, and delivers envelopes to the subscriber channel.
+// dispatchNotification extracts the thread ID, converts via the mapper, and
+// delivers envelopes to the subscriber channel. Locks subMu once per notification.
 func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification) {
 	var params struct {
 		ThreadID string `json:"threadId"`
@@ -509,29 +495,24 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 
 	m.subMu.Lock()
 	sessionID := m.subSessions[params.ThreadID]
-	m.subMu.Unlock()
-
-	envs := m.converter.MapNotification(notif.Method, notif.Params)
-	for _, env := range envs {
-		if env != nil {
-			env.SessionID = sessionID
-			m.sendToSubscriber(params.ThreadID, env)
-		}
-	}
-}
-
-// sendToSubscriber delivers a single envelope to the thread's channel.
-// Low-priority events (delta) are dropped silently when the channel is full;
-// critical events (Done/Error/State) block until delivered to prevent loss.
-func (m *CodexAppServerManager) sendToSubscriber(threadID string, env *events.Envelope) {
-	m.subMu.Lock()
-	ch, ok := m.subscribers[threadID]
+	ch, ok := m.subscribers[params.ThreadID]
 	m.subMu.Unlock()
 	if !ok {
 		return
 	}
 
-	// Delta events are non-critical — drop silently if channel is full.
+	envs := m.converter.MapNotification(notif.Method, notif.Params)
+	for _, env := range envs {
+		if env != nil {
+			env.SessionID = sessionID
+			m.sendEnvelope(ch, env)
+		}
+	}
+}
+
+// sendEnvelope delivers a single envelope to a subscriber channel with backpressure.
+// Delta events are dropped silently when full; critical events block until delivered.
+func (m *CodexAppServerManager) sendEnvelope(ch chan *events.Envelope, env *events.Envelope) {
 	if env.Event.Type == events.MessageDelta {
 		select {
 		case ch <- env:
@@ -539,8 +520,6 @@ func (m *CodexAppServerManager) sendToSubscriber(threadID string, env *events.En
 		}
 		return
 	}
-
-	// Critical events (Done, Error, State) must never be dropped.
 	ch <- env
 }
 
@@ -611,16 +590,8 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 	})
 }
 
-// buildEnv creates the environment for the codex app-server process.
 func (m *CodexAppServerManager) buildEnv() []string {
-	env := base.BuildEnv(worker.SessionInfo{}, []string{
-		"HOTPLEX_",
-		"CODEX_",
-	}, "codex-app-server")
-	return env
+	return base.BuildEnv(worker.SessionInfo{}, EnvBlocklist, "codex-app-server")
 }
 
-// compile-time check for interface satisfaction.
-var (
-	_ interface{ IsRunning() bool } = (*CodexAppServerManager)(nil)
-)
+var _ interface{ IsRunning() bool } = (*CodexAppServerManager)(nil)

@@ -68,6 +68,20 @@ const (
 	EventError         = "error"
 )
 
+// Item type constants used in CodexItem.Type and mapper switch cases.
+const (
+	ItemCommandExecution = "command_execution"
+	ItemFileChange       = "file_change"
+	ItemMCPToolCall      = "mcp_tool_call"
+	ItemAgentMessage     = "agent_message"
+	ItemReasoning        = "reasoning"
+	ItemPlan             = "plan"
+	ItemImageGeneration  = "image_generation"
+)
+
+// EnvBlocklist defines environment variable prefixes to strip from worker processes.
+var EnvBlocklist = []string{"HOTPLEX_", "CODEX_"}
+
 // ─── JSON-RPC 2.0 Wire Types (app-server mode) ──────────────────────────
 
 type JSONRPCRequest struct {

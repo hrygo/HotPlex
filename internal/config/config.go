@@ -647,7 +647,7 @@ func Default() *Config {
 				ApprovalMode:    "never",
 				Ephemeral:       true,
 				StartupTimeout:  30 * time.Second,
-				UseAppServer:    false,
+				UseAppServer:    true,
 				IdleDrainPeriod: 30 * time.Minute,
 			},
 		},

@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 
 	"github.com/hrygo/hotplex/internal/config"
-	"github.com/hrygo/hotplex/internal/security"
 )
 
 var globalConfig atomic.Pointer[config.CodexCLIConfig]
@@ -16,9 +15,6 @@ func InitConfig(cfg config.CodexCLIConfig) {
 		cfg.Command = "codex"
 	}
 	globalConfig.Store(&cfg)
-	if err := security.RegisterCommand("codex"); err != nil {
-		slog.Default().Warn("codexcli: failed to register command", "err", err)
-	}
 }
 
 func GetConfig() config.CodexCLIConfig {

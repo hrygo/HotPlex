@@ -172,8 +172,8 @@ worker:
     ephemeral: true
     # Process startup timeout
     startup_timeout: 30s
-    # Use persistent app-server mode instead of one-shot exec
-    use_app_server: false
+    # Use persistent app-server mode (default) instead of one-shot exec
+    use_app_server: true
     # Idle drain timeout for app-server mode before killing process
     idle_drain_period: 30m
 
