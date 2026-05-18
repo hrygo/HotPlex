@@ -76,7 +76,7 @@ func TestParserParseLine(t *testing.T) {
 func TestMapperMap(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapper("session-1", func() int64 { return 0 })
+	m := NewMapper("session-1")
 
 	t.Run("agent_message_to_delta", func(t *testing.T) {
 		t.Parallel()
@@ -277,7 +277,7 @@ func TestCapabilities(t *testing.T) {
 func TestMapNotificationAgentMessageStateMachine(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapper("session-1", func() int64 { return 0 })
+	m := NewMapper("session-1")
 
 	// Step 1: item/started (agent_message) → message.start
 	startedParams := json.RawMessage(`{"item":{"id":"msg_1","type":"agent_message"}}`)
@@ -315,7 +315,7 @@ func TestMapNotificationAgentMessageStateMachine(t *testing.T) {
 func TestMapNotificationTurnFailed(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapper("session-1", func() int64 { return 0 })
+	m := NewMapper("session-1")
 	envs := m.MapNotification("turn/failed", json.RawMessage(`{"turn":{}}`))
 	require.Len(t, envs, 2)
 	require.Equal(t, events.Error, envs[0].Event.Type)
@@ -328,7 +328,7 @@ func TestMapNotificationTurnFailed(t *testing.T) {
 func TestMapNotificationTurnCompleted(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapper("session-1", func() int64 { return 0 })
+	m := NewMapper("session-1")
 	params := json.RawMessage(`{"turn":{"usage":{"input_tokens":150,"output_tokens":75}}}`)
 	envs := m.MapNotification("turn/completed", params)
 	require.Len(t, envs, 1)
@@ -343,7 +343,7 @@ func TestMapNotificationTurnCompleted(t *testing.T) {
 func TestMapNotificationApproval(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapper("session-1", func() int64 { return 0 })
+	m := NewMapper("session-1")
 	params := json.RawMessage(`{"requestId":"req_1","toolName":"Bash"}`)
 	envs := m.MapNotification("serverRequest/approval", params)
 	require.Len(t, envs, 1)
@@ -357,7 +357,7 @@ func TestMapNotificationApproval(t *testing.T) {
 func TestMapNotificationCommandExecution(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapper("session-1", func() int64 { return 0 })
+	m := NewMapper("session-1")
 
 	// Started
 	started := json.RawMessage(`{"item":{"id":"cmd_1","type":"command_execution","command":"ls -la","cwd":"/tmp"}}`)
@@ -382,7 +382,7 @@ func TestMapNotificationCommandExecution(t *testing.T) {
 func TestMapNotificationReasoning(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapper("session-1", func() int64 { return 0 })
+	m := NewMapper("session-1")
 	params := json.RawMessage(`{"item":{"id":"r_1","type":"reasoning","summary_text":["Step 1","Step 2"]}}`)
 	envs := m.MapNotification("item/completed", params)
 	require.Len(t, envs, 1)
@@ -395,7 +395,7 @@ func TestMapNotificationReasoning(t *testing.T) {
 func TestMapNotificationUnknownMethod(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapper("session-1", func() int64 { return 0 })
+	m := NewMapper("session-1")
 	envs := m.MapNotification("thread/started", json.RawMessage(`{}`))
 	require.Nil(t, envs)
 }
@@ -464,15 +464,15 @@ func TestManagerSubscribeUnsubscribe(t *testing.T) {
 	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
 	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
-	ch := mgr.Subscribe("thread-1")
+	ch := 	mgr.Subscribe("thread-1", "session-thread-1")
 	require.NotNil(t, ch)
 
 	// Second subscribe returns same channel
-	ch2 := mgr.Subscribe("thread-1")
+	ch2 := 	mgr.Subscribe("thread-1", "session-thread-1")
 	require.Equal(t, ch, ch2)
 
 	// Different thread gets different channel
-	ch3 := mgr.Subscribe("thread-2")
+	ch3 := 	mgr.Subscribe("thread-2", "session-thread-2")
 	require.NotNil(t, ch3)
 	require.NotEqual(t, ch, ch3)
 
@@ -482,7 +482,7 @@ func TestManagerSubscribeUnsubscribe(t *testing.T) {
 	require.False(t, ok) // channel closed
 
 	// Re-subscribe after unsubscribe creates new channel
-	ch4 := mgr.Subscribe("thread-1")
+	ch4 := 	mgr.Subscribe("thread-1", "session-thread-1")
 	require.NotNil(t, ch4)
 	require.NotEqual(t, ch, ch4)
 }
@@ -529,8 +529,8 @@ func TestManagerShutdown(t *testing.T) {
 	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
 	// Add some subscribers
-	ch1 := mgr.Subscribe("thread-1")
-	ch2 := mgr.Subscribe("thread-2")
+	ch1 := 	mgr.Subscribe("thread-1", "session-thread-1")
+	ch2 := 	mgr.Subscribe("thread-2", "session-thread-2")
 
 	mgr.Shutdown(context.Background())
 

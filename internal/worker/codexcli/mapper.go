@@ -15,7 +15,7 @@ type Mapper struct {
 	tracker   *messageTracker
 }
 
-func NewMapper(sessionID string, nextSeq func() int64) *Mapper {
+func NewMapper(sessionID string) *Mapper {
 	return &Mapper{
 		sessionID: sessionID,
 		tracker:   newMessageTracker(),
@@ -238,8 +238,9 @@ func (m *Mapper) mapNotifItemStarted(params json.RawMessage) []*events.Envelope 
 		m.tracker.startMessage(p.Item.ID)
 		return []*events.Envelope{
 			newEnvelope(events.MessageStart, events.MessageStartData{
-				ID:   m.tracker.getMessageID(p.Item.ID),
-				Role: "assistant",
+				ID:          m.tracker.getMessageID(p.Item.ID),
+				Role:        "assistant",
+				ContentType: ContentTypeText,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case "command_execution":

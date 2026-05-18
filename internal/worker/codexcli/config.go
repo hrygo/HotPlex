@@ -31,14 +31,8 @@ func GetConfig() config.CodexCLIConfig {
 var globalSingleton atomic.Pointer[CodexAppServerManager]
 
 func InitSingleton(log *slog.Logger, cfg config.CodexCLIConfig) {
-	if cfg.Command == "" {
-		cfg.Command = "codex"
-	}
-	globalConfig.Store(&cfg)
-	if err := security.RegisterCommand("codex"); err != nil {
-		slog.Default().Warn("codexcli: failed to register command", "err", err)
-	}
-	mgr := NewCodexAppServerManager(log, cfg)
+	InitConfig(cfg)
+	mgr := NewCodexAppServerManager(log, GetConfig())
 	globalSingleton.Store(mgr)
 }
 

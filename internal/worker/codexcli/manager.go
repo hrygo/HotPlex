@@ -73,6 +73,8 @@ type CodexAppServerManager struct {
 	// subMu protects subscribers for thread event routing.
 	subMu       sync.Mutex
 	subscribers map[string]chan *events.Envelope
+	subSessions map[string]string // threadID → sessionID mapping for envelope population
+	subsClosed  atomic.Bool       // set when subscribers have been closed (prevents double-close)
 
 	// writeMu serializes writes to stdin from concurrent Call/Notify.
 	writeMu sync.Mutex
@@ -96,7 +98,8 @@ func NewCodexAppServerManager(log *slog.Logger, cfg config.CodexCLIConfig) *Code
 		cfg:         cfg,
 		crashCh:     make(chan struct{}),
 		subscribers: make(map[string]chan *events.Envelope),
-		converter:   NewMapper("", nil),
+		subSessions: make(map[string]string),
+		converter:   NewMapper(""),
 	}
 }
 
@@ -154,7 +157,7 @@ func (m *CodexAppServerManager) Release() {
 }
 
 // Subscribe returns a channel that receives AEP events for the given thread ID.
-func (m *CodexAppServerManager) Subscribe(threadID string) chan *events.Envelope {
+func (m *CodexAppServerManager) Subscribe(threadID, sessionID string) chan *events.Envelope {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
@@ -164,17 +167,18 @@ func (m *CodexAppServerManager) Subscribe(threadID string) chan *events.Envelope
 
 	ch := make(chan *events.Envelope, 256)
 	m.subscribers[threadID] = ch
-	m.log.Debug("codex-app-server: subscribed", "thread_id", threadID)
+	m.subSessions[threadID] = sessionID
+	m.log.Debug("codex-app-server: subscribed", "thread_id", threadID, "session_id", sessionID)
 	return ch
 }
 
-// Unsubscribe removes the subscription for the given thread ID.
 func (m *CodexAppServerManager) Unsubscribe(threadID string) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
 	if ch, ok := m.subscribers[threadID]; ok {
 		delete(m.subscribers, threadID)
+		delete(m.subSessions, threadID)
 		close(ch)
 		m.log.Debug("codex-app-server: unsubscribed", "thread_id", threadID)
 	}
@@ -266,13 +270,17 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 		m.refs = 0
 	}
 
-	// Close all active subscriptions.
-	m.subMu.Lock()
-	for id, ch := range m.subscribers {
-		close(ch)
-		delete(m.subscribers, id)
+	// Close all active subscriptions if not already closed by monitorProcess.
+	if !m.subsClosed.Load() {
+		m.subsClosed.Store(true)
+		m.subMu.Lock()
+		for id, ch := range m.subscribers {
+			close(ch)
+			delete(m.subscribers, id)
+		}
+		m.subSessions = make(map[string]string)
+		m.subMu.Unlock()
 	}
-	m.subMu.Unlock()
 }
 
 // IsRunning reports whether the singleton process is currently running.
@@ -288,6 +296,7 @@ func (m *CodexAppServerManager) IsRunning() bool {
 // JSON-RPC initialize handshake. Caller must hold m.mu.
 func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 	m.state = stateStarting
+	m.subsClosed.Store(false)
 	m.log.Info("codex-app-server: starting codex app-server process")
 
 	args := []string{"app-server"}
@@ -343,7 +352,16 @@ func (m *CodexAppServerManager) handshake(ctx context.Context) error {
 		Capabilities json.RawMessage `json:"capabilities"`
 	}
 
-	resp, err := m.Call("initialize", map[string]any{})
+	resp, err := m.Call("initialize", map[string]any{
+		"clientInfo": map[string]string{
+			"name":    "hotplex",
+			"title":   "HotPlex Gateway",
+			"version": "1.0.0",
+		},
+		"capabilities": map[string]any{
+			"experimentalApi": true,
+		},
+	})
 	if err != nil {
 		return fmt.Errorf("initialize: %w", err)
 	}
@@ -351,6 +369,10 @@ func (m *CodexAppServerManager) handshake(ctx context.Context) error {
 	var result initializeResult
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return fmt.Errorf("parse initialize result: %w", err)
+	}
+
+	if err := m.Notify("initialized", map[string]any{}); err != nil {
+		return fmt.Errorf("initialized notification: %w", err)
 	}
 
 	m.log.Info("codex-app-server: handshake complete",
@@ -468,34 +490,39 @@ func (m *CodexAppServerManager) dispatchResponse(resp *JSONRPCResponse) {
 }
 
 // dispatchNotification extracts the thread ID from notification params, converts
-// via the mapper, and delivers envelopes to the subscriber channel.
+// via the mapper with the correct sessionID, and delivers envelopes to the subscriber channel.
 func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification) {
-	// Extract threadId from params.
 	var params struct {
 		ThreadID string `json:"threadId"`
 	}
 	if notif.Params != nil {
 		if err := json.Unmarshal(notif.Params, &params); err != nil {
-			m.log.Warn("codex-app-server: unmarshal notification params",
-				"err", err)
+			m.log.Warn("codex-app-server: unmarshal notification params", "err", err)
 			return
 		}
 	}
 
 	if params.ThreadID == "" {
-		m.log.Debug("codex-app-server: notification without threadId, skipping",
-			"method", notif.Method)
+		m.log.Debug("codex-app-server: notification without threadId, skipping", "method", notif.Method)
 		return
 	}
 
-	// Convert via mapper to AEP envelopes.
+	m.subMu.Lock()
+	sessionID := m.subSessions[params.ThreadID]
+	m.subMu.Unlock()
+
 	envs := m.converter.MapNotification(notif.Method, notif.Params)
 	for _, env := range envs {
-		m.sendToSubscriber(params.ThreadID, env)
+		if env != nil {
+			env.SessionID = sessionID
+			m.sendToSubscriber(params.ThreadID, env)
+		}
 	}
 }
 
 // sendToSubscriber delivers a single envelope to the thread's channel.
+// Low-priority events (delta) are dropped silently when the channel is full;
+// critical events (Done/Error/State) block until delivered to prevent loss.
 func (m *CodexAppServerManager) sendToSubscriber(threadID string, env *events.Envelope) {
 	m.subMu.Lock()
 	ch, ok := m.subscribers[threadID]
@@ -504,17 +531,28 @@ func (m *CodexAppServerManager) sendToSubscriber(threadID string, env *events.En
 		return
 	}
 
-	select {
-	case ch <- env:
-	default:
-		m.log.Warn("codex-app-server: subscriber channel full, dropping event",
-			"thread_id", threadID, "type", env.Event.Type)
+	// Delta events are non-critical — drop silently if channel is full.
+	if env.Event.Type == events.MessageDelta {
+		select {
+		case ch <- env:
+		default:
+		}
+		return
 	}
+
+	// Critical events (Done, Error, State) must never be dropped.
+	ch <- env
 }
 
 // monitorProcess waits for the process to exit and handles crash recovery.
 func (m *CodexAppServerManager) monitorProcess() {
-	code, _ := m.proc.Wait()
+	m.mu.Lock()
+	pm := m.proc
+	m.mu.Unlock()
+	if pm == nil {
+		return
+	}
+	code, _ := pm.Wait()
 
 	m.mu.Lock()
 	wasRunning := m.state == stateRunning
@@ -524,31 +562,33 @@ func (m *CodexAppServerManager) monitorProcess() {
 	m.stdin = nil
 	m.stdout = nil
 
-	// Cancel background reader.
+	if m.idleTimer != nil {
+		m.idleTimer.Stop()
+		m.idleTimer = nil
+	}
+
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
 	}
 
-	// Notify crash subscribers if process died unexpectedly while sessions are active.
 	if wasRunning && refs > 0 {
-		m.log.Warn("codex-app-server: process crashed",
-			"exit_code", code, "refs", refs)
+		m.log.Warn("codex-app-server: process crashed", "exit_code", code, "refs", refs)
 		close(m.crashCh)
-		m.crashCh = make(chan struct{}) // new channel for next lifecycle
+		m.crashCh = make(chan struct{})
 	} else {
-		m.log.Info("codex-app-server: process exited",
-			"exit_code", code, "refs", refs)
+		m.log.Info("codex-app-server: process exited", "exit_code", code, "refs", refs)
 	}
 	m.mu.Unlock()
 
-	// Close all subscriber channels outside m.mu to avoid lock nesting.
 	if wasRunning {
+		m.subsClosed.Store(true)
 		m.subMu.Lock()
 		for id, ch := range m.subscribers {
 			close(ch)
 			delete(m.subscribers, id)
 		}
+		m.subSessions = make(map[string]string)
 		m.subMu.Unlock()
 	}
 }

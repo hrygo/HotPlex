@@ -55,6 +55,10 @@ type CodexItemError struct {
 
 // Event type constants for protocol dispatch.
 const (
+	ContentTypeText = "text"
+)
+
+const (
 	EventThreadStarted = "thread.started"
 	EventTurnStarted   = "turn.started"
 	EventTurnCompleted = "turn.completed"

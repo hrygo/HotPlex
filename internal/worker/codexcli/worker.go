@@ -98,7 +98,7 @@ func (w *ExecWorker) startLocked(session worker.SessionInfo) error {
 	}
 
 	w.parser = NewParser()
-	w.mapper = NewMapper(session.SessionID, w.nextSeq)
+	w.mapper = NewMapper(session.SessionID)
 
 	w.started = true
 	return nil
@@ -397,6 +397,7 @@ type AppServerWorker struct {
 
 	manager     *CodexAppServerManager
 	threadID    string
+	userID      string
 	releaseOnce sync.Once
 	crashSub    <-chan struct{}
 	mu          sync.Mutex
@@ -413,9 +414,24 @@ type appConn struct {
 	recvCh    chan *events.Envelope
 	mu        sync.Mutex
 	closed    bool
+	manager   *CodexAppServerManager
 }
 
-func (c *appConn) Send(ctx context.Context, msg *events.Envelope) error { return nil }
+func (c *appConn) Send(ctx context.Context, msg *events.Envelope) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("app-conn: marshal envelope: %w", err)
+	}
+
+	c.manager.writeMu.Lock()
+	_, err = c.manager.stdin.Write(append(data, '\n'))
+	c.manager.writeMu.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("app-conn: write to stdin: %w", err)
+	}
+	return nil
+}
 func (c *appConn) Recv() <-chan *events.Envelope                        { return c.recvCh }
 func (c *appConn) TrySend(env *events.Envelope) bool {
 	select {
@@ -486,8 +502,9 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 
 	w.threadID = result.Thread.ID
 	w.sessionID = session.SessionID
+	w.userID = session.UserID
 
-	w.recvCh = w.manager.Subscribe(w.threadID)
+	w.recvCh = w.manager.Subscribe(w.threadID, w.sessionID)
 	w.commands = NewServerCommander(w.manager, w.threadID)
 	w.BaseWorker.StartTime = time.Now()
 	w.BaseWorker.SetLastIO(w.BaseWorker.StartTime)
@@ -505,12 +522,15 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		return nil
 	}
 
-	if w.threadID == "" {
+	w.mu.Lock()
+	tid := w.threadID
+	w.mu.Unlock()
+	if tid == "" {
 		return fmt.Errorf("codexcli: app-server not started")
 	}
 
 	params := TurnStartParams{
-		ThreadID: w.threadID,
+		ThreadID: tid,
 		Input: []TurnInputItem{
 			{Type: "text", Text: content},
 		},
@@ -540,8 +560,6 @@ func (w *AppServerWorker) Kill() error {
 }
 
 func (w *AppServerWorker) Wait() (int, error) {
-	w.releaseOnce.Do(func() { w.release() })
-
 	if w.crashSub == nil {
 		return 0, nil
 	}
@@ -561,13 +579,14 @@ func (w *AppServerWorker) release() {
 			return
 		}
 		w.closed = true
+		tid := w.threadID
 		w.mu.Unlock()
 
-		if w.manager != nil && w.threadID != "" {
+		if w.manager != nil && tid != "" {
 			_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
-				ThreadID: w.threadID,
+				ThreadID: tid,
 			})
-			w.manager.Unsubscribe(w.threadID)
+			w.manager.Unsubscribe(tid)
 			w.manager.Release()
 		}
 	})
@@ -592,9 +611,10 @@ func (w *AppServerWorker) Conn() worker.SessionConn {
 		return nil
 	}
 	return &appConn{
-		userID:    w.sessionID,
+		userID:    w.userID,
 		sessionID: w.sessionID,
 		recvCh:    w.recvCh,
+		manager:   w.manager,
 	}
 }
 
