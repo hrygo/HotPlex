@@ -482,14 +482,14 @@ type ClaudeCodeConfig struct {
 
 // CodexCLIConfig holds Codex CLI worker startup settings.
 type CodexCLIConfig struct {
-	Command          string        `mapstructure:"command"`           // codex binary path, default "codex"
-	Model            string        `mapstructure:"model"`             // model name, empty = use Codex default
-	Sandbox          string        `mapstructure:"sandbox"`           // sandbox mode, default "workspace-write"
-	ApprovalMode     string        `mapstructure:"approval_mode"`     // approval mode, default "never"
-	Ephemeral        bool          `mapstructure:"ephemeral"`         // ephemeral sessions, default true
-	StartupTimeout   time.Duration `mapstructure:"startup_timeout"`   // process startup timeout, default 30s
-	UseAppServer     bool          `mapstructure:"use_app_server"`    // use persistent app-server mode instead of one-shot exec
-	IdleDrainPeriod  time.Duration `mapstructure:"idle_drain_period"` // idle drain timeout for app-server mode, default 30m
+	Command         string        `mapstructure:"command"`           // codex binary path, default "codex"
+	Model           string        `mapstructure:"model"`             // model name, empty = use Codex default
+	Sandbox         string        `mapstructure:"sandbox"`           // sandbox mode, default "workspace-write"
+	ApprovalMode    string        `mapstructure:"approval_mode"`     // approval mode, default "never"
+	Ephemeral       bool          `mapstructure:"ephemeral"`         // ephemeral sessions, default true
+	StartupTimeout  time.Duration `mapstructure:"startup_timeout"`   // process startup timeout, default 30s
+	UseAppServer    bool          `mapstructure:"use_app_server"`    // use persistent app-server mode instead of one-shot exec
+	IdleDrainPeriod time.Duration `mapstructure:"idle_drain_period"` // idle drain timeout for app-server mode, default 30m
 }
 
 // OpenCodeServerConfig holds OpenCode Server singleton process settings.

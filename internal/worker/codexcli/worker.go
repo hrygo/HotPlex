@@ -38,18 +38,18 @@ func init() {
 type ExecWorker struct {
 	*base.BaseWorker
 
-	cfg        Config
-	mu         sync.Mutex
-	started    bool
-	sessionID  string
-	projectDir string
+	cfg         Config
+	mu          sync.Mutex
+	started     bool
+	sessionID   string
+	projectDir  string
 	origSession worker.SessionInfo
 
 	threadID string
 
-	parser  *Parser
-	mapper  *Mapper
-	cancel  context.CancelFunc
+	parser *Parser
+	mapper *Mapper
+	cancel context.CancelFunc
 
 	readLineFn func() (string, error)
 	testConn   worker.SessionConn
@@ -64,14 +64,14 @@ type Config struct {
 	StartupTimeout time.Duration
 }
 
-func (w *ExecWorker) Type() worker.WorkerType    { return worker.TypeCodexCLI }
-func (w *ExecWorker) SupportsResume() bool       { return true }
-func (w *ExecWorker) SupportsStreaming() bool    { return true }
-func (w *ExecWorker) SupportsTools() bool        { return true }
-func (w *ExecWorker) EnvBlocklist() []string     { return EnvBlocklist }
-func (w *ExecWorker) SessionStoreDir() string    { return "" }
-func (w *ExecWorker) MaxTurns() int              { return 0 }
-func (w *ExecWorker) Modalities() []string       { return []string{"text", "code"} }
+func (w *ExecWorker) Type() worker.WorkerType { return worker.TypeCodexCLI }
+func (w *ExecWorker) SupportsResume() bool    { return true }
+func (w *ExecWorker) SupportsStreaming() bool { return true }
+func (w *ExecWorker) SupportsTools() bool     { return true }
+func (w *ExecWorker) EnvBlocklist() []string  { return EnvBlocklist }
+func (w *ExecWorker) SessionStoreDir() string { return "" }
+func (w *ExecWorker) MaxTurns() int           { return 0 }
+func (w *ExecWorker) Modalities() []string    { return []string{"text", "code"} }
 
 func (w *ExecWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
@@ -140,7 +140,7 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 	return args
 }
 
-func (w *ExecWorker) spawn(ctx context.Context, prompt string) error {
+func (w *ExecWorker) spawn(_ context.Context, prompt string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -173,11 +173,11 @@ func (w *ExecWorker) spawn(ctx context.Context, prompt string) error {
 		w.readLineFn = w.Proc.ReadLine
 	}
 
-	conn := base.NewConn(w.BaseWorker.Log, stdin, session.UserID, session.SessionID)
+	conn := base.NewConn(w.Log, stdin, session.UserID, session.SessionID)
 	w.SetConnLocked(conn)
 
-	w.BaseWorker.StartTime = time.Now()
-	w.BaseWorker.SetLastIO(w.BaseWorker.StartTime)
+	w.StartTime = time.Now()
+	w.SetLastIO(w.StartTime)
 
 	go w.readOutput(childCtx, stdout, conn)
 	return nil
@@ -255,7 +255,7 @@ func (w *ExecWorker) LastIO() time.Time {
 func (w *ExecWorker) readOutput(ctx context.Context, stdout io.Reader, entryConn *base.Conn) {
 	defer func() {
 		if r := recover(); r != nil {
-			w.BaseWorker.Log.Error("codexcli: readOutput panic",
+			w.Log.Error("codexcli: readOutput panic",
 				"session_id", w.sessionID, "panic", r)
 		}
 		if entryConn != nil {
@@ -402,7 +402,7 @@ func (c *appConn) Send(ctx context.Context, msg *events.Envelope) error {
 	}
 	return nil
 }
-func (c *appConn) Recv() <-chan *events.Envelope                        { return c.recvCh }
+func (c *appConn) Recv() <-chan *events.Envelope { return c.recvCh }
 func (c *appConn) TrySend(env *events.Envelope) bool {
 	select {
 	case c.recvCh <- env:
@@ -414,7 +414,9 @@ func (c *appConn) TrySend(env *events.Envelope) bool {
 func (c *appConn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed { return nil }
+	if c.closed {
+		return nil
+	}
 	c.closed = true
 	close(c.recvCh)
 	return nil
@@ -422,14 +424,14 @@ func (c *appConn) Close() error {
 func (c *appConn) UserID() string    { return c.userID }
 func (c *appConn) SessionID() string { return c.sessionID }
 
-func (w *AppServerWorker) Type() worker.WorkerType  { return worker.TypeCodexCLI }
-func (w *AppServerWorker) SupportsResume() bool     { return true }
-func (w *AppServerWorker) SupportsStreaming() bool  { return true }
-func (w *AppServerWorker) SupportsTools() bool      { return true }
-func (w *AppServerWorker) EnvBlocklist() []string   { return EnvBlocklist }
-func (w *AppServerWorker) SessionStoreDir() string  { return "" }
-func (w *AppServerWorker) MaxTurns() int            { return 0 }
-func (w *AppServerWorker) Modalities() []string     { return []string{"text", "code"} }
+func (w *AppServerWorker) Type() worker.WorkerType { return worker.TypeCodexCLI }
+func (w *AppServerWorker) SupportsResume() bool    { return true }
+func (w *AppServerWorker) SupportsStreaming() bool { return true }
+func (w *AppServerWorker) SupportsTools() bool     { return true }
+func (w *AppServerWorker) EnvBlocklist() []string  { return EnvBlocklist }
+func (w *AppServerWorker) SessionStoreDir() string { return "" }
+func (w *AppServerWorker) MaxTurns() int           { return 0 }
+func (w *AppServerWorker) Modalities() []string    { return []string{"text", "code"} }
 
 func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
@@ -482,8 +484,8 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 		recvCh:    w.recvCh,
 		manager:   w.manager,
 	}
-	w.BaseWorker.StartTime = time.Now()
-	w.BaseWorker.SetLastIO(w.BaseWorker.StartTime)
+	w.StartTime = time.Now()
+	w.SetLastIO(w.StartTime)
 
 	return nil
 }

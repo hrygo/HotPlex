@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/pkg/events"
-	"github.com/stretchr/testify/require"
 )
 
 func TestParserParseLine(t *testing.T) {
@@ -464,15 +465,15 @@ func TestManagerSubscribeUnsubscribe(t *testing.T) {
 	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
 	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
-	ch := 	mgr.Subscribe("thread-1", "session-thread-1")
+	ch := mgr.Subscribe("thread-1", "session-thread-1")
 	require.NotNil(t, ch)
 
 	// Second subscribe returns same channel
-	ch2 := 	mgr.Subscribe("thread-1", "session-thread-1")
+	ch2 := mgr.Subscribe("thread-1", "session-thread-1")
 	require.Equal(t, ch, ch2)
 
 	// Different thread gets different channel
-	ch3 := 	mgr.Subscribe("thread-2", "session-thread-2")
+	ch3 := mgr.Subscribe("thread-2", "session-thread-2")
 	require.NotNil(t, ch3)
 	require.NotEqual(t, ch, ch3)
 
@@ -482,7 +483,7 @@ func TestManagerSubscribeUnsubscribe(t *testing.T) {
 	require.False(t, ok) // channel closed
 
 	// Re-subscribe after unsubscribe creates new channel
-	ch4 := 	mgr.Subscribe("thread-1", "session-thread-1")
+	ch4 := mgr.Subscribe("thread-1", "session-thread-1")
 	require.NotNil(t, ch4)
 	require.NotEqual(t, ch, ch4)
 }
@@ -529,8 +530,8 @@ func TestManagerShutdown(t *testing.T) {
 	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
 	// Add some subscribers
-	ch1 := 	mgr.Subscribe("thread-1", "session-thread-1")
-	ch2 := 	mgr.Subscribe("thread-2", "session-thread-2")
+	ch1 := mgr.Subscribe("thread-1", "session-thread-1")
+	ch2 := mgr.Subscribe("thread-2", "session-thread-2")
 
 	mgr.Shutdown(context.Background())
 

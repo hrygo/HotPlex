@@ -57,12 +57,12 @@ type CodexAppServerManager struct {
 	log *slog.Logger
 	cfg config.CodexCLIConfig
 
-	mu     sync.Mutex
-	proc   *proc.Manager
-	stdin  io.WriteCloser
-	stdout io.Reader
-	refs   int
-	state  managerState
+	mu      sync.Mutex
+	proc    *proc.Manager
+	stdin   io.WriteCloser
+	stdout  io.Reader
+	refs    int
+	state   managerState
 	crashCh chan struct{} // closed when process exits unexpectedly
 
 	// pending maps JSON-RPC request IDs to response channels.
@@ -339,7 +339,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 }
 
 // handshake performs the JSON-RPC initialize/initialized handshake.
-func (m *CodexAppServerManager) handshake(ctx context.Context) error {
+func (m *CodexAppServerManager) handshake(_ context.Context) error {
 	type initializeResult struct {
 		Capabilities json.RawMessage `json:"capabilities"`
 	}
