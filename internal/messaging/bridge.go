@@ -76,6 +76,12 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 		return fmt.Errorf("messaging bridge: OwnerID not set for platform message")
 	}
 
+	// Register platform conn BEFORE starting the session so that early events
+	// (e.g. state transitions) are routed to the platform instead of being dropped.
+	if pc != nil && b.hub != nil {
+		b.hub.JoinPlatformSession(env.SessionID, pc)
+	}
+
 	// Auto-create session if starter is available.
 	if b.starter != nil {
 		// Extract platform key from envelope metadata for persistence.
@@ -87,11 +93,6 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, platform, platformKey, botID); err != nil {
 			return fmt.Errorf("messaging bridge: session start failed: %w", err)
 		}
-	}
-
-	// Register platform conn so worker output is routed back to the platform.
-	if pc != nil && b.hub != nil {
-		b.hub.JoinPlatformSession(env.SessionID, pc)
 	}
 
 	// Assign monotonically increasing seq (messaging path lacks conn.go's NextSeq call).

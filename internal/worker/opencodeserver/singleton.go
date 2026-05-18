@@ -436,6 +436,9 @@ func (s *SingletonProcessManager) startIdleDrainLocked() {
 func (s *SingletonProcessManager) buildEnv() []string {
 	env := base.BuildEnv(worker.SessionInfo{}, openCodeSrvEnvBlocklist, "opencode-server")
 	env = append(env, "OPENCODE_EXPERIMENTAL_EVENT_SYSTEM=true")
+	if s.cfg.Password != "" {
+		env = append(env, "OPENCODE_SERVER_PASSWORD="+s.cfg.Password)
+	}
 	return env
 }
 

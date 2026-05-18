@@ -29,6 +29,8 @@ pool:
 worker:
   idle_timeout: 30m
   execution_timeout: 30m
+  opencode_server:
+    password: "${OPENCODE_SERVER_PASSWORD}"
 
 log:
   level: "debug"

@@ -635,7 +635,14 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		"last_flushed_len", len(c.lastFlushed))
 
 	finalFlushOK := false
-	if c.cardKitOK && c.cardID != "" {
+	// Skip final flush when content is empty — CardKit rejects empty content
+	// with code 99992402. If lastFlushed has content, the streaming card already
+	// displays it from the periodic flush loop.
+	if content == "" && c.lastFlushed != "" {
+		c.log.Debug("feishu: skipping final flush, content empty (already flushed)",
+			"last_flushed_len", len(c.lastFlushed))
+		finalFlushOK = true
+	} else if c.cardKitOK && c.cardID != "" {
 		seq := int(c.sequence.Add(1))
 		if err := c.flushCardKitElement(ctx, c.elementID, content, seq); err != nil {
 			c.log.Warn("feishu: final cardkit flush failed, attempting IM patch fallback",

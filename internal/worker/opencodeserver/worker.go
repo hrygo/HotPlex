@@ -78,8 +78,13 @@ const (
 	// recvChannelSize is the buffer size for SSE event channel.
 	recvChannelSize = 256
 
-	// httpClientTimeout is the timeout for HTTP client operations.
+	// httpClientTimeout is the timeout for general HTTP client operations.
 	httpClientTimeout = 30 * time.Second
+
+	// sendTimeout is the timeout for sending user input to the OCS server.
+	// The OCS POST /session/{id}/message blocks until the turn completes,
+	// so this must be long enough for the longest expected turn.
+	sendTimeout = 5 * time.Minute
 )
 
 // Worker implements the OpenCode Server worker adapter.
@@ -155,6 +160,20 @@ func New() *Worker {
 func newHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: httpClientTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 100,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+}
+
+// newSendClient creates an HTTP client with a longer timeout for sending
+// user input. The OCS POST /session/{id}/message blocks until the turn
+// completes, so the default 30s timeout causes false "server unreachable" errors.
+func newSendClient() *http.Client {
+	return &http.Client{
+		Timeout: sendTimeout,
 		Transport: &http.Transport{
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 100,
@@ -520,6 +539,7 @@ func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string, session wo
 		sessionID:    sessionID,
 		httpAddr:     w.httpAddr,
 		client:       w.client,
+		sendClient:   newSendClient(),
 		recvCh:       make(chan *events.Envelope, recvChannelSize),
 		log:          w.Log,
 		systemPrompt: systemPrompt,
@@ -744,6 +764,7 @@ type conn struct {
 	sessionID    string
 	httpAddr     string
 	client       *http.Client
+	sendClient   *http.Client // longer timeout for input delivery (OCS blocks until turn completes)
 	recvCh       chan *events.Envelope
 	log          *slog.Logger
 	systemPrompt string
@@ -833,9 +854,18 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	// Use sendClient (long timeout) for input delivery; fall back to client for tests.
+	sendCl := c.sendClient
+	if sendCl == nil {
+		sendCl = c.client
+	}
+	resp, err := sendCl.Do(req)
 	if err != nil {
-		if isServerDownError(err) {
+		if isTimeoutError(err) {
+			// Server is alive but response took too long — do not treat as unreachable.
+			return &worker.WorkerError{Kind: worker.ErrKindTimeout, Message: "opencodeserver: input delivery timed out", Cause: err}
+		}
+		if isUnreachableError(err) {
 			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "opencodeserver: server unreachable", Cause: err}
 		}
 		return fmt.Errorf("opencodeserver: send input: %w", err)
@@ -873,15 +903,24 @@ func (c *conn) Close() error {
 func (c *conn) UserID() string    { return c.userID }
 func (c *conn) SessionID() string { return c.sessionID }
 
-// isServerDownError classifies network/timeout errors as "server unavailable".
-func isServerDownError(err error) bool {
+// isTimeoutError reports whether the error is a timeout (deadline exceeded or
+// net.Error with Timeout()=true). The server may still be alive and processing.
+func isTimeoutError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	if _, ok := errors.AsType[net.Error](err); ok {
-		return true
+	ne, ok := errors.AsType[net.Error](err)
+	return ok && ne.Timeout()
+}
+
+// isUnreachableError reports whether the error indicates the server is actually
+// unreachable (connection refused, DNS failure, etc.) — not a timeout.
+func isUnreachableError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return false // timeout is not unreachable
 	}
-	return false
+	ne, ok := errors.AsType[net.Error](err)
+	return ok && !ne.Timeout()
 }
 
 // ─── Init ────────────────────────────────────────────────────────────────────

@@ -481,6 +481,7 @@ type ClaudeCodeConfig struct {
 // OpenCodeServerConfig holds OpenCode Server singleton process settings.
 type OpenCodeServerConfig struct {
 	Command           string        `mapstructure:"command"` // binary + optional subcommand, e.g. "opencode" or "opencode serve"
+	Password          string        `mapstructure:"password"`
 	IdleDrainPeriod   time.Duration `mapstructure:"idle_drain_period"`
 	ReadyTimeout      time.Duration `mapstructure:"ready_timeout"`
 	ReadyPollInterval time.Duration `mapstructure:"ready_poll_interval"`
@@ -856,6 +857,7 @@ func Load(filePath string, opts LoadOptions) (*Config, error) {
 	_ = v.BindEnv("worker.opencode_server.ready_timeout")
 	_ = v.BindEnv("worker.opencode_server.ready_poll_interval")
 	_ = v.BindEnv("worker.opencode_server.http_timeout")
+	_ = v.BindEnv("worker.opencode_server.password")
 	_ = v.BindEnv("security.jwt_audience")
 	_ = v.BindEnv("security.api_key_header")
 	_ = v.BindEnv("agent_config.enabled")
@@ -1022,6 +1024,7 @@ func (c *Config) normalizePaths() {
 		&c.Admin.Addr,
 		&c.Worker.ClaudeCode.Command,
 		&c.Worker.OpenCodeServer.Command,
+		&c.Worker.OpenCodeServer.Password,
 		&c.Messaging.Slack.LocalCmd,
 		&c.Messaging.Feishu.LocalCmd,
 		&c.Messaging.Feishu.MossModelDir,

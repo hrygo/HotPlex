@@ -1088,9 +1088,9 @@ func TestConn_ImplementsInputRecoverer(t *testing.T) {
 	var _ worker.InputRecoverer = (*conn)(nil)
 }
 
-// ─── isServerDownError Tests ──────────────────────────────────────────────────
+// ─── Error Classification Tests ─────────────────────────────────────────────
 
-func TestIsServerDownError(t *testing.T) {
+func TestIsTimeoutError(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -1106,7 +1106,28 @@ func TestIsServerDownError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tt.want, isServerDownError(tt.err))
+			require.Equal(t, tt.want, isTimeoutError(tt.err))
+		})
+	}
+}
+
+func TestIsUnreachableError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"context deadline is not unreachable", context.DeadlineExceeded, false},
+		{"nil error", nil, false},
+		{"generic error", io.ErrUnexpectedEOF, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, isUnreachableError(tt.err))
 		})
 	}
 }

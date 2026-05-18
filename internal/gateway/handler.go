@@ -221,6 +221,12 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 			h.log.Debug("gateway: delivering input to worker", "session_id", env.SessionID, "content_len", len(content), "preview", preview)
 		}
 		if err := w.Input(ctx, content, nil); err != nil {
+			// Timeout errors mean the worker is still processing — don't send error card.
+			var we *worker.WorkerError
+			if errors.As(err, &we) && we.Kind == worker.ErrKindTimeout {
+				h.log.Info("gateway: worker input delivery timed out (worker still processing)", "session_id", env.SessionID)
+				return nil
+			}
 			h.log.Warn("gateway: worker input", "err", err, "session_id", env.SessionID)
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker input failed: %v", err)
 		}

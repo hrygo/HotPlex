@@ -22,10 +22,16 @@ func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code eve
 // classifyWorkerError converts worker errors into AEP error codes.
 // Worker process death (ErrKindUnavailable) maps to ErrCodeSessionTerminated
 // so clients can reconnect rather than treating them as transient internal errors.
+// Timeout errors (ErrKindTimeout) are not treated as fatal — the worker is still alive.
 func classifyWorkerError(err error) events.ErrorCode {
-	var we *worker.WorkerError
-	if errors.As(err, &we) && we.Kind == worker.ErrKindUnavailable {
-		return events.ErrCodeSessionTerminated
+	we, ok := errors.AsType[*worker.WorkerError](err)
+	if ok {
+		switch we.Kind {
+		case worker.ErrKindUnavailable:
+			return events.ErrCodeSessionTerminated
+		case worker.ErrKindTimeout:
+			return events.ErrCodeInternalError
+		}
 	}
 	return events.ErrCodeInternalError
 }

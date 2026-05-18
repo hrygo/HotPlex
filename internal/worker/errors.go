@@ -9,6 +9,9 @@ const (
 	// ErrKindSessionInUse indicates session files are locked by another process
 	// (e.g. leftover from a crashed session).
 	ErrKindSessionInUse
+	// ErrKindTimeout indicates the worker operation timed out (not unreachable).
+	// The worker is alive but the response took too long.
+	ErrKindTimeout
 )
 
 // WorkerError is a typed error carrying a classification kind.
