@@ -15,7 +15,7 @@ export function SystemPromptPreview({ botName }: { botName: string }) {
     setError(null);
     try {
       const res = await previewSystemPrompt(botName);
-      setPreview(res.prompt);
+      setPreview(res.preview);
     } catch (err) {
       setError(String(err));
     } finally {

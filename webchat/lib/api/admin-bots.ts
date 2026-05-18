@@ -21,21 +21,21 @@ export function getBot(name: string): Promise<BotConfigEntry> {
 }
 
 export function createBot(attrs: Partial<BotConfigEntry>): Promise<BotConfigEntry> {
-  return adminFetch<BotConfigEntry>('/admin/bots/config', {
+  return adminFetch<BotConfigEntry>('/admin/bots', {
     method: 'POST',
     body: JSON.stringify(attrs),
   });
 }
 
 export function updateBot(name: string, updates: Partial<BotConfigEntry>): Promise<BotConfigEntry> {
-  return adminFetch<BotConfigEntry>(`/admin/bots/${encodeURIComponent(name)}/config`, {
+  return adminFetch<BotConfigEntry>(`/admin/bots/${encodeURIComponent(name)}`, {
     method: 'PATCH',
     body: JSON.stringify(updates),
   });
 }
 
 export function deleteBot(name: string): Promise<void> {
-  return adminFetch<void>(`/admin/bots/${encodeURIComponent(name)}/config`, {
+  return adminFetch<void>(`/admin/bots/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   });
 }
@@ -68,6 +68,6 @@ export function writeAgentFile(
 // System Prompt Preview
 // ---------------------------------------------------------------------------
 
-export function previewSystemPrompt(name: string): Promise<{ prompt: string }> {
-  return adminFetch<{ prompt: string }>(`/admin/bots/${encodeURIComponent(name)}/preview`);
+export function previewSystemPrompt(name: string): Promise<{ preview: string }> {
+  return adminFetch<{ preview: string }>(`/admin/bots/${encodeURIComponent(name)}/preview`);
 }

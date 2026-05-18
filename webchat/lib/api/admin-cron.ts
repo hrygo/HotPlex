@@ -25,7 +25,7 @@ export function deleteCronJob(id: string): Promise<void> {
 }
 
 export function triggerCronJob(id: string): Promise<void> {
-  return adminFetch<void>(`/api/cron/jobs/${encodeURIComponent(id)}/trigger`, {
+  return adminFetch<void>(`/api/cron/jobs/${encodeURIComponent(id)}/run`, {
     method: 'POST',
   });
 }

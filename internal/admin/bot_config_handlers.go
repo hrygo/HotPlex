@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // HandleListBotConfigs returns all registered bot configurations.
@@ -174,7 +175,11 @@ func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.botConfig.DeleteBot(r.Context(), name); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		status := http.StatusNotFound
+		if isConflictError(err) {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	a.log.Info("admin: bot deleted", "bot", name, "admin", adminKeyPrefix(r))
@@ -222,6 +227,9 @@ func (a *AdminAPI) HandleWriteAgentConfigFile(w http.ResponseWriter, r *http.Req
 // extractBotConfigAttrs builds BotConfigAttrs from a raw JSON map.
 func extractBotConfigAttrs(body map[string]any) *BotConfigAttrs {
 	attrs := &BotConfigAttrs{}
+	if v, ok := body["platform"].(string); ok {
+		attrs.Platform = v
+	}
 	if v, ok := body["worker_type"].(string); ok {
 		attrs.WorkerType = v
 	}
@@ -275,4 +283,14 @@ func toStringSlice(vals []any) []string {
 		}
 	}
 	return result
+}
+
+// isConflictError checks whether the error indicates a conflict
+// (e.g., trying to delete a running bot).
+func isConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "running") || strings.Contains(msg, "conflict")
 }

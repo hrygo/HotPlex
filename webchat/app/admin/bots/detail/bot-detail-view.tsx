@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { getBot } from '@/lib/api/admin-bots';
 import { BotConfigEditor } from '@/components/admin/bot-config-editor';
 import { SystemPromptPreview } from '@/components/admin/system-prompt-preview';
@@ -13,9 +13,7 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
       <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1">
         {label}
       </p>
-      <p
-        className={`text-sm text-[var(--text-primary)] ${mono ? 'font-mono' : ''} break-all`}
-      >
+      <p className={`text-sm text-[var(--text-primary)] ${mono ? 'font-mono' : ''} break-all`}>
         {value || '—'}
       </p>
     </div>
@@ -31,8 +29,8 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 export function BotDetailView() {
-  const params = useParams();
-  const name = decodeURIComponent(params.name as string);
+  const searchParams = useSearchParams();
+  const name = searchParams.get('name') ?? '';
 
   const [bot, setBot] = useState<BotConfigEntry | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,22 +38,29 @@ export function BotDetailView() {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
 
   useEffect(() => {
+    if (!name) return;
     let cancelled = false;
     setLoading(true);
     getBot(name)
-      .then((data) => {
+      .then((data: BotConfigEntry) => {
         if (!cancelled) setBot(data);
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (!cancelled) setError(String(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [name]);
+
+  if (!name) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <p className="text-sm text-[var(--text-faint)]">No bot name specified</p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -119,9 +124,7 @@ export function BotDetailView() {
         </div>
       )}
 
-      {activeTab === 'config' && (
-        <BotConfigEditor botName={name} />
-      )}
+      {activeTab === 'config' && <BotConfigEditor botName={name} />}
 
       {activeTab === 'access' && (
         <div className="grid grid-cols-2 gap-3">

@@ -43,6 +43,7 @@ type BotConfigEntry struct {
 
 // BotConfigAttrs holds the mutable attributes of a bot configuration.
 type BotConfigAttrs struct {
+	Platform       string    `json:"platform,omitempty"`
 	WorkerType     string    `json:"worker_type,omitempty"`
 	WorkDir        string    `json:"work_dir,omitempty"`
 	DMPolicy       string    `json:"dm_policy,omitempty"`

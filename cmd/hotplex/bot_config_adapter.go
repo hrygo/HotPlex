@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/hrygo/hotplex/internal/admin"
 	"github.com/hrygo/hotplex/internal/agentconfig"
@@ -119,17 +123,128 @@ func (a *botConfigAdapter) GetSystemPromptPreview(ctx context.Context, botName s
 
 // UpdateBotConfig applies partial updates to an existing bot configuration.
 func (a *botConfigAdapter) UpdateBotConfig(ctx context.Context, name string, attrs *admin.BotConfigAttrs) error {
-	return fmt.Errorf("not implemented")
+	platform, _, ok := resolvePlatformAndBotID(name)
+	if !ok {
+		return fmt.Errorf("bot %q not found in registry", name)
+	}
+
+	cfg := a.cfgStore.Load()
+
+	switch platform {
+	case "slack":
+		bot := resolveSlackBot(cfg, name)
+		if bot == nil {
+			return fmt.Errorf("bot %q not found in slack config", name)
+		}
+		applyBotAttrsToSlack(bot, attrs)
+	case "feishu":
+		bot := resolveFeishuBot(cfg, name)
+		if bot == nil {
+			return fmt.Errorf("bot %q not found in feishu config", name)
+		}
+		applyBotAttrsToFeishu(bot, attrs)
+	default:
+		return fmt.Errorf("unknown platform %q", platform)
+	}
+
+	return a.writeConfig(cfg)
 }
 
 // CreateBot registers a new bot with the given attributes.
 func (a *botConfigAdapter) CreateBot(ctx context.Context, name string, attrs *admin.BotConfigAttrs) error {
-	return fmt.Errorf("not implemented")
+	if name == "" {
+		return fmt.Errorf("bot name must not be empty")
+	}
+
+	// Check that the name does not already exist in the registry.
+	registry := messaging.DefaultBotRegistry()
+	if _, found := registry.GetByName(name); found {
+		return fmt.Errorf("bot %q already exists", name)
+	}
+
+	// Determine which platform to create the bot on.
+	cfg := a.cfgStore.Load()
+	platform := attrs.Platform
+	if platform == "" {
+		// Fallback: prefer the first enabled platform.
+		switch {
+		case cfg.Messaging.Feishu.Enabled:
+			platform = "feishu"
+		case cfg.Messaging.Slack.Enabled:
+			platform = "slack"
+		default:
+			return fmt.Errorf("no messaging platform enabled; cannot create bot")
+		}
+	}
+
+	switch platform {
+	case "feishu":
+		if !cfg.Messaging.Feishu.Enabled {
+			return fmt.Errorf("feishu platform is not enabled")
+		}
+		if resolveFeishuBot(cfg, name) != nil {
+			return fmt.Errorf("bot %q already exists in feishu config", name)
+		}
+		newBot := config.FeishuBotConfig{Name: name}
+		applyBotAttrsToFeishu(&newBot, attrs)
+		cfg.Messaging.Feishu.Bots = append(cfg.Messaging.Feishu.Bots, newBot)
+	case "slack":
+		if !cfg.Messaging.Slack.Enabled {
+			return fmt.Errorf("slack platform is not enabled")
+		}
+		if resolveSlackBot(cfg, name) != nil {
+			return fmt.Errorf("bot %q already exists in slack config", name)
+		}
+		newBot := config.SlackBotConfig{Name: name}
+		applyBotAttrsToSlack(&newBot, attrs)
+		cfg.Messaging.Slack.Bots = append(cfg.Messaging.Slack.Bots, newBot)
+	default:
+		return fmt.Errorf("unsupported platform %q", platform)
+	}
+
+	// Create agent-config directory for the bot.
+	botDir := filepath.Join(a.agentConfigDir, platform, name)
+	if err := os.MkdirAll(botDir, 0o755); err != nil {
+		return fmt.Errorf("create agent config directory: %w", err)
+	}
+
+	return a.writeConfig(cfg)
 }
 
 // DeleteBot removes a bot registration by name.
 func (a *botConfigAdapter) DeleteBot(ctx context.Context, name string) error {
-	return fmt.Errorf("not implemented")
+	platform, _, ok := resolvePlatformAndBotID(name)
+	if !ok {
+		return fmt.Errorf("bot %q not found in registry", name)
+	}
+
+	// Check if the bot is currently running.
+	registry := messaging.DefaultBotRegistry()
+	entry, found := registry.GetByName(name)
+	if found && entry.Status == messaging.BotStatusRunning {
+		return fmt.Errorf("bot %q is running (status=%s); stop it before deleting", name, entry.Status)
+	}
+
+	cfg := a.cfgStore.Load()
+
+	switch platform {
+	case "slack":
+		idx := findSlackBotIndex(cfg, name)
+		if idx < 0 {
+			return fmt.Errorf("bot %q not found in slack config", name)
+		}
+		cfg.Messaging.Slack.Bots = append(cfg.Messaging.Slack.Bots[:idx], cfg.Messaging.Slack.Bots[idx+1:]...)
+	case "feishu":
+		idx := findFeishuBotIndex(cfg, name)
+		if idx < 0 {
+			return fmt.Errorf("bot %q not found in feishu config", name)
+		}
+		cfg.Messaging.Feishu.Bots = append(cfg.Messaging.Feishu.Bots[:idx], cfg.Messaging.Feishu.Bots[idx+1:]...)
+	default:
+		return fmt.Errorf("unknown platform %q", platform)
+	}
+
+	return a.writeConfig(cfg)
 }
 
 // WriteAgentConfigFile writes content to a single agent config file for the named bot.
@@ -318,4 +433,135 @@ func getConfigField(configs *agentconfig.AgentConfigs, file admin.AgentConfigFil
 	default:
 		return ""
 	}
+}
+
+// writeConfig atomically writes the config to disk: marshal YAML, write to a
+// temp file in the same directory, then rename over the original.
+func (a *botConfigAdapter) writeConfig(cfg *config.Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	cfgPath := a.configFilePath
+	dir := filepath.Dir(cfgPath)
+	tmp, err := os.CreateTemp(dir, "hotplex-config-*")
+	if err != nil {
+		return fmt.Errorf("create temp config file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp config file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temp config file: %w", err)
+	}
+	_ = tmp.Close()
+
+	if err := os.Rename(tmpName, cfgPath); err != nil {
+		return fmt.Errorf("rename config file: %w", err)
+	}
+	return nil
+}
+
+// applyBotAttrsToSlack applies non-zero/non-nil fields from attrs to the Slack bot config.
+func applyBotAttrsToSlack(bot *config.SlackBotConfig, attrs *admin.BotConfigAttrs) {
+	if attrs.WorkerType != "" {
+		bot.WorkerType = attrs.WorkerType
+	}
+	if attrs.WorkDir != "" {
+		bot.WorkDir = attrs.WorkDir
+	}
+	if attrs.DMPolicy != "" {
+		bot.DMPolicy = attrs.DMPolicy
+	}
+	if attrs.GroupPolicy != "" {
+		bot.GroupPolicy = attrs.GroupPolicy
+	}
+	if attrs.RequireMention {
+		bot.RequireMention = &attrs.RequireMention
+	}
+	if len(attrs.AllowFrom) > 0 {
+		bot.AllowFrom = attrs.AllowFrom
+	}
+	if len(attrs.AllowDMFrom) > 0 {
+		bot.AllowDMFrom = attrs.AllowDMFrom
+	}
+	if len(attrs.AllowGroupFrom) > 0 {
+		bot.AllowGroupFrom = attrs.AllowGroupFrom
+	}
+	if attrs.STT != nil && attrs.STT.Provider != "" {
+		bot.Provider = attrs.STT.Provider
+	}
+	if attrs.TTS != nil {
+		if attrs.TTS.Provider != "" {
+			bot.TTSProvider = attrs.TTS.Provider
+		}
+		if attrs.TTS.Voice != "" {
+			bot.Voice = attrs.TTS.Voice
+		}
+	}
+}
+
+// applyBotAttrsToFeishu applies non-zero/non-nil fields from attrs to the Feishu bot config.
+func applyBotAttrsToFeishu(bot *config.FeishuBotConfig, attrs *admin.BotConfigAttrs) {
+	if attrs.WorkerType != "" {
+		bot.WorkerType = attrs.WorkerType
+	}
+	if attrs.WorkDir != "" {
+		bot.WorkDir = attrs.WorkDir
+	}
+	if attrs.DMPolicy != "" {
+		bot.DMPolicy = attrs.DMPolicy
+	}
+	if attrs.GroupPolicy != "" {
+		bot.GroupPolicy = attrs.GroupPolicy
+	}
+	if attrs.RequireMention {
+		bot.RequireMention = &attrs.RequireMention
+	}
+	if len(attrs.AllowFrom) > 0 {
+		bot.AllowFrom = attrs.AllowFrom
+	}
+	if len(attrs.AllowDMFrom) > 0 {
+		bot.AllowDMFrom = attrs.AllowDMFrom
+	}
+	if len(attrs.AllowGroupFrom) > 0 {
+		bot.AllowGroupFrom = attrs.AllowGroupFrom
+	}
+	if attrs.STT != nil && attrs.STT.Provider != "" {
+		bot.Provider = attrs.STT.Provider
+	}
+	if attrs.TTS != nil {
+		if attrs.TTS.Provider != "" {
+			bot.TTSProvider = attrs.TTS.Provider
+		}
+		if attrs.TTS.Voice != "" {
+			bot.Voice = attrs.TTS.Voice
+		}
+	}
+}
+
+// findSlackBotIndex returns the index of the Slack bot with the given name, or -1.
+func findSlackBotIndex(cfg *config.Config, name string) int {
+	for i := range cfg.Messaging.Slack.Bots {
+		if cfg.Messaging.Slack.Bots[i].Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// findFeishuBotIndex returns the index of the Feishu bot with the given name, or -1.
+func findFeishuBotIndex(cfg *config.Config, name string) int {
+	for i := range cfg.Messaging.Feishu.Bots {
+		if cfg.Messaging.Feishu.Bots[i].Name == name {
+			return i
+		}
+	}
+	return -1
 }

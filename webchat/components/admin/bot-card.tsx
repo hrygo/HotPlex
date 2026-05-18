@@ -36,7 +36,7 @@ export function BotCard({ bot }: BotCardProps) {
 
   return (
     <Link
-      href={`/admin/bots/${bot.name}`}
+      href={`/admin/bots/detail?name=${encodeURIComponent(bot.name)}`}
       className="group block rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] p-4 transition-all hover:border-[var(--border-bright)] hover:bg-[var(--bg-elevated)]"
     >
       {/* Header: name + platform */}
