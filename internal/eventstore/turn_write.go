@@ -1,5 +1,11 @@
 package eventstore
 
+// Turn role constants.
+const (
+	RoleUser      = "user"
+	RoleAssistant = "assistant"
+)
+
 // TurnWriteRequest is the write payload for a single turn row.
 // Produced by Bridge (assistant turns on done, user turns on input),
 // consumed by the Collector's background batch writer.

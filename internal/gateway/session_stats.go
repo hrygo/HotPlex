@@ -103,21 +103,11 @@ func (a *sessionAccumulator) computePerTurnDeltas() {
 	a.PerTurnCost = a.TotalCostUSD - a.PrevTotalCost
 	a.PerTurnCacheWrite = a.TotalCacheWrite - a.PrevCacheWrite
 	a.PerTurnCacheRead = a.TotalCacheRead - a.PrevCacheRead
-	if a.PerTurnInput < 0 {
-		a.PerTurnInput = 0
-	}
-	if a.PerTurnOutput < 0 {
-		a.PerTurnOutput = 0
-	}
-	if a.PerTurnCost < 0 {
-		a.PerTurnCost = 0
-	}
-	if a.PerTurnCacheWrite < 0 {
-		a.PerTurnCacheWrite = 0
-	}
-	if a.PerTurnCacheRead < 0 {
-		a.PerTurnCacheRead = 0
-	}
+	a.PerTurnInput = max(a.PerTurnInput, 0)
+	a.PerTurnOutput = max(a.PerTurnOutput, 0)
+	a.PerTurnCost = max(a.PerTurnCost, 0)
+	a.PerTurnCacheWrite = max(a.PerTurnCacheWrite, 0)
+	a.PerTurnCacheRead = max(a.PerTurnCacheRead, 0)
 }
 
 // resetPerTurn must be called after computePerTurnDeltas and the record is written.

@@ -105,11 +105,11 @@ type TurnRecord struct {
 	Source           string         `json:"source"`
 	Tools            map[string]int `json:"tools"`
 	ToolCount        int            `json:"tool_call_count"`
-	TokensIn         int            `json:"tokens_in"` // computed: input + cache_write + cache_read
-	TokensInput      int            `json:"tokens_input"`
-	TokensCacheWrite int            `json:"tokens_cache_write"`
-	TokensCacheRead  int            `json:"tokens_cache_read"`
-	TokensOut        int            `json:"tokens_out"`
+	TokensIn         int64          `json:"tokens_in"` // computed: input + cache_write + cache_read
+	TokensInput      int64          `json:"tokens_input"`
+	TokensCacheWrite int64          `json:"tokens_cache_write"`
+	TokensCacheRead  int64          `json:"tokens_cache_read"`
+	TokensOut        int64          `json:"tokens_out"`
 	DurationMs       int64          `json:"duration_ms"`
 	CostUSD          float64        `json:"cost_usd"`
 	CreatedAt        int64          `json:"created_at"`
@@ -387,15 +387,24 @@ func (s *SQLiteStore) Close() error {
 	return nil
 }
 
+// resolveGeneration returns the latest generation for a session, or ErrNotFound if no turns exist.
+func (s *SQLiteStore) resolveGeneration(ctx context.Context, sessionID string) (int64, error) {
+	gen, err := s.LatestGeneration(ctx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	if gen == 0 {
+		return 0, ErrNotFound
+	}
+	return gen, nil
+}
+
 // QueryTurns fetches conversation turns from the materialized turns table.
 // Automatically resolves the latest generation for the session.
 func (s *SQLiteStore) QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error) {
-	gen, err := s.LatestGeneration(ctx, sessionID)
+	gen, err := s.resolveGeneration(ctx, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	if gen == 0 {
-		return nil, ErrNotFound
 	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
@@ -428,12 +437,9 @@ func (s *SQLiteStore) QueryTurnsBefore(ctx context.Context, sessionID string, be
 
 // QueryTurnStats returns aggregated turn statistics for a session's latest generation.
 func (s *SQLiteStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error) {
-	gen, err := s.LatestGeneration(ctx, sessionID)
+	gen, err := s.resolveGeneration(ctx, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	if gen == 0 {
-		return nil, ErrNotFound
 	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
@@ -449,9 +455,7 @@ func (s *SQLiteStore) QueryTurnStats(ctx context.Context, sessionID string) (*Tu
 		var success sql.NullInt64
 		var toolsJSON sql.NullString
 		var toolCount sql.NullInt64
-		var dummySessionID string
-		var dummyGeneration int64
-		if err := rows.Scan(&dummySessionID, &dummyGeneration, &ts.TurnNum, &ts.Seq, &success, &ts.Source,
+		if err := rows.Scan(&ts.TurnNum, &ts.Seq, &success, &ts.Source,
 			&toolsJSON, &toolCount,
 			&ts.TokensInput, &ts.TokensCacheWrite, &ts.TokensCacheRead, &ts.TokensIn,
 			&ts.TokensOut, &ts.DurationMs, &ts.CostUSD, &ts.Model, &ts.CreatedAt); err != nil {

@@ -379,6 +379,7 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 				"kind", kindOf(req),
 				"err", err,
 			)
+			return // SQLite: failed statement aborts tx, remaining appends would also fail.
 		}
 	}
 

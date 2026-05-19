@@ -59,7 +59,10 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	if acc.Generation == 0 {
 		gen := int64(1)
 		if b.turnsQuerier != nil {
-			if latest, _ := b.turnsQuerier.LatestGeneration(context.Background(), sessionID); latest > 0 {
+			genCtx, genCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
+			genCancel()
+			if latest > 0 {
 				gen = latest
 			}
 		}
@@ -438,7 +441,7 @@ func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Ki
 			Generation: acc.Generation,
 			TurnNum:    acc.TurnCount + 1,
 			Seq:        seq,
-			Role:       "user",
+			Role:       eventstore.RoleUser,
 			Content:    content,
 			Platform:   platform,
 			UserID:     owner,
@@ -517,7 +520,7 @@ func (b *Bridge) captureSyntheticEvent(sessionID, reason, message, source string
 		Generation: acc.Generation,
 		TurnNum:    acc.TurnCount,
 		Seq:        seq,
-		Role:       "assistant",
+		Role:       eventstore.RoleAssistant,
 		Content:    message,
 		Source:     source,
 		Success:    &sFalse,
@@ -536,25 +539,16 @@ func (b *Bridge) captureAssistantTurn(sessionID string, seq int64, acc *sessionA
 		b, _ := json.Marshal(acc.ToolNames)
 		toolsJSON = string(b)
 	}
-	tokensInput := acc.PerTurnInput - acc.PerTurnCacheWrite - acc.PerTurnCacheRead
-	if tokensInput < 0 {
-		tokensInput = 0
-	}
-	// Determine success from done event snapshot.
-	var success *bool
-	if sess := acc.snapshot(); sess != nil {
-		// Success is determined by the done event; we use the tool_call_count > 0 heuristic
-		// as a fallback. The actual success value is already injected by injectSessionStats.
-		s := true // default to true for normal completion
-		success = &s
-	}
+	tokensInput := max(acc.PerTurnInput-acc.PerTurnCacheWrite-acc.PerTurnCacheRead, 0)
+	s := true // Normal completion path is always success.
+	success := &s
 
 	turn := &eventstore.TurnWriteRequest{
 		SessionID:        sessionID,
 		Generation:       acc.Generation,
 		TurnNum:          acc.TurnCount,
 		Seq:              seq,
-		Role:             "assistant",
+		Role:             eventstore.RoleAssistant,
 		Content:          content,
 		Platform:         platform,
 		UserID:           owner,

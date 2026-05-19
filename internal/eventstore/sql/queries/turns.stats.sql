@@ -1,4 +1,4 @@
-SELECT session_id, generation, turn_num, seq, success, source,
+SELECT turn_num, seq, success, source,
        tools_json, tool_count,
        tokens_input, tokens_cache_write, tokens_cache_read,
        (tokens_input + tokens_cache_write + tokens_cache_read) AS tokens_in,

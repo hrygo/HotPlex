@@ -325,7 +325,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		log.Warn("Brain initialization failed (fail-open)", "error", err)
 	}
 
-	// Events/Turns TTL GC: hourly cleanup of expired records.
 	go runEventsGC(ctx, stores.event, log, cfg.Events.Retention)
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)

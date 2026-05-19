@@ -134,11 +134,11 @@ func TestTurnsTable_InsertCorrectness(t *testing.T) {
 		require.True(t, *r.Success)
 		require.Equal(t, 2, r.Tools["Read"])
 		require.Equal(t, 3, r.ToolCount)
-		require.Equal(t, 100, r.TokensInput)
-		require.Equal(t, 50, r.TokensCacheWrite)
-		require.Equal(t, 30, r.TokensCacheRead)
-		require.Equal(t, 180, r.TokensIn) // 100+50+30
-		require.Equal(t, 200, r.TokensOut)
+		require.Equal(t, int64(100), r.TokensInput)
+		require.Equal(t, int64(50), r.TokensCacheWrite)
+		require.Equal(t, int64(30), r.TokensCacheRead)
+		require.Equal(t, int64(180), r.TokensIn) // 100+50+30
+		require.Equal(t, int64(200), r.TokensOut)
 		require.Equal(t, int64(5000), r.DurationMs)
 		require.InDelta(t, 0.042, r.CostUSD, 0.001)
 	})
@@ -683,10 +683,10 @@ func TestTurnsTable_TokensInputSplitting(t *testing.T) {
 	require.Len(t, records, 1)
 
 	r := records[0]
-	require.Equal(t, 100, r.TokensInput)
-	require.Equal(t, 50, r.TokensCacheWrite)
-	require.Equal(t, 30, r.TokensCacheRead)
-	require.Equal(t, 180, r.TokensIn) // computed: 100+50+30
+	require.Equal(t, int64(100), r.TokensInput)
+	require.Equal(t, int64(50), r.TokensCacheWrite)
+	require.Equal(t, int64(30), r.TokensCacheRead)
+	require.Equal(t, int64(180), r.TokensIn) // computed: 100+50+30
 }
 
 // ─── Synthetic turn sources (TURN-006) ─────────────────────────────────────

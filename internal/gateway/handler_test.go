@@ -1026,11 +1026,35 @@ func newBridgeWithCollector(t *testing.T) (*Bridge, *eventstore.SQLiteStore) {
 		created_at INTEGER NOT NULL
 	)`)
 	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS turns (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id TEXT NOT NULL,
+		generation INTEGER NOT NULL DEFAULT 1,
+		turn_num INTEGER NOT NULL,
+		seq INTEGER NOT NULL DEFAULT 0,
+		role TEXT NOT NULL,
+		content TEXT NOT NULL DEFAULT '',
+		platform TEXT NOT NULL DEFAULT '',
+		user_id TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		success INTEGER,
+		source TEXT NOT NULL DEFAULT 'normal',
+		tools_json TEXT,
+		tool_count INTEGER NOT NULL DEFAULT 0,
+		tokens_input INTEGER NOT NULL DEFAULT 0,
+		tokens_cache_write INTEGER NOT NULL DEFAULT 0,
+		tokens_cache_read INTEGER NOT NULL DEFAULT 0,
+		tokens_out INTEGER NOT NULL DEFAULT 0,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		cost_usd REAL NOT NULL DEFAULT 0.0,
+		created_at INTEGER NOT NULL
+	)`)
+	require.NoError(t, err)
 
 	store := eventstore.NewSQLiteStore(db)
 	collector := eventstore.NewCollector(store, slog.Default())
 
-	return &Bridge{log: slog.Default(), collector: collector, accum: make(map[string]*sessionAccumulator)}, store
+	return &Bridge{log: slog.Default(), collector: collector, accum: make(map[string]*sessionAccumulator), turnsQuerier: store}, store
 }
 
 // IES-2: interaction response (permission/question/elicitation) triggers CaptureInbound.
