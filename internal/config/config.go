@@ -160,6 +160,7 @@ type Config struct {
 	AgentConfig AgentConfig     `mapstructure:"agent_config"`
 	Skills      SkillsConfig    `mapstructure:"skills"`
 	Cron        CronConfig      `mapstructure:"cron"`
+	Events      EventsConfig    `mapstructure:"events"`
 	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 }
 
@@ -570,6 +571,11 @@ type CronConfig struct {
 	Jobs              []map[string]any `mapstructure:"jobs"`                // inline job definitions
 }
 
+// EventsConfig holds event and turn retention settings.
+type EventsConfig struct {
+	Retention time.Duration `mapstructure:"retention"` // TTL for events + turns, default 168h (7 days)
+}
+
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 // Default returns a Config with sensible production defaults.
@@ -700,6 +706,9 @@ func Default() *Config {
 			MaxJobs:           50,
 			DefaultTimeoutSec: 300,
 			TickIntervalSec:   60,
+		},
+		Events: EventsConfig{
+			Retention: 168 * time.Hour, // 7 days
 		},
 	}
 }

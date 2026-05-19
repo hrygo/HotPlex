@@ -281,10 +281,10 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	beforeSeq := int64(0)
-	if bs := r.URL.Query().Get("before_seq"); bs != "" {
-		if v, err := strconv.ParseInt(bs, 10, 64); err == nil && v > 0 {
-			beforeSeq = v
+	beforeID := int64(0)
+	if bid := r.URL.Query().Get("before_id"); bid != "" {
+		if v, err := strconv.ParseInt(bid, 10, 64); err == nil && v > 0 {
+			beforeID = v
 		}
 	}
 
@@ -299,8 +299,8 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 		err     error
 	)
 
-	if beforeSeq > 0 {
-		records, err = g.turnsStore.QueryTurnsBefore(r.Context(), id, beforeSeq, fetchLimit)
+	if beforeID > 0 {
+		records, err = g.turnsStore.QueryTurnsBefore(r.Context(), id, beforeID, fetchLimit)
 	} else {
 		records, err = g.turnsStore.QueryTurns(r.Context(), id, fetchLimit, 0)
 	}

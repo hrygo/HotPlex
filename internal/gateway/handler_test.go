@@ -1030,7 +1030,7 @@ func newBridgeWithCollector(t *testing.T) (*Bridge, *eventstore.SQLiteStore) {
 	store := eventstore.NewSQLiteStore(db)
 	collector := eventstore.NewCollector(store, slog.Default())
 
-	return &Bridge{log: slog.Default(), collector: collector}, store
+	return &Bridge{log: slog.Default(), collector: collector, accum: make(map[string]*sessionAccumulator)}, store
 }
 
 // IES-2: interaction response (permission/question/elicitation) triggers CaptureInbound.

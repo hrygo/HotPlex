@@ -52,6 +52,20 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		myGen = rg.LoadResetGeneration()
 	}
 
+	// Initialize accumulator generation.
+	// Only set when Generation == 0 (first creation or service restart recovery).
+	// If Generation > 0, ResetSession already incremented it — don't overwrite.
+	acc := b.getOrInitAccum(sessionID, opts.workDir, startTime)
+	if acc.Generation == 0 {
+		gen := int64(1)
+		if b.turnsQuerier != nil {
+			if latest, _ := b.turnsQuerier.LatestGeneration(context.Background(), sessionID); latest > 0 {
+				gen = latest
+			}
+		}
+		acc.Generation = gen
+	}
+
 	// LLM retry: accumulate turn text and error data for retry detection.
 	var turnText strings.Builder
 	var lastError *events.ErrorData
@@ -78,6 +92,17 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	recvCh := w.Conn().Recv()
 
 	for env := range recvCh {
+
+		// OCS in-place reset detection: check if generation has changed.
+		if rg, ok := w.(resetGenerationer); ok {
+			currentGen := rg.LoadResetGeneration()
+			if currentGen != myGen {
+				acc.Generation++
+				acc.TurnCount = 0
+				turnText.Reset()
+				myGen = currentGen
+			}
+		}
 
 		if env.Event.Type == events.Error {
 			b.log.Warn("bridge: received error from worker", "session_id", sessionID, "worker_type", workerType, "data", env.Event.Data)
@@ -152,6 +177,8 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			}
 
 			b.injectSessionStats(env, acc)
+			b.captureAssistantTurn(sessionID, env.Seq, acc, turnText.String(),
+				sessOwner, sessPlatform, env.Timestamp)
 			acc.resetPerTurn()
 			if b.log.Enabled(context.Background(), slog.LevelDebug) {
 				b.log.Debug("bridge: turn completed",
@@ -391,9 +418,35 @@ func (b *Bridge) captureEvent(sessionID string, seq int64, eventType events.Kind
 	b.captureDirected(sessionID, seq, eventType, data, "outbound")
 }
 
-// CaptureInbound persists an inbound (user→worker) event for replay.
-func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Kind, data any) {
+// CaptureInboundEvent persists an inbound event for replay only (no turn write).
+// Used for interaction responses (permission/question/elicitation) which are not user turns.
+func (b *Bridge) CaptureInboundEvent(sessionID string, seq int64, eventType events.Kind, data any) {
 	b.captureDirected(sessionID, seq, eventType, data, "inbound")
+}
+
+// CaptureInbound persists an inbound (user→worker) event for replay.
+// Also writes a user turn record when eventType is Input.
+func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Kind, data any, platform, owner string) {
+	b.captureDirected(sessionID, seq, eventType, data, "inbound")
+
+	// Write user turn record for Input events.
+	if eventType == events.Input && b.collector != nil {
+		acc := b.getOrInitAccum(sessionID, "", time.Now())
+		content := extractInputContent(data)
+		turn := &eventstore.TurnWriteRequest{
+			SessionID:  sessionID,
+			Generation: acc.Generation,
+			TurnNum:    acc.TurnCount + 1,
+			Seq:        seq,
+			Role:       "user",
+			Content:    content,
+			Platform:   platform,
+			UserID:     owner,
+			Source:     eventstore.SourceNormal,
+			CreatedAt:  time.Now().UnixMilli(),
+		}
+		b.collector.CaptureTurn(turn)
+	}
 }
 
 // captureDirected marshals event data and sends it to the collector with the given direction.
@@ -455,6 +508,83 @@ func (b *Bridge) captureSyntheticEvent(sessionID, reason, message, source string
 	}
 	seq := b.hub.NextSeq(sessionID)
 	b.collector.Capture(sessionID, seq, events.Done, data, "outbound", source)
+
+	// Also write a synthetic assistant turn for crash/timeout.
+	acc := b.getOrInitAccum(sessionID, "", time.Now())
+	sFalse := false
+	turn := &eventstore.TurnWriteRequest{
+		SessionID:  sessionID,
+		Generation: acc.Generation,
+		TurnNum:    acc.TurnCount,
+		Seq:        seq,
+		Role:       "assistant",
+		Content:    message,
+		Source:     source,
+		Success:    &sFalse,
+		CreatedAt:  time.Now().UnixMilli(),
+	}
+	b.collector.CaptureTurn(turn)
+}
+
+// captureAssistantTurn writes an assistant turn record from the done event path.
+func (b *Bridge) captureAssistantTurn(sessionID string, seq int64, acc *sessionAccumulator, content, owner, platform string, timestamp int64) {
+	if b.collector == nil {
+		return
+	}
+	var toolsJSON string
+	if len(acc.ToolNames) > 0 {
+		b, _ := json.Marshal(acc.ToolNames)
+		toolsJSON = string(b)
+	}
+	tokensInput := acc.PerTurnInput - acc.PerTurnCacheWrite - acc.PerTurnCacheRead
+	if tokensInput < 0 {
+		tokensInput = 0
+	}
+	// Determine success from done event snapshot.
+	var success *bool
+	if sess := acc.snapshot(); sess != nil {
+		// Success is determined by the done event; we use the tool_call_count > 0 heuristic
+		// as a fallback. The actual success value is already injected by injectSessionStats.
+		s := true // default to true for normal completion
+		success = &s
+	}
+
+	turn := &eventstore.TurnWriteRequest{
+		SessionID:        sessionID,
+		Generation:       acc.Generation,
+		TurnNum:          acc.TurnCount,
+		Seq:              seq,
+		Role:             "assistant",
+		Content:          content,
+		Platform:         platform,
+		UserID:           owner,
+		Model:            acc.ModelName,
+		Success:          success,
+		Source:           eventstore.SourceNormal,
+		ToolsJSON:        toolsJSON,
+		ToolCount:        acc.ToolCallCount,
+		TokensInput:      tokensInput,
+		TokensCacheWrite: acc.PerTurnCacheWrite,
+		TokensCacheRead:  acc.PerTurnCacheRead,
+		TokensOut:        acc.PerTurnOutput,
+		DurationMs:       acc.TurnDurationMs,
+		CostUSD:          acc.PerTurnCost,
+		CreatedAt:        timestamp,
+	}
+	b.collector.CaptureTurn(turn)
+}
+
+// extractInputContent extracts user input text from event data.
+func extractInputContent(data any) string {
+	switch d := data.(type) {
+	case events.InputData:
+		return d.Content
+	case map[string]any:
+		if c, ok := d["content"].(string); ok {
+			return c
+		}
+	}
+	return ""
 }
 
 // extractMessageContent extracts text content from a message or message_delta event.

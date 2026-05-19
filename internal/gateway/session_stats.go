@@ -10,7 +10,8 @@ import (
 // sessionAccumulator tracks session-level statistics across turns.
 // One instance per session, stored in Bridge.accum.
 type sessionAccumulator struct {
-	TurnCount     int
+	Generation    int64 // session reset generation (monotonic)
+	TurnCount     int   // generation-scoped turn counter
 	ToolCallCount int
 	TotalCostUSD  float64
 	TotalInput    int64 // cumulative input tokens consumed across turns
@@ -21,6 +22,14 @@ type sessionAccumulator struct {
 	StartedAt     time.Time
 	WorkDir       string // session working directory
 	GitBranch     string // current git branch (captured once at start)
+
+	// Cache token tracking (cumulative across turns).
+	TotalCacheWrite   int64
+	TotalCacheRead    int64
+	PrevCacheWrite    int64
+	PrevCacheRead     int64
+	PerTurnCacheWrite int64
+	PerTurnCacheRead  int64
 
 	// Per-turn tracking (reset after each done).
 	ToolNames      map[string]int // tool name -> call count this turn
@@ -51,6 +60,8 @@ func (a *sessionAccumulator) mergePerTurnStats(data events.DoneData) {
 		a.TotalInput += input
 		a.ContextFill = input
 		a.TotalOutput += events.ToInt64(usage["output_tokens"])
+		a.TotalCacheWrite += events.ToInt64(usage["cache_creation_input_tokens"])
+		a.TotalCacheRead += events.ToInt64(usage["cache_read_input_tokens"])
 	} else if tokens, ok := data.Stats["tokens"].(map[string]any); ok {
 		// OpenCode format: input/cache_read/cache_write are separate additive fields.
 		input := events.ToInt64(tokens["input"]) +
@@ -59,6 +70,8 @@ func (a *sessionAccumulator) mergePerTurnStats(data events.DoneData) {
 		a.TotalInput += input
 		a.ContextFill = input
 		a.TotalOutput += events.ToInt64(tokens["output"])
+		a.TotalCacheWrite += events.ToInt64(tokens["cache_write"])
+		a.TotalCacheRead += events.ToInt64(tokens["cache_read"])
 	}
 
 	// Claude Code modelUsage: extract model name + contextWindow
@@ -88,6 +101,8 @@ func (a *sessionAccumulator) computePerTurnDeltas() {
 	a.PerTurnInput = a.TotalInput - a.PrevTotalIn
 	a.PerTurnOutput = a.TotalOutput - a.PrevTotalOut
 	a.PerTurnCost = a.TotalCostUSD - a.PrevTotalCost
+	a.PerTurnCacheWrite = a.TotalCacheWrite - a.PrevCacheWrite
+	a.PerTurnCacheRead = a.TotalCacheRead - a.PrevCacheRead
 	if a.PerTurnInput < 0 {
 		a.PerTurnInput = 0
 	}
@@ -97,6 +112,12 @@ func (a *sessionAccumulator) computePerTurnDeltas() {
 	if a.PerTurnCost < 0 {
 		a.PerTurnCost = 0
 	}
+	if a.PerTurnCacheWrite < 0 {
+		a.PerTurnCacheWrite = 0
+	}
+	if a.PerTurnCacheRead < 0 {
+		a.PerTurnCacheRead = 0
+	}
 }
 
 // resetPerTurn must be called after computePerTurnDeltas and the record is written.
@@ -104,11 +125,15 @@ func (a *sessionAccumulator) resetPerTurn() {
 	a.PrevTotalIn = a.TotalInput
 	a.PrevTotalOut = a.TotalOutput
 	a.PrevTotalCost = a.TotalCostUSD
+	a.PrevCacheWrite = a.TotalCacheWrite
+	a.PrevCacheRead = a.TotalCacheRead
 	a.ToolNames = nil
 	a.ToolCallCount = 0
 	a.PerTurnInput = 0
 	a.PerTurnOutput = 0
 	a.PerTurnCost = 0
+	a.PerTurnCacheWrite = 0
+	a.PerTurnCacheRead = 0
 	a.TurnDurationMs = 0
 }
 

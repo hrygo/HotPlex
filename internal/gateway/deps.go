@@ -24,7 +24,8 @@ type BridgeDeps struct {
 	Log                *slog.Logger
 	Hub                *Hub
 	SM                 bridgeSM
-	EventCollector     *eventstore.Collector // optional; nil means event storage disabled
+	EventCollector     *eventstore.Collector  // optional; nil means event storage disabled
+	TurnsQuerier       eventstore.TurnQuerier // optional; for LatestGeneration on startup
 	RetryCtrl          *LLMRetryController
 	AgentConfigDir     string
 	TurnTimeout        time.Duration

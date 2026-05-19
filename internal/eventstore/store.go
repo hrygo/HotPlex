@@ -89,51 +89,64 @@ func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFun
 	return context.WithTimeout(ctx, defaultTimeout)
 }
 
-// TurnRecord represents a single conversational turn derived from events VIEW.
+// TurnRecord represents a single conversational turn from the materialized turns table.
 type TurnRecord struct {
-	ID         string         `json:"id"`
-	SessionID  string         `json:"session_id"`
-	Seq        int64          `json:"seq"`
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	Platform   string         `json:"platform"`
-	UserID     string         `json:"user_id"`
-	Model      string         `json:"model"`
-	Success    *bool          `json:"success"`
-	Source     string         `json:"source"`
-	Tools      map[string]int `json:"tools"`
-	ToolCount  int            `json:"tool_call_count"`
-	TokensIn   int            `json:"tokens_in"`
-	TokensOut  int            `json:"tokens_out"`
-	DurationMs int64          `json:"duration_ms"`
-	CostUSD    float64        `json:"cost_usd"`
-	CreatedAt  int64          `json:"created_at"`
+	ID               int64          `json:"id"`
+	SessionID        string         `json:"session_id"`
+	Generation       int64          `json:"generation"`
+	TurnNum          int            `json:"turn_num"`
+	Seq              int64          `json:"seq"`
+	Role             string         `json:"role"`
+	Content          string         `json:"content"`
+	Platform         string         `json:"platform"`
+	UserID           string         `json:"user_id"`
+	Model            string         `json:"model"`
+	Success          *bool          `json:"success"`
+	Source           string         `json:"source"`
+	Tools            map[string]int `json:"tools"`
+	ToolCount        int            `json:"tool_call_count"`
+	TokensIn         int            `json:"tokens_in"` // computed: input + cache_write + cache_read
+	TokensInput      int            `json:"tokens_input"`
+	TokensCacheWrite int            `json:"tokens_cache_write"`
+	TokensCacheRead  int            `json:"tokens_cache_read"`
+	TokensOut        int            `json:"tokens_out"`
+	DurationMs       int64          `json:"duration_ms"`
+	CostUSD          float64        `json:"cost_usd"`
+	CreatedAt        int64          `json:"created_at"`
 }
 
 // TurnStats holds aggregated statistics across all assistant turns of a session.
 type TurnStats struct {
-	SessionID    string         `json:"session_id"`
-	TotalTurns   int            `json:"total_turns"`
-	SuccessTurns int            `json:"success_turns"`
-	FailedTurns  int            `json:"failed_turns"`
-	TotalDurMs   int64          `json:"total_duration_ms"`
-	TotalCostUSD float64        `json:"total_cost_usd"`
-	TotalTokIn   int64          `json:"total_tokens_in"`
-	TotalTokOut  int64          `json:"total_tokens_out"`
-	Turns        []TurnStatItem `json:"turns"`
+	SessionID          string         `json:"session_id"`
+	Generation         int64          `json:"generation"`
+	TotalTurns         int            `json:"total_turns"`
+	SuccessTurns       int            `json:"success_turns"`
+	FailedTurns        int            `json:"failed_turns"`
+	TotalDurMs         int64          `json:"total_duration_ms"`
+	TotalCostUSD       float64        `json:"total_cost_usd"`
+	TotalTokIn         int64          `json:"total_tokens_in"` // computed sum
+	TotalTokInput      int64          `json:"total_tokens_input"`
+	TotalTokCacheWrite int64          `json:"total_tokens_cache_write"`
+	TotalTokCacheRead  int64          `json:"total_tokens_cache_read"`
+	TotalTokOut        int64          `json:"total_tokens_out"`
+	Turns              []TurnStatItem `json:"turns"`
 }
 
 // TurnStatItem holds per-turn statistics.
 type TurnStatItem struct {
-	Seq        int64   `json:"seq"`
-	Success    bool    `json:"success"`
-	DurationMs int64   `json:"duration_ms"`
-	CostUSD    float64 `json:"cost_usd"`
-	TokensIn   int64   `json:"tokens_in"`
-	TokensOut  int64   `json:"tokens_out"`
-	Model      string  `json:"model"`
-	Source     string  `json:"source"`
-	CreatedAt  int64   `json:"created_at"`
+	TurnNum          int     `json:"turn_num"`
+	Seq              int64   `json:"seq"`
+	Success          bool    `json:"success"`
+	DurationMs       int64   `json:"duration_ms"`
+	CostUSD          float64 `json:"cost_usd"`
+	TokensIn         int64   `json:"tokens_in"` // computed: input + cache_write + cache_read
+	TokensInput      int64   `json:"tokens_input"`
+	TokensCacheWrite int64   `json:"tokens_cache_write"`
+	TokensCacheRead  int64   `json:"tokens_cache_read"`
+	TokensOut        int64   `json:"tokens_out"`
+	Model            string  `json:"model"`
+	Source           string  `json:"source"`
+	CreatedAt        int64   `json:"created_at"`
 }
 
 // StoredEvent represents a single persisted AEP event.
@@ -180,17 +193,20 @@ type EventStore interface {
 	Close() error
 }
 
-// EventTx is a transaction handle for batch event writes.
+// EventTx is a transaction handle for batch event and turn writes.
 type EventTx interface {
 	Append(ctx context.Context, event *StoredEvent) error
+	AppendTurn(ctx context.Context, turn *TurnWriteRequest) error
 	Commit() error
 }
 
 // TurnQuerier provides read-only access to conversation turn records.
 type TurnQuerier interface {
 	QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error)
-	QueryTurnsBefore(ctx context.Context, sessionID string, beforeSeq int64, limit int) ([]*TurnRecord, error)
+	QueryTurnsBefore(ctx context.Context, sessionID string, beforeID int64, limit int) ([]*TurnRecord, error)
 	QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error)
+	LatestGeneration(ctx context.Context, sessionID string) (int64, error)
+	DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 // SQLiteStore implements EventStore using a shared SQLite database connection.
@@ -249,6 +265,26 @@ func (t *sqliteTx) Append(ctx context.Context, event *StoredEvent) error {
 		event.SessionID, event.Seq, event.Type, event.Data, event.Direction, event.Source, event.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("eventstore: tx append: %w", err)
+	}
+	return nil
+}
+
+func (t *sqliteTx) AppendTurn(ctx context.Context, turn *TurnWriteRequest) error {
+	var successVal any
+	if turn.Success != nil {
+		if *turn.Success {
+			successVal = 1
+		} else {
+			successVal = 0
+		}
+	}
+	_, err := t.tx.ExecContext(ctx, queries["turns.insert"],
+		turn.SessionID, turn.Generation, turn.TurnNum, turn.Seq, turn.Role, turn.Content,
+		turn.Platform, turn.UserID, turn.Model, successVal, turn.Source, turn.ToolsJSON, turn.ToolCount,
+		turn.TokensInput, turn.TokensCacheWrite, turn.TokensCacheRead, turn.TokensOut,
+		turn.DurationMs, turn.CostUSD, turn.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("eventstore: tx append turn: %w", err)
 	}
 	return nil
 }
@@ -351,11 +387,19 @@ func (s *SQLiteStore) Close() error {
 	return nil
 }
 
-// QueryTurns fetches conversation turns via v_turns view with limit/offset pagination.
+// QueryTurns fetches conversation turns from the materialized turns table.
+// Automatically resolves the latest generation for the session.
 func (s *SQLiteStore) QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error) {
+	gen, err := s.LatestGeneration(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if gen == 0 {
+		return nil, ErrNotFound
+	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, queries["turns.query"], sessionID, limit, offset)
+	rows, err := s.db.QueryContext(ctx, queries["turns.query"], sessionID, gen, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: query turns: %w", err)
 	}
@@ -363,11 +407,12 @@ func (s *SQLiteStore) QueryTurns(ctx context.Context, sessionID string, limit, o
 	return scanTurns(rows)
 }
 
-// QueryTurnsBefore fetches turns with seq < beforeSeq (cursor-based, DESC in SQL, reversed to ASC).
-func (s *SQLiteStore) QueryTurnsBefore(ctx context.Context, sessionID string, beforeSeq int64, limit int) ([]*TurnRecord, error) {
+// QueryTurnsBefore fetches turns with id < beforeID (cursor-based, DESC in SQL, reversed to ASC).
+// Does not filter generation — supports cross-generation pagination.
+func (s *SQLiteStore) QueryTurnsBefore(ctx context.Context, sessionID string, beforeID int64, limit int) ([]*TurnRecord, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, queries["turns.query_before"], sessionID, beforeSeq, limit)
+	rows, err := s.db.QueryContext(ctx, queries["turns.query_before"], sessionID, beforeID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: query turns before: %w", err)
 	}
@@ -381,25 +426,35 @@ func (s *SQLiteStore) QueryTurnsBefore(ctx context.Context, sessionID string, be
 	return records, nil
 }
 
-// QueryTurnStats returns aggregated turn statistics for a session via v_turns_assistant.
+// QueryTurnStats returns aggregated turn statistics for a session's latest generation.
 func (s *SQLiteStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error) {
+	gen, err := s.LatestGeneration(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if gen == 0 {
+		return nil, ErrNotFound
+	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, queries["turns.stats"], sessionID)
+	rows, err := s.db.QueryContext(ctx, queries["turns.stats"], sessionID, gen)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: query turn stats: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	stats := &TurnStats{SessionID: sessionID}
+	stats := &TurnStats{SessionID: sessionID, Generation: gen}
 	for rows.Next() {
 		var ts TurnStatItem
 		var success sql.NullInt64
-		var role, toolsJSON sql.NullString
+		var toolsJSON sql.NullString
 		var toolCount sql.NullInt64
-		if err := rows.Scan(new(string), &ts.Seq, &role, &success, &ts.Source,
-			&toolsJSON, &toolCount, &ts.TokensIn, &ts.TokensOut,
-			&ts.DurationMs, &ts.CostUSD, &ts.Model, &ts.CreatedAt); err != nil {
+		var dummySessionID string
+		var dummyGeneration int64
+		if err := rows.Scan(&dummySessionID, &dummyGeneration, &ts.TurnNum, &ts.Seq, &success, &ts.Source,
+			&toolsJSON, &toolCount,
+			&ts.TokensInput, &ts.TokensCacheWrite, &ts.TokensCacheRead, &ts.TokensIn,
+			&ts.TokensOut, &ts.DurationMs, &ts.CostUSD, &ts.Model, &ts.CreatedAt); err != nil {
 			slog.Warn("eventstore: scan turn stats row", "session_id", sessionID, "error", err)
 			continue
 		}
@@ -413,6 +468,9 @@ func (s *SQLiteStore) QueryTurnStats(ctx context.Context, sessionID string) (*Tu
 		stats.TotalDurMs += ts.DurationMs
 		stats.TotalCostUSD += ts.CostUSD
 		stats.TotalTokIn += ts.TokensIn
+		stats.TotalTokInput += ts.TokensInput
+		stats.TotalTokCacheWrite += ts.TokensCacheWrite
+		stats.TotalTokCacheRead += ts.TokensCacheRead
 		stats.TotalTokOut += ts.TokensOut
 		stats.Turns = append(stats.Turns, ts)
 	}
@@ -420,6 +478,29 @@ func (s *SQLiteStore) QueryTurnStats(ctx context.Context, sessionID string) (*Tu
 		return nil, ErrNotFound
 	}
 	return stats, rows.Err()
+}
+
+// LatestGeneration returns the maximum generation for a session, or 0 if no turns exist.
+func (s *SQLiteStore) LatestGeneration(ctx context.Context, sessionID string) (int64, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	var gen int64
+	err := s.db.QueryRowContext(ctx, queries["turns.latest_generation"], sessionID).Scan(&gen)
+	if err != nil {
+		return 0, fmt.Errorf("eventstore: latest generation: %w", err)
+	}
+	return gen, nil
+}
+
+// DeleteExpiredTurns removes turns older than the cutoff by created_at.
+func (s *SQLiteStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	res, err := s.db.ExecContext(ctx, queries["turns.delete_expired"], cutoff.UnixMilli())
+	if err != nil {
+		return 0, fmt.Errorf("eventstore: delete expired turns: %w", err)
+	}
+	return res.RowsAffected()
 }
 
 func scanEvents(rows *sql.Rows) ([]*StoredEvent, error) {
@@ -443,19 +524,19 @@ func scanTurns(rows *sql.Rows) ([]*TurnRecord, error) {
 		var r TurnRecord
 		var success sql.NullInt64
 		var toolsJSON sql.NullString
-		if err := rows.Scan(&r.SessionID, &r.Seq, &r.Role, &r.Content,
+		if err := rows.Scan(&r.ID, &r.SessionID, &r.Generation, &r.TurnNum, &r.Seq, &r.Role, &r.Content,
 			&r.Platform, &r.UserID, &r.Model, &success, &r.Source,
-			&toolsJSON, &r.ToolCount, &r.TokensIn, &r.TokensOut,
-			&r.DurationMs, &r.CostUSD, &r.CreatedAt); err != nil {
+			&toolsJSON, &r.ToolCount,
+			&r.TokensInput, &r.TokensCacheWrite, &r.TokensCacheRead, &r.TokensIn,
+			&r.TokensOut, &r.DurationMs, &r.CostUSD, &r.CreatedAt); err != nil {
 			return nil, fmt.Errorf("eventstore: scan turn: %w", err)
 		}
 		if success.Valid {
 			s := success.Int64 == 1
 			r.Success = &s
 		}
-		r.ID = fmt.Sprintf("%s:%d", r.SessionID, r.Seq)
 		if toolsJSON.Valid && toolsJSON.String != "" {
-			_ = json.Unmarshal([]byte(toolsJSON.String), &r.Tools) //nolint:errcheck // best-effort: malformed tools_json yields empty map
+			_ = json.Unmarshal([]byte(toolsJSON.String), &r.Tools) //nolint:errcheck // best-effort
 		}
 		records = append(records, &r)
 	}

@@ -48,12 +48,13 @@ type bridgeSM interface {
 // Bridge connects the gateway to the session manager.
 // It runs the read pump in a goroutine and proxies worker events to the hub.
 type Bridge struct {
-	log       *slog.Logger
-	hub       *Hub
-	sm        bridgeSM
-	collector *eventstore.Collector // optional; nil means event storage disabled
-	wf        WorkerFactory
-	retryCtrl *LLMRetryController
+	log          *slog.Logger
+	hub          *Hub
+	sm           bridgeSM
+	collector    *eventstore.Collector  // optional; nil means event storage disabled
+	turnsQuerier eventstore.TurnQuerier // optional; for LatestGeneration on startup
+	wf           WorkerFactory
+	retryCtrl    *LLMRetryController
 
 	fwdWg         sync.WaitGroup // tracks active forwardEvents goroutines
 	closed        atomic.Bool    // set during shutdown to skip crash detection
@@ -93,6 +94,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		sm:                 deps.SM,
 		wf:                 defaultWorkerFactory{},
 		collector:          deps.EventCollector,
+		turnsQuerier:       deps.TurnsQuerier,
 		retryCtrl:          deps.RetryCtrl,
 		agentConfigDir:     deps.AgentConfigDir,
 		turnTimeout:        deps.TurnTimeout,
@@ -385,6 +387,15 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	if err := w.ResetContext(ctx); err != nil {
 		return fmt.Errorf("bridge: reset worker: %w", err)
 	}
+
+	// Reset accumulator generation-scoped counters.
+	// TotalInput/TotalOutput/TotalCostUSD are preserved (cumulative).
+	b.accumMu.Lock()
+	if acc, ok := b.accum[sessionID]; ok {
+		acc.TurnCount = 0
+		acc.Generation++
+	}
+	b.accumMu.Unlock()
 
 	// Workers that reset in-place (no process restart, no Conn replacement)
 	// keep their existing forwardEvents goroutine. Spawning a new one would

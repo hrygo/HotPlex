@@ -19,6 +19,8 @@ func init() {
 	_ = sqlutil.DriverName
 }
 
+func raw(s string) json.RawMessage { return json.RawMessage(s) }
+
 func newTestStore(t *testing.T) *SQLiteStore {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")

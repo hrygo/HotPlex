@@ -123,7 +123,7 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 						"type", respType,
 						"session_id", env.SessionID)
 				} else if h.bridge != nil {
-					h.bridge.CaptureInbound(env.SessionID, env.Seq, events.Input, env.Event.Data)
+					h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, events.Input, env.Event.Data)
 				}
 			} else {
 				h.log.Warn("gateway: interaction response dropped — no worker",
@@ -233,7 +233,7 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
 		// Capture inbound event for replay (best-effort).
 		if h.bridge != nil {
-			h.bridge.CaptureInbound(env.SessionID, env.Seq, events.Input, env.Event.Data)
+			h.bridge.CaptureInbound(env.SessionID, env.Seq, events.Input, env.Event.Data, si.Platform, si.OwnerID)
 		}
 	} else {
 		h.log.Warn("gateway: handleInput no worker found", "session_id", env.SessionID)

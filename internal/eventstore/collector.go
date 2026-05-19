@@ -49,8 +49,24 @@ func IsStorable(eventType events.Kind) bool {
 }
 
 // captureRequest is a pending write for the background batch writer.
+// event and turn are mutually exclusive: one is set, the other is nil.
 type captureRequest struct {
 	event *StoredEvent
+	turn  *TurnWriteRequest
+}
+
+func (r *captureRequest) sessionID() string {
+	if r.event != nil {
+		return r.event.SessionID
+	}
+	return r.turn.SessionID
+}
+
+func kindOf(req *captureRequest) string {
+	if req.turn != nil {
+		return "turn"
+	}
+	return "event"
 }
 
 // Collector captures AEP events, merges message.delta streams, and writes
@@ -229,12 +245,19 @@ func (c *Collector) send(req *captureRequest) {
 	case c.captureC <- req:
 	default:
 		c.dropped.Add(1)
-		c.log.Warn("eventstore: capture channel full, dropping event",
-			"session_id", req.event.SessionID,
-			"seq", req.event.Seq,
-			"type", req.event.Type,
+		c.log.Warn("eventstore: capture channel full, dropping",
+			"session_id", req.sessionID(),
+			"kind", kindOf(req),
 		)
 	}
+}
+
+// CaptureTurn sends a turn write request to the collector for async persistence.
+func (c *Collector) CaptureTurn(turn *TurnWriteRequest) {
+	if turn == nil {
+		return
+	}
+	c.send(&captureRequest{turn: turn})
 }
 
 // Close drains the capture channel and flushes remaining events.
@@ -343,11 +366,17 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 	}
 
 	for _, req := range batch {
-		if err := tx.Append(ctx, req.event); err != nil {
+		var err error
+		switch {
+		case req.turn != nil:
+			err = tx.AppendTurn(ctx, req.turn)
+		case req.event != nil:
+			err = tx.Append(ctx, req.event)
+		}
+		if err != nil {
 			c.log.Warn("eventstore: batch append failed",
-				"session_id", req.event.SessionID,
-				"seq", req.event.Seq,
-				"type", req.event.Type,
+				"session_id", req.sessionID(),
+				"kind", kindOf(req),
 				"err", err,
 			)
 		}

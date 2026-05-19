@@ -145,8 +145,8 @@ func (m *mockTurnsStore) QueryTurns(ctx context.Context, sessionID string, limit
 	return args.Get(0).([]*eventstore.TurnRecord), args.Error(1)
 }
 
-func (m *mockTurnsStore) QueryTurnsBefore(ctx context.Context, sessionID string, beforeSeq int64, limit int) ([]*eventstore.TurnRecord, error) {
-	args := m.Called(ctx, sessionID, beforeSeq, limit)
+func (m *mockTurnsStore) QueryTurnsBefore(ctx context.Context, sessionID string, beforeID int64, limit int) ([]*eventstore.TurnRecord, error) {
+	args := m.Called(ctx, sessionID, beforeID, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -159,6 +159,16 @@ func (m *mockTurnsStore) QueryTurnStats(ctx context.Context, sessionID string) (
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*eventstore.TurnStats), args.Error(1)
+}
+
+func (m *mockTurnsStore) LatestGeneration(ctx context.Context, sessionID string) (int64, error) {
+	args := m.Called(ctx, sessionID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *mockTurnsStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error) {
+	args := m.Called(ctx, cutoff)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 // ─── Test helpers ───────────────────────────────────────────────────────────────
@@ -624,7 +634,7 @@ func TestGetHistory_OwnershipCheck(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code)
 }
 
-func TestGetHistory_WithBeforeSeq(t *testing.T) {
+func TestGetHistory_WithBeforeID(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
@@ -633,13 +643,13 @@ func TestGetHistory_WithBeforeSeq(t *testing.T) {
 
 	sm.On("Get", "sess-1").Return(&session.SessionInfo{ID: "sess-1", UserID: "anonymous"}, nil)
 	records := []*eventstore.TurnRecord{
-		{Seq: 1},
+		{ID: 1},
 	}
 	ts.On("QueryTurnsBefore", mock.Anything, "sess-1", int64(5), 11).Return(records, nil)
 
 	mux := setupMux(api)
 	w := httptest.NewRecorder()
-	r := authedReq("GET", "/api/sessions/sess-1/history?before_seq=5&limit=10", nil)
+	r := authedReq("GET", "/api/sessions/sess-1/history?before_id=5&limit=10", nil)
 	mux.ServeHTTP(w, r)
 
 	require.Equal(t, http.StatusOK, w.Code)

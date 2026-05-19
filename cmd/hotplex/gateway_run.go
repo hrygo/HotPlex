@@ -202,6 +202,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Hub:                hub,
 		SM:                 sm,
 		EventCollector:     stores.collector,
+		TurnsQuerier:       stores.event, // SQLiteStore implements TurnQuerier
 		RetryCtrl:          retryCtrl,
 		AgentConfigDir:     agentConfigDir,
 		TurnTimeout:        cfg.Worker.TurnTimeout,
@@ -323,6 +324,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	if err := brain.Init(log); err != nil {
 		log.Warn("Brain initialization failed (fail-open)", "error", err)
 	}
+
+	// Events/Turns TTL GC: hourly cleanup of expired records.
+	go runEventsGC(ctx, stores.event, log, cfg.Events.Retention)
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
 
@@ -548,6 +552,29 @@ func (s *gatewayStores) close(log *slog.Logger) {
 	if s.session != nil {
 		if err := s.session.Close(); err != nil {
 			log.Warn("gateway: session store close", "err", err)
+		}
+	}
+}
+
+// runEventsGC periodically deletes expired events and turns.
+func runEventsGC(ctx context.Context, es *eventstore.SQLiteStore, log *slog.Logger, retention time.Duration) {
+	if retention <= 0 {
+		retention = 168 * time.Hour // default 7 days
+	}
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cutoff := time.Now().Add(-retention)
+			if n, err := es.DeleteExpired(ctx, cutoff); err == nil && n > 0 {
+				log.Info("events gc: deleted expired events", "count", n)
+			}
+			if n, err := es.DeleteExpiredTurns(ctx, cutoff); err == nil && n > 0 {
+				log.Info("events gc: deleted expired turns", "count", n)
+			}
 		}
 	}
 }
