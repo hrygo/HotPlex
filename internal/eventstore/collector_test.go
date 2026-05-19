@@ -390,3 +390,47 @@ func TestCollector_ReasoningTimerFlush(t *testing.T) {
 	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
 	require.Equal(t, "think1think2", data["content"])
 }
+
+func TestCollector_CaptureReasoningViaCapture(t *testing.T) {
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+
+	c.Capture("s1", 1, events.Reasoning, json.RawMessage(`{"content":"think"}`), "outbound", SourceNormal)
+	c.Capture("s1", 2, events.Reasoning, json.RawMessage(`{"content":" more"}`), "outbound", SourceNormal)
+	c.Capture("s1", 3, events.Done, json.RawMessage(`{}`), "outbound", SourceNormal)
+
+	require.NoError(t, c.Close())
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 2) // Reasoning + Done
+
+	require.Equal(t, string(events.Reasoning), page.Events[0].Type)
+	require.Equal(t, int64(1), page.Events[0].Seq)
+
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
+	require.Equal(t, "think more", data["content"])
+	require.Equal(t, float64(2), data["merged_count"])
+}
+
+func TestCollector_CaptureReasoningStringEmptyContent(t *testing.T) {
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+
+	c.CaptureReasoningString("s1", 1, "")
+	c.Capture("s1", 2, events.Done, json.RawMessage(`{}`), "outbound", SourceNormal)
+
+	require.NoError(t, c.Close())
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	// Only Done — empty content accumulator flushed but has count=1 with empty string
+	require.Len(t, page.Events, 2)
+	require.Equal(t, string(events.Reasoning), page.Events[0].Type)
+	require.Equal(t, string(events.Done), page.Events[1].Type)
+
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
+	require.Equal(t, "", data["content"])
+}
