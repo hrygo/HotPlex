@@ -30,8 +30,8 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 			},
 		})
 
-		require.Equal(t, int64(15234), acc.TotalInput)
-		require.Equal(t, int64(15234), acc.ContextFill)
+		require.Equal(t, int64(23434), acc.TotalInput)
+		require.Equal(t, int64(23434), acc.ContextFill)
 		require.Equal(t, int64(3821), acc.TotalOutput)
 		require.Equal(t, int64(200000), acc.ContextWindow)
 		require.Equal(t, "Sonnet", acc.ModelName)
@@ -65,7 +65,7 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 		require.Equal(t, int64(0), acc.TotalOutput)
 	})
 
-	t.Run("cache tokens not double-counted", func(t *testing.T) {
+	t.Run("cache tokens summed into total input", func(t *testing.T) {
 		acc := &sessionAccumulator{StartedAt: time.Now()}
 		acc.mergePerTurnStats(events.DoneData{
 			Stats: map[string]any{
@@ -80,10 +80,10 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 				},
 			},
 		})
-		require.Equal(t, int64(50000), acc.ContextFill, "ContextFill must equal input_tokens only")
-		require.Equal(t, int64(50000), acc.TotalInput, "TotalInput must not add cache tokens")
+		require.Equal(t, int64(90000), acc.ContextFill, "ContextFill = input + cache_creation + cache_read")
+		require.Equal(t, int64(90000), acc.TotalInput, "TotalInput = input + cache_creation + cache_read")
 		pct := acc.computeContextPct()
-		require.Equal(t, 25.0, pct, "context % must be 50000/200000 = 25%%, not inflated by cache")
+		require.Equal(t, 45.0, pct, "context % must be 90000/200000 = 45%%")
 	})
 
 	t.Run("context fill overwritten by latest turn", func(t *testing.T) {

@@ -60,7 +60,7 @@ SELECT
   d.source,
   json_extract(d.data, '$.stats._session.tool_names') AS tools_json,
   COALESCE(json_extract(d.data, '$.stats._session.tool_call_count'), 0) AS tool_call_count,
-  COALESCE(json_extract(d.data, '$.stats._session.turn_input_tok'), 0) AS tokens_in,
+  CASE WHEN json_extract(d.data, '$.stats.usage.input_tokens') IS NOT NULL THEN COALESCE(json_extract(d.data, '$.stats.usage.input_tokens'), 0) + COALESCE(json_extract(d.data, '$.stats.usage.cache_creation_input_tokens'), 0) + COALESCE(json_extract(d.data, '$.stats.usage.cache_read_input_tokens'), 0) ELSE COALESCE(json_extract(d.data, '$.stats._session.turn_input_tok'), 0) END AS tokens_in,
   COALESCE(json_extract(d.data, '$.stats._session.turn_output_tok'), 0) AS tokens_out,
   COALESCE(json_extract(d.data, '$.stats._session.turn_duration_ms'), 0) AS duration_ms,
   COALESCE(json_extract(d.data, '$.stats._session.turn_cost_usd'), 0.0) AS cost_usd,
@@ -354,4 +354,60 @@ func filterByRole(records []*TurnRecord, role string) []*TurnRecord {
 		}
 	}
 	return filtered
+}
+
+func TestTurnsView_ClaudeCodeCacheTokens(t *testing.T) {
+	store := newTestStoreWithViews(t)
+	ctx := context.Background()
+	sid := "sess-view-test"
+	now := time.Now().UnixMilli()
+
+	// Simulate a pre-fix Claude Code done event: _session.turn_input_tok is wrong
+	// (only input_tokens, missing cache), but raw usage fields are complete.
+	require.NoError(t, store.Append(ctx, &StoredEvent{
+		SessionID: sid, Seq: 1, Type: "input",
+		Data: raw(`{"content":"fix bug"}`), Direction: "inbound",
+		Source: SourceNormal, CreatedAt: now,
+	}))
+	require.NoError(t, store.Append(ctx, &StoredEvent{
+		SessionID: sid, Seq: 2, Type: "message",
+		Data: raw(`{"content":"done"}`), Direction: "outbound",
+		Source: SourceNormal, CreatedAt: now + 1,
+	}))
+	require.NoError(t, store.Append(ctx, &StoredEvent{
+		SessionID: sid, Seq: 3, Type: "done",
+		Data: raw(`{
+			"success": true,
+			"stats": {
+				"usage": {
+					"input_tokens": 15234,
+					"cache_creation_input_tokens": 8200,
+					"cache_read_input_tokens": 0,
+					"output_tokens": 3821
+				},
+				"_session": {
+					"model_name": "Sonnet",
+					"turn_input_tok": 15234,
+					"turn_output_tok": 3821,
+					"turn_duration_ms": 5000,
+					"turn_cost_usd": 0.042,
+					"tool_call_count": 3
+				}
+			}
+		}`),
+		Direction: "outbound", Source: SourceNormal, CreatedAt: now + 2,
+	}))
+
+	records, err := store.QueryTurns(ctx, sid, 100, 0)
+	require.NoError(t, err)
+	assistants := filterByRole(records, "assistant")
+	require.Len(t, assistants, 1)
+
+	// tokens_in must be computed from raw usage fields: 15234 + 8200 + 0 = 23434
+	require.Equal(t, 23434, assistants[0].TokensIn, "cache tokens must be included from raw usage fields")
+	require.Equal(t, 3821, assistants[0].TokensOut)
+
+	stats, err := store.QueryTurnStats(ctx, sid)
+	require.NoError(t, err)
+	require.Equal(t, int64(23434), stats.TotalTokIn)
 }

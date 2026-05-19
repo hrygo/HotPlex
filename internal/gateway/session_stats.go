@@ -41,11 +41,13 @@ func (a *sessionAccumulator) mergePerTurnStats(data events.DoneData) {
 		return
 	}
 
-	// Claude Code format: input_tokens already includes cache tokens.
-	// cache_creation and cache_read are billing-rate breakdowns (subsets of
-	// input_tokens), NOT additive — summing them double-counts cache tokens.
+	// Claude Code format: input_tokens, cache_creation_input_tokens, and
+	// cache_read_input_tokens are separate additive fields (Anthropic API).
+	// Total input = input_tokens + cache_creation_input_tokens + cache_read_input_tokens.
 	if usage, ok := data.Stats["usage"].(map[string]any); ok {
-		input := events.ToInt64(usage["input_tokens"])
+		input := events.ToInt64(usage["input_tokens"]) +
+			events.ToInt64(usage["cache_creation_input_tokens"]) +
+			events.ToInt64(usage["cache_read_input_tokens"])
 		a.TotalInput += input
 		a.ContextFill = input
 		a.TotalOutput += events.ToInt64(usage["output_tokens"])
