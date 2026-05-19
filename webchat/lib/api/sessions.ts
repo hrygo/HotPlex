@@ -35,8 +35,10 @@ export interface ListSessionsResponse {
 }
 
 export interface ConversationRecord {
-  id: string;
+  id: number;
   session_id: string;
+  generation: number;
+  turn_num: number;
   seq: number;
   role: string;
   content: string;
@@ -48,11 +50,13 @@ export interface ConversationRecord {
   tools: Record<string, number> | null;
   tool_call_count: number;
   tokens_in: number;
+  tokens_input: number;
+  tokens_cache_write: number;
+  tokens_cache_read: number;
   tokens_out: number;
   duration_ms: number;
   cost_usd: number;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
+  created_at: number;
 }
 
 export interface GetHistoryResponse {
@@ -99,15 +103,15 @@ export async function deleteSession(id: string, signal?: AbortSignal): Promise<v
 
 export async function getSessionHistory(
   sessionId: string,
-  options?: { beforeSeq?: number; limit?: number; signal?: AbortSignal }
+  options?: { beforeId?: number; limit?: number; signal?: AbortSignal }
 ): Promise<GetHistoryResponse> {
   if (!sessionId?.trim()) {
     throw new Error('getSessionHistory: empty session ID');
   }
   const limit = options?.limit ?? 50;
   let url = `${BASE}/api/sessions/${sessionId}/history?limit=${limit}`;
-  if (options?.beforeSeq) {
-    url += `&before_seq=${options.beforeSeq}`;
+  if (options?.beforeId) {
+    url += `&before_id=${options.beforeId}`;
   }
   const res = await fetch(url, { headers: { ...AUTH_HEADER, 'Content-Type': 'application/json' }, signal: options?.signal });
   if (!res.ok) throw new Error(`getSessionHistory failed: ${res.status}`);

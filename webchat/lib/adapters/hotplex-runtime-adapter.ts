@@ -115,27 +115,25 @@ function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
 // History Conversion Helpers
 // ============================================================================
 
+// Extract min database turn ID from message IDs for cursor-based pagination.
+// Message ID format: "turn:{dbId}:{role}".
+function extractMinDbId(messages: { id: string }[]): number {
+  if (messages.length === 0) return 0;
+  let min = Number.MAX_SAFE_INTEGER;
+  for (const m of messages) {
+    if (!m.id.startsWith('turn:')) continue;
+    const parts = m.id.split(':');
+    const dbId = parts.length >= 2 ? parseInt(parts[1], 10) : 0;
+    if (dbId > 0 && dbId < min) min = dbId;
+  }
+  return min === Number.MAX_SAFE_INTEGER ? 0 : min;
+}
+
 // Convert ConversationRecord[] from API to HotPlexMessage[]
 function historyToMessages(records: ConversationRecord[]): HotPlexMessage[] {
   const turns = records.map(r => ({
-    id: r.id,
-    session_id: r.session_id,
-    seq: r.seq,
-    role: r.role,
-    content: r.content,
-    platform: r.platform,
-    user_id: r.user_id,
-    model: r.model,
+    ...r,
     success: r.success == null ? null : !!r.success,
-    source: r.source,
-    tools: r.tools,
-    tool_call_count: r.tool_call_count,
-    tokens_in: r.tokens_in,
-    tokens_out: r.tokens_out,
-    duration_ms: r.duration_ms,
-    cost_usd: r.cost_usd,
-    metadata: r.metadata,
-    created_at: r.created_at,
   }));
   return conversationTurnsToMessages(turns).map(m => ({
     id: m.id,
@@ -212,8 +210,8 @@ export function useHotPlexRuntime({
   // Track pending interaction requests for response routing
   const interactionMapRef = useRef<Map<string, { type: 'permission' | 'question' | 'elicitation' }>>(new Map());
 
-  // Cache min seq for cursor-based pagination (avoid O(n) scan on each load)
-  const minSeqRef = useRef<number>(0);
+  // Cache min turn ID for cursor-based pagination (avoid O(n) scan on each load)
+  const minIdRef = useRef<number>(0);
 
   // Metrics tracking (spec §4.5 — Token & latency dashboard)
   const { sessionMetrics, startTurn, recordTurn } = useMetrics();
@@ -262,13 +260,9 @@ export function useHotPlexRuntime({
             });
             return [...serverMessages, ...liveOnly];
           });
-          // Update minSeq cache for cursor-based pagination
+          // Update minId cache for cursor-based pagination
           if (serverMessages.length > 0) {
-            const minSeq = Math.min(...serverMessages.map(m => {
-              const seq = parseInt(m.id.split('_').pop() || '0', 10);
-              return seq > 0 ? seq : Number.MAX_SAFE_INTEGER;
-            }));
-            minSeqRef.current = minSeq === Number.MAX_SAFE_INTEGER ? 0 : minSeq;
+            minIdRef.current = extractMinDbId(serverMessages);
           }
         }
         setHistoryHasMore(res.has_more);
@@ -931,11 +925,11 @@ export function useHotPlexRuntime({
     historyLoadingRef.current = true;
 
     try {
-      // Use cached minSeq for cursor (updated when loading history from server)
-      const cursorSeq = minSeqRef.current;
-      if (!cursorSeq) return { hasMore: false };
+      // Use cached minId for cursor (updated when loading history from server)
+      const cursorId = minIdRef.current;
+      if (!cursorId) return { hasMore: false };
 
-      const res = await getSessionHistory(sid, { beforeSeq: cursorSeq, limit: 50 });
+      const res = await getSessionHistory(sid, { beforeId: cursorId, limit: 50 });
       if (res.records.length > 0) {
         const olderMessages = historyToMessages(res.records);
         setMessages(prev => {
@@ -943,13 +937,10 @@ export function useHotPlexRuntime({
           const newOnly = olderMessages.filter(m => !existingIds.has(m.id));
           return [...newOnly, ...prev];
         });
-        // Update minSeq cache for next page
+        // Update minId cache for next page
         if (olderMessages.length > 0) {
-          const minSeq = Math.min(...olderMessages.map(m => {
-            const seq = parseInt(m.id.split('_').pop() || '0', 10);
-            return seq > 0 ? seq : Number.MAX_SAFE_INTEGER;
-          }));
-          minSeqRef.current = minSeq === Number.MAX_SAFE_INTEGER ? cursorSeq : minSeq;
+          const extracted = extractMinDbId(olderMessages);
+          minIdRef.current = extracted || cursorId;
         }
       }
       setHistoryHasMore(res.has_more);
