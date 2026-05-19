@@ -60,7 +60,7 @@ SELECT
   d.source,
   json_extract(d.data, '$.stats._session.tool_names') AS tools_json,
   COALESCE(json_extract(d.data, '$.stats._session.tool_call_count'), 0) AS tool_call_count,
-  CASE WHEN json_extract(d.data, '$.stats.usage.input_tokens') IS NOT NULL THEN COALESCE(json_extract(d.data, '$.stats.usage.input_tokens'), 0) + COALESCE(json_extract(d.data, '$.stats.usage.cache_creation_input_tokens'), 0) + COALESCE(json_extract(d.data, '$.stats.usage.cache_read_input_tokens'), 0) ELSE COALESCE(json_extract(d.data, '$.stats._session.turn_input_tok'), 0) END AS tokens_in,
+  CASE WHEN json_extract(d.data, '$.stats.usage') IS NOT NULL THEN COALESCE(json_extract(d.data, '$.stats.usage.input_tokens'), 0) + COALESCE(json_extract(d.data, '$.stats.usage.cache_creation_input_tokens'), 0) + COALESCE(json_extract(d.data, '$.stats.usage.cache_read_input_tokens'), 0) ELSE COALESCE(json_extract(d.data, '$.stats._session.turn_input_tok'), 0) END AS tokens_in,
   COALESCE(json_extract(d.data, '$.stats._session.turn_output_tok'), 0) AS tokens_out,
   COALESCE(json_extract(d.data, '$.stats._session.turn_duration_ms'), 0) AS duration_ms,
   COALESCE(json_extract(d.data, '$.stats._session.turn_cost_usd'), 0.0) AS cost_usd,

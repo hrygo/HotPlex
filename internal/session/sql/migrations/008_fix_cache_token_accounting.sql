@@ -21,7 +21,7 @@ SELECT
   json_extract(d.data, '$.stats._session.tool_names') AS tools_json,
   COALESCE(json_extract(d.data, '$.stats._session.tool_call_count'), 0) AS tool_call_count,
   CASE
-    WHEN json_extract(d.data, '$.stats.usage.input_tokens') IS NOT NULL THEN
+    WHEN json_extract(d.data, '$.stats.usage') IS NOT NULL THEN
       COALESCE(json_extract(d.data, '$.stats.usage.input_tokens'), 0)
       + COALESCE(json_extract(d.data, '$.stats.usage.cache_creation_input_tokens'), 0)
       + COALESCE(json_extract(d.data, '$.stats.usage.cache_read_input_tokens'), 0)
