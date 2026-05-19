@@ -558,7 +558,7 @@ func (s *gatewayStores) close(log *slog.Logger) {
 // runEventsGC periodically deletes expired events and turns.
 func runEventsGC(ctx context.Context, es *eventstore.SQLiteStore, log *slog.Logger, retention time.Duration) {
 	if retention <= 0 {
-		retention = 168 * time.Hour // default 7 days
+		retention = 720 * time.Hour // default 30 days
 	}
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()

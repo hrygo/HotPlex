@@ -573,7 +573,7 @@ type CronConfig struct {
 
 // EventsConfig holds event and turn retention settings.
 type EventsConfig struct {
-	Retention time.Duration `mapstructure:"retention"` // TTL for events + turns, default 168h (7 days)
+	Retention time.Duration `mapstructure:"retention"` // TTL for events + turns, default 720h (30 days)
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
@@ -708,7 +708,7 @@ func Default() *Config {
 			TickIntervalSec:   60,
 		},
 		Events: EventsConfig{
-			Retention: 168 * time.Hour, // 7 days
+			Retention: 720 * time.Hour, // 30 days
 		},
 	}
 }
