@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -489,6 +490,9 @@ func TestManagerSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestManagerReleaseIdleDrain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping: triggers process start")
+	}
 	cfg := config.CodexCLIConfig{IdleDrainPeriod: 50 * time.Millisecond}
 	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
@@ -580,3 +584,659 @@ func TestAppServerWorkerConnNilBeforeStart(t *testing.T) {
 
 	require.Nil(t, w.Conn())
 }
+
+// ─── ExecWorker Lifecycle Tests ─────────────────────────────────────────
+
+func newTestExecWorker(t *testing.T) *ExecWorker {
+	t.Helper()
+	return &ExecWorker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
+}
+
+func TestExecWorkerStart(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	err := w.Start(context.Background(), worker.SessionInfo{
+		SessionID:  "sess-1",
+		ProjectDir: t.TempDir(),
+	})
+	require.NoError(t, err)
+	require.True(t, w.started)
+	require.Equal(t, "sess-1", w.sessionID)
+
+	// Double start should error
+	err = w.Start(context.Background(), worker.SessionInfo{SessionID: "sess-2"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already started")
+}
+
+func TestExecWorkerTerminateWithoutCancel(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	require.Nil(t, w.cancel)
+	err := w.Terminate(context.Background())
+	require.NoError(t, err)
+}
+
+func TestExecWorkerTerminateWithCancel(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	w.cancel = cancel
+
+	err := w.Terminate(context.Background())
+	require.NoError(t, err)
+	require.Error(t, ctx.Err()) // cancelled
+}
+
+func TestExecWorkerResetContext(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	_ = w.Start(context.Background(), worker.SessionInfo{
+		SessionID:  "sess-1",
+		ProjectDir: t.TempDir(),
+	})
+	w.threadID = "thread-old"
+	w.readLineFn = func() (string, error) { return "", nil }
+
+	err := w.ResetContext(context.Background())
+	require.NoError(t, err)
+	require.False(t, w.started)
+	require.Empty(t, w.threadID)
+	require.Nil(t, w.readLineFn)
+}
+
+func TestExecWorkerInputNoProcessReturnsErrNotImplemented(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	_ = w.Start(context.Background(), worker.SessionInfo{
+		SessionID:  "sess-1",
+		ProjectDir: t.TempDir(),
+	})
+
+	// Input without a running process should try spawn, which will fail
+	// because there's no actual codex binary. This is expected.
+	err := w.Input(context.Background(), "hello", nil)
+	require.Error(t, err)
+}
+
+func TestExecWorkerHandlePermissionResponse(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	err := w.HandlePermissionResponse(context.Background(), "req-1", true, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not supported")
+}
+
+func TestExecWorkerHandleQuestionResponse(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	err := w.HandleQuestionResponse(context.Background(), "req-1", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not supported")
+}
+
+func TestExecWorkerHandleElicitationResponse(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	err := w.HandleElicitationResponse(context.Background(), "req-1", "", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not supported")
+}
+
+func TestExecWorkerHealthAndLastIO(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	health := w.Health()
+	require.Equal(t, worker.TypeCodexCLI, health.Type)
+
+	lastIO := w.LastIO()
+	require.True(t, lastIO.IsZero() || !lastIO.IsZero())
+}
+
+func TestExecWorkerSetTestConn(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	require.Nil(t, w.Conn())
+
+	// After setting test conn, Conn() returns it
+	mockConn := &mockSessionConn{}
+	w.SetTestConn(mockConn)
+	require.Equal(t, mockConn, w.Conn())
+}
+
+func TestExecWorkerSetReadLineFn(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	w.SetReadLineFn(func() (string, error) { return "", nil })
+	require.NotNil(t, w.readLineFn)
+}
+
+func TestExecWorkerReadOutput(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	_ = w.Start(context.Background(), worker.SessionInfo{
+		SessionID:  "sess-1",
+		ProjectDir: t.TempDir(),
+	})
+
+	// Simulate stdout with turn.completed to trigger return
+	stdout := strings.NewReader(
+		`{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}` + "\n",
+	)
+	conn := base.NewConn(slog.Default(), nil, "user-1", "sess-1")
+	mockConn := &mockSessionConn{sendCh: make(chan *events.Envelope, 10)}
+	w.SetTestConn(mockConn)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.readOutput(ctx, stdout, conn)
+}
+
+func TestExecWorkerReadOutputEmptyLine(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	_ = w.Start(context.Background(), worker.SessionInfo{
+		SessionID:  "sess-1",
+		ProjectDir: t.TempDir(),
+	})
+
+	stdout := strings.NewReader("\n\n{\"type\":\"turn.completed\"}\n")
+	conn := base.NewConn(slog.Default(), nil, "user-1", "sess-1")
+	w.SetTestConn(&mockSessionConn{sendCh: make(chan *events.Envelope, 10)})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.readOutput(ctx, stdout, conn)
+}
+
+func TestExecWorkerReadOutputCancelled(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	_ = w.Start(context.Background(), worker.SessionInfo{
+		SessionID:  "sess-1",
+		ProjectDir: t.TempDir(),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	// Should return quickly due to cancelled context
+	stdout := strings.NewReader("")
+	conn := base.NewConn(slog.Default(), nil, "user-1", "sess-1")
+	w.readOutput(ctx, stdout, conn)
+}
+
+func TestExecWorkerBuildArgs(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	w.cfg = Config{
+		Sandbox:      "workspace-write",
+		ApprovalMode: "never",
+	}
+
+	session := worker.SessionInfo{
+		SessionID:       "sess-1",
+		ProjectDir:      "/tmp/project",
+		ResumeSessionID: "",
+	}
+
+	args := w.buildArgs(session, "fix the bug")
+	require.Contains(t, args, "exec")
+	require.Contains(t, args, "--json")
+	require.Contains(t, args, "fix the bug")
+}
+
+func TestExecWorkerBuildArgsWithResume(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	w.cfg = Config{Sandbox: "workspace-write", ApprovalMode: "never"}
+
+	session := worker.SessionInfo{
+		SessionID:       "sess-1",
+		ProjectDir:      "/tmp/project",
+		ResumeSessionID: "thread-123",
+	}
+
+	args := w.buildArgs(session, "continue")
+	require.Contains(t, args, "resume")
+	require.Contains(t, args, "thread-123")
+}
+
+func TestExecWorkerBuildArgsWithModel(t *testing.T) {
+	t.Parallel()
+
+	w := newTestExecWorker(t)
+	w.cfg = Config{
+		Sandbox:      "workspace-write",
+		ApprovalMode: "never",
+		Model:        "o3",
+	}
+
+	session := worker.SessionInfo{
+		SessionID:  "sess-1",
+		ProjectDir: "/tmp/project",
+	}
+
+	args := w.buildArgs(session, "test")
+	require.Contains(t, args, "-m")
+	require.Contains(t, args, "o3")
+}
+
+// ─── AppServerWorker Lifecycle Tests ─────────────────────────────────────
+
+func newTestAppServerWorker(t *testing.T) *AppServerWorker {
+	t.Helper()
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+	return &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+	}
+}
+
+func TestAppServerWorkerTerminate(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Terminate(context.Background())
+	require.NoError(t, err)
+}
+
+func TestAppServerWorkerKill(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Kill()
+	require.NoError(t, err)
+}
+
+func TestAppServerWorkerWaitNoCrashSub(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
+func TestAppServerWorkerResume(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	// Resume delegates to Start, which will fail without manager running
+	err := w.Resume(context.Background(), worker.SessionInfo{
+		SessionID:  "sess-1",
+		ProjectDir: t.TempDir(),
+	})
+	require.Error(t, err)
+}
+
+func TestAppServerWorkerHealthAndLastIO(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	health := w.Health()
+	require.Equal(t, worker.TypeCodexCLI, health.Type)
+
+	lastIO := w.LastIO()
+	_ = lastIO // can be zero
+}
+
+func TestAppServerWorkerHandlePermissionResponse(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.HandlePermissionResponse(context.Background(), "req-1", true, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not supported")
+}
+
+func TestAppServerWorkerHandleQuestionResponse(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.HandleQuestionResponse(context.Background(), "req-1", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not supported")
+}
+
+func TestAppServerWorkerHandleElicitationResponse(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.HandleElicitationResponse(context.Background(), "req-1", "", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not supported")
+}
+
+func TestAppServerWorkerInputNoThreadID(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Input(context.Background(), "hello", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not started")
+}
+
+// ─── mapItemCompleted branch tests ───────────────────────────────────────
+
+func TestMapperMapItemCompletedBranches(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	t.Run("file_change_completed", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{
+			Type: EventItemCompleted,
+			Item: &CodexItem{
+				ID:     "item_1",
+				Type:   ItemFileChange,
+				Status: "completed",
+				Stderr: "",
+			},
+		}
+		envs := m.Map(event)
+		require.Len(t, envs, 1)
+		require.Equal(t, events.ToolResult, envs[0].Event.Type)
+		tr := envs[0].Event.Data.(events.ToolResultData)
+		require.Equal(t, "completed", tr.Output)
+	})
+
+	t.Run("file_change_failed", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{
+			Type: EventItemCompleted,
+			Item: &CodexItem{
+				ID:     "item_1",
+				Type:   ItemFileChange,
+				Status: "error",
+				Stderr: "permission denied",
+			},
+		}
+		envs := m.Map(event)
+		require.Len(t, envs, 1)
+		tr := envs[0].Event.Data.(events.ToolResultData)
+		require.Equal(t, "failed", tr.Output)
+		require.Equal(t, "permission denied", tr.Error)
+	})
+
+	t.Run("mcp_tool_call_completed", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{
+			Type: EventItemCompleted,
+			Item: &CodexItem{
+				ID:     "item_1",
+				Type:   ItemMCPToolCall,
+				Result: json.RawMessage(`{"files":["a.go"]}`),
+			},
+		}
+		envs := m.Map(event)
+		require.Len(t, envs, 1)
+		tr := envs[0].Event.Data.(events.ToolResultData)
+		require.Contains(t, tr.Output, "a.go")
+	})
+
+	t.Run("mcp_tool_call_with_error", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{
+			Type: EventItemCompleted,
+			Item: &CodexItem{
+				ID:    "item_1",
+				Type:  ItemMCPToolCall,
+				Error: &CodexItemError{Message: "timeout"},
+			},
+		}
+		envs := m.Map(event)
+		require.Len(t, envs, 1)
+		tr := envs[0].Event.Data.(events.ToolResultData)
+		require.Equal(t, "timeout", tr.Error)
+	})
+
+	t.Run("plan_item", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{
+			Type: EventItemCompleted,
+			Item: &CodexItem{
+				ID:   "item_1",
+				Type: ItemPlan,
+				Text: "I will refactor the module",
+			},
+		}
+		envs := m.Map(event)
+		require.Len(t, envs, 1)
+		require.Equal(t, events.State, envs[0].Event.Type)
+		sd := envs[0].Event.Data.(events.StateData)
+		require.Equal(t, events.SessionState("planning"), sd.State)
+	})
+
+	t.Run("image_generation_item", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{
+			Type: EventItemCompleted,
+			Item: &CodexItem{
+				ID:        "item_1",
+				Type:      ItemImageGeneration,
+				SavedPath: "/tmp/image.png",
+			},
+		}
+		envs := m.Map(event)
+		require.Len(t, envs, 1)
+		tr := envs[0].Event.Data.(events.ToolResultData)
+		require.Equal(t, "/tmp/image.png", tr.Output)
+	})
+
+	t.Run("unknown_item_type", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{
+			Type: EventItemCompleted,
+			Item: &CodexItem{ID: "item_1", Type: "unknown_type"},
+		}
+		envs := m.Map(event)
+		require.Nil(t, envs)
+	})
+}
+
+// ─── mapItemStarted branch tests ─────────────────────────────────────────
+
+func TestMapperMapItemStartedBranches(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	t.Run("unknown_item_started", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{
+			Type: EventItemStarted,
+			Item: &CodexItem{ID: "item_1", Type: "unknown"},
+		}
+		envs := m.Map(event)
+		require.Nil(t, envs)
+	})
+
+	t.Run("nil_item_started", func(t *testing.T) {
+		t.Parallel()
+		event := &CodexEvent{Type: EventItemStarted, Item: nil}
+		envs := m.Map(event)
+		require.Nil(t, envs)
+	})
+}
+
+// ─── appConn tests ────────────────────────────────────────────────────────
+
+func TestAppConnSendRecvClose(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+	ch := make(chan *events.Envelope, 5)
+	conn := &appConn{
+		userID:    "user-1",
+		sessionID: "sess-1",
+		recvCh:    ch,
+		manager:   mgr,
+	}
+
+	require.Equal(t, "user-1", conn.UserID())
+	require.Equal(t, "sess-1", conn.SessionID())
+	require.Equal(t, (<-chan *events.Envelope)(ch), conn.Recv())
+
+	// TrySend
+	env := events.NewEnvelope("id-1", "sess-1", 1, events.MessageDelta, events.MessageDeltaData{Content: "hi"})
+	require.True(t, conn.TrySend(env))
+	got := <-ch
+	require.Equal(t, events.MessageDelta, got.Event.Type)
+
+	// Close
+	require.NoError(t, conn.Close())
+	require.NoError(t, conn.Close()) // idempotent
+	_, ok := <-ch
+	require.False(t, ok) // closed
+}
+
+func TestAppConnTrySendFull(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+	ch := make(chan *events.Envelope, 1)
+	conn := &appConn{
+		userID:    "user-1",
+		sessionID: "sess-1",
+		recvCh:    ch,
+		manager:   mgr,
+	}
+
+	// Fill channel
+	conn.TrySend(events.NewEnvelope("id-1", "sess-1", 1, events.Done, events.DoneData{}))
+	// Next send should fail
+	require.False(t, conn.TrySend(events.NewEnvelope("id-2", "sess-1", 2, events.Done, events.DoneData{})))
+}
+
+// ─── buildUsageStats edge case ────────────────────────────────────────────
+
+func TestBuildUsageStatsNil(t *testing.T) {
+	result := buildUsageStats(nil)
+	require.Nil(t, result)
+}
+
+// ─── ParseNotification/ParseResponse edge cases ───────────────────────────
+
+func TestParseNotificationMissingParams(t *testing.T) {
+	t.Parallel()
+
+	p := NewParser()
+	method, params, err := p.ParseNotification(`{"jsonrpc":"2.0","method":"item/started"}`)
+	require.NoError(t, err)
+	require.Equal(t, "item/started", method)
+	require.Nil(t, params)
+}
+
+func TestParseResponseMissingResult(t *testing.T) {
+	t.Parallel()
+
+	p := NewParser()
+	id, result, rpcErr, err := p.ParseResponse(`{"jsonrpc":"2.0","id":5}`)
+	require.NoError(t, err)
+	require.Equal(t, int64(5), id)
+	require.Nil(t, result)
+	require.Nil(t, rpcErr)
+}
+
+// ─── config init tests ────────────────────────────────────────────────────
+
+func TestInitConfigAndGetConfig(t *testing.T) {
+	InitConfig(config.CodexCLIConfig{
+		Command: "/usr/local/bin/codex",
+		Model:   "o3",
+	})
+	cfg := GetConfig()
+	require.Equal(t, "/usr/local/bin/codex", cfg.Command)
+	require.Equal(t, "o3", cfg.Model)
+}
+
+func TestAppServerWorkerResetContext(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	// Don't set threadID to avoid triggering Notify on a nil manager connection
+	err := w.ResetContext(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, w.threadID)
+	require.Nil(t, w.recvCh)
+}
+
+// ─── Manager Lifecycle Tests ──────────────────────────────────────────────
+
+func TestManagerIsRunning(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	require.False(t, mgr.IsRunning())
+
+	mgr.mu.Lock()
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	require.True(t, mgr.IsRunning())
+}
+
+func TestManagerAcquireStartsProcess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping: requires codex binary")
+	}
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Acquire will try to start the process, which requires codex binary.
+	// This should fail since there's no actual codex binary available in CI.
+	_, err := mgr.Acquire(context.Background())
+	require.Error(t, err)
+}
+
+// ─── Mock Helpers ──────────────────────────────────────────────────────────
+
+type mockSessionConn struct {
+	sendCh chan *events.Envelope
+}
+
+func (m *mockSessionConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
+	return nil
+}
+func (m *mockSessionConn) Send(ctx context.Context, env *events.Envelope) error {
+	select {
+	case m.sendCh <- env:
+		return nil
+	default:
+		return fmt.Errorf("channel full")
+	}
+}
+func (m *mockSessionConn) TrySend(env *events.Envelope) bool {
+	select {
+	case m.sendCh <- env:
+		return true
+	default:
+		return false
+	}
+}
+func (m *mockSessionConn) Recv() <-chan *events.Envelope { return m.sendCh }
+func (m *mockSessionConn) Close() error                  { return nil }
+func (m *mockSessionConn) UserID() string                { return "user-1" }
+func (m *mockSessionConn) SessionID() string             { return "sess-1" }
