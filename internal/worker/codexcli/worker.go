@@ -387,20 +387,11 @@ type appConn struct {
 	manager   *CodexAppServerManager
 }
 
+// Send returns ErrNotImplemented because in app-server mode the manager
+// handles all communication via JSON-RPC. Writing AEP envelopes directly
+// to stdin would bypass the JSON-RPC protocol and break the codex process.
 func (c *appConn) Send(ctx context.Context, msg *events.Envelope) error {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("app-conn: marshal envelope: %w", err)
-	}
-
-	c.manager.writeMu.Lock()
-	_, err = c.manager.stdin.Write(append(data, '\n'))
-	c.manager.writeMu.Unlock()
-
-	if err != nil {
-		return fmt.Errorf("app-conn: write to stdin: %w", err)
-	}
-	return nil
+	return worker.ErrNotImplemented
 }
 func (c *appConn) Recv() <-chan *events.Envelope { return c.recvCh }
 func (c *appConn) TrySend(env *events.Envelope) bool {

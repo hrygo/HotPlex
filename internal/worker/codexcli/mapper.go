@@ -264,17 +264,34 @@ func (m *Mapper) mapNotifTurnCompleted(params json.RawMessage) []*events.Envelop
 
 func (m *Mapper) mapNotifApproval(params json.RawMessage) []*events.Envelope {
 	var p struct {
-		RequestID string `json:"requestId"`
-		ToolName  string `json:"toolName"`
+		RequestID string          `json:"requestId"`
+		ToolName  string          `json:"toolName"`
+		Arguments json.RawMessage `json:"arguments,omitempty"`
+		Reason    string          `json:"reason,omitempty"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil
 	}
+	desc := p.ToolName
+	if p.Reason != "" {
+		desc = p.Reason
+	}
+
+	input := map[string]any{"tool": p.ToolName}
+	if p.Arguments != nil {
+		var args map[string]any
+		if err := json.Unmarshal(p.Arguments, &args); err == nil {
+			for k, v := range args {
+				input[k] = v
+			}
+		}
+	}
+
 	return []*events.Envelope{
 		newEnvelope(events.PermissionRequest, events.PermissionRequestData{
 			ID:          p.RequestID,
 			ToolName:    p.ToolName,
-			Description: p.ToolName,
+			Description: desc,
 		}, m.sessionID, m.nextSeq()),
 	}
 }

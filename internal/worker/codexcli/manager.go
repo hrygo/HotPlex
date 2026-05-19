@@ -434,6 +434,12 @@ func (m *CodexAppServerManager) readNotifications(ctx context.Context) {
 }
 
 // dispatchFrame parses a single JSON-RPC frame once and routes to response or notification.
+//
+// Routing logic (in order):
+//  1. ID != 0 → this is a response (request IDs start at 1, monotonically increasing)
+//  2. ID == 0 && Error != nil → error notification or response to ID 0 (which never
+//     exists in pending — dropped silently, logged as debug)
+//  3. ID == 0 && Error == nil → try to parse as notification by method presence
 func (m *CodexAppServerManager) dispatchFrame(data []byte) {
 	var resp JSONRPCResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
@@ -446,7 +452,11 @@ func (m *CodexAppServerManager) dispatchFrame(data []byte) {
 		return
 	}
 
+	// ID == 0: either a notification or a response to an unknown request.
 	if resp.Error != nil {
+		// Error with no ID — treat as notification-like (e.g. server-side error).
+		// Since no pending request has ID 0, dispatchResponse will drop it silently.
+		m.log.Debug("codex-app-server: response with ID=0, dropping", "error", resp.Error.Message)
 		m.dispatchResponse(&resp)
 		return
 	}
@@ -458,6 +468,8 @@ func (m *CodexAppServerManager) dispatchFrame(data []byte) {
 	}
 	if notif.Method != "" {
 		m.dispatchNotification(&notif)
+	} else {
+		m.log.Debug("codex-app-server: frame with ID=0, no method, no error — dropped")
 	}
 }
 
