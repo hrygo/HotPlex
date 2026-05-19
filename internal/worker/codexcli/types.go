@@ -4,11 +4,11 @@ import "encoding/json"
 
 // CodexEvent is the top-level JSONL event from codex exec --json.
 type CodexEvent struct {
-	Type     string     `json:"type"`
-	Item     *CodexItem `json:"item,omitempty"`
-	ThreadID string     `json:"thread_id,omitempty"`
+	Type     string      `json:"type"`
+	Item     *CodexItem  `json:"item,omitempty"`
+	ThreadID string      `json:"thread_id,omitempty"`
 	Usage    *CodexUsage `json:"usage,omitempty"`
-	Message  string     `json:"message,omitempty"`
+	Message  string      `json:"message,omitempty"`
 }
 
 // CodexItem represents a single turn item within a codex turn.
