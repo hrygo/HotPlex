@@ -520,7 +520,8 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 	}
 
 	if params.ThreadID == "" {
-		m.log.Debug("codex-app-server: server request without threadId, dropping", "method", frame.Method)
+		m.log.Debug("codex-app-server: server request without threadId, dropping",
+			"method", frame.Method, "id", frame.ID)
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -1209,6 +1210,206 @@ func TestManagerAcquireStartsProcess(t *testing.T) {
 	// This should fail since there's no actual codex binary available in CI.
 	_, err := mgr.Acquire(context.Background())
 	require.Error(t, err)
+}
+
+// ─── dispatchFrame / dispatchServerRequest / RespondServerRequest ──────
+
+func TestDispatchFrameServerRequest(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Subscribe to receive events for the thread.
+	ch := mgr.Subscribe("thr-1", "sess-1")
+
+	// Simulate a server-initiated approval request (has both ID and Method).
+	frame := []byte(`{"jsonrpc":"2.0","id":99,"method":"serverRequest/approval","params":{"threadId":"thr-1","requestId":"req-42","toolName":"Bash","reason":"run ls"}}`)
+	mgr.dispatchFrame(frame)
+
+	// Should have stored requestID → frameID mapping.
+	v, ok := mgr.serverReqIDs.Load("req-42")
+	require.True(t, ok, "requestID should be stored in serverReqIDs")
+	require.Equal(t, int64(99), v)
+
+	// Subscriber should receive a PermissionRequest envelope.
+	select {
+	case env := <-ch:
+		require.Equal(t, events.PermissionRequest, env.Event.Type)
+		pr, ok := env.Event.Data.(events.PermissionRequestData)
+		require.True(t, ok)
+		require.Equal(t, "req-42", pr.ID)
+		require.Equal(t, "Bash", pr.ToolName)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for envelope")
+	}
+}
+
+func TestDispatchFrameClientResponse(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Register a pending request.
+	respCh := make(chan *JSONRPCResponse, 1)
+	mgr.pending.Store(int64(7), respCh)
+	defer mgr.pending.Delete(int64(7))
+
+	// Simulate a client response (has ID, no Method).
+	frame := []byte(`{"jsonrpc":"2.0","id":7,"result":{"thread":{"id":"thr-1"}}}`)
+	mgr.dispatchFrame(frame)
+
+	select {
+	case resp := <-respCh:
+		require.Equal(t, int64(7), resp.ID)
+		require.NotNil(t, resp.Result)
+		require.Nil(t, resp.Error)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for response")
+	}
+}
+
+func TestDispatchFrameNotification(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	ch := mgr.Subscribe("thr-1", "sess-1")
+
+	// Notification: ID=0, Method present, no Error.
+	frame := []byte(`{"jsonrpc":"2.0","method":"turn/failed","params":{"threadId":"thr-1","turn":{}}}`)
+	mgr.dispatchFrame(frame)
+
+	select {
+	case env := <-ch:
+		require.Equal(t, events.Error, env.Event.Type)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for notification envelope")
+	}
+}
+
+func TestDispatchFrameErrorWithZeroID(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Error frame with ID=0 should be dropped silently (no panic).
+	frame := []byte(`{"jsonrpc":"2.0","id":0,"error":{"code":-32600,"message":"Invalid params"}}`)
+	mgr.dispatchFrame(frame) // should not panic
+}
+
+func TestDispatchFrameNoMethodNoID(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Bare frame with no method, no ID — should be dropped.
+	frame := []byte(`{"jsonrpc":"2.0"}`)
+	mgr.dispatchFrame(frame) // should not panic
+}
+
+func TestDispatchFrameInvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Invalid JSON should be handled gracefully.
+	mgr.dispatchFrame([]byte(`not json at all`)) // should not panic
+}
+
+func TestDispatchServerRequestWithoutThreadID(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Server request without threadId should be dropped without storing requestID.
+	frame := &JSONRPCFrame{
+		JSONRPC: "2.0",
+		ID:      50,
+		Method:  "serverRequest/approval",
+		Params:  json.RawMessage(`{"requestId":"req-no-thread"}`),
+	}
+	mgr.dispatchServerRequest(frame)
+
+	_, ok := mgr.serverReqIDs.Load("req-no-thread")
+	require.False(t, ok, "requestID should NOT be stored for threadless request")
+}
+
+func TestRespondServerRequest(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+
+		// Pre-store a requestID → frameID mapping.
+		mgr.serverReqIDs.Store("req-100", int64(42))
+
+		// Capture what gets written to stdin.
+		var buf strings.Builder
+		mgr.stdin = struct {
+			io.Writer
+			io.Closer
+		}{
+			Writer: &buf,
+			Closer: io.NopCloser(nil),
+		}
+
+		err := mgr.RespondServerRequest("req-100", map[string]string{"decision": "accept"})
+		require.NoError(t, err)
+
+		// Entry should be deleted.
+		_, ok := mgr.serverReqIDs.Load("req-100")
+		require.False(t, ok)
+
+		// Written JSON should contain the frame ID and result.
+		require.Contains(t, buf.String(), `"id":42`)
+		require.Contains(t, buf.String(), "accept")
+	})
+
+	t.Run("unknown_request", func(t *testing.T) {
+		t.Parallel()
+
+		err := mgr.RespondServerRequest("nonexistent", map[string]string{"decision": "decline"})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no pending server request")
+	})
+}
+
+// ─── Approval Method Name Coverage ─────────────────────────────────────
+
+func TestMapNotificationApprovalMethodNames(t *testing.T) {
+	t.Parallel()
+
+	methods := []string{
+		"serverRequest/approval",
+		"item/commandExecution/requestApproval",
+		"item/fileChange/requestApproval",
+	}
+
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+
+			m := NewMapper("session-1")
+			params := json.RawMessage(fmt.Sprintf(
+				`{"requestId":"r1","toolName":"%s","reason":"test"}`, method))
+			envs := m.MapNotification(method, params)
+			require.Len(t, envs, 1, "method %s should produce 1 envelope", method)
+			require.Equal(t, events.PermissionRequest, envs[0].Event.Type, "method %s", method)
+			pr, ok := envs[0].Event.Data.(events.PermissionRequestData)
+			require.True(t, ok)
+			require.Equal(t, "r1", pr.ID)
+		})
+	}
 }
 
 // ─── Mock Helpers ──────────────────────────────────────────────────────────
