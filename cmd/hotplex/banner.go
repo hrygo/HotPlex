@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"runtime"
-	"strings"
 
 	"github.com/hrygo/hotplex/internal/cli/output"
 )
@@ -51,6 +50,7 @@ type RuntimeStatus struct {
 	AdminAddr       string
 	WebChatAddr     string
 	WebChatEmbedded bool
+	TLSEnabled      bool
 	DBPath          string
 	PoolMax         int
 	PoolIdle        int
@@ -77,46 +77,59 @@ func writeAll(w io.Writer, lines ...string) {
 func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPath string) {
 	tty := output.IsTTY(out)
 
-	bold := func(s string) string {
+	bold := func(text string) string {
 		if tty {
-			return ansiBold + s + ansiReset
+			return ansiBold + text + ansiReset
 		}
-		return s
+		return text
 	}
-	cyan := func(s string) string {
+	cyan := func(text string) string {
 		if tty {
-			return ansiCyan + s + ansiReset
+			return ansiCyan + text + ansiReset
 		}
-		return s
+		return text
 	}
-	dim := func(s string) string {
+	dim := func(text string) string {
 		if tty {
-			return ansiDim + s + ansiReset
+			return ansiDim + text + ansiReset
 		}
-		return s
+		return text
 	}
-	green := func(v string) string {
+	green := func(text string) string {
 		if tty {
-			return ansiGreen + v + ansiReset
+			return ansiGreen + text + ansiReset
 		}
-		return v
+		return text
 	}
-	red := func(v string) string {
+	red := func(text string) string {
 		if tty {
-			return ansiRed + v + ansiReset
+			return ansiRed + text + ansiReset
 		}
-		return v
+		return text
 	}
 
 	pad := func(label, value string) string {
 		return fmt.Sprintf("  %s%s", bold(fmt.Sprintf("%-11s", label)), value)
 	}
 
+	sectionHeader := func(name string) string {
+		dashes := "──────────────────────────────────────────"
+		return "  " + bold(name) + " " + dim(dashes)
+	}
+
+	sectionPad := func(label, value string) string {
+		return fmt.Sprintf("    %s%s", bold(fmt.Sprintf("%-15s", label)), value)
+	}
+
+	wsScheme := "ws"
+	if s.TLSEnabled {
+		wsScheme = "wss"
+	}
+
 	var lines []string
 
+	// ASCII art + build info
 	lines = append(lines, "", cyan(bannerArt), "")
-
-	// Build info
 	lines = append(lines,
 		pad("Version", cyan(info.Version)),
 		pad("Build", info.BuildTime),
@@ -126,37 +139,46 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 		lines = append(lines, pad("Config", configPath))
 	}
 
-	// Separator between build info and runtime status
-	lines = append(lines, dim("  ─────────────────────────────────────"), "")
-
-	// Runtime status
-	lines = append(lines, pad("Gateway", "http://"+s.GatewayAddr))
-	if s.AdminAddr != "" {
-		lines = append(lines, pad("Admin", "http://"+s.AdminAddr))
-	}
+	// ── Endpoints ────────────────────────────────────────────
+	lines = append(lines, "", dim("  ───────────────────────────────────────────"), "")
+	lines = append(lines, sectionHeader("Endpoints"))
+	lines = append(lines, sectionPad("Gateway", "http://"+s.GatewayAddr))
+	lines = append(lines, sectionPad("WebSocket", wsScheme+"://"+s.GatewayAddr+"/ws"))
+	lines = append(lines, sectionPad("Health", "http://"+s.GatewayAddr+"/health"))
 	if s.WebChatEmbedded {
-		lines = append(lines, pad("WebChat", "http://"+s.GatewayAddr+"/ "+dim("(embedded)")))
+		lines = append(lines, sectionPad("WebChat", "http://"+s.GatewayAddr+"/ "+dim("(embedded)")))
+		lines = append(lines, sectionPad("Admin UI", "http://"+s.GatewayAddr+"/admin "+dim("(embedded)")))
 	} else if s.WebChatAddr != "" {
-		lines = append(lines, pad("WebChat", "http://"+s.WebChatAddr))
+		lines = append(lines, sectionPad("WebChat", "http://"+s.WebChatAddr))
+		lines = append(lines, sectionPad("Admin UI", "http://"+s.WebChatAddr+"/admin"))
 	}
-	lines = append(lines, pad("Docs", "http://"+s.GatewayAddr+"/docs/"))
-	lines = append(lines, pad("Database", s.DBPath))
-	lines = append(lines, pad("Pool", fmt.Sprintf("%d sessions / %d idle per user", s.PoolMax, s.PoolIdle)))
+	lines = append(lines, sectionPad("Docs", "http://"+s.GatewayAddr+"/docs/"))
+	if s.AdminAddr != "" {
+		lines = append(lines, sectionPad("Admin API", "http://"+s.AdminAddr))
+	}
 
+	// ── Bots ─────────────────────────────────────────────────
 	if len(s.Adapters) > 0 {
-		var parts []string
+		lines = append(lines, "", sectionHeader("Bots"))
 		for _, a := range s.Adapters {
+			name := a.Name
+			if a.BotName != "" {
+				name += "/" + a.BotName
+			}
 			if a.Started {
-				parts = append(parts, fmt.Sprintf("%s %s", a.Name, green("✓")))
+				lines = append(lines, "    "+name+"  "+green("✓"))
 			} else {
-				parts = append(parts, red(fmt.Sprintf("%s ✗", a.Name)))
+				lines = append(lines, "    "+name+"  "+red("✗"))
 			}
 		}
-		lines = append(lines, pad("Adapters", strings.Join(parts, "  ")))
 	}
 
+	// ── Resources ────────────────────────────────────────────
+	lines = append(lines, "", sectionHeader("Resources"))
+	lines = append(lines, sectionPad("Database", s.DBPath))
+	lines = append(lines, sectionPad("Pool", fmt.Sprintf("%d sessions / %d idle per user", s.PoolMax, s.PoolIdle)))
 	if s.RetryEnabled {
-		lines = append(lines, pad("LLM Retry", green(fmt.Sprintf("✓ %d retries, %s base delay", s.RetryMax, s.RetryDelay))))
+		lines = append(lines, sectionPad("LLM Retry", green(fmt.Sprintf("✓ %d retries, %s delay", s.RetryMax, s.RetryDelay))))
 	}
 
 	lines = append(lines, "")

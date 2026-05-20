@@ -134,13 +134,13 @@ func setupRoutes(
 	adminMux.HandleFunc("GET /admin/sessions/{id}/stats", adminAPI.HandleSessionStats)
 
 	// Cron API
-	adminMux.HandleFunc("GET /api/cron/jobs", adminAPI.HandleCronList)
-	adminMux.HandleFunc("GET /api/cron/jobs/{id}", adminAPI.HandleCronGet)
-	adminMux.HandleFunc("POST /api/cron/jobs", adminAPI.HandleCronCreate)
-	adminMux.HandleFunc("PATCH /api/cron/jobs/{id}", adminAPI.HandleCronUpdate)
-	adminMux.HandleFunc("DELETE /api/cron/jobs/{id}", adminAPI.HandleCronDelete)
-	adminMux.HandleFunc("POST /api/cron/jobs/{id}/run", adminAPI.HandleCronTrigger)
-	adminMux.HandleFunc("GET /api/cron/jobs/{id}/runs", adminAPI.HandleCronRunHistory)
+	adminMux.HandleFunc("GET /admin/cron/jobs", adminAPI.HandleCronList)
+	adminMux.HandleFunc("GET /admin/cron/jobs/{id}", adminAPI.HandleCronGet)
+	adminMux.HandleFunc("POST /admin/cron/jobs", adminAPI.HandleCronCreate)
+	adminMux.HandleFunc("PATCH /admin/cron/jobs/{id}", adminAPI.HandleCronUpdate)
+	adminMux.HandleFunc("DELETE /admin/cron/jobs/{id}", adminAPI.HandleCronDelete)
+	adminMux.HandleFunc("POST /admin/cron/jobs/{id}/run", adminAPI.HandleCronTrigger)
+	adminMux.HandleFunc("GET /admin/cron/jobs/{id}/runs", adminAPI.HandleCronRunHistory)
 
 	// Bot status API
 	adminMux.HandleFunc("GET /admin/bots", adminAPI.HandleListBots)

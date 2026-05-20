@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/config"
@@ -133,6 +135,29 @@ func waitForProcessExit(pid int, timeout time.Duration) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// cleanupWebchatOrphan terminates a running webchat dev process started by `make dev`.
+// Returns the cleaned-up PID, or 0 if no orphan was found.
+func cleanupWebchatOrphan() int {
+	pidPath := filepath.Join(config.HotplexHome(), ".pids", "hotplex-webchat.pid")
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0
+	}
+	if proc.IsProcessAlive(pid) != nil {
+		_ = os.Remove(pidPath)
+		return 0
+	}
+	if p, err := os.FindProcess(pid); err == nil {
+		_ = p.Kill()
+	}
+	_ = os.Remove(pidPath)
+	return pid
 }
 
 // ─── Restart Cooldown Marker ──────────────────────────────────────────────────

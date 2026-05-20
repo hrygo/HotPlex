@@ -251,7 +251,7 @@ func TriggerViaAdmin(ctx context.Context, configPath, jobID string) error {
 		return fmt.Errorf("no admin token configured")
 	}
 
-	url := "http://" + addr + "/api/cron/jobs/" + url.PathEscape(jobID) + "/run"
+	url := "http://" + addr + "/admin/cron/jobs/" + url.PathEscape(jobID) + "/run"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)

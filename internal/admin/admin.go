@@ -196,6 +196,12 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 			}
 		}
 
+		// Health readiness probe exempt from auth (required for k8s/Docker probes).
+		if r.URL.Path == "/admin/health/ready" {
+			next.ServeHTTP(sw, r)
+			return
+		}
+
 		token := extractBearerToken(r)
 		if token == "" {
 			http.Error(sw, "missing admin token", http.StatusUnauthorized)

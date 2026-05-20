@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hrygo/hotplex/internal/cli/output"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 )
@@ -54,7 +55,7 @@ Use -d to run as a background daemon.`,
 				return err
 			}
 			if err := writeGatewayState(configPath, devMode); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not write PID file: %s\n", err)
+				fmt.Fprintf(os.Stderr, "  %s could not write PID file: %s\n", output.StatusSymbol("warn"), err)
 			}
 			if err := runGateway(configPath, devMode, nil); err != nil {
 				removeGatewayState()
@@ -82,7 +83,10 @@ func newGatewayStopCmd() *cobra.Command {
 			if err := stopGateway(inst); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "gateway: stopped (%s, PID %d)\n", inst.Source, inst.PID)
+			fmt.Fprintf(os.Stderr, "  %s gateway stopped (PID %d, %s)\n", output.Green("✓"), inst.PID, inst.Source)
+			if pid := cleanupWebchatOrphan(); pid > 0 {
+				fmt.Fprintf(os.Stderr, "  %s webchat cleaned up (PID %d)\n", output.Green("✓"), pid)
+			}
 			return nil
 		},
 	}
@@ -110,12 +114,12 @@ Use --detached to spawn a helper process that survives worker shutdown.`,
 
 			inst, err := findRunningGateway()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "gateway: %s (proceeding with start)\n", err)
+				fmt.Fprintf(os.Stderr, "  %s %s\n", output.StatusSymbol("warn"), err)
 			} else {
 				if stopErr := stopGateway(inst); stopErr != nil {
-					fmt.Fprintf(os.Stderr, "gateway: stop failed: %s (proceeding with start)\n", stopErr)
+					fmt.Fprintf(os.Stderr, "  %s stop failed: %s\n", output.Red("✗"), stopErr)
 				} else {
-					fmt.Fprintf(os.Stderr, "gateway: stopped (%s, PID %d)\n", inst.Source, inst.PID)
+					fmt.Fprintf(os.Stderr, "  %s gateway stopped (PID %d, %s)\n", output.Green("✓"), inst.PID, inst.Source)
 				}
 
 				if inst.Source == sourcePID {
@@ -137,7 +141,7 @@ Use --detached to spawn a helper process that survives worker shutdown.`,
 				return startDaemon(configPath, devMode)
 			}
 			if err := writeGatewayState(configPath, devMode); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not write PID file: %s\n", err)
+				fmt.Fprintf(os.Stderr, "  %s could not write PID file: %s\n", output.StatusSymbol("warn"), err)
 			}
 			if err := runGateway(configPath, devMode, nil); err != nil {
 				removeGatewayState()
@@ -214,6 +218,7 @@ func startDaemon(configPath string, devMode bool) error {
 		return fmt.Errorf("daemon exited unexpectedly; check logs at %s", logPath)
 	}
 
-	fmt.Fprintf(os.Stderr, "gateway: started as daemon (PID %d, log: %s)\n", childPID, logPath)
+	fmt.Fprintf(os.Stderr, "  %s gateway started as daemon (PID %d)\n", output.Green("✓"), childPID)
+	fmt.Fprintf(os.Stderr, "    %s %s\n", output.Dim("logs"), logPath)
 	return nil
 }
