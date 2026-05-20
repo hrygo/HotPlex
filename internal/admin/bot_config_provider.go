@@ -46,6 +46,7 @@ type BotConfigAttrs struct {
 	Platform       string    `json:"platform,omitempty"`
 	WorkerType     string    `json:"worker_type,omitempty"`
 	WorkDir        string    `json:"work_dir,omitempty"`
+	Soul           string    `json:"soul,omitempty"`
 	DMPolicy       string    `json:"dm_policy,omitempty"`
 	GroupPolicy    string    `json:"group_policy,omitempty"`
 	RequireMention bool      `json:"require_mention,omitempty"`
@@ -54,6 +55,12 @@ type BotConfigAttrs struct {
 	AllowGroupFrom []string  `json:"allow_group_from,omitempty"`
 	STT            *STTAttrs `json:"stt,omitempty"`
 	TTS            *TTSAttrs `json:"tts,omitempty"`
+
+	// Credentials — only used during creation; never returned in GET responses.
+	BotToken  string `json:"bot_token,omitempty"`
+	AppToken  string `json:"app_token,omitempty"`
+	AppID     string `json:"app_id,omitempty"`
+	AppSecret string `json:"app_secret,omitempty"`
 }
 
 // STTAttrs holds speech-to-text configuration.

@@ -27,8 +27,8 @@ export function createBot(attrs: Partial<BotConfigEntry>): Promise<BotConfigEntr
   });
 }
 
-export function updateBot(name: string, updates: Partial<BotConfigEntry>): Promise<BotConfigEntry> {
-  return adminFetch<BotConfigEntry>(`/admin/bots/${encodeURIComponent(name)}`, {
+export function updateBot(name: string, updates: Record<string, unknown>): Promise<void> {
+  return adminFetch<void>(`/admin/bots/${encodeURIComponent(name)}`, {
     method: 'PATCH',
     body: JSON.stringify(updates),
   });

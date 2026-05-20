@@ -26,6 +26,7 @@ export interface BotConfigEntry {
 export interface BotConfigAttrs {
   worker_type?: string;
   work_dir?: string;
+  soul?: string;
   dm_policy?: string;
   group_policy?: string;
   require_mention?: boolean;

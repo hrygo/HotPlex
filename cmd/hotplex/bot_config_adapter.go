@@ -299,6 +299,7 @@ func extractBotAttrs(cfg *config.Config, platform, name string) *admin.BotConfig
 		if bot != nil {
 			attrs.WorkerType = bot.WorkerType
 			attrs.WorkDir = bot.WorkDir
+			attrs.Soul = bot.Soul
 			attrs.DMPolicy = bot.DMPolicy
 			attrs.GroupPolicy = bot.GroupPolicy
 			if bot.RequireMention != nil {
@@ -343,6 +344,7 @@ func extractBotAttrs(cfg *config.Config, platform, name string) *admin.BotConfig
 		if bot != nil {
 			attrs.WorkerType = bot.WorkerType
 			attrs.WorkDir = bot.WorkDir
+			attrs.Soul = bot.Soul
 			attrs.DMPolicy = bot.DMPolicy
 			attrs.GroupPolicy = bot.GroupPolicy
 			if bot.RequireMention != nil {
@@ -490,6 +492,9 @@ func applyBotAttrsToSlack(bot *config.SlackBotConfig, attrs *admin.BotConfigAttr
 	if attrs.WorkDir != "" {
 		bot.WorkDir = attrs.WorkDir
 	}
+	if attrs.Soul != "" {
+		bot.Soul = attrs.Soul
+	}
 	if attrs.DMPolicy != "" {
 		bot.DMPolicy = attrs.DMPolicy
 	}
@@ -518,6 +523,13 @@ func applyBotAttrsToSlack(bot *config.SlackBotConfig, attrs *admin.BotConfigAttr
 		if attrs.TTS.Voice != "" {
 			bot.Voice = attrs.TTS.Voice
 		}
+	}
+	// Credentials
+	if attrs.BotToken != "" {
+		bot.BotToken = attrs.BotToken
+	}
+	if attrs.AppToken != "" {
+		bot.AppToken = attrs.AppToken
 	}
 }
 
@@ -529,6 +541,9 @@ func applyBotAttrsToFeishu(bot *config.FeishuBotConfig, attrs *admin.BotConfigAt
 	if attrs.WorkDir != "" {
 		bot.WorkDir = attrs.WorkDir
 	}
+	if attrs.Soul != "" {
+		bot.Soul = attrs.Soul
+	}
 	if attrs.DMPolicy != "" {
 		bot.DMPolicy = attrs.DMPolicy
 	}
@@ -557,6 +572,13 @@ func applyBotAttrsToFeishu(bot *config.FeishuBotConfig, attrs *admin.BotConfigAt
 		if attrs.TTS.Voice != "" {
 			bot.Voice = attrs.TTS.Voice
 		}
+	}
+	// Credentials
+	if attrs.AppID != "" {
+		bot.AppID = attrs.AppID
+	}
+	if attrs.AppSecret != "" {
+		bot.AppSecret = attrs.AppSecret
 	}
 }
 

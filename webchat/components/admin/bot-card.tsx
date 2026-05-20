@@ -8,12 +8,26 @@ interface BotCardProps {
   bot: BotConfigEntry;
 }
 
-const PLATFORM_COLORS: Record<string, string> = {
-  slack: 'bg-[#E01E5A]/15 text-[#E01E5A]',
-  feishu: 'bg-[#3370FF]/15 text-[#3370FF]',
+const PLATFORM_STYLES: Record<string, { color: string; label: string }> = {
+  slack: { color: 'bg-[#E01E5A]/15 text-[#E01E5A]', label: 'Slack' },
+  feishu: { color: 'bg-[#3370FF]/15 text-[#3370FF]', label: 'Feishu' },
 };
 
-const DEFAULT_PLATFORM_COLOR = 'bg-[var(--bg-hover)] text-[var(--text-muted)]';
+const DEFAULT_PLATFORM_STYLE = { color: 'bg-[var(--bg-hover)] text-[var(--text-muted)]', label: '' };
+
+const SOURCE_LABELS: Record<string, string> = {
+  soul: 'Soul',
+  agents: 'Rules',
+  skills: 'Skills',
+  user: 'User',
+  memory: 'Memory',
+};
+
+const SOURCE_ICONS: Record<string, string> = {
+  global: 'G',
+  platform: 'P',
+  bot: 'B',
+};
 
 function formatConnectedTime(connectedAt?: string): string {
   if (!connectedAt) return '';
@@ -32,69 +46,68 @@ function formatConnectedTime(connectedAt?: string): string {
 }
 
 export function BotCard({ bot }: BotCardProps) {
-  const platformColor = PLATFORM_COLORS[bot.platform] ?? DEFAULT_PLATFORM_COLOR;
+  const platform = PLATFORM_STYLES[bot.platform] ?? DEFAULT_PLATFORM_STYLE;
 
   return (
     <Link
       href={`/admin/bots/detail?name=${encodeURIComponent(bot.name)}`}
       className="group block rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] p-4 transition-all hover:border-[var(--border-bright)] hover:bg-[var(--bg-elevated)]"
     >
-      {/* Header: name + platform */}
-      <div className="flex items-center gap-2 mb-3">
+      {/* Header: name + platform + status */}
+      <div className="flex items-center gap-2 mb-2.5">
         <h3 className="text-sm font-display font-bold text-[var(--text-primary)] truncate">
           {bot.name}
         </h3>
         <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${platformColor}`}
+          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${platform.color}`}
         >
-          {bot.platform}
+          {platform.label || bot.platform}
         </span>
+        <div className="ml-auto">
+          <StatusBadge status={bot.status} />
+        </div>
       </div>
 
-      {/* Status + worker info */}
-      <div className="flex items-center gap-3 mb-3">
-        <StatusBadge status={bot.status} />
+      {/* Worker info */}
+      <div className="flex items-center gap-3 mb-2.5 text-[11px] text-[var(--text-faint)]">
         {bot.config?.worker_type && (
-          <span className="text-[11px] font-mono text-[var(--text-faint)]">
+          <span className="flex items-center gap-1 font-mono">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="6" width="20" height="12" rx="2" />
+              <path d="M6 12h.01M10 12h.01" />
+            </svg>
             {bot.config.worker_type}
+          </span>
+        )}
+        {bot.connected_at && (
+          <span className="flex items-center gap-1">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+            {formatConnectedTime(bot.connected_at)}
           </span>
         )}
       </div>
 
-      {/* Connected time */}
-      {bot.connected_at && (
-        <p className="text-[11px] text-[var(--text-muted)] mb-3">
-          Connected {formatConnectedTime(bot.connected_at)}
-        </p>
-      )}
-
-      {/* Agent config source badges */}
+      {/* Agent config source indicators */}
       {bot.agent_configs && (
-        <div className="flex flex-wrap gap-1.5 pt-3 border-t border-[var(--border-subtle)]">
-          {renderSourceBadge('soul', bot.agent_configs.soul)}
-          {renderSourceBadge('agents', bot.agent_configs.agents)}
-          {renderSourceBadge('skills', bot.agent_configs.skills)}
-          {renderSourceBadge('user', bot.agent_configs.user)}
-          {renderSourceBadge('memory', bot.agent_configs.memory)}
+        <div className="flex flex-wrap gap-1.5 pt-2.5 border-t border-[var(--border-subtle)]">
+          {Object.entries(bot.agent_configs).map(([key, meta]) => {
+            if (!meta?.source) return null;
+            return (
+              <span
+                key={key}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--bg-hover)] text-[var(--text-faint)]"
+                title={`${SOURCE_LABELS[key] || key}: ${meta.source} (${meta.size}B)`}
+              >
+                {SOURCE_LABELS[key] || key}
+                <span className="text-[8px] opacity-60">{SOURCE_ICONS[meta.source] || meta.source[0]}</span>
+              </span>
+            );
+          })}
         </div>
       )}
     </Link>
-  );
-}
-
-function renderSourceBadge(
-  key: string,
-  meta?: { source?: string; size?: number },
-) {
-  if (!meta?.source) return null;
-
-  return (
-    <span
-      key={key}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--bg-hover)] text-[var(--text-faint)]"
-      title={`${key}: ${meta.source} (${meta.size}B)`}
-    >
-      {key}:{meta.source === 'global' ? 'g' : meta.source === 'platform' ? 'p' : 'b'}
-    </span>
   );
 }

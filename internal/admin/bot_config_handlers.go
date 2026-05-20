@@ -236,6 +236,9 @@ func extractBotConfigAttrs(body map[string]any) *BotConfigAttrs {
 	if v, ok := body["work_dir"].(string); ok {
 		attrs.WorkDir = v
 	}
+	if v, ok := body["soul"].(string); ok {
+		attrs.Soul = v
+	}
 	if v, ok := body["dm_policy"].(string); ok {
 		attrs.DMPolicy = v
 	}
@@ -270,6 +273,19 @@ func extractBotConfigAttrs(body map[string]any) *BotConfigAttrs {
 		if ttsAttrs.Provider != "" || ttsAttrs.Voice != "" {
 			attrs.TTS = ttsAttrs
 		}
+	}
+	// Credentials
+	if v, ok := body["bot_token"].(string); ok {
+		attrs.BotToken = v
+	}
+	if v, ok := body["app_token"].(string); ok {
+		attrs.AppToken = v
+	}
+	if v, ok := body["app_id"].(string); ok {
+		attrs.AppID = v
+	}
+	if v, ok := body["app_secret"].(string); ok {
+		attrs.AppSecret = v
 	}
 	return attrs
 }

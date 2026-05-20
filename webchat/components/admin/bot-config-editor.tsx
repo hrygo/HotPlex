@@ -4,10 +4,6 @@ import { useState, useCallback, useEffect } from 'react';
 import { getAgentFile, writeAgentFile } from '@/lib/api/admin-bots';
 import type { AgentConfigFile } from '@/lib/types/admin';
 
-// ---------------------------------------------------------------------------
-// Config file definitions
-// ---------------------------------------------------------------------------
-
 interface ConfigFileDef {
   key: string;
   file: string;
@@ -23,17 +19,15 @@ const CONFIG_FILES: ConfigFileDef[] = [
   { key: 'memory', file: 'MEMORY.md', label: 'Memory', description: 'Persistent context & notes' },
 ];
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export function BotConfigEditor({ botName }: { botName: string }) {
   const [activeFile, setActiveFile] = useState<string>('soul');
   const [fileData, setFileData] = useState<AgentConfigFile | null>(null);
   const [content, setContent] = useState('');
+  const [savedContent, setSavedContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const dirty = content !== savedContent;
 
   const loadFile = useCallback(async (fileKey: string) => {
     const def = CONFIG_FILES.find((f) => f.key === fileKey);
@@ -45,10 +39,12 @@ export function BotConfigEditor({ botName }: { botName: string }) {
       const data = await getAgentFile(botName, def.file);
       setFileData(data);
       setContent(data.content);
+      setSavedContent(data.content);
     } catch (err) {
       setMessage({ type: 'error', text: String(err) });
       setFileData(null);
       setContent('');
+      setSavedContent('');
     } finally {
       setLoading(false);
     }
@@ -58,6 +54,28 @@ export function BotConfigEditor({ botName }: { botName: string }) {
     loadFile(activeFile);
   }, [activeFile, loadFile]);
 
+  // Warn before navigating away with unsaved changes
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (dirty) {
+        e.preventDefault();
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dirty]);
+
+  const handleSwitchFile = (key: string) => {
+    if (key === activeFile) return;
+
+    if (dirty) {
+      if (!window.confirm('You have unsaved changes. Discard them and switch file?')) {
+        return;
+      }
+    }
+    setActiveFile(key);
+  };
+
   const handleSave = async () => {
     const def = CONFIG_FILES.find((f) => f.key === activeFile);
     if (!def) return;
@@ -66,16 +84,31 @@ export function BotConfigEditor({ botName }: { botName: string }) {
     setMessage(null);
     try {
       await writeAgentFile(botName, def.file, content);
+      setSavedContent(content);
       setMessage({ type: 'success', text: 'Saved successfully' });
-      // Refresh file data to update size/source
       const data = await getAgentFile(botName, def.file);
       setFileData(data);
+      setTimeout(() => setMessage(null), 3000);
     } catch (err) {
       setMessage({ type: 'error', text: String(err) });
     } finally {
       setSaving(false);
     }
   };
+
+  // Keyboard shortcut: Ctrl/Cmd+S to save
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        if (dirty && !saving && !loading) {
+          handleSave();
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
 
   const currentDef = CONFIG_FILES.find((f) => f.key === activeFile);
   const charCount = content.length;
@@ -85,22 +118,25 @@ export function BotConfigEditor({ botName }: { botName: string }) {
     <div className="flex gap-4 h-full">
       {/* Left sidebar */}
       <div className="w-48 flex-shrink-0 space-y-1">
-        {CONFIG_FILES.map((def) => (
-          <button
-            key={def.key}
-            onClick={() => setActiveFile(def.key)}
-            className={`w-full text-left px-3 py-2.5 rounded-xl transition-all text-sm ${
-              activeFile === def.key
-                ? 'bg-[var(--bg-active)] border border-[var(--border-active)] text-[var(--accent-gold)]'
-                : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-transparent'
-            }`}
-          >
-            <span className="font-semibold block">{def.label}</span>
-            <span className="text-[10px] text-[var(--text-faint)] block mt-0.5">
-              {def.description}
-            </span>
-          </button>
-        ))}
+        {CONFIG_FILES.map((def) => {
+          const isActive = activeFile === def.key;
+          return (
+            <button
+              key={def.key}
+              onClick={() => handleSwitchFile(def.key)}
+              className={`w-full text-left px-3 py-2.5 rounded-xl transition-all text-sm ${
+                isActive
+                  ? 'bg-[var(--bg-active)] border border-[var(--border-active)] text-[var(--accent-gold)]'
+                  : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-transparent'
+              }`}
+            >
+              <span className="font-semibold block">{def.label}</span>
+              <span className="text-[10px] text-[var(--text-faint)] block mt-0.5">
+                {def.description}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Right side */}
@@ -121,14 +157,18 @@ export function BotConfigEditor({ botName }: { botName: string }) {
                 }`}
               >
                 {charCount.toLocaleString()} chars
-                {charWarning && ' (>'}
-                {charWarning && ' 8000)'}
+                {charWarning && ' (> 8000)'}
               </span>
+              {dirty && (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--accent-gold)]/15 text-[var(--accent-gold)]">
+                  unsaved
+                </span>
+              )}
             </div>
             <button
               onClick={handleSave}
-              disabled={saving || loading}
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-[var(--accent-gold)] text-[var(--text-contrast)] hover:bg-[var(--accent-gold-bright)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={saving || loading || !dirty}
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent-gold)] text-[var(--text-contrast)] hover:bg-[var(--accent-gold-bright)]"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
@@ -162,6 +202,12 @@ export function BotConfigEditor({ botName }: { botName: string }) {
             spellCheck={false}
           />
         )}
+
+        {/* Footer hint */}
+        <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-faint)]">
+          <span>Ctrl+S to save</span>
+          {dirty && <span>Changes not saved</span>}
+        </div>
       </div>
     </div>
   );
