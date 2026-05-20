@@ -30,7 +30,7 @@ func larkCreateMessage(ctx context.Context, client *lark.Client, chatID, content
 		Build()
 
 	req := larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(larkim.ReceiveIdTypeChatId).
+		ReceiveIdType("chat_id").
 		Body(body).
 		Build()
 

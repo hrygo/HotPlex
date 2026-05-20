@@ -13,7 +13,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/hrygo/hotplex/client v0.0.0
-	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
+	github.com/larksuite/oapi-sdk-go/v3 v3.9.1
 	github.com/mattn/go-isatty v0.0.21
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/prometheus/client_golang v1.19.1
