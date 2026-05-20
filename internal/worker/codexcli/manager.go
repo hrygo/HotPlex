@@ -31,14 +31,11 @@ const (
 )
 
 const (
-	// defaultCallTimeout is the maximum time to wait for a JSON-RPC response.
-	defaultCallTimeout = 30 * time.Second
-
-	// scannerInitSize is the initial buffer size for stdout scanning.
-	scannerInitSize = 64 * 1024 // 64 KB
-
-	// scannerMaxSize is the maximum buffer size per line.
-	scannerMaxSize = 10 * 1024 * 1024 // 10 MB
+	defaultCallTimeout       = 30 * time.Second
+	defaultStartupTimeout    = 30 * time.Second
+	criticalEventSendTimeout = 5 * time.Second
+	scannerInitSize          = 64 * 1024        // 64 KB
+	scannerMaxSize           = 10 * 1024 * 1024 // 10 MB
 )
 
 // CodexAppServerManager manages a single shared `codex app-server` process
@@ -314,7 +311,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 
 	startTimeout := m.cfg.StartupTimeout
 	if startTimeout <= 0 {
-		startTimeout = 30 * time.Second
+		startTimeout = defaultStartupTimeout
 	}
 	startCtx, startCancel := context.WithTimeout(ctx, startTimeout)
 	defer startCancel()
@@ -382,20 +379,21 @@ func (m *CodexAppServerManager) handshake(_ context.Context) error {
 	return nil
 }
 
-// writeRequest marshals and writes a JSON-RPC request to stdin.
-func (m *CodexAppServerManager) writeRequest(req *JSONRPCRequest) error {
+// writeFrame serializes a JSON-RPC frame to stdin. Caller must not hold m.mu.
+func (m *CodexAppServerManager) writeFrame(v any) error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
+	return json.NewEncoder(m.stdin).Encode(v)
+}
 
-	return json.NewEncoder(m.stdin).Encode(req)
+// writeRequest marshals and writes a JSON-RPC request to stdin.
+func (m *CodexAppServerManager) writeRequest(req *JSONRPCRequest) error {
+	return m.writeFrame(req)
 }
 
 // writeNotification marshals and writes a JSON-RPC notification to stdin.
 func (m *CodexAppServerManager) writeNotification(notif *JSONRPCNotification) error {
-	m.writeMu.Lock()
-	defer m.writeMu.Unlock()
-
-	return json.NewEncoder(m.stdin).Encode(notif)
+	return m.writeFrame(notif)
 }
 
 // readNotifications reads JSON-RPC frames from stdout and routes them to
@@ -561,9 +559,7 @@ func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) e
 		ID:      rpcID,
 		Result:  raw,
 	}
-	m.writeMu.Lock()
-	defer m.writeMu.Unlock()
-	return json.NewEncoder(m.stdin).Encode(resp)
+	return m.writeFrame(resp)
 }
 
 // dispatchNotification extracts the thread ID, converts via the mapper, and
@@ -611,9 +607,11 @@ func (m *CodexAppServerManager) sendEnvelope(ch chan *events.Envelope, env *even
 		}
 		return
 	}
+	timer := time.NewTimer(criticalEventSendTimeout)
+	defer timer.Stop()
 	select {
 	case ch <- env:
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		m.log.Warn("codex-app-server: critical event send timeout, dropping",
 			"event_type", env.Event.Type)
 	}

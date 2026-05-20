@@ -169,7 +169,7 @@ func (w *ExecWorker) spawn(ctx context.Context, prompt string) error {
 
 	timeout := w.cfg.StartupTimeout
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = defaultStartupTimeout
 	}
 	startCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -336,7 +336,7 @@ func (w *ExecWorker) trySend(env *events.Envelope) {
 	}
 	switch env.Event.Type {
 	case events.Done, events.Error, events.State:
-		sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		sendCtx, cancel := context.WithTimeout(context.Background(), criticalEventSendTimeout)
 		_ = conn.Send(sendCtx, env)
 		cancel()
 	default:
@@ -458,14 +458,10 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	w.crashSub = crashCh
 
 	cfg := resolveConfig()
-	personality := cfg.Personality
-	if personality == "" {
-		personality = "friendly"
-	}
 	params := map[string]any{
 		"cwd":         session.ProjectDir,
 		"sandbox":     cfg.Sandbox,
-		"personality": personality,
+		"personality": cfg.Personality,
 	}
 	if cfg.Model != "" {
 		params["model"] = cfg.Model
