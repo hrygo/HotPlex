@@ -236,9 +236,6 @@ func extractBotConfigAttrs(body map[string]any) *BotConfigAttrs {
 	if v, ok := body["work_dir"].(string); ok {
 		attrs.WorkDir = v
 	}
-	if v, ok := body["soul"].(string); ok {
-		attrs.Soul = v
-	}
 	if v, ok := body["dm_policy"].(string); ok {
 		attrs.DMPolicy = v
 	}

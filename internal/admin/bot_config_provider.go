@@ -46,7 +46,6 @@ type BotConfigAttrs struct {
 	Platform       string    `json:"platform,omitempty"`
 	WorkerType     string    `json:"worker_type,omitempty"`
 	WorkDir        string    `json:"work_dir,omitempty"`
-	Soul           string    `json:"soul,omitempty"`
 	DMPolicy       string    `json:"dm_policy,omitempty"`
 	GroupPolicy    string    `json:"group_policy,omitempty"`
 	RequireMention bool      `json:"require_mention,omitempty"`

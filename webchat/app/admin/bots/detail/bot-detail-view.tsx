@@ -107,14 +107,12 @@ function OverviewEditor({
 	const cfg = bot.config;
 	const [workerType, setWorkerType] = useState<WorkerType>((cfg?.worker_type as WorkerType) || 'claude_code');
 	const [workDir, setWorkDir] = useState(cfg?.work_dir ?? '');
-	const [soul, setSoul] = useState(cfg?.soul ?? '');
 	const [saving, setSaving] = useState(false);
 	const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
 	const dirty =
 		workerType !== ((cfg?.worker_type as WorkerType) || 'claude_code') ||
-		workDir !== (cfg?.work_dir ?? '') ||
-		soul !== (cfg?.soul ?? '');
+		workDir !== (cfg?.work_dir ?? '');
 
 	const handleSave = async () => {
 		setSaving(true);
@@ -123,7 +121,6 @@ function OverviewEditor({
 			await updateBot(botName, {
 				worker_type: workerType,
 				work_dir: workDir || undefined,
-				soul: soul || undefined,
 			});
 			setMessage({ type: 'success', text: 'Updated. Restart gateway to apply.' });
 			setTimeout(() => setMessage(null), 3000);
@@ -171,23 +168,6 @@ function OverviewEditor({
 					</div>
 				</div>
 
-				<div>
-					<label className="block text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1.5">
-						Soul
-					</label>
-					<input
-						type="text"
-						value={soul}
-						onChange={(e) => setSoul(e.target.value)}
-						placeholder="Soul file identifier (optional)"
-						className={inputClass}
-					/>
-					<p className="mt-1 text-[11px] text-[var(--text-faint)]">
-						Custom soul file identifier for agent config resolution.
-					</p>
-				</div>
-
-				{/* Connected At — read-only */}
 				<div>
 					<label className="block text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1.5">
 						Connected At

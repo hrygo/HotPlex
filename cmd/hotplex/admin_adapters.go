@@ -128,7 +128,6 @@ func toAdminBotEntry(e *messaging.BotEntry) admin.BotEntry {
 		BotID:       e.BotID,
 		Status:      string(e.Status),
 		ConnectedAt: e.ConnectedAt.Format("2006-01-02T15:04:05Z"),
-		Soul:        e.Soul,
 		WorkerType:  e.WorkerType,
 	}
 }

@@ -17,7 +17,6 @@ type BotEntry struct {
 	BotID       string `json:"bot_id"`
 	Status      string `json:"status"`
 	ConnectedAt string `json:"connected_at,omitempty"`
-	Soul        string `json:"soul,omitempty"`
 	WorkerType  string `json:"worker_type,omitempty"`
 }
 

@@ -317,7 +317,6 @@ type SlackBotConfig struct {
 	Name       string `mapstructure:"name"`
 	BotToken   string `mapstructure:"bot_token"`
 	AppToken   string `mapstructure:"app_token"`
-	Soul       string `mapstructure:"soul,omitempty"`
 	WorkerType string `mapstructure:"worker_type,omitempty"`
 	WorkDir    string `mapstructure:"work_dir,omitempty"`
 
@@ -352,7 +351,6 @@ type FeishuBotConfig struct {
 	Name       string `mapstructure:"name"`
 	AppID      string `mapstructure:"app_id"`
 	AppSecret  string `mapstructure:"app_secret"`
-	Soul       string `mapstructure:"soul,omitempty"`
 	WorkerType string `mapstructure:"worker_type,omitempty"`
 	WorkDir    string `mapstructure:"work_dir,omitempty"`
 

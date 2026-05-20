@@ -16,7 +16,6 @@ const PLATFORM_STYLES: Record<string, { color: string; label: string }> = {
 const DEFAULT_PLATFORM_STYLE = { color: 'bg-[var(--bg-hover)] text-[var(--text-muted)]', label: '' };
 
 const SOURCE_LABELS: Record<string, string> = {
-  soul: 'Soul',
   agents: 'Rules',
   skills: 'Skills',
   user: 'User',

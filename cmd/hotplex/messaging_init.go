@@ -86,7 +86,6 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				botEntries = append(botEntries, &messaging.BotEntry{
 					Name:       bc.Name,
 					Platform:   pt,
-					Soul:       bc.Soul,
 					WorkerType: bc.WorkerType,
 					Status:     messaging.BotStatusStarting,
 				})
@@ -102,7 +101,6 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				botEntries = append(botEntries, &messaging.BotEntry{
 					Name:       bc.Name,
 					Platform:   pt,
-					Soul:       bc.Soul,
 					WorkerType: bc.WorkerType,
 					Status:     messaging.BotStatusStarting,
 				})

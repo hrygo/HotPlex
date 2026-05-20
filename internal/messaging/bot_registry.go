@@ -23,7 +23,6 @@ type BotEntry struct {
 	Status      BotStatus
 	Adapter     PlatformAdapterInterface
 	Bridge      *Bridge
-	Soul        string
 	WorkerType  string
 	ConnectedAt time.Time
 }

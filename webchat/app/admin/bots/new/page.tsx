@@ -21,7 +21,6 @@ interface FormState {
   dm_policy: Policy;
   group_policy: Policy;
   require_mention: boolean;
-  soul: string;
   stt_provider: string;
   tts_provider: string;
   tts_voice: string;
@@ -44,7 +43,6 @@ const INITIAL: FormState = {
   dm_policy: 'open',
   group_policy: 'open',
   require_mention: false,
-  soul: '',
   stt_provider: '',
   tts_provider: '',
   tts_voice: '',
@@ -133,7 +131,6 @@ export default function NewBotPage() {
 
     body.worker_type = form.worker_type;
     if (form.work_dir.trim()) body.work_dir = form.work_dir.trim();
-    if (form.soul.trim()) body.soul = form.soul.trim();
     body.dm_policy = form.dm_policy;
     body.group_policy = form.group_policy;
     body.require_mention = form.require_mention;
@@ -351,20 +348,6 @@ export default function NewBotPage() {
               />
             </div>
 
-            <div>
-              <label htmlFor="soul" className={labelClass}>Soul</label>
-              <input
-                id="soul"
-                type="text"
-                placeholder="Custom soul identifier (optional)"
-                value={form.soul}
-                onChange={(e) => set('soul', e.target.value)}
-                className={inputClass}
-              />
-              <p className="mt-1 text-[11px] text-[var(--text-faint)]">
-                Agent config resolution identifier.
-              </p>
-            </div>
           </section>
 
           {/* Section 3: Access Control */}
