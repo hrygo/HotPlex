@@ -44,4 +44,4 @@ messaging:
     enabled: true
   feishu:
     enabled: true
-    worker_type: "opencode_server"
+    worker_type: "codex_cli"

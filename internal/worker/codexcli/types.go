@@ -84,6 +84,18 @@ var EnvBlocklist = []string{"HOTPLEX_", "CODEX_"}
 
 // ─── JSON-RPC 2.0 Wire Types (app-server mode) ──────────────────────────
 
+// JSONRPCFrame is a unified type for single-pass frame parsing. It captures all
+// routing fields (ID, Method, Error) so dispatchFrame can branch without a
+// second unmarshal.
+type JSONRPCFrame struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int64           `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *JSONRPCError   `json:"error,omitempty"`
+}
+
 type JSONRPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id"`

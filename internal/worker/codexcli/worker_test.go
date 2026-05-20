@@ -904,7 +904,7 @@ func TestAppServerWorkerHandlePermissionResponse(t *testing.T) {
 	w := newTestAppServerWorker(t)
 	err := w.HandlePermissionResponse(context.Background(), "req-1", true, "")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
+	require.Contains(t, err.Error(), "no pending server request")
 }
 
 func TestAppServerWorkerHandleQuestionResponse(t *testing.T) {

@@ -3,9 +3,11 @@ package codexcli
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/security"
 )
 
 var globalConfig atomic.Pointer[config.CodexCLIConfig]
@@ -13,6 +15,10 @@ var globalConfig atomic.Pointer[config.CodexCLIConfig]
 func InitConfig(cfg config.CodexCLIConfig) {
 	if cfg.Command == "" {
 		cfg.Command = "codex"
+	}
+	parts := strings.Fields(cfg.Command)
+	if err := security.RegisterCommand(parts[0]); err != nil {
+		slog.Default().Error("codexcli: failed to register command", "command", parts[0], "err", err)
 	}
 	globalConfig.Store(&cfg)
 }

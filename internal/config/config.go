@@ -485,6 +485,7 @@ type CodexCLIConfig struct {
 	Sandbox         string        `mapstructure:"sandbox"`           // sandbox mode, default "workspace-write"
 	ApprovalMode    string        `mapstructure:"approval_mode"`     // approval mode, default "never"
 	Ephemeral       bool          `mapstructure:"ephemeral"`         // ephemeral sessions, default true
+	Personality     string        `mapstructure:"personality"`       // agent personality for app-server mode, default "friendly"
 	StartupTimeout  time.Duration `mapstructure:"startup_timeout"`   // process startup timeout, default 30s
 	UseAppServer    bool          `mapstructure:"use_app_server"`    // use persistent app-server mode instead of one-shot exec
 	IdleDrainPeriod time.Duration `mapstructure:"idle_drain_period"` // idle drain timeout for app-server mode, default 30m
@@ -644,6 +645,7 @@ func Default() *Config {
 				Sandbox:         "workspace-write",
 				ApprovalMode:    "never",
 				Ephemeral:       true,
+				Personality:     "friendly",
 				StartupTimeout:  30 * time.Second,
 				UseAppServer:    true,
 				IdleDrainPeriod: 30 * time.Minute,

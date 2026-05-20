@@ -68,6 +68,10 @@ type CodexAppServerManager struct {
 	// pending maps JSON-RPC request IDs to response channels.
 	pending sync.Map // map[int64]chan *JSONRPCResponse
 
+	// serverReqIDs maps approval requestID → JSON-RPC frame ID for server-initiated
+	// requests, so the worker can respond via RespondServerRequest.
+	serverReqIDs sync.Map // map[string]int64
+
 	nextReqID atomic.Int64
 
 	// subMu protects subscribers for thread event routing.
@@ -308,7 +312,13 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 	env := m.buildEnv()
 	m.proc = proc.New(proc.Opts{Logger: m.log})
 
-	stdin, stdout, _, err := m.proc.Start(context.Background(), binary, fullArgs, env, "")
+	startTimeout := m.cfg.StartupTimeout
+	if startTimeout <= 0 {
+		startTimeout = 30 * time.Second
+	}
+	startCtx, startCancel := context.WithTimeout(ctx, startTimeout)
+	defer startCancel()
+	stdin, stdout, _, err := m.proc.Start(startCtx, binary, fullArgs, env, "")
 	if err != nil {
 		m.proc = nil
 		m.state = stateIdle
@@ -433,41 +443,50 @@ func (m *CodexAppServerManager) readNotifications(ctx context.Context) {
 	}
 }
 
-// dispatchFrame parses a single JSON-RPC frame once and routes to response or notification.
+// dispatchFrame parses a single JSON-RPC frame and routes to the correct handler.
 //
 // Routing logic (in order):
-//  1. ID != 0 → this is a response (request IDs start at 1, monotonically increasing)
-//  2. ID == 0 && Error != nil → error notification or response to ID 0 (which never
-//     exists in pending — dropped silently, logged as debug)
-//  3. ID == 0 && Error == nil → try to parse as notification by method presence
+//  1. Method != "" && ID != 0 → server-initiated request (e.g. approval)
+//  2. ID != 0 && Method == "" → response to a client request
+//  3. ID == 0 && Error != nil → error with no ID, dropped
+//  4. ID == 0 && Method != "" → notification
 func (m *CodexAppServerManager) dispatchFrame(data []byte) {
-	var resp JSONRPCResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
+	var frame JSONRPCFrame
+	if err := json.Unmarshal(data, &frame); err != nil {
 		m.log.Warn("codex-app-server: unmarshal frame", "err", err)
 		return
 	}
 
-	if resp.ID != 0 {
-		m.dispatchResponse(&resp)
+	// Server-initiated request (has both ID and Method, e.g. approval).
+	if frame.Method != "" && frame.ID != 0 {
+		m.dispatchServerRequest(&frame)
 		return
 	}
 
-	// ID == 0: either a notification or a response to an unknown request.
-	if resp.Error != nil {
-		// Error with no ID — treat as notification-like (e.g. server-side error).
-		// Since no pending request has ID 0, dispatchResponse will drop it silently.
-		m.log.Debug("codex-app-server: response with ID=0, dropping", "error", resp.Error.Message)
-		m.dispatchResponse(&resp)
+	if frame.ID != 0 {
+		resp := &JSONRPCResponse{
+			JSONRPC: frame.JSONRPC,
+			ID:      frame.ID,
+			Result:  frame.Result,
+			Error:   frame.Error,
+		}
+		m.dispatchResponse(resp)
 		return
 	}
 
-	var notif JSONRPCNotification
-	if err := json.Unmarshal(data, &notif); err != nil {
-		m.log.Warn("codex-app-server: unmarshal notification", "err", err)
+	// ID == 0: notification or unknown.
+	if frame.Error != nil {
+		m.log.Debug("codex-app-server: error frame with ID=0, dropping", "error", frame.Error.Message)
 		return
 	}
-	if notif.Method != "" {
-		m.dispatchNotification(&notif)
+
+	if frame.Method != "" {
+		notif := &JSONRPCNotification{
+			JSONRPC: frame.JSONRPC,
+			Method:  frame.Method,
+			Params:  frame.Params,
+		}
+		m.dispatchNotification(notif)
 	} else {
 		m.log.Debug("codex-app-server: frame with ID=0, no method, no error — dropped")
 	}
@@ -485,6 +504,66 @@ func (m *CodexAppServerManager) dispatchResponse(resp *JSONRPCResponse) {
 			}
 		}
 	}
+}
+
+// dispatchServerRequest handles server-initiated JSON-RPC requests (e.g. approvals).
+// It extracts the thread ID, maps the request to AEP envelopes via the converter,
+// and stores the request ID → frame ID mapping so the worker can respond later.
+func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
+	var params struct {
+		ThreadID  string `json:"threadId"`
+		RequestID string `json:"requestId"`
+	}
+	if frame.Params != nil {
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			m.log.Warn("codex-app-server: unmarshal server request params", "method", frame.Method, "err", err)
+			return
+		}
+	}
+
+	if params.ThreadID == "" {
+		m.log.Debug("codex-app-server: server request without threadId, dropping", "method", frame.Method)
+		return
+	}
+
+	// Store the JSON-RPC frame ID so HandlePermissionResponse can reply.
+	if params.RequestID != "" {
+		m.serverReqIDs.Store(params.RequestID, frame.ID)
+	}
+
+	// Map and deliver as notification to the subscriber.
+	notif := &JSONRPCNotification{
+		JSONRPC: frame.JSONRPC,
+		Method:  frame.Method,
+		Params:  frame.Params,
+	}
+	m.dispatchNotification(notif)
+}
+
+// RespondServerRequest sends a JSON-RPC response to a server-initiated request.
+// reqID is the approval request's requestId; result is the response payload.
+func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) error {
+	v, ok := m.serverReqIDs.LoadAndDelete(reqID)
+	if !ok {
+		return fmt.Errorf("codex-app-server: no pending server request for %q", reqID)
+	}
+	rpcID, ok := v.(int64)
+	if !ok {
+		return fmt.Errorf("codex-app-server: invalid rpc id type for %q", reqID)
+	}
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("codex-app-server: marshal server response: %w", err)
+	}
+	resp := JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      rpcID,
+		Result:  raw,
+	}
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+	return json.NewEncoder(m.stdin).Encode(resp)
 }
 
 // dispatchNotification extracts the thread ID, converts via the mapper, and
@@ -523,7 +602,7 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 }
 
 // sendEnvelope delivers a single envelope to a subscriber channel with backpressure.
-// Delta events are dropped silently when full; critical events block until delivered.
+// Delta events are dropped silently when full; critical events block with a 5s timeout.
 func (m *CodexAppServerManager) sendEnvelope(ch chan *events.Envelope, env *events.Envelope) {
 	if env.Event.Type == events.MessageDelta {
 		select {
@@ -532,7 +611,12 @@ func (m *CodexAppServerManager) sendEnvelope(ch chan *events.Envelope, env *even
 		}
 		return
 	}
-	ch <- env
+	select {
+	case ch <- env:
+	case <-time.After(5 * time.Second):
+		m.log.Warn("codex-app-server: critical event send timeout, dropping",
+			"event_type", env.Event.Type)
+	}
 }
 
 // monitorProcess waits for the process to exit and handles crash recovery.
@@ -573,6 +657,7 @@ func (m *CodexAppServerManager) monitorProcess() {
 	m.mu.Unlock()
 
 	if wasRunning {
+		m.converter.Reset()
 		m.subsClosed.Store(true)
 		m.subMu.Lock()
 		for id, ch := range m.subscribers {

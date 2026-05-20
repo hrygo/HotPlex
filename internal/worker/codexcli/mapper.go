@@ -80,7 +80,9 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 		return m.mapNotifTurnCompleted(params)
 	case "turn/failed":
 		return m.mapTurnFailed()
-	case "serverRequest/approval":
+	case "serverRequest/approval",
+		"item/commandExecution/requestApproval",
+		"item/fileChange/requestApproval":
 		return m.mapNotifApproval(params)
 	case "thread/started":
 		return nil
@@ -291,6 +293,11 @@ func (m *Mapper) nextSeq() int64 {
 	return m.seq.Add(1)
 }
 
+// Reset clears internal tracking state, called on session end or crash recovery.
+func (m *Mapper) Reset() {
+	m.tracker.Reset()
+}
+
 func newEnvelope(kind events.Kind, data interface{}, sessionID string, seq int64) *events.Envelope {
 	return events.NewEnvelope(aep.NewID(), sessionID, seq, kind, data)
 }
@@ -348,4 +355,11 @@ func (t *messageTracker) endMessage(itemID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.messages, itemID)
+}
+
+// Reset clears all tracked messages, called on session end or crash recovery.
+func (t *messageTracker) Reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.messages = make(map[string]string, len(t.messages))
 }

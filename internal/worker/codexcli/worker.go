@@ -61,6 +61,7 @@ type Config struct {
 	Sandbox        string
 	ApprovalMode   string
 	Ephemeral      bool
+	Personality    string
 	StartupTimeout time.Duration
 }
 
@@ -107,6 +108,7 @@ func resolveConfig() Config {
 		Sandbox:        gc.Sandbox,
 		ApprovalMode:   gc.ApprovalMode,
 		Ephemeral:      gc.Ephemeral,
+		Personality:    gc.Personality,
 		StartupTimeout: gc.StartupTimeout,
 	}
 }
@@ -140,9 +142,14 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 	return args
 }
 
-func (w *ExecWorker) spawn(_ context.Context, prompt string) error {
+func (w *ExecWorker) spawn(ctx context.Context, prompt string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	if w.Proc != nil {
+		return fmt.Errorf("%w: codex exec is one-shot per process; use Resume for follow-up",
+			worker.ErrNotImplemented)
+	}
 
 	session := w.origSession
 	if session.SessionID == "" {
@@ -153,20 +160,26 @@ func (w *ExecWorker) spawn(_ context.Context, prompt string) error {
 	args := w.buildArgs(session, prompt)
 
 	w.Proc = proc.New(proc.Opts{
-		Logger: w.Log,
+		Logger:       w.Log,
+		AllowedTools: session.AllowedTools,
 	})
 	w.Proc.SetPIDKey(session.SessionID)
 
 	env := base.BuildEnv(session, w.EnvBlocklist(), "codex-cli")
 
-	bgCtx := context.Background()
-	stdin, stdout, _, err := w.Proc.Start(bgCtx, w.cfg.Command, args, env, session.ProjectDir)
+	timeout := w.cfg.StartupTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	startCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	stdin, stdout, _, err := w.Proc.Start(startCtx, w.cfg.Command, args, env, session.ProjectDir)
 	if err != nil {
 		w.Proc = nil
 		return fmt.Errorf("codexcli: start: %w", err)
 	}
 
-	childCtx, cancel := context.WithCancel(bgCtx)
+	childCtx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 
 	if w.readLineFn == nil {
@@ -194,13 +207,12 @@ func (w *ExecWorker) Input(ctx context.Context, content string, metadata map[str
 	}
 
 	w.mu.Lock()
-	alreadyRunning := w.Proc != nil
-	w.mu.Unlock()
-
-	if alreadyRunning {
+	if w.Proc != nil {
+		w.mu.Unlock()
 		return fmt.Errorf("%w: codex exec is one-shot per process; use Resume for follow-up",
 			worker.ErrNotImplemented)
 	}
+	w.mu.Unlock()
 
 	return w.spawn(ctx, content)
 }
@@ -324,7 +336,9 @@ func (w *ExecWorker) trySend(env *events.Envelope) {
 	}
 	switch env.Event.Type {
 	case events.Done, events.Error, events.State:
-		_ = conn.Send(context.Background(), env)
+		sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = conn.Send(sendCtx, env)
+		cancel()
 	default:
 		ts, ok := conn.(interface{ TrySend(*events.Envelope) bool })
 		if !ok {
@@ -369,6 +383,7 @@ type AppServerWorker struct {
 	userID      string
 	releaseOnce sync.Once
 	crashSub    <-chan struct{}
+	doneCh      chan struct{}
 	mu          sync.Mutex
 	recvCh      chan *events.Envelope
 	commands    *ServerCommander
@@ -432,6 +447,10 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 		return fmt.Errorf("codexcli: app-server already started")
 	}
 
+	if w.doneCh == nil {
+		w.doneCh = make(chan struct{})
+	}
+
 	crashCh, err := w.manager.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("codexcli: acquire: %w", err)
@@ -439,10 +458,14 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	w.crashSub = crashCh
 
 	cfg := resolveConfig()
+	personality := cfg.Personality
+	if personality == "" {
+		personality = "friendly"
+	}
 	params := map[string]any{
 		"cwd":         session.ProjectDir,
 		"sandbox":     cfg.Sandbox,
-		"personality": "friendly",
+		"personality": personality,
 	}
 	if cfg.Model != "" {
 		params["model"] = cfg.Model
@@ -535,7 +558,7 @@ func (w *AppServerWorker) Wait() (int, error) {
 	select {
 	case <-w.crashSub:
 		return 1, nil
-	case <-time.After(2 * time.Second):
+	case <-w.doneCh:
 		return 0, nil
 	}
 }
@@ -548,8 +571,14 @@ func (w *AppServerWorker) release() {
 			return
 		}
 		w.closed = true
+		doneCh := w.doneCh
+		w.doneCh = nil
 		tid := w.threadID
 		w.mu.Unlock()
+
+		if doneCh != nil {
+			close(doneCh)
+		}
 
 		if w.manager != nil && tid != "" {
 			_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
@@ -569,6 +598,8 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 	w.threadID = ""
 	w.recvCh = nil
 	w.closed = false
+	w.doneCh = make(chan struct{})
+	w.releaseOnce = sync.Once{}
 	w.mu.Unlock()
 	return nil
 }
@@ -587,8 +618,16 @@ func (w *AppServerWorker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }
 
-func (w *AppServerWorker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, reason string) error {
-	return fmt.Errorf("codexcli: permission responses not supported in app-server mode yet")
+func (w *AppServerWorker) HandlePermissionResponse(_ context.Context, reqID string, allowed bool, reason string) error {
+	decision := "decline"
+	if allowed {
+		decision = "accept"
+	}
+	result := map[string]any{"decision": decision}
+	if reason != "" {
+		result["reason"] = reason
+	}
+	return w.manager.RespondServerRequest(reqID, result)
 }
 
 func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
