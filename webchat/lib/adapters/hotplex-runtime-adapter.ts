@@ -56,13 +56,7 @@ export interface UseHotPlexRuntimeConfig {
 // Content-signature prefix length for dedup — covers most short/medium responses.
 const CONTENT_SIG_PREFIX = 300;
 
-const DEFAULT_SUGGESTIONS: readonly ThreadSuggestion[] = [
-  { title: '帮我写一个 React 组件', label: '代码', prompt: '帮我写一个 React 组件' },
-  { title: '解释这段代码的逻辑', label: '学习', prompt: '解释这段代码的逻辑' },
-  { title: '帮我调试这个错误', label: '调试', prompt: '帮我调试这个错误' },
-  { title: '重构这段代码让它更简洁', label: '重构', prompt: '重构这段代码让它更简洁' },
-  { title: '解释系统架构设计', label: '架构', prompt: '解释系统架构设计' },
-];
+const DEFAULT_SUGGESTIONS: readonly ThreadSuggestion[] = [];
 
 // ============================================================================
 // Message Converter

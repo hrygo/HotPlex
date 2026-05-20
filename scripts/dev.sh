@@ -114,6 +114,16 @@ start_gateway() {
         return 0
     fi
 
+    # Clean stale processes on the port (belt-and-suspenders, same as webchat).
+    local gw_port; gw_port="${GATEWAY_ADDR##*:}"
+    local stale; stale=$(lsof -ti:"$gw_port" 2>/dev/null || true)
+    if [[ -n "$stale" ]]; then
+        warn "Port $gw_port occupied (PID $stale), killing..."
+        echo "$stale" | xargs kill -9 2>/dev/null || true
+        sleep 1
+    fi
+    rm -f "$GATEWAY_PID"
+
     info "Starting gateway..."
     local binary="${BUILD_DIR}/${BIN_NAME}-$(go env GOOS)-$(go env GOARCH)"
     if [[ ! -x "$binary" ]]; then
@@ -159,6 +169,9 @@ start_gateway() {
 
 stop_gateway() {
     kill_pidfile "$GATEWAY_PID" "gateway"
+    # Belt-and-suspenders: kill by port in case PID file was stale or missing.
+    local gw_port; gw_port="${GATEWAY_ADDR##*:}"
+    kill_port "$gw_port" "gateway (port)"
 }
 
 status_gateway() {

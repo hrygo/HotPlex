@@ -88,7 +88,7 @@ export default function BotsPage() {
         {!loading && !error && bots.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {bots.map((bot) => (
-              <BotCard key={bot.name} bot={bot} />
+              <BotCard key={bot.bot_id} bot={bot} />
             ))}
           </div>
         )}

@@ -1,15 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { adminUrl } from '@/lib/config';
 
-interface LoginPageProps {
-  // login is injected via AdminLayout context — we import useAdminAuth directly
-}
-
 export default function LoginPage() {
-  const router = useRouter();
   const [url, setUrl] = useState(adminUrl);
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,7 +21,10 @@ export default function LoginPage() {
       const ok = await testConnection({ url: url.trim(), token: token.trim() });
       if (ok) {
         storeAdminConnection({ url: url.trim(), token: token.trim() });
-        router.replace('/admin');
+        // Full page reload to re-mount AdminShell and re-read localStorage.
+        // router.replace() does not trigger useAdminAuth to re-check credentials.
+        window.location.replace('/admin');
+        return;
       } else {
         setError('Connection failed. Check the URL and token.');
       }
@@ -84,7 +81,7 @@ export default function LoginPage() {
                 type="url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="http://localhost:9090"
+                placeholder="http://127.0.0.1:9999"
                 className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20"
               />
             </div>

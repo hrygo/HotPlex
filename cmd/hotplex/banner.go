@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/hrygo/hotplex/internal/cli/output"
 )
@@ -112,9 +113,14 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 		return fmt.Sprintf("  %s%s", bold(fmt.Sprintf("%-11s", label)), value)
 	}
 
+	const sectionWidth = 48
+
 	sectionHeader := func(name string) string {
-		dashes := "──────────────────────────────────────────"
-		return "  " + bold(name) + " " + dim(dashes)
+		dashLen := sectionWidth - 2 - len(name) - 1
+		if dashLen < 3 {
+			dashLen = 3
+		}
+		return "  " + bold(name) + " " + dim(strings.Repeat("─", dashLen))
 	}
 
 	sectionPad := func(label, value string) string {
@@ -140,8 +146,7 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 	}
 
 	// ── Endpoints ────────────────────────────────────────────
-	lines = append(lines, "", dim("  ───────────────────────────────────────────"), "")
-	lines = append(lines, sectionHeader("Endpoints"))
+	lines = append(lines, "", sectionHeader("Endpoints"))
 	lines = append(lines, sectionPad("Gateway", "http://"+s.GatewayAddr))
 	lines = append(lines, sectionPad("WebSocket", wsScheme+"://"+s.GatewayAddr+"/ws"))
 	lines = append(lines, sectionPad("Health", "http://"+s.GatewayAddr+"/health"))

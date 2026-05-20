@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAdminAuth } from '@/hooks/use-admin-auth';
 import { AdminNav } from '@/components/admin/admin-nav';
@@ -11,8 +12,13 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const isLoginPage = pathname === '/admin/login';
 
   // Unauthenticated and not on login page -> redirect
+  useEffect(() => {
+    if (state === 'unauthenticated' && !isLoginPage) {
+      router.replace('/admin/login');
+    }
+  }, [state, isLoginPage, router]);
+
   if (state === 'unauthenticated' && !isLoginPage) {
-    router.replace('/admin/login');
     return null;
   }
 
