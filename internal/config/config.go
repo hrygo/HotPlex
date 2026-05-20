@@ -1012,6 +1012,14 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 		}
 	}
 
+	// Expand env vars in token slices (supports ${VAR} references in config files).
+	for i, t := range cfg.Admin.Tokens {
+		cfg.Admin.Tokens[i] = ExpandEnv(t)
+	}
+	for i, k := range cfg.Security.APIKeys {
+		cfg.Security.APIKeys[i] = ExpandEnv(k)
+	}
+
 	// Numbered environment variables for slices (e.g. HOTPLEX_ADMIN_TOKEN_1..N)
 	// This supports project conventions for secret rotation and .env clarity.
 	cfg.Admin.Tokens = aggregateNumberedEnv(cfg.Admin.Tokens, "HOTPLEX_ADMIN_TOKEN_")

@@ -10,7 +10,7 @@ inherits: config.yaml
 admin:
   addr: "127.0.0.1:9999"
   tokens:
-    - "4bd61e481aa33d699d69e9c1fc937977b992c7b0f7cbca1542d57d96eb5f8055"
+    - "${ADMIN_TOKEN}"
   rate_limit_enabled: false
 
 gateway:
