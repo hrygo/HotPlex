@@ -48,10 +48,32 @@ func Handler() http.Handler {
 		}
 
 		// Try exact file match (favicon.ico, robots.txt, etc.).
+		// Next.js static export produces .html files for each route
+		// alongside directories with the same name (e.g. admin.html + admin/).
+		// When a path resolves to a directory, or has no match at all,
+		// try the .html variant before falling back to SPA index.html.
 		relPath := strings.TrimPrefix(path, "/")
 		if relPath != "" {
 			if f, err := spaFS.Open(relPath); err == nil {
+				stat, serr := f.Stat()
 				_ = f.Close()
+				if serr == nil && stat.IsDir() {
+					// Path matched a directory (e.g. /admin -> admin/);
+					// serve the .html file instead.
+					if hf, herr := spaFS.Open(relPath + ".html"); herr == nil {
+						_ = hf.Close()
+						r.URL.Path = path + ".html"
+						fileServer.ServeHTTP(w, r)
+						return
+					}
+				}
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			// No exact match; try .html variant (e.g. /admin/bots/detail -> admin/bots/detail.html).
+			if hf, herr := spaFS.Open(relPath + ".html"); herr == nil {
+				_ = hf.Close()
+				r.URL.Path = path + ".html"
 				fileServer.ServeHTTP(w, r)
 				return
 			}
