@@ -53,6 +53,7 @@ export default function SessionsPage() {
     try {
       setLoading(true);
       setError(null);
+      setConfirmId(null);
       const data = await listSessions(100, 0);
       setSessions(data.sessions);
     } catch (err) {
