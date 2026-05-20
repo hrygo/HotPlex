@@ -47,6 +47,7 @@ export default function SessionsPage() {
   const [sort, setSort] = useState<SortOption>('last_active');
   const [query, setQuery] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -121,9 +122,9 @@ export default function SessionsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this session permanently? This cannot be undone.')) return;
     try {
       setActionLoading(id);
+      setConfirmId(null);
       await deleteSession(id);
       setSessions((prev) => prev.filter((s) => s.id !== id));
     } catch (err) {
@@ -360,38 +361,69 @@ export default function SessionsPage() {
                   className="flex items-center justify-end gap-1"
                   onClick={(e) => e.preventDefault()}
                 >
-                  {session.state !== 'terminated' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleTerminate(session.id);
-                      }}
-                      disabled={actionLoading === session.id}
-                      className="p-1.5 rounded-[var(--radius-sm)] text-[var(--accent-amber)] bg-[rgba(245,158,11,0.1)] hover:bg-[rgba(245,158,11,0.2)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      title="Terminate session"
-                    >
-                      {actionLoading === session.id ? (
-                        <div className="w-3.5 h-3.5 border border-current border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-3.5 w-3.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
-                        </svg>
+                  {confirmId === session.id ? (
+                    <div className="flex items-center gap-1 animate-[fadeInScale_0.12s_ease-out]">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(session.id);
+                        }}
+                        disabled={actionLoading === session.id}
+                        className="px-2 py-1 rounded-[var(--radius-sm)] text-[10px] font-bold text-[var(--accent-coral)] bg-[rgba(244,63,94,0.1)] hover:bg-[rgba(244,63,94,0.2)] transition-colors disabled:opacity-40"
+                      >
+                        {actionLoading === session.id ? (
+                          <span className="inline-block w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          'Confirm'
+                        )}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmId(null);
+                        }}
+                        disabled={actionLoading === session.id}
+                        className="px-2 py-1 rounded-[var(--radius-sm)] text-[10px] font-bold text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-40"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {session.state !== 'terminated' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleTerminate(session.id);
+                          }}
+                          disabled={actionLoading === session.id}
+                          className="p-1.5 rounded-[var(--radius-sm)] text-[var(--accent-amber)] bg-[rgba(245,158,11,0.1)] hover:bg-[rgba(245,158,11,0.2)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Terminate session"
+                        >
+                          {actionLoading === session.id ? (
+                            <div className="w-3.5 h-3.5 border border-current border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-3.5 w-3.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
+                            </svg>
+                          )}
+                        </button>
                       )}
-                    </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmId(session.id);
+                        }}
+                        disabled={actionLoading === session.id}
+                        className="p-1.5 rounded-[var(--radius-sm)] text-[var(--accent-coral)] bg-[rgba(244,63,94,0.08)] hover:bg-[rgba(244,63,94,0.15)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Delete session"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-3.5 w-3.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                        </svg>
+                      </button>
+                    </>
                   )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(session.id);
-                    }}
-                    disabled={actionLoading === session.id}
-                    className="p-1.5 rounded-[var(--radius-sm)] text-[var(--accent-coral)] bg-[rgba(244,63,94,0.08)] hover:bg-[rgba(244,63,94,0.15)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="Delete session"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-3.5 w-3.5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                    </svg>
-                  </button>
                 </span>
               </Link>
             ))}
