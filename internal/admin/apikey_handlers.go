@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// maskAPIKey returns a masked version showing only first 8 and last 4 chars.
+func maskAPIKey(key string) string {
+	if len(key) <= 12 {
+		return "****"
+	}
+	return key[:8] + "****" + key[len(key)-4:]
+}
+
 // APIKeyUser represents a mapping from an API key to a user identity.
 type APIKeyUser struct {
 	APIKey      string `json:"api_key"`
@@ -118,6 +126,9 @@ func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) 
 	if users == nil {
 		users = []APIKeyUser{}
 	}
+	for i := range users {
+		users[i].APIKey = maskAPIKey(users[i].APIKey)
+	}
 	respondJSON(w, users)
 }
 
@@ -159,6 +170,7 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	u.APIKey = maskAPIKey(u.APIKey)
 	respondJSON(w, u)
 }
 

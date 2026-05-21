@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+	"time"
 )
 
 // APIKeyResolver maps an API key to a user identity.
@@ -51,9 +52,16 @@ func (r *MapResolver) Update(data map[string]string) {
 }
 
 // DBResolver resolves API keys from a SQLite database.
+// Uses an in-memory cache with TTL to avoid repeated DB queries on hot keys.
 // Used when enterprise deployments manage key→user mappings via Admin API.
 type DBResolver struct {
-	db *sql.DB
+	db    *sql.DB
+	cache sync.Map // key → *cacheEntry
+}
+
+type cacheEntry struct {
+	userID    string
+	expiresAt time.Time
 }
 
 // NewDBResolver creates a resolver backed by the api_key_users table.
@@ -63,6 +71,18 @@ func NewDBResolver(db *sql.DB) *DBResolver {
 }
 
 func (r *DBResolver) Resolve(ctx context.Context, key string) (string, bool) {
+	// Check cache first.
+	if v, ok := r.cache.Load(key); ok {
+		e, ok := v.(*cacheEntry)
+		if !ok {
+			r.cache.Delete(key)
+		} else if time.Now().Before(e.expiresAt) {
+			return e.userID, true
+		} else {
+			r.cache.Delete(key)
+		}
+	}
+
 	var userID string
 	err := r.db.QueryRowContext(ctx,
 		"SELECT user_id FROM api_key_users WHERE api_key = ?",
@@ -71,6 +91,11 @@ func (r *DBResolver) Resolve(ctx context.Context, key string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	// Cache for 60 seconds — balances freshness with DB load.
+	r.cache.Store(key, &cacheEntry{
+		userID:    userID,
+		expiresAt: time.Now().Add(60 * time.Second),
+	})
 	return userID, true
 }
 
