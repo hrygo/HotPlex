@@ -162,6 +162,10 @@ type Config struct {
 	Cron        CronConfig      `mapstructure:"cron"`
 	Events      EventsConfig    `mapstructure:"events"`
 	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
+
+	// ResolvedAPIKeyUsers is the runtime map of expanded API key value → userID.
+	// Populated by resolveAPIKeyUsers() during load. Nil when no mapping configured.
+	ResolvedAPIKeyUsers map[string]string `mapstructure:"-"`
 }
 
 // MessagingConfig holds messaging platform adapter settings.
@@ -541,6 +545,11 @@ type SecurityConfig struct {
 	AllowedOrigins []string `mapstructure:"allowed_origins"`
 	JWTSecret      []byte   `mapstructure:"-"` // loaded via SecretsProvider, never from config file
 	JWTAudience    string   `mapstructure:"jwt_audience"`
+
+	// APIKeyUsers maps environment variable names (or literal key values) to user IDs.
+	// Enterprise multi-user: each API key gets a distinct identity for session isolation.
+	// Keys not present in this map default to "api_user" (backward compatible).
+	APIKeyUsers map[string]string `mapstructure:"api_key_users"`
 
 	// WorkDir security settings
 	WorkDirAllowedBasePatterns []string `mapstructure:"work_dir_allowed_base_patterns"` // extra whitelist patterns (supports ~ and ${VAR})
@@ -1027,6 +1036,9 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 	cfg.Admin.Tokens = aggregateNumberedEnv(cfg.Admin.Tokens, "HOTPLEX_ADMIN_TOKEN_")
 	cfg.Security.APIKeys = aggregateNumberedEnv(cfg.Security.APIKeys, "HOTPLEX_SECURITY_API_KEY_")
 
+	// Resolve API key → user identity mappings from config.
+	cfg.ResolvedAPIKeyUsers = resolveAPIKeyUsers(cfg.Security.APIKeyUsers, cfg.Security.APIKeys)
+
 	// Messaging platform env var overrides.
 	applyMessagingEnv(cfg)
 
@@ -1212,6 +1224,33 @@ func aggregateNumberedEnv(existing []string, prefix string) []string {
 		}
 	}
 	return existing
+}
+
+// resolveAPIKeyUsers builds a runtime map of expanded API key value → userID.
+// Input map keys are resolved as env var names first, then as literal keys.
+// Returns nil when no valid mappings are found (preserves "api_user" default).
+func resolveAPIKeyUsers(raw map[string]string, expandedKeys []string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	keySet := make(map[string]struct{}, len(expandedKeys))
+	for _, k := range expandedKeys {
+		keySet[k] = struct{}{}
+	}
+	result := make(map[string]string, len(raw))
+	for mapKey, userID := range raw {
+		if envVal := os.Getenv(mapKey); envVal != "" {
+			result[envVal] = userID
+			continue
+		}
+		if _, isKey := keySet[mapKey]; isKey {
+			result[mapKey] = userID
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // applyMessagingEnv overrides messaging config from environment variables.

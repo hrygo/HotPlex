@@ -271,7 +271,7 @@ func (c *Conn) performInit(handler *Handler) error {
 			c.sendInitError(events.ErrCodeUnauthorized, "authentication required")
 			return fmt.Errorf("deferred auth: no token in init envelope")
 		}
-		uid, ok := handler.auth.AuthenticateKey(initData.Auth.Token)
+		uid, ok := handler.auth.AuthenticateKey(context.TODO(), initData.Auth.Token)
 		if !ok {
 			c.sendInitError(events.ErrCodeUnauthorized, "invalid token")
 			return fmt.Errorf("deferred auth: invalid token")

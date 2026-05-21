@@ -1,0 +1,101 @@
+package security
+
+import (
+	"context"
+	"database/sql"
+	"sync"
+)
+
+// APIKeyResolver maps an API key to a user identity.
+// Implementations: MapResolver (YAML config), DBResolver (SQLite).
+// Nil resolver means all valid keys resolve to "api_user" (default behavior).
+type APIKeyResolver interface {
+	// Resolve returns the userID associated with the given API key.
+	// Returns ("", false) if the key has no explicit mapping —
+	// caller falls back to "api_user".
+	Resolve(ctx context.Context, key string) (userID string, ok bool)
+}
+
+// MapResolver resolves API keys via an in-memory map.
+// Thread-safe: Update swaps the map atomically under write lock.
+// This is the default implementation driven by YAML config.
+type MapResolver struct {
+	mu   sync.RWMutex
+	data map[string]string // apiKey → userID
+}
+
+// NewMapResolver creates a resolver from a static key→user map.
+// Nil or empty data is safe — Resolve always returns ("", false).
+func NewMapResolver(data map[string]string) *MapResolver {
+	if data == nil {
+		data = make(map[string]string)
+	}
+	return &MapResolver{data: data}
+}
+
+func (r *MapResolver) Resolve(_ context.Context, key string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	uid, ok := r.data[key]
+	return uid, ok
+}
+
+// Update replaces the mapping atomically. Called during config hot-reload.
+func (r *MapResolver) Update(data map[string]string) {
+	if data == nil {
+		data = make(map[string]string)
+	}
+	r.mu.Lock()
+	r.data = data
+	r.mu.Unlock()
+}
+
+// DBResolver resolves API keys from a SQLite database.
+// Used when enterprise deployments manage key→user mappings via Admin API.
+type DBResolver struct {
+	db *sql.DB
+}
+
+// NewDBResolver creates a resolver backed by the api_key_users table.
+// The table must exist (created by migration 010).
+func NewDBResolver(db *sql.DB) *DBResolver {
+	return &DBResolver{db: db}
+}
+
+func (r *DBResolver) Resolve(ctx context.Context, key string) (string, bool) {
+	var userID string
+	err := r.db.QueryRowContext(ctx,
+		"SELECT user_id FROM api_key_users WHERE api_key = ?",
+		key,
+	).Scan(&userID)
+	if err != nil {
+		return "", false
+	}
+	return userID, true
+}
+
+// ChainResolver tries multiple resolvers in order, returning the first match.
+// This allows config entries to take priority over DB entries.
+type ChainResolver struct {
+	resolvers []APIKeyResolver
+}
+
+// NewChainResolver creates a resolver that tries each resolver in order.
+func NewChainResolver(resolvers ...APIKeyResolver) *ChainResolver {
+	filtered := make([]APIKeyResolver, 0, len(resolvers))
+	for _, r := range resolvers {
+		if r != nil {
+			filtered = append(filtered, r)
+		}
+	}
+	return &ChainResolver{resolvers: filtered}
+}
+
+func (r *ChainResolver) Resolve(ctx context.Context, key string) (string, bool) {
+	for _, res := range r.resolvers {
+		if uid, ok := res.Resolve(ctx, key); ok {
+			return uid, true
+		}
+	}
+	return "", false
+}

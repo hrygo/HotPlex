@@ -349,7 +349,7 @@ func (h *Hub) HandleHTTP(
 
 		key, found := auth.ExtractAPIKey(r)
 		if found {
-			uid, ok := auth.AuthenticateKey(key)
+			uid, ok := auth.AuthenticateKey(r.Context(), key)
 			if !ok {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return

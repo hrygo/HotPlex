@@ -1156,3 +1156,59 @@ func TestMessagingLevelEnvVars(t *testing.T) {
 	require.Equal(t, 15*time.Minute, cfg.Messaging.MossIdleTimeout)
 	require.Equal(t, 4, cfg.Messaging.MossCpuThreads)
 }
+
+func TestResolveAPIKeyUsers(t *testing.T) {
+	t.Run("nil input returns nil", func(t *testing.T) {
+		result := resolveAPIKeyUsers(nil, []string{"sk-1"})
+		assertNilKeyMap(t, result)
+	})
+
+	t.Run("empty input returns nil", func(t *testing.T) {
+		result := resolveAPIKeyUsers(map[string]string{}, []string{"sk-1"})
+		assertNilKeyMap(t, result)
+	})
+
+	t.Run("env var name resolved to value", func(t *testing.T) {
+		t.Setenv("TEST_SK_ALICE", "sk-actual-alice-key")
+		defer os.Unsetenv("TEST_SK_ALICE")
+
+		raw := map[string]string{"TEST_SK_ALICE": "alice"}
+		expanded := []string{"sk-actual-alice-key", "sk-other"}
+		result := resolveAPIKeyUsers(raw, expanded)
+		require.Equal(t, map[string]string{"sk-actual-alice-key": "alice"}, result)
+	})
+
+	t.Run("literal key value matched from expanded keys", func(t *testing.T) {
+		raw := map[string]string{"sk-literal": "bob"}
+		expanded := []string{"sk-literal", "sk-other"}
+		result := resolveAPIKeyUsers(raw, expanded)
+		require.Equal(t, map[string]string{"sk-literal": "bob"}, result)
+	})
+
+	t.Run("unknown key ignored", func(t *testing.T) {
+		raw := map[string]string{"sk-unknown": "charlie"}
+		expanded := []string{"sk-different"}
+		result := resolveAPIKeyUsers(raw, expanded)
+		assertNilKeyMap(t, result)
+	})
+
+	t.Run("mixed env and literal keys", func(t *testing.T) {
+		t.Setenv("TEST_SK_ENV", "sk-env-value")
+		defer os.Unsetenv("TEST_SK_ENV")
+
+		raw := map[string]string{
+			"TEST_SK_ENV": "env-user",
+			"sk-literal":  "lit-user",
+		}
+		expanded := []string{"sk-env-value", "sk-literal"}
+		result := resolveAPIKeyUsers(raw, expanded)
+		require.Equal(t, map[string]string{
+			"sk-env-value": "env-user",
+			"sk-literal":   "lit-user",
+		}, result)
+	})
+}
+
+func assertNilKeyMap(t *testing.T, v map[string]string) {
+	require.Nil(t, v)
+}

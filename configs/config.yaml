@@ -70,6 +70,20 @@ security:
   api_key_header: "X-API-Key"
   # APIKeys must be provided via HOTPLEX_SECURITY_API_KEY_1..N env vars
   api_keys: []
+  # api_key_users maps API key values (or env var names) to user identities.
+  # When set, the resolved userID flows into session isolation (UUIDv5 key,
+  # SEC-008 cross-user rejection, per-user quotas). Without mapping, all keys
+  # resolve to "api_user" (shared namespace).
+  # Example (env var names resolved at load time):
+  #   api_key_users:
+  #     HOTPLEX_SECURITY_API_KEY_1: "alice"
+  #     HOTPLEX_SECURITY_API_KEY_2: "bob"
+  # Or with literal key values:
+  #   api_key_users:
+  #     "sk-actual-key-value": "alice"
+  api_key_users: {}
+  # Resolver chain: DB (Admin API CRUD) → YAML config. DB entries override config.
+  # No configuration needed — the chain is always active when the table exists.
   tls_enabled: false
   tls_cert_file: "/etc/hotplex/tls/server.crt"
   tls_key_file: "/etc/hotplex/tls/server.key"

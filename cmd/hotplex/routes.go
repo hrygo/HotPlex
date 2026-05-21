@@ -88,6 +88,7 @@ func setupRoutes(
 		BotConfig:     newBotConfigAdapter(deps.ConfigStore, cfg.AgentConfig.ConfigDir, ""),
 		Version:       versionString,
 		NewSessionID:  newSessionID,
+		DB:            deps.DB,
 	})
 
 	if cfg.Admin.RateLimitEnabled {
@@ -155,6 +156,13 @@ func setupRoutes(
 	adminMux.HandleFunc("POST /admin/bots", adminAPI.HandleCreateBot)
 	adminMux.HandleFunc("DELETE /admin/bots/{name}", adminAPI.HandleDeleteBot)
 	adminMux.HandleFunc("PUT /admin/bots/{name}/config/{file}", adminAPI.HandleWriteAgentConfigFile)
+
+	// API key user management
+	adminMux.HandleFunc("GET /admin/api-keys", adminAPI.HandleAPIKeyUserList)
+	adminMux.HandleFunc("POST /admin/api-keys", adminAPI.HandleAPIKeyUserCreate)
+	adminMux.HandleFunc("GET /admin/api-keys/{key}", adminAPI.HandleAPIKeyUserGet)
+	adminMux.HandleFunc("PATCH /admin/api-keys/{key}", adminAPI.HandleAPIKeyUserUpdate)
+	adminMux.HandleFunc("DELETE /admin/api-keys/{key}", adminAPI.HandleAPIKeyUserDelete)
 
 	// Documentation
 	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler()))

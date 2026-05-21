@@ -21,6 +21,7 @@ type Authenticator struct {
 	cfg          *config.SecurityConfig
 	validKey     map[string]bool // set of valid API keys (hashed in production)
 	jwtValidator *JWTValidator   // optional; set when JWT botID extraction is needed at HTTP level
+	keyResolver  APIKeyResolver  // optional; maps API keys to user identities. nil = "api_user"
 }
 
 // NewAuthenticator creates a new authenticator. jwtValidator may be nil.
@@ -72,7 +73,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		return "", "", ErrUnauthorized
 	}
 
-	return "api_user", a.BotIDFromRequest(r), nil
+	return a.resolveUserID(r.Context(), key), a.BotIDFromRequest(r), nil
 }
 
 // ReloadKeys dynamically replaces the set of valid API keys.
@@ -85,6 +86,26 @@ func (a *Authenticator) ReloadKeys(cfg *config.SecurityConfig) {
 	a.cfg = cfg
 	a.validKey = validKey
 	a.mu.Unlock()
+}
+
+// SetKeyResolver sets the API key → user identity resolver.
+// Nil clears the mapping (all keys return "api_user").
+func (a *Authenticator) SetKeyResolver(r APIKeyResolver) {
+	a.mu.Lock()
+	a.keyResolver = r
+	a.mu.Unlock()
+}
+
+// resolveUserID returns the user identity for a valid API key.
+// Checks the resolver first; falls back to "api_user" if no mapping exists.
+// Caller must hold at least RLock.
+func (a *Authenticator) resolveUserID(ctx context.Context, key string) string {
+	if a.keyResolver != nil {
+		if uid, ok := a.keyResolver.Resolve(ctx, key); ok {
+			return uid
+		}
+	}
+	return "api_user"
 }
 
 // ExtractAPIKey returns the API key from header or query param.
@@ -111,7 +132,7 @@ func (a *Authenticator) ExtractAPIKey(r *http.Request) (string, bool) {
 // AuthenticateKey validates an API key string directly.
 // Returns userID if valid, ("", false) if invalid.
 // Handles dev mode (no keys configured → "anonymous").
-func (a *Authenticator) AuthenticateKey(key string) (string, bool) {
+func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -123,7 +144,7 @@ func (a *Authenticator) AuthenticateKey(key string) (string, bool) {
 	if !a.validKey[key] {
 		return "", false
 	}
-	return "api_user", true
+	return a.resolveUserID(ctx, key), true
 }
 
 // BotIDFromRequest extracts the BotID claim from a JWT Bearer token in the Authorization header.

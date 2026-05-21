@@ -367,16 +367,16 @@ func TestReloadKeys(t *testing.T) {
 	cfg := &config.SecurityConfig{APIKeys: []string{"key1"}}
 	auth := NewAuthenticator(cfg, nil)
 
-	userID, ok := auth.AuthenticateKey("key1")
+	userID, ok := auth.AuthenticateKey(context.Background(), "key1")
 	require.True(t, ok)
 	require.Equal(t, "api_user", userID)
 
 	auth.ReloadKeys(&config.SecurityConfig{APIKeys: []string{"key2", "key3"}})
 
-	_, ok = auth.AuthenticateKey("key1")
+	_, ok = auth.AuthenticateKey(context.Background(), "key1")
 	require.False(t, ok)
 
-	userID, ok = auth.AuthenticateKey("key2")
+	userID, ok = auth.AuthenticateKey(context.Background(), "key2")
 	require.True(t, ok)
 	require.Equal(t, "api_user", userID)
 }
@@ -427,7 +427,7 @@ func TestAuthenticateKey(t *testing.T) {
 	t.Run("valid key", func(t *testing.T) {
 		t.Parallel()
 		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"secret"}}, nil)
-		userID, ok := auth.AuthenticateKey("secret")
+		userID, ok := auth.AuthenticateKey(context.Background(), "secret")
 		require.True(t, ok)
 		require.Equal(t, "api_user", userID)
 	})
@@ -435,14 +435,14 @@ func TestAuthenticateKey(t *testing.T) {
 	t.Run("invalid key", func(t *testing.T) {
 		t.Parallel()
 		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"secret"}}, nil)
-		_, ok := auth.AuthenticateKey("wrong")
+		_, ok := auth.AuthenticateKey(context.Background(), "wrong")
 		require.False(t, ok)
 	})
 
 	t.Run("dev mode", func(t *testing.T) {
 		t.Parallel()
 		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{}}, nil)
-		userID, ok := auth.AuthenticateKey("anything")
+		userID, ok := auth.AuthenticateKey(context.Background(), "anything")
 		require.True(t, ok)
 		require.Equal(t, "anonymous", userID)
 	})
@@ -471,4 +471,114 @@ func TestRegisterCommand(t *testing.T) {
 		err := RegisterCommand("foo;bar")
 		require.Error(t, err)
 	})
+}
+
+// ─── API Key Resolver Integration ─────────────────────────────────────────────
+
+func TestAuthenticator_WithMapResolver(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.SecurityConfig{
+		APIKeys: []string{"sk-alice", "sk-bob", "sk-orphan"},
+	}
+	auth := NewAuthenticator(cfg, nil)
+	auth.SetKeyResolver(NewMapResolver(map[string]string{
+		"sk-alice": "alice",
+		"sk-bob":   "bob",
+		// sk-orphan has no mapping → should fall back to "api_user"
+	}))
+
+	tests := []struct {
+		name       string
+		key        string
+		wantUserID string
+	}{
+		{"mapped alice", "sk-alice", "alice"},
+		{"mapped bob", "sk-bob", "bob"},
+		{"unmapped falls back", "sk-orphan", "api_user"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			uid, ok := auth.AuthenticateKey(context.Background(), tt.key)
+			require.True(t, ok)
+			require.Equal(t, tt.wantUserID, uid)
+		})
+	}
+}
+
+func TestAuthenticator_SetKeyResolver_Nil(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.SecurityConfig{APIKeys: []string{"sk-test"}}
+	auth := NewAuthenticator(cfg, nil)
+
+	// Set then clear resolver
+	auth.SetKeyResolver(NewMapResolver(map[string]string{"sk-test": "mapped"}))
+	uid, ok := auth.AuthenticateKey(context.Background(), "sk-test")
+	require.True(t, ok)
+	require.Equal(t, "mapped", uid)
+
+	auth.SetKeyResolver(nil)
+	uid, ok = auth.AuthenticateKey(context.Background(), "sk-test")
+	require.True(t, ok)
+	require.Equal(t, "api_user", uid)
+}
+
+func TestAuthenticator_WithResolver_AuthenticateRequest(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.SecurityConfig{APIKeys: []string{"sk-alice"}}
+	auth := NewAuthenticator(cfg, nil)
+	auth.SetKeyResolver(NewMapResolver(map[string]string{"sk-alice": "alice"}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-API-Key", "sk-alice")
+
+	userID, _, err := auth.AuthenticateRequest(req)
+	require.NoError(t, err)
+	require.Equal(t, "alice", userID)
+}
+
+func TestAuthenticator_ResolverWithJWT(t *testing.T) {
+	t.Parallel()
+
+	apiKey := "sk-alice"
+	jwtSecret := []byte("resolver-jwt-secret")
+	jwtVal := NewJWTValidator(jwtSecret, "")
+	cfg := &config.SecurityConfig{APIKeys: []string{apiKey}}
+	auth := NewAuthenticator(cfg, jwtVal)
+	auth.SetKeyResolver(NewMapResolver(map[string]string{apiKey: "alice-resolved"}))
+
+	token := mustGenToken(jwtVal, "jwt-user", "bot-007")
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	userID, botID, err := auth.AuthenticateRequest(req)
+	require.NoError(t, err)
+	require.Equal(t, "alice-resolved", userID, "resolver userID should override default")
+	require.Equal(t, "bot-007", botID, "JWT botID should still be extracted")
+}
+
+func TestAuthenticator_ChainResolver(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.SecurityConfig{APIKeys: []string{"sk-1", "sk-2"}}
+	auth := NewAuthenticator(cfg, nil)
+
+	// Simulate: DB maps sk-1 to "db-user", config maps sk-1 to "config-user"
+	// ChainResolver tries DB first, so DB wins.
+	dbResolver := NewMapResolver(map[string]string{"sk-1": "db-user"})
+	configResolver := NewMapResolver(map[string]string{"sk-1": "config-user", "sk-2": "config-only"})
+	auth.SetKeyResolver(NewChainResolver(dbResolver, configResolver))
+
+	uid, ok := auth.AuthenticateKey(context.Background(), "sk-1")
+	require.True(t, ok)
+	require.Equal(t, "db-user", uid, "DB resolver should take priority over config")
+
+	uid, ok = auth.AuthenticateKey(context.Background(), "sk-2")
+	require.True(t, ok)
+	require.Equal(t, "config-only", uid, "Config resolver should be fallback when DB has no entry")
 }

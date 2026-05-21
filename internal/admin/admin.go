@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -96,8 +97,9 @@ type AdminAPI struct {
 	botLister     BotListerProvider
 	botConfig     BotConfigProvider
 	logCollector  LogCollector
-	rateLimiter   atomic.Value // *simpleRateLimiter
-	allowedCIDRs  atomic.Value // []string
+	akStore       *apiKeyUserStore // nil when DB resolver not enabled
+	rateLimiter   atomic.Value     // *simpleRateLimiter
+	allowedCIDRs  atomic.Value     // []string
 	version       func() string
 	newSessionID  func() string
 	startedAt     time.Time
@@ -117,6 +119,7 @@ type Deps struct {
 	LogCollector  LogCollector
 	Version       func() string
 	NewSessionID  func() string
+	DB            *sql.DB // Optional: enables API key user CRUD + DB resolver
 }
 
 func New(deps Deps) *AdminAPI {
@@ -136,6 +139,7 @@ func New(deps Deps) *AdminAPI {
 		botLister:     deps.BotLister,
 		botConfig:     deps.BotConfig,
 		logCollector:  lc,
+		akStore:       newAPIKeyUserStoreFromDB(deps.DB),
 		version:       deps.Version,
 		newSessionID:  deps.NewSessionID,
 		startedAt:     time.Now(),
