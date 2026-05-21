@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
+import { useAdminUI } from '@/context/admin-ui-context';
 import type { CronJob } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
@@ -42,6 +43,7 @@ function formatTime(iso?: string): string {
 // ---------------------------------------------------------------------------
 
 export default function CronPage() {
+  const { showToast, confirm } = useAdminUI();
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,40 +86,56 @@ export default function CronPage() {
   const handleToggle = async (job: CronJob) => {
     const next = !job.enabled;
     const label = next ? 'enable' : 'disable';
-    if (!window.confirm(`${next ? 'Enable' : 'Disable'} cron job "${job.name}"?`)) return;
+    const confirmed = await confirm(
+      `${next ? 'Enable' : 'Disable'} Cron Job?`,
+      `Are you sure you want to ${label} cron job "${job.name}"?`
+    );
+    if (!confirmed) return;
     try {
       setActionLoading(job.id);
       await updateCronJob(job.id, { enabled: next });
       setJobs((prev) =>
         prev.map((j) => (j.id === job.id ? { ...j, enabled: next } : j)),
       );
+      showToast(`Cron job "${job.name}" ${next ? 'enabled' : 'disabled'} successfully.`, 'success');
     } catch (err) {
-      alert(err instanceof Error ? err.message : `Failed to ${label} cron job`);
+      showToast(err instanceof Error ? err.message : `Failed to ${label} cron job`, 'error');
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleTrigger = async (id: string, name: string) => {
-    if (!window.confirm(`Manually trigger cron job "${name}"?`)) return;
+    const confirmed = await confirm(
+      'Trigger Cron Job?',
+      `Manually execute cron job "${name}" right now?`
+    );
+    if (!confirmed) return;
     try {
       setActionLoading(id);
       await triggerCronJob(id);
+      showToast(`Cron job "${name}" manually triggered.`, 'success');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to trigger cron job');
+      showToast(err instanceof Error ? err.message : 'Failed to trigger cron job', 'error');
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`Delete cron job "${name}" permanently? This cannot be undone.`)) return;
+    const confirmed = await confirm(
+      'Delete Cron Job?',
+      `Are you sure you want to permanently delete cron job "${name}"? This action is irreversible.`,
+      { destructive: true }
+    );
+    if (!confirmed) return;
     try {
       setActionLoading(id);
       await deleteCronJob(id);
       setJobs((prev) => prev.filter((j) => j.id !== id));
+      showToast(`Cron job "${name}" successfully deleted.`, 'success');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete cron job');
+      showToast(err instanceof Error ? err.message : 'Failed to delete cron job', 'error');
     } finally {
       setActionLoading(null);
     }

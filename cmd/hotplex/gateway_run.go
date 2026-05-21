@@ -57,6 +57,8 @@ type GatewayDeps struct {
 	ChatAccessStore *messaging.ChatAccessStore
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
+	ConfigPath      string
+	DevMode         bool
 }
 
 const defaultConfigPath = config.DefaultConfigPath
@@ -360,6 +362,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		ChatAccessStore: messaging.NewChatAccessStore(stores.session.DB(), log),
 		DB:              stores.session.DB(),
 		DBResolver:      dbResolver,
+		ConfigPath:      configPath,
+		DevMode:         devMode,
 	}
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).

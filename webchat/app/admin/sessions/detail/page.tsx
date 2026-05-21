@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { listSessions, terminateSession } from '@/lib/api/admin-sessions';
 import { SessionStatusBadge } from '@/components/admin/session-status-badge';
+import { useAdminUI } from '@/context/admin-ui-context';
 import type { AdminSessionInfo } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ function formatDateTime(iso?: string): string {
 // ---------------------------------------------------------------------------
 
 export default function SessionDetailPage() {
+  const { showToast, confirm } = useAdminUI();
   const searchParams = useSearchParams();
   const id = searchParams.get('id') ?? '';
 
@@ -80,13 +82,19 @@ export default function SessionDetailPage() {
 
   const handleTerminate = async () => {
     if (!session || session.state === 'terminated') return;
-    if (!window.confirm('Terminate this session? The worker will be stopped.')) return;
+    const confirmed = await confirm(
+      'Terminate Session?',
+      `Are you sure you want to terminate session "${session.id}"? The running worker process will be stopped immediately.`,
+      { confirmLabel: 'Terminate', destructive: true }
+    );
+    if (!confirmed) return;
     try {
       setTerminating(true);
       await terminateSession(session.id);
       setSession((prev) => (prev ? { ...prev, state: 'terminated' } : prev));
+      showToast(`Session "${session.id}" successfully terminated.`, 'success');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to terminate session');
+      showToast(err instanceof Error ? err.message : 'Failed to terminate session', 'error');
     } finally {
       setTerminating(false);
     }

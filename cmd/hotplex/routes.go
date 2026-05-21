@@ -88,8 +88,15 @@ func setupRoutes(
 		BotConfig:     newBotConfigAdapter(deps.ConfigStore, cfg.AgentConfig.ConfigDir, ""),
 		Version:       versionString,
 		NewSessionID:  newSessionID,
-		DB:            deps.DB,
-		DBResolver:    deps.DBResolver,
+		Restart: func() error {
+			inst, err := findRunningGateway()
+			if err != nil {
+				return err
+			}
+			return forkRestartHelper(inst, deps.ConfigPath, deps.DevMode, true)
+		},
+		DB:         deps.DB,
+		DBResolver: deps.DBResolver,
 	})
 
 	if cfg.Admin.RateLimitEnabled {
@@ -128,6 +135,7 @@ func setupRoutes(
 	adminMux.HandleFunc("POST /admin/config/validate", adminAPI.HandleConfigValidate)
 	adminMux.HandleFunc("POST /admin/config/rollback", adminAPI.HandleConfigRollback)
 	adminMux.HandleFunc("GET /admin/debug/sessions/{id}", adminAPI.HandleDebugSession)
+	adminMux.HandleFunc("POST /admin/restart", adminAPI.HandleRestart)
 
 	adminMux.HandleFunc("GET /admin/sessions", adminAPI.ListSessions)
 	adminMux.HandleFunc("GET /admin/sessions/{id}", adminAPI.GetSession)
@@ -161,9 +169,9 @@ func setupRoutes(
 	// API key user management
 	adminMux.HandleFunc("GET /admin/api-keys", adminAPI.HandleAPIKeyUserList)
 	adminMux.HandleFunc("POST /admin/api-keys", adminAPI.HandleAPIKeyUserCreate)
-	adminMux.HandleFunc("GET /admin/api-keys/{key}", adminAPI.HandleAPIKeyUserGet)
-	adminMux.HandleFunc("PATCH /admin/api-keys/{key}", adminAPI.HandleAPIKeyUserUpdate)
-	adminMux.HandleFunc("DELETE /admin/api-keys/{key}", adminAPI.HandleAPIKeyUserDelete)
+	adminMux.HandleFunc("GET /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserGet)
+	adminMux.HandleFunc("PATCH /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserUpdate)
+	adminMux.HandleFunc("DELETE /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserDelete)
 
 	// Documentation
 	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler()))

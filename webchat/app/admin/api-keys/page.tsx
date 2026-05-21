@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useAdminUI } from '@/context/admin-ui-context';
 import {
   listAPIKeys,
   createAPIKey,
-  updateAPIKey,
   deleteAPIKey,
 } from '@/lib/api/admin-apikeys';
 import type { APIKeyUser } from '@/lib/types/admin';
@@ -41,6 +41,7 @@ function maskKey(key: string): string {
 // ---------------------------------------------------------------------------
 
 export default function APIKeysPage() {
+  const { showToast, confirm } = useAdminUI();
   const [keys, setKeys] = useState<APIKeyUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +49,6 @@ export default function APIKeysPage() {
 
   // Dialog state
   const [showCreate, setShowCreate] = useState(false);
-  const [editingKey, setEditingKey] = useState<APIKeyUser | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -104,40 +103,31 @@ export default function APIKeysPage() {
     }
   };
 
-  const handleEdit = async () => {
-    if (!editingKey || !formUserId.trim()) {
-      setFormError('User ID is required');
-      return;
-    }
-    try {
-      setFormError(null);
-      const result = await updateAPIKey(editingKey.api_key, {
-        user_id: formUserId.trim(),
-        description: formDesc.trim() || undefined,
-      });
-      setKeys((prev) =>
-        prev.map((k) =>
-          k.api_key === editingKey.api_key
-            ? { ...k, user_id: result.user_id, description: result.description }
-            : k,
-        ),
-      );
-      closeDialog();
-    } catch (err) {
-      setFormError(
-        err instanceof Error ? err.message : 'Failed to update API key',
-      );
-    }
-  };
+  const handleDelete = async (id: number) => {
+    const matchedKey = keys.find((k) => k.id === id);
+    const userId = matchedKey?.user_id || 'unknown';
 
-  const handleDelete = async (key: string) => {
+    const ok = await confirm(
+      'Delete API Key',
+      `Are you sure you want to permanently delete the API key for user "${userId}"? This will immediately revoke all access for this key. This action is irreversible.`,
+      {
+        confirmLabel: 'Delete',
+        cancelLabel: 'Cancel',
+        destructive: true,
+      }
+    );
+    if (!ok) return;
+
     try {
-      setActionLoading(key);
-      await deleteAPIKey(key);
-      setKeys((prev) => prev.filter((k) => k.api_key !== key));
-      setDeleteConfirm(null);
+      setActionLoading(id.toString());
+      await deleteAPIKey(id);
+      setKeys((prev) => prev.filter((k) => k.id !== id));
+      showToast('API key successfully deleted', 'success');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete API key');
+      showToast(
+        err instanceof Error ? err.message : 'Failed to delete API key',
+        'error',
+      );
     } finally {
       setActionLoading(null);
     }
@@ -152,16 +142,8 @@ export default function APIKeysPage() {
     setShowCreate(true);
   };
 
-  const openEdit = (k: APIKeyUser) => {
-    setFormUserId(k.user_id);
-    setFormDesc(k.description ?? '');
-    setFormError(null);
-    setEditingKey(k);
-  };
-
   const closeDialog = () => {
     setShowCreate(false);
-    setEditingKey(null);
     setCreatedKey(null);
     setCopied(false);
     setFormError(null);
@@ -312,7 +294,7 @@ export default function APIKeysPage() {
             {/* Table rows */}
             {keys.map((k) => (
               <div
-                key={k.api_key}
+                key={k.id || k.api_key}
                 className="grid grid-cols-[1fr_140px_1fr_110px_120px] gap-2 border-b border-[var(--border-subtle)] px-4 py-2.5 last:border-b-0 items-center transition-colors hover:bg-[var(--bg-hover)]"
               >
                 {/* API Key — display masked value only */}
@@ -342,75 +324,34 @@ export default function APIKeysPage() {
 
                 {/* Actions */}
                 <div className="flex items-center justify-end gap-1.5">
-                  {/* Edit */}
                   <button
-                    onClick={() => openEdit(k)}
-                    className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--accent-gold)]/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--accent-gold)] transition-colors hover:bg-[var(--accent-gold)]/20"
-                    title="Edit"
+                    onClick={() => handleDelete(k.id!)}
+                    disabled={actionLoading === k.id?.toString()}
+                    className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[rgba(244,63,94,0.08)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--accent-coral)] transition-colors hover:bg-[rgba(244,63,94,0.15)] disabled:opacity-40"
+                    title="Delete"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={1.5}
-                      stroke="currentColor"
-                      className="h-3 w-3"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
-                      />
-                    </svg>
-                    Edit
+                    {actionLoading === k.id?.toString() ? (
+                      <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                    ) : (
+                      <>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={1.5}
+                          stroke="currentColor"
+                          className="h-3 w-3"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
+                          />
+                        </svg>
+                        Delete
+                      </>
+                    )}
                   </button>
-
-                  {/* Delete / Confirm */}
-                  {deleteConfirm === k.api_key ? (
-                    <>
-                      <button
-                        onClick={() => handleDelete(k.api_key)}
-                        disabled={actionLoading === k.api_key}
-                        className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[rgba(244,63,94,0.15)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--accent-coral)] transition-colors disabled:opacity-40"
-                      >
-                        {actionLoading === k.api_key ? (
-                          <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
-                        ) : (
-                          'Confirm'
-                        )}
-                      </button>
-                      <button
-                        onClick={() => setDeleteConfirm(null)}
-                        disabled={actionLoading === k.api_key}
-                        className="inline-flex items-center rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)]"
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => setDeleteConfirm(k.api_key)}
-                      disabled={actionLoading === k.api_key}
-                      className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[rgba(244,63,94,0.08)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--accent-coral)] transition-colors hover:bg-[rgba(244,63,94,0.15)] disabled:opacity-40"
-                      title="Delete"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={1.5}
-                        stroke="currentColor"
-                        className="h-3 w-3"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
-                        />
-                      </svg>
-                      Delete
-                    </button>
-                  )}
                 </div>
               </div>
             ))}
@@ -420,39 +361,66 @@ export default function APIKeysPage() {
 
       {/* ====== Create Dialog ====== */}
       {showCreate && (
-        <DialogOverlay onClose={closeDialog}>
+        <DialogOverlay onClose={closeDialog} preventOutsideClose={!!createdKey}>
           <div className="w-full max-w-md">
             <h2 className="font-display text-lg font-bold text-[var(--text-primary)]">
               Create API Key
             </h2>
 
             {createdKey ? (
-              <>
-                <p className="mt-2 text-sm text-[var(--text-muted)]">
-                  API key created. Copy it now — it won&apos;t be shown again.
-                </p>
-                <div className="mt-4 flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3">
-                  <code className="flex-1 break-all font-mono text-xs text-[var(--accent-gold)]">
-                    {createdKey}
-                  </code>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(createdKey);
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
-                    className="shrink-0 rounded-[var(--radius-sm)] bg-[var(--accent-gold)]/10 px-2 py-1 text-[10px] font-bold uppercase text-[var(--accent-gold)] transition-colors hover:bg-[var(--accent-gold)]/20"
-                  >
-                    {copied ? 'Copied!' : 'Copy'}
-                  </button>
+              <div className="space-y-4">
+                <div className="rounded-[var(--radius-sm)] border border-amber-500/20 bg-amber-500/10 p-3.5">
+                  <div className="flex gap-2.5">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="var(--accent-gold)"
+                      className="h-5 w-5 shrink-0 mt-0.5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286Zm0 13.036h.008v.008H12v-.008Z"
+                      />
+                    </svg>
+                    <div>
+                      <h4 className="font-display text-xs font-bold uppercase tracking-wider text-[var(--accent-gold)]">
+                        Critical Security Warning
+                      </h4>
+                      <p className="mt-1 text-xs text-[var(--text-muted)] leading-relaxed">
+                        For security reasons, this API key will be shown <strong className="text-[var(--text-primary)]">ONLY ONCE</strong>. You will not be able to retrieve, view, or copy it again after closing this dialog.
+                      </p>
+                    </div>
+                  </div>
                 </div>
+
+                <div className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3">
+                  <div className="flex items-center gap-3">
+                    <code className="flex-1 break-all font-mono text-xs text-[var(--accent-gold)] select-all selection:bg-[var(--accent-gold)]/25">
+                      {createdKey}
+                    </code>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(createdKey);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                      className="shrink-0 rounded-[var(--radius-sm)] bg-[var(--accent-gold)]/10 px-3 py-1.5 text-[10px] font-bold uppercase text-[var(--accent-gold)] transition-colors hover:bg-[var(--accent-gold)]/20"
+                    >
+                      {copied ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
                 <button
                   onClick={closeDialog}
-                  className="mt-6 w-full rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-4 py-2 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)]"
+                  className="mt-2 w-full rounded-[var(--radius-sm)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] py-2 text-xs font-bold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover-more)] uppercase tracking-wider"
                 >
-                  Close
+                  I have copied & saved this key
                 </button>
-              </>
+              </div>
             ) : (
               <>
                 <form
@@ -501,61 +469,6 @@ export default function APIKeysPage() {
           </div>
         </DialogOverlay>
       )}
-
-      {/* ====== Edit Dialog ====== */}
-      {editingKey && (
-        <DialogOverlay onClose={closeDialog}>
-          <div className="w-full max-w-md">
-            <h2 className="font-display text-lg font-bold text-[var(--text-primary)]">
-              Edit API Key
-            </h2>
-            <p className="mt-1 truncate font-mono text-xs text-[var(--text-faint)]">
-              {maskKey(editingKey.api_key)}
-            </p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleEdit();
-              }}
-              className="mt-4 space-y-4"
-            >
-              <Field
-                label="User ID"
-                value={formUserId}
-                onChange={setFormUserId}
-                placeholder="e.g. alice"
-                required
-              />
-              <Field
-                label="Description"
-                value={formDesc}
-                onChange={setFormDesc}
-                placeholder="Optional description"
-              />
-              {formError && (
-                <p className="text-xs text-[var(--accent-coral)]">
-                  {formError}
-                </p>
-              )}
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="submit"
-                  className="flex-1 rounded-[var(--radius-sm)] bg-[var(--accent-gold)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-gold)]/90"
-                >
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={closeDialog}
-                  className="flex-1 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-4 py-2 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)]"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </DialogOverlay>
-      )}
     </div>
   );
 }
@@ -567,31 +480,37 @@ export default function APIKeysPage() {
 function DialogOverlay({
   children,
   onClose,
+  preventOutsideClose = false,
 }: {
   children: React.ReactNode;
   onClose: () => void;
+  preventOutsideClose?: boolean;
 }) {
   useEffect(() => {
+    if (preventOutsideClose) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
+  }, [onClose, preventOutsideClose]);
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-all duration-300"
     >
       <div
-        className="w-full max-w-md rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6 shadow-xl"
+        className="relative w-full max-w-md border border-[var(--border-default)] bg-[var(--bg-glass)] backdrop-blur-xl p-6 rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] transition-all duration-300 transform scale-100 hover:border-[var(--accent-gold)]/20"
         onClick={(e) => e.stopPropagation()}
       >
+        <div className="absolute -inset-px -z-10 rounded-[var(--radius-lg)] opacity-10 blur-sm pointer-events-none transition-all bg-[var(--accent-gold)]" />
         {children}
       </div>
-      <div className="absolute inset-0 -z-10" onClick={onClose} />
+      <div className="absolute inset-0 -z-10" onClick={() => {
+        if (!preventOutsideClose) onClose();
+      }} />
     </div>
   );
 }

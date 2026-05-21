@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -22,6 +23,7 @@ func maskAPIKey(key string) string {
 
 // APIKeyUser represents a mapping from an API key to a user identity.
 type APIKeyUser struct {
+	ID          int64  `json:"id"`
 	APIKey      string `json:"api_key"`
 	UserID      string `json:"user_id"`
 	Description string `json:"description,omitempty"`
@@ -48,7 +50,7 @@ func newAPIKeyUserStoreWithInvalidator(db *sql.DB, inv cacheInvalidator) *apiKey
 
 func (s *apiKeyUserStore) list(ctx context.Context) ([]APIKeyUser, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT api_key, user_id, description, created_at, updated_at FROM api_key_users ORDER BY created_at DESC")
+		"SELECT id, api_key, user_id, description, created_at, updated_at FROM api_key_users ORDER BY created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("admin: list api key users: %w", err)
 	}
@@ -57,7 +59,7 @@ func (s *apiKeyUserStore) list(ctx context.Context) ([]APIKeyUser, error) {
 	var result []APIKeyUser
 	for rows.Next() {
 		var u APIKeyUser
-		if err := rows.Scan(&u.APIKey, &u.UserID, &u.Description, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.APIKey, &u.UserID, &u.Description, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("admin: scan api key user: %w", err)
 		}
 		result = append(result, u)
@@ -65,11 +67,11 @@ func (s *apiKeyUserStore) list(ctx context.Context) ([]APIKeyUser, error) {
 	return result, rows.Err()
 }
 
-func (s *apiKeyUserStore) get(ctx context.Context, apiKey string) (*APIKeyUser, error) {
+func (s *apiKeyUserStore) get(ctx context.Context, id int64) (*APIKeyUser, error) {
 	var u APIKeyUser
 	err := s.db.QueryRowContext(ctx,
-		"SELECT api_key, user_id, description, created_at, updated_at FROM api_key_users WHERE api_key = ?", apiKey,
-	).Scan(&u.APIKey, &u.UserID, &u.Description, &u.CreatedAt, &u.UpdatedAt)
+		"SELECT id, api_key, user_id, description, created_at, updated_at FROM api_key_users WHERE id = ?", id,
+	).Scan(&u.ID, &u.APIKey, &u.UserID, &u.Description, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -85,38 +87,40 @@ func (s *apiKeyUserStore) create(ctx context.Context, u *APIKeyUser) error {
 		u.APIKey = "hpk_" + hex.EncodeToString(key)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(ctx,
 		"INSERT INTO api_key_users (api_key, user_id, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 		u.APIKey, u.UserID, u.Description, now, now)
 	if err != nil {
 		return fmt.Errorf("admin: create api key user: %w", err)
 	}
+	id, _ := res.LastInsertId()
+	u.ID = id
 	return nil
 }
 
-func (s *apiKeyUserStore) update(ctx context.Context, apiKey string, u *APIKeyUser) error {
+func (s *apiKeyUserStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE api_key_users SET user_id = ?, description = ?, updated_at = ? WHERE api_key = ?",
-		u.UserID, u.Description, now, apiKey)
+		"UPDATE api_key_users SET user_id = ?, description = ?, updated_at = ? WHERE id = ?",
+		u.UserID, u.Description, now, id)
 	if err != nil {
 		return fmt.Errorf("admin: update api key user: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("admin: api key user %q not found", apiKey)
+		return fmt.Errorf("admin: api key user ID %d not found", id)
 	}
 	return nil
 }
 
-func (s *apiKeyUserStore) delete(ctx context.Context, apiKey string) error {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM api_key_users WHERE api_key = ?", apiKey)
+func (s *apiKeyUserStore) delete(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM api_key_users WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("admin: delete api key user: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("admin: api key user %q not found", apiKey)
+		return fmt.Errorf("admin: api key user ID %d not found", id)
 	}
 	return nil
 }
@@ -176,8 +180,13 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
 		return
 	}
-	apiKey := r.PathValue("key")
-	u, err := a.akStore.get(r.Context(), apiKey)
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	u, err := a.akStore.get(r.Context(), id)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -191,7 +200,12 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
 		return
 	}
-	apiKey := r.PathValue("key")
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
 	var u APIKeyUser
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&u); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -205,15 +219,23 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 		http.Error(w, "description too long (max 512 chars)", http.StatusBadRequest)
 		return
 	}
-	if err := a.akStore.update(r.Context(), apiKey, &u); err != nil {
+
+	oldUser, err := a.akStore.get(r.Context(), id)
+	if err != nil {
+		a.log.Error("admin: get api key user for update", "error", err)
+		http.Error(w, "api key user not found", http.StatusNotFound)
+		return
+	}
+
+	if err := a.akStore.update(r.Context(), id, &u); err != nil {
 		a.log.Error("admin: update api key user", "error", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	if a.akStore.invalidator != nil {
-		a.akStore.invalidator.Invalidate(apiKey)
+		a.akStore.invalidator.Invalidate(oldUser.APIKey)
 	}
-	respondJSON(w, APIKeyUser{APIKey: apiKey, UserID: u.UserID, Description: u.Description})
+	respondJSON(w, APIKeyUser{ID: id, APIKey: maskAPIKey(oldUser.APIKey), UserID: u.UserID, Description: u.Description})
 }
 
 func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request) {
@@ -221,14 +243,27 @@ func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
 		return
 	}
-	apiKey := r.PathValue("key")
-	if err := a.akStore.delete(r.Context(), apiKey); err != nil {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	u, err := a.akStore.get(r.Context(), id)
+	if err != nil {
+		a.log.Error("admin: get api key user for delete", "error", err)
+		http.Error(w, "api key user not found", http.StatusNotFound)
+		return
+	}
+
+	if err := a.akStore.delete(r.Context(), id); err != nil {
 		a.log.Error("admin: delete api key user", "error", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	if a.akStore.invalidator != nil {
-		a.akStore.invalidator.Invalidate(apiKey)
+		a.akStore.invalidator.Invalidate(u.APIKey)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

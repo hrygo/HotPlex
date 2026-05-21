@@ -90,6 +90,7 @@ export interface CronJob {
 // --- API Key ---
 
 export interface APIKeyUser {
+  id?: number;
   api_key: string;
   user_id: string;
   description?: string;

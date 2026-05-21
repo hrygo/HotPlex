@@ -8,6 +8,7 @@ export default function LoginPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showHelp, setShowHelp] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,6 +118,73 @@ export default function LoginPage() {
               {loading ? 'Connecting...' : 'Connect'}
             </button>
           </form>
+
+          {/* Help Accordion */}
+          <div className="mt-6 pt-4 border-t border-[var(--border-subtle)]">
+            <button
+              type="button"
+              onClick={() => setShowHelp(!showHelp)}
+              className="flex w-full items-center justify-between text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              <span className="flex items-center gap-1.5 font-medium">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.8}
+                  stroke="var(--accent-gold)"
+                  className="h-3.5 w-3.5"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z"
+                  />
+                </svg>
+                How to set or get Admin Token?
+              </span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2.5}
+                stroke="currentColor"
+                className={`h-3 w-3 text-[var(--text-faint)] transition-transform duration-200 ${
+                  showHelp ? 'rotate-180 text-[var(--text-primary)]' : ''
+                }`}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
+
+            {showHelp && (
+              <div className="mt-3.5 space-y-3 text-xs text-[var(--text-muted)] animate-[fadeInScale_0.15s_ease-out] bg-[var(--bg-elevated)]/40 border border-[var(--border-subtle)]/40 p-3.5 rounded-lg leading-relaxed">
+                <p>
+                  The Admin Token is used to authorize connection to your gateway. It is configured inside your backend environment settings:
+                </p>
+                <div className="space-y-2">
+                  <div className="flex gap-2 items-start">
+                    <span className="text-[var(--accent-gold)] font-bold mt-0.5">•</span>
+                    <span>
+                      <strong>Development Mode</strong>: Default value is <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded text-[var(--accent-gold)] border border-[var(--border-subtle)]">admin-token-dev</code>, or read from <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">ADMIN_TOKEN</code> inside local <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">.env</code>.
+                    </span>
+                  </div>
+                  <div className="flex gap-2 items-start">
+                    <span className="text-[var(--accent-gold)] font-bold mt-0.5">•</span>
+                    <span>
+                      <strong>Production Mode</strong>: Configured via numbered environment variables in your gateway host config (e.g. <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_1</code> ... <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_N</code>) inside <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">.env</code> or system configs.
+                    </span>
+                  </div>
+                </div>
+                <div className="pt-2 border-t border-[var(--border-subtle)]/30">
+                  <p className="mb-2 font-medium text-[var(--text-primary)]">Generate a secure token using CLI:</p>
+                  <div className="flex items-center justify-between rounded bg-[var(--bg-hover)] p-2 font-mono text-[10px] text-[var(--text-primary)] border border-[var(--border-subtle)]">
+                    <code className="select-all">openssl rand -base64 32</code>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

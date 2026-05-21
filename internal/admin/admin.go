@@ -102,6 +102,7 @@ type AdminAPI struct {
 	allowedCIDRs  atomic.Value     // []string
 	version       func() string
 	newSessionID  func() string
+	restart       func() error
 	startedAt     time.Time
 }
 
@@ -119,6 +120,7 @@ type Deps struct {
 	LogCollector  LogCollector
 	Version       func() string
 	NewSessionID  func() string
+	Restart       func() error
 	DB            *sql.DB          // Optional: enables API key user CRUD + DB resolver
 	DBResolver    cacheInvalidator // Optional: invalidates DBResolver cache after CUD
 }
@@ -143,6 +145,7 @@ func New(deps Deps) *AdminAPI {
 		akStore:       newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver),
 		version:       deps.Version,
 		newSessionID:  deps.NewSessionID,
+		restart:       deps.Restart,
 		startedAt:     time.Now(),
 	}
 	return a

@@ -294,3 +294,26 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 }
+
+func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminWrite) {
+		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		return
+	}
+	if a.restart == nil {
+		http.Error(w, "restart is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		a.log.Info("admin: initiating gateway restart via helper")
+		if err := a.restart(); err != nil {
+			a.log.Error("admin: restart failed", "err", err)
+		}
+	}()
+
+	respondJSON(w, map[string]any{
+		"status": "restarting",
+	})
+}

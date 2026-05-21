@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,7 +24,8 @@ func setupAPIKeyStore(t *testing.T) (*AdminAPI, func()) {
 
 	// Create table manually (no goose in test).
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS api_key_users (
-		api_key TEXT PRIMARY KEY,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		api_key TEXT NOT NULL UNIQUE,
 		user_id TEXT NOT NULL,
 		description TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL DEFAULT (datetime('now')),
@@ -75,8 +77,8 @@ func TestHandleAPIKeyUserCreateAndGet(t *testing.T) {
 	require.Contains(t, list[0].APIKey, "****", "list should mask API key")
 
 	// Get — key should be masked
-	r = httptest.NewRequest("GET", "/admin/api-keys/{key}", nil)
-	r.SetPathValue("key", created.APIKey)
+	r = httptest.NewRequest("GET", "/admin/api-keys/{id}", nil)
+	r.SetPathValue("id", strconv.FormatInt(created.ID, 10))
 	r = withScope(r, ScopeAdminRead)
 	tw2 := httptest.NewRecorder()
 	api.HandleAPIKeyUserGet(tw2, r)
@@ -101,8 +103,8 @@ func TestHandleAPIKeyUserUpdate(t *testing.T) {
 
 	// Update
 	body = `{"user_id":"alice-updated","description":"updated"}`
-	r = httptest.NewRequest("PATCH", "/admin/api-keys/{key}", strings.NewReader(body))
-	r.SetPathValue("key", created.APIKey)
+	r = httptest.NewRequest("PATCH", "/admin/api-keys/{id}", strings.NewReader(body))
+	r.SetPathValue("id", strconv.FormatInt(created.ID, 10))
 	r = withScope(r, ScopeAdminWrite)
 	tw := httptest.NewRecorder()
 	api.HandleAPIKeyUserUpdate(tw, r)
@@ -124,9 +126,20 @@ func TestHandleAPIKeyUserDelete(t *testing.T) {
 	var created APIKeyUser
 	require.NoError(t, json.NewDecoder(tw.Body).Decode(&created))
 
-	// Delete
-	r = httptest.NewRequest("DELETE", "/admin/api-keys/{key}", nil)
-	r.SetPathValue("key", created.APIKey)
+	// List keys to verify they are present
+	r = httptest.NewRequest("GET", "/admin/api-keys", nil)
+	r = withScope(r, ScopeAdminRead)
+	twList := httptest.NewRecorder()
+	api.HandleAPIKeyUserList(twList, r)
+	require.Equal(t, http.StatusOK, twList.Code)
+	var list []APIKeyUser
+	require.NoError(t, json.NewDecoder(twList.Body).Decode(&list))
+	require.Len(t, list, 1)
+	require.Equal(t, created.ID, list[0].ID)
+
+	// Delete using the ID
+	r = httptest.NewRequest("DELETE", "/admin/api-keys/{id}", nil)
+	r.SetPathValue("id", strconv.FormatInt(created.ID, 10))
 	r = withScope(r, ScopeAdminWrite)
 	tw2 := httptest.NewRecorder()
 	api.HandleAPIKeyUserDelete(tw2, r)
@@ -137,9 +150,9 @@ func TestHandleAPIKeyUserDelete(t *testing.T) {
 	r = withScope(r, ScopeAdminRead)
 	tw3 := httptest.NewRecorder()
 	api.HandleAPIKeyUserList(tw3, r)
-	var list []APIKeyUser
-	require.NoError(t, json.NewDecoder(tw3.Body).Decode(&list))
-	require.Empty(t, list)
+	var list2 []APIKeyUser
+	require.NoError(t, json.NewDecoder(tw3.Body).Decode(&list2))
+	require.Empty(t, list2)
 }
 
 func TestHandleAPIKeyUserCreate_Validation(t *testing.T) {
