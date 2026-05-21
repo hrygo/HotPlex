@@ -30,11 +30,20 @@ type APIKeyUser struct {
 }
 
 type apiKeyUserStore struct {
-	db *sql.DB
+	db          *sql.DB
+	invalidator cacheInvalidator
 }
 
-func newAPIKeyUserStore(db *sql.DB) *apiKeyUserStore {
-	return &apiKeyUserStore{db: db}
+// cacheInvalidator clears cached resolver entries after CUD operations.
+type cacheInvalidator interface {
+	Invalidate(key string)
+}
+
+func newAPIKeyUserStoreWithInvalidator(db *sql.DB, inv cacheInvalidator) *apiKeyUserStore {
+	if db == nil {
+		return nil
+	}
+	return &apiKeyUserStore{db: db, invalidator: inv}
 }
 
 func (s *apiKeyUserStore) list(ctx context.Context) ([]APIKeyUser, error) {
@@ -155,6 +164,9 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 		http.Error(w, "create failed", http.StatusInternalServerError)
 		return
 	}
+	if a.akStore.invalidator != nil {
+		a.akStore.invalidator.Invalidate(u.APIKey)
+	}
 	w.WriteHeader(http.StatusCreated)
 	respondJSON(w, u)
 }
@@ -198,6 +210,9 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	if a.akStore.invalidator != nil {
+		a.akStore.invalidator.Invalidate(apiKey)
+	}
 	respondJSON(w, APIKeyUser{APIKey: apiKey, UserID: u.UserID, Description: u.Description})
 }
 
@@ -212,14 +227,8 @@ func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// newAPIKeyUserStoreFromDB creates an apiKeyUserStore from *sql.DB.
-// Returns nil when db is nil (API key user endpoints return empty/501).
-func newAPIKeyUserStoreFromDB(db *sql.DB) *apiKeyUserStore {
-	if db == nil {
-		return nil
+	if a.akStore.invalidator != nil {
+		a.akStore.invalidator.Invalidate(apiKey)
 	}
-	return newAPIKeyUserStore(db)
+	w.WriteHeader(http.StatusNoContent)
 }

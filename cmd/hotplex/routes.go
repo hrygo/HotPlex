@@ -89,6 +89,7 @@ func setupRoutes(
 		Version:       versionString,
 		NewSessionID:  newSessionID,
 		DB:            deps.DB,
+		DBResolver:    deps.DBResolver,
 	})
 
 	if cfg.Admin.RateLimitEnabled {

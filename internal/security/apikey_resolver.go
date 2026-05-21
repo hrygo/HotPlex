@@ -70,6 +70,11 @@ func NewDBResolver(db *sql.DB) *DBResolver {
 	return &DBResolver{db: db}
 }
 
+// Invalidate removes a cached entry. Called by Admin API after CUD operations.
+func (r *DBResolver) Invalidate(key string) {
+	r.cache.Delete(key)
+}
+
 func (r *DBResolver) Resolve(ctx context.Context, key string) (string, bool) {
 	// Check cache first.
 	if v, ok := r.cache.Load(key); ok {

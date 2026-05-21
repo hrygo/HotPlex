@@ -119,7 +119,8 @@ type Deps struct {
 	LogCollector  LogCollector
 	Version       func() string
 	NewSessionID  func() string
-	DB            *sql.DB // Optional: enables API key user CRUD + DB resolver
+	DB            *sql.DB          // Optional: enables API key user CRUD + DB resolver
+	DBResolver    cacheInvalidator // Optional: invalidates DBResolver cache after CUD
 }
 
 func New(deps Deps) *AdminAPI {
@@ -139,7 +140,7 @@ func New(deps Deps) *AdminAPI {
 		botLister:     deps.BotLister,
 		botConfig:     deps.BotConfig,
 		logCollector:  lc,
-		akStore:       newAPIKeyUserStoreFromDB(deps.DB),
+		akStore:       newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver),
 		version:       deps.Version,
 		newSessionID:  deps.NewSessionID,
 		startedAt:     time.Now(),

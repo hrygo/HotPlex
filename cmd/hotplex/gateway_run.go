@@ -56,6 +56,7 @@ type GatewayDeps struct {
 	CronScheduler   *cron.Scheduler
 	ChatAccessStore *messaging.ChatAccessStore
 	DB              *sql.DB
+	DBResolver      *security.DBResolver
 }
 
 const defaultConfigPath = config.DefaultConfigPath
@@ -191,13 +192,13 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 	auth := security.NewAuthenticator(&cfg.Security, jwtValidator)
 
-	// API key → user identity resolver: DB (Admin API CRUD) takes priority over YAML config.
-	// ChainResolver tries DB first, falls back to config map. Either source may be empty.
+	// API key → user identity resolver: YAML config takes priority over DB (Admin API CRUD).
+	// ChainResolver tries config map first, falls back to DB. Either source may be empty.
 	dbResolver := security.NewDBResolver(stores.session.DB())
 	if len(cfg.ResolvedAPIKeyUsers) > 0 {
 		mapResolver := security.NewMapResolver(cfg.ResolvedAPIKeyUsers)
-		auth.SetKeyResolver(security.NewChainResolver(dbResolver, mapResolver))
-		log.Info("gateway: API key resolver: database → config",
+		auth.SetKeyResolver(security.NewChainResolver(mapResolver, dbResolver))
+		log.Info("gateway: API key resolver: config → database",
 			"mapped_config_keys", len(cfg.ResolvedAPIKeyUsers))
 	} else {
 		auth.SetKeyResolver(dbResolver)
@@ -358,6 +359,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		CronScheduler:   cronScheduler,
 		ChatAccessStore: messaging.NewChatAccessStore(stores.session.DB(), log),
 		DB:              stores.session.DB(),
+		DBResolver:      dbResolver,
 	}
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).
