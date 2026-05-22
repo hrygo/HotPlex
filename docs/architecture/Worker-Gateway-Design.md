@@ -241,7 +241,8 @@ CREATE TABLE sessions (
 | ------- | ----------------------------------------------- | ---------------------------- |
 | Session | `IDLE` 超过 `idle_timeout`（默认 60min）        | → `TERMINATED`，清理 runtime |
 | Session | 总存活超过 `max_lifetime`（默认 24h）           | → `TERMINATED`               |
-| Session | `TERMINATED` 超过 `retention_period`（默认 7d） | → `DELETED`（删除 DB 记录）  |
+| Session | `TERMINATED` cron 类超过 `cron_term_retention`（默认 24h） | → `DELETED`（删除 DB 记录） |
+| Session | `TERMINATED` 其他超过 `term_retention`（默认 7d） | → `DELETED`（删除 DB 记录） |
 
 GC 扫描间隔：60s，后台 goroutine 定期执行。
 

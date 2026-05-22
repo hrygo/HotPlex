@@ -378,6 +378,11 @@ type WorkerCommandData struct {
 }
 
 // ContextUsageData carries context window usage breakdown from a worker.
+// TotalTokens semantics differ by worker:
+//   - Claude Code: total input tokens (including cache) from the last API call.
+//   - OCS: last assistant message's input + cache_read + cache_write.
+//
+// In both cases this represents the actual context window fill, not cumulative totals.
 type ContextUsageData struct {
 	TotalTokens int               `json:"total_tokens"`
 	MaxTokens   int               `json:"max_tokens"`

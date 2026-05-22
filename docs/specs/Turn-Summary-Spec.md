@@ -217,7 +217,7 @@ type TurnSummaryData struct {
     TotalCostUSD   float64
 
     // 额外实现字段
-    ContextFill     int64
+    ContextFill     int64  // 仅从控制通道获取，消除多步 turn 累计膨胀
     TotalOutputTok  int64
     SessionDuration string
     WorkDir         string

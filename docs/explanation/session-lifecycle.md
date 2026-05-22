@@ -184,7 +184,13 @@ IDLE session 的 idle_expires_at = entered_idle_at + IdleTimeout。
 到期后 TERMINATED，回收暂停的 Worker 进程。
 ```
 
-**特别注意**：GC 不执行物理删除（`DELETE FROM sessions`）。TERMINATED 的记录保留作为"resume 决策标志"——它们的存在告诉 Gateway 可以尝试 `--resume` 恢复对话历史。
+**第 3 层：TERMINATED 记录清理**
+```
+TERMINATED session 按 source 差异化保留：
+  cron 类：updated_at ≤ now - cron_term_retention（默认 24h）→ DELETE
+  其他：updated_at ≤ now - term_retention（默认 7d）→ DELETE
+```
+TERMINATED 记录在保留期内作为"resume 决策标志"——它们的存在告诉 Gateway 可以尝试 `--resume` 恢复对话历史。
 
 ### Fast Reconnect 优化
 
