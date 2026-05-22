@@ -16,8 +16,8 @@ type sessionAccumulator struct {
 	TotalCostUSD  float64
 	TotalInput    int64 // cumulative input tokens consumed across turns
 	TotalOutput   int64
-	ContextWindow int64  // from modelUsage.contextWindow (0 = unknown)
-	ContextFill   int64  // latest turn's input_tokens (total including cache, bounded by ContextWindow)
+	ContextWindow int64  // from modelUsage.contextWindow or get_context_usage.maxTokens (0 = unknown)
+	ContextFill   int64  // context window fill from get_context_usage control channel (0 if unavailable)
 	ModelName     string // first model seen
 	StartedAt     time.Time
 	WorkDir       string // session working directory
@@ -58,7 +58,6 @@ func (a *sessionAccumulator) mergePerTurnStats(data events.DoneData) {
 			events.ToInt64(usage["cache_creation_input_tokens"]) +
 			events.ToInt64(usage["cache_read_input_tokens"])
 		a.TotalInput += input
-		a.ContextFill = input
 		a.TotalOutput += events.ToInt64(usage["output_tokens"])
 		a.TotalCacheWrite += events.ToInt64(usage["cache_creation_input_tokens"])
 		a.TotalCacheRead += events.ToInt64(usage["cache_read_input_tokens"])
@@ -68,7 +67,6 @@ func (a *sessionAccumulator) mergePerTurnStats(data events.DoneData) {
 			events.ToInt64(tokens["cache_read"]) +
 			events.ToInt64(tokens["cache_write"])
 		a.TotalInput += input
-		a.ContextFill = input
 		a.TotalOutput += events.ToInt64(tokens["output"])
 		a.TotalCacheWrite += events.ToInt64(tokens["cache_write"])
 		a.TotalCacheRead += events.ToInt64(tokens["cache_read"])
@@ -125,10 +123,11 @@ func (a *sessionAccumulator) resetPerTurn() {
 	a.PerTurnCacheWrite = 0
 	a.PerTurnCacheRead = 0
 	a.TurnDurationMs = 0
+	a.ContextFill = 0
 }
 
-// mergeContextUsage updates ContextFill, ContextWindow, and ModelName from precise worker control data.
-// Called after get_context_usage returns; overrides the aggregated Done event values.
+// mergeContextUsage sets ContextFill, ContextWindow, and ModelName from the worker's
+// get_context_usage control channel response. This is the sole source for ContextFill.
 // Supports partial data: updates ModelName even when MaxTokens is 0 (OCS scenario).
 func (a *sessionAccumulator) mergeContextUsage(cu *events.ContextUsageData) {
 	if cu == nil {
@@ -146,7 +145,7 @@ func (a *sessionAccumulator) mergeContextUsage(cu *events.ContextUsageData) {
 }
 
 // computeContextPct returns context window usage percentage (0-100).
-// Data comes from get_context_usage control channel (precise) or Done event usage (fallback).
+// Returns 0 if either ContextFill or ContextWindow is unset (control channel unavailable).
 func (a *sessionAccumulator) computeContextPct() float64 {
 	if a.ContextWindow <= 0 || a.ContextFill <= 0 {
 		return 0

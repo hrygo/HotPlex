@@ -88,7 +88,7 @@ func TestServerCommanderQueryContextUsage(t *testing.T) {
 
 	resp, err := c.SendControlRequest(context.Background(), "get_context_usage", nil)
 	require.NoError(t, err)
-	require.Equal(t, 400, resp["totalTokens"])
+	require.Equal(t, 100+30+20, resp["totalTokens"], "totalTokens = last message input + cache_read + cache_write")
 	require.Equal(t, "anthropic/claude-sonnet-4", resp["model"])
 	require.Len(t, resp["categories"], 5)
 }
@@ -115,7 +115,7 @@ func TestServerCommanderQueryContextUsageMultipleMessages(t *testing.T) {
 
 	resp, err := c.SendControlRequest(context.Background(), "get_context_usage", nil)
 	require.NoError(t, err)
-	require.Equal(t, 100+200+50+10+5+50+100+25+5+3, resp["totalTokens"])
+	require.Equal(t, 50+5+3, resp["totalTokens"], "totalTokens = last assistant message input + cache_read + cache_write")
 	require.Equal(t, "openai/gpt-4", resp["model"])
 	categories := resp["categories"].([]map[string]any)
 	require.Len(t, categories, 5)

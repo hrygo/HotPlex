@@ -110,11 +110,15 @@ func (c *ServerCommander) queryContextUsage(ctx context.Context) (map[string]any
 		return nil, fmt.Errorf("opencode context query: %w", err)
 	}
 	var totalInput, totalOutput, totalReasoning, totalCacheRead, totalCacheWrite int
+	var lastInput, lastCacheRead, lastCacheWrite int
 	var model string
 	for _, msg := range messages {
 		if msg.Info.Role != "assistant" || msg.Info.Tokens == nil {
 			continue
 		}
+		lastInput = msg.Info.Tokens.Input
+		lastCacheRead = msg.Info.Tokens.Cache.Read
+		lastCacheWrite = msg.Info.Tokens.Cache.Write
 		totalInput += msg.Info.Tokens.Input
 		totalOutput += msg.Info.Tokens.Output
 		totalReasoning += msg.Info.Tokens.Reasoning
@@ -124,9 +128,11 @@ func (c *ServerCommander) queryContextUsage(ctx context.Context) (map[string]any
 			model = msg.Info.Model.ProviderID + "/" + msg.Info.Model.ModelID
 		}
 	}
-	totalTokens := totalInput + totalOutput + totalReasoning + totalCacheRead + totalCacheWrite
+	// Context fill = last assistant message's total input tokens (input + cache read + cache write).
+	// This represents the actual context window usage for the most recent API call.
+	contextFill := lastInput + lastCacheRead + lastCacheWrite
 	return map[string]any{
-		"totalTokens": totalTokens,
+		"totalTokens": contextFill,
 		"maxTokens":   0,
 		"percentage":  0,
 		"model":       model,

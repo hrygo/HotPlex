@@ -174,7 +174,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			acc.computePerTurnDeltas()
 
 			// Query precise context usage from worker via control channel.
-			// Silently falls back to aggregated Done stats on failure.
+			// ContextFill stays 0 on failure — no inflated fallback.
 			if cr, ok := w.(worker.ControlRequester); ok {
 				fetchContextUsage(cr, acc)
 			}
