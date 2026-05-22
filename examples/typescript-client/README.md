@@ -108,7 +108,7 @@ new HotPlexClient(config: ClientConfig)
 |--------|------|----------|---------|-------------|
 | `url` | `string` | ✅ | - | Gateway WebSocket URL (e.g., `ws://localhost:8888`) |
 | `workerType` | `WorkerType` | ✅ | - | Worker type (`CLAUDE_CODE`, `OPENCODE_SERVER`, etc.) |
-| `authToken` | `string` | ❌ | - | API key or JWT token |
+| `authToken` | `string` | ❌ | - | API key for deferred browser auth |
 | `sessionId` | `string` | ❌ | auto | Resume existing session |
 | `reconnect` | `boolean` | ❌ | `true` | Enable auto-reconnection |
 | `reconnectMaxAttempts` | `number` | ❌ | `5` | Max reconnection attempts |
@@ -404,7 +404,7 @@ client.on("error", (data) => {
 Error [UNAUTHORIZED]: Invalid API key
 ```
 
-**Solution**: Check `authToken` matches gateway config:
+**Solution**: Verify `authToken` matches your gateway API key:
 ```typescript
 const client = new HotPlexClient({
   authToken: process.env.HOTPLEX_API_KEY, // Ensure this is set

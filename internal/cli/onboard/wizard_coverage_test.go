@@ -215,7 +215,7 @@ func TestStepWriteEnv(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
 
-	result := stepWriteConfig(envPath, "jwt-secret", "admin-token",
+	result := stepWriteConfig(envPath, "admin-token",
 		messagingPlatformConfig{}, messagingPlatformConfig{}, false, WizardOptions{})
 
 	require.Equal(t, "pass", result.Status)
@@ -223,15 +223,13 @@ func TestStepWriteEnv(t *testing.T) {
 	data, err := os.ReadFile(envPath)
 	require.NoError(t, err)
 	content := string(data)
-	require.Contains(t, content, "HOTPLEX_JWT_SECRET=jwt-secret")
 	require.Contains(t, content, "HOTPLEX_ADMIN_TOKEN_1=admin-token")
 }
 
 // ─── buildEnvContent ─────────────────────────────────────────────────────────
 
 func TestBuildEnvContent_NoPlatforms(t *testing.T) {
-	content := buildEnvContent("secret", "token", messagingPlatformConfig{}, messagingPlatformConfig{}, "")
-	require.Contains(t, content, "HOTPLEX_JWT_SECRET=secret")
+	content := buildEnvContent("token", messagingPlatformConfig{}, messagingPlatformConfig{}, "")
 	require.Contains(t, content, "HOTPLEX_ADMIN_TOKEN_1=token")
 	require.NotContains(t, content, "SLACK_ENABLED")
 	require.NotContains(t, content, "FEISHU_ENABLED")
@@ -242,7 +240,7 @@ func TestBuildEnvContent_WithSlack(t *testing.T) {
 		enabled:     true,
 		credentials: map[string]string{"HOTPLEX_MESSAGING_SLACK_BOT_TOKEN": "xoxb-123"},
 	}
-	content := buildEnvContent("secret", "token", slackCfg, messagingPlatformConfig{}, "")
+	content := buildEnvContent("token", slackCfg, messagingPlatformConfig{}, "")
 	require.Contains(t, content, "HOTPLEX_MESSAGING_SLACK_ENABLED=true")
 	require.Contains(t, content, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=xoxb-123")
 }
@@ -253,7 +251,7 @@ func TestBuildEnvContent_KeptPlatform(t *testing.T) {
 	require.NoError(t, os.WriteFile(envPath, []byte("HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=xoxb-existing\n"), 0o600))
 
 	slackCfg := messagingPlatformConfig{enabled: true, kept: true, credentials: map[string]string{}}
-	content := buildEnvContent("secret", "token", slackCfg, messagingPlatformConfig{}, envPath)
+	content := buildEnvContent("token", slackCfg, messagingPlatformConfig{}, envPath)
 	require.Contains(t, content, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=xoxb-existing")
 }
 

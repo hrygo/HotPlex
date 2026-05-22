@@ -16,7 +16,7 @@ description: 基于 AEP v1 协议的 HotPlex Worker Gateway Go 客户端 SDK 完
 go get github.com/hrygo/hotplex/client
 ```
 
-依赖：`gorilla/websocket`（WebSocket）、`golang-jwt/jwt/v5`（Token 生成）。
+依赖：`gorilla/websocket`（WebSocket）。
 
 ## 快速开始
 
@@ -90,7 +90,7 @@ func main() {
 c, err := client.New(ctx,
     client.URL("ws://localhost:8888"),              // 必填：Gateway WebSocket 地址
     client.WorkerType("claude_code"),                // 必填：Worker 类型
-    client.AuthToken("eyJ..."),                      // JWT Bearer token（可选）
+    client.BotID("bot-123"),                         // Bot ID for multi-bot setups
     client.APIKey("ak-xxx"),                         // X-API-Key header（可选）
     client.AutoReconnect(true),                      // 启用指数退避自动重连
     client.PingInterval(54*time.Second),             // 心跳间隔（默认 54s）
@@ -285,26 +285,18 @@ for evt := range ch {
 }
 ```
 
-## Token 生成
+## Bot ID（多 Bot 设置）
 
-SDK 内置 `TokenGenerator`，用于生成 ES256 JWT 认证令牌：
+在多 Bot 环境中，使用 `BotID` 选项指定目标 Bot：
 
 ```go
-tg, err := client.NewTokenGenerator("path/to/key.pem")
-if err != nil {
-    log.Fatal(err)
-}
-
-tg.WithBotID("B12345").WithAudience("gateway")
-
-token, err := tg.Generate(
-    "user-1",                                     // subject
-    []string{"session:create", "session:write"},  // scopes
-    1*time.Hour,                                  // TTL
+c, err := client.New(ctx,
+    client.URL("ws://localhost:8888"),
+    client.WorkerType("claude_code"),
+    client.APIKey("ak-xxx"),
+    client.BotID("bot-123"),   // 指定 Bot ID
 )
 ```
-
-支持三种密钥格式：PEM 文件路径、64 位 hex 字符串、44 位 base64 字符串。
 
 ## 完整示例
 

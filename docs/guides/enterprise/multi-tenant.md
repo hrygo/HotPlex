@@ -6,7 +6,7 @@ description: Per-bot isolation, access control, and resource quotas for multi-te
 
 # Multi-Tenant Isolation Guide
 
-> 面向企业多团队/多 Bot 场景的 HotPlex 租户隔离方案。涵盖 Agent 配置隔离、JWT 路由、Session 配额和访问控制策略。
+> 面向企业多团队/多 Bot 场景的 HotPlex 租户隔离方案。涵盖 Agent 配置隔离、Bot ID 路由、Session 配额和访问控制策略。
 
 ---
 
@@ -17,7 +17,7 @@ HotPlex 采用 **Bot-centric 隔离模型**：每个 Bot（Slack Bot / Feishu Ap
 | 隔离层 | 机制 | 范围 |
 |--------|------|------|
 | 配置隔离 | 3-level Agent Config fallback | Bot 级别 |
-| 路由隔离 | JWT `bot_id` claim | 请求级别 |
+| 路由隔离 | `X-Bot-ID` Header | 请求级别 |
 | 工作目录隔离 | Per-bot `work_dir` | 进程级别 |
 | 资源隔离 | Per-user Session/Memory 配额 | 用户级别 |
 | 访问控制 | DM/Group policy + allowlist | 平台级别 |
@@ -56,25 +56,26 @@ agent-configs/
 
 ---
 
-## 3. JWT bot_id 路由隔离
+## 3. Bot ID 路由隔离
 
-JWT Token 包含 `bot_id` claim，网关在请求处理时强制校验：
+通过 `X-Bot-ID` Header 或 `bot_id` 查询参数指定 Bot 身份，网关在请求处理时强制校验：
 
 ```
-JWT Claims:
-  iss: "hotplex"
-  sub: "user_id"
-  bot_id: "U12345"      ← 路由隔离关键字段
-  user_id: "U12345"
-  session_id: "..."
-  role: "user"
-  scopes: ["session:read", "session:write"]
+请求 Header:
+  X-API-Key: your-api-key
+  X-Bot-ID: U12345      ← 路由隔离关键字段
+```
+
+或通过查询参数：
+
+```
+ws://localhost:8888/ws?api_key=your-api-key&bot_id=U12345
 ```
 
 **隔离规则**：
 - `bot_id` 必须与 Session 所属 Bot **精确匹配**
 - 跨 Bot 操作被硬拒绝，返回 `403 Forbidden`
-- 每个 Bot 独立的 ES256 密钥对，共享 JWT Secret 但 bot_id 互斥
+- 使用 `security.BotIDFromRequest(r)` 提取 Bot ID
 
 ---
 

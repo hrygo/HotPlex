@@ -45,7 +45,7 @@ func LoadConfigAndClient(configPath string) (*config.Config, *slack.Client, erro
 
 	loadEnvFile(filepath.Dir(configPath))
 
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load config: %w", err)
 	}

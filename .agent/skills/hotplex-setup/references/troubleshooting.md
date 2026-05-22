@@ -148,7 +148,6 @@ hotplex service restart
 
 | checker | 问题 | 修复 |
 |---------|------|------|
-| `jwt_strength` | JWT secret 太弱 | `openssl rand -base64 48` 重新生成 |
 | `admin_token` | 弱默认值 | 替换为强随机值 |
 | `env_in_git` | .env 被 git 追踪 | `git rm --cached .env` |
 

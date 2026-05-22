@@ -56,7 +56,7 @@ from hotplex_client import HotPlexClient, WorkerType
 client = HotPlexClient(
     url="ws://localhost:8888",                    # 必填：Gateway WebSocket 地址
     worker_type=WorkerType.CLAUDE_CODE,           # 必填：Worker 类型
-    auth_token="eyJ...",                          # JWT 认证（可选）
+    auth_token="your-api-key",                         # API Key 认证（可选）
     session_id="sess_xxxx",                       # 恢复已有 session（可选）
     config={"model": "sonnet"},                   # Worker 配置覆盖（可选）
 )
@@ -225,7 +225,7 @@ session_id = await transport.connect(
     url="ws://localhost:8888",
     worker_type=WorkerType.CLAUDE_CODE,
     session_id=None,        # 恢复已有 session
-    auth_token=None,        # JWT 认证
+    auth_token=None,        # API Key 认证
     config=None,            # Worker 配置
 )
 
@@ -297,7 +297,7 @@ try:
     async with HotPlexClient(
         url="ws://localhost:8888",
         worker_type=WorkerType.CLAUDE_CODE,
-        auth_token="your-jwt-token",
+        auth_token="your-api-key",
     ) as client:
         await client.send_input("hello")
         result = await client.wait_for_done(timeout=120)

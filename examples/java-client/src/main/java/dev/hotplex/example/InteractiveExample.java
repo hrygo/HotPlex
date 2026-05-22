@@ -2,7 +2,6 @@ package dev.hotplex.example;
 
 import dev.hotplex.client.HotPlexClient;
 import dev.hotplex.protocol.*;
-import dev.hotplex.security.JwtTokenGenerator;
 
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
@@ -21,7 +20,8 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * Environment Variables:
  * HOTPLEX_GATEWAY_URL - Gateway URL (default: ws://localhost:8888)
- * HOTPLEX_SIGNING_KEY - JWT signing key (required)
+ * HOTPLEX_API_KEY     - Gateway API key (required)
+ * HOTPLEX_BOT_ID      - Bot ID for multi-bot isolation (optional)
  */
 public class InteractiveExample {
 
@@ -35,16 +35,15 @@ public class InteractiveExample {
 
         // Configuration from environment
         String gatewayUrl = getEnvOrDefault("HOTPLEX_GATEWAY_URL", DEFAULT_GATEWAY_URL);
-        String signingKey = requireEnv("HOTPLEX_SIGNING_KEY");
-
-        // Create JWT token generator
-        JwtTokenGenerator tokenGenerator = new JwtTokenGenerator(signingKey, "hotplex");
+        String apiKey = requireEnv("HOTPLEX_API_KEY");
+        String botId = System.getenv("HOTPLEX_BOT_ID");
 
         // Create client
         HotPlexClient client = HotPlexClient.builder()
                 .url(gatewayUrl)
                 .workerType("claude-code")
-                .tokenGenerator(tokenGenerator)
+                .apiKey(apiKey)
+                .botId(botId)
                 .build();
 
         // Setup event handlers
@@ -159,7 +158,7 @@ public class InteractiveExample {
         String value = System.getenv(name);
         if (value == null || value.isEmpty()) {
             System.err.println("Error: " + name + " environment variable is required");
-            System.err.println("Example: export " + name + "=your-256-bit-secret-key-min-32-chars");
+            System.err.println("Example: export " + name + "=your-api-key");
             System.exit(1);
         }
         return value;

@@ -220,7 +220,7 @@ hotplex doctor --json              # JSON 输出（用于脚本集成）
 
 ### `hotplex security`
 
-对 HotPlex 配置运行安全审计。检查 TLS 设置、SSRF 防护、JWT 配置和访问策略。
+对 HotPlex 配置运行安全审计。检查 TLS 设置、SSRF 防护和访问策略。
 
 **示例**：
 
@@ -251,13 +251,11 @@ hotplex security --json            # JSON 输出
 ```bash
 hotplex config validate                        # 验证默认配置
 hotplex config validate -c /path/to/config.yaml
-hotplex config validate --strict               # 同时检查密钥配置
 ```
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
 | `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
-| `--strict` | | `bool` | `false` | 严格模式，同时验证必需的密钥（JWT、Admin Token 等）是否已设置 |
 
 ---
 

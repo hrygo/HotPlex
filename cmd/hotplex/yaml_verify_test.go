@@ -22,7 +22,7 @@ func TestEmbeddedConfigYAMLIntegrity(t *testing.T) {
 		"broadcast_queue_size: 256", "rate_limit_enabled: true",
 		"wal_mode: true", "busy_timeout: 5s",
 		"api_key_header:", "tls_enabled: false",
-		"jwt_audience:", "retention_period: 168h", "gc_scan_interval: 1m",
+		"retention_period: 168h", "gc_scan_interval: 1m",
 		"max_concurrent: 1000", "min_size: 0", "max_size: 100", "max_idle_per_user: 5",
 		"max_memory_per_user: 3221225472",
 		"max_lifetime: 24h", "execution_timeout: 30m",

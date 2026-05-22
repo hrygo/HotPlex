@@ -1,12 +1,12 @@
 # Config Package
 
 ## OVERVIEW
-Central configuration via Viper + YAML with config inheritance, secrets provider chain, hot-reload watcher with audit log and rollback, and atomic ConfigStore with observer pattern.
+Central configuration via Viper + YAML with config inheritance, HOTPLEX_* environment variables (AutomaticEnv), hot-reload watcher with audit log and rollback, and atomic ConfigStore with observer pattern.
 
 ## STRUCTURE
 ```
 config/
-  config.go          # Config struct (20+ sub-configs), Load, Validate, SecretsProvider chain, path normalization (923 lines)
+  config.go          # Config struct (20+ sub-configs), Load, Validate, path normalization (923 lines)
   store.go           # ConfigStore: atomic Pointer[Config], Observer registration, Swap/Get
   watcher.go         # Watcher: fsnotify debounce, diffConfigs, hot/static change split, audit trail, rollback
   paths_unix.go      # DataDir/LogDir/PIDDir for Linux/macOS
@@ -18,7 +18,7 @@ config/
 |------|----------|-------|
 | Add config field | `config.go` Config struct | Add field + mapstructure tag + default in `applyDefaults()` |
 | Config inheritance | `config.go` Load | `Inherits` field → recursive merge with cycle detection |
-| Secrets loading | `config.go` SecretsProvider | EnvSecretsProvider (HOTPLEX_*) → ChainedSecretsProvider |
+| Secrets loading | `config.go` Load | Viper AutomaticEnv binds HOTPLEX_* env vars |
 | Hot reload | `watcher.go` Watcher | fsnotify → debounce 500ms → diffConfigs → hot/static split |
 | Audit trail | `watcher.go` ConfigChange | Field-level diff with old/new values, hot flag |
 | Rollback | `watcher.go` Rollback() | History ring buffer, latestIdx tracking |
@@ -31,7 +31,7 @@ config/
 
 **Config hierarchy**: `Config` contains 12 sub-configs (Gateway, DB, Worker, Security, Session, Pool, Log, Admin, WebChat, Messaging, AgentConfig, Skills). Each has mapstructure tags for Viper binding.
 
-**Secrets provider chain**: `EnvSecretsProvider` reads HOTPLEX_* env vars → `ChainedSecretsProvider` tries multiple providers in order. JWT secret never from config file (mapstructure:"-").
+**Environment variables**: Viper AutomaticEnv binds all HOTPLEX_* prefixed environment variables. Secrets (API keys, tokens) must be provided via env vars, never committed to YAML.
 
 **Hot reload flow**: fsnotify event → debounce timer → reload() → Load() → Validate() → diffConfigs() → split hot/static → apply via ConfigStore.Swap() → notify observers. Static changes logged but not applied (require restart).
 
@@ -41,7 +41,7 @@ config/
 
 ## ANTI-PATTERNS
 - ❌ Read config without ConfigStore.Get() — direct field access bypasses atomic updates
-- ❌ Add secrets to YAML config — use SecretsProvider or env vars only
+- ❌ Add secrets to YAML config — use HOTPLEX_* environment variables only
 - ❌ Skip Validate() after Load — invalid configs silently accepted
 - ❌ Hot-reload static fields (addr, db.path) — they require restart
 - ❌ Forget `mapstructure:"-"` for sensitive fields — they'd appear in config dump

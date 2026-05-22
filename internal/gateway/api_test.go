@@ -175,7 +175,7 @@ func (m *mockTurnsStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Tim
 
 func newTestAuth(t *testing.T) *security.Authenticator {
 	t.Helper()
-	return security.NewAuthenticator(&config.SecurityConfig{}, nil)
+	return security.NewAuthenticator(&config.SecurityConfig{})
 }
 
 func newTestAPI(t *testing.T, sm *mockAPISM, bridge *mockAPIBridge) *GatewayAPI {

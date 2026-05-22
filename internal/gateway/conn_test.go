@@ -2,9 +2,6 @@ package gateway
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -19,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
-	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/noop"
@@ -518,15 +514,11 @@ func (m *mockSessionStoreForBotID) Close() error {
 	return args.Error(0)
 }
 
-// makeInitEnvelope builds a init Envelope for the given session, workerType, and optional JWT token.
-func makeInitEnvelope(sessionID, workerType, token string) []byte {
+func makeInitEnvelope(sessionID, workerType string) []byte {
 	data := map[string]any{
 		"version":     events.Version,
 		"worker_type": workerType,
 		"session_id":  sessionID,
-	}
-	if token != "" {
-		data["auth"] = map[string]any{"token": token}
 	}
 	env := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Init, data)
 	env.SessionID = sessionID
@@ -580,14 +572,6 @@ var expandedSafeTestWorkDir = func() string {
 	return expanded
 }()
 
-// newECDSAKey generates a fresh P-256 ECDSA key pair for ES256 JWT signing in tests.
-func newECDSAKey(t *testing.T) *ecdsa.PrivateKey {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-	return key
-}
-
 // TestBotIDIsolation_CreateMismatch tests that creating a new session with bot_id=bot_001
 // and then resuming it with bot_id=bot_002 is rejected with ErrCodeUnauthorized.
 // This is the SEC-007 cross-bot access rejection at resume time.
@@ -600,21 +584,6 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	)
 	// Derive the server session ID using the same algorithm as conn.go:DeriveSessionKey.
 	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
-
-	// Build a JWT token for bot_alice using ES256 (ECDSA P-256).
-	jwtKey := newECDSAKey(t)
-	jwtVal := security.NewJWTValidator(jwtKey, "")
-	tokenAlice, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
-		UserID: "alice",
-		BotID:  botAlice,
-	})
-	require.NoError(t, err)
-
-	tokenBob, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
-		UserID: "alice",
-		BotID:  botBob,
-	})
-	require.NoError(t, err)
 
 	// Phase 1: client A connects with bot_alice token and creates a session.
 	store1 := new(mockSessionStoreForBotID)
@@ -636,6 +605,8 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr1.Close() })
 
+	handler1 := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h1, SM: mgr1})
+
 	var serverConn1 *websocket.Conn
 	var mu1 sync.Mutex
 	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -647,8 +618,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 		mu1.Unlock()
 		go func() {
 			c := newBotIDTestConn(h1, conn, derivedSID, "alice", botAlice)
-			h := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h1, SM: mgr1, JWTValidator: jwtVal})
-			c.ReadPump(h)
+			c.ReadPump(handler1)
 		}()
 	}))
 	t.Cleanup(server1.Close)
@@ -666,7 +636,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Client A sends init with bot_alice token → should succeed (new session).
-	init1 := makeInitEnvelope(sessionIDConst, workerType, tokenAlice)
+	init1 := makeInitEnvelope(sessionIDConst, workerType)
 	resp1, err := sendWSInit(client1, init1)
 	require.NoError(t, err)
 	require.Contains(t, string(resp1), `"type":"init_ack"`, "bot_alice create should succeed")
@@ -701,6 +671,8 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr2.Close() })
 
+	handler2 := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h2, SM: mgr2})
+
 	var serverConn2 *websocket.Conn
 	var mu2 sync.Mutex
 	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -712,8 +684,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 		mu2.Unlock()
 		go func() {
 			c := newBotIDTestConn(h2, conn, derivedSID, "alice", botBob)
-			h := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h2, SM: mgr2, JWTValidator: jwtVal})
-			c.ReadPump(h)
+			c.ReadPump(handler2)
 		}()
 	}))
 	t.Cleanup(server2.Close)
@@ -730,7 +701,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Client B sends init with bot_bob token for the same session → should be rejected.
-	init2 := makeInitEnvelope(sessionIDConst, workerType, tokenBob)
+	init2 := makeInitEnvelope(sessionIDConst, workerType)
 	resp2, err := sendWSInit(client2, init2)
 	require.NoError(t, err)
 	require.Contains(t, string(resp2), `"type":"init_ack"`) // init_ack is always sent, but contains error
@@ -745,14 +716,6 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 		botID          = "bot_team_a"
 	)
 	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
-
-	jwtKey := newECDSAKey(t)
-	jwtVal := security.NewJWTValidator(jwtKey, "")
-	token, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
-		UserID: "user1",
-		BotID:  botID,
-	})
-	require.NoError(t, err)
 
 	store := new(mockSessionStoreForBotID)
 	store.Test(t)
@@ -775,6 +738,7 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, nil, store)
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Close() })
+	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hubForTest, SM: mgr})
 
 	var serverConn *websocket.Conn
 	var mu sync.Mutex
@@ -787,7 +751,6 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 		mu.Unlock()
 		go func() {
 			c := newBotIDTestConn(hubForTest, conn, derivedSID, "user1", botID)
-			handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hubForTest, SM: mgr, JWTValidator: jwtVal})
 			c.ReadPump(handler)
 		}()
 	}))
@@ -804,7 +767,7 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 		return ok
 	}, 2*time.Second, 10*time.Millisecond)
 
-	init := makeInitEnvelope(sessionIDConst, workerType, token)
+	init := makeInitEnvelope(sessionIDConst, workerType)
 	resp, err := sendWSInit(client, init)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)
@@ -828,9 +791,6 @@ func TestUserIDOwnership_MismatchRejected(t *testing.T) {
 	// to simulate a key collision or direct UUID lookup scenario.
 	derivedSIDBob := session.DeriveSessionKey("bob", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
 
-	jwtKey := newECDSAKey(t)
-	jwtVal := security.NewJWTValidator(jwtKey, "")
-
 	// Session exists, owned by "alice".
 	existingSession := &session.SessionInfo{
 		ID:         derivedSIDAlice,
@@ -841,11 +801,6 @@ func TestUserIDOwnership_MismatchRejected(t *testing.T) {
 	}
 
 	// "bob" tries to reconnect to alice's session.
-	tokenBob, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
-		UserID: "bob",
-		BotID:  botID, // same bot_id — should not bypass user check
-	})
-	require.NoError(t, err)
 
 	store := new(mockSessionStoreForBotID)
 	store.Test(t)
@@ -861,6 +816,7 @@ func TestUserIDOwnership_MismatchRejected(t *testing.T) {
 	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, nil, store)
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Close() })
+	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hubForTest, SM: mgr})
 
 	var serverConn *websocket.Conn
 	var mu sync.Mutex
@@ -874,7 +830,6 @@ func TestUserIDOwnership_MismatchRejected(t *testing.T) {
 		go func() {
 			// Bob connects, same bot_id as alice's session.
 			c := newBotIDTestConn(hubForTest, conn, derivedSIDBob, "bob", botID)
-			handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hubForTest, SM: mgr, JWTValidator: jwtVal})
 			c.ReadPump(handler)
 		}()
 	}))
@@ -892,7 +847,7 @@ func TestUserIDOwnership_MismatchRejected(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Bob sends init to reconnect to alice's session → should be rejected.
-	initMsg := makeInitEnvelope(sessionIDConst, workerType, tokenBob)
+	initMsg := makeInitEnvelope(sessionIDConst, workerType)
 	resp, err := sendWSInit(client, initMsg)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)
@@ -908,14 +863,6 @@ func TestUserIDOwnership_MatchAllowed(t *testing.T) {
 		botID          = "bot_team"
 	)
 	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
-
-	jwtKey := newECDSAKey(t)
-	jwtVal := security.NewJWTValidator(jwtKey, "")
-	token, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
-		UserID: "alice",
-		BotID:  botID,
-	})
-	require.NoError(t, err)
 
 	existingSession := &session.SessionInfo{
 		ID:         derivedSID,
@@ -939,6 +886,7 @@ func TestUserIDOwnership_MatchAllowed(t *testing.T) {
 	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, nil, store)
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Close() })
+	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hubForTest, SM: mgr})
 
 	var serverConn *websocket.Conn
 	var mu sync.Mutex
@@ -951,7 +899,6 @@ func TestUserIDOwnership_MatchAllowed(t *testing.T) {
 		mu.Unlock()
 		go func() {
 			c := newBotIDTestConn(hubForTest, conn, derivedSID, "alice", botID)
-			handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hubForTest, SM: mgr, JWTValidator: jwtVal})
 			c.ReadPump(handler)
 		}()
 	}))
@@ -968,7 +915,7 @@ func TestUserIDOwnership_MatchAllowed(t *testing.T) {
 		return ok
 	}, 2*time.Second, 10*time.Millisecond)
 
-	initMsg := makeInitEnvelope(sessionIDConst, workerType, token)
+	initMsg := makeInitEnvelope(sessionIDConst, workerType)
 	resp, err := sendWSInit(client, initMsg)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)
@@ -976,7 +923,6 @@ func TestUserIDOwnership_MatchAllowed(t *testing.T) {
 }
 
 // TestUserIDOwnership_EmptyConnectionUserID_Allowed tests that when the connection has
-// no userID (anonymous, no JWT) but the session is owned by a named user, the SEC-008
 // check is bypassed — allowing anonymous reconnects to named-user sessions.
 // This is intentional: either side being empty means ownership cannot be verified,
 // so the check is skipped (backward compatibility with anonymous access).
@@ -1023,7 +969,6 @@ func TestUserIDOwnership_EmptyConnectionUserID_Allowed(t *testing.T) {
 		serverConn = conn
 		mu.Unlock()
 		go func() {
-			// Empty userID (no JWT) — SEC-008 check should be bypassed.
 			c := newBotIDTestConn(hubForTest, conn, derivedSIDEmpty, "", botID)
 			handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hubForTest, SM: mgr})
 			c.ReadPump(handler)
@@ -1043,7 +988,7 @@ func TestUserIDOwnership_EmptyConnectionUserID_Allowed(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// No auth token → empty userID → SEC-008 bypassed → should succeed.
-	initMsg := makeInitEnvelope(sessionIDConst, workerType, "")
+	initMsg := makeInitEnvelope(sessionIDConst, workerType)
 	resp, err := sendWSInit(client, initMsg)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)
@@ -1057,10 +1002,8 @@ func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 		sessionIDConst = "sess_no_bot"
 		workerType     = "claude-code"
 	)
-	// When no JWT is provided, c.userID defaults to "anon" (from newBotIDTestConn).
 	derivedSID := session.DeriveSessionKey("anon", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
 
-	// No JWT token (empty botID scenario).
 	store := new(mockSessionStoreForBotID)
 	store.Test(t)
 	store.On("Close").Return(nil).Maybe()
@@ -1107,7 +1050,7 @@ func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// No auth token → empty bot_id → should succeed.
-	init := makeInitEnvelope(sessionIDConst, workerType, "")
+	init := makeInitEnvelope(sessionIDConst, workerType)
 	resp, err := sendWSInit(client, init)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)
@@ -1123,14 +1066,6 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 		botID          = "bot_new_session"
 	)
 	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
-
-	jwtKey := newECDSAKey(t)
-	jwtVal := security.NewJWTValidator(jwtKey, "")
-	token, err := jwtVal.GenerateTokenWithClaims(&security.JWTClaims{
-		UserID: "user1",
-		BotID:  botID,
-	})
-	require.NoError(t, err)
 
 	store := new(mockSessionStoreForBotID)
 	store.Test(t)
@@ -1152,6 +1087,7 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, nil, store)
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Close() })
+	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h, SM: mgr})
 
 	var serverConn *websocket.Conn
 	var mu sync.Mutex
@@ -1164,7 +1100,6 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 		mu.Unlock()
 		go func() {
 			c := newBotIDTestConn(h, conn, derivedSID, "user1", botID)
-			handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h, SM: mgr, JWTValidator: jwtVal})
 			c.ReadPump(handler)
 		}()
 	}))
@@ -1181,7 +1116,7 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 		return ok
 	}, 2*time.Second, 10*time.Millisecond)
 
-	init := makeInitEnvelope(sessionIDConst, workerType, token)
+	init := makeInitEnvelope(sessionIDConst, workerType)
 	resp, err := sendWSInit(client, init)
 	require.NoError(t, err)
 	require.Contains(t, string(resp), `"type":"init_ack"`)

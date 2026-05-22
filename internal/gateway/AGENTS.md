@@ -58,7 +58,7 @@ testutil/       # WebSocket mock helpers for tests
 
 **GatewayAPI (api.go)**
 - HTTP REST endpoints for session management alongside WebSocket
-- Auth via `security.Authenticator` (JWT + API key)
+- Auth via `security.Authenticator` (API key + Bot ID header)
 - ListSessions, GetSession, TerminateSession handlers
 
 **Backpressure**

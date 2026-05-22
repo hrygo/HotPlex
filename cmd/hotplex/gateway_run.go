@@ -142,7 +142,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	var configWatcher *config.Watcher
 	if configPath != "" {
-		configWatcher = config.NewWatcher(log, configPath, nil, cfgStore,
+		configWatcher = config.NewWatcher(log, configPath, cfgStore,
 			func(newCfg *config.Config) {
 				log.Info("config: hot reload applied",
 					"gateway_addr", newCfg.Gateway.Addr,
@@ -188,11 +188,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		_ = hub.SendToSession(ctx, env)
 	}
 
-	var jwtValidator *security.JWTValidator
-	if len(cfg.Security.JWTSecret) > 0 {
-		jwtValidator = security.NewJWTValidator(cfg.Security.JWTSecret, cfg.Security.JWTAudience)
-	}
-	auth := security.NewAuthenticator(&cfg.Security, jwtValidator)
+	auth := security.NewAuthenticator(&cfg.Security)
 
 	// API key → user identity resolver: YAML config takes priority over DB (Admin API CRUD).
 	// ChainResolver tries config map first, falls back to DB. Either source may be empty.
@@ -238,7 +234,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Hub:           hub,
 		SM:            sm,
 		Auth:          auth,
-		JWTValidator:  jwtValidator,
 		Bridge:        bridge,
 		SkillsLocator: skillsLocator,
 	})
@@ -484,11 +479,11 @@ loop:
 			if err != nil {
 				log.Error("gateway: server failed, exiting", "err", err)
 				cancel()
-				shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, jwtValidator, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+				shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
 				return err
 			}
 			cancel()
-			shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, jwtValidator, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+			shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
 			return nil
 		case <-stopCh:
 			log.Info("gateway: shutdown", "signal", "stopCh")
@@ -497,7 +492,7 @@ loop:
 	}
 
 	cancel()
-	shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, jwtValidator, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+	shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
 	return nil
 }
 
@@ -632,7 +627,6 @@ func shutdownGateway(
 	msgAdapters []messaging.PlatformAdapterInterface,
 	server *http.Server,
 	adminServer *http.Server,
-	jwtValidator *security.JWTValidator,
 	skillsLocator *skills.Locator,
 	pidTracker *proc.Tracker,
 	cleanupWG *sync.WaitGroup,
@@ -684,10 +678,6 @@ func shutdownGateway(
 
 	deps.Bridge.Shutdown(shutdownCtx)
 
-	if jwtValidator != nil {
-		jwtValidator.Stop()
-	}
-
 	cleanupWG.Wait()
 	pidTracker.RemoveAll()
 
@@ -728,7 +718,7 @@ func loadConfig(configPath string, devMode bool) (*config.Config, error) {
 
 	loadEnvFile(filepath.Dir(absPath))
 
-	cfg, err := config.Load(absPath, config.LoadOptions{})
+	cfg, err := config.Load(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("config: load %q: %w", absPath, err)
 	}

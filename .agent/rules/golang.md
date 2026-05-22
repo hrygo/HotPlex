@@ -21,7 +21,6 @@ paths:
 type GatewayDeps struct {
     Hub          *gateway.Hub
     SM           *session.Manager
-    JWTValidator *security.JWTValidator
     Bridge       *gateway.Bridge
 }
 

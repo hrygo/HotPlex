@@ -5,9 +5,6 @@ package e2e_test
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -290,16 +286,14 @@ func (m *mockStore) Close() error {
 // ─── Test Gateway Setup ─────────────────────────────────────────────────────
 
 type testGateway struct {
-	server   *httptest.Server
-	hub      *gateway.Hub
-	sm       *session.Manager
-	bridge   *gateway.Bridge
-	cfg      *config.Config
-	store    *mockStore
-	log      *slog.Logger
-	cancel   context.CancelFunc
-	jwtKey   *ecdsa.PrivateKey
-	jwtValid *security.JWTValidator
+	server *httptest.Server
+	hub    *gateway.Hub
+	sm     *session.Manager
+	bridge *gateway.Bridge
+	cfg    *config.Config
+	store  *mockStore
+	log    *slog.Logger
+	cancel context.CancelFunc
 }
 
 func setupTestGateway(t *testing.T) *testGateway {
@@ -317,10 +311,6 @@ func setupTestGateway(t *testing.T) *testGateway {
 	cfg.Pool.MaxSize = 20
 	cfg.Pool.MaxIdlePerUser = 10
 	cfg.Pool.MaxMemoryPerUser = 0
-
-	// Generate ES256 key for JWT testing.
-	jwtKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	jwtValidator := security.NewJWTValidator(jwtKey, "")
 
 	store := new(mockStore)
 	store.Test(t)
@@ -341,6 +331,9 @@ func setupTestGateway(t *testing.T) *testGateway {
 
 	hub := gateway.NewHub(log, config.NewConfigStore(cfg, nil))
 
+	auth := security.NewAuthenticator(&cfg.Security)
+	handler := gateway.NewHandler(gateway.HandlerDeps{Log: log, Hub: hub, SM: sm})
+
 	sm.StateNotifier = func(ctx context.Context, sessionID string, state events.SessionState, message string) {
 		env := events.NewEnvelope(aep.NewID(), sessionID, hub.NextSeq(sessionID), events.State, events.StateData{
 			State:   state,
@@ -349,11 +342,8 @@ func setupTestGateway(t *testing.T) *testGateway {
 		_ = hub.SendToSession(ctx, env)
 	}
 
-	handler := gateway.NewHandler(gateway.HandlerDeps{Log: log, Hub: hub, SM: sm, JWTValidator: jwtValidator})
 	bridge := gateway.NewBridge(gateway.BridgeDeps{Log: log, Hub: hub, SM: sm})
 	bridge.SetWorkerFactory(testWorkerFactory{})
-
-	auth := security.NewAuthenticator(&cfg.Security, jwtValidator)
 
 	mux := http.NewServeMux()
 	mux.Handle("/ws", hub.HandleHTTP(auth, handler, bridge))
@@ -361,16 +351,14 @@ func setupTestGateway(t *testing.T) *testGateway {
 	server := httptest.NewServer(mux)
 
 	tg := &testGateway{
-		server:   server,
-		hub:      hub,
-		sm:       sm,
-		bridge:   bridge,
-		cfg:      cfg,
-		store:    store,
-		log:      log,
-		cancel:   cancel,
-		jwtKey:   jwtKey,
-		jwtValid: jwtValidator,
+		server: server,
+		hub:    hub,
+		sm:     sm,
+		bridge: bridge,
+		cfg:    cfg,
+		store:  store,
+		log:    log,
+		cancel: cancel,
 	}
 
 	t.Cleanup(func() {
@@ -387,33 +375,12 @@ func (tg *testGateway) wsURL() string {
 	return "ws" + strings.TrimPrefix(tg.server.URL, "http") + "/ws"
 }
 
-func (tg *testGateway) generateToken(subject string, ttl time.Duration) string {
-	now := time.Now()
-	claims := jwt.MapClaims{
-		"iss":    "hotplex",
-		"sub":    subject,
-		"aud":    "gateway",
-		"exp":    now.Add(ttl).Unix(),
-		"iat":    now.Unix(),
-		"nbf":    now.Unix(),
-		"jti":    uuid.NewString(),
-		"scopes": []string{"session:write"},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	s, err := token.SignedString(tg.jwtKey)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
-
 func connectClient(t *testing.T, tg *testGateway, workerType string) *client.Client {
 	t.Helper()
-	token := tg.generateToken("test-user", 5*time.Minute)
 	c, err := client.New(context.Background(),
 		client.URL(tg.wsURL()),
 		client.WorkerType(workerType),
-		client.AuthToken(token),
+		client.BotID("test-bot"),
 		client.APIKey("test-key"),
 	)
 	require.NoError(t, err)

@@ -20,7 +20,7 @@ description: Security auditing, config change tracking, credential management, a
 hotplex check --security
 ```
 
-检查范围包括：JWT 配置完整性、TLS 状态、Admin API 暴露面、环境变量泄漏风险、Worker 命令白名单合规性。
+检查范围包括：TLS 状态、Admin API 暴露面、环境变量泄漏风险、Worker 命令白名单合规性。
 
 ### 输入验证层级
 
@@ -50,7 +50,7 @@ ConfigChange{
 ```
 
 - 审计日志上限 **256 条**，超出后 FIFO 裁剪
-- 敏感字段（`security.api_keys`、`security.jwt_secret`）自动脱敏为 `[REDACTED]`
+- 敏感字段（`security.api_keys`）自动脱敏为 `[REDACTED]`
 - 通过 `Watcher.AuditLog()` API 获取完整审计记录
 
 ### 配置历史与回滚
@@ -73,7 +73,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
 | 类别 | 字段 | 生效方式 |
 |------|------|----------|
 | Hot（立即生效） | log.level, pool.*, worker.timeout, admin.tokens | fsnotify + 500ms debounce |
-| Static（需重启） | gateway.addr, db.path, tls.*, jwt_secret | 仅记录，下次重启生效 |
+| Static（需重启） | gateway.addr, db.path, tls.* | 仅记录，下次重启生效 |
 
 ---
 
@@ -101,26 +101,10 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 | 凭证 | 环境变量 | 注入方式 |
 |------|----------|----------|
-| JWT Secret | `HOTPLEX_JWT_SECRET` | SecretsProvider |
 | Admin Token | `HOTPLEX_ADMIN_TOKEN_1` / `_2` | 编号聚合 |
 | API Key | `HOTPLEX_SECURITY_API_KEY_1` | 编号聚合 |
 | Slack Token | `HOTPLEX_MESSAGING_SLACK_BOT_TOKEN` | 环境覆盖 |
 | Feishu Secret | `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` | 环境覆盖 |
-
-### SecretsProvider 链
-
-支持多来源凭证链式查找，按顺序尝试直到找到值：
-
-```go
-// 默认链（仅环境变量）
-ChainedSecretsProvider{
-    EnvSecretsProvider{}, // 从 HOTPLEX_* 环境变量读取
-}
-
-// 可扩展：实现 SecretsProvider 接口接入 Vault 等外部密钥管理
-// type VaultProvider struct{ ... }
-// func (p *VaultProvider) Get(key string) string { ... }
-```
 
 ### Worker 环境隔离
 
@@ -130,22 +114,7 @@ Worker 进程的 Environment 列表支持 `${VAR:-default}` 模板展开：
 
 ---
 
-## 5. JWT Token 生命周期
-
-### Token 类型与 TTL
-
-| Token 类型 | TTL | 用途 |
-|------------|-----|------|
-| Access Token | 5 分钟 | 客户端短期访问凭证 |
-| Gateway Token | 1 小时 | WebSocket 长连接认证 |
-| Refresh Token | 7 天 | Token 续期 |
-
-### 安全机制
-
-- **ES256 签名**：强制 ECDSA P-256，拒绝其他算法
-- **JTI 防重放**：`crypto/rand` 生成唯一 ID + 内存黑名单 TTL 缓存
-- **Bot 隔离**：`bot_id` claim 精确匹配，跨 Bot 操作被拒绝
-- **密钥长度**：JWT Secret 必须 >= 32 字节（base64 编码）
+## 5. Admin Token 安全管理
 
 ### Admin Token 双 Token 轮转模式
 
@@ -192,7 +161,6 @@ EOF
 
 ## 7. 合规检查清单
 
-- [ ] JWT Secret >= 32 字节，仅通过环境变量注入
 - [ ] Admin API 启用 IP 白名单 + Rate Limit
 - [ ] 非本地地址启用 TLS (`tls_enabled: true`)
 - [ ] 敏感凭证不在 config.yaml 中明文存储

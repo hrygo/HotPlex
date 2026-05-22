@@ -1,13 +1,13 @@
 // 09_production — Full production-grade integration example.
 //
-// Combines: JWT/API Key auth, session resume, signal handling,
+// Combines: API Key auth, optional bot ID, session resume, signal handling,
 // streaming output, tool permission policy, usage statistics,
 // and graceful shutdown.
 //
 // Usage:
 //
 //	HOTPLEX_API_KEY=test-api-key go run ./09_production
-//	HOTPLEX_SIGNING_KEY=<key> go run ./09_production
+//	HOTPLEX_BOT_ID=<bot-id> go run ./09_production
 //	HOTPLEX_SESSION_ID=<id> go run ./09_production    # resume existing session
 package main
 
@@ -45,28 +45,14 @@ type sessionStats struct {
 
 func main() {
 	gatewayURL := demo.EnvOr("HOTPLEX_GATEWAY_URL", "ws://localhost:8888/ws")
-	signingKey := demo.EnvOr("HOTPLEX_SIGNING_KEY", "")
 	apiKey := demo.EnvOr("HOTPLEX_API_KEY", "")
+	botID := demo.EnvOr("HOTPLEX_BOT_ID", "")
 	sessionID := os.Getenv("HOTPLEX_SESSION_ID")
 	workerType := demo.EnvOr("HOTPLEX_WORKER_TYPE", "claude_code")
 	task := demo.EnvOr("HOTPLEX_TASK", "List the files in the current directory and count them.")
 
-	// Auth: JWT, API Key, or none (for dev).
-	var authToken string
-	if signingKey != "" {
-		gen, err := client.NewTokenGenerator(signingKey)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: token generator: %v\n", err)
-			os.Exit(1) //nolint:gocritic // example exit
-		}
-		token, err := gen.Generate("production-user", []string{"read", "write"}, 1*time.Hour)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: generate token: %v\n", err)
-			os.Exit(1) //nolint:gocritic // example exit
-		}
-		authToken = token
-		fmt.Println("Auth: JWT")
-	} else if apiKey != "" {
+	// Auth: API Key or none (for dev).
+	if apiKey != "" {
 		fmt.Println("Auth: API Key")
 	} else {
 		fmt.Println("Auth: none (development mode)")
@@ -75,22 +61,17 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Default to test-api-key if no auth provided (development).
-	if apiKey == "" && authToken == "" {
-		apiKey = "test-api-key"
-	}
-
 	opts := []client.Option{
 		client.URL(gatewayURL),
 		client.WorkerType(workerType),
 		client.AutoReconnect(true),
 		client.Logger(slog.Default()),
 	}
-	if authToken != "" {
-		opts = append(opts, client.AuthToken(authToken))
-	}
 	if apiKey != "" {
 		opts = append(opts, client.APIKey(apiKey))
+	}
+	if botID != "" {
+		opts = append(opts, client.BotID(botID))
 	}
 
 	c, err := client.New(ctx, opts...)

@@ -46,15 +46,13 @@ HotPlex 采用分层覆盖策略，**高优先级覆盖低优先级**：
 配置文件 (YAML/JSON/TOML)
   ↓ 被覆盖
 环境变量 (HOTPLEX_*)
-  ↓ 被覆盖
-Secrets Provider (JWT 等敏感字段，仅通过 Provider 加载)
 ```
 
 **要点**：
 
 - 代码默认值让二进制可以在零配置下启动（敏感字段除外）
 - 配置文件是**非敏感值的权威来源**
-- 敏感字段（JWT secret、Admin tokens、API keys）**永远不会从配置文件加载**，只能通过环境变量或 Secrets Provider 注入
+- 敏感字段（Admin tokens、API keys）**永远不会从配置文件加载**，只能通过环境变量或 Secrets Provider 注入
 - 消息平台配置有额外的三级优先级：`platform-level > messaging-level > Default()`
 
 ---
@@ -172,8 +170,6 @@ SQLite 数据库配置，Session 和 Event Store 共享。
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径 |
 | `allowed_origins` | []string | `["*"]` | — | WebSocket CORS 允许的 Origin 列表 |
-| `jwt_secret` | []byte | — | `HOTPLEX_JWT_SECRET` | JWT 签名密钥（ES256）。**仅通过环境变量注入**，支持 raw 32 字节或 base64 编码。配置文件中不可设置 |
-| `jwt_audience` | string | `hotplex-gateway` | `HOTPLEX_SECURITY_JWT_AUDIENCE` | JWT audience 声明 |
 | `work_dir_allowed_base_patterns` | []string | `[]` | — | 额外的工作目录白名单模式。支持 `~` 和 `${VAR}` 展开。程序内建默认值：`~/.hotplex/workspace`、`~/workspace`、`~/projects`、`~/work`、`~/dev`、`/var/hotplex/projects` |
 | `work_dir_forbidden_dirs` | []string | `[]` | — | 额外的工作目录黑名单。显式禁止的目录列表 |
 
@@ -537,7 +533,6 @@ HotPlex 通过 `fsnotify` 监听配置文件变更，支持运行时热更新。
 | `security.tls_enabled` | TLS 开关 |
 | `security.tls_cert_file` | TLS 证书路径 |
 | `security.tls_key_file` | TLS 私钥路径 |
-| `security.jwt_secret` | JWT 密钥 |
 | `db.path` | 数据库路径 |
 | `db.wal_mode` | WAL 模式 |
 
@@ -573,7 +568,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 
 | 变量 | 说明 | 示例 |
 |------|------|------|
-| `HOTPLEX_JWT_SECRET` | JWT 签名密钥（ES256，≥32 字节） | `openssl rand -base64 32 \| tr -d '\n'` |
+| `HOTPLEX_SECURITY_API_KEY_1` | API Key（至少配置一个） | `openssl rand -base64 32 \| tr -d '/+=' \| head -c 43` |
 | `HOTPLEX_ADMIN_TOKEN_1` | Admin API 认证 token | `openssl rand -base64 32 \| tr -d '/+=' \| head -c 43` |
 
 ### 5.3 完整环境变量列表
@@ -623,11 +618,9 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 
 | 变量 | 对应配置 | 说明 |
 |------|----------|------|
-| `HOTPLEX_JWT_SECRET` | `security.jwt_secret` | 仅通过此变量注入 |
 | `HOTPLEX_ADMIN_TOKEN_1..N` | `admin.tokens` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_1..N` | `security.api_keys` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_HEADER` | `security.api_key_header` | 默认 `X-API-Key` |
-| `HOTPLEX_SECURITY_JWT_AUDIENCE` | `security.jwt_audience` | 默认 `hotplex-gateway` |
 
 #### Agent Config
 

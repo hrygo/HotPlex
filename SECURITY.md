@@ -32,7 +32,7 @@ We will acknowledge receipt of your report within **48 hours** and provide a tim
 
 -   **TLS**: Always enable TLS (`security.tls_enabled: true`) in production.
 -   **Authentication**: Configure strong `APIKeys` and `Admin.Tokens`.
--   **JWT**: Use the `JWTValidator` for user-level session authentication.
+-   **API Key**: Use `Authenticator` for API key validation. Bot ID: Use `BotIDFromRequest(r)` for multi-bot isolation via X-Bot-ID header.
 -   **PGID Isolation**: Ensure the gateway process has sufficient permissions to manage process groups (PGID).
 
 ---

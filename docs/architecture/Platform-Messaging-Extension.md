@@ -1219,7 +1219,7 @@ func (a *Adapter) streamCardContent(ctx context.Context, cardID, elementID, text
 | 维度 | WebSocket 客户端 | Slack | 飞书 |
 |------|-----------------|-------|------|
 | 连接建立 | 客户端主动 WS 握手 | Socket Mode SDK 连接 Slack | larkws SDK 连接飞书 |
-| 认证 | JWT 握手（网关层） | App Token（SDK 层） | App Token + Token 刷新 |
+| 认证 | API Key（网关层） | App Token（SDK 层） | App Token + Token 刷新 |
 | 会话 ID | client 生成 UUID | `slack:{team}:{channel}:{thread_ts}:{user}` | `feishu:{chat_id}:{thread_ts}:{user_id}` |
 | 消息去重 | WebSocket 本身无重复 | ClientMsgID dedup | message_id dedup |
 | 流式更新 | WebSocket 实时推送 | SDK 原生 `StartStream/AppendStream/StopStream` | CardKit `v1` 流式 API（50 次/秒） |
@@ -1310,7 +1310,7 @@ func (a *Adapter) streamCardContent(ctx context.Context, cardID, elementID, text
 
 ### R7: Handler.Handle 所有权验证
 
-**风险**: WS 模式下 OwnerID 由 JWT 验证填充。平台模式下 OwnerID 从哪里来？
+**风险**: WS 模式下 OwnerID 由 API Key 验证填充。平台模式下 OwnerID 从哪里来？
 **缓解**: PlatformAdapter 在调用 `Bridge.Handle()` 前，验证 SDK 级别的用户身份（Slack user token / 飞书 user access token），并将 user_id 作为 OwnerID 填入 Envelope。平台适配器是受信的内部组件。
 
 ---

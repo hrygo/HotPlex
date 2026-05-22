@@ -37,7 +37,7 @@
 
 ### 🛡️ 安全加固与可靠性
 - 🛡️ **元认知防御基线** — 宪法级 **META-COGNITION** 迁移至 B 通道首位，内置 **XML Sanitizer** 防护，彻底阻断 Prompt 注入与 XML 结构破坏。
-- 🔒 **企业级安全加固** — 强制 JWT ES256 认证、SSRF 防护、Windows 临时文件式注入（规避 cmd 转义陷阱）及进程级隔离。
+- 🔒 **企业级安全加固** — API Key + Bot ID 认证、SSRF 防护、Windows 临时文件式注入（规避 cmd 转义陷阱）及进程级隔离。
 
 ### 📱 多平台分发与集成
 - 📱 **跨平台分发能力** — **"一次接入，全端覆盖"**。无需修改 Agent 代码即可秒级分发至 Web、Slack (Socket Mode) 和飞书。

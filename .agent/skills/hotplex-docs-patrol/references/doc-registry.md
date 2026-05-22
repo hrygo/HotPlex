@@ -123,7 +123,7 @@ Viper 配置加载、热重载、三级继承、审计回滚。
 
 ## Security (`internal/security/`)
 
-JWT 认证、SSRF 防御、路径安全、白名单。
+API Key + Bot ID 认证、SSRF 防御、路径安全、白名单。
 
 → `explanation/security-model.md` — 安全模型
 → `guides/developer/security-model.md` — 开发者安全指南

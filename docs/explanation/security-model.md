@@ -1,7 +1,7 @@
 ---
 title: 安全模型
 weight: 6
-description: HotPlex Gateway 安全设计哲学与多层防护体系：白名单策略、JWT 认证、SSRF 防御与进程隔离
+description: HotPlex Gateway 安全设计哲学与多层防护体系：白名单策略、API Key 认证、SSRF 防御与进程隔离
 ---
 
 # 安全模型
@@ -27,7 +27,7 @@ HotPlex Gateway 的安全模型遵循两条核心原则：
 ├─────────────────────────────────────┤
 │  Layer 3: Input Validation          │  Envelope 校验、XML Sanitizer
 ├─────────────────────────────────────┤
-│  Layer 2: Authentication            │  API Key + JWT ES256
+│  Layer 2: Authentication            │  API Key + X-Bot-ID
 ├─────────────────────────────────────┤
 │  Layer 1: Protocol Security         │  AEP 版本协商、命令白名单
 └─────────────────────────────────────┘
@@ -42,10 +42,54 @@ HotPlex Gateway 的安全模型遵循两条核心原则：
 
 ### Layer 2：Authentication（认证）
 
-- **API Key**：Gateway 级别的访问控制。支持两种解析模式：
-  - **默认模式**：所有有效 Key 映射到 `api_user`（单用户场景）
-  - **企业模式**（APIKeyResolver）：通过数据库映射将 Key 关联到具体用户身份，实现多用户 Session 隔离。支持 `MapResolver`（配置文件）和 `DBResolver`（SQLite）两种实现
-- **JWT**：Session 级别的身份验证，携带 `user_id`、`bot_id`、`scopes`
+认证采用 **API Key + Bot ID** 双字段模型，实现网关级别访问控制与多 Bot 隔离。
+
+#### 传输方式
+
+| 通道 | API Key | Bot ID | 适用场景 |
+|------|---------|--------|---------|
+| HTTP Header | `X-API-Key` | `X-Bot-ID` | REST API、CLI、服务端客户端 |
+| Query Param | `api_key` | `bot_id` | 浏览器 WebSocket（无法发送自定义 Header） |
+| Init Envelope | `auth.token` | `auth.bot_id` | 浏览器 WebSocket 延迟认证 |
+
+#### 认证流程
+
+**标准客户端（HTTP Header）**：
+
+```
+Client ──X-API-Key──> HTTP Upgrade ──> Authenticator.AuthenticateRequest()
+         X-Bot-ID                     ├─ 提取 API Key（header 优先，query param 兜底）
+                                      ├─ 校验 Key 合法性（恒定时间比较）
+                                      ├─ 解析 Bot ID
+                                      └─ 返回 (userID, botID, nil) 或 ErrUnauthorized
+```
+
+**浏览器 WebSocket 客户端（延迟认证）**：
+
+```
+Browser ──WS Upgrade (no headers)──> Hub.HandleHTTP
+                                     └─ pendingAuth = true（标记延迟认证）
+
+Browser ──init envelope──> Conn.ReadPump
+         auth.token         ├─ ExtractAPIKey 失败 → 拒绝
+         auth.bot_id        ├─ AuthenticateKey 校验 token
+                            ├─ 提取 bot_id
+                            └─ 认证成功，清除 pendingAuth
+```
+
+浏览器 WebSocket 客户端因 CORS 限制无法发送自定义 HTTP Header，因此认证被延迟到首帧 `init` Envelope。服务端在 `HandleHTTP` 阶段检测到无 API Key 时设置 `pendingAuth` 标记，待 `ReadPump` 收到 `init` 后从 `auth.token` 字段提取并校验。
+
+#### Dev 模式
+
+当未配置任何 API Key 时，所有请求以 `"anonymous"` 身份放行，无需认证。这一行为在 `AuthenticateRequest` 和 `AuthenticateKey` 中均有处理：`len(validKey) == 0` 时直接返回 `"anonymous"`。
+
+#### API Key 到用户身份的映射
+
+默认情况下，所有合法 Key 的用户身份为 `"api_user"`。可通过 `SetKeyResolver` 注入自定义映射（如从数据库关联 API Key 到具体用户 ID）。
+
+#### Bot ID 与多租户隔离
+
+Bot ID 通过 `security.BotIDFromRequest(r)` 从 `X-Bot-ID` Header 或 `bot_id` Query Param 中提取。连接中的 `botID` 必须与 Session 所属 Bot 精确匹配，跨 Bot 操作被 Session 层拒绝。
 
 ### Layer 3：Input Validation（输入验证）
 
@@ -66,32 +110,6 @@ HotPlex Gateway 的安全模型遵循两条核心原则：
 - 环境变量隔离，防止凭证泄露到 Worker 子进程
 - 嵌套 Agent 防护（`StripNestedAgent`）
 - Permission 交互协议，敏感操作需人类审批
-
-## 为什么只用 ES256 JWT
-
-HotPlex 强制使用 **ES256**（ECDSA P-256）签名算法：
-
-### 非对称优势
-
-- **公钥分发**：验证 Token 只需公钥，私钥永远不出现在 Gateway 配置之外的任何地方
-- **Bot 隔离**：每个 Bot 使用独立的密钥对，`bot_id` 嵌入 JWT claims，实现天然的多租户隔离
-- **密钥泄露影响范围**：单个私钥泄露只影响对应的 Bot，不影响整个系统
-
-### 对称算法的问题
-
-HS256 等对称算法的密钥既用于签名又用于验证。如果密钥泄露，攻击者可以伪造任何 Bot 的 Token，破坏多租户隔离。
-
-### ES256 在代码中的强制执行
-
-```go
-// jwt.go — 拒绝所有非 ES256 算法
-switch token.Method.Alg() {
-case "ES256":
-    return publicKey, nil
-default:
-    return nil, fmt.Errorf("rejected signing method: %v (only ES256 is allowed)", alg)
-}
-```
 
 ## 为什么使用命令白名单
 
@@ -185,7 +203,6 @@ Layer 4: IP 段检查 → 所有解析结果与 BlockedCIDRs 比对
 | 维度 | Dev 模式 | 生产模式 |
 |------|---------|---------|
 | API Key | 未配置时允许所有请求（`anonymous`） | 必须配置，所有请求需认证 |
-| JWT | 可选 | 强制 |
 | SSRF | 标准检查 | 标准 + Double Resolve |
 | Tool 限制 | 所有 Tool | 仅 Safe 类 |
 | Bash 策略 | P1 改为警告 | P1 严格阻止 |
@@ -197,5 +214,5 @@ Layer 4: IP 段检查 → 所有解析结果与 BlockedCIDRs 比对
 
 ## 相关实践
 
-- [安全模型操作指南](../guides/developer/security-model.md) — 7 层安全体系的日常配置与审计
-- [安全策略参数参考](../reference/security-policies.md) — JWT、SSRF、命令白名单、工具控制的完整参数
+- [安全模型操作指南](../guides/developer/security-model.md) — 5 层安全体系的日常配置与审计
+- [安全策略参数参考](../reference/security-policies.md) — API Key、SSRF、命令白名单、工具控制的完整参数

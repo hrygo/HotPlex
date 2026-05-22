@@ -1036,7 +1036,7 @@ func TestHub_HandleHTTP_Success(t *testing.T) {
 	cfg.Security.APIKeys = []string{"test-api-key"} // require this key
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
@@ -1067,7 +1067,7 @@ func TestHub_HandleHTTP_DeferredAuth(t *testing.T) {
 	cfg.Security.APIKeys = []string{"secret-key"} // require this key
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
@@ -1090,7 +1090,7 @@ func TestHub_HandleHTTP_WithSessionID(t *testing.T) {
 	cfg.Security.APIKeys = []string{"test-key"}
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
@@ -1122,7 +1122,7 @@ func TestHub_HandleHTTP_GeneratesSessionID(t *testing.T) {
 	cfg.Security.APIKeys = []string{"test-key"}
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
@@ -1155,7 +1155,7 @@ func TestHub_HandleHTTP_RejectsInvalidAPIKey(t *testing.T) {
 	cfg.Security.APIKeys = []string{"correct-key"}
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})

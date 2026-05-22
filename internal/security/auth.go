@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/hrygo/hotplex/internal/config"
@@ -15,25 +14,29 @@ import (
 // that cannot send custom headers (CORS restrictions).
 const apiKeyQueryParam = "api_key"
 
+// botIDHeader is the HTTP header for bot identity in multi-bot setups.
+const botIDHeader = "X-Bot-ID"
+
+// botIDQueryParam is the query parameter fallback for browser WebSocket clients.
+const botIDQueryParam = "bot_id"
+
 // Authenticator validates API keys and user credentials.
 type Authenticator struct {
-	mu           sync.RWMutex
-	cfg          *config.SecurityConfig
-	validKey     map[string]bool // set of valid API keys (hashed in production)
-	jwtValidator *JWTValidator   // optional; set when JWT botID extraction is needed at HTTP level
-	keyResolver  APIKeyResolver  // optional; maps API keys to user identities. nil = "api_user"
+	mu          sync.RWMutex
+	cfg         *config.SecurityConfig
+	validKey    map[string]bool // set of valid API keys (hashed in production)
+	keyResolver APIKeyResolver  // optional; maps API keys to user identities. nil = "api_user"
 }
 
-// NewAuthenticator creates a new authenticator. jwtValidator may be nil.
-func NewAuthenticator(cfg *config.SecurityConfig, jwtValidator *JWTValidator) *Authenticator {
+// NewAuthenticator creates a new authenticator.
+func NewAuthenticator(cfg *config.SecurityConfig) *Authenticator {
 	validKey := make(map[string]bool)
 	for _, k := range cfg.APIKeys {
 		validKey[k] = true
 	}
 	return &Authenticator{
-		cfg:          cfg,
-		validKey:     validKey,
-		jwtValidator: jwtValidator,
+		cfg:      cfg,
+		validKey: validKey,
 	}
 }
 
@@ -41,8 +44,7 @@ func NewAuthenticator(cfg *config.SecurityConfig, jwtValidator *JWTValidator) *A
 var ErrUnauthorized = errors.New("security: unauthorized")
 
 // AuthenticateRequest validates the request's API key.
-// Returns the user ID, bot ID (from JWT BotID claim), and any error.
-// botID may be empty when no JWT Bearer token is present.
+// Returns the user ID, bot ID (from X-Bot-ID header or bot_id query param), and any error.
 func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, error) {
 	a.mu.RLock()
 	header := a.cfg.APIKeyHeader
@@ -64,16 +66,18 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	// but acceptable for API keys (small set, low timing sensitivity).
 	defer a.mu.RUnlock()
 
+	botID := BotIDFromRequest(r)
+
 	if len(a.validKey) == 0 {
 		// No keys configured — allow all (dev mode).
-		return "anonymous", a.BotIDFromRequest(r), nil
+		return "anonymous", botID, nil
 	}
 
 	if !a.validKey[key] {
 		return "", "", ErrUnauthorized
 	}
 
-	return a.resolveUserID(r.Context(), key), a.BotIDFromRequest(r), nil
+	return a.resolveUserID(r.Context(), key), botID, nil
 }
 
 // ReloadKeys dynamically replaces the set of valid API keys.
@@ -147,28 +151,13 @@ func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string
 	return a.resolveUserID(ctx, key), true
 }
 
-// BotIDFromRequest extracts the BotID claim from a JWT Bearer token in the Authorization header.
-// Returns "" if no token is present or if extraction fails (fail-open).
-func (a *Authenticator) BotIDFromRequest(r *http.Request) string {
-	if a.jwtValidator == nil {
-		return ""
+// BotIDFromRequest extracts the bot ID from X-Bot-ID header or bot_id query param.
+// Returns "" if not provided (no bot isolation).
+func BotIDFromRequest(r *http.Request) string {
+	if v := r.Header.Get(botIDHeader); v != "" {
+		return v
 	}
-	auth := r.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
-		return ""
-	}
-	tokenString := strings.TrimPrefix(auth, "Bearer ")
-	if tokenString == "" {
-		return ""
-	}
-	// SECURITY: Verify the token signature before extracting botID.
-	// We use the same ES256 validation as the full JWT check, but silently
-	// ignore errors (fail-open) since the API key is the primary auth gate.
-	claims, err := a.jwtValidator.Validate(tokenString)
-	if err != nil {
-		return ""
-	}
-	return claims.BotID
+	return r.URL.Query().Get(botIDQueryParam)
 }
 
 // Middleware returns an HTTP middleware that enforces authentication.

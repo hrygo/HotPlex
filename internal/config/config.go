@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -62,39 +61,7 @@ func expandEnvEntry(entry string) (string, bool) {
 	return ExpandEnv(entry), true
 }
 
-// SecretsProvider abstracts how secrets are retrieved.
-type SecretsProvider interface {
-	// Get returns the secret value for the given key, or "" if not found.
-	Get(key string) string
-}
-
-// EnvSecretsProvider retrieves secrets from environment variables.
-type EnvSecretsProvider struct{}
-
-func NewEnvSecretsProvider() *EnvSecretsProvider { return &EnvSecretsProvider{} }
-
-func (p *EnvSecretsProvider) Get(key string) string { return os.Getenv(key) }
-
-// ChainedSecretsProvider tries providers in order until a value is found.
-type ChainedSecretsProvider struct {
-	providers []SecretsProvider
-}
-
-func NewChainedSecretsProvider(providers ...SecretsProvider) *ChainedSecretsProvider {
-	return &ChainedSecretsProvider{providers: providers}
-}
-
-func (p *ChainedSecretsProvider) Get(key string) string {
-	for _, pr := range p.providers {
-		if val := pr.Get(key); val != "" {
-			return val
-		}
-	}
-	return ""
-}
-
 // Validate checks that all required configuration fields are set.
-// Sensitive fields (JWTSecret) are validated separately via RequireSecrets.
 func (c *Config) Validate() []string {
 	var errs []string
 
@@ -122,25 +89,6 @@ func (c *Config) Validate() []string {
 	}
 
 	return errs
-}
-
-// RequireSecrets validates that all required sensitive fields are present.
-// Returns an error listing any missing secrets. Call after Load.
-func (c *Config) RequireSecrets() error {
-	var missing []string
-	if len(c.Security.JWTSecret) == 0 {
-		if os.Getenv("HOTPLEX_JWT_SECRET") != "" {
-			missing = append(missing, "security.jwt_secret (set but invalid: must decode to >= 32 bytes)")
-		} else {
-			missing = append(missing, "security.jwt_secret")
-		}
-	} else if len(c.Security.JWTSecret) < 32 {
-		missing = append(missing, "security.jwt_secret (must decode to >= 32 bytes for ES256)")
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("config: missing required secrets: %s (set via config file or HOTPLEX_JWT_SECRET env var)", strings.Join(missing, ", "))
-	}
-	return nil
 }
 
 // ─── Config structs ───────────────────────────────────────────────────────────
@@ -535,7 +483,6 @@ func (c AutoRetryConfig) Defaults() AutoRetryConfig {
 }
 
 // SecurityConfig holds auth and input validation settings.
-// Sensitive fields (JWTSecret) must be provided via SecretsProvider after Load.
 type SecurityConfig struct {
 	APIKeyHeader   string   `mapstructure:"api_key_header"`
 	APIKeys        []string `mapstructure:"api_keys"`
@@ -543,8 +490,6 @@ type SecurityConfig struct {
 	TLSCertFile    string   `mapstructure:"tls_cert_file"`
 	TLSKeyFile     string   `mapstructure:"tls_key_file"`
 	AllowedOrigins []string `mapstructure:"allowed_origins"`
-	JWTSecret      []byte   `mapstructure:"-"` // loaded via SecretsProvider, never from config file
-	JWTAudience    string   `mapstructure:"jwt_audience"`
 
 	// APIKeyUsers maps environment variable names (or literal key values) to user IDs.
 	// Enterprise multi-user: each API key gets a distinct identity for session isolation.
@@ -601,7 +546,6 @@ type EventsConfig struct {
 
 // Default returns a Config with sensible production defaults.
 // All non-sensitive fields have values — the binary runs with zero config.
-// Sensitive fields (JWTSecret) are left empty and must be provided separately.
 func Default() *Config {
 	return &Config{
 		Gateway: GatewayConfig{
@@ -838,29 +782,21 @@ func normalizePathFields(fields ...*string) {
 
 // ─── Loading ─────────────────────────────────────────────────────────────────
 
-// LoadOptions controls how configuration is loaded.
-type LoadOptions struct {
-	// SecretsProvider supplies sensitive values (e.g. JWT secret, API keys).
-	// If nil, secrets are read from HOTPLEX_* environment variables.
-	SecretsProvider SecretsProvider
-}
-
 // ErrConfigCycle is returned when a config inheritance chain contains a cycle.
 var ErrConfigCycle = errors.New("config: inheritance cycle detected")
 
 // Load reads configuration from the given file path, then applies defaults
-// and secrets.  Configuration strategy: convention over configuration.
+// and environment overrides.  Configuration strategy: convention over configuration.
 //
 // Load order (later overrides earlier):
 //  1. Sensible defaults (Default())
 //  2. Parent config file (via inherits field), recursively, with cycle detection
 //  3. Config file (YAML/JSON/TOML) — canonical source for non-sensitive values
 //  4. Environment variables (HOTPLEX_*)
-//  5. Secrets provider — only sensitive fields (JWTSecret, etc.)
 //
-// If filePath is empty, only defaults + environment + secrets are used.
-func Load(filePath string, opts LoadOptions) (*Config, error) {
-	cfg, err := loadRecursive(filePath, opts, nil)
+// If filePath is empty, only defaults + environment are used.
+func Load(filePath string) (*Config, error) {
+	cfg, err := loadRecursive(filePath, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -898,7 +834,6 @@ func Load(filePath string, opts LoadOptions) (*Config, error) {
 	_ = v.BindEnv("worker.opencode_server.ready_poll_interval")
 	_ = v.BindEnv("worker.opencode_server.http_timeout")
 	_ = v.BindEnv("worker.opencode_server.password")
-	_ = v.BindEnv("security.jwt_audience")
 	_ = v.BindEnv("security.api_key_header")
 	_ = v.BindEnv("agent_config.enabled")
 	_ = v.BindEnv("agent_config.config_dir")
@@ -943,7 +878,7 @@ func Load(filePath string, opts LoadOptions) (*Config, error) {
 
 // loadRecursive loads a config file and its ancestors, detecting cycles.
 // visited tracks file paths already loaded in the current chain; nil on the root call.
-func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config, error) {
+func loadRecursive(filePath string, visited []string) (*Config, error) {
 	// Start with defaults.
 	cfg := Default()
 
@@ -992,7 +927,7 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 		if !filepath.IsAbs(parentFile) && filePath != "" {
 			parentFile = filepath.Join(filepath.Dir(filePath), parentFile)
 		}
-		parentCfg, err := loadRecursive(parentFile, opts, ancestors)
+		parentCfg, err := loadRecursive(parentFile, ancestors)
 		if err != nil {
 			return nil, fmt.Errorf("config: inherits %q: %w", parentFile, err)
 		}
@@ -1002,25 +937,6 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 			return nil, fmt.Errorf("config: merge %q: %w", filePath, err)
 		}
 		*cfg = *parentCfg
-	}
-
-	// Apply secrets via provider.  If no provider given, fall back to env vars
-	// (HOTPLEX_JWT_SECRET etc.) for backwards compatibility.
-	sp := opts.SecretsProvider
-	if sp == nil {
-		sp = NewEnvSecretsProvider()
-	}
-
-	// JWTSecret — only from secrets provider, never from config file.
-	// The secret is base64-encoded (standard or URL-safe) and decoded before use.
-	// This matches the client token generator's key loading behavior.
-	if secret := sp.Get("HOTPLEX_JWT_SECRET"); secret != "" {
-		cfg.Security.JWTSecret = decodeJWTSecret(secret)
-		if cfg.Security.JWTSecret == nil {
-			if _, loaded := warnedEnvEntries.LoadOrStore("jwt_secret_invalid", true); !loaded {
-				slog.Warn("config: HOTPLEX_JWT_SECRET set but invalid format (must be 32-byte raw or base64-encoded 32 bytes)", "length", len(secret))
-			}
-		}
 	}
 
 	// Expand env vars in token slices (supports ${VAR} references in config files).
@@ -1437,22 +1353,5 @@ func setSliceField(target any, field, value string) error {
 		slice[i] = strings.TrimSpace(p)
 	}
 	f.Set(reflect.ValueOf(slice))
-	return nil
-}
-
-// decodeJWTSecret decodes a base64-encoded JWT secret.
-// It supports both standard base64 and URL-safe base64 (with or without padding).
-// Requires >= 32 bytes (HKDF-derived ECDSA key needs sufficient entropy).
-func decodeJWTSecret(secret string) []byte {
-	if decoded, err := base64.StdEncoding.DecodeString(secret); err == nil && len(decoded) >= 32 {
-		return decoded
-	}
-	if decoded, err := base64.URLEncoding.DecodeString(secret); err == nil && len(decoded) >= 32 {
-		return decoded
-	}
-	raw := []byte(secret)
-	if len(raw) >= 32 {
-		return raw
-	}
 	return nil
 }

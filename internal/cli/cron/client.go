@@ -332,7 +332,7 @@ func loadConfig(configPath string) (*config.Config, error) {
 
 	loadEnvFile(filepath.Dir(configPath))
 
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}

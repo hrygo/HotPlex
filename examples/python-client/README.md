@@ -83,7 +83,7 @@ from hotplex_client import HotPlexClient, WorkerType
 async with HotPlexClient(
     url="ws://localhost:8888",
     worker_type=WorkerType.CLAUDE_CODE,
-    auth_token="your-token",  # 可选
+    auth_token="your-token",  # API Key（可选）
 ) as client:
     # 自动完成 init 握手
     print(f"Session: {client.session_id}")

@@ -18,9 +18,9 @@
 
 | 变量模式 | 风险 | 严重度 |
 |----------|------|--------|
-| `HOTPLEX_JWT_SECRET` | JWT 签名密钥 | P0 |
 | `HOTPLEX_ADMIN_TOKEN_*` | 管理员 Token | P0 |
 | `HOTPLEX_GATEWAY_TOKEN` | 网关认证 Token | P0 |
+| `HOTPLEX_SECURITY_API_KEY_*` | API Key | P0 |
 | `HOTPLEX_SLACK_*` | Slack App 凭证 | P1 |
 | `HOTPLEX_FEISHU_*` | 飞书 App 凭证 | P1 |
 | `CLAUDECODE` | 嵌套 Agent 注入 | P1 |
@@ -98,7 +98,7 @@ var openCodeSrvEnvBlocklist = []string{
 | 条目 | 匹配规则 | 示例 |
 |------|---------|------|
 | `"CLAUDECODE"` | 精确匹配 | 仅阻止 `CLAUDECODE` |
-| `"HOTPLEX_"` | 前缀匹配 | 阻止 `HOTPLEX_JWT_SECRET`、`HOTPLEX_ADMIN_TOKEN_1` 等所有 `HOTPLEX_*` 变量 |
+| `"HOTPLEX_"` | 前缀匹配 | 阻止 `HOTPLEX_GATEWAY_TOKEN`、`HOTPLEX_ADMIN_TOKEN_1` 等所有 `HOTPLEX_*` 变量 |
 | `"CLAUDE_"` | 前缀匹配 | 阻止 `CLAUDE_API_KEY`、`CLAUDE_MODEL` 等 |
 
 ### 2.3 配置驱动的扩展黑名单
@@ -193,7 +193,7 @@ for _, e := range environ {
 # .env
 
 # 网关内部变量（不会泄漏给 Worker）
-HOTPLEX_JWT_SECRET=xxx
+HOTPLEX_GATEWAY_TOKEN=xxx
 HOTPLEX_ADMIN_TOKEN_1=xxx
 
 # Worker 专用变量（自动剥离前缀后注入 Worker 环境）
@@ -424,9 +424,9 @@ worker:
 # .env
 
 # === 网关内部变量（HOTPLEX_ 前缀，不会泄漏给 Worker）===
-HOTPLEX_JWT_SECRET=xxx
-HOTPLEX_ADMIN_TOKEN_1=xxx
 HOTPLEX_GATEWAY_TOKEN=xxx
+HOTPLEX_ADMIN_TOKEN_1=xxx
+HOTPLEX_SECURITY_API_KEY_1=xxx
 HOTPLEX_SLACK_APP_TOKEN=xxx
 HOTPLEX_FEISHU_APP_ID=xxx
 

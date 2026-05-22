@@ -33,7 +33,7 @@ func DeriveSessionKey(ownerID string, wt worker.WorkerType, clientKey, workDir s
 // ThreadTS is cross-platform: used by both Slack threads and Feishu chat threads.
 type PlatformContext struct {
 	Platform string
-	BotID    string // Bot identity (Slack UserID, Feishu OpenID, WebChat JWT bot_id)
+	BotID    string // Bot identity (Slack UserID, Feishu OpenID, WebChat X-Bot-ID header)
 	// Slack fields
 	TeamID    string
 	ChannelID string

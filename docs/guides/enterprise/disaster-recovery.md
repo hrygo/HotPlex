@@ -181,23 +181,6 @@ curl http://localhost:9999/admin/health
 
 ## 5. 密钥轮转流程
 
-### JWT Secret 轮转
-
-```bash
-# 1. 生成新密钥
-NEW_SECRET=$(openssl rand -base64 32)
-
-# 2. 更新环境配置
-# 编辑 /etc/hotplex/.env 或 secrets.env
-# HOTPLEX_JWT_SECRET="$NEW_SECRET"
-
-# 3. 重启服务
-systemctl restart hotplex
-
-# 4. 通知所有客户端更新 Token
-# 注意：旧 Token 将立即失效
-```
-
 ### Admin Token 轮转（零停机）
 
 ```bash

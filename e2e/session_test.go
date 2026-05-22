@@ -152,12 +152,10 @@ func TestE2E_ResumeSession(t *testing.T) {
 			t.Parallel()
 			tg := setupTestGateway(t)
 
-			token := tg.generateToken("test-user", 5*time.Minute)
-
 			c1, err := client.New(context.Background(),
 				client.URL(tg.wsURL()),
 				client.WorkerType(wt.workerType),
-				client.AuthToken(token),
+				client.BotID("test-bot"),
 				client.APIKey("test-key"),
 			)
 			require.NoError(t, err)
@@ -181,7 +179,7 @@ func TestE2E_ResumeSession(t *testing.T) {
 			c2, err := client.New(context.Background(),
 				client.URL(tg.wsURL()),
 				client.WorkerType(wt.workerType),
-				client.AuthToken(token),
+				client.BotID("test-bot"),
 				client.APIKey("test-key"),
 				client.ClientSessionID(sessionID),
 			)

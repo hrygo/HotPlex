@@ -3,7 +3,7 @@
 # Sensible defaults for both dev and prod. Override via:
 #   1. Inheritance: config-dev.yaml / config-prod.yaml (inherits this file)
 #   2. Environment variables: HOTPLEX_* (highest priority, auto-detected if key exists here)
-#   3. Secrets provider: JWT secret, admin tokens (never in config files)
+#   3. Secrets provider: admin tokens (never in config files)
 #
 # Code defaults live in internal/config/config.go:Default().
 
@@ -89,7 +89,6 @@ security:
   tls_key_file: "/etc/hotplex/tls/server.key"
   allowed_origins:
     - "*"
-  jwt_audience: "hotplex-gateway"
 
   # Work directory security settings (convention + configuration)
   # Program defaults (convention over configuration):

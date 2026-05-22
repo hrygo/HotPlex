@@ -90,7 +90,7 @@ func sttRequirements() (needsPython, needsFFmpeg bool) {
 	if configPath == "" {
 		return false, false
 	}
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return false, false
 	}

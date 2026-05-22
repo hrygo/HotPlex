@@ -4,7 +4,6 @@
 # Usage: ./hotplex -config configs/config-prod.yaml
 #
 # Required env vars:
-#   HOTPLEX_JWT_SECRET       — JWT signing key (ES256)
 #   HOTPLEX_ADMIN_TOKEN_1    — Admin API token
 #
 # Only fields that differ from base are listed below.

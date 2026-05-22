@@ -67,7 +67,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [企业部署](guides/enterprise/deployment.md)           | 生产环境部署、安全加固、资源管理      |
 | [安全加固](guides/enterprise/security-hardening.md)   | 7 层安全体系详解                      |
 | [可观测性](guides/enterprise/observability.md)        | 日志、Prometheus、OpenTelemetry、告警 |
-| [多租户隔离](guides/enterprise/multi-tenant.md)       | Bot 级隔离、JWT 路由、会话配额        |
+| [多租户隔离](guides/enterprise/multi-tenant.md)       | Bot 级隔离、Bot ID 路由、会话配额        |
 | [合规与审计](guides/enterprise/compliance.md)         | 配置审计、凭据管理、回滚能力          |
 | [灾备恢复](guides/enterprise/disaster-recovery.md)    | RTO/RPO、自动重启、备份策略           |
 | [配置管理](guides/enterprise/config-management.md)    | 5 层优先级、热重载、多环境策略        |
@@ -97,7 +97,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [Admin API 参考](reference/admin-api.md)           | 管理端点、Scope 权限、请求/响应格式 |
 | [AEP 协议参考](reference/aep-protocol.md)          | Agent Exchange Protocol v1 完整规范 |
 | [事件参考](reference/events.md)                    | 全部 AEP 事件类型和数据结构         |
-| [安全策略参考](reference/security-policies.md)     | JWT、SSRF、命令白名单、工具控制     |
+| [安全策略参考](reference/security-policies.md)     | API Key、Bot ID、SSRF、命令白名单、工具控制     |
 | [Metrics 参考](reference/metrics.md)               | Prometheus 指标、scrape 配置        |
 | [术语表](reference/glossary.md)                    | HotPlex 核心术语解释                |
 | [Go SDK 参考](reference/sdk-go.md)                 | Go 客户端 SDK API 文档              |

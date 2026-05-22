@@ -414,7 +414,7 @@ internal/worker      — 基础 worker, proc manager
   internal/worker/opencodeserver — OCS 单例 + worker
 internal/config      — Viper 配置, 热重载
 internal/agentconfig — Agent 个性/上下文加载器
-internal/security    — JWT, SSRF, 路径安全, 命令白名单
+internal/security    — API Key, Bot ID, SSRF, 路径安全, 命令白名单
 internal/admin       — Admin API 处理器
 internal/aep         — AEP v1 编解码器
 internal/cli         — Checker 注册表, onboard 向导

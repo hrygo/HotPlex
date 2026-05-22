@@ -17,7 +17,6 @@
 
 import * as readline from 'readline';
 import { HotPlexClient, WorkerType, SessionState, ErrorCode } from '../src/index.js';
-import { generateTestToken } from '../scripts/generate-test-token.js';
 
 // ============================================================================
 // Types
@@ -92,14 +91,11 @@ async function main() {
 
   printConfig();
 
-  const token = await generateTestToken();
-  
   // Create client
   const client = new HotPlexClient({
     url: CONFIG.url + '/ws',
     workerType: WorkerType.ClaudeCode,
-    apiKey: 'dev-api-key',
-    authToken: token,
+    apiKey: process.env.HOTPLEX_API_KEY || 'dev-api-key',
     reconnect: {
       enabled: true,
       maxAttempts: 5,

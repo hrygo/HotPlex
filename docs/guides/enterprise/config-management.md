@@ -88,7 +88,6 @@ config-a.yaml → config-b.yaml → config-a.yaml
 | `gateway.addr` | 端口绑定 |
 | `db.path` | 数据库连接 |
 | `tls_enabled` / `tls_cert_file` / `tls_key_file` | TLS 配置 |
-| `security.jwt_secret` | 签名密钥 |
 | `log.format` | 日志格式 |
 
 ### 实现原理

@@ -1,5 +1,83 @@
 # Changelog
 
+## [Unreleased]
+
+### Summary
+
+移除 JWT 认证依赖，替换为 API Key + Bot ID 认证模型。这是一次 **Breaking Change**，影响所有 WebSocket 客户端和 SDK 用户。
+
+### Breaking Changes
+
+#### 认证模型变更
+
+- **移除 JWT (ES256) 认证**：不再支持 `Authorization: Bearer <jwt>` 头。所有客户端必须使用 `X-API-Key` 头传递 API key。(#467)
+- **Bot ID 传输变更**：不再通过 JWT `bot_id` claim 传递。改为 `X-Bot-ID` HTTP 头或 `bot_id` query param。服务端通过 `security.BotIDFromRequest(r)` 提取。(#467)
+- **浏览器 WebSocket 客户端**：init envelope 的 `auth.token` 字段语义从 JWT 变为 API key（deferred auth）。(#467)
+- **环境变量**：`HOTPLEX_JWT_SECRET` 已移除。改用 `HOTPLEX_SECURITY_API_KEY_*` 编号式环境变量。(#467)
+- **用户身份**：JWT `sub` claim 的自动 per-user 隔离不再可用。默认身份为 `api_user`。多用户隔离需配置 `APIKeyResolver`（`security.SetKeyResolver()`）将 API key 映射到用户身份。(#467)
+- **`--strict` 标志**：`hotplex config validate --strict` 已移除（用于检查 JWT secret 是否设置，不再适用）。
+
+#### SDK Breaking Changes
+
+| SDK | 移除 | 替代 |
+|-----|------|------|
+| Go Client | `AuthToken()` option, `token.go`, `gen-token/` | `BotID()` option — 发送 `X-Bot-ID` 头 |
+| Java Client | `JwtTokenGenerator`, `.tokenGenerator()`, jjwt/bcprov 依赖 | `.apiKey()` + `.botId()` — 发送 `X-Bot-ID` 头 |
+| TypeScript Client | `generate-test-token.ts`, `jose` 依赖 | `authToken` 字段语义改为 API key（deferred browser auth） |
+| Python Client | — | `auth_token` 参数语义改为 API key |
+
+#### 配置 API 变更
+
+- `config.Load(path, LoadOptions{})` → `config.Load(path)` — 移除 `LoadOptions` 和 `SecretsProvider` 管道（`EnvSecretsProvider`, `ChainedSecretsProvider`）。配置加载仅通过 Viper `AutomaticEnv` 绑定 `HOTPLEX_*` 环境变量。
+- `config.NewWatcher(log, path, sp, store, ...)` → `config.NewWatcher(log, path, store, ...)` — 移除 `SecretsProvider` 参数。
+- `security.NewAuthenticator(cfg, jwtValidator)` → `security.NewAuthenticator(cfg)` — 移除 JWT validator 参数。
+- `security.BotIDFromHeader(r)` → `security.BotIDFromRequest(r)` — 重命名以反映其同时读取 header 和 query param。
+
+### Removed
+
+- `internal/security/jwt.go` — JWT 验证器（ES256 签名、HKDF 密钥派生、JTI 黑名单）。(#467)
+- `client/token.go` — Go SDK JWT token 生成。(#467)
+- `client/scripts/gen-token/` — Go SDK token 生成命令行工具。(#467)
+- `client/examples/08_token_generator/` — Go SDK token 生成示例。(#467)
+- `internal/cli/checkers/security_fix_test.go` — JWT 强度检查测试。(#467)
+- `examples/typescript-client/scripts/generate-test-token.ts` — TS SDK JWT token 生成脚本。(#467)
+- `examples/java-client/src/main/java/dev/hotplex/security/JwtTokenGenerator.java` — Java SDK JWT 生成器。(#467)
+- `golang-jwt/jwt/v5` 依赖 — 不再需要。(#467)
+- `jjwt-api/impl/jackson` + `bcprov-jdk18on` 依赖（Java SDK） — 不再需要。(#467)
+
+### Changed
+
+- `security.AuthenticateRequest()` 内 `BotIDFromRequest` 调用从 2 次优化为 1 次（提取到局部变量）。(#467)
+- `conn.go` 中 `context.TODO()` 替换为 `context.Background()`（与同函数其他路径一致）。(#467)
+
+### Migration Guide
+
+**1. 环境变量替换：**
+```bash
+# 旧（已移除）
+export HOTPLEX_JWT_SECRET="$(openssl rand -base64 32)"
+
+# 新
+export HOTPLEX_SECURITY_API_KEY_1="your-api-key"
+export HOTPLEX_ADMIN_TOKEN_1="your-admin-token"
+```
+
+**2. Go SDK 迁移：**
+```go
+// 旧
+client.New(ctx, URL("ws://localhost:8888/ws"), WorkerType("claude_code"), AuthToken("jwt-token"))
+
+// 新
+client.New(ctx, URL("ws://localhost:8888/ws"), WorkerType("claude_code"), BotID("bot-123"))
+```
+
+**3. 多用户隔离：** 如果之前依赖 JWT `sub` 实现用户隔离，需在 Gateway 启动时配置 `APIKeyResolver`：
+```go
+auth.SetKeyResolver(security.NewChainResolver(dbResolver, configResolver))
+```
+
+**4. 浏览器 WebSocket：** init envelope 中 `auth.token` 从传 JWT 改为传 API key，`auth.bot_id` 保持不变。
+
 ## [1.17.0] - 2026-05-21
 
 ### Summary

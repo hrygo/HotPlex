@@ -28,6 +28,7 @@ type InitData struct {
 // InitAuth carries authentication data embedded in the init envelope.
 type InitAuth struct {
 	Token string `json:"token,omitempty"`
+	BotID string `json:"bot_id,omitempty"`
 }
 
 // InitConfig carries per-session configuration.
@@ -147,6 +148,9 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 	if authData, ok := data["auth"].(map[string]any); ok {
 		if token, ok := authData["token"].(string); ok {
 			auth.Token = token
+		}
+		if bid, ok := authData["bot_id"].(string); ok {
+			auth.BotID = bid
 		}
 	}
 

@@ -31,8 +31,6 @@ mvn clean install -DskipTests
 |------|------|------|
 | `spring-boot-starter-websocket` | 3.2.5 | WebSocket 客户端 |
 | `jackson-databind` + `jackson-datatype-jsr310` | (managed) | JSON 序列化 |
-| `jjwt-api` / `jjwt-impl` / `jjwt-jackson` | 0.12.6 | JWT 生成 |
-| `bcprov-jdk18on` | 1.78 | BouncyCastle ECDSA |
 
 ## 快速开始
 
@@ -41,20 +39,18 @@ mvn clean install -DskipTests
 ```java
 import dev.hotplex.client.HotPlexClient;
 import dev.hotplex.protocol.*;
-import dev.hotplex.security.JwtTokenGenerator;
 
 public class QuickStart {
     public static void main(String[] args) throws Exception {
         String url = System.getenv().getOrDefault("HOTPLEX_GATEWAY_URL", "ws://localhost:8888");
-        String signingKey = System.getenv("HOTPLEX_SIGNING_KEY"); // 至少 32 字节
+        String apiKey = System.getenv("HOTPLEX_API_KEY");
 
-        var tokenGen = new JwtTokenGenerator(signingKey, "hotplex");
         var latch = new java.util.concurrent.CountDownLatch(1);
 
         try (var client = HotPlexClient.builder()
                 .url(url)
                 .workerType("claude-code")
-                .tokenGenerator(tokenGen)
+                .apiKey(apiKey)
                 .build()) {
 
             client.<MessageDeltaData>on("messageDelta", delta -> {
@@ -81,7 +77,7 @@ public class QuickStart {
 
 ```java
 try (var client = HotPlexClient.builder()
-        .url(url).workerType("claude-code").tokenGenerator(tokenGen).build()) {
+        .url(url).workerType("claude-code").apiKey(apiKey).build()) {
 
     client.<MessageDeltaData>on("messageDelta", d -> {
         System.out.print(d.getContent());
@@ -117,7 +113,6 @@ var client = HotPlexClient.builder()
     .url("ws://localhost:8888")              // 必填：Gateway WebSocket 地址
     .workerType("claude-code")               // 必填：Worker 类型
     .apiKey("ak-xxx")                        // 可选：X-API-Key header
-    .tokenGenerator(jwtGenerator)            // 可选：JWT ES256 认证
     .config(initConfig)                      // 可选：Session 配置
     .build();
 ```
@@ -278,45 +273,6 @@ public enum SessionState {
 ### Session Busy 重试
 
 收到 `SESSION_BUSY` 错误时，自动延迟 2 秒（`SESSION_BUSY_RETRY_DELAY_MS`）后重发待处理输入。
-
-## Token 生成
-
-### JwtTokenGenerator
-
-ES256 (ECDSA P-256) 签名，从 `secret` 派生 P-256 密钥对：
-
-```java
-// 基本用法
-var tokenGen = new JwtTokenGenerator(secret, "hotplex");
-
-// 自定义 audience
-var tokenGen = new JwtTokenGenerator(secret, "hotplex", "my-gateway");
-```
-
-- `secret` — 至少 32 字节的签名字符串
-- 内部通过 BouncyCastle HKDF-SHA256 从 secret 派生 P-256 密钥对，与 Go SDK 完全一致
-
-```java
-// 生成 token
-String token = tokenGen.generateToken(
-    "user-1",                              // subject
-    List.of("session:create", "session:write"),  // scopes
-    3600L                                   // TTL 秒
-);
-
-// 带自定义 JTI
-String token = tokenGen.generateTokenWithJti(
-    "user-1", List.of("worker:use"), 3600L, "my-trace-id"
-);
-
-// 带额外 claims
-String token = tokenGen.generateTokenWithClaims(
-    "user-1", List.of("worker:use"), 3600L,
-    Map.of("bot_id", "B12345")
-);
-```
-
-JWT Claims：`sub`（subject）、`iss`（issuer）、`aud`（audience）、`iat`（签发时间）、`exp`（过期时间）、`scopes`（权限列表）、`jti`（唯一 ID）。
 
 ## 已知限制
 

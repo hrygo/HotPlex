@@ -2,7 +2,6 @@ package dev.hotplex.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.hotplex.protocol.*;
-import dev.hotplex.security.JwtTokenGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.socket.*;
@@ -44,7 +43,7 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
     private final String url;
     private final String workerType;
     private final String apiKey;
-    private final JwtTokenGenerator tokenGenerator;
+    private final String botId;
     private final InitData.InitConfig config;
     
     private final ObjectMapper objectMapper;
@@ -101,7 +100,7 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
         this.url = builder.url;
         this.workerType = builder.workerType;
         this.apiKey = builder.apiKey;
-        this.tokenGenerator = builder.tokenGenerator;
+        this.botId = builder.botId;
         this.config = builder.config;
         
         this.objectMapper = new ObjectMapper();
@@ -182,6 +181,9 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
             WebSocketHttpHeaders wsHeaders = new WebSocketHttpHeaders();
             if (apiKey != null && !apiKey.isEmpty()) {
                 wsHeaders.add("X-API-Key", apiKey);
+            }
+            if (botId != null && !botId.isEmpty()) {
+                wsHeaders.add("X-Bot-ID", botId);
             }
             
             client.execute(this, wsHeaders, URI.create(url));
@@ -856,16 +858,7 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
             "reasoning", "step", "control", "ping", "pong"
         ));
         initData.setClientCaps(clientCaps);
-        
-        // Add auth if token generator is available
-        if (tokenGenerator != null) {
-            // Default TTL: 1 hour (3600 seconds)
-            String token = tokenGenerator.generateToken("user", List.of("worker:use"), 3600);
-            InitData.InitAuth auth = new InitData.InitAuth();
-            auth.setToken(token);
-            initData.setAuth(auth);
-        }
-        
+
         return createEnvelope(EventKind.Init.getValue(), initData, "control");
     }
 
@@ -910,7 +903,7 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
         private String url;
         private String workerType;
         private String apiKey;
-        private JwtTokenGenerator tokenGenerator;
+        private String botId;
         private InitData.InitConfig config;
 
         public Builder url(String url) {
@@ -928,8 +921,8 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
             return this;
         }
 
-        public Builder tokenGenerator(JwtTokenGenerator tokenGenerator) {
-            this.tokenGenerator = tokenGenerator;
+        public Builder botId(String botId) {
+            this.botId = botId;
             return this;
         }
 

@@ -22,7 +22,7 @@ This directory contains installation and deployment scripts for HotPlex Worker G
 - Checks system dependencies (Go 1.21+, OpenSSL)
 - Builds binary with version injection
 - Creates directory structure (`/etc/hotplex`, `/var/lib/hotplex`, `/var/log/hotplex`)
-- Generates secrets (JWT secret, admin tokens)
+- Generates secrets (admin tokens)
 - Generates TLS certificates (self-signed or Let's Encrypt integration)
 - Creates configuration file
 - Installs systemd service (Linux)
@@ -56,7 +56,7 @@ sudo ./scripts/install.sh --systemd
 /usr/local/bin/hotplex           # Binary
 /etc/hotplex/
   ├── config.yaml                       # Main config
-  ├── secrets.env                       # Secrets (JWT, tokens)
+  ├── secrets.env                       # Secrets (tokens)
   ├── config.env.example                # Environment template
   └── tls/
       ├── server.crt                    # TLS certificate
@@ -149,20 +149,17 @@ curl http://localhost:9999/admin/health
 ```bash
 # Development
 docker run -p 8080:8888 -p 9080:9999 \
-  -e HOTPLEX_JWT_SECRET=your-secret \
   hotplex:latest
 
 # With custom config
 docker run -p 8080:8888 -p 9080:9999 \
   -v /path/to/config.yaml:/etc/hotplex/config.yaml \
-  -e HOTPLEX_JWT_SECRET=your-secret \
   hotplex:latest
 
 # With TLS
 docker run -p 8443:8443 -p 9080:9999 \
   -v /path/to/tls.crt:/etc/hotplex/tls/server.crt \
   -v /path/to/tls.key:/etc/hotplex/tls/server.key \
-  -e HOTPLEX_JWT_SECRET=your-secret \
   hotplex:latest
 ```
 
@@ -498,7 +495,6 @@ docker-compose down -v
 
 ```bash
 # Required
-export HOTPLEX_JWT_SECRET="your-jwt-secret"
 export HOTPLEX_ADMIN_TOKEN="your-admin-token"
 
 # Optional
@@ -528,7 +524,6 @@ docker network create traefik-network
 
 **Production checklist:**
 
-- [ ] Set strong `HOTPLEX_JWT_SECRET`
 - [ ] Set strong `HOTPLEX_ADMIN_TOKEN`
 - [ ] Configure `GRAFANA_PASSWORD`
 - [ ] Update Traefik dashboard host (`traefik.hotplex.dev`)
@@ -550,7 +545,7 @@ source /etc/hotplex/secrets.env
 
 ```bash
 # Option 1: Vault
-export HOTPLEX_JWT_SECRET=$(vault read -field=jwt_secret secret/hotplex)
+export HOTPLEX_ADMIN_TOKEN=$(vault read -field=admin_token secret/hotplex)
 
 # Option 2: Kubernetes Secrets
 envFrom:
@@ -559,7 +554,7 @@ envFrom:
 
 # Option 3: Docker Swarm Secrets
 secrets:
-  - hotplex_jwt_secret
+  - hotplex_admin_token
 ```
 
 ### TLS Certificates

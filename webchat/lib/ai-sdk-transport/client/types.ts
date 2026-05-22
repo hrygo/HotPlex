@@ -257,6 +257,7 @@ export interface InitData {
 
 export interface InitAuth {
   token?: string;
+  bot_id?: string;
 }
 
 export interface InitConfig {

@@ -182,9 +182,9 @@ curl -i --no-buffer \
 }
 ```
 
-#### JWT — 多用户隔离，适合 SaaS 产品
+#### 多 Bot 隔离 -- Bot ID 路由
 
-签发 ES256 签名的 JWT，在 init 信封中携带：
+多 Bot 场景通过 `X-Bot-ID` Header 或 `bot_id` 查询参数指定 Bot 身份，实现 Bot 级别隔离：
 
 ```json
 {
@@ -194,31 +194,37 @@ curl -i --no-buffer \
       "version": "aep/v1",
       "worker_type": "claude_code",
       "auth": {
-        "token": "eyJhbGciOiJFUzI1NiIs..."
-      }
+        "token": "your-api-key"
+      },
+      "bot_id": "B12345"
     }
   }
 }
 ```
 
-JWT 关键 Claims：
+或通过 HTTP Header 携带：
 
-| 字段     | 必填 | 说明                                          |
-| -------- | ---- | --------------------------------------------- |
-| `sub`    | 是   | 用户唯一标识（如 `"user-123"`），用于会话隔离 |
-| `bot_id` | 否   | Bot 身份标识，用于多 Bot 隔离                 |
-| `exp`    | 是   | 过期时间                                      |
-| `iss`    | 是   | 固定 `"hotplex"`                              |
+```bash
+curl -i --no-buffer \
+  -H "X-API-Key: your-api-key" \
+  -H "X-Bot-ID: B12345" \
+  -H "Upgrade: websocket" \
+  -H "Connection: Upgrade" \
+  http://localhost:8080/ws
+```
+
+对于需要区分用户身份的多用户场景，可通过 `security.SetKeyResolver()` 设置自定义的 `APIKeyResolver`，将 API Key 映射到不同的 userID，实现用户级会话隔离。
 
 #### 如何选择
 
-|          | API Key                   | JWT                     |
-| -------- | ------------------------- | ----------------------- |
-| 用户身份 | 全部为 `api_user`（共享） | `sub` claim（每人独立） |
-| 会话隔离 | 无用户级隔离              | 按用户隔离              |
-| 适用场景 | 单用户/内部测试           | 多用户 SaaS             |
+|          | 仅 API Key                   | API Key + Bot ID           |
+| -------- | ---------------------------- | -------------------------- |
+| 用户身份 | 全部为 `api_user`（共享）     | 通过 `APIKeyResolver` 映射 |
+| Bot 隔离 | 无                           | 按 Bot ID 隔离             |
+| 会话隔离 | 无用户级隔离                 | 按 resolver 映射的 userID  |
+| 适用场景 | 单用户/内部测试              | 多 Bot / 多用户 SaaS       |
 
-> **多用户场景必须用 JWT**。API Key 认证下所有用户共享 `api_user` 身份，无法区分。
+> **多 Bot/多用户场景应使用 Bot ID + APIKeyResolver**。纯 API Key 认证下所有请求共享 `api_user` 身份，无法区分用户或 Bot。
 
 ---
 
@@ -686,18 +692,18 @@ Session ID 由四个维度派生，任何维度不同都会产生不同的 Sessi
 
 | 维度                | 说明                                  | 隔离效果            |
 | ------------------- | ------------------------------------- | ------------------- |
-| **userID**          | JWT `sub`（或 API Key 的 `api_user`） | 不同用户 → 不同会话 |
+| **userID**          | API Key Resolver 映射（或默认 `api_user`） | 不同用户 -> 不同会话 |
 | **workerType**      | `claude_code` 等                      | 不同引擎 → 不同会话 |
 | **clientSessionID** | 客户端生成的 ID                       | 不同 tab → 不同会话 |
 | **workDir**         | 工作目录                              | 不同项目 → 不同会话 |
 
 ### 多用户隔离
 
-使用 API Key 认证时所有用户都是 `api_user` → **无法隔离**。使用 JWT 认证，`sub` 参与派生 → **天然隔离**：
+使用 API Key 认证时所有用户默认都是 `api_user`，无法隔离。配置 `APIKeyResolver` 后，不同 API Key 可映射到不同 userID，实现用户级隔离：
 
 ```
-Alice JWT {sub:"alice"} → "alice|claude_code|tab-1|/project" → Session A
-Bob   JWT {sub:"bob"}   → "bob|claude_code|tab-1|/project"   → Session B
+Alice (key: ak-alice, resolver->userID: "alice") -> "alice|claude_code|tab-1|/project" -> Session A
+Bob   (key: ak-bob,   resolver->userID: "bob")   -> "bob|claude_code|tab-1|/project"   -> Session B
 ```
 
 `ListSessions` API 按 userID 过滤，每个用户只看到自己的会话。
@@ -898,7 +904,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
       "version": "aep/v1",
       "worker_type": "claude_code",
       "auth": {
-        "token": "your-api-key-or-jwt"
+        "token": "your-api-key"
       },
       "config": {
         "work_dir": "/home/user/project",
@@ -970,7 +976,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `VERSION_MISMATCH`   | 协议版本不匹配 | 检查 version 字段  |
 | `PROTOCOL_VIOLATION` | 协议违规       | 首帧必须是 init    |
 | `INVALID_MESSAGE`    | 消息格式错误   | 检查 JSON 结构     |
-| `UNAUTHORIZED`       | 认证失败       | 检查 API Key / JWT |
+| `UNAUTHORIZED`       | 认证失败       | 检查 API Key       |
 | `SESSION_NOT_FOUND`  | Session 不存在 | 重新 init          |
 | `SESSION_BUSY`       | Session 非活跃 | 等待或重连         |
 | `SESSION_EXPIRED`    | 已过期         | 创建新会话         |
@@ -990,7 +996,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 
 ### ListSessions 返回所有用户的会话？
 
-使用 JWT 认证。API Key 认证的身份统一为 `api_user`，无法区分用户。
+配置 `APIKeyResolver`。纯 API Key 认证的身份统一为 `api_user`，无法区分用户。通过 `security.SetKeyResolver()` 设置自定义 resolver 可将 API Key 映射到不同 userID。
 
 ### 重连后对话历史丢失？
 

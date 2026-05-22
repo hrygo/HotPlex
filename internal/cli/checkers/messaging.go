@@ -118,7 +118,7 @@ func (c multiBotConfigChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),

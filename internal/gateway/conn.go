@@ -43,7 +43,7 @@ type Conn struct {
 
 	sessionID string
 	userID    string
-	botID     string // SEC-007: bot isolation tag from JWT
+	botID     string // SEC-007: bot isolation tag from X-Bot-ID header or init envelope
 
 	// pendingAuth defers authentication to the init envelope (browser WS clients).
 	pendingAuth bool
@@ -265,41 +265,25 @@ func (c *Conn) performInit(handler *Handler) error {
 	// Authenticate via init envelope if HTTP-level auth was deferred.
 	// Browser WebSocket clients cannot send custom headers, so auth is deferred
 	// to the first init message (pendingAuth is set when HandleHTTP finds no API key).
-	didDeferredAuth := false
 	if c.pendingAuth {
 		if initData.Auth.Token == "" {
 			c.sendInitError(events.ErrCodeUnauthorized, "authentication required")
 			return fmt.Errorf("deferred auth: no token in init envelope")
 		}
-		uid, ok := handler.auth.AuthenticateKey(context.TODO(), initData.Auth.Token)
+		uid, ok := handler.auth.AuthenticateKey(context.Background(), initData.Auth.Token)
 		if !ok {
 			c.sendInitError(events.ErrCodeUnauthorized, "invalid token")
 			return fmt.Errorf("deferred auth: invalid token")
 		}
 		c.userID = uid
 		c.pendingAuth = false
-		didDeferredAuth = true
 	}
 
-	// Validate JWT token from init envelope (if provided and validator is configured).
-	// Skip if we completed deferred auth — the token was already validated as an API key,
-	// not a JWT. JWT validation requires an ES256-signed token with standard claims.
-	if initData.Auth.Token != "" && handler.jwtValidator != nil && !didDeferredAuth {
-		claims, err := handler.jwtValidator.Validate(initData.Auth.Token)
-		if err != nil {
-			c.log.Warn("gateway: init JWT validation failed", "session_id", c.sessionID, "err", err)
-			c.sendInitError(events.ErrCodeUnauthorized, "invalid token")
-			metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeUnauthorized)).Inc()
-			return fmt.Errorf("jwt validation: %w", err)
-		}
-		// Bind user_id from JWT subject claim (overrides HTTP auth userID for session ownership).
-		if claims.Subject != "" {
-			c.userID = claims.Subject
-		}
-		// SEC-007: bind bot_id for multi-bot isolation.
-		if claims.BotID != "" {
-			c.botID = claims.BotID
-		}
+	// Extract botID from init envelope for deferred-auth clients (browser WS
+	// clients that cannot send custom headers). Non-deferred clients already
+	// have botID set from X-Bot-ID header during WS upgrade (hub.go).
+	if c.botID == "" && initData.Auth.BotID != "" {
+		c.botID = initData.Auth.BotID
 	}
 
 	// Resolve work dir: use client-provided value or default from config.

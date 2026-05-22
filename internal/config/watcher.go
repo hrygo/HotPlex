@@ -43,7 +43,6 @@ var staticFields = map[string]bool{
 	"security.tls_enabled":         true,
 	"security.tls_cert_file":       true,
 	"security.tls_key_file":        true,
-	"security.jwt_secret":          true,
 	"db.path":                      true,
 	"db.wal_mode":                  true,
 }
@@ -61,7 +60,6 @@ type ConfigChange struct {
 type Watcher struct {
 	log      *slog.Logger
 	path     string
-	sp       SecretsProvider // used on reload to supply secrets
 	viper    *fsnotify.Watcher
 	debounce time.Duration
 	onChange func(*Config) // called with the new config after hot reload
@@ -97,23 +95,18 @@ type Watcher struct {
 
 // NewWatcher creates a file-system watcher for hot config reloading.
 // path: absolute path to the config file.
-// sp: SecretsProvider used on reload to supply sensitive values. If nil, falls back to env vars.
 // store: central ConfigStore for atomic config propagation. If nil, falls back to onChange callback only.
 // onChange: called (in a goroutine) when hot-reloadable fields change.
 // onStatic: called (in a goroutine) when static fields change.
 // The watcher does not start until Start() is called.
 // The caller should pass the initially loaded config via SetInitial after calling NewWatcher.
-func NewWatcher(log *slog.Logger, path string, sp SecretsProvider, store *ConfigStore, onChange func(*Config), onStatic func(string)) *Watcher {
+func NewWatcher(log *slog.Logger, path string, store *ConfigStore, onChange func(*Config), onStatic func(string)) *Watcher {
 	if log == nil {
 		log = slog.Default()
-	}
-	if sp == nil {
-		sp = NewEnvSecretsProvider()
 	}
 	return &Watcher{
 		log:           log,
 		path:          path,
-		sp:            sp,
 		store:         store,
 		debounce:      500 * time.Millisecond,
 		onChange:      onChange,
@@ -206,7 +199,7 @@ func (w *Watcher) reload() {
 
 	prev := w.Latest()
 
-	newCfg, err := Load(w.path, LoadOptions{SecretsProvider: w.sp})
+	newCfg, err := Load(w.path)
 	if err != nil {
 		w.log.Warn("config: reload failed", "err", err)
 		return
@@ -337,8 +330,7 @@ func diffConfigs(prev, next *Config) []ConfigChange {
 
 // sensitiveFields are fields whose values should be redacted in audit logs.
 var sensitiveFields = map[string]bool{
-	"security.api_keys":   true,
-	"security.jwt_secret": true,
+	"security.api_keys": true,
 }
 
 // resolveField extracts a config field value by its dot-separated path

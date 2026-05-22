@@ -12,19 +12,15 @@
  */
 
 import { HotPlexClient, WorkerType } from '../src/index.js';
-import { generateTestToken } from '../scripts/generate-test-token.js';
 
 async function main() {
   console.log('🚀 HotPlex Gateway - Quick Start\n');
 
-  const token = await generateTestToken();
-  
   // Create client connecting to local gateway
   const client = new HotPlexClient({
     url: 'ws://localhost:8888/ws',
     workerType: WorkerType.ClaudeCode,
-    apiKey: 'dev-api-key',
-    authToken: token,
+    apiKey: process.env.HOTPLEX_API_KEY || 'dev-api-key',
   });
 
   // Handle streaming output

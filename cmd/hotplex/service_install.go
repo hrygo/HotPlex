@@ -40,7 +40,7 @@ func newServiceInstallCmd() *cobra.Command {
 
 			loadEnvFile(filepath.Dir(configPath))
 
-			cfg, err := config.Load(configPath, config.LoadOptions{})
+			cfg, err := config.Load(configPath)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}

@@ -24,7 +24,7 @@ title: WebSocket Full-Duplex Communication Flow
                                              │
                                              │ 1️⃣ WebSocket Upgrade
                                              │    GET /ws?session_id=xxx
-                                             │    Authorization: Bearer <JWT>
+                                             │    X-API-Key: <key>
                                              ▼
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
 │                          HotPlex Worker Gateway (Go)                                  │
@@ -100,7 +100,7 @@ title: WebSocket Full-Duplex Communication Flow
                                        │
                                        │ 2️⃣ stdio / Process Spawn
                                        │    - Environment Variables Injection
-                                       │    - JWT Token Passing
+                                       │    - API Key Auth
                                        │    - Session Context
                                        ▼
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
@@ -151,7 +151,7 @@ title: WebSocket Full-Duplex Communication Flow
     │══ 2.Handshake ══════════════════════════════════════════════════════════════│
     │                │                     │                   │
     │── {init} ─────►│                     │                   │
-    │    JWT Token   │── Validate ─────────│                   │
+    │    API Key    │── Authenticate ───────│                   │
     │                │◄── OK ──────────────│                   │
     │                │── Create Session ──►│                   │
     │                │                     │                   │
@@ -247,7 +247,7 @@ title: WebSocket Full-Duplex Communication Flow
   
   AEP Event Type            Gateway Handler            Claude Code
   ─────────────────────────────────────────────────────────────────
-  init          ─────────►   Validate JWT               N/A
+  init          ─────────►   Authenticate                N/A
   input         ─────────►   Parse & Route ─────────►   stdin
   delta         ◄─────────   Format & Send              stdout
   done          ◄─────────   Format & Send              stdout

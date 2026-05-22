@@ -33,7 +33,7 @@ type Client struct {
 	// config from options
 	url             string
 	workerType      string
-	authToken       string
+	botID           string
 	apiKey          string
 	clientSessionID string
 
@@ -193,8 +193,8 @@ func (c *Client) Resume(ctx context.Context, sessionID string) (*InitAckData, er
 
 func (c *Client) doConnect(ctx context.Context, sessionID string, isResume bool) (*InitAckData, error) {
 	hdr := http.Header{}
-	if c.authToken != "" {
-		hdr.Set("Authorization", "Bearer "+c.authToken)
+	if c.botID != "" {
+		hdr.Set("X-Bot-ID", c.botID)
 	}
 	if c.apiKey != "" {
 		hdr.Set("X-API-Key", c.apiKey)
@@ -226,8 +226,8 @@ func (c *Client) doConnect(ctx context.Context, sessionID string, isResume bool)
 	if c.metadata != nil {
 		initData["config"] = map[string]any{"metadata": c.metadata}
 	}
-	if c.authToken != "" {
-		initData["auth"] = map[string]any{"token": c.authToken}
+	if c.botID != "" {
+		initData["auth"] = map[string]any{"bot_id": c.botID}
 	}
 	if c.clientSessionID != "" || isResume {
 		initData["session_id"] = sessionID

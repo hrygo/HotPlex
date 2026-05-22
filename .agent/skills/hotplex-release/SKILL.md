@@ -122,7 +122,7 @@ git log "${LAST_TAG}..HEAD" --no-merges --format="%h %s%n%b---"
 | `slack`, `feishu`, `messaging`, `stt` | **Messaging** |
 | `webchat`, `ui`, `chat` | **WebChat UI** |
 | `config`, `agent-config` | **Configuration** |
-| `security`, `jwt`, `ssrf` | **Security** |
+| `security`, `auth`, `ssrf` | **Security** |
 | `cli`, `onboard`, `doctor` | **CLI** |
 | `client`, `sdk`, `ts`, `python`, `java` | **SDK** |
 | `test`, `ci`, `build`, `makefile` | **Infrastructure** |

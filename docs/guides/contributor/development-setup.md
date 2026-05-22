@@ -86,9 +86,6 @@ cp configs/env.example .env
 **必填项**（开发阶段至少需要）：
 
 ```bash
-# JWT 签名密钥（ES256）
-HOTPLEX_JWT_SECRET=$(openssl rand -base64 32 | tr -d '\n')
-
 # Admin API Token
 HOTPLEX_ADMIN_TOKEN_1=$(openssl rand -base64 32 | tr -d '/+=' | head -c 43)
 ```

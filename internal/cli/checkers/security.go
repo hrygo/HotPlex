@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,105 +17,6 @@ import (
 type pathPerm struct {
 	path string
 	perm os.FileMode
-}
-
-// ─── security.jwt_strength ────────────────────────────────────────────────────
-
-type jwtStrengthChecker struct{}
-
-func (c jwtStrengthChecker) Name() string     { return "security.jwt_strength" }
-func (c jwtStrengthChecker) Category() string { return "security" }
-func (c jwtStrengthChecker) Check(ctx context.Context) cli.Diagnostic {
-	secret := resolveJWTSecret()
-
-	if len(secret) == 0 {
-		return cli.Diagnostic{
-			Name:     c.Name(),
-			Category: c.Category(),
-			Status:   cli.StatusFail,
-			Message:  "JWT secret is empty",
-			FixHint:  "Generate a strong JWT secret",
-			FixFunc:  fixJWTStrength,
-		}
-	}
-
-	if len(secret) < 32 {
-		return cli.Diagnostic{
-			Name:     c.Name(),
-			Category: c.Category(),
-			Status:   cli.StatusFail,
-			Message:  fmt.Sprintf("JWT secret too short (%d bytes, need >= 32)", len(secret)),
-			FixHint:  "Generate a strong JWT secret (>= 32 bytes)",
-			FixFunc:  fixJWTStrength,
-		}
-	}
-
-	allSame := true
-	for i := 1; i < len(secret); i++ {
-		if secret[i] != secret[0] {
-			allSame = false
-			break
-		}
-	}
-	if allSame {
-		return cli.Diagnostic{
-			Name:     c.Name(),
-			Category: c.Category(),
-			Status:   cli.StatusFail,
-			Message:  "JWT secret has no entropy (all same character)",
-			FixHint:  "Generate a strong JWT secret",
-			FixFunc:  fixJWTStrength,
-		}
-	}
-
-	return cli.Diagnostic{
-		Name:     c.Name(),
-		Category: c.Category(),
-		Status:   cli.StatusPass,
-		Message:  "JWT secret strong enough",
-	}
-}
-
-func resolveJWTSecret() []byte {
-	if val := os.Getenv("JWT_SECRET"); val != "" {
-		return []byte(val)
-	}
-	if val := os.Getenv("HOTPLEX_JWT_SECRET"); val != "" {
-		return decodeBase64Secret(val)
-	}
-	if configPath != "" {
-		cfg, err := config.Load(configPath, config.LoadOptions{})
-		if err == nil && len(cfg.Security.JWTSecret) > 0 {
-			return cfg.Security.JWTSecret
-		}
-	}
-	return nil
-}
-
-func decodeBase64Secret(s string) []byte {
-	if d, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return d
-	}
-	if d, err := base64.URLEncoding.DecodeString(s); err == nil {
-		return d
-	}
-	return []byte(s)
-}
-
-func fixJWTStrength() error {
-	b := make([]byte, 48)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Errorf("generate secret: %w", err)
-	}
-	encoded := base64.StdEncoding.EncodeToString(b)
-	if err := writeEnvVar("HOTPLEX_JWT_SECRET", encoded); err != nil {
-		return err
-	}
-	return unsetEnvVar("JWT_SECRET")
-}
-
-func init() {
-	cli.DefaultRegistry.Register(jwtStrengthChecker{})
 }
 
 // ─── security.admin_token ─────────────────────────────────────────────────────
@@ -167,7 +67,7 @@ func resolveAdminToken() string {
 		return val
 	}
 	if configPath != "" {
-		cfg, err := config.Load(configPath, config.LoadOptions{})
+		cfg, err := config.Load(configPath)
 		if err == nil && len(cfg.Admin.Tokens) > 0 {
 			return cfg.Admin.Tokens[0]
 		}
@@ -218,7 +118,7 @@ func (c filePermsChecker) Check(ctx context.Context) cli.Diagnostic {
 		checkPerm(filepath.Dir(configPath), 0o700)
 		checkPerm(configPath, 0o600)
 
-		cfg, err := config.Load(configPath, config.LoadOptions{})
+		cfg, err := config.Load(configPath)
 		if err == nil && cfg.DB.Path != "" {
 			checkPerm(filepath.Dir(cfg.DB.Path), 0o700)
 		}
@@ -333,7 +233,6 @@ func envFilePath() string {
 func writeEnvVar(key, value string) error {
 	envPath := envFilePath()
 
-	// Read existing content and remove any existing entry for this key.
 	var lines []string
 	data, err := os.ReadFile(envPath)
 	if err != nil && !os.IsNotExist(err) {

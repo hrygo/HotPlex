@@ -81,9 +81,9 @@ hotplex doctor --json
 |---------|---------|------|
 | `exists` | config.yaml 不存在 | 运行 `hotplex onboard` 生成 |
 | `syntax` | YAML 解析错误 | 检查缩进和语法，参考 `configs/config.yaml` |
-| `required` | JWT secret 缺失或无平台启用 | 运行 `hotplex onboard` 或手动设置 |
+| `required` | API Key 缺失或无平台启用 | 运行 `hotplex onboard` 或手动设置 |
 | `values` | 端口无效或数据目录不存在 | 创建目录或修改端口配置 |
-| `env_vars` | JWT_SECRET/ADMIN_TOKEN 未设置 | 在 `.env` 中添加 |
+| `env_vars` | ADMIN_TOKEN 未设置 | 在 `.env` 中添加 |
 
 #### dependencies（依赖）
 
@@ -96,7 +96,6 @@ hotplex doctor --json
 
 | checker | 失败原因 | 处理 |
 |---------|---------|------|
-| `jwt_strength` | JWT secret 太短或低熵 | `openssl rand -base64 48` 重新生成 |
 | `admin_token` | Token 为空或弱默认值 | 替换为强随机值 |
 | `file_permissions` | 配置文件权限过宽 | `chmod 600 ~/.hotplex/.env ~/.hotplex/config.yaml` |
 | `env_in_git` | .env 被 git 追踪 | `git rm --cached .env` |
@@ -201,7 +200,7 @@ hotplex onboard
 hotplex doctor
 ```
 
-`hotplex onboard` 自动处理：Go/OS/磁盘检查、JWT/Token 生成、Slack/飞书配置、Worker 选择、config.yaml/.env 生成、Agent 配置模板、STT/TTS 检查、系统服务安装。
+`hotplex onboard` 自动处理：Go/OS/磁盘检查、Slack/飞书配置、Worker 选择、config.yaml/.env 生成、Agent 配置模板、STT/TTS 检查、系统服务安装。
 
 **非交互模式**（CI/自动化）：
 ```bash

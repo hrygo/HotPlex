@@ -14,7 +14,7 @@ cli/
     environment.go    # Environment: HOME, PATH, data dir writability, disk space
     messaging.go      # Messaging: Slack/Feishu token presence and format validation
     runtime.go        # Runtime: Go version, OS/arch compatibility, POSIX check
-    security.go       # Security: JWT secret, admin tokens, TLS config
+    security.go       # Security: admin tokens, TLS config
     stt.go            # STT: Python deps, model files, ONNX validity
     *_test.go         # Per-checker tests (table-driven)
   onboard/

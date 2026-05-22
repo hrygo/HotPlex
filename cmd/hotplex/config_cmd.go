@@ -19,17 +19,14 @@ func newConfigCmd() *cobra.Command {
 
 func newConfigValidateCmd() *cobra.Command {
 	var configPath string
-	var strict bool
 
 	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Validate configuration file",
 		Long: "Validate the configuration file without starting the gateway.\n" +
-			"Checks YAML syntax, required fields, and value constraints.\n" +
-			"Use --strict to also verify that required secrets (JWT, admin tokens) are set.",
+			"Checks YAML syntax, required fields, and value constraints.",
 		Example: `  hotplex config validate                     # Validate default config
-  hotplex config validate -c /path/to/config.yaml
-  hotplex config validate --strict             # Also check secrets`,
+  hotplex config validate -c /path/to/config.yaml`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(configPath, false)
 			if err != nil {
@@ -41,12 +38,6 @@ func newConfigValidateCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "  ⚠ %s\n", w)
 			}
 
-			if strict {
-				if err := cfg.RequireSecrets(); err != nil {
-					return err
-				}
-			}
-
 			if len(warns) > 0 {
 				fmt.Fprintf(os.Stderr, "\nConfiguration loaded with %d warning(s).\n", len(warns))
 			} else {
@@ -56,6 +47,5 @@ func newConfigValidateCmd() *cobra.Command {
 		},
 	}
 	configFlag(cmd, &configPath)
-	cmd.Flags().BoolVar(&strict, "strict", false, "also verify required secrets are set")
 	return cmd
 }

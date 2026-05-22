@@ -355,7 +355,7 @@ func (h *Hub) HandleHTTP(
 				return
 			}
 			userID = uid
-			botID = auth.BotIDFromRequest(r)
+			botID = security.BotIDFromRequest(r)
 		} else {
 			// No key at HTTP level — defer to init envelope auth (browser WS clients).
 			pendingAuth = true

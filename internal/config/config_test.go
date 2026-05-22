@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -284,49 +283,10 @@ func TestExpandEnvEntry(t *testing.T) {
 	}
 }
 
-func TestEnvSecretsProvider(t *testing.T) {
-	t.Parallel()
-
-	os.Setenv("TEST_SECRET", "secret123")
-	defer os.Unsetenv("TEST_SECRET")
-
-	p := NewEnvSecretsProvider()
-	require.Equal(t, "secret123", p.Get("TEST_SECRET"))
-	require.Empty(t, p.Get("NONEXISTENT"))
-}
-
-func TestChainedSecretsProvider(t *testing.T) {
-	t.Parallel()
-
-	p := NewChainedSecretsProvider(
-		&staticProvider{data: map[string]string{"key1": "from-first"}},
-		&staticProvider{data: map[string]string{"key1": "from-second", "key2": "from-second"}},
-	)
-
-	require.Equal(t, "from-first", p.Get("key1"))  // first provider wins
-	require.Equal(t, "from-second", p.Get("key2")) // only in second
-	require.Empty(t, p.Get("key3"))                // neither has it
-}
-
-type staticProvider struct {
-	data map[string]string
-}
-
-func (p *staticProvider) Get(key string) string {
-	return p.data[key]
-}
-
-func TestChainedSecretsProvider_Empty(t *testing.T) {
-	t.Parallel()
-
-	p := NewChainedSecretsProvider()
-	require.Empty(t, p.Get("anything"))
-}
-
 func TestLoad_FileNotFound(t *testing.T) {
 	t.Parallel()
 
-	_, err := Load("/nonexistent/config.yaml", LoadOptions{})
+	_, err := Load("/nonexistent/config.yaml")
 	require.Error(t, err)
 }
 
@@ -347,7 +307,7 @@ func TestLoad_Inheritance_CycleDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Load(baseCfg, LoadOptions{})
+	_, err := Load(baseCfg)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrConfigCycle)
 }
@@ -364,7 +324,7 @@ func TestLoad_Inheritance_SelfReference(t *testing.T) {
 	}
 	tmp.Close()
 
-	_, err = Load(tmp.Name(), LoadOptions{})
+	_, err = Load(tmp.Name())
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrConfigCycle)
 }
@@ -387,7 +347,7 @@ func TestLoad_Inheritance_ThreeLevelChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(leafCfg, LoadOptions{})
+	cfg, err := Load(leafCfg)
 	require.NoError(t, err)
 	// Leaf overrides mid, mid overrides base.
 	require.Equal(t, ":7070", cfg.Gateway.Addr)
@@ -406,7 +366,7 @@ func TestLoad_Inheritance_NoInherits(t *testing.T) {
 	}
 	tmp.Close()
 
-	cfg, err := Load(tmp.Name(), LoadOptions{})
+	cfg, err := Load(tmp.Name())
 	require.NoError(t, err)
 	require.Equal(t, ":6060", cfg.Gateway.Addr)
 	require.Equal(t, 5, cfg.Pool.MaxSize)
@@ -433,7 +393,7 @@ func TestLoad_Inheritance_PathExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(childPath, LoadOptions{})
+	cfg, err := Load(childPath)
 	require.NoError(t, err)
 	require.Equal(t, ":8001", cfg.Gateway.Addr)
 }
@@ -448,63 +408,12 @@ func TestLoad_NumberedEnv(t *testing.T) {
 		os.Unsetenv("HOTPLEX_SECURITY_API_KEY_1")
 	}()
 
-	cfg, err := Load("", LoadOptions{})
+	cfg, err := Load("")
 	require.NoError(t, err)
 
 	require.Contains(t, cfg.Admin.Tokens, "token1")
 	require.Contains(t, cfg.Admin.Tokens, "token2")
 	require.Contains(t, cfg.Security.APIKeys, "key1")
-}
-
-func TestConfig_RequireSecrets(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		cfg         Config
-		expectError bool
-	}{
-		{
-			name: "JWT secret present",
-			cfg: Config{
-				Security: SecurityConfig{
-					JWTSecret: decodeJWTSecret("c2VjcmV0LXNlY3JldC1zZWNyZXQtc2VjcmV0MTIzNDU="),
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "JWT secret missing",
-			cfg: Config{
-				Security: SecurityConfig{
-					JWTSecret: []byte{},
-				},
-			},
-			expectError: true,
-		},
-		{
-			name: "JWT secret present but short",
-			cfg: Config{
-				Security: SecurityConfig{
-					JWTSecret: decodeJWTSecret("c2hvcnQ="), // "short" in base64
-				},
-			},
-			expectError: true, // Now rejects non-32-byte keys
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			err := tt.cfg.RequireSecrets()
-			if tt.expectError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
 }
 
 func TestAutoRetryConfig_Defaults(t *testing.T) {
@@ -553,76 +462,6 @@ func TestAutoRetryConfig_Defaults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			result := tt.input.Defaults()
-			require.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestDecodeJWTSecret(t *testing.T) {
-	t.Parallel()
-
-	// Valid 32-byte secret
-	validSecret32 := make([]byte, 32)
-	for i := range validSecret32 {
-		validSecret32[i] = byte(i)
-	}
-	validSecretB64 := base64.StdEncoding.EncodeToString(validSecret32)
-	validSecretURLB64 := base64.URLEncoding.EncodeToString(validSecret32)
-
-	// 48-byte secret (e.g. openssl rand -base64 48)
-	validSecret48 := make([]byte, 48)
-	for i := range validSecret48 {
-		validSecret48[i] = byte(i)
-	}
-	validSecret48B64 := base64.StdEncoding.EncodeToString(validSecret48)
-
-	tests := []struct {
-		name     string
-		input    string
-		expected []byte
-	}{
-		{
-			name:     "standard base64 32 bytes",
-			input:    validSecretB64,
-			expected: validSecret32,
-		},
-		{
-			name:     "URL-safe base64 32 bytes",
-			input:    validSecretURLB64,
-			expected: validSecret32,
-		},
-		{
-			name:     "raw 32-byte string",
-			input:    string(validSecret32),
-			expected: validSecret32,
-		},
-		{
-			name:     "base64 48 bytes accepted",
-			input:    validSecret48B64,
-			expected: validSecret48,
-		},
-		{
-			name:     "raw 48-byte string accepted",
-			input:    string(validSecret48),
-			expected: validSecret48,
-		},
-		{
-			name:     "other string (not 32 bytes)",
-			input:    "short",
-			expected: nil,
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			result := decodeJWTSecret(tt.input)
 			require.Equal(t, tt.expected, result)
 		})
 	}
@@ -902,7 +741,7 @@ db:
 	require.NoError(t, err)
 	tempFile.Close()
 
-	cfg, err := Load(tempFile.Name(), LoadOptions{})
+	cfg, err := Load(tempFile.Name())
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	require.Equal(t, ":8888", cfg.Gateway.Addr)

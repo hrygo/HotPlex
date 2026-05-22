@@ -32,7 +32,6 @@
 - ❌ `sync.Mutex` 嵌入或传指针
 - ❌ `math/rand` 用于加密
 - ❌ Shell 执行（仅允许 `claude` 二进制）
-- ❌ 非 ES256 JWT
 - ❌ 硬编码路径分隔符
 - ❌ 直接使用 POSIX 信号
 - ❌ 用 `sed`/`awk` 插入或修改源码行（缩进不可控，必须用 Edit 工具）
@@ -138,7 +137,7 @@
 
 **支撑模块**：
 - `config/` - Viper 配置 + 热重载 + 继承 + 审计/回滚。消息层共享默认值（WorkerType, STT, TTS）通过 `FillFrom()` 传播到平台配置。三级优先级：platform > messaging > Default()。多 bot 支持：`SlackBotConfig`/`FeishuBotConfig` + `normalizeSlackBots`/`normalizeFeishuBots` 向后兼容归一化
-- `security/` - JWT、SSRF、路径安全
+- `security/` - API Key 认证（`Authenticator`）、Bot ID 提取（`BotIDFromRequest`）、SSRF 防护、路径安全
 - `skills/` - Skills 发现
 - `metrics/` - Prometheus 指标
 - `service/` - 跨平台系统服务管理（systemd/launchd/SCM）

@@ -8,30 +8,12 @@ paths:
 
 > Mutex / 反模式规范 → 见 AGENTS.md 约定与规范
 
-## JWT 认证
+## Bot ID 传输
 
-### 必须使用 ES256 签名
-```go
-if token.Method.Alg() != "ES256" {
-    return ErrUnauthorized
-}
-```
-
-### Claims 完整性
-JWT 必须包含：`iss`、`sub`、`aud`、`exp`、`iat`、`jti` + `role`、`scope`、`bot_id`、`session_id`
-
-### Token 生命周期
-| 类型 | TTL |
-|------|-----|
-| Access Token | 5min |
-| Gateway Token | 1h |
-| Refresh Token | 7d |
-
-### JTI 黑名单（TTL 缓存）
-被撤销的 Token jti 必须进入内存黑名单，超时后自动清理。JTI 生成禁止 `math/rand`，必须用 `crypto/rand`。
+Bot ID 通过 `X-Bot-ID` HTTP header 或 `bot_id` query param 传输。服务端通过 `security.BotIDFromRequest(r)` 提取，无需 JWT。
 
 ### 多 Bot 隔离
-Token 中的 `bot_id` 必须与请求的 Session 所属 Bot 精确匹配，禁止跨 Bot 操作。
+连接中的 `botID` 必须与请求的 Session 所属 Bot 精确匹配，禁止跨 Bot 操作。
 
 ---
 

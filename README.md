@@ -37,7 +37,7 @@
 
 ### 🛡️ Security & Reliability
 - 🛡️ **Meta-Cognition Hardening** — Constitutional **META-COGNITION** promoted to the top of B-channel with built-in **XML Sanitizer** to block prompt injection.
-- 🔒 **Enterprise-Grade Security** — JWT ES256 authentication, SSRF protection, and **Windows File-Based Injection** to bypass cmd.exe escaping traps.
+- 🔒 **Enterprise-Grade Security** — API Key + Bot ID authentication, SSRF protection, and **Windows File-Based Injection** to bypass cmd.exe escaping traps.
 
 ### 📱 Multi-Platform Delivery & Integration
 - 📱 **Cross-Platform Delivery** — **"Write Once, Deploy Anywhere"**. Bridge agents to Web, Slack (Socket Mode), and Feishu (WebSocket) with zero code changes.

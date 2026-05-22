@@ -1065,7 +1065,7 @@ SELECT * FROM sessions WHERE state != 'deleted';
 | 策略                        | 说明                                                                        |
 | --------------------------- | --------------------------------------------------------------------------- |
 | **Upgrade 阶段认证**（MVP） | WebSocket 握手时通过 query param 或 header 携带 API Key，验证通过后建立连接 |
-| **Per-message JWT**（v1.1） | 每个 Envelope 携带 JWT，支持细粒度权限控制                                  |
+| **Per-message auth**（v1.1） | 每个 Envelope 携带 auth token，支持细粒度权限控制                                  |
 | **Token 刷新**（v1.1）      | 通过 `control.refresh_token` 在不断开连接的情况下刷新凭证                   |
 
 > **参考**: Slack RTM 使用 Upgrade 阶段 token 认证。Discord Gateway 在 init 握手中携带 token。

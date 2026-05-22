@@ -14,7 +14,6 @@ type HandlerDeps struct {
 	Hub           *Hub
 	SM            SessionManager
 	Auth          *security.Authenticator
-	JWTValidator  *security.JWTValidator
 	Bridge        *Bridge
 	SkillsLocator SkillsLocator
 }

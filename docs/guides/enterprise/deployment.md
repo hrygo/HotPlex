@@ -23,7 +23,7 @@ description: Production deployment, security hardening, and operational best pra
 
 ```bash
 make build
-cp configs/env.example .env   # 至少设置 HOTPLEX_JWT_SECRET、HOTPLEX_ADMIN_TOKEN_1
+cp configs/env.example .env   # 至少设置 HOTPLEX_SECURITY_API_KEY_1、HOTPLEX_ADMIN_TOKEN_1
 ./hotplex gateway start
 
 # 注册为系统服务（Linux/macOS/Windows）
@@ -36,7 +36,7 @@ hotplex service install --level system  # 系统级（需 sudo）
 ```bash
 docker run -d --name hotplex --init --restart unless-stopped \
   -p 8888:8888 -p 9999:9999 \
-  -e HOTPLEX_JWT_SECRET="${JWT_SECRET}" \
+  -e HOTPLEX_SECURITY_API_KEY_1="${API_KEY}" \
   -e HOTPLEX_ADMIN_TOKEN_1="${ADMIN_TOKEN}" \
   -v hotplex-data:/var/lib/hotplex/data \
   -v hotplex-logs:/var/log/hotplex \
@@ -77,12 +77,16 @@ security:
   allowed_origins: ["https://app.yourdomain.com"]
 ```
 
-### 2.2 JWT 认证
+### 2.2 API Key + Bot ID 认证
 
-ES256（ECDSA P-256）签名，**禁止 HS256**。JWT 包含 `sub`（用户）、`bot_id`（Bot 隔离）、`scopes`（权限列表），Gateway 验证 `aud: "hotplex-gateway"`。
+请求通过 `X-API-Key` Header 或 `?api_key=` Query Param 携带密钥。Bot ID 通过 `X-Bot-ID` Header 或 `bot_id` 查询参数指定。
 
 ```bash
-export HOTPLEX_JWT_SECRET="$(openssl rand -base64 32 | tr -d '\n')"  # 不要写入配置文件
+# API Key 认证（编号式环境变量支持无损轮转）
+HOTPLEX_SECURITY_API_KEY_1=ak-xxxxx   # 请求头：X-API-Key: ak-xxxxx
+
+# Bot ID 指定（多 Bot 隔离）
+X-Bot-ID: your-bot-id
 ```
 
 ### 2.3 API Key + Admin Token
@@ -172,7 +176,7 @@ Docker 需同时配置容器级限制（`deploy.resources.limits: cpus 4, memory
 
 ### 路由 + 工作目录隔离
 
-JWT `bot_id` claim 实现 session 路由隔离。Per-bot `work_dir` 实现文件系统隔离：
+`X-Bot-ID` Header 实现 session 路由隔离。Per-bot `work_dir` 实现文件系统隔离：
 
 ```yaml
 messaging:

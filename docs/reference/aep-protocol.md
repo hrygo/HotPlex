@@ -71,7 +71,7 @@ WebSocket 连接建立后的**第一帧**必须是 `init`，30 秒超时。
     "version": "aep/v1",
     "worker_type": "claude_code",
     "session_id": "sess_xxx",
-    "auth": { "token": "<jwt>" },
+    "auth": { "token": "<api-key>" },
     "config": {
       "model": "claude-sonnet-4-6",
       "allowed_tools": ["read_file", "write_file"],

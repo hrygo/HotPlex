@@ -17,7 +17,7 @@ npm install hotplex-client
 # 或从 examples/typescript-client/ 本地引用
 ```
 
-依赖：`ws`（WebSocket 客户端）、`eventemitter3`（类型安全事件分发）、`jose`（JWT 工具）。
+依赖：`ws`（WebSocket 客户端）、`eventemitter3`（类型安全事件分发）。
 
 ## 快速开始
 
@@ -61,7 +61,7 @@ const client = new HotPlexClient({
   url: 'ws://localhost:8888/ws',          // 必填：Gateway WebSocket 地址
   workerType: WorkerType.ClaudeCode,       // 必填：Worker 类型
   apiKey: 'ak-xxx',                        // X-API-Key header（可选）
-  authToken: 'eyJ...',                     // JWT Bearer token（可选）
+  authToken: 'your-api-key',                // 延迟浏览器认证（可选）
   reconnect: {
     enabled: true,                         // 启用自动重连（默认 true）
     maxAttempts: 10,                       // 最大重连次数（默认 10）

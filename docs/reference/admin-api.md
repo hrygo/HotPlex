@@ -219,17 +219,17 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 
 ## Gateway API 端点
 
-Gateway API（`/api/sessions`）监听在网关主端口（`8888`），面向客户端 SDK 和 WebSocket 连接，使用 API Key 或 JWT 认证（非 Bearer Token）。
+Gateway API（`/api/sessions`）监听在网关主端口（`8888`），面向客户端 SDK 和 WebSocket 连接，使用 API Key 认证（非 Bearer Token）。
 
 | 方法 | 路径 | 认证 | 说明 |
 |------|------|------|------|
-| GET | `/api/sessions` | API Key / JWT | 列出当前用户的会话 |
-| POST | `/api/sessions` | API Key / JWT | 创建会话 |
-| GET | `/api/sessions/{id}` | API Key / JWT | 获取单个会话 |
-| DELETE | `/api/sessions/{id}` | API Key / JWT | 删除会话 |
-| POST | `/api/sessions/{id}/cd` | API Key / JWT | 切换工作目录 |
-| GET | `/api/sessions/{id}/history` | API Key / JWT | 获取会话历史 |
-| GET | `/api/sessions/{id}/events` | API Key / JWT | 获取会话事件流 |
+| GET | `/api/sessions` | API Key | 列出当前用户的会话 |
+| POST | `/api/sessions` | API Key | 创建会话 |
+| GET | `/api/sessions/{id}` | API Key | 获取单个会话 |
+| DELETE | `/api/sessions/{id}` | API Key | 删除会话 |
+| POST | `/api/sessions/{id}/cd` | API Key | 切换工作目录 |
+| GET | `/api/sessions/{id}/history` | API Key | 获取会话历史 |
+| GET | `/api/sessions/{id}/events` | API Key | 获取会话事件流 |
 
 所有 Gateway API 端点启用 CORS（`Access-Control-Allow-Origin: *`），支持 `GET`、`POST`、`DELETE`、`OPTIONS` 方法。
 

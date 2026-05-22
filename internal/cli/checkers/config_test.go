@@ -15,8 +15,7 @@ import (
 func resetConfigPath() { SetConfigPath("") }
 
 // Tests using SetConfigPath cannot use t.Parallel because configPath is a
-// package-level mutable variable shared with checkers in other files
-// (e.g. filePermsChecker, resolveJWTSecret) that also read it.
+// package-level mutable variable shared with checkers in other files.
 
 func TestSetConfigPath(t *testing.T) {
 	SetConfigPath("/some/path/config.yaml")
@@ -222,8 +221,6 @@ func TestExtractPort(t *testing.T) {
 
 func TestConfigEnvVars_Missing(t *testing.T) {
 	// t.Setenv + package-level configPath — cannot use t.Parallel.
-	t.Setenv("JWT_SECRET", "")
-	t.Setenv("HOTPLEX_JWT_SECRET", "")
 	t.Setenv("ADMIN_TOKEN", "")
 	t.Setenv("HOTPLEX_ADMIN_TOKEN_1", "")
 
@@ -232,13 +229,11 @@ func TestConfigEnvVars_Missing(t *testing.T) {
 
 	require.Equal(t, cli.StatusWarn, d.Status)
 	require.NotNil(t, d.FixFunc)
-	require.Contains(t, d.Detail, "JWT_SECRET")
 	require.Contains(t, d.Detail, "ADMIN_TOKEN")
 }
 
 func TestConfigEnvVars_Present(t *testing.T) {
 	// t.Setenv — cannot use t.Parallel.
-	t.Setenv("JWT_SECRET", "my-jwt-secret-value")
 	t.Setenv("ADMIN_TOKEN", "my-admin-token-value")
 
 	c := configEnvVarsChecker{}
@@ -255,8 +250,6 @@ func TestConfigEnvVars_FixFunc(t *testing.T) {
 	require.NoError(t, os.Chdir(dir))
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	t.Setenv("JWT_SECRET", "")
-	t.Setenv("HOTPLEX_JWT_SECRET", "")
 	t.Setenv("ADMIN_TOKEN", "")
 	t.Setenv("HOTPLEX_ADMIN_TOKEN_1", "")
 
@@ -268,7 +261,6 @@ func TestConfigEnvVars_FixFunc(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(dir, ".env"))
 	require.NoError(t, err)
-	require.Contains(t, string(data), "HOTPLEX_JWT_SECRET=")
 	require.Contains(t, string(data), "HOTPLEX_ADMIN_TOKEN_1=")
 }
 
@@ -295,31 +287,9 @@ db:
 	require.Contains(t, d.Detail, "Slack and Feishu")
 }
 
-func TestConfigRequired_MissingJWT(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-	dbDir := filepath.Join(dir, "data")
-	require.NoError(t, os.MkdirAll(dbDir, 0o755))
-	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n"
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
-
-	defer resetConfigPath()
-	SetConfigPath(path)
-
-	c := configRequiredChecker{}
-	d := c.Check(context.Background())
-
-	require.Equal(t, cli.StatusFail, d.Status)
-	require.Contains(t, d.Detail, "security.jwt_secret")
-}
-
 func TestConfigRequired_AllPresent(t *testing.T) {
 	// t.Setenv — cannot use t.Parallel.
-	// JWTSecret has mapstructure:"-" and is loaded via SecretsProvider, not from
-	// config file. The checker calls config.Load with empty LoadOptions, so
-	// JWTSecret is always empty. This test only verifies that the messaging
-	// check passes when Slack is enabled — JWT will still be reported missing.
-	t.Setenv("JWT_SECRET", "dGVzdC1zZWNyZXQta2V5LWZvci1qd3Q=")
+	// config file. The checker calls config.Load.
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -334,10 +304,7 @@ func TestConfigRequired_AllPresent(t *testing.T) {
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
 
-	// Messaging is enabled so no messaging warning; JWT is still missing
-	// because the checker has no SecretsProvider.
-	require.Equal(t, cli.StatusFail, d.Status)
-	require.Contains(t, d.Detail, "security.jwt_secret")
+	require.Equal(t, cli.StatusPass, d.Status)
 }
 
 func TestConfigRequired_EmptyPath(t *testing.T) {
