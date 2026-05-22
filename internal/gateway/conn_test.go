@@ -484,8 +484,8 @@ func (m *mockSessionStoreForBotID) GetExpiredIdle(ctx context.Context, now time.
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockSessionStoreForBotID) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
-	args := m.Called(ctx, cutoff)
+func (m *mockSessionStoreForBotID) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+	args := m.Called(ctx, cronCutoff, defaultCutoff)
 	return args.Error(0)
 }
 

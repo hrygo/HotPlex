@@ -20,7 +20,7 @@ type Store interface {
 	List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error)
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
-	DeleteTerminated(ctx context.Context, cutoff time.Time) error
+	DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error
 	DeletePhysical(ctx context.Context, id string) error
 	Compact(ctx context.Context, threshold float64) error
 	GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error)
@@ -86,7 +86,7 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 		info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
 		info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
 		info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
-		string(ctxJSON),
+		string(ctxJSON), info.Source,
 	)
 	if err != nil {
 		return fmt.Errorf("session store: upsert: %w", err)
@@ -105,7 +105,7 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 	err := sc.Scan(
 		&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State, &info.BotID,
 		&info.Platform, &platformKeyStr, &info.WorkDir, &info.Title,
-		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON,
+		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON, &info.Source,
 	)
 	if err != nil {
 		return nil, err
@@ -196,8 +196,8 @@ func (s *SQLiteStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]stri
 }
 
 // Events lifecycle is managed independently — session deletion does not cascade to events.
-func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
-	_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cutoff)
+func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+	_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
 	if err != nil {
 		return fmt.Errorf("session store: delete terminated: %w", err)
 	}

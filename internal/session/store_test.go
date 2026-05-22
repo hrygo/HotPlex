@@ -173,11 +173,46 @@ func TestSQLiteStore_DeleteTerminated(t *testing.T) {
 	store, _ := helperDB(t)
 	ctx := context.Background()
 
-	helperUpsert(t, store, "sess_term", "user1", events.StateTerminated)
+	now := time.Now()
+	// Cron session: terminated 25h ago → should be deleted (cutoff 24h)
+	require.NoError(t, store.Upsert(ctx, &SessionInfo{
+		ID: "cron_old", UserID: "u1", WorkerType: "claude_code",
+		State: events.StateTerminated, Source: SourceCron,
+		CreatedAt: now.Add(-25 * time.Hour), UpdatedAt: now.Add(-25 * time.Hour),
+	}))
+	// Normal session: terminated 8d ago → should be deleted (cutoff 7d)
+	require.NoError(t, store.Upsert(ctx, &SessionInfo{
+		ID: "normal_old", UserID: "u1", WorkerType: "claude_code",
+		State:     events.StateTerminated,
+		CreatedAt: now.Add(-8 * 24 * time.Hour), UpdatedAt: now.Add(-8 * 24 * time.Hour),
+	}))
+	// Cron session: terminated 12h ago → should survive (cutoff 24h)
+	require.NoError(t, store.Upsert(ctx, &SessionInfo{
+		ID: "cron_recent", UserID: "u1", WorkerType: "claude_code",
+		State: events.StateTerminated, Source: SourceCron,
+		CreatedAt: now.Add(-12 * time.Hour), UpdatedAt: now.Add(-12 * time.Hour),
+	}))
+	// Normal session: terminated 3d ago → should survive (cutoff 7d)
+	require.NoError(t, store.Upsert(ctx, &SessionInfo{
+		ID: "normal_recent", UserID: "u1", WorkerType: "claude_code",
+		State:     events.StateTerminated,
+		CreatedAt: now.Add(-3 * 24 * time.Hour), UpdatedAt: now.Add(-3 * 24 * time.Hour),
+	}))
 
-	cutoff := time.Now().Add(time.Hour)
-	err := store.DeleteTerminated(ctx, cutoff)
+	cronCutoff := now.Add(-24 * time.Hour)
+	defaultCutoff := now.Add(-7 * 24 * time.Hour)
+	err := store.DeleteTerminated(ctx, cronCutoff, defaultCutoff)
 	require.NoError(t, err)
+
+	_, err = store.Get(ctx, "cron_old")
+	require.ErrorIs(t, err, ErrSessionNotFound, "old cron session should be deleted")
+	_, err = store.Get(ctx, "normal_old")
+	require.ErrorIs(t, err, ErrSessionNotFound, "old normal session should be deleted")
+
+	_, err = store.Get(ctx, "cron_recent")
+	require.NoError(t, err, "recent cron session should survive")
+	_, err = store.Get(ctx, "normal_recent")
+	require.NoError(t, err, "recent normal session should survive")
 }
 
 // ─── SQLiteStore: GetSessionsByState ─────────────────────────────────────────

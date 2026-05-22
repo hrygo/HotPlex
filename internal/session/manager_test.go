@@ -54,8 +54,8 @@ func (m *mockStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockStore) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
-	args := m.Called(ctx, cutoff)
+func (m *mockStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+	args := m.Called(ctx, cronCutoff, defaultCutoff)
 	return args.Error(0)
 }
 
@@ -1433,7 +1433,7 @@ func TestManager_GC_ZombieDetection(t *testing.T) {
 	store.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
 	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
-	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time")).Return(nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(nil)
 
 	m.gc(ctx)
 
@@ -1476,7 +1476,7 @@ func TestManager_GC_NoZombieWhenRecentIO(t *testing.T) {
 
 	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
-	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time")).Return(nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(nil)
 
 	m.gc(ctx)
 
@@ -1500,7 +1500,7 @@ func TestManager_GC_ExpiredMaxLifetime(t *testing.T) {
 		Return([]string{"sess_maxlife"}, nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).
 		Return([]string(nil), nil)
-	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time")).
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).
 		Return(nil)
 	store.On("Close").Return(nil)
 	m, err := NewManager(ctx, nil, cfg, nil, store)
@@ -1541,7 +1541,7 @@ func TestManager_GC_ExpiredIdleTimeout(t *testing.T) {
 		Return([]string(nil), nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).
 		Return([]string{"sess_idle_exp"}, nil)
-	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time")).
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).
 		Return(nil)
 	store.On("Close").Return(nil)
 	m, err := NewManager(ctx, nil, cfg, nil, store)
@@ -1581,8 +1581,7 @@ func TestManager_GC_NoRetentionCleanup(t *testing.T) {
 		Return([]string(nil), nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).
 		Return([]string(nil), nil)
-	// DeleteTerminated is NOT expected — retention cleanup is intentionally
-	// removed so that TERMINATED records serve as "resume decision flags".
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(nil)
 	store.On("Close").Return(nil)
 
 	m, err := NewManager(ctx, nil, cfg, nil, store)
@@ -1603,6 +1602,7 @@ func TestManager_GC_TerminatedSessionPreserved(t *testing.T) {
 		Return([]string(nil), nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).
 		Return([]string(nil), nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(nil)
 	store.On("Close").Return(nil)
 
 	m, err := NewManager(ctx, nil, cfg, nil, store)
@@ -1646,14 +1646,14 @@ func TestManager_GC_TerminatedSession_DBError_NoImpact(t *testing.T) {
 	store := new(mockStore)
 	store.Test(t)
 
-	// Even if the store had a DeleteTerminated method that errored, GC should
-	// be unaffected because retention cleanup is no longer performed.
+	// DeleteTerminated error is logged but does not propagate.
 	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).
 		Return([]string(nil), errors.New("db error"))
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).
 		Return([]string(nil), errors.New("db error"))
 	store.On("Close").Return(nil)
 
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(errors.New("db error"))
 	m, err := NewManager(ctx, nil, cfg, nil, store)
 	require.NoError(t, err)
 
@@ -1694,7 +1694,7 @@ func TestManager_GC_NoPanicOnStoreErrors(t *testing.T) {
 		Return([]string(nil), errors.New("db error"))
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).
 		Return([]string(nil), errors.New("db error"))
-	// DeleteTerminated no longer called — retention cleanup removed.
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(errors.New("db error"))
 	store.On("Close").Return(nil)
 
 	m, err := NewManager(ctx, nil, cfg, nil, store)
@@ -2344,6 +2344,7 @@ func TestGC_EvictsOldTerminatedSessions(t *testing.T) {
 	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
 	store.On("Close").Return(nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(nil)
 
 	m, err := NewManager(ctx, nil, cfg, nil, store)
 	require.NoError(t, err)

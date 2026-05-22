@@ -60,6 +60,11 @@ type Manager struct {
 // After this duration, they are evicted from the in-memory map (DB records preserved).
 const terminatedSessionTTL = 24 * time.Hour
 
+// Session source constants — used for differential DB retention.
+const (
+	SourceCron = "cron" // cron-triggered session (24h retention)
+)
+
 // runningIndex helpers — use riMu (independent of m.mu/ms.mu) to avoid lock ordering issues.
 
 func (m *Manager) addToRunningIndex(id string) {
@@ -137,6 +142,9 @@ type SessionInfo struct {
 	// Title is the user-facing session name. Used as DeriveSessionKey input for WebChat sessions.
 	// Empty for Slack/Feishu sessions (they use DerivePlatformSessionKey instead).
 	Title string `json:"title,omitempty"`
+	// Source identifies the session origin: "" (user-initiated) or "cron" (cron-triggered).
+	// Used for differential DB retention — cron sessions are cleaned up after 24h vs 7d for normal.
+	Source string `json:"source,omitempty"`
 }
 
 // NewManager creates a new session manager using the provided Store.
@@ -175,6 +183,10 @@ func (m *Manager) Create(ctx context.Context, id, userID string, workerType work
 // CreateWithBot creates a new session with explicit bot_id and persists it to SQLite.
 func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title string) (*SessionInfo, error) {
 	now := time.Now()
+	source := ""
+	if _, isCron := platformKey["cron_job_id"]; isCron {
+		source = SourceCron
+	}
 	info := &SessionInfo{
 		ID:           id,
 		UserID:       userID,
@@ -189,6 +201,7 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, w
 		PlatformKey:  platformKey,
 		WorkDir:      workDir,
 		Title:        title,
+		Source:       source,
 	}
 
 	if err := m.store.Upsert(ctx, info); err != nil {
@@ -1066,6 +1079,17 @@ func (m *Manager) gc(ctx context.Context) {
 	if evicted > 0 {
 		m.log.Info("session: gc evicted TERMINATED sessions from memory",
 			"count", evicted, "ttl", terminatedSessionTTL)
+	}
+	// 4. Delete old TERMINATED sessions from DB with source-based retention.
+	// Cron sessions: CronTermRetention, normal sessions: TermRetention. Events are not cascaded.
+	cfg := m.cfg
+	if m.cfgStore != nil {
+		cfg = m.cfgStore.Load()
+	}
+	cronCutoff := now.Add(-cfg.Session.CronTermRetention)
+	defaultCutoff := now.Add(-cfg.Session.TermRetention)
+	if err := m.store.DeleteTerminated(ctx, cronCutoff, defaultCutoff); err != nil {
+		m.log.Error("session: gc (delete_terminated) failed", "err", err)
 	}
 }
 

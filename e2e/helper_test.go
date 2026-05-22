@@ -258,8 +258,8 @@ func (m *mockStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockStore) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
-	args := m.Called(ctx, cutoff)
+func (m *mockStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+	args := m.Called(ctx, cronCutoff, defaultCutoff)
 	return args.Error(0)
 }
 
@@ -320,7 +320,7 @@ func setupTestGateway(t *testing.T) *testGateway {
 	store.On("Close").Return(nil)
 	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string{}, nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string{}, nil)
-	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time")).Return(nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(nil)
 	store.On("List", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("int"), mock.AnythingOfType("int")).Return([]*session.SessionInfo{}, nil)
 	// Get falls back to store when session is not in Manager's in-memory map.
 	// Return not-found for all store lookups (Manager holds sessions in memory after Create).

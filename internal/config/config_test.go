@@ -21,6 +21,8 @@ func TestDefault(t *testing.T) {
 	require.Equal(t, 5, cfg.Pool.MaxIdlePerUser)
 	require.Equal(t, 7*24*time.Hour, cfg.Session.RetentionPeriod)
 	require.Equal(t, 1*time.Minute, cfg.Session.GCScanInterval)
+	require.Equal(t, 7*24*time.Hour, cfg.Session.TermRetention)
+	require.Equal(t, 24*time.Hour, cfg.Session.CronTermRetention)
 	require.False(t, cfg.Security.TLSEnabled)
 	require.True(t, cfg.Admin.Enabled)
 	require.Equal(t, "localhost:9999", cfg.Admin.Addr)

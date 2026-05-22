@@ -503,9 +503,11 @@ type SecurityConfig struct {
 
 // SessionConfig holds session lifecycle settings.
 type SessionConfig struct {
-	RetentionPeriod time.Duration `mapstructure:"retention_period"`
-	GCScanInterval  time.Duration `mapstructure:"gc_scan_interval"`
-	MaxConcurrent   int           `mapstructure:"max_concurrent"`
+	RetentionPeriod   time.Duration `mapstructure:"retention_period"`    // max session lifetime (default 7d)
+	GCScanInterval    time.Duration `mapstructure:"gc_scan_interval"`    // GC scan interval (default 1m)
+	MaxConcurrent     int           `mapstructure:"max_concurrent"`      // max concurrent sessions
+	TermRetention     time.Duration `mapstructure:"term_retention"`      // DB retention for terminated sessions (default 7d)
+	CronTermRetention time.Duration `mapstructure:"cron_term_retention"` // DB retention for terminated cron sessions (default 24h)
 }
 
 // PoolConfig holds session pool settings.
@@ -611,9 +613,11 @@ func Default() *Config {
 			AllowedOrigins: []string{"*"},
 		},
 		Session: SessionConfig{
-			RetentionPeriod: 7 * 24 * time.Hour,
-			GCScanInterval:  1 * time.Minute,
-			MaxConcurrent:   1000,
+			RetentionPeriod:   7 * 24 * time.Hour,
+			GCScanInterval:    1 * time.Minute,
+			MaxConcurrent:     1000,
+			TermRetention:     7 * 24 * time.Hour,
+			CronTermRetention: 24 * time.Hour,
 		},
 		Pool: PoolConfig{
 			MinSize:          0,
@@ -818,6 +822,8 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("admin.addr")
 	_ = v.BindEnv("session.max_concurrent")
 	_ = v.BindEnv("session.retention_period")
+	_ = v.BindEnv("session.term_retention")
+	_ = v.BindEnv("session.cron_term_retention")
 	_ = v.BindEnv("pool.max_size")
 	_ = v.BindEnv("pool.max_idle_per_user")
 	_ = v.BindEnv("pool.max_memory_per_user")
