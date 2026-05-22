@@ -33,8 +33,8 @@ public class QuickStart {
         if (gatewayUrl == null || gatewayUrl.isEmpty()) {
             gatewayUrl = DEFAULT_GATEWAY_URL;
         }
-        String signingKey = System.getenv("HOTPLEX_API_KEY");
-        if (signingKey == null || signingKey.isEmpty()) {
+        String apiKey = System.getenv("HOTPLEX_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
             System.err.println("Error: HOTPLEX_API_KEY environment variable is required");
             System.err.println("Example: export HOTPLEX_API_KEY=your-api-key");
             System.exit(1);
@@ -50,7 +50,7 @@ public class QuickStart {
         try (HotPlexClient client = HotPlexClient.builder()
                 .url(gatewayUrl)
                 .workerType("claude-code")
-                .apiKey(signingKey)
+                .apiKey(apiKey)
                 .botId(botId)
                 .build()) {
 

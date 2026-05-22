@@ -174,14 +174,13 @@ Risky / Network / System 类工具在开发模式下可用，但 Bash 命令受�
 |---|--------|------|
 | 1 | Gateway 绑定 localhost，未暴露公网 | ☐ |
 | 2 | 至少配置一个 API Key（生产环境） | ☐ |
-| 3 | Bot ID 隔离验证生效 | ☐ |
-| 4 | `bot_id` 隔离验证生效 | ☐ |
-| 5 | SSRF BlockedCIDRs 覆盖私有/元数据地址 | ☐ |
-| 6 | Worker 命令白名单仅含 claude/opencode | ☐ |
-| 7 | `HOTPLEX_WORKER_` 前缀隔离正确配置 | ☐ |
-| 8 | 生产环境使用 `ProductionAllowedTools`（3 工具） | ☐ |
-| 9 | Output Limits 未被修改 | ☐ |
-| 10 | TLS 由反向代理终止 | ☐ |
+| 3 | Bot ID 隔离验证生效（Header + Query） | ☐ |
+| 4 | SSRF BlockedCIDRs 覆盖私有/元数据地址 | ☐ |
+| 5 | Worker 命令白名单仅含 claude/opencode | ☐ |
+| 6 | `HOTPLEX_WORKER_` 前缀隔离正确配置 | ☐ |
+| 7 | 生产环境使用 `ProductionAllowedTools`（3 工具） | ☐ |
+| 8 | Output Limits 未被修改 | ☐ |
+| 9 | TLS 由反向代理终止 | ☐ |
 
 ---
 
