@@ -3,6 +3,7 @@ package security
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"sync"
@@ -62,22 +63,25 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		return "", "", ErrUnauthorized
 	}
 
-	// Key lookup under RLock; map lookup is not constant-time
-	// but acceptable for API keys (small set, low timing sensitivity).
-	defer a.mu.RUnlock()
-
-	botID := BotIDFromRequest(r)
-
+	// Dev mode: no keys configured — allow all.
 	if len(a.validKey) == 0 {
-		// No keys configured — allow all (dev mode).
+		a.mu.RUnlock()
+		botID := BotIDFromRequest(r)
 		return "anonymous", botID, nil
 	}
 
-	if !a.validKey[key] {
+	// Key lookup using constant-time comparison to prevent timing attacks.
+	if !a.authenticateKey(key) {
+		a.mu.RUnlock()
 		return "", "", ErrUnauthorized
 	}
 
-	return a.resolveUserID(r.Context(), key), botID, nil
+	// Snapshot resolver under lock, then release before calling external resolver.
+	resolver := a.keyResolver
+	a.mu.RUnlock()
+
+	botID := BotIDFromRequest(r)
+	return resolveUserIDWith(r.Context(), key, resolver), botID, nil
 }
 
 // ReloadKeys dynamically replaces the set of valid API keys.
@@ -100,12 +104,28 @@ func (a *Authenticator) SetKeyResolver(r APIKeyResolver) {
 	a.mu.Unlock()
 }
 
+// authenticateKey performs constant-time comparison of the key against the valid key set.
+// Caller must hold at least RLock.
+func (a *Authenticator) authenticateKey(key string) bool {
+	for k := range a.validKey {
+		if subtle.ConstantTimeCompare([]byte(k), []byte(key)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveUserID returns the user identity for a valid API key.
 // Checks the resolver first; falls back to "api_user" if no mapping exists.
 // Caller must hold at least RLock.
 func (a *Authenticator) resolveUserID(ctx context.Context, key string) string {
-	if a.keyResolver != nil {
-		if uid, ok := a.keyResolver.Resolve(ctx, key); ok {
+	return resolveUserIDWith(ctx, key, a.keyResolver)
+}
+
+// resolveUserIDWith resolves user identity without holding any lock.
+func resolveUserIDWith(ctx context.Context, key string, resolver APIKeyResolver) string {
+	if resolver != nil {
+		if uid, ok := resolver.Resolve(ctx, key); ok {
 			return uid
 		}
 	}
@@ -145,7 +165,7 @@ func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string
 		return "anonymous", true
 	}
 
-	if !a.validKey[key] {
+	if !a.authenticateKey(key) {
 		return "", false
 	}
 	return a.resolveUserID(ctx, key), true
@@ -153,6 +173,13 @@ func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string
 
 // BotIDFromRequest extracts the bot ID from X-Bot-ID header or bot_id query param.
 // Returns "" if not provided (no bot isolation).
+//
+// Trust boundary: Bot ID is NOT cryptographically bound to the API key.
+// Any authenticated client can specify any bot ID. This is acceptable because:
+// 1. Bot ID determines routing behavior (which bot configuration to use), not authorization.
+// 2. API key authentication already gates access at the connection level.
+// 3. Cross-bot data isolation is enforced downstream by session key derivation.
+// If API-key-to-bot-ID binding is required, implement a KeyBotBinding resolver.
 func BotIDFromRequest(r *http.Request) string {
 	if v := r.Header.Get(botIDHeader); v != "" {
 		return v

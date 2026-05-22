@@ -12,6 +12,13 @@ paths:
 
 Bot ID 通过 `X-Bot-ID` HTTP header 或 `bot_id` query param 传输。服务端通过 `security.BotIDFromRequest(r)` 提取，无需 JWT。
 
+### 信任边界
+
+Bot ID **未与 API Key 密码学绑定**——任何已认证客户端可指定任意 bot ID。这是可接受的设计：
+1. Bot ID 仅决定路由行为（使用哪套 bot 配置），不决定授权
+2. API Key 认证已在连接层网关限制访问
+3. 跨 Bot 数据隔离由下游 session key 派生强制执行
+
 ### 多 Bot 隔离
 连接中的 `botID` 必须与请求的 Session 所属 Bot 精确匹配，禁止跨 Bot 操作。
 
