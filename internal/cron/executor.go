@@ -137,14 +137,11 @@ func (e *Executor) waitForCompletion(ctx context.Context, sessionID string, time
 // HasCLIDelivery returns true if the job has sufficient platform info
 // for CLI-based result delivery.
 func HasCLIDelivery(job *CronJob) bool {
-	switch job.Platform {
-	case "slack":
-		return job.PlatformKey["channel_id"] != ""
-	case "feishu":
-		return job.PlatformKey["chat_id"] != ""
-	default:
+	key, ok := RequiredPlatformKey[job.Platform]
+	if !ok {
 		return false
 	}
+	return job.PlatformKey[key] != ""
 }
 
 // buildDeliverySuffix appends CLI delivery instructions to the cron prompt.
@@ -166,7 +163,7 @@ func buildDeliverySuffix(job *CronJob) string {
 }
 
 func buildSlackDelivery(job *CronJob) string {
-	ch := job.PlatformKey["channel_id"]
+	ch := job.PlatformKey[RequiredPlatformKey["slack"]]
 	if ch == "" {
 		return ""
 	}
@@ -178,9 +175,14 @@ func buildSlackDelivery(job *CronJob) string {
 }
 
 func buildFeishuDelivery(job *CronJob) string {
-	chatID := job.PlatformKey["chat_id"]
+	chatID := job.PlatformKey[RequiredPlatformKey["feishu"]]
 	if chatID == "" {
 		return ""
+	}
+	msgID := job.PlatformKey["message_id"]
+	if msgID != "" {
+		cmd := fmt.Sprintf("lark-cli im +messages-reply --as bot --message-id %s --markdown \"结果内容\"", msgID)
+		return fmt.Sprintf(deliveryBlockFmt, job.Name, cmd)
 	}
 	cmd := fmt.Sprintf("lark-cli im +messages-send --as bot --chat-id %s --markdown \"结果内容\"", chatID)
 	return fmt.Sprintf(deliveryBlockFmt, job.Name, cmd)

@@ -7,6 +7,14 @@ import (
 	"time"
 )
 
+// RequiredPlatformKey maps each platform to the PlatformKey field required
+// for CLI-based result delivery. Used by ValidateJob, HasCLIDelivery, and
+// buildDeliverySuffix to avoid duplicating platform→key mappings.
+var RequiredPlatformKey = map[string]string{
+	"feishu": "chat_id",
+	"slack":  "channel_id",
+}
+
 var threatPatterns = []string{
 	"ignore previous instructions",
 	"system prompt override",
@@ -59,15 +67,10 @@ func ValidateJob(job *CronJob) error {
 			return errors.New("cron: attached_session does not support cron expression schedules")
 		}
 	}
-	// Platform delivery validation: feishu requires chat_id, slack requires channel_id.
-	switch job.Platform {
-	case "feishu":
-		if job.PlatformKey["chat_id"] == "" {
-			return errors.New("cron: feishu platform requires chat_id in platform_key")
-		}
-	case "slack":
-		if job.PlatformKey["channel_id"] == "" {
-			return errors.New("cron: slack platform requires channel_id in platform_key")
+	// Platform delivery validation: each platform requires a specific key in platform_key.
+	if key, ok := RequiredPlatformKey[job.Platform]; ok {
+		if job.PlatformKey[key] == "" {
+			return fmt.Errorf("cron: %s platform requires %s in platform_key", job.Platform, key)
 		}
 	}
 	// Recurring jobs must have lifecycle constraints to prevent infinite execution.

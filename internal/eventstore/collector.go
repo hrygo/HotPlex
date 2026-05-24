@@ -413,9 +413,9 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 		return
 	}
 
-	committed := false
+	done := false
 	defer func() {
-		if !committed {
+		if !done {
 			_ = tx.Rollback()
 		}
 	}()
@@ -441,7 +441,7 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 	if err := tx.Commit(); err != nil {
 		c.log.Error("eventstore: batch commit", "err", err)
 	}
-	committed = true
+	done = true
 }
 
 // CaptureDeltaString accumulates a message.delta content string directly,

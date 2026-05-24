@@ -163,6 +163,9 @@ func resolvePlatform(cliPlatform string, cliPlatformKey map[string]string) (stri
 		if chatID := os.Getenv("GATEWAY_CHANNEL_ID"); chatID != "" {
 			key["chat_id"] = chatID
 		}
+		if msgID := os.Getenv("GATEWAY_THREAD_ID"); msgID != "" {
+			key["message_id"] = msgID
+		}
 		return "feishu", key
 	}
 

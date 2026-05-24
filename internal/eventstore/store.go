@@ -194,6 +194,8 @@ type EventStore interface {
 }
 
 // EventTx is a transaction handle for batch event and turn writes.
+// Callers MUST call either Commit or Rollback to release the underlying
+// write lock — failure to do so will deadlock all subsequent writes.
 type EventTx interface {
 	Append(ctx context.Context, event *StoredEvent) error
 	AppendTurn(ctx context.Context, turn *TurnWriteRequest) error
