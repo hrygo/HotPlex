@@ -107,7 +107,7 @@ func newHandlerWithRealStore(t *testing.T) (*Handler, *session.Manager, *Hub, fu
 	cleanup := func() { os.Remove(tmpPath) }
 
 	cfg.DB.Path = tmpPath
-	store, err := session.NewSQLiteStore(context.Background(), cfg)
+	store, err := session.NewSQLiteStore(context.Background(), cfg, nil)
 	require.NoError(t, err)
 	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, nil, store)
 	require.NoError(t, err)

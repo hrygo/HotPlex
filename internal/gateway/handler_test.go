@@ -1051,7 +1051,7 @@ func newBridgeWithCollector(t *testing.T) (*Bridge, *eventstore.SQLiteStore) {
 	)`)
 	require.NoError(t, err)
 
-	store := eventstore.NewSQLiteStore(db)
+	store := eventstore.NewSQLiteStore(db, nil)
 	collector := eventstore.NewCollector(store, slog.Default())
 
 	return &Bridge{log: slog.Default(), collector: collector, accum: make(map[string]*sessionAccumulator), turnsQuerier: store}, store

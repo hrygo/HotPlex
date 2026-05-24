@@ -31,6 +31,7 @@ import (
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/tracing"
 	"github.com/hrygo/hotplex/internal/webchat"
 	"github.com/hrygo/hotplex/internal/worker/claudecode"
@@ -294,9 +295,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	// Cron scheduler: init after Bridge, before messaging adapters.
 	if cfg.Cron.Enabled {
-		cronStore := cron.NewSQLiteStore(stores.session.DB(), log)
+		cronStore := cron.NewSQLiteStore(stores.session.DB(), log, stores.writeMu)
 		cronDelivery = cron.NewDelivery(log,
 			func(ctx context.Context, sessionID string) (string, error) {
+				stores.collector.Flush()
 				turns, err := stores.event.QueryTurns(ctx, sessionID, 1, 0)
 				if err != nil || len(turns) == 0 {
 					return "", err
@@ -354,7 +356,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Bridge:          bridge,
 		ConfigWatcher:   configWatcher,
 		CronScheduler:   cronScheduler,
-		ChatAccessStore: messaging.NewChatAccessStore(stores.session.DB(), log),
+		ChatAccessStore: messaging.NewChatAccessStore(stores.session.DB(), log, stores.writeMu),
 		DB:              stores.session.DB(),
 		DBResolver:      dbResolver,
 		ConfigPath:      configPath,
@@ -565,21 +567,24 @@ type gatewayStores struct {
 	session   *session.SQLiteStore
 	event     *eventstore.SQLiteStore
 	collector *eventstore.Collector
+	writeMu   *sqlutil.WriteMu
 }
 
 func initStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*gatewayStores, error) {
-	sessionStore, err := session.NewSQLiteStore(ctx, cfg)
+	writeMu := sqlutil.NewWriteMu()
+	sessionStore, err := session.NewSQLiteStore(ctx, cfg, writeMu)
 	if err != nil {
 		return nil, err
 	}
 
 	// EventStore shares the session store's *sql.DB (schema managed by goose migration 002).
-	eventStore := eventstore.NewSQLiteStore(sessionStore.DB())
+	eventStore := eventstore.NewSQLiteStore(sessionStore.DB(), writeMu)
 
 	return &gatewayStores{
 		session:   sessionStore,
 		event:     eventStore,
 		collector: eventstore.NewCollector(eventStore, log),
+		writeMu:   writeMu,
 	}, nil
 }
 

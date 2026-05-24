@@ -58,7 +58,7 @@ func newTestStore(t *testing.T) *SQLiteStore {
 		)`)
 	require.NoError(t, err)
 
-	return NewSQLiteStore(db, slog.Default())
+	return NewSQLiteStore(db, slog.Default(), nil)
 }
 
 func helperJob(name string) *CronJob {

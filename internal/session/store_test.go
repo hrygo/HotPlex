@@ -19,7 +19,7 @@ func helperDB(t *testing.T) (*SQLiteStore, *config.Config) {
 	cfg.DB.Path = filepath.Join(t.TempDir(), "test.db")
 	cfg.DB.WALMode = true
 
-	store, err := NewSQLiteStore(context.Background(), cfg)
+	store, err := NewSQLiteStore(context.Background(), cfg, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, cfg

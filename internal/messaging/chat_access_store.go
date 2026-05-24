@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/sqlutil"
 )
 
 // ChatAccessType classifies why the chat-entered event fired.
@@ -32,13 +34,14 @@ type ChatAccessRecord struct {
 
 // ChatAccessStore provides dedup + cooldown + persistence for chat-entered events.
 type ChatAccessStore struct {
-	db  *sql.DB
-	log *slog.Logger
+	db      *sql.DB
+	log     *slog.Logger
+	writeMu *sqlutil.WriteMu
 }
 
 // NewChatAccessStore creates a store backed by the shared SQLite connection.
-func NewChatAccessStore(db *sql.DB, log *slog.Logger) *ChatAccessStore {
-	return &ChatAccessStore{db: db, log: log}
+func NewChatAccessStore(db *sql.DB, log *slog.Logger, writeMu *sqlutil.WriteMu) *ChatAccessStore {
+	return &ChatAccessStore{db: db, log: log, writeMu: writeMu}
 }
 
 // Record inserts the event. Returns false (with nil error) when event_id
@@ -46,6 +49,10 @@ func NewChatAccessStore(db *sql.DB, log *slog.Logger) *ChatAccessStore {
 func (s *ChatAccessStore) Record(ctx context.Context, r ChatAccessRecord) (inserted bool, err error) {
 	now := time.Now().Unix()
 	r.CreatedAt = now
+	if s.writeMu != nil {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO chat_access_events (event_id, platform, chat_id, user_id, bot_id, last_message_at, welcome_sent, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

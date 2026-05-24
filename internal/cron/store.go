@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/sqlutil"
 )
 
 // ErrJobNotFound is returned when a job is not found in the store.
@@ -28,13 +30,14 @@ type Store interface {
 
 // SQLiteStore implements Store using SQLite.
 type SQLiteStore struct {
-	db  *sql.DB
-	log *slog.Logger
+	db      *sql.DB
+	log     *slog.Logger
+	writeMu *sqlutil.WriteMu
 }
 
 // NewSQLiteStore creates a new cron store backed by the given database.
-func NewSQLiteStore(db *sql.DB, log *slog.Logger) *SQLiteStore {
-	return &SQLiteStore{db: db, log: log.With("component", "cron_store")}
+func NewSQLiteStore(db *sql.DB, log *slog.Logger, writeMu *sqlutil.WriteMu) *SQLiteStore {
+	return &SQLiteStore{db: db, log: log.With("component", "cron_store"), writeMu: writeMu}
 }
 
 const defaultTimeout = 5 * time.Second
@@ -65,6 +68,10 @@ func (s *SQLiteStore) Create(ctx context.Context, job *CronJob) error {
 		return err
 	}
 
+	if s.writeMu != nil {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO cron_jobs (`+jobColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -89,6 +96,10 @@ func (s *SQLiteStore) Update(ctx context.Context, job *CronJob) error {
 		return err
 	}
 
+	if s.writeMu != nil {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE cron_jobs SET
 			name = ?, description = ?, enabled = ?,
@@ -120,6 +131,10 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
 
+	if s.writeMu != nil {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM cron_jobs WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("cron store: delete job: %w", err)
@@ -184,6 +199,10 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, id string, state CronJobS
 	}
 
 	now := time.Now().UnixMilli()
+	if s.writeMu != nil {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE cron_jobs SET state = ?, updated_at = ? WHERE id = ?`,
 		string(data), now, id,
@@ -204,6 +223,10 @@ func (s *SQLiteStore) SetEnabled(ctx context.Context, id string, enabled bool) e
 	defer cancel()
 
 	now := time.Now().UnixMilli()
+	if s.writeMu != nil {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE cron_jobs SET enabled = ?, updated_at = ? WHERE id = ?`,
 		boolToInt(enabled), now, id,

@@ -49,22 +49,29 @@ func IsStorable(eventType events.Kind) bool {
 }
 
 // captureRequest is a pending write for the background batch writer.
-// event and turn are mutually exclusive: one is set, the other is nil.
+// event, turn, and flush are mutually exclusive: exactly one is set.
 type captureRequest struct {
 	event *StoredEvent
 	turn  *TurnWriteRequest
+	flush chan struct{} // non-nil: flush marker; closed by runWriter after batch commit
 }
 
 func (r *captureRequest) sessionID() string {
 	if r.event != nil {
 		return r.event.SessionID
 	}
-	return r.turn.SessionID
+	if r.turn != nil {
+		return r.turn.SessionID
+	}
+	return ""
 }
 
 func kindOf(req *captureRequest) string {
 	if req.turn != nil {
 		return "turn"
+	}
+	if req.flush != nil {
+		return "flush"
 	}
 	return "event"
 }
@@ -260,6 +267,34 @@ func (c *Collector) CaptureTurn(turn *TurnWriteRequest) {
 	c.send(&captureRequest{turn: turn})
 }
 
+// Flush blocks until all pending writes in the capture channel have been
+// committed to the underlying store. Safe for concurrent use.
+// Returns immediately if the collector is closed.
+func (c *Collector) Flush() {
+	// Fast path: return immediately if already closed.
+	select {
+	case <-c.closeC:
+		return
+	default:
+	}
+
+	done := make(chan struct{})
+	select {
+	case c.captureC <- &captureRequest{flush: done}:
+	case <-c.closeC:
+		return
+	case <-time.After(5 * time.Second):
+		c.log.Warn("eventstore: flush send timeout")
+		return
+	}
+	select {
+	case <-done:
+	case <-c.closeC:
+	case <-time.After(5 * time.Second):
+		c.log.Warn("eventstore: flush wait timeout")
+	}
+}
+
 // Close drains the capture channel and flushes remaining events.
 func (c *Collector) Close() error {
 	// Swap accumulator maps under lock, flush outside to avoid deadlock.
@@ -312,6 +347,11 @@ func (c *Collector) runWriter() {
 			for {
 				select {
 				case req := <-c.captureC:
+					if req.flush != nil {
+						flush()
+						close(req.flush)
+						continue
+					}
 					batch = append(batch, req)
 				default:
 					flush()
@@ -319,6 +359,11 @@ func (c *Collector) runWriter() {
 				}
 			}
 		case req := <-c.captureC:
+			if req.flush != nil {
+				flush()
+				close(req.flush)
+				continue
+			}
 			batch = append(batch, req)
 			if len(batch) >= collectorBatchMax {
 				flush()
@@ -365,6 +410,13 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 		return
 	}
 
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
 	for _, req := range batch {
 		var err error
 		switch {
@@ -386,6 +438,7 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 	if err := tx.Commit(); err != nil {
 		c.log.Error("eventstore: batch commit", "err", err)
 	}
+	committed = true
 }
 
 // CaptureDeltaString accumulates a message.delta content string directly,

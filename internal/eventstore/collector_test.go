@@ -434,3 +434,80 @@ func TestCollector_CaptureReasoningStringEmptyContent(t *testing.T) {
 	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
 	require.Equal(t, "", data["content"])
 }
+
+func TestCollector_Flush(t *testing.T) {
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+	defer func() { _ = c.Close() }()
+
+	// Send events without waiting for timer flush.
+	c.Capture("s1", 1, events.Input, json.RawMessage(`{"content":"hello"}`), "inbound", SourceNormal)
+	c.Capture("s1", 2, events.Done, json.RawMessage(`{}`), "outbound", SourceNormal)
+
+	// Flush must make events queryable immediately (no 1s timer wait).
+	c.Flush()
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 2)
+	require.Equal(t, string(events.Input), page.Events[0].Type)
+	require.Equal(t, string(events.Done), page.Events[1].Type)
+}
+
+func TestCollector_FlushAfterClose(t *testing.T) {
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+
+	require.NoError(t, c.Close())
+
+	// Flush on a closed collector must return immediately without panic.
+	c.Flush()
+}
+
+func TestCollector_FlushConcurrent(t *testing.T) {
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+	defer func() { _ = c.Close() }()
+
+	const flushers = 5
+	done := make(chan struct{})
+	for i := range flushers {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			c.Capture("s1", int64(i+1), events.Done, json.RawMessage(`{}`), "outbound", SourceNormal)
+			c.Flush()
+		}()
+	}
+	for range flushers {
+		<-done
+	}
+
+	// All events must be persisted.
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, flushers)
+}
+
+func TestCollector_FlushTurn(t *testing.T) {
+	store := newTestStoreWithTurnsTable(t)
+	c := NewCollector(store, slog.Default())
+	defer func() { _ = c.Close() }()
+
+	// Capture a turn (the exact pattern used by cron delivery).
+	c.CaptureTurn(&TurnWriteRequest{
+		SessionID:  "s1",
+		Generation: 1,
+		TurnNum:    1,
+		Role:       "assistant",
+		Content:    "cron result",
+		Source:     SourceNormal,
+		CreatedAt:  time.Now().UnixMilli(),
+	})
+
+	c.Flush()
+
+	turns, err := store.QueryTurns(context.Background(), "s1", 1, 0)
+	require.NoError(t, err)
+	require.Len(t, turns, 1)
+	require.Equal(t, "cron result", turns[0].Content)
+}
