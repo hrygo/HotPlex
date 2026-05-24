@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/session"
@@ -49,9 +50,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 	// Merge platform context so the bridge can inject environment variables (like channel_id).
 	platformKey := make(map[string]string)
 	if job.PlatformKey != nil {
-		for k, v := range job.PlatformKey {
-			platformKey[k] = v
-		}
+		maps.Copy(platformKey, job.PlatformKey)
 	}
 	platformKey["cron_job_id"] = job.ID
 	title := fmt.Sprintf("cron:%s", job.Name)
@@ -179,12 +178,12 @@ func buildFeishuDelivery(job *CronJob) string {
 	if chatID == "" {
 		return ""
 	}
-	msgID := job.PlatformKey["message_id"]
-	if msgID != "" {
-		cmd := fmt.Sprintf("lark-cli im +messages-reply --as bot --message-id %s --markdown \"结果内容\"", msgID)
-		return fmt.Sprintf(deliveryBlockFmt, job.Name, cmd)
+	var cmd string
+	if msgID := job.PlatformKey["message_id"]; msgID != "" {
+		cmd = fmt.Sprintf("lark-cli im +messages-reply --as bot --message-id %s --markdown \"结果内容\"", msgID)
+	} else {
+		cmd = fmt.Sprintf("lark-cli im +messages-send --as bot --chat-id %s --markdown \"结果内容\"", chatID)
 	}
-	cmd := fmt.Sprintf("lark-cli im +messages-send --as bot --chat-id %s --markdown \"结果内容\"", chatID)
 	return fmt.Sprintf(deliveryBlockFmt, job.Name, cmd)
 }
 
