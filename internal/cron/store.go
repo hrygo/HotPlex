@@ -50,10 +50,10 @@ func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 }
 
 const jobColumns = `id, name, description, enabled,
-	schedule_kind, schedule_data, payload_kind, payload_data,
-	work_dir, bot_id, owner_id, platform, platform_key,
-	timeout_sec, delete_after_run, silent, max_retries, max_runs, expires_at,
-	state, created_at, updated_at`
+		schedule_kind, schedule_data, payload_kind, payload_data,
+		work_dir, bot_id, owner_id, platform, platform_key,
+		timeout_sec, delete_after_run, silent, max_retries, max_runs, expires_at,
+		state, created_at, updated_at`
 
 func (s *SQLiteStore) Create(ctx context.Context, job *CronJob) error {
 	if job.ID == "" {
@@ -68,23 +68,21 @@ func (s *SQLiteStore) Create(ctx context.Context, job *CronJob) error {
 		return err
 	}
 
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO cron_jobs (`+jobColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.ID, job.Name, job.Description, boolToInt(job.Enabled),
-		job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-		job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
-		job.TimeoutSec, boolToInt(job.DeleteAfterRun), boolToInt(job.Silent), job.MaxRetries, job.MaxRuns, job.ExpiresAt,
-		stateData, job.CreatedAtMs, job.UpdatedAtMs,
-	)
-	if err != nil {
-		return fmt.Errorf("cron store: create job: %w", err)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		_, err = s.db.ExecContext(ctx, `
+			INSERT INTO cron_jobs (`+jobColumns+`)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			job.ID, job.Name, job.Description, boolToInt(job.Enabled),
+			job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
+			job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
+			job.TimeoutSec, boolToInt(job.DeleteAfterRun), boolToInt(job.Silent), job.MaxRetries, job.MaxRuns, job.ExpiresAt,
+			stateData, job.CreatedAtMs, job.UpdatedAtMs,
+		)
+		if err != nil {
+			return fmt.Errorf("cron store: create job: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteStore) Update(ctx context.Context, job *CronJob) error {
@@ -96,54 +94,50 @@ func (s *SQLiteStore) Update(ctx context.Context, job *CronJob) error {
 		return err
 	}
 
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE cron_jobs SET
-			name = ?, description = ?, enabled = ?,
-			schedule_kind = ?, schedule_data = ?, payload_kind = ?, payload_data = ?,
-			work_dir = ?, bot_id = ?, owner_id = ?, platform = ?, platform_key = ?,
-			timeout_sec = ?, delete_after_run = ?, silent = ?, max_retries = ?,
-			max_runs = ?, expires_at = ?,
-			state = ?, updated_at = ?
-		WHERE id = ?`,
-		job.Name, job.Description, boolToInt(job.Enabled),
-		job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-		job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
-		job.TimeoutSec, boolToInt(job.DeleteAfterRun), boolToInt(job.Silent), job.MaxRetries,
-		job.MaxRuns, job.ExpiresAt,
-		stateData, job.UpdatedAtMs,
-		job.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("cron store: update job: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrJobNotFound, job.ID)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx, `
+			UPDATE cron_jobs SET
+				name = ?, description = ?, enabled = ?,
+				schedule_kind = ?, schedule_data = ?, payload_kind = ?, payload_data = ?,
+				work_dir = ?, bot_id = ?, owner_id = ?, platform = ?, platform_key = ?,
+				timeout_sec = ?, delete_after_run = ?, silent = ?, max_retries = ?,
+				max_runs = ?, expires_at = ?,
+				state = ?, updated_at = ?
+			WHERE id = ?`,
+			job.Name, job.Description, boolToInt(job.Enabled),
+			job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
+			job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
+			job.TimeoutSec, boolToInt(job.DeleteAfterRun), boolToInt(job.Silent), job.MaxRetries,
+			job.MaxRuns, job.ExpiresAt,
+			stateData, job.UpdatedAtMs,
+			job.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("cron store: update job: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("%w: %s", ErrJobNotFound, job.ID)
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
 
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM cron_jobs WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("cron store: delete job: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrJobNotFound, id)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx, `DELETE FROM cron_jobs WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("cron store: delete job: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("%w: %s", ErrJobNotFound, id)
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*CronJob, error) {
@@ -199,22 +193,20 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, id string, state CronJobS
 	}
 
 	now := time.Now().UnixMilli()
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE cron_jobs SET state = ?, updated_at = ? WHERE id = ?`,
-		string(data), now, id,
-	)
-	if err != nil {
-		return fmt.Errorf("cron store: update state: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrJobNotFound, id)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx,
+			`UPDATE cron_jobs SET state = ?, updated_at = ? WHERE id = ?`,
+			string(data), now, id,
+		)
+		if err != nil {
+			return fmt.Errorf("cron store: update state: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("%w: %s", ErrJobNotFound, id)
+		}
+		return nil
+	})
 }
 
 // SetEnabled updates the enabled flag for a job without touching other fields.
@@ -223,22 +215,20 @@ func (s *SQLiteStore) SetEnabled(ctx context.Context, id string, enabled bool) e
 	defer cancel()
 
 	now := time.Now().UnixMilli()
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE cron_jobs SET enabled = ?, updated_at = ? WHERE id = ?`,
-		boolToInt(enabled), now, id,
-	)
-	if err != nil {
-		return fmt.Errorf("cron store: set enabled: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrJobNotFound, id)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx,
+			`UPDATE cron_jobs SET enabled = ?, updated_at = ? WHERE id = ?`,
+			boolToInt(enabled), now, id,
+		)
+		if err != nil {
+			return fmt.Errorf("cron store: set enabled: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("%w: %s", ErrJobNotFound, id)
+		}
+		return nil
+	})
 }
 
 // UpsertByName inserts or updates a job by name (idempotent for YAML import).

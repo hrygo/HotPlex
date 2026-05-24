@@ -260,3 +260,54 @@ func TestCollector_DropNonStorable(t *testing.T) {
 	_, err := store.QueryBySession(context.Background(), "sess1", 0, CursorLatest, 10)
 	require.ErrorIs(t, err, ErrNotFound)
 }
+
+func TestSqliteTx_DoubleRelease(t *testing.T) {
+	store := newTestStoreWithWriteMu(t)
+	ctx := context.Background()
+
+	tx, err := store.BeginTx(ctx)
+	require.NoError(t, err)
+
+	_ = tx.Commit()
+	_ = tx.Rollback()
+
+	// Core assertion: writeMu is NOT deadlocked after Commit+Rollback.
+	require.NoError(t, store.writeMu.WithLock(func() error { return nil }))
+}
+
+func TestSqliteTx_RollbackThenCommit(t *testing.T) {
+	store := newTestStoreWithWriteMu(t)
+	ctx := context.Background()
+
+	tx, err := store.BeginTx(ctx)
+	require.NoError(t, err)
+
+	_ = tx.Rollback()
+	_ = tx.Commit()
+
+	require.NoError(t, store.writeMu.WithLock(func() error { return nil }))
+}
+
+func newTestStoreWithWriteMu(t *testing.T) *SQLiteStore {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := NewIndependentStore(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	store.writeMu = sqlutil.NewWriteMu()
+
+	_, err = store.db.Exec(`CREATE TABLE IF NOT EXISTS events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id TEXT NOT NULL,
+		seq INTEGER NOT NULL,
+		type TEXT NOT NULL,
+		data TEXT NOT NULL,
+		direction TEXT NOT NULL DEFAULT 'outbound',
+		source TEXT NOT NULL DEFAULT 'normal'
+			CHECK(source IN ('normal', 'crash', 'timeout', 'fresh_start')),
+		created_at INTEGER NOT NULL DEFAULT 0
+	)`)
+	require.NoError(t, err)
+	return store
+}

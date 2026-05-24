@@ -355,6 +355,9 @@ func (c *Collector) runWriter() {
 					batch = append(batch, req)
 				default:
 					flush()
+					if d := c.dropped.Load(); d > 0 {
+						c.log.Warn("eventstore: events dropped during lifetime", "count", d)
+					}
 					return
 				}
 			}

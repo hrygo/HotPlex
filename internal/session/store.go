@@ -85,20 +85,18 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 		}
 	}
 
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	_, err := s.db.ExecContext(ctx, queries["sessions.upsert_session"],
-		info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
-		info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
-		info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
-		string(ctxJSON), info.Source,
-	)
-	if err != nil {
-		return fmt.Errorf("session store: upsert: %w", err)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["sessions.upsert_session"],
+			info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
+			info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
+			info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
+			string(ctxJSON), info.Source,
+		)
+		if err != nil {
+			return fmt.Errorf("session store: upsert: %w", err)
+		}
+		return nil
+	})
 }
 
 type rowScanner interface{ Scan(dest ...any) error }
@@ -204,27 +202,23 @@ func (s *SQLiteStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]stri
 
 // Events lifecycle is managed independently — session deletion does not cascade to events.
 func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
-	if err != nil {
-		return fmt.Errorf("session store: delete terminated: %w", err)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
+		if err != nil {
+			return fmt.Errorf("session store: delete terminated: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	_, err := s.db.ExecContext(ctx, queries["store.delete_physical"], id)
-	if err != nil {
-		return fmt.Errorf("session store: delete physical: %w", err)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["store.delete_physical"], id)
+		if err != nil {
+			return fmt.Errorf("session store: delete physical: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteStore) Close() error {
@@ -232,28 +226,28 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) Compact(ctx context.Context, threshold float64) error {
-	if s.writeMu != nil {
-		s.writeMu.Lock()
-		defer s.writeMu.Unlock()
-	}
-	var pageCount, freeCount int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount); err != nil {
-		return fmt.Errorf("session store: compact page_count: %w", err)
-	}
-	if err := s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freeCount); err != nil {
-		return fmt.Errorf("session store: compact freelist_count: %w", err)
-	}
-	if pageCount == 0 || float64(freeCount)/float64(pageCount) < threshold {
-		return nil
-	}
-	s.log.Info("session store: VACUUM starting",
-		"page_count", pageCount, "free_count", freeCount,
-		"ratio", fmt.Sprintf("%.1f%%", float64(freeCount)/float64(pageCount)*100))
-	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		return fmt.Errorf("session store: compact checkpoint: %w", err)
-	}
-	_, err := s.db.ExecContext(ctx, "VACUUM")
-	return err
+	return s.writeMu.WithLock(func() error {
+		var pageCount, freeCount int
+		if err := s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount); err != nil {
+			return fmt.Errorf("session store: compact page_count: %w", err)
+		}
+		if err := s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freeCount); err != nil {
+			return fmt.Errorf("session store: compact freelist_count: %w", err)
+		}
+		if pageCount == 0 || float64(freeCount)/float64(pageCount) < threshold {
+			return nil
+		}
+		start := time.Now()
+		s.log.Info("session store: VACUUM starting",
+			"page_count", pageCount, "free_count", freeCount,
+			"ratio", fmt.Sprintf("%.1f%%", float64(freeCount)/float64(pageCount)*100))
+		if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+			return fmt.Errorf("session store: compact checkpoint: %w", err)
+		}
+		_, err := s.db.ExecContext(ctx, "VACUUM")
+		s.log.Info("session store: VACUUM completed", "duration", time.Since(start))
+		return err
+	})
 }
 
 func (s *SQLiteStore) GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error) {
