@@ -203,6 +203,54 @@ func TestValidateJob(t *testing.T) {
 			wantErr: true,
 			errPart: "max_runs is required",
 		},
+		{
+			name: "feishu without chat_id rejected",
+			job: func() *CronJob {
+				j := validJob()
+				j.Platform = "feishu"
+				j.PlatformKey = map[string]string{}
+				return j
+			}(),
+			wantErr: true,
+			errPart: "feishu platform requires chat_id",
+		},
+		{
+			name: "feishu with chat_id passes",
+			job: func() *CronJob {
+				j := validJob()
+				j.Platform = "feishu"
+				j.PlatformKey = map[string]string{"chat_id": "oc_123"}
+				return j
+			}(),
+		},
+		{
+			name: "slack without channel_id rejected",
+			job: func() *CronJob {
+				j := validJob()
+				j.Platform = "slack"
+				j.PlatformKey = map[string]string{}
+				return j
+			}(),
+			wantErr: true,
+			errPart: "slack platform requires channel_id",
+		},
+		{
+			name: "slack with channel_id passes",
+			job: func() *CronJob {
+				j := validJob()
+				j.Platform = "slack"
+				j.PlatformKey = map[string]string{"channel_id": "C123"}
+				return j
+			}(),
+		},
+		{
+			name: "cron platform needs no key",
+			job: func() *CronJob {
+				j := validJob()
+				j.Platform = "cron"
+				return j
+			}(),
+		},
 	}
 
 	for _, tt := range tests {

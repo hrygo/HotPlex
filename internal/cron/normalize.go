@@ -59,6 +59,17 @@ func ValidateJob(job *CronJob) error {
 			return errors.New("cron: attached_session does not support cron expression schedules")
 		}
 	}
+	// Platform delivery validation: feishu requires chat_id, slack requires channel_id.
+	switch job.Platform {
+	case "feishu":
+		if job.PlatformKey["chat_id"] == "" {
+			return errors.New("cron: feishu platform requires chat_id in platform_key")
+		}
+	case "slack":
+		if job.PlatformKey["channel_id"] == "" {
+			return errors.New("cron: slack platform requires channel_id in platform_key")
+		}
+	}
 	// Recurring jobs must have lifecycle constraints to prevent infinite execution.
 	if job.Schedule.Kind != ScheduleAt {
 		if job.MaxRuns <= 0 {
