@@ -89,7 +89,7 @@ func TestYAMLDefToJob(t *testing.T) {
 		WorkDir:       "/tmp",
 		BotID:         "bot1",
 		OwnerID:       "user1",
-		Platform:      "feishu",
+		Platform:      "cron",
 		TimeoutSec:    120,
 		MaxRetries:    3,
 		Silent:        true,
@@ -112,7 +112,7 @@ func TestYAMLDefToJob(t *testing.T) {
 	require.Equal(t, "/tmp", job.WorkDir)
 	require.Equal(t, "bot1", job.BotID)
 	require.Equal(t, "user1", job.OwnerID)
-	require.Equal(t, "feishu", job.Platform)
+	require.Equal(t, "cron", job.Platform)
 	require.Equal(t, 120, job.TimeoutSec)
 	require.Equal(t, 3, job.MaxRetries)
 	require.True(t, job.Silent)
