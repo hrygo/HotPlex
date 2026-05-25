@@ -480,12 +480,7 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 	case messaging.CmdControl:
 		conn := a.GetOrCreateConn(channelID, threadTS)
 		if conn != nil {
-			// NOTE: Lock-before-timeout is a pre-existing limitation — if another
-			// goroutine already holds handlerMu, this goroutine blocks at Lock()
-			// and the timeout does not protect this wait phase. Mitigated by the
-			// timeout on the holder side, which ensures the lock is eventually released.
-			conn.handlerMu.Lock()
-			defer conn.handlerMu.Unlock()
+			defer conn.lockHandlerMu()()
 		}
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
 		defer cmdCancel()
@@ -495,9 +490,7 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		conn := a.GetOrCreateConn(channelID, threadTS)
 		if conn != nil {
 			conn.messageTS = msgEvent.TimeStamp
-			// NOTE: Same lock-before-timeout limitation as CmdControl above.
-			conn.handlerMu.Lock()
-			defer conn.handlerMu.Unlock()
+			defer conn.lockHandlerMu()()
 		}
 		if a.isAssistantCapable.Load() && threadTS != "" {
 			_ = a.SetAssistantStatus(ctx, channelID, threadTS, "Processing "+cmd.Worker.Label+"...")
@@ -556,9 +549,7 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 		return fmt.Errorf("slack: failed to build envelope")
 	}
 
-	// NOTE: Same lock-before-timeout limitation as CmdControl/CmdWorker above.
-	conn.handlerMu.Lock()
-	defer conn.handlerMu.Unlock()
+	defer conn.lockHandlerMu()()
 	msgCtx, cancel := context.WithTimeout(ctx, handlerMsgTimeout)
 	defer cancel()
 	return a.Bridge().Handle(msgCtx, envelope, conn)
@@ -685,6 +676,11 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 
 	if err := a.Bridge().Handle(ctx, ctrlEnv, conn); err != nil {
 		a.Log.Warn("slack: text control command failed", "action", result.Label, "err", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
+				fmt.Sprintf("⚠️ %s timed out. Please try again.", result.Label))
+			return
+		}
 		// Provide user-friendly error message with details
 		errMsg := fmt.Sprintf("❌ Failed to execute %s: %s", result.Label, formatSecurityErrorSlack(err))
 		a.sendEphemeralOrPost(ctx, channelID, threadTS, userID, errMsg)
@@ -736,6 +732,11 @@ func (a *Adapter) handleTextWorkerCommand(ctx context.Context, teamID, channelID
 
 	if err := a.Bridge().Handle(ctx, cmdEnv, conn); err != nil {
 		a.Log.Warn("slack: worker command failed", "command", result.Label, "err", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
+				fmt.Sprintf("⚠️ %s timed out. Please try again.", result.Label))
+			return
+		}
 		a.sendEphemeralOrPost(ctx, channelID, threadTS, userID, fmt.Sprintf("❌ Failed to execute %s.", result.Label))
 		return
 	}
@@ -768,6 +769,19 @@ type SlackConn struct {
 // NewSlackConn creates a platform connection bound to a channel/thread.
 func NewSlackConn(adapter *Adapter, channelID, threadTS, workDir string) *SlackConn {
 	return &SlackConn{adapter: adapter, channelID: channelID, threadTS: threadTS, workDir: workDir}
+}
+
+// lockHandlerMu acquires the per-thread serialization lock.
+// Returns an unlock function for use with defer.
+//
+// Known limitation: Lock() blocks without timeout if another goroutine holds
+// handlerMu. The timeout on the holder side ensures eventual release. A future
+// improvement could use TryLock + retry. Callers should use:
+//
+//	defer conn.lockHandlerMu()()
+func (c *SlackConn) lockHandlerMu() (unlock func()) {
+	c.handlerMu.Lock()
+	return c.handlerMu.Unlock
 }
 
 func (c *SlackConn) WorkDir() string {
