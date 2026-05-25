@@ -172,19 +172,9 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 	rules := make([]map[string]any, 0)
 	switch mode {
 	case "bypassPermissions":
-		if len(allowedTools) > 0 {
-			// B3-2: restrict bypass to only the allowed tools.
-			for _, tool := range allowedTools {
-				rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
-			}
-		} else {
+		if len(allowedTools) == 0 {
 			// Wildcard allow-all: all tool calls auto-approved.
 			rules = []map[string]any{{"permission": "*", "action": "allow", "pattern": "*"}}
-		}
-	case "default", "":
-		// No rules injected: OCS default (no matching rule → ask → publishes permission.asked).
-		for _, tool := range allowedTools {
-			rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
 		}
 	case "plan":
 		// Read-only allowed + write requires approval.
@@ -194,14 +184,13 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 		if len(allowedTools) > 0 {
 			slog.Warn("opencode: plan mode with allowed_tools may override read-only semantics",
 				"mode", mode, "allowed_tools", allowedTools)
-			for _, tool := range allowedTools {
-				rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
-			}
 		}
 	default:
-		for _, tool := range allowedTools {
-			rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
-		}
+		// No rules injected: OCS default (no matching rule → ask → publishes permission.asked).
+	}
+	// Apply allowed tools whitelist across all modes.
+	for _, tool := range allowedTools {
+		rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
 	}
 	if err := c.doPatch(ctx, "/session/"+url.PathEscape(c.sessionID), map[string]any{"permission": rules}); err != nil {
 		return nil, fmt.Errorf("opencode set permission: %w", err)
