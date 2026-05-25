@@ -190,8 +190,13 @@ func (w *Worker) SupportsStreaming() bool { return true }
 func (w *Worker) SupportsTools() bool     { return true }
 func (w *Worker) EnvBlocklist() []string  { return openCodeSrvEnvBlocklist }
 func (w *Worker) SessionStoreDir() string { return "" }
-func (w *Worker) MaxTurns() int           { return 0 }
-func (w *Worker) Modalities() []string    { return []string{"text", "code", "image"} }
+
+// MaxTurns returns 0 (unlimited).
+// B3-1 note: OCS does not support dynamic per-session steps limits.
+// The underlying OpenCode agent may have a predefined steps config,
+// but it cannot be set via the HTTP session API.
+func (w *Worker) MaxTurns() int        { return 0 }
+func (w *Worker) Modalities() []string { return []string{"text", "code", "image"} }
 
 // ─── Worker Lifecycle ─────────────────────────────────────────────────────────
 
@@ -498,9 +503,18 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 		mode = session.PermissionMode
 	}
 
-	_, err := cmd.SendControlRequest(ctx, "set_permission_mode", map[string]any{
+	body := map[string]any{
 		"mode": mode,
-	})
+	}
+
+	// B3-2 绕行: pass AllowedTools so setPermissionMode can generate
+	// per-tool allow rules. Semantics differ from CC --allowed-tools:
+	// OCS permission rules are session-scoped and pattern-based.
+	if len(session.AllowedTools) > 0 {
+		body["allowed_tools"] = session.AllowedTools
+	}
+
+	_, err := cmd.SendControlRequest(ctx, "set_permission_mode", body)
 	return err
 }
 
