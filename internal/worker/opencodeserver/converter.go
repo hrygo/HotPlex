@@ -43,7 +43,8 @@ type Converter struct {
 type turnState struct {
 	cost            float64
 	tokens          tokenAccum
-	reasoningActive bool // true between reasoning.started and reasoning.ended
+	reasoningActive bool   // true between reasoning.started and reasoning.ended
+	model           string // "providerID/modelID" from step.started
 }
 
 type tokenAccum struct {
@@ -101,7 +102,22 @@ func (c *Converter) convertV2(sessionID, eventType string, props json.RawMessage
 	}
 }
 
-func (c *Converter) handleStepStarted(_ string, _ json.RawMessage) []*events.Envelope {
+func (c *Converter) handleStepStarted(sessionID string, props json.RawMessage) []*events.Envelope {
+	var evt struct {
+		Model struct {
+			ProviderID string `json:"providerID"`
+			ModelID    string `json:"modelID"`
+		} `json:"model"`
+	}
+	if err := json.Unmarshal(props, &evt); err != nil {
+		return nil
+	}
+	if evt.Model.ModelID != "" {
+		st := c.getOrCreateState(sessionID)
+		if st.model == "" {
+			st.model = evt.Model.ProviderID + "/" + evt.Model.ModelID
+		}
+	}
 	return nil
 }
 
@@ -387,7 +403,7 @@ func (c *Converter) takeStats(sessionID string) map[string]any {
 	if st.cost == 0 && st.tokens == (tokenAccum{}) {
 		return nil
 	}
-	return map[string]any{
+	stats := map[string]any{
 		"tokens": map[string]any{
 			"input":       st.tokens.input,
 			"output":      st.tokens.output,
@@ -397,4 +413,13 @@ func (c *Converter) takeStats(sessionID string) map[string]any {
 		},
 		"cost": st.cost,
 	}
+	if st.model != "" {
+		stats["model_usage"] = map[string]any{
+			st.model: map[string]any{
+				"input_tokens":  st.tokens.input,
+				"output_tokens": st.tokens.output,
+			},
+		}
+	}
+	return stats
 }

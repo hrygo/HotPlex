@@ -22,7 +22,7 @@ func rawProps(t *testing.T, v map[string]any) json.RawMessage {
 
 // ─── V2 Step Events ───────────────────────────────────────────────────────────
 
-func TestConverter_StepStarted_NoOutput(t *testing.T) {
+func TestConverter_StepStarted_TracksModel(t *testing.T) {
 	c := newTestConverter()
 	props := rawProps(t, map[string]any{
 		"model": map[string]any{
@@ -32,6 +32,17 @@ func TestConverter_StepStarted_NoOutput(t *testing.T) {
 	})
 	envs := c.Convert("s1", ocsStepStarted, props)
 	require.Empty(t, envs)
+
+	st := c.states["s1"]
+	require.Equal(t, "anthropic/claude-sonnet-4-6", st.model)
+}
+
+func TestConverter_StepStarted_NoModelField(t *testing.T) {
+	c := newTestConverter()
+	envs := c.Convert("s1", ocsStepStarted, rawProps(t, map[string]any{}))
+	require.Empty(t, envs)
+	_, exists := c.states["s1"]
+	require.False(t, exists)
 }
 
 func TestConverter_StepEnded_Accumulates(t *testing.T) {
@@ -80,6 +91,43 @@ func TestConverter_StepEnded_MultipleAccumulates(t *testing.T) {
 	require.InDelta(t, 0.003, st.cost, 0.0001)
 	require.Equal(t, int64(1300), st.tokens.input)
 	require.Equal(t, int64(150), st.tokens.output)
+}
+
+func TestConverter_TakeStats_ModelUsage(t *testing.T) {
+	c := newTestConverter()
+	// step.started sets model
+	c.Convert("s1", ocsStepStarted, rawProps(t, map[string]any{
+		"model": map[string]any{"providerID": "anthropic", "modelID": "claude-sonnet-4-6"},
+	}))
+	// step.ended accumulates tokens
+	c.Convert("s1", ocsStepEnded, rawProps(t, map[string]any{
+		"cost":   0.005,
+		"tokens": map[string]any{"input": 1000, "output": 200, "reasoning": 0, "cache": map[string]any{"read": 0, "write": 0}},
+	}))
+
+	stats := c.takeStats("s1")
+	require.NotNil(t, stats)
+	require.Equal(t, 0.005, stats["cost"])
+
+	mu, ok := stats["model_usage"].(map[string]any)
+	require.True(t, ok, "model_usage should be present")
+	inner, ok := mu["anthropic/claude-sonnet-4-6"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, int64(1000), inner["input_tokens"])
+	require.Equal(t, int64(200), inner["output_tokens"])
+}
+
+func TestConverter_TakeStats_NoModel(t *testing.T) {
+	c := newTestConverter()
+	c.Convert("s1", ocsStepEnded, rawProps(t, map[string]any{
+		"cost":   0.001,
+		"tokens": map[string]any{"input": 100, "output": 10, "reasoning": 0, "cache": map[string]any{"read": 0, "write": 0}},
+	}))
+
+	stats := c.takeStats("s1")
+	require.NotNil(t, stats)
+	_, hasModelUsage := stats["model_usage"]
+	require.False(t, hasModelUsage, "model_usage should be absent when no model tracked")
 }
 
 func TestConverter_StepFailed(t *testing.T) {
