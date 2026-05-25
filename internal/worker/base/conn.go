@@ -2,7 +2,6 @@ package base
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -23,22 +22,6 @@ type Conn struct {
 	mu        sync.Mutex
 	closed    bool
 	lastInput string // last user message content; used for crash recovery re-delivery
-}
-
-// Claude Code stream-json input message types.
-type claudeUserMessage struct {
-	Type    string        `json:"type"`
-	Message claudeUserMsg `json:"message"`
-}
-
-type claudeUserMsg struct {
-	Role    string              `json:"role"`
-	Content []claudeTextContent `json:"content"`
-}
-
-type claudeTextContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
 }
 
 // NewConn creates a new stdin-based session connection.
@@ -76,42 +59,6 @@ func (c *Conn) Send(ctx context.Context, msg *events.Envelope) error {
 	return nil
 }
 
-func (c *Conn) SendUserMessage(ctx context.Context, content string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
-		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "base: connection closed"}
-	}
-	c.lastInput = content // capture for crash recovery re-delivery
-
-	msg := claudeUserMessage{
-		Type: "user",
-		Message: claudeUserMsg{
-			Role: "user",
-			Content: []claudeTextContent{
-				{Type: "text", Text: content},
-			},
-		},
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("base: marshal user message: %w", err)
-	}
-	data = append(data, '\n')
-
-	err = WriteAll(int(c.stdin.Fd()), data)
-	if err != nil {
-		if IsDeadProcessError(err) {
-			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "base: worker process is not running or stdin is closed", Cause: err}
-		}
-		return fmt.Errorf("base: write user message: %w", err)
-	}
-
-	return nil
-}
-
 // Recv returns a channel that yields messages from the worker runtime.
 func (c *Conn) Recv() <-chan *events.Envelope {
 	return c.recvCh
@@ -130,6 +77,25 @@ func (c *Conn) TrySend(env *events.Envelope) bool {
 // ControlHandler should use this same mutex to serialize stdin access.
 func (c *Conn) WriteMu() *sync.Mutex {
 	return &c.mu
+}
+
+// Stdin returns the underlying stdin file. Workers that need direct stdin
+// access for protocol-specific message formats (e.g. Claude Code stream-json)
+// should use this together with WriteMu() to ensure serialized writes.
+func (c *Conn) Stdin() *os.File {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stdin
+}
+
+// SetLastInput records the content of the most recent user message.
+// Worker adapters should call this when they deliver user input through
+// protocol-specific channels, so the bridge crash recovery mechanism
+// can re-deliver the message after a resume failure.
+func (c *Conn) SetLastInput(content string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastInput = content
 }
 
 // CloseInput closes the stdin pipe to signal EOF to the worker process.
@@ -182,7 +148,7 @@ func (c *Conn) SetSessionID(id string) {
 	c.sessionID = id
 }
 
-// LastInput returns the content of the most recent user message sent via SendUserMessage.
+// LastInput returns the content of the most recent user message.
 // Used by bridge crash recovery to re-deliver input to a fresh worker after resume failure.
 func (c *Conn) LastInput() string {
 	c.mu.Lock()
