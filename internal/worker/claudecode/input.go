@@ -34,6 +34,12 @@ type streamTextContent struct {
 func writeStreamInput(stdin *os.File, mu *sync.Mutex, content string) error {
 	mu.Lock()
 	defer mu.Unlock()
+	return writeStreamInputLocked(stdin, content)
+}
+
+// writeStreamInputLocked writes a stream-json user message without acquiring the mutex.
+// Caller must hold the lock (e.g. from base.Conn.StdinLocked).
+func writeStreamInputLocked(stdin *os.File, content string) error {
 
 	msg := streamUserMessage{
 		Type: "user",

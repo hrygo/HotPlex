@@ -88,6 +88,14 @@ func (c *Conn) Stdin() *os.File {
 	return c.stdin
 }
 
+// StdinLocked returns the stdin file and the protecting mutex (locked).
+// Caller must unlock the returned mutex after completing all operations.
+// Use for atomic stdin-read + write + SetLastInput sequences.
+func (c *Conn) StdinLocked() (*os.File, *sync.Mutex) {
+	c.mu.Lock()
+	return c.stdin, &c.mu
+}
+
 // SetLastInput records the content of the most recent user message.
 // Worker adapters should call this when they deliver user input through
 // protocol-specific channels, so the bridge crash recovery mechanism
@@ -95,6 +103,11 @@ func (c *Conn) Stdin() *os.File {
 func (c *Conn) SetLastInput(content string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.lastInput = content
+}
+
+// SetLastInputLocked sets lastInput. Caller must hold c.mu.
+func (c *Conn) SetLastInputLocked(content string) {
 	c.lastInput = content
 }
 

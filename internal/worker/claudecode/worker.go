@@ -396,14 +396,17 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	// Normal input: use Claude Code's stream-json format
 	// instead of AEP envelope format
 	if baseConn, ok := conn.(*base.Conn); ok {
-		stdin := baseConn.Stdin()
+		stdin, mu := baseConn.StdinLocked()
 		if stdin == nil {
+			mu.Unlock()
 			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
 		}
-		if err := writeStreamInput(stdin, baseConn.WriteMu(), content); err != nil {
+		if err := writeStreamInputLocked(stdin, content); err != nil {
+			mu.Unlock()
 			return fmt.Errorf("claudecode: input: %w", err)
 		}
-		baseConn.SetLastInput(content)
+		baseConn.SetLastInputLocked(content)
+		mu.Unlock()
 	} else {
 		// Fallback to AEP envelope for tests with mock connections
 		msg := events.NewEnvelope(

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -420,3 +422,62 @@ func TestControlHandler_SendControlRequest_ContextCancelled(t *testing.T) {
 type closedBuffer struct{}
 
 func (c *closedBuffer) Write(_ []byte) (int, error) { return 0, io.ErrClosedPipe }
+
+// ─── Compact ──────────────────────────────────────────────────────────────────
+
+func TestCompact_NotStarted(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	err := w.Compact(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not started")
+}
+
+func TestCompact_ClosedStdin(t *testing.T) {
+	t.Parallel()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	worker := New()
+	conn := base.NewConn(slog.Default(), w, "user1", "sess1")
+	worker.testConn = conn
+
+	require.NoError(t, w.Close())
+
+	err = worker.Compact(context.Background(), nil)
+	require.Error(t, err)
+}
+
+func TestClear_NotImplemented(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	err := w.Clear(context.Background())
+	require.Error(t, err)
+	require.Equal(t, worker.ErrNotImplemented, err)
+}
+
+// ─── Rewind ──────────────────────────────────────────────────────────────────
+
+func TestRewind_NotRunning(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	err := w.Rewind(context.Background(), "msg-123")
+	require.Error(t, err)
+	var we *worker.WorkerError
+	require.ErrorAs(t, err, &we)
+	require.Equal(t, worker.ErrKindUnavailable, we.Kind)
+}
+
+func TestRewind_ControlHandlerNotInitialized(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	// Proc is nil → SendControlRequest returns ErrKindUnavailable before reaching control handler
+	err := w.Rewind(context.Background(), "msg-123")
+	require.Error(t, err)
+}

@@ -397,10 +397,11 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		mode        string
-		checkBody   func(*testing.T, map[string]any)
-		wantSuccess bool
+		name         string
+		mode         string
+		allowedTools []string
+		checkBody    func(*testing.T, map[string]any)
+		wantSuccess  bool
 	}{
 		{
 			name: "bypassPermissions", mode: "bypassPermissions",
@@ -411,6 +412,48 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 			name: "unknown mode", mode: "unknownMode",
 			checkBody: func(t *testing.T, reqBody map[string]any) {
 				require.Equal(t, []any{}, reqBody["permission"])
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "bypassPermissions + allowedTools generates per-tool rules only",
+			mode: "bypassPermissions", allowedTools: []string{"Read", "Bash"},
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				require.Len(t, perms, 2)
+				for _, p := range perms {
+					rule := p.(map[string]any)
+					require.Equal(t, "tool", rule["permission"])
+					require.Equal(t, "allow", rule["action"])
+				}
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "plan + allowedTools includes read-only + per-tool rules",
+			mode: "plan", allowedTools: []string{"Bash"},
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				require.Len(t, perms, 2)
+				readRule := perms[0].(map[string]any)
+				require.Equal(t, "read", readRule["permission"])
+				toolRule := perms[1].(map[string]any)
+				require.Equal(t, "tool", toolRule["permission"])
+				require.Equal(t, "Bash", toolRule["pattern"])
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "default mode + allowedTools generates per-tool rules only",
+			mode: "default", allowedTools: []string{"Edit", "Write"},
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				require.Len(t, perms, 2)
+				for _, p := range perms {
+					rule := p.(map[string]any)
+					require.Equal(t, "tool", rule["permission"])
+					require.Equal(t, "allow", rule["action"])
+				}
 			},
 			wantSuccess: true,
 		},
@@ -431,7 +474,11 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				}
 				w.WriteHeader(http.StatusOK)
 			})
-			resp, err := c.SendControlRequest(context.Background(), "set_permission_mode", map[string]any{"mode": tt.mode})
+			reqBody := map[string]any{"mode": tt.mode}
+			if len(tt.allowedTools) > 0 {
+				reqBody["allowed_tools"] = tt.allowedTools
+			}
+			resp, err := c.SendControlRequest(context.Background(), "set_permission_mode", reqBody)
 			require.NoError(t, err)
 			require.True(t, called)
 			require.Equal(t, tt.mode, resp["mode"])
