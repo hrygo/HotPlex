@@ -203,19 +203,24 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	// Acquire ref from singleton (starts process if first session)
+	w.Log.Debug("opencodeserver: start step 1 - acquiring server")
 	if err := w.acquireServer(ctx); err != nil {
 		return err
 	}
+	w.Log.Debug("opencodeserver: start step 2 - server acquired", "addr", w.httpAddr)
 
 	// Create new session via HTTP API
+	w.Log.Debug("opencodeserver: start step 3 - creating session", "dir", session.ProjectDir)
 	sessionID, err := w.createSession(ctx, session.ProjectDir)
 	if err != nil {
 		w.releaseOnce.Do(func() { w.singleton.Release() })
 		return fmt.Errorf("opencodeserver: create session: %w", err)
 	}
+	w.Log.Debug("opencodeserver: start step 4 - session created", "ocs_session_id", sessionID)
 
 	w.initSessionConn(ctx, sessionID, session)
 	w.startSSE(sessionID)
+	w.Log.Debug("opencodeserver: start completed")
 	return nil
 }
 

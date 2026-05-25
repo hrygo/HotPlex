@@ -33,6 +33,7 @@ const (
 	mediaTTL         = 24 * time.Hour
 	maxMessageLength = 3800            // Slack limit is ~4000
 	errPrefix        = "\u26a0\ufe0f " // ⚠️
+	handlerTimeout   = 120 * time.Second
 )
 
 // Subtypes that should never be processed.
@@ -474,7 +475,9 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 			conn.handlerMu.Lock()
 			defer conn.handlerMu.Unlock()
 		}
-		a.handleTextControlCommand(ctx, teamID, channelID, threadTS, userID, cmd.Control)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerTimeout)
+		defer cmdCancel()
+		a.handleTextControlCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Control)
 		return
 	case messaging.CmdWorker:
 		conn := a.GetOrCreateConn(channelID, threadTS)
@@ -486,7 +489,9 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		if a.isAssistantCapable.Load() && threadTS != "" {
 			_ = a.SetAssistantStatus(ctx, channelID, threadTS, "Processing "+cmd.Worker.Label+"...")
 		}
-		a.handleTextWorkerCommand(ctx, teamID, channelID, threadTS, userID, cmd.Worker)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerTimeout)
+		defer cmdCancel()
+		a.handleTextWorkerCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Worker)
 		return
 	}
 
@@ -536,7 +541,9 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 
 	conn.handlerMu.Lock()
 	defer conn.handlerMu.Unlock()
-	return a.Bridge().Handle(ctx, envelope, conn)
+	msgCtx, cancel := context.WithTimeout(ctx, handlerTimeout)
+	defer cancel()
+	return a.Bridge().Handle(msgCtx, envelope, conn)
 }
 
 // NewStreamingWriter creates a streaming writer for the given channel/thread.
