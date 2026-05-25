@@ -396,32 +396,49 @@ for i in issues:
 ### 模块分组
 
 分组紧密耦合的子包：
-- `messaging/slack/` + `messaging/feishu/` → 作为子模块在 `messaging` 下分析
-- `worker/claudecode/` + `worker/opencodeserver/` + `worker/pi/` → 在 `worker` 下的子模块
-- `cli/checkers/` + `cli/onboard/` → 在 `cli` 下的子模块
+- `messaging/slack/` + `messaging/feishu/` + `messaging/stt/` + `messaging/tts/` + `messaging/toolfmt/` → 作为子模块在 `messaging` 下分析
+- `worker/claudecode/` + `worker/opencodeserver/` + `worker/base/` + `worker/proc/` → 在 `worker` 下的子模块
+- `cli/checkers/` + `cli/onboard/` + `cli/cron/` + `cli/slack/` → 在 `cli` 下的子模块
 
 父模块（`messaging`、`worker`、`cli`）获得自己的分析通过，涵盖共享代码（bridge、接口、基本类型）。
 
 ### 标准模块列表（HotPlex）
 
 ```
-internal/gateway     — WebSocket hub, conn, handler, bridge, API
+internal/gateway     — WebSocket hub, conn, handler, bridge, LLM retry, API
 internal/session     — 状态机, store, pool, key derivation
-internal/messaging   — 平台适配器, bridge, interaction, STT
+internal/messaging   — 平台适配器, bridge, interaction, toolfmt
   internal/messaging/slack   — Slack Socket Mode 适配器
-  internal/messaging/feishu  — Feishu WS 适配器
-internal/worker      — 基础 worker, proc manager
-  internal/worker/opencodeserver — OCS 单例 + worker
-internal/config      — Viper 配置, 热重载
-internal/agentconfig — Agent 个性/上下文加载器
-internal/security    — API Key, Bot ID, SSRF, 路径安全, 命令白名单
-internal/admin       — Admin API 处理器
-internal/aep         — AEP v1 编解码器
-internal/cli         — Checker 注册表, onboard 向导
+  internal/messaging/feishu  — 飞书 WS 适配器 + STT
+  internal/messaging/stt     — 语音转文字（FunASR）
+  internal/messaging/tts     — 文字转语音（Edge-TTS / MOSS）
+internal/worker      — 共享 BaseWorker + Conn + MetadataHandler
+  internal/worker/claudecode    — Claude Code stdio 适配器
+  internal/worker/opencodeserver — OCS 单例进程 + HTTP/SSE 适配器
+  internal/worker/proc          — 跨平台进程生命周期（PGID/Job Object）
+internal/brain       — LLM 客户端装饰器链、意图路由、上下文压缩、安全审计
+  internal/brain/llm  — OpenAI/Anthropic 客户端 + retry/cache/ratelimit/circuit
+internal/config      — Viper 配置 + 热重载 + 继承 + 审计/回滚
+internal/agentconfig — B/C 通道组装、配置加载
+internal/security    — API Key 认证、Bot ID、SSRF 防护、路径安全
+internal/admin       — Admin API 处理器、Bot 状态
+internal/cron        — 定时任务调度、SQLite 持久化、Worker 执行、结果投递
+internal/eventstore  — 会话事件持久化 + delta 聚合
+internal/cli         — Cobra CLI 入口、doctor、onboard、cron CRUD
+  internal/cli/checkers — 诊断检查器注册表
+  internal/cli/cron     — cron 子命令 CRUD
+  internal/cli/slack    — Slack CLI 子命令
 internal/skills      — Skills 发现
-internal/metrics     — Prometheus 计数器
+internal/metrics     — Prometheus 指标
 internal/tracing     — OpenTelemetry 设置
+internal/service     — 跨平台系统服务（systemd/launchd/SCM）
+internal/updater     — 自更新（GitHub API、sha256 校验、原子替换）
+internal/docs        — 自托管文档门户（Markdown → HTML → go:embed）
+internal/webchat     — 嵌入式 Next.js SPA（go:embed）
+internal/sqlutil     — SQLite 驱动（modernc.org/sqlite，纯 Go）
+internal/assets      — 静态资源嵌入
 pkg/events           — AEP 包络 + 事件类型
+pkg/aep              — AEP v1 编解码
 cmd/hotplex          — Cobra CLI 入口点
 ```
 
