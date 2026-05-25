@@ -26,6 +26,7 @@ import (
 
 // Compile-time interface compliance checks.
 var _ worker.Worker = (*Worker)(nil)
+var _ worker.WorkerCommander = (*Worker)(nil)
 
 // commandParts stores the space-split command (binary + optional prefix args).
 // Thread-safe via atomic.Value. Default: ["claude"].
@@ -821,6 +822,49 @@ func (w *Worker) readOutput(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// ─── WorkerCommander ──────────────────────────────────────────────────────────
+
+// Compact sends the /compact text command to Claude Code.
+// B3-3: uses writeStreamInput directly (bypasses LastInput) since /compact
+// is a control command, not user content that should be re-delivered on crash.
+// Note: args is ignored. Claude Code's /compact does not accept extra parameters
+// (unlike OCS which supports model selection in the summarize request).
+func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
+	conn := w.Conn()
+	if conn == nil {
+		return fmt.Errorf("claudecode: not started")
+	}
+	baseConn, ok := conn.(*base.Conn)
+	if !ok {
+		return worker.ErrNotImplemented
+	}
+	stdin := baseConn.Stdin()
+	if stdin == nil {
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
+	}
+	return writeStreamInput(stdin, baseConn.WriteMu(), "/compact")
+}
+
+// Clear is not supported by Claude Code in non-interactive mode.
+func (w *Worker) Clear(_ context.Context) error {
+	return worker.ErrNotImplemented
+}
+
+// Rewind sends a rewind_files control_request to Claude Code.
+// B3-4: uses rewind_files control_request subtype instead of /rewind text command.
+// When targetID is empty, the Claude CLI will rewind to the most recent assistant turn.
+func (w *Worker) Rewind(ctx context.Context, targetID string) error {
+	body := map[string]any{}
+	if targetID != "" {
+		body["target_id"] = targetID
+	}
+	_, err := w.SendControlRequest(ctx, "rewind_files", body)
+	if err != nil {
+		return fmt.Errorf("claudecode: rewind: %w", err)
+	}
+	return nil
 }
 
 // trySend non-blocking sends an envelope to the connection.
