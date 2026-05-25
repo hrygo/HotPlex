@@ -18,7 +18,7 @@ description: HotPlex 项目架构、代码健康和性能优化深度审计 — 
 
 **核心设计**：每次调用 = **一个分析周期**在**一个模块**上覆盖**2-3 个方面**。专为 `/loop` 设计 — 重复调用在 4 个深度阶段中渐进覆盖所有模块 × 所有方面。
 
-**状态持久化在** `.claude/arch-analysis/progress.json` — 跨会话重启存活，启用 `/loop` 连续性。
+**状态持久化在** `.Codex/arch-analysis/progress.json` — 跨会话重启存活，启用 `/loop` 连续性。
 
 ### 为什么使用 /loop？
 
@@ -77,7 +77,7 @@ description: HotPlex 项目架构、代码健康和性能优化深度审计 — 
 
 ### 步骤 1：加载进度
 
-读取 `.claude/arch-analysis/progress.json`。
+读取 `.Codex/arch-analysis/progress.json`。
 
 **如果未找到** — 运行初始化：
 1. 发现模块（见下面的模块发现）
@@ -334,7 +334,7 @@ for i in issues:
 
 ### 步骤 6：更新进度
 
-更新 `.claude/arch-analysis/progress.json`：
+更新 `.Codex/arch-analysis/progress.json`：
 - 增加模块的 `analysis_count`
 - 将分析的方面移至 `aspects_covered`
 - 将 issue 号添加到 `issues_created`
@@ -389,7 +389,7 @@ for i in issues:
 
 ## 模块发现
 
-**主要来源**：`CLAUDE.md` STRUCTURE 部分 — 如果存在，使用记录的模块边界。
+**主要来源**：`AGENTS.md` STRUCTURE 部分 — 如果存在，使用记录的模块边界。
 
 **后备**：扫描 `internal/`、`pkg/`、`cmd/` 目录。每个带有 `.go` 文件的子目录 = 一个模块。
 
@@ -397,7 +397,7 @@ for i in issues:
 
 分组紧密耦合的子包：
 - `messaging/slack/` + `messaging/feishu/` → 作为子模块在 `messaging` 下分析
-- `worker/claudecode/` + `worker/opencodeserver/` + `worker/pi/` → 在 `worker` 下的子模块
+- `worker/Codex/` + `worker/opencodeserver/` + `worker/pi/` → 在 `worker` 下的子模块
 - `cli/checkers/` + `cli/onboard/` → 在 `cli` 下的子模块
 
 父模块（`messaging`、`worker`、`cli`）获得自己的分析通过，涵盖共享代码（bridge、接口、基本类型）。

@@ -353,7 +353,7 @@ hotplex cron history <id|name> [--json]
 ### 符号链接
 
 - `CLAUDE.md` ← `AGENTS.md`（只编辑 AGENTS.md）
-- `.claude` ← `.agent`
+- `.claude` ← `.agents`
 
 ### 重要限制
 
