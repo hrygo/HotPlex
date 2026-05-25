@@ -1985,3 +1985,97 @@ func TestWriteCtx_InteractionEvents_ClosesStream(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// HandlerMu timeout boundary tests
+// ---------------------------------------------------------------------------
+
+func TestHandlerMu_TimeoutReleasesLock(t *testing.T) {
+	// Verify that handlerMu is correctly released after a context timeout.
+	// This tests the lock-before-timeout pattern used in HandleTextMessage/CmdControl/CmdWorker.
+	conn := &SlackConn{channelID: "C_test", threadTS: "123.000"}
+
+	// Goroutine 1: acquire handlerMu, then wait for a short context timeout.
+	goroutineDone := make(chan struct{})
+	go func() {
+		defer close(goroutineDone)
+		conn.handlerMu.Lock()
+		defer conn.handlerMu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		<-ctx.Done() // blocks until timeout
+	}()
+
+	// Wait for goroutine 1 to acquire the lock.
+	time.Sleep(20 * time.Millisecond)
+
+	// Goroutine 2: try to acquire handlerMu — should block until goroutine 1 finishes.
+	acquired := make(chan struct{})
+	go func() {
+		conn.handlerMu.Lock()
+		defer conn.handlerMu.Unlock()
+		close(acquired)
+	}()
+
+	// After goroutine 1's timeout (50ms) + margin, goroutine 2 should acquire the lock.
+	select {
+	case <-acquired:
+		// Success: mu was released after timeout.
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("handlerMu was not released after context timeout — defer Unlock failed")
+	}
+
+	<-goroutineDone
+}
+
+func TestHandlerMu_MultipleAcquireRelease(t *testing.T) {
+	// Verify that handlerMu can be acquired multiple times in sequence
+	// (simulating sequential message processing in the same thread).
+	conn := &SlackConn{channelID: "C_test", threadTS: "123.000"}
+
+	for i := 0; i < 5; i++ {
+		conn.handlerMu.Lock()
+		// Simulate a short-lived context timeout as in the production code.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		<-ctx.Done()
+		cancel()
+		conn.handlerMu.Unlock()
+	}
+
+	// If we reach here, the lock was properly acquired and released 5 times.
+}
+
+func TestHandlerMu_TimeoutDoesNotBlockSubsequentCalls(t *testing.T) {
+	// Verify that after a simulated timeout path, the next goroutine
+	// can immediately acquire the lock (no permanent hold).
+	conn := &SlackConn{channelID: "C_test", threadTS: "123.000"}
+
+	// Simulate one complete timeout cycle: Lock → context timeout → Unlock (via defer).
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn.handlerMu.Lock()
+		defer conn.handlerMu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+		<-ctx.Done()
+	}()
+	<-done
+
+	// Now verify immediate acquisition.
+	acquired := make(chan struct{})
+	go func() {
+		conn.handlerMu.Lock()
+		defer conn.handlerMu.Unlock()
+		close(acquired)
+	}()
+
+	select {
+	case <-acquired:
+		// Lock acquired immediately after previous timeout cycle.
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("handlerMu still held after timeout cycle completed")
+	}
+}

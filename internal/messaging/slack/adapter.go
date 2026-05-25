@@ -3,6 +3,7 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -33,7 +34,14 @@ const (
 	mediaTTL         = 24 * time.Hour
 	maxMessageLength = 3800            // Slack limit is ~4000
 	errPrefix        = "\u26a0\ufe0f " // ⚠️
-	handlerTimeout   = 120 * time.Second
+	// handlerMsgTimeout controls the context timeout for HandleTextMessage.
+	// Covers Bridge.Handle → session start → HTTP request (createSession, initSessionConn).
+	// Does NOT cover acquireServer's process fork (proc.Start is not context-aware).
+	// Set longer than cmd timeout because LLM agentic turns (multi-tool) can take minutes.
+	handlerMsgTimeout = 300 * time.Second
+	// handlerCmdTimeout controls the context timeout for CmdControl/CmdWorker paths.
+	// These are lightweight control-plane operations that should complete quickly.
+	handlerCmdTimeout = 60 * time.Second
 )
 
 // Subtypes that should never be processed.
@@ -472,10 +480,14 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 	case messaging.CmdControl:
 		conn := a.GetOrCreateConn(channelID, threadTS)
 		if conn != nil {
+			// NOTE: Lock-before-timeout is a pre-existing limitation — if another
+			// goroutine already holds handlerMu, this goroutine blocks at Lock()
+			// and the timeout does not protect this wait phase. Mitigated by the
+			// timeout on the holder side, which ensures the lock is eventually released.
 			conn.handlerMu.Lock()
 			defer conn.handlerMu.Unlock()
 		}
-		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerTimeout)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
 		defer cmdCancel()
 		a.handleTextControlCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Control)
 		return
@@ -483,13 +495,14 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		conn := a.GetOrCreateConn(channelID, threadTS)
 		if conn != nil {
 			conn.messageTS = msgEvent.TimeStamp
+			// NOTE: Same lock-before-timeout limitation as CmdControl above.
 			conn.handlerMu.Lock()
 			defer conn.handlerMu.Unlock()
 		}
 		if a.isAssistantCapable.Load() && threadTS != "" {
 			_ = a.SetAssistantStatus(ctx, channelID, threadTS, "Processing "+cmd.Worker.Label+"...")
 		}
-		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerTimeout)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
 		defer cmdCancel()
 		a.handleTextWorkerCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Worker)
 		return
@@ -513,6 +526,10 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 
 	if err := a.HandleTextMessage(ctx, platformMsgID, channelID, teamID, threadTS, userID, text); err != nil {
 		a.Log.Warn("slack: handle message failed", "err", err, "channel", channelID, "thread", threadTS, "user", userID)
+		if errors.Is(err, context.DeadlineExceeded) {
+			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
+				"⚠️ Request timed out. The operation took too long and was cancelled. Please try again.")
+		}
 	}
 }
 
@@ -539,9 +556,10 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 		return fmt.Errorf("slack: failed to build envelope")
 	}
 
+	// NOTE: Same lock-before-timeout limitation as CmdControl/CmdWorker above.
 	conn.handlerMu.Lock()
 	defer conn.handlerMu.Unlock()
-	msgCtx, cancel := context.WithTimeout(ctx, handlerTimeout)
+	msgCtx, cancel := context.WithTimeout(ctx, handlerMsgTimeout)
 	defer cancel()
 	return a.Bridge().Handle(msgCtx, envelope, conn)
 }
