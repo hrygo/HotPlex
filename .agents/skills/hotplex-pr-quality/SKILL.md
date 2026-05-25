@@ -57,7 +57,7 @@ make lint    # golangci-lint
 
 <footer>
 
-Co-Authored-By: Codex Opus 4.7 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 ```
 
 **Type**: feat, fix, refactor, perf, test, docs, style, chore
@@ -77,7 +77,7 @@ and use cancellable context for clean shutdown.
 
 Fixes #85
 
-Co-Authored-By: Codex Opus 4.7 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 ```
 
 ### 阶段 4：推送代码

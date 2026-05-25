@@ -118,7 +118,7 @@ git log "${LAST_TAG}..HEAD" --no-merges --format="%h %s%n%b---"
 | Commit Scope | Display Group |
 |:---|:---|
 | `gateway`, `session`, `hub`, `conn` | **Gateway Core** |
-| `worker`, `Codex`, `opencode`, `pi` | **Worker** |
+| `worker`, `claude-code`, `opencode`, `pi` | **Worker** |
 | `slack`, `feishu`, `messaging`, `stt` | **Messaging** |
 | `webchat`, `ui`, `chat` | **WebChat UI** |
 | `config`, `agent-config` | **Configuration** |
@@ -252,7 +252,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 | `AGENTS.md` | 头部 `**最后更新**: YYYY-MM-DD` | `**最后更新**: 2026-05-10` |
 | `AGENTS.md` | 头部 `**版本**: vX.X.X` | `**版本**: v1.2.0` |
 
-> **注意**：`AGENTS.md` 是 `AGENTS.md` 的符号链接，只需编辑 `AGENTS.md`（这是实际文件），`AGENTS.md` 会自动同步。修改时请同时更新**版本号**和**最后更新日期**。
+> **注意**：`CLAUDE.md` 是 `AGENTS.md` 的符号链接，只需编辑 `AGENTS.md`（这是实际文件），`CLAUDE.md` 会自动同步。修改时请同时更新**版本号**和**最后更新日期**。
 
 ### 4.4 基础设施
 

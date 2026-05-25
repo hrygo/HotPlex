@@ -69,6 +69,7 @@ test_output.txt
 *.local.yaml
 *.local.yml
 .agent/settings.local.json
+.agents/settings.local.json
 *.pem
 *.key
 *.cert

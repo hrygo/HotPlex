@@ -89,7 +89,7 @@ hotplex doctor --json
 
 | checker | 失败原因 | 处理 |
 |---------|---------|------|
-| `worker_binary` | Codex/opencode 不在 PATH | 安装 Codex CLI 或设置 `HOTPLEX_WORKER_CLAUDE_CODE_COMMAND` |
+| `worker_binary` | claude/opencode 不在 PATH | 安装 Claude Code CLI 或设置 `HOTPLEX_WORKER_CLAUDE_CODE_COMMAND` |
 | `sqlite_path` | 数据目录不存在或无写权限 | `mkdir -p ~/.hotplex/data && chmod 755 ~/.hotplex` |
 
 #### security（安全）
@@ -290,7 +290,7 @@ hotplex service logs -f          # 日志确认连接
 | 版本 | vX.Y.Z |
 | 消息平台 | Slack: xoxb-... (N bots) / 飞书: cli_xxx (N bots) |
 | 访问策略 | allowlist |
-| Worker | Codex |
+| Worker | Claude Code |
 | STT | local / feishu+local |
 | TTS | enabled / disabled |
 | 服务模式 | systemd/launchd/SCM/dev |
