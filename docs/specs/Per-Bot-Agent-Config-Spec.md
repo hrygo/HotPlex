@@ -365,7 +365,7 @@ Three `createAndLaunchWorker` call sites must pass botID:
 ### Phase 5: CLI & Skills Updates
 - Update `internal/cli/onboard/wizard.go` `stepAgentConfig()`: mention directory structure
 - Update `cmd/hotplex/onboard.go` `displayAgentConfigPanel()`: update guidance text
-- Update `.agent/skills/hotplex-setup/SKILL.md`: directory structure, bot subdirectories, env vars
+- Update `.agents/skills/hotplex-setup/SKILL.md`: directory structure, bot subdirectories, env vars
 - Add deprecation warning in `cmd/hotplex/gateway_run.go`: one-time scan for `*.{platform}.md` suffix files at startup
 - Add `agentConfigSuffixChecker` to `internal/cli/checkers/`: detect old suffix files and suggest migration
 
@@ -436,18 +436,13 @@ Three `createAndLaunchWorker` call sites must pass botID:
 
 | File | Change |
 |------|--------|
-| `.agent/skills/hotplex-setup/SKILL.md` | 更新 agent-config 配置说明：目录结构、bot 子目录用法、环境变量 |
-| `.agent/skills/hotplex-release/SKILL.md` | 更新 config area 列表描述 |
-| `.agent/skills/hotplex-arch-analyzer/SKILL.md` | 更新 agentconfig 模块描述 |
-
-### 7.4 Rule Files Changes
-
-| File | Change |
-|------|--------|
-| `.agent/rules/agentconfig.md` | **核心更新**: 替换 suffix-append 文档为目录 fallback 文档，更新目录结构图、加载逻辑说明、大小限制 |
-| `.agent/rules/golang.md` | 更新 cross-reference |
-| `.agent/rules/cli.md` | 更新 checker 列表（新增 agentConfigSuffixChecker） |
-| `.agent/rules/session.md` | 更新 session key 派生说明（+botID） |
+| `.agents/skills/hotplex-setup/SKILL.md` | 更新 agent-config 配置说明：目录结构、bot 子目录用法、环境变量 |
+| `.agents/skills/hotplex-release/SKILL.md` | 更新 config area 列表描述 |
+| `.agents/skills/hotplex-arch-analyzer/SKILL.md` | 更新 agentconfig 模块描述 |
+| `.agents/rules/agentconfig.md` | **核心更新**: 替换 suffix-append 文档为目录 fallback 文档，更新目录结构图、加载逻辑说明、大小限制 |
+| `.agents/rules/golang.md` | 更新 cross-reference |
+| `.agents/rules/cli.md` | 更新 checker 列表（新增 agentConfigSuffixChecker） |
+| `.agents/rules/session.md` | 更新 session key 派生说明（+botID） |
 
 ### 7.5 Embedded Content Changes
 
