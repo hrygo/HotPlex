@@ -11,8 +11,6 @@
 #   3. Adds depends_on so gateway waits for PG to be healthy
 #
 
-version: '3.8'
-
 services:
   gateway:
     environment:

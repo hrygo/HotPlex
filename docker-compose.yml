@@ -26,9 +26,6 @@ services:
     # Use init to handle zombie processes (critical for spawning workers)
     init: true
 
-    # Run as root for entrypoint permission fix, then drop to hotplex user
-    user: "0:0"
-
     ports:
       - "${HOTPLEX_PORT:-8888}:8888"   # WebSocket gateway
       - "${HOTPLEX_ADMIN_PORT:-9999}:9999"   # Admin API
@@ -86,11 +83,11 @@ services:
       - ./tls:/etc/hotplex/tls:ro
 
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9999/admin/health/ready"]
+      test: ["CMD", "curl", "-f", "http://localhost:9999/admin/health/ready"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 30s
 
     networks:
       - hotplex-network
@@ -126,6 +123,7 @@ services:
     image: pgvector/pgvector:pg16
     container_name: hotplex-postgres
     restart: unless-stopped
+    shm_size: '512m'
     profiles:
       - postgres
     ports:
@@ -134,6 +132,11 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-hotplex}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hotplex}
       - POSTGRES_DB=${POSTGRES_DB:-hotplex}
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=32MB
+      -c max_parallel_workers_per_gather=2
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -142,44 +145,62 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 10s
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - hotplex-network
 
   # Database backup sidecar
   backup:
-    image: alpine:3.21
+    image: postgres:16-alpine
     container_name: hotplex-backup
     restart: unless-stopped
     depends_on:
-      gateway:
-        condition: service_started
       postgres:
         condition: service_healthy
     profiles:
       - postgres
     volumes:
-      - hotplex-data:/data:ro
       - backup-storage:/backups
     environment:
-      - BACKUP_INTERVAL=3600  # 1 hour
-      - RETENTION_DAYS=30
+      - BACKUP_INTERVAL=${BACKUP_INTERVAL:-3600}
+      - RETENTION_DAYS=${RETENTION_DAYS:-30}
       - PGHOST=postgres
       - PGUSER=${POSTGRES_USER:-hotplex}
       - PGPASSWORD=${POSTGRES_PASSWORD:-hotplex}
       - PGDATABASE=${POSTGRES_DB:-hotplex}
-    command: >
-      sh -c "
-        apk add --no-cache postgresql-client &&
-        mkdir -p /backups &&
+    entrypoint: >
+      sh -c '
+        trap "echo Backup shutting down; exit 0" SIGTERM SIGINT
         while true; do
-          TIMESTAMP=$$(date +%Y%m%d-%H%M%S) &&
-          pg_dump -Fc > /backups/hotplex-$$TIMESTAMP.dump &&
-          find /backups -name '*.dump' -mtime +$$RETENTION_DAYS -delete &&
-          echo \"Backup created: hotplex-$$TIMESTAMP.dump at $$(date)\" &&
-          sleep $$BACKUP_INTERVAL
+          TIMESTAMP=$$(date +%Y%m%d-%H%M%S)
+          FILENAME="/backups/hotplex-$$TIMESTAMP.dump"
+          if pg_dump -Fc > "$$FILENAME"; then
+            echo "[$$(date)] Backup OK: $$FILENAME"
+            find /backups -name "*.dump" -mtime +$$RETENTION_DAYS -delete
+          else
+            echo "[$$(date)] Backup FAILED" >&2
+            rm -f "$$FILENAME"
+          fi
+          sleep $$BACKUP_INTERVAL &
+          wait $$!
         done
-      "
+      '
+    healthcheck:
+      test: ["CMD-SHELL", "test $$(find /backups -name '*.dump' -mmin -7200 | wc -l) -gt 0 || exit 1"]
+      interval: 1h
+      timeout: 10s
+      retries: 1
+      start_period: 5m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
     networks:
       - hotplex-network
 
@@ -195,6 +216,11 @@ services:
     volumes:
       - ./configs/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - hotplex-network
 
@@ -214,6 +240,11 @@ services:
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - hotplex-network
 
