@@ -24,6 +24,26 @@ import (
 // platformWebChat is the platform tag for WebSocket webchat sessions.
 const platformWebChat = "webchat"
 
+// connHandler provides event handling capability for Conn.
+type connHandler interface {
+	Handle(ctx context.Context, env *events.Envelope) error
+}
+
+// connSM provides the session management subset that Conn needs
+// for init handshake and ReadPump cleanup.
+type connSM interface {
+	Get(ctx context.Context, id string) (*session.SessionInfo, error)
+	GetWorker(id string) worker.Worker
+	Transition(ctx context.Context, id string, to events.SessionState) error
+	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title string) (*session.SessionInfo, error)
+	DeletePhysical(ctx context.Context, id string) error
+}
+
+// connAuth provides authentication capability for deferred-init auth.
+type connAuth interface {
+	AuthenticateKey(ctx context.Context, key string) (string, bool)
+}
+
 // SessionStarter initiates a worker session. It is the only Bridge capability
 // used by Conn (called once during the AEP init handshake).
 type SessionStarter interface {
@@ -106,7 +126,7 @@ func (c *Conn) RemoteAddr() string {
 
 // ReadPump pumps messages from the WebSocket to the hub's broadcast channel.
 // It also handles pong responses, missed pong detection, and the AEP init handshake.
-func (c *Conn) ReadPump(handler *Handler) {
+func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 	defer func() {
 		if r := recover(); r != nil {
 			c.log.Error("gateway: panic in ReadPump", "session_id", c.sessionID, "panic", r, "stack", string(debug.Stack()))
@@ -118,9 +138,9 @@ func (c *Conn) ReadPump(handler *Handler) {
 		// can be routed through Hub.Run while the conn is still in h.sessions.
 		// If we unregister first, routeMessage finds no connections and the
 		// state event is silently dropped.
-		if c.sessionID != "" && handler.sm != nil {
-			if si, getErr := handler.sm.Get(context.Background(), c.sessionID); getErr == nil && si != nil && si.State == events.StateRunning {
-				if err := handler.sm.Transition(context.Background(), c.sessionID, events.StateIdle); err != nil {
+		if c.sessionID != "" && sm != nil {
+			if si, getErr := sm.Get(context.Background(), c.sessionID); getErr == nil && si != nil && si.State == events.StateRunning {
+				if err := sm.Transition(context.Background(), c.sessionID, events.StateIdle); err != nil {
 					c.log.Warn("gateway: conn close transition to idle", "session_id", c.sessionID, "err", err)
 				}
 			}
@@ -135,7 +155,7 @@ func (c *Conn) ReadPump(handler *Handler) {
 	c.wc.SetReadLimit(maxMessageSize)
 
 	// Phase 1: AEP init handshake — read the first message.
-	if err := c.performInit(handler); err != nil {
+	if err := c.performInit(auth, sm); err != nil {
 		c.log.Warn("gateway: init handshake failed", "session_id", c.sessionID, "err", err)
 		return
 	}
@@ -217,7 +237,7 @@ func (c *Conn) ReadPump(handler *Handler) {
 
 // performInit reads and processes the AEP init handshake message.
 // It blocks until either an init message is processed or an error occurs.
-func (c *Conn) performInit(handler *Handler) error {
+func (c *Conn) performInit(auth connAuth, sm connSM) error {
 	_, span := tracing.SpanFromContext(context.Background()).Start(context.Background(), "conn.init")
 	defer func() {
 		if span != nil {
@@ -270,7 +290,7 @@ func (c *Conn) performInit(handler *Handler) error {
 			c.sendInitError(events.ErrCodeUnauthorized, "authentication required")
 			return fmt.Errorf("deferred auth: no token in init envelope")
 		}
-		uid, ok := handler.auth.AuthenticateKey(context.Background(), initData.Auth.Token)
+		uid, ok := auth.AuthenticateKey(context.Background(), initData.Auth.Token)
 		if !ok {
 			c.sendInitError(events.ErrCodeUnauthorized, "invalid token")
 			return fmt.Errorf("deferred auth: invalid token")
@@ -306,7 +326,7 @@ func (c *Conn) performInit(handler *Handler) error {
 	var sessionID string
 	var preResolved *session.SessionInfo
 	if env.SessionID != "" {
-		if existing, getErr := handler.sm.Get(context.Background(), env.SessionID); getErr == nil && existing != nil && existing.State != events.StateDeleted {
+		if existing, getErr := sm.Get(context.Background(), env.SessionID); getErr == nil && existing != nil && existing.State != events.StateDeleted {
 			sessionID = env.SessionID
 			preResolved = existing
 		}
@@ -337,7 +357,7 @@ func (c *Conn) performInit(handler *Handler) error {
 	if preResolved != nil {
 		si = preResolved
 	} else {
-		si, err = handler.sm.Get(context.Background(), sessionID)
+		si, err = sm.Get(context.Background(), sessionID)
 	}
 	if err != nil {
 		// Session does not exist → create and start via SessionStarter.
@@ -349,7 +369,7 @@ func (c *Conn) performInit(handler *Handler) error {
 					metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 					return fmt.Errorf("create session: %w", err)
 				}
-				si, err = handler.sm.Get(context.Background(), sessionID)
+				si, err = sm.Get(context.Background(), sessionID)
 				if err != nil {
 					c.hub.InitThrottle.RecordFailure(sessionID)
 					c.sendInitError(events.ErrCodeInternalError, "session not found after creation")
@@ -358,7 +378,7 @@ func (c *Conn) performInit(handler *Handler) error {
 				}
 			} else {
 				// Test mode
-				si, err = handler.sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, "")
+				si, err = sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, "")
 				if err != nil {
 					c.hub.InitThrottle.RecordFailure(sessionID)
 					c.sendInitError(events.ErrCodeInternalError, "failed to create session")
@@ -377,7 +397,7 @@ func (c *Conn) performInit(handler *Handler) error {
 				c.sendInitError(events.ErrCodeInternalError, "failed to start session")
 				return fmt.Errorf("start unstarted session: %w", err)
 			}
-			si, err = handler.sm.Get(context.Background(), sessionID)
+			si, err = sm.Get(context.Background(), sessionID)
 			if err != nil {
 				c.sendInitError(events.ErrCodeInternalError, "session lost after creation")
 				return fmt.Errorf("get session after start: %w", err)
@@ -385,7 +405,7 @@ func (c *Conn) performInit(handler *Handler) error {
 		}
 	} else if si.State == events.StateDeleted {
 		// Deleted sessions cannot be resumed. Physically remove then start fresh.
-		_ = handler.sm.DeletePhysical(context.Background(), sessionID)
+		_ = sm.DeletePhysical(context.Background(), sessionID)
 		if c.starter != nil {
 			if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
 				initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
@@ -395,16 +415,16 @@ func (c *Conn) performInit(handler *Handler) error {
 				metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 				return fmt.Errorf("recreate deleted session: %w", err)
 			}
-			si, err = handler.sm.Get(context.Background(), sessionID)
+			si, err = sm.Get(context.Background(), sessionID)
 			if err != nil {
 				c.sendInitError(events.ErrCodeInternalError, "session lost after recreation")
 				return fmt.Errorf("get session after recreation: %w", err)
 			}
 		}
-	} else if w := handler.sm.GetWorker(sessionID); w != nil {
+	} else if w := sm.GetWorker(sessionID); w != nil {
 		// Fast reconnect: worker still alive, skip terminate+resume cycle.
 		if si.State != events.StateRunning {
-			if err := handler.sm.Transition(context.Background(), sessionID, events.StateRunning); err != nil {
+			if err := sm.Transition(context.Background(), sessionID, events.StateRunning); err != nil {
 				c.log.Warn("gateway: fast reconnect transition failed", "session_id", sessionID, "from", si.State, "err", err)
 			} else {
 				si.State = events.StateRunning
@@ -424,7 +444,7 @@ func (c *Conn) performInit(handler *Handler) error {
 					return fmt.Errorf("start session after resume fallback: %w", err)
 				}
 			}
-			si, err = handler.sm.Get(context.Background(), sessionID)
+			si, err = sm.Get(context.Background(), sessionID)
 			if err != nil {
 				c.sendInitError(events.ErrCodeInternalError, "session lost after resume")
 				return fmt.Errorf("get session after resume: %w", err)

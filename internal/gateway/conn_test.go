@@ -618,7 +618,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 		mu1.Unlock()
 		go func() {
 			c := newBotIDTestConn(h1, conn, derivedSID, "alice", botAlice)
-			c.ReadPump(handler1)
+			c.ReadPump(handler1, handler1.sm, handler1.auth)
 		}()
 	}))
 	t.Cleanup(server1.Close)
@@ -684,7 +684,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 		mu2.Unlock()
 		go func() {
 			c := newBotIDTestConn(h2, conn, derivedSID, "alice", botBob)
-			c.ReadPump(handler2)
+			c.ReadPump(handler2, handler2.sm, handler2.auth)
 		}()
 	}))
 	t.Cleanup(server2.Close)
@@ -751,7 +751,7 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 		mu.Unlock()
 		go func() {
 			c := newBotIDTestConn(hubForTest, conn, derivedSID, "user1", botID)
-			c.ReadPump(handler)
+			c.ReadPump(handler, handler.sm, handler.auth)
 		}()
 	}))
 	t.Cleanup(server.Close)
@@ -830,7 +830,7 @@ func TestUserIDOwnership_MismatchRejected(t *testing.T) {
 		go func() {
 			// Bob connects, same bot_id as alice's session.
 			c := newBotIDTestConn(hubForTest, conn, derivedSIDBob, "bob", botID)
-			c.ReadPump(handler)
+			c.ReadPump(handler, handler.sm, handler.auth)
 		}()
 	}))
 	t.Cleanup(server.Close)
@@ -899,7 +899,7 @@ func TestUserIDOwnership_MatchAllowed(t *testing.T) {
 		mu.Unlock()
 		go func() {
 			c := newBotIDTestConn(hubForTest, conn, derivedSID, "alice", botID)
-			c.ReadPump(handler)
+			c.ReadPump(handler, handler.sm, handler.auth)
 		}()
 	}))
 	t.Cleanup(server.Close)
@@ -971,7 +971,7 @@ func TestUserIDOwnership_EmptyConnectionUserID_Allowed(t *testing.T) {
 		go func() {
 			c := newBotIDTestConn(hubForTest, conn, derivedSIDEmpty, "", botID)
 			handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hubForTest, SM: mgr})
-			c.ReadPump(handler)
+			c.ReadPump(handler, handler.sm, handler.auth)
 		}()
 	}))
 	t.Cleanup(server.Close)
@@ -1033,7 +1033,7 @@ func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 		go func() {
 			c := newBotIDTestConn(h, conn, derivedSID, "anon", "")
 			handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h, SM: mgr})
-			c.ReadPump(handler)
+			c.ReadPump(handler, handler.sm, handler.auth)
 		}()
 	}))
 	t.Cleanup(server.Close)
@@ -1100,7 +1100,7 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 		mu.Unlock()
 		go func() {
 			c := newBotIDTestConn(h, conn, derivedSID, "user1", botID)
-			c.ReadPump(handler)
+			c.ReadPump(handler, handler.sm, handler.auth)
 		}()
 	}))
 	t.Cleanup(server.Close)
