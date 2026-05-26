@@ -57,9 +57,9 @@ type GatewayDeps struct {
 **Messaging init sequence**
 1. Iterate `config.Messaging.Slack/Feishu` → skip if `!Enabled`
 2. `messaging.New(platformType)` → adapter instance
-3. `adapter.Configure(platformConfig)` → apply credentials/policies
-4. `adapter.SetHub/SetSM/SetHandler/SetBridge` → inject dependencies
-5. `adapter.Start(ctx)` → connect to platform (Socket Mode / WS)
+3. `adapter.ConfigureWith(AdapterConfig)` → inject Hub/Handler/Bridge/Gate/Extras
+4. `adapter.Start(ctx)` → connect to platform (Socket Mode / WS)
+5. `msgBridge.SetAdapter(adapter)` → register adapter for botID resolution
 
 **Route registration (routes.go)**
 - `/ws` → Hub.HandleHTTP (WebSocket upgrade)

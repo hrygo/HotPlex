@@ -418,7 +418,7 @@ Three `createAndLaunchWorker` call sites must pass botID:
 | `internal/messaging/platform_adapter.go` | `PlatformAdapterInterface` +`GetBotID()`, `SessionStarter` +botID, `ExtractPlatformKeys` +`bot_id` extraction |
 | `internal/messaging/slack/adapter.go` | 实现 `GetBotID()`, 更新 `makeEnvelope` 调用 +botID 参数 |
 | `internal/messaging/feishu/adapter.go` | 实现 `GetBotID()`, 更新 `makeEnvelope` 调用 +botID 参数 |
-| `internal/messaging/bridge.go` | `Bridge` +adapter field +`SetAdapter()`, `makeEnvelope`/`makeEnvelope` +botID, `MakeEnvelope` metadata +bot_id, `Handle()` 提取 botID |
+| `internal/messaging/bridge.go` | `Bridge` +adapter field +`SetAdapter()`, `MakeEnvelope` (public) +botID, `Handle()` 提取 botID; adapters use private `makeEnvelope` helpers |
 | `internal/gateway/bridge.go` | `injectAgentConfig` +botID, `startOrResumeOnInUse` 使用 botID, `workerLaunchParams` +botID, 3个 `createAndLaunchWorker` 调用点 +botID |
 | `cmd/hotplex/messaging_init.go` | `adapter.Start()` 后调用 `msgBridge.SetAdapter(adapter)` |
 | `cmd/hotplex/gateway_run.go` | 启动时扫描旧 suffix 文件, 日志 deprecation warning |
