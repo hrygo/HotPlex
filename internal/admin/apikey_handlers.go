@@ -30,6 +30,8 @@ type APIKeyUser struct {
 	UpdatedAt   string `json:"updated_at,omitempty"`
 }
 
+// apiKeyUserStore implements APIKeyUserStorer backed by SQLite.
+// PG-backed callers use pgStore (apikey_pg_store.go) instead.
 type apiKeyUserStore struct {
 	db          DBExecutor
 	invalidator cacheInvalidator
@@ -114,7 +116,10 @@ func (s *apiKeyUserStore) create(ctx context.Context, u *APIKeyUser) error {
 	if err != nil {
 		return fmt.Errorf("admin: create api key user: %w", err)
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("admin: get inserted api key user id: %w", err)
+	}
 	u.ID = id
 	return nil
 }

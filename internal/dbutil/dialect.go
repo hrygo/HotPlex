@@ -1,8 +1,11 @@
 package dbutil
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Dialect string
@@ -53,13 +56,15 @@ func (d Dialect) IsUniqueViolation(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
 	switch d {
 	case DialectSQLite:
-		return strings.Contains(msg, "UNIQUE constraint failed")
+		return strings.Contains(err.Error(), "UNIQUE constraint failed")
 	case DialectPostgres:
-		return strings.Contains(msg, "23505") ||
-			strings.Contains(msg, "duplicate key value")
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			return pgErr.Code == "23505"
+		}
+		return false
 	default:
 		return false
 	}

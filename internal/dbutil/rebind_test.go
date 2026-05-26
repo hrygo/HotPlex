@@ -3,6 +3,7 @@ package dbutil
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 )
 
@@ -203,8 +204,8 @@ func TestDialectBoolValuePostgresType(t *testing.T) {
 func TestDialectIsUniqueViolation(t *testing.T) {
 	t.Parallel()
 	errSQLite := errStr("UNIQUE constraint failed: users.email")
-	errPG23505 := errStr("ERROR: duplicate key value violates unique constraint \"users_pkey\" (SQLSTATE 23505)")
-	errPGDupKey := errStr("duplicate key value violates unique constraint")
+	errPG23505 := &pgconn.PgError{Code: "23505", Message: "duplicate key value"}
+	errPGOther := &pgconn.PgError{Code: "42P01", Message: "undefined table"}
 	errOther := errStr("some other error")
 
 	tests := []struct {
@@ -217,7 +218,7 @@ func TestDialectIsUniqueViolation(t *testing.T) {
 		{"sqlite no match", DialectSQLite, errOther, false},
 		{"sqlite nil", DialectSQLite, nil, false},
 		{"postgres 23505", DialectPostgres, errPG23505, true},
-		{"postgres duplicate key", DialectPostgres, errPGDupKey, true},
+		{"postgres other pgerr", DialectPostgres, errPGOther, false},
 		{"postgres no match", DialectPostgres, errOther, false},
 		{"postgres nil", DialectPostgres, nil, false},
 	}

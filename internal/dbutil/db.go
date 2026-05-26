@@ -3,7 +3,6 @@ package dbutil
 import (
 	"database/sql"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -66,12 +65,11 @@ func openSQLite(cfg *config.DBConfig) (*DB, error) {
 }
 
 func openPostgres(cfg *config.DBConfig) (*DB, error) {
-	dsn := cfg.DSN()
-
 	if cfg.Postgres.ConnStr == "" {
-		slog.Warn("dbutil: postgres using default DSN with sslmode=prefer — configure db.postgres.dsn for production")
+		return nil, fmt.Errorf("dbutil: postgres DSN is required — set db.postgres.dsn or HOTPLEX_DB_POSTGRES_CONNSTR")
 	}
 
+	dsn := cfg.DSN()
 	sqldb, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("dbutil: open postgres: %w", err)

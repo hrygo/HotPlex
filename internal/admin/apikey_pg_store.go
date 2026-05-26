@@ -12,10 +12,10 @@ import (
 
 // pgStore implements APIKeyUserStorer backed by PostgreSQL.
 type pgStore struct {
-	db              *dbutil.DB
-	dialect         dbutil.Dialect
-	invalidator     cacheInvalidator
-	invalidatorOnce sync.Once
+	db          *dbutil.DB
+	dialect     dbutil.Dialect
+	mu          sync.Mutex
+	invalidator cacheInvalidator
 }
 
 // NewAPIKeyUserPGStore creates a PG-backed API key store.
@@ -31,11 +31,11 @@ func NewAPIKeyUserPGStore(db *dbutil.DB, inv cacheInvalidator) APIKeyUserStorer 
 }
 
 // SetInvalidator sets the cache invalidator used after API key CRUD operations.
-// Safe for concurrent use — only the first call takes effect.
+// Safe for concurrent use — last call wins.
 func (s *pgStore) SetInvalidator(inv cacheInvalidator) {
-	s.invalidatorOnce.Do(func() {
-		s.invalidator = inv
-	})
+	s.mu.Lock()
+	s.invalidator = inv
+	s.mu.Unlock()
 }
 
 var (
@@ -43,7 +43,11 @@ var (
 	_                  = NewAPIKeyUserPGStore
 )
 
-func (s *pgStore) Invalidator() cacheInvalidator { return s.invalidator }
+func (s *pgStore) Invalidator() cacheInvalidator {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.invalidator
+}
 
 func (s *pgStore) list(ctx context.Context) ([]APIKeyUser, error) {
 	rows, err := s.db.QueryContext(ctx,

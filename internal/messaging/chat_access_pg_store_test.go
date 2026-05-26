@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/dbutil"
@@ -79,17 +80,11 @@ func TestChatAccessPGStore_Record_Duplicate(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(q)).
 		WithArgs(r.EventID, r.Platform, r.ChatID, r.UserID, r.BotID, r.LastMessageAt, false, sqlmock.AnyArg()).
-		WillReturnError(fakeDuplicateError{})
+		WillReturnError(&pgconn.PgError{Code: "23505", Message: "duplicate key value"})
 
 	inserted, err := store.Record(context.Background(), r)
 	require.NoError(t, err)
 	require.False(t, inserted)
-}
-
-type fakeDuplicateError struct{}
-
-func (f fakeDuplicateError) Error() string {
-	return "duplicate key value violates unique constraint 23505"
 }
 
 func TestChatAccessPGStore_Classify_New(t *testing.T) {

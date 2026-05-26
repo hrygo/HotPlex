@@ -48,7 +48,7 @@ if [[ -d "${SOURCE_CONFIG}" ]]; then
     mkdir -p "${RUNTIME_CONFIG}"
     cp -a "${SOURCE_CONFIG}/." "${RUNTIME_CONFIG}/"
 
-    VARS=$(compgen -A export | grep -E "^(HOTPLEX_|GIT_|GITHUB_|POSTGRES_)" | sed 's/^/$/' | tr '\n' ' ')
+    VARS=$(compgen -A export | grep -E "^(HOTPLEX_|GIT_|GITHUB_)" | sed 's/^/$/' | tr '\n' ' ')
     for yaml in "${RUNTIME_CONFIG}"/*.yaml; do
         [[ -f "$yaml" ]] || continue
         if envsubst "${VARS}" < "$yaml" > "${yaml}.tmp"; then
