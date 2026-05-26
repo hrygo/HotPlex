@@ -19,7 +19,7 @@ services:
     # If using SQLite, keep replicas: 1. If HA is required, migrate to Postgres.
     deploy:
       mode: replicated
-      replicas: 1 
+      replicas: 1
       resources:
         limits:
           cpus: '4'
@@ -32,6 +32,15 @@ services:
         delay: 5s
         max_attempts: 5
         window: 120s
+
+    # PostgreSQL configuration (uncomment for HA deployments)
+    # When using postgres profile in base compose, add these environment overrides:
+    # environment:
+    #   - HOTPLEX_DB_DRIVER=postgres
+    #   - HOTPLEX_DB_POSTGRES_DSN=postgres://hotplex:${POSTGRES_PASSWORD}@postgres:5432/hotplex?sslmode=disable
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
 
     # Traefik labels for secure access and WebSocket support
     labels:

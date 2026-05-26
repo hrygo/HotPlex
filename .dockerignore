@@ -45,10 +45,11 @@ logs/
 *.db-wal
 *.db-shm
 
-# Config (keep templates only)
-configs/*.yaml
-configs/*.json
-!configs/config.yaml.example
+# Config — exclude large/generated, keep runtime defaults
+configs/monitoring/
+configs/grafana/
+configs/env.example
+configs/permission-hooks-examples.json
 
 # Scripts (not needed in runtime)
 scripts/

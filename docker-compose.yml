@@ -1,11 +1,14 @@
 # HotPlex Worker Gateway - Docker Compose
 #
 # Usage:
-#   Development:
-#     docker-compose up -d
+#   Development (SQLite):
+#     docker compose up -d
+#
+#   Development (PostgreSQL + pgvector):
+#     docker compose --profile postgres up -d
 #
 #   Production:
-#     docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 
 version: '3.8'
@@ -21,13 +24,19 @@ services:
     image: hotplex:latest
     container_name: hotplex
     restart: unless-stopped
-    
+
     # Use init to handle zombie processes (critical for spawning workers)
     init: true
+
+    # Run as root for entrypoint permission fix, then drop to hotplex user
+    user: "0:0"
 
     ports:
       - "${HOTPLEX_PORT:-8888}:8888"   # WebSocket gateway
       - "${HOTPLEX_ADMIN_PORT:-9999}:9999"   # Admin API
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     environment:
       # Required secrets
@@ -40,9 +49,22 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       - TZ=${TZ:-Asia/Shanghai}
       - GOMEMLIMIT=6500MiB
-      
+
+      # Proxy (for AI workers accessing external APIs)
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.local,.internal
+
       # Claude Code environment
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+
+      # Database — uncomment the two lines below to use PostgreSQL instead of SQLite
+      # - HOTPLEX_DB_DRIVER=postgres
+      # - HOTPLEX_DB_POSTGRES_DSN=postgres://hotplex:${POSTGRES_PASSWORD:-hotplex}@postgres:5432/hotplex?sslmode=disable
+
+      # Git identity (injected into container via entrypoint)
+      - GIT_USER_NAME=${GIT_USER_NAME:-}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
 
     volumes:
       # Configuration
@@ -51,6 +73,9 @@ services:
       # Persistent data (SQLite database & sessions)
       - hotplex-data:/var/lib/hotplex/data
       - hotplex-worker-sessions:/home/hotplex/.claude
+
+      # Project workspaces (optional)
+      - ${HOTPLEX_PROJECTS_DIR:-./projects}:/home/hotplex/projects
 
       # Logs
       - hotplex-logs:/var/log/hotplex
@@ -68,13 +93,18 @@ services:
     networks:
       - hotplex-network
 
-    # Security options
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
     # Resource limits
     deploy:
@@ -86,6 +116,34 @@ services:
           cpus: '1'
           memory: 2G
 
+  # PostgreSQL with pgvector (optional — uncomment to use instead of SQLite)
+  # When enabled, also set HOTPLEX_DB_DRIVER=postgres and HOTPLEX_DB_POSTGRES_DSN
+  # in the gateway environment section above.
+  # Usage: docker compose --profile postgres up -d
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: hotplex-postgres
+    restart: unless-stopped
+    profiles:
+      - postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-hotplex}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hotplex}
+      - POSTGRES_DB=${POSTGRES_DB:-hotplex}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hotplex}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hotplex-network
+
   # Database backup sidecar
   backup:
     image: alpine:3.21
@@ -93,21 +151,27 @@ services:
     restart: unless-stopped
     depends_on:
       - gateway
+    profiles:
+      - postgres
     volumes:
       - hotplex-data:/data:ro
       - backup-storage:/backups
     environment:
       - BACKUP_INTERVAL=3600  # 1 hour
       - RETENTION_DAYS=30
+      - PGHOST=postgres
+      - PGUSER=${POSTGRES_USER:-hotplex}
+      - PGPASSWORD=${POSTGRES_PASSWORD:-hotplex}
+      - PGDATABASE=${POSTGRES_DB:-hotplex}
     command: >
       sh -c "
-        apk add --no-cache sqlite &&
+        apk add --no-cache postgresql-client &&
         mkdir -p /backups &&
         while true; do
           TIMESTAMP=$$(date +%Y%m%d-%H%M%S) &&
-          sqlite3 /data/hotplex.db \".backup '/backups/hotplex-$$TIMESTAMP.db'\" &&
-          find /backups -name '*.db' -mtime +$$RETENTION_DAYS -delete &&
-          echo \"Backup created: hotplex-$$TIMESTAMP.db at $$(date)\" &&
+          pg_dump -Fc > /backups/hotplex-$$TIMESTAMP.dump &&
+          find /backups -name '*.dump' -mtime +$$RETENTION_DAYS -delete &&
+          echo \"Backup created: hotplex-$$TIMESTAMP.dump at $$(date)\" &&
           sleep $$BACKUP_INTERVAL
         done
       "
@@ -153,6 +217,7 @@ volumes:
   hotplex-worker-sessions:
   hotplex-logs:
   backup-storage:
+  postgres-data:
   prometheus-data:
   grafana-data:
 
