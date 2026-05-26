@@ -866,7 +866,17 @@ func (w *Worker) Compact(ctx context.Context, _ map[string]any) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		<-errCh // wait for write to complete before releasing mu
+		// Wait for the write goroutine to finish so we don't release mu while
+		// a write is in flight. However, syscall.Write blocks at the OS level
+		// and cannot be preempted — if the pipe buffer is full and the worker
+		// process is stalled, this blocks forever. Use a secondary timeout to
+		// bound the wait. The orphaned goroutine will complete when the process
+		// exits and the pipe read end closes (EPIPE).
+		select {
+		case <-errCh:
+		case <-time.After(30 * time.Second):
+			w.Log.Warn("claudecode: compact: write goroutine did not complete within 30s after ctx cancellation, releasing lock")
+		}
 		return fmt.Errorf("claudecode: compact: %w", ctx.Err())
 	}
 }

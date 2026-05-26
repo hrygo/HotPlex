@@ -298,7 +298,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		cronStore := cron.NewSQLiteStore(stores.session.DB(), log, stores.writeMu)
 		cronDelivery = cron.NewDelivery(log,
 			func(ctx context.Context, sessionID string) (string, error) {
-				stores.collector.Flush()
+				if err := stores.collector.Flush(); err != nil {
+					log.Warn("cron: flush before query", "error", err)
+				}
 				turns, err := stores.event.QueryTurns(ctx, sessionID, 1, 0)
 				if err != nil || len(turns) == 0 {
 					return "", err

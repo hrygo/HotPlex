@@ -481,7 +481,26 @@ func (w *Worker) Clear(ctx context.Context) error {
 	if w.cmd == nil {
 		return fmt.Errorf("opencode server: commander not initialized")
 	}
-	return w.cmd.Clear(ctx)
+	oldID := w.cmd.SessionID()
+	if err := w.cmd.Clear(ctx); err != nil {
+		return err
+	}
+	newID := w.cmd.SessionID()
+	if newID == oldID || newID == "" {
+		return nil
+	}
+	// Cancel old SSE goroutine and unsubscribe from old session.
+	w.Mu.Lock()
+	if w.sseCancel != nil {
+		w.sseCancel()
+	}
+	w.Mu.Unlock()
+	w.singleton.Unsubscribe(oldID)
+	// Propagate new session ID to conn + atomic store.
+	w.SetWorkerSessionID(newID)
+	// Re-subscribe EventBus for the new session.
+	w.startSSE(newID)
+	return nil
 }
 
 func (w *Worker) Rewind(ctx context.Context, targetID string) error {

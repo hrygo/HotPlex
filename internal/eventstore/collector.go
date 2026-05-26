@@ -3,6 +3,7 @@ package eventstore
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -270,11 +271,11 @@ func (c *Collector) CaptureTurn(turn *TurnWriteRequest) {
 // Flush blocks until all pending writes in the capture channel have been
 // committed to the underlying store. Safe for concurrent use.
 // Returns immediately if the collector is closed.
-func (c *Collector) Flush() {
+func (c *Collector) Flush() error {
 	// Fast path: return immediately if already closed.
 	select {
 	case <-c.closeC:
-		return
+		return nil
 	default:
 	}
 
@@ -282,16 +283,17 @@ func (c *Collector) Flush() {
 	select {
 	case c.captureC <- &captureRequest{flush: done}:
 	case <-c.closeC:
-		return
+		return nil
 	case <-time.After(5 * time.Second):
-		c.log.Warn("eventstore: flush send timeout")
-		return
+		return fmt.Errorf("eventstore: flush send timeout")
 	}
 	select {
 	case <-done:
+		return nil
 	case <-c.closeC:
+		return nil
 	case <-time.After(5 * time.Second):
-		c.log.Warn("eventstore: flush wait timeout")
+		return fmt.Errorf("eventstore: flush wait timeout")
 	}
 }
 
@@ -307,12 +309,24 @@ func (c *Collector) Close() error {
 
 	for sid, acc := range pending {
 		if acc.count > 0 {
-			c.send(acc.toRequest(sid))
+			req := acc.toRequest(sid)
+			select {
+			case c.captureC <- req:
+			case <-time.After(5 * time.Second):
+				c.log.Error("eventstore: accumulator flush dropped during close",
+					"session_id", sid, "kind", "turn")
+			}
 		}
 	}
 	for sid, acc := range pendingReasoning {
 		if acc.count > 0 {
-			c.send(acc.toRequest(sid))
+			req := acc.toRequest(sid)
+			select {
+			case c.captureC <- req:
+			case <-time.After(5 * time.Second):
+				c.log.Error("eventstore: accumulator flush dropped during close",
+					"session_id", sid, "kind", "reasoning")
+			}
 		}
 	}
 
