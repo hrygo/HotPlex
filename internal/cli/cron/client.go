@@ -18,6 +18,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/cron"
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
@@ -38,22 +39,32 @@ type gatewayState struct {
 }
 
 // OpenStore opens the config, initializes the DB, and returns cron store + eventstore + cleanup.
-func OpenStore(ctx context.Context, configPath string) (cron.Store, *eventstore.SQLiteStore, func(), error) {
+func OpenStore(ctx context.Context, configPath string) (cron.Store, eventstore.TurnQuerier, func(), error) {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	ss, err := session.NewSQLiteStore(ctx, cfg, nil)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("open session store: %w", err)
+	switch dbutil.ParseDialect(cfg.DB.Driver) {
+	case dbutil.DialectPostgres:
+		db, openErr := dbutil.Open(dbutil.DialectPostgres, &cfg.DB)
+		if openErr != nil {
+			return nil, nil, nil, fmt.Errorf("open postgres: %w", openErr)
+		}
+		cronStore := cron.NewPGStore(db, slog.Default())
+		evStore := eventstore.NewPGStore(db, slog.Default())
+		cleanup := func() { _ = db.Close() }
+		return cronStore, evStore, cleanup, nil
+	default:
+		ss, openErr := session.NewSQLiteStore(ctx, cfg, nil)
+		if openErr != nil {
+			return nil, nil, nil, fmt.Errorf("open session store: %w", openErr)
+		}
+		cronStore := cron.NewSQLiteStore(ss.DB(), slog.Default(), nil)
+		evStore := eventstore.NewSQLiteStore(ss.DB(), nil)
+		cleanup := func() { _ = ss.Close() }
+		return cronStore, evStore, cleanup, nil
 	}
-
-	cronStore := cron.NewSQLiteStore(ss.DB(), slog.Default(), nil)
-	evStore := eventstore.NewSQLiteStore(ss.DB(), nil)
-	cleanup := func() { _ = ss.Close() }
-
-	return cronStore, evStore, cleanup, nil
 }
 
 // ResolveJob resolves a job by ID or name.
@@ -280,7 +291,7 @@ func TriggerViaAdmin(ctx context.Context, configPath, jobID string) error {
 }
 
 // QueryHistory queries the eventstore for a cron job's execution history.
-func QueryHistory(ctx context.Context, store cron.Store, evStore *eventstore.SQLiteStore, idOrName string) (*eventstore.TurnStats, error) {
+func QueryHistory(ctx context.Context, store cron.Store, evStore eventstore.TurnQuerier, idOrName string) (*eventstore.TurnStats, error) {
 	job, err := ResolveJob(store, ctx, idOrName)
 	if err != nil {
 		return nil, err

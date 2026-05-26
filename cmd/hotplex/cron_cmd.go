@@ -50,7 +50,7 @@ func withStore(ctx context.Context, configPath string, fn func(croncli.Store) er
 }
 
 // withStoreAndEvents opens both stores, calls fn, and ensures cleanup.
-func withStoreAndEvents(ctx context.Context, configPath string, fn func(croncli.Store, *eventstore.SQLiteStore) error) error {
+func withStoreAndEvents(ctx context.Context, configPath string, fn func(croncli.Store, eventstore.TurnQuerier) error) error {
 	store, evStore, cleanup, err := croncli.OpenStore(ctx, configPath)
 	if err != nil {
 		return err

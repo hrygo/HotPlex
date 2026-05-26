@@ -68,8 +68,10 @@ func (c *Config) Validate() []string {
 	if c.Gateway.Addr == "" {
 		errs = append(errs, "gateway.addr is required (or use default :8080)")
 	}
-	if c.DB.Path == "" {
-		errs = append(errs, "db.path is required (or use default hotplex.db)")
+	if c.DB.Driver == "" || c.DB.Driver == "sqlite" {
+		if c.DB.Path == "" && c.DB.SQLite.Path == "" {
+			errs = append(errs, "db.path or db.sqlite.path is required (or use default hotplex.db)")
+		}
 	}
 	if c.Session.RetentionPeriod <= 0 {
 		errs = append(errs, "session.retention_period must be positive")

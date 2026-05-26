@@ -170,7 +170,8 @@ func (s *PGStore) GetSessionsByState(ctx context.Context, state events.SessionSt
 	return collectIDs(rows)
 }
 
-// Close closes the database connection.
+// Close is a no-op for PGStore — the connection is managed by gatewayStores,
+// which calls s.db.Close() on the shared *dbutil.DB after s.session.Close().
 func (s *PGStore) Close() error {
-	return s.db.Close()
+	return nil
 }

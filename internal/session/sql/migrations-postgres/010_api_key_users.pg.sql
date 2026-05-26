@@ -1,9 +1,7 @@
 -- +goose Up
 -- API key → user identity mapping table for enterprise multi-user isolation.
 -- Managed via Admin API CRUD endpoints. Queried by DBResolver.
-DROP TABLE IF EXISTS "api_key_users";
-
-CREATE TABLE "api_key_users" (
+CREATE TABLE IF NOT EXISTS "api_key_users" (
     "id" BIGSERIAL PRIMARY KEY,
     "api_key" TEXT NOT NULL UNIQUE,
     "user_id" TEXT NOT NULL,

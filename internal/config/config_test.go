@@ -73,6 +73,7 @@ func TestConfig_Validate(t *testing.T) {
 			cfg: func() Config {
 				c := *Default()
 				c.DB.Path = ""
+				c.DB.SQLite.Path = ""
 				return c
 			}(),
 			errCnt: 1, // missing path only
@@ -101,6 +102,7 @@ func TestConfig_Validate(t *testing.T) {
 				c := *Default()
 				c.Gateway.Addr = ""
 				c.DB.Path = ""
+				c.DB.SQLite.Path = ""
 				return c
 			}(),
 			errCnt: 3, // missing addr + missing path + TLS warning

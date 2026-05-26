@@ -31,7 +31,10 @@ func Open(dialect Dialect, cfg *config.DBConfig) (*DB, error) {
 }
 
 func openSQLite(cfg *config.DBConfig) (*DB, error) {
-	dbPath := cfg.Path
+	dbPath := cfg.SQLite.Path
+	if dbPath == "" {
+		dbPath = cfg.Path // legacy backward compat
+	}
 	if dbPath == "" {
 		dbPath = ":memory:"
 	}

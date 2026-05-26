@@ -19,7 +19,11 @@ type dbOpenOpts struct {
 
 // openSQLiteDB opens a SQLite database with PRAGMAs and pool settings.
 func openSQLiteDB(cfg *config.Config, opts dbOpenOpts) (*sql.DB, error) {
-	return sqlutil.OpenDB(cfg.DB.Path, &cfg.DB, sqlutil.DialectSQLite, opts.Label, sqlutil.PoolOpts{
+	dbPath := cfg.DB.SQLite.Path
+	if dbPath == "" {
+		dbPath = cfg.DB.Path // legacy backward compat
+	}
+	return sqlutil.OpenDB(dbPath, &cfg.DB, sqlutil.DialectSQLite, opts.Label, sqlutil.PoolOpts{
 		MaxOpen:     opts.MaxOpen,
 		MaxIdle:     opts.MaxIdle,
 		MaxLifetime: opts.MaxLifetime,

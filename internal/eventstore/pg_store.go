@@ -68,8 +68,6 @@ func (s *pgEventStore) Append(ctx context.Context, event *StoredEvent) error {
 }
 
 func (s *pgEventStore) BeginTx(ctx context.Context) (EventTx, error) {
-	ctx, cancel := withDefaultTimeout(ctx)
-	defer cancel()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: begin tx: %w", err)
