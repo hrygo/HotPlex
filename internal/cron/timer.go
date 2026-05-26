@@ -182,6 +182,7 @@ func (s *Scheduler) executeJob(job *CronJob) {
 
 	job.State.LastRunID = sessionKey
 	shouldDisable := s.finishExecution(job, start.UnixMilli(), err, errorType(err))
+	s.mergeJobState(job.ID, job.State, false)
 
 	if shouldDisable {
 		s.persistAndDisable(job.ID, job.State)
@@ -227,6 +228,7 @@ func (s *Scheduler) executeAttached(job *CronJob) {
 	err := s.attachedHandler.Execute(ctx, job)
 
 	shouldDisable := s.finishExecution(job, time.Now().UnixMilli(), err, "attached")
+	s.mergeJobState(job.ID, job.State, false)
 
 	if shouldDisable {
 		s.persistAndDisable(job.ID, job.State)

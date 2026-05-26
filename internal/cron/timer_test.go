@@ -238,6 +238,46 @@ func TestMaxTimerInterval(t *testing.T) {
 	require.Equal(t, 60*time.Second, maxTimerInterval)
 }
 
+func TestFinishExecution_ClearsRunningAtMs(t *testing.T) {
+	// Regression: finishExecution must sync RunningAtMs=0 back to in-memory
+	// via mergeJobState. Otherwise collectDue skips the job forever (line 411).
+	store := newTestStore(t)
+	bridge := &mockBridge{}
+	sm := &mockSessionStateChecker{
+		sessions: map[string]*session.SessionInfo{},
+		workers:  map[string]worker.Worker{},
+	}
+	s := &Scheduler{
+		log:           slog.Default(),
+		store:         store,
+		executor:      NewExecutor(slog.Default(), bridge, sm),
+		maxConcurrent: 3,
+		ctx:           context.Background(),
+		jobs:          map[string]*CronJob{},
+		tickLoop:      newTimerLoop(&Scheduler{}),
+	}
+	s.tickLoop.scheduler = s
+
+	now := time.Now()
+	job := helperJob("running-clear")
+	job.State.NextRunAtMs = now.Add(-1 * time.Second).UnixMilli()
+	require.NoError(t, store.Create(context.Background(), job))
+	s.jobs[job.ID] = job
+
+	// Fire tick → executes job in goroutine → will timeout (no worker).
+	s.tickLoop.onTick()
+	s.closed.Store(true)
+	s.tickLoop.stop()
+	s.wg.Wait()
+
+	// After execution finishes, in-memory RunningAtMs must be 0.
+	got := s.jobs[job.ID]
+	require.Equal(t, int64(0), got.State.RunningAtMs,
+		"RunningAtMs must be cleared after execution so collectDue does not skip the job")
+	require.Equal(t, StatusFailed, got.State.LastStatus)
+	require.Equal(t, 1, got.State.ConsecutiveErrs)
+}
+
 func TestGenerateJobID(t *testing.T) {
 	id := GenerateJobID()
 	require.True(t, strings.HasPrefix(id, "cron_"))
