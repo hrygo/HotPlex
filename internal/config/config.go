@@ -450,10 +450,10 @@ type PostgresConfig struct {
 	MaxOpenConns int    `mapstructure:"max_open_conns"`
 }
 
-// DSN returns the PostgreSQL connection string. Defaults to localhost when empty.
+// DSN returns the PostgreSQL connection string. Defaults to localhost with sslmode=prefer when empty.
 func (p PostgresConfig) DSN() string {
 	if p.ConnStr == "" {
-		return "postgres://localhost:5432/hotplex?sslmode=disable"
+		return "postgres://localhost:5432/hotplex?sslmode=prefer"
 	}
 	return p.ConnStr
 }

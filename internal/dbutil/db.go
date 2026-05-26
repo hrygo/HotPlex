@@ -67,9 +67,9 @@ func openSQLite(cfg *config.DBConfig) (*DB, error) {
 
 func openPostgres(cfg *config.DBConfig) (*DB, error) {
 	dsn := cfg.DSN()
-	hasDefaultDSN := dsn == ""
-	if hasDefaultDSN {
-		dsn = "postgres://localhost:5432/hotplex?sslmode=disable"
+
+	if cfg.Postgres.ConnStr == "" {
+		slog.Warn("dbutil: postgres using default DSN with sslmode=prefer — configure db.postgres.dsn for production")
 	}
 
 	sqldb, err := sql.Open("pgx", dsn)
@@ -80,10 +80,6 @@ func openPostgres(cfg *config.DBConfig) (*DB, error) {
 	if err := sqldb.Ping(); err != nil {
 		_ = sqldb.Close()
 		return nil, fmt.Errorf("dbutil: ping postgres: %w", err)
-	}
-
-	if hasDefaultDSN {
-		slog.Warn("dbutil: postgres using default DSN with sslmode=disable — configure db.postgres.dsn for production")
 	}
 
 	maxOpen := cfg.Postgres.MaxOpenConns

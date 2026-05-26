@@ -43,6 +43,7 @@ type APIKeyUserStorer interface {
 	update(ctx context.Context, id int64, u *APIKeyUser) error
 	delete(ctx context.Context, id int64) error
 	Invalidator() cacheInvalidator
+	SetInvalidator(cacheInvalidator)
 }
 
 // cacheInvalidator clears cached resolver entries after CUD operations.
@@ -60,6 +61,10 @@ func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator) APIK
 var _ APIKeyUserStorer = (*apiKeyUserStore)(nil)
 
 func (s *apiKeyUserStore) Invalidator() cacheInvalidator { return s.invalidator }
+
+func (s *apiKeyUserStore) SetInvalidator(inv cacheInvalidator) {
+	s.invalidator = inv
+}
 
 func (s *apiKeyUserStore) list(ctx context.Context) ([]APIKeyUser, error) {
 	rows, err := s.db.QueryContext(ctx,

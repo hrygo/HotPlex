@@ -55,6 +55,10 @@ services:
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.local,.internal
 
+      # Network binding (must be 0.0.0.0 inside container)
+      - HOTPLEX_GATEWAY_ADDR=0.0.0.0:8888
+      - HOTPLEX_ADMIN_ADDR=0.0.0.0:9999
+
       # Claude Code environment
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
 

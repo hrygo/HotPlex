@@ -30,8 +30,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags="-s -w \
-    -X 'github.com/hrygo/hotplex/internal/version.GitCommit=${GIT_SHA}' \
-    -X 'github.com/hrygo/hotplex/internal/version.BuildDate=${BUILD_TIME}'" \
+    -X main.version=${GIT_SHA} \
+    -X main.buildTime=${BUILD_TIME}" \
     -o /build/bin/hotplex \
     ./cmd/hotplex
 

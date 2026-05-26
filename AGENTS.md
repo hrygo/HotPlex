@@ -88,6 +88,7 @@
 **Session** (`internal/session/`)：
 - `manager.go` - `Manager` 5 状态机、状态迁移、GC
 - `store.go` - SQLite 持久化
+- `pg_store.go` - PostgreSQL 持久化
 - `key.go` - `DeriveSessionKey` UUIDv5 确定性 session ID
 - `pool.go` - `PoolManager` 全局 + 每用户配额
 
@@ -144,7 +145,8 @@
 - `service/` - 跨平台系统服务管理（systemd/launchd/SCM）
 - `eventstore/` - 会话事件持久化 + delta 聚合
 - `updater/` - 自更新（GitHub API、sha256 校验、原子替换）
-- `sqlutil/` - SQLite 驱动（modernc.org/sqlite，纯 Go）+ `WriteMu` 跨 store 全局写序列化（消除 SQLITE_BUSY）
+- `dbutil/` - 数据库方言抽象（Dialect, Rebind, BoolValue）、DB 封装、跨 store 连接生命周期
+- `sqlutil/` - SQLite 驱动（modernc.org/sqlite，纯 Go）+ PostgreSQL 驱动（jackc/pgx/v5）+ `WriteMu` 跨 store 全局写序列化（消除 SQLITE_BUSY，PG 下为 no-op）
 - `webchat/` - 嵌入式 Next.js SPA (go:embed)
 - `docs/` - 自托管中文文档门户（Markdown → 静态 HTML → go:embed → `/docs` 路由）
 
