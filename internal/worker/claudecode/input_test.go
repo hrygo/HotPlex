@@ -92,10 +92,12 @@ func TestConn_Stdin_SetLastInput_Integration(t *testing.T) {
 
 	conn := base.NewConn(slog.Default(), w, "user1", "sess1")
 
-	stdin := conn.Stdin()
+	stdin, mu := conn.StdinLocked()
+	defer mu.Unlock()
 	require.NotNil(t, stdin)
 
-	require.NoError(t, writeStreamInput(stdin, conn.WriteMu(), "hello"))
+	require.NoError(t, writeStreamInputLocked(stdin, "hello"))
+	mu.Unlock()
 	conn.SetLastInput("hello")
 	require.Equal(t, "hello", conn.LastInput())
 

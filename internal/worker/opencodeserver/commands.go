@@ -176,6 +176,8 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 			// Wildcard allow-all: all tool calls auto-approved.
 			rules = []map[string]any{{"permission": "*", "action": "allow", "pattern": "*"}}
 		} else {
+			// Intentional security tightening: when bypassPermissions is paired with
+			// an explicit tool whitelist, scope down from allow-all to allow-listed only.
 			slog.Info("opencode: bypassPermissions mode with allowed_tools restricts to tool whitelist",
 				"mode", mode, "allowed_tools", allowedTools)
 		}

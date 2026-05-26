@@ -437,7 +437,7 @@ func TestCompact_NotStarted(t *testing.T) {
 	require.Equal(t, worker.ErrKindUnavailable, we.Kind)
 }
 
-func TestCompact_ClosedStdin(t *testing.T) {
+func TestCompact_ProcessNotRunning(t *testing.T) {
 	t.Parallel()
 
 	r, w, err := os.Pipe()

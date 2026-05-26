@@ -79,11 +79,10 @@ func (c *Conn) WriteMu() *sync.Mutex {
 	return &c.mu
 }
 
-// Stdin returns the underlying stdin file. Workers that need direct stdin
-// access for protocol-specific message formats (e.g. Claude Code stream-json)
-// should use this together with WriteMu() to ensure serialized writes.
-// WARNING: the returned *os.File is only valid while the mutex is held by the caller.
-// Prefer StdinLocked() for any operation that reads or writes through the file.
+// Stdin returns the underlying stdin file.
+//
+// Deprecated: Use StdinLocked() instead. The returned *os.File is unprotected
+// after the internal mutex is released, making it unsafe for concurrent writes.
 func (c *Conn) Stdin() *os.File {
 	c.mu.Lock()
 	defer c.mu.Unlock()

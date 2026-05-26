@@ -832,7 +832,7 @@ func (w *Worker) readOutput(ctx context.Context) {
 // is a control command, not user content that should be re-delivered on crash.
 // Note: args is ignored. Claude Code's /compact does not accept extra parameters
 // (unlike OCS which supports model selection in the summarize request).
-func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
+func (w *Worker) Compact(ctx context.Context, _ map[string]any) error {
 	conn := w.Conn()
 	if conn == nil {
 		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: not started"}
@@ -854,7 +854,20 @@ func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
 		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
 	}
 	defer mu.Unlock()
-	return writeStreamInputLocked(stdin, "/compact")
+
+	// writeStreamInputLocked issues syscall.Write which blocks when the pipe
+	// buffer is full and the reader has stalled. Guard with context cancellation
+	// so the caller is not blocked indefinitely.
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- writeStreamInputLocked(stdin, "/compact")
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("claudecode: compact: %w", ctx.Err())
+	}
 }
 
 // Clear is not supported by Claude Code in non-interactive mode.
