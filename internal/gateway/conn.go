@@ -434,6 +434,7 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to start session")
+		metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
 		return nil, fmt.Errorf("start unstarted session: %w", err)
 	}
 	si, err := sm.Get(context.Background(), sessionID)

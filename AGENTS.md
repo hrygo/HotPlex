@@ -78,12 +78,15 @@
 ### 核心模块 (`internal/`)
 
 **Gateway** (`internal/gateway/`)：
-- `hub.go` - `Hub` WS 广播 hub
-- `conn.go` - `Conn` 单个 WS 连接 (ReadPump/WritePump)
-- `handler.go` - `Handler` AEP 事件分发
+- `hub.go` - `Hub` WS 广播 hub（`routeMessage`、`removeSession`、`SessionWriter` 接口）
+- `conn.go` - `Conn` 单个 WS 连接 (ReadPump/WritePump、performInit 四阶段 dispatch)
+- `handler.go` - `Handler` AEP 事件分发（`SessionManager` 子接口组合：SessionReader/Lifecycle/Transitioner/WorkerManager/Admin）
 - `bridge.go` - `Bridge` Session ↔ Worker 生命周期编排
+- `bridge_forward.go` - `forwardEvents` 事件转发循环（`forwardContext` 单 goroutine 所有权）
 - `llm_retry.go` - `LLMRetryController` 自动重试
 - `api.go` - `GatewayAPI` HTTP session 端点
+- `worker_cmds.go` - Worker 命令分发（context usage/MCP status/set model 等）
+- `platform_writer.go` - `RouteWrite` 按 WS conn 编码写入（替代 pre-encoded 广播）
 
 **Session** (`internal/session/`)：
 - `manager.go` - `Manager` 5 状态机、状态迁移、GC

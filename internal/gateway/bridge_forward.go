@@ -19,6 +19,9 @@ import (
 )
 
 // forwardContext carries per-session mutable state for the event forwarding loop.
+// Ownership: exclusively owned by the single forwardEvents goroutine per session.
+// No concurrent access — all fields are read/written from that goroutine only,
+// except turnTimerFired which uses atomic.Bool for timer callback safety.
 type forwardContext struct {
 	sessionID      string
 	workerType     worker.WorkerType
@@ -193,7 +196,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	b.captureForwardedEvent(env, deltaContent, reasoningContent, fc)
 
 	// Flush buffered error on non-Done events.
-	b.flushPendingError(env, fc)
+	b.flushPendingError(fc, true)
 
 	// LLM retry: check after Done is forwarded.
 	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
@@ -207,7 +210,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 			fc.lastError = nil
 			return // continue — retry produces new events on recv
 		}
-		b.flushRetryPendingError(fc)
+		b.flushPendingError(fc, false)
 		b.retryCtrl.RecordSuccess(sessionID)
 		fc.lastError = nil
 	}
@@ -311,21 +314,14 @@ func (b *Bridge) captureForwardedEvent(env *events.Envelope, deltaContent, reaso
 	}
 }
 
-// flushPendingError sends the buffered error event on non-Done events.
-func (b *Bridge) flushPendingError(env *events.Envelope, fc *forwardContext) {
-	if fc.pendingError == nil || env.Event.Type == events.Done {
+// flushPendingError sends the buffered error event to the client.
+// skipOnDone controls whether to suppress the flush when the current event is Done
+// (used in the main forwarding loop to defer error delivery past retry decision).
+func (b *Bridge) flushPendingError(fc *forwardContext, skipOnDone bool) {
+	if fc.pendingError == nil {
 		return
 	}
-	if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
-		b.log.Warn("bridge: forward buffered error failed", "err", err, "session_id", fc.sessionID, "worker_type", fc.workerType)
-	}
-	b.captureEvent(fc.sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data)
-	fc.pendingError = nil
-}
-
-// flushRetryPendingError sends the buffered error event after retry decision.
-func (b *Bridge) flushRetryPendingError(fc *forwardContext) {
-	if fc.pendingError == nil {
+	if skipOnDone && fc.doneReceived {
 		return
 	}
 	if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {

@@ -475,6 +475,8 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(msg.Env.Event.Type)).Inc()
 		if err := conn.RouteWrite(context.Background(), msg.Env); err != nil {
 			h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
+			// Eager removal: Close() the conn and remove it from the session map
+			// to prevent repeated write failures on stale connections.
 			_ = conn.Close()
 			h.mu.Lock()
 			h.removeSession(msg.Env.SessionID, conn)
