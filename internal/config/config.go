@@ -415,6 +415,15 @@ func (d DBConfig) DSN() string {
 	}
 }
 
+// EffectiveSQLitePath returns the effective SQLite database path,
+// preferring the structured SQLite.Path with legacy flat Path as fallback.
+func (d DBConfig) EffectiveSQLitePath() string {
+	if d.SQLite.Path != "" {
+		return d.SQLite.Path
+	}
+	return d.Path
+}
+
 // SQLiteConfig holds SQLite-specific database settings.
 type SQLiteConfig struct {
 	Path              string        `mapstructure:"path"`

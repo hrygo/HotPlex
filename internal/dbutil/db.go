@@ -33,10 +33,7 @@ func Open(dialect Dialect, cfg *config.DBConfig) (*DB, error) {
 }
 
 func openSQLite(cfg *config.DBConfig) (*DB, error) {
-	dbPath := cfg.SQLite.Path
-	if dbPath == "" {
-		dbPath = cfg.Path // legacy backward compat
-	}
+	dbPath := cfg.EffectiveSQLitePath()
 	if dbPath == "" {
 		dbPath = ":memory:"
 	}
@@ -96,6 +93,7 @@ func openPostgres(cfg *config.DBConfig) (*DB, error) {
 	sqldb.SetMaxOpenConns(maxOpen)
 	sqldb.SetMaxIdleConns(5)
 	sqldb.SetConnMaxLifetime(5 * time.Minute)
+	sqldb.SetConnMaxIdleTime(5 * time.Minute)
 
 	return &DB{DB: sqldb, dialect: DialectPostgres}, nil
 }

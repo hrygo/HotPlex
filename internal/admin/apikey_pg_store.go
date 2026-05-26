@@ -5,15 +5,17 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sync"
 
 	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
 // APIKeyUserPGStore implements APIKeyUserStorer backed by PostgreSQL.
 type APIKeyUserPGStore struct {
-	db          *dbutil.DB
-	dialect     dbutil.Dialect
-	invalidator cacheInvalidator
+	db              *dbutil.DB
+	dialect         dbutil.Dialect
+	invalidator     cacheInvalidator
+	invalidatorOnce sync.Once
 }
 
 func NewAPIKeyUserPGStore(db *dbutil.DB, inv cacheInvalidator) *APIKeyUserPGStore {
@@ -28,8 +30,11 @@ func NewAPIKeyUserPGStore(db *dbutil.DB, inv cacheInvalidator) *APIKeyUserPGStor
 }
 
 // SetInvalidator sets the cache invalidator used after API key CRUD operations.
+// Safe for concurrent use — only the first call takes effect.
 func (s *APIKeyUserPGStore) SetInvalidator(inv cacheInvalidator) {
-	s.invalidator = inv
+	s.invalidatorOnce.Do(func() {
+		s.invalidator = inv
+	})
 }
 
 var (

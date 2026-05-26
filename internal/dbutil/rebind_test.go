@@ -7,6 +7,7 @@ import (
 )
 
 func TestRebind(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -108,12 +109,14 @@ func TestRebind(t *testing.T) {
 }
 
 func TestRebindDialectSQLite(t *testing.T) {
+	t.Parallel()
 	input := "SELECT ? FROM t WHERE name = 'hello?world' AND id = ?"
 	got := DialectSQLite.Rebind(input)
 	require.Equal(t, input, got, "DialectSQLite.Rebind()")
 }
 
 func TestDialectPlaceholder(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		dialect  Dialect
@@ -136,6 +139,7 @@ func TestDialectPlaceholder(t *testing.T) {
 }
 
 func TestDialectQuoteIdent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		dialect  Dialect
@@ -156,6 +160,7 @@ func TestDialectQuoteIdent(t *testing.T) {
 }
 
 func TestDialectBoolValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		dialect  Dialect
@@ -177,6 +182,7 @@ func TestDialectBoolValue(t *testing.T) {
 }
 
 func TestDialectBoolValueSQLiteType(t *testing.T) {
+	t.Parallel()
 	// Verify SQLite BoolValue returns int, not bool
 	v := DialectSQLite.BoolValue(true)
 	_, ok := v.(int)
@@ -188,12 +194,14 @@ func TestDialectBoolValueSQLiteType(t *testing.T) {
 }
 
 func TestDialectBoolValuePostgresType(t *testing.T) {
+	t.Parallel()
 	v := DialectPostgres.BoolValue(true)
 	_, ok := v.(bool)
 	require.True(t, ok, "Postgres BoolValue(true) type = %T, want bool", v)
 }
 
 func TestDialectIsUniqueViolation(t *testing.T) {
+	t.Parallel()
 	errSQLite := errStr("UNIQUE constraint failed: users.email")
 	errPG23505 := errStr("ERROR: duplicate key value violates unique constraint \"users_pkey\" (SQLSTATE 23505)")
 	errPGDupKey := errStr("duplicate key value violates unique constraint")
@@ -223,6 +231,7 @@ func TestDialectIsUniqueViolation(t *testing.T) {
 }
 
 func TestParseDialect(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string

@@ -120,7 +120,7 @@ func (s *PGStore) GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]s
 	rows, err := s.db.QueryContext(ctx, s.queries["store.get_expired_max_lifetime"],
 		string(events.StateCreated), string(events.StateRunning), string(events.StateIdle), now)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session store: get expired max lifetime: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return collectIDs(rows)
@@ -130,7 +130,7 @@ func (s *PGStore) GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]s
 func (s *PGStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, s.queries["store.get_expired_idle"], events.StateIdle, now)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session store: get expired idle: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return collectIDs(rows)
