@@ -1,7 +1,6 @@
 package dbutil
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 )
@@ -65,5 +64,3 @@ func (d Dialect) IsUniqueViolation(err error) bool {
 		return false
 	}
 }
-
-var _ = (*sql.DB)(nil)

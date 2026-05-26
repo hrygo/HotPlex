@@ -207,6 +207,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	// API key → user identity resolver: YAML config takes priority over DB (Admin API CRUD).
 	// ChainResolver tries config map first, falls back to DB. Either source may be empty.
 	dbResolver := security.NewDBResolver(stores.sqlDB)
+	// PG stores need the dbResolver for cache invalidation after API key CRUD.
+	if ak, ok := stores.apiKeyStore.(*admin.APIKeyUserPGStore); ok {
+		ak.SetInvalidator(dbResolver)
+	}
 	if len(cfg.ResolvedAPIKeyUsers) > 0 {
 		mapResolver := security.NewMapResolver(cfg.ResolvedAPIKeyUsers)
 		auth.SetKeyResolver(security.NewChainResolver(mapResolver, dbResolver))
