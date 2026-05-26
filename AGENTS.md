@@ -118,6 +118,7 @@
 
 **Worker**：
 - `claudecode/` - Claude Code 适配器 (stdio, `--print --session-id`)
+- `codexcli/` - Codex CLI 适配器 (exec + app-server 双模式)
 - `opencodeserver/` - Open Code Server 适配器（单例进程, HTTP+SSE）
 - `proc/` - 跨平台进程生命周期管理 (PGID/Job Object)
 - `base/` - 共享 BaseWorker + Conn + MetadataHandler

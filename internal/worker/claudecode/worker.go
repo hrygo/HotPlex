@@ -866,6 +866,7 @@ func (w *Worker) Compact(ctx context.Context, _ map[string]any) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+		<-errCh // wait for write to complete before releasing mu
 		return fmt.Errorf("claudecode: compact: %w", ctx.Err())
 	}
 }
