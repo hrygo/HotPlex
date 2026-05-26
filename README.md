@@ -138,23 +138,23 @@ Supports **systemd** (Linux), **launchd** (macOS), and **Windows SCM**.
 HotPlex sits between frontend clients and backend AI coding agents, featuring a built-in **Meta-Cognition Core** that abstracts protocol differences into a unified **AEP v1** WebSocket layer.
 
 ```
-┌──────────┐   ┌──────────┐   ┌──────────┐
-│  Web UI  │   │  Slack   │   │  Feishu  │
-└────┬─────┘   └────┬─────┘   └────┬─────┘
-     │              │              │
-     └──────────────┼──────────────┘
-                    │
-              ┌─────┴─────┐
-              │  HotPlex  │
-              │  Gateway  │
-              └─────┬─────┘
-                    │
-     ┌──────────┬───┴───┬──────────┐
-     │          │       │          │
-┌────┴─────┐ ┌──┴────┐ ┌┴────────┐
-│  Claude  │ │ Codex │ │OpenCode │
-│  Code    │ │  CLI  │ │ Server  │
-└──────────┘ └───────┘ └─────────┘
+┌────────────┐   ┌────────────┐   ┌────────────┐
+│   Web UI   │   │   Slack    │   │   Feishu   │
+└─────┬──────┘   └─────┬──────┘   └─────┬──────┘
+      │                │                │
+      └────────────────┼────────────────┘
+                       │
+                 ┌─────┴──────┐
+                 │  HotPlex   │
+                 │  Gateway   │
+                 └─────┬──────┘
+                       │
+      ┌────────────────┼────────────────┐
+      │                │                │
+┌─────┴──────┐   ┌─────┴──────┐   ┌─────┴──────┐
+│   Claude   │   │   Codex    │   │  OpenCode  │
+│    Code    │   │    CLI     │   │   Server   │
+└────────────┘   └────────────┘   └────────────┘
 ```
 
 ## 🔗 SDKs & Libraries
