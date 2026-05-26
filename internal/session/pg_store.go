@@ -1,0 +1,183 @@
+package session
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/dbutil"
+	"github.com/hrygo/hotplex/pkg/events"
+)
+
+// PGStore implements Store using PostgreSQL.
+type PGStore struct {
+	db      *dbutil.DB
+	dialect dbutil.Dialect
+	queries map[string]string // Rebound queries ($N placeholders)
+	log     *slog.Logger
+}
+
+// NewPGStore creates and initializes a new PGStore.
+func NewPGStore(ctx context.Context, cfg *config.Config) (*PGStore, error) {
+	db, err := dbutil.Open(dbutil.DialectPostgres, &cfg.DB)
+	if err != nil {
+		return nil, fmt.Errorf("session store: open postgres: %w", err)
+	}
+
+	if err := runMigrations(ctx, db.DB, dbutil.DialectPostgres); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	// Copy and rebind all queries from ? to $N placeholders.
+	q := make(map[string]string, len(queries))
+	for k, v := range queries {
+		q[k] = dbutil.DialectPostgres.Rebind(v)
+	}
+
+	return &PGStore{
+		db:      db,
+		dialect: dbutil.DialectPostgres,
+		queries: q,
+		log:     slog.Default().With("component", "session_pg_store"),
+	}, nil
+}
+
+// Upsert inserts or updates a session record.
+// Unlike SQLiteStore, no write serialization is needed — PG handles concurrency natively.
+func (s *PGStore) Upsert(ctx context.Context, info *SessionInfo) error {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+
+	var ctxJSON []byte
+	if info.Context != nil {
+		var err error
+		ctxJSON, err = json.Marshal(info.Context)
+		if err != nil {
+			return fmt.Errorf("session store: marshal context: %w", err)
+		}
+	}
+
+	var platformKeyJSON []byte
+	if info.PlatformKey != nil {
+		var err2 error
+		platformKeyJSON, err2 = json.Marshal(info.PlatformKey)
+		if err2 != nil {
+			return fmt.Errorf("session store: marshal platform key: %w", err2)
+		}
+	}
+
+	_, err := s.db.ExecContext(ctx, s.queries["sessions.upsert_session"],
+		info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
+		info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
+		info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
+		string(ctxJSON), info.Source,
+	)
+	if err != nil {
+		return fmt.Errorf("session store: upsert: %w", err)
+	}
+	return nil
+}
+
+// Get loads a session by ID. Returns ErrSessionNotFound if not found.
+func (s *PGStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
+	info, err := scanSession(s.db.QueryRowContext(ctx, s.queries["store.get_session"], id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("session store: load: %w", err)
+	}
+	return info, nil
+}
+
+// List returns sessions with pagination, excluding soft-deleted records.
+func (s *PGStore) List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, s.queries["store.list_sessions"], userID, userID, platform, platform, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("session store: list: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var sessions []*SessionInfo
+	for rows.Next() {
+		si, err := scanSession(rows)
+		if err != nil {
+			s.log.Warn("session store: skipping corrupted row", "err", err)
+			continue
+		}
+		sessions = append(sessions, si)
+	}
+	return sessions, rows.Err()
+}
+
+// GetExpiredMaxLifetime returns session IDs that exceeded their max lifetime.
+func (s *PGStore) GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["store.get_expired_max_lifetime"],
+		string(events.StateCreated), string(events.StateRunning), string(events.StateIdle), now)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return collectIDs(rows)
+}
+
+// GetExpiredIdle returns session IDs that exceeded their idle timeout.
+func (s *PGStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["store.get_expired_idle"], events.StateIdle, now)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return collectIDs(rows)
+}
+
+// DeleteTerminated removes terminated sessions older than the respective cutoffs.
+func (s *PGStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+	_, err := s.db.ExecContext(ctx, s.queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
+	if err != nil {
+		return fmt.Errorf("session store: delete terminated: %w", err)
+	}
+	return nil
+}
+
+// DeletePhysical deletes a session by ID, bypassing the state machine.
+func (s *PGStore) DeletePhysical(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.queries["store.delete_physical"], id)
+	if err != nil {
+		return fmt.Errorf("session store: delete physical: %w", err)
+	}
+	return nil
+}
+
+// Compact is a no-op for PostgreSQL. PG handles bloat automatically with autovacuum;
+// there is no equivalent of SQLite VACUUM needed for routine session table maintenance.
+func (s *PGStore) Compact(_ context.Context, _ float64) error {
+	return nil
+}
+
+// GetSessionsByState returns all session IDs in the given state.
+func (s *PGStore) GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["store.get_sessions_by_state"], string(state))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return collectIDs(rows)
+}
+
+// Close closes the database connection.
+func (s *PGStore) Close() error {
+	return s.db.Close()
+}

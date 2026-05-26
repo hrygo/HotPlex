@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,8 +31,18 @@ type APIKeyUser struct {
 }
 
 type apiKeyUserStore struct {
-	db          *sql.DB
+	db          DBExecutor
 	invalidator cacheInvalidator
+}
+
+// APIKeyUserStorer defines CRUD operations for API key user records.
+type APIKeyUserStorer interface {
+	list(ctx context.Context) ([]APIKeyUser, error)
+	get(ctx context.Context, id int64) (*APIKeyUser, error)
+	create(ctx context.Context, u *APIKeyUser) error
+	update(ctx context.Context, id int64, u *APIKeyUser) error
+	delete(ctx context.Context, id int64) error
+	Invalidator() cacheInvalidator
 }
 
 // cacheInvalidator clears cached resolver entries after CUD operations.
@@ -41,12 +50,16 @@ type cacheInvalidator interface {
 	Invalidate(key string)
 }
 
-func newAPIKeyUserStoreWithInvalidator(db *sql.DB, inv cacheInvalidator) *apiKeyUserStore {
+func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator) *apiKeyUserStore {
 	if db == nil {
 		return nil
 	}
 	return &apiKeyUserStore{db: db, invalidator: inv}
 }
+
+var _ APIKeyUserStorer = (*apiKeyUserStore)(nil)
+
+func (s *apiKeyUserStore) Invalidator() cacheInvalidator { return s.invalidator }
 
 func (s *apiKeyUserStore) list(ctx context.Context) ([]APIKeyUser, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -168,8 +181,8 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 		http.Error(w, "create failed", http.StatusInternalServerError)
 		return
 	}
-	if a.akStore.invalidator != nil {
-		a.akStore.invalidator.Invalidate(u.APIKey)
+	if inv := a.akStore.Invalidator(); inv != nil {
+		inv.Invalidate(u.APIKey)
 	}
 	w.WriteHeader(http.StatusCreated)
 	respondJSON(w, u)
@@ -232,8 +245,8 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	if a.akStore.invalidator != nil {
-		a.akStore.invalidator.Invalidate(oldUser.APIKey)
+	if inv := a.akStore.Invalidator(); inv != nil {
+		inv.Invalidate(oldUser.APIKey)
 	}
 	respondJSON(w, APIKeyUser{ID: id, APIKey: maskAPIKey(oldUser.APIKey), UserID: u.UserID, Description: u.Description})
 }
@@ -262,8 +275,8 @@ func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	if a.akStore.invalidator != nil {
-		a.akStore.invalidator.Invalidate(u.APIKey)
+	if inv := a.akStore.Invalidator(); inv != nil {
+		inv.Invalidate(u.APIKey)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

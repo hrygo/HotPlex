@@ -42,7 +42,7 @@ func newTestChatAccessStore(t *testing.T) *testChatStore {
 	require.NoError(t, err)
 
 	return &testChatStore{
-		ChatAccessStore: NewChatAccessStore(db, nil, sqlutil.NewWriteMu()),
+		ChatAccessStore: NewChatAccessStore(db, nil, sqlutil.NewWriteMu(sqlutil.DialectSQLite)),
 		db:              db,
 	}
 }

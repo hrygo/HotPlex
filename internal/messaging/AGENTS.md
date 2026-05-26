@@ -12,6 +12,8 @@ messaging/
   interaction.go         # InteractionManager: user permission/Q&A/elicitation with timeout + auto-deny
   control_command.go     # Slash commands (/gc, /reset, /park, /new) + $prefix natural language
   sanitize.go            # Text sanitization: control chars, null bytes, BOM, surrogates
+  bot_registry.go        # BotRegistry: concurrent-safe multi-bot registration + BotConfig lookup
+  config.go              # AdapterConfig with BotName field, messaging shared defaults
   integration_test.go     # Cross-adapter integration tests
   slack/                 # Slack Socket Mode adapter (18 files)
   feishu/                # Feishu ws.Client adapter (15 files + STT)

@@ -133,10 +133,10 @@ func phraseOr(p *phrases.Phrases, category, fallback string) string {
 }
 
 // chatAccessStore extracts the ChatAccessStore from the adapter extras.
-func (a *Adapter) chatAccessStore() *messaging.ChatAccessStore {
+func (a *Adapter) chatAccessStore() messaging.ChatAccessStorer {
 	if a.Extras == nil {
 		return nil
 	}
-	s, _ := a.Extras["chat_access_store"].(*messaging.ChatAccessStore)
+	s, _ := a.Extras["chat_access_store"].(messaging.ChatAccessStorer)
 	return s
 }

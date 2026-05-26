@@ -52,6 +52,26 @@ admin:
 # ─────────────────────────────────────────────────────────────────────────────
 
 db:
+  # Driver: "sqlite" (default) or "postgres".
+  # When set to "postgres", the postgres sub-config is used.
+  driver: "sqlite"
+
+  # ── SQLite configuration (default) ─────────────────────────────────────
+  # Legacy flat fields (path, wal_mode, etc.) are also supported for backward
+  # compatibility. When both flat and structured fields are present, the
+  # structured fields take precedence.
+  sqlite:
+    path: ~/.hotplex/data/hotplex.db
+    wal_mode: true
+    busy_timeout: 5s
+    max_open_conns: 3         # 1 writer + 2 readers for shared session/event store
+    vacuum_threshold: 0.2     # VACUUM when 20%+ free pages
+    cache_size_kib: 8192
+    mmap_size_mib: 64
+    wal_autocheckpoint: 2000
+
+  # Legacy flat fields (backward compatible, maps to sqlite.*).
+  # These are DEPRECATED — use the structured sqlite.* format instead.
   path: ~/.hotplex/data/hotplex.db
   events_path: ""           # Deprecated: events table lives in hotplex.db
   wal_mode: true
@@ -61,6 +81,12 @@ db:
   cache_size_kib: 8192
   mmap_size_mib: 64
   wal_autocheckpoint: 2000
+
+  # ── PostgreSQL configuration (optional) ────────────────────────────────
+  # Uncomment and set driver: "postgres" to use PostgreSQL instead of SQLite.
+  # postgres:
+  #   dsn: "postgres://user:password@localhost:5432/hotplex?sslmode=disable"
+  #   max_open_conns: 25
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECURITY & AUTH

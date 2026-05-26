@@ -7,7 +7,7 @@ LLM orchestration layer providing safety guard (input/output validation), intent
 ```
 brain/
   brain.go       # Core interfaces: Brain, StreamingBrain, RoutableBrain, ObservableBrain + global singleton (106 lines)
-  init.go        # Init() orchestration + enhancedBrainWrapper (middleware pipeline assembly) (412 lines)
+  init.go        # Init() orchestration + enhancedBrainWrapper (middleware pipeline assembly) (435 lines)
   config.go      # 13 sub-configs + 4-tier API key discovery + env loading (484 lines)
   guard.go       # SafetyGuard: threat detection, per-user rate limit, Chat2Config, self-healing (781 lines)
   router.go      # IntentRouter: message classification, LRU cache, fast-path detection (606 lines)

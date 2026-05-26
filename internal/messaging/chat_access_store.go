@@ -32,6 +32,15 @@ type ChatAccessRecord struct {
 	CreatedAt     int64 // unix epoch
 }
 
+// ChatAccessStorer abstracts chat access event storage and classification.
+type ChatAccessStorer interface {
+	Record(ctx context.Context, r ChatAccessRecord) (bool, error)
+	Classify(ctx context.Context, platform, chatID, botID, userID string, lastMessageAtMs int64) ChatAccessType
+}
+
+// Compile-time check that ChatAccessStore satisfies ChatAccessStorer.
+var _ ChatAccessStorer = (*ChatAccessStore)(nil)
+
 // ChatAccessStore provides dedup + cooldown + persistence for chat-entered events.
 type ChatAccessStore struct {
 	db      *sql.DB

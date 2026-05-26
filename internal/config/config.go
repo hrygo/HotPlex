@@ -374,8 +374,23 @@ type GatewayConfig struct {
 	DeltaCoalesceSize int `mapstructure:"delta_coalesce_size"`
 }
 
-// DBConfig holds SQLite settings shared by all database connections.
+// DBConfig holds database settings.
+// Supports both SQLite and PostgreSQL backends.
+// For backward compatibility, legacy flat fields (Path, WALMode, etc.) are kept
+// on DBConfig. New code should prefer the structured SQLite.* or Postgres.* fields.
 type DBConfig struct {
+	// Driver specifies the database driver: "sqlite" (default) or "postgres".
+	// When set to "postgres", the Postgres sub-config is used instead of SQLite.
+	Driver string `mapstructure:"driver"`
+
+	// SQLite-specific configuration. Also the target for legacy flat fields
+	// when using the sqlite driver (default).
+	SQLite SQLiteConfig `mapstructure:"sqlite"`
+
+	// Postgres-specific configuration. Active when Driver is "postgres".
+	Postgres PostgresConfig `mapstructure:"postgres"`
+
+	// ── Legacy flat fields (deprecated, use SQLite.* instead) ──
 	Path              string        `mapstructure:"path"`
 	EventsPath        string        `mapstructure:"events_path"` // Deprecated: events table now lives in hotplex.db (same as Path)
 	WALMode           bool          `mapstructure:"wal_mode"`
@@ -385,6 +400,51 @@ type DBConfig struct {
 	CacheSizeKiB      int           `mapstructure:"cache_size_kib"`
 	MmapSizeMiB       int           `mapstructure:"mmap_size_mib"`
 	WalAutoCheckpoint int           `mapstructure:"wal_autocheckpoint"`
+}
+
+// DSN returns the connection string for the configured database driver.
+// Delegates to the active sub-config's DSN method based on Driver.
+func (d DBConfig) DSN() string {
+	switch strings.ToLower(d.Driver) {
+	case "postgres", "pg", "postgresql":
+		return d.Postgres.DSN()
+	default:
+		return d.SQLite.DSN()
+	}
+}
+
+// SQLiteConfig holds SQLite-specific database settings.
+type SQLiteConfig struct {
+	Path              string        `mapstructure:"path"`
+	WALMode           bool          `mapstructure:"wal_mode"`
+	BusyTimeout       time.Duration `mapstructure:"busy_timeout"`
+	MaxOpenConns      int           `mapstructure:"max_open_conns"`
+	VacuumThreshold   float64       `mapstructure:"vacuum_threshold"`
+	CacheSizeKiB      int           `mapstructure:"cache_size_kib"`
+	MmapSizeMiB       int           `mapstructure:"mmap_size_mib"`
+	WalAutoCheckpoint int           `mapstructure:"wal_autocheckpoint"`
+}
+
+// DSN returns the SQLite database path. Defaults to ":memory:" when empty.
+func (s SQLiteConfig) DSN() string {
+	if s.Path == "" {
+		return ":memory:"
+	}
+	return s.Path
+}
+
+// PostgresConfig holds PostgreSQL-specific database settings.
+type PostgresConfig struct {
+	ConnStr      string `mapstructure:"dsn"`
+	MaxOpenConns int    `mapstructure:"max_open_conns"`
+}
+
+// DSN returns the PostgreSQL connection string. Defaults to localhost when empty.
+func (p PostgresConfig) DSN() string {
+	if p.ConnStr == "" {
+		return "postgres://localhost:5432/hotplex?sslmode=disable"
+	}
+	return p.ConnStr
 }
 
 // WorkerConfig holds per-worker defaults.
@@ -566,6 +626,18 @@ func Default() *Config {
 			DeltaCoalesceSize:     200,
 		},
 		DB: DBConfig{
+			Driver: "sqlite",
+			SQLite: SQLiteConfig{
+				Path:              filepath.Join(HotplexHome(), "data", "hotplex.db"),
+				WALMode:           true,
+				BusyTimeout:       5 * time.Second,
+				MaxOpenConns:      3, // 1 writer + 2 readers for shared session/event store
+				VacuumThreshold:   0.2,
+				CacheSizeKiB:      8192,
+				MmapSizeMiB:       64,
+				WalAutoCheckpoint: 2000,
+			},
+			// Legacy flat fields (kept for backward compat with existing consumers).
 			Path:              filepath.Join(HotplexHome(), "data", "hotplex.db"),
 			EventsPath:        "", // Deprecated: unused, events table lives in hotplex.db
 			WALMode:           true,
@@ -1032,6 +1104,7 @@ func (c *Config) normalizePaths() {
 
 	// 2. Expand ~ and normalize paths.
 	for _, pf := range []*string{
+		&c.DB.SQLite.Path,
 		&c.DB.Path,
 		&c.DB.EventsPath,
 		&c.Worker.DefaultWorkDir,

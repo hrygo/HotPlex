@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -52,7 +53,7 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config, writeMu *sqlutil.Wr
 		return nil, err
 	}
 
-	if err := runMigrations(ctx, db); err != nil {
+	if err := runMigrations(ctx, db, dbutil.DialectSQLite); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

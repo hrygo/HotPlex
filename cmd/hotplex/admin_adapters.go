@@ -83,7 +83,7 @@ func (a *hubAdapter) NextSeqPeek(sessionID string) int64 {
 }
 
 type turnsStoreAdapter struct {
-	es *eventstore.SQLiteStore
+	es eventstore.TurnQuerier
 }
 
 func (a *turnsStoreAdapter) TurnStats(ctx context.Context, sessionID string) (*eventstore.TurnStats, error) {

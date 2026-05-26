@@ -18,7 +18,7 @@ func TestWriteMu_WithLock_Nil(t *testing.T) {
 }
 
 func TestWriteMu_WithLock_ReturnsError(t *testing.T) {
-	mu := NewWriteMu()
+	mu := NewWriteMu(DialectSQLite)
 	expected := errors.New("test error")
 	err := mu.WithLock(func() error {
 		return expected
@@ -27,7 +27,7 @@ func TestWriteMu_WithLock_ReturnsError(t *testing.T) {
 }
 
 func TestWriteMu_WithLock_SerializesAccess(t *testing.T) {
-	mu := NewWriteMu()
+	mu := NewWriteMu(DialectSQLite)
 	var concurrent atomic.Int32
 	var maxConcurrent atomic.Int32
 

@@ -295,7 +295,7 @@ func newTestStoreWithWriteMu(t *testing.T) *SQLiteStore {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	store.writeMu = sqlutil.NewWriteMu()
+	store.writeMu = sqlutil.NewWriteMu(sqlutil.DialectSQLite)
 
 	_, err = store.db.Exec(`CREATE TABLE IF NOT EXISTS events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,

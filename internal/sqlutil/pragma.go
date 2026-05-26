@@ -10,7 +10,11 @@ import (
 // InitSQLiteDB configures a SQLite connection with standard PRAGMAs.
 // All hotplex SQLite stores (session, conversation, event) should call this
 // to ensure consistent tuning driven by the shared DBConfig.
-func InitSQLiteDB(db *sql.DB, cfg *config.DBConfig, label string) error {
+// When dialect is PostgreSQL, it returns immediately (PRAGMAs are SQLite-only).
+func InitSQLiteDB(db *sql.DB, cfg *config.DBConfig, dialect, label string) error {
+	if dialect == DialectPostgres {
+		return nil
+	}
 	if cfg.WALMode {
 		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 			return fmt.Errorf("%s WAL: %w", label, err)

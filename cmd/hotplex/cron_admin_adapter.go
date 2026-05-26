@@ -14,7 +14,7 @@ import (
 // cronAdminAdapter bridges cron.Scheduler to admin.CronSchedulerProvider.
 type cronAdminAdapter struct {
 	scheduler  *cron.Scheduler
-	turnsStore *eventstore.SQLiteStore
+	turnsStore eventstore.TurnQuerier
 }
 
 // Fields that must not be overwritten via admin API UpdateJob.

@@ -18,7 +18,7 @@ import (
 func setupAPIKeyStore(t *testing.T) (*AdminAPI, func()) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := sqlutil.OpenDB(":memory:", &config.DBConfig{}, "test", sqlutil.PoolOpts{})
+	db, err := sqlutil.OpenDB(":memory:", &config.DBConfig{}, sqlutil.DialectSQLite, "test", sqlutil.PoolOpts{})
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
