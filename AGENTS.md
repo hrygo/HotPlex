@@ -93,7 +93,10 @@
 
 **Messaging** (`internal/messaging/`)：
 - `bridge.go` - `Bridge` StartSession → Join → Handle
-- `platform_adapter.go` - 基础适配器
+- `platform_adapter.go` - `PlatformAdapter` 基座（共享状态、ConfigureWith）
+- `platform_types.go` - `PlatformType` 常量 + `ExtractPlatformKeys`
+- `platform_interfaces.go` - `HubInterface`、`HandlerInterface`、`SessionStarter`、`PlatformAdapterInterface`
+- `platform_registry.go` - 适配器注册表（Register/New/RegisteredTypes）
 - `control_command.go` - `ParseControlCommand` 斜杠命令解析
 - `bot_registry.go` - `BotRegistry` 并发安全多 bot 注册表
 - `config.go` - `AdapterConfig` 含 `BotName` 字段

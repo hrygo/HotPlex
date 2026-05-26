@@ -189,13 +189,12 @@ import (
 // PlatformAdapter is the base type for all messaging platform adapters.
 // Each adapter embeds this struct and implements Start, HandleTextMessage, and Close.
 //
-// [实现说明] hub/sm/handler 使用接口类型（HubInterface, HandlerInterface）而非具体类型，
-// 消除对 internal/gateway 包的直接依赖。SessionManager 为空接口（any）占位。
+// [实现说明] hub/handler 使用接口类型（HubInterface, HandlerInterface）而非具体类型，
+// 消除对 internal/gateway 包的直接依赖。依赖通过 ConfigureWith(AdapterConfig) 一次性注入。
 type PlatformAdapter struct {
 	Log *slog.Logger
 
 	hub     HubInterface
-	sm      SessionManager
 	handler HandlerInterface
 	bridge  *Bridge
 }
@@ -290,7 +289,6 @@ type Bridge struct {
 	log         *slog.Logger
 	platform    PlatformType
 	hub         HubInterface
-	sm          SessionManager
 	handler     HandlerInterface
 	starter     SessionStarter       // gateway.Bridge.StartPlatformSession
 	workerType  string
@@ -1383,7 +1381,7 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc PlatformConn) {
 | AC-2.1 | `PlatformAdapterInterface` 定义 `Platform()` / `Start()` / `HandleTextMessage()` / `Close()` | 编译通过 | ✅ |
 | AC-2.2 | `init()` 自注册: `Register(PlatformSlack, ...)` 和 `Register(PlatformFeishu, ...)` | 单元测试: `New()` 返回正确类型 | ✅ |
 | AC-2.3 | 未知 platform 类型返回错误 `messaging: unknown platform %q` | 单元测试 | ✅ |
-| AC-2.4 | `SetHub` / `SetSessionManager` / `SetHandler` / `SetBridge` 注入依赖 | 集成测试 | ✅ |
+| AC-2.4 | `ConfigureWith(AdapterConfig)` 注入 Hub/Handler/Bridge/Gate/Extras | 集成测试 | ✅ |
 
 #### AC-3: PlatformBridge 编排
 
