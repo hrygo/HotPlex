@@ -283,67 +283,35 @@ func New(pt PlatformType, log *slog.Logger) (PlatformAdapterInterface, error) {
 ```go
 // internal/messaging/bridge.go（实际实现）
 
-type ConnFactory func(sessionID string) PlatformConn
-
 type Bridge struct {
-	log         *slog.Logger
-	platform    PlatformType
-	hub         HubInterface
-	handler     HandlerInterface
-	starter     SessionStarter       // gateway.Bridge.StartPlatformSession
-	workerType  string
-	workDir     string
-	connFactory ConnFactory          // per-platform conn 工厂
-
-	mu     sync.Mutex
-	joined map[string]bool           // sessionID → already joined (去重)
+	log        *slog.Logger
+	platform   PlatformType
+	hub        HubInterface
+	handler    HandlerInterface
+	starter    SessionStarter
+	workerType string
+	workDir    string
+	adapter    atomic.Value // PlatformAdapterInterface; set via SetAdapter after Start()
 }
 
-func (b *Bridge) Handle(ctx context.Context, env *events.Envelope) error {
-	if env.OwnerID == "" {
-		return fmt.Errorf("messaging bridge: OwnerID not set for platform message")
+// Handle routes a platform message through the gateway.
+// pc is the PlatformConn provided by the adapter (caller manages lifecycle).
+func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformConn) error {
+	// 1. Register platform conn with hub so worker output routes back.
+	if pc != nil && b.hub != nil {
+		b.hub.JoinPlatformSession(env.SessionID, pc)
 	}
-	// 1. Auto-create session if starter is available.
+	// 2. Auto-create session if starter is available.
 	if b.starter != nil {
 		_ = b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir)
-	}
-	// 2. Join platform conn (once per session) so worker output routes back.
-	if b.connFactory != nil && b.hub != nil {
-		b.mu.Lock()
-		if !b.joined[env.SessionID] {
-			pc := b.connFactory(env.SessionID)
-			if pc != nil {
-				b.hub.JoinPlatformSession(env.SessionID, pc)
-				b.joined[env.SessionID] = true
-			}
-		}
-		b.mu.Unlock()
 	}
 	// 3. Route through gateway handler.
 	return b.handler.Handle(ctx, env)
 }
 
-// ─── Slack-specific bridge helpers ─────────────────────────────────────────
-
-// [实现说明] 两个 MakeXxxEnvelope 方法共享 makeEnvelope helper（DRY 优化），
-// 仅 session ID 格式和 metadata 内容不同。
-
-func (b *Bridge) MakeEnvelope(teamID, channelID, threadTS, userID, text string) *events.Envelope {
-	sessionID := fmt.Sprintf("slack:%s:%s:%s:%s", teamID, channelID, threadTS, userID)
-	return b.makeEnvelope(sessionID, userID, text, map[string]any{
-		"platform":   "slack",
-		"team_id":    teamID,
-		"channel_id": channelID,
-	})
-}
-
-func (b *Bridge) MakeEnvelope(chatID, threadTS, userID, text string) *events.Envelope {
-	sessionID := fmt.Sprintf("feishu:%s:%s:%s", chatID, threadTS, userID)
-	return b.makeEnvelope(sessionID, userID, text, map[string]any{
-		"platform": "feishu",
-		"chat_id":  chatID,
-	})
-}
+// MakeEnvelope creates an AEP input envelope with UUIDv5 session ID.
+// Called by per-adapter makeEnvelope helpers (Slack/Feishu).
+func (b *Bridge) MakeEnvelope(userID, text string, platformCtx session.PlatformContext) *events.Envelope { ... }
 ```
 
 ### 4.4 Hub.JoinPlatformSession（唯一核心改动）

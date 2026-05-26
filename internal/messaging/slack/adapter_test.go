@@ -1914,6 +1914,52 @@ func TestAdapter_Platform(t *testing.T) {
 	require.Equal(t, messaging.PlatformSlack, a.Platform())
 }
 
+func TestAdapter_MakeEnvelope(t *testing.T) {
+	t.Parallel()
+
+	br := messaging.NewBridge(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		messaging.PlatformSlack,
+		nil, nil, nil,
+		"claude_code", "/tmp/hotplex/workspace",
+	)
+
+	a := &Adapter{botID: "B123"}
+	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: br})
+	require.NoError(t, err)
+
+	env := a.makeEnvelope("T1", "C1", "1234.56", "U1", "hello", "")
+
+	require.NotNil(t, env)
+	require.Equal(t, "U1", env.OwnerID)
+	require.NotEmpty(t, env.SessionID)
+
+	data, ok := env.Event.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "hello", data["content"])
+}
+
+func TestAdapter_MakeEnvelope_CustomWorkDir(t *testing.T) {
+	t.Parallel()
+
+	br := messaging.NewBridge(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		messaging.PlatformSlack,
+		nil, nil, nil,
+		"claude_code", "/default",
+	)
+
+	a := &Adapter{botID: "B123"}
+	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: br})
+	require.NoError(t, err)
+
+	env1 := a.makeEnvelope("T1", "C1", "", "U1", "hi", "/custom")
+	env2 := a.makeEnvelope("T1", "C1", "", "U1", "hi", "")
+
+	// Different workDir → different session ID.
+	require.NotEqual(t, env1.SessionID, env2.SessionID)
+}
+
 // ---------------------------------------------------------------------------
 // WriteCtx interaction events close stream writer
 // ---------------------------------------------------------------------------

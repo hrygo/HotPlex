@@ -365,3 +365,48 @@ func TestMediaExtByType(t *testing.T) {
 		})
 	}
 }
+
+func TestAdapter_MakeEnvelope(t *testing.T) {
+	t.Parallel()
+
+	br := messaging.NewBridge(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		messaging.PlatformFeishu,
+		nil, nil, nil,
+		"claude_code", "/tmp/hotplex/workspace",
+	)
+
+	a := &Adapter{botOpenID: "ou_bot123"}
+	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: br})
+	require.NoError(t, err)
+
+	env := a.makeEnvelope("oc_chat1", "msg_001", "ou_user1", "飞书消息", "")
+
+	require.NotNil(t, env)
+	require.Equal(t, "ou_user1", env.OwnerID)
+	require.NotEmpty(t, env.SessionID)
+
+	data, ok := env.Event.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "飞书消息", data["content"])
+}
+
+func TestAdapter_MakeEnvelope_CustomWorkDir(t *testing.T) {
+	t.Parallel()
+
+	br := messaging.NewBridge(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		messaging.PlatformFeishu,
+		nil, nil, nil,
+		"claude_code", "/default",
+	)
+
+	a := &Adapter{botOpenID: "ou_bot123"}
+	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: br})
+	require.NoError(t, err)
+
+	env1 := a.makeEnvelope("oc_chat1", "", "ou_user1", "hi", "/custom")
+	env2 := a.makeEnvelope("oc_chat1", "", "ou_user1", "hi", "")
+
+	require.NotEqual(t, env1.SessionID, env2.SessionID)
+}
