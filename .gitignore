@@ -134,3 +134,6 @@ internal/webchat/out/
 !internal/webchat/out/index.html
 build-docs
 .superpowers/
+
+# Docker local override (developer-specific)
+docker-compose.override.yml

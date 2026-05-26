@@ -140,8 +140,8 @@ ENV PATH="/usr/local/bin:/home/hotplex/.npm-global/bin:${PATH}"
 
 USER hotplex:hotplex
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:9999/admin/health/ready || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD ["curl", "-f", "http://localhost:9999/admin/health/ready"]
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 

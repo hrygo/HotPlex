@@ -85,7 +85,7 @@ db:
   # ── PostgreSQL configuration (optional) ────────────────────────────────
   # Uncomment and set driver: "postgres" to use PostgreSQL instead of SQLite.
   # postgres:
-  #   dsn: "postgres://user:password@localhost:5432/hotplex?sslmode=disable"
+  #   dsn: "postgres://user:password@localhost:5432/hotplex?sslmode=prefer"
   #   max_open_conns: 25
 
 # ─────────────────────────────────────────────────────────────────────────────

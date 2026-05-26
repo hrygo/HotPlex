@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/dbutil"
@@ -48,7 +49,8 @@ func NewPGStore(db *dbutil.DB, log *slog.Logger) *pgEventStore {
 		s.sql[k] = d.Rebind(v)
 	}
 	// Override turns.insert with RETURNING id for PG auto-increment.
-	s.sql["turns.insert"] = d.Rebind(queries["turns.insert"]) + " RETURNING id"
+	// Strip trailing semicolons to prevent RETURNING from being appended after a statement terminator.
+	s.sql["turns.insert"] = d.Rebind(strings.TrimRight(strings.TrimSpace(queries["turns.insert"]), ";")) + " RETURNING id"
 	return s
 }
 
