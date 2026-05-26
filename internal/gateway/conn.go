@@ -385,10 +385,10 @@ func (c *Conn) resolveSessionState(sessionID string, initData InitData, workDir 
 		result, stateErr := c.startCreatedSession(sessionID, initData, workDir, sm, si)
 		return sessionID, result, stateErr
 	case events.StateDeleted:
-		result, stateErr := c.recreateDeletedSession(sessionID, initData, workDir, sm)
+		result, stateErr := c.recreateDeletedSession(sessionID, initData, workDir, sm, si)
 		return sessionID, result, stateErr
 	default:
-		result, stateErr := c.handleExistingSession(sessionID, workDir, sm, si)
+		result, stateErr := c.handleExistingSession(sessionID, workDir, sm, si, initData)
 		return sessionID, result, stateErr
 	}
 }
@@ -444,10 +444,10 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 	return si, nil
 }
 
-func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workDir string, sm connSM) (*session.SessionInfo, error) {
+func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workDir string, sm connSM, si *session.SessionInfo) (*session.SessionInfo, error) {
 	_ = sm.DeletePhysical(context.Background(), sessionID)
 	if c.starter == nil {
-		return nil, nil
+		return si, nil
 	}
 	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
 		initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
@@ -464,7 +464,7 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 	return si, nil
 }
 
-func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *session.SessionInfo) (*session.SessionInfo, error) {
+func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *session.SessionInfo, initData InitData) (*session.SessionInfo, error) {
 	// Fast reconnect: worker still alive, skip terminate+resume cycle.
 	if w := sm.GetWorker(sessionID); w != nil {
 		if si.State != events.StateRunning {
@@ -489,7 +489,7 @@ func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *s
 	resumeErr := c.starter.ResumeSession(context.Background(), sessionID, workDir)
 	if resumeErr != nil {
 		if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
-			worker.TypeClaudeCode, nil, workDir, platformWebChat, nil, ""); err != nil {
+			initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			msg := fmt.Sprintf("resume failed (%v), then start also failed (%v)", resumeErr, err)
 			c.sendInitError(events.ErrCodeInternalError, msg)
