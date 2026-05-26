@@ -376,3 +376,4 @@ hotplex cron history <id|name> [--json]
 - B 通道（`<directives>`）：`META-COGNITION.md`(go:embed, 首位) + SOUL.md + AGENTS.md + SKILLS.md
 - C 通道（`<context>`）：USER.md + MEMORY.md
 - 三级 fallback：全局 → 平台（slack/）→ Bot（slack/U12345/），每文件独立解析，命中即终止
+- 配置热更新：仅在 session 初始化或 `/reset` 时加载，运行中修改不立即生效

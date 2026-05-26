@@ -431,7 +431,9 @@ func TestCompact_NotStarted(t *testing.T) {
 	w := New()
 	err := w.Compact(context.Background(), nil)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not started")
+	var we *worker.WorkerError
+	require.ErrorAs(t, err, &we)
+	require.Equal(t, worker.ErrKindUnavailable, we.Kind)
 }
 
 func TestCompact_ClosedStdin(t *testing.T) {

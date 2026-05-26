@@ -212,7 +212,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 
 ### Fixed
 
-- **Gateway Core**: Codex mapper silently discarded `EventSystem` and `EventSessionState` — payload type mismatch caused all state transitions to be dropped.
+- **Gateway Core**: Claude Code mapper silently discarded `EventSystem` and `EventSessionState` — payload type mismatch caused all state transitions to be dropped.
 - **WebChat UI**: Connection stability — deterministic session IDs across REST/WS paths, browser console warnings eliminated.
 ```
 

@@ -37,7 +37,7 @@ description: HotPlex Gateway 运行时诊断 — 从症状逐层缩小范围到�
 查 `~/.hotplex/data/hotplex.db`，关注：
 - 各状态 session 数量：`SELECT state, COUNT(*) FROM sessions GROUP BY state`
 - 对 running/idle session：进程是否存活？Worker PID 匹配？
-- 对带 `--resume` 的 Worker：Codex session 文件（`~/.claude/projects/*/<uuid>.jsonl`）是否存在？
+- 对带 `--resume` 的 Worker：Claude Code session 文件（`~/.claude/projects/*/<uuid>.jsonl`）是否存在？
 
 不一致分类（表示系统健康问题的术语）：
 - **ORPHANED**：DB 记录在但进程已死 — 等 GC 自动清理或手动终止记录
@@ -156,7 +156,7 @@ TCP 连接数持续增长不回落暗示泄漏 — 可以用 `lsof -iTCP` 对比
 |----|------|------|
 | Session 管理 | `internal/session/manager.go` | 5 状态机、GC |
 | Worker 生命周期 | `internal/gateway/bridge.go` | start/resume/crash/fallback、forwardEvents |
-| Codex Worker | `internal/worker/claudecode/worker.go` | readOutput、trySend、last_io |
+| Claude Code Worker | `internal/worker/claudecode/worker.go` | readOutput、trySend、last_io |
 | 事件分发 | `internal/gateway/hub.go` | SendToSession、routeMessage、背压 |
 | 平台写缓冲 | `internal/gateway/platform_writer.go` | delta 合并、DropThreshold |
 | 飞书适配器 | `internal/messaging/feishu/adapter.go` | streaming card、WriteCtx |

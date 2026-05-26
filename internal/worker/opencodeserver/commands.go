@@ -190,6 +190,10 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 		}
 	default:
 		// No rules injected: OCS default (no matching rule → ask → publishes permission.asked).
+		if len(allowedTools) > 0 {
+			slog.Info("opencode: default mode with allowed_tools restricts to tool whitelist",
+				"mode", mode, "allowed_tools", allowedTools)
+		}
 	}
 	// Apply allowed tools whitelist across all modes.
 	for _, tool := range allowedTools {

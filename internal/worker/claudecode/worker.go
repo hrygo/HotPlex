@@ -397,16 +397,14 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	// instead of AEP envelope format
 	if baseConn, ok := conn.(*base.Conn); ok {
 		stdin, mu := baseConn.StdinLocked()
+		defer mu.Unlock()
 		if stdin == nil {
-			mu.Unlock()
 			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
 		}
 		if err := writeStreamInputLocked(stdin, content); err != nil {
-			mu.Unlock()
 			return fmt.Errorf("claudecode: input: %w", err)
 		}
 		baseConn.SetLastInputLocked(content)
-		mu.Unlock()
 	} else {
 		// Fallback to AEP envelope for tests with mock connections
 		msg := events.NewEnvelope(
@@ -835,7 +833,14 @@ func (w *Worker) readOutput(ctx context.Context) {
 // Note: args is ignored. Claude Code's /compact does not accept extra parameters
 // (unlike OCS which supports model selection in the summarize request).
 func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
+	w.Mu.Lock()
+	if w.Proc == nil || !w.Proc.IsRunning() {
+		w.Mu.Unlock()
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: worker process is not running"}
+	}
 	conn := w.Conn()
+	w.Mu.Unlock()
+
 	if conn == nil {
 		return fmt.Errorf("claudecode: not started")
 	}
@@ -843,11 +848,13 @@ func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
 	if !ok {
 		return worker.ErrNotImplemented
 	}
-	stdin := baseConn.Stdin()
+	stdin, mu := baseConn.StdinLocked()
 	if stdin == nil {
+		mu.Unlock()
 		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
 	}
-	return writeStreamInput(stdin, baseConn.WriteMu(), "/compact")
+	defer mu.Unlock()
+	return writeStreamInputLocked(stdin, "/compact")
 }
 
 // Clear is not supported by Claude Code in non-interactive mode.
