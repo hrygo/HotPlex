@@ -6,19 +6,19 @@ Timer-driven cron scheduler with 3 schedule types (cron expression / every inter
 ## STRUCTURE
 ```
 cron/
-  cron.go        # Scheduler core: in-memory index, CRUD, rebuildIndex, lifecycle (553 lines)
-  timer.go       # timerLoop: tick engine, collectDue, CAS concurrency slots, arm/stop (391 lines)
-  store.go       # Store interface, SQLiteStore, ErrJobNotFound, scanner pattern (345 lines)
-  pg_store.go    # Postgres stub for Store interface (263 lines)
-  types.go       # CronJob/CronSchedule/CronPayload/CronJobState + Clone() deep copy (119 lines)
-  schedule.go    # NextRun/ValidateSchedule: 3 schedule kinds via robfig/cron/v3 parser (89 lines)
-  executor.go    # Executor: starts worker session, sends prompt, waits for completion (198 lines)
-  attached.go    # AttachedSessionHandler: dispatch callback into existing session (91 lines)
-  delivery.go    # Delivery: extract response + route to platform (Slack/Feishu) (73 lines)
-  loader.go      # LoadFromYAML: name-idempotent upsert from YAML defs (139 lines)
-  retry.go       # backoff schedule, isTemporaryError, scheduleRetry (86 lines)
-  normalize.go   # ValidateJob, ValidateJobPrompt, threat detection, lifecycle constraints (89 lines)
-  skill.go       # go:embed cron-skill-manual.md → B channel skill manual (9 lines)
+  cron.go        # Scheduler core: in-memory index, CRUD, rebuildIndex, lifecycle
+  timer.go       # timerLoop: tick engine, collectDue, CAS concurrency slots, arm/stop
+  store.go       # Store interface, SQLiteStore, ErrJobNotFound, scanner pattern
+  pg_store.go    # Postgres stub for Store interface
+  types.go       # CronJob/CronSchedule/CronPayload/CronJobState + Clone() deep copy
+  schedule.go    # NextRun/ValidateSchedule: 3 schedule kinds via robfig/cron/v3 parser
+  executor.go    # Executor: starts worker session, sends prompt, waits for completion
+  attached.go    # AttachedSessionHandler: dispatch callback into existing session
+  delivery.go    # Delivery: extract response + route to platform (Slack/Feishu)
+  loader.go      # LoadFromYAML: name-idempotent upsert from YAML defs
+  retry.go       # backoff schedule, isTemporaryError, scheduleRetry
+  normalize.go   # ValidateJob, ValidateJobPrompt, threat detection, lifecycle constraints
+  skill.go       # go:embed cron-skill-manual.md → B channel skill manual
   cron-skill-manual.md  # Embedded cron management manual for worker agents
 ```
 

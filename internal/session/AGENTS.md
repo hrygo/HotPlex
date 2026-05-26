@@ -6,7 +6,7 @@ Session lifecycle manager with SQLite persistence, deterministic session IDs (UU
 ## STRUCTURE
 | File | Purpose |
 |------|---------|
-| `manager.go` | Manager, managedSession, SessionInfo, state transitions (1153 lines) |
+| `manager.go` | Manager, managedSession, SessionInfo, state transitions |
 | `store.go` | Store interface, SQLiteStore (371 lines) |
 | `message_store.go` | MessageStore interface, SQLiteMessageStore (301 lines) |
 | `key.go` | DeriveSessionKey (UUIDv5), PlatformContext, DerivePlatformSessionKey (100 lines) |

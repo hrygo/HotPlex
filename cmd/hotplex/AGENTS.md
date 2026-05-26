@@ -6,21 +6,21 @@ Cobra CLI entry points for the HotPlex gateway binary. Root command in main.go, 
 ## STRUCTURE
 ```
 cmd/hotplex/
-  main.go            (~54 lines)  cobra root: register gateway, doctor, security, onboard, version subcommands
-  gateway_run.go     (~530 lines) gateway run: DI pipeline decomposed into initLogging, initOrphanCleanup, initStores, shutdownGateway
-  gateway_cmd.go     (~185 lines) gateway subcommand: start/stop/restart + daemon launcher; preserves config path across restarts
-  routes.go          (~127 lines) HTTP route registration: /ws (gateway), /admin/*, /health, /metrics
-  admin_adapters.go  (~158 lines) admin provider adapters: bridge concrete types to admin.Provider interfaces; botListerAdapter for multi-bot registry
-  messaging_init.go  (~260 lines) messaging adapter lifecycle: multi-bot init (platforms × bots loop), fillSlackExtras/fillFeishuExtras, startup validation, STT engine setup
-  doctor.go          (~150 lines) doctor subcommand: run DefaultRegistry checkers, render structured report
-  security.go        (~182 lines) security subcommand: path validation, env isolation checks
-  onboard.go         (~105 lines) onboard subcommand: launch interactive wizard, generate config
-  config_cmd.go      (~61 lines)  config subcommand: validate, dump, show current config
-  status.go          (~95 lines)  status subcommand: check gateway process status via PID file
-  banner.go          (~167 lines) startup banner: ASCII art + config summary + endpoint URLs
-  dev.go             (~29 lines)  dev subcommand: start gateway + webchat concurrently
-  pid.go             (~124 lines) gateway state management: JSON PID file with config path + dev mode, discovery, stop, waitForProcessExit
-  version.go         (~46 lines)  version subcommand: print version string
+  main.go            cobra root: register gateway, doctor, security, onboard, version subcommands
+  gateway_run.go     gateway run: DI pipeline decomposed into initLogging, initOrphanCleanup, initStores, shutdownGateway
+  gateway_cmd.go     gateway subcommand: start/stop/restart + daemon launcher; preserves config path across restarts
+  routes.go          HTTP route registration: /ws (gateway), /admin/*, /health, /metrics
+  admin_adapters.go  admin provider adapters: bridge concrete types to admin.Provider interfaces; botListerAdapter for multi-bot registry
+  messaging_init.go  messaging adapter lifecycle: multi-bot init (platforms × bots loop), fillSlackExtras/fillFeishuExtras, startup validation, STT engine setup
+  doctor.go          doctor subcommand: run DefaultRegistry checkers, render structured report
+  security.go        security subcommand: path validation, env isolation checks
+  onboard.go         onboard subcommand: launch interactive wizard, generate config
+  config_cmd.go      config subcommand: validate, dump, show current config
+  status.go          status subcommand: check gateway process status via PID file
+  banner.go          startup banner: ASCII art + config summary + endpoint URLs
+  dev.go             dev subcommand: start gateway + webchat concurrently
+  pid.go             gateway state management: JSON PID file with config path + dev mode, discovery, stop, waitForProcessExit
+  version.go         version subcommand: print version string
   banner_art.txt                  ASCII art banner content
 ```
 

@@ -6,15 +6,15 @@ Cross-dialect database infrastructure: pure-Go SQLite driver (modernc.org), glob
 ## STRUCTURE
 ```
 sqlutil/
-  driver.go     # DriverName/sqlite constant, DriverNamePG/pgx constant (10 lines)
-  open.go       # OpenDB: dialect-conditional open + PRAGMA + pool config (84 lines)
-  pragma.go     # InitSQLiteDB: 8 PRAGMAs (WAL, busy_timeout, FK, sync, cache, temp, mmap, wal_checkpoint) (47 lines)
-  writemu.go    # WriteMu: global write serializer, no-op for PostgreSQL (53 lines)
+  driver.go     # DriverName/sqlite constant, DriverNamePG/pgx constant
+  open.go       # OpenDB: dialect-conditional open + PRAGMA + pool config
+  pragma.go     # InitSQLiteDB: 8 PRAGMAs (WAL, busy_timeout, FK, sync, cache, temp, mmap, wal_checkpoint)
+  writemu.go    # WriteMu: global write serializer, no-op for PostgreSQL
 
 dbutil/
-  db.go         # DB struct (wraps *sql.DB), Open helper for SQLite/Postgres (81 lines)
-  dialect.go    # Dialect type, ParseDialect, Rebind/Placeholder/QuoteIdent/BoolValue/IsUniqueViolation (69 lines)
-  rebind.go     # ? → $N positional rebind for PostgreSQL queries (222 lines)
+  db.go         # DB struct (wraps *sql.DB), Open helper for SQLite/Postgres
+  dialect.go    # Dialect type, ParseDialect, Rebind/Placeholder/QuoteIdent/BoolValue/IsUniqueViolation
+  rebind.go     # ? → $N positional rebind for PostgreSQL queries
 ```
 
 ## WHERE TO LOOK

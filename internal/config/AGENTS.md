@@ -6,7 +6,7 @@ Central configuration via Viper + YAML with config inheritance, HOTPLEX_* enviro
 ## STRUCTURE
 ```
 config/
-  config.go          # Config struct (20+ sub-configs), Load, Validate, path normalization (923 lines)
+  config.go          # Config struct (20+ sub-configs), Load, Validate, path normalization
   store.go           # ConfigStore: atomic Pointer[Config], Observer registration, Swap/Get
   watcher.go         # Watcher: fsnotify debounce, diffConfigs, hot/static change split, audit trail, rollback
   paths_unix.go      # DataDir/LogDir/PIDDir for Linux/macOS
