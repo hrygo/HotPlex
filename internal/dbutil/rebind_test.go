@@ -2,6 +2,8 @@ package dbutil
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRebind(t *testing.T) {
@@ -100,9 +102,7 @@ func TestRebind(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := rebind(tt.input)
-			if got != tt.want {
-				t.Errorf("rebind() = %q, want %q", got, tt.want)
-			}
+			require.Equal(t, tt.want, got, "rebind(%q)", tt.input)
 		})
 	}
 }
@@ -110,9 +110,7 @@ func TestRebind(t *testing.T) {
 func TestRebindDialectSQLite(t *testing.T) {
 	input := "SELECT ? FROM t WHERE name = 'hello?world' AND id = ?"
 	got := DialectSQLite.Rebind(input)
-	if got != input {
-		t.Errorf("DialectSQLite.Rebind() = %q, want %q", got, input)
-	}
+	require.Equal(t, input, got, "DialectSQLite.Rebind()")
 }
 
 func TestDialectPlaceholder(t *testing.T) {
@@ -132,9 +130,7 @@ func TestDialectPlaceholder(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.dialect.Placeholder(tt.n)
-			if got != tt.expected {
-				t.Errorf("Placeholder(%d) = %q, want %q", tt.n, got, tt.expected)
-			}
+			require.Equal(t, tt.expected, got, "Placeholder(%d)", tt.n)
 		})
 	}
 }
@@ -154,9 +150,7 @@ func TestDialectQuoteIdent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.dialect.QuoteIdent(tt.input)
-			if got != tt.expected {
-				t.Errorf("QuoteIdent(%q) = %q, want %q", tt.input, got, tt.expected)
-			}
+			require.Equal(t, tt.expected, got, "QuoteIdent(%q)", tt.input)
 		})
 	}
 }
@@ -177,10 +171,7 @@ func TestDialectBoolValue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.dialect.BoolValue(tt.input)
-			if got != tt.expected {
-				t.Errorf("BoolValue(%v) = %v (type %T), want %v (type %T)",
-					tt.input, got, got, tt.expected, tt.expected)
-			}
+			require.Equal(t, tt.expected, got, "BoolValue(%v)", tt.input)
 		})
 	}
 }
@@ -188,21 +179,18 @@ func TestDialectBoolValue(t *testing.T) {
 func TestDialectBoolValueSQLiteType(t *testing.T) {
 	// Verify SQLite BoolValue returns int, not bool
 	v := DialectSQLite.BoolValue(true)
-	if _, ok := v.(int); !ok {
-		t.Errorf("SQLite BoolValue(true) type = %T, want int", v)
-	}
+	_, ok := v.(int)
+	require.True(t, ok, "SQLite BoolValue(true) type = %T, want int", v)
 
 	v = DialectSQLite.BoolValue(false)
-	if _, ok := v.(int); !ok {
-		t.Errorf("SQLite BoolValue(false) type = %T, want int", v)
-	}
+	_, ok = v.(int)
+	require.True(t, ok, "SQLite BoolValue(false) type = %T, want int", v)
 }
 
 func TestDialectBoolValuePostgresType(t *testing.T) {
 	v := DialectPostgres.BoolValue(true)
-	if _, ok := v.(bool); !ok {
-		t.Errorf("Postgres BoolValue(true) type = %T, want bool", v)
-	}
+	_, ok := v.(bool)
+	require.True(t, ok, "Postgres BoolValue(true) type = %T, want bool", v)
 }
 
 func TestDialectIsUniqueViolation(t *testing.T) {
@@ -229,9 +217,7 @@ func TestDialectIsUniqueViolation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.dialect.IsUniqueViolation(tt.err)
-			if got != tt.expected {
-				t.Errorf("IsUniqueViolation() = %v, want %v", got, tt.expected)
-			}
+			require.Equal(t, tt.expected, got, "IsUniqueViolation(%v)", tt.err)
 		})
 	}
 }
@@ -257,9 +243,7 @@ func TestParseDialect(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ParseDialect(tt.input)
-			if got != tt.expected {
-				t.Errorf("ParseDialect(%q) = %v, want %v", tt.input, got, tt.expected)
-			}
+			require.Equal(t, tt.expected, got, "ParseDialect(%q)", tt.input)
 		})
 	}
 }

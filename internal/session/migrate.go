@@ -21,25 +21,22 @@ var migrationsPGFs embed.FS
 
 // runMigrations applies all pending goose migrations to the database.
 func runMigrations(ctx context.Context, db *sql.DB, dialect dbutil.Dialect) error {
-	var gooseDialect goose.Dialect
-	var embedFS embed.FS
+	var (
+		gooseDialect goose.Dialect
+		embedFS      embed.FS
+		subDir       string
+	)
 	switch dialect {
 	case dbutil.DialectSQLite:
 		gooseDialect = goose.DialectSQLite3
 		embedFS = migrationFS
+		subDir = "sql/migrations"
 	case dbutil.DialectPostgres:
 		gooseDialect = goose.DialectPostgres
 		embedFS = migrationsPGFs
+		subDir = "sql/migrations-postgres"
 	default:
 		return fmt.Errorf("unsupported dialect: %s", dialect)
-	}
-
-	var subDir string
-	switch dialect {
-	case dbutil.DialectSQLite:
-		subDir = "sql/migrations"
-	case dbutil.DialectPostgres:
-		subDir = "sql/migrations-postgres"
 	}
 	migrations, err := fs.Sub(embedFS, subDir)
 	if err != nil {

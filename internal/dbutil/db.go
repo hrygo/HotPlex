@@ -3,8 +3,10 @@ package dbutil
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/sqlutil"
@@ -68,7 +70,8 @@ func openSQLite(cfg *config.DBConfig) (*DB, error) {
 
 func openPostgres(cfg *config.DBConfig) (*DB, error) {
 	dsn := cfg.DSN()
-	if dsn == "" {
+	hasDefaultDSN := dsn == ""
+	if hasDefaultDSN {
 		dsn = "postgres://localhost:5432/hotplex?sslmode=disable"
 	}
 
@@ -77,12 +80,22 @@ func openPostgres(cfg *config.DBConfig) (*DB, error) {
 		return nil, fmt.Errorf("dbutil: open postgres: %w", err)
 	}
 
+	if err := sqldb.Ping(); err != nil {
+		_ = sqldb.Close()
+		return nil, fmt.Errorf("dbutil: ping postgres: %w", err)
+	}
+
+	if hasDefaultDSN {
+		slog.Warn("dbutil: postgres using default DSN with sslmode=disable — configure db.postgres.dsn for production")
+	}
+
 	maxOpen := cfg.Postgres.MaxOpenConns
 	if maxOpen <= 0 {
 		maxOpen = 25
 	}
 	sqldb.SetMaxOpenConns(maxOpen)
 	sqldb.SetMaxIdleConns(5)
+	sqldb.SetConnMaxLifetime(5 * time.Minute)
 
 	return &DB{DB: sqldb, dialect: DialectPostgres}, nil
 }

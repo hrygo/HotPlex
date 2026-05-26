@@ -7,9 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 )
 
 func TestOpenSQLiteMemory(t *testing.T) {
+	t.Parallel()
 	cfg := &config.DBConfig{Path: ":memory:"}
 	db, err := Open(DialectSQLite, cfg)
 	require.NoError(t, err)
@@ -41,6 +43,7 @@ func TestOpenSQLiteMemory(t *testing.T) {
 }
 
 func TestOpenSQLiteMemoryDefaultPath(t *testing.T) {
+	t.Parallel()
 	cfg := &config.DBConfig{Path: ""}
 	db, err := Open(DialectSQLite, cfg)
 	require.NoError(t, err)
@@ -50,6 +53,7 @@ func TestOpenSQLiteMemoryDefaultPath(t *testing.T) {
 }
 
 func TestOpenUnsupportedDialect(t *testing.T) {
+	t.Parallel()
 	cfg := &config.DBConfig{Path: ":memory:"}
 	_, err := Open("mysql", cfg)
 	require.Error(t, err)
@@ -57,6 +61,7 @@ func TestOpenUnsupportedDialect(t *testing.T) {
 }
 
 func TestDBDialectRoundTrip(t *testing.T) {
+	t.Parallel()
 	cfg := &config.DBConfig{Path: ":memory:"}
 	db, err := Open(DialectSQLite, cfg)
 	require.NoError(t, err)
@@ -67,4 +72,12 @@ func TestDBDialectRoundTrip(t *testing.T) {
 	require.Equal(t, `"test"`, db.Dialect().QuoteIdent("test"))
 	require.Equal(t, 1, db.Dialect().BoolValue(true))
 	require.Equal(t, 0, db.Dialect().BoolValue(false))
+}
+
+func TestDialectConstantsSync(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, string(DialectSQLite), sqlutil.DialectSQLite,
+		"dbutil.DialectSQLite must match sqlutil.DialectSQLite")
+	require.Equal(t, string(DialectPostgres), sqlutil.DialectPostgres,
+		"dbutil.DialectPostgres must match sqlutil.DialectPostgres")
 }
