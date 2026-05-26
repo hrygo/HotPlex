@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -22,15 +21,9 @@ type PGStore struct {
 	log     *slog.Logger
 }
 
-// NewPGStore creates and initializes a new PGStore.
-func NewPGStore(ctx context.Context, cfg *config.Config) (*PGStore, error) {
-	db, err := dbutil.Open(dbutil.DialectPostgres, &cfg.DB)
-	if err != nil {
-		return nil, fmt.Errorf("session store: open postgres: %w", err)
-	}
-
+// NewPGStore creates and initializes a new PGStore using the provided db connection.
+func NewPGStore(ctx context.Context, db *dbutil.DB) (*PGStore, error) {
 	if err := runMigrations(ctx, db.DB, dbutil.DialectPostgres); err != nil {
-		_ = db.Close()
 		return nil, err
 	}
 

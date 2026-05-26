@@ -15,7 +15,7 @@ CREATE TABLE "turns" (
     "platform"            TEXT    NOT NULL DEFAULT '',
     "user_id"             TEXT    NOT NULL DEFAULT '',
     "model"               TEXT    NOT NULL DEFAULT '',
-    "success"             INTEGER,                    -- NULL for user turns
+    "success"             BOOLEAN,                    -- NULL for user turns
     "source"              TEXT    NOT NULL DEFAULT 'normal',
     "tools_json"          TEXT,                       -- {"Read":2,"Bash":1}
     "tool_count"          INTEGER NOT NULL DEFAULT 0,

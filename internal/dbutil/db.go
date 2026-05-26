@@ -64,7 +64,7 @@ func openSQLite(cfg *config.DBConfig) (*DB, error) {
 }
 
 func openPostgres(cfg *config.DBConfig) (*DB, error) {
-	dsn := cfg.Path
+	dsn := cfg.DSN()
 	if dsn == "" {
 		dsn = "postgres://localhost:5432/hotplex?sslmode=disable"
 	}
@@ -74,7 +74,11 @@ func openPostgres(cfg *config.DBConfig) (*DB, error) {
 		return nil, fmt.Errorf("dbutil: open postgres: %w", err)
 	}
 
-	sqldb.SetMaxOpenConns(25)
+	maxOpen := cfg.Postgres.MaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = 25
+	}
+	sqldb.SetMaxOpenConns(maxOpen)
 	sqldb.SetMaxIdleConns(5)
 
 	return &DB{DB: sqldb, dialect: DialectPostgres}, nil

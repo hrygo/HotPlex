@@ -50,7 +50,7 @@ type cacheInvalidator interface {
 	Invalidate(key string)
 }
 
-func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator) *apiKeyUserStore {
+func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator) APIKeyUserStorer {
 	if db == nil {
 		return nil
 	}

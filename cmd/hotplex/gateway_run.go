@@ -70,6 +70,7 @@ type GatewayDeps struct {
 	ChatAccessStore messaging.ChatAccessStorer
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
+	APIKeyStore     admin.APIKeyUserStorer
 	ConfigPath      string
 	DevMode         bool
 }
@@ -378,6 +379,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		ChatAccessStore: stores.chatAccessOrNew(stores.sqlDB, log),
 		DB:              stores.sqlDB,
 		DBResolver:      dbResolver,
+		APIKeyStore:     stores.apiKeyStore,
 		ConfigPath:      configPath,
 		DevMode:         devMode,
 	}
@@ -592,6 +594,7 @@ type gatewayStores struct {
 	writeMu     *sqlutil.WriteMu
 	db          *dbutil.DB
 	sqlDB       *sql.DB
+	apiKeyStore admin.APIKeyUserStorer
 }
 
 // chatAccessOrNew returns the chat-access store if already initialized (PG path),
@@ -640,7 +643,7 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 		return nil, fmt.Errorf("pg: open db: %w", err)
 	}
 
-	sessionStore, err := session.NewPGStore(ctx, cfg)
+	sessionStore, err := session.NewPGStore(ctx, db)
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("pg: session store: %w", err)
@@ -659,6 +662,7 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 		chatAccess:  chatAccessStore,
 		db:          db,
 		sqlDB:       db.DB,
+		apiKeyStore: admin.NewAPIKeyUserPGStore(db, nil),
 	}, nil
 }
 

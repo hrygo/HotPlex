@@ -8,8 +8,9 @@ import (
 	"io/fs"
 	"log/slog"
 
-	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/pressly/goose/v3"
+
+	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
 //go:embed sql/migrations/*.sql

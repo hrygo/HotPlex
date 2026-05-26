@@ -16,7 +16,8 @@ type apiKeyUserPGStore struct {
 	invalidator cacheInvalidator
 }
 
-func newAPIKeyUserPGStoreWithInvalidator(db *dbutil.DB, inv cacheInvalidator) *apiKeyUserPGStore {
+// NewAPIKeyUserPGStore creates a PostgreSQL-backed API key user store.
+func NewAPIKeyUserPGStore(db *dbutil.DB, inv cacheInvalidator) APIKeyUserStorer {
 	if db == nil {
 		return nil
 	}
@@ -30,7 +31,7 @@ func newAPIKeyUserPGStoreWithInvalidator(db *dbutil.DB, inv cacheInvalidator) *a
 var (
 	_ APIKeyUserStorer = (*apiKeyUserPGStore)(nil)
 	// Ensure constructor is referenced (used by DI wiring in cmd/hotplex)
-	_ = newAPIKeyUserPGStoreWithInvalidator
+	_ = NewAPIKeyUserPGStore
 )
 
 func (s *apiKeyUserPGStore) Invalidator() cacheInvalidator { return s.invalidator }

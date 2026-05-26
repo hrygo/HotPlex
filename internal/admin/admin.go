@@ -130,6 +130,7 @@ type Deps struct {
 	Restart       func() error
 	DB            DBExecutor       // Optional: enables API key user CRUD + DB resolver
 	DBResolver    cacheInvalidator // Optional: invalidates DBResolver cache after CUD
+	APIKeyStore   APIKeyUserStorer // Optional: pre-built store (e.g. PG); overrides DB-based creation
 }
 
 func New(deps Deps) *AdminAPI {
@@ -149,11 +150,16 @@ func New(deps Deps) *AdminAPI {
 		botLister:     deps.BotLister,
 		botConfig:     deps.BotConfig,
 		logCollector:  lc,
-		akStore:       newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver),
-		version:       deps.Version,
-		newSessionID:  deps.NewSessionID,
-		restart:       deps.Restart,
-		startedAt:     time.Now(),
+		akStore: func() APIKeyUserStorer {
+			if deps.APIKeyStore != nil {
+				return deps.APIKeyStore
+			}
+			return newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver)
+		}(),
+		version:      deps.Version,
+		newSessionID: deps.NewSessionID,
+		restart:      deps.Restart,
+		startedAt:    time.Now(),
 	}
 	return a
 }

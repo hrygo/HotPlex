@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hrygo/hotplex/internal/config"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 func TestOpenSQLiteMemory(t *testing.T) {
