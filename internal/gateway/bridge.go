@@ -139,9 +139,7 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 		return fmt.Errorf("bridge: create session: %w", err)
 	}
 
-	workerInfo := b.buildWorkerInfo(id, userID, workDir, si)
-	injectSlackEnv(&workerInfo, platformKey)
-	workerInfo.Env = injectGatewayContext(workerInfo.Env, platform, botID, userID, platformKey, id, workDir)
+	workerInfo := b.prepareWorkerInfo(id, userID, workDir, si)
 
 	// Inject cron-specific env vars (e.g. admin API creds) only for cron sessions.
 	// Detected via platformKey rather than platform value, since cron executor now
@@ -224,9 +222,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		b.sm.DetachWorker(id)
 	}
 
-	workerInfo := b.buildWorkerInfo(si.ID, si.UserID, workDir, si)
-	injectSlackEnv(&workerInfo, si.PlatformKey)
-	workerInfo.Env = injectGatewayContext(workerInfo.Env, si.Platform, si.BotID, si.UserID, si.PlatformKey, id, workDir)
+	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:         ctx,
 		wt:          si.WorkerType,
@@ -570,6 +566,16 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// prepareWorkerInfo builds a complete worker.SessionInfo with all standard env
+// injection applied. This consolidates the buildWorkerInfo + injectSlackEnv +
+// injectGatewayContext trio that was previously duplicated across 3 call sites.
+func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
+	info := b.buildWorkerInfo(sessionID, userID, workDir, si)
+	injectSlackEnv(&info, si.PlatformKey)
+	info.Env = injectGatewayContext(info.Env, si.Platform, si.BotID, si.UserID, si.PlatformKey, sessionID, workDir)
+	return info
 }
 
 // buildWorkerInfo constructs a worker.SessionInfo from session metadata,

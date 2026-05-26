@@ -154,9 +154,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		return false
 	}
 
-	workerInfo := b.buildWorkerInfo(si.ID, si.UserID, p.workDir, si)
-	injectSlackEnv(&workerInfo, si.PlatformKey)
-	workerInfo.Env = injectGatewayContext(workerInfo.Env, si.Platform, si.BotID, si.UserID, si.PlatformKey, si.ID, p.workDir)
+	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, p.workDir, si)
 
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:         context.Background(),
