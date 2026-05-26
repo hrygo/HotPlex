@@ -653,7 +653,7 @@ func sliceVal(v any) []any  { s, _ := v.([]any); return s }
 #### 4.5 Passthrough 命令 — 无需 Worker 层改动
 
 所有 6 项 passthrough 命令 (`/compact`, `/clear`, `/model`, `/effort`, `/rewind`, `/commit`)
-通过 `worker.Input()` 发送，走的是已有的 `SendUserMessage` 路径。
+通过 `worker.Input()` 发送，走的是已有的 stdin 写入路径。
 Claude Code 将其解析为 slash command 并原地执行。结果通过正常的 `assistant` → `result` 流式管道返回。
 
 Worker 层**零改动**即可支持所有 passthrough 命令。

@@ -30,7 +30,8 @@ type streamTextContent struct {
 
 // writeStreamInput constructs a Claude Code stream-json user message and writes
 // it to the given stdin file descriptor, serialized under the provided mutex.
-// This replaces the former base.Conn.SendUserMessage method.
+// Retained for test coverage; production code prefers StdinLocked + writeStreamInputLocked
+// to avoid double-locking and TOCTOU gaps.
 func writeStreamInput(stdin *os.File, mu *sync.Mutex, content string) error {
 	mu.Lock()
 	defer mu.Unlock()

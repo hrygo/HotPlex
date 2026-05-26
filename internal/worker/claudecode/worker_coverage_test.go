@@ -14,6 +14,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
+	"github.com/hrygo/hotplex/internal/worker/proc"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -443,14 +444,19 @@ func TestCompact_ClosedStdin(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
 
-	worker := New()
+	ww := New()
 	conn := base.NewConn(slog.Default(), w, "user1", "sess1")
-	worker.testConn = conn
+	ww.testConn = conn
+	ww.Proc = proc.New(proc.Opts{Logger: slog.Default()})
+	ww.Proc.SetPIDKey("test")
 
 	require.NoError(t, w.Close())
 
-	err = worker.Compact(context.Background(), nil)
+	err = ww.Compact(context.Background(), nil)
 	require.Error(t, err)
+	var we *worker.WorkerError
+	require.ErrorAs(t, err, &we)
+	require.Equal(t, worker.ErrKindUnavailable, we.Kind)
 }
 
 func TestClear_NotImplemented(t *testing.T) {

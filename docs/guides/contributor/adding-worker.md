@@ -233,9 +233,15 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
         return nil
     }
 
-    // 通过 base.Conn.SendUserMessage 发送用户消息
+    // 通过 base.Conn 发送用户消息（需要自行序列化为 Worker 的 stdin 协议格式）
     if baseConn, ok := conn.(*base.Conn); ok {
-        if err := baseConn.SendUserMessage(ctx, content); err != nil {
+        stdin, mu := baseConn.StdinLocked()
+        defer mu.Unlock()
+        if stdin == nil {
+            return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "myagent: stdin closed"}
+        }
+        // 序列化并写入 stdin（示例使用 AEP 编码，Claude Code Worker 使用 stream-json）
+        if err := aep.Encode(stdin, msg); err != nil {
             return fmt.Errorf("myagent: input: %w", err)
         }
     }

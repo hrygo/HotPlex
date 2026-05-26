@@ -833,17 +833,17 @@ func (w *Worker) readOutput(ctx context.Context) {
 // Note: args is ignored. Claude Code's /compact does not accept extra parameters
 // (unlike OCS which supports model selection in the summarize request).
 func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
+	conn := w.Conn()
+	if conn == nil {
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: not started"}
+	}
 	w.Mu.Lock()
 	if w.Proc == nil || !w.Proc.IsRunning() {
 		w.Mu.Unlock()
 		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: worker process is not running"}
 	}
-	conn := w.Conn()
 	w.Mu.Unlock()
 
-	if conn == nil {
-		return fmt.Errorf("claudecode: not started")
-	}
 	baseConn, ok := conn.(*base.Conn)
 	if !ok {
 		return worker.ErrNotImplemented
