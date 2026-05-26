@@ -11,7 +11,6 @@ import (
 type AdapterConfig struct {
 	// Core dependencies (from PlatformAdapter setters)
 	Hub     HubInterface
-	SM      SessionManager
 	Handler HandlerInterface
 	Bridge  *Bridge
 

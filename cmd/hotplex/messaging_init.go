@@ -62,7 +62,6 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 	log := deps.Log
 	appCfg := deps.Config
 	hub := deps.Hub
-	sm := deps.SessionMgr
 	handler := deps.Handler
 	gwBridge := deps.Bridge
 	registry := messaging.DefaultBotRegistry()
@@ -159,11 +158,10 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				continue
 			}
 
-			msgBridge := messaging.NewBridge(log, pt, hub, sm, handler, gwBridge, botWorkerType, botWorkDir)
+			msgBridge := messaging.NewBridge(log, pt, hub, handler, gwBridge, botWorkerType, botWorkDir)
 
 			acfg := messaging.AdapterConfig{
 				Hub:     hub,
-				SM:      sm,
 				Handler: handler,
 				Bridge:  msgBridge,
 				BotName: entry.Name,

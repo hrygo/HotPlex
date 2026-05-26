@@ -113,7 +113,6 @@ func startRealAdapter(t *testing.T, cfg semiConfig) (*Adapter, *[]capturedCall, 
 		logger,
 		messaging.PlatformSlack,
 		nil, // hub
-		nil, // sm
 		handler,
 		nil,    // starter
 		"noop", // use noop worker to avoid launching real AI

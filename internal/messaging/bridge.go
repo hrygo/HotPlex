@@ -19,7 +19,6 @@ type Bridge struct {
 	log        *slog.Logger
 	platform   PlatformType
 	hub        HubInterface
-	sm         SessionManager
 	handler    HandlerInterface
 	starter    SessionStarter
 	workerType string
@@ -29,13 +28,12 @@ type Bridge struct {
 
 // NewBridge creates a new platform bridge.
 func NewBridge(log *slog.Logger, platform PlatformType, hub HubInterface,
-	sm SessionManager, handler HandlerInterface, starter SessionStarter, workerType, workDir string,
+	handler HandlerInterface, starter SessionStarter, workerType, workDir string,
 ) *Bridge {
 	return &Bridge{
 		log:        log.With("component", "messaging_bridge", "platform", string(platform)),
 		platform:   platform,
 		hub:        hub,
-		sm:         sm,
 		handler:    handler,
 		starter:    starter,
 		workerType: workerType,

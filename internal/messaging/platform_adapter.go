@@ -132,7 +132,6 @@ type PlatformAdapter struct {
 	Log *slog.Logger
 
 	hub     HubInterface
-	sm      SessionManager
 	handler HandlerInterface
 	bridge  *Bridge
 
@@ -157,10 +156,6 @@ type HandlerInterface interface {
 	Handle(ctx context.Context, env *events.Envelope) error
 }
 
-// SessionManager is an opaque interface for session management.
-// Platform adapters don't call session creation directly; the bridge handles it.
-type SessionManager any
-
 // SessionStarter creates a new gateway session for a platform message.
 // Implemented by gateway.Bridge and injected during wiring.
 type SessionStarter interface {
@@ -173,7 +168,6 @@ func (a *PlatformAdapter) Bridge() *Bridge { return a.bridge }
 // ConfigureWith sets the common adapter dependencies from config.
 func (a *PlatformAdapter) ConfigureWith(config AdapterConfig) error {
 	a.hub = config.Hub
-	a.sm = config.SM
 	a.handler = config.Handler
 	a.bridge = config.Bridge
 	return nil

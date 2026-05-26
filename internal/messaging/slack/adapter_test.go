@@ -1891,7 +1891,7 @@ func TestAdapter_ConfigureWith_BridgeSetsWorkDir(t *testing.T) {
 	testBridge := messaging.NewBridge(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		messaging.PlatformSlack,
-		nil, nil, nil, nil, "claude_code", "/tmp/hotplex/workspace",
+		nil, nil, nil, "claude_code", "/tmp/hotplex/workspace",
 	)
 
 	a := &Adapter{}

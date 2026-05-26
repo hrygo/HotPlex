@@ -125,7 +125,6 @@ func TestBridge_MakeSlackEnvelope(t *testing.T) {
 		&mockHub{},
 		nil,
 		nil,
-		nil,
 		"claude_code",
 		config.Default().Worker.DefaultWorkDir,
 	)
@@ -170,7 +169,6 @@ func TestBridge_MakeFeishuEnvelope(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		PlatformFeishu,
 		&mockHub{},
-		nil,
 		nil,
 		nil,
 		"claude_code",
