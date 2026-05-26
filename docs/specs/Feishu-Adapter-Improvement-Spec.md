@@ -64,7 +64,7 @@ last_updated: 2026-05-08
 
 #### 2.1.1 问题
 
-`adapter.go:157` 的 `MakeFeishuEnvelope` 始终传入空 `threadTS`；出站消息不支持回复引用。
+`adapter.go:157` 的 `makeEnvelope` 始终传入空 `threadTS`；出站消息不支持回复引用。
 
 #### 2.1.2 入站：提取线程信息
 
@@ -102,7 +102,7 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
         threadKey = ptrStr(msg.ThreadId)
     }
 
-    envelope := a.bridge.MakeFeishuEnvelope(chatID, threadKey, userID, text)
+    envelope := a.makeEnvelope(chatID, threadKey, userID, text)
     // 将 chatType、rootID、parentID、messageID 注入 envelope metadata
 }
 ```
@@ -184,7 +184,7 @@ func (a *Adapter) replyMessage(ctx context.Context, messageID, content string, r
 | 2.1-1 | DM 消息（chat_type=p2p）正确路由，session ID 格式 `feishu:{chat_id}::{user_id}` | 单元测试 |
 | 2.1-2 | 群消息中的话题消息提取 root_id 作为 threadKey | 单元测试 |
 | 2.1-3 | 回复消息提取 parent_id，出站使用 Reply API | 单元测试 |
-| 2.1-4 | bridge.MakeFeishuEnvelope 正确传递 threadKey | 单元测试 |
+| 2.1-4 | makeEnvelope 正确传递 threadKey | 单元测试 |
 | 2.1-5 | FeishuConn 在有 replyToMsgID 时使用 Reply API 而非 Create | 集成测试 |
 
 ---
@@ -1213,7 +1213,7 @@ P2MessageReceiveV1 Event
     └─ 9. Chat 队列入队 (ChatQueue.Enqueue → HandleTextMessage)
             │
             ├─ Typing indicator ON
-            ├─ MakeFeishuEnvelope (chatID, threadKey, userID, text)
+            ├─ makeEnvelope (chatID, threadKey, userID, text)
             ├─ Bridge.Handle → Session → Worker
             ├─ FeishuConn.WriteCtx
             │   ├─ Phase 1: sendTextMessage (静态)

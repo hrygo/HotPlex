@@ -31,11 +31,19 @@ func (m *CommandMap[T]) Lookup(normalized string) (T, bool) {
 	if v, ok := m.slash[normalized]; ok {
 		return v, true
 	}
-	if v, ok := m.natural[normalized]; ok {
-		return v, true
-	}
-	var zero T
-	return zero, false
+	return m.LookupNatural(normalized)
+}
+
+// LookupSlash finds a command in the slash entries only.
+func (m *CommandMap[T]) LookupSlash(normalized string) (T, bool) {
+	v, ok := m.slash[normalized]
+	return v, ok
+}
+
+// LookupNatural finds a command in the natural language entries only.
+func (m *CommandMap[T]) LookupNatural(normalized string) (T, bool) {
+	v, ok := m.natural[normalized]
+	return v, ok
 }
 
 // controlCommands maps slash and natural language triggers to control actions.
@@ -171,7 +179,7 @@ func ParseWorkerCommand(text string) *WorkerCommandResult {
 	t = trimTrailingPunct(t)
 
 	base, args := parseWorkerSlashCommands(t)
-	if cmd, ok := workerCommands.slash[base]; ok {
+	if cmd, ok := workerCommands.LookupSlash(base); ok {
 		label := base
 		if !workerSlashCommandsWithArgs[base] {
 			args = ""
@@ -183,7 +191,7 @@ func ParseWorkerCommand(text string) *WorkerCommandResult {
 		}
 	}
 
-	if cmd, ok := workerCommands.natural[t]; ok {
+	if cmd, ok := workerCommands.LookupNatural(t); ok {
 		return &WorkerCommandResult{
 			Command: cmd,
 			Label:   t,

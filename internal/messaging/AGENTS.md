@@ -22,7 +22,7 @@ messaging/
 | Task | Location | Notes |
 |------|----------|-------|
 | Add new platform adapter | `internal/messaging/<name>/` | Embed `PlatformAdapter`, implement `PlatformAdapterInterface`: `Platform()`/`Start()`/`HandleTextMessage()`/`Close()` |
-| Wire adapter in main | `cmd/hotplex/main.go` | `startMessagingAdapters()`: config → New → Configure → SetHub/SetSM/SetHandler/SetBridge → Start |
+| Wire adapter in main | `cmd/hotplex/messaging_init.go` | `startMessagingAdapters()`: New → ConfigureWith(AdapterConfig) → Start → SetAdapter |
 | Bridge lifecycle | `bridge.go` | 3-step: `StartPlatformSession` → `JoinPlatformSession` → `Handle` |
 | PlatformConn interface | `platform_conn.go:11` | `WriteCtx(ctx, env)` + `Close()` — the contract gateway uses to send to platforms |
 | Adapter registration | `platform_adapter.go:47` | `Register(PlatformType, Builder)` — called in each adapter's `init()` |
@@ -62,7 +62,7 @@ _ "hotplex/internal/messaging/feishu"
 - Response delivered back to worker via gateway → auto-deny after 5min if no response
 
 ## ANTI-PATTERNS
-- ❌ Skip `SetHub`/`SetSM`/`SetHandler`/`SetBridge` — all 4 must be called before `Start()`
+- ❌ Skip `ConfigureWith` — must be called before `Start()`
 - ❌ Create platform connections without dedup — always use `GetOrCreateConn`
 - ❌ Send messages directly — use `Bridge.Handle()` to ensure session lifecycle
 - ❌ Skip `SanitizeText()` on user-facing output

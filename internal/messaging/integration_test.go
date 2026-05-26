@@ -118,6 +118,7 @@ func TestBridge_MakeSlackEnvelope(t *testing.T) {
 	threadTS := "1234567890.123456"
 	userID := "U789"
 	text := "hello"
+	workDir := config.Default().Worker.DefaultWorkDir
 
 	br := NewBridge(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -126,17 +127,19 @@ func TestBridge_MakeSlackEnvelope(t *testing.T) {
 		nil,
 		nil,
 		"claude_code",
-		config.Default().Worker.DefaultWorkDir,
+		workDir,
 	)
 
-	env := br.MakeEnvelope(userID, text, session.PlatformContext{
+	slackCtx := session.PlatformContext{
 		Platform:  "slack",
 		TeamID:    teamID,
 		ChannelID: channelID,
 		ThreadTS:  threadTS,
 		UserID:    userID,
-		WorkDir:   config.Default().Worker.DefaultWorkDir,
-	})
+		WorkDir:   workDir,
+	}
+
+	env := br.MakeEnvelope(userID, text, slackCtx)
 	require.NotNil(t, env)
 
 	// Session ID is now a UUIDv5 derived from platform context.
@@ -144,25 +147,11 @@ func TestBridge_MakeSlackEnvelope(t *testing.T) {
 	require.Equal(t, userID, env.OwnerID)
 
 	// Deterministic: same inputs produce the same UUIDv5.
-	env2 := br.MakeEnvelope(userID, text, session.PlatformContext{
-		Platform:  "slack",
-		TeamID:    teamID,
-		ChannelID: channelID,
-		ThreadTS:  threadTS,
-		UserID:    userID,
-		WorkDir:   config.Default().Worker.DefaultWorkDir,
-	})
+	env2 := br.MakeEnvelope(userID, text, slackCtx)
 	require.Equal(t, env.SessionID, env2.SessionID)
 
 	// Matches the underlying derivation function.
-	expected := session.DerivePlatformSessionKey(userID, "claude_code", session.PlatformContext{
-		Platform:  "slack",
-		TeamID:    teamID,
-		ChannelID: channelID,
-		ThreadTS:  threadTS,
-		UserID:    userID,
-		WorkDir:   config.Default().Worker.DefaultWorkDir,
-	})
+	expected := session.DerivePlatformSessionKey(userID, "claude_code", slackCtx)
 	require.Equal(t, expected, env.SessionID)
 
 	// Event.Data is a map with content and metadata
@@ -178,6 +167,7 @@ func TestBridge_MakeFeishuEnvelope(t *testing.T) {
 	threadTS := "msg_456"
 	userID := "ou_789"
 	text := "飞书消息"
+	workDir := config.Default().Worker.DefaultWorkDir
 
 	br := NewBridge(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -186,39 +176,29 @@ func TestBridge_MakeFeishuEnvelope(t *testing.T) {
 		nil,
 		nil,
 		"claude_code",
-		config.Default().Worker.DefaultWorkDir,
+		workDir,
 	)
 
-	env := br.MakeEnvelope(userID, text, session.PlatformContext{
+	feishuCtx := session.PlatformContext{
 		Platform: "feishu",
 		ChatID:   chatID,
 		ThreadTS: threadTS,
 		UserID:   userID,
-		WorkDir:  config.Default().Worker.DefaultWorkDir,
-	})
+		WorkDir:  workDir,
+	}
+
+	env := br.MakeEnvelope(userID, text, feishuCtx)
 	require.NotNil(t, env)
 
 	// Session ID is now a UUIDv5 derived from platform context.
 	require.Regexp(t, uuidV5Regex, env.SessionID)
 
 	// Deterministic: same inputs produce the same UUIDv5.
-	env2 := br.MakeEnvelope(userID, text, session.PlatformContext{
-		Platform: "feishu",
-		ChatID:   chatID,
-		ThreadTS: threadTS,
-		UserID:   userID,
-		WorkDir:  config.Default().Worker.DefaultWorkDir,
-	})
+	env2 := br.MakeEnvelope(userID, text, feishuCtx)
 	require.Equal(t, env.SessionID, env2.SessionID)
 
 	// Matches the underlying derivation function.
-	expected := session.DerivePlatformSessionKey(userID, "claude_code", session.PlatformContext{
-		Platform: "feishu",
-		ChatID:   chatID,
-		ThreadTS: threadTS,
-		UserID:   userID,
-		WorkDir:  config.Default().Worker.DefaultWorkDir,
-	})
+	expected := session.DerivePlatformSessionKey(userID, "claude_code", feishuCtx)
 	require.Equal(t, expected, env.SessionID)
 
 	data, ok := env.Event.Data.(map[string]any)

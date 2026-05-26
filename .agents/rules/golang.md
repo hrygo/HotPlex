@@ -54,7 +54,7 @@ func init() { worker.Register(worker.TypeOpenCodeSrv, New) }
 
 ```go
 type Adapter struct {
-    *platformadapter.PlatformAdapter  // SetHub/SetSM/SetHandler/SetBridge
+    *platformadapter.PlatformAdapter  // ConfigureWith + shared state
 }
 
 // PlatformConn 接口（适配器必须实现）：
@@ -64,12 +64,10 @@ type PlatformConn interface {
 }
 ```
 
-**5 步初始化**（缺一不可）：
-1. `SetHub` — 注入 WS hub（广播路由）
-2. `SetSM` — 注入 SessionManager（状态机）
-3. `SetHandler` — 注入消息处理器（AEP dispatch）
-4. `SetBridge` — 注入 MessagingBridge（session 生命周期）
-5. `Start` — 启动连接（后台 goroutine）
+**3 步初始化**（缺一不可）：
+1. `ConfigureWith(AdapterConfig)` — 注入 Hub/Handler/Bridge/Gate/Extras
+2. `Start` — 启动连接（后台 goroutine）
+3. `Bridge.SetAdapter(adapter)` — 注册 adapter 用于 botID 解析
 
 ---
 

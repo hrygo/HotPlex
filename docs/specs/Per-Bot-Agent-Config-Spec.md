@@ -231,14 +231,14 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform string)
 func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID string)
 ```
 
-### 3.11 messaging.Bridge.MakeSlackEnvelope / MakeFeishuEnvelope
+### 3.11 messaging.Bridge.makeEnvelope / makeEnvelope
 
 ```go
 // Before
-func (b *Bridge) MakeSlackEnvelope(teamID, channelID, threadTS, userID, text, workDir string) *events.Envelope
+func (b *Bridge) makeEnvelope(teamID, channelID, threadTS, userID, text, workDir string) *events.Envelope
 
 // After — botID parameter added
-func (b *Bridge) MakeSlackEnvelope(teamID, channelID, threadTS, userID, text, workDir, botID string) *events.Envelope
+func (b *Bridge) makeEnvelope(teamID, channelID, threadTS, userID, text, workDir, botID string) *events.Envelope
 ```
 
 `PlatformContext` in both methods now includes `BotID` field, which flows into `DerivePlatformSessionKey` and envelope metadata.
@@ -275,7 +275,7 @@ Adapter.Start()
   └─> auth.test / Bot API → adapter.botID / adapter.botOpenID
 
 Adapter.HandleTextMessage()
-  └─> a.Bridge().MakeSlackEnvelope(teamID, ch, threadTS, userID, text, workDir, a.botID)
+  └─> a.Bridge().makeEnvelope(teamID, ch, threadTS, userID, text, workDir, a.botID)
         └─> MakeEnvelope(userID, text, PlatformContext{..., BotID: botID})
               └─> DerivePlatformSessionKey(userID, wt, pctx)  ← botID in hash
               └─> metadata["bot_id"] = botID
@@ -347,8 +347,8 @@ Three `createAndLaunchWorker` call sites must pass botID:
 - Add `BotID` field to `session.PlatformContext`
 - Update `FromMap()`: parse `m["bot_id"]`
 - Update `DerivePlatformSessionKey()`: include botID in hash input
-- Update `MakeSlackEnvelope` / `MakeFeishuEnvelope`: +botID parameter
-- Update all callers of `MakeSlackEnvelope` / `MakeFeishuEnvelope` in adapter files
+- Update `makeEnvelope` / `makeEnvelope`: +botID parameter
+- Update all callers of `makeEnvelope` / `makeEnvelope` in adapter files
 - Update `MakeEnvelope()`: include botID in metadata as `"bot_id"`
 - Update `ExtractPlatformKeys`: extract `bot_id` from metadata for both Slack and Feishu cases
 
@@ -388,7 +388,7 @@ Three `createAndLaunchWorker` call sites must pass botID:
 | PBAC-008 | Empty file (frontmatter only) falls through to next level | Unit test |
 | PBAC-009 | Slack adapter exposes botID via `GetBotID()` | Unit test |
 | PBAC-010 | Feishu adapter exposes botID via `GetBotID()` | Unit test |
-| PBAC-011 | `MakeSlackEnvelope` includes botID in PlatformContext | Unit test |
+| PBAC-011 | `makeEnvelope` includes botID in PlatformContext | Unit test |
 | PBAC-012 | `DerivePlatformSessionKey` with different botIDs produces different session IDs | Unit test |
 | PBAC-013 | `StartPlatformSession` receives botID from adapter | Integration test |
 | PBAC-014 | `injectAgentConfig` passes botID directly to `agentconfig.Load` | Unit test |
@@ -399,7 +399,7 @@ Three `createAndLaunchWorker` call sites must pass botID:
 | PBAC-019 | `hotplex doctor` detects old suffix files and suggests migration | Unit test |
 | PBAC-020 | `make check` passes (lint + test + build) | CI |
 | PBAC-021 | Cross-platform build passes (linux/macOS/windows) | CI |
-| PBAC-022 | `MakeFeishuEnvelope` includes botID in PlatformContext and metadata | Unit test |
+| PBAC-022 | `makeEnvelope` includes botID in PlatformContext and metadata | Unit test |
 | PBAC-023 | `MakeEnvelope` includes `bot_id` in metadata map | Unit test |
 | PBAC-024 | `ExtractPlatformKeys` extracts `bot_id` from metadata for both Slack and Feishu | Unit test |
 | PBAC-025 | `messaging.Bridge.Handle()` extracts botID from adapter via `GetBotID()`, passes to `StartPlatformSession` | Unit test |
@@ -416,9 +416,9 @@ Three `createAndLaunchWorker` call sites must pass botID:
 | `internal/agentconfig/loader_test.go` | 替换 suffix-append 测试为 3级 fallback 测试, +path traversal +empty file tests |
 | `internal/session/key.go` | `PlatformContext` +BotID, `FromMap` +bot_id, `DerivePlatformSessionKey` hash input +botID |
 | `internal/messaging/platform_adapter.go` | `PlatformAdapterInterface` +`GetBotID()`, `SessionStarter` +botID, `ExtractPlatformKeys` +`bot_id` extraction |
-| `internal/messaging/slack/adapter.go` | 实现 `GetBotID()`, 更新 `MakeSlackEnvelope` 调用 +botID 参数 |
-| `internal/messaging/feishu/adapter.go` | 实现 `GetBotID()`, 更新 `MakeFeishuEnvelope` 调用 +botID 参数 |
-| `internal/messaging/bridge.go` | `Bridge` +adapter field +`SetAdapter()`, `MakeSlackEnvelope`/`MakeFeishuEnvelope` +botID, `MakeEnvelope` metadata +bot_id, `Handle()` 提取 botID |
+| `internal/messaging/slack/adapter.go` | 实现 `GetBotID()`, 更新 `makeEnvelope` 调用 +botID 参数 |
+| `internal/messaging/feishu/adapter.go` | 实现 `GetBotID()`, 更新 `makeEnvelope` 调用 +botID 参数 |
+| `internal/messaging/bridge.go` | `Bridge` +adapter field +`SetAdapter()`, `makeEnvelope`/`makeEnvelope` +botID, `MakeEnvelope` metadata +bot_id, `Handle()` 提取 botID |
 | `internal/gateway/bridge.go` | `injectAgentConfig` +botID, `startOrResumeOnInUse` 使用 botID, `workerLaunchParams` +botID, 3个 `createAndLaunchWorker` 调用点 +botID |
 | `cmd/hotplex/messaging_init.go` | `adapter.Start()` 后调用 `msgBridge.SetAdapter(adapter)` |
 | `cmd/hotplex/gateway_run.go` | 启动时扫描旧 suffix 文件, 日志 deprecation warning |

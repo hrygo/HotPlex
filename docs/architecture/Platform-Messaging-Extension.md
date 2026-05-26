@@ -210,10 +210,6 @@ type HandlerInterface interface {
 	Handle(ctx context.Context, env *events.Envelope) error
 }
 
-// SessionManager is an opaque interface for session management.
-// Platform adapters don't call session creation directly; the bridge handles it.
-type SessionManager any
-
 // SessionStarter creates a new gateway session for a platform message.
 // Implemented by gateway.Bridge and injected during wiring.
 type SessionStarter interface {
@@ -338,7 +334,7 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope) error {
 // [实现说明] 两个 MakeXxxEnvelope 方法共享 makeEnvelope helper（DRY 优化），
 // 仅 session ID 格式和 metadata 内容不同。
 
-func (b *Bridge) MakeSlackEnvelope(teamID, channelID, threadTS, userID, text string) *events.Envelope {
+func (b *Bridge) MakeEnvelope(teamID, channelID, threadTS, userID, text string) *events.Envelope {
 	sessionID := fmt.Sprintf("slack:%s:%s:%s:%s", teamID, channelID, threadTS, userID)
 	return b.makeEnvelope(sessionID, userID, text, map[string]any{
 		"platform":   "slack",
@@ -347,7 +343,7 @@ func (b *Bridge) MakeSlackEnvelope(teamID, channelID, threadTS, userID, text str
 	})
 }
 
-func (b *Bridge) MakeFeishuEnvelope(chatID, threadTS, userID, text string) *events.Envelope {
+func (b *Bridge) MakeEnvelope(chatID, threadTS, userID, text string) *events.Envelope {
 	sessionID := fmt.Sprintf("feishu:%s:%s:%s", chatID, threadTS, userID)
 	return b.makeEnvelope(sessionID, userID, text, map[string]any{
 		"platform": "feishu",
@@ -420,7 +416,7 @@ func pcToConnWrapper(pc PlatformConn) *Conn { /* inline wrapper, ~10 lines */ }
    └─▶ 建立 WebSocket 长连接到 Slack 云
 2. Slack → message event
    └─▶ Adapter.HandleTextMessage(ctx, event.Team, event.Channel, event.User, event.Text)
-       ├─▶ Bridge.MakeSlackEnvelope() → AEP Envelope
+       ├─▶ Bridge.MakeEnvelope() → AEP Envelope
        ├─▶ Bridge.JoinSession(sessionID, platformConn)
        │   └─▶ Hub.JoinPlatformSession() — 注册连接用于接收响应
        └─▶ Bridge.Handle(ctx, env)
@@ -455,7 +451,7 @@ func init() {
 }
 
 type Adapter struct {
-	messaging.PlatformAdapter // embedding for SetHub/SetSM/SetHandler
+	messaging.PlatformAdapter // embedding for ConfigureWith
 
 	app    *slack.App
 	client *slack.Client
@@ -531,7 +527,7 @@ func (a *Adapter) handleMessage(ctx context.Context, ev slackevents.EventsAPIEve
 
 func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelID, userID, text string) error {
 	// Map Slack message to AEP Envelope
-	env := a.Bridge.MakeSlackEnvelope("", channelID, userID, text)
+	env := a.Bridge.MakeEnvelope("", channelID, userID, text)
 	if env == nil {
 		return nil
 	}
@@ -846,7 +842,7 @@ func (r *ChannelRateLimiter) Allow(channelID string) bool {
 1. wsClient.Connect() — 建立飞书 WebSocket 长连接
 2. 飞书 → larkim event (receive message)
    └─▶ Adapter.HandleTextMessage(ctx, chatID, userID, text)
-       ├─▶ Bridge.MakeFeishuEnvelope() → AEP Envelope
+       ├─▶ Bridge.MakeEnvelope() → AEP Envelope
        ├─▶ Bridge.JoinSession(sessionID, platformConn)
        └─▶ Bridge.Handle(ctx, env)
 3. Worker → AEP events → Hub.SendToSession()
@@ -960,7 +956,7 @@ func (a *Adapter) onMessage(ctx context.Context, event *larkim.P2MessageReceiveV
 }
 
 func (a *Adapter) HandleTextMessage(ctx context.Context, chatID, userID, text string) error {
-	env := a.Bridge.MakeFeishuEnvelope(chatID, userID, text)
+	env := a.Bridge.MakeEnvelope(chatID, userID, text)
 	if env == nil {
 		return nil
 	}
@@ -1398,8 +1394,8 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc PlatformConn) {
 | ID | 验收标准 | 验证方式 | 状态 |
 |----|---------|---------|------|
 | AC-3.1 | `Bridge.Handle()` 验证 `OwnerID` 非空后调用 `handler.Handle()` | 单元测试: OwnerID 空返回错误 | ✅ |
-| AC-3.2 | `MakeSlackEnvelope` 生成 session ID: `slack:{team}:{channel}:{thread_ts}:{user_id}` | 单元测试: 验证格式 | ✅ |
-| AC-3.3 | `MakeFeishuEnvelope` 生成 session ID: `feishu:{chat_id}:{thread_ts}:{user_id}` | 单元测试: 验证格式 | ✅ |
+| AC-3.2 | `MakeEnvelope` 生成 session ID: `slack:{team}:{channel}:{thread_ts}:{user_id}` | 单元测试: 验证格式 | ✅ |
+| AC-3.3 | `MakeEnvelope` 生成 session ID: `feishu:{chat_id}:{thread_ts}:{user_id}` | 单元测试: 验证格式 | ✅ |
 | AC-3.4 | Envelope `Data.content` 去首尾空白，`Data.metadata` 含 platform 标识 | 单元测试 | ✅ |
 
 #### AC-4: Hub.JoinPlatformSession

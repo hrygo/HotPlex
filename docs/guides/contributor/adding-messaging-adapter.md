@@ -69,7 +69,6 @@ type PlatformConn interface {
 ```go
 type AdapterConfig struct {
     Hub     HubInterface       // WebSocket Hub（广播路由）
-    SM      SessionManager     // Session 状态机
     Handler HandlerInterface   // AEP Handler（事件分发）
     Bridge  *Bridge            // MessagingBridge（Session 生命周期）
     Gate    *Gate              // 访问控制
