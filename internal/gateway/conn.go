@@ -566,10 +566,53 @@ func (c *Conn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 
 	select {
 	case c.writeCh <- data:
-		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
 		return nil
 	case <-c.done:
 		return errors.New("conn closed")
+	}
+}
+
+// RouteWrite writes an envelope through the Hub routing path. It handles
+// init-phase buffering and applies droppable semantics for delta/raw events
+// (silently drops on full channel instead of disconnecting).
+func (c *Conn) RouteWrite(_ context.Context, env *events.Envelope) error {
+	data, err := aep.EncodeJSON(env)
+	if err != nil {
+		return err
+	}
+	// Handle init-phase buffering and closed check.
+	if handled, err := c.bufferOrReject(data); handled {
+		return err
+	}
+	// Post-init: apply droppable vs reliable write semantics.
+	if isDroppable(env.Event.Type) {
+		return c.trySendData(data)
+	}
+	return c.sendData(data)
+}
+
+// sendData writes pre-encoded data to the write channel. Disconnects the
+// client if the channel is full (backpressure for reliable events).
+func (c *Conn) sendData(data []byte) error {
+	select {
+	case c.writeCh <- data:
+		return nil
+	default:
+		c.log.Warn("gateway: slow client, write channel full, disconnecting", "session_id", c.sessionID)
+		metrics.GatewayErrorsTotal.WithLabelValues("slow_client").Inc()
+		_ = c.Close()
+		return errors.New("write channel full, slow client disconnected")
+	}
+}
+
+// trySendData attempts to write pre-encoded data without blocking.
+// Silently drops the message if the channel is full (for droppable events).
+func (c *Conn) trySendData(data []byte) error {
+	select {
+	case c.writeCh <- data:
+		return nil
+	default:
+		return nil
 	}
 }
 

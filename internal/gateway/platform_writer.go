@@ -78,6 +78,12 @@ func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) 
 	return e
 }
 
+// RouteWrite writes an envelope through the Hub routing path.
+// pcEntry already handles droppable semantics in WriteCtx, so this delegates directly.
+func (e *pcEntry) RouteWrite(ctx context.Context, env *events.Envelope) error {
+	return e.WriteCtx(ctx, env)
+}
+
 func (e *pcEntry) WriteCtx(_ context.Context, env *events.Envelope) error {
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {
