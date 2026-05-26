@@ -18,7 +18,7 @@ func ExtractChatID(env *events.Envelope) string {
 	if id, ok := md["chat_id"].(string); ok && id != "" {
 		return id
 	}
-	// Nested: used by Bridge.MakeFeishuEnvelope.
+	// Nested: used by Adapter.makeEnvelope.
 	if meta, ok := md["metadata"].(map[string]any); ok {
 		if id, ok := meta["chat_id"].(string); ok && id != "" {
 			return id

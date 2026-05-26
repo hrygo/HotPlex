@@ -55,12 +55,19 @@ func TestBridge_MakeEnvelope_BotIDInMetadata(t *testing.T) {
 	})
 }
 
-// PBAC-011: MakeSlackEnvelope includes botID in PlatformContext.
-func TestBridge_MakeSlackEnvelope_BotID(t *testing.T) {
+// PBAC-011: MakeEnvelope includes botID in PlatformContext for Slack.
+func TestBridge_MakeEnvelope_SlackBotID(t *testing.T) {
 	t.Parallel()
 
 	b := newTestBridge()
-	env := b.MakeSlackEnvelope("T001", "C100", "123.456", "U001", "hello", "", "U_BOT_X")
+	env := b.MakeEnvelope("U001", "hello", session.PlatformContext{
+		Platform:  "slack",
+		BotID:     "U_BOT_X",
+		TeamID:    "T001",
+		ChannelID: "C100",
+		ThreadTS:  "123.456",
+		UserID:    "U001",
+	})
 
 	md := env.Event.Data.(map[string]any)["metadata"].(map[string]any)
 	require.Equal(t, "U_BOT_X", md["bot_id"])
@@ -68,12 +75,18 @@ func TestBridge_MakeSlackEnvelope_BotID(t *testing.T) {
 	require.Equal(t, "C100", md["channel_id"])
 }
 
-// PBAC-022: MakeFeishuEnvelope includes botID in PlatformContext and metadata.
-func TestBridge_MakeFeishuEnvelope_BotID(t *testing.T) {
+// PBAC-022: MakeEnvelope includes botID in PlatformContext for Feishu.
+func TestBridge_MakeEnvelope_FeishuBotID(t *testing.T) {
 	t.Parallel()
 
 	b := newTestBridge()
-	env := b.MakeFeishuEnvelope("oc_chat1", "msg_001", "ou_user1", "hello", "", "ou_bot_Y")
+	env := b.MakeEnvelope("ou_user1", "hello", session.PlatformContext{
+		Platform: "feishu",
+		BotID:    "ou_bot_Y",
+		ChatID:   "oc_chat1",
+		ThreadTS: "msg_001",
+		UserID:   "ou_user1",
+	})
 
 	md := env.Event.Data.(map[string]any)["metadata"].(map[string]any)
 	require.Equal(t, "ou_bot_Y", md["bot_id"])

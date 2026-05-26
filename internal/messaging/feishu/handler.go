@@ -9,8 +9,24 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/events"
 )
+
+// makeEnvelope builds an AEP input envelope for a Feishu message.
+func (a *Adapter) makeEnvelope(chatID, threadTS, userID, text, workDir string) *events.Envelope {
+	if workDir == "" {
+		workDir = a.Bridge().WorkDir()
+	}
+	return a.Bridge().MakeEnvelope(userID, text, session.PlatformContext{
+		Platform: string(messaging.PlatformFeishu),
+		BotID:    a.botOpenID,
+		ChatID:   chatID,
+		ThreadTS: threadTS,
+		UserID:   userID,
+		WorkDir:  workDir,
+	})
+}
 
 func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 	if event.Event == nil || event.Event.Message == nil {
@@ -155,7 +171,7 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 		conn.voiceTriggered.Store(true)
 	}
 
-	envelope := a.Bridge().MakeFeishuEnvelope(channelID, threadKey, userID, text, conn.WorkDir(), a.botOpenID)
+	envelope := a.makeEnvelope(channelID, threadKey, userID, text, conn.WorkDir())
 	if envelope == nil {
 		return fmt.Errorf("feishu: failed to build envelope")
 	}
@@ -235,7 +251,7 @@ func (a *Adapter) GetOrCreateConn(chatID, threadKey string) *FeishuConn {
 
 func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, threadKey, platformMsgID string, result *messaging.ControlCommandResult) {
 	conn := a.GetOrCreateConn(chatID, threadKey)
-	envelope := a.Bridge().MakeFeishuEnvelope(chatID, threadKey, userID, "", conn.WorkDir(), a.botOpenID)
+	envelope := a.makeEnvelope(chatID, threadKey, userID, "", conn.WorkDir())
 	if envelope == nil {
 		a.Log.Warn("feishu: text control command failed to derive session", "action", result.Label)
 		return
@@ -298,7 +314,7 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, 
 
 func (a *Adapter) handleTextWorkerCommand(ctx context.Context, chatID, chatType, userID, threadKey, platformMsgID, replyToMsgID string, result *messaging.WorkerCommandResult) {
 	conn := a.GetOrCreateConn(chatID, threadKey)
-	envelope := a.Bridge().MakeFeishuEnvelope(chatID, threadKey, userID, "", conn.WorkDir(), a.botOpenID)
+	envelope := a.makeEnvelope(chatID, threadKey, userID, "", conn.WorkDir())
 	if envelope == nil {
 		a.Log.Warn("feishu: worker command failed to derive session", "command", result.Label)
 		return

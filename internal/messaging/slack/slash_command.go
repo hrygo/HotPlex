@@ -152,7 +152,7 @@ func (a *Adapter) deriveSessionIDFromCommand(cmd slack.SlashCommand) string {
 	if conn != nil {
 		workDir = conn.WorkDir()
 	}
-	envelope := a.Bridge().MakeSlackEnvelope(cmd.TeamID, cmd.ChannelID, "", cmd.UserID, "", workDir, a.botID)
+	envelope := a.makeEnvelope(cmd.TeamID, cmd.ChannelID, "", cmd.UserID, "", workDir)
 	if envelope == nil {
 		return ""
 	}

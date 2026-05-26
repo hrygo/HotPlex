@@ -17,6 +17,7 @@ import (
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/messaging/phrases"
 	"github.com/hrygo/hotplex/internal/messaging/stt"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/events"
 
 	"runtime/debug"
@@ -544,7 +545,7 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 		return fmt.Errorf("slack: adapter closed, dropping message for channel %s", channelID)
 	}
 
-	envelope := a.Bridge().MakeSlackEnvelope(teamID, channelID, threadTS, userID, text, conn.WorkDir(), a.botID)
+	envelope := a.makeEnvelope(teamID, channelID, threadTS, userID, text, conn.WorkDir())
 	if envelope == nil {
 		return fmt.Errorf("slack: failed to build envelope")
 	}
@@ -553,6 +554,22 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 	msgCtx, cancel := context.WithTimeout(ctx, handlerMsgTimeout)
 	defer cancel()
 	return a.Bridge().Handle(msgCtx, envelope, conn)
+}
+
+// makeEnvelope builds an AEP input envelope for a Slack message.
+func (a *Adapter) makeEnvelope(teamID, channelID, threadTS, userID, text, workDir string) *events.Envelope {
+	if workDir == "" {
+		workDir = a.Bridge().WorkDir()
+	}
+	return a.Bridge().MakeEnvelope(userID, text, session.PlatformContext{
+		Platform:  string(messaging.PlatformSlack),
+		BotID:     a.botID,
+		TeamID:    teamID,
+		ChannelID: channelID,
+		ThreadTS:  threadTS,
+		UserID:    userID,
+		WorkDir:   workDir,
+	})
 }
 
 // NewStreamingWriter creates a streaming writer for the given channel/thread.
@@ -661,7 +678,7 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 		return
 	}
 
-	env := a.Bridge().MakeSlackEnvelope(teamID, channelID, threadTS, userID, "", conn.WorkDir(), a.botID)
+	env := a.makeEnvelope(teamID, channelID, threadTS, userID, "", conn.WorkDir())
 	if env == nil {
 		a.Log.Warn("slack: text control command failed to derive session", "action", result.Label)
 		return
@@ -722,7 +739,7 @@ func (a *Adapter) handleTextWorkerCommand(ctx context.Context, teamID, channelID
 		return
 	}
 
-	envelope := a.Bridge().MakeSlackEnvelope(teamID, channelID, threadTS, userID, "", conn.WorkDir(), a.botID)
+	envelope := a.makeEnvelope(teamID, channelID, threadTS, userID, "", conn.WorkDir())
 	if envelope == nil {
 		a.Log.Warn("slack: worker command failed to derive session", "command", result.Label)
 		return
