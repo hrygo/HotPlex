@@ -223,10 +223,29 @@ func TestMapper_Map_Result(t *testing.T) {
 		require.Len(t, envs, 1)
 		env := envs[0]
 		require.Equal(t, events.Done, env.Event.Type)
+		require.Greater(t, env.Timestamp, int64(0), "NewEnvelope must set timestamp")
 
 		data, ok := env.Event.Data.(events.DoneData)
 		require.True(t, ok)
 		require.True(t, data.Success)
+	})
+
+	t.Run("failure includes error and done with timestamp", func(t *testing.T) {
+		event := &WorkerEvent{
+			Type: EventResult,
+			Payload: &ResultPayload{
+				Success: false,
+				Message: "something broke",
+			},
+		}
+
+		envs, err := mapper.Map(event)
+		require.NoError(t, err)
+		require.Len(t, envs, 2)
+		require.Equal(t, events.Error, envs[0].Event.Type)
+		require.Equal(t, events.Done, envs[1].Event.Type)
+		require.Greater(t, envs[0].Timestamp, int64(0))
+		require.Greater(t, envs[1].Timestamp, int64(0))
 	})
 
 	t.Run("success merges usage and model_usage into stats", func(t *testing.T) {

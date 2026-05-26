@@ -480,6 +480,14 @@ func TestConverter_FullTurnLifecycle(t *testing.T) {
 	require.Equal(t, int64(500), tokens["cache_write"])
 	require.InDelta(t, 0.02, dd.Stats["cost"], 0.0001)
 
+	// model_usage from step.started
+	mu, ok := dd.Stats["model_usage"].(map[string]any)
+	require.True(t, ok, "model_usage should be present in lifecycle done stats")
+	inner, ok := mu["anthropic/claude-sonnet-4-6"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, int64(5000), inner["input_tokens"])
+	require.Equal(t, int64(600), inner["output_tokens"])
+
 	// State cleared
 	_, exists := c.states[sid]
 	require.False(t, exists)
