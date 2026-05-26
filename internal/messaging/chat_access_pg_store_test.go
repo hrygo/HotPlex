@@ -13,14 +13,14 @@ import (
 	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
-func newChatAccessPGMock(t *testing.T) (*ChatAccessPGStore, sqlmock.Sqlmock, func()) {
+func newChatAccessPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	t.Helper()
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
 
 	db := &dbutil.DB{DB: mockDB}
 
-	store := &ChatAccessPGStore{
+	store := &pgStore{
 		db:      db,
 		dialect: dbutil.DialectPostgres,
 		log:     slog.Default(),

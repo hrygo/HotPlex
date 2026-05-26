@@ -25,7 +25,7 @@ CREATE TABLE "turns" (
     "tokens_out"          INTEGER NOT NULL DEFAULT 0,
     "duration_ms"         INTEGER NOT NULL DEFAULT 0,
     "cost_usd"            NUMERIC(18,8) NOT NULL DEFAULT 0.0,
-    "created_at"          INTEGER NOT NULL            -- Unix ms
+    "created_at"          BIGINT NOT NULL               -- Unix ms
 );
 
 CREATE INDEX "idx_turns_session_gen_id"

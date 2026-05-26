@@ -58,6 +58,7 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
 
       # Database — uncomment the two lines below to use PostgreSQL instead of SQLite
+      # sslmode=disable is safe within Docker network; use sslmode=prefer for non-Docker.
       # - HOTPLEX_DB_DRIVER=postgres
       # - HOTPLEX_DB_POSTGRES_DSN=postgres://hotplex:${POSTGRES_PASSWORD:-hotplex}@postgres:5432/hotplex?sslmode=disable
 
@@ -126,8 +127,9 @@ services:
     shm_size: '512m'
     profiles:
       - postgres
+    # ⚠️ Development only: bind to localhost. Override POSTGRES_PASSWORD for production.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-hotplex}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hotplex}
@@ -171,6 +173,8 @@ services:
       - RETENTION_DAYS=${RETENTION_DAYS:-30}
       - PGHOST=postgres
       - PGUSER=${POSTGRES_USER:-hotplex}
+      # ⚠️ PGPASSWORD uses POSTGRES_PASSWORD (default: "hotplex" — development only).
+      # For production, always set a strong password via environment or secrets.
       - PGPASSWORD=${POSTGRES_PASSWORD:-hotplex}
       - PGDATABASE=${POSTGRES_DB:-hotplex}
     entrypoint: >

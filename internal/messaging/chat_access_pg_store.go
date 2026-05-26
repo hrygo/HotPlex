@@ -9,20 +9,20 @@ import (
 	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
-// Compile-time check that ChatAccessPGStore satisfies ChatAccessStorer.
-var _ ChatAccessStorer = (*ChatAccessPGStore)(nil)
+// Compile-time check that pgStore satisfies ChatAccessStorer.
+var _ ChatAccessStorer = (*pgStore)(nil)
 
-// ChatAccessPGStore provides dedup + cooldown + persistence for chat-entered events,
+// pgStore provides dedup + cooldown + persistence for chat-entered events,
 // backed by PostgreSQL.
-type ChatAccessPGStore struct {
+type pgStore struct {
 	db      *dbutil.DB
 	dialect dbutil.Dialect
 	log     *slog.Logger
 }
 
 // NewChatAccessPGStore creates a store backed by the given PostgreSQL connection.
-func NewChatAccessPGStore(db *dbutil.DB, log *slog.Logger) *ChatAccessPGStore {
-	return &ChatAccessPGStore{
+func NewChatAccessPGStore(db *dbutil.DB, log *slog.Logger) ChatAccessStorer {
+	return &pgStore{
 		db:      db,
 		dialect: db.Dialect(),
 		log:     log,
@@ -31,7 +31,7 @@ func NewChatAccessPGStore(db *dbutil.DB, log *slog.Logger) *ChatAccessPGStore {
 
 // Record inserts the event. Returns false (with nil error) when event_id
 // already exists (duplicate event from the platform).
-func (s *ChatAccessPGStore) Record(ctx context.Context, r ChatAccessRecord) (bool, error) {
+func (s *pgStore) Record(ctx context.Context, r ChatAccessRecord) (bool, error) {
 	now := time.Now().Unix()
 	r.CreatedAt = now
 	var inserted bool
@@ -58,7 +58,7 @@ func (s *ChatAccessPGStore) Record(ctx context.Context, r ChatAccessRecord) (boo
 //
 // Feishu: pass lastMessageAtMs from the event payload.
 // Slack:  pass 0; the function falls back to the DB.
-func (s *ChatAccessPGStore) Classify(ctx context.Context, platform, chatID, botID, userID string, lastMessageAtMs int64) ChatAccessType {
+func (s *pgStore) Classify(ctx context.Context, platform, chatID, botID, userID string, lastMessageAtMs int64) ChatAccessType {
 	cooldown := int64(3600) // 1 h debounce window in seconds.
 
 	// Check recent row for (platform, chat_id, bot_id).

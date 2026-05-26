@@ -15,6 +15,8 @@ services:
   gateway:
     environment:
       - HOTPLEX_DB_DRIVER=postgres
+      # sslmode=disable is safe here: traffic stays within the Docker network.
+      # For non-Docker deployments, use sslmode=prefer or sslmode=require.
       - HOTPLEX_DB_POSTGRES_DSN=postgres://hotplex:${POSTGRES_PASSWORD:-hotplex}@postgres:5432/hotplex?sslmode=disable
     depends_on:
       postgres:

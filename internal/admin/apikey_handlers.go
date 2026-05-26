@@ -82,7 +82,10 @@ func (s *apiKeyUserStore) list(ctx context.Context) ([]APIKeyUser, error) {
 		}
 		result = append(result, u)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("admin: iterate api key users: %w", err)
+	}
+	return result, nil
 }
 
 func (s *apiKeyUserStore) get(ctx context.Context, id int64) (*APIKeyUser, error) {
@@ -91,7 +94,7 @@ func (s *apiKeyUserStore) get(ctx context.Context, id int64) (*APIKeyUser, error
 		"SELECT id, api_key, user_id, description, created_at, updated_at FROM api_key_users WHERE id = ?", id,
 	).Scan(&u.ID, &u.APIKey, &u.UserID, &u.Description, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("admin: get api key user: %w", err)
 	}
 	return &u, nil
 }

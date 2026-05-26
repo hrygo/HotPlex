@@ -424,6 +424,15 @@ func (d DBConfig) EffectiveSQLitePath() string {
 	return d.Path
 }
 
+// EffectiveMaxOpenConns returns the effective max open connections,
+// preferring the structured SQLite.MaxOpenConns with legacy flat MaxOpenConns as fallback.
+func (d DBConfig) EffectiveMaxOpenConns() int {
+	if d.SQLite.MaxOpenConns > 0 {
+		return d.SQLite.MaxOpenConns
+	}
+	return d.MaxOpenConns
+}
+
 // SQLiteConfig holds SQLite-specific database settings.
 type SQLiteConfig struct {
 	Path              string        `mapstructure:"path"`
@@ -900,6 +909,9 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("log.format")
 	_ = v.BindEnv("db.path")
 	_ = v.BindEnv("db.wal_mode")
+	_ = v.BindEnv("db.driver")
+	_ = v.BindEnv("db.postgres.dsn")
+	_ = v.BindEnv("db.postgres.max_open_conns")
 	_ = v.BindEnv("gateway.addr")
 	_ = v.BindEnv("admin.enabled")
 	_ = v.BindEnv("admin.addr")

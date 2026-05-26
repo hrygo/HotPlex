@@ -21,12 +21,12 @@ CREATE TABLE IF NOT EXISTS "cron_jobs" (
     "max_runs"         INTEGER NOT NULL DEFAULT 0,
     "expires_at"       TEXT NOT NULL DEFAULT '',
     "state"            TEXT NOT NULL DEFAULT '{}',
-    "created_at"       INTEGER NOT NULL,
-    "updated_at"       INTEGER NOT NULL
+    "created_at"       BIGINT NOT NULL,
+    "updated_at"       BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS "idx_cron_jobs_enabled" ON "cron_jobs"("enabled");
-CREATE INDEX IF NOT EXISTS "idx_cron_jobs_next_run" ON "cron_jobs"("enabled", ((state->>'next_run_at_ms')::bigint));
+CREATE INDEX IF NOT EXISTS "idx_cron_jobs_next_run" ON "cron_jobs"("enabled", (((state::jsonb)->>'next_run_at_ms')::bigint));
 
 -- +goose Down
 DROP TABLE IF EXISTS "cron_jobs";

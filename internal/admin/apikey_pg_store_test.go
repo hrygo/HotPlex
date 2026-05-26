@@ -11,14 +11,14 @@ import (
 	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
-func newAPIKeyPGMock(t *testing.T) (*APIKeyUserPGStore, sqlmock.Sqlmock, func()) {
+func newAPIKeyPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	t.Helper()
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
 
 	db := &dbutil.DB{DB: mockDB}
 
-	store := &APIKeyUserPGStore{
+	store := &pgStore{
 		db:      db,
 		dialect: dbutil.DialectPostgres,
 	}

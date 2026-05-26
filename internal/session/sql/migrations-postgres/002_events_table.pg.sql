@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS "events" (
     "direction" TEXT NOT NULL DEFAULT 'outbound',
     "source" TEXT NOT NULL DEFAULT 'normal'
       CHECK(source IN ('normal', 'crash', 'timeout', 'fresh_start')),
-    "created_at" INTEGER NOT NULL
+    "created_at" BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS "idx_events_session_seq" ON "events"("session_id", "seq");

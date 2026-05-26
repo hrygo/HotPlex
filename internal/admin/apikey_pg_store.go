@@ -10,19 +10,20 @@ import (
 	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
-// APIKeyUserPGStore implements APIKeyUserStorer backed by PostgreSQL.
-type APIKeyUserPGStore struct {
+// pgStore implements APIKeyUserStorer backed by PostgreSQL.
+type pgStore struct {
 	db              *dbutil.DB
 	dialect         dbutil.Dialect
 	invalidator     cacheInvalidator
 	invalidatorOnce sync.Once
 }
 
-func NewAPIKeyUserPGStore(db *dbutil.DB, inv cacheInvalidator) *APIKeyUserPGStore {
+// NewAPIKeyUserPGStore creates a PG-backed API key store.
+func NewAPIKeyUserPGStore(db *dbutil.DB, inv cacheInvalidator) APIKeyUserStorer {
 	if db == nil {
 		return nil
 	}
-	return &APIKeyUserPGStore{
+	return &pgStore{
 		db:          db,
 		dialect:     db.Dialect(),
 		invalidator: inv,
@@ -31,20 +32,20 @@ func NewAPIKeyUserPGStore(db *dbutil.DB, inv cacheInvalidator) *APIKeyUserPGStor
 
 // SetInvalidator sets the cache invalidator used after API key CRUD operations.
 // Safe for concurrent use — only the first call takes effect.
-func (s *APIKeyUserPGStore) SetInvalidator(inv cacheInvalidator) {
+func (s *pgStore) SetInvalidator(inv cacheInvalidator) {
 	s.invalidatorOnce.Do(func() {
 		s.invalidator = inv
 	})
 }
 
 var (
-	_ APIKeyUserStorer = (*APIKeyUserPGStore)(nil)
+	_ APIKeyUserStorer = (*pgStore)(nil)
 	_                  = NewAPIKeyUserPGStore
 )
 
-func (s *APIKeyUserPGStore) Invalidator() cacheInvalidator { return s.invalidator }
+func (s *pgStore) Invalidator() cacheInvalidator { return s.invalidator }
 
-func (s *APIKeyUserPGStore) list(ctx context.Context) ([]APIKeyUser, error) {
+func (s *pgStore) list(ctx context.Context) ([]APIKeyUser, error) {
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, api_key, user_id, description, created_at, updated_at FROM api_key_users ORDER BY created_at DESC")
 	if err != nil {
@@ -60,10 +61,13 @@ func (s *APIKeyUserPGStore) list(ctx context.Context) ([]APIKeyUser, error) {
 		}
 		result = append(result, u)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("admin: iterate api key users: %w", err)
+	}
+	return result, nil
 }
 
-func (s *APIKeyUserPGStore) get(ctx context.Context, id int64) (*APIKeyUser, error) {
+func (s *pgStore) get(ctx context.Context, id int64) (*APIKeyUser, error) {
 	var u APIKeyUser
 	query := s.dialect.Rebind(
 		"SELECT id, api_key, user_id, description, created_at, updated_at FROM api_key_users WHERE id = ?")
@@ -75,7 +79,7 @@ func (s *APIKeyUserPGStore) get(ctx context.Context, id int64) (*APIKeyUser, err
 	return &u, nil
 }
 
-func (s *APIKeyUserPGStore) create(ctx context.Context, u *APIKeyUser) error {
+func (s *pgStore) create(ctx context.Context, u *APIKeyUser) error {
 	if u.APIKey == "" {
 		key := make([]byte, 24)
 		if _, err := rand.Read(key); err != nil {
@@ -88,7 +92,7 @@ func (s *APIKeyUserPGStore) create(ctx context.Context, u *APIKeyUser) error {
 	return s.db.QueryRowContext(ctx, query, u.APIKey, u.UserID, u.Description).Scan(&u.ID)
 }
 
-func (s *APIKeyUserPGStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
+func (s *pgStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
 	query := s.dialect.Rebind("UPDATE api_key_users SET user_id = ?, description = ?, updated_at = NOW() WHERE id = ?")
 	res, err := s.db.ExecContext(ctx, query, u.UserID, u.Description, id)
 	if err != nil {
@@ -101,7 +105,7 @@ func (s *APIKeyUserPGStore) update(ctx context.Context, id int64, u *APIKeyUser)
 	return nil
 }
 
-func (s *APIKeyUserPGStore) delete(ctx context.Context, id int64) error {
+func (s *pgStore) delete(ctx context.Context, id int64) error {
 	query := s.dialect.Rebind("DELETE FROM api_key_users WHERE id = ?")
 	res, err := s.db.ExecContext(ctx, query, id)
 	if err != nil {

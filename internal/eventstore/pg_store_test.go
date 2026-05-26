@@ -12,7 +12,7 @@ import (
 	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
-func newEventPGMock(t *testing.T) (*pgEventStore, sqlmock.Sqlmock, func()) {
+func newEventPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	t.Helper()
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -25,7 +25,7 @@ func newEventPGMock(t *testing.T) (*pgEventStore, sqlmock.Sqlmock, func()) {
 		"query_latest": pg.Rebind("SELECT session_id, seq, type, data, direction, source, created_at FROM events WHERE session_id = ? ORDER BY seq DESC LIMIT ?"),
 	}
 
-	store := &pgEventStore{
+	store := &pgStore{
 		db:      db,
 		dialect: pg,
 		sql:     sqlMap,

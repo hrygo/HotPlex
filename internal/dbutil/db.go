@@ -57,8 +57,8 @@ func openSQLite(cfg *config.DBConfig) (*DB, error) {
 		return nil, err
 	}
 
-	if cfg.MaxOpenConns > 0 {
-		sqldb.SetMaxOpenConns(cfg.MaxOpenConns)
+	if maxOpen := cfg.EffectiveMaxOpenConns(); maxOpen > 0 {
+		sqldb.SetMaxOpenConns(maxOpen)
 	}
 	sqldb.SetMaxIdleConns(2)
 
@@ -89,7 +89,7 @@ func openPostgres(cfg *config.DBConfig) (*DB, error) {
 	sqldb.SetMaxOpenConns(maxOpen)
 	sqldb.SetMaxIdleConns(5)
 	sqldb.SetConnMaxLifetime(5 * time.Minute)
-	sqldb.SetConnMaxIdleTime(5 * time.Minute)
+	sqldb.SetConnMaxIdleTime(3 * time.Minute)
 
 	return &DB{DB: sqldb, dialect: DialectPostgres}, nil
 }

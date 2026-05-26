@@ -52,6 +52,7 @@ type RuntimeStatus struct {
 	WebChatAddr     string
 	WebChatEmbedded bool
 	TLSEnabled      bool
+	DBDriver        string
 	DBPath          string
 	PoolMax         int
 	PoolIdle        int
@@ -180,7 +181,11 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 
 	// ── Resources ────────────────────────────────────────────
 	lines = append(lines, "", sectionHeader("Resources"))
-	lines = append(lines, sectionPad("Database", s.DBPath))
+	if strings.EqualFold(s.DBDriver, "postgres") {
+		lines = append(lines, sectionPad("Database", "PostgreSQL"))
+	} else {
+		lines = append(lines, sectionPad("Database", s.DBPath))
+	}
 	lines = append(lines, sectionPad("Pool", fmt.Sprintf("%d sessions / %d idle per user", s.PoolMax, s.PoolIdle)))
 	if s.RetryEnabled {
 		lines = append(lines, sectionPad("LLM Retry", green(fmt.Sprintf("✓ %d retries, %s delay", s.RetryMax, s.RetryDelay))))

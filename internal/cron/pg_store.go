@@ -19,7 +19,7 @@ type pgStore struct {
 
 // NewPGStore creates a new cron store backed by PostgreSQL.
 // Returns an unexported type; external packages use the Store interface.
-func NewPGStore(db *dbutil.DB, log *slog.Logger) *pgStore {
+func NewPGStore(db *dbutil.DB, log *slog.Logger) Store {
 	return &pgStore{
 		db:      db,
 		dialect: db.Dialect(),

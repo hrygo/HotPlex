@@ -13,8 +13,8 @@ import (
 	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
-// pgEventStore implements EventStore + TurnQuerier using PostgreSQL.
-type pgEventStore struct {
+// pgStore implements EventStore + TurnQuerier using PostgreSQL.
+type pgStore struct {
 	db      *dbutil.DB
 	dialect dbutil.Dialect
 	sql     map[string]string // Rebound query cache (PG $N placeholders)
@@ -24,22 +24,22 @@ type pgEventStore struct {
 // pgEventTx is a PostgreSQL-backed transaction for batch event and turn writes.
 type pgEventTx struct {
 	tx      *sql.Tx
-	sql     map[string]string // Reference to pgEventStore's rebound queries
+	sql     map[string]string // Reference to pgStore's rebound queries
 	dialect dbutil.Dialect
 }
 
 // Interface checks.
 var (
-	_ EventStore  = (*pgEventStore)(nil)
-	_ TurnQuerier = (*pgEventStore)(nil)
+	_ EventStore  = (*pgStore)(nil)
+	_ TurnQuerier = (*pgStore)(nil)
 )
 
 // NewPGStore creates a PostgreSQL-backed event store. All embedded SQL queries
 // are rebound to PG $N placeholders. The turns.insert query gets an additional
 // RETURNING id clause since PG does not support LastInsertId.
-func NewPGStore(db *dbutil.DB, log *slog.Logger) *pgEventStore {
+func NewPGStore(db *dbutil.DB, log *slog.Logger) *pgStore {
 	d := db.Dialect()
-	s := &pgEventStore{
+	s := &pgStore{
 		db:      db,
 		dialect: d,
 		sql:     make(map[string]string, len(queries)),
@@ -58,7 +58,7 @@ func NewPGStore(db *dbutil.DB, log *slog.Logger) *pgEventStore {
 // EventStore implementation
 // ---------------------------------------------------------------------------
 
-func (s *pgEventStore) Append(ctx context.Context, event *StoredEvent) error {
+func (s *pgStore) Append(ctx context.Context, event *StoredEvent) error {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 	_, err := s.db.ExecContext(ctx, s.sql["insert"],
@@ -69,7 +69,7 @@ func (s *pgEventStore) Append(ctx context.Context, event *StoredEvent) error {
 	return nil
 }
 
-func (s *pgEventStore) BeginTx(ctx context.Context) (EventTx, error) {
+func (s *pgStore) BeginTx(ctx context.Context) (EventTx, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: begin tx: %w", err)
@@ -77,7 +77,7 @@ func (s *pgEventStore) BeginTx(ctx context.Context) (EventTx, error) {
 	return &pgEventTx{tx: tx, sql: s.sql, dialect: s.dialect}, nil
 }
 
-func (s *pgEventStore) QueryBySession(ctx context.Context, sessionID string, cursor int64, dir CursorDirection, limit int) (*EventPage, error) {
+func (s *pgStore) QueryBySession(ctx context.Context, sessionID string, cursor int64, dir CursorDirection, limit int) (*EventPage, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 	if limit <= 0 {
@@ -144,7 +144,7 @@ func (s *pgEventStore) QueryBySession(ctx context.Context, sessionID string, cur
 	return page, nil
 }
 
-func (s *pgEventStore) DeleteBySession(ctx context.Context, sessionID string) error {
+func (s *pgStore) DeleteBySession(ctx context.Context, sessionID string) error {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 	_, err := s.db.ExecContext(ctx, s.sql["delete_by_session"], sessionID)
@@ -154,7 +154,7 @@ func (s *pgEventStore) DeleteBySession(ctx context.Context, sessionID string) er
 	return nil
 }
 
-func (s *pgEventStore) DeleteExpired(ctx context.Context, cutoff time.Time) (int64, error) {
+func (s *pgStore) DeleteExpired(ctx context.Context, cutoff time.Time) (int64, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 	res, err := s.db.ExecContext(ctx, s.sql["delete_expired"], cutoff.UnixMilli())
@@ -165,7 +165,7 @@ func (s *pgEventStore) DeleteExpired(ctx context.Context, cutoff time.Time) (int
 	return rowsAffected, nil
 }
 
-func (s *pgEventStore) Close() error {
+func (s *pgStore) Close() error {
 	return nil
 }
 
@@ -213,7 +213,7 @@ func (t *pgEventTx) Rollback() error {
 // TurnQuerier implementation
 // ---------------------------------------------------------------------------
 
-func (s *pgEventStore) resolveGeneration(ctx context.Context, sessionID string) (int64, error) {
+func (s *pgStore) resolveGeneration(ctx context.Context, sessionID string) (int64, error) {
 	gen, err := s.LatestGeneration(ctx, sessionID)
 	if err != nil {
 		return 0, err
@@ -224,7 +224,7 @@ func (s *pgEventStore) resolveGeneration(ctx context.Context, sessionID string) 
 	return gen, nil
 }
 
-func (s *pgEventStore) QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error) {
+func (s *pgStore) QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error) {
 	gen, err := s.resolveGeneration(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -239,7 +239,7 @@ func (s *pgEventStore) QueryTurns(ctx context.Context, sessionID string, limit, 
 	return scanTurnsPG(rows)
 }
 
-func (s *pgEventStore) QueryTurnsBefore(ctx context.Context, sessionID string, beforeID int64, limit int) ([]*TurnRecord, error) {
+func (s *pgStore) QueryTurnsBefore(ctx context.Context, sessionID string, beforeID int64, limit int) ([]*TurnRecord, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 	rows, err := s.db.QueryContext(ctx, s.sql["turns.query_before"], sessionID, beforeID, limit)
@@ -256,7 +256,7 @@ func (s *pgEventStore) QueryTurnsBefore(ctx context.Context, sessionID string, b
 	return records, nil
 }
 
-func (s *pgEventStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error) {
+func (s *pgStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error) {
 	gen, err := s.resolveGeneration(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -304,7 +304,7 @@ func (s *pgEventStore) QueryTurnStats(ctx context.Context, sessionID string) (*T
 	return stats, rows.Err()
 }
 
-func (s *pgEventStore) LatestGeneration(ctx context.Context, sessionID string) (int64, error) {
+func (s *pgStore) LatestGeneration(ctx context.Context, sessionID string) (int64, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 	var gen int64
@@ -315,7 +315,7 @@ func (s *pgEventStore) LatestGeneration(ctx context.Context, sessionID string) (
 	return gen, nil
 }
 
-func (s *pgEventStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error) {
+func (s *pgStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 	res, err := s.db.ExecContext(ctx, s.sql["turns.delete_expired"], cutoff.UnixMilli())

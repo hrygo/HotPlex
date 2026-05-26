@@ -15,7 +15,7 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-func newPGMock(t *testing.T) (*PGStore, sqlmock.Sqlmock, func()) {
+func newPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	t.Helper()
 	mockDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -33,7 +33,7 @@ func newPGMock(t *testing.T) (*PGStore, sqlmock.Sqlmock, func()) {
 	q["store.delete_physical"] = dbutil.DialectPostgres.Rebind(
 		"DELETE FROM sessions WHERE id = ?")
 
-	store := &PGStore{
+	store := &pgStore{
 		db:      db,
 		dialect: dbutil.DialectPostgres,
 		queries: q,

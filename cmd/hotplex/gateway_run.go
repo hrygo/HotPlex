@@ -206,9 +206,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	// API key → user identity resolver: YAML config takes priority over DB (Admin API CRUD).
 	// ChainResolver tries config map first, falls back to DB. Either source may be empty.
-	dbResolver := security.NewDBResolver(stores.sqlDB)
-	// PG stores need the dbResolver for cache invalidation after API key CRUD.
-	stores.apiKeyStore.SetInvalidator(dbResolver)
+	dbResolver := stores.dbResolver
 	if len(cfg.ResolvedAPIKeyUsers) > 0 {
 		mapResolver := security.NewMapResolver(cfg.ResolvedAPIKeyUsers)
 		auth.SetKeyResolver(security.NewChainResolver(mapResolver, dbResolver))
@@ -471,6 +469,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		WebChatAddr:     cfg.WebChat.Addr,
 		WebChatEmbedded: cfg.WebChat.Enabled,
 		TLSEnabled:      cfg.Security.TLSEnabled,
+		DBDriver:        cfg.DB.Driver,
 		DBPath:          cfg.DB.Path,
 		PoolMax:         cfg.Pool.MaxSize,
 		PoolIdle:        cfg.Pool.MaxIdlePerUser,
@@ -597,6 +596,7 @@ type gatewayStores struct {
 	db          *dbutil.DB
 	sqlDB       *sql.DB
 	apiKeyStore admin.APIKeyUserStorer
+	dbResolver  *security.DBResolver
 }
 
 // chatAccessOrNew returns the chat-access store if already initialized (PG path),
@@ -627,6 +627,7 @@ func initSQLiteStores(ctx context.Context, cfg *config.Config, log *slog.Logger)
 
 	// EventStore shares the session store's *sql.DB (schema managed by goose migration 002).
 	eventStore := eventstore.NewSQLiteStore(sessionStore.DB(), writeMu)
+	dbResolver := security.NewDBResolver(sessionStore.DB())
 
 	return &gatewayStores{
 		session:     sessionStore,
@@ -635,6 +636,7 @@ func initSQLiteStores(ctx context.Context, cfg *config.Config, log *slog.Logger)
 		collector:   eventstore.NewCollector(eventStore, log),
 		writeMu:     writeMu,
 		sqlDB:       sessionStore.DB(),
+		dbResolver:  dbResolver,
 	}, nil
 }
 
@@ -654,6 +656,7 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 	eventStore := eventstore.NewPGStore(db, log)
 	cronStore := cron.NewPGStore(db, log)
 	chatAccessStore := messaging.NewChatAccessPGStore(db, log)
+	dbResolver := security.NewDBResolver(db.DB)
 
 	return &gatewayStores{
 		session:     sessionStore,
@@ -664,7 +667,8 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 		chatAccess:  chatAccessStore,
 		db:          db,
 		sqlDB:       db.DB,
-		apiKeyStore: admin.NewAPIKeyUserPGStore(db, nil),
+		apiKeyStore: admin.NewAPIKeyUserPGStore(db, dbResolver),
+		dbResolver:  dbResolver,
 	}, nil
 }
 

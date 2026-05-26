@@ -7,9 +7,9 @@ CREATE TABLE IF NOT EXISTS "chat_access_events" (
     "chat_id"           TEXT NOT NULL,
     "user_id"           TEXT NOT NULL,
     "bot_id"            TEXT NOT NULL DEFAULT '',
-    "last_message_at"   INTEGER NOT NULL DEFAULT 0,
+    "last_message_at"   BIGINT NOT NULL DEFAULT 0,
     "welcome_sent"      BOOLEAN NOT NULL DEFAULT FALSE,
-    "created_at"        INTEGER NOT NULL
+    "created_at"        BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS "idx_ca_event" ON "chat_access_events"("event_id");
