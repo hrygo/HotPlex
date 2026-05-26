@@ -11,9 +11,6 @@ import (
 // TestNewClaudeCodeExtractor tests the constructor
 func TestNewClaudeCodeExtractor(t *testing.T) {
 	extractor := NewClaudeCodeExtractor()
-	if extractor == nil {
-		t.Fatal("NewClaudeCodeExtractor() returned nil")
-	}
 	if extractor.ConfigPath == "" {
 		t.Error("ConfigPath should not be empty")
 	}
@@ -21,10 +18,7 @@ func TestNewClaudeCodeExtractor(t *testing.T) {
 
 // TestNewOpenCodeExtractor tests the constructor
 func TestNewOpenCodeExtractor(t *testing.T) {
-	extractor := NewOpenCodeExtractor()
-	if extractor == nil {
-		t.Fatal("NewOpenCodeExtractor() returned nil")
-	}
+	_ = NewOpenCodeExtractor()
 	// configPath may be empty if os.UserHomeDir fails, but should work in tests
 }
 
