@@ -10,10 +10,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build
 # ─────────────────────────────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 ARG GIT_SHA
 ARG BUILD_TIME
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /build
 
@@ -27,7 +29,7 @@ COPY . .
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=linux go build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -trimpath \
     -ldflags="-s -w \
     -X main.version=${GIT_SHA} \
@@ -38,7 +40,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: AI Tools Collector
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:24-bookworm-slim AS ai-tools-collector
+FROM alpine:3.21 AS ai-tools-collector
 
 ARG GITHUB_PROXY
 

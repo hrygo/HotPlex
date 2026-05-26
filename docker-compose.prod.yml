@@ -57,6 +57,7 @@ services:
       - "--api.dashboard=false"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-network"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
@@ -72,6 +73,10 @@ services:
       - traefik-letsencrypt:/letsencrypt
     networks:
       - traefik-network
+
+  # Do not expose PostgreSQL port in production
+  postgres:
+    ports: !override []
 
 networks:
   traefik-network:
