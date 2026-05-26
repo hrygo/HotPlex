@@ -110,7 +110,7 @@ func (m *mockHub) NextSeq(sessionID string) int64 { return 1 }
 
 var uuidV5Regex = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`)
 
-func TestBridge_MakeSlackEnvelope(t *testing.T) {
+func TestBridge_MakeEnvelope_Slack(t *testing.T) {
 	t.Parallel()
 
 	teamID := "T123"
@@ -160,7 +160,7 @@ func TestBridge_MakeSlackEnvelope(t *testing.T) {
 	require.Equal(t, text, data["content"])
 }
 
-func TestBridge_MakeFeishuEnvelope(t *testing.T) {
+func TestBridge_MakeEnvelope_Feishu(t *testing.T) {
 	t.Parallel()
 
 	chatID := "oc_abc123"

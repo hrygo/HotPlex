@@ -231,14 +231,14 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform string)
 func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID string)
 ```
 
-### 3.11 messaging.Bridge.makeEnvelope / makeEnvelope
+### 3.11 Slack adapter.makeEnvelope / Feishu adapter.makeEnvelope
 
 ```go
-// Before
-func (b *Bridge) makeEnvelope(teamID, channelID, threadTS, userID, text, workDir string) *events.Envelope
+// Slack adapter — platform-specific helper (moved from Bridge)
+func (a *Adapter) makeEnvelope(teamID, channelID, threadTS, userID, text, workDir string) *events.Envelope
 
-// After — botID parameter added
-func (b *Bridge) makeEnvelope(teamID, channelID, threadTS, userID, text, workDir, botID string) *events.Envelope
+// Feishu adapter — platform-specific helper (moved from Bridge)
+func (a *Adapter) makeEnvelope(chatID, threadTS, userID, text, workDir string) *events.Envelope
 ```
 
 `PlatformContext` in both methods now includes `BotID` field, which flows into `DerivePlatformSessionKey` and envelope metadata.
@@ -347,8 +347,8 @@ Three `createAndLaunchWorker` call sites must pass botID:
 - Add `BotID` field to `session.PlatformContext`
 - Update `FromMap()`: parse `m["bot_id"]`
 - Update `DerivePlatformSessionKey()`: include botID in hash input
-- Update `makeEnvelope` / `makeEnvelope`: +botID parameter
-- Update all callers of `makeEnvelope` / `makeEnvelope` in adapter files
+- Update Slack and Feishu adapter.makeEnvelope: +botID parameter
+- Update all callers of adapter.makeEnvelope in Slack and Feishu adapter files
 - Update `MakeEnvelope()`: include botID in metadata as `"bot_id"`
 - Update `ExtractPlatformKeys`: extract `bot_id` from metadata for both Slack and Feishu cases
 

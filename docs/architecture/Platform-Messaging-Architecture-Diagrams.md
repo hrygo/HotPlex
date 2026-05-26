@@ -54,8 +54,7 @@
 │   │  ├─ ResumeSession()                 │  │    └─→ Handler.Handle()          │     │
 │   │  ├─ forwardEvents(w, sessionID)    │  ├─ JoinSession(pc)                │     │
 │   │  │    goroutine 事件转发           │  │    └─→ Hub.JoinPlatformSession() │     │
-│   │  └─ worker lifecycle               │  ├─ MakeSlackEnvelope()            │     │
-│   │                                      │  ├─ MakeFeishuEnvelope()            │     │
+│   │  └─ worker lifecycle               │  ├─ MakeEnvelope()                  │     │
 │   │                                      │  └─ platform 身份验证                │     │
 │   └────────────────────────────────────┬──────────────────────────────────────┘     │
 │                                        │                                           │
