@@ -11,8 +11,6 @@
 #     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 
-version: '3.8'
-
 services:
   gateway:
     build:
@@ -41,14 +39,14 @@ services:
     environment:
       # Required secrets
       - HOTPLEX_JWT_SECRET=${HOTPLEX_JWT_SECRET:?HOTPLEX_JWT_SECRET is required}
-      - HOTPLEX_ADMIN_TOKEN_1=${HOTPLEX_ADMIN_TOKEN:-admin-token-dev}
+      - HOTPLEX_ADMIN_TOKEN_1=${HOTPLEX_ADMIN_TOKEN:-}
       - HOTPLEX_ADMIN_TOKEN_2=${HOTPLEX_ADMIN_TOKEN_2:-}
 
       # Optional configuration
       - HOTPLEX_LOG_LEVEL=${HOTPLEX_LOG_LEVEL:-info}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       - TZ=${TZ:-Asia/Shanghai}
-      - GOMEMLIMIT=6500MiB
+      - GOMEMLIMIT=4096MiB
 
       # Proxy (for AI workers accessing external APIs)
       - HTTP_PROXY=${HTTP_PROXY:-}
@@ -154,7 +152,10 @@ services:
     container_name: hotplex-backup
     restart: unless-stopped
     depends_on:
-      - gateway
+      gateway:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     profiles:
       - postgres
     volumes:

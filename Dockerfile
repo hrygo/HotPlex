@@ -85,9 +85,12 @@ RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ] && [ -n "$DEBIAN_MIRROR" ]; then
     procps openssl unzip gnupg \
     python3 python3-pip python3-venv \
     sqlite3 postgresql-client \
-    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Node.js from official image (avoids deprecated NodeSource setup script)
+COPY --from=node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:24-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 
 # 2. Multi-architecture dev tools (gh)
 RUN bash -c 'set -o pipefail && \
