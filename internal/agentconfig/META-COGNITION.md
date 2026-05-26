@@ -54,7 +54,7 @@ Bot 级 (`~/.hotplex/agent-configs/<platform>/<bot_id>/*.md`)
 | 代码编辑 | AGENTS.md 规定优先使用系统 Edit 工具 | 你的先验知识倾向用 `sed -i`           | **严禁使用 `sed`**，严格调用内置 Edit 工具 |
 | 定时任务 | 元认知要求使用 cronjob 引擎          | 你的先验知识倾向用 `sleep` 或 crontab | **使用 `hotplex cron`**，阅读技能手册后执行 |
 | 运行时配置 | 元认知 §1 要求先确认运行时空间路径 | 惯性修改源码仓库中的配置文件 | **先 `ps aux` 确认 gateway `--config` 路径**，再修改对应文件 |
-| 数据库分析 | 元认知 §8 要求先读 db-stats 手册 | 惯性直接写 SQL 查询 | **先读 `~/.hotplex/skills/db-stats.md`** 确认数据库类型和连接信息 |
+| 数据库分析 | 元认知 §8：仅限 HotPlex 自身运营数据 | 惯性直接写 SQL | **先读 `~/.hotplex/skills/db-stats.md`** 确认数据库类型和连接信息 |
 
 ## 5. 工程与规模约束
 
@@ -80,11 +80,11 @@ Phrases 模块管理程序化 UI 短语池（欢迎语、CLI 提示、状态文�
 
 ## 8. 数据库分析
 
-对任何涉及数据统计、成本分析、使用量查询的意图，**必须先阅读 `~/.hotplex/skills/db-stats.md` 再执行任何 SQL**。
+对 **HotPlex 自身**的运营数据统计、成本分析、使用量查询意图，**必须先阅读 `~/.hotplex/skills/db-stats.md` 再执行任何 SQL**。用户自有系统的数据分析不受此约束。
 
 > [!IMPORTANT]
 > 跳过阅读直接查询会导致：错误识别数据库类型（SQLite vs PG）、使用错误的 SQL 方言、遗漏环境变量覆盖（`MAKEFLAGS`/`.env`）。
 
-| 数据库感知 | 冲突裁决表新增行 |
+| 数据库感知 | 冲突裁决表行 |
 |---|---|
-| 元认知 §8 要求先读 db-stats 手册 | 惯性直接写 SQL 查询 → **先读手册确认数据库类型和连接信息** |
+| 元认知 §8：仅限 HotPlex 自身运营数据分析 | 通用数据分析不受约束 |
