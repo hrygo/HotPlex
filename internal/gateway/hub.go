@@ -224,6 +224,19 @@ func (h *Hub) removeSession(sessionID string, conn SessionWriter) {
 	}
 }
 
+// snapshotConns returns a snapshot of all SessionWriters subscribed to a session.
+// The snapshot is taken under RLock and is safe to iterate without holding the lock.
+func (h *Hub) snapshotConns(sessionID string) []SessionWriter {
+	h.mu.RLock()
+	sessionConns := h.sessions[sessionID]
+	conns := make([]SessionWriter, 0, len(sessionConns))
+	for conn := range sessionConns {
+		conns = append(conns, conn)
+	}
+	h.mu.RUnlock()
+	return conns
+}
+
 // JoinPlatformSession subscribes a PlatformConn to receive events for a session.
 // Unlike JoinSession, it does not register the connection in h.conns (no WS tracking)
 // and does not remove stale connections (platform SDK handles its own lifecycle).
@@ -315,13 +328,7 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 }
 
 func (h *Hub) sendControlToSession(ctx context.Context, env *events.Envelope) {
-	h.mu.RLock()
-	sessionConns := h.sessions[env.SessionID]
-	conns := make([]SessionWriter, 0, len(sessionConns))
-	for conn := range sessionConns {
-		conns = append(conns, conn)
-	}
-	h.mu.RUnlock()
+	conns := h.snapshotConns(env.SessionID)
 
 	if len(conns) == 0 {
 		metrics.GatewayEventsNoSubscribersDropped.WithLabelValues(string(env.Event.Type)).Inc()
@@ -444,13 +451,7 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
-	h.mu.RLock()
-	sessionConns := h.sessions[msg.Env.SessionID]
-	conns := make([]SessionWriter, 0, len(sessionConns))
-	for conn := range sessionConns {
-		conns = append(conns, conn)
-	}
-	h.mu.RUnlock()
+	conns := h.snapshotConns(msg.Env.SessionID)
 
 	if len(conns) == 0 {
 		metrics.GatewayEventsNoSubscribersDropped.WithLabelValues(string(msg.Env.Event.Type)).Inc()
