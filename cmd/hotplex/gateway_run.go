@@ -124,6 +124,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 	defer stores.close(log)
 
+	releaseDBStatsManual(log)
+
 	sm, err := session.NewManager(ctx, log, cfg, cfgStore, stores.session)
 	if err != nil {
 		return err
@@ -932,4 +934,20 @@ func buildMCPConfigJSON(cfg *config.Config) string {
 		return ""
 	}
 	return string(b)
+}
+
+func releaseDBStatsManual(log *slog.Logger) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Warn("db-stats: cannot determine home dir for skill manual release", "err", err)
+		return
+	}
+	dir := filepath.Join(home, ".hotplex", "skills")
+	_ = os.MkdirAll(dir, 0o755)
+	path := filepath.Join(dir, "db-stats.md")
+	if err := os.WriteFile(path, []byte(dbutil.SkillManual()), 0o644); err != nil {
+		log.Warn("db-stats: failed to release skill manual", "path", path, "err", err)
+		return
+	}
+	log.Debug("db-stats: skill manual released", "path", path)
 }
