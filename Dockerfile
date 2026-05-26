@@ -44,9 +44,7 @@ FROM alpine:3.21 AS ai-tools-collector
 
 ARG GITHUB_PROXY
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache curl ca-certificates
 
 RUN arch=$(uname -m) && \
     case "$arch" in \
@@ -72,11 +70,14 @@ ARG HOST_UID=1000
 ARG GITHUB_PROXY
 ARG DEBIAN_MIRROR
 
-LABEL maintainer="HotPlex Team <support@hotplex.dev>"
-LABEL version="1.18.1"
-LABEL git.sha="${GIT_SHA}"
-LABEL build.time="${BUILD_TIME}"
-LABEL description="HotPlex Worker Gateway - AI Coding Agent access layer"
+LABEL org.opencontainers.image.title="HotPlex Worker Gateway"
+LABEL org.opencontainers.image.description="AI Coding Agent access layer"
+LABEL org.opencontainers.image.version="1.18.1"
+LABEL org.opencontainers.image.source="https://github.com/hotplex/hotplex"
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+LABEL org.opencontainers.image.created="${BUILD_TIME}"
+LABEL org.opencontainers.image.vendor="HotPlex Team"
+LABEL org.opencontainers.image.authors="support@hotplex.dev"
 
 # 1. OS baseline with mirror support
 RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ] && [ -n "$DEBIAN_MIRROR" ]; then \
