@@ -12,23 +12,8 @@ import (
 )
 
 func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope) error {
-	var cmd events.WorkerStdioCommand
-	var args string
-	var extra map[string]any
-
-	switch d := env.Event.Data.(type) {
-	case events.WorkerCommandData:
-		cmd = d.Command
-		args = d.Args
-		extra = d.Extra
-	case map[string]any:
-		c, _ := d["command"].(string)
-		cmd = events.WorkerStdioCommand(c)
-		args, _ = d["args"].(string)
-		if e, ok := d["extra"].(map[string]any); ok {
-			extra = e
-		}
-	default:
+	cmd, args, extra, ok := parseWorkerCommand(env)
+	if !ok {
 		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "worker_command: invalid data")
 	}
 
@@ -54,73 +39,91 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 		return h.sendErrorf(ctx, env, events.ErrCodeNotSupported, "worker type does not support control requests")
 	}
 
-	// Control requests need an independent timeout so they don't block for
-	// the full caller context (e.g. Feishu chatQueue's 10-minute deadline).
 	ctrlCtx, ctrlCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer ctrlCancel()
 
 	switch cmd {
 	case events.StdioSkills:
 		return h.handleSkillsList(ctx, env, args)
-
 	case events.StdioContextUsage:
-		resp, err := cr.SendControlRequest(ctrlCtx, "get_context_usage", nil)
-		if err != nil {
-			code := classifyWorkerError(err)
-			return h.sendErrorf(ctx, env, code, "context query: %v", err)
-		}
-		data := events.MapContextUsageResponse(resp)
-		respEnv := events.NewEnvelope(
-			aep.NewID(), env.SessionID,
-			h.hub.NextSeq(env.SessionID),
-			events.ContextUsage, data,
-		)
-		return h.hub.SendToSession(ctx, respEnv)
-
+		return h.handleContextUsage(ctrlCtx, env, cr)
 	case events.StdioMCPStatus:
-		resp, err := cr.SendControlRequest(ctrlCtx, "mcp_status", nil)
-		if err != nil {
-			code := classifyWorkerError(err)
-			return h.sendErrorf(ctx, env, code, "mcp status: %v", err)
-		}
-		data := events.MapMCPStatusResponse(resp)
-		respEnv := events.NewEnvelope(
-			aep.NewID(), env.SessionID,
-			h.hub.NextSeq(env.SessionID),
-			events.MCPStatus, data,
-		)
-		return h.hub.SendToSession(ctx, respEnv)
-
+		return h.handleMCPStatus(ctrlCtx, env, cr)
 	case events.StdioSetModel:
-		modelName := args
-		if modelName == "" {
-			modelName, _ = extra["model"].(string)
-		}
-		if modelName == "" {
-			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "model name required")
-		}
-		_, err := cr.SendControlRequest(ctrlCtx, "set_model", map[string]any{"model": modelName})
-		if err != nil {
-			code := classifyWorkerError(err)
-			return h.sendErrorf(ctx, env, code, "set model: %v", err)
-		}
-
+		return h.handleSetModel(ctrlCtx, env, cr, args, extra)
 	case events.StdioSetPermMode:
-		mode := args
-		if mode == "" {
-			mode, _ = extra["mode"].(string)
-		}
-		if mode == "" {
-			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "permission mode required")
-		}
-		_, err := cr.SendControlRequest(ctrlCtx, "set_permission_mode", map[string]any{"mode": mode})
-		if err != nil {
-			code := classifyWorkerError(err)
-			return h.sendErrorf(ctx, env, code, "set permission: %v", err)
-		}
-
+		return h.handleSetPermMode(ctrlCtx, env, cr, args, extra)
 	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown worker command: %s", cmd)
+	}
+}
+
+func parseWorkerCommand(env *events.Envelope) (cmd events.WorkerStdioCommand, args string, extra map[string]any, ok bool) {
+	switch d := env.Event.Data.(type) {
+	case events.WorkerCommandData:
+		return d.Command, d.Args, d.Extra, true
+	case map[string]any:
+		c, _ := d["command"].(string)
+		a, _ := d["args"].(string)
+		if e, o := d["extra"].(map[string]any); o {
+			extra = e
+		}
+		return events.WorkerStdioCommand(c), a, extra, true
+	default:
+		return "", "", nil, false
+	}
+}
+
+func (h *Handler) handleContextUsage(ctx context.Context, env *events.Envelope, cr worker.ControlRequester) error {
+	resp, err := cr.SendControlRequest(ctx, "get_context_usage", nil)
+	if err != nil {
+		return h.sendErrorf(ctx, env, classifyWorkerError(err), "context query: %v", err)
+	}
+	respEnv := events.NewEnvelope(
+		aep.NewID(), env.SessionID,
+		h.hub.NextSeq(env.SessionID),
+		events.ContextUsage, events.MapContextUsageResponse(resp),
+	)
+	return h.hub.SendToSession(ctx, respEnv)
+}
+
+func (h *Handler) handleMCPStatus(ctx context.Context, env *events.Envelope, cr worker.ControlRequester) error {
+	resp, err := cr.SendControlRequest(ctx, "mcp_status", nil)
+	if err != nil {
+		return h.sendErrorf(ctx, env, classifyWorkerError(err), "mcp status: %v", err)
+	}
+	respEnv := events.NewEnvelope(
+		aep.NewID(), env.SessionID,
+		h.hub.NextSeq(env.SessionID),
+		events.MCPStatus, events.MapMCPStatusResponse(resp),
+	)
+	return h.hub.SendToSession(ctx, respEnv)
+}
+
+func (h *Handler) handleSetModel(ctx context.Context, env *events.Envelope, cr worker.ControlRequester, args string, extra map[string]any) error {
+	modelName := args
+	if modelName == "" {
+		modelName, _ = extra["model"].(string)
+	}
+	if modelName == "" {
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "model name required")
+	}
+	if _, err := cr.SendControlRequest(ctx, "set_model", map[string]any{"model": modelName}); err != nil {
+		return h.sendErrorf(ctx, env, classifyWorkerError(err), "set model: %v", err)
+	}
+	return nil
+}
+
+func (h *Handler) handleSetPermMode(ctx context.Context, env *events.Envelope, cr worker.ControlRequester, args string, extra map[string]any) error {
+	mode := args
+	if mode == "" {
+		mode, _ = extra["mode"].(string)
+	}
+	if mode == "" {
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "permission mode required")
+	}
+	if _, err := cr.SendControlRequest(ctx, "set_permission_mode", map[string]any{"mode": mode}); err != nil {
+		return h.sendErrorf(ctx, env, classifyWorkerError(err), "set permission: %v", err)
 	}
 	return nil
 }
