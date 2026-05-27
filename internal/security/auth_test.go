@@ -554,3 +554,117 @@ func TestAuthenticator_ChainResolver(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "config-only", uid, "Config resolver should be fallback when DB has no entry")
 }
+
+// ─── DB-sourced Keys (AddKey / RemoveKey) ──────────────────────────────────────
+
+func TestAddKey(t *testing.T) {
+	t.Parallel()
+
+	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"config-key"}})
+
+	// Before AddKey, DB key is rejected.
+	_, ok := auth.AuthenticateKey(context.Background(), "db-key-1")
+	require.False(t, ok)
+
+	auth.AddKey("db-key-1")
+
+	// After AddKey, DB key authenticates.
+	userID, ok := auth.AuthenticateKey(context.Background(), "db-key-1")
+	require.True(t, ok)
+	require.Equal(t, "api_user", userID)
+
+	// Config key still works.
+	userID, ok = auth.AuthenticateKey(context.Background(), "config-key")
+	require.True(t, ok)
+	require.Equal(t, "api_user", userID)
+}
+
+func TestRemoveKey(t *testing.T) {
+	t.Parallel()
+
+	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"config-key"}})
+	auth.AddKey("db-key-removeme")
+
+	userID, ok := auth.AuthenticateKey(context.Background(), "db-key-removeme")
+	require.True(t, ok)
+	require.Equal(t, "api_user", userID)
+
+	auth.RemoveKey("db-key-removeme")
+
+	_, ok = auth.AuthenticateKey(context.Background(), "db-key-removeme")
+	require.False(t, ok)
+
+	// Config key still works after DB key removal.
+	_, ok = auth.AuthenticateKey(context.Background(), "config-key")
+	require.True(t, ok)
+}
+
+func TestAddKey_AuthenticateRequest(t *testing.T) {
+	t.Parallel()
+
+	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"config-key"}})
+	auth.AddKey("hpk_abc123")
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-API-Key", "hpk_abc123")
+
+	userID, _, err := auth.AuthenticateRequest(req)
+	require.NoError(t, err)
+	require.Equal(t, "api_user", userID)
+}
+
+func TestReloadKeys_PreservesDBKeys(t *testing.T) {
+	t.Parallel()
+
+	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"old-config"}})
+
+	// Add a DB key.
+	auth.AddKey("db-persistent")
+
+	// Verify both work before reload.
+	_, ok := auth.AuthenticateKey(context.Background(), "old-config")
+	require.True(t, ok)
+	_, ok = auth.AuthenticateKey(context.Background(), "db-persistent")
+	require.True(t, ok)
+
+	// Hot-reload config keys — old-config replaced by new-config.
+	auth.ReloadKeys(&config.SecurityConfig{APIKeys: []string{"new-config"}})
+
+	// Old config key gone.
+	_, ok = auth.AuthenticateKey(context.Background(), "old-config")
+	require.False(t, ok)
+
+	// New config key works.
+	_, ok = auth.AuthenticateKey(context.Background(), "new-config")
+	require.True(t, ok)
+
+	// DB key survives reload.
+	_, ok = auth.AuthenticateKey(context.Background(), "db-persistent")
+	require.True(t, ok)
+}
+
+func TestDevMode_DisabledByDBKeys(t *testing.T) {
+	t.Parallel()
+
+	// No config keys → dev mode active.
+	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{}})
+	userID, ok := auth.AuthenticateKey(context.Background(), "anything")
+	require.True(t, ok)
+	require.Equal(t, "anonymous", userID)
+
+	// Adding a DB key disables dev mode.
+	auth.AddKey("hpk_first")
+	_, ok = auth.AuthenticateKey(context.Background(), "anything")
+	require.False(t, ok, "dev mode should be disabled when dbKeys is non-empty")
+
+	// The DB key itself works.
+	userID, ok = auth.AuthenticateKey(context.Background(), "hpk_first")
+	require.True(t, ok)
+	require.Equal(t, "api_user", userID)
+
+	// Removing the DB key re-enables dev mode.
+	auth.RemoveKey("hpk_first")
+	userID, ok = auth.AuthenticateKey(context.Background(), "anything")
+	require.True(t, ok)
+	require.Equal(t, "anonymous", userID)
+}

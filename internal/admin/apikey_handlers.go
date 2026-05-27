@@ -58,6 +58,13 @@ type cacheInvalidator interface {
 	Invalidate(key string)
 }
 
+// KeyValidator syncs database-sourced API keys into the authentication layer.
+// Implemented by security.Authenticator; injected via Deps.
+type KeyValidator interface {
+	AddKey(key string)
+	RemoveKey(key string)
+}
+
 func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator, writeMu *sqlutil.WriteMu) APIKeyUserStorer {
 	if db == nil {
 		return nil
@@ -139,6 +146,8 @@ func (s *apiKeyUserStore) create(ctx context.Context, u *APIKeyUser) error {
 
 func (s *apiKeyUserStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	// NOTE: api_key is immutable after creation — never add it to SET clause
+	// without also calling KeyValidator.RemoveKey(old) + AddKey(new).
 	return s.writeMu.WithLock(func() error {
 		res, err := s.db.ExecContext(ctx,
 			"UPDATE api_key_users SET user_id = ?, description = ?, updated_at = ? WHERE id = ?",
@@ -213,6 +222,9 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 	}
 	if inv := a.akStore.Invalidator(); inv != nil {
 		inv.Invalidate(u.APIKey)
+	}
+	if a.keyValidator != nil {
+		a.keyValidator.AddKey(u.APIKey)
 	}
 	w.WriteHeader(http.StatusCreated)
 	respondJSON(w, u)
@@ -307,6 +319,9 @@ func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request
 	}
 	if inv := a.akStore.Invalidator(); inv != nil {
 		inv.Invalidate(u.APIKey)
+	}
+	if a.keyValidator != nil {
+		a.keyValidator.RemoveKey(u.APIKey)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

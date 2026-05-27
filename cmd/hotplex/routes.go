@@ -95,8 +95,9 @@ func setupRoutes(
 			}
 			return forkRestartHelper(inst, deps.ConfigPath, deps.DevMode, true)
 		},
-		DB:         deps.DB,
-		DBResolver: deps.DBResolver,
+		DB:           deps.DB,
+		DBResolver:   deps.DBResolver,
+		KeyValidator: deps.Auth,
 	})
 
 	if cfg.Admin.RateLimitEnabled {

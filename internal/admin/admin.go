@@ -106,6 +106,7 @@ type AdminAPI struct {
 	botConfig     BotConfigProvider
 	logCollector  LogCollector
 	akStore       APIKeyUserStorer // nil when DB resolver not enabled
+	keyValidator  KeyValidator     // nil when not injected
 	rateLimiter   atomic.Value     // *simpleRateLimiter
 	allowedCIDRs  atomic.Value     // []string
 	version       func() string
@@ -133,6 +134,7 @@ type Deps struct {
 	DBResolver    cacheInvalidator // Optional: invalidates DBResolver cache after CUD
 	WriteMu       *sqlutil.WriteMu // Optional: serializes SQLite writes; nil-safe, PG-safe
 	APIKeyStore   APIKeyUserStorer // Optional: pre-built store (e.g. PG); overrides DB-based creation
+	KeyValidator  KeyValidator     // Optional: syncs DB keys into auth layer for Phase 1 validation
 }
 
 func New(deps Deps) *AdminAPI {
@@ -152,6 +154,7 @@ func New(deps Deps) *AdminAPI {
 		botLister:     deps.BotLister,
 		botConfig:     deps.BotConfig,
 		logCollector:  lc,
+		keyValidator:  deps.KeyValidator,
 		akStore: func() APIKeyUserStorer {
 			if deps.APIKeyStore != nil {
 				return deps.APIKeyStore

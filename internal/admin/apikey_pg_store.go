@@ -100,6 +100,8 @@ func (s *pgStore) create(ctx context.Context, u *APIKeyUser) error {
 }
 
 func (s *pgStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
+	// NOTE: api_key is immutable after creation — never add it to SET clause
+	// without also calling KeyValidator.RemoveKey(old) + AddKey(new).
 	query := s.dialect.Rebind("UPDATE api_key_users SET user_id = ?, description = ?, updated_at = NOW() WHERE id = ?")
 	res, err := s.db.ExecContext(ctx, query, u.UserID, u.Description, id)
 	if err != nil {

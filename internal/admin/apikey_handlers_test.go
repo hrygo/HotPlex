@@ -188,3 +188,62 @@ func TestHandleAPIKeyUser_NilStore(t *testing.T) {
 	api.HandleAPIKeyUserList(w, r)
 	require.Equal(t, http.StatusOK, w.Code) // returns empty array
 }
+
+// mockKeyValidator records AddKey/RemoveKey calls for test assertions.
+type mockKeyValidator struct {
+	added   []string
+	removed []string
+}
+
+func (m *mockKeyValidator) AddKey(key string)    { m.added = append(m.added, key) }
+func (m *mockKeyValidator) RemoveKey(key string) { m.removed = append(m.removed, key) }
+
+func TestHandleAPIKeyUserCreate_SyncsKeyValidator(t *testing.T) {
+	kv := &mockKeyValidator{}
+	api, _ := setupAPIKeyStore(t)
+	api.keyValidator = kv
+
+	body := `{"user_id":"alice","description":"test"}`
+	r := httptest.NewRequest("POST", "/admin/api-keys", strings.NewReader(body))
+	r = withScope(r, ScopeAdminWrite)
+	w := httptest.NewRecorder()
+	api.HandleAPIKeyUserCreate(w, r)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var created APIKeyUser
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&created))
+	require.Len(t, kv.added, 1, "AddKey should be called once")
+	require.Equal(t, created.APIKey, kv.added[0], "AddKey should receive the generated key")
+	require.Empty(t, kv.removed)
+}
+
+func TestHandleAPIKeyUserDelete_SyncsKeyValidator(t *testing.T) {
+	kv := &mockKeyValidator{}
+	api, _ := setupAPIKeyStore(t)
+	api.keyValidator = kv
+
+	// Create a key first.
+	body := `{"user_id":"alice"}`
+	r := httptest.NewRequest("POST", "/admin/api-keys", strings.NewReader(body))
+	r = withScope(r, ScopeAdminWrite)
+	w := httptest.NewRecorder()
+	api.HandleAPIKeyUserCreate(w, r)
+	require.Equal(t, http.StatusCreated, w.Code)
+	var created APIKeyUser
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&created))
+
+	// Reset added to focus on delete behavior.
+	kv.added = nil
+
+	// Delete.
+	r = httptest.NewRequest("DELETE", "/admin/api-keys/{id}", nil)
+	r.SetPathValue("id", strconv.FormatInt(created.ID, 10))
+	r = withScope(r, ScopeAdminWrite)
+	tw := httptest.NewRecorder()
+	api.HandleAPIKeyUserDelete(tw, r)
+	require.Equal(t, http.StatusNoContent, tw.Code)
+
+	require.Len(t, kv.removed, 1, "RemoveKey should be called once")
+	require.True(t, strings.HasPrefix(kv.removed[0], "hpk_"), "RemoveKey should receive the full key")
+	require.Empty(t, kv.added)
+}

@@ -25,7 +25,8 @@ const botIDQueryParam = "bot_id"
 type Authenticator struct {
 	mu          sync.RWMutex
 	cfg         *config.SecurityConfig
-	validKey    map[string]bool // set of valid API keys (hashed in production)
+	validKey    map[string]bool // config-sourced keys (YAML + env)
+	dbKeys      map[string]bool // database-sourced keys (Admin API CRUD)
 	keyResolver APIKeyResolver  // optional; maps API keys to user identities. nil = "api_user"
 }
 
@@ -38,6 +39,7 @@ func NewAuthenticator(cfg *config.SecurityConfig) *Authenticator {
 	return &Authenticator{
 		cfg:      cfg,
 		validKey: validKey,
+		dbKeys:   make(map[string]bool),
 	}
 }
 
@@ -64,7 +66,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	}
 
 	// Dev mode: no keys configured — allow all.
-	if len(a.validKey) == 0 {
+	if len(a.validKey) == 0 && len(a.dbKeys) == 0 {
 		a.mu.RUnlock()
 		botID := BotIDFromRequest(r)
 		return "anonymous", botID, nil
@@ -105,6 +107,7 @@ func (a *Authenticator) SetKeyResolver(r APIKeyResolver) {
 }
 
 // authenticateKey performs constant-time comparison of the key against the valid key set.
+// Checks both config-sourced and database-sourced keys.
 // Caller must hold at least RLock.
 func (a *Authenticator) authenticateKey(key string) bool {
 	for k := range a.validKey {
@@ -112,7 +115,28 @@ func (a *Authenticator) authenticateKey(key string) bool {
 			return true
 		}
 	}
+	for k := range a.dbKeys {
+		if subtle.ConstantTimeCompare([]byte(k), []byte(key)) == 1 {
+			return true
+		}
+	}
 	return false
+}
+
+// AddKey adds a database-sourced API key to the valid key set.
+// Called by Admin API after creating a new key in the database.
+func (a *Authenticator) AddKey(key string) {
+	a.mu.Lock()
+	a.dbKeys[key] = true
+	a.mu.Unlock()
+}
+
+// RemoveKey removes a database-sourced API key from the valid key set.
+// Called by Admin API after deleting a key from the database.
+func (a *Authenticator) RemoveKey(key string) {
+	a.mu.Lock()
+	delete(a.dbKeys, key)
+	a.mu.Unlock()
 }
 
 // resolveUserID returns the user identity for a valid API key.
@@ -160,7 +184,7 @@ func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	if len(a.validKey) == 0 {
+	if len(a.validKey) == 0 && len(a.dbKeys) == 0 {
 		// No keys configured — allow all (dev mode).
 		return "anonymous", true
 	}

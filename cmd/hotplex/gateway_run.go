@@ -220,6 +220,26 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		log.Info("gateway: API key resolver: database")
 	}
 
+	// Preload database-sourced API keys into Phase 1 validation so that
+	// keys created via Admin API are valid immediately after gateway restart.
+	if stores.sqlDB != nil {
+		rows, err := stores.sqlDB.QueryContext(ctx, "SELECT api_key FROM api_key_users")
+		if err != nil {
+			log.Warn("gateway: preload DB API keys failed", "error", err)
+		} else {
+			for rows.Next() {
+				var key string
+				if rows.Scan(&key) == nil {
+					auth.AddKey(key)
+				}
+			}
+			if err := rows.Err(); err != nil {
+				log.Warn("gateway: preload DB API keys incomplete", "error", err)
+			}
+			_ = rows.Close()
+		}
+	}
+
 	retryCtrl := gateway.NewLLMRetryController(cfg.Worker.AutoRetry, log)
 
 	agentConfigDir := ""
