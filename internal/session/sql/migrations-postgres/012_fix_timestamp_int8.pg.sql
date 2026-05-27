@@ -12,9 +12,5 @@ ALTER TABLE "turns"              ALTER COLUMN "created_at"      TYPE BIGINT;
 
 -- +goose Down
 
-ALTER TABLE "events"             ALTER COLUMN "created_at"      TYPE INTEGER;
-ALTER TABLE "cron_jobs"          ALTER COLUMN "created_at"      TYPE INTEGER;
-ALTER TABLE "cron_jobs"          ALTER COLUMN "updated_at"      TYPE INTEGER;
-ALTER TABLE "chat_access_events" ALTER COLUMN "created_at"      TYPE INTEGER;
-ALTER TABLE "chat_access_events" ALTER COLUMN "last_message_at" TYPE INTEGER;
-ALTER TABLE "turns"              ALTER COLUMN "created_at"      TYPE INTEGER;
+-- No-op: reverting to INTEGER would silently truncate Unix ms timestamps
+-- (current ~1.7×10¹² exceeds int4 max 2,147,483,647). Keep BIGINT.
