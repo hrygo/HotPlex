@@ -66,7 +66,7 @@ func openSQLite(cfg *config.DBConfig) (*DB, error) {
 
 func openPostgres(cfg *config.DBConfig) (*DB, error) {
 	if cfg.Postgres.ConnStr == "" {
-		return nil, fmt.Errorf("dbutil: postgres DSN is required — set db.postgres.dsn or HOTPLEX_DB_POSTGRES_CONNSTR")
+		return nil, fmt.Errorf("dbutil: postgres DSN is required — set db.postgres.dsn or HOTPLEX_DB_POSTGRES_DSN")
 	}
 
 	dsn := cfg.DSN()

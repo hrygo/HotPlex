@@ -594,7 +594,7 @@ type gatewayStores struct {
 	collector   *eventstore.Collector
 	cron        cron.Store
 	chatAccess  messaging.ChatAccessStorer
-	writeMu     *sqlutil.WriteMu
+	writeMu     *sqlutil.WriteMu // nil when using PostgreSQL (WriteMu is SQLite-only)
 	db          *dbutil.DB
 	sqlDB       *sql.DB
 	apiKeyStore admin.APIKeyUserStorer

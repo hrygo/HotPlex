@@ -93,7 +93,10 @@ func (s *pgStore) create(ctx context.Context, u *APIKeyUser) error {
 	}
 	// created_at and updated_at use DEFAULT NOW() in the Postgres schema.
 	query := s.dialect.Rebind("INSERT INTO api_key_users (api_key, user_id, description) VALUES (?, ?, ?) RETURNING id")
-	return s.db.QueryRowContext(ctx, query, u.APIKey, u.UserID, u.Description).Scan(&u.ID)
+	if err := s.db.QueryRowContext(ctx, query, u.APIKey, u.UserID, u.Description).Scan(&u.ID); err != nil {
+		return fmt.Errorf("admin: create api key user: %w", err)
+	}
+	return nil
 }
 
 func (s *pgStore) update(ctx context.Context, id int64, u *APIKeyUser) error {

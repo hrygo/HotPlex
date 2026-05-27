@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -34,6 +35,7 @@ type APIKeyUser struct {
 // PG-backed callers use pgStore (apikey_pg_store.go) instead.
 type apiKeyUserStore struct {
 	db          DBExecutor
+	mu          sync.Mutex
 	invalidator cacheInvalidator
 }
 
@@ -62,10 +64,16 @@ func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator) APIK
 
 var _ APIKeyUserStorer = (*apiKeyUserStore)(nil)
 
-func (s *apiKeyUserStore) Invalidator() cacheInvalidator { return s.invalidator }
+func (s *apiKeyUserStore) Invalidator() cacheInvalidator {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.invalidator
+}
 
 func (s *apiKeyUserStore) SetInvalidator(inv cacheInvalidator) {
+	s.mu.Lock()
 	s.invalidator = inv
+	s.mu.Unlock()
 }
 
 func (s *apiKeyUserStore) list(ctx context.Context) ([]APIKeyUser, error) {

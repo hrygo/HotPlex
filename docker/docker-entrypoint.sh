@@ -48,10 +48,13 @@ if [[ -d "${SOURCE_CONFIG}" ]]; then
     mkdir -p "${RUNTIME_CONFIG}"
     cp -a "${SOURCE_CONFIG}/." "${RUNTIME_CONFIG}/"
 
-    VARS=$(compgen -A export | grep -E "^(HOTPLEX_|GIT_|GITHUB_)" | sed 's/^/$/' | tr '\n' ' ')
+    # Explicit allowlist of variables expected in config YAML templates.
+    # Avoids expanding sensitive or arbitrary HOTPLEX_* vars (JWT_SECRET, API_KEY, etc.)
+    # and prevents YAML injection from values containing ':', '#', '|', etc.
+    ENVSUBST_VARS='${ADMIN_TOKEN} ${OPENCODE_SERVER_PASSWORD} ${HOTPLEX_WORKER_GH_TOKEN} ${HOTPLEX_WORKER_GITHUB_TOKEN} ${HOTPLEX_DB_DRIVER} ${HOTPLEX_DB_POSTGRES_DSN}'
     for yaml in "${RUNTIME_CONFIG}"/*.yaml; do
         [[ -f "$yaml" ]] || continue
-        if envsubst "${VARS}" < "$yaml" > "${yaml}.tmp"; then
+        if envsubst "${ENVSUBST_VARS}" < "$yaml" > "${yaml}.tmp"; then
             mv "${yaml}.tmp" "${yaml}"
         else
             rm -f "${yaml}.tmp"

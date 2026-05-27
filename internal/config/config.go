@@ -72,6 +72,10 @@ func (c *Config) Validate() []string {
 		if c.DB.Path == "" && c.DB.SQLite.Path == "" {
 			errs = append(errs, "db.path or db.sqlite.path is required (or use default hotplex.db)")
 		}
+	} else if strings.EqualFold(c.DB.Driver, "postgres") || strings.EqualFold(c.DB.Driver, "pg") || strings.EqualFold(c.DB.Driver, "postgresql") {
+		if c.DB.Postgres.ConnStr == "" {
+			errs = append(errs, "db.postgres.dsn is required when db.driver is postgres")
+		}
 	}
 	if c.Session.RetentionPeriod <= 0 {
 		errs = append(errs, "session.retention_period must be positive")
@@ -431,6 +435,46 @@ func (d DBConfig) EffectiveMaxOpenConns() int {
 		return d.SQLite.MaxOpenConns
 	}
 	return d.MaxOpenConns
+}
+
+// EffectiveWALMode returns the effective WAL mode setting.
+func (d DBConfig) EffectiveWALMode() bool {
+	if d.SQLite.WALMode {
+		return true
+	}
+	return d.WALMode
+}
+
+// EffectiveBusyTimeout returns the effective busy timeout for SQLite.
+func (d DBConfig) EffectiveBusyTimeout() time.Duration {
+	if d.SQLite.BusyTimeout > 0 {
+		return d.SQLite.BusyTimeout
+	}
+	return d.BusyTimeout
+}
+
+// EffectiveCacheSizeKiB returns the effective SQLite cache size in KiB.
+func (d DBConfig) EffectiveCacheSizeKiB() int {
+	if d.SQLite.CacheSizeKiB > 0 {
+		return d.SQLite.CacheSizeKiB
+	}
+	return d.CacheSizeKiB
+}
+
+// EffectiveMmapSizeMiB returns the effective SQLite mmap size in MiB.
+func (d DBConfig) EffectiveMmapSizeMiB() int {
+	if d.SQLite.MmapSizeMiB > 0 {
+		return d.SQLite.MmapSizeMiB
+	}
+	return d.MmapSizeMiB
+}
+
+// EffectiveWalAutoCheckpoint returns the effective WAL auto-checkpoint threshold.
+func (d DBConfig) EffectiveWalAutoCheckpoint() int {
+	if d.SQLite.WalAutoCheckpoint > 0 {
+		return d.SQLite.WalAutoCheckpoint
+	}
+	return d.WalAutoCheckpoint
 }
 
 // SQLiteConfig holds SQLite-specific database settings.
