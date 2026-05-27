@@ -30,8 +30,9 @@ type connHandler interface {
 	Handle(ctx context.Context, env *events.Envelope) error
 }
 
-// connSM provides the session management subset that Conn needs
-// for init handshake and ReadPump cleanup.
+// connSM provides the session management subset that Conn needs for the
+// resolveSession* series (init handshake, existing session resume, deleted
+// session recreation) and ReadPump cleanup.
 type connSM interface {
 	Get(ctx context.Context, id string) (*session.SessionInfo, error)
 	GetWorker(id string) worker.Worker
@@ -483,7 +484,8 @@ func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *s
 		return si, nil
 	}
 
-	// Resume or fresh-start for idle/terminated/running (zombie) sessions.
+	// State guard: Created/Deleted are handled by startCreatedSession/recreateDeletedSession
+	// in resolveSessionState; only idle, terminated, or running (zombie) reach this resume path.
 	if si.State != events.StateIdle && si.State != events.StateTerminated && si.State != events.StateRunning {
 		return si, nil
 	}
@@ -794,5 +796,6 @@ func (c *Conn) sendError(code events.ErrorCode, msg string) {
 		Code:    code,
 		Message: msg,
 	})
+	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(events.Error)).Inc()
 	_ = c.WriteCtx(context.Background(), env)
 }
