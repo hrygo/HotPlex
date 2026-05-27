@@ -61,7 +61,6 @@ type GatewayDeps struct {
 	Hub             *gateway.Hub
 	SessionMgr      *session.Manager
 	EventStore      eventStoreProvider
-	EventCollector  *eventstore.Collector
 	Auth            *security.Authenticator
 	Handler         *gateway.Handler
 	Bridge          *gateway.Bridge
@@ -393,7 +392,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Hub:             hub,
 		SessionMgr:      sm,
 		EventStore:      stores.event,
-		EventCollector:  stores.collector,
 		Auth:            auth,
 		Handler:         handler,
 		Bridge:          bridge,
