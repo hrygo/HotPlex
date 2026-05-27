@@ -19,8 +19,8 @@ var migrationFS embed.FS
 //go:embed sql/migrations-postgres/*.sql
 var migrationsPGFs embed.FS
 
-// runMigrations applies all pending goose migrations to the database.
-func runMigrations(ctx context.Context, db *sql.DB, dialect dbutil.Dialect) error {
+// RunMigrations applies all pending goose migrations to the database.
+func RunMigrations(ctx context.Context, db *sql.DB, dialect dbutil.Dialect) error {
 	var (
 		gooseDialect goose.Dialect
 		embedFS      embed.FS

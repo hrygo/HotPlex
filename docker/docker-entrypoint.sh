@@ -51,7 +51,9 @@ if [[ -d "${SOURCE_CONFIG}" ]]; then
     # Explicit allowlist of variables expected in config YAML templates.
     # Avoids expanding sensitive or arbitrary HOTPLEX_* vars (JWT_SECRET, API_KEY, etc.)
     # and prevents YAML injection from values containing ':', '#', '|', etc.
-    ENVSUBST_VARS='${ADMIN_TOKEN} ${OPENCODE_SERVER_PASSWORD} ${HOTPLEX_WORKER_GH_TOKEN} ${HOTPLEX_WORKER_GITHUB_TOKEN} ${HOTPLEX_DB_DRIVER} ${HOTPLEX_DB_POSTGRES_DSN}'
+    # Note: HOTPLEX_DB_POSTGRES_DSN is NOT included here — it contains credentials
+    # and is handled by Viper's BindEnv mechanism instead.
+    ENVSUBST_VARS='${ADMIN_TOKEN} ${OPENCODE_SERVER_PASSWORD} ${HOTPLEX_WORKER_GH_TOKEN} ${HOTPLEX_WORKER_GITHUB_TOKEN} ${HOTPLEX_DB_DRIVER}'
     for yaml in "${RUNTIME_CONFIG}"/*.yaml; do
         [[ -f "$yaml" ]] || continue
         if envsubst "${ENVSUBST_VARS}" < "$yaml" > "${yaml}.tmp"; then

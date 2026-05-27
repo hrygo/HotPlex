@@ -52,6 +52,10 @@ func OpenStore(ctx context.Context, configPath string) (cron.Store, eventstore.T
 		if openErr != nil {
 			return nil, nil, nil, fmt.Errorf("open postgres: %w", openErr)
 		}
+		if migErr := session.RunMigrations(ctx, db.DB, dbutil.DialectPostgres); migErr != nil {
+			_ = db.Close()
+			return nil, nil, nil, fmt.Errorf("pg migrations: %w", migErr)
+		}
 		cronStore := cron.NewPGStore(db, slog.Default())
 		evStore := eventstore.NewPGStore(db, slog.Default())
 		cleanup := func() { _ = db.Close() }

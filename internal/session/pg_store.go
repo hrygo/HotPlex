@@ -23,7 +23,7 @@ type pgStore struct {
 
 // NewPGStore creates and initializes a new pgStore using the provided db connection.
 func NewPGStore(ctx context.Context, db *dbutil.DB) (Store, error) {
-	if err := runMigrations(ctx, db.DB, dbutil.DialectPostgres); err != nil {
+	if err := RunMigrations(ctx, db.DB, dbutil.DialectPostgres); err != nil {
 		return nil, err
 	}
 

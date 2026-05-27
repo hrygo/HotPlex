@@ -21,7 +21,11 @@ type WriteMu struct {
 
 // NewWriteMu creates a new write serializer for the given dialect.
 // Pass the dialect string (e.g., "sqlite" or "postgres").
+// Empty dialect defaults to SQLite (safe-write behavior).
 func NewWriteMu(dialect string) *WriteMu {
+	if dialect == "" {
+		dialect = DialectSQLite
+	}
 	return &WriteMu{dialect: dialect}
 }
 

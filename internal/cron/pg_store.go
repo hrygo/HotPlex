@@ -2,7 +2,9 @@ package cron
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -116,7 +118,7 @@ func (s *pgStore) Get(ctx context.Context, id string) (*CronJob, error) {
 
 	row := s.db.QueryRowContext(ctx,
 		s.dialect.Rebind(`SELECT `+jobColumns+` FROM cron_jobs WHERE id = ?`), id)
-	return scanJob(row)
+	return scanJobPG(row)
 }
 
 func (s *pgStore) GetByName(ctx context.Context, name string) (*CronJob, error) {
@@ -125,7 +127,7 @@ func (s *pgStore) GetByName(ctx context.Context, name string) (*CronJob, error) 
 
 	row := s.db.QueryRowContext(ctx,
 		s.dialect.Rebind(`SELECT `+jobColumns+` FROM cron_jobs WHERE name = ?`), name)
-	return scanJob(row)
+	return scanJobPG(row)
 }
 
 func (s *pgStore) List(ctx context.Context, enabledOnly bool) ([]*CronJob, error) {
@@ -148,7 +150,7 @@ func (s *pgStore) List(ctx context.Context, enabledOnly bool) ([]*CronJob, error
 
 	var jobs []*CronJob
 	for rows.Next() {
-		job, err := scanJobRow(rows)
+		job, err := scanJobRowPG(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -256,6 +258,45 @@ func (s *pgStore) UpsertByName(ctx context.Context, job *CronJob) error {
 		return fmt.Errorf("cron store: upsert job: %w", err)
 	}
 	return nil
+}
+
+// scanJobPG scans a single job row using PG-appropriate types (BOOLEAN → bool).
+func scanJobPG(row *sql.Row) (*CronJob, error) {
+	job, err := scanJobRowPG(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrJobNotFound
+	}
+	return job, err
+}
+
+// scanJobRowPG scans BOOLEAN columns into bool variables for PostgreSQL compatibility.
+// pgx returns Go bool for BOOLEAN columns; scanning into *int causes runtime errors.
+func scanJobRowPG(s scanner) (*CronJob, error) {
+	job := &CronJob{}
+	var enabled, deleteAfterRun, silent bool
+	var schedData, payloadData, platformKeyData, stateData string
+
+	err := s.Scan(
+		&job.ID, &job.Name, &job.Description, &enabled,
+		&job.Schedule.Kind, &schedData, &job.Payload.Kind, &payloadData,
+		&job.WorkDir, &job.BotID, &job.OwnerID, &job.Platform, &platformKeyData,
+		&job.TimeoutSec, &deleteAfterRun, &silent, &job.MaxRetries, &job.MaxRuns, &job.ExpiresAt,
+		&stateData, &job.CreatedAtMs, &job.UpdatedAtMs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cron store: scan job: %w", err)
+	}
+	if err := decodeJobFields(job, b2i(enabled), b2i(deleteAfterRun), b2i(silent), schedData, payloadData, platformKeyData, stateData); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // compile-time interface check

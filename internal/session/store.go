@@ -53,7 +53,7 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config, writeMu *sqlutil.Wr
 		return nil, err
 	}
 
-	if err := runMigrations(ctx, db, dbutil.DialectSQLite); err != nil {
+	if err := RunMigrations(ctx, db, dbutil.DialectSQLite); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
