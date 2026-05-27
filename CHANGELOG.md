@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.19.0] - 2026-05-27
+
+### Summary
+
+v1.19.0 是一次 minor 版本更新，聚焦于 **PostgreSQL 双数据库支持** 和 **安全修复**。新增完整的 PostgreSQL 后端（`dbutil.Dialect` 抽象层 + 5 个 PG Store + 9 个 PG 迁移文件），在保留 SQLite 默认后端的同时提供企业级数据库选项。安全方面修复了 Admin API key 认证绕过和 dev mode 重激活漏洞。Gateway Core 和 Messaging 层进行了 SOLID 原则批量重构，提升可维护性和可测试性。
+
+### Added
+
+- **Database**: PostgreSQL dual-database support via `dbutil.Dialect` abstraction — thin dialect layer (5 methods, 120-line Rebind state machine) isolates all SQL differences. 5 PG Store implementations (session, cron, eventstore, chat_access, api_key), 9 PG migration files, Docker Compose PG stack. (#490)
+- **Database**: `db-stats` skill manual with go:embed integration — 4-step database detection, complete schema reference, 9 categories of analytics SQL templates.
+- **Database**: CLI cron commands now support PostgreSQL backend via driver-aware `OpenStore`.
+- **Docker**: Multi-DB Docker Compose setup with `docker-compose.pg.yml`, PostgreSQL init script, dual-mode entrypoint, and production PG config with volume persistence.
+
+### Changed
+
+- **Gateway Core**: SOLID principles batch refactor — extract `prepareWorkerInfo` (eliminate env injection trio), unify `SessionManager` interface hierarchy via embedding, eliminate Hub type assertions via `RouteWrite`, decompose `performInit` into four-phase dispatch, extract `forwardContext` from `forwardEvents`. (#492)
+- **Gateway Core**: Decompose `handleInput` into focused sub-handlers and extract worker command handlers from switch chain for independent testability. (#492)
+- **Messaging**: SOLID + test coverage — extract generic `CommandMap[T]`, move platform-specific envelope builders to adapters, split `platform_adapter.go` into 4 single-responsibility files (types, interfaces, registry, adapter), remove dead `SessionManager` type. (#491)
+- **Database**: `WriteMu` becomes no-op on PostgreSQL (MVCC handles concurrency natively), PG stores use `errors.As` for unique violation detection instead of fragile string matching.
+
+### Fixed
+
+- **Security**: Admin API key authentication bypass — Phase 1 (`authenticateKey`) only checked config-sourced keys, database-created keys were never accepted. Add separate `dbKeys` map synced via `AddKey`/`RemoveKey` and preloaded at startup. (#495)
+- **Security**: Dev mode re-activation vulnerability — add `devModeLocked` flag to `Authenticator`, preventing auth bypass when all DB keys are removed after initial configuration.
+- **Security**: DBResolver PostgreSQL placeholder incompatibility — add dialect field to `DBResolver`, using `dbutil.Dialect.Rebind()` for `$1/$2/...` parameter conversion.
+- **Admin**: `routes.go` omitted `APIKeyStore` and `WriteMu` on PostgreSQL path, causing admin to fall back to SQLite-style store with wrong SQL placeholders.
+- **Gateway Core**: CORS preflight blocking PUT and PATCH — add both methods to `Allow-Methods` header in two locations.
+- **Infrastructure**: CI webchat cache key expanded to include `context/`, `types/`, and `public/` directories to prevent stale builds.
+
 ## [1.18.1] - 2026-05-26
 
 ### Summary
