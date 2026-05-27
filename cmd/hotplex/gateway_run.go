@@ -300,7 +300,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if !reflect.DeepEqual(prev.ResolvedAPIKeyUsers, next.ResolvedAPIKeyUsers) {
-			dbR := security.NewDBResolver(stores.sqlDB)
+			dbR := stores.dbResolver
 			if len(next.ResolvedAPIKeyUsers) > 0 {
 				auth.SetKeyResolver(security.NewChainResolver(security.NewMapResolver(next.ResolvedAPIKeyUsers), dbR))
 			} else {
@@ -619,6 +619,7 @@ type gatewayStores struct {
 	writeMu     *sqlutil.WriteMu // nil when using PostgreSQL (WriteMu is SQLite-only)
 	db          *dbutil.DB
 	sqlDB       *sql.DB
+	dialect     dbutil.Dialect
 	apiKeyStore admin.APIKeyUserStorer
 	dbResolver  *security.DBResolver
 }
@@ -651,7 +652,7 @@ func initSQLiteStores(ctx context.Context, cfg *config.Config, log *slog.Logger)
 
 	// EventStore shares the session store's *sql.DB (schema managed by goose migration 002).
 	eventStore := eventstore.NewSQLiteStore(sessionStore.DB(), writeMu)
-	dbResolver := security.NewDBResolver(sessionStore.DB())
+	dbResolver := security.NewDBResolver(sessionStore.DB(), dbutil.DialectSQLite)
 
 	return &gatewayStores{
 		session:     sessionStore,
@@ -660,6 +661,7 @@ func initSQLiteStores(ctx context.Context, cfg *config.Config, log *slog.Logger)
 		collector:   eventstore.NewCollector(eventStore, log),
 		writeMu:     writeMu,
 		sqlDB:       sessionStore.DB(),
+		dialect:     dbutil.DialectSQLite,
 		dbResolver:  dbResolver,
 	}, nil
 }
@@ -680,7 +682,7 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 	eventStore := eventstore.NewPGStore(db, log)
 	cronStore := cron.NewPGStore(db, log)
 	chatAccessStore := messaging.NewChatAccessPGStore(db, log)
-	dbResolver := security.NewDBResolver(db.DB)
+	dbResolver := security.NewDBResolver(db.DB, dbutil.DialectPostgres)
 
 	return &gatewayStores{
 		session:     sessionStore,
@@ -691,6 +693,7 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 		chatAccess:  chatAccessStore,
 		db:          db,
 		sqlDB:       db.DB,
+		dialect:     dbutil.DialectPostgres,
 		apiKeyStore: admin.NewAPIKeyUserPGStore(db, dbResolver),
 		dbResolver:  dbResolver,
 	}, nil
