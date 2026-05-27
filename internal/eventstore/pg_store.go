@@ -108,7 +108,7 @@ func (s *pgStore) QueryBySession(ctx context.Context, sessionID string, cursor i
 
 	events, err := scanEvents(rows)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("eventstore: scan events: %w", err)
 	}
 
 	hasMore := len(events) > limit
@@ -227,7 +227,7 @@ func (s *pgStore) resolveGeneration(ctx context.Context, sessionID string) (int6
 func (s *pgStore) QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error) {
 	gen, err := s.resolveGeneration(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("eventstore: resolve generation: %w", err)
 	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
@@ -249,7 +249,7 @@ func (s *pgStore) QueryTurnsBefore(ctx context.Context, sessionID string, before
 	defer func() { _ = rows.Close() }()
 	records, err := scanTurnsPG(rows)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("eventstore: scan turns: %w", err)
 	}
 	// Reverse to ASC order (SQL returns DESC).
 	slices.Reverse(records)
@@ -259,7 +259,7 @@ func (s *pgStore) QueryTurnsBefore(ctx context.Context, sessionID string, before
 func (s *pgStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error) {
 	gen, err := s.resolveGeneration(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("eventstore: resolve generation: %w", err)
 	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()

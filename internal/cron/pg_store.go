@@ -152,7 +152,7 @@ func (s *pgStore) List(ctx context.Context, enabledOnly bool) ([]*CronJob, error
 	for rows.Next() {
 		job, err := scanJobRowPG(rows)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("cron store: scan job row: %w", err)
 		}
 		jobs = append(jobs, job)
 	}
@@ -287,7 +287,7 @@ func scanJobRowPG(s scanner) (*CronJob, error) {
 		return nil, fmt.Errorf("cron store: scan job: %w", err)
 	}
 	if err := decodeJobFields(job, b2i(enabled), b2i(deleteAfterRun), b2i(silent), schedData, payloadData, platformKeyData, stateData); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cron store: decode job: %w", err)
 	}
 	return job, nil
 }

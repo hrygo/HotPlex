@@ -53,7 +53,7 @@ func openSQLite(cfg *config.DBConfig) (*DB, error) {
 
 	if err := sqlutil.InitSQLiteDB(sqldb, cfg, sqlutil.DialectSQLite, "dbutil"); err != nil {
 		_ = sqldb.Close()
-		return nil, err
+		return nil, fmt.Errorf("dbutil: init sqlite: %w", err)
 	}
 
 	if maxOpen := cfg.EffectiveMaxOpenConns(); maxOpen > 0 {

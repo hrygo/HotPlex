@@ -24,7 +24,7 @@ type pgStore struct {
 // NewPGStore creates and initializes a new pgStore using the provided db connection.
 func NewPGStore(ctx context.Context, db *dbutil.DB) (Store, error) {
 	if err := RunMigrations(ctx, db.DB, dbutil.DialectPostgres); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session store: pg migrations: %w", err)
 	}
 
 	// Copy and rebind all queries from ? to $N placeholders.
@@ -164,7 +164,7 @@ func (s *pgStore) Compact(_ context.Context, _ float64) error {
 func (s *pgStore) GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, s.queries["store.get_sessions_by_state"], string(state))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session store: query by state: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return collectIDs(rows)
