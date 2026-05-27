@@ -226,6 +226,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		if err != nil {
 			log.Warn("gateway: preload DB API keys failed", "error", err)
 		} else {
+			defer func() { _ = rows.Close() }()
 			for rows.Next() {
 				var key string
 				if rows.Scan(&key) == nil {
@@ -235,7 +236,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			if err := rows.Err(); err != nil {
 				log.Warn("gateway: preload DB API keys incomplete", "error", err)
 			}
-			_ = rows.Close()
 		}
 	}
 
