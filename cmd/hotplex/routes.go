@@ -98,6 +98,8 @@ func setupRoutes(
 		DB:           deps.DB,
 		DBResolver:   deps.DBResolver,
 		KeyValidator: deps.Auth,
+		APIKeyStore:  deps.APIKeyStore,
+		WriteMu:      deps.WriteMu,
 	})
 
 	if cfg.Admin.RateLimitEnabled {
