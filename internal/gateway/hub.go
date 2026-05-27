@@ -473,8 +473,9 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	}
 
 	for _, conn := range conns {
-		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(msg.Env.Event.Type)).Inc()
-		if err := conn.RouteWrite(context.Background(), msg.Env); err != nil {
+		if err := conn.RouteWrite(context.Background(), msg.Env); err == nil {
+			continue
+		} else {
 			h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
 			// Eager removal: Close() the conn and remove it from the session map
 			// to prevent repeated write failures on stale connections.
@@ -483,6 +484,12 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 			h.removeSession(msg.Env.SessionID, conn)
 			h.mu.Unlock()
 		}
+		// Eager removal: Close() the conn and remove it from the session map
+		// to prevent repeated write failures on stale connections.
+		_ = conn.Close()
+		h.mu.Lock()
+		h.removeSession(msg.Env.SessionID, conn)
+		h.mu.Unlock()
 	}
 }
 

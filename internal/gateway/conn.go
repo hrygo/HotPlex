@@ -654,6 +654,7 @@ func (c *Conn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 // init-phase buffering and applies droppable semantics for delta/raw events
 // (silently drops on full channel instead of disconnecting).
 func (c *Conn) RouteWrite(_ context.Context, env *events.Envelope) error {
+	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
 	data, err := aep.EncodeJSON(env)
 	if err != nil {
 		return err

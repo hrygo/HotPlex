@@ -81,6 +81,7 @@ func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) 
 // RouteWrite writes an envelope through the Hub routing path.
 // pcEntry already handles droppable semantics in WriteCtx, so this delegates directly.
 func (e *pcEntry) RouteWrite(ctx context.Context, env *events.Envelope) error {
+	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
 	return e.WriteCtx(ctx, env)
 }
 

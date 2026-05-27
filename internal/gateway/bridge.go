@@ -36,7 +36,7 @@ type bridgeSM interface {
 	SessionLifecycle
 	SessionTransitioner
 	SessionWorkerManager
-	ResetExpiry(ctx context.Context, id string) error
+	SessionExpirer
 }
 
 // Bridge connects the gateway to the session manager.

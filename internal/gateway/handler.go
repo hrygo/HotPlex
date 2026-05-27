@@ -361,9 +361,16 @@ type SessionWorkerManager interface {
 
 // SessionAdmin provides listing, ownership validation, and metadata mutations.
 type SessionAdmin interface {
+	SessionExpirer
 	List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error)
 	ValidateOwnership(ctx context.Context, sessionID, userID, adminUserID string) error
 	UpdateWorkDir(ctx context.Context, id, workDir string) error
+}
+
+// SessionExpirer resets session expiry timers. Extracted as a single-method
+// interface so bridgeSM can compose it alongside reader/lifecycle/transition
+// sub-interfaces without pulling in the full SessionAdmin.
+type SessionExpirer interface {
 	ResetExpiry(ctx context.Context, id string) error
 }
 

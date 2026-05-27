@@ -149,5 +149,5 @@ func ParseOggDurationMs(data []byte) int {
 	if lastGranule == 0 {
 		return 0
 	}
-	return int(lastGranule * 1000 / opusInternalRate)
+	return int(lastGranule / (opusInternalRate / 1000))
 }
