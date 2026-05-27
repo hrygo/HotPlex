@@ -12,6 +12,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -130,6 +131,7 @@ type Deps struct {
 	Restart       func() error
 	DB            DBExecutor       // Optional: enables API key user CRUD + DB resolver
 	DBResolver    cacheInvalidator // Optional: invalidates DBResolver cache after CUD
+	WriteMu       *sqlutil.WriteMu // Optional: serializes SQLite writes; nil-safe, PG-safe
 	APIKeyStore   APIKeyUserStorer // Optional: pre-built store (e.g. PG); overrides DB-based creation
 }
 
@@ -154,7 +156,7 @@ func New(deps Deps) *AdminAPI {
 			if deps.APIKeyStore != nil {
 				return deps.APIKeyStore
 			}
-			return newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver)
+			return newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver, deps.WriteMu)
 		}(),
 		version:      deps.Version,
 		newSessionID: deps.NewSessionID,

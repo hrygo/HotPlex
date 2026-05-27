@@ -22,6 +22,7 @@ import (
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 )
 
@@ -56,12 +57,13 @@ func OpenStore(ctx context.Context, configPath string) (cron.Store, eventstore.T
 		cleanup := func() { _ = db.Close() }
 		return cronStore, evStore, cleanup, nil
 	default:
-		ss, openErr := session.NewSQLiteStore(ctx, cfg, nil)
+		writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
+		ss, openErr := session.NewSQLiteStore(ctx, cfg, writeMu)
 		if openErr != nil {
 			return nil, nil, nil, fmt.Errorf("open session store: %w", openErr)
 		}
-		cronStore := cron.NewSQLiteStore(ss.DB(), slog.Default(), nil)
-		evStore := eventstore.NewSQLiteStore(ss.DB(), nil)
+		cronStore := cron.NewSQLiteStore(ss.DB(), slog.Default(), writeMu)
+		evStore := eventstore.NewSQLiteStore(ss.DB(), writeMu)
 		cleanup := func() { _ = ss.Close() }
 		return cronStore, evStore, cleanup, nil
 	}

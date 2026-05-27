@@ -438,6 +438,9 @@ func (d DBConfig) EffectiveMaxOpenConns() int {
 }
 
 // EffectiveWALMode returns the effective WAL mode setting.
+// Note: explicitly setting WALMode=false (zero value) falls through to the legacy field.
+// This is acceptable because WALMode=false is not a meaningful config — users who want
+// to disable WAL should omit the field and set the legacy wal_mode: false instead.
 func (d DBConfig) EffectiveWALMode() bool {
 	if d.SQLite.WALMode {
 		return true
@@ -503,11 +506,8 @@ type PostgresConfig struct {
 	MaxOpenConns int    `mapstructure:"max_open_conns"`
 }
 
-// DSN returns the PostgreSQL connection string. Defaults to localhost with sslmode=prefer when empty.
+// DSN returns the PostgreSQL connection string. Returns empty when ConnStr is not configured.
 func (p PostgresConfig) DSN() string {
-	if p.ConnStr == "" {
-		return "postgres://localhost:5432/hotplex?sslmode=prefer"
-	}
 	return p.ConnStr
 }
 

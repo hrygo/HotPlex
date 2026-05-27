@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/sqlutil"
 )
 
 // maskAPIKey returns a masked version showing only first 8 and last 4 chars.
@@ -37,6 +39,7 @@ type apiKeyUserStore struct {
 	db          DBExecutor
 	mu          sync.Mutex
 	invalidator cacheInvalidator
+	writeMu     *sqlutil.WriteMu // serializes writes for SQLite; nil/PG-safe
 }
 
 // APIKeyUserStorer defines CRUD operations for API key user records.
@@ -55,11 +58,11 @@ type cacheInvalidator interface {
 	Invalidate(key string)
 }
 
-func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator) APIKeyUserStorer {
+func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator, writeMu *sqlutil.WriteMu) APIKeyUserStorer {
 	if db == nil {
 		return nil
 	}
-	return &apiKeyUserStore{db: db, invalidator: inv}
+	return &apiKeyUserStore{db: db, invalidator: inv, writeMu: writeMu}
 }
 
 var _ APIKeyUserStorer = (*apiKeyUserStore)(nil)
@@ -118,45 +121,51 @@ func (s *apiKeyUserStore) create(ctx context.Context, u *APIKeyUser) error {
 		u.APIKey = "hpk_" + hex.EncodeToString(key)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.db.ExecContext(ctx,
-		"INSERT INTO api_key_users (api_key, user_id, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-		u.APIKey, u.UserID, u.Description, now, now)
-	if err != nil {
-		return fmt.Errorf("admin: create api key user: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("admin: get inserted api key user id: %w", err)
-	}
-	u.ID = id
-	return nil
+	return s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx,
+			"INSERT INTO api_key_users (api_key, user_id, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			u.APIKey, u.UserID, u.Description, now, now)
+		if err != nil {
+			return fmt.Errorf("admin: create api key user: %w", err)
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("admin: get inserted api key user id: %w", err)
+		}
+		u.ID = id
+		return nil
+	})
 }
 
 func (s *apiKeyUserStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.db.ExecContext(ctx,
-		"UPDATE api_key_users SET user_id = ?, description = ?, updated_at = ? WHERE id = ?",
-		u.UserID, u.Description, now, id)
-	if err != nil {
-		return fmt.Errorf("admin: update api key user: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("admin: api key user ID %d not found", id)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx,
+			"UPDATE api_key_users SET user_id = ?, description = ?, updated_at = ? WHERE id = ?",
+			u.UserID, u.Description, now, id)
+		if err != nil {
+			return fmt.Errorf("admin: update api key user: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("admin: api key user ID %d not found", id)
+		}
+		return nil
+	})
 }
 
 func (s *apiKeyUserStore) delete(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM api_key_users WHERE id = ?", id)
-	if err != nil {
-		return fmt.Errorf("admin: delete api key user: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("admin: api key user ID %d not found", id)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx, "DELETE FROM api_key_users WHERE id = ?", id)
+		if err != nil {
+			return fmt.Errorf("admin: delete api key user: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("admin: api key user ID %d not found", id)
+		}
+		return nil
+	})
 }
 
 func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) {

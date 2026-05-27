@@ -71,6 +71,7 @@ type GatewayDeps struct {
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
 	APIKeyStore     admin.APIKeyUserStorer
+	WriteMu         *sqlutil.WriteMu
 	ConfigPath      string
 	DevMode         bool
 }
@@ -382,6 +383,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		DB:              stores.sqlDB,
 		DBResolver:      dbResolver,
 		APIKeyStore:     stores.apiKeyStore,
+		WriteMu:         stores.writeMu,
 		ConfigPath:      configPath,
 		DevMode:         devMode,
 	}

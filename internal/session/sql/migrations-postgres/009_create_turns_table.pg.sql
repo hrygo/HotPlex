@@ -4,7 +4,7 @@
 -- Written by Collector at done (assistant) and input (user) time.
 -- id is BIGSERIAL: strictly ordered, used for pagination cursor and frontend replay.
 
-CREATE TABLE "turns" (
+CREATE TABLE IF NOT EXISTS "turns" (
     "id"                  BIGSERIAL PRIMARY KEY,
     "session_id"          TEXT    NOT NULL,
     "generation"          INTEGER NOT NULL DEFAULT 1,
