@@ -222,7 +222,6 @@ func (s *pgStore) UpsertByName(ctx context.Context, job *CronJob) error {
 	query := s.dialect.Rebind(`INSERT INTO cron_jobs (` + jobColumns + `)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (name) DO UPDATE SET
-			id = cron_jobs.id,
 			name = EXCLUDED.name,
 			description = EXCLUDED.description,
 			enabled = EXCLUDED.enabled,
