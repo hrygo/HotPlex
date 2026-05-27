@@ -662,9 +662,12 @@ func TestDevMode_DisabledByDBKeys(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "api_user", userID)
 
-	// Removing the DB key re-enables dev mode.
+	// Removing the DB key does NOT re-enable dev mode (devModeLocked).
 	auth.RemoveKey("hpk_first")
-	userID, ok = auth.AuthenticateKey(context.Background(), "anything")
-	require.True(t, ok)
-	require.Equal(t, "anonymous", userID)
+	_, ok = auth.AuthenticateKey(context.Background(), "anything")
+	require.False(t, ok, "dev mode should stay disabled after RemoveKey (devModeLocked)")
+
+	// No key works at all — must restart gateway or add a new key.
+	_, ok = auth.AuthenticateKey(context.Background(), "hpk_first")
+	require.False(t, ok, "removed key should no longer authenticate")
 }
