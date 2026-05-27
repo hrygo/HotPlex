@@ -385,7 +385,7 @@ func (c *Conn) resolveSessionState(sessionID string, initData InitData, workDir 
 		result, stateErr := c.startCreatedSession(sessionID, initData, workDir, sm, si)
 		return sessionID, result, stateErr
 	case events.StateDeleted:
-		result, stateErr := c.recreateDeletedSession(sessionID, initData, workDir, sm, si)
+		result, stateErr := c.recreateDeletedSession(sessionID, initData, workDir, sm)
 		return sessionID, result, stateErr
 	default:
 		result, stateErr := c.handleExistingSession(sessionID, workDir, sm, si, initData)
@@ -445,10 +445,15 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 	return si, nil
 }
 
-func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workDir string, sm connSM, si *session.SessionInfo) (*session.SessionInfo, error) {
+func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workDir string, sm connSM) (*session.SessionInfo, error) {
 	_ = sm.DeletePhysical(context.Background(), sessionID)
 	if c.starter == nil {
-		return si, nil
+		// Test mode: re-create session directly since the old one was physically deleted.
+		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, "")
+		if err != nil {
+			return nil, fmt.Errorf("recreate deleted session (test mode): %w", err)
+		}
+		return newSI, nil
 	}
 	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
 		initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
@@ -683,6 +688,7 @@ func (c *Conn) trySendData(data []byte) error {
 	case c.writeCh <- data:
 		return nil
 	default:
+		metrics.GatewayDeltasDropped.Inc()
 		return nil
 	}
 }

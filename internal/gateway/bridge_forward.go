@@ -218,6 +218,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if env.Event.Type == events.Done {
 		fc.turnText.Reset()
 		fc.turnStartTime = time.Now()
+		fc.doneReceived = false
 	}
 
 }

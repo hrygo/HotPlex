@@ -339,6 +339,7 @@ func (h *Hub) sendControlToSession(ctx context.Context, env *events.Envelope) {
 
 	env = events.Clone(env)
 	for _, conn := range conns {
+		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
 		if err := conn.WriteCtx(ctx, env); err != nil {
 			h.log.Warn("gateway: send to conn failed", "session_id", env.SessionID, "err", err)
 		}
