@@ -231,6 +231,20 @@ func (cb *CircuitBreaker) Reset() {
 
 	cb.forceOpen.Store(false)
 	cb.forceClosed.Store(false)
+
+	settings := gobreaker.Settings{
+		Name:        cb.config.Name,
+		MaxRequests: cb.config.HalfOpenMaxRequests,
+		Interval:    cb.config.Interval,
+		Timeout:     cb.config.Timeout,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= cb.config.MaxFailures
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			cb.onStateChange(from, to)
+		},
+	}
+	cb.breaker = gobreaker.NewCircuitBreaker(settings)
 	cb.state.Store(string(CircuitClosed))
 	cb.lastStateChange.Store(time.Now())
 

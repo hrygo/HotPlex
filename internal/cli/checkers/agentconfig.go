@@ -160,6 +160,7 @@ func (c agentConfigDirChecker) Check(_ context.Context) cli.Diagnostic {
 func (c agentConfigDirChecker) checkSubdir(platformDir, platformName string, warnings *[]string) {
 	entries, err := os.ReadDir(platformDir)
 	if err != nil {
+		*warnings = append(*warnings, fmt.Sprintf("cannot read %s config dir: %v", platformName, err))
 		return
 	}
 	for _, e := range entries {
