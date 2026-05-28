@@ -5,12 +5,34 @@ import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
 import type { CronJob } from '@/lib/types/admin';
+import type { CronSchedule } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 type FilterOption = 'all' | 'enabled' | 'disabled';
+
+function formatSchedule(s: CronJob['schedule']): string {
+  if (!s) return '—';
+  switch (s.kind) {
+    case 'cron': return s.expr ?? '—';
+    case 'every': return s.every_ms ? `every ${formatDuration(s.every_ms)}` : '—';
+    case 'at': return s.at ?? '—';
+    default: return String((s as Record<string, unknown>).kind ?? '—');
+  }
+}
+
+function formatDuration(ms: number): string {
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return sec % 60 ? `${min}m${sec % 60}s` : `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return min % 60 ? `${hr}h${min % 60}m` : `${hr}h`;
+  const d = Math.floor(hr / 24);
+  return hr % 24 ? `${d}d${hr % 24}h` : `${d}d`;
+}
 
 function formatTime(iso?: string): string {
   if (!iso) return '--';
@@ -261,8 +283,8 @@ export default function CronPage() {
                 </div>
 
                 {/* Schedule */}
-                <span className="text-xs font-mono text-[var(--text-muted)] truncate" title={job.schedule}>
-                  {job.schedule}
+                <span className="text-xs font-mono text-[var(--text-muted)] truncate" title={formatSchedule(job.schedule)}>
+                  {formatSchedule(job.schedule)}
                 </span>
 
                 {/* Enabled toggle */}
