@@ -319,9 +319,17 @@ webchat-rebuild:
 # ─────────────────────────────────────────────────────────────────────────────
 
 docs-build:
-	@echo "  $(CYAN)Docs$(RESET)$(DIM) building...$(RESET)"
-	@go run cmd/build-docs/main.go
-	@echo "  $(GREEN)✓$(RESET) Documentation built"
+	@if [ ! -f internal/docs/out/index.html ]; then \
+		echo "  $(CYAN)Docs$(RESET)$(DIM) building from scratch...$(RESET)"; \
+		go run cmd/build-docs/main.go; \
+	elif find docs cmd/build-docs -newer internal/docs/out \
+		\( -name "*.md" -o -name "*.go" -o -name "*.yaml" -o -name "*.png" -o -name "*.svg" \) \
+		-print 2>/dev/null | head -n 1 | grep -q .; then \
+		echo "  $(CYAN)Docs$(RESET)$(DIM) rebuilding (source changed)...$(RESET)"; \
+		go run cmd/build-docs/main.go; \
+	else \
+		echo "  $(DIM)Docs ✓ cached$(RESET)"; \
+	fi
 
 docs-clean:
 	@rm -rf internal/docs/out
