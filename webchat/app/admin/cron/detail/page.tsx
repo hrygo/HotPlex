@@ -45,9 +45,10 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
   );
 }
 
-function formatDateTime(iso?: string): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', {
+function formatDateTime(value?: string | number): string {
+  if (!value) return '—';
+  const date = typeof value === 'number' ? new Date(value) : new Date(value);
+  return date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -101,7 +102,7 @@ export default function CronDetailPage() {
       } else {
         setJob(found);
         setSchedule(formatScheduleStr(found.schedule));
-        setMessage(found.message);
+        setMessage(found.payload?.message ?? '');
         setMaxRuns(found.max_runs != null ? String(found.max_runs) : '');
         setEnabled(found.enabled);
         setHasChanges(false);
@@ -122,7 +123,7 @@ export default function CronDetailPage() {
     if (!job) return;
     const changed =
       schedule !== formatScheduleStr(job.schedule) ||
-      message !== job.message ||
+      message !== (job.payload?.message ?? '') ||
       maxRuns !== (job.max_runs != null ? String(job.max_runs) : '') ||
       enabled !== job.enabled;
     setHasChanges(changed);
@@ -134,7 +135,7 @@ export default function CronDetailPage() {
       setSaving(true);
       const updates: Record<string, unknown> = {};
       if (schedule !== formatScheduleStr(job.schedule)) updates.schedule = schedule;
-      if (message !== job.message) updates.message = message;
+      if (message !== (job.payload?.message ?? '')) updates.message = message;
       if (maxRuns !== (job.max_runs != null ? String(job.max_runs) : '')) {
         updates.max_runs = maxRuns ? Number(maxRuns) : undefined;
       }
@@ -438,7 +439,7 @@ export default function CronDetailPage() {
               <button
                 onClick={() => {
                   setSchedule(formatScheduleStr(job.schedule));
-                  setMessage(job.message);
+                  setMessage(job.payload?.message ?? '');
                   setMaxRuns(job.max_runs != null ? String(job.max_runs) : '');
                   setEnabled(job.enabled);
                 }}
@@ -460,10 +461,10 @@ export default function CronDetailPage() {
         <InfoRow label="Expires At" value={formatDateTime(job.expires_at)} />
         <InfoRow
           label="Run Count"
-          value={job.runs_count != null ? `${job.runs_count}${job.max_runs != null ? ` / ${job.max_runs}` : ''}` : ''}
+          value={job.state?.run_count != null ? `${job.state.run_count}${job.max_runs != null ? ` / ${job.max_runs}` : ''}` : ''}
         />
-        <InfoRow label="Last Run" value={formatDateTime(job.last_run_at)} />
-        <InfoRow label="Next Run" value={job.enabled ? formatDateTime(job.next_run_at) : '—'} />
+        <InfoRow label="Last Run" value={formatDateTime(job.state?.last_run_at_ms)} />
+        <InfoRow label="Next Run" value={job.enabled ? formatDateTime(job.state?.next_run_at_ms) : '—'} />
       </div>
     </div>
   );
