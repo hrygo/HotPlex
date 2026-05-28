@@ -126,9 +126,11 @@ func AddToUserPath(dir string) error {
 	if runtime.GOOS == "windows" {
 		// Escape single quotes for PowerShell: replace ' with ''
 		escaped := strings.ReplaceAll(dir, "'", "''")
+		// Use -split/-notcontains instead of -notlike to avoid
+		// wildcard interpretation of [ and ] in paths.
 		ps := fmt.Sprintf(
 			`$p=[Environment]::GetEnvironmentVariable('Path','User');`+
-				`if($p -notlike '*%s*'){`+
+				`if(-not ($p -split ';' -notcontains '%s')){`+
 				`[Environment]::SetEnvironmentVariable('Path','%s;'+$p,'User')}`,
 			escaped, escaped)
 		return exec.Command("powershell", "-NoProfile", "-Command", ps).Run()
@@ -139,7 +141,10 @@ func AddToUserPath(dir string) error {
 		return fmt.Errorf("SHELL environment variable not set; add %s to PATH manually", dir)
 	}
 
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("determine home directory: %w", err)
+	}
 	// Escape double quotes and backslashes for shell export line
 	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(dir)
 	exportLine := fmt.Sprintf(`export PATH="%s:$PATH"`, escaped)
