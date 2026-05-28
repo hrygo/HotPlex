@@ -21,7 +21,7 @@ func securityHeaders(next http.Handler) http.Handler {
 			"default-src 'self'; "+
 				"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
 				"style-src 'self' 'unsafe-inline'; "+
-				"connect-src 'self' ws://localhost:* wss://*; "+
+				"connect-src 'self' http://localhost:* ws://localhost:* wss://*; "+
 				"img-src 'self' data: blob:; "+
 				"font-src 'self' data:")
 		next.ServeHTTP(w, r)

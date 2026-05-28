@@ -21,8 +21,9 @@ GOOS         := $(shell go env GOOS)
 GOARCH       := $(shell go env GOARCH)
 GIT_SHA      := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME   := $(shell date '+%Y-%m-%dT%H:%M:%S%z')
-LDFLAGS      := -s -w -X main.version=v1.19.0 -X main.buildTime=$(BUILD_TIME)
+LDFLAGS      := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)
 BUILD_OPTS   := -trimpath
+VERSION      := v1.19.0
 
 GATEWAY_PID   := $(HOME)/.hotplex/.pids/gateway.pid
 GATEWAY_LOG   := $(LOG_DIR)/hotplex.log
@@ -123,9 +124,13 @@ endef
 # Build
 # ─────────────────────────────────────────────────────────────────────────────
 
-build: docs-build webchat-embed
-	@echo "$(CYAN)Building...$(RESET)"
+build:
+	@echo "$(BOLD)$(CYAN)Build$(RESET)  $(DIM)$(VERSION) · $(GIT_SHA) · $(GOOS)/$(GOARCH)$(RESET)"
+	@echo ""
+	@$(MAKE) docs-build --no-print-directory
+	@$(MAKE) webchat-embed --no-print-directory
 	@mkdir -p $(BUILD_DIR) $(LOG_DIR)
+	@echo "  $(CYAN)Compiling$(RESET)$(DIM) Go binary...$(RESET)"
 	@CGO_ENABLED=0 go build $(BUILD_OPTS) -ldflags="$(LDFLAGS)" \
 		-o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) $(MAIN_PATH)
 	@echo "  $(GREEN)✓$(RESET) $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)"
@@ -288,10 +293,18 @@ webchat-stop:
 
 webchat-embed:
 	@if [ ! -d $(WEB_CHAT_OUT)/_next ]; then \
-		echo "$(CYAN)Building webchat for embedding...$(RESET)"; \
+		echo "  $(CYAN)Webchat$(RESET)$(DIM) building from scratch...$(RESET)"; \
 		cd $(WEB_CHAT_DIR) && pnpm install --frozen-lockfile && pnpm build && \
 		rm -rf ../$(WEB_CHAT_OUT).tmp && cp -r out ../$(WEB_CHAT_OUT).tmp && \
 		rm -rf ../$(WEB_CHAT_OUT) && mv ../$(WEB_CHAT_OUT).tmp ../$(WEB_CHAT_OUT); \
+		echo "  $(GREEN)✓$(RESET) Webchat built"; \
+	elif find $(WEB_CHAT_DIR)/app $(WEB_CHAT_DIR)/lib $(WEB_CHAT_DIR)/components $(WEB_CHAT_DIR)/public \
+		$(WEB_CHAT_DIR)/next.config.mjs $(WEB_CHAT_DIR)/tsconfig.json \
+		$(WEB_CHAT_DIR)/postcss.config.mjs $(WEB_CHAT_DIR)/package.json \
+		-newer $(WEB_CHAT_OUT)/_next -print 2>/dev/null | head -n 1 | grep -q .; then \
+		$(MAKE) webchat-rebuild --no-print-directory; \
+	else \
+		echo "  $(DIM)Webchat ✓ cached$(RESET)"; \
 	fi
 
 webchat-rebuild:
@@ -306,7 +319,7 @@ webchat-rebuild:
 # ─────────────────────────────────────────────────────────────────────────────
 
 docs-build:
-	@echo "$(CYAN)Building documentation...$(RESET)"
+	@echo "  $(CYAN)Docs$(RESET)$(DIM) building...$(RESET)"
 	@go run cmd/build-docs/main.go
 	@echo "  $(GREEN)✓$(RESET) Documentation built"
 
