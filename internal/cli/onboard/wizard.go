@@ -3,9 +3,7 @@ package onboard
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +15,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/cli"
 	"github.com/hrygo/hotplex/internal/cli/checkers"
+	"github.com/hrygo/hotplex/internal/cli/install"
 	"github.com/hrygo/hotplex/internal/cli/output"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
@@ -1240,13 +1239,9 @@ func stepServiceInstall(reader *bufio.Reader, opts WizardOptions) StepResult {
 func stepBinaryInstall(reader *bufio.Reader, opts WizardOptions) StepResult {
 	const stepName = "binary_install"
 
-	binPath, err := os.Executable()
+	binPath, err := install.ResolveSourceBinary()
 	if err != nil {
-		return StepResult{Name: stepName, Status: "fail", Detail: "resolve binary: " + err.Error()}
-	}
-	binPath, err = filepath.EvalSymlinks(binPath)
-	if err != nil {
-		return StepResult{Name: stepName, Status: "fail", Detail: "resolve symlink: " + err.Error()}
+		return StepResult{Name: stepName, Status: "fail", Detail: err.Error()}
 	}
 
 	// Guard: skip if running from a test binary (go test -c produces *.test)
@@ -1254,10 +1249,7 @@ func stepBinaryInstall(reader *bufio.Reader, opts WizardOptions) StepResult {
 		return StepResult{Name: stepName, Status: "skip", Detail: "running from test binary"}
 	}
 
-	exeName := "hotplex"
-	if runtime.GOOS == "windows" {
-		exeName = "hotplex.exe"
-	}
+	exeName := install.ExeName()
 
 	// --- Case 1: hotplex already in PATH ---
 	if pathBin, lpErr := exec.LookPath("hotplex"); lpErr == nil {
@@ -1268,7 +1260,7 @@ func stepBinaryInstall(reader *bufio.Reader, opts WizardOptions) StepResult {
 			pathBin = resolved
 		}
 
-		if sameContent(binPath, pathBin) {
+		if install.SameContent(binPath, pathBin) {
 			return StepResult{Name: stepName, Status: "pass", Detail: "already in PATH at " + pathBin}
 		}
 
@@ -1281,23 +1273,16 @@ func stepBinaryInstall(reader *bufio.Reader, opts WizardOptions) StepResult {
 			}
 		}
 
-		if err := copyBinary(binPath, pathBin); err != nil {
+		if err := install.CopyBinary(binPath, pathBin); err != nil {
 			return StepResult{Name: stepName, Status: "fail", Detail: "update failed: " + err.Error()}
 		}
 		return StepResult{Name: stepName, Status: "pass", Detail: "updated " + pathBin}
 	}
 
 	// --- Case 2: Not in PATH — install to user-local directory ---
-	homeDir, err := os.UserHomeDir()
+	targetDir, err := install.DefaultInstallDir()
 	if err != nil {
-		return StepResult{Name: stepName, Status: "fail", Detail: "resolve home: " + err.Error()}
-	}
-
-	var targetDir string
-	if runtime.GOOS == "windows" {
-		targetDir = filepath.Join(homeDir, ".hotplex", "bin")
-	} else {
-		targetDir = filepath.Join(homeDir, ".local", "bin")
+		return StepResult{Name: stepName, Status: "fail", Detail: err.Error()}
 	}
 	targetPath := filepath.Join(targetDir, exeName)
 
@@ -1314,13 +1299,13 @@ func stepBinaryInstall(reader *bufio.Reader, opts WizardOptions) StepResult {
 		return StepResult{Name: stepName, Status: "fail", Detail: "create directory: " + err.Error()}
 	}
 
-	if err := copyBinary(binPath, targetPath); err != nil {
+	if err := install.CopyBinary(binPath, targetPath); err != nil {
 		return StepResult{Name: stepName, Status: "fail", Detail: "install failed: " + err.Error()}
 	}
 
 	detail := "installed to " + targetPath
-	if !isInPATH(targetDir) {
-		if pErr := addToUserPath(targetDir); pErr != nil {
+	if !install.IsInPATH(targetDir) {
+		if pErr := install.AddToUserPath(targetDir); pErr != nil {
 			detail += "\nfailed to add " + targetDir + " to PATH: " + pErr.Error()
 			detail += "\nadd it manually: export PATH=\"" + targetDir + ":$PATH\""
 			return StepResult{Name: stepName, Status: "warn", Detail: detail}
@@ -1332,113 +1317,4 @@ func stepBinaryInstall(reader *bufio.Reader, opts WizardOptions) StepResult {
 	}
 
 	return StepResult{Name: stepName, Status: "pass", Detail: detail}
-}
-
-func sameContent(a, b string) bool {
-	ai, err1 := os.Stat(a)
-	bi, err2 := os.Stat(b)
-	if err1 != nil || err2 != nil || ai.Size() != bi.Size() {
-		return false
-	}
-	ha, hb := fileSHA256(a), fileSHA256(b)
-	return ha != nil && hb != nil && string(ha) == string(hb)
-}
-
-func fileSHA256(path string) []byte {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return nil
-	}
-	return h.Sum(nil)
-}
-
-func copyBinary(src, dst string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(dst), "hotplex-install-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	in, err := os.Open(src)
-	if err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	defer func() { _ = in.Close() }()
-
-	if _, err := io.Copy(tmp, in); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, dst); err != nil {
-		return err
-	}
-	ok = true
-	return nil
-}
-
-func isInPATH(dir string) bool {
-	return slices.Contains(filepath.SplitList(os.Getenv("PATH")), dir)
-}
-
-func addToUserPath(dir string) error {
-	if runtime.GOOS == "windows" {
-		ps := fmt.Sprintf(
-			`$p=[Environment]::GetEnvironmentVariable('Path','User');`+
-				`if($p -notlike '*%s*'){`+
-				`[Environment]::SetEnvironmentVariable('Path','%s;'+$p,'User')}`,
-			dir, dir)
-		return exec.Command("powershell", "-NoProfile", "-Command", ps).Run()
-	}
-
-	// Unix: append export line to shell rc file
-	homeDir, _ := os.UserHomeDir()
-	shellName := filepath.Base(os.Getenv("SHELL"))
-	exportLine := fmt.Sprintf(`export PATH="%s:$PATH"`, dir)
-
-	switch shellName {
-	case "zsh":
-		return appendToRC(filepath.Join(homeDir, ".zshrc"), exportLine)
-	case "bash":
-		return appendToRC(filepath.Join(homeDir, ".bashrc"), exportLine)
-	case "fish":
-		return exec.Command("fish", "-c", "fish_add_path "+dir).Run()
-	default:
-		return fmt.Errorf("unsupported shell: %s, add %s to PATH manually", shellName, dir)
-	}
-}
-
-func appendToRC(path, line string) error {
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	// Skip if already present
-	if strings.Contains(string(data), line) {
-		return nil
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	_, err = fmt.Fprintf(f, "\n# Added by hotplex onboard\n%s\n", line)
-	return err
 }
