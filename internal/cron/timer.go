@@ -180,26 +180,10 @@ func (s *Scheduler) executeJob(job *CronJob) {
 
 	start := time.Now()
 	sessionKey, err := s.executor.Execute(ctx, job, timeout)
-	duration := time.Since(start)
-
-	metrics.CronDurationSeconds.WithLabelValues(job.Name).Observe(duration.Seconds())
+	metrics.CronDurationSeconds.WithLabelValues(job.Name).Observe(time.Since(start).Seconds())
 
 	job.State.LastRunID = sessionKey
-	shouldDisable := s.finishExecution(job, start.UnixMilli(), err, errorType(err))
-	s.mergeJobState(job.ID, job.State, false)
-
-	if shouldDisable {
-		s.persistAndDisable(job.ID, job.State)
-		return
-	}
-
-	if err != nil {
-		// One-shot retry logic (checked after finishExecution records the error).
-		if job.Schedule.Kind == ScheduleAt && isTemporaryError(err) && job.State.RetryCount < maxRetries(job) {
-			s.scheduleRetry(s.ctx, job)
-			return
-		}
-		s.persistState(job.ID, job.State)
+	if s.handlePostExecution(job, start.UnixMilli(), err, errorType(err)) {
 		return
 	}
 
@@ -207,7 +191,6 @@ func (s *Scheduler) executeJob(job *CronJob) {
 	if s.delivery != nil && !job.Silent && !HasCLIDelivery(job) {
 		s.delivery.Deliver(s.ctx, job, sessionKey)
 	}
-
 	s.applyLifecycle(job)
 }
 
@@ -231,25 +214,33 @@ func (s *Scheduler) executeAttached(job *CronJob) {
 
 	err := s.attachedHandler.Execute(ctx, job)
 
-	shouldDisable := s.finishExecution(job, time.Now().UnixMilli(), err, "attached")
+	if s.handlePostExecution(job, time.Now().UnixMilli(), err, "attached") {
+		return
+	}
+	s.applyLifecycle(job)
+}
+
+// handlePostExecution handles error/disable/retry logic after execution.
+// Returns true if the caller should stop (disabled, retrying, or errored).
+func (s *Scheduler) handlePostExecution(job *CronJob, startedAtMs int64, err error, errType string) bool {
+	shouldDisable := s.finishExecution(job, startedAtMs, err, errType)
 	s.mergeJobState(job.ID, job.State, false)
 
 	if shouldDisable {
 		s.persistAndDisable(job.ID, job.State)
-		return
+		return true
 	}
 
 	if err != nil {
-		// One-shot retry logic (checked after finishExecution records the error).
 		if job.Schedule.Kind == ScheduleAt && isTemporaryError(err) && job.State.RetryCount < maxRetries(job) {
 			s.scheduleRetry(s.ctx, job)
-			return
+			return true
 		}
 		s.persistState(job.ID, job.State)
-		return
+		return true
 	}
 
-	s.applyLifecycle(job)
+	return false
 }
 
 // beginExecution marks a job as running and persists state.

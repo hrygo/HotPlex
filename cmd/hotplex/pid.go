@@ -9,19 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/cli/pidutil"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/service"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 )
 
 func gatewayPIDPath() string {
-	return filepath.Join(config.HotplexHome(), ".pids", "gateway.pid")
-}
-
-type gatewayState struct {
-	PID        int    `json:"pid"`
-	ConfigPath string `json:"config,omitempty"`
-	DevMode    bool   `json:"dev,omitempty"`
+	return pidutil.PIDPath()
 }
 
 func writeGatewayState(configPath string, devMode bool) error {
@@ -29,7 +24,7 @@ func writeGatewayState(configPath string, devMode bool) error {
 	if err := os.MkdirAll(filepath.Dir(pidPath), 0o755); err != nil {
 		return err
 	}
-	state := gatewayState{
+	state := pidutil.GatewayState{
 		PID:        os.Getpid(),
 		ConfigPath: configPath,
 		DevMode:    devMode,
@@ -38,15 +33,10 @@ func writeGatewayState(configPath string, devMode bool) error {
 	return os.WriteFile(pidPath, data, 0o644)
 }
 
-func readGatewayState() (*gatewayState, error) {
-	data, err := os.ReadFile(gatewayPIDPath())
+func readGatewayState() (*pidutil.GatewayState, error) {
+	state, err := pidutil.ReadState()
 	if err != nil {
 		return nil, fmt.Errorf("gateway not running (no PID file)")
-	}
-
-	var state gatewayState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("invalid PID file content")
 	}
 
 	if err := proc.IsProcessAlive(state.PID); err != nil {
@@ -57,7 +47,7 @@ func readGatewayState() (*gatewayState, error) {
 		return nil, fmt.Errorf("gateway not running (PID %d: %w)", state.PID, err)
 	}
 
-	return &state, nil
+	return state, nil
 }
 
 func removeGatewayState() {
