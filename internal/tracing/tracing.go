@@ -32,7 +32,7 @@ var (
 // If OTEL_SDK_DISABLED=true or no OTEL_EXPORTER_OTLP_ENDPOINT is set,
 // a no-op tracer is installed and this function logs a warning.
 // Init is idempotent — subsequent calls are no-ops.
-func Init(ctx context.Context, log *slog.Logger, serviceName string) {
+func Init(ctx context.Context, log *slog.Logger, serviceName, serviceVersion string) {
 	initOnce.Do(func() {
 		if os.Getenv("OTEL_SDK_DISABLED") == "true" {
 			Tracer = noopTracer()
@@ -60,7 +60,7 @@ func Init(ctx context.Context, log *slog.Logger, serviceName string) {
 		res, err := resource.New(ctx,
 			resource.WithAttributes(
 				semconv.ServiceName(serviceName),
-				semconv.ServiceVersion("1.19.0"),
+				semconv.ServiceVersion(serviceVersion),
 			),
 		)
 		if err != nil {
@@ -98,8 +98,8 @@ func noopTracer() trace.Tracer {
 	return noop.NewTracerProvider().Tracer("hotplex")
 }
 
-// SpanFromContext returns Tracer if non-nil, otherwise returns a no-op tracer.
-func SpanFromContext(ctx context.Context) trace.Tracer {
+// GetTracer returns the global Tracer if initialized, otherwise returns a no-op tracer.
+func GetTracer() trace.Tracer {
 	if Tracer != nil {
 		return Tracer
 	}
