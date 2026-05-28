@@ -132,8 +132,8 @@ export default function CronDetailPage() {
     if (!job || !hasChanges) return;
     try {
       setSaving(true);
-      const updates: Partial<CronJob> = {};
-      if (schedule !== job.schedule) updates.schedule = schedule;
+      const updates: Record<string, unknown> = {};
+      if (schedule !== formatScheduleStr(job.schedule)) updates.schedule = schedule;
       if (message !== job.message) updates.message = message;
       if (maxRuns !== (job.max_runs != null ? String(job.max_runs) : '')) {
         updates.max_runs = maxRuns ? Number(maxRuns) : undefined;

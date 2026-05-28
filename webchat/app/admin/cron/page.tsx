@@ -19,7 +19,7 @@ function formatSchedule(s: CronJob['schedule']): string {
     case 'cron': return s.expr ?? '—';
     case 'every': return s.every_ms ? `every ${formatDuration(s.every_ms)}` : '—';
     case 'at': return s.at ?? '—';
-    default: return String((s as Record<string, unknown>).kind ?? '—');
+    default: return s.kind ?? '—';
   }
 }
 
