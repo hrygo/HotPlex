@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
 import { formatDuration } from '@/lib/utils/format-duration';
-import type { CronJob } from '@/lib/types/admin';
+import type { CronJob, CronSchedule } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -20,6 +20,33 @@ function formatScheduleStr(s?: CronJob['schedule']): string {
     case 'at': return `at:${s.at ?? ''}`;
     default: return '';
   }
+}
+
+function parseDurationToMs(dur: string): number {
+  let ms = 0;
+  const re = /(\d+)(d|h|m|s)/g;
+  let m;
+  while ((m = re.exec(dur)) !== null) {
+    const n = parseInt(m[1], 10);
+    switch (m[2]) {
+      case 'd': ms += n * 86400000; break;
+      case 'h': ms += n * 3600000; break;
+      case 'm': ms += n * 60000; break;
+      case 's': ms += n * 1000; break;
+    }
+  }
+  return ms;
+}
+
+function parseScheduleStr(s: string): CronSchedule | null {
+  const t = s.trim();
+  if (t.startsWith('cron:')) return { kind: 'cron', expr: t.slice(5).trim() };
+  if (t.startsWith('every:')) {
+    const ms = parseDurationToMs(t.slice(6));
+    return ms > 0 ? { kind: 'every', every_ms: ms } : null;
+  }
+  if (t.startsWith('at:')) return { kind: 'at', at: t.slice(3).trim() };
+  return null;
 }
 
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -65,6 +92,7 @@ export default function CronDetailPage() {
 
   // Editable fields
   const [schedule, setSchedule] = useState('');
+  const [scheduleObj, setScheduleObj] = useState<CronSchedule | null>(null);
   const [message, setMessage] = useState('');
   const [maxRuns, setMaxRuns] = useState<string>('');
   const [enabled, setEnabled] = useState(true);
@@ -92,6 +120,7 @@ export default function CronDetailPage() {
       } else {
         setJob(found);
         setSchedule(formatScheduleStr(found.schedule));
+        setScheduleObj(found.schedule ?? null);
         setMessage(found.payload?.message ?? '');
         setMaxRuns(found.max_runs != null ? String(found.max_runs) : '');
         setEnabled(found.enabled);
@@ -124,7 +153,14 @@ export default function CronDetailPage() {
     try {
       setSaving(true);
       const updates: Record<string, unknown> = {};
-      if (schedule !== formatScheduleStr(job.schedule)) updates.schedule = schedule;
+      if (schedule !== formatScheduleStr(job.schedule)) {
+        const parsed = parseScheduleStr(schedule);
+        if (!parsed) {
+          showToast('Invalid schedule format. Use cron:EXPR, every:DURATION, or at:TIMESTAMP.', 'error');
+          return;
+        }
+        updates.schedule = parsed;
+      }
       if (message !== (job.payload?.message ?? '')) updates.payload = { ...job.payload, message };
       if (maxRuns !== (job.max_runs != null ? String(job.max_runs) : '')) {
         updates.max_runs = maxRuns ? Number(maxRuns) : undefined;
@@ -134,6 +170,7 @@ export default function CronDetailPage() {
       setJob((prev) => {
         if (!prev) return prev;
         const updated = { ...prev };
+        if (updates.schedule) updated.schedule = updates.schedule as CronSchedule;
         if (updates.payload) updated.payload = { ...prev.payload, ...(updates.payload as Record<string, unknown>) };
         if (updates.max_runs !== undefined) updated.max_runs = updates.max_runs as number;
         if (updates.enabled !== undefined) updated.enabled = updates.enabled as boolean;
@@ -436,6 +473,7 @@ export default function CronDetailPage() {
               <button
                 onClick={() => {
                   setSchedule(formatScheduleStr(job.schedule));
+                  setScheduleObj(job.schedule ?? null);
                   setMessage(job.payload?.message ?? '');
                   setMaxRuns(job.max_runs != null ? String(job.max_runs) : '');
                   setEnabled(job.enabled);

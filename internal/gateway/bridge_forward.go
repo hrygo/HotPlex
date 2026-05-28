@@ -90,7 +90,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation)
 		tnCancel()
 		if err != nil {
-			b.log.Debug("turns: restore turn num", "error", err)
+			b.log.Warn("turns: restore turn num", "error", err)
 		}
 		if tn > 0 {
 			acc.TurnCount = tn
