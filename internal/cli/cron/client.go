@@ -3,7 +3,6 @@ package croncli
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/cli/pidutil"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/cron"
 	"github.com/hrygo/hotplex/internal/dbutil"
@@ -31,13 +31,6 @@ type (
 	Store   = cron.Store
 	CronJob = cron.CronJob
 )
-
-// gatewayState mirrors cmd/hotplex/pid.go gatewayState to avoid circular imports.
-type gatewayState struct {
-	PID        int    `json:"pid"`
-	ConfigPath string `json:"config,omitempty"`
-	DevMode    bool   `json:"dev,omitempty"`
-}
 
 // OpenStore opens the config, initializes the DB, and returns cron store + eventstore + cleanup.
 func OpenStore(ctx context.Context, configPath string) (cron.Store, eventstore.TurnQuerier, func(), error) {
@@ -308,15 +301,9 @@ func QueryHistory(ctx context.Context, store cron.Store, evStore eventstore.Turn
 
 // NotifyGateway sends SIGHUP to the running gateway to reload the cron index.
 func NotifyGateway() error {
-	pidPath := filepath.Join(config.HotplexHome(), ".pids", "gateway.pid")
-	data, err := os.ReadFile(pidPath)
+	state, err := pidutil.ReadState()
 	if err != nil {
 		return nil // gateway not running, nothing to notify
-	}
-
-	var state gatewayState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("parse gateway PID file: %w", err)
 	}
 	if state.PID <= 0 {
 		return nil
@@ -329,13 +316,8 @@ func NotifyGateway() error {
 // the running gateway is using. Returns "" if the gateway is not running or
 // the PID file doesn't exist.
 func gatewayConfigPath() string {
-	pidPath := filepath.Join(config.HotplexHome(), ".pids", "gateway.pid")
-	data, err := os.ReadFile(pidPath)
+	state, err := pidutil.ReadState()
 	if err != nil {
-		return ""
-	}
-	var state gatewayState
-	if err := json.Unmarshal(data, &state); err != nil {
 		return ""
 	}
 	if err := proc.IsProcessAlive(state.PID); err != nil {

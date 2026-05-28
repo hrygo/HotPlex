@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/internal/cli/pidutil"
 )
 
 func TestGatewayStateWriteReadRemove(t *testing.T) {
@@ -30,7 +32,7 @@ func TestGatewayStateWriteReadRemove(t *testing.T) {
 	t.Setenv("HOME", origHome)
 }
 
-func requireConfigPath(t *testing.T, state *gatewayState) {
+func requireConfigPath(t *testing.T, state *pidutil.GatewayState) {
 	t.Helper()
 	require.NotNil(t, state)
 	require.Equal(t, os.Getpid(), state.PID)

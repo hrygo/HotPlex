@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hrygo/hotplex/internal/cli/output"
+	"github.com/hrygo/hotplex/internal/cli/pidutil"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 )
@@ -204,7 +205,7 @@ func startDaemon(configPath string, devMode bool) error {
 	childPID := daemonCmd.Process.Pid
 	pidPath := gatewayPIDPath()
 	if err := os.MkdirAll(filepath.Dir(pidPath), 0o755); err == nil {
-		state := gatewayState{PID: childPID, ConfigPath: configPath, DevMode: devMode}
+		state := pidutil.GatewayState{PID: childPID, ConfigPath: configPath, DevMode: devMode}
 		data, _ := json.Marshal(state)
 		_ = os.WriteFile(pidPath, data, 0o644)
 	}
