@@ -20,7 +20,7 @@ func (a *AdminAPI) HandleListBotConfigs(w http.ResponseWriter, r *http.Request) 
 	}
 	result, err := a.botConfig.ListBotConfigs(r.Context())
 	if err != nil {
-		a.log.Error("admin: list bot configs", "error", err)
+		a.log.Error("admin: list bot configs", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -44,7 +44,7 @@ func (a *AdminAPI) HandleGetBotConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.botConfig.GetBotConfig(r.Context(), name)
 	if err != nil {
-		a.log.Error("admin: get bot config", "error", err)
+		a.log.Error("admin: get bot config", "err", err)
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -74,7 +74,7 @@ func (a *AdminAPI) HandleGetAgentConfigFile(w http.ResponseWriter, r *http.Reque
 	}
 	result, err := a.botConfig.GetAgentConfigFile(r.Context(), name, fileName)
 	if err != nil {
-		a.log.Error("admin: get agent config file", "error", err)
+		a.log.Error("admin: get agent config file", "err", err)
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -98,7 +98,7 @@ func (a *AdminAPI) HandleSystemPromptPreview(w http.ResponseWriter, r *http.Requ
 	}
 	result, err := a.botConfig.GetSystemPromptPreview(r.Context(), name)
 	if err != nil {
-		a.log.Error("admin: system prompt preview", "error", err)
+		a.log.Error("admin: system prompt preview", "err", err)
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -127,7 +127,7 @@ func (a *AdminAPI) HandleUpdateBotConfig(w http.ResponseWriter, r *http.Request)
 	}
 	attrs := extractBotConfigAttrs(body)
 	if err := a.botConfig.UpdateBotConfig(r.Context(), name, attrs); err != nil {
-		a.log.Error("admin: update bot config", "error", err)
+		a.log.Error("admin: update bot config", "err", err)
 		http.Error(w, "update failed", http.StatusBadRequest)
 		return
 	}
@@ -157,7 +157,7 @@ func (a *AdminAPI) HandleCreateBot(w http.ResponseWriter, r *http.Request) {
 	}
 	attrs := extractBotConfigAttrs(body)
 	if err := a.botConfig.CreateBot(r.Context(), name, attrs); err != nil {
-		a.log.Error("admin: create bot", "error", err)
+		a.log.Error("admin: create bot", "err", err)
 		http.Error(w, "create failed", http.StatusBadRequest)
 		return
 	}
@@ -185,7 +185,7 @@ func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 		if isConflictError(err) {
 			status = http.StatusConflict
 		}
-		a.log.Error("admin: delete bot", "error", err)
+		a.log.Error("admin: delete bot", "err", err)
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
@@ -224,7 +224,7 @@ func (a *AdminAPI) HandleWriteAgentConfigFile(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := a.botConfig.WriteAgentConfigFile(r.Context(), name, fileName, body.Content); err != nil {
-		a.log.Error("admin: write agent config file", "error", err)
+		a.log.Error("admin: write agent config file", "err", err)
 		http.Error(w, "write failed", http.StatusBadRequest)
 		return
 	}
