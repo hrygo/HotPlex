@@ -386,15 +386,9 @@ func (m *Manager) drainStderr() {
 			m.log.Error("proc: drainStderr panic", "panic", r)
 		}
 	}()
-	buf := make([]byte, 4096)
-	for {
-		n, err := m.stderr.Read(buf)
-		if n > 0 {
-			m.log.Info("proc: stderr", "msg", string(buf[:n]))
-		}
-		if err != nil {
-			break
-		}
+	scanner := bufio.NewScanner(m.stderr)
+	for scanner.Scan() {
+		m.log.Info("proc: stderr", "msg", scanner.Text())
 	}
 }
 
