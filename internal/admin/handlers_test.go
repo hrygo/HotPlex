@@ -96,7 +96,7 @@ func (m *mockConfig) Get() *config.Config {
 	return &config.Config{
 		Admin: config.AdminConfig{
 			Tokens:        []string{"test-token"},
-			DefaultScopes: []string{ScopeSessionRead, ScopeSessionWrite, ScopeSessionKill, ScopeStatsRead, ScopeHealthRead, ScopeAdminRead, ScopeConfigRead},
+			DefaultScopes: []string{ScopeSessionRead, ScopeSessionWrite, ScopeSessionKill, ScopeStatsRead, ScopeHealthRead, ScopeAdminWrite},
 		},
 	}
 }

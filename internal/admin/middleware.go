@@ -28,10 +28,23 @@ func hasScope(r *http.Request, required string) bool {
 	if slices.Contains(granted, required) {
 		return true
 	}
-	// Check implied scopes: if the user holds a higher scope, it grants the required one.
-	for _, s := range granted {
-		if implied, ok := scopeImplies[s]; ok && slices.Contains(implied, required) {
-			return true
+	// Check implied scopes with transitive closure:
+	// admin:write → admin:read → config:read
+	visited := map[string]bool{}
+	queue := make([]string, len(granted))
+	copy(queue, granted)
+	for len(queue) > 0 {
+		s := queue[0]
+		queue = queue[1:]
+		if visited[s] {
+			continue
+		}
+		visited[s] = true
+		if implied, ok := scopeImplies[s]; ok {
+			if slices.Contains(implied, required) {
+				return true
+			}
+			queue = append(queue, implied...)
 		}
 	}
 	return false

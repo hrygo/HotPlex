@@ -131,7 +131,7 @@ Admin API 管理端点配置。
 | `addr` | string | `localhost:9999` | `HOTPLEX_ADMIN_ADDR` | Admin API 监听地址。默认仅绑定 localhost |
 | `tokens` | []string | `[]` | `HOTPLEX_ADMIN_TOKEN_1..N` | 认证 token 列表。**只能通过环境变量设置**，支持编号后缀用于轮换 |
 | `token_scopes` | map[string][]string | `nil` | — | 每 token 的权限范围映射 |
-| `default_scopes` | []string | `["session:read", "stats:read", "health:read"]` | — | 未配置 scopes 的 token 的默认权限范围 |
+| `default_scopes` | []string | `["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]` | — | 未配置 scopes 的 token 的默认权限范围。`admin:write` 隐含 `admin:read` → `config:read` |
 | `ip_whitelist_enabled` | bool | `false` | — | 是否启用 IP 白名单 |
 | `allowed_cidrs` | []string | `["127.0.0.0/8", "10.0.0.0/8"]` | — | 允许访问的 CIDR 列表 |
 | `rate_limit_enabled` | bool | `true` | — | 是否启用速率限制 |

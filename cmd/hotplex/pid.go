@@ -105,7 +105,10 @@ func findRunningGateway() (*gatewayInstance, error) {
 func stopGateway(inst *gatewayInstance) error {
 	switch inst.Source {
 	case sourcePID:
-		if err := proc.GracefulTerminate(inst.PID); err != nil {
+		// Use Terminate (direct PID signal) instead of GracefulTerminate (process
+		// group signal). The gateway may not be a process group leader when started
+		// in foreground mode (PGID inherited from parent shell).
+		if err := proc.Terminate(inst.PID); err != nil {
 			return fmt.Errorf("stop PID %d: %w", inst.PID, err)
 		}
 		removeGatewayState()

@@ -88,7 +88,7 @@ log:
 | `addr` | string | `:9999` | — | Admin API 监听地址。生产环境应绑定到内网 IP（如 `10.0.0.1:9999`）或通过 `allowed_cidrs` 限制访问 |
 | `tokens` | []string | `[]` | ✅ | 授权令牌列表。通过 `HOTPLEX_ADMIN_TOKEN_1..N` 编号式环境变量设置。每个请求需携带 `Authorization: Bearer <token>` 头。支持多令牌用于无损轮转 |
 | `token_scopes` | map | `{}` | — | 令牌到权限的 RBAC 映射。key 为令牌值，value 为权限列表（如 `["session:read", "session:write"]`）。未映射的令牌使用 `default_scopes` |
-| `default_scopes` | []string | `["session:read", "stats:read", "health:read"]` | — | 未在 `token_scopes` 中显式映射的令牌的默认权限集 |
+| `default_scopes` | []string | `["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]` | — | 未在 `token_scopes` 中显式映射的令牌的默认权限集。`admin:write` 隐含 `admin:read` → `config:read` |
 | `ip_whitelist_enabled` | bool | `false` | — | 启用 CIDR 白名单。开启后仅 `allowed_cidrs` 中的网段可访问 Admin API。Docker/Kubernetes 环境建议使用网络策略替代 |
 | `allowed_cidrs` | []string | `127.0.0.0/8, 10.0.0.0/8` | — | 信任的 CIDR 网段列表。仅当 `ip_whitelist_enabled: true` 时生效 |
 | `rate_limit_enabled` | bool | `true` | ✅ | 启用基于令牌桶的速率限制。按客户端 IP 独立计数，防止单个客户端滥用管理接口 |

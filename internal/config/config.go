@@ -768,7 +768,7 @@ func Default() *Config {
 			Addr:               "localhost:9999",
 			Tokens:             nil,
 			TokenScopes:        nil,
-			DefaultScopes:      []string{"session:read", "stats:read", "health:read"},
+			DefaultScopes:      []string{"session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"},
 			IPWhitelistEnabled: false,
 			AllowedCIDRs:       []string{"127.0.0.0/8", "10.0.0.0/8"},
 			RateLimitEnabled:   true,

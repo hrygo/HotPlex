@@ -32,8 +32,8 @@ admin:
     - "my-admin-token"
   token_scopes:                    # 细粒度 scope token
     "ops-token": ["session:read", "stats:read", "health:read"]
-    "admin-token": ["session:read", "session:write", "session:delete", "stats:read", "health:read", "config:read", "config:write", "admin:read", "admin:write"]
-  default_scopes: ["session:read", "stats:read", "health:read"]  # 简单 token 的默认 scope
+    "admin-token": ["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]
+  default_scopes: ["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]
 ```
 
 ### Scope 权限矩阵
