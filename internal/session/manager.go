@@ -850,7 +850,8 @@ func (m *Manager) RepairRunningSessions(ctx context.Context) (int, error) {
 	return repaired, nil
 }
 
-// Stats returns the active worker pool utilization.
+// Stats returns the current worker pool counts: total active workers,
+// maximum pool size, and number of unique users with active sessions.
 func (m *Manager) Stats() (totalWorkers, maxWorkers, uniqueUsers int) {
 	total, max, users := m.pool.Stats()
 	return total, max, users
