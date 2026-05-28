@@ -34,9 +34,9 @@ function formatDuration(ms: number): string {
   return hr % 24 ? `${d}d${hr % 24}h` : `${d}d`;
 }
 
-function formatTime(iso?: string): string {
-  if (!iso) return '--';
-  const date = new Date(iso);
+function formatTime(ms?: number): string {
+  if (!ms) return '--';
+  const date = new Date(ms);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);
@@ -45,7 +45,6 @@ function formatTime(iso?: string): string {
   const diffDay = Math.floor(diffMs / 86400000);
 
   if (diffSec < 0) {
-    // Future time
     const futureMs = -diffMs;
     const futureMin = Math.floor(futureMs / 60000);
     const futureHour = Math.floor(futureMs / 3600000);
@@ -275,9 +274,9 @@ export default function CronPage() {
                   >
                     {job.name}
                   </Link>
-                  {job.message && (
-                    <span className="text-[10px] text-[var(--text-faint)] truncate" title={job.message}>
-                      {job.message}
+                  {job.payload?.message && (
+                    <span className="text-[10px] text-[var(--text-faint)] truncate" title={job.payload.message}>
+                      {job.payload.message}
                     </span>
                   )}
                 </div>
@@ -306,18 +305,18 @@ export default function CronPage() {
                 </button>
 
                 {/* Last run */}
-                <span className="text-xs text-[var(--text-muted)]" title={job.last_run_at}>
-                  {formatTime(job.last_run_at)}
+                <span className="text-xs text-[var(--text-muted)]" title={job.state?.last_run_at_ms ? new Date(job.state.last_run_at_ms).toISOString() : undefined}>
+                  {formatTime(job.state?.last_run_at_ms)}
                 </span>
 
                 {/* Next run */}
-                <span className="text-xs text-[var(--text-muted)]" title={job.next_run_at}>
-                  {job.enabled ? formatTime(job.next_run_at) : '--'}
+                <span className="text-xs text-[var(--text-muted)]" title={job.state?.next_run_at_ms ? new Date(job.state.next_run_at_ms).toISOString() : undefined}>
+                  {job.enabled ? formatTime(job.state?.next_run_at_ms) : '--'}
                 </span>
 
                 {/* Runs count / max */}
                 <span className="text-xs text-[var(--text-muted)]">
-                  {job.runs_count ?? 0}
+                  {job.state?.run_count ?? 0}
                   {job.max_runs != null ? <span className="text-[var(--text-faint)]"> / {job.max_runs}</span> : null}
                 </span>
 

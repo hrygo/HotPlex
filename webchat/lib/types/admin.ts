@@ -80,19 +80,34 @@ export interface CronSchedule {
   tz?: string;
 }
 
+export interface CronPayload {
+  kind: string;
+  message: string;
+  target_session_id?: string;
+  allowed_tools?: string[];
+  worker_type?: string;
+}
+
+export interface CronJobState {
+  next_run_at_ms?: number;
+  last_run_at_ms?: number;
+  run_count?: number;
+  last_status?: string;
+  consecutive_errors?: number;
+}
+
 export interface CronJob {
   id: string;
   name: string;
+  description?: string;
   schedule: CronSchedule;
-  message: string;
-  bot_id: string;
-  owner_id: string;
+  payload: CronPayload;
   enabled: boolean;
+  bot_id?: string;
+  owner_id?: string;
   max_runs?: number;
-  runs_count?: number;
-  next_run_at?: string;
-  last_run_at?: string;
   expires_at?: string;
+  state?: CronJobState;
 }
 
 // --- API Key ---
