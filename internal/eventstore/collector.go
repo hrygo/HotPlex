@@ -450,6 +450,7 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 		}
 	}()
 
+	var batchErr error
 	for _, req := range batch {
 		var err error
 		switch {
@@ -464,19 +465,17 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 				"kind", kindOf(req),
 				"err", err,
 			)
-			// continue rather than return: on PostgreSQL a failed statement does not
-			// poison the transaction, so remaining appends may succeed. On SQLite a
-			// failed statement invalidates the tx and subsequent appends will also fail,
-			// producing warn logs for each — this is acceptable noise versus silently
-			// dropping the rest of the batch.
-			continue
+			batchErr = err
+			break
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		c.log.Error("eventstore: batch commit", "err", err)
+	if batchErr == nil {
+		if err := tx.Commit(); err != nil {
+			c.log.Error("eventstore: batch commit", "err", err)
+		}
+		done = true
 	}
-	done = true
 }
 
 // CaptureDeltaString accumulates a message.delta content string directly,
