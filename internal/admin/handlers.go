@@ -3,8 +3,10 @@ package admin
 import (
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -317,4 +319,15 @@ func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"status": "restarting",
 	})
+}
+
+// respondStoreError handles store/DB operation errors without leaking internal
+// details. Not-found errors return 404; all others are logged and return 500.
+func respondStoreError(w http.ResponseWriter, log *slog.Logger, op string, err error) {
+	if strings.Contains(err.Error(), "not found") {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	log.Error(op, "error", err)
+	http.Error(w, "internal error", http.StatusInternalServerError)
 }

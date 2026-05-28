@@ -30,7 +30,7 @@ func (a *AdminAPI) HandleCronList(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.cron.ListJobs(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondStoreError(w, a.log, "admin: cron list jobs", err)
 		return
 	}
 	respondJSON(w, result)
@@ -48,7 +48,7 @@ func (a *AdminAPI) HandleCronGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	result, err := a.cron.GetJob(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		respondStoreError(w, a.log, "admin: cron get job", err)
 		return
 	}
 	respondJSON(w, result)
@@ -110,7 +110,7 @@ func (a *AdminAPI) HandleCronDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if err := a.cron.DeleteJob(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		respondStoreError(w, a.log, "admin: cron delete job", err)
 		return
 	}
 	a.log.Info("admin: cron job deleted", "job_id", id, "admin", adminKeyPrefix(r))
@@ -128,7 +128,7 @@ func (a *AdminAPI) HandleCronTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if err := a.cron.TriggerJob(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		respondStoreError(w, a.log, "admin: cron trigger job", err)
 		return
 	}
 	a.log.Info("admin: cron job triggered", "job_id", id, "admin", adminKeyPrefix(r))
@@ -147,7 +147,7 @@ func (a *AdminAPI) HandleCronRunHistory(w http.ResponseWriter, r *http.Request) 
 	id := r.PathValue("id")
 	result, err := a.cron.RunHistory(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondStoreError(w, a.log, "admin: cron run history", err)
 		return
 	}
 	respondJSON(w, result)
