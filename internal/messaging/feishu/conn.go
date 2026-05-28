@@ -111,9 +111,12 @@ func (c *FeishuConn) getStreamCtrl() *StreamingCardController {
 // resetStreamCtrl replaces a closed streaming controller with a fresh one
 // so subsequent events can create a new card via lazy-init.
 func (c *FeishuConn) resetStreamCtrl() {
+	c.mu.RLock()
+	tc, m, br, wd := c.turnCount, c.lastModel, c.lastBranch, c.workDir
+	c.mu.RUnlock()
 	newCtrl := NewStreamingCardController(
 		c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log,
-		c.adapter.resolveBotName(), c.turnCount, c.lastModel, c.lastBranch, c.workDir,
+		c.adapter.resolveBotName(), tc, m, br, wd,
 		c.adapter.phrases,
 	)
 	c.mu.Lock()
@@ -499,7 +502,10 @@ func (c *FeishuConn) writeContent(ctx context.Context, env *events.Envelope, tex
 		c.adapter.Log.Info("feishu: streaming card rotated",
 			"old_msg_id", oldMsgID)
 
-		newCtrl := NewStreamingCardController(c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log, c.adapter.resolveBotName(), c.turnCount+1, c.lastModel, c.lastBranch, c.workDir, c.adapter.phrases)
+		c.mu.RLock()
+		tc, m, br, wd := c.turnCount, c.lastModel, c.lastBranch, c.workDir
+		c.mu.RUnlock()
+		newCtrl := NewStreamingCardController(c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log, c.adapter.resolveBotName(), tc+1, m, br, wd, c.adapter.phrases)
 		c.mu.Lock()
 		c.streamCtrl = newCtrl
 		if oldMsgID != "" {

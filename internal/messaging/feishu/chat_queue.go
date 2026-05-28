@@ -75,6 +75,9 @@ func (q *ChatQueue) runWorker(chatID string, w *chatWorker) {
 	defer q.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
+			q.mu.Lock()
+			delete(q.workers, chatID)
+			q.mu.Unlock()
 			if q.log != nil {
 				q.log.Error("feishu: panic in chat queue worker", "chat_id", chatID, "panic", r, "stack", string(debug.Stack()))
 			}

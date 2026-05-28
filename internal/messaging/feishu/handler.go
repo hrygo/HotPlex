@@ -185,11 +185,13 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 	if a.checkPendingInteraction(ctx, text, userID, conn) {
 		return nil // text consumed as interaction response
 	}
+	var oldTypingRid, oldPlatformMsgID string
 	conn.mu.Lock()
 	// Clean up stale reactions from previous message before switching platformMsgID.
 	if conn.platformMsgID != "" && conn.platformMsgID != platformMsgID {
 		if conn.typingRid != "" {
-			_ = a.RemoveTypingIndicator(context.Background(), conn.platformMsgID, conn.typingRid)
+			oldTypingRid = conn.typingRid
+			oldPlatformMsgID = conn.platformMsgID
 			conn.typingRid = ""
 		}
 	}
@@ -197,6 +199,10 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 	conn.platformMsgID = platformMsgID
 	conn.chatType = chatType
 	conn.mu.Unlock()
+
+	if oldTypingRid != "" {
+		_ = a.RemoveTypingIndicator(context.Background(), oldPlatformMsgID, oldTypingRid)
+	}
 
 	// Typing indicator: add reaction to user's message (non-blocking, failure is non-fatal).
 	if platformMsgID != "" {

@@ -2,6 +2,8 @@ package messaging
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -73,7 +75,9 @@ func (s *pgStore) Classify(ctx context.Context, platform, chatID, botID, userID 
 	).Scan(&lastCreatedAt)
 
 	if err != nil {
-		// No prior record — first contact, always welcome.
+		if !errors.Is(err, sql.ErrNoRows) {
+			s.log.Warn("chat_access: classify query failed", "err", err)
+		}
 		return ChatAccessNew
 	}
 
@@ -105,7 +109,8 @@ func (s *pgStore) Classify(ctx context.Context, platform, chatID, botID, userID 
 		platform, userID, botID,
 	).Scan(&lastAct)
 	if err != nil {
-		return ChatAccessReturning
+		s.log.Warn("chat_access: activity query failed", "err", err)
+		return ChatAccessActive // suppress welcome on DB error to avoid spam
 	}
 	since := now - lastAct
 	if since > 3600 {

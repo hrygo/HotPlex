@@ -52,11 +52,11 @@ Worker 是 Gateway 的子进程。Gateway 停止 = Worker 死亡。`hotplex gate
 
 ```go
 if pgid > 0 {
-    _ = GracefulTerminate(pgid)  // syscall.Kill(-pgid, SIGTERM)
+    _ = proc.Terminate(pgid)  // single-PID SIGTERM
 }
 ```
 
-`TerminateAllWorkers()` 对每个 Worker 调用 `GracefulTerminate(workerPGID)`，发送 SIGTERM 到整个进程组。restart CLI 作为 Worker 的孙子进程，继承 Worker 的 PGID，被连带杀死。
+`TerminateAllWorkers()` 对每个 Worker 调用 `proc.Terminate(workerPID)`，发送 SIGTERM 到 Worker 进程。restart CLI 作为 Worker 的孙子进程，继承 Worker 的 PGID，被连带杀死。
 
 ### 1.4 次要问题：竞态窗口
 
@@ -256,9 +256,9 @@ func removeRestartMarker()
        → SCM: stop + start
 
      PID 模式:
-       a. proc.GracefulTerminate(oldPID) — SIGTERM
+       a. proc.Terminate(oldPID) — SIGTERM
        b. waitForProcessExit(oldPID, 30s) — 等待退出
-       c. 若仍存活: proc.ForceKill(oldPID)
+       c. 若仍存活: proc.ForceKillProcess(oldPID)
        d. removeGatewayState() — 清理旧 PID 文件
        e. startDaemon(configPath, devMode) — 启动新 Gateway
        f. 验证新 Gateway 存活 (1s)
@@ -335,8 +335,8 @@ Cron executor 构造的 prompt 中可以包含 `hotplex gateway restart --detach
 | `waitForProcessExit()` | `pid.go:128` | 轮询等待进程退出 |
 | `startDaemon()` | `gateway_cmd.go:147` | 启动 daemon Gateway |
 | `daemonSysProcAttr()` | `daemon_unix.go` | 平台 SysProcAttr 参考 |
-| `proc.GracefulTerminate()` | `proc/signal_unix.go` | SIGTERM 到进程组 |
-| `proc.ForceKill()` | `proc/signal_unix.go` | SIGKILL 到进程组 |
+| `proc.Terminate()` | `proc/signal_unix.go` | SIGTERM 到单个进程 |
+| `proc.ForceKillProcess()` | `proc/signal_unix.go` | SIGKILL 到单个进程 |
 | `proc.IsProcessAlive()` | `proc/signal_unix.go` | 进程存活检查 |
 | `service.NewManager().Restart()` | `service/manager_*.go` | 服务重启 |
 

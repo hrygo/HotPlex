@@ -187,7 +187,9 @@ func (c *Collector) flushAndAccumulate(sessionID string, seq int64, isReasoning 
 		acc = c.getOrCreateAccum(sessionID)
 	}
 	if acc != nil {
-		acc.append(seq, data)
+		if err := acc.append(seq, data); err != nil {
+			c.log.Warn("eventstore: delta unmarshal failed", "session_id", sessionID, "err", err)
+		}
 	}
 	c.accumMu.Unlock()
 
@@ -448,6 +450,7 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 		}
 	}()
 
+	var batchErr error
 	for _, req := range batch {
 		var err error
 		switch {
@@ -462,14 +465,17 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 				"kind", kindOf(req),
 				"err", err,
 			)
-			return // SQLite: failed statement aborts tx, remaining appends would also fail.
+			batchErr = err
+			break
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		c.log.Error("eventstore: batch commit", "err", err)
+	if batchErr == nil {
+		if err := tx.Commit(); err != nil {
+			c.log.Error("eventstore: batch commit", "err", err)
+		}
+		done = true
 	}
-	done = true
 }
 
 // CaptureDeltaString accumulates a message.delta content string directly,
@@ -516,13 +522,15 @@ func newDeltaAccumulator(eventType events.Kind) *deltaAccumulator {
 	return &deltaAccumulator{eventType: eventType}
 }
 
-func (a *deltaAccumulator) append(seq int64, data json.RawMessage) {
+func (a *deltaAccumulator) append(seq int64, data json.RawMessage) error {
 	var delta struct {
 		Content string `json:"content"`
 	}
-	_ = json.Unmarshal(data, &delta)
-
+	if err := json.Unmarshal(data, &delta); err != nil {
+		return fmt.Errorf("unmarshal delta content: %w", err)
+	}
 	a.appendRaw(seq, delta.Content)
+	return nil
 }
 
 func (a *deltaAccumulator) appendRaw(seq int64, content string) {
