@@ -220,7 +220,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 			continue
 		}
 
-		_, span := tracing.SpanFromContext(context.Background()).Start(context.Background(), "conn.recv")
+		_, span := tracing.GetTracer().Start(context.Background(), "conn.recv")
 		span.SetAttributes(
 			attribute.String("session_id", c.sessionID),
 			attribute.String("event_type", string(env.Event.Type)),
@@ -240,7 +240,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 // performInit reads and processes the AEP init handshake message.
 // It blocks until either an init message is processed or an error occurs.
 func (c *Conn) performInit(auth connAuth, sm connSM) error {
-	_, span := tracing.SpanFromContext(context.Background()).Start(context.Background(), "conn.init")
+	_, span := tracing.GetTracer().Start(context.Background(), "conn.init")
 	defer span.End()
 	start := time.Now()
 	defer func() { metrics.InitHandshakeDuration.Observe(time.Since(start).Seconds()) }()

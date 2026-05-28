@@ -150,7 +150,7 @@ func (w *simulatedWorker) Input(_ context.Context, content string, _ map[string]
 	if conn == nil {
 		return fmt.Errorf("worker not started")
 	}
-	go conn.emitEvents(content)
+	conn.emitEvents(content)
 	return nil
 }
 

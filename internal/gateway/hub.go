@@ -281,7 +281,7 @@ func (h *Hub) sendBroadcast(msg *EnvelopeWithConn) (sent bool) {
 // Control-priority messages bypass the broadcast queue.
 // afterDrain functions are called sequentially after the item is routed by Run.
 func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrain ...func()) error {
-	spanCtx, span := tracing.SpanFromContext(ctx).Start(ctx, "hub.send_to_session")
+	spanCtx, span := tracing.GetTracer().Start(ctx, "hub.send_to_session")
 	defer span.End()
 	span.SetAttributes(
 		tracing.Attr("session_id", env.SessionID),
@@ -435,7 +435,7 @@ func (h *Hub) Run() {
 						h.log.Error("hub: panic in routeMessage", "session_id", msg.Env.SessionID, "panic", r, "stack", string(debug.Stack()))
 					}
 				}()
-				_, span := tracing.SpanFromContext(h.ctx).Start(h.ctx, "hub.broadcast")
+				_, span := tracing.GetTracer().Start(h.ctx, "hub.broadcast")
 				span.SetAttributes(
 					tracing.Attr("session_id", msg.Env.SessionID),
 					tracing.Attr("event_type", string(msg.Env.Event.Type)),

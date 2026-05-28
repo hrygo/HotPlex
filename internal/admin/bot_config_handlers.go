@@ -2,10 +2,10 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // HandleListBotConfigs returns all registered bot configurations.
@@ -20,8 +20,7 @@ func (a *AdminAPI) HandleListBotConfigs(w http.ResponseWriter, r *http.Request) 
 	}
 	result, err := a.botConfig.ListBotConfigs(r.Context())
 	if err != nil {
-		a.log.Error("admin: list bot configs", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		respondStoreError(w, a.log, "admin: list bot configs", err)
 		return
 	}
 	respondJSON(w, result)
@@ -44,8 +43,7 @@ func (a *AdminAPI) HandleGetBotConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.botConfig.GetBotConfig(r.Context(), name)
 	if err != nil {
-		a.log.Error("admin: get bot config", "err", err)
-		http.Error(w, "not found", http.StatusNotFound)
+		respondStoreError(w, a.log, "admin: get bot config", err)
 		return
 	}
 	respondJSON(w, result)
@@ -74,8 +72,7 @@ func (a *AdminAPI) HandleGetAgentConfigFile(w http.ResponseWriter, r *http.Reque
 	}
 	result, err := a.botConfig.GetAgentConfigFile(r.Context(), name, fileName)
 	if err != nil {
-		a.log.Error("admin: get agent config file", "err", err)
-		http.Error(w, "not found", http.StatusNotFound)
+		respondStoreError(w, a.log, "admin: get agent config file", err)
 		return
 	}
 	respondJSON(w, result)
@@ -98,8 +95,7 @@ func (a *AdminAPI) HandleSystemPromptPreview(w http.ResponseWriter, r *http.Requ
 	}
 	result, err := a.botConfig.GetSystemPromptPreview(r.Context(), name)
 	if err != nil {
-		a.log.Error("admin: system prompt preview", "err", err)
-		http.Error(w, "not found", http.StatusNotFound)
+		respondStoreError(w, a.log, "admin: get system prompt preview", err)
 		return
 	}
 	respondJSON(w, map[string]string{"preview": result})
@@ -181,12 +177,12 @@ func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.botConfig.DeleteBot(r.Context(), name); err != nil {
-		status := http.StatusNotFound
-		if isConflictError(err) {
-			status = http.StatusConflict
+		if errors.Is(err, ErrBotRunning) {
+			a.log.Error("admin: delete bot conflict", "bot", name, "error", err)
+			http.Error(w, "bot is currently running", http.StatusConflict)
+		} else {
+			respondStoreError(w, a.log, "admin: delete bot", err)
 		}
-		a.log.Error("admin: delete bot", "err", err)
-		http.Error(w, http.StatusText(status), status)
 		return
 	}
 	a.log.Info("admin: bot deleted", "bot", name, "admin", adminKeyPrefix(r))
@@ -304,14 +300,4 @@ func toStringSlice(vals []any) []string {
 		}
 	}
 	return result
-}
-
-// isConflictError checks whether the error indicates a conflict
-// (e.g., trying to delete a running bot).
-func isConflictError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "running") || strings.Contains(msg, "conflict")
 }

@@ -274,6 +274,12 @@ func (w *ExecWorker) readOutput(ctx context.Context, stdout io.Reader, entryConn
 			_ = entryConn.Close()
 		}
 	}()
+	// Drain remaining stdout data in background so the pipe writer (child
+	// process) is never blocked. The goroutine exits when proc.Manager.Close
+	// closes the read end of the pipe.
+	defer func() {
+		go func() { _, _ = io.Copy(io.Discard, stdout) }()
+	}()
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)

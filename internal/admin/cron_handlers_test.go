@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/internal/cron"
 )
 
 // --- Mock cron scheduler ---
@@ -207,7 +210,7 @@ func TestHandleCronGet_NotFound(t *testing.T) {
 	t.Parallel()
 	api := cronAPIWithMock(func(mc *mockCronScheduler) {
 		mc.getJobFn = func(_ context.Context, _ string) (any, error) {
-			return nil, errors.New("not found")
+			return nil, fmt.Errorf("%w: missing", cron.ErrJobNotFound)
 		}
 	})
 	w := httptest.NewRecorder()
@@ -295,8 +298,8 @@ func TestHandleCronCreate_SchedulerError(t *testing.T) {
 
 	api.HandleCronCreate(w, r)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "create job")
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, w.Body.String(), "internal error")
 }
 
 func TestHandleCronCreate_NilScheduler(t *testing.T) {
@@ -372,7 +375,7 @@ func TestHandleCronUpdate_SchedulerError(t *testing.T) {
 	t.Parallel()
 	api := cronAPIWithMock(func(mc *mockCronScheduler) {
 		mc.updateJobFn = func(_ context.Context, _ string, _ map[string]any) error {
-			return errors.New("job not found")
+			return fmt.Errorf("%w: missing", cron.ErrJobNotFound)
 		}
 	})
 	w := httptest.NewRecorder()
@@ -382,8 +385,8 @@ func TestHandleCronUpdate_SchedulerError(t *testing.T) {
 
 	api.HandleCronUpdate(w, r)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "update job")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Contains(t, w.Body.String(), "not found")
 }
 
 func TestHandleCronUpdate_NilScheduler(t *testing.T) {
@@ -440,7 +443,7 @@ func TestHandleCronDelete_NotFound(t *testing.T) {
 	t.Parallel()
 	api := cronAPIWithMock(func(mc *mockCronScheduler) {
 		mc.deleteJobFn = func(_ context.Context, _ string) error {
-			return errors.New("not found")
+			return fmt.Errorf("%w: missing", cron.ErrJobNotFound)
 		}
 	})
 	w := httptest.NewRecorder()
@@ -507,7 +510,7 @@ func TestHandleCronTrigger_NotFound(t *testing.T) {
 	t.Parallel()
 	api := cronAPIWithMock(func(mc *mockCronScheduler) {
 		mc.triggerJobFn = func(_ context.Context, _ string) error {
-			return errors.New("job not found")
+			return fmt.Errorf("%w: missing", cron.ErrJobNotFound)
 		}
 	})
 	w := httptest.NewRecorder()

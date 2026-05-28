@@ -1,11 +1,17 @@
 package admin
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/cron"
+	"github.com/hrygo/hotplex/internal/session"
 )
 
 func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
@@ -317,4 +323,17 @@ func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"status": "restarting",
 	})
+}
+
+// respondStoreError handles store/DB operation errors without leaking internal
+// details. Not-found errors return 404; all others are logged and return 500.
+func respondStoreError(w http.ResponseWriter, log *slog.Logger, op string, err error) {
+	if errors.Is(err, sql.ErrNoRows) ||
+		errors.Is(err, cron.ErrJobNotFound) ||
+		errors.Is(err, session.ErrSessionNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	log.Error(op, "error", err)
+	http.Error(w, "internal error", http.StatusInternalServerError)
 }

@@ -111,7 +111,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	log, cfgStore, levelVar := initLogging(cfg)
 	pidTracker, cleanupWG := initOrphanCleanup(ctx, cfg, log)
 
-	tracing.Init(ctx, log, "hotplex-gateway")
+	tracing.Init(ctx, log, "hotplex-gateway", versionString())
 	log.Info("gateway: starting",
 		"go", runtime.Version(),
 		"addr", cfg.Gateway.Addr,

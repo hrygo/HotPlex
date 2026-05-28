@@ -232,7 +232,7 @@ func (a *botConfigAdapter) DeleteBot(ctx context.Context, name string) error {
 	registry := messaging.DefaultBotRegistry()
 	entry, found := registry.GetByName(name)
 	if found && entry.Status == messaging.BotStatusRunning {
-		return fmt.Errorf("bot %q is running (status=%s); stop it before deleting", name, entry.Status)
+		return fmt.Errorf("bot %q is running (status=%s); stop it before deleting: %w", name, entry.Status, admin.ErrBotRunning)
 	}
 
 	cfg := a.cfgStore.Load()

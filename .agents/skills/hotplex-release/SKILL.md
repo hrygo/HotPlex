@@ -232,7 +232,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 |:---|:---|:---|
 | `cmd/hotplex/main.go:16` | `version = "v1.x.x"` | `v1.2.0` |
 | `Makefile:26` | `VERSION := v1.x.x`（LDFLAGS 引用 `$(VERSION)`） | `v1.2.0` |
-| `internal/tracing/tracing.go` | `semconv.ServiceVersion("1.x.x")` | `1.2.0` |
+| `cmd/hotplex/gateway_run.go` | `tracing.Init(ctx, log, "hotplex-gateway", versionString())` | version from LDFLAGS |
 
 ### 4.2 多语言 SDK
 
@@ -269,7 +269,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 git diff
 
 # 或者使用 grep 确认新版本号已写入所有关键文件（如 1.2.0）
-grep -rn "1\.2\.0" cmd/hotplex/main.go Makefile internal/tracing/tracing.go \
+grep -rn "1\.2\.0" cmd/hotplex/main.go Makefile \
   examples/typescript-client/package.json examples/python-client/pyproject.toml \
   examples/python-client/hotplex_client/__init__.py examples/java-client/pom.xml \
   Dockerfile README.md README_zh.md AGENTS.md
@@ -315,7 +315,6 @@ git diff --stat
 git add \
   cmd/hotplex/main.go \
   Makefile \
-  internal/tracing/tracing.go \
   examples/typescript-client/package.json \
   examples/python-client/pyproject.toml \
   examples/python-client/hotplex_client/__init__.py \
@@ -527,7 +526,7 @@ gh release view vX.X.X
 
 > [!IMPORTANT]
 > **同步检查**：以下位置的版本号必须全部匹配，共 12 处：
-> - **Go 核心**：`cmd/hotplex/main.go`、`Makefile`、`internal/tracing/tracing.go`
+> - **Go 核心**：`cmd/hotplex/main.go`、`Makefile`（版本通过 `gateway_run.go` → `tracing.Init` 传入）
 > - **SDK**：`examples/{typescript,python,java}-client/` 各自的版本文件
 > - **文档**：`README.md` badge、`README_zh.md` badge、`AGENTS.md` 头部
 > - **基础设施**：`Dockerfile`

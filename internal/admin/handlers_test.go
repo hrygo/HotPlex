@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -46,7 +47,7 @@ func (m *mockSessionManager) Get(_ context.Context, id string) (any, error) {
 	if m.getFn != nil {
 		return m.getFn(id)
 	}
-	return nil, errors.New("not found")
+	return nil, session.ErrSessionNotFound
 }
 func (m *mockSessionManager) Delete(ctx context.Context, id string) error {
 	if m.deleteFn != nil {
