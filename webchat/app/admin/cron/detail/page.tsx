@@ -135,13 +135,20 @@ export default function CronDetailPage() {
       setSaving(true);
       const updates: Record<string, unknown> = {};
       if (schedule !== formatScheduleStr(job.schedule)) updates.schedule = schedule;
-      if (message !== (job.payload?.message ?? '')) updates.message = message;
+      if (message !== (job.payload?.message ?? '')) updates.payload = { ...job.payload, message };
       if (maxRuns !== (job.max_runs != null ? String(job.max_runs) : '')) {
         updates.max_runs = maxRuns ? Number(maxRuns) : undefined;
       }
       if (enabled !== job.enabled) updates.enabled = enabled;
       await updateCronJob(job.id, updates);
-      setJob((prev) => (prev ? { ...prev, ...updates } : prev));
+      setJob((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev };
+        if (updates.payload) updated.payload = { ...prev.payload, ...(updates.payload as Record<string, unknown>) };
+        if (updates.max_runs !== undefined) updated.max_runs = updates.max_runs as number;
+        if (updates.enabled !== undefined) updated.enabled = updates.enabled as boolean;
+        return updated;
+      });
       setHasChanges(false);
       showToast(`Cron job "${job.name}" configuration updated.`, 'success');
     } catch (err) {
