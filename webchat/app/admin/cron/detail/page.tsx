@@ -121,12 +121,12 @@ export default function CronDetailPage() {
   useEffect(() => {
     if (!job) return;
     const changed =
-      schedule !== job.schedule ||
+      schedule !== formatScheduleStr(job.schedule) ||
       message !== job.message ||
       maxRuns !== (job.max_runs != null ? String(job.max_runs) : '') ||
       enabled !== job.enabled;
     setHasChanges(changed);
-  }, [schedule, message, maxRuns, enabled, job]);
+  }, [schedule, message, maxRuns, enabled, job, formatScheduleStr]);
 
   const handleSave = async () => {
     if (!job || !hasChanges) return;
@@ -437,7 +437,7 @@ export default function CronDetailPage() {
               </button>
               <button
                 onClick={() => {
-                  setSchedule(job.schedule);
+                  setSchedule(formatScheduleStr(job.schedule));
                   setMessage(job.message);
                   setMaxRuns(job.max_runs != null ? String(job.max_runs) : '');
                   setEnabled(job.enabled);
