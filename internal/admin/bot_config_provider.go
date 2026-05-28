@@ -2,7 +2,12 @@ package admin
 
 import (
 	"context"
+	"errors"
 )
+
+// ErrBotRunning indicates a delete or update was attempted on a bot that is
+// currently running. Callers should check with errors.Is and return 409.
+var ErrBotRunning = errors.New("bot is currently running")
 
 // AgentConfigFileName identifies a recognized agent configuration file.
 type AgentConfigFileName string

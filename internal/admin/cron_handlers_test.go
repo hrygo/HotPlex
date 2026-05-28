@@ -298,8 +298,8 @@ func TestHandleCronCreate_SchedulerError(t *testing.T) {
 
 	api.HandleCronCreate(w, r)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "create job")
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, w.Body.String(), "internal error")
 }
 
 func TestHandleCronCreate_NilScheduler(t *testing.T) {
@@ -385,8 +385,8 @@ func TestHandleCronUpdate_SchedulerError(t *testing.T) {
 
 	api.HandleCronUpdate(w, r)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "update job")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Contains(t, w.Body.String(), "not found")
 }
 
 func TestHandleCronUpdate_NilScheduler(t *testing.T) {

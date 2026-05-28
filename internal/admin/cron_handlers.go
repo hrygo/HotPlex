@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 )
@@ -69,7 +68,7 @@ func (a *AdminAPI) HandleCronCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.cron.CreateJob(r.Context(), body); err != nil {
-		http.Error(w, fmt.Sprintf("create job: %s", err), http.StatusBadRequest)
+		respondStoreError(w, a.log, "admin: create cron job", err)
 		return
 	}
 	a.log.Info("admin: cron job created", "admin", adminKeyPrefix(r))
@@ -92,7 +91,7 @@ func (a *AdminAPI) HandleCronUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.cron.UpdateJob(r.Context(), id, body); err != nil {
-		http.Error(w, fmt.Sprintf("update job: %s", err), http.StatusBadRequest)
+		respondStoreError(w, a.log, "admin: update cron job", err)
 		return
 	}
 	a.log.Info("admin: cron job updated", "job_id", id, "admin", adminKeyPrefix(r))

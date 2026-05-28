@@ -2,10 +2,10 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // HandleListBotConfigs returns all registered bot configurations.
@@ -177,7 +177,7 @@ func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.botConfig.DeleteBot(r.Context(), name); err != nil {
-		if isConflictError(err) {
+		if errors.Is(err, ErrBotRunning) {
 			a.log.Error("admin: delete bot conflict", "bot", name, "error", err)
 			http.Error(w, "bot is currently running", http.StatusConflict)
 		} else {
@@ -300,14 +300,4 @@ func toStringSlice(vals []any) []string {
 		}
 	}
 	return result
-}
-
-// isConflictError checks whether the error indicates a conflict
-// (e.g., trying to delete a running bot).
-func isConflictError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "running") || strings.Contains(msg, "conflict")
 }
