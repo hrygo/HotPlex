@@ -10,18 +10,19 @@ import (
 // sessionAccumulator tracks session-level statistics across turns.
 // One instance per session, stored in Bridge.accum.
 type sessionAccumulator struct {
-	Generation    int64 // session reset generation (monotonic)
-	TurnCount     int   // generation-scoped turn counter
-	ToolCallCount int
-	TotalCostUSD  float64
-	TotalInput    int64 // cumulative input tokens consumed across turns
-	TotalOutput   int64
-	ContextWindow int64  // from modelUsage.contextWindow or get_context_usage.maxTokens (0 = unknown)
-	ContextFill   int64  // context window fill from get_context_usage control channel (0 if unavailable)
-	ModelName     string // first model seen
-	StartedAt     time.Time
-	WorkDir       string // session working directory
-	GitBranch     string // current git branch (captured once at start)
+	Generation      int64 // session reset generation (monotonic)
+	AppliedResetGen int64 // last worker resetGen applied to Generation (idempotent guard)
+	TurnCount       int   // generation-scoped turn counter
+	ToolCallCount   int
+	TotalCostUSD    float64
+	TotalInput      int64 // cumulative input tokens consumed across turns
+	TotalOutput     int64
+	ContextWindow   int64  // from modelUsage.contextWindow or get_context_usage.maxTokens (0 = unknown)
+	ContextFill     int64  // context window fill from get_context_usage control channel (0 if unavailable)
+	ModelName       string // first model seen
+	StartedAt       time.Time
+	WorkDir         string // session working directory
+	GitBranch       string // current git branch (captured once at start)
 
 	// Cache token tracking (cumulative across turns).
 	TotalCacheWrite   int64

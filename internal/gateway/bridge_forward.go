@@ -85,6 +85,14 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		}
 		acc.Generation = gen
 	}
+	if acc.TurnCount == 0 && b.turnsQuerier != nil {
+		tnCtx, tnCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		tn, _ := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation)
+		tnCancel()
+		if tn > 0 {
+			acc.TurnCount = tn
+		}
+	}
 
 	if b.turnTimeout > 0 {
 		fc.turnTimer = time.AfterFunc(b.turnTimeout, func() {
@@ -139,7 +147,10 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		currentGen := rg.LoadResetGeneration()
 		if currentGen != fc.myGen {
 			acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
-			acc.Generation++
+			if acc.AppliedResetGen < currentGen {
+				acc.Generation++
+				acc.AppliedResetGen = currentGen
+			}
 			acc.TurnCount = 0
 			fc.turnText.Reset()
 			fc.myGen = currentGen

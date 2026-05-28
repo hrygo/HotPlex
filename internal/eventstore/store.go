@@ -209,6 +209,7 @@ type TurnQuerier interface {
 	QueryTurnsBefore(ctx context.Context, sessionID string, beforeID int64, limit int) ([]*TurnRecord, error)
 	QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error)
 	LatestGeneration(ctx context.Context, sessionID string) (int64, error)
+	LatestTurnNum(ctx context.Context, sessionID string, generation int64) (int, error)
 	DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
@@ -533,6 +534,18 @@ func (s *SQLiteStore) LatestGeneration(ctx context.Context, sessionID string) (i
 		return 0, fmt.Errorf("eventstore: latest generation: %w", err)
 	}
 	return gen, nil
+}
+
+// LatestTurnNum returns the maximum turn_num for a session+generation, or 0 if none exist.
+func (s *SQLiteStore) LatestTurnNum(ctx context.Context, sessionID string, generation int64) (int, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	var tn int
+	err := s.db.QueryRowContext(ctx, queries["turns.latest_turn_num"], sessionID, generation).Scan(&tn)
+	if err != nil {
+		return 0, fmt.Errorf("eventstore: latest turn num: %w", err)
+	}
+	return tn, nil
 }
 
 // DeleteExpiredTurns removes turns older than the cutoff by created_at.
