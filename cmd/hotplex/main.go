@@ -49,6 +49,7 @@ Quick start:
 		newConfigCmd(),
 		newStatusCmd(),
 		newServiceCmd(),
+		newInstallCmd(),
 		newUpdateCmd(),
 		newSlackCmd(),
 		newCronCmd(),
