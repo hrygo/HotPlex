@@ -21,9 +21,9 @@ GOOS         := $(shell go env GOOS)
 GOARCH       := $(shell go env GOARCH)
 GIT_SHA      := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME   := $(shell date '+%Y-%m-%dT%H:%M:%S%z')
+VERSION      := v1.19.0
 LDFLAGS      := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)
 BUILD_OPTS   := -trimpath
-VERSION      := v1.19.0
 
 GATEWAY_PID   := $(HOME)/.hotplex/.pids/gateway.pid
 GATEWAY_LOG   := $(LOG_DIR)/hotplex.log
@@ -301,6 +301,7 @@ webchat-embed:
 	elif find $(WEB_CHAT_DIR)/app $(WEB_CHAT_DIR)/lib $(WEB_CHAT_DIR)/components $(WEB_CHAT_DIR)/public \
 		$(WEB_CHAT_DIR)/next.config.mjs $(WEB_CHAT_DIR)/tsconfig.json \
 		$(WEB_CHAT_DIR)/postcss.config.mjs $(WEB_CHAT_DIR)/package.json \
+		$(WEB_CHAT_DIR)/pnpm-lock.yaml \
 		-newer $(WEB_CHAT_OUT)/_next -print 2>/dev/null | head -n 1 | grep -q .; then \
 		$(MAKE) webchat-rebuild --no-print-directory; \
 	else \
