@@ -8,6 +8,9 @@ description: HotPlex Gateway 系统架构全景视图，帮助贡献者理解各
 
 > 阅读本文后，你将理解 HotPlex Gateway 的整体架构、核心模块职责、数据流路径和关键设计决策。
 
+> [!TIP]
+> 我们为您准备了 **[✨ 交互式功能架构全景图 (Interactive Dashboard)](../../architecture/hotplex_architecture.html)**。在此交互网页中，您可以悬停并点击各底层模块（如 *B/C 双通道配置注入*、*意图路由器*、*物理执行沙盒* 等），查看高亮组件职责与核心包路径，并能一键演示全双工 WebSocket 消息数据流脉冲奔跑特效。
+
 ## 概述
 
 HotPlex Gateway 是一个**单进程 Go 应用**，基于 Go 1.26 构建，作为 AI Coding Agent 的统一接入层。它通过 WebSocket（AEP v1 协议）对外提供服务，内部通过 goroutine 实现并发，每个用户会话对应一个 Worker 子进程。
