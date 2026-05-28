@@ -35,7 +35,7 @@ var (
 func Init(ctx context.Context, log *slog.Logger, serviceName, serviceVersion string) {
 	initOnce.Do(func() {
 		if os.Getenv("OTEL_SDK_DISABLED") == "true" {
-			Tracer = noopTracer()
+			Tracer = noopTracerVal
 			log.Info("tracing: disabled via OTEL_SDK_DISABLED=true")
 			return
 		}
@@ -43,7 +43,7 @@ func Init(ctx context.Context, log *slog.Logger, serviceName, serviceVersion str
 		endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 		if endpoint == "" {
 			// No endpoint configured — install noop tracer (don't fail startup)
-			Tracer = noopTracer()
+			Tracer = noopTracerVal
 			log.Info("tracing: no OTEL_EXPORTER_OTLP_ENDPOINT set, tracing disabled")
 			return
 		}
@@ -53,7 +53,7 @@ func Init(ctx context.Context, log *slog.Logger, serviceName, serviceVersion str
 		exp, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
 		if err != nil {
 			log.Warn("tracing: stdout exporter creation failed, disabling", "err", err)
-			Tracer = noopTracer()
+			Tracer = noopTracerVal
 			return
 		}
 
@@ -65,7 +65,7 @@ func Init(ctx context.Context, log *slog.Logger, serviceName, serviceVersion str
 		)
 		if err != nil {
 			log.Warn("tracing: resource creation failed, disabling", "err", err)
-			Tracer = noopTracer()
+			Tracer = noopTracerVal
 			return
 		}
 
@@ -94,16 +94,14 @@ func Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func noopTracer() trace.Tracer {
-	return noop.NewTracerProvider().Tracer("hotplex")
-}
+var noopTracerVal = noop.NewTracerProvider().Tracer("hotplex")
 
 // GetTracer returns the global Tracer if initialized, otherwise returns a no-op tracer.
 func GetTracer() trace.Tracer {
 	if Tracer != nil {
 		return Tracer
 	}
-	return noop.NewTracerProvider().Tracer("hotplex")
+	return noopTracerVal
 }
 
 // Attr returns a trace attribute for span attributes.

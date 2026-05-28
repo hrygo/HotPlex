@@ -232,7 +232,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 |:---|:---|:---|
 | `cmd/hotplex/main.go:16` | `version = "v1.x.x"` | `v1.2.0` |
 | `Makefile:26` | `VERSION := v1.x.x`（LDFLAGS 引用 `$(VERSION)`） | `v1.2.0` |
-| `internal/tracing/tracing.go` | `semconv.ServiceVersion("1.x.x")` | `1.2.0` |
+| `cmd/hotplex/gateway_run.go` | `tracing.Init(ctx, log, "hotplex-gateway", versionString())` | version from LDFLAGS |
 
 ### 4.2 多语言 SDK
 
