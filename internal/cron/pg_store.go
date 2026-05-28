@@ -286,17 +286,15 @@ func scanJobRowPG(s scanner) (*CronJob, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cron store: scan job: %w", err)
 	}
-	if err := decodeJobFields(job, b2i(enabled), b2i(deleteAfterRun), b2i(silent), schedData, payloadData, platformKeyData, stateData); err != nil {
+	if err := decodeJobFields(job, boolFromPG(enabled), boolFromPG(deleteAfterRun), boolFromPG(silent), schedData, payloadData, platformKeyData, stateData); err != nil {
 		return nil, fmt.Errorf("cron store: decode job: %w", err)
 	}
 	return job, nil
 }
 
-func b2i(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
+// boolFromPG converts a PostgreSQL BOOLEAN to int for shared decodeJobFields.
+func boolFromPG(b bool) int {
+	return boolToInt(b)
 }
 
 // compile-time interface check
