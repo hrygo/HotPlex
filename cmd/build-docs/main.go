@@ -246,7 +246,7 @@ func isLocalAsset(dest string) bool {
 		return false
 	}
 	ext := strings.ToLower(filepath.Ext(dest))
-	return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".pdf"
+	return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".pdf" || ext == ".html"
 }
 
 func cleanLink(dest string) string {
