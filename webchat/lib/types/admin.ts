@@ -72,10 +72,18 @@ export interface AdminSessionInfo {
 
 // --- Cron ---
 
+export interface CronSchedule {
+  kind: 'at' | 'every' | 'cron';
+  at?: string;
+  every_ms?: number;
+  expr?: string;
+  tz?: string;
+}
+
 export interface CronJob {
   id: string;
   name: string;
-  schedule: string;
+  schedule: CronSchedule;
   message: string;
   bot_id: string;
   owner_id: string;

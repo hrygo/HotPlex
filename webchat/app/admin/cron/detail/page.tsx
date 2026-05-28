@@ -11,6 +11,27 @@ import type { CronJob } from '@/lib/types/admin';
 // Helpers
 // ---------------------------------------------------------------------------
 
+function formatScheduleStr(s?: CronJob['schedule']): string {
+  if (!s) return '';
+  switch (s.kind) {
+    case 'cron': return `cron:${s.expr ?? ''}`;
+    case 'every': return `every:${formatDuration(s.every_ms ?? 0)}`;
+    case 'at': return `at:${s.at ?? ''}`;
+    default: return '';
+  }
+}
+
+function formatDuration(ms: number): string {
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return sec % 60 ? `${min}m${sec % 60}s` : `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return min % 60 ? `${hr}h${min % 60}m` : `${hr}h`;
+  const d = Math.floor(hr / 24);
+  return hr % 24 ? `${d}d${hr % 24}h` : `${d}d`;
+}
+
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="px-4 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
@@ -79,7 +100,7 @@ export default function CronDetailPage() {
         setNotFound(true);
       } else {
         setJob(found);
-        setSchedule(found.schedule);
+        setSchedule(formatScheduleStr(found.schedule));
         setMessage(found.message);
         setMaxRuns(found.max_runs != null ? String(found.max_runs) : '');
         setEnabled(found.enabled);
