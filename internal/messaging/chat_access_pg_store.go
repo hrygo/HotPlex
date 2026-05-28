@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -74,7 +75,7 @@ func (s *pgStore) Classify(ctx context.Context, platform, chatID, botID, userID 
 	).Scan(&lastCreatedAt)
 
 	if err != nil {
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			s.log.Warn("chat_access: classify query failed", "err", err)
 		}
 		return ChatAccessNew

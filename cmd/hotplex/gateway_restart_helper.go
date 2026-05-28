@@ -127,15 +127,15 @@ func runRestartHelper(oldPID int, source, configPath, levelStr string, devMode, 
 	default: // "pid"
 		appendRestartLog(logPath, "stopping old gateway (PID %d)\n", oldPID)
 
-		if err := proc.GracefulTerminate(oldPID); err != nil {
-			appendRestartLog(logPath, "graceful terminate failed: %s, force killing\n", err)
-			_ = proc.ForceKill(oldPID)
+		if err := proc.Terminate(oldPID); err != nil {
+			appendRestartLog(logPath, "terminate failed: %s, force killing\n", err)
+			_ = proc.ForceKillProcess(oldPID)
 		}
 		waitForProcessExit(oldPID, 30*time.Second)
 
 		if proc.IsProcessAlive(oldPID) == nil {
 			appendRestartLog(logPath, "process %d still alive after timeout, force killing\n", oldPID)
-			_ = proc.ForceKill(oldPID)
+			_ = proc.ForceKillProcess(oldPID)
 			time.Sleep(500 * time.Millisecond)
 		}
 

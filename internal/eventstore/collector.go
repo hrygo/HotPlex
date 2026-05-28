@@ -464,7 +464,12 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 				"kind", kindOf(req),
 				"err", err,
 			)
-			continue // log and skip; tx rolled back by defer on commit failure
+			// continue rather than return: on PostgreSQL a failed statement does not
+			// poison the transaction, so remaining appends may succeed. On SQLite a
+			// failed statement invalidates the tx and subsequent appends will also fail,
+			// producing warn logs for each — this is acceptable noise versus silently
+			// dropping the rest of the batch.
+			continue
 		}
 	}
 

@@ -30,6 +30,11 @@ func ForceKill(pgid int) error {
 	return syscall.Kill(-pgid, syscall.SIGKILL)
 }
 
+// ForceKillProcess sends SIGKILL to a single process (not its group).
+func ForceKillProcess(pid int) error {
+	return syscall.Kill(pid, syscall.SIGKILL)
+}
+
 // DefaultGracePeriod is the default time to wait after SIGTERM before
 // escalating to SIGKILL. Shared across proc/manager, proc/pidfile, and
 // base/worker to avoid magic number duplication.
