@@ -387,8 +387,12 @@ func (m *Manager) drainStderr() {
 		}
 	}()
 	scanner := bufio.NewScanner(m.stderr)
+	scanner.Buffer(make([]byte, scannerInitSize), scannerMaxSize)
 	for scanner.Scan() {
 		m.log.Info("proc: stderr", "msg", scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		m.log.Warn("proc: drainStderr ended with error", "error", err)
 	}
 }
 
