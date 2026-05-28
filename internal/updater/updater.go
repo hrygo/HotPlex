@@ -308,7 +308,7 @@ func findChecksum(checksums, filename string) (string, error) {
 		if len(parts) != 2 {
 			continue
 		}
-		if filepath.Base(parts[1]) == filename || parts[1] == filename {
+		if parts[1] == filename || filepath.Base(parts[1]) == filename {
 			return parts[0], nil
 		}
 	}
