@@ -166,6 +166,11 @@ func (m *mockTurnsStore) LatestGeneration(ctx context.Context, sessionID string)
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *mockTurnsStore) LatestTurnNum(ctx context.Context, sessionID string, generation int64) (int, error) {
+	args := m.Called(ctx, sessionID, generation)
+	return args.Get(0).(int), args.Error(1)
+}
+
 func (m *mockTurnsStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error) {
 	args := m.Called(ctx, cutoff)
 	return args.Get(0).(int64), args.Error(1)
