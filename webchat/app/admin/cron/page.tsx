@@ -250,7 +250,7 @@ export default function CronPage() {
         {!loading && !error && filtered.length > 0 && (
           <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden">
             {/* Table header */}
-            <div className="grid grid-cols-[1fr_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
+            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Name</span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Schedule</span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Enabled</span>
@@ -264,10 +264,10 @@ export default function CronPage() {
             {filtered.map((job) => (
               <div
                 key={job.id}
-                className={`grid grid-cols-[1fr_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-2.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center ${!job.enabled ? 'opacity-60' : ''}`}
+                className={`grid grid-cols-[minmax(0,1fr)_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-2.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center ${!job.enabled ? 'opacity-60' : ''}`}
               >
                 {/* Name */}
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
                   <Link
                     href={`/admin/cron/detail?id=${encodeURIComponent(job.id)}`}
                     className="text-xs font-medium text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] truncate transition-colors"
