@@ -60,7 +60,7 @@ func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	var dbErr string
 	if _, err := a.sm.List(r.Context(), "", "", 1, 0); err != nil {
 		dbHealthy = false
-		dbErr = err.Error()
+		dbErr = "query failed"
 		a.log.Warn("admin: health check DB probe failed", "err", err)
 	}
 
@@ -178,7 +178,7 @@ func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) 
 		} `json:"pool"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
@@ -243,7 +243,7 @@ func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) 
 		Version int `json:"version"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 	if body.Version < 1 {
@@ -253,7 +253,8 @@ func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) 
 
 	_, idx, err := a.configWatcher.Rollback(body.Version)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		a.log.Error("admin: config rollback failed", "error", err)
+		http.Error(w, "rollback failed", http.StatusBadRequest)
 		return
 	}
 

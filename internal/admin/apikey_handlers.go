@@ -284,7 +284,7 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 
 	if err := a.akStore.update(r.Context(), id, &u); err != nil {
 		a.log.Error("admin: update api key user", "error", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	if inv := a.akStore.Invalidator(); inv != nil {
@@ -314,7 +314,7 @@ func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request
 
 	if err := a.akStore.delete(r.Context(), id); err != nil {
 		a.log.Error("admin: delete api key user", "error", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	if inv := a.akStore.Invalidator(); inv != nil {
