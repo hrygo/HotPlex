@@ -345,7 +345,7 @@ func resolveField(cfg *Config, path string) string {
 	v := reflect.ValueOf(cfg).Elem()
 
 	for _, part := range parts {
-		if v.Kind() == reflect.Ptr {
+		if v.Kind() == reflect.Pointer {
 			if v.IsNil() {
 				return "<nil>"
 			}

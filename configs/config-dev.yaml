@@ -45,3 +45,11 @@ messaging:
   feishu:
     enabled: true
     worker_type: "claude_code"
+  yuanxin:
+    enabled: false
+    worker_type: "claude_code"
+    work_dir: "./.hotplex/workspace"
+    tenant: "public"
+    namespace: "default"
+    app_id: "${YUANXIN_APP_ID}"
+    pulsar_url: "${YUANXIN_PULSAR_URL}"

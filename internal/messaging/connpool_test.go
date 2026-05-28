@@ -89,3 +89,12 @@ func TestConnPool_IsClosed(t *testing.T) {
 	p.ClearAndClose()
 	require.True(t, p.IsClosed())
 }
+
+func TestConnPool_DeleteAfterClose(t *testing.T) {
+	t.Parallel()
+
+	p := NewConnPool(func(key string) any { return key })
+	p.GetOrCreate("x")
+	p.ClearAndClose()
+	require.NotPanics(t, func() { p.Delete("x") })
+}

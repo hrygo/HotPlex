@@ -138,7 +138,7 @@ func (cb *CircuitBreaker) onStateChange(from, to gobreaker.State) {
 			"name", cb.config.Name,
 			"from", from.String(),
 			"to", to.String(),
-			"newState", newState)
+			"new_state", newState)
 	}
 }
 

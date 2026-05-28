@@ -136,8 +136,9 @@ type MessagingConfig struct {
 	TTSConfig  `mapstructure:",squash"`
 
 	// Platform-specific configs.
-	Slack  SlackConfig  `mapstructure:"slack"`
-	Feishu FeishuConfig `mapstructure:"feishu"`
+	Slack   SlackConfig   `mapstructure:"slack"`
+	Feishu  FeishuConfig  `mapstructure:"feishu"`
+	Yuanxin YuanxinConfig `mapstructure:"yuanxin"`
 }
 
 // STT constants for provider values.
@@ -322,6 +323,17 @@ type FeishuBotConfig struct {
 
 	STTConfig `mapstructure:",squash"`
 	TTSConfig `mapstructure:",squash"`
+}
+
+// YuanxinConfig holds Yuanxin Pulsar adapter settings.
+type YuanxinConfig struct {
+	MessagingPlatformConfig `mapstructure:",squash"`
+
+	Tenant        string `mapstructure:"tenant"`
+	Namespace     string `mapstructure:"namespace"`
+	PulsarURL     string `mapstructure:"pulsar_url"`
+	AppID         string `mapstructure:"app_id"`
+	ProducerTopic string `mapstructure:"producer_topic"`
 }
 
 type AdminConfig struct {
@@ -809,6 +821,9 @@ func Default() *Config {
 			Slack: SlackConfig{
 				MessagingPlatformConfig: defaultMessagingPlatformConfig(),
 			},
+			Yuanxin: YuanxinConfig{
+				MessagingPlatformConfig: defaultMessagingPlatformConfig(),
+			},
 		},
 		AgentConfig: AgentConfig{
 			Enabled:   true,
@@ -847,6 +862,7 @@ func propagateMessagingDefaults(cfg *Config) {
 	msg := &cfg.Messaging
 	propagatePlatform(&msg.Slack.MessagingPlatformConfig, msg)
 	propagatePlatform(&msg.Feishu.MessagingPlatformConfig, msg)
+	propagatePlatform(&msg.Yuanxin.MessagingPlatformConfig, msg)
 
 	// Propagate shared defaults into per-bot configs.
 	for i := range msg.Slack.Bots {
@@ -1183,6 +1199,7 @@ func (c *Config) normalizePaths() {
 		&c.Messaging.Slack.MossModelDir,
 		&c.Messaging.Feishu.WorkDir,
 		&c.Messaging.Feishu.MossModelDir,
+		&c.Messaging.Yuanxin.WorkDir,
 	} {
 		if *pf != "" {
 			absPath, err := ExpandAndAbs(*pf)
@@ -1247,6 +1264,10 @@ func (c *Config) ResolvePlatformWorkDir(platform string) string {
 	case "feishu":
 		if c.Messaging.Feishu.WorkDir != "" {
 			return c.Messaging.Feishu.WorkDir
+		}
+	case "yuanxin":
+		if c.Messaging.Yuanxin.WorkDir != "" {
+			return c.Messaging.Yuanxin.WorkDir
 		}
 	}
 	return c.Worker.DefaultWorkDir
@@ -1360,6 +1381,29 @@ func applyMessagingEnv(cfg *Config) {
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM", "AllowFrom"},
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_DM_FROM", "AllowDMFrom"},
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_GROUP_FROM", "AllowGroupFrom"},
+		},
+	)
+
+	// Yuanxin
+	applyPlatformEnv(&cfg.Messaging.Yuanxin,
+		[]envMapping{
+			{"HOTPLEX_MESSAGING_YUANXIN_APP_ID", "AppID"},
+			{"HOTPLEX_MESSAGING_YUANXIN_PULSAR_URL", "PulsarURL"},
+			{"HOTPLEX_MESSAGING_YUANXIN_TENANT", "Tenant"},
+			{"HOTPLEX_MESSAGING_YUANXIN_NAMESPACE", "Namespace"},
+			{"HOTPLEX_MESSAGING_YUANXIN_PRODUCER_TOPIC", "ProducerTopic"},
+			{"HOTPLEX_MESSAGING_YUANXIN_WORKER_TYPE", "WorkerType"},
+			{"HOTPLEX_MESSAGING_YUANXIN_WORK_DIR", "WorkDir"},
+			{"HOTPLEX_MESSAGING_YUANXIN_DM_POLICY", "DMPolicy"},
+			{"HOTPLEX_MESSAGING_YUANXIN_GROUP_POLICY", "GroupPolicy"},
+		},
+		[]envMapping{
+			{"HOTPLEX_MESSAGING_YUANXIN_ENABLED", "Enabled"},
+		},
+		[]envMapping{
+			{"HOTPLEX_MESSAGING_YUANXIN_ALLOW_FROM", "AllowFrom"},
+			{"HOTPLEX_MESSAGING_YUANXIN_ALLOW_DM_FROM", "AllowDMFrom"},
+			{"HOTPLEX_MESSAGING_YUANXIN_ALLOW_GROUP_FROM", "AllowGroupFrom"},
 		},
 	)
 

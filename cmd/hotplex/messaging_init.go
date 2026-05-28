@@ -24,6 +24,7 @@ import (
 	"github.com/hrygo/hotplex/internal/messaging/slack"
 	"github.com/hrygo/hotplex/internal/messaging/stt"
 	"github.com/hrygo/hotplex/internal/messaging/tts"
+	_ "github.com/hrygo/hotplex/internal/messaging/yuanxin"
 )
 
 var (
@@ -104,6 +105,22 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 					Status:     messaging.BotStatusStarting,
 				})
 			}
+		case messaging.PlatformYuanxin:
+			if !appCfg.Messaging.Yuanxin.Enabled {
+				statuses = append(statuses, AdapterStatus{Name: "yuanxin", Started: false})
+				continue
+			}
+			workerType = appCfg.Messaging.Yuanxin.WorkerType
+			// Yuanxin is single-bot; use AppID as bot name.
+			botName := appCfg.Messaging.Yuanxin.AppID
+			if botName == "" {
+				botName = "yuanxin"
+			}
+			botEntries = append(botEntries, &messaging.BotEntry{
+				Name:     botName,
+				Platform: pt,
+				Status:   messaging.BotStatusStarting,
+			})
 		}
 
 		if len(botEntries) == 0 {
@@ -181,6 +198,8 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			case messaging.PlatformFeishu:
 				botCfg := resolveFeishuBot(appCfg, entry.Name)
 				fillFeishuExtras(&acfg, appCfg, botCfg, log)
+			case messaging.PlatformYuanxin:
+				fillYuanxinExtras(&acfg, appCfg)
 			}
 
 			if err := adapter.ConfigureWith(acfg); err != nil {
@@ -331,6 +350,34 @@ func fillFeishuExtras(acfg *messaging.AdapterConfig, appCfg *config.Config, botC
 	}
 	if p := buildFeishuTTSPipeline(ttsCfg, appID, appSecret, log); p != nil {
 		acfg.Extras["tts_pipeline"] = p
+	}
+}
+
+// fillYuanxinExtras populates AdapterConfig.Extras for a Yuanxin bot.
+func fillYuanxinExtras(acfg *messaging.AdapterConfig, appCfg *config.Config) {
+	platformCfg := appCfg.Messaging.Yuanxin
+	acfg.Gate = messaging.NewGate(
+		platformCfg.DMPolicy,
+		platformCfg.GroupPolicy,
+		platformCfg.RequireMention,
+		platformCfg.AllowFrom,
+		platformCfg.AllowDMFrom,
+		platformCfg.AllowGroupFrom,
+	)
+	if platformCfg.AppID != "" {
+		acfg.Extras["app_id"] = platformCfg.AppID
+	}
+	if platformCfg.PulsarURL != "" {
+		acfg.Extras["pulsar_url"] = platformCfg.PulsarURL
+	}
+	if platformCfg.ProducerTopic != "" {
+		acfg.Extras["producer_topic"] = platformCfg.ProducerTopic
+	}
+	if platformCfg.Tenant != "" {
+		acfg.Extras["tenant"] = platformCfg.Tenant
+	}
+	if platformCfg.Namespace != "" {
+		acfg.Extras["namespace"] = platformCfg.Namespace
 	}
 }
 
