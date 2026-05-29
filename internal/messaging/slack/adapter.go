@@ -1187,18 +1187,14 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 }
 
 func (c *SlackConn) buildTurnSummaryTable(d messaging.TurnSummaryData) []slack.Block {
-	table := slack.NewTableBlock("turn_summary")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
+	table := slack.NewDataTableBlock("Turn Summary", slack.DataTableBlockOptionBlockID("turn_summary"))
 
 	for _, f := range d.Fields() {
 		val := f.Value
 		if f.Label == "🔧 Tools" {
 			val = formatToolNamesSlack(d.ToolNames, d.ToolCallCount)
 		}
-		table.AddRow(richTextCell(f.Label), richTextCell(val))
+		table.AddRow(dataTableCell(f.Label), dataTableCell(val))
 	}
 
 	return []slack.Block{table}
@@ -1257,28 +1253,24 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 // buildContextUsageTable builds a TableBlock for context usage (primary format).
 func (c *SlackConn) buildContextUsageTable(d events.ContextUsageData) []slack.Block {
 	info := messaging.BuildContextDisplay(d)
-	table := slack.NewTableBlock("context_usage")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
+	table := slack.NewDataTableBlock("Context Usage", slack.DataTableBlockOptionBlockID("context_usage"))
 
-	table.AddRow(richTextCell(info.Icon+" Context"), richTextCell(fmt.Sprintf("%s %s", info.ProgressBar, info.TokenDisplay)))
+	table.AddRow(dataTableCell(info.Icon+" Context"), dataTableCell(fmt.Sprintf("%s %s", info.ProgressBar, info.TokenDisplay)))
 	if info.Model != "" {
-		table.AddRow(richTextCell("Model"), richTextCell(info.Model))
+		table.AddRow(dataTableCell("Model"), dataTableCell(info.Model))
 	}
 	if len(info.TopCategories) > 0 {
 		catParts := make([]string, len(info.TopCategories))
 		for i, cat := range info.TopCategories {
 			catParts[i] = fmt.Sprintf("%s: %s", cat.Name, messaging.FormatTokenCount(cat.Tokens))
 		}
-		table.AddRow(richTextCell("Top Context"), richTextCell(strings.Join(catParts, ", ")))
+		table.AddRow(dataTableCell("Top Context"), dataTableCell(strings.Join(catParts, ", ")))
 	}
 	if info.ExtrasLine != "" {
-		table.AddRow(richTextCell("Extras"), richTextCell(info.ExtrasLine))
+		table.AddRow(dataTableCell("Extras"), dataTableCell(info.ExtrasLine))
 	}
 	if info.ActionTip != "" {
-		table.AddRow(richTextCell("Tip"), richTextCell(info.ActionTip))
+		table.AddRow(dataTableCell("Tip"), dataTableCell(info.ActionTip))
 	}
 	return []slack.Block{table}
 }
@@ -1289,12 +1281,9 @@ func (c *SlackConn) buildContextUsageFallback(d events.ContextUsageData) []slack
 	return []slack.Block{slack.NewContextBlock("", text)}
 }
 
-// richTextCell creates a RichTextBlock cell for use in TableBlock rows.
-func richTextCell(text string) *slack.RichTextBlock {
-	section := slack.NewRichTextSection(
-		slack.NewRichTextSectionTextElement(text, nil),
-	)
-	return slack.NewRichTextBlock("", section)
+// dataTableCell creates a plain-text cell for use in DataTableBlock rows.
+func dataTableCell(text string) slack.DataTableCell {
+	return slack.NewDataTableRawTextCell(text)
 }
 
 func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) error {
@@ -1314,14 +1303,10 @@ func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) err
 	}
 	plainText := sb.String()
 
-	table := slack.NewTableBlock("mcp_status")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
-	table.AddRow(richTextCell("🔌 MCP Status"), richTextCell(fmt.Sprintf("%d servers", len(d.Servers))))
+	table := slack.NewDataTableBlock("MCP Status", slack.DataTableBlockOptionBlockID("mcp_status"))
+	table.AddRow(dataTableCell("🔌 MCP Status"), dataTableCell(fmt.Sprintf("%d servers", len(d.Servers))))
 	for _, s := range d.Servers {
-		table.AddRow(richTextCell(messaging.MCPServerIcon(s.Status)+" "+s.Name), richTextCell(s.Status))
+		table.AddRow(dataTableCell(messaging.MCPServerIcon(s.Status)+" "+s.Name), dataTableCell(s.Status))
 	}
 
 	blocks := []slack.Block{table}

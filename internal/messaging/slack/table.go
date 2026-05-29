@@ -316,7 +316,7 @@ const maxMarkdownBlockChars = 11000 // safety margin under Slack's 12K cumulativ
 
 // BuildTableBlocks constructs Block Kit blocks from extracted tables and text.
 //
-//   - 1 table: MarkdownBlock(text) + TableBlock → best visual
+//   - 1 table: MarkdownBlock(text) + DataTableBlock → best visual
 //   - 2+ tables: MarkdownBlock(full text with tables wrapped in code blocks)
 //   - oversized or no tables: returns nil
 func BuildTableBlocks(content string, segments []TextSegment, tables []ParsedTable) []slack.Block {
@@ -357,28 +357,19 @@ func buildMultiTableBlocks(content string) []slack.Block {
 	return []slack.Block{slack.NewMarkdownBlock("md_full", wrapped)}
 }
 
-func buildOneTableBlock(blockID string, t ParsedTable) *slack.TableBlock {
-	table := slack.NewTableBlock(blockID)
-	settings := make([]slack.ColumnSetting, len(t.Headers))
-	for j := range settings {
-		align := slack.ColumnAlignmentLeft
-		if j < len(t.ColAligns) {
-			align = t.ColAligns[j]
-		}
-		settings[j] = slack.ColumnSetting{Align: align, IsWrapped: true}
-	}
-	table = table.WithColumnSettings(settings...)
+func buildOneTableBlock(blockID string, t ParsedTable) *slack.DataTableBlock {
+	table := slack.NewDataTableBlock(blockID, slack.DataTableBlockOptionBlockID(blockID))
 
-	headerRow := make([]*slack.RichTextBlock, len(t.Headers))
+	headerRow := make([]slack.DataTableCell, len(t.Headers))
 	for j, h := range t.Headers {
-		headerRow[j] = richTextCell(h)
+		headerRow[j] = dataTableCell(h)
 	}
 	table.AddRow(headerRow...)
 
 	for _, row := range t.Rows {
-		cells := make([]*slack.RichTextBlock, len(row))
+		cells := make([]slack.DataTableCell, len(row))
 		for j, cell := range row {
-			cells[j] = richTextCell(cell)
+			cells[j] = dataTableCell(cell)
 		}
 		table.AddRow(cells...)
 	}

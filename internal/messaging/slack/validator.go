@@ -101,6 +101,11 @@ func ValidateBlocks(blocks []slack.Block) error {
 					i, blockType, utf8.RuneCountInString(b.Text.Text))
 			}
 
+		case *slack.TableBlock:
+			if err := validateTableBlock(b, i, blockType); err != nil {
+				return err
+			}
+
 		default:
 			// For unknown block types, attempt basic validation
 			if err := validateUnknownBlock(block, i); err != nil {
@@ -160,6 +165,20 @@ func checkActionID(actionID string, actionIDs map[string]bool, blockIdx int, blo
 func validateUnknownBlock(_ slack.Block, _ int) error {
 	// Try to get any text or action IDs through reflection-like checks
 	// This is a best-effort for extensibility
+	return nil
+}
+
+// TableBlock constraints per Slack API documentation
+const (
+	maxTableRows = 100
+)
+
+// validateTableBlock validates a TableBlock against Slack constraints.
+func validateTableBlock(b *slack.TableBlock, i int, blockType slack.MessageBlockType) error {
+	if len(b.Rows) > maxTableRows {
+		return fmt.Errorf("block %d (%s): row count %d exceeds maximum of %d",
+			i, blockType, len(b.Rows), maxTableRows)
+	}
 	return nil
 }
 
