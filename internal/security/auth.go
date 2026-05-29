@@ -147,7 +147,8 @@ func (a *Authenticator) RemoveKey(key string) {
 	empty := len(a.validKey) == 0 && len(a.dbKeys) == 0 && a.devModeLocked
 	a.mu.Unlock()
 	if empty {
-		slog.Warn("security: all API keys removed but dev mode is locked — restart gateway to restore anonymous access")
+		slog.Warn("security: all API keys removed but dev mode is locked — restart gateway to restore anonymous access",
+			"dev_mode_locked", true)
 	}
 }
 
