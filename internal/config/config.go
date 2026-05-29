@@ -267,6 +267,10 @@ type SlackConfig struct {
 	ReconnectBaseDelay  time.Duration `mapstructure:"reconnect_base_delay"`
 	ReconnectMaxDelay   time.Duration `mapstructure:"reconnect_max_delay"`
 
+	// Branding for Assistant status (paid workspaces).
+	DisplayName string `mapstructure:"display_name,omitempty"`
+	IconEmoji   string `mapstructure:"icon_emoji,omitempty"`
+
 	// Multi-bot configuration. When non-empty, takes precedence over top-level credentials.
 	Bots []SlackBotConfig `mapstructure:"bots"`
 }
@@ -286,6 +290,10 @@ type SlackBotConfig struct {
 	AllowFrom      []string `mapstructure:"allow_from,omitempty"`
 	AllowDMFrom    []string `mapstructure:"allow_dm_from,omitempty"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from,omitempty"`
+
+	// Per-bot branding override (falls back to platform-level when empty).
+	DisplayName string `mapstructure:"display_name,omitempty"`
+	IconEmoji   string `mapstructure:"icon_emoji,omitempty"`
 
 	STTConfig `mapstructure:",squash"`
 	TTSConfig `mapstructure:",squash"`

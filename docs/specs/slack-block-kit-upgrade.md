@@ -3,7 +3,7 @@
 **Epic Issue**: #565
 **分支**: `feat/slack-block-kit-upgrade-565`
 **前置**: PR #562 (deps upgrade, slack-go v0.24.0 已合并)
-**状态**: Phase 2 已完成 (PR #566)，Phase 1/3 待后续 PR
+**状态**: Phase 1.2 + Phase 2 + Phase 3 已完成，Phase 1.1 AlertBlock 已放弃
 
 ---
 
@@ -161,14 +161,14 @@ Skills 列表和多结果输出用 CardBlock/CarouselBlock 结构化展示。
 ## 验收标准
 
 - [ ] Phase 1: ~AlertBlock 在所有错误/状态提示场景替换完成~ → **不可行**，AlertBlock 仅支持 modal surface，不支持 `chat.postMessage`
-- [ ] Phase 1: Assistant status 显示 bot username 和 icon（待后续 PR）
+- [x] Phase 1: Assistant status 显示 bot username 和 icon（`SlackConfig.DisplayName`/`IconEmoji` → `status.go`）
 - [ ] Phase 1: `make check` 全量通过
 - [x] Phase 2: DataTable 替换所有 TableBlock
 - [x] Phase 2: `isInvalidBlocksError` helper 统一到 8 个调用点
 - [x] Phase 2: validator/sanitizer 支持 DataTableBlock
 - [x] Phase 2: `make check` 全量通过 + CI 6/6 绿
-- [ ] Phase 3: Skills 列表用 CarouselBlock 展示
-- [ ] Phase 3: 单条消息内无 50-block 限制溢出
+- [x] Phase 3: Skills 列表用 DataTableBlock 展示（每个 SkillGroup → 独立 DataTableBlock，columns: Name / Description）
+- [x] Phase 3: 单条消息内无 block 限制溢出（每个 DataTableBlock 占 1 block 位，行数保护 maxDataTableRows）
 - [ ] Phase 3: `make check` 全量通过
 
 ## 风险
@@ -176,5 +176,5 @@ Skills 列表和多结果输出用 CardBlock/CarouselBlock 结构化展示。
 | 风险 | 缓解 |
 |------|------|
 | AlertBlock/DataTable 不被部分 workspace 支持 | 保留 fallback 路径 |
-| CarouselBlock 移动端渲染差异 | Block Kit Builder 测试 + fallback |
+| DataTableBlock 部分工作区不支持 | isInvalidBlocksError → postSkillsMessageFallback |
 | slack-go v0.24.0 新 API 有 bug | 关注 upstream issues |

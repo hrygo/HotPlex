@@ -21,45 +21,60 @@ func (c *SlackConn) sendSkillsList(ctx context.Context, env *events.Envelope) er
 	}
 
 	groups := messaging.GroupSkillsBySource(d.Skills)
-	pages := messaging.PaginateSkillGroups(groups, messaging.SkillsPerPage)
+	// page=1, total=1: non-paginated display, suppresses "Part X/Y" suffix.
+	header := messaging.SkillsHeader(d, 1, 1)
 
-	for i, page := range pages {
-		var blocks []slack.Block
+	// Build DataTableBlocks — one table per skill group.
+	var blocks []slack.Block
+	var shown int
+	blocks = append(blocks, slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.PlainTextType, header, false, false), nil, nil))
 
-		header := messaging.SkillsHeader(d, i+1, len(pages))
+	for i, g := range groups {
+		// Reserve 1 slot for the header SectionBlock above.
+		if len(blocks) >= maxBlocksPerMessage-1 {
+			break
+		}
+		blocks = append(blocks, buildSkillGroupTable(g, fmt.Sprintf("skills_%s_%d", g.Source, i)))
+		shown = i + 1
+	}
+	// Append truncation notice if some groups were omitted (very rare: requires 99+ sources).
+	if shown < len(groups) {
+		remaining := len(groups) - shown
 		blocks = append(blocks, slack.NewSectionBlock(
-			slack.NewTextBlockObject(slack.PlainTextType, header, false, false), nil, nil))
-
-		for _, g := range page {
-			emoji := messaging.SourceEmoji(g.Source)
-
-			var sb strings.Builder
-			fmt.Fprintf(&sb, "*%s %s (%d)*\n", emoji, g.Source, len(g.Entries))
-			for _, s := range g.Entries {
-				desc := messaging.TruncateDesc(s.Description)
-				fmt.Fprintf(&sb, "• %s — %s\n", s.Name, desc)
-			}
-			blocks = append(blocks, slack.NewSectionBlock(
-				slack.NewTextBlockObject(slack.MarkdownType, sb.String(), false, false), nil, nil))
-
-			if len(blocks) >= messaging.SkillsBlockSoftLimit {
-				break
-			}
-		}
-
-		if len(blocks) > messaging.SkillsBlockHardLimit {
-			blocks = blocks[:messaging.SkillsBlockHardLimit]
-		}
-
-		fallback := header + "\n" + formatSkillsPlainText(page)
-		if err := c.postSkillsMessage(ctx, fallback, blocks); err != nil {
-			return err
-		}
+			slack.NewTextBlockObject(slack.PlainTextType,
+				fmt.Sprintf("… and %d more group(s) — use `$skills` for full list", remaining), false, false),
+			nil, nil))
 	}
 
-	return nil
+	fallback := header + "\n" + formatSkillsPlainText(groups)
+	return c.postSkillsMessage(ctx, fallback, blocks)
 }
 
+// buildSkillGroupTable creates a DataTableBlock for a single skill group.
+func buildSkillGroupTable(g messaging.SkillGroup, blockID string) *slack.DataTableBlock {
+	emoji := messaging.SourceEmoji(g.Source)
+	caption := fmt.Sprintf("%s %s (%d)", emoji, g.Source, len(g.Entries))
+
+	table := slack.NewDataTableBlock(caption, slack.DataTableBlockOptionBlockID(blockID))
+
+	// Header row.
+	table.AddRow(dataTableCell("Name"), dataTableCell("Description"))
+
+	// Data rows. Cap at maxDataTableRows-1 (excluding header) to prevent Slack rejection.
+	maxRows := maxDataTableRows - 1
+	for i, s := range g.Entries {
+		if i >= maxRows {
+			table.AddRow(dataTableCell("..."), dataTableCell(fmt.Sprintf("and %d more", len(g.Entries)-maxRows)))
+			break
+		}
+		table.AddRow(dataTableCell(s.Name), dataTableCell(messaging.TruncateDesc(s.Description)))
+	}
+
+	return table
+}
+
+// postSkillsMessageFallback sends skills as plain text when blocks are rejected.
 func (c *SlackConn) postSkillsMessageFallback(ctx context.Context, env *events.Envelope) error {
 	d, err := messaging.ExtractSkillsListData(env)
 	if err != nil {

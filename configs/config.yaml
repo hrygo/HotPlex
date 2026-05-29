@@ -278,6 +278,9 @@ messaging:
     require_mention: true
     # Override shared defaults here if needed, e.g.:
     # tts_provider: "edge"
+    # Assistant status branding (optional):
+    # display_name: "HotPlex AI"
+    # icon_emoji: ":robot_face:"
     # Multi-bot support (uncomment to use):
     # bots:
     #   - name: tech-support
