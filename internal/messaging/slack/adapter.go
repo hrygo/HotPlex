@@ -942,7 +942,7 @@ func (c *SlackConn) writeWithPostMessage(ctx context.Context, text string, isDel
 	return nil
 }
 
-// tryTableBlocks extracts markdown tables and sends as Block Kit (MarkdownBlock + TableBlock).
+// tryTableBlocks extracts markdown tables and sends as Block Kit (MarkdownBlock + DataTableBlock).
 // Returns error if no tables found or block send fails (caller falls back to text).
 func (c *SlackConn) tryTableBlocks(ctx context.Context, text string) error {
 	segments, tables := ExtractTables(text)
@@ -1153,7 +1153,7 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 		return
 	}
 
-	// Primary: TableBlock with rich per-field layout.
+	// Primary: DataTableBlock with rich per-field layout.
 	blocks := c.buildTurnSummaryTable(d)
 	richText := messaging.FormatTurnSummaryRich(d)
 	if richText == "" {
@@ -1174,13 +1174,13 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 		return
 	}
 
-	if !strings.Contains(err.Error(), "invalid_blocks") {
+	if !isInvalidBlocksError(err) {
 		c.adapter.Log.Warn("turn summary send failed", "err", err)
 		return
 	}
 
 	// Fallback: rich plain text with emoji-prefixed fields.
-	c.adapter.Log.Warn("slack: turn summary TableBlock rejected, falling back to rich text", "err", err)
+	c.adapter.Log.Warn("slack: turn summary DataTableBlock rejected, falling back to rich text", "err", err)
 	fbOpts := []slack.MsgOption{slack.MsgOptionText(richText, false)}
 	if c.threadTS != "" {
 		fbOpts = append(fbOpts, slack.MsgOptionTS(c.threadTS))
@@ -1194,18 +1194,14 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 }
 
 func (c *SlackConn) buildTurnSummaryTable(d messaging.TurnSummaryData) []slack.Block {
-	table := slack.NewTableBlock("turn_summary")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
+	table := slack.NewDataTableBlock("Turn Summary", slack.DataTableBlockOptionBlockID("turn_summary"))
 
 	for _, f := range d.Fields() {
 		val := f.Value
 		if f.Label == "🔧 Tools" {
 			val = formatToolNamesSlack(d.ToolNames, d.ToolCallCount)
 		}
-		table.AddRow(richTextCell(f.Label), richTextCell(val))
+		table.AddRow(dataTableCell(f.Label), dataTableCell(val))
 	}
 
 	return []slack.Block{table}
@@ -1230,7 +1226,7 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	}
 	plainText := messaging.FormatCanonicalText(d)
 
-	// Primary: TableBlock (may be rejected by workspaces without the beta feature)
+	// Primary: DataTableBlock (may be rejected by some workspaces)
 	blocks := c.buildContextUsageTable(d)
 	opts := []slack.MsgOption{
 		slack.MsgOptionBlocks(blocks...),
@@ -1243,12 +1239,12 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	if pErr == nil {
 		return nil
 	}
-	if !strings.Contains(pErr.Error(), "invalid_blocks") {
+	if !isInvalidBlocksError(pErr) {
 		return pErr
 	}
 
 	// Fallback: ContextBlock (universally supported)
-	c.adapter.Log.Warn("slack: context usage TableBlock rejected, falling back to ContextBlock", "err", pErr)
+	c.adapter.Log.Warn("slack: context usage DataTableBlock rejected, falling back to ContextBlock", "err", pErr)
 	fbBlocks := c.buildContextUsageFallback(d)
 	fbOpts := []slack.MsgOption{
 		slack.MsgOptionBlocks(fbBlocks...),
@@ -1261,47 +1257,40 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	return fbErr
 }
 
-// buildContextUsageTable builds a TableBlock for context usage (primary format).
+// buildContextUsageTable builds a DataTableBlock for context usage (primary format).
 func (c *SlackConn) buildContextUsageTable(d events.ContextUsageData) []slack.Block {
 	info := messaging.BuildContextDisplay(d)
-	table := slack.NewTableBlock("context_usage")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
+	table := slack.NewDataTableBlock("Context Usage", slack.DataTableBlockOptionBlockID("context_usage"))
 
-	table.AddRow(richTextCell(info.Icon+" Context"), richTextCell(fmt.Sprintf("%s %s", info.ProgressBar, info.TokenDisplay)))
+	table.AddRow(dataTableCell(info.Icon+" Context"), dataTableCell(fmt.Sprintf("%s %s", info.ProgressBar, info.TokenDisplay)))
 	if info.Model != "" {
-		table.AddRow(richTextCell("Model"), richTextCell(info.Model))
+		table.AddRow(dataTableCell("Model"), dataTableCell(info.Model))
 	}
 	if len(info.TopCategories) > 0 {
 		catParts := make([]string, len(info.TopCategories))
 		for i, cat := range info.TopCategories {
 			catParts[i] = fmt.Sprintf("%s: %s", cat.Name, messaging.FormatTokenCount(cat.Tokens))
 		}
-		table.AddRow(richTextCell("Top Context"), richTextCell(strings.Join(catParts, ", ")))
+		table.AddRow(dataTableCell("Top Context"), dataTableCell(strings.Join(catParts, ", ")))
 	}
 	if info.ExtrasLine != "" {
-		table.AddRow(richTextCell("Extras"), richTextCell(info.ExtrasLine))
+		table.AddRow(dataTableCell("Extras"), dataTableCell(info.ExtrasLine))
 	}
 	if info.ActionTip != "" {
-		table.AddRow(richTextCell("Tip"), richTextCell(info.ActionTip))
+		table.AddRow(dataTableCell("Tip"), dataTableCell(info.ActionTip))
 	}
 	return []slack.Block{table}
 }
 
-// buildContextUsageFallback builds ContextBlock fallback when TableBlock is rejected.
+// buildContextUsageFallback builds ContextBlock fallback when DataTableBlock is rejected.
 func (c *SlackConn) buildContextUsageFallback(d events.ContextUsageData) []slack.Block {
 	text := slack.NewTextBlockObject("mrkdwn", messaging.FormatCanonicalText(d), false, false)
 	return []slack.Block{slack.NewContextBlock("", text)}
 }
 
-// richTextCell creates a RichTextBlock cell for use in TableBlock rows.
-func richTextCell(text string) *slack.RichTextBlock {
-	section := slack.NewRichTextSection(
-		slack.NewRichTextSectionTextElement(text, nil),
-	)
-	return slack.NewRichTextBlock("", section)
+// dataTableCell creates a plain-text cell for use in DataTableBlock rows.
+func dataTableCell(text string) slack.DataTableCell {
+	return slack.NewDataTableRawTextCell(text)
 }
 
 func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) error {
@@ -1321,14 +1310,10 @@ func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) err
 	}
 	plainText := sb.String()
 
-	table := slack.NewTableBlock("mcp_status")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
-	table.AddRow(richTextCell("🔌 MCP Status"), richTextCell(fmt.Sprintf("%d servers", len(d.Servers))))
+	table := slack.NewDataTableBlock("MCP Status", slack.DataTableBlockOptionBlockID("mcp_status"))
+	table.AddRow(dataTableCell("🔌 MCP Status"), dataTableCell(fmt.Sprintf("%d servers", len(d.Servers))))
 	for _, s := range d.Servers {
-		table.AddRow(richTextCell(messaging.MCPServerIcon(s.Status)+" "+s.Name), richTextCell(s.Status))
+		table.AddRow(dataTableCell(messaging.MCPServerIcon(s.Status)+" "+s.Name), dataTableCell(s.Status))
 	}
 
 	blocks := []slack.Block{table}
@@ -1341,8 +1326,8 @@ func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) err
 	}
 	_, _, err := c.adapter.client.PostMessageContext(ctx, c.channelID, opts...)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid_blocks") {
-			c.adapter.Log.Warn("slack: MCP status TableBlock rejected, falling back to plain text", "err", err)
+		if isInvalidBlocksError(err) {
+			c.adapter.Log.Warn("slack: MCP status DataTableBlock rejected, falling back to plain text", "err", err)
 			fbOpts := []slack.MsgOption{slack.MsgOptionText(plainText, false)}
 			if c.threadTS != "" {
 				fbOpts = append(fbOpts, slack.MsgOptionTS(c.threadTS))

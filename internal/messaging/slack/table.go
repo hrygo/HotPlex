@@ -19,8 +19,11 @@ type TextSegment struct {
 
 // ParsedTable holds the structured data extracted from a markdown table.
 type ParsedTable struct {
-	Headers   []string
-	Rows      [][]string
+	Headers []string
+	Rows    [][]string
+	// ColAligns is parsed from markdown separator lines (e.g. :---:, ---:)
+	// but not applied: DataTableBlock has no per-column alignment API.
+	// Retained for potential future use if slack-go adds alignment support.
 	ColAligns []slack.ColumnAlignment
 }
 
@@ -316,7 +319,7 @@ const maxMarkdownBlockChars = 11000 // safety margin under Slack's 12K cumulativ
 
 // BuildTableBlocks constructs Block Kit blocks from extracted tables and text.
 //
-//   - 1 table: MarkdownBlock(text) + TableBlock → best visual
+//   - 1 table: MarkdownBlock(text) + DataTableBlock → best visual
 //   - 2+ tables: MarkdownBlock(full text with tables wrapped in code blocks)
 //   - oversized or no tables: returns nil
 func BuildTableBlocks(content string, segments []TextSegment, tables []ParsedTable) []slack.Block {
@@ -345,7 +348,7 @@ func buildSingleTableBlocks(segments []TextSegment, table ParsedTable) []slack.B
 		blocks = append(blocks, slack.NewMarkdownBlock("md_text", text))
 	}
 
-	blocks = append(blocks, buildOneTableBlock("md_table", table))
+	blocks = append(blocks, buildOneTableBlock("Table", "md_table", table))
 	return blocks
 }
 
@@ -357,28 +360,19 @@ func buildMultiTableBlocks(content string) []slack.Block {
 	return []slack.Block{slack.NewMarkdownBlock("md_full", wrapped)}
 }
 
-func buildOneTableBlock(blockID string, t ParsedTable) *slack.TableBlock {
-	table := slack.NewTableBlock(blockID)
-	settings := make([]slack.ColumnSetting, len(t.Headers))
-	for j := range settings {
-		align := slack.ColumnAlignmentLeft
-		if j < len(t.ColAligns) {
-			align = t.ColAligns[j]
-		}
-		settings[j] = slack.ColumnSetting{Align: align, IsWrapped: true}
-	}
-	table = table.WithColumnSettings(settings...)
+func buildOneTableBlock(caption, blockID string, t ParsedTable) *slack.DataTableBlock {
+	table := slack.NewDataTableBlock(caption, slack.DataTableBlockOptionBlockID(blockID))
 
-	headerRow := make([]*slack.RichTextBlock, len(t.Headers))
+	headerRow := make([]slack.DataTableCell, len(t.Headers))
 	for j, h := range t.Headers {
-		headerRow[j] = richTextCell(h)
+		headerRow[j] = dataTableCell(h)
 	}
 	table.AddRow(headerRow...)
 
 	for _, row := range t.Rows {
-		cells := make([]*slack.RichTextBlock, len(row))
+		cells := make([]slack.DataTableCell, len(row))
 		for j, cell := range row {
-			cells[j] = richTextCell(cell)
+			cells[j] = dataTableCell(cell)
 		}
 		table.AddRow(cells...)
 	}

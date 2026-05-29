@@ -2,7 +2,6 @@ package slack
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -100,7 +99,7 @@ func (c *SlackConn) handleSkillsList(ctx context.Context, env *events.Envelope) 
 	c.notifyStatus(ctx, "Loading skills...")
 	err := c.sendSkillsList(ctx, env)
 	c.clearStatus(ctx)
-	if err == nil || !strings.Contains(err.Error(), "invalid_blocks") {
+	if err == nil || !isInvalidBlocksError(err) {
 		return err
 	}
 	c.adapter.Log.Warn("slack: skills blocks rejected, falling back to plain text", "err", err)

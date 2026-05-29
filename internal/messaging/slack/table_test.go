@@ -146,14 +146,14 @@ func TestBuildTableBlocks(t *testing.T) {
 		require.Nil(t, blocks)
 	})
 
-	t.Run("single table produces MarkdownBlock + TableBlock", func(t *testing.T) {
+	t.Run("single table produces MarkdownBlock + DataTableBlock", func(t *testing.T) {
 		t.Parallel()
 		segments := []TextSegment{{Text: "before"}, {Text: "after"}}
 		tables := []ParsedTable{{Headers: []string{"H1", "H2"}, Rows: [][]string{{"A", "B"}}, ColAligns: []slack.ColumnAlignment{slack.ColumnAlignmentLeft, slack.ColumnAlignmentLeft}}}
 		blocks := BuildTableBlocks("before\n\n| H1 | H2 |\n|---|---|\n| A | B |\n\nafter", segments, tables)
 		require.Len(t, blocks, 2)
 		require.IsType(t, &slack.MarkdownBlock{}, blocks[0])
-		require.IsType(t, &slack.TableBlock{}, blocks[1])
+		require.IsType(t, &slack.DataTableBlock{}, blocks[1])
 	})
 
 	t.Run("multiple tables produces single MarkdownBlock with code blocks", func(t *testing.T) {

@@ -36,31 +36,26 @@ func loadVerifyClient(t *testing.T) (*slack.Client, string) {
 	return slack.New(token), channel
 }
 
-func buildTestTable() *slack.TableBlock {
-	table := slack.NewTableBlock("verify_table")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentRight, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentCenter, IsWrapped: true},
-	)
-	table.AddRow(richTextCell("Name"), richTextCell("Score"), richTextCell("Grade"))
-	table.AddRow(richTextCell("Alice"), richTextCell("95"), richTextCell("A"))
-	table.AddRow(richTextCell("Bob"), richTextCell("82"), richTextCell("B"))
-	table.AddRow(richTextCell("Carol"), richTextCell("78"), richTextCell("C"))
+func buildTestTable() *slack.DataTableBlock {
+	table := slack.NewDataTableBlock("Verify Table", slack.DataTableBlockOptionBlockID("verify_table"))
+	table.AddRow(dataTableCell("Name"), dataTableCell("Score"), dataTableCell("Grade"))
+	table.AddRow(dataTableCell("Alice"), dataTableCell("95"), dataTableCell("A"))
+	table.AddRow(dataTableCell("Bob"), dataTableCell("82"), dataTableCell("B"))
+	table.AddRow(dataTableCell("Carol"), dataTableCell("78"), dataTableCell("C"))
 	return table
 }
 
 // ---------------------------------------------------------------------------
-// Test 1: PostMessage + TableBlock (single table, non-streaming)
+// Test 1: PostMessage + DataTableBlock (single table, non-streaming)
 // ---------------------------------------------------------------------------
 
-func TestVerify_PostMessage_TableBlock(t *testing.T) {
+func TestVerify_PostMessage_DataTableBlock(t *testing.T) {
 	client, channel := loadVerifyClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	table := buildTestTable()
-	text := "Verification: PostMessage + TableBlock (single table)"
+	text := "Verification: PostMessage + DataTableBlock (single table)"
 	blocks := []slack.Block{
 		slack.NewMarkdownBlock("md_text", text),
 		table,
@@ -74,12 +69,12 @@ func TestVerify_PostMessage_TableBlock(t *testing.T) {
 		slack.MsgOptionText(text, false),
 	)
 	if err != nil {
-		t.Errorf("FAIL: PostMessage with TableBlock rejected: %v", err)
-		if strings.Contains(err.Error(), "invalid_blocks") {
-			t.Errorf("  → Slack returned invalid_blocks: TableBlock NOT supported by this workspace/app")
+		t.Errorf("FAIL: PostMessage with DataTableBlock rejected: %v", err)
+		if isInvalidBlocksError(err) {
+			t.Errorf("  → Slack returned invalid_blocks: DataTableBlock NOT supported by this workspace/app")
 		}
 	} else {
-		t.Logf("OK: PostMessage with TableBlock accepted — channel=%s ts=%s", ch, ts)
+		t.Logf("OK: PostMessage with DataTableBlock accepted — channel=%s ts=%s", ch, ts)
 	}
 }
 
@@ -138,10 +133,10 @@ func TestVerify_Stream_StopWithBlocks(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	// Phase 3: Stop stream with TableBlock
+	// Phase 3: Stop stream with DataTableBlock
 	table := buildTestTable()
 	stopBlocks := []slack.Block{
-		slack.NewMarkdownBlock("md_text", "Verification: StopStream with TableBlock (streaming table upgrade)"),
+		slack.NewMarkdownBlock("md_text", "Verification: StopStream with DataTableBlock (streaming table upgrade)"),
 		table,
 	}
 
@@ -164,7 +159,7 @@ func TestVerify_Stream_StopWithBlocks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 4: Stream → Stop → chat.update with TableBlock
+// Test 4: Stream → Stop → chat.update with DataTableBlock
 // ---------------------------------------------------------------------------
 
 func TestVerify_Stream_ThenUpdateWithBlocks(t *testing.T) {
@@ -200,10 +195,10 @@ func TestVerify_Stream_ThenUpdateWithBlocks(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	// Phase 4: Try chat.update with TableBlock to replace streamed content
+	// Phase 4: Try chat.update with DataTableBlock to replace streamed content
 	table := buildTestTable()
 	updateBlocks := []slack.Block{
-		slack.NewMarkdownBlock("md_text", "Verification: chat.update with TableBlock (post-stream replacement)"),
+		slack.NewMarkdownBlock("md_text", "Verification: chat.update with DataTableBlock (post-stream replacement)"),
 		table,
 	}
 
@@ -212,19 +207,19 @@ func TestVerify_Stream_ThenUpdateWithBlocks(t *testing.T) {
 		slack.MsgOptionText("Updated with table", false),
 	)
 	if updateErr != nil {
-		t.Errorf("FAIL: chat.update with TableBlock rejected: %v", updateErr)
+		t.Errorf("FAIL: chat.update with DataTableBlock rejected: %v", updateErr)
 		if strings.Contains(updateErr.Error(), "block_mismatch") {
 			t.Logf("  → block_mismatch confirmed: rich_text blocks from streaming cannot be replaced")
-		} else if strings.Contains(updateErr.Error(), "invalid_blocks") {
-			t.Logf("  → invalid_blocks: TableBlock NOT supported")
+		} else if isInvalidBlocksError(updateErr) {
+			t.Logf("  → invalid_blocks: DataTableBlock NOT supported")
 		}
 	} else {
-		t.Logf("OK: chat.update with TableBlock accepted — channel=%s ts=%s", ch, newTS)
+		t.Logf("OK: chat.update with DataTableBlock accepted — channel=%s ts=%s", ch, newTS)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: Stream → Stop → PostMessage follow-up with TableBlock
+// Test 5: Stream → Stop → PostMessage follow-up with DataTableBlock
 //   (This is the proposed fix approach)
 // ---------------------------------------------------------------------------
 
@@ -257,7 +252,7 @@ func TestVerify_Stream_ThenFollowUpTable(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Phase 4: Follow-up PostMessage with proper TableBlock
+	// Phase 4: Follow-up PostMessage with proper DataTableBlock
 	table := buildTestTable()
 	followUpText := fmt.Sprintf("Table for <https://hotplex.slack.com/archives/%s/p%s|streamed message>:", channel, strings.ReplaceAll(streamTS, ".", ""))
 	followUpBlocks := []slack.Block{
@@ -271,7 +266,7 @@ func TestVerify_Stream_ThenFollowUpTable(t *testing.T) {
 		slack.MsgOptionTS(streamTS), // reply in thread
 	)
 	if err != nil {
-		t.Errorf("FAIL: Follow-up PostMessage with TableBlock rejected: %v", err)
+		t.Errorf("FAIL: Follow-up PostMessage with DataTableBlock rejected: %v", err)
 	} else {
 		t.Logf("OK: Follow-up PostMessage accepted — channel=%s ts=%s", ch, newTS)
 		t.Logf("  → This is the proposed fix: separate message with proper table")
