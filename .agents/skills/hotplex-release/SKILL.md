@@ -534,7 +534,7 @@ gh release view vX.X.X
 ## 关键提醒
 
 > [!IMPORTANT]
-> **同步检查**：以下位置的版本号必须全部匹配，共 13 处：
+> **同步检查**：以下位置的版本号必须全部匹配，共 12 处：
 > - **Go 核心**：`cmd/hotplex/main.go`、`Makefile`（版本通过 `gateway_run.go` → `tracing.Init` 传入）
 > - **WebChat UI**：`webchat/package.json`（页面状态栏 `v{version}-stable`）
 > - **SDK**：`examples/{typescript,python,java}-client/` 各自的版本文件
