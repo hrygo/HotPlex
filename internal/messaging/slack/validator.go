@@ -10,16 +10,18 @@ import (
 
 // Slack Block Kit constraints per Slack API documentation
 const (
-	maxBlocksPerMessage   = 100
-	maxSectionTextLength  = 3000
-	maxContextElements    = 10
-	maxContextTextLength  = 3000
-	maxActionsElements    = 25
-	maxActionIDLength     = 255
-	maxButtonTextLength   = 75
-	maxButtonValueLength  = 2000
-	maxImageAltTextLength = 2000
-	maxImageURLLength     = 3000
+	maxBlocksPerMessage       = 100
+	maxSectionTextLength      = 3000
+	maxContextElements        = 10
+	maxContextTextLength      = 3000
+	maxActionsElements        = 25
+	maxActionIDLength         = 255
+	maxButtonTextLength       = 75
+	maxButtonValueLength      = 2000
+	maxImageAltTextLength     = 2000
+	maxImageURLLength         = 3000
+	maxDataTableCaptionLength = 3000
+	maxDataTableRows          = 100
 )
 
 // ValidateBlocks checks blocks against Slack's schema constraints.
@@ -167,12 +169,6 @@ func validateUnknownBlock(_ slack.Block, _ int) error {
 	// This is a best-effort for extensibility
 	return nil
 }
-
-// DataTableBlock constraints per Slack API documentation
-const (
-	maxDataTableCaptionLength = 3000
-	maxDataTableRows          = 100
-)
 
 // validateDataTableBlock validates a DataTableBlock against Slack constraints.
 func validateDataTableBlock(b *slack.DataTableBlock, i int, blockType slack.MessageBlockType) error {

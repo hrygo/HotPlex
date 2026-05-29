@@ -4,7 +4,7 @@
 
 ### Changed
 
-- **Messaging/Slack**: Replace beta `TableBlock` with GA `DataTableBlock` (slack-go v0.24.0). All 6 table builders migrated, validator/sanitizer updated, `isInvalidBlocksError` helper unified across 6 call sites. (#565)
+- **Messaging/Slack**: Replace beta `TableBlock` with GA `DataTableBlock` (slack-go v0.24.0). All 6 table builders migrated, validator/sanitizer updated, `isInvalidBlocksError` helper unified across 8 call sites. (#565)
 
 ## [1.20.0] - 2026-05-29
 
