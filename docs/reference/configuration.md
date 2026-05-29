@@ -412,6 +412,8 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `app_token` | string | `""` | `HOTPLEX_MESSAGING_SLACK_APP_TOKEN` | Slack App Token（`xapp-...`），Socket Mode 所需（单 bot 模式） |
 | `socket_mode` | bool | `true` | — | 是否使用 Socket Mode（推荐） |
 | `assistant_api_enabled` | *bool | `nil` | — | 是否启用 Slack Assistant API。nil = 未设置 |
+| `display_name` | string | `""` | — | Assistant 状态和消息中显示的名称（用于品牌化） |
+| `icon_emoji` | string | `""` | — | Assistant 状态和消息中显示的 emoji 图标（如 `:robot_face:`） |
 | `reconnect_base_delay` | duration | — | — | 断线重连基础延迟 |
 | `reconnect_max_delay` | duration | — | — | 断线重连最大延迟 |
 | `bots` | []SlackBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
@@ -447,6 +449,8 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 | `name` | string | Bot 名称（同一平台内唯一，必填） |
 | `bot_token` | string | Slack Bot Token（`xoxb-...`） |
 | `app_token` | string | Slack App Token（`xapp-...`） |
+| `display_name` | string | 覆盖顶层 Assistant 显示名称（bot 级品牌化） |
+| `icon_emoji` | string | 覆盖顶层 Assistant emoji 图标（bot 级品牌化） |
 | `worker_type` | string | 覆盖 Worker 类型 |
 | `stt_*` | — | 覆盖 STT 配置（继承平台级 → messaging 级） |
 | `tts_*` | — | 覆盖 TTS 配置（继承平台级 → messaging 级） |
