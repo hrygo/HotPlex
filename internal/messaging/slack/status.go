@@ -75,7 +75,8 @@ type StatusManager struct {
 	unregLogged sync.Map
 	// workDir is the per-adapter workDir for $WK substitution in status text.
 	// Moved from package-level var to fix multi-bot race (#510).
-	workDir string
+	workDir   string
+	workDirMu sync.RWMutex
 }
 
 // NewStatusManager creates a new status manager.
@@ -277,15 +278,23 @@ func init() {
 
 // SetWorkDir sets the workdir used for $WK substitution in status text.
 func (m *StatusManager) SetWorkDir(dir string) {
-	m.mu.Lock()
+	m.workDirMu.Lock()
 	m.workDir = dir
-	m.mu.Unlock()
+	m.workDirMu.Unlock()
+}
+
+// WorkDir returns the current workdir (thread-safe).
+func (m *StatusManager) WorkDir() string {
+	m.workDirMu.RLock()
+	wd := m.workDir
+	m.workDirMu.RUnlock()
+	return wd
 }
 
 func (m *StatusManager) shortenPaths(s string) string {
-	m.mu.Lock()
+	m.workDirMu.RLock()
 	wd := m.workDir
-	m.mu.Unlock()
+	m.workDirMu.RUnlock()
 	if wd != "" {
 		s = strings.ReplaceAll(s, wd, "$WK")
 	}

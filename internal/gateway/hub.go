@@ -481,25 +481,19 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	}
 
 	for _, conn := range conns {
-		// Optimized path: *Conn supports RouteWriteData (pre-encoded bytes).
-		// Platform connections (pcEntry) still use RouteWrite with envelope.
+		var writeErr error
 		switch c := conn.(type) {
 		case *Conn:
-			if err := c.RouteWriteData(data, msg.Env.Event.Type); err != nil {
-				h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
-				_ = c.Close()
-				h.mu.Lock()
-				h.removeSession(msg.Env.SessionID, conn)
-				h.mu.Unlock()
-			}
+			writeErr = c.RouteWriteData(data, msg.Env.Event.Type)
 		default:
-			if err := conn.RouteWrite(context.Background(), msg.Env); err != nil {
-				h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
-				_ = conn.Close()
-				h.mu.Lock()
-				h.removeSession(msg.Env.SessionID, conn)
-				h.mu.Unlock()
-			}
+			writeErr = conn.RouteWrite(context.Background(), msg.Env)
+		}
+		if writeErr != nil {
+			h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", writeErr)
+			_ = conn.Close()
+			h.mu.Lock()
+			h.removeSession(msg.Env.SessionID, conn)
+			h.mu.Unlock()
 		}
 	}
 }

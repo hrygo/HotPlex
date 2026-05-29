@@ -96,13 +96,16 @@ func Global() Brain {
 // (e.g. goroutine leaks from RateLimiter) on hot-reload.
 func SetGlobal(b Brain) {
 	globalBrainMu.Lock()
-	defer globalBrainMu.Unlock()
-	if globalBrain != nil {
-		if c, ok := globalBrain.(interface{ Close() }); ok {
+	prev := globalBrain
+	globalBrain = b
+	globalBrainMu.Unlock()
+
+	// Close outside the lock — it may block waiting for goroutines to exit.
+	if prev != nil {
+		if c, ok := prev.(interface{ Close() }); ok {
 			c.Close()
 		}
 	}
-	globalBrain = b
 }
 
 // GetRouter returns the global router if the brain supports routing.

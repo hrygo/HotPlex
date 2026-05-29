@@ -1895,7 +1895,7 @@ func TestAdapter_ConfigureWith_BridgeSetsWorkDir(t *testing.T) {
 	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: testBridge})
 	require.NoError(t, err)
 	require.Same(t, testBridge, a.Bridge())
-	require.Equal(t, "/tmp/hotplex/workspace", a.statusMgr.workDir)
+	require.Equal(t, "/tmp/hotplex/workspace", a.statusMgr.WorkDir())
 }
 
 type fakeTranscriberForTest struct{}
