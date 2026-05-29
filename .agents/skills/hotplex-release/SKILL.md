@@ -234,7 +234,15 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 | `Makefile:26` | `VERSION := v1.x.x`（LDFLAGS 引用 `$(VERSION)`） | `v1.2.0` |
 | `cmd/hotplex/gateway_run.go` | `tracing.Init(ctx, log, "hotplex-gateway", versionString())` | version from LDFLAGS |
 
-### 4.2 多语言 SDK
+### 4.2 WebChat UI
+
+| 文件 | 模式 | 示例 |
+|:---|:---|:---|
+| `webchat/package.json` | `"version": "1.x.x"` | `1.2.0` |
+
+> **注意**：页面状态栏通过 `import { version } from "../../package.json"` 读取版本号，显示为 `v{version}-stable`。
+
+### 4.3 多语言 SDK
 
 | 文件 | 模式 |
 |:---|:---|
@@ -243,7 +251,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 | `examples/python-client/hotplex_client/__init__.py` | `__version__ = "1.x.x"` |
 | `examples/java-client/pom.xml` | `<version>1.x.x-SNAPSHOT</version>` |
 
-### 4.3 项目文档
+### 4.4 项目文档
 
 | 文件 | 模式 | 示例 |
 |:---|:---|:---|
@@ -254,7 +262,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 
 > **注意**：`CLAUDE.md` 是 `AGENTS.md` 的符号链接，只需编辑 `AGENTS.md`（这是实际文件），`CLAUDE.md` 会自动同步。修改时请同时更新**版本号**和**最后更新日期**。
 
-### 4.4 基础设施
+### 4.5 基础设施
 
 | 文件 | 模式 |
 |:---|:---|
@@ -269,7 +277,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 git diff
 
 # 或者使用 grep 确认新版本号已写入所有关键文件（如 1.2.0）
-grep -rn "1\.2\.0" cmd/hotplex/main.go Makefile \
+grep -rn "1\.2\.0" cmd/hotplex/main.go Makefile webchat/package.json \
   examples/typescript-client/package.json examples/python-client/pyproject.toml \
   examples/python-client/hotplex_client/__init__.py examples/java-client/pom.xml \
   Dockerfile README.md README_zh.md AGENTS.md
@@ -315,6 +323,7 @@ git diff --stat
 git add \
   cmd/hotplex/main.go \
   Makefile \
+  webchat/package.json \
   examples/typescript-client/package.json \
   examples/python-client/pyproject.toml \
   examples/python-client/hotplex_client/__init__.py \
@@ -525,8 +534,9 @@ gh release view vX.X.X
 ## 关键提醒
 
 > [!IMPORTANT]
-> **同步检查**：以下位置的版本号必须全部匹配，共 12 处：
+> **同步检查**：以下位置的版本号必须全部匹配，共 13 处：
 > - **Go 核心**：`cmd/hotplex/main.go`、`Makefile`（版本通过 `gateway_run.go` → `tracing.Init` 传入）
+> - **WebChat UI**：`webchat/package.json`（页面状态栏 `v{version}-stable`）
 > - **SDK**：`examples/{typescript,python,java}-client/` 各自的版本文件
 > - **文档**：`README.md` badge、`README_zh.md` badge、`AGENTS.md` 头部
 > - **基础设施**：`Dockerfile`
