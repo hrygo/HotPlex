@@ -812,10 +812,11 @@ func (c *SlackConn) WorkDir() string {
 func (c *SlackConn) SetWorkDir(dir string) {
 	c.mu.Lock()
 	c.workDir = dir
+	adapter := c.adapter
 	c.mu.Unlock()
 	// Propagate to StatusManager so $WK substitution uses this conn's workDir.
-	if c.adapter != nil && c.adapter.statusMgr != nil {
-		c.adapter.statusMgr.SetWorkDir(dir)
+	if adapter != nil && adapter.statusMgr != nil {
+		adapter.statusMgr.SetWorkDir(dir)
 	}
 }
 

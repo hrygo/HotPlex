@@ -722,9 +722,10 @@ func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) 
 	// Fast path: check if accumulator exists under read lock.
 	b.accumMu.RLock()
 	acc, ok := b.accum[sessionID]
+	needsWorkDir := ok && workDir != "" && acc.WorkDir == ""
 	b.accumMu.RUnlock()
 	if ok {
-		if workDir != "" && acc.WorkDir == "" {
+		if needsWorkDir {
 			// Resolve git branch outside any lock (up to 2s subprocess).
 			branch := gitBranchOf(workDir)
 			b.accumMu.Lock()
