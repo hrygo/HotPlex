@@ -496,15 +496,12 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
 			m.log.Warn("session: attach rejected", "err", poolErr, "session_id", id)
-			metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
 			return ErrPoolExhausted
 		}
 		m.log.Warn("session: attach rejected", "kind", pe.Kind, "session_id", id)
 		if pe.Kind == poolErrKindUserQuotaExceeded {
-			metrics.PoolAcquireTotal.WithLabelValues("user_quota_exceeded").Inc()
 			return ErrUserQuotaExceeded
 		}
-		metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
 		return ErrPoolExhausted
 	}
 
@@ -853,12 +850,10 @@ func (m *Manager) RepairRunningSessions(ctx context.Context) (int, error) {
 	return repaired, nil
 }
 
-// Stats returns the active worker pool utilization.
+// Stats returns the current worker pool counts: total active workers,
+// maximum pool size, and number of unique users with active sessions.
 func (m *Manager) Stats() (totalWorkers, maxWorkers, uniqueUsers int) {
 	total, max, users := m.pool.Stats()
-	if max > 0 {
-		metrics.PoolUtilization.Set(float64(total) / float64(max))
-	}
 	return total, max, users
 }
 

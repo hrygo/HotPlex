@@ -166,8 +166,23 @@ func (c configRequiredChecker) Check(ctx context.Context) cli.Diagnostic {
 
 	var missing []string
 
-	hasWorker := cfg.Messaging.Slack.Enabled || cfg.Messaging.Feishu.Enabled
-	if !hasWorker {
+	if cfg.Messaging.Slack.Enabled {
+		if cfg.Messaging.Slack.BotToken == "" {
+			missing = append(missing, "messaging.slack.bot_token")
+		}
+		if cfg.Messaging.Slack.AppToken == "" {
+			missing = append(missing, "messaging.slack.app_token")
+		}
+	}
+	if cfg.Messaging.Feishu.Enabled {
+		if cfg.Messaging.Feishu.AppID == "" {
+			missing = append(missing, "messaging.feishu.app_id")
+		}
+		if cfg.Messaging.Feishu.AppSecret == "" {
+			missing = append(missing, "messaging.feishu.app_secret")
+		}
+	}
+	if !cfg.Messaging.Slack.Enabled && !cfg.Messaging.Feishu.Enabled {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),

@@ -295,6 +295,8 @@ func TestConfigRequired_AllPresent(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	dbDir := filepath.Join(dir, "data")
 	require.NoError(t, os.MkdirAll(dbDir, 0o755))
+	t.Setenv("HOTPLEX_MESSAGING_SLACK_BOT_TOKEN", "xoxb-test-token")
+	t.Setenv("HOTPLEX_MESSAGING_SLACK_APP_TOKEN", "xapp-test-token")
 	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
