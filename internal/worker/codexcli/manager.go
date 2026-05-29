@@ -313,13 +313,12 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 	env := m.buildEnv()
 	m.proc = proc.New(proc.Opts{Logger: m.log})
 
-	startTimeout := m.cfg.StartupTimeout
-	if startTimeout <= 0 {
-		startTimeout = defaultStartupTimeout
-	}
-	startCtx, startCancel := context.WithTimeout(ctx, startTimeout)
-	defer startCancel()
-	stdin, stdout, _, err := m.proc.Start(startCtx, binary, fullArgs, env, "")
+	// Use context.Background() for the long-lived codex process.
+	// exec.CommandContext kills the process when the context is done,
+	// so a timeout context would kill the process immediately after
+	// startProcessLocked returns. The handshake timeout is already
+	// enforced by the Call method's own timer.
+	stdin, stdout, _, err := m.proc.Start(context.Background(), binary, fullArgs, env, "")
 	if err != nil {
 		m.proc = nil
 		m.state = stateIdle
