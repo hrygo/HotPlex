@@ -62,7 +62,7 @@ type Bridge struct {
 	cronEnv            []string      // env vars injected only into cron platform sessions
 	mcpConfigJSON      atomic.Value  // pre-serialized MCP config JSON string; "" = not configured
 
-	accum   map[string]*sessionAccumulator // per-session stats accumulator
+	accum map[string]*sessionAccumulator // per-session stats accumulator
 	// accumMu protects accum. RWMutex allows concurrent reads in getOrInitAccum
 	// fast path; write lock is used for create/delete/reset operations.
 	accumMu sync.RWMutex

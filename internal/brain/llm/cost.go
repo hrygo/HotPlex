@@ -28,8 +28,8 @@ type CostCalculator struct {
 	sessionTTL time.Duration
 	// evictCounter triggers eviction every evictInterval TrackRequest calls
 	// to amortize the O(n) scan cost away from the hot path.
-	evictCounter   int64
-	evictInterval  int64
+	evictCounter  int64
+	evictInterval int64
 }
 
 // ModelPricing represents pricing for a model.

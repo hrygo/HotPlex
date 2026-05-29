@@ -487,13 +487,14 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	}
 
 	for _, conn := range conns {
-		if err := conn.RouteWriteData(data, msg.Env.Event.Type); err != nil {
-			h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
-			_ = conn.Close()
-			h.mu.Lock()
-			h.removeSession(msg.Env.SessionID, conn)
-			h.mu.Unlock()
+		if err := conn.RouteWriteData(data, msg.Env.Event.Type); err == nil {
+			continue
 		}
+		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
+		_ = conn.Close()
+		h.mu.Lock()
+		h.removeSession(msg.Env.SessionID, conn)
+		h.mu.Unlock()
 	}
 }
 
