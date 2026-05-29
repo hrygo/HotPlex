@@ -1795,25 +1795,24 @@ func TestNotify_EmptyText_ClearsState(t *testing.T) {
 func TestShortenPaths(t *testing.T) {
 	t.Parallel()
 
+	// Create a StatusManager for testing (workDir is per-instance now).
+	sm := &StatusManager{}
+
 	// Home dir substitution
-	require.Equal(t, "~/src/main.go", shortenPaths(homeDir+"/src/main.go"))
-	require.Equal(t, "/usr/local/bin", shortenPaths("/usr/local/bin"))
-	require.Equal(t, "no path here", shortenPaths("no path here"))
+	require.Equal(t, "~/src/main.go", sm.shortenPaths(homeDir+"/src/main.go"))
+	require.Equal(t, "/usr/local/bin", sm.shortenPaths("/usr/local/bin"))
+	require.Equal(t, "no path here", sm.shortenPaths("no path here"))
 
 	// WorkDir substitution takes priority
-	workDirMu.RLock()
-	origWorkDir := workDir
-	workDirMu.RUnlock()
-	SetWorkDir("/tmp/hotplex/workspace")
-	t.Cleanup(func() { SetWorkDir(origWorkDir) })
+	sm.SetWorkDir("/tmp/hotplex/workspace")
 
-	require.Equal(t, "$WK/main.go", shortenPaths("/tmp/hotplex/workspace/main.go"))
-	require.Equal(t, "$WK/sub/file.txt", shortenPaths("/tmp/hotplex/workspace/sub/file.txt"))
+	require.Equal(t, "$WK/main.go", sm.shortenPaths("/tmp/hotplex/workspace/main.go"))
+	require.Equal(t, "$WK/sub/file.txt", sm.shortenPaths("/tmp/hotplex/workspace/sub/file.txt"))
 
 	// Both: workDir first, then homeDir on remaining
-	SetWorkDir(homeDir + "/projects/myapp")
-	require.Equal(t, "$WK/main.go", shortenPaths(homeDir+"/projects/myapp/main.go"))
-	require.Equal(t, "~/other/file.go", shortenPaths(homeDir+"/other/file.go"))
+	sm.SetWorkDir(homeDir + "/projects/myapp")
+	require.Equal(t, "$WK/main.go", sm.shortenPaths(homeDir+"/projects/myapp/main.go"))
+	require.Equal(t, "~/other/file.go", sm.shortenPaths(homeDir+"/other/file.go"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1885,9 +1884,6 @@ func TestAdapter_ConfigureWith_Gate(t *testing.T) {
 }
 
 func TestAdapter_ConfigureWith_BridgeSetsWorkDir(t *testing.T) {
-	origWorkDir := workDir
-	t.Cleanup(func() { workDir = origWorkDir })
-
 	testBridge := messaging.NewBridge(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		messaging.PlatformSlack,
@@ -1895,10 +1891,11 @@ func TestAdapter_ConfigureWith_BridgeSetsWorkDir(t *testing.T) {
 	)
 
 	a := &Adapter{}
+	a.statusMgr = NewStatusManager(a, slog.Default())
 	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: testBridge})
 	require.NoError(t, err)
 	require.Same(t, testBridge, a.Bridge())
-	require.Equal(t, "/tmp/hotplex/workspace", workDir)
+	require.Equal(t, "/tmp/hotplex/workspace", a.statusMgr.workDir)
 }
 
 type fakeTranscriberForTest struct{}

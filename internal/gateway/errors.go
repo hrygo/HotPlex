@@ -16,7 +16,7 @@ func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code eve
 		Message: fmt.Sprintf(format, args...),
 	})
 	_ = h.hub.SendToSession(ctx, err) // best-effort; always return the error
-	return fmt.Errorf("%s: %s", code, fmt.Sprintf(format, args...))
+	return fmt.Errorf("%s: %w", code, fmt.Errorf(format, args...))
 }
 
 // classifyWorkerError converts worker errors into AEP error codes.

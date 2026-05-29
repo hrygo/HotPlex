@@ -433,3 +433,12 @@ func (w *enhancedBrainWrapper) GetRouter() *llm.Router {
 func (w *enhancedBrainWrapper) GetRateLimiter() *llm.RateLimiter {
 	return w.rateLimiter
 }
+
+// Close releases resources held by the brain wrapper.
+// Stops the rate limiter's queue-processing goroutine to prevent leaks
+// on hot-reload (where a new brain is created and the old one is discarded).
+func (w *enhancedBrainWrapper) Close() {
+	if w.rateLimiter != nil {
+		w.rateLimiter.Close()
+	}
+}

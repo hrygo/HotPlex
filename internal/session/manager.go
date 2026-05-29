@@ -296,32 +296,35 @@ func (m *Manager) UpdateWorkDir(ctx context.Context, id, workDir string) error {
 
 // transitionState performs the common state-transition work: validation,
 // in-memory update, persistence, and notifications.
+// Uses copy-on-write: mutates a snapshot of ms.info, then persists the
+// snapshot. On DB success the snapshot becomes the new ms.info — on failure
+// ms.info is unchanged, eliminating the need for rollback.
 // Caller must hold ms.mu for write; this method temporarily releases ms.mu
 // for the DB write and re-acquires it before returning.
 func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from, to events.SessionState, termReason string) error {
-	ms.info.State = to
-	ms.info.UpdatedAt = time.Now()
+	// Build the candidate state as a value copy (never mutates ms.info in-place).
+	candidate := ms.info
+	candidate.State = to
+	candidate.UpdatedAt = time.Now()
 
 	// Set idle expiry when entering IDLE; clear when leaving IDLE.
-	prevIdleExpiresAt := ms.info.IdleExpiresAt
 	if to == events.StateIdle {
-		ms.info.IdleExpiresAt = ptr(time.Now().Add(m.cfg.Worker.IdleTimeout))
+		candidate.IdleExpiresAt = ptr(time.Now().Add(m.cfg.Worker.IdleTimeout))
 	} else {
-		ms.info.IdleExpiresAt = nil
+		candidate.IdleExpiresAt = nil
 	}
 
-	info := ms.info
 	ms.mu.Unlock()
-
-	dbErr := m.store.Upsert(ctx, &info)
-
+	dbErr := m.store.Upsert(ctx, &candidate)
 	ms.mu.Lock()
+
 	if dbErr != nil {
-		ms.info.State = from
-		ms.info.UpdatedAt = time.Now()
-		ms.info.IdleExpiresAt = prevIdleExpiresAt
+		// ms.info untouched — no rollback needed.
 		return dbErr
 	}
+
+	// Commit: replace ms.info with the persisted snapshot.
+	ms.info = candidate
 
 	if to == events.StateTerminated || to == events.StateDeleted {
 		// Record worker execution duration and decrement running gauge before killing.
@@ -1115,7 +1118,7 @@ func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state
 	}
 }
 
-func (m *Manager) getManagedSession(_ context.Context, id string) *managedSession {
+func (m *Manager) getManagedSession(ctx context.Context, id string) *managedSession {
 	m.mu.RLock()
 	ms, ok := m.sessions[id]
 	m.mu.RUnlock()
@@ -1123,7 +1126,7 @@ func (m *Manager) getManagedSession(_ context.Context, id string) *managedSessio
 		return ms
 	}
 	// Load from Store.
-	info, err := m.store.Get(context.Background(), id)
+	info, err := m.store.Get(ctx, id)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) {
 			m.log.Error("session: store lookup failed", "session_id", id, "err", err)

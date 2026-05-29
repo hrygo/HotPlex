@@ -91,9 +91,17 @@ func Global() Brain {
 }
 
 // SetGlobal sets the global Brain instance.
+// If the new brain implements io.Closer, SetGlobal calls Close on the
+// *previous* instance before replacing it — this prevents resource leaks
+// (e.g. goroutine leaks from RateLimiter) on hot-reload.
 func SetGlobal(b Brain) {
 	globalBrainMu.Lock()
 	defer globalBrainMu.Unlock()
+	if globalBrain != nil {
+		if c, ok := globalBrain.(interface{ Close() }); ok {
+			c.Close()
+		}
+	}
 	globalBrain = b
 }
 

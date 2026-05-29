@@ -715,25 +715,49 @@ func extractReasoningContent(env *events.Envelope) string {
 }
 
 // getOrInitAccum returns the session accumulator, creating one if needed.
-// gitBranchOf is called inside the lock only when the accumulator first
-// receives a non-empty workDir — a one-time cost per session (up to 2s
-// subprocess). After that, the branch is already set and skipped.
+// gitBranchOf is called outside the lock to avoid blocking all sessions
+// during the ~2s git subprocess. The branch is set on the accumulator
+// after re-acquiring the lock.
 func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) *sessionAccumulator {
-	b.accumMu.Lock()
-	defer b.accumMu.Unlock()
-	if acc, ok := b.accum[sessionID]; ok {
+	// Fast path: check if accumulator exists under read lock.
+	b.accumMu.RLock()
+	acc, ok := b.accum[sessionID]
+	b.accumMu.RUnlock()
+	if ok {
 		if workDir != "" && acc.WorkDir == "" {
+			// Resolve git branch outside any lock (up to 2s subprocess).
+			branch := gitBranchOf(workDir)
+			b.accumMu.Lock()
 			acc.WorkDir = workDir
-			acc.GitBranch = gitBranchOf(workDir)
+			acc.GitBranch = branch
+			b.accumMu.Unlock()
 		}
 		return acc
 	}
-	acc := &sessionAccumulator{StartedAt: startTime}
+
+	// Slow path: resolve git branch before acquiring write lock.
+	var branch string
 	if workDir != "" {
-		acc.WorkDir = workDir
-		acc.GitBranch = gitBranchOf(workDir)
+		branch = gitBranchOf(workDir)
+	}
+
+	b.accumMu.Lock()
+	// Double-check after acquiring write lock.
+	if acc, ok := b.accum[sessionID]; ok {
+		b.accumMu.Unlock()
+		if workDir != "" && acc.WorkDir == "" {
+			acc.WorkDir = workDir
+			acc.GitBranch = branch
+		}
+		return acc
+	}
+	acc = &sessionAccumulator{
+		StartedAt: startTime,
+		WorkDir:   workDir,
+		GitBranch: branch,
 	}
 	b.accum[sessionID] = acc
+	b.accumMu.Unlock()
 	return acc
 }
 

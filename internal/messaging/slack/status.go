@@ -73,6 +73,9 @@ type StatusManager struct {
 	threadState map[string]*threadState
 	// unregLogged tracks tool names already logged as unregistered (once-per-name dedup).
 	unregLogged sync.Map
+	// workDir is the per-adapter workDir for $WK substitution in status text.
+	// Moved from package-level var to fix multi-bot race (#510).
+	workDir string
 }
 
 // NewStatusManager creates a new status manager.
@@ -263,12 +266,8 @@ func extractResultFields(env *events.Envelope) (any, string) {
 // statusTextLimit is the max rune length for tool status text.
 const statusTextLimit = 80
 
-// shortenPaths replaces workDir with "$WK" then homeDir with "~" in s.
-var (
-	homeDir   string
-	workDir   string
-	workDirMu sync.RWMutex
-)
+// homeDir is read-only after init — safe as package-level.
+var homeDir string
 
 func init() {
 	if dir, err := os.UserHomeDir(); err == nil {
@@ -277,16 +276,16 @@ func init() {
 }
 
 // SetWorkDir sets the workdir used for $WK substitution in status text.
-func SetWorkDir(dir string) {
-	workDirMu.Lock()
-	workDir = dir
-	workDirMu.Unlock()
+func (m *StatusManager) SetWorkDir(dir string) {
+	m.mu.Lock()
+	m.workDir = dir
+	m.mu.Unlock()
 }
 
-func shortenPaths(s string) string {
-	workDirMu.RLock()
-	wd := workDir
-	workDirMu.RUnlock()
+func (m *StatusManager) shortenPaths(s string) string {
+	m.mu.Lock()
+	wd := m.workDir
+	m.mu.Unlock()
 	if wd != "" {
 		s = strings.ReplaceAll(s, wd, "$WK")
 	}

@@ -472,15 +472,34 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		h.LogHandler(level, fmt.Sprintf("event %s seq=%d", msg.Env.Event.Type, msg.Env.Seq), msg.Env.SessionID)
 	}
 
+	// Pre-encode once and distribute raw bytes to all connections.
+	// This avoids N redundant JSON marshal operations (one per conn).
+	data, err := aep.EncodeJSON(msg.Env)
+	if err != nil {
+		h.log.Error("gateway: encode message failed", "session_id", msg.Env.SessionID, "err", err)
+		return
+	}
+
 	for _, conn := range conns {
-		if err := conn.RouteWrite(context.Background(), msg.Env); err == nil {
-			continue
-		} else {
-			h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
-			_ = conn.Close()
-			h.mu.Lock()
-			h.removeSession(msg.Env.SessionID, conn)
-			h.mu.Unlock()
+		// Optimized path: *Conn supports RouteWriteData (pre-encoded bytes).
+		// Platform connections (pcEntry) still use RouteWrite with envelope.
+		switch c := conn.(type) {
+		case *Conn:
+			if err := c.RouteWriteData(data, msg.Env.Event.Type); err != nil {
+				h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
+				_ = c.Close()
+				h.mu.Lock()
+				h.removeSession(msg.Env.SessionID, conn)
+				h.mu.Unlock()
+			}
+		default:
+			if err := conn.RouteWrite(context.Background(), msg.Env); err != nil {
+				h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
+				_ = conn.Close()
+				h.mu.Lock()
+				h.removeSession(msg.Env.SessionID, conn)
+				h.mu.Unlock()
+			}
 		}
 	}
 }

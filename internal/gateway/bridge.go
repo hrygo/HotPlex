@@ -63,7 +63,7 @@ type Bridge struct {
 	mcpConfigJSON      atomic.Value  // pre-serialized MCP config JSON string; "" = not configured
 
 	accum   map[string]*sessionAccumulator // per-session stats accumulator
-	accumMu sync.Mutex
+	accumMu sync.RWMutex
 
 	crashTracker   map[string]*crashHistory // per-session crash loop detection
 	crashTrackerMu sync.Mutex

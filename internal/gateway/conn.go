@@ -670,6 +670,20 @@ func (c *Conn) RouteWrite(_ context.Context, env *events.Envelope) error {
 	return c.sendData(data)
 }
 
+// RouteWriteData writes pre-encoded JSON bytes through the Hub routing path.
+// This avoids redundant re-encoding when the same message is sent to N connections.
+// The caller must provide the event type for metrics and droppable semantics.
+func (c *Conn) RouteWriteData(data []byte, eventType events.Kind) error {
+	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(eventType)).Inc()
+	if handled, err := c.bufferOrReject(data); handled {
+		return err
+	}
+	if isDroppable(eventType) {
+		return c.trySendData(data)
+	}
+	return c.sendData(data)
+}
+
 // sendData writes pre-encoded data to the write channel. Disconnects the
 // client if the channel is full (backpressure for reliable events).
 func (c *Conn) sendData(data []byte) error {

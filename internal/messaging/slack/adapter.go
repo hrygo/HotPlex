@@ -127,7 +127,9 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 
 	// Bridge reference and workdir.
 	if config.Bridge != nil {
-		SetWorkDir(config.Bridge.WorkDir())
+		if a.statusMgr != nil {
+			a.statusMgr.SetWorkDir(config.Bridge.WorkDir())
+		}
 	}
 
 	// Shared: gate, backoff delays.
@@ -809,8 +811,12 @@ func (c *SlackConn) WorkDir() string {
 
 func (c *SlackConn) SetWorkDir(dir string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.workDir = dir
+	c.mu.Unlock()
+	// Propagate to StatusManager so $WK substitution uses this conn's workDir.
+	if c.adapter != nil && c.adapter.statusMgr != nil {
+		c.adapter.statusMgr.SetWorkDir(dir)
+	}
 }
 
 // notifyStatus sets processing status (nil-safe for tests).
