@@ -233,6 +233,9 @@ func SanitizeBlocks(blocks []slack.Block) []slack.Block {
 		case *slack.HeaderBlock:
 			sanitized = append(sanitized, sanitizeHeaderBlock(b))
 
+		case *slack.DataTableBlock:
+			sanitized = append(sanitized, sanitizeDataTableBlock(b))
+
 		default:
 			// Keep other block types as-is
 			sanitized = append(sanitized, block)
@@ -346,6 +349,16 @@ func sanitizeImageBlock(b *slack.ImageBlock) *slack.ImageBlock {
 func sanitizeHeaderBlock(b *slack.HeaderBlock) *slack.HeaderBlock {
 	if b.Text != nil && utf8.RuneCountInString(b.Text.Text) > 150 {
 		b.Text.Text = truncateWithSuffix(b.Text.Text, 150)
+	}
+	return b
+}
+
+func sanitizeDataTableBlock(b *slack.DataTableBlock) *slack.DataTableBlock {
+	if utf8.RuneCountInString(b.Caption) > maxDataTableCaptionLength {
+		b.Caption = truncateWithSuffix(b.Caption, maxDataTableCaptionLength)
+	}
+	if len(b.Rows) > maxDataTableRows {
+		b.Rows = b.Rows[:maxDataTableRows]
 	}
 	return b
 }

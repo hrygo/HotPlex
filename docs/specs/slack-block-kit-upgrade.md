@@ -98,30 +98,25 @@ params := slack.AssistantThreadsSetStatusParameters{
 **turn summary** (`adapter.go:1189-1204`)：
 ```go
 func (c *SlackConn) buildTurnSummaryTable(d messaging.TurnSummaryData) []slack.Block {
-    dt := slack.NewDataTableBlock("turn_summary")
-    dt.Caption = "Turn Summary"
+    table := slack.NewDataTableBlock("Turn Summary", slack.DataTableBlockOptionBlockID("turn_summary"))
     for _, f := range d.Fields() {
         val := f.Value
         if f.Label == "🔧 Tools" {
             val = formatToolNamesSlack(d.ToolNames, d.ToolCallCount)
         }
-        dt.AddRow(
-            slack.NewRawTextCell(f.Label),
-            slack.NewRawTextCell(val),
-        )
+        table.AddRow(dataTableCell(f.Label), dataTableCell(val))
     }
-    return []slack.Block{dt}
+    return []slack.Block{table}
 }
 ```
 
-**删除 fallback 代码**：
-- `adapter.go:1237-1254` context usage fallback → 删除
-- `adapter.go:1337-1347` MCP status fallback → 删除
-- `adapter.go:1163-1186` turn summary fallback → 删除
+**Fallback 保留**：DataTableBlock 为 GA API，但部分 workspace 可能不支持。
+- `sendTurnSummary` / `sendContextUsage` / `sendMCPStatus` 均保留 `isInvalidBlocksError` fallback
+- Fallback 使用 plain text 或 ContextBlock 替代
 
 ### 2.4 兼容性
 
-DataTable 为 2026 新 API。保留渐进策略：
+DataTable 为 2026 GA API。保留渐进策略：
 1. 先尝试 DataTable
 2. `invalid_blocks` 错误 → fallback 到 AlertBlock（Phase 1 已实现）
 3. 工作区兼容后移除 fallback
