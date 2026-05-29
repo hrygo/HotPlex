@@ -196,6 +196,7 @@ export function useSessions({
     try {
       await deleteSession(id);
     } catch (e) {
+      logger.error('Sessions', 'Failed to delete session', { error: String(e) });
       setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to delete session'));
       refreshSessions();
     }
