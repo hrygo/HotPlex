@@ -102,6 +102,7 @@ export async function createSession(opts: CreateSessionOptions, signal?: AbortSi
     url += `&work_dir=${encodeURIComponent(opts.workDir)}`;
   }
   const res = await fetch(url, { method: 'POST', headers: AUTH_HEADER, signal });
+  throwIfAuthError('createSession', res.status);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(body || `createSession failed: ${res.status}`);
@@ -114,6 +115,7 @@ export async function deleteSession(id: string, signal?: AbortSignal): Promise<v
     `${BASE}/api/sessions/${id}`,
     { method: 'DELETE', headers: AUTH_HEADER, signal }
   );
+  throwIfAuthError('deleteSession', res.status);
   if (!res.ok) throw new Error(`deleteSession failed: ${res.status}`);
 }
 
@@ -130,6 +132,7 @@ export async function getSessionHistory(
     url += `&before_id=${options.beforeId}`;
   }
   const res = await fetch(url, { headers: { ...AUTH_HEADER, 'Content-Type': 'application/json' }, signal: options?.signal });
+  throwIfAuthError('getSessionHistory', res.status);
   if (!res.ok) throw new Error(`getSessionHistory failed: ${res.status}`);
   return res.json();
 }
