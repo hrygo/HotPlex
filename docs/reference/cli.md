@@ -34,6 +34,7 @@ hotplex
 ├── config           # 配置管理
 │   └── validate     # 验证配置文件
 ├── onboard          # 交互式配置向导
+├── install          # 安装二进制到 PATH
 ├── update           # 自更新
 ├── service          # 系统服务管理
 │   ├── install      # 安装服务
@@ -293,6 +294,29 @@ hotplex onboard --non-interactive \
 | `--feishu-group-policy` | `string` | `allowlist` | 飞书群组策略：`open`、`allowlist`、`disabled` |
 | `--install-service` | `bool` | `false` | 在非交互模式下同时安装为系统服务 |
 | `--service-level` | `string` | `user` | 服务级别：`user` 或 `system`（配合 `--install-service`） |
+
+---
+
+## 二进制安装
+
+### `hotplex install`
+
+将 hotplex 二进制安装到 PATH 中的目录。若已在 PATH 中且内容相同则为 no-op；若二进制不同则原地更新。
+
+安装到新位置时，自动将目标目录添加到 PATH（通过 shell RC 文件 `~/.zshrc`/`~/.bashrc` 或 Windows 用户环境变量）。
+
+**示例**：
+
+```bash
+hotplex install              # 安装到默认位置 (~/.local/bin)
+hotplex install --path /usr/local/bin  # 安装到指定目录
+hotplex install --force                # 强制重新安装
+```
+
+| 标志 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--path` | `string` | `~/.local/bin` | 目标安装目录 |
+| `--force` | `bool` | `false` | 即使已安装也重新安装 |
 
 ---
 
