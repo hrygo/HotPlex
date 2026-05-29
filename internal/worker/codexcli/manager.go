@@ -313,13 +313,12 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 	env := m.buildEnv()
 	m.proc = proc.New(proc.Opts{Logger: m.log})
 
-	startTimeout := m.cfg.StartupTimeout
-	if startTimeout <= 0 {
-		startTimeout = defaultStartupTimeout
-	}
-	startCtx, startCancel := context.WithTimeout(ctx, startTimeout)
-	defer startCancel()
-	stdin, stdout, _, err := m.proc.Start(startCtx, binary, fullArgs, env, "")
+	// Use context.Background() for the long-lived codex process.
+	// exec.CommandContext kills the process when the context is done,
+	// so a timeout context would kill the process immediately after
+	// startProcessLocked returns. The handshake timeout is already
+	// enforced by the Call method's own timer.
+	stdin, stdout, _, err := m.proc.Start(context.Background(), binary, fullArgs, env, "")
 	if err != nil {
 		m.proc = nil
 		m.state = stateIdle
@@ -331,7 +330,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 
 	bgCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	go m.readNotifications(bgCtx)
+	go m.readNotifications(bgCtx, stdout)
 	go m.monitorProcess()
 
 	if err := m.handshake(ctx); err != nil {
@@ -402,17 +401,14 @@ func (m *CodexAppServerManager) writeNotification(notif *JSONRPCNotification) er
 
 // readNotifications reads JSON-RPC frames from stdout and routes them to
 // pending response channels or subscriber notification channels.
-func (m *CodexAppServerManager) readNotifications(ctx context.Context) {
+// reader is passed in to avoid acquiring m.mu at startup (caller holds it).
+func (m *CodexAppServerManager) readNotifications(ctx context.Context, reader io.Reader) {
 	defer func() {
 		if r := recover(); r != nil {
 			m.log.Error("codex-app-server: readNotifications panic",
 				"panic", r, "stack", string(debug.Stack()))
 		}
 	}()
-
-	m.mu.Lock()
-	reader := m.stdout
-	m.mu.Unlock()
 
 	if reader == nil {
 		return
@@ -581,9 +577,27 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 	}
 
 	if params.ThreadID == "" {
+		// Also try nested thread.id format (codex sends some notifications with
+		// params.thread.id instead of params.threadId).
+		var nested struct {
+			Thread struct {
+				ID string `json:"id"`
+			} `json:"thread"`
+		}
+		if notif.Params != nil {
+			_ = json.Unmarshal(notif.Params, &nested)
+		}
+		if nested.Thread.ID != "" {
+			params.ThreadID = nested.Thread.ID
+		}
+	}
+
+	if params.ThreadID == "" {
 		m.log.Debug("codex-app-server: notification without threadId, skipping", "method", notif.Method)
 		return
 	}
+
+	m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "threadId", params.ThreadID)
 
 	m.subMu.Lock()
 	sessionID := m.subSessions[params.ThreadID]

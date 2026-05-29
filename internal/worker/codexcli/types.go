@@ -37,10 +37,23 @@ type CodexItem struct {
 	Phase       string                     `json:"phase,omitempty"`
 }
 
-// CodexUsage holds token usage statistics from turn.completed.
+// CodexUsage holds token usage statistics from turn.completed (exec mode).
+// Fields use camelCase to match codex exec serde serialization.
 type CodexUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens           int `json:"inputTokens"`
+	CachedInputTokens     int `json:"cachedInputTokens"`
+	OutputTokens          int `json:"outputTokens"`
+	ReasoningOutputTokens int `json:"reasoningOutputTokens"`
+}
+
+// CodexTokenUsage holds per-turn or cumulative token usage from app-server
+// thread/tokenUsage/updated notifications (TokenUsageBreakdown in codex schema).
+type CodexTokenUsage struct {
+	TotalTokens           int `json:"totalTokens"`
+	InputTokens           int `json:"inputTokens"`
+	CachedInputTokens     int `json:"cachedInputTokens"`
+	OutputTokens          int `json:"outputTokens"`
+	ReasoningOutputTokens int `json:"reasoningOutputTokens"`
 }
 
 // CodexFileChange describes a single file modification.
@@ -125,11 +138,12 @@ type JSONRPCError struct {
 // App-server specific param/response payloads.
 
 type ThreadStartParams struct {
-	Model       string `json:"model,omitempty"`
-	CWD         string `json:"cwd,omitempty"`
-	Sandbox     string `json:"sandbox,omitempty"`
-	Personality string `json:"personality,omitempty"`
-	Ephemeral   bool   `json:"ephemeral,omitempty"`
+	Model          string `json:"model,omitempty"`
+	CWD            string `json:"cwd,omitempty"`
+	Sandbox        string `json:"sandbox,omitempty"`
+	Personality    string `json:"personality,omitempty"`
+	Ephemeral      bool   `json:"ephemeral,omitempty"`
+	ApprovalPolicy string `json:"approvalPolicy,omitempty"` // "never" | "on-request" | "on-failure" | "untrusted"
 }
 
 type ThreadStartResult struct {

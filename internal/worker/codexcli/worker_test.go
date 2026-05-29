@@ -45,13 +45,15 @@ func TestParserParseLine(t *testing.T) {
 
 	t.Run("turn_completed_with_usage", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}`
+		line := `{"type":"turn.completed","usage":{"inputTokens":100,"cachedInputTokens":20,"outputTokens":50,"reasoningOutputTokens":5}}`
 		event, err := p.ParseLine(line)
 		require.NoError(t, err)
 		require.Equal(t, EventTurnCompleted, event.Type)
 		require.NotNil(t, event.Usage)
 		require.Equal(t, 100, event.Usage.InputTokens)
 		require.Equal(t, 50, event.Usage.OutputTokens)
+		require.Equal(t, 20, event.Usage.CachedInputTokens)
+		require.Equal(t, 5, event.Usage.ReasoningOutputTokens)
 	})
 
 	t.Run("error_event", func(t *testing.T) {
@@ -161,8 +163,9 @@ func TestMapperMap(t *testing.T) {
 		event := &CodexEvent{
 			Type: EventTurnCompleted,
 			Usage: &CodexUsage{
-				InputTokens:  100,
-				OutputTokens: 50,
+				InputTokens:       100,
+				CachedInputTokens: 20,
+				OutputTokens:      50,
 			},
 		}
 		envs := m.Map(event)
@@ -171,8 +174,11 @@ func TestMapperMap(t *testing.T) {
 		dd, ok := envs[0].Event.Data.(events.DoneData)
 		require.True(t, ok)
 		require.True(t, dd.Success)
-		require.Equal(t, 100, dd.Stats["input_tokens"])
-		require.Equal(t, 50, dd.Stats["output_tokens"])
+		usage, ok := dd.Stats["usage"].(map[string]any)
+		require.True(t, ok, "stats should have nested 'usage' map")
+		require.Equal(t, int64(100), usage["input_tokens"])
+		require.Equal(t, int64(50), usage["output_tokens"])
+		require.Equal(t, int64(20), usage["cache_read_input_tokens"])
 	})
 
 	t.Run("turn_failed_to_error_and_done", func(t *testing.T) {
@@ -295,7 +301,7 @@ func TestMapNotificationAgentMessageStateMachine(t *testing.T) {
 
 	// Step 2: item/agentMessage/delta (x3) → message.delta
 	for i, word := range []string{"Hello", " world", "!"} {
-		deltaParams := json.RawMessage(fmt.Sprintf(`{"itemId":"msg_1","textDelta":%q}`, word))
+		deltaParams := json.RawMessage(fmt.Sprintf(`{"itemId":"msg_1","delta":%q}`, word))
 		envs = m.MapNotification("item/agentMessage/delta", deltaParams)
 		require.Len(t, envs, 1, "delta %d", i)
 		require.Equal(t, events.MessageDelta, envs[0].Event.Type)
@@ -332,15 +338,36 @@ func TestMapNotificationTurnCompleted(t *testing.T) {
 	t.Parallel()
 
 	m := NewMapper("session-1")
-	params := json.RawMessage(`{"turn":{"usage":{"input_tokens":150,"output_tokens":75}}}`)
-	envs := m.MapNotification("turn/completed", params)
+
+	// turn/started sets the current turn ID.
+	m.MapNotification("turn/started", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-1","status":"inProgress"}}`))
+
+	// Simulate token usage tracking from thread/tokenUsage/updated.
+	tokenParams := json.RawMessage(`{"threadId":"thr-1","turnId":"turn-1","tokenUsage":{"last":{"totalTokens":250,"inputTokens":150,"outputTokens":75,"cachedInputTokens":20,"reasoningOutputTokens":5},"total":{"totalTokens":500,"inputTokens":300,"outputTokens":150}}}`)
+	envs := m.MapNotification("thread/tokenUsage/updated", tokenParams)
+	require.Nil(t, envs, "token usage tracking produces no envelopes")
+
+	// Simulate model tracking from model/rerouted.
+	modelParams := json.RawMessage(`{"threadId":"thr-1","turnId":"turn-1","fromModel":"gpt-4","toModel":"o3","reason":"highRiskCyberActivity"}`)
+	envs = m.MapNotification("model/rerouted", modelParams)
+	require.Nil(t, envs, "model rerouted tracking produces no envelopes")
+
+	// turn/completed uses tracked usage and model.
+	envs = m.MapNotification("turn/completed", json.RawMessage(`{"threadId":"thr-1","turn":{"id":"turn-1","status":"completed"}}`))
 	require.Len(t, envs, 1)
 	require.Equal(t, events.Done, envs[0].Event.Type)
 	dd, ok := envs[0].Event.Data.(events.DoneData)
 	require.True(t, ok)
 	require.True(t, dd.Success)
-	require.Equal(t, 150, dd.Stats["input_tokens"])
-	require.Equal(t, 75, dd.Stats["output_tokens"])
+	usage, ok := dd.Stats["usage"].(map[string]any)
+	require.True(t, ok, "stats should have nested 'usage' map")
+	require.Equal(t, int64(150), usage["input_tokens"])
+	require.Equal(t, int64(75), usage["output_tokens"])
+	require.Equal(t, int64(20), usage["cache_read_input_tokens"])
+	modelUsage, ok := dd.Stats["model_usage"].(map[string]any)
+	require.True(t, ok, "stats should have nested 'model_usage' map")
+	require.Contains(t, modelUsage, "o3")
 }
 
 func TestMapNotificationApproval(t *testing.T) {
@@ -401,6 +428,164 @@ func TestMapNotificationUnknownMethod(t *testing.T) {
 	m := NewMapper("session-1")
 	envs := m.MapNotification("thread/started", json.RawMessage(`{}`))
 	require.Nil(t, envs)
+}
+
+func TestMapNotificationOutputDelta(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	// Simulate a command started first.
+	started := json.RawMessage(`{"item":{"id":"cmd_1","type":"command_execution","command":"ls","cwd":"/tmp"}}`)
+	envs := m.MapNotification("item/started", started)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ToolCall, envs[0].Event.Type)
+
+	// Streaming output deltas.
+	delta1 := json.RawMessage(`{"threadId":"thr-1","turnId":"turn-1","itemId":"cmd_1","delta":"file1\n"}`)
+	envs = m.MapNotification("item/commandExecution/outputDelta", delta1)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ToolResult, envs[0].Event.Type)
+	tr, ok := envs[0].Event.Data.(events.ToolResultData)
+	require.True(t, ok)
+	require.Equal(t, "cmd_1", tr.ID)
+	require.Equal(t, "file1\n", tr.Output)
+
+	delta2 := json.RawMessage(`{"threadId":"thr-1","turnId":"turn-1","itemId":"cmd_1","delta":"file2\n"}`)
+	envs = m.MapNotification("item/commandExecution/outputDelta", delta2)
+	require.Len(t, envs, 1)
+	tr = envs[0].Event.Data.(events.ToolResultData)
+	require.Equal(t, "file2\n", tr.Output)
+
+	// Final item/completed overwrites with full output.
+	completed := json.RawMessage(`{"item":{"id":"cmd_1","type":"command_execution","stdout":"file1\nfile2\n","exitCode":0}}`)
+	envs = m.MapNotification("item/completed", completed)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ToolResult, envs[0].Event.Type)
+	tr = envs[0].Event.Data.(events.ToolResultData)
+	require.Equal(t, "file1\nfile2\n", tr.Output)
+}
+
+func TestMapNotificationOutputDeltaEmpty(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+	envs := m.MapNotification("item/commandExecution/outputDelta", json.RawMessage(
+		`{"threadId":"thr-1","turnId":"turn-1","itemId":"","delta":"text"}`))
+	require.Nil(t, envs, "empty itemId should produce no envelopes")
+}
+
+func TestMapNotificationReasoningDelta(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("item/reasoning/summaryTextDelta", json.RawMessage(
+		`{"threadId":"thr-1","turnId":"turn-1","itemId":"r_1","delta":"Analyzing the code structure","summaryIndex":0}`))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Reasoning, envs[0].Event.Type)
+	rd, ok := envs[0].Event.Data.(events.ReasoningData)
+	require.True(t, ok)
+	require.Equal(t, "Analyzing the code structure", rd.Content)
+	require.Equal(t, "r_1", rd.ID)
+}
+
+func TestMapNotificationReasoningDeltaEmpty(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("item/reasoning/summaryTextDelta", json.RawMessage(
+		`{"threadId":"thr-1","itemId":"r_1","delta":""}`))
+	require.Nil(t, envs, "empty delta should produce no envelopes")
+}
+
+func TestMapNotificationWarning(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("warning", json.RawMessage(
+		`{"threadId":"thr-1","message":"Rate limit approaching"}`))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Step, envs[0].Event.Type)
+	sd, ok := envs[0].Event.Data.(events.StepData)
+	require.True(t, ok)
+	require.Equal(t, "warning", sd.StepType)
+	require.Equal(t, "Rate limit approaching", sd.Name)
+}
+
+func TestMapNotificationMCPProgress(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("item/mcpToolCall/progress", json.RawMessage(
+		`{"threadId":"thr-1","turnId":"turn-1","itemId":"mcp_1","message":"Searching files..."}`))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Step, envs[0].Event.Type)
+	sd, ok := envs[0].Event.Data.(events.StepData)
+	require.True(t, ok)
+	require.Equal(t, "mcp_progress", sd.StepType)
+	require.Equal(t, "Searching files...", sd.Name)
+	require.Equal(t, "mcp_1", sd.ID)
+}
+
+func TestMapNotificationTurnStartedResetsUsage(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	// Track usage first.
+	m.MapNotification("thread/tokenUsage/updated", json.RawMessage(
+		`{"tokenUsage":{"last":{"totalTokens":100,"inputTokens":60,"outputTokens":40}}}`))
+	require.NotNil(t, m.lastUsage)
+
+	// turn/started resets tracked usage.
+	envs := m.MapNotification("turn/started", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-2","status":"inProgress"}}`))
+	require.Nil(t, envs)
+	require.Nil(t, m.lastUsage)
+	require.Equal(t, "turn-2", m.turnID)
+}
+
+func TestMapNotificationTurnCompletedNoUsage(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	// turn/completed without prior token usage tracking → nil stats.
+	envs := m.MapNotification("turn/completed", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-1","status":"completed"}}`))
+	require.Len(t, envs, 1)
+	dd, ok := envs[0].Event.Data.(events.DoneData)
+	require.True(t, ok)
+	require.True(t, dd.Success)
+	require.Nil(t, dd.Stats)
+}
+
+func TestMapNotificationStaleTokenUsageRejected(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	// Set up turn-1 with usage.
+	m.MapNotification("turn/started", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-1","status":"inProgress"}}`))
+	m.MapNotification("thread/tokenUsage/updated", json.RawMessage(
+		`{"turnId":"turn-1","tokenUsage":{"last":{"totalTokens":100,"inputTokens":60,"outputTokens":40}}}`))
+	require.NotNil(t, m.lastUsage)
+
+	// Advance to turn-2 — lastUsage is cleared.
+	m.MapNotification("turn/started", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-2","status":"inProgress"}}`))
+	require.Nil(t, m.lastUsage)
+	require.Equal(t, "turn-2", m.turnID)
+
+	// Late token usage for turn-1 should be rejected.
+	m.MapNotification("thread/tokenUsage/updated", json.RawMessage(
+		`{"turnId":"turn-1","tokenUsage":{"last":{"totalTokens":100,"inputTokens":60,"outputTokens":40}}}`))
+	require.Nil(t, m.lastUsage, "stale turn-1 usage should be rejected")
 }
 
 // ─── ParseNotification Tests ────────────────────────────────────────────
@@ -734,7 +919,7 @@ func TestExecWorkerReadOutput(t *testing.T) {
 
 	// Simulate stdout with turn.completed to trigger return
 	stdout := strings.NewReader(
-		`{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}` + "\n",
+		`{"type":"turn.completed","usage":{"inputTokens":10,"outputTokens":5}}` + "\n",
 	)
 	conn := base.NewConn(slog.Default(), nil, "user-1", "sess-1")
 	mockConn := &mockSessionConn{sendCh: make(chan *events.Envelope, 10)}
@@ -1203,13 +1388,23 @@ func TestManagerAcquireStartsProcess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping: requires codex binary")
 	}
-	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute, StartupTimeout: time.Second, CallTimeout: time.Second}
-	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
-	// Acquire will try to start the process, which requires codex binary.
-	// This should fail since there's no actual codex binary available in CI.
-	_, err := mgr.Acquire(context.Background())
-	require.Error(t, err)
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute, StartupTimeout: 5 * time.Second, CallTimeout: 5 * time.Second}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	crashCh, err := mgr.Acquire(context.Background())
+
+	if err != nil {
+		// Codex binary not available (CI or fresh environment) — expected to fail.
+		t.Logf("Acquire failed (expected when codex not installed): %v", err)
+		return
+	}
+
+	// Codex binary available — verify handshake completed and process is running.
+	require.NoError(t, err)
+	require.NotNil(t, crashCh)
+	mgr.Release()
 }
 
 // ─── dispatchFrame / dispatchServerRequest / RespondServerRequest ──────

@@ -9,7 +9,7 @@
 | 文档 | 描述 | 状态 | 日期 | 进度 |
 |------|------|------|------|------|
 | [Gateway-Async-Init-Spec.md](./Gateway-Async-Init-Spec.md) | Gateway 异步初始化 — Session Start 异步化设计 | draft | 2026-04-04 | 0% |
-| [Worker-ACPX-Spec.md](./Worker-ACPX-Spec.md) | ACPX Worker 集成规格 — 支持 16+ AI 编程 Agent | draft | 2026-04-04 | 0% |
+| [ACP-Worker-Spec.md](./ACP-Worker-Spec.md) | ACP Worker 集成规格 — 通用 ACP Agent 对接，Hermes 试点 | proposed | 2026-05-29 | 0% |
 | [Worker-User-Interaction-Spec.md](./Worker-User-Interaction-Spec.md) | Worker 用户交互集成 — 权限请求/问题询问/MCP Elicitation 转发与响应 | implemented | 2026-04-19 | 95% |
 | [Feishu-Adapter-Improvement-Spec.md](./Feishu-Adapter-Improvement-Spec.md) | Feishu Adapter 改进规格 — 流式卡片、访问控制、多消息类型 | in-progress | 2026-04-17 | 50% |
 | [Dual-Database-Support-Spec.md](./Dual-Database-Support-Spec.md) | 双数据库支持 — SQLite + PostgreSQL 并存方案 | proposed | 2026-05-26 | 0% |
@@ -77,7 +77,7 @@
 ### 按状态分类
 
 - **implemented**: 4 个 — Per-Bot-Agent-Config, Turn-Summary-WorkDir-Fix, Worker-User-Interaction, Slack-Stream-Rotation
-- **draft**: 7 个 — Gateway-Async-Init, Worker-ACPX, Feishu-Adapter, Hot-Reload, Session-History, Turn-Summary, CLI-Self-Service, Onboard-UX, TTS-Engine
+- **draft**: 7 个 — Gateway-Async-Init, Feishu-Adapter, Hot-Reload, Session-History, Turn-Summary, CLI-Self-Service, Onboard-UX, TTS-Engine
 - **proposed**: 6 个 — Dual-Database-Support, Consolidate-Events-Store, Delta-Optimization, Interaction-Response-Chain-Fix, Inbound-Event-Storage-Fix, Onboard-Go-Embed-AST, WebChat-v2-Revamp, Windows-Support
 
 ### 按领域分类

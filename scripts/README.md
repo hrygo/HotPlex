@@ -207,9 +207,10 @@ sudo journalctl -u hotplex -f
 systemctl show hotplex -p MemoryCurrent,CPUUsageNSec
 ```
 
-### validate-acpx-spec.sh
+### ~~validate-acpx-spec.sh~~ (archived — superseded by ACP-Worker-Spec.md)
 
-**ACPX spec validation script** that validates Worker-ACPX-Spec.md against actual acpx CLI behavior.
+**ACPX spec validation script** that validated Worker-ACPX-Spec.md against actual acpx CLI behavior.
+The Worker-ACPX-Spec.md has been superseded by [ACP-Worker-Spec.md](../docs/specs/ACP-Worker-Spec.md) which uses direct stdio connection instead of acpx middleware.
 
 **Purpose:**
 
