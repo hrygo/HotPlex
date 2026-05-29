@@ -661,9 +661,9 @@ func (c *Conn) RouteWrite(_ context.Context, env *events.Envelope) error {
 	return c.writeDispatch(data, env.Event.Type)
 }
 
-// RouteWriteData writes pre-encoded JSON bytes through the Hub routing path.
-// This avoids redundant re-encoding when the same message is sent to N connections.
-// The caller must provide the event type for metrics and droppable semantics.
+// RouteWriteData writes pre-encoded JSON bytes to this connection.
+// The caller (typically Hub.routeMessage) encodes once and distributes
+// the same bytes to all subscribed connections.
 func (c *Conn) RouteWriteData(data []byte, eventType events.Kind) error {
 	return c.writeDispatch(data, eventType)
 }

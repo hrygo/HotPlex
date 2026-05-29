@@ -745,11 +745,11 @@ func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) 
 	b.accumMu.Lock()
 	// Double-check after acquiring write lock.
 	if acc, ok := b.accum[sessionID]; ok {
-		b.accumMu.Unlock()
 		if workDir != "" && acc.WorkDir == "" {
 			acc.WorkDir = workDir
 			acc.GitBranch = branch
 		}
+		b.accumMu.Unlock()
 		return acc
 	}
 	acc = &sessionAccumulator{

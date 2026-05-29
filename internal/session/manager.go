@@ -303,6 +303,8 @@ func (m *Manager) UpdateWorkDir(ctx context.Context, id, workDir string) error {
 // for the DB write and re-acquires it before returning.
 func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from, to events.SessionState, termReason string) error {
 	// Build the candidate state as a value copy (never mutates ms.info in-place).
+	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
+	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
 	candidate := ms.info
 	candidate.State = to
 	candidate.UpdatedAt = time.Now()
