@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -196,10 +195,9 @@ func TestGetOrInitAccum(t *testing.T) {
 	log := slog.Default()
 	sm := new(mockBridgeSM)
 	b := &Bridge{
-		log:     log,
-		sm:      sm,
-		accum:   make(map[string]*sessionAccumulator),
-		accumMu: sync.Mutex{},
+		log:   log,
+		sm:    sm,
+		accum: make(map[string]*sessionAccumulator),
 	}
 
 	acc1 := b.getOrInitAccum("sess-1", "", time.Now())
@@ -216,10 +214,9 @@ func TestGetOrInitAccum_LazyUpdate(t *testing.T) {
 	t.Parallel()
 	log := slog.Default()
 	b := &Bridge{
-		log:     log,
-		sm:      new(mockBridgeSM),
-		accum:   make(map[string]*sessionAccumulator),
-		accumMu: sync.Mutex{},
+		log:   log,
+		sm:    new(mockBridgeSM),
+		accum: make(map[string]*sessionAccumulator),
 	}
 
 	// First call creates accumulator with empty workDir.
@@ -242,10 +239,9 @@ func TestGetOrInitAccum_EmptyWorkDirNoOp(t *testing.T) {
 	t.Parallel()
 	log := slog.Default()
 	b := &Bridge{
-		log:     log,
-		sm:      new(mockBridgeSM),
-		accum:   make(map[string]*sessionAccumulator),
-		accumMu: sync.Mutex{},
+		log:   log,
+		sm:    new(mockBridgeSM),
+		accum: make(map[string]*sessionAccumulator),
 	}
 
 	acc := b.getOrInitAccum("sess-1", "", time.Now())

@@ -296,32 +296,37 @@ func (m *Manager) UpdateWorkDir(ctx context.Context, id, workDir string) error {
 
 // transitionState performs the common state-transition work: validation,
 // in-memory update, persistence, and notifications.
+// Uses copy-on-write: mutates a snapshot of ms.info, then persists the
+// snapshot. On DB success the snapshot becomes the new ms.info — on failure
+// ms.info is unchanged, eliminating the need for rollback.
 // Caller must hold ms.mu for write; this method temporarily releases ms.mu
 // for the DB write and re-acquires it before returning.
 func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from, to events.SessionState, termReason string) error {
-	ms.info.State = to
-	ms.info.UpdatedAt = time.Now()
+	// Build the candidate state as a value copy (never mutates ms.info in-place).
+	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
+	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
+	candidate := ms.info
+	candidate.State = to
+	candidate.UpdatedAt = time.Now()
 
 	// Set idle expiry when entering IDLE; clear when leaving IDLE.
-	prevIdleExpiresAt := ms.info.IdleExpiresAt
 	if to == events.StateIdle {
-		ms.info.IdleExpiresAt = ptr(time.Now().Add(m.cfg.Worker.IdleTimeout))
+		candidate.IdleExpiresAt = ptr(time.Now().Add(m.cfg.Worker.IdleTimeout))
 	} else {
-		ms.info.IdleExpiresAt = nil
+		candidate.IdleExpiresAt = nil
 	}
 
-	info := ms.info
 	ms.mu.Unlock()
-
-	dbErr := m.store.Upsert(ctx, &info)
-
+	dbErr := m.store.Upsert(ctx, &candidate)
 	ms.mu.Lock()
+
 	if dbErr != nil {
-		ms.info.State = from
-		ms.info.UpdatedAt = time.Now()
-		ms.info.IdleExpiresAt = prevIdleExpiresAt
+		// ms.info untouched — no rollback needed.
 		return dbErr
 	}
+
+	// Commit: replace ms.info with the persisted snapshot.
+	ms.info = candidate
 
 	if to == events.StateTerminated || to == events.StateDeleted {
 		// Record worker execution duration and decrement running gauge before killing.
@@ -436,6 +441,10 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 			var workerToKill worker.Worker
 			if events.IsValidTransition(from, events.StateTerminated) {
 				if err := m.transitionState(ctx, ms, from, events.StateTerminated, "max_turns"); err != nil {
+					// Deliberate escape hatch: DB persistence failed, but we
+					// force-terminate in-memory to ensure worker cleanup.
+					// DB consistency is sacrificed here — the session may
+					// appear active in DB after restart until GC reaps it.
 					m.log.Error("session: max-turns state transition failed, force-terminating in-memory state",
 						"session_id", id, "err", err)
 					ms.info.State = events.StateTerminated
@@ -443,6 +452,7 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 					m.updateRunningIndexForTransition(id, from, events.StateTerminated)
 				}
 			} else {
+				// Escape hatch: invalid transition — force-terminate in-memory.
 				m.log.Warn("session: max-turns transition invalid, force-terminating in-memory state",
 					"session_id", id, "from_state", from)
 				ms.info.State = events.StateTerminated
@@ -620,19 +630,22 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	hasWorker := ms.worker != nil
 	workerType := ms.info.WorkerType
 	uid := ms.info.UserID
-	prevState := ms.info.State
-	ms.info.State = events.StateDeleted
-	ms.info.UpdatedAt = time.Now()
-	info := ms.info
+	wasRunning := ms.info.State == events.StateRunning
+	// Copy-on-write: build candidate, persist, commit on success.
+	candidate := ms.info
+	candidate.State = events.StateDeleted
+	candidate.UpdatedAt = time.Now()
 	ms.mu.Unlock()
 	m.mu.Unlock()
 
-	if err := m.store.Upsert(ctx, &info); err != nil {
-		ms.mu.Lock()
-		ms.info.State = prevState
-		ms.mu.Unlock()
+	if err := m.store.Upsert(ctx, &candidate); err != nil {
 		return err
 	}
+
+	// Persist succeeded — commit the candidate in-memory.
+	ms.mu.Lock()
+	ms.info = candidate
+	ms.mu.Unlock()
 
 	m.mu.Lock()
 	if _, exists := m.sessions[id]; exists {
@@ -647,7 +660,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 			m.pool.Release(uid)
 		}
 		delete(m.sessions, id)
-		if prevState == events.StateRunning {
+		if wasRunning {
 			m.removeFromRunningIndex(id)
 		}
 	}
@@ -1115,7 +1128,7 @@ func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state
 	}
 }
 
-func (m *Manager) getManagedSession(_ context.Context, id string) *managedSession {
+func (m *Manager) getManagedSession(ctx context.Context, id string) *managedSession {
 	m.mu.RLock()
 	ms, ok := m.sessions[id]
 	m.mu.RUnlock()
@@ -1123,7 +1136,7 @@ func (m *Manager) getManagedSession(_ context.Context, id string) *managedSessio
 		return ms
 	}
 	// Load from Store.
-	info, err := m.store.Get(context.Background(), id)
+	info, err := m.store.Get(ctx, id)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) {
 			m.log.Error("session: store lookup failed", "session_id", id, "err", err)

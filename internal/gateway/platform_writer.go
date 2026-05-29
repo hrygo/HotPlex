@@ -85,6 +85,18 @@ func (e *pcEntry) RouteWrite(ctx context.Context, env *events.Envelope) error {
 	return e.WriteCtx(ctx, env)
 }
 
+// RouteWriteData decodes pre-encoded bytes and delegates to RouteWrite.
+// pcEntry internally works with envelopes (not raw bytes), so it cannot
+// benefit from the pre-encoding optimization. This fallback ensures
+// pcEntry satisfies the SessionWriter interface.
+func (e *pcEntry) RouteWriteData(data []byte, eventType events.Kind) error {
+	env, err := aep.DecodeLine(data)
+	if err != nil {
+		return err
+	}
+	return e.RouteWrite(context.Background(), env)
+}
+
 func (e *pcEntry) WriteCtx(_ context.Context, env *events.Envelope) error {
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {

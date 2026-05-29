@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 
 	"github.com/hrygo/hotplex/internal/brain/llm"
@@ -91,10 +92,21 @@ func Global() Brain {
 }
 
 // SetGlobal sets the global Brain instance.
+// If the new brain implements io.Closer, SetGlobal calls Close on the
+// *previous* instance before replacing it — this prevents resource leaks
+// (e.g. goroutine leaks from RateLimiter) on hot-reload.
 func SetGlobal(b Brain) {
 	globalBrainMu.Lock()
-	defer globalBrainMu.Unlock()
+	prev := globalBrain
 	globalBrain = b
+	globalBrainMu.Unlock()
+
+	// Close outside the lock — it may block waiting for goroutines to exit.
+	if prev != nil {
+		if c, ok := prev.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}
 }
 
 // GetRouter returns the global router if the brain supports routing.

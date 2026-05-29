@@ -36,7 +36,7 @@ func (c *SlackConn) notifyStatusFromEvent(ctx context.Context, env *events.Envel
 		if text == "" {
 			text = "Tool completed"
 		}
-		_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, StatusToolResult, truncateWithSuffix(shortenPaths(text), statusTextLimit))
+		_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, StatusToolResult, truncateWithSuffix(c.adapter.statusMgr.shortenPaths(text), statusTextLimit))
 	default:
 		if env.Event.Type == events.MessageDelta {
 			_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, StatusAnswering, "Composing response...")

@@ -62,6 +62,12 @@ type SessionWriter interface {
 	// RouteWrite writes an envelope through the Hub routing path. Handles
 	// init-phase buffering (for WS conns) and droppable semantics internally.
 	RouteWrite(ctx context.Context, env *events.Envelope) error
+	// RouteWriteData writes pre-encoded JSON bytes through the Hub routing path.
+	// This avoids redundant re-encoding when the same message is sent to N
+	// connections. The caller provides the event type for metrics and droppable
+	// dispatch. Implementations that cannot consume raw bytes may decode and
+	// re-encode internally.
+	RouteWriteData(data []byte, eventType events.Kind) error
 	Close() error
 }
 
@@ -472,16 +478,23 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		h.LogHandler(level, fmt.Sprintf("event %s seq=%d", msg.Env.Event.Type, msg.Env.Seq), msg.Env.SessionID)
 	}
 
+	// Pre-encode once and distribute raw bytes to all connections.
+	// This avoids N redundant JSON marshal operations (one per conn).
+	data, err := aep.EncodeJSON(msg.Env)
+	if err != nil {
+		h.log.Error("gateway: encode message failed", "session_id", msg.Env.SessionID, "err", err)
+		return
+	}
+
 	for _, conn := range conns {
-		if err := conn.RouteWrite(context.Background(), msg.Env); err == nil {
+		if err := conn.RouteWriteData(data, msg.Env.Event.Type); err == nil {
 			continue
-		} else {
-			h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
-			_ = conn.Close()
-			h.mu.Lock()
-			h.removeSession(msg.Env.SessionID, conn)
-			h.mu.Unlock()
 		}
+		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
+		_ = conn.Close()
+		h.mu.Lock()
+		h.removeSession(msg.Env.SessionID, conn)
+		h.mu.Unlock()
 	}
 }
 
