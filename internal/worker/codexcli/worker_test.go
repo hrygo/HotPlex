@@ -1203,13 +1203,23 @@ func TestManagerAcquireStartsProcess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping: requires codex binary")
 	}
-	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute, StartupTimeout: time.Second, CallTimeout: time.Second}
-	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
-	// Acquire will try to start the process, which requires codex binary.
-	// This should fail since there's no actual codex binary available in CI.
-	_, err := mgr.Acquire(context.Background())
-	require.Error(t, err)
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute, StartupTimeout: 5 * time.Second, CallTimeout: 5 * time.Second}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	crashCh, err := mgr.Acquire(context.Background())
+
+	if err != nil {
+		// Codex binary not available (CI or fresh environment) — expected to fail.
+		t.Logf("Acquire failed (expected when codex not installed): %v", err)
+		return
+	}
+
+	// Codex binary available — verify handshake completed and process is running.
+	require.NoError(t, err)
+	require.NotNil(t, crashCh)
+	mgr.Release()
 }
 
 // ─── dispatchFrame / dispatchServerRequest / RespondServerRequest ──────

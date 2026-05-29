@@ -331,7 +331,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 
 	bgCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	go m.readNotifications(bgCtx)
+	go m.readNotifications(bgCtx, stdout)
 	go m.monitorProcess()
 
 	if err := m.handshake(ctx); err != nil {
@@ -402,17 +402,14 @@ func (m *CodexAppServerManager) writeNotification(notif *JSONRPCNotification) er
 
 // readNotifications reads JSON-RPC frames from stdout and routes them to
 // pending response channels or subscriber notification channels.
-func (m *CodexAppServerManager) readNotifications(ctx context.Context) {
+// reader is passed in to avoid acquiring m.mu at startup (caller holds it).
+func (m *CodexAppServerManager) readNotifications(ctx context.Context, reader io.Reader) {
 	defer func() {
 		if r := recover(); r != nil {
 			m.log.Error("codex-app-server: readNotifications panic",
 				"panic", r, "stack", string(debug.Stack()))
 		}
 	}()
-
-	m.mu.Lock()
-	reader := m.stdout
-	m.mu.Unlock()
 
 	if reader == nil {
 		return
