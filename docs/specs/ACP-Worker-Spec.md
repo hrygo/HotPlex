@@ -48,8 +48,7 @@ ACP (Agent Client Protocol) 是一个开放协议（JSON-RPC 2.0 over stdio）�
 
 ### 1.3 关联文档
 
-- `docs/specs/Worker-ACPX-Spec.md` — 原 acpx CLI 中间层方案（已废弃，本文档取代）
-- `docs/specs/AEP-ACP-Extension-Spec.md` — 原 AEP 扩展方案（已整合到本文档 §3）
+- `docs/specs/ACP-Worker-Spec.md` — 原始文档（已废弃并删除）
 - `~/.hermes/hermes-agent/acp_adapter/` — Hermes ACP 实现参考
 
 ---
@@ -111,7 +110,7 @@ ACP (Agent Client Protocol) 是一个开放协议（JSON-RPC 2.0 over stdio）�
 
 ```go
 const (
-	// ... 现有 28 种 ...
+	// ... 现有 27 种 ...
 
 	// ACP 扩展 — 任何 ACP 兼容 Agent 可使用
 	ToolUpdate  Kind = "tool_update"  // 工具调用中间状态（ACP tool_call_update）
@@ -140,17 +139,17 @@ type PlanData struct {
 }
 
 // PlanItem 计划中的单个项目。
+// 映射自 ACP PlanEntry：content（描述）、priority（优先级）、status（状态）。
 type PlanItem struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`               // pending / in_progress / completed / cancelled
-	Description string `json:"description,omitempty"`
+	Content  string `json:"content"`                   // 任务描述（ACP PlanEntry.content）
+	Priority string `json:"priority"`                  // high / medium / low（ACP PlanEntryPriority）
+	Status   string `json:"status"`                    // pending / in_progress / completed（ACP PlanEntryStatus）
 }
 
 // ModeUpdateData Agent 执行模式切换通知。
+// 映射自 ACP CurrentModeUpdate：currentModeId 引用 session/new 返回的 modes 中的 mode ID。
 type ModeUpdateData struct {
-	Mode        string `json:"mode"`                  // default / accept_edits / dont_ask
-	Description string `json:"description,omitempty"`
+	CurrentModeID string `json:"current_mode_id"`           // mode ID（ACP CurrentModeUpdate.currentModeId）
 }
 ```
 
@@ -184,8 +183,7 @@ type ToolCallData struct {
 	Input map[string]any `json:"input"`
 	// ACP 扩展字段
 	Title     string         `json:"title,omitempty"`      // "read: main.go"
-	Kind      string         `json:"kind,omitempty"`        // read / edit / execute / search / fetch / think / other
-	Status    string         `json:"status,omitempty"`      // pending / in_progress
+	Kind      string         `json:"kind,omitempty"`        // read / edit / delete / move / search / execute / think / fetch / switch_mode / other
 	Locations []FileLocation `json:"locations,omitempty"`
 }
 ```
@@ -212,9 +210,13 @@ type ToolResultData struct {
 | `input_tokens` | int | ACP PromptUsage.inputTokens | 输入 token |
 | `output_tokens` | int | ACP PromptUsage.outputTokens | 输出 token |
 | `thought_tokens` | int | ACP PromptUsage.thoughtTokens | 推理 token |
-| `cached_read_tokens` | int | ACP PromptUsage.cachedReadTokens | 缓存命中 token |
-| `stop_reason` | string | ACP PromptResult.stopReason | end_turn / cancelled / max_tokens / refusal |
+| `cached_read_tokens` | int | ACP PromptUsage.cachedReadTokens | 缓存读取 token |
+| `cached_write_tokens` | int | ACP PromptUsage.cachedWriteTokens | 缓存写入 token |
+| `total_tokens` | int | ACP PromptUsage.totalTokens | 总 token |
+| `stop_reason` | string | ACP PromptResult.stopReason | end_turn / cancelled / max_tokens / max_turn_requests / refusal |
 | `cost` | object | ACP UsageUpdate.cost | `{amount: float, currency: string}` |
+| `context_size` | int | ACP UsageUpdate.size | 上下文窗口总大小 |
+| `context_used` | int | ACP UsageUpdate.used | 已使用上下文大小 |
 
 ### 3.6 Raw 透传约定
 
@@ -319,14 +321,17 @@ func ReadMessage(reader *bufio.Reader) (any, error) {
 
 | 方法 | ACP Method | 说明 |
 |------|-----------|------|
-| `Initialize()` | `initialize` | 版本协商、能力交换 |
-| `NewSession(cwd)` | `session/new` | 创建会话，获取 sessionID + models + modes |
-| `LoadSession(id, cwd)` | `session/load` | 恢复已有会话 |
+| `Initialize()` | `initialize` | 版本协商、能力交换（params 含 `protocolVersion`、`clientCapabilities`、`clientInfo`） |
+| `NewSession(cwd, mcpServers)` | `session/new` | 创建会话，返回 sessionId + models + modes + configOptions |
+| `LoadSession(sessionID, cwd, mcpServers)` | `session/load` | 恢复已有会话（Agent 回放历史） |
+| `ResumeSession(sessionID, cwd, mcpServers)` | `session/resume` | 恢复中断的会话 |
 | `Prompt(sessionID, content)` | `session/prompt` | 发送 prompt |
 | `Cancel(sessionID)` | `session/cancel` | 取消当前 turn |
-| `RespondPermission(reqID, allowed)` | `request_permission` response | 回复权限请求 |
-| `SetSessionModel(sessionID, modelID)` | `session/set_model` | 切换模型 |
-| `SetSessionMode(sessionID, modeID)` | `session/set_mode` | 切换模式 |
+| `RespondPermission(reqID, outcome)` | `session/request_permission` response | 回复权限请求（AllowedOutcome 或 DeniedOutcome） |
+| `SetSessionModel(sessionID, modelID)` | `session/set_model` | 切换模型（P2） |
+| `SetSessionMode(sessionID, modeID)` | `session/set_mode` | 切换模式（P2） |
+| `ForkSession(sessionID)` | `session/fork` | 分叉会话（P2） |
+| `ListSessions()` | `session/list` | 列出会话（P2） |
 
 内部状态：
 
@@ -349,10 +354,10 @@ type ACPClient struct {
 ### 4.4 握手序列
 
 ```
-Gateway ──→ Agent : {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-Agent  ──→ Gateway : {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"hermes-agent","version":"0.15.1"},...}}
-Gateway ──→ Agent : {"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/project"}}
-Agent  ──→ Gateway : {"jsonrpc":"2.0","id":2,"result":{"sessionId":"uuid","models":{...},"modes":{...}}}
+Gateway ──→ Agent : {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"hotplex","version":"..."}}}
+Agent  ──→ Gateway : {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"hermes-agent","version":"0.15.1"},"agentCapabilities":{...},...}}
+Gateway ──→ Agent : {"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/project","mcpServers":[]}}
+Agent  ──→ Gateway : {"jsonrpc":"2.0","id":2,"result":{"sessionId":"uuid","models":{...},"modes":{...},"configOptions":[...]}}
 ```
 
 ### 4.5 Prompt 流程
@@ -369,14 +374,19 @@ Agent  ──→ Gateway : {"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_t
 ### 4.6 权限请求流程
 
 ```
-Agent  ──→ Gateway : {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"uuid","update":{"sessionUpdate":"request_permission","toolCall":{...},"options":[...]}}}
+Agent  ──→ Gateway : {"jsonrpc":"2.0","id":N,"method":"session/request_permission","params":{"sessionId":"uuid","toolCall":{...},"options":[{"optionId":"opt-1","name":"Allow Once","kind":"allow_once"},{"optionId":"opt-2","name":"Deny","kind":"reject_once"}]}}
                                           ↓
-                     AEP permission_request → Client
+                     AEP permission_request → Client（Mapper 将多选项模型简化为 allow/deny）
                                           ↓
                      Client 回复 permission_response
                                           ↓
-Gateway ──→ Agent : {"jsonrpc":"2.0","id":N,"result":{"outcome":{"outcome":"selected","option_id":"allow_once"}}}
+Gateway ──→ Agent : {"jsonrpc":"2.0","id":N,"result":{"outcome":{"outcome":"selected","optionId":"opt-1"}}}
 ```
+
+> **注意**：ACP 权限模型是多选项（`PermissionOption[]`，每项有 `optionId`/`name`/`kind`），
+> 而 AEP 是布尔模型（`Allowed bool`）。Mapper 负责转换：
+> - ACP → AEP：选择第一个 `kind=allow_*` 选项的 `name` 作为 Description
+> - AEP → ACP：`Allowed=true` 选择第一个 `kind=allow_once` 选项的 `optionId`；`Allowed=false` 返回 `{"outcome":"cancelled"}`
 
 ---
 
@@ -401,18 +411,19 @@ type ACPMapper struct {
 
 | ACP sessionUpdate | AEP Kind | Data 结构 | 映射说明 |
 |---|---|---|---|
+| `user_message_chunk` | 忽略 | — | 用户输入回显，Gateway 已有原始输入，无需映射 |
 | `agent_message_chunk` | `message.start`（首个）+ `message.delta` | `MessageDeltaData` | 首个 chunk 时合成 `message.start`，Content.Text → Text |
 | `agent_thought_chunk` | `reasoning` | `ReasoningData` | Content.Text → Text |
-| `tool_call` | `tool_call` | `ToolCallData`（含扩展字段） | 映射 title/kind/status/locations/rawInput |
+| `tool_call` | `tool_call` | `ToolCallData`（含扩展字段） | 映射 title/kind/locations/rawInput（**不含 status**） |
 | `tool_call_update`（中间） | `tool_update` | `ToolUpdateData` | status=pending/in_progress |
 | `tool_call_update`（完成） | `tool_result` | `ToolResultData`（含扩展字段） | status=completed/failed，含 diff |
-| `usage_update` | `context_usage`（内部） | 内部跟踪 | 不生成外部 Envelope |
-| `plan` | `plan` | `PlanData` | 一等公民 |
-| `current_mode_update` | `mode_update` | `ModeUpdateData` | 一等公民 |
+| `usage_update` | `context_usage`（内部） | 内部跟踪 | 提取 size/used/cost，不生成外部 Envelope |
+| `plan` | `plan` | `PlanData` | 映射 PlanEntry.content/priority/status |
+| `current_mode_update` | `mode_update` | `ModeUpdateData` | 映射 currentModeId（引用 session/new 返回的 modes） |
 | `available_commands_update` | `raw` | `RawData{Kind:"acp.available_commands_update"}` | 透传 |
 | `config_option_update` | `raw` | `RawData{Kind:"acp.config_option_update"}` | 透传 |
 | `session_info_update` | `raw` | `RawData{Kind:"acp.session_info_update"}` | 透传 |
-| `request_permission` | `permission_request` | `PermissionRequestData` | 映射 ACP 权限请求 |
+| `request_permission` | `permission_request` | `PermissionRequestData` | 多选项→布尔转换（见 §4.6 注） |
 | Prompt Response (success) | `message.end` + `done` | `DoneData{Success:true, Stats}` | 合成 message.end + done |
 | Prompt Response (error) | `error` + `done` | `ErrorData` + `DoneData{Success:false}` | JSON-RPC Error |
 
@@ -423,6 +434,7 @@ type ACPMapper struct {
 | `end_turn` | `true` | 正常完成 |
 | `cancelled` | `true` | 用户取消，非错误 |
 | `max_tokens` | `false` | 上下文耗尽 |
+| `max_turn_requests` | `false` | 达到最大 turn 数 |
 | `refusal` | `false` | 模型拒绝 |
 | JSON-RPC Error | `false` + ErrorData | 协议级错误 |
 
@@ -443,11 +455,12 @@ ACP 没有显式的 `message.start` / `message.end` / `state` 事件，Mapper �
 |----------|---------------------|------|
 | `toolCallId` | `ID` | 工具调用 ID |
 | `title` | `Title`（扩展） | 人类可读标题 |
-| `kind` | `Kind`（扩展） | read/edit/execute/search/fetch/think/other |
-| `status` | `Status`（扩展） | pending/in_progress |
+| `kind` | `Kind`（扩展） | read/edit/delete/move/search/execute/think/fetch/switch_mode/other |
 | `rawInput` | `Input` | 工具参数 |
 | `content[].path` | `Locations`（扩展） | 文件位置 |
 | `_meta.claudeCode.toolName` | `Name` | 回退到 meta 中的工具名 |
+
+> **注意**：`tool_call`（ToolCallStart）**不含 `status` 字段**。Status 仅在 `tool_call_update`（ToolCallProgress）中出现。
 
 ### 5.6 ACP tool_call_update 字段 → AEP 映射
 
@@ -468,61 +481,66 @@ internal/worker/acp/
 ├── codec.go      # NDJSON 行读写、JSON-RPC 2.0 消息解析
 ├── client.go     # ACP Client：握手、会话管理、prompt 发送、通知接收
 ├── mapper.go     # ACP session/update → AEP Envelope 双向映射
-├── worker.go     # Worker 接口实现，组合 client + mapper
+├── worker.go     # Worker 接口实现 + TypeACP 常量 + init() 注册
 ├── worker_test.go
 ├── mapper_test.go
-├── codec_test.go
-└── init.go       # 注册 WorkerType("acp")
+└── codec_test.go
 ```
 
 ### 6.2 Worker 结构
 
 ```go
 type Worker struct {
-    base *base.BaseWorker
-    mu   sync.Mutex
+	*base.BaseWorker                      // 嵌入（提供 Proc/Terminate/Kill/Wait/Health/Conn）
+	mu               sync.Mutex
 
-    client       *ACPClient
-    mapper       *ACPMapper
-    proc         *proc.Manager
+	client           *ACPClient
+	mapper           *ACPMapper
 
-    acpSessionID string  // ACP 会话 ID
-    command      string  // 可执行文件路径（如 "hermes-acp"）
-    args         []string
-    cwd          string
-    autoApprove  bool    // 自动批准权限请求
+	acpSessionID     string               // ACP 会话 ID
+	command          string               // 可执行文件路径（如 "hermes-acp"）
+	args             []string
+	cwd              string
+	autoApprove      bool                 // 自动批准权限请求
 }
 ```
+
+> **设计说明**：
+> - 使用 `*base.BaseWorker` 嵌入（与 ClaudeCode/CodexCLI/OCS 一致），复用 `Proc`、`Terminate`、`Kill`、`Wait` 等方法
+> - 发送 Envelope 通过 `w.BaseWorker.Conn.TrySend(env)` — 与现有 Worker 一致（非 `base.Send()`）
+> - ACP Worker 需重写 `Terminate()`：先 `client.Cancel()` 再调用 `base.BaseWorker.Terminate()`
+> - 需实现 `Health(worker.WorkerType)` 包装（BaseWorker 的 Health 需要 type 参数）
+> - 建议实现 `worker.WorkerSessionIDHandler`（`SetWorkerSessionID`/`GetWorkerSessionID`）以便 Bridge 自动持久化 ACP session ID
 
 ### 6.3 生命周期
 
 | 阶段 | Worker 方法 | 内部动作 |
 |------|------------|---------|
-| 启动（新会话） | `Start(ctx, session)` | 1. `proc.Start(command, args)` 启动进程<br>2. `client.Initialize()` 握手<br>3. `client.NewSession(cwd)` 创建会话<br>4. 记录 `acpSessionID`<br>5. 启动 `readLoop` goroutine |
-| 启动（恢复会话） | `Start(ctx, session)` | 1. 启动进程<br>2. `client.Initialize()` 握手<br>3. `client.LoadSession(acpSessionID, cwd)` 恢复会话 |
+| 启动（新会话） | `Start(ctx, session)` | 1. `base.Proc.Start(command, args)` 启动进程<br>2. `client.Initialize()` 握手<br>3. `client.NewSession(cwd, mcpServers)` 创建会话<br>4. 记录 `acpSessionID`<br>5. 启动 `readLoop` goroutine |
+| 启动（恢复会话） | `Start(ctx, session)` | 1. 启动进程<br>2. `client.Initialize()` 握手<br>3. `client.LoadSession(acpSessionID, cwd, mcpServers)` 恢复会话（Agent 回放历史） |
 | 输入 | `Input(ctx, content, metadata)` | 构造 `session/prompt` 请求，`client.Prompt()` |
-| 输出 | `readLoop`（后台 goroutine） | 从 `client.NotificationCh` 读取 → `mapper.MapNotification()` → `base.Send()` |
-| 权限回复 | `Send(ctx, envelope)` | 收到 `permission_response` → `client.RespondPermission()` |
-| 终止 | `Terminate(ctx)` | 1. `client.Cancel()` 优雅取消<br>2. `proc.Terminate(ctx)` 三层终止 |
+| 输出 | `readLoop`（后台 goroutine） | 从 `client.NotificationCh` 读取 → `mapper.MapNotification()` → `Conn.TrySend()` |
+| 权限回复 | `Send(ctx, envelope)` | 收到 `permission_response` → Mapper 将布尔转换回 ACP 选项 → `client.RespondPermission()` |
+| 终止 | `Terminate(ctx)` | 1. `client.Cancel()` 优雅取消当前 turn<br>2. `base.BaseWorker.Terminate(ctx)` → `base.Proc.Terminate()`（SIGTERM → 5s → SIGKILL） |
 
 ### 6.4 readLoop
 
 ```go
 func (w *Worker) readLoop(ctx context.Context) {
-    for {
-        select {
-        case <-ctx.Done():
-            return
-        case notif, ok := <-w.client.NotificationCh:
-            if !ok {
-                return
-            }
-            envelopes := w.mapper.MapNotification(notif)
-            for _, env := range envelopes {
-                _ = w.base.Send(ctx, env) // 背压：丢弃 delta，保留 state/done/error
-            }
-        }
-    }
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case notif, ok := <-w.client.NotificationCh:
+			if !ok {
+				return
+			}
+			envelopes := w.mapper.MapNotification(notif)
+			for _, env := range envelopes {
+				w.Conn.TrySend(env) // 背压：TrySend 对 delta 类事件可丢弃
+			}
+		}
+	}
 }
 ```
 
@@ -542,8 +560,15 @@ type ACPConfig struct {
 YAML 配置示例：
 
 ```yaml
+# Worker 类型按平台配置（与现有 Worker 一致）
+messaging:
+  slack:
+    worker_type: acp
+  feishu:
+    worker_type: acp
+
+# ACP 特定配置
 worker:
-  type: acp
   acp:
     command: hermes-acp
     auto_approve: true
@@ -552,11 +577,13 @@ worker:
 ### 6.6 注册
 
 ```go
-// internal/worker/acp/init.go
+// internal/worker/acp/worker.go — 注册（与现有 Worker 一致，放在 worker.go 的 init() 中）
+const TypeACP worker.WorkerType = "acp" // 新常量，与 TypeACPX = "acpx" 共存
+
 func init() {
-    worker.Register(worker.WorkerType("acp"), func() (worker.Worker, error) {
-        return &Worker{...}, nil
-    })
+	worker.Register(TypeACP, func() (worker.Worker, error) {
+		return &Worker{}, nil
+	})
 }
 ```
 
@@ -605,12 +632,11 @@ func init() {
 | `internal/worker/acp/codec.go` | NDJSON 编解码 + JSON-RPC 类型 | ~150 行 |
 | `internal/worker/acp/client.go` | ACP Client（握手/会话/prompt/通知） | ~300 行 |
 | `internal/worker/acp/mapper.go` | ACP ↔ AEP 事件映射 | ~350 行 |
-| `internal/worker/acp/worker.go` | Worker 接口实现 | ~200 行 |
-| `internal/worker/acp/init.go` | 注册 | ~20 行 |
+| `internal/worker/acp/worker.go` | Worker 接口实现 + TypeACP + init() 注册 | ~200 行 |
 | `internal/worker/acp/codec_test.go` | 编解码测试 | ~100 行 |
 | `internal/worker/acp/mapper_test.go` | 映射测试 | ~200 行 |
 | `internal/worker/acp/worker_test.go` | Worker 集成测试 | ~150 行 |
-| **总计** | | **~1570 行** |
+| **总计** | | **~1450 行** |
 
 ### 8.3 配置扩展
 
@@ -757,3 +783,49 @@ func init() {
 - WebChat / Slack 客户端正确渲染文本流、工具调用、推理内容
 - Usage stats 正确统计并展示
 - 会话可恢复、可终止
+
+---
+
+## 附录 A. 交叉审查修正记录
+
+> 三路交叉审查（ACP SDK 标准 / HotPlex 源码 / Hermes 源码）后的修正清单。
+
+### A.1 ACP 协议修正
+
+| # | 原始描述 | 修正 | 来源 |
+|---|---------|------|------|
+| 1 | PlanItem 有 id/title/description/status(4值) | ACP `PlanEntry` 实际为 content/priority/status(3值: pending/in_progress/completed) | ACP SDK `schema.py` + Hermes `events.py` |
+| 2 | ModeUpdateData 有 mode/description | ACP `CurrentModeUpdate` 实际为 currentModeId（引用 mode ID） | ACP SDK `schema.py` |
+| 3 | ToolKind 有 7 个值 | ACP SDK 定义 10 个值，补充 delete/move/switch_mode | ACP SDK `schema.py` ToolKind |
+| 4 | StopReason 有 4 个值 | ACP SDK 定义 5 个值，补充 max_turn_requests | ACP SDK `schema.py` StopReason |
+| 5 | tool_call 含 status 字段 | status 仅在 tool_call_update 上存在，tool_call 不含 status | Hermes `tools.py` build_tool_start |
+| 6 | initialize params 为空 | protocolVersion 是必填字段，clientCapabilities/clientInfo 应提供 | ACP SDK `InitializeRequest` |
+| 7 | session/new 仅需 cwd | mcpServers 是必填字段（传 `[]` 即可）；响应还含 configOptions | ACP SDK `NewSessionRequest` |
+| 8 | 权限选项字段为 id/label/outcome | 实际为 optionId/name/kind(PermissionOptionKind) | ACP SDK `PermissionOption` |
+| 9 | 权限响应方法为 request_permission | 实际方法为 `session/request_permission`（Agent→Client RPC） | ACP SDK `CLIENT_METHODS` |
+| 10 | 权限示例 option_id 值为 "allow_once" | optionId 是 opaque 字符串（UUID），不是 kind 值 | ACP SDK `AllowedOutcome` |
+| 11 | DoneData.Stats 缺少 token 字段 | 补充 cached_write_tokens、total_tokens、context_size、context_used | ACP SDK `Usage` + `UsageUpdate` |
+| 12 | 映射表缺少 user_message_chunk | 补充：用户输入回显，Gateway 已有原始输入，映射为忽略 | ACP SDK `UserMessageChunk` |
+
+### A.2 HotPlex 源码修正
+
+| # | 原始描述 | 修正 | 来源 |
+|---|---------|------|------|
+| 13 | 现有 28 种 Kind | 实际为 27 种 | `pkg/events/events.go` |
+| 14 | `base.Send()` 发送 Envelope | BaseWorker 无 Send 方法；应使用 `Conn.TrySend()` | `internal/worker/base/worker.go` |
+| 15 | Worker 有独立 `proc *proc.Manager` | 应嵌入 `*base.BaseWorker` 复用其 Proc 字段 | ClaudeCode/CodexCLI/OCS 源码 |
+| 16 | 注册在单独 init.go | 现有 Worker 将注册放在 worker.go 的 init() 中 | 各 Worker 源码 |
+| 17 | 配置为顶级 `worker.type` | Worker 类型按平台配置（`messaging.slack.worker_type`） | `internal/config/config.go` |
+| 18 | 权限映射为简单布尔 | ACP 多选项模型 vs AEP 布尔模型需 Mapper 做转换 | `PermissionRequestData` + ACP SDK |
+
+### A.3 验证状态
+
+- ACP JSON-RPC 方法名：✅ 全部验证（initialize/session.new/session.load/session.prompt/session.cancel）
+- ACP 事件结构（toolCallId/title/kind/content/locations/rawInput/rawOutput）：✅ 验证
+- ACP ToolCallStatus（pending/in_progress/completed/failed）：✅ 验证
+- ACP Diff 结构（path/old_text/new_text）：✅ 验证
+- 60s 权限超时：✅ 验证
+- BaseWorker 嵌入模式：✅ 验证
+- Bridge 统一管线对新 Kind 透传：✅ 验证
+- worker.Register 签名 `func() (Worker, error)`：✅ 验证
+- AEP 版本 `aep/v1`：✅ 验证
