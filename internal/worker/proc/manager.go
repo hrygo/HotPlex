@@ -382,9 +382,14 @@ func (m *Manager) ReadLine() (string, error) {
 
 // drainStderr drains the stderr pipe in the background.
 func (m *Manager) drainStderr(stderr io.ReadCloser) {
+	defer func() { _ = stderr.Close() }()
 	defer func() {
 		if r := recover(); r != nil {
-			m.log.Error("proc: drainStderr panic", "panic", r)
+			if e, ok := r.(error); ok && errors.Is(e, bufio.ErrTooLong) {
+				m.log.Warn("proc: drainStderr line exceeded buffer limit")
+			} else {
+				m.log.Error("proc: drainStderr unexpected panic", "panic", r)
+			}
 		}
 	}()
 	scanner := bufio.NewScanner(stderr)
