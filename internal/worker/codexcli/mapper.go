@@ -93,8 +93,8 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 		return m.mapNotifReasoningDelta(params)
 	case "item/reasoning/textDelta":
 		return m.mapNotifReasoningDelta(params)
-	case "item/commandExecution/outputDelta":
-		return nil // streaming tool output — rely on item/completed for full ToolResult
+		case "item/commandExecution/outputDelta":
+			return m.mapNotifOutputDelta(params)
 	case "item/mcpToolCall/progress":
 		return m.mapNotifMCPProgress(params)
 	case "thread/tokenUsage/updated":
@@ -353,6 +353,22 @@ func (m *Mapper) mapNotifWarning(params json.RawMessage) []*events.Envelope {
 	}
 }
 
+func (m *Mapper) mapNotifOutputDelta(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		ItemID string `json:"itemId"`
+		Delta  string `json:"delta"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.ItemID == "" {
+		return nil
+	}
+	return []*events.Envelope{
+		newEnvelope(events.ToolResult, events.ToolResultData{
+			ID:     p.ItemID,
+			Output: p.Delta,
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
 func (m *Mapper) trackTokenUsage(params json.RawMessage) {
 	var p struct {
 		TurnID    string `json:"turnId"`
@@ -382,20 +398,25 @@ func (m *Mapper) trackModelRerouted(params json.RawMessage) {
 	m.model = p.ToModel
 }
 
-func (m *Mapper) trackedUsageStats() map[string]any {
+	func (m *Mapper) trackedUsageStats() map[string]any {
 	if m.lastUsage == nil && m.model == "" {
 		return nil
 	}
 	stats := make(map[string]any)
 	if m.lastUsage != nil {
-		stats["input_tokens"] = m.lastUsage.InputTokens
-		stats["output_tokens"] = m.lastUsage.OutputTokens
-		if m.lastUsage.CachedInputTokens > 0 {
-			stats["cached_input_tokens"] = m.lastUsage.CachedInputTokens
+		usage := map[string]any{
+			"input_tokens":  int64(m.lastUsage.InputTokens),
+			"output_tokens": int64(m.lastUsage.OutputTokens),
 		}
+		if m.lastUsage.CachedInputTokens > 0 {
+			usage["cache_read_input_tokens"] = int64(m.lastUsage.CachedInputTokens)
+		}
+		stats["usage"] = usage
 	}
 	if m.model != "" {
-		stats["model"] = m.model
+		stats["model_usage"] = map[string]any{
+			m.model: map[string]any{},
+		}
 	}
 	return stats
 }
@@ -440,15 +461,20 @@ func extractTurnID(params json.RawMessage) string {
 }
 
 // buildUsageStats builds DoneData.Stats from exec-mode CodexUsage.
-// For app-server mode, see Mapper.trackedUsageStats which includes additional
-// fields (cached_input_tokens, model) from CodexTokenUsage.
+// Uses nested "usage" format compatible with sessionAccumulator.mergePerTurnStats().
 func buildUsageStats(usage *CodexUsage) map[string]any {
 	if usage == nil {
 		return nil
 	}
+	usageMap := map[string]any{
+		"input_tokens":  int64(usage.InputTokens),
+		"output_tokens": int64(usage.OutputTokens),
+	}
+	if usage.CachedInputTokens > 0 {
+		usageMap["cache_read_input_tokens"] = int64(usage.CachedInputTokens)
+	}
 	return map[string]any{
-		"input_tokens":  usage.InputTokens,
-		"output_tokens": usage.OutputTokens,
+		"usage": usageMap,
 	}
 }
 

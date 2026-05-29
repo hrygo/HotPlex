@@ -45,13 +45,15 @@ func TestParserParseLine(t *testing.T) {
 
 	t.Run("turn_completed_with_usage", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}`
+		line := `{"type":"turn.completed","usage":{"inputTokens":100,"cachedInputTokens":20,"outputTokens":50,"reasoningOutputTokens":5}}`
 		event, err := p.ParseLine(line)
 		require.NoError(t, err)
 		require.Equal(t, EventTurnCompleted, event.Type)
 		require.NotNil(t, event.Usage)
 		require.Equal(t, 100, event.Usage.InputTokens)
 		require.Equal(t, 50, event.Usage.OutputTokens)
+		require.Equal(t, 20, event.Usage.CachedInputTokens)
+		require.Equal(t, 5, event.Usage.ReasoningOutputTokens)
 	})
 
 	t.Run("error_event", func(t *testing.T) {
@@ -161,8 +163,9 @@ func TestMapperMap(t *testing.T) {
 		event := &CodexEvent{
 			Type: EventTurnCompleted,
 			Usage: &CodexUsage{
-				InputTokens:  100,
-				OutputTokens: 50,
+				InputTokens:       100,
+				CachedInputTokens: 20,
+				OutputTokens:      50,
 			},
 		}
 		envs := m.Map(event)
@@ -171,8 +174,11 @@ func TestMapperMap(t *testing.T) {
 		dd, ok := envs[0].Event.Data.(events.DoneData)
 		require.True(t, ok)
 		require.True(t, dd.Success)
-		require.Equal(t, 100, dd.Stats["input_tokens"])
-		require.Equal(t, 50, dd.Stats["output_tokens"])
+		usage, ok := dd.Stats["usage"].(map[string]any)
+		require.True(t, ok, "stats should have nested 'usage' map")
+		require.Equal(t, int64(100), usage["input_tokens"])
+		require.Equal(t, int64(50), usage["output_tokens"])
+		require.Equal(t, int64(20), usage["cache_read_input_tokens"])
 	})
 
 	t.Run("turn_failed_to_error_and_done", func(t *testing.T) {
@@ -354,10 +360,14 @@ func TestMapNotificationTurnCompleted(t *testing.T) {
 	dd, ok := envs[0].Event.Data.(events.DoneData)
 	require.True(t, ok)
 	require.True(t, dd.Success)
-	require.Equal(t, 150, dd.Stats["input_tokens"])
-	require.Equal(t, 75, dd.Stats["output_tokens"])
-	require.Equal(t, 20, dd.Stats["cached_input_tokens"])
-	require.Equal(t, "o3", dd.Stats["model"])
+	usage, ok := dd.Stats["usage"].(map[string]any)
+	require.True(t, ok, "stats should have nested 'usage' map")
+	require.Equal(t, int64(150), usage["input_tokens"])
+	require.Equal(t, int64(75), usage["output_tokens"])
+	require.Equal(t, int64(20), usage["cache_read_input_tokens"])
+	modelUsage, ok := dd.Stats["model_usage"].(map[string]any)
+	require.True(t, ok, "stats should have nested 'model_usage' map")
+	require.Contains(t, modelUsage, "o3")
 }
 
 func TestMapNotificationApproval(t *testing.T) {
@@ -418,6 +428,51 @@ func TestMapNotificationUnknownMethod(t *testing.T) {
 	m := NewMapper("session-1")
 	envs := m.MapNotification("thread/started", json.RawMessage(`{}`))
 	require.Nil(t, envs)
+}
+
+func TestMapNotificationOutputDelta(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	// Simulate a command started first.
+	started := json.RawMessage(`{"item":{"id":"cmd_1","type":"command_execution","command":"ls","cwd":"/tmp"}}`)
+	envs := m.MapNotification("item/started", started)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ToolCall, envs[0].Event.Type)
+
+	// Streaming output deltas.
+	delta1 := json.RawMessage(`{"threadId":"thr-1","turnId":"turn-1","itemId":"cmd_1","delta":"file1\n"}`)
+	envs = m.MapNotification("item/commandExecution/outputDelta", delta1)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ToolResult, envs[0].Event.Type)
+	tr, ok := envs[0].Event.Data.(events.ToolResultData)
+	require.True(t, ok)
+	require.Equal(t, "cmd_1", tr.ID)
+	require.Equal(t, "file1\n", tr.Output)
+
+	delta2 := json.RawMessage(`{"threadId":"thr-1","turnId":"turn-1","itemId":"cmd_1","delta":"file2\n"}`)
+	envs = m.MapNotification("item/commandExecution/outputDelta", delta2)
+	require.Len(t, envs, 1)
+	tr = envs[0].Event.Data.(events.ToolResultData)
+	require.Equal(t, "file2\n", tr.Output)
+
+	// Final item/completed overwrites with full output.
+	completed := json.RawMessage(`{"item":{"id":"cmd_1","type":"command_execution","stdout":"file1\nfile2\n","exitCode":0}}`)
+	envs = m.MapNotification("item/completed", completed)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ToolResult, envs[0].Event.Type)
+	tr = envs[0].Event.Data.(events.ToolResultData)
+	require.Equal(t, "file1\nfile2\n", tr.Output)
+}
+
+func TestMapNotificationOutputDeltaEmpty(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+	envs := m.MapNotification("item/commandExecution/outputDelta", json.RawMessage(
+		`{"threadId":"thr-1","turnId":"turn-1","itemId":"","delta":"text"}`))
+	require.Nil(t, envs, "empty itemId should produce no envelopes")
 }
 
 func TestMapNotificationReasoningDelta(t *testing.T) {
@@ -864,7 +919,7 @@ func TestExecWorkerReadOutput(t *testing.T) {
 
 	// Simulate stdout with turn.completed to trigger return
 	stdout := strings.NewReader(
-		`{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}` + "\n",
+		`{"type":"turn.completed","usage":{"inputTokens":10,"outputTokens":5}}` + "\n",
 	)
 	conn := base.NewConn(slog.Default(), nil, "user-1", "sess-1")
 	mockConn := &mockSessionConn{sendCh: make(chan *events.Envelope, 10)}

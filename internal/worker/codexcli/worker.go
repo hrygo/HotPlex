@@ -114,10 +114,16 @@ func resolveConfig() Config {
 }
 
 func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []string {
+	// Session-aware approval: session.SkipPermissions overrides config default.
+	approvalMode := w.cfg.ApprovalMode
+	if session.SkipPermissions {
+		approvalMode = "never"
+	}
+
 	args := []string{
 		"exec", "--json",
 		"--sandbox", w.cfg.Sandbox,
-		"--ask-for-approval", w.cfg.ApprovalMode,
+		"--ask-for-approval", approvalMode,
 		"--cd", session.ProjectDir,
 	}
 
@@ -464,10 +470,18 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	w.crashSub = crashCh
 
 	cfg := resolveConfig()
+
+	// Session-aware approval: session.SkipPermissions overrides config default.
+	approvalMode := cfg.ApprovalMode
+	if session.SkipPermissions {
+		approvalMode = "never"
+	}
+
 	params := map[string]any{
-		"cwd":         session.ProjectDir,
-		"sandbox":     cfg.Sandbox,
-		"personality": cfg.Personality,
+		"cwd":            session.ProjectDir,
+		"sandbox":        cfg.Sandbox,
+		"personality":    cfg.Personality,
+		"approvalPolicy": approvalMode,
 	}
 	if cfg.Model != "" {
 		params["model"] = cfg.Model
