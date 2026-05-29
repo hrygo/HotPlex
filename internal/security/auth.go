@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sync"
 
@@ -143,7 +144,11 @@ func (a *Authenticator) AddKey(key string) {
 func (a *Authenticator) RemoveKey(key string) {
 	a.mu.Lock()
 	delete(a.dbKeys, key)
+	empty := len(a.validKey) == 0 && len(a.dbKeys) == 0 && a.devModeLocked
 	a.mu.Unlock()
+	if empty {
+		slog.Warn("security: all API keys removed but dev mode is locked — restart gateway to restore anonymous access")
+	}
 }
 
 // resolveUserID returns the user identity for a valid API key.

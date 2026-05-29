@@ -64,11 +64,27 @@ export interface GetHistoryResponse {
   has_more: boolean;
 }
 
+export class AuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthError';
+  }
+}
+
+function throwIfAuthError(prefix: string, status: number): never | void {
+  if (status === 401) {
+    throw new AuthError(
+      `${prefix} failed: 401 — API key mismatch. Check HOTPLEX_WEBCHAT_API_KEY in .env.local or remove gateway API keys to use dev mode.`
+    );
+  }
+}
+
 export async function listSessions(limit = 20, offset = 0, signal?: AbortSignal): Promise<ListSessionsResponse> {
   const res = await fetch(
     `${BASE}/api/sessions?limit=${limit}&offset=${offset}`,
     { headers: { ...AUTH_HEADER, 'Content-Type': 'application/json' }, signal }
   );
+  throwIfAuthError('listSessions', res.status);
   if (!res.ok) throw new Error(`listSessions failed: ${res.status}`);
   return res.json();
 }

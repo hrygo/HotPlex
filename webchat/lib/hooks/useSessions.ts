@@ -15,6 +15,7 @@ import {
   listSessions,
   createSession,
   deleteSession,
+  AuthError,
   type SessionInfo,
 } from '@/lib/api/sessions';
 import { workerType as defaultWorkerType, workDir as configWorkDir } from '@/lib/config';
@@ -134,7 +135,7 @@ export function useSessions({
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load sessions');
+      setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to load sessions'));
     } finally {
       setIsLoading(false);
     }
@@ -177,7 +178,7 @@ export function useSessions({
       onSelectRef.current(session_id);
       localStorage.setItem(STORAGE_KEY, session_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create session');
+      setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to create session'));
     } finally {
       setIsLoading(false);
       isCreating.current = false;

@@ -5,9 +5,6 @@ import './globals.css';
 
 const inter = localFont({
   src: [
-    { path: '../node_modules/@fontsource/inter/files/inter-latin-100-normal.woff2', weight: '100' },
-    { path: '../node_modules/@fontsource/inter/files/inter-latin-200-normal.woff2', weight: '200' },
-    { path: '../node_modules/@fontsource/inter/files/inter-latin-300-normal.woff2', weight: '300' },
     { path: '../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2', weight: '400' },
     { path: '../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2', weight: '500' },
     { path: '../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2', weight: '600' },
@@ -21,9 +18,6 @@ const inter = localFont({
 
 const outfit = localFont({
   src: [
-    { path: '../node_modules/@fontsource/outfit/files/outfit-latin-100-normal.woff2', weight: '100' },
-    { path: '../node_modules/@fontsource/outfit/files/outfit-latin-200-normal.woff2', weight: '200' },
-    { path: '../node_modules/@fontsource/outfit/files/outfit-latin-300-normal.woff2', weight: '300' },
     { path: '../node_modules/@fontsource/outfit/files/outfit-latin-400-normal.woff2', weight: '400' },
     { path: '../node_modules/@fontsource/outfit/files/outfit-latin-500-normal.woff2', weight: '500' },
     { path: '../node_modules/@fontsource/outfit/files/outfit-latin-600-normal.woff2', weight: '600' },
@@ -37,9 +31,6 @@ const outfit = localFont({
 
 const jetbrainsMono = localFont({
   src: [
-    { path: '../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-100-normal.woff2', weight: '100' },
-    { path: '../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-200-normal.woff2', weight: '200' },
-    { path: '../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-300-normal.woff2', weight: '300' },
     { path: '../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2', weight: '400' },
     { path: '../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2', weight: '500' },
     { path: '../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-600-normal.woff2', weight: '600' },
