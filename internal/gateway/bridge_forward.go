@@ -109,7 +109,17 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 				"session_id", sessionID, "worker_type", workerType, "turn_timeout", b.turnTimeout)
 			b.sendError(sessionID, events.ErrCodeTurnTimeout, "Turn exceeded %v time limit and was terminated.", b.turnTimeout)
 			acc := b.getOrInitAccum(sessionID, "", fc.startTime)
-			b.captureSyntheticEvent(sessionID, "turn_timeout", fmt.Sprintf("Turn exceeded %v time limit", b.turnTimeout), eventstore.SourceTimeout, fc.sessPlatform, fc.sessOwner, acc.ModelName)
+			b.captureSyntheticEvent(syntheticTurnParams{
+				SessionID:  sessionID,
+				Reason:     "turn_timeout",
+				Message:    fmt.Sprintf("Turn exceeded %v time limit", b.turnTimeout),
+				Source:     eventstore.SourceTimeout,
+				Platform:   fc.sessPlatform,
+				Owner:      fc.sessOwner,
+				Model:      acc.ModelName,
+				Generation: acc.Generation,
+				TurnNum:    acc.TurnCount,
+			})
 			_ = w.Terminate(context.Background())
 		})
 		defer fc.turnTimer.Stop()
@@ -419,6 +429,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		if lastInput == "" {
 			lastInput = p.opts.lastInput
 		}
+		acc := b.getOrInitAccum(p.sessionID, "", p.startTime)
 		if b.attemptResumeFallback(fallbackParams{
 			sessionID:     p.sessionID,
 			workDir:       p.opts.workDir,
@@ -429,6 +440,8 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			crashedWorker: w,
 			sessPlatform:  p.sessPlatform,
 			sessOwner:     p.sessOwner,
+			accGeneration: acc.Generation,
+			accModelName:  acc.ModelName,
 		}) {
 			return
 		}
@@ -467,7 +480,17 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount)
 		metrics.WorkerCrashesTotal.WithLabelValues(string(workerType), fmt.Sprintf("%d", exitCode)).Inc()
 		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
-		b.captureSyntheticEvent(p.sessionID, "worker_crash", fmt.Sprintf("Worker crashed with exit code %d", exitCode), eventstore.SourceCrash, p.sessPlatform, p.sessOwner, acc.ModelName)
+		b.captureSyntheticEvent(syntheticTurnParams{
+			SessionID:  p.sessionID,
+			Reason:     "worker_crash",
+			Message:    fmt.Sprintf("Worker crashed with exit code %d", exitCode),
+			Source:     eventstore.SourceCrash,
+			Platform:   p.sessPlatform,
+			Owner:      p.sessOwner,
+			Model:      acc.ModelName,
+			Generation: acc.Generation,
+			TurnNum:    acc.TurnCount,
+		})
 	} else if exitCode == -1 {
 		b.sendError(p.sessionID, events.ErrCodeSessionTerminated, "worker terminated (killed)")
 	} else if !p.doneReceived {
@@ -558,38 +581,49 @@ func truncateToolResultOutput(raw json.RawMessage) json.RawMessage {
 	return truncated
 }
 
+// syntheticTurnParams carries metadata for writing a synthetic turn (crash/timeout/fresh_start).
+type syntheticTurnParams struct {
+	SessionID  string
+	Reason     string
+	Message    string
+	Source     string
+	Platform   string
+	Owner      string
+	Model      string
+	Generation int64
+	TurnNum    int
+}
+
 // captureSyntheticEvent writes a synthetic done-like event for crash/timeout/fresh_start scenarios.
 // Allocates a real seq number to avoid colliding with the AEP "unassigned" convention (seq=0).
-func (b *Bridge) captureSyntheticEvent(sessionID, reason, message, source, platform, owner, model string) {
+func (b *Bridge) captureSyntheticEvent(p syntheticTurnParams) {
 	if b.collector == nil {
 		return
 	}
 	data, err := json.Marshal(map[string]any{
 		"success":   false,
-		"reason":    reason,
-		"message":   message,
+		"reason":    p.Reason,
+		"message":   p.Message,
 		"synthetic": true,
 	})
 	if err != nil {
 		return
 	}
-	seq := b.hub.NextSeq(sessionID)
-	b.collector.Capture(sessionID, seq, events.Done, data, "outbound", source)
+	seq := b.hub.NextSeq(p.SessionID)
+	b.collector.Capture(p.SessionID, seq, events.Done, data, "outbound", p.Source)
 
-	// Also write a synthetic assistant turn for crash/timeout.
-	acc := b.getOrInitAccum(sessionID, "", time.Now())
 	sFalse := false
 	turn := &eventstore.TurnWriteRequest{
-		SessionID:  sessionID,
-		Generation: acc.Generation,
-		TurnNum:    acc.TurnCount,
+		SessionID:  p.SessionID,
+		Generation: p.Generation,
+		TurnNum:    p.TurnNum,
 		Seq:        seq,
 		Role:       eventstore.RoleAssistant,
-		Content:    message,
-		Platform:   platform,
-		UserID:     owner,
-		Model:      model,
-		Source:     source,
+		Content:    p.Message,
+		Platform:   p.Platform,
+		UserID:     p.Owner,
+		Model:      p.Model,
+		Source:     p.Source,
 		Success:    &sFalse,
 		CreatedAt:  time.Now().UnixMilli(),
 	}
