@@ -172,10 +172,13 @@ func (m *Manager) Start(ctx context.Context, name string, args, env []string, di
 		"dir", dir,
 	)
 
-	// Drain stderr in background.
-	go m.drainStderr()
+	// Drain stderr in background. Transfer ownership to drainStderr
+	// goroutine; closeLocked will skip nil (no double-close).
+	stderrPipe := m.stderr
+	m.stderr = nil
+	go m.drainStderr(stderrPipe)
 
-	return m.stdin, m.stdout, m.stderr, nil
+	return m.stdin, m.stdout, nil, nil
 }
 
 // Terminate gracefully stops the process group and waits for shutdown.
@@ -380,13 +383,19 @@ func (m *Manager) ReadLine() (string, error) {
 }
 
 // drainStderr drains the stderr pipe in the background.
-func (m *Manager) drainStderr() {
+func (m *Manager) drainStderr(stderr io.ReadCloser) {
+	// Recovery registered first (outermost) so Close() panic is also caught.
 	defer func() {
 		if r := recover(); r != nil {
-			m.log.Error("proc: drainStderr panic", "panic", r)
+			if e, ok := r.(error); ok && errors.Is(e, bufio.ErrTooLong) {
+				m.log.Warn("proc: drainStderr line exceeded buffer limit")
+			} else {
+				m.log.Error("proc: drainStderr unexpected panic", "panic", r)
+			}
 		}
 	}()
-	scanner := bufio.NewScanner(m.stderr)
+	defer func() { _ = stderr.Close() }()
+	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, scannerInitSize), scannerMaxSize)
 	for scanner.Scan() {
 		m.log.Info("proc: stderr", "msg", scanner.Text())
