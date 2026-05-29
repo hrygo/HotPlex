@@ -367,10 +367,10 @@ gh run watch <RUN_ID> --exit-status
 # CI 完成后，提取 CHANGELOG 内容替换自动生成的注释
 # 将 1.2.0 替换为当前发布的纯数字版本号
 VERSION="1.2.0"
-# 注意：必须用 $2 == ver（字符串精确比较），严禁用 $0 ~ ver（正则匹配）
-# 因为 "[1.16.0]" 中的方括号会被 awk 当作字符类，导致匹配所有版本
+# 注意：必须用 index($0, ver)（字面子串搜索），禁止 $0 ~ ver（正则匹配，方括号会被当字符类）
+# index 不依赖字段切分，也不触发正则引擎，是最安全的匹配方式
 awk -v ver="[$VERSION]" '
-  /^## \[/ && $2 == ver { found=1; next }
+  /^## \[/ && index($0, ver) { found=1; next }
   /^## \[/ && found { exit }
   found { print }
 ' CHANGELOG.md | perl -ne 'BEGIN{$b=1} $b=0 if /\S/; if($b && /^\s*$/){next} print' > /tmp/release-notes.md
