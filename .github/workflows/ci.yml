@@ -31,6 +31,7 @@ on:
       - '.github/workflows/**'
 
 env:
+  # TODO: remove after Node 24 becomes the default runtime for GitHub Actions
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
