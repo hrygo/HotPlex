@@ -332,8 +332,23 @@ func TestMapNotificationTurnCompleted(t *testing.T) {
 	t.Parallel()
 
 	m := NewMapper("session-1")
-	params := json.RawMessage(`{"turn":{"usage":{"input_tokens":150,"output_tokens":75}}}`)
-	envs := m.MapNotification("turn/completed", params)
+
+	// turn/started sets the current turn ID.
+	m.MapNotification("turn/started", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-1","status":"inProgress"}}`))
+
+	// Simulate token usage tracking from thread/tokenUsage/updated.
+	tokenParams := json.RawMessage(`{"threadId":"thr-1","turnId":"turn-1","tokenUsage":{"last":{"totalTokens":250,"inputTokens":150,"outputTokens":75,"cachedInputTokens":20,"reasoningOutputTokens":5},"total":{"totalTokens":500,"inputTokens":300,"outputTokens":150}}}`)
+	envs := m.MapNotification("thread/tokenUsage/updated", tokenParams)
+	require.Nil(t, envs, "token usage tracking produces no envelopes")
+
+	// Simulate model tracking from model/rerouted.
+	modelParams := json.RawMessage(`{"threadId":"thr-1","turnId":"turn-1","fromModel":"gpt-4","toModel":"o3","reason":"highRiskCyberActivity"}`)
+	envs = m.MapNotification("model/rerouted", modelParams)
+	require.Nil(t, envs, "model rerouted tracking produces no envelopes")
+
+	// turn/completed uses tracked usage and model.
+	envs = m.MapNotification("turn/completed", json.RawMessage(`{"threadId":"thr-1","turn":{"id":"turn-1","status":"completed"}}`))
 	require.Len(t, envs, 1)
 	require.Equal(t, events.Done, envs[0].Event.Type)
 	dd, ok := envs[0].Event.Data.(events.DoneData)
@@ -341,6 +356,8 @@ func TestMapNotificationTurnCompleted(t *testing.T) {
 	require.True(t, dd.Success)
 	require.Equal(t, 150, dd.Stats["input_tokens"])
 	require.Equal(t, 75, dd.Stats["output_tokens"])
+	require.Equal(t, 20, dd.Stats["cached_input_tokens"])
+	require.Equal(t, "o3", dd.Stats["model"])
 }
 
 func TestMapNotificationApproval(t *testing.T) {
@@ -401,6 +418,119 @@ func TestMapNotificationUnknownMethod(t *testing.T) {
 	m := NewMapper("session-1")
 	envs := m.MapNotification("thread/started", json.RawMessage(`{}`))
 	require.Nil(t, envs)
+}
+
+func TestMapNotificationReasoningDelta(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("item/reasoning/summaryTextDelta", json.RawMessage(
+		`{"threadId":"thr-1","turnId":"turn-1","itemId":"r_1","delta":"Analyzing the code structure","summaryIndex":0}`))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Reasoning, envs[0].Event.Type)
+	rd, ok := envs[0].Event.Data.(events.ReasoningData)
+	require.True(t, ok)
+	require.Equal(t, "Analyzing the code structure", rd.Content)
+	require.Equal(t, "r_1", rd.ID)
+}
+
+func TestMapNotificationReasoningDeltaEmpty(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("item/reasoning/summaryTextDelta", json.RawMessage(
+		`{"threadId":"thr-1","itemId":"r_1","delta":""}`))
+	require.Nil(t, envs, "empty delta should produce no envelopes")
+}
+
+func TestMapNotificationWarning(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("warning", json.RawMessage(
+		`{"threadId":"thr-1","message":"Rate limit approaching"}`))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Step, envs[0].Event.Type)
+	sd, ok := envs[0].Event.Data.(events.StepData)
+	require.True(t, ok)
+	require.Equal(t, "warning", sd.StepType)
+	require.Equal(t, "Rate limit approaching", sd.Name)
+}
+
+func TestMapNotificationMCPProgress(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("item/mcpToolCall/progress", json.RawMessage(
+		`{"threadId":"thr-1","turnId":"turn-1","itemId":"mcp_1","message":"Searching files..."}`))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Step, envs[0].Event.Type)
+	sd, ok := envs[0].Event.Data.(events.StepData)
+	require.True(t, ok)
+	require.Equal(t, "mcp_progress", sd.StepType)
+	require.Equal(t, "Searching files...", sd.Name)
+	require.Equal(t, "mcp_1", sd.ID)
+}
+
+func TestMapNotificationTurnStartedResetsUsage(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	// Track usage first.
+	m.MapNotification("thread/tokenUsage/updated", json.RawMessage(
+		`{"tokenUsage":{"last":{"totalTokens":100,"inputTokens":60,"outputTokens":40}}}`))
+	require.NotNil(t, m.lastUsage)
+
+	// turn/started resets tracked usage.
+	envs := m.MapNotification("turn/started", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-2","status":"inProgress"}}`))
+	require.Nil(t, envs)
+	require.Nil(t, m.lastUsage)
+	require.Equal(t, "turn-2", m.turnID)
+}
+
+func TestMapNotificationTurnCompletedNoUsage(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	// turn/completed without prior token usage tracking → nil stats.
+	envs := m.MapNotification("turn/completed", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-1","status":"completed"}}`))
+	require.Len(t, envs, 1)
+	dd, ok := envs[0].Event.Data.(events.DoneData)
+	require.True(t, ok)
+	require.True(t, dd.Success)
+	require.Nil(t, dd.Stats)
+}
+
+func TestMapNotificationStaleTokenUsageRejected(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	// Set up turn-1 with usage.
+	m.MapNotification("turn/started", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-1","status":"inProgress"}}`))
+	m.MapNotification("thread/tokenUsage/updated", json.RawMessage(
+		`{"turnId":"turn-1","tokenUsage":{"last":{"totalTokens":100,"inputTokens":60,"outputTokens":40}}}`))
+	require.NotNil(t, m.lastUsage)
+
+	// Advance to turn-2 — lastUsage is cleared.
+	m.MapNotification("turn/started", json.RawMessage(
+		`{"threadId":"thr-1","turn":{"id":"turn-2","status":"inProgress"}}`))
+	require.Nil(t, m.lastUsage)
+	require.Equal(t, "turn-2", m.turnID)
+
+	// Late token usage for turn-1 should be rejected.
+	m.MapNotification("thread/tokenUsage/updated", json.RawMessage(
+		`{"turnId":"turn-1","tokenUsage":{"last":{"totalTokens":100,"inputTokens":60,"outputTokens":40}}}`))
+	require.Nil(t, m.lastUsage, "stale turn-1 usage should be rejected")
 }
 
 // ─── ParseNotification Tests ────────────────────────────────────────────

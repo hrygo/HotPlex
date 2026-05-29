@@ -37,10 +37,20 @@ type CodexItem struct {
 	Phase       string                     `json:"phase,omitempty"`
 }
 
-// CodexUsage holds token usage statistics from turn.completed.
+// CodexUsage holds token usage statistics from turn.completed (exec mode).
 type CodexUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+}
+
+// CodexTokenUsage holds per-turn or cumulative token usage from app-server
+// thread/tokenUsage/updated notifications (TokenUsageBreakdown in codex schema).
+type CodexTokenUsage struct {
+	TotalTokens           int `json:"totalTokens"`
+	InputTokens           int `json:"inputTokens"`
+	CachedInputTokens     int `json:"cachedInputTokens"`
+	OutputTokens          int `json:"outputTokens"`
+	ReasoningOutputTokens int `json:"reasoningOutputTokens"`
 }
 
 // CodexFileChange describes a single file modification.
