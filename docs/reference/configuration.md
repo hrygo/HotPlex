@@ -414,7 +414,7 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `assistant_api_enabled` | *bool | `nil` | — | 是否启用 Slack Assistant API。nil = 未设置 |
 | `reconnect_base_delay` | duration | — | — | 断线重连基础延迟 |
 | `reconnect_max_delay` | duration | — | — | 断线重连最大延迟 |
-| `bots` | []SlackBotConfig | `[]` | — | 多 bot 配置（见 §3.11.7） |
+| `bots` | []SlackBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
 
 #### 3.11.6 Feishu 专有配置
 
@@ -422,7 +422,7 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 |------|------|--------|----------|------|
 | `app_id` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_ID` | 飞书 App ID（`cli_xxxx`）（单 bot 模式） |
 | `app_secret` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` | 飞书 App Secret（单 bot 模式） |
-| `bots` | []FeishuBotConfig | `[]` | — | 多 bot 配置（见 §3.11.7） |
+| `bots` | []FeishuBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
 
 #### 3.11.7 Yuanxin 专有配置
 
