@@ -577,9 +577,27 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 	}
 
 	if params.ThreadID == "" {
+		// Also try nested thread.id format (codex sends some notifications with
+		// params.thread.id instead of params.threadId).
+		var nested struct {
+			Thread struct {
+				ID string `json:"id"`
+			} `json:"thread"`
+		}
+		if notif.Params != nil {
+			_ = json.Unmarshal(notif.Params, &nested)
+		}
+		if nested.Thread.ID != "" {
+			params.ThreadID = nested.Thread.ID
+		}
+	}
+
+	if params.ThreadID == "" {
 		m.log.Debug("codex-app-server: notification without threadId, skipping", "method", notif.Method)
 		return
 	}
+
+	m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "threadId", params.ThreadID)
 
 	m.subMu.Lock()
 	sessionID := m.subSessions[params.ThreadID]

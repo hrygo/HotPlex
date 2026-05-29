@@ -233,8 +233,8 @@ func (m *Mapper) mapError(msg string) []*events.Envelope {
 
 func (m *Mapper) mapNotifDelta(params json.RawMessage) []*events.Envelope {
 	var p struct {
-		ItemID    string `json:"itemId"`
-		TextDelta string `json:"textDelta"`
+		ItemID string `json:"itemId"`
+		Delta  string `json:"delta"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil
@@ -242,7 +242,7 @@ func (m *Mapper) mapNotifDelta(params json.RawMessage) []*events.Envelope {
 	return []*events.Envelope{
 		newEnvelope(events.MessageDelta, events.MessageDeltaData{
 			MessageID: m.tracker.getMessageID(p.ItemID),
-			Content:   p.TextDelta,
+			Content:   p.Delta,
 		}, m.sessionID, m.nextSeq()),
 	}
 }

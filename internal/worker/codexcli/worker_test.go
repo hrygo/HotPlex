@@ -295,7 +295,7 @@ func TestMapNotificationAgentMessageStateMachine(t *testing.T) {
 
 	// Step 2: item/agentMessage/delta (x3) → message.delta
 	for i, word := range []string{"Hello", " world", "!"} {
-		deltaParams := json.RawMessage(fmt.Sprintf(`{"itemId":"msg_1","textDelta":%q}`, word))
+		deltaParams := json.RawMessage(fmt.Sprintf(`{"itemId":"msg_1","delta":%q}`, word))
 		envs = m.MapNotification("item/agentMessage/delta", deltaParams)
 		require.Len(t, envs, 1, "delta %d", i)
 		require.Equal(t, events.MessageDelta, envs[0].Event.Type)
