@@ -107,13 +107,6 @@ jobs:
           go build -ldflags="${LDFLAGS} -X main.version=${VERSION} -X main.commit=${COMMIT}" \
             -o "dist/${NAME}" ./cmd/hotplex
 
-      - name: Compute checksum
-        run: |
-          EXT=""
-          [ "${{ matrix.os }}" = "windows" ] && EXT=".exe"
-          NAME="hotplex-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
-          sha256sum "dist/${NAME}" >> dist/checksums.txt
-
       - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.os }}-${{ matrix.arch }}
@@ -135,16 +128,15 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Verify and sort checksums
+      - name: Generate checksums
         run: |
-          echo "=== Release artifacts ==="
-          ls -lh dist/
-          echo ""
+          cd dist
+          sha256sum hotplex-* > checksums.txt
           echo "=== Checksums ==="
-          sort -k2 dist/checksums.txt
+          cat checksums.txt
           echo ""
           echo "=== Integrity check ==="
-          sha256sum --check <(sort -k2 dist/checksums.txt)
+          sha256sum --check checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v3.0.0

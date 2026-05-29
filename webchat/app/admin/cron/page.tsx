@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
+import { formatDuration } from '@/lib/utils/format-duration';
 import type { CronJob } from '@/lib/types/admin';
+import type { CronSchedule } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -12,9 +14,19 @@ import type { CronJob } from '@/lib/types/admin';
 
 type FilterOption = 'all' | 'enabled' | 'disabled';
 
-function formatTime(iso?: string): string {
-  if (!iso) return '--';
-  const date = new Date(iso);
+function formatSchedule(s: CronJob['schedule']): string {
+  if (!s) return '—';
+  switch (s.kind) {
+    case 'cron': return s.expr ?? '—';
+    case 'every': return s.every_ms ? `every ${formatDuration(s.every_ms)}` : '—';
+    case 'at': return s.at ?? '—';
+    default: return s.kind ?? '—';
+  }
+}
+
+function formatTime(ms?: number): string {
+  if (!ms) return '--';
+  const date = new Date(ms);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);
@@ -23,7 +35,6 @@ function formatTime(iso?: string): string {
   const diffDay = Math.floor(diffMs / 86400000);
 
   if (diffSec < 0) {
-    // Future time
     const futureMs = -diffMs;
     const futureMin = Math.floor(futureMs / 60000);
     const futureHour = Math.floor(futureMs / 3600000);
@@ -229,7 +240,7 @@ export default function CronPage() {
         {!loading && !error && filtered.length > 0 && (
           <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden">
             {/* Table header */}
-            <div className="grid grid-cols-[1fr_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
+            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Name</span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Schedule</span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Enabled</span>
@@ -243,26 +254,26 @@ export default function CronPage() {
             {filtered.map((job) => (
               <div
                 key={job.id}
-                className={`grid grid-cols-[1fr_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-2.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center ${!job.enabled ? 'opacity-60' : ''}`}
+                className={`grid grid-cols-[minmax(0,1fr)_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-2.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center ${!job.enabled ? 'opacity-60' : ''}`}
               >
                 {/* Name */}
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
                   <Link
                     href={`/admin/cron/detail?id=${encodeURIComponent(job.id)}`}
                     className="text-xs font-medium text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] truncate transition-colors"
                   >
                     {job.name}
                   </Link>
-                  {job.message && (
-                    <span className="text-[10px] text-[var(--text-faint)] truncate" title={job.message}>
-                      {job.message}
+                  {job.payload?.message && (
+                    <span className="text-[10px] text-[var(--text-faint)] truncate" title={job.payload.message}>
+                      {job.payload.message}
                     </span>
                   )}
                 </div>
 
                 {/* Schedule */}
-                <span className="text-xs font-mono text-[var(--text-muted)] truncate" title={job.schedule}>
-                  {job.schedule}
+                <span className="text-xs font-mono text-[var(--text-muted)] truncate" title={formatSchedule(job.schedule)}>
+                  {formatSchedule(job.schedule)}
                 </span>
 
                 {/* Enabled toggle */}
@@ -284,18 +295,18 @@ export default function CronPage() {
                 </button>
 
                 {/* Last run */}
-                <span className="text-xs text-[var(--text-muted)]" title={job.last_run_at}>
-                  {formatTime(job.last_run_at)}
+                <span className="text-xs text-[var(--text-muted)]" title={job.state?.last_run_at_ms ? new Date(job.state.last_run_at_ms).toISOString() : undefined}>
+                  {formatTime(job.state?.last_run_at_ms)}
                 </span>
 
                 {/* Next run */}
-                <span className="text-xs text-[var(--text-muted)]" title={job.next_run_at}>
-                  {job.enabled ? formatTime(job.next_run_at) : '--'}
+                <span className="text-xs text-[var(--text-muted)]" title={job.state?.next_run_at_ms ? new Date(job.state.next_run_at_ms).toISOString() : undefined}>
+                  {job.enabled ? formatTime(job.state?.next_run_at_ms) : '--'}
                 </span>
 
                 {/* Runs count / max */}
                 <span className="text-xs text-[var(--text-muted)]">
-                  {job.runs_count ?? 0}
+                  {job.state?.run_count ?? 0}
                   {job.max_runs != null ? <span className="text-[var(--text-faint)]"> / {job.max_runs}</span> : null}
                 </span>
 

@@ -315,6 +315,17 @@ func (s *pgStore) LatestGeneration(ctx context.Context, sessionID string) (int64
 	return gen, nil
 }
 
+func (s *pgStore) LatestTurnNum(ctx context.Context, sessionID string, generation int64) (int, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	var tn int
+	err := s.db.QueryRowContext(ctx, s.sql["turns.latest_turn_num"], sessionID, generation).Scan(&tn)
+	if err != nil {
+		return 0, fmt.Errorf("eventstore: latest turn num: %w", err)
+	}
+	return tn, nil
+}
+
 func (s *pgStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()

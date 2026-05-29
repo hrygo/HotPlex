@@ -74,7 +74,7 @@ export async function adminFetch<T>(
     throw new Error(body || `Admin request failed: ${res.status}`);
   }
 
-  if (res.status === 204) {
+  if (res.status === 204 || res.status === 202) {
     return undefined as unknown as T;
   }
 

@@ -383,7 +383,15 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	b.accumMu.Lock()
 	if acc, ok := b.accum[sessionID]; ok {
 		acc.TurnCount = 0
-		acc.Generation++
+		if rg, ok := w.(resetGenerationer); ok {
+			newGen := rg.LoadResetGeneration()
+			if acc.AppliedResetGen < newGen {
+				acc.Generation++
+				acc.AppliedResetGen = newGen
+			}
+		} else {
+			acc.Generation++
+		}
 	}
 	b.accumMu.Unlock()
 
