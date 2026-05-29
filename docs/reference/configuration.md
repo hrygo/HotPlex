@@ -388,7 +388,7 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 
 #### 3.11.4 平台通用配置
 
-每个消息平台（Slack / Feishu）共享以下配置结构。`MessagingPlatformConfig` 字段由共享默认值传播填充，平台级显式设置优先。
+每个消息平台（Slack / Feishu / Yuanxin）共享以下配置结构。`MessagingPlatformConfig` 字段由共享默认值传播填充，平台级显式设置优先。
 
 | 字段 | 类型 | 默认值 | 环境变量前缀 | 说明 |
 |------|------|--------|-------------|------|
@@ -414,7 +414,7 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `assistant_api_enabled` | *bool | `nil` | — | 是否启用 Slack Assistant API。nil = 未设置 |
 | `reconnect_base_delay` | duration | — | — | 断线重连基础延迟 |
 | `reconnect_max_delay` | duration | — | — | 断线重连最大延迟 |
-| `bots` | []SlackBotConfig | `[]` | — | 多 bot 配置（见 §3.11.7） |
+| `bots` | []SlackBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
 
 #### 3.11.6 Feishu 专有配置
 
@@ -422,9 +422,21 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 |------|------|--------|----------|------|
 | `app_id` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_ID` | 飞书 App ID（`cli_xxxx`）（单 bot 模式） |
 | `app_secret` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` | 飞书 App Secret（单 bot 模式） |
-| `bots` | []FeishuBotConfig | `[]` | — | 多 bot 配置（见 §3.11.7） |
+| `bots` | []FeishuBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
 
-#### 3.11.7 多 Bot 配置（Multi-Bot）
+#### 3.11.7 Yuanxin 专有配置
+
+Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `tenant` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_TENANT` | Pulsar 租户 |
+| `namespace` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_NAMESPACE` | Pulsar 命名空间 |
+| `pulsar_url` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_PULSAR_URL` | Pulsar Broker URL |
+| `app_id` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_APP_ID` | 应用 ID |
+| `producer_topic` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_PRODUCER_TOPIC` | 生产者 Topic |
+
+#### 3.11.8 多 Bot 配置（Multi-Bot）
 
 每个平台支持多个独立 bot 实例，各自拥有独立凭证、STT/TTS 配置。
 
@@ -463,7 +475,7 @@ GET /admin/bots          → 列出所有活跃 bot
 GET /admin/bots/{name}   → 单个 bot 详情
 ```
 
-#### 3.11.8 配置传播机制
+#### 3.11.9 配置传播机制
 
 共享配置通过 `propagateMessagingDefaults()` 从 `messaging` 级传播到各平台，再传播到每个 bot：
 
@@ -735,6 +747,24 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_MESSAGING_FEISHU_TTS_MOSS_PORT` | `messaging.feishu.tts_moss_port` |
 | `HOTPLEX_MESSAGING_FEISHU_TTS_MOSS_IDLE_TIMEOUT` | `messaging.feishu.tts_moss_idle_timeout` |
 | `HOTPLEX_MESSAGING_FEISHU_TTS_MOSS_CPU_THREADS` | `messaging.feishu.tts_moss_cpu_threads` |
+
+#### Messaging — Yuanxin
+
+| 变量 | 对应配置 |
+|------|----------|
+| `HOTPLEX_MESSAGING_YUANXIN_ENABLED` | `messaging.yuanxin.enabled` |
+| `HOTPLEX_MESSAGING_YUANXIN_APP_ID` | `messaging.yuanxin.app_id` |
+| `HOTPLEX_MESSAGING_YUANXIN_PULSAR_URL` | `messaging.yuanxin.pulsar_url` |
+| `HOTPLEX_MESSAGING_YUANXIN_TENANT` | `messaging.yuanxin.tenant` |
+| `HOTPLEX_MESSAGING_YUANXIN_NAMESPACE` | `messaging.yuanxin.namespace` |
+| `HOTPLEX_MESSAGING_YUANXIN_PRODUCER_TOPIC` | `messaging.yuanxin.producer_topic` |
+| `HOTPLEX_MESSAGING_YUANXIN_WORKER_TYPE` | `messaging.yuanxin.worker_type` |
+| `HOTPLEX_MESSAGING_YUANXIN_WORK_DIR` | `messaging.yuanxin.work_dir` |
+| `HOTPLEX_MESSAGING_YUANXIN_DM_POLICY` | `messaging.yuanxin.dm_policy` |
+| `HOTPLEX_MESSAGING_YUANXIN_GROUP_POLICY` | `messaging.yuanxin.group_policy` |
+| `HOTPLEX_MESSAGING_YUANXIN_ALLOW_FROM` | `messaging.yuanxin.allow_from` |
+| `HOTPLEX_MESSAGING_YUANXIN_ALLOW_DM_FROM` | `messaging.yuanxin.allow_dm_from` |
+| `HOTPLEX_MESSAGING_YUANXIN_ALLOW_GROUP_FROM` | `messaging.yuanxin.allow_group_from` |
 
 #### Observability
 
