@@ -93,8 +93,8 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 		return m.mapNotifReasoningDelta(params)
 	case "item/reasoning/textDelta":
 		return m.mapNotifReasoningDelta(params)
-		case "item/commandExecution/outputDelta":
-			return m.mapNotifOutputDelta(params)
+	case "item/commandExecution/outputDelta":
+		return m.mapNotifOutputDelta(params)
 	case "item/mcpToolCall/progress":
 		return m.mapNotifMCPProgress(params)
 	case "thread/tokenUsage/updated":
@@ -371,7 +371,7 @@ func (m *Mapper) mapNotifOutputDelta(params json.RawMessage) []*events.Envelope 
 
 func (m *Mapper) trackTokenUsage(params json.RawMessage) {
 	var p struct {
-		TurnID    string `json:"turnId"`
+		TurnID     string `json:"turnId"`
 		TokenUsage struct {
 			Last *CodexTokenUsage `json:"last"`
 		} `json:"tokenUsage"`
@@ -398,7 +398,7 @@ func (m *Mapper) trackModelRerouted(params json.RawMessage) {
 	m.model = p.ToModel
 }
 
-	func (m *Mapper) trackedUsageStats() map[string]any {
+func (m *Mapper) trackedUsageStats() map[string]any {
 	if m.lastUsage == nil && m.model == "" {
 		return nil
 	}
