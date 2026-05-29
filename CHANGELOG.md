@@ -1,10 +1,26 @@
 # Changelog
 
-## [Unreleased]
+## [1.21.0] - 2026-05-29
+
+### Summary
+
+v1.21.0 是一次 minor 版本更新，聚焦于 **ACP Worker 通用集成框架** 和 **CodexCLI 稳定性**。新增 ACP (Agent Client Protocol) Worker 集成规格（经过三源交叉审查验证），为 Hermes 等 ACP 兼容 Agent 提供通用对接路径。CodexCLI 适配器获得关键死锁修复和流式输出增强。Slack 适配器完成 DataTableBlock GA 迁移。
+
+### Added
+
+- **Worker/ACP**: ACP Worker integration spec — 11-section design document defining universal ACP agent connectivity via stdio JSON-RPC 2.0. Triple cross-reviewed against ACP SDK, HotPlex source, and Hermes source with 22 corrections applied. (#570)
+- **Messaging/Slack**: Replace beta `TableBlock` with GA `DataTableBlock` (slack-go v0.24.0). All 6 table builders migrated, validator/sanitizer updated, `isInvalidBlocksError` helper unified across 8 call sites. (#566)
 
 ### Changed
 
-- **Messaging/Slack**: Replace beta `TableBlock` with GA `DataTableBlock` (slack-go v0.24.0). All 6 table builders migrated, validator/sanitizer updated, `isInvalidBlocksError` helper unified across 8 call sites. (#565)
+- **Infrastructure**: Upgrade Go dependencies to latest stable versions. (#562)
+
+### Fixed
+
+- **Worker/CodexCLI**: Fix `readNotifications` mutex deadlock causing 30s handshake timeout — pass stdout directly instead of shared pipe. Fix `context.Background()` SIGKILL race where `defer startCancel()` killed process within 10ms of successful handshake. Expand notification coverage for reasoning, MCP tool calls, warnings, and command execution. Gate token usage by turnID to prevent cross-turn contamination. Add `approvalPolicy` to thread/start params. (#570)
+- **Gateway Core**: Populate metadata in synthetic events — done/error events now include turn statistics and session context. (#563)
+- **UX**: Dev mode lockout warning with upgrade guidance, WebChat 401 error handling with authentication redirect, font preload optimization. (#561)
+- **Worker/CodexCLI**: Batch fix — 5 high-ROI fixes addressing handshake deadlock (#501), notification parsing (#527), thread lifecycle (#526), streaming output (#510), and context propagation (#544). (#564)
 
 ## [1.20.0] - 2026-05-29
 
