@@ -25,8 +25,11 @@ type CostCalculator struct {
 	sessions map[string]*SessionCost
 
 	// sessionTTL controls automatic eviction of stale session cost entries.
-	// Entries older than sessionTTL are removed on the next TrackRequest call.
 	sessionTTL time.Duration
+	// evictCounter triggers eviction every evictInterval TrackRequest calls
+	// to amortize the O(n) scan cost away from the hot path.
+	evictCounter   int64
+	evictInterval  int64
 }
 
 // ModelPricing represents pricing for a model.
@@ -161,9 +164,10 @@ func DefaultModelPricing() []ModelPricing {
 // NewCostCalculator creates a new cost calculator.
 func NewCostCalculator() *CostCalculator {
 	cc := &CostCalculator{
-		pricing:    make(map[string]ModelPricing),
-		sessions:   make(map[string]*SessionCost),
-		sessionTTL: 24 * time.Hour,
+		pricing:       make(map[string]ModelPricing),
+		sessions:      make(map[string]*SessionCost),
+		sessionTTL:    24 * time.Hour,
+		evictInterval: 1000,
 	}
 
 	// Initialize with default pricing
@@ -245,8 +249,11 @@ func (cc *CostCalculator) TrackRequest(sessionID, modelName string, inputTokens,
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 
-	// Evict stale sessions to prevent unbounded map growth.
-	if cc.sessionTTL > 0 && len(cc.sessions) > 0 {
+	// Evict stale sessions periodically (every N TrackRequest calls)
+	// to amortize the O(n) scan cost away from the hot path.
+	cc.evictCounter++
+	if cc.sessionTTL > 0 && cc.evictCounter >= cc.evictInterval && len(cc.sessions) > 0 {
+		cc.evictCounter = 0
 		now := time.Now()
 		for sid, sc := range cc.sessions {
 			if now.Sub(sc.LastRequest) > cc.sessionTTL {

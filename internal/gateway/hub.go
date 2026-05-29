@@ -62,6 +62,12 @@ type SessionWriter interface {
 	// RouteWrite writes an envelope through the Hub routing path. Handles
 	// init-phase buffering (for WS conns) and droppable semantics internally.
 	RouteWrite(ctx context.Context, env *events.Envelope) error
+	// RouteWriteData writes pre-encoded JSON bytes through the Hub routing path.
+	// This avoids redundant re-encoding when the same message is sent to N
+	// connections. The caller provides the event type for metrics and droppable
+	// dispatch. Implementations that cannot consume raw bytes may decode and
+	// re-encode internally.
+	RouteWriteData(data []byte, eventType events.Kind) error
 	Close() error
 }
 
@@ -481,15 +487,8 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	}
 
 	for _, conn := range conns {
-		var writeErr error
-		switch c := conn.(type) {
-		case *Conn:
-			writeErr = c.RouteWriteData(data, msg.Env.Event.Type)
-		default:
-			writeErr = conn.RouteWrite(context.Background(), msg.Env)
-		}
-		if writeErr != nil {
-			h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", writeErr)
+		if err := conn.RouteWriteData(data, msg.Env.Event.Type); err != nil {
+			h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
 			_ = conn.Close()
 			h.mu.Lock()
 			h.removeSession(msg.Env.SessionID, conn)

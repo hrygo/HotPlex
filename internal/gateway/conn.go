@@ -654,26 +654,23 @@ func (c *Conn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 // init-phase buffering and applies droppable semantics for delta/raw events
 // (silently drops on full channel instead of disconnecting).
 func (c *Conn) RouteWrite(_ context.Context, env *events.Envelope) error {
-	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
 	data, err := aep.EncodeJSON(env)
 	if err != nil {
 		return err
 	}
-	// Handle init-phase buffering and closed check.
-	if handled, err := c.bufferOrReject(data); handled {
-		return err
-	}
-	// Post-init: apply droppable vs reliable write semantics.
-	if isDroppable(env.Event.Type) {
-		return c.trySendData(data)
-	}
-	return c.sendData(data)
+	return c.writeDispatch(data, env.Event.Type)
 }
 
 // RouteWriteData writes pre-encoded JSON bytes through the Hub routing path.
 // This avoids redundant re-encoding when the same message is sent to N connections.
 // The caller must provide the event type for metrics and droppable semantics.
 func (c *Conn) RouteWriteData(data []byte, eventType events.Kind) error {
+	return c.writeDispatch(data, eventType)
+}
+
+// writeDispatch is the shared write-path for both RouteWrite and RouteWriteData.
+// It handles metrics, init-phase buffering, and droppable vs reliable dispatch.
+func (c *Conn) writeDispatch(data []byte, eventType events.Kind) error {
 	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(eventType)).Inc()
 	if handled, err := c.bufferOrReject(data); handled {
 		return err

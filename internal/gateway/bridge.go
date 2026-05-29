@@ -63,6 +63,8 @@ type Bridge struct {
 	mcpConfigJSON      atomic.Value  // pre-serialized MCP config JSON string; "" = not configured
 
 	accum   map[string]*sessionAccumulator // per-session stats accumulator
+	// accumMu protects accum. RWMutex allows concurrent reads in getOrInitAccum
+	// fast path; write lock is used for create/delete/reset operations.
 	accumMu sync.RWMutex
 
 	crashTracker   map[string]*crashHistory // per-session crash loop detection

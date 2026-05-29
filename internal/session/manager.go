@@ -439,6 +439,10 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 			var workerToKill worker.Worker
 			if events.IsValidTransition(from, events.StateTerminated) {
 				if err := m.transitionState(ctx, ms, from, events.StateTerminated, "max_turns"); err != nil {
+					// Deliberate escape hatch: DB persistence failed, but we
+					// force-terminate in-memory to ensure worker cleanup.
+					// DB consistency is sacrificed here — the session may
+					// appear active in DB after restart until GC reaps it.
 					m.log.Error("session: max-turns state transition failed, force-terminating in-memory state",
 						"session_id", id, "err", err)
 					ms.info.State = events.StateTerminated
@@ -446,6 +450,7 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 					m.updateRunningIndexForTransition(id, from, events.StateTerminated)
 				}
 			} else {
+				// Escape hatch: invalid transition — force-terminate in-memory.
 				m.log.Warn("session: max-turns transition invalid, force-terminating in-memory state",
 					"session_id", id, "from_state", from)
 				ms.info.State = events.StateTerminated
@@ -623,19 +628,22 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	hasWorker := ms.worker != nil
 	workerType := ms.info.WorkerType
 	uid := ms.info.UserID
-	prevState := ms.info.State
-	ms.info.State = events.StateDeleted
-	ms.info.UpdatedAt = time.Now()
-	info := ms.info
+	wasRunning := ms.info.State == events.StateRunning
+	// Copy-on-write: build candidate, persist, commit on success.
+	candidate := ms.info
+	candidate.State = events.StateDeleted
+	candidate.UpdatedAt = time.Now()
 	ms.mu.Unlock()
 	m.mu.Unlock()
 
-	if err := m.store.Upsert(ctx, &info); err != nil {
-		ms.mu.Lock()
-		ms.info.State = prevState
-		ms.mu.Unlock()
+	if err := m.store.Upsert(ctx, &candidate); err != nil {
 		return err
 	}
+
+	// Persist succeeded — commit the candidate in-memory.
+	ms.mu.Lock()
+	ms.info = candidate
+	ms.mu.Unlock()
 
 	m.mu.Lock()
 	if _, exists := m.sessions[id]; exists {
@@ -650,7 +658,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 			m.pool.Release(uid)
 		}
 		delete(m.sessions, id)
-		if prevState == events.StateRunning {
+		if wasRunning {
 			m.removeFromRunningIndex(id)
 		}
 	}

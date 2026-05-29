@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 
 	"github.com/hrygo/hotplex/internal/brain/llm"
@@ -102,7 +103,7 @@ func SetGlobal(b Brain) {
 
 	// Close outside the lock — it may block waiting for goroutines to exit.
 	if prev != nil {
-		if c, ok := prev.(interface{ Close() }); ok {
+		if c, ok := prev.(io.Closer); ok {
 			c.Close()
 		}
 	}
