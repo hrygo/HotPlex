@@ -74,7 +74,7 @@ export class AuthError extends Error {
 function throwIfAuthError(prefix: string, status: number): never | void {
   if (status === 401) {
     throw new AuthError(
-      `${prefix} failed: 401 — API key mismatch. Check HOTPLEX_WEBCHAT_API_KEY in .env.local or remove gateway API keys and restart gateway to use dev mode.`
+      `${prefix} failed: 401 — Authentication failed. Check your API key configuration or consult the documentation.`
     );
   }
 }

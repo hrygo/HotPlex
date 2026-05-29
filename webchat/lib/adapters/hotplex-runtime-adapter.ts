@@ -590,7 +590,7 @@ export function useHotPlexRuntime({
           errorMessage = "You've reached the rate limit. Please wait a moment before sending more messages.";
           break;
         case 'UNAUTHORIZED':
-          errorMessage = "Authentication failed: 401 — API key mismatch. Check HOTPLEX_WEBCHAT_API_KEY in .env.local or remove gateway API keys and restart gateway to use dev mode.";
+          errorMessage = "Authentication failed: 401 — Check your API key configuration or consult the documentation.";
           break;
         case 'WORKER_OUTPUT_LIMIT':
           errorMessage = "The agent produced too much output and was terminated. Try to narrow down your request.";
