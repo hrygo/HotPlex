@@ -173,7 +173,8 @@ func (m *Manager) Start(ctx context.Context, name string, args, env []string, di
 	)
 
 	// Drain stderr in background.
-	go m.drainStderr()
+	stderrPipe := m.stderr
+	go m.drainStderr(stderrPipe)
 
 	return m.stdin, m.stdout, m.stderr, nil
 }
@@ -380,13 +381,13 @@ func (m *Manager) ReadLine() (string, error) {
 }
 
 // drainStderr drains the stderr pipe in the background.
-func (m *Manager) drainStderr() {
+func (m *Manager) drainStderr(stderr io.ReadCloser) {
 	defer func() {
 		if r := recover(); r != nil {
 			m.log.Error("proc: drainStderr panic", "panic", r)
 		}
 	}()
-	scanner := bufio.NewScanner(m.stderr)
+	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, scannerInitSize), scannerMaxSize)
 	for scanner.Scan() {
 		m.log.Info("proc: stderr", "msg", scanner.Text())
