@@ -65,6 +65,9 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		if si, err := b.sm.Get(context.Background(), sessionID); err == nil {
 			fc.sessPlatform = si.Platform
 			fc.sessOwner = si.OwnerID
+			if fc.sessOwner == "" {
+				fc.sessOwner = si.UserID
+			}
 		}
 	}
 
@@ -105,7 +108,8 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			b.log.Warn("bridge: turn timeout exceeded, terminating worker",
 				"session_id", sessionID, "worker_type", workerType, "turn_timeout", b.turnTimeout)
 			b.sendError(sessionID, events.ErrCodeTurnTimeout, "Turn exceeded %v time limit and was terminated.", b.turnTimeout)
-			b.captureSyntheticEvent(sessionID, "turn_timeout", fmt.Sprintf("Turn exceeded %v time limit", b.turnTimeout), eventstore.SourceTimeout)
+			acc := b.getOrInitAccum(sessionID, "", fc.startTime)
+			b.captureSyntheticEvent(sessionID, "turn_timeout", fmt.Sprintf("Turn exceeded %v time limit", b.turnTimeout), eventstore.SourceTimeout, fc.sessPlatform, fc.sessOwner, acc.ModelName)
 			_ = w.Terminate(context.Background())
 		})
 		defer fc.turnTimer.Stop()
@@ -423,6 +427,8 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			workerType:    workerType,
 			lastInput:     lastInput,
 			crashedWorker: w,
+			sessPlatform:  p.sessPlatform,
+			sessOwner:     p.sessOwner,
 		}) {
 			return
 		}
@@ -461,7 +467,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount)
 		metrics.WorkerCrashesTotal.WithLabelValues(string(workerType), fmt.Sprintf("%d", exitCode)).Inc()
 		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
-		b.captureSyntheticEvent(p.sessionID, "worker_crash", fmt.Sprintf("Worker crashed with exit code %d", exitCode), eventstore.SourceCrash)
+		b.captureSyntheticEvent(p.sessionID, "worker_crash", fmt.Sprintf("Worker crashed with exit code %d", exitCode), eventstore.SourceCrash, p.sessPlatform, p.sessOwner, acc.ModelName)
 	} else if exitCode == -1 {
 		b.sendError(p.sessionID, events.ErrCodeSessionTerminated, "worker terminated (killed)")
 	} else if !p.doneReceived {
@@ -554,7 +560,7 @@ func truncateToolResultOutput(raw json.RawMessage) json.RawMessage {
 
 // captureSyntheticEvent writes a synthetic done-like event for crash/timeout/fresh_start scenarios.
 // Allocates a real seq number to avoid colliding with the AEP "unassigned" convention (seq=0).
-func (b *Bridge) captureSyntheticEvent(sessionID, reason, message, source string) {
+func (b *Bridge) captureSyntheticEvent(sessionID, reason, message, source, platform, owner, model string) {
 	if b.collector == nil {
 		return
 	}
@@ -580,6 +586,9 @@ func (b *Bridge) captureSyntheticEvent(sessionID, reason, message, source string
 		Seq:        seq,
 		Role:       eventstore.RoleAssistant,
 		Content:    message,
+		Platform:   platform,
+		UserID:     owner,
+		Model:      model,
 		Source:     source,
 		Success:    &sFalse,
 		CreatedAt:  time.Now().UnixMilli(),

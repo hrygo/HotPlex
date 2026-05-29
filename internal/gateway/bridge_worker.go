@@ -110,6 +110,8 @@ type fallbackParams struct {
 	workerType    worker.WorkerType
 	lastInput     string
 	crashedWorker worker.Worker
+	sessPlatform  string
+	sessOwner     string
 }
 
 // attemptResumeFallback handles a crashed resumed worker with a two-step strategy:
@@ -183,7 +185,8 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	}
 
 	// Re-deliver the original input that was lost when the first worker crashed.
-	b.captureSyntheticEvent(p.sessionID, "fresh_start", "Session restarted with context reset after worker crash", eventstore.SourceFreshStart)
+	acc := b.getOrInitAccum(p.sessionID, "", time.Now())
+	b.captureSyntheticEvent(p.sessionID, "fresh_start", "Session restarted with context reset after worker crash", eventstore.SourceFreshStart, p.sessPlatform, p.sessOwner, acc.ModelName)
 	if p.lastInput != "" {
 		b.log.Info("bridge: re-delivering input to fresh worker", "session_id", p.sessionID, "content_len", len(p.lastInput))
 		if err := w.Input(context.Background(), p.lastInput, nil); err != nil {
