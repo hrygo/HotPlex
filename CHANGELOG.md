@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.20.0] - 2026-05-29
+
+### Summary
+
+v1.20.0 是一次 minor 版本更新，聚焦于 **新消息平台集成** 和 **安全加固**。新增 Yuanxin (Pulsar) 消息适配器和 `hotplex install` CLI 命令，扩展平台覆盖和安装体验。安全方面修复了 XML 注入绕过、SSRF DNS 信息泄露和 SafetyGuard 数据竞争。Cron 模块经过全面并发安全重构，Admin API 不再泄露内部错误信息。测试稳定性大幅提升，消除了多个 CI flaky test。
+
+### Added
+
+- **Messaging**: Yuanxin messaging adapter via Apache Pulsar — consumer/producer lifecycle, MessageDelta 背压累积, cron 结果投递, multi-round code review (16 commits). (#494)
+- **CLI**: `hotplex install` command — install binary to PATH with cross-platform shell profile detection, extracted shared install utilities from onboard wizard. (#555)
+- **Gateway Core**: TurnCount persistence across gateway restarts — load latest turn_num from DB when in-memory counter is 0, prevent duplicate turn_nums. (#555)
+
+### Changed
+
+- **Cron**: Extract `handlePostExecution` template to eliminate ~80% lifecycle duplication between `executeJob` and `executeAttached`. (#543)
+- **CLI**: Extract `GatewayState` to shared `pidutil` package, removing duplicates across `cmd/hotplex` and `internal/cli`. (#543)
+- **Build**: webchat-embed and docs-build staleness detection via `find -newer` cache pattern, Makefile VERSION variable extraction, 3-stage build status display. (#549)
+- **Tracing**: Rename misleading `SpanFromContext` to `GetTracer`, fix hardcoded version via `serviceVersion` parameter. (#552)
+- **Test**: Parameterize time constants to reduce CI wait times, replace `time.Sleep`+assert with `require.Eventually` across 8 files. (#550)
+
+### Fixed
+
+- **Security**: XML sanitizer missed uppercase attribute tags (e.g. `<RULES x="1">`), allowing prompt injection bypass for all 10 reserved tags. (#517)
+- **Security**: SSRF `ValidateURL` leaked internal DNS topology through error strings in API responses. (#537)
+- **Security**: `SafetyGuard` data race on `banPatterns` and config fields in hot path — add RLock snapshot. (#531)
+- **Security**: `AllowedModels`/`AllowedTools` data race — add RWMutex protection with `RegisterModel`/`RegisterTool` API. (#537)
+- **Security**: Admin API error handlers leaked internal error strings to HTTP responses — add `respondStoreError` with sentinel-based 404 detection. (#552)
+- **Cron**: Unified error classification, `persistCtx` race condition, panic recovery leaving jobs permanently stuck, `loadFromDB` lock ordering deadlock. (#514, #499, #534)
+- **Messaging**: Feishu data race on turn metadata, lock-during-API blocking, chat queue panic leak. (#539)
+- **Messaging**: `Classify()` treated all DB errors as "no record found", causing duplicate welcome messages on transient failures. (#528)
+- **Worker**: codexcli stdout pipe FD leak on early return, stderr buffer `bufio.ErrTooLong` on large lines. (#547)
+- **Gateway Core**: `stopGateway` failed with "no such process" on foreground-started instances — add `Terminate()` for direct PID signaling. (#549)
+- **Gateway Core**: `dev` command missing duplicate-gateway guard, causing port conflicts. (#529)
+- **Circuit Breaker**: `Reset()` caused state divergence with underlying breaker, `Execute` data race on `cb.breaker`. (#532)
+- **Eventstore**: JSON unmarshal errors silently discarded, `flushBatch` cascading warnings on poisoned SQLite tx. (#536)
+- **WebChat UI**: CronSchedule object rendered as React child, cron list grid overflow, JSON parse error on trigger, formatDuration triplication. (#555)
+
 ## [1.19.0] - 2026-05-27
 
 ### Summary
