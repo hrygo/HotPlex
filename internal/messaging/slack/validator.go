@@ -101,8 +101,8 @@ func ValidateBlocks(blocks []slack.Block) error {
 					i, blockType, utf8.RuneCountInString(b.Text.Text))
 			}
 
-		case *slack.TableBlock:
-			if err := validateTableBlock(b, i, blockType); err != nil {
+		case *slack.DataTableBlock:
+			if err := validateDataTableBlock(b, i, blockType); err != nil {
 				return err
 			}
 
@@ -168,16 +168,25 @@ func validateUnknownBlock(_ slack.Block, _ int) error {
 	return nil
 }
 
-// TableBlock constraints per Slack API documentation
+// DataTableBlock constraints per Slack API documentation
 const (
-	maxTableRows = 100
+	maxDataTableCaptionLength = 3000
+	maxDataTableRows          = 100
 )
 
-// validateTableBlock validates a TableBlock against Slack constraints.
-func validateTableBlock(b *slack.TableBlock, i int, blockType slack.MessageBlockType) error {
-	if len(b.Rows) > maxTableRows {
+// validateDataTableBlock validates a DataTableBlock against Slack constraints.
+func validateDataTableBlock(b *slack.DataTableBlock, i int, blockType slack.MessageBlockType) error {
+	if b.Caption == "" {
+		return fmt.Errorf("block %d (%s): DataTableBlock caption is required",
+			i, blockType)
+	}
+	if utf8.RuneCountInString(b.Caption) > maxDataTableCaptionLength {
+		return fmt.Errorf("block %d (%s): caption length %d exceeds maximum of %d",
+			i, blockType, utf8.RuneCountInString(b.Caption), maxDataTableCaptionLength)
+	}
+	if len(b.Rows) > maxDataTableRows {
 		return fmt.Errorf("block %d (%s): row count %d exceeds maximum of %d",
-			i, blockType, len(b.Rows), maxTableRows)
+			i, blockType, len(b.Rows), maxDataTableRows)
 	}
 	return nil
 }

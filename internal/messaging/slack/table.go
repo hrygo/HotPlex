@@ -19,8 +19,11 @@ type TextSegment struct {
 
 // ParsedTable holds the structured data extracted from a markdown table.
 type ParsedTable struct {
-	Headers   []string
-	Rows      [][]string
+	Headers []string
+	Rows    [][]string
+	// ColAligns is parsed from markdown separator lines (e.g. :---:, ---:)
+	// but not applied: DataTableBlock has no per-column alignment API.
+	// Retained for potential future use if slack-go adds alignment support.
 	ColAligns []slack.ColumnAlignment
 }
 
@@ -345,7 +348,7 @@ func buildSingleTableBlocks(segments []TextSegment, table ParsedTable) []slack.B
 		blocks = append(blocks, slack.NewMarkdownBlock("md_text", text))
 	}
 
-	blocks = append(blocks, buildOneTableBlock("md_table", table))
+	blocks = append(blocks, buildOneTableBlock("Table", "md_table", table))
 	return blocks
 }
 
@@ -357,8 +360,8 @@ func buildMultiTableBlocks(content string) []slack.Block {
 	return []slack.Block{slack.NewMarkdownBlock("md_full", wrapped)}
 }
 
-func buildOneTableBlock(blockID string, t ParsedTable) *slack.DataTableBlock {
-	table := slack.NewDataTableBlock(blockID, slack.DataTableBlockOptionBlockID(blockID))
+func buildOneTableBlock(caption, blockID string, t ParsedTable) *slack.DataTableBlock {
+	table := slack.NewDataTableBlock(caption, slack.DataTableBlockOptionBlockID(blockID))
 
 	headerRow := make([]slack.DataTableCell, len(t.Headers))
 	for j, h := range t.Headers {

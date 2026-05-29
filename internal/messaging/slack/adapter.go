@@ -935,7 +935,7 @@ func (c *SlackConn) writeWithPostMessage(ctx context.Context, text string, isDel
 	return nil
 }
 
-// tryTableBlocks extracts markdown tables and sends as Block Kit (MarkdownBlock + TableBlock).
+// tryTableBlocks extracts markdown tables and sends as Block Kit (MarkdownBlock + DataTableBlock).
 // Returns error if no tables found or block send fails (caller falls back to text).
 func (c *SlackConn) tryTableBlocks(ctx context.Context, text string) error {
 	segments, tables := ExtractTables(text)
@@ -1146,7 +1146,7 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 		return
 	}
 
-	// Primary: TableBlock with rich per-field layout.
+	// Primary: DataTableBlock with rich per-field layout.
 	blocks := c.buildTurnSummaryTable(d)
 	richText := messaging.FormatTurnSummaryRich(d)
 	if richText == "" {
@@ -1167,13 +1167,13 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 		return
 	}
 
-	if !strings.Contains(err.Error(), "invalid_blocks") {
+	if !isInvalidBlocksError(err) {
 		c.adapter.Log.Warn("turn summary send failed", "err", err)
 		return
 	}
 
 	// Fallback: rich plain text with emoji-prefixed fields.
-	c.adapter.Log.Warn("slack: turn summary TableBlock rejected, falling back to rich text", "err", err)
+	c.adapter.Log.Warn("slack: turn summary DataTableBlock rejected, falling back to rich text", "err", err)
 	fbOpts := []slack.MsgOption{slack.MsgOptionText(richText, false)}
 	if c.threadTS != "" {
 		fbOpts = append(fbOpts, slack.MsgOptionTS(c.threadTS))
@@ -1219,7 +1219,7 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	}
 	plainText := messaging.FormatCanonicalText(d)
 
-	// Primary: TableBlock (may be rejected by workspaces without the beta feature)
+	// Primary: DataTableBlock (may be rejected by some workspaces)
 	blocks := c.buildContextUsageTable(d)
 	opts := []slack.MsgOption{
 		slack.MsgOptionBlocks(blocks...),
@@ -1232,12 +1232,12 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	if pErr == nil {
 		return nil
 	}
-	if !strings.Contains(pErr.Error(), "invalid_blocks") {
+	if !isInvalidBlocksError(pErr) {
 		return pErr
 	}
 
 	// Fallback: ContextBlock (universally supported)
-	c.adapter.Log.Warn("slack: context usage TableBlock rejected, falling back to ContextBlock", "err", pErr)
+	c.adapter.Log.Warn("slack: context usage DataTableBlock rejected, falling back to ContextBlock", "err", pErr)
 	fbBlocks := c.buildContextUsageFallback(d)
 	fbOpts := []slack.MsgOption{
 		slack.MsgOptionBlocks(fbBlocks...),
@@ -1250,7 +1250,7 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	return fbErr
 }
 
-// buildContextUsageTable builds a TableBlock for context usage (primary format).
+// buildContextUsageTable builds a DataTableBlock for context usage (primary format).
 func (c *SlackConn) buildContextUsageTable(d events.ContextUsageData) []slack.Block {
 	info := messaging.BuildContextDisplay(d)
 	table := slack.NewDataTableBlock("Context Usage", slack.DataTableBlockOptionBlockID("context_usage"))
@@ -1275,7 +1275,7 @@ func (c *SlackConn) buildContextUsageTable(d events.ContextUsageData) []slack.Bl
 	return []slack.Block{table}
 }
 
-// buildContextUsageFallback builds ContextBlock fallback when TableBlock is rejected.
+// buildContextUsageFallback builds ContextBlock fallback when DataTableBlock is rejected.
 func (c *SlackConn) buildContextUsageFallback(d events.ContextUsageData) []slack.Block {
 	text := slack.NewTextBlockObject("mrkdwn", messaging.FormatCanonicalText(d), false, false)
 	return []slack.Block{slack.NewContextBlock("", text)}
@@ -1319,8 +1319,8 @@ func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) err
 	}
 	_, _, err := c.adapter.client.PostMessageContext(ctx, c.channelID, opts...)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid_blocks") {
-			c.adapter.Log.Warn("slack: MCP status TableBlock rejected, falling back to plain text", "err", err)
+		if isInvalidBlocksError(err) {
+			c.adapter.Log.Warn("slack: MCP status DataTableBlock rejected, falling back to plain text", "err", err)
 			fbOpts := []slack.MsgOption{slack.MsgOptionText(plainText, false)}
 			if c.threadTS != "" {
 				fbOpts = append(fbOpts, slack.MsgOptionTS(c.threadTS))
