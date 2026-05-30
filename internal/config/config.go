@@ -689,7 +689,7 @@ type SkillsConfig struct {
 // WebhookConfig holds GitHub webhook receiver settings.
 type WebhookConfig struct {
 	MaxBodySize   int64    `mapstructure:"max_body_size"`   // default: 1MB
-	AllowedRepos  []string `mapstructure:"allowed_repos"`   // repos to accept events from; empty = accept all
+	AllowedRepos  []string `mapstructure:"allowed_repos"`   // repos to accept events from; empty = accept all (env override not supported for slices)
 	TargetJobName string   `mapstructure:"target_job_name"` // cron job to trigger on matching events
 	Secret        string   `mapstructure:"secret"`
 	Path          string   `mapstructure:"path"` // default: "/api/webhook/github"

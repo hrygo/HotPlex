@@ -167,9 +167,11 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 9. Async trigger with dedup and bounded concurrency
 	jobName := h.cfg.TargetJobName
+	repo := event.Repository.FullName
 	for _, prNum := range prNumbers {
 		// Dedup: skip if the same PR was triggered within the cooldown window.
-		prKey := strconv.Itoa(prNum)
+		// Key includes repo to avoid cross-repo collision when AllowedRepos is empty.
+		prKey := repo + "#" + strconv.Itoa(prNum)
 		if last, ok := h.dedup.Load(prKey); ok {
 			if t, _ := last.(time.Time); time.Since(t) < triggerDedupCooldown {
 				h.log.Info("webhook: skipping duplicate trigger", "pr", prNum)
@@ -189,7 +191,12 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"pr_number": strconv.Itoa(n),
 				})
 				if err != nil {
-					h.log.Error("webhook: trigger failed", "pr", n, "err", err)
+					// Distinguish expected (disabled/not found) from unexpected errors.
+					if strings.Contains(err.Error(), "disabled") || strings.Contains(err.Error(), "not found") {
+						h.log.Warn("webhook: trigger skipped", "pr", n, "err", err)
+					} else {
+						h.log.Error("webhook: trigger failed", "pr", n, "err", err)
+					}
 				} else {
 					h.log.Info("webhook: triggered review", "pr", n)
 				}

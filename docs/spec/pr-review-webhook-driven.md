@@ -879,7 +879,7 @@ PROMPT
 | ID | 验收条件 | 验证方法 |
 |----|---------|---------|
 | AC-5.1 | Webhook 请求在 1s 内返回 202，review 异步执行 | 发送事件 → HTTP 202 在 <1s 返回，gateway 日志后续显示 session 创建 |
-| AC-5.2 | `TriggerByName` 传入 `target_pr` 环境变量到 worker | 检查 executor 注入 `platformKey["target_pr"]` 的代码路径 |
+| AC-5.2 | `TriggerByName` 传入 `pr_number` 上下文到 worker | 检查 `platformKey["pr_number"]` → `env["TARGET_PR"]` 的代码路径 |
 | AC-5.3 | Job 不存在时返回错误日志，不影响 HTTP 响应 | 调用不存在 job name → 日志 `job not found`，HTTP 仍为 202 |
 | AC-5.4 | Job 被禁用时不触发 | `hotplex cron update pr-review-hotplex --enabled=false` → 触发被拒 |
 | AC-5.5 | 同一 PR 的并发 webhook 事件不产生重复 review | 快速发送 2 个相同事件 → 仅触发 1 次 review（幂等保护） |
