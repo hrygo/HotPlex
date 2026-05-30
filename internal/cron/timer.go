@@ -308,7 +308,7 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 	// One-shot: disable or delete after run (success or permanent error).
 	if job.Schedule.Kind == ScheduleAt {
 		if job.DeleteAfterRun {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := s.persistTimeout()
 			defer cancel()
 			if err := s.store.Delete(ctx, job.ID); err != nil {
 				s.log.Error("cron: delete one-shot job", "job_id", job.ID, "err", err)
@@ -338,7 +338,7 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 
 	s.persistState(job.ID, job.State)
 	if shouldDisable {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := s.persistTimeout()
 		defer cancel()
 		if err := s.store.SetEnabled(ctx, job.ID, false); err != nil {
 			s.log.Error("cron: persist disable", "job_id", job.ID, "err", err)
@@ -351,7 +351,7 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 // Used for one-shot jobs and auto-disabled jobs after consecutive failures.
 func (s *Scheduler) persistAndDisable(jobID string, state CronJobState) {
 	s.persistState(jobID, state)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := s.persistTimeout()
 	defer cancel()
 	if err := s.store.SetEnabled(ctx, jobID, false); err != nil {
 		s.log.Error("cron: persist disable", "job_id", jobID, "err", err)
@@ -359,10 +359,17 @@ func (s *Scheduler) persistAndDisable(jobID string, state CronJobState) {
 	s.mergeJobState(jobID, state, true)
 }
 
+// persistTimeout returns a context with a 5-second timeout for store operations.
+// Used by persist helpers that run outside the scheduler's main context
+// (e.g. final state writes during shutdown).
+func (s *Scheduler) persistTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 5*time.Second)
+}
+
 // persistState saves job state to the store, using a background context
 // so final state is not lost during scheduler shutdown.
 func (s *Scheduler) persistState(jobID string, state CronJobState) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := s.persistTimeout()
 	defer cancel()
 	if err := s.store.UpdateState(ctx, jobID, state); err != nil {
 		if errors.Is(err, ErrJobNotFound) {

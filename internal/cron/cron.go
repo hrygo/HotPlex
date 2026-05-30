@@ -487,7 +487,10 @@ func (s *Scheduler) ReloadIndex() {
 // Store writes are performed outside s.mu to avoid lock-ordering deadlock
 // with CreateJob/UpdateJob (which acquire writeMu then s.mu).
 func (s *Scheduler) rebuildIndex() {
-	jobs, err := s.store.List(context.Background(), false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	jobs, err := s.store.List(ctx, false)
 	if err != nil {
 		s.log.Error("cron: rebuild index failed", "err", err)
 		return
@@ -517,7 +520,7 @@ func (s *Scheduler) rebuildIndex() {
 
 	// Second pass: persist state patches outside the lock.
 	for _, p := range statePatches {
-		if err := s.store.UpdateState(context.Background(), p.id, p.state); err != nil {
+		if err := s.store.UpdateState(ctx, p.id, p.state); err != nil {
 			s.log.Error("cron: persist next_run on reload", "job_id", p.id, "err", err)
 		}
 	}
