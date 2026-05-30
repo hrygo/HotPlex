@@ -9,7 +9,8 @@
 set -uo pipefail
 
 PUBLIC_IP="${1:-43.106.12.60}"
-SECRET="${2:-948af5f7932d7b8f6e4922c306d97b611386a776e7eb53df45bfbf56530c96c0}"
+SECRET="${2:-}"
+[ -z "$SECRET" ] && { echo "Error: SECRET required (arg 2). Usage: $0 [PUBLIC_IP] [SECRET]"; exit 1; }
 WEBHOOK_PATH="/api/webhook/github"
 BASE_URL="https://${PUBLIC_IP}"
 

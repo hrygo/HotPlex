@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/cron"
 )
 
 // GitHubEvent represents the common fields of GitHub webhook payloads.
@@ -191,8 +193,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"pr_number": strconv.Itoa(n),
 				})
 				if err != nil {
-					// Distinguish expected (disabled/not found) from unexpected errors.
-					if strings.Contains(err.Error(), "disabled") || strings.Contains(err.Error(), "not found") {
+					if errors.Is(err, cron.ErrJobDisabled) || errors.Is(err, cron.ErrJobNotFound) {
 						h.log.Warn("webhook: trigger skipped", "pr", n, "err", err)
 					} else {
 						h.log.Error("webhook: trigger failed", "pr", n, "err", err)
