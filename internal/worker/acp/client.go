@@ -25,7 +25,7 @@ type ACPClient struct {
 	mu      sync.Mutex
 	pending map[string]chan *JSONRPCResponse
 
-	writeMu sync.Mutex // serializes stdin writes (call + RespondPermission) // id → response channel
+	writeMu sync.Mutex // serializes stdin writes (call + RespondPermission)
 
 	// NotificationCh delivers session/update notifications to the worker's readLoop.
 	NotificationCh chan *JSONRPCNotification

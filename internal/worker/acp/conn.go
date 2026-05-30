@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -80,13 +81,18 @@ func (c *acpConn) trySendNonBlocking(env *events.Envelope) (sent bool) {
 	}
 }
 
-// safeSend performs a blocking send on recvCh with panic recovery.
+// safeSend performs a blocking send on recvCh with panic recovery and timeout.
 // This protects against the TOCTOU race where Close() shuts down recvCh
 // between the closed-flag check and the actual send.
+// A 5s timeout prevents readLoop deadlock when forwardEvents is slow.
 func (c *acpConn) safeSend(env *events.Envelope) (sent bool) {
 	defer func() { _ = recover() }()
-	c.recvCh <- env
-	return true
+	select {
+	case c.recvCh <- env:
+		return true
+	case <-time.After(5 * time.Second):
+		return false
+	}
 }
 
 // Close shuts down the receive channel.

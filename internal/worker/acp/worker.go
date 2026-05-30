@@ -205,9 +205,20 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Start read loop — decoupled from request lifecycle.
 	childCtx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
+
+	// Defensive cleanup: if any code after this point fails,
+	// cancel ensures goroutines don't leak.
+	cleanup := true
+	defer func() {
+		if cleanup {
+			cancel()
+		}
+	}()
+
 	client.StartReadLoop(childCtx)
 	go w.readLoop(childCtx)
 
+	cleanup = false
 	return nil
 }
 
@@ -358,6 +369,11 @@ func (w *Worker) HandleElicitationResponse(_ context.Context, _, _ string, _ map
 // ─── readLoop ────────────────────────────────────────────────────────────────
 
 func (w *Worker) readLoop(ctx context.Context) {
+	// Capture conn under lock for consistent access pattern.
+	w.Mu.Lock()
+	conn := w.conn
+	w.Mu.Unlock()
+
 	defer func() {
 		// Clean up stale pending permission entries when read loop exits
 		// (agent disconnected or context cancelled). Prevents accumulation
@@ -379,7 +395,7 @@ func (w *Worker) readLoop(ctx context.Context) {
 			w.SetLastIO(time.Now())
 			envelopes := w.mapper.MapNotification(notif)
 			for _, env := range envelopes {
-				w.conn.TrySend(env)
+				conn.TrySend(env)
 			}
 		case req, ok := <-w.client.RequestCh:
 			if !ok {
