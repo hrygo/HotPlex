@@ -17,7 +17,7 @@ func TestBackoff(t *testing.T) {
 		wantDelay time.Duration
 	}{
 		{"first retry", 0, 30 * time.Second},
-		{"second retry", 1, 30 * time.Second},  // first actual error gets shortest backoff
+		{"second retry", 1, 30 * time.Second}, // first actual error gets shortest backoff
 		{"third retry", 2, 1 * time.Minute},
 		{"fourth retry", 3, 5 * time.Minute},
 		{"fifth retry", 4, 15 * time.Minute},

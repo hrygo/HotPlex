@@ -14,7 +14,7 @@ func newCronDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <id|name>",
 		Short: "Delete a cron job",
-		Args: cobra.MaximumNArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) < 1 {
 				return fmt.Errorf("requires an <id|name> argument.\nSee 'hotplex cron delete --help' for usage")

@@ -249,7 +249,7 @@ func TestScheduler_WithinGracePeriod(t *testing.T) {
 		{"missed 1m job by 31s", 60_000, 31 * time.Second, false},   // grace = 30s
 		{"missed 1h job by 20m", 3_600_000, 20 * time.Minute, true}, // grace = 30min
 		{"missed 1h job by 40m", 3_600_000, 40 * time.Minute, false},
-		{"missed 5h job by 15m", 18_000_000, 15 * time.Minute, true},    // grace capped at 30min, within
+		{"missed 5h job by 15m", 18_000_000, 15 * time.Minute, true},  // grace capped at 30min, within
 		{"missed 5h job by 45m", 18_000_000, 45 * time.Minute, false}, // grace capped at 30min, outside
 	}
 

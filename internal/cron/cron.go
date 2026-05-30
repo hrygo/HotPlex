@@ -337,18 +337,13 @@ func (s *Scheduler) loadFromDB(ctx context.Context) error {
 }
 
 // withinGracePeriod checks whether a missed job is within its grace period.
-// Grace period = 50% of schedule interval, capped at 2 hours.
+// Grace period = 50% of schedule interval, capped at 30 minutes.
 func (s *Scheduler) withinGracePeriod(job *CronJob, now time.Time) bool {
 	missedAt := time.UnixMilli(job.State.NextRunAtMs)
 	elapsed := now.Sub(missedAt)
 
 	interval := s.scheduleInterval(job)
-	grace := interval / 2
-	// Grace period cap at 30 minutes — generous enough for catch-up after
-	// brief downtime, but not so long that stale one-shot tasks re-fire.
-	if grace > 30*time.Minute {
-		grace = 30 * time.Minute
-	}
+	grace := min(interval/2, 30*time.Minute)
 
 	return elapsed <= grace
 }

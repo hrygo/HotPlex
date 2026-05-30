@@ -48,8 +48,8 @@ func isHTTPStatus(msg string, codes ...int) bool {
 				break
 			}
 			// Verify the match is a standalone number, not part of a larger number.
-			prevOK := idx == 0 || !(isDigit(msg[idx-1]) || isLetter(msg[idx-1]))
-			nextOK := idx+len(s) >= len(msg) || !(isDigit(msg[idx+len(s)]) || isLetter(msg[idx+len(s)]))
+			prevOK := idx == 0 || (!isDigit(msg[idx-1]) && !isLetter(msg[idx-1]))
+			nextOK := idx+len(s) >= len(msg) || (!isDigit(msg[idx+len(s)]) && !isLetter(msg[idx+len(s)]))
 			if prevOK && nextOK {
 				return true
 			}
