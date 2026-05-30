@@ -306,6 +306,32 @@ OpenAI Codex CLI Worker，支持双模式：exec（每次 Turn fork 新进程）
 
 > **注意**：Codex CLI Worker 的所有配置项仅支持 YAML 配置，不支持环境变量覆盖。
 
+#### 3.7.6 acp — ACP 通用 Worker
+
+ACP (Agent Communication Protocol) 通用 Worker，通过 JSON-RPC 2.0 over stdio 连接任何 ACP 兼容的 AI Agent（如 Hermes Agent）。支持流式响应、工具调用、权限请求和 Session 恢复。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `command` | string | `hermes-acp` | `HOTPLEX_WORKER_ACP_COMMAND` | ACP Agent 启动命令。支持带子命令，如 `hermes acp` |
+| `auto_approve` | bool | `false` | `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | 自动批准权限请求，无需用户确认 |
+
+**配置示例**：
+
+```yaml
+worker:
+  acp:
+    command: "hermes acp"    # 或其他 ACP 兼容 Agent
+    auto_approve: true       # 自动批准工具调用权限
+```
+
+**使用方式**：在 messaging 层指定 `worker_type: "acp"` 即可启用：
+
+```yaml
+messaging:
+  worker_type: "acp"         # 全局默认
+  # 或 per-platform / per-bot 指定
+```
+
 ---
 
 ### 3.8 agent_config — Agent 人格与上下文

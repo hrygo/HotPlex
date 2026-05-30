@@ -217,6 +217,15 @@ worker:
     # Idle drain timeout for app-server mode before killing process
     idle_drain_period: 30m
 
+  # ACP (Agent Communication Protocol) — universal worker for any ACP-compatible agent.
+  # Communicates via JSON-RPC 2.0 over stdio.
+  acp:
+    # Command to start ACP agent. Use space to separate subcommand args.
+    # Override via HOTPLEX_WORKER_ACP_COMMAND environment variable.
+    command: "hermes acp"
+    # Auto-approve permission requests from the agent (no user confirmation needed).
+    auto_approve: true
+
 # ─────────────────────────────────────────────────────────────────────────────
 # AGENT PERSONALITY & SKILLS (B/C Channels)
 # ─────────────────────────────────────────────────────────────────────────────

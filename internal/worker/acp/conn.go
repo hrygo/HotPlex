@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 type acpConn struct {
 	userID    string
 	sessionID string
+	log       *slog.Logger
 	recvCh    chan *events.Envelope
 	mu        sync.Mutex
 	closed    bool
@@ -24,10 +26,11 @@ type acpConn struct {
 // Compile-time check.
 var _ worker.SessionConn = (*acpConn)(nil)
 
-func newACPConn(userID, sessionID string) *acpConn {
+func newACPConn(userID, sessionID string, log *slog.Logger) *acpConn {
 	return &acpConn{
 		userID:    userID,
 		sessionID: sessionID,
+		log:       log,
 		recvCh:    make(chan *events.Envelope, 256),
 	}
 }
@@ -86,7 +89,12 @@ func (c *acpConn) trySendNonBlocking(env *events.Envelope) (sent bool) {
 // between the closed-flag check and the actual send.
 // A 5s timeout prevents readLoop deadlock when forwardEvents is slow.
 func (c *acpConn) safeSend(env *events.Envelope) (sent bool) {
-	defer func() { _ = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			c.log.Warn("acp conn: send on closed channel, event dropped",
+				"session_id", c.sessionID, "event_type", env.Event.Type)
+		}
+	}()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 	select {

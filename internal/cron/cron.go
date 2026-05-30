@@ -507,6 +507,7 @@ func (s *Scheduler) rebuildIndex() {
 	for _, j := range jobs {
 		if j.Enabled && j.State.NextRunAtMs <= 0 {
 			if next, nerr := NextRun(j.Schedule, now); nerr == nil && !next.IsZero() {
+				j = j.Clone()
 				j.State.NextRunAtMs = next.UnixMilli()
 				statePatches = append(statePatches, struct {
 					id    string

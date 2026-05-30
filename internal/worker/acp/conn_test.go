@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 func TestNewACPConn(t *testing.T) {
 	t.Parallel()
 
-	c := newACPConn("user1", "sess1")
+	c := newACPConn("user1", "sess1", slog.Default())
 	require.Equal(t, "user1", c.UserID())
 	require.Equal(t, "sess1", c.SessionID())
 }
@@ -21,7 +22,7 @@ func TestNewACPConn(t *testing.T) {
 func TestACPConn_Send_NotImplemented(t *testing.T) {
 	t.Parallel()
 
-	c := newACPConn("u", "s")
+	c := newACPConn("u", "s", slog.Default())
 	err := c.Send(context.Background(), &events.Envelope{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not implemented")
@@ -30,7 +31,7 @@ func TestACPConn_Send_NotImplemented(t *testing.T) {
 func TestACPConn_Recv(t *testing.T) {
 	t.Parallel()
 
-	c := newACPConn("u", "s")
+	c := newACPConn("u", "s", slog.Default())
 	ch := c.Recv()
 	require.NotNil(t, ch)
 
@@ -44,7 +45,7 @@ func TestACPConn_Recv(t *testing.T) {
 func TestACPConn_TrySend_Droppable(t *testing.T) {
 	t.Parallel()
 
-	c := newACPConn("u", "s")
+	c := newACPConn("u", "s", slog.Default())
 
 	// Droppable event succeeds on empty channel.
 	require.True(t, c.TrySend(&events.Envelope{
@@ -67,7 +68,7 @@ func TestACPConn_TrySend_Droppable(t *testing.T) {
 func TestACPConn_TrySend_Critical(t *testing.T) {
 	t.Parallel()
 
-	c := newACPConn("u", "s")
+	c := newACPConn("u", "s", slog.Default())
 
 	// Critical event blocks until channel has room.
 	filled := make(chan struct{}) // signaled when goroutine has filled the channel
@@ -99,7 +100,7 @@ func TestACPConn_TrySend_Critical(t *testing.T) {
 func TestACPConn_TrySend_CriticalAfterClose(t *testing.T) {
 	t.Parallel()
 
-	c := newACPConn("u", "s")
+	c := newACPConn("u", "s", slog.Default())
 	require.NoError(t, c.Close())
 
 	// Critical event after close — should return false.
@@ -111,7 +112,7 @@ func TestACPConn_TrySend_CriticalAfterClose(t *testing.T) {
 func TestACPConn_SafeSend_AfterClose(t *testing.T) {
 	t.Parallel()
 
-	c := newACPConn("u", "s")
+	c := newACPConn("u", "s", slog.Default())
 	require.NoError(t, c.Close())
 
 	// safeSend should not panic on closed channel.
@@ -122,7 +123,7 @@ func TestACPConn_SafeSend_AfterClose(t *testing.T) {
 func TestACPConn_Close_Idempotent(t *testing.T) {
 	t.Parallel()
 
-	c := newACPConn("u", "s")
+	c := newACPConn("u", "s", slog.Default())
 	require.NoError(t, c.Close())
 	require.NoError(t, c.Close()) // second close is no-op
 }

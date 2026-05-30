@@ -16,6 +16,7 @@ import (
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/internal/worker/proc"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // Compile-time interface compliance checks.
@@ -144,8 +145,11 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		return fmt.Errorf("acp: failed to start process: %s", binary)
 	}
 
-	w.StartTime = time.Now()
-	w.SetLastIO(time.Now())
+	now := time.Now()
+	w.Mu.Lock()
+	w.StartTime = now
+	w.Mu.Unlock()
+	w.SetLastIO(now)
 
 	// Create client.
 	client := w.testClient
@@ -166,17 +170,20 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Create or load session.
 	var acpSessID string
+	var historyLost bool
 	if session.WorkerSessionID != "" {
 		// Resume existing session.
 		sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, nil)
 		if loadErr != nil {
-			w.Log.Warn("acp: load session failed, creating new", "error", loadErr)
+			w.Log.Error("acp: load session failed, conversation history will be lost",
+				"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID, "error", loadErr)
 			newSess, newErr := client.NewSession(hctx, session.ProjectDir, nil)
 			if newErr != nil {
 				_ = w.Proc.Kill()
 				return fmt.Errorf("acp: new session: %w", newErr)
 			}
 			acpSessID = newSess.SessionID
+			historyLost = true
 		} else {
 			acpSessID = sessResult.SessionID
 		}
@@ -199,9 +206,9 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Create connection.
 	w.Mu.Lock()
-	w.conn = newACPConn(session.UserID, session.SessionID)
-	w.Mu.Unlock()
+	w.conn = newACPConn(session.UserID, session.SessionID, w.Log)
 	w.SetConnLocked(nil) // base.Conn not used; acpConn is returned via Conn() override.
+	w.Mu.Unlock()
 
 	// Start read loop — decoupled from request lifecycle.
 	childCtx, cancel := context.WithCancel(context.Background())
@@ -218,6 +225,19 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	client.StartReadLoop(childCtx)
 	go w.readLoop(childCtx)
+
+	// Notify client if conversation history was lost during resume.
+	if historyLost {
+		w.conn.TrySend(&events.Envelope{
+			Event: events.Event{
+				Type: events.Error,
+				Data: events.ErrorData{
+					Code:    "HISTORY_LOST",
+					Message: "Previous conversation history could not be restored; starting a new session.",
+				},
+			},
+		})
+	}
 
 	cleanup = false
 	return nil

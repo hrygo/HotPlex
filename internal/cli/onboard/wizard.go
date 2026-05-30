@@ -461,7 +461,7 @@ func (wctx *wizardContext) runRequiredConfig() StepResult {
 		wctx.adminToken = GenerateSecret()
 		fmt.Fprintln(os.Stderr, "  → Generated admin token")
 	}
-	wctx.workerType = promptChoice(wctx.reader, "Worker type", []string{"claude_code", "opencode_server"})
+	wctx.workerType = promptChoice(wctx.reader, "Worker type", []string{"claude_code", "opencode_server", "codex_cli", "acp"})
 	return StepResult{Name: "required_config", Status: "pass", Detail: "worker=" + wctx.workerType}
 }
 

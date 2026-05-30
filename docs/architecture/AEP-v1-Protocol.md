@@ -114,7 +114,7 @@ title: Agent Event Protocol (AEP) v1
 | 字段 | 必选 | 说明 |
 |------|------|------|
 | `version` | 是 | 协议版本，必须为 `aep/v1`（同时存在于 Envelope 层和 data 层） |
-| `worker_type` | 是 | Worker 类型标识（如 `claude_code`、`opencode_server`） |
+| `worker_type` | 是 | Worker 类型标识（如 `claude_code`、`opencode_server`、`codex_cli`、`acp`） |
 | `session_id` | 否 | 有值 = resume 已有 session；空 = 创建新 session |
 | `auth` | 否 | 鉴权载荷（非浏览器或无需 Cookie 环境必传，包含 API Key 认证信息） |
 | `config` | 否 | Worker 配置 |

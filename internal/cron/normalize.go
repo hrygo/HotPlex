@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // RequiredPlatformKey maps each platform to the PlatformKey field required
@@ -26,6 +28,7 @@ var threatPatterns = []string{
 	"new instructions:",
 	"override previous",
 	"jailbreak",
+	"you are now",
 }
 
 // filterControl removes control characters and Unicode formatting codepoints from s.
@@ -56,7 +59,9 @@ func ValidateJobPrompt(prompt string) error {
 	if len(prompt) > 4096 {
 		return fmt.Errorf("cron: prompt exceeds 4KB limit (%d bytes)", len(prompt))
 	}
-	cleaned := strings.ToLower(filterControl(prompt, true))
+	// NFKD decomposes compatibility characters (e.g., fullwidth Latin → ASCII)
+	// so that confusable Unicode cannot bypass substring-based threat detection.
+	cleaned := strings.ToLower(norm.NFKD.String(filterControl(prompt, true)))
 	for _, pat := range threatPatterns {
 		if strings.Contains(cleaned, pat) {
 			return fmt.Errorf("cron: potential prompt injection detected")
@@ -71,11 +76,11 @@ func SanitizeJobName(name string) string {
 	return filterControl(name, false)
 }
 
-// SanitizePrompt strips invisible characters from a prompt and returns the
-// cleaned version suitable for storage. Called after ValidateJobPrompt passes
-// to ensure the persisted text matches what was validated.
+// SanitizePrompt strips invisible characters and normalizes Unicode from a prompt
+// and returns the cleaned version suitable for storage. Called after ValidateJobPrompt
+// passes to ensure the persisted text matches what was validated.
 func SanitizePrompt(prompt string) string {
-	return filterControl(prompt, true)
+	return norm.NFKD.String(filterControl(prompt, true))
 }
 
 // formatJobPrompt builds the standard cron prompt with job metadata and timestamp.

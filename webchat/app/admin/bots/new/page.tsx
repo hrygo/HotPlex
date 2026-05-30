@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createBot } from '@/lib/api/admin-bots';
 
 type Platform = 'feishu' | 'slack';
-type WorkerType = 'claude_code' | 'open_code_server';
+type WorkerType = 'claude_code' | 'open_code_server' | 'codex_cli' | 'acp';
 type Policy = 'open' | 'allowlist' | 'disabled';
 
 interface FormState {
@@ -333,6 +333,8 @@ export default function NewBotPage() {
               >
                 <option value="claude_code">claude_code</option>
                 <option value="open_code_server">open_code_server</option>
+                <option value="codex_cli">codex_cli</option>
+                <option value="acp">acp (ACP)</option>
               </select>
             </div>
 

@@ -534,7 +534,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test HotPlex interaction events via AEP WebSocket")
     parser.add_argument("--port", type=int, default=8888, help="Gateway WebSocket port")
     parser.add_argument("--timeout", type=float, default=120, help="Per-test timeout in seconds")
-    parser.add_argument("--worker", choices=["claude_code", "opencode_server"], default="claude_code",
+    parser.add_argument("--worker", choices=["claude_code", "opencode_server", "codex_cli", "acp"], default="claude_code",
                         help="Worker type to test")
     parser.add_argument("--skip", nargs="*", default=[], help="Test names to skip")
     args = parser.parse_args()

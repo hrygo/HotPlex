@@ -206,7 +206,7 @@ hotplex cron create --attach \
 | `--max-retries`      | 否       | 失败重试次数，默认0                         |
 | `--max-runs`         | 周期必填 | 成功N次后自动disable                        |
 | `--expires-at`       | 周期必填 | 过期时间（RFC3339）                         |
-| `--worker-type`      | 否       | Agent引擎类型 (claude_code/opencode_server) |
+| `--worker-type`      | 否       | Agent引擎类型 (claude_code/opencode_server/codex_cli/acp) |
 | `--attach`           | 否       | 会话附加模式，需要 `$GATEWAY_SESSION_ID`。省略 `--schedule` 时默认 `at:+10m` |
 
 </field_reference>

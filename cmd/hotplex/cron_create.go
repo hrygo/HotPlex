@@ -157,7 +157,7 @@ Schedule format:
 	cmd.Flags().StringVar(&expiresAt, "expires-at", "", "auto-disable after this time RFC3339 (required for every/cron)")
 	cmd.Flags().StringVar(&platform, "platform", "", "target delivery platform (slack|feishu|cron), auto-detected from env if unset")
 	cmd.Flags().StringVar(&platformKey, "platform-key", "", "platform routing key as JSON, e.g. '{\"channel_id\":\"C123\"}'")
-	cmd.Flags().StringVar(&workerType, "worker-type", "", "AI Agent engine to use (e.g. claude_code, opencode_server)")
+	cmd.Flags().StringVar(&workerType, "worker-type", "", "AI Agent engine (claude_code|opencode_server|codex_cli|acp)")
 	cmd.Flags().BoolVar(&attach, "attach", false, "Create attached_session job (requires $GATEWAY_SESSION_ID)")
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("message")

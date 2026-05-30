@@ -76,28 +76,19 @@ func (c *ACPClient) Initialize(ctx context.Context, clientInfo map[string]string
 
 // NewSession creates a new ACP session.
 func (c *ACPClient) NewSession(ctx context.Context, cwd string, mcpServers any) (*SessionResult, error) {
-	params := map[string]any{"cwd": cwd}
-	if mcpServers != nil {
-		params["mcpServers"] = mcpServers
-	}
+	params := map[string]any{"cwd": cwd, "mcpServers": normalizeMCPServers(mcpServers)}
 	return c.callSessionMethod(ctx, "session/new", params, "new session")
 }
 
 // LoadSession restores an existing ACP session.
 func (c *ACPClient) LoadSession(ctx context.Context, sessionID, cwd string, mcpServers any) (*SessionResult, error) {
-	params := map[string]any{"sessionId": sessionID, "cwd": cwd}
-	if mcpServers != nil {
-		params["mcpServers"] = mcpServers
-	}
+	params := map[string]any{"sessionId": sessionID, "cwd": cwd, "mcpServers": normalizeMCPServers(mcpServers)}
 	return c.callSessionMethod(ctx, "session/load", params, "load session")
 }
 
 // ResumeSession resumes an interrupted ACP session.
 func (c *ACPClient) ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers any) (*SessionResult, error) {
-	params := map[string]any{"sessionId": sessionID, "cwd": cwd}
-	if mcpServers != nil {
-		params["mcpServers"] = mcpServers
-	}
+	params := map[string]any{"sessionId": sessionID, "cwd": cwd, "mcpServers": normalizeMCPServers(mcpServers)}
 	return c.callSessionMethod(ctx, "session/resume", params, "resume session")
 }
 
@@ -390,3 +381,12 @@ type PromptUsage struct {
 // which provides 7 security layers including prefix stripping, nested agent
 // protection, and blocklist enforcement. ACP worker calls it via
 // base.BuildEnv(session, acpEnvBlocklist, "acp").
+
+// normalizeMCPServers ensures mcpServers is never nil (null in JSON).
+// Some ACP agents require a list, not null.
+func normalizeMCPServers(mcpServers any) any {
+	if mcpServers == nil {
+		return []any{}
+	}
+	return mcpServers
+}

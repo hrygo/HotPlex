@@ -95,7 +95,8 @@ export type ControlAction = typeof ControlAction[keyof typeof ControlAction];
 export const WorkerType = {
   ClaudeCode: 'claude_code',
   OpenCodeServer: 'opencode_server',
-  PiMono: 'pi-mono',
+  CodexCLI: 'codex_cli',
+  ACP: 'acp',
 } as const;
 
 export type WorkerType = typeof WorkerType[keyof typeof WorkerType];

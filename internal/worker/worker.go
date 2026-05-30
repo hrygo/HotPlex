@@ -38,7 +38,7 @@ type SessionConn interface {
 
 // Capabilities describes what a worker adapter supports.
 type Capabilities interface {
-	// Type returns the worker type identifier (e.g. "claude_code", "opencode_server").
+	// Type returns the worker type identifier (e.g. "claude_code", "opencode_server", "codex_cli", "acp").
 	Type() WorkerType
 
 	// SupportsResume returns true if the worker can resume a previous session.

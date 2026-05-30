@@ -581,7 +581,7 @@ type ClaudeCodeConfig struct {
 type CodexCLIConfig struct {
 	Command         string        `mapstructure:"command"`           // codex binary path, default "codex"
 	Model           string        `mapstructure:"model"`             // model name, empty = use Codex default
-	Sandbox         string        `mapstructure:"sandbox"`           // sandbox mode, default "workspace-write"
+	Sandbox         string        `mapstructure:"sandbox"`           // sandbox mode, default "danger-full-access"
 	ApprovalMode    string        `mapstructure:"approval_mode"`     // approval mode, default "never"
 	Ephemeral       bool          `mapstructure:"ephemeral"`         // ephemeral sessions, default true
 	Personality     string        `mapstructure:"personality"`       // agent personality for app-server mode, default "friendly"

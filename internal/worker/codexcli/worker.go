@@ -629,8 +629,13 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 	w.mu.Unlock()
 
 	// Start fresh thread on same manager (same process, no Acquire needed).
+	// If the process crashed between turns, bail out — bridge will Terminate+Start.
 	if origSess.SessionID == "" {
 		return nil
+	}
+
+	if w.manager != nil && !w.manager.IsRunning() {
+		return fmt.Errorf("codexcli: manager process not running, cannot reset")
 	}
 
 	cfg := resolveConfig()

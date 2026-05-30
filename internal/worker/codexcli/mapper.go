@@ -369,11 +369,11 @@ func (m *Mapper) mapNotifError(params json.RawMessage) []*events.Envelope {
 	if msg == "" {
 		msg = "unknown error"
 	}
+	// Only emit Error; Done is emitted by turn/failed or turn/completed.
 	return []*events.Envelope{
 		newEnvelope(events.Error, events.ErrorData{
 			Code: "CODEX_ERROR", Message: msg,
 		}, m.sessionID, m.nextSeq()),
-		newEnvelope(events.Done, events.DoneData{Success: false}, m.sessionID, m.nextSeq()),
 	}
 }
 

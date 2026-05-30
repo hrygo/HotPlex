@@ -127,6 +127,7 @@
 - `claudecode/` - Claude Code 适配器 (stdio, `--print --session-id`)
 - `codexcli/` - Codex CLI 适配器 (exec + app-server 双模式)
 - `opencodeserver/` - Open Code Server 适配器（单例进程, HTTP+SSE）
+- `acp/` - ACP 通用适配器（JSON-RPC 2.0 over stdio，支持任何 ACP 兼容 Agent）
 - `proc/` - 跨平台进程生命周期管理 (PGID/Job Object)
 - `base/` - 共享 BaseWorker + Conn + MetadataHandler
 
@@ -194,7 +195,7 @@ configs/   - 配置文件
 | Session 管理    | `internal/session/manager.go`    | 状态机、原子操作                                           |
 | WebSocket 协议  | `internal/gateway/conn.go`       | ReadPump/WritePump                                         |
 | LLM 重试        | `internal/gateway/llm_retry.go`  | 可重试错误检测                                             |
-| Worker 启动命令 | `configs/config.yaml`            | `claude_code.command` / `opencode_server.command`          |
+| Worker 启动命令 | `configs/config.yaml`            | `claude_code.command` / `opencode_server.command` / `codex_cli.command` / `acp.command` |
 | 路由注册        | `cmd/hotplex/routes.go`          | HTTP 路由                                                  |
 | 多 bot 配置     | `internal/config/config.go`      | `SlackBotConfig`/`FeishuBotConfig`、normalize、propagation |
 | Bot 状态 API    | `internal/admin/bot_handlers.go` | `BotListerProvider` + HTTP handlers                        |

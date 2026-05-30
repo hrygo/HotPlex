@@ -260,7 +260,9 @@ func (s *Scheduler) handlePostExecution(job *CronJob, startedAtMs int64, err err
 
 	if err != nil {
 		if job.Schedule.Kind == ScheduleAt && isTemporaryError(err) && job.State.RetryCount < maxRetries(job) {
-			s.scheduleRetry(s.ctx, job)
+			pctx, pcancel := s.persistTimeout()
+			s.scheduleRetry(pctx, job)
+			pcancel()
 			return true
 		}
 		s.persistState(job.ID, job.State)
