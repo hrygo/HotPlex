@@ -23,8 +23,11 @@ Schedule format:
   --schedule "cron:*/5 * * * *"
   --schedule "every:30m"
   --schedule "at:2026-01-01T00:00:00Z"`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("requires an <id|name> argument.\nSee 'hotplex cron update --help' for usage")
+			}
 			return withStore(context.Background(), configPath, func(store croncli.Store) error {
 				job, err := croncli.ResolveJob(store, context.Background(), args[0])
 				if err != nil {

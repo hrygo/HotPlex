@@ -98,7 +98,7 @@ Schedule format:
 					}
 				} else {
 					if schedule == "" {
-						return cmd.Help()
+						return fmt.Errorf("required flag --schedule not set.\nSee 'hotplex cron create --help' for usage")
 					}
 					var missing []string
 					if botID == "" {

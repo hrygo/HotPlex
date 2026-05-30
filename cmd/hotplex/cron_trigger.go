@@ -18,8 +18,11 @@ func newCronTriggerCmd() *cobra.Command {
 		Long: `Trigger an immediate execution of a cron job via the gateway admin API.
 
 Requires the gateway to be running.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("requires an <id|name> argument.\nSee 'hotplex cron trigger --help' for usage")
+			}
 			return withStore(context.Background(), configPath, func(store croncli.Store) error {
 				job, err := croncli.ResolveJob(store, context.Background(), args[0])
 				if err != nil {
