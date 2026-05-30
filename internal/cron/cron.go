@@ -344,6 +344,10 @@ func (s *Scheduler) withinGracePeriod(job *CronJob, now time.Time) bool {
 	elapsed := now.Sub(missedAt)
 
 	interval := s.scheduleInterval(job)
+	// Grace period = 50% of schedule interval, capped at 30 minutes.
+	// NOTE(behavioral): Previously capped at 2h. The 30min cap means daily/weekly
+	// jobs whose grace window exceeds 30min will not be compensated after a gateway
+	// downtime exceeding 30 minutes. This is intentional — 2h was overly generous.
 	grace := min(interval/2, 30*time.Minute)
 
 	return elapsed <= grace
@@ -379,6 +383,9 @@ func (s *Scheduler) scheduleInterval(job *CronJob) time.Duration {
 
 // scheduleCatchUp executes missed jobs with staggering.
 // First 5 jobs fire immediately; remaining jobs are staggered 5s apart.
+// NOTE: Each catch-up job acquires a concurrency slot via tryAcquireSlot for
+// the full delay + execution duration. This is acceptable because catch-up is
+// a cold-start path (not performance-critical) and concurrency is bounded.
 func (s *Scheduler) scheduleCatchUp(jobs []*CronJob) {
 	if len(jobs) == 0 {
 		return

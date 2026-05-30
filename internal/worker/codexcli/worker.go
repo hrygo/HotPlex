@@ -86,6 +86,9 @@ func (w *ExecWorker) startLocked(session worker.SessionInfo) error {
 	}
 
 	w.cfg = resolveConfig()
+	if w.cfg.Sandbox == "" || w.cfg.Sandbox == "danger-full-access" {
+		w.Log.Warn("codexcli: sandbox is not restricted; commands run with full permissions", "sandbox", w.cfg.Sandbox)
+	}
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
 

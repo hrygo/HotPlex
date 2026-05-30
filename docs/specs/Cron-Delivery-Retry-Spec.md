@@ -1,6 +1,6 @@
 # Cron Delivery Retry Spec
 
-**Issue**: #575 (to be created)
+**Issue**: cron delivery retry (follow-up to #574 audit)
 **Priority**: P2
 **Status**: Draft
 **Author**: Claude Code Audit

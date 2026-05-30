@@ -228,15 +228,10 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Notify client if conversation history was lost during resume.
 	if historyLost {
-		w.conn.TrySend(&events.Envelope{
-			Event: events.Event{
-				Type: events.Error,
-				Data: events.ErrorData{
-					Code:    "HISTORY_LOST",
-					Message: "Previous conversation history could not be restored; starting a new session.",
-				},
-			},
-		})
+		w.conn.TrySend(w.mapper.newEnvelope(events.Error, events.ErrorData{
+			Code:    "HISTORY_LOST",
+			Message: "Previous conversation history could not be restored; starting a new session.",
+		}))
 	}
 
 	cleanup = false

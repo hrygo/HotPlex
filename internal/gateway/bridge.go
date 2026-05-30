@@ -388,6 +388,10 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 			return fmt.Errorf("bridge: reset worker: %w", err)
 		}
 		// Worker doesn't support in-place reset — fall back to Terminate+Start.
+		// NOTE(architecture): Terminate then Start on the same struct is safe for
+		// current workers because Start fully reinitializes internal state. A future
+		// WorkerFactory pattern (new struct per reset) would be cleaner but requires
+		// broader refactoring of the worker lifecycle management.
 		if termErr := w.Terminate(ctx); termErr != nil {
 			b.log.Warn("bridge: reset fallback: terminate failed", "session_id", sessionID, "err", termErr)
 		}

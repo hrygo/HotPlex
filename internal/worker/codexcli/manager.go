@@ -171,6 +171,9 @@ func (m *CodexAppServerManager) Subscribe(threadID, sessionID string) chan *even
 	return ch
 }
 
+// Unsubscribe removes the subscriber channel for the given thread.
+// Precondition: the corresponding appConn must be closed before or after this
+// call to ensure the channel is eventually cleaned up by monitorProcess.
 func (m *CodexAppServerManager) Unsubscribe(threadID string) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
