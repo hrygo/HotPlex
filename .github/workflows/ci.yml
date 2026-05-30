@@ -251,7 +251,7 @@ jobs:
           THRESHOLDS["internal/worker/claudecode"]=53
           THRESHOLDS["internal/worker/opencodeserver"]=9
           THRESHOLDS["internal/worker/noop"]=80
-          THRESHOLDS["internal/worker/acp"]=42
+          THRESHOLDS["internal/worker/acp"]=40
           THRESHOLDS["internal/messaging/feishu"]=48
           THRESHOLDS["internal/worker/codexcli"]=51
           THRESHOLDS["internal/worker/pi"]=0
