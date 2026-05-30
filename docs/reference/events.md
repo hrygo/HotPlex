@@ -178,8 +178,14 @@ type ToolCallData struct {
     ID    string         `json:"id"`
     Name  string         `json:"name"`
     Input map[string]any `json:"input"`
+    // ACP extension fields — zero breaking change, omitted by existing workers.
+    Title     string         `json:"title,omitempty"`      // "read: main.go"
+    Kind      string         `json:"kind,omitempty"`       // read/edit/delete/move/search/execute/think/fetch/switch_mode/other
+    Locations []FileLocation `json:"locations,omitempty"`  // 文件位置引用
 }
 ```
+
+> ACP 扩展字段由 ACP 兼容 Worker 填充，现有 Worker（ClaudeCode/Codex/OCS）不发送这些字段。
 
 #### `tool_result` — 工具执行结果
 
@@ -188,6 +194,9 @@ type ToolResultData struct {
     ID     string `json:"id"`     // 对应 tool_call.id
     Output any    `json:"output"`
     Error  string `json:"error,omitempty"`
+    // ACP extension fields — zero breaking change, omitted by existing workers.
+    Status string    `json:"status,omitempty"` // completed / failed
+    Diff   *FileDiff `json:"diff,omitempty"`   // 结构化文件编辑
 }
 ```
 
@@ -278,6 +287,61 @@ type RawData struct {
 ```
 
 **可被 backpressure 丢弃**，丢弃时不消耗 seq。用于将 Worker（如 Claude Code）的 Agent 特定事件原样透传给客户端。
+
+#### `tool_update` — 工具调用中间状态（ACP 扩展）
+
+ACP Agent 工具执行过程中的中间状态更新。现有 Worker（ClaudeCode/Codex/OCS）不发送此事件。
+
+```go
+type ToolUpdateData struct {
+    ID        string    `json:"id"`
+    Status    string    `json:"status"`              // pending / in_progress
+    Content   any       `json:"content,omitempty"`
+    Diff      *FileDiff `json:"diff,omitempty"`
+    RawOutput string    `json:"raw_output,omitempty"`
+}
+```
+
+#### `plan` — 计划/任务列表更新（ACP 扩展）
+
+ACP Agent 的任务计划更新。映射自 ACP `AgentPlanUpdate`。
+
+```go
+type PlanData struct {
+    Items []PlanItem `json:"items"`
+}
+
+type PlanItem struct {
+    Content  string `json:"content"`  // 任务描述（ACP PlanEntry.content）
+    Priority string `json:"priority"` // high / medium / low
+    Status   string `json:"status"`   // pending / in_progress / completed
+}
+```
+
+#### `mode_update` — Agent 模式切换（ACP 扩展）
+
+ACP Agent 执行模式变更通知。映射自 ACP `CurrentModeUpdate`。
+
+```go
+type ModeUpdateData struct {
+    Mode string `json:"mode"` // Agent 当前模式标识
+}
+```
+
+#### ACP 公共结构体
+
+```go
+type FileLocation struct {
+    Path string `json:"path"`
+    Line int    `json:"line,omitempty"`
+}
+
+type FileDiff struct {
+    Path    string `json:"path"`
+    OldText string `json:"old_text"`
+    NewText string `json:"new_text"`
+}
+```
 
 #### `context_usage` — Context Window 使用报告
 
