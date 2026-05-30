@@ -44,36 +44,40 @@ func (c *acpConn) Recv() <-chan *events.Envelope {
 // TrySend enqueues an envelope from readLoop (backpressure-aware).
 // Critical events (state/done/error/permission_request/question_request/elicitation_request)
 // block until sent; droppable events (message.delta/raw) are silently discarded when full.
+// All channel sends are protected by recover() to prevent send-on-closed-channel panics
+// during the shutdown race between TrySend and Close.
 func (c *acpConn) TrySend(env *events.Envelope) bool {
 	if isDroppable(env.Event.Type) {
-		// Non-blocking: drop delta/raw when channel is full.
-		select {
-		case c.recvCh <- env:
-			return true
-		default:
-			return false
-		}
+		return c.trySendNonBlocking(env)
 	}
-	// Critical event: blocking send with channel-full fallback.
-	select {
-	case c.recvCh <- env:
+	// Critical event: try non-blocking first, then blocking with closed-channel check.
+	if c.trySendNonBlocking(env) {
 		return true
-	default:
-		// Channel full — must not lose critical events.
-		// Check closed flag, then blocking send with panic recovery.
-		c.mu.Lock()
-		closed := c.closed
-		c.mu.Unlock()
-		if closed {
-			return false
-		}
-		return c.safeSend(env)
 	}
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	if closed {
+		return false
+	}
+	return c.safeSend(env)
 }
 
 // isDroppable reports whether an event type can be silently discarded under backpressure.
 func isDroppable(kind events.Kind) bool {
 	return kind == events.MessageDelta || kind == events.Raw
+}
+
+// trySendNonBlocking attempts a non-blocking send with panic recovery.
+// Returns false if the channel is full, closed, or a panic was recovered.
+func (c *acpConn) trySendNonBlocking(env *events.Envelope) (sent bool) {
+	defer func() { _ = recover() }()
+	select {
+	case c.recvCh <- env:
+		return true
+	default:
+		return false
+	}
 }
 
 // safeSend performs a blocking send on recvCh with panic recovery.
