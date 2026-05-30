@@ -1,28 +1,26 @@
 #!/usr/bin/env bash
-# setup-webhook-pr-review.sh — 一键配置 GitHub Webhook + Caddy 反代 + HotPlex
+# setup-webhook-pr-review.sh — 一键配置 Caddy 反代 + HotPlex Webhook（服务器侧）
 #
 # 用法: sudo bash scripts/setup-webhook-pr-review.sh
 #
 # 功能:
-#   1. 前置检查（含 gh auth scope 自动刷新）
+#   1. 前置检查
 #   2. 生成 Webhook Secret
 #   3. 备份并更新 Caddyfile（公网反代，仅 /api/webhook/github 可达）
 #   4. 验证并重载 Caddy
-#   5. 注册 GitHub Repository Webhook
-#   6. 配置 HotPlex（.env + config.yaml）
-#   7. 重启 HotPlex Gateway
+#   5. 配置 HotPlex（.env + config.yaml）
+#   6. 重启 HotPlex Gateway
+#   7. Cron 降频（3min → 30min）
 #   8. 端到端验证
+#
+# GitHub Webhook 注册请另行执行:
+#   bash scripts/setup-github-webhook.sh <secret>
+#   （需以 hrygo 身份登录 gh CLI）
 #
 # 前置条件:
 #   - sudo 权限
-#   - gh CLI 已登录
 #   - HotPlex Gateway 运行在 127.0.0.1:8888
 #   - Caddy 已通过 systemd 管理
-#
-# 注意:
-#   公网 IP 无法获取 Let's Encrypt 证书（LE 不支持纯 IP）。
-#   本脚本使用 Caddy 内置 CA 生成自签名证书，并在 GitHub Webhook 中关闭 SSL 验证。
-#   如需正式证书，请绑定域名后去掉 tls internal 并启用 SSL verification。
 #
 set -uo pipefail
 
@@ -57,21 +55,8 @@ run_as_user() { su - "$LOGNAME_USER" -c "$*"; }
 info "Step 1/8: 前置检查..."
 
 [ "$(id -u)" -eq 0 ] || fail "需要 sudo 权限运行: sudo bash $0"
-command -v gh >/dev/null || fail "gh CLI 未安装"
 command -v caddy >/dev/null || fail "caddy 未安装"
 command -v openssl >/dev/null || fail "openssl 未安装"
-
-# 检查 gh 认证
-if ! run_as_user "gh auth status" >/dev/null 2>&1; then
-    fail "gh CLI 未认证，请先运行: gh auth login"
-fi
-
-# 检查 admin:repo_hook scope（创建 webhook 必需）
-if ! run_as_user "gh api repos/${REPO}/hooks" >/dev/null 2>&1; then
-    info "gh token 缺少 admin:repo_hook scope，正在刷新..."
-    run_as_user "gh auth refresh -h github.com -s admin:repo_hook" || \
-        fail "无法刷新 gh token scope，请手动运行: gh auth refresh -h github.com -s admin:repo_hook"
-fi
 
 # 检查 HotPlex 是否在运行
 if ! pgrep -f "hotplex gateway" > /dev/null 2>&1; then
@@ -96,8 +81,7 @@ ok "Caddyfile 已备份: ${CADDYFILE_BAK}"
 if grep -q "${PUBLIC_IP}" "$CADDYFILE" 2>/dev/null; then
     warn "Caddyfile 中已存在 ${PUBLIC_IP} 配置，跳过追加"
 else
-    # 追加公网 webhook 端点
-    # 注意: 使用 tls internal 因为 Let's Encrypt 不支持纯 IP 证书
+    # 使用 tls internal（Let's Encrypt 不支持纯 IP）
     cat >> "$CADDYFILE" <<EOF
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -163,32 +147,8 @@ else
     warn "Webhook 路径 → ${HTTP_HOOK}（期望 403/400/405）"
 fi
 
-# ─── Step 5: 注册 GitHub Webhook ─────────────────────────────────────────────
-info "Step 5/8: 注册 GitHub Repository Webhook..."
-
-EXISTING=$(run_as_user "gh api repos/${REPO}/hooks --jq '.[].config.url'" 2>/dev/null || echo "")
-if echo "$EXISTING" | grep -q "${PUBLIC_IP}"; then
-    warn "GitHub webhook 已存在，跳过注册"
-else
-    if run_as_user "gh api repos/${REPO}/hooks \
-        --method POST \
-        --field name=web \
-        --field active=true \
-        --field 'events[]=pull_request' \
-        --field 'events[]=check_suite' \
-        --field 'events[]=check_run' \
-        --field 'config[url]=https://${PUBLIC_IP}${WEBHOOK_PATH}' \
-        --field 'config[content_type]=json' \
-        --field 'config[secret]=${SECRET}' \
-        --field 'config[insecure_ssl]=1'" >/dev/null 2>&1; then
-        ok "GitHub webhook 已注册: https://${PUBLIC_IP}${WEBHOOK_PATH}"
-    else
-        fail "GitHub webhook 注册失败。请检查: 1) gh auth 有 admin:repo_hook scope  2) 仓库权限"
-    fi
-fi
-
-# ─── Step 6: 配置 HotPlex ────────────────────────────────────────────────────
-info "Step 6/8: 配置 HotPlex..."
+# ─── Step 5: 配置 HotPlex ────────────────────────────────────────────────────
+info "Step 5/8: 配置 HotPlex..."
 
 # 写入 .env（幂等：已有则更新值）
 if grep -q "^HOTPLEX_WEBHOOK_SECRET=" "$ENV_FILE" 2>/dev/null; then
@@ -221,8 +181,8 @@ YAML
     ok "webhook 配置已追加到 ${CONFIG_FILE}"
 fi
 
-# ─── Step 7: 重启 HotPlex Gateway ────────────────────────────────────────────
-info "Step 7/8: 重启 HotPlex Gateway..."
+# ─── Step 6: 重启 HotPlex Gateway ────────────────────────────────────────────
+info "Step 6/8: 重启 HotPlex Gateway..."
 
 if run_as_user "hotplex gateway restart --config ${CONFIG_FILE}" 2>/dev/null; then
     ok "HotPlex Gateway 已重启"
@@ -232,8 +192,9 @@ fi
 
 sleep 5
 
-# 降频 cron（从 3min → 30min）
-info "降频 cron fallback..."
+# ─── Step 7: Cron 降频 ───────────────────────────────────────────────────────
+info "Step 7/8: Cron 降频（3min → 30min）..."
+
 if run_as_user "hotplex cron update ${CRON_JOB_NAME} --schedule 'every:30m'" 2>/dev/null; then
     ok "cron 频率已降为 30min 兜底"
 else
@@ -243,25 +204,15 @@ fi
 # ─── Step 8: 端到端验证 ──────────────────────────────────────────────────────
 info "Step 8/8: 端到端验证..."
 
-# 8a. 验证 gateway 日志中 webhook 路由注册
+# 8a. 验证 gateway 日志
 sleep 3
-if journalctl -u hotplex --since "10 sec ago" 2>/dev/null | grep -q "webhook handler registered"; then
-    ok "Gateway 日志: webhook 路由已注册 ✓"
-elif run_as_user "hotplex gateway logs 2>/dev/null | tail -20" 2>/dev/null | grep -q "webhook handler registered"; then
+if run_as_user "hotplex gateway logs 2>/dev/null | tail -30" 2>/dev/null | grep -q "webhook handler registered"; then
     ok "Gateway 日志: webhook 路由已注册 ✓"
 else
     warn "未在日志中找到 'webhook handler registered'（可能日志延迟）"
 fi
 
-# 8b. 验证 GitHub ping
-sleep 2
-if run_as_user "gh api repos/${REPO}/hooks --jq '.[0].last_response.code // empty'" 2>/dev/null | grep -q "200"; then
-    ok "GitHub ping 事件已成功投递 ✓"
-else
-    info "GitHub ping 待验证（可在 GitHub Settings → Webhooks 页面查看 Recent Deliveries）"
-fi
-
-# 8c. 验证 webhook 端点可达
+# 8b. 验证 webhook 端点可达
 HTTP_VERIFY=$(curl -sk -o /dev/null -w "%{http_code}" -X POST \
     -H "X-Hub-Signature-256: sha256=deadbeef" \
     -H "X-GitHub-Event: ping" \
@@ -278,19 +229,18 @@ fi
 # ─── 完成 ────────────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════"
-ok "Webhook PR Review 系统部署完成！"
+ok "服务器侧 Webhook 配置完成！"
 echo "════════════════════════════════════════════════════════════════════════════"
 echo ""
 echo "  公网端点:    https://${PUBLIC_IP}${WEBHOOK_PATH}"
 echo "  TLS:         Caddy 内置 CA 自签名（绑定域名后可升级 Let's Encrypt）"
-echo "  SSL 验证:    GitHub webhook 已关闭（insecure_ssl=1，因自签名证书）"
 echo "  Caddyfile:   ${CADDYFILE}"
 echo "  备份:        ${CADDYFILE_BAK}"
-echo "  Secret:      ${ENV_FILE} (HOTPLEX_WEBHOOK_SECRET)"
+echo "  Secret:      ${ENV_FILE} (HOTPLEX_WEBHOOK_SECRET=${SECRET:0:8}...)"
 echo "  Cron 兜底:   every:30m（从 every:3m 降频）"
 echo ""
-echo "后续优化:"
-echo "  绑定域名后: 1) Caddyfile 去掉 'tls internal'  2) GitHub webhook 开启 SSL 验证"
+echo "⚠️  下一步: 在本地电脑注册 GitHub Webhook:"
+echo "  bash scripts/setup-github-webhook.sh ${SECRET}"
 echo ""
 echo "回滚:"
 echo "  sudo cp ${CADDYFILE_BAK} ${CADDYFILE} && sudo systemctl reload caddy"
