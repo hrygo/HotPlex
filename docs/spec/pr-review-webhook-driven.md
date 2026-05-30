@@ -1,6 +1,6 @@
 # PR Review Webhook-Driven 触发 + Prompt 优化 Spec
 
-**版本**: v1.1 · **日期**: 2026-05-30 · **状态**: Partial Implementation
+**版本**: v1.2 · **日期**: 2026-05-30 · **状态**: Code Complete (§6/§7/§8 implemented)
 
 ---
 
@@ -956,10 +956,10 @@ PROMPT
 
 | 章节 | 状态 | 说明 |
 |------|------|------|
-| §4 网络拓扑与安全 | ⏳ 待实施 | Caddy 反代 + TLS |
-| §5 GitHub 侧配置 | ⏳ 待实施 | Repository Webhook |
-| §6 HotPlex 代码改动 | ⏳ 待实施 | webhook handler |
-| §7 HotPlex 配置 | ⏳ 待实施 | webhook secret |
+| §4 网络拓扑与安全 | ⏳ 待实施 | Caddy 反代 + TLS（运维侧，需服务器操作） |
+| §5 GitHub 侧配置 | ⏳ 待实施 | Repository Webhook（运维侧，需 GitHub 配置） |
+| **§6 HotPlex 代码改动** | **✅ 已实施** | **webhook.go + webhook_test.go + routes + executor + config** |
+| **§7 HotPlex 配置** | **✅ 已实施** | **WebhookConfig + env 绑定（部署时配置 secret）** |
 | **§8 Prompt 优化** | **✅ 已实施** | **2026-05-30 完成** |
 | §9 迁移计划 | ⏳ 待实施 | |
 

@@ -179,6 +179,22 @@ func setupRoutes(
 	// Documentation
 	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler()))
 
+	// Webhook endpoint (GitHub → HotPlex event-driven triggers)
+	if cfg.Webhook.Enabled && deps.CronScheduler != nil {
+		webhookHandler := gateway.NewWebhookHandler(
+			gateway.WebhookConfig{
+				Enabled:     cfg.Webhook.Enabled,
+				Secret:      cfg.Webhook.Secret,
+				Path:        cfg.Webhook.Path,
+				MaxBodySize: cfg.Webhook.MaxBodySize,
+			},
+			deps.CronScheduler,
+			log,
+		)
+		mux.Handle(cfg.Webhook.Path, webhookHandler)
+		log.Info("webhook handler registered", "path", cfg.Webhook.Path)
+	}
+
 	// Global favicon fallback using docs logo
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/docs/assets/logo.png", http.StatusMovedPermanently)
