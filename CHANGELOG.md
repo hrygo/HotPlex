@@ -26,7 +26,8 @@ v1.22.0 是一次 minor 版本更新，聚焦于 **ACP Worker 全面实现**、*
 
 ### Fixed
 
-- **Cron**: End-to-end audit — fix 6 P1 race conditions (slot leak, ABBA deadlock, narrow SetEnabled, cancel leak, CLI timestamps, maxJobs gate), 8 P2 design gaps (platform key merge, delivery error escalation, injection detection hardening, upsert atomicity, persist timeout), and 4 P3 edge cases (grace period cap, backoff off-by-one, sanitize boundary). (#574)
+- **Cron**: End-to-end audit — fix 6 P1 race conditions (slot leak, ABBA deadlock, narrow SetEnabled, cancel leak, CLI timestamps, maxJobs gate), 8 P2 design gaps (platform key merge, delivery error escalation, injection detection hardening, upsert atomicity, persist timeout), and 4 P3 edge cases (backoff off-by-one, sanitize boundary). (#574)
+- **Cron**: Grace period cap reduced from 2h to `min(interval/2, 30min)` — gateway downtime exceeding 30min will skip missed cron executions. Previously daily jobs had up to 12h grace, weekly up to 84h. (#574)
 - **Cron**: Resolve platform keys from env vars even with explicit --platform flag, preventing missing channel_id/chat_id in created jobs.
 - **Cron**: Use background timeout in onTick persist calls — s.ctx gets cancelled during Shutdown causing silent persist failures.
 - **CLI/Cron**: Improve missing-arg error messages with --help guidance instead of generic "accepts 1 arg(s), received 0".

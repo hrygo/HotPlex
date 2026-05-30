@@ -225,8 +225,8 @@ worker:
     command: "hermes acp"
     # Auto-approve permission requests from the agent (no user confirmation needed).
     # WARNING: auto_approve: true grants full tool access without human review.
-    # Consider setting to false in production environments.
-    auto_approve: true
+    # Consider keeping false in production environments.
+    auto_approve: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AGENT PERSONALITY & SKILLS (B/C Channels)

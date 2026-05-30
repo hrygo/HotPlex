@@ -310,7 +310,7 @@ ACP (Agent Communication Protocol) 通用 Worker，通过 JSON-RPC 2.0 over stdi
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
-| `command` | string | `hermes-acp` | `HOTPLEX_WORKER_ACP_COMMAND` | ACP Agent 启动命令。支持带子命令，如 `hermes acp` |
+| `command` | string | `hermes acp` | `HOTPLEX_WORKER_ACP_COMMAND` | ACP Agent 启动命令。支持带子命令，如 `hermes acp` |
 | `auto_approve` | bool | `false` | `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | 自动批准权限请求，无需用户确认 |
 
 **配置示例**：
