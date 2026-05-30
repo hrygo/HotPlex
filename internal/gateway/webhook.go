@@ -90,9 +90,14 @@ func NewWebhookHandler(baseCtx context.Context, cfg config.WebhookConfig, trigge
 	}
 }
 
-// Close cancels in-flight trigger goroutines. Safe to call multiple times.
+// Close cancels in-flight trigger goroutines and clears dedup entries.
+// Safe to call multiple times.
 func (h *WebhookHandler) Close() {
 	h.cancel()
+	h.dedup.Range(func(key, _ any) bool {
+		h.dedup.Delete(key)
+		return true
+	})
 }
 
 // ServeHTTP handles incoming GitHub webhook HTTP requests.
@@ -234,6 +239,9 @@ func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 		if e.CheckSuite == nil || e.CheckSuite.Conclusion != "success" {
 			return nil
 		}
+		// NOTE: check_suite/check_run PullRequests may include draft or already-merged
+		// PRs (GitHub associates suites with commits, not PR state). We intentionally
+		// don't filter here — the downstream agent's CI gate will skip irrelevant PRs.
 		prs := make([]int, 0, len(e.CheckSuite.PullRequests))
 		for _, pr := range e.CheckSuite.PullRequests {
 			prs = append(prs, pr.Number)

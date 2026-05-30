@@ -190,6 +190,7 @@ func setupRoutes(
 				deps.CronScheduler,
 				log,
 			)
+			deps.WebhookHandler = webhookHandler
 			mux.Handle(cfg.Webhook.Path, webhookHandler)
 			log.Info("webhook handler registered", "path", cfg.Webhook.Path)
 		}

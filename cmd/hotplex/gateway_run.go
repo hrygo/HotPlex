@@ -68,6 +68,7 @@ type GatewayDeps struct {
 	Bridge          *gateway.Bridge
 	ConfigWatcher   *config.Watcher
 	CronScheduler   *cron.Scheduler
+	WebhookHandler  *gateway.WebhookHandler // non-nil when webhook is enabled
 	ChatAccessStore messaging.ChatAccessStorer
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
@@ -784,6 +785,10 @@ func shutdownGateway(
 		if err := deps.ConfigWatcher.Close(); err != nil {
 			log.Warn("config: watcher close", "err", err)
 		}
+	}
+
+	if deps.WebhookHandler != nil {
+		deps.WebhookHandler.Close()
 	}
 
 	if cronScheduler != nil {

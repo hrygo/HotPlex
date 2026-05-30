@@ -87,8 +87,9 @@ else
 # ──────────────────────────────────────────────────────────────────────────────
 # 公网 Webhook 端点（仅 /api/webhook/github 可达，用于 GitHub → HotPlex 触发）
 # 使用 Caddy 内置 CA 自签名证书（Let's Encrypt 不支持纯 IP）
+# 显式绑定 IP:443，避免 Caddy 在所有接口监听 443 与 Tailscale HTTPS 冲突
 # ──────────────────────────────────────────────────────────────────────────────
-${PUBLIC_IP} {
+${PUBLIC_IP}:443 {
     tls internal
 
     handle /api/webhook/github {

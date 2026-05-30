@@ -176,9 +176,9 @@ http://<TAILSCALE_IP>:80 {
 | L1: 网络层 | Caddy 路由隔离 | 仅 `/api/webhook/github` 可达，其余 404 |
 | L2: 传输层 | TLS (Caddy 内置 CA 自签名) | 纯 IP 无法用 Let's Encrypt，绑定域名后可升级 |
 | L3: 应用层 | HMAC-SHA256 签名验证 | `X-Hub-Signature-256` header，常量时间比较 |
-| L4: 逻辑层 | 事件过滤 + 仓库校验 | 仅处理 `AllowedRepos`（可配置，默认 `["hrygo/hotplex"]`）的特定事件类型 |
+| L4: 逻辑层 | 事件过滤 + 仓库校验 | 仅处理 `AllowedRepos`（可配置，为空则接受所有仓库）的特定事件类型 |
 | L5: 限流 | Token bucket | 每秒 ≤2 请求，突发 ≤10 |
-| L6: 幂等 | commit SHA 去重 | 同一 commit 不重复审 |
+| L6: 幂等 | PR number 冷却期去重 (60s) | 同一 PR 在 60s 冷却期内不重复触发 |
 
 ### 4.3 备选方案（如不愿暴露公网 IP）
 

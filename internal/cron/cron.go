@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -11,6 +12,9 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// ErrJobDisabled is returned when attempting to trigger a disabled job.
+var ErrJobDisabled = errors.New("cron: job is disabled")
 
 // Scheduler manages cron job lifecycle: loading, scheduling, execution, and shutdown.
 type Scheduler struct {
@@ -273,17 +277,18 @@ func (s *Scheduler) TriggerByName(ctx context.Context, jobName string, extra map
 			break
 		}
 	}
-	s.mu.Unlock()
-
 	if found == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("cron trigger by name: job %q not found: %w", jobName, ErrJobNotFound)
 	}
 	if !found.Enabled {
+		s.mu.Unlock()
 		return fmt.Errorf("cron trigger by name: job %q: %w", jobName, ErrJobDisabled)
 	}
+	job := found.Clone()
+	s.mu.Unlock()
 
 	// Inject extra context (e.g. target_pr from webhook) into PlatformKey.
-	job := found.Clone()
 	if len(extra) > 0 {
 		if job.PlatformKey == nil {
 			job.PlatformKey = make(map[string]string)
