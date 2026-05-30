@@ -636,6 +636,13 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 // sendEnvelope delivers a single envelope to a subscriber channel with backpressure.
 // Delta events are dropped silently when full; critical events block with a 5s timeout.
 func (m *CodexAppServerManager) sendEnvelope(ch chan *events.Envelope, env *events.Envelope) {
+	// Recover from send on closed channel — release() may close ch
+	// concurrently with Unsubscribe+conn.Close after we released subMu.
+	defer func() {
+		if r := recover(); r != nil {
+			m.log.Debug("codex-app-server: send on closed channel, subscriber gone")
+		}
+	}()
 	if env.Event.Type == events.MessageDelta {
 		select {
 		case ch <- env:

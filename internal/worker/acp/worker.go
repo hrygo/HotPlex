@@ -33,7 +33,7 @@ var commandParts atomic.Value // []string
 var autoApprove atomic.Value // bool
 
 func init() {
-	commandParts.Store([]string{"hermes-acp"})
+	commandParts.Store([]string{"hermes", "acp"})
 	autoApprove.Store(false)
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
@@ -45,7 +45,7 @@ func init() {
 func InitConfig(cfg config.ACPConfig) {
 	cmd := cfg.Command
 	if cmd == "" {
-		cmd = "hermes-acp"
+		cmd = "hermes acp"
 	}
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {

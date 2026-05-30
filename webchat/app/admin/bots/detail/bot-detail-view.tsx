@@ -11,7 +11,7 @@ import { StatusBadge } from '@/components/admin/status-badge';
 import type { BotConfigEntry } from '@/lib/types/admin';
 
 type Policy = 'open' | 'allowlist' | 'disabled';
-type WorkerType = 'claude_code' | 'open_code_server' | 'codex_cli' | 'acp';
+type WorkerType = 'claude_code' | 'opencode_server' | 'codex_cli' | 'acp';
 
 const selectClass =
 	'w-full rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)] transition-colors appearance-none';
@@ -151,7 +151,7 @@ function OverviewEditor({
 						</label>
 						<select value={workerType} onChange={(e) => setWorkerType(e.target.value as WorkerType)} className={selectClass}>
 							<option value="claude_code">claude_code</option>
-							<option value="open_code_server">open_code_server</option>
+							<option value="opencode_server">opencode_server</option>
 							<option value="codex_cli">codex_cli</option>
 							<option value="acp">acp (ACP)</option>
 						</select>

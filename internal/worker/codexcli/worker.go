@@ -655,6 +655,10 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 
 	resp, err := w.manager.Call("thread/start", params)
 	if err != nil {
+		// thread/start failed — mark closed so Terminate/release skips cleanup.
+		w.mu.Lock()
+		w.closed = true
+		w.mu.Unlock()
 		return fmt.Errorf("codexcli: reset thread/start: %w", err)
 	}
 
