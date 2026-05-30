@@ -601,7 +601,14 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 		return
 	}
 
-	m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "threadId", params.ThreadID)
+	// Only log lifecycle events; skip high-frequency deltas to avoid log flooding.
+	switch notif.Method {
+	case "item/agentMessage/delta", "item/reasoning/summaryTextDelta",
+		"item/reasoning/textDelta", "item/commandExecution/outputDelta",
+		"thread/tokenUsage/updated":
+	default:
+		m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "threadId", params.ThreadID)
+	}
 
 	m.subMu.Lock()
 	sessionID := m.subSessions[params.ThreadID]
