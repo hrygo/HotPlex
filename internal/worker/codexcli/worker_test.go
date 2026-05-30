@@ -1707,9 +1707,9 @@ func TestResetContextRestartsFromSavedSession(t *testing.T) {
 		manager:      mgr,
 		savedSession: worker.SessionInfo{SessionID: "sess-575", UserID: "u1", ProjectDir: "/tmp"},
 		// threadID left empty so release() skips Notify (no real process).
-		recvCh:       make(chan *events.Envelope, 1),
-		doneCh:       make(chan struct{}),
-		conn:         &appConn{},
+		recvCh: make(chan *events.Envelope, 1),
+		doneCh: make(chan struct{}),
+		conn:   &appConn{},
 	}
 
 	// ResetContext will Terminate (release) → clear state → Start.
