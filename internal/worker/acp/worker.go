@@ -406,12 +406,12 @@ func (w *Worker) readLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			w.handleServerRequest(ctx, req)
+			w.handleServerRequest(ctx, req, conn)
 		}
 	}
 }
 
-func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest) {
+func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, conn *acpConn) {
 	switch req.Method {
 	case "session/request_permission":
 		pm := w.mapper.MapPermissionRequest(req)
@@ -428,7 +428,7 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest) {
 
 		// Store mapping and send permission_request to client.
 		w.pendingPerm.Store(string(req.ID), pm)
-		w.conn.TrySend(pm.Envelope)
+		conn.TrySend(pm.Envelope)
 
 	default:
 		w.Log.Warn("acp: unhandled server request", "method", req.Method)

@@ -87,10 +87,12 @@ func (c *acpConn) trySendNonBlocking(env *events.Envelope) (sent bool) {
 // A 5s timeout prevents readLoop deadlock when forwardEvents is slow.
 func (c *acpConn) safeSend(env *events.Envelope) (sent bool) {
 	defer func() { _ = recover() }()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
 	select {
 	case c.recvCh <- env:
 		return true
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		return false
 	}
 }
