@@ -133,7 +133,7 @@ func (c *ACPClient) Cancel(ctx context.Context, sessionID string) error {
 }
 
 // RespondPermission sends a response to a server-initiated request_permission.
-// No lock needed — this method does not access the pending map.
+// No pendingMu needed (does not access the pending map); writeMu serializes stdin writes.
 func (c *ACPClient) RespondPermission(ctx context.Context, id json.RawMessage, outcome any) error {
 	req := &JSONRPCResponse{
 		JSONRPC: "2.0",

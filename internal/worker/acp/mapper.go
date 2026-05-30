@@ -223,7 +223,7 @@ func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
 		input = make(map[string]any)
 	}
 
-	// Single-pass content parse: extract tool name and file locations together.
+	// Extract tool name and file locations from content.
 	type contentItem struct {
 		Path string `json:"path"`
 		Line int    `json:"line,omitempty"`
