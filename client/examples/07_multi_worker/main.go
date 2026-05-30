@@ -21,7 +21,7 @@ import (
 var workerTypes = []string{
 	"claude_code",
 	"opencode_server",
-	"acpx",
+	"acp",
 }
 
 func main() {

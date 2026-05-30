@@ -154,18 +154,8 @@ type acpTextContent struct {
 }
 
 func (m *ACPMapper) mapAgentMessageChunk(raw json.RawMessage) []*events.Envelope {
-	var u struct {
-		Content json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &u); err != nil {
-		return nil
-	}
-
-	var content acpTextContent
-	if err := json.Unmarshal(u.Content, &content); err != nil {
-		return nil
-	}
-	if content.Text == "" {
+	text := extractTextContent(raw)
+	if text == "" {
 		return nil
 	}
 
@@ -182,32 +172,37 @@ func (m *ACPMapper) mapAgentMessageChunk(raw json.RawMessage) []*events.Envelope
 
 	envs = append(envs, m.newEnvelope(events.MessageDelta, events.MessageDeltaData{
 		MessageID: m.messageID(),
-		Content:   content.Text,
+		Content:   text,
 	}))
 	return envs
 }
 
 func (m *ACPMapper) mapAgentThoughtChunk(raw json.RawMessage) []*events.Envelope {
-	var u struct {
-		Content json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &u); err != nil {
-		return nil
-	}
-
-	var content acpTextContent
-	if err := json.Unmarshal(u.Content, &content); err != nil {
-		return nil
-	}
-	if content.Text == "" {
+	text := extractTextContent(raw)
+	if text == "" {
 		return nil
 	}
 	return []*events.Envelope{
 		m.newEnvelope(events.Reasoning, events.ReasoningData{
 			ID:      aep.NewID(),
-			Content: content.Text,
+			Content: text,
 		}),
 	}
+}
+
+// extractTextContent parses the content field from an ACP text chunk notification.
+func extractTextContent(raw json.RawMessage) string {
+	var u struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return ""
+	}
+	var content acpTextContent
+	if err := json.Unmarshal(u.Content, &content); err != nil {
+		return ""
+	}
+	return content.Text
 }
 
 // acpToolCallUpdate is the common structure for tool_call and tool_call_update.

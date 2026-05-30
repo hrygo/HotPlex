@@ -1,7 +1,7 @@
 # Worker Adapter Package
 
 ## OVERVIEW
-Go worker adapter package with 2 runtime adapters (ClaudeCode, OpenCodeSrv) + 1 noop reference implementation + shared process lifecycle management. ACPX type constant exists but has no implementation.
+Go worker adapter package with 3 runtime adapters (ClaudeCode, OpenCodeSrv, ACP) + 1 noop reference implementation + shared process lifecycle management.
 
 ## STRUCTURE
 ```
@@ -11,7 +11,7 @@ internal/worker/
   noop/              # Reference implementation (compile-time assertions)
   claudecode/        # Claude Code adapter (claude --print --session-id, 631 lines)
   opencodeserver/    # OpenCode Server adapter (HTTP+SSE, 952 lines)
-  acpx/              # EMPTY — only TypeACPX constant exists in worker.go
+  acp/               # ACP (Agent Client Protocol) adapter (JSON-RPC 2.0 over stdio)
   base/
     worker.go        # BaseWorker shared lifecycle: Terminate/Kill/Wait/Health/LastIO
     conn.go          # stdin SessionConn: NDJSON over stdio, WriteAll, InputRecoverer

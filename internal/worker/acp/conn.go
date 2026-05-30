@@ -41,14 +41,39 @@ func (c *acpConn) Recv() <-chan *events.Envelope {
 	return c.recvCh
 }
 
-// TrySend enqueues an envelope from readLoop (non-blocking, backpressure-aware).
+// TrySend enqueues an envelope from readLoop (backpressure-aware).
+// Critical events (state/done/error/permission_request/question_request/elicitation_request)
+// block until sent; droppable events (message.delta/raw) are silently discarded when full.
 func (c *acpConn) TrySend(env *events.Envelope) bool {
+	if isDroppable(env.Event.Type) {
+		// Non-blocking: drop delta/raw when channel is full.
+		select {
+		case c.recvCh <- env:
+			return true
+		default:
+			return false
+		}
+	}
+	// Critical event: blocking send with channel-full fallback.
 	select {
 	case c.recvCh <- env:
 		return true
 	default:
-		return false
+		// Channel full — must not lose critical events, log and retry once.
+		c.mu.Lock()
+		closed := c.closed
+		c.mu.Unlock()
+		if closed {
+			return false
+		}
+		c.recvCh <- env
+		return true
 	}
+}
+
+// isDroppable reports whether an event type can be silently discarded under backpressure.
+func isDroppable(kind events.Kind) bool {
+	return kind == events.MessageDelta || kind == events.Raw
 }
 
 // Close shuts down the receive channel.

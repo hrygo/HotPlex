@@ -73,6 +73,7 @@ type Worker struct {
 	mapper *ACPMapper
 	conn   *acpConn
 	cancel context.CancelFunc
+	ctx    context.Context // lifecycle context for background operations
 
 	// pendingPerm stores the permission mapping for in-flight permission requests.
 	pendingPerm sync.Map // requestID (string) → *PermissionMapResult
@@ -110,11 +111,13 @@ func (w *Worker) GetWorkerSessionID() string {
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
+	// Phase 1: Assign fields under lock (fast, no I/O).
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
+	w.mu.Unlock()
+
+	// Phase 2: I/O-heavy operations outside the lock.
 
 	// Resolve command.
 	parts, _ := commandParts.Load().([]string)
@@ -123,8 +126,8 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	copy(args, parts[1:])
 	args = append(args, session.Args...)
 
-	// Build environment.
-	env := BuildEnv(session.Env, session.ConfigEnv, append(acpEnvBlocklist, session.ConfigBlocklist...))
+	// Build environment using shared security layer.
+	env := base.BuildEnv(session, acpEnvBlocklist, "acp")
 
 	// Create process manager.
 	w.Proc = proc.New(proc.Opts{Logger: w.Log})
@@ -181,7 +184,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		}
 		acpSessID = sessResult.SessionID
 	}
-	w.acpSessionID = acpSessID
+	w.SetWorkerSessionID(acpSessID)
 
 	// Create mapper.
 	mapper := w.testMapper
@@ -191,12 +194,15 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mapper = mapper
 
 	// Create connection.
+	w.mu.Lock()
 	w.conn = newACPConn(session.UserID, session.SessionID)
+	w.mu.Unlock()
 	w.SetConnLocked(nil) // base.Conn not used; acpConn is returned via Conn() override.
 
 	// Start read loop.
 	childCtx, cancel := context.WithCancel(ctx)
 	w.cancel = cancel
+	w.ctx = childCtx
 	client.StartReadLoop(childCtx)
 	go w.readLoop(childCtx)
 
@@ -225,16 +231,14 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 
 	result, promptErr := w.client.Prompt(pctx, w.GetWorkerSessionID(), content)
 	if promptErr != nil {
-		if _, ok := errors.AsType[*JSONRPCError](promptErr); ok {
-			envs := w.mapper.MapPromptError(promptErr)
-			for _, env := range envs {
-				w.conn.TrySend(env)
-			}
-			return nil
-		}
+		// Always emit error sequence to client.
 		envs := w.mapper.MapPromptError(promptErr)
 		for _, env := range envs {
 			w.conn.TrySend(env)
+		}
+		// JSONRPCError is an expected agent error — don't wrap.
+		if _, ok := errors.AsType[*JSONRPCError](promptErr); ok {
+			return nil
 		}
 		return fmt.Errorf("acp: prompt: %w", promptErr)
 	}
@@ -314,7 +318,7 @@ func (w *Worker) HandlePermissionResponse(_ context.Context, reqID string, allow
 		outcome = pm.FormatDeniedOutcome()
 	}
 
-	return w.client.RespondPermission(context.Background(), pm.RequestID, outcome)
+	return w.client.RespondPermission(w.lifecycleCtx(), pm.RequestID, outcome)
 }
 
 func (w *Worker) HandleQuestionResponse(_ context.Context, _ string, _ map[string]string) error {
@@ -323,6 +327,15 @@ func (w *Worker) HandleQuestionResponse(_ context.Context, _ string, _ map[strin
 
 func (w *Worker) HandleElicitationResponse(_ context.Context, _, _ string, _ map[string]any) error {
 	return worker.ErrNotImplemented
+}
+
+// lifecycleCtx returns a context for background operations (permission responses, etc.).
+// Falls back to context.Background() if the worker hasn't started yet.
+func (w *Worker) lifecycleCtx() context.Context {
+	if w.ctx != nil {
+		return w.ctx
+	}
+	return context.Background()
 }
 
 // ─── readLoop ────────────────────────────────────────────────────────────────
@@ -361,7 +374,7 @@ func (w *Worker) handleServerRequest(req *JSONRPCRequest) {
 
 		// Check auto-approve.
 		if val, _ := autoApprove.Load().(bool); val {
-			_ = w.client.RespondPermission(context.Background(), req.ID, pm.FormatAllowedOutcome())
+			_ = w.client.RespondPermission(w.lifecycleCtx(), req.ID, pm.FormatAllowedOutcome())
 			return
 		}
 

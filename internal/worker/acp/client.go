@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
 )
@@ -74,61 +73,29 @@ func (c *ACPClient) Initialize(ctx context.Context, clientInfo map[string]string
 
 // NewSession creates a new ACP session.
 func (c *ACPClient) NewSession(ctx context.Context, cwd string, mcpServers any) (*SessionResult, error) {
-	params := map[string]any{
-		"cwd": cwd,
-	}
+	params := map[string]any{"cwd": cwd}
 	if mcpServers != nil {
 		params["mcpServers"] = mcpServers
 	}
-	resp, err := c.call(ctx, "session/new", params)
-	if err != nil {
-		return nil, fmt.Errorf("acp new session: %w", err)
-	}
-	var result SessionResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return nil, fmt.Errorf("acp new session: unmarshal: %w", err)
-	}
-	return &result, nil
+	return c.callSessionMethod(ctx, "session/new", params, "new session")
 }
 
 // LoadSession restores an existing ACP session.
 func (c *ACPClient) LoadSession(ctx context.Context, sessionID, cwd string, mcpServers any) (*SessionResult, error) {
-	params := map[string]any{
-		"sessionId": sessionID,
-		"cwd":       cwd,
-	}
+	params := map[string]any{"sessionId": sessionID, "cwd": cwd}
 	if mcpServers != nil {
 		params["mcpServers"] = mcpServers
 	}
-	resp, err := c.call(ctx, "session/load", params)
-	if err != nil {
-		return nil, fmt.Errorf("acp load session: %w", err)
-	}
-	var result SessionResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return nil, fmt.Errorf("acp load session: unmarshal: %w", err)
-	}
-	return &result, nil
+	return c.callSessionMethod(ctx, "session/load", params, "load session")
 }
 
 // ResumeSession resumes an interrupted ACP session.
 func (c *ACPClient) ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers any) (*SessionResult, error) {
-	params := map[string]any{
-		"sessionId": sessionID,
-		"cwd":       cwd,
-	}
+	params := map[string]any{"sessionId": sessionID, "cwd": cwd}
 	if mcpServers != nil {
 		params["mcpServers"] = mcpServers
 	}
-	resp, err := c.call(ctx, "session/resume", params)
-	if err != nil {
-		return nil, fmt.Errorf("acp resume session: %w", err)
-	}
-	var result SessionResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return nil, fmt.Errorf("acp resume session: unmarshal: %w", err)
-	}
-	return &result, nil
+	return c.callSessionMethod(ctx, "session/resume", params, "resume session")
 }
 
 // Prompt sends a user message to the active session and waits for the response.
@@ -345,6 +312,19 @@ func (c *ACPClient) dispatchResponse(resp *JSONRPCResponse) {
 	}
 }
 
+// callSessionMethod is a helper for session/* RPCs that return SessionResult.
+func (c *ACPClient) callSessionMethod(ctx context.Context, method string, params map[string]any, label string) (*SessionResult, error) {
+	resp, err := c.call(ctx, method, params)
+	if err != nil {
+		return nil, fmt.Errorf("acp %s: %w", label, err)
+	}
+	var result SessionResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("acp %s: unmarshal: %w", label, err)
+	}
+	return &result, nil
+}
+
 func mustMarshal(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -398,41 +378,7 @@ type PromptUsage struct {
 }
 
 // ─── Env blocklist ───────────────────────────────────────────────────────────
-
-// BuildEnv constructs the environment for an ACP agent process.
-func BuildEnv(sessionEnv map[string]string, configEnv []string, blocklist []string) []string {
-	env := os.Environ()
-	// Filter blocklist.
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		blocked := false
-		for _, prefix := range blocklist {
-			if hasEnvPrefix(e, prefix) {
-				blocked = true
-				break
-			}
-		}
-		if !blocked {
-			filtered = append(filtered, e)
-		}
-	}
-	env = filtered
-
-	// Session env overrides.
-	for k, v := range sessionEnv {
-		env = append(env, k+"="+v)
-	}
-	// Config env (highest priority).
-	env = append(env, configEnv...)
-	return env
-}
-
-func hasEnvPrefix(entry, prefix string) bool {
-	if len(prefix) == 0 {
-		return false
-	}
-	if len(entry) < len(prefix) {
-		return false
-	}
-	return entry[:len(prefix)] == prefix
-}
+// NOTE: Environment construction is handled by base.BuildEnv (base/env.go),
+// which provides 7 security layers including prefix stripping, nested agent
+// protection, and blocklist enforcement. ACP worker calls it via
+// base.BuildEnv(session, acpEnvBlocklist, "acp").
