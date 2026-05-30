@@ -477,6 +477,9 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	w.crashSub = crashCh
 
 	cfg := resolveConfig()
+	if cfg.Sandbox == "" || cfg.Sandbox == "danger-full-access" {
+		w.Log.Warn("codexcli: sandbox is not restricted; commands run with full permissions", "sandbox", cfg.Sandbox)
+	}
 
 	params := buildThreadStartParams(session, cfg)
 
@@ -601,6 +604,12 @@ func (w *AppServerWorker) release() {
 				ThreadID: tid,
 			})
 			w.manager.Unsubscribe(tid)
+			// Close recvCh so forwardEvents exits its range loop.
+			// Must happen after Unsubscribe (removes from dispatch map) to
+			// avoid racing with in-flight dispatchNotification sends.
+			if w.conn != nil {
+				_ = w.conn.Close()
+			}
 			w.manager.Release()
 		}
 	})
