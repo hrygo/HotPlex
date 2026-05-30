@@ -402,6 +402,10 @@ type AppServerWorker struct {
 	closed      bool
 	sessionID   string
 	conn        *appConn
+
+	// origSession preserves the SessionInfo from the most recent Start()
+	// call so that ResetContext can re-establish a fresh thread after cleanup.
+	origSession worker.SessionInfo
 }
 
 // appConn implements worker.SessionConn for the app-server mode.
@@ -505,6 +509,7 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	w.threadID = result.Thread.ID
 	w.sessionID = session.SessionID
 	w.userID = session.UserID
+	w.origSession = session
 
 	w.recvCh = w.manager.Subscribe(w.threadID, w.sessionID)
 	w.commands = NewServerCommander(w.manager, w.threadID)
@@ -559,11 +564,25 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
 	w.release()
+	// Even on graceful Terminate, immediately kill the singleton process if
+	// no other sessions hold refs. This prevents zombie GC path (which calls
+	// Terminate, not Kill) from leaving the process lingering for 30 minutes.
+	if w.manager != nil {
+		w.manager.KillIfIdle()
+	}
 	return nil
 }
 
 func (w *AppServerWorker) Kill() error {
 	w.release()
+	// Both Kill() and Terminate() call KillIfIdle() after release() to
+	// ensure the singleton process is killed immediately when refs reach 0,
+	// rather than waiting for the 30-minute idle drain timer. The methods
+	// are functionally identical; the distinction exists for interface
+	// conformance with worker.Worker.
+	if w.manager != nil {
+		w.manager.KillIfIdle()
+	}
 	return nil
 }
 
@@ -611,12 +630,36 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 		w.Log.Warn("codexcli: reset terminate", "error", err)
 	}
 	w.mu.Lock()
+	origSess := w.origSession
 	w.threadID = ""
 	w.recvCh = nil
+	w.conn = nil
+	w.commands = nil
 	w.closed = false
 	w.doneCh = make(chan struct{})
 	w.releaseOnce = sync.Once{}
 	w.mu.Unlock()
+
+	// Re-establish a fresh thread so the new forwardEvents goroutine
+	// (spawned by bridge.ResetSession) reads from a live recvCh instead
+	// of the stale closed channel left by release().
+	if origSess.SessionID != "" {
+		if err := w.Start(ctx, origSess); err != nil {
+			// Start() failure leaves the worker in an unrecoverable state:
+			// closed=false, doneCh=new, recvCh=nil, conn=nil. A subsequent
+			// Kill() would re-execute release() via the fresh releaseOnce,
+			// double-releasing manager refs. Mark closed and signal doneCh
+			// so the worker is safely inert.
+			w.mu.Lock()
+			w.closed = true
+			if w.doneCh != nil {
+				close(w.doneCh)
+			}
+			w.doneCh = nil
+			w.mu.Unlock()
+			return fmt.Errorf("codexcli: reset start: %w", err)
+		}
+	}
 	return nil
 }
 

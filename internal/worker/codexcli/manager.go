@@ -87,6 +87,7 @@ type CodexAppServerManager struct {
 	converter *Mapper
 
 	idleTimer *time.Timer
+	pgid      int // cached PGID from proc.Manager, set in startProcessLocked
 }
 
 func NewCodexAppServerManager(log *slog.Logger, cfg config.CodexCLIConfig) *CodexAppServerManager {
@@ -267,6 +268,7 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 		m.log.Info("codex-app-server: shutdown, killing process")
 		_ = m.proc.Kill()
 		m.proc = nil
+		m.pgid = 0
 		m.stdin = nil
 		m.stdout = nil
 		m.refs = 0
@@ -327,6 +329,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 
 	m.stdin = stdin
 	m.stdout = stdout
+	m.pgid = m.proc.PGID()
 
 	bgCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
@@ -337,6 +340,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 		cancel()
 		_ = m.proc.Kill()
 		m.proc = nil
+		m.pgid = 0
 		m.stdin = nil
 		m.stdout = nil
 		m.state = stateIdle
@@ -651,6 +655,7 @@ func (m *CodexAppServerManager) monitorProcess() {
 	refs := m.refs
 	m.state = stateIdle
 	m.proc = nil
+	m.pgid = 0
 	m.stdin = nil
 	m.stdout = nil
 
@@ -702,6 +707,42 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 		}
 		m.idleTimer = nil
 	})
+}
+
+// KillIfIdle immediately kills the singleton process when no sessions hold
+// references (refs == 0). Used by both Kill() and Terminate() to avoid the
+// 30-minute idle drain wait.
+//
+// This skips the graceful SIGTERM→5s→SIGKILL protocol used by Shutdown()
+// because an idle process has no active sessions — there is nothing to
+// drain or notify.
+//
+// We use ForceKill(pgid) directly instead of proc.Manager.Kill() to avoid
+// a deadlock: Manager.Kill() acquires proc.mu and then calls cmd.Wait(),
+// which blocks until the child exits; meanwhile monitorProcess's Wait()
+// (via waitOnce) is already holding proc.mu inside its own cmd.Wait()
+// call. These two concurrent cmd.Wait() acquisitions would deadlock.
+// ForceKill sends SIGKILL by PGID without touching proc.mu, so the
+// already-running monitorProcess.Wait() observes the exit and runs cleanup.
+//
+// NOTE: There is a benign TOCTOU window between the shouldKill check (under
+// m.mu) and the ForceKill(pgid) call (after unlock). If the process exits
+// in this window, ForceKill returns ESRCH, which is harmless and ignored.
+func (m *CodexAppServerManager) KillIfIdle() {
+	m.mu.Lock()
+	if m.idleTimer != nil {
+		m.idleTimer.Stop()
+		m.idleTimer = nil
+	}
+	shouldKill := m.refs == 0 && m.state == stateRunning && m.pgid > 0
+	pgid := m.pgid
+	m.mu.Unlock()
+
+	if shouldKill {
+		m.log.Info("codex-app-server: killing idle process immediately", "pgid", pgid)
+		_ = proc.ForceKill(pgid)
+		// monitorProcess will observe the exit, set state to stateIdle, and clean up.
+	}
 }
 
 func (m *CodexAppServerManager) buildEnv() []string {
