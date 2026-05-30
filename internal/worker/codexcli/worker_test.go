@@ -1636,3 +1636,175 @@ func (m *mockSessionConn) Recv() <-chan *events.Envelope { return m.sendCh }
 func (m *mockSessionConn) Close() error                  { return nil }
 func (m *mockSessionConn) UserID() string                { return "user-1" }
 func (m *mockSessionConn) SessionID() string             { return "sess-1" }
+
+// ─── Issue #575: Reset kills session + Zombie process fix tests ──────────
+//
+// NOTE: These tests modify global config via InitConfig and must NOT use
+// t.Parallel() to avoid racing with other tests that read global config.
+// Each test saves and restores the previous global config via defer.
+
+// testConfig575 sets a known-good config for #575 tests and returns a
+// restore function that should be deferred.
+func testConfig575() func() {
+	prev := GetConfig() // snapshot before mutation
+	InitConfig(config.CodexCLIConfig{
+		Sandbox:         "workspace-write",
+		ApprovalMode:    "never",
+		Personality:     "friendly",
+		IdleDrainPeriod: time.Minute,
+		StartupTimeout:  10 * time.Second,
+		CallTimeout:     10 * time.Second,
+	})
+	return func() { InitConfig(prev) }
+}
+
+func TestAppServerWorkerStartSavesSessionInfo(t *testing.T) {
+	defer testConfig575()()
+
+	w := newTestAppServerWorker(t)
+	session := worker.SessionInfo{
+		SessionID:  "sess-reset-test",
+		UserID:     "user-1",
+		ProjectDir: t.TempDir(),
+	}
+	err := w.Start(context.Background(), session)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Terminate(context.Background()) })
+
+	w.mu.Lock()
+	saved := w.savedSession
+	w.mu.Unlock()
+	require.Equal(t, "sess-reset-test", saved.SessionID)
+	require.Equal(t, "user-1", saved.UserID)
+}
+
+func TestAppServerWorkerResetContextStartsNewThread(t *testing.T) {
+	defer testConfig575()()
+
+	w := newTestAppServerWorker(t)
+	session := worker.SessionInfo{
+		SessionID:  "sess-reset-restart",
+		UserID:     "user-2",
+		ProjectDir: t.TempDir(),
+	}
+	err := w.Start(context.Background(), session)
+	require.NoError(t, err)
+
+	// Verify threadID is set after Start.
+	w.mu.Lock()
+	firstThreadID := w.threadID
+	firstRecvCh := w.recvCh
+	w.mu.Unlock()
+	require.NotEmpty(t, firstThreadID)
+	require.NotNil(t, firstRecvCh)
+
+	// ResetContext should: Terminate → clear state → Start() → new thread.
+	err = w.ResetContext(context.Background())
+	require.NoError(t, err)
+
+	w.mu.Lock()
+	secondThreadID := w.threadID
+	secondRecvCh := w.recvCh
+	secondConn := w.conn
+	w.mu.Unlock()
+
+	// After reset, threadID should be a new non-empty value.
+	require.NotEmpty(t, secondThreadID)
+	require.NotEqual(t, firstThreadID, secondThreadID, "threadID should be different after reset")
+	require.NotNil(t, secondRecvCh, "recvCh should be re-created after reset")
+	require.NotNil(t, secondConn, "conn should be re-created after reset")
+
+	t.Cleanup(func() { _ = w.Terminate(context.Background()) })
+}
+
+func TestManagerKillIfIdle(t *testing.T) {
+
+	// Use a short idle drain period so the idle timer fires quickly if
+	// KillIfIdle does NOT work (regression guard).
+	cfg := config.CodexCLIConfig{
+		IdleDrainPeriod: 10 * time.Second,
+		StartupTimeout:  10 * time.Second,
+		CallTimeout:     5 * time.Second,
+	}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Start the process via Acquire.
+	_, err := mgr.Acquire(context.Background())
+	require.NoError(t, err)
+	require.True(t, mgr.IsRunning())
+
+	// Release to drop refs to 0 (starts idle drain timer).
+	mgr.Release()
+
+	// KillIfIdle should immediately kill the process.
+	mgr.KillIfIdle()
+
+	// Wait for monitorProcess to observe the exit.
+	require.Eventually(t, func() bool {
+		return !mgr.IsRunning()
+	}, 5*time.Second, 100*time.Millisecond, "process should be killed immediately, not after idle drain")
+}
+
+func TestManagerKillIfIdleNoOpWhenRefsPositive(t *testing.T) {
+
+	cfg := config.CodexCLIConfig{
+		IdleDrainPeriod: 30 * time.Minute,
+		StartupTimeout:  10 * time.Second,
+		CallTimeout:     5 * time.Second,
+	}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	// Acquire twice (refs = 2).
+	_, err := mgr.Acquire(context.Background())
+	require.NoError(t, err)
+	_, err = mgr.Acquire(context.Background())
+	require.NoError(t, err)
+
+	// Release once (refs = 1).
+	mgr.Release()
+
+	// KillIfIdle should be a no-op because refs > 0.
+	mgr.KillIfIdle()
+	require.True(t, mgr.IsRunning(), "process should stay alive when refs > 0")
+
+	// Clean up.
+	mgr.Release()
+	mgr.Shutdown(context.Background())
+}
+
+func TestAppServerWorkerKillCallsKillIfIdle(t *testing.T) {
+	// Verify that Kill() distinguishes from Terminate() by calling
+	// KillIfIdle on the manager, which immediately kills the idle process.
+	defer testConfig575()()
+
+	cfg := config.CodexCLIConfig{
+		IdleDrainPeriod: 30 * time.Minute,
+		StartupTimeout:  10 * time.Second,
+		CallTimeout:     5 * time.Second,
+	}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+	}
+
+	// Acquire a reference and "start" the worker via a simulated session.
+	session := worker.SessionInfo{
+		SessionID:  "sess-kill-test",
+		UserID:     "user-1",
+		ProjectDir: t.TempDir(),
+	}
+	err := w.Start(context.Background(), session)
+	require.NoError(t, err)
+	require.True(t, mgr.IsRunning())
+
+	// Kill should: release() → refs=0 → KillIfIdle → process dead.
+	err = w.Kill()
+	require.NoError(t, err)
+
+	// Process should be killed immediately, not after 30 minutes.
+	require.Eventually(t, func() bool {
+		return !mgr.IsRunning()
+	}, 5*time.Second, 100*time.Millisecond, "Kill() should immediately terminate idle singleton process")
+}

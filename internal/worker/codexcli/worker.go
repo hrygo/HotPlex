@@ -402,6 +402,10 @@ type AppServerWorker struct {
 	closed      bool
 	sessionID   string
 	conn        *appConn
+
+	// savedSession preserves the SessionInfo from the most recent Start()
+	// call so that ResetContext can re-establish a fresh thread after cleanup.
+	savedSession worker.SessionInfo
 }
 
 // appConn implements worker.SessionConn for the app-server mode.
@@ -505,6 +509,7 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	w.threadID = result.Thread.ID
 	w.sessionID = session.SessionID
 	w.userID = session.UserID
+	w.savedSession = session
 
 	w.recvCh = w.manager.Subscribe(w.threadID, w.sessionID)
 	w.commands = NewServerCommander(w.manager, w.threadID)
@@ -564,6 +569,13 @@ func (w *AppServerWorker) Terminate(ctx context.Context) error {
 
 func (w *AppServerWorker) Kill() error {
 	w.release()
+	// After release(), refs may reach 0. Immediately kill the singleton
+	// process instead of waiting for the idle drain timer (30 minutes).
+	// This distinguishes Kill() (forceful, from zombie GC) from
+	// Terminate() (graceful, keeps process alive for reuse).
+	if w.manager != nil {
+		w.manager.KillIfIdle()
+	}
 	return nil
 }
 
@@ -611,12 +623,22 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 		w.Log.Warn("codexcli: reset terminate", "error", err)
 	}
 	w.mu.Lock()
+	saved := w.savedSession
 	w.threadID = ""
 	w.recvCh = nil
 	w.closed = false
 	w.doneCh = make(chan struct{})
 	w.releaseOnce = sync.Once{}
 	w.mu.Unlock()
+
+	// Re-establish a fresh thread so the new forwardEvents goroutine
+	// (spawned by bridge.ResetSession) reads from a live recvCh instead
+	// of the stale closed channel left by release().
+	if saved.SessionID != "" {
+		if err := w.Start(ctx, saved); err != nil {
+			return fmt.Errorf("codexcli: reset start: %w", err)
+		}
+	}
 	return nil
 }
 

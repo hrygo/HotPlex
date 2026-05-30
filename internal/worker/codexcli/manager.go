@@ -87,6 +87,7 @@ type CodexAppServerManager struct {
 	converter *Mapper
 
 	idleTimer *time.Timer
+	pgid      int // cached PGID from proc.Manager, set in startProcessLocked
 }
 
 func NewCodexAppServerManager(log *slog.Logger, cfg config.CodexCLIConfig) *CodexAppServerManager {
@@ -327,6 +328,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 
 	m.stdin = stdin
 	m.stdout = stdout
+	m.pgid = m.proc.PGID()
 
 	bgCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
@@ -702,6 +704,33 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 		}
 		m.idleTimer = nil
 	})
+}
+
+// KillIfIdle immediately kills the singleton process when no sessions hold
+// references (refs == 0). This is used by AppServerWorker.Kill() to
+// distinguish a forceful termination (zombie GC) from a graceful release
+// (Terminate), avoiding the 30-minute idle drain wait.
+//
+// We use ForceKill(pgid) directly instead of proc.Manager.Kill() to avoid
+// a deadlock: Manager.Kill() holds proc.mu while calling cmd.Wait(), but
+// monitorProcess may already hold proc.mu in its own Wait() call.
+// ForceKill sends SIGKILL without acquiring proc.mu; monitorProcess will
+// observe the exit and clean up.
+func (m *CodexAppServerManager) KillIfIdle() {
+	m.mu.Lock()
+	if m.idleTimer != nil {
+		m.idleTimer.Stop()
+		m.idleTimer = nil
+	}
+	shouldKill := m.refs == 0 && m.state == stateRunning && m.pgid > 0
+	pgid := m.pgid
+	m.mu.Unlock()
+
+	if shouldKill {
+		m.log.Info("codex-app-server: killing idle process immediately", "pgid", pgid)
+		_ = proc.ForceKill(pgid)
+		// monitorProcess will observe the exit, set state to stateIdle, and clean up.
+	}
 }
 
 func (m *CodexAppServerManager) buildEnv() []string {
