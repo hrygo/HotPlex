@@ -487,7 +487,7 @@ func (s *Scheduler) ReloadIndex() {
 // Store writes are performed outside s.mu to avoid lock-ordering deadlock
 // with CreateJob/UpdateJob (which acquire writeMu then s.mu).
 func (s *Scheduler) rebuildIndex() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := s.persistTimeout()
 	defer cancel()
 
 	jobs, err := s.store.List(ctx, false)

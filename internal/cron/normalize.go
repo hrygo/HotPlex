@@ -28,16 +28,18 @@ var threatPatterns = []string{
 	"jailbreak",
 }
 
-// stripInvisible removes zero-width characters, control chars, and homoglyph
-// noise from a string to harden injection detection against evasion.
-func stripInvisible(s string) string {
+// filterControl removes control characters and Unicode formatting codepoints from s.
+// When keepNewlineTab is true, \n and \t are preserved (used for prompts).
+// When false, all control chars including \n and \t are removed (used for job names).
+func filterControl(s string, keepNewlineTab bool) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
-		if unicode.IsControl(r) && r != '\n' && r != '\t' {
-			continue
+		if unicode.IsControl(r) {
+			if !keepNewlineTab || (r != '\n' && r != '\t') {
+				continue
+			}
 		}
-		// Skip common zero-width and formatting codepoints.
 		if unicode.Is(unicode.Cf, r) {
 			continue
 		}
@@ -54,7 +56,7 @@ func ValidateJobPrompt(prompt string) error {
 	if len(prompt) > 4096 {
 		return fmt.Errorf("cron: prompt exceeds 4KB limit (%d bytes)", len(prompt))
 	}
-	cleaned := strings.ToLower(stripInvisible(prompt))
+	cleaned := strings.ToLower(filterControl(prompt, true))
 	for _, pat := range threatPatterns {
 		if strings.Contains(cleaned, pat) {
 			return fmt.Errorf("cron: potential prompt injection detected")
@@ -66,30 +68,14 @@ func ValidateJobPrompt(prompt string) error {
 // SanitizeJobName strips control characters and newlines from a job name
 // to prevent injection when the name is embedded in worker prompts.
 func SanitizeJobName(name string) string {
-	// stripInvisible handles Unicode Cf and most control chars but preserves
-	// \t and \n. We additionally strip those since newlines in job names
-	// would break prompt formatting.
-	return stripNewlinesTabs(stripInvisible(name))
-}
-
-// stripNewlinesTabs removes \n and \t from a string.
-func stripNewlinesTabs(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		if r == '\n' || r == '\t' {
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return filterControl(name, false)
 }
 
 // SanitizePrompt strips invisible characters from a prompt and returns the
 // cleaned version suitable for storage. Called after ValidateJobPrompt passes
 // to ensure the persisted text matches what was validated.
 func SanitizePrompt(prompt string) string {
-	return stripInvisible(prompt)
+	return filterControl(prompt, true)
 }
 
 // formatJobPrompt builds the standard cron prompt with job metadata and timestamp.

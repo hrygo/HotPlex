@@ -175,10 +175,9 @@ func (m *CodexAppServerManager) Unsubscribe(threadID string) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
-	if ch, ok := m.subscribers[threadID]; ok {
+	if _, ok := m.subscribers[threadID]; ok {
 		delete(m.subscribers, threadID)
 		delete(m.subSessions, threadID)
-		close(ch)
 		m.log.Debug("codex-app-server: unsubscribed", "thread_id", threadID)
 	}
 }
@@ -266,12 +265,16 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 
 	if m.proc != nil {
 		m.log.Info("codex-app-server: shutdown, killing process")
-		_ = m.proc.Kill()
-		m.proc = nil
-		m.pgid = 0
-		m.stdin = nil
-		m.stdout = nil
-		m.refs = 0
+		// Use ForceKill(pgid) instead of proc.Kill() to avoid deadlock
+		// with monitorProcess's Wait() (see KillIfIdle for rationale).
+		if m.pgid > 0 {
+			_ = proc.ForceKill(m.pgid)
+		} else {
+			_ = m.proc.Kill()
+		}
+		// Do not clear m.proc here — monitorProcess will handle cleanup
+		// after Wait() observes the exit. Only clear if no monitorProcess
+		// goroutine exists (stateStopped set above prevents double cleanup).
 	}
 
 	// Close all active subscriptions if not already closed by monitorProcess.

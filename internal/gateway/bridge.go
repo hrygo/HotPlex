@@ -309,7 +309,7 @@ var _ = events.Clone // compile-time check that Clone is accessible
 func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error {
 	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "sandbox", sandbox, "platform", platform, "platform_key", platformKey, "bot_id", botID)
 	if sandbox != "" && platformKey != nil {
-		platformKey["_sandbox"] = sandbox
+		platformKey[worker.SandboxPlatformKey] = sandbox
 	}
 	si, err := b.sm.Get(ctx, sessionID)
 	if err == nil {
@@ -319,6 +319,11 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 			// is delivered, not silently dropped (bug: worker pointer non-nil after
 			// transitionState nils it, but only after SIGTERM completes asynchronously).
 			if si.State.IsActive() {
+				// Re-inject current sandbox into persisted PlatformKey so
+				// stale values don't remain after bot config changes.
+				if sandbox != "" && si.PlatformKey != nil {
+					si.PlatformKey[worker.SandboxPlatformKey] = sandbox
+				}
 				return nil
 			}
 		}
@@ -333,7 +338,7 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		// Re-inject current sandbox into the loaded session so resume uses
 		// the latest config, not a potentially stale persisted value.
 		if sandbox != "" && si.PlatformKey != nil {
-			si.PlatformKey["_sandbox"] = sandbox
+			si.PlatformKey[worker.SandboxPlatformKey] = sandbox
 		}
 		if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
 			b.log.Warn("bridge: resume failed, falling back to new session",
@@ -601,7 +606,7 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		WorkerSessionID: si.WorkerSessionID,
 		ConfigEnv:       b.workerEnv,
 		ConfigBlocklist: b.workerEnvBlocklist,
-		Sandbox:         si.PlatformKey["_sandbox"],
+		Sandbox:         si.PlatformKey[worker.SandboxPlatformKey],
 	}
 
 	// MCP config injection — 3 scenarios:

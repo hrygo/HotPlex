@@ -236,3 +236,7 @@ type SessionInfo struct {
 	// (--include-partial-messages).
 	IncludePartialMessages bool
 }
+
+// SandboxPlatformKey is the platformKey map key used to propagate sandbox config
+// from bridge/executor through session persistence to the worker.
+const SandboxPlatformKey = "_sandbox"

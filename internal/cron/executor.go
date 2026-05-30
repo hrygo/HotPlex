@@ -50,14 +50,15 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 	sessionKey := session.DeriveCronSessionKey(job.ID, time.Now().UnixNano())
 
 	// Merge platform context so the bridge can inject environment variables (like channel_id).
+	// Inject default sandbox first; per-job PlatformKey overrides below.
 	platformKey := make(map[string]string)
+	if e.sandbox != "" {
+		platformKey[worker.SandboxPlatformKey] = e.sandbox
+	}
 	if job.PlatformKey != nil {
 		maps.Copy(platformKey, job.PlatformKey)
 	}
 	platformKey["cron_job_id"] = job.ID
-	if e.sandbox != "" {
-		platformKey["_sandbox"] = e.sandbox
-	}
 	title := fmt.Sprintf("cron:%s", job.Name)
 
 	wt := worker.WorkerType(job.Payload.WorkerType)

@@ -27,7 +27,7 @@ func classifyError(err error) errClass {
 	if containsAny(msg, "rate limit", "429") {
 		return errClassRateLimit
 	}
-	if isHTTPStatus(msg, 500, 502, 503, 504) {
+	if isHTTPStatus(msg) {
 		return errClassServer
 	}
 	if containsAny(msg, "connection refused", "temporary") {
@@ -40,7 +40,7 @@ func classifyError(err error) errClass {
 // using word boundaries to avoid false positives from substrings like "500ms".
 var httpStatusRe = regexp.MustCompile(`\b(?:500|502|503|504)\b`)
 
-func isHTTPStatus(msg string, _ ...int) bool {
+func isHTTPStatus(msg string) bool {
 	return httpStatusRe.MatchString(msg)
 }
 

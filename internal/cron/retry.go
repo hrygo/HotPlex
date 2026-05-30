@@ -18,7 +18,7 @@ var backoffDurations = []time.Duration{
 // After exhausting the list, it returns 1 hour.
 func backoff(consecutiveErrs int) time.Duration {
 	if consecutiveErrs <= 0 {
-		return backoffDurations[0]
+		return 0
 	}
 	if consecutiveErrs >= len(backoffDurations) {
 		return backoffDurations[len(backoffDurations)-1]

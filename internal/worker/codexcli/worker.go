@@ -475,24 +475,7 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 
 	cfg := resolveConfig()
 
-	// Session-aware approval: session.SkipPermissions overrides config default.
-	approvalMode := cfg.ApprovalMode
-	if session.SkipPermissions {
-		approvalMode = "never"
-	}
-
-	params := map[string]any{
-		"cwd":            session.ProjectDir,
-		"sandbox":        sandboxFromSession(session, cfg.Sandbox),
-		"personality":    cfg.Personality,
-		"approvalPolicy": approvalMode,
-	}
-	if cfg.Model != "" {
-		params["model"] = cfg.Model
-	}
-	if cfg.Ephemeral {
-		params["ephemeral"] = true
-	}
+	params := buildThreadStartParams(session, cfg)
 
 	resp, err := w.manager.Call("thread/start", params)
 	if err != nil {
@@ -563,27 +546,22 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 }
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
-	w.release()
-	// Even on graceful Terminate, immediately kill the singleton process if
-	// no other sessions hold refs. This prevents zombie GC path (which calls
-	// Terminate, not Kill) from leaving the process lingering for 30 minutes.
-	if w.manager != nil {
-		w.manager.KillIfIdle()
-	}
+	w.shutdown()
 	return nil
 }
 
 func (w *AppServerWorker) Kill() error {
+	w.shutdown()
+	return nil
+}
+
+// shutdown releases the worker's manager subscription and kills the singleton
+// process if no other sessions hold refs. Called by both Terminate and Kill.
+func (w *AppServerWorker) shutdown() {
 	w.release()
-	// Both Kill() and Terminate() call KillIfIdle() after release() to
-	// ensure the singleton process is killed immediately when refs reach 0,
-	// rather than waiting for the 30-minute idle drain timer. The methods
-	// are functionally identical; the distinction exists for interface
-	// conformance with worker.Worker.
 	if w.manager != nil {
 		w.manager.KillIfIdle()
 	}
-	return nil
 }
 
 func (w *AppServerWorker) Wait() (int, error) {
@@ -643,28 +621,20 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 		w.manager.Unsubscribe(oldThreadID)
 	}
 
+	// Reset lifecycle state so subsequent Terminate/Kill can release the new thread.
+	w.mu.Lock()
+	w.closed = false
+	w.releaseOnce = sync.Once{}
+	w.doneCh = make(chan struct{})
+	w.mu.Unlock()
+
 	// Start fresh thread on same manager (same process, no Acquire needed).
 	if origSess.SessionID == "" {
 		return nil
 	}
 
 	cfg := resolveConfig()
-	approvalMode := cfg.ApprovalMode
-	if origSess.SkipPermissions {
-		approvalMode = "never"
-	}
-	params := map[string]any{
-		"cwd":            origSess.ProjectDir,
-		"sandbox":        sandboxFromSession(origSess, cfg.Sandbox),
-		"personality":    cfg.Personality,
-		"approvalPolicy": approvalMode,
-	}
-	if cfg.Model != "" {
-		params["model"] = cfg.Model
-	}
-	if cfg.Ephemeral {
-		params["ephemeral"] = true
-	}
+	params := buildThreadStartParams(origSess, cfg)
 
 	resp, err := w.manager.Call("thread/start", params)
 	if err != nil {
@@ -734,4 +704,26 @@ func sandboxFromSession(session worker.SessionInfo, defaultSandbox string) strin
 		return session.Sandbox
 	}
 	return defaultSandbox
+}
+
+// buildThreadStartParams constructs the JSON-RPC params for "thread/start".
+// Shared by Start() and ResetContext() to avoid duplication.
+func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]any {
+	approvalMode := cfg.ApprovalMode
+	if session.SkipPermissions {
+		approvalMode = "never"
+	}
+	params := map[string]any{
+		"cwd":            session.ProjectDir,
+		"sandbox":        sandboxFromSession(session, cfg.Sandbox),
+		"personality":    cfg.Personality,
+		"approvalPolicy": approvalMode,
+	}
+	if cfg.Model != "" {
+		params["model"] = cfg.Model
+	}
+	if cfg.Ephemeral {
+		params["ephemeral"] = true
+	}
+	return params
 }
