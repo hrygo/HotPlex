@@ -22,8 +22,10 @@ type ACPClient struct {
 	log    *slog.Logger
 	nextID atomic.Int64
 
-	pendingMu sync.Mutex
-	pending   map[string]chan *JSONRPCResponse // id → response channel
+	mu      sync.Mutex
+	pending map[string]chan *JSONRPCResponse
+
+	writeMu sync.Mutex // serializes stdin writes (call + RespondPermission) // id → response channel
 
 	// NotificationCh delivers session/update notifications to the worker's readLoop.
 	NotificationCh chan *JSONRPCNotification
@@ -138,13 +140,16 @@ func (c *ACPClient) RespondPermission(ctx context.Context, id json.RawMessage, o
 		ID:      id,
 		Result:  mustMarshal(outcome),
 	}
-	if err := WriteMessage(c.stdin, req); err != nil {
+	c.writeMu.Lock()
+	err := WriteMessage(c.stdin, req)
+	c.writeMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("acp respond permission: %w", err)
 	}
 	return nil
 }
 
-// SetSessionModel switches the model for an active session (P2).
+// SetSessionModel switches the model for an active session .
 func (c *ACPClient) SetSessionModel(ctx context.Context, sessionID, modelID string) error {
 	_, err := c.call(ctx, "session/set_model", map[string]any{
 		"sessionId": sessionID,
@@ -156,7 +161,7 @@ func (c *ACPClient) SetSessionModel(ctx context.Context, sessionID, modelID stri
 	return nil
 }
 
-// SetSessionMode switches the execution mode for an active session (P2).
+// SetSessionMode switches the execution mode for an active session .
 func (c *ACPClient) SetSessionMode(ctx context.Context, sessionID, modeID string) error {
 	_, err := c.call(ctx, "session/set_mode", map[string]any{
 		"sessionId": sessionID,
@@ -168,7 +173,7 @@ func (c *ACPClient) SetSessionMode(ctx context.Context, sessionID, modeID string
 	return nil
 }
 
-// ForkSession forks an active session (P2).
+// ForkSession forks an active session .
 func (c *ACPClient) ForkSession(ctx context.Context, sessionID string) (*SessionResult, error) {
 	resp, err := c.call(ctx, "session/fork", map[string]any{
 		"sessionId": sessionID,
@@ -183,7 +188,7 @@ func (c *ACPClient) ForkSession(ctx context.Context, sessionID string) (*Session
 	return &result, nil
 }
 
-// ListSessions lists all sessions (P2).
+// ListSessions lists all sessions .
 func (c *ACPClient) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	resp, err := c.call(ctx, "session/list", map[string]any{})
 	if err != nil {
@@ -272,14 +277,14 @@ func (c *ACPClient) call(ctx context.Context, method string, params any) (*JSONR
 	}
 
 	ch := make(chan *JSONRPCResponse, 1)
-	c.pendingMu.Lock()
+	c.mu.Lock()
 	c.pending[string(idRaw)] = ch
-	c.pendingMu.Unlock()
+	c.mu.Unlock()
 
 	defer func() {
-		c.pendingMu.Lock()
+		c.mu.Lock()
 		delete(c.pending, string(idRaw))
-		c.pendingMu.Unlock()
+		c.mu.Unlock()
 	}()
 
 	if err := WriteMessage(c.stdin, req); err != nil {
@@ -298,9 +303,9 @@ func (c *ACPClient) call(ctx context.Context, method string, params any) (*JSONR
 }
 
 func (c *ACPClient) dispatchResponse(resp *JSONRPCResponse) {
-	c.pendingMu.Lock()
+	c.mu.Lock()
 	ch, ok := c.pending[string(resp.ID)]
-	c.pendingMu.Unlock()
+	c.mu.Unlock()
 	if !ok {
 		c.log.Warn("acp client: unmatched response", "id", string(resp.ID))
 		return

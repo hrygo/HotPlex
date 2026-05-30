@@ -193,7 +193,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Create mapper.
 	mapper := w.testMapper
 	if mapper == nil {
-		mapper = NewACPMapper(session.SessionID, session.UserID)
+		mapper = NewACPMapper(session.SessionID, session.UserID, w.Log)
 	}
 	w.mapper = mapper
 

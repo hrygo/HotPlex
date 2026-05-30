@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,7 +12,7 @@ import (
 )
 
 func newTestMapper() *ACPMapper {
-	return NewACPMapper("sess_123", "user_1")
+	return NewACPMapper("sess_123", "user_1", slog.Default())
 }
 
 // ─── Agent Message Chunk ─────────────────────────────────────────────────────

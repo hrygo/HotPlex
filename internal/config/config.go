@@ -602,10 +602,8 @@ type OpenCodeServerConfig struct {
 // ACPConfig holds ACP (Agent Client Protocol) worker settings.
 // ACP is a universal worker type that connects to any ACP-compatible agent via stdio.
 type ACPConfig struct {
-	Command      string   `mapstructure:"command" json:"command"`                                 // ACP agent binary (e.g. "hermes-acp")
-	Args         []string `mapstructure:"args,omitempty" json:"args,omitempty"`                   // extra args passed to the agent
-	AutoApprove  bool     `mapstructure:"auto_approve,omitempty" json:"auto_approve,omitempty"`   // auto-approve permission requests
-	SessionStore string   `mapstructure:"session_store,omitempty" json:"session_store,omitempty"` // session storage directory
+	Command     string `mapstructure:"command" json:"command"`                               // ACP agent binary (e.g. "hermes-acp")
+	AutoApprove bool   `mapstructure:"auto_approve,omitempty" json:"auto_approve,omitempty"` // auto-approve permission requests
 }
 
 // AutoRetryConfig controls automatic retry behavior when LLM provider returns

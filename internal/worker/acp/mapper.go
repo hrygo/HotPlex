@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync/atomic"
-	"time"
 
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -17,16 +16,21 @@ import (
 type ACPMapper struct {
 	sessionID  string
 	userID     string
+	log        *slog.Logger
 	msgActive  atomic.Bool // true when inside a message stream (first chunk received, not yet ended)
 	turnActive atomic.Bool // true while a prompt turn is in progress
 	seq        atomic.Int64
 }
 
 // NewACPMapper creates a mapper bound to the given session.
-func NewACPMapper(sessionID, userID string) *ACPMapper {
+func NewACPMapper(sessionID, userID string, log *slog.Logger) *ACPMapper {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &ACPMapper{
 		sessionID: sessionID,
 		userID:    userID,
+		log:       log,
 	}
 }
 
@@ -52,7 +56,7 @@ func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelo
 		Update    json.RawMessage `json:"update"`
 	}
 	if err := json.Unmarshal(notif.Params, &params); err != nil {
-		slog.Debug("acp mapper: failed to parse session/update params", "error", err)
+		m.log.Debug("acp mapper: failed to parse session/update params", "error", err)
 		return nil
 	}
 
@@ -398,17 +402,7 @@ func (m *ACPMapper) nextSeq() int64 {
 }
 
 func (m *ACPMapper) newEnvelope(kind events.Kind, data any) *events.Envelope {
-	return &events.Envelope{
-		Version:   events.Version,
-		ID:        aep.NewID(),
-		Seq:       m.nextSeq(),
-		SessionID: m.sessionID,
-		Timestamp: time.Now().UnixMilli(),
-		Event: events.Event{
-			Type: kind,
-			Data: data,
-		},
-	}
+	return events.NewEnvelope(aep.NewID(), m.sessionID, m.nextSeq(), kind, data)
 }
 
 func (m *ACPMapper) messageID() string {
