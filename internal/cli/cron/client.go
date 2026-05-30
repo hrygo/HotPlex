@@ -149,49 +149,42 @@ type JobCreateOptions struct {
 }
 
 // resolvePlatform resolves the target platform and routing key with three-level priority:
-// 1. CLI flags (explicit --platform / --platform-key)
+// 1. CLI flags (explicit --platform / --platform-key) — highest, overrides env
 // 2. Environment variables (GATEWAY_PLATFORM, GATEWAY_CHANNEL_ID, GATEWAY_THREAD_ID)
-// 3. Default "cron" (backward compatible)
+// 3. Default "cron" (no delivery)
+//
+// Env-derived keys are always built as baseline; CLI keys override them.
 func resolvePlatform(cliPlatform string, cliPlatformKey map[string]string) (string, map[string]string) {
-	if cliPlatform != "" {
-		return cliPlatform, cliPlatformKey
+	resolved := cliPlatform
+	if resolved == "" {
+		resolved = os.Getenv("GATEWAY_PLATFORM")
+	}
+	if resolved == "" {
+		resolved = "cron"
 	}
 
-	envPlatform := os.Getenv("GATEWAY_PLATFORM")
-	switch envPlatform {
+	key := map[string]string{}
+	switch resolved {
 	case "slack":
-		key := map[string]string{}
 		if ch := os.Getenv("GATEWAY_CHANNEL_ID"); ch != "" {
 			key["channel_id"] = ch
 		}
 		if ts := os.Getenv("GATEWAY_THREAD_ID"); ts != "" {
 			key["thread_ts"] = ts
 		}
-		mergeKeyIfMissing(key, cliPlatformKey)
-		return "slack", key
 	case "feishu":
-		key := map[string]string{}
 		if chatID := os.Getenv("GATEWAY_CHANNEL_ID"); chatID != "" {
 			key["chat_id"] = chatID
 		}
 		if msgID := os.Getenv("GATEWAY_THREAD_ID"); msgID != "" {
 			key["message_id"] = msgID
 		}
-		mergeKeyIfMissing(key, cliPlatformKey)
-		return "feishu", key
 	}
 
-	return "cron", cliPlatformKey
-}
+	// CLI platform-key overrides env-derived values.
+	maps.Copy(key, cliPlatformKey)
 
-// mergeKeyIfMissing copies entries from src into dst that don't already exist in dst.
-// This preserves env-derived values while filling in any CLI-provided keys not set by env.
-func mergeKeyIfMissing(dst, src map[string]string) {
-	for k, v := range src {
-		if _, exists := dst[k]; !exists {
-			dst[k] = v
-		}
-	}
+	return resolved, key
 }
 
 // PrepareJobForCreate builds a CronJob from CLI flags.

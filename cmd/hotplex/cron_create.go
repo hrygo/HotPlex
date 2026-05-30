@@ -131,6 +131,11 @@ Schedule format:
 				fmt.Printf("Created job %s (%s)\n", job.ID, job.Name)
 				fmt.Printf("  Schedule: %s\n", croncli.FormatSchedule(job.Schedule))
 				fmt.Printf("  Next run: %s\n", croncli.FormatTimeMs(job.State.NextRunAtMs))
+
+				if job.Platform == "cron" && !attach && !silent {
+					_, _ = fmt.Fprintf(os.Stderr, "warning: no delivery platform detected.\n")
+					_, _ = fmt.Fprintf(os.Stderr, "  Results will not be sent to any chat. Set --platform or run within a gateway session.\n")
+				}
 				return nil
 			})
 		},
