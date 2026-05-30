@@ -582,50 +582,52 @@ func TestWebhookHandler_EventFiltering(t *testing.T) {
 在 gateway mux 注册 webhook 路由：
 
 ```go
-// 在 setupGatewayRoutes() 中添加：
-if cfg.Webhook.Enabled {
-    webhookHandler := gateway.NewWebhookHandler(
-        gateway.WebhookConfig{
-            Secret:      cfg.Webhook.Secret,
-            Path:        cfg.Webhook.Path,
-            MaxBodySize: cfg.Webhook.MaxBodySize,
-        },
-        cronExecutor,  // 实现 JobTrigger 接口
-        logger,
-    )
-    mux.Handle(cfg.Webhook.Path, webhookHandler)
+// 在 setupRoutes() 中添加：
+if cfg.Webhook.Enabled && deps.CronScheduler != nil {
+    if cfg.Webhook.Secret == "" {
+        log.Warn("webhook enabled but secret is empty")
+    } else {
+        webhookHandler := gateway.NewWebhookHandler(
+            deps.Ctx,           // gateway lifecycle context
+            cfg.Webhook,        // WebhookConfig (6 fields)
+            deps.CronScheduler, // implements JobTrigger interface
+            log,
+        )
+        deps.WebhookHandler = webhookHandler // for shutdown
+        mux.Handle(cfg.Webhook.Path, webhookHandler)
+    }
 }
 ```
 
-#### `internal/cron/executor.go`
+#### `internal/cron/cron.go`
 
 新增 `TriggerByName` 方法，供 webhook handler 调用：
 
 ```go
-// TriggerByName 按名称查找 cron job 并触发执行（供 webhook 调用）
-func (e *Executor) TriggerByName(ctx context.Context, jobName string, extraContext map[string]string) error {
-    job, err := e.store.GetByName(ctx, jobName)
-    if err != nil {
-        return fmt.Errorf("webhook trigger: job %q not found: %w", jobName, err)
+// TriggerByName finds a job by name in the in-memory index and triggers its execution.
+func (s *Scheduler) TriggerByName(ctx context.Context, jobName string, extra map[string]string) error {
+    s.mu.Lock()
+    var found *CronJob
+    for _, j := range s.jobs {
+        if j.Name == jobName { found = j; break }
     }
-    if !job.Enabled {
-        return fmt.Errorf("webhook trigger: job %q is disabled", jobName)
+    if found == nil {
+        s.mu.Unlock()
+        return fmt.Errorf("cron trigger by name: job %q not found: %w", jobName, ErrJobNotFound)
     }
+    if !found.Enabled {
+        s.mu.Unlock()
+        return fmt.Errorf("cron trigger by name: job %q: %w", jobName, ErrJobDisabled)
+    }
+    job := found.Clone()
+    s.mu.Unlock()
 
-    // 注入 webhook 上下文到 platformKey
-    platformKey := make(map[string]string)
-    if job.PlatformKey != nil {
-        maps.Copy(platformKey, job.PlatformKey)
+    // Inject extra context (e.g. pr_number from webhook) into PlatformKey.
+    if len(extra) > 0 {
+        if job.PlatformKey == nil { job.PlatformKey = make(map[string]string) }
+        maps.Copy(job.PlatformKey, extra)
     }
-    platformKey["cron_job_id"] = job.ID
-    platformKey["trigger_source"] = "webhook"
-    if pr, ok := extraContext["pr_number"]; ok {
-        platformKey["target_pr"] = pr
-    }
-
-    // 异步执行（不阻塞 webhook 响应）
-    go e.Execute(ctx, job, time.Duration(job.TimeoutSec)*time.Second)
-    return nil
+    return s.TriggerJob(ctx, job)
 }
 ```
 
@@ -636,14 +638,16 @@ func (e *Executor) TriggerByName(ctx context.Context, jobName string, extraConte
 ```go
 // WebhookConfig GitHub webhook 配置
 type WebhookConfig struct {
-    Enabled     bool   `mapstructure:"enabled"`
-    Secret      string `mapstructure:"secret"`
-    Path        string `mapstructure:"path"`         // default: "/api/webhook/github"
-    MaxBodySize int64  `mapstructure:"max_body_size"` // default: 1048576 (1MB)
+    Enabled       bool     `mapstructure:"enabled"`
+    Secret        string   `mapstructure:"secret"`
+    Path          string   `mapstructure:"path"`           // default: "/api/webhook/github"
+    MaxBodySize   int64    `mapstructure:"max_body_size"`   // default: 1048576 (1MB)
+    AllowedRepos  []string `mapstructure:"allowed_repos"`   // empty = accept all repos
+    TargetJobName string   `mapstructure:"target_job_name"` // default: "pr-review-hotplex"
 }
 
-// 在 RootConfig 中添加字段：
-type RootConfig struct {
+// 在 Config 中添加字段：
+type Config struct {
     // ... 现有字段
     Webhook WebhookConfig `mapstructure:"webhook"`
 }

@@ -96,10 +96,12 @@ func postWebhook(h *WebhookHandler, eventType string, payload any) *httptest.Res
 	return w
 }
 
-func newIsolatedHandler() (*WebhookHandler, *mockTrigger) {
-	t := &mockTrigger{}
-	h := NewWebhookHandler(context.Background(), testWebhookConfig(), t, noopLogger())
-	return h, t
+func newIsolatedHandler(t *testing.T) (*WebhookHandler, *mockTrigger) {
+	t.Helper()
+	tr := &mockTrigger{}
+	h := NewWebhookHandler(context.Background(), testWebhookConfig(), tr, noopLogger())
+	t.Cleanup(func() { h.Close() })
+	return h, tr
 }
 
 // --- Signature verification unit tests (AC-3) ---
@@ -338,7 +340,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("GET returns 405", func(t *testing.T) {
 		t.Parallel()
-		h, _ := newIsolatedHandler()
+		h, _ := newIsolatedHandler(t)
 		req := httptest.NewRequest(http.MethodGet, "/api/webhook/github", nil)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -347,7 +349,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("missing signature returns 403", func(t *testing.T) {
 		t.Parallel()
-		h, _ := newIsolatedHandler()
+		h, _ := newIsolatedHandler(t)
 		req := httptest.NewRequest(http.MethodPost, "/api/webhook/github", bytes.NewReader([]byte(`{}`)))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -357,7 +359,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("invalid signature returns 403", func(t *testing.T) {
 		t.Parallel()
-		h, _ := newIsolatedHandler()
+		h, _ := newIsolatedHandler(t)
 		req := httptest.NewRequest(http.MethodPost, "/api/webhook/github", bytes.NewReader([]byte(`{}`)))
 		req.Header.Set("X-Hub-Signature-256", "sha256=deadbeef")
 		w := httptest.NewRecorder()
@@ -367,7 +369,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("ping returns 200 without trigger", func(t *testing.T) {
 		t.Parallel()
-		h, trigger := newIsolatedHandler()
+		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "ping", []byte(`{"zen":"Keep it logical.","repository":{"full_name":"hrygo/hotplex"}}`))
 		require.Equal(t, http.StatusOK, w.Code)
 		require.Equal(t, 0, trigger.count())
@@ -375,7 +377,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("wrong repo returns 200 without trigger", func(t *testing.T) {
 		t.Parallel()
-		h, trigger := newIsolatedHandler()
+		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "pull_request", &GitHubEvent{
 			Action: "opened",
 			Repository: struct {
@@ -392,6 +394,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 		cfg := testWebhookConfig()
 		cfg.AllowedRepos = nil // no filter
 		h := NewWebhookHandler(context.Background(), cfg, trigger, noopLogger())
+		t.Cleanup(func() { h.Close() })
 		w := postWebhook(h, "pull_request", &GitHubEvent{
 			Action: "opened",
 			Repository: struct {
@@ -405,7 +408,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("valid PR opened triggers review", func(t *testing.T) {
 		t.Parallel()
-		h, trigger := newIsolatedHandler()
+		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "pull_request", &GitHubEvent{
 			Action: "opened",
 			Repository: struct {
@@ -424,7 +427,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("draft PR does not trigger", func(t *testing.T) {
 		t.Parallel()
-		h, trigger := newIsolatedHandler()
+		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "pull_request", &GitHubEvent{
 			Action: "opened",
 			Repository: struct {
@@ -440,14 +443,14 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("malformed JSON returns 400", func(t *testing.T) {
 		t.Parallel()
-		h, _ := newIsolatedHandler()
+		h, _ := newIsolatedHandler(t)
 		w := postWebhook(h, "pull_request", []byte(`{invalid json`))
 		require.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("oversized payload returns 413", func(t *testing.T) {
 		t.Parallel()
-		h, _ := newIsolatedHandler()
+		h, _ := newIsolatedHandler(t)
 		bigPayload := make([]byte, 1<<20+100) // > 1MB
 		for i := range bigPayload {
 			bigPayload[i] = 'a'
@@ -458,7 +461,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("check_suite success triggers review", func(t *testing.T) {
 		t.Parallel()
-		h, trigger := newIsolatedHandler()
+		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "check_suite", &GitHubEvent{
 			Action: "completed",
 			Repository: struct {
@@ -481,7 +484,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("check_run success triggers review", func(t *testing.T) {
 		t.Parallel()
-		h, trigger := newIsolatedHandler()
+		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "check_run", &GitHubEvent{
 			Action: "completed",
 			Repository: struct {
@@ -509,7 +512,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("check_suite failure does not trigger", func(t *testing.T) {
 		t.Parallel()
-		h, trigger := newIsolatedHandler()
+		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "check_suite", &GitHubEvent{
 			Action: "completed",
 			Repository: struct {
@@ -531,7 +534,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 
 	t.Run("unknown event returns 200 without trigger", func(t *testing.T) {
 		t.Parallel()
-		h, trigger := newIsolatedHandler()
+		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "push", &GitHubEvent{
 			Repository: struct {
 				FullName string `json:"full_name"`
@@ -549,7 +552,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 func TestWebhookHandler_RateLimiting(t *testing.T) {
 	t.Parallel()
 
-	h, _ := newIsolatedHandler()
+	h, _ := newIsolatedHandler(t)
 
 	// Exhaust burst (10 tokens)
 	var limited int
@@ -578,6 +581,7 @@ func TestWebhookHandler_TriggerError(t *testing.T) {
 	t.Parallel()
 
 	h := NewWebhookHandler(context.Background(), testWebhookConfig(), &errorTrigger{}, noopLogger())
+	t.Cleanup(func() { h.Close() })
 
 	w := postWebhook(h, "pull_request", &GitHubEvent{
 		Action: "opened",
@@ -597,7 +601,7 @@ func TestWebhookHandler_TriggerError(t *testing.T) {
 func TestWebhookHandler_EmptySecret(t *testing.T) {
 	t.Parallel()
 
-	h, _ := newIsolatedHandler()
+	h, _ := newIsolatedHandler(t)
 	h.cfg.Secret = ""
 
 	payload := []byte(`{}`)

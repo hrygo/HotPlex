@@ -4,13 +4,14 @@
 # 用法: bash scripts/verify-webhook.sh [PUBLIC_IP] [SECRET]
 #
 # 默认值:
-#   PUBLIC_IP = 43.106.12.60
+#   PUBLIC_IP = $WEBHOOK_HOST env or arg 1
 #   SECRET    = (使用服务端生成的 secret)
 set -uo pipefail
 
-PUBLIC_IP="${1:-43.106.12.60}"
+PUBLIC_IP="${1:-${WEBHOOK_HOST:-}}"
 SECRET="${2:-}"
 [ -z "$SECRET" ] && { echo "Error: SECRET required (arg 2). Usage: $0 [PUBLIC_IP] [SECRET]"; exit 1; }
+[ -z "$PUBLIC_IP" ] && { echo "Error: PUBLIC_IP required (arg 1 or WEBHOOK_HOST env). Usage: $0 [PUBLIC_IP] [SECRET]"; exit 1; }
 WEBHOOK_PATH="/api/webhook/github"
 BASE_URL="https://${PUBLIC_IP}"
 
