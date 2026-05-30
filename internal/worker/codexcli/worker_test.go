@@ -1656,36 +1656,28 @@ func testConfigWithDefaults() func() {
 // ---------- Unit tests (no codex binary required) ----------
 
 func TestResetContextClearsStateAndResetsOnce(t *testing.T) {
-	// Verify ResetContext resets closed, releaseOnce, and doneCh before
-	// attempting Start. This is the core state-cleanup logic of #575.
-	// We test with origSession.SessionID="" so Start is skipped.
+	// Verify lightweight ResetContext closes old conn and unsubscribes old thread
+	// without touching closed/doneCh/releaseOnce (no Terminate+Start cycle).
+	// We test with origSession.SessionID="" so thread/start is skipped.
 	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
 		IdleDrainPeriod: time.Minute,
 	})
 
+	recvCh := make(chan *events.Envelope, 1)
 	w := &AppServerWorker{
 		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
 		manager:    mgr,
 		doneCh:     make(chan struct{}),
+		conn:       &appConn{recvCh: recvCh},
 	}
-	// Simulate a "started" worker.
-	w.mu.Lock()
-	w.closed = true
-	w.threadID = ""
-	w.mu.Unlock()
-
-	// origSession is zero-value (SessionID="") so ResetContext won't call Start.
 	w.origSession = worker.SessionInfo{}
 
 	err := w.ResetContext(context.Background())
 	require.NoError(t, err)
 
-	// Verify state was cleared.
-	w.mu.Lock()
-	require.False(t, w.closed, "closed should be reset")
-	require.NotNil(t, w.doneCh, "doneCh should be recreated")
-	require.Empty(t, w.threadID, "threadID should be empty")
-	w.mu.Unlock()
+	// Old recvCh should be closed by appConn.Close().
+	_, ok := <-recvCh
+	require.False(t, ok, "old recvCh should be closed")
 }
 
 func TestResetContextRestartsFromSavedSession(t *testing.T) {

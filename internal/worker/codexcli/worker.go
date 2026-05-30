@@ -626,40 +626,70 @@ func (w *AppServerWorker) release() {
 }
 
 func (w *AppServerWorker) ResetContext(ctx context.Context) error {
-	if err := w.Terminate(ctx); err != nil {
-		w.Log.Warn("codexcli: reset terminate", "error", err)
-	}
 	w.mu.Lock()
+	oldConn := w.conn
+	oldThreadID := w.threadID
 	origSess := w.origSession
-	w.threadID = ""
-	w.recvCh = nil
-	w.conn = nil
-	w.commands = nil
-	w.closed = false
-	w.doneCh = make(chan struct{})
-	w.releaseOnce = sync.Once{}
 	w.mu.Unlock()
 
-	// Re-establish a fresh thread so the new forwardEvents goroutine
-	// (spawned by bridge.ResetSession) reads from a live recvCh instead
-	// of the stale closed channel left by release().
-	if origSess.SessionID != "" {
-		if err := w.Start(ctx, origSess); err != nil {
-			// Start() failure leaves the worker in an unrecoverable state:
-			// closed=false, doneCh=new, recvCh=nil, conn=nil. A subsequent
-			// Kill() would re-execute release() via the fresh releaseOnce,
-			// double-releasing manager refs. Mark closed and signal doneCh
-			// so the worker is safely inert.
-			w.mu.Lock()
-			w.closed = true
-			if w.doneCh != nil {
-				close(w.doneCh)
-			}
-			w.doneCh = nil
-			w.mu.Unlock()
-			return fmt.Errorf("codexcli: reset start: %w", err)
-		}
+	// Close old conn → closes old recvCh → old forwardEvents exits range loop.
+	if oldConn != nil {
+		_ = oldConn.Close()
 	}
+
+	// Unsubscribe old thread (keep manager reference, no Release).
+	if oldThreadID != "" && w.manager != nil {
+		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
+		w.manager.Unsubscribe(oldThreadID)
+	}
+
+	// Start fresh thread on same manager (same process, no Acquire needed).
+	if origSess.SessionID == "" {
+		return nil
+	}
+
+	cfg := resolveConfig()
+	approvalMode := cfg.ApprovalMode
+	if origSess.SkipPermissions {
+		approvalMode = "never"
+	}
+	params := map[string]any{
+		"cwd":            origSess.ProjectDir,
+		"sandbox":        sandboxFromSession(origSess, cfg.Sandbox),
+		"personality":    cfg.Personality,
+		"approvalPolicy": approvalMode,
+	}
+	if cfg.Model != "" {
+		params["model"] = cfg.Model
+	}
+	if cfg.Ephemeral {
+		params["ephemeral"] = true
+	}
+
+	resp, err := w.manager.Call("thread/start", params)
+	if err != nil {
+		return fmt.Errorf("codexcli: reset thread/start: %w", err)
+	}
+
+	var result ThreadStartResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return fmt.Errorf("codexcli: reset parse thread/start: %w", err)
+	}
+
+	w.mu.Lock()
+	w.threadID = result.Thread.ID
+	w.recvCh = w.manager.Subscribe(result.Thread.ID, origSess.SessionID)
+	w.commands = NewServerCommander(w.manager, result.Thread.ID)
+	w.conn = &appConn{
+		userID:    origSess.UserID,
+		sessionID: origSess.SessionID,
+		recvCh:    w.recvCh,
+		manager:   w.manager,
+	}
+	w.StartTime = time.Now()
+	w.SetLastIO(w.StartTime)
+	w.mu.Unlock()
+
 	return nil
 }
 
