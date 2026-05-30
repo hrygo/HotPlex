@@ -306,6 +306,24 @@ func fillSlackExtras(acfg *messaging.AdapterConfig, appCfg *config.Config, botCf
 	acfg.Extras["reconnect_base_delay"] = platformCfg.ReconnectBaseDelay
 	acfg.Extras["reconnect_max_delay"] = platformCfg.ReconnectMaxDelay
 
+	// Branding: bot-level override with platform-level fallback.
+	displayName := platformCfg.DisplayName
+	iconEmoji := platformCfg.IconEmoji
+	if botCfg != nil {
+		if botCfg.DisplayName != "" {
+			displayName = botCfg.DisplayName
+		}
+		if botCfg.IconEmoji != "" {
+			iconEmoji = botCfg.IconEmoji
+		}
+	}
+	if displayName != "" {
+		acfg.Extras["display_name"] = displayName
+	}
+	if iconEmoji != "" {
+		acfg.Extras["icon_emoji"] = iconEmoji
+	}
+
 	sttCfg := platformCfg.STTConfig
 	ttsCfg := platformCfg.TTSConfig
 	if botCfg != nil {

@@ -99,6 +99,8 @@ type Adapter struct {
 	phrases            *phrases.Phrases
 	Extras             map[string]any
 	botName            string
+	displayName        string
+	iconEmoji          string
 
 	rateLimiter   *ChannelRateLimiter
 	slashLimiter  *SlashRateLimiter
@@ -158,6 +160,12 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 
 	if config.BotName != "" {
 		a.botName = config.BotName
+	}
+	if v := config.ExtrasString("display_name"); v != "" {
+		a.displayName = v
+	}
+	if v := config.ExtrasString("icon_emoji"); v != "" {
+		a.iconEmoji = v
 	}
 
 	return nil

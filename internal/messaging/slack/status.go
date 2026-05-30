@@ -305,6 +305,8 @@ func (m *StatusManager) shortenPaths(s string) string {
 }
 
 // SetAssistantStatus sets the native assistant status text via Slack API.
+// When displayName or iconEmoji are configured, they are included as branding
+// on the status event (Username/IconEmoji fields).
 func (a *Adapter) SetAssistantStatus(ctx context.Context, channelID, threadTS, status string) error {
 	if a.client == nil || threadTS == "" {
 		return nil
@@ -314,6 +316,12 @@ func (a *Adapter) SetAssistantStatus(ctx context.Context, channelID, threadTS, s
 		ChannelID: channelID,
 		ThreadTS:  threadTS,
 		Status:    status,
+	}
+	if a.displayName != "" {
+		params.Username = a.displayName
+	}
+	if a.iconEmoji != "" {
+		params.IconEmoji = a.iconEmoji
 	}
 
 	return a.client.SetAssistantThreadsStatusContext(ctx, params)
