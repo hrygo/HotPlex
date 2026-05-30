@@ -163,6 +163,17 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 	w.client = client
 
+	// Start read loop early — must run before handshake to receive responses.
+	childCtx, cancel := context.WithCancel(context.Background())
+	w.cancel = cancel
+	cleanup := true
+	defer func() {
+		if cleanup {
+			cancel()
+		}
+	}()
+	client.StartReadLoop(childCtx)
+
 	// Handshake.
 	hctx, hcancel := context.WithTimeout(ctx, 30*time.Second)
 	defer hcancel()
@@ -215,20 +226,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.SetConnLocked(nil) // base.Conn not used; acpConn is returned via Conn() override.
 	w.Mu.Unlock()
 
-	// Start read loop — decoupled from request lifecycle.
-	childCtx, cancel := context.WithCancel(context.Background())
-	w.cancel = cancel
-
-	// Defensive cleanup: if any code after this point fails,
-	// cancel ensures goroutines don't leak.
-	cleanup := true
-	defer func() {
-		if cleanup {
-			cancel()
-		}
-	}()
-
-	client.StartReadLoop(childCtx)
+	// Start worker read loop.
 	go w.readLoop(childCtx)
 
 	// Notify client if conversation history was lost during resume.
