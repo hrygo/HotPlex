@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"time"
+
 	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -54,7 +56,7 @@ func (h *AttachedSessionHandler) Execute(ctx context.Context, job *CronJob) erro
 		return fmt.Errorf("callback: session %s not found: %w", sid, err)
 	}
 
-	prompt := formatJobPrompt(job)
+	prompt := formatJobPrompt(job, time.Now())
 	metadata := map[string]any{
 		"source":   "cron_attached",
 		"cron_job": job.ID,

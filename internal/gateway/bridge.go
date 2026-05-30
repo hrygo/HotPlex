@@ -330,6 +330,11 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		// RUNNING/IDLE/TERMINATED — try Resume to preserve conversation history.
 		// If Resume fails (session files deleted or corrupted), fall back to Start.
 		b.log.Info("bridge: orphan platform session, resuming", "session_id", sessionID, "state", si.State)
+		// Re-inject current sandbox into the loaded session so resume uses
+		// the latest config, not a potentially stale persisted value.
+		if sandbox != "" && si.PlatformKey != nil {
+			si.PlatformKey["_sandbox"] = sandbox
+		}
 		if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
 			b.log.Warn("bridge: resume failed, falling back to new session",
 				"session_id", sessionID, "state", si.State, "err", err)

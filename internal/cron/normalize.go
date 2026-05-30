@@ -66,10 +66,18 @@ func ValidateJobPrompt(prompt string) error {
 // SanitizeJobName strips control characters and newlines from a job name
 // to prevent injection when the name is embedded in worker prompts.
 func SanitizeJobName(name string) string {
+	// stripInvisible handles Unicode Cf and most control chars but preserves
+	// \t and \n. We additionally strip those since newlines in job names
+	// would break prompt formatting.
+	return stripNewlinesTabs(stripInvisible(name))
+}
+
+// stripNewlinesTabs removes \n and \t from a string.
+func stripNewlinesTabs(s string) string {
 	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		if unicode.IsControl(r) {
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '\n' || r == '\t' {
 			continue
 		}
 		b.WriteRune(r)
@@ -77,11 +85,18 @@ func SanitizeJobName(name string) string {
 	return b.String()
 }
 
+// SanitizePrompt strips invisible characters from a prompt and returns the
+// cleaned version suitable for storage. Called after ValidateJobPrompt passes
+// to ensure the persisted text matches what was validated.
+func SanitizePrompt(prompt string) string {
+	return stripInvisible(prompt)
+}
+
 // formatJobPrompt builds the standard cron prompt with job metadata and timestamp.
-func formatJobPrompt(job *CronJob) string {
+func formatJobPrompt(job *CronJob, scheduledAt time.Time) string {
 	return fmt.Sprintf("[cron:%s %s] %s\n%s",
 		job.ID, SanitizeJobName(job.Name),
-		job.Payload.Message, time.Now().Format(time.RFC3339))
+		job.Payload.Message, scheduledAt.Format(time.RFC3339))
 }
 
 // ValidateJob performs full validation on a CronJob before creation/update.

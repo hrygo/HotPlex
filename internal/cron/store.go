@@ -59,67 +59,18 @@ func (s *SQLiteStore) Create(ctx context.Context, job *CronJob) error {
 	if job.ID == "" {
 		job.ID = GenerateJobID()
 	}
-
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
-
-	schedData, payloadData, platformKeyData, stateData, err := marshalJobColumns(job)
-	if err != nil {
-		return err
-	}
-
 	return s.writeMu.WithLock(func() error {
-		_, err = s.db.ExecContext(ctx, `
-			INSERT INTO cron_jobs (`+jobColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			job.ID, job.Name, job.Description, boolToInt(job.Enabled),
-			job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-			job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
-			job.TimeoutSec, boolToInt(job.DeleteAfterRun), boolToInt(job.Silent), job.MaxRetries, job.MaxRuns, job.ExpiresAt,
-			stateData, job.CreatedAtMs, job.UpdatedAtMs,
-		)
-		if err != nil {
-			return fmt.Errorf("cron store: create job: %w", err)
-		}
-		return nil
+		return s.createLocked(ctx, job)
 	})
 }
 
 func (s *SQLiteStore) Update(ctx context.Context, job *CronJob) error {
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
-
-	schedData, payloadData, platformKeyData, stateData, err := marshalJobColumns(job)
-	if err != nil {
-		return err
-	}
-
 	return s.writeMu.WithLock(func() error {
-		res, err := s.db.ExecContext(ctx, `
-			UPDATE cron_jobs SET
-				name = ?, description = ?, enabled = ?,
-				schedule_kind = ?, schedule_data = ?, payload_kind = ?, payload_data = ?,
-				work_dir = ?, bot_id = ?, owner_id = ?, platform = ?, platform_key = ?,
-				timeout_sec = ?, delete_after_run = ?, silent = ?, max_retries = ?,
-				max_runs = ?, expires_at = ?,
-				state = ?, updated_at = ?
-			WHERE id = ?`,
-			job.Name, job.Description, boolToInt(job.Enabled),
-			job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-			job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
-			job.TimeoutSec, boolToInt(job.DeleteAfterRun), boolToInt(job.Silent), job.MaxRetries,
-			job.MaxRuns, job.ExpiresAt,
-			stateData, job.UpdatedAtMs,
-			job.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("cron store: update job: %w", err)
-		}
-		n, _ := res.RowsAffected()
-		if n == 0 {
-			return fmt.Errorf("%w: %s", ErrJobNotFound, job.ID)
-		}
-		return nil
+		return s.updateLocked(ctx, job)
 	})
 }
 

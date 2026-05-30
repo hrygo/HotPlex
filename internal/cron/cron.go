@@ -44,6 +44,7 @@ type Config struct {
 	DefaultTimeoutSec int    `mapstructure:"default_timeout_sec"`
 	TickIntervalSec   int    `mapstructure:"tick_interval_sec"`
 	YAMLConfigPath    string `mapstructure:"yaml_config_path"`
+	DefaultSandbox    string `mapstructure:"default_sandbox,omitempty"`
 }
 
 // WorkDirResolver determines the effective workdir for a cron job when job.WorkDir is empty.
@@ -87,7 +88,7 @@ func New(deps Deps) *Scheduler {
 		defaultTimeout = time.Duration(deps.Cfg.DefaultTimeoutSec) * time.Second
 	}
 	s.defaultTimeout = defaultTimeout
-	s.executor = NewExecutor(deps.Log, deps.Bridge, deps.SessionMgr)
+	s.executor = NewExecutor(deps.Log, deps.Bridge, deps.SessionMgr, deps.Cfg.DefaultSandbox)
 	if deps.AttachedRouter != nil {
 		s.attachedHandler = NewAttachedSessionHandler(deps.Log, deps.AttachedRouter)
 	}

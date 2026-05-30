@@ -206,7 +206,7 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 		Description:    description,
 		Enabled:        true,
 		Schedule:       sched,
-		Payload:        cron.CronPayload{Kind: payloadKind, Message: message, TargetSessionID: opts.TargetSessionID, AllowedTools: allowedTools, WorkerType: opts.WorkerType},
+		Payload:        cron.CronPayload{Kind: payloadKind, Message: cron.SanitizePrompt(message), TargetSessionID: opts.TargetSessionID, AllowedTools: allowedTools, WorkerType: opts.WorkerType},
 		WorkDir:        workDir,
 		BotID:          botID,
 		OwnerID:        ownerID,

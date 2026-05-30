@@ -135,6 +135,13 @@ func (tl *timerLoop) onTick() {
 
 		// Re-check job still exists after acquiring slot — DeleteJob may have
 		// removed it between collectDue and here, wasting a slot on an orphan.
+		//
+		// NOTE: This is a TOCTOU check — the gap between releasing s.mu here
+		// and launching the goroutine means DeleteJob can still win. Consequence
+		// is benign: the orphan goroutine executes on a cloned job, and all
+		// subsequent mergeJobState/persistState calls silently no-op because
+		// the job is no longer in s.jobs. The slot is held until completion but
+		// no data corruption occurs.
 		s.mu.Lock()
 		_, exists := s.jobs[job.ID]
 		s.mu.Unlock()

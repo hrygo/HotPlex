@@ -372,6 +372,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 				DefaultTimeoutSec: cfg.Cron.DefaultTimeoutSec,
 				TickIntervalSec:   cfg.Cron.TickIntervalSec,
 				YAMLConfigPath:    cfg.Cron.YAMLConfigPath,
+				DefaultSandbox:    cfg.Worker.CodexCLI.Sandbox,
 			},
 			ResolveWorkDir: func(job *cron.CronJob) string {
 				return cfgStore.Load().ResolvePlatformWorkDir(job.Platform)

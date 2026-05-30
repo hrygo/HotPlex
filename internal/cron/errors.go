@@ -1,7 +1,7 @@
 package cron
 
 import (
-	"strconv"
+	"regexp"
 	"strings"
 )
 
@@ -36,31 +36,13 @@ func classifyError(err error) errClass {
 	return errClassExec
 }
 
-// isHTTPStatus checks whether msg contains standalone HTTP status codes (e.g. "500"
-// or "502") without matching substrings like "500ms" or "15000". This prevents
-// false positives from timeout durations containing numeric substrings.
-func isHTTPStatus(msg string, codes ...int) bool {
-	for _, code := range codes {
-		s := strconv.Itoa(code)
-		for {
-			idx := strings.Index(msg, s)
-			if idx < 0 {
-				break
-			}
-			// Verify the match is a standalone number, not part of a larger number.
-			prevOK := idx == 0 || (!isDigit(msg[idx-1]) && !isLetter(msg[idx-1]))
-			nextOK := idx+len(s) >= len(msg) || (!isDigit(msg[idx+len(s)]) && !isLetter(msg[idx+len(s)]))
-			if prevOK && nextOK {
-				return true
-			}
-			msg = msg[idx+len(s):]
-		}
-	}
-	return false
-}
+// httpStatusRe is a pre-compiled regex that matches standalone HTTP status codes,
+// using word boundaries to avoid false positives from substrings like "500ms".
+var httpStatusRe = regexp.MustCompile(`\b(?:500|502|503|504)\b`)
 
-func isDigit(c byte) bool  { return c >= '0' && c <= '9' }
-func isLetter(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') }
+func isHTTPStatus(msg string, _ ...int) bool {
+	return httpStatusRe.MatchString(msg)
+}
 
 // errorType returns the metric label for an execution error.
 func errorType(err error) string {
