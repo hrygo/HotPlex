@@ -16,6 +16,7 @@ import (
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/internal/worker/proc"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // Compile-time interface compliance checks.
@@ -32,7 +33,7 @@ var commandParts atomic.Value // []string
 var autoApprove atomic.Value // bool
 
 func init() {
-	commandParts.Store([]string{"hermes-acp"})
+	commandParts.Store([]string{"hermes", "acp"})
 	autoApprove.Store(false)
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
@@ -44,7 +45,7 @@ func init() {
 func InitConfig(cfg config.ACPConfig) {
 	cmd := cfg.Command
 	if cmd == "" {
-		cmd = "hermes-acp"
+		cmd = "hermes acp"
 	}
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
@@ -121,8 +122,13 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Phase 2: I/O-heavy operations outside the lock.
 
-	// Resolve command.
-	parts, _ := commandParts.Load().([]string)
+	// Resolve command — per-session override takes precedence over global config.
+	var parts []string
+	if session.ACPCommand != "" {
+		parts = strings.Fields(session.ACPCommand)
+	} else {
+		parts, _ = commandParts.Load().([]string)
+	}
 	binary := parts[0]
 	args := make([]string, len(parts)-1, len(parts)-1+len(session.Args))
 	copy(args, parts[1:])
@@ -144,8 +150,11 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		return fmt.Errorf("acp: failed to start process: %s", binary)
 	}
 
-	w.StartTime = time.Now()
-	w.SetLastIO(time.Now())
+	now := time.Now()
+	w.Mu.Lock()
+	w.StartTime = now
+	w.Mu.Unlock()
+	w.SetLastIO(now)
 
 	// Create client.
 	client := w.testClient
@@ -153,6 +162,17 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		client = NewACPClient(stdin, stdout, w.Log)
 	}
 	w.client = client
+
+	// Start read loop early — must run before handshake to receive responses.
+	childCtx, cancel := context.WithCancel(context.Background())
+	w.cancel = cancel
+	cleanup := true
+	defer func() {
+		if cleanup {
+			cancel()
+		}
+	}()
+	client.StartReadLoop(childCtx)
 
 	// Handshake.
 	hctx, hcancel := context.WithTimeout(ctx, 30*time.Second)
@@ -166,17 +186,20 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Create or load session.
 	var acpSessID string
+	var historyLost bool
 	if session.WorkerSessionID != "" {
 		// Resume existing session.
 		sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, nil)
 		if loadErr != nil {
-			w.Log.Warn("acp: load session failed, creating new", "error", loadErr)
+			w.Log.Error("acp: load session failed, conversation history will be lost",
+				"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID, "error", loadErr)
 			newSess, newErr := client.NewSession(hctx, session.ProjectDir, nil)
 			if newErr != nil {
 				_ = w.Proc.Kill()
 				return fmt.Errorf("acp: new session: %w", newErr)
 			}
 			acpSessID = newSess.SessionID
+			historyLost = true
 		} else {
 			acpSessID = sessResult.SessionID
 		}
@@ -199,25 +222,20 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Create connection.
 	w.Mu.Lock()
-	w.conn = newACPConn(session.UserID, session.SessionID)
-	w.Mu.Unlock()
+	w.conn = newACPConn(session.UserID, session.SessionID, w.Log)
 	w.SetConnLocked(nil) // base.Conn not used; acpConn is returned via Conn() override.
+	w.Mu.Unlock()
 
-	// Start read loop — decoupled from request lifecycle.
-	childCtx, cancel := context.WithCancel(context.Background())
-	w.cancel = cancel
-
-	// Defensive cleanup: if any code after this point fails,
-	// cancel ensures goroutines don't leak.
-	cleanup := true
-	defer func() {
-		if cleanup {
-			cancel()
-		}
-	}()
-
-	client.StartReadLoop(childCtx)
+	// Start worker read loop.
 	go w.readLoop(childCtx)
+
+	// Notify client if conversation history was lost during resume.
+	if historyLost {
+		w.conn.TrySend(w.mapper.newEnvelope(events.Error, events.ErrorData{
+			Code:    "HISTORY_LOST",
+			Message: "Previous conversation history could not be restored; starting a new session.",
+		}))
+	}
 
 	cleanup = false
 	return nil

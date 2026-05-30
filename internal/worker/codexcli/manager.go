@@ -171,14 +171,16 @@ func (m *CodexAppServerManager) Subscribe(threadID, sessionID string) chan *even
 	return ch
 }
 
+// Unsubscribe removes the subscriber channel for the given thread.
+// Precondition: the corresponding appConn must be closed before or after this
+// call to ensure the channel is eventually cleaned up by monitorProcess.
 func (m *CodexAppServerManager) Unsubscribe(threadID string) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
-	if ch, ok := m.subscribers[threadID]; ok {
+	if _, ok := m.subscribers[threadID]; ok {
 		delete(m.subscribers, threadID)
 		delete(m.subSessions, threadID)
-		close(ch)
 		m.log.Debug("codex-app-server: unsubscribed", "thread_id", threadID)
 	}
 }
@@ -266,12 +268,16 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 
 	if m.proc != nil {
 		m.log.Info("codex-app-server: shutdown, killing process")
-		_ = m.proc.Kill()
-		m.proc = nil
-		m.pgid = 0
-		m.stdin = nil
-		m.stdout = nil
-		m.refs = 0
+		// Use ForceKill(pgid) instead of proc.Kill() to avoid deadlock
+		// with monitorProcess's Wait() (see KillIfIdle for rationale).
+		if m.pgid > 0 {
+			_ = proc.ForceKill(m.pgid)
+		} else {
+			_ = m.proc.Kill()
+		}
+		// Do not clear m.proc here — monitorProcess will handle cleanup
+		// after Wait() observes the exit. Only clear if no monitorProcess
+		// goroutine exists (stateStopped set above prevents double cleanup).
 	}
 
 	// Close all active subscriptions if not already closed by monitorProcess.
@@ -601,7 +607,14 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 		return
 	}
 
-	m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "threadId", params.ThreadID)
+	// Only log lifecycle events; skip high-frequency deltas to avoid log flooding.
+	switch notif.Method {
+	case "item/agentMessage/delta", "item/reasoning/summaryTextDelta",
+		"item/reasoning/textDelta", "item/commandExecution/outputDelta",
+		"thread/tokenUsage/updated":
+	default:
+		m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "threadId", params.ThreadID)
+	}
 
 	m.subMu.Lock()
 	sessionID := m.subSessions[params.ThreadID]
@@ -623,6 +636,13 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 // sendEnvelope delivers a single envelope to a subscriber channel with backpressure.
 // Delta events are dropped silently when full; critical events block with a 5s timeout.
 func (m *CodexAppServerManager) sendEnvelope(ch chan *events.Envelope, env *events.Envelope) {
+	// Recover from send on closed channel — release() may close ch
+	// concurrently with Unsubscribe+conn.Close after we released subMu.
+	defer func() {
+		if r := recover(); r != nil {
+			m.log.Debug("codex-app-server: send on closed channel, subscriber gone")
+		}
+	}()
 	if env.Event.Type == events.MessageDelta {
 		select {
 		case ch <- env:

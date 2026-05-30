@@ -164,6 +164,7 @@ worker:
   environment:
     - GH_TOKEN=${HOTPLEX_WORKER_GH_TOKEN}
     - GITHUB_TOKEN=${HOTPLEX_WORKER_GITHUB_TOKEN}
+    - NO_PROXY=localhost,127.0.0.1,::1
   # - BUN_JSC_useJIT=0  # JIT workaround for Bun SIGILL on broken AVX VPS (severe perf penalty)
 
   auto_retry:
@@ -215,6 +216,17 @@ worker:
     use_app_server: true
     # Idle drain timeout for app-server mode before killing process
     idle_drain_period: 30m
+
+  # ACP (Agent Communication Protocol) — universal worker for any ACP-compatible agent.
+  # Communicates via JSON-RPC 2.0 over stdio.
+  acp:
+    # Command to start ACP agent. Use space to separate subcommand args.
+    # Override via HOTPLEX_WORKER_ACP_COMMAND environment variable.
+    command: "hermes acp"
+    # Auto-approve permission requests from the agent (no user confirmation needed).
+    # WARNING: auto_approve: true grants full tool access without human review.
+    # Consider keeping false in production environments.
+    auto_approve: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AGENT PERSONALITY & SKILLS (B/C Channels)

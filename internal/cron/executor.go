@@ -27,17 +27,19 @@ type SessionStateChecker interface {
 
 // Executor runs a single cron job by starting a worker session and delivering the prompt.
 type Executor struct {
-	log    *slog.Logger
-	bridge BridgeStarter
-	sm     SessionStateChecker
+	log     *slog.Logger
+	bridge  BridgeStarter
+	sm      SessionStateChecker
+	sandbox string
 }
 
 // NewExecutor creates a new cron executor.
-func NewExecutor(log *slog.Logger, bridge BridgeStarter, sm SessionStateChecker) *Executor {
+func NewExecutor(log *slog.Logger, bridge BridgeStarter, sm SessionStateChecker, sandbox string) *Executor {
 	return &Executor{
-		log:    log.With("component", "cron_executor"),
-		bridge: bridge,
-		sm:     sm,
+		log:     log.With("component", "cron_executor"),
+		bridge:  bridge,
+		sm:      sm,
+		sandbox: sandbox,
 	}
 }
 
@@ -48,7 +50,11 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 	sessionKey := session.DeriveCronSessionKey(job.ID, time.Now().UnixNano())
 
 	// Merge platform context so the bridge can inject environment variables (like channel_id).
+	// Inject default sandbox first; per-job PlatformKey overrides below.
 	platformKey := make(map[string]string)
+	if e.sandbox != "" {
+		platformKey[worker.SandboxPlatformKey] = e.sandbox
+	}
 	if job.PlatformKey != nil {
 		maps.Copy(platformKey, job.PlatformKey)
 	}
@@ -72,8 +78,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		return "", fmt.Errorf("cron executor: worker not found after start")
 	}
 
-	prompt := fmt.Sprintf("[cron:%s %s] %s\n%s", job.ID, job.Name,
-		job.Payload.Message, time.Now().Format(time.RFC3339))
+	prompt := formatJobPrompt(job, time.Now())
 	prompt += buildDeliverySuffix(job)
 
 	if err := w.Input(ctx, prompt, nil); err != nil {
@@ -170,7 +175,7 @@ func buildSlackDelivery(job *CronJob) string {
 	if ts := job.PlatformKey["thread_ts"]; ts != "" {
 		cmd += fmt.Sprintf(" --thread-ts %s", ts)
 	}
-	return fmt.Sprintf(deliveryBlockFmt, job.Name, cmd)
+	return fmt.Sprintf(deliveryBlockFmt, SanitizeJobName(job.Name), cmd)
 }
 
 func buildFeishuDelivery(job *CronJob) string {
@@ -184,7 +189,7 @@ func buildFeishuDelivery(job *CronJob) string {
 	} else {
 		cmd = fmt.Sprintf("lark-cli im +messages-send --as bot --chat-id %s --markdown \"结果内容\"", chatID)
 	}
-	return fmt.Sprintf(deliveryBlockFmt, job.Name, cmd)
+	return fmt.Sprintf(deliveryBlockFmt, SanitizeJobName(job.Name), cmd)
 }
 
 const deliveryBlockFmt = `

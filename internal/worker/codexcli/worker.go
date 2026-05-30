@@ -86,6 +86,9 @@ func (w *ExecWorker) startLocked(session worker.SessionInfo) error {
 	}
 
 	w.cfg = resolveConfig()
+	if w.cfg.Sandbox == "" || w.cfg.Sandbox == "danger-full-access" {
+		w.Log.Warn("codexcli: sandbox is not restricted; commands run with full permissions", "sandbox", w.cfg.Sandbox)
+	}
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
 
@@ -122,7 +125,7 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 
 	args := []string{
 		"exec", "--json",
-		"--sandbox", w.cfg.Sandbox,
+		"--sandbox", sandboxFromSession(session, w.cfg.Sandbox),
 		"--ask-for-approval", approvalMode,
 		"--cd", session.ProjectDir,
 	}
@@ -474,25 +477,11 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	w.crashSub = crashCh
 
 	cfg := resolveConfig()
-
-	// Session-aware approval: session.SkipPermissions overrides config default.
-	approvalMode := cfg.ApprovalMode
-	if session.SkipPermissions {
-		approvalMode = "never"
+	if cfg.Sandbox == "" || cfg.Sandbox == "danger-full-access" {
+		w.Log.Warn("codexcli: sandbox is not restricted; commands run with full permissions", "sandbox", cfg.Sandbox)
 	}
 
-	params := map[string]any{
-		"cwd":            session.ProjectDir,
-		"sandbox":        cfg.Sandbox,
-		"personality":    cfg.Personality,
-		"approvalPolicy": approvalMode,
-	}
-	if cfg.Model != "" {
-		params["model"] = cfg.Model
-	}
-	if cfg.Ephemeral {
-		params["ephemeral"] = true
-	}
+	params := buildThreadStartParams(session, cfg)
 
 	resp, err := w.manager.Call("thread/start", params)
 	if err != nil {
@@ -563,27 +552,22 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 }
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
-	w.release()
-	// Even on graceful Terminate, immediately kill the singleton process if
-	// no other sessions hold refs. This prevents zombie GC path (which calls
-	// Terminate, not Kill) from leaving the process lingering for 30 minutes.
-	if w.manager != nil {
-		w.manager.KillIfIdle()
-	}
+	w.shutdown()
 	return nil
 }
 
 func (w *AppServerWorker) Kill() error {
+	w.shutdown()
+	return nil
+}
+
+// shutdown releases the worker's manager subscription and kills the singleton
+// process if no other sessions hold refs. Called by both Terminate and Kill.
+func (w *AppServerWorker) shutdown() {
 	w.release()
-	// Both Kill() and Terminate() call KillIfIdle() after release() to
-	// ensure the singleton process is killed immediately when refs reach 0,
-	// rather than waiting for the 30-minute idle drain timer. The methods
-	// are functionally identical; the distinction exists for interface
-	// conformance with worker.Worker.
 	if w.manager != nil {
 		w.manager.KillIfIdle()
 	}
-	return nil
 }
 
 func (w *AppServerWorker) Wait() (int, error) {
@@ -620,46 +604,83 @@ func (w *AppServerWorker) release() {
 				ThreadID: tid,
 			})
 			w.manager.Unsubscribe(tid)
+			// Close recvCh so forwardEvents exits its range loop.
+			// Must happen after Unsubscribe (removes from dispatch map) to
+			// avoid racing with in-flight dispatchNotification sends.
+			if w.conn != nil {
+				_ = w.conn.Close()
+			}
 			w.manager.Release()
 		}
 	})
 }
 
 func (w *AppServerWorker) ResetContext(ctx context.Context) error {
-	if err := w.Terminate(ctx); err != nil {
-		w.Log.Warn("codexcli: reset terminate", "error", err)
-	}
 	w.mu.Lock()
+	oldConn := w.conn
+	oldThreadID := w.threadID
 	origSess := w.origSession
-	w.threadID = ""
-	w.recvCh = nil
-	w.conn = nil
-	w.commands = nil
-	w.closed = false
-	w.doneCh = make(chan struct{})
-	w.releaseOnce = sync.Once{}
 	w.mu.Unlock()
 
-	// Re-establish a fresh thread so the new forwardEvents goroutine
-	// (spawned by bridge.ResetSession) reads from a live recvCh instead
-	// of the stale closed channel left by release().
-	if origSess.SessionID != "" {
-		if err := w.Start(ctx, origSess); err != nil {
-			// Start() failure leaves the worker in an unrecoverable state:
-			// closed=false, doneCh=new, recvCh=nil, conn=nil. A subsequent
-			// Kill() would re-execute release() via the fresh releaseOnce,
-			// double-releasing manager refs. Mark closed and signal doneCh
-			// so the worker is safely inert.
-			w.mu.Lock()
-			w.closed = true
-			if w.doneCh != nil {
-				close(w.doneCh)
-			}
-			w.doneCh = nil
-			w.mu.Unlock()
-			return fmt.Errorf("codexcli: reset start: %w", err)
-		}
+	// Close old conn → closes old recvCh → old forwardEvents exits range loop.
+	if oldConn != nil {
+		_ = oldConn.Close()
 	}
+
+	// Unsubscribe old thread (keep manager reference, no Release).
+	if oldThreadID != "" && w.manager != nil {
+		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
+		w.manager.Unsubscribe(oldThreadID)
+	}
+
+	// Reset lifecycle state so subsequent Terminate/Kill can release the new thread.
+	w.mu.Lock()
+	w.closed = false
+	w.releaseOnce = sync.Once{}
+	w.doneCh = make(chan struct{})
+	w.mu.Unlock()
+
+	// Start fresh thread on same manager (same process, no Acquire needed).
+	// If the process crashed between turns, bail out — bridge will Terminate+Start.
+	if origSess.SessionID == "" {
+		return nil
+	}
+
+	if w.manager != nil && !w.manager.IsRunning() {
+		return fmt.Errorf("codexcli: manager process not running, cannot reset")
+	}
+
+	cfg := resolveConfig()
+	params := buildThreadStartParams(origSess, cfg)
+
+	resp, err := w.manager.Call("thread/start", params)
+	if err != nil {
+		// thread/start failed — mark closed so Terminate/release skips cleanup.
+		w.mu.Lock()
+		w.closed = true
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: reset thread/start: %w", err)
+	}
+
+	var result ThreadStartResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return fmt.Errorf("codexcli: reset parse thread/start: %w", err)
+	}
+
+	w.mu.Lock()
+	w.threadID = result.Thread.ID
+	w.recvCh = w.manager.Subscribe(result.Thread.ID, origSess.SessionID)
+	w.commands = NewServerCommander(w.manager, result.Thread.ID)
+	w.conn = &appConn{
+		userID:    origSess.UserID,
+		sessionID: origSess.SessionID,
+		recvCh:    w.recvCh,
+		manager:   w.manager,
+	}
+	w.StartTime = time.Now()
+	w.SetLastIO(w.StartTime)
+	w.mu.Unlock()
+
 	return nil
 }
 
@@ -695,4 +716,35 @@ func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID stri
 
 func (w *AppServerWorker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
 	return fmt.Errorf("codexcli: elicitation responses not supported in app-server mode yet")
+}
+
+// sandboxFromSession returns the session-level sandbox override if set,
+// otherwise falls back to the config default.
+func sandboxFromSession(session worker.SessionInfo, defaultSandbox string) string {
+	if session.Sandbox != "" {
+		return session.Sandbox
+	}
+	return defaultSandbox
+}
+
+// buildThreadStartParams constructs the JSON-RPC params for "thread/start".
+// Shared by Start() and ResetContext() to avoid duplication.
+func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]any {
+	approvalMode := cfg.ApprovalMode
+	if session.SkipPermissions {
+		approvalMode = "never"
+	}
+	params := map[string]any{
+		"cwd":            session.ProjectDir,
+		"sandbox":        sandboxFromSession(session, cfg.Sandbox),
+		"personality":    cfg.Personality,
+		"approvalPolicy": approvalMode,
+	}
+	if cfg.Model != "" {
+		params["model"] = cfg.Model
+	}
+	if cfg.Ephemeral {
+		params["ephemeral"] = true
+	}
+	return params
 }

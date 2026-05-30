@@ -282,6 +282,8 @@ type SlackBotConfig struct {
 	AppToken   string `mapstructure:"app_token"`
 	WorkerType string `mapstructure:"worker_type,omitempty"`
 	WorkDir    string `mapstructure:"work_dir,omitempty"`
+	Sandbox    string `mapstructure:"sandbox,omitempty"`
+	ACPCommand string `mapstructure:"acp_command,omitempty"` // per-bot ACP agent binary override
 
 	// Per-bot access control (falls back to platform-level when empty).
 	DMPolicy       string   `mapstructure:"dm_policy,omitempty"`
@@ -320,6 +322,8 @@ type FeishuBotConfig struct {
 	AppSecret  string `mapstructure:"app_secret"`
 	WorkerType string `mapstructure:"worker_type,omitempty"`
 	WorkDir    string `mapstructure:"work_dir,omitempty"`
+	Sandbox    string `mapstructure:"sandbox,omitempty"`
+	ACPCommand string `mapstructure:"acp_command,omitempty"` // per-bot ACP agent binary override
 
 	// Per-bot access control (falls back to platform-level when empty).
 	DMPolicy       string   `mapstructure:"dm_policy,omitempty"`
@@ -579,7 +583,7 @@ type ClaudeCodeConfig struct {
 type CodexCLIConfig struct {
 	Command         string        `mapstructure:"command"`           // codex binary path, default "codex"
 	Model           string        `mapstructure:"model"`             // model name, empty = use Codex default
-	Sandbox         string        `mapstructure:"sandbox"`           // sandbox mode, default "workspace-write"
+	Sandbox         string        `mapstructure:"sandbox"`           // sandbox mode, default "danger-full-access"
 	ApprovalMode    string        `mapstructure:"approval_mode"`     // approval mode, default "never"
 	Ephemeral       bool          `mapstructure:"ephemeral"`         // ephemeral sessions, default true
 	Personality     string        `mapstructure:"personality"`       // agent personality for app-server mode, default "friendly"
@@ -762,7 +766,7 @@ func Default() *Config {
 			},
 			CodexCLI: CodexCLIConfig{
 				Command:         "codex",
-				Sandbox:         "workspace-write",
+				Sandbox:         "danger-full-access",
 				ApprovalMode:    "never",
 				Ephemeral:       true,
 				Personality:     "friendly",
@@ -1007,6 +1011,12 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("worker.auto_retry.enabled")
 	_ = v.BindEnv("worker.auto_retry.max_retries")
 	_ = v.BindEnv("worker.claude_code.command")
+	_ = v.BindEnv("worker.codex_cli.command")
+	_ = v.BindEnv("worker.codex_cli.model")
+	_ = v.BindEnv("worker.codex_cli.sandbox")
+	_ = v.BindEnv("worker.codex_cli.approval_mode")
+	_ = v.BindEnv("worker.acp.command")
+	_ = v.BindEnv("worker.acp.auto_approve")
 	_ = v.BindEnv("worker.opencode_server.command")
 	_ = v.BindEnv("worker.opencode_server.idle_drain_period")
 	_ = v.BindEnv("worker.opencode_server.ready_timeout")

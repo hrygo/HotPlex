@@ -149,37 +149,42 @@ type JobCreateOptions struct {
 }
 
 // resolvePlatform resolves the target platform and routing key with three-level priority:
-// 1. CLI flags (explicit --platform / --platform-key)
+// 1. CLI flags (explicit --platform / --platform-key) — highest, overrides env
 // 2. Environment variables (GATEWAY_PLATFORM, GATEWAY_CHANNEL_ID, GATEWAY_THREAD_ID)
-// 3. Default "cron" (backward compatible)
+// 3. Default "cron" (no delivery)
+//
+// Env-derived keys are always built as baseline; CLI keys override them.
 func resolvePlatform(cliPlatform string, cliPlatformKey map[string]string) (string, map[string]string) {
-	if cliPlatform != "" {
-		return cliPlatform, cliPlatformKey
+	resolved := cliPlatform
+	if resolved == "" {
+		resolved = os.Getenv("GATEWAY_PLATFORM")
+	}
+	if resolved == "" {
+		resolved = "cron"
 	}
 
-	envPlatform := os.Getenv("GATEWAY_PLATFORM")
-	switch envPlatform {
+	key := map[string]string{}
+	switch resolved {
 	case "slack":
-		key := map[string]string{}
 		if ch := os.Getenv("GATEWAY_CHANNEL_ID"); ch != "" {
 			key["channel_id"] = ch
 		}
 		if ts := os.Getenv("GATEWAY_THREAD_ID"); ts != "" {
 			key["thread_ts"] = ts
 		}
-		return "slack", key
 	case "feishu":
-		key := map[string]string{}
 		if chatID := os.Getenv("GATEWAY_CHANNEL_ID"); chatID != "" {
 			key["chat_id"] = chatID
 		}
 		if msgID := os.Getenv("GATEWAY_THREAD_ID"); msgID != "" {
 			key["message_id"] = msgID
 		}
-		return "feishu", key
 	}
 
-	return "cron", nil
+	// CLI platform-key overrides env-derived values.
+	maps.Copy(key, cliPlatformKey)
+
+	return resolved, key
 }
 
 // PrepareJobForCreate builds a CronJob from CLI flags.
@@ -201,7 +206,7 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 		Description:    description,
 		Enabled:        true,
 		Schedule:       sched,
-		Payload:        cron.CronPayload{Kind: payloadKind, Message: message, TargetSessionID: opts.TargetSessionID, AllowedTools: allowedTools, WorkerType: opts.WorkerType},
+		Payload:        cron.CronPayload{Kind: payloadKind, Message: cron.SanitizePrompt(message), TargetSessionID: opts.TargetSessionID, AllowedTools: allowedTools, WorkerType: opts.WorkerType},
 		WorkDir:        workDir,
 		BotID:          botID,
 		OwnerID:        ownerID,
@@ -229,7 +234,10 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 		return nil, err
 	}
 
+	now := time.Now().UnixMilli()
 	job.ID = cron.GenerateJobID()
+	job.CreatedAtMs = now
+	job.UpdatedAtMs = now
 
 	next, err := cron.NextRun(sched, time.Now())
 	if err != nil {
@@ -238,6 +246,27 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 	job.State.NextRunAtMs = next.UnixMilli()
 
 	return job, nil
+}
+
+// CheckMaxJobs enforces the max jobs limit for out-of-process CLI creation.
+// Reads the configured max_jobs (default 50) and checks current job count.
+func CheckMaxJobs(ctx context.Context, store cron.Store, configPath string) error {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return nil // config unavailable, skip check
+	}
+	maxJobs := cfg.Cron.MaxJobs
+	if maxJobs <= 0 {
+		maxJobs = 50
+	}
+	jobs, err := store.List(ctx, false)
+	if err != nil {
+		return nil // store unavailable, skip check
+	}
+	if len(jobs) >= maxJobs {
+		return fmt.Errorf("cron: max jobs limit reached (%d)", maxJobs)
+	}
+	return nil
 }
 
 // TriggerViaAdmin calls the gateway admin API to trigger a job run.

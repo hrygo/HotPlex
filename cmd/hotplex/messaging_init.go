@@ -77,7 +77,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 		switch pt {
 		case messaging.PlatformSlack:
 			if !appCfg.Messaging.Slack.Enabled {
-				statuses = append(statuses, AdapterStatus{Name: "slack", Started: false})
+				statuses = append(statuses, AdapterStatus{Name: "slack", WorkerType: appCfg.Messaging.Slack.WorkerType, Started: false})
 				continue
 			}
 			workerType = appCfg.Messaging.Slack.WorkerType
@@ -92,7 +92,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			}
 		case messaging.PlatformFeishu:
 			if !appCfg.Messaging.Feishu.Enabled {
-				statuses = append(statuses, AdapterStatus{Name: "feishu", Started: false})
+				statuses = append(statuses, AdapterStatus{Name: "feishu", WorkerType: appCfg.Messaging.Feishu.WorkerType, Started: false})
 				continue
 			}
 			workerType = appCfg.Messaging.Feishu.WorkerType
@@ -107,7 +107,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			}
 		case messaging.PlatformYuanxin:
 			if !appCfg.Messaging.Yuanxin.Enabled {
-				statuses = append(statuses, AdapterStatus{Name: "yuanxin", Started: false})
+				statuses = append(statuses, AdapterStatus{Name: "yuanxin", WorkerType: appCfg.Messaging.Yuanxin.WorkerType, Started: false})
 				continue
 			}
 			workerType = appCfg.Messaging.Yuanxin.WorkerType
@@ -169,13 +169,44 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				}
 			}
 
+			// Per-bot sandbox override (codex CLI only).
+			botSandbox := appCfg.Worker.CodexCLI.Sandbox
+			switch pt {
+			case messaging.PlatformSlack:
+				if bc := resolveSlackBot(appCfg, entry.Name); bc != nil && bc.Sandbox != "" {
+					botSandbox = bc.Sandbox
+				}
+			case messaging.PlatformFeishu:
+				if bc := resolveFeishuBot(appCfg, entry.Name); bc != nil && bc.Sandbox != "" {
+					botSandbox = bc.Sandbox
+				}
+			}
+
+			// Per-bot ACP command override.
+			botACPCommand := appCfg.Worker.ACP.Command
+			switch pt {
+			case messaging.PlatformSlack:
+				if bc := resolveSlackBot(appCfg, entry.Name); bc != nil && bc.ACPCommand != "" {
+					botACPCommand = bc.ACPCommand
+				}
+			case messaging.PlatformFeishu:
+				if bc := resolveFeishuBot(appCfg, entry.Name); bc != nil && bc.ACPCommand != "" {
+					botACPCommand = bc.ACPCommand
+				}
+			}
+
+			workerDetail := ""
+			if botWorkerType == "acp" && botACPCommand != "" {
+				workerDetail = botACPCommand
+			}
+
 			adapter, err := messaging.New(pt, log)
 			if err != nil {
 				log.Warn("messaging: skip adapter", "platform", pt, "bot", entry.Name, "err", err)
 				continue
 			}
 
-			msgBridge := messaging.NewBridge(log, pt, hub, handler, gwBridge, botWorkerType, botWorkDir)
+			msgBridge := messaging.NewBridge(log, pt, hub, handler, gwBridge, botWorkerType, botACPCommand, botWorkDir, botSandbox)
 
 			acfg := messaging.AdapterConfig{
 				Hub:     hub,
@@ -209,7 +240,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 
 			if err := adapter.Start(ctx); err != nil {
 				log.Warn("messaging: start failed", "platform", pt, "bot", entry.Name, "err", err)
-				statuses = append(statuses, AdapterStatus{Name: string(pt), BotName: entry.Name, Started: false})
+				statuses = append(statuses, AdapterStatus{Name: string(pt), BotName: entry.Name, WorkerType: botWorkerType, WorkerDetail: workerDetail, Started: false})
 				continue
 			}
 
@@ -257,7 +288,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				log.Error("messaging: adapter platform mismatch", "platform", pt, "bot", entry.Name, "err", err)
 			}
 			adapters = append(adapters, adapter)
-			statuses = append(statuses, AdapterStatus{Name: string(pt), BotName: entry.Name, Started: true})
+			statuses = append(statuses, AdapterStatus{Name: string(pt), BotName: entry.Name, WorkerType: botWorkerType, WorkerDetail: workerDetail, Started: true})
 			log.Info("messaging: adapter started", "platform", pt, "bot", entry.Name, "bot_id", entry.BotID)
 		}
 	}

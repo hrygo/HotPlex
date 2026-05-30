@@ -515,6 +515,32 @@ func TestMapNotificationWarning(t *testing.T) {
 	require.Equal(t, "Rate limit approaching", sd.Name)
 }
 
+func TestMapNotificationError(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("error", json.RawMessage(
+		`{"threadId":"thr-1","error":{"message":"API request failed: 502"}}`))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Error, envs[0].Event.Type)
+	ed, ok := envs[0].Event.Data.(events.ErrorData)
+	require.True(t, ok)
+	require.Equal(t, events.ErrorCode("CODEX_ERROR"), ed.Code)
+	require.Equal(t, "API request failed: 502", ed.Message)
+}
+
+func TestMapNotificationErrorEmptyMessage(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+
+	envs := m.MapNotification("error", json.RawMessage(`{"threadId":"thr-1","error":{}}`))
+	require.Len(t, envs, 1)
+	ed, _ := envs[0].Event.Data.(events.ErrorData)
+	require.Equal(t, "unknown error", ed.Message)
+}
+
 func TestMapNotificationMCPProgress(t *testing.T) {
 	t.Parallel()
 
@@ -664,10 +690,8 @@ func TestManagerSubscribeUnsubscribe(t *testing.T) {
 	require.NotNil(t, ch3)
 	require.NotEqual(t, ch, ch3)
 
-	// Unsubscribe closes channel and removes it
+	// Unsubscribe removes from map (channel is closed by appConn or monitorProcess).
 	mgr.Unsubscribe("thread-1")
-	_, ok := <-ch
-	require.False(t, ok) // channel closed
 
 	// Re-subscribe after unsubscribe creates new channel
 	ch4 := mgr.Subscribe("thread-1", "session-thread-1")
@@ -676,14 +700,10 @@ func TestManagerSubscribeUnsubscribe(t *testing.T) {
 }
 
 func TestManagerReleaseIdleDrain(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: triggers process start")
-	}
-	cfg := config.CodexCLIConfig{IdleDrainPeriod: 50 * time.Millisecond}
+	t.Parallel()
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: 10 * time.Millisecond}
 	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
-	// Simulate acquire without starting process (set state manually via reflection or test helper)
-	// This test validates the idle drain timer logic only.
 	mgr.mu.Lock()
 	mgr.state = stateRunning
 	mgr.refs = 1
@@ -691,7 +711,7 @@ func TestManagerReleaseIdleDrain(t *testing.T) {
 
 	mgr.Release() // refs → 0, starts idle drain
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 	// Idle drain should have fired by now
 	mgr.mu.Lock()
 	require.Equal(t, stateRunning, mgr.state, "state should still be running since proc is nil (no actual kill)")
@@ -1656,88 +1676,73 @@ func testConfigWithDefaults() func() {
 // ---------- Unit tests (no codex binary required) ----------
 
 func TestResetContextClearsStateAndResetsOnce(t *testing.T) {
-	// Verify ResetContext resets closed, releaseOnce, and doneCh before
-	// attempting Start. This is the core state-cleanup logic of #575.
-	// We test with origSession.SessionID="" so Start is skipped.
+	// Verify lightweight ResetContext closes old conn and unsubscribes old thread
+	// without touching closed/doneCh/releaseOnce (no Terminate+Start cycle).
+	// We test with origSession.SessionID="" so thread/start is skipped.
 	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
 		IdleDrainPeriod: time.Minute,
 	})
 
+	recvCh := make(chan *events.Envelope, 1)
 	w := &AppServerWorker{
 		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
 		manager:    mgr,
 		doneCh:     make(chan struct{}),
+		conn:       &appConn{recvCh: recvCh},
 	}
-	// Simulate a "started" worker.
-	w.mu.Lock()
-	w.closed = true
-	w.threadID = ""
-	w.mu.Unlock()
-
-	// origSession is zero-value (SessionID="") so ResetContext won't call Start.
 	w.origSession = worker.SessionInfo{}
 
 	err := w.ResetContext(context.Background())
 	require.NoError(t, err)
 
-	// Verify state was cleared.
-	w.mu.Lock()
-	require.False(t, w.closed, "closed should be reset")
-	require.NotNil(t, w.doneCh, "doneCh should be recreated")
-	require.Empty(t, w.threadID, "threadID should be empty")
-	w.mu.Unlock()
+	// Old recvCh should be closed by appConn.Close().
+	_, ok := <-recvCh
+	require.False(t, ok, "old recvCh should be closed")
 }
 
 func TestResetContextRestartsFromSavedSession(t *testing.T) {
-	// Verify ResetContext preserves origSession and calls Start() again.
-	// Requires codex binary because ResetContext calls Start internally.
-	if testing.Short() {
-		t.Skip("skipping: requires codex binary")
-	}
+	// Verify ResetContext performs lightweight thread swap: closes old conn,
+	// resets lifecycle state, then attempts thread/start on same manager.
+	// No real codex process — provide fake stdin so writeFrame won't panic,
+	// thread/start will fail with write/timeout error.
 	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
 		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
 	})
-	// Simulate an acquired manager (refs=1) so release() decrements to 0
-	// cleanly instead of going negative from an unacquired state.
+	r, w := io.Pipe()
+	mgr.stdin = w
 	mgr.mu.Lock()
 	mgr.refs = 1
+	mgr.state = stateRunning
 	mgr.mu.Unlock()
+	// Drain pipe in background so Notify/Call writes don't block.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
 
-	w := &AppServerWorker{
+	oldRecvCh := make(chan *events.Envelope, 1)
+	wk := &AppServerWorker{
 		BaseWorker:  base.NewBaseWorker(slog.Default(), nil),
 		manager:     mgr,
 		origSession: worker.SessionInfo{SessionID: "sess-575", UserID: "u1", ProjectDir: "/tmp"},
-		// threadID left empty so release() skips Notify (no real process).
-		recvCh: make(chan *events.Envelope, 1),
-		doneCh: make(chan struct{}),
-		conn:   &appConn{},
+		threadID:    "old-thread",
+		recvCh:      make(chan *events.Envelope, 1),
+		doneCh:      make(chan struct{}),
+		conn:        &appConn{recvCh: oldRecvCh},
 	}
 
-	// ResetContext will Terminate (release) → clear state → Start.
-	// Start may succeed (if codex binary exists) or fail (CI).
-	// Either way, the fact that ResetContext called Start is the core fix.
-	err := w.ResetContext(context.Background())
+	err := wk.ResetContext(context.Background())
 
-	if err != nil {
-		// Start failed — verify it was the expected "reset start" path.
-		require.Contains(t, err.Error(), "codexcli: reset start:")
-	}
-	// If err == nil, Start succeeded with a real process — also fine.
+	// Old conn should be closed.
+	_, ok := <-oldRecvCh
+	require.False(t, ok, "old recvCh should be closed")
 
-	// Verify releaseOnce was re-initialised: closed should be reset to
-	// false by ResetContext before Start was called.
-	w.mu.Lock()
-	closed := w.closed
-	w.mu.Unlock()
-	if err != nil {
-		// Start failed → closed is true (Start set it via release after failure).
-		// But ResetContext did reset it before Start; Start's own release re-set it.
-		// Either way, ResetContext cleared it initially — the logic is correct.
-		_ = closed
-	} else {
-		// Start succeeded → worker is running fresh.
-		t.Cleanup(func() { _ = w.Terminate(context.Background()) })
-	}
+	// thread/start fails because no real process responds.
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: reset thread/start:")
 }
 
 func TestKillCallsKillIfIdle(t *testing.T) {

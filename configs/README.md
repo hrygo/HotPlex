@@ -238,7 +238,7 @@ Worker 进程启动时的工作目录遵循以下优先级覆盖逻辑：
 | `bot_token` | string | — | — | Slack Bot User OAuth Token（`xoxb-` 前缀）。用于调用 Slack Web API 发送消息、更新卡片。通过环境变量 `HOTPLEX_MESSAGING_SLACK_BOT_TOKEN` 设置 |
 | `app_token` | string | — | — | Slack App-Level Token（`xapp-` 前缀）。用于建立 Socket Mode WebSocket 连接。需要在 Slack App 配置中启用 Socket Mode 并生成。通过环境变量 `HOTPLEX_MESSAGING_SLACK_APP_TOKEN` 设置 |
 | `socket_mode` | bool | `true` (代码: `false`) | — | 启用 Socket Mode。Socket Mode 通过 WebSocket 与 Slack 服务器通信，无需公网可访问的 HTTP 端点。关闭则需要配置 Events API URL |
-| `worker_type` | string | `claude_code` | — | 为 Slack 会话创建的 Worker 类型。决定使用哪个适配器启动 Worker 进程（`claude_code` = Claude Code CLI，`opencodeserver` = OpenCode Server） |
+| `worker_type` | string | `claude_code` | — | 为 Slack 会话创建的 Worker 类型。`claude_code` = Claude Code CLI，`opencodeserver` = OpenCode Server，`codex_cli` = Codex CLI，`acp` = ACP 兼容 Agent（JSON-RPC 2.0） |
 | `work_dir` | string | — | — | Worker 进程的工作目录。为空时使用 `worker.default_work_dir`。可按平台设置不同目录 |
 | `dm_policy` | string | `allowlist` | — | 私聊（DM）的访问策略。`open` = 允许所有人，`allowlist` = 仅 `allow_from` + `allow_dm_from` 中的用户，`disabled` = 禁止所有私聊 |
 | `group_policy` | string | `allowlist` | — | 频道和群组 DM 的访问策略。选项同 `dm_policy`。`require_mention: true` 时，即使策略允许，也需要 @机器人 才触发 |
@@ -259,7 +259,7 @@ Worker 进程启动时的工作目录遵循以下优先级覆盖逻辑：
 | `enabled` | bool | `false` | — | 启用飞书适配器。启动时通过 WebSocket 连接到飞书服务器，监听消息事件 |
 | `app_id` | string | — | — | 飞书应用 ID（`cli_` 前缀）。在飞书开放平台创建应用后获取。通过环境变量 `HOTPLEX_MESSAGING_FEISHU_APP_ID` 设置 |
 | `app_secret` | string | — | — | 飞书应用密钥。用于获取 tenant_access_token 调用飞书 API。通过环境变量 `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` 设置 |
-| `worker_type` | string | `claude_code` | — | 为飞书会话创建的 Worker 类型。同 Slack 的 `worker_type` |
+| `worker_type` | string | `claude_code` | — | 为飞书会话创建的 Worker 类型。同 Slack 的 `worker_type`（`claude_code` / `opencodeserver` / `codex_cli` / `acp`） |
 | `work_dir` | string | — | — | Worker 进程工作目录。同 Slack 的 `work_dir` |
 | `dm_policy` | string | `allowlist` | — | 单聊访问策略。选项同 Slack |
 | `group_policy` | string | `allowlist` | — | 群组和话题群访问策略。选项同 Slack |

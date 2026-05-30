@@ -103,6 +103,8 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 	case "model/rerouted":
 		m.trackModelRerouted(params)
 		return nil
+	case "error":
+		return m.mapNotifError(params)
 	case "warning":
 		return m.mapNotifWarning(params)
 	case "turn/started":
@@ -349,6 +351,28 @@ func (m *Mapper) mapNotifWarning(params json.RawMessage) []*events.Envelope {
 		newEnvelope(events.Step, events.StepData{
 			StepType: "warning",
 			Name:     p.Message,
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func (m *Mapper) mapNotifError(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		Error struct {
+			Message           string `json:"message"`
+			AdditionalDetails string `json:"additionalDetails"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil
+	}
+	msg := p.Error.Message
+	if msg == "" {
+		msg = "unknown error"
+	}
+	// Only emit Error; Done is emitted by turn/failed or turn/completed.
+	return []*events.Envelope{
+		newEnvelope(events.Error, events.ErrorData{
+			Code: "CODEX_ERROR", Message: msg,
 		}, m.sessionID, m.nextSeq()),
 	}
 }

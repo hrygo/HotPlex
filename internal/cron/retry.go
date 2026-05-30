@@ -18,12 +18,14 @@ var backoffDurations = []time.Duration{
 // After exhausting the list, it returns 1 hour.
 func backoff(consecutiveErrs int) time.Duration {
 	if consecutiveErrs <= 0 {
-		return backoffDurations[0]
+		return 0
 	}
 	if consecutiveErrs >= len(backoffDurations) {
 		return backoffDurations[len(backoffDurations)-1]
 	}
-	return backoffDurations[consecutiveErrs]
+	// First error (consecutiveErrs=1) should get the shortest backoff (30s).
+	// Subtract 1 so the index maps: 1→0 (30s), 2→1 (1m), 3→2 (5m), etc.
+	return backoffDurations[consecutiveErrs-1]
 }
 
 // maxRetries returns the effective max retries for a job (default 3).

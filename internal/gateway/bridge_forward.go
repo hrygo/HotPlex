@@ -180,6 +180,8 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		if ed, ok := env.Event.Data.(events.ErrorData); ok {
 			fc.lastError = &ed
 		}
+		// When LLM retry is active, buffer the error and suppress forwarding.
+		// The error is flushed only if retry decides NOT to retry (after Done).
 		if b.retryCtrl != nil {
 			cloned := events.Clone(env)
 			cloned.SessionID = sessionID

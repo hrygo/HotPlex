@@ -22,13 +22,15 @@ type Bridge struct {
 	handler    HandlerInterface
 	starter    SessionStarter
 	workerType string
+	acpCommand string
 	workDir    string
+	sandbox    string
 	adapter    atomic.Value // stores PlatformAdapterInterface; set after adapter.Start() via SetAdapter
 }
 
 // NewBridge creates a new platform bridge.
 func NewBridge(log *slog.Logger, platform PlatformType, hub HubInterface,
-	handler HandlerInterface, starter SessionStarter, workerType, workDir string,
+	handler HandlerInterface, starter SessionStarter, workerType, acpCommand, workDir, sandbox string,
 ) *Bridge {
 	return &Bridge{
 		log:        log.With("component", "messaging_bridge", "platform", string(platform)),
@@ -37,7 +39,9 @@ func NewBridge(log *slog.Logger, platform PlatformType, hub HubInterface,
 		handler:    handler,
 		starter:    starter,
 		workerType: workerType,
+		acpCommand: acpCommand,
 		workDir:    workDir,
+		sandbox:    sandbox,
 	}
 }
 
@@ -84,11 +88,14 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 	if b.starter != nil {
 		// Extract platform key from envelope metadata for persistence.
 		platform, platformKey := b.extractPlatformKey(env)
+		if b.acpCommand != "" {
+			platformKey[worker.ACPCommandPlatformKey] = b.acpCommand
+		}
 		var botID string
 		if a := b.getAdapter(); a != nil {
 			botID = a.GetBotID()
 		}
-		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, platform, platformKey, botID); err != nil {
+		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, b.sandbox, platform, platformKey, botID); err != nil {
 			return fmt.Errorf("messaging bridge: session start failed: %w", err)
 		}
 	}

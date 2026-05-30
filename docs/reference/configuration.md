@@ -295,16 +295,40 @@ OpenAI Codex CLI Worker，支持双模式：exec（每次 Turn fork 新进程）
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
-| `command` | string | `codex` | — | Worker 启动命令。支持带子命令 |
-| `model` | string | `""` | — | 模型名称。空值使用 Codex 默认模型（`~/.codex/config.toml`） |
-| `sandbox` | string | `workspace-write` | — | 沙箱模式：`read-only`、`workspace-write`、`danger-full-access` |
-| `approval_mode` | string | `never` | — | 审批模式：`untrusted`（所有操作需审批）、`on-request`（仅高风险操作）、`never`（全自动） |
+| `command` | string | `codex` | `HOTPLEX_WORKER_CODEX_CLI_COMMAND` | Worker 启动命令。支持带子命令 |
+| `model` | string | `""` | `HOTPLEX_WORKER_CODEX_CLI_MODEL` | 模型名称。空值使用 Codex 默认模型（`~/.codex/config.toml`） |
+| `sandbox` | string | `danger-full-access` | `HOTPLEX_WORKER_CODEX_CLI_SANDBOX` | 沙箱模式：`read-only`、`workspace-write`、`danger-full-access` |
+| `approval_mode` | string | `never` | `HOTPLEX_WORKER_CODEX_CLI_APPROVAL_MODE` | 审批模式：`untrusted`（所有操作需审批）、`on-request`（仅高风险操作）、`never`（全自动） |
 | `ephemeral` | bool | `true` | — | 临时会话模式。不持久化到磁盘，Session 结束后数据清除 |
 | `startup_timeout` | duration | `30s` | — | 进程启动超时 |
 | `use_app_server` | bool | `true` | — | 使用持久 app-server 模式（推荐）。`false` 则使用每次 exec 的 one-shot 模式 |
 | `idle_drain_period` | duration | `30m` | — | app-server 模式下空闲排空超时。超时后单例进程关闭 |
 
-> **注意**：Codex CLI Worker 的所有配置项仅支持 YAML 配置，不支持环境变量覆盖。
+#### 3.7.6 acp — ACP 通用 Worker
+
+ACP (Agent Communication Protocol) 通用 Worker，通过 JSON-RPC 2.0 over stdio 连接任何 ACP 兼容的 AI Agent（如 Hermes Agent）。支持流式响应、工具调用、权限请求和 Session 恢复。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `command` | string | `hermes acp` | `HOTPLEX_WORKER_ACP_COMMAND` | ACP Agent 启动命令。支持带子命令，如 `hermes acp` |
+| `auto_approve` | bool | `false` | `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | 自动批准权限请求，无需用户确认 |
+
+**配置示例**：
+
+```yaml
+worker:
+  acp:
+    command: "hermes acp"    # 或其他 ACP 兼容 Agent
+    auto_approve: true       # 自动批准工具调用权限
+```
+
+**使用方式**：在 messaging 层指定 `worker_type: "acp"` 即可启用：
+
+```yaml
+messaging:
+  worker_type: "acp"         # 全局默认
+  # 或 per-platform / per-bot 指定
+```
 
 ---
 

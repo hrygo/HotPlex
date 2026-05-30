@@ -306,8 +306,9 @@ var _ = events.Clone // compile-time check that Clone is accessible
 //  3. No worker, state=CREATED → Start (--session-id)
 //  4. No worker, state=RUNNING/IDLE/TERMINATED → Resume (--resume)
 //     If Resume fails (files gone/corrupted), fall back to Start (--session-id)
-func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, platform string, platformKey map[string]string, botID string) error {
-	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "platform", platform, "platform_key", platformKey, "bot_id", botID)
+func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error {
+	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "sandbox", sandbox, "platform", platform, "platform_key", platformKey, "bot_id", botID)
+	injectSandbox(platformKey, sandbox)
 	si, err := b.sm.Get(ctx, sessionID)
 	if err == nil {
 		if w := b.sm.GetWorker(sessionID); w != nil {
@@ -316,6 +317,9 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 			// is delivered, not silently dropped (bug: worker pointer non-nil after
 			// transitionState nils it, but only after SIGTERM completes asynchronously).
 			if si.State.IsActive() {
+				// Re-inject current sandbox into persisted PlatformKey so
+				// stale values don't remain after bot config changes.
+				injectSandbox(si.PlatformKey, sandbox)
 				return nil
 			}
 		}
@@ -327,6 +331,9 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		// RUNNING/IDLE/TERMINATED — try Resume to preserve conversation history.
 		// If Resume fails (session files deleted or corrupted), fall back to Start.
 		b.log.Info("bridge: orphan platform session, resuming", "session_id", sessionID, "state", si.State)
+		// Re-inject current sandbox into the loaded session so resume uses
+		// the latest config, not a potentially stale persisted value.
+		injectSandbox(si.PlatformKey, sandbox)
 		if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
 			b.log.Warn("bridge: resume failed, falling back to new session",
 				"session_id", sessionID, "state", si.State, "err", err)
@@ -377,7 +384,25 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 
 	// Worker-level reset: Terminate → delete session files → Start fresh.
 	if err := w.ResetContext(ctx); err != nil {
-		return fmt.Errorf("bridge: reset worker: %w", err)
+		if !errors.Is(err, worker.ErrNotImplemented) {
+			return fmt.Errorf("bridge: reset worker: %w", err)
+		}
+		// Worker doesn't support in-place reset — fall back to Terminate+Start.
+		// NOTE(architecture): Terminate then Start on the same struct is safe for
+		// current workers because Start fully reinitializes internal state. A future
+		// WorkerFactory pattern (new struct per reset) would be cleaner but requires
+		// broader refactoring of the worker lifecycle management.
+		if termErr := w.Terminate(ctx); termErr != nil {
+			b.log.Warn("bridge: reset fallback: terminate failed", "session_id", sessionID, "err", termErr)
+		}
+		si, siErr := b.sm.Get(ctx, sessionID)
+		if siErr != nil {
+			return fmt.Errorf("bridge: reset fallback: get session: %w", siErr)
+		}
+		workerInfo := b.prepareWorkerInfo(sessionID, si.UserID, si.WorkDir, si)
+		if startErr := w.Start(ctx, workerInfo); startErr != nil {
+			return fmt.Errorf("bridge: reset fallback: start: %w", startErr)
+		}
 	}
 
 	// Reset accumulator generation-scoped counters.
@@ -572,6 +597,14 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// injectSandbox writes the current sandbox value into the platformKey map
+// so it is persisted and propagated through session resume paths.
+func injectSandbox(platformKey map[string]string, sandbox string) {
+	if sandbox != "" && platformKey != nil {
+		platformKey[worker.SandboxPlatformKey] = sandbox
+	}
+}
+
 // prepareWorkerInfo builds a complete worker.SessionInfo with all standard env
 // injection applied. This consolidates the buildWorkerInfo + injectSlackEnv +
 // injectGatewayContext trio that was previously duplicated across 3 call sites.
@@ -593,6 +626,8 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		WorkerSessionID: si.WorkerSessionID,
 		ConfigEnv:       b.workerEnv,
 		ConfigBlocklist: b.workerEnvBlocklist,
+		Sandbox:         si.PlatformKey[worker.SandboxPlatformKey],
+		ACPCommand:      si.PlatformKey[worker.ACPCommandPlatformKey],
 	}
 
 	// MCP config injection — 3 scenarios:

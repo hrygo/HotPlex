@@ -38,7 +38,7 @@ type SessionConn interface {
 
 // Capabilities describes what a worker adapter supports.
 type Capabilities interface {
-	// Type returns the worker type identifier (e.g. "claude_code", "opencode_server").
+	// Type returns the worker type identifier (e.g. "claude_code", "opencode_server", "codex_cli", "acp").
 	Type() WorkerType
 
 	// SupportsResume returns true if the worker can resume a previous session.
@@ -206,6 +206,12 @@ type SessionInfo struct {
 	PermissionMode string
 	// SkipPermissions bypasses all permission checks (equivalent to --dangerously-skip-permissions).
 	SkipPermissions bool
+	// Sandbox controls the codex CLI sandbox mode ("read-only", "workspace-write", "danger-full-access").
+	// Empty = use config default. Per-bot override propagated from messaging config.
+	Sandbox string
+	// ACPCommand overrides the global ACP agent binary for this session.
+	// Empty = use worker.acp.command config. Per-bot override propagated via platformKey.
+	ACPCommand string
 	// ContinueSession resumes the latest session in the current directory without a session ID.
 	ContinueSession bool
 	// ForkSession, when resuming, creates a new session ID instead of reusing the existing one.
@@ -233,3 +239,11 @@ type SessionInfo struct {
 	// (--include-partial-messages).
 	IncludePartialMessages bool
 }
+
+// SandboxPlatformKey is the platformKey map key used to propagate sandbox config
+// from bridge/executor through session persistence to the worker.
+const SandboxPlatformKey = "_sandbox"
+
+// ACPCommandPlatformKey is the platformKey map key used to propagate per-bot
+// ACP command override from messaging bridge through session persistence to the ACP worker.
+const ACPCommandPlatformKey = "_acp_command"

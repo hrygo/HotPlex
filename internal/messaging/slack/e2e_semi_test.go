@@ -117,6 +117,7 @@ func startRealAdapter(t *testing.T, cfg semiConfig) (*Adapter, *[]capturedCall, 
 		nil,    // starter
 		"noop", // use noop worker to avoid launching real AI
 		"/tmp",
+		"",
 	)
 
 	a := &Adapter{

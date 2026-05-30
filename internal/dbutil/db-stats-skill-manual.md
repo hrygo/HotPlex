@@ -155,7 +155,7 @@ HotPlex 数据库包含 5 张核心表。SQLite 和 PostgreSQL 使用相同的�
 | owner_id | TEXT | TEXT | 所有者 ID |
 | bot_id | TEXT | TEXT | Bot ID |
 | worker_session_id | TEXT | TEXT | Worker 内部 session ID |
-| worker_type | TEXT NOT NULL | TEXT NOT NULL | `claude_code` / `opencode_server` |
+| worker_type | TEXT NOT NULL | TEXT NOT NULL | `claude_code` / `opencode_server` / `codex_cli` / `acp` |
 | state | TEXT CHECK | TEXT CHECK | `created`/`running`/`idle`/`terminated`/`deleted` |
 | platform | TEXT | TEXT | `feishu` / `slack` / 空 |
 | platform_key_json | TEXT | TEXT | 平台路由键 JSON |

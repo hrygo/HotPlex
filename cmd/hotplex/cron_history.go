@@ -20,8 +20,11 @@ func newCronHistoryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "history <id|name>",
 		Short: "Show execution history for a cron job",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("requires an <id|name> argument.\nSee 'hotplex cron history --help' for usage")
+			}
 			return withStoreAndEvents(context.Background(), configPath, func(store croncli.Store, evStore eventstore.TurnQuerier) error {
 				stats, err := croncli.QueryHistory(context.Background(), store, evStore, args[0])
 				if err != nil {

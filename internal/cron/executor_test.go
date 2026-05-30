@@ -96,7 +96,7 @@ func TestExecutor_Execute_StartFails(t *testing.T) {
 	bridge := &mockBridge{startErr: errTestNotFound}
 	sm := &mockSessionStateChecker{workers: map[string]worker.Worker{}}
 
-	e := NewExecutor(slog.Default(), bridge, sm)
+	e := NewExecutor(slog.Default(), bridge, sm, "")
 	_, err := e.Execute(context.Background(), testJob(), 5*time.Minute)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "start cron session")
@@ -108,7 +108,7 @@ func TestExecutor_Execute_WorkerNotFound(t *testing.T) {
 	bridge := &mockBridge{}
 	sm := &mockSessionStateChecker{workers: map[string]worker.Worker{}}
 
-	e := NewExecutor(slog.Default(), bridge, sm)
+	e := NewExecutor(slog.Default(), bridge, sm, "")
 	_, err := e.Execute(context.Background(), testJob(), 5*time.Minute)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "worker not found")
@@ -122,7 +122,7 @@ func TestExecutor_Execute_InputFails(t *testing.T) {
 		defaultWorker: &mockWorker{inputErr: errTestNotFound},
 	}
 
-	e := NewExecutor(slog.Default(), bridge, sm)
+	e := NewExecutor(slog.Default(), bridge, sm, "")
 	_, err := e.Execute(context.Background(), testJob(), 5*time.Minute)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "input prompt")
@@ -137,7 +137,7 @@ func TestExecutor_Execute_TimeoutWaiting(t *testing.T) {
 		defaultWorker:  &mockWorker{},
 	}
 
-	e := NewExecutor(slog.Default(), bridge, sm)
+	e := NewExecutor(slog.Default(), bridge, sm, "")
 	_, err := e.Execute(context.Background(), testJob(), 100*time.Millisecond)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeout")
@@ -153,7 +153,7 @@ func TestExecutor_Execute_Success(t *testing.T) {
 		defaultWorker:  &mockWorker{},
 	}
 
-	e := NewExecutor(slog.Default(), bridge, sm)
+	e := NewExecutor(slog.Default(), bridge, sm, "")
 
 	gotKey, err := e.Execute(context.Background(), testJob(), 5*time.Second)
 	require.NoError(t, err)

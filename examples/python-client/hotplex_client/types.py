@@ -27,7 +27,8 @@ class WorkerType(StrEnum):
 
     CLAUDE_CODE = "claude_code"
     OPENCODE_SERVER = "opencode_server"
-    PI_MONO = "pi-mono"
+    CODEX_CLI = "codex_cli"
+    ACP = "acp"
 
 
 class SessionState(StrEnum):

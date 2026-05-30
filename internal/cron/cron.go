@@ -44,6 +44,7 @@ type Config struct {
 	DefaultTimeoutSec int    `mapstructure:"default_timeout_sec"`
 	TickIntervalSec   int    `mapstructure:"tick_interval_sec"`
 	YAMLConfigPath    string `mapstructure:"yaml_config_path"`
+	DefaultSandbox    string `mapstructure:"default_sandbox,omitempty"`
 }
 
 // WorkDirResolver determines the effective workdir for a cron job when job.WorkDir is empty.
@@ -87,7 +88,7 @@ func New(deps Deps) *Scheduler {
 		defaultTimeout = time.Duration(deps.Cfg.DefaultTimeoutSec) * time.Second
 	}
 	s.defaultTimeout = defaultTimeout
-	s.executor = NewExecutor(deps.Log, deps.Bridge, deps.SessionMgr)
+	s.executor = NewExecutor(deps.Log, deps.Bridge, deps.SessionMgr, deps.Cfg.DefaultSandbox)
 	if deps.AttachedRouter != nil {
 		s.attachedHandler = NewAttachedSessionHandler(deps.Log, deps.AttachedRouter)
 	}
@@ -337,16 +338,17 @@ func (s *Scheduler) loadFromDB(ctx context.Context) error {
 }
 
 // withinGracePeriod checks whether a missed job is within its grace period.
-// Grace period = 50% of schedule interval, capped at 2 hours.
+// Grace period = 50% of schedule interval, capped at 30 minutes.
 func (s *Scheduler) withinGracePeriod(job *CronJob, now time.Time) bool {
 	missedAt := time.UnixMilli(job.State.NextRunAtMs)
 	elapsed := now.Sub(missedAt)
 
 	interval := s.scheduleInterval(job)
-	grace := interval / 2
-	if grace > 2*time.Hour {
-		grace = 2 * time.Hour
-	}
+	// Grace period = 50% of schedule interval, capped at 30 minutes.
+	// NOTE(behavioral): Previously capped at 2h. The 30min cap means daily/weekly
+	// jobs whose grace window exceeds 30min will not be compensated after a gateway
+	// downtime exceeding 30 minutes. This is intentional — 2h was overly generous.
+	grace := min(interval/2, 30*time.Minute)
 
 	return elapsed <= grace
 }
@@ -381,6 +383,9 @@ func (s *Scheduler) scheduleInterval(job *CronJob) time.Duration {
 
 // scheduleCatchUp executes missed jobs with staggering.
 // First 5 jobs fire immediately; remaining jobs are staggered 5s apart.
+// NOTE: Each catch-up job acquires a concurrency slot via tryAcquireSlot for
+// the full delay + execution duration. This is acceptable because catch-up is
+// a cold-start path (not performance-critical) and concurrency is bounded.
 func (s *Scheduler) scheduleCatchUp(jobs []*CronJob) {
 	if len(jobs) == 0 {
 		return
@@ -486,28 +491,46 @@ func (s *Scheduler) ReloadIndex() {
 }
 
 // rebuildIndex refreshes the in-memory index from the store.
+// Store writes are performed outside s.mu to avoid lock-ordering deadlock
+// with CreateJob/UpdateJob (which acquire writeMu then s.mu).
 func (s *Scheduler) rebuildIndex() {
-	jobs, err := s.store.List(context.Background(), false)
+	ctx, cancel := s.persistTimeout()
+	defer cancel()
+
+	jobs, err := s.store.List(ctx, false)
 	if err != nil {
 		s.log.Error("cron: rebuild index failed", "err", err)
 		return
 	}
 
+	// First pass: build index and collect state patches under lock.
+	var statePatches []struct {
+		id    string
+		state CronJobState
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.jobs = make(map[string]*CronJob, len(jobs))
 	now := time.Now()
 	for _, j := range jobs {
 		if j.Enabled && j.State.NextRunAtMs <= 0 {
-			if next, err := NextRun(j.Schedule, now); err == nil && !next.IsZero() {
+			if next, nerr := NextRun(j.Schedule, now); nerr == nil && !next.IsZero() {
+				j = j.Clone()
 				j.State.NextRunAtMs = next.UnixMilli()
-				if err := s.store.UpdateState(context.Background(), j.ID, j.State); err != nil {
-					s.log.Error("cron: persist next_run on reload", "job_id", j.ID, "err", err)
-				}
+				statePatches = append(statePatches, struct {
+					id    string
+					state CronJobState
+				}{j.ID, j.State})
 			}
 		}
 		s.jobs[j.ID] = j
+	}
+	s.mu.Unlock()
+
+	// Second pass: persist state patches outside the lock.
+	for _, p := range statePatches {
+		if err := s.store.UpdateState(ctx, p.id, p.state); err != nil {
+			s.log.Error("cron: persist next_run on reload", "job_id", p.id, "err", err)
+		}
 	}
 }
 

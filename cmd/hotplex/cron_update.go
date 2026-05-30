@@ -23,8 +23,11 @@ Schedule format:
   --schedule "cron:*/5 * * * *"
   --schedule "every:30m"
   --schedule "at:2026-01-01T00:00:00Z"`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("requires an <id|name> argument.\nSee 'hotplex cron update --help' for usage")
+			}
 			return withStore(context.Background(), configPath, func(store croncli.Store) error {
 				job, err := croncli.ResolveJob(store, context.Background(), args[0])
 				if err != nil {
@@ -74,7 +77,7 @@ Schedule format:
 	cmd.Flags().Int("max-retries", 0, "max retries for failed one-shot jobs")
 	cmd.Flags().Int("max-runs", 0, "max executions before auto-disable (required for every/cron)")
 	cmd.Flags().String("expires-at", "", "auto-disable after this time RFC3339 (required for every/cron)")
-	cmd.Flags().String("worker-type", "", "AI Agent engine to use (e.g. claude_code, opencode_server)")
+	cmd.Flags().String("worker-type", "", "AI Agent engine (claude_code|opencode_server|codex_cli|acp)")
 	return cmd
 }
 
@@ -90,7 +93,8 @@ func applyFlags(cmd *cobra.Command, job *cron.CronJob) bool {
 		}
 	}
 	if cmd.Flags().Changed("message") {
-		job.Payload.Message, _ = cmd.Flags().GetString("message")
+		msg, _ := cmd.Flags().GetString("message")
+		job.Payload.Message = cron.SanitizePrompt(msg)
 		changed = true
 	}
 	if cmd.Flags().Changed("description") {

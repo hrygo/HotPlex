@@ -24,6 +24,18 @@ const WORKER_OPTIONS: WorkerOption[] = [
     description: "OpenCode Server protocol adapter",
     icon: "M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
   },
+  {
+    id: "codex_cli",
+    name: "Codex CLI",
+    description: "OpenAI Codex CLI agent",
+    icon: "M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z",
+  },
+  {
+    id: "acp",
+    name: "ACP Agent",
+    description: "Any ACP-compatible agent via JSON-RPC 2.0",
+    icon: "M13 10V3L4 14h7v7l9-11h-7z",
+  },
 ];
 
 interface NewSessionModalProps {

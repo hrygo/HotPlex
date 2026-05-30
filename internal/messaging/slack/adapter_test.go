@@ -1887,7 +1887,8 @@ func TestAdapter_ConfigureWith_BridgeSetsWorkDir(t *testing.T) {
 	testBridge := messaging.NewBridge(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		messaging.PlatformSlack,
-		nil, nil, nil, "claude_code", "/tmp/hotplex/workspace",
+		nil, nil, nil, "claude_code", "", "/tmp/hotplex/workspace",
+		"",
 	)
 
 	a := &Adapter{}
@@ -1918,7 +1919,8 @@ func TestAdapter_MakeEnvelope(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		messaging.PlatformSlack,
 		nil, nil, nil,
-		"claude_code", "/tmp/hotplex/workspace",
+		"claude_code", "", "/tmp/hotplex/workspace",
+		"",
 	)
 
 	a := &Adapter{botID: "B123"}
@@ -1943,7 +1945,8 @@ func TestAdapter_MakeEnvelope_CustomWorkDir(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		messaging.PlatformSlack,
 		nil, nil, nil,
-		"claude_code", "/default",
+		"claude_code", "", "/default",
+		"",
 	)
 
 	a := &Adapter{botID: "B123"}

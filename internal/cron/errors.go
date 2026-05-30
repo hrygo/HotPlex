@@ -1,6 +1,9 @@
 package cron
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 type errClass string
 
@@ -24,13 +27,21 @@ func classifyError(err error) errClass {
 	if containsAny(msg, "rate limit", "429") {
 		return errClassRateLimit
 	}
-	if containsAny(msg, "500", "502", "503", "504") {
+	if isHTTPStatus(msg) {
 		return errClassServer
 	}
 	if containsAny(msg, "connection refused", "temporary") {
 		return errClassTimeout
 	}
 	return errClassExec
+}
+
+// httpStatusRe is a pre-compiled regex that matches standalone HTTP status codes,
+// using word boundaries to avoid false positives from substrings like "500ms".
+var httpStatusRe = regexp.MustCompile(`\b(?:500|502|503|504)\b`)
+
+func isHTTPStatus(msg string) bool {
+	return httpStatusRe.MatchString(msg)
 }
 
 // errorType returns the metric label for an execution error.

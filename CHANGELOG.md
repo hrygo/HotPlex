@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.22.0] - 2026-05-30
+
+### Summary
+
+v1.22.0 是一次 minor 版本更新，聚焦于 **ACP Worker 全面实现**、**Cron 并发安全审计** 和 **CodexCLI 生命周期修复**。新增 ACP (Agent Client Protocol) Worker 适配器，使任何 ACP 兼容 Agent（如 Hermes）可作为一线 Worker 运行。Cron 模块经过端到端审计，修复 6 个 P1 竞态条件。CodexCLI 获得 reset 轻量化重构和 zombie 进程修复。Worker sandbox 支持 per-bot 粒度配置，Slack 适配器新增 Assistant branding 能力。
+
+### Added
+
+- **Worker/ACP**: ACP Worker adapter — full implementation of JSON-RPC 2.0 over stdio protocol with bidirectional ACP↔AEP mapping (11 notification types), permission bridging, priority-aware backpressure, and 12 rounds of PR review hardening. 24 tests with -race flag. (#569, #579)
+- **Worker/Codex**: Per-bot sandbox field in Slack/Feishu bot configs for role-based access control.
+- **Messaging/Slack**: Assistant branding — DisplayName/IconEmoji support with bot-level override for custom assistant status. DataTableBlock for skills list rendering. (#565)
+- **Worker**: Add NO_PROXY to worker environment — bypass system proxy (e.g. Clash) for localhost calls, preventing 502 Bad Gateway on local CLIProxyAPI requests.
+
+### Security
+
+- **Worker/Codex**: Default sandbox changed from `workspace-write` to `danger-full-access`. Existing deployments upgrading to v1.22.0 will have Codex workers silently elevated to unrestricted access. Set `sandbox: "workspace-write"` per-bot or at platform level to restore the old behavior.
+
+### Changed
+
+- **Worker/CodexCLI**: ResetContext now uses lightweight thread swap on the same app-server process instead of full Terminate→Start cycle, eliminating 30s reset timeout. (#576)
+- **Worker/CodexCLI**: Skip DEBUG log for high-frequency delta notifications — reduces codex log output from ~80% to <5% of total.
+- **Cron/CLI**: `--platform-key` now merges over environment variable keys instead of replacing them. Previous behavior: CLI keys fully replaced env keys. New behavior: env keys serve as baseline, CLI keys override.
+- **Cron/CLI**: `--attach` with recurring schedules (`every:`) no longer sets `DeleteAfterRun=true`. Only `at:` one-shot attach jobs auto-delete. Recurring attach jobs use `max_runs`/`expires_at` for lifecycle management.
+
+### Fixed
+
+- **Cron**: End-to-end audit — fix 6 P1 race conditions (slot leak, ABBA deadlock, narrow SetEnabled, cancel leak, CLI timestamps, maxJobs gate), 8 P2 design gaps (platform key merge, delivery error escalation, injection detection hardening, upsert atomicity, persist timeout), and 4 P3 edge cases (backoff off-by-one, sanitize boundary). (#574)
+- **Cron**: Grace period cap reduced from 2h to `min(interval/2, 30min)` — gateway downtime exceeding 30min will skip missed cron executions. Previously daily jobs had up to 12h grace, weekly up to 84h. (#574)
+- **Cron**: Resolve platform keys from env vars even with explicit --platform flag, preventing missing channel_id/chat_id in created jobs.
+- **Cron**: Use background timeout in onTick persist calls — s.ctx gets cancelled during Shutdown causing silent persist failures.
+- **CLI/Cron**: Improve missing-arg error messages with --help guidance instead of generic "accepts 1 arg(s), received 0".
+- **Worker/CodexCLI**: Fix reset killing session + zombie process lingering 30min — ResetContext now properly rebuilds thread, Kill immediately force-kills idle singletons. (#575, #576)
+- **Release**: Use awk index() for changelog extraction to prevent field-splitting errors on bracketed version strings.
+
 ## [1.21.0] - 2026-05-29
 
 ### Summary
