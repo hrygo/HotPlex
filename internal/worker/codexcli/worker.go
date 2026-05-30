@@ -403,9 +403,9 @@ type AppServerWorker struct {
 	sessionID   string
 	conn        *appConn
 
-	// savedSession preserves the SessionInfo from the most recent Start()
+	// origSession preserves the SessionInfo from the most recent Start()
 	// call so that ResetContext can re-establish a fresh thread after cleanup.
-	savedSession worker.SessionInfo
+	origSession worker.SessionInfo
 }
 
 // appConn implements worker.SessionConn for the app-server mode.
@@ -509,7 +509,7 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	w.threadID = result.Thread.ID
 	w.sessionID = session.SessionID
 	w.userID = session.UserID
-	w.savedSession = session
+	w.origSession = session
 
 	w.recvCh = w.manager.Subscribe(w.threadID, w.sessionID)
 	w.commands = NewServerCommander(w.manager, w.threadID)
@@ -623,7 +623,7 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 		w.Log.Warn("codexcli: reset terminate", "error", err)
 	}
 	w.mu.Lock()
-	saved := w.savedSession
+	saved := w.origSession
 	w.threadID = ""
 	w.recvCh = nil
 	w.closed = false

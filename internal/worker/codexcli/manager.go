@@ -711,11 +711,19 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 // distinguish a forceful termination (zombie GC) from a graceful release
 // (Terminate), avoiding the 30-minute idle drain wait.
 //
+// KillIfIdle immediately kills the singleton process when refs == 0.
+//
+// This skips the graceful SIGTERM→5s→SIGKILL protocol used by Shutdown()
+// because an idle process has no active sessions — there is nothing to
+// drain or notify.  Contrast with opencodeserver's Kill() which also
+// does not force-kill; here the urgency is higher because zombie GC
+// expects immediate cleanup, not a 30-minute idle drain.
+//
 // We use ForceKill(pgid) directly instead of proc.Manager.Kill() to avoid
-// a deadlock: Manager.Kill() holds proc.mu while calling cmd.Wait(), but
-// monitorProcess may already hold proc.mu in its own Wait() call.
-// ForceKill sends SIGKILL without acquiring proc.mu; monitorProcess will
-// observe the exit and clean up.
+// a deadlock: both Manager.Kill() and monitorProcess's Wait() acquire
+// proc.mu internally and call cmd.Wait() (serialised by waitOnce).
+// ForceKill sends SIGKILL by PGID without touching proc.mu; monitorProcess
+// naturally observes the exit via its Wait() and runs cleanup.
 func (m *CodexAppServerManager) KillIfIdle() {
 	m.mu.Lock()
 	if m.idleTimer != nil {

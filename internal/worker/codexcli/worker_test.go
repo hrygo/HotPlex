@@ -1659,7 +1659,7 @@ func testConfig575() func() {
 func TestResetContextClearsStateAndResetsOnce(t *testing.T) {
 	// Verify ResetContext resets closed, releaseOnce, and doneCh before
 	// attempting Start. This is the core state-cleanup logic of #575.
-	// We test with savedSession.SessionID="" so Start is skipped.
+	// We test with origSession.SessionID="" so Start is skipped.
 	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
 		IdleDrainPeriod: time.Minute,
 	})
@@ -1675,8 +1675,8 @@ func TestResetContextClearsStateAndResetsOnce(t *testing.T) {
 	w.threadID = ""
 	w.mu.Unlock()
 
-	// savedSession is zero-value (SessionID="") so ResetContext won't call Start.
-	w.savedSession = worker.SessionInfo{}
+	// origSession is zero-value (SessionID="") so ResetContext won't call Start.
+	w.origSession = worker.SessionInfo{}
 
 	err := w.ResetContext(context.Background())
 	require.NoError(t, err)
@@ -1690,7 +1690,7 @@ func TestResetContextClearsStateAndResetsOnce(t *testing.T) {
 }
 
 func TestResetContextRestartsFromSavedSession(t *testing.T) {
-	// Verify ResetContext preserves savedSession and calls Start() again.
+	// Verify ResetContext preserves origSession and calls Start() again.
 	// Requires codex binary because ResetContext calls Start internally.
 	if testing.Short() {
 		t.Skip("skipping: requires codex binary")
@@ -1703,9 +1703,9 @@ func TestResetContextRestartsFromSavedSession(t *testing.T) {
 	// This makes Start() return an error confirming it was called.
 
 	w := &AppServerWorker{
-		BaseWorker:   base.NewBaseWorker(slog.Default(), nil),
-		manager:      mgr,
-		savedSession: worker.SessionInfo{SessionID: "sess-575", UserID: "u1", ProjectDir: "/tmp"},
+		BaseWorker:  base.NewBaseWorker(slog.Default(), nil),
+		manager:     mgr,
+		origSession: worker.SessionInfo{SessionID: "sess-575", UserID: "u1", ProjectDir: "/tmp"},
 		// threadID left empty so release() skips Notify (no real process).
 		recvCh: make(chan *events.Envelope, 1),
 		doneCh: make(chan struct{}),
@@ -1820,7 +1820,7 @@ func TestIntegrationStartSavesSessionAndResetRestarts(t *testing.T) {
 	t.Cleanup(func() { _ = w.Terminate(context.Background()) })
 
 	w.mu.Lock()
-	saved := w.savedSession
+	saved := w.origSession
 	w.mu.Unlock()
 	require.Equal(t, "sess-integ-575", saved.SessionID)
 	require.Equal(t, "user-1", saved.UserID)
