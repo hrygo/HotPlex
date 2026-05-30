@@ -522,16 +522,12 @@ func TestMapNotificationError(t *testing.T) {
 
 	envs := m.MapNotification("error", json.RawMessage(
 		`{"threadId":"thr-1","error":{"message":"API request failed: 502"}}`))
-	require.Len(t, envs, 2)
+	require.Len(t, envs, 1)
 	require.Equal(t, events.Error, envs[0].Event.Type)
 	ed, ok := envs[0].Event.Data.(events.ErrorData)
 	require.True(t, ok)
 	require.Equal(t, events.ErrorCode("CODEX_ERROR"), ed.Code)
 	require.Equal(t, "API request failed: 502", ed.Message)
-	require.Equal(t, events.Done, envs[1].Event.Type)
-	dd, ok := envs[1].Event.Data.(events.DoneData)
-	require.True(t, ok)
-	require.False(t, dd.Success)
 }
 
 func TestMapNotificationErrorEmptyMessage(t *testing.T) {
@@ -540,7 +536,7 @@ func TestMapNotificationErrorEmptyMessage(t *testing.T) {
 	m := NewMapper("session-1")
 
 	envs := m.MapNotification("error", json.RawMessage(`{"threadId":"thr-1","error":{}}`))
-	require.Len(t, envs, 2)
+	require.Len(t, envs, 1)
 	ed, _ := envs[0].Event.Data.(events.ErrorData)
 	require.Equal(t, "unknown error", ed.Message)
 }
@@ -1717,6 +1713,7 @@ func TestResetContextRestartsFromSavedSession(t *testing.T) {
 	mgr.stdin = w
 	mgr.mu.Lock()
 	mgr.refs = 1
+	mgr.state = stateRunning
 	mgr.mu.Unlock()
 	// Drain pipe in background so Notify/Call writes don't block.
 	done := make(chan struct{})
