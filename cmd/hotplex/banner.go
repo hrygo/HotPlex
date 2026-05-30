@@ -67,7 +67,7 @@ type AdapterStatus struct {
 	Name         string
 	BotName      string
 	WorkerType   string
-	WorkerDetail string // e.g. ACP agent name
+	WorkerDetail string // e.g. ACP agent command
 	Started      bool
 }
 
@@ -177,15 +177,11 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 			if !a.Started {
 				icon = red("✗")
 			}
-			line := "    " + name + "  " + icon
-			if a.WorkerType != "" {
-					wt := a.WorkerType
-					if a.WorkerDetail != "" {
-						wt += "/" + a.WorkerDetail
-					}
-					line += "  " + dim("("+wt+")")
-				}
-			lines = append(lines, line)
+			wt := a.WorkerType
+			if a.WorkerDetail != "" {
+				wt += "/" + a.WorkerDetail
+			}
+			lines = append(lines, fmt.Sprintf("    %-16s %s %s", name, icon, dim(wt)))
 		}
 	}
 

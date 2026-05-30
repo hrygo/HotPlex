@@ -195,6 +195,11 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				}
 			}
 
+			workerDetail := ""
+			if botWorkerType == "acp" && botACPCommand != "" {
+				workerDetail = botACPCommand
+			}
+
 			adapter, err := messaging.New(pt, log)
 			if err != nil {
 				log.Warn("messaging: skip adapter", "platform", pt, "bot", entry.Name, "err", err)
@@ -235,7 +240,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 
 			if err := adapter.Start(ctx); err != nil {
 				log.Warn("messaging: start failed", "platform", pt, "bot", entry.Name, "err", err)
-				statuses = append(statuses, AdapterStatus{Name: string(pt), BotName: entry.Name, WorkerType: botWorkerType, Started: false})
+				statuses = append(statuses, AdapterStatus{Name: string(pt), BotName: entry.Name, WorkerType: botWorkerType, WorkerDetail: workerDetail, Started: false})
 				continue
 			}
 
@@ -283,7 +288,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				log.Error("messaging: adapter platform mismatch", "platform", pt, "bot", entry.Name, "err", err)
 			}
 			adapters = append(adapters, adapter)
-			statuses = append(statuses, AdapterStatus{Name: string(pt), BotName: entry.Name, WorkerType: botWorkerType, Started: true})
+			statuses = append(statuses, AdapterStatus{Name: string(pt), BotName: entry.Name, WorkerType: botWorkerType, WorkerDetail: workerDetail, Started: true})
 			log.Info("messaging: adapter started", "platform", pt, "bot", entry.Name, "bot_id", entry.BotID)
 		}
 	}
