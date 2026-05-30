@@ -21,6 +21,8 @@ v1.22.0 是一次 minor 版本更新，聚焦于 **ACP Worker 全面实现**、*
 
 - **Worker/CodexCLI**: ResetContext now uses lightweight thread swap on the same app-server process instead of full Terminate→Start cycle, eliminating 30s reset timeout. (#576)
 - **Worker/CodexCLI**: Skip DEBUG log for high-frequency delta notifications — reduces codex log output from ~80% to <5% of total.
+- **Cron/CLI**: `--platform-key` now merges over environment variable keys instead of replacing them. Previous behavior: CLI keys fully replaced env keys. New behavior: env keys serve as baseline, CLI keys override.
+- **Cron/CLI**: `--attach` with recurring schedules (`every:`) no longer sets `DeleteAfterRun=true`. Only `at:` one-shot attach jobs auto-delete. Recurring attach jobs use `max_runs`/`expires_at` for lifecycle management.
 
 ### Fixed
 

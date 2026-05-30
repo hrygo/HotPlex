@@ -51,7 +51,7 @@ HotPlex Gateway 支持同时运行多个 AI Worker 实例，通过 Session 隔�
   - 支持流式文本/推理输出、工具调用、权限请求
   - 支持 Session 恢复（`session/load`）
   - 模型无关：由 Agent 侧决定使用哪个 LLM
-  - 通过 `worker.acp.command` 配置 Agent 启动命令（默认 `hermes-acp`）
+  - 通过 `worker.acp.command` 配置 Agent 启动命令（默认 `hermes acp`）
 - **生命周期**：app-server 模式首次使用时启动，空闲排空后关闭；exec 模式每次执行后终止
 - **特点**：
   - 基于 OpenAI Codex CLI，支持沙箱隔离（read-only / workspace-write / danger-full-access）

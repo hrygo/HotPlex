@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -118,11 +119,13 @@ Schedule format:
 				}
 
 				// Enforce max jobs limit (best-effort for out-of-process CLI).
-				if err := croncli.CheckMaxJobs(context.Background(), store, configPath); err != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := croncli.CheckMaxJobs(ctx, store, configPath); err != nil {
 					return err
 				}
 
-				if err := store.Create(context.Background(), job); err != nil {
+				if err := store.Create(ctx, job); err != nil {
 					return fmt.Errorf("create job: %w", err)
 				}
 
