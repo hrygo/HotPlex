@@ -1,7 +1,6 @@
 package acp
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"strings"
@@ -37,9 +36,9 @@ func TestReadMessage_Response(t *testing.T) {
 	t.Parallel()
 
 	input := `{"jsonrpc":"2.0","id":1,"result":{"sessionId":"abc-123"}}` + "\n"
-	r := bufio.NewReader(strings.NewReader(input))
+	scan := NewScanner(strings.NewReader(input))
 
-	msg, err := ReadMessage(r)
+	msg, err := ReadMessage(scan)
 	require.NoError(t, err)
 
 	resp, ok := msg.(*JSONRPCResponse)
@@ -58,9 +57,9 @@ func TestReadMessage_Notification(t *testing.T) {
 	t.Parallel()
 
 	input := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1"}}` + "\n"
-	r := bufio.NewReader(strings.NewReader(input))
+	scan := NewScanner(strings.NewReader(input))
 
-	msg, err := ReadMessage(r)
+	msg, err := ReadMessage(scan)
 	require.NoError(t, err)
 
 	notif, ok := msg.(*JSONRPCNotification)
@@ -72,9 +71,9 @@ func TestReadMessage_Request(t *testing.T) {
 	t.Parallel()
 
 	input := `{"jsonrpc":"2.0","id":5,"method":"session/request_permission","params":{}}` + "\n"
-	r := bufio.NewReader(strings.NewReader(input))
+	scan := NewScanner(strings.NewReader(input))
 
-	msg, err := ReadMessage(r)
+	msg, err := ReadMessage(scan)
 	require.NoError(t, err)
 
 	req, ok := msg.(*JSONRPCRequest)
@@ -86,9 +85,9 @@ func TestReadMessage_ErrorResponse(t *testing.T) {
 	t.Parallel()
 
 	input := `{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"Invalid params"}}` + "\n"
-	r := bufio.NewReader(strings.NewReader(input))
+	scan := NewScanner(strings.NewReader(input))
 
-	msg, err := ReadMessage(r)
+	msg, err := ReadMessage(scan)
 	require.NoError(t, err)
 
 	resp, ok := msg.(*JSONRPCResponse)
@@ -102,21 +101,43 @@ func TestReadMessage_BlankLine(t *testing.T) {
 	t.Parallel()
 
 	input := "\n\n" + `{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"
-	r := bufio.NewReader(strings.NewReader(input))
+	scan := NewScanner(strings.NewReader(input))
 
 	// Skip blank lines.
-	msg, err := ReadMessage(r)
+	msg, err := ReadMessage(scan)
 	require.NoError(t, err)
 	require.Nil(t, msg)
 
-	msg, err = ReadMessage(r)
+	msg, err = ReadMessage(scan)
 	require.NoError(t, err)
 	require.Nil(t, msg)
 
-	msg, err = ReadMessage(r)
+	msg, err = ReadMessage(scan)
 	require.NoError(t, err)
 	_, ok := msg.(*JSONRPCResponse)
 	require.True(t, ok)
+}
+
+func TestReadMessage_InvalidVersion(t *testing.T) {
+	t.Parallel()
+
+	input := `{"jsonrpc":"1.0","id":1,"result":{}}` + "\n"
+	scan := NewScanner(strings.NewReader(input))
+
+	_, err := ReadMessage(scan)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid jsonrpc version")
+}
+
+func TestReadMessage_MissingVersion(t *testing.T) {
+	t.Parallel()
+
+	input := `{"id":1,"result":{}}` + "\n"
+	scan := NewScanner(strings.NewReader(input))
+
+	_, err := ReadMessage(scan)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid jsonrpc version")
 }
 
 func TestRoundtrip(t *testing.T) {
@@ -131,7 +152,7 @@ func TestRoundtrip(t *testing.T) {
 	}
 	require.NoError(t, WriteMessage(&buf, orig))
 
-	msg, err := ReadMessage(bufio.NewReader(&buf))
+	msg, err := ReadMessage(NewScanner(&buf))
 	require.NoError(t, err)
 
 	req, ok := msg.(*JSONRPCRequest)

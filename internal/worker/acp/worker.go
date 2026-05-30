@@ -1,7 +1,6 @@
 package acp
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -150,7 +149,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Create client.
 	client := w.testClient
 	if client == nil {
-		client = NewACPClient(stdin, bufio.NewReader(stdout), w.Log)
+		client = NewACPClient(stdin, stdout, w.Log)
 	}
 	w.client = client
 
@@ -359,6 +358,16 @@ func (w *Worker) HandleElicitationResponse(_ context.Context, _, _ string, _ map
 // ─── readLoop ────────────────────────────────────────────────────────────────
 
 func (w *Worker) readLoop(ctx context.Context) {
+	defer func() {
+		// Clean up stale pending permission entries when read loop exits
+		// (agent disconnected or context cancelled). Prevents accumulation
+		// if agent crashes mid-permission before Terminate is called.
+		w.pendingPerm.Range(func(key, _ any) bool {
+			w.pendingPerm.Delete(key)
+			return true
+		})
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():

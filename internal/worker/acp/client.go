@@ -17,10 +17,10 @@ import (
 // ACPClient manages the JSON-RPC 2.0 lifecycle with an ACP agent process.
 // It owns the read loop goroutine that dispatches incoming messages.
 type ACPClient struct {
-	stdin  io.Writer
-	stdout *bufio.Reader
-	log    *slog.Logger
-	nextID atomic.Int64
+	stdin   io.Writer
+	scanner *bufio.Scanner
+	log     *slog.Logger
+	nextID  atomic.Int64
 
 	mu      sync.Mutex
 	pending map[string]chan *JSONRPCResponse
@@ -37,13 +37,13 @@ type ACPClient struct {
 }
 
 // NewACPClient creates a new ACP client communicating over the given pipes.
-func NewACPClient(stdin io.Writer, stdout *bufio.Reader, log *slog.Logger) *ACPClient {
+func NewACPClient(stdin io.Writer, stdout io.Reader, log *slog.Logger) *ACPClient {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &ACPClient{
 		stdin:          stdin,
-		stdout:         stdout,
+		scanner:        NewScanner(stdout),
 		log:            log,
 		pending:        make(map[string]chan *JSONRPCResponse),
 		NotificationCh: make(chan *JSONRPCNotification, 64),
@@ -220,7 +220,7 @@ func (c *ACPClient) readLoop(ctx context.Context) {
 		default:
 		}
 
-		msg, err := ReadMessage(c.stdout)
+		msg, err := ReadMessage(c.scanner)
 		if err != nil {
 			if ctx.Err() != nil {
 				return // context cancelled, expected
@@ -287,7 +287,10 @@ func (c *ACPClient) call(ctx context.Context, method string, params any) (*JSONR
 		c.mu.Unlock()
 	}()
 
-	if err := WriteMessage(c.stdin, req); err != nil {
+	c.writeMu.Lock()
+	err := WriteMessage(c.stdin, req)
+	c.writeMu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 

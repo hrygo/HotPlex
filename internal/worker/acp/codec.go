@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -48,6 +49,20 @@ func (e *JSONRPCError) Error() string {
 
 // ─── NDJSON Codec ────────────────────────────────────────────────────────────
 
+// Per-line size limits for bufio.Scanner (matching proc/manager pattern).
+const (
+	scannerInitSize = 64 * 1024        // 64 KB initial capacity
+	scannerMaxSize  = 10 * 1024 * 1024 // 10 MB hard cap
+)
+
+// NewScanner creates a bufio.Scanner with the standard ACP size limits.
+func NewScanner(r io.Reader) *bufio.Scanner {
+	scan := bufio.NewScanner(r)
+	buf := make([]byte, scannerInitSize)
+	scan.Buffer(buf, scannerMaxSize)
+	return scan
+}
+
 // WriteMessage serializes a JSON-RPC message and writes it as a single NDJSON line.
 func WriteMessage(w io.Writer, msg any) error {
 	data, err := json.Marshal(msg)
@@ -65,12 +80,18 @@ func WriteMessage(w io.Writer, msg any) error {
 // ReadMessage reads one NDJSON line and dispatches it as the correct JSON-RPC type.
 // Returns *JSONRPCResponse (has id, no method), *JSONRPCRequest (has id + method),
 // or *JSONRPCNotification (no id).
-func ReadMessage(r *bufio.Reader) (any, error) {
-	line, err := r.ReadBytes('\n')
-	if err != nil {
-		return nil, fmt.Errorf("acp codec: read line: %w", err)
+func ReadMessage(scan *bufio.Scanner) (any, error) {
+	if !scan.Scan() {
+		if err := scan.Err(); err != nil {
+			if errors.Is(err, bufio.ErrTooLong) {
+				return nil, fmt.Errorf("acp codec: line exceeds %d byte limit", scannerMaxSize)
+			}
+			return nil, fmt.Errorf("acp codec: read line: %w", err)
+		}
+		return nil, io.EOF
 	}
-	line = bytes.TrimSpace(line)
+
+	line := bytes.TrimSpace(scan.Bytes())
 	if len(line) == 0 {
 		return nil, nil // skip blank lines
 	}
@@ -86,6 +107,11 @@ func ReadMessage(r *bufio.Reader) (any, error) {
 	}
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return nil, fmt.Errorf("acp codec: parse json: %w", err)
+	}
+
+	// Validate JSON-RPC version field.
+	if raw.JSONRPC != "2.0" {
+		return nil, fmt.Errorf("acp codec: invalid jsonrpc version %q, want %q", raw.JSONRPC, "2.0")
 	}
 
 	switch {

@@ -320,7 +320,7 @@ Lifecycle:   persistent | ephemeral | managed
 | ------------------- | ---------- | ----------- | ---------- | ------------------------------------------- |
 | Claude Code         | stdio      | stream-json | persistent | turn 间进程不退出，热复用                   |
 | **OpenCode Server** | HTTP + SSE | SSE/JSON    | managed    | `opencode serve`，单进程多 session          |
-| ACPX                | —          | —           | —          | ⚠️ **未实现**（`internal/worker/acpx/` 为空目录） |
+| **ACP**             | stdio      | JSON-RPC 2.0 | per-session | 通用 ACP 协议适配器（`internal/worker/acp/`） |
 
 > **Hot-Multiplexing**：persistent Worker 在 turn 结束后**不退出进程**，保持 `idle` 状态等待下一轮 stdin 输入，实现零冷启动。ephemeral Worker 每次执行完毕退出。managed Worker 由外部进程管理生命周期。
 
