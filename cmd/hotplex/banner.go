@@ -64,9 +64,11 @@ type RuntimeStatus struct {
 
 // AdapterStatus reports a single messaging adapter's state.
 type AdapterStatus struct {
-	Name    string
-	BotName string
-	Started bool
+	Name         string
+	BotName      string
+	WorkerType   string
+	WorkerDetail string // e.g. ACP agent name
+	Started      bool
 }
 
 // writeAll writes strings to w, ignoring errors (banner output is best-effort).
@@ -171,11 +173,19 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 			if a.BotName != "" {
 				name += "/" + a.BotName
 			}
-			if a.Started {
-				lines = append(lines, "    "+name+"  "+green("✓"))
-			} else {
-				lines = append(lines, "    "+name+"  "+red("✗"))
+			icon := green("✓")
+			if !a.Started {
+				icon = red("✗")
 			}
+			line := "    " + name + "  " + icon
+			if a.WorkerType != "" {
+					wt := a.WorkerType
+					if a.WorkerDetail != "" {
+						wt += "/" + a.WorkerDetail
+					}
+					line += "  " + dim("("+wt+")")
+				}
+			lines = append(lines, line)
 		}
 	}
 

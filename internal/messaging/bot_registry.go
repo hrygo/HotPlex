@@ -24,6 +24,7 @@ type BotEntry struct {
 	Adapter     PlatformAdapterInterface
 	Bridge      *Bridge
 	WorkerType  string
+	ACPCommand  string // per-bot ACP agent binary override
 	ConnectedAt time.Time
 }
 

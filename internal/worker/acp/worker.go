@@ -122,8 +122,13 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Phase 2: I/O-heavy operations outside the lock.
 
-	// Resolve command.
-	parts, _ := commandParts.Load().([]string)
+	// Resolve command — per-session override takes precedence over global config.
+	var parts []string
+	if session.ACPCommand != "" {
+		parts = strings.Fields(session.ACPCommand)
+	} else {
+		parts, _ = commandParts.Load().([]string)
+	}
 	binary := parts[0]
 	args := make([]string, len(parts)-1, len(parts)-1+len(session.Args))
 	copy(args, parts[1:])

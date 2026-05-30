@@ -22,6 +22,7 @@ type Bridge struct {
 	handler    HandlerInterface
 	starter    SessionStarter
 	workerType string
+	acpCommand string
 	workDir    string
 	sandbox    string
 	adapter    atomic.Value // stores PlatformAdapterInterface; set after adapter.Start() via SetAdapter
@@ -29,7 +30,7 @@ type Bridge struct {
 
 // NewBridge creates a new platform bridge.
 func NewBridge(log *slog.Logger, platform PlatformType, hub HubInterface,
-	handler HandlerInterface, starter SessionStarter, workerType, workDir, sandbox string,
+	handler HandlerInterface, starter SessionStarter, workerType, acpCommand, workDir, sandbox string,
 ) *Bridge {
 	return &Bridge{
 		log:        log.With("component", "messaging_bridge", "platform", string(platform)),
@@ -38,6 +39,7 @@ func NewBridge(log *slog.Logger, platform PlatformType, hub HubInterface,
 		handler:    handler,
 		starter:    starter,
 		workerType: workerType,
+		acpCommand: acpCommand,
 		workDir:    workDir,
 		sandbox:    sandbox,
 	}
@@ -86,6 +88,9 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 	if b.starter != nil {
 		// Extract platform key from envelope metadata for persistence.
 		platform, platformKey := b.extractPlatformKey(env)
+		if b.acpCommand != "" {
+			platformKey["_acp_command"] = b.acpCommand
+		}
 		var botID string
 		if a := b.getAdapter(); a != nil {
 			botID = a.GetBotID()

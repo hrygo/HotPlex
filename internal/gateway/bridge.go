@@ -627,6 +627,7 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		ConfigEnv:       b.workerEnv,
 		ConfigBlocklist: b.workerEnvBlocklist,
 		Sandbox:         si.PlatformKey[worker.SandboxPlatformKey],
+		ACPCommand:      si.PlatformKey[worker.ACPCommandPlatformKey],
 	}
 
 	// MCP config injection — 3 scenarios:

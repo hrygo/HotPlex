@@ -283,6 +283,7 @@ type SlackBotConfig struct {
 	WorkerType string `mapstructure:"worker_type,omitempty"`
 	WorkDir    string `mapstructure:"work_dir,omitempty"`
 	Sandbox    string `mapstructure:"sandbox,omitempty"`
+	ACPCommand string `mapstructure:"acp_command,omitempty"` // per-bot ACP agent binary override
 
 	// Per-bot access control (falls back to platform-level when empty).
 	DMPolicy       string   `mapstructure:"dm_policy,omitempty"`
@@ -322,6 +323,7 @@ type FeishuBotConfig struct {
 	WorkerType string `mapstructure:"worker_type,omitempty"`
 	WorkDir    string `mapstructure:"work_dir,omitempty"`
 	Sandbox    string `mapstructure:"sandbox,omitempty"`
+	ACPCommand string `mapstructure:"acp_command,omitempty"` // per-bot ACP agent binary override
 
 	// Per-bot access control (falls back to platform-level when empty).
 	DMPolicy       string   `mapstructure:"dm_policy,omitempty"`

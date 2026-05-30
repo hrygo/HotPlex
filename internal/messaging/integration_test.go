@@ -127,6 +127,7 @@ func TestBridge_MakeEnvelope_Slack(t *testing.T) {
 		nil,
 		nil,
 		"claude_code",
+		"",
 		workDir,
 		"",
 	)
@@ -177,6 +178,7 @@ func TestBridge_MakeEnvelope_Feishu(t *testing.T) {
 		nil,
 		nil,
 		"claude_code",
+		"",
 		workDir,
 		"",
 	)

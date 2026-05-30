@@ -97,6 +97,7 @@ func newAdapterWithCapture(t *testing.T) (*Adapter, *[]capturedCall) {
 		handler,
 		nil, // starter
 		"test_worker",
+		"",
 		"/tmp",
 		"",
 	)

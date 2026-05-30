@@ -209,6 +209,9 @@ type SessionInfo struct {
 	// Sandbox controls the codex CLI sandbox mode ("read-only", "workspace-write", "danger-full-access").
 	// Empty = use config default. Per-bot override propagated from messaging config.
 	Sandbox string
+	// ACPCommand overrides the global ACP agent binary for this session.
+	// Empty = use worker.acp.command config. Per-bot override propagated via platformKey.
+	ACPCommand string
 	// ContinueSession resumes the latest session in the current directory without a session ID.
 	ContinueSession bool
 	// ForkSession, when resuming, creates a new session ID instead of reusing the existing one.
@@ -240,3 +243,7 @@ type SessionInfo struct {
 // SandboxPlatformKey is the platformKey map key used to propagate sandbox config
 // from bridge/executor through session persistence to the worker.
 const SandboxPlatformKey = "_sandbox"
+
+// ACPCommandPlatformKey is the platformKey map key used to propagate per-bot
+// ACP command override from messaging bridge through session persistence to the ACP worker.
+const ACPCommandPlatformKey = "_acp_command"
