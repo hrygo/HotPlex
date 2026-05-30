@@ -144,8 +144,10 @@ http://<TAILSCALE_IP>:80 {
 }
 
 # 新增：公网 webhook 端点（仅此一个路径）
+# 注意: 纯 IP 无法获取 Let's Encrypt 证书，使用 Caddy 内置 CA 自签名
+# 绑定域名后去掉 tls internal，改为自动 Let's Encrypt
 <PUBLIC_IP> {
-    # Caddy 自动申请 Let's Encrypt 证书
+    tls internal
 
     # 仅放行 webhook 路径
     handle /api/webhook/github {
@@ -155,11 +157,6 @@ http://<TAILSCALE_IP>:80 {
     # 其他所有路径拒绝
     handle {
         respond 404
-    }
-
-    # 请求体大小限制（GitHub webhook payload 通常 < 100KB）
-    request_body {
-        max_size 1MB
     }
 
     log {
@@ -177,7 +174,7 @@ http://<TAILSCALE_IP>:80 {
 | 层级 | 机制 | 说明 |
 |------|------|------|
 | L1: 网络层 | Caddy 路由隔离 | 仅 `/api/webhook/github` 可达，其余 404 |
-| L2: 传输层 | TLS 1.3 (Let's Encrypt) | Caddy 自动管理证书 |
+| L2: 传输层 | TLS (Caddy 内置 CA 自签名) | 纯 IP 无法用 Let's Encrypt，绑定域名后可升级 |
 | L3: 应用层 | HMAC-SHA256 签名验证 | `X-Hub-Signature-256` header，常量时间比较 |
 | L4: 逻辑层 | 事件过滤 + 仓库校验 | 仅处理 `hrygo/hotplex` 的特定事件类型 |
 | L5: 限流 | Token bucket | 每秒 ≤2 请求，突发 ≤10 |
@@ -247,7 +244,7 @@ openssl rand -hex 32
 | **Payload URL** | `https://<PUBLIC_IP>/api/webhook/github` |
 | **Content type** | `application/json` |
 | **Secret** | 上一步生成的 secret |
-| **SSL verification** | ✅ Enable (Let's Encrypt 证书) |
+| **SSL verification** | ☐ Disable (自签名证书，绑定域名后开启) |
 | **Which events** | ☑ **Let me select individual events**: |
 | | ☑ Pull requests → opened, synchronize, reopened, ready_for_review |
 | | ☑ Check suites → completed |
@@ -956,12 +953,12 @@ PROMPT
 
 | 章节 | 状态 | 说明 |
 |------|------|------|
-| §4 网络拓扑与安全 | ⏳ 待实施 | Caddy 反代 + TLS（运维侧，需服务器操作） |
-| §5 GitHub 侧配置 | ⏳ 待实施 | Repository Webhook（运维侧，需 GitHub 配置） |
+| §4 网络拓扑与安全 | 🔧 脚本就绪 | `scripts/setup-webhook-pr-review.sh`（需 sudo 执行）|
+| §5 GitHub 侧配置 | 🔧 脚本就绪 | 脚本自动注册（需 `admin:repo_hook` scope）|
 | **§6 HotPlex 代码改动** | **✅ 已实施** | **webhook.go + webhook_test.go + routes + executor + config** |
 | **§7 HotPlex 配置** | **✅ 已实施** | **WebhookConfig + env 绑定（部署时配置 secret）** |
 | **§8 Prompt 优化** | **✅ 已实施** | **2026-05-30 完成** |
-| §9 迁移计划 | ⏳ 待实施 | |
+| §9 迁移计划 | 🔧 脚本就绪 | 脚本自动降频 cron + 重启 gateway |
 
 ---
 
