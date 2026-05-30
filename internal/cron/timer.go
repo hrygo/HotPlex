@@ -114,14 +114,19 @@ func (tl *timerLoop) onTick() {
 		// advanced but disk still has the old value. A crash+restart would cause
 		// re-execution (at-least-once instead of at-most-once). We proceed anyway
 		// because skipping execution here would also be wrong.
-		if err := s.store.UpdateState(s.ctx, job.ID, job.State); err != nil {
-			s.log.Error("cron: persist state before execution — at-most-once guarantee weakened, crash may cause re-execution",
+		// Uses background timeout (not s.ctx) so shutdown doesn't cancel the write.
+		pctx, pcancel := s.persistTimeout()
+		if err := s.store.UpdateState(pctx, job.ID, job.State); err != nil {
+			s.log.Error("cron: persist state before execution",
 				"job_id", job.ID, "err", err)
 		}
+		pcancel()
 		if !job.Enabled {
-			if err := s.store.SetEnabled(s.ctx, job.ID, false); err != nil {
+			pctx, pcancel = s.persistTimeout()
+			if err := s.store.SetEnabled(pctx, job.ID, false); err != nil {
 				s.log.Error("cron: persist disabled job", "job_id", job.ID, "err", err)
 			}
+			pcancel()
 			s.mergeJobState(job.ID, job.State, true)
 			continue
 		}
@@ -361,7 +366,7 @@ func (s *Scheduler) persistAndDisable(jobID string, state CronJobState) {
 
 // persistTimeout returns a context with a 5-second timeout for store operations.
 // Used by persist helpers that run outside the scheduler's main context
-// (e.g. final state writes during shutdown).
+// (e.g. final state writes during shutdown, onTick persist calls).
 func (s *Scheduler) persistTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 5*time.Second)
 }
