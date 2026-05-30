@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -375,9 +376,13 @@ func (w *Worker) readLoop(ctx context.Context) {
 	w.Mu.Unlock()
 
 	defer func() {
+		if r := recover(); r != nil {
+			w.Log.Error("acp: readLoop panic",
+				"session_id", w.sessionID, "panic", r,
+				"stack", string(debug.Stack()))
+		}
 		// Clean up stale pending permission entries when read loop exits
-		// (agent disconnected or context cancelled). Prevents accumulation
-		// if agent crashes mid-permission before Terminate is called.
+		// (agent disconnected, context cancelled, or panic recovered).
 		w.pendingPerm.Range(func(key, _ any) bool {
 			w.pendingPerm.Delete(key)
 			return true
