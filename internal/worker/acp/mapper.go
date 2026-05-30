@@ -20,6 +20,7 @@ type ACPMapper struct {
 	msgActive  atomic.Bool // true when inside a message stream (first chunk received, not yet ended)
 	turnActive atomic.Bool // true while a prompt turn is in progress
 	seq        atomic.Int64
+	msgID      string // pre-computed "msg_" + sessionID, avoids allocation on hot path
 }
 
 // NewACPMapper creates a mapper bound to the given session.
@@ -31,6 +32,7 @@ func NewACPMapper(sessionID, userID string, log *slog.Logger) *ACPMapper {
 		sessionID: sessionID,
 		userID:    userID,
 		log:       log,
+		msgID:     "msg_" + sessionID,
 	}
 }
 
@@ -135,7 +137,7 @@ func (m *ACPMapper) closeMessageStream() []*events.Envelope {
 	}
 	return []*events.Envelope{
 		m.newEnvelope(events.MessageEnd, events.MessageEndData{
-			MessageID: m.messageID(),
+			MessageID: m.msgID,
 		}),
 	}
 }
@@ -172,14 +174,14 @@ func (m *ACPMapper) mapAgentMessageChunkText(text string) []*events.Envelope {
 	// First chunk → synthesize message.start
 	if !m.msgActive.Swap(true) {
 		envs = append(envs, m.newEnvelope(events.MessageStart, events.MessageStartData{
-			ID:          m.messageID(),
+			ID:          m.msgID,
 			Role:        "assistant",
 			ContentType: "text",
 		}))
 	}
 
 	envs = append(envs, m.newEnvelope(events.MessageDelta, events.MessageDeltaData{
-		MessageID: m.messageID(),
+		MessageID: m.msgID,
 		Content:   text,
 	}))
 	return envs
@@ -403,10 +405,6 @@ func (m *ACPMapper) nextSeq() int64 {
 
 func (m *ACPMapper) newEnvelope(kind events.Kind, data any) *events.Envelope {
 	return events.NewEnvelope(aep.NewID(), m.sessionID, m.nextSeq(), kind, data)
-}
-
-func (m *ACPMapper) messageID() string {
-	return "msg_" + m.sessionID
 }
 
 func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {

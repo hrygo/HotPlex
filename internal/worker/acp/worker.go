@@ -232,12 +232,20 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return err
 	}
 
+	// Capture conn under lock for consistent access pattern.
+	w.Mu.Lock()
+	conn := w.conn
+	w.Mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("acp: worker connection closed")
+	}
+
 	// Regular user input → send prompt.
 	w.mapper.Reset()
 	w.mapper.SetTurnActive()
 
 	// Emit state(running).
-	w.conn.TrySend(w.mapper.MapStateRunning())
+	conn.TrySend(w.mapper.MapStateRunning())
 	w.SetLastIO(time.Now())
 
 	pctx, pcancel := context.WithTimeout(ctx, 30*time.Minute)
@@ -248,7 +256,7 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		// Always emit error sequence to client.
 		envs := w.mapper.MapPromptError(promptErr)
 		for _, env := range envs {
-			w.conn.TrySend(env)
+			conn.TrySend(env)
 		}
 		// JSONRPCError is an expected agent error — don't wrap.
 		if _, ok := errors.AsType[*JSONRPCError](promptErr); ok {
@@ -260,7 +268,7 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	// Emit done sequence.
 	envs := w.mapper.MapPromptResponse(result)
 	for _, env := range envs {
-		w.conn.TrySend(env)
+		conn.TrySend(env)
 	}
 
 	w.SetLastIO(time.Now())
