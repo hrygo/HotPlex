@@ -49,5 +49,5 @@ type HandlerInterface interface {
 // SessionStarter creates a new gateway session for a platform message.
 // Implemented by gateway.Bridge and injected during wiring.
 type SessionStarter interface {
-	StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, platform string, platformKey map[string]string, botID string) error
+	StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error
 }

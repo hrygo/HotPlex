@@ -122,7 +122,7 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 
 	args := []string{
 		"exec", "--json",
-		"--sandbox", w.cfg.Sandbox,
+		"--sandbox", sandboxFromSession(session, w.cfg.Sandbox),
 		"--ask-for-approval", approvalMode,
 		"--cd", session.ProjectDir,
 	}
@@ -483,7 +483,7 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 
 	params := map[string]any{
 		"cwd":            session.ProjectDir,
-		"sandbox":        cfg.Sandbox,
+		"sandbox":        sandboxFromSession(session, cfg.Sandbox),
 		"personality":    cfg.Personality,
 		"approvalPolicy": approvalMode,
 	}
@@ -695,4 +695,13 @@ func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID stri
 
 func (w *AppServerWorker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
 	return fmt.Errorf("codexcli: elicitation responses not supported in app-server mode yet")
+}
+
+// sandboxFromSession returns the session-level sandbox override if set,
+// otherwise falls back to the config default.
+func sandboxFromSession(session worker.SessionInfo, defaultSandbox string) string {
+	if session.Sandbox != "" {
+		return session.Sandbox
+	}
+	return defaultSandbox
 }

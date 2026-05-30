@@ -282,6 +282,7 @@ type SlackBotConfig struct {
 	AppToken   string `mapstructure:"app_token"`
 	WorkerType string `mapstructure:"worker_type,omitempty"`
 	WorkDir    string `mapstructure:"work_dir,omitempty"`
+	Sandbox    string `mapstructure:"sandbox,omitempty"`
 
 	// Per-bot access control (falls back to platform-level when empty).
 	DMPolicy       string   `mapstructure:"dm_policy,omitempty"`
@@ -320,6 +321,7 @@ type FeishuBotConfig struct {
 	AppSecret  string `mapstructure:"app_secret"`
 	WorkerType string `mapstructure:"worker_type,omitempty"`
 	WorkDir    string `mapstructure:"work_dir,omitempty"`
+	Sandbox    string `mapstructure:"sandbox,omitempty"`
 
 	// Per-bot access control (falls back to platform-level when empty).
 	DMPolicy       string   `mapstructure:"dm_policy,omitempty"`
@@ -762,7 +764,7 @@ func Default() *Config {
 			},
 			CodexCLI: CodexCLIConfig{
 				Command:         "codex",
-				Sandbox:         "workspace-write",
+				Sandbox:         "danger-full-access",
 				ApprovalMode:    "never",
 				Ephemeral:       true,
 				Personality:     "friendly",

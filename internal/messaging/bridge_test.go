@@ -103,7 +103,7 @@ func TestBridge_Handle_ExtractsBotID(t *testing.T) {
 
 	var capturedBotID string
 	b.starter = &mockStarter{
-		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ map[string]string, botID string) error {
+		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ string, _ map[string]string, botID string) error {
 			capturedBotID = botID
 			return nil
 		},
@@ -142,12 +142,12 @@ func (m *mockHandler) Handle(_ context.Context, _ *events.Envelope) error { retu
 
 // mockStarter captures botID passed to StartPlatformSession.
 type mockStarter struct {
-	startFn func(ctx context.Context, sessionID, ownerID, workerType, workDir, platform string, platformKey map[string]string, botID string) error
+	startFn func(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error
 }
 
-func (s *mockStarter) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, platform string, platformKey map[string]string, botID string) error {
+func (s *mockStarter) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error {
 	if s.startFn != nil {
-		return s.startFn(ctx, sessionID, ownerID, workerType, workDir, platform, platformKey, botID)
+		return s.startFn(ctx, sessionID, ownerID, workerType, workDir, sandbox, platform, platformKey, botID)
 	}
 	return nil
 }
@@ -161,7 +161,7 @@ func TestBridge_Handle_NilAdapter_EmptyBotID(t *testing.T) {
 
 	var capturedBotID string
 	b.starter = &mockStarter{
-		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ map[string]string, botID string) error {
+		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ string, _ map[string]string, botID string) error {
 			capturedBotID = botID
 			return nil
 		},
@@ -227,7 +227,7 @@ func TestBridge_Handle_StartError(t *testing.T) {
 	b := newTestBridge()
 	b.handler = &mockHandler{}
 	b.starter = &mockStarter{
-		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ map[string]string, _ string) error {
+		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ string, _ map[string]string, _ string) error {
 			return fmt.Errorf("pool exhausted")
 		},
 	}

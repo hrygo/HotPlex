@@ -128,6 +128,7 @@ func TestBridge_MakeEnvelope_Slack(t *testing.T) {
 		nil,
 		"claude_code",
 		workDir,
+		"",
 	)
 
 	slackCtx := session.PlatformContext{
@@ -177,6 +178,7 @@ func TestBridge_MakeEnvelope_Feishu(t *testing.T) {
 		nil,
 		"claude_code",
 		workDir,
+		"",
 	)
 
 	feishuCtx := session.PlatformContext{

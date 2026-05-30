@@ -206,6 +206,9 @@ type SessionInfo struct {
 	PermissionMode string
 	// SkipPermissions bypasses all permission checks (equivalent to --dangerously-skip-permissions).
 	SkipPermissions bool
+	// Sandbox controls the codex CLI sandbox mode ("read-only", "workspace-write", "danger-full-access").
+	// Empty = use config default. Per-bot override propagated from messaging config.
+	Sandbox string
 	// ContinueSession resumes the latest session in the current directory without a session ID.
 	ContinueSession bool
 	// ForkSession, when resuming, creates a new session ID instead of reusing the existing one.

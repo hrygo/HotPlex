@@ -169,13 +169,26 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				}
 			}
 
+			// Per-bot sandbox override (codex CLI only).
+			botSandbox := appCfg.Worker.CodexCLI.Sandbox
+			switch pt {
+			case messaging.PlatformSlack:
+				if bc := resolveSlackBot(appCfg, entry.Name); bc != nil && bc.Sandbox != "" {
+					botSandbox = bc.Sandbox
+				}
+			case messaging.PlatformFeishu:
+				if bc := resolveFeishuBot(appCfg, entry.Name); bc != nil && bc.Sandbox != "" {
+					botSandbox = bc.Sandbox
+				}
+			}
+
 			adapter, err := messaging.New(pt, log)
 			if err != nil {
 				log.Warn("messaging: skip adapter", "platform", pt, "bot", entry.Name, "err", err)
 				continue
 			}
 
-			msgBridge := messaging.NewBridge(log, pt, hub, handler, gwBridge, botWorkerType, botWorkDir)
+			msgBridge := messaging.NewBridge(log, pt, hub, handler, gwBridge, botWorkerType, botWorkDir, botSandbox)
 
 			acfg := messaging.AdapterConfig{
 				Hub:     hub,

@@ -306,8 +306,11 @@ var _ = events.Clone // compile-time check that Clone is accessible
 //  3. No worker, state=CREATED → Start (--session-id)
 //  4. No worker, state=RUNNING/IDLE/TERMINATED → Resume (--resume)
 //     If Resume fails (files gone/corrupted), fall back to Start (--session-id)
-func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, platform string, platformKey map[string]string, botID string) error {
-	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "platform", platform, "platform_key", platformKey, "bot_id", botID)
+func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error {
+	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "sandbox", sandbox, "platform", platform, "platform_key", platformKey, "bot_id", botID)
+	if sandbox != "" && platformKey != nil {
+		platformKey["_sandbox"] = sandbox
+	}
 	si, err := b.sm.Get(ctx, sessionID)
 	if err == nil {
 		if w := b.sm.GetWorker(sessionID); w != nil {
@@ -593,6 +596,7 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		WorkerSessionID: si.WorkerSessionID,
 		ConfigEnv:       b.workerEnv,
 		ConfigBlocklist: b.workerEnvBlocklist,
+		Sandbox:         si.PlatformKey["_sandbox"],
 	}
 
 	// MCP config injection — 3 scenarios:

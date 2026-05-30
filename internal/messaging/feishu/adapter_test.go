@@ -374,6 +374,7 @@ func TestAdapter_MakeEnvelope(t *testing.T) {
 		messaging.PlatformFeishu,
 		nil, nil, nil,
 		"claude_code", "/tmp/hotplex/workspace",
+		"",
 	)
 
 	a := &Adapter{botOpenID: "ou_bot123"}
@@ -399,6 +400,7 @@ func TestAdapter_MakeEnvelope_CustomWorkDir(t *testing.T) {
 		messaging.PlatformFeishu,
 		nil, nil, nil,
 		"claude_code", "/default",
+		"",
 	)
 
 	a := &Adapter{botOpenID: "ou_bot123"}
