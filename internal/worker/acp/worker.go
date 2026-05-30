@@ -385,12 +385,12 @@ func (w *Worker) readLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			w.handleServerRequest(req)
+			w.handleServerRequest(ctx, req)
 		}
 	}
 }
 
-func (w *Worker) handleServerRequest(req *JSONRPCRequest) {
+func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest) {
 	switch req.Method {
 	case "session/request_permission":
 		pm := w.mapper.MapPermissionRequest(req)
@@ -401,7 +401,7 @@ func (w *Worker) handleServerRequest(req *JSONRPCRequest) {
 
 		// Check auto-approve.
 		if val, _ := autoApprove.Load().(bool); val {
-			_ = w.client.RespondPermission(context.Background(), req.ID, pm.FormatAllowedOutcome())
+			_ = w.client.RespondPermission(ctx, req.ID, pm.FormatAllowedOutcome())
 			return
 		}
 
