@@ -120,6 +120,14 @@ if ! caddy validate --config "$CADDYFILE" 2>&1; then
 fi
 ok "Caddyfile 验证通过"
 
+# caddy validate 以 root 运行会创建日志文件但 owner 为 root，
+# 而 Caddy 服务以 caddy 用户运行无法写入，需要修正所有权
+CADDY_LOG_DIR="/var/log/caddy"
+if [ -d "$CADDY_LOG_DIR" ]; then
+    chown -R caddy:caddy "$CADDY_LOG_DIR"
+    ok "Caddy 日志目录权限已修正"
+fi
+
 systemctl reload caddy || fail "Caddy 重载失败"
 sleep 3
 

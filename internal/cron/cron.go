@@ -261,12 +261,22 @@ func (s *Scheduler) TriggerJob(ctx context.Context, job *CronJob) error {
 	return nil
 }
 
-// TriggerByName finds a job by name and triggers its execution.
-// It uses the store for indexed lookup and respects the enabled/disabled state.
+// TriggerByName finds a job by name in the in-memory index and triggers its execution.
+// It reads from s.jobs (source of truth) rather than the store to avoid stale-read windows
+// when the CLI has disabled a job but the DB has not yet been updated.
 func (s *Scheduler) TriggerByName(ctx context.Context, jobName string, extra map[string]string) error {
-	found, err := s.store.GetByName(ctx, jobName)
-	if err != nil {
-		return fmt.Errorf("cron trigger by name: job %q not found: %w", jobName, err)
+	s.mu.Lock()
+	var found *CronJob
+	for _, j := range s.jobs {
+		if j.Name == jobName {
+			found = j
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if found == nil {
+		return fmt.Errorf("cron trigger by name: job %q not found: %w", jobName, ErrJobNotFound)
 	}
 	if !found.Enabled {
 		return fmt.Errorf("cron trigger by name: job %q: %w", jobName, ErrJobDisabled)

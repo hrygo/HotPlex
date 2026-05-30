@@ -176,7 +176,7 @@ http://<TAILSCALE_IP>:80 {
 | L1: 网络层 | Caddy 路由隔离 | 仅 `/api/webhook/github` 可达，其余 404 |
 | L2: 传输层 | TLS (Caddy 内置 CA 自签名) | 纯 IP 无法用 Let's Encrypt，绑定域名后可升级 |
 | L3: 应用层 | HMAC-SHA256 签名验证 | `X-Hub-Signature-256` header，常量时间比较 |
-| L4: 逻辑层 | 事件过滤 + 仓库校验 | 仅处理 `hrygo/hotplex` 的特定事件类型 |
+| L4: 逻辑层 | 事件过滤 + 仓库校验 | 仅处理 `AllowedRepos`（可配置，默认 `["hrygo/hotplex"]`）的特定事件类型 |
 | L5: 限流 | Token bucket | 每秒 ≤2 请求，突发 ≤10 |
 | L6: 幂等 | commit SHA 去重 | 同一 commit 不重复审 |
 
@@ -395,8 +395,8 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // 7. 仓库校验
-    if event.Repository.FullName != "hrygo/hotplex" {
+    // 7. 仓库校验（可配置 AllowedRepos，为空则接受所有仓库）
+    if len(h.cfg.AllowedRepos) > 0 && !slices.Contains(h.cfg.AllowedRepos, event.Repository.FullName) {
         h.log.Warn("webhook: unexpected repo", "repo", event.Repository.FullName)
         w.WriteHeader(http.StatusOK) // 返回 200 避免重试
         return
@@ -870,7 +870,7 @@ PROMPT
 | AC-4.4 | `pull_request` + draft=true → 不触发 | 发送 draft PR 事件 → 日志无 trigger，HTTP 200 |
 | AC-4.5 | `check_suite` + `completed` + `conclusion: success` → 触发关联 PR review | 构造 payload → 日志显示 trigger |
 | AC-4.6 | `check_suite` + `conclusion: failure` → 不触发 | 发送 failure 事件 → 日志无 trigger |
-| AC-4.7 | 非 `hrygo/hotplex` 仓库的事件被忽略 | payload 中 `repository.full_name` 改为其他 → 日志 `unexpected repo`，HTTP 200 |
+| AC-4.7 | 非 `AllowedRepos` 仓库的事件被忽略（空列表接受所有） | payload 中 `repository.full_name` 改为其他 → 日志 `unexpected repo`，HTTP 200 |
 | AC-4.8 | `ping` 事件返回 200 且不触发 review | 发送 ping → 日志 `ping received`，无 trigger |
 | AC-4.9 | 未知事件类型返回 200 且不触发 | 发送 `X-GitHub-Event: push` → 无 trigger，HTTP 200 |
 
@@ -1076,7 +1076,7 @@ GitHub POST → Caddy (TLS + 路由隔离)
     ├─ RateLimit    (2/s burst 10)
     ├─ BodyRead     (≤1MB)
     ├─ HMACVerify   (sha256(secret, body))
-    ├─ RepoFilter   (hrygo/hotplex only)
+    ├─ RepoFilter   (AllowedRepos configurable, default: accept all)
     ├─ EventFilter  (pull_request opened/sync/reopened/ready + check_suite completed/success)
     ├─ PRExtract    (draft=false, state=open)
     └─ AsyncTrigger (goroutine → CronExecutor.TriggerByName)

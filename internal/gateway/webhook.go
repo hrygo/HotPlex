@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -58,6 +59,9 @@ type JobTrigger interface {
 
 const maxConcurrentTriggers = 5
 
+// triggerDedupCooldown prevents duplicate triggers for the same PR within this window.
+const triggerDedupCooldown = 60 * time.Second
+
 // WebhookHandler handles incoming GitHub webhook requests.
 type WebhookHandler struct {
 	cfg     config.WebhookConfig
@@ -65,17 +69,30 @@ type WebhookHandler struct {
 	limiter *rate.Limiter
 	sem     chan struct{} // bounds concurrent trigger goroutines
 	log     *slog.Logger
+	baseCtx context.Context    // gateway lifecycle context for async goroutines
+	cancel  context.CancelFunc // cancels in-flight triggers on shutdown
+	dedup   sync.Map           // pr_number(string) -> time.Time; cooldown-based dedup
 }
 
 // NewWebhookHandler creates a new GitHub webhook handler.
-func NewWebhookHandler(cfg config.WebhookConfig, trigger JobTrigger, log *slog.Logger) *WebhookHandler {
+// baseCtx should be the gateway lifecycle context so in-flight triggers
+// are cancelled on graceful shutdown.
+func NewWebhookHandler(baseCtx context.Context, cfg config.WebhookConfig, trigger JobTrigger, log *slog.Logger) *WebhookHandler {
+	ctx, cancel := context.WithCancel(baseCtx)
 	return &WebhookHandler{
 		cfg:     cfg,
 		trigger: trigger,
 		limiter: rate.NewLimiter(2, 10), // 2 req/s, burst 10
 		sem:     make(chan struct{}, maxConcurrentTriggers),
 		log:     log.With("component", "webhook"),
+		baseCtx: ctx,
+		cancel:  cancel,
 	}
+}
+
+// Close cancels in-flight trigger goroutines. Safe to call multiple times.
+func (h *WebhookHandler) Close() {
+	h.cancel()
 }
 
 // ServeHTTP handles incoming GitHub webhook HTTP requests.
@@ -143,14 +160,24 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 9. Async trigger — bounded concurrency via semaphore
+	// 9. Async trigger with dedup and bounded concurrency
 	jobName := h.cfg.TargetJobName
 	for _, prNum := range prNumbers {
+		// Dedup: skip if the same PR was triggered within the cooldown window.
+		prKey := strconv.Itoa(prNum)
+		if last, ok := h.dedup.Load(prKey); ok {
+			if t, _ := last.(time.Time); time.Since(t) < triggerDedupCooldown {
+				h.log.Info("webhook: skipping duplicate trigger", "pr", prNum)
+				continue
+			}
+		}
+		h.dedup.Store(prKey, time.Now())
+
 		select {
 		case h.sem <- struct{}{}:
 			go func(n int) {
 				defer func() { <-h.sem }()
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				ctx, cancel := context.WithTimeout(h.baseCtx, 5*time.Minute)
 				defer cancel()
 				err := h.trigger.TriggerByName(ctx, jobName, map[string]string{
 					"trigger":   "webhook",

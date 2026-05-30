@@ -69,7 +69,7 @@ func testWebhookConfig() config.WebhookConfig {
 		Secret:        testSecret,
 		Path:          "/api/webhook/github",
 		AllowedRepos:  []string{"hrygo/hotplex"},
-		TargetJobName: "pr-review",
+		TargetJobName: "pr-review-hotplex",
 		Enabled:       true,
 	}
 }
@@ -97,7 +97,7 @@ func postWebhook(h *WebhookHandler, eventType string, payload any) *httptest.Res
 
 func newIsolatedHandler() (*WebhookHandler, *mockTrigger) {
 	t := &mockTrigger{}
-	h := NewWebhookHandler(testWebhookConfig(), t, noopLogger())
+	h := NewWebhookHandler(context.Background(), testWebhookConfig(), t, noopLogger())
 	return h, t
 }
 
@@ -390,7 +390,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 		trigger := &mockTrigger{}
 		cfg := testWebhookConfig()
 		cfg.AllowedRepos = nil // no filter
-		h := NewWebhookHandler(cfg, trigger, noopLogger())
+		h := NewWebhookHandler(context.Background(), cfg, trigger, noopLogger())
 		w := postWebhook(h, "pull_request", &GitHubEvent{
 			Action: "opened",
 			Repository: struct {
@@ -576,7 +576,7 @@ func (e *errorTrigger) TriggerByName(_ context.Context, _ string, _ map[string]s
 func TestWebhookHandler_TriggerError(t *testing.T) {
 	t.Parallel()
 
-	h := NewWebhookHandler(testWebhookConfig(), &errorTrigger{}, noopLogger())
+	h := NewWebhookHandler(context.Background(), testWebhookConfig(), &errorTrigger{}, noopLogger())
 
 	w := postWebhook(h, "pull_request", &GitHubEvent{
 		Action: "opened",

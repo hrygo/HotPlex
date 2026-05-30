@@ -185,6 +185,7 @@ func setupRoutes(
 			log.Warn("webhook enabled but secret is empty — rejecting for security")
 		} else {
 			webhookHandler := gateway.NewWebhookHandler(
+				deps.Ctx,
 				cfg.Webhook,
 				deps.CronScheduler,
 				log,

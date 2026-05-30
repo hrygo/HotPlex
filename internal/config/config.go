@@ -873,7 +873,7 @@ func Default() *Config {
 		Webhook: WebhookConfig{
 			MaxBodySize:   1 << 20, // 1MB
 			Path:          "/api/webhook/github",
-			TargetJobName: "pr-review",
+			TargetJobName: "pr-review-hotplex",
 			Enabled:       false,
 		},
 		Events: EventsConfig{

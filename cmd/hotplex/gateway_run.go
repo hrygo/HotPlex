@@ -57,6 +57,7 @@ type eventStoreProvider interface {
 // These are passed to various components and registrations.
 type GatewayDeps struct {
 	Log             *slog.Logger
+	Ctx             context.Context // gateway lifecycle context for graceful shutdown
 	Config          *config.Config
 	ConfigStore     *config.ConfigStore
 	Hub             *gateway.Hub
@@ -395,6 +396,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	mux := http.NewServeMux()
 	deps := &GatewayDeps{
 		Log:             log,
+		Ctx:             ctx,
 		Config:          cfg,
 		ConfigStore:     cfgStore,
 		Hub:             hub,
