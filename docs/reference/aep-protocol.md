@@ -227,6 +227,30 @@ message.start → message.delta* → message.end
 
 Autonomous 模式下为**通知性质**，Worker 内部执行，Client 无需回传结果。
 
+### tool_update（工具调用中间状态）
+
+```json
+{ "type": "tool_update", "data": { "id": "call_123", "name": "read_file", "status": "in_progress" } }
+```
+
+ACP 专用：映射 `tool_call_update`，报告工具调用的中间状态（`pending` / `in_progress`）。
+
+### plan（计划更新）
+
+```json
+{ "type": "plan", "data": { "entries": [{"id": "1", "text": "Read config file", "status": "completed"}] } }
+```
+
+ACP 专用：映射 `AgentPlanUpdate`，Agent 的计划/任务列表变更通知。
+
+### mode_update（模式切换）
+
+```json
+{ "type": "mode_update", "data": { "mode_id": "code", "name": "Code Mode" } }
+```
+
+ACP 专用：映射 `CurrentModeUpdate`，Agent 执行模式切换通知。
+
 ### state（状态变更）
 
 ```json
@@ -424,4 +448,4 @@ Heartbeat:      ping ←→ pong
 
 **必须支持**：`init`、`input`、`control`、`ping`、`init_ack`、`message.delta`、`state`、`error`、`done`、`pong`
 
-**可选扩展**：`message.start/end`、`message`、`tool_call/result`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`
+**可选扩展**：`message.start/end`、`message`、`tool_call/result`、`tool_update`、`plan`、`mode_update`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`

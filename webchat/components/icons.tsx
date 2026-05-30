@@ -15,7 +15,7 @@ export function BrandIcon({ size = 28, style, className }: { size?: number; styl
 export const WORKER_DISPLAY: Record<string, string> = {
   claude_code: "claude",
   opencode_server: "opencode",
-  acpx: "acpx",
+  acp: "acp",
   pimon: "pimon",
 };
 
@@ -34,7 +34,7 @@ export function WorkerIcon({ type, className }: { type: string; className?: stri
           <polyline points="8 6 2 12 8 18" />
         </svg>
       );
-    case 'acpx':
+    case 'acp':
       return (
         <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="11" width="18" height="10" rx="2" />

@@ -210,7 +210,7 @@ const (
     TypeClaudeCode  WorkerType = "claude_code"
     TypeOpenCodeSrv WorkerType = "opencode_server"
     TypeCodexCLI    WorkerType = "codex_cli"          // 新增
-    TypeACPX        WorkerType = "acpx"
+    TypeACP          WorkerType = "acp"
     TypeUnknown     WorkerType = "unknown"
 )
 ```

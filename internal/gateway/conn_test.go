@@ -176,7 +176,7 @@ func TestSessionStateForWorker(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, events.StateCreated, SessionStateForWorker(worker.TypeClaudeCode))
 	require.Equal(t, events.StateCreated, SessionStateForWorker(worker.TypeOpenCodeSrv))
-	require.Equal(t, events.StateCreated, SessionStateForWorker(worker.TypeACPX))
+	require.Equal(t, events.StateCreated, SessionStateForWorker(worker.TypeACP))
 }
 
 func TestDefaultServerCaps(t *testing.T) {

@@ -35,6 +35,7 @@ import (
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/tracing"
 	"github.com/hrygo/hotplex/internal/webchat"
+	"github.com/hrygo/hotplex/internal/worker/acp"
 	"github.com/hrygo/hotplex/internal/worker/claudecode"
 	"github.com/hrygo/hotplex/internal/worker/codexcli"
 	"github.com/hrygo/hotplex/internal/worker/opencodeserver"
@@ -280,6 +281,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	opencodeserver.InitSingleton(log, cfg.Worker.OpenCodeServer)
 	claudecode.InitConfig(cfg.Worker.ClaudeCode)
+	acp.InitConfig(cfg.Worker.ACP)
 	if cfg.Worker.CodexCLI.UseAppServer {
 		codexcli.InitSingleton(log, cfg.Worker.CodexCLI)
 	} else {
@@ -317,6 +319,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if prev.Worker.CodexCLI.Command != next.Worker.CodexCLI.Command {
 			codexcli.InitConfig(next.Worker.CodexCLI)
+		}
+	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		if !reflect.DeepEqual(prev.Worker.ACP, next.Worker.ACP) {
+			acp.InitConfig(next.Worker.ACP)
 		}
 	})
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {

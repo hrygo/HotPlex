@@ -40,6 +40,11 @@ const (
 	SkillsList          Kind = "skills_list"    // Gateway-originated skill list (S→C)
 	MCPStatus           Kind = "mcp_status"     // Worker MCP server status (S→C)
 	WorkerCmd           Kind = "worker_command" // Gateway → Worker stdio command trigger (C→S)
+
+	// ACP extension kinds — any ACP-compatible agent may emit these.
+	ToolUpdate Kind = "tool_update" // intermediate tool call status (ACP tool_call_update)
+	Plan       Kind = "plan"        // plan/todo update (ACP AgentPlanUpdate)
+	ModeUpdate Kind = "mode_update" // agent mode switch (ACP CurrentModeUpdate)
 )
 
 // Priority levels for message delivery.
@@ -195,11 +200,28 @@ type MessageEndData struct {
 	MessageID string `json:"message_id"`
 }
 
+// FileLocation references a position in a file.
+type FileLocation struct {
+	Path string `json:"path"`
+	Line int    `json:"line,omitempty"`
+}
+
+// FileDiff represents a structured file edit (unified diff equivalent).
+type FileDiff struct {
+	Path    string `json:"path"`
+	OldText string `json:"old_text"`
+	NewText string `json:"new_text"`
+}
+
 // ToolCallData is the payload for ToolCall events.
 type ToolCallData struct {
 	ID    string         `json:"id"`
 	Name  string         `json:"name"`
 	Input map[string]any `json:"input"`
+	// ACP extension fields — zero breaking change, omitted by existing workers.
+	Title     string         `json:"title,omitempty"` // "read: main.go"
+	Kind      string         `json:"kind,omitempty"`  // read/edit/delete/move/search/execute/think/fetch/switch_mode/other
+	Locations []FileLocation `json:"locations,omitempty"`
 }
 
 // ToolResultData is the payload for ToolResult events.
@@ -207,6 +229,9 @@ type ToolResultData struct {
 	ID     string `json:"id"`
 	Output any    `json:"output"`
 	Error  string `json:"error,omitempty"`
+	// ACP extension fields — zero breaking change, omitted by existing workers.
+	Status string    `json:"status,omitempty"` // completed / failed
+	Diff   *FileDiff `json:"diff,omitempty"`
 }
 
 // RawData is the payload for Raw events (passthrough for agent-specific messages).
@@ -399,6 +424,35 @@ type ContextUsageData struct {
 type ContextCategory struct {
 	Name   string `json:"name"`
 	Tokens int    `json:"tokens"`
+}
+
+// ToolUpdateData carries intermediate tool call status (ACP tool_call_update).
+// Existing workers (ClaudeCode/Codex/OCS) do not emit this event.
+type ToolUpdateData struct {
+	ID        string    `json:"id"`
+	Status    string    `json:"status"` // pending / in_progress
+	Content   any       `json:"content,omitempty"`
+	Diff      *FileDiff `json:"diff,omitempty"`
+	RawOutput string    `json:"raw_output,omitempty"`
+}
+
+// PlanData carries a plan/todo update (ACP AgentPlanUpdate).
+type PlanData struct {
+	Items []PlanItem `json:"items"`
+}
+
+// PlanItem represents a single item in a plan.
+// Maps from ACP PlanEntry: content (description), priority, status.
+type PlanItem struct {
+	Content  string `json:"content"`  // task description (ACP PlanEntry.content)
+	Priority string `json:"priority"` // high / medium / low (ACP PlanEntryPriority)
+	Status   string `json:"status"`   // pending / in_progress / completed (ACP PlanEntryStatus)
+}
+
+// ModeUpdateData carries an agent execution mode switch notification.
+// Maps from ACP CurrentModeUpdate: currentModeId references modes from session/new.
+type ModeUpdateData struct {
+	CurrentModeID string `json:"current_mode_id"`
 }
 
 // ContextSkillInfo carries skill-related context usage.

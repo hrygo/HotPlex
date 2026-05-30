@@ -544,6 +544,7 @@ type WorkerConfig struct {
 	OpenCodeServer   OpenCodeServerConfig `mapstructure:"opencode_server"`
 	ClaudeCode       ClaudeCodeConfig     `mapstructure:"claude_code"`
 	CodexCLI         CodexCLIConfig       `mapstructure:"codex_cli"`
+	ACP              ACPConfig            `mapstructure:"acp"`
 	Environment      []string             `mapstructure:"environment"`
 }
 
@@ -596,6 +597,13 @@ type OpenCodeServerConfig struct {
 	ReadyTimeout      time.Duration `mapstructure:"ready_timeout"`
 	ReadyPollInterval time.Duration `mapstructure:"ready_poll_interval"`
 	HTTPTimeout       time.Duration `mapstructure:"http_timeout"`
+}
+
+// ACPConfig holds ACP (Agent Client Protocol) worker settings.
+// ACP is a universal worker type that connects to any ACP-compatible agent via stdio.
+type ACPConfig struct {
+	Command     string `mapstructure:"command" json:"command"`                               // ACP agent binary (e.g. "hermes-acp")
+	AutoApprove bool   `mapstructure:"auto_approve,omitempty" json:"auto_approve,omitempty"` // auto-approve permission requests
 }
 
 // AutoRetryConfig controls automatic retry behavior when LLM provider returns
