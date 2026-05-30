@@ -224,6 +224,8 @@ worker:
     # Override via HOTPLEX_WORKER_ACP_COMMAND environment variable.
     command: "hermes acp"
     # Auto-approve permission requests from the agent (no user confirmation needed).
+    # WARNING: auto_approve: true grants full tool access without human review.
+    # Consider setting to false in production environments.
     auto_approve: true
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -9,9 +9,13 @@ v1.22.0 是一次 minor 版本更新，聚焦于 **ACP Worker 全面实现**、*
 ### Added
 
 - **Worker/ACP**: ACP Worker adapter — full implementation of JSON-RPC 2.0 over stdio protocol with bidirectional ACP↔AEP mapping (11 notification types), permission bridging, priority-aware backpressure, and 12 rounds of PR review hardening. 24 tests with -race flag. (#569, #579)
-- **Worker/Codex**: Default sandbox changed from workspace-write to danger-full-access, with per-bot sandbox field in Slack/Feishu bot configs for role-based access control.
+- **Worker/Codex**: Per-bot sandbox field in Slack/Feishu bot configs for role-based access control.
 - **Messaging/Slack**: Assistant branding — DisplayName/IconEmoji support with bot-level override for custom assistant status. DataTableBlock for skills list rendering. (#565)
 - **Worker**: Add NO_PROXY to worker environment — bypass system proxy (e.g. Clash) for localhost calls, preventing 502 Bad Gateway on local CLIProxyAPI requests.
+
+### Security
+
+- **Worker/Codex**: Default sandbox changed from `workspace-write` to `danger-full-access`. Existing deployments upgrading to v1.22.0 will have Codex workers silently elevated to unrestricted access. Set `sandbox: "workspace-write"` per-bot or at platform level to restore the old behavior.
 
 ### Changed
 
