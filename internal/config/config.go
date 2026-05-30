@@ -688,10 +688,12 @@ type SkillsConfig struct {
 
 // WebhookConfig holds GitHub webhook receiver settings.
 type WebhookConfig struct {
-	Enabled     bool   `mapstructure:"enabled"`
-	Secret      string `mapstructure:"secret"`
-	Path        string `mapstructure:"path"`          // default: "/api/webhook/github"
-	MaxBodySize int64  `mapstructure:"max_body_size"` // default: 1MB
+	MaxBodySize   int64    `mapstructure:"max_body_size"`   // default: 1MB
+	AllowedRepos  []string `mapstructure:"allowed_repos"`   // repos to accept events from; empty = accept all
+	TargetJobName string   `mapstructure:"target_job_name"` // cron job to trigger on matching events
+	Secret        string   `mapstructure:"secret"`
+	Path          string   `mapstructure:"path"` // default: "/api/webhook/github"
+	Enabled       bool     `mapstructure:"enabled"`
 }
 
 // CronConfig holds AI-native cronjob scheduler settings.
@@ -869,9 +871,10 @@ func Default() *Config {
 			TickIntervalSec:   60,
 		},
 		Webhook: WebhookConfig{
-			Enabled:     false,
-			Path:        "/api/webhook/github",
-			MaxBodySize: 1 << 20, // 1MB
+			MaxBodySize:   1 << 20, // 1MB
+			Path:          "/api/webhook/github",
+			TargetJobName: "pr-review",
+			Enabled:       false,
 		},
 		Events: EventsConfig{
 			Retention: 720 * time.Hour, // 30 days
@@ -1071,6 +1074,7 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("webhook.secret")
 	_ = v.BindEnv("webhook.path")
 	_ = v.BindEnv("webhook.max_body_size")
+	_ = v.BindEnv("webhook.target_job_name")
 
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("config: environment override: %w", err)

@@ -9,20 +9,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
-)
 
-// WebhookConfig holds GitHub webhook receiver configuration.
-type WebhookConfig struct {
-	Enabled     bool
-	Secret      string
-	Path        string
-	MaxBodySize int64
-}
+	"github.com/hrygo/hotplex/internal/config"
+)
 
 // GitHubEvent represents the common fields of GitHub webhook payloads.
 type GitHubEvent struct {
@@ -46,6 +41,14 @@ type GitHubEvent struct {
 			Number int `json:"number"`
 		} `json:"pull_requests"`
 	} `json:"check_suite"`
+	CheckRun *struct {
+		Conclusion string `json:"conclusion"`
+		CheckSuite *struct {
+			PullRequests []struct {
+				Number int `json:"number"`
+			} `json:"pull_requests"`
+		} `json:"check_suite"`
+	} `json:"check_run"`
 }
 
 // JobTrigger triggers a named cron job with optional extra context.
@@ -53,20 +56,24 @@ type JobTrigger interface {
 	TriggerByName(ctx context.Context, jobName string, extra map[string]string) error
 }
 
+const maxConcurrentTriggers = 5
+
 // WebhookHandler handles incoming GitHub webhook requests.
 type WebhookHandler struct {
-	cfg     WebhookConfig
+	cfg     config.WebhookConfig
 	trigger JobTrigger
 	limiter *rate.Limiter
+	sem     chan struct{} // bounds concurrent trigger goroutines
 	log     *slog.Logger
 }
 
 // NewWebhookHandler creates a new GitHub webhook handler.
-func NewWebhookHandler(cfg WebhookConfig, trigger JobTrigger, log *slog.Logger) *WebhookHandler {
+func NewWebhookHandler(cfg config.WebhookConfig, trigger JobTrigger, log *slog.Logger) *WebhookHandler {
 	return &WebhookHandler{
 		cfg:     cfg,
 		trigger: trigger,
 		limiter: rate.NewLimiter(2, 10), // 2 req/s, burst 10
+		sem:     make(chan struct{}, maxConcurrentTriggers),
 		log:     log.With("component", "webhook"),
 	}
 }
@@ -123,7 +130,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. Repository filter
-	if event.Repository.FullName != "hrygo/hotplex" {
+	if len(h.cfg.AllowedRepos) > 0 && !slices.Contains(h.cfg.AllowedRepos, event.Repository.FullName) {
 		h.log.Warn("webhook: unexpected repo", "repo", event.Repository.FullName)
 		w.WriteHeader(http.StatusOK) // 200 to prevent GitHub retries
 		return
@@ -136,21 +143,28 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 9. Async trigger — do not block HTTP response
+	// 9. Async trigger — bounded concurrency via semaphore
+	jobName := h.cfg.TargetJobName
 	for _, prNum := range prNumbers {
-		go func(n int) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			err := h.trigger.TriggerByName(ctx, "pr-review-hotplex", map[string]string{
-				"trigger":   "webhook",
-				"pr_number": strconv.Itoa(n),
-			})
-			if err != nil {
-				h.log.Error("webhook: trigger failed", "pr", n, "err", err)
-			} else {
-				h.log.Info("webhook: triggered review", "pr", n)
-			}
-		}(prNum)
+		select {
+		case h.sem <- struct{}{}:
+			go func(n int) {
+				defer func() { <-h.sem }()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				err := h.trigger.TriggerByName(ctx, jobName, map[string]string{
+					"trigger":   "webhook",
+					"pr_number": strconv.Itoa(n),
+				})
+				if err != nil {
+					h.log.Error("webhook: trigger failed", "pr", n, "err", err)
+				} else {
+					h.log.Info("webhook: triggered review", "pr", n)
+				}
+			}(prNum)
+		default:
+			h.log.Warn("webhook: trigger concurrency limit reached, skipping", "pr", prNum)
+		}
 	}
 
 	w.WriteHeader(http.StatusAccepted)
@@ -189,12 +203,22 @@ func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 			return []int{e.PullRequest.Number}
 		}
 
-	case "check_suite", "check_run":
+	case "check_suite":
 		if e.CheckSuite == nil || e.CheckSuite.Conclusion != "success" {
 			return nil
 		}
 		prs := make([]int, 0, len(e.CheckSuite.PullRequests))
 		for _, pr := range e.CheckSuite.PullRequests {
+			prs = append(prs, pr.Number)
+		}
+		return prs
+
+	case "check_run":
+		if e.CheckRun == nil || e.CheckRun.Conclusion != "success" || e.CheckRun.CheckSuite == nil {
+			return nil
+		}
+		prs := make([]int, 0, len(e.CheckRun.CheckSuite.PullRequests))
+		for _, pr := range e.CheckRun.CheckSuite.PullRequests {
 			prs = append(prs, pr.Number)
 		}
 		return prs

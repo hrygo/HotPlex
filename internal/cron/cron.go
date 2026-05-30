@@ -262,23 +262,14 @@ func (s *Scheduler) TriggerJob(ctx context.Context, job *CronJob) error {
 }
 
 // TriggerByName finds a job by name and triggers its execution.
-// It uses the in-memory index for lookup and respects the enabled/disabled state.
+// It uses the store for indexed lookup and respects the enabled/disabled state.
 func (s *Scheduler) TriggerByName(ctx context.Context, jobName string, extra map[string]string) error {
-	s.mu.Lock()
-	var found *CronJob
-	for _, j := range s.jobs {
-		if j.Name == jobName {
-			found = j
-			break
-		}
-	}
-	s.mu.Unlock()
-
-	if found == nil {
-		return fmt.Errorf("cron trigger by name: job %q not found: %w", jobName, ErrJobNotFound)
+	found, err := s.store.GetByName(ctx, jobName)
+	if err != nil {
+		return fmt.Errorf("cron trigger by name: job %q not found: %w", jobName, err)
 	}
 	if !found.Enabled {
-		return fmt.Errorf("cron trigger by name: job %q is disabled", jobName)
+		return fmt.Errorf("cron trigger by name: job %q: %w", jobName, ErrJobDisabled)
 	}
 
 	// Inject extra context (e.g. target_pr from webhook) into PlatformKey.

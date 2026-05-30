@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 const testSecret = "test-webhook-secret"
@@ -41,6 +43,16 @@ type checkSuiteDetail = struct {
 	} `json:"pull_requests"`
 }
 
+// checkRunDetail is a typed alias for the CheckRun inner struct.
+type checkRunDetail = struct {
+	Conclusion string `json:"conclusion"`
+	CheckSuite *struct {
+		PullRequests []struct {
+			Number int `json:"number"`
+		} `json:"pull_requests"`
+	} `json:"check_suite"`
+}
+
 func noopLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
@@ -49,6 +61,17 @@ func signPayload(secret string, payload []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(payload)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func testWebhookConfig() config.WebhookConfig {
+	return config.WebhookConfig{
+		MaxBodySize:   1 << 20,
+		Secret:        testSecret,
+		Path:          "/api/webhook/github",
+		AllowedRepos:  []string{"hrygo/hotplex"},
+		TargetJobName: "pr-review",
+		Enabled:       true,
+	}
 }
 
 func postWebhook(h *WebhookHandler, eventType string, payload any) *httptest.ResponseRecorder {
@@ -74,12 +97,7 @@ func postWebhook(h *WebhookHandler, eventType string, payload any) *httptest.Res
 
 func newIsolatedHandler() (*WebhookHandler, *mockTrigger) {
 	t := &mockTrigger{}
-	h := NewWebhookHandler(WebhookConfig{
-		Enabled:     true,
-		Secret:      testSecret,
-		Path:        "/api/webhook/github",
-		MaxBodySize: 1 << 20,
-	}, t, noopLogger())
+	h := NewWebhookHandler(testWebhookConfig(), t, noopLogger())
 	return h, t
 }
 
@@ -89,7 +107,7 @@ func TestWebhookHandler_SignatureVerification(t *testing.T) {
 	t.Parallel()
 
 	h := &WebhookHandler{
-		cfg: WebhookConfig{Secret: testSecret, MaxBodySize: 1 << 20},
+		cfg: config.WebhookConfig{Secret: testSecret, MaxBodySize: 1 << 20},
 	}
 
 	payload := []byte(`{"action":"opened"}`)
@@ -115,7 +133,7 @@ func TestWebhookHandler_SignatureVerification(t *testing.T) {
 
 	t.Run("empty secret rejects all", func(t *testing.T) {
 		t.Parallel()
-		empty := &WebhookHandler{cfg: WebhookConfig{Secret: "", MaxBodySize: 1 << 20}}
+		empty := &WebhookHandler{cfg: config.WebhookConfig{Secret: "", MaxBodySize: 1 << 20}}
 		sig := signPayload(testSecret, payload)
 		ok := empty.verifySignature(payload, sig)
 		require.False(t, ok)
@@ -141,7 +159,7 @@ func TestWebhookHandler_SignatureVerification(t *testing.T) {
 func TestWebhookHandler_ExtractPRs(t *testing.T) {
 	t.Parallel()
 
-	h := &WebhookHandler{cfg: WebhookConfig{MaxBodySize: 1 << 20}}
+	h := &WebhookHandler{cfg: config.WebhookConfig{MaxBodySize: 1 << 20}}
 
 	t.Run("draft PR ignored", func(t *testing.T) {
 		t.Parallel()
@@ -218,6 +236,58 @@ func TestWebhookHandler_ExtractPRs(t *testing.T) {
 			},
 		}
 		prs := h.extractPRs("check_suite", e)
+		require.Empty(t, prs)
+	})
+
+	t.Run("check_run success triggers PRs", func(t *testing.T) {
+		t.Parallel()
+		e := &GitHubEvent{
+			CheckRun: &checkRunDetail{
+				Conclusion: "success",
+				CheckSuite: &struct {
+					PullRequests []struct {
+						Number int `json:"number"`
+					} `json:"pull_requests"`
+				}{
+					PullRequests: []struct {
+						Number int `json:"number"`
+					}{{Number: 77}},
+				},
+			},
+		}
+		prs := h.extractPRs("check_run", e)
+		require.Equal(t, []int{77}, prs)
+	})
+
+	t.Run("check_run failure ignored", func(t *testing.T) {
+		t.Parallel()
+		e := &GitHubEvent{
+			CheckRun: &checkRunDetail{
+				Conclusion: "failure",
+				CheckSuite: &struct {
+					PullRequests []struct {
+						Number int `json:"number"`
+					} `json:"pull_requests"`
+				}{
+					PullRequests: []struct {
+						Number int `json:"number"`
+					}{{Number: 77}},
+				},
+			},
+		}
+		prs := h.extractPRs("check_run", e)
+		require.Empty(t, prs)
+	})
+
+	t.Run("check_run nil CheckSuite ignored", func(t *testing.T) {
+		t.Parallel()
+		e := &GitHubEvent{
+			CheckRun: &checkRunDetail{
+				Conclusion: "success",
+				CheckSuite: nil,
+			},
+		}
+		prs := h.extractPRs("check_run", e)
 		require.Empty(t, prs)
 	})
 
@@ -315,6 +385,23 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 		require.Equal(t, 0, trigger.count())
 	})
 
+	t.Run("any repo accepted when AllowedRepos empty", func(t *testing.T) {
+		t.Parallel()
+		trigger := &mockTrigger{}
+		cfg := testWebhookConfig()
+		cfg.AllowedRepos = nil // no filter
+		h := NewWebhookHandler(cfg, trigger, noopLogger())
+		w := postWebhook(h, "pull_request", &GitHubEvent{
+			Action: "opened",
+			Repository: struct {
+				FullName string `json:"full_name"`
+			}{FullName: "any/repo"},
+			PullRequest: &prDetail{Number: 10, State: "open"},
+		})
+		require.Equal(t, http.StatusAccepted, w.Code)
+		require.Eventually(t, func() bool { return trigger.count() >= 1 }, 2*time.Second, 50*time.Millisecond)
+	})
+
 	t.Run("valid PR opened triggers review", func(t *testing.T) {
 		t.Parallel()
 		h, trigger := newIsolatedHandler()
@@ -391,6 +478,34 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 		require.Equal(t, "55", trigger.getLastExtra()["pr_number"])
 	})
 
+	t.Run("check_run success triggers review", func(t *testing.T) {
+		t.Parallel()
+		h, trigger := newIsolatedHandler()
+		w := postWebhook(h, "check_run", &GitHubEvent{
+			Action: "completed",
+			Repository: struct {
+				FullName string `json:"full_name"`
+			}{
+				FullName: "hrygo/hotplex",
+			},
+			CheckRun: &checkRunDetail{
+				Conclusion: "success",
+				CheckSuite: &struct {
+					PullRequests []struct {
+						Number int `json:"number"`
+					} `json:"pull_requests"`
+				}{
+					PullRequests: []struct {
+						Number int `json:"number"`
+					}{{Number: 33}},
+				},
+			},
+		})
+		require.Equal(t, http.StatusAccepted, w.Code)
+		require.Eventually(t, func() bool { return trigger.count() >= 1 }, 2*time.Second, 50*time.Millisecond)
+		require.Equal(t, "33", trigger.getLastExtra()["pr_number"])
+	})
+
 	t.Run("check_suite failure does not trigger", func(t *testing.T) {
 		t.Parallel()
 		h, trigger := newIsolatedHandler()
@@ -455,18 +570,13 @@ func TestWebhookHandler_RateLimiting(t *testing.T) {
 type errorTrigger struct{}
 
 func (e *errorTrigger) TriggerByName(_ context.Context, _ string, _ map[string]string) error {
-	return fmt.Errorf("job not found: pr-review-hotplex")
+	return fmt.Errorf("job not found: pr-review")
 }
 
 func TestWebhookHandler_TriggerError(t *testing.T) {
 	t.Parallel()
 
-	h := NewWebhookHandler(WebhookConfig{
-		Enabled:     true,
-		Secret:      testSecret,
-		Path:        "/api/webhook/github",
-		MaxBodySize: 1 << 20,
-	}, &errorTrigger{}, noopLogger())
+	h := NewWebhookHandler(testWebhookConfig(), &errorTrigger{}, noopLogger())
 
 	w := postWebhook(h, "pull_request", &GitHubEvent{
 		Action: "opened",

@@ -15,6 +15,9 @@ import (
 // ErrJobNotFound is returned when a job is not found in the store.
 var ErrJobNotFound = errors.New("cron store: job not found")
 
+// ErrJobDisabled is returned when attempting to trigger a disabled job.
+var ErrJobDisabled = errors.New("cron: job is disabled")
+
 // Store defines the persistence interface for cron jobs.
 type Store interface {
 	Create(ctx context.Context, job *CronJob) error
