@@ -575,10 +575,11 @@ func (w *AppServerWorker) Terminate(ctx context.Context) error {
 
 func (w *AppServerWorker) Kill() error {
 	w.release()
-	// After release(), refs may reach 0. Immediately kill the singleton
-	// process instead of waiting for the idle drain timer (30 minutes).
-	// This distinguishes Kill() (forceful, from zombie GC) from
-	// Terminate() (graceful, keeps process alive for reuse).
+	// Both Kill() and Terminate() call KillIfIdle() after release() to
+	// ensure the singleton process is killed immediately when refs reach 0,
+	// rather than waiting for the 30-minute idle drain timer. The methods
+	// are functionally identical; the distinction exists for interface
+	// conformance with worker.Worker.
 	if w.manager != nil {
 		w.manager.KillIfIdle()
 	}

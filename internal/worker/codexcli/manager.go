@@ -710,21 +710,24 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 }
 
 // KillIfIdle immediately kills the singleton process when no sessions hold
-// references (refs == 0). This is used by AppServerWorker.Kill() (and
-// Terminate) to distinguish a forceful termination (zombie GC) from a
-// graceful release, avoiding the 30-minute idle drain wait.
+// references (refs == 0). Used by both Kill() and Terminate() to avoid the
+// 30-minute idle drain wait.
 //
 // This skips the graceful SIGTERM→5s→SIGKILL protocol used by Shutdown()
 // because an idle process has no active sessions — there is nothing to
-// drain or notify.  Contrast with opencodeserver's Kill() which also
-// does not force-kill; here the urgency is higher because zombie GC
-// expects immediate cleanup, not a 30-minute idle drain.
+// drain or notify.
 //
 // We use ForceKill(pgid) directly instead of proc.Manager.Kill() to avoid
-// a deadlock: Manager.Kill() acquires proc.mu and calls cmd.Wait(), while
-// monitorProcess's Wait() (via waitOnce) also holds proc.mu during its own
-// cmd.Wait(). ForceKill sends SIGKILL by PGID without touching proc.mu;
-// monitorProcess naturally observes the exit via its Wait() and runs cleanup.
+// a deadlock: Manager.Kill() acquires proc.mu and then calls cmd.Wait(),
+// which blocks until the child exits; meanwhile monitorProcess's Wait()
+// (via waitOnce) is already holding proc.mu inside its own cmd.Wait()
+// call. These two concurrent cmd.Wait() acquisitions would deadlock.
+// ForceKill sends SIGKILL by PGID without touching proc.mu, so the
+// already-running monitorProcess.Wait() observes the exit and runs cleanup.
+//
+// NOTE: There is a benign TOCTOU window between the shouldKill check (under
+// m.mu) and the ForceKill(pgid) call (after unlock). If the process exits
+// in this window, ForceKill returns ESRCH, which is harmless and ignored.
 func (m *CodexAppServerManager) KillIfIdle() {
 	m.mu.Lock()
 	if m.idleTimer != nil {
