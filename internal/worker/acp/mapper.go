@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -51,6 +52,7 @@ func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelo
 		Update    json.RawMessage `json:"update"`
 	}
 	if err := json.Unmarshal(notif.Params, &params); err != nil {
+		slog.Debug("acp mapper: failed to parse session/update params", "error", err)
 		return nil
 	}
 
@@ -93,13 +95,7 @@ func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelo
 
 // MapPromptResponse converts a prompt result to AEP done + message.end envelopes.
 func (m *ACPMapper) MapPromptResponse(result *PromptResult) []*events.Envelope {
-	var envs []*events.Envelope
-
-	if m.msgActive.Swap(false) {
-		envs = append(envs, m.newEnvelope(events.MessageEnd, events.MessageEndData{
-			MessageID: m.messageID(),
-		}))
-	}
+	envs := m.closeMessageStream()
 
 	success := result.StopReason == "end_turn" || result.StopReason == "cancelled"
 	stats := m.buildStats(result)
@@ -114,13 +110,7 @@ func (m *ACPMapper) MapPromptResponse(result *PromptResult) []*events.Envelope {
 
 // MapPromptError converts a prompt error to AEP error + done envelopes.
 func (m *ACPMapper) MapPromptError(err error) []*events.Envelope {
-	var envs []*events.Envelope
-
-	if m.msgActive.Swap(false) {
-		envs = append(envs, m.newEnvelope(events.MessageEnd, events.MessageEndData{
-			MessageID: m.messageID(),
-		}))
-	}
+	envs := m.closeMessageStream()
 
 	envs = append(envs, m.newEnvelope(events.Error, events.ErrorData{
 		Code:    events.ErrCodeInternalError,
@@ -132,6 +122,18 @@ func (m *ACPMapper) MapPromptError(err error) []*events.Envelope {
 
 	m.turnActive.Store(false)
 	return envs
+}
+
+// closeMessageStream emits a message.end envelope if a message stream is active.
+func (m *ACPMapper) closeMessageStream() []*events.Envelope {
+	if !m.msgActive.Swap(false) {
+		return nil
+	}
+	return []*events.Envelope{
+		m.newEnvelope(events.MessageEnd, events.MessageEndData{
+			MessageID: m.messageID(),
+		}),
+	}
 }
 
 // MapStateRunning creates a state(running) envelope.

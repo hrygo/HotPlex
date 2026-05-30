@@ -68,7 +68,6 @@ var acpEnvBlocklist = []string{
 type Worker struct {
 	*base.BaseWorker
 
-	mu           sync.Mutex
 	sessionID    string
 	projectDir   string
 	acpSessionID string // ACP agent's internal session ID
@@ -77,7 +76,6 @@ type Worker struct {
 	mapper *ACPMapper
 	conn   *acpConn
 	cancel context.CancelFunc
-	ctx    context.Context // lifecycle context for background operations
 
 	// pendingPerm stores the permission mapping for in-flight permission requests.
 	pendingPerm sync.Map // requestID (string) → *PermissionMapResult
@@ -96,19 +94,19 @@ func (w *Worker) SupportsTools() bool     { return true }
 func (w *Worker) EnvBlocklist() []string  { return append([]string{}, acpEnvBlocklist...) }
 func (w *Worker) SessionStoreDir() string { return "" }
 func (w *Worker) MaxTurns() int           { return 0 }
-func (w *Worker) Modalities() []string    { return []string{"text", "code"} }
+func (w *Worker) Modalities() []string    { return []string{"text", "code", "image"} }
 
 // ─── WorkerSessionIDHandler ──────────────────────────────────────────────────
 
 func (w *Worker) SetWorkerSessionID(id string) {
-	w.mu.Lock()
+	w.Mu.Lock()
 	w.acpSessionID = id
-	w.mu.Unlock()
+	w.Mu.Unlock()
 }
 
 func (w *Worker) GetWorkerSessionID() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.Mu.Lock()
+	defer w.Mu.Unlock()
 	return w.acpSessionID
 }
 
@@ -116,10 +114,10 @@ func (w *Worker) GetWorkerSessionID() string {
 
 func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Phase 1: Assign fields under lock (fast, no I/O).
-	w.mu.Lock()
+	w.Mu.Lock()
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
-	w.mu.Unlock()
+	w.Mu.Unlock()
 
 	// Phase 2: I/O-heavy operations outside the lock.
 
@@ -133,10 +131,12 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Build environment using shared security layer.
 	env := base.BuildEnv(session, acpEnvBlocklist, "acp")
 
-	// Create process manager.
+	// Create process manager â protected by Mu for concurrent Terminate safety.
+	w.Mu.Lock()
 	w.Proc = proc.New(proc.Opts{Logger: w.Log})
+	w.Mu.Unlock()
 
-	stdin, stdout, _, err := w.Proc.Start(ctx, binary, args, env, session.ProjectDir)
+	stdin, stdout, _, err := w.Proc.Start(context.Background(), binary, args, env, session.ProjectDir)
 	if err != nil {
 		return fmt.Errorf("acp: failed to start process: %w", err)
 	}
@@ -198,15 +198,14 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mapper = mapper
 
 	// Create connection.
-	w.mu.Lock()
+	w.Mu.Lock()
 	w.conn = newACPConn(session.UserID, session.SessionID)
-	w.mu.Unlock()
+	w.Mu.Unlock()
 	w.SetConnLocked(nil) // base.Conn not used; acpConn is returned via Conn() override.
 
-	// Start read loop.
-	childCtx, cancel := context.WithCancel(ctx)
+	// Start read loop — decoupled from request lifecycle.
+	childCtx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
-	w.ctx = childCtx
 	client.StartReadLoop(childCtx)
 	go w.readLoop(childCtx)
 
@@ -271,9 +270,9 @@ func (w *Worker) Terminate(ctx context.Context) error {
 	}
 
 	// Close conn first so forwardEvents goroutine exits promptly.
-	w.mu.Lock()
+	w.Mu.Lock()
 	conn := w.conn
-	w.mu.Unlock()
+	w.Mu.Unlock()
 	if conn != nil {
 		_ = conn.Close()
 	}
@@ -298,8 +297,8 @@ func (w *Worker) Terminate(ctx context.Context) error {
 
 // Conn returns the acpConn as a SessionConn (overrides base.BaseWorker.Conn).
 func (w *Worker) Conn() worker.SessionConn {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.Mu.Lock()
+	defer w.Mu.Unlock()
 	if w.conn == nil {
 		return nil
 	}
@@ -312,11 +311,11 @@ func (w *Worker) Health() worker.WorkerHealth {
 	h := w.BaseWorker.Health(worker.TypeACP)
 	// BaseWorker.Health reads base.Conn which is nil for ACP (we use acpConn instead).
 	// Populate SessionID from acpConn if available.
-	w.mu.Lock()
+	w.Mu.Lock()
 	if w.conn != nil {
 		h.SessionID = w.conn.SessionID()
 	}
-	w.mu.Unlock()
+	w.Mu.Unlock()
 	return h
 }
 
@@ -329,7 +328,7 @@ func (w *Worker) ResetContext(_ context.Context) error {
 
 // ─── MetadataHandler ─────────────────────────────────────────────────────────
 
-func (w *Worker) HandlePermissionResponse(_ context.Context, reqID string, allowed bool, _ string) error {
+func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, _ string) error {
 	result, ok := w.pendingPerm.LoadAndDelete(reqID)
 	if !ok {
 		return fmt.Errorf("acp: no pending permission request: %s", reqID)
@@ -346,7 +345,7 @@ func (w *Worker) HandlePermissionResponse(_ context.Context, reqID string, allow
 		outcome = pm.FormatDeniedOutcome()
 	}
 
-	return w.client.RespondPermission(w.lifecycleCtx(), pm.RequestID, outcome)
+	return w.client.RespondPermission(ctx, pm.RequestID, outcome)
 }
 
 func (w *Worker) HandleQuestionResponse(_ context.Context, _ string, _ map[string]string) error {
@@ -355,15 +354,6 @@ func (w *Worker) HandleQuestionResponse(_ context.Context, _ string, _ map[strin
 
 func (w *Worker) HandleElicitationResponse(_ context.Context, _, _ string, _ map[string]any) error {
 	return worker.ErrNotImplemented
-}
-
-// lifecycleCtx returns a context for background operations (permission responses, etc.).
-// Falls back to context.Background() if the worker hasn't started yet.
-func (w *Worker) lifecycleCtx() context.Context {
-	if w.ctx != nil {
-		return w.ctx
-	}
-	return context.Background()
 }
 
 // ─── readLoop ────────────────────────────────────────────────────────────────
@@ -402,7 +392,7 @@ func (w *Worker) handleServerRequest(req *JSONRPCRequest) {
 
 		// Check auto-approve.
 		if val, _ := autoApprove.Load().(bool); val {
-			_ = w.client.RespondPermission(w.lifecycleCtx(), req.ID, pm.FormatAllowedOutcome())
+			_ = w.client.RespondPermission(context.Background(), req.ID, pm.FormatAllowedOutcome())
 			return
 		}
 
