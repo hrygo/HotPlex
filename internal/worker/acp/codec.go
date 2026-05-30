@@ -76,41 +76,45 @@ func ReadMessage(r *bufio.Reader) (any, error) {
 		return nil, nil // skip blank lines
 	}
 
-	// Peek at the raw message to determine type without full unmarshal.
-	var probe struct {
-		ID     *json.RawMessage `json:"id"`
-		Method *string          `json:"method"`
-		Result json.RawMessage  `json:"result"`
-		Error  *JSONRPCError    `json:"error"`
+	// Single-pass unmarshal: extract discriminator fields alongside full payload.
+	var raw struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  *string         `json:"method"`
+		Params  json.RawMessage `json:"params,omitempty"`
+		Result  json.RawMessage `json:"result,omitempty"`
+		Error   *JSONRPCError   `json:"error,omitempty"`
 	}
-	if err := json.Unmarshal(line, &probe); err != nil {
+	if err := json.Unmarshal(line, &raw); err != nil {
 		return nil, fmt.Errorf("acp codec: parse json: %w", err)
 	}
 
 	switch {
-	case probe.ID != nil && probe.Method != nil:
+	case raw.ID != nil && raw.Method != nil:
 		// Request: has id + method (server-initiated, e.g. request_permission).
-		var req JSONRPCRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			return nil, fmt.Errorf("acp codec: unmarshal request: %w", err)
-		}
-		return &req, nil
+		return &JSONRPCRequest{
+			JSONRPC: raw.JSONRPC,
+			ID:      raw.ID,
+			Method:  *raw.Method,
+			Params:  raw.Params,
+		}, nil
 
-	case probe.ID != nil:
+	case raw.ID != nil:
 		// Response: has id, no method.
-		var resp JSONRPCResponse
-		if err := json.Unmarshal(line, &resp); err != nil {
-			return nil, fmt.Errorf("acp codec: unmarshal response: %w", err)
-		}
-		return &resp, nil
+		return &JSONRPCResponse{
+			JSONRPC: raw.JSONRPC,
+			ID:      raw.ID,
+			Result:  raw.Result,
+			Error:   raw.Error,
+		}, nil
 
-	case probe.Method != nil:
+	case raw.Method != nil:
 		// Notification: no id, has method.
-		var notif JSONRPCNotification
-		if err := json.Unmarshal(line, &notif); err != nil {
-			return nil, fmt.Errorf("acp codec: unmarshal notification: %w", err)
-		}
-		return &notif, nil
+		return &JSONRPCNotification{
+			JSONRPC: raw.JSONRPC,
+			Method:  *raw.Method,
+			Params:  raw.Params,
+		}, nil
 
 	default:
 		return nil, fmt.Errorf("acp codec: unrecognized message: %s", string(line))

@@ -578,7 +578,7 @@ worker:
 
 ```go
 // internal/worker/acp/worker.go — 注册（与现有 Worker 一致，放在 worker.go 的 init() 中）
-const TypeACP worker.WorkerType = "acp" // 新常量，与 TypeACPX = "acpx" 共存
+const TypeACP worker.WorkerType = "acp" // 替代原 TypeACPX = "acpx"
 
 func init() {
 	worker.Register(TypeACP, func() (worker.Worker, error) {

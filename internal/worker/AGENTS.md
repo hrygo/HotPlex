@@ -25,7 +25,7 @@ internal/worker/
 |------|----------|-------|
 | Add new Worker adapter | `internal/worker/<name>/` | Implement `Worker` + `SessionConn` + `Capabilities`, register via `init()` |
 | Core adapter interfaces | `worker.go` | SessionConn (line 19), Capabilities (line 40), Worker (line 84) |
-| Worker type constants | `worker.go:70` | TypeClaudeCode, TypeOpenCodeSrv, TypeACPX, TypeUnknown |
+| Worker type constants | `worker.go:70` | TypeClaudeCode, TypeOpenCodeSrv, TypeACP, TypeUnknown |
 | Process lifecycle | `proc/manager.go` | Start/Terminate/Kill/Wait/ReadLine |
 | Worker registration | `registry.go` | `Register(t WorkerType, b Builder)`, blank import in main.go |
 | Compile-time interface checks | `noop/worker.go` | `var _ worker.Worker = (*Worker)(nil)` assertions |
@@ -57,11 +57,14 @@ func NewWorker(t WorkerType) (Worker, error)
 | ClaudeCode | stdio (`claude --print --session-id`) | `--resume` flag | External (gateway) |
 | OpenCodeSrv | HTTP+SSE (`opencode serve`) | Process managed | Via HTTP API |
 | Noop | N/A | N/A | Testing only |
-| ACPX | N/A | N/A | Type constant only, no implementation |
+| ACP | stdio (JSON-RPC 2.0 over NDJSON) | NewSession/LoadSession | Via Initialize handshake |
 
 ## ANTI-PATTERNS
 - Do NOT use `math/rand` for crypto — use `crypto/rand` for JTI, tokens
 - Do NOT skip `Setpgid:true` — child process cleanup depends on PGID isolation
 - Do NOT skip graceful shutdown — always attempt SIGTERM before SIGKILL
 - Do NOT use shell execution — only call `claude`/`opencode` binaries directly
-- Do NOT register ACPX adapter — directory is empty, only TypeACPX constant exists
+- Do NOT use `math/rand` for crypto — use `crypto/rand` for JTI, tokens
+- Do NOT skip `Setpgid:true` — child process cleanup depends on PGID isolation
+- Do NOT skip graceful shutdown — always attempt SIGTERM before SIGKILL
+- Do NOT use shell execution — only call `claude`/`opencode`/`hermes-acp` binaries directly

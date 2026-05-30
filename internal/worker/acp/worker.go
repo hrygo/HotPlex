@@ -266,10 +266,20 @@ func (w *Worker) Terminate(ctx context.Context) error {
 		w.cancel()
 	}
 
-	// Try graceful cancel.
-	cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = w.client.Cancel(cancelCtx, w.GetWorkerSessionID())
+	// Close conn first so forwardEvents goroutine exits promptly.
+	w.mu.Lock()
+	conn := w.conn
+	w.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+
+	// Try graceful cancel (nil-safe for pre-Start Terminate).
+	if w.client != nil {
+		cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = w.client.Cancel(cancelCtx, w.GetWorkerSessionID())
+		cancel()
+	}
 
 	return w.BaseWorker.Terminate(ctx)
 }

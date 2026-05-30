@@ -190,19 +190,16 @@ func (m *ACPMapper) mapAgentThoughtChunk(raw json.RawMessage) []*events.Envelope
 	}
 }
 
-// extractTextContent parses the content field from an ACP text chunk notification.
+// extractTextContent parses the content.text field from an ACP text chunk notification.
+// Single-pass unmarshal — avoids double decode on the streaming hot path.
 func extractTextContent(raw json.RawMessage) string {
 	var u struct {
-		Content json.RawMessage `json:"content"`
+		Content acpTextContent `json:"content"`
 	}
 	if err := json.Unmarshal(raw, &u); err != nil {
 		return ""
 	}
-	var content acpTextContent
-	if err := json.Unmarshal(u.Content, &content); err != nil {
-		return ""
-	}
-	return content.Text
+	return u.Content.Text
 }
 
 // acpToolCallUpdate is the common structure for tool_call and tool_call_update.
@@ -223,8 +220,6 @@ func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
 		return nil
 	}
 
-	name := extractToolName(u.Content)
-
 	var input map[string]any
 	if len(u.RawInput) > 0 {
 		_ = json.Unmarshal(u.RawInput, &input)
@@ -233,26 +228,33 @@ func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
 		input = make(map[string]any)
 	}
 
-	var locations []events.FileLocation
-	var contentItems []struct {
+	// Single-pass content parse: extract tool name and file locations together.
+	type contentItem struct {
 		Path string `json:"path"`
 		Line int    `json:"line,omitempty"`
 	}
+	var items []contentItem
+	var toolName string
 	if len(u.Content) > 0 {
-		_ = json.Unmarshal(u.Content, &contentItems)
-		for _, item := range contentItems {
-			if item.Path != "" {
-				locations = append(locations, events.FileLocation{
-					Path: item.Path,
-					Line: item.Line,
-				})
-			}
+		// Try _meta.claudeCode.toolName first.
+		toolName = extractToolName(u.Content)
+		// Also extract file location items.
+		_ = json.Unmarshal(u.Content, &items)
+	}
+
+	var locations []events.FileLocation
+	for _, item := range items {
+		if item.Path != "" {
+			locations = append(locations, events.FileLocation{
+				Path: item.Path,
+				Line: item.Line,
+			})
 		}
 	}
 
 	data := events.ToolCallData{
 		ID:        u.ToolCallID,
-		Name:      name,
+		Name:      toolName,
 		Input:     input,
 		Title:     u.Title,
 		Kind:      u.Kind,
