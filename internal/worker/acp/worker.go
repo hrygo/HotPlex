@@ -47,6 +47,10 @@ func InitConfig(cfg config.ACPConfig) {
 		cmd = "hermes-acp"
 	}
 	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		slog.Default().Error("acp: empty command after parsing")
+		return
+	}
 	commandParts.Store(parts)
 	autoApprove.Store(cfg.AutoApprove)
 	if err := security.RegisterCommand(parts[0]); err != nil {
@@ -274,6 +278,12 @@ func (w *Worker) Terminate(ctx context.Context) error {
 		_ = conn.Close()
 	}
 
+	// Clear stale pending permission entries (session teardown cleanup).
+	w.pendingPerm.Range(func(key, _ any) bool {
+		w.pendingPerm.Delete(key)
+		return true
+	})
+
 	// Try graceful cancel (nil-safe for pre-Start Terminate).
 	if w.client != nil {
 		cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -299,7 +309,15 @@ func (w *Worker) Conn() worker.SessionConn {
 // ─── Health ──────────────────────────────────────────────────────────────────
 
 func (w *Worker) Health() worker.WorkerHealth {
-	return w.BaseWorker.Health(worker.TypeACP)
+	h := w.BaseWorker.Health(worker.TypeACP)
+	// BaseWorker.Health reads base.Conn which is nil for ACP (we use acpConn instead).
+	// Populate SessionID from acpConn if available.
+	w.mu.Lock()
+	if w.conn != nil {
+		h.SessionID = w.conn.SessionID()
+	}
+	w.mu.Unlock()
+	return h
 }
 
 // ─── ResetContext ────────────────────────────────────────────────────────────

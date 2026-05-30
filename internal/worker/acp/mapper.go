@@ -39,6 +39,8 @@ func (m *ACPMapper) Reset() {
 func (m *ACPMapper) SetTurnActive() { m.turnActive.Store(true) }
 
 // MapNotification converts an ACP notification to zero or more AEP Envelopes.
+// Optimized: discriminator + hot-path content (message/thought chunks) extracted
+// in a single unmarshal pass, eliminating triple-deserialization on the streaming path.
 func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelope {
 	if notif.Method != "session/update" {
 		return nil
@@ -52,19 +54,20 @@ func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelo
 		return nil
 	}
 
-	// Extract the sessionUpdate discriminator.
-	var discriminator struct {
-		SessionUpdate string `json:"sessionUpdate"`
+	// Single-pass discriminator + hot-path content extraction.
+	var disc struct {
+		SessionUpdate string         `json:"sessionUpdate"`
+		Content       acpTextContent `json:"content"` // populated for chunk types only
 	}
-	if err := json.Unmarshal(params.Update, &discriminator); err != nil {
+	if err := json.Unmarshal(params.Update, &disc); err != nil {
 		return nil
 	}
 
-	switch discriminator.SessionUpdate {
+	switch disc.SessionUpdate {
 	case "agent_message_chunk":
-		return m.mapAgentMessageChunk(params.Update)
+		return m.mapAgentMessageChunkText(disc.Content.Text)
 	case "agent_thought_chunk":
-		return m.mapAgentThoughtChunk(params.Update)
+		return m.mapAgentThoughtChunkText(disc.Content.Text)
 	case "tool_call":
 		return m.mapToolCall(params.Update)
 	case "tool_call_update":
@@ -153,8 +156,7 @@ type acpTextContent struct {
 	Text string `json:"text"`
 }
 
-func (m *ACPMapper) mapAgentMessageChunk(raw json.RawMessage) []*events.Envelope {
-	text := extractTextContent(raw)
+func (m *ACPMapper) mapAgentMessageChunkText(text string) []*events.Envelope {
 	if text == "" {
 		return nil
 	}
@@ -177,8 +179,7 @@ func (m *ACPMapper) mapAgentMessageChunk(raw json.RawMessage) []*events.Envelope
 	return envs
 }
 
-func (m *ACPMapper) mapAgentThoughtChunk(raw json.RawMessage) []*events.Envelope {
-	text := extractTextContent(raw)
+func (m *ACPMapper) mapAgentThoughtChunkText(text string) []*events.Envelope {
 	if text == "" {
 		return nil
 	}
@@ -188,18 +189,6 @@ func (m *ACPMapper) mapAgentThoughtChunk(raw json.RawMessage) []*events.Envelope
 			Content: text,
 		}),
 	}
-}
-
-// extractTextContent parses the content.text field from an ACP text chunk notification.
-// Single-pass unmarshal — avoids double decode on the streaming hot path.
-func extractTextContent(raw json.RawMessage) string {
-	var u struct {
-		Content acpTextContent `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &u); err != nil {
-		return ""
-	}
-	return u.Content.Text
 }
 
 // acpToolCallUpdate is the common structure for tool_call and tool_call_update.
@@ -469,10 +458,14 @@ func extractToolName(raw json.RawMessage) string {
 	return ""
 }
 
+// isAllowKind reports whether the option kind is an "allow" variant.
+// See ACP spec: session/request_permission → options[].kind.
 func isAllowKind(kind string) bool {
 	return kind == "allow_once" || kind == "allow_always" || kind == "allow_session"
 }
 
+// isDenyKind reports whether the option kind is a "reject" variant.
+// See ACP spec: session/request_permission → options[].kind.
 func isDenyKind(kind string) bool {
 	return kind == "reject_once" || kind == "reject_always"
 }

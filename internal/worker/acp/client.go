@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -130,14 +131,13 @@ func (c *ACPClient) Cancel(ctx context.Context, sessionID string) error {
 }
 
 // RespondPermission sends a response to a server-initiated request_permission.
+// No lock needed — this method does not access the pending map.
 func (c *ACPClient) RespondPermission(ctx context.Context, id json.RawMessage, outcome any) error {
 	req := &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Result:  mustMarshal(outcome),
 	}
-	c.pendingMu.Lock()
-	defer c.pendingMu.Unlock()
 	if err := WriteMessage(c.stdin, req); err != nil {
 		return fmt.Errorf("acp respond permission: %w", err)
 	}
@@ -220,7 +220,7 @@ func (c *ACPClient) readLoop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return // context cancelled, expected
 			}
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				c.log.Debug("acp client: agent stdout closed")
 				return
 			}

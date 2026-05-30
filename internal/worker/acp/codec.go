@@ -54,11 +54,10 @@ func WriteMessage(w io.Writer, msg any) error {
 	if err != nil {
 		return fmt.Errorf("acp codec: marshal: %w", err)
 	}
+	// Single Write syscall: append newline to avoid two separate writes.
+	data = append(data, '\n')
 	if _, err := w.Write(data); err != nil {
 		return fmt.Errorf("acp codec: write: %w", err)
-	}
-	if _, err := w.Write([]byte{'\n'}); err != nil {
-		return fmt.Errorf("acp codec: write newline: %w", err)
 	}
 	return nil
 }

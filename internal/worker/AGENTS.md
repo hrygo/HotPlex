@@ -63,8 +63,4 @@ func NewWorker(t WorkerType) (Worker, error)
 - Do NOT use `math/rand` for crypto — use `crypto/rand` for JTI, tokens
 - Do NOT skip `Setpgid:true` — child process cleanup depends on PGID isolation
 - Do NOT skip graceful shutdown — always attempt SIGTERM before SIGKILL
-- Do NOT use shell execution — only call `claude`/`opencode` binaries directly
-- Do NOT use `math/rand` for crypto — use `crypto/rand` for JTI, tokens
-- Do NOT skip `Setpgid:true` — child process cleanup depends on PGID isolation
-- Do NOT skip graceful shutdown — always attempt SIGTERM before SIGKILL
 - Do NOT use shell execution — only call `claude`/`opencode`/`hermes-acp` binaries directly

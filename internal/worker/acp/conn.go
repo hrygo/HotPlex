@@ -59,21 +59,30 @@ func (c *acpConn) TrySend(env *events.Envelope) bool {
 	case c.recvCh <- env:
 		return true
 	default:
-		// Channel full — must not lose critical events, log and retry once.
+		// Channel full — must not lose critical events.
+		// Check closed flag, then blocking send with panic recovery.
 		c.mu.Lock()
 		closed := c.closed
 		c.mu.Unlock()
 		if closed {
 			return false
 		}
-		c.recvCh <- env
-		return true
+		return c.safeSend(env)
 	}
 }
 
 // isDroppable reports whether an event type can be silently discarded under backpressure.
 func isDroppable(kind events.Kind) bool {
 	return kind == events.MessageDelta || kind == events.Raw
+}
+
+// safeSend performs a blocking send on recvCh with panic recovery.
+// This protects against the TOCTOU race where Close() shuts down recvCh
+// between the closed-flag check and the actual send.
+func (c *acpConn) safeSend(env *events.Envelope) (sent bool) {
+	defer func() { _ = recover() }()
+	c.recvCh <- env
+	return true
 }
 
 // Close shuts down the receive channel.
