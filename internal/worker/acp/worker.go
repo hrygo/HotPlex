@@ -307,6 +307,13 @@ func (w *Worker) Terminate(ctx context.Context) error {
 		cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = w.client.Cancel(cancelCtx, w.GetWorkerSessionID())
 		cancel()
+
+		// Wait for readLoop goroutine to fully exit before killing the process,
+		// preventing reads from closed pipes during rapid session teardown.
+		select {
+		case <-w.client.Done():
+		case <-time.After(3 * time.Second):
+		}
 	}
 
 	return w.BaseWorker.Terminate(ctx)
