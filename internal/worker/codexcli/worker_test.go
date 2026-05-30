@@ -1396,9 +1396,8 @@ func TestManagerAcquireStartsProcess(t *testing.T) {
 	crashCh, err := mgr.Acquire(context.Background())
 
 	if err != nil {
-		// Codex binary not available (CI or fresh environment) — expected to fail.
-		t.Logf("Acquire failed (expected when codex not installed): %v", err)
-		return
+		// Codex binary not available (CI or fresh environment).
+		t.Skipf("codex binary not available: %v", err)
 	}
 
 	// Codex binary available — verify handshake completed and process is running.
@@ -1745,9 +1744,10 @@ func TestKillCallsKillIfIdle(t *testing.T) {
 		IdleDrainPeriod: time.Minute,
 	})
 
-	// Simulate running with refs=1 and a fake pgid.
+	// Simulate running with refs=1 but leave state as stateIdle so
+	// KillIfIdle's shouldKill guard returns false — avoids calling
+	// ForceKill(99999) on a potentially real PGID in CI.
 	mgr.mu.Lock()
-	mgr.state = stateRunning
 	mgr.refs = 1
 	mgr.pgid = 99999
 	mgr.mu.Unlock()
@@ -1814,8 +1814,7 @@ func TestIntegrationStartSavesSessionAndResetRestarts(t *testing.T) {
 	}
 	err := w.Start(context.Background(), session)
 	if err != nil {
-		t.Logf("Start failed (expected when codex not installed): %v", err)
-		return
+		t.Skipf("codex binary not available: %v", err)
 	}
 	t.Cleanup(func() { _ = w.Terminate(context.Background()) })
 
@@ -1856,8 +1855,7 @@ func TestIntegrationKillImmediatelyTerminatesIdleProcess(t *testing.T) {
 
 	_, err := mgr.Acquire(context.Background())
 	if err != nil {
-		t.Logf("Acquire failed (expected when codex not installed): %v", err)
-		return
+		t.Skipf("codex binary not available: %v", err)
 	}
 	require.True(t, mgr.IsRunning())
 

@@ -564,6 +564,12 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
 	w.release()
+	// Even on graceful Terminate, immediately kill the singleton process if
+	// no other sessions hold refs. This prevents zombie GC path (which calls
+	// Terminate, not Kill) from leaving the process lingering for 30 minutes.
+	if w.manager != nil {
+		w.manager.KillIfIdle()
+	}
 	return nil
 }
 
@@ -623,9 +629,11 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 		w.Log.Warn("codexcli: reset terminate", "error", err)
 	}
 	w.mu.Lock()
-	saved := w.origSession
+	origSess := w.origSession
 	w.threadID = ""
 	w.recvCh = nil
+	w.conn = nil
+	w.commands = nil
 	w.closed = false
 	w.doneCh = make(chan struct{})
 	w.releaseOnce = sync.Once{}
@@ -634,8 +642,20 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 	// Re-establish a fresh thread so the new forwardEvents goroutine
 	// (spawned by bridge.ResetSession) reads from a live recvCh instead
 	// of the stale closed channel left by release().
-	if saved.SessionID != "" {
-		if err := w.Start(ctx, saved); err != nil {
+	if origSess.SessionID != "" {
+		if err := w.Start(ctx, origSess); err != nil {
+			// Start() failure leaves the worker in an unrecoverable state:
+			// closed=false, doneCh=new, recvCh=nil, conn=nil. A subsequent
+			// Kill() would re-execute release() via the fresh releaseOnce,
+			// double-releasing manager refs. Mark closed and signal doneCh
+			// so the worker is safely inert.
+			w.mu.Lock()
+			w.closed = true
+			if w.doneCh != nil {
+				close(w.doneCh)
+			}
+			w.doneCh = nil
+			w.mu.Unlock()
 			return fmt.Errorf("codexcli: reset start: %w", err)
 		}
 	}

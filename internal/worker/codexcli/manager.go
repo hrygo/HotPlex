@@ -268,6 +268,7 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 		m.log.Info("codex-app-server: shutdown, killing process")
 		_ = m.proc.Kill()
 		m.proc = nil
+		m.pgid = 0
 		m.stdin = nil
 		m.stdout = nil
 		m.refs = 0
@@ -339,6 +340,7 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 		cancel()
 		_ = m.proc.Kill()
 		m.proc = nil
+		m.pgid = 0
 		m.stdin = nil
 		m.stdout = nil
 		m.state = stateIdle
@@ -653,6 +655,7 @@ func (m *CodexAppServerManager) monitorProcess() {
 	refs := m.refs
 	m.state = stateIdle
 	m.proc = nil
+	m.pgid = 0
 	m.stdin = nil
 	m.stdout = nil
 
@@ -707,11 +710,9 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 }
 
 // KillIfIdle immediately kills the singleton process when no sessions hold
-// references (refs == 0). This is used by AppServerWorker.Kill() to
-// distinguish a forceful termination (zombie GC) from a graceful release
-// (Terminate), avoiding the 30-minute idle drain wait.
-//
-// KillIfIdle immediately kills the singleton process when refs == 0.
+// references (refs == 0). This is used by AppServerWorker.Kill() (and
+// Terminate) to distinguish a forceful termination (zombie GC) from a
+// graceful release, avoiding the 30-minute idle drain wait.
 //
 // This skips the graceful SIGTERM→5s→SIGKILL protocol used by Shutdown()
 // because an idle process has no active sessions — there is nothing to
@@ -720,10 +721,10 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 // expects immediate cleanup, not a 30-minute idle drain.
 //
 // We use ForceKill(pgid) directly instead of proc.Manager.Kill() to avoid
-// a deadlock: both Manager.Kill() and monitorProcess's Wait() acquire
-// proc.mu internally and call cmd.Wait() (serialised by waitOnce).
-// ForceKill sends SIGKILL by PGID without touching proc.mu; monitorProcess
-// naturally observes the exit via its Wait() and runs cleanup.
+// a deadlock: Manager.Kill() acquires proc.mu and calls cmd.Wait(), while
+// monitorProcess's Wait() (via waitOnce) also holds proc.mu during its own
+// cmd.Wait(). ForceKill sends SIGKILL by PGID without touching proc.mu;
+// monitorProcess naturally observes the exit via its Wait() and runs cleanup.
 func (m *CodexAppServerManager) KillIfIdle() {
 	m.mu.Lock()
 	if m.idleTimer != nil {
