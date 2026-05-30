@@ -42,6 +42,19 @@ t.Cleanup(func() { db.Close() })
 dir := t.TempDir()  // 自动清理，无需 t.Cleanup
 ```
 
+## 测试性能要求
+
+- **单模块 ≤5s**：`go test ./<pkg>/... -count=1 -race` 任一模块不得超过 5 秒
+- **避免 `time.Sleep`**：用 `require.Eventually`、channel 信号、context 超时或 mock 回调替代固定等待；唯一例外是测试定时器/退避逻辑时可用极短 sleep（≤30ms）
+- **集成测试隔离**：需要外部二进制或网络服务的测试必须用 `testing.Short()` guard，CI 以 `-short` 运行时自动 skip
+- **`t.Parallel()` 优先**：无共享状态的测试一律加 `t.Parallel()`，充分利用多核
+
+### 反模式（禁止）
+
+- ❌ `time.Sleep(100 * time.Millisecond)` 等待异步结果（改用 `require.Eventually`）
+- ❌ 无超时的 channel 阻塞（必须 `select` + `time.After` 或 context）
+- ❌ 启动真实进程的测试不加 `testing.Short()` guard
+
 ## 测试工具
 
 ```

@@ -22,7 +22,7 @@
 - **Mutex**: 显式 `mu` 字段，不嵌入，不传指针
 - **错误**: `Err` 前缀（哨兵）、`Error` 后缀（自定义）、`fmt.Errorf("%w")` 包装
 - **日志**: `log/slog` JSON handler
-- **测试**: `testify/require`、table-driven、`t.Parallel()`
+- **测试**: `testify/require`、table-driven、`t.Parallel()`、单模块 ≤5s（`-count=1 -race`）、禁止 `time.Sleep` 等待异步结果（改用 `require.Eventually` 或 channel 信号）
 - **Worker 注册**: `init()` + `worker.Register()` 模式
 - **关闭顺序**: signal → cancel ctx → tracing → hub → bridge → sessionMgr → HTTP
 - **服务重启**: 必须使用 `hotplex service restart` 原子指令，禁止手动拆分 `stop && sleep && start`（仅二进制替换场景需手动 stop 等待）
