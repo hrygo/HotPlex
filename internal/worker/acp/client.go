@@ -2,12 +2,14 @@ package acp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -297,9 +299,19 @@ func (c *ACPClient) call(ctx context.Context, method string, params any) (*JSONR
 }
 
 func (c *ACPClient) dispatchResponse(resp *JSONRPCResponse) {
+	key := string(resp.ID)
+
 	c.mu.Lock()
-	ch, ok := c.pending[string(resp.ID)]
+	ch, ok := c.pending[key]
+	if !ok {
+		// JSON-RPC 2.0 allows integer or string IDs. If the agent returned
+		// a different format (e.g., "1" vs 1), try the alternate form.
+		if altKey := alternateIDKey(resp.ID); altKey != key {
+			ch, ok = c.pending[altKey]
+		}
+	}
 	c.mu.Unlock()
+
 	if !ok {
 		c.log.Warn("acp client: unmatched response", "id", string(resp.ID))
 		return
@@ -309,6 +321,32 @@ func (c *ACPClient) dispatchResponse(resp *JSONRPCResponse) {
 	default:
 		c.log.Warn("acp client: response channel full", "id", string(resp.ID))
 	}
+}
+
+// alternateIDKey returns the pending-map key for the opposite JSON-RPC ID format.
+// If the ID is a JSON number (e.g., 1), it returns the string form ("1").
+// If the ID is a JSON string (e.g., "1"), it returns the numeric form (1).
+func alternateIDKey(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+	if raw[0] == '"' {
+		// String ID → try numeric form: strip quotes.
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return string(mustMarshal(n))
+			}
+		}
+	} else {
+		// Numeric ID → try string form.
+		var n int64
+		if json.Unmarshal(raw, &n) == nil {
+			return string(mustMarshal(strconv.FormatInt(n, 10)))
+		}
+	}
+	return string(raw)
 }
 
 // callSessionMethod is a helper for session/* RPCs that return SessionResult.
