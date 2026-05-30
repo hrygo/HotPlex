@@ -305,8 +305,6 @@ messaging:
   feishu:
     enabled: false
     require_mention: true
-    # Use ACP worker to connect to Hermes agent via JSON-RPC 2.0 over stdio.
-    worker_type: "acp"
     # Override shared defaults here if needed, e.g.:
     # tts_provider: "edge"
     # Multi-bot support (uncomment to use):

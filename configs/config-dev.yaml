@@ -44,7 +44,7 @@ messaging:
     enabled: true
   feishu:
     enabled: true
-    worker_type: "codex_cli"
+    worker_type: "claude_code"
   yuanxin:
     enabled: false
     worker_type: "claude_code"
