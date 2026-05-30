@@ -73,7 +73,8 @@ type WebhookHandler struct {
 	log     *slog.Logger
 	baseCtx context.Context    // gateway lifecycle context for async goroutines
 	cancel  context.CancelFunc // cancels in-flight triggers on shutdown
-	dedup   sync.Map           // pr_number(string) -> time.Time; cooldown-based dedup
+	dedup   sync.Map           // "repo#pr_number" -> time.Time; cooldown-based dedup
+	wg      sync.WaitGroup     // tracks in-flight trigger + sweeper goroutines
 }
 
 // NewWebhookHandler creates a new GitHub webhook handler.
@@ -81,7 +82,7 @@ type WebhookHandler struct {
 // are cancelled on graceful shutdown.
 func NewWebhookHandler(baseCtx context.Context, cfg config.WebhookConfig, trigger JobTrigger, log *slog.Logger) *WebhookHandler {
 	ctx, cancel := context.WithCancel(baseCtx)
-	return &WebhookHandler{
+	h := &WebhookHandler{
 		cfg:     cfg,
 		trigger: trigger,
 		limiter: rate.NewLimiter(2, 10), // 2 req/s, burst 10
@@ -90,16 +91,41 @@ func NewWebhookHandler(baseCtx context.Context, cfg config.WebhookConfig, trigge
 		baseCtx: ctx,
 		cancel:  cancel,
 	}
+	h.wg.Add(1)
+	go h.dedupSweeper()
+	return h
 }
 
-// Close cancels in-flight trigger goroutines and clears dedup entries.
-// Safe to call multiple times.
+// Close cancels in-flight trigger goroutines, stops the dedup sweeper,
+// and waits for all goroutines to finish. Safe to call multiple times.
 func (h *WebhookHandler) Close() {
 	h.cancel()
+	h.wg.Wait()
 	h.dedup.Range(func(key, _ any) bool {
 		h.dedup.Delete(key)
 		return true
 	})
+}
+
+// dedupSweeper periodically purges stale dedup entries.
+func (h *WebhookHandler) dedupSweeper() {
+	defer h.wg.Done()
+	ticker := time.NewTicker(triggerDedupCooldown * 2)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-h.baseCtx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now()
+			h.dedup.Range(func(key, val any) bool {
+				if t, _ := val.(time.Time); now.Sub(t) > triggerDedupCooldown {
+					h.dedup.Delete(key)
+				}
+				return true
+			})
+		}
+	}
 }
 
 // ServeHTTP handles incoming GitHub webhook HTTP requests.
@@ -184,8 +210,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		select {
 		case h.sem <- struct{}{}:
+			h.wg.Add(1)
 			go func(n int) {
-				defer func() { <-h.sem }()
+				defer func() { <-h.sem; h.wg.Done() }()
 				ctx, cancel := context.WithTimeout(h.baseCtx, 5*time.Minute)
 				defer cancel()
 				err := h.trigger.TriggerByName(ctx, jobName, map[string]string{

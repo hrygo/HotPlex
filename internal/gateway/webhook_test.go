@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/cron"
 )
 
 const testSecret = "test-webhook-secret"
@@ -570,7 +571,7 @@ func TestWebhookHandler_RateLimiting(t *testing.T) {
 type errorTrigger struct{}
 
 func (e *errorTrigger) TriggerByName(_ context.Context, _ string, _ map[string]string) error {
-	return fmt.Errorf("job not found: pr-review")
+	return fmt.Errorf("job not found: %w", cron.ErrJobNotFound)
 }
 
 func TestWebhookHandler_TriggerError(t *testing.T) {
