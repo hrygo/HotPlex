@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/internal/session"
@@ -40,6 +39,12 @@ func NewAttachedSessionHandler(log *slog.Logger, router AttachedSessionRouter) *
 
 // Execute dispatches a callback into the target session.
 // Returns nil on successful injection (fire-and-forget), or an error if dispatch fails.
+//
+// Design note: This is intentionally fire-and-forget. Success is recorded at
+// injection time, not at completion. If the target session fails after injection,
+// the cron job still shows StatusSuccess and RunCount is incremented. This avoids
+// the complexity of cross-session state observation. The metrics label "success"
+// reflects successful prompt dispatch, not successful execution outcome.
 func (h *AttachedSessionHandler) Execute(ctx context.Context, job *CronJob) error {
 	sid := job.Payload.TargetSessionID
 
@@ -49,8 +54,7 @@ func (h *AttachedSessionHandler) Execute(ctx context.Context, job *CronJob) erro
 		return fmt.Errorf("callback: session %s not found: %w", sid, err)
 	}
 
-	prompt := fmt.Sprintf("[cron:%s %s] %s\n%s",
-		job.ID, job.Name, job.Payload.Message, time.Now().Format(time.RFC3339))
+	prompt := formatJobPrompt(job)
 	metadata := map[string]any{
 		"source":   "cron_attached",
 		"cron_job": job.ID,

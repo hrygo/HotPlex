@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // RequiredPlatformKey maps each platform to the PlatformKey field required
@@ -17,11 +18,32 @@ var RequiredPlatformKey = map[string]string{
 
 var threatPatterns = []string{
 	"ignore previous instructions",
-	"system prompt override",
-	"you are now",
 	"ignore all above",
+	"ignore all instructions",
 	"forget your instructions",
 	"disregard your training",
+	"system prompt override",
+	"new instructions:",
+	"override previous",
+	"jailbreak",
+}
+
+// stripInvisible removes zero-width characters, control chars, and homoglyph
+// noise from a string to harden injection detection against evasion.
+func stripInvisible(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			continue
+		}
+		// Skip common zero-width and formatting codepoints.
+		if unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // ValidateJobPrompt scans for obvious prompt injection patterns.
@@ -32,19 +54,50 @@ func ValidateJobPrompt(prompt string) error {
 	if len(prompt) > 4096 {
 		return fmt.Errorf("cron: prompt exceeds 4KB limit (%d bytes)", len(prompt))
 	}
-	lower := strings.ToLower(prompt)
+	cleaned := strings.ToLower(stripInvisible(prompt))
 	for _, pat := range threatPatterns {
-		if strings.Contains(lower, pat) {
+		if strings.Contains(cleaned, pat) {
 			return fmt.Errorf("cron: potential prompt injection detected")
 		}
 	}
 	return nil
 }
 
+// SanitizeJobName strips control characters and newlines from a job name
+// to prevent injection when the name is embedded in worker prompts.
+func SanitizeJobName(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// formatJobPrompt builds the standard cron prompt with job metadata and timestamp.
+func formatJobPrompt(job *CronJob) string {
+	return fmt.Sprintf("[cron:%s %s] %s\n%s",
+		job.ID, SanitizeJobName(job.Name),
+		job.Payload.Message, time.Now().Format(time.RFC3339))
+}
+
 // ValidateJob performs full validation on a CronJob before creation/update.
 func ValidateJob(job *CronJob) error {
 	if job.Name == "" {
 		return errors.New("cron: name is required")
+	}
+	if len(job.Name) > 128 {
+		return fmt.Errorf("cron: name exceeds 128 character limit (%d chars)", len(job.Name))
+	}
+	// Reject names with control characters or newlines that could enable
+	// prompt injection when the name is embedded in worker prompts.
+	for _, r := range job.Name {
+		if unicode.IsControl(r) {
+			return errors.New("cron: name contains control characters")
+		}
 	}
 	if job.OwnerID == "" {
 		return errors.New("cron: owner_id is required")

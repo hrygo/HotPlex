@@ -344,8 +344,10 @@ func (s *Scheduler) withinGracePeriod(job *CronJob, now time.Time) bool {
 
 	interval := s.scheduleInterval(job)
 	grace := interval / 2
-	if grace > 2*time.Hour {
-		grace = 2 * time.Hour
+	// Grace period cap at 30 minutes — generous enough for catch-up after
+	// brief downtime, but not so long that stale one-shot tasks re-fire.
+	if grace > 30*time.Minute {
+		grace = 30 * time.Minute
 	}
 
 	return elapsed <= grace
@@ -486,6 +488,8 @@ func (s *Scheduler) ReloadIndex() {
 }
 
 // rebuildIndex refreshes the in-memory index from the store.
+// Store writes are performed outside s.mu to avoid lock-ordering deadlock
+// with CreateJob/UpdateJob (which acquire writeMu then s.mu).
 func (s *Scheduler) rebuildIndex() {
 	jobs, err := s.store.List(context.Background(), false)
 	if err != nil {
@@ -493,21 +497,33 @@ func (s *Scheduler) rebuildIndex() {
 		return
 	}
 
+	// First pass: build index and collect state patches under lock.
+	var statePatches []struct {
+		id    string
+		state CronJobState
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.jobs = make(map[string]*CronJob, len(jobs))
 	now := time.Now()
 	for _, j := range jobs {
 		if j.Enabled && j.State.NextRunAtMs <= 0 {
-			if next, err := NextRun(j.Schedule, now); err == nil && !next.IsZero() {
+			if next, nerr := NextRun(j.Schedule, now); nerr == nil && !next.IsZero() {
 				j.State.NextRunAtMs = next.UnixMilli()
-				if err := s.store.UpdateState(context.Background(), j.ID, j.State); err != nil {
-					s.log.Error("cron: persist next_run on reload", "job_id", j.ID, "err", err)
-				}
+				statePatches = append(statePatches, struct {
+					id    string
+					state CronJobState
+				}{j.ID, j.State})
 			}
 		}
 		s.jobs[j.ID] = j
+	}
+	s.mu.Unlock()
+
+	// Second pass: persist state patches outside the lock.
+	for _, p := range statePatches {
+		if err := s.store.UpdateState(context.Background(), p.id, p.state); err != nil {
+			s.log.Error("cron: persist next_run on reload", "job_id", p.id, "err", err)
+		}
 	}
 }
 

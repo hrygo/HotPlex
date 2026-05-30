@@ -72,8 +72,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		return "", fmt.Errorf("cron executor: worker not found after start")
 	}
 
-	prompt := fmt.Sprintf("[cron:%s %s] %s\n%s", job.ID, job.Name,
-		job.Payload.Message, time.Now().Format(time.RFC3339))
+	prompt := formatJobPrompt(job)
 	prompt += buildDeliverySuffix(job)
 
 	if err := w.Input(ctx, prompt, nil); err != nil {

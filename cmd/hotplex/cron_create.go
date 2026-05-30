@@ -90,7 +90,12 @@ Schedule format:
 					}
 					opts.Attach = true
 					opts.TargetSessionID = sid
-					opts.DeleteAfterRun = true
+					// Only set DeleteAfterRun for one-shot (at) schedules.
+					// For recurring (every) attach jobs, lifecycle is managed by
+					// max_runs/expires_at instead of auto-deletion.
+					if strings.HasPrefix(schedule, "at:") {
+						opts.DeleteAfterRun = true
+					}
 				} else {
 					if schedule == "" {
 						return cmd.Help()
@@ -109,6 +114,11 @@ Schedule format:
 
 				job, err := croncli.PrepareJobForCreate(name, schedule, message, description, workDir, botID, ownerID, timeoutSec, tools, opts)
 				if err != nil {
+					return err
+				}
+
+				// Enforce max jobs limit (best-effort for out-of-process CLI).
+				if err := croncli.CheckMaxJobs(context.Background(), store, configPath); err != nil {
 					return err
 				}
 

@@ -110,11 +110,16 @@ func (tl *timerLoop) onTick() {
 		}
 
 		// Persist state before execution.
+		// If this fails, memory and disk diverge: the in-memory NextRunAtMs is
+		// advanced but disk still has the old value. A crash+restart would cause
+		// re-execution (at-least-once instead of at-most-once). We proceed anyway
+		// because skipping execution here would also be wrong.
 		if err := s.store.UpdateState(s.ctx, job.ID, job.State); err != nil {
-			s.log.Error("cron: persist state before execution", "job_id", job.ID, "err", err)
+			s.log.Error("cron: persist state before execution — at-most-once guarantee weakened, crash may cause re-execution",
+				"job_id", job.ID, "err", err)
 		}
 		if !job.Enabled {
-			if err := s.store.Update(s.ctx, job); err != nil {
+			if err := s.store.SetEnabled(s.ctx, job.ID, false); err != nil {
 				s.log.Error("cron: persist disabled job", "job_id", job.ID, "err", err)
 			}
 			s.mergeJobState(job.ID, job.State, true)
@@ -125,6 +130,16 @@ func (tl *timerLoop) onTick() {
 		// Execute with concurrency cap.
 		if !tl.tryAcquireSlot(s.maxConcurrent) {
 			s.log.Warn("cron: concurrency cap reached, skipping job", "job_id", job.ID)
+			continue
+		}
+
+		// Re-check job still exists after acquiring slot — DeleteJob may have
+		// removed it between collectDue and here, wasting a slot on an orphan.
+		s.mu.Lock()
+		_, exists := s.jobs[job.ID]
+		s.mu.Unlock()
+		if !exists {
+			tl.releaseSlot()
 			continue
 		}
 
@@ -286,7 +301,9 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 	// One-shot: disable or delete after run (success or permanent error).
 	if job.Schedule.Kind == ScheduleAt {
 		if job.DeleteAfterRun {
-			if err := s.store.Delete(s.persistCtx(), job.ID); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := s.store.Delete(ctx, job.ID); err != nil {
 				s.log.Error("cron: delete one-shot job", "job_id", job.ID, "err", err)
 			}
 			s.mu.Lock()
@@ -314,7 +331,9 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 
 	s.persistState(job.ID, job.State)
 	if shouldDisable {
-		if err := s.store.SetEnabled(s.persistCtx(), job.ID, false); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.store.SetEnabled(ctx, job.ID, false); err != nil {
 			s.log.Error("cron: persist disable", "job_id", job.ID, "err", err)
 		}
 	}
@@ -325,7 +344,9 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 // Used for one-shot jobs and auto-disabled jobs after consecutive failures.
 func (s *Scheduler) persistAndDisable(jobID string, state CronJobState) {
 	s.persistState(jobID, state)
-	if err := s.store.SetEnabled(s.persistCtx(), jobID, false); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.store.SetEnabled(ctx, jobID, false); err != nil {
 		s.log.Error("cron: persist disable", "job_id", jobID, "err", err)
 	}
 	s.mergeJobState(jobID, state, true)
@@ -343,16 +364,6 @@ func (s *Scheduler) persistState(jobID string, state CronJobState) {
 		}
 		s.log.Error("cron: persist state", "job_id", jobID, "err", err)
 	}
-}
-
-// persistCtx returns a background context for store operations that must
-// survive scheduler shutdown (e.g., deleting a completed one-shot job).
-func (s *Scheduler) persistCtx() context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// Cancel after timeout fires to release resources immediately rather than
-	// waiting for GC. The timeout itself prevents indefinite blocking.
-	time.AfterFunc(5*time.Second, cancel)
-	return ctx
 }
 
 // jobTimeout returns the timeout for a job, falling back to the scheduler default.

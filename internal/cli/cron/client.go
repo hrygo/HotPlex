@@ -167,6 +167,7 @@ func resolvePlatform(cliPlatform string, cliPlatformKey map[string]string) (stri
 		if ts := os.Getenv("GATEWAY_THREAD_ID"); ts != "" {
 			key["thread_ts"] = ts
 		}
+		mergeKeyIfMissing(key, cliPlatformKey)
 		return "slack", key
 	case "feishu":
 		key := map[string]string{}
@@ -176,10 +177,21 @@ func resolvePlatform(cliPlatform string, cliPlatformKey map[string]string) (stri
 		if msgID := os.Getenv("GATEWAY_THREAD_ID"); msgID != "" {
 			key["message_id"] = msgID
 		}
+		mergeKeyIfMissing(key, cliPlatformKey)
 		return "feishu", key
 	}
 
-	return "cron", nil
+	return "cron", cliPlatformKey
+}
+
+// mergeKeyIfMissing copies entries from src into dst that don't already exist in dst.
+// This preserves env-derived values while filling in any CLI-provided keys not set by env.
+func mergeKeyIfMissing(dst, src map[string]string) {
+	for k, v := range src {
+		if _, exists := dst[k]; !exists {
+			dst[k] = v
+		}
+	}
 }
 
 // PrepareJobForCreate builds a CronJob from CLI flags.
@@ -229,7 +241,10 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 		return nil, err
 	}
 
+	now := time.Now().UnixMilli()
 	job.ID = cron.GenerateJobID()
+	job.CreatedAtMs = now
+	job.UpdatedAtMs = now
 
 	next, err := cron.NextRun(sched, time.Now())
 	if err != nil {
@@ -238,6 +253,27 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 	job.State.NextRunAtMs = next.UnixMilli()
 
 	return job, nil
+}
+
+// CheckMaxJobs enforces the max jobs limit for out-of-process CLI creation.
+// Reads the configured max_jobs (default 50) and checks current job count.
+func CheckMaxJobs(ctx context.Context, store cron.Store, configPath string) error {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return nil // config unavailable, skip check
+	}
+	maxJobs := cfg.Cron.MaxJobs
+	if maxJobs <= 0 {
+		maxJobs = 50
+	}
+	jobs, err := store.List(ctx, false)
+	if err != nil {
+		return nil // store unavailable, skip check
+	}
+	if len(jobs) >= maxJobs {
+		return fmt.Errorf("cron: max jobs limit reached (%d)", maxJobs)
+	}
+	return nil
 }
 
 // TriggerViaAdmin calls the gateway admin API to trigger a job run.
