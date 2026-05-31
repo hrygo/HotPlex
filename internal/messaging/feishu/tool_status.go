@@ -46,7 +46,14 @@ func extractToolCallData(env *events.Envelope) (id, name string, input map[strin
 	if !ok {
 		return "", "", nil
 	}
-	return data.ID, data.Name, data.Input
+	name = data.Name
+	if name == "" {
+		name = data.Kind
+	}
+	if name == "" {
+		name = data.Title
+	}
+	return data.ID, name, data.Input
 }
 
 // extractToolResultData extracts (id, output, errMsg) from a ToolResult envelope.

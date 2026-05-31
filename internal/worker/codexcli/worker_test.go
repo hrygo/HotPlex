@@ -135,7 +135,7 @@ func TestMapperMap(t *testing.T) {
 		require.Equal(t, events.ToolCall, envs[0].Event.Type)
 		tc, ok := envs[0].Event.Data.(events.ToolCallData)
 		require.True(t, ok)
-		require.Equal(t, "shell", tc.Name)
+		require.Equal(t, "Bash", tc.Name)
 		require.Equal(t, "ls -la", tc.Input["command"])
 	})
 
@@ -224,7 +224,7 @@ func TestMapperMap(t *testing.T) {
 		require.Equal(t, events.ToolCall, envs[0].Event.Type)
 		tc, ok := envs[0].Event.Data.(events.ToolCallData)
 		require.True(t, ok)
-		require.Equal(t, "file_edit", tc.Name)
+		require.Equal(t, "Edit", tc.Name)
 	})
 
 	t.Run("mcp_tool_call_started_to_toolcall", func(t *testing.T) {
@@ -245,7 +245,7 @@ func TestMapperMap(t *testing.T) {
 		require.Equal(t, events.ToolCall, envs[0].Event.Type)
 		tc, ok := envs[0].Event.Data.(events.ToolCallData)
 		require.True(t, ok)
-		require.Equal(t, "mcp:search", tc.Name)
+		require.Equal(t, "search", tc.Name)
 	})
 
 	t.Run("nil_item_returns_nil", func(t *testing.T) {
@@ -396,7 +396,7 @@ func TestMapNotificationCommandExecution(t *testing.T) {
 	require.Equal(t, events.ToolCall, envs[0].Event.Type)
 	tc, ok := envs[0].Event.Data.(events.ToolCallData)
 	require.True(t, ok)
-	require.Equal(t, "shell", tc.Name)
+	require.Equal(t, "Bash", tc.Name)
 	require.Equal(t, "ls -la", tc.Input["command"])
 
 	// Completed

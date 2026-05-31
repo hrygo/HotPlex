@@ -147,21 +147,19 @@ func (m *Mapper) mapItemStarted(item *CodexItem) []*events.Envelope {
 		return []*events.Envelope{
 			newEnvelope(events.ToolCall, events.ToolCallData{
 				ID:   item.ID,
-				Name: "shell",
+				Name: "Bash",
 				Input: map[string]any{
 					"command": item.Command,
-					"cwd":     item.CWD,
 				},
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemFileChange:
+		name, input := codexFileChangeToToolCall(item)
 		return []*events.Envelope{
 			newEnvelope(events.ToolCall, events.ToolCallData{
-				ID:   item.ID,
-				Name: "file_edit",
-				Input: map[string]any{
-					"changes": item.Changes,
-				},
+				ID:    item.ID,
+				Name:  name,
+				Input: input,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemMCPToolCall:
@@ -172,28 +170,30 @@ func (m *Mapper) mapItemStarted(item *CodexItem) []*events.Envelope {
 		return []*events.Envelope{
 			newEnvelope(events.ToolCall, events.ToolCallData{
 				ID:    item.ID,
-				Name:  "mcp:" + item.Tool,
+				Name:  item.Tool,
 				Input: args,
-			}, m.sessionID, m.nextSeq()),
-		}
-	case ItemCollabToolCall:
-		return []*events.Envelope{
-			newEnvelope(events.ToolCall, events.ToolCallData{
-				ID:   item.ID,
-				Name: "collab:" + item.CollabTool,
-				Input: map[string]any{
-					"agents": item.Agents,
-				},
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemWebSearch:
 		return []*events.Envelope{
 			newEnvelope(events.ToolCall, events.ToolCallData{
 				ID:   item.ID,
-				Name: "web_search",
+				Name: "WebSearch",
 				Input: map[string]any{
 					"query": item.Query,
 				},
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemCollabToolCall:
+		var args map[string]any
+		if item.Arguments != nil {
+			_ = json.Unmarshal(item.Arguments, &args)
+		}
+		return []*events.Envelope{
+			newEnvelope(events.ToolCall, events.ToolCallData{
+				ID:    item.ID,
+				Name:  item.CollabTool,
+				Input: args,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemTodoList:
@@ -206,6 +206,18 @@ func (m *Mapper) mapItemStarted(item *CodexItem) []*events.Envelope {
 		}
 	}
 	return nil
+}
+
+// codexFileChangeToToolCall maps a CodexItem file_change to Claude Code standard tool name and input.
+func codexFileChangeToToolCall(item *CodexItem) (string, map[string]any) {
+	name := "Edit"
+	if item.Action == "create" {
+		name = "Write"
+	}
+	for fp := range item.Changes {
+		return name, map[string]any{"file_path": fp}
+	}
+	return name, map[string]any{"file_path": ""}
 }
 
 func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {

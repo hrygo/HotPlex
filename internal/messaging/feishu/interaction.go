@@ -21,7 +21,7 @@ func (c *FeishuConn) sendPermissionRequest(ctx context.Context, env *events.Enve
 	}
 
 	// Build header
-	header := fmt.Sprintf("**⚠️ 工具执行授权**\nClaude Code 请求：\n📝 **%s**", data.ToolName)
+	header := fmt.Sprintf("**⚠️ 工具执行授权**\n工具执行请求：\n📝 **%s**", data.ToolName)
 	if data.Description != "" && data.Description != data.ToolName {
 		header += fmt.Sprintf("\n> %s", data.Description)
 	}
@@ -325,7 +325,7 @@ func truncate(s string, maxLen int) string {
 // buildPermissionFallbackText creates plain-text fallback for permission request.
 func buildPermissionFallbackText(data *events.PermissionRequestData) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "⚠️ 工具执行授权\nClaude Code 请求运行: %s\n", data.ToolName)
+	fmt.Fprintf(&sb, "⚠️ 工具执行授权\n工具执行请求: %s\n", data.ToolName)
 
 	if data.Description != "" && data.Description != data.ToolName {
 		fmt.Fprintf(&sb, "描述: %s\n", data.Description)

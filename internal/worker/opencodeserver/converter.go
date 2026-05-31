@@ -2,6 +2,7 @@ package opencodeserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/hrygo/hotplex/pkg/aep"
@@ -165,6 +166,7 @@ func (c *Converter) handleStepFailed(sessionID string, props json.RawMessage) []
 			Code:    events.ErrCodeInternalError,
 			Message: msg,
 		}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false}),
 	}
 }
 
@@ -246,7 +248,7 @@ func (c *Converter) handleToolOutcome(sessionID string, props json.RawMessage, i
 			data.Error = evt.Error.Message
 		}
 	} else {
-		data.Output = evt.Content
+		data.Output = contentToString(evt.Content)
 	}
 
 	return []*events.Envelope{
@@ -336,6 +338,7 @@ func (c *Converter) handleSessionError(sessionID string, props json.RawMessage) 
 			Code:    events.ErrCodeInternalError,
 			Message: msg,
 		}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false}),
 	}
 }
 
@@ -428,4 +431,16 @@ func (c *Converter) takeStats(sessionID string) map[string]any {
 		}
 	}
 	return stats
+}
+
+// contentToString converts OCS tool content ([]any) to a string for AEP ToolResult.
+func contentToString(content []any) string {
+	if len(content) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(content))
+	for _, c := range content {
+		parts = append(parts, fmt.Sprintf("%v", c))
+	}
+	return strings.Join(parts, "\n")
 }

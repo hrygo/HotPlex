@@ -180,6 +180,8 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 		return c.handleToolCall(ctx, env)
 	case events.ToolResult:
 		return c.handleToolResult(ctx, env)
+	case events.ToolUpdate:
+		return c.handleToolUpdate(ctx, env)
 	case events.PermissionRequest:
 		return c.handleInteraction(ctx, env, c.sendPermissionRequest)
 	case events.QuestionRequest:
@@ -311,6 +313,11 @@ func (c *FeishuConn) handleToolResult(_ context.Context, env *events.Envelope) e
 			ctrl.WriteToolResult(id, output, errMsg)
 		}
 	}
+	return nil
+}
+
+func (c *FeishuConn) handleToolUpdate(_ context.Context, _ *events.Envelope) error {
+	c.resetSilenceTimer()
 	return nil
 }
 

@@ -136,9 +136,10 @@ func TestConverter_StepFailed(t *testing.T) {
 		"error": map[string]any{"message": "API timeout"},
 	})
 	envs := c.Convert("s1", ocsStepFailed, props)
-	require.Len(t, envs, 1)
+	require.Len(t, envs, 2)
 	require.Equal(t, events.Error, envs[0].Event.Type)
 	require.Equal(t, "API timeout", envs[0].Event.Data.(events.ErrorData).Message)
+	require.Equal(t, events.Done, envs[1].Event.Type)
 }
 
 // ─── message.part.delta (OCS 1.15+) ──────────────────────────────────────────
@@ -344,9 +345,10 @@ func TestConverter_SessionError(t *testing.T) {
 		"error": map[string]any{"name": "APIError", "data": map[string]any{"message": "rate limited"}},
 	})
 	envs := c.Convert("s1", ocsSessionError, props)
-	require.Len(t, envs, 1)
+	require.Len(t, envs, 2)
 	require.Equal(t, events.Error, envs[0].Event.Type)
 	require.Equal(t, "rate limited", envs[0].Event.Data.(events.ErrorData).Message)
+	require.Equal(t, events.Done, envs[1].Event.Type)
 	_, exists := c.states["s1"]
 	require.False(t, exists, "session.error should clear state")
 }
@@ -357,8 +359,9 @@ func TestConverter_SessionError_NameOnly(t *testing.T) {
 		"error": map[string]any{"name": "TimeoutError"},
 	})
 	envs := c.Convert("s1", ocsSessionError, props)
-	require.Len(t, envs, 1)
+	require.Len(t, envs, 2)
 	require.Equal(t, "TimeoutError", envs[0].Event.Data.(events.ErrorData).Message)
+	require.Equal(t, events.Done, envs[1].Event.Type)
 }
 
 func TestConverter_PermissionAsked(t *testing.T) {
@@ -537,14 +540,15 @@ func TestConverter_MalformedJSON(t *testing.T) {
 		require.Empty(t, envs, "malformed JSON should produce nil for %s", eventType)
 	}
 
-	// step.failed and session.error always emit Error (use default message on bad JSON)
+	// step.failed and session.error always emit Error + Done (use default message on bad JSON)
 	for _, eventType := range []string{
 		ocsStepFailed,
 		ocsSessionError,
 	} {
 		envs := c.Convert("s1", eventType, bad)
-		require.Len(t, envs, 1, "%s should emit Error even on malformed JSON", eventType)
+		require.Len(t, envs, 2, "%s should emit Error+Done even on malformed JSON", eventType)
 		require.Equal(t, events.Error, envs[0].Event.Type)
+		require.Equal(t, events.Done, envs[1].Event.Type)
 	}
 }
 
