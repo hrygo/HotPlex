@@ -487,7 +487,16 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	}
 
 	for _, conn := range conns {
-		if err := conn.RouteWriteData(data, msg.Env.Event.Type); err == nil {
+		var err error
+		// pcEntry must receive the original envelope to preserve json:"-"
+		// fields (e.g. OwnerID) that EncodeJSON omits. WS conns use the
+		// pre-encoded bytes for efficiency.
+		if pc, ok := conn.(*pcEntry); ok {
+			err = pc.RouteWrite(context.Background(), msg.Env)
+		} else {
+			err = conn.RouteWriteData(data, msg.Env.Event.Type)
+		}
+		if err == nil {
 			continue
 		}
 		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
