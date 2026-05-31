@@ -141,7 +141,7 @@ func (m *Mapper) mapItemStarted(item *CodexItem) []*events.Envelope {
 	if item == nil {
 		return nil
 	}
-		switch item.Type {
+	switch item.Type {
 	case ItemCommandExecution:
 		return []*events.Envelope{
 			newEnvelope(events.ToolCall, events.ToolCallData{

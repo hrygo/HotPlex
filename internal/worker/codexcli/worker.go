@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -147,7 +148,7 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 	}
 
 	if session.OutputFile != "" {
-		args = append(args, "--output-last-message")
+		args = append(args, "--output-last-message", session.OutputFile)
 	}
 
 	if session.StrictConfig {
@@ -456,6 +457,7 @@ type AppServerWorker struct {
 
 	manager     *CodexAppServerManager
 	threadID    string
+	turnID      string
 	userID      string
 	releaseOnce sync.Once
 	crashSub    <-chan struct{}
@@ -599,9 +601,20 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		},
 	}
 
-	_, err = w.manager.Call("turn/start", params)
+	resp, err := w.manager.Call("turn/start", params)
 	if err != nil {
 		return fmt.Errorf("codexcli: turn/start: %w", err)
+	}
+
+	var tr struct {
+		Turn struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if err := json.Unmarshal(resp, &tr); err == nil && tr.Turn.ID != "" {
+		w.mu.Lock()
+		w.turnID = tr.Turn.ID
+		w.mu.Unlock()
 	}
 
 	w.SetLastIO(time.Now())
@@ -803,14 +816,20 @@ func (w *AppServerWorker) Compact(ctx context.Context, args map[string]any) erro
 func (w *AppServerWorker) Clear(ctx context.Context) error {
 	w.mu.Lock()
 	tid := w.threadID
+	turnID := w.turnID
 	w.mu.Unlock()
 	if tid == "" {
 		return fmt.Errorf("codexcli: no active thread")
 	}
-	_ = w.manager.InterruptTurn(tid)
+	// Only interrupt when a turn is in flight; turn/interrupt requires a turnId.
+	if turnID != "" {
+		_ = w.manager.InterruptTurn(tid, turnID)
+	}
 	return w.ResetContext(ctx)
 }
 
+// Rewind drops turns from the end of the thread. targetID is interpreted as the
+// number of turns to drop (parseable uint); empty or invalid defaults to 1.
 func (w *AppServerWorker) Rewind(ctx context.Context, targetID string) error {
 	w.mu.Lock()
 	tid := w.threadID
@@ -818,7 +837,13 @@ func (w *AppServerWorker) Rewind(ctx context.Context, targetID string) error {
 	if tid == "" {
 		return fmt.Errorf("codexcli: no active thread")
 	}
-	_, err := w.manager.RollbackThread(tid, targetID)
+	numTurns := uint32(1)
+	if targetID != "" {
+		if n, perr := strconv.ParseUint(targetID, 10, 32); perr == nil && n >= 1 {
+			numTurns = uint32(n)
+		}
+	}
+	_, err := w.manager.RollbackThread(tid, numTurns)
 	return err
 }
 

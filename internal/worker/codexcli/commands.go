@@ -37,14 +37,13 @@ func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype strin
 		}
 		return map[string]any{"status": json.RawMessage(resp)}, nil
 	case "mcp_refresh":
-		serverName, _ := body["server_name"].(string)
-		if err := sc.manager.RefreshMCPServer(serverName); err != nil {
+		if err := sc.manager.RefreshMCPServer(); err != nil {
 			return nil, fmt.Errorf("codexcli: mcp_refresh: %w", err)
 		}
 		return map[string]any{"status": "ok"}, nil
 	case "mcp_oauth":
-		serverName, _ := body["server_name"].(string)
-		resp, err := sc.manager.MCPServerOAuthLogin(serverName)
+		name, _ := body["server_name"].(string)
+		resp, err := sc.manager.MCPServerOAuthLogin(name)
 		if err != nil {
 			return nil, fmt.Errorf("codexcli: mcp_oauth: %w", err)
 		}
@@ -56,15 +55,5 @@ func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype strin
 
 func (sc *ServerCommander) Compact(ctx context.Context, _ map[string]any) error {
 	_, err := sc.manager.CompactThread(sc.threadID)
-	return err
-}
-
-func (sc *ServerCommander) Clear(ctx context.Context) error {
-	_ = sc.manager.InterruptTurn(sc.threadID)
-	return nil
-}
-
-func (sc *ServerCommander) Rewind(ctx context.Context, targetID string) error {
-	_, err := sc.manager.RollbackThread(sc.threadID, targetID)
 	return err
 }
