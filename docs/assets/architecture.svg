@@ -103,8 +103,8 @@
   <circle cx="582" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
 
   <!-- Data Channel Labels -->
-  <rect x="360" y="145" width="80" height="16" rx="8" fill="#111827" stroke="#1f2937" stroke-width="1" />
-  <text x="400" y="156" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">AEP v1 (WS)</text>
+  <rect x="415" y="146" width="70" height="15" rx="7.5" fill="#0c111d" stroke="#1e293b" stroke-width="1" />
+  <text x="450" y="156" fill="#22d3ee" font-size="7.5" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">AEP v1 (WS)</text>
 
   <!-- ==================== TOP LAYER: CLIENTS ==================== -->
   
