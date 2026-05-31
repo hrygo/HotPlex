@@ -12,7 +12,7 @@ import (
 // TraceWriter logs all JSON-RPC messages to a JSONL trace file for debugging.
 // Enabled via acp.debug: true in config.yaml.
 //
-// File location: {dir}/acp-trace-{sessionID}.jsonl
+// File location: {dir}/acp-trace-{base(sessionID)}.jsonl
 // Each line: {"ts":"...","dir":"→|←","msg":{...}}
 // Rotation: when file exceeds maxSize, renamed to .1 and a new file is created.
 type TraceWriter struct {
