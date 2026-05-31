@@ -232,13 +232,19 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
 		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(sessionID, fc.lastError); shouldRetry {
 			fc.pendingError = nil
+			// Pre-register cancel channel before launching goroutine to close
+			// the race window where CancelRetry can't find the channel.
+			cancelCh := make(chan struct{})
+			b.retryCancelMu.Lock()
+			b.retryCancel[sessionID] = cancelCh
+			b.retryCancelMu.Unlock()
 			// Run autoRetry asynchronously so forwardEvents continues reading
 			// from recvCh. This prevents the goroutine from blocking during
 			// the backoff period — if the worker crashes, the for-range loop
 			// detects recvCh closure immediately instead of waiting for the
 			// backoff timer to expire. The goroutine uses shutdownCtx so it
 			// cancels promptly during bridge shutdown.
-			go b.autoRetry(b.shutdownCtx, w, sessionID, attempt)
+			go b.autoRetry(b.shutdownCtx, w, sessionID, attempt, cancelCh)
 			fc.turnText.Reset()
 			if b.collector != nil {
 				b.collector.ResetSession(sessionID)
