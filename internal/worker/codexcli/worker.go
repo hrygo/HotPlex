@@ -616,12 +616,14 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 			ID string `json:"id"`
 		} `json:"turn"`
 	}
-	if err := json.Unmarshal(resp, &tr); err == nil && tr.Turn.ID != "" {
+	if err := json.Unmarshal(resp, &tr); err != nil {
+		w.Log.Debug("codexcli: turn/start response parse error", "error", err)
+	} else if tr.Turn.ID == "" {
+		w.Log.Debug("codexcli: turn/start response missing turn.id")
+	} else {
 		w.mu.Lock()
 		w.turnID = tr.Turn.ID
 		w.mu.Unlock()
-	} else if tr.Turn.ID == "" {
-		w.Log.Debug("codexcli: turn/start response missing turn.id", "resp", string(resp))
 	}
 
 	w.SetLastIO(time.Now())
