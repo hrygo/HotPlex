@@ -1,0 +1,261 @@
+<svg width="800" height="520" viewBox="0 0 800 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Grid Pattern -->
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#111625" stroke-width="1"/>
+    </pattern>
+    
+    <!-- Glow Filters -->
+    <filter id="glow-cyan" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glow-purple" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    
+    <!-- Gradients -->
+    <!-- Client Gradients -->
+    <linearGradient id="grad-client" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+    
+    <!-- Gateway Gradient -->
+    <linearGradient id="grad-gateway" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="50%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    
+    <!-- Worker Gradients -->
+    <linearGradient id="grad-claude" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ea580c" />
+      <stop offset="100%" stop-color="#f43f5e" />
+    </linearGradient>
+    <linearGradient id="grad-codex" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+    <linearGradient id="grad-opencode" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+    <linearGradient id="grad-acp" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#4338ca" />
+    </linearGradient>
+
+    <!-- Line Gradients -->
+    <linearGradient id="grad-line-cyan" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0.8" />
+    </linearGradient>
+    <linearGradient id="grad-line-purple" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#4f46e5" stop-opacity="0.8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Sleek Space Background -->
+  <rect width="800" height="520" fill="#080b11" rx="16" />
+  <rect width="800" height="520" fill="url(#grid)" rx="16" />
+
+  <!-- Ambient Glow Effects -->
+  <circle cx="400" cy="280" r="180" fill="#8b5cf6" opacity="0.06" filter="url(#glow-purple)" />
+  <circle cx="400" cy="90" r="120" fill="#06b6d4" opacity="0.03" filter="url(#glow-cyan)" />
+
+  <!-- ==================== CONNECTOR LINES ==================== -->
+  
+  <!-- Clients to Gateway Lines (Cyan Theme) -->
+  <!-- Glowing back-lines -->
+  <path d="M 170 125 C 170 170, 300 170, 300 195" fill="none" stroke="#22d3ee" stroke-width="4" opacity="0.2" filter="url(#glow-cyan)" />
+  <path d="M 400 125 L 400 195" fill="none" stroke="#22d3ee" stroke-width="4" opacity="0.2" filter="url(#glow-cyan)" />
+  <path d="M 630 125 C 630 170, 500 170, 500 195" fill="none" stroke="#22d3ee" stroke-width="4" opacity="0.2" filter="url(#glow-cyan)" />
+  
+  <!-- Sharp front-lines -->
+  <path d="M 170 125 C 170 170, 300 170, 300 195" fill="none" stroke="url(#grad-client)" stroke-width="1.8" />
+  <path d="M 400 125 L 400 195" fill="none" stroke="url(#grad-client)" stroke-width="1.8" />
+  <path d="M 630 125 C 630 170, 500 170, 500 195" fill="none" stroke="url(#grad-client)" stroke-width="1.8" />
+
+  <!-- Gateway to Workers Lines (Purple/Indigo Theme) -->
+  <!-- Glowing back-lines -->
+  <path d="M 300 380 C 300 410, 125 410, 125 430" fill="none" stroke="#a855f7" stroke-width="4" opacity="0.15" filter="url(#glow-purple)" />
+  <path d="M 366 380 C 366 410, 305 410, 305 430" fill="none" stroke="#a855f7" stroke-width="4" opacity="0.15" filter="url(#glow-purple)" />
+  <path d="M 433 380 C 433 410, 485 410, 485 430" fill="none" stroke="#a855f7" stroke-width="4" opacity="0.15" filter="url(#glow-purple)" />
+  <path d="M 500 380 C 500 410, 665 410, 665 430" fill="none" stroke="#a855f7" stroke-width="4" opacity="0.15" filter="url(#glow-purple)" />
+  
+  <!-- Sharp front-lines -->
+  <path d="M 300 380 C 300 410, 125 410, 125 430" fill="none" stroke="url(#grad-line-purple)" stroke-width="1.8" />
+  <path d="M 366 380 C 366 410, 305 410, 305 430" fill="none" stroke="url(#grad-line-purple)" stroke-width="1.8" />
+  <path d="M 433 380 C 433 410, 485 410, 485 430" fill="none" stroke="url(#grad-line-purple)" stroke-width="1.8" />
+  <path d="M 500 380 C 500 410, 665 410, 665 430" fill="none" stroke="url(#grad-line-purple)" stroke-width="1.8" />
+
+  <!-- Data Flow Pulse Dots -->
+  <circle cx="210" cy="160" r="3.5" fill="#22d3ee" filter="url(#glow-cyan)" />
+  <circle cx="400" cy="160" r="3.5" fill="#22d3ee" filter="url(#glow-cyan)" />
+  <circle cx="590" cy="160" r="3.5" fill="#22d3ee" filter="url(#glow-cyan)" />
+  
+  <circle cx="210" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
+  <circle cx="335" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
+  <circle cx="459" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
+  <circle cx="582" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
+
+  <!-- Data Channel Labels -->
+  <rect x="360" y="145" width="80" height="16" rx="8" fill="#111827" stroke="#1f2937" stroke-width="1" />
+  <text x="400" y="156" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">AEP v1 (WS)</text>
+
+  <!-- ==================== TOP LAYER: CLIENTS ==================== -->
+  
+  <!-- Web UI Card -->
+  <g id="client-web">
+    <rect x="90" y="60" width="160" height="65" rx="10" fill="#0e1322" stroke="url(#grad-client)" stroke-width="1.5" />
+    <!-- Web Icon -->
+    <rect x="105" y="78" width="22" height="18" rx="2" fill="none" stroke="#22d3ee" stroke-width="1.5" />
+    <line x1="105" y1="84" x2="127" y2="84" stroke="#22d3ee" stroke-width="1" />
+    <circle cx="109" cy="81" r="1.2" fill="#22d3ee" />
+    <circle cx="113" cy="81" r="1.2" fill="#22d3ee" />
+    <!-- Text -->
+    <text x="136" y="90" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">Web UI</text>
+    <text x="136" y="103" fill="#64748b" font-size="9" font-family="system-ui, -apple-system, sans-serif">Embedded SPA</text>
+  </g>
+
+  <!-- Slack Card -->
+  <g id="client-slack">
+    <rect x="320" y="60" width="160" height="65" rx="10" fill="#0e1322" stroke="url(#grad-client)" stroke-width="1.5" />
+    <!-- Slack Icon representation -->
+    <circle cx="337" cy="80" r="3.2" fill="#36c5f0" />
+    <rect x="333.5" y="85" width="7" height="9" rx="3.5" fill="#2eb67d" />
+    <circle cx="347" cy="80" r="3.2" fill="#ecb22e" />
+    <rect x="343.5" y="71" width="7" height="9" rx="3.5" fill="#e01e5a" />
+    <!-- Text -->
+    <text x="366" y="90" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">Slack Bot</text>
+    <text x="366" y="103" fill="#64748b" font-size="9" font-family="system-ui, -apple-system, sans-serif">Socket Mode</text>
+  </g>
+
+  <!-- Feishu Card -->
+  <g id="client-feishu">
+    <rect x="550" y="60" width="160" height="65" rx="10" fill="#0e1322" stroke="url(#grad-client)" stroke-width="1.5" />
+    <!-- Feishu Airplane Icon -->
+    <path d="M565,76 L580,82 L572,85 L570,92 L568,87 Z" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+    <path d="M565,76 L572,85 L580,82" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-linejoin="round" />
+    <!-- Text -->
+    <text x="594" y="90" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">Feishu Bot</text>
+    <text x="594" y="103" fill="#64748b" font-size="9" font-family="system-ui, -apple-system, sans-serif">WebSocket</text>
+  </g>
+
+  <!-- ==================== CENTRAL LAYER: HOTPLEX GATEWAY ==================== -->
+  
+  <g id="gateway-core">
+    <!-- Outer glowing background -->
+    <rect x="170" y="195" width="460" height="185" rx="14" fill="#0d0a1b" stroke="url(#grad-gateway)" stroke-width="2" />
+    
+    <!-- Gateway Header -->
+    <g transform="translate(192, 210)">
+      <!-- Tech Logo / Chip representation -->
+      <rect width="18" height="18" rx="4" fill="#8b5cf6" />
+      <path d="M 5 9 L 13 9 M 9 5 L 9 13" stroke="#ffffff" stroke-width="1.5" />
+      <text x="26" y="14" fill="#ffffff" font-size="13" font-family="system-ui, -apple-system, sans-serif" font-weight="800" letter-spacing="0.5">HOTPLEX GATEWAY ENGINE</text>
+      
+      <!-- Version Tag -->
+      <rect x="302" y="1" width="58" height="14" rx="7" fill="#8b5cf6" fill-opacity="0.15" stroke="#8b5cf6" stroke-width="1" />
+      <text x="331" y="11" fill="#c084fc" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">v1.22.0</text>
+    </g>
+    
+    <!-- Sub-Card 1: AEP v1 Engine -->
+    <rect x="190" y="242" width="205" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="206" cy="268" r="8" fill="#a855f7" fill-opacity="0.15" />
+    <path d="M202,268 L210,268 M206,264 L206,272" stroke="#c084fc" stroke-width="1.5"/>
+    <text x="222" y="263" fill="#f1f5f9" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="600">AEP v1 Engine</text>
+    <text x="222" y="275" fill="#8b5cf6" font-size="9" font-family="system-ui, -apple-system, sans-serif">Full-Duplex WS &amp; Event Hub</text>
+
+    <!-- Sub-Card 2: Brain Orchestrator -->
+    <rect x="405" y="242" width="205" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="421" cy="268" r="8" fill="#ec4899" fill-opacity="0.15" />
+    <circle cx="421" cy="268" r="4" stroke="#f472b6" stroke-width="1.2" fill="none"/>
+    <path d="M 421 264 C 423 264, 425 266, 425 268 C 425 270, 423 272, 421 272" stroke="#f472b6" stroke-width="1.2" fill="none" />
+    <text x="437" y="263" fill="#f1f5f9" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Brain Orchestrator</text>
+    <text x="437" y="275" fill="#f472b6" font-size="9" font-family="system-ui, -apple-system, sans-serif">Intent Router &amp; Multi-LLM</text>
+
+    <!-- Sub-Card 3: Cron Scheduler -->
+    <rect x="190" y="308" width="205" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="206" cy="334" r="8" fill="#3b82f6" fill-opacity="0.15" />
+    <circle cx="206" cy="334" r="5" stroke="#60a5fa" stroke-width="1.2" fill="none"/>
+    <line x1="206" y1="331" x2="206" y2="334" stroke="#60a5fa" stroke-width="1.2"/>
+    <line x1="206" y1="334" x2="209" y2="334" stroke="#60a5fa" stroke-width="1.2"/>
+    <text x="222" y="329" fill="#f1f5f9" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Cron Scheduler</text>
+    <text x="222" y="341" fill="#93c5fd" font-size="9" font-family="system-ui, -apple-system, sans-serif">Autonomous Scheduled Tasks</text>
+
+    <!-- Sub-Card 4: Meta-Cognition & Guard -->
+    <rect x="405" y="308" width="205" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="421" cy="334" r="8" fill="#10b981" fill-opacity="0.15" />
+    <path d="M417,331 L421,329 L425,331 L425,336 C425,339 421,341 421,341 C421,341 417,339 417,336 Z" stroke="#34d399" stroke-width="1.2" fill="none"/>
+    <text x="437" y="329" fill="#f1f5f9" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Meta-Cognition Guard</text>
+    <text x="437" y="341" fill="#34d399" font-size="9" font-family="system-ui, -apple-system, sans-serif">XML Sanitizer &amp; Safety base</text>
+  </g>
+
+  <!-- ==================== BOTTOM LAYER: WORKERS ==================== -->
+  
+  <!-- Claude Code Worker -->
+  <g id="worker-claude">
+    <rect x="50" y="430" width="150" height="65" rx="10" fill="#130e0a" stroke="url(#grad-claude)" stroke-width="1.5" />
+    <!-- Terminal Prompt Icon -->
+    <path d="M63,458 L69,462 L63,466" stroke="#f97316" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    <line x1="71" y1="466" x2="78" y2="466" stroke="#f97316" stroke-width="1.5" stroke-linecap="round" />
+    <!-- Text -->
+    <text x="86" y="460" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">Claude Code</text>
+    <text x="86" y="472" fill="#d97706" font-size="9" font-family="system-ui, -apple-system, sans-serif">Claude Stdio API</text>
+    
+    <!-- Small Connection Method Tag -->
+    <text x="125" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">Stdio Pipe</text>
+  </g>
+
+  <!-- Codex CLI Worker -->
+  <g id="worker-codex">
+    <rect x="230" y="430" width="150" height="65" rx="10" fill="#09101e" stroke="url(#grad-codex)" stroke-width="1.5" />
+    <!-- Code Brackets Icon -->
+    <path d="M243,458 L238,462 L243,466" stroke="#3b82f6" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M249,458 L254,462 L249,466" stroke="#3b82f6" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    <line x1="245" y1="467" x2="247" y2="457" stroke="#3b82f6" stroke-width="1.2" />
+    <!-- Text -->
+    <text x="266" y="460" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">Codex CLI</text>
+    <text x="266" y="472" fill="#60a5fa" font-size="9" font-family="system-ui, -apple-system, sans-serif">Exec Command</text>
+    
+    <!-- Small Connection Method Tag -->
+    <text x="305" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">Fork/Exec</text>
+  </g>
+
+  <!-- OpenCode Server Worker -->
+  <g id="worker-opencode">
+    <rect x="410" y="430" width="150" height="65" rx="10" fill="#08130f" stroke="url(#grad-opencode)" stroke-width="1.5" />
+    <!-- Server Stack Icon -->
+    <rect x="420" y="451" width="16" height="5" rx="1" fill="none" stroke="#10b981" stroke-width="1.2" />
+    <circle cx="423" cy="453.5" r="0.8" fill="#10b981" />
+    <rect x="420" y="459" width="16" height="5" rx="1" fill="none" stroke="#10b981" stroke-width="1.2" />
+    <circle cx="423" cy="461.5" r="0.8" fill="#10b981" />
+    <rect x="420" y="467" width="16" height="5" rx="1" fill="none" stroke="#10b981" stroke-width="1.2" />
+    <circle cx="423" cy="469.5" r="0.8" fill="#10b981" />
+    <!-- Text -->
+    <text x="446" y="460" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">OpenCode</text>
+    <text x="446" y="472" fill="#34d399" font-size="9" font-family="system-ui, -apple-system, sans-serif">Standalone OCS</text>
+    
+    <!-- Small Connection Method Tag -->
+    <text x="485" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">HTTP + SSE</text>
+  </g>
+
+  <!-- ACP Agent Worker -->
+  <g id="worker-acp">
+    <rect x="590" y="430" width="150" height="65" rx="10" fill="#0a0d1a" stroke="url(#grad-acp)" stroke-width="1.5" />
+    <!-- Plug Icon -->
+    <circle cx="605" cy="462" r="4" fill="none" stroke="#6366f1" stroke-width="1.5" />
+    <line x1="609" y1="462" x2="614" y2="462" stroke="#6366f1" stroke-width="1.5" />
+    <circle cx="615" cy="462" r="1.5" fill="#6366f1" />
+    <!-- Text -->
+    <text x="626" y="460" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">ACP Agent</text>
+    <text x="626" y="472" fill="#818cf8" font-size="9" font-family="system-ui, -apple-system, sans-serif">Generic Agent</text>
+    
+    <!-- Small Connection Method Tag -->
+    <text x="665" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">JSON-RPC 2.0</text>
+  </g>
+</svg>
