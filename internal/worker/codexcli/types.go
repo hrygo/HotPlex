@@ -36,10 +36,10 @@ type CodexItem struct {
 	SavedPath   string                     `json:"saved_path,omitempty"`
 	Phase       string                     `json:"phase,omitempty"`
 	// CollabToolCall fields
-	CollabTool string     `json:"collab_tool,omitempty"`
-	Agents     []string   `json:"agents,omitempty"`
+	CollabTool string   `json:"collab_tool,omitempty"`
+	Agents     []string `json:"agents,omitempty"`
 	// WebSearch fields
-	Results    json.RawMessage `json:"results,omitempty"`
+	Results json.RawMessage `json:"results,omitempty"`
 	// TodoList fields
 	TodoItems []CodexTodoItem `json:"todo_items,omitempty"`
 	Data      json.RawMessage `json:"data,omitempty"` // generic payload for error items
