@@ -677,6 +677,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 
 	ms.mu.Lock()
+	hadWorkerBefore := ms.worker != nil
+	workerType := ms.info.WorkerType
+	uid := ms.info.UserID
 	wasRunning := ms.info.State == events.StateRunning
 	// Copy-on-write: build candidate, persist, commit on success.
 	candidate := ms.info
@@ -697,18 +700,21 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.mu.Lock()
 	if _, exists := m.sessions[id]; exists {
 		// Re-check worker under lock: AttachWorker may have attached during DB write gap.
-		// If a new worker appeared, the session was resurrected — abort deletion
-		// to avoid creating an orphan worker with no session record.
 		ms.mu.Lock()
-		workerAppeared := ms.worker != nil
+		hasWorkerAfter := ms.worker != nil
 		ms.mu.Unlock()
-		if workerAppeared {
+		// If worker appeared during the gap (was nil before, now non-nil),
+		// a concurrent AttachWorker resurrected the session — abort deletion.
+		// If the worker was already there (hadWorkerBefore), proceed normally.
+		if !hadWorkerBefore && hasWorkerAfter {
 			m.mu.Unlock()
 			m.log.Warn("session: worker attached during delete gap, aborting deletion",
 				"session_id", id)
-			// DB already has DELETED state — next worker exit will trigger cleanup
-			// via Transition(TERMINATED) which is valid from DELETED's predecessor.
 			return nil
+		}
+		if hasWorkerAfter {
+			metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
+			m.pool.Release(uid)
 		}
 		delete(m.sessions, id)
 		if wasRunning {
