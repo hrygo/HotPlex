@@ -227,6 +227,17 @@ worker:
     # WARNING: auto_approve: true grants full tool access without human review.
     # Consider keeping false in production environments.
     auto_approve: false
+    # Extra arguments appended after the command (e.g., model selection, verbose mode).
+    # Override via HOTPLEX_WORKER_ACP_ARGS environment variable.
+    # Note: env var is split on whitespace; quoted values with spaces are not supported.
+    # args:
+    #   - "--model"
+    #   - "claude-sonnet-4-6"
+    # Enable protocol-level debug tracing to ~/.hotplex/logs/acp-trace-*.jsonl.
+    # Override via HOTPLEX_WORKER_ACP_DEBUG environment variable.
+    # WARNING: trace files contain full prompts and agent responses, including
+    # potentially sensitive data. Enable only for debugging and delete after use.
+    debug: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AGENT PERSONALITY & SKILLS (B/C Channels)

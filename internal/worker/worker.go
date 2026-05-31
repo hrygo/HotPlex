@@ -252,3 +252,13 @@ const SandboxPlatformKey = "_sandbox"
 // ACPCommandPlatformKey is the platformKey map key used to propagate per-bot
 // ACP command override from messaging bridge through session persistence to the ACP worker.
 const ACPCommandPlatformKey = "_acp_command"
+
+// ForkSessionPlatformKey is the platformKey map key used to signal that a session
+// should be forked from an existing session instead of resumed or created fresh.
+// Expected value: "true" (string, checked via == "true" in bridge).
+const ForkSessionPlatformKey = "_fork_session"
+
+// JSONSchemaPlatformKey is the platformKey map key used to inject a JSON Schema
+// for structured output into the first prompt of a session.
+// Expected value: raw JSON Schema string (e.g. '{"type":"object","properties":{...}}').
+const JSONSchemaPlatformKey = "_json_schema"

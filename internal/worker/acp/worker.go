@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -36,12 +37,19 @@ var (
 // commandParts stores the space-split command (binary + optional prefix args).
 var commandParts atomic.Value // []string
 
+// configArgs stores extra args from acp.args config, appended after commandParts.
+var configArgs atomic.Value // []string
+
+// debugEnabled stores the acp.debug config flag.
+var debugEnabled atomic.Bool
+
 // autoApproveDefault is the global default for auto-approve set from config.
 // Per-session overrides live on Worker.autoApprove.
 var autoApproveDefault atomic.Bool
 
 func init() {
 	commandParts.Store([]string{"hermes", "acp"})
+	configArgs.Store([]string{})
 	autoApproveDefault.Store(false)
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
@@ -63,7 +71,19 @@ func InitConfig(cfg config.ACPConfig) {
 		return
 	}
 	commandParts.Store(parts)
+	args := cfg.Args
+	if args == nil {
+		args = []string{}
+	}
+	// Viper's BindEnv for []string produces a single-element slice from the
+	// raw env var value (e.g. ["--model gpt-4"] instead of ["--model", "gpt-4"]).
+	// Detect and split this case so env override works correctly.
+	if len(args) == 1 && strings.Contains(args[0], " ") {
+		args = strings.Fields(args[0])
+	}
+	configArgs.Store(args)
 	autoApproveDefault.Store(cfg.AutoApprove)
+	debugEnabled.Store(cfg.Debug)
 	if err := security.RegisterCommand(parts[0]); err != nil {
 		slog.Default().Error("acp: failed to register command", "command", parts[0], "err", err)
 	}
@@ -150,12 +170,21 @@ type Worker struct {
 	systemPrompt         string
 	systemPromptInjected atomic.Bool
 
+	// jsonSchema holds the JSON Schema for structured output (from SessionInfo.JSONSchema).
+	// Injected as a prefix on the first user prompt, similar to systemPrompt.
+	jsonSchema         string
+	jsonSchemaInjected atomic.Bool
+
 	// mcpServers caches the parsed MCP servers from Start() so Clear() can reuse them.
 	mcpServers []any
 
 	// autoApprove controls per-session permission auto-approval.
 	// Initialized from global default, overridable via set_permission_mode.
 	autoApprove atomic.Bool
+
+	// trace holds the optional protocol-level debug trace writer (nil when debug disabled).
+	// Protected by atomic.Pointer for concurrent access from Start/readLoop/Terminate.
+	trace atomic.Pointer[TraceWriter]
 
 	// testHooks for injection-based testing.
 	testClient *ACPClient
@@ -205,6 +234,8 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 	w.systemPrompt = sp
 	w.systemPromptInjected.Store(false)
+	w.jsonSchema = session.JSONSchema
+	w.jsonSchemaInjected.Store(false)
 
 	// Phase 2: I/O-heavy operations outside the lock.
 
@@ -216,8 +247,11 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		parts, _ = commandParts.Load().([]string)
 	}
 	binary := parts[0]
-	args := make([]string, len(parts)-1, len(parts)-1+len(session.Args))
-	copy(args, parts[1:])
+	// Merge: command prefix args + config-level args + session-level args.
+	ca, _ := configArgs.Load().([]string)
+	args := make([]string, 0, len(parts)-1+len(ca)+len(session.Args))
+	args = append(args, parts[1:]...)
+	args = append(args, ca...)
 	args = append(args, session.Args...)
 
 	// Build environment using shared security layer.
@@ -279,37 +313,87 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		"agent", initResult.AgentInfo.Name,
 		"version", initResult.AgentInfo.Version,
 		"protocol", initResult.ProtocolVersion)
+	if initResult.ProtocolVersion > 1 {
+		w.Log.Warn("acp: agent uses newer protocol version, using best-effort compatibility",
+			"protocol", initResult.ProtocolVersion, "known", 1)
+	}
 
-	// Create or load session.
+	// Initialize protocol trace if debug mode is enabled.
+	if debugEnabled.Load() {
+		tw, err := NewTraceWriter(filepath.Join(config.HotplexHome(), "logs"), session.SessionID)
+		if err != nil {
+			w.Log.Warn("acp: failed to create trace file", "error", err)
+		} else {
+			w.trace.Store(tw)
+			w.Log.Info("acp: protocol trace enabled", "path", tw.Path())
+		}
+	}
+
+	// Create, load, or fork session (dedicated timeout, independent of handshake).
+	sctx, scancel := context.WithTimeout(ctx, 30*time.Second)
+	defer scancel()
+
 	mcpServers := parseMCPServers(session.MCPConfig)
 	w.mcpServers = mcpServers // cache for Clear()
+	// forceNewSession creates a fresh session, killing the process on failure.
+	forceNewSession := func() (string, error) {
+		sess, err := client.NewSession(sctx, session.ProjectDir, mcpServers)
+		if err != nil {
+			_ = w.Proc.Kill()
+			return "", fmt.Errorf("acp: new session: %w", err)
+		}
+		return sess.SessionID, nil
+	}
+
 	var acpSessID string
 	var historyLost bool
-	if session.WorkerSessionID != "" && w.supportsCapability("loadSession") {
-		// Resume existing session (only if agent supports load).
-		sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
-		if loadErr != nil {
-			w.Log.Error("acp: session load failed, falling back to new session (history lost)",
-				"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID,
-				"error", loadErr,
-				"hint", "check agent session storage and persistence")
-			newSess, newErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
-			if newErr != nil {
-				_ = w.Proc.Kill()
-				return fmt.Errorf("acp: new session: %w", newErr)
+	if session.WorkerSessionID != "" {
+		if session.ForkSession {
+			// Fork from existing session (AC-FR08-01).
+			forkResult, forkErr := client.ForkSession(sctx, session.WorkerSessionID)
+			if forkErr != nil {
+				w.Log.Warn("acp: session fork failed, falling back to new session",
+					"session_id", session.SessionID, "error", forkErr)
+				id, err := forceNewSession()
+				if err != nil {
+					return err
+				}
+				acpSessID = id
+				historyLost = true
+			} else {
+				acpSessID = forkResult.SessionID
 			}
-			acpSessID = newSess.SessionID
-			historyLost = true
+		} else if w.supportsCapability("loadSession") {
+			// Resume existing session (only if agent supports load).
+			sessResult, loadErr := client.LoadSession(sctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
+			if loadErr != nil {
+				w.Log.Error("acp: session load failed, falling back to new session (history lost)",
+					"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID,
+					"error", loadErr,
+					"hint", "check agent session storage and persistence")
+				id, err := forceNewSession()
+				if err != nil {
+					return err
+				}
+				acpSessID = id
+				historyLost = true
+			} else {
+				acpSessID = sessResult.SessionID
+			}
 		} else {
-			acpSessID = sessResult.SessionID
+			// Agent does not support loadSession; create fresh.
+			id, err := forceNewSession()
+			if err != nil {
+				return err
+			}
+			acpSessID = id
 		}
 	} else {
-		sessResult, sessErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
-		if sessErr != nil {
-			_ = w.Proc.Kill()
-			return fmt.Errorf("acp: new session: %w", sessErr)
+		id, err := forceNewSession()
+		if err != nil {
+			return err
 		}
-		acpSessID = sessResult.SessionID
+		acpSessID = id
 	}
 	w.SetWorkerSessionID(acpSessID)
 
@@ -369,6 +453,10 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	if w.systemPrompt != "" && w.systemPromptInjected.CompareAndSwap(false, true) {
 		content = fmt.Sprintf("[SYSTEM INSTRUCTIONS]\n%s\n[/SYSTEM INSTRUCTIONS]\n\n%s", w.systemPrompt, content)
 	}
+	// Inject JSON Schema on first user input for structured output support.
+	if w.jsonSchema != "" && w.jsonSchemaInjected.CompareAndSwap(false, true) {
+		content = fmt.Sprintf("[JSON SCHEMA]\n%s\n[/JSON SCHEMA]\n\n%s", w.jsonSchema, content)
+	}
 
 	// Cache input for crash recovery (InputRecoverer).
 	conn.lastInput.Store(&content)
@@ -380,6 +468,9 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	pctx, pcancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer pcancel()
 
+	if tw := w.trace.Load(); tw != nil {
+		tw.Log("→", map[string]any{"method": "session/prompt", "sessionId": w.GetWorkerSessionID(), "contentLen": len(content)})
+	}
 	result, promptErr := w.client.Prompt(pctx, w.GetWorkerSessionID(), content)
 	if promptErr != nil {
 		// Always emit error sequence to client.
@@ -413,6 +504,12 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 // ─── Terminate ───────────────────────────────────────────────────────────────
 
 func (w *Worker) Terminate(ctx context.Context) error {
+	// Close trace writer if active.
+	tw := w.trace.Swap(nil)
+	if tw != nil {
+		_ = tw.Close()
+	}
+
 	if w.cancel != nil {
 		w.cancel()
 	}
@@ -550,6 +647,8 @@ func (w *Worker) resetSession(ctx context.Context) error {
 	w.acpSessionID = result.SessionID
 	w.mapper.Reset()
 	w.systemPromptInjected.Store(false)
+	w.jsonSchemaInjected.Store(false)
+	// Note: systemPrompt and jsonSchema values are intentionally preserved across reset (set at Start time from session config).
 	// Clear stale pending entries from the old session.
 	w.pendingPerm.Range(func(key, _ any) bool {
 		w.pendingPerm.Delete(key)
@@ -743,6 +842,9 @@ func (w *Worker) readLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
+			if tw := w.trace.Load(); tw != nil {
+				tw.Log("←", notif)
+			}
 			w.SetLastIO(time.Now())
 			envelopes := w.mapper.MapNotification(notif)
 			for _, env := range envelopes {
@@ -751,6 +853,9 @@ func (w *Worker) readLoop(ctx context.Context) {
 		case req, ok := <-w.client.RequestCh:
 			if !ok {
 				return
+			}
+			if tw := w.trace.Load(); tw != nil {
+				tw.Log("←", req)
 			}
 			w.handleServerRequest(ctx, req, conn)
 		}
@@ -780,6 +885,8 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 	default:
 		// Non-permission server-initiated request (e.g. question, elicitation).
 		// Forward as Raw event so the client can display and respond.
+		w.Log.Debug("acp: forwarding unknown server request as raw event",
+			"method", req.Method, "id", string(req.ID))
 		w.pendingRequests.Store(string(req.ID), req)
 		var params any
 		if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -808,7 +915,7 @@ func (w *Worker) fmtStartError(binary string, err error) error {
 	}
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) && os.IsPermission(pathErr.Err) {
-		return fmt.Errorf("acp: agent %q is not executable. Run: chmod +x $(which %s): %w", binary, binary, err)
+		return fmt.Errorf("acp: agent %q is not executable. Ensure the binary has execute permission, or set acp.command in config.yaml: %w", binary, err)
 	}
 	// Fallback: substring matching for wrapped errors that lose type info.
 	errMsg := err.Error()
@@ -819,7 +926,7 @@ func (w *Worker) fmtStartError(binary string, err error) error {
 		return fmt.Errorf("acp: agent %q not found in PATH. Install the agent or set acp.command in config.yaml: %w", binary, err)
 	}
 	if strings.Contains(errMsg, "permission denied") {
-		return fmt.Errorf("acp: agent %q is not executable. Run: chmod +x $(which %s): %w", binary, binary, err)
+		return fmt.Errorf("acp: agent %q is not executable. Ensure the binary has execute permission, or set acp.command in config.yaml: %w", binary, err)
 	}
 	return fmt.Errorf("acp: failed to start process %q: %w", binary, err)
 }
