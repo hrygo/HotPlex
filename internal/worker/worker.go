@@ -243,6 +243,26 @@ type SessionInfo struct {
 	// IncludePartialMessages exposes partial message blocks as they arrive
 	// (--include-partial-messages).
 	IncludePartialMessages bool
+	// Images carries image file paths for codex exec --image flags.
+	Images []string
+	// Color enables colored output for the codex CLI (--color).
+	Color bool
+	// OutputFile triggers output-only-last-message mode (--output-last-message).
+	OutputFile string
+	// StrictConfig enables strict config validation (--strict-config).
+	StrictConfig bool
+	// SkipGitRepoCheck bypasses git repo existence check (--skip-git-repo-check).
+	SkipGitRepoCheck bool
+	// IgnoreUserConfig ignores user-level configuration (--ignore-user-config).
+	IgnoreUserConfig bool
+	// IgnoreRules ignores project rules (--ignore-rules).
+	IgnoreRules bool
+	// LocalProvider forces local model provider (--local-provider).
+	LocalProvider bool
+	// ConfigProfile specifies the codex configuration profile (--profile).
+	ConfigProfile string
+	// BypassHookTrust bypasses hook trust requirements (--dangerously-bypass-hook-trust).
+	BypassHookTrust bool
 }
 
 // SandboxPlatformKey is the platformKey map key used to propagate sandbox config

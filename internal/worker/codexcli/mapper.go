@@ -31,6 +31,8 @@ func (m *Mapper) Map(event *CodexEvent) []*events.Envelope {
 	switch event.Type {
 	case EventItemStarted:
 		return m.mapItemStarted(event.Item)
+	case EventItemUpdated:
+		return m.mapItemUpdated(event.Item)
 	case EventItemCompleted:
 		return m.mapItemCompleted(event.Item)
 	case EventTurnCompleted:
@@ -77,6 +79,12 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 			return envs
 		}
 		return m.mapItemCompleted(item)
+	case "item/updated":
+		item := parseNotifItem(params)
+		if item == nil {
+			return nil
+		}
+		return m.mapItemUpdated(item)
 	case "item/agentMessage/delta":
 		return m.mapNotifDelta(params)
 	case "turn/completed":
@@ -111,6 +119,18 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 		m.lastUsage = nil
 		m.turnID = extractTurnID(params)
 		return nil
+	case "turn/diff/updated":
+		return m.mapNotifDiffUpdated(params)
+	case "turn/plan/updated":
+		return m.mapNotifPlanUpdated(params)
+	case "thread/settings/updated":
+		return m.mapNotifSettingsUpdated(params)
+	case "serverRequest/resolved":
+		return nil // no user-facing action needed
+	case "deprecationNotice":
+		return m.mapNotifDeprecation(params)
+	case "guardianWarning":
+		return m.mapNotifGuardianWarning(params)
 	}
 	return nil
 }
@@ -121,7 +141,7 @@ func (m *Mapper) mapItemStarted(item *CodexItem) []*events.Envelope {
 	if item == nil {
 		return nil
 	}
-	switch item.Type {
+		switch item.Type {
 	case ItemCommandExecution:
 		return []*events.Envelope{
 			newEnvelope(events.ToolCall, events.ToolCallData{
@@ -153,6 +173,34 @@ func (m *Mapper) mapItemStarted(item *CodexItem) []*events.Envelope {
 				ID:    item.ID,
 				Name:  "mcp:" + item.Tool,
 				Input: args,
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemCollabToolCall:
+		return []*events.Envelope{
+			newEnvelope(events.ToolCall, events.ToolCallData{
+				ID:   item.ID,
+				Name: "collab:" + item.CollabTool,
+				Input: map[string]any{
+					"agents": item.Agents,
+				},
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemWebSearch:
+		return []*events.Envelope{
+			newEnvelope(events.ToolCall, events.ToolCallData{
+				ID:   item.ID,
+				Name: "web_search",
+				Input: map[string]any{
+					"query": item.Query,
+				},
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemTodoList:
+		return []*events.Envelope{
+			newEnvelope(events.Step, events.StepData{
+				ID:       item.ID,
+				StepType: "planning",
+				Name:     "task planning started",
 			}, m.sessionID, m.nextSeq()),
 		}
 	}
@@ -217,15 +265,107 @@ func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {
 				Message: item.Text,
 			}, m.sessionID, m.nextSeq()),
 		}
-	case ItemImageGeneration:
+	case ItemCollabToolCall:
+		var errMsg string
+		if item.Error != nil {
+			errMsg = item.Error.Message
+		}
 		return []*events.Envelope{
 			newEnvelope(events.ToolResult, events.ToolResultData{
 				ID:     item.ID,
-				Output: item.SavedPath,
+				Output: string(item.Result),
+				Error:  errMsg,
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemWebSearch:
+		return []*events.Envelope{
+			newEnvelope(events.ToolResult, events.ToolResultData{
+				ID:     item.ID,
+				Output: string(item.Result),
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemTodoList:
+		msg := item.Text
+		if msg == "" {
+			msg = "task planning completed"
+		}
+		return []*events.Envelope{
+			newEnvelope(events.State, events.StateData{
+				State:   "planning",
+				Message: msg,
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemError:
+		return []*events.Envelope{
+			newEnvelope(events.Error, events.ErrorData{
+				Code: "CODEX_ITEM_ERROR", Message: item.Error.Message,
 			}, m.sessionID, m.nextSeq()),
 		}
 	}
 	return nil
+}
+
+// mapItemUpdated handles incremental updates to an item (exec-mode item.updated events).
+// It emits deltas for streamed content rather than the full summary emitted on completion.
+func (m *Mapper) mapItemUpdated(item *CodexItem) []*events.Envelope {
+	if item == nil {
+		return nil
+	}
+	switch item.Type {
+	case ItemAgentMessage:
+		if item.Text == "" {
+			return nil
+		}
+		return []*events.Envelope{
+			newEnvelope(events.MessageDelta, events.MessageDeltaData{
+				MessageID: m.tracker.getMessageID(item.ID),
+				Content:   item.Text,
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemCommandExecution:
+		if item.Stdout == "" {
+			return nil
+		}
+		return []*events.Envelope{
+			newEnvelope(events.ToolResult, events.ToolResultData{
+				ID:     item.ID,
+				Output: item.Stdout,
+				Error:  item.Stderr,
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemFileChange:
+		// Stream file change progress as tool results.
+		if item.Stdout == "" {
+			return nil
+		}
+		return []*events.Envelope{
+			newEnvelope(events.ToolResult, events.ToolResultData{
+				ID:     item.ID,
+				Output: item.Stdout,
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemReasoning:
+		text := strings.Join(item.SummaryText, "\n")
+		if text == "" {
+			return nil
+		}
+		return []*events.Envelope{
+			newEnvelope(events.Reasoning, events.ReasoningData{
+				ID:      item.ID,
+				Content: text,
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemTodoList:
+		return []*events.Envelope{
+			newEnvelope(events.State, events.StateData{
+				State:   "planning",
+				Message: "task list updated",
+			}, m.sessionID, m.nextSeq()),
+		}
+	default:
+		// CollabToolCall, WebSearch, McpToolCall, Error — only emit on started/completed.
+		return nil
+	}
 }
 
 func (m *Mapper) mapTurnCompleted(usage *CodexUsage) []*events.Envelope {
@@ -392,6 +532,90 @@ func (m *Mapper) mapNotifOutputDelta(params json.RawMessage) []*events.Envelope 
 		newEnvelope(events.ToolResult, events.ToolResultData{
 			ID:     p.ItemID,
 			Output: p.Delta,
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func (m *Mapper) mapNotifDiffUpdated(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		ItemID string `json:"itemId"`
+		Lines  string `json:"lines"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil
+	}
+	return []*events.Envelope{
+		newEnvelope(events.ToolResult, events.ToolResultData{
+			ID:     p.ItemID,
+			Output: p.Lines,
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func (m *Mapper) mapNotifPlanUpdated(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		Steps json.RawMessage `json:"steps"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil
+	}
+	return []*events.Envelope{
+		newEnvelope(events.State, events.StateData{
+			State:   "planning",
+			Message: string(p.Steps),
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func (m *Mapper) mapNotifSettingsUpdated(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		Settings json.RawMessage `json:"settings"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil
+	}
+	return []*events.Envelope{
+		newEnvelope(events.State, events.StateData{
+			State:   "settings",
+			Message: string(p.Settings),
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func (m *Mapper) mapNotifDeprecation(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil
+	}
+	return []*events.Envelope{
+		newEnvelope(events.Step, events.StepData{
+			StepType: "deprecation",
+			Name:     p.Message,
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func (m *Mapper) mapNotifGuardianWarning(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		Message  string `json:"message"`
+		Severity string `json:"severity"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil
+	}
+	if p.Severity == "error" {
+		return []*events.Envelope{
+			newEnvelope(events.Error, events.ErrorData{
+				Code: "GUARDIAN_WARNING", Message: p.Message,
+			}, m.sessionID, m.nextSeq()),
+		}
+	}
+	return []*events.Envelope{
+		newEnvelope(events.Step, events.StepData{
+			StepType: "guardian",
+			Name:     p.Message,
 		}, m.sessionID, m.nextSeq()),
 	}
 }
