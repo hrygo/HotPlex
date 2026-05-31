@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
-
-	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // ─── T-04: Performance Benchmarks ──────────────────────────────────────────────
@@ -174,6 +172,3 @@ func BenchmarkMapNotification_Plan(b *testing.B) {
 		m.MapNotification(notif)
 	}
 }
-
-// Ensure the benchmark event types exist.
-var _ = events.Kind("")

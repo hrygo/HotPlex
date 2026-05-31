@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -33,10 +34,17 @@ func NewTraceWriter(dir, sessionID string) (*TraceWriter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("acp trace: open file: %w", err)
 	}
+	// Initialize byte counter from existing file size so rotation works
+	// correctly after process restart with a pre-existing trace file.
+	var written int64
+	if info, statErr := f.Stat(); statErr == nil {
+		written = info.Size()
+	}
 	return &TraceWriter{
-		file:    f,
-		path:    path,
-		maxSize: 50 * 1024 * 1024, // 50 MB
+		file:         f,
+		path:         path,
+		maxSize:      50 * 1024 * 1024, // 50 MB
+		writtenBytes: written,
 	}, nil
 }
 
@@ -83,11 +91,13 @@ func (tw *TraceWriter) rotateLocked() {
 	rotated := tw.path + ".1"
 	_ = os.Remove(rotated)
 	if err := os.Rename(tw.path, rotated); err != nil {
+		slog.Warn("acp trace: rename failed, trace data lost", "error", err, "path", tw.path)
 		tw.file = nil
 		return
 	}
 	f, err := os.OpenFile(tw.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		slog.Warn("acp trace: reopen failed after rotation", "error", err, "path", tw.path)
 		tw.file = nil
 		return
 	}
