@@ -18,6 +18,11 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
+// waitKillTimeout is the maximum time to wait for Worker.Wait() to return
+// after calling Kill(). If Wait() still hasn't returned, forwardEvents
+// abandons the wait to prevent permanent goroutine blocking.
+const waitKillTimeout = 5 * time.Second
+
 // forwardContext carries per-session mutable state for the event forwarding loop.
 // Ownership: exclusively owned by the single forwardEvents goroutine per session.
 // No concurrent access — all fields are read/written from that goroutine only,
@@ -426,7 +431,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		// Secondary timeout: if Wait() still doesn't return after Kill()
 		// (e.g., Go runtime deadlock or zombie process), abandon the wait
 		// instead of blocking forwardEvents forever.
-		killTimeout := time.NewTimer(5 * time.Second)
+		killTimeout := time.NewTimer(waitKillTimeout)
 		defer killTimeout.Stop()
 		select {
 		case <-ch:

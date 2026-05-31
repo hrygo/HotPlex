@@ -50,8 +50,12 @@ type Bridge struct {
 	wf           WorkerFactory
 	retryCtrl    *LLMRetryController
 
-	fwdWg          sync.WaitGroup // tracks active forwardEvents goroutines
-	closed         atomic.Bool    // set during shutdown to skip crash detection
+	fwdWg  sync.WaitGroup // tracks active forwardEvents goroutines
+	closed atomic.Bool    // set during shutdown to skip crash detection
+	// shutdownCtx is stored as a struct field to broadcast shutdown to async
+	// autoRetry goroutines. This is an intentional exception to the "no ctx in
+	// struct" convention — the alternative (passing ctx through every call site)
+	// doesn't reach goroutines spawned from processForwardedEvent.
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc // cancels shutdownCtx on Shutdown()
 	retryCancelMu  sync.Mutex
