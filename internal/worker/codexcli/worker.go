@@ -57,13 +57,23 @@ type ExecWorker struct {
 }
 
 type Config struct {
-	Command        string
-	Model          string
-	Sandbox        string
-	ApprovalMode   string
-	Ephemeral      bool
-	Personality    string
-	StartupTimeout time.Duration
+	Command          string
+	Model            string
+	Sandbox          string
+	ApprovalMode     string
+	Ephemeral        bool
+	Personality      string
+	StartupTimeout   time.Duration
+	CallTimeout      time.Duration
+	Color            bool
+	OutputFile       string
+	StrictConfig     bool
+	SkipGitRepoCheck bool
+	IgnoreUserConfig bool
+	IgnoreRules      bool
+	LocalProvider    bool
+	ConfigProfile    string
+	BypassHookTrust  bool
 }
 
 func (w *ExecWorker) Type() worker.WorkerType { return worker.TypeCodexCLI }
@@ -107,13 +117,23 @@ func (w *ExecWorker) startLocked(session worker.SessionInfo) error {
 func resolveConfig() Config {
 	gc := GetConfig()
 	return Config{
-		Command:        gc.Command,
-		Model:          gc.Model,
-		Sandbox:        gc.Sandbox,
-		ApprovalMode:   gc.ApprovalMode,
-		Ephemeral:      gc.Ephemeral,
-		Personality:    gc.Personality,
-		StartupTimeout: gc.StartupTimeout,
+		Command:          gc.Command,
+		Model:            gc.Model,
+		Sandbox:          gc.Sandbox,
+		ApprovalMode:     gc.ApprovalMode,
+		Ephemeral:        gc.Ephemeral,
+		Personality:      gc.Personality,
+		StartupTimeout:   gc.StartupTimeout,
+		CallTimeout:      gc.CallTimeout,
+		Color:            gc.Color,
+		OutputFile:       gc.OutputFile,
+		StrictConfig:     gc.StrictConfig,
+		SkipGitRepoCheck: gc.SkipGitRepoCheck,
+		IgnoreUserConfig: gc.IgnoreUserConfig,
+		IgnoreRules:      gc.IgnoreRules,
+		LocalProvider:    gc.LocalProvider,
+		ConfigProfile:    gc.ConfigProfile,
+		BypassHookTrust:  gc.BypassHookTrust,
 	}
 }
 
@@ -143,39 +163,39 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 		args = append(args, "--add-dir", dir)
 	}
 
-	if session.CodexFlags.Color {
+	if w.cfg.Color {
 		args = append(args, "--color")
 	}
 
-	if session.CodexFlags.OutputFile != "" {
-		args = append(args, "--output-last-message", session.CodexFlags.OutputFile)
+	if w.cfg.OutputFile != "" {
+		args = append(args, "--output-last-message", w.cfg.OutputFile)
 	}
 
-	if session.CodexFlags.StrictConfig {
+	if w.cfg.StrictConfig {
 		args = append(args, "--strict-config")
 	}
 
-	if session.CodexFlags.SkipGitRepoCheck {
+	if w.cfg.SkipGitRepoCheck {
 		args = append(args, "--skip-git-repo-check")
 	}
 
-	if session.CodexFlags.IgnoreUserConfig {
+	if w.cfg.IgnoreUserConfig {
 		args = append(args, "--ignore-user-config")
 	}
 
-	if session.CodexFlags.IgnoreRules {
+	if w.cfg.IgnoreRules {
 		args = append(args, "--ignore-rules")
 	}
 
-	if session.CodexFlags.LocalProvider {
+	if w.cfg.LocalProvider {
 		args = append(args, "--local-provider")
 	}
 
-	if session.CodexFlags.ConfigProfile != "" {
-		args = append(args, "--profile", session.CodexFlags.ConfigProfile)
+	if w.cfg.ConfigProfile != "" {
+		args = append(args, "--profile", w.cfg.ConfigProfile)
 	}
 
-	if session.CodexFlags.BypassHookTrust {
+	if w.cfg.BypassHookTrust {
 		args = append(args, "--dangerously-bypass-hook-trust")
 	}
 
@@ -971,32 +991,32 @@ func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]a
 	if len(session.AllowedDirs) > 0 {
 		params["additionalDirectories"] = session.AllowedDirs
 	}
-	if session.CodexFlags.Color {
+	if cfg.Color {
 		params["color"] = true
 	}
-	if session.CodexFlags.StrictConfig {
+	if cfg.StrictConfig {
 		params["strictConfig"] = true
 	}
-	if session.CodexFlags.SkipGitRepoCheck {
+	if cfg.SkipGitRepoCheck {
 		params["skipGitRepoCheck"] = true
 	}
-	if session.CodexFlags.IgnoreRules {
+	if cfg.IgnoreRules {
 		params["ignoreRules"] = true
 	}
-	if session.CodexFlags.IgnoreUserConfig {
+	if cfg.IgnoreUserConfig {
 		params["ignoreUserConfig"] = true
 	}
-	if session.CodexFlags.LocalProvider {
+	if cfg.LocalProvider {
 		params["localProvider"] = true
 	}
-	if session.CodexFlags.BypassHookTrust {
+	if cfg.BypassHookTrust {
 		params["bypassHookTrust"] = true
 	}
-	if session.CodexFlags.OutputFile != "" {
-		params["outputFile"] = session.CodexFlags.OutputFile
+	if cfg.OutputFile != "" {
+		params["outputFile"] = cfg.OutputFile
 	}
-	if session.CodexFlags.ConfigProfile != "" {
-		params["profile"] = session.CodexFlags.ConfigProfile
+	if cfg.ConfigProfile != "" {
+		params["profile"] = cfg.ConfigProfile
 	}
 	return params
 }
