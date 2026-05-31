@@ -262,6 +262,9 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	w.mapper.Reset()
 	w.mapper.SetTurnActive()
 
+	// Cache input for crash recovery (InputRecoverer).
+	conn.lastInput.Store(&content)
+
 	// Emit state(running).
 	conn.TrySend(w.mapper.MapStateRunning())
 	w.SetLastIO(time.Now())
