@@ -26,6 +26,7 @@
 - **Worker 注册**: `init()` + `worker.Register()` 模式
 - **关闭顺序**: signal → cancel ctx → tracing → hub → bridge → sessionMgr → HTTP
 - **服务重启**: 必须使用 `hotplex service restart` 原子指令，禁止手动拆分 `stop && sleep && start`（仅二进制替换场景需手动 stop 等待）
+- **非 main 分支 push**: 非 main 分支本地验证通过后直接 commit + push，无需询问用户确认
 
 ### 反模式（禁止）
 
