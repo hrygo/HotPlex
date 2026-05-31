@@ -25,6 +25,7 @@ description: "HotPlex Worker Gateway 所有配置项的权威参考，覆盖配�
    - [agent_config — Agent 人格与上下文](#38-agent_config--agent-人格与上下文)
    - [skills — Skills 发现](#39-skills--skills-发现)
    - [cron — 定时任务调度器](#310-cron--定时任务调度器)
+   - [webhook — GitHub Webhook 接收器](#3101-webhook--github-webhook-接收器)
    - [messaging — 消息平台](#311-messaging--消息平台)
    - [log — 日志](#312-log--日志)
    - [webchat — Web Chat UI](#313-webchat--web-chat-ui)
@@ -373,6 +374,35 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 
 ---
 
+### 3.10.1 webhook — GitHub Webhook 接收器
+
+GitHub Webhook 接收器，用于事件驱动的 Cron 任务触发。当收到匹配的 GitHub 事件（如 PR opened/synchronize）时，自动触发指定的 Cron Job。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `enabled` | bool | `false` | `HOTPLEX_WEBHOOK_ENABLED` | 是否启用 Webhook 接收器 |
+| `secret` | string | `""` | `HOTPLEX_WEBHOOK_SECRET` | GitHub Webhook Secret（用于 HMAC-SHA256 签名验证）。**必须设置，为空时拒绝启动** |
+| `path` | string | `/api/webhook/github` | `HOTPLEX_WEBHOOK_PATH` | HTTP 端点路径 |
+| `max_body_size` | int64 | `1048576` (1MB) | `HOTPLEX_WEBHOOK_MAX_BODY_SIZE` | 请求体最大大小（字节） |
+| `allowed_repos` | []string | `[]` | — | 允许的仓库列表（空 = 接受所有） |
+| `target_job_name` | string | `pr-review-hotplex` | `HOTPLEX_WEBHOOK_TARGET_JOB_NAME` | 匹配事件时触发的 Cron Job 名称 |
+
+**配置示例**：
+
+```yaml
+webhook:
+  enabled: true
+  secret: "${GITHUB_WEBHOOK_SECRET}"   # 通过环境变量注入
+  path: /api/webhook/github
+  allowed_repos:
+    - "owner/repo"
+  target_job_name: "pr-review"
+```
+
+**安全要求**：`secret` 必须与 GitHub Webhook 设置中的 Secret 一致。未设置 secret 时 Webhook 不会注册（安全基线）。
+
+---
+
 ### 3.11 messaging — 消息平台
 
 消息平台适配器配置。采用**共享默认值 + 平台覆盖**模式。
@@ -476,6 +506,8 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 | `display_name` | string | 覆盖顶层 Assistant 显示名称（bot 级品牌化） |
 | `icon_emoji` | string | 覆盖顶层 Assistant emoji 图标（bot 级品牌化） |
 | `worker_type` | string | 覆盖 Worker 类型 |
+| `sandbox` | string | 覆盖 CodexCLI sandbox 模式（bot 级） |
+| `acp_command` | string | 覆盖 ACP Agent 启动命令（bot 级，仅 `worker_type: acp` 时生效） |
 | `stt_*` | — | 覆盖 STT 配置（继承平台级 → messaging 级） |
 | `tts_*` | — | 覆盖 TTS 配置（继承平台级 → messaging 级） |
 
@@ -487,6 +519,8 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 | `app_id` | string | 飞书 App ID |
 | `app_secret` | string | 飞书 App Secret |
 | `worker_type` | string | 覆盖 Worker 类型 |
+| `sandbox` | string | 覆盖 CodexCLI sandbox 模式（bot 级） |
+| `acp_command` | string | 覆盖 ACP Agent 启动命令（bot 级，仅 `worker_type: acp` 时生效） |
 | `stt_*` | — | 覆盖 STT 配置 |
 | `tts_*` | — | 覆盖 TTS 配置 |
 
@@ -682,8 +716,24 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_WORKER_OPENCODE_SERVER_HTTP_TIMEOUT` | `worker.opencode_server.http_timeout` | `30s` |
 | `HOTPLEX_WORKER_AUTO_RETRY_ENABLED` | `worker.auto_retry.enabled` | `true` |
 | `HOTPLEX_WORKER_AUTO_RETRY_MAX_RETRIES` | `worker.auto_retry.max_retries` | `9` |
+| `HOTPLEX_WORKER_CODEX_CLI_COMMAND` | `worker.codex_cli.command` | `codex` |
+| `HOTPLEX_WORKER_CODEX_CLI_MODEL` | `worker.codex_cli.model` | `""` |
+| `HOTPLEX_WORKER_CODEX_CLI_SANDBOX` | `worker.codex_cli.sandbox` | `danger-full-access` |
+| `HOTPLEX_WORKER_CODEX_CLI_APPROVAL_MODE` | `worker.codex_cli.approval_mode` | `never` |
+| `HOTPLEX_WORKER_ACP_COMMAND` | `worker.acp.command` | `hermes acp` |
+| `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | `worker.acp.auto_approve` | `false` |
 | `HOTPLEX_WORKER_GH_TOKEN` | 通过 `worker.environment` 注入 | — |
 | `HOTPLEX_WORKER_GITHUB_TOKEN` | 通过 `worker.environment` 注入 | — |
+
+#### Webhook
+
+| 变量 | 对应配置 | 默认值 |
+|------|----------|--------|
+| `HOTPLEX_WEBHOOK_ENABLED` | `webhook.enabled` | `false` |
+| `HOTPLEX_WEBHOOK_SECRET` | `webhook.secret` | `""` |
+| `HOTPLEX_WEBHOOK_PATH` | `webhook.path` | `/api/webhook/github` |
+| `HOTPLEX_WEBHOOK_MAX_BODY_SIZE` | `webhook.max_body_size` | `1048576` |
+| `HOTPLEX_WEBHOOK_TARGET_JOB_NAME` | `webhook.target_job_name` | `pr-review-hotplex` |
 
 #### Security
 
