@@ -244,9 +244,14 @@ type SessionInfo struct {
 	// (--include-partial-messages).
 	IncludePartialMessages bool
 	// Images carries image file paths for codex exec --image flags.
+	// NOTE: Currently populated only in exec-mode buildArgs() which reads
+	// from SessionInfo directly. Per-session injection through gateway/bridge
+	// is not yet wired. Reserved for future per-session image support.
 	Images []string
-	// CodexFlags groups CodexCLI exec-mode flags that are only meaningful for
+	// CodexFlags groups CodexCLI exec flags that are only meaningful for
 	// the codexcli worker. Other adapters (claudecode, acp, ocs) ignore these.
+	// NOTE: Currently populated from global config (resolveConfig), not from
+	// per-session SessionInfo. Reserved for future per-session flag injection.
 	CodexFlags CodexExecFlags
 }
 

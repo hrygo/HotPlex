@@ -2,6 +2,7 @@ package codexcli
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -609,6 +610,7 @@ func (m *Mapper) mapNotifGuardianWarning(params json.RawMessage) []*events.Envel
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil
 	}
+	slog.Debug("codexcli: guardian warning", "severity", p.Severity, "message", p.Message)
 	if p.Severity == "error" {
 		return []*events.Envelope{
 			newEnvelope(events.Error, events.ErrorData{

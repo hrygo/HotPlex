@@ -355,8 +355,11 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 			b.log.Info("bridge: orphan platform session unstarted, starting fresh", "session_id", sessionID)
 			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
 		}
-		// RUNNING/IDLE/TERMINATED â try Resume to preserve conversation history.
-		// DELETED sessions cannot be resumed (record gone from store), start fresh.
+		// RUNNING/IDLE/TERMINATED — try Resume to preserve conversation history.
+		// DELETED sessions cannot be resumed (record gone from store), so we start
+		// fresh. This is safe because the old session key is orphaned: no worker
+		// holds a reference, and startOrResumeOnInUse will create a new session
+		// with the same deterministic key, effectively replacing the deleted one.
 		if si.State == events.StateDeleted {
 			b.log.Info("bridge: orphan platform session already deleted, starting fresh", "session_id", sessionID)
 			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID)

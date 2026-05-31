@@ -69,6 +69,11 @@ type SessionWriter interface {
 	// re-encode internally.
 	RouteWriteData(data []byte, eventType events.Kind) error
 	Close() error
+	// PreferEnvelope returns true if the connection prefers receiving original
+	// envelopes (via RouteWrite) over pre-encoded bytes (via RouteWriteData).
+	// Platform connections (pcEntry) return true to preserve json:"-" fields;
+	// WebSocket connections return false to benefit from pre-encoded bytes.
+	PreferEnvelope() bool
 }
 
 // Hub is the central message router and connection registry.
@@ -488,11 +493,10 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 
 	for _, conn := range conns {
 		var err error
-		// pcEntry must receive the original envelope to preserve json:"-"
-		// fields (e.g. OwnerID) that EncodeJSON omits. WS conns use the
-		// pre-encoded bytes for efficiency.
-		if pc, ok := conn.(*pcEntry); ok {
-			err = pc.RouteWrite(h.ctx, msg.Env)
+		if conn.PreferEnvelope() {
+			// Platform connections need the original envelope to preserve
+			// json:"-" fields (e.g. OwnerID) that EncodeJSON omits.
+			err = conn.RouteWrite(h.ctx, msg.Env)
 		} else {
 			err = conn.RouteWriteData(data, msg.Env.Event.Type)
 		}
