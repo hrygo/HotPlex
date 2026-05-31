@@ -318,6 +318,25 @@ func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {
 				Code: "CODEX_ITEM_ERROR", Message: errMsg,
 			}, m.sessionID, m.nextSeq()),
 		}
+	case ItemWebSearch:
+		return []*events.Envelope{
+			newEnvelope(events.ToolResult, events.ToolResultData{
+				ID:     item.ID,
+				Output: string(item.Results),
+			}, m.sessionID, m.nextSeq()),
+		}
+	case ItemCollabToolCall:
+		var errMsg string
+		if item.Error != nil {
+			errMsg = item.Error.Message
+		}
+		return []*events.Envelope{
+			newEnvelope(events.ToolResult, events.ToolResultData{
+				ID:     item.ID,
+				Output: string(item.Result),
+				Error:  errMsg,
+			}, m.sessionID, m.nextSeq()),
+		}
 	}
 	return nil
 }
