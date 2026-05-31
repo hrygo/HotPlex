@@ -255,10 +255,10 @@ const ACPCommandPlatformKey = "_acp_command"
 
 // ForkSessionPlatformKey is the platformKey map key used to signal that a session
 // should be forked from an existing session instead of resumed or created fresh.
-// TODO: wire from platform adapters in UX follow-up.
+// Expected value: "true" (string, checked via == "true" in bridge).
 const ForkSessionPlatformKey = "_fork_session"
 
 // JSONSchemaPlatformKey is the platformKey map key used to inject a JSON Schema
 // for structured output into the first prompt of a session.
-// TODO: wire from platform adapters in UX follow-up.
+// Expected value: raw JSON Schema string (e.g. '{"type":"object","properties":{...}}').
 const JSONSchemaPlatformKey = "_json_schema"

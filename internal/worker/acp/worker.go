@@ -326,7 +326,10 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		}
 	}
 
-	// Create, load, or fork session.
+	// Create, load, or fork session (dedicated timeout, independent of handshake).
+	sctx, scancel := context.WithTimeout(ctx, 30*time.Second)
+	defer scancel()
+
 	mcpServers := parseMCPServers(session.MCPConfig)
 	w.mcpServers = mcpServers // cache for Clear()
 	var acpSessID string
@@ -334,11 +337,11 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	if session.WorkerSessionID != "" {
 		if session.ForkSession {
 			// Fork from existing session (AC-FR08-01).
-			forkResult, forkErr := client.ForkSession(ctx, session.WorkerSessionID)
+			forkResult, forkErr := client.ForkSession(sctx, session.WorkerSessionID)
 			if forkErr != nil {
 				w.Log.Warn("acp: session fork failed, falling back to new session",
 					"session_id", session.SessionID, "error", forkErr)
-				newSess, newErr := client.NewSession(ctx, session.ProjectDir, mcpServers)
+				newSess, newErr := client.NewSession(sctx, session.ProjectDir, mcpServers)
 				if newErr != nil {
 					_ = w.Proc.Kill()
 					return fmt.Errorf("acp: new session: %w", newErr)
@@ -350,13 +353,13 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			}
 		} else if w.supportsCapability("loadSession") {
 			// Resume existing session (only if agent supports load).
-			sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
+			sessResult, loadErr := client.LoadSession(sctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
 			if loadErr != nil {
 				w.Log.Error("acp: session load failed, falling back to new session (history lost)",
 					"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID,
 					"error", loadErr,
 					"hint", "check agent session storage and persistence")
-				newSess, newErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
+				newSess, newErr := client.NewSession(sctx, session.ProjectDir, mcpServers)
 				if newErr != nil {
 					_ = w.Proc.Kill()
 					return fmt.Errorf("acp: new session: %w", newErr)
@@ -368,7 +371,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			}
 		} else {
 			// Agent does not support loadSession; create fresh.
-			sessResult, sessErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
+			sessResult, sessErr := client.NewSession(sctx, session.ProjectDir, mcpServers)
 			if sessErr != nil {
 				_ = w.Proc.Kill()
 				return fmt.Errorf("acp: new session: %w", sessErr)
@@ -376,7 +379,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			acpSessID = sessResult.SessionID
 		}
 	} else {
-		sessResult, sessErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
+		sessResult, sessErr := client.NewSession(sctx, session.ProjectDir, mcpServers)
 		if sessErr != nil {
 			_ = w.Proc.Kill()
 			return fmt.Errorf("acp: new session: %w", sessErr)
@@ -457,7 +460,7 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	defer pcancel()
 
 	if tw := w.trace.Load(); tw != nil {
-		tw.Log("→", map[string]string{"method": "session/prompt", "sessionId": w.GetWorkerSessionID(), "content": content})
+		tw.Log("→", map[string]any{"method": "session/prompt", "sessionId": w.GetWorkerSessionID(), "contentLen": len(content)})
 	}
 	result, promptErr := w.client.Prompt(pctx, w.GetWorkerSessionID(), content)
 	if promptErr != nil {
@@ -636,6 +639,7 @@ func (w *Worker) resetSession(ctx context.Context) error {
 	w.mapper.Reset()
 	w.systemPromptInjected.Store(false)
 	w.jsonSchemaInjected.Store(false)
+	// Note: systemPrompt and jsonSchema values are intentionally preserved across reset (set at Start time from session config).
 	// Clear stale pending entries from the old session.
 	w.pendingPerm.Range(func(key, _ any) bool {
 		w.pendingPerm.Delete(key)

@@ -25,11 +25,11 @@ type TraceWriter struct {
 
 // NewTraceWriter creates a trace writer that appends to a JSONL file.
 func NewTraceWriter(dir, sessionID string) (*TraceWriter, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("acp trace: create dir: %w", err)
 	}
 	path := filepath.Join(dir, "acp-trace-"+sessionID+".jsonl")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("acp trace: open file: %w", err)
 	}
@@ -86,7 +86,7 @@ func (tw *TraceWriter) rotateLocked() {
 		tw.file = nil
 		return
 	}
-	f, err := os.OpenFile(tw.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(tw.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		tw.file = nil
 		return
@@ -109,18 +109,17 @@ func (tw *TraceWriter) Close() error {
 
 // Rotate forces a rotation. Safe to call on nil TraceWriter.
 // Rotation is also triggered automatically by Log() when the file exceeds maxSize.
-func (tw *TraceWriter) Rotate() error {
+func (tw *TraceWriter) Rotate() {
 	if tw == nil {
-		return nil
+		return
 	}
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
 	if tw.file == nil {
-		return nil
+		return
 	}
 	tw.writtenBytes = 0
 	tw.rotateLocked()
-	return nil
 }
 
 // Path returns the current trace file path (for diagnostics).

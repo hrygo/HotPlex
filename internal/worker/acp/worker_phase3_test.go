@@ -8,9 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -108,7 +107,7 @@ func TestTraceWriter_NilSafe(t *testing.T) {
 	// All operations on nil TraceWriter should be no-ops.
 	tw.Log("→", "test")
 	require.NoError(t, tw.Close())
-	require.NoError(t, tw.Rotate())
+	tw.Rotate()
 	require.Equal(t, "", tw.Path())
 }
 
@@ -322,18 +321,15 @@ func TestTraceWriter_ConcurrentWrites(t *testing.T) {
 	t.Cleanup(func() { _ = tw.Close() })
 
 	// Write from multiple goroutines simultaneously.
-	var wg atomic.Int32
+	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(n int) {
-			defer wg.Add(-1)
+			defer wg.Done()
 			tw.Log("→", map[string]any{"index": n, "data": strings.Repeat("x", 50)})
 		}(i)
 	}
-
-	require.Eventually(t, func() bool {
-		return wg.Load() == 0
-	}, 2*time.Second, 10*time.Millisecond)
+	wg.Wait()
 
 	require.NoError(t, tw.Close())
 
