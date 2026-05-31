@@ -57,6 +57,7 @@ type eventStoreProvider interface {
 // These are passed to various components and registrations.
 type GatewayDeps struct {
 	Log             *slog.Logger
+	Ctx             context.Context // gateway lifecycle context for graceful shutdown
 	Config          *config.Config
 	ConfigStore     *config.ConfigStore
 	Hub             *gateway.Hub
@@ -67,6 +68,7 @@ type GatewayDeps struct {
 	Bridge          *gateway.Bridge
 	ConfigWatcher   *config.Watcher
 	CronScheduler   *cron.Scheduler
+	WebhookHandler  *gateway.WebhookHandler // non-nil when webhook is enabled
 	ChatAccessStore messaging.ChatAccessStorer
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
@@ -395,6 +397,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	mux := http.NewServeMux()
 	deps := &GatewayDeps{
 		Log:             log,
+		Ctx:             ctx,
 		Config:          cfg,
 		ConfigStore:     cfgStore,
 		Hub:             hub,
@@ -782,6 +785,10 @@ func shutdownGateway(
 		if err := deps.ConfigWatcher.Close(); err != nil {
 			log.Warn("config: watcher close", "err", err)
 		}
+	}
+
+	if deps.WebhookHandler != nil {
+		deps.WebhookHandler.Close()
 	}
 
 	if cronScheduler != nil {

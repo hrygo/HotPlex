@@ -2,14 +2,19 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrJobDisabled is returned when attempting to trigger a disabled job.
+var ErrJobDisabled = errors.New("cron: job is disabled")
 
 // Scheduler manages cron job lifecycle: loading, scheduling, execution, and shutdown.
 type Scheduler struct {
@@ -258,6 +263,40 @@ func (s *Scheduler) TriggerJob(ctx context.Context, job *CronJob) error {
 		s.executeJob(j)
 	}()
 	return nil
+}
+
+// TriggerByName finds a job by name in the in-memory index and triggers its execution.
+// It reads from s.jobs (source of truth) rather than the store to avoid stale-read windows
+// when the CLI has disabled a job but the DB has not yet been updated.
+func (s *Scheduler) TriggerByName(ctx context.Context, jobName string, extra map[string]string) error {
+	s.mu.Lock()
+	var found *CronJob
+	for _, j := range s.jobs {
+		if j.Name == jobName {
+			found = j
+			break
+		}
+	}
+	if found == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("cron trigger by name: job %q not found: %w", jobName, ErrJobNotFound)
+	}
+	if !found.Enabled {
+		s.mu.Unlock()
+		return fmt.Errorf("cron trigger by name: job %q: %w", jobName, ErrJobDisabled)
+	}
+	job := found.Clone()
+	s.mu.Unlock()
+
+	// Inject extra context (e.g. target_pr from webhook) into PlatformKey.
+	if len(extra) > 0 {
+		if job.PlatformKey == nil {
+			job.PlatformKey = make(map[string]string)
+		}
+		maps.Copy(job.PlatformKey, extra)
+	}
+
+	return s.TriggerJob(ctx, job)
 }
 
 // loadFromDB loads all jobs from the store into the in-memory index.

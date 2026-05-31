@@ -702,6 +702,10 @@ func injectGatewayContext(env map[string]string, platform, botID, userID string,
 	if teamID := platformKey["team_id"]; teamID != "" {
 		env["GATEWAY_TEAM_ID"] = teamID
 	}
+	// Webhook-triggered context: pr_number injected by TriggerByName extra map.
+	if prNum := platformKey["pr_number"]; prNum != "" {
+		env["TARGET_PR"] = prNum
+	}
 	return env
 }
 

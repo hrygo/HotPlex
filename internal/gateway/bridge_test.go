@@ -529,6 +529,21 @@ func TestInjectGatewayContext(t *testing.T) {
 				"GATEWAY_CHANNEL_ID": "C_PRIORITY",
 			},
 		},
+		{
+			name:     "pr_number mapped to TARGET_PR",
+			platform: "cron",
+			botID:    "B1",
+			userID:   "U1",
+			platformKey: map[string]string{
+				"pr_number": "42",
+				"trigger":   "webhook",
+			},
+			sessionID: "sess-webhook",
+			workDir:   "/tmp",
+			want: map[string]string{
+				"TARGET_PR": "42",
+			},
+		},
 	}
 
 	for _, tt := range tests {

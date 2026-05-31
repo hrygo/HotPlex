@@ -114,6 +114,7 @@ type Config struct {
 	AgentConfig AgentConfig     `mapstructure:"agent_config"`
 	Skills      SkillsConfig    `mapstructure:"skills"`
 	Cron        CronConfig      `mapstructure:"cron"`
+	Webhook     WebhookConfig   `mapstructure:"webhook"`
 	Events      EventsConfig    `mapstructure:"events"`
 	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 
@@ -685,6 +686,16 @@ type SkillsConfig struct {
 	CacheTTL time.Duration `mapstructure:"cache_ttl"` // TTL for skills list cache, default 5m
 }
 
+// WebhookConfig holds GitHub webhook receiver settings.
+type WebhookConfig struct {
+	MaxBodySize   int64    `mapstructure:"max_body_size"`   // default: 1MB
+	AllowedRepos  []string `mapstructure:"allowed_repos"`   // repos to accept events from; empty = accept all (env override not supported for slices)
+	TargetJobName string   `mapstructure:"target_job_name"` // cron job to trigger on matching events
+	Secret        string   `mapstructure:"secret"`
+	Path          string   `mapstructure:"path"` // default: "/api/webhook/github"
+	Enabled       bool     `mapstructure:"enabled"`
+}
+
 // CronConfig holds AI-native cronjob scheduler settings.
 type CronConfig struct {
 	Enabled           bool             `mapstructure:"enabled"`
@@ -858,6 +869,12 @@ func Default() *Config {
 			MaxJobs:           50,
 			DefaultTimeoutSec: 300,
 			TickIntervalSec:   60,
+		},
+		Webhook: WebhookConfig{
+			MaxBodySize:   1 << 20, // 1MB
+			Path:          "/api/webhook/github",
+			TargetJobName: "pr-review-hotplex",
+			Enabled:       false,
 		},
 		Events: EventsConfig{
 			Retention: 720 * time.Hour, // 30 days
@@ -1053,6 +1070,11 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("messaging.slack.tts_moss_port")
 	_ = v.BindEnv("messaging.slack.tts_moss_idle_timeout")
 	_ = v.BindEnv("messaging.slack.tts_moss_cpu_threads")
+	_ = v.BindEnv("webhook.enabled")
+	_ = v.BindEnv("webhook.secret")
+	_ = v.BindEnv("webhook.path")
+	_ = v.BindEnv("webhook.max_body_size")
+	_ = v.BindEnv("webhook.target_job_name")
 
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("config: environment override: %w", err)
