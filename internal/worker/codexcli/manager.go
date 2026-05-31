@@ -554,22 +554,13 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 // reqID is the approval request's requestId; result is the response payload,
 // which should contain a "decision" or "behavior" key for server request handling.
 func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) error {
-	v, ok := m.serverReqIDs.LoadAndDelete(reqID)
-	if !ok {
-		return fmt.Errorf("codex-app-server: no pending server request for %q", reqID)
-	}
-	rpcID, ok := v.(int64)
-	if !ok {
-		return fmt.Errorf("codex-app-server: invalid rpc id type for %q", reqID)
-	}
-
+	// Validate before consuming reqID so validation failures don't orphan
+	// the codex process waiting for a response that will never arrive.
 	raw, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("codex-app-server: marshal server response: %w", err)
 	}
 
-	// Validate the response shape. Permission/approval responses carry
-	// "behavior" or "decision"; elicitation responses carry "action".
 	var check map[string]any
 	if err := json.Unmarshal(raw, &check); err == nil {
 		_, hasBehavior := check["behavior"]
@@ -578,6 +569,15 @@ func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) e
 		if !hasBehavior && !hasDecision && !hasAction {
 			return fmt.Errorf("codex-app-server: server response for %q missing behavior, decision, or action key", reqID)
 		}
+	}
+
+	v, ok := m.serverReqIDs.LoadAndDelete(reqID)
+	if !ok {
+		return fmt.Errorf("codex-app-server: no pending server request for %q", reqID)
+	}
+	rpcID, ok := v.(int64)
+	if !ok {
+		return fmt.Errorf("codex-app-server: invalid rpc id type for %q", reqID)
 	}
 
 	resp := JSONRPCResponse{
