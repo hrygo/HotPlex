@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -256,10 +257,10 @@ func (b *Bridge) resolveInjectExclude(platform, _ string, perSession []string) [
 	}
 	if m, ok := b.agentConfigExclude.Load().(map[string][]string); ok {
 		if excl, found := m[platform]; found {
-			return excl
+			return slices.Clone(excl)
 		}
 		if excl, found := m[""]; found {
-			return excl
+			return slices.Clone(excl)
 		}
 	}
 	return nil

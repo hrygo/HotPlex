@@ -368,12 +368,11 @@ func fillSlackExtras(acfg *messaging.AdapterConfig, appCfg *config.Config, botCf
 		acfg.Extras["tts_pipeline"] = p
 	}
 
-	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, func() []string {
-		if botCfg != nil {
-			return botCfg.InjectExclude
-		}
-		return nil
-	})
+	var slackBotExcl []string
+	if botCfg != nil {
+		slackBotExcl = botCfg.InjectExclude
+	}
+	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, slackBotExcl)
 }
 
 // fillFeishuExtras populates AdapterConfig.Extras for a Feishu bot.
@@ -408,18 +407,16 @@ func fillFeishuExtras(acfg *messaging.AdapterConfig, appCfg *config.Config, botC
 		acfg.Extras["tts_pipeline"] = p
 	}
 
-	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, func() []string {
-		if botCfg != nil {
-			return botCfg.InjectExclude
-		}
-		return nil
-	})
+	var feishuBotExcl []string
+	if botCfg != nil {
+		feishuBotExcl = botCfg.InjectExclude
+	}
+	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, feishuBotExcl)
 }
 
 // applyInjectExclude resolves the 3-level inject_exclude fallback (bot → platform → global)
-// and stores the result in acfg.Extras when configured. Shared by fillSlackExtras and fillFeishuExtras.
-func applyInjectExclude(acfg *messaging.AdapterConfig, global, platformExcl []string, botExclFn func() []string) {
-	botExcl := botExclFn()
+// and stores the result in acfg.Extras when configured. Shared by all fill*Extras functions.
+func applyInjectExclude(acfg *messaging.AdapterConfig, global, platformExcl, botExcl []string) {
 	if excl := config.ResolveInjectExclude(global, platformExcl, botExcl); excl != nil {
 		acfg.Extras["inject_exclude"] = excl
 	}
@@ -452,7 +449,7 @@ func fillYuanxinExtras(acfg *messaging.AdapterConfig, appCfg *config.Config) {
 		acfg.Extras["namespace"] = platformCfg.Namespace
 	}
 
-	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, func() []string { return nil })
+	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, nil)
 }
 
 func buildFeishuTranscriber(sttCfg config.STTConfig, appID, appSecret string, log *slog.Logger) stt.Transcriber {
