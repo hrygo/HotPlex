@@ -119,11 +119,21 @@
   <!-- Slack Card -->
   <g id="client-slack">
     <rect x="320" y="60" width="160" height="65" rx="10" fill="#0e1322" stroke="url(#grad-client)" stroke-width="1.5" />
-    <!-- Slack Icon representation -->
-    <circle cx="337" cy="80" r="3.2" fill="#36c5f0" />
-    <rect x="333.5" y="85" width="7" height="9" rx="3.5" fill="#2eb67d" />
-    <circle cx="347" cy="80" r="3.2" fill="#ecb22e" />
-    <rect x="343.5" y="71" width="7" height="9" rx="3.5" fill="#e01e5a" />
+    <!-- Official Slack Pinwheel Vector -->
+    <g transform="translate(332, 78)">
+      <!-- Top-Left Red Petal -->
+      <circle cx="2.5" cy="2.5" r="2.5" fill="#e01e5a" />
+      <rect x="7.5" y="0" width="5" height="10" rx="2.5" fill="#e01e5a" />
+      <!-- Top-Right Blue Petal -->
+      <circle cx="18.5" cy="2.5" r="2.5" fill="#36c5f0" />
+      <rect x="11" y="7.5" width="10" height="5" rx="2.5" fill="#36c5f0" />
+      <!-- Bottom-Right Green Petal -->
+      <circle cx="18.5" cy="18.5" r="2.5" fill="#2eb67d" />
+      <rect x="8.5" y="11" width="5" height="10" rx="2.5" fill="#2eb67d" />
+      <!-- Bottom-Left Yellow Petal -->
+      <circle cx="2.5" cy="18.5" r="2.5" fill="#ecb22e" />
+      <rect x="0" y="8.5" width="10" height="5" rx="2.5" fill="#ecb22e" />
+    </g>
     <!-- Text -->
     <text x="366" y="90" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">Slack Bot</text>
     <text x="366" y="103" fill="#64748b" font-size="9" font-family="system-ui, -apple-system, sans-serif">Socket Mode</text>
