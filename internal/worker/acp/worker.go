@@ -533,18 +533,16 @@ func (w *Worker) Terminate(ctx context.Context) error {
 	})
 
 	// Best-effort graceful cancel (nil-safe for pre-Start Terminate).
-	// Not all ACP agents support session/cancel, so use a short timeout
-	// to avoid blocking zombie cleanup (bridge Wait is only 2s).
-	// NOTE: Timeout reduced from 5s to 2s to match bridge Wait timeout.
-	// Cross-module change: see also internal/gateway/bridge.go Wait().
+	// Not all ACP agents support session/cancel; use a short timeout
+	// so a failed Cancel doesn't eat into the SIGTERM grace period.
 	if w.client != nil {
-		cancelCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		cancelCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		_ = w.client.Cancel(cancelCtx, w.GetWorkerSessionID())
 		cancel()
 
 		select {
 		case <-w.client.Done():
-		case <-time.After(time.Second):
+		case <-time.After(500 * time.Millisecond):
 		}
 	}
 
