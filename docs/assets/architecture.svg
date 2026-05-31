@@ -92,14 +92,14 @@
   <path d="M 500 380 C 500 410, 665 410, 665 430" fill="none" stroke="url(#grad-line-purple)" stroke-width="1.8" />
 
   <!-- Data Flow Pulse Dots -->
-  <circle cx="210" cy="160" r="3.5" fill="#22d3ee" filter="url(#glow-cyan)" />
+  <circle cx="235" cy="168" r="3.5" fill="#22d3ee" filter="url(#glow-cyan)" />
   <circle cx="400" cy="160" r="3.5" fill="#22d3ee" filter="url(#glow-cyan)" />
-  <circle cx="590" cy="160" r="3.5" fill="#22d3ee" filter="url(#glow-cyan)" />
+  <circle cx="565" cy="168" r="3.5" fill="#22d3ee" filter="url(#glow-cyan)" />
   
-  <circle cx="210" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
-  <circle cx="335" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
-  <circle cx="459" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
-  <circle cx="582" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
+  <circle cx="212.5" cy="409" r="3" fill="#c084fc" filter="url(#glow-purple)" />
+  <circle cx="335.5" cy="409" r="3" fill="#c084fc" filter="url(#glow-purple)" />
+  <circle cx="459" cy="409" r="3" fill="#c084fc" filter="url(#glow-purple)" />
+  <circle cx="582.5" cy="409" r="3" fill="#c084fc" filter="url(#glow-purple)" />
 
   <!-- ==================== TOP LAYER: CLIENTS ==================== -->
   
