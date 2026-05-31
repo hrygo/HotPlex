@@ -25,6 +25,7 @@ var (
 	_ worker.Worker                 = (*Worker)(nil)
 	_ worker.WorkerSessionIDHandler = (*Worker)(nil)
 	_ worker.WorkerCommander        = (*Worker)(nil)
+	_ worker.ControlRequester       = (*Worker)(nil)
 	_ base.MetadataHandler          = (*Worker)(nil)
 )
 
@@ -489,6 +490,65 @@ func (w *Worker) lastMCPConfig() string {
 	// Currently no cached MCP config on Worker; return empty to use defaults.
 	// When FR-02 ControlRequester is implemented, this can cache from Start().
 	return ""
+}
+
+// ─── ControlRequester ────────────────────────────────────────────────────────
+
+// SendControlRequest handles structured control queries from Bridge/worker_cmds.
+// Supported subtypes: get_context_usage, set_model, set_permission_mode, mcp_status.
+func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
+	switch subtype {
+	case "get_context_usage":
+		return w.handleContextUsage()
+	case "set_model":
+		return w.handleSetModel(ctx, body)
+	case "set_permission_mode":
+		return w.handleSetPermissionMode(body)
+	case "mcp_status":
+		// ACP has no MCP status query method — return empty map.
+		return map[string]any{}, nil
+	default:
+		return nil, fmt.Errorf("acp: unsupported control request: %s", subtype)
+	}
+}
+
+func (w *Worker) handleContextUsage() (map[string]any, error) {
+	snapshot := w.mapper.LastUsage()
+	result := map[string]any{
+		"maxTokens":   snapshot.ContextSize,
+		"totalTokens": snapshot.ContextUsed,
+	}
+	// Include model if known from last prompt result.
+	if snapshot.ContextSize > 0 || snapshot.ContextUsed > 0 {
+		return result, nil
+	}
+	// No usage data yet — return zero-value map (consistent with OCS behavior).
+	return map[string]any{
+		"maxTokens":   0,
+		"totalTokens": 0,
+	}, nil
+}
+
+func (w *Worker) handleSetModel(ctx context.Context, body map[string]any) (map[string]any, error) {
+	modelID, _ := body["modelId"].(string)
+	if modelID == "" {
+		return nil, fmt.Errorf("acp: set_model: missing modelId")
+	}
+	if err := w.client.SetSessionModel(ctx, w.GetWorkerSessionID(), modelID); err != nil {
+		return nil, fmt.Errorf("acp: set_model: %w", err)
+	}
+	return map[string]any{"model": modelID}, nil
+}
+
+func (w *Worker) handleSetPermissionMode(body map[string]any) (map[string]any, error) {
+	mode, _ := body["mode"].(string)
+	switch mode {
+	case "auto-accept":
+		autoApprove.Store(true)
+	default:
+		autoApprove.Store(false)
+	}
+	return map[string]any{"mode": mode}, nil
 }
 
 // ─── MetadataHandler ─────────────────────────────────────────────────────────
