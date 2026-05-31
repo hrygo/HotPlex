@@ -42,6 +42,9 @@ func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype strin
 		return map[string]any{"status": "ok"}, nil
 	case "mcp_oauth":
 		name, _ := body["server_name"].(string)
+		if name == "" {
+			return nil, fmt.Errorf("codexcli: mcp_oauth: missing server_name")
+		}
 		resp, err := sc.manager.MCPServerOAuthLogin(name)
 		if err != nil {
 			return nil, fmt.Errorf("codexcli: mcp_oauth: %w", err)

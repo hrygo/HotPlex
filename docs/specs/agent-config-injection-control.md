@@ -1,5 +1,8 @@
 # Spec: Agent Config Injection Control
 
+> **Design-only** — this document describes a planned feature (`inject_exclude`).
+> The code changes are not yet implemented. Tracked in GitHub issue #594.
+
 | 字段     | 值                                          |
 |----------|---------------------------------------------|
 | 状态     | Draft                                       |
