@@ -23,6 +23,7 @@ import (
 // Errors returned by the session manager.
 var (
 	ErrSessionNotFound   = errors.New("session: not found")
+	ErrSessionNotActive  = errors.New("session: not active")
 	ErrSessionBusy       = errors.New("session: busy")
 	ErrInvalidTransition = errors.New("session: invalid state transition")
 	ErrPoolExhausted     = errors.New("session: pool exhausted")
@@ -576,6 +577,16 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
 		return ErrWorkerAttached
 	}
+	// Reject attach if session is no longer active — prevents Delete/Attach
+	// race where Delete releases locks during DB write and a concurrent
+	// AttachWorker slips in, creating an orphan worker with no session record.
+	if !ms.info.State.IsActive() {
+		ms.mu.Unlock()
+		m.mu.Unlock()
+		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
+		return ErrSessionNotActive
+	}
 	ms.worker = w
 	ms.startedAt = time.Now()
 	metrics.PoolAcquireTotal.WithLabelValues("success").Inc()
@@ -667,7 +678,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 
 	ms.mu.Lock()
-	hasWorker := ms.worker != nil
+	hadWorkerBefore := ms.worker != nil
 	workerType := ms.info.WorkerType
 	uid := ms.info.UserID
 	wasRunning := ms.info.State == events.StateRunning
@@ -682,23 +693,37 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		return err
 	}
 
-	// Persist succeeded — commit the candidate in-memory.
-	ms.mu.Lock()
-	ms.info = candidate
-	ms.mu.Unlock()
-
+	// Persist succeeded — validate gap before committing in-memory.
+	// This must happen BEFORE setting ms.info = candidate to prevent
+	// leaving the session in DELETED state with a running worker when
+	// a concurrent AttachWorker slipped in during the DB write window.
 	m.mu.Lock()
 	if _, exists := m.sessions[id]; exists {
-		// Re-check worker under lock: AttachWorker may have attached during DB write gap.
 		ms.mu.Lock()
-		if ms.worker != nil {
-			hasWorker = true
+		hasWorkerAfter := ms.worker != nil
+		// If worker appeared during the gap (was nil before, now non-nil),
+		// a concurrent AttachWorker resurrected the session — abort deletion.
+		if !hadWorkerBefore && hasWorkerAfter {
+			ms.mu.Unlock()
+			m.mu.Unlock()
+			m.log.Warn("session: worker attached during delete gap, rolling back",
+				"session_id", id)
+			// Rollback DB: restore original state (ms.info hasn't been mutated yet).
+			ms.mu.RLock()
+			original := ms.info
+			ms.mu.RUnlock()
+			if rbErr := m.store.Upsert(ctx, &original); rbErr != nil {
+				m.log.Error("session: delete rollback failed", "session_id", id, "err", rbErr)
+			}
+			return nil
 		}
-		ms.mu.Unlock()
-		if hasWorker {
+		// No gap worker — commit candidate and delete atomically under both locks.
+		ms.info = candidate
+		if hasWorkerAfter {
 			metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
 			m.pool.Release(uid)
 		}
+		ms.mu.Unlock()
 		delete(m.sessions, id)
 		if wasRunning {
 			m.removeFromRunningIndex(id)

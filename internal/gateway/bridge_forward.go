@@ -18,6 +18,11 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
+// waitKillTimeout is the maximum time to wait for Worker.Wait() to return
+// after calling Kill(). If Wait() still hasn't returned, forwardEvents
+// abandons the wait to prevent permanent goroutine blocking.
+const waitKillTimeout = 5 * time.Second
+
 // forwardContext carries per-session mutable state for the event forwarding loop.
 // Ownership: exclusively owned by the single forwardEvents goroutine per session.
 // No concurrent access — all fields are read/written from that goroutine only,
@@ -232,7 +237,19 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
 		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(sessionID, fc.lastError); shouldRetry {
 			fc.pendingError = nil
-			b.autoRetry(context.Background(), w, sessionID, attempt)
+			// Pre-register cancel channel before launching goroutine to close
+			// the race window where CancelRetry can't find the channel.
+			cancelCh := make(chan struct{})
+			b.retryCancelMu.Lock()
+			b.retryCancel[sessionID] = cancelCh
+			b.retryCancelMu.Unlock()
+			// Run autoRetry asynchronously so forwardEvents continues reading
+			// from recvCh. This prevents the goroutine from blocking during
+			// the backoff period — if the worker crashes, the for-range loop
+			// detects recvCh closure immediately instead of waiting for the
+			// backoff timer to expire. The goroutine uses shutdownCtx so it
+			// cancels promptly during bridge shutdown.
+			go b.autoRetry(b.shutdownCtx, w, sessionID, attempt, cancelCh)
 			fc.turnText.Reset()
 			if b.collector != nil {
 				b.collector.ResetSession(sessionID)
@@ -411,7 +428,18 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	case <-time.After(waitTimeout):
 		b.log.Warn("bridge: Wait() timed out, force-killing", "session_id", p.sessionID, "worker_type", workerType)
 		_ = w.Kill()
-		<-ch
+		// Secondary timeout: if Wait() still doesn't return after Kill()
+		// (e.g., Go runtime deadlock or zombie process), abandon the wait
+		// instead of blocking forwardEvents forever.
+		killTimeout := time.NewTimer(waitKillTimeout)
+		defer killTimeout.Stop()
+		select {
+		case <-ch:
+			// Wait completed after Kill.
+		case <-killTimeout.C:
+			b.log.Warn("bridge: Wait() did not return after Kill(), abandoning",
+				"session_id", p.sessionID, "worker_type", workerType)
+		}
 	}
 
 	// Resume retry: skip during shutdown and for SIGTERM (exit 143).
