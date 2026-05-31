@@ -143,39 +143,39 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 		args = append(args, "--add-dir", dir)
 	}
 
-	if session.Color {
+	if session.CodexFlags.Color {
 		args = append(args, "--color")
 	}
 
-	if session.OutputFile != "" {
-		args = append(args, "--output-last-message", session.OutputFile)
+	if session.CodexFlags.OutputFile != "" {
+		args = append(args, "--output-last-message", session.CodexFlags.OutputFile)
 	}
 
-	if session.StrictConfig {
+	if session.CodexFlags.StrictConfig {
 		args = append(args, "--strict-config")
 	}
 
-	if session.SkipGitRepoCheck {
+	if session.CodexFlags.SkipGitRepoCheck {
 		args = append(args, "--skip-git-repo-check")
 	}
 
-	if session.IgnoreUserConfig {
+	if session.CodexFlags.IgnoreUserConfig {
 		args = append(args, "--ignore-user-config")
 	}
 
-	if session.IgnoreRules {
+	if session.CodexFlags.IgnoreRules {
 		args = append(args, "--ignore-rules")
 	}
 
-	if session.LocalProvider {
+	if session.CodexFlags.LocalProvider {
 		args = append(args, "--local-provider")
 	}
 
-	if session.ConfigProfile != "" {
-		args = append(args, "--profile", session.ConfigProfile)
+	if session.CodexFlags.ConfigProfile != "" {
+		args = append(args, "--profile", session.CodexFlags.ConfigProfile)
 	}
 
-	if session.BypassHookTrust {
+	if session.CodexFlags.BypassHookTrust {
 		args = append(args, "--dangerously-bypass-hook-trust")
 	}
 
@@ -911,32 +911,32 @@ func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]a
 	if len(session.AllowedDirs) > 0 {
 		params["additionalDirectories"] = session.AllowedDirs
 	}
-	if session.Color {
+	if session.CodexFlags.Color {
 		params["color"] = true
 	}
-	if session.StrictConfig {
+	if session.CodexFlags.StrictConfig {
 		params["strictConfig"] = true
 	}
-	if session.SkipGitRepoCheck {
+	if session.CodexFlags.SkipGitRepoCheck {
 		params["skipGitRepoCheck"] = true
 	}
-	if session.IgnoreRules {
+	if session.CodexFlags.IgnoreRules {
 		params["ignoreRules"] = true
 	}
-	if session.IgnoreUserConfig {
+	if session.CodexFlags.IgnoreUserConfig {
 		params["ignoreUserConfig"] = true
 	}
-	if session.LocalProvider {
+	if session.CodexFlags.LocalProvider {
 		params["localProvider"] = true
 	}
-	if session.BypassHookTrust {
+	if session.CodexFlags.BypassHookTrust {
 		params["bypassHookTrust"] = true
 	}
-	if session.OutputFile != "" {
-		params["outputFile"] = session.OutputFile
+	if session.CodexFlags.OutputFile != "" {
+		params["outputFile"] = session.CodexFlags.OutputFile
 	}
-	if session.ConfigProfile != "" {
-		params["profile"] = session.ConfigProfile
+	if session.CodexFlags.ConfigProfile != "" {
+		params["profile"] = session.CodexFlags.ConfigProfile
 	}
 	return params
 }

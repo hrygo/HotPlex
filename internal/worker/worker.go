@@ -245,6 +245,14 @@ type SessionInfo struct {
 	IncludePartialMessages bool
 	// Images carries image file paths for codex exec --image flags.
 	Images []string
+	// CodexFlags groups CodexCLI exec-mode flags that are only meaningful for
+	// the codexcli worker. Other adapters (claudecode, acp, ocs) ignore these.
+	CodexFlags CodexExecFlags
+}
+
+// CodexExecFlags holds CodexCLI-specific exec flags propagated through SessionInfo.
+// These are ignored by all other worker adapters.
+type CodexExecFlags struct {
 	// Color enables colored output for the codex CLI (--color).
 	Color bool
 	// OutputFile triggers output-only-last-message mode (--output-last-message).
