@@ -451,6 +451,8 @@ func fillYuanxinExtras(acfg *messaging.AdapterConfig, appCfg *config.Config) {
 	if platformCfg.Namespace != "" {
 		acfg.Extras["namespace"] = platformCfg.Namespace
 	}
+
+	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, func() []string { return nil })
 }
 
 func buildFeishuTranscriber(sttCfg config.STTConfig, appID, appSecret string, log *slog.Logger) stt.Transcriber {

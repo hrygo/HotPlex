@@ -997,6 +997,9 @@ func buildAgentConfigExclude(cfg *config.Config) map[string][]string {
 	if cfg.Messaging.Feishu.InjectExclude != nil {
 		m["feishu"] = cfg.Messaging.Feishu.InjectExclude
 	}
+	if cfg.Messaging.Yuanxin.InjectExclude != nil {
+		m["yuanxin"] = cfg.Messaging.Yuanxin.InjectExclude
+	}
 	if len(m) == 0 {
 		return nil
 	}

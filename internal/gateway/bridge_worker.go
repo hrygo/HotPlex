@@ -162,12 +162,13 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, p.workDir, si)
 
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
-		ctx:         context.Background(),
-		wt:          si.WorkerType,
-		workerInfo:  workerInfo,
-		platform:    si.Platform,
-		botID:       si.BotID,
-		forwardOpts: &forwardOpts{workDir: p.workDir},
+		ctx:           context.Background(),
+		wt:            si.WorkerType,
+		workerInfo:    workerInfo,
+		platform:      si.Platform,
+		botID:         si.BotID,
+		forwardOpts:   &forwardOpts{workDir: p.workDir},
+		injectExclude: b.resolveInjectExclude(si.Platform, nil),
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := b.sm.Transition(ctx, p.sessionID, events.StateRunning); err != nil {
@@ -244,6 +245,24 @@ func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Wor
 	b.crashTrackerMu.Unlock()
 }
 
+// resolveInjectExclude returns the inject_exclude list for a platform, falling
+// back from the per-session value to the platform/global default in the atomic
+// config map. Used by injectAgentConfig and crash recovery paths.
+func (b *Bridge) resolveInjectExclude(platform string, perSession []string) []string {
+	if perSession != nil {
+		return perSession
+	}
+	if m, ok := b.agentConfigExclude.Load().(map[string][]string); ok {
+		if excl, found := m[platform]; found {
+			return excl
+		}
+		if excl, found := m[""]; found {
+			return excl
+		}
+	}
+	return nil
+}
+
 // injectAgentConfig loads agent config files and injects the unified system
 // prompt into session info. A no-op when config dir is empty or agent config
 // is not configured.
@@ -253,16 +272,7 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID str
 	if b.agentConfigDir == "" {
 		return
 	}
-	// Resolve exclude list: per-session override → platform default from config map.
-	if injectExclude == nil {
-		if m, ok := b.agentConfigExclude.Load().(map[string][]string); ok {
-			if excl, found := m[platform]; found {
-				injectExclude = excl
-			} else if excl, found := m[""]; found {
-				injectExclude = excl
-			}
-		}
-	}
+	injectExclude = b.resolveInjectExclude(platform, injectExclude)
 	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_id", botID, "exclude", injectExclude)
 	configs, err := agentconfig.Load(b.agentConfigDir, platform, botID, injectExclude...)
 	if err != nil {

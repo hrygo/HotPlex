@@ -166,12 +166,13 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 	}
 
 	if _, err := b.createAndLaunchWorker(workerLaunchParams{
-		ctx:         ctx,
-		wt:          wt,
-		workerInfo:  workerInfo,
-		platform:    platform,
-		botID:       botID,
-		forwardOpts: &forwardOpts{workDir: workDir},
+		ctx:           ctx,
+		wt:            wt,
+		workerInfo:    workerInfo,
+		platform:      platform,
+		botID:         botID,
+		forwardOpts:   &forwardOpts{workDir: workDir},
+		injectExclude: injectExclude,
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := w.Start(ctx, info); err != nil {
@@ -373,7 +374,7 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		return fmt.Errorf("bridge: no worker_type configured for platform session %s", sessionID)
 	}
 
-	return b.startOrResumeOnInUse(ctx, sessionID, ownerID, wt, workDir, platform, platformKey, botID)
+	return b.startOrResumeOnInUse(ctx, sessionID, ownerID, wt, workDir, platform, platformKey, botID, injectExclude...)
 }
 
 // startOrResumeOnInUse attempts StartSession; if the worker reports its session
@@ -538,7 +539,8 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 	}
 
 	if !resumed {
-		if err := b.StartSession(ctx, newID, si.UserID, si.BotID, si.WorkerType, si.AllowedTools, expanded, si.Platform, si.PlatformKey, si.Title); err != nil {
+		excl := b.resolveInjectExclude(si.Platform, nil)
+		if err := b.StartSession(ctx, newID, si.UserID, si.BotID, si.WorkerType, si.AllowedTools, expanded, si.Platform, si.PlatformKey, si.Title, excl...); err != nil {
 			return nil, fmt.Errorf("switch-workdir: start session: %w", err)
 		}
 		b.log.Info("switch-workdir: created fresh session",
