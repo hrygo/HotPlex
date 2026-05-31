@@ -332,21 +332,21 @@ func (m *Mapper) mapItemUpdated(item *CodexItem) []*events.Envelope {
 			return nil
 		}
 		return []*events.Envelope{
-			newEnvelope(events.ToolResult, events.ToolResultData{
-				ID:     item.ID,
-				Output: item.Stdout,
-				Error:  item.Stderr,
+			newEnvelope(events.ToolUpdate, events.ToolUpdateData{
+				ID:        item.ID,
+				Status:    "in_progress",
+				RawOutput: item.Stdout,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemFileChange:
-		// Stream file change progress as tool results.
 		if item.Stdout == "" {
 			return nil
 		}
 		return []*events.Envelope{
-			newEnvelope(events.ToolResult, events.ToolResultData{
-				ID:     item.ID,
-				Output: item.Stdout,
+			newEnvelope(events.ToolUpdate, events.ToolUpdateData{
+				ID:        item.ID,
+				Status:    "in_progress",
+				RawOutput: item.Stdout,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemReasoning:

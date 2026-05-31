@@ -57,5 +57,8 @@ func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype strin
 
 func (sc *ServerCommander) Compact(ctx context.Context, _ map[string]any) error {
 	_, err := sc.manager.CompactThread(sc.threadID)
-	return err
+	if err != nil {
+		return fmt.Errorf("codexcli: compact: %w", err)
+	}
+	return nil
 }
