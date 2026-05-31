@@ -576,6 +576,16 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
 		return ErrWorkerAttached
 	}
+	// Reject attach if session is no longer active — prevents Delete/Attach
+	// race where Delete releases locks during DB write and a concurrent
+	// AttachWorker slips in, creating an orphan worker with no session record.
+	if !ms.info.State.IsActive() {
+		ms.mu.Unlock()
+		m.mu.Unlock()
+		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
+		return ErrSessionNotFound
+	}
 	ms.worker = w
 	ms.startedAt = time.Now()
 	metrics.PoolAcquireTotal.WithLabelValues("success").Inc()
@@ -667,9 +677,6 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 
 	ms.mu.Lock()
-	hasWorker := ms.worker != nil
-	workerType := ms.info.WorkerType
-	uid := ms.info.UserID
 	wasRunning := ms.info.State == events.StateRunning
 	// Copy-on-write: build candidate, persist, commit on success.
 	candidate := ms.info
@@ -690,14 +697,18 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.mu.Lock()
 	if _, exists := m.sessions[id]; exists {
 		// Re-check worker under lock: AttachWorker may have attached during DB write gap.
+		// If a new worker appeared, the session was resurrected — abort deletion
+		// to avoid creating an orphan worker with no session record.
 		ms.mu.Lock()
-		if ms.worker != nil {
-			hasWorker = true
-		}
+		workerAppeared := ms.worker != nil
 		ms.mu.Unlock()
-		if hasWorker {
-			metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
-			m.pool.Release(uid)
+		if workerAppeared {
+			m.mu.Unlock()
+			m.log.Warn("session: worker attached during delete gap, aborting deletion",
+				"session_id", id)
+			// DB already has DELETED state — next worker exit will trigger cleanup
+			// via Transition(TERMINATED) which is valid from DELETED's predecessor.
+			return nil
 		}
 		delete(m.sessions, id)
 		if wasRunning {

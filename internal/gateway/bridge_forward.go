@@ -232,7 +232,13 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
 		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(sessionID, fc.lastError); shouldRetry {
 			fc.pendingError = nil
-			b.autoRetry(context.Background(), w, sessionID, attempt)
+			// Run autoRetry asynchronously so forwardEvents continues reading
+			// from recvCh. This prevents the goroutine from blocking during
+			// the backoff period — if the worker crashes, the for-range loop
+			// detects recvCh closure immediately instead of waiting for the
+			// backoff timer to expire. The goroutine uses shutdownCtx so it
+			// cancels promptly during bridge shutdown.
+			go b.autoRetry(b.shutdownCtx, w, sessionID, attempt)
 			fc.turnText.Reset()
 			if b.collector != nil {
 				b.collector.ResetSession(sessionID)
@@ -411,7 +417,18 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	case <-time.After(waitTimeout):
 		b.log.Warn("bridge: Wait() timed out, force-killing", "session_id", p.sessionID, "worker_type", workerType)
 		_ = w.Kill()
-		<-ch
+		// Secondary timeout: if Wait() still doesn't return after Kill()
+		// (e.g., Go runtime deadlock or zombie process), abandon the wait
+		// instead of blocking forwardEvents forever.
+		killTimeout := time.NewTimer(5 * time.Second)
+		defer killTimeout.Stop()
+		select {
+		case <-ch:
+			// Wait completed after Kill.
+		case <-killTimeout.C:
+			b.log.Warn("bridge: Wait() did not return after Kill(), abandoning",
+				"session_id", p.sessionID, "worker_type", workerType)
+		}
 	}
 
 	// Resume retry: skip during shutdown and for SIGTERM (exit 143).

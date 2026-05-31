@@ -50,10 +50,12 @@ type Bridge struct {
 	wf           WorkerFactory
 	retryCtrl    *LLMRetryController
 
-	fwdWg         sync.WaitGroup // tracks active forwardEvents goroutines
-	closed        atomic.Bool    // set during shutdown to skip crash detection
-	retryCancelMu sync.Mutex
-	retryCancel   map[string]chan struct{} // sessionID → cancel channel
+	fwdWg          sync.WaitGroup // tracks active forwardEvents goroutines
+	closed         atomic.Bool    // set during shutdown to skip crash detection
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc // cancels shutdownCtx on Shutdown()
+	retryCancelMu  sync.Mutex
+	retryCancel    map[string]chan struct{} // sessionID → cancel channel
 
 	agentConfigDir     string        // agent config directory path; "" = disabled
 	turnTimeout        time.Duration // per-turn timeout; 0 = disabled
@@ -84,6 +86,7 @@ const (
 
 // NewBridge creates a new bridge.
 func NewBridge(deps BridgeDeps) *Bridge {
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	b := &Bridge{
 		log:                deps.Log.With("component", "bridge"),
 		hub:                deps.Hub,
@@ -100,6 +103,8 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		retryCancel:        make(map[string]chan struct{}),
 		accum:              make(map[string]*sessionAccumulator),
 		crashTracker:       make(map[string]*crashHistory),
+		shutdownCtx:        shutdownCtx,
+		shutdownCancel:     shutdownCancel,
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
 	return b
@@ -173,7 +178,16 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 
 	// Transition to RUNNING. (StateNotifier will emit state event automatically)
 	if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
-		b.log.Warn("bridge: transition to running failed", "session_id", id, "worker_type", wt, "err", err)
+		// Kill the worker to prevent orphan — without this, the worker runs
+		// indefinitely while the session stays in CREATED state, invisible to GC.
+		// forwardEvents will detect the exit and cleanupCrashedWorker transitions
+		// the session to TERMINATED for eventual GC reclamation.
+		b.log.Error("bridge: transition to running failed, terminating orphan worker",
+			"session_id", id, "worker_type", wt, "err", err)
+		if w := b.sm.GetWorker(id); w != nil {
+			_ = w.Terminate(context.Background())
+		}
+		return fmt.Errorf("bridge: transition to running: %w", err)
 	}
 
 	return nil
@@ -539,9 +553,11 @@ func isWorkerInUseError(err error) bool {
 
 // Shutdown signals the bridge that the gateway is shutting down.
 // It sets the closed flag so forwardEvents goroutines skip crash detection,
+// cancels the shutdown context to abort pending auto-retries,
 // then waits for all forwardEvents goroutines to complete or ctx to expire.
 func (b *Bridge) Shutdown(ctx context.Context) {
 	b.closed.Store(true)
+	b.shutdownCancel()
 	done := make(chan struct{})
 	go func() {
 		b.fwdWg.Wait()
