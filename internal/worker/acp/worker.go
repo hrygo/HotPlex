@@ -33,15 +33,20 @@ var (
 // commandParts stores the space-split command (binary + optional prefix args).
 var commandParts atomic.Value // []string
 
-// autoApprove controls whether permission requests are auto-approved.
-var autoApprove atomic.Value // bool
+// autoApproveDefault is the global default for auto-approve set from config.
+// Per-session overrides live on Worker.autoApprove.
+var autoApproveDefault atomic.Value // bool
 
 func init() {
 	commandParts.Store([]string{"hermes", "acp"})
-	autoApprove.Store(false)
+	autoApproveDefault.Store(false)
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
-		return &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}, nil
+		w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
+		if v, ok := autoApproveDefault.Load().(bool); ok {
+			w.autoApprove.Store(v)
+		}
+		return w, nil
 	})
 }
 
@@ -57,7 +62,7 @@ func InitConfig(cfg config.ACPConfig) {
 		return
 	}
 	commandParts.Store(parts)
-	autoApprove.Store(cfg.AutoApprove)
+	autoApproveDefault.Store(cfg.AutoApprove)
 	if err := security.RegisterCommand(parts[0]); err != nil {
 		slog.Default().Error("acp: failed to register command", "command", parts[0], "err", err)
 	}
@@ -91,6 +96,9 @@ func parseMCPServers(mcpConfig string) []any {
 
 // normalizeMCPServersToArray converts the mcpServers value to []any.
 // ACP session/new expects an array; config provides either a map or array.
+// NOTE: For map input, this mutates the inner maps in-place (sets m["name"]=name).
+// Currently safe because input always comes from json.Unmarshal (fresh allocation),
+// but callers must not pass shared/persistent maps.
 func normalizeMCPServersToArray(servers any) []any {
 	if servers == nil {
 		return nil
@@ -132,7 +140,14 @@ type Worker struct {
 	// systemPrompt holds the B/C channel agent config from SessionInfo.SystemPrompt.
 	// Injected as a prefix on the first user prompt (ACP v1 has no native system prompt).
 	systemPrompt         string
-	systemPromptInjected bool
+	systemPromptInjected atomic.Bool
+
+	// mcpServers caches the parsed MCP servers from Start() so Clear() can reuse them.
+	mcpServers []any
+
+	// autoApprove controls per-session permission auto-approval.
+	// Initialized from global default, overridable via set_permission_mode.
+	autoApprove atomic.Bool
 
 	// testHooks for injection-based testing.
 	testClient *ACPClient
@@ -181,7 +196,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		sp = sp[:32*1024]
 	}
 	w.systemPrompt = sp
-	w.systemPromptInjected = false
+	w.systemPromptInjected.Store(false)
 
 	// Phase 2: I/O-heavy operations outside the lock.
 
@@ -249,6 +264,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Create or load session.
 	mcpServers := parseMCPServers(session.MCPConfig)
+	w.mcpServers = mcpServers // cache for Clear()
 	var acpSessID string
 	var historyLost bool
 	if session.WorkerSessionID != "" {
@@ -330,8 +346,8 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	w.mapper.SetTurnActive()
 
 	// Inject system prompt on first user input (ACP v1 has no native system prompt).
-	if w.systemPrompt != "" && !w.systemPromptInjected {
-		w.systemPromptInjected = true
+	if w.systemPrompt != "" && !w.systemPromptInjected.Load() {
+		w.systemPromptInjected.Store(true)
 		content = fmt.Sprintf("[SYSTEM INSTRUCTIONS]\n%s\n[/SYSTEM INSTRUCTIONS]\n\n%s", w.systemPrompt, content)
 	}
 
@@ -456,11 +472,13 @@ func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
 
 // Clear creates a new ACP session within the same process (equivalent to /clear).
 // The PID stays the same; only the acpSessionID changes.
+// I/O runs outside Mu to avoid blocking Terminate/Health during Cancel+NewSession.
 func (w *Worker) Clear(ctx context.Context) error {
 	w.Mu.Lock()
-	defer w.Mu.Unlock()
+	client := w.client
+	w.Mu.Unlock()
 
-	if w.client == nil {
+	if client == nil {
 		return fmt.Errorf("acp: clear: worker not started")
 	}
 
@@ -468,32 +486,25 @@ func (w *Worker) Clear(ctx context.Context) error {
 	defer hcancel()
 
 	// Cancel any in-flight turn before creating new session.
-	_ = w.client.Cancel(hctx, w.acpSessionID)
+	_ = client.Cancel(hctx, w.GetWorkerSessionID())
 
-	mcpServers := parseMCPServers(w.lastMCPConfig())
-	result, err := w.client.NewSession(hctx, w.projectDir, mcpServers)
+	result, err := client.NewSession(hctx, w.projectDir, w.mcpServers)
 	if err != nil {
 		return fmt.Errorf("acp: clear: new session: %w", err)
 	}
 
+	w.Mu.Lock()
 	w.acpSessionID = result.SessionID
 	w.mapper.Reset()
-	w.systemPromptInjected = false
+	w.systemPromptInjected.Store(false)
 	w.IncResetGeneration()
+	w.Mu.Unlock()
 	return nil
 }
 
 // Rewind returns ErrNotImplemented — ACP has no rewind method.
 func (w *Worker) Rewind(_ context.Context, _ string) error {
 	return worker.ErrNotImplemented
-}
-
-// lastMCPConfig returns the MCP config to use for new sessions.
-// Stored as an indirect method to allow future per-session caching.
-func (w *Worker) lastMCPConfig() string {
-	// Currently no cached MCP config on Worker; return empty to use defaults.
-	// When FR-02 ControlRequester is implemented, this can cache from Start().
-	return ""
 }
 
 // ─── ControlRequester ────────────────────────────────────────────────────────
@@ -548,9 +559,9 @@ func (w *Worker) handleSetPermissionMode(body map[string]any) (map[string]any, e
 	mode, _ := body["mode"].(string)
 	switch mode {
 	case "auto-accept":
-		autoApprove.Store(true)
+		w.autoApprove.Store(true)
 	default:
-		autoApprove.Store(false)
+		w.autoApprove.Store(false)
 	}
 	return map[string]any{"mode": mode}, nil
 }
@@ -641,7 +652,7 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 		}
 
 		// Check auto-approve.
-		if val, _ := autoApprove.Load().(bool); val {
+		if w.autoApprove.Load() {
 			_ = w.client.RespondPermission(ctx, req.ID, pm.FormatAllowedOutcome())
 			metrics.ACPPermissionRequestsTotal.WithLabelValues("approved").Inc()
 			return

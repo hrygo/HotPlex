@@ -32,16 +32,12 @@ type ACPMapper struct {
 }
 
 // usageSnapshot caches token usage, context size, and cost from usage_update events.
+// Embeds PromptUsage for token fields; adds context/cost fields from usage_update.
 type usageSnapshot struct {
-	InputTokens       int
-	OutputTokens      int
-	ThoughtTokens     int
-	CachedReadTokens  int
-	CachedWriteTokens int
-	TotalTokens       int
-	ContextSize       int
-	ContextUsed       int
-	Cost              *CostInfo
+	PromptUsage
+	ContextSize int
+	ContextUsed int
+	Cost        *CostInfo
 }
 
 // CostInfo holds cost information from usage_update events.
@@ -510,10 +506,8 @@ func (m *ACPMapper) updateUsage(raw json.RawMessage) {
 		return
 	}
 
+	// Accumulate into snapshot under lock (field names match PromptUsage via embedding).
 	m.usageMu.Lock()
-	defer m.usageMu.Unlock()
-
-	// Accumulate tokens (usage_update may fire multiple times per turn).
 	s := &m.usage
 	s.InputTokens += u.InputTokens
 	s.OutputTokens += u.OutputTokens
@@ -521,16 +515,12 @@ func (m *ACPMapper) updateUsage(raw json.RawMessage) {
 	s.CachedReadTokens += u.CachedReadTokens
 	s.CachedWriteTokens += u.CachedWriteTokens
 	s.TotalTokens += u.TotalTokens
-
-	// Context size/used are absolute snapshots, not cumulative.
 	if u.ContextSize > 0 {
 		s.ContextSize = u.ContextSize
 	}
 	if u.ContextUsed > 0 {
 		s.ContextUsed = u.ContextUsed
 	}
-
-	// Cost accumulates across updates.
 	if u.Cost != nil {
 		if s.Cost == nil {
 			s.Cost = &CostInfo{}
@@ -538,8 +528,9 @@ func (m *ACPMapper) updateUsage(raw json.RawMessage) {
 		s.Cost.Amount += u.Cost.Amount
 		s.Cost.Currency = u.Cost.Currency
 	}
+	m.usageMu.Unlock()
 
-	// Record Prometheus token metrics.
+	// Prometheus metrics outside the lock — counters have internal synchronization.
 	if u.InputTokens > 0 {
 		metrics.ACPPromptTokensTotal.WithLabelValues("input").Add(float64(u.InputTokens))
 	}
