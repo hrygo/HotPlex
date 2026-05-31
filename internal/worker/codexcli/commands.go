@@ -2,7 +2,6 @@ package codexcli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 )
 
@@ -35,7 +34,7 @@ func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype strin
 		if err != nil {
 			return nil, fmt.Errorf("codexcli: mcp_status: %w", err)
 		}
-		return map[string]any{"status": json.RawMessage(resp)}, nil
+		return map[string]any{"status": resp}, nil
 	case "mcp_refresh":
 		if err := sc.manager.RefreshMCPServer(); err != nil {
 			return nil, fmt.Errorf("codexcli: mcp_refresh: %w", err)
