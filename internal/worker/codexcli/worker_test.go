@@ -1237,7 +1237,7 @@ func TestMapperMapItemCompletedBranches(t *testing.T) {
 		event := &CodexEvent{
 			Type: EventItemCompleted,
 			Item: &CodexItem{
-				ID: "item_1",
+				ID:   "item_1",
 				Type: ItemError,
 				Error: &CodexItemError{
 					Message: "test error",
