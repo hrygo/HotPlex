@@ -1,6 +1,6 @@
 # HotPlex 项目知识库
 
-**最后更新**: 2026-05-30 · **分支**: main · **版本**: v1.22.0
+**最后更新**: 2026-05-31 · **分支**: main · **版本**: v1.22.0+
 
 ---
 
@@ -106,9 +106,14 @@
 - `bot_registry.go` - `BotRegistry` 并发安全多 bot 注册表
 - `config.go` - `AdapterConfig` 含 `BotName` 字段
 - `slack/` - Socket Mode 适配器
-- `feishu/` - WS 适配器 + STT
+- `feishu/` - 飞书 WS 适配器 + STT + 卡片模板
+- `yuanxin/` - 元芯平台适配器
 - `tts/` - Edge-TTS 语音合成 + FFmpeg Opus 转换
-- `interaction/` - `InteractionManager` 权限/Q&A 管理
+- `stt/` - 语音转文字（独立 STT 模块）
+- `toolfmt/` - 工具调用格式化
+- `phrases/` - 短语模板
+- `mock/` - 测试 mock
+- `interaction.go` - `InteractionManager` 权限/Q&A 管理
 
 **Brain** (`internal/brain/`)：
 - `brain.go` - 核心接口 (Brain/StreamingBrain/RoutableBrain/ObservableBrain) + 全局单例
@@ -235,14 +240,6 @@ make dev  # gateway + webchat
 make check   # 完整 CI: quality + build
 make dev-status  # 查看运行服务
 ```
-
-**常用命令**：
-- `make build` - 构建网关二进制
-- `make test` - 运行测试（含 -race）
-- `make lint` - golangci-lint 检查
-- `make dev` - 启动开发环境
-- `hotplex service start` - 启动系统服务
-- `hotplex update` - 自更新到最新版本
 
 ---
 

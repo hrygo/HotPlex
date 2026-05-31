@@ -217,6 +217,7 @@ dev: dev-start
 	@echo ""
 
 dev-start: gateway-start
+	@rm -f logs/*.log
 	@$(MAKE) webchat-dev || echo "  $(YELLOW)⚠$(RESET) Webchat skipped (run 'cd webchat && pnpm install' to fix)"
 
 dev-stop: webchat-stop gateway-stop
