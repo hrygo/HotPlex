@@ -27,6 +27,7 @@ var (
 	_ worker.WorkerSessionIDHandler = (*Worker)(nil)
 	_ worker.WorkerCommander        = (*Worker)(nil)
 	_ worker.ControlRequester       = (*Worker)(nil)
+	_ worker.InPlaceReseter         = (*Worker)(nil)
 	_ base.MetadataHandler          = (*Worker)(nil)
 )
 
@@ -135,6 +136,13 @@ type Worker struct {
 	// pendingPerm stores the permission mapping for in-flight permission requests.
 	pendingPerm sync.Map // requestID (string) → *PermissionMapResult
 
+	// pendingRequests stores non-permission server-initiated requests (questions, elicitations)
+	// for forwarding client responses back to the agent as JSON-RPC responses.
+	pendingRequests sync.Map // requestID (string) → *JSONRPCRequest
+
+	// initResult caches the ACP initialize handshake result for agent discovery and capability checks.
+	initResult *InitializeResult
+
 	// systemPrompt holds the B/C channel agent config from SessionInfo.SystemPrompt.
 	// Injected as a prefix on the first user prompt (ACP v1 has no native system prompt).
 	systemPrompt         string
@@ -220,7 +228,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	stdin, stdout, _, err := w.Proc.Start(context.Background(), binary, args, env, session.ProjectDir)
 	if err != nil {
-		return fmt.Errorf("acp: failed to start process: %w", err)
+		return w.fmtStartError(binary, err)
 	}
 	if stdin == nil || stdout == nil {
 		return fmt.Errorf("acp: failed to start process: %s", binary)
@@ -255,22 +263,30 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	defer hcancel()
 
 	clientInfo := map[string]string{"name": "hotplex", "version": "1.0"}
-	if _, err := client.Initialize(hctx, clientInfo); err != nil {
+	initResult, err := client.Initialize(hctx, clientInfo)
+	if err != nil {
 		_ = w.Proc.Kill()
-		return fmt.Errorf("acp: initialize handshake: %w", err)
+		return w.fmtHandshakeError(err)
 	}
+	w.initResult = initResult
+	w.Log.Info("acp: agent discovered",
+		"agent", initResult.AgentInfo.Name,
+		"version", initResult.AgentInfo.Version,
+		"protocol", initResult.ProtocolVersion)
 
 	// Create or load session.
 	mcpServers := parseMCPServers(session.MCPConfig)
 	w.mcpServers = mcpServers // cache for Clear()
 	var acpSessID string
 	var historyLost bool
-	if session.WorkerSessionID != "" {
-		// Resume existing session.
+	if session.WorkerSessionID != "" && w.supportsCapability("loadSession") {
+		// Resume existing session (only if agent supports load).
 		sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
 		if loadErr != nil {
-			w.Log.Error("acp: load session failed, conversation history will be lost",
-				"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID, "error", loadErr)
+			w.Log.Error("acp: session load failed, falling back to new session (history lost)",
+				"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID,
+				"error", loadErr,
+				"hint", "check agent session storage and persistence")
 			newSess, newErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
 			if newErr != nil {
 				_ = w.Proc.Kill()
@@ -403,9 +419,13 @@ func (w *Worker) Terminate(ctx context.Context) error {
 		_ = conn.Close()
 	}
 
-	// Clear stale pending permission entries (session teardown cleanup).
+	// Clear stale pending permission/request entries (session teardown cleanup).
 	w.pendingPerm.Range(func(key, _ any) bool {
 		w.pendingPerm.Delete(key)
+		return true
+	})
+	w.pendingRequests.Range(func(key, _ any) bool {
+		w.pendingRequests.Delete(key)
 		return true
 	})
 
@@ -442,21 +462,85 @@ func (w *Worker) Conn() worker.SessionConn {
 
 func (w *Worker) Health() worker.WorkerHealth {
 	h := w.BaseWorker.Health(worker.TypeACP)
-	// BaseWorker.Health reads base.Conn which is nil for ACP (we use acpConn instead).
-	// Populate SessionID from acpConn if available.
 	w.Mu.Lock()
 	if w.conn != nil {
 		h.SessionID = w.conn.SessionID()
 	}
+	ir := w.initResult
 	w.Mu.Unlock()
+	if ir != nil {
+		h.AgentName = ir.AgentInfo.Name
+		h.AgentVersion = ir.AgentInfo.Version
+		h.ProtocolVersion = ir.ProtocolVersion
+	}
 	return h
+}
+
+// supportsCapability checks whether the agent declared a capability in the
+// initialize handshake. Returns true if the capability is absent (assume supported)
+// or explicitly true. Returns false only if explicitly set to false.
+func (w *Worker) supportsCapability(name string) bool {
+	if w.initResult == nil {
+		return true // no handshake result, assume supported
+	}
+	caps := w.initResult.AgentCapabilities
+	if caps == nil {
+		return true // no capabilities declared, assume all supported
+	}
+	v, ok := caps[name]
+	if !ok {
+		return true // not listed, assume supported
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return true
 }
 
 // ─── ResetContext ────────────────────────────────────────────────────────────
 
-func (w *Worker) ResetContext(_ context.Context) error {
-	// ACP doesn't support in-place reset → terminate + restart handled by Bridge.
-	return worker.ErrNotImplemented
+func (w *Worker) ResetContext(ctx context.Context) error {
+	// Reuse the same process: cancel current turn, create new session.
+	// Equivalent to Clear() but called by Bridge.ResetSession.
+	return w.resetSession(ctx)
+}
+
+// InPlaceReset tells Bridge not to rebuild the forwardEvents goroutine.
+// The existing goroutine detects generation changes via resetGenerationer.
+func (w *Worker) InPlaceReset() bool { return true }
+
+// resetSession is the shared logic for Clear() and ResetContext():
+// cancel current turn, create new ACP session within the same process.
+func (w *Worker) resetSession(ctx context.Context) error {
+	w.Mu.Lock()
+	client := w.client
+	projectDir := w.projectDir
+	mcpServers := w.mcpServers
+	sessionID := w.acpSessionID
+	w.Mu.Unlock()
+
+	if client == nil {
+		return fmt.Errorf("acp: reset: worker not started")
+	}
+
+	hctx, hcancel := context.WithTimeout(ctx, 10*time.Second)
+	defer hcancel()
+
+	// Cancel any in-flight turn before creating new session.
+	_ = client.Cancel(hctx, sessionID)
+
+	result, err := client.NewSession(hctx, projectDir, mcpServers)
+	if err != nil {
+		return fmt.Errorf("acp: reset: new session: %w", err)
+	}
+
+	w.Mu.Lock()
+	w.acpSessionID = result.SessionID
+	w.mapper.Reset()
+	w.systemPromptInjected.Store(false)
+	w.IncResetGeneration()
+	w.Mu.Unlock()
+	return nil
 }
 
 // ─── WorkerCommander ─────────────────────────────────────────────────────────
@@ -469,39 +553,8 @@ func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
 
 // Clear creates a new ACP session within the same process (equivalent to /clear).
 // The PID stays the same; only the acpSessionID changes.
-// I/O runs outside Mu to avoid blocking Terminate/Health during Cancel+NewSession.
 func (w *Worker) Clear(ctx context.Context) error {
-	// Snapshot all fields needed for I/O under one lock hold to avoid data races
-	// on projectDir (string), mcpServers (slice), and acpSessionID (string).
-	w.Mu.Lock()
-	client := w.client
-	projectDir := w.projectDir
-	mcpServers := w.mcpServers
-	sessionID := w.acpSessionID
-	w.Mu.Unlock()
-
-	if client == nil {
-		return fmt.Errorf("acp: clear: worker not started")
-	}
-
-	hctx, hcancel := context.WithTimeout(ctx, 10*time.Second)
-	defer hcancel()
-
-	// Cancel any in-flight turn before creating new session.
-	_ = client.Cancel(hctx, sessionID)
-
-	result, err := client.NewSession(hctx, projectDir, mcpServers)
-	if err != nil {
-		return fmt.Errorf("acp: clear: new session: %w", err)
-	}
-
-	w.Mu.Lock()
-	w.acpSessionID = result.SessionID
-	w.mapper.Reset()
-	w.systemPromptInjected.Store(false)
-	w.IncResetGeneration()
-	w.Mu.Unlock()
-	return nil
+	return w.resetSession(ctx)
 }
 
 // Rewind returns ErrNotImplemented — ACP has no rewind method.
@@ -598,12 +651,44 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 	return client.RespondPermission(ctx, pm.RequestID, outcome)
 }
 
-func (w *Worker) HandleQuestionResponse(_ context.Context, _ string, _ map[string]string) error {
-	return worker.ErrNotImplemented
+func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
+	req, ok := w.pendingRequests.LoadAndDelete(reqID)
+	if !ok {
+		return fmt.Errorf("acp: no pending question request: %s", reqID)
+	}
+	w.Mu.Lock()
+	client := w.client
+	w.Mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("acp: question response: worker not started")
+	}
+	acpReq, ok := req.(*JSONRPCRequest)
+	if !ok {
+		return fmt.Errorf("acp: question response: invalid request type %T", req)
+	}
+	return client.RespondPermission(ctx, acpReq.ID, answers)
 }
 
-func (w *Worker) HandleElicitationResponse(_ context.Context, _, _ string, _ map[string]any) error {
-	return worker.ErrNotImplemented
+func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
+	req, ok := w.pendingRequests.LoadAndDelete(reqID)
+	if !ok {
+		return fmt.Errorf("acp: no pending elicitation request: %s", reqID)
+	}
+	w.Mu.Lock()
+	client := w.client
+	w.Mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("acp: elicitation response: worker not started")
+	}
+	outcome := map[string]any{"action": action}
+	if content != nil {
+		outcome["content"] = content
+	}
+	acpReq, ok := req.(*JSONRPCRequest)
+	if !ok {
+		return fmt.Errorf("acp: elicitation response: invalid request type %T", req)
+	}
+	return client.RespondPermission(ctx, acpReq.ID, outcome)
 }
 
 // ─── readLoop ────────────────────────────────────────────────────────────────
@@ -620,10 +705,14 @@ func (w *Worker) readLoop(ctx context.Context) {
 				"session_id", w.sessionID, "panic", r,
 				"stack", string(debug.Stack()))
 		}
-		// Clean up stale pending permission entries when read loop exits
+		// Clean up stale pending permission/request entries when read loop exits
 		// (agent disconnected, context cancelled, or panic recovered).
 		w.pendingPerm.Range(func(key, _ any) bool {
 			w.pendingPerm.Delete(key)
+			return true
+		})
+		w.pendingRequests.Range(func(key, _ any) bool {
+			w.pendingRequests.Delete(key)
 			return true
 		})
 	}()
@@ -671,6 +760,42 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 		conn.TrySend(pm.Envelope)
 
 	default:
-		w.Log.Warn("acp: unhandled server request", "method", req.Method)
+		// Non-permission server-initiated request (e.g. question, elicitation).
+		// Forward as Raw event so the client can display and respond.
+		w.pendingRequests.Store(string(req.ID), req)
+		var params any
+		_ = json.Unmarshal(req.Params, &params)
+		conn.TrySend(w.mapper.newEnvelope(events.Raw, events.RawData{
+			Kind: "acp.server_request." + req.Method,
+			Raw: map[string]any{
+				"id":     string(req.ID),
+				"method": req.Method,
+				"params": params,
+			},
+		}))
 	}
+}
+
+// Error Formatting (U-03)
+
+// fmtStartError produces an actionable error when the agent binary cannot be started.
+func (w *Worker) fmtStartError(binary string, err error) error {
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "executable file not found") ||
+		strings.Contains(errMsg, "no such file") ||
+		strings.Contains(errMsg, "command not found") {
+		return fmt.Errorf("acp: agent %q not found in PATH. Install the agent or set acp.command in config.yaml: %w", binary, err)
+	}
+	if strings.Contains(errMsg, "permission denied") {
+		return fmt.Errorf("acp: agent %q is not executable. Run: chmod +x $(which %s): %w", binary, binary, err)
+	}
+	return fmt.Errorf("acp: failed to start process %q: %w", binary, err)
+}
+
+// fmtHandshakeError produces an actionable error when the ACP handshake fails.
+func (w *Worker) fmtHandshakeError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("acp: handshake timed out after 30s. Check: 1) agent is running 2) API keys are configured 3) network connectivity: %w", err)
+	}
+	return fmt.Errorf("acp: initialize handshake: %w", err)
 }

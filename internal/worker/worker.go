@@ -133,6 +133,11 @@ type WorkerHealth struct {
 	Healthy   bool       `json:"healthy"`
 	Uptime    string     `json:"uptime"`
 	Error     string     `json:"error,omitempty"`
+
+	// Agent discovery fields (populated by ACP and similar workers).
+	AgentName       string `json:"agent_name,omitempty"`
+	AgentVersion    string `json:"agent_version,omitempty"`
+	ProtocolVersion int    `json:"protocol_version,omitempty"`
 }
 
 // InputRecoverer is an optional interface for session connections that cache
