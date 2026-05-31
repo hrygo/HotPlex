@@ -568,15 +568,16 @@ func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) e
 		return fmt.Errorf("codex-app-server: marshal server response: %w", err)
 	}
 
-	// Validate that the response contains a "behavior" or "decision" key.
-	// Both are valid server request response payloads.
+	// Validate the response shape. Permission/approval responses carry
+	// "behavior" or "decision"; elicitation responses carry "action".
 	var check map[string]any
 	if err := json.Unmarshal(raw, &check); err == nil {
 		_, hasBehavior := check["behavior"]
 		_, hasDecision := check["decision"]
-		if !hasBehavior && !hasDecision {
+		_, hasAction := check["action"]
+		if !hasBehavior && !hasDecision && !hasAction {
 			m.log.Warn("codex-app-server: server response missing expected key",
-				"reqID", reqID, "expected", "behavior or decision")
+				"reqID", reqID, "expected", "behavior, decision, or action")
 		}
 	}
 
@@ -641,10 +642,11 @@ func (m *CodexAppServerManager) SetThreadName(threadID, name string) error {
 }
 
 // SetThreadGoal sets a goal for the specified thread.
-func (m *CodexAppServerManager) SetThreadGoal(threadID, goal string) error {
+// Upstream ThreadGoalSetParams uses "objective" (thread.rs:746), not "goal".
+func (m *CodexAppServerManager) SetThreadGoal(threadID, objective string) error {
 	err := m.Notify("thread/goal/set", map[string]any{
-		"threadId": threadID,
-		"goal":     goal,
+		"threadId":  threadID,
+		"objective": objective,
 	})
 	if err != nil {
 		return fmt.Errorf("codex-app-server: thread/goal/set: %w", err)
@@ -671,11 +673,13 @@ func (m *CodexAppServerManager) ClearThreadGoal(threadID string) error {
 }
 
 // UpdateThreadSettings updates the settings configuration for a thread.
+// Upstream ThreadSettingsUpdateParams (thread.rs:229) is a flat struct: settings
+// keys (cwd, approvalPolicy, sandboxPolicy, model, ...) sit alongside threadId,
+// not nested under a "settings" wrapper.
 func (m *CodexAppServerManager) UpdateThreadSettings(threadID string, settings map[string]any) error {
-	err := m.Notify("thread/settings/update", map[string]any{
-		"threadId": threadID,
-		"settings": settings,
-	})
+	params := map[string]any{"threadId": threadID}
+	maps.Copy(params, settings)
+	err := m.Notify("thread/settings/update", params)
 	if err != nil {
 		return fmt.Errorf("codex-app-server: thread/settings/update: %w", err)
 	}
@@ -692,14 +696,17 @@ func (m *CodexAppServerManager) CompactThread(threadID string) (json.RawMessage,
 	return resp, nil
 }
 
-// RollbackThread rolls back a thread to a previous turn identified by targetID.
-// If targetID is empty, the rollback undoes the last turn.
-func (m *CodexAppServerManager) RollbackThread(threadID, targetID string) (json.RawMessage, error) {
-	params := map[string]any{"threadId": threadID}
-	if targetID != "" {
-		params["targetId"] = targetID
+// RollbackThread drops numTurns turns from the end of the thread.
+// Upstream ThreadRollbackParams (thread.rs:956) requires num_turns (>= 1),
+// not a target ID. numTurns < 1 is clamped to 1.
+func (m *CodexAppServerManager) RollbackThread(threadID string, numTurns uint32) (json.RawMessage, error) {
+	if numTurns < 1 {
+		numTurns = 1
 	}
-	resp, err := m.Call("thread/rollback", params)
+	resp, err := m.Call("thread/rollback", map[string]any{
+		"threadId": threadID,
+		"numTurns": numTurns,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: thread/rollback: %w", err)
 	}
@@ -708,26 +715,31 @@ func (m *CodexAppServerManager) RollbackThread(threadID, targetID string) (json.
 
 // ─── Turn Control ──────────────────────────────────────────────────────────
 
-// SteerTurn steers the current turn of a thread with an instruction and optional
-// steering parameters. The steering map is omitted from params if nil or empty.
-func (m *CodexAppServerManager) SteerTurn(threadID, instruction string, steering map[string]any) (json.RawMessage, error) {
-	params := map[string]any{
-		"threadId":    threadID,
-		"instruction": instruction,
-	}
-	if len(steering) > 0 {
-		params["steering"] = steering
-	}
-	resp, err := m.Call("turn/steer", params)
+// SteerTurn injects mid-turn input into the active turn of a thread.
+// Upstream TurnSteerParams (turn.rs:160) requires input (Vec<UserInput>) and
+// expectedTurnId (the currently-active turn; the request fails if it does not
+// match). The text is wrapped as a single UserInput text item.
+func (m *CodexAppServerManager) SteerTurn(threadID, expectedTurnID, text string) (json.RawMessage, error) {
+	resp, err := m.Call("turn/steer", map[string]any{
+		"threadId":       threadID,
+		"expectedTurnId": expectedTurnID,
+		"input": []map[string]any{
+			{"type": "text", "text": text},
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: turn/steer: %w", err)
 	}
 	return resp, nil
 }
 
-// InterruptTurn interrupts the currently running turn in the specified thread.
-func (m *CodexAppServerManager) InterruptTurn(threadID string) error {
-	err := m.Notify("turn/interrupt", map[string]any{"threadId": threadID})
+// InterruptTurn interrupts the running turn in the specified thread.
+// Upstream TurnInterruptParams (turn.rs:188) requires both threadId and turnId.
+func (m *CodexAppServerManager) InterruptTurn(threadID, turnID string) error {
+	err := m.Notify("turn/interrupt", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+	})
 	if err != nil {
 		return fmt.Errorf("codex-app-server: turn/interrupt: %w", err)
 	}
@@ -736,9 +748,14 @@ func (m *CodexAppServerManager) InterruptTurn(threadID string) error {
 
 // ─── Environment ───────────────────────────────────────────────────────────
 
-// AddEnvironment adds environment variables to the app-server process.
-func (m *CodexAppServerManager) AddEnvironment(vars map[string]string) error {
-	err := m.Notify("environment/add", map[string]any{"variables": vars})
+// AddEnvironment registers a remote execution environment with the app-server.
+// Upstream EnvironmentAddParams (environment.rs:9) requires environmentId and
+// execServerUrl — it is not a key/value env-var setter.
+func (m *CodexAppServerManager) AddEnvironment(environmentID, execServerURL string) error {
+	err := m.Notify("environment/add", map[string]any{
+		"environmentId": environmentID,
+		"execServerUrl": execServerURL,
+	})
 	if err != nil {
 		return fmt.Errorf("codex-app-server: environment/add: %w", err)
 	}
@@ -756,21 +773,27 @@ func (m *CodexAppServerManager) ListMCPServerStatus() (json.RawMessage, error) {
 	return resp, nil
 }
 
-// ReadMCPResource reads a resource from a configured MCP server by URI.
-func (m *CodexAppServerManager) ReadMCPResource(uri string) (json.RawMessage, error) {
-	resp, err := m.Call("mcpServer/resource/read", map[string]any{"uri": uri})
+// ReadMCPResource reads a resource from a configured MCP server.
+// Upstream McpResourceReadParams (mcp.rs:77) requires both server and uri.
+func (m *CodexAppServerManager) ReadMCPResource(server, uri string) (json.RawMessage, error) {
+	resp, err := m.Call("mcpServer/resource/read", map[string]any{
+		"server": server,
+		"uri":    uri,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: mcpServer/resource/read: %w", err)
 	}
 	return resp, nil
 }
 
-// CallMCPTool invokes a tool on a configured MCP server. The args map is
-// omitted from params if nil.
-func (m *CodexAppServerManager) CallMCPTool(serverName, toolName string, args map[string]any) (json.RawMessage, error) {
+// CallMCPTool invokes a tool on a configured MCP server.
+// Upstream McpServerToolCallParams (mcp.rs:94) requires threadId, server, tool;
+// arguments is optional. The args map is omitted from params if nil.
+func (m *CodexAppServerManager) CallMCPTool(threadID, server, tool string, args map[string]any) (json.RawMessage, error) {
 	params := map[string]any{
-		"serverName": serverName,
-		"toolName":   toolName,
+		"threadId": threadID,
+		"server":   server,
+		"tool":     tool,
 	}
 	if args != nil {
 		params["arguments"] = args
@@ -782,18 +805,20 @@ func (m *CodexAppServerManager) CallMCPTool(serverName, toolName string, args ma
 	return resp, nil
 }
 
-// RefreshMCPServer triggers a reload of the specified MCP server configuration.
-func (m *CodexAppServerManager) RefreshMCPServer(serverName string) error {
-	err := m.Notify("config/mcpServer/reload", map[string]any{"serverName": serverName})
+// RefreshMCPServer reloads the global MCP server registry.
+// Upstream McpServerRefresh (common.rs:874) takes no params (undefined/None).
+func (m *CodexAppServerManager) RefreshMCPServer() error {
+	err := m.Notify("config/mcpServer/reload", nil)
 	if err != nil {
 		return fmt.Errorf("codex-app-server: config/mcpServer/reload: %w", err)
 	}
 	return nil
 }
 
-// MCPServerOAuthLogin initiates an OAuth login flow for the specified MCP server.
-func (m *CodexAppServerManager) MCPServerOAuthLogin(serverName string) (json.RawMessage, error) {
-	resp, err := m.Call("mcpServer/oauth/login", map[string]any{"serverName": serverName})
+// MCPServerOAuthLogin initiates an OAuth login flow for the named MCP server.
+// Upstream McpServerOauthLoginParams (mcp.rs:187) uses "name", not "serverName".
+func (m *CodexAppServerManager) MCPServerOAuthLogin(name string) (json.RawMessage, error) {
+	resp, err := m.Call("mcpServer/oauth/login", map[string]any{"name": name})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: mcpServer/oauth/login: %w", err)
 	}
@@ -802,9 +827,13 @@ func (m *CodexAppServerManager) MCPServerOAuthLogin(serverName string) (json.Raw
 
 // ─── Review ────────────────────────────────────────────────────────────────
 
-// StartReview initiates a code review session with the given target.
-func (m *CodexAppServerManager) StartReview(target map[string]any) (json.RawMessage, error) {
-	resp, err := m.Call("review/start", map[string]any{"target": target})
+// StartReview initiates a code review on the given thread.
+// Upstream ReviewStartParams (review.rs:17) requires both threadId and target.
+func (m *CodexAppServerManager) StartReview(threadID string, target map[string]any) (json.RawMessage, error) {
+	resp, err := m.Call("review/start", map[string]any{
+		"threadId": threadID,
+		"target":   target,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: review/start: %w", err)
 	}
