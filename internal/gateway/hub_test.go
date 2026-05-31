@@ -1172,3 +1172,45 @@ func TestHub_HandleHTTP_RejectsInvalidAPIKey(t *testing.T) {
 	require.Error(t, err, "dial should fail with wrong API key")
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
+
+// TestHub_SendToSession_PlatformConnOwnerID verifies that json:"-" fields
+// (specifically OwnerID) survive the Hub routing pipeline when delivering
+// to platform conns. Regression test: routeMessage's pre-encode path used
+// EncodeJSON which omits json:"-" fields, causing pcEntry to decode an
+// envelope with OwnerID="" — breaking permission request interactions.
+func TestHub_SendToSession_PlatformConnOwnerID(t *testing.T) {
+	t.Parallel()
+
+	h := newTestHub(t)
+	pc := &mockPlatformConn{}
+	h.JoinPlatformSession("s1", pc)
+
+	env := &events.Envelope{
+		Version:   events.Version,
+		ID:        "test-id-1",
+		SessionID: "s1",
+		Seq:       1,
+		Timestamp: time.Now().UnixMilli(),
+		OwnerID:   "ou_test_owner_12345",
+		Event: events.Event{
+			Type: events.PermissionRequest,
+			Data: events.PermissionRequestData{
+				ID:       "req-0",
+				ToolName: "edit",
+			},
+		},
+	}
+
+	err := h.SendToSession(context.Background(), env)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return len(pc.envelopes()) > 0
+	}, 2*time.Second, 10*time.Millisecond, "platform conn should receive the envelope")
+
+	received := pc.envelopes()[0]
+	require.Equal(t, "ou_test_owner_12345", received.OwnerID,
+		"OwnerID must survive Hub routing to platform conn")
+	require.Equal(t, events.PermissionRequest, received.Event.Type)
+	require.Equal(t, "s1", received.SessionID)
+}
