@@ -474,20 +474,20 @@ var _ worker.ControlRequester = (*AppServerWorker)(nil)
 type AppServerWorker struct {
 	*base.BaseWorker
 
-	manager     *CodexAppServerManager
-	threadID    string
-	turnID      string
-	userID      string
-	crashSub    <-chan struct{}
-	doneCh      chan struct{}
-	mu          sync.Mutex
-	recvCh      chan *events.Envelope
-	commands    *ServerCommander
-	closed      bool
-	released    bool
-	started     bool
-	sessionID   string
-	conn        *appConn
+	manager   *CodexAppServerManager
+	threadID  string
+	turnID    string
+	userID    string
+	crashSub  <-chan struct{}
+	doneCh    chan struct{}
+	mu        sync.Mutex
+	recvCh    chan *events.Envelope
+	commands  *ServerCommander
+	closed    bool
+	released  bool
+	started   bool
+	sessionID string
+	conn      *appConn
 
 	// origSession preserves the SessionInfo from the most recent Start()
 	// call so that ResetContext can re-establish a fresh thread after cleanup.
