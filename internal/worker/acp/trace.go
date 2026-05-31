@@ -28,7 +28,7 @@ func NewTraceWriter(dir, sessionID string) (*TraceWriter, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("acp trace: create dir: %w", err)
 	}
-	path := filepath.Join(dir, "acp-trace-"+sessionID+".jsonl")
+	path := filepath.Join(dir, "acp-trace-"+filepath.Base(sessionID)+".jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("acp trace: open file: %w", err)

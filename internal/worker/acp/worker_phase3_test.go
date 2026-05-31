@@ -20,6 +20,9 @@ import (
 // ─── EX-01: InitConfig Args/Debug ───────────────────────────────────────────
 
 func TestInitConfig_ArgsStored(t *testing.T) {
+	t.Cleanup(func() {
+		InitConfig(config.ACPConfig{Command: "hermes acp"})
+	})
 
 	InitConfig(config.ACPConfig{
 		Command:     "test-agent serve",
@@ -35,20 +38,17 @@ func TestInitConfig_ArgsStored(t *testing.T) {
 	require.Equal(t, []string{"--model", "gpt-4"}, ca)
 
 	require.True(t, debugEnabled.Load())
-
-	// Restore defaults.
-	InitConfig(config.ACPConfig{Command: "hermes acp"})
 }
 
 func TestInitConfig_DefaultCommand(t *testing.T) {
+	t.Cleanup(func() {
+		InitConfig(config.ACPConfig{Command: "hermes acp"})
+	})
 
 	InitConfig(config.ACPConfig{Command: ""})
 
 	parts, _ := commandParts.Load().([]string)
 	require.Equal(t, []string{"hermes", "acp"}, parts)
-
-	// Restore defaults.
-	InitConfig(config.ACPConfig{Command: "hermes acp"})
 }
 
 // ─── EX-02: Protocol Version Warning ────────────────────────────────────────
@@ -119,16 +119,28 @@ func TestTraceWriter_Rotation(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tw.Close() })
 
-	// Write enough data to exceed 100 bytes.
+	// Use a small threshold to actually trigger rotation.
+	tw.maxSize = 500
+
+	// Write enough data to exceed the threshold.
 	for i := 0; i < 50; i++ {
 		tw.Log("→", map[string]string{"method": "session/prompt", "content": strings.Repeat("x", 100)})
 	}
 	require.NoError(t, tw.Close())
 
-	// Verify file exists and has content.
+	// Verify rotation produced a .1 backup file.
+	rotated := tw.Path() + ".1"
+	_, err = os.Stat(rotated)
+	require.NoError(t, err, "rotated backup file should exist")
+
+	rotatedData, err := os.ReadFile(rotated)
+	require.NoError(t, err)
+	require.True(t, len(rotatedData) > 0, "rotated file should have content")
+
+	// Current file should also have content (new entries after rotation).
 	data, err := os.ReadFile(tw.Path())
 	require.NoError(t, err)
-	require.True(t, len(data) > 100, "trace file should have data")
+	require.True(t, len(data) > 0, "current trace file should have content")
 }
 
 func TestTraceWriter_DebugDisabledByDefault(t *testing.T) {
@@ -137,7 +149,7 @@ func TestTraceWriter_DebugDisabledByDefault(t *testing.T) {
 	require.False(t, debugEnabled.Load())
 }
 
-// ─── FR-08: ForkSession ───────────────────────────────
+// ─── FR-08: ForkSession ───────────────────────────────────────
 
 func TestClient_ForkSession_Success(t *testing.T) {
 	t.Parallel()
@@ -292,6 +304,9 @@ func TestJSONSchema_SchemaOnly_NoSystemPrompt(t *testing.T) {
 // ─── EX-01: Config Args Merging ─────────────────────────────────────────────
 
 func TestInitConfig_ArgsMergeOrder(t *testing.T) {
+	t.Cleanup(func() {
+		InitConfig(config.ACPConfig{Command: "hermes acp"})
+	})
 
 	// Set config-level args.
 	InitConfig(config.ACPConfig{
@@ -305,9 +320,6 @@ func TestInitConfig_ArgsMergeOrder(t *testing.T) {
 	// Verify commandParts are correct.
 	parts, _ := commandParts.Load().([]string)
 	require.Equal(t, []string{"agent", "run"}, parts)
-
-	// Restore defaults.
-	InitConfig(config.ACPConfig{Command: "hermes acp"})
 }
 
 // ─── U-04: TraceWriter Concurrent Writes ────────────────────────────────────

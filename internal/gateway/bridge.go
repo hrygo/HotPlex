@@ -630,7 +630,8 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		ACPCommand:      si.PlatformKey[worker.ACPCommandPlatformKey],
 		ForkSession:     si.PlatformKey[worker.ForkSessionPlatformKey] == "true",
 		JSONSchema:      si.PlatformKey[worker.JSONSchemaPlatformKey],
-		// TODO: wire ForkSession/JSONSchema from platform adapters in UX follow-up.
+		// TODO: platform adapters (Slack/Feishu) need to populate ForkSession/JSONSchema
+		// into PlatformKey for this wiring to take effect; tracked in UX follow-up.
 	}
 
 	// MCP config injection — 3 scenarios:

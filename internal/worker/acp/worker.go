@@ -314,15 +314,12 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Initialize protocol trace if debug mode is enabled.
 	if debugEnabled.Load() {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			tw, err := NewTraceWriter(filepath.Join(home, ".hotplex", "logs"), session.SessionID)
-			if err != nil {
-				w.Log.Warn("acp: failed to create trace file", "error", err)
-			} else {
-				w.trace.Store(tw)
-				w.Log.Info("acp: protocol trace enabled", "path", tw.Path())
-			}
+		tw, err := NewTraceWriter(filepath.Join(config.HotplexHome(), "logs"), session.SessionID)
+		if err != nil {
+			w.Log.Warn("acp: failed to create trace file", "error", err)
+		} else {
+			w.trace.Store(tw)
+			w.Log.Info("acp: protocol trace enabled", "path", tw.Path())
 		}
 	}
 
@@ -332,6 +329,16 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	mcpServers := parseMCPServers(session.MCPConfig)
 	w.mcpServers = mcpServers // cache for Clear()
+	// forceNewSession creates a fresh session, killing the process on failure.
+	forceNewSession := func() (string, error) {
+		sess, err := client.NewSession(sctx, session.ProjectDir, mcpServers)
+		if err != nil {
+			_ = w.Proc.Kill()
+			return "", fmt.Errorf("acp: new session: %w", err)
+		}
+		return sess.SessionID, nil
+	}
+
 	var acpSessID string
 	var historyLost bool
 	if session.WorkerSessionID != "" {
@@ -341,12 +348,11 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			if forkErr != nil {
 				w.Log.Warn("acp: session fork failed, falling back to new session",
 					"session_id", session.SessionID, "error", forkErr)
-				newSess, newErr := client.NewSession(sctx, session.ProjectDir, mcpServers)
-				if newErr != nil {
-					_ = w.Proc.Kill()
-					return fmt.Errorf("acp: new session: %w", newErr)
+				id, err := forceNewSession()
+				if err != nil {
+					return err
 				}
-				acpSessID = newSess.SessionID
+				acpSessID = id
 				historyLost = true
 			} else {
 				acpSessID = forkResult.SessionID
@@ -359,32 +365,29 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 					"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID,
 					"error", loadErr,
 					"hint", "check agent session storage and persistence")
-				newSess, newErr := client.NewSession(sctx, session.ProjectDir, mcpServers)
-				if newErr != nil {
-					_ = w.Proc.Kill()
-					return fmt.Errorf("acp: new session: %w", newErr)
+				id, err := forceNewSession()
+				if err != nil {
+					return err
 				}
-				acpSessID = newSess.SessionID
+				acpSessID = id
 				historyLost = true
 			} else {
 				acpSessID = sessResult.SessionID
 			}
 		} else {
 			// Agent does not support loadSession; create fresh.
-			sessResult, sessErr := client.NewSession(sctx, session.ProjectDir, mcpServers)
-			if sessErr != nil {
-				_ = w.Proc.Kill()
-				return fmt.Errorf("acp: new session: %w", sessErr)
+			id, err := forceNewSession()
+			if err != nil {
+				return err
 			}
-			acpSessID = sessResult.SessionID
+			acpSessID = id
 		}
 	} else {
-		sessResult, sessErr := client.NewSession(sctx, session.ProjectDir, mcpServers)
-		if sessErr != nil {
-			_ = w.Proc.Kill()
-			return fmt.Errorf("acp: new session: %w", sessErr)
+		id, err := forceNewSession()
+		if err != nil {
+			return err
 		}
-		acpSessID = sessResult.SessionID
+		acpSessID = id
 	}
 	w.SetWorkerSessionID(acpSessID)
 
