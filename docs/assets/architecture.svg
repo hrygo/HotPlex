@@ -67,7 +67,6 @@
   <circle cx="400" cy="90" r="120" fill="#06b6d4" opacity="0.03" filter="url(#glow-cyan)" />
 
   <!-- ==================== CONNECTOR LINES ==================== -->
-  
   <!-- Clients to Gateway Lines (Cyan Theme) -->
   <!-- Glowing back-lines -->
   <path d="M 170 125 C 170 170, 300 170, 300 195" fill="none" stroke="#22d3ee" stroke-width="4" opacity="0.2" filter="url(#glow-cyan)" />
@@ -75,9 +74,9 @@
   <path d="M 630 125 C 630 170, 500 170, 500 195" fill="none" stroke="#22d3ee" stroke-width="4" opacity="0.2" filter="url(#glow-cyan)" />
   
   <!-- Sharp front-lines -->
-  <path d="M 170 125 C 170 170, 300 170, 300 195" fill="none" stroke="url(#grad-client)" stroke-width="1.8" />
-  <path d="M 400 125 L 400 195" fill="none" stroke="url(#grad-client)" stroke-width="1.8" />
-  <path d="M 630 125 C 630 170, 500 170, 500 195" fill="none" stroke="url(#grad-client)" stroke-width="1.8" />
+  <path d="M 170 125 C 170 170, 300 170, 300 195" fill="none" stroke="#22d3ee" stroke-width="1.8" />
+  <path d="M 400 125 L 400 195" fill="none" stroke="#22d3ee" stroke-width="1.8" />
+  <path d="M 630 125 C 630 170, 500 170, 500 195" fill="none" stroke="#22d3ee" stroke-width="1.8" />
 
   <!-- Gateway to Workers Lines (Purple/Indigo Theme) -->
   <!-- Glowing back-lines -->
@@ -101,10 +100,6 @@
   <circle cx="335" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
   <circle cx="459" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
   <circle cx="582" cy="405" r="3" fill="#c084fc" filter="url(#glow-purple)" />
-
-  <!-- Data Channel Labels -->
-  <rect x="415" y="146" width="70" height="15" rx="7.5" fill="#0c111d" stroke="#1e293b" stroke-width="1" />
-  <text x="450" y="156" fill="#22d3ee" font-size="7.5" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">AEP v1 (WS)</text>
 
   <!-- ==================== TOP LAYER: CLIENTS ==================== -->
   
