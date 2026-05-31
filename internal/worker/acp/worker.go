@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
@@ -275,6 +276,9 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		acpSessID = sessResult.SessionID
 	}
 	w.SetWorkerSessionID(acpSessID)
+
+	// Record handshake latency.
+	metrics.ACPHandshakeDuration.Observe(time.Since(now).Seconds())
 
 	// Create mapper.
 	mapper := w.testMapper
@@ -566,8 +570,10 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 	var outcome any
 	if allowed {
 		outcome = pm.FormatAllowedOutcome()
+		metrics.ACPPermissionRequestsTotal.WithLabelValues("approved").Inc()
 	} else {
 		outcome = pm.FormatDeniedOutcome()
+		metrics.ACPPermissionRequestsTotal.WithLabelValues("denied").Inc()
 	}
 
 	return w.client.RespondPermission(ctx, pm.RequestID, outcome)
@@ -637,6 +643,7 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 		// Check auto-approve.
 		if val, _ := autoApprove.Load().(bool); val {
 			_ = w.client.RespondPermission(ctx, req.ID, pm.FormatAllowedOutcome())
+			metrics.ACPPermissionRequestsTotal.WithLabelValues("approved").Inc()
 			return
 		}
 

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/hrygo/hotplex/internal/metrics"
+
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -286,6 +288,14 @@ func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
 		Kind:      u.Kind,
 		Locations: locations,
 	}
+
+	// Record Prometheus tool call metric.
+	toolKind := u.Kind
+	if toolKind == "" {
+		toolKind = "other"
+	}
+	metrics.ACPToolCallsTotal.WithLabelValues(toolKind).Inc()
+
 	return []*events.Envelope{m.newEnvelope(events.ToolCall, data)}
 }
 
@@ -527,6 +537,23 @@ func (m *ACPMapper) updateUsage(raw json.RawMessage) {
 		}
 		s.Cost.Amount += u.Cost.Amount
 		s.Cost.Currency = u.Cost.Currency
+	}
+
+	// Record Prometheus token metrics.
+	if u.InputTokens > 0 {
+		metrics.ACPPromptTokensTotal.WithLabelValues("input").Add(float64(u.InputTokens))
+	}
+	if u.OutputTokens > 0 {
+		metrics.ACPPromptTokensTotal.WithLabelValues("output").Add(float64(u.OutputTokens))
+	}
+	if u.ThoughtTokens > 0 {
+		metrics.ACPPromptTokensTotal.WithLabelValues("thought").Add(float64(u.ThoughtTokens))
+	}
+	if u.CachedReadTokens > 0 {
+		metrics.ACPPromptTokensTotal.WithLabelValues("cached_read").Add(float64(u.CachedReadTokens))
+	}
+	if u.CachedWriteTokens > 0 {
+		metrics.ACPPromptTokensTotal.WithLabelValues("cached_write").Add(float64(u.CachedWriteTokens))
 	}
 }
 
