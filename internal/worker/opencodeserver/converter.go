@@ -440,7 +440,22 @@ func contentToString(content []any) string {
 	}
 	parts := make([]string, 0, len(content))
 	for _, c := range content {
-		parts = append(parts, fmt.Sprintf("%v", c))
+		parts = append(parts, contentPartToString(c))
 	}
 	return strings.Join(parts, "\n")
+}
+
+func contentPartToString(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case nil:
+		return ""
+	default:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return string(b)
+	}
 }

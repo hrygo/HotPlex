@@ -478,13 +478,14 @@ type AppServerWorker struct {
 	threadID    string
 	turnID      string
 	userID      string
-	releaseOnce sync.Once
 	crashSub    <-chan struct{}
 	doneCh      chan struct{}
 	mu          sync.Mutex
 	recvCh      chan *events.Envelope
 	commands    *ServerCommander
 	closed      bool
+	released    bool
+	started     bool
 	sessionID   string
 	conn        *appConn
 
@@ -546,10 +547,11 @@ func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string
 
 func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
-	if w.recvCh != nil {
+	if w.started {
 		w.mu.Unlock()
 		return fmt.Errorf("codexcli: app-server already started")
 	}
+	w.started = true
 
 	if w.doneCh == nil {
 		w.doneCh = make(chan struct{})
@@ -661,7 +663,7 @@ func (w *AppServerWorker) cleanupOldThread() {
 func (w *AppServerWorker) resetLifecycleState() {
 	w.mu.Lock()
 	w.closed = false
-	w.releaseOnce = sync.Once{}
+	w.released = false
 	if w.doneCh == nil {
 		w.doneCh = make(chan struct{})
 	}
@@ -758,36 +760,35 @@ func (w *AppServerWorker) Wait() (int, error) {
 }
 
 func (w *AppServerWorker) release() {
-	w.releaseOnce.Do(func() {
-		w.mu.Lock()
-		if w.closed {
-			w.mu.Unlock()
-			return
-		}
-		w.closed = true
-		doneCh := w.doneCh
-		w.doneCh = nil
-		tid := w.threadID
+	w.mu.Lock()
+	if w.released || w.closed {
 		w.mu.Unlock()
+		return
+	}
+	w.released = true
+	w.closed = true
+	doneCh := w.doneCh
+	w.doneCh = nil
+	tid := w.threadID
+	w.mu.Unlock()
 
-		if doneCh != nil {
-			close(doneCh)
-		}
+	if doneCh != nil {
+		close(doneCh)
+	}
 
-		if w.manager != nil && tid != "" {
-			_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
-				ThreadID: tid,
-			})
-			w.manager.Unsubscribe(tid)
-			// Close recvCh so forwardEvents exits its range loop.
-			// Must happen after Unsubscribe (removes from dispatch map) to
-			// avoid racing with in-flight dispatchNotification sends.
-			if w.conn != nil {
-				_ = w.conn.Close()
-			}
-			w.manager.Release()
+	if w.manager != nil && tid != "" {
+		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
+			ThreadID: tid,
+		})
+		w.manager.Unsubscribe(tid)
+		// Close recvCh so forwardEvents exits its range loop.
+		// Must happen after Unsubscribe (removes from dispatch map) to
+		// avoid racing with in-flight dispatchNotification sends.
+		if w.conn != nil {
+			_ = w.conn.Close()
 		}
-	})
+		w.manager.Release()
+	}
 }
 
 func (w *AppServerWorker) ResetContext(ctx context.Context) error {

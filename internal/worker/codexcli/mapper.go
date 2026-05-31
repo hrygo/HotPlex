@@ -3,6 +3,7 @@ package codexcli
 import (
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -214,10 +215,17 @@ func codexFileChangeToToolCall(item *CodexItem) (string, map[string]any) {
 	if item.Action == "create" {
 		name = "Write"
 	}
+	// Sort file paths for deterministic output on multi-file changes.
+	paths := make([]string, 0, len(item.Changes))
 	for fp := range item.Changes {
-		return name, map[string]any{"file_path": fp}
+		paths = append(paths, fp)
 	}
-	return name, map[string]any{"file_path": ""}
+	slices.Sort(paths)
+	fp := ""
+	if len(paths) > 0 {
+		fp = paths[0]
+	}
+	return name, map[string]any{"file_path": fp}
 }
 
 func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {
