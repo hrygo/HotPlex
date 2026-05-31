@@ -476,7 +476,8 @@ func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {
 		stats["context_used"] = m.usage.ContextUsed
 	}
 	if m.usage.Cost != nil && m.usage.Cost.Amount > 0 {
-		stats["cost"] = m.usage.Cost
+		costCopy := *m.usage.Cost
+		stats["cost"] = &costCopy
 	}
 	m.usageMu.Unlock()
 
@@ -547,8 +548,13 @@ func (m *ACPMapper) updateUsage(raw json.RawMessage) {
 // LastUsage returns a copy of the current usage snapshot for ControlRequester queries.
 func (m *ACPMapper) LastUsage() usageSnapshot {
 	m.usageMu.Lock()
-	defer m.usageMu.Unlock()
-	return m.usage
+	snap := m.usage
+	m.usageMu.Unlock()
+	if snap.Cost != nil {
+		cp := *snap.Cost
+		snap.Cost = &cp
+	}
+	return snap
 }
 
 func extractToolName(raw json.RawMessage) string {

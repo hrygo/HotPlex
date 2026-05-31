@@ -539,11 +539,17 @@ func (w *Worker) handleContextUsage() (map[string]any, error) {
 }
 
 func (w *Worker) handleSetModel(ctx context.Context, body map[string]any) (map[string]any, error) {
-	modelID, _ := body["modelId"].(string)
+	modelID, _ := body["model"].(string)
 	if modelID == "" {
-		return nil, fmt.Errorf("acp: set_model: missing modelId")
+		return nil, fmt.Errorf("acp: set_model: missing model")
 	}
-	if err := w.client.SetSessionModel(ctx, w.GetWorkerSessionID(), modelID); err != nil {
+	w.Mu.Lock()
+	client := w.client
+	w.Mu.Unlock()
+	if client == nil {
+		return nil, fmt.Errorf("acp: set_model: worker not started")
+	}
+	if err := client.SetSessionModel(ctx, w.GetWorkerSessionID(), modelID); err != nil {
 		return nil, fmt.Errorf("acp: set_model: %w", err)
 	}
 	return map[string]any{"model": modelID}, nil
@@ -583,7 +589,13 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 		metrics.ACPPermissionRequestsTotal.WithLabelValues("denied").Inc()
 	}
 
-	return w.client.RespondPermission(ctx, pm.RequestID, outcome)
+	w.Mu.Lock()
+	client := w.client
+	w.Mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("acp: permission response: worker not started")
+	}
+	return client.RespondPermission(ctx, pm.RequestID, outcome)
 }
 
 func (w *Worker) HandleQuestionResponse(_ context.Context, _ string, _ map[string]string) error {
