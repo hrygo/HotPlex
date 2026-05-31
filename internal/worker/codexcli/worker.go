@@ -64,7 +64,6 @@ type Config struct {
 	Ephemeral        bool
 	Personality      string
 	StartupTimeout   time.Duration
-	CallTimeout      time.Duration
 	Color            bool
 	OutputFile       string
 	StrictConfig     bool
@@ -124,7 +123,6 @@ func resolveConfig() Config {
 		Ephemeral:        gc.Ephemeral,
 		Personality:      gc.Personality,
 		StartupTimeout:   gc.StartupTimeout,
-		CallTimeout:      gc.CallTimeout,
 		Color:            gc.Color,
 		OutputFile:       gc.OutputFile,
 		StrictConfig:     gc.StrictConfig,
@@ -487,7 +485,6 @@ type AppServerWorker struct {
 	recvCh      chan *events.Envelope
 	commands    *ServerCommander
 	closed      bool
-	started     bool
 	sessionID   string
 	conn        *appConn
 
@@ -553,10 +550,6 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 		w.mu.Unlock()
 		return fmt.Errorf("codexcli: app-server already started")
 	}
-	// Sentinel: mark started under lock to close TOCTOU window between
-	// unlock and re-lock. Bridge serializes Start per session, but this
-	// is defensive against future callers.
-	w.started = true
 
 	if w.doneCh == nil {
 		w.doneCh = make(chan struct{})
