@@ -68,16 +68,26 @@ AI-native 定时任务：scheduler、timerLoop、SQLite 持久化、平台投递
 
 ## Messaging (`internal/messaging/`)
 
-消息适配器基类、Slack Socket Mode、飞书 WS、STT/TTS、权限交互。
+消息适配器基类、Slack Socket Mode、飞书 WS、元芯平台适配器、独立 STT/TTS 模块、工具调用格式化、权限交互。
+
+| 子模块 | 职责 |
+|--------|------|
+| feishu/ | 飞书 WS 适配器 + STT + 卡片模板 |
+| slack/ | Slack Socket Mode 适配器 |
+| yuanxin/ | 元芯平台适配器 |
+| stt/ | 独立语音转文字模块 |
+| tts/ | Edge-TTS 语音合成 + FFmpeg Opus 转换 |
+| toolfmt/ | 工具调用格式化 |
+| phrases/ | 短语模板 |
 
 → `tutorials/slack-integration.md` — Slack 集成
 → `tutorials/feishu-integration.md` — 飞书集成
 → `guides/user/chat-with-ai.md` — AI 对话指南
 → `guides/user/commands-cheatsheet.md` — 命令速查表
 → `guides/user/mobile-access.md` — 移动端访问
-→ `guides/developer/voice-features.md` — 语音功能
+→ `guides/developer/voice-features.md` — 语音功能（STT/TTS）
 
-**影响规则**：平台适配器变更 → 对应集成教程；新增斜杠命令 → 速查表；TTS/STT → voice-features。
+**影响规则**：平台适配器变更 → 对应集成教程；新增斜杠命令 → 速查表；STT/TTS → voice-features；新增平台适配器 → 对应集成教程。
 
 ---
 
@@ -93,11 +103,23 @@ B/C 通道配置加载、BuildSystemPrompt、三级 fallback、XML 安全。
 
 ## Worker (`internal/worker/`)
 
-Claude Code stdio 适配器、OpenCode Server HTTP+SSE、进程管理。
+多 Agent 适配器 + 共享基座 + 跨平台进程管理。
+
+| 子模块 | 职责 |
+|--------|------|
+| claudecode/ | Claude Code 适配器（stdio, `--print --session-id`） |
+| codexcli/ | Codex CLI 适配器（exec + app-server 双模式） |
+| opencodeserver/ | Open Code Server 适配器（单例进程, HTTP+SSE） |
+| acp/ | ACP 通用适配器（JSON-RPC 2.0 over stdio，支持任何 ACP 兼容 Agent） |
+| base/ | 共享 BaseWorker + Conn + MetadataHandler |
+| proc/ | 跨平台进程生命周期管理（PGID/Job Object） |
 
 → `guides/developer/remote-coding-agent.md` — 远程开发指南
 → `guides/developer/multiple-agents.md` — 多 Agent 协作
 → `guides/enterprise/resource-limits.md` — 资源限制
+→ `reference/configuration.md` — Worker 类型配置（command、环境变量）
+
+**影响规则**：适配器行为变更 → 对应指南；新增 Worker 类型 → multiple-agents + configuration.md；进程管理变更 → remote-coding-agent。
 
 ---
 

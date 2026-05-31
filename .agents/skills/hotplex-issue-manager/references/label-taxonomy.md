@@ -10,17 +10,19 @@ CURRENT_USER=$(gh api user --jq '.login')
 [ "$REPO_OWNER" = "$CURRENT_USER" ] && echo "ADMIN" || echo "NOT_ADMIN"
 ```
 
-## 标签体系（6 类 27 个标签）
+## 标签体系（6 类 40+ 个标签）
 
 **类型**（选一个）：`bug` | `enhancement` | `documentation` | `performance` | `refactor` | `security`
 
-**优先级**（ROI 计算后分配）：`P1`（关键 ROI≥50）| `P2`（高 ROI 30-49）| `P3`（中 ROI 15-29）
+**优先级**（ROI 计算后分配）：`P0`（紧急 ROI≥80）| `P1`（关键 ROI≥50）| `P2`（高 ROI 30-49）| `P3`（中 ROI 15-29）
 
 **领域**（可多选）：`architecture` | `race-condition` | `goroutine` | `resource-leak` | `reliability` | `DoS`
 
-**模块**（可多选）：`area/gateway` | `area/session` | `area/messaging` | `area/worker` | `area/cli` | `area/webchat` | `area/config` | `area/updater`
+**模块**（可多选）：`area/gateway` | `area/session` | `area/messaging` | `area/worker` | `area/cli` | `area/webchat` | `area/config` | `area/updater` | `area/cron` | `area/brain` | `area/security` | `area/admin` | `area/metrics` | `area/eventstore` | `area/agentconfig` | `area/skills` | `area/service` | `area/docs`
 
-**状态**：`needs-triage` | `blocked` | `breaking-change`
+**状态**：`needs-triage` | `blocked` | `breaking-change` | `epic`
+
+**辅助**（非必选）：`good first issue` | `help wanted` | `question`
 
 **关闭原因**：`duplicate` | `wontfix` | `invalid` | `fixed` | `not-reproducible`
 

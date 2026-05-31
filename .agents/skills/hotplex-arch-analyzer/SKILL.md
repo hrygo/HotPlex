@@ -481,8 +481,8 @@ Issue 编号: <ISSUE_NUMBER>
 ### 模块分组
 
 分组紧密耦合的子包：
-- `messaging/slack/` + `messaging/feishu/` + `messaging/stt/` + `messaging/tts/` + `messaging/toolfmt/` → 作为子模块在 `messaging` 下分析
-- `worker/claudecode/` + `worker/opencodeserver/` + `worker/base/` + `worker/proc/` → 在 `worker` 下的子模块
+- `messaging/slack/` + `messaging/feishu/` + `messaging/yuanxin/` + `messaging/stt/` + `messaging/tts/` + `messaging/toolfmt/` → 作为子模块在 `messaging` 下分析
+- `worker/claudecode/` + `worker/codexcli/` + `worker/opencodeserver/` + `worker/acp/` + `worker/base/` + `worker/proc/` → 在 `worker` 下的子模块
 - `cli/checkers/` + `cli/onboard/` + `cli/cron/` + `cli/slack/` → 在 `cli` 下的子模块
 
 父模块（`messaging`、`worker`、`cli`）获得自己的分析通过，涵盖共享代码（bridge、接口、基本类型）。
@@ -492,14 +492,17 @@ Issue 编号: <ISSUE_NUMBER>
 ```
 internal/gateway     — WebSocket hub, conn, handler, bridge, LLM retry, API
 internal/session     — 状态机, store, pool, key derivation
-internal/messaging   — 平台适配器, bridge, interaction, toolfmt
-  internal/messaging/slack   — Slack Socket Mode 适配器
-  internal/messaging/feishu  — 飞书 WS 适配器 + STT
-  internal/messaging/stt     — 语音转文字（FunASR）
-  internal/messaging/tts     — 文字转语音（Edge-TTS / MOSS）
-internal/worker      — 共享 BaseWorker + Conn + MetadataHandler
+internal/messaging   — 平台适配器, bridge, interaction, toolfmt, sanitize, dedup, gate
+  internal/messaging/slack    — Slack Socket Mode 适配器
+  internal/messaging/feishu   — 飞书 WS 适配器 + STT + 卡片模板
+  internal/messaging/yuanxin  — 元芯平台适配器
+  internal/messaging/stt      — 语音转文字（独立 STT 模块）
+  internal/messaging/tts      — 文字转语音（Edge-TTS / FFmpeg Opus 转换）
+internal/worker      — 共享接口 + Worker 注册表 + 跨平台进程管理
   internal/worker/claudecode    — Claude Code stdio 适配器
+  internal/worker/codexcli      — Codex CLI 适配器 (exec + app-server 双模式)
   internal/worker/opencodeserver — OCS 单例进程 + HTTP/SSE 适配器
+  internal/worker/acp           — ACP 通用适配器（JSON-RPC 2.0 over stdio）
   internal/worker/proc          — 跨平台进程生命周期（PGID/Job Object）
 internal/brain       — LLM 客户端装饰器链、意图路由、上下文压缩、安全审计
   internal/brain/llm  — OpenAI/Anthropic 客户端 + retry/cache/ratelimit/circuit
@@ -520,7 +523,7 @@ internal/service     — 跨平台系统服务（systemd/launchd/SCM）
 internal/updater     — 自更新（GitHub API、sha256 校验、原子替换）
 internal/docs        — 自托管文档门户（Markdown → HTML → go:embed）
 internal/webchat     — 嵌入式 Next.js SPA（go:embed）
-internal/sqlutil     — SQLite 驱动（modernc.org/sqlite，纯 Go）
+internal/sqlutil     — SQLite 驱动（modernc.org/sqlite，纯 Go）+ PostgreSQL 驱动（jackc/pgx/v5）
 internal/assets      — 静态资源嵌入
 pkg/events           — AEP 包络 + 事件类型
 pkg/aep              — AEP v1 编解码

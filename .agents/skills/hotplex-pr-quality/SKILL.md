@@ -17,7 +17,7 @@ HotPlex 项目专用的 PR 提交与 CI 达标工作流。
 
 ## HotPlex 架构速查
 
-代码运行在多 channel（Slack/飞书/WebChat）、多 worker（CC/OCS/Pi）、跨平台（Linux/macOS/Windows）环境下，CI 必须三平台通过。
+代码运行在多 channel（Slack/飞书/WebChat/元芯）、多 worker（CC/OCS/CodexCLI/ACP）、跨平台（Linux/macOS/Windows）环境下，CI 必须三平台通过。
 
 架构详情：[references/architecture.md](references/architecture.md)
 
@@ -57,7 +57,7 @@ make lint    # golangci-lint
 
 <footer>
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 **Type**: feat, fix, refactor, perf, test, docs, style, chore
@@ -65,7 +65,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 **Scope**（架构感知，根据 git diff 推断）：
 - Gateway 核心：`gateway`、`session`、`config`、`security`
 - Channel：`messaging/slack`、`messaging/feishu`、`webchat`
-- Worker：`worker/cc`、`worker/ocs`、`worker/pi`
+- Worker：`worker/cc`、`worker/ocs`、`worker/codexcli`、`worker/acp`
 - 平台：`cli`、`service`、`build`
 
 **示例**：
@@ -77,7 +77,7 @@ and use cancellable context for clean shutdown.
 
 Fixes #85
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### 阶段 4：推送代码
@@ -102,8 +102,8 @@ PR 描述模板：
 - Change 1 (影响的 channel/worker/平台)
 
 **架构影响**：
-- Channel: Slack / 飞书 / WebChat / N/A
-- Worker: CC / OCS / Pi / N/A
+- Channel: Slack / 飞书 / WebChat / 元芯 / N/A
+- Worker: CC / OCS / CodexCLI / ACP / N/A
 - 平台: Linux / macOS / Windows / 跨平台
 
 ## Test Plan

@@ -19,7 +19,7 @@ description: HotPlex Gateway 运行时诊断 — 从症状逐层缩小范围到�
 
 为什么先查进程 — 进程不在，后面所有的日志和状态都可能过时。
 
-确认组件存活：Gateway（8888）、WebChat（3000）、Admin（9999）、Worker 子进程（`claude --session-id` / `--resume`）。
+确认组件存活：Gateway（8888）、WebChat（3000）、Admin（9999）、Worker 子进程（`claude --session-id` / `--resume`、`codex`、`opencode-server`、ACP agent via stdio JSON-RPC）。
 
 检查要点：
 - PID 文件（`~/.hotplex/.pids/`）中的 PID 是否对应实际进程 — 不对应说明进程异常退出但系统未清理
@@ -37,7 +37,11 @@ description: HotPlex Gateway 运行时诊断 — 从症状逐层缩小范围到�
 查 `~/.hotplex/data/hotplex.db`，关注：
 - 各状态 session 数量：`SELECT state, COUNT(*) FROM sessions GROUP BY state`
 - 对 running/idle session：进程是否存活？Worker PID 匹配？
-- 对带 `--resume` 的 Worker：Claude Code session 文件（`~/.claude/projects/*/<uuid>.jsonl`）是否存在？
+- Worker session 持久化方式因 worker 类型而异：
+  - Claude Code Worker：`~/.claude/projects/*/<uuid>.jsonl`（JSONL session 文件）
+  - Codex CLI Worker：通过 app-server HTTP API 管理，无本地文件
+  - OCS Worker：单例进程内维护 session 状态
+  - ACP Worker：通过 stdio JSON-RPC 管理，生命周期与子进程绑定
 
 不一致分类（表示系统健康问题的术语）：
 - **ORPHANED**：DB 记录在但进程已死 — 等 GC 自动清理或手动终止记录
@@ -59,6 +63,12 @@ description: HotPlex Gateway 运行时诊断 — 从症状逐层缩小范围到�
 ```
 Worker stdout → readOutput/trySend → forwardEvents → Hub.SendToSession → routeMessage → PlatformConn.WriteCtx
 ```
+
+不同 Worker 的输出格式：
+- **Claude Code**：JSON streaming（`--print` 模式，每行一个 JSON 事件）
+- **Codex CLI**：app-server JSON（exec 模式为 stdout JSON，app-server 模式为 HTTP SSE）
+- **OCS**：HTTP SSE（单例进程，通过 HTTP 接口订阅事件）
+- **ACP**：JSON-RPC 2.0 responses（stdio，`Content-Length` header + JSON body）
 
 每一段都有不同的失败模式和检测方法。
 
@@ -107,6 +117,10 @@ Worker stdout → readOutput/trySend → forwardEvents → Hub.SendToSession →
 **Worker → Bridge**：
 - `recv channel full, dropping` — Worker 产出过快导致事件丢失
 - `trySend conn nil` — 生命周期 race，Worker 已清理但事件还在产出
+- `codexcli:` — Codex CLI Worker 事件（exec / app-server 双模式）
+- `app-server:` — Codex app-server 连接/重连
+- `markdown table parser` — Codex markdown 表格解析（panic 恢复）
+- `acp:` / `json-rpc:` — ACP Worker JSON-RPC 通信
 
 **Bridge → Hub**：
 - `bridge: handling dropped deltas before done` — Hub 层 delta 丢弃的关键指标，Done 事件会标记 dropped=true
@@ -126,6 +140,9 @@ Worker stdout → readOutput/trySend → forwardEvents → Hub.SendToSession →
 - `feishu: streaming integrity check failed` — 确认内容丢失（>10% 缺失），只在 `final_flush_ok=false` 时需关注
 - `feishu: streaming write failed, falling back to static` — 流式失败降级为静态消息
 - `feishu: IM patch flush failed` — 降级路径也失败
+- `cardkit:` — CardKit 流式卡片渲染层（渲染异常、flush 失败）
+- `feishu: streaming card` — 飞书流式卡片生命周期事件
+- `yuanxin:` — 元芯平台适配器事件（连接/断连/消息投递）
 
 **状态机异常**：
 - `terminated.*terminated` — 重复终止，GC 和 crash cleanup 之间的 race
@@ -157,11 +174,18 @@ TCP 连接数持续增长不回落暗示泄漏 — 可以用 `lsof -iTCP` 对比
 | Session 管理 | `internal/session/manager.go` | 5 状态机、GC |
 | Worker 生命周期 | `internal/gateway/bridge.go` | start/resume/crash/fallback、forwardEvents |
 | Claude Code Worker | `internal/worker/claudecode/worker.go` | readOutput、trySend、last_io |
+| Codex CLI Worker | `internal/worker/codexcli/worker.go` | Codex exec + app-server 双模式、markdown table parser |
+| ACP Worker | `internal/worker/acp/worker.go` | JSON-RPC 2.0 over stdio 通用适配器 |
 | 事件分发 | `internal/gateway/hub.go` | SendToSession、routeMessage、背压 |
+| 事件编解码 | `pkg/aep/` | AEP v1 编解码 |
 | 平台写缓冲 | `internal/gateway/platform_writer.go` | delta 合并、DropThreshold |
 | 飞书适配器 | `internal/messaging/feishu/adapter.go` | streaming card、WriteCtx |
 | 飞书流式 | `internal/messaging/feishu/streaming.go` | CardKit flush、TTL、完整性 |
+| 飞书流式卡片区 | `internal/messaging/feishu/cardkit/` | CardKit 流式卡片渲染 |
 | Slack 适配器 | `internal/messaging/slack/adapter.go` | Socket Mode、streaming writer |
+| 元芯适配器 | `internal/messaging/yuanxin/adapter.go` | 元芯平台消息适配 |
+| STT 模块 | `internal/messaging/stt/` | 独立语音转文字 |
+| TTS 模块 | `internal/messaging/tts/` | 文字转语音（Edge-TTS + FFmpeg Opus） |
 | WebChat | `webchat/lib/adapters/hotplex-runtime-adapter.ts` | 消息 dedup |
 
 ---

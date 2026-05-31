@@ -13,7 +13,7 @@ description: HotPlex 环境检查、安装、配置、故障排查的完整指�
 用户请求 → 构建安装二进制 → hotplex doctor --json → 解析报告 → 分支处理
 ```
 
-不要手动逐项检查依赖——`hotplex doctor` 集成了 26 个 checker（8 个 category），覆盖环境、配置、依赖、安全、运行时、消息平台、STT、TTS、Agent 配置。先让它跑，你再根据报告行动。
+不要手动逐项检查依赖——`hotplex doctor` 集成了 25 个 checker（9 个 category），覆盖环境、配置、依赖、安全、运行时、消息平台、STT、TTS、Agent 配置。先让它跑，你再根据报告行动。
 
 ### 第零步：构建安装二进制
 
@@ -89,7 +89,7 @@ hotplex doctor --json
 
 | checker | 失败原因 | 处理 |
 |---------|---------|------|
-| `worker_binary` | claude/opencode 不在 PATH | 安装 Claude Code CLI 或设置 `HOTPLEX_WORKER_CLAUDE_CODE_COMMAND` |
+| `worker_binary` | claude/opencode 不在 PATH | 安装对应 CLI 或设置 worker command 配置项。Claude Code: `claude_code.command` 或环境变量 `HOTPLEX_WORKER_CLAUDE_CODE_COMMAND`；Codex CLI: `codex_cli.command`；OCS/ACP 通过各自的 `command` 配置启动，无需预装二进制 |
 | `sqlite_path` | 数据目录不存在或无写权限 | `mkdir -p ~/.hotplex/data && chmod 755 ~/.hotplex` |
 
 #### security（安全）
@@ -290,7 +290,7 @@ hotplex service logs -f          # 日志确认连接
 | 版本 | vX.Y.Z |
 | 消息平台 | Slack: xoxb-... (N bots) / 飞书: cli_xxx (N bots) |
 | 访问策略 | allowlist |
-| Worker | Claude Code |
+| Worker | Claude Code / Codex CLI / OCS / ACP |
 | STT | local / feishu+local |
 | TTS | enabled / disabled |
 | 服务模式 | systemd/launchd/SCM/dev |

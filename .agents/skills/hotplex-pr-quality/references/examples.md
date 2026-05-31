@@ -172,7 +172,7 @@ cancellable context in readSSE for clean shutdown.
 Fixes #85
 Fixes #79
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 #### 阶段 3：推送代码（10 秒）
@@ -288,7 +288,7 @@ singleton may be nil in uninitialized state.
 
 Fixes test failure in PR #96
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 #### 步骤 4：推送更新

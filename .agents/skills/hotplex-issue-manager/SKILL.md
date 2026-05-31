@@ -39,7 +39,7 @@ gh issue list --limit 100 --state open \
 
 ### 1.2 标签与关闭（Admin 专属）
 
-标签体系（6 类 27 个标签）、关闭无效 issue 的完整流程见 `references/label-taxonomy.md`。
+标签体系（6 类 40+ 个标签，含 P0-P3 优先级、18 个模块标签、领域/状态/辅助/关闭原因）、关闭无效 issue 的完整流程见 `references/label-taxonomy.md`。
 
 ### 1.3 呈现阶段结果
 
@@ -70,9 +70,10 @@ ROI = (I × U × E) / 10    最大值 = 100
 
 | 优先级 | ROI 范围 | 标签 |
 |--------|----------|------|
-| P1 | ≥ 50 | `P1` |
-| P2 | 30-49 | `P2` |
-| P3 | 15-29 | `P3` |
+| P0 | ≥ 80 | `P0`（紧急：生产故障/数据丢失/安全漏洞） |
+| P1 | 50-79 | `P1`（关键：阻塞功能/每日影响） |
+| P2 | 30-49 | `P2`（高：应尽快修） |
+| P3 | 15-29 | `P3`（中：有空就修） |
 
 检查 issue body 中的 `#XX` 引用识别依赖。被未解决依赖阻塞的标记 `blocked` 并降低优先级。
 
@@ -147,9 +148,9 @@ ROI = (I × U × E) / 10    最大值 = 100
 
 | 文件 | 内容 |
 |------|------|
-| `references/label-taxonomy.md` | 标签体系（6 类 27 个）、关闭无效 issue 流程、质量检查 |
+| `references/label-taxonomy.md` | 标签体系（6 类 40+ 个标签，含 P0-P3、18 个模块标签）、关闭无效 issue 流程、质量检查 |
 | `references/common-pitfalls.md` | 7 个常见陷阱与对策（含 PR 冲突） |
-| `references/implementation-guide.md` | Phase 4 完整指南：仓库准备、分支创建、commit 模板、PR 模板 |
+| `references/implementation-guide.md` | Phase 4 完整指南：仓库准备、分支创建、commit 模板（含全部 scope）、PR 模板 |
 | `references/example-session.md` | 完整演练：从 20 个 issues 到合并 PR |
 | `references/troubleshooting.md` | 8 个常见问题的诊断和解决方案 |
 

@@ -75,6 +75,20 @@ HotPlex 支持多种消息 channel，每个 channel 有特定的适配器和特�
 - 修复 WebChat session 粘性问题
 ```
 
+### 元芯平台
+
+**目录**：`internal/messaging/yuanxin/`
+
+**特性**：
+- 元芯平台适配器
+- 消息收发与状态同步
+
+**在 PR 中说明影响的 channel**：
+```markdown
+### Changes
+- 修复元芯平台消息同步问题
+```
+
 ## 多 Worker 支持
 
 HotPlex 支持多种 AI worker 运行时，每个 worker 有特定的适配器和特性。
@@ -119,6 +133,47 @@ HotPlex 支持多种 AI worker 运行时，每个 worker 有特定的适配器�
 ```markdown
 ### Changes
 - 修复 OCS SSE timeout 问题
+```
+
+### Codex CLI (CodexCLI)
+
+**目录**：`internal/worker/codexcli/`
+
+**特性**：
+- Codex CLI 适配器（exec + app-server 双模式）
+- NDJSON over stdio 通信
+- Session 管理
+- 支持 WebSearch / CollabToolCall 等扩展事件类型
+
+**关键文件**：
+- `worker.go` - CodexCLI worker 适配器
+- `base/worker.go` - BaseWorker 共享逻辑
+- `base/conn.go` - NDJSON over stdio
+
+**在 PR 中说明影响的 worker**：
+```markdown
+### Changes
+- 优化 CodexCLI 事件映射和飞书卡片渲染
+```
+
+### ACP 通用适配器 (ACP)
+
+**目录**：`internal/worker/acp/`
+
+**特性**：
+- JSON-RPC 2.0 over stdio 协议
+- 支持任何 ACP 兼容 Agent
+- 通用事件映射（task/update/result）
+
+**关键文件**：
+- `worker.go` - ACP worker 适配器
+- `base/worker.go` - BaseWorker 共享逻辑
+- `base/conn.go` - NDJSON over stdio
+
+**在 PR 中说明影响的 worker**：
+```markdown
+### Changes
+- 修复 ACP 适配器 JSON-RPC 消息解析
 ```
 
 ## 跨平台兼容
@@ -256,11 +311,14 @@ HotPlex Gateway
 ├── Channel Adapters (internal/messaging/)
 │   ├── Slack Socket Mode
 │   ├── 飞书 WebSocket (P2)
+│   ├── 元芯平台
 │   └── WebChat (HTTP/SSE)
 │
 ├── Worker Adapters (internal/worker/)
 │   ├── Claude Code (CC)
-│   └── OpenCode Server (OCS)
+│   ├── OpenCode Server (OCS)
+│   ├── Codex CLI (CodexCLI)
+│   └── ACP 通用适配器 (ACP)
 │
 └── Cross-Platform Support
     ├── Linux (systemd)
@@ -281,6 +339,8 @@ HotPlex Gateway
 | `webchat/*` | `webchat` | WebChat 前端 |
 | `internal/worker/claudecode/*` | `worker/cc` | CC worker |
 | `internal/worker/opencodeserver/*` | `worker/ocs` | OCS worker |
+| `internal/worker/codexcli/*` | `worker/codexcli` | CodexCLI worker |
+| `internal/worker/acp/*` | `worker/acp` | ACP worker |
 | `internal/service/*` | `service` | 系统服务（跨平台） |
 | `internal/cli/*` | `cli` | CLI 命令 |
 | `internal/security/*` | `security` | 安全 |
@@ -300,7 +360,7 @@ fix(messaging/slack): resolve streaming message loss
 
 Fixes #123
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### 示例 2：Worker 相关
@@ -313,7 +373,7 @@ and use cancellable context for clean shutdown.
 
 Fixes #85
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### 示例 3：跨平台相关
@@ -327,7 +387,7 @@ fix(service): Windows service installation fails
 
 Fixes #456
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### 示例 4：多组件影响
@@ -344,5 +404,5 @@ fix(gateway): resolve session timeout across all channels
 
 Fixes #789
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
