@@ -23,7 +23,11 @@ func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code eve
 // Worker process death (ErrKindUnavailable) maps to ErrCodeSessionTerminated
 // so clients can reconnect rather than treating them as transient internal errors.
 // Timeout errors (ErrKindTimeout) are not treated as fatal — the worker is still alive.
+// ErrNotImplemented maps to ErrCodeNotSupported for unimplemented worker capabilities.
 func classifyWorkerError(err error) events.ErrorCode {
+	if errors.Is(err, worker.ErrNotImplemented) {
+		return events.ErrCodeNotSupported
+	}
 	we, ok := errors.AsType[*worker.WorkerError](err)
 	if ok {
 		switch we.Kind {

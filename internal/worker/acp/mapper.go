@@ -3,7 +3,10 @@ package acp
 import (
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"sync/atomic"
+
+	"github.com/hrygo/hotplex/internal/metrics"
 
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -21,6 +24,26 @@ type ACPMapper struct {
 	turnActive atomic.Bool // true while a prompt turn is in progress
 	seq        atomic.Int64
 	msgID      string // pre-computed "msg_" + sessionID, avoids allocation on hot path
+
+	// usageSnapshot caches the latest usage_update for ControlRequester queries.
+	// Accumulated across multiple usage_update notifications within a turn.
+	usageMu sync.Mutex
+	usage   usageSnapshot
+}
+
+// usageSnapshot caches token usage, context size, and cost from usage_update events.
+// Embeds PromptUsage for token fields; adds context/cost fields from usage_update.
+type usageSnapshot struct {
+	PromptUsage
+	ContextSize int
+	ContextUsed int
+	Cost        *CostInfo
+}
+
+// CostInfo holds cost information from usage_update events.
+type CostInfo struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
 }
 
 // NewACPMapper creates a mapper bound to the given session.
@@ -40,6 +63,9 @@ func NewACPMapper(sessionID, userID string, log *slog.Logger) *ACPMapper {
 func (m *ACPMapper) Reset() {
 	m.msgActive.Store(false)
 	m.turnActive.Store(false)
+	m.usageMu.Lock()
+	m.usage = usageSnapshot{}
+	m.usageMu.Unlock()
 }
 
 // SetTurnActive marks the start of a prompt turn.
@@ -81,6 +107,7 @@ func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelo
 	case "tool_call_update":
 		return m.mapToolCallUpdate(params.Update)
 	case "usage_update":
+		m.updateUsage(params.Update)
 		return nil // internal tracking, stats included in Done
 	case "plan":
 		return m.mapPlan(params.Update)
@@ -257,6 +284,14 @@ func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
 		Kind:      u.Kind,
 		Locations: locations,
 	}
+
+	// Record Prometheus tool call metric.
+	toolKind := u.Kind
+	if toolKind == "" {
+		toolKind = "other"
+	}
+	metrics.ACPToolCallsTotal.WithLabelValues(toolKind).Inc()
+
 	return []*events.Envelope{m.newEnvelope(events.ToolCall, data)}
 }
 
@@ -431,7 +466,95 @@ func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {
 	if result.Usage.TotalTokens > 0 {
 		stats["total_tokens"] = result.Usage.TotalTokens
 	}
+
+	// Include accumulated usage_update data (context size, cost).
+	m.usageMu.Lock()
+	if m.usage.ContextSize > 0 {
+		stats["context_size"] = m.usage.ContextSize
+	}
+	if m.usage.ContextUsed > 0 {
+		stats["context_used"] = m.usage.ContextUsed
+	}
+	if m.usage.Cost != nil && m.usage.Cost.Amount > 0 {
+		costCopy := *m.usage.Cost
+		stats["cost"] = &costCopy
+	}
+	m.usageMu.Unlock()
+
 	return stats
+}
+
+// ─── Usage Tracking ──────────────────────────────────────────────────────────
+
+// updateUsage parses a usage_update notification and accumulates into the snapshot.
+func (m *ACPMapper) updateUsage(raw json.RawMessage) {
+	var u struct {
+		InputTokens       int `json:"inputTokens"`
+		OutputTokens      int `json:"outputTokens"`
+		ThoughtTokens     int `json:"thoughtTokens"`
+		CachedReadTokens  int `json:"cachedReadTokens"`
+		CachedWriteTokens int `json:"cachedWriteTokens"`
+		TotalTokens       int `json:"totalTokens"`
+		ContextSize       int `json:"contextSize"`
+		ContextUsed       int `json:"contextUsed"`
+		Cost              *struct {
+			Amount   float64 `json:"amount"`
+			Currency string  `json:"currency"`
+		} `json:"cost"`
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		m.log.Debug("acp mapper: failed to parse usage_update", "error", err)
+		return
+	}
+
+	// Accumulate into snapshot under lock (field names match PromptUsage via embedding).
+	m.usageMu.Lock()
+	s := &m.usage
+	s.InputTokens += u.InputTokens
+	s.OutputTokens += u.OutputTokens
+	s.ThoughtTokens += u.ThoughtTokens
+	s.CachedReadTokens += u.CachedReadTokens
+	s.CachedWriteTokens += u.CachedWriteTokens
+	s.TotalTokens += u.TotalTokens
+	if u.ContextSize > 0 {
+		s.ContextSize = u.ContextSize
+	}
+	if u.ContextUsed > 0 {
+		s.ContextUsed = u.ContextUsed
+	}
+	if u.Cost != nil {
+		if s.Cost == nil {
+			s.Cost = &CostInfo{}
+		}
+		s.Cost.Amount += u.Cost.Amount
+		s.Cost.Currency = u.Cost.Currency
+	}
+	m.usageMu.Unlock()
+
+	// Prometheus metrics outside the lock — counters have internal synchronization.
+	for label, val := range map[string]int{
+		"input":        u.InputTokens,
+		"output":       u.OutputTokens,
+		"thought":      u.ThoughtTokens,
+		"cached_read":  u.CachedReadTokens,
+		"cached_write": u.CachedWriteTokens,
+	} {
+		if val > 0 {
+			metrics.ACPPromptTokensTotal.WithLabelValues(label).Add(float64(val))
+		}
+	}
+}
+
+// LastUsage returns a copy of the current usage snapshot for ControlRequester queries.
+func (m *ACPMapper) LastUsage() usageSnapshot {
+	m.usageMu.Lock()
+	snap := m.usage
+	m.usageMu.Unlock()
+	if snap.Cost != nil {
+		cp := *snap.Cost
+		snap.Cost = &cp
+	}
+	return snap
 }
 
 func extractToolName(raw json.RawMessage) string {

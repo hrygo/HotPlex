@@ -267,4 +267,35 @@ var (
 		Help:      "Duration of worker creation and launch in seconds",
 		Buckets:   []float64{0.5, 1, 2, 5, 10, 30, 60},
 	}, []string{"worker_type"})
+
+	// ─── ACP Worker Metrics ────────────────────────────────────────────────────
+
+	// ACPPromptTokensTotal tracks token usage from ACP usage_update events.
+	ACPPromptTokensTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "acp_prompt_tokens_total",
+		Help:      "Total token usage from ACP agents by type (input/output/cached_read/cached_write/thought)",
+	}, []string{"type"})
+
+	// ACPToolCallsTotal tracks tool call counts by kind.
+	ACPToolCallsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "acp_tool_calls_total",
+		Help:      "Total ACP tool calls by kind (read/edit/delete/execute/search/other)",
+	}, []string{"kind"})
+
+	// ACPPermissionRequestsTotal tracks permission request outcomes.
+	ACPPermissionRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "hotplex",
+		Name:      "acp_permission_requests_total",
+		Help:      "Total ACP permission requests by outcome (approved/denied/timeout)",
+	}, []string{"outcome"})
+
+	// ACPHandshakeDuration records ACP initialize handshake duration.
+	ACPHandshakeDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "hotplex",
+		Name:      "acp_handshake_duration_seconds",
+		Help:      "Duration of ACP agent initialize handshake in seconds",
+		Buckets:   []float64{0.1, 0.25, 0.5, 1, 2, 5, 10},
+	})
 )

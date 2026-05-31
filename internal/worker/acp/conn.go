@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/worker"
@@ -21,10 +22,14 @@ type acpConn struct {
 	recvCh    chan *events.Envelope
 	mu        sync.Mutex
 	closed    bool
+	lastInput atomic.Pointer[string] // cached for InputRecoverer crash recovery
 }
 
-// Compile-time check.
-var _ worker.SessionConn = (*acpConn)(nil)
+// Compile-time checks.
+var (
+	_ worker.SessionConn    = (*acpConn)(nil)
+	_ worker.InputRecoverer = (*acpConn)(nil)
+)
 
 func newACPConn(userID, sessionID string, log *slog.Logger) *acpConn {
 	return &acpConn{
@@ -115,6 +120,16 @@ func (c *acpConn) Close() error {
 	c.closed = true
 	close(c.recvCh)
 	return nil
+}
+
+// LastInput returns the most recent user input for crash recovery re-delivery.
+// Satisfies worker.InputRecoverer — Bridge's handleWorkerExit reads this to
+// re-inject the last message after a worker restart.
+func (c *acpConn) LastInput() string {
+	if p := c.lastInput.Load(); p != nil {
+		return *p
+	}
+	return ""
 }
 
 func (c *acpConn) UserID() string    { return c.userID }

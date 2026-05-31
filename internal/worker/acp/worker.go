@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
@@ -23,21 +25,26 @@ import (
 var (
 	_ worker.Worker                 = (*Worker)(nil)
 	_ worker.WorkerSessionIDHandler = (*Worker)(nil)
+	_ worker.WorkerCommander        = (*Worker)(nil)
+	_ worker.ControlRequester       = (*Worker)(nil)
 	_ base.MetadataHandler          = (*Worker)(nil)
 )
 
 // commandParts stores the space-split command (binary + optional prefix args).
 var commandParts atomic.Value // []string
 
-// autoApprove controls whether permission requests are auto-approved.
-var autoApprove atomic.Value // bool
+// autoApproveDefault is the global default for auto-approve set from config.
+// Per-session overrides live on Worker.autoApprove.
+var autoApproveDefault atomic.Bool
 
 func init() {
 	commandParts.Store([]string{"hermes", "acp"})
-	autoApprove.Store(false)
+	autoApproveDefault.Store(false)
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
-		return &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}, nil
+		w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
+		w.autoApprove.Store(autoApproveDefault.Load())
+		return w, nil
 	})
 }
 
@@ -53,7 +60,7 @@ func InitConfig(cfg config.ACPConfig) {
 		return
 	}
 	commandParts.Store(parts)
-	autoApprove.Store(cfg.AutoApprove)
+	autoApproveDefault.Store(cfg.AutoApprove)
 	if err := security.RegisterCommand(parts[0]); err != nil {
 		slog.Default().Error("acp: failed to register command", "command", parts[0], "err", err)
 	}
@@ -63,6 +70,53 @@ func InitConfig(cfg config.ACPConfig) {
 var acpEnvBlocklist = []string{
 	"CLAUDECODE",
 	"HOTPLEX_",
+}
+
+// parseMCPServers extracts the mcpServers array from the JSON config string
+// produced by Bridge's buildWorkerInfo. The input format is {"mcpServers":{...}}.
+// Returns an empty slice if the config is empty or unparseable.
+func parseMCPServers(mcpConfig string) []any {
+	if mcpConfig == "" {
+		return nil
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(mcpConfig), &raw); err != nil {
+		return nil
+	}
+	servers, ok := raw["mcpServers"]
+	if !ok {
+		return nil
+	}
+	// mcpServers is typically a map → normalize to []any for ACP protocol.
+	// normalizeMCPServers in client.go handles nil → []any{}.
+	return normalizeMCPServersToArray(servers)
+}
+
+// normalizeMCPServersToArray converts the mcpServers value to []any.
+// ACP session/new expects an array; config provides either a map or array.
+// NOTE: For map input, this mutates the inner maps in-place (sets m["name"]=name).
+// Currently safe because input always comes from json.Unmarshal (fresh allocation),
+// but callers must not pass shared/persistent maps.
+func normalizeMCPServersToArray(servers any) []any {
+	if servers == nil {
+		return nil
+	}
+	switch v := servers.(type) {
+	case []any:
+		return v
+	case map[string]any:
+		// Convert map to array of named server configs.
+		result := make([]any, 0, len(v))
+		for name, cfg := range v {
+			if m, ok := cfg.(map[string]any); ok {
+				m["name"] = name
+				result = append(result, m)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 // Worker implements the ACP (Agent Client Protocol) worker adapter.
@@ -80,6 +134,18 @@ type Worker struct {
 
 	// pendingPerm stores the permission mapping for in-flight permission requests.
 	pendingPerm sync.Map // requestID (string) → *PermissionMapResult
+
+	// systemPrompt holds the B/C channel agent config from SessionInfo.SystemPrompt.
+	// Injected as a prefix on the first user prompt (ACP v1 has no native system prompt).
+	systemPrompt         string
+	systemPromptInjected atomic.Bool
+
+	// mcpServers caches the parsed MCP servers from Start() so Clear() can reuse them.
+	mcpServers []any
+
+	// autoApprove controls per-session permission auto-approval.
+	// Initialized from global default, overridable via set_permission_mode.
+	autoApprove atomic.Bool
 
 	// testHooks for injection-based testing.
 	testClient *ACPClient
@@ -119,6 +185,16 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
 	w.Mu.Unlock()
+
+	// Cache system prompt for first-input injection (ACP v1 has no native mechanism).
+	sp := session.SystemPrompt
+	if len(sp) > 32*1024 {
+		w.Log.Warn("acp: system prompt exceeds 32KB, truncating",
+			"session_id", session.SessionID, "size", len(sp))
+		sp = sp[:32*1024]
+	}
+	w.systemPrompt = sp
+	w.systemPromptInjected.Store(false)
 
 	// Phase 2: I/O-heavy operations outside the lock.
 
@@ -185,15 +261,17 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	// Create or load session.
+	mcpServers := parseMCPServers(session.MCPConfig)
+	w.mcpServers = mcpServers // cache for Clear()
 	var acpSessID string
 	var historyLost bool
 	if session.WorkerSessionID != "" {
 		// Resume existing session.
-		sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, nil)
+		sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
 		if loadErr != nil {
 			w.Log.Error("acp: load session failed, conversation history will be lost",
 				"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID, "error", loadErr)
-			newSess, newErr := client.NewSession(hctx, session.ProjectDir, nil)
+			newSess, newErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
 			if newErr != nil {
 				_ = w.Proc.Kill()
 				return fmt.Errorf("acp: new session: %w", newErr)
@@ -204,7 +282,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			acpSessID = sessResult.SessionID
 		}
 	} else {
-		sessResult, sessErr := client.NewSession(hctx, session.ProjectDir, nil)
+		sessResult, sessErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
 		if sessErr != nil {
 			_ = w.Proc.Kill()
 			return fmt.Errorf("acp: new session: %w", sessErr)
@@ -212,6 +290,9 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		acpSessID = sessResult.SessionID
 	}
 	w.SetWorkerSessionID(acpSessID)
+
+	// Record handshake latency.
+	metrics.ACPHandshakeDuration.Observe(time.Since(now).Seconds())
 
 	// Create mapper.
 	mapper := w.testMapper
@@ -261,6 +342,14 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	// Regular user input → send prompt.
 	w.mapper.Reset()
 	w.mapper.SetTurnActive()
+
+	// Inject system prompt on first user input (ACP v1 has no native system prompt).
+	if w.systemPrompt != "" && w.systemPromptInjected.CompareAndSwap(false, true) {
+		content = fmt.Sprintf("[SYSTEM INSTRUCTIONS]\n%s\n[/SYSTEM INSTRUCTIONS]\n\n%s", w.systemPrompt, content)
+	}
+
+	// Cache input for crash recovery (InputRecoverer).
+	conn.lastInput.Store(&content)
 
 	// Emit state(running).
 	conn.TrySend(w.mapper.MapStateRunning())
@@ -370,6 +459,115 @@ func (w *Worker) ResetContext(_ context.Context) error {
 	return worker.ErrNotImplemented
 }
 
+// ─── WorkerCommander ─────────────────────────────────────────────────────────
+
+// Compact returns ErrNotImplemented — ACP has no compact method.
+// Terminate+Start is too expensive; let Bridge fallback to Input passthrough.
+func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
+	return worker.ErrNotImplemented
+}
+
+// Clear creates a new ACP session within the same process (equivalent to /clear).
+// The PID stays the same; only the acpSessionID changes.
+// I/O runs outside Mu to avoid blocking Terminate/Health during Cancel+NewSession.
+func (w *Worker) Clear(ctx context.Context) error {
+	// Snapshot all fields needed for I/O under one lock hold to avoid data races
+	// on projectDir (string), mcpServers (slice), and acpSessionID (string).
+	w.Mu.Lock()
+	client := w.client
+	projectDir := w.projectDir
+	mcpServers := w.mcpServers
+	sessionID := w.acpSessionID
+	w.Mu.Unlock()
+
+	if client == nil {
+		return fmt.Errorf("acp: clear: worker not started")
+	}
+
+	hctx, hcancel := context.WithTimeout(ctx, 10*time.Second)
+	defer hcancel()
+
+	// Cancel any in-flight turn before creating new session.
+	_ = client.Cancel(hctx, sessionID)
+
+	result, err := client.NewSession(hctx, projectDir, mcpServers)
+	if err != nil {
+		return fmt.Errorf("acp: clear: new session: %w", err)
+	}
+
+	w.Mu.Lock()
+	w.acpSessionID = result.SessionID
+	w.mapper.Reset()
+	w.systemPromptInjected.Store(false)
+	w.IncResetGeneration()
+	w.Mu.Unlock()
+	return nil
+}
+
+// Rewind returns ErrNotImplemented — ACP has no rewind method.
+func (w *Worker) Rewind(_ context.Context, _ string) error {
+	return worker.ErrNotImplemented
+}
+
+// ─── ControlRequester ────────────────────────────────────────────────────────
+
+// SendControlRequest handles structured control queries from Bridge/worker_cmds.
+// Supported subtypes: get_context_usage, set_model, set_permission_mode, mcp_status.
+func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
+	switch subtype {
+	case "get_context_usage":
+		return w.handleContextUsage()
+	case "set_model":
+		return w.handleSetModel(ctx, body)
+	case "set_permission_mode":
+		return w.handleSetPermissionMode(body)
+	case "mcp_status":
+		// ACP has no MCP status query method — return empty map.
+		return map[string]any{}, nil
+	default:
+		return nil, fmt.Errorf("acp: unsupported control request: %s", subtype)
+	}
+}
+
+func (w *Worker) handleContextUsage() (map[string]any, error) {
+	snapshot := w.mapper.LastUsage()
+	// Return context usage snapshot; zero values mean no data yet (consistent with OCS).
+	return map[string]any{
+		"maxTokens":   snapshot.ContextSize,
+		"totalTokens": snapshot.ContextUsed,
+	}, nil
+}
+
+func (w *Worker) handleSetModel(ctx context.Context, body map[string]any) (map[string]any, error) {
+	modelID, _ := body["model"].(string)
+	if modelID == "" {
+		return nil, fmt.Errorf("acp: set_model: missing model")
+	}
+	w.Mu.Lock()
+	client := w.client
+	w.Mu.Unlock()
+	if client == nil {
+		return nil, fmt.Errorf("acp: set_model: worker not started")
+	}
+	if err := client.SetSessionModel(ctx, w.GetWorkerSessionID(), modelID); err != nil {
+		return nil, fmt.Errorf("acp: set_model: %w", err)
+	}
+	return map[string]any{"model": modelID}, nil
+}
+
+func (w *Worker) handleSetPermissionMode(body map[string]any) (map[string]any, error) {
+	mode, _ := body["mode"].(string)
+	switch mode {
+	case "auto-accept":
+		w.autoApprove.Store(true)
+	case "default", "":
+		w.autoApprove.Store(false)
+	default:
+		return nil, fmt.Errorf("acp: set_permission_mode: unsupported mode: %s", mode)
+	}
+	return map[string]any{"mode": mode}, nil
+}
+
 // ─── MetadataHandler ─────────────────────────────────────────────────────────
 
 func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, _ string) error {
@@ -385,11 +583,19 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 	var outcome any
 	if allowed {
 		outcome = pm.FormatAllowedOutcome()
+		metrics.ACPPermissionRequestsTotal.WithLabelValues("approved").Inc()
 	} else {
 		outcome = pm.FormatDeniedOutcome()
+		metrics.ACPPermissionRequestsTotal.WithLabelValues("denied").Inc()
 	}
 
-	return w.client.RespondPermission(ctx, pm.RequestID, outcome)
+	w.Mu.Lock()
+	client := w.client
+	w.Mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("acp: permission response: worker not started")
+	}
+	return client.RespondPermission(ctx, pm.RequestID, outcome)
 }
 
 func (w *Worker) HandleQuestionResponse(_ context.Context, _ string, _ map[string]string) error {
@@ -454,8 +660,9 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 		}
 
 		// Check auto-approve.
-		if val, _ := autoApprove.Load().(bool); val {
+		if w.autoApprove.Load() {
 			_ = w.client.RespondPermission(ctx, req.ID, pm.FormatAllowedOutcome())
+			metrics.ACPPermissionRequestsTotal.WithLabelValues("approved").Inc()
 			return
 		}
 
