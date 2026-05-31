@@ -379,6 +379,47 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	return nil
 }
 
+// forceTerminateInMemory performs in-memory state cleanup when transitionState fails
+// (DB error or invalid transition). It mirrors transitionState's side effects
+// (metrics, quota release, worker nil) without DB persistence.
+// Caller must hold ms.mu for write. Returns worker to kill outside lock.
+//
+// Design note: the returned worker is Kill()'d (hard) by the caller, whereas
+// transitionState uses Terminate() (graceful SIGTERM + 5s timeout). This is
+// intentional — when DB persistence fails we cannot track the graceful-shutdown
+// window, so a hard kill is the safer choice to guarantee process cleanup.
+func (m *Manager) forceTerminateInMemory(ctx context.Context, ms *managedSession, from events.SessionState, termReason string) worker.Worker {
+	var workerToKill worker.Worker
+	ms.info.State = events.StateTerminated
+	ms.info.UpdatedAt = time.Now()
+
+	// Guard termReason to avoid empty Prometheus label (matches transitionState behavior).
+	if termReason == "" {
+		termReason = "terminated"
+	}
+
+	// Record worker execution duration.
+	if !ms.startedAt.IsZero() && ms.worker != nil {
+		metrics.WorkerExecDuration.WithLabelValues(string(ms.info.WorkerType)).Observe(time.Since(ms.startedAt).Seconds())
+	}
+	// Release quota and decrement running gauge.
+	if ms.worker != nil {
+		metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Dec()
+		m.releaseWorkerQuota(ms)
+		workerToKill = ms.worker
+	}
+	ms.worker = nil // unconditional nil — matches transitionState, prevents double-release
+
+	m.updateRunningIndexForTransition(ms.info.ID, from, events.StateTerminated)
+	metrics.SessionsActive.WithLabelValues(string(from)).Dec()
+	metrics.SessionsActive.WithLabelValues(string(events.StateTerminated)).Inc()
+	metrics.SessionsTerminated.WithLabelValues(termReason).Inc()
+
+	m.notifyStateChange(ctx, ms.info.ID, events.StateTerminated, termReason)
+
+	return workerToKill
+}
+
 // Transition atomically transitions a session to a new state.
 // Both the in-memory state and the DB are updated.
 // When transitioning to IDLE, sets idle_expires_at = now + IdleTimeout.
@@ -447,17 +488,13 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 					// appear active in DB after restart until GC reaps it.
 					m.log.Error("session: max-turns state transition failed, force-terminating in-memory state",
 						"session_id", id, "err", err)
-					ms.info.State = events.StateTerminated
-					workerToKill = ms.worker
-					m.updateRunningIndexForTransition(id, from, events.StateTerminated)
+					workerToKill = m.forceTerminateInMemory(ctx, ms, from, "max_turns")
 				}
 			} else {
 				// Escape hatch: invalid transition — force-terminate in-memory.
 				m.log.Warn("session: max-turns transition invalid, force-terminating in-memory state",
 					"session_id", id, "from_state", from)
-				ms.info.State = events.StateTerminated
-				workerToKill = ms.worker
-				m.updateRunningIndexForTransition(id, from, events.StateTerminated)
+				workerToKill = m.forceTerminateInMemory(ctx, ms, from, "max_turns")
 			}
 			ms.mu.Unlock()
 			// Kill worker outside lock only if transitionState did not handle it.
@@ -528,6 +565,7 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	if !ok {
 		m.mu.Unlock()
 		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
 		return ErrSessionNotFound
 	}
 	ms.mu.Lock()
@@ -535,10 +573,12 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		ms.mu.Unlock()
 		m.mu.Unlock()
 		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
 		return ErrWorkerAttached
 	}
 	ms.worker = w
 	ms.startedAt = time.Now()
+	metrics.PoolAcquireTotal.WithLabelValues("success").Inc()
 	metrics.WorkerStartsTotal.WithLabelValues(string(ms.info.WorkerType), "success").Inc()
 	metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Inc()
 	ms.mu.Unlock()

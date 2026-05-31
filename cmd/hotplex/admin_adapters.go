@@ -122,10 +122,18 @@ type botListerAdapter struct {
 }
 
 func toAdminBotEntry(e *messaging.BotEntry) admin.BotEntry {
+	botID := e.BotID
+	if botID == "" {
+		// Fallback when platform BotID is not yet available (adapter not started).
+		// Use platform:name to guarantee uniqueness across platforms.
+		// NOTE: assumes bot Name does not contain colons — safe for Slack/Feishu
+		// auto-generated names ("default") and all known platform bot name formats.
+		botID = string(e.Platform) + ":" + e.Name
+	}
 	return admin.BotEntry{
 		Name:        e.Name,
 		Platform:    string(e.Platform),
-		BotID:       e.BotID,
+		BotID:       botID,
 		Status:      string(e.Status),
 		ConnectedAt: e.ConnectedAt.Format("2006-01-02T15:04:05Z"),
 		WorkerType:  e.WorkerType,
