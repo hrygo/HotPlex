@@ -137,25 +137,8 @@ hotplex service uninstall
 
 HotPlex 位于前端客户端和后端 AI Coding Agent 之间，内置 **元认知控制内核**，将协议差异抽象为统一的 **AEP v1 (Agent Exchange Protocol)** WebSocket 层。
 
-```
-┌────────────┐   ┌────────────┐   ┌────────────┐
-│   Web UI   │   │   Slack    │   │   Feishu   │
-└─────┬──────┘   └─────┬──────┘   └─────┬──────┘
-      │                │                │
-      └────────────────┼────────────────┘
-                       │
-                 ┌─────┴──────┐
-                 │  HotPlex   │
-                 │  Gateway   │
-                 └─────┬──────┘
-                       │
-      ┌────────────────┼────────────────┐
-      │                │                │
-┌─────┴──────┐   ┌─────┴──────┐   ┌─────┴──────┐
-│   Claude   │   │   Codex    │   │  OpenCode  │
-│    Code    │   │    CLI     │   │   Server   │
-└────────────┘   └────────────┘   └────────────┘
-```
+![HotPlex 架构](docs/assets/architecture.svg)
+
 
 ## 🔗 SDK 与客户端库
 
@@ -203,7 +186,7 @@ func main() {
 | 配置项                      | 默认值                       | 说明                                |
 | :-------------------------- | :--------------------------- | :---------------------------------- |
 | `agent_config.enabled`      | `true`                       | 启用 Agent 人格/上下文注入          |
-| `tts.enabled`               | `false`                      | 启用 Edge-TTS 语音回传流水线        |
+| `tts.enabled`               | `true`                       | 启用 Edge-TTS 语音回传流水线        |
 | `brain.enabled`             | `false`                      | 启用 Brain LLM 编排层（需 API Key） |
 | `webchat.enabled`           | `true`                       | 从网关提供嵌入式 Web Chat SPA       |
 | `worker.auto_retry.enabled` | `true`                       | LLM 智能重试，支持指数退避          |
