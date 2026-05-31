@@ -345,3 +345,101 @@ func writeFile(t *testing.T, dir, name, content string) {
 	err := os.WriteFile(fullPath, []byte(content), 0o644)
 	require.NoError(t, err)
 }
+
+func TestShouldExclude(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		baseName string
+		exclude  []string
+		want     bool
+	}{
+		{"nil exclude", "SOUL.md", nil, false},
+		{"empty exclude", "SOUL.md", []string{}, false},
+		{"exact match", "SOUL.md", []string{"SOUL.md"}, true},
+		{"case insensitive", "soul.md", []string{"SOUL.MD"}, true},
+		{"case insensitive reverse", "SOUL.MD", []string{"soul.md"}, true},
+		{"mixed case", "Soul.Md", []string{"sOul.mD"}, true},
+		{"no match", "SOUL.md", []string{"AGENTS.md"}, false},
+		{"multiple exclude one match", "USER.md", []string{"SOUL.md", "USER.md"}, true},
+		{"multiple exclude no match", "SKILLS.md", []string{"SOUL.md", "USER.md"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := shouldExclude(tt.baseName, tt.exclude)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestLoadWithInjectExclude(t *testing.T) {
+	t.Parallel()
+
+	t.Run("excludes specified file", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "I am soul.")
+		writeFile(t, dir, "AGENTS.md", "Rules here.")
+		writeFile(t, dir, "USER.md", "User data.")
+
+		cfg, err := Load(dir, "", "", "SOUL.md")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Soul, "SOUL.md should be excluded")
+		require.Equal(t, "Rules here.", cfg.Agents)
+		require.Equal(t, "User data.", cfg.User)
+	})
+
+	t.Run("excludes multiple files", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "Soul content.")
+		writeFile(t, dir, "AGENTS.md", "Agents content.")
+		writeFile(t, dir, "USER.md", "User content.")
+		writeFile(t, dir, "MEMORY.md", "Memory content.")
+
+		cfg, err := Load(dir, "", "", "SOUL.md", "MEMORY.md")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Soul, "SOUL.md should be excluded")
+		require.Empty(t, cfg.Memory, "MEMORY.md should be excluded")
+		require.Equal(t, "Agents content.", cfg.Agents)
+		require.Equal(t, "User content.", cfg.User)
+	})
+
+	t.Run("exclude is case insensitive", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "Soul content.")
+
+		cfg, err := Load(dir, "", "", "soul.md")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Soul, "soul.md (lowercase) should exclude SOUL.md")
+	})
+
+	t.Run("no exclude loads all files", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "Soul content.")
+		writeFile(t, dir, "AGENTS.md", "Agents content.")
+
+		cfg, err := Load(dir, "", "")
+		require.NoError(t, err)
+		require.Equal(t, "Soul content.", cfg.Soul)
+		require.Equal(t, "Agents content.", cfg.Agents)
+	})
+
+	t.Run("exclude with platform fallback still works", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "Global soul.")
+		writeFile(t, dir, "slack/SOUL.md", "Slack soul.")
+		writeFile(t, dir, "AGENTS.md", "Rules.")
+
+		cfg, err := Load(dir, "slack", "", "SOUL.md")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Soul, "excluded file should not load from any level")
+		require.Equal(t, "Rules.", cfg.Agents)
+	})
+}

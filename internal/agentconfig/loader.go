@@ -36,8 +36,11 @@ const MaxTotalChars = 40_000
 // Each file resolves independently. Missing files fall through to the next level.
 // Platform can be "slack", "feishu", "webchat", or "" (no platform-level lookup).
 // botID is used directly as directory name (e.g., Slack UserID, Feishu OpenID).
+// injectExclude lists file base names to skip (e.g., ["SOUL.md", "MEMORY.md"]).
+// Files listed in injectExclude are not loaded; their corresponding config fields
+// remain empty. META-COGNITION.md is never excluded (go:embed, always injected).
 // Returns AgentConfigs with frontmatter stripped and size limits enforced.
-func Load(dir, platform, botID string) (*AgentConfigs, error) {
+func Load(dir, platform, botID string, injectExclude ...string) (*AgentConfigs, error) {
 	if dir == "" {
 		return &AgentConfigs{}, nil
 	}
@@ -51,6 +54,9 @@ func Load(dir, platform, botID string) (*AgentConfigs, error) {
 	var total int
 
 	load := func(baseName string, target *string) error {
+		if shouldExclude(baseName, injectExclude) {
+			return nil
+		}
 		content, err := resolveFile(dir, platform, botID, baseName)
 		if err != nil {
 			return err
@@ -97,6 +103,22 @@ func Load(dir, platform, botID string) (*AgentConfigs, error) {
 
 // configFiles lists recognized agent config file names.
 var configFiles = []string{"SOUL.md", "AGENTS.md", "SKILLS.md", "USER.md", "MEMORY.md"}
+
+// shouldExclude reports whether a config file should be skipped from injection.
+// baseName is matched case-insensitively against the exclude list.
+// META-COGNITION.md is never excluded (it is go:embed, always injected outside Load).
+func shouldExclude(baseName string, exclude []string) bool {
+	if len(exclude) == 0 {
+		return false
+	}
+	upper := strings.ToUpper(baseName)
+	for _, name := range exclude {
+		if strings.ToUpper(name) == upper {
+			return true
+		}
+	}
+	return false
+}
 
 // HasGlobalFiles reports whether any config file exists at the global level (dir/<file>).
 func HasGlobalFiles(dir string) bool {

@@ -367,6 +367,15 @@ func fillSlackExtras(acfg *messaging.AdapterConfig, appCfg *config.Config, botCf
 	if p := buildSlackTTSPipeline(ttsCfg, botToken, appToken, log); p != nil {
 		acfg.Extras["tts_pipeline"] = p
 	}
+
+	// Agent config injection exclusion: bot → platform → global fallback.
+	var botExcl []string
+	if botCfg != nil {
+		botExcl = botCfg.InjectExclude
+	}
+	if excl := config.ResolveInjectExclude(appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, botExcl); excl != nil {
+		acfg.Extras["inject_exclude"] = excl
+	}
 }
 
 // fillFeishuExtras populates AdapterConfig.Extras for a Feishu bot.
@@ -399,6 +408,15 @@ func fillFeishuExtras(acfg *messaging.AdapterConfig, appCfg *config.Config, botC
 	}
 	if p := buildFeishuTTSPipeline(ttsCfg, appID, appSecret, log); p != nil {
 		acfg.Extras["tts_pipeline"] = p
+	}
+
+	// Agent config injection exclusion: bot → platform → global fallback.
+	var botExcl []string
+	if botCfg != nil {
+		botExcl = botCfg.InjectExclude
+	}
+	if excl := config.ResolveInjectExclude(appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, botExcl); excl != nil {
+		acfg.Extras["inject_exclude"] = excl
 	}
 }
 

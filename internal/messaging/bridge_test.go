@@ -134,6 +134,7 @@ func (m *mockBotIDAdapter) HandleTextMessage(_ context.Context, _, _, _, _, _, _
 func (m *mockBotIDAdapter) Close(_ context.Context) error       { return nil }
 func (m *mockBotIDAdapter) ConfigureWith(_ AdapterConfig) error { return nil }
 func (m *mockBotIDAdapter) GetBotID() string                    { return m.botID }
+func (m *mockBotIDAdapter) GetInjectExclude() []string          { return nil }
 
 // mockHandler implements HandlerInterface.
 type mockHandler struct{}
@@ -145,7 +146,7 @@ type mockStarter struct {
 	startFn func(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error
 }
 
-func (s *mockStarter) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error {
+func (s *mockStarter) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string, _ ...string) error {
 	if s.startFn != nil {
 		return s.startFn(ctx, sessionID, ownerID, workerType, workDir, sandbox, platform, platformKey, botID)
 	}

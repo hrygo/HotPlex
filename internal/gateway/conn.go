@@ -50,7 +50,7 @@ type connAuth interface {
 // used by Conn (called once during the AEP init handshake).
 type SessionStarter interface {
 	StartSession(ctx context.Context, id, userID, botID string,
-		wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string) error
+		wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string, injectExclude ...string) error
 	ResumeSession(ctx context.Context, id string, workDir string) error
 	SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir string) (*SwitchWorkDirResult, error)
 }

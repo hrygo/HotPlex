@@ -45,7 +45,8 @@ func (a *botConfigAdapter) GetBotConfig(ctx context.Context, name string) (*admi
 	botID := entry.BotID
 
 	attrs := extractBotAttrs(cfg, platform, name)
-	summary := getAgentConfigSummary(platform, botID, a.agentConfigDir)
+	excl := a.resolveInjectExcludeForAdmin(platform, name)
+	summary := getAgentConfigSummary(platform, botID, a.agentConfigDir, excl...)
 
 	return &admin.BotConfigEntry{
 		Name:         entry.Name,
@@ -68,7 +69,8 @@ func (a *botConfigAdapter) ListBotConfigs(ctx context.Context) ([]admin.BotConfi
 	for _, e := range entries {
 		platform := string(e.Platform)
 		attrs := extractBotAttrs(cfg, platform, e.Name)
-		summary := getAgentConfigSummary(platform, e.BotID, a.agentConfigDir)
+		excl := a.resolveInjectExcludeForAdmin(platform, e.Name)
+		summary := getAgentConfigSummary(platform, e.BotID, a.agentConfigDir, excl...)
 
 		result = append(result, admin.BotConfigEntry{
 			Name:         e.Name,
@@ -90,7 +92,8 @@ func (a *botConfigAdapter) GetAgentConfigFile(ctx context.Context, botName strin
 		return nil, fmt.Errorf("bot %q not found in registry", botName)
 	}
 
-	configs, err := agentconfig.Load(a.agentConfigDir, platform, botID)
+	excl := a.resolveInjectExcludeForAdmin(platform, botName)
+	configs, err := agentconfig.Load(a.agentConfigDir, platform, botID, excl...)
 	if err != nil {
 		return nil, fmt.Errorf("load agent config: %w", err)
 	}
@@ -113,7 +116,8 @@ func (a *botConfigAdapter) GetSystemPromptPreview(ctx context.Context, botName s
 		return "", fmt.Errorf("bot %q not found in registry", botName)
 	}
 
-	configs, err := agentconfig.Load(a.agentConfigDir, platform, botID)
+	excl := a.resolveInjectExcludeForAdmin(platform, botName)
+	configs, err := agentconfig.Load(a.agentConfigDir, platform, botID, excl...)
 	if err != nil {
 		return "", fmt.Errorf("load agent config: %w", err)
 	}
@@ -287,6 +291,27 @@ func resolvePlatformAndBotID(name string) (platform, botID string, ok bool) {
 	return string(entry.Platform), entry.BotID, true
 }
 
+// resolveInjectExcludeForAdmin resolves the inject_exclude list for a bot
+// using 3-level fallback: bot → platform → global.
+func (a *botConfigAdapter) resolveInjectExcludeForAdmin(platform, botName string) []string {
+	cfg := a.cfgStore.Load()
+	global := cfg.AgentConfig.InjectExclude
+	var platformExcl, botExcl []string
+	switch platform {
+	case "slack":
+		platformExcl = cfg.Messaging.Slack.InjectExclude
+		if bc := resolveSlackBot(cfg, botName); bc != nil {
+			botExcl = bc.InjectExclude
+		}
+	case "feishu":
+		platformExcl = cfg.Messaging.Feishu.InjectExclude
+		if bc := resolveFeishuBot(cfg, botName); bc != nil {
+			botExcl = bc.InjectExclude
+		}
+	}
+	return config.ResolveInjectExclude(global, platformExcl, botExcl)
+}
+
 // extractBotAttrs builds BotConfigAttrs from the config for a specific bot.
 func extractBotAttrs(cfg *config.Config, platform, name string) *admin.BotConfigAttrs {
 	attrs := &admin.BotConfigAttrs{}
@@ -387,8 +412,8 @@ func extractBotAttrs(cfg *config.Config, platform, name string) *admin.BotConfig
 }
 
 // getAgentConfigSummary returns a summary of all agent config files for a bot.
-func getAgentConfigSummary(platform, botID, agentConfigDir string) *admin.AgentConfigSummary {
-	configs, err := agentconfig.Load(agentConfigDir, platform, botID)
+func getAgentConfigSummary(platform, botID, agentConfigDir string, injectExclude ...string) *admin.AgentConfigSummary {
+	configs, err := agentconfig.Load(agentConfigDir, platform, botID, injectExclude...)
 	if err != nil || configs == nil {
 		return nil
 	}

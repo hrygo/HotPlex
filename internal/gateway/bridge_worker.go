@@ -24,12 +24,13 @@ type forwardOpts struct {
 
 // workerLaunchParams holds the parameters for createAndLaunchWorker.
 type workerLaunchParams struct {
-	ctx         context.Context
-	wt          worker.WorkerType
-	workerInfo  worker.SessionInfo
-	platform    string
-	botID       string
-	forwardOpts *forwardOpts
+	ctx           context.Context
+	wt            worker.WorkerType
+	workerInfo    worker.SessionInfo
+	platform      string
+	botID         string
+	forwardOpts   *forwardOpts
+	injectExclude []string // per-session agent config files to skip; nil = use platform default
 }
 
 // workerStartFunc is called after AttachWorker and injectAgentConfig.
@@ -69,7 +70,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, fmt.Errorf("bridge: attach worker: %w", err)
 	}
 
-	b.injectAgentConfig(&params.workerInfo, params.platform, params.botID)
+	b.injectAgentConfig(&params.workerInfo, params.platform, params.botID, params.injectExclude)
 
 	if err := startFn(params.ctx, w, params.workerInfo); err != nil {
 		b.sm.DetachWorker(sid)
@@ -246,12 +247,24 @@ func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Wor
 // injectAgentConfig loads agent config files and injects the unified system
 // prompt into session info. A no-op when config dir is empty or agent config
 // is not configured.
-func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID string) {
+// injectExclude lists file base names to skip; when nil, falls back to the
+// platform-level default from the atomic config map.
+func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID string, injectExclude []string) {
 	if b.agentConfigDir == "" {
 		return
 	}
-	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_id", botID)
-	configs, err := agentconfig.Load(b.agentConfigDir, platform, botID)
+	// Resolve exclude list: per-session override → platform default from config map.
+	if injectExclude == nil {
+		if m, ok := b.agentConfigExclude.Load().(map[string][]string); ok {
+			if excl, found := m[platform]; found {
+				injectExclude = excl
+			} else if excl, found := m[""]; found {
+				injectExclude = excl
+			}
+		}
+	}
+	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_id", botID, "exclude", injectExclude)
+	configs, err := agentconfig.Load(b.agentConfigDir, platform, botID, injectExclude...)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid botID") {
 			b.log.Error("bridge: agent config rejected botID",

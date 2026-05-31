@@ -246,8 +246,9 @@ type MessagingPlatformConfig struct {
 	AllowDMFrom    []string `mapstructure:"allow_dm_from"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from"`
 
-	STTConfig `mapstructure:",squash"`
-	TTSConfig `mapstructure:",squash"`
+	InjectExclude []string `mapstructure:"inject_exclude"` // platform-level default: files to skip from agent config injection
+	STTConfig     `mapstructure:",squash"`
+	TTSConfig     `mapstructure:",squash"`
 }
 
 // MaxBotsPerPlatform is the maximum number of bots allowed per messaging platform.
@@ -294,6 +295,9 @@ type SlackBotConfig struct {
 	AllowDMFrom    []string `mapstructure:"allow_dm_from,omitempty"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from,omitempty"`
 
+	// Per-bot agent config injection override (falls back to platform-level when nil).
+	InjectExclude []string `mapstructure:"inject_exclude,omitempty"`
+
 	// Per-bot branding override (falls back to platform-level when empty).
 	DisplayName string `mapstructure:"display_name,omitempty"`
 	IconEmoji   string `mapstructure:"icon_emoji,omitempty"`
@@ -333,6 +337,9 @@ type FeishuBotConfig struct {
 	AllowFrom      []string `mapstructure:"allow_from,omitempty"`
 	AllowDMFrom    []string `mapstructure:"allow_dm_from,omitempty"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from,omitempty"`
+
+	// Per-bot agent config injection override (falls back to platform-level when nil).
+	InjectExclude []string `mapstructure:"inject_exclude,omitempty"`
 
 	STTConfig `mapstructure:",squash"`
 	TTSConfig `mapstructure:",squash"`
@@ -679,8 +686,9 @@ type PoolConfig struct {
 }
 
 type AgentConfig struct {
-	Enabled   bool   `mapstructure:"enabled"`    // enable agent config loading
-	ConfigDir string `mapstructure:"config_dir"` // default: ~/.hotplex/agent-configs/
+	Enabled       bool     `mapstructure:"enabled"`        // enable agent config loading
+	ConfigDir     string   `mapstructure:"config_dir"`     // default: ~/.hotplex/agent-configs/
+	InjectExclude []string `mapstructure:"inject_exclude"` // global default: files to skip from agent config injection
 }
 
 // SkillsConfig holds skill discovery and caching settings.
@@ -1598,4 +1606,19 @@ func setSliceField(target any, field, value string) error {
 	}
 	f.Set(reflect.ValueOf(slice))
 	return nil
+}
+
+// ResolveInjectExclude resolves the inject_exclude list using 3-level fallback:
+// bot → platform → global. A nil slice means "not configured" and falls back;
+// a non-nil empty slice (e.g. YAML `inject_exclude: []`) means "explicitly clear,
+// override parent level". Returns nil when no exclusion is configured at any level,
+// which means full injection (backward-compatible default).
+func ResolveInjectExclude(global, platform, bot []string) []string {
+	if bot != nil {
+		return bot
+	}
+	if platform != nil {
+		return platform
+	}
+	return global
 }

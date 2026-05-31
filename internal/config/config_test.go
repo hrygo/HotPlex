@@ -1055,3 +1055,29 @@ func TestResolveAPIKeyUsers(t *testing.T) {
 func assertNilKeyMap(t *testing.T, v map[string]string) {
 	require.Nil(t, v)
 }
+
+func TestResolveInjectExclude(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                  string
+		global, platform, bot []string
+		want                  []string
+	}{
+		{"all nil", nil, nil, nil, nil},
+		{"bot wins", []string{"A"}, []string{"B"}, []string{"C"}, []string{"C"}},
+		{"platform wins when bot nil", []string{"A"}, []string{"B"}, nil, []string{"B"}},
+		{"global wins when rest nil", []string{"A"}, nil, nil, []string{"A"}},
+		{"bot empty slice overrides", []string{"A"}, []string{"B"}, []string{}, []string{}},
+		{"platform empty slice overrides", []string{"A"}, []string{}, nil, []string{}},
+		{"global empty slice is returned", []string{}, nil, nil, []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ResolveInjectExclude(tt.global, tt.platform, tt.bot)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}

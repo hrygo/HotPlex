@@ -28,8 +28,9 @@ type BridgeDeps struct {
 	RetryCtrl          *LLMRetryController
 	AgentConfigDir     string
 	TurnTimeout        time.Duration
-	WorkerEnv          []string // extra env vars from worker.environment config
-	WorkerEnvBlocklist []string // extra blocklist entries from worker.env_blocklist config
-	CronEnv            []string // env vars injected only into cron platform sessions (e.g. admin API creds)
-	MCPConfigJSON      string   // pre-serialized MCP config JSON; "" = not configured → Claude Code default discovery
+	WorkerEnv          []string            // extra env vars from worker.environment config
+	WorkerEnvBlocklist []string            // extra blocklist entries from worker.env_blocklist config
+	CronEnv            []string            // env vars injected only into cron platform sessions (e.g. admin API creds)
+	MCPConfigJSON      string              // pre-serialized MCP config JSON; "" = not configured → Claude Code default discovery
+	AgentConfigExclude map[string][]string // platform → inject_exclude (global default at "" key)
 }

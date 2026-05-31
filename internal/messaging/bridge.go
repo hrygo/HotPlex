@@ -95,10 +95,12 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 			platformKey[worker.ACPCommandPlatformKey] = b.acpCommand
 		}
 		var botID string
+		var injectExclude []string
 		if a := b.getAdapter(); a != nil {
 			botID = a.GetBotID()
+			injectExclude = a.GetInjectExclude()
 		}
-		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, b.sandbox, platform, platformKey, botID); err != nil {
+		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, b.sandbox, platform, platformKey, botID, injectExclude...); err != nil {
 			return fmt.Errorf("messaging bridge: session start failed: %w", err)
 		}
 	}

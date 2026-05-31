@@ -115,7 +115,7 @@ type mockAPIBridge struct {
 	mock.Mock
 }
 
-func (m *mockAPIBridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string) error {
+func (m *mockAPIBridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string, _ ...string) error {
 	return m.Called(ctx, id, userID, botID, wt, allowedTools, workDir, platform, platformKey, title).Error(0)
 }
 
