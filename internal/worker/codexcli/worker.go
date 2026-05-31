@@ -860,7 +860,10 @@ func (w *AppServerWorker) Compact(ctx context.Context, args map[string]any) erro
 		return fmt.Errorf("codexcli: no active thread")
 	}
 	_, err := w.manager.CompactThread(tid)
-	return fmt.Errorf("codexcli: compact: %w", err)
+	if err != nil {
+		return fmt.Errorf("codexcli: compact: %w", err)
+	}
+	return nil
 }
 
 func (w *AppServerWorker) Clear(ctx context.Context) error {
@@ -894,7 +897,10 @@ func (w *AppServerWorker) Rewind(ctx context.Context, targetID string) error {
 		}
 	}
 	_, err := w.manager.RollbackThread(tid, numTurns)
-	return fmt.Errorf("codexcli: rewind: %w", err)
+	if err != nil {
+		return fmt.Errorf("codexcli: rewind: %w", err)
+	}
+	return nil
 }
 
 // sandboxFromSession returns the session-level sandbox override if set,
