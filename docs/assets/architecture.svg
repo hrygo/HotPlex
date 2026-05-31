@@ -29,11 +29,10 @@
       <stop offset="100%" stop-color="#6366f1" />
     </linearGradient>
     
-    <!-- HotPlex Logo Text Gradient -->
-    <linearGradient id="grad-hotplex" x1="0%" y1="0%" x2="100%" y2="0%">
+    <!-- HotPlex Logo "Hot" Gradient -->
+    <linearGradient id="grad-hot" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#f43f5e" />
-      <stop offset="60%" stop-color="#a855f7" />
-      <stop offset="100%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#ea580c" />
     </linearGradient>
     
     <!-- Worker Gradients -->
@@ -168,8 +167,8 @@
       <!-- Tech Logo / Chip representation -->
       <rect width="18" height="18" rx="4" fill="#8b5cf6" />
       <path d="M 5 9 L 13 9 M 9 5 L 9 13" stroke="#ffffff" stroke-width="1.5" />
-      <text x="26" y="14" font-family="system-ui, -apple-system, sans-serif" letter-spacing="0.8">
-        <tspan fill="url(#grad-hotplex)" font-size="14" font-weight="900">HOTPLEX</tspan>
+      <text x="26" y="14" font-family="system-ui, -apple-system, sans-serif" letter-spacing="0.5">
+        <tspan fill="url(#grad-hot)" font-size="14" font-weight="900" letter-spacing="0.2">Hot</tspan><tspan fill="#ffffff" font-size="14" font-weight="900" letter-spacing="0.2">Plex</tspan>
         <tspan fill="#64748b" font-size="10" font-weight="700" letter-spacing="0.5"> GATEWAY ENGINE</tspan>
       </text>
     </g>
