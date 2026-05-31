@@ -539,7 +539,7 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 	}
 
 	if !resumed {
-		// TODO(#603-per-bot-excl): per-bot injectExclude from the messaging adapter
+		// TODO(inject-per-bot): per-bot injectExclude from the messaging adapter
 		// is not persisted in the session record, so SwitchWorkDir falls back to
 		// platform/global from the atomic config map. Fix requires storing
 		// injectExclude in the session record or giving bridge access to adapters.

@@ -986,6 +986,9 @@ func buildMCPConfigJSON(cfg *config.Config) string {
 // buildAgentConfigExclude builds the platform → inject_exclude map for non-platform
 // sessions (webchat/API/cron). The "" key holds the global default; platform-specific
 // keys override it. Nil values are omitted (meaning "not configured, fall through").
+//
+// NOTE: keep platform keys in sync with resolveInjectExcludeForAdmin (bot_config_adapter.go)
+// and applyInjectExclude callers (messaging_init.go).
 func buildAgentConfigExclude(cfg *config.Config) map[string][]string {
 	m := make(map[string][]string)
 	if cfg.AgentConfig.InjectExclude != nil {
