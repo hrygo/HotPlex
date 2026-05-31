@@ -548,21 +548,21 @@ func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string
 
 func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	if w.recvCh != nil {
+		w.mu.Unlock()
 		return fmt.Errorf("codexcli: app-server already started")
 	}
 
 	if w.doneCh == nil {
 		w.doneCh = make(chan struct{})
 	}
+	w.mu.Unlock()
 
+	// RPC calls outside lock to avoid blocking other goroutines (P1 fix).
 	crashCh, err := w.manager.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("codexcli: acquire: %w", err)
 	}
-	w.crashSub = crashCh
 
 	cfg := resolveConfig()
 	if cfg.Sandbox == "" || cfg.Sandbox == "danger-full-access" {
@@ -583,11 +583,12 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 		return fmt.Errorf("codexcli: parse thread/start: %w", err)
 	}
 
+	w.mu.Lock()
 	w.threadID = result.Thread.ID
 	w.sessionID = session.SessionID
 	w.userID = session.UserID
 	w.origSession = session
-
+	w.crashSub = crashCh
 	w.recvCh = w.manager.Subscribe(w.threadID, w.sessionID)
 	w.commands = NewServerCommander(w.manager, w.threadID)
 	w.conn = &appConn{
@@ -598,6 +599,7 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	}
 	w.StartTime = time.Now()
 	w.SetLastIO(w.StartTime)
+	w.mu.Unlock()
 
 	return nil
 }
@@ -650,9 +652,22 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 	return nil
 }
 
-func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
-	// Clean up old subscription, keeping the manager reference (no Release).
-	// Follows the same pattern as ResetContext: reuse the manager process.
+// ─── AppServerWorker lifecycle helpers ────────────────────────────────
+
+// closeAndMarkDone closes doneCh and marks the worker as closed.
+// This ensures Wait() is always unblocked even on error paths (P1 fix).
+// Caller must hold w.mu.
+func (w *AppServerWorker) closeAndMarkDone() {
+	w.closed = true
+	if w.doneCh != nil {
+		close(w.doneCh)
+		w.doneCh = nil
+	}
+}
+
+// cleanupOldThread closes the old connection and unsubscribes from the
+// old thread. Shared by Resume and ResetContext.
+func (w *AppServerWorker) cleanupOldThread() {
 	w.mu.Lock()
 	oldConn := w.conn
 	oldThreadID := w.threadID
@@ -667,8 +682,11 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
 		w.manager.Unsubscribe(oldThreadID)
 	}
+}
 
-	// Reset lifecycle state so subsequent Terminate/Kill can release cleanly.
+// resetLifecycleState resets lifecycle state for a new thread attempt.
+// After calling this, Terminate/Kill can release the new thread cleanly.
+func (w *AppServerWorker) resetLifecycleState() {
 	w.mu.Lock()
 	w.closed = false
 	w.releaseOnce = sync.Once{}
@@ -676,13 +694,16 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 		w.doneCh = make(chan struct{})
 	}
 	w.mu.Unlock()
+}
 
-	// Start fresh thread on same manager (same process, no Acquire needed).
+// startNewThread starts a fresh thread on the manager and wires up worker
+// state. errPrefix is used in error messages for caller identification.
+func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix string) error {
 	if w.manager != nil && !w.manager.IsRunning() {
 		w.mu.Lock()
-		w.closed = true
+		w.closeAndMarkDone()
 		w.mu.Unlock()
-		return fmt.Errorf("codexcli: manager process not running, cannot resume")
+		return fmt.Errorf("codexcli: %s: manager process not running", errPrefix)
 	}
 
 	cfg := resolveConfig()
@@ -691,17 +712,17 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 	resp, err := w.manager.Call("thread/start", params)
 	if err != nil {
 		w.mu.Lock()
-		w.closed = true
+		w.closeAndMarkDone()
 		w.mu.Unlock()
-		return fmt.Errorf("codexcli: resume thread/start: %w", err)
+		return fmt.Errorf("codexcli: %s thread/start: %w", errPrefix, err)
 	}
 
 	var result ThreadStartResult
 	if err := json.Unmarshal(resp, &result); err != nil {
 		w.mu.Lock()
-		w.closed = true
+		w.closeAndMarkDone()
 		w.mu.Unlock()
-		return fmt.Errorf("codexcli: resume parse thread/start: %w", err)
+		return fmt.Errorf("codexcli: %s parse thread/start: %w", errPrefix, err)
 	}
 
 	w.mu.Lock()
@@ -723,6 +744,14 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 	w.mu.Unlock()
 
 	return nil
+}
+
+// ─── AppServerWorker lifecycle ────────────────────────────────────────
+
+func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
+	w.cleanupOldThread()
+	w.resetLifecycleState()
+	return w.startNewThread(session, "resume")
 }
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
@@ -791,78 +820,17 @@ func (w *AppServerWorker) release() {
 
 func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 	w.mu.Lock()
-	oldConn := w.conn
-	oldThreadID := w.threadID
 	origSess := w.origSession
 	w.mu.Unlock()
 
-	// Close old conn → closes old recvCh → old forwardEvents exits range loop.
-	if oldConn != nil {
-		_ = oldConn.Close()
-	}
+	w.cleanupOldThread()
+	w.resetLifecycleState()
 
-	// Unsubscribe old thread (keep manager reference, no Release).
-	if oldThreadID != "" && w.manager != nil {
-		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
-		w.manager.Unsubscribe(oldThreadID)
-	}
-
-	// Reset lifecycle state so subsequent Terminate/Kill can release the new thread.
-	w.mu.Lock()
-	w.closed = false
-	w.releaseOnce = sync.Once{}
-	w.doneCh = make(chan struct{})
-	w.mu.Unlock()
-
-	// Start fresh thread on same manager (same process, no Acquire needed).
 	// If the process crashed between turns, bail out — bridge will Terminate+Start.
 	if origSess.SessionID == "" {
 		return nil
 	}
-
-	if w.manager != nil && !w.manager.IsRunning() {
-		w.mu.Lock()
-		w.closed = true
-		w.mu.Unlock()
-		return fmt.Errorf("codexcli: manager process not running, cannot reset")
-	}
-
-	cfg := resolveConfig()
-	params := buildThreadStartParams(origSess, cfg)
-
-	resp, err := w.manager.Call("thread/start", params)
-	if err != nil {
-		// thread/start failed — mark closed so Terminate/release skips cleanup.
-		w.mu.Lock()
-		w.closed = true
-		w.mu.Unlock()
-		return fmt.Errorf("codexcli: reset thread/start: %w", err)
-	}
-
-	var result ThreadStartResult
-	if err := json.Unmarshal(resp, &result); err != nil {
-		w.mu.Lock()
-		w.closed = true
-		w.mu.Unlock()
-		return fmt.Errorf("codexcli: reset parse thread/start: %w", err)
-	}
-
-	w.mu.Lock()
-	w.threadID = result.Thread.ID
-	w.turnID = ""
-	w.recvCh = w.manager.Subscribe(result.Thread.ID, origSess.SessionID)
-	w.commands = NewServerCommander(w.manager, result.Thread.ID)
-	w.conn = &appConn{
-		userID:    origSess.UserID,
-		sessionID: origSess.SessionID,
-		recvCh:    w.recvCh,
-		manager:   w.manager,
-	}
-	w.StartTime = time.Now()
-	w.SetLastIO(w.StartTime)
-	w.mu.Unlock()
-
-	return nil
+	return w.startNewThread(origSess, "reset")
 }
 
 func (w *AppServerWorker) Conn() worker.SessionConn {
@@ -917,7 +885,7 @@ func (w *AppServerWorker) Compact(ctx context.Context, args map[string]any) erro
 		return fmt.Errorf("codexcli: no active thread")
 	}
 	_, err := w.manager.CompactThread(tid)
-	return err
+	return fmt.Errorf("codexcli: compact: %w", err)
 }
 
 func (w *AppServerWorker) Clear(ctx context.Context) error {
