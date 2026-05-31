@@ -451,6 +451,7 @@ func (w *ExecWorker) SetReadLineFn(fn func() (string, error)) {
 
 var _ worker.Worker = (*AppServerWorker)(nil)
 var _ worker.WorkerCommander = (*AppServerWorker)(nil)
+var _ worker.ControlRequester = (*AppServerWorker)(nil)
 
 type AppServerWorker struct {
 	*base.BaseWorker
@@ -520,6 +521,10 @@ func (w *AppServerWorker) EnvBlocklist() []string  { return EnvBlocklist }
 func (w *AppServerWorker) SessionStoreDir() string { return "" }
 func (w *AppServerWorker) MaxTurns() int           { return 0 }
 func (w *AppServerWorker) Modalities() []string    { return []string{"text", "code", "image"} }
+
+func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
+	return w.commands.SendControlRequest(ctx, subtype, body)
+}
 
 func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
@@ -622,6 +627,16 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 }
 
 func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
+	w.mu.Lock()
+	if w.recvCh != nil {
+		w.closed = true
+		w.recvCh = nil
+		if w.conn != nil {
+			_ = w.conn.Close()
+		}
+		w.conn = nil
+	}
+	w.mu.Unlock()
 	return w.Start(ctx, session)
 }
 
@@ -721,6 +736,9 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 	}
 
 	if w.manager != nil && !w.manager.IsRunning() {
+		w.mu.Lock()
+		w.closed = true
+		w.mu.Unlock()
 		return fmt.Errorf("codexcli: manager process not running, cannot reset")
 	}
 
@@ -738,11 +756,15 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 
 	var result ThreadStartResult
 	if err := json.Unmarshal(resp, &result); err != nil {
+		w.mu.Lock()
+		w.closed = true
+		w.mu.Unlock()
 		return fmt.Errorf("codexcli: reset parse thread/start: %w", err)
 	}
 
 	w.mu.Lock()
 	w.threadID = result.Thread.ID
+	w.turnID = ""
 	w.recvCh = w.manager.Subscribe(result.Thread.ID, origSess.SessionID)
 	w.commands = NewServerCommander(w.manager, result.Thread.ID)
 	w.conn = &appConn{
@@ -895,6 +917,18 @@ func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]a
 	}
 	if session.IgnoreRules {
 		params["ignoreRules"] = true
+	}
+	if session.IgnoreUserConfig {
+		params["ignoreUserConfig"] = true
+	}
+	if session.LocalProvider {
+		params["localProvider"] = true
+	}
+	if session.BypassHookTrust {
+		params["bypassHookTrust"] = true
+	}
+	if session.OutputFile != "" {
+		params["outputFile"] = session.OutputFile
 	}
 	if session.ConfigProfile != "" {
 		params["profile"] = session.ConfigProfile

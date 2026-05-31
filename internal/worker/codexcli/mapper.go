@@ -296,9 +296,13 @@ func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemError:
+		var errMsg string
+		if item.Error != nil {
+			errMsg = item.Error.Message
+		}
 		return []*events.Envelope{
 			newEnvelope(events.Error, events.ErrorData{
-				Code: "CODEX_ITEM_ERROR", Message: item.Error.Message,
+				Code: "CODEX_ITEM_ERROR", Message: errMsg,
 			}, m.sessionID, m.nextSeq()),
 		}
 	}
