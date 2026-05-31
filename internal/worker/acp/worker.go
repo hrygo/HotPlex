@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -63,6 +64,50 @@ func InitConfig(cfg config.ACPConfig) {
 var acpEnvBlocklist = []string{
 	"CLAUDECODE",
 	"HOTPLEX_",
+}
+
+// parseMCPServers extracts the mcpServers array from the JSON config string
+// produced by Bridge's buildWorkerInfo. The input format is {"mcpServers":{...}}.
+// Returns an empty slice if the config is empty or unparseable.
+func parseMCPServers(mcpConfig string) []any {
+	if mcpConfig == "" {
+		return nil
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(mcpConfig), &raw); err != nil {
+		return nil
+	}
+	servers, ok := raw["mcpServers"]
+	if !ok {
+		return nil
+	}
+	// mcpServers is typically a map → normalize to []any for ACP protocol.
+	// normalizeMCPServers in client.go handles nil → []any{}.
+	return normalizeMCPServersToArray(servers)
+}
+
+// normalizeMCPServersToArray converts the mcpServers value to []any.
+// ACP session/new expects an array; config provides either a map or array.
+func normalizeMCPServersToArray(servers any) []any {
+	if servers == nil {
+		return nil
+	}
+	switch v := servers.(type) {
+	case []any:
+		return v
+	case map[string]any:
+		// Convert map to array of named server configs.
+		result := make([]any, 0, len(v))
+		for name, cfg := range v {
+			if m, ok := cfg.(map[string]any); ok {
+				m["name"] = name
+				result = append(result, m)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 // Worker implements the ACP (Agent Client Protocol) worker adapter.
@@ -185,15 +230,16 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	// Create or load session.
+	mcpServers := parseMCPServers(session.MCPConfig)
 	var acpSessID string
 	var historyLost bool
 	if session.WorkerSessionID != "" {
 		// Resume existing session.
-		sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, nil)
+		sessResult, loadErr := client.LoadSession(hctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
 		if loadErr != nil {
 			w.Log.Error("acp: load session failed, conversation history will be lost",
 				"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID, "error", loadErr)
-			newSess, newErr := client.NewSession(hctx, session.ProjectDir, nil)
+			newSess, newErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
 			if newErr != nil {
 				_ = w.Proc.Kill()
 				return fmt.Errorf("acp: new session: %w", newErr)
@@ -204,7 +250,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			acpSessID = sessResult.SessionID
 		}
 	} else {
-		sessResult, sessErr := client.NewSession(hctx, session.ProjectDir, nil)
+		sessResult, sessErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
 		if sessErr != nil {
 			_ = w.Proc.Kill()
 			return fmt.Errorf("acp: new session: %w", sessErr)
