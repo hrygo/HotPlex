@@ -629,20 +629,78 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 }
 
 func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
+	// Clean up old subscription, keeping the manager reference (no Release).
+	// Follows the same pattern as ResetContext: reuse the manager process.
 	w.mu.Lock()
-	if w.recvCh != nil {
-		if w.threadID != "" {
-			w.manager.Unsubscribe(w.threadID)
-		}
-		w.closed = true
-		w.recvCh = nil
-		if w.conn != nil {
-			_ = w.conn.Close()
-		}
-		w.conn = nil
+	oldConn := w.conn
+	oldThreadID := w.threadID
+	w.recvCh = nil
+	w.conn = nil
+	w.mu.Unlock()
+
+	if oldConn != nil {
+		_ = oldConn.Close()
+	}
+	if oldThreadID != "" && w.manager != nil {
+		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
+		w.manager.Unsubscribe(oldThreadID)
+	}
+
+	// Reset lifecycle state so subsequent Terminate/Kill can release cleanly.
+	w.mu.Lock()
+	w.closed = false
+	w.releaseOnce = sync.Once{}
+	if w.doneCh == nil {
+		w.doneCh = make(chan struct{})
 	}
 	w.mu.Unlock()
-	return w.Start(ctx, session)
+
+	// Start fresh thread on same manager (same process, no Acquire needed).
+	if w.manager != nil && !w.manager.IsRunning() {
+		w.mu.Lock()
+		w.closed = true
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: manager process not running, cannot resume")
+	}
+
+	cfg := resolveConfig()
+	params := buildThreadStartParams(session, cfg)
+
+	resp, err := w.manager.Call("thread/start", params)
+	if err != nil {
+		w.mu.Lock()
+		w.closed = true
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: resume thread/start: %w", err)
+	}
+
+	var result ThreadStartResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		w.mu.Lock()
+		w.closed = true
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: resume parse thread/start: %w", err)
+	}
+
+	w.mu.Lock()
+	w.threadID = result.Thread.ID
+	w.turnID = ""
+	w.sessionID = session.SessionID
+	w.userID = session.UserID
+	w.origSession = session
+	w.recvCh = w.manager.Subscribe(result.Thread.ID, session.SessionID)
+	w.commands = NewServerCommander(w.manager, result.Thread.ID)
+	w.conn = &appConn{
+		userID:    session.UserID,
+		sessionID: session.SessionID,
+		recvCh:    w.recvCh,
+		manager:   w.manager,
+	}
+	w.StartTime = time.Now()
+	w.SetLastIO(w.StartTime)
+	w.mu.Unlock()
+
+	return nil
 }
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
