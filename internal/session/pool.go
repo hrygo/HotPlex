@@ -82,7 +82,9 @@ func (p *PoolManager) Acquire(userID string) error {
 	if p.maxSize > 0 {
 		metrics.PoolUtilization.Set(float64(p.totalCount) / float64(p.maxSize))
 	}
-	metrics.PoolAcquireTotal.WithLabelValues("success").Inc()
+	// Note: PoolAcquireTotal["success"] is NOT recorded here because the
+	// overall attach may still fail (e.g., memory quota). The caller records
+	// the final outcome after all checks pass.
 	p.log.Debug("pool: acquired", "user_id", userID, "total", p.totalCount)
 	return nil
 }

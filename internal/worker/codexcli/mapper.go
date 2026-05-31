@@ -247,6 +247,9 @@ func (m *Mapper) mapTurnFailed() []*events.Envelope {
 }
 
 func (m *Mapper) mapError(msg string) []*events.Envelope {
+	if msg == "" {
+		msg = "unknown error"
+	}
 	return []*events.Envelope{
 		newEnvelope(events.Error, events.ErrorData{
 			Code: "CODEX_ERROR", Message: msg,

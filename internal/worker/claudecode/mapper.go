@@ -192,10 +192,14 @@ func (m *Mapper) mapResult(p *ResultPayload) ([]*events.Envelope, error) {
 	}
 
 	if !p.Success {
+		msg := p.Message
+		if msg == "" {
+			msg = "worker execution failed"
+		}
 		return []*events.Envelope{
 			events.NewEnvelope(aep.NewID(), m.sessionID, m.seqGen(), events.Error, events.ErrorData{
 				Code:    events.ErrCodeInternalError,
-				Message: p.Message,
+				Message: msg,
 			}),
 			events.NewEnvelope(aep.NewID(), m.sessionID, m.seqGen(), events.Done, events.DoneData{
 				Success: false,

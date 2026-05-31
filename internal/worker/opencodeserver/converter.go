@@ -161,7 +161,10 @@ func (c *Converter) handleStepFailed(sessionID string, props json.RawMessage) []
 		msg = evt.Error.Message
 	}
 	return []*events.Envelope{
-		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{Message: msg}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
+			Code:    events.ErrCodeInternalError,
+			Message: msg,
+		}),
 	}
 }
 
@@ -329,7 +332,10 @@ func (c *Converter) handleSessionError(sessionID string, props json.RawMessage) 
 	}
 	delete(c.states, sessionID)
 	return []*events.Envelope{
-		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{Message: msg}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
+			Code:    events.ErrCodeInternalError,
+			Message: msg,
+		}),
 	}
 }
 
