@@ -630,6 +630,7 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		ACPCommand:      si.PlatformKey[worker.ACPCommandPlatformKey],
 		ForkSession:     si.PlatformKey["_fork_session"] == "true",
 		JSONSchema:      si.PlatformKey["_json_schema"],
+		// TODO: wire _fork_session/_json_schema from platform adapters in UX follow-up (see #589 Phase 3).
 	}
 
 	// MCP config injection — 3 scenarios:

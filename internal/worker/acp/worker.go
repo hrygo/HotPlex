@@ -71,7 +71,11 @@ func InitConfig(cfg config.ACPConfig) {
 		return
 	}
 	commandParts.Store(parts)
-	configArgs.Store(cfg.Args)
+	args := cfg.Args
+	if args == nil {
+		args = []string{}
+	}
+	configArgs.Store(args)
 	autoApproveDefault.Store(cfg.AutoApprove)
 	debugEnabled.Store(cfg.Debug)
 	if err := security.RegisterCommand(parts[0]); err != nil {
@@ -628,6 +632,7 @@ func (w *Worker) resetSession(ctx context.Context) error {
 	w.acpSessionID = result.SessionID
 	w.mapper.Reset()
 	w.systemPromptInjected.Store(false)
+	w.jsonSchemaInjected.Store(false)
 	// Clear stale pending entries from the old session.
 	w.pendingPerm.Range(func(key, _ any) bool {
 		w.pendingPerm.Delete(key)

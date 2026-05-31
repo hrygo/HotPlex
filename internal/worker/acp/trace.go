@@ -3,7 +3,6 @@ package acp
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -45,6 +44,7 @@ func NewTraceWriter(dir, sessionID string) (*TraceWriter, error) {
 }
 
 // Log writes a single trace entry. Safe to call on a nil TraceWriter (no-op).
+// Also checks file size and triggers rotation when the configured max is exceeded.
 func (tw *TraceWriter) Log(direction string, msg any) {
 	if tw == nil {
 		return
@@ -55,8 +55,39 @@ func (tw *TraceWriter) Log(direction string, msg any) {
 		"msg": msg,
 	}
 	tw.mu.Lock()
+	if tw.enc == nil {
+		tw.mu.Unlock()
+		return
+	}
 	_ = tw.enc.Encode(entry)
+	// Check rotation after write (best-effort, ignore error).
+	if f, err := tw.file.Stat(); err == nil && f.Size() >= tw.maxSize {
+		tw.rotateLocked()
+	}
 	tw.mu.Unlock()
+}
+
+// rotateLocked performs file rotation. Caller must hold tw.mu.
+// On failure, tw.file is set to nil so subsequent Log() calls degrade gracefully.
+func (tw *TraceWriter) rotateLocked() {
+	if err := tw.file.Close(); err != nil {
+		return
+	}
+	rotated := tw.path + ".1"
+	_ = os.Remove(rotated)
+	if err := os.Rename(tw.path, rotated); err != nil {
+		tw.file = nil
+		tw.enc = nil
+		return
+	}
+	f, err := os.OpenFile(tw.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		tw.file = nil
+		tw.enc = nil
+		return
+	}
+	tw.file = f
+	tw.enc = json.NewEncoder(f)
 }
 
 // Close flushes and closes the trace file.
@@ -70,14 +101,16 @@ func (tw *TraceWriter) Close() error {
 }
 
 // Rotate checks the file size and rotates if it exceeds maxSize.
-// The old file is renamed with a .1 suffix and a new file is created.
+// Safe to call on nil TraceWriter. Rotation is also triggered automatically by Log().
 func (tw *TraceWriter) Rotate(maxSize int64) error {
 	if tw == nil {
 		return nil
 	}
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
-
+	if tw.file == nil {
+		return nil
+	}
 	info, err := tw.file.Stat()
 	if err != nil {
 		return fmt.Errorf("acp trace: stat: %w", err)
@@ -85,26 +118,7 @@ func (tw *TraceWriter) Rotate(maxSize int64) error {
 	if info.Size() < maxSize {
 		return nil
 	}
-
-	// Close current file.
-	if err := tw.file.Close(); err != nil {
-		return fmt.Errorf("acp trace: close for rotate: %w", err)
-	}
-
-	// Rename old file.
-	rotated := tw.path + ".1"
-	_ = os.Remove(rotated) // ignore error if .1 doesn't exist
-	if err := os.Rename(tw.path, rotated); err != nil {
-		slog.Warn("acp trace: failed to rename for rotation", "error", err)
-	}
-
-	// Open new file.
-	f, err := os.OpenFile(tw.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return fmt.Errorf("acp trace: reopen after rotate: %w", err)
-	}
-	tw.file = f
-	tw.enc = json.NewEncoder(f)
+	tw.rotateLocked()
 	return nil
 }
 
