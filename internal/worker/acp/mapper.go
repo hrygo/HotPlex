@@ -76,6 +76,7 @@ func (m *ACPMapper) SetTurnActive() { m.turnActive.Store(true) }
 // in a single unmarshal pass, eliminating triple-deserialization on the streaming path.
 func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelope {
 	if notif.Method != "session/update" {
+		m.log.Debug("acp mapper: skipping non-session/update notification", "method", notif.Method)
 		return nil
 	}
 
@@ -122,6 +123,8 @@ func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelo
 	case "user_message_chunk":
 		return nil // echo of user input, ignored
 	default:
+		m.log.Warn("acp mapper: unknown sessionUpdate type, skipping",
+			"type", disc.SessionUpdate)
 		return nil
 	}
 }
