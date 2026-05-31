@@ -97,6 +97,10 @@ func (e *pcEntry) RouteWriteData(data []byte, eventType events.Kind) error {
 	return e.RouteWrite(context.Background(), env)
 }
 
+// PreferEnvelope returns true: pcEntry needs the original envelope to preserve
+// json:"-" fields (e.g. OwnerID) that EncodeJSON omits from pre-encoded bytes.
+func (e *pcEntry) PreferEnvelope() bool { return true }
+
 func (e *pcEntry) WriteCtx(_ context.Context, env *events.Envelope) error {
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {

@@ -487,6 +487,7 @@ type AppServerWorker struct {
 	recvCh      chan *events.Envelope
 	commands    *ServerCommander
 	closed      bool
+	started     bool
 	sessionID   string
 	conn        *appConn
 
@@ -552,6 +553,10 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 		w.mu.Unlock()
 		return fmt.Errorf("codexcli: app-server already started")
 	}
+	// Sentinel: mark started under lock to close TOCTOU window between
+	// unlock and re-lock. Bridge serializes Start per session, but this
+	// is defensive against future callers.
+	w.started = true
 
 	if w.doneCh == nil {
 		w.doneCh = make(chan struct{})
@@ -561,46 +566,20 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 	// RPC calls outside lock to avoid blocking other goroutines (P1 fix).
 	crashCh, err := w.manager.Acquire(ctx)
 	if err != nil {
+		// Close doneCh so Wait() does not block on this error path.
+		w.mu.Lock()
+		w.closeAndMarkDone()
+		w.mu.Unlock()
 		return fmt.Errorf("codexcli: acquire: %w", err)
 	}
-
-	cfg := resolveConfig()
-	if cfg.Sandbox == "" || cfg.Sandbox == "danger-full-access" {
-		w.Log.Warn("codexcli: sandbox is not restricted; commands run with full permissions", "sandbox", cfg.Sandbox)
-	}
-
-	params := buildThreadStartParams(session, cfg)
-
-	resp, err := w.manager.Call("thread/start", params)
-	if err != nil {
-		w.manager.Release()
-		return fmt.Errorf("codexcli: thread/start: %w", err)
-	}
-
-	var result ThreadStartResult
-	if err := json.Unmarshal(resp, &result); err != nil {
-		w.manager.Release()
-		return fmt.Errorf("codexcli: parse thread/start: %w", err)
-	}
-
 	w.mu.Lock()
-	w.threadID = result.Thread.ID
-	w.sessionID = session.SessionID
-	w.userID = session.UserID
-	w.origSession = session
 	w.crashSub = crashCh
-	w.recvCh = w.manager.Subscribe(w.threadID, w.sessionID)
-	w.commands = NewServerCommander(w.manager, w.threadID)
-	w.conn = &appConn{
-		userID:    w.userID,
-		sessionID: w.sessionID,
-		recvCh:    w.recvCh,
-		manager:   w.manager,
-	}
-	w.StartTime = time.Now()
-	w.SetLastIO(w.StartTime)
 	w.mu.Unlock()
 
+	if err := w.startNewThread(session, "start"); err != nil {
+		w.manager.Release()
+		return err
+	}
 	return nil
 }
 
@@ -828,6 +807,9 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 
 	// If the process crashed between turns, bail out — bridge will Terminate+Start.
 	if origSess.SessionID == "" {
+		w.mu.Lock()
+		w.closeAndMarkDone()
+		w.mu.Unlock()
 		return nil
 	}
 	return w.startNewThread(origSess, "reset")
@@ -919,7 +901,7 @@ func (w *AppServerWorker) Rewind(ctx context.Context, targetID string) error {
 		}
 	}
 	_, err := w.manager.RollbackThread(tid, numTurns)
-	return err
+	return fmt.Errorf("codexcli: rewind: %w", err)
 }
 
 // sandboxFromSession returns the session-level sandbox override if set,
