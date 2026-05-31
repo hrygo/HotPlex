@@ -159,36 +159,53 @@
       <text x="26" y="14" fill="#ffffff" font-size="13" font-family="system-ui, -apple-system, sans-serif" font-weight="800" letter-spacing="0.5">HOTPLEX GATEWAY ENGINE</text>
     </g>
     
-    <!-- Sub-Card 1: AEP v1 Engine -->
-    <rect x="190" y="242" width="205" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
-    <circle cx="206" cy="268" r="8" fill="#a855f7" fill-opacity="0.15" />
-    <path d="M202,268 L210,268 M206,264 L206,272" stroke="#c084fc" stroke-width="1.5"/>
-    <text x="222" y="263" fill="#f1f5f9" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="600">AEP v1 Engine</text>
-    <text x="222" y="275" fill="#8b5cf6" font-size="9" font-family="system-ui, -apple-system, sans-serif">Full-Duplex WS &amp; Event Hub</text>
+    <!-- Sub-Card 1: AEP Hub & Bridge -->
+    <rect x="185" y="242" width="140" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="198" cy="268" r="8" fill="#a855f7" fill-opacity="0.15" />
+    <path d="M194,268 L202,268 M198,264 L198,272" stroke="#c084fc" stroke-width="1.5"/>
+    <text x="212" y="263" fill="#f1f5f9" font-size="9.5" font-family="system-ui, -apple-system, sans-serif" font-weight="600">AEP WS Hub</text>
+    <text x="212" y="275" fill="#8b5cf6" font-size="7.5" font-family="system-ui, -apple-system, sans-serif">Full-Duplex WS Hub</text>
 
     <!-- Sub-Card 2: Brain Orchestrator -->
-    <rect x="405" y="242" width="205" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
-    <circle cx="421" cy="268" r="8" fill="#ec4899" fill-opacity="0.15" />
-    <circle cx="421" cy="268" r="4" stroke="#f472b6" stroke-width="1.2" fill="none"/>
-    <path d="M 421 264 C 423 264, 425 266, 425 268 C 425 270, 423 272, 421 272" stroke="#f472b6" stroke-width="1.2" fill="none" />
-    <text x="437" y="263" fill="#f1f5f9" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Brain Orchestrator</text>
-    <text x="437" y="275" fill="#f472b6" font-size="9" font-family="system-ui, -apple-system, sans-serif">Intent Router &amp; Multi-LLM</text>
+    <rect x="330" y="242" width="140" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="343" cy="268" r="8" fill="#ec4899" fill-opacity="0.15" />
+    <circle cx="343" cy="268" r="4" stroke="#f472b6" stroke-width="1.2" fill="none"/>
+    <path d="M 343 264 C 345 264, 347 266, 347 268 C 347 270, 345 272, 343 272" stroke="#f472b6" stroke-width="1.2" fill="none" />
+    <text x="357" y="263" fill="#f1f5f9" font-size="9.5" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Brain Core</text>
+    <text x="357" y="275" fill="#f472b6" font-size="7.5" font-family="system-ui, -apple-system, sans-serif">Intent Router &amp; Cache</text>
 
-    <!-- Sub-Card 3: Cron Scheduler -->
-    <rect x="190" y="308" width="205" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
-    <circle cx="206" cy="334" r="8" fill="#3b82f6" fill-opacity="0.15" />
-    <circle cx="206" cy="334" r="5" stroke="#60a5fa" stroke-width="1.2" fill="none"/>
-    <line x1="206" y1="331" x2="206" y2="334" stroke="#60a5fa" stroke-width="1.2"/>
-    <line x1="206" y1="334" x2="209" y2="334" stroke="#60a5fa" stroke-width="1.2"/>
-    <text x="222" y="329" fill="#f1f5f9" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Cron Scheduler</text>
-    <text x="222" y="341" fill="#93c5fd" font-size="9" font-family="system-ui, -apple-system, sans-serif">Autonomous Scheduled Tasks</text>
+    <!-- Sub-Card 3: Session Manager -->
+    <rect x="475" y="242" width="140" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="488" cy="268" r="8" fill="#3b82f6" fill-opacity="0.15" />
+    <ellipse cx="488" cy="265" rx="4" ry="2" fill="none" stroke="#60a5fa" stroke-width="1.2" />
+    <path d="M484,265 L484,271 A4,2 0 0,0 492,271 L492,265" stroke="#60a5fa" stroke-width="1.2" fill="none" />
+    <text x="502" y="263" fill="#f1f5f9" font-size="9.5" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Session Manager</text>
+    <text x="502" y="275" fill="#93c5fd" font-size="7.5" font-family="system-ui, -apple-system, sans-serif">5-State Machine &amp; DB</text>
 
-    <!-- Sub-Card 4: Meta-Cognition & Guard -->
-    <rect x="405" y="308" width="205" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
-    <circle cx="421" cy="334" r="8" fill="#10b981" fill-opacity="0.15" />
-    <path d="M417,331 L421,329 L425,331 L425,336 C425,339 421,341 421,341 C421,341 417,339 417,336 Z" stroke="#34d399" stroke-width="1.2" fill="none"/>
-    <text x="437" y="329" fill="#f1f5f9" font-size="11" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Meta-Cognition Guard</text>
-    <text x="437" y="341" fill="#34d399" font-size="9" font-family="system-ui, -apple-system, sans-serif">XML Sanitizer &amp; Safety base</text>
+    <!-- Sub-Card 4: B/C Dual Channel -->
+    <rect x="185" y="308" width="140" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="198" cy="334" r="8" fill="#10b981" fill-opacity="0.15" />
+    <path d="M195,331 L201,337 M201,331 L195,337" stroke="#34d399" stroke-width="1.2" />
+    <text x="212" y="329" fill="#f1f5f9" font-size="9.5" font-family="system-ui, -apple-system, sans-serif" font-weight="600">B/C Dual Channel</text>
+    <text x="212" y="341" fill="#34d399" font-size="7.5" font-family="system-ui, -apple-system, sans-serif">Directives &amp; Context</text>
+
+    <!-- Sub-Card 5: Cron Scheduler -->
+    <rect x="330" y="308" width="140" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="343" cy="334" r="8" fill="#f59e0b" fill-opacity="0.15" />
+    <circle cx="343" cy="334" r="5" stroke="#fbbf24" stroke-width="1.2" fill="none"/>
+    <line x1="343" y1="331" x2="343" y2="334" stroke="#fbbf24" stroke-width="1.2"/>
+    <line x1="343" y1="334" x2="346" y2="334" stroke="#fbbf24" stroke-width="1.2"/>
+    <text x="357" y="329" fill="#f1f5f9" font-size="9.5" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Cron Scheduler</text>
+    <text x="357" y="341" fill="#fbbf24" font-size="7.5" font-family="system-ui, -apple-system, sans-serif">Auto Schedule Tasks</text>
+
+    <!-- Sub-Card 6: Speech & TTS Pipe -->
+    <rect x="475" y="308" width="140" height="52" rx="8" fill="#131024" stroke="#2e2652" stroke-width="1" />
+    <circle cx="488" cy="334" r="8" fill="#06b6d4" fill-opacity="0.15" />
+    <path d="M485,331 A2,2 0 0,1 491,331 L491,335 A2,2 0 0,1 485,335 Z" stroke="#22d3ee" stroke-width="1" fill="none" />
+    <path d="M483,333 L483,335 A5,5 0 0,0 493,335 L493,333" stroke="#22d3ee" stroke-width="1.2" fill="none" />
+    <line x1="488" y1="337" x2="488" y2="340" stroke="#22d3ee" stroke-width="1.2" />
+    <text x="502" y="329" fill="#f1f5f9" font-size="9.5" font-family="system-ui, -apple-system, sans-serif" font-weight="600">Speech &amp; TTS Pipe</text>
+    <text x="502" y="341" fill="#22d3ee" font-size="7.5" font-family="system-ui, -apple-system, sans-serif">SenseVoice &amp; Edge-TTS</text>
   </g>
 
   <!-- ==================== BOTTOM LAYER: WORKERS ==================== -->
