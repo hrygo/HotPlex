@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -16,11 +17,12 @@ import (
 // Each line: {"ts":"...","dir":"→|←","msg":{...}}
 // Rotation: when file exceeds maxSize, renamed to .1 and a new file is created.
 type TraceWriter struct {
-	mu      sync.Mutex
-	file    *os.File
-	enc     *json.Encoder
-	path    string
-	maxSize int64
+	mu           sync.Mutex
+	file         *os.File
+	enc          *json.Encoder
+	path         string
+	maxSize      int64
+	writtenBytes atomic.Int64
 }
 
 // NewTraceWriter creates a trace writer that appends to a JSONL file.
@@ -44,24 +46,33 @@ func NewTraceWriter(dir, sessionID string) (*TraceWriter, error) {
 }
 
 // Log writes a single trace entry. Safe to call on a nil TraceWriter (no-op).
-// Also checks file size and triggers rotation when the configured max is exceeded.
+// Uses an atomic byte counter to track size and triggers rotation without Stat() syscall.
 func (tw *TraceWriter) Log(direction string, msg any) {
 	if tw == nil {
 		return
 	}
-	entry := map[string]any{
+	// Marshal outside the lock to reduce contention.
+	line, err := json.Marshal(map[string]any{
 		"ts":  time.Now().Format(time.RFC3339Nano),
 		"dir": direction,
 		"msg": msg,
+	})
+	if err != nil {
+		return
 	}
+	line = append(line, '\n')
+
 	tw.mu.Lock()
-	if tw.enc == nil {
+	if tw.file == nil {
 		tw.mu.Unlock()
 		return
 	}
-	_ = tw.enc.Encode(entry)
-	// Check rotation after write (best-effort, ignore error).
-	if f, err := tw.file.Stat(); err == nil && f.Size() >= tw.maxSize {
+	_, _ = tw.file.Write(line)
+	tw.writtenBytes.Add(int64(len(line)))
+
+	// Check rotation using byte counter (avoids Stat() syscall on every Log).
+	if tw.writtenBytes.Load() >= tw.maxSize {
+		tw.writtenBytes.Store(0)
 		tw.rotateLocked()
 	}
 	tw.mu.Unlock()
@@ -71,6 +82,8 @@ func (tw *TraceWriter) Log(direction string, msg any) {
 // On failure, tw.file is set to nil so subsequent Log() calls degrade gracefully.
 func (tw *TraceWriter) rotateLocked() {
 	if err := tw.file.Close(); err != nil {
+		tw.file = nil
+		tw.enc = nil
 		return
 	}
 	rotated := tw.path + ".1"
@@ -97,6 +110,9 @@ func (tw *TraceWriter) Close() error {
 	}
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
+	if tw.file == nil {
+		return nil
+	}
 	return tw.file.Close()
 }
 
@@ -111,13 +127,10 @@ func (tw *TraceWriter) Rotate(maxSize int64) error {
 	if tw.file == nil {
 		return nil
 	}
-	info, err := tw.file.Stat()
-	if err != nil {
-		return fmt.Errorf("acp trace: stat: %w", err)
-	}
-	if info.Size() < maxSize {
+	if tw.writtenBytes.Load() < maxSize {
 		return nil
 	}
+	tw.writtenBytes.Store(0)
 	tw.rotateLocked()
 	return nil
 }

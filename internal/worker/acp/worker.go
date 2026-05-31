@@ -177,7 +177,8 @@ type Worker struct {
 	autoApprove atomic.Bool
 
 	// trace holds the optional protocol-level debug trace writer (nil when debug disabled).
-	trace *TraceWriter
+	// Protected by atomic.Pointer for concurrent access from Start/readLoop/Terminate.
+	trace atomic.Pointer[TraceWriter]
 
 	// testHooks for injection-based testing.
 	testClient *ACPClient
@@ -319,7 +320,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			if err != nil {
 				w.Log.Warn("acp: failed to create trace file", "error", err)
 			} else {
-				w.trace = tw
+				w.trace.Store(tw)
 				w.Log.Info("acp: protocol trace enabled", "path", tw.Path())
 			}
 		}
@@ -333,11 +334,11 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	if session.WorkerSessionID != "" {
 		if session.ForkSession {
 			// Fork from existing session (AC-FR08-01).
-			forkResult, forkErr := client.ForkSession(hctx, session.WorkerSessionID)
+			forkResult, forkErr := client.ForkSession(ctx, session.WorkerSessionID)
 			if forkErr != nil {
 				w.Log.Warn("acp: session fork failed, falling back to new session",
 					"session_id", session.SessionID, "error", forkErr)
-				newSess, newErr := client.NewSession(hctx, session.ProjectDir, mcpServers)
+				newSess, newErr := client.NewSession(ctx, session.ProjectDir, mcpServers)
 				if newErr != nil {
 					_ = w.Proc.Kill()
 					return fmt.Errorf("acp: new session: %w", newErr)
@@ -455,7 +456,9 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	pctx, pcancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer pcancel()
 
-	w.trace.Log("→", map[string]string{"method": "session/prompt", "sessionId": w.GetWorkerSessionID(), "content": content})
+	if tw := w.trace.Load(); tw != nil {
+		tw.Log("→", map[string]string{"method": "session/prompt", "sessionId": w.GetWorkerSessionID(), "content": content})
+	}
 	result, promptErr := w.client.Prompt(pctx, w.GetWorkerSessionID(), content)
 	if promptErr != nil {
 		// Always emit error sequence to client.
@@ -490,9 +493,9 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 
 func (w *Worker) Terminate(ctx context.Context) error {
 	// Close trace writer if active.
-	if w.trace != nil {
-		_ = w.trace.Close()
-		w.trace = nil
+	tw := w.trace.Swap(nil)
+	if tw != nil {
+		_ = tw.Close()
 	}
 
 	if w.cancel != nil {
@@ -826,7 +829,9 @@ func (w *Worker) readLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			w.trace.Log("←", notif)
+			if tw := w.trace.Load(); tw != nil {
+				tw.Log("←", notif)
+			}
 			w.SetLastIO(time.Now())
 			envelopes := w.mapper.MapNotification(notif)
 			for _, env := range envelopes {
@@ -836,7 +841,9 @@ func (w *Worker) readLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			w.trace.Log("←", req)
+			if tw := w.trace.Load(); tw != nil {
+				tw.Log("←", req)
+			}
 			w.handleServerRequest(ctx, req, conn)
 		}
 	}
