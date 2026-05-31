@@ -576,8 +576,7 @@ func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) e
 		_, hasDecision := check["decision"]
 		_, hasAction := check["action"]
 		if !hasBehavior && !hasDecision && !hasAction {
-			m.log.Error("codex-app-server: server response missing expected key",
-				"req_id", reqID, "expected", "behavior, decision, or action")
+			return fmt.Errorf("codex-app-server: server response for %q missing behavior, decision, or action key", reqID)
 		}
 	}
 

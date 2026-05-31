@@ -492,7 +492,7 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		// fields (e.g. OwnerID) that EncodeJSON omits. WS conns use the
 		// pre-encoded bytes for efficiency.
 		if pc, ok := conn.(*pcEntry); ok {
-			err = pc.RouteWrite(context.Background(), msg.Env)
+			err = pc.RouteWrite(h.ctx, msg.Env)
 		} else {
 			err = conn.RouteWriteData(data, msg.Env.Event.Type)
 		}
