@@ -24,6 +24,7 @@ import (
 var (
 	_ worker.Worker                 = (*Worker)(nil)
 	_ worker.WorkerSessionIDHandler = (*Worker)(nil)
+	_ worker.WorkerCommander        = (*Worker)(nil)
 	_ base.MetadataHandler          = (*Worker)(nil)
 )
 
@@ -438,6 +439,56 @@ func (w *Worker) Health() worker.WorkerHealth {
 func (w *Worker) ResetContext(_ context.Context) error {
 	// ACP doesn't support in-place reset → terminate + restart handled by Bridge.
 	return worker.ErrNotImplemented
+}
+
+// ─── WorkerCommander ─────────────────────────────────────────────────────────
+
+// Compact returns ErrNotImplemented — ACP has no compact method.
+// Terminate+Start is too expensive; let Bridge fallback to Input passthrough.
+func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
+	return worker.ErrNotImplemented
+}
+
+// Clear creates a new ACP session within the same process (equivalent to /clear).
+// The PID stays the same; only the acpSessionID changes.
+func (w *Worker) Clear(ctx context.Context) error {
+	w.Mu.Lock()
+	defer w.Mu.Unlock()
+
+	if w.client == nil {
+		return fmt.Errorf("acp: clear: worker not started")
+	}
+
+	hctx, hcancel := context.WithTimeout(ctx, 10*time.Second)
+	defer hcancel()
+
+	// Cancel any in-flight turn before creating new session.
+	_ = w.client.Cancel(hctx, w.acpSessionID)
+
+	mcpServers := parseMCPServers(w.lastMCPConfig())
+	result, err := w.client.NewSession(hctx, w.projectDir, mcpServers)
+	if err != nil {
+		return fmt.Errorf("acp: clear: new session: %w", err)
+	}
+
+	w.acpSessionID = result.SessionID
+	w.mapper.Reset()
+	w.systemPromptInjected = false
+	w.IncResetGeneration()
+	return nil
+}
+
+// Rewind returns ErrNotImplemented — ACP has no rewind method.
+func (w *Worker) Rewind(_ context.Context, _ string) error {
+	return worker.ErrNotImplemented
+}
+
+// lastMCPConfig returns the MCP config to use for new sessions.
+// Stored as an indirect method to allow future per-session caching.
+func (w *Worker) lastMCPConfig() string {
+	// Currently no cached MCP config on Worker; return empty to use defaults.
+	// When FR-02 ControlRequester is implemented, this can cache from Start().
+	return ""
 }
 
 // ─── MetadataHandler ─────────────────────────────────────────────────────────
