@@ -168,7 +168,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		platform:      si.Platform,
 		botID:         si.BotID,
 		forwardOpts:   &forwardOpts{workDir: p.workDir},
-		injectExclude: b.resolveInjectExclude(si.Platform, nil),
+		injectExclude: b.resolveInjectExclude(si.Platform, si.BotID, nil),
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := b.sm.Transition(ctx, p.sessionID, events.StateRunning); err != nil {
@@ -247,8 +247,10 @@ func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Wor
 
 // resolveInjectExclude returns the inject_exclude list for a platform, falling
 // back from the per-session value to the platform/global default in the atomic
-// config map. Used by injectAgentConfig and crash recovery paths.
-func (b *Bridge) resolveInjectExclude(platform string, perSession []string) []string {
+// config map. botID is reserved for future per-bot resolution (currently unused
+// because per-bot excludes are resolved at adapter time and not persisted in
+// the session record). Used by injectAgentConfig and crash recovery paths.
+func (b *Bridge) resolveInjectExclude(platform, _ string, perSession []string) []string {
 	if perSession != nil {
 		return perSession
 	}
@@ -272,7 +274,7 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID str
 	if b.agentConfigDir == "" {
 		return
 	}
-	injectExclude = b.resolveInjectExclude(platform, injectExclude)
+	injectExclude = b.resolveInjectExclude(platform, botID, injectExclude)
 	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_id", botID, "exclude", injectExclude)
 	configs, err := agentconfig.Load(b.agentConfigDir, platform, botID, injectExclude...)
 	if err != nil {

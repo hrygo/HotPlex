@@ -111,9 +111,8 @@ func shouldExclude(baseName string, exclude []string) bool {
 	if len(exclude) == 0 {
 		return false
 	}
-	upper := strings.ToUpper(baseName)
 	for _, name := range exclude {
-		if strings.ToUpper(name) == upper {
+		if strings.EqualFold(name, baseName) {
 			return true
 		}
 	}

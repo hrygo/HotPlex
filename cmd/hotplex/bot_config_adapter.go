@@ -45,7 +45,7 @@ func (a *botConfigAdapter) GetBotConfig(ctx context.Context, name string) (*admi
 	botID := entry.BotID
 
 	attrs := extractBotAttrs(cfg, platform, name)
-	excl := a.resolveInjectExcludeForAdmin(platform, name)
+	excl := resolveInjectExcludeForAdmin(cfg, platform, name)
 	summary := getAgentConfigSummary(platform, botID, a.agentConfigDir, excl...)
 
 	return &admin.BotConfigEntry{
@@ -69,7 +69,7 @@ func (a *botConfigAdapter) ListBotConfigs(ctx context.Context) ([]admin.BotConfi
 	for _, e := range entries {
 		platform := string(e.Platform)
 		attrs := extractBotAttrs(cfg, platform, e.Name)
-		excl := a.resolveInjectExcludeForAdmin(platform, e.Name)
+		excl := resolveInjectExcludeForAdmin(cfg, platform, e.Name)
 		summary := getAgentConfigSummary(platform, e.BotID, a.agentConfigDir, excl...)
 
 		result = append(result, admin.BotConfigEntry{
@@ -92,7 +92,7 @@ func (a *botConfigAdapter) GetAgentConfigFile(ctx context.Context, botName strin
 		return nil, fmt.Errorf("bot %q not found in registry", botName)
 	}
 
-	excl := a.resolveInjectExcludeForAdmin(platform, botName)
+	excl := resolveInjectExcludeForAdmin(a.cfgStore.Load(), platform, botName)
 	configs, err := agentconfig.Load(a.agentConfigDir, platform, botID, excl...)
 	if err != nil {
 		return nil, fmt.Errorf("load agent config: %w", err)
@@ -116,7 +116,7 @@ func (a *botConfigAdapter) GetSystemPromptPreview(ctx context.Context, botName s
 		return "", fmt.Errorf("bot %q not found in registry", botName)
 	}
 
-	excl := a.resolveInjectExcludeForAdmin(platform, botName)
+	excl := resolveInjectExcludeForAdmin(a.cfgStore.Load(), platform, botName)
 	configs, err := agentconfig.Load(a.agentConfigDir, platform, botID, excl...)
 	if err != nil {
 		return "", fmt.Errorf("load agent config: %w", err)
@@ -293,8 +293,7 @@ func resolvePlatformAndBotID(name string) (platform, botID string, ok bool) {
 
 // resolveInjectExcludeForAdmin resolves the inject_exclude list for a bot
 // using 3-level fallback: bot → platform → global.
-func (a *botConfigAdapter) resolveInjectExcludeForAdmin(platform, botName string) []string {
-	cfg := a.cfgStore.Load()
+func resolveInjectExcludeForAdmin(cfg *config.Config, platform, botName string) []string {
 	global := cfg.AgentConfig.InjectExclude
 	var platformExcl, botExcl []string
 	switch platform {
@@ -308,6 +307,8 @@ func (a *botConfigAdapter) resolveInjectExcludeForAdmin(platform, botName string
 		if bc := resolveFeishuBot(cfg, botName); bc != nil {
 			botExcl = bc.InjectExclude
 		}
+	case "yuanxin":
+		platformExcl = cfg.Messaging.Yuanxin.InjectExclude
 	}
 	return config.ResolveInjectExclude(global, platformExcl, botExcl)
 }
