@@ -126,6 +126,11 @@ type Worker struct {
 	// pendingPerm stores the permission mapping for in-flight permission requests.
 	pendingPerm sync.Map // requestID (string) → *PermissionMapResult
 
+	// systemPrompt holds the B/C channel agent config from SessionInfo.SystemPrompt.
+	// Injected as a prefix on the first user prompt (ACP v1 has no native system prompt).
+	systemPrompt         string
+	systemPromptInjected bool
+
 	// testHooks for injection-based testing.
 	testClient *ACPClient
 	testMapper *ACPMapper
@@ -164,6 +169,16 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
 	w.Mu.Unlock()
+
+	// Cache system prompt for first-input injection (ACP v1 has no native mechanism).
+	sp := session.SystemPrompt
+	if len(sp) > 32*1024 {
+		w.Log.Warn("acp: system prompt exceeds 32KB, truncating",
+			"session_id", session.SessionID, "size", len(sp))
+		sp = sp[:32*1024]
+	}
+	w.systemPrompt = sp
+	w.systemPromptInjected = false
 
 	// Phase 2: I/O-heavy operations outside the lock.
 
@@ -307,6 +322,12 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	// Regular user input → send prompt.
 	w.mapper.Reset()
 	w.mapper.SetTurnActive()
+
+	// Inject system prompt on first user input (ACP v1 has no native system prompt).
+	if w.systemPrompt != "" && !w.systemPromptInjected {
+		w.systemPromptInjected = true
+		content = fmt.Sprintf("[SYSTEM INSTRUCTIONS]\n%s\n[/SYSTEM INSTRUCTIONS]\n\n%s", w.systemPrompt, content)
+	}
 
 	// Cache input for crash recovery (InputRecoverer).
 	conn.lastInput.Store(&content)
