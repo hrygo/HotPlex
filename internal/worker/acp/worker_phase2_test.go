@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -497,4 +499,193 @@ func TestWorkerImplementsMetadataHandler(t *testing.T) {
 		HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error
 		HandleElicitationResponse(ctx context.Context, reqID string, action string, content map[string]any) error
 	} = (*Worker)(nil)
+}
+
+// ─── Fix #8: resetSession happy path tests ──────────────────────────────────────
+
+func TestResetSession_UpdatesSessionIDAndClearsPending(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = client
+	w.acpSessionID = "old_session"
+	w.projectDir = "/tmp"
+	w.mcpServers = nil
+	w.mapper = newTestMapper()
+
+	// Store stale entries that should be cleared.
+	w.pendingRequests.Store("stale_req", &JSONRPCRequest{ID: mustMarshal(1)})
+	w.pendingPerm.Store("stale_perm", nil)
+
+	// Agent goroutine: handle Cancel then NewSession.
+	go func() {
+		scanner := bufio.NewScanner(agentStdinR)
+		for i := 0; i < 2; i++ {
+			if !scanner.Scan() {
+				return
+			}
+			var req struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			_ = json.Unmarshal(scanner.Bytes(), &req)
+
+			var result any
+			switch req.Method {
+			case "session/cancel":
+				result = json.RawMessage(`{}`)
+			case "session/new":
+				result = SessionResult{SessionID: "new_session_42"}
+			default:
+				result = json.RawMessage(`{}`)
+			}
+			resp := &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  mustMarshal(result),
+			}
+			_ = WriteMessage(agentStdoutW, resp)
+		}
+	}()
+
+	err := w.resetSession(ctx)
+	require.NoError(t, err)
+
+	// Verify acpSessionID was updated.
+	w.Mu.Lock()
+	sid := w.acpSessionID
+	w.Mu.Unlock()
+	require.Equal(t, "new_session_42", sid)
+
+	// Verify pending maps were cleared.
+	_, ok := w.pendingRequests.Load("stale_req")
+	require.False(t, ok, "pendingRequests should be cleared after resetSession")
+	_, ok = w.pendingPerm.Load("stale_perm")
+	require.False(t, ok, "pendingPerm should be cleared after resetSession")
+}
+
+func TestClear_IncResetGeneration(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = client
+	w.acpSessionID = "old"
+	w.projectDir = "/tmp"
+	w.mcpServers = nil
+	w.mapper = newTestMapper()
+
+	genBefore := w.LoadResetGeneration()
+
+	go func() {
+		scanner := bufio.NewScanner(agentStdinR)
+		for i := 0; i < 2; i++ {
+			if !scanner.Scan() {
+				return
+			}
+			var req struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			_ = json.Unmarshal(scanner.Bytes(), &req)
+			var result any = json.RawMessage(`{}`)
+			if req.Method == "session/new" {
+				result = SessionResult{SessionID: "new_sess"}
+			}
+			_ = WriteMessage(agentStdoutW, &JSONRPCResponse{
+				JSONRPC: "2.0", ID: req.ID, Result: mustMarshal(result),
+			})
+		}
+	}()
+
+	err := w.Clear(ctx)
+	require.NoError(t, err)
+
+	genAfter := w.LoadResetGeneration()
+	require.Equal(t, genBefore+1, genAfter, "Clear should increment reset generation exactly once")
+}
+
+func TestResetContext_DoesNotIncResetGeneration(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = client
+	w.acpSessionID = "old"
+	w.projectDir = "/tmp"
+	w.mcpServers = nil
+	w.mapper = newTestMapper()
+
+	genBefore := w.LoadResetGeneration()
+
+	go func() {
+		scanner := bufio.NewScanner(agentStdinR)
+		for i := 0; i < 2; i++ {
+			if !scanner.Scan() {
+				return
+			}
+			var req struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			_ = json.Unmarshal(scanner.Bytes(), &req)
+			var result any = json.RawMessage(`{}`)
+			if req.Method == "session/new" {
+				result = SessionResult{SessionID: "new_sess"}
+			}
+			_ = WriteMessage(agentStdoutW, &JSONRPCResponse{
+				JSONRPC: "2.0", ID: req.ID, Result: mustMarshal(result),
+			})
+		}
+	}()
+
+	err := w.ResetContext(ctx)
+	require.NoError(t, err)
+
+	genAfter := w.LoadResetGeneration()
+	require.Equal(t, genBefore, genAfter, "ResetContext should NOT increment generation (Bridge does it)")
+}
+
+func TestFmtStartError_ExecError(t *testing.T) {
+	t.Parallel()
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	err := w.fmtStartError("myagent", &exec.Error{Name: "myagent", Err: errors.New("executable file not found")})
+	require.Contains(t, err.Error(), "not found in PATH")
+	require.Contains(t, err.Error(), "Install the agent")
+}
+
+func TestFmtStartError_PathErrorPermission(t *testing.T) {
+	t.Parallel()
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	err := w.fmtStartError("myagent", &os.PathError{Op: "fork/exec", Path: "/usr/local/bin/myagent", Err: os.ErrPermission})
+	require.Contains(t, err.Error(), "not executable")
+	require.Contains(t, err.Error(), "chmod +x")
 }

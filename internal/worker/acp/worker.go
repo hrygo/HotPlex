@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -245,7 +247,9 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	if client == nil {
 		client = NewACPClient(stdin, stdout, w.Log)
 	}
+	w.Mu.Lock()
 	w.client = client
+	w.Mu.Unlock()
 
 	// Start read loop early — must run before handshake to receive responses.
 	childCtx, cancel := context.WithCancel(context.Background())
@@ -268,7 +272,9 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 		_ = w.Proc.Kill()
 		return w.fmtHandshakeError(err)
 	}
+	w.Mu.Lock()
 	w.initResult = initResult
+	w.Mu.Unlock()
 	w.Log.Info("acp: agent discovered",
 		"agent", initResult.AgentInfo.Name,
 		"version", initResult.AgentInfo.Version,
@@ -523,11 +529,14 @@ func (w *Worker) resetSession(ctx context.Context) error {
 		return fmt.Errorf("acp: reset: worker not started")
 	}
 
+	// Cancel any in-flight turn with a short, independent timeout
+	// so a slow Cancel doesn't eat into the NewSession budget.
+	cctx, ccancel := context.WithTimeout(ctx, 3*time.Second)
+	_ = client.Cancel(cctx, sessionID)
+	ccancel()
+
 	hctx, hcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer hcancel()
-
-	// Cancel any in-flight turn before creating new session.
-	_ = client.Cancel(hctx, sessionID)
 
 	result, err := client.NewSession(hctx, projectDir, mcpServers)
 	if err != nil {
@@ -538,7 +547,15 @@ func (w *Worker) resetSession(ctx context.Context) error {
 	w.acpSessionID = result.SessionID
 	w.mapper.Reset()
 	w.systemPromptInjected.Store(false)
-	w.IncResetGeneration()
+	// Clear stale pending entries from the old session.
+	w.pendingPerm.Range(func(key, _ any) bool {
+		w.pendingPerm.Delete(key)
+		return true
+	})
+	w.pendingRequests.Range(func(key, _ any) bool {
+		w.pendingRequests.Delete(key)
+		return true
+	})
 	w.Mu.Unlock()
 	return nil
 }
@@ -553,8 +570,14 @@ func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
 
 // Clear creates a new ACP session within the same process (equivalent to /clear).
 // The PID stays the same; only the acpSessionID changes.
+// IncResetGeneration is called here because the /clear path does NOT go through
+// Bridge.ResetSession (which calls it separately for the reset path).
 func (w *Worker) Clear(ctx context.Context) error {
-	return w.resetSession(ctx)
+	if err := w.resetSession(ctx); err != nil {
+		return err
+	}
+	w.IncResetGeneration()
+	return nil
 }
 
 // Rewind returns ErrNotImplemented — ACP has no rewind method.
@@ -652,41 +675,33 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 }
 
 func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
-	req, ok := w.pendingRequests.LoadAndDelete(reqID)
-	if !ok {
-		return fmt.Errorf("acp: no pending question request: %s", reqID)
-	}
-	w.Mu.Lock()
-	client := w.client
-	w.Mu.Unlock()
-	if client == nil {
-		return fmt.Errorf("acp: question response: worker not started")
-	}
-	acpReq, ok := req.(*JSONRPCRequest)
-	if !ok {
-		return fmt.Errorf("acp: question response: invalid request type %T", req)
-	}
-	return client.RespondPermission(ctx, acpReq.ID, answers)
+	return w.respondToServerRequest(ctx, reqID, "question", answers)
 }
 
 func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
-	req, ok := w.pendingRequests.LoadAndDelete(reqID)
-	if !ok {
-		return fmt.Errorf("acp: no pending elicitation request: %s", reqID)
-	}
-	w.Mu.Lock()
-	client := w.client
-	w.Mu.Unlock()
-	if client == nil {
-		return fmt.Errorf("acp: elicitation response: worker not started")
-	}
 	outcome := map[string]any{"action": action}
 	if content != nil {
 		outcome["content"] = content
 	}
+	return w.respondToServerRequest(ctx, reqID, "elicitation", outcome)
+}
+
+// respondToServerRequest is the shared logic for forwarding client responses
+// back to the agent for non-permission server-initiated requests.
+func (w *Worker) respondToServerRequest(ctx context.Context, reqID, kind string, outcome any) error {
+	req, ok := w.pendingRequests.LoadAndDelete(reqID)
+	if !ok {
+		return fmt.Errorf("acp: no pending %s request: %s", kind, reqID)
+	}
+	w.Mu.Lock()
+	client := w.client
+	w.Mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("acp: %s response: worker not started", kind)
+	}
 	acpReq, ok := req.(*JSONRPCRequest)
 	if !ok {
-		return fmt.Errorf("acp: elicitation response: invalid request type %T", req)
+		return fmt.Errorf("acp: %s response: invalid request type %T", kind, req)
 	}
 	return client.RespondPermission(ctx, acpReq.ID, outcome)
 }
@@ -764,7 +779,10 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 		// Forward as Raw event so the client can display and respond.
 		w.pendingRequests.Store(string(req.ID), req)
 		var params any
-		_ = json.Unmarshal(req.Params, &params)
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			w.Log.Warn("acp: malformed params in server request",
+				"method", req.Method, "error", err)
+		}
 		conn.TrySend(w.mapper.newEnvelope(events.Raw, events.RawData{
 			Kind: "acp.server_request." + req.Method,
 			Raw: map[string]any{
@@ -780,10 +798,21 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 
 // fmtStartError produces an actionable error when the agent binary cannot be started.
 func (w *Worker) fmtStartError(binary string, err error) error {
+	// Prefer structured error checks (cross-platform) over substring matching.
+	var execErr *exec.Error
+	if errors.As(err, &execErr) {
+		return fmt.Errorf("acp: agent %q not found in PATH. Install the agent or set acp.command in config.yaml: %w", binary, err)
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && os.IsPermission(pathErr.Err) {
+		return fmt.Errorf("acp: agent %q is not executable. Run: chmod +x $(which %s): %w", binary, binary, err)
+	}
+	// Fallback: substring matching for wrapped errors that lose type info.
 	errMsg := err.Error()
 	if strings.Contains(errMsg, "executable file not found") ||
 		strings.Contains(errMsg, "no such file") ||
-		strings.Contains(errMsg, "command not found") {
+		strings.Contains(errMsg, "command not found") ||
+		strings.Contains(errMsg, "cannot find the file") {
 		return fmt.Errorf("acp: agent %q not found in PATH. Install the agent or set acp.command in config.yaml: %w", binary, err)
 	}
 	if strings.Contains(errMsg, "permission denied") {
