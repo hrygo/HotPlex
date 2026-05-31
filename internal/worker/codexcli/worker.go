@@ -72,7 +72,7 @@ func (w *ExecWorker) SupportsTools() bool     { return true }
 func (w *ExecWorker) EnvBlocklist() []string  { return EnvBlocklist }
 func (w *ExecWorker) SessionStoreDir() string { return "" }
 func (w *ExecWorker) MaxTurns() int           { return 0 }
-func (w *ExecWorker) Modalities() []string    { return []string{"text", "code"} }
+func (w *ExecWorker) Modalities() []string    { return []string{"text", "code", "image"} }
 
 func (w *ExecWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
@@ -456,7 +456,7 @@ func (w *AppServerWorker) SupportsTools() bool     { return true }
 func (w *AppServerWorker) EnvBlocklist() []string  { return EnvBlocklist }
 func (w *AppServerWorker) SessionStoreDir() string { return "" }
 func (w *AppServerWorker) MaxTurns() int           { return 0 }
-func (w *AppServerWorker) Modalities() []string    { return []string{"text", "code"} }
+func (w *AppServerWorker) Modalities() []string    { return []string{"text", "code", "image"} }
 
 func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()

@@ -35,6 +35,14 @@ type CodexItem struct {
 	Action      string                     `json:"action,omitempty"`
 	SavedPath   string                     `json:"saved_path,omitempty"`
 	Phase       string                     `json:"phase,omitempty"`
+	// CollabToolCall fields
+	CollabTool string     `json:"collab_tool,omitempty"`
+	Agents     []string   `json:"agents,omitempty"`
+	// WebSearch fields
+	Results    json.RawMessage `json:"results,omitempty"`
+	// TodoList fields
+	TodoItems []CodexTodoItem `json:"todo_items,omitempty"`
+	Data      json.RawMessage `json:"data,omitempty"` // generic payload for error items
 }
 
 // CodexUsage holds token usage statistics from turn.completed (exec mode).
@@ -61,6 +69,14 @@ type CodexFileChange struct {
 	FilePath string `json:"file_path,omitempty"`
 }
 
+// CodexTodoItem represents a single todo item within a TodoList.
+type CodexTodoItem struct {
+	ID          string `json:"id,omitempty"`
+	Description string `json:"description"`
+	Completed   bool   `json:"completed"`
+	Priority    string `json:"priority,omitempty"`
+}
+
 // CodexItemError represents an error within an item.
 type CodexItemError struct {
 	Message string `json:"message"`
@@ -77,6 +93,7 @@ const (
 	EventTurnCompleted = "turn.completed"
 	EventTurnFailed    = "turn.failed"
 	EventItemStarted   = "item.started"
+	EventItemUpdated   = "item.updated"
 	EventItemCompleted = "item.completed"
 	EventError         = "error"
 )
@@ -89,11 +106,14 @@ const (
 	ItemAgentMessage     = "agent_message"
 	ItemReasoning        = "reasoning"
 	ItemPlan             = "plan"
-	ItemImageGeneration  = "image_generation"
+	ItemCollabToolCall   = "collab_tool_call"
+	ItemWebSearch        = "web_search"
+	ItemTodoList         = "todo_list"
+	ItemError            = "error"
 )
 
 // EnvBlocklist defines environment variable prefixes to strip from worker processes.
-var EnvBlocklist = []string{"HOTPLEX_", "CODEX_"}
+var EnvBlocklist = []string{"HOTPLEX_", "CODEX_", "CODEXCLI"}
 
 // ─── JSON-RPC 2.0 Wire Types (app-server mode) ──────────────────────────
 

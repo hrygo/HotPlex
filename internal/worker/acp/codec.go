@@ -44,6 +44,9 @@ type JSONRPCError struct {
 }
 
 func (e *JSONRPCError) Error() string {
+	if len(e.Data) > 0 {
+		return fmt.Sprintf("JSON-RPC error %d: %s: %s", e.Code, e.Message, string(e.Data))
+	}
 	return fmt.Sprintf("JSON-RPC error %d: %s", e.Code, e.Message)
 }
 

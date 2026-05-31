@@ -89,6 +89,9 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 		// Extract platform key from envelope metadata for persistence.
 		platform, platformKey := b.extractPlatformKey(env)
 		if b.acpCommand != "" {
+			if platformKey == nil {
+				platformKey = make(map[string]string, 1)
+			}
 			platformKey[worker.ACPCommandPlatformKey] = b.acpCommand
 		}
 		var botID string

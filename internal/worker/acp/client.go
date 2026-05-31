@@ -422,8 +422,12 @@ type PromptUsage struct {
 
 // normalizeMCPServers ensures mcpServers is never nil (null in JSON).
 // Some ACP agents require a list, not null.
+// Handles Go's typed-nil trap: []any(nil) != nil as interface.
 func normalizeMCPServers(mcpServers any) any {
 	if mcpServers == nil {
+		return []any{}
+	}
+	if s, ok := mcpServers.([]any); ok && len(s) == 0 {
 		return []any{}
 	}
 	return mcpServers
