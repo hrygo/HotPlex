@@ -582,16 +582,25 @@ type ClaudeCodeConfig struct {
 
 // CodexCLIConfig holds Codex CLI worker startup settings.
 type CodexCLIConfig struct {
-	Command         string        `mapstructure:"command"`           // codex binary path, default "codex"
-	Model           string        `mapstructure:"model"`             // model name, empty = use Codex default
-	Sandbox         string        `mapstructure:"sandbox"`           // sandbox mode, default "danger-full-access"
-	ApprovalMode    string        `mapstructure:"approval_mode"`     // approval mode, default "never"
-	Ephemeral       bool          `mapstructure:"ephemeral"`         // ephemeral sessions, default true
-	Personality     string        `mapstructure:"personality"`       // agent personality for app-server mode, default "friendly"
-	StartupTimeout  time.Duration `mapstructure:"startup_timeout"`   // process startup timeout, default 30s
-	CallTimeout     time.Duration `mapstructure:"call_timeout"`      // JSON-RPC call timeout, default 30s
-	UseAppServer    bool          `mapstructure:"use_app_server"`    // use persistent app-server mode instead of one-shot exec
-	IdleDrainPeriod time.Duration `mapstructure:"idle_drain_period"` // idle drain timeout for app-server mode, default 30m
+	Command          string        `mapstructure:"command"`             // codex binary path, default "codex"
+	Model            string        `mapstructure:"model"`               // model name, empty = use Codex default
+	Sandbox          string        `mapstructure:"sandbox"`             // sandbox mode, default "danger-full-access"
+	ApprovalMode     string        `mapstructure:"approval_mode"`       // approval mode, default "never"
+	Ephemeral        bool          `mapstructure:"ephemeral"`           // ephemeral sessions, default true
+	Personality      string        `mapstructure:"personality"`         // agent personality for app-server mode, default "friendly"
+	StartupTimeout   time.Duration `mapstructure:"startup_timeout"`     // process startup timeout, default 30s
+	CallTimeout      time.Duration `mapstructure:"call_timeout"`        // JSON-RPC call timeout, default 30s
+	UseAppServer     bool          `mapstructure:"use_app_server"`      // use persistent app-server mode instead of one-shot exec
+	IdleDrainPeriod  time.Duration `mapstructure:"idle_drain_period"`   // idle drain timeout for app-server mode, default 30m
+	Color            bool          `mapstructure:"color"`               // colored output (--color)
+	OutputFile       string        `mapstructure:"output_file"`         // output-only-last-message mode (--output-last-message)
+	StrictConfig     bool          `mapstructure:"strict_config"`       // strict config validation (--strict-config)
+	SkipGitRepoCheck bool          `mapstructure:"skip_git_repo_check"` // bypass git repo check (--skip-git-repo-check)
+	IgnoreUserConfig bool          `mapstructure:"ignore_user_config"`  // ignore user-level config (--ignore-user-config)
+	IgnoreRules      bool          `mapstructure:"ignore_rules"`        // ignore project rules (--ignore-rules)
+	LocalProvider    bool          `mapstructure:"local_provider"`      // force local model provider (--local-provider)
+	ConfigProfile    string        `mapstructure:"config_profile"`      // codex config profile (--profile)
+	BypassHookTrust  bool          `mapstructure:"bypass_hook_trust"`   // bypass hook trust (--dangerously-bypass-hook-trust)
 }
 
 // OpenCodeServerConfig holds OpenCode Server singleton process settings.
