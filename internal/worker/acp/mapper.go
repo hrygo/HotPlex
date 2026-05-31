@@ -531,20 +531,16 @@ func (m *ACPMapper) updateUsage(raw json.RawMessage) {
 	m.usageMu.Unlock()
 
 	// Prometheus metrics outside the lock — counters have internal synchronization.
-	if u.InputTokens > 0 {
-		metrics.ACPPromptTokensTotal.WithLabelValues("input").Add(float64(u.InputTokens))
-	}
-	if u.OutputTokens > 0 {
-		metrics.ACPPromptTokensTotal.WithLabelValues("output").Add(float64(u.OutputTokens))
-	}
-	if u.ThoughtTokens > 0 {
-		metrics.ACPPromptTokensTotal.WithLabelValues("thought").Add(float64(u.ThoughtTokens))
-	}
-	if u.CachedReadTokens > 0 {
-		metrics.ACPPromptTokensTotal.WithLabelValues("cached_read").Add(float64(u.CachedReadTokens))
-	}
-	if u.CachedWriteTokens > 0 {
-		metrics.ACPPromptTokensTotal.WithLabelValues("cached_write").Add(float64(u.CachedWriteTokens))
+	for label, val := range map[string]int{
+		"input":        u.InputTokens,
+		"output":       u.OutputTokens,
+		"thought":      u.ThoughtTokens,
+		"cached_read":  u.CachedReadTokens,
+		"cached_write": u.CachedWriteTokens,
+	} {
+		if val > 0 {
+			metrics.ACPPromptTokensTotal.WithLabelValues(label).Add(float64(val))
+		}
 	}
 }
 

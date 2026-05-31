@@ -35,7 +35,7 @@ var commandParts atomic.Value // []string
 
 // autoApproveDefault is the global default for auto-approve set from config.
 // Per-session overrides live on Worker.autoApprove.
-var autoApproveDefault atomic.Value // bool
+var autoApproveDefault atomic.Bool
 
 func init() {
 	commandParts.Store([]string{"hermes", "acp"})
@@ -43,9 +43,7 @@ func init() {
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
 		w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
-		if v, ok := autoApproveDefault.Load().(bool); ok {
-			w.autoApprove.Store(v)
-		}
+		w.autoApprove.Store(autoApproveDefault.Load())
 		return w, nil
 	})
 }
@@ -346,8 +344,7 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	w.mapper.SetTurnActive()
 
 	// Inject system prompt on first user input (ACP v1 has no native system prompt).
-	if w.systemPrompt != "" && !w.systemPromptInjected.Load() {
-		w.systemPromptInjected.Store(true)
+	if w.systemPrompt != "" && w.systemPromptInjected.CompareAndSwap(false, true) {
 		content = fmt.Sprintf("[SYSTEM INSTRUCTIONS]\n%s\n[/SYSTEM INSTRUCTIONS]\n\n%s", w.systemPrompt, content)
 	}
 
@@ -474,8 +471,13 @@ func (w *Worker) Compact(_ context.Context, _ map[string]any) error {
 // The PID stays the same; only the acpSessionID changes.
 // I/O runs outside Mu to avoid blocking Terminate/Health during Cancel+NewSession.
 func (w *Worker) Clear(ctx context.Context) error {
+	// Snapshot all fields needed for I/O under one lock hold to avoid data races
+	// on projectDir (string), mcpServers (slice), and acpSessionID (string).
 	w.Mu.Lock()
 	client := w.client
+	projectDir := w.projectDir
+	mcpServers := w.mcpServers
+	sessionID := w.acpSessionID
 	w.Mu.Unlock()
 
 	if client == nil {
@@ -486,9 +488,9 @@ func (w *Worker) Clear(ctx context.Context) error {
 	defer hcancel()
 
 	// Cancel any in-flight turn before creating new session.
-	_ = client.Cancel(hctx, w.GetWorkerSessionID())
+	_ = client.Cancel(hctx, sessionID)
 
-	result, err := client.NewSession(hctx, w.projectDir, w.mcpServers)
+	result, err := client.NewSession(hctx, projectDir, mcpServers)
 	if err != nil {
 		return fmt.Errorf("acp: clear: new session: %w", err)
 	}
@@ -529,18 +531,10 @@ func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body ma
 
 func (w *Worker) handleContextUsage() (map[string]any, error) {
 	snapshot := w.mapper.LastUsage()
-	result := map[string]any{
+	// Return context usage snapshot; zero values mean no data yet (consistent with OCS).
+	return map[string]any{
 		"maxTokens":   snapshot.ContextSize,
 		"totalTokens": snapshot.ContextUsed,
-	}
-	// Include model if known from last prompt result.
-	if snapshot.ContextSize > 0 || snapshot.ContextUsed > 0 {
-		return result, nil
-	}
-	// No usage data yet — return zero-value map (consistent with OCS behavior).
-	return map[string]any{
-		"maxTokens":   0,
-		"totalTokens": 0,
 	}, nil
 }
 
@@ -560,8 +554,10 @@ func (w *Worker) handleSetPermissionMode(body map[string]any) (map[string]any, e
 	switch mode {
 	case "auto-accept":
 		w.autoApprove.Store(true)
-	default:
+	case "default", "":
 		w.autoApprove.Store(false)
+	default:
+		return nil, fmt.Errorf("acp: set_permission_mode: unsupported mode: %s", mode)
 	}
 	return map[string]any{"mode": mode}, nil
 }
