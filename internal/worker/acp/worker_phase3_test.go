@@ -322,6 +322,29 @@ func TestInitConfig_ArgsMergeOrder(t *testing.T) {
 	require.Equal(t, []string{"agent", "run"}, parts)
 }
 
+func TestInitConfig_ArgsEnvSplit(t *testing.T) {
+	t.Cleanup(func() {
+		InitConfig(config.ACPConfig{Command: "hermes acp"})
+	})
+
+	// Simulate Viper BindEnv behavior: env var produces single-element slice.
+	InitConfig(config.ACPConfig{
+		Command: "agent run",
+		Args:    []string{"--model gpt-4"}, // single element with space (env override)
+	})
+
+	ca, _ := configArgs.Load().([]string)
+	require.Equal(t, []string{"--model", "gpt-4"}, ca, "single element with spaces should be split")
+
+	// Already-split args pass through unchanged.
+	InitConfig(config.ACPConfig{
+		Command: "agent run",
+		Args:    []string{"--model", "gpt-4"},
+	})
+	ca, _ = configArgs.Load().([]string)
+	require.Equal(t, []string{"--model", "gpt-4"}, ca)
+}
+
 // ─── U-04: TraceWriter Concurrent Writes ────────────────────────────────────
 
 func TestTraceWriter_ConcurrentWrites(t *testing.T) {

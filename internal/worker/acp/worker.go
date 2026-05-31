@@ -75,6 +75,12 @@ func InitConfig(cfg config.ACPConfig) {
 	if args == nil {
 		args = []string{}
 	}
+	// Viper's BindEnv for []string produces a single-element slice from the
+	// raw env var value (e.g. ["--model gpt-4"] instead of ["--model", "gpt-4"]).
+	// Detect and split this case so env override works correctly.
+	if len(args) == 1 && strings.Contains(args[0], " ") {
+		args = strings.Fields(args[0])
+	}
 	configArgs.Store(args)
 	autoApproveDefault.Store(cfg.AutoApprove)
 	debugEnabled.Store(cfg.Debug)
