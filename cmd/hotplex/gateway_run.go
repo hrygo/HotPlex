@@ -335,6 +335,14 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			log.Info("config: MCP servers updated", "count", len(next.Worker.ClaudeCode.MCPServers))
 		}
 	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		prevExcl := buildAgentConfigExclude(prev)
+		nextExcl := buildAgentConfigExclude(next)
+		if !reflect.DeepEqual(prevExcl, nextExcl) {
+			bridge.UpdateAgentConfigExclude(nextExcl)
+			log.Info("config: agent config inject_exclude updated")
+		}
+	})
 
 	// Assemble deps and start HTTP + messaging
 

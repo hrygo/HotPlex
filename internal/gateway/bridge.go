@@ -127,6 +127,12 @@ func (b *Bridge) UpdateMCPConfig(json string) {
 	b.mcpConfigJSON.Store(json)
 }
 
+// UpdateAgentConfigExclude atomically updates the platform → inject_exclude map.
+// Used by config hot-reload for non-platform sessions (webchat/API/cron).
+func (b *Bridge) UpdateAgentConfigExclude(m map[string][]string) {
+	b.agentConfigExclude.Store(m)
+}
+
 // StartSession creates a new session and starts a worker.
 func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title string, injectExclude ...string) error {
 	if b.closed.Load() {

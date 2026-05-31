@@ -368,14 +368,12 @@ func fillSlackExtras(acfg *messaging.AdapterConfig, appCfg *config.Config, botCf
 		acfg.Extras["tts_pipeline"] = p
 	}
 
-	// Agent config injection exclusion: bot → platform → global fallback.
-	var botExcl []string
-	if botCfg != nil {
-		botExcl = botCfg.InjectExclude
-	}
-	if excl := config.ResolveInjectExclude(appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, botExcl); excl != nil {
-		acfg.Extras["inject_exclude"] = excl
-	}
+	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, func() []string {
+		if botCfg != nil {
+			return botCfg.InjectExclude
+		}
+		return nil
+	})
 }
 
 // fillFeishuExtras populates AdapterConfig.Extras for a Feishu bot.
@@ -410,12 +408,19 @@ func fillFeishuExtras(acfg *messaging.AdapterConfig, appCfg *config.Config, botC
 		acfg.Extras["tts_pipeline"] = p
 	}
 
-	// Agent config injection exclusion: bot → platform → global fallback.
-	var botExcl []string
-	if botCfg != nil {
-		botExcl = botCfg.InjectExclude
-	}
-	if excl := config.ResolveInjectExclude(appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, botExcl); excl != nil {
+	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, func() []string {
+		if botCfg != nil {
+			return botCfg.InjectExclude
+		}
+		return nil
+	})
+}
+
+// applyInjectExclude resolves the 3-level inject_exclude fallback (bot → platform → global)
+// and stores the result in acfg.Extras when configured. Shared by fillSlackExtras and fillFeishuExtras.
+func applyInjectExclude(acfg *messaging.AdapterConfig, global, platformExcl []string, botExclFn func() []string) {
+	botExcl := botExclFn()
+	if excl := config.ResolveInjectExclude(global, platformExcl, botExcl); excl != nil {
 		acfg.Extras["inject_exclude"] = excl
 	}
 }
