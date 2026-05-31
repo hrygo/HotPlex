@@ -383,10 +383,20 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 // (DB error or invalid transition). It mirrors transitionState's side effects
 // (metrics, quota release, worker nil) without DB persistence.
 // Caller must hold ms.mu for write. Returns worker to kill outside lock.
+//
+// Design note: the returned worker is Kill()'d (hard) by the caller, whereas
+// transitionState uses Terminate() (graceful SIGTERM + 5s timeout). This is
+// intentional — when DB persistence fails we cannot track the graceful-shutdown
+// window, so a hard kill is the safer choice to guarantee process cleanup.
 func (m *Manager) forceTerminateInMemory(ctx context.Context, ms *managedSession, from events.SessionState, termReason string) worker.Worker {
 	var workerToKill worker.Worker
 	ms.info.State = events.StateTerminated
 	ms.info.UpdatedAt = time.Now()
+
+	// Guard termReason to avoid empty Prometheus label (matches transitionState behavior).
+	if termReason == "" {
+		termReason = "terminated"
+	}
 
 	// Record worker execution duration.
 	if !ms.startedAt.IsZero() && ms.worker != nil {
@@ -397,8 +407,8 @@ func (m *Manager) forceTerminateInMemory(ctx context.Context, ms *managedSession
 		metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Dec()
 		m.releaseWorkerQuota(ms)
 		workerToKill = ms.worker
-		ms.worker = nil // prevent DetachWorker double-release
 	}
+	ms.worker = nil // unconditional nil — matches transitionState, prevents double-release
 
 	m.updateRunningIndexForTransition(ms.info.ID, from, events.StateTerminated)
 	metrics.SessionsActive.WithLabelValues(string(from)).Dec()
@@ -555,6 +565,7 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	if !ok {
 		m.mu.Unlock()
 		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
 		return ErrSessionNotFound
 	}
 	ms.mu.Lock()
@@ -562,6 +573,7 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		ms.mu.Unlock()
 		m.mu.Unlock()
 		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
 		return ErrWorkerAttached
 	}
 	ms.worker = w

@@ -126,6 +126,8 @@ func toAdminBotEntry(e *messaging.BotEntry) admin.BotEntry {
 	if botID == "" {
 		// Fallback when platform BotID is not yet available (adapter not started).
 		// Use platform:name to guarantee uniqueness across platforms.
+		// NOTE: assumes bot Name does not contain colons — safe for Slack/Feishu
+		// auto-generated names ("default") and all known platform bot name formats.
 		botID = string(e.Platform) + ":" + e.Name
 	}
 	return admin.BotEntry{
