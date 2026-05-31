@@ -130,6 +130,54 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 		"--cd", session.ProjectDir,
 	}
 
+	for _, img := range session.Images {
+		args = append(args, "--image", img)
+	}
+
+	if session.JSONSchema != "" {
+		args = append(args, "--output-schema", session.JSONSchema)
+	}
+
+	for _, dir := range session.AllowedDirs {
+		args = append(args, "--add-dir", dir)
+	}
+
+	if session.Color {
+		args = append(args, "--color")
+	}
+
+	if session.OutputFile != "" {
+		args = append(args, "--output-last-message")
+	}
+
+	if session.StrictConfig {
+		args = append(args, "--strict-config")
+	}
+
+	if session.SkipGitRepoCheck {
+		args = append(args, "--skip-git-repo-check")
+	}
+
+	if session.IgnoreUserConfig {
+		args = append(args, "--ignore-user-config")
+	}
+
+	if session.IgnoreRules {
+		args = append(args, "--ignore-rules")
+	}
+
+	if session.LocalProvider {
+		args = append(args, "--local-provider")
+	}
+
+	if session.ConfigProfile != "" {
+		args = append(args, "--profile", session.ConfigProfile)
+	}
+
+	if session.BypassHookTrust {
+		args = append(args, "--dangerously-bypass-hook-trust")
+	}
+
 	if w.cfg.Ephemeral {
 		args = append(args, "--ephemeral")
 	}
@@ -378,6 +426,18 @@ func (w *ExecWorker) HandleElicitationResponse(_ context.Context, reqID, action 
 	return fmt.Errorf("codexcli: elicitation responses not supported in one-shot mode")
 }
 
+func (w *ExecWorker) Compact(ctx context.Context, args map[string]any) error {
+	return fmt.Errorf("codexcli: compact not supported in exec mode; use app-server mode")
+}
+
+func (w *ExecWorker) Clear(ctx context.Context) error {
+	return fmt.Errorf("codexcli: clear not supported in exec mode; use app-server mode")
+}
+
+func (w *ExecWorker) Rewind(ctx context.Context, targetID string) error {
+	return fmt.Errorf("codexcli: rewind not supported in exec mode; use app-server mode")
+}
+
 func (w *ExecWorker) SetTestConn(c worker.SessionConn) {
 	w.testConn = c
 }
@@ -389,6 +449,7 @@ func (w *ExecWorker) SetReadLineFn(fn func() (string, error)) {
 // ─── AppServerWorker (v2 persistent mode) ───────────────────────────────
 
 var _ worker.Worker = (*AppServerWorker)(nil)
+var _ worker.WorkerCommander = (*AppServerWorker)(nil)
 
 type AppServerWorker struct {
 	*base.BaseWorker
@@ -711,11 +772,54 @@ func (w *AppServerWorker) HandlePermissionResponse(_ context.Context, reqID stri
 }
 
 func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
-	return fmt.Errorf("codexcli: question responses not supported in app-server mode yet")
+	result := map[string]any{
+		"behavior": "allow",
+		"updatedInput": map[string]any{
+			"answers": answers,
+		},
+	}
+	return w.manager.RespondServerRequest(reqID, result)
 }
 
 func (w *AppServerWorker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
-	return fmt.Errorf("codexcli: elicitation responses not supported in app-server mode yet")
+	result := map[string]any{
+		"action":  action,
+		"content": content,
+	}
+	return w.manager.RespondServerRequest(reqID, result)
+}
+
+func (w *AppServerWorker) Compact(ctx context.Context, args map[string]any) error {
+	w.mu.Lock()
+	tid := w.threadID
+	w.mu.Unlock()
+	if tid == "" {
+		return fmt.Errorf("codexcli: no active thread")
+	}
+	_, err := w.manager.CompactThread(tid)
+	return err
+}
+
+func (w *AppServerWorker) Clear(ctx context.Context) error {
+	w.mu.Lock()
+	tid := w.threadID
+	w.mu.Unlock()
+	if tid == "" {
+		return fmt.Errorf("codexcli: no active thread")
+	}
+	_ = w.manager.InterruptTurn(tid)
+	return w.ResetContext(ctx)
+}
+
+func (w *AppServerWorker) Rewind(ctx context.Context, targetID string) error {
+	w.mu.Lock()
+	tid := w.threadID
+	w.mu.Unlock()
+	if tid == "" {
+		return fmt.Errorf("codexcli: no active thread")
+	}
+	_, err := w.manager.RollbackThread(tid, targetID)
+	return err
 }
 
 // sandboxFromSession returns the session-level sandbox override if set,
@@ -745,6 +849,30 @@ func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]a
 	}
 	if cfg.Ephemeral {
 		params["ephemeral"] = true
+	}
+	if len(session.Images) > 0 {
+		params["images"] = session.Images
+	}
+	if session.JSONSchema != "" {
+		params["outputSchema"] = session.JSONSchema
+	}
+	if len(session.AllowedDirs) > 0 {
+		params["additionalDirectories"] = session.AllowedDirs
+	}
+	if session.Color {
+		params["color"] = true
+	}
+	if session.StrictConfig {
+		params["strictConfig"] = true
+	}
+	if session.SkipGitRepoCheck {
+		params["skipGitRepoCheck"] = true
+	}
+	if session.IgnoreRules {
+		params["ignoreRules"] = true
+	}
+	if session.ConfigProfile != "" {
+		params["profile"] = session.ConfigProfile
 	}
 	return params
 }

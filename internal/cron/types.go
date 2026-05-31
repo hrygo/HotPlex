@@ -65,8 +65,12 @@ type CronJobState struct {
 
 // SessionKey derives the deterministic session key for this cron job's execution history.
 func (j *CronJob) SessionKey() string {
+	wt := worker.WorkerType(j.Payload.WorkerType)
+	if wt == "" {
+		wt = worker.TypeClaudeCode
+	}
 	return session.DerivePlatformSessionKey(
-		j.OwnerID, worker.TypeClaudeCode,
+		j.OwnerID, wt,
 		session.PlatformContext{
 			Platform: "cron",
 			BotID:    j.BotID,
