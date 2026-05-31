@@ -808,7 +808,7 @@ func (w *Worker) fmtStartError(binary string, err error) error {
 	}
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) && os.IsPermission(pathErr.Err) {
-		return fmt.Errorf("acp: agent %q is not executable. Run: chmod +x $(which %s): %w", binary, binary, err)
+		return fmt.Errorf("acp: agent %q is not executable. Ensure the binary has execute permission, or set acp.command in config.yaml: %w", binary, err)
 	}
 	// Fallback: substring matching for wrapped errors that lose type info.
 	errMsg := err.Error()
@@ -819,7 +819,7 @@ func (w *Worker) fmtStartError(binary string, err error) error {
 		return fmt.Errorf("acp: agent %q not found in PATH. Install the agent or set acp.command in config.yaml: %w", binary, err)
 	}
 	if strings.Contains(errMsg, "permission denied") {
-		return fmt.Errorf("acp: agent %q is not executable. Run: chmod +x $(which %s): %w", binary, binary, err)
+		return fmt.Errorf("acp: agent %q is not executable. Ensure the binary has execute permission, or set acp.command in config.yaml: %w", binary, err)
 	}
 	return fmt.Errorf("acp: failed to start process %q: %w", binary, err)
 }

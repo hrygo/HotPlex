@@ -267,7 +267,7 @@ func TestFmtStartError_PermissionDenied(t *testing.T) {
 	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
 	err := w.fmtStartError("hermes", errors.New("fork/exec: permission denied"))
 	require.Contains(t, err.Error(), "not executable")
-	require.Contains(t, err.Error(), "chmod +x")
+	require.Contains(t, err.Error(), "execute permission")
 }
 
 func TestFmtStartError_Other(t *testing.T) {
@@ -687,5 +687,5 @@ func TestFmtStartError_PathErrorPermission(t *testing.T) {
 	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
 	err := w.fmtStartError("myagent", &os.PathError{Op: "fork/exec", Path: "/usr/local/bin/myagent", Err: os.ErrPermission})
 	require.Contains(t, err.Error(), "not executable")
-	require.Contains(t, err.Error(), "chmod +x")
+	require.Contains(t, err.Error(), "execute permission")
 }
