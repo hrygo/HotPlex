@@ -47,7 +47,7 @@ func BenchmarkMapNotification_Stream(b *testing.B) {
 	toolNotif := &JSONRPCNotification{
 		JSONRPC: "2.0",
 		Method:  "session/update",
-		Params: marshalParams(map[string]any{
+		Params: mustMarshal(map[string]any{
 			"sessionId": "sess_bench_123",
 			"update": map[string]any{
 				"sessionUpdate": "tool_call",
@@ -173,12 +173,6 @@ func BenchmarkMapNotification_Plan(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		m.MapNotification(notif)
 	}
-}
-
-// marshalParams is a test helper that panics on failure.
-func marshalParams(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
-	return b
 }
 
 // Ensure the benchmark event types exist.

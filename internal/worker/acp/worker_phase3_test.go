@@ -21,7 +21,6 @@ import (
 // ─── EX-01: InitConfig Args/Debug ───────────────────────────────────────────
 
 func TestInitConfig_ArgsStored(t *testing.T) {
-	t.Parallel()
 
 	InitConfig(config.ACPConfig{
 		Command:     "test-agent serve",
@@ -43,7 +42,6 @@ func TestInitConfig_ArgsStored(t *testing.T) {
 }
 
 func TestInitConfig_DefaultCommand(t *testing.T) {
-	t.Parallel()
 
 	InitConfig(config.ACPConfig{Command: ""})
 
@@ -110,7 +108,7 @@ func TestTraceWriter_NilSafe(t *testing.T) {
 	// All operations on nil TraceWriter should be no-ops.
 	tw.Log("→", "test")
 	require.NoError(t, tw.Close())
-	require.NoError(t, tw.Rotate(1024))
+	require.NoError(t, tw.Rotate())
 	require.Equal(t, "", tw.Path())
 }
 
@@ -295,7 +293,6 @@ func TestJSONSchema_SchemaOnly_NoSystemPrompt(t *testing.T) {
 // ─── EX-01: Config Args Merging ─────────────────────────────────────────────
 
 func TestInitConfig_ArgsMergeOrder(t *testing.T) {
-	t.Parallel()
 
 	// Set config-level args.
 	InitConfig(config.ACPConfig{

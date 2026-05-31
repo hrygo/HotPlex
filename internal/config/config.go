@@ -1036,6 +1036,8 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("worker.codex_cli.approval_mode")
 	_ = v.BindEnv("worker.acp.command")
 	_ = v.BindEnv("worker.acp.auto_approve")
+	_ = v.BindEnv("worker.acp.args")
+	_ = v.BindEnv("worker.acp.debug")
 	_ = v.BindEnv("worker.opencode_server.command")
 	_ = v.BindEnv("worker.opencode_server.idle_drain_period")
 	_ = v.BindEnv("worker.opencode_server.ready_timeout")
