@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 
 	"github.com/hrygo/hotplex/pkg/aep"
@@ -21,6 +22,30 @@ type ACPMapper struct {
 	turnActive atomic.Bool // true while a prompt turn is in progress
 	seq        atomic.Int64
 	msgID      string // pre-computed "msg_" + sessionID, avoids allocation on hot path
+
+	// usageSnapshot caches the latest usage_update for ControlRequester queries.
+	// Accumulated across multiple usage_update notifications within a turn.
+	usageMu sync.Mutex
+	usage   usageSnapshot
+}
+
+// usageSnapshot caches token usage, context size, and cost from usage_update events.
+type usageSnapshot struct {
+	InputTokens       int
+	OutputTokens      int
+	ThoughtTokens     int
+	CachedReadTokens  int
+	CachedWriteTokens int
+	TotalTokens       int
+	ContextSize       int
+	ContextUsed       int
+	Cost              *CostInfo
+}
+
+// CostInfo holds cost information from usage_update events.
+type CostInfo struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
 }
 
 // NewACPMapper creates a mapper bound to the given session.
@@ -40,6 +65,9 @@ func NewACPMapper(sessionID, userID string, log *slog.Logger) *ACPMapper {
 func (m *ACPMapper) Reset() {
 	m.msgActive.Store(false)
 	m.turnActive.Store(false)
+	m.usageMu.Lock()
+	m.usage = usageSnapshot{}
+	m.usageMu.Unlock()
 }
 
 // SetTurnActive marks the start of a prompt turn.
@@ -81,6 +109,7 @@ func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelo
 	case "tool_call_update":
 		return m.mapToolCallUpdate(params.Update)
 	case "usage_update":
+		m.updateUsage(params.Update)
 		return nil // internal tracking, stats included in Done
 	case "plan":
 		return m.mapPlan(params.Update)
@@ -431,7 +460,81 @@ func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {
 	if result.Usage.TotalTokens > 0 {
 		stats["total_tokens"] = result.Usage.TotalTokens
 	}
+
+	// Include accumulated usage_update data (context size, cost).
+	m.usageMu.Lock()
+	if m.usage.ContextSize > 0 {
+		stats["context_size"] = m.usage.ContextSize
+	}
+	if m.usage.ContextUsed > 0 {
+		stats["context_used"] = m.usage.ContextUsed
+	}
+	if m.usage.Cost != nil && m.usage.Cost.Amount > 0 {
+		stats["cost"] = m.usage.Cost
+	}
+	m.usageMu.Unlock()
+
 	return stats
+}
+
+// ─── Usage Tracking ──────────────────────────────────────────────────────────
+
+// updateUsage parses a usage_update notification and accumulates into the snapshot.
+func (m *ACPMapper) updateUsage(raw json.RawMessage) {
+	var u struct {
+		InputTokens       int `json:"inputTokens"`
+		OutputTokens      int `json:"outputTokens"`
+		ThoughtTokens     int `json:"thoughtTokens"`
+		CachedReadTokens  int `json:"cachedReadTokens"`
+		CachedWriteTokens int `json:"cachedWriteTokens"`
+		TotalTokens       int `json:"totalTokens"`
+		ContextSize       int `json:"contextSize"`
+		ContextUsed       int `json:"contextUsed"`
+		Cost              *struct {
+			Amount   float64 `json:"amount"`
+			Currency string  `json:"currency"`
+		} `json:"cost"`
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		m.log.Debug("acp mapper: failed to parse usage_update", "error", err)
+		return
+	}
+
+	m.usageMu.Lock()
+	defer m.usageMu.Unlock()
+
+	// Accumulate tokens (usage_update may fire multiple times per turn).
+	s := &m.usage
+	s.InputTokens += u.InputTokens
+	s.OutputTokens += u.OutputTokens
+	s.ThoughtTokens += u.ThoughtTokens
+	s.CachedReadTokens += u.CachedReadTokens
+	s.CachedWriteTokens += u.CachedWriteTokens
+	s.TotalTokens += u.TotalTokens
+
+	// Context size/used are absolute snapshots, not cumulative.
+	if u.ContextSize > 0 {
+		s.ContextSize = u.ContextSize
+	}
+	if u.ContextUsed > 0 {
+		s.ContextUsed = u.ContextUsed
+	}
+
+	// Cost accumulates across updates.
+	if u.Cost != nil {
+		if s.Cost == nil {
+			s.Cost = &CostInfo{}
+		}
+		s.Cost.Amount += u.Cost.Amount
+		s.Cost.Currency = u.Cost.Currency
+	}
+}
+
+// LastUsage returns a copy of the current usage snapshot for ControlRequester queries.
+func (m *ACPMapper) LastUsage() usageSnapshot {
+	m.usageMu.Lock()
+	defer m.usageMu.Unlock()
+	return m.usage
 }
 
 func extractToolName(raw json.RawMessage) string {
