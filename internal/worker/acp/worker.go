@@ -486,10 +486,13 @@ func (w *Worker) Health() worker.WorkerHealth {
 // initialize handshake. Returns true if the capability is absent (assume supported)
 // or explicitly true. Returns false only if explicitly set to false.
 func (w *Worker) supportsCapability(name string) bool {
-	if w.initResult == nil {
+	w.Mu.Lock()
+	ir := w.initResult
+	w.Mu.Unlock()
+	if ir == nil {
 		return true // no handshake result, assume supported
 	}
-	caps := w.initResult.AgentCapabilities
+	caps := ir.AgentCapabilities
 	if caps == nil {
 		return true // no capabilities declared, assume all supported
 	}
@@ -671,7 +674,7 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 	if client == nil {
 		return fmt.Errorf("acp: permission response: worker not started")
 	}
-	return client.RespondPermission(ctx, pm.RequestID, outcome)
+	return client.RespondRequest(ctx, pm.RequestID, outcome)
 }
 
 func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
@@ -703,7 +706,7 @@ func (w *Worker) respondToServerRequest(ctx context.Context, reqID, kind string,
 	if !ok {
 		return fmt.Errorf("acp: %s response: invalid request type %T", kind, req)
 	}
-	return client.RespondPermission(ctx, acpReq.ID, outcome)
+	return client.RespondRequest(ctx, acpReq.ID, outcome)
 }
 
 // ─── readLoop ────────────────────────────────────────────────────────────────
@@ -765,7 +768,7 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 
 		// Check auto-approve.
 		if w.autoApprove.Load() {
-			_ = w.client.RespondPermission(ctx, req.ID, pm.FormatAllowedOutcome())
+			_ = w.client.RespondRequest(ctx, req.ID, pm.FormatAllowedOutcome())
 			metrics.ACPPermissionRequestsTotal.WithLabelValues("approved").Inc()
 			return
 		}

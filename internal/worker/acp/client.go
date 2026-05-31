@@ -125,9 +125,11 @@ func (c *ACPClient) Cancel(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// RespondPermission sends a response to a server-initiated request_permission.
+// RespondRequest sends a JSON-RPC response to a server-initiated request
+// (permission, question, or elicitation). It is the canonical name;
+// RespondPermission is kept as a compatibility alias.
 // No pendingMu needed (does not access the pending map); writeMu serializes stdin writes.
-func (c *ACPClient) RespondPermission(ctx context.Context, id json.RawMessage, outcome any) error {
+func (c *ACPClient) RespondRequest(ctx context.Context, id json.RawMessage, outcome any) error {
 	req := &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -137,9 +139,14 @@ func (c *ACPClient) RespondPermission(ctx context.Context, id json.RawMessage, o
 	err := WriteMessage(c.stdin, req)
 	c.writeMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("acp respond permission: %w", err)
+		return fmt.Errorf("acp respond request: %w", err)
 	}
 	return nil
+}
+
+// RespondPermission is a compatibility alias for RespondRequest.
+func (c *ACPClient) RespondPermission(ctx context.Context, id json.RawMessage, outcome any) error {
+	return c.RespondRequest(ctx, id, outcome)
 }
 
 // SetSessionModel switches the model for an active session .
