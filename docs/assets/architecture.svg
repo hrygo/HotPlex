@@ -218,10 +218,10 @@
     <line x1="71" y1="466" x2="78" y2="466" stroke="#f97316" stroke-width="1.5" stroke-linecap="round" />
     <!-- Text -->
     <text x="86" y="460" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">Claude Code</text>
-    <text x="86" y="472" fill="#d97706" font-size="9" font-family="system-ui, -apple-system, sans-serif">Claude Stdio API</text>
+    <text x="86" y="472" fill="#d97706" font-size="9" font-family="system-ui, -apple-system, sans-serif">Terminal stdio API</text>
     
     <!-- Small Connection Method Tag -->
-    <text x="125" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">Stdio Pipe</text>
+    <text x="125" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">Stdio Stream</text>
   </g>
 
   <!-- Codex CLI Worker -->
@@ -233,10 +233,10 @@
     <line x1="245" y1="467" x2="247" y2="457" stroke="#3b82f6" stroke-width="1.2" />
     <!-- Text -->
     <text x="266" y="460" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">Codex CLI</text>
-    <text x="266" y="472" fill="#60a5fa" font-size="9" font-family="system-ui, -apple-system, sans-serif">Exec Command</text>
+    <text x="266" y="472" fill="#60a5fa" font-size="9" font-family="system-ui, -apple-system, sans-serif">Dual Exec/App-Server</text>
     
     <!-- Small Connection Method Tag -->
-    <text x="305" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">Fork/Exec</text>
+    <text x="305" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">Dual Exec/HTTP</text>
   </g>
 
   <!-- OpenCode Server Worker -->
@@ -251,10 +251,10 @@
     <circle cx="423" cy="469.5" r="0.8" fill="#10b981" />
     <!-- Text -->
     <text x="446" y="460" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">OpenCode</text>
-    <text x="446" y="472" fill="#34d399" font-size="9" font-family="system-ui, -apple-system, sans-serif">Standalone OCS</text>
+    <text x="446" y="472" fill="#34d399" font-size="9" font-family="system-ui, -apple-system, sans-serif">Singleton OCS Server</text>
     
     <!-- Small Connection Method Tag -->
-    <text x="485" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">HTTP + SSE</text>
+    <text x="485" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">HTTP &amp; SSE</text>
   </g>
 
   <!-- ACP Agent Worker -->
@@ -266,9 +266,9 @@
     <circle cx="615" cy="462" r="1.5" fill="#6366f1" />
     <!-- Text -->
     <text x="626" y="460" fill="#f8fafc" font-size="12" font-family="system-ui, -apple-system, sans-serif" font-weight="700">ACP Agent</text>
-    <text x="626" y="472" fill="#818cf8" font-size="9" font-family="system-ui, -apple-system, sans-serif">Generic Agent</text>
+    <text x="626" y="472" fill="#818cf8" font-size="9" font-family="system-ui, -apple-system, sans-serif">Universal JSON-RPC</text>
     
     <!-- Small Connection Method Tag -->
-    <text x="665" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">JSON-RPC 2.0</text>
+    <text x="665" y="420" fill="#64748b" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle">Stdio JSON-RPC</text>
   </g>
 </svg>
