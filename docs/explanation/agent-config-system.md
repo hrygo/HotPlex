@@ -89,17 +89,18 @@ META-COGNITION 定义了 Worker 的**身份边界**——明确告知 Agent "你
 
 ### 配置加载流程
 
-`Load(dir, platform, botID)` 的完整执行路径：
+`Load(dir, platform, botID, injectExclude...)` 的完整执行路径：
 
 ```
 1. 路径安全检查：filepath.Base(botID) == botID（防止路径穿越）
 2. 逐文件加载（SOUL → AGENTS → SKILLS → USER → MEMORY）：
-   a. 调用 resolveFile(dir, platform, botID, fileName)
-   b. 按三级 fallback 查找文件
-   c. 读取文件内容，剥离 YAML frontmatter
-   d. 检查单文件大小限制（MaxFileChars = 8000 字符）
-   e. 检查总量预算（MaxTotalChars = 40000 字符）
-   f. 超出预算的文件截断并记录 warning
+   a. 检查 injectExclude：如文件名在排除列表中，跳过加载
+   b. 调用 resolveFile(dir, platform, botID, fileName)
+   c. 按三级 fallback 查找文件
+   d. 读取文件内容，剥离 YAML frontmatter
+   e. 检查单文件大小限制（MaxFileChars = 8000 字符）
+   f. 检查总量预算（MaxTotalChars = 40000 字符）
+   g. 超出预算的文件截断并记录 warning
 3. 返回 AgentConfigs 结构体
 ```
 
@@ -108,6 +109,47 @@ META-COGNITION 定义了 Worker 的**身份边界**——明确告知 Agent "你
 配置文件支持 Hugo 风格的 YAML frontmatter（`---` 包裹的元数据块），Gateway 在加载时自动剥离。Frontmatter 是给配置管理系统（如 Git、CMS）使用的元数据，不是给 LLM 看的。剥离操作节省 Worker 的 token 消耗。
 
 剥离逻辑处理畸形 frontmatter 的策略是"原样返回"——如果找不到闭合的 `---`，说明格式错误，不会截断内容，而是保留原文。
+
+### 文件排除（inject_exclude）
+
+`inject_exclude` 允许管理员跳过指定配置文件的加载，被排除文件对应的注入位置保持为空。这在多 Bot 场景下特别有用——例如某些 Bot 不需要 `MEMORY.md` 或 `USER.md` 的上下文。
+
+**三级 fallback**（通过 `ResolveInjectExclude` 解析）：
+
+```
+1. Bot 级（bots[].inject_exclude）           -- 最高优先级
+2. 平台级（messaging.*.inject_exclude）
+3. 全局级（agent_config.inject_exclude）      -- 默认
+```
+
+解析规则：
+- **非 nil 空切片**（YAML `inject_exclude: []`）表示"显式清空"——即使全局级有值，也会被覆盖为空
+- **nil**（未设置）表示"使用上级值"——fallback 到上级配置
+- **非空切片** 表示"使用此列表"——直接覆盖上级配置
+
+**匹配方式**：大小写不敏感。`SOUL.md` 和 `soul.md` 等效。
+
+**不可排除**：`META-COGNITION.md` 通过 `go:embed` 编译进二进制，始终注入，不受 `inject_exclude` 影响。
+
+**配置示例**：
+
+```yaml
+# 全局：排除所有 Bot 的 MEMORY.md
+agent_config:
+  inject_exclude: ["MEMORY.md"]
+
+# 平台级：Slack 平台排除 SOUL.md 和 MEMORY.md
+messaging:
+  slack:
+    inject_exclude: ["SOUL.md", "MEMORY.md"]
+
+# Bot 级：特定 Bot 排除 USER.md 和 MEMORY.md
+messaging:
+  slack:
+    bots:
+      - name: "dev-bot"
+        inject_exclude: ["USER.md", "MEMORY.md"]
+```
 
 ### XML Sanitizer：防止注入
 

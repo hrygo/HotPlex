@@ -313,6 +313,8 @@ ACP (Agent Communication Protocol) 通用 Worker，通过 JSON-RPC 2.0 over stdi
 |------|------|--------|----------|------|
 | `command` | string | `hermes acp` | `HOTPLEX_WORKER_ACP_COMMAND` | ACP Agent 启动命令。支持带子命令，如 `hermes acp` |
 | `auto_approve` | bool | `false` | `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | 自动批准权限请求，无需用户确认 |
+| `args` | []string | `[]` | — | 附加到 command 之后的额外参数列表 |
+| `debug` | bool | `false` | — | 启用 JSON-RPC 协议 trace 日志（调试用） |
 
 **配置示例**：
 
@@ -321,6 +323,8 @@ worker:
   acp:
     command: "hermes acp"    # 或其他 ACP 兼容 Agent
     auto_approve: true       # 自动批准工具调用权限
+    args: ["--verbose"]      # 附加命令行参数
+    debug: true              # 启用协议 trace 日志
 ```
 
 **使用方式**：在 messaging 层指定 `worker_type: "acp"` 即可启用：
@@ -341,6 +345,7 @@ Agent B/C 通道配置加载器。
 |------|------|--------|----------|------|
 | `enabled` | bool | `true` | `HOTPLEX_AGENT_CONFIG_ENABLED` | 是否启用 Agent 配置加载（SOUL.md、AGENTS.md 等） |
 | `config_dir` | string | `~/.hotplex/agent-configs` | `HOTPLEX_AGENT_CONFIG_DIR` | 配置文件根目录。支持 `~` 和 `${VAR}` 展开 |
+| `inject_exclude` | []string | `[]` | — | 全局默认排除列表。列出的配置文件（如 `SOUL.md`、`MEMORY.md`）不会被加载和注入。平台级和 Bot 级可覆盖。`META-COGNITION.md` 始终注入（go:embed），不可排除 |
 
 **B 通道**（`<directives>`）：`META-COGNITION.md`（go:embed，始终首位）+ `SOUL.md` + `AGENTS.md` + `SKILLS.md`
 
@@ -368,6 +373,7 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `max_concurrent_runs` | int | `3` | — | 最大并行 Job 执行数 |
 | `max_jobs` | int | `50` | — | 最大注册 Job 数 |
 | `default_timeout_sec` | int | `300` (5分钟) | — | 单 Job 执行超时（秒） |
+| `default_sandbox` | string | `""` | — | Cron Job 的默认 sandbox 模式覆盖。非空时应用于所有 cron Worker |
 | `tick_interval_sec` | int | `60` | — | 调度器 tick 间隔（秒） |
 | `yaml_config_path` | string | `""` | — | 外部 YAML 配置文件路径（可选） |
 | `jobs` | []map | `[]` | — | 内联 Job 定义（可选） |
@@ -452,6 +458,7 @@ webhook:
 | `dm_policy` | string | `allowlist` | `HOTPLEX_MESSAGING_{PLATFORM}_DM_POLICY` | 私聊消息策略：`allowlist` = 仅允许白名单用户 |
 | `group_policy` | string | `allowlist` | `HOTPLEX_MESSAGING_{PLATFORM}_GROUP_POLICY` | 群聊消息策略：`allowlist` = 仅允许白名单群组 |
 | `require_mention` | bool | `true` | `HOTPLEX_MESSAGING_{PLATFORM}_REQUIRE_MENTION` | 群聊中是否需要 @机器人 才响应 |
+| `inject_exclude` | []string | `[]` | — | 平台级默认排除列表。覆盖 `agent_config.inject_exclude`，被 Bot 级覆盖 |
 | `allow_from` | []string | `[]` | `HOTPLEX_MESSAGING_{PLATFORM}_ALLOW_FROM` | 全局白名单用户/群组（逗号分隔） |
 | `allow_dm_from` | []string | `[]` | `HOTPLEX_MESSAGING_{PLATFORM}_ALLOW_DM_FROM` | 私聊白名单用户（逗号分隔） |
 | `allow_group_from` | []string | `[]` | `HOTPLEX_MESSAGING_{PLATFORM}_ALLOW_GROUP_FROM` | 群聊白名单群组（逗号分隔） |
@@ -508,6 +515,7 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 | `worker_type` | string | 覆盖 Worker 类型 |
 | `sandbox` | string | 覆盖 CodexCLI sandbox 模式（bot 级） |
 | `acp_command` | string | 覆盖 ACP Agent 启动命令（bot 级，仅 `worker_type: acp` 时生效） |
+| `inject_exclude` | []string | 覆盖 agent config 排除列表（bot 级，覆盖平台级和全局级） |
 | `stt_*` | — | 覆盖 STT 配置（继承平台级 → messaging 级） |
 | `tts_*` | — | 覆盖 TTS 配置（继承平台级 → messaging 级） |
 
@@ -521,6 +529,7 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 | `worker_type` | string | 覆盖 Worker 类型 |
 | `sandbox` | string | 覆盖 CodexCLI sandbox 模式（bot 级） |
 | `acp_command` | string | 覆盖 ACP Agent 启动命令（bot 级，仅 `worker_type: acp` 时生效） |
+| `inject_exclude` | []string | 覆盖 agent config 排除列表（bot 级，覆盖平台级和全局级） |
 | `stt_*` | — | 覆盖 STT 配置 |
 | `tts_*` | — | 覆盖 TTS 配置 |
 
@@ -547,7 +556,13 @@ messaging.stt_*        ──→  slack.stt_* (如未设置)        ──→  s
 messaging.tts_*        ──→  slack.tts_* (如未设置)        ──→  slack.bots[i].tts_* (如未设置)
 ```
 
-**优先级**：`bot-level > platform-level (YAML/env) > messaging-level > Default()`
+`inject_exclude` 使用独立的三级 fallback（通过 `ResolveInjectExclude`）：
+
+```
+agent_config.inject_exclude  ──→  messaging.slack.inject_exclude  ──→  slack.bots[i].inject_exclude
+```
+
+**优先级**：`bot-level > platform-level (YAML/env) > global-level > Default()`
 
 仅 zero-value 字段被填充，已有值不会被覆盖。
 
