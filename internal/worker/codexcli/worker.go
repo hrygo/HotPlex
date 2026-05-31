@@ -620,6 +620,8 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		w.mu.Lock()
 		w.turnID = tr.Turn.ID
 		w.mu.Unlock()
+	} else if tr.Turn.ID == "" {
+		w.Log.Debug("codexcli: turn/start response missing turn.id", "resp", string(resp))
 	}
 
 	w.SetLastIO(time.Now())
@@ -629,6 +631,9 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
 	if w.recvCh != nil {
+		if w.threadID != "" {
+			w.manager.Unsubscribe(w.threadID)
+		}
 		w.closed = true
 		w.recvCh = nil
 		if w.conn != nil {

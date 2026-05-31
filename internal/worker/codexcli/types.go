@@ -110,7 +110,6 @@ const (
 	ItemWebSearch        = "web_search"
 	ItemTodoList         = "todo_list"
 	ItemError            = "error"
-	ItemImageGeneration  = "image_generation"
 )
 
 // EnvBlocklist defines environment variable prefixes to strip from worker processes.
