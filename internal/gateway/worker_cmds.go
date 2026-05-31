@@ -133,19 +133,19 @@ func (h *Handler) handlePassthroughCommand(ctx context.Context, env *events.Enve
 		switch cmd {
 		case events.StdioCompact:
 			if err := commander.Compact(ctx, nil); err != nil {
-				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "compact: %v", err)
+				return h.sendErrorf(ctx, env, classifyWorkerError(err), "compact: %v", err)
 			}
 			h.sendCommandFeedback(ctx, env.SessionID, "✅ 对话历史已压缩")
 			return nil
 		case events.StdioClear:
 			if err := commander.Clear(ctx); err != nil {
-				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "clear: %v", err)
+				return h.sendErrorf(ctx, env, classifyWorkerError(err), "clear: %v", err)
 			}
 			h.sendCommandFeedback(ctx, env.SessionID, "✅ 会话已清空，新会话已创建")
 			return nil
 		case events.StdioRewind:
 			if err := commander.Rewind(ctx, ""); err != nil {
-				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "rewind: %v", err)
+				return h.sendErrorf(ctx, env, classifyWorkerError(err), "rewind: %v", err)
 			}
 			h.sendCommandFeedback(ctx, env.SessionID, "✅ 已回退到上一轮对话")
 			return nil
