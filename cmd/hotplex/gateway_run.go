@@ -63,6 +63,7 @@ type GatewayDeps struct {
 	Hub             *gateway.Hub
 	SessionMgr      *session.Manager
 	EventStore      eventStoreProvider
+	EventCollector  *eventstore.Collector
 	Auth            *security.Authenticator
 	Handler         *gateway.Handler
 	Bridge          *gateway.Bridge
@@ -412,6 +413,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Hub:             hub,
 		SessionMgr:      sm,
 		EventStore:      stores.event,
+		EventCollector:  stores.collector,
 		Auth:            auth,
 		Handler:         handler,
 		Bridge:          bridge,
@@ -822,16 +824,34 @@ func shutdownGateway(
 	closeSTTCache(shutdownCtx, log)
 	closeTTSCache(shutdownCtx, log)
 
-	// Terminate all workers BEFORE bridge.Shutdown() so forwardEvents
-	// goroutines (blocked on worker stdout) can exit.
+	// Mark bridge closed FIRST to prevent in-flight message handlers from
+	// creating new sessions/workers during shutdown. Without this, a handler
+	// can pass the b.closed check in StartSession, start a worker, and have
+	// it immediately killed by TerminateAllWorkers below (race #613 defect 2).
+	deps.Bridge.MarkClosed()
+
+	// Terminate all workers so forwardEvents goroutines (blocked on worker
+	// stdout) can exit.
 	deps.SessionMgr.TerminateAllWorkers()
 	opencodeserver.ShutdownSingleton(shutdownCtx)
 	codexcli.ShutdownSingleton(shutdownCtx)
 
-	deps.Bridge.Shutdown(shutdownCtx)
+	// Wait for forwardEvents goroutines to drain.
+	deps.Bridge.WaitForwarders(shutdownCtx)
 
 	cleanupWG.Wait()
 	pidTracker.RemoveAll()
+
+	// Close eventstore collector BEFORE SessionMgr.Close() to prevent
+	// the collector's background writer from writing to a closed DB.
+	// Without this, deferred stores.close() fires after SessionMgr has
+	// already closed the shared SQLite connection (#613 defect 3).
+	if deps.EventCollector != nil {
+		if err := deps.EventCollector.Close(); err != nil {
+			log.Warn("gateway: event collector close", "err", err)
+		}
+		deps.EventCollector = nil // prevent double-close in deferred stores.close()
+	}
 
 	if err := deps.SessionMgr.Close(); err != nil {
 		log.Warn("gateway: session manager close", "err", err)

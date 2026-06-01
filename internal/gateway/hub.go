@@ -87,6 +87,10 @@ type Hub struct {
 	mu       sync.RWMutex
 	conns    map[*Conn]struct{}                // all active connections
 	sessions map[string]map[SessionWriter]bool // sessionID → connections
+	// everHadConn tracks sessions that have had at least one connection
+	// registered (WS or platform). Used to suppress "event dropped" debug
+	// log noise for sessions that never had connections (e.g. cron jobs).
+	everHadConn map[string]bool
 
 	// Incoming messages from all connections.
 	broadcast chan *EnvelopeWithConn
@@ -133,6 +137,7 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 		cfgStore:       cfgStore,
 		conns:          make(map[*Conn]struct{}),
 		sessions:       make(map[string]map[SessionWriter]bool),
+		everHadConn:    make(map[string]bool),
 		seqGen:         NewSeqGen(),
 		sessionDropped: make(map[string]bool),
 		broadcast:      make(chan *EnvelopeWithConn, broadcastQueueSize(cfg)),
@@ -211,6 +216,7 @@ func (h *Hub) JoinSession(sessionID string, conn *Conn) {
 		h.sessions[sessionID] = make(map[SessionWriter]bool)
 	}
 	h.sessions[sessionID][conn] = true
+	h.everHadConn[sessionID] = true
 }
 
 // LeaveSession unsubscribes conn from a session.
@@ -274,6 +280,7 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc messaging.PlatformConn) {
 	}
 
 	h.sessions[sessionID][newPCEntry(pc, defaultPCEntryConfig(h.cfgStore.Load()), h.log)] = true
+	h.everHadConn[sessionID] = true
 }
 
 // sendBroadcast sends to the broadcast channel. Returns false if the hub is
@@ -467,8 +474,13 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 
 	if len(conns) == 0 {
 		metrics.GatewayEventsNoSubscribersDropped.WithLabelValues(string(msg.Env.Event.Type)).Inc()
-		h.log.Debug("gateway: event dropped, no connections",
-			"session_id", msg.Env.SessionID, "event_type", msg.Env.Event.Type)
+		// Suppress debug log for sessions that never had any connection
+		// registered (e.g. cron/internal sessions). These events are expected
+		// to have no subscribers — logging every one is just noise.
+		if h.everHadConn[msg.Env.SessionID] {
+			h.log.Debug("gateway: event dropped, no connections",
+				"session_id", msg.Env.SessionID, "event_type", msg.Env.Event.Type)
+		}
 		return
 	}
 
