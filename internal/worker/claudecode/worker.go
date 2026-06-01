@@ -1,3 +1,4 @@
+// Package claudecode implements the Claude Code worker adapter via stdio.
 package claudecode
 
 import (
@@ -727,7 +728,9 @@ func (w *Worker) readOutput(ctx context.Context) {
 							var input struct {
 								Questions []events.Question `json:"questions"`
 							}
-							_ = json.Unmarshal(cr.Input, &input)
+							if err := json.Unmarshal(cr.Input, &input); err != nil {
+								w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
+							}
 							questions = input.Questions
 						}
 						env := events.NewEnvelope(
@@ -750,7 +753,9 @@ func (w *Worker) readOutput(ctx context.Context) {
 						// Other tools → PermissionRequest event
 						var input map[string]any
 						if len(cr.Input) > 0 {
-							_ = json.Unmarshal(cr.Input, &input)
+							if err := json.Unmarshal(cr.Input, &input); err != nil {
+								w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
+							}
 						}
 						args := []string{`{}`}
 						if len(input) > 0 {
@@ -784,7 +789,9 @@ func (w *Worker) readOutput(ctx context.Context) {
 						RequestedSchema map[string]any `json:"requested_schema,omitempty"`
 					}
 					if evt.RawMessage != nil && len(evt.RawMessage.Response) > 0 {
-						_ = json.Unmarshal(evt.RawMessage.Response, &elData)
+						if err := json.Unmarshal(evt.RawMessage.Response, &elData); err != nil {
+							w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
+						}
 					}
 					env := events.NewEnvelope(
 						aep.NewID(),
@@ -947,7 +954,9 @@ func (w *Worker) writeTempFile(prefix, content string) (string, error) {
 		_ = os.Remove(path)
 		return "", fmt.Errorf("close temp file: %w", err)
 	}
+	w.Mu.Lock()
 	w.tempFiles = append(w.tempFiles, path)
+	w.Mu.Unlock()
 	return path, nil
 }
 
@@ -955,7 +964,14 @@ func (w *Worker) writeTempFile(prefix, content string) (string, error) {
 // On Windows, the child process may still hold a file handle briefly after
 // termination, so we retry once after a short delay if deletion fails.
 func (w *Worker) cleanupTempFiles() {
-	for _, path := range w.tempFiles {
+	// Snapshot and clear the slice under w.Mu so a concurrent writeTempFile
+	// cannot append to a slice we are iterating, and so the field is left in
+	// a consistent nil state even if a file removal blocks.
+	w.Mu.Lock()
+	files := w.tempFiles
+	w.tempFiles = nil
+	w.Mu.Unlock()
+	for _, path := range files {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			// Retry once after a short delay for Windows file-lock stragglers.
 			time.Sleep(200 * time.Millisecond)
@@ -964,7 +980,6 @@ func (w *Worker) cleanupTempFiles() {
 			}
 		}
 	}
-	w.tempFiles = nil
 }
 
 // joinTools joins tool names with comma.

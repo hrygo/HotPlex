@@ -539,8 +539,8 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		return ErrWorkerAttached
 	}
 
-	// Acquire pool quota outside m.mu — reduces m.mu hold time by ~50%.
-	if poolErr := m.pool.Acquire(userID); poolErr != nil {
+	// Acquire pool quota (slot + memory) in a single atomic operation.
+	if poolErr := m.pool.AcquireWithMemory(userID); poolErr != nil {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
 			m.log.Warn("session: attach rejected", "err", poolErr, "session_id", id)
@@ -550,14 +550,10 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		if pe.Kind == poolErrKindUserQuotaExceeded {
 			return ErrUserQuotaExceeded
 		}
+		if pe.Kind == poolErrKindMemoryExceeded {
+			return ErrMemoryExceeded
+		}
 		return ErrPoolExhausted
-	}
-
-	// RES-008: track per-user estimated memory (RLIMIT_AS=512MB per worker).
-	if err := m.pool.AcquireMemory(userID); err != nil {
-		m.pool.Release(userID) // rollback slot quota
-		metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
-		return ErrMemoryExceeded
 	}
 
 	// Re-validate under write lock (TOCTOU safety).
@@ -1123,15 +1119,32 @@ func (m *Manager) gc(ctx context.Context) {
 	})
 	_ = eg.Wait() // errors already logged inside goroutines
 
-	for _, id := range maxIds {
-		if err := m.TransitionWithReason(ctx, id, events.StateTerminated, "max_lifetime"); err != nil {
-			m.log.Warn("session: gc (max_lifetime) transition", "session_id", id, "err", err)
+	allIds := make([]string, 0, len(maxIds)+len(idleIds))
+	allIds = append(allIds, maxIds...)
+	allIds = append(allIds, idleIds...)
+	if len(allIds) > 0 {
+		// Build a reason map for O(1) lookup. max_lifetime wins if a session
+		// appears in both lists (unlikely but safe to be explicit).
+		reasonMap := make(map[string]string, len(maxIds)+len(idleIds))
+		for _, id := range idleIds {
+			reasonMap[id] = "idle_timeout"
 		}
-	}
-	for _, id := range idleIds {
-		if err := m.TransitionWithReason(ctx, id, events.StateTerminated, "idle_timeout"); err != nil {
-			m.log.Warn("session: gc (idle) transition", "session_id", id, "err", err)
+		for _, id := range maxIds {
+			reasonMap[id] = "max_lifetime"
 		}
+
+		eg2, egCtx2 := errgroup.WithContext(ctx)
+		eg2.SetLimit(5)
+		for _, id := range allIds {
+			id := id
+			eg2.Go(func() error {
+				if err := m.TransitionWithReason(egCtx2, id, events.StateTerminated, reasonMap[id]); err != nil {
+					m.log.Warn("session: gc transition", "session_id", id, "reason", reasonMap[id], "err", err)
+				}
+				return nil // don't propagate individual failures
+			})
+		}
+		_ = eg2.Wait()
 	}
 
 	// 3. Evict old TERMINATED sessions from in-memory map to prevent unbounded growth.
