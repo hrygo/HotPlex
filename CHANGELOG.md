@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.23.1] - 2026-06-01
+
+### Summary
+
+v1.23.1 是一次 patch 版本更新，修复 v1.23.0 引入的两个回归问题。Claude Code Worker 的临时文件互斥锁导致自死锁，使 bot 完全无响应；ACP Worker 的 turn summary 缺少 token 和成本数据。两者均为 v1.23.0 引入的回归，影响已部署实例的日常使用。
+
+### Fixed
+
+- **Worker/Claudecode**: Resolve self-deadlock in `writeTempFile`/`cleanupTempFiles` — PR #606 added `w.Mu.Lock()` to both functions, but they are called from `startLocked()` which already holds `w.Mu`, causing an instant deadlock that blocks all subsequent messages. Introduce dedicated `tempFilesMu` to preserve the data-race fix without deadlocking the Start path. (#612)
+- **Worker/ACP**: Align `buildStats` output with gateway `sessionAccumulator` format — token counts and cost data were missing because `buildStats()` emitted flat keys incompatible with `mergePerTurnStats()`. Wrap token data in nested `usage` map and store cost as `float64` for JSON round-trip safety. (#610)
+
 ## [1.23.0] - 2026-06-01
 
 ### Summary
