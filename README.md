@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.22.0-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.23.0-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -137,25 +137,8 @@ Supports **systemd** (Linux), **launchd** (macOS), and **Windows SCM**.
 
 HotPlex sits between frontend clients and backend AI coding agents, featuring a built-in **Meta-Cognition Core** that abstracts protocol differences into a unified **AEP v1** WebSocket layer.
 
-```
-┌────────────┐   ┌────────────┐   ┌────────────┐
-│   Web UI   │   │   Slack    │   │   Feishu   │
-└─────┬──────┘   └─────┬──────┘   └─────┬──────┘
-      │                │                │
-      └────────────────┼────────────────┘
-                       │
-                 ┌─────┴──────┐
-                 │  HotPlex   │
-                 │  Gateway   │
-                 └─────┬──────┘
-                       │
-      ┌────────────────┼────────────────┐
-      │                │                │
-┌─────┴──────┐   ┌─────┴──────┐   ┌─────┴──────┐
-│   Claude   │   │   Codex    │   │  OpenCode  │
-│    Code    │   │    CLI     │   │   Server   │
-└────────────┘   └────────────┘   └────────────┘
-```
+![HotPlex Architecture](docs/assets/architecture.svg)
+
 
 ## 🔗 SDKs & Libraries
 
@@ -213,7 +196,7 @@ func main() {
 | `log.level`                 | `info`                       | Log level: debug, info, warn, error            |
 
 > [!TIP]
-> See [Config Reference](docs/management/Config-Reference.md) for the full list of environment variables and YAML settings.
+> See [Configuration Reference](docs/reference/configuration.md) for the full list of environment variables and YAML settings.
 
 ## 📖 Documentation
 

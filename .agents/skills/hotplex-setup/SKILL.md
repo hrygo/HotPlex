@@ -1,6 +1,6 @@
 ---
 name: hotplex-setup
-description: HotPlex 环境检查、安装、配置、故障排查的完整指引。遇到以下场景时使用此 skill：首次安装 HotPlex、运行 hotplex doctor、依赖缺失（Go/Python/ffmpeg/STT/TTS）、Token 验证（Slack/飞书）、端口冲突、权限问题、服务启动失败、STT/TTS/MOSS 模型配置、Agent 个性化、升级版本、迁移配置。也适用于用户提到 hotplex + 安装/配置/环境/启动/报错/检查/doctor/onboard/服务/模型 等关键词。支持 Linux/macOS/Windows 全平台。即使用户只是问"我的 hotplex 怎么了"、"TTS 不工作"、"MOSS 语音合成失败"或"环境怎么配"，也应使用此 skill 来诊断和修复。
+description: HotPlex 环境检查、安装、配置与故障排查。覆盖首次安装、`hotplex doctor` 诊断（25 个 checker / 9 类别）、`hotplex onboard` 向导、4 种 Worker（claude_code / opencode_server / codex_cli / acp）切换、STT/TTS/MOSS 模型配置、Agent 个性化、系统服务（systemd/launchd/SCM）部署、跨平台（Linux/macOS/Windows）。**核心流程：以 `hotplex doctor --json` 为入口，按 category 分支处理 fail/warn 项**；典型反直觉陷阱见 §配置陷阱（.env 来源、Worker 5 级 fallback、inject_exclude 边界、dev YAML vs home YAML、Worker 注册 blank import）。
 ---
 
 # HotPlex 环境检查与安装指引
@@ -13,7 +13,7 @@ description: HotPlex 环境检查、安装、配置、故障排查的完整指�
 用户请求 → 构建安装二进制 → hotplex doctor --json → 解析报告 → 分支处理
 ```
 
-不要手动逐项检查依赖——`hotplex doctor` 集成了 26 个 checker（8 个 category），覆盖环境、配置、依赖、安全、运行时、消息平台、STT、TTS、Agent 配置。先让它跑，你再根据报告行动。
+不要手动逐项检查依赖——`hotplex doctor` 集成了 25 个 checker（9 个 category），覆盖环境、配置、依赖、安全、运行时、消息平台、STT、TTS、Agent 配置。先让它跑，你再根据报告行动。
 
 ### 第零步：构建安装二进制
 
@@ -89,7 +89,7 @@ hotplex doctor --json
 
 | checker | 失败原因 | 处理 |
 |---------|---------|------|
-| `worker_binary` | claude/opencode 不在 PATH | 安装 Claude Code CLI 或设置 `HOTPLEX_WORKER_CLAUDE_CODE_COMMAND` |
+| `worker_binary` | claude/opencode 不在 PATH | 安装对应 CLI 或设置 worker command 配置项。Claude Code: `claude_code.command` 或环境变量 `HOTPLEX_WORKER_CLAUDE_CODE_COMMAND`；Codex CLI: `codex_cli.command`；OCS/ACP 通过各自的 `command` 配置启动，无需预装二进制 |
 | `sqlite_path` | 数据目录不存在或无写权限 | `mkdir -p ~/.hotplex/data && chmod 755 ~/.hotplex` |
 
 #### security（安全）
@@ -173,9 +173,108 @@ hotplex doctor --json
 
 ```bash
 hotplex doctor --json
+# 或启用自动修复（仅限带 FixFunc 的 fail 项，如 config.exists、security.file_permissions、env_vars）
+hotplex doctor --fix
 ```
 
+`--fix` 只修复 `status: fail` 且带 `FixFunc` 的项；**不修复 warn**（warn 需要用户决策）。**注意**：`--fix` 不会备份现有配置，修复前可手动 `cp ~/.hotplex/config.yaml{,.bak}`。
+
 重复直到 `summary.fail == 0`。
+
+---
+
+## ⚠️ 配置陷阱（高发反直觉点）
+
+首次安装或调试时，用户经常因为以下"看起来应该工作但实际不行"的配置陷阱而浪费时间。诊断前先排查这些：
+
+### 1. `.env` 来源：`make dev` ≠ `~/.hotplex/`
+
+`make dev` / `scripts/dev.sh:16-18` 加载的是 **repo-local `<project>/.env`**，**不是** `~/.hotplex/.env`：
+
+```bash
+# scripts/dev.sh:16-18 — 实际加载路径
+if [[ -f "${BASH_SOURCE[0]%/*}/../.env" ]]; then
+    set -a && source "${BASH_SOURCE[0]%/*}/../.env" && set +a
+fi
+```
+
+| 路径 | 何时加载 | 用途 |
+|:---|:---|:---|
+| `<project>/.env` | `make dev` / `scripts/dev.sh` | **dev 实际加载** |
+| `~/.hotplex/.env` | `hotplex service`（systemd/launchd/SCM） | **生产/服务安装路径** |
+| `configs/config-dev.yaml` | `make dev` 显式 `-c` 参数 | dev-only YAML 覆盖层 |
+
+**诊断信号**：dev 改了 worker type 但 `hotplex doctor` 看不到。**修复**：编辑 `<project>/.env`，**不是** `~/.hotplex/.env`。
+
+### 2. Worker Type 解析 5 级 fallback
+
+`WorkerType` 在配置中有 5 个可能来源（按优先级从高到低）：
+
+```
+1. bots[].worker_type                    (per-bot YAML，仅多 bot 模式可用)
+2. <platform>.worker_type                (YAML 平台级，feishu/slack/yuanxin)
+3. HOTPLEX_MESSAGING_<PLATFORM>_WORKER_TYPE  (env 平台级，覆盖 YAML)
+4. messaging.worker_type                 (YAML 共享默认)
+5. 编译默认                              (config.go:855 → "claude_code")
+```
+
+支持 4 个 worker type（`internal/worker/worker.go:62-66`）：
+- `claude_code` — Claude Code (stdio, `--print --session-id`)
+- `opencode_server` — OCS 单例 (HTTP+SSE)
+- `codex_cli` — Codex CLI (exec + app-server 双模式)
+- `acp` — ACP 通用 (JSON-RPC 2.0 over stdio)
+
+**Per-bot `acp_command`**：仅 `bots[]` 数组模式下生效，平台级 `MessagingPlatformConfig` **没有** `acp_command` 字段。单 bot 模式下用全局 `worker.acp.command` 默认值（`hermes acp`）。
+
+**诊断信号**：feishu bot 启动 claude_code，但用户期望 acp。**修复**：检查 `HOTPLEX_MESSAGING_FEISHU_WORKER_TYPE` 是否设置；或在 `<project>/.env` 追加。
+
+### 3. `inject_exclude` 边界
+
+`inject_exclude` 控制哪些 Agent 配置文件**不**被注入到 worker session：
+
+| 文件 | 可被 `inject_exclude` 排除？ |
+|:---|:---:|
+| `SOUL.md`, `AGENTS.md`, `SKILLS.md`, `USER.md`, `MEMORY.md` | ✅ |
+| `META-COGNITION.md` | ❌ **强制注入首位**（`go:embed`，Worker 身份边界） |
+
+**3 级 fallback**：`bots[].inject_exclude` > `<platform>.inject_exclude` > `agent_config.inject_exclude` (global)
+- `nil` 继承父级
+- `[]string{}` 显式清空
+
+**诊断信号**：feishu session 仍收到 SOUL.md 内容。**修复**：检查 `META-COGNITION.md` 是元认知层，**无法排除**；其他 5 个文件需要逐个列入。
+
+### 4. dev YAML vs home YAML 用途区分
+
+| 文件 | 何时生效 | 互相同步？ |
+|:---|:---|:---:|
+| `configs/config-dev.yaml` | `make dev` 显式加载 | ❌ 与 home YAML 独立 |
+| `configs/config.yaml` | `hotplex service` + base for dev (通过 `inherits`) | ❌ |
+| `~/.hotplex/config.yaml` | 服务安装路径加载 | ❌ |
+
+**诊断信号**：dev 改的 `config-dev.yaml` 不影响 systemd 服务。**修复**：dev-only 偏好放 `config-dev.yaml`；生产偏好放 `~/.hotplex/config.yaml`。
+
+### 5. Worker 二进制与配置
+
+切换 worker type 时，**必须同时确保**：
+1. `worker.<type>.command` 在 YAML 中正确（`configs/config.yaml:180-240`）
+2. 二进制在 PATH 或通过 env 变量覆盖（`HOTPLEX_WORKER_<TYPE>_COMMAND`）
+3. 对于 `acp`：额外需要 per-bot `acp_command`（仅多 bot 模式）
+
+**ACP/Hermes 验证**：
+
+```bash
+# 1. 检查 hermes 二进制
+which hermes  # 应在 ~/.local/bin/hermes 或 PATH 中
+
+# 2. 验证 ACP 子命令
+hermes acp --help
+
+# 3. 检查 feishu 配置
+grep "WORKER_TYPE\|worker_type" <project>/.env configs/config-dev.yaml
+
+# 4. 重启 dev
+make dev-reset
+```
 
 ---
 
@@ -290,7 +389,7 @@ hotplex service logs -f          # 日志确认连接
 | 版本 | vX.Y.Z |
 | 消息平台 | Slack: xoxb-... (N bots) / 飞书: cli_xxx (N bots) |
 | 访问策略 | allowlist |
-| Worker | Claude Code |
+| Worker | Claude Code / Codex CLI / OCS / ACP |
 | STT | local / feishu+local |
 | TTS | enabled / disabled |
 | 服务模式 | systemd/launchd/SCM/dev |
@@ -310,9 +409,46 @@ hotplex service logs -f          # 日志确认连接
 ## 何时重新运行此 skill？
 
 - 服务启动失败或无法连接消息平台
-- 升级 HotPlex 版本后
+- 升级 HotPlex版本后
 - 添加新的消息平台或切换 STT/TTS 配置
 - 首次安装后验证所有依赖和模型就绪
+
+## Worker 适配器注册机制
+
+**为什么需要理解**：如果用户在源码中添加了新的 Worker 适配器但没在 `main.go` 中导入对应的 `worker/<name>/` 包（带 blank import），运行时会出现"未知 worker type"错误，`hotplex doctor` 可能不会发现。
+
+**注册模式**：每个 worker 包通过 `init()` 函数自注册到全局注册表：
+
+```go
+// internal/worker/<name>/worker.go
+func init() {
+    worker.Register(TypeXxx, New)
+}
+```
+
+**主程序入口**（`cmd/hotplex/main.go:9-12`）必须 blank-import 所有需要的 worker 包：
+
+```go
+import (
+    _ "github.com/hrygo/hotplex/internal/worker/claudecode"   // ← 必须保留
+    _ "github.com/hrygo/hotplex/internal/worker/codexcli"       // ← 必须保留
+    _ "github.com/hrygo/hotplex/internal/worker/opencodeserver"
+    _ "github.com/hrygo/hotplex/internal/worker/acp"
+)
+```
+
+**DI 重构陷阱**：曾有 PR 误删 `claude` blank import（因为看起来"未使用"），导致 claudecode worker 未注册，整个 Slack/飞书集成崩盘。规则：**永远不要删除 `cmd/hotplex/main.go` 中的 worker 包 blank import**。
+
+**4 个已注册 worker type**（`internal/worker/worker.go:62-66`）：
+
+| Worker Type | 包 | 注册触发 |
+|:---|:---|:---|
+| `claude_code` | `claudecode/` | `init()` 自注册 |
+| `opencode_server` | `opencodeserver/` | `init()` 自注册 |
+| `codex_cli` | `codexcli/` | `init()` 自注册 |
+| `acp` | `acp/` | `init()` 自注册 |
+
+**诊断信号**：用户配置 `worker_type: acp` 但日志报 `unknown worker type: acp`。**修复**：检查 `cmd/hotplex/main.go` 是否包含 `internal/worker/acp` 的 blank import。
 
 ## 版本升级
 

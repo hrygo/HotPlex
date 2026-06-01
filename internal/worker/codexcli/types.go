@@ -33,7 +33,6 @@ type CodexItem struct {
 	Duration    int64                      `json:"duration,omitempty"`
 	Query       string                     `json:"query,omitempty"`
 	Action      string                     `json:"action,omitempty"`
-	SavedPath   string                     `json:"saved_path,omitempty"`
 	Phase       string                     `json:"phase,omitempty"`
 	// CollabToolCall fields
 	CollabTool string   `json:"collab_tool,omitempty"`
@@ -110,7 +109,6 @@ const (
 	ItemWebSearch        = "web_search"
 	ItemTodoList         = "todo_list"
 	ItemError            = "error"
-	ItemImageGeneration  = "image_generation"
 )
 
 // EnvBlocklist defines environment variable prefixes to strip from worker processes.

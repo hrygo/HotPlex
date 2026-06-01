@@ -118,9 +118,23 @@ hotplex service logs -n 50
 **Claude Code 找不到**：
 ```bash
 which claude
-# 设置完整路径
+# 设置完整路径（config.yaml 或环境变量）
+# 方式 1：环境变量
 export HOTPLEX_WORKER_CLAUDE_CODE_COMMAND=/full/path/to/claude
+# 方式 2：config.yaml
+# claude_code:
+#   command: /full/path/to/claude
 ```
+
+**Codex CLI 找不到**：
+```bash
+which codex
+# 设置完整路径（config.yaml）
+# codex_cli:
+#   command: /full/path/to/codex
+```
+
+**OCS / ACP Worker**：通过 `opencode_server.command` 或 `acp.command` 配置启动命令，无需预装到 PATH。
 
 **OpenCode Server 崩溃**：
 ```bash

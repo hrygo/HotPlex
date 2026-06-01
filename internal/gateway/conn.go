@@ -787,6 +787,10 @@ flushLoop:
 	c.mu.Unlock()
 }
 
+// PreferEnvelope returns false: WebSocket connections benefit from pre-encoded
+// bytes (RouteWriteData) for efficiency.
+func (c *Conn) PreferEnvelope() bool { return false }
+
 // Close closes the WebSocket connection.
 func (c *Conn) Close() error {
 	c.mu.Lock()

@@ -69,6 +69,11 @@ type SessionWriter interface {
 	// re-encode internally.
 	RouteWriteData(data []byte, eventType events.Kind) error
 	Close() error
+	// PreferEnvelope returns true if the connection prefers receiving original
+	// envelopes (via RouteWrite) over pre-encoded bytes (via RouteWriteData).
+	// Platform connections (pcEntry) return true to preserve json:"-" fields;
+	// WebSocket connections return false to benefit from pre-encoded bytes.
+	PreferEnvelope() bool
 }
 
 // Hub is the central message router and connection registry.
@@ -487,7 +492,17 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	}
 
 	for _, conn := range conns {
-		if err := conn.RouteWriteData(data, msg.Env.Event.Type); err == nil {
+		var err error
+		if conn.PreferEnvelope() {
+			// Platform connections need the original envelope to preserve
+			// json:"-" fields (e.g. OwnerID) that EncodeJSON omits.
+			// Use WithoutCancel so cancelled h.ctx doesn't block during
+			// shutdown drain, while preserving tracing propagation.
+			err = conn.RouteWrite(context.WithoutCancel(h.ctx), msg.Env)
+		} else {
+			err = conn.RouteWriteData(data, msg.Env.Event.Type)
+		}
+		if err == nil {
 			continue
 		}
 		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)

@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.23.0] - 2026-06-01
+
+### Summary
+
+v1.23.0 是一次 minor 版本更新，聚焦于 **CodexCLI 100% 协议覆盖**、**ACP Worker 三阶段补齐**、**Agent 配置注入控制** 和 **Gateway 核心可靠性修复**。CodexCLI 适配器实现与上游 Codex CLI 的完全协议对等（5 阶段 16 任务，+666 行）。ACP Worker 完成 Phase 1–3 全部功能。新增 inject_exclude 机制支持按文件排除 Agent 配置注入。Gateway Core 修复 session 生命周期竞态和 platform conn 路由丢失等关键问题。
+
+### Added
+
+- **Worker/CodexCLI**: Full protocol upgrade — 100% coverage with upstream Codex CLI. WorkerCommander interface (Compact/Clear/Rewind), Thread lifecycle (Resume/Fork/Archive/Rollback), Turn control (Steer/Interrupt), 5 MCP methods, Review support, 12 CLI flags, 11 Thread management methods. (#592)
+- **Worker/CodexCLI**: Resume on existing manager process — creates new thread without restarting, preserving conversation context.
+- **Worker/CodexCLI**: Exec flags wired through config pipeline — 9 exec-mode flags (color, output_file, strict_config, etc.) configurable per-bot.
+- **Worker/ACP**: Phase 1 core features — complete ACP protocol support for permission bridging, priority-aware backpressure, and bidirectional ACP↔AEP mapping. (#590)
+- **Worker/ACP**: Phase 2 interaction completeness — reset optimization, discovery, and error UX improvements. (#591)
+- **Worker/ACP**: Phase 3 advanced features — protocol version negotiation, multi-agent coordination, debug trace, ForkSession, and JSON Schema validation. (#595)
+- **Worker**: Align OCS/Codex/ACP feishu UI/UX with Claude Code worker — standardized tool names, ToolUpdate event handling, Name fallback for non-ClaudeCode agents.
+- **Configuration**: Per-file injection control (inject_exclude) — configurable blacklist to skip specific agent config files, with 3-level fallback (bot → platform → global). (#594, #603)
+- **Gateway**: GitHub webhook receiver for event-driven PR review with comprehensive access control. (#581)
+
+### Changed
+
+- **Worker/CodexCLI**: Extract CodexExecFlags into dedicated struct — other worker adapters no longer see CodexCLI-specific flags in shared SessionInfo type.
+- **Gateway Core**: routeMessage uses context.WithoutCancel(h.ctx) for platform conn pre-encoded path, preserving tracing propagation during shutdown drain.
+
+### Fixed
+
+- **Gateway Core**: P0 markdown table parser panic on bare "|" input — add slice bounds guard in feishu and slack table formatters.
+- **Gateway Core**: forwardEvents blocking risk + StartSession orphan worker + Delete/Attach race conditions. (#599, #600, #602)
+- **Gateway Core**: Platform conn routing lost OwnerID during pre-encoded JSON path, causing interactive authorization failure ("OwnerID not set") in Feishu/Slack channels.
+- **Gateway Core**: dev-start clears logs before gateway starts — previous ordering deleted logs after gateway began writing, leaving running process with fd to removed inode.
+- **Cron**: SessionKey now honors `Payload.WorkerType` instead of always using `claudecode`. Prior cron sessions for non-claudecode workers (codexcli/acp) become orphaned under the old key — their session records remain in storage but are no longer reachable via SessionKey(). This is a correctness fix; no data is deleted. If you rely on history for non-claudecode cron jobs, either re-run them or migrate by updating the SessionKey column manually in your store.
+- **Worker/CodexCLI**: Wait() deadlock from unclosed doneCh, resume ref leak, lock held during IO, map mutation across goroutines, error swallowing — comprehensive fixes across 4 review rounds. (#593)
+- **Worker/CodexCLI**: Missing mapItemCompleted cases for WebSearch/CollabToolCall — Feishu tool_activity strip showed them as perpetually in-progress.
+- **Worker/CodexCLI**: Multi-file edit visibility in Feishu cards — join all file paths with comma instead of silently discarding beyond the first.
+- **Worker/ACP**: Zombie cleanup timeout + orphan DELETED session invalid resume — cancel timeout adjusted to 2s for reliability on high-load systems.
+- **Infrastructure**: E2E listener registration race eliminated in all tests.
+
 ## [1.22.0] - 2026-05-30
 
 ### Summary

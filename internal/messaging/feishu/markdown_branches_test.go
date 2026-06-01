@@ -6,6 +6,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsMarkdownTableHeader_BarePipe(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		row  string
+		want bool
+	}{
+		{name: "bare pipe", row: "|", want: false},
+		{name: "double pipe", row: "||", want: false},
+		{name: "pipe with spaces", row: "| |", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := isMarkdownTableHeader(tt.row)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // ─── isMarkdownTableHeader: fence rejection ──────────────────────────────────
 // The fence check fires AFTER the allSeparator check passes.
 // For all cells to pass allSeparator: every cell must be exclusively (-:, space).

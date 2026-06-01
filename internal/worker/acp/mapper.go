@@ -268,6 +268,13 @@ func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
 		// Also extract file location items.
 		_ = json.Unmarshal(u.Content, &items)
 	}
+	// Fallback: use Kind or Title when toolName is empty (non-ClaudeCode ACP agents).
+	if toolName == "" {
+		toolName = u.Kind
+	}
+	if toolName == "" {
+		toolName = u.Title
+	}
 
 	var locations []events.FileLocation
 	for _, item := range items {

@@ -36,7 +36,7 @@ var codeBlockTableRe = regexp.MustCompile("(?s)```.*?```|~~~.*?~~~")
 // isMarkdownTableHeader returns true if s looks like a markdown table header row.
 func isMarkdownTableHeader(s string) bool {
 	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "|") || !strings.HasSuffix(s, "|") {
+	if len(s) < 2 || !strings.HasPrefix(s, "|") || !strings.HasSuffix(s, "|") {
 		return false
 	}
 	cells := strings.Split(s[1:len(s)-1], "|")

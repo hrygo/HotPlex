@@ -65,7 +65,7 @@ Fixes #88"
 
 **Commit message 结构**：
 - **Type**: `refactor`, `fix`, `feat`, `perf`, `docs`
-- **Scope**: `messaging`, `cli`, `webchat` 等
+- **Scope**: `gateway`, `session`, `messaging`, `worker`, `worker/claudecode`, `worker/codexcli`, `worker/opencodeserver`, `worker/acp`, `cli`, `webchat`, `config`, `updater`, `cron`, `brain`, `security`, `admin`, `metrics`, `eventstore`, `agentconfig`, `skills`, `service`, `docs`, `dbutil`, `sqlutil`
 - **Subject**: 简短描述（祈使语气）
 - **Body**: 详细更改说明
 - **Footer**: 引用 issue（Fixes #XX）

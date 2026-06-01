@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -56,13 +57,22 @@ type ExecWorker struct {
 }
 
 type Config struct {
-	Command        string
-	Model          string
-	Sandbox        string
-	ApprovalMode   string
-	Ephemeral      bool
-	Personality    string
-	StartupTimeout time.Duration
+	Command          string
+	Model            string
+	Sandbox          string
+	ApprovalMode     string
+	Ephemeral        bool
+	Personality      string
+	StartupTimeout   time.Duration
+	Color            bool
+	OutputFile       string
+	StrictConfig     bool
+	SkipGitRepoCheck bool
+	IgnoreUserConfig bool
+	IgnoreRules      bool
+	LocalProvider    bool
+	ConfigProfile    string
+	BypassHookTrust  bool
 }
 
 func (w *ExecWorker) Type() worker.WorkerType { return worker.TypeCodexCLI }
@@ -106,13 +116,22 @@ func (w *ExecWorker) startLocked(session worker.SessionInfo) error {
 func resolveConfig() Config {
 	gc := GetConfig()
 	return Config{
-		Command:        gc.Command,
-		Model:          gc.Model,
-		Sandbox:        gc.Sandbox,
-		ApprovalMode:   gc.ApprovalMode,
-		Ephemeral:      gc.Ephemeral,
-		Personality:    gc.Personality,
-		StartupTimeout: gc.StartupTimeout,
+		Command:          gc.Command,
+		Model:            gc.Model,
+		Sandbox:          gc.Sandbox,
+		ApprovalMode:     gc.ApprovalMode,
+		Ephemeral:        gc.Ephemeral,
+		Personality:      gc.Personality,
+		StartupTimeout:   gc.StartupTimeout,
+		Color:            gc.Color,
+		OutputFile:       gc.OutputFile,
+		StrictConfig:     gc.StrictConfig,
+		SkipGitRepoCheck: gc.SkipGitRepoCheck,
+		IgnoreUserConfig: gc.IgnoreUserConfig,
+		IgnoreRules:      gc.IgnoreRules,
+		LocalProvider:    gc.LocalProvider,
+		ConfigProfile:    gc.ConfigProfile,
+		BypassHookTrust:  gc.BypassHookTrust,
 	}
 }
 
@@ -128,6 +147,54 @@ func (w *ExecWorker) buildArgs(session worker.SessionInfo, prompt string) []stri
 		"--sandbox", sandboxFromSession(session, w.cfg.Sandbox),
 		"--ask-for-approval", approvalMode,
 		"--cd", session.ProjectDir,
+	}
+
+	for _, img := range session.Images {
+		args = append(args, "--image", img)
+	}
+
+	if session.JSONSchema != "" {
+		args = append(args, "--output-schema", session.JSONSchema)
+	}
+
+	for _, dir := range session.AllowedDirs {
+		args = append(args, "--add-dir", dir)
+	}
+
+	if w.cfg.Color {
+		args = append(args, "--color")
+	}
+
+	if w.cfg.OutputFile != "" {
+		args = append(args, "--output-last-message", w.cfg.OutputFile)
+	}
+
+	if w.cfg.StrictConfig {
+		args = append(args, "--strict-config")
+	}
+
+	if w.cfg.SkipGitRepoCheck {
+		args = append(args, "--skip-git-repo-check")
+	}
+
+	if w.cfg.IgnoreUserConfig {
+		args = append(args, "--ignore-user-config")
+	}
+
+	if w.cfg.IgnoreRules {
+		args = append(args, "--ignore-rules")
+	}
+
+	if w.cfg.LocalProvider {
+		args = append(args, "--local-provider")
+	}
+
+	if w.cfg.ConfigProfile != "" {
+		args = append(args, "--profile", w.cfg.ConfigProfile)
+	}
+
+	if w.cfg.BypassHookTrust {
+		args = append(args, "--dangerously-bypass-hook-trust")
 	}
 
 	if w.cfg.Ephemeral {
@@ -378,6 +445,18 @@ func (w *ExecWorker) HandleElicitationResponse(_ context.Context, reqID, action 
 	return fmt.Errorf("codexcli: elicitation responses not supported in one-shot mode")
 }
 
+func (w *ExecWorker) Compact(ctx context.Context, args map[string]any) error {
+	return fmt.Errorf("codexcli: compact not supported in exec mode; use app-server mode")
+}
+
+func (w *ExecWorker) Clear(ctx context.Context) error {
+	return fmt.Errorf("codexcli: clear not supported in exec mode; use app-server mode")
+}
+
+func (w *ExecWorker) Rewind(ctx context.Context, targetID string) error {
+	return fmt.Errorf("codexcli: rewind not supported in exec mode; use app-server mode")
+}
+
 func (w *ExecWorker) SetTestConn(c worker.SessionConn) {
 	w.testConn = c
 }
@@ -389,22 +468,35 @@ func (w *ExecWorker) SetReadLineFn(fn func() (string, error)) {
 // ─── AppServerWorker (v2 persistent mode) ───────────────────────────────
 
 var _ worker.Worker = (*AppServerWorker)(nil)
+var _ worker.WorkerCommander = (*AppServerWorker)(nil)
+var _ worker.ControlRequester = (*AppServerWorker)(nil)
+
+type appState int
+
+const (
+	appStateNew appState = iota
+	appStateStarting
+	appStateReady
+	appStateTerminated
+)
 
 type AppServerWorker struct {
 	*base.BaseWorker
 
-	manager     *CodexAppServerManager
-	threadID    string
-	userID      string
-	releaseOnce sync.Once
-	crashSub    <-chan struct{}
-	doneCh      chan struct{}
-	mu          sync.Mutex
-	recvCh      chan *events.Envelope
-	commands    *ServerCommander
-	closed      bool
-	sessionID   string
-	conn        *appConn
+	manager   *CodexAppServerManager
+	threadID  string
+	turnID    string
+	userID    string
+	crashSub  <-chan struct{}
+	doneCh    chan struct{}
+	mu        sync.Mutex
+	recvCh    chan *events.Envelope
+	commands  *ServerCommander
+	closed    bool
+	released  bool
+	state     appState
+	sessionID string
+	conn      *appConn
 
 	// origSession preserves the SessionInfo from the most recent Start()
 	// call so that ResetContext can re-establish a fresh thread after cleanup.
@@ -458,59 +550,46 @@ func (w *AppServerWorker) SessionStoreDir() string { return "" }
 func (w *AppServerWorker) MaxTurns() int           { return 0 }
 func (w *AppServerWorker) Modalities() []string    { return []string{"text", "code", "image"} }
 
+func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
+	if w.commands == nil {
+		return nil, fmt.Errorf("codexcli: not started")
+	}
+	return w.commands.SendControlRequest(ctx, subtype, body)
+}
+
 func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.recvCh != nil {
-		return fmt.Errorf("codexcli: app-server already started")
+	if w.state != appStateNew {
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: app-server already started (state=%d)", w.state)
 	}
+	w.state = appStateStarting
 
 	if w.doneCh == nil {
 		w.doneCh = make(chan struct{})
 	}
+	w.mu.Unlock()
 
+	// RPC calls outside lock to avoid blocking other goroutines (P1 fix).
 	crashCh, err := w.manager.Acquire(ctx)
 	if err != nil {
+		// Close doneCh so Wait() does not block on this error path.
+		w.mu.Lock()
+		w.closeAndMarkDone()
+		w.mu.Unlock()
 		return fmt.Errorf("codexcli: acquire: %w", err)
 	}
+	w.mu.Lock()
 	w.crashSub = crashCh
+	w.mu.Unlock()
 
-	cfg := resolveConfig()
-	if cfg.Sandbox == "" || cfg.Sandbox == "danger-full-access" {
-		w.Log.Warn("codexcli: sandbox is not restricted; commands run with full permissions", "sandbox", cfg.Sandbox)
-	}
-
-	params := buildThreadStartParams(session, cfg)
-
-	resp, err := w.manager.Call("thread/start", params)
-	if err != nil {
+	if err := w.startNewThread(session, "start"); err != nil {
 		w.manager.Release()
-		return fmt.Errorf("codexcli: thread/start: %w", err)
+		return err
 	}
-
-	var result ThreadStartResult
-	if err := json.Unmarshal(resp, &result); err != nil {
-		w.manager.Release()
-		return fmt.Errorf("codexcli: parse thread/start: %w", err)
-	}
-
-	w.threadID = result.Thread.ID
-	w.sessionID = session.SessionID
-	w.userID = session.UserID
-	w.origSession = session
-
-	w.recvCh = w.manager.Subscribe(w.threadID, w.sessionID)
-	w.commands = NewServerCommander(w.manager, w.threadID)
-	w.conn = &appConn{
-		userID:    w.userID,
-		sessionID: w.sessionID,
-		recvCh:    w.recvCh,
-		manager:   w.manager,
-	}
-	w.StartTime = time.Now()
-	w.SetLastIO(w.StartTime)
-
+	w.mu.Lock()
+	w.state = appStateReady
+	w.mu.Unlock()
 	return nil
 }
 
@@ -538,26 +617,159 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		},
 	}
 
-	_, err = w.manager.Call("turn/start", params)
+	resp, err := w.manager.Call("turn/start", params)
 	if err != nil {
 		return fmt.Errorf("codexcli: turn/start: %w", err)
+	}
+
+	var tr struct {
+		Turn struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if err := json.Unmarshal(resp, &tr); err != nil {
+		w.Log.Debug("codexcli: turn/start response parse error", "error", err)
+	} else if tr.Turn.ID == "" {
+		w.Log.Debug("codexcli: turn/start response missing turn.id")
+	} else {
+		w.mu.Lock()
+		w.turnID = tr.Turn.ID
+		w.mu.Unlock()
 	}
 
 	w.SetLastIO(time.Now())
 	return nil
 }
 
+// ─── AppServerWorker lifecycle helpers ────────────────────────────────
+
+// closeAndMarkDone closes doneCh and marks the worker as closed.
+// This ensures Wait() is always unblocked even on error paths (P1 fix).
+// Caller must hold w.mu.
+func (w *AppServerWorker) closeAndMarkDone() {
+	w.closed = true
+	if w.doneCh != nil {
+		close(w.doneCh)
+		w.doneCh = nil
+	}
+}
+
+// cleanupOldThread closes the old connection and unsubscribes from the
+// old thread. Shared by Resume and ResetContext.
+func (w *AppServerWorker) cleanupOldThread() {
+	w.mu.Lock()
+	oldConn := w.conn
+	oldThreadID := w.threadID
+	w.recvCh = nil
+	w.conn = nil
+	w.mu.Unlock()
+
+	if oldConn != nil {
+		_ = oldConn.Close()
+	}
+	if oldThreadID != "" && w.manager != nil {
+		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
+		w.manager.Unsubscribe(oldThreadID)
+	}
+}
+
+// resetLifecycleState resets lifecycle state for a new thread attempt.
+// After calling this, Terminate/Kill can release the new thread cleanly.
+func (w *AppServerWorker) resetLifecycleState() {
+	w.mu.Lock()
+	w.closed = false
+	w.released = false
+	if w.doneCh == nil {
+		w.doneCh = make(chan struct{})
+	}
+	w.mu.Unlock()
+}
+
+// startNewThread starts a fresh thread on the manager and wires up worker
+// state. errPrefix is used in error messages for caller identification.
+func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix string) error {
+	if w.manager != nil && !w.manager.IsRunning() {
+		w.mu.Lock()
+		w.closeAndMarkDone()
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: %s: manager process not running", errPrefix)
+	}
+
+	cfg := resolveConfig()
+	params := buildThreadStartParams(session, cfg)
+
+	resp, err := w.manager.Call("thread/start", params)
+	if err != nil {
+		w.mu.Lock()
+		w.closeAndMarkDone()
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: %s thread/start: %w", errPrefix, err)
+	}
+
+	var result ThreadStartResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		w.mu.Lock()
+		w.closeAndMarkDone()
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: %s parse thread/start: %w", errPrefix, err)
+	}
+
+	w.mu.Lock()
+	w.threadID = result.Thread.ID
+	w.turnID = ""
+	w.sessionID = session.SessionID
+	w.userID = session.UserID
+	w.origSession = session
+	w.recvCh = w.manager.Subscribe(result.Thread.ID, session.SessionID)
+	w.commands = NewServerCommander(w.manager, result.Thread.ID)
+	w.conn = &appConn{
+		userID:    session.UserID,
+		sessionID: session.SessionID,
+		recvCh:    w.recvCh,
+		manager:   w.manager,
+	}
+	w.StartTime = time.Now()
+	w.SetLastIO(w.StartTime)
+	w.mu.Unlock()
+
+	return nil
+}
+
+// ─── AppServerWorker lifecycle ────────────────────────────────────────
+
 func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
-	return w.Start(ctx, session)
+	w.mu.Lock()
+	if w.state == appStateNew || w.state == appStateTerminated {
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: app-server not started (state=%d)", w.state)
+	}
+	w.state = appStateStarting
+	w.mu.Unlock()
+
+	w.cleanupOldThread()
+	w.resetLifecycleState()
+	if err := w.startNewThread(session, "resume"); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.state = appStateReady
+	w.mu.Unlock()
+	return nil
 }
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
 	w.shutdown()
+	w.mu.Lock()
+	w.state = appStateTerminated
+	w.mu.Unlock()
 	return nil
 }
 
 func (w *AppServerWorker) Kill() error {
 	w.shutdown()
+	w.mu.Lock()
+	w.state = appStateTerminated
+	w.mu.Unlock()
 	return nil
 }
 
@@ -583,105 +795,53 @@ func (w *AppServerWorker) Wait() (int, error) {
 }
 
 func (w *AppServerWorker) release() {
-	w.releaseOnce.Do(func() {
-		w.mu.Lock()
-		if w.closed {
-			w.mu.Unlock()
-			return
-		}
-		w.closed = true
-		doneCh := w.doneCh
-		w.doneCh = nil
-		tid := w.threadID
+	w.mu.Lock()
+	if w.released || w.closed {
 		w.mu.Unlock()
+		return
+	}
+	w.released = true
+	w.closed = true
+	doneCh := w.doneCh
+	w.doneCh = nil
+	tid := w.threadID
+	w.mu.Unlock()
 
-		if doneCh != nil {
-			close(doneCh)
-		}
+	if doneCh != nil {
+		close(doneCh)
+	}
 
-		if w.manager != nil && tid != "" {
-			_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
-				ThreadID: tid,
-			})
-			w.manager.Unsubscribe(tid)
-			// Close recvCh so forwardEvents exits its range loop.
-			// Must happen after Unsubscribe (removes from dispatch map) to
-			// avoid racing with in-flight dispatchNotification sends.
-			if w.conn != nil {
-				_ = w.conn.Close()
-			}
-			w.manager.Release()
+	if w.manager != nil && tid != "" {
+		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
+			ThreadID: tid,
+		})
+		w.manager.Unsubscribe(tid)
+		// Close recvCh so forwardEvents exits its range loop.
+		// Must happen after Unsubscribe (removes from dispatch map) to
+		// avoid racing with in-flight dispatchNotification sends.
+		if w.conn != nil {
+			_ = w.conn.Close()
 		}
-	})
+		w.manager.Release()
+	}
 }
 
 func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 	w.mu.Lock()
-	oldConn := w.conn
-	oldThreadID := w.threadID
 	origSess := w.origSession
 	w.mu.Unlock()
 
-	// Close old conn → closes old recvCh → old forwardEvents exits range loop.
-	if oldConn != nil {
-		_ = oldConn.Close()
-	}
+	w.cleanupOldThread()
+	w.resetLifecycleState()
 
-	// Unsubscribe old thread (keep manager reference, no Release).
-	if oldThreadID != "" && w.manager != nil {
-		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
-		w.manager.Unsubscribe(oldThreadID)
-	}
-
-	// Reset lifecycle state so subsequent Terminate/Kill can release the new thread.
-	w.mu.Lock()
-	w.closed = false
-	w.releaseOnce = sync.Once{}
-	w.doneCh = make(chan struct{})
-	w.mu.Unlock()
-
-	// Start fresh thread on same manager (same process, no Acquire needed).
 	// If the process crashed between turns, bail out — bridge will Terminate+Start.
 	if origSess.SessionID == "" {
+		w.mu.Lock()
+		w.closeAndMarkDone()
+		w.mu.Unlock()
 		return nil
 	}
-
-	if w.manager != nil && !w.manager.IsRunning() {
-		return fmt.Errorf("codexcli: manager process not running, cannot reset")
-	}
-
-	cfg := resolveConfig()
-	params := buildThreadStartParams(origSess, cfg)
-
-	resp, err := w.manager.Call("thread/start", params)
-	if err != nil {
-		// thread/start failed — mark closed so Terminate/release skips cleanup.
-		w.mu.Lock()
-		w.closed = true
-		w.mu.Unlock()
-		return fmt.Errorf("codexcli: reset thread/start: %w", err)
-	}
-
-	var result ThreadStartResult
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return fmt.Errorf("codexcli: reset parse thread/start: %w", err)
-	}
-
-	w.mu.Lock()
-	w.threadID = result.Thread.ID
-	w.recvCh = w.manager.Subscribe(result.Thread.ID, origSess.SessionID)
-	w.commands = NewServerCommander(w.manager, result.Thread.ID)
-	w.conn = &appConn{
-		userID:    origSess.UserID,
-		sessionID: origSess.SessionID,
-		recvCh:    w.recvCh,
-		manager:   w.manager,
-	}
-	w.StartTime = time.Now()
-	w.SetLastIO(w.StartTime)
-	w.mu.Unlock()
-
-	return nil
+	return w.startNewThread(origSess, "reset")
 }
 
 func (w *AppServerWorker) Conn() worker.SessionConn {
@@ -711,11 +871,72 @@ func (w *AppServerWorker) HandlePermissionResponse(_ context.Context, reqID stri
 }
 
 func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
-	return fmt.Errorf("codexcli: question responses not supported in app-server mode yet")
+	result := map[string]any{
+		"behavior": "allow",
+		"updatedInput": map[string]any{
+			"answers": answers,
+		},
+	}
+	return w.manager.RespondServerRequest(reqID, result)
 }
 
 func (w *AppServerWorker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
-	return fmt.Errorf("codexcli: elicitation responses not supported in app-server mode yet")
+	result := map[string]any{
+		"action":  action,
+		"content": content,
+	}
+	return w.manager.RespondServerRequest(reqID, result)
+}
+
+func (w *AppServerWorker) Compact(ctx context.Context, args map[string]any) error {
+	w.mu.Lock()
+	tid := w.threadID
+	w.mu.Unlock()
+	if tid == "" {
+		return fmt.Errorf("codexcli: no active thread")
+	}
+	_, err := w.manager.CompactThread(tid)
+	if err != nil {
+		return fmt.Errorf("codexcli: compact: %w", err)
+	}
+	return nil
+}
+
+func (w *AppServerWorker) Clear(ctx context.Context) error {
+	w.mu.Lock()
+	tid := w.threadID
+	turnID := w.turnID
+	w.mu.Unlock()
+	if tid == "" {
+		return fmt.Errorf("codexcli: no active thread")
+	}
+	// Only interrupt when a turn is in flight; turn/interrupt requires a turnId.
+	if turnID != "" {
+		_ = w.manager.InterruptTurn(tid, turnID)
+	}
+	return w.ResetContext(ctx)
+}
+
+// Rewind drops turns from the end of the thread. targetID is interpreted as the
+// number of turns to drop (parseable uint); empty or invalid defaults to 1.
+func (w *AppServerWorker) Rewind(ctx context.Context, targetID string) error {
+	w.mu.Lock()
+	tid := w.threadID
+	w.mu.Unlock()
+	if tid == "" {
+		return fmt.Errorf("codexcli: no active thread")
+	}
+	numTurns := uint32(1)
+	if targetID != "" {
+		if n, perr := strconv.ParseUint(targetID, 10, 32); perr == nil && n >= 1 {
+			numTurns = uint32(n)
+		}
+	}
+	_, err := w.manager.RollbackThread(tid, numTurns)
+	if err != nil {
+		return fmt.Errorf("codexcli: rewind: %w", err)
+	}
+	return nil
 }
 
 // sandboxFromSession returns the session-level sandbox override if set,
@@ -745,6 +966,42 @@ func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]a
 	}
 	if cfg.Ephemeral {
 		params["ephemeral"] = true
+	}
+	if len(session.Images) > 0 {
+		params["images"] = session.Images
+	}
+	if session.JSONSchema != "" {
+		params["outputSchema"] = session.JSONSchema
+	}
+	if len(session.AllowedDirs) > 0 {
+		params["additionalDirectories"] = session.AllowedDirs
+	}
+	if cfg.Color {
+		params["color"] = true
+	}
+	if cfg.StrictConfig {
+		params["strictConfig"] = true
+	}
+	if cfg.SkipGitRepoCheck {
+		params["skipGitRepoCheck"] = true
+	}
+	if cfg.IgnoreRules {
+		params["ignoreRules"] = true
+	}
+	if cfg.IgnoreUserConfig {
+		params["ignoreUserConfig"] = true
+	}
+	if cfg.LocalProvider {
+		params["localProvider"] = true
+	}
+	if cfg.BypassHookTrust {
+		params["bypassHookTrust"] = true
+	}
+	if cfg.OutputFile != "" {
+		params["outputFile"] = cfg.OutputFile
+	}
+	if cfg.ConfigProfile != "" {
+		params["profile"] = cfg.ConfigProfile
 	}
 	return params
 }

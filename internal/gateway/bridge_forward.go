@@ -408,7 +408,8 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	}
 
 	// AEP-020: Worker.Recv() closed — get exit code to determine crash vs normal exit.
-	waitTimeout := 2 * time.Second
+	// Must match proc.DefaultGracePeriod (5s) so SIGTERM grace isn't cut short.
+	waitTimeout := 5 * time.Second
 	if b.closed.Load() {
 		waitTimeout = 10 * time.Second
 	}

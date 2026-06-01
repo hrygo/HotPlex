@@ -243,6 +243,11 @@ type SessionInfo struct {
 	// IncludePartialMessages exposes partial message blocks as they arrive
 	// (--include-partial-messages).
 	IncludePartialMessages bool
+	// Images carries image file paths for codex exec --image flags.
+	// NOTE: Currently populated only in exec-mode buildArgs() which reads
+	// from SessionInfo directly. Per-session injection through gateway/bridge
+	// is not yet wired. Reserved for future per-session image support.
+	Images []string
 }
 
 // SandboxPlatformKey is the platformKey map key used to propagate sandbox config

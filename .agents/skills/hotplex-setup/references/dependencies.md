@@ -177,6 +177,10 @@ sudo yum groupinstall "Development Tools"  # CentOS/RHEL
 | funasr-onnx + modelscope | 本地 STT | `stt_provider=local` |
 | torch + onnxruntime | MOSS-TTS-Nano | `tts_provider=moss` 或 `edge+moss` |
 | Make | 源码构建 | `make` 命令 |
+| Claude Code CLI (`claude`) | Worker 执行 | `worker_type=claude_code`（默认） |
+| Codex CLI (`codex`) | Worker 执行 | `worker_type=codex_cli` |
+
+**注意**：OCS（`worker_type=opencode_server`）和 ACP（`worker_type=acp`）通过各自的 `command` 配置项启动，无需预装特定二进制到 PATH。
 
 ## 相关文档
 

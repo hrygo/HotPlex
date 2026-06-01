@@ -356,6 +356,14 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
 		}
 		// RUNNING/IDLE/TERMINATED — try Resume to preserve conversation history.
+		// DELETED sessions cannot be resumed (session state is DELETED), so we start
+		// fresh. This is safe because the old session key is orphaned: no worker
+		// holds a reference, and startOrResumeOnInUse will create a new session
+		// with the same deterministic key, effectively replacing the deleted one.
+		if si.State == events.StateDeleted {
+			b.log.Info("bridge: orphan platform session already deleted, starting fresh", "session_id", sessionID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
+		}
 		// If Resume fails (session files deleted or corrupted), fall back to Start.
 		b.log.Info("bridge: orphan platform session, resuming", "session_id", sessionID, "state", si.State)
 		// Re-inject current sandbox into the loaded session so resume uses

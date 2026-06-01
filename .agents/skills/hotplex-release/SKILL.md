@@ -118,8 +118,8 @@ git log "${LAST_TAG}..HEAD" --no-merges --format="%h %s%n%b---"
 | Commit Scope | Display Group |
 |:---|:---|
 | `gateway`, `session`, `hub`, `conn` | **Gateway Core** |
-| `worker`, `claude-code`, `opencode`, `pi` | **Worker** |
-| `slack`, `feishu`, `messaging`, `stt` | **Messaging** |
+| `worker`, `claude-code`, `opencode-server`, `ocs`, `codexcli`, `codex`, `acp` | **Worker** |
+| `slack`, `feishu`, `yuanxin`, `messaging`, `stt` | **Messaging** |
 | `webchat`, `ui`, `chat` | **WebChat UI** |
 | `config`, `agent-config` | **Configuration** |
 | `security`, `auth`, `ssrf` | **Security** |
@@ -231,7 +231,7 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 | 文件 | 模式 | 示例 |
 |:---|:---|:---|
 | `cmd/hotplex/main.go:16` | `version = "v1.x.x"` | `v1.2.0` |
-| `Makefile:26` | `VERSION := v1.x.x`（LDFLAGS 引用 `$(VERSION)`） | `v1.2.0` |
+| `Makefile:24` | `VERSION := v1.x.x`（LDFLAGS 引用 `$(VERSION)`） | `v1.2.0` |
 | `cmd/hotplex/gateway_run.go` | `tracing.Init(ctx, log, "hotplex-gateway", versionString())` | version from LDFLAGS |
 
 ### 4.2 WebChat UI

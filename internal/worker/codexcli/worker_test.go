@@ -135,7 +135,7 @@ func TestMapperMap(t *testing.T) {
 		require.Equal(t, events.ToolCall, envs[0].Event.Type)
 		tc, ok := envs[0].Event.Data.(events.ToolCallData)
 		require.True(t, ok)
-		require.Equal(t, "shell", tc.Name)
+		require.Equal(t, "Bash", tc.Name)
 		require.Equal(t, "ls -la", tc.Input["command"])
 	})
 
@@ -224,7 +224,7 @@ func TestMapperMap(t *testing.T) {
 		require.Equal(t, events.ToolCall, envs[0].Event.Type)
 		tc, ok := envs[0].Event.Data.(events.ToolCallData)
 		require.True(t, ok)
-		require.Equal(t, "file_edit", tc.Name)
+		require.Equal(t, "Edit", tc.Name)
 	})
 
 	t.Run("mcp_tool_call_started_to_toolcall", func(t *testing.T) {
@@ -245,7 +245,7 @@ func TestMapperMap(t *testing.T) {
 		require.Equal(t, events.ToolCall, envs[0].Event.Type)
 		tc, ok := envs[0].Event.Data.(events.ToolCallData)
 		require.True(t, ok)
-		require.Equal(t, "mcp:search", tc.Name)
+		require.Equal(t, "search", tc.Name)
 	})
 
 	t.Run("nil_item_returns_nil", func(t *testing.T) {
@@ -396,7 +396,7 @@ func TestMapNotificationCommandExecution(t *testing.T) {
 	require.Equal(t, events.ToolCall, envs[0].Event.Type)
 	tc, ok := envs[0].Event.Data.(events.ToolCallData)
 	require.True(t, ok)
-	require.Equal(t, "shell", tc.Name)
+	require.Equal(t, "Bash", tc.Name)
 	require.Equal(t, "ls -la", tc.Input["command"])
 
 	// Completed
@@ -1119,7 +1119,7 @@ func TestAppServerWorkerHandleQuestionResponse(t *testing.T) {
 	w := newTestAppServerWorker(t)
 	err := w.HandleQuestionResponse(context.Background(), "req-1", nil)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
+	require.Contains(t, err.Error(), "no pending server request")
 }
 
 func TestAppServerWorkerHandleElicitationResponse(t *testing.T) {
@@ -1128,7 +1128,7 @@ func TestAppServerWorkerHandleElicitationResponse(t *testing.T) {
 	w := newTestAppServerWorker(t)
 	err := w.HandleElicitationResponse(context.Background(), "req-1", "", nil)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
+	require.Contains(t, err.Error(), "no pending server request")
 }
 
 func TestAppServerWorkerInputNoThreadID(t *testing.T) {
@@ -1232,20 +1232,22 @@ func TestMapperMapItemCompletedBranches(t *testing.T) {
 		require.Equal(t, events.SessionState("planning"), sd.State)
 	})
 
-	t.Run("image_generation_item", func(t *testing.T) {
+	t.Run("item_error", func(t *testing.T) {
 		t.Parallel()
 		event := &CodexEvent{
 			Type: EventItemCompleted,
 			Item: &CodexItem{
-				ID:        "item_1",
-				Type:      ItemImageGeneration,
-				SavedPath: "/tmp/image.png",
+				ID:   "item_1",
+				Type: ItemError,
+				Error: &CodexItemError{
+					Message: "test error",
+				},
 			},
 		}
 		envs := m.Map(event)
 		require.Len(t, envs, 1)
-		tr := envs[0].Event.Data.(events.ToolResultData)
-		require.Equal(t, "/tmp/image.png", tr.Output)
+		ted := envs[0].Event.Data.(events.ErrorData)
+		require.Contains(t, ted.Message, "test error")
 	})
 
 	t.Run("unknown_item_type", func(t *testing.T) {

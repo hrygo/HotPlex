@@ -173,7 +173,7 @@ func nextSearchFrom(text string, tableEnd int) int {
 // code-block examples (cells containing fence characters like ``` or ~~~).
 func isMarkdownTableHeader(s string) bool {
 	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "|") || !strings.HasSuffix(s, "|") {
+	if len(s) < 2 || !strings.HasPrefix(s, "|") || !strings.HasSuffix(s, "|") {
 		return false
 	}
 	cells := strings.Split(s[1:len(s)-1], "|")

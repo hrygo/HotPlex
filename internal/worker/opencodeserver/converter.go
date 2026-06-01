@@ -2,6 +2,7 @@ package opencodeserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/hrygo/hotplex/pkg/aep"
@@ -160,11 +161,14 @@ func (c *Converter) handleStepFailed(sessionID string, props json.RawMessage) []
 	if evt.Error.Message != "" {
 		msg = evt.Error.Message
 	}
+	// Snapshot stats before clearing state so downstream Done still has token data.
+	stats := c.takeStats(sessionID)
 	return []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
 			Code:    events.ErrCodeInternalError,
 			Message: msg,
 		}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false, Stats: stats}),
 	}
 }
 
@@ -246,7 +250,7 @@ func (c *Converter) handleToolOutcome(sessionID string, props json.RawMessage, i
 			data.Error = evt.Error.Message
 		}
 	} else {
-		data.Output = evt.Content
+		data.Output = contentToString(evt.Content)
 	}
 
 	return []*events.Envelope{
@@ -330,13 +334,18 @@ func (c *Converter) handleSessionError(sessionID string, props json.RawMessage) 
 	} else if data.Error.Name != "" {
 		msg = data.Error.Name
 	}
-	delete(c.states, sessionID)
-	return []*events.Envelope{
+	// Snapshot stats and clear state before emitting Done, so a subsequent
+	// session.idle on the same session (v1 path) does not produce a duplicate
+	// Done{Success:true} on top of Done{Success:false}.
+	stats := c.takeStats(sessionID)
+	envs := []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
 			Code:    events.ErrCodeInternalError,
 			Message: msg,
 		}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false, Stats: stats}),
 	}
+	return envs
 }
 
 func (c *Converter) handlePermAsked(sessionID string, props json.RawMessage) []*events.Envelope {
@@ -428,4 +437,31 @@ func (c *Converter) takeStats(sessionID string) map[string]any {
 		}
 	}
 	return stats
+}
+
+// contentToString converts OCS tool content ([]any) to a string for AEP ToolResult.
+func contentToString(content []any) string {
+	if len(content) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(content))
+	for _, c := range content {
+		parts = append(parts, contentPartToString(c))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func contentPartToString(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case nil:
+		return ""
+	default:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return string(b)
+	}
 }

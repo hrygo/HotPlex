@@ -532,17 +532,17 @@ func (w *Worker) Terminate(ctx context.Context) error {
 		return true
 	})
 
-	// Try graceful cancel (nil-safe for pre-Start Terminate).
+	// Best-effort graceful cancel (nil-safe for pre-Start Terminate).
+	// Not all ACP agents support session/cancel; use a short timeout
+	// so a failed Cancel doesn't eat into the SIGTERM grace period.
 	if w.client != nil {
-		cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cancelCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = w.client.Cancel(cancelCtx, w.GetWorkerSessionID())
 		cancel()
 
-		// Wait for readLoop goroutine to fully exit before killing the process,
-		// preventing reads from closed pipes during rapid session teardown.
 		select {
 		case <-w.client.Done():
-		case <-time.After(3 * time.Second):
+		case <-time.After(2 * time.Second):
 		}
 	}
 
