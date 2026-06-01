@@ -458,26 +458,36 @@ func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {
 		return stats
 	}
 	stats["stop_reason"] = result.StopReason
+
+	// Wrap token data in nested "usage" map for compatibility with the
+	// gateway's sessionAccumulator.mergePerTurnStats (Claude Code format).
+	// Keep the key names matching Anthropic API fields so the shared
+	// accumulator can extract them without a third format branch.
+	usage := map[string]any{}
 	if result.Usage.InputTokens > 0 {
-		stats["input_tokens"] = result.Usage.InputTokens
+		usage["input_tokens"] = result.Usage.InputTokens
 	}
 	if result.Usage.OutputTokens > 0 {
-		stats["output_tokens"] = result.Usage.OutputTokens
+		usage["output_tokens"] = result.Usage.OutputTokens
 	}
 	if result.Usage.ThoughtTokens > 0 {
-		stats["thought_tokens"] = result.Usage.ThoughtTokens
+		usage["thought_tokens"] = result.Usage.ThoughtTokens
 	}
 	if result.Usage.CachedReadTokens > 0 {
-		stats["cached_read_tokens"] = result.Usage.CachedReadTokens
+		usage["cache_read_input_tokens"] = result.Usage.CachedReadTokens
 	}
 	if result.Usage.CachedWriteTokens > 0 {
-		stats["cached_write_tokens"] = result.Usage.CachedWriteTokens
+		usage["cache_creation_input_tokens"] = result.Usage.CachedWriteTokens
 	}
 	if result.Usage.TotalTokens > 0 {
-		stats["total_tokens"] = result.Usage.TotalTokens
+		usage["total_tokens"] = result.Usage.TotalTokens
+	}
+	if len(usage) > 0 {
+		stats["usage"] = usage
 	}
 
 	// Include accumulated usage_update data (context size, cost).
+	// Cost stored as float64 for compatibility with events.ToFloat64().
 	m.usageMu.Lock()
 	if m.usage.ContextSize > 0 {
 		stats["context_size"] = m.usage.ContextSize
@@ -486,8 +496,7 @@ func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {
 		stats["context_used"] = m.usage.ContextUsed
 	}
 	if m.usage.Cost != nil && m.usage.Cost.Amount > 0 {
-		costCopy := *m.usage.Cost
-		stats["cost"] = &costCopy
+		stats["total_cost_usd"] = m.usage.Cost.Amount
 	}
 	m.usageMu.Unlock()
 
