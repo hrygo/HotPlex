@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -735,6 +736,115 @@ func TestWriteCtx_InteractionEvents_ClosesStreamCtrl(t *testing.T) {
 			got := conn.typingRid
 			conn.mu.RUnlock()
 			require.Empty(t, got, "typingRid should be cleared after %s event", tt.name)
+		})
+	}
+}
+
+func TestShouldAppendNewlineAfterDelta(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		// Empty → no separator.
+		{"empty", "", false},
+		// CJK word-split mid-stream chunks: must NOT add \n.
+		{"cjk partial word", "赫尔", false},
+		{"cjk mid sentence", "墨斯的", false},
+		{"chinese comma", "赫尔墨斯，", false},
+		// ASCII sentence terminators → add \n.
+		{"ascii period", "Hello world.", true},
+		{"ascii question", "Are you sure?", true},
+		{"ascii exclamation", "Got it!", true},
+		// ASCII terminator clusters → add \n.
+		{"ascii question-period", "really?!", true},
+		{"ascii bang-period", "yes!.", true},
+		{"ascii double question", "why??", true},
+		{"ascii double bang", "wow!!", true},
+		{"ascii interrobang", "what!?", true},
+		// CJK fullwidth terminators → add \n.
+		{"cjk period", "你好世界。", true},
+		{"cjk question", "你好吗？", true},
+		{"cjk exclamation", "太棒了！", true},
+		// Whitespace and other punctuation: do not trigger.
+		{"space suffix", "trailing space ", false},
+		{"semicolon", "item;", false},
+		{"chinese semicolon", "项；", false},
+		{"chinese colon", "注：", false},
+		// CJK char ending in 0x82 that is NOT a terminator: 0x82 is also
+		// the trailing byte of other 3-byte UTF-8 chars. Make sure we
+		// decode the rune and don't false-positive.
+		{"cjk non-terminator 0x82", "啊", false},
+		{"chinese comma", "你，", false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := shouldAppendNewlineAfterDelta(tt.text)
+			require.Equal(t, tt.want, got, "shouldAppendNewlineAfterDelta(%q)", tt.text)
+		})
+	}
+}
+
+func TestWriteCtx_MessageDelta_NoSeparatorForCJKMidWord(t *testing.T) {
+	t.Parallel()
+	// Regression for: every MessageDelta was being suffixed with "\n\n",
+	// which split CJK words across chunk boundaries (e.g. "赫尔" + "墨斯"
+	// rendered as separate lines). The fix only appends "\n" when the chunk
+	// ends on a sentence terminator.
+	//
+	// We assert directly via shouldAppendNewlineAfterDelta (the helper that
+	// gates the suffix). The streaming-IO path is covered by other tests
+	// and requires a non-nil lark client, which we deliberately don't set
+	// here — this test is about the suffix decision, not transport.
+	cases := []struct {
+		name  string
+		chunk string
+		want  bool
+	}{
+		{"cjk first half", "赫尔", false},
+		{"cjk second half", "墨斯", false},
+		{"cjk sentence end", "你好世界。", true},
+		{"ascii sentence end", "Hello world.", true},
+		{"empty", "", false},
+		{"trailing comma", "赫尔墨斯，", false},
+		{"trailing space", "trailing ", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, shouldAppendNewlineAfterDelta(tc.chunk))
+		})
+	}
+}
+
+// BenchmarkShouldAppendNewlineAfterDelta measures the per-delta suffix-gate
+// decision cost on representative streaming chunks. Every MessageDelta
+// passes through this helper, so it sits on the hot path of every streaming
+// turn. The constant-time implementation must not allocate per call.
+func BenchmarkShouldAppendNewlineAfterDelta(b *testing.B) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		// Mid-CJK word: 200 runes. This is the worst case for the naive
+		// []rune(text) implementation — it would allocate a 200-element rune
+		// slice per call. Our constant-time impl must touch only the last byte.
+		{"cjk_mid_200", strings.Repeat("赫", 199) + "尔"},
+		// 1k ASCII chunk with terminator: also long enough to punish full scans.
+		{"ascii_long_1k", strings.Repeat("a", 999) + "."},
+		// CJK sentence-terminated: exercises the UTF-8 decode branch.
+		{"cjk_end_50", strings.Repeat("中", 49) + "。"},
+		// Short mid-CJK word (the bug-trigger shape).
+		{"cjk_short_2", "赫尔"},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = shouldAppendNewlineAfterDelta(tc.text)
+			}
 		})
 	}
 }
