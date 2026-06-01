@@ -35,6 +35,7 @@ type Adapter struct {
 	tenant        string
 	ns            string
 	producerTopic string
+	injectExclude []string
 	client        pulsar.Client
 	consumer      pulsar.Consumer
 	producer      pulsar.Producer
@@ -48,7 +49,8 @@ func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformY
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 var _ messaging.CronResultSender = (*Adapter)(nil)
 
-func (a *Adapter) GetBotID() string { return a.appID }
+func (a *Adapter) GetBotID() string           { return a.appID }
+func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
 
 // ConfigureWith initializes adapter fields. Must be called before Start;
 // after Start returns, these fields are read-only and accessed without locks.
@@ -80,6 +82,11 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 	if a.appID == "" {
 		return fmt.Errorf("yuanxin: app_id is required")
 	}
+
+	if v, ok := config.Extras["inject_exclude"].([]string); ok {
+		a.injectExclude = v
+	}
+
 	return nil
 }
 

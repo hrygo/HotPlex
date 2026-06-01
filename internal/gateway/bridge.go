@@ -67,6 +67,7 @@ type Bridge struct {
 	workerEnvBlocklist []string      // extra blocklist entries from worker.env_blocklist config
 	cronEnv            []string      // env vars injected only into cron platform sessions
 	mcpConfigJSON      atomic.Value  // pre-serialized MCP config JSON string; "" = not configured
+	agentConfigExclude atomic.Value  // map[string][]string: platform → inject_exclude (global default at "" key)
 
 	accum map[string]*sessionAccumulator // per-session stats accumulator
 	// accumMu protects accum. RWMutex allows concurrent reads in getOrInitAccum
@@ -111,6 +112,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		shutdownCancel:     shutdownCancel,
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
+	b.agentConfigExclude.Store(deps.AgentConfigExclude)
 	return b
 }
 
@@ -125,8 +127,14 @@ func (b *Bridge) UpdateMCPConfig(json string) {
 	b.mcpConfigJSON.Store(json)
 }
 
+// UpdateAgentConfigExclude atomically updates the platform → inject_exclude map.
+// Used by config hot-reload for non-platform sessions (webchat/API/cron).
+func (b *Bridge) UpdateAgentConfigExclude(m map[string][]string) {
+	b.agentConfigExclude.Store(m)
+}
+
 // StartSession creates a new session and starts a worker.
-func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title string) error {
+func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title string, injectExclude ...string) error {
 	if b.closed.Load() {
 		return fmt.Errorf("bridge: rejecting new session during shutdown")
 	}
@@ -158,12 +166,13 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 	}
 
 	if _, err := b.createAndLaunchWorker(workerLaunchParams{
-		ctx:         ctx,
-		wt:          wt,
-		workerInfo:  workerInfo,
-		platform:    platform,
-		botID:       botID,
-		forwardOpts: &forwardOpts{workDir: workDir},
+		ctx:           ctx,
+		wt:            wt,
+		workerInfo:    workerInfo,
+		platform:      platform,
+		botID:         botID,
+		forwardOpts:   &forwardOpts{workDir: workDir},
+		injectExclude: injectExclude,
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := w.Start(ctx, info); err != nil {
@@ -324,7 +333,7 @@ var _ = events.Clone // compile-time check that Clone is accessible
 //  3. No worker, state=CREATED → Start (--session-id)
 //  4. No worker, state=RUNNING/IDLE/TERMINATED → Resume (--resume)
 //     If Resume fails (files gone/corrupted), fall back to Start (--session-id)
-func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error {
+func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string, injectExclude ...string) error {
 	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "sandbox", sandbox, "platform", platform, "platform_key", platformKey, "bot_id", botID)
 	injectSandbox(platformKey, sandbox)
 	si, err := b.sm.Get(ctx, sessionID)
@@ -344,7 +353,7 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		// Orphan: session record exists but worker is gone.
 		if si.State == events.StateCreated {
 			b.log.Info("bridge: orphan platform session unstarted, starting fresh", "session_id", sessionID)
-			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
 		}
 		// RUNNING/IDLE/TERMINATED — try Resume to preserve conversation history.
 		// If Resume fails (session files deleted or corrupted), fall back to Start.
@@ -355,7 +364,7 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
 			b.log.Warn("bridge: resume failed, falling back to new session",
 				"session_id", sessionID, "state", si.State, "err", err)
-			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
 		}
 		return nil
 	}
@@ -365,14 +374,14 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		return fmt.Errorf("bridge: no worker_type configured for platform session %s", sessionID)
 	}
 
-	return b.startOrResumeOnInUse(ctx, sessionID, ownerID, wt, workDir, platform, platformKey, botID)
+	return b.startOrResumeOnInUse(ctx, sessionID, ownerID, wt, workDir, platform, platformKey, botID, injectExclude...)
 }
 
 // startOrResumeOnInUse attempts StartSession; if the worker reports its session
 // files are already in use (leftover from a crashed session), falls back to
 // ResumeSession to recover the existing conversation history.
-func (b *Bridge) startOrResumeOnInUse(ctx context.Context, sessionID, ownerID string, wt worker.WorkerType, workDir, platform string, platformKey map[string]string, botID string) error {
-	if err := b.StartSession(ctx, sessionID, ownerID, botID, wt, nil, workDir, platform, platformKey, ""); err != nil {
+func (b *Bridge) startOrResumeOnInUse(ctx context.Context, sessionID, ownerID string, wt worker.WorkerType, workDir, platform string, platformKey map[string]string, botID string, injectExclude ...string) error {
+	if err := b.StartSession(ctx, sessionID, ownerID, botID, wt, nil, workDir, platform, platformKey, "", injectExclude...); err != nil {
 		if isWorkerInUseError(err) {
 			b.log.Info("bridge: worker rejected as in-use, switching to resume", "session_id", sessionID, "err", err)
 			return b.ResumeSession(ctx, sessionID, workDir)
@@ -530,7 +539,12 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 	}
 
 	if !resumed {
-		if err := b.StartSession(ctx, newID, si.UserID, si.BotID, si.WorkerType, si.AllowedTools, expanded, si.Platform, si.PlatformKey, si.Title); err != nil {
+		// TODO(inject-per-bot): per-bot injectExclude from the messaging adapter
+		// is not persisted in the session record, so SwitchWorkDir falls back to
+		// platform/global from the atomic config map. Fix requires storing
+		// injectExclude in the session record or giving bridge access to adapters.
+		excl := b.resolveInjectExclude(si.Platform, si.BotID, nil)
+		if err := b.StartSession(ctx, newID, si.UserID, si.BotID, si.WorkerType, si.AllowedTools, expanded, si.Platform, si.PlatformKey, si.Title, excl...); err != nil {
 			return nil, fmt.Errorf("switch-workdir: start session: %w", err)
 		}
 		b.log.Info("switch-workdir: created fresh session",

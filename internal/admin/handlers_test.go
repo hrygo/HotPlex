@@ -82,7 +82,7 @@ func (m *mockHub) NextSeqPeek(string) int64 { return 42 }
 
 type mockBridge struct{ err error }
 
-func (m *mockBridge) StartSession(context.Context, string, string, string, worker.WorkerType, []string, string, string, map[string]string, string) error {
+func (m *mockBridge) StartSession(context.Context, string, string, string, worker.WorkerType, []string, string, string, map[string]string, string, ...string) error {
 	return m.err
 }
 

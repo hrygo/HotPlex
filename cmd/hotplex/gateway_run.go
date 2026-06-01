@@ -264,6 +264,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		WorkerEnvBlocklist: cfg.Worker.EnvBlocklist,
 		CronEnv:            buildCronEnv(cfg),
 		MCPConfigJSON:      buildMCPConfigJSON(cfg),
+		AgentConfigExclude: buildAgentConfigExclude(cfg),
 	})
 
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
@@ -332,6 +333,14 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		if !reflect.DeepEqual(prev.Worker.ClaudeCode.MCPServers, next.Worker.ClaudeCode.MCPServers) {
 			bridge.UpdateMCPConfig(buildMCPConfigJSON(next))
 			log.Info("config: MCP servers updated", "count", len(next.Worker.ClaudeCode.MCPServers))
+		}
+	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		prevExcl := buildAgentConfigExclude(prev)
+		nextExcl := buildAgentConfigExclude(next)
+		if !reflect.DeepEqual(prevExcl, nextExcl) {
+			bridge.UpdateAgentConfigExclude(nextExcl)
+			log.Info("config: agent config inject_exclude updated")
 		}
 	})
 
@@ -972,6 +981,32 @@ func buildMCPConfigJSON(cfg *config.Config) string {
 		return ""
 	}
 	return string(b)
+}
+
+// buildAgentConfigExclude builds the platform → inject_exclude map for non-platform
+// sessions (webchat/API/cron). The "" key holds the global default; platform-specific
+// keys override it. Nil values are omitted (meaning "not configured, fall through").
+//
+// NOTE: keep platform keys in sync with resolveInjectExcludeForAdmin (bot_config_adapter.go)
+// and applyInjectExclude callers (messaging_init.go).
+func buildAgentConfigExclude(cfg *config.Config) map[string][]string {
+	m := make(map[string][]string)
+	if cfg.AgentConfig.InjectExclude != nil {
+		m[""] = cfg.AgentConfig.InjectExclude
+	}
+	if cfg.Messaging.Slack.InjectExclude != nil {
+		m["slack"] = cfg.Messaging.Slack.InjectExclude
+	}
+	if cfg.Messaging.Feishu.InjectExclude != nil {
+		m["feishu"] = cfg.Messaging.Feishu.InjectExclude
+	}
+	if cfg.Messaging.Yuanxin.InjectExclude != nil {
+		m["yuanxin"] = cfg.Messaging.Yuanxin.InjectExclude
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 func releaseDBStatsManual(log *slog.Logger) {

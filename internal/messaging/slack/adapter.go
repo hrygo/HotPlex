@@ -89,6 +89,7 @@ type Adapter struct {
 	socketMode         *socketmode.Client
 	botID              string
 	teamID             string
+	injectExclude      []string
 	userCache          *UserCache
 	statusMgr          *StatusManager
 	isAssistantCapable atomic.Bool
@@ -111,7 +112,8 @@ func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformS
 
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 
-func (a *Adapter) GetBotID() string { return a.botID }
+func (a *Adapter) GetBotID() string           { return a.botID }
+func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
 
 func (a *Adapter) SetPhrases(p *phrases.Phrases) {
 	if p != nil {
@@ -157,6 +159,10 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 	}
 
 	a.Extras = config.Extras
+
+	if v, ok := config.Extras["inject_exclude"].([]string); ok {
+		a.injectExclude = v
+	}
 
 	if config.BotName != "" {
 		a.botName = config.BotName

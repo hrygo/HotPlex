@@ -28,6 +28,10 @@ type PlatformAdapterInterface interface {
 
 	// GetBotID returns the platform bot identity (Slack UserID, Feishu OpenID, etc.).
 	GetBotID() string
+
+	// GetInjectExclude returns the per-bot agent config files to skip from injection.
+	// Returns nil when no exclusion is configured (full injection).
+	GetInjectExclude() []string
 }
 
 // CronResultSender sends a cron job execution result to a platform target.
@@ -49,5 +53,5 @@ type HandlerInterface interface {
 // SessionStarter creates a new gateway session for a platform message.
 // Implemented by gateway.Bridge and injected during wiring.
 type SessionStarter interface {
-	StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error
+	StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string, injectExclude ...string) error
 }
