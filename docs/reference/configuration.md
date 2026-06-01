@@ -200,6 +200,7 @@ db:
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径 |
 | `allowed_origins` | []string | `["*"]` | — | WebSocket CORS 允许的 Origin 列表 |
+| `csp` | string | `""` | `HOTPLEX_SECURITY_CSP` | 嵌入式 webchat SPA 与文档门户的 `Content-Security-Policy` 响应头。空值使用包级默认（**故意宽松**）：`connect-src` 使用 CSP scheme 关键字（`http:` / `https:` / `ws:` / `wss:`），允许 SPA 直连任意后端主机，零配置即可用于远程部署。启动时会输出 WARN 日志提示此默认值生效。锁定严格指令示例：`"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://10.102.78.2:9999 ws://10.102.78.2:9999 wss://*; img-src 'self' data: blob:; font-src 'self' data:"` |
 | `work_dir_allowed_base_patterns` | []string | `[]` | — | 额外的工作目录白名单模式。支持 `~` 和 `${VAR}` 展开。程序内建默认值：`~/.hotplex/workspace`、`~/workspace`、`~/projects`、`~/work`、`~/dev`、`/var/hotplex/projects` |
 | `work_dir_forbidden_dirs` | []string | `[]` | — | 额外的工作目录黑名单。显式禁止的目录列表 |
 
@@ -757,6 +758,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_ADMIN_TOKEN_1..N` | `admin.tokens` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_1..N` | `security.api_keys` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_HEADER` | `security.api_key_header` | 默认 `X-API-Key` |
+| `HOTPLEX_SECURITY_CSP` | `security.csp` | 覆盖 webchat/docs CSP；空值使用宽松默认（远程部署友好，启动 WARN 提示） |
 
 #### Agent Config
 
