@@ -1,3 +1,4 @@
+// #541: fixed split-lock, tempFiles race, silent unmarshal in control events
 package claudecode
 
 import (
@@ -155,7 +156,19 @@ func (h *ControlHandler) SendControlRequest(ctx context.Context, subtype string,
 	ch := make(chan map[string]any, 1)
 	h.mu.Lock()
 	h.pendingRequests[reqID] = ch
+	_, err = h.stdin.Write(data)
 	h.mu.Unlock()
+	if err != nil {
+		// Cleanup on write failure: defer is set up only after the success path,
+		// so the stale pending entry must be removed before returning.
+		h.mu.Lock()
+		delete(h.pendingRequests, reqID)
+		h.mu.Unlock()
+		if base.IsDeadProcessError(err) {
+			return nil, &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "control: worker process is not running or stdin is closed", Cause: err}
+		}
+		return nil, fmt.Errorf("control: write request: %w", err)
+	}
 
 	defer func() {
 		h.mu.Lock()
@@ -166,16 +179,6 @@ func (h *ControlHandler) SendControlRequest(ctx context.Context, subtype string,
 		default:
 		}
 	}()
-
-	h.mu.Lock()
-	_, err = h.stdin.Write(data)
-	h.mu.Unlock()
-	if err != nil {
-		if base.IsDeadProcessError(err) {
-			return nil, &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "control: worker process is not running or stdin is closed", Cause: err}
-		}
-		return nil, fmt.Errorf("control: write request: %w", err)
-	}
 
 	h.log.Debug("control: sent request", "request_id", reqID, "subtype", subtype)
 
