@@ -4,31 +4,19 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+
+	"github.com/hrygo/hotplex/internal/security"
 )
 
 var spaFS, _ = fs.Sub(StaticFS, "out")
 
 var fileServer = http.FileServerFS(spaFS)
 
-// securityHeaders injects security response headers for all SPA responses.
-// These headers provide defense-in-depth against XSS, clickjacking, and content-type sniffing.
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
-				"style-src 'self' 'unsafe-inline'; "+
-				"connect-src 'self' http://localhost:* ws://localhost:* wss://*; "+
-				"img-src 'self' data: blob:; "+
-				"font-src 'self' data:")
-		next.ServeHTTP(w, r)
-	})
-}
-
 // Handler returns an http.Handler that serves the webchat SPA.
+//
+// Pass an empty string for csp to use DefaultWebChatCSP; pass a custom
+// directive when serving from a non-localhost host (e.g. reverse-prod on
+// http://10.102.78.2:9999). Whitespace-only csp is treated as empty.
 //
 // Routing strategy:
 //   - /_next/*  → static assets with aggressive cache headers (hashed filenames)
@@ -36,8 +24,8 @@ func securityHeaders(next http.Handler) http.Handler {
 //   - everything else → fallback to index.html (client-side routing)
 //
 // Must be registered last on the ServeMux so explicit API/WS routes take priority.
-func Handler() http.Handler {
-	return securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func Handler(csp string) http.Handler {
+	return security.SecurityHeaders(security.DefaultWebChatCSP, csp, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
 		// Static assets with content-hashed filenames — cache for 1 year.

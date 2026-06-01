@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging/textutil"
 	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -202,8 +203,8 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if !ok {
 		return nil
 	}
-	if env.Event.Type == events.MessageDelta && text != "" {
-		text += "\n\n"
+	if env.Event.Type == events.MessageDelta && textutil.EndsWithSentenceTerminator(text) {
+		text += "\n"
 	}
 	text = StripInvalidImageKeys(text)
 	return c.writeContent(ctx, env, text)

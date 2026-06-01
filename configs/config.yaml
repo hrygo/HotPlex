@@ -115,6 +115,17 @@ security:
   tls_key_file: "/etc/hotplex/tls/server.key"
   allowed_origins:
     - "*"
+  # Content-Security-Policy header served with the embedded webchat SPA and
+  # docs portal. Leave empty to use the package-level default, which is
+  # INTENTIONALLY permissive: connect-src uses the CSP scheme keywords
+  # (http: / https: / ws: / wss:) so the SPA can reach any backend host
+  # without configuration — required for zero-config remote deployments.
+  # A startup WARN log fires when this default is in effect to flag the
+  # production exposure. Pin a strict directive to silence the warning and
+  # restrict the SPA, e.g.:
+  #   csp: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://10.102.78.2:9999 ws://10.102.78.2:9999 wss://*; img-src 'self' data: blob:; font-src 'self' data:"
+  # Can be overridden at runtime by HOTPLEX_SECURITY_CSP env var.
+  csp: ""
 
   # Work directory security settings (convention + configuration)
   # Program defaults (convention over configuration):
