@@ -556,19 +556,18 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) error {
 	// Validate before consuming reqID so validation failures don't orphan
 	// the codex process waiting for a response that will never arrive.
-	raw, err := json.Marshal(result)
-	if err != nil {
-		return fmt.Errorf("codex-app-server: marshal server response: %w", err)
-	}
-
-	var check map[string]any
-	if err := json.Unmarshal(raw, &check); err == nil {
+	if check, ok := result.(map[string]any); ok {
 		_, hasBehavior := check["behavior"]
 		_, hasDecision := check["decision"]
 		_, hasAction := check["action"]
 		if !hasBehavior && !hasDecision && !hasAction {
 			return fmt.Errorf("codex-app-server: server response for %q missing behavior, decision, or action key", reqID)
 		}
+	}
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("codex-app-server: marshal server response: %w", err)
 	}
 
 	v, ok := m.serverReqIDs.LoadAndDelete(reqID)

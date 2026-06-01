@@ -161,12 +161,14 @@ func (c *Converter) handleStepFailed(sessionID string, props json.RawMessage) []
 	if evt.Error.Message != "" {
 		msg = evt.Error.Message
 	}
+	// Snapshot stats before clearing state so downstream Done still has token data.
+	stats := c.takeStats(sessionID)
 	return []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
 			Code:    events.ErrCodeInternalError,
 			Message: msg,
 		}),
-		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false, Stats: stats}),
 	}
 }
 
@@ -332,14 +334,18 @@ func (c *Converter) handleSessionError(sessionID string, props json.RawMessage) 
 	} else if data.Error.Name != "" {
 		msg = data.Error.Name
 	}
-	delete(c.states, sessionID)
-	return []*events.Envelope{
+	// Snapshot stats and clear state before emitting Done, so a subsequent
+	// session.idle on the same session (v1 path) does not produce a duplicate
+	// Done{Success:true} on top of Done{Success:false}.
+	stats := c.takeStats(sessionID)
+	envs := []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
 			Code:    events.ErrCodeInternalError,
 			Message: msg,
 		}),
-		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false, Stats: stats}),
 	}
+	return envs
 }
 
 func (c *Converter) handlePermAsked(sessionID string, props json.RawMessage) []*events.Envelope {

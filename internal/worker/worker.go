@@ -248,34 +248,6 @@ type SessionInfo struct {
 	// from SessionInfo directly. Per-session injection through gateway/bridge
 	// is not yet wired. Reserved for future per-session image support.
 	Images []string
-	// CodexFlags groups CodexCLI exec flags that are only meaningful for
-	// the codexcli worker. Other adapters (claudecode, acp, ocs) ignore these.
-	// NOTE: Currently populated from global config (resolveConfig), not from
-	// per-session SessionInfo. Reserved for future per-session flag injection.
-	CodexFlags CodexExecFlags
-}
-
-// CodexExecFlags holds CodexCLI-specific exec flags propagated through SessionInfo.
-// These are ignored by all other worker adapters.
-type CodexExecFlags struct {
-	// Color enables colored output for the codex CLI (--color).
-	Color bool
-	// OutputFile triggers output-only-last-message mode (--output-last-message).
-	OutputFile string
-	// StrictConfig enables strict config validation (--strict-config).
-	StrictConfig bool
-	// SkipGitRepoCheck bypasses git repo existence check (--skip-git-repo-check).
-	SkipGitRepoCheck bool
-	// IgnoreUserConfig ignores user-level configuration (--ignore-user-config).
-	IgnoreUserConfig bool
-	// IgnoreRules ignores project rules (--ignore-rules).
-	IgnoreRules bool
-	// LocalProvider forces local model provider (--local-provider).
-	LocalProvider bool
-	// ConfigProfile specifies the codex configuration profile (--profile).
-	ConfigProfile string
-	// BypassHookTrust bypasses hook trust requirements (--dangerously-bypass-hook-trust).
-	BypassHookTrust bool
 }
 
 // SandboxPlatformKey is the platformKey map key used to propagate sandbox config

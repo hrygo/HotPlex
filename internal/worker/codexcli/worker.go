@@ -471,6 +471,15 @@ var _ worker.Worker = (*AppServerWorker)(nil)
 var _ worker.WorkerCommander = (*AppServerWorker)(nil)
 var _ worker.ControlRequester = (*AppServerWorker)(nil)
 
+type appState int
+
+const (
+	appStateNew appState = iota
+	appStateStarting
+	appStateReady
+	appStateTerminated
+)
+
 type AppServerWorker struct {
 	*base.BaseWorker
 
@@ -486,6 +495,7 @@ type AppServerWorker struct {
 	closed    bool
 	released  bool
 	started   bool
+	state     appState
 	sessionID string
 	conn      *appConn
 
@@ -550,11 +560,11 @@ func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string
 
 func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
-	if w.started {
+	if w.state != appStateNew {
 		w.mu.Unlock()
-		return fmt.Errorf("codexcli: app-server already started")
+		return fmt.Errorf("codexcli: app-server already started (state=%d)", w.state)
 	}
-	w.started = true
+	w.state = appStateStarting
 
 	if w.doneCh == nil {
 		w.doneCh = make(chan struct{})
@@ -578,6 +588,9 @@ func (w *AppServerWorker) Start(ctx context.Context, session worker.SessionInfo)
 		w.manager.Release()
 		return err
 	}
+	w.mu.Lock()
+	w.state = appStateReady
+	w.mu.Unlock()
 	return nil
 }
 
@@ -726,18 +739,38 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 // ─── AppServerWorker lifecycle ────────────────────────────────────────
 
 func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
+	w.mu.Lock()
+	if w.state == appStateNew || w.state == appStateTerminated {
+		w.mu.Unlock()
+		return fmt.Errorf("codexcli: app-server not started (state=%d)", w.state)
+	}
+	w.state = appStateStarting
+	w.mu.Unlock()
+
 	w.cleanupOldThread()
 	w.resetLifecycleState()
-	return w.startNewThread(session, "resume")
+	if err := w.startNewThread(session, "resume"); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.state = appStateReady
+	w.mu.Unlock()
+	return nil
 }
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
 	w.shutdown()
+	w.mu.Lock()
+	w.state = appStateTerminated
+	w.mu.Unlock()
 	return nil
 }
 
 func (w *AppServerWorker) Kill() error {
 	w.shutdown()
+	w.mu.Lock()
+	w.state = appStateTerminated
+	w.mu.Unlock()
 	return nil
 }
 
