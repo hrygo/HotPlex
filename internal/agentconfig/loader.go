@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -104,6 +105,11 @@ func Load(dir, platform, botID string, injectExclude ...string) (*AgentConfigs, 
 // configFiles lists recognized agent config file names.
 var configFiles = []string{"SOUL.md", "AGENTS.md", "SKILLS.md", "USER.md", "MEMORY.md"}
 
+// KnownFiles returns the list of recognized config file names for validation/logging.
+func KnownFiles() []string {
+	return slices.Clone(configFiles)
+}
+
 // shouldExclude reports whether a config file should be skipped from injection.
 // baseName is matched case-insensitively against the exclude list.
 // META-COGNITION.md is never excluded (it is go:embed, always injected outside Load).
@@ -117,6 +123,25 @@ func shouldExclude(baseName string, exclude []string) bool {
 		}
 	}
 	return false
+}
+
+// ValidateExcludeList returns entries from exclude that do not match any known
+// config file name. Matching is case-insensitive. Returns nil if all entries are valid.
+func ValidateExcludeList(exclude []string) []string {
+	var unknown []string
+	for _, name := range exclude {
+		found := false
+		for _, cfg := range configFiles {
+			if strings.EqualFold(name, cfg) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			unknown = append(unknown, name)
+		}
+	}
+	return unknown
 }
 
 // HasGlobalFiles reports whether any config file exists at the global level (dir/<file>).

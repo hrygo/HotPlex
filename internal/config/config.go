@@ -296,7 +296,9 @@ type SlackBotConfig struct {
 	AllowGroupFrom []string `mapstructure:"allow_group_from,omitempty"`
 
 	// Per-bot agent config injection override (falls back to platform-level when nil).
-	InjectExclude []string `mapstructure:"inject_exclude,omitempty"`
+	// No omitempty: inject_exclude: [] must produce a non-nil empty slice to
+	// explicitly clear the parent-level exclusion (nil = inherit, [] = clear).
+	InjectExclude []string `mapstructure:"inject_exclude"`
 
 	// Per-bot branding override (falls back to platform-level when empty).
 	DisplayName string `mapstructure:"display_name,omitempty"`
@@ -339,7 +341,9 @@ type FeishuBotConfig struct {
 	AllowGroupFrom []string `mapstructure:"allow_group_from,omitempty"`
 
 	// Per-bot agent config injection override (falls back to platform-level when nil).
-	InjectExclude []string `mapstructure:"inject_exclude,omitempty"`
+	// No omitempty: inject_exclude: [] must produce a non-nil empty slice to
+	// explicitly clear the parent-level exclusion (nil = inherit, [] = clear).
+	InjectExclude []string `mapstructure:"inject_exclude"`
 
 	STTConfig `mapstructure:",squash"`
 	TTSConfig `mapstructure:",squash"`

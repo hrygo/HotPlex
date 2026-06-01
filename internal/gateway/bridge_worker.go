@@ -169,7 +169,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		platform:      si.Platform,
 		botID:         si.BotID,
 		forwardOpts:   &forwardOpts{workDir: p.workDir},
-		injectExclude: b.resolveInjectExclude(si.Platform, si.BotID, nil),
+		injectExclude: nil, // resolved by injectAgentConfig
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := b.sm.Transition(ctx, p.sessionID, events.StateRunning); err != nil {
@@ -276,6 +276,10 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID str
 		return
 	}
 	injectExclude = b.resolveInjectExclude(platform, botID, injectExclude)
+	if unknown := agentconfig.ValidateExcludeList(injectExclude); len(unknown) > 0 {
+		b.log.Warn("bridge: inject_exclude contains unknown config files",
+			"unknown", unknown, "valid", agentconfig.KnownFiles())
+	}
 	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_id", botID, "exclude", injectExclude)
 	configs, err := agentconfig.Load(b.agentConfigDir, platform, botID, injectExclude...)
 	if err != nil {
