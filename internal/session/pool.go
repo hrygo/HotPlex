@@ -109,6 +109,7 @@ func (p *PoolManager) AcquireWithMemory(userID string) error {
 	if p.maxMemoryPerUser > 0 {
 		used := p.userMemory[userID]
 		if used+workerMemoryEstimate > p.maxMemoryPerUser {
+			metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
 			p.log.Warn("pool: memory quota exceeded", "user_id", userID,
 				"used_mb", used/(1024*1024),
 				"limit_mb", p.maxMemoryPerUser/(1024*1024),
@@ -176,6 +177,10 @@ func (p *PoolManager) UpdateLimits(maxSize, maxIdlePerUser int) {
 	p.log.Info("pool: limits updated", "old_max", old, "new_max", maxSize, "max_per_user", maxIdlePerUser)
 }
 
+// Deprecated: use AcquireWithMemory instead. AcquireMemory is TOCTOU-unsafe
+// when called separately from Acquire; the combined method atomically checks
+// both slot and memory quota under a single lock.
+//
 // AcquireMemory reserves memory quota for a user.
 // It uses workerMemoryEstimate as the per-worker allocation.
 // Returns nil on success, or ErrUserMemoryExceeded if the per-user limit is exceeded.
@@ -197,6 +202,8 @@ func (p *PoolManager) AcquireMemory(userID string) error {
 	return nil
 }
 
+// Deprecated: AcquireWithMemory + Release handles both slot and memory atomically.
+//
 // ReleaseMemory frees memory quota for a user.
 func (p *PoolManager) ReleaseMemory(userID string) {
 	p.mu.Lock()

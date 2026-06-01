@@ -1,4 +1,4 @@
-// #541: fixed split-lock, tempFiles race, silent unmarshal in control events
+// Package claudecode implements the Claude Code worker adapter via stdio.
 package claudecode
 
 import (
@@ -954,6 +954,7 @@ func (w *Worker) writeTempFile(prefix, content string) (string, error) {
 		_ = os.Remove(path)
 		return "", fmt.Errorf("close temp file: %w", err)
 	}
+	// Caller must hold w.Mu.
 	w.tempFiles = append(w.tempFiles, path)
 	return path, nil
 }

@@ -551,7 +551,6 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 			return ErrUserQuotaExceeded
 		}
 		if pe.Kind == poolErrKindMemoryExceeded {
-			metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
 			return ErrMemoryExceeded
 		}
 		return ErrPoolExhausted
@@ -1124,27 +1123,23 @@ func (m *Manager) gc(ctx context.Context) {
 	allIds = append(allIds, maxIds...)
 	allIds = append(allIds, idleIds...)
 	if len(allIds) > 0 {
+		// Build a reason map for O(1) lookup. max_lifetime wins if a session
+		// appears in both lists (unlikely but safe to be explicit).
+		reasonMap := make(map[string]string, len(maxIds)+len(idleIds))
+		for _, id := range idleIds {
+			reasonMap[id] = "idle_timeout"
+		}
+		for _, id := range maxIds {
+			reasonMap[id] = "max_lifetime"
+		}
+
 		eg2, egCtx2 := errgroup.WithContext(ctx)
 		eg2.SetLimit(5)
 		for _, id := range allIds {
 			id := id
 			eg2.Go(func() error {
-				reason := "max_lifetime"
-				// Check which list this ID came from for the correct reason
-				for _, mid := range maxIds {
-					if mid == id {
-						reason = "max_lifetime"
-						break
-					}
-				}
-				for _, iid := range idleIds {
-					if iid == id {
-						reason = "idle_timeout"
-						break
-					}
-				}
-				if err := m.TransitionWithReason(egCtx2, id, events.StateTerminated, reason); err != nil {
-					m.log.Warn("session: gc transition", "session_id", id, "reason", reason, "err", err)
+				if err := m.TransitionWithReason(egCtx2, id, events.StateTerminated, reasonMap[id]); err != nil {
+					m.log.Warn("session: gc transition", "session_id", id, "reason", reasonMap[id], "err", err)
 				}
 				return nil // don't propagate individual failures
 			})

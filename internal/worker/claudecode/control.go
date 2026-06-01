@@ -1,4 +1,4 @@
-// #541: fixed split-lock, tempFiles race, silent unmarshal in control events
+// Package claudecode implements the Claude Code worker adapter via stdio.
 package claudecode
 
 import (
