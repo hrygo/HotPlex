@@ -67,37 +67,12 @@ func (e *PoolError) Error() string {
 func (p *PoolManager) Acquire(userID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	if p.maxSize > 0 && p.totalCount >= p.maxSize {
-		metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
-		return &PoolError{Kind: poolErrKindExhausted, Current: p.totalCount, Max: p.maxSize}
-	}
-	if p.maxIdlePerUser > 0 && p.userCount[userID] >= p.maxIdlePerUser {
-		metrics.PoolAcquireTotal.WithLabelValues("user_quota_exceeded").Inc()
-		return &PoolError{Kind: poolErrKindUserQuotaExceeded, UserID: userID, Current: p.userCount[userID], Max: p.maxIdlePerUser}
-	}
-
-	p.userCount[userID]++
-	p.totalCount++
-	if p.maxSize > 0 {
-		metrics.PoolUtilization.Set(float64(p.totalCount) / float64(p.maxSize))
-	}
-	// Note: PoolAcquireTotal["success"] is NOT recorded here because the
-	// overall attach may still fail (e.g., memory quota). The caller records
-	// the final outcome after all checks pass.
-	p.log.Debug("pool: acquired", "user_id", userID, "total", p.totalCount)
-	return nil
+	return p.acquireLocked(userID, false)
 }
 
-// AcquireWithMemory atomically reserves both concurrency and memory quota for userID.
-// Returns nil on success, or a PoolError describing the failure.
-// This avoids the TOCTOU race that exists when Acquire + AcquireMemory are called
-// separately: between the two calls, another goroutine could observe the slot
-// taken but memory not yet reserved, leading to quota accounting drift.
-func (p *PoolManager) AcquireWithMemory(userID string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
+// acquireLocked reserves a concurrency slot (and optionally memory) for userID.
+// Caller must hold p.mu.
+func (p *PoolManager) acquireLocked(userID string, reserveMemory bool) error {
 	if p.maxSize > 0 && p.totalCount >= p.maxSize {
 		metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
 		return &PoolError{Kind: poolErrKindExhausted, Current: p.totalCount, Max: p.maxSize}
@@ -106,7 +81,7 @@ func (p *PoolManager) AcquireWithMemory(userID string) error {
 		metrics.PoolAcquireTotal.WithLabelValues("user_quota_exceeded").Inc()
 		return &PoolError{Kind: poolErrKindUserQuotaExceeded, UserID: userID, Current: p.userCount[userID], Max: p.maxIdlePerUser}
 	}
-	if p.maxMemoryPerUser > 0 {
+	if reserveMemory && p.maxMemoryPerUser > 0 {
 		used := p.userMemory[userID]
 		if used+workerMemoryEstimate > p.maxMemoryPerUser {
 			metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
@@ -124,8 +99,19 @@ func (p *PoolManager) AcquireWithMemory(userID string) error {
 	if p.maxSize > 0 {
 		metrics.PoolUtilization.Set(float64(p.totalCount) / float64(p.maxSize))
 	}
-	p.log.Debug("pool: acquired with memory", "user_id", userID, "total", p.totalCount)
+	p.log.Debug("pool: acquired", "user_id", userID, "total", p.totalCount)
 	return nil
+}
+
+// AcquireWithMemory atomically reserves both concurrency and memory quota for userID.
+// Returns nil on success, or a PoolError describing the failure.
+// This avoids the TOCTOU race that exists when Acquire + AcquireMemory are called
+// separately: between the two calls, another goroutine could observe the slot
+// taken but memory not yet reserved, leading to quota accounting drift.
+func (p *PoolManager) AcquireWithMemory(userID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.acquireLocked(userID, true)
 }
 
 // Release frees a concurrency slot previously acquired for userID.
@@ -177,9 +163,9 @@ func (p *PoolManager) UpdateLimits(maxSize, maxIdlePerUser int) {
 	p.log.Info("pool: limits updated", "old_max", old, "new_max", maxSize, "max_per_user", maxIdlePerUser)
 }
 
-// Deprecated: use AcquireWithMemory instead. AcquireMemory is TOCTOU-unsafe
-// when called separately from Acquire; the combined method atomically checks
-// both slot and memory quota under a single lock.
+// Deprecated: AcquireMemory is TOCTOU-unsafe when called separately from
+// Acquire. Use AcquireWithMemory instead, which atomically checks both
+// slot and memory quota under a single lock.
 //
 // AcquireMemory reserves memory quota for a user.
 // It uses workerMemoryEstimate as the per-worker allocation.
@@ -202,7 +188,8 @@ func (p *PoolManager) AcquireMemory(userID string) error {
 	return nil
 }
 
-// Deprecated: AcquireWithMemory + Release handles both slot and memory atomically.
+// Deprecated: AcquireWithMemory + Release handles both slot and memory
+// atomically with a single lock.
 //
 // ReleaseMemory frees memory quota for a user.
 func (p *PoolManager) ReleaseMemory(userID string) {
