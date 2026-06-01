@@ -124,7 +124,7 @@ func TestIsInPATHTailingSlash(t *testing.T) {
 	orig := os.Getenv("PATH")
 	t.Cleanup(func() { os.Setenv("PATH", orig) })
 
-		// PATH has trailing slash, dir does not
+	// PATH has trailing slash, dir does not
 	os.Setenv("PATH", dir+"/"+string(os.PathListSeparator)+orig)
 	require.True(t, IsInPATH(dir), "should match despite trailing slash")
 }
