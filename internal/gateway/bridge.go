@@ -331,7 +331,8 @@ var _ = events.Clone // compile-time check that Clone is accessible
 //  1. No DB record → Create + Start (--session-id)
 //  2. Worker alive → Reuse (forward message)
 //  3. No worker, state=CREATED → Start (--session-id)
-//  4. No worker, state=RUNNING/IDLE/TERMINATED → Resume (--resume)
+//  4. No worker, state=TERMINATED/DELETED → Start fresh (skip resume)
+//  5. No worker, state=RUNNING/IDLE → Resume (--resume)
 //     If Resume fails (files gone/corrupted), fall back to Start (--session-id)
 func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string, injectExclude ...string) error {
 	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "sandbox", sandbox, "platform", platform, "platform_key", platformKey, "bot_id", botID)
@@ -355,14 +356,12 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 			b.log.Info("bridge: orphan platform session unstarted, starting fresh", "session_id", sessionID)
 			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
 		}
-		// RUNNING/IDLE/TERMINATED — try Resume to preserve conversation history.
-		// DELETED sessions cannot be resumed (session state is DELETED), so we start
-		// fresh. This is safe because the old session key is orphaned: no worker
-		// holds a reference, and startOrResumeOnInUse will create a new session
-		// with the same deterministic key, effectively replacing the deleted one.
-		// TERMINATED sessions cannot be resumed because AttachWorker rejects
-		// non-active sessions (IsActive() returns false). Skip directly to
-		// fresh start to avoid wasting pool quota on doomed resume attempts.
+		// TERMINATED/DELETED — start fresh (skip resume).
+		// AttachWorker rejects non-active sessions (IsActive() returns false),
+		// so TERMINATED sessions cannot be resumed. DELETED sessions have no
+		// DB record to resume from. In both cases, startOrResumeOnInUse creates
+		// a new session with the same deterministic key, effectively replacing
+		// the orphaned one.
 		if si.State == events.StateTerminated {
 			b.log.Info("bridge: orphan platform session terminated, starting fresh", "session_id", sessionID)
 			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)

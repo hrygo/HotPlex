@@ -236,6 +236,7 @@ func (h *Hub) removeSession(sessionID string, conn SessionWriter) {
 		if len(conns) == 0 {
 			delete(h.sessions, sessionID)
 			delete(h.sessionDropped, sessionID)
+			delete(h.everHadConn, sessionID)
 			h.seqGen.Remove(sessionID)
 		}
 	}
