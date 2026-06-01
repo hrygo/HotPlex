@@ -888,15 +888,15 @@ func (m *Manager) List(ctx context.Context, userID, platform string, limit, offs
 }
 
 // ListActive returns in-memory active sessions (no DB round-trip).
-// ms.info is a value-type struct; reading it under m.mu.RLock is safe because
-// m.mu serializes all writes to managedSession fields.
 func (m *Manager) ListActive() []*SessionInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	sessions := make([]*SessionInfo, 0, len(m.sessions))
 	for _, ms := range m.sessions {
+		ms.mu.RLock()
 		info := ms.info
+		ms.mu.RUnlock()
 		sessions = append(sessions, &info)
 	}
 	return sessions
@@ -949,17 +949,17 @@ func (m *Manager) ResetExpiry(ctx context.Context, id string) error {
 }
 
 // WorkerHealthStatuses returns a snapshot of health for all active worker processes.
-// ms.worker is assigned under m.mu+ms.mu in AttachWorker; reading it under
-// m.mu.RLock is safe because m.mu serializes writes to managedSession fields.
 func (m *Manager) WorkerHealthStatuses() []worker.WorkerHealth {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	statuses := make([]worker.WorkerHealth, 0, len(m.sessions))
 	for _, ms := range m.sessions {
+		ms.mu.RLock()
 		if ms.worker != nil {
 			statuses = append(statuses, ms.worker.Health())
 		}
+		ms.mu.RUnlock()
 	}
 	return statuses
 }

@@ -954,8 +954,9 @@ func (w *Worker) writeTempFile(prefix, content string) (string, error) {
 		_ = os.Remove(path)
 		return "", fmt.Errorf("close temp file: %w", err)
 	}
-	// Caller must hold w.Mu.
+	w.Mu.Lock()
 	w.tempFiles = append(w.tempFiles, path)
+	w.Mu.Unlock()
 	return path, nil
 }
 
