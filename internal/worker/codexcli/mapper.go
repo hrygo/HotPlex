@@ -609,6 +609,7 @@ func (m *Mapper) mapNotifDeprecation(params json.RawMessage) []*events.Envelope 
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
+		slog.Debug("codexcli: unmarshal deprecationNotice params", "err", err, "raw", string(params))
 		return nil
 	}
 	return []*events.Envelope{
@@ -625,6 +626,7 @@ func (m *Mapper) mapNotifGuardianWarning(params json.RawMessage) []*events.Envel
 		Severity string `json:"severity"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
+		slog.Debug("codexcli: unmarshal guardianWarning params", "err", err, "raw", string(params))
 		return nil
 	}
 	slog.Debug("codexcli: guardian warning", "severity", p.Severity, "message", p.Message)

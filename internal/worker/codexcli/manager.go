@@ -600,9 +600,9 @@ func (m *CodexAppServerManager) ResumeThread(threadID string) (json.RawMessage, 
 
 // ForkThread forks a thread at the current state with additional parameters.
 func (m *CodexAppServerManager) ForkThread(threadID string, params map[string]any) (json.RawMessage, error) {
-	merged := map[string]any{"threadId": threadID}
+	merged := make(map[string]any, len(params)+1)
 	maps.Copy(merged, params)
-	merged["threadId"] = threadID // ensure authoritative value wins
+	merged["threadId"] = threadID // authoritative value, overrides any caller-supplied threadId in params
 	resp, err := m.Call("thread/fork", merged)
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: thread/fork: %w", err)
@@ -676,9 +676,9 @@ func (m *CodexAppServerManager) ClearThreadGoal(threadID string) error {
 // keys (cwd, approvalPolicy, sandboxPolicy, model, ...) sit alongside threadId,
 // not nested under a "settings" wrapper.
 func (m *CodexAppServerManager) UpdateThreadSettings(threadID string, settings map[string]any) error {
-	params := map[string]any{"threadId": threadID}
+	params := make(map[string]any, len(settings)+1)
 	maps.Copy(params, settings)
-	params["threadId"] = threadID // ensure authoritative value wins
+	params["threadId"] = threadID // authoritative value, overrides any caller-supplied threadId in settings
 	err := m.Notify("thread/settings/update", params)
 	if err != nil {
 		return fmt.Errorf("codex-app-server: thread/settings/update: %w", err)

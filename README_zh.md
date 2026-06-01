@@ -186,7 +186,7 @@ func main() {
 | 配置项                      | 默认值                       | 说明                                |
 | :-------------------------- | :--------------------------- | :---------------------------------- |
 | `agent_config.enabled`      | `true`                       | 启用 Agent 人格/上下文注入          |
-| `tts.enabled`               | `true`                       | 启用 Edge-TTS 语音回传流水线        |
+| `tts.enabled`               | `true`                       | 启用 Edge-TTS 语音回传流水线（语音输入到语音输出） |
 | `brain.enabled`             | `false`                      | 启用 Brain LLM 编排层（需 API Key） |
 | `webchat.enabled`           | `true`                       | 从网关提供嵌入式 Web Chat SPA       |
 | `worker.auto_retry.enabled` | `true`                       | LLM 智能重试，支持指数退避          |

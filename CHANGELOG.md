@@ -29,6 +29,7 @@ v1.23.0 是一次 minor 版本更新，聚焦于 **CodexCLI 100% 协议覆盖**�
 - **Gateway Core**: forwardEvents blocking risk + StartSession orphan worker + Delete/Attach race conditions. (#599, #600, #602)
 - **Gateway Core**: Platform conn routing lost OwnerID during pre-encoded JSON path, causing interactive authorization failure ("OwnerID not set") in Feishu/Slack channels.
 - **Gateway Core**: dev-start clears logs before gateway starts — previous ordering deleted logs after gateway began writing, leaving running process with fd to removed inode.
+- **Cron**: SessionKey now honors `Payload.WorkerType` instead of always using `claudecode`. Prior cron sessions for non-claudecode workers (codexcli/acp) become orphaned under the old key — their session records remain in storage but are no longer reachable via SessionKey(). This is a correctness fix; no data is deleted. If you rely on history for non-claudecode cron jobs, either re-run them or migrate by updating the SessionKey column manually in your store.
 - **Worker/CodexCLI**: Wait() deadlock from unclosed doneCh, resume ref leak, lock held during IO, map mutation across goroutines, error swallowing — comprehensive fixes across 4 review rounds. (#593)
 - **Worker/CodexCLI**: Missing mapItemCompleted cases for WebSearch/CollabToolCall — Feishu tool_activity strip showed them as perpetually in-progress.
 - **Worker/CodexCLI**: Multi-file edit visibility in Feishu cards — join all file paths with comma instead of silently discarding beyond the first.

@@ -316,6 +316,11 @@ func (c *FeishuConn) handleToolResult(_ context.Context, env *events.Envelope) e
 	return nil
 }
 
+// handleToolUpdate intentionally drops ToolUpdate payloads. In Feishu the tool
+// activity strip is rendered from ToolCall+ToolResult only; intermediate
+// streaming progress (stdout/stderr deltas, diff increments) would require a
+// new card widget that does not exist. We still reset the silence timer so
+// the connection is not marked idle while the worker is actively streaming.
 func (c *FeishuConn) handleToolUpdate(_ context.Context, _ *events.Envelope) error {
 	c.resetSilenceTimer()
 	return nil
