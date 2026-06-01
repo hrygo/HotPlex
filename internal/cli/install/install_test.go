@@ -106,8 +106,6 @@ func TestSameContent(t *testing.T) {
 }
 
 func TestIsInPATH(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
 
 	// Not in PATH initially
@@ -121,21 +119,17 @@ func TestIsInPATH(t *testing.T) {
 }
 
 func TestIsInPATHTailingSlash(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
 
 	orig := os.Getenv("PATH")
 	t.Cleanup(func() { os.Setenv("PATH", orig) })
 
-	// PATH has trailing slash, dir does not
+		// PATH has trailing slash, dir does not
 	os.Setenv("PATH", dir+"/"+string(os.PathListSeparator)+orig)
 	require.True(t, IsInPATH(dir), "should match despite trailing slash")
 }
 
 func TestIsInPATHNotInPath(t *testing.T) {
-	t.Parallel()
-
 	orig := os.Getenv("PATH")
 	t.Cleanup(func() { os.Setenv("PATH", orig) })
 
