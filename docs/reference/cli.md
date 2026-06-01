@@ -737,6 +737,7 @@ hotplex cron create \
 | `--expires-at` | | `string` | | 否 | 自动禁用时间（RFC3339 格式） |
 | `--platform` | | `string` | | 否 | 目标投递平台：`slack`、`feishu`、`cron`（未设置时根据 `bot_id` 关联的 session 平台信息推断；若推断失败则默认为 `cron`，不投递结果） |
 | `--platform-key` | | `string` | | 否 | 平台路由键（JSON 对象），如 `'{"channel_id":"C123"}'` |
+| `--worker-type` | | `string` | | 否 | AI Agent 引擎类型：`claude_code`、`opencode_server`、`codex_cli`、`acp`。未设置时使用平台默认 |
 | `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex cron list`
