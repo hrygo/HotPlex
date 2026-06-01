@@ -454,7 +454,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	// Webchat SPA fallback
 	var rootHandler http.Handler = mux
 	if cfg.WebChat.Enabled {
-		spa := webchat.Handler()
+		spa := webchat.Handler(cfg.Security.CSP)
+		warnCSPLogPolicy(log, "webchat", cfg.Security.CSP)
 		rootHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, pattern := mux.Handler(r)
 			if pattern != "" {

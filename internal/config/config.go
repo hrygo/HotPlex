@@ -679,6 +679,12 @@ type SecurityConfig struct {
 	// WorkDir security settings
 	WorkDirAllowedBasePatterns []string `mapstructure:"work_dir_allowed_base_patterns"` // extra whitelist patterns (supports ~ and ${VAR})
 	WorkDirForbiddenDirs       []string `mapstructure:"work_dir_forbidden_dirs"`        // extra blacklist directories
+
+	// CSP overrides the Content-Security-Policy header served with the embedded
+	// webchat SPA and docs portal. Empty string keeps the package-level default
+	// (localhost-friendly). Set this when serving from a remote host — the
+	// browser blocks fetch/ws/connect calls that do not match a directive in CSP.
+	CSP string `mapstructure:"csp"`
 }
 
 // SessionConfig holds session lifecycle settings.
@@ -815,6 +821,7 @@ func Default() *Config {
 			APIKeys:        nil,
 			TLSEnabled:     false,
 			AllowedOrigins: []string{"*"},
+			CSP:            "", // empty → webchat/docs use package-level default
 		},
 		Session: SessionConfig{
 			RetentionPeriod:   7 * 24 * time.Hour,
@@ -1066,6 +1073,7 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("worker.opencode_server.http_timeout")
 	_ = v.BindEnv("worker.opencode_server.password")
 	_ = v.BindEnv("security.api_key_header")
+	_ = v.BindEnv("security.csp")
 	_ = v.BindEnv("agent_config.enabled")
 	_ = v.BindEnv("agent_config.config_dir")
 	_ = v.BindEnv("skills.cache_ttl")

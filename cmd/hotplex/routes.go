@@ -177,7 +177,8 @@ func setupRoutes(
 	adminMux.HandleFunc("DELETE /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserDelete)
 
 	// Documentation
-	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler()))
+	warnCSPLogPolicy(log, "docs", cfg.Security.CSP)
+	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler(cfg.Security.CSP)))
 
 	// Webhook endpoint (GitHub → HotPlex event-driven triggers)
 	if cfg.Webhook.Enabled && deps.CronScheduler != nil {
