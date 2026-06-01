@@ -477,7 +477,10 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		// Suppress debug log for sessions that never had any connection
 		// registered (e.g. cron/internal sessions). These events are expected
 		// to have no subscribers — logging every one is just noise.
-		if h.everHadConn[msg.Env.SessionID] {
+		h.mu.RLock()
+		hadConn := h.everHadConn[msg.Env.SessionID]
+		h.mu.RUnlock()
+		if hadConn {
 			h.log.Debug("gateway: event dropped, no connections",
 				"session_id", msg.Env.SessionID, "event_type", msg.Env.Event.Type)
 		}
