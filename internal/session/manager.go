@@ -539,8 +539,8 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		return ErrWorkerAttached
 	}
 
-	// Acquire pool quota outside m.mu — reduces m.mu hold time by ~50%.
-	if poolErr := m.pool.Acquire(userID); poolErr != nil {
+	// Acquire pool quota (slot + memory) in a single atomic operation.
+	if poolErr := m.pool.AcquireWithMemory(userID); poolErr != nil {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
 			m.log.Warn("session: attach rejected", "err", poolErr, "session_id", id)
@@ -550,14 +550,11 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 		if pe.Kind == poolErrKindUserQuotaExceeded {
 			return ErrUserQuotaExceeded
 		}
+		if pe.Kind == poolErrKindMemoryExceeded {
+			metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
+			return ErrMemoryExceeded
+		}
 		return ErrPoolExhausted
-	}
-
-	// RES-008: track per-user estimated memory (RLIMIT_AS=512MB per worker).
-	if err := m.pool.AcquireMemory(userID); err != nil {
-		m.pool.Release(userID) // rollback slot quota
-		metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
-		return ErrMemoryExceeded
 	}
 
 	// Re-validate under write lock (TOCTOU safety).
@@ -892,15 +889,15 @@ func (m *Manager) List(ctx context.Context, userID, platform string, limit, offs
 }
 
 // ListActive returns in-memory active sessions (no DB round-trip).
+// ms.info is a value-type struct; reading it under m.mu.RLock is safe because
+// m.mu serializes all writes to managedSession fields.
 func (m *Manager) ListActive() []*SessionInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	sessions := make([]*SessionInfo, 0, len(m.sessions))
 	for _, ms := range m.sessions {
-		ms.mu.RLock()
 		info := ms.info
-		ms.mu.RUnlock()
 		sessions = append(sessions, &info)
 	}
 	return sessions
@@ -953,17 +950,17 @@ func (m *Manager) ResetExpiry(ctx context.Context, id string) error {
 }
 
 // WorkerHealthStatuses returns a snapshot of health for all active worker processes.
+// ms.worker is assigned under m.mu+ms.mu in AttachWorker; reading it under
+// m.mu.RLock is safe because m.mu serializes writes to managedSession fields.
 func (m *Manager) WorkerHealthStatuses() []worker.WorkerHealth {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	statuses := make([]worker.WorkerHealth, 0, len(m.sessions))
 	for _, ms := range m.sessions {
-		ms.mu.RLock()
 		if ms.worker != nil {
 			statuses = append(statuses, ms.worker.Health())
 		}
-		ms.mu.RUnlock()
 	}
 	return statuses
 }
@@ -1123,15 +1120,36 @@ func (m *Manager) gc(ctx context.Context) {
 	})
 	_ = eg.Wait() // errors already logged inside goroutines
 
-	for _, id := range maxIds {
-		if err := m.TransitionWithReason(ctx, id, events.StateTerminated, "max_lifetime"); err != nil {
-			m.log.Warn("session: gc (max_lifetime) transition", "session_id", id, "err", err)
+	allIds := make([]string, 0, len(maxIds)+len(idleIds))
+	allIds = append(allIds, maxIds...)
+	allIds = append(allIds, idleIds...)
+	if len(allIds) > 0 {
+		eg2, egCtx2 := errgroup.WithContext(ctx)
+		eg2.SetLimit(5)
+		for _, id := range allIds {
+			id := id
+			eg2.Go(func() error {
+				reason := "max_lifetime"
+				// Check which list this ID came from for the correct reason
+				for _, mid := range maxIds {
+					if mid == id {
+						reason = "max_lifetime"
+						break
+					}
+				}
+				for _, iid := range idleIds {
+					if iid == id {
+						reason = "idle_timeout"
+						break
+					}
+				}
+				if err := m.TransitionWithReason(egCtx2, id, events.StateTerminated, reason); err != nil {
+					m.log.Warn("session: gc transition", "session_id", id, "reason", reason, "err", err)
+				}
+				return nil // don't propagate individual failures
+			})
 		}
-	}
-	for _, id := range idleIds {
-		if err := m.TransitionWithReason(ctx, id, events.StateTerminated, "idle_timeout"); err != nil {
-			m.log.Warn("session: gc (idle) transition", "session_id", id, "err", err)
-		}
+		_ = eg2.Wait()
 	}
 
 	// 3. Evict old TERMINATED sessions from in-memory map to prevent unbounded growth.
