@@ -16,7 +16,7 @@ var fileServer = http.FileServerFS(spaFS)
 //
 // Pass an empty string for csp to use DefaultWebChatCSP; pass a custom
 // directive when serving from a non-localhost host (e.g. reverse-prod on
-// http://10.102.78.2:9999). Whitespace-only csp is treated as empty.
+// http://192.168.1.100:9999). Whitespace-only csp is treated as empty.
 //
 // Routing strategy:
 //   - /_next/*  → static assets with aggressive cache headers (hashed filenames)

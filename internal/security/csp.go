@@ -8,7 +8,7 @@ import "strings"
 // It is intentionally permissive: connect-src uses the CSP scheme keywords
 // (http: / https: / ws: / wss:), which the browser interprets as "any host
 // over the matching scheme". This lets the SPA reach backends on remote IPs
-// (e.g. http://10.102.78.2:9999) without configuration — the explicit
+// (e.g. http://192.168.1.100:9999) without configuration — the explicit
 // trade-off the project chose between "out-of-the-box usability" and
 // "strict-but-needs-config". Production deployments should override this
 // with security.csp / HOTPLEX_SECURITY_CSP pinning the actual host(s).
