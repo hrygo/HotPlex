@@ -394,8 +394,7 @@ hotplex cron history <id|name> [--json]
 
 - 无 `api/` 目录（使用 JSON over WebSocket）
 - PostgreSQL 支持已实现（`db.driver: "postgres"`），SQLite 仍为默认
-- OpenCode CLI 适配器已移除（由 OCS 替代）
-- ACP 适配器已实现（JSON-RPC 2.0 over stdio，原 ACPX 已移除）
+- ACP 适配器已实现（JSON-RPC 2.0 over stdio）
 - Windows 自更新不支持（exe 运行时被锁，使用 `scripts/install.ps1` 替代）
 
 ### 跨平台支持
