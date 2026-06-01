@@ -494,7 +494,6 @@ type AppServerWorker struct {
 	commands  *ServerCommander
 	closed    bool
 	released  bool
-	started   bool
 	state     appState
 	sessionID string
 	conn      *appConn
