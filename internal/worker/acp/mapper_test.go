@@ -278,7 +278,8 @@ func TestMapPromptResponse_EndTurn(t *testing.T) {
 
 	done := envs[1].Event.Data.(events.DoneData)
 	require.True(t, done.Success)
-	require.Equal(t, 100, done.Stats["input_tokens"])
+	usage := done.Stats["usage"].(map[string]any)
+	require.Equal(t, 100, usage["input_tokens"])
 	require.Equal(t, "end_turn", done.Stats["stop_reason"])
 }
 

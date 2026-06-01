@@ -262,9 +262,15 @@ func TestBuildStats_IncludesUsageSnapshot(t *testing.T) {
 
 	require.Equal(t, 128000, stats["context_size"])
 	require.Equal(t, 25000, stats["context_used"])
-	cost, ok := stats["cost"].(*CostInfo)
+	// Cost stored as float64 ("total_cost_usd") for gateway compatibility.
+	require.InDelta(t, 0.42, stats["total_cost_usd"], 0.001)
+
+	// Token data nested in "usage" map (Claude Code format).
+	usage, ok := stats["usage"].(map[string]any)
 	require.True(t, ok)
-	require.InDelta(t, 0.42, cost.Amount, 0.001)
+	require.Equal(t, 100, usage["input_tokens"])
+	require.Equal(t, 50, usage["output_tokens"])
+	require.Equal(t, 150, usage["total_tokens"])
 }
 
 func TestBuildStats_NoUsageSnapshot(t *testing.T) {
@@ -278,7 +284,11 @@ func TestBuildStats_NoUsageSnapshot(t *testing.T) {
 
 	require.Nil(t, stats["context_size"])
 	require.Nil(t, stats["context_used"])
-	require.Nil(t, stats["cost"])
+	require.Nil(t, stats["total_cost_usd"])
+	// usage map still present with token data.
+	usage, ok := stats["usage"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 100, usage["input_tokens"])
 }
 
 // ─── MapNotification routes usage_update ──────────────────────────────────────
