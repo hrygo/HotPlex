@@ -360,6 +360,13 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		// fresh. This is safe because the old session key is orphaned: no worker
 		// holds a reference, and startOrResumeOnInUse will create a new session
 		// with the same deterministic key, effectively replacing the deleted one.
+		// TERMINATED sessions cannot be resumed because AttachWorker rejects
+		// non-active sessions (IsActive() returns false). Skip directly to
+		// fresh start to avoid wasting pool quota on doomed resume attempts.
+		if si.State == events.StateTerminated {
+			b.log.Info("bridge: orphan platform session terminated, starting fresh", "session_id", sessionID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
+		}
 		if si.State == events.StateDeleted {
 			b.log.Info("bridge: orphan platform session already deleted, starting fresh", "session_id", sessionID)
 			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
@@ -582,8 +589,24 @@ func isWorkerInUseError(err error) bool {
 // cancels the shutdown context to abort pending auto-retries,
 // then waits for all forwardEvents goroutines to complete or ctx to expire.
 func (b *Bridge) Shutdown(ctx context.Context) {
+	b.MarkClosed()
+	b.WaitForwarders(ctx)
+}
+
+// MarkClosed sets the closed flag and cancels the shutdown context so that:
+//   - New session creation (StartSession/resumeWithOpts) is rejected immediately.
+//   - handleWorkerExit skips crash recovery during shutdown.
+//   - Pending auto-retry goroutines are cancelled.
+//
+// Must be called BEFORE TerminateAllWorkers to prevent the race where an
+// in-flight message handler creates a worker that is immediately killed.
+func (b *Bridge) MarkClosed() {
 	b.closed.Store(true)
 	b.shutdownCancel()
+}
+
+// WaitForwarders waits for all forwardEvents goroutines to complete or ctx to expire.
+func (b *Bridge) WaitForwarders(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {
 		b.fwdWg.Wait()

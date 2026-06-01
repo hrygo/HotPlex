@@ -201,6 +201,13 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		fc.firstEvent = false
 	}
 
+	// New turn detection: state(running) marks the beginning of a new turn.
+	// Reset doneReceived so crash detection applies to this turn (prevents
+	// stale true from a previous turn masking a crash in the current turn).
+	if env.Event.Type == events.State {
+		fc.doneReceived = false
+	}
+
 	if fc.turnTimer != nil && !fc.turnTimerFired.Load() {
 		fc.turnTimer.Reset(b.turnTimeout)
 	}
@@ -265,7 +272,6 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if env.Event.Type == events.Done {
 		fc.turnText.Reset()
 		fc.turnStartTime = time.Now()
-		fc.doneReceived = false
 	}
 
 }
