@@ -9,9 +9,9 @@
 - [约定与规范](#约定与规范)
 - [项目结构](#项目结构)
 - [开发指南](#开发指南)
-- [快速开始](#快速开始)
+- [配置参考](#配置参考)
 - [命令参考](#命令参考)
-- [备注](#备注)
+- [附录](#附录)
 
 ---
 
@@ -51,7 +51,7 @@
 - **Seq 分配**: Per-session 原子单调计数器
 - **进程终止**: 3 层（SIGTERM → 等待 5s → SIGKILL）
 - **Detached Restart**: `--detached` fork 独立 PGID helper，60s 冷却期防循环（`pid.go: restartMarker`）
-- **Agent 配置**: B/C 双通道注入（通道结构、加载方式、fallback 规则见 [配置文件](#配置文件)）
+- **Agent 配置**: B/C 双通道注入（通道结构、加载方式、fallback 规则见 [配置参考](#配置参考)）
 - **元认知层**: `internal/agentconfig/META-COGNITION.md` 定义 Worker 的身份边界（不管理 Transport/状态/协议）、B/C 通道冲突隔离法则（directives 无条件覆盖 context）、配置替换的"命中即终止"机制、配置修改 SOP（禁止改全局来影响 Bot）
 - **XML 安全**: 强制开启 **XML Sanitizer**，对保留标签进行 HTML 转义预防注入
 - **Windows 注入**: 强制使用 **临时文件注入**（`--append-system-prompt-file`），严禁使用内联参数防止 cmd.exe 截断
@@ -220,9 +220,40 @@ configs/   - 配置文件
 
 ---
 
-## 快速开始
+## 配置参考
 
-**首次使用**：
+### 配置文件
+
+- Agent 配置目录：`~/.hotplex/agent-configs/`
+- **B 通道**（`<directives>`，无条件生效）：
+  - `<hotplex>` = `META-COGNITION.md`（go:embed，强制注入首位，不可排除）
+  - `<persona>` = `SOUL.md`
+  - `<rules>` = `AGENTS.md`
+  - `<skills>` = `SKILLS.md`
+- **C 通道**（`<context>`，可被 B 通道覆盖）：
+  - `<user>` = `USER.md`
+  - `<memory>` = `MEMORY.md`
+- 三级 fallback：全局 → 平台（slack/）→ Bot（slack/U12345/），每文件独立解析，命中即终止
+- 配置热更新：仅在 session 初始化或 `/reset` 时加载，运行中修改不立即生效
+
+### 配置陷阱（高发反直觉点）
+
+- **`.env` 来源**: `make dev` / `scripts/dev.sh:16-18` `source` 的是 **repo-local `<project>/.env`**，**不是** `~/.hotplex/.env`。后者是运行实例的 home 配置（PID/db/agent-configs 父目录），**不被 dev.sh 加载**。如要调整 dev 行为，编辑 `<project>/.env`；`~/.hotplex/.env` 仅供生产/服务安装路径使用。
+- **Worker 解析 5 级 fallback**（`internal/config/config.go:propagatePlatform` + `:937-940`）：
+  1. `bots[].worker_type`（per-bot YAML，单 bot 模式下不可用）
+  2. `feishu.worker_type`（YAML 平台级，dev → `configs/config-dev.yaml:47`，base → `configs/config.yaml:318`）
+  3. `HOTPLEX_MESSAGING_FEISHU_WORKER_TYPE`（env 平台级，`.env:74`，env 覆盖 YAML）
+  4. `messaging.worker_type`（YAML 共享默认，`configs/config.yaml:276`）
+  5. 编译默认 `claude_code`（`config.go:855`）
+- **`inject_exclude` 边界**（`internal/agentconfig/loader.go:106`）：5 个可排除文件 `SOUL.md` / `AGENTS.md` / `SKILLS.md` / `USER.md` / `MEMORY.md`；`META-COGNITION.md` 是 `go:embed` **强制注入首位，无法被排除**（Worker 身份边界）。3 级 fallback：bot > platform > global；nil 继承父级，`[]string{}` 显式清空。
+- **dev YAML vs home YAML**: `configs/config-dev.yaml` 通过 `inherits: config.yaml` 覆盖基础，是 dev-only 覆盖层；`~/.hotplex/config.yaml` 是运行实例配置（影响服务安装路径）。两者**独立**，不互通。
+
+---
+
+## 命令参考
+
+### 快速开始
+
 ```bash
 # 1. 环境配置
 cp configs/env.example .env
@@ -235,15 +266,11 @@ make quickstart  # check-tools + build + test-short
 make dev  # gateway + webchat
 ```
 
-**开发验证**：
+验证：
 ```bash
-make check   # 完整 CI: quality + build
+make check       # 完整 CI: quality + build
 make dev-status  # 查看运行服务
 ```
-
----
-
-## 命令参考
 
 ### 构建与质量
 
@@ -356,7 +383,7 @@ hotplex cron history <id|name> [--json]
 
 ---
 
-## 备注
+## 附录
 
 ### 符号链接
 
@@ -377,29 +404,3 @@ hotplex cron history <id|name> [--json]
 - **进程隔离**: POSIX (PGID) / Windows (Job Object)
 - **平台适配**: `*_unix.go` / `*_windows.go` build tags
 - **CI 要求**: 三平台必须通过测试
-
-### 配置文件
-
-- Agent 配置目录：`~/.hotplex/agent-configs/`
-- **B 通道**（`<directives>`，无条件生效）：
-  - `<hotplex>` = `META-COGNITION.md`（go:embed，强制注入首位，不可排除）
-  - `<persona>` = `SOUL.md`
-  - `<rules>` = `AGENTS.md`
-  - `<skills>` = `SKILLS.md`
-- **C 通道**（`<context>`，可被 B 通道覆盖）：
-  - `<user>` = `USER.md`
-  - `<memory>` = `MEMORY.md`
-- 三级 fallback：全局 → 平台（slack/）→ Bot（slack/U12345/），每文件独立解析，命中即终止
-- 配置热更新：仅在 session 初始化或 `/reset` 时加载，运行中修改不立即生效
-
-### 配置陷阱（高发反直觉点）
-
-- **`.env` 来源**: `make dev` / `scripts/dev.sh:16-18` `source` 的是 **repo-local `<project>/.env`**，**不是** `~/.hotplex/.env`。后者是运行实例的 home 配置（PID/db/agent-configs 父目录），**不被 dev.sh 加载**。如要调整 dev 行为，编辑 `<project>/.env`；`~/.hotplex/.env` 仅供生产/服务安装路径使用。
-- **Worker 解析 5 级 fallback**（`internal/config/config.go:propagatePlatform` + `:937-940`）：
-  1. `bots[].worker_type`（per-bot YAML，单 bot 模式下不可用）
-  2. `feishu.worker_type`（YAML 平台级，dev → `configs/config-dev.yaml:47`，base → `configs/config.yaml:318`）
-  3. `HOTPLEX_MESSAGING_FEISHU_WORKER_TYPE`（env 平台级，`.env:74`，env 覆盖 YAML）
-  4. `messaging.worker_type`（YAML 共享默认，`configs/config.yaml:276`）
-  5. 编译默认 `claude_code`（`config.go:855`）
-- **`inject_exclude` 边界**（`internal/agentconfig/loader.go:106`）：5 个可排除文件 `SOUL.md` / `AGENTS.md` / `SKILLS.md` / `USER.md` / `MEMORY.md`；`META-COGNITION.md` 是 `go:embed` **强制注入首位，无法被排除**（Worker 身份边界）。3 级 fallback：bot > platform > global；nil 继承父级，`[]string{}` 显式清空。
-- **dev YAML vs home YAML**: `configs/config-dev.yaml` 通过 `inherits: config.yaml` 覆盖基础，是 dev-only 覆盖层；`~/.hotplex/config.yaml` 是运行实例配置（影响服务安装路径）。两者**独立**，不互通。
