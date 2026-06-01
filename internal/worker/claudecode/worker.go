@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -116,7 +117,8 @@ type Worker struct {
 	// tempFiles tracks temp files created for --*-file flags (system prompt,
 	// MCP config). Cleaned up in Terminate. Using files avoids Windows cmd.exe
 	// mangling XML/JSON characters (<, >) in inline arguments.
-	tempFiles []string
+	tempFiles   []string
+	tempFilesMu sync.Mutex // protects tempFiles; separate from w.Mu to avoid deadlock in startLocked
 
 	// readLineFn reads the next line from stdout. If nil, readOutput uses
 	// proc.ReadLine. Inject a func for unit testing without a real process.
@@ -954,9 +956,9 @@ func (w *Worker) writeTempFile(prefix, content string) (string, error) {
 		_ = os.Remove(path)
 		return "", fmt.Errorf("close temp file: %w", err)
 	}
-	w.Mu.Lock()
+	w.tempFilesMu.Lock()
 	w.tempFiles = append(w.tempFiles, path)
-	w.Mu.Unlock()
+	w.tempFilesMu.Unlock()
 	return path, nil
 }
 
@@ -967,10 +969,10 @@ func (w *Worker) cleanupTempFiles() {
 	// Snapshot and clear the slice under w.Mu so a concurrent writeTempFile
 	// cannot append to a slice we are iterating, and so the field is left in
 	// a consistent nil state even if a file removal blocks.
-	w.Mu.Lock()
+	w.tempFilesMu.Lock()
 	files := w.tempFiles
 	w.tempFiles = nil
-	w.Mu.Unlock()
+	w.tempFilesMu.Unlock()
 	for _, path := range files {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			// Retry once after a short delay for Windows file-lock stragglers.
