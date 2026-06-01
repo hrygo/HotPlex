@@ -362,7 +362,7 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		// with the same deterministic key, effectively replacing the deleted one.
 		if si.State == events.StateDeleted {
 			b.log.Info("bridge: orphan platform session already deleted, starting fresh", "session_id", sessionID)
-			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
 		}
 		// If Resume fails (session files deleted or corrupted), fall back to Start.
 		b.log.Info("bridge: orphan platform session, resuming", "session_id", sessionID, "state", si.State)
