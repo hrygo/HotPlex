@@ -1,4 +1,4 @@
-package config
+package security
 
 import "strings"
 
@@ -30,25 +30,38 @@ const DefaultDocsCSP = "default-src 'self'; " +
 	"img-src 'self' data: blob:; " +
 	"font-src 'self' data: https://fonts.gstatic.com"
 
-// IsPermissiveCSP returns true when the directive is so broad that it grants
-// any-host access. Triggers:
+// ResolveCSP returns the effective CSP for a service. If override is empty
+// or contains only whitespace, defaultCSP is returned. Otherwise the trimmed
+// override is used verbatim. Centralising the resolution prevents a stray
+// space in YAML or env from shipping a malformed Content-Security-Policy
+// header that browsers reject (a silent breakage where the SPA stops
+// loading with no operator-visible warning).
+func ResolveCSP(defaultCSP, override string) string {
+	if s := strings.TrimSpace(override); s != "" {
+		return s
+	}
+	return defaultCSP
+}
+
+// IsPermissiveCSP reports whether directive grants any-host access via:
 //   - the bare wildcard "*" appearing as a source
 //   - any network-scheme-only keyword source ("http:", "https:", "ws:",
 //     "wss:") — these match every host over that scheme per CSP
 //     source-list semantics
-//   - any host-pattern ending in "://*" (e.g. "wss://*", "https://*") —
-//     the more explicit form of "all hosts over this scheme"
+//   - any host-pattern ending in "://*" (e.g. "wss://*", "https://*")
 //
-// Note: "data:" / "blob:" / "filesystem:" are intentionally NOT flagged.
-// They are non-network schemes used to allow inline resources (base64
-// images, blob URLs from the SPA itself) and are part of the safe baseline.
+// "data:" / "blob:" / "filesystem:" are intentionally NOT flagged — they
+// are non-network schemes used for inline resources (base64 images, blob
+// URLs from the SPA itself) and are part of the safe baseline.
 //
-// The intent is to surface "this CSP doesn't actually restrict anything" to
-// the operator via a startup log warning, not to make a precise security
-// judgment. False positives are acceptable; missing a wide-open config is not.
+// An empty directive is reported as not permissive: an empty policy is
+// the browser's default-deny posture, which is strictly stricter than
+// `*`. The "is the operator's value permissive?" check is a separate
+// concern from "is anything configured at all" — callers should branch
+// on override == "" themselves if they want the latter.
 func IsPermissiveCSP(directive string) bool {
 	if directive == "" {
-		return true
+		return false
 	}
 	for _, tok := range tokenizeCSP(directive) {
 		switch tok {
@@ -63,8 +76,8 @@ func IsPermissiveCSP(directive string) bool {
 	return false
 }
 
-// tokenizeCSP returns whitespace- and semicolon-separated tokens. It collapses
-// runs of delimiters so empty strings are never emitted.
+// tokenizeCSP returns whitespace- and semicolon-separated tokens. It
+// collapses runs of delimiters so empty strings are never emitted.
 func tokenizeCSP(directive string) []string {
 	out := make([]string, 0, 16)
 	start := -1

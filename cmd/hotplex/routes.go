@@ -12,6 +12,7 @@ import (
 	"github.com/hrygo/hotplex/internal/docs"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/security"
 )
 
 func setupRoutes(
@@ -177,7 +178,10 @@ func setupRoutes(
 	adminMux.HandleFunc("DELETE /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserDelete)
 
 	// Documentation
-	warnCSPLogPolicy(log, "docs", cfg.Security.CSP)
+	if resolved := security.ResolveCSP(security.DefaultDocsCSP, cfg.Security.CSP); security.IsPermissiveCSP(resolved) {
+		log.Warn("csp: docs policy is permissive (any http/https/ws/wss host allowed); set security.csp to restrict in production",
+			"service", "docs")
+	}
 	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler(cfg.Security.CSP)))
 
 	// Webhook endpoint (GitHub → HotPlex event-driven triggers)

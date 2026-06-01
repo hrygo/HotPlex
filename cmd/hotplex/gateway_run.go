@@ -454,8 +454,15 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	// Webchat SPA fallback
 	var rootHandler http.Handler = mux
 	if cfg.WebChat.Enabled {
+		// Warn at boot if the resolved webchat CSP is the package default
+		// (no operator override) or is itself permissive (any-host sources).
+		// ResolveCSP normalises whitespace-only overrides to the default, so
+		// a stray space cannot ship a malformed header silently.
+		if resolved := security.ResolveCSP(security.DefaultWebChatCSP, cfg.Security.CSP); security.IsPermissiveCSP(resolved) {
+			log.Warn("csp: webchat policy is permissive (any http/https/ws/wss host allowed); set security.csp to restrict in production",
+				"service", "webchat")
+		}
 		spa := webchat.Handler(cfg.Security.CSP)
-		warnCSPLogPolicy(log, "webchat", cfg.Security.CSP)
 		rootHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, pattern := mux.Handler(r)
 			if pattern != "" {

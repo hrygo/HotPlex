@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging/textutil"
 	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -203,51 +203,11 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if !ok {
 		return nil
 	}
-	if env.Event.Type == events.MessageDelta && shouldAppendNewlineAfterDelta(text) {
+	if env.Event.Type == events.MessageDelta && textutil.EndsWithSentenceTerminator(text) {
 		text += "\n"
 	}
 	text = StripInvalidImageKeys(text)
 	return c.writeContent(ctx, env, text)
-}
-
-// shouldAppendNewlineAfterDelta reports whether a streaming MessageDelta
-// should be followed by a single \n to keep adjacent delta chunks visually
-// separated in the Feishu card. It returns true when the chunk ends on a
-// sentence terminator — ASCII (. ? !) or CJK fullwidth (。 ？ !) — including
-// a trailing half-width punctuation cluster (e.g. "!?", "!?", "!!");
-// intermediate chunks (which often split mid-word for CJK content) get no
-// separator.
-//
-// Hot-path optimization: we never build a []rune view of the whole chunk —
-// every MessageDelta goes through this, and chunks can be hundreds of
-// runes. The terminator check is constant-time:
-//  1. Look at the last byte. If it is '.', '?', or '!', we have a strong
-//     hint, but the byte before may already be a terminator (e.g. "?!" or
-//     "!?") so we must not double-look — accept it and return true.
-//  2. If the last byte is 0x82 it might be the trailing byte of U+3002,
-//     U+FF1F, or U+FF01 (all share the same 3-byte UTF-8 tail). Decode
-//     just that one rune and look it up.
-//  3. Otherwise: not a terminator.
-func shouldAppendNewlineAfterDelta(text string) bool {
-	if text == "" {
-		return false
-	}
-	last := text[len(text)-1]
-	// ASCII terminators. Each byte is unique to a single terminator, so a
-	// single-byte check suffices. The "?!" / "!?" / "!!" / "??" clusters
-	// all end on one of these bytes — and we only care that the *trailing*
-	// position is a terminator, not whether the cluster is "single" or
-	// "doubled", so we accept immediately.
-	if last == '.' || last == '?' || last == '!' {
-		return true
-	}
-	// Non-ASCII trailing byte: decode the last rune and check against the
-	// CJK fullwidth terminator set. Note that '。' (0x82), '？' (0x9F),
-	// '！' (0x81) have DIFFERENT trailing bytes — they do NOT share a
-	// byte, so the earlier "0x82 fast path" optimization is incorrect
-	// and we must always decode the rune.
-	r, _ := utf8.DecodeLastRuneInString(text)
-	return r == '。' || r == '？' || r == '！'
 }
 
 func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error {
