@@ -1,6 +1,6 @@
 ---
 name: hotplex-update
-description: 需要更新 HotPlex 二进制时使用此 skill。当你说"更新 hotplex"、"部署新版本"、"重启服务"、"安装最新构建"、"升级二进制"、"回滚版本"时触发。也适用于构建后部署、git pull 后更新、服务升级失败恢复等场景。提供完整工作流：构建、安装、服务重启、验证、错误处理和回滚机制。支持用户级和系统级服务，跨平台兼容（Linux/macOS/Windows）。
+description: HotPlex 二进制更新。完整工作流：构建 → 安装 → 服务重启 → 验证 → 错误处理和回滚机制。支持用户级和系统级服务，跨平台兼容（Linux/macOS/Windows）。
 ---
 
 # HotPlex 更新与服务重启工作流

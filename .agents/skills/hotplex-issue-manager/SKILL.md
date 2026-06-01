@@ -1,6 +1,6 @@
 ---
 name: hotplex-issue-manager
-description: "HotPlex issue 批量管理与合并 PR 交付。当需要管理 HotPlex issues、排列优先级、规划批量修复、批量实施多个相关 issue、将多个修复合并到一个 PR、计算 issue 优先级 ROI、或减少合并冲突和审查开销时触发此 skill。即使只说「处理一下 issues」「看看 open issues」「修几个 bug」「批量修复」「issue 优先级」「把这几个 issue 一起做了」也应触发。此 skill 将分散的 GitHub issues 转化为一个合并 PR — 这是对传统一个-issue-一个-PR 工作流的刻意替代，后者经常导致合并冲突和审查疲劳。"
+description: HotPlex issue 批量管理与合并 PR 交付。将分散的 GitHub issues 转化为一个合并 PR——对传统一个-issue-一个-PR 工作流的刻意替代，减少合并冲突和审查疲劳。覆盖 issue 优先级排列、批量修复规划与实施、ROI 计算。
 compatibility: Requires gh CLI, Go 1.26+, golangci-lint, make
 ---
 

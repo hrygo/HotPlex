@@ -1,6 +1,6 @@
 ---
 name: hotplex-arch-analyzer
-description: HotPlex 架构深度审计 — 架构分析、SOLID/DRY 合规、并发安全、性能优化、安全扫描、存量 issue 审计与清理。自动创建 GitHub Issue，支持 /loop 循环执行。当提到架构分析、代码质量、性能优化、瓶颈定位、锁竞争、热路径优化时使用。
+description: HotPlex 架构深度审计。覆盖架构分析、SOLID/DRY 合规、并发安全、性能优化、安全扫描、存量 issue 审计与清理。自动创建 GitHub Issue，支持 `/loop` 循环执行。**核心流程**：选定模块 → 静态分析 → 产出结构化发现 → 自动建 issue → 闭环修复。
 ---
 
 # 架构深度分析器

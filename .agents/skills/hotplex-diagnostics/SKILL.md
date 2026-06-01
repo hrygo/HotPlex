@@ -1,6 +1,6 @@
 ---
 name: hotplex-diagnostics
-description: HotPlex Gateway 运行时诊断 — 从症状逐层缩小范围到根因。当用户提到 hotplex 进程状态、日志分析、worker 崩溃、响应慢、session 异常、反馈中断、任务卡住、没有输出了、streaming 卡住时使用此 skill。用户主动请求健康检查、上线前验证、或发现 Gateway/Worker/适配器异常时也适用。此 skill 的独特价值在于：理解反馈链路架构，能通过时间线交叉验证检测静默中断（Worker 在跑但用户端无更新），并分类根因是管道阻塞、背压丢弃、适配器故障还是客户端断连。跨平台支持 Linux/macOS/Windows。
+description: HotPlex Gateway 运行时诊断。从症状逐层缩小到根因：进程状态、日志分析、worker 崩溃、响应慢、session 异常、streaming 卡住、反馈中断（Worker 在跑但用户端无更新）。理解反馈链路架构，能通过时间线交叉验证检测静默中断，分类根因为管道阻塞/背压丢弃/适配器故障/客户端断连。跨平台支持 Linux/macOS/Windows。
 ---
 
 # HotPlex 运行时诊断
