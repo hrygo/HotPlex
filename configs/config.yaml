@@ -123,7 +123,7 @@ security:
   # A startup WARN log fires when this default is in effect to flag the
   # production exposure. Pin a strict directive to silence the warning and
   # restrict the SPA, e.g.:
-  #   csp: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://10.102.78.2:9999 ws://10.102.78.2:9999 wss://*; img-src 'self' data: blob:; font-src 'self' data:"
+  #   csp: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://192.168.1.100:9999 ws://192.168.1.100:9999 wss://*; img-src 'self' data: blob:; font-src 'self' data:"
   # Can be overridden at runtime by HOTPLEX_SECURITY_CSP env var.
   csp: ""
 

@@ -52,7 +52,7 @@ func TestIsPermissiveCSP(t *testing.T) {
 		{"data: is not permissive", "img-src 'self' data: blob:", false},
 		{"blob: is not permissive", "img-src 'self' blob:", false},
 		{"default real_example_strict unchanged", "default-src 'self'; script-src 'self' 'unsafe-inline'; " +
-			"style-src 'self' 'unsafe-inline'; connect-src 'self' http://10.102.78.2:9999", false},
+			"style-src 'self' 'unsafe-inline'; connect-src 'self' http://192.168.1.100:9999", false},
 		{"real_example_permissive trips", "default-src 'self'; connect-src 'self' http: wss://*", true},
 	}
 	for _, tt := range cases {
