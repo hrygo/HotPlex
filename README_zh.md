@@ -187,7 +187,7 @@ func main() {
 | :-------------------------- | :--------------------------- | :---------------------------------- |
 | `agent_config.enabled`      | `true`                       | 启用 Agent 人格/上下文注入          |
 | `tts.enabled`               | `true`                       | 启用 Edge-TTS 语音回传流水线（语音输入到语音输出） |
-| `brain.enabled`             | `false`                      | 启用 Brain LLM 编排层（需 API Key） |
+| `brain.enabled`             | `false`                      | 启用 Brain LLM 编排层（自动从 Worker 配置文件查找 API Key） |
 | `webchat.enabled`           | `true`                       | 从网关提供嵌入式 Web Chat SPA       |
 | `worker.auto_retry.enabled` | `true`                       | LLM 智能重试，支持指数退避          |
 | `gateway.addr`              | `localhost:8888`             | WebSocket 网关地址                  |

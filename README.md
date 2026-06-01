@@ -187,7 +187,7 @@ func main() {
 | :-------------------------- | :--------------------------- | :--------------------------------------------- |
 | `agent_config.enabled`      | `true`                       | Enable agent personality/context injection     |
 | `tts.enabled`               | `true`                       | Enable Edge-TTS voice reply (voice-in → voice-out) |
-| `brain.enabled`             | `false`                      | Enable Brain LLM orchestration (requires key)  |
+| `brain.enabled`             | `false`                      | Enable Brain LLM orchestration (auto-discovers keys from worker configs)  |
 | `webchat.enabled`           | `true`                       | Serve embedded webchat SPA from gateway        |
 | `worker.auto_retry.enabled` | `true`                       | Intelligent LLM retry with exponential backoff |
 | `gateway.addr`              | `localhost:8888`             | WebSocket gateway address                      |
