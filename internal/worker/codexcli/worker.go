@@ -542,6 +542,9 @@ func (w *AppServerWorker) MaxTurns() int           { return 0 }
 func (w *AppServerWorker) Modalities() []string    { return []string{"text", "code", "image"} }
 
 func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
+	if w.commands == nil {
+		return nil, fmt.Errorf("codexcli: not started")
+	}
 	return w.commands.SendControlRequest(ctx, subtype, body)
 }
 

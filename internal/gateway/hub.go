@@ -496,8 +496,9 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		if conn.PreferEnvelope() {
 			// Platform connections need the original envelope to preserve
 			// json:"-" fields (e.g. OwnerID) that EncodeJSON omits.
-			// Use Background() so cancelled h.ctx doesn't block during shutdown drain.
-			err = conn.RouteWrite(context.Background(), msg.Env)
+			// Use WithoutCancel so cancelled h.ctx doesn't block during
+			// shutdown drain, while preserving tracing propagation.
+			err = conn.RouteWrite(context.WithoutCancel(h.ctx), msg.Env)
 		} else {
 			err = conn.RouteWriteData(data, msg.Env.Event.Type)
 		}

@@ -536,13 +536,13 @@ func (w *Worker) Terminate(ctx context.Context) error {
 	// Not all ACP agents support session/cancel; use a short timeout
 	// so a failed Cancel doesn't eat into the SIGTERM grace period.
 	if w.client != nil {
-		cancelCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		cancelCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = w.client.Cancel(cancelCtx, w.GetWorkerSessionID())
 		cancel()
 
 		select {
 		case <-w.client.Done():
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(2 * time.Second):
 		}
 	}
 

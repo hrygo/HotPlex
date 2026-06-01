@@ -1,11 +1,11 @@
 # Spec: Agent Config Injection Control
 
-> **Design-only** — this document describes a planned feature (`inject_exclude`).
-> The code changes are not yet implemented. Tracked in GitHub issue #594.
+> **Implemented** — the `inject_exclude` feature described below was implemented in PR#603.
+> This document now serves as the design reference.
 
 | 字段     | 值                                          |
 |----------|---------------------------------------------|
-| 状态     | Draft                                       |
+| 状态     | Implemented                                  |
 | 日期     | 2026-05-31                                  |
 | 作者     | 黄飞虹                                      |
 | 影响模块 | `internal/agentconfig`, `internal/config`, `internal/gateway`, `cmd/hotplex` |

@@ -221,11 +221,7 @@ func codexFileChangeToToolCall(item *CodexItem) (string, map[string]any) {
 		paths = append(paths, fp)
 	}
 	slices.Sort(paths)
-	fp := ""
-	if len(paths) > 0 {
-		fp = paths[0]
-	}
-	return name, map[string]any{"file_path": fp}
+	return name, map[string]any{"file_path": strings.Join(paths, ", ")}
 }
 
 func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {
@@ -570,9 +566,10 @@ func (m *Mapper) mapNotifDiffUpdated(params json.RawMessage) []*events.Envelope 
 		return nil
 	}
 	return []*events.Envelope{
-		newEnvelope(events.ToolResult, events.ToolResultData{
-			ID:     p.ItemID,
-			Output: p.Lines,
+		newEnvelope(events.ToolUpdate, events.ToolUpdateData{
+			ID:      p.ItemID,
+			Status:  "in_progress",
+			Content: p.Lines,
 		}, m.sessionID, m.nextSeq()),
 	}
 }
