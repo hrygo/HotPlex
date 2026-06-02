@@ -83,10 +83,9 @@ public class QuickStart {
 
             client.on("error", (ErrorData data) -> {
                 if (data != null) {
-                    System.err.println("\n❌ Error: " + data.getCode() + " - " + data.getMessage());
+                    System.err.println("\n❌ Error: " + data.getCode().getValue() + " - " + data.getMessage());
                 }
                 doneLatch.countDown();
-                System.exit(1);
             });
 
             client.on("disconnected", (String reason) -> {

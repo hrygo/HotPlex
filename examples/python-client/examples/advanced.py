@@ -32,6 +32,7 @@ from hotplex_client.types import (
 
 # Configure logging for internal client debugging if needed
 logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
 console = Console()
 
 class HotPlexAdvancedDemo:

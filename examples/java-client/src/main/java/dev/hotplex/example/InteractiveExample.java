@@ -39,51 +39,50 @@ public class InteractiveExample {
         String botId = System.getenv("HOTPLEX_BOT_ID");
 
         // Create client
-        HotPlexClient client = HotPlexClient.builder()
+        try (HotPlexClient client = HotPlexClient.builder()
                 .url(gatewayUrl)
                 .workerType("claude-code")
                 .apiKey(apiKey)
                 .botId(botId)
-                .build();
+                .build()) {
 
-        // Setup event handlers
-        setupEventHandlers(client);
+            // Setup event handlers
+            setupEventHandlers(client);
 
-        // Connect
-        System.out.println("Connecting to " + gatewayUrl + "...");
-        InitAckData ack = client.connect().get(10, TimeUnit.SECONDS);
-        System.out.println("✅ Connected!");
-        System.out.println("   Session ID: " + ack.getSessionId());
-        System.out.println("   State: " + ack.getState() + "\n");
+            // Connect
+            System.out.println("Connecting to " + gatewayUrl + "...");
+            InitAckData ack = client.connect().get(10, TimeUnit.SECONDS);
+            System.out.println("✅ Connected!");
+            System.out.println("   Session ID: " + ack.getSessionId());
+            System.out.println("   State: " + ack.getState() + "\n");
 
-        // Interactive mode
-        try (Scanner scanner = new Scanner(System.in)) {
-            while (true) {
-                System.out.print("\n> ");
-                String input = scanner.nextLine().trim();
+            // Interactive mode
+            try (Scanner scanner = new Scanner(System.in)) {
+                while (true) {
+                    System.out.print("\n> ");
+                    String input = scanner.nextLine().trim();
 
-                if (input.isEmpty()) {
-                    continue;
-                }
-
-                if (input.startsWith("/")) {
-                    // Handle commands
-                    String command = input.toLowerCase();
-
-                    if (command.equals("/quit")) {
-                        System.out.println("Goodbye!");
-                        client.disconnect();
-                        return;
-                    } else if (command.equals("/status")) {
-                        System.out.println("Session ID: " + client.getSessionId());
-                        System.out.println("Connected: " + client.isConnected());
-                        System.out.println("State: " + client.getState());
-                    } else {
-                        System.out.println("Unknown command: " + input);
+                    if (input.isEmpty()) {
+                        continue;
                     }
-                } else {
-                    // Send as input and wait for response
-                    sendAndWait(client, input);
+
+                    if (input.startsWith("/")) {
+                        String command = input.toLowerCase();
+
+                        if (command.equals("/quit")) {
+                            System.out.println("Goodbye!");
+                            client.disconnect();
+                            return;
+                        } else if (command.equals("/status")) {
+                            System.out.println("Session ID: " + client.getSessionId());
+                            System.out.println("Connected: " + client.isConnected());
+                            System.out.println("State: " + client.getState());
+                        } else {
+                            System.out.println("Unknown command: " + input);
+                        }
+                    } else {
+                        sendAndWait(client, input);
+                    }
                 }
             }
         }
