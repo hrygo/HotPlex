@@ -5,10 +5,26 @@
  * using X-API-Key header for authentication.
  */
 
-import { httpBase, apiKey } from "@/lib/config";
+import { httpBase, apiKey, isSameOrigin } from "@/lib/config";
 
 const BASE = httpBase();
-const AUTH_HEADER = { 'X-API-Key': apiKey };
+
+// Build auth options: same-origin uses cookie auth (credentials: same-origin),
+// cross-origin deployments continue using X-API-Key header.
+function authHeaders(): Record<string, string> {
+  if (isSameOrigin()) return {};
+  return apiKey ? { 'X-API-Key': apiKey } : {};
+}
+
+function authOpts(): RequestInit {
+  if (isSameOrigin()) return { credentials: 'same-origin' as RequestCredentials };
+  return {};
+}
+
+// Merge auth headers with custom headers.
+function withAuth(headers?: Record<string, string>): Record<string, string> {
+  return { ...authHeaders(), ...headers };
+}
 
 export interface SessionInfo {
   id: string;
@@ -82,7 +98,7 @@ function throwIfAuthError(prefix: string, status: number): never | void {
 export async function listSessions(limit = 20, offset = 0, signal?: AbortSignal): Promise<ListSessionsResponse> {
   const res = await fetch(
     `${BASE}/api/sessions?limit=${limit}&offset=${offset}`,
-    { headers: { ...AUTH_HEADER, 'Content-Type': 'application/json' }, signal }
+    { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
   throwIfAuthError('listSessions', res.status);
   if (!res.ok) throw new Error(`listSessions failed: ${res.status}`);
@@ -101,7 +117,7 @@ export async function createSession(opts: CreateSessionOptions, signal?: AbortSi
   if (opts.workDir) {
     url += `&work_dir=${encodeURIComponent(opts.workDir)}`;
   }
-  const res = await fetch(url, { method: 'POST', headers: AUTH_HEADER, signal });
+  const res = await fetch(url, { method: 'POST', headers: authHeaders(), ...authOpts(), signal });
   throwIfAuthError('createSession', res.status);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
@@ -113,7 +129,7 @@ export async function createSession(opts: CreateSessionOptions, signal?: AbortSi
 export async function deleteSession(id: string, signal?: AbortSignal): Promise<void> {
   const res = await fetch(
     `${BASE}/api/sessions/${id}`,
-    { method: 'DELETE', headers: AUTH_HEADER, signal }
+    { method: 'DELETE', headers: authHeaders(), ...authOpts(), signal }
   );
   throwIfAuthError('deleteSession', res.status);
   if (!res.ok) throw new Error(`deleteSession failed: ${res.status}`);
@@ -131,7 +147,7 @@ export async function getSessionHistory(
   if (options?.beforeId) {
     url += `&before_id=${options.beforeId}`;
   }
-  const res = await fetch(url, { headers: { ...AUTH_HEADER, 'Content-Type': 'application/json' }, signal: options?.signal });
+  const res = await fetch(url, { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal: options?.signal });
   throwIfAuthError('getSessionHistory', res.status);
   if (!res.ok) throw new Error(`getSessionHistory failed: ${res.status}`);
   return res.json();

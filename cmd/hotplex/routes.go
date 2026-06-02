@@ -62,7 +62,7 @@ func setupRoutes(
 	mux.HandleFunc("OPTIONS /api/sessions/{id}/history", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("OPTIONS /api/sessions/{id}/events", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
 
-	mux.Handle("GET /ws", hub.HandleHTTP(auth, handler, bridge))
+	mux.Handle("GET /ws", hub.HandleHTTP(auth, handler, bridge, deps.CookieAuth))
 
 	sessionAdapter := &sessionManagerAdapter{sm: sm}
 	hubAdapter := &hubAdapter{hub: hub}

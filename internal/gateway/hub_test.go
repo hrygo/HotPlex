@@ -1041,7 +1041,7 @@ func TestHub_HandleHTTP_Success(t *testing.T) {
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1072,7 +1072,7 @@ func TestHub_HandleHTTP_DeferredAuth(t *testing.T) {
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1095,7 +1095,7 @@ func TestHub_HandleHTTP_WithSessionID(t *testing.T) {
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1127,7 +1127,7 @@ func TestHub_HandleHTTP_GeneratesSessionID(t *testing.T) {
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1160,7 +1160,7 @@ func TestHub_HandleHTTP_RejectsInvalidAPIKey(t *testing.T) {
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 

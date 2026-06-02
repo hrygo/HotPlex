@@ -18,13 +18,16 @@ var fileServer = http.FileServerFS(spaFS)
 // directive when serving from a non-localhost host (e.g. reverse-prod on
 // http://192.168.1.100:9999). Whitespace-only csp is treated as empty.
 //
+// cookieAuth, when non-nil, enables automatic HMAC cookie issuance on the
+// SPA fallback path (index.html). Static assets (/_next/*) skip cookie handling.
+//
 // Routing strategy:
 //   - /_next/*  → static assets with aggressive cache headers (hashed filenames)
 //   - exact file match (favicon, robots.txt) → serve directly
 //   - everything else → fallback to index.html (client-side routing)
 //
 // Must be registered last on the ServeMux so explicit API/WS routes take priority.
-func Handler(csp string) http.Handler {
+func Handler(csp string, cookieAuth *security.CookieAuth) http.Handler {
 	return security.SecurityHeaders(security.DefaultWebChatCSP, csp, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -68,6 +71,10 @@ func Handler(csp string) http.Handler {
 		}
 
 		// SPA fallback: serve index.html for all non-file paths.
+		// Issue a cookie if cookieAuth is configured and request lacks a valid one.
+		if cookieAuth != nil {
+			_ = cookieAuth.SetCookie(w, r, "webchat_user")
+		}
 		w.Header().Set("Cache-Control", "no-cache")
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)

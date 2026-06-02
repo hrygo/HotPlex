@@ -371,6 +371,7 @@ func (h *Hub) HandleHTTP(
 	auth *security.Authenticator,
 	handler *Handler,
 	bridge *Bridge,
+	cookieAuth *security.CookieAuth,
 ) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -388,6 +389,14 @@ func (h *Hub) HandleHTTP(
 			}
 			userID = uid
 			botID = security.BotIDFromRequest(r)
+		} else if cookieAuth != nil {
+			// No API key — try cookie auth before deferring to init envelope.
+			if uid, ok := cookieAuth.Authenticate(r); ok {
+				userID = uid
+				botID = security.BotIDFromRequest(r)
+			} else {
+				pendingAuth = true
+			}
 		} else {
 			// No key at HTTP level — defer to init envelope auth (browser WS clients).
 			pendingAuth = true
