@@ -1,8 +1,10 @@
 /**
  * Gateway API client for session management.
  *
- * These endpoints are on the same port as WebSocket (gateway :8888),
- * using X-API-Key header for authentication.
+ * These endpoints are on the same port as WebSocket (gateway :8888).
+ * Authentication strategy:
+ *   - Same-origin (embedded webchat): credentials: 'same-origin' (cookie auth)
+ *   - Cross-origin (external deployment): X-API-Key header
  */
 
 import { httpBase, apiKey, isSameOrigin } from "@/lib/config";
