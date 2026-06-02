@@ -10,7 +10,7 @@ description: 面向第三方开发者，从快速上手到高级特性，完整�
 
 ```javascript
 // 1. 连接
-const ws = new WebSocket('ws://localhost:8080/ws');
+const ws = new WebSocket('ws://localhost:8888/ws');
 
 ws.onopen = () => {
   // 2. 握手（必须作为第一帧）
@@ -105,15 +105,16 @@ function sendInput(text) {
 }
 ```
 
-| 字段         | 说明                                   |
-| ------------ | -------------------------------------- |
-| `version`    | 固定 `"aep/v1"`                        |
-| `id`         | 消息唯一 ID，任意 UUID 即可            |
-| `session_id` | 会话 ID（见下方 Session 章节）         |
-| `seq`        | 序列号，客户端发 `0`，Gateway 自动分配 |
-| `timestamp`  | Unix 毫秒时间戳                        |
-| `event.type` | 消息类型                               |
-| `event.data` | 消息载荷                               |
+| 字段         | 说明                                                            |
+| ------------ | --------------------------------------------------------------- |
+| `version`    | 固定 `"aep/v1"`                                                 |
+| `id`         | 消息唯一 ID，任意 UUID 即可                                     |
+| `session_id` | 会话 ID（见下方 Session 章节）                                  |
+| `seq`        | 序列号，客户端发 `0`，Gateway 自动分配                          |
+| `priority`   | 可选。`"control"` 绕过背压，`"data"`（默认）受背压约束          |
+| `timestamp`  | Unix 毫秒时间戳                                                 |
+| `event.type` | 消息类型                                                        |
+| `event.data` | 消息载荷                                                        |
 
 ### 一次完整对话的流程
 
@@ -155,17 +156,25 @@ ws://<host>:<port>/ws
 
 #### API Key — 简单快速，适合单用户/内部服务
 
-在 HTTP Header 中携带：
+三种传递方式（优先级从高到低）：
+
+1. **HTTP Header `X-API-Key`**（推荐，非浏览器客户端）：
 
 ```bash
 curl -i --no-buffer \
   -H "X-API-Key: your-api-key" \
   -H "Upgrade: websocket" \
   -H "Connection: Upgrade" \
-  http://localhost:8080/ws
+  http://localhost:8888/ws
 ```
 
-浏览器无法自定义 WS Header，可在 init 信封中携带：
+2. **Query 参数 `api_key`**（简单场景）：
+
+```
+ws://localhost:8888/ws?api_key=your-api-key
+```
+
+3. **Init 信封延迟认证**（浏览器客户端，无法自定义 Header 时）：
 
 ```json
 {
@@ -210,21 +219,21 @@ curl -i --no-buffer \
   -H "X-Bot-ID: B12345" \
   -H "Upgrade: websocket" \
   -H "Connection: Upgrade" \
-  http://localhost:8080/ws
+  http://localhost:8888/ws
 ```
 
 对于需要区分用户身份的多用户场景，可通过 `security.SetKeyResolver()` 设置自定义的 `APIKeyResolver`，将 API Key 映射到不同的 userID，实现用户级会话隔离。
 
+> **注意**：用户隔离和 Bot 隔离是**两个独立维度**。`APIKeyResolver` 控制 userID（影响 session key 派生），Bot ID 控制 bot 配置路由。两者可以独立使用或组合使用。
+
 #### 如何选择
 
-|          | 仅 API Key                   | API Key + Bot ID           |
-| -------- | ---------------------------- | -------------------------- |
-| 用户身份 | 全部为 `api_user`（共享）     | 通过 `APIKeyResolver` 映射 |
-| Bot 隔离 | 无                           | 按 Bot ID 隔离             |
-| 会话隔离 | 无用户级隔离                 | 按 resolver 映射的 userID  |
-| 适用场景 | 单用户/内部测试              | 多 Bot / 多用户 SaaS       |
-
-> **多 Bot/多用户场景应使用 Bot ID + APIKeyResolver**。纯 API Key 认证下所有请求共享 `api_user` 身份，无法区分用户或 Bot。
+| 场景 | 配置 | 用户身份 | Bot 隔离 |
+| ---- | ---- | -------- | -------- |
+| 单用户 / 内部测试 | 仅 API Key | 全部 `api_user`（共享） | 无 |
+| 多用户 SaaS | API Key + `APIKeyResolver` | 不同 key → 不同 userID | 无 |
+| 多 Bot 单用户 | API Key + Bot ID | 全部 `api_user`（共享） | 按 Bot ID 隔离 |
+| 多 Bot 多用户 | API Key + `APIKeyResolver` + Bot ID | 不同 key → 不同 userID | 按 Bot ID 隔离 |
 
 ---
 
@@ -294,8 +303,12 @@ const tabId = `sess_${crypto.randomUUID()}`;
 
 ```
 CREATED ──► RUNNING ──► IDLE ──► TERMINATED ──► DELETED
-   │                    ▲  ▲         ▲
-   └── Worker 启动 ────┘  └── resume ┘
+   │  │         │  ▲  ▲  │         ▲
+   │  └──── ────┘  │  └── resume ─┘
+   │         │      │      └── TERMINATED → RUNNING (reconnect)
+   │         │      └── RUNNING/IDLE → DELETED (直接删除)
+   └── Worker 启动
+       (CREATED 也可直接 → TERMINATED)
 ```
 
 | 状态         | 含义                  | 能发消息吗               |
@@ -315,6 +328,8 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 | Worker 仍存活     | **Fast Reconnect** — 直接复用，零延迟 |
 | idle / terminated | Resume — 恢复对话历史                 |
 | Resume 失败       | 降级创建新会话                        |
+
+> **GC 自动回收**：空闲超过 60 分钟的 session 会被 GC 回收（idle → terminated），最长存活 7 天（可配置）。Worker 僵死（30 分钟无 IO）也会被回收为 terminated。
 
 ---
 
@@ -340,11 +355,11 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 
 > `session_id` 和 `seq` 由 Gateway 覆盖，客户端填空字符串或 `0` 即可。
 
-**限制**：Session 必须处于 Active 状态（running / idle），否则返回 `SESSION_BUSY` 错误。
+**限制**：Session 必须处于 Active 状态（created / running / idle），非 Active 状态下发送 input 返回 `SESSION_BUSY` 或 `SESSION_TERMINATED` 错误。
 
 ### 接收流式响应
 
-一个完整 Turn 的事件序列：
+一个完整 Turn 的事件序列（理想模型）：
 
 ```
 message.start     ← 开始输出
@@ -353,6 +368,8 @@ message.end       ← 结束输出
 message           ← 完整文本聚合
 done              ← Turn 终止符
 ```
+
+> **注意**：实际事件序列因 Worker 类型而异。ClaudeCode Worker 只产出 `message.delta` + `done`；CodexCLI Worker 产出 `message.start` + `message.delta` + `message.end` + `done`。客户端应兼容处理，不依赖特定事件的出现。
 
 #### message.delta — 增量文本
 
@@ -388,13 +405,15 @@ done              ← Turn 终止符
     "data": {
       "id": "msg_1",
       "role": "assistant",
-      "content": "根据代码分析，主要瓶颈在..."
+      "content": "根据代码分析，主要瓶颈在...",
+      "content_type": "text",
+      "metadata": {}
     }
   }
 }
 ```
 
-Turn 结束时发送，包含完整的回复文本。**如果 delta 被丢弃，以 message 为准。**
+`content_type` 和 `metadata` 为可选字段。**如果 delta 被丢弃，以 message 为准。**
 
 #### done — Turn 结束
 
@@ -405,8 +424,22 @@ Turn 结束时发送，包含完整的回复文本。**如果 delta 被丢弃，
     "data": {
       "success": true,
       "stats": {
-        "total_tokens": 1500,
-        "duration_ms": 3200
+        "usage": {
+          "input_tokens": 1234,
+          "cache_read_input_tokens": 78,
+          "output_tokens": 90
+        },
+        "total_cost_usd": 0.012,
+        "_session": {
+          "turn_count": 5,
+          "tool_call_count": 12,
+          "duration_seconds": 754.5,
+          "total_input_tok": 50000,
+          "total_output_tok": 15000,
+          "context_pct": 15.0,
+          "total_cost_usd": 0.12,
+          "model_name": "Sonnet"
+        }
       }
     }
   }
@@ -415,16 +448,24 @@ Turn 结束时发送，包含完整的回复文本。**如果 delta 被丢弃，
 
 收到 `done` 后可以发送下一条 input。如果期间有 delta 被丢弃，`dropped` 字段为 `true`。
 
+> **stats 结构**：`stats` 包含两部分 —— Worker 原始统计（`usage`、`total_cost_usd` 等）和 Gateway 注入的 `_session` 累计统计。不同 Worker 类型的原始 stats 字段可能不同，但 `_session` 格式统一。
+
 ### 辅助事件
 
 Worker 执行过程中还可能产生：
 
-| 事件          | 说明                           | 何时出现                    |
-| ------------- | ------------------------------ | --------------------------- |
-| `tool_call`   | 调用工具（读文件、执行命令等） | Worker 使用工具时           |
-| `tool_result` | 工具执行结果                   | 工具完成后                  |
-| `reasoning`   | 推理过程                       | Worker 思考时（取决于配置） |
-| `step`        | 执行步骤                       | Worker 分步执行时           |
+| 事件               | 说明                           | 何时出现                      |
+| ------------------ | ------------------------------ | ----------------------------- |
+| `tool_call`        | 调用工具（读文件、执行命令等） | Worker 使用工具时             |
+| `tool_result`      | 工具执行结果                   | 工具完成后                    |
+| `tool_update`      | 工具调用中间状态（ACP）        | ACP Worker 工具执行过程中     |
+| `reasoning`        | 推理过程                       | Worker 思考时（取决于配置）   |
+| `step`             | 执行步骤                       | Worker 分步执行时             |
+| `plan`             | 计划/TODO 更新（ACP）          | ACP Worker 更新计划时         |
+| `mode_update`      | Agent 模式切换（ACP）          | ACP Worker 切换模式时         |
+| `context_usage`    | 上下文使用量                   | Worker 上报上下文消耗         |
+| `skills_list`      | Gateway 技能列表               | `/skills` 命令响应            |
+| `mcp_status`       | Worker MCP 状态                | `/mcp` 命令响应               |
 
 ---
 
@@ -455,7 +496,7 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
       "content": "yes",
       "metadata": {
         "permission_response": {
-          "id": "perm_1",
+          "request_id": "perm_1",
           "allowed": true
         }
       }
@@ -471,7 +512,7 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
       "content": "",
       "metadata": {
         "permission_response": {
-          "id": "perm_1",
+          "request_id": "perm_1",
           "allowed": false,
           "reason": "不允许"
         }
@@ -568,7 +609,8 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
 | 项目             | 值                                                                |
 | ---------------- | ----------------------------------------------------------------- |
 | Server Ping 间隔 | 54 秒（WebSocket Ping 帧）                                        |
-| Pong 超时        | 60 秒未回复则断开                                                 |
+| Pong 超时        | 60 秒未回复计为一次 Miss                                           |
+| 连续 Miss 上限   | 3 次，达到后断连（纯静默场景最坏 ~180 秒断连）                     |
 | 客户端主动 Ping  | 可发 AEP `ping` 事件，Gateway 回复 `pong`（含当前 session state） |
 
 ```json
@@ -602,7 +644,7 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
 
 ### 重连步骤
 
-1. WebSocket 断开后，等待指数退避时间（1s, 2s, 4s, 8s...最大 30s）
+1. WebSocket 断开后，等待指数退避时间（1s, 2s, 4s, 8s...最大 60s）
 2. 重新建立 WebSocket 连接
 3. 发送 init，**携带与首次完全相同的参数**（clientSessionID、auth、workDir）
 4. Gateway 派生出相同的 Session ID → 自动恢复
@@ -675,7 +717,7 @@ class HotPlexClient {
 
   scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
-    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 30000);
+    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 60000);
     this.reconnectAttempts++;
     setTimeout(() => this.connect(), delay);
   }
@@ -723,12 +765,15 @@ const tabId = `sess_${crypto.randomUUID()}`;
 
 ## 控制命令
 
+### 客户端发送的控制命令
+
 通过 `control` 事件管理会话：
 
 ```json
 { "event": { "type": "control", "data": { "action": "terminate" } } }
 { "event": { "type": "control", "data": { "action": "reset" } } }
 { "event": { "type": "control", "data": { "action": "delete" } } }
+{ "event": { "type": "control", "data": { "action": "gc" } } }
 {
   "event": {
     "type": "control",
@@ -742,12 +787,35 @@ const tabId = `sess_${crypto.randomUUID()}`;
 }
 ```
 
-也可在 `input.content` 中用快捷命令：
+| Action | 效果 | 说明 |
+| ------ | ---- | ---- |
+| `terminate` | 终止 Worker 进程 | Session 进入 terminated 状态 |
+| `delete` | 删除会话 | 直接删除，跳过 terminated 状态 |
+| `reset` | 重置上下文 | Session 重置为 running |
+| `gc` | 回收会话资源 | 终止 Worker 并归档 |
+| `cd` | 切换工作目录 | 需带 `details.path` 参数 |
 
-| 命令     | 效果           |
-| -------- | -------------- |
-| `/reset` | 重置会话上下文 |
-| `/gc`    | 回收空闲会话   |
+### 服务端发送的控制命令
+
+Gateway 会主动推送以下控制命令：
+
+| Action | 说明 |
+| ------ | ---- |
+| `reconnect` | 要求客户端重连（Session 恢复） |
+| `session_invalid` | Session 已失效，需重新 init |
+| `throttle` | 请求被限流 |
+
+### 斜杠命令
+
+在消息平台（飞书/Slack）中，也可在 `input.content` 中用快捷命令：
+
+| 命令 | 效果 | 等价 Action |
+| ---- | ---- | ----------- |
+| `/reset` | 重置会话上下文 | `reset` |
+| `/new` | 重置会话上下文 | `reset` |
+| `/gc` | 回收空闲会话 | `gc` |
+| `/park` | 回收空闲会话 | `gc`（等同于 `/gc`） |
+| `/cd <path>` | 切换工作目录 | `cd` |
 
 ---
 
@@ -759,9 +827,11 @@ const tabId = `sess_${crypto.randomUUID()}`;
 | ----------------------------------- | ----------------------------- |
 | `message.delta`                     | **可丢弃** — 通道满时静默丢弃 |
 | `raw`                               | **可丢弃**                    |
-| `state`, `done`, `error`, `message` | **保障送达** — 阻塞等待       |
+| 所有其他事件（含 ACP 扩展）         | **保障送达** — 阻塞等待       |
 
-**客户端处理**：收到 `done` 时检查 `dropped` 字段，如果为 `true`，用 `message` 中的完整文本替代拼接的 delta。
+保障送达的事件包括但不限于：`state`、`done`、`error`、`message`、`message.start`、`message.end`、`tool_call`、`tool_result`、`permission_request`、`question_request`、`elicitation_request`、`tool_update`、`plan`、`mode_update`、`context_usage`。
+
+**客户端处理**：收到 `done` 时检查 `dropped` 字段，如果为 `true`，用 `message` 中的完整文本替代拼接的 delta。背压丢弃由 Gateway 静默处理，不会通知客户端具体丢弃了哪些 delta。
 
 ---
 
@@ -775,10 +845,10 @@ Gateway 提供两个 REST API 查询历史，需要认证且校验 session 归�
 
 ```bash
 curl -H "X-API-Key: your-key" \
-  "http://localhost:8080/api/sessions/{session_id}/history?limit=50"
+  "http://localhost:8888/api/sessions/{session_id}/history?limit=50"
 ```
 
-**参数**：`limit`（1-200，默认 50）、`before_seq`（游标翻页）
+**参数**：`limit`（1-200，默认 50）、`before_id`（游标翻页，使用 turn 的 `id` 字段）
 
 **响应**：
 
@@ -786,16 +856,18 @@ curl -H "X-API-Key: your-key" \
 {
   "records": [
     {
+      "id": 123,
       "seq": 15,
       "role": "user",
       "content": "解释这个函数",
-      "created_at": 1710000000
+      "created_at": 1710000000000
     },
     {
+      "id": 124,
       "seq": 28,
       "role": "assistant",
       "content": "这个函数的作用是...",
-      "model": "claude-sonnet-4-6",
+      "model": "Sonnet",
       "success": true,
       "tools": {
         "Read": 1,
@@ -806,17 +878,17 @@ curl -H "X-API-Key: your-key" \
       "tokens_out": 350,
       "duration_ms": 3200,
       "cost_usd": 0.012,
-      "created_at": 1710000003
+      "created_at": 1710000003000
     }
   ],
   "has_more": false
 }
 ```
 
-**翻页**：`has_more` 为 `true` 时，用最后一条的 `seq` 请求下一页：
+**翻页**：`has_more` 为 `true` 时，用最后一条的 `id` 请求下一页：
 
 ```bash
-curl "http://localhost:8080/api/sessions/{id}/history?limit=20&before_seq=15"
+curl "http://localhost:8888/api/sessions/{id}/history?limit=20&before_id=123"
 ```
 
 ### Event 级别 — 原始事件流
@@ -825,7 +897,7 @@ curl "http://localhost:8080/api/sessions/{id}/history?limit=20&before_seq=15"
 
 ```bash
 curl -H "X-API-Key: your-key" \
-  "http://localhost:8080/api/sessions/{session_id}/events?limit=200&direction=latest"
+  "http://localhost:8888/api/sessions/{session_id}/events?limit=200&direction=latest"
 ```
 
 **参数**：`limit`（1-1000）、`cursor`（seq 值）、`direction`（`latest` / `before` / `after`）
@@ -881,7 +953,7 @@ direction=after&cursor=42     # 向后追赶：seq > 42
 | 聊天界面展示对话 | `/history`                          |
 | Token 用量统计   | `/history`（assistant turn 已聚合） |
 | 调试/审计/回放   | `/events`                           |
-| 加载更多历史     | `/history` + `before_seq`           |
+| 加载更多历史     | `/history` + `before_id`            |
 
 ---
 
@@ -904,22 +976,40 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
       "version": "aep/v1",
       "worker_type": "claude_code",
       "auth": {
-        "token": "your-api-key"
+        "token": "your-api-key",
+        "bot_id": "B12345"
       },
       "config": {
         "work_dir": "/home/user/project",
-        "allowed_tools": [
-          "Bash",
-          "Read",
-          "Write"
-        ],
+        "allowed_tools": ["Bash", "Read", "Write"],
+        "disallowed_tools": ["Edit"],
         "system_prompt": "...",
-        "model": "claude-sonnet-4-6"
+        "model": "claude-sonnet-4-6",
+        "max_turns": 50,
+        "metadata": {}
+      },
+      "client_caps": {
+        "supports_delta": true,
+        "supports_tool_call": true,
+        "supported_kinds": ["message.delta", "tool_call"]
       }
     }
   }
 }
 ```
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| `version` | 是 | 固定 `"aep/v1"` |
+| `worker_type` | 是 | Worker 类型（`claude_code`、`codex_cli`、`acp` 等） |
+| `auth.token` | 条件 | 无 API Key Header/Query 时必需 |
+| `auth.bot_id` | 否 | 多 Bot 隔离，优先级低于 Header/Query |
+| `config.work_dir` | 否 | 工作目录，安全校验 |
+| `config.model` | 否 | 模型白名单校验 |
+| `config.allowed_tools` | 否 | 允许的工具列表 |
+| `config.disallowed_tools` | 否 | 禁用的工具列表 |
+| `config.max_turns` | 否 | 最大轮次 |
+| `client_caps.*` | 否 | 客户端能力声明 |
 
 ### init_ack 响应
 
@@ -931,9 +1021,13 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
   "state": "running",
   "server_caps": {
     "protocol_version": "aep/v1",
+    "worker_type": "claude_code",
     "supports_resume": true,
     "supports_delta": true,
-    "max_frame_size": 32768
+    "supports_tool_call": true,
+    "supports_ping": true,
+    "max_frame_size": 32768,
+    "modalities": ["text", "code"]
   }
 }
 ```
@@ -948,43 +1042,80 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 }
 ```
 
-| 错误码               | 原因                  |
-| -------------------- | --------------------- |
-| `VERSION_MISMATCH`   | version 不是 `aep/v1` |
-| `PROTOCOL_VIOLATION` | 第一帧不是 init       |
-| `UNAUTHORIZED`       | 认证失败              |
-| `RATE_LIMITED`       | 握手频率过高          |
+| 错误码               | 原因                          |
+| -------------------- | ----------------------------- |
+| `VERSION_MISMATCH`   | version 不是 `aep/v1`         |
+| `PROTOCOL_VIOLATION` | 第一帧不是 init               |
+| `INVALID_MESSAGE`    | JSON 格式错误或字段缺失       |
+| `UNAUTHORIZED`       | 认证失败                      |
+| `RATE_LIMITED`       | 握手频率过高                  |
+| `CONFIG_INVALID`     | allowed_tools 或 model 校验失败 |
 
 ---
 
 ## 连接限制
 
-| 项目             | 值     |
-| ---------------- | ------ |
-| 最大消息大小     | 32 KB  |
-| Init 握手超时    | 30 秒  |
-| Pong 检测超时    | 60 秒  |
-| Server Ping 间隔 | 54 秒  |
-| 交互确认超时     | 5 分钟 |
+| 项目             | 值      | 配置项                        |
+| ---------------- | ------- | ----------------------------- |
+| 最大消息大小     | 32 KB   | —                             |
+| Init 握手超时    | 30 秒   | —                             |
+| Pong 检测超时    | 60 秒   | —                             |
+| Server Ping 间隔 | 54 秒   | —                             |
+| 连续 Miss 上限   | 3 次    | —                             |
+| 交互确认超时     | 5 分钟  | —                             |
+| 最大并发 Session | 1000    | `session.max_concurrent`      |
+| 全局最大活跃 Worker | 100  | `pool.max_size`               |
+| 每用户最大空闲 Session | 5 | `pool.max_idle_per_user`      |
+| 背压队列大小     | 256     | `gateway.broadcast_queue_size`|
 
 ---
 
 ## 错误码参考
 
-| 错误码               | 说明           | 建议               |
-| -------------------- | -------------- | ------------------ |
-| `VERSION_MISMATCH`   | 协议版本不匹配 | 检查 version 字段  |
-| `PROTOCOL_VIOLATION` | 协议违规       | 首帧必须是 init    |
-| `INVALID_MESSAGE`    | 消息格式错误   | 检查 JSON 结构     |
-| `UNAUTHORIZED`       | 认证失败       | 检查 API Key       |
-| `SESSION_NOT_FOUND`  | Session 不存在 | 重新 init          |
-| `SESSION_BUSY`       | Session 非活跃 | 等待或重连         |
-| `SESSION_EXPIRED`    | 已过期         | 创建新会话         |
-| `RATE_LIMITED`       | 频率过高       | 退避重试           |
-| `WORKER_CRASH`       | Worker 崩溃    | Gateway 自动恢复   |
-| `TURN_TIMEOUT`       | 单轮超时       | 简化任务           |
-| `INTERNAL_ERROR`     | 服务端错误     | 查看日志           |
-| `RECONNECT_REQUIRED` | 服务端要求重连 | 执行重连           |
+### 握手阶段
+
+| 错误码               | 说明               | 建议                       |
+| -------------------- | ------------------ | -------------------------- |
+| `VERSION_MISMATCH`   | 协议版本不匹配     | 检查 version 字段          |
+| `PROTOCOL_VIOLATION` | 首帧非 init        | 首帧必须是 init            |
+| `INVALID_MESSAGE`    | 消息格式错误       | 检查 JSON 结构和必需字段   |
+| `UNAUTHORIZED`       | 认证失败           | 检查 API Key               |
+| `RATE_LIMITED`       | 握手频率过高       | 退避重试                   |
+| `CONFIG_INVALID`     | 配置校验失败       | 检查 allowed_tools / model |
+
+### 会话阶段
+
+| 错误码               | 说明               | 建议                       |
+| -------------------- | ------------------ | -------------------------- |
+| `SESSION_NOT_FOUND`  | Session 不存在     | 重新 init                  |
+| `SESSION_BUSY`       | Session 非活跃     | 等待或重连                 |
+| `SESSION_EXPIRED`    | 已过期             | 创建新会话                 |
+| `SESSION_TERMINATED` | Session 已终止     | 重连恢复或新建             |
+| `SESSION_INVALIDATED`| Session 已失效     | 重新 init                  |
+| `RECONNECT_REQUIRED` | 服务端要求重连     | 执行重连                   |
+
+### Worker 阶段
+
+| 错误码               | 说明               | 建议                       |
+| -------------------- | ------------------ | -------------------------- |
+| `WORKER_CRASH`       | Worker 崩溃        | Gateway 自动恢复           |
+| `WORKER_START_FAILED`| Worker 启动失败    | 检查 Worker 配置           |
+| `WORKER_TIMEOUT`     | Worker 响应超时    | 简化任务或增加超时         |
+| `WORKER_OOM`         | Worker 内存溢出    | 减少上下文长度             |
+| `PROCESS_SIGKILL`    | Worker 被强制终止  | 检查系统资源               |
+| `EXECUTION_TIMEOUT`  | 执行超时           | 简化任务                   |
+| `WORKER_OUTPUT_LIMIT`| Worker 输出超限    | 减少输出量                 |
+| `RESUME_RETRY`       | Resume 重试        | Gateway 自动重试           |
+
+### 其他
+
+| 错误码               | 说明               | 建议                       |
+| -------------------- | ------------------ | -------------------------- |
+| `INTERNAL_ERROR`     | 服务端内部错误     | 查看日志                   |
+| `GATEWAY_OVERLOAD`   | Gateway 过载       | 退避重试                   |
+| `AUTH_REQUIRED`      | 需要认证           | 提供 API Key               |
+| `TURN_TIMEOUT`       | 单轮超时           | 简化任务                   |
+| `NOT_SUPPORTED`      | 不支持的操作       | 检查 Worker 类型兼容性     |
 
 ---
 

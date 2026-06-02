@@ -30,7 +30,10 @@ async def test_client_wait_for_done():
         mock_instance.is_connected = True
         mock_instance.session_id = "sess_123"
         mock_instance.send = AsyncMock()
-        
+        async def _never_return():
+            await asyncio.Event().wait()
+        mock_instance.receive = AsyncMock(side_effect=_never_return)
+
         client = HotPlexClient()
         await client.connect()
         

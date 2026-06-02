@@ -23,6 +23,17 @@ public enum EventKind {
     Pong("pong"),
     Control("control"),
     InitAck("init_ack"),
+    QuestionRequest("question_request"),
+    QuestionResponse("question_response"),
+    ElicitationRequest("elicitation_request"),
+    ElicitationResponse("elicitation_response"),
+    ContextUsage("context_usage"),
+    SkillsList("skills_list"),
+    MCPStatus("mcp_status"),
+    WorkerCommand("worker_command"),
+    ToolUpdate("tool_update"),
+    Plan("plan"),
+    ModeUpdate("mode_update"),
     Init("init");
 
     private final String value;

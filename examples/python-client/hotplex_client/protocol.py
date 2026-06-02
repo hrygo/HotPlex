@@ -16,12 +16,14 @@ from hotplex_client.types import (
     SESSION_ID_PREFIX,
     ControlAction,
     ControlData,
+    ElicitationResponseData,
     Envelope,
     Event,
     InitData,
     InputData,
     PermissionResponseData,
     Priority,
+    QuestionResponseData,
     ToolResultData,
     WorkerType,
 )
@@ -323,6 +325,72 @@ def create_permission_response_envelope(
         event_type="permission_response",
         event_data=data,
         priority=Priority.CONTROL,
+    )
+
+
+def create_question_response_envelope(
+    session_id: str,
+    question_id: str,
+    answers: dict[str, str],
+) -> Envelope[QuestionResponseData]:
+    """
+    Create question response envelope.
+
+    Args:
+        session_id: Session ID
+        question_id: Question request ID
+        answers: Dictionary mapping question labels to selected option labels
+
+    Returns:
+        Question response event envelope
+    """
+    data: dict[str, Any] = {
+        "id": question_id,
+        "answers": answers,
+    }
+
+    return create_envelope(
+        id=generate_event_id(),
+        session_id=session_id,
+        seq=0,
+        event_type="question_response",
+        event_data=data,
+        priority=Priority.DATA,
+    )
+
+
+def create_elicitation_response_envelope(
+    session_id: str,
+    elicitation_id: str,
+    action: str,
+    content: dict[str, Any] | None = None,
+) -> Envelope[ElicitationResponseData]:
+    """
+    Create elicitation response envelope.
+
+    Args:
+        session_id: Session ID
+        elicitation_id: Elicitation request ID
+        action: The action to take (e.g., "accept", "modify", "reject")
+        content: Optional additional content
+
+    Returns:
+        Elicitation response event envelope
+    """
+    data: dict[str, Any] = {
+        "id": elicitation_id,
+        "action": action,
+    }
+    if content:
+        data["content"] = content
+
+    return create_envelope(
+        id=generate_event_id(),
+        session_id=session_id,
+        seq=0,
+        event_type="elicitation_response",
+        event_data=data,
+        priority=Priority.DATA,
     )
 
 

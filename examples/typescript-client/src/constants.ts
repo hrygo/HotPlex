@@ -21,6 +21,17 @@ export const EventKind = {
   Ping: 'ping',
   Pong: 'pong',
   Control: 'control',
+  QuestionRequest: 'question_request',
+  QuestionResponse: 'question_response',
+  ElicitationRequest: 'elicitation_request',
+  ElicitationResponse: 'elicitation_response',
+  ContextUsage: 'context_usage',
+  SkillsList: 'skills_list',
+  MCPStatus: 'mcp_status',
+  WorkerCmd: 'worker_command',
+  ToolUpdate: 'tool_update',
+  Plan: 'plan',
+  ModeUpdate: 'mode_update',
 } as const;
 
 export type EventKind = typeof EventKind[keyof typeof EventKind];
@@ -76,6 +87,9 @@ export const ErrorCode = {
   ExecutionTimeout: 'EXECUTION_TIMEOUT',
   ReconnectRequired: 'RECONNECT_REQUIRED',
   WorkerOutputLimit: 'WORKER_OUTPUT_LIMIT',
+  ResumeRetry: 'RESUME_RETRY',
+  NotSupported: 'NOT_SUPPORTED',
+  TurnTimeout: 'TURN_TIMEOUT',
 } as const;
 
 export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];
@@ -87,6 +101,9 @@ export const ControlAction = {
   Throttle: 'throttle',
   Terminate: 'terminate',
   Delete: 'delete',
+  Reset: 'reset',
+  GC: 'gc',
+  CD: 'cd',
 } as const;
 
 export type ControlAction = typeof ControlAction[keyof typeof ControlAction];

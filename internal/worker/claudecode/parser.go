@@ -205,8 +205,18 @@ func (p *Parser) parseAssistant(msg *SDKMessage) ([]*WorkerEvent, error) {
 				RawMessage: msg,
 			})
 		case "thinking":
-			// Skip — thinking content was already streamed as EventStream deltas.
-			// Re-emitting the full block would duplicate reasoning content on the client.
+				// Claude CLI v2.1.158+ no longer emits stream_event for thinking;
+				// the complete thinking block is in the assistant message instead.
+				if block.Thinking != "" {
+					events = append(events, &WorkerEvent{
+						Type: EventStream,
+						Payload: &StreamPayload{
+							Type:    string(StreamThinking),
+							Content: block.Thinking,
+						},
+						RawMessage: msg,
+					})
+				}
 		case "tool_use":
 			var input map[string]any
 			if err := json.Unmarshal(block.Input, &input); err != nil {
