@@ -346,7 +346,7 @@ func setupTestGateway(t *testing.T) *testGateway {
 	bridge.SetWorkerFactory(testWorkerFactory{})
 
 	mux := http.NewServeMux()
-	mux.Handle("/ws", hub.HandleHTTP(auth, handler, bridge))
+	mux.Handle("/ws", hub.HandleHTTP(auth, handler, bridge, nil))
 
 	server := httptest.NewServer(mux)
 

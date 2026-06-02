@@ -30,6 +30,7 @@ type Authenticator struct {
 	dbKeys        map[string]bool // database-sourced keys (Admin API CRUD)
 	keyResolver   APIKeyResolver  // optional; maps API keys to user identities. nil = "api_user"
 	devModeLocked bool            // true once any key has existed; prevents dev mode re-enable
+	cookieAuth    *CookieAuth     // optional; HMAC cookie auth (3rd priority after header/query)
 }
 
 // NewAuthenticator creates a new authenticator.
@@ -46,6 +47,14 @@ func NewAuthenticator(cfg *config.SecurityConfig) *Authenticator {
 	}
 }
 
+// SetCookieAuth enables cookie-based authentication as a 3rd priority fallback
+// after header and query param. Typically called when webchat is enabled.
+func (a *Authenticator) SetCookieAuth(ca *CookieAuth) {
+	a.mu.Lock()
+	a.cookieAuth = ca
+	a.mu.Unlock()
+}
+
 // ErrUnauthorized is returned when authentication fails.
 var ErrUnauthorized = errors.New("security: unauthorized")
 
@@ -56,6 +65,14 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 
 	key, found := a.extractAPIKey(r)
 	if !found {
+		// 3rd priority: cookie auth fallback (webchat same-origin).
+		if a.cookieAuth != nil {
+			if uid, ok := a.cookieAuth.Authenticate(r); ok {
+				a.mu.RUnlock()
+				botID := BotIDFromRequest(r)
+				return uid, botID, nil
+			}
+		}
 		a.mu.RUnlock()
 		return "", "", ErrUnauthorized
 	}

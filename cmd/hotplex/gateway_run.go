@@ -70,6 +70,7 @@ type GatewayDeps struct {
 	ConfigWatcher   *config.Watcher
 	CronScheduler   *cron.Scheduler
 	WebhookHandler  *gateway.WebhookHandler // non-nil when webhook is enabled
+	CookieAuth      *security.CookieAuth    // non-nil when webchat is enabled
 	ChatAccessStore messaging.ChatAccessStorer
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
@@ -404,6 +405,19 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		}
 	}
 
+	// Cookie auth: created when webchat is enabled for same-origin browser authentication.
+	var cookieAuth *security.CookieAuth
+	if cfg.WebChat.Enabled {
+		ca, err := security.NewCookieAuth()
+		if err != nil {
+			return fmt.Errorf("create cookie auth: %w", err)
+		}
+		cookieAuth = ca
+		auth.SetCookieAuth(ca)
+		log.Info("gateway: webchat cookie auth enabled")
+		log.Warn("gateway: webchat cookie auth uses shared \"webchat_user\" identity; all visitors share the same session ownership — not suitable for multi-user deployments")
+	}
+
 	mux := http.NewServeMux()
 	deps := &GatewayDeps{
 		Log:             log,
@@ -419,6 +433,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Bridge:          bridge,
 		ConfigWatcher:   configWatcher,
 		CronScheduler:   cronScheduler,
+		CookieAuth:      cookieAuth,
 		ChatAccessStore: stores.chatAccessOrNew(stores.sqlDB, log),
 		DB:              stores.sqlDB,
 		DBResolver:      dbResolver,
@@ -464,7 +479,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			log.Warn("csp: webchat policy is permissive (any http/https/ws/wss host allowed); set security.csp to restrict in production",
 				"service", "webchat")
 		}
-		spa := webchat.Handler(cfg.Security.CSP)
+		spa := webchat.Handler(cfg.Security.CSP, cookieAuth)
 		rootHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, pattern := mux.Handler(r)
 			if pattern != "" {
