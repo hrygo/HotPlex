@@ -176,12 +176,13 @@ func (c *StreamingCardController) WriteToolCall(id, name string, input map[strin
 	}
 	text := formatToolCall(name, input)
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.toolEntries = append(c.toolEntries, toolEntry{id: id, name: name, text: text})
 	if len(c.toolEntries) > maxToolEntries {
 		c.toolEntries = c.toolEntries[len(c.toolEntries)-maxToolEntries:]
 	}
 	c.toolDirty = true
+	c.mu.Unlock()
+	c.triggerToolFlush()
 }
 
 // WriteToolResult marks the matching tool entry as done by ID and sets the result summary.
@@ -190,14 +191,27 @@ func (c *StreamingCardController) WriteToolResult(id string, output any, errMsg 
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	for i := range c.toolEntries {
 		if c.toolEntries[i].id == id {
 			c.toolEntries[i].done = true
 			c.toolEntries[i].result = formatToolResult(c.toolEntries[i].name, output, errMsg)
 			c.toolDirty = true
+			c.mu.Unlock()
+			c.triggerToolFlush()
 			return
 		}
+	}
+	c.mu.Unlock()
+}
+
+// triggerToolFlush ensures the flush loop is running and signals an immediate flush.
+// This is necessary because tool events can arrive before any text Write() calls,
+// leaving the tool_activity strip stale until the first text content arrives.
+func (c *StreamingCardController) triggerToolFlush() {
+	c.startFlushLoop()
+	select {
+	case c.flushTrigger <- struct{}{}:
+	default:
 	}
 }
 
