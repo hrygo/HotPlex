@@ -42,20 +42,35 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 	ctrlCtx, ctrlCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer ctrlCancel()
 
+	var cmdErr error
 	switch cmd {
 	case events.StdioSkills:
-		return h.handleSkillsList(ctx, env, args)
+		cmdErr = h.handleSkillsList(ctx, env, args)
 	case events.StdioContextUsage:
-		return h.handleContextUsage(ctrlCtx, env, cr)
+		cmdErr = h.handleContextUsage(ctrlCtx, env, cr)
 	case events.StdioMCPStatus:
-		return h.handleMCPStatus(ctrlCtx, env, cr)
+		cmdErr = h.handleMCPStatus(ctrlCtx, env, cr)
 	case events.StdioSetModel:
-		return h.handleSetModel(ctrlCtx, env, cr, args, extra)
+		cmdErr = h.handleSetModel(ctrlCtx, env, cr, args, extra)
 	case events.StdioSetPermMode:
-		return h.handleSetPermMode(ctrlCtx, env, cr, args, extra)
+		cmdErr = h.handleSetPermMode(ctrlCtx, env, cr, args, extra)
 	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown worker command: %s", cmd)
 	}
+
+	// Server-handled worker commands don't go through the bridge turn cycle,
+	// so the frontend never receives a "done" event to clear isRunning.
+	// Send one now so the UI doesn't freeze.
+	if cmdErr == nil {
+		doneEnv := events.NewEnvelope(
+			aep.NewID(), env.SessionID,
+			h.hub.NextSeq(env.SessionID),
+			events.Done, events.DoneData{},
+		)
+		_ = h.hub.SendToSession(ctx, doneEnv)
+	}
+
+	return cmdErr
 }
 
 func parseWorkerCommand(env *events.Envelope) (cmd events.WorkerStdioCommand, args string, extra map[string]any, ok bool) {

@@ -693,6 +693,11 @@ export function useHotPlexRuntime({
       });
     };
     client.on('contextUsage', handleContextUsage);
+    client.on('skillsList', (data: import('@/lib/ai-sdk-transport/client/types').SkillsListData) => {
+      skillsFetchedRef.current = true;
+      const names = data?.skills?.map(s => s.name) ?? [];
+      onSkillsChangeRef.current?.(names);
+    });
 
     // Interaction event handlers — inject as tool-call parts for PermissionCard rendering
     const handlePermissionRequest = (data: PermissionRequestData, _env: Envelope) => {
@@ -779,6 +784,7 @@ export function useHotPlexRuntime({
       client.off('toolCall', handleToolCall);
       client.off('toolResult', handleToolResult);
       client.off('contextUsage', handleContextUsage);
+      client.off('skillsList');
       client.off('permissionRequest', handlePermissionRequest);
       client.off('questionRequest', handleQuestionRequest);
       client.off('elicitationRequest', handleElicitationRequest);
