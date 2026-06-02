@@ -86,7 +86,9 @@ func InitConfig(cfg config.ACPConfig) {
 		args = strings.Fields(args[0])
 	}
 	configArgs.Store(args)
-	autoApproveDefault.Store(cfg.AutoApprove)
+	if cfg.AutoApprove != nil {
+		autoApproveDefault.Store(*cfg.AutoApprove)
+	}
 	debugEnabled.Store(cfg.Debug)
 	if err := security.RegisterCommand(parts[0]); err != nil {
 		slog.Default().Error("acp: failed to register command", "command", parts[0], "err", err)

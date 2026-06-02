@@ -27,7 +27,7 @@ func TestInitConfig_ArgsStored(t *testing.T) {
 	InitConfig(config.ACPConfig{
 		Command:     "test-agent serve",
 		Args:        []string{"--model", "gpt-4"},
-		AutoApprove: false,
+		AutoApprove: boolPtr(false),
 		Debug:       true,
 	})
 
@@ -50,6 +50,28 @@ func TestInitConfig_DefaultCommand(t *testing.T) {
 	parts, _ := commandParts.Load().([]string)
 	require.Equal(t, []string{"hermes", "acp"}, parts)
 }
+
+func TestInitConfig_AutoApprove_NilKeepsDefault(t *testing.T) {
+	t.Cleanup(func() { InitConfig(config.ACPConfig{Command: "hermes acp"}) })
+	autoApproveDefault.Store(true)
+	InitConfig(config.ACPConfig{Command: "hermes acp"})
+	require.True(t, autoApproveDefault.Load(),
+		"absent acp.auto_approve should preserve init() default (true)")
+}
+
+func TestInitConfig_AutoApprove_ExplicitTrue(t *testing.T) {
+	t.Cleanup(func() { InitConfig(config.ACPConfig{Command: "hermes acp"}) })
+	InitConfig(config.ACPConfig{Command: "hermes acp", AutoApprove: boolPtr(true)})
+	require.True(t, autoApproveDefault.Load())
+}
+
+func TestInitConfig_AutoApprove_ExplicitFalse(t *testing.T) {
+	t.Cleanup(func() { InitConfig(config.ACPConfig{Command: "hermes acp"}) })
+	InitConfig(config.ACPConfig{Command: "hermes acp", AutoApprove: boolPtr(false)})
+	require.False(t, autoApproveDefault.Load())
+}
+
+func boolPtr(v bool) *bool { return &v }
 
 // ─── EX-02: Protocol Version Warning ────────────────────────────────────────
 
