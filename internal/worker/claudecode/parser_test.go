@@ -96,6 +96,29 @@ func TestParser_ParseLine_Assistant_ThinkingBlock(t *testing.T) {
 	require.Equal(t, "The answer is 42.", textPayload.Content)
 }
 
+func TestParser_ParseLine_Assistant_ThinkingBlock_Dedup(t *testing.T) {
+	log := newTestLogger()
+	parser := NewParser(log)
+
+	// Simulate old CLI: stream_event thinking first, then assistant with thinking block
+	streamLine := `{"type":"stream_event","event":{"type":"thinking","message":{"id":"msg_1","content":"partial thinking"}}}`
+	events, err := parser.ParseLine(streamLine)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, EventStream, events[0].Type)
+
+	// Now parse assistant with thinking block — should be skipped (dedup)
+	assistantLine := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"full thinking content"},{"type":"text","text":"Answer"}]}}`
+	events, err = parser.ParseLine(assistantLine)
+	require.NoError(t, err)
+	// Only text event, thinking is deduped
+	require.Len(t, events, 1)
+	require.Equal(t, EventAssistant, events[0].Type)
+	textPayload, ok := events[0].Payload.(*StreamPayload)
+	require.True(t, ok)
+	require.Equal(t, "text", textPayload.Type)
+}
+
 func TestParser_ParseLine_ToolProgress(t *testing.T) {
 	log := newTestLogger()
 	parser := NewParser(log)
