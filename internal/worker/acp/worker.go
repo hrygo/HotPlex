@@ -50,7 +50,7 @@ var autoApproveDefault atomic.Bool
 func init() {
 	commandParts.Store([]string{"hermes", "acp"})
 	configArgs.Store([]string{})
-	autoApproveDefault.Store(false)
+	autoApproveDefault.Store(true)
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
 		w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
