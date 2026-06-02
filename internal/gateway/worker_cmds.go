@@ -40,21 +40,25 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 		return h.sendErrorf(ctx, env, events.ErrCodeNotSupported, "worker type does not support control requests")
 	}
 
-	ctrlCtx, ctrlCancel := context.WithTimeout(ctx, 60*time.Second)
-	defer ctrlCancel()
-
 	var cmdErr error
 	switch cmd {
 	case events.StdioSkills:
 		cmdErr = h.handleSkillsList(ctx, env, args)
-	case events.StdioContextUsage:
-		cmdErr = h.handleContextUsage(ctrlCtx, env, cr)
-	case events.StdioMCPStatus:
-		cmdErr = h.handleMCPStatus(ctrlCtx, env, cr)
-	case events.StdioSetModel:
-		cmdErr = h.handleSetModel(ctrlCtx, env, cr, args, extra)
-	case events.StdioSetPermMode:
-		cmdErr = h.handleSetPermMode(ctrlCtx, env, cr, args, extra)
+	case events.StdioContextUsage, events.StdioMCPStatus, events.StdioSetModel, events.StdioSetPermMode:
+		// Control-request commands use a dedicated timeout context.
+		ctrlCtx, ctrlCancel := context.WithTimeout(ctx, 60*time.Second)
+		defer ctrlCancel()
+
+		switch cmd {
+		case events.StdioContextUsage:
+			cmdErr = h.handleContextUsage(ctrlCtx, env, cr)
+		case events.StdioMCPStatus:
+			cmdErr = h.handleMCPStatus(ctrlCtx, env, cr)
+		case events.StdioSetModel:
+			cmdErr = h.handleSetModel(ctrlCtx, env, cr, args, extra)
+		case events.StdioSetPermMode:
+			cmdErr = h.handleSetPermMode(ctrlCtx, env, cr, args, extra)
+		}
 	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown worker command: %s", cmd)
 	}
@@ -198,7 +202,7 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		h.log.Warn("skills list: failed to resolve home directory, global skills skipped", "error", err)
+	h.log.Warn("skills list: failed to resolve home directory, global skills may be incomplete", "error", err)
 	}
 	allSkills, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
 	if err != nil {
