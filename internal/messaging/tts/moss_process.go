@@ -256,7 +256,7 @@ func (p *MossProcess) spawn(ctx context.Context) error {
 
 	p.log.Info("tts: starting moss sidecar", "port", p.port, "model_dir", p.modelDir)
 
-	cmd := exec.Command("python3", args...)
+	cmd := exec.CommandContext(ctx, "python3", args...)
 	proc.SetSysProcAttr(cmd)
 
 	// Redirect sidecar stdout/stderr to gateway logs.
