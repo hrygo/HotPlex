@@ -55,8 +55,8 @@ func TestCookieAuthExpiry(t *testing.T) {
 	err = ca.SetCookie(w, r, "expired_user")
 	require.NoError(t, err)
 
-	// Wait for expiry.
-	time.Sleep(10 * time.Millisecond)
+	// No sleep needed: maxAge is 1ns, so time.Since(ts) in verify() will
+	// always exceed maxAge by the time we reach this point.
 
 	cookies := w.Result().Cookies()
 	require.Len(t, cookies, 1)

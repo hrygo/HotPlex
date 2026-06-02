@@ -1,7 +1,3 @@
-// Package security provides HMAC-SHA256 signed cookie authentication for webchat.
-//
-// Cookie format: Base64(timestamp|userID|HMAC(timestamp|userID, secret))
-// Cookie attributes: HttpOnly, SameSite=Strict, Path=/, conditional Secure, 24h Max-Age
 package security
 
 import (
@@ -9,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -27,9 +24,16 @@ const (
 	hmacKeyLen = 32
 )
 
-// CookieAuth provides HMAC-SHA256 signed cookie issuance and verification.
-// The HMAC key is generated at startup via crypto/rand — it is never stored
-// on disk or embedded in the binary.
+// CookieAuth provides HMAC-SHA256 signed cookie issuance and verification for
+// same-origin webchat deployments. The HMAC key is generated at startup via
+// crypto/rand and is never stored on disk or embedded in the binary.
+//
+// Cookie format: Base64(timestamp|userID|hex(HMAC-SHA256(timestamp|userID, secret)))
+// Cookie attributes: HttpOnly, SameSite=Strict, Path=/, conditional Secure, 24h Max-Age.
+//
+// Immutability: the secret and maxAge fields are set once at construction and never
+// modified. This allows safe concurrent access from both Hub.HandleHTTP (WS upgrade)
+// and Authenticator.AuthenticateRequest (REST API) without additional locking.
 type CookieAuth struct {
 	secret []byte
 	maxAge time.Duration
@@ -80,16 +84,18 @@ func (c *CookieAuth) Authenticate(r *http.Request) (string, bool) {
 	return c.verify(cookie.Value)
 }
 
-// sign creates a signed cookie value: Base64(timestamp|userID|hmac).
+// sign creates a signed cookie value: Base64(timestamp|userID|hexHMAC).
+// The HMAC signature is hex-encoded to avoid binary bytes in the delimited format,
+// making the cookie value safe for debugging and unambiguous to parse.
 func (c *CookieAuth) sign(userID string) string {
 	ts := time.Now().Unix()
 	payload := fmt.Sprintf("%d|%s", ts, userID)
 
 	mac := hmac.New(sha256.New, c.secret)
 	mac.Write([]byte(payload))
-	sig := mac.Sum(nil)
+	sig := hex.EncodeToString(mac.Sum(nil))
 
-	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + string(sig)))
+	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + sig))
 }
 
 // verify parses and validates a signed cookie value.
@@ -104,7 +110,7 @@ func (c *CookieAuth) verify(encoded string) (string, bool) {
 		return "", false
 	}
 
-	tsStr, userID, sig := parts[0], parts[1], []byte(parts[2])
+	tsStr, userID, sigHex := parts[0], parts[1], parts[2]
 
 	// Check timestamp freshness.
 	ts, err := strconv.ParseInt(tsStr, 10, 64)
@@ -112,6 +118,12 @@ func (c *CookieAuth) verify(encoded string) (string, bool) {
 		return "", false
 	}
 	if time.Since(time.Unix(ts, 0)) > c.maxAge {
+		return "", false
+	}
+
+	// Decode hex-encoded HMAC signature.
+	sig, err := hex.DecodeString(sigHex)
+	if err != nil {
 		return "", false
 	}
 
@@ -129,7 +141,11 @@ func (c *CookieAuth) verify(encoded string) (string, bool) {
 }
 
 // isHTTPS determines if the request was made over HTTPS.
-// Checks TLS state and X-Forwarded-Proto header (reverse proxy).
+// Checks TLS state and X-Forwarded-Proto header (set by reverse proxies).
+// Note: X-Forwarded-Proto is trusted unconditionally — a misconfigured or
+// direct-access client could set this header, causing the Secure flag on
+// the cookie. This is a self-DoS (cookie won't be sent back over HTTP),
+// not a security bypass.
 func isHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true

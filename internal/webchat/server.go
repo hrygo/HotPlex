@@ -73,6 +73,10 @@ func Handler(csp string, cookieAuth *security.CookieAuth) http.Handler {
 		// SPA fallback: serve index.html for all non-file paths.
 		// Issue a cookie if cookieAuth is configured and request lacks a valid one.
 		if cookieAuth != nil {
+			// TODO(security): support real user identity via login/OAuth.
+			// Currently all webchat visitors share "webchat_user" identity.
+			// This is sufficient for single-user webchat but prevents cookie-authed
+			// users from accessing sessions created by specific API key identities.
 			_ = cookieAuth.SetCookie(w, r, "webchat_user")
 		}
 		w.Header().Set("Cache-Control", "no-cache")
