@@ -191,6 +191,7 @@ func (c *StreamingCardController) WriteToolResult(id string, output any, errMsg 
 		return
 	}
 	c.mu.Lock()
+	var found bool
 	for i := range c.toolEntries {
 		if c.toolEntries[i].id != id {
 			continue
@@ -198,11 +199,13 @@ func (c *StreamingCardController) WriteToolResult(id string, output any, errMsg 
 		c.toolEntries[i].done = true
 		c.toolEntries[i].result = formatToolResult(c.toolEntries[i].name, output, errMsg)
 		c.toolDirty = true
-		c.mu.Unlock()
-		c.triggerToolFlush()
-		return
+		found = true
+		break
 	}
 	c.mu.Unlock()
+	if found {
+		c.triggerToolFlush()
+	}
 }
 
 // triggerToolFlush ensures the flush loop is running and signals an immediate flush.

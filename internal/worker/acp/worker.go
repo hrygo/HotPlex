@@ -50,6 +50,9 @@ var autoApproveDefault atomic.Bool
 func init() {
 	commandParts.Store([]string{"hermes", "acp"})
 	configArgs.Store([]string{})
+	// ACP agents run in sandboxed environments where manual approval is impractical.
+	// Default to auto-approve so tool calls proceed without waiting for permission
+	// responses that may never arrive. Operators can opt out via acp.auto_approve: false.
 	autoApproveDefault.Store(true)
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
