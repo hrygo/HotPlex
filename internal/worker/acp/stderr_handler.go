@@ -31,10 +31,10 @@ type acpStderrHandler struct {
 type foldKind int
 
 const (
-	foldNone   foldKind = iota
-	foldSystemPrompt         // [SYSTEM INSTRUCTIONS] … [/SYSTEM INSTRUCTIONS]
-	foldTraceback            // Traceback (most recent call last): … exception line
-	foldXMLConfig            // <agent-configuration> … </agent-configuration>
+	foldNone         foldKind = iota
+	foldSystemPrompt          // [SYSTEM INSTRUCTIONS] … [/SYSTEM INSTRUCTIONS]
+	foldTraceback             // Traceback (most recent call last): … exception line
+	foldXMLConfig             // <agent-configuration> … </agent-configuration>
 )
 
 // Safety valve: force emit if a folded block exceeds these limits.
