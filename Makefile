@@ -98,17 +98,10 @@ check-tools:
 
 hooks:
 	@echo "$(CYAN)Installing git hooks...$(RESET)"
+	@git config core.hooksPath scripts/git-hooks
 	@for hook in scripts/git-hooks/*; do \
 		name=$$(basename "$$hook"); \
-		target=".git/hooks/$$name"; \
-		if [ -L "$$target" ]; then \
-			echo "  $(GREEN)✓$(RESET) $$name (symlink exists)"; \
-		elif [ -f "$$target" ]; then \
-			echo "  $(YELLOW)⚠$(RESET) $$name (regular file, skipping — remove manually and re-run)"; \
-		else \
-			ln -s "$(PWD)/$$hook" "$$target" && \
-			echo "  $(GREEN)✓$(RESET) $$name → $$hook"; \
-		fi; \
+		echo "  $(GREEN)✓$(RESET) $$name"; \
 	done
 	@echo "  $(DIM)Pre-push runs: fmt → lint → vet → mod verify → build → test$(RESET)"
 
