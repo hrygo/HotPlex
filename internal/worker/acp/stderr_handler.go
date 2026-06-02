@@ -87,6 +87,11 @@ func (h *acpStderrHandler) isFoldEnd(line string) bool {
 		if isFrame || trimmed == "^" || strings.HasPrefix(trimmed, "~") {
 			return false
 		}
+		// Known limitation: intermediate traceback lines like
+		// "During handling of the above exception, another exception occurred:"
+		// are not frame patterns and would prematurely end the fold, producing
+		// a misleading summary. Low impact — the safety valve (256 lines / 32KB)
+		// catches most cases.
 		return true
 	default:
 		return false

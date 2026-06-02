@@ -38,8 +38,9 @@ type StderrHandlerFactory func(sessionID string) StderrHandler
 //   - Unmarked lines default to Debug
 //   - No content suppression (no folding of system prompts, tracebacks, etc.)
 //
-// This preserves the existing behavior of all non-ACP workers — stderr is still
-// fully logged, just at more appropriate levels instead of always-Info.
+// Unlike the previous always-Info behavior, this handler maps unmarked lines to
+// Debug and [INFO]-prefixed lines to Debug (agent INFO is treated as noisy).
+// Stderr is still fully logged, just at more appropriate levels.
 type DefaultStderrHandler struct{}
 
 // Handle implements StderrHandler.
