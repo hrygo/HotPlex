@@ -11,20 +11,17 @@ description: 面向第三方开发者，从快速上手到高级特性，完整�
 - [3. 连接与认证](#3-连接与认证)
 - [4. Session 管理](#4-session-管理)
 - [5. 消息收发](#5-消息收发)
-- [6. 用户交互](#6-用户交互)
-- [7. 心跳保活](#7-心跳保活)
-- [8. 断线重连](#8-断线重连)
-- [9. 会话隔离](#9-会话隔离)
-- [10. 控制命令](#10-控制命令)
+- [6. 心跳保活](#6-心跳保活)
+- [7. 断线重连](#7-断线重连)
+- [8. 会话隔离](#8-会话隔离)
+- [9. 控制命令](#9-控制命令)
+- [10. 用户交互](#10-用户交互)
 - [11. 背压与丢弃](#11-背压与丢弃)
 - [12. 会话历史查询](#12-会话历史查询)
 - [13. Init 握手详解](#13-init-握手详解)
 - [14. 连接限制](#14-连接限制)
 - [15. 错误码参考](#15-错误码参考)
 - [16. 常见问题](#16-常见问题)
-    - [收到 `dropped: true`？](#收到-dropped-true)
-    - [Worker 崩溃了？](#worker-崩溃了)
-    - [如何查看历史记录？](#如何查看历史记录)
 
 ---
 
@@ -530,16 +527,16 @@ Worker 执行过程中还可能产生：
 
 ---
 
-## 8. 断线重连
+## 7. 断线重连
 
-### 8.1 重连步骤
+### 7.1 重连步骤
 
 1. WebSocket 断开后，等待指数退避时间（1s, 2s, 4s, 8s...最大 60s）
 2. 重新建立 WebSocket 连接
 3. 发送 init，**携带与首次完全相同的参数**（clientSessionID、auth、workDir）
 4. Gateway 派生出相同的 Session ID → 自动恢复
 
-### 8.2 完整重连示例
+### 7.2 完整重连示例
 
 ```javascript
 class HotPlexClient {
@@ -616,9 +613,9 @@ class HotPlexClient {
 
 ---
 
-## 9. 会话隔离
+## 8. 会话隔离
 
-### 9.1 四维度隔离
+### 8.1 四维度隔离
 
 Session ID 由四个维度派生，任何维度不同都会产生不同的 Session：
 
@@ -629,7 +626,7 @@ Session ID 由四个维度派生，任何维度不同都会产生不同的 Sessi
 | **clientSessionID** | 客户端生成的 ID                            | 不同 tab → 不同会话  |
 | **workDir**         | 工作目录                                   | 不同项目 → 不同会话  |
 
-### 9.2 多用户隔离
+### 8.2 多用户隔离
 
 使用 API Key 认证时所有用户默认都是 `api_user`，无法隔离。服务端管理员可为不同用户分配不同 API Key，实现用户级隔离：
 
@@ -640,7 +637,7 @@ Bob   (key: ak-bob,   resolver->userID: "bob")   -> "bob|claude_code|tab-1|/proj
 
 `ListSessions` API 按 userID 过滤，每个用户只看到自己的会话。
 
-### 9.3 多 Tab 隔离
+### 8.3 多 Tab 隔离
 
 每个 tab 生成独立的 clientSessionID：
 
@@ -653,9 +650,9 @@ const tabId = `sess_${crypto.randomUUID()}`;
 
 ---
 
-## 10. 控制命令
+## 9. 控制命令
 
-### 10.1 客户端发送的控制命令
+### 9.1 客户端发送的控制命令
 
 通过 `control` 事件管理会话：
 
@@ -685,7 +682,7 @@ const tabId = `sess_${crypto.randomUUID()}`;
 | `gc`        | 回收会话资源     | 终止 Worker 并归档             |
 | `cd`        | 切换工作目录     | 需带 `details.path` 参数       |
 
-### 10.2 服务端发送的控制命令
+### 9.2 服务端发送的控制命令
 
 Gateway 会主动推送以下控制命令：
 
@@ -695,7 +692,7 @@ Gateway 会主动推送以下控制命令：
 | `session_invalid` | Session 已失效，需重新 init    |
 | `throttle`        | 请求被限流                     |
 
-### 10.3 斜杠命令
+### 9.3 斜杠命令
 
 在消息平台（飞书/Slack）中，也可在 `input.content` 中用快捷命令：
 
@@ -706,6 +703,141 @@ Gateway 会主动推送以下控制命令：
 | `/gc`        | 回收空闲会话   | `gc`                 |
 | `/park`      | 回收空闲会话   | `gc`（等同于 `/gc`） |
 | `/cd <path>` | 切换工作目录   | `cd`                 |
+
+---
+
+## 10. 用户交互
+
+Worker 执行过程中可能需要用户参与。三种交互类型都遵循相同的模式：**Gateway 发送请求 → 客户端通过 input 响应**。
+
+### 10.1 权限确认 — Worker 请求执行工具
+
+```json
+// Gateway → 客户端
+{
+  "event": {
+    "type": "permission_request",
+    "data": {
+      "id": "perm_1",
+      "tool_name": "Bash",
+      "input_raw": "{\"command\":\"rm -rf /tmp/*\"}"
+    }
+  }
+}
+
+// 客户端 → Gateway（允许）
+{
+  "event": {
+    "type": "input",
+    "data": {
+      "content": "yes",
+      "metadata": {
+        "permission_response": {
+          "request_id": "perm_1",
+          "allowed": true
+        }
+      }
+    }
+  }
+}
+
+// 客户端 → Gateway（拒绝）
+{
+  "event": {
+    "type": "input",
+    "data": {
+      "content": "",
+      "metadata": {
+        "permission_response": {
+          "request_id": "perm_1",
+          "allowed": false,
+          "reason": "不允许"
+        }
+      }
+    }
+  }
+}
+```
+
+### 10.2 问答请求 — Worker 需要用户选择
+
+```json
+// Gateway → 客户端
+{
+  "event": {
+    "type": "question_request",
+    "data": {
+      "id": "q_1",
+      "questions": [
+        {
+          "question": "选择环境",
+          "header": "环境",
+          "options": [
+            { "label": "staging", "description": "预发布" },
+            { "label": "production", "description": "生产" }
+          ],
+          "multi_select": false
+        }
+      ]
+    }
+  }
+}
+
+// 客户端 → Gateway
+{
+  "event": {
+    "type": "input",
+    "data": {
+      "content": "staging",
+      "metadata": {
+        "question_response": {
+          "id": "q_1",
+          "answers": {
+            "选择环境": "staging"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### 10.3 MCP 输入请求 — MCP Server 需要用户信息
+
+```json
+// Gateway → 客户端
+{
+  "event": {
+    "type": "elicitation_request",
+    "data": {
+      "id": "el_1",
+      "mcp_server_name": "github",
+      "message": "请输入 GitHub Token"
+    }
+  }
+}
+
+// 客户端 → Gateway
+{
+  "event": {
+    "type": "input",
+    "data": {
+      "content": "",
+      "metadata": {
+        "elicitation_response": {
+          "id": "el_1",
+          "action": "accept",
+          "content": {
+            "token": "ghp_xxx"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**超时**：所有交互默认 5 分钟，超时后自动拒绝（auto-deny）。
 
 ---
 
@@ -945,7 +1077,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 
 ## 14. 连接限制
 
-### 客户端相关
+### 14.1 客户端相关
 
 | 项目             | 值     | 说明                               |
 | ---------------- | ------ | ---------------------------------- |
@@ -956,7 +1088,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | 连续 Miss 上限   | 3 次   | 纯静默场景最坏 ~180 秒断连         |
 | 交互确认超时     | 5 分钟 | 权限/问答/elicitation 超时自动拒绝 |
 
-### 服务端配置（可能影响你的请求）
+### 14.2 服务端配置（可能影响你的请求）
 
 | 项目                   | 默认值 | 说明                        |
 | ---------------------- | ------ | --------------------------- |
