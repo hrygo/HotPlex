@@ -15,6 +15,9 @@ func FormatCall(name string, input map[string]any) string {
 	if fn, ok := callFormatters[name]; ok && input != nil {
 		return fn(input)
 	}
+	if fn, ok := callFormattersLower[strings.ToLower(name)]; ok && input != nil {
+		return fn(input)
+	}
 	return formatFallbackCall(name, input)
 }
 
@@ -33,16 +36,16 @@ func FormatResult(name string, output any, errMsg string) string {
 		return ""
 	}
 	lines := strings.Count(s, "\n") + 1
-	switch name {
-	case "Grep":
+	switch strings.ToLower(name) {
+	case "grep":
 		if lines > 0 {
 			return fmt.Sprintf("%d matches", lines)
 		}
-	case "Read":
+	case "read":
 		if lines > 1 {
 			return fmt.Sprintf("%d lines", lines)
 		}
-	case "Glob":
+	case "glob":
 		if lines > 0 {
 			return fmt.Sprintf("%d files", lines)
 		}
@@ -73,6 +76,17 @@ func TruncateRunes(s string, max int) string {
 // --- Tool call formatters ---
 
 type callFormatter func(input map[string]any) string
+
+// callFormattersLower provides case-insensitive lookup for ACP agents
+// that send lowercase tool names (e.g., "read" instead of "Read").
+var callFormattersLower map[string]callFormatter
+
+func init() {
+	callFormattersLower = make(map[string]callFormatter, len(callFormatters))
+	for k, v := range callFormatters {
+		callFormattersLower[strings.ToLower(k)] = v
+	}
+}
 
 var callFormatters = map[string]callFormatter{
 	"TodoWrite":    formatTodoWrite,
