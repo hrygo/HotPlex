@@ -202,7 +202,7 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-	h.log.Warn("skills list: failed to resolve home directory, global skills may be incomplete", "error", err)
+		h.log.Warn("skills list: failed to resolve home directory, global skills may be incomplete", "error", err)
 	}
 	allSkills, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
 	if err != nil {
