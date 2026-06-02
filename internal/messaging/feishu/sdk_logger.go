@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/hrygo/hotplex/internal/messaging/toolfmt"
 )
 
 // Sensitive URL query parameter keys redacted in logs: access_key, conn_id,
@@ -34,20 +36,12 @@ func sdkLogFilter(msg string) string {
 	}
 	// Truncate oversized debug messages (full event payloads are noise in logs).
 	if utf8.RuneCountInString(msg) > maxDebugMsgLen {
-		msg = truncateRunes(msg, maxDebugMsgLen)
+		msg = toolfmt.TruncateRunes(msg, maxDebugMsgLen)
 	}
 	return msg
 }
 
 const maxDebugMsgLen = 400
-
-func truncateRunes(s string, max int) string {
-	if utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:max]) + "..."
-}
 
 // sensitiveParamRe matches sensitive=VALUE patterns and captures the key=
 // prefix for replacement. Values are terminated by &, whitespace, [, or ].
