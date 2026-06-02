@@ -6,7 +6,61 @@ description: 面向第三方开发者，从快速上手到高级特性，完整�
 
 # WebSocket Gateway 对接指南
 
-## 快速上手：30 秒跑通
+**目录**
+
+- [1. 快速上手：30 秒跑通](#1-快速上手30-秒跑通)
+- [2. 核心概念](#2-核心概念)
+  - [2.1 通信模型](#21-通信模型)
+  - [2.2 消息信封](#22-消息信封)
+  - [2.3 一次完整对话的流程](#23-一次完整对话的流程)
+- [3. 连接与认证](#3-连接与认证)
+  - [3.1 连接端点](#31-连接端点)
+  - [3.2 认证方式](#32-认证方式)
+- [4. Session 管理](#4-session-管理)
+  - [4.1 Session 是什么](#41-session-是什么)
+  - [4.2 Session ID 如何确定](#42-session-id-如何确定)
+  - [4.3 三个关键规则](#43-三个关键规则)
+  - [4.4 Session 状态](#44-session-状态)
+  - [4.5 会话恢复决策](#45-会话恢复决策)
+- [5. 消息收发](#5-消息收发)
+  - [5.1 发送用户输入](#51-发送用户输入)
+  - [5.2 接收流式响应](#52-接收流式响应)
+  - [5.3 辅助事件](#53-辅助事件)
+- [6. 用户交互](#6-用户交互)
+  - [6.1 权限确认](#61-权限确认worker-请求执行工具)
+  - [6.2 问答请求](#62-问答请求worker-需要用户选择)
+  - [6.3 MCP 输入请求](#63-mcp-输入请求mcp-server-需要用户信息)
+- [7. 心跳保活](#7-心跳保活)
+- [8. 断线重连](#8-断线重连)
+  - [8.1 重连步骤](#81-重连步骤)
+  - [8.2 完整重连示例](#82-完整重连示例)
+- [9. 会话隔离](#9-会话隔离)
+  - [9.1 四维度隔离](#91-四维度隔离)
+  - [9.2 多用户隔离](#92-多用户隔离)
+  - [9.3 多 Tab 隔离](#93-多-tab-隔离)
+- [10. 控制命令](#10-控制命令)
+  - [10.1 客户端发送的控制命令](#101-客户端发送的控制命令)
+  - [10.2 服务端发送的控制命令](#102-服务端发送的控制命令)
+  - [10.3 斜杠命令](#103-斜杠命令)
+- [11. 背压与丢弃](#11-背压与丢弃)
+- [12. 会话历史查询](#12-会话历史查询)
+  - [12.1 Turn 级别 — 聊天记录](#121-turn-级别-聊天记录)
+  - [12.2 Event 级别 — 原始事件流](#122-event-级别-原始事件流)
+  - [12.3 如何选择](#123-如何选择)
+- [13. Init 握手详解](#13-init-握手详解)
+  - [13.1 init 完整字段](#131-init-完整字段)
+  - [13.2 init\_ack 响应](#132-init_ack-响应)
+- [14. 连接限制](#14-连接限制)
+- [15. 错误码参考](#15-错误码参考)
+  - [15.1 握手阶段](#151-握手阶段)
+  - [15.2 会话阶段](#152-会话阶段)
+  - [15.3 Worker 阶段](#153-worker-阶段)
+  - [15.4 其他](#154-其他)
+- [16. 常见问题](#16-常见问题)
+
+---
+
+## 1. 快速上手：30 秒跑通
 
 ```javascript
 // 1. 连接
@@ -71,11 +125,32 @@ function sendInput(text) {
 
 运行上面的代码，你就能看到 AI 的流式回复。以下是完整的工作原理。
 
+> **官方示例代码**：项目提供了完整的 TypeScript SDK 和示例，可直接运行：
+>
+> | 示例 | 路径 | 说明 |
+> |------|------|------|
+> | Quick Start | [`examples/typescript-client/examples/quickstart.ts`](https://github.com/hrygo/hotplex/tree/main/examples/typescript-client/examples/quickstart.ts) | 最小连接 + 发送任务 + 流式输出 |
+> | Complete | [`examples/typescript-client/examples/complete.ts`](https://github.com/hrygo/hotplex/tree/main/examples/typescript-client/examples/complete.ts) | 完整功能：Session 恢复、权限确认、工具监控、错误恢复 |
+>
+> ```bash
+> # 克隆后进入 TypeScript 客户端目录
+> cd examples/typescript-client
+> npm install
+>
+> # 运行快速上手示例
+> HOTPLEX_API_KEY=your-key npx tsx examples/quickstart.ts
+>
+> # 运行完整示例（交互式 REPL）
+> HOTPLEX_API_KEY=your-key npx tsx examples/complete.ts
+> ```
+>
+> SDK 还提供 Python (`examples/python-client/`) 和 Java (`examples/java-client/`) 客户端。
+
 ---
 
-## 核心概念
+## 2. 核心概念
 
-### 通信模型
+### 2.1 通信模型
 
 ```
 你的客户端  ◄──── WebSocket (全双工, NDJSON) ────►  HotPlex Gateway  ◄── stdio ──►  AI Worker
@@ -85,7 +160,7 @@ function sendInput(text) {
 - **协议**：AEP v1（Agent Event Protocol），统一信封格式
 - **模式**：全双工，客户端和服务端可以同时发送消息
 
-### 消息信封
+### 2.2 消息信封
 
 所有消息都遵循相同的结构：
 
@@ -116,7 +191,7 @@ function sendInput(text) {
 | `event.type` | 消息类型                                                        |
 | `event.data` | 消息载荷                                                        |
 
-### 一次完整对话的流程
+### 2.3 一次完整对话的流程
 
 ```
 客户端                            Gateway                         AI Worker
@@ -144,15 +219,15 @@ function sendInput(text) {
 
 ---
 
-## 连接与认证
+## 3. 连接与认证
 
-### 连接端点
+### 3.1 连接端点
 
 ```
 ws://<host>:<port>/ws
 ```
 
-### 两种认证方式
+### 3.2 认证方式
 
 #### API Key — 简单快速，适合单用户/内部服务
 
@@ -222,28 +297,26 @@ curl -i --no-buffer \
   http://localhost:8888/ws
 ```
 
-对于需要区分用户身份的多用户场景，可通过 `security.SetKeyResolver()` 设置自定义的 `APIKeyResolver`，将 API Key 映射到不同的 userID，实现用户级会话隔离。
+对于需要区分用户身份的多用户场景，服务端管理员可为不同用户分配不同的 API Key。每个 API Key 对应独立的用户身份，实现用户级会话隔离（具体映射由服务端配置决定）。
 
-> **注意**：用户隔离和 Bot 隔离是**两个独立维度**。`APIKeyResolver` 控制 userID（影响 session key 派生），Bot ID 控制 bot 配置路由。两者可以独立使用或组合使用。
+> **关于 Bot ID**：`X-Bot-ID` 是可选的 session 标签，客户端可随意传递，服务端不做校验。对 WebSocket 客户端而言，Bot ID 不影响 session key 派生，也不参与 bot 配置路由（该功能仅在飞书/Slack 消息适配器中生效）。Bot ID 的唯一作用是重连时的一致性校验——重连时携带的 Bot ID 必须与 session 记录中的一致，否则拒绝连接。
 
 #### 如何选择
 
-| 场景 | 配置 | 用户身份 | Bot 隔离 |
-| ---- | ---- | -------- | -------- |
-| 单用户 / 内部测试 | 仅 API Key | 全部 `api_user`（共享） | 无 |
-| 多用户 SaaS | API Key + `APIKeyResolver` | 不同 key → 不同 userID | 无 |
-| 多 Bot 单用户 | API Key + Bot ID | 全部 `api_user`（共享） | 按 Bot ID 隔离 |
-| 多 Bot 多用户 | API Key + `APIKeyResolver` + Bot ID | 不同 key → 不同 userID | 按 Bot ID 隔离 |
+| 场景 | 服务端配置 | 用户身份 |
+| ---- | ---- | -------- |
+| 单用户 / 内部测试 | `api_keys` 配置一个 key | 全部 `api_user`（共享） |
+| 多用户 | Admin UI 或 `api_key_users` 为每人创建 key | 每个 key 独立 userID |
 
 ---
 
-## Session 管理
+## 4. Session 管理
 
-### Session 是什么
+### 4.1 Session 是什么
 
 Session 代表一个独立的对话上下文。每个 Session 绑定一个 Worker 进程，拥有独立的状态和对话历史。
 
-### Session ID 如何确定
+### 4.2 Session ID 如何确定
 
 Gateway 使用 **UUIDv5 确定性派生**，从四个维度生成唯一 ID：
 
@@ -253,7 +326,7 @@ Session ID = UUIDv5(userID | workerType | clientSessionID | workDir)
 
 **clientSessionID 是什么**：你在 init 信封 `session_id` 字段传入的值。它**不是** Session ID 本身，只是派生函数的一个输入。
 
-### 三个关键规则
+### 4.3 三个关键规则
 
 **规则 1：不传 clientSessionID → 自动获得固定会话**
 
@@ -299,7 +372,7 @@ const tabId = `sess_${crypto.randomUUID()}`;
 | **clientSessionID**（你自己生成的）       | init 握手时传入，重连时重传           |
 | **Gateway Session ID**（init_ack 返回的） | REST API 调用（查询历史、删除会话等） |
 
-### Session 状态
+### 4.4 Session 状态
 
 ```
 CREATED ──► RUNNING ──► IDLE ──► TERMINATED ──► DELETED
@@ -318,7 +391,7 @@ CREATED ──► RUNNING ──► IDLE ──► TERMINATED ──► DELETED
 | `terminated` | Worker 已终止         | 需重连恢复               |
 | `deleted`    | 终态，已删除          | 不能                     |
 
-### 会话恢复决策
+### 4.5 会话恢复决策
 
 init 握手时，Gateway 根据 Session 状态自动决策：
 
@@ -333,9 +406,9 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 
 ---
 
-## 消息收发
+## 5. 消息收发
 
-### 发送用户输入
+### 5.1 发送用户输入
 
 ```json
 {
@@ -357,7 +430,7 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 
 **限制**：Session 必须处于 Active 状态（created / running / idle），非 Active 状态下发送 input 返回 `SESSION_BUSY` 或 `SESSION_TERMINATED` 错误。
 
-### 接收流式响应
+### 5.2 接收流式响应
 
 一个完整 Turn 的事件序列（理想模型）：
 
@@ -371,7 +444,7 @@ done              ← Turn 终止符
 
 > **注意**：实际事件序列因 Worker 类型而异。ClaudeCode Worker 只产出 `message.delta` + `done`；CodexCLI Worker 产出 `message.start` + `message.delta` + `message.end` + `done`。客户端应兼容处理，不依赖特定事件的出现。
 
-#### message.delta — 增量文本
+#### 5.2.1 message.delta — 增量文本
 
 ```json
 {
@@ -396,7 +469,7 @@ done              ← Turn 终止符
 
 拼接所有 delta 即可获得流式效果。delta 可能因背压被丢弃，详见[背压与丢弃](#背压与丢弃)。
 
-#### message — 完整文本
+#### 5.2.2 message — 完整文本
 
 ```json
 {
@@ -415,7 +488,7 @@ done              ← Turn 终止符
 
 `content_type` 和 `metadata` 为可选字段。**如果 delta 被丢弃，以 message 为准。**
 
-#### done — Turn 结束
+#### 5.2.3 done — Turn 结束
 
 ```json
 {
@@ -450,7 +523,7 @@ done              ← Turn 终止符
 
 > **stats 结构**：`stats` 包含两部分 —— Worker 原始统计（`usage`、`total_cost_usd` 等）和 Gateway 注入的 `_session` 累计统计。不同 Worker 类型的原始 stats 字段可能不同，但 `_session` 格式统一。
 
-### 辅助事件
+### 5.3 辅助事件
 
 Worker 执行过程中还可能产生：
 
@@ -469,11 +542,11 @@ Worker 执行过程中还可能产生：
 
 ---
 
-## 用户交互
+## 6. 用户交互
 
 Worker 执行过程中可能需要用户参与。三种交互类型都遵循相同的模式：**Gateway 发送请求 → 客户端通过 input 响应**。
 
-### 权限确认 — Worker 请求执行工具
+### 6.1 权限确认 — Worker 请求执行工具
 
 ```json
 // Gateway → 客户端
@@ -522,7 +595,7 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
 }
 ```
 
-### 问答请求 — Worker 需要用户选择
+### 6.2 问答请求 — Worker 需要用户选择
 
 ```json
 // Gateway → 客户端
@@ -565,7 +638,7 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
 }
 ```
 
-### MCP 输入请求 — MCP Server 需要用户信息
+### 6.3 MCP 输入请求 — MCP Server 需要用户信息
 
 ```json
 // Gateway → 客户端
@@ -604,7 +677,7 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
 
 ---
 
-## 心跳保活
+## 7. 心跳保活
 
 | 项目             | 值                                                                |
 | ---------------- | ----------------------------------------------------------------- |
@@ -640,16 +713,16 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
 
 ---
 
-## 断线重连
+## 8. 断线重连
 
-### 重连步骤
+### 8.1 重连步骤
 
 1. WebSocket 断开后，等待指数退避时间（1s, 2s, 4s, 8s...最大 60s）
 2. 重新建立 WebSocket 连接
 3. 发送 init，**携带与首次完全相同的参数**（clientSessionID、auth、workDir）
 4. Gateway 派生出相同的 Session ID → 自动恢复
 
-### 完整重连示例
+### 8.2 完整重连示例
 
 ```javascript
 class HotPlexClient {
@@ -726,9 +799,9 @@ class HotPlexClient {
 
 ---
 
-## 会话隔离
+## 9. 会话隔离
 
-### 四维度隔离
+### 9.1 四维度隔离
 
 Session ID 由四个维度派生，任何维度不同都会产生不同的 Session：
 
@@ -739,9 +812,9 @@ Session ID 由四个维度派生，任何维度不同都会产生不同的 Sessi
 | **clientSessionID** | 客户端生成的 ID                       | 不同 tab → 不同会话 |
 | **workDir**         | 工作目录                              | 不同项目 → 不同会话 |
 
-### 多用户隔离
+### 9.2 多用户隔离
 
-使用 API Key 认证时所有用户默认都是 `api_user`，无法隔离。配置 `APIKeyResolver` 后，不同 API Key 可映射到不同 userID，实现用户级隔离：
+使用 API Key 认证时所有用户默认都是 `api_user`，无法隔离。服务端管理员可为不同用户分配不同 API Key，实现用户级隔离：
 
 ```
 Alice (key: ak-alice, resolver->userID: "alice") -> "alice|claude_code|tab-1|/project" -> Session A
@@ -750,7 +823,7 @@ Bob   (key: ak-bob,   resolver->userID: "bob")   -> "bob|claude_code|tab-1|/proj
 
 `ListSessions` API 按 userID 过滤，每个用户只看到自己的会话。
 
-### 多 Tab 隔离
+### 9.3 多 Tab 隔离
 
 每个 tab 生成独立的 clientSessionID：
 
@@ -763,9 +836,9 @@ const tabId = `sess_${crypto.randomUUID()}`;
 
 ---
 
-## 控制命令
+## 10. 控制命令
 
-### 客户端发送的控制命令
+### 10.1 客户端发送的控制命令
 
 通过 `control` 事件管理会话：
 
@@ -795,7 +868,7 @@ const tabId = `sess_${crypto.randomUUID()}`;
 | `gc` | 回收会话资源 | 终止 Worker 并归档 |
 | `cd` | 切换工作目录 | 需带 `details.path` 参数 |
 
-### 服务端发送的控制命令
+### 10.2 服务端发送的控制命令
 
 Gateway 会主动推送以下控制命令：
 
@@ -805,7 +878,7 @@ Gateway 会主动推送以下控制命令：
 | `session_invalid` | Session 已失效，需重新 init |
 | `throttle` | 请求被限流 |
 
-### 斜杠命令
+### 10.3 斜杠命令
 
 在消息平台（飞书/Slack）中，也可在 `input.content` 中用快捷命令：
 
@@ -819,7 +892,7 @@ Gateway 会主动推送以下控制命令：
 
 ---
 
-## 背压与丢弃
+## 11. 背压与丢弃
 
 当客户端消费速度跟不上 Worker 输出时：
 
@@ -835,11 +908,11 @@ Gateway 会主动推送以下控制命令：
 
 ---
 
-## 会话历史查询
+## 12. 会话历史查询
 
 Gateway 提供两个 REST API 查询历史，需要认证且校验 session 归属（非 owner 返回 403）。
 
-### Turn 级别 — 聊天记录
+### 12.1 Turn 级别 — 聊天记录
 
 适合展示对话列表（一句提问一句回答）。
 
@@ -891,7 +964,7 @@ curl -H "X-API-Key: your-key" \
 curl "http://localhost:8888/api/sessions/{id}/history?limit=20&before_id=123"
 ```
 
-### Event 级别 — 原始事件流
+### 12.2 Event 级别 — 原始事件流
 
 适合调试、审计、回放完整会话状态。
 
@@ -946,7 +1019,7 @@ direction=before&cursor=5     # 向前翻页：seq < 5
 direction=after&cursor=42     # 向后追赶：seq > 42
 ```
 
-### 如何选择
+### 12.3 如何选择
 
 | 场景             | 用哪个                              |
 | ---------------- | ----------------------------------- |
@@ -957,11 +1030,11 @@ direction=after&cursor=42     # 向后追赶：seq > 42
 
 ---
 
-## Init 握手详解
+## 13. Init 握手详解
 
 WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧。
 
-### init 完整字段
+### 13.1 init 完整字段
 
 ```json
 {
@@ -1011,7 +1084,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `config.max_turns` | 否 | 最大轮次 |
 | `client_caps.*` | 否 | 客户端能力声明 |
 
-### init_ack 响应
+### 13.2 init\_ack 响应
 
 成功时：
 
@@ -1053,26 +1126,32 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 
 ---
 
-## 连接限制
+## 14. 连接限制
 
-| 项目             | 值      | 配置项                        |
-| ---------------- | ------- | ----------------------------- |
-| 最大消息大小     | 32 KB   | —                             |
-| Init 握手超时    | 30 秒   | —                             |
-| Pong 检测超时    | 60 秒   | —                             |
-| Server Ping 间隔 | 54 秒   | —                             |
-| 连续 Miss 上限   | 3 次    | —                             |
-| 交互确认超时     | 5 分钟  | —                             |
-| 最大并发 Session | 1000    | `session.max_concurrent`      |
-| 全局最大活跃 Worker | 100  | `pool.max_size`               |
-| 每用户最大空闲 Session | 5 | `pool.max_idle_per_user`      |
-| 背压队列大小     | 256     | `gateway.broadcast_queue_size`|
+### 客户端相关
+
+| 项目             | 值      | 说明                                    |
+| ---------------- | ------- | --------------------------------------- |
+| 最大消息大小     | 32 KB   | 超过会被拒绝                            |
+| Init 握手超时    | 30 秒   | 连接后必须在此时间内发送 init           |
+| Pong 检测超时    | 60 秒   | 每次 Miss 的等待时间                    |
+| Server Ping 间隔 | 54 秒   | 服务端自动发送 Ping 帧                  |
+| 连续 Miss 上限   | 3 次    | 纯静默场景最坏 ~180 秒断连              |
+| 交互确认超时     | 5 分钟  | 权限/问答/elicitation 超时自动拒绝      |
+
+### 服务端配置（可能影响你的请求）
+
+| 项目                    | 默认值 | 说明                         |
+| ----------------------- | ------ | ---------------------------- |
+| 最大并发 Session        | 1000   | 超出返回 `GATEWAY_OVERLOAD`  |
+| 全局最大活跃 Worker     | 100    | 超出需等待空闲槽位           |
+| 每用户最大空闲 Session  | 5      | 超出触发最早 session 回收    |
 
 ---
 
-## 错误码参考
+## 15. 错误码参考
 
-### 握手阶段
+### 15.1 握手阶段
 
 | 错误码               | 说明               | 建议                       |
 | -------------------- | ------------------ | -------------------------- |
@@ -1083,7 +1162,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `RATE_LIMITED`       | 握手频率过高       | 退避重试                   |
 | `CONFIG_INVALID`     | 配置校验失败       | 检查 allowed_tools / model |
 
-### 会话阶段
+### 15.2 会话阶段
 
 | 错误码               | 说明               | 建议                       |
 | -------------------- | ------------------ | -------------------------- |
@@ -1094,7 +1173,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `SESSION_INVALIDATED`| Session 已失效     | 重新 init                  |
 | `RECONNECT_REQUIRED` | 服务端要求重连     | 执行重连                   |
 
-### Worker 阶段
+### 15.3 Worker 阶段
 
 | 错误码               | 说明               | 建议                       |
 | -------------------- | ------------------ | -------------------------- |
@@ -1107,7 +1186,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `WORKER_OUTPUT_LIMIT`| Worker 输出超限    | 减少输出量                 |
 | `RESUME_RETRY`       | Resume 重试        | Gateway 自动重试           |
 
-### 其他
+### 15.4 其他
 
 | 错误码               | 说明               | 建议                       |
 | -------------------- | ------------------ | -------------------------- |
@@ -1119,7 +1198,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 
 ---
 
-## 常见问题
+## 16. 常见问题
 
 ### 多个浏览器 tab 消息串了？
 
@@ -1127,7 +1206,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 
 ### ListSessions 返回所有用户的会话？
 
-配置 `APIKeyResolver`。纯 API Key 认证的身份统一为 `api_user`，无法区分用户。通过 `security.SetKeyResolver()` 设置自定义 resolver 可将 API Key 映射到不同 userID。
+联系服务端管理员为你的用户分配独立 API Key。纯 API Key 认证且未做用户映射时，所有请求共享 `api_user` 身份，无法区分用户。
 
 ### 重连后对话历史丢失？
 
