@@ -33,7 +33,7 @@ func sdkLogFilter(msg string) string {
 		msg = strings.Split(msg, ", err:")[0] + " (connection reset by peer)"
 	}
 	// Truncate oversized debug messages (full event payloads are noise in logs).
-	if len(msg) > maxDebugMsgLen {
+	if utf8.RuneCountInString(msg) > maxDebugMsgLen {
 		msg = truncateRunes(msg, maxDebugMsgLen)
 	}
 	return msg
