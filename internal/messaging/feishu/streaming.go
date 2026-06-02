@@ -933,7 +933,6 @@ func (c *StreamingCardController) flushCardKitElement(ctx context.Context, eleme
 	if !resp.Success() {
 		return fmt.Errorf("cardkit element content failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
-	c.log.Debug("feishu: cardkit element content flushed", "card_id", c.cardID, "seq", seq, "content_len", len(content))
 	return nil
 }
 

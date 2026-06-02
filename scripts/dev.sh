@@ -135,7 +135,7 @@ start_gateway() {
     fi
 
     : > "$GATEWAY_LOG"
-    "$binary" gateway start -c "$CONFIG" >> "$GATEWAY_LOG" 2>&1 &
+    "$binary" gateway start -c "$CONFIG" 2>> "$GATEWAY_LOG" &
     local bg_pid=$!
     echo $bg_pid > "$GATEWAY_PID"
 
