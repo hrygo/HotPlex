@@ -182,11 +182,12 @@ func (p *MossProcess) ensureRunningLocked(ctx context.Context) error {
 	if p.closed {
 		return ErrSynthesizerClosed
 	}
-	if p.started && p.isAlive() {
-		return nil
-	}
 
 	// Another goroutine is already starting — wait without holding the lock.
+	// Must check starting BEFORE started&&isAlive: after spawn() sets
+	// started=true, start() releases the lock for warmup (up to 60s).
+	// A concurrent caller seeing started&&isAlive would skip the single-flight
+	// guard and send HTTP to an unready sidecar.
 	if p.starting {
 		ready := p.readyCh
 		p.mu.Unlock()
@@ -200,6 +201,10 @@ func (p *MossProcess) ensureRunningLocked(ctx context.Context) error {
 		if p.closed || !p.isAlive() {
 			return fmt.Errorf("tts moss: sidecar failed to start")
 		}
+		return nil
+	}
+
+	if p.started && p.isAlive() {
 		return nil
 	}
 
