@@ -59,7 +59,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
     if (!filterText) return true;
     return cmd.key.toLowerCase().includes(filterText) ||
            cmd.description.toLowerCase().includes(filterText);
-  }).slice(0, 8);
+  });
 
   useEffect(() => {
     setSelectedIndex(0);
