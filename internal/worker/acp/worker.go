@@ -50,7 +50,11 @@ var autoApproveDefault atomic.Bool
 func init() {
 	commandParts.Store([]string{"hermes", "acp"})
 	configArgs.Store([]string{})
-	autoApproveDefault.Store(false)
+	// Design decision: ACP agents run in sandboxed environments where manual
+	// approval is impractical. Default to auto-approve so tool calls proceed
+	// without waiting for permission responses that may never arrive.
+	// Operators can opt out via acp.auto_approve: false.
+	autoApproveDefault.Store(true)
 
 	worker.Register(worker.TypeACP, func() (worker.Worker, error) {
 		w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
@@ -82,7 +86,9 @@ func InitConfig(cfg config.ACPConfig) {
 		args = strings.Fields(args[0])
 	}
 	configArgs.Store(args)
-	autoApproveDefault.Store(cfg.AutoApprove)
+	if cfg.AutoApprove != nil {
+		autoApproveDefault.Store(*cfg.AutoApprove)
+	}
 	debugEnabled.Store(cfg.Debug)
 	if err := security.RegisterCommand(parts[0]); err != nil {
 		slog.Default().Error("acp: failed to register command", "command", parts[0], "err", err)
@@ -257,9 +263,16 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Build environment using shared security layer.
 	env := base.BuildEnv(session, acpEnvBlocklist, "acp")
 
-	// Create process manager â protected by Mu for concurrent Terminate safety.
+	// Create process manager — protected by Mu for concurrent Terminate safety.
 	w.Mu.Lock()
-	w.Proc = proc.New(proc.Opts{Logger: w.Log})
+	w.Proc = proc.New(proc.Opts{
+		Logger:        w.Log,
+		StderrHandler: ACPStderrHandlerFactory(session.SessionID),
+		StderrAttrs: []slog.Attr{
+			slog.String("worker_type", string(worker.TypeACP)),
+			slog.String("session_id", session.SessionID),
+		},
+	})
 	w.Mu.Unlock()
 
 	stdin, stdout, _, err := w.Proc.Start(context.Background(), binary, args, env, session.ProjectDir)

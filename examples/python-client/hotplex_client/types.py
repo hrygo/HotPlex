@@ -56,6 +56,9 @@ class ControlAction(StrEnum):
     THROTTLE = "throttle"
     TERMINATE = "terminate"
     DELETE = "delete"
+    RESET = "reset"
+    GC = "gc"
+    CD = "cd"
 
 
 class ErrorCode(StrEnum):
@@ -83,6 +86,9 @@ class ErrorCode(StrEnum):
     EXECUTION_TIMEOUT = "EXECUTION_TIMEOUT"
     RECONNECT_REQUIRED = "RECONNECT_REQUIRED"
     WORKER_OUTPUT_LIMIT = "WORKER_OUTPUT_LIMIT"
+    RESUME_RETRY = "RESUME_RETRY"
+    NOT_SUPPORTED = "NOT_SUPPORTED"
+    TURN_TIMEOUT = "TURN_TIMEOUT"
 
 
 # ============================================================================
@@ -164,6 +170,9 @@ class ToolCallData:
     id: str
     name: str
     input: dict[str, Any]
+    title: str | None = None
+    kind: str | None = None
+    locations: 'list[FileLocation] | None' = None
 
 
 @dataclass
@@ -173,6 +182,83 @@ class ToolResultData:
     id: str
     output: Any
     error: str | None = None
+    status: str | None = None
+    diff: 'FileDiff | None' = None
+
+
+@dataclass
+class FileLocation:
+    """File location reference."""
+
+    path: str
+    line: int | None = None
+
+
+@dataclass
+class FileDiff:
+    """File diff content."""
+
+    path: str
+    old_text: str
+    new_text: str
+
+
+@dataclass
+class QuestionOption:
+    """Option for a question."""
+
+    label: str
+    description: str | None = None
+    preview: str | None = None
+
+
+@dataclass
+class Question:
+    """Structured question with options."""
+
+    question: str
+    header: str
+    options: list[QuestionOption]
+    multi_select: bool
+
+
+@dataclass
+class QuestionRequestData:
+    """question_request event payload (asking user a question)."""
+
+    id: str
+    tool_name: str | None = None
+    questions: list[Question] | None = None
+
+
+@dataclass
+class QuestionResponseData:
+    """question_response event payload (user answers)."""
+
+    id: str
+    answers: dict[str, str]
+
+
+@dataclass
+class ElicitationRequestData:
+    """elicitation_request event payload (MCP elicitation)."""
+
+    id: str
+    mcp_server_name: str
+    message: str
+    mode: str | None = None
+    url: str | None = None
+    elicitation_id: str | None = None
+    requested_schema: dict[str, Any] | None = None
+
+
+@dataclass
+class ElicitationResponseData:
+    """elicitation_response event payload (elicitation result)."""
+
+    id: str
+    action: str
+    content: dict[str, Any] | None = None
 
 
 @dataclass
@@ -222,6 +308,115 @@ class RawData:
 
     kind: str
     raw: Any
+
+
+@dataclass
+class ContextCategory:
+    """Context usage category."""
+
+    name: str
+    tokens: int
+
+
+@dataclass
+class ContextSkillInfo:
+    """Context skill information."""
+
+    total: int
+    included: int
+    tokens: int
+    names: list[str] | None = None
+
+
+@dataclass
+class ContextUsageData:
+    """context_usage event payload (context window usage)."""
+
+    total_tokens: int
+    max_tokens: int
+    percentage: int
+    model: str | None = None
+    categories: list[ContextCategory] | None = None
+    memory_files: int | None = None
+    mcp_tools: int | None = None
+    agents: int | None = None
+    skills: ContextSkillInfo | None = None
+
+
+@dataclass
+class SkillEntry:
+    """Skill entry information."""
+
+    name: str
+    description: str
+    source: str
+
+
+@dataclass
+class SkillsListData:
+    """skills_list event payload (available skills)."""
+
+    skills: list[SkillEntry]
+    total: int
+    filter: str | None = None
+
+
+@dataclass
+class MCPServerInfo:
+    """MCP server status info."""
+
+    name: str
+    status: str
+
+
+@dataclass
+class MCPStatusData:
+    """mcp_status event payload (MCP server status)."""
+
+    servers: list[MCPServerInfo]
+
+
+@dataclass
+class WorkerCommandData:
+    """worker_command event payload (command to worker)."""
+
+    command: str
+    args: str | None = None
+    extra: dict[str, Any] | None = None
+
+
+@dataclass
+class ToolUpdateData:
+    """tool_update event payload (tool execution update)."""
+
+    id: str
+    status: str
+    content: Any | None = None
+    diff: FileDiff | None = None
+    raw_output: str | None = None
+
+
+@dataclass
+class PlanItem:
+    """Plan item in an execution plan."""
+
+    content: str
+    priority: str
+    status: str
+
+
+@dataclass
+class PlanData:
+    """plan event payload (execution plan)."""
+
+    items: list[PlanItem]
+
+
+@dataclass
+class ModeUpdateData:
+    """mode_update event payload (mode switch)."""
+
+    current_mode_id: str
 
 
 @dataclass

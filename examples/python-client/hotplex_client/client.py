@@ -12,31 +12,46 @@ from typing import Any, Callable, Coroutine, TypeVar, Generic
 from hotplex_client.exceptions import HotPlexError, SessionError, TransportError
 from hotplex_client.protocol import (
     create_control_envelope,
+    create_elicitation_response_envelope,
     create_input_envelope,
     create_permission_response_envelope,
+    create_question_response_envelope,
     create_tool_result_envelope,
 )
 from hotplex_client.transport import WebSocketTransport
 from hotplex_client.types import (
+    ContextUsageData,
     ControlAction,
     ControlData,
     DoneData,
+    ElicitationRequestData,
+    ElicitationResponseData,
     Envelope,
     ErrorData,
     InitAckData,
     InputData,
+    MCPStatusData,
     MessageData,
     MessageDeltaData,
     MessageEndData,
     MessageStartData,
+    ModeUpdateData,
     PermissionRequestData,
     PermissionResponseData,
+    PlanData,
+    Question,
+    QuestionOption,
+    QuestionRequestData,
+    QuestionResponseData,
     ReasoningData,
     SessionState,
+    SkillsListData,
     StateData,
     StepData,
     ToolCallData,
     ToolResultData,
+    ToolUpdateData,
+    WorkerCommandData,
     WorkerType,
 )
 
@@ -233,6 +248,53 @@ class HotPlexClient:
         )
         await self._transport.send(env)
 
+    async def send_question_response(
+        self,
+        question_id: str,
+        answers: dict[str, str],
+    ) -> None:
+        """
+        Send a response to a question_request event.
+
+        Args:
+            question_id: The ID from the question_request event.
+            answers: Dictionary mapping question labels to selected option labels.
+        """
+        if not self.is_connected:
+            raise SessionError("Not connected")
+
+        env = create_question_response_envelope(
+            session_id=self.session_id,
+            question_id=question_id,
+            answers=answers,
+        )
+        await self._transport.send(env)
+
+    async def send_elicitation_response(
+        self,
+        elicitation_id: str,
+        action: str,
+        content: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Send a response to an elicitation_request event.
+
+        Args:
+            elicitation_id: The ID from the elicitation_request event.
+            action: The action to take (e.g., "accept", "modify", "reject").
+            content: Optional additional content for the response.
+        """
+        if not self.is_connected:
+            raise SessionError("Not connected")
+
+        env = create_elicitation_response_envelope(
+            session_id=self.session_id,
+            elicitation_id=elicitation_id,
+            action=action,
+            content=content,
+        )
+        await self._transport.send(env)
+
     async def terminate(self) -> None:
         """Request the gateway to terminate the current session."""
         if not self.is_connected:
@@ -310,6 +372,38 @@ class HotPlexClient:
     def on_error(self, callback: Callback[ErrorData]) -> None:
         """Register callback for error events."""
         self._callbacks["error"].append(callback)
+
+    def on_question_request(self, callback: Callback[QuestionRequestData]) -> None:
+        """Register callback for question_request events."""
+        self._callbacks["question_request"].append(callback)
+
+    def on_elicitation_request(self, callback: Callback[ElicitationRequestData]) -> None:
+        """Register callback for elicitation_request events."""
+        self._callbacks["elicitation_request"].append(callback)
+
+    def on_context_usage(self, callback: Callback[ContextUsageData]) -> None:
+        """Register callback for context_usage events."""
+        self._callbacks["context_usage"].append(callback)
+
+    def on_skills_list(self, callback: Callback[SkillsListData]) -> None:
+        """Register callback for skills_list events."""
+        self._callbacks["skills_list"].append(callback)
+
+    def on_mcp_status(self, callback: Callback[MCPStatusData]) -> None:
+        """Register callback for mcp_status events."""
+        self._callbacks["mcp_status"].append(callback)
+
+    def on_tool_update(self, callback: Callback[ToolUpdateData]) -> None:
+        """Register callback for tool_update events."""
+        self._callbacks["tool_update"].append(callback)
+
+    def on_plan(self, callback: Callback[PlanData]) -> None:
+        """Register callback for plan events."""
+        self._callbacks["plan"].append(callback)
+
+    def on_mode_update(self, callback: Callback[ModeUpdateData]) -> None:
+        """Register callback for mode_update events."""
+        self._callbacks["mode_update"].append(callback)
 
     # ========================================================================
     # Context Manager

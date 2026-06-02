@@ -31,12 +31,11 @@ func (a *Adapter) addReaction(ctx context.Context, messageID, emoji string) (str
 		return "", fmt.Errorf("feishu: add reaction %s failed: code=%d msg=%s", emoji, resp.Code, resp.Msg)
 	}
 
-	a.Log.Debug("feishu: added reaction", "emoji", emoji, "msg", messageID)
-
 	reactionID := ""
 	if resp.Data != nil && resp.Data.ReactionId != nil {
 		reactionID = *resp.Data.ReactionId
 	}
+	a.Log.Debug("feishu: added reaction", "emoji", emoji, "msg", messageID)
 	return reactionID, nil
 }
 

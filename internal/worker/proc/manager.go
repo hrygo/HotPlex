@@ -48,6 +48,12 @@ type Manager struct {
 	allowedTools []string
 	pidKey       string
 
+	// stderrHandler processes each stderr line: level extraction, content folding/suppression.
+	// When nil, DefaultStderrHandler is used (preserves existing behavior).
+	stderrHandler StderrHandler
+	// stderrAttrs are extra slog.Attr injected into every proc:stderr log entry.
+	stderrAttrs []slog.Attr
+
 	// jobHandle stores the Windows Job Object handle for process tree cleanup.
 	// On Unix this is always 0. On Windows, closing this handle kills the entire
 	// process tree (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).
@@ -58,6 +64,13 @@ type Manager struct {
 type Opts struct {
 	Logger       *slog.Logger
 	AllowedTools []string // tools allowed for this worker process
+
+	// StderrHandler customizes how subprocess stderr is processed.
+	// When nil, DefaultStderrHandler is used.
+	StderrHandler StderrHandler
+	// StderrAttrs are extra slog.Attr attached to every proc:stderr log entry
+	// (e.g., worker_type, session_id for filtering).
+	StderrAttrs []slog.Attr
 }
 
 // New creates a new process manager.
@@ -65,9 +78,15 @@ func New(opts Opts) *Manager {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	handler := opts.StderrHandler
+	if handler == nil {
+		handler = &DefaultStderrHandler{}
+	}
 	return &Manager{
-		log:          opts.Logger,
-		allowedTools: opts.AllowedTools,
+		log:           opts.Logger,
+		allowedTools:  opts.AllowedTools,
+		stderrHandler: handler,
+		stderrAttrs:   opts.StderrAttrs,
 	}
 }
 
@@ -395,10 +414,19 @@ func (m *Manager) drainStderr(stderr io.ReadCloser) {
 		}
 	}()
 	defer func() { _ = stderr.Close() }()
+
+	handler := m.stderrHandler
+	attrs := m.stderrAttrs
+
 	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, scannerInitSize), scannerMaxSize)
 	for scanner.Scan() {
-		m.log.Info("proc: stderr", "msg", scanner.Text())
+		level, msg := handler.Handle(scanner.Text())
+		if msg == "" {
+			continue
+		}
+		m.log.LogAttrs(context.Background(), level, "proc: stderr",
+			append([]slog.Attr{slog.String("stderr", msg)}, attrs...)...)
 	}
 	if err := scanner.Err(); err != nil {
 		m.log.Warn("proc: drainStderr ended with error", "error", err)

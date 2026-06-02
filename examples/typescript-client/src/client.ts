@@ -27,6 +27,17 @@ import type {
   PermissionRequestData,
   PongData,
   ControlData,
+  QuestionRequestData,
+  QuestionResponseData,
+  ElicitationRequestData,
+  ElicitationResponseData,
+  ContextUsageData,
+  SkillsListData,
+  MCPStatusData,
+  WorkerCommandData,
+  ToolUpdateData,
+  PlanData,
+  ModeUpdateData,
 } from './types.js';
 import {
   createInitEnvelope,
@@ -73,6 +84,20 @@ export interface HotPlexClientEvents {
   sessionInvalid: (data: ControlData, env: Envelope) => void;
   throttle: (data: ControlData, env: Envelope) => void;
   pong: (data: PongData, env: Envelope) => void;
+  questionRequest: (data: QuestionRequestData, env: Envelope) => void;
+  questionResponse: (data: QuestionResponseData, env: Envelope) => void;
+  elicitationRequest: (data: ElicitationRequestData, env: Envelope) => void;
+  elicitationResponse: (data: ElicitationResponseData, env: Envelope) => void;
+  contextUsage: (data: ContextUsageData, env: Envelope) => void;
+  skillsList: (data: SkillsListData, env: Envelope) => void;
+  mcpStatus: (data: MCPStatusData, env: Envelope) => void;
+  workerCommand: (data: WorkerCommandData, env: Envelope) => void;
+  toolUpdate: (data: ToolUpdateData, env: Envelope) => void;
+  plan: (data: PlanData, env: Envelope) => void;
+  modeUpdate: (data: ModeUpdateData, env: Envelope) => void;
+  reset: (data: ControlData, env: Envelope) => void;
+  gc: (data: ControlData, env: Envelope) => void;
+  cd: (data: ControlData, env: Envelope) => void;
 }
 
 // ============================================================================
@@ -408,6 +433,40 @@ export class HotPlexClient extends EventEmitter<HotPlexClientEvents> {
         this.emit('pong', event.data as PongData, env);
         break;
         
+      case EventKind.QuestionRequest:
+        this.emit('questionRequest', event.data as QuestionRequestData, env);
+        break;
+      case EventKind.QuestionResponse:
+        this.emit('questionResponse', event.data as QuestionResponseData, env);
+        break;
+      case EventKind.ElicitationRequest:
+        this.emit('elicitationRequest', event.data as ElicitationRequestData, env);
+        break;
+      case EventKind.ElicitationResponse:
+        this.emit('elicitationResponse', event.data as ElicitationResponseData, env);
+        break;
+      case EventKind.ContextUsage:
+        this.emit('contextUsage', event.data as ContextUsageData, env);
+        break;
+      case EventKind.SkillsList:
+        this.emit('skillsList', event.data as SkillsListData, env);
+        break;
+      case EventKind.MCPStatus:
+        this.emit('mcpStatus', event.data as MCPStatusData, env);
+        break;
+      case EventKind.WorkerCmd:
+        this.emit('workerCommand', event.data as WorkerCommandData, env);
+        break;
+      case EventKind.ToolUpdate:
+        this.emit('toolUpdate', event.data as ToolUpdateData, env);
+        break;
+      case EventKind.Plan:
+        this.emit('plan', event.data as PlanData, env);
+        break;
+      case EventKind.ModeUpdate:
+        this.emit('modeUpdate', event.data as ModeUpdateData, env);
+        break;
+        
       case EventKind.Control:
         this._handleControlMessage(event.data as ControlData, env);
         break;
@@ -442,6 +501,15 @@ export class HotPlexClient extends EventEmitter<HotPlexClientEvents> {
       case ControlAction.Delete:
         this.shouldReconnect = false;
         this.disconnect();
+        break;
+      case ControlAction.Reset:
+        this.emit('reset', data, env);
+        break;
+      case ControlAction.GC:
+        this.emit('gc', data, env);
+        break;
+      case ControlAction.CD:
+        this.emit('cd', data, env);
         break;
     }
   }

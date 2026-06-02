@@ -86,7 +86,8 @@ type ResultPayload struct {
 
 // Parser parses SDK messages into WorkerEvents.
 type Parser struct {
-	log *slog.Logger
+	log              *slog.Logger
+	streamedThinking bool // true if stream_event thinking was seen for current assistant turn
 }
 
 // NewParser creates a new Parser instance.
@@ -148,6 +149,9 @@ func (p *Parser) parseStreamEvent(msg *SDKMessage) ([]*WorkerEvent, error) {
 	case string(StreamThinking), string(StreamText), string(StreamCode):
 		// Extract text from message content
 		content = extractTextFromContent(streamEvt.Message.Content)
+		if streamEvt.Type == string(StreamThinking) {
+			p.streamedThinking = true
+		}
 	case string(StreamImage):
 		// Image content - extract as base64 or URL
 		content = extractTextFromContent(streamEvt.Message.Content)
@@ -181,6 +185,11 @@ func (p *Parser) parseStreamEvent(msg *SDKMessage) ([]*WorkerEvent, error) {
 
 // parseAssistant handles assistant messages.
 func (p *Parser) parseAssistant(msg *SDKMessage) ([]*WorkerEvent, error) {
+	// Snapshot and reset: if stream_event thinking was already emitted for this
+	// turn, skip the duplicate in the assistant block (old CLI compat).
+	alreadyStreamed := p.streamedThinking
+	p.streamedThinking = false
+
 	var assistantMsg AssistantMessage
 	if err := json.Unmarshal(msg.Message, &assistantMsg); err != nil {
 		return nil, fmt.Errorf("parser: unmarshal assistant: %w", err)
@@ -205,8 +214,19 @@ func (p *Parser) parseAssistant(msg *SDKMessage) ([]*WorkerEvent, error) {
 				RawMessage: msg,
 			})
 		case "thinking":
-			// Skip — thinking content was already streamed as EventStream deltas.
-			// Re-emitting the full block would duplicate reasoning content on the client.
+			// Claude CLI v2.1.158+ no longer emits stream_event for thinking;
+			// the complete thinking block is in the assistant message instead.
+			// Skip if stream_event already delivered thinking (old CLI compat).
+			if !alreadyStreamed && block.Thinking != "" {
+				events = append(events, &WorkerEvent{
+					Type: EventStream,
+					Payload: &StreamPayload{
+						Type:    string(StreamThinking),
+						Content: block.Thinking,
+					},
+					RawMessage: msg,
+				})
+			}
 		case "tool_use":
 			var input map[string]any
 			if err := json.Unmarshal(block.Input, &input); err != nil {

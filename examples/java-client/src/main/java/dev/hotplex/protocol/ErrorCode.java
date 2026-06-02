@@ -25,7 +25,10 @@ public enum ErrorCode {
     GatewayOverload("GATEWAY_OVERLOAD"),
     ExecutionTimeout("EXECUTION_TIMEOUT"),
     ReconnectRequired("RECONNECT_REQUIRED"),
-    WorkerOutputLimit("WORKER_OUTPUT_LIMIT");
+    WorkerOutputLimit("WORKER_OUTPUT_LIMIT"),
+    ResumeRetry("RESUME_RETRY"),
+    NotSupported("NOT_SUPPORTED"),
+    TurnTimeout("TURN_TIMEOUT");
 
     private final String value;
 

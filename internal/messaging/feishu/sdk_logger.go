@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/hrygo/hotplex/internal/messaging/toolfmt"
 )
 
 // Sensitive URL query parameter keys redacted in logs: access_key, conn_id,
@@ -13,6 +16,7 @@ import (
 
 // sdkLogFilter rewrites Feishu SDK log messages to be more readable and
 // removes connection noise that carries no actionable information.
+// Messages exceeding maxDebugMsgLen are truncated to keep the log compact.
 func sdkLogFilter(msg string) string {
 	// Silent noisy routine messages (ping/pong/heartbeat cycles).
 	for _, sub := range sdkDebugSilent {
@@ -28,11 +32,16 @@ func sdkLogFilter(msg string) string {
 	}
 	// Improve "receive message failed" error readability.
 	if strings.Contains(msg, "receive message failed") {
-		// Strip the raw TCP errno from the user-facing log.
 		msg = strings.Split(msg, ", err:")[0] + " (connection reset by peer)"
+	}
+	// Truncate oversized debug messages (full event payloads are noise in logs).
+	if utf8.RuneCountInString(msg) > maxDebugMsgLen {
+		msg = toolfmt.TruncateRunes(msg, maxDebugMsgLen)
 	}
 	return msg
 }
+
+const maxDebugMsgLen = 400
 
 // sensitiveParamRe matches sensitive=VALUE patterns and captures the key=
 // prefix for replacement. Values are terminated by &, whitespace, [, or ].

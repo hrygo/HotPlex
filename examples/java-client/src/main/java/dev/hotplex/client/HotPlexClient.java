@@ -424,7 +424,62 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
                 PermissionRequestData permData = objectMapper.convertValue(data, PermissionRequestData.class);
                 emit("permissionRequest", permData, env);
                 break;
-                
+
+            case "question_request":
+                QuestionRequestData qrData = objectMapper.convertValue(data, QuestionRequestData.class);
+                emit("questionRequest", qrData, env);
+                break;
+
+            case "question_response":
+                QuestionResponseData qrsData = objectMapper.convertValue(data, QuestionResponseData.class);
+                emit("questionResponse", qrsData, env);
+                break;
+
+            case "elicitation_request":
+                ElicitationRequestData elData = objectMapper.convertValue(data, ElicitationRequestData.class);
+                emit("elicitationRequest", elData, env);
+                break;
+
+            case "elicitation_response":
+                ElicitationResponseData elrData = objectMapper.convertValue(data, ElicitationResponseData.class);
+                emit("elicitationResponse", elrData, env);
+                break;
+
+            case "context_usage":
+                ContextUsageData ctxData = objectMapper.convertValue(data, ContextUsageData.class);
+                emit("contextUsage", ctxData, env);
+                break;
+
+            case "skills_list":
+                SkillsListData skData = objectMapper.convertValue(data, SkillsListData.class);
+                emit("skillsList", skData, env);
+                break;
+
+            case "mcp_status":
+                MCPStatusData mcpData = objectMapper.convertValue(data, MCPStatusData.class);
+                emit("mcpStatus", mcpData, env);
+                break;
+
+            case "worker_command":
+                WorkerCommandData wcData = objectMapper.convertValue(data, WorkerCommandData.class);
+                emit("workerCommand", wcData, env);
+                break;
+
+            case "tool_update":
+                ToolUpdateData tuData = objectMapper.convertValue(data, ToolUpdateData.class);
+                emit("toolUpdate", tuData, env);
+                break;
+
+            case "plan":
+                PlanData planData = objectMapper.convertValue(data, PlanData.class);
+                emit("plan", planData, env);
+                break;
+
+            case "mode_update":
+                ModeUpdateData muData = objectMapper.convertValue(data, ModeUpdateData.class);
+                emit("modeUpdate", muData, env);
+                break;
+
             case "pong":
                 missedPongs = 0;
                 lastPongTime = System.currentTimeMillis();
@@ -479,6 +534,18 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
             case "delete":
                 shouldReconnect = false;
                 disconnect();
+                break;
+
+            case "reset":
+                emit("reset", ctrlData, env);
+                break;
+
+            case "gc":
+                emit("gc", ctrlData, env);
+                break;
+
+            case "cd":
+                emit("cd", ctrlData, env);
                 break;
         }
     }
@@ -654,6 +721,47 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
         } catch (Exception e) {
             log.error("Failed to send permission response", e);
             throw new RuntimeException("Failed to send permission response", e);
+        }
+    }
+
+    /**
+     * Send a question response.
+     *
+     * @param questionId the question request ID
+     * @param answers the answers keyed by question header
+     */
+    public void sendQuestionResponse(String questionId, Map<String, String> answers) {
+        requireConnected();
+
+        try {
+            QuestionResponseData questionResponse = new QuestionResponseData(questionId, answers);
+            Envelope envelope = createEnvelope(EventKind.QuestionResponse.getValue(), questionResponse, "control");
+            sendEnvelope(envelope);
+            log.debug("Sent question response: {}", questionId);
+        } catch (Exception e) {
+            log.error("Failed to send question response", e);
+            throw new RuntimeException("Failed to send question response", e);
+        }
+    }
+
+    /**
+     * Send an elicitation response.
+     *
+     * @param elicitationId the elicitation request ID
+     * @param action the action taken (e.g., "accept", "decline")
+     * @param content the elicitation content payload
+     */
+    public void sendElicitationResponse(String elicitationId, String action, Map<String, Object> content) {
+        requireConnected();
+
+        try {
+            ElicitationResponseData elicitationResponse = new ElicitationResponseData(elicitationId, action, content);
+            Envelope envelope = createEnvelope(EventKind.ElicitationResponse.getValue(), elicitationResponse, "control");
+            sendEnvelope(envelope);
+            log.debug("Sent elicitation response: {} = {}", elicitationId, action);
+        } catch (Exception e) {
+            log.error("Failed to send elicitation response", e);
+            throw new RuntimeException("Failed to send elicitation response", e);
         }
     }
 

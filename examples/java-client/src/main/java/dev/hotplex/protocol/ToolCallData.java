@@ -2,6 +2,7 @@ package dev.hotplex.protocol;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -12,6 +13,9 @@ public class ToolCallData {
     private String id;
     private String name;
     private Map<String, Object> input;
+    private String title;
+    private String kind;
+    private List<FileLocation> locations;
 
     public ToolCallData() {}
 
@@ -43,5 +47,53 @@ public class ToolCallData {
 
     public void setInput(Map<String, Object> input) {
         this.input = input;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getKind() {
+        return kind;
+    }
+
+    public void setKind(String kind) {
+        this.kind = kind;
+    }
+
+    public List<FileLocation> getLocations() {
+        return locations;
+    }
+
+    public void setLocations(List<FileLocation> locations) {
+        this.locations = locations;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class FileLocation {
+        private String path;
+        private Integer line;
+
+        public FileLocation() {}
+
+        public String getPath() {
+            return path;
+        }
+
+        public void setPath(String path) {
+            this.path = path;
+        }
+
+        public Integer getLine() {
+            return line;
+        }
+
+        public void setLine(Integer line) {
+            this.line = line;
+        }
     }
 }

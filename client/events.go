@@ -31,15 +31,26 @@ const (
 	EventPing                = string(events.Ping)
 	EventPong                = string(events.Pong)
 	EventControl             = string(events.Control)
+	EventContextUsage        = string(events.ContextUsage)
+	EventSkillsList          = string(events.SkillsList)
+	EventMCPStatus           = string(events.MCPStatus)
+	EventWorkerCmd           = string(events.WorkerCmd)
+	EventToolUpdate          = string(events.ToolUpdate)
+	EventPlan                = string(events.Plan)
+	EventModeUpdate          = string(events.ModeUpdate)
 	EventInitAck             = "init_ack"
 )
 
 // ControlAction constants for client-initiated control.
 const (
-	ControlActionTerminate = string(events.ControlActionTerminate)
-	ControlActionDelete    = string(events.ControlActionDelete)
-	ControlActionReset     = string(events.ControlActionReset)
-	ControlActionGC        = string(events.ControlActionGC)
+	ControlActionTerminate      = string(events.ControlActionTerminate)
+	ControlActionDelete         = string(events.ControlActionDelete)
+	ControlActionReset          = string(events.ControlActionReset)
+	ControlActionGC             = string(events.ControlActionGC)
+	ControlActionReconnect      = string(events.ControlActionReconnect)
+	ControlActionSessionInvalid = string(events.ControlActionSessionInvalid)
+	ControlActionThrottle       = string(events.ControlActionThrottle)
+	ControlActionCD             = string(events.ControlActionCD)
 )
 
 // SessionState mirrors pkg/events/events.go.
@@ -63,6 +74,9 @@ const (
 	ErrCodeInternalError   = events.ErrCodeInternalError
 	ErrCodeUnauthorized    = events.ErrCodeUnauthorized
 	ErrCodeSessionNotFound = events.ErrCodeSessionNotFound
+	ErrCodeResumeRetry     = events.ErrCodeResumeRetry
+	ErrCodeNotSupported    = events.ErrCodeNotSupported
+	ErrCodeTurnTimeout     = events.ErrCodeTurnTimeout
 )
 
 // Event data types re-exported from pkg/events for type-safe access.
@@ -84,6 +98,20 @@ type (
 	QuestionResponseData    = events.QuestionResponseData
 	ElicitationRequestData  = events.ElicitationRequestData
 	ElicitationResponseData = events.ElicitationResponseData
+	FileLocation            = events.FileLocation
+	FileDiff                = events.FileDiff
+	ContextUsageData        = events.ContextUsageData
+	ContextCategory         = events.ContextCategory
+	ContextSkillInfo        = events.ContextSkillInfo
+	SkillsListData          = events.SkillsListData
+	SkillEntry              = events.SkillEntry
+	MCPStatusData           = events.MCPStatusData
+	MCPServerInfo           = events.MCPServerInfo
+	WorkerCommandData       = events.WorkerCommandData
+	ToolUpdateData          = events.ToolUpdateData
+	PlanData                = events.PlanData
+	PlanItem                = events.PlanItem
+	ModeUpdateData          = events.ModeUpdateData
 )
 
 // ErrorData is the payload of an error event.

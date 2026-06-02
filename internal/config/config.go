@@ -628,7 +628,7 @@ type OpenCodeServerConfig struct {
 // ACP is a universal worker type that connects to any ACP-compatible agent via stdio.
 type ACPConfig struct {
 	Command     string   `mapstructure:"command" json:"command"`                               // ACP agent binary (e.g. "hermes-acp")
-	AutoApprove bool     `mapstructure:"auto_approve,omitempty" json:"auto_approve,omitempty"` // auto-approve permission requests
+	AutoApprove *bool    `mapstructure:"auto_approve,omitempty" json:"auto_approve,omitempty"` // auto-approve permission requests
 	Args        []string `mapstructure:"args,omitempty" json:"args,omitempty"`                 // extra args appended after the command
 	Debug       bool     `mapstructure:"debug,omitempty" json:"debug,omitempty"`               // enable JSON-RPC protocol trace logging
 }

@@ -135,7 +135,7 @@ start_gateway() {
     fi
 
     : > "$GATEWAY_LOG"
-    "$binary" gateway start -c "$CONFIG" >> "$GATEWAY_LOG" 2>&1 &
+    "$binary" gateway start -c "$CONFIG" 2>> "$GATEWAY_LOG" &
     local bg_pid=$!
     echo $bg_pid > "$GATEWAY_PID"
 
@@ -155,10 +155,7 @@ start_gateway() {
     done
 
     if kill -0 "$bg_pid" 2>/dev/null; then
-        # Show startup banner from log (best-effort, non-blocking).
-        local banner
-        banner=$(grep -vE '^(time=|\{"time":|[0-9]{4}/[0-9]{2}/[0-9]{2} )' "$GATEWAY_LOG" 2>/dev/null | sed '/^$/d')
-        [[ -n "$banner" ]] && echo "$banner"
+        info "Gateway started (PID $bg_pid)"
     else
         err "Gateway failed to start"
         tail -20 "$GATEWAY_LOG"
