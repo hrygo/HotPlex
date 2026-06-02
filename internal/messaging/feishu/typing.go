@@ -35,6 +35,7 @@ func (a *Adapter) addReaction(ctx context.Context, messageID, emoji string) (str
 	if resp.Data != nil && resp.Data.ReactionId != nil {
 		reactionID = *resp.Data.ReactionId
 	}
+	a.Log.Debug("feishu: added reaction", "emoji", emoji, "msg", messageID)
 	return reactionID, nil
 }
 
@@ -62,6 +63,7 @@ func (a *Adapter) removeReaction(ctx context.Context, messageID, reactionID stri
 			"msg", messageID, "code", resp.Code, "msg", resp.Msg)
 	}
 
+	a.Log.Debug("feishu: removed reaction", "msg", messageID)
 	return nil
 }
 
