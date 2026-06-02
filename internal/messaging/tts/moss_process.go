@@ -208,25 +208,24 @@ func (p *MossProcess) ensureRunningLocked(ctx context.Context) error {
 		return nil
 	}
 
-	return p.start(ctx)
+	return p.start()
 }
 
-func (p *MossProcess) start(ctx context.Context) error {
+func (p *MossProcess) start() error {
 	p.starting = true
 	p.readyCh = make(chan struct{})
 
-	// Spawn is non-blocking — runs under p.mu.
-	if err := p.spawn(ctx); err != nil {
+	if err := p.spawn(); err != nil {
 		p.starting = false
 		close(p.readyCh)
 		return err
 	}
 
-	// Release lock during the blocking warmup so other callers can
-	// enter the single-flight wait path in ensureRunningLocked.
 	p.mu.Unlock()
 
-	warmupErr := p.waitForReady(ctx)
+	warmupCtx, warmupCancel := context.WithTimeout(context.Background(), mossReadyTimeout)
+	defer warmupCancel()
+	warmupErr := p.waitForReady(warmupCtx)
 
 	p.mu.Lock()
 	p.starting = false
@@ -236,8 +235,11 @@ func (p *MossProcess) start(ctx context.Context) error {
 		p.terminate()
 		return fmt.Errorf("moss sidecar warmup: %w", warmupErr)
 	}
+	if p.closed {
+		p.terminate()
+		return ErrSynthesizerClosed
+	}
 
-	// Start idle monitor after warmup succeeds.
 	if p.idleTTL > 0 {
 		idleCtx, cancel := context.WithCancel(context.Background())
 		p.cancel = cancel
@@ -250,7 +252,7 @@ func (p *MossProcess) start(ctx context.Context) error {
 	return nil
 }
 
-func (p *MossProcess) spawn(ctx context.Context) error {
+func (p *MossProcess) spawn() error {
 	appPath := p.modelDir + "/app_onnx.py"
 	args := []string{
 		appPath,
@@ -261,7 +263,7 @@ func (p *MossProcess) spawn(ctx context.Context) error {
 
 	p.log.Info("tts: starting moss sidecar", "port", p.port, "model_dir", p.modelDir)
 
-	cmd := exec.CommandContext(ctx, "python3", args...)
+	cmd := exec.Command("python3", args...)
 	proc.SetSysProcAttr(cmd)
 
 	// Redirect sidecar stdout/stderr to gateway logs.
