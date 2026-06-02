@@ -257,9 +257,16 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Build environment using shared security layer.
 	env := base.BuildEnv(session, acpEnvBlocklist, "acp")
 
-	// Create process manager â protected by Mu for concurrent Terminate safety.
+	// Create process manager — protected by Mu for concurrent Terminate safety.
 	w.Mu.Lock()
-	w.Proc = proc.New(proc.Opts{Logger: w.Log})
+	w.Proc = proc.New(proc.Opts{
+		Logger:        w.Log,
+		StderrHandler: ACPStderrHandlerFactory(session.SessionID),
+		StderrAttrs: []slog.Attr{
+			slog.String("worker_type", string(worker.TypeACP)),
+			slog.String("session_id", session.SessionID),
+		},
+	})
 	w.Mu.Unlock()
 
 	stdin, stdout, _, err := w.Proc.Start(context.Background(), binary, args, env, session.ProjectDir)
