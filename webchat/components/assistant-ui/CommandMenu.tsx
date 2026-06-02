@@ -51,7 +51,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
   const isSlash = inputValue.startsWith("/");
   const filterText = isSlash ? inputValue.slice(1).toLowerCase() : inputValue.toLowerCase();
 
-  const matched = allCommands.filter(cmd => {
+  const filtered = allCommands.filter(cmd => {
     if (!isSlash) {
       if (cmd.type !== "skill") return false;
       if (!filterText) return false;
@@ -60,9 +60,6 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
     return cmd.key.toLowerCase().includes(filterText) ||
            cmd.description.toLowerCase().includes(filterText);
   });
-
-  const MAX_VISIBLE = 20;
-  const filtered = matched.slice(0, MAX_VISIBLE);
 
   useEffect(() => {
     setSelectedIndex(0);
