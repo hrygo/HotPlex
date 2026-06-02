@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.23.2] - 2026-06-02
+
+### Summary
+
+v1.23.2 是一次 patch 版本更新，聚焦于 **Gateway 生命周期可靠性** 和 **安全正确性**。修复了 shutdown 竞态导致 Worker 启动后即被杀死、session/bridge 多个状态迁移缺陷、安全模块 race condition、AEP 信封 mutation、TTS 侧冷启动 contention 等问题。同时新增 ACP Worker 可插拔 stderr handler 和跨 SDK ACP 事件类型覆盖。
+
+### Added
+
+- **Worker/ACP**: Pluggable stderr handler — `proc.StderrHandler` interface replaces hardcoded Info logging; ACP worker gets a stateful multi-line folder that collapses system prompt echoes, XML blocks, and Python tracebacks into concise summaries. (#618)
+- **Worker/ACP**: Auto-approve by default for sandboxed ACP agents — `*bool` config distinguishes absent from explicit false. (#618)
+- **SDK**: Full ACP extension event coverage across Go/Java/Python/TypeScript — context_usage, skills_list, mcp_status, worker_command, tool_update, plan, mode_update, question/elicitation request/response. (#618)
+- **Worker/ClaudeCode**: Emit assistant thinking content blocks as EventStream events (Claude CLI v2.1.158+ compat) with dedup guard for old CLI versions. (#618)
+
+### Changed
+
+- **Messaging/Feishu**: Release lock before triggering tool flush to avoid deadlock; case-insensitive tool name lookup for ACP agents. (#618)
+- **Messaging/Feishu**: Truncate sdk_logger messages >400 chars to reduce dev log noise. (#618)
+- **Worker/ClaudeCode**: Remove redundant `--settings` JSON from buildCLIArgs that broke CCR (claude-code-router) — env injection via cmd.Env is sufficient. (#619)
+
+### Fixed
+
+- **Gateway Core**: Shutdown race — split `Shutdown()` into `MarkClosed()` + `WaitForwarders()` so in-flight handlers are rejected before worker termination, preventing start-then-kill. (#613)
+- **Gateway Core**: `doneReceived` reset causes false "worker exited without done" errors on single-turn platform sessions — replace immediate reset with new-turn detection. (#613)
+- **Gateway Core**: Eventstore collector close order — close before SessionMgr to prevent writes to closed DB. (#613)
+- **Gateway Core**: Collector.Close() double-close panic — add sync.Once protection. (#617)
+- **Gateway Core**: everHadConn map unbounded growth — delete on removeSession. (#617)
+- **Security**: API key allowlist/blocklist atomicity gap — replace double-lock cycles with single mutex-protected access; add RLock to ValidateBaseDir. (#619)
+- **Security**: Replace real IP with LAN example in CSP comments/tests. (#619)
+- **AEP**: Envelope mutation — extract `marshalEnvelope` with shallow copy to prevent Encode/EncodeJSON from mutating caller's envelope. (#619)
+- **TTS**: MossProcess single-flight start — concurrent callers wait on readyCh instead of contending mutex during ~60s sidecar warmup; detach warmup context from request lifecycle. (#619)
+
 ## [1.23.1] - 2026-06-01
 
 ### Summary
