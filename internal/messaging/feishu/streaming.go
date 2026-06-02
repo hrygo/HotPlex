@@ -192,14 +192,15 @@ func (c *StreamingCardController) WriteToolResult(id string, output any, errMsg 
 	}
 	c.mu.Lock()
 	for i := range c.toolEntries {
-		if c.toolEntries[i].id == id {
-			c.toolEntries[i].done = true
-			c.toolEntries[i].result = formatToolResult(c.toolEntries[i].name, output, errMsg)
-			c.toolDirty = true
-			c.mu.Unlock()
-			c.triggerToolFlush()
-			return
+		if c.toolEntries[i].id != id {
+			continue
 		}
+		c.toolEntries[i].done = true
+		c.toolEntries[i].result = formatToolResult(c.toolEntries[i].name, output, errMsg)
+		c.toolDirty = true
+		c.mu.Unlock()
+		c.triggerToolFlush()
+		return
 	}
 	c.mu.Unlock()
 }
