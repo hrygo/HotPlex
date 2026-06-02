@@ -24,6 +24,7 @@ func scanDirs(homeDir, workDir string) []Skill {
 	}{
 		{filepath.Join(homeDir, ".claude", "skills"), SourceGlobal},
 		{filepath.Join(homeDir, ".agents", "skills"), SourceGlobal},
+		{filepath.Join(homeDir, ".hotplex", "skills"), SourceGlobal},
 		{filepath.Join(workDir, ".claude", "skills"), SourceProject},
 		{filepath.Join(workDir, ".agents", "skills"), SourceProject},
 	}

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
@@ -197,7 +198,8 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 	}
 
-	allSkills, err := h.skillsLocator.List(ctx, "", si.WorkDir)
+	homeDir, _ := os.UserHomeDir()
+	allSkills, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
 	if err != nil {
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "skills: %v", err)
 	}
