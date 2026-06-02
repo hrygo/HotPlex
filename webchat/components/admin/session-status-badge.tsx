@@ -1,15 +1,15 @@
 const SESSION_STATUS_MAP: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-  active: {
+  running: {
     bg: 'rgba(52, 211, 153, 0.12)',
     text: 'text-[var(--accent-emerald)]',
     dot: 'bg-[var(--accent-emerald)]',
-    label: 'Active',
+    label: 'Running',
   },
-  working: {
-    bg: 'rgba(52, 211, 153, 0.12)',
-    text: 'text-[var(--accent-emerald)]',
-    dot: 'bg-[var(--accent-emerald)]',
-    label: 'Working',
+  created: {
+    bg: 'rgba(96, 165, 250, 0.12)',
+    text: 'text-[var(--accent-blue)]',
+    dot: 'bg-[var(--accent-blue)]',
+    label: 'Created',
   },
   idle: {
     bg: 'rgba(245, 158, 11, 0.12)',
@@ -22,6 +22,12 @@ const SESSION_STATUS_MAP: Record<string, { bg: string; text: string; dot: string
     text: 'text-[var(--text-muted)]',
     dot: 'bg-[var(--text-muted)]',
     label: 'Terminated',
+  },
+  deleted: {
+    bg: 'rgba(161, 161, 170, 0.12)',
+    text: 'text-[var(--text-muted)]',
+    dot: 'bg-[var(--text-muted)]',
+    label: 'Deleted',
   },
   error: {
     bg: 'rgba(244, 63, 94, 0.12)',

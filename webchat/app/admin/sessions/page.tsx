@@ -100,7 +100,7 @@ export default function SessionsPage() {
 
   const stats = useMemo(() => {
     const total = sessions.length;
-    const active = sessions.filter((s) => s.state === 'active' || s.state === 'working').length;
+    const active = sessions.filter((s) => s.state === 'running' || s.state === 'created').length;
     const idle = sessions.filter((s) => s.state === 'idle').length;
     const terminated = sessions.filter((s) => s.state === 'terminated').length;
     return { total, active, idle, terminated };
@@ -366,24 +366,24 @@ export default function SessionsPage() {
               All <span className="opacity-60 ml-0.5">({stats.total})</span>
             </button>
             <button
-              onClick={() => setFilter('active')}
+              onClick={() => setFilter('running')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
-                filter === 'active'
+                filter === 'running'
                   ? 'bg-[var(--bg-elevated)] text-[var(--accent-emerald)] shadow-sm'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
-              Active <span className="opacity-60 ml-0.5">({sessions.filter((s) => s.state === 'active').length})</span>
+              Running <span className="opacity-60 ml-0.5">({sessions.filter((s) => s.state === 'running').length})</span>
             </button>
             <button
-              onClick={() => setFilter('working')}
+              onClick={() => setFilter('created')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
-                filter === 'working'
-                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-emerald)] shadow-sm'
+                filter === 'created'
+                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-blue)] shadow-sm'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
-              Working <span className="opacity-60 ml-0.5">({sessions.filter((s) => s.state === 'working').length})</span>
+              Created <span className="opacity-60 ml-0.5">({sessions.filter((s) => s.state === 'created').length})</span>
             </button>
             <button
               onClick={() => setFilter('idle')}
