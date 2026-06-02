@@ -15,6 +15,10 @@ import (
 
 func (a *Adapter) newEventHandler() *dispatcher.EventDispatcher {
 	return dispatcher.NewEventDispatcher("", "").
+		// Callbacks are dispatched before message events in the EventDispatcher
+		// (Do() checks callbackType2CallbackHandler before eventType2EventHandler),
+		// so register card action handlers first to mirror that priority order.
+		OnP2CardActionTrigger(a.handleCardActionTrigger).
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) (err error) {
 			defer func() {
 				if r := recover(); r != nil {

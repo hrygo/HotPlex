@@ -427,3 +427,234 @@ func TestBuildQuestionElements(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildPermissionCardWithButtons(t *testing.T) {
+	t.Parallel()
+	data := &events.PermissionRequestData{
+		ID:          "perm-1",
+		ToolName:    "Bash",
+		Description: "Run shell command",
+		Args:        []string{"ls", "-la"},
+	}
+	got := buildPermissionCardWithButtons(data)
+
+	var card map[string]any
+	require.NoError(t, json.Unmarshal([]byte(got), &card))
+
+	body := card["body"].(map[string]any)
+	elements := body["elements"].([]any)
+
+	var actionEl map[string]any
+	for _, e := range elements {
+		m := e.(map[string]any)
+		if m["tag"] == "action" {
+			actionEl = m
+			break
+		}
+	}
+	require.NotNil(t, actionEl, "expected an action element")
+
+	buttons := actionEl["actions"].([]any)
+	require.Len(t, buttons, 2)
+
+	btn0 := buttons[0].(map[string]any)
+	require.Equal(t, "button", btn0["tag"])
+	require.Equal(t, "primary", btn0["type"])
+	require.Equal(t, "✅ 允许", btn0["text"].(map[string]any)["content"])
+	val0 := btn0["value"].(map[string]any)
+	require.Equal(t, "allow", val0["action"])
+	require.Equal(t, "perm-1", val0["request_id"])
+
+	btn1 := buttons[1].(map[string]any)
+	require.Equal(t, "danger", btn1["type"])
+	require.Equal(t, "❌ 拒绝", btn1["text"].(map[string]any)["content"])
+	val1 := btn1["value"].(map[string]any)
+	require.Equal(t, "deny", val1["action"])
+	require.Equal(t, "perm-1", val1["request_id"])
+
+	hdr := card["header"].(map[string]any)
+	require.Equal(t, "orange", hdr["template"])
+}
+
+func TestBuildPermissionCardWithButtons_NoArgs(t *testing.T) {
+	t.Parallel()
+	data := &events.PermissionRequestData{
+		ID:          "perm-2",
+		ToolName:    "Read",
+		Description: "Read file",
+		Args:        nil,
+	}
+	got := buildPermissionCardWithButtons(data)
+
+	var card map[string]any
+	require.NoError(t, json.Unmarshal([]byte(got), &card))
+
+	body := card["body"].(map[string]any)
+	elements := body["elements"].([]any)
+	require.GreaterOrEqual(t, len(elements), 2)
+
+	md := elements[0].(map[string]any)
+	require.Equal(t, "markdown", md["tag"])
+	content := md["content"].(string)
+	require.Contains(t, content, "Read")
+	require.NotContains(t, content, "参数：")
+
+	var actionEl map[string]any
+	for _, e := range elements {
+		m := e.(map[string]any)
+		if m["tag"] == "action" {
+			actionEl = m
+			break
+		}
+	}
+	require.NotNil(t, actionEl)
+	buttons := actionEl["actions"].([]any)
+	require.Len(t, buttons, 2)
+}
+
+func TestBuildQuestionCardWithButtons(t *testing.T) {
+	t.Parallel()
+	data := &events.QuestionRequestData{
+		ID:       "q-1",
+		ToolName: "AskUserQuestion",
+		Questions: []events.Question{
+			{
+				Header:   "Auth",
+				Question: "Pick one",
+				Options: []events.QuestionOption{
+					{Label: "JWT"},
+					{Label: "OAuth"},
+				},
+			},
+		},
+	}
+	got := buildQuestionCardWithButtons(data)
+
+	var card map[string]any
+	require.NoError(t, json.Unmarshal([]byte(got), &card))
+	require.Nil(t, card["schema"], "v1 card must not have schema field")
+
+	elems := card["elements"].([]any)
+
+	var actionEl map[string]any
+	for _, e := range elems {
+		m := e.(map[string]any)
+		if m["tag"] == "action" {
+			actionEl = m
+			break
+		}
+	}
+	require.NotNil(t, actionEl, "expected an action element")
+
+	buttons := actionEl["actions"].([]any)
+	require.Len(t, buttons, 2)
+
+	for _, b := range buttons {
+		btn := b.(map[string]any)
+		require.Equal(t, "button", btn["tag"])
+		val := btn["value"].(map[string]any)
+		require.Equal(t, "answer", val["action"])
+		require.Equal(t, "q-1", val["request_id"])
+		require.NotEmpty(t, val["answer"])
+		require.NotEmpty(t, val["label"])
+	}
+
+	hdr := card["header"].(map[string]any)
+	require.Equal(t, "yellow", hdr["template"])
+}
+
+func TestBuildQuestionCardWithButtons_NoOptions(t *testing.T) {
+	t.Parallel()
+	data := &events.QuestionRequestData{
+		ID:       "q-2",
+		ToolName: "AskUserQuestion",
+		Questions: []events.Question{
+			{Header: "Open", Question: "Why?"},
+		},
+	}
+	got := buildQuestionCardWithButtons(data)
+
+	var card map[string]any
+	require.NoError(t, json.Unmarshal([]byte(got), &card))
+
+	elems := card["elements"].([]any)
+	for _, e := range elems {
+		m := e.(map[string]any)
+		require.NotEqual(t, "action", m["tag"], "no action element expected when question has no options")
+	}
+}
+
+func TestBuildElicitationCardWithButtons(t *testing.T) {
+	t.Parallel()
+	data := &events.ElicitationRequestData{
+		ID:            "e-1",
+		MCPServerName: "github",
+		Message:       "Allow access",
+		URL:           "https://github.com/login/oauth",
+	}
+	got := buildElicitationCardWithButtons(data)
+
+	var card map[string]any
+	require.NoError(t, json.Unmarshal([]byte(got), &card))
+
+	body := card["body"].(map[string]any)
+	elements := body["elements"].([]any)
+
+	md := elements[0].(map[string]any)
+	require.Equal(t, "markdown", md["tag"])
+	content := md["content"].(string)
+	require.Contains(t, content, "https://github.com/login/oauth", "URL must appear as link in body")
+
+	actionEl := elements[1].(map[string]any)
+	require.Equal(t, "action", actionEl["tag"])
+	buttons := actionEl["actions"].([]any)
+	require.Len(t, buttons, 2)
+
+	btn0 := buttons[0].(map[string]any)
+	require.Equal(t, "primary", btn0["type"])
+	require.Equal(t, "✅ 接受", btn0["text"].(map[string]any)["content"])
+	val0 := btn0["value"].(map[string]any)
+	require.Equal(t, "accept", val0["action"])
+	require.Equal(t, "e-1", val0["request_id"])
+
+	btn1 := buttons[1].(map[string]any)
+	require.Equal(t, "danger", btn1["type"])
+	require.Equal(t, "❌ 拒绝", btn1["text"].(map[string]any)["content"])
+	val1 := btn1["value"].(map[string]any)
+	require.Equal(t, "decline", val1["action"])
+	require.Equal(t, "e-1", val1["request_id"])
+
+	hdr := card["header"].(map[string]any)
+	require.Equal(t, "violet", hdr["template"])
+}
+
+func TestBuildResolvedCard_Green(t *testing.T) {
+	t.Parallel()
+	card := buildResolvedCard("allow", "已允许", "")
+	require.NotNil(t, card)
+
+	cfg := card["config"].(map[string]any)
+	require.Equal(t, true, cfg["wide_screen_mode"])
+
+	hdr := card["header"].(map[string]any)
+	require.Equal(t, "green", hdr["template"])
+	title := hdr["title"].(map[string]any)
+	require.Equal(t, "plain_text", title["tag"])
+	require.Equal(t, "已允许", title["content"])
+}
+
+func TestBuildResolvedCard_Red(t *testing.T) {
+	t.Parallel()
+	card := buildResolvedCard("deny", "已拒绝", "")
+	hdr := card["header"].(map[string]any)
+	require.Equal(t, "red", hdr["template"])
+}
+
+func TestBuildResolvedCard_ExplicitColor(t *testing.T) {
+	t.Parallel()
+	card := buildResolvedCard("allow", "Custom Label", "blue")
+	hdr := card["header"].(map[string]any)
+	require.Equal(t, "blue", hdr["template"])
+	title := hdr["title"].(map[string]any)
+	require.Equal(t, "Custom Label", title["content"])
+}
