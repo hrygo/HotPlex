@@ -44,13 +44,14 @@ HotPlex Gateway 的安全模型遵循两条核心原则：
 
 认证采用 **API Key + Bot ID** 双字段模型，实现网关级别访问控制与多 Bot 隔离。
 
-#### 传输方式
+#### 传输方式（按优先级）
 
 | 通道 | API Key | Bot ID | 适用场景 |
 |------|---------|--------|---------|
 | HTTP Header | `X-API-Key` | `X-Bot-ID` | REST API、CLI、服务端客户端 |
 | Query Param | `api_key` | `bot_id` | 浏览器 WebSocket（无法发送自定义 Header） |
-| Init Envelope | `auth.token` | `auth.bot_id` | 浏览器 WebSocket 延迟认证 |
+| HMAC Cookie | 自动签发 | `bot_id` | 同源 WebChat（Gateway 自动签发 HttpOnly cookie） |
+| Init Envelope | `auth.token` | `auth.bot_id` | 浏览器 WebSocket 延迟认证（跨域场景） |
 
 #### 认证流程
 
@@ -78,6 +79,35 @@ Browser ──init envelope──> Conn.ReadPump
 ```
 
 浏览器 WebSocket 客户端因 CORS 限制无法发送自定义 HTTP Header，因此认证被延迟到首帧 `init` Envelope。服务端在 `HandleHTTP` 阶段检测到无 API Key 时设置 `pendingAuth` 标记，待 `ReadPump` 收到 `init` 后从 `auth.token` 字段提取并校验。
+
+#### HMAC Cookie 认证（同源 WebChat）
+
+同源部署的 WebChat SPA 使用 HMAC-SHA256 签名 cookie 替代构建时嵌入 API Key，消除前端 JS bundle 凭证泄露风险。
+
+```
+Gateway 启动 ──> crypto/rand 生成 HMAC key
+     │
+     ▼
+Browser ──GET /──> SPA handler (index.html fallback)
+                    └─ SetCookie: HttpOnly, SameSite=Strict, 24h expiry
+     │
+     ▼
+Browser ──WS Upgrade──> Hub.HandleHTTP
+     (cookie 自动携带)   ├─ CookieAuth.VerifyCookie() 签名+过期校验
+                         ├─ 通过 → "webchat_user" 身份
+                         └─ 失败 → fallback to init envelope
+```
+
+**安全属性**：
+- **HttpOnly**：JavaScript 无法读取，防止 XSS 窃取
+- **SameSite=Strict**：仅同源请求携带，阻止 CSRF
+- **HMAC-SHA256**：服务端随机密钥签名，无法伪造
+- **24 小时过期**：限制凭证有效期
+- **Secure 标记**：HTTPS 环境自动启用
+
+**认证优先级**：HTTP Header → Query Param → **Cookie** → Init Envelope。Cookie 作为第 3 优先级 fallback，仅在同源 WebChat 场景自动生效，不影响其他客户端。
+
+**已知限制**：所有同源 WebChat 用户共享 `webchat_user` 身份，无法区分单个用户。跨域部署仍需使用 Init Envelope 认证。
 
 #### Dev 模式
 
