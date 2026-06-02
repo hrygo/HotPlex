@@ -43,10 +43,10 @@ const (
 
 // ControlAction constants for client-initiated control.
 const (
-	ControlActionTerminate = string(events.ControlActionTerminate)
-	ControlActionDelete    = string(events.ControlActionDelete)
-	ControlActionReset     = string(events.ControlActionReset)
-	ControlActionGC        = string(events.ControlActionGC)
+	ControlActionTerminate      = string(events.ControlActionTerminate)
+	ControlActionDelete         = string(events.ControlActionDelete)
+	ControlActionReset          = string(events.ControlActionReset)
+	ControlActionGC             = string(events.ControlActionGC)
 	ControlActionReconnect      = string(events.ControlActionReconnect)
 	ControlActionSessionInvalid = string(events.ControlActionSessionInvalid)
 	ControlActionThrottle       = string(events.ControlActionThrottle)
@@ -74,9 +74,9 @@ const (
 	ErrCodeInternalError   = events.ErrCodeInternalError
 	ErrCodeUnauthorized    = events.ErrCodeUnauthorized
 	ErrCodeSessionNotFound = events.ErrCodeSessionNotFound
-	ErrCodeResumeRetry  = events.ErrCodeResumeRetry
-	ErrCodeNotSupported = events.ErrCodeNotSupported
-	ErrCodeTurnTimeout  = events.ErrCodeTurnTimeout
+	ErrCodeResumeRetry     = events.ErrCodeResumeRetry
+	ErrCodeNotSupported    = events.ErrCodeNotSupported
+	ErrCodeTurnTimeout     = events.ErrCodeTurnTimeout
 )
 
 // Event data types re-exported from pkg/events for type-safe access.
