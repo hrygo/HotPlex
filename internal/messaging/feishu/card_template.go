@@ -371,7 +371,7 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 		"content": "💬 点击按钮直接选择，或直接回复自定义答案",
 	})
 
-	return buildV1Card(header, map[string]any{"wide_screen_mode": true}, elements)
+	return buildCard(header, map[string]any{"wide_screen_mode": true}, elements)
 }
 
 func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string {

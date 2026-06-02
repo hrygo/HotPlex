@@ -532,9 +532,10 @@ func TestBuildQuestionCardWithButtons(t *testing.T) {
 
 	var card map[string]any
 	require.NoError(t, json.Unmarshal([]byte(got), &card))
-	require.Nil(t, card["schema"], "v1 card must not have schema field")
+	require.Equal(t, "2.0", card["schema"], "question card should now use v2 format")
 
-	elems := card["elements"].([]any)
+	body := card["body"].(map[string]any)
+	elems := body["elements"].([]any)
 
 	var actionEl map[string]any
 	for _, e := range elems {
@@ -577,7 +578,8 @@ func TestBuildQuestionCardWithButtons_NoOptions(t *testing.T) {
 	var card map[string]any
 	require.NoError(t, json.Unmarshal([]byte(got), &card))
 
-	elems := card["elements"].([]any)
+	body := card["body"].(map[string]any)
+	elems := body["elements"].([]any)
 	for _, e := range elems {
 		m := e.(map[string]any)
 		require.NotEqual(t, "action", m["tag"], "no action element expected when question has no options")

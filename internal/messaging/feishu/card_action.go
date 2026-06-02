@@ -80,10 +80,8 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 		resolvedColor = "red"
 
 	default:
-		if a.Log != nil {
-			a.Log.Warn("feishu: unknown card action type", "action", actionType, "request_id", requestID)
-		}
-		return nil, nil
+		a.Log.Warn("feishu: unknown card action type", "action", actionType, "request_id", requestID)
+		return wrapResolvedCard(buildResolvedCard("deny", "未知操作", headerGrey)), nil
 	}
 
 	// Owner check BEFORE Complete — preserves the interaction for non-owner
@@ -113,12 +111,10 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 		pi.SendResponse(metadata)
 	}
 
-	if a.Log != nil {
-		a.Log.Info("feishu: interaction resolved via card button",
-			"request_id", requestID,
-			"action", actionType,
-			"operator", openID)
-	}
+	a.Log.Info("feishu: interaction resolved via card button",
+		"request_id", requestID,
+		"action", actionType,
+		"operator", openID)
 
 	return wrapResolvedCard(buildResolvedCard(actionType, resolvedLabel, resolvedColor)), nil
 }

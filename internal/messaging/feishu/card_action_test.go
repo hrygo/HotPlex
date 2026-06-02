@@ -309,6 +309,13 @@ func TestHandleCardAction_UnknownAction(t *testing.T) {
 
 	got, err := a.handleCardActionTrigger(context.Background(), event)
 	require.NoError(t, err)
-	assert.Nil(t, got)
-	assert.Equal(t, 0, a.Interactions.Len())
+	require.NotNil(t, got, "unknown action should return a resolved card for user feedback")
+	require.NotNil(t, got.Card)
+	card, ok := got.Card.Data.(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, card, "header")
+	header := card["header"].(map[string]any)
+	title := header["title"].(map[string]any)
+	assert.Equal(t, "未知操作", title["content"])
+	assert.Equal(t, headerGrey, header["template"])
 }
