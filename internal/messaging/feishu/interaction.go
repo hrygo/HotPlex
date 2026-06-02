@@ -11,41 +11,14 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-// sendPermissionRequest posts a permission request card to Feishu.
-// Since the Feishu WS client does not forward card.action.trigger events,
-// the card is display-only — users respond by typing "允许/allow" or "拒绝/deny".
+// sendPermissionRequest posts an interactive permission request card with [允许/拒绝] buttons.
 func (c *FeishuConn) sendPermissionRequest(ctx context.Context, env *events.Envelope) error {
 	data, err := messaging.ExtractPermissionData(env)
 	if err != nil {
 		return fmt.Errorf("feishu: extract permission data: %w", err)
 	}
 
-	// Build header
-	header := fmt.Sprintf("**⚠️ 工具执行授权**\n工具执行请求：\n📝 **%s**", data.ToolName)
-	if data.Description != "" && data.Description != data.ToolName {
-		header += fmt.Sprintf("\n> %s", data.Description)
-	}
-
-	// Args preview
-	if len(data.Args) > 0 && data.Args[0] != "{}" {
-		preview := data.Args[0]
-		if len(preview) > 500 {
-			preview = preview[:500] + "..."
-		}
-		// Strip triple backticks to prevent nested code blocks.
-		preview = strings.ReplaceAll(preview, "```", "")
-		header += fmt.Sprintf("\n```\n%s\n```", preview)
-	}
-
-	// Instruction text with request ID for reference
-	footer := fmt.Sprintf("---\n📋 请求ID: `%s`\n💬 回复 **允许/同意/ok** 或 **拒绝/取消/no** 来响应此请求", data.ID)
-
-	cardJSON := buildInteractionCard(header, footer, cardHeader{
-		Title:    "工具执行授权",
-		Subtitle: data.ToolName,
-		Template: headerOrange,
-		Tags:     []cardTag{{Text: "pending", Color: "orange"}},
-	})
+	cardJSON := buildPermissionCardWithButtons(data)
 	chatID := c.chatID
 	c.adapter.Log.Debug("feishu: sending permission request card", "chat", chatID, "request_id", data.ID)
 
@@ -75,16 +48,7 @@ func (c *FeishuConn) sendQuestionRequest(ctx context.Context, env *events.Envelo
 		return fmt.Errorf("feishu: extract question data: %w", err)
 	}
 
-	elements := buildQuestionElements(data.Questions)
-	elements = append(elements,
-		map[string]any{"tag": "hr"},
-		map[string]any{"tag": "markdown", "content": questionFooterHint(data.Questions)},
-	)
-
-	cardJSON := buildV1Card(cardHeader{
-		Title:    "用户输入请求",
-		Template: headerYellow,
-	}, map[string]any{"wide_screen_mode": true}, elements)
+	cardJSON := buildQuestionCardWithButtons(data)
 
 	chatID := c.chatID
 	if err := c.adapter.sendCardMessage(ctx, chatID, cardJSON); err != nil {
@@ -111,20 +75,7 @@ func (c *FeishuConn) sendElicitationRequest(ctx context.Context, env *events.Env
 		return fmt.Errorf("feishu: extract elicitation data: %w", err)
 	}
 
-	header := fmt.Sprintf("**🔗 MCP Server Request**\n`%s` 请求输入：\n%s", data.MCPServerName, data.Message)
-
-	var footer strings.Builder
-	footer.WriteString("---\n")
-	if data.URL != "" {
-		fmt.Fprintf(&footer, "📎 [外部表单](%s)\n", data.URL)
-	}
-	footer.WriteString("💬 回复 **accept/同意** 或 **decline/拒绝** 来响应此请求")
-
-	cardJSON := buildInteractionCard(header, footer.String(), cardHeader{
-		Title:    "MCP Server 请求",
-		Subtitle: data.MCPServerName,
-		Template: headerViolet,
-	})
+	cardJSON := buildElicitationCardWithButtons(data)
 
 	chatID := c.chatID
 	if err := c.adapter.sendCardMessage(ctx, chatID, cardJSON); err != nil {
@@ -259,19 +210,6 @@ func (a *Adapter) sendCardMessage(ctx context.Context, chatID, cardJSON string) 
 		return fmt.Errorf("feishu: send card message: %w", err)
 	}
 	return nil
-}
-
-// buildInteractionCard builds a CardKit v2 card for interaction requests.
-func buildInteractionCard(body, footer string, header cardHeader) string {
-	elements := []map[string]any{
-		{"tag": "markdown", "content": body},
-	}
-	if footer != "" {
-		elements = append(elements, map[string]any{"tag": "hr"})
-		elements = append(elements, map[string]any{"tag": "markdown", "content": footer})
-	}
-
-	return buildCard(header, map[string]any{"wide_screen_mode": true}, elements)
 }
 
 // isPermissionAllow checks if the normalized text is a permission-allow keyword.

@@ -12,9 +12,8 @@ research_sources:
   - Lark SDK v3.5.3 ws/client.go, card/card.go, card/model.go
 sdk_upgrade:
   from: v3.5.3
-  to: v3.9.1
-  breaking_changes: "ReceiveIdTypeChatId constant removed → use string \"chat_id\" directly"
-  test_result: ALL PASS (0 failures)
+  to: v3.9.3
+  notes: "v3.9.3 EventDispatcher natively supports OnP2CardActionTrigger; no SDK patching or go.mod replace required"
 ---
 
 # Feishu Interactive Card Buttons Spec
@@ -35,41 +34,25 @@ sdk_upgrade:
 
 ### 1.3 根因
 
-飞书交互式按钮不可用的根本原因是 **Lark SDK（v3.5.3 ~ v3.9.1 所有版本）的 WebSocket 客户端未实现卡片回调处理**：
+飞书交互式按钮的回调路径在 **Lark SDK v3.9.3** 中已得到原生支持。SDK 的 `EventDispatcher` 内置 `OnP2CardActionTrigger` 注册入口：
 
-```go
-// ws/client.go handleDataFrame() — v3.5.3 和 v3.9.1 代码完全相同
-switch MessageType(type_) {
-case MessageTypeEvent:
-    rsp, err = c.eventHandler.Do(ctx, pl)
-case MessageTypeCard:
-    return  // ← 卡片回调消息被静默丢弃！所有版本均未修复
-}
-```
+- 卡片按钮点击事件通过 `MessageTypeEvent` 帧传输，event_type 字段为 `card.action.trigger`
+- `EventDispatcher.Do()` 通过 `callbackType2CallbackHandler` 自动路由到注册的 `OnP2CardActionTrigger` 处理器
+- 无需任何 SDK 补丁、go.mod replace 指令或 vendor 目录覆盖
 
-SDK 的 `cardHandler` 字段和 `WithCardHandler` 选项已定义但被注释掉，且 **v3.5.3 → v3.9.1 的 4 个大版本升级均未解除注释**。
-
-**关键结论**：飞书 WS 协议**支持**传输卡片回调消息（`MessageTypeCard`），SDK 已定义处理框架但从未完成实现。升级 SDK 无法解决此问题，必须自行补丁。
+**关键结论**：升级到 SDK v3.9.3 即可使用 `OnP2CardActionTrigger` 路由卡片回调，无需修改 SDK 源码。
 
 ---
 
 ## 2. 方案设计
 
-### 2.1 方案选择：SDK 补丁 + Handler 注册
+### 2.1 方案：EventDispatcher.OnP2CardActionTrigger
 
-| 方案 | 描述 | 优点 | 缺点 |
-|------|------|------|------|
-| **A. SDK 补丁（推荐）** | go.mod replace 指向本地补丁版 SDK | 改动最小（~10行），复用现有 WS 连接 | 维护本地 SDK fork |
-| B. Webhook 混合模式 | WS 收消息 + HTTP 收卡片回调 | 不改 SDK | 需额外 HTTP 端口和公网可达 |
-| C. 自定义 WS 拦截器 | 在 SDK 处理前拦截原始帧 | 不改 SDK | 绕过 SDK 抽象层，脆弱 |
-| D. 等待官方 SDK 更新 | 无改动 | 最安全 | 时间不可控 |
+**采用方案**：使用 SDK v3.9.3 内置的 `EventDispatcher.OnP2CardActionTrigger` 路由卡片按钮回调。
 
-**选定方案 A**：SDK 补丁。
-
-理由：
-1. 补丁量极小（启用 `WithCardHandler` + 路由 `MessageTypeCard`），影响面可控
-2. 复用现有 WS 长连接，无需新增 HTTP 端口或公网域名
-3. 可向上游提交 PR，未来官方合并后移除 replace 指令
+- **触发路径**：卡片按钮点击 → 飞书 WS → `MessageTypeEvent` 帧（event_type=`card.action.trigger`）→ `EventDispatcher.Do()` → `callbackType2CallbackHandler` → `OnP2CardActionTrigger` 处理器
+- **优势**：无 SDK 源码修改、无 `go.mod` replace、无 vendor 补丁；与官方 SDK 升级路径完全兼容
+- **代价**：回调数据由 `callback.CardActionTriggerEvent` 包装（非裸 `CardAction`），返回类型为 `*callback.CardActionTriggerResponse`
 
 ### 2.2 架构总览
 
@@ -78,24 +61,24 @@ SDK 的 `cardHandler` 字段和 `WithCardHandler` 选项已定义但被注释掉
                         │           HotPlex Gateway               │
                         │                                         │
   Feishu WS ───────────▶│  ws.go ──▶ newEventHandler()            │
-  (MessageTypeCard)     │            │                             │
+  (MessageTypeEvent,    │            │                             │
+   event_type=          │            ├── OnP2CardActionTrigger     │
+   card.action.trigger) │            │     └─▶ handleCardAction   │
+                        │            │          Trigger()         │
                         │            ├── P2MessageReceiveV1        │
-                        │            ├── P2ChatAccessEvent...      │
-                        │            └── [新增] cardHandler         │
-                        │                 │                        │
-                        │                 ▼                        │
-                        │          handleCardAction()              │
-                        │            │                             │
-                        │            ├── 验证操作者身份              │
-                        │            ├── Complete(requestID)       │
-                        │            ├── SendResponse(metadata)    │
-                        │            └── 返回更新卡片（原地变色）     │
-                        │                 │                        │
+                        │            └── P2ChatAccessEvent...      │
+                        │                                          │
+                        │  handleCardActionTrigger():              │
+                        │    ├── 验证操作者身份                    │
+                        │    ├── Interactions.Complete(requestID)  │
+                        │    ├── pi.SendResponse(metadata)         │
+                        │    └── 返回 wrapResolvedCard(...)        │
+                        │                                          │
   Slack Socket ─────────▶│  slack/interaction.go (已实现 ✅)        │
-  (BlockActions)         │                                         │
-                        │                                         │
+  (BlockActions)         │                                          │
+                        │                                          │
   WebChat WS ───────────▶│  gateway/conn.go → 浏览器前端 (已实现 ✅) │
-  (AEP events)           │                                         │
+  (AEP events)           │                                          │
                         └─────────────────────────────────────────┘
 ```
 
@@ -103,39 +86,9 @@ SDK 的 `cardHandler` 字段和 `WithCardHandler` 选项已定义但被注释掉
 
 ## 3. 实现细节
 
-### 3.1 Phase 1: Lark SDK 补丁
+### 3.1 Phase 1: 无 SDK 改动
 
-**文件**: `go.mod` + vendor/replace
-
-补丁内容（基于 `github.com/larksuite/oapi-sdk-go/v3@v3.5.3/ws/client.go`）：
-
-```go
-// 1. 取消注释 WithCardHandler（原第 54-58 行）
-func WithCardHandler(handler *larkcard.CardActionHandler) ClientOption {
-    return func(cli *Client) {
-        cli.cardHandler = handler
-    }
-}
-
-// 2. 修改 handleMessage 中 MessageTypeCard 分支（原第 424-425 行）
-case MessageTypeCard:
-    if c.cardHandler != nil {
-        rsp, err = c.cardHandler.DoHandle(ctx, &larkevent.EventReq{
-            Header: frame.Headers.Map(),
-            Body:   pl,
-        })
-    } else {
-        return
-    }
-```
-
-**go.mod 改动**:
-
-```
-replace github.com/larksuite/oapi-sdk-go/v3 => ./vendor/patches/oapi-sdk-go-v3
-```
-
-将补丁版 SDK 放入 `vendor/patches/oapi-sdk-go-v3/`，仅修改 `ws/client.go` 一个文件。
+Lark SDK v3.9.3 的 `EventDispatcher` 已原生支持卡片回调（`OnP2CardActionTrigger`），无需任何 SDK 源码补丁、`go.mod` replace 指令或 `vendor/patches/` 目录。代码改动完全在 `internal/messaging/feishu/` 内部。
 
 ### 3.2 Phase 2: Feishu Adapter 注册卡片处理器
 
@@ -144,27 +97,14 @@ replace github.com/larksuite/oapi-sdk-go/v3 => ./vendor/patches/oapi-sdk-go-v3
 ```go
 func (a *Adapter) newEventHandler() *dispatcher.EventDispatcher {
     return dispatcher.NewEventDispatcher("", "").
-        OnP2MessageReceiveV1(a.handleMessage).
-        OnP2MessageReadV1(func(_ context.Context, _ *larkim.P2MessageReadV1) error { return nil }).
-        OnP2MessageReactionCreatedV1(func(_ context.Context, _ *larkim.P2MessageReactionCreatedV1) error { return nil }).
-        OnP2MessageReactionDeletedV1(func(_ context.Context, _ *larkim.P2MessageReactionDeletedV1) error { return nil }).
+        // Card action handlers are registered first — EventDispatcher.Do()
+        // checks callbacks before events, mirroring that priority order.
+        OnP2CardActionTrigger(a.handleCardActionTrigger).
+        OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
+            return a.handleMessage(ctx, event)
+        }).
+        // ... 其他 P2 事件处理器（Read/Reaction/ChatAccess）...
         OnP2ChatAccessEventBotP2pChatEnteredV1(a.handleChatEntered)
-}
-
-// 新增：构建卡片回调处理器
-func (a *Adapter) newCardHandler() *larkcard.CardActionHandler {
-    return larkcard.NewCardActionHandler("", "", a.handleCardAction)
-}
-
-func (a *Adapter) runWebSocket(ctx context.Context) {
-    // ... existing reconnect loop ...
-    client := ws.NewClient(a.appID, a.appSecret,
-        ws.WithEventHandler(a.newEventHandler()),
-        ws.WithCardHandler(a.newCardHandler()),  // ← 新增
-        ws.WithAutoReconnect(true),
-        ws.WithLogger(SlogLogger{Logger: a.Log}),
-    )
-    // ...
 }
 ```
 
@@ -176,107 +116,118 @@ func (a *Adapter) runWebSocket(ctx context.Context) {
 package feishu
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
+	"context"
+	"fmt"
+	"runtime/debug"
 
-    larkcard "github.com/larksuite/oapi-sdk-go/v3/card"
-    "github.com/hrygo/hotplex/internal/messaging"
-    "github.com/hrygo/hotplex/pkg/events"
+	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
+
+	"github.com/hrygo/hotplex/internal/messaging"
 )
 
-// 交互动作前缀，与 Slack 的 hp_interact/ 前缀保持语义一致
-const actionPrefix = "hp_interact"
-
-// 交互动作类型
 const (
-    actionAllow   = "allow"
-    actionDeny    = "deny"
-    actionAnswer  = "answer"
-    actionAccept  = "accept"
-    actionDecline = "decline"
+	cardActionAllow   = "allow"
+	cardActionDeny    = "deny"
+	cardActionAnswer  = "answer"
+	cardActionAccept  = "accept"
+	cardActionDecline = "decline"
 )
 
-// handleCardAction 处理飞书卡片按钮回调。
-// 返回值用于原地更新卡片内容（变色显示审批结果）。
-func (a *Adapter) handleCardAction(ctx context.Context, cardAction *larkcard.CardAction) (interface{}, error) {
-    if cardAction.Action == nil || cardAction.Action.Value == nil {
-        return nil, nil
-    }
+// handleCardActionTrigger 处理飞书卡片按钮回调。
+// 注册入口：newEventHandler().OnP2CardActionTrigger
+// 返回值：原地更新卡片内容（变色显示审批结果），通过 wrapResolvedCard 包装。
+func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.CardActionTriggerEvent) (resp *callback.CardActionTriggerResponse, err error) {
+	// Panic recovery: WS handler convention (see ws.go). Named returns are
+	// required so the defer can set `err` and prevent a higher-level crash.
+	defer func() {
+		if r := recover(); r != nil {
+			a.Log.Error("feishu: panic in card action handler", "panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("feishu card action panic: %v", r)
+		}
+	}()
 
-    // 提取按钮 value 中的 action 和 request_id
-    val := cardAction.Action.Value
-    actionType, _ := val["action"].(string)
-    requestID, _ := val["request_id"].(string)
+	if event == nil || event.Event == nil || event.Event.Action == nil || event.Event.Action.Value == nil {
+		return nil, nil
+	}
 
-    if actionType == "" || requestID == "" {
-        return nil, nil
-    }
+	val := event.Event.Action.Value
+	requestID, _ := val["request_id"].(string)
+	actionType, _ := val["action"].(string)
 
-    // 完整 action key: "hp_interact/allow/req_xxx"
-    actionKey := actionPrefix + "/" + actionType + "/" + requestID
+	openID := ""
+	if event.Event.Operator != nil {
+		openID = event.Event.Operator.OpenID
+	}
 
-    // 验证操作者身份
-    operatorID := cardAction.OpenID
+	var (
+		metadata      map[string]any
+		resolvedLabel string
+		resolvedColor string
+	)
 
-    // 从 InteractionManager 中完成交互
-    pi, ok := a.Interactions.Complete(requestID)
-    if !ok {
-        // 已被响应或超时
-        return buildResolvedCard(actionDeny, "已过期或已响应", ""), nil
-    }
+	switch actionType {
+	case cardActionAllow:
+		metadata = messaging.BuildPermissionResponse(requestID, true, "")
+		resolvedLabel = "✅ 已允许"
+		resolvedColor = "green"
+	case cardActionDeny:
+		metadata = messaging.BuildPermissionResponse(requestID, false, "user denied")
+		resolvedLabel = "🚫 已拒绝"
+		resolvedColor = "red"
+	case cardActionAnswer:
+		answer, _ := val["answer"].(string)
+		if answer == "" {
+			answer, _ = val["label"].(string)
+		}
+		metadata = messaging.BuildQuestionResponse(requestID, answer)
+		resolvedLabel = "✅ 已回答"
+		resolvedColor = "green"
+	case cardActionAccept:
+		metadata = messaging.BuildElicitationResponse(requestID, "accept")
+		resolvedLabel = "✅ 已接受"
+		resolvedColor = "green"
+	case cardActionDecline:
+		metadata = messaging.BuildElicitationResponse(requestID, "decline")
+		resolvedLabel = "🚫 已拒绝"
+		resolvedColor = "red"
+	default:
+		a.Log.Warn("feishu: unknown card action type", "action", actionType, "request_id", requestID)
+		return nil, nil
+	}
 
-    // 验证所有者
-    if pi.OwnerID != "" && pi.OwnerID != operatorID {
-        // 非所有者操作，重新注册（不消耗）
-        a.Interactions.Register(pi)
-        return nil, nil
-    }
+	// Owner check BEFORE Complete — preserves the interaction for non-owner
+	// clicks. If we Completed first, the original watchTimeout goroutine
+	// (still running) would race the re-Registered entry.
+	pending, exists := a.Interactions.Get(requestID)
+	if !exists {
+		return wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", "")), nil
+	}
+	if pending.OwnerID != "" && pending.OwnerID != openID {
+		return nil, nil
+	}
 
-    // 构建响应 metadata 并发送
-    var metadata map[string]any
-    var resultLabel string
-    var resultColor string
+	pi, ok := a.Interactions.Complete(requestID)
+	if !ok {
+		return wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", "")), nil
+	}
 
-    switch {
-    case actionType == actionAllow:
-        metadata = messaging.BuildPermissionResponse(requestID, true, "")
-        resultLabel = "✅ 已允许"
-        resultColor = larkcard.TemplateGreen
-    case actionType == actionDeny:
-        metadata = messaging.BuildPermissionResponse(requestID, false, "user denied")
-        resultLabel = "🚫 已拒绝"
-        resultColor = larkcard.TemplateRed
-    case actionType == actionAnswer:
-        answer, _ := val["answer"].(string)
-        if answer == "" {
-            answer, _ = val["label"].(string)
-        }
-        metadata = messaging.BuildQuestionResponse(requestID, answer)
-        resultLabel = "✅ 已回答"
-        resultColor = larkcard.TemplateGreen
-    case actionType == actionAccept:
-        metadata = messaging.BuildElicitationResponse(requestID, "accept")
-        resultLabel = "✅ 已接受"
-        resultColor = larkcard.TemplateGreen
-    case actionType == actionDecline:
-        metadata = messaging.BuildElicitationResponse(requestID, "decline")
-        resultLabel = "🚫 已拒绝"
-        resultColor = larkcard.TemplateRed
-    default:
-        return nil, nil
-    }
+	if pi.SendResponse != nil {
+		pi.SendResponse(metadata)
+	}
 
-    // 发送响应到 Worker
-    pi.SendResponse(metadata)
+	a.Log.Info("feishu: interaction resolved via card button",
+		"request_id", requestID, "action", actionType, "operator", openID)
 
-    a.Log.Info("feishu: interaction resolved via card button",
-        "request_id", requestID,
-        "action", actionType,
-        "operator", operatorID)
+	return wrapResolvedCard(buildResolvedCard(actionType, resolvedLabel, resolvedColor)), nil
+}
 
-    // 返回更新后的卡片（原地变色）
-    return buildResolvedCard(actionType, resultLabel, resultColor), nil
+func wrapResolvedCard(card map[string]any) *callback.CardActionTriggerResponse {
+	return &callback.CardActionTriggerResponse{
+		Card: &callback.Card{
+			Type: "card_json",
+			Data: card,
+		},
+	}
 }
 ```
 
@@ -545,7 +496,7 @@ Fallback: 文字 "allow <id>" / "deny <id>"
 ```
 交互卡: CardKit v2 action 元素 + button 元素
 动作值: {"action": "<type>", "request_id": "<id>"}
-回调: MessageTypeCard → CardActionHandler → handleCardAction()
+回调: MessageTypeEvent (event_type=card.action.trigger) → OnP2CardActionTrigger → handleCardActionTrigger()
 Fallback: 文字 "允许/拒绝"（保留 checkPendingInteraction）
 ```
 
@@ -565,7 +516,7 @@ Worker → AEP PermissionRequest → Gateway Handler → PlatformConn.WriteCtx
                                    用户点击按钮   用户点击按钮    用户点击按钮
                                           │              │              │
                                           ▼              ▼              ▼
-                                  handleCardAction  handleInteraction  sendResponse
+                                   handleCardActionTrigger  handleInteraction  sendResponse
                                           │              │              │
                                           └──────┬───────┘──────────────┘
                                                  ▼
@@ -601,7 +552,7 @@ Worker → AEP PermissionRequest → Gateway Handler → PlatformConn.WriteCtx
 | 文字 fallback | 发送按钮卡后，用户不打字直接发"允许" | 文字通道仍可用，按钮卡显示"已过期" |
 | 超时 | 发送按钮卡后等待 5min | 自动拒绝，卡片不变色 |
 | 非所有者 | 其他用户点击按钮 | 操作被忽略，卡片不变 |
-| SDK 补丁 | WS 收到 MessageTypeCard 帧 | 正确路由到 cardHandler，不再丢弃 |
+| EventDispatcher 路由 | WS 收到 MessageTypeEvent 帧（event_type=card.action.trigger）| 自动路由到 OnP2CardActionTrigger → handleCardActionTrigger |
 
 ### 5.3 验收标准
 
@@ -619,15 +570,13 @@ Worker → AEP PermissionRequest → Gateway Handler → PlatformConn.WriteCtx
 
 | 文件 | 操作 | 改动量 | 说明 |
 |------|------|-------|------|
-| `vendor/patches/oapi-sdk-go-v3/ws/client.go` | 修改 | ~10行 | 启用 WithCardHandler + 路由 MessageTypeCard |
-| `go.mod` | 修改 | 1行 | 添加 replace 指令 |
-| `internal/messaging/feishu/card_action.go` | **新建** | ~120行 | 卡片回调处理器 |
+| `internal/messaging/feishu/card_action.go` | **新建** | ~135行 | handleCardActionTrigger + wrapResolvedCard + panic recovery |
 | `internal/messaging/feishu/card_template.go` | 修改 | ~150行 | 新增 4 个卡片构建函数 |
 | `internal/messaging/feishu/interaction.go` | 修改 | ~30行 | 切换到带按钮卡片、删除过时注释 |
-| `internal/messaging/feishu/ws.go` | 修改 | ~10行 | 注册 newCardHandler |
+| `internal/messaging/feishu/ws.go` | 修改 | ~5行 | 在 newEventHandler() 链中添加 OnP2CardActionTrigger |
 | `internal/messaging/feishu/AGENTS.md` | 修改 | ~5行 | 更新文档 |
 
-**总改动量**：~325 行（含测试）
+**总改动量**：~325 行（含测试），其中 SDK 部分 0 改动
 
 ---
 
@@ -635,17 +584,32 @@ Worker → AEP PermissionRequest → Gateway Handler → PlatformConn.WriteCtx
 
 | 风险 | 影响 | 概率 | 缓解 |
 |------|------|------|------|
-| SDK 补丁与未来官方更新冲突 | 低 | 中 | 补丁范围极小（2处），可轻松 rebase；向上游提 PR |
-| 飞书 WS 不实际投递 MessageTypeCard | 高 | 低 | Hermes Agent 已在 Python SDK 验证此路径可行；Go SDK 帧解析已就绪 |
-| 卡片回调 3 秒超时 | 中 | 低 | handleCardAction 内部逻辑简单（map lookup + channel send），远低于 3 秒 |
+| EventDispatcher 行为变更 | 低 | 低 | 使用公开 API `OnP2CardActionTrigger`，向后兼容保证高；SDK v3.9.3 已稳定 |
+| 卡片回调 3 秒超时 | 中 | 低 | handleCardActionTrigger 内部逻辑简单（map lookup + channel send），远低于 3 秒 |
 | 按钮卡在飞书旧版客户端不显示 | 低 | 中 | Fallback 到纯文字通道已保留 |
 
 ---
 
-## 8. 飞书开放平台配置
+## 8. 飞书开放平台配置（2026-06 更新）
 
-**前置条件**（需在飞书开放平台后台确认）：
+### 8.1 控制台配置路径
 
-1. 应用功能 → 机器人 → 开启「卡片事件回调」
-2. 应用功能 → 机器人 → 确认已拥有 `im:message` + `im:message:send_as_bot` 权限
-3. 无需配置 Webhook URL（使用 WS 模式接收回调）
+```
+open.feishu.cn → 开发者后台 → 选择应用
+  → 开发配置 → 事件与回调 → 回调配置（非"事件配置"标签页）
+    ├─ 订阅方式：编辑 → 使用长连接接收回调 → 保存
+    │   ⚠️ 保存前必须确保本地 WS 客户端处于已连接状态
+    └─ 已订阅的回调 → 添加回调 → 卡片回传交互 (card.action.trigger)
+```
+
+### 8.2 权限要求
+
+1. 确认已拥有 `im:message` + `im:message:send_as_bot` 权限
+2. `card.action.trigger` 回调本身无权限要求
+
+### 8.3 技术实现说明
+
+SDK v3.9.3 的 `EventDispatcher` 已内置 `OnP2CardActionTrigger` 支持：
+- 卡片回调通过 `MessageTypeEvent` 帧（event_type=`card.action.trigger`）传输
+- `EventDispatcher.Do()` 的 `callbackType2CallbackHandler` 自动路由到 `OnP2CardActionTrigger`
+- **无需 SDK 补丁**，直接使用 `EventDispatcher.OnP2CardActionTrigger` 注册回调处理器

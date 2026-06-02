@@ -1,7 +1,6 @@
 package feishu
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -147,19 +146,6 @@ func TestBuildMediaPrompt_NoUserText(t *testing.T) {
 	result := BuildMediaPrompt("", []string{"/tmp/img.png"}, medias, nil)
 	require.Contains(t, result, "已下载到本地")
 	require.NotContains(t, result, "用户的文字内容")
-}
-
-func TestBuildInteractionCard_NoFooter(t *testing.T) {
-	t.Parallel()
-	result := buildInteractionCard("body text", "", cardHeader{Title: "Test"})
-	require.Contains(t, result, "body text")
-
-	var parsed map[string]any
-	require.NoError(t, json.Unmarshal([]byte(result), &parsed))
-	// No hr element when no footer.
-	body := parsed["body"].(map[string]any)
-	elements := body["elements"].([]any)
-	require.Len(t, elements, 1)
 }
 
 func TestStripInvalidImageKeys_NoImageSyntax(t *testing.T) {
