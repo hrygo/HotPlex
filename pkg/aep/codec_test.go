@@ -415,3 +415,39 @@ func TestEncodeJSON_NDJSONSafe(t *testing.T) {
 	require.Contains(t, decoded.Event.Data.Content, "\u2028")
 	require.Contains(t, decoded.Event.Data.Content, "\u2029")
 }
+
+func TestEncode_NoMutation(t *testing.T) {
+	t.Parallel()
+
+	env := &events.Envelope{
+		ID:        NewID(),
+		SessionID: "sess_nomut",
+		Seq:       1,
+		Event:     events.Event{Type: events.Input, Data: events.InputData{Content: "test"}},
+	}
+	origVersion := env.Version
+	origTimestamp := env.Timestamp
+
+	var sb strings.Builder
+	require.NoError(t, Encode(&sb, env))
+	require.Equal(t, origVersion, env.Version, "Encode must not mutate input Version")
+	require.Equal(t, origTimestamp, env.Timestamp, "Encode must not mutate input Timestamp")
+}
+
+func TestEncodeJSON_NoMutation(t *testing.T) {
+	t.Parallel()
+
+	env := &events.Envelope{
+		ID:        NewID(),
+		SessionID: "sess_nomut",
+		Seq:       1,
+		Event:     events.Event{Type: events.Input, Data: events.InputData{Content: "test"}},
+	}
+	origVersion := env.Version
+	origTimestamp := env.Timestamp
+
+	_, err := EncodeJSON(env)
+	require.NoError(t, err)
+	require.Equal(t, origVersion, env.Version, "EncodeJSON must not mutate input Version")
+	require.Equal(t, origTimestamp, env.Timestamp, "EncodeJSON must not mutate input Timestamp")
+}
