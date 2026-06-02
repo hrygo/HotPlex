@@ -1,7 +1,7 @@
 # Webchat Cookie 认证设计规格
 
 **日期**: 2026-06-02
-**状态**: Draft
+**状态**: Implemented (PR #625)
 **范围**: 消除构建时 API Key 泄露，改用运行时 HMAC 签名 Cookie 认证
 
 ---
