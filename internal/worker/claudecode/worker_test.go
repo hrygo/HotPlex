@@ -571,18 +571,10 @@ func TestBuildCLIArgs_ConfigEnv(t *testing.T) {
 
 	args, err := w.buildCLIArgs(session, false)
 	require.NoError(t, err)
-	require.Contains(t, args, "--settings")
-	// Verify the JSON content
-	for i, a := range args {
-		if a == "--settings" && i+1 < len(args) {
-			var parsed map[string]any
-			require.NoError(t, json.Unmarshal([]byte(args[i+1]), &parsed))
-			envMap, ok := parsed["env"].(map[string]any)
-			require.True(t, ok)
-			require.Equal(t, "bar", envMap["FOO"])
-			require.Equal(t, "qux", envMap["BAZ"])
-		}
-	}
+	// ConfigEnv is injected via cmd.Env (env.go Phase 7), NOT via --settings
+	// JSON. See issue #622: --settings collides with CCR's own --settings push
+	// and causes Claude to fail with "Settings file not found: [...]".
+	require.NotContains(t, args, "--settings")
 }
 
 func TestBuildCLIArgs_ConfigEnv_SkipsMalformed(t *testing.T) {
@@ -598,16 +590,7 @@ func TestBuildCLIArgs_ConfigEnv_SkipsMalformed(t *testing.T) {
 
 	args, err := w.buildCLIArgs(session, false)
 	require.NoError(t, err)
-	require.Contains(t, args, "--settings")
-	for i, a := range args {
-		if a == "--settings" && i+1 < len(args) {
-			var parsed map[string]any
-			require.NoError(t, json.Unmarshal([]byte(args[i+1]), &parsed))
-			envMap := parsed["env"].(map[string]any)
-			require.Len(t, envMap, 1)
-			require.Equal(t, "value", envMap["VALID"])
-		}
-	}
+	require.NotContains(t, args, "--settings")
 }
 
 func TestBuildCLIArgs_ConfigEnv_Empty(t *testing.T) {

@@ -172,10 +172,15 @@ worker:
 
   # Extra environment variables for all worker processes (highest priority).
   # These override all other env sources.
+  # NOTE: these go to workers via cmd.Env (env.go Phase 7), NOT via
+  # --settings JSON (removed in commit fixing #622 — that path broke CCR
+  # which appends its own --settings, causing Claude to error out).
+  # For network env (NO_PROXY, HTTP_PROXY, etc.), the HOTPLEX_WORKER_<NAME>
+  # .env mechanism is preferred — it only sets cmd.Env without polluting
+  # worker.environment defaults.
   environment:
     - GH_TOKEN=${HOTPLEX_WORKER_GH_TOKEN}
     - GITHUB_TOKEN=${HOTPLEX_WORKER_GITHUB_TOKEN}
-    - NO_PROXY=localhost,127.0.0.1,::1
   # - BUN_JSC_useJIT=0  # JIT workaround for Bun SIGILL on broken AVX VPS (severe perf penalty)
 
   auto_retry:

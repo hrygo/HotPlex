@@ -357,22 +357,15 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 	if session.IncludeHookEvents {
 		args = append(args, "--include-hook-events")
 	}
-	// ConfigEnv: inject environment variables via --settings JSON.
-	if len(session.ConfigEnv) > 0 {
-		envMap := make(map[string]string, len(session.ConfigEnv))
-		for _, kv := range session.ConfigEnv {
-			if k, v, ok := strings.Cut(kv, "="); ok {
-				envMap[k] = v
-			}
-		}
-		if len(envMap) > 0 {
-			settingsJSON, err := json.Marshal(map[string]any{"env": envMap})
-			if err != nil {
-				return nil, fmt.Errorf("marshal settings JSON: %w", err)
-			}
-			args = append(args, "--settings", string(settingsJSON))
-		}
-	}
+	// ConfigEnv is injected via cmd.Env only (env.go Phase 7), NOT via
+	// --settings JSON. Claude Code's --settings flag is a no-op for env
+	// (cmd.Env is inherited by tool subprocesses) and serializing ConfigEnv
+	// here breaks third-party wrappers that also push --settings:
+	//   - CCR appends its own "--settings /tmp/.../ccr-settings-<hash>.json"
+	//   - Claude receives two --settings values, yargs merges them into an
+	//     array, UZ4()'s "{...}" JSON-shape check fails, and Claude reports
+	//     "Settings file not found: [...]" → exit_code=1 → session crash.
+	// See issue #622.
 	if session.IncludePartialMessages {
 		args = append(args, "--include-partial-messages")
 	}
