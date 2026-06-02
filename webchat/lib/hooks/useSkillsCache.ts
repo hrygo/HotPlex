@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { SkillEntry } from '@/lib/ai-sdk-transport/client/types';
 
 const STORAGE_KEY_PREFIX = 'hotplex:skills';
@@ -32,6 +32,11 @@ export function useSkillsCache(sessionId: string | null) {
   );
   const currentIdRef = useRef(sessionId);
   currentIdRef.current = sessionId;
+
+  // Reload from storage when session changes
+  useEffect(() => {
+    setSkills(sessionId ? loadFromStorage(sessionId) : []);
+  }, [sessionId]);
 
   const mergeSkills = useCallback((incoming: SkillEntry[]) => {
     setSkills(prev => {

@@ -61,15 +61,13 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 
 	// Server-handled worker commands don't go through the bridge turn cycle,
 	// so the frontend never receives a "done" event to clear isRunning.
-	// Send one now so the UI doesn't freeze.
-	if cmdErr == nil {
-		doneEnv := events.NewEnvelope(
-			aep.NewID(), env.SessionID,
-			h.hub.NextSeq(env.SessionID),
-			events.Done, events.DoneData{},
-		)
-		_ = h.hub.SendToSession(ctx, doneEnv)
-	}
+	// Send one unconditionally so the UI recovers on both success and failure.
+	doneEnv := events.NewEnvelope(
+		aep.NewID(), env.SessionID,
+		h.hub.NextSeq(env.SessionID),
+		events.Done, events.DoneData{Success: cmdErr == nil},
+	)
+	_ = h.hub.SendToSession(ctx, doneEnv)
 
 	return cmdErr
 }
@@ -198,7 +196,10 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 	}
 
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		h.log.Warn("skills list: failed to resolve home directory, global skills skipped", "error", err)
+	}
 	allSkills, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
 	if err != nil {
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "skills: %v", err)
