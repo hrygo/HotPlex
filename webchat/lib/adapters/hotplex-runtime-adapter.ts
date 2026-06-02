@@ -49,6 +49,8 @@ export interface UseHotPlexRuntimeConfig {
   onMetricsChange?: (metrics: import('@/lib/hooks/useMetrics').SessionMetrics) => void;
   /** Called when skills list is fetched from the worker. */
   onSkillsChange?: (skills: string[]) => void;
+  /** Called when session lifecycle state changes (running/idle/terminated etc). */
+  onSessionStateChange?: (state: string) => void;
   /** Custom welcome suggestions shown when thread is empty. */
   suggestions?: readonly ThreadSuggestion[];
 }
@@ -167,6 +169,7 @@ export function useHotPlexRuntime({
   overrideWorkDir,
   onMetricsChange,
   onSkillsChange,
+  onSessionStateChange,
   suggestions: configSuggestions,
 }: UseHotPlexRuntimeConfig = {}): ExternalStoreAdapter<HotPlexMessage> {
   // State
@@ -197,6 +200,8 @@ export function useHotPlexRuntime({
   // Stable ref for skills callback — avoids adding to useEffect deps
   const onSkillsChangeRef = useRef(onSkillsChange);
   onSkillsChangeRef.current = onSkillsChange;
+  const onSessionStateChangeRef = useRef(onSessionStateChange);
+  onSessionStateChangeRef.current = onSessionStateChange;
 
   // Track whether skills have been fetched (only after first turn completes)
   const skillsFetchedRef = useRef(false);
@@ -667,6 +672,9 @@ export function useHotPlexRuntime({
     client.on('messageStart', handleMessageStart);
     client.on('toolCall', handleToolCall);
     client.on('toolResult', handleToolResult);
+    client.on('state', (data: { state: string }) => {
+      onSessionStateChangeRef.current?.(data.state);
+    });
 
     const handleContextUsage = (data: ContextUsageData) => {
       const names = data?.skills?.names ?? [];

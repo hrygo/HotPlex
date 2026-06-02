@@ -167,7 +167,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
       </div>
 
       <div className="flex flex-col flex-1 min-w-0">
-        <div className="msg-assistant-body relative p-0 space-y-4">
+        <div className="msg-assistant-body relative space-y-4">
           <MessagePrimitive.Parts>
             {({ part }) => {
               const p = part as Record<string, any>;

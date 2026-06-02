@@ -41,6 +41,7 @@ export interface UseSessionsReturn {
   removeSession: (id: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   handleSessionSelect: (id: string) => void;
+  updateSessionState: (sessionId: string, state: string) => void;
 }
 
 export function useSessions({
@@ -213,6 +214,11 @@ export function useSessions({
   const openPanel = useCallback(() => setIsOpen(true), []);
   const closePanel = useCallback(() => setIsOpen(false), []);
 
+  const updateSessionState = useCallback((sessionId: string, state: string) => {
+    setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, state: state as SessionInfo['state'] } : s));
+    setActiveSession(prev => prev?.id === sessionId ? { ...prev, state: state as SessionInfo['state'] } : prev);
+  }, []);
+
   return {
     sessions,
     activeSession,
@@ -226,5 +232,6 @@ export function useSessions({
     removeSession,
     selectSession,
     handleSessionSelect,
+    updateSessionState,
   };
 }

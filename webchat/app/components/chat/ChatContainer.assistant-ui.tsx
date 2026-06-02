@@ -20,10 +20,12 @@ function ChatInterface({
   sessionId,
   overrideWorkDir,
   onMetricsChange,
+  onSessionStateChange,
 }: {
   sessionId: string | null;
   overrideWorkDir?: string;
   onMetricsChange?: (metrics: SessionMetrics) => void;
+  onSessionStateChange?: (state: string) => void;
 }) {
   const [skills, setSkills] = useState<string[]>([]);
   const adapter = useHotPlexRuntime({
@@ -31,6 +33,7 @@ function ChatInterface({
     overrideWorkDir,
     onMetricsChange,
     onSkillsChange: setSkills,
+    onSessionStateChange,
   });
 
   const runtime = useExternalStoreRuntime(adapter);
@@ -74,6 +77,7 @@ export default function ChatContainer() {
     createNewSession,
     removeSession,
     sessions,
+    updateSessionState,
   } = useSessions({
     onSelect: () => {},
   });
@@ -205,6 +209,7 @@ export default function ChatContainer() {
               sessionId={activeSessionId}
               overrideWorkDir={urlDir ?? undefined}
               onMetricsChange={setSessionMetrics}
+              onSessionStateChange={(state) => activeSessionId && updateSessionState(activeSessionId, state)}
             />
           )}
         </div>

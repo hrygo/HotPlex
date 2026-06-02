@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { formatRelativeTime, type SessionInfo } from '@/lib/api/sessions';
+import { formatRelativeTime, stateLabel, type SessionInfo } from '@/lib/api/sessions';
 import { BrandIcon, WORKER_DISPLAY, WorkerIcon } from '@/components/icons';
 import { httpBase } from '@/lib/config';
 
@@ -84,8 +84,8 @@ function SessionRow({
                   session.state === 'idle' ? 'bg-[var(--accent-gold)]' : 
                   session.state === 'terminated' ? 'bg-[var(--text-faint)]' : 'bg-[var(--accent-blue)]'
                 }`} />
-                <span className={`text-[11px] font-bold capitalize ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>
-                  {session.state}
+                <span className={`text-[11px] font-bold ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>
+                  {stateLabel(session.state)}
                 </span>
               </div>
               <span className="text-[10px] text-[var(--text-faint)] opacity-40">•</span>
