@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect, useMemo } from "react";
+import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
 
 interface Command {
   key: string;
@@ -26,7 +26,7 @@ interface CommandMenuProps {
   onSelect: (value: string) => void;
   isOpen: boolean;
   onClose: () => void;
-  skills?: string[];
+  skills?: SkillEntry[];
 }
 
 export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: CommandMenuProps) {
@@ -34,30 +34,24 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
 
   const allCommands: Command[] = useMemo(() => [
     ...SLASH_COMMANDS,
-    ...(skills ?? []).map(name => ({
-      key: name,
-      label: name,
-      description: `${name} skill`,
+    ...(skills ?? []).map(s => ({
+      key: `/${s.name}`,
+      label: `/${s.name}`,
+      description: s.description || `${s.name} skill`,
       type: "skill" as const,
     })),
   ], [skills]);
 
-  // Filter commands based on input value
-  // If starts with /, filter only slash commands. Otherwise filter skills.
+  // Filter commands — "/" mode shows both slash commands and skills
   const isSlash = inputValue.startsWith("/");
   const filterText = isSlash ? inputValue.slice(1).toLowerCase() : inputValue.toLowerCase();
 
   const filtered = allCommands.filter(cmd => {
-    if (isSlash) {
-      if (cmd.type !== "slash") return false;
-      if (!filterText) return true; // Show all slash commands if only '/' is typed
-      return cmd.key.toLowerCase().includes(filterText) ||
-             cmd.description.toLowerCase().includes(filterText);
+    if (!isSlash) {
+      if (cmd.type !== "skill") return false;
+      if (!filterText) return false;
     }
-
-    // Skill filtering
-    if (!inputValue) return false;
-    if (cmd.type !== "skill") return false;
+    if (!filterText) return true;
     return cmd.key.toLowerCase().includes(filterText) ||
            cmd.description.toLowerCase().includes(filterText);
   }).slice(0, 8);

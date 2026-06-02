@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -15,6 +15,7 @@ import { NewSessionModal } from './NewSessionModal';
 import { MetricsBar } from '@/components/assistant-ui/MetricsBar';
 import { workerType, workDir, httpBase, type ConnectionState } from '@/lib/config';
 import type { SessionMetrics } from '@/lib/hooks/useMetrics';
+import { useSkillsCache } from '@/lib/hooks/useSkillsCache';
 
 function ChatInterface({
   sessionId,
@@ -27,12 +28,12 @@ function ChatInterface({
   onMetricsChange?: (metrics: SessionMetrics) => void;
   onSessionStateChange?: (state: string) => void;
 }) {
-  const [skills, setSkills] = useState<string[]>([]);
+  const { skills, mergeSkills } = useSkillsCache(sessionId);
   const adapter = useHotPlexRuntime({
     sessionId: sessionId ?? undefined,
     overrideWorkDir,
     onMetricsChange,
-    onSkillsChange: setSkills,
+    onSkillsChange: mergeSkills,
     onSessionStateChange,
   });
 

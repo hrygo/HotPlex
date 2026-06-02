@@ -23,7 +23,7 @@ import { TurnSummaryCard } from "./TurnSummaryCard";
 import { ListTool } from "./tools/ListTool";
 import { TodoTool } from "./tools/TodoTool";
 import { AgentTool } from "./tools/AgentTool";
-import type { ContextUsageData, TurnSessionStats } from "@/lib/ai-sdk-transport/client/types";
+import type { ContextUsageData, TurnSessionStats, SkillEntry } from "@/lib/ai-sdk-transport/client/types";
 import { httpBase, type ConnectionState } from "@/lib/config";
 
 // assistant-ui ThreadMessage doesn't expose status/metadata in public types.
@@ -398,7 +398,7 @@ function WelcomeScreen({ suggestions, onSuggestionClick }: { suggestions?: reado
 }
 
 interface ThreadProps {
-  skills?: string[];
+  skills?: SkillEntry[];
   hasMore?: boolean;
   connectionState?: ConnectionState;
   onLoadHistory?: () => Promise<{ hasMore: boolean }>;
@@ -520,8 +520,8 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
                   <div className="w-1 h-1 rounded-full bg-[var(--accent-gold)] animate-pulse" />
                 </div>
                 {skills?.slice(0, 3).map(skill => (
-                  <div key={skill} className="px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[10px] font-medium text-[var(--text-muted)] whitespace-nowrap hover:border-[var(--text-faint)] transition-colors cursor-default">
-                    {skill}
+                  <div key={skill.name} className="px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[10px] font-medium text-[var(--text-muted)] whitespace-nowrap hover:border-[var(--text-faint)] transition-colors cursor-default">
+                    {skill.name}
                   </div>
                 ))}
                 {skills && skills.length > 3 && (
