@@ -111,6 +111,10 @@ func TestFormatResult(t *testing.T) {
 		{"Glob single", "Glob", "a.go", "", "1 files"},
 		{"Bash success", "Bash", "ok", "", ""},
 		{"unknown tool", "Other", "output", "", ""},
+		{"Grep exact case (uppercase G)", "GREP", "a\nb\nc", "", "3 matches"},
+		{"Read exact case", "READ", "a\nb", "", "2 lines"},
+		{"Glob exact case", "GLOB", "a\nb\nc", "", "3 files"},
+		{"Mixed case Read", "ReAd", "a\nb\nc\nd", "", "4 lines"},
 	}
 
 	for _, tt := range tests {
