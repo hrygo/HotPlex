@@ -39,13 +39,15 @@ type MossProcess struct {
 	pidKey     string
 	log        *slog.Logger
 
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	pgid    int
-	started bool
-	closed  bool
-	baseURL string
-	client  *http.Client
+	mu       sync.Mutex
+	cmd      *exec.Cmd
+	pgid     int
+	started  bool
+	starting bool
+	readyCh  chan struct{}
+	closed   bool
+	baseURL  string
+	client   *http.Client
 
 	lastUsed    atomic.Int64
 	activeCount atomic.Int32 // tracks in-flight Synthesize calls for idleMonitor
@@ -172,6 +174,9 @@ func (p *MossProcess) Close(ctx context.Context) error {
 }
 
 // ensureRunning lazily starts the sidecar on first call or restarts on crash.
+// Uses single-flight pattern: the first caller runs start while others release
+// the lock and wait on readyCh, avoiding blocking all Synthesize calls during
+// the up-to-60s sidecar warmup.
 // Caller must hold p.mu.
 func (p *MossProcess) ensureRunningLocked(ctx context.Context) error {
 	if p.closed {
@@ -180,10 +185,67 @@ func (p *MossProcess) ensureRunningLocked(ctx context.Context) error {
 	if p.started && p.isAlive() {
 		return nil
 	}
+
+	// Another goroutine is already starting — wait without holding the lock.
+	if p.starting {
+		ready := p.readyCh
+		p.mu.Unlock()
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			p.mu.Lock()
+			return ctx.Err()
+		}
+		p.mu.Lock()
+		if p.closed || !p.isAlive() {
+			return fmt.Errorf("tts moss: sidecar failed to start")
+		}
+		return nil
+	}
+
 	return p.start(ctx)
 }
 
 func (p *MossProcess) start(ctx context.Context) error {
+	p.starting = true
+	p.readyCh = make(chan struct{})
+
+	// Spawn is non-blocking — runs under p.mu.
+	if err := p.spawn(ctx); err != nil {
+		p.starting = false
+		close(p.readyCh)
+		return err
+	}
+
+	// Release lock during the blocking warmup so other callers can
+	// enter the single-flight wait path in ensureRunningLocked.
+	p.mu.Unlock()
+
+	warmupErr := p.waitForReady(ctx)
+
+	p.mu.Lock()
+	p.starting = false
+	close(p.readyCh)
+
+	if warmupErr != nil {
+		p.terminate()
+		return fmt.Errorf("moss sidecar warmup: %w", warmupErr)
+	}
+
+	// Start idle monitor after warmup succeeds.
+	if p.idleTTL > 0 {
+		idleCtx, cancel := context.WithCancel(context.Background())
+		p.cancel = cancel
+		done := make(chan struct{})
+		p.done = done
+		go p.idleMonitor(idleCtx, done)
+	}
+
+	p.log.Info("tts: moss sidecar ready", "pid", p.cmd.Process.Pid, "port", p.port)
+	return nil
+}
+
+func (p *MossProcess) spawn(ctx context.Context) error {
 	appPath := p.modelDir + "/app_onnx.py"
 	args := []string{
 		appPath,
@@ -216,22 +278,6 @@ func (p *MossProcess) start(ctx context.Context) error {
 		}
 	}
 
-	// Wait for health check.
-	if err := p.waitForReady(ctx); err != nil {
-		p.terminate()
-		return fmt.Errorf("moss sidecar warmup: %w", err)
-	}
-
-	// Start idle monitor.
-	if p.idleTTL > 0 {
-		idleCtx, cancel := context.WithCancel(context.Background())
-		p.cancel = cancel
-		done := make(chan struct{})
-		p.done = done
-		go p.idleMonitor(idleCtx, done)
-	}
-
-	p.log.Info("tts: moss sidecar ready", "pid", cmd.Process.Pid, "port", p.port)
 	return nil
 }
 
