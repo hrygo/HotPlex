@@ -53,17 +53,9 @@ var ErrUnauthorized = errors.New("security: unauthorized")
 // Returns the user ID, bot ID (from X-Bot-ID header or bot_id query param), and any error.
 func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, error) {
 	a.mu.RLock()
-	header := a.cfg.APIKeyHeader
-	if header == "" {
-		header = "X-API-Key"
-	}
 
-	// Check header first, then query param (for browser WebSocket clients).
-	key := r.Header.Get(header)
-	if key == "" {
-		key = r.URL.Query().Get(apiKeyQueryParam)
-	}
-	if key == "" {
+	key, found := a.extractAPIKey(r)
+	if !found {
 		a.mu.RUnlock()
 		return "", "", ErrUnauthorized
 	}
@@ -174,12 +166,16 @@ func resolveUserIDWith(ctx context.Context, key string, resolver APIKeyResolver)
 func (a *Authenticator) ExtractAPIKey(r *http.Request) (string, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	return a.extractAPIKey(r)
+}
 
+// extractAPIKey reads the API key from the configured header or query param.
+// Caller must hold at least RLock.
+func (a *Authenticator) extractAPIKey(r *http.Request) (string, bool) {
 	header := a.cfg.APIKeyHeader
 	if header == "" {
 		header = "X-API-Key"
 	}
-
 	key := r.Header.Get(header)
 	if key == "" {
 		key = r.URL.Query().Get(apiKeyQueryParam)

@@ -8,7 +8,10 @@ import (
 
 // ValidateBaseDir checks that the base directory is in the allowed list.
 func ValidateBaseDir(baseDir string) error {
-	if !allowedBaseDirs[baseDir] {
+	securityConfigMutex.RLock()
+	ok := allowedBaseDirs[baseDir]
+	securityConfigMutex.RUnlock()
+	if !ok {
 		return fmt.Errorf("security: base directory %q not in whitelist", baseDir)
 	}
 	return nil
@@ -70,14 +73,17 @@ func ValidateWorkDir(dir string) error {
 // checkForbidden returns an error if path is exactly or under a forbidden directory.
 // Whitelist (allowedBaseDirs) takes priority over blacklist (forbiddenWorkDirs).
 func checkForbidden(path string) error {
+	securityConfigMutex.RLock()
+
 	// Check whitelist first (highest priority)
-	allowedDirs := GetAllowedBaseDirs()
-	for allowedDir := range allowedDirs {
-		// If path is exactly an allowed directory or under it, skip forbidden check
+	for allowedDir := range allowedBaseDirs {
 		if path == allowedDir || pathHasPrefix(path, allowedDir+string(filepath.Separator)) {
+			securityConfigMutex.RUnlock()
 			return nil
 		}
 	}
+
+	securityConfigMutex.RUnlock()
 
 	// Intelligent user directory analysis (Unix-only, no-op on Windows)
 	// This allows /home/<current_user>/*, /Users/<current_user>/*, /usr/local/<current_user>/*
@@ -86,16 +92,19 @@ func checkForbidden(path string) error {
 		return nil
 	}
 
-	// Then check blacklist
-	forbiddenDirs := GetForbiddenWorkDirs()
-	for _, forbidden := range forbiddenDirs {
+	// Check blacklist under a single lock acquisition
+	securityConfigMutex.RLock()
+	for _, forbidden := range forbiddenWorkDirs {
 		if pathEqual(path, forbidden) {
+			securityConfigMutex.RUnlock()
 			return fmt.Errorf("security: work dir %q is a forbidden system directory", path)
 		}
 		if pathHasPrefix(path, forbidden+string(filepath.Separator)) {
+			securityConfigMutex.RUnlock()
 			return fmt.Errorf("security: work dir %q is under forbidden directory %q", path, forbidden)
 		}
 	}
+	securityConfigMutex.RUnlock()
 
 	// Reject root itself — no process should use the root as its working directory.
 	if isRootPath(path) {
