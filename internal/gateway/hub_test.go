@@ -1176,6 +1176,7 @@ func TestHub_HandleHTTP_RejectsInvalidAPIKey(t *testing.T) {
 // TestHub_HandleHTTP_CookieAuth verifies that a valid HMAC cookie authenticates
 // the WebSocket upgrade without requiring an API key header.
 func TestHub_HandleHTTP_CookieAuth(t *testing.T) {
+	t.Parallel()
 	cfg := config.Default()
 	cfg.Security.AllowedOrigins = []string{"*"}
 
@@ -1218,6 +1219,7 @@ func TestHub_HandleHTTP_CookieAuth(t *testing.T) {
 // TestHub_HandleHTTP_CookieAuth_InvalidCookie verifies that an invalid cookie
 // falls back to pendingAuth (deferred to init envelope).
 func TestHub_HandleHTTP_CookieAuth_InvalidCookie(t *testing.T) {
+	t.Parallel()
 	cfg := config.Default()
 	cfg.Security.AllowedOrigins = []string{"*"}
 

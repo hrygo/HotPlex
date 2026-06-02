@@ -53,7 +53,7 @@ type CookieAuth struct {
 }
 
 func NewCookieAuth() *CookieAuth
-func (c *CookieAuth) SetCookie(w http.ResponseWriter, userID string) error
+func (c *CookieAuth) SetCookie(w http.ResponseWriter, r *http.Request, userID string) error
 func (c *CookieAuth) Authenticate(r *http.Request) (userID string, ok bool)
 ```
 
