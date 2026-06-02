@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.24.0] - 2026-06-02
+
+### Summary
+
+v1.24.0 是一次 minor 版本更新，聚焦于 **飞书交互式卡片** 和 **WebChat 会话状态实时性**。飞书适配器新增权限确认、问答确认和 Elicitation 三种交互式卡片按钮，用户无需输入斜杠命令即可在卡片上直接操作。WebChat 修复了 session 状态徽章映射错误和侧边栏无实时更新的问题，状态变更现通过 WebSocket 实时推送到前端并以中文标签展示。
+
+### Added
+
+- **Messaging/Feishu**: Interactive card buttons for permission approval, question confirmation, and elicitation — users can approve/reject/answer directly on Feishu cards without slash commands. (#620)
+- **WebChat UI**: Real-time session state propagation — WebSocket `state` events now flow through the adapter to the session hook, updating sidebar status live without page refresh.
+
+### Changed
+
+- **Messaging/Feishu**: Unify question card to v2 `buildCard` format, matching permission/elicitation card structure. Remove deprecated `buildInteractionCard` and related dead code. (#620)
+
+### Fixed
+
+- **WebChat UI**: Session status badge mapped non-existent `active`/`working` states — backend returns `created`/`running`/`idle`/`terminated`/`deleted`, causing gray fallback for running sessions and zero active count.
+- **WebChat UI**: Replace raw English state strings with Chinese labels in sidebar via `stateLabel()` (running → 进行中, idle → 空闲, etc.).
+- **Messaging/Feishu**: Return "未知操作" feedback card for unknown card action types instead of nil. (#620)
+
 ## [1.23.2] - 2026-06-02
 
 ### Summary
