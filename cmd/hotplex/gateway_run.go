@@ -844,13 +844,12 @@ func shutdownGateway(
 
 	// Close eventstore collector BEFORE SessionMgr.Close() to prevent
 	// the collector's background writer from writing to a closed DB.
-	// Without this, deferred stores.close() fires after SessionMgr has
-	// already closed the shared SQLite connection (#613 defect 3).
+	// Collector.Close() is idempotent (sync.Once), so the deferred
+	// stores.close() calling Close() again is safe.
 	if deps.EventCollector != nil {
 		if err := deps.EventCollector.Close(); err != nil {
 			log.Warn("gateway: event collector close", "err", err)
 		}
-		deps.EventCollector = nil // prevent double-close in deferred stores.close()
 	}
 
 	if err := deps.SessionMgr.Close(); err != nil {

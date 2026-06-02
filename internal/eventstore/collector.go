@@ -85,11 +85,12 @@ func kindOf(req *captureRequest) string {
 //   - Timer: accumulator age exceeds deltaFlushInterval (runWriter ticker)
 //   - Event: MessageEnd or next storable event (hot path, synchronous)
 type Collector struct {
-	store    EventStore
-	captureC chan *captureRequest
-	closeC   chan struct{}
-	closeWg  sync.WaitGroup
-	log      *slog.Logger
+	store     EventStore
+	captureC  chan *captureRequest
+	closeC    chan struct{}
+	closeWg   sync.WaitGroup
+	closeOnce sync.Once
+	log       *slog.Logger
 
 	flushInterval time.Duration // ticker interval for batch flush (default: collectorFlushInterval)
 	deltaFlush    time.Duration // max age before flushing accumulated deltas (default: deltaFlushInterval)
@@ -315,39 +316,41 @@ func (c *Collector) Flush() error {
 
 // Close drains the capture channel and flushes remaining events.
 func (c *Collector) Close() error {
-	// Swap accumulator maps under lock, flush outside to avoid deadlock.
-	c.accumMu.Lock()
-	pending := c.accum
-	pendingReasoning := c.reasoningAccum
-	c.accum = nil
-	c.reasoningAccum = nil
-	c.accumMu.Unlock()
+	c.closeOnce.Do(func() {
+		// Swap accumulator maps under lock, flush outside to avoid deadlock.
+		c.accumMu.Lock()
+		pending := c.accum
+		pendingReasoning := c.reasoningAccum
+		c.accum = nil
+		c.reasoningAccum = nil
+		c.accumMu.Unlock()
 
-	for sid, acc := range pending {
-		if acc.count > 0 {
-			req := acc.toRequest(sid)
-			select {
-			case c.captureC <- req:
-			case <-time.After(5 * time.Second):
-				c.log.Error("eventstore: accumulator flush dropped during close",
-					"session_id", sid, "kind", "turn")
+		for sid, acc := range pending {
+			if acc.count > 0 {
+				req := acc.toRequest(sid)
+				select {
+				case c.captureC <- req:
+				case <-time.After(5 * time.Second):
+					c.log.Error("eventstore: accumulator flush dropped during close",
+						"session_id", sid, "kind", "turn")
+				}
 			}
 		}
-	}
-	for sid, acc := range pendingReasoning {
-		if acc.count > 0 {
-			req := acc.toRequest(sid)
-			select {
-			case c.captureC <- req:
-			case <-time.After(5 * time.Second):
-				c.log.Error("eventstore: accumulator flush dropped during close",
-					"session_id", sid, "kind", "reasoning")
+		for sid, acc := range pendingReasoning {
+			if acc.count > 0 {
+				req := acc.toRequest(sid)
+				select {
+				case c.captureC <- req:
+				case <-time.After(5 * time.Second):
+					c.log.Error("eventstore: accumulator flush dropped during close",
+						"session_id", sid, "kind", "reasoning")
+				}
 			}
 		}
-	}
 
-	close(c.closeC)
-	c.closeWg.Wait()
+		close(c.closeC)
+		c.closeWg.Wait()
+	})
 	return nil
 }
 
