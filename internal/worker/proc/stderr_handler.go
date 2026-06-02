@@ -48,32 +48,56 @@ func (h *DefaultStderrHandler) Handle(line string) (slog.Level, string) {
 }
 
 // ParseLevelPrefix extracts the log level from a stderr line and returns the
-// appropriate slog.Level with the original line unchanged.
+// appropriate slog.Level with the timestamp and level marker stripped.
 //
 // Recognized patterns:
 //
-//	[ERROR] ...  → slog.LevelError
-//	[WARN] ...   → slog.LevelWarn
-//	[WARNING] ... → slog.LevelWarn
-//	[DEBUG] ...  → slog.LevelDebug
-//	[INFO] ...   → slog.LevelDebug  (agent INFO = noisy, demote to Debug)
-//	(unmarked)   → slog.LevelDebug
+//	[ERROR] ...  → slog.LevelError,  "..."
+//	[WARN] ...   → slog.LevelWarn,   "..."
+//	[WARNING] ... → slog.LevelWarn,  "..."
+//	[DEBUG] ...  → slog.LevelDebug,  "..."
+//	[INFO] ...   → slog.LevelDebug,  "..." (agent INFO = noisy, demote to Debug)
+//	(unmarked)   → slog.LevelDebug, line (unchanged)
 //
-// This is the shared parsing function used by both DefaultStderrHandler
-// and worker-specific handlers as a base before their custom adjustments.
+// The returned message has the leading timestamp and level marker removed so the
+// outer log entry (which already carries its own timestamp and the mapped level)
+// does not contain redundant information.
 func ParseLevelPrefix(line string) (slog.Level, string) {
+	level := slog.LevelDebug
+	marker := ""
 	switch {
 	case containsLevelMarker(line, "[ERROR]"):
-		return slog.LevelError, line
+		level, marker = slog.LevelError, "[ERROR]"
 	case containsLevelMarker(line, "[WARN]"), containsLevelMarker(line, "[WARNING]"):
-		return slog.LevelWarn, line
+		level, marker = slog.LevelWarn, "[WARN]"
 	case containsLevelMarker(line, "[DEBUG]"):
-		return slog.LevelDebug, line
+		level, marker = slog.LevelDebug, "[DEBUG]"
 	case containsLevelMarker(line, "[INFO]"):
-		return slog.LevelDebug, line // agent INFO → gateway DEBUG
-	default:
-		return slog.LevelDebug, line // unmarked → DEBUG (don't drop)
+		level, marker = slog.LevelDebug, "[INFO]"
 	}
+
+	if marker == "" {
+		return slog.LevelDebug, line
+	}
+
+	msg := stripLevelPrefix(line, marker)
+	return level, msg
+}
+
+// stripLevelPrefix removes the timestamp and level marker from a log line.
+// Handles patterns like:
+//
+//	2026-06-02 09:21:24 [INFO] actual message
+//	2026/06/02 09:21:24 [INFO] actual message
+func stripLevelPrefix(line, marker string) string {
+	idx := strings.Index(line, marker)
+	if idx < 0 {
+		return line
+	}
+	// Skip past the marker and any trailing space.
+	rest := line[idx+len(marker):]
+	rest = strings.TrimLeft(rest, " \t")
+	return rest
 }
 
 // containsLevelMarker checks if a line contains a bracketed log level marker

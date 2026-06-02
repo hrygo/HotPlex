@@ -426,7 +426,7 @@ func (m *Manager) drainStderr(stderr io.ReadCloser) {
 			continue
 		}
 		m.log.LogAttrs(context.Background(), level, "proc: stderr",
-			append([]slog.Attr{slog.String("msg", msg)}, attrs...)...)
+			append([]slog.Attr{slog.String("stderr", msg)}, attrs...)...)
 	}
 	if err := scanner.Err(); err != nil {
 		m.log.Warn("proc: drainStderr ended with error", "error", err)
