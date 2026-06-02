@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
 
 interface Command {
@@ -31,6 +31,11 @@ interface CommandMenuProps {
 
 export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: CommandMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  const scrollToSelected = useCallback(() => {
+    selectedRef.current?.scrollIntoView({ block: "nearest" });
+  }, []);
 
   const allCommands: Command[] = useMemo(() => [
     ...SLASH_COMMANDS,
@@ -58,7 +63,8 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
 
   useEffect(() => {
     setSelectedIndex(0);
-  }, [inputValue]);
+    scrollToSelected();
+  }, [inputValue, scrollToSelected]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -67,9 +73,11 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex(prev => (prev + 1) % filtered.length);
+        requestAnimationFrame(scrollToSelected);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setSelectedIndex(prev => (prev - 1 + filtered.length) % filtered.length);
+        requestAnimationFrame(scrollToSelected);
       } else if (e.key === "Enter" && filtered.length > 0) {
         e.preventDefault();
         onSelect(filtered[selectedIndex].key);
@@ -98,6 +106,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
         {filtered.map((cmd, i) => (
           <button
             key={cmd.key}
+            ref={i === selectedIndex ? selectedRef : undefined}
             className={`w-full px-4 py-3 text-left flex flex-col gap-0.5 transition-all ${
               i === selectedIndex
                 ? "bg-[var(--bg-hover)] translate-x-1"
