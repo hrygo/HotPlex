@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { listBots } from '@/lib/api/admin-bots';
 import { listSessions } from '@/lib/api/admin-sessions';
 import { listCronJobs } from '@/lib/api/admin-cron';
@@ -58,7 +58,7 @@ export default function DashboardPage() {
 			try {
 				healthData = await adminFetch<any>('/admin/health');
 			} catch (e) {
-				console.warn('Health probe failed', e);
+				console.warn('Health probe failed', e);  // TODO: replace with logger after logger import available in admin
 			}
 
 			const [botsRes, sessionsRes, cronRes] = await Promise.allSettled([

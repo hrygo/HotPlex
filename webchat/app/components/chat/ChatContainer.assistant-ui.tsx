@@ -67,7 +67,6 @@ export default function ChatContainer() {
   const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(null);
 
   // nuqs deep link params
-  const [urlWorker] = useQueryState('worker', parseAsString);
   const [urlDir] = useQueryState('dir', parseAsString);
 
   const {

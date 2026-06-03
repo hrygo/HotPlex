@@ -50,7 +50,6 @@ import {
   createWorkerCommandEnvelope,
   serializeEnvelope,
   deserializeEnvelope,
-  newSessionId,
   isInitAck,
 } from './envelope';
 
