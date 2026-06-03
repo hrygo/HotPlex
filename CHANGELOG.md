@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.24.1] - 2026-06-03
+
+### Summary
+
+v1.24.1 是一次 patch 版本更新，聚焦于 **WebChat Skills 功能修复**。修复了 `$skills` 命令冻结 UI 和返回不完整列表两个核心问题（#624），新增 skills 本地缓存与斜杠命令菜单集成，并通过多轮 PR #626 review 修复了 worker 命令 done 事件、会话切换和错误处理的多个缺陷。
+
+### Added
+
+- **WebChat UI**: Skills caching with 24h TTL — fetched skills are persisted to localStorage (keyed by session ID) and merged into the slash command menu (`/` palette) alongside built-in commands.
+
+### Changed
+
+- **Infrastructure**: Git hooks use `core.hooksPath` instead of symlinks for reliable cross-worktree setup; pre-push validation parallelized for ~50% speed improvement.
+
+### Fixed
+
+- **Gateway Core**: `$skills` returns incomplete list when `homeDir` is empty — global skill directories (`~/.claude/skills`, `~/.agents/skills`, `~/.hotplex/skills`) were skipped or resolved as relative paths. (#624)
+- **Gateway Core**: Worker commands (`$skills`, `$context`, `$mcp`, `$model`, `$perm`) never emit a `done` event, leaving frontend stuck in running state. Synthetic done event now scoped to `StdioSkills` only. (#624)
+- **WebChat UI**: `SkillsList` event undeclared in frontend `EventKind` constants, causing gateway response to be silently dropped. (#624)
+- **WebChat UI**: Slash command menu hard 8-item cap cut off all skills — container scrolling now handles arbitrary list lengths; keyboard navigation auto-scrolls selected item into view.
+
 ## [1.24.0] - 2026-06-02
 
 ### Summary
