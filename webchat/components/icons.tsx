@@ -13,10 +13,10 @@ export function BrandIcon({ size = 28, style, className }: { size?: number; styl
 }
 
 export const WORKER_DISPLAY: Record<string, string> = {
-  claude_code: "claude",
-  opencode_server: "opencode",
-  acp: "acp",
-  pimon: "pimon",
+  claude_code: "Claude",
+  codex_cli: "Codex",
+  opencode_server: "OpenCode",
+  acp: "ACP",
 };
 
 export function WorkerIcon({ type, className }: { type: string; className?: string }) {
