@@ -13,10 +13,10 @@ export function BrandIcon({ size = 28, style, className }: { size?: number; styl
 }
 
 export const WORKER_DISPLAY: Record<string, string> = {
-  claude_code: "claude",
-  opencode_server: "opencode",
-  acp: "acp",
-  pimon: "pimon",
+  claude_code: "Claude",
+  codex_cli: "Codex",
+  opencode_server: "OpenCode",
+  acp: "ACP",
 };
 
 export function WorkerIcon({ type, className }: { type: string; className?: string }) {
@@ -42,16 +42,6 @@ export function WorkerIcon({ type, className }: { type: string; className?: stri
           <path d="M12 7v4" />
           <line x1="8" y1="16" x2="8" y2="16" />
           <line x1="16" y1="16" x2="16" y2="16" />
-        </svg>
-      );
-    case 'pimon':
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M4 7h16" />
-          <path d="M4 12h16" />
-          <path d="M4 17h16" />
-          <path d="M7 7v10" />
-          <path d="M17 7v10" />
         </svg>
       );
     default:

@@ -12,6 +12,7 @@
 | [ACP-Worker-Spec.md](./ACP-Worker-Spec.md) | ACP Worker 集成规格 — 通用 ACP Agent 对接，Hermes 试点 | proposed | 2026-05-29 | 0% |
 | [Worker-User-Interaction-Spec.md](./Worker-User-Interaction-Spec.md) | Worker 用户交互集成 — 权限请求/问题询问/MCP Elicitation 转发与响应 | implemented | 2026-04-19 | 95% |
 | [Feishu-Adapter-Improvement-Spec.md](./Feishu-Adapter-Improvement-Spec.md) | Feishu Adapter 改进规格 — 流式卡片、访问控制、多消息类型 | in-progress | 2026-04-17 | 50% |
+| [GroupChat-Collaboration-Spec.md](./GroupChat-Collaboration-Spec.md) | 群聊多 Bot 协作 — 飞书/Slack 群组中多 Bot 协同讨论与任务分配 | proposed | 2026-06-03 | 0% |
 | [Dual-Database-Support-Spec.md](./Dual-Database-Support-Spec.md) | 双数据库支持 — SQLite + PostgreSQL 并存方案 | proposed | 2026-05-26 | 0% |
 | [Consolidate-Events-Store-Spec.md](./Consolidate-Events-Store-Spec.md) | 事件存储合并 — 统一 EventStore 架构 | proposed | - | - |
 | [Delta-Optimization-Spec.md](./Delta-Optimization-Spec.md) | Delta 优化 — 增量消息压缩与合并策略 | proposed | - | - |
@@ -77,12 +78,12 @@
 ### 按状态分类
 
 - **implemented**: 4 个 — Per-Bot-Agent-Config, Turn-Summary-WorkDir-Fix, Worker-User-Interaction, Slack-Stream-Rotation
-- **draft**: 7 个 — Gateway-Async-Init, Feishu-Adapter, Hot-Reload, Session-History, Turn-Summary, CLI-Self-Service, Onboard-UX, TTS-Engine
-- **proposed**: 6 个 — Dual-Database-Support, Consolidate-Events-Store, Delta-Optimization, Interaction-Response-Chain-Fix, Inbound-Event-Storage-Fix, Onboard-Go-Embed-AST, WebChat-v2-Revamp, Windows-Support
+- **draft**: 8 个 — Gateway-Async-Init, Feishu-Adapter, Hot-Reload, Session-History, Turn-Summary, CLI-Self-Service, Onboard-UX, TTS-Engine
+- **proposed**: 9 个 — GroupChat-Collaboration, Dual-Database-Support, Consolidate-Events-Store, Delta-Optimization, Interaction-Response-Chain-Fix, Inbound-Event-Storage-Fix, Onboard-Go-Embed-AST, WebChat-v2-Revamp, Windows-Support
 
 ### 按领域分类
 
-- **架构/Gateway**: 9 个
+- **架构/Gateway**: 10 个
 - **Worker/Session**: 5 个
 - **平台适配**: 2 个
 - **定时任务**: 2 个

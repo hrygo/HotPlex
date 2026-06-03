@@ -9,11 +9,11 @@ import { useQueryState, parseAsString } from 'nuqs';
 import { useHotPlexRuntime } from '@/lib/adapters/hotplex-runtime-adapter';
 import { useSessions } from '@/lib/hooks/useSessions';
 import { Thread } from '@/components/assistant-ui/thread';
-import { BrandIcon } from '@/components/icons';
+import { BrandIcon, WORKER_DISPLAY } from '@/components/icons';
 import { SessionPanel } from './SessionPanel';
 import { NewSessionModal } from './NewSessionModal';
 import { MetricsBar } from '@/components/assistant-ui/MetricsBar';
-import { workerType, workDir, httpBase, type ConnectionState } from '@/lib/config';
+import { workerType as defaultWorkerType, workDir, httpBase, type ConnectionState } from '@/lib/config';
 import type { SessionMetrics } from '@/lib/hooks/useMetrics';
 import { useSkillsCache } from '@/lib/hooks/useSkillsCache';
 
@@ -67,7 +67,6 @@ export default function ChatContainer() {
   const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(null);
 
   // nuqs deep link params
-  const [urlWorker] = useQueryState('worker', parseAsString);
   const [urlDir] = useQueryState('dir', parseAsString);
 
   const {
@@ -133,7 +132,7 @@ export default function ChatContainer() {
                   <h1 className="text-xs font-display font-bold text-[var(--text-primary)] leading-none mb-0.5">HotPlex Agent</h1>
                   <p className="text-[9px] text-[var(--text-faint)] font-mono uppercase tracking-widest flex items-center gap-1.5">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent-emerald)] shadow-[0_0_6px_var(--accent-emerald)]" />
-                    Active · {workerType}
+                    Active · {WORKER_DISPLAY[activeSession?.worker_type ?? defaultWorkerType] ?? activeSession?.worker_type ?? defaultWorkerType}
                   </p>
                   {(urlDir || workDir) && (
                     <p className="text-[9px] text-[var(--text-faint)] font-mono mt-0.5 truncate max-w-[200px]" title={urlDir || workDir}>

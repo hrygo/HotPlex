@@ -11,6 +11,7 @@ import { BrowserHotPlexClient } from '@/lib/ai-sdk-transport';
 import type { InitConfig, ContextUsageData, PermissionRequestData, QuestionRequestData, ElicitationRequestData } from '@/lib/ai-sdk-transport/client/types';
 import { WorkerStdioCommand } from '@/lib/ai-sdk-transport/client/constants';
 import { wsUrl, workerType, apiKey, isSameOrigin, workDir, allowedTools, type ConnectionState } from '@/lib/config';
+import { TODO_TOOLS } from '@/lib/tool-categories';
 import { useMetrics } from '@/lib/hooks/useMetrics';
 import { getSessionHistory, type ConversationRecord } from '@/lib/api/sessions';
 import { conversationTurnsToMessages } from '@/lib/utils/turn-replay';
@@ -398,7 +399,7 @@ export function useHotPlexRuntime({
       setIsRunning(true);
     };
 
-    const handleDelta = (data: MessageDeltaData, env: Envelope) => {
+    const handleDelta = (data: MessageDeltaData, _env: Envelope) => {
       if (!data) return;
       pendingDelta += data.content || '';
       if (!deltaRafId) {
@@ -447,9 +448,7 @@ export function useHotPlexRuntime({
       setIsRunning(false);
     };
 
-    const TODO_TOOLS = new Set(['todo', 'todowrite', 'todo_write', 'task_list', 'checklist']);
-
-    const handleToolCall = (data: ToolCallData, env: Envelope) => {
+    const handleToolCall = (data: ToolCallData, _env: Envelope) => {
       if (!data) return;
       setMessages((prev) => {
         const lastMessage = prev[prev.length - 1];
@@ -478,7 +477,7 @@ export function useHotPlexRuntime({
       });
     };
 
-    const handleToolResult = (data: ToolResultData, env: Envelope) => {
+    const handleToolResult = (data: ToolResultData, _env: Envelope) => {
       if (!data) return;
       setMessages((prev) => {
         const lastMessage = prev[prev.length - 1];
@@ -551,8 +550,6 @@ export function useHotPlexRuntime({
 
       const hasData = data && (data.code || data.message);
       if (hasData) {
-        const detailsStr = data.details ? ` Details: ${JSON.stringify(data.details)}` : '';
-        const eventStr = env?.id ? ` EventID: ${env.id}` : '';
         if (isResumeRetry) {
           logger.warn('RuntimeAdapter', 'Worker recovery triggered', { code: data.code, message: data.message, details: data.details, eventId: env?.id });
         } else {

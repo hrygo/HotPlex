@@ -46,7 +46,7 @@ const TERMINAL_TOOLS: ReadonlySet<string> = new Set([
   ToolName.RunCommand, ToolName.Bash, ToolName.ExecuteCommand, ToolName.Shell,
 ]);
 
-const TODO_TOOLS: ReadonlySet<string> = new Set([
+export const TODO_TOOLS: ReadonlySet<string> = new Set([
   "todo", "todowrite", "todo_write", "task_list", "checklist"
 ]);
 
