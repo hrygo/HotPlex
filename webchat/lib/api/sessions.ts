@@ -108,14 +108,18 @@ export async function listSessions(limit = 20, offset = 0, signal?: AbortSignal)
 }
 
 export interface CreateSessionOptions {
+  clientSessionId: string;
   workerType?: string;
-  title: string;
+  title?: string;
   workDir?: string;
 }
 
 export async function createSession(opts: CreateSessionOptions, signal?: AbortSignal): Promise<{ session_id: string }> {
   const workerType = opts.workerType ?? 'claude_code';
-  let url = `${BASE}/api/sessions?worker_type=${encodeURIComponent(workerType)}&title=${encodeURIComponent(opts.title)}`;
+  let url = `${BASE}/api/sessions?client_session_id=${encodeURIComponent(opts.clientSessionId)}&worker_type=${encodeURIComponent(workerType)}`;
+  if (opts.title) {
+    url += `&title=${encodeURIComponent(opts.title)}`;
+  }
   if (opts.workDir) {
     url += `&work_dir=${encodeURIComponent(opts.workDir)}`;
   }

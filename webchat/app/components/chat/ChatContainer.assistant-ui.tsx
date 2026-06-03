@@ -220,7 +220,6 @@ export default function ChatContainer() {
         <NewSessionModal
           onConfirm={handleModalConfirm}
           onCancel={() => setShowNewModal(false)}
-          existingTitles={sessions.filter(s => s.title).map(s => s.title!)}
         />
       )}
     </div>

@@ -20,7 +20,8 @@ var CronNamespace = uuid.NewHash(sha1.New(), hotplexNamespace, []byte("cron"), 5
 
 // DeriveSessionKey generates a deterministic server-side session ID using UUIDv5.
 // Same (ownerID, workerType, clientKey, workDir) always maps to the same session.
-// clientKey is either a user-specified title (WebChat) or a protocol session ID (WS).
+// clientKey is a client-provided opaque identifier: REST API uses client_session_id,
+// WebSocket init uses session_id field. Title is NOT a valid clientKey (since v1.25).
 func DeriveSessionKey(ownerID string, wt worker.WorkerType, clientKey, workDir string) string {
 	// UUIDv5 = SHA-1(namespace+name) — deterministic, no randomness.
 	name := ownerID + "|" + string(wt) + "|" + clientKey + "|" + workDir

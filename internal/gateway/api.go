@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -124,21 +125,30 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	clientSessionID := strings.TrimSpace(r.URL.Query().Get("client_session_id"))
+	clientSessionID = messaging.SanitizeText(clientSessionID)
+	if clientSessionID == "" {
+		g.log.Warn("gateway: create session missing client_session_id", "method", r.Method, "path", r.URL.Path)
+		http.Error(w, "client_session_id is required", http.StatusBadRequest)
+		return
+	}
+	if len(clientSessionID) > session.MaxClientKeyLen {
+		g.log.Warn("gateway: create session client_session_id too long", "method", r.Method, "path", r.URL.Path, "len", len(clientSessionID))
+		http.Error(w, fmt.Sprintf("client_session_id too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
+		return
+	}
+
 	title := strings.TrimSpace(r.URL.Query().Get("title"))
 	title = messaging.SanitizeText(title)
+	if len(title) > session.MaxClientKeyLen {
+		g.log.Warn("gateway: create session title too long", "method", r.Method, "path", r.URL.Path, "title_len", len(title))
+		http.Error(w, fmt.Sprintf("title too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
+		return
+	}
+
 	wt := worker.WorkerType(r.URL.Query().Get("worker_type"))
 	if wt == "" {
 		wt = worker.TypeClaudeCode
-	}
-	if title == "" {
-		g.log.Warn("gateway: create session missing title", "method", r.Method, "path", r.URL.Path)
-		http.Error(w, "title is required", http.StatusBadRequest)
-		return
-	}
-	if len(title) > 256 {
-		g.log.Warn("gateway: create session title too long", "method", r.Method, "path", r.URL.Path, "title_len", len(title))
-		http.Error(w, "title too long (max 256 chars)", http.StatusBadRequest)
-		return
 	}
 
 	// Resolve work dir: use client-provided value or default from config.
@@ -159,7 +169,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	// Derive session ID via UUIDv5 for consistency with WebSocket path.
 	// Both REST and WS use the auth userID ("anonymous" in dev mode, "api_user"
 	// with API keys) so they produce the same derived session ID.
-	id := session.DeriveSessionKey(userID, wt, title, workDir)
+	id := session.DeriveSessionKey(userID, wt, clientSessionID, workDir)
 
 	// Default userID after derivation — bridge expects non-empty.
 	if userID == "" {
@@ -177,7 +187,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = g.sm.DeletePhysical(r.Context(), id)
 	}
 
-	if err := g.bridge.StartSession(r.Context(), id, userID, botID, wt, nil, workDir, platformWebChat, nil, title, ""); err != nil {
+	if err := g.bridge.StartSession(r.Context(), id, userID, botID, wt, nil, workDir, platformWebChat, nil, title, clientSessionID); err != nil {
 		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
 		http.Error(w, "failed to create session", http.StatusInternalServerError)
 		return
