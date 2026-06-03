@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	version   = "v1.24.1"
+	version   = "v1.24.2"
 	buildTime = "unknown"
 )
 

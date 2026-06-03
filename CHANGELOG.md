@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.24.2] - 2026-06-03
+
+### Summary
+
+v1.24.2 是一次 patch 版本更新，聚焦于 **会话追踪能力增强** 和 **WebChat 代码质量提升**。新增 `client_key` 持久化到 sessions 表，将 WebSocket init 的 clientSessionID 存入数据库便于调试和会话关联。WebChat 完成组件拆分重构（thread.tsx → 7 个独立组件），修复了 CopyButton 定时器泄漏和会话 worker 名称显示错误。文档门户新增 mermaid.js 离线渲染和 SSO 集成最佳实践。
+
+### Added
+
+- **Session**: Persist `client_key` in sessions table — stores the WebSocket init envelope's `session_id` for debugging and session tracing, with 256-char length validation. (#631)
+- **Docs**: Bundle mermaid.js for offline rendering in self-hosted documentation portal — no CDN dependency. (#631)
+
+### Changed
+
+- **WebChat UI**: Extract thread.tsx (597 lines) into 7 focused components — AssistantMessage, UserMessage, WelcomeScreen, PreAssistantIndicator, ReasoningBlock, CopyButton, MessageActions + shared helpers. (#629)
+- **Docs**: Restructure WebSocket integration guide (17→15 sections), add SSO integration best practices and bidirectional client_key/clientSessionID cross-references. (#631)
+
+### Fixed
+
+- **WebChat UI**: CopyButton `setTimeout` timer not cleared on unmount — potential setState-after-unmount when navigating away within the 2s cooldown window. (#629)
+- **WebChat UI**: Chat header showed global config worker type instead of per-session `worker_type` — now displays correct worker name (Claude/Codex/OpenCode/ACP) per session. (#629)
+
 ## [1.24.1] - 2026-06-03
 
 ### Summary

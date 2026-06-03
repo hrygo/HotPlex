@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.24.1-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.24.2-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -26,28 +26,25 @@
 
 ## ✨ 核心能力
 
-### 🏗️ 核心架构与智能编排
-- 🌐 **全协议统一网关** — 基于 **AEP v1 (Agent Exchange Protocol)** WebSocket 标准，抹平不同 AI Coding Agent 的协议差异，提供一致的流式交互与权限控制。
-- 🧠 **Brain 编排内核** — 新增 `internal/brain` 编排层，支持 LLM 智能总结、意图分发与安全防护（Safety Guard），解耦复杂交互逻辑。
-- ⏰ **AI 原生定时任务** — Agent 自主解析自然语言意图创建定时任务（如"30分钟后提醒我"），支持生命周期管理（`max_runs`、`expires_at`）、自动结果回传和嵌入式技能手册。
+### 🏗️ 核心架构
+- 🌐 **统一 AEP 网关** — 将所有 AI Coding Agent 抽象为单一 WebSocket 协议（AEP v1），支持背压感知的流控、会话级严格递增序号和 LLM 指数退避自动重试。
+- 🔌 **可插拔 Worker 后端** — **Claude Code**、**OpenCode Server**、**ACP**（JSON-RPC 2.0 over stdio，兼容任意 ACP Agent）和 **Codex CLI** 四类 Worker 统一接口。通过五级 fallback（Bot → 平台 → 环境变量 → 共享默认 → 编译默认）灵活切换。
+- 🔄 **确定性会话管理** — 基于 UUIDv5 的确定性 Session ID，网络中断后无缝重连。五状态机 + 每用户会话配额 + **SQLite/PostgreSQL** 双数据库持久化 + 后台 GC。
 
-### 🤖 AI 智能与多模态交互
-- 🤖 **深度配置注入** — 独创 **B/C 双通道** 注入系统。**B 通道** (SOUL/AGENTS/SKILLS) 负责指令约束，**C 通道** (USER/MEMORY) 负责背景上下文。
-- 🎙️ **多模态交互** — 原生集成 SenseVoice 语音转文字与 **Edge-TTS 语音合成**，支持"语音下令，语音回传"，开启双向语音编程新纪元。
+### 📱 多平台分发
+- 🌍 **一次接入，全端覆盖** — 无需修改 Agent 代码，即可分发至 **Slack**（Socket Mode）、**飞书**（WebSocket）和 **Web**。每个适配器提供平台原生流式输出、斜杠命令和交互管理。
+- ⏰ **AI 原生定时任务** — Agent 自主将自然语言（"30 分钟后提醒我"）转换为定时任务，支持 cron 表达式、固定间隔、一次性执行，具备生命周期控制（`max_runs`、`expires_at`）、附加会话注入和自动结果回传。
+- 💬 **开箱即用 Web Chat + 管理后台** — 单二进制同时提供 AEP 网关、Next.js SPA 聊天界面和管理控制台（Bot 配置、API Key 管理、会话监控）。
 
-### 🛡️ 安全加固与可靠性
-- 🛡️ **元认知防御基线** — 宪法级 **META-COGNITION** 迁移至 B 通道首位，内置 **XML Sanitizer** 防护，彻底阻断 Prompt 注入与 XML 结构破坏。
-- 🔒 **企业级安全加固** — API Key + Bot ID 认证、SSRF 防护、Windows 临时文件式注入（规避 cmd 转义陷阱）及进程级隔离。
+### 🤖 Agent 智能
+- 🎭 **B/C 双通道人格注入** — **B 通道**指令（SOUL/AGENTS/SKILLS）无条件覆盖 **C 通道**上下文（USER/MEMORY）。三级逐文件 fallback（全局 → 平台 → Bot 专属）。META-COGNITION 内置 **XML Sanitizer** 阻断 Prompt 注入。
+- 🧠 **Brain LLM 编排** — 可选智能层，支持意图路由（问候语绕过编码 Agent）、两级安全检测、上下文压缩（8K token 阈值）和跨会话用户偏好提取。
 
-### 📱 多平台分发与集成
-- 📱 **跨平台分发能力** — **"一次接入，全端覆盖"**。无需修改 Agent 代码即可秒级分发至 Web、Slack (Socket Mode) 和飞书。
-- 💬 **开箱即用 Web UI** — 内部集成高颜值 Next.js Chat 界面，单二进制文件即可完成从 API 到前端的全栈部署。
-- 🖥️ **管理后台 WebUI** — 内置管理控制台，支持 API Key 管理、用户管理、Bot（Agent）配置和会话监控。
-- 🌍 **多语言 SDK** — Go、TypeScript、Python、Java 客户端开箱即用
-
-### ⚙️ 开发者体验与自动化运维
-- 🛠️ **一体化 CLI** — `gateway`、`service`、`slack`、`cron`、`update`、`config`、`dev`、`onboard`、`doctor`、`security`、`status` 集成在单个二进制中
-- 📊 **全链路监控审计** — 完整支持 Prometheus 指标、OpenTelemetry 链路追踪及结构化 JSON 日志，掌控每一条指令。
+### 🛡️ 安全与运维
+- 🔒 **企业级安全加固** — 时序安全 API Key 认证，DNS 重绑定防御型 SSRF 防护，命令/工具/模型白名单，环境变量隔离，路径穿越防护。
+- 📊 **全链路可观测** — 30+ Prometheus 指标，OpenTelemetry 分布式追踪（W3C TraceContext 传播），结构化 JSON 日志。
+- 🛠️ **一体化 CLI** — 单二进制 13 个子命令：`gateway`、`service`（systemd/launchd/SCM）、`onboard`（引导式配置）、`doctor`（25 项诊断检查）、`cron`、`slack`、`config`、`update`（自更新）、`dev`、`status`、`security`、`install`、`version`。
+- 🔄 **热重载配置** — YAML + 环境变量配置，运行时热重载，字段级变更审计，版本化回滚——大多数变更无需重启。
 
 ## ⚡ 快速开始
 
