@@ -37,7 +37,7 @@ type connSM interface {
 	Get(ctx context.Context, id string) (*session.SessionInfo, error)
 	GetWorker(id string) worker.Worker
 	Transition(ctx context.Context, id string, to events.SessionState) error
-	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
 	DeletePhysical(ctx context.Context, id string) error
 }
 
@@ -50,7 +50,7 @@ type connAuth interface {
 // used by Conn (called once during the AEP init handshake).
 type SessionStarter interface {
 	StartSession(ctx context.Context, id, userID, botID string,
-		wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string, injectExclude ...string) error
+		wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string, clientKey string, injectExclude ...string) error
 	ResumeSession(ctx context.Context, id string, workDir string) error
 	SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir string) (*SwitchWorkDirResult, error)
 }
@@ -360,13 +360,13 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 	c.hub.LeaveSession("", c)
 	c.hub.JoinSession(sessionID, c)
 
-	return c.resolveSessionState(sessionID, initData, workDir, sm, preResolved)
+	return c.resolveSessionState(sessionID, initData, workDir, sm, preResolved, env.SessionID)
 }
 
 // resolveSessionState handles the session state machine transitions:
 // not-found → create, created → start, deleted → recreate,
 // idle/terminated → resume (with fresh-start fallback), running+alive → fast reconnect.
-func (c *Conn) resolveSessionState(sessionID string, initData InitData, workDir string, sm connSM, preResolved *session.SessionInfo) (string, *session.SessionInfo, error) {
+func (c *Conn) resolveSessionState(sessionID string, initData InitData, workDir string, sm connSM, preResolved *session.SessionInfo, clientKey string) (string, *session.SessionInfo, error) {
 	var si *session.SessionInfo
 	var err error
 
@@ -377,24 +377,24 @@ func (c *Conn) resolveSessionState(sessionID string, initData InitData, workDir 
 	}
 
 	if err != nil {
-		result, handleErr := c.handleSessionNotFound(sessionID, initData, workDir, sm, err)
+		result, handleErr := c.handleSessionNotFound(sessionID, initData, workDir, sm, err, clientKey)
 		return sessionID, result, handleErr
 	}
 
 	switch si.State {
 	case events.StateCreated:
-		result, stateErr := c.startCreatedSession(sessionID, initData, workDir, sm, si)
+		result, stateErr := c.startCreatedSession(sessionID, initData, workDir, sm, si, clientKey)
 		return sessionID, result, stateErr
 	case events.StateDeleted:
-		result, stateErr := c.recreateDeletedSession(sessionID, initData, workDir, sm)
+		result, stateErr := c.recreateDeletedSession(sessionID, initData, workDir, sm, clientKey)
 		return sessionID, result, stateErr
 	default:
-		result, stateErr := c.handleExistingSession(sessionID, workDir, sm, si, initData)
+		result, stateErr := c.handleExistingSession(sessionID, workDir, sm, si, initData, clientKey)
 		return sessionID, result, stateErr
 	}
 }
 
-func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDir string, sm connSM, lookupErr error) (*session.SessionInfo, error) {
+func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDir string, sm connSM, lookupErr error, clientKey string) (*session.SessionInfo, error) {
 	if !errors.Is(lookupErr, session.ErrSessionNotFound) {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, lookupErr.Error())
@@ -402,7 +402,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	}
 
 	if c.starter != nil {
-		if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
+		if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, "", clientKey); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			c.sendInitError(events.ErrCodeInternalError, "failed to create session")
 			metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
@@ -419,7 +419,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	}
 
 	// Test mode: create directly via session manager.
-	si, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, "")
+	si, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, "", clientKey)
 	if err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to create session")
@@ -428,11 +428,11 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	return si, nil
 }
 
-func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir string, sm connSM, si *session.SessionInfo) (*session.SessionInfo, error) {
+func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir string, sm connSM, si *session.SessionInfo, clientKey string) (*session.SessionInfo, error) {
 	if c.starter == nil {
 		return si, nil // no starter in test mode, session stays CREATED
 	}
-	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
+	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, "", clientKey); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to start session")
 		metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
@@ -446,18 +446,18 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 	return si, nil
 }
 
-func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workDir string, sm connSM) (*session.SessionInfo, error) {
+func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workDir string, sm connSM, clientKey string) (*session.SessionInfo, error) {
 	_ = sm.DeletePhysical(context.Background(), sessionID)
 	if c.starter == nil {
 		// Test mode: re-create session directly since the old one was physically deleted.
-		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, "")
+		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, "", clientKey)
 		if err != nil {
 			return nil, fmt.Errorf("recreate deleted session (test mode): %w", err)
 		}
 		return newSI, nil
 	}
 	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
-		initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
+		initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, "", clientKey); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, fmt.Sprintf("failed to recreate deleted session: %v", err))
 		metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInternalError)).Inc()
@@ -471,7 +471,7 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 	return si, nil
 }
 
-func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *session.SessionInfo, initData InitData) (*session.SessionInfo, error) {
+func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *session.SessionInfo, initData InitData, clientKey string) (*session.SessionInfo, error) {
 	// Fast reconnect: worker still alive, skip terminate+resume cycle.
 	if w := sm.GetWorker(sessionID); w != nil {
 		if si.State != events.StateRunning {
@@ -497,7 +497,7 @@ func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *s
 	resumeErr := c.starter.ResumeSession(context.Background(), sessionID, workDir)
 	if resumeErr != nil {
 		if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
-			initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, ""); err != nil {
+			initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, "", clientKey); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			msg := fmt.Sprintf("resume failed (%v), then start also failed (%v)", resumeErr, err)
 			c.sendInitError(events.ErrCodeInternalError, msg)

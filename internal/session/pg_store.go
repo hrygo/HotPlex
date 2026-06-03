@@ -72,7 +72,7 @@ func (s *pgStore) Upsert(ctx context.Context, info *SessionInfo) error {
 		info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
 		info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
 		info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
-		string(ctxJSON), info.Source,
+		string(ctxJSON), info.Source, info.ClientKey,
 	)
 	if err != nil {
 		return fmt.Errorf("session store: upsert: %w", err)

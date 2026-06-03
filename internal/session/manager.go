@@ -146,6 +146,9 @@ type SessionInfo struct {
 	// Source identifies the session origin: "" (user-initiated) or "cron" (cron-triggered).
 	// Used for differential DB retention — cron sessions are cleaned up after 24h vs 7d for normal.
 	Source string `json:"source,omitempty"`
+	// ClientKey is the client-provided session_id from the init envelope.
+	// Empty for platform sessions (Slack/Feishu) which use DerivePlatformSessionKey.
+	ClientKey string `json:"client_key,omitempty"`
 }
 
 // NewManager creates a new session manager using the provided Store.
@@ -178,11 +181,11 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 
 // Create creates a new session and persists it to SQLite.
 func (m *Manager) Create(ctx context.Context, id, userID string, workerType worker.WorkerType, allowedTools []string, workDir, title string) (*SessionInfo, error) {
-	return m.CreateWithBot(ctx, id, userID, "", workerType, allowedTools, "", nil, workDir, title)
+	return m.CreateWithBot(ctx, id, userID, "", workerType, allowedTools, "", nil, workDir, title, "")
 }
 
 // CreateWithBot creates a new session with explicit bot_id and persists it to SQLite.
-func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title string) (*SessionInfo, error) {
+func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*SessionInfo, error) {
 	now := time.Now()
 	source := ""
 	if _, isCron := platformKey["cron_job_id"]; isCron {
@@ -203,6 +206,7 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, w
 		WorkDir:      workDir,
 		Title:        title,
 		Source:       source,
+		ClientKey:    clientKey,
 	}
 
 	if err := m.store.Upsert(ctx, info); err != nil {
