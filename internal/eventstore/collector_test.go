@@ -115,10 +115,10 @@ func TestCollector_CreatedAtUsesFirstSeenAt(t *testing.T) {
 
 	before := time.Now()
 	c.CaptureDeltaString("s1", 1, "first")
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	c.CaptureDeltaString("s1", 2, "second")
 	// Flush well after first delta
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	c.Capture("s1", 3, events.MessageEnd, nil, "outbound", SourceNormal)
 	require.NoError(t, c.Close())
 
@@ -128,7 +128,7 @@ func TestCollector_CreatedAtUsesFirstSeenAt(t *testing.T) {
 
 	createdAt := time.UnixMilli(page.Events[0].CreatedAt)
 	// created_at should be close to before (first delta), not to flush time
-	require.WithinDuration(t, before, createdAt, 50*time.Millisecond)
+	require.WithinDuration(t, before, createdAt, 30*time.Millisecond)
 }
 
 func TestCollector_ReplaySeqOrdering(t *testing.T) {

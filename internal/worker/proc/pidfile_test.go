@@ -233,6 +233,9 @@ func TestCleanupOrphans_StaleContent(t *testing.T) {
 
 func TestCleanupOrphans_LiveOrphan(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping real process test in short mode")
+	}
 	if os.Getenv("TEST_RACE_ENABLED") != "" {
 		t.Skip("skipping real process test under race detector")
 	}

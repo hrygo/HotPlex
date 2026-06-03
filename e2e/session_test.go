@@ -14,6 +14,9 @@ import (
 )
 
 func TestE2E_ConnectAndInit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e integration test in short mode")
+	}
 	for _, wt := range allWorkerTypes {
 		t.Run(wt.name, func(t *testing.T) {
 			t.Parallel()
@@ -34,6 +37,9 @@ func TestE2E_ConnectAndInit(t *testing.T) {
 }
 
 func TestE2E_SessionTerminate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e integration test in short mode")
+	}
 	for _, wt := range allWorkerTypes {
 		t.Run(wt.name, func(t *testing.T) {
 			t.Parallel()
@@ -71,6 +77,9 @@ func TestE2E_SessionTerminate(t *testing.T) {
 }
 
 func TestE2E_SessionDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e integration test in short mode")
+	}
 	for _, wt := range allWorkerTypes {
 		t.Run(wt.name, func(t *testing.T) {
 			t.Parallel()
@@ -98,6 +107,9 @@ func TestE2E_SessionDelete(t *testing.T) {
 // TestE2E_SessionReset: after Connect, session is RUNNING. Reset from RUNNING
 // is idempotent — clears context and sends state=running event (no error).
 func TestE2E_SessionReset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e integration test in short mode")
+	}
 	for _, wt := range allWorkerTypes {
 		t.Run(wt.name, func(t *testing.T) {
 			t.Parallel()
@@ -120,6 +132,9 @@ func TestE2E_SessionReset(t *testing.T) {
 }
 
 func TestE2E_SessionGC(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e integration test in short mode")
+	}
 	for _, wt := range allWorkerTypes {
 		t.Run(wt.name, func(t *testing.T) {
 			t.Parallel()
@@ -147,6 +162,9 @@ func TestE2E_SessionGC(t *testing.T) {
 }
 
 func TestE2E_ResumeSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e integration test in short mode")
+	}
 	for _, wt := range allWorkerTypes {
 		t.Run(wt.name, func(t *testing.T) {
 			t.Parallel()
@@ -173,7 +191,13 @@ func TestE2E_ResumeSession(t *testing.T) {
 			require.NoError(t, c1.Close())
 
 			// Wait for session to transition to IDLE.
-			time.Sleep(200 * time.Millisecond)
+			require.Eventually(t, func() bool {
+				si, err := tg.sm.Get(context.Background(), sessionID)
+				if err != nil {
+					return false
+				}
+				return si.State == client.StateIdle || si.State == client.StateTerminated
+			}, 2*time.Second, 50*time.Millisecond, "session should transition to idle after close")
 
 			// Resume with same session ID.
 			c2, err := client.New(context.Background(),

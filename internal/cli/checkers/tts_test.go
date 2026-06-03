@@ -85,6 +85,9 @@ func TestTTSEnvironmentChecker_SlackEdgeTTSEnabled(t *testing.T) {
 // --- MOSS Provider Tests ---
 
 func TestTTSEnvironmentChecker_MossProvider(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that probes external binary dependencies")
+	}
 	dir := t.TempDir()
 	path := writeTTSConfig(t, dir, ttsConfigOpts{feishuEnabled: true, feishuTTS: true, feishuProvider: "edge+moss"})
 	defer resetConfigPath()
@@ -96,6 +99,9 @@ func TestTTSEnvironmentChecker_MossProvider(t *testing.T) {
 }
 
 func TestTTSEnvironmentChecker_MossOnlyProvider(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that probes external binary dependencies")
+	}
 	dir := t.TempDir()
 	path := writeTTSConfig(t, dir, ttsConfigOpts{feishuEnabled: true, feishuTTS: true, feishuProvider: "moss"})
 	defer resetConfigPath()
@@ -107,6 +113,9 @@ func TestTTSEnvironmentChecker_MossOnlyProvider(t *testing.T) {
 }
 
 func TestTTSEnvironmentChecker_MossModelDirWithEntryScript(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that probes external binary dependencies")
+	}
 	// Create a model dir with app_onnx.py present.
 	modelDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(modelDir, "app_onnx.py"), []byte("# mock"), 0o644))
@@ -126,6 +135,9 @@ func TestTTSEnvironmentChecker_MossModelDirWithEntryScript(t *testing.T) {
 }
 
 func TestTTSEnvironmentChecker_MossModelDirMissingEntryScript(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that probes external binary dependencies")
+	}
 	// Create a model dir without app_onnx.py.
 	modelDir := t.TempDir()
 
