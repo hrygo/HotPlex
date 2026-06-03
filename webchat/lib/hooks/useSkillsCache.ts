@@ -1,12 +1,15 @@
 'use client';
 
-// NOTE: No TTL/cleanup for localStorage entries. Short-lived sessions produce small
-// entries (~KB) and the volume is bounded by actual usage. If cleanup becomes necessary,
-// handle it in a separate housekeeping pass rather than adding complexity here.
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { SkillEntry } from '@/lib/ai-sdk-transport/client/types';
 
 const STORAGE_KEY_PREFIX = 'hotplex:skills';
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface CachedSkills {
+  ts: number;
+  skills: SkillEntry[];
+}
 
 function storageKey(sessionId: string) {
   return `${STORAGE_KEY_PREFIX}:${sessionId}`;
@@ -15,7 +18,13 @@ function storageKey(sessionId: string) {
 function loadFromStorage(sessionId: string): SkillEntry[] {
   try {
     const raw = localStorage.getItem(storageKey(sessionId));
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const cached: CachedSkills = JSON.parse(raw);
+    if (Date.now() - cached.ts > CACHE_TTL_MS) {
+      localStorage.removeItem(storageKey(sessionId));
+      return [];
+    }
+    return cached.skills ?? [];
   } catch {
     return [];
   }
@@ -23,7 +32,8 @@ function loadFromStorage(sessionId: string): SkillEntry[] {
 
 function saveToStorage(sessionId: string, skills: SkillEntry[]) {
   try {
-    localStorage.setItem(storageKey(sessionId), JSON.stringify(skills));
+    const cached: CachedSkills = { ts: Date.now(), skills };
+    localStorage.setItem(storageKey(sessionId), JSON.stringify(cached));
   } catch {
     // localStorage full or unavailable — in-memory only
   }

@@ -98,6 +98,7 @@ check-tools:
 
 hooks:
 	@echo "$(CYAN)Installing git hooks...$(RESET)"
+# Relative core.hooksPath resolves per-worktree root, safe across linked worktrees
 	@git config core.hooksPath scripts/git-hooks
 	@for hook in scripts/git-hooks/*; do \
 		name=$$(basename "$$hook"); \
