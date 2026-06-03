@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.24.3] - 2026-06-03
+
+### Summary
+
+v1.24.3 是一次 patch 版本更新，修复了 WebSocket 客户端在消息中省略 `session_id` 或 `seq` 字段时触发验证错误的问题。AEP 解码器新增 `ValidateMinimal` 路径，允许这些字段为空——Gateway 会在解码后注入权威值。
+
+### Fixed
+
+- **Gateway Core**: AEP codec rejects client messages with empty `session_id`/`seq` — add `DecodeLineMinimal` path that skips these fields since the Gateway stamps authoritative values after decoding.
+
 ## [1.24.2] - 2026-06-03
 
 ### Summary
