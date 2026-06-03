@@ -434,6 +434,16 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			bridge, sm,
 			&gcBotLookup{registry: messaging.DefaultBotRegistry()},
 			&gcLogSender{log: log},
+			func(ctx context.Context, sessionID string) (string, error) {
+				if err := stores.collector.Flush(); err != nil {
+					log.Warn("groupchat: flush before query", "error", err)
+				}
+				turns, err := stores.event.QueryTurns(ctx, sessionID, 1, 0)
+				if err != nil || len(turns) == 0 {
+					return "", err
+				}
+				return turns[len(turns)-1].Content, nil
+			},
 		)
 		groupChatMgr.RepairRunningSessions(ctx)
 		log.Info("gateway: group chat manager started")
@@ -499,6 +509,12 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			}
 			return fmt.Errorf("cron delivery: no adapter for platform %q", platform)
 		})
+	}
+
+	// Wire groupchat response sender to platform adapters.
+	if groupChatMgr != nil {
+		adapters := msgAdapters // capture for closure
+		groupChatMgr.SetResponseSender(&gcPlatformSender{log: log, adapters: adapters})
 	}
 
 	adminHandler := setupRoutes(mux, deps)
@@ -1122,19 +1138,55 @@ func (a *gcBotLookup) GetByName(name string) (groupchat.BotEntry, bool) {
 	return groupchat.BotEntry{Name: e.Name, BotID: e.BotID, WorkerType: e.WorkerType}, true
 }
 
-// gcLogSender is a v1 logging-only ResponseSender.
-// TODO: Phase 2 — route through platform adapters for real message delivery.
+// gcLogSender is a boot-time fallback ResponseSender that logs instead of sending.
+// Replaced by gcPlatformSender after messaging adapters start via SetResponseSender.
 type gcLogSender struct {
 	log *slog.Logger
 }
 
 func (s *gcLogSender) SendTurnResponse(_ context.Context, platform, channelID, threadTS, botName, content string, turnNum int) error {
-	s.log.Info("groupchat: turn response", "bot", botName, "turn", turnNum,
+	s.log.Info("groupchat: turn response (no adapter)", "bot", botName, "turn", turnNum,
 		"platform", platform, "channel", channelID, "thread", threadTS, "len", len(content))
 	return nil
 }
 
 func (s *gcLogSender) SendControlMessage(_ context.Context, platform, channelID, threadTS, message string) error {
-	s.log.Info("groupchat: control", "platform", platform, "channel", channelID, "thread", threadTS, "msg", message)
+	s.log.Info("groupchat: control (no adapter)", "platform", platform, "channel", channelID, "thread", threadTS, "msg", message)
 	return nil
+}
+
+// gcPlatformSender routes groupchat messages through platform adapters via CronResultSender.
+type gcPlatformSender struct {
+	log      *slog.Logger
+	adapters []messaging.PlatformAdapterInterface
+}
+
+func (s *gcPlatformSender) SendTurnResponse(ctx context.Context, platform, channelID, threadTS, botName, content string, turnNum int) error {
+	if content == "" {
+		return nil
+	}
+	platformKey := map[string]string{
+		"chat_id":    channelID,
+		"message_id": threadTS,
+	}
+	return s.deliver(ctx, platform, platformKey, fmt.Sprintf("**%s** (Turn %d):\n%s", botName, turnNum, content))
+}
+
+func (s *gcPlatformSender) SendControlMessage(ctx context.Context, platform, channelID, threadTS, message string) error {
+	platformKey := map[string]string{
+		"chat_id":    channelID,
+		"message_id": threadTS,
+	}
+	return s.deliver(ctx, platform, platformKey, message)
+}
+
+func (s *gcPlatformSender) deliver(ctx context.Context, platform string, platformKey map[string]string, text string) error {
+	for _, a := range s.adapters {
+		if a.Platform() == messaging.PlatformType(platform) {
+			if sender, ok := a.(messaging.CronResultSender); ok {
+				return sender.SendCronResult(ctx, text, platformKey)
+			}
+		}
+	}
+	return fmt.Errorf("groupchat: no adapter for platform %q", platform)
 }

@@ -47,17 +47,21 @@ type ResponseSender interface {
 	SendControlMessage(ctx context.Context, platform, channelID, threadTS, message string) error
 }
 
+// ResponseExtractor extracts the last assistant response from a completed session.
+type ResponseExtractor func(ctx context.Context, sessionID string) (string, error)
+
 // Manager orchestrates group chat sessions.
 type Manager struct {
-	log      *slog.Logger
-	cfg      Config
-	store    Store
-	bridge   BridgeStarter
-	sm       SessionStateChecker
-	bots     BotLookup
-	sender   ResponseSender
-	guard    *TerminateCheck
-	selector *RoundRobinSelector
+	log       *slog.Logger
+	cfg       Config
+	store     Store
+	bridge    BridgeStarter
+	sm        SessionStateChecker
+	bots      BotLookup
+	sender    ResponseSender
+	extractor ResponseExtractor // nil = extractResponse returns ""
+	guard     *TerminateCheck
+	selector  *RoundRobinSelector
 
 	mu     sync.Mutex
 	active map[string]*groupRun // groupID → running context
@@ -70,19 +74,27 @@ type groupRun struct {
 }
 
 // NewManager creates the group chat manager.
-func NewManager(log *slog.Logger, cfg Config, store Store, bridge BridgeStarter, sm SessionStateChecker, bots BotLookup, sender ResponseSender) *Manager {
+func NewManager(log *slog.Logger, cfg Config, store Store, bridge BridgeStarter, sm SessionStateChecker, bots BotLookup, sender ResponseSender, extractor ResponseExtractor) *Manager {
 	return &Manager{
-		log:      log.With("component", "groupchat_manager"),
-		cfg:      cfg,
-		store:    store,
-		bridge:   bridge,
-		sm:       sm,
-		bots:     bots,
-		sender:   sender,
-		guard:    &TerminateCheck{MaxTurns: cfg.MaxTurns, CostLimitUSD: cfg.CostLimitUSD, MaxConsecutiveTMO: 2},
-		selector: &RoundRobinSelector{},
-		active:   make(map[string]*groupRun),
+		log:       log.With("component", "groupchat_manager"),
+		cfg:       cfg,
+		store:     store,
+		bridge:    bridge,
+		sm:        sm,
+		bots:      bots,
+		sender:    sender,
+		extractor: extractor,
+		guard:     &TerminateCheck{MaxTurns: cfg.MaxTurns, CostLimitUSD: cfg.CostLimitUSD, MaxConsecutiveTMO: 2},
+		selector:  &RoundRobinSelector{},
+		active:    make(map[string]*groupRun),
 	}
+}
+
+// SetResponseSender replaces the response sender (late binding after adapters start).
+func (m *Manager) SetResponseSender(sender ResponseSender) {
+	m.mu.Lock()
+	m.sender = sender
+	m.mu.Unlock()
 }
 
 // StartDiscussion creates and begins a group chat.
@@ -484,25 +496,18 @@ func (m *Manager) waitForCompletion(ctx context.Context, sessionID string, timeo
 	}
 }
 
-// extractResponse retrieves the last assistant turn text from the sub-session.
-// For v1, we poll session state and return a placeholder; the actual content
-// extraction uses the event store turns query if available, or falls back to
-// the worker's last output.
-func (m *Manager) extractResponse(_ context.Context, _ string) string {
-	// The forwardEvents goroutine already captured the response in the event store.
-	// For v1, we query the session's turns from the bridge's accumulator.
-	// Since we don't have direct access to the accumulator, we use the session's
-	// last known state as a signal that the worker completed.
-	// The actual content will be delivered via the Hub to any subscribed PlatformConns.
-	// For the groupchat manager, we rely on the fact that the worker's output
-	// has been forwarded to the hub, and the platform adapter will render it.
-	//
-	// For now, return empty content and rely on the platform adapter's
-	// existing rendering pipeline to show the response.
-	// The groupchat manager's primary job is orchestration, not content extraction.
-	//
-	// TODO: Phase 2 — extract content from event store for context building.
-	return ""
+// extractResponse retrieves the last assistant turn text from the sub-session
+// via the configured ResponseExtractor (event store turn query).
+func (m *Manager) extractResponse(ctx context.Context, sessionID string) string {
+	if m.extractor == nil {
+		return ""
+	}
+	content, err := m.extractor(ctx, sessionID)
+	if err != nil {
+		m.log.Warn("groupchat: extract response failed", "session_id", sessionID, "err", err)
+		return ""
+	}
+	return content
 }
 
 func (m *Manager) endDiscussion(ctx context.Context, gs *GroupSession, reason EndReason) {
