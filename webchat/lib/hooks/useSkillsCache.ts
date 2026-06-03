@@ -42,7 +42,11 @@ export function useSkillsCache(sessionId: string | null) {
     setSkills(prev => {
       const existing = new Map(prev.map(s => [s.name, s]));
       for (const skill of incoming) {
-        existing.set(skill.name, skill); // newer overwrites older
+        const cur = existing.get(skill.name);
+        // Don't let stub entries (empty description) overwrite richer data
+        if (!cur || cur.description === '' || skill.description !== '') {
+          existing.set(skill.name, skill);
+        }
       }
       const merged = Array.from(existing.values());
       if (currentIdRef.current) saveToStorage(currentIdRef.current, merged);

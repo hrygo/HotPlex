@@ -44,6 +44,14 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 	switch cmd {
 	case events.StdioSkills:
 		cmdErr = h.handleSkillsList(ctx, env, args)
+		// SkillsList is the only server-handled command without its own response
+		// signal — send a synthetic done so the frontend clears isRunning.
+		doneEnv := events.NewEnvelope(
+			aep.NewID(), env.SessionID,
+			h.hub.NextSeq(env.SessionID),
+			events.Done, events.DoneData{Success: cmdErr == nil},
+		)
+		_ = h.hub.SendToSession(ctx, doneEnv)
 	case events.StdioContextUsage, events.StdioMCPStatus, events.StdioSetModel, events.StdioSetPermMode:
 		// Control-request commands use a dedicated timeout context.
 		ctrlCtx, ctrlCancel := context.WithTimeout(ctx, 60*time.Second)
@@ -62,16 +70,6 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown worker command: %s", cmd)
 	}
-
-	// Server-handled worker commands don't go through the bridge turn cycle,
-	// so the frontend never receives a "done" event to clear isRunning.
-	// Send one unconditionally so the UI recovers on both success and failure.
-	doneEnv := events.NewEnvelope(
-		aep.NewID(), env.SessionID,
-		h.hub.NextSeq(env.SessionID),
-		events.Done, events.DoneData{Success: cmdErr == nil},
-	)
-	_ = h.hub.SendToSession(ctx, doneEnv)
 
 	return cmdErr
 }

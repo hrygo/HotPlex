@@ -21,13 +21,36 @@ func scanDirs(homeDir, workDir string) []Skill {
 	dirs := []struct {
 		path   string
 		source string
-	}{
-		{filepath.Join(homeDir, ".claude", "skills"), SourceGlobal},
-		{filepath.Join(homeDir, ".agents", "skills"), SourceGlobal},
-		{filepath.Join(homeDir, ".hotplex", "skills"), SourceGlobal},
-		{filepath.Join(workDir, ".claude", "skills"), SourceProject},
-		{filepath.Join(workDir, ".agents", "skills"), SourceProject},
+	}{}
+
+	// Global skill dirs require a valid home directory
+	if homeDir != "" {
+		dirs = append(dirs,
+			struct {
+				path   string
+				source string
+			}{filepath.Join(homeDir, ".claude", "skills"), SourceGlobal},
+			struct {
+				path   string
+				source string
+			}{filepath.Join(homeDir, ".agents", "skills"), SourceGlobal},
+			struct {
+				path   string
+				source string
+			}{filepath.Join(homeDir, ".hotplex", "skills"), SourceGlobal},
+		)
 	}
+
+	dirs = append(dirs,
+		struct {
+			path   string
+			source string
+		}{filepath.Join(workDir, ".claude", "skills"), SourceProject},
+		struct {
+			path   string
+			source string
+		}{filepath.Join(workDir, ".agents", "skills"), SourceProject},
+	)
 
 	// Also check current working dir (hotplex repo root) if distinct from workDir
 	if cwd, _ := os.Getwd(); cwd != "" && cwd != workDir {
