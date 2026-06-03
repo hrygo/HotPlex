@@ -79,7 +79,7 @@
 
 - **implemented**: 4 个 — Per-Bot-Agent-Config, Turn-Summary-WorkDir-Fix, Worker-User-Interaction, Slack-Stream-Rotation
 - **draft**: 7 个 — Gateway-Async-Init, Feishu-Adapter, Hot-Reload, Session-History, Turn-Summary, CLI-Self-Service, Onboard-UX, TTS-Engine
-- **proposed**: 7 个 — GroupChat-Collaboration, Dual-Database-Support, Consolidate-Events-Store, Delta-Optimization, Interaction-Response-Chain-Fix, Inbound-Event-Storage-Fix, Onboard-Go-Embed-AST, WebChat-v2-Revamp, Windows-Support
+- **proposed**: 9 个 — GroupChat-Collaboration, Dual-Database-Support, Consolidate-Events-Store, Delta-Optimization, Interaction-Response-Chain-Fix, Inbound-Event-Storage-Fix, Onboard-Go-Embed-AST, WebChat-v2-Revamp, Windows-Support
 
 ### 按领域分类
 

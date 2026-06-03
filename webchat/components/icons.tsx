@@ -44,16 +44,6 @@ export function WorkerIcon({ type, className }: { type: string; className?: stri
           <line x1="16" y1="16" x2="16" y2="16" />
         </svg>
       );
-    case 'pimon':
-      return (
-        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M4 7h16" />
-          <path d="M4 12h16" />
-          <path d="M4 17h16" />
-          <path d="M7 7v10" />
-          <path d="M17 7v10" />
-        </svg>
-      );
     default:
       return (
         <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
