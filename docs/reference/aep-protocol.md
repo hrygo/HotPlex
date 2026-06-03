@@ -71,6 +71,7 @@ WebSocket 连接建立后的**第一帧**必须是 `init`，30 秒超时。
     "version": "aep/v1",
     "worker_type": "claude_code",
     "session_id": "sess_xxx",
+    "title": "可选显示名称",
     "auth": { "token": "<api-key>" },
     "config": {
       "model": "claude-sonnet-4-6",
@@ -87,7 +88,14 @@ WebSocket 连接建立后的**第一帧**必须是 `init`，30 秒超时。
 }
 ```
 
-`session_id` 非空时为 Resume 模式，空时创建新 Session。
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| `version` | 是 | 固定 `"aep/v1"` |
+| `worker_type` | 是 | Worker 类型（`claude_code`、`codex_cli`、`acp` 等） |
+| `session_id` | 否 | 空=创建新 Session，非空=Resume 模式。会被清洗和长度校验 |
+| `title` | 否 | 会话显示名称，不参与 Session ID 派生。最大 256 字符，会被清洗 |
+
+`session_id` 和 `title` 均经过 `SanitizeText()` 清洗（移除控制字符、null bytes、BOM、surrogates）和长度校验（最大 256 字符）。超长时返回 `INVALID_MESSAGE` 错误。
 
 ### input（用户输入）
 

@@ -300,7 +300,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | ------------------------- | ---- | --------------------------------------------------- |
 | `version`                 | 是   | 固定 `"aep/v1"`                                     |
 | `worker_type`             | 是   | Worker 类型（`claude_code`、`codex_cli`、`acp` 等） |
-| `title`                   | 否   | 会话显示名称，不参与 Session ID 派生                 |
+| `title`                   | 否   | 会话显示名称，不参与 Session ID 派生。最大 256 字符，自动清洗 |
 | `auth.token`              | 条件 | 无 API Key Header/Query 时必需                      |
 | `auth.bot_id`             | 否   | 多 Bot 隔离，优先级低于 Header/Query                |
 | `config.work_dir`         | 否   | 工作目录，安全校验                                  |
@@ -345,7 +345,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | -------------------- | ------------------------------- |
 | `VERSION_MISMATCH`   | version 不是 `aep/v1`           |
 | `PROTOCOL_VIOLATION` | 第一帧不是 init                 |
-| `INVALID_MESSAGE`    | JSON 格式错误或字段缺失         |
+| `INVALID_MESSAGE`    | JSON 格式错误、字段缺失、或字段超长（如 title > 256 字符） |
 | `UNAUTHORIZED`       | 认证失败                        |
 | `RATE_LIMITED`       | 握手频率过高                    |
 | `CONFIG_INVALID`     | allowed_tools 或 model 校验失败 |
@@ -517,7 +517,7 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 | Session 不存在    | 创建新会话 + 启动 Worker              |
 | Worker 仍存活     | **Fast Reconnect** — 直接复用，零延迟 |
 | idle / terminated | Resume — 恢复对话历史                 |
-| Resume 失败       | 降级创建新会话                        |
+| Resume 失败       | 降级创建新会话（独立 30s 超时，不共享 Resume 的超时预算） |
 
 > **GC 自动回收**：空闲超过 60 分钟的 session 会被 GC 回收（idle → terminated），最长存活 7 天（可配置）。Worker 僵死（30 分钟无 IO）也会被回收为 terminated。
 
@@ -1316,7 +1316,7 @@ direction=after&cursor=42     # 向后追赶：seq > 42
 | -------------------- | -------------- | -------------------------- |
 | `VERSION_MISMATCH`   | 协议版本不匹配 | 检查 version 字段          |
 | `PROTOCOL_VIOLATION` | 首帧非 init    | 首帧必须是 init            |
-| `INVALID_MESSAGE`    | 消息格式错误   | 检查 JSON 结构和必需字段   |
+| `INVALID_MESSAGE`    | 消息格式错误或字段超长   | 检查 JSON 结构、必需字段、title 长度（≤256） |
 | `UNAUTHORIZED`       | 认证失败       | 检查 API Key               |
 | `RATE_LIMITED`       | 握手频率过高   | 退避重试                   |
 | `CONFIG_INVALID`     | 配置校验失败   | 检查 allowed_tools / model |

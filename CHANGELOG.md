@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.24.4] - 2026-06-03
+
+### Summary
+
+v1.24.4 是一次 patch 版本更新，聚焦于 **session identity 迁移的安全加固**。PR #635 补全了 WS init 路径缺失的输入清洗和长度校验，隔离了 session 恢复/启动的 context 超时预算，并统一了前端 session ID 生成逻辑。同步更新了 specs 索引和 WebSocket 集成文档。
+
+### Changed
+
+- **Gateway Core**: WS init path now sanitizes `title` and `sessionID` via `messaging.SanitizeText()` — REST API path already had this; the WS path was unguarded. (#635)
+- **Gateway Core**: Resume→Start session fallback uses independent 30s timeout contexts instead of sharing a single budget — a slow resume no longer starves the heavier StartSession. (#635)
+- **Gateway Core**: Replace hardcoded `256` with `session.MaxClientKeyLen` constant in API handler for consistency with session manager's validation. (#635)
+- **WebChat UI**: Replace inline `crypto.randomUUID()` with existing `newSessionId()` utility — provides cross-browser fallback instead of silently failing. (#635)
+- **WebChat UI**: Consolidate `MAIN_SESSION_CLIENT_ID`/`MAIN_SESSION_TITLE` into single `ANCHOR_SESSION_ID` constant. (#635)
+
+### Fixed
+
+- **Session**: Title length validation missing in WS init path — `client_session_id` had a 256-char guard but `title` did not, allowing unbounded input. (#635)
+
 ## [1.24.3] - 2026-06-03
 
 ### Summary

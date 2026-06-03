@@ -69,7 +69,7 @@ HotPlex 使用 UUIDv5（SHA-1 哈希 + 固定命名空间）生成确定性的 S
 
 **两种 Key 派生方式**：
 
-1. **通用 Key**（`DeriveSessionKey`）：`SHA1(namespace, ownerID|workerType|clientKey|workDir)`，适用于 WebChat 和直连 WebSocket。
+1. **通用 Key**（`DeriveSessionKey`）：`SHA1(namespace, ownerID|workerType|clientKey|workDir)`，适用于 WebChat 和直连 WebSocket。`clientKey` 是客户端传入的 `client_session_id`（REST）或 `session_id`（WS init），经过 `SanitizeText()` 清洗和 `MaxClientKeyLen`（256 字符）长度校验。
 2. **平台 Key**（`DerivePlatformSessionKey`）：根据平台类型拼接不同字段：
    - Slack：`ownerID|wt|slack[|teamID][|channelID][|threadTS][|userID][|workDir]`
    - 飞书：`ownerID|wt|feishu[|chatID][|threadTS][|userID][|workDir]`
@@ -223,6 +223,7 @@ if ms.info.State == RUNNING && ms.worker != nil {
 3. 无 Worker, CREATED    -> Start (--session-id)
 4. 无 Worker, RUNNING/IDLE/TERMINATED -> Resume (--resume)
    如果 Resume 失败（文件丢失），降级到 Start (--session-id)
+   Resume 和 Start 使用独立的 30s 超时 context，Resume 失败不消耗 Start 的超时预算
 ```
 
 **ResetSession** 使用递增的 generation counter 代替布尔标志，消除了旧设计中的竞态条件——旧 `forwardEvents` goroutine 可以通过 generation 比较准确判断是否应该跳过 crash 处理。

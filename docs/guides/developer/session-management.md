@@ -80,6 +80,8 @@ CREATED → RUNNING ⟷ IDLE → TERMINATED → DELETED
 
 **Fast Reconnect 优化**：如果 WebSocket 断线重连时 Worker 进程仍然存活，直接复用，跳过 terminate + resume 周期。
 
+**Resume 失败降级**：如果 Resume 失败（如 session 文件已被清理），Gateway 自动降级为 Start（全新会话）。Resume 和 Start 使用独立的 30 秒超时 context，互不影响——Resume 失败不会消耗 Start 的超时预算。
+
 ## Session 高级控制（CC Worker）
 
 Claude Code Worker 的 `buildCLIArgs()` 将 `SessionInfo` 字段映射为 CLI flags。以下 4 个字段在 v1.14.0 新增支持：
