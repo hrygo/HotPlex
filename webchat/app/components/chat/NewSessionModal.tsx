@@ -2,40 +2,20 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { WorkerIcon } from "@/components/icons";
 import { workDir as configWorkDir } from "@/lib/config";
 
 interface WorkerOption {
   id: string;
   name: string;
   description: string;
-  icon: string;
 }
 
 const WORKER_OPTIONS: WorkerOption[] = [
-  {
-    id: "claude_code",
-    name: "Claude Code",
-    description: "Anthropic's coding agent via Claude CLI",
-    icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
-  },
-  {
-    id: "opencode_server",
-    name: "OpenCode Server",
-    description: "OpenCode Server protocol adapter",
-    icon: "M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
-  },
-  {
-    id: "codex_cli",
-    name: "Codex CLI",
-    description: "OpenAI Codex CLI agent",
-    icon: "M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z",
-  },
-  {
-    id: "acp",
-    name: "ACP Agent",
-    description: "Any ACP-compatible agent via JSON-RPC 2.0",
-    icon: "M13 10V3L4 14h7v7l9-11h-7z",
-  },
+  { id: "claude_code", name: "Claude Code", description: "Anthropic coding agent" },
+  { id: "opencode_server", name: "OpenCode", description: "Server-based code agent" },
+  { id: "codex_cli", name: "Codex CLI", description: "OpenAI coding agent" },
+  { id: "acp", name: "ACP", description: "JSON-RPC agent protocol" },
 ];
 
 interface NewSessionModalProps {
@@ -123,14 +103,12 @@ export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <svg className={`w-4 h-4 ${selectedWorker === w.id ? "text-[var(--accent-gold)]" : "text-[var(--text-muted)]"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={w.icon} />
-                  </svg>
-                  <span className={`text-xs font-bold ${selectedWorker === w.id ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+                  <WorkerIcon type={w.id} className={`w-4 h-4 ${selectedWorker === w.id ? "text-[var(--accent-gold)]" : "text-[var(--text-muted)]"}`} />
+                  <span className={`text-xs font-bold whitespace-nowrap ${selectedWorker === w.id ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
                     {w.name}
                   </span>
                 </div>
-                <p className="text-[10px] text-[var(--text-faint)] leading-relaxed">
+                <p className="text-[10px] text-[var(--text-faint)] whitespace-nowrap">
                   {w.description}
                 </p>
               </button>
