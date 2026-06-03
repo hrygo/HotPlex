@@ -17,11 +17,12 @@ description: 面向第三方开发者，从快速上手到高级特性，完整�
 - [9. 控制命令](#9-控制命令)
 - [10. 用户交互](#10-用户交互)
 - [11. 背压与丢弃](#11-背压与丢弃)
-- [12. 会话历史查询](#12-会话历史查询)
+- [12. 会话管理 REST API](#12-会话管理-rest-api)
 - [13. Init 握手详解](#13-init-握手详解)
 - [14. 连接限制](#14-连接限制)
 - [15. 错误码参考](#15-错误码参考)
 - [16. 常见问题](#16-常见问题)
+- [17. SSO 集成最佳实践](#17-sso-集成最佳实践)
 
 ---
 
@@ -916,11 +917,67 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
 
 ---
 
-## 12. 会话历史查询
+## 12. 会话管理 REST API
 
-Gateway 提供两个 REST API 查询历史，需要认证且校验 session 归属（非 owner 返回 403）。
+所有 REST API 需要认证（`X-API-Key` Header 或同源 Cookie），且自动按认证身份过滤——用户只能访问自己的会话。
 
-### 12.1 Turn 级别 — 聊天记录
+### 12.1 会话列表 — `GET /api/sessions`
+
+返回当前用户的所有会话。适合构建会话列表 UI（侧边栏、历史记录页）。
+
+```bash
+curl -H "X-API-Key: your-key" \
+  "http://localhost:8888/api/sessions?limit=20&platform=webchat"
+```
+
+**参数**：
+
+| 参数       | 类型   | 默认      | 说明                                                  |
+| ---------- | ------ | --------- | ----------------------------------------------------- |
+| `limit`    | int    | 100       | 每页数量，最大 500                                     |
+| `offset`   | int    | 0         | 翻页偏移                                              |
+| `platform` | string | `webchat` | 按平台过滤。`webchat` / `slack` / `feishu` / `all`   |
+
+**响应**：
+
+```json
+{
+  "sessions": [
+    {
+      "id": "a1b2c3d4-...",
+      "user_id": "u_12345",
+      "worker_type": "claude_code",
+      "state": "idle",
+      "title": "代码审查",
+      "client_key": "550e8400-e29b-41d4-a716-446655440000",
+      "platform": "webchat",
+      "work_dir": "/home/user/project",
+      "created_at": "2026-06-03T10:00:00Z",
+      "updated_at": "2026-06-03T10:05:00Z",
+      "expires_at": "2026-06-10T10:00:00Z"
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "platform": "webchat"
+}
+```
+
+**关键字段说明**：
+
+| 字段          | 说明                                                                |
+| ------------- | ------------------------------------------------------------------- |
+| `id`          | Session ID（init_ack 返回的权威 ID），用于历史查询、重连等          |
+| `client_key`  | 客户端 init 时传入的原始 `session_id`，重连时需要此值恢复同一会话   |
+| `state`       | `created` / `running` / `idle` / `terminated`（见 §4.4）           |
+| `title`       | 用户定义的会话名称（WebChat 传入，用于 Session Key 派生）           |
+| `work_dir`    | 工作目录（影响 Session Key 派生，重连时需一致）                     |
+
+> **`client_key` 与重连**：重连时需要传回 `client_key`（即 init 信封的 `session_id` 字段）。如果客户端丢失了此值，可以从本接口获取。见 §7 断线重连。
+
+---
+
+### 12.2 Turn 级别 — 聊天记录
 
 适合展示对话列表（一句提问一句回答）。
 
@@ -972,7 +1029,7 @@ curl -H "X-API-Key: your-key" \
 curl "http://localhost:8888/api/sessions/{id}/history?limit=20&before_id=123"
 ```
 
-### 12.2 Event 级别 — 原始事件流
+### 12.3 Event 级别 — 原始事件流
 
 适合调试、审计、回放完整会话状态。
 
@@ -1027,7 +1084,7 @@ direction=before&cursor=5     # 向前翻页：seq < 5
 direction=after&cursor=42     # 向后追赶：seq > 42
 ```
 
-### 12.3 如何选择
+### 12.4 如何选择
 
 | 场景             | 用哪个                              |
 | ---------------- | ----------------------------------- |
@@ -1225,3 +1282,236 @@ Gateway 自动处理：尝试 Resume → 失败则 Fresh Start → 通知客户�
 
 **如何查看历史记录？**
 Turn 级别用 `GET /api/sessions/{id}/history`，Event 级别用 `GET /api/sessions/{id}/events`。详见[会话历史查询](#会话历史查询)。
+
+---
+
+## 17. SSO 集成最佳实践
+
+当你的系统使用 SSO（如 OAuth2、SAML、CAS）登录，需要集成 HotPlex 会话管理时，核心挑战是：**HotPlex 使用 API Key 认证，而 SSO 使用用户身份 token，两者需要映射**。
+
+### 17.1 架构概览
+
+推荐使用 **BFF（Backend For Frontend）代理模式**：你的后端持有 HotPlex API Key，前端通过 SSO session 与后端通信，后端负责 credential 注入。前端全程不接触 API Key。
+
+```
+┌─────────┐   SSO Login    ┌──────────────┐  注入 API Key   ┌──────────────────┐
+│  用户    │ ────────────→ │  你的后端     │ ─────────────→ │  HotPlex Gateway  │
+│ (浏览器) │ ←──────────── │  (BFF 代理)   │ ←───────────── │  (api_key_users)  │
+└─────────┘  Session       └──────────────┘                 └──────────────────┘
+              Cookie         持有 API Key
+             (不含 API Key)   存储在 BFF DB
+```
+
+**两种方案对比**：
+
+| 维度       | 方案 A：BFF 代理（推荐）                  | 方案 B：API Key 下发                     |
+| ---------- | ------------------------------------------ | ---------------------------------------- |
+| 安全性     | 前端不接触 API Key，无泄漏风险             | API Key 经过前端，存在 XSS/日志泄漏风险  |
+| 复杂度     | 需要后端代理 WebSocket 和 REST             | 后端仅负责登录时下发，前端直连 Gateway   |
+| WebSocket  | BFF 代理升级请求并注入凭证                 | 前端在 init 信封中传入 API Key           |
+| 适用场景   | 生产环境、多用户 SSO                       | 快速原型、内部工具                       |
+
+### 17.2 方案 A：BFF 代理模式（推荐）
+
+#### 认证流程
+
+1. 用户通过 SSO 登录你的系统
+2. BFF 后端完成 SSO 认证后，查询本地数据库获取该用户的 HotPlex API Key
+3. 若无 Key，调用 Admin API 创建并**在 BFF 本地存储原始 Key**
+4. BFF 向前端下发 SSO session cookie（不含 API Key）
+5. 前端所有 HotPlex 请求（WebSocket、REST）都通过 BFF 代理，BFF 负责注入 API Key
+
+> **重要**：Admin API 的 `GET /admin/api-keys` 返回的是 **masked** Key（如 `hpk_a1b2****f6`），仅用于展示。BFF 必须在创建 Key 时缓存原始值到自己的数据库，不能依赖列表接口获取可用 Key。
+
+#### BFF 后端示例
+
+```python
+# BFF 后端（Python Flask 示例）
+
+@app.route("/sso/callback")
+def sso_callback():
+    sso_user = verify_sso_token(request.args["code"])
+    user_id = f"sso_{sso_user['id']}"
+
+    # 从 BFF 本地数据库查询已缓存的 API Key
+    api_key = db.get_hotplex_key(user_id)
+
+    if not api_key:
+        # 首次登录：调用 Admin API 创建 Key
+        resp = requests.post(
+            "http://hotplex:8888/admin/api-keys",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "user_id": user_id,
+                "description": f"SSO: {sso_user['email']}"
+                # api_key 省略，由 Gateway 自动生成 hpk_ 前缀密钥
+            }
+        )
+        api_key = resp.json()["api_key"]  # 仅创建接口返回原始 Key
+        db.save_hotplex_key(user_id, api_key)  # 缓存到 BFF 数据库
+
+    # 下发 SSO session cookie（不含 API Key）
+    response = redirect("/")
+    response.set_cookie("session", create_session_token(user_id),
+                        httponly=True, secure=True, samesite="Strict")
+    return response
+```
+
+#### WebSocket 代理
+
+浏览器无法在 WebSocket 升级请求中设置自定义 HTTP 头（如 `X-API-Key`），BFF 代理需通过 query param 或第一帧 init 传递凭证：
+
+```python
+# BFF 代理 WebSocket 连接（Python 示例，使用 websockets 库）
+
+@app.route("/chat/ws")
+async def chat_ws():
+    user_id = verify_session(request.cookies["session"])
+    api_key = db.get_hotplex_key(user_id)
+
+    # BFF 代理：带上 API Key 连接 HotPlex Gateway
+    async with websockets.connect(
+        f"ws://hotplex:8888/ws?api_key={api_key}"
+    ) as upstream:
+        # 双向转发：浏览器 <-> BFF <-> HotPlex
+        await asyncio.gather(
+            relay_upstream(upstream),   # 浏览器 → HotPlex
+            relay_downstream(upstream)  # HotPlex → 浏览器
+        )
+```
+
+#### REST API 代理
+
+```python
+@app.route("/api/sessions")
+def list_sessions():
+    user_id = verify_session(request.cookies["session"])
+    api_key = db.get_hotplex_key(user_id)
+
+    # BFF 注入 API Key，代理到 HotPlex
+    resp = requests.get(
+        "http://hotplex:8888/api/sessions",
+        headers={"X-API-Key": api_key},
+        params=request.args
+    )
+    return resp.json()
+```
+
+### 17.3 方案 B：API Key 下发模式
+
+此方案适用于快速集成或内部工具场景。BFF 在 SSO 登录后将 API Key 下发给前端，前端直连 HotPlex Gateway。
+
+> **注意**：此方案中 API Key 会经过前端。仅在可信网络环境中使用，生产环境推荐方案 A。
+
+#### SSO 登录下发
+
+```python
+@app.route("/sso/callback")
+def sso_callback():
+    sso_user = verify_sso_token(request.args["code"])
+    user_id = f"sso_{sso_user['id']}"
+
+    # 从 BFF 本地数据库获取缓存的 API Key（不使用列表接口）
+    api_key = db.get_hotplex_key(user_id)
+    if not api_key:
+        resp = requests.post(
+            "http://hotplex:8888/admin/api-keys",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={"user_id": user_id, "description": f"SSO: {sso_user['email']}"}
+        )
+        api_key = resp.json()["api_key"]
+        db.save_hotplex_key(user_id, api_key)
+
+    # 通过一次性接口返回 API Key（不要存入长期 Cookie）
+    response = redirect("/")
+    response.set_cookie("hotplex_api_key", api_key,
+                        httponly=True, secure=True, samesite="Strict",
+                        max_age=3600)  # 短期有效
+    return response
+```
+
+#### 前端直连 Gateway
+
+```javascript
+// 前端从 HttpOnly Cookie 读取需要后端接口辅助
+// 这里假设后端提供了 /api/hotplex-config 接口返回 API Key
+const { api_key } = await fetch('/api/hotplex-config', {
+  credentials: 'include'  // 携带 session cookie
+}).then(r => r.json());
+
+// WebSocket：通过 init 信封传递 API Key（浏览器无法设置 WS 自定义头）
+const ws = new WebSocket('ws://localhost:8888/ws');
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    version: 'aep/v1',
+    id: crypto.randomUUID(),
+    session_id: crypto.randomUUID(),
+    seq: 0,
+    timestamp: Date.now(),
+    event: {
+      type: 'init',
+      data: {
+        version: 'aep/v1',
+        worker_type: 'claude_code',
+        auth: { token: api_key }
+      }
+    }
+  }) + '\n');
+};
+
+// REST API
+const sessions = await fetch('/api/sessions', {
+  headers: { 'X-API-Key': api_key }
+});
+```
+
+#### 会话恢复
+
+```javascript
+// 获取该用户的会话列表
+const { sessions } = await fetch('/api/sessions?state=idle&limit=20', {
+  headers: { 'X-API-Key': api_key }
+}).then(r => r.json());
+
+// 重连时使用 client_key 恢复会话
+const target = sessions[0];
+ws.send(JSON.stringify({
+  version: 'aep/v1',
+  id: crypto.randomUUID(),
+  session_id: target.client_key,  // 从列表接口获取原始 clientKey
+  seq: 0,
+  timestamp: Date.now(),
+  event: {
+    type: 'init',
+    data: {
+      version: 'aep/v1',
+      worker_type: 'claude_code',
+      auth: { token: api_key },
+      config: { work_dir: target.work_dir }
+    }
+  }
+}) + '\n');
+```
+
+### 17.4 Admin API Key 管理接口
+
+完整的 API Key CRUD 通过 Admin API 提供（需要 Admin Token 认证）：
+
+| 操作   | 方法   | 路径                        | 说明                                            |
+| ------ | ------ | --------------------------- | ----------------------------------------------- |
+| 列表   | GET    | `/admin/api-keys`           | 返回 **masked** Key，仅用于展示，不可用于认证   |
+| 创建   | POST   | `/admin/api-keys`           | 返回原始 Key（唯一获取时机），建议立即缓存      |
+| 查询   | GET    | `/admin/api-keys/{id}`      | 按 DB ID 查询单条，Key 为 masked                |
+| 更新   | PATCH  | `/admin/api-keys/{id}`      | 更新 user_id/description，Key 创建后不可变      |
+| 删除   | DELETE | `/admin/api-keys/{id}`      | 删除映射                                        |
+
+> **创建接口的响应包含原始 API Key**，是唯一获取可用密钥的时机。`api_key` 字段可省略，Gateway 自动生成 `hpk_` 前缀的随机密钥。BFF 必须在此时将原始 Key 存入自己的数据库，后续无法从 Admin API 获取。
+
+### 17.5 安全注意事项
+
+1. **HTTPS/WSS**：生产环境必须启用，防止 API Key 被截获
+2. **BFF 缓存 Key 的安全**：BFF 数据库中的 API Key 应加密存储，使用 KMS 或环境变量管理加密密钥
+3. **Admin Token 隔离**：Admin API 的 Bearer Token 仅在 BFF 后端使用，永远不要暴露给前端
+4. **user_id 隔离**：确保每个 SSO 用户映射到唯一的 `user_id`（≤128 字符），HotPlex 使用此值隔离会话空间
+5. **API Key 轮换**：删除旧 Key → 创建新 Key → 更新 BFF 缓存。无需重启 Gateway
+6. **WebSocket 认证限制**：浏览器无法在 WebSocket 升级请求中设置自定义 HTTP 头。对于方案 B，只能通过 init 信封的 `auth.token` 字段传递 API Key；对于方案 A，BFF 可通过 query param 或代理注入
