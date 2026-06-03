@@ -1,5 +1,8 @@
 'use client';
 
+// NOTE: No TTL/cleanup for localStorage entries. Short-lived sessions produce small
+// entries (~KB) and the volume is bounded by actual usage. If cleanup becomes necessary,
+// handle it in a separate housekeeping pass rather than adding complexity here.
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { SkillEntry } from '@/lib/ai-sdk-transport/client/types';
 

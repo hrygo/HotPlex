@@ -60,6 +60,8 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
     return cmd.key.toLowerCase().includes(filterText) ||
            cmd.description.toLowerCase().includes(filterText);
   });
+  // NOTE: No .slice() limit — container has max-h-[320px] + overflow-y-auto
+  // and scrollIntoView handles keyboard navigation. A hard cap hides skills.
 
   useEffect(() => {
     setSelectedIndex(0);
