@@ -20,6 +20,7 @@ type InitData struct {
 	Version    string            `json:"version"`
 	WorkerType worker.WorkerType `json:"worker_type"`
 	SessionID  string            `json:"session_id,omitempty"`
+	Title      string            `json:"title,omitempty"`
 	Auth       InitAuth          `json:"auth,omitempty"`
 	Config     InitConfig        `json:"config,omitempty"`
 	ClientCaps ClientCaps        `json:"client_caps,omitempty"`
@@ -143,6 +144,7 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 	}
 
 	sessionID, _ := data["session_id"].(string)
+	title, _ := data["title"].(string)
 
 	var auth InitAuth
 	if authData, ok := data["auth"].(map[string]any); ok {
@@ -199,6 +201,7 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 		Version:    version,
 		WorkerType: worker.WorkerType(wt),
 		SessionID:  sessionID,
+		Title:      title,
 		Auth:       auth,
 		Config:     cfg,
 	}, nil

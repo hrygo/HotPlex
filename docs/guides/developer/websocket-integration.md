@@ -300,6 +300,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | ------------------------- | ---- | --------------------------------------------------- |
 | `version`                 | 是   | 固定 `"aep/v1"`                                     |
 | `worker_type`             | 是   | Worker 类型（`claude_code`、`codex_cli`、`acp` 等） |
+| `title`                   | 否   | 会话显示名称，不参与 Session ID 派生                 |
 | `auth.token`              | 条件 | 无 API Key Header/Query 时必需                      |
 | `auth.bot_id`             | 否   | 多 Bot 隔离，优先级低于 Header/Query                |
 | `config.work_dir`         | 否   | 工作目录，安全校验                                  |
@@ -357,9 +358,21 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 
 Session 代表一个独立的对话上下文。每个 Session 绑定一个 Worker 进程，拥有独立的状态和对话历史。
 
-### 5.2 Session ID 如何确定
+### 5.2 Session ID 解析机制
 
-Gateway 使用 **UUIDv5 确定性派生**，从四个维度生成唯一 ID：
+Gateway 使用 **UUIDv5 确定性派生**生成 Session ID，但解析过程分为两步：
+
+```
+init { session_id: X }
+  ├─ X 非空 → sm.Get(X) 按 sessions.id 主键查询
+  │    ├─ 命中且非 Deleted → 直查复用（不派生）
+  │    └─ 未命中 → DeriveSessionKey(userID, wt, X, workDir) → 派生 UUIDv5
+  │         ├─ sm.Get(UUIDv5) 命中 → 恢复
+  │         └─ sm.Get(UUIDv5) 未命中 → 创建新 session
+  └─ X 为空 → DeriveSessionKey(userID, wt, "", workDir) → 固定 UUIDv5
+```
+
+**派生公式**：
 
 ```
 Session ID = UUIDv5(userID | workerType | clientSessionID | workDir)
@@ -367,7 +380,51 @@ Session ID = UUIDv5(userID | workerType | clientSessionID | workDir)
 
 **clientSessionID 是什么**：你在 init 信封 `session_id` 字段传入的值。它**不是** Session ID 本身，只是派生函数的一个输入。该值会被 Gateway 持久化为 `client_key`（可通过 `GET /api/sessions` 的 `client_key` 字段取回，见 §11.1）。
 
-### 5.3 三个关键规则
+> **注意**：`sm.Get(X)` 只按 `sessions.id` 主键（UUIDv5）查询，**不匹配** `client_key` 列。所以传 clientSessionID 永远走不到直查路径——必须先派生成 UUIDv5 再查。
+
+### 5.3 两种创建路径
+
+#### 路径 A：REST + WS（WebChat 模式）
+
+适合需要会话列表 UI 的应用。先用 REST API 创建 session，再用 WS 连接实时通信。
+
+```
+① REST POST /api/sessions?client_session_id=<client_generated>&title=显示名
+   → DeriveSessionKey(userID, wt, clientSessionID, workDir) → UUIDv5
+   → 创建 session + 启动 Worker
+   → 返回 { session_id: UUIDv5 }
+
+② 前端存储 UUIDv5（如 localStorage）
+
+③ WS init { session_id: UUIDv5 }
+   → sm.Get(UUIDv5) → 直查命中 → 复用（一步，不派生）
+
+④ 重连：WS init { session_id: UUIDv5 } → 同 ③
+```
+
+#### 路径 B：纯 WS（SDK/Bot 模式）
+
+适合不需要 session 管理界面的轻量客户端。所有交互通过 WS 完成。
+
+```
+① 首次连接：WS init { session_id: clientSessionID, data: { title: "可选显示名" } }
+   → sm.Get(clientSessionID) → miss（主键是 UUIDv5）
+   → DeriveSessionKey(userID, wt, clientSessionID, workDir) → UUIDv5
+   → sm.Get(UUIDv5) → miss → 创建 session
+   → init_ack 返回 UUIDv5
+
+② 重连方式一（推荐）：存储 init_ack 返回的 UUIDv5，重传
+   WS init { session_id: UUIDv5 }
+   → sm.Get(UUIDv5) → 命中 → 一步恢复
+
+③ 重连方式二（备选）：重传原始 clientSessionID
+   WS init { session_id: clientSessionID }
+   → sm.Get(clientSessionID) → miss → 派生 → 同一 UUIDv5 → sm.Get(UUIDv5) → 命中 → 两步恢复
+```
+
+> **两种重连方式对比**：方式一（传 server UUID）更高效，一步直查恢复。方式二（传 clientSessionID）多一步派生，但在 session 被 GC 物理删除后能重建同一 session——这是它唯一的优势。
+
+### 5.4 四个关键规则
 
 **规则 1：不传 clientSessionID → 自动获得固定会话**
 
@@ -394,24 +451,40 @@ const tabId = `sess_${crypto.randomUUID()}`;
 // init 时传入 → 每个 tab 独立会话
 ```
 
-**规则 3：重连时必须重传原始 clientSessionID**
+**规则 3：REST API 创建 session 必须提供 client_session_id**
 
+```bash
+# client_session_id 用于 Session ID 派生（必填）
+# title 用于显示名称（可选）
+curl -X POST "http://localhost:8888/api/sessions?client_session_id=sess_xxx&title=代码审查" \
+  -H "X-API-Key: your-key"
 ```
-首次:  init { session_id: "sess_tab-abc" }
-       → 派生得到 "a1b2c3d4-..." → init_ack.session_id = "a1b2c3d4-..."
 
-重连:  init { session_id: "sess_tab-abc" }     ← 重传同一个
-       → 再次派生得到 "a1b2c3d4-..."（确定性！） → 自动恢复
+相同的 `client_session_id` → 幂等返回已有 session。不同的 `client_session_id` → 独立 session（`title` 可以相同）。
+
+**规则 4：title 是纯显示名，不参与 Session ID 派生**
+
+```json
+{
+  "event": {
+    "type": "init",
+    "data": {
+      "version": "aep/v1",
+      "worker_type": "claude_code",
+      "title": "Bug Fix Session"
+    }
+  }
+}
 ```
 
-> 如果错误地传 Gateway 返回的 `"a1b2c3d4-..."`，在 Session 被 GC 删除后，派生结果会变，导致创建全新会话、对话历史丢失。
+`title` 仅用于 `GET /api/sessions` 返回的显示名称。多个 session 可以有相同的 title。
 
 **两个 ID 各自的用途**：
 
 | ID                                        | 用在哪                                |
 | ----------------------------------------- | ------------------------------------- |
-| **clientSessionID**（你自己生成的）       | init 握手时传入，重连时重传。REST API 中以 `client_key` 字段返回（§11.1） |
-| **Gateway Session ID**（init_ack 返回的） | REST API 调用（查询历史、删除会话等） |
+| **clientSessionID**（你自己生成的）       | init 握手时传入，参与 Session ID 派生。REST API 以 `client_key` 字段返回（§11.1） |
+| **Gateway Session ID**（init_ack 返回的） | REST API 调用（查询历史、删除会话等）、WS 重连直查 |
 
 ### 5.4 Session 状态
 
@@ -667,14 +740,25 @@ Worker 执行过程中还可能产生：
 
 ## 8. 断线重连
 
-### 8.1 重连步骤
+### 8.1 重连方式
+
+重连时 init 的 `session_id` 字段可以传两种值：
+
+| 传值 | 解析路径 | 特点 |
+|------|---------|------|
+| **服务端 UUID**（init_ack 返回的 `session_id`） | `sm.Get(UUID)` 主键直查命中 → 一步恢复 | 推荐方式，高效 |
+| **客户端 clientSessionID**（首次 init 传的原始值） | `sm.Get()` miss → `DeriveSessionKey` → `sm.Get(派生UUID)` → 两步恢复 | GC 物理删除后能自动重建 |
+
+> **两种方式在 session 未被 GC 删除时效果完全一致**。区别仅在 session 被物理删除后：传 server UUID 会派生出新 UUID（创建全新 session），传 clientSessionID 会派生出相同 UUID（可重建原 session）。
+
+### 8.2 重连步骤
 
 1. WebSocket 断开后，等待指数退避时间（1s, 2s, 4s, 8s...最大 60s）
 2. 重新建立 WebSocket 连接
-3. 发送 init，**携带与首次完全相同的参数**（clientSessionID、auth、workDir）
-4. Gateway 派生出相同的 Session ID → 自动恢复
+3. 发送 init，`session_id` 携带 init_ack 返回的服务端 UUID（推荐）或原始 clientSessionID
+4. Gateway 解析 session → 自动恢复（详见 §5.2 解析流程）
 
-### 8.2 完整重连示例
+### 8.3 完整重连示例
 
 ```javascript
 class HotPlexClient {
@@ -1051,15 +1135,39 @@ curl -H "X-API-Key: your-key" \
 
 | 字段          | 说明                                                                |
 | ------------- | ------------------------------------------------------------------- |
-| `id`          | Session ID（init_ack 返回的权威 ID），用于历史查询、重连等          |
-| `client_key`  | 客户端 init 时传入的原始 `session_id`，即 §5.2 中的 **clientSessionID**。重连时需要此值恢复同一会话 |
-| `state`       | `created` / `running` / `idle` / `terminated`（见 §5.4）           |
-| `title`       | 用户定义的会话名称（WebChat 传入，用于 Session Key 派生）           |
+| `id`          | Session ID（init_ack 返回的权威 ID），用于历史查询、WS 重连直查等   |
+| `client_key`  | 客户端传入的 `session_id` 或 `client_session_id`，参与 Session ID 派生。可用于 GC 删除后的 session 重建 |
+| `state`       | `created` / `running` / `idle` / `terminated`（见 §5.5）           |
+| `title`       | 会话显示名称，不参与 Session ID 派生                                |
 | `work_dir`    | 工作目录（影响 Session Key 派生，重连时需一致）                     |
 
-> **`client_key` = `clientSessionID`**：这两个名称指向同一个值。你在 init 信封 `session_id` 字段传入的 clientSessionID，会被 Gateway 持久化并在本接口以 `client_key` 返回。重连时需要传回此值（见 §8 断线重连）。如果客户端丢失了本地保存的 clientSessionID，可以从本接口的 `client_key` 字段取回。
+> **`client_key` = `clientSessionID`**：这两个名称指向同一个值。REST API 以 `client_session_id` 参数传入，WS init 以 `session_id` 字段传入。Gateway 持久化并在本接口以 `client_key` 返回。如果客户端丢失了本地保存的 clientSessionID，可以从本接口取回。
 
-### 11.2 Turn 级别 — 聊天记录
+### 11.2 创建会话 — `POST /api/sessions`
+
+```bash
+curl -X POST -H "X-API-Key: your-key" \
+  "http://localhost:8888/api/sessions?client_session_id=sess_550e8400&title=代码审查&worker_type=claude_code&work_dir=/home/user/project"
+```
+
+**参数**：
+
+| 参数                | 必需 | 说明                                                        |
+| ------------------- | ---- | ----------------------------------------------------------- |
+| `client_session_id` | 是   | 用于 Session ID 派生。相同值幂等返回已有 session            |
+| `worker_type`       | 否   | Worker 类型，默认 `claude_code`                             |
+| `title`             | 否   | 会话显示名称，不参与 Session ID 派生。纯展示用              |
+| `work_dir`          | 否   | 工作目录，默认使用服务端配置                                |
+
+**响应**：
+
+```json
+{ "session_id": "a1b2c3d4-e5f6-..." }
+```
+
+**幂等性**：相同的 `(client_session_id, worker_type, work_dir)` 在同一用户下总是返回同一个 session ID。
+
+### 11.3 Turn 级别 — 聊天记录
 
 适合展示对话列表（一句提问一句回答）。
 
