@@ -15,6 +15,7 @@ description: 面向第三方开发者，从快速上手到高级特性，完整�
 - [7. 断线重连](#7-断线重连)
 - [8. 会话隔离](#8-会话隔离)
 - [9. 控制命令](#9-控制命令)
+  - [9.4 Skills 列表查询](#94-skills-列表查询)
 - [10. 用户交互](#10-用户交互)
 - [11. 背压与丢弃](#11-背压与丢弃)
 - [12. 会话历史查询](#12-会话历史查询)
@@ -703,6 +704,65 @@ Gateway 会主动推送以下控制命令：
 | `/gc`        | 回收空闲会话   | `gc`                 |
 | `/park`      | 回收空闲会话   | `gc`（等同于 `/gc`） |
 | `/cd <path>` | 切换工作目录   | `cd`                 |
+
+### 9.4 Skills 列表查询
+
+客户端可通过 `worker_command` 向 Gateway 查询当前可用的 Skills 列表。
+
+**发送请求**：
+
+```json
+{
+  "version": "aep/v1",
+  "session_id": "sess_xxx",
+  "event": {
+    "type": "worker_command",
+    "data": {
+      "command": "skills",
+      "args": ""
+    }
+  }
+}
+```
+
+`args` 可选填 skill 名称前缀进行过滤，留空返回全部。
+
+**接收响应**：
+
+Gateway 返回 `skills_list` 事件：
+
+```json
+{
+  "version": "aep/v1",
+  "session_id": "sess_xxx",
+  "event": {
+    "type": "skills_list",
+    "data": {
+      "skills": [
+        { "name": "brainstorming", "description": "Collaborative design brainstorming", "source": "global" },
+        { "name": "systematic-debugging", "description": "Structured bug diagnosis", "source": "project" }
+      ],
+      "total": 2
+    }
+  }
+}
+```
+
+`SkillEntry` 字段说明：
+
+| 字段          | 类型     | 说明                                    |
+| ------------- | -------- | --------------------------------------- |
+| `name`        | string   | Skill 名称，全局唯一标识                |
+| `description` | string   | Skill 功能描述                          |
+| `source`      | string   | 来源：`global`（用户级）或 `project`（项目级） |
+
+**完成后 Gateway 自动发送 `done` 事件**，客户端应据此清除 `isRunning` 状态。
+
+**缓存建议**：
+
+- `name` 可作为唯一键做客户端缓存和去重
+- Skills 列表变化频率低（取决于文件系统变更），建议使用 session 级或 localStorage 缓存
+- 合并多次获取结果时，以 `name` 去重，保留有 `description` 的条目覆盖空描述的 stub
 
 ---
 
