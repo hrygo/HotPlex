@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -115,10 +116,13 @@ func (m *Manager) Start(ctx context.Context, name string, args, env []string, di
 	cmd.Env = security.StripNestedAgent(env)
 
 	// Ensure work dir exists; create if missing.
-	if dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, nil, nil, fmt.Errorf("proc: mkdir workdir %s: %w", dir, err)
-		}
+	// Default to a temp directory when no workdir is configured, preventing
+	// the worker from accidentally inheriting the gateway process's cwd.
+	if dir == "" {
+		dir = filepath.Join(os.TempDir(), "hotplex")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, nil, nil, fmt.Errorf("proc: mkdir workdir %s: %w", dir, err)
 	}
 
 	SetSysProcAttr(cmd)

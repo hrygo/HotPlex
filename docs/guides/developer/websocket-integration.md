@@ -9,19 +9,18 @@ description: 面向第三方开发者，从快速上手到高级特性，完整�
 - [1. 快速上手：30 秒跑通](#1-快速上手30-秒跑通)
 - [2. 核心概念](#2-核心概念)
 - [3. 连接与认证](#3-连接与认证)
-- [4. Session 管理](#4-session-管理)
-- [5. 消息收发](#5-消息收发)
-- [6. 心跳保活](#6-心跳保活)
-- [7. 断线重连](#7-断线重连)
-- [8. 会话隔离](#8-会话隔离)
+- [4. Init 握手详解](#4-init-握手详解)
+- [5. Session 管理](#5-session-管理)
+- [6. 消息收发](#6-消息收发)
+- [7. 心跳保活](#7-心跳保活)
+- [8. 断线重连](#8-断线重连)
 - [9. 控制命令](#9-控制命令)
 - [10. 用户交互](#10-用户交互)
-- [11. 背压与丢弃](#11-背压与丢弃)
-- [12. 会话历史查询](#12-会话历史查询)
-- [13. Init 握手详解](#13-init-握手详解)
-- [14. 连接限制](#14-连接限制)
-- [15. 错误码参考](#15-错误码参考)
-- [16. 常见问题](#16-常见问题)
+- [11. 会话管理 REST API](#11-会话管理-rest-api)
+- [12. 连接限制](#12-连接限制)
+- [13. 错误码参考](#13-错误码参考)
+- [14. 常见问题](#14-常见问题)
+- [15. SSO 集成最佳实践](#15-sso-集成最佳实践)
 
 ---
 
@@ -256,13 +255,109 @@ curl -i --no-buffer \
 
 ---
 
-## 4. Session 管理
+## 4. Init 握手详解
 
-### 4.1 Session 是什么
+WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧。
+
+### 4.1 init 完整字段
+
+```json
+{
+  "version": "aep/v1",
+  "id": "evt_550e8400-...",
+  "session_id": "sess_6ba7b810-...",
+  "seq": 0,
+  "timestamp": 1710000000000,
+  "event": {
+    "type": "init",
+    "data": {
+      "version": "aep/v1",
+      "worker_type": "claude_code",
+      "auth": {
+        "token": "your-api-key",
+        "bot_id": "B12345"
+      },
+      "config": {
+        "work_dir": "/home/user/project",
+        "allowed_tools": ["Bash", "Read", "Write"],
+        "disallowed_tools": ["Edit"],
+        "system_prompt": "...",
+        "model": "claude-sonnet-4-6",
+        "max_turns": 50,
+        "metadata": {}
+      },
+      "client_caps": {
+        "supports_delta": true,
+        "supports_tool_call": true,
+        "supported_kinds": ["message.delta", "tool_call"]
+      }
+    }
+  }
+}
+```
+
+| 字段                      | 必需 | 说明                                                |
+| ------------------------- | ---- | --------------------------------------------------- |
+| `version`                 | 是   | 固定 `"aep/v1"`                                     |
+| `worker_type`             | 是   | Worker 类型（`claude_code`、`codex_cli`、`acp` 等） |
+| `auth.token`              | 条件 | 无 API Key Header/Query 时必需                      |
+| `auth.bot_id`             | 否   | 多 Bot 隔离，优先级低于 Header/Query                |
+| `config.work_dir`         | 否   | 工作目录，安全校验                                  |
+| `config.model`            | 否   | 模型白名单校验                                      |
+| `config.allowed_tools`    | 否   | 允许的工具列表                                      |
+| `config.disallowed_tools` | 否   | 禁用的工具列表                                      |
+| `config.max_turns`        | 否   | 最大轮次                                            |
+| `client_caps.*`           | 否   | 客户端能力声明                                      |
+
+### 4.2 init\_ack 响应
+
+成功时：
+
+```json
+{
+  "session_id": "a1b2c3d4-e5f6-...",
+  "state": "running",
+  "server_caps": {
+    "protocol_version": "aep/v1",
+    "worker_type": "claude_code",
+    "supports_resume": true,
+    "supports_delta": true,
+    "supports_tool_call": true,
+    "supports_ping": true,
+    "max_frame_size": 32768,
+    "modalities": ["text", "code"]
+  }
+}
+```
+
+失败时：
+
+```json
+{
+  "session_id": "sess_xxx",
+  "error": "version mismatch",
+  "code": "VERSION_MISMATCH"
+}
+```
+
+| 错误码               | 原因                            |
+| -------------------- | ------------------------------- |
+| `VERSION_MISMATCH`   | version 不是 `aep/v1`           |
+| `PROTOCOL_VIOLATION` | 第一帧不是 init                 |
+| `INVALID_MESSAGE`    | JSON 格式错误或字段缺失         |
+| `UNAUTHORIZED`       | 认证失败                        |
+| `RATE_LIMITED`       | 握手频率过高                    |
+| `CONFIG_INVALID`     | allowed_tools 或 model 校验失败 |
+
+---
+
+## 5. Session 管理
+
+### 5.1 Session 是什么
 
 Session 代表一个独立的对话上下文。每个 Session 绑定一个 Worker 进程，拥有独立的状态和对话历史。
 
-### 4.2 Session ID 如何确定
+### 5.2 Session ID 如何确定
 
 Gateway 使用 **UUIDv5 确定性派生**，从四个维度生成唯一 ID：
 
@@ -270,9 +365,9 @@ Gateway 使用 **UUIDv5 确定性派生**，从四个维度生成唯一 ID：
 Session ID = UUIDv5(userID | workerType | clientSessionID | workDir)
 ```
 
-**clientSessionID 是什么**：你在 init 信封 `session_id` 字段传入的值。它**不是** Session ID 本身，只是派生函数的一个输入。
+**clientSessionID 是什么**：你在 init 信封 `session_id` 字段传入的值。它**不是** Session ID 本身，只是派生函数的一个输入。该值会被 Gateway 持久化为 `client_key`（可通过 `GET /api/sessions` 的 `client_key` 字段取回，见 §11.1）。
 
-### 4.3 三个关键规则
+### 5.3 三个关键规则
 
 **规则 1：不传 clientSessionID → 自动获得固定会话**
 
@@ -315,10 +410,10 @@ const tabId = `sess_${crypto.randomUUID()}`;
 
 | ID                                        | 用在哪                                |
 | ----------------------------------------- | ------------------------------------- |
-| **clientSessionID**（你自己生成的）       | init 握手时传入，重连时重传           |
+| **clientSessionID**（你自己生成的）       | init 握手时传入，重连时重传。REST API 中以 `client_key` 字段返回（§11.1） |
 | **Gateway Session ID**（init_ack 返回的） | REST API 调用（查询历史、删除会话等） |
 
-### 4.4 Session 状态
+### 5.4 Session 状态
 
 ```mermaid
 stateDiagram-v2
@@ -340,7 +435,7 @@ stateDiagram-v2
 | `terminated` | Worker 已终止         | 需重连恢复               |
 | `deleted`    | 终态，已删除          | 不能                     |
 
-### 4.5 会话恢复决策
+### 5.5 会话恢复决策
 
 init 握手时，Gateway 根据 Session 状态自动决策：
 
@@ -353,11 +448,40 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 
 > **GC 自动回收**：空闲超过 60 分钟的 session 会被 GC 回收（idle → terminated），最长存活 7 天（可配置）。Worker 僵死（30 分钟无 IO）也会被回收为 terminated。
 
+### 5.6 会话隔离
+
+Session ID 由四个维度派生，任何维度不同都会产生不同的 Session：
+
+| 维度                | 说明                                       | 隔离效果             |
+| ------------------- | ------------------------------------------ | -------------------- |
+| **userID**          | API Key Resolver 映射（或默认 `api_user`） | 不同用户 -> 不同会话 |
+| **workerType**      | `claude_code` 等                           | 不同引擎 → 不同会话  |
+| **clientSessionID** | 客户端生成的 ID                            | 不同 tab → 不同会话  |
+| **workDir**         | 工作目录                                   | 不同项目 → 不同会话  |
+
+**多用户隔离**：使用 API Key 认证时所有用户默认都是 `api_user`，无法隔离。服务端管理员可为不同用户分配不同 API Key，实现用户级隔离：
+
+```
+Alice (key: ak-alice, resolver->userID: "alice") -> "alice|claude_code|tab-1|/project" -> Session A
+Bob   (key: ak-bob,   resolver->userID: "bob")   -> "bob|claude_code|tab-1|/project"   -> Session B
+```
+
+`ListSessions` API 按 userID 过滤，每个用户只看到自己的会话。
+
+**多 Tab 隔离**：每个 tab 生成独立的 clientSessionID：
+
+```javascript
+// 每个 tab 独立 ID
+const tabId = `sess_${crypto.randomUUID()}`;
+```
+
+如果两个 tab 用相同的 clientSessionID，后加入的 tab 接管会话，先前的不再收到消息。
+
 ---
 
-## 5. 消息收发
+## 6. 消息收发
 
-### 5.1 发送用户输入
+### 6.1 发送用户输入
 
 ```json
 {
@@ -379,7 +503,7 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 
 **限制**：Session 必须处于 Active 状态（created / running / idle），非 Active 状态下发送 input 返回 `SESSION_BUSY` 或 `SESSION_TERMINATED` 错误。
 
-### 5.2 接收流式响应
+### 6.2 接收流式响应
 
 一个完整 Turn 的事件序列（理想模型）：
 
@@ -393,7 +517,7 @@ done              ← Turn 终止符
 
 > **注意**：实际事件序列因 Worker 类型而异。ClaudeCode Worker 只产出 `message.delta` + `done`；CodexCLI Worker 产出 `message.start` + `message.delta` + `message.end` + `done`。客户端应兼容处理，不依赖特定事件的出现。
 
-#### 5.2.1 message.delta — 增量文本
+#### 6.2.1 message.delta — 增量文本
 
 ```json
 {
@@ -416,9 +540,9 @@ done              ← Turn 终止符
 }
 ```
 
-拼接所有 delta 即可获得流式效果。delta 可能因背压被丢弃，详见[背压与丢弃](#背压与丢弃)。
+拼接所有 delta 即可获得流式效果。delta 可能因背压被丢弃，详见 §6.4。
 
-#### 5.2.2 message — 完整文本
+#### 6.2.2 message — 完整文本
 
 ```json
 {
@@ -437,7 +561,7 @@ done              ← Turn 终止符
 
 `content_type` 和 `metadata` 为可选字段。**如果 delta 被丢弃，以 message 为准。**
 
-#### 5.2.3 done — Turn 结束
+#### 6.2.3 done — Turn 结束
 
 ```json
 {
@@ -472,7 +596,7 @@ done              ← Turn 终止符
 
 > **stats 结构**：`stats` 包含两部分 —— Worker 原始统计（`usage`、`total_cost_usd` 等）和 Gateway 注入的 `_session` 累计统计。不同 Worker 类型的原始 stats 字段可能不同，但 `_session` 格式统一。
 
-### 5.3 辅助事件
+### 6.3 辅助事件
 
 Worker 执行过程中还可能产生：
 
@@ -489,9 +613,23 @@ Worker 执行过程中还可能产生：
 | `skills_list`   | Gateway 技能列表               | `/skills` 命令响应          |
 | `mcp_status`    | Worker MCP 状态                | `/mcp` 命令响应             |
 
+### 6.4 背压与丢弃
+
+当客户端消费速度跟不上 Worker 输出时：
+
+| 事件类型                    | 策略                          |
+| --------------------------- | ----------------------------- |
+| `message.delta`             | **可丢弃** — 通道满时静默丢弃 |
+| `raw`                       | **可丢弃**                    |
+| 所有其他事件（含 ACP 扩展） | **保障送达** — 阻塞等待       |
+
+保障送达的事件包括但不限于：`state`、`done`、`error`、`message`、`message.start`、`message.end`、`tool_call`、`tool_result`、`permission_request`、`question_request`、`elicitation_request`、`tool_update`、`plan`、`mode_update`、`context_usage`。
+
+**客户端处理**：收到 `done` 时检查 `dropped` 字段，如果为 `true`，用 `message` 中的完整文本替代拼接的 delta。背压丢弃由 Gateway 静默处理，不会通知客户端具体丢弃了哪些 delta。
+
 ---
 
-## 6. 心跳保活
+## 7. 心跳保活
 
 | 项目             | 值                                                                |
 | ---------------- | ----------------------------------------------------------------- |
@@ -527,16 +665,16 @@ Worker 执行过程中还可能产生：
 
 ---
 
-## 7. 断线重连
+## 8. 断线重连
 
-### 7.1 重连步骤
+### 8.1 重连步骤
 
 1. WebSocket 断开后，等待指数退避时间（1s, 2s, 4s, 8s...最大 60s）
 2. 重新建立 WebSocket 连接
 3. 发送 init，**携带与首次完全相同的参数**（clientSessionID、auth、workDir）
 4. Gateway 派生出相同的 Session ID → 自动恢复
 
-### 7.2 完整重连示例
+### 8.2 完整重连示例
 
 ```javascript
 class HotPlexClient {
@@ -610,43 +748,6 @@ class HotPlexClient {
   }
 }
 ```
-
----
-
-## 8. 会话隔离
-
-### 8.1 四维度隔离
-
-Session ID 由四个维度派生，任何维度不同都会产生不同的 Session：
-
-| 维度                | 说明                                       | 隔离效果             |
-| ------------------- | ------------------------------------------ | -------------------- |
-| **userID**          | API Key Resolver 映射（或默认 `api_user`） | 不同用户 -> 不同会话 |
-| **workerType**      | `claude_code` 等                           | 不同引擎 → 不同会话  |
-| **clientSessionID** | 客户端生成的 ID                            | 不同 tab → 不同会话  |
-| **workDir**         | 工作目录                                   | 不同项目 → 不同会话  |
-
-### 8.2 多用户隔离
-
-使用 API Key 认证时所有用户默认都是 `api_user`，无法隔离。服务端管理员可为不同用户分配不同 API Key，实现用户级隔离：
-
-```
-Alice (key: ak-alice, resolver->userID: "alice") -> "alice|claude_code|tab-1|/project" -> Session A
-Bob   (key: ak-bob,   resolver->userID: "bob")   -> "bob|claude_code|tab-1|/project"   -> Session B
-```
-
-`ListSessions` API 按 userID 过滤，每个用户只看到自己的会话。
-
-### 8.3 多 Tab 隔离
-
-每个 tab 生成独立的 clientSessionID：
-
-```javascript
-// 每个 tab 独立 ID
-const tabId = `sess_${crypto.randomUUID()}`;
-```
-
-如果两个 tab 用相同的 clientSessionID，后加入的 tab 接管会话，先前的不再收到消息。
 
 ---
 
@@ -900,27 +1001,65 @@ Worker 执行过程中可能需要用户参与。三种交互类型都遵循相�
 
 ---
 
-## 11. 背压与丢弃
+## 11. 会话管理 REST API
 
-当客户端消费速度跟不上 Worker 输出时：
+所有 REST API 需要认证（`X-API-Key` Header 或同源 Cookie），且自动按认证身份过滤——用户只能访问自己的会话。
 
-| 事件类型                    | 策略                          |
-| --------------------------- | ----------------------------- |
-| `message.delta`             | **可丢弃** — 通道满时静默丢弃 |
-| `raw`                       | **可丢弃**                    |
-| 所有其他事件（含 ACP 扩展） | **保障送达** — 阻塞等待       |
+### 11.1 会话列表 — `GET /api/sessions`
 
-保障送达的事件包括但不限于：`state`、`done`、`error`、`message`、`message.start`、`message.end`、`tool_call`、`tool_result`、`permission_request`、`question_request`、`elicitation_request`、`tool_update`、`plan`、`mode_update`、`context_usage`。
+返回当前用户的所有会话。适合构建会话列表 UI（侧边栏、历史记录页）。
 
-**客户端处理**：收到 `done` 时检查 `dropped` 字段，如果为 `true`，用 `message` 中的完整文本替代拼接的 delta。背压丢弃由 Gateway 静默处理，不会通知客户端具体丢弃了哪些 delta。
+```bash
+curl -H "X-API-Key: your-key" \
+  "http://localhost:8888/api/sessions?limit=20&platform=webchat"
+```
 
----
+**参数**：
 
-## 12. 会话历史查询
+| 参数       | 类型   | 默认      | 说明                                                  |
+| ---------- | ------ | --------- | ----------------------------------------------------- |
+| `limit`    | int    | 100       | 每页数量，最大 500                                     |
+| `offset`   | int    | 0         | 翻页偏移                                              |
+| `platform` | string | `webchat` | 按平台过滤。`webchat` / `slack` / `feishu` / `all`   |
 
-Gateway 提供两个 REST API 查询历史，需要认证且校验 session 归属（非 owner 返回 403）。
+**响应**：
 
-### 12.1 Turn 级别 — 聊天记录
+```json
+{
+  "sessions": [
+    {
+      "id": "a1b2c3d4-...",
+      "user_id": "u_12345",
+      "worker_type": "claude_code",
+      "state": "idle",
+      "title": "代码审查",
+      "client_key": "550e8400-e29b-41d4-a716-446655440000",
+      "platform": "webchat",
+      "work_dir": "/home/user/project",
+      "created_at": "2026-06-03T10:00:00Z",
+      "updated_at": "2026-06-03T10:05:00Z",
+      "expires_at": "2026-06-10T10:00:00Z"
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "platform": "webchat"
+}
+```
+
+**关键字段说明**：
+
+| 字段          | 说明                                                                |
+| ------------- | ------------------------------------------------------------------- |
+| `id`          | Session ID（init_ack 返回的权威 ID），用于历史查询、重连等          |
+| `client_key`  | 客户端 init 时传入的原始 `session_id`，即 §5.2 中的 **clientSessionID**。重连时需要此值恢复同一会话 |
+| `state`       | `created` / `running` / `idle` / `terminated`（见 §5.4）           |
+| `title`       | 用户定义的会话名称（WebChat 传入，用于 Session Key 派生）           |
+| `work_dir`    | 工作目录（影响 Session Key 派生，重连时需一致）                     |
+
+> **`client_key` = `clientSessionID`**：这两个名称指向同一个值。你在 init 信封 `session_id` 字段传入的 clientSessionID，会被 Gateway 持久化并在本接口以 `client_key` 返回。重连时需要传回此值（见 §8 断线重连）。如果客户端丢失了本地保存的 clientSessionID，可以从本接口的 `client_key` 字段取回。
+
+### 11.2 Turn 级别 — 聊天记录
 
 适合展示对话列表（一句提问一句回答）。
 
@@ -972,7 +1111,7 @@ curl -H "X-API-Key: your-key" \
 curl "http://localhost:8888/api/sessions/{id}/history?limit=20&before_id=123"
 ```
 
-### 12.2 Event 级别 — 原始事件流
+### 11.3 Event 级别 — 原始事件流
 
 适合调试、审计、回放完整会话状态。
 
@@ -1027,7 +1166,7 @@ direction=before&cursor=5     # 向前翻页：seq < 5
 direction=after&cursor=42     # 向后追赶：seq > 42
 ```
 
-### 12.3 如何选择
+### 11.4 如何选择
 
 | 场景             | 用哪个                              |
 | ---------------- | ----------------------------------- |
@@ -1038,105 +1177,9 @@ direction=after&cursor=42     # 向后追赶：seq > 42
 
 ---
 
-## 13. Init 握手详解
+## 12. 连接限制
 
-WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧。
-
-### 13.1 init 完整字段
-
-```json
-{
-  "version": "aep/v1",
-  "id": "evt_550e8400-...",
-  "session_id": "sess_6ba7b810-...",
-  "seq": 0,
-  "timestamp": 1710000000000,
-  "event": {
-    "type": "init",
-    "data": {
-      "version": "aep/v1",
-      "worker_type": "claude_code",
-      "auth": {
-        "token": "your-api-key",
-        "bot_id": "B12345"
-      },
-      "config": {
-        "work_dir": "/home/user/project",
-        "allowed_tools": ["Bash", "Read", "Write"],
-        "disallowed_tools": ["Edit"],
-        "system_prompt": "...",
-        "model": "claude-sonnet-4-6",
-        "max_turns": 50,
-        "metadata": {}
-      },
-      "client_caps": {
-        "supports_delta": true,
-        "supports_tool_call": true,
-        "supported_kinds": ["message.delta", "tool_call"]
-      }
-    }
-  }
-}
-```
-
-| 字段                      | 必需 | 说明                                                |
-| ------------------------- | ---- | --------------------------------------------------- |
-| `version`                 | 是   | 固定 `"aep/v1"`                                     |
-| `worker_type`             | 是   | Worker 类型（`claude_code`、`codex_cli`、`acp` 等） |
-| `auth.token`              | 条件 | 无 API Key Header/Query 时必需                      |
-| `auth.bot_id`             | 否   | 多 Bot 隔离，优先级低于 Header/Query                |
-| `config.work_dir`         | 否   | 工作目录，安全校验                                  |
-| `config.model`            | 否   | 模型白名单校验                                      |
-| `config.allowed_tools`    | 否   | 允许的工具列表                                      |
-| `config.disallowed_tools` | 否   | 禁用的工具列表                                      |
-| `config.max_turns`        | 否   | 最大轮次                                            |
-| `client_caps.*`           | 否   | 客户端能力声明                                      |
-
-### 13.2 init\_ack 响应
-
-成功时：
-
-```json
-{
-  "session_id": "a1b2c3d4-e5f6-...",
-  "state": "running",
-  "server_caps": {
-    "protocol_version": "aep/v1",
-    "worker_type": "claude_code",
-    "supports_resume": true,
-    "supports_delta": true,
-    "supports_tool_call": true,
-    "supports_ping": true,
-    "max_frame_size": 32768,
-    "modalities": ["text", "code"]
-  }
-}
-```
-
-失败时：
-
-```json
-{
-  "session_id": "sess_xxx",
-  "error": "version mismatch",
-  "code": "VERSION_MISMATCH"
-}
-```
-
-| 错误码               | 原因                            |
-| -------------------- | ------------------------------- |
-| `VERSION_MISMATCH`   | version 不是 `aep/v1`           |
-| `PROTOCOL_VIOLATION` | 第一帧不是 init                 |
-| `INVALID_MESSAGE`    | JSON 格式错误或字段缺失         |
-| `UNAUTHORIZED`       | 认证失败                        |
-| `RATE_LIMITED`       | 握手频率过高                    |
-| `CONFIG_INVALID`     | allowed_tools 或 model 校验失败 |
-
----
-
-## 14. 连接限制
-
-### 14.1 客户端相关
+### 12.1 客户端相关
 
 | 项目             | 值     | 说明                               |
 | ---------------- | ------ | ---------------------------------- |
@@ -1147,7 +1190,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | 连续 Miss 上限   | 3 次   | 纯静默场景最坏 ~180 秒断连         |
 | 交互确认超时     | 5 分钟 | 权限/问答/elicitation 超时自动拒绝 |
 
-### 14.2 服务端配置（可能影响你的请求）
+### 12.2 服务端配置（可能影响你的请求）
 
 | 项目                   | 默认值 | 说明                        |
 | ---------------------- | ------ | --------------------------- |
@@ -1157,9 +1200,9 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 
 ---
 
-## 15. 错误码参考
+## 13. 错误码参考
 
-### 15.1 握手阶段
+### 13.1 握手阶段
 
 | 错误码               | 说明           | 建议                       |
 | -------------------- | -------------- | -------------------------- |
@@ -1170,7 +1213,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `RATE_LIMITED`       | 握手频率过高   | 退避重试                   |
 | `CONFIG_INVALID`     | 配置校验失败   | 检查 allowed_tools / model |
 
-### 15.2 会话阶段
+### 13.2 会话阶段
 
 | 错误码                | 说明           | 建议           |
 | --------------------- | -------------- | -------------- |
@@ -1181,7 +1224,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `SESSION_INVALIDATED` | Session 已失效 | 重新 init      |
 | `RECONNECT_REQUIRED`  | 服务端要求重连 | 执行重连       |
 
-### 15.3 Worker 阶段
+### 13.3 Worker 阶段
 
 | 错误码                | 说明              | 建议               |
 | --------------------- | ----------------- | ------------------ |
@@ -1194,7 +1237,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `WORKER_OUTPUT_LIMIT` | Worker 输出超限   | 减少输出量         |
 | `RESUME_RETRY`        | Resume 重试       | Gateway 自动重试   |
 
-### 15.4 其他
+### 13.4 其他
 
 | 错误码             | 说明           | 建议                   |
 | ------------------ | -------------- | ---------------------- |
@@ -1206,7 +1249,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 
 ---
 
-## 16. 常见问题
+## 14. 常见问题
 
 **多个浏览器 tab 消息串了？**
 每个 tab 生成独立的 `clientSessionID`（`crypto.randomUUID()`），UUIDv5 会派生出不同的 Session ID。
@@ -1224,4 +1267,237 @@ delta 事件被背压丢弃。用 `message` 事件中的完整文本替代拼接
 Gateway 自动处理：尝试 Resume → 失败则 Fresh Start → 通知客户端。客户端只需正常处理 `error` 事件。
 
 **如何查看历史记录？**
-Turn 级别用 `GET /api/sessions/{id}/history`，Event 级别用 `GET /api/sessions/{id}/events`。详见[会话历史查询](#会话历史查询)。
+Turn 级别用 `GET /api/sessions/{id}/history`，Event 级别用 `GET /api/sessions/{id}/events`。详见 §11 会话管理 REST API。
+
+---
+
+## 15. SSO 集成最佳实践
+
+当你的系统使用 SSO（如 OAuth2、SAML、CAS）登录，需要集成 HotPlex 会话管理时，核心挑战是：**HotPlex 使用 API Key 认证，而 SSO 使用用户身份 token，两者需要映射**。
+
+### 15.1 架构概览
+
+推荐使用 **BFF（Backend For Frontend）代理模式**：你的后端持有 HotPlex API Key，前端通过 SSO session 与后端通信，后端负责 credential 注入。前端全程不接触 API Key。
+
+```
+┌─────────┐   SSO Login    ┌──────────────┐  注入 API Key   ┌──────────────────┐
+│  用户    │ ────────────→ │  你的后端     │ ─────────────→ │  HotPlex Gateway  │
+│ (浏览器) │ ←──────────── │  (BFF 代理)   │ ←───────────── │  (api_key_users)  │
+└─────────┘  Session       └──────────────┘                 └──────────────────┘
+              Cookie         持有 API Key
+             (不含 API Key)   存储在 BFF DB
+```
+
+**两种方案对比**：
+
+| 维度       | 方案 A：BFF 代理（推荐）                  | 方案 B：API Key 下发                     |
+| ---------- | ------------------------------------------ | ---------------------------------------- |
+| 安全性     | 前端不接触 API Key，无泄漏风险             | API Key 经过前端，存在 XSS/日志泄漏风险  |
+| 复杂度     | 需要后端代理 WebSocket 和 REST             | 后端仅负责登录时下发，前端直连 Gateway   |
+| WebSocket  | BFF 代理升级请求并注入凭证                 | 前端在 init 信封中传入 API Key           |
+| 适用场景   | 生产环境、多用户 SSO                       | 快速原型、内部工具                       |
+
+### 15.2 方案 A：BFF 代理模式（推荐）
+
+#### 认证流程
+
+1. 用户通过 SSO 登录你的系统
+2. BFF 后端完成 SSO 认证后，查询本地数据库获取该用户的 HotPlex API Key
+3. 若无 Key，调用 Admin API 创建并**在 BFF 本地存储原始 Key**
+4. BFF 向前端下发 SSO session cookie（不含 API Key）
+5. 前端所有 HotPlex 请求（WebSocket、REST）都通过 BFF 代理，BFF 负责注入 API Key
+
+> **重要**：Admin API 的 `GET /admin/api-keys` 返回的是 **masked** Key（如 `hpk_a1b2****f6`），仅用于展示。BFF 必须在创建 Key 时缓存原始值到自己的数据库，不能依赖列表接口获取可用 Key。
+
+#### BFF 后端示例
+
+```python
+# BFF 后端（Python Flask 示例）
+
+@app.route("/sso/callback")
+def sso_callback():
+    sso_user = verify_sso_token(request.args["code"])
+    user_id = f"sso_{sso_user['id']}"
+
+    # 从 BFF 本地数据库查询已缓存的 API Key
+    api_key = db.get_hotplex_key(user_id)
+
+    if not api_key:
+        # 首次登录：调用 Admin API 创建 Key
+        resp = requests.post(
+            "http://hotplex:8888/admin/api-keys",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "user_id": user_id,
+                "description": f"SSO: {sso_user['email']}"
+                # api_key 省略，由 Gateway 自动生成 hpk_ 前缀密钥
+            }
+        )
+        api_key = resp.json()["api_key"]  # 仅创建接口返回原始 Key
+        db.save_hotplex_key(user_id, api_key)  # 缓存到 BFF 数据库
+
+    # 下发 SSO session cookie（不含 API Key）
+    response = redirect("/")
+    response.set_cookie("session", create_session_token(user_id),
+                        httponly=True, secure=True, samesite="Strict")
+    return response
+```
+
+#### WebSocket 代理
+
+浏览器无法在 WebSocket 升级请求中设置自定义 HTTP 头（如 `X-API-Key`），BFF 代理需通过 query param 或第一帧 init 传递凭证：
+
+```python
+# BFF 代理 WebSocket 连接（Python 示例，使用 websockets 库）
+
+@app.route("/chat/ws")
+async def chat_ws():
+    user_id = verify_session(request.cookies["session"])
+    api_key = db.get_hotplex_key(user_id)
+
+    # BFF 代理：带上 API Key 连接 HotPlex Gateway
+    async with websockets.connect(
+        f"ws://hotplex:8888/ws?api_key={api_key}"
+    ) as upstream:
+        # 双向转发：浏览器 <-> BFF <-> HotPlex
+        await asyncio.gather(
+            relay_upstream(upstream),   # 浏览器 → HotPlex
+            relay_downstream(upstream)  # HotPlex → 浏览器
+        )
+```
+
+#### REST API 代理
+
+```python
+@app.route("/api/sessions")
+def list_sessions():
+    user_id = verify_session(request.cookies["session"])
+    api_key = db.get_hotplex_key(user_id)
+
+    # BFF 注入 API Key，代理到 HotPlex
+    resp = requests.get(
+        "http://hotplex:8888/api/sessions",
+        headers={"X-API-Key": api_key},
+        params=request.args
+    )
+    return resp.json()
+```
+
+### 15.3 方案 B：API Key 下发模式
+
+此方案适用于快速集成或内部工具场景。BFF 在 SSO 登录后将 API Key 下发给前端，前端直连 HotPlex Gateway。
+
+> **注意**：此方案中 API Key 会经过前端。仅在可信网络环境中使用，生产环境推荐方案 A。
+
+#### SSO 登录下发
+
+```python
+@app.route("/sso/callback")
+def sso_callback():
+    sso_user = verify_sso_token(request.args["code"])
+    user_id = f"sso_{sso_user['id']}"
+
+    # 从 BFF 本地数据库获取缓存的 API Key（不使用列表接口）
+    api_key = db.get_hotplex_key(user_id)
+    if not api_key:
+        resp = requests.post(
+            "http://hotplex:8888/admin/api-keys",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={"user_id": user_id, "description": f"SSO: {sso_user['email']}"}
+        )
+        api_key = resp.json()["api_key"]
+        db.save_hotplex_key(user_id, api_key)
+
+    # 通过一次性接口返回 API Key（不要存入长期 Cookie）
+    response = redirect("/")
+    response.set_cookie("hotplex_api_key", api_key,
+                        httponly=True, secure=True, samesite="Strict",
+                        max_age=3600)  # 短期有效
+    return response
+```
+
+#### 前端直连 Gateway
+
+```javascript
+// 前端从 HttpOnly Cookie 读取需要后端接口辅助
+// 这里假设后端提供了 /api/hotplex-config 接口返回 API Key
+const { api_key } = await fetch('/api/hotplex-config', {
+  credentials: 'include'  // 携带 session cookie
+}).then(r => r.json());
+
+// WebSocket：通过 init 信封传递 API Key（浏览器无法设置 WS 自定义头）
+const ws = new WebSocket('ws://localhost:8888/ws');
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    version: 'aep/v1',
+    id: crypto.randomUUID(),
+    session_id: crypto.randomUUID(),
+    seq: 0,
+    timestamp: Date.now(),
+    event: {
+      type: 'init',
+      data: {
+        version: 'aep/v1',
+        worker_type: 'claude_code',
+        auth: { token: api_key }
+      }
+    }
+  }) + '\n');
+};
+
+// REST API
+const sessions = await fetch('/api/sessions', {
+  headers: { 'X-API-Key': api_key }
+});
+```
+
+#### 会话恢复
+
+```javascript
+// 获取该用户的会话列表
+const { sessions } = await fetch('/api/sessions?state=idle&limit=20', {
+  headers: { 'X-API-Key': api_key }
+}).then(r => r.json());
+
+// 重连时使用 client_key 恢复会话
+const target = sessions[0];
+ws.send(JSON.stringify({
+  version: 'aep/v1',
+  id: crypto.randomUUID(),
+  session_id: target.client_key,  // 从列表接口获取原始 clientKey
+  seq: 0,
+  timestamp: Date.now(),
+  event: {
+    type: 'init',
+    data: {
+      version: 'aep/v1',
+      worker_type: 'claude_code',
+      auth: { token: api_key },
+      config: { work_dir: target.work_dir }
+    }
+  }
+}) + '\n');
+```
+
+### 15.4 Admin API Key 管理接口
+
+完整的 API Key CRUD 通过 Admin API 提供（需要 Admin Token 认证）：
+
+| 操作   | 方法   | 路径                        | 说明                                            |
+| ------ | ------ | --------------------------- | ----------------------------------------------- |
+| 列表   | GET    | `/admin/api-keys`           | 返回 **masked** Key，仅用于展示，不可用于认证   |
+| 创建   | POST   | `/admin/api-keys`           | 返回原始 Key（唯一获取时机），建议立即缓存      |
+| 查询   | GET    | `/admin/api-keys/{id}`      | 按 DB ID 查询单条，Key 为 masked                |
+| 更新   | PATCH  | `/admin/api-keys/{id}`      | 更新 user_id/description，Key 创建后不可变      |
+| 删除   | DELETE | `/admin/api-keys/{id}`      | 删除映射                                        |
+
+> **创建接口的响应包含原始 API Key**，是唯一获取可用密钥的时机。`api_key` 字段可省略，Gateway 自动生成 `hpk_` 前缀的随机密钥。BFF 必须在此时将原始 Key 存入自己的数据库，后续无法从 Admin API 获取。
+
+### 15.5 安全注意事项
+
+1. **HTTPS/WSS**：生产环境必须启用，防止 API Key 被截获
+2. **BFF 缓存 Key 的安全**：BFF 数据库中的 API Key 应加密存储，使用 KMS 或环境变量管理加密密钥
+3. **Admin Token 隔离**：Admin API 的 Bearer Token 仅在 BFF 后端使用，永远不要暴露给前端
+4. **user_id 隔离**：确保每个 SSO 用户映射到唯一的 `user_id`（≤128 字符），HotPlex 使用此值隔离会话空间
+5. **API Key 轮换**：删除旧 Key → 创建新 Key → 更新 BFF 缓存。无需重启 Gateway
+6. **WebSocket 认证限制**：浏览器无法在 WebSocket 升级请求中设置自定义 HTTP 头。对于方案 B，只能通过 init 信封的 `auth.token` 字段传递 API Key；对于方案 A，BFF 可通过 query param 或代理注入

@@ -50,7 +50,7 @@ func sessionColumns() []string {
 	return []string{
 		"id", "user_id", "owner_id", "worker_session_id", "worker_type", "state", "bot_id",
 		"platform", "platform_key_json", "work_dir", "title",
-		"created_at", "updated_at", "expires_at", "idle_expires_at", "context_json", "source",
+		"created_at", "updated_at", "expires_at", "idle_expires_at", "context_json", "source", "client_key",
 	}
 }
 
@@ -63,7 +63,7 @@ func TestPGStore_Get_Found(t *testing.T) {
 	rows := sqlmock.NewRows(sessionColumns()).
 		AddRow("sess-1", "user-1", "owner-1", "", "claude_code", string(events.StateRunning), "bot-1",
 			"slack", `{"channel_id":"C123"}`, "/work", "My Session",
-			now, now, nil, nil, `{"key":"value"}`, "")
+			now, now, nil, nil, `{"key":"value"}`, "", "")
 
 	q := dbutil.DialectPostgres.Rebind(
 		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source FROM sessions WHERE id = ?")

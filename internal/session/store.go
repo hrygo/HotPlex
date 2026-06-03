@@ -91,7 +91,7 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 			info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
 			info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
 			info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
-			string(ctxJSON), info.Source,
+			string(ctxJSON), info.Source, info.ClientKey,
 		)
 		if err != nil {
 			return fmt.Errorf("session store: upsert: %w", err)
@@ -111,7 +111,7 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 	err := sc.Scan(
 		&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State, &info.BotID,
 		&info.Platform, &platformKeyStr, &info.WorkDir, &info.Title,
-		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON, &info.Source,
+		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON, &info.Source, &info.ClientKey,
 	)
 	if err != nil {
 		return nil, err
