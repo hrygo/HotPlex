@@ -195,7 +195,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 		// Reset missed counter on any successful read.
 		c.hb.MarkAlive()
 
-		env, err := aep.DecodeLine(data)
+		env, err := aep.DecodeLineMinimal(data)
 		if err != nil {
 			c.sendError(events.ErrCodeInvalidMessage, err.Error())
 			metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInvalidMessage)).Inc()
@@ -272,7 +272,7 @@ func (c *Conn) readAndValidateInit() (*events.Envelope, InitData, error) {
 		return nil, InitData{}, fmt.Errorf("read init: %w", err)
 	}
 
-	env, err := aep.DecodeLine(data)
+	env, err := aep.DecodeLineMinimal(data)
 	if err != nil {
 		c.sendInitError(events.ErrCodeInvalidMessage, "malformed message: "+err.Error())
 		metrics.GatewayErrorsTotal.WithLabelValues(string(events.ErrCodeInvalidMessage)).Inc()

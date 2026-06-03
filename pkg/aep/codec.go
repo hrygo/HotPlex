@@ -110,6 +110,20 @@ func Decode(r io.Reader) (*events.Envelope, error) {
 	return &env, nil
 }
 
+// DecodeLineMinimal decodes a JSON line with minimal validation.
+// Unlike DecodeLine, it does not require session_id or seq — suitable for
+// client→server messages where the Gateway stamps these fields.
+func DecodeLineMinimal(data []byte) (*events.Envelope, error) {
+	var env events.Envelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return nil, fmt.Errorf("aep: unmarshal envelope: %w", err)
+	}
+	if err := ValidateMinimal(&env); err != nil {
+		return nil, fmt.Errorf("aep: validate envelope: %w", err)
+	}
+	return &env, nil
+}
+
 // DecodeLine decodes a single JSON-encoded line (no trailing newline required).
 func DecodeLine(data []byte) (*events.Envelope, error) {
 	var env events.Envelope

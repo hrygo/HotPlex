@@ -188,6 +188,63 @@ func TestValidate_ValidEnvelope(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestDecodeLineMinimal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		json    string
+		wantErr bool
+		errSub  string
+	}{
+		{
+			name: "minimal valid — empty session_id, seq=0",
+			json: `{"version":"aep/v1","id":"","session_id":"","seq":0,"timestamp":0,"event":{"type":"input","data":{"content":"hi"}}}`,
+		},
+		{
+			name: "minimal valid — all fields omitted",
+			json: `{"event":{"type":"ping","data":{}}}`,
+		},
+		{
+			name: "minimal valid — version present",
+			json: `{"version":"aep/v1","event":{"type":"input","data":{}}}`,
+		},
+		{
+			name:    "reject wrong version",
+			json:    `{"version":"v2","event":{"type":"input","data":{}}}`,
+			wantErr: true,
+			errSub:  "unsupported version",
+		},
+		{
+			name:    "reject missing event type",
+			json:    `{"version":"aep/v1","event":{"data":{}}}`,
+			wantErr: true,
+			errSub:  "event type",
+		},
+		{
+			name:    "reject invalid json",
+			json:    `{bad}`,
+			wantErr: true,
+			errSub:  "unmarshal",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env, err := DecodeLineMinimal([]byte(tt.json))
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errSub)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, env)
+		})
+	}
+}
+
 func TestEncodeJSON(t *testing.T) {
 	t.Parallel()
 
