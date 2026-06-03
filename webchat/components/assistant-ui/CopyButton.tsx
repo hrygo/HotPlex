@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function CopyButton({ message, onCopy }: { message: any; onCopy?: () => void }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  useEffect(() => () => { if (timerRef.current !== null) clearTimeout(timerRef.current); }, []);
 
   const handleCopy = () => {
     let text = "";
@@ -20,7 +23,7 @@ export function CopyButton({ message, onCopy }: { message: any; onCopy?: () => v
       navigator.clipboard.writeText(text);
       setCopied(true);
       onCopy?.();
-      setTimeout(() => setCopied(false), 2000);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
     }
   };
 
