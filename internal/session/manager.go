@@ -31,7 +31,11 @@ var (
 	ErrOwnershipMismatch = errors.New("session: ownership mismatch")
 	ErrMaxTurnsReached   = errors.New("session: max turns reached")
 	ErrWorkerAttached    = errors.New("session: worker already attached")
+	ErrClientKeyTooLong  = errors.New("session: client_key too long")
 )
+
+// MaxClientKeyLen is the maximum allowed length for ClientKey.
+const MaxClientKeyLen = 256
 
 // Manager orchestrates session lifecycle, persistence, and GC.
 type Manager struct {
@@ -186,6 +190,9 @@ func (m *Manager) Create(ctx context.Context, id, userID string, workerType work
 
 // CreateWithBot creates a new session with explicit bot_id and persists it to SQLite.
 func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*SessionInfo, error) {
+	if len(clientKey) > MaxClientKeyLen {
+		return nil, fmt.Errorf("%w: length %d exceeds maximum %d", ErrClientKeyTooLong, len(clientKey), MaxClientKeyLen)
+	}
 	now := time.Now()
 	source := ""
 	if _, isCron := platformKey["cron_job_id"]; isCron {
