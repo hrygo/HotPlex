@@ -4,7 +4,9 @@ package gateway
 import (
 	"time"
 
+	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/security"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -145,6 +147,12 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 
 	sessionID, _ := data["session_id"].(string)
 	title, _ := data["title"].(string)
+	title = messaging.SanitizeText(title)
+	if len(title) > session.MaxClientKeyLen {
+		return InitData{}, &InitError{Code: events.ErrCodeInvalidMessage,
+			Message: "init: title too long"}
+	}
+	sessionID = messaging.SanitizeText(sessionID)
 
 	var auth InitAuth
 	if authData, ok := data["auth"].(map[string]any); ok {

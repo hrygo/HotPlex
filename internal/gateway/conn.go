@@ -498,7 +498,9 @@ func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *s
 	defer resumeCancel()
 	resumeErr := c.starter.ResumeSession(resumeCtx, sessionID, workDir)
 	if resumeErr != nil {
-		if err := c.starter.StartSession(resumeCtx, sessionID, c.userID, c.botID,
+		startCtx, startCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer startCancel()
+		if err := c.starter.StartSession(startCtx, sessionID, c.userID, c.botID,
 			initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			msg := fmt.Sprintf("resume failed (%v), then start also failed (%v)", resumeErr, err)

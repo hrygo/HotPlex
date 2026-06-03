@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -131,17 +132,17 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "client_session_id is required", http.StatusBadRequest)
 		return
 	}
-	if len(clientSessionID) > 256 {
+	if len(clientSessionID) > session.MaxClientKeyLen {
 		g.log.Warn("gateway: create session client_session_id too long", "method", r.Method, "path", r.URL.Path, "len", len(clientSessionID))
-		http.Error(w, "client_session_id too long (max 256 chars)", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("client_session_id too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
 		return
 	}
 
 	title := strings.TrimSpace(r.URL.Query().Get("title"))
 	title = messaging.SanitizeText(title)
-	if len(title) > 256 {
+	if len(title) > session.MaxClientKeyLen {
 		g.log.Warn("gateway: create session title too long", "method", r.Method, "path", r.URL.Path, "title_len", len(title))
-		http.Error(w, "title too long (max 256 chars)", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("title too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
 		return
 	}
 
