@@ -1,6 +1,6 @@
 # HotPlex 项目知识库
 
-**最后更新**: 2026-06-02 · **分支**: main · **版本**: v1.24.0
+**最后更新**: 2026-06-03 · **分支**: main · **版本**: v1.24.1
 
 ---
 
@@ -27,6 +27,7 @@
 - **关闭顺序**: signal → cancel ctx → tracing → hub → bridge → sessionMgr → HTTP
 - **服务重启**: 必须使用 `hotplex service restart` 原子指令，禁止手动拆分 `stop && sleep && start`（仅二进制替换场景需手动 stop 等待）
 - **非 main 分支 push**: 非 main 分支本地验证通过后直接 commit + push，无需询问用户确认
+- **Git Hooks**: clone 后必须执行 `make hooks` 安装 hooks（pre-commit 跑 gofmt + golangci-lint，pre-push 跑完整质量门禁），禁止跳过
 
 ### 反模式（禁止）
 

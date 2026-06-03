@@ -21,7 +21,7 @@ GOOS         := $(shell go env GOOS)
 GOARCH       := $(shell go env GOARCH)
 GIT_SHA      := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME   := $(shell date '+%Y-%m-%dT%H:%M:%S%z')
-VERSION      := v1.24.0
+VERSION      := v1.24.1
 LDFLAGS      := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)
 BUILD_OPTS   := -trimpath
 
@@ -98,17 +98,11 @@ check-tools:
 
 hooks:
 	@echo "$(CYAN)Installing git hooks...$(RESET)"
+# Relative core.hooksPath resolves per-worktree root, safe across linked worktrees
+	@git config core.hooksPath scripts/git-hooks
 	@for hook in scripts/git-hooks/*; do \
 		name=$$(basename "$$hook"); \
-		target=".git/hooks/$$name"; \
-		if [ -L "$$target" ]; then \
-			echo "  $(GREEN)✓$(RESET) $$name (symlink exists)"; \
-		elif [ -f "$$target" ]; then \
-			echo "  $(YELLOW)⚠$(RESET) $$name (regular file, skipping — remove manually and re-run)"; \
-		else \
-			ln -s "$(PWD)/$$hook" "$$target" && \
-			echo "  $(GREEN)✓$(RESET) $$name → $$hook"; \
-		fi; \
+		echo "  $(GREEN)✓$(RESET) $$name"; \
 	done
 	@echo "  $(DIM)Pre-push runs: fmt → lint → vet → mod verify → build → test$(RESET)"
 

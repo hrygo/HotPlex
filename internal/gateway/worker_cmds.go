@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
@@ -39,23 +40,38 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 		return h.sendErrorf(ctx, env, events.ErrCodeNotSupported, "worker type does not support control requests")
 	}
 
-	ctrlCtx, ctrlCancel := context.WithTimeout(ctx, 60*time.Second)
-	defer ctrlCancel()
-
+	var cmdErr error
 	switch cmd {
 	case events.StdioSkills:
-		return h.handleSkillsList(ctx, env, args)
-	case events.StdioContextUsage:
-		return h.handleContextUsage(ctrlCtx, env, cr)
-	case events.StdioMCPStatus:
-		return h.handleMCPStatus(ctrlCtx, env, cr)
-	case events.StdioSetModel:
-		return h.handleSetModel(ctrlCtx, env, cr, args, extra)
-	case events.StdioSetPermMode:
-		return h.handleSetPermMode(ctrlCtx, env, cr, args, extra)
+		cmdErr = h.handleSkillsList(ctx, env, args)
+		// SkillsList is the only server-handled command without its own response
+		// signal — send a synthetic done so the frontend clears isRunning.
+		doneEnv := events.NewEnvelope(
+			aep.NewID(), env.SessionID,
+			h.hub.NextSeq(env.SessionID),
+			events.Done, events.DoneData{Success: cmdErr == nil},
+		)
+		_ = h.hub.SendToSession(ctx, doneEnv)
+	case events.StdioContextUsage, events.StdioMCPStatus, events.StdioSetModel, events.StdioSetPermMode:
+		// Control-request commands use a dedicated timeout context.
+		ctrlCtx, ctrlCancel := context.WithTimeout(ctx, 60*time.Second)
+		defer ctrlCancel()
+
+		switch cmd {
+		case events.StdioContextUsage:
+			cmdErr = h.handleContextUsage(ctrlCtx, env, cr)
+		case events.StdioMCPStatus:
+			cmdErr = h.handleMCPStatus(ctrlCtx, env, cr)
+		case events.StdioSetModel:
+			cmdErr = h.handleSetModel(ctrlCtx, env, cr, args, extra)
+		case events.StdioSetPermMode:
+			cmdErr = h.handleSetPermMode(ctrlCtx, env, cr, args, extra)
+		}
 	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown worker command: %s", cmd)
 	}
+
+	return cmdErr
 }
 
 func parseWorkerCommand(env *events.Envelope) (cmd events.WorkerStdioCommand, args string, extra map[string]any, ok bool) {
@@ -182,7 +198,11 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 	}
 
-	allSkills, err := h.skillsLocator.List(ctx, "", si.WorkDir)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		h.log.Warn("skills list: failed to resolve home directory, global skills may be incomplete", "error", err)
+	}
+	allSkills, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
 	if err != nil {
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "skills: %v", err)
 	}

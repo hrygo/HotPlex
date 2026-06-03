@@ -1,6 +1,9 @@
 #!/bin/bash
 # Git pre-push hook for HotPlex Worker
 # Final guard before code leaves the local machine
+#
+# Pipeline: large-file → fmt → parallel(vet, verify, lint, build) → test-short
+# Expected total: ~25-35s (down from 45-60s serial)
 
 set -e
 
@@ -10,35 +13,34 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+PASS=0
+FAIL=0
+
+pass() { PASS=$((PASS + 1)); printf "  ${GREEN}✓${NC} %s\n" "$1"; }
+fail() { FAIL=$((FAIL + 1)); printf "  ${RED}✗${NC} %s\n" "$1"; }
+
 printf "${YELLOW}🚀 Running pre-push validation...${NC}\n"
 
-# 0. Block large files (>1MB) anywhere in the tree
-# Scans ALL commits being pushed, not just working tree
+# ── 0. Block large files (>1MB) ────────────────────────────────────────────
 REMOTE_REF="$1"
 LOCAL_REF="$2"
 
-# Find the range of commits being pushed
 RANGE=""
 if [ -n "$LOCAL_REF" ] && [ "$LOCAL_REF" != "0000000000000000000000000000000000000000" ]; then
-    # Get merge base between local and remote
     MERGE_BASE=$(git merge-base "$LOCAL_REF" "$REMOTE_REF" 2>/dev/null || echo "")
     if [ -n "$MERGE_BASE" ]; then
         RANGE="$MERGE_BASE..$LOCAL_REF"
     else
-        # New branch - check all commits
         RANGE="$LOCAL_REF"
     fi
 fi
 
 if [ -n "$RANGE" ]; then
-    MAX_BLOB_SIZE=1048576  # 1MB
     OVERSIZED=""
-    # List all blobs in the push range and check sizes
     while IFS= read -r blob_info; do
         size=$(echo "$blob_info" | awk '{print $3}')
         path=$(echo "$blob_info" | awk '{print $4}')
-        if [ -n "$size" ] && [ "$size" -gt "$MAX_BLOB_SIZE" ] 2>/dev/null; then
-            # Allow known binary asset directories
+        if [ -n "$size" ] && [ "$size" -gt 1048576 ] 2>/dev/null; then
             case "$path" in
                 assets/*|docs/asserts/*|docs/channels/*/guides/*) continue ;;
             esac
@@ -47,59 +49,106 @@ if [ -n "$RANGE" ]; then
     done < <(git rev-list --objects "$RANGE" 2>/dev/null | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' 2>/dev/null | awk '$1 == "blob" && $2 > 1048576 {print $0}')
 
     if [ -n "$OVERSIZED" ]; then
-        printf "${RED}❌ Push blocked: files >1MB detected in push range:${NC}\n"
+        printf "${RED}❌ Push blocked: files >1MB detected:${NC}\n"
         printf "$OVERSIZED\n"
-        printf "${YELLOW}Move to .gitignore, use Git LFS, or reduce file size.${NC}\n"
         exit 1
     fi
 fi
 
-# 1. Format check (gofmt + goimports)
-# Catches formatting drift from rebase conflict resolution or manual edits.
+# ── 1. Format check (serial — modifies files) ─────────────────────────────
 printf "🔹 Checking formatting...\n"
-make fmt > /dev/null 2>&1
-if ! git diff --quiet; then
-    printf "${RED}❌ make fmt modified files. Stage and commit the changes, then push again.${NC}\n"
-    git diff --name-only
+if make fmt > /dev/null 2>&1 && git diff --quiet; then
+    pass "formatting"
+else
+    # Re-run fmt to show what changed
+    make fmt > /dev/null 2>&1
+    if ! git diff --quiet; then
+        fail "formatting — run make fmt and commit"
+        git diff --name-only
+        exit 1
+    fi
+    pass "formatting"
+fi
+
+# ── 2. Parallel checks: vet + verify + lint + build ───────────────────────
+printf "🔹 Running parallel checks (vet, verify, lint, build)...\n"
+
+VET_RESULT=0
+VERIFY_RESULT=0
+LINT_RESULT=0
+BUILD_RESULT=0
+
+# Temp files for error output
+VET_ERR=$(mktemp)
+VERIFY_ERR=$(mktemp)
+LINT_ERR=$(mktemp)
+BUILD_ERR=$(mktemp)
+trap 'rm -f "$VET_ERR" "$VERIFY_ERR" "$LINT_ERR" "$BUILD_ERR"' EXIT
+
+# Run all four checks in parallel
+go vet ./... > "$VET_ERR" 2>&1 &
+VET_PID=$!
+
+go mod verify > "$VERIFY_ERR" 2>&1 &
+VERIFY_PID=$!
+
+make lint > "$LINT_ERR" 2>&1 &
+LINT_PID=$!
+
+# Use go build instead of make build to skip docs/webchat
+go build ./... > "$BUILD_ERR" 2>&1 &
+BUILD_PID=$!
+
+# Wait for all and collect results
+wait $VET_PID || VET_RESULT=1
+wait $VERIFY_PID || VERIFY_RESULT=1
+wait $LINT_PID || LINT_RESULT=1
+wait $BUILD_PID || BUILD_RESULT=1
+
+if [ "$VET_RESULT" -eq 0 ]; then
+    pass "go vet"
+else
+    fail "go vet"
+    cat "$VET_ERR"
+fi
+
+if [ "$VERIFY_RESULT" -eq 0 ]; then
+    pass "go mod verify"
+else
+    fail "go mod verify"
+    cat "$VERIFY_ERR"
+fi
+
+if [ "$LINT_RESULT" -eq 0 ]; then
+    pass "lint"
+else
+    fail "lint"
+    cat "$LINT_ERR"
+fi
+
+if [ "$BUILD_RESULT" -eq 0 ]; then
+    pass "build"
+else
+    fail "build"
+    cat "$BUILD_ERR"
+fi
+
+# Fail fast if any parallel check failed
+if [ "$FAIL" -gt 0 ]; then
+    printf "${RED}❌ Parallel checks failed! Push aborted.${NC}\n"
     exit 1
 fi
 
-# 2. Lint (golangci-lint including gofmt, goimports, staticcheck, etc.)
-printf "🔹 Running linter...\n"
-if ! make lint; then
-    printf "${RED}❌ Lint failed! Fix the issues before pushing.${NC}\n"
-    exit 1
-fi
-
-# 3. Vet (static analysis beyond lint)
-printf "🔹 Running go vet...\n"
-if ! go vet ./...; then
-    printf "${RED}❌ go vet found issues! Fix before pushing.${NC}\n"
-    exit 1
-fi
-
-# 4. Module integrity
-printf "🔹 Verifying module checksums...\n"
-if ! go mod verify; then
-    printf "${RED}❌ Module checksums mismatch! Run 'go mod tidy' and check dependencies.${NC}\n"
-    exit 1
-fi
-
-# 5. Build validation
-printf "🔹 Verifying build...\n"
-if ! make build > /dev/null 2>&1; then
-    printf "${RED}❌ Build failed! Fix compilation errors before pushing.${NC}\n"
-    make build
-    exit 1
-fi
-
-# 6. Fast unit tests
+# ── 3. Fast unit tests ────────────────────────────────────────────────────
 printf "🔹 Running tests...\n"
-if ! make test-short > /dev/null 2>&1; then
-    printf "${RED}❌ Tests failed! Push aborted.${NC}\n"
+if make test-short > /dev/null 2>&1; then
+    pass "tests"
+else
+    fail "tests"
     make test-short
     exit 1
 fi
 
 printf "${GREEN}✅ All quality gates passed! Push authorized.${NC}\n"
+printf "  (%d passed, %d failed)\n" "$PASS" "$FAIL"
 exit 0

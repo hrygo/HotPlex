@@ -29,6 +29,7 @@ export const EventKind = {
   Control: 'control',
   WorkerCommand: 'worker_command',
   ContextUsage: 'context_usage',
+  SkillsList: 'skills_list',
 } as const;
 
 export type EventKind = typeof EventKind[keyof typeof EventKind];

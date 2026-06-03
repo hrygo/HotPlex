@@ -174,12 +174,15 @@ export function formatRelativeTime(dateStr: string): string {
 }
 
 export function stateLabel(state: SessionState): string {
+  // NOTE: Labels are intentionally English. Do not translate to Chinese —
+  // the rest of the UI (bot feedback, commands, header) is English too.
+  // If i18n is needed, use a proper i18n framework rather than hardcoded translations.
   const map: Record<SessionState, string> = {
-    created: '待启动',
-    running: '进行中',
-    idle: '空闲',
-    terminated: '已结束',
-    deleted: '已删除',
+    created: 'Created',
+    running: 'Running',
+    idle: 'Idle',
+    terminated: 'Terminated',
+    deleted: 'Deleted',
   };
   return map[state] ?? state;
 }

@@ -54,6 +54,9 @@ func TestSTTEnvironmentChecker_STTDisabled(t *testing.T) {
 }
 
 func TestSTTEnvironmentChecker_LocalProvider(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that probes external binary dependencies")
+	}
 	dir := t.TempDir()
 	path := writeSTTConfig(t, dir, true, "local", false, "")
 	defer resetConfigPath()
@@ -83,6 +86,9 @@ func TestSTTEnvironmentChecker_FeishuProvider(t *testing.T) {
 }
 
 func TestSTTEnvironmentChecker_FeishuLocalProvider(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that probes external binary dependencies")
+	}
 	dir := t.TempDir()
 	path := writeSTTConfig(t, dir, false, "", true, "feishu+local")
 	defer resetConfigPath()

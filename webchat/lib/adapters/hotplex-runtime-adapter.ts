@@ -48,7 +48,7 @@ export interface UseHotPlexRuntimeConfig {
   /** Called when session metrics update (for dashboard display). */
   onMetricsChange?: (metrics: import('@/lib/hooks/useMetrics').SessionMetrics) => void;
   /** Called when skills list is fetched from the worker. */
-  onSkillsChange?: (skills: string[]) => void;
+  onSkillsChange?: (skills: import('@/lib/ai-sdk-transport/client/types').SkillEntry[]) => void;
   /** Called when session lifecycle state changes (running/idle/terminated etc). */
   onSessionStateChange?: (state: string) => void;
   /** Custom welcome suggestions shown when thread is empty. */
@@ -678,7 +678,9 @@ export function useHotPlexRuntime({
 
     const handleContextUsage = (data: ContextUsageData) => {
       const names = data?.skills?.names ?? [];
-      onSkillsChangeRef.current?.(names);
+      // ContextUsage only has names, not full entries — pass minimal entries
+      const entries = names.map(name => ({ name, description: '', source: 'context' }));
+      onSkillsChangeRef.current?.(entries);
 
       // Inject into last assistant message's parts (same pattern as turn-summary in handleDone)
       setMessages((prev) => {
@@ -693,6 +695,12 @@ export function useHotPlexRuntime({
       });
     };
     client.on('contextUsage', handleContextUsage);
+    const handleSkillsList = (data: import('@/lib/ai-sdk-transport/client/types').SkillsListData) => {
+      skillsFetchedRef.current = true;
+      const entries = data?.skills ?? [];
+      onSkillsChangeRef.current?.(entries);
+    };
+    client.on('skillsList', handleSkillsList);
 
     // Interaction event handlers — inject as tool-call parts for PermissionCard rendering
     const handlePermissionRequest = (data: PermissionRequestData, _env: Envelope) => {
@@ -779,6 +787,7 @@ export function useHotPlexRuntime({
       client.off('toolCall', handleToolCall);
       client.off('toolResult', handleToolResult);
       client.off('contextUsage', handleContextUsage);
+      client.off('skillsList', handleSkillsList);
       client.off('permissionRequest', handlePermissionRequest);
       client.off('questionRequest', handleQuestionRequest);
       client.off('elicitationRequest', handleElicitationRequest);

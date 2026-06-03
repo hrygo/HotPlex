@@ -82,6 +82,9 @@ func TestStepConfigGen_SlackEnabled(t *testing.T) {
 }
 
 func TestStepWorkerDep(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that probes external binary dependencies")
+	}
 	t.Parallel()
 	tests := []struct {
 		name       string
@@ -316,6 +319,9 @@ func TestPromptCommaList(t *testing.T) {
 }
 
 func TestRun_NonInteractive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	s := stepEnvPreCheck()
 	if s.Status == "fail" {
 		t.Skip("skipping: environment pre-check fails on this system: " + s.Detail)
@@ -365,6 +371,9 @@ func TestRun_NonInteractive(t *testing.T) {
 }
 
 func TestRun_NonInteractive_WithSlack(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	s := stepEnvPreCheck()
 	if s.Status == "fail" {
 		t.Skip("skipping: environment pre-check fails on this system: " + s.Detail)
