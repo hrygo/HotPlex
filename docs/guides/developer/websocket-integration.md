@@ -75,7 +75,7 @@ function sendInput(text) {
   ws.send(JSON.stringify({
     version: 'aep/v1',
     id: crypto.randomUUID(),
-    session_id: '',
+    session_id: '', // init 后由 Gateway 覆盖，填任意值或省略均可
     seq: 0,
     timestamp: Date.now(),
     event: {
@@ -375,7 +375,7 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 }
 ```
 
-> `session_id` 和 `seq` 由 Gateway 覆盖，客户端填空字符串或 `0` 即可。
+> `session_id`、`seq` 由 Gateway 在路由前覆盖为服务端权威值（`conn.go`），客户端填空字符串、真实 ID 或省略该字段效果完全相同。`session_id` 仅在 init 握手时有语义（参与 Session ID 派生），后续所有消息中该字段被忽略。
 
 **限制**：Session 必须处于 Active 状态（created / running / idle），非 Active 状态下发送 input 返回 `SESSION_BUSY` 或 `SESSION_TERMINATED` 错误。
 
