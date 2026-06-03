@@ -29,6 +29,7 @@ import (
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging/groupchat"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
@@ -71,6 +72,7 @@ type GatewayDeps struct {
 	CronScheduler   *cron.Scheduler
 	WebhookHandler  *gateway.WebhookHandler // non-nil when webhook is enabled
 	CookieAuth      *security.CookieAuth    // non-nil when webchat is enabled
+	GroupChatMgr    *groupchat.Manager      // non-nil when group_chat is enabled
 	ChatAccessStore messaging.ChatAccessStorer
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
@@ -405,6 +407,38 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		}
 	}
 
+	// GroupChat manager: init after Bridge, before messaging adapters.
+	var groupChatMgr *groupchat.Manager
+	if cfg.GroupChat.Enabled {
+		var gcStore groupchat.Store
+		if stores.groupChat != nil {
+			gcStore = stores.groupChat
+		} else {
+			gcStore = groupchat.NewSQLiteStore(stores.sqlDB, log, stores.writeMu)
+		}
+		gcCfg := groupchat.Config{
+			Enabled:               cfg.GroupChat.Enabled,
+			MaxTurns:              cfg.GroupChat.MaxTurns,
+			TurnTimeoutSec:        cfg.GroupChat.TurnTimeoutSec,
+			CooldownMS:            cfg.GroupChat.CooldownMS,
+			MaxGroupSessions:      cfg.GroupChat.MaxGroupSessions,
+			MaxSessionsPerUser:    cfg.GroupChat.MaxSessionsPerUser,
+			MaxTurnContentLength:  cfg.GroupChat.MaxTurnContentLength,
+			MaxTotalContextLength: cfg.GroupChat.MaxTotalContextLength,
+			CostLimitUSD:          cfg.GroupChat.CostLimitUSD,
+			MaxTopicLength:        cfg.GroupChat.MaxTopicLength,
+			PoolReservation:       cfg.GroupChat.PoolReservation,
+		}
+		groupChatMgr = groupchat.NewManager(
+			log, gcCfg, gcStore,
+			bridge, sm,
+			&gcBotLookup{registry: messaging.DefaultBotRegistry()},
+			&gcLogSender{log: log},
+		)
+		groupChatMgr.RepairRunningSessions(ctx)
+		log.Info("gateway: group chat manager started")
+	}
+
 	// Cookie auth: created when webchat is enabled for same-origin browser authentication.
 	var cookieAuth *security.CookieAuth
 	if cfg.WebChat.Enabled {
@@ -434,6 +468,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		ConfigWatcher:   configWatcher,
 		CronScheduler:   cronScheduler,
 		CookieAuth:      cookieAuth,
+		GroupChatMgr:    groupChatMgr,
 		ChatAccessStore: stores.chatAccessOrNew(stores.sqlDB, log),
 		DB:              stores.sqlDB,
 		DBResolver:      dbResolver,
@@ -658,6 +693,7 @@ type gatewayStores struct {
 	turnQuerier eventstore.TurnQuerier
 	collector   *eventstore.Collector
 	cron        cron.Store
+	groupChat   groupchat.Store
 	chatAccess  messaging.ChatAccessStorer
 	writeMu     *sqlutil.WriteMu // nil when using PostgreSQL (WriteMu is SQLite-only)
 	db          *dbutil.DB
@@ -724,6 +760,7 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 
 	eventStore := eventstore.NewPGStore(db, log)
 	cronStore := cron.NewPGStore(db, log)
+	groupChatStore := groupchat.NewPGStore(db, log)
 	chatAccessStore := messaging.NewChatAccessPGStore(db, log)
 	dbResolver := security.NewDBResolver(db.DB, dbutil.DialectPostgres)
 
@@ -733,6 +770,7 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 		turnQuerier: eventStore,
 		collector:   eventstore.NewCollector(eventStore, log),
 		cron:        cronStore,
+		groupChat:   groupChatStore,
 		chatAccess:  chatAccessStore,
 		db:          db,
 		sqlDB:       db.DB,
@@ -827,6 +865,10 @@ func shutdownGateway(
 
 	if cronScheduler != nil {
 		cronScheduler.Shutdown(shutdownCtx)
+	}
+
+	if deps.GroupChatMgr != nil {
+		deps.GroupChatMgr.StopAll(shutdownCtx)
 	}
 
 	for _, adapter := range msgAdapters {
@@ -1065,4 +1107,34 @@ func releaseDBStatsManual(log *slog.Logger) {
 		return
 	}
 	log.Debug("db-stats: skill manual released", "path", path)
+}
+
+// gcBotLookup adapts messaging.BotRegistry to groupchat.BotLookup.
+type gcBotLookup struct {
+	registry *messaging.BotRegistry
+}
+
+func (a *gcBotLookup) GetByName(name string) (groupchat.BotEntry, bool) {
+	e, ok := a.registry.GetByName(name)
+	if !ok {
+		return groupchat.BotEntry{}, false
+	}
+	return groupchat.BotEntry{Name: e.Name, BotID: e.BotID, WorkerType: e.WorkerType}, true
+}
+
+// gcLogSender is a v1 logging-only ResponseSender.
+// TODO: Phase 2 — route through platform adapters for real message delivery.
+type gcLogSender struct {
+	log *slog.Logger
+}
+
+func (s *gcLogSender) SendTurnResponse(_ context.Context, platform, channelID, threadTS, botName, content string, turnNum int) error {
+	s.log.Info("groupchat: turn response", "bot", botName, "turn", turnNum,
+		"platform", platform, "channel", channelID, "thread", threadTS, "len", len(content))
+	return nil
+}
+
+func (s *gcLogSender) SendControlMessage(_ context.Context, platform, channelID, threadTS, message string) error {
+	s.log.Info("groupchat: control", "platform", platform, "channel", channelID, "thread", threadTS, "msg", message)
+	return nil
 }

@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -111,6 +112,25 @@ func (r *BotRegistry) ListByPlatform(platform PlatformType) []*BotEntry {
 	}
 	r.mu.RUnlock()
 	return result
+}
+
+// Verify checks that a bot is registered, running, and has an active bridge.
+// Returns an error describing why the bot is unavailable.
+func (r *BotRegistry) Verify(name string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, e := range r.entries {
+		if e.Name == name {
+			if e.Status != BotStatusRunning {
+				return fmt.Errorf("bot %q is not running (status: %s)", name, e.Status)
+			}
+			if e.Bridge == nil {
+				return fmt.Errorf("bot %q has no bridge", name)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("bot %q not found in registry", name)
 }
 
 // UnregisterAll removes all bot entries. Used during gateway shutdown.

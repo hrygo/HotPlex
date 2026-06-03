@@ -18,6 +18,10 @@ var hotplexNamespace = uuid.MustParse("urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd4
 // Cron sessions use this namespace to guarantee they never collide with feishu/slack sessions.
 var CronNamespace = uuid.NewHash(sha1.New(), hotplexNamespace, []byte("cron"), 5)
 
+// GroupChatNamespace is a sub-namespace for group chat sub-session isolation.
+// Each bot in a group chat gets its own session keyed by (groupID, botID).
+var GroupChatNamespace = uuid.NewHash(sha1.New(), hotplexNamespace, []byte("groupchat"), 5)
+
 // DeriveSessionKey generates a deterministic server-side session ID using UUIDv5.
 // Same (ownerID, workerType, clientKey, workDir) always maps to the same session.
 // clientKey is a client-provided opaque identifier: REST API uses client_session_id,
@@ -128,4 +132,12 @@ func DerivePlatformSessionKey(ownerID string, wt worker.WorkerType, ctx Platform
 func DeriveCronSessionKey(jobID string, epoch int64) string {
 	name := jobID + "|" + strconv.FormatInt(epoch, 10)
 	return uuid.NewHash(sha1.New(), CronNamespace, []byte(name), 5).String()
+}
+
+// DeriveGroupSessionKey generates a deterministic UUIDv5 for a bot's sub-session
+// within a group chat. Uses GroupChatNamespace so keys never collide with platform or cron sessions.
+// Each bot+turn combination gets a unique key via botID and turnNum differentiation.
+func DeriveGroupSessionKey(groupID, botID string, turnNum int) string {
+	name := groupID + "|" + botID + "|" + strconv.Itoa(turnNum)
+	return uuid.NewHash(sha1.New(), GroupChatNamespace, []byte(name), 5).String()
 }

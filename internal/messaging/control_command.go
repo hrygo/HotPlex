@@ -272,6 +272,13 @@ func HelpText() string {
 					{Commands: []string{"$"}, Args: "前缀", Desc: "自然语言触发（如 $上下文、$休眠）"},
 				},
 			},
+			{
+				Title: "多 Bot 协作", Emoji: "🤝",
+				Entries: []helpEntry{
+					{Commands: []string{"/discuss"}, Args: "@bot1 @bot2 <话题>", Desc: "发起多 Bot 讨论"},
+					{Commands: []string{"/stop-collab"}, Desc: "停止当前协作讨论"},
+				},
+			},
 		}
 		helpText = formatHelpSections(sections)
 	})

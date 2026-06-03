@@ -116,6 +116,7 @@ type Config struct {
 	Cron        CronConfig      `mapstructure:"cron"`
 	Webhook     WebhookConfig   `mapstructure:"webhook"`
 	Events      EventsConfig    `mapstructure:"events"`
+	GroupChat   GroupChatConfig `mapstructure:"group_chat"`
 	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 
 	// ResolvedAPIKeyUsers is the runtime map of expanded API key value → userID.
@@ -741,6 +742,21 @@ type EventsConfig struct {
 	Retention time.Duration `mapstructure:"retention"` // TTL for events + turns, default 720h (30 days)
 }
 
+// GroupChatConfig holds multi-bot collaboration settings.
+type GroupChatConfig struct {
+	Enabled               bool    `mapstructure:"enabled"`
+	MaxTurns              int     `mapstructure:"max_turns"`
+	TurnTimeoutSec        int     `mapstructure:"turn_timeout_sec"`
+	CooldownMS            int     `mapstructure:"cooldown_ms"`
+	MaxGroupSessions      int     `mapstructure:"max_group_sessions"`
+	MaxSessionsPerUser    int     `mapstructure:"max_sessions_per_user"`
+	MaxTurnContentLength  int     `mapstructure:"max_turn_content_length"`
+	MaxTotalContextLength int     `mapstructure:"max_total_context_length"`
+	CostLimitUSD          float64 `mapstructure:"cost_limit_usd"`
+	MaxTopicLength        int     `mapstructure:"max_topic_length"`
+	PoolReservation       int     `mapstructure:"pool_reservation"`
+}
+
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 // Default returns a Config with sensible production defaults.
@@ -908,6 +924,19 @@ func Default() *Config {
 		},
 		Events: EventsConfig{
 			Retention: 720 * time.Hour, // 30 days
+		},
+		GroupChat: GroupChatConfig{
+			Enabled:               false,
+			MaxTurns:              15,
+			TurnTimeoutSec:        120,
+			CooldownMS:            5000,
+			MaxGroupSessions:      20,
+			MaxSessionsPerUser:    2,
+			MaxTurnContentLength:  50000,
+			MaxTotalContextLength: 80000,
+			CostLimitUSD:          1.00,
+			MaxTopicLength:        500,
+			PoolReservation:       10,
 		},
 	}
 }
