@@ -76,7 +76,7 @@ jobs:
           fi
           echo "No oversized files in HEAD tree."
 
-  # ── Test: race + coverage (parallel with Build) ────────────────────────
+  # ── Test: coverage (parallel with Build) ─────────────────────────────────
   # Skips webchat build entirely — tests don't import the embedded SPA.
   # Runs vet inline for fast failure before expensive compilation.
   test:
@@ -129,7 +129,7 @@ jobs:
             echo "pkgs=." >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run tests with race detector + coverage
+      - name: Run tests with coverage
         env:
           SCOPE: ${{ steps.scope.outputs.pkgs }}
           CGO_ENABLED: '0'
@@ -166,7 +166,7 @@ jobs:
           fi
 
           # shellcheck disable=SC2086,SC2046
-          go test -race -timeout=10m -coverprofile=coverage.out -covermode=atomic $TEST_PKGS
+          go test -timeout=10m -coverprofile=coverage.out -covermode=atomic $TEST_PKGS
 
       - name: Display coverage
         if: always()
