@@ -8,13 +8,16 @@ import (
 	"runtime/debug"
 
 	"github.com/hrygo/hotplex/internal/messaging"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // ─── Message Handler ─────────────────────────────────────────────────────────
@@ -297,7 +300,7 @@ var passthroughMetricLabel = map[events.Kind]string{
 
 func (h *Handler) passthroughToSession(ctx context.Context, env *events.Envelope) error {
 	if label, ok := passthroughMetricLabel[env.Event.Type]; ok {
-		metrics.GatewayEventsTotal.WithLabelValues(label, "s2c").Inc()
+		observability.GatewayEvents().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", label), attribute.String("direction", "s2c")))
 	}
 	return h.hub.SendToSession(ctx, env)
 }

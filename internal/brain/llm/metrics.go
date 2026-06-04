@@ -5,9 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/hrygo/hotplex/internal/observability"
 )
 
 // MetricsCollector collects and exports LLM metrics via OpenTelemetry.
@@ -66,13 +67,13 @@ func NewMetricsCollector(config MetricsConfig) *MetricsCollector {
 	}
 
 	// Initialize OpenTelemetry meter
-	mc.meter = otel.Meter(config.ServiceName)
+	mc.meter = observability.Meter()
 
 	var err error
 
 	// Request latency histogram
 	mc.requestLatency, err = mc.meter.Float64Histogram(
-		"brain.request.latency.ms",
+		"hotplex.brain.request.latency",
 		metric.WithDescription("Request latency in milliseconds"),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(10, 50, 100, 250, 500, 1000, 2500, 5000, 10000),
@@ -85,7 +86,7 @@ func NewMetricsCollector(config MetricsConfig) *MetricsCollector {
 
 	// Input token counter
 	mc.inputTokenCounter, err = mc.meter.Int64Counter(
-		"brain.tokens.input",
+		"hotplex.brain.tokens.input",
 		metric.WithDescription("Total input tokens processed"),
 		metric.WithUnit("{tokens}"),
 	)
@@ -96,7 +97,7 @@ func NewMetricsCollector(config MetricsConfig) *MetricsCollector {
 
 	// Output token counter
 	mc.outputTokenCounter, err = mc.meter.Int64Counter(
-		"brain.tokens.output",
+		"hotplex.brain.tokens.output",
 		metric.WithDescription("Total output tokens generated"),
 		metric.WithUnit("{tokens}"),
 	)
@@ -107,7 +108,7 @@ func NewMetricsCollector(config MetricsConfig) *MetricsCollector {
 
 	// Cost counter
 	mc.costCounter, err = mc.meter.Float64Counter(
-		"brain.cost.usd",
+		"hotplex.brain.cost",
 		metric.WithDescription("Total cost in USD"),
 		metric.WithUnit("USD"),
 	)
@@ -118,7 +119,7 @@ func NewMetricsCollector(config MetricsConfig) *MetricsCollector {
 
 	// Error counter
 	mc.errorCounter, err = mc.meter.Int64Counter(
-		"brain.errors.total",
+		"hotplex.brain.errors",
 		metric.WithDescription("Total number of errors"),
 		metric.WithUnit("{errors}"),
 	)
@@ -129,7 +130,7 @@ func NewMetricsCollector(config MetricsConfig) *MetricsCollector {
 
 	// Routing decision counter
 	mc.routingCounter, err = mc.meter.Int64Counter(
-		"brain.routing.decisions",
+		"hotplex.brain.routing.decisions",
 		metric.WithDescription("Number of routing decisions"),
 		metric.WithUnit("{decisions}"),
 	)
@@ -140,7 +141,7 @@ func NewMetricsCollector(config MetricsConfig) *MetricsCollector {
 
 	// Active requests gauge
 	mc.activeRequestsGauge, err = mc.meter.Int64UpDownCounter(
-		"brain.requests.active",
+		"hotplex.brain.requests.active",
 		metric.WithDescription("Number of active requests"),
 		metric.WithUnit("{requests}"),
 	)

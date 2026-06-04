@@ -13,12 +13,15 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/messaging"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // resetGenerationer is an optional interface for workers that support
@@ -139,16 +142,16 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 		return fmt.Errorf("bridge: rejecting new session during shutdown")
 	}
 
-	metrics.SessionStartsTotal.WithLabelValues(string(wt)).Inc()
+	observability.SessionStartAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(wt))))
 	start := time.Now()
 	defer func() {
-		metrics.SessionStartDuration.WithLabelValues(string(wt)).Observe(time.Since(start).Seconds())
+		observability.SessionStartDuration().Record(context.Background(), time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(wt))))
 	}()
 
 	// Create session in DB with bot_id and allowed_tools.
 	si, err := b.sm.CreateWithBot(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
 	if err != nil {
-		metrics.SessionErrorsTotal.WithLabelValues(string(wt), "create_failed").Inc()
+		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(wt)), attribute.String("error_type", "create_failed")))
 		return fmt.Errorf("bridge: create session: %w", err)
 	}
 
@@ -185,7 +188,7 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 			_ = b.sm.Delete(ctx, id)
 		},
 	); err != nil {
-		metrics.SessionErrorsTotal.WithLabelValues(string(wt), "start_failed").Inc()
+		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(wt)), attribute.String("error_type", "start_failed")))
 		return err
 	}
 
@@ -226,7 +229,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 
 	start := time.Now()
 	defer func() {
-		metrics.SessionStartDuration.WithLabelValues(string(si.WorkerType)).Observe(time.Since(start).Seconds())
+		observability.SessionStartDuration().Record(context.Background(), time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(si.WorkerType))))
 	}()
 
 	if si.State == events.StateDeleted {

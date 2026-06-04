@@ -10,15 +10,18 @@ import (
 	"os"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/messaging"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
-	"github.com/hrygo/hotplex/internal/tracing"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -95,6 +98,9 @@ type Hub struct {
 	// Incoming messages from all connections.
 	broadcast chan *EnvelopeWithConn
 
+	// connCount tracks the number of active WebSocket connections for the OTel gauge.
+	connCount atomic.Int64
+
 	// Sequence generation per session
 	seqGen *SeqGen
 	// Backpressure drop tracking per session
@@ -160,6 +166,13 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 		},
 	}
 	go h.Run()
+
+	// Register OTel observable gauge for connection count.
+	_, _ = observability.Meter().RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		o.ObserveInt64(observability.GatewayConnections(), h.connCount.Load())
+		return nil
+	}, observability.GatewayConnections())
+
 	return h
 }
 
@@ -168,7 +181,7 @@ func (h *Hub) RegisterConn(conn *Conn) {
 	h.mu.Lock()
 	h.conns[conn] = struct{}{}
 	h.mu.Unlock()
-	metrics.GatewayConnectionsOpen.Inc()
+	h.connCount.Add(1)
 	h.log.Debug("gateway: conn registered", "remote", conn.RemoteAddr(), "session_id", conn.sessionID)
 }
 
@@ -182,7 +195,7 @@ func (h *Hub) UnregisterConn(conn *Conn) {
 		h.removeSession(sid, conn)
 	}
 	h.mu.Unlock()
-	metrics.GatewayConnectionsOpen.Dec()
+	h.connCount.Add(-1)
 	h.log.Debug("gateway: conn unregistered", "remote", conn.RemoteAddr(), "session_id", conn.sessionID)
 }
 
@@ -300,13 +313,21 @@ func (h *Hub) sendBroadcast(msg *EnvelopeWithConn) (sent bool) {
 // Control-priority messages bypass the broadcast queue.
 // afterDrain functions are called sequentially after the item is routed by Run.
 func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrain ...func()) error {
-	spanCtx, span := tracing.GetTracer().Start(ctx, "hub.send_to_session")
+	spanCtx, span := observability.Tracer().Start(ctx, "hub.send_to_session")
 	defer span.End()
 	span.SetAttributes(
-		tracing.Attr("session_id", env.SessionID),
-		tracing.Attr("event_type", string(env.Event.Type)),
-		tracing.Attr("priority", string(env.Priority)),
+		attribute.String("session_id", env.SessionID),
+		attribute.String("event_type", string(env.Event.Type)),
+		attribute.String("priority", string(env.Priority)),
 	)
+
+	// Inject trace_id into AEP metadata
+	if sc := trace.SpanContextFromContext(spanCtx); sc.IsValid() {
+		if env.Metadata == nil {
+			env.Metadata = make(map[string]any)
+		}
+		env.Metadata["trace_id"] = sc.TraceID().String()
+	}
 
 	// Assign sequence number before sending to broadcast queue or clients.
 	// We skip assignment if seq is already set (eg. by Handler for direct replies).
@@ -335,7 +356,7 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 		h.mu.Lock()
 		h.sessionDropped[env.SessionID] = true
 		h.mu.Unlock()
-		metrics.GatewayDeltasDropped.Inc()
+		observability.GatewayDeltasDropped().Add(context.Background(), 1)
 		return nil
 	}
 
@@ -350,7 +371,7 @@ func (h *Hub) sendControlToSession(ctx context.Context, env *events.Envelope) {
 	conns := h.snapshotConns(env.SessionID)
 
 	if len(conns) == 0 {
-		metrics.GatewayEventsNoSubscribersDropped.WithLabelValues(string(env.Event.Type)).Inc()
+		observability.GatewayNoSubscribersDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
 		h.log.Debug("gateway: control event dropped, no connections",
 			"session_id", env.SessionID, "event_type", env.Event.Type)
 		return
@@ -358,7 +379,7 @@ func (h *Hub) sendControlToSession(ctx context.Context, env *events.Envelope) {
 
 	env = events.Clone(env)
 	for _, conn := range conns {
-		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
+		observability.GatewayMessages().Add(ctx, 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", string(env.Event.Type))))
 		if err := conn.WriteCtx(ctx, env); err != nil {
 			h.log.Warn("gateway: send to conn failed", "session_id", env.SessionID, "err", err)
 		}
@@ -463,11 +484,11 @@ func (h *Hub) Run() {
 						h.log.Error("hub: panic in routeMessage", "session_id", msg.Env.SessionID, "panic", r, "stack", string(debug.Stack()))
 					}
 				}()
-				_, span := tracing.GetTracer().Start(h.ctx, "hub.broadcast")
+				_, span := observability.Tracer().Start(h.ctx, "hub.broadcast")
 				span.SetAttributes(
-					tracing.Attr("session_id", msg.Env.SessionID),
-					tracing.Attr("event_type", string(msg.Env.Event.Type)),
-					tracing.Attr("seq", msg.Env.Seq),
+					attribute.String("session_id", msg.Env.SessionID),
+					attribute.String("event_type", string(msg.Env.Event.Type)),
+					attribute.String("seq", fmt.Sprintf("%d", msg.Env.Seq)),
 				)
 				h.routeMessage(msg)
 				span.End()
@@ -483,7 +504,7 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	conns := h.snapshotConns(msg.Env.SessionID)
 
 	if len(conns) == 0 {
-		metrics.GatewayEventsNoSubscribersDropped.WithLabelValues(string(msg.Env.Event.Type)).Inc()
+		observability.GatewayNoSubscribersDropped().Add(h.ctx, 1, metric.WithAttributes(attribute.String("event_type", string(msg.Env.Event.Type))))
 		// Suppress debug log for sessions that never had any connection
 		// registered (e.g. cron/internal sessions). These events are expected
 		// to have no subscribers — logging every one is just noise.

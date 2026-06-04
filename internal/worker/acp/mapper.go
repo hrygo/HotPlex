@@ -1,12 +1,16 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 
-	"github.com/hrygo/hotplex/internal/metrics"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/hrygo/hotplex/internal/observability"
 
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -300,7 +304,7 @@ func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
 	if toolKind == "" {
 		toolKind = "other"
 	}
-	metrics.ACPToolCallsTotal.WithLabelValues(toolKind).Inc()
+	observability.ACPToolCalls().Add(context.Background(), 1, metric.WithAttributes(attribute.String("kind", toolKind)))
 
 	return []*events.Envelope{m.newEnvelope(events.ToolCall, data)}
 }
@@ -559,7 +563,7 @@ func (m *ACPMapper) updateUsage(raw json.RawMessage) {
 		"cached_write": u.CachedWriteTokens,
 	} {
 		if val > 0 {
-			metrics.ACPPromptTokensTotal.WithLabelValues(label).Add(float64(val))
+			observability.ACPPromptTokens().Add(context.Background(), int64(val), metric.WithAttributes(attribute.String("type", label)))
 		}
 	}
 }

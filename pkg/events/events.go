@@ -95,6 +95,9 @@ type Envelope struct {
 	SessionID string   `json:"session_id"`
 	Timestamp int64    `json:"timestamp"`
 	Event     Event    `json:"event"`
+	// Metadata carries opaque metadata injected by the gateway
+	// (e.g., trace_id for distributed tracing context propagation).
+	Metadata map[string]any `json:"metadata,omitempty"`
 	// OwnerID is the authenticated user who owns this envelope.
 	// Set by the gateway at init time and used for ownership validation.
 	// Not serialized over the wire.

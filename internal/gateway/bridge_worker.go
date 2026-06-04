@@ -9,10 +9,13 @@ import (
 
 	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/eventstore"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/noop"
 	"github.com/hrygo/hotplex/pkg/events"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // forwardOpts configures the forwardEvents goroutine behavior.
@@ -52,7 +55,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 
 	start := time.Now()
 	defer func() {
-		metrics.WorkerCreationDuration.WithLabelValues(string(params.wt)).Observe(time.Since(start).Seconds())
+		observability.WorkerCreationDuration().Record(context.Background(), time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(params.wt))))
 	}()
 
 	w, err := b.wf.NewWorker(params.wt)
