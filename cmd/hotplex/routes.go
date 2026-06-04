@@ -11,6 +11,8 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/docs"
 	"github.com/hrygo/hotplex/internal/gateway"
+	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/security"
 )
 
 func setupRoutes(
@@ -37,7 +39,7 @@ func setupRoutes(
 	withCORS := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusOK)
@@ -60,7 +62,7 @@ func setupRoutes(
 	mux.HandleFunc("OPTIONS /api/sessions/{id}/history", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
 	mux.HandleFunc("OPTIONS /api/sessions/{id}/events", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
 
-	mux.Handle("GET /ws", hub.HandleHTTP(auth, handler, bridge))
+	mux.Handle("GET /ws", hub.HandleHTTP(auth, handler, bridge, deps.CookieAuth))
 
 	sessionAdapter := &sessionManagerAdapter{sm: sm}
 	hubAdapter := &hubAdapter{hub: hub}
@@ -83,8 +85,22 @@ func setupRoutes(
 		Bridge:        bridgeAdapter,
 		ConfigWatcher: configWatcherAdapter,
 		Cron:          cronProvider,
+		BotLister:     &botListerAdapter{registry: messaging.DefaultBotRegistry()},
+		BotConfig:     newBotConfigAdapter(deps.ConfigStore, cfg.AgentConfig.ConfigDir, ""),
 		Version:       versionString,
 		NewSessionID:  newSessionID,
+		Restart: func() error {
+			inst, err := findRunningGateway()
+			if err != nil {
+				return err
+			}
+			return forkRestartHelper(inst, deps.ConfigPath, deps.DevMode, true)
+		},
+		DB:           deps.DB,
+		DBResolver:   deps.DBResolver,
+		KeyValidator: deps.Auth,
+		APIKeyStore:  deps.APIKeyStore,
+		WriteMu:      deps.WriteMu,
 	})
 
 	if cfg.Admin.RateLimitEnabled {
@@ -123,6 +139,7 @@ func setupRoutes(
 	adminMux.HandleFunc("POST /admin/config/validate", adminAPI.HandleConfigValidate)
 	adminMux.HandleFunc("POST /admin/config/rollback", adminAPI.HandleConfigRollback)
 	adminMux.HandleFunc("GET /admin/debug/sessions/{id}", adminAPI.HandleDebugSession)
+	adminMux.HandleFunc("POST /admin/restart", adminAPI.HandleRestart)
 
 	adminMux.HandleFunc("GET /admin/sessions", adminAPI.ListSessions)
 	adminMux.HandleFunc("GET /admin/sessions/{id}", adminAPI.GetSession)
@@ -131,16 +148,58 @@ func setupRoutes(
 	adminMux.HandleFunc("GET /admin/sessions/{id}/stats", adminAPI.HandleSessionStats)
 
 	// Cron API
-	adminMux.HandleFunc("GET /api/cron/jobs", adminAPI.HandleCronList)
-	adminMux.HandleFunc("GET /api/cron/jobs/{id}", adminAPI.HandleCronGet)
-	adminMux.HandleFunc("POST /api/cron/jobs", adminAPI.HandleCronCreate)
-	adminMux.HandleFunc("PATCH /api/cron/jobs/{id}", adminAPI.HandleCronUpdate)
-	adminMux.HandleFunc("DELETE /api/cron/jobs/{id}", adminAPI.HandleCronDelete)
-	adminMux.HandleFunc("POST /api/cron/jobs/{id}/run", adminAPI.HandleCronTrigger)
-	adminMux.HandleFunc("GET /api/cron/jobs/{id}/runs", adminAPI.HandleCronRunHistory)
+	adminMux.HandleFunc("GET /admin/cron/jobs", adminAPI.HandleCronList)
+	adminMux.HandleFunc("GET /admin/cron/jobs/{id}", adminAPI.HandleCronGet)
+	adminMux.HandleFunc("POST /admin/cron/jobs", adminAPI.HandleCronCreate)
+	adminMux.HandleFunc("PATCH /admin/cron/jobs/{id}", adminAPI.HandleCronUpdate)
+	adminMux.HandleFunc("DELETE /admin/cron/jobs/{id}", adminAPI.HandleCronDelete)
+	adminMux.HandleFunc("POST /admin/cron/jobs/{id}/run", adminAPI.HandleCronTrigger)
+	adminMux.HandleFunc("GET /admin/cron/jobs/{id}/runs", adminAPI.HandleCronRunHistory)
+
+	// Bot status API
+	adminMux.HandleFunc("GET /admin/bots", adminAPI.HandleListBots)
+	adminMux.HandleFunc("GET /admin/bots/{name}", adminAPI.HandleGetBot)
+
+	// Bot config API
+	adminMux.HandleFunc("GET /admin/bots/config", adminAPI.HandleListBotConfigs)
+	adminMux.HandleFunc("GET /admin/bots/{name}/config", adminAPI.HandleGetBotConfig)
+	adminMux.HandleFunc("GET /admin/bots/{name}/config/{file}", adminAPI.HandleGetAgentConfigFile)
+	adminMux.HandleFunc("GET /admin/bots/{name}/preview", adminAPI.HandleSystemPromptPreview)
+	adminMux.HandleFunc("PATCH /admin/bots/{name}", adminAPI.HandleUpdateBotConfig)
+	adminMux.HandleFunc("POST /admin/bots", adminAPI.HandleCreateBot)
+	adminMux.HandleFunc("DELETE /admin/bots/{name}", adminAPI.HandleDeleteBot)
+	adminMux.HandleFunc("PUT /admin/bots/{name}/config/{file}", adminAPI.HandleWriteAgentConfigFile)
+
+	// API key user management
+	adminMux.HandleFunc("GET /admin/api-keys", adminAPI.HandleAPIKeyUserList)
+	adminMux.HandleFunc("POST /admin/api-keys", adminAPI.HandleAPIKeyUserCreate)
+	adminMux.HandleFunc("GET /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserGet)
+	adminMux.HandleFunc("PATCH /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserUpdate)
+	adminMux.HandleFunc("DELETE /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserDelete)
 
 	// Documentation
-	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler()))
+	if resolved := security.ResolveCSP(security.DefaultDocsCSP, cfg.Security.CSP); security.IsPermissiveCSP(resolved) {
+		log.Warn("csp: docs policy is permissive (any http/https/ws/wss host allowed); set security.csp to restrict in production",
+			"service", "docs")
+	}
+	mux.Handle("GET /docs/", http.StripPrefix("/docs", docs.Handler(cfg.Security.CSP)))
+
+	// Webhook endpoint (GitHub → HotPlex event-driven triggers)
+	if cfg.Webhook.Enabled && deps.CronScheduler != nil {
+		if cfg.Webhook.Secret == "" {
+			log.Warn("webhook enabled but secret is empty — rejecting for security")
+		} else {
+			webhookHandler := gateway.NewWebhookHandler(
+				deps.Ctx,
+				cfg.Webhook,
+				deps.CronScheduler,
+				log,
+			)
+			deps.WebhookHandler = webhookHandler
+			mux.Handle(cfg.Webhook.Path, webhookHandler)
+			log.Info("webhook handler registered", "path", cfg.Webhook.Path)
+		}
+	}
 
 	// Global favicon fallback using docs logo
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {

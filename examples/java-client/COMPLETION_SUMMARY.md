@@ -45,8 +45,6 @@ examples/java-client/
 │   │   ├── ControlData.java
 │   │   ├── PongData.java
 │   │   └── ProtocolConstants.java
-│   └── security/
-│       └── JwtTokenGenerator.java          # JWT 生成器 (191 行)
 ├── src/main/resources/
 │   ├── application.yml
 │   └── logback.xml
@@ -84,11 +82,10 @@ examples/java-client/
 - ✅ `sendControl()` - 发送控制命令
 - ✅ `sendPermissionResponse()` - 权限响应
 
-### 5. JWT 认证
-- ✅ ES256 签名
-- ✅ 与 Go 服务器兼容的密钥派生
-- ✅ 自动 token 生成
-- ✅ 可配置 TTL 和 scopes
+### 5. 认证
+- ✅ API Key 认证 (X-API-Key header)
+- ✅ Bot ID 多 bot 隔离 (X-Bot-ID header)
+- ✅ 可配置认证凭据
 
 ---
 
@@ -128,8 +125,8 @@ examples/java-client/
 
 ### Medium-Priority 重构 (1 项)
 
-7. **JWT Builder 重复** ✅
-   - 提取 `baseBuilder()` 辅助方法
+7. **Builder 方法重复** ✅
+   - 提取辅助方法
    - 减少 ~40 行重复代码
    - 防止细微的 bug
 
@@ -154,7 +151,7 @@ examples/java-client/
 
 ```bash
 export HOTPLEX_GATEWAY_URL=ws://localhost:8888
-export HOTPLEX_SIGNING_KEY=your-256-bit-secret-key-min-32-characters
+export HOTPLEX_API_KEY=your-api-key
 ```
 
 ### 2. 编译项目
@@ -183,14 +180,12 @@ mvn exec:java -Dexec.mainClass="dev.hotplex.example.InteractiveExample"
 ### 基础用法
 
 ```java
-// 创建 JWT 生成器
-JwtTokenGenerator tokenGen = new JwtTokenGenerator(signingKey, "hotplex");
-
 // 创建客户端
 HotPlexClient client = HotPlexClient.builder()
     .url("ws://localhost:8888")
     .workerType("claude-code")
-    .tokenGenerator(tokenGen)
+    .apiKey("your-api-key")
+    .botId("bot-123")
     .build();
 
 // 注册事件监听器
@@ -242,7 +237,8 @@ client.disconnect();
 HotPlexClient newClient = HotPlexClient.builder()
     .url("ws://localhost:8888")
     .workerType("claude-code")
-    .tokenGenerator(tokenGen)
+    .apiKey("your-api-key")
+    .botId("bot-123")
     .build();
 
 InitAckData resumed = newClient.resume(sessionId).get();
@@ -258,7 +254,8 @@ InitAckData resumed = newClient.resume(sessionId).get();
 HotPlexClient client = HotPlexClient.builder()
     .url(String)                    // 必需: Gateway URL
     .workerType(String)             // 必需: Worker 类型
-    .tokenGenerator(JwtTokenGenerator)  // 可选: JWT 生成器
+    .apiKey(String)                 // 可选: API Key
+    .botId(String)                  // 可选: Bot ID（多 bot 隔离）
     .build();
 ```
 

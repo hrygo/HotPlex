@@ -29,8 +29,8 @@ type mockAPISM struct {
 	mock.Mock
 }
 
-func (m *mockAPISM) CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir string, title string) (*session.SessionInfo, error) {
-	args := m.Called(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workDir, title)
+func (m *mockAPISM) CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir string, title string, clientKey string) (*session.SessionInfo, error) {
+	args := m.Called(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -115,8 +115,8 @@ type mockAPIBridge struct {
 	mock.Mock
 }
 
-func (m *mockAPIBridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string) error {
-	return m.Called(ctx, id, userID, botID, wt, allowedTools, workDir, platform, platformKey, title).Error(0)
+func (m *mockAPIBridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title, clientKey string, _ ...string) error {
+	return m.Called(ctx, id, userID, botID, wt, allowedTools, workDir, platform, platformKey, title, clientKey).Error(0)
 }
 
 func (m *mockAPIBridge) ResumeSession(ctx context.Context, id string, workDir string) error {
@@ -145,19 +145,42 @@ func (m *mockTurnsStore) QueryTurns(ctx context.Context, sessionID string, limit
 	return args.Get(0).([]*eventstore.TurnRecord), args.Error(1)
 }
 
-func (m *mockTurnsStore) QueryTurnsBefore(ctx context.Context, sessionID string, beforeSeq int64, limit int) ([]*eventstore.TurnRecord, error) {
-	args := m.Called(ctx, sessionID, beforeSeq, limit)
+func (m *mockTurnsStore) QueryTurnsBefore(ctx context.Context, sessionID string, beforeID int64, limit int) ([]*eventstore.TurnRecord, error) {
+	args := m.Called(ctx, sessionID, beforeID, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]*eventstore.TurnRecord), args.Error(1)
 }
 
+func (m *mockTurnsStore) QueryTurnStats(ctx context.Context, sessionID string) (*eventstore.TurnStats, error) {
+	args := m.Called(ctx, sessionID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*eventstore.TurnStats), args.Error(1)
+}
+
+func (m *mockTurnsStore) LatestGeneration(ctx context.Context, sessionID string) (int64, error) {
+	args := m.Called(ctx, sessionID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *mockTurnsStore) LatestTurnNum(ctx context.Context, sessionID string, generation int64) (int, error) {
+	args := m.Called(ctx, sessionID, generation)
+	return args.Get(0).(int), args.Error(1)
+}
+
+func (m *mockTurnsStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error) {
+	args := m.Called(ctx, cutoff)
+	return args.Get(0).(int64), args.Error(1)
+}
+
 // ─── Test helpers ───────────────────────────────────────────────────────────────
 
 func newTestAuth(t *testing.T) *security.Authenticator {
 	t.Helper()
-	return security.NewAuthenticator(&config.SecurityConfig{}, nil)
+	return security.NewAuthenticator(&config.SecurityConfig{})
 }
 
 func newTestAPI(t *testing.T, sm *mockAPISM, bridge *mockAPIBridge) *GatewayAPI {
@@ -190,7 +213,7 @@ func setupMux(api *GatewayAPI) *http.ServeMux {
 
 // ─── CreateSession tests ────────────────────────────────────────────────────────
 
-func TestCreateSession_TitlePreferred(t *testing.T) {
+func TestCreateSession_WithClientSessionID(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
@@ -199,10 +222,10 @@ func TestCreateSession_TitlePreferred(t *testing.T) {
 	// Get returns not found → no idempotency path
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
 	bridge.On("StartSession", mock.Anything, mock.Anything, "anonymous", "", worker.TypeClaudeCode,
-		([]string)(nil), "", "webchat", map[string]string(nil), "my-title").Return(nil)
+		([]string)(nil), "", "webchat", map[string]string(nil), "my-title", "client-1").Return(nil)
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?title=my-title", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=client-1&title=my-title", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp map[string]string
@@ -211,21 +234,7 @@ func TestCreateSession_TitlePreferred(t *testing.T) {
 	bridge.AssertExpectations(t)
 }
 
-func TestCreateSession_SessionIDOnlyRejected(t *testing.T) {
-	t.Parallel()
-	sm := new(mockAPISM)
-	bridge := new(mockAPIBridge)
-	api := newTestAPI(t, sm, bridge)
-
-	// session_id alone without title is rejected
-	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?session_id=fallback-id", nil))
-
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "title is required")
-}
-
-func TestCreateSession_MissingTitleAndSessionID(t *testing.T) {
+func TestCreateSession_MissingClientSessionID(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
@@ -235,7 +244,25 @@ func TestCreateSession_MissingTitleAndSessionID(t *testing.T) {
 	api.CreateSession(w, authedReq("POST", "/api/sessions", nil))
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "title is required")
+	require.Contains(t, w.Body.String(), "client_session_id is required")
+}
+
+func TestCreateSession_ClientSessionIDOnlyNoTitle(t *testing.T) {
+	t.Parallel()
+	sm := new(mockAPISM)
+	bridge := new(mockAPIBridge)
+	api := newTestAPI(t, sm, bridge)
+
+	// title is optional, client_session_id alone should work
+	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
+	bridge.On("StartSession", mock.Anything, mock.Anything, "anonymous", "", worker.TypeClaudeCode,
+		([]string)(nil), "", "webchat", map[string]string(nil), "", "csid-only").Return(nil)
+
+	w := httptest.NewRecorder()
+	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=csid-only", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	bridge.AssertExpectations(t)
 }
 
 func TestCreateSession_IdempotentActiveSession(t *testing.T) {
@@ -249,7 +276,7 @@ func TestCreateSession_IdempotentActiveSession(t *testing.T) {
 	// bridge.StartSession should NOT be called
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?title=test", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=test&title=test", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	bridge.AssertNotCalled(t, "StartSession", mock.Anything)
@@ -265,10 +292,10 @@ func TestCreateSession_DeletedSessionRecreated(t *testing.T) {
 	sm.On("Get", mock.Anything).Return(deleted, nil)
 	sm.On("DeletePhysical", mock.Anything, mock.Anything).Return(nil)
 	bridge.On("StartSession", mock.Anything, mock.Anything, "anonymous", "",
-		worker.TypeClaudeCode, ([]string)(nil), "", "webchat", map[string]string(nil), "test").Return(nil)
+		worker.TypeClaudeCode, ([]string)(nil), "", "webchat", map[string]string(nil), "test", "test-csid").Return(nil)
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?title=test", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=test-csid&title=test", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	sm.AssertCalled(t, "DeletePhysical", mock.Anything, mock.Anything)
@@ -283,11 +310,11 @@ func TestCreateSession_BridgeError(t *testing.T) {
 
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
 	bridge.On("StartSession", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(errTestBridge)
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?title=fail", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=fail&title=fail", nil))
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 	require.Contains(t, w.Body.String(), "failed to create session")
@@ -303,11 +330,11 @@ func TestCreateSession_WithWorkDir(t *testing.T) {
 
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
 	bridge.On("StartSession", mock.Anything, mock.Anything, "anonymous", "",
-		worker.TypeClaudeCode, ([]string)(nil), mock.Anything, "webchat", map[string]string(nil), "with-workdir").
+		worker.TypeClaudeCode, ([]string)(nil), mock.Anything, "webchat", map[string]string(nil), "with-workdir", "workdir-csid").
 		Return(nil)
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?title=with-workdir&work_dir=/tmp", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=workdir-csid&title=with-workdir&work_dir=/tmp", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	bridge.AssertExpectations(t)
@@ -616,7 +643,7 @@ func TestGetHistory_OwnershipCheck(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code)
 }
 
-func TestGetHistory_WithBeforeSeq(t *testing.T) {
+func TestGetHistory_WithBeforeID(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
@@ -625,13 +652,13 @@ func TestGetHistory_WithBeforeSeq(t *testing.T) {
 
 	sm.On("Get", "sess-1").Return(&session.SessionInfo{ID: "sess-1", UserID: "anonymous"}, nil)
 	records := []*eventstore.TurnRecord{
-		{Seq: 1},
+		{ID: 1},
 	}
 	ts.On("QueryTurnsBefore", mock.Anything, "sess-1", int64(5), 11).Return(records, nil)
 
 	mux := setupMux(api)
 	w := httptest.NewRecorder()
-	r := authedReq("GET", "/api/sessions/sess-1/history?before_seq=5&limit=10", nil)
+	r := authedReq("GET", "/api/sessions/sess-1/history?before_id=5&limit=10", nil)
 	mux.ServeHTTP(w, r)
 
 	require.Equal(t, http.StatusOK, w.Code)

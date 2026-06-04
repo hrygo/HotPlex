@@ -6,13 +6,12 @@ import "strings"
 // Separate from worker blocklists since BuildEnv must pass HOME/PATH/USER
 // through to worker processes.
 var cliProtectedVars = map[string]bool{
-	"HOME":          true,
-	"PATH":          true,
-	"USER":          true,
-	"SHELL":         true,
-	"CLAUDECODE":    true,
-	"GATEWAY_ADDR":  true,
-	"GATEWAY_TOKEN": true,
+	"HOME":         true,
+	"PATH":         true,
+	"USER":         true,
+	"SHELL":        true,
+	"CLAUDECODE":   true,
+	"GATEWAY_ADDR": true,
 }
 
 // IsProtected reports whether an environment variable key should not be

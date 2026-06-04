@@ -429,3 +429,86 @@ func TestToMP3_TranscodesNonMP3(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "ffmpeg")
 }
+
+// --- ParseOggDurationMs Tests ---
+
+func TestParseOggDurationMs_InvalidInput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		data []byte
+		want int
+	}{
+		{"nil", nil, 0},
+		{"empty", []byte{}, 0},
+		{"too short", []byte("OggS"), 0},
+		{"not ogg", make([]byte, 100), 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, ParseOggDurationMs(tt.data))
+		})
+	}
+}
+
+func TestParseOggDurationMs_SyntheticOgg(t *testing.T) {
+	t.Parallel()
+	// Build a minimal Ogg page with known granule position.
+	// Ogg Opus granule is at 48 kHz. 48000 samples = 1 second = 1000 ms.
+	ogg := makeOggPage(0, false, 48000)               // data page: 1s
+	ogg = append(ogg, makeOggPage(0, true, 96000)...) // EOS page: 2s total
+
+	assert.Equal(t, 2000, ParseOggDurationMs(ogg))
+}
+
+func TestParseOggDurationMs_SingleEOSPage(t *testing.T) {
+	t.Parallel()
+	// Single page with EOS, granule = 24000 (0.5s at 48kHz)
+	ogg := makeOggPage(0, true, 24000)
+	assert.Equal(t, 500, ParseOggDurationMs(ogg))
+}
+
+func TestParseOggDurationMs_ZeroGranule(t *testing.T) {
+	t.Parallel()
+	// Header page with granule=0 followed by data page with granule=14400 (0.3s)
+	ogg := makeOggPage(0, false, 0)
+	ogg = append(ogg, makeOggPage(0, true, 14400)...)
+	assert.Equal(t, 300, ParseOggDurationMs(ogg))
+}
+
+// makeOggPage creates a minimal valid Ogg page for testing.
+func makeOggPage(serial uint32, eos bool, granule uint64) []byte {
+	const pageSize = 27
+	buf := make([]byte, pageSize)
+	// Capture pattern "OggS"
+	buf[0] = 'O'
+	buf[1] = 'g'
+	buf[2] = 'g'
+	buf[3] = 'S'
+	// Version
+	buf[4] = 0
+	// Header type: EOS bit
+	if eos {
+		buf[5] = 0x04
+	}
+	// Granule position (little-endian uint64)
+	buf[6] = byte(granule)
+	buf[7] = byte(granule >> 8)
+	buf[8] = byte(granule >> 16)
+	buf[9] = byte(granule >> 24)
+	buf[10] = byte(granule >> 32)
+	buf[11] = byte(granule >> 40)
+	buf[12] = byte(granule >> 48)
+	buf[13] = byte(granule >> 56)
+	// Serial number (little-endian uint32)
+	buf[14] = byte(serial)
+	buf[15] = byte(serial >> 8)
+	buf[16] = byte(serial >> 16)
+	buf[17] = byte(serial >> 24)
+	// Page sequence number (4 bytes, zero)
+	// CRC (4 bytes, zero — not validated by parser)
+	// Number of segments = 0
+	buf[26] = 0
+	return buf
+}

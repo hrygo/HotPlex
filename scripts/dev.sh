@@ -114,6 +114,16 @@ start_gateway() {
         return 0
     fi
 
+    # Clean stale processes on the port (belt-and-suspenders, same as webchat).
+    local gw_port; gw_port="${GATEWAY_ADDR##*:}"
+    local stale; stale=$(lsof -ti:"$gw_port" 2>/dev/null || true)
+    if [[ -n "$stale" ]]; then
+        warn "Port $gw_port occupied (PID $stale), killing..."
+        echo "$stale" | xargs kill -9 2>/dev/null || true
+        sleep 1
+    fi
+    rm -f "$GATEWAY_PID"
+
     info "Starting gateway..."
     local binary="${BUILD_DIR}/${BIN_NAME}-$(go env GOOS)-$(go env GOARCH)"
     if [[ ! -x "$binary" ]]; then
@@ -125,7 +135,7 @@ start_gateway() {
     fi
 
     : > "$GATEWAY_LOG"
-    "$binary" gateway start -c "$CONFIG" >> "$GATEWAY_LOG" 2>&1 &
+    "$binary" gateway start -c "$CONFIG" 2>> "$GATEWAY_LOG" &
     local bg_pid=$!
     echo $bg_pid > "$GATEWAY_PID"
 
@@ -145,10 +155,7 @@ start_gateway() {
     done
 
     if kill -0 "$bg_pid" 2>/dev/null; then
-        # Show startup banner from log (best-effort, non-blocking).
-        local banner
-        banner=$(grep -vE '^(time=|\{"time":|[0-9]{4}/[0-9]{2}/[0-9]{2} )' "$GATEWAY_LOG" 2>/dev/null | sed '/^$/d')
-        [[ -n "$banner" ]] && echo "$banner"
+        info "Gateway started (PID $bg_pid)"
     else
         err "Gateway failed to start"
         tail -20 "$GATEWAY_LOG"
@@ -159,6 +166,9 @@ start_gateway() {
 
 stop_gateway() {
     kill_pidfile "$GATEWAY_PID" "gateway"
+    # Belt-and-suspenders: kill by port in case PID file was stale or missing.
+    local gw_port; gw_port="${GATEWAY_ADDR##*:}"
+    kill_port "$gw_port" "gateway (port)"
 }
 
 status_gateway() {

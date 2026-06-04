@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCircuitBreaker_StateTransitions(t *testing.T) {
@@ -33,17 +34,11 @@ func TestCircuitBreaker_StateTransitions(t *testing.T) {
 	// Circuit should be open
 	assert.Equal(t, CircuitOpen, cb.GetState())
 
-	// Wait for timeout
-	time.Sleep(100 * time.Millisecond)
-
-	// Execute in half-open state - should succeed and close
-	err := cb.Execute(context.Background(), func() error {
-		return nil
-	})
-	assert.NoError(t, err)
-
-	// Circuit should be closed now
-	assert.Equal(t, CircuitClosed, cb.GetState())
+	// Wait for timeout → half-open → success → closed
+	require.Eventually(t, func() bool {
+		err := cb.Execute(context.Background(), func() error { return nil })
+		return err == nil && cb.GetState() == CircuitClosed
+	}, 500*time.Millisecond, 20*time.Millisecond)
 }
 
 func TestCircuitBreaker_ManualReset(t *testing.T) {

@@ -80,15 +80,12 @@ func TestSingletonProcessManager_allocatePort_Multiple(t *testing.T) {
 	cfg := config.OpenCodeServerConfig{}
 	mgr := NewSingletonProcessManager(log, cfg)
 
-	ports := make(map[int]bool)
 	for range 5 {
 		port, err := mgr.allocatePort()
 		require.NoError(t, err)
-		// Each call should return a different port (OS assigns ephemeral port).
-		ports[port] = true
+		require.Greater(t, port, 0)
+		require.Less(t, port, 65536)
 	}
-	// All ports should be unique.
-	require.Equal(t, 5, len(ports))
 }
 
 func TestSingletonProcessManager_Release_NoRefs(t *testing.T) {

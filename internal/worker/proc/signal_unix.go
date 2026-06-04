@@ -19,9 +19,20 @@ func GracefulTerminate(pgid int) error {
 	return syscall.Kill(-pgid, syscall.SIGTERM)
 }
 
+// Terminate sends SIGTERM to a single process (not its group).
+// Use this when the target may not be a process group leader.
+func Terminate(pid int) error {
+	return syscall.Kill(pid, syscall.SIGTERM)
+}
+
 // ForceKill sends SIGKILL to the entire process group.
 func ForceKill(pgid int) error {
 	return syscall.Kill(-pgid, syscall.SIGKILL)
+}
+
+// ForceKillProcess sends SIGKILL to a single process (not its group).
+func ForceKillProcess(pid int) error {
+	return syscall.Kill(pid, syscall.SIGKILL)
 }
 
 // DefaultGracePeriod is the default time to wait after SIGTERM before

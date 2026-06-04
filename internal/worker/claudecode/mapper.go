@@ -192,46 +192,28 @@ func (m *Mapper) mapResult(p *ResultPayload) ([]*events.Envelope, error) {
 	}
 
 	if !p.Success {
+		msg := p.Message
+		if msg == "" {
+			msg = "worker execution failed"
+		}
 		return []*events.Envelope{
-			{
-				ID:        aep.NewID(),
-				SessionID: m.sessionID,
-				Seq:       m.seqGen(),
-				Event: events.Event{
-					Type: events.Error,
-					Data: events.ErrorData{
-						Code:    events.ErrCodeInternalError,
-						Message: p.Message,
-					},
-				},
-			},
-			{
-				ID:        aep.NewID(),
-				SessionID: m.sessionID,
-				Seq:       m.seqGen(),
-				Event: events.Event{
-					Type: events.Done,
-					Data: events.DoneData{
-						Success: false,
-						Stats:   stats,
-					},
-				},
-			},
+			events.NewEnvelope(aep.NewID(), m.sessionID, m.seqGen(), events.Error, events.ErrorData{
+				Code:    events.ErrCodeInternalError,
+				Message: msg,
+			}),
+			events.NewEnvelope(aep.NewID(), m.sessionID, m.seqGen(), events.Done, events.DoneData{
+				Success: false,
+				Stats:   stats,
+			}),
 		}, nil
 	}
 
-	return []*events.Envelope{{
-		ID:        aep.NewID(),
-		SessionID: m.sessionID,
-		Seq:       m.seqGen(),
-		Event: events.Event{
-			Type: events.Done,
-			Data: events.DoneData{
-				Success: true,
-				Stats:   stats,
-			},
-		},
-	}}, nil
+	return []*events.Envelope{
+		events.NewEnvelope(aep.NewID(), m.sessionID, m.seqGen(), events.Done, events.DoneData{
+			Success: true,
+			Stats:   stats,
+		}),
+	}, nil
 }
 
 // mapSystem converts system status to state event.

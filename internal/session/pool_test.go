@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -274,4 +275,61 @@ func TestPoolAttachMemory_Integrated(t *testing.T) {
 	pool.ReleaseMemory("user1")
 
 	require.Equal(t, int64(0), pool.UserMemory("user1"))
+}
+
+func TestPoolAcquireWithMemory_Success(t *testing.T) {
+	t.Parallel()
+
+	pool := NewPoolManager(nil, 10, 5, 1<<30)
+	require.Nil(t, pool.AcquireWithMemory("user1"))
+	require.Equal(t, int64(workerMemoryEstimate), pool.UserMemory("user1"))
+	pool.Release("user1")
+	require.Equal(t, int64(0), pool.UserMemory("user1"))
+}
+
+func TestPoolAcquireWithMemory_MemoryExceeded(t *testing.T) {
+	t.Parallel()
+
+	// Limit to 1 worker's worth of memory.
+	pool := NewPoolManager(nil, 10, 5, int64(workerMemoryEstimate))
+
+	require.Nil(t, pool.AcquireWithMemory("user1"))
+
+	err := pool.AcquireWithMemory("user1")
+	require.Error(t, err)
+	var pe *PoolError
+	require.True(t, errors.As(err, &pe))
+	require.Equal(t, poolErrKindMemoryExceeded, pe.Kind)
+
+	pool.Release("user1")
+}
+
+func TestPoolAcquireWithMemory_PoolExhausted(t *testing.T) {
+	t.Parallel()
+
+	pool := NewPoolManager(nil, 1, 5, 0)
+	require.Nil(t, pool.AcquireWithMemory("user1"))
+
+	err := pool.AcquireWithMemory("user2")
+	require.Error(t, err)
+	var pe *PoolError
+	require.True(t, errors.As(err, &pe))
+	require.Equal(t, poolErrKindExhausted, pe.Kind)
+
+	pool.Release("user1")
+}
+
+func TestPoolAcquireWithMemory_UserQuotaExceeded(t *testing.T) {
+	t.Parallel()
+
+	pool := NewPoolManager(nil, 10, 1, 0)
+	require.Nil(t, pool.AcquireWithMemory("user1"))
+
+	err := pool.AcquireWithMemory("user1")
+	require.Error(t, err)
+	var pe *PoolError
+	require.True(t, errors.As(err, &pe))
+	require.Equal(t, poolErrKindUserQuotaExceeded, pe.Kind)
+
+	pool.Release("user1")
 }

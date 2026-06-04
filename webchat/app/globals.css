@@ -394,6 +394,7 @@ body {
 .msg-assistant-body {
   flex: 1;
   min-width: 0;
+  padding-top: 5px;
   font-size: 0.9375rem;
   color: var(--text-secondary);
   line-height: 1.75;

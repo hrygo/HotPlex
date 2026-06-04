@@ -2,7 +2,6 @@ package cron
 
 import (
 	"context"
-	"strings"
 	"time"
 )
 
@@ -19,43 +18,14 @@ var backoffDurations = []time.Duration{
 // After exhausting the list, it returns 1 hour.
 func backoff(consecutiveErrs int) time.Duration {
 	if consecutiveErrs <= 0 {
-		return backoffDurations[0]
+		return 0
 	}
 	if consecutiveErrs >= len(backoffDurations) {
 		return backoffDurations[len(backoffDurations)-1]
 	}
-	return backoffDurations[consecutiveErrs]
-}
-
-// isTemporaryError classifies an execution error as retriable or permanent.
-// Temporary: timeout, rate-limit, 5xx.
-// Permanent: everything else (invalid config, auth failure, etc.).
-func isTemporaryError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return containsAny(msg,
-		"timeout",
-		"deadline exceeded",
-		"rate limit",
-		"429",
-		"500",
-		"502",
-		"503",
-		"504",
-		"connection refused",
-		"temporary",
-	)
-}
-
-func containsAny(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
+	// First error (consecutiveErrs=1) should get the shortest backoff (30s).
+	// Subtract 1 so the index maps: 1→0 (30s), 2→1 (1m), 3→2 (5m), etc.
+	return backoffDurations[consecutiveErrs-1]
 }
 
 // maxRetries returns the effective max retries for a job (default 3).
@@ -72,7 +42,9 @@ func (s *Scheduler) scheduleRetry(ctx context.Context, job *CronJob) {
 	nextRun := time.Now().Add(delay)
 	job.State.NextRunAtMs = nextRun.UnixMilli()
 	job.State.RetryCount++
-	_ = s.store.UpdateState(ctx, job.ID, job.State)
+	if err := s.store.UpdateState(ctx, job.ID, job.State); err != nil {
+		s.log.Error("cron: persist retry state", "job_id", job.ID, "err", err)
+	}
 	s.mergeJobState(job.ID, job.State, false)
 
 	s.log.Info("cron: retry scheduled",

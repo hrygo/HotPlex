@@ -2,8 +2,6 @@
 title: 飞书 (Feishu) 集成教程
 weight: 2
 description: 一步步将 HotPlex Gateway 接入飞书，实现 AI 对话、语音消息和权限交互
-persona: developer
-difficulty: beginner
 ---
 
 # 飞书集成教程
@@ -34,28 +32,74 @@ difficulty: beginner
 
 ### 1.3 配置权限
 
-进入「权限管理」，搜索并开通以下权限：
+进入「权限管理」→ 点击右上角「批量导入/导出权限」→ 选择「导入权限」→ 粘贴以下 JSON：
 
-| 权限 | 权限标识 | 用途 |
-|------|---------|------|
-| 获取与发送单聊、群聊消息 | `im:message` | 收发消息 |
-| 以应用身份发消息 | `im:message:send_as_bot` | 机器人发送 |
-| 获取与上传图片或文件资源 | `im:resource` | 语音/文件 |
-| 获取群组信息 | `im:chat` | 群聊策略 |
+```json
+{
+  "scopes": {
+    "tenant": [
+      "im:message",
+      "im:message:send_as_bot",
+      "im:message.group_msg",
+      "im:message.group_msg:readonly",
+      "im:message.p2p_msg",
+      "im:message.p2p_msg:readonly",
+      "im:message.reactions:write_only",
+      "im:resource",
+      "im:resource:download",
+      "im:chat",
+      "im:chat:readonly",
+      "bot:info"
+    ]
+  }
+}
+```
 
-> 如需飞书云端 STT，额外开通「语音转文字」权限（`speech:stt`）。
+点击「确定」→「申请开通」（企业内部应用通常会自动通过）→ 发布新版本 → 申请线上发布。
 
-点击「批量开通」→ 发布新版本 → 申请线上发布。
+#### 权限用途说明
+
+| 权限标识 | 用途 | 对应 API |
+|---------|------|---------|
+| `im:message` | 接收单聊和群聊消息 | WebSocket 事件接收 |
+| `im:message:send_as_bot` | 以机器人身份发送/回复/更新消息 | `Im.Message.Create`、`Im.Message.Reply`、`Im.Message.Patch`、CardKit 流式更新 |
+| `im:message.group_msg` | 处理群聊消息 | 群聊消息接收 |
+| `im:message.group_msg:readonly` | 读取群聊消息 | 群聊消息事件 |
+| `im:message.p2p_msg` | 处理单聊消息 | 单聊消息接收 |
+| `im:message.p2p_msg:readonly` | 读取单聊消息 | 单聊消息事件 |
+| `im:message.reactions:write_only` | 添加/移除 Emoji reaction（Typing 指示器） | `MessageReaction.Create`、`MessageReaction.Delete` |
+| `im:resource` | 上传 TTS 语音文件 | `Im.File.Create`（Edge-TTS 语音回复） |
+| `im:resource:download` | 下载用户发送的图片/文件/音频/视频/贴纸 | `Im.MessageResource.Get` |
+| `im:chat` | 获取群组信息（群聊策略执行） | 群聊访问控制 |
+| `im:chat:readonly` | 读取群组元数据 | 群聊信息查询 |
+| `bot:info` | 获取机器人自身 OpenID 和名称 | `GET /open-apis/bot/v3/info`（启动时自动调用） |
+
+#### 可选权限
+
+| 权限标识 | 用途 | 启用条件 |
+|---------|------|---------|
+| `speech:stt` | 飞书云端语音转文字 | `STT_PROVIDER=feishu` 或 `feishu+local` 时必须 |
+
+> 如果使用本地 STT 引擎（默认），则无需 `speech:stt` 权限。
 
 ### 1.4 订阅事件
 
 进入「事件订阅」：
 
 1. 选择 **WebSocket 模式**（HotPlex 使用 WS 长连接，无需公网回调地址）
-2. 添加事件：`im.message.receive_v1`（接收消息）
+2. 添加以下事件：
+
+| 事件 | 事件标识 | 必要性 | 用途 |
+|------|---------|-------|------|
+| 接收消息 | `im.message.receive_v1` | **必须** | 接收所有类型的用户消息（文本/富文本/图片/文件/音频/视频/贴纸/卡片） |
+| 进入机器人单聊 | `chat_access.event.bot_p2p_chat_entered_v1` | **必须** | 新用户/回访用户进入单聊时发送欢迎卡片 |
+| 消息已读 | `im.message.read_v1` | 推荐 | 消息已读状态追踪 |
+| 新增表情回复 | `im.message.reaction.created_v1` | 推荐 | Emoji reaction 事件 |
+| 删除表情回复 | `im.message.reaction.deleted_v1` | 推荐 | Emoji reaction 事件 |
+
 3. （推荐）设置 **Encrypt Key** 和 **Verification Token**
 
-**验证**：事件订阅页面显示「已启用」且 `im.message.receive_v1` 状态为正常。
+**验证**：事件订阅页面显示「已启用」且所有事件状态为正常。
 
 ### 1.5 一键配置速查
 
@@ -145,8 +189,8 @@ hotplex service logs -f
 
 发送需要执行命令的请求（如「列出当前目录文件」）：
 
-1. Bot 应发送权限确认卡片
-2. 回复「允许」或「拒绝」
+1. Bot 发送带交互按钮的权限确认卡片
+2. 点击卡片上的「✓ 允许」或「✗ 拒绝」按钮（也可回复文字「允许」或「拒绝」）
 3. **期望**：Bot 根据回复继续执行或取消
 
 ### 4.3 语音消息
@@ -199,9 +243,9 @@ HOTPLEX_MESSAGING_TTS_MAX_CHARS=150
 <details>
 <summary>交互与指示器</summary>
 
-**权限交互**：Bot 发送确认卡片时，用户直接回复文本「允许」或「拒绝」即可，无需点击按钮。
+**权限交互**：Bot 发送带交互按钮的确认卡片。用户可点击卡片上的「✓ 允许」或「✗ 拒绝」按钮直接操作，也可回复文字「允许」或「拒绝」。
 
-**Typing 指示器**：Bot 收到消息后自动添加 👀 emoji reaction，回复完成后自动移除。
+**选项交互**：当 Bot 发送多选项问题（如 AskUserQuestion）时，卡片包含可点击的选项按钮。点击按钮即可直接选择对应选项。也可手动输入选项文本或自定义答案。
 
 这些行为为内置默认，无需额外配置。
 

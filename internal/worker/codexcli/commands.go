@@ -1,0 +1,64 @@
+package codexcli
+
+import (
+	"context"
+	"fmt"
+)
+
+type ServerCommander struct {
+	manager  *CodexAppServerManager
+	threadID string
+}
+
+func NewServerCommander(manager *CodexAppServerManager, threadID string) *ServerCommander {
+	return &ServerCommander{manager: manager, threadID: threadID}
+}
+
+func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
+	switch subtype {
+	case "set_model":
+		return nil, fmt.Errorf("codexcli: set_model not supported")
+	case "get_context_usage":
+		resp, err := sc.manager.Call("thread/read", map[string]string{
+			"threadId": sc.threadID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("codexcli: get_context_usage: %w", err)
+		}
+		result := map[string]any{
+			"raw": string(resp),
+		}
+		return result, nil
+	case "mcp_status":
+		resp, err := sc.manager.ListMCPServerStatus()
+		if err != nil {
+			return nil, fmt.Errorf("codexcli: mcp_status: %w", err)
+		}
+		return map[string]any{"status": resp}, nil
+	case "mcp_refresh":
+		if err := sc.manager.RefreshMCPServer(); err != nil {
+			return nil, fmt.Errorf("codexcli: mcp_refresh: %w", err)
+		}
+		return map[string]any{"status": "ok"}, nil
+	case "mcp_oauth":
+		name, _ := body["server_name"].(string)
+		if name == "" {
+			return nil, fmt.Errorf("codexcli: mcp_oauth: missing server_name")
+		}
+		resp, err := sc.manager.MCPServerOAuthLogin(name)
+		if err != nil {
+			return nil, fmt.Errorf("codexcli: mcp_oauth: %w", err)
+		}
+		return map[string]any{"oauth_url": string(resp)}, nil
+	default:
+		return nil, fmt.Errorf("codexcli: unknown control subtype: %s", subtype)
+	}
+}
+
+func (sc *ServerCommander) Compact(ctx context.Context, _ map[string]any) error {
+	_, err := sc.manager.CompactThread(sc.threadID)
+	if err != nil {
+		return fmt.Errorf("codexcli: compact: %w", err)
+	}
+	return nil
+}

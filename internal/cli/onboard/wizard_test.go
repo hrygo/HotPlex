@@ -82,6 +82,9 @@ func TestStepConfigGen_SlackEnabled(t *testing.T) {
 }
 
 func TestStepWorkerDep(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that probes external binary dependencies")
+	}
 	t.Parallel()
 	tests := []struct {
 		name       string
@@ -111,8 +114,7 @@ func TestBuildEnvContent(t *testing.T) {
 	t.Parallel()
 	t.Run("minimal", func(t *testing.T) {
 		t.Parallel()
-		got := buildEnvContent("jwt", "admin", messagingPlatformConfig{}, messagingPlatformConfig{}, "")
-		require.Contains(t, got, "HOTPLEX_JWT_SECRET=jwt")
+		got := buildEnvContent("admin", messagingPlatformConfig{}, messagingPlatformConfig{}, "")
 		require.Contains(t, got, "HOTPLEX_ADMIN_TOKEN_1=admin")
 		require.NotContains(t, got, "HOTPLEX_WORKER_TYPE")
 		require.NotContains(t, got, "# ── Slack ──")
@@ -127,7 +129,7 @@ func TestBuildEnvContent(t *testing.T) {
 				"HOTPLEX_MESSAGING_SLACK_APP_TOKEN": "xapp-test",
 			},
 		}
-		got := buildEnvContent("jwt", "admin", slack, messagingPlatformConfig{}, "")
+		got := buildEnvContent("admin", slack, messagingPlatformConfig{}, "")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_ENABLED=true")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=xoxb-test")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_APP_TOKEN=xapp-test")
@@ -144,7 +146,7 @@ func TestBuildEnvContent(t *testing.T) {
 				"HOTPLEX_MESSAGING_FEISHU_APP_SECRET": "secret456",
 			},
 		}
-		got := buildEnvContent("jwt", "admin", messagingPlatformConfig{}, feishu, "")
+		got := buildEnvContent("admin", messagingPlatformConfig{}, feishu, "")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_ENABLED=true")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_APP_ID=cli_123")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_APP_SECRET=secret456")
@@ -165,7 +167,7 @@ func TestBuildEnvContent(t *testing.T) {
 				"HOTPLEX_MESSAGING_FEISHU_APP_ID": "cli_789",
 			},
 		}
-		got := buildEnvContent("jwt", "admin", slack, feishu, "")
+		got := buildEnvContent("admin", slack, feishu, "")
 		require.Contains(t, got, "# ── Slack ──")
 		require.Contains(t, got, "# ── Feishu ──")
 	})
@@ -176,7 +178,7 @@ func TestBuildEnvContent(t *testing.T) {
 			enabled:     true,
 			credentials: map[string]string{},
 		}
-		got := buildEnvContent("jwt", "admin", slack, messagingPlatformConfig{}, "")
+		got := buildEnvContent("admin", slack, messagingPlatformConfig{}, "")
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_ENABLED=true")
 		require.NotContains(t, got, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=")
 	})
@@ -186,16 +188,13 @@ func TestStepWriteConfig(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
-	s := stepWriteConfig(envPath, "jwt-secret", "admin-token", messagingPlatformConfig{}, messagingPlatformConfig{}, false, WizardOptions{})
+	s := stepWriteConfig(envPath, "admin-token", messagingPlatformConfig{}, messagingPlatformConfig{}, false, WizardOptions{})
 	require.Equal(t, "pass", s.Status)
-	data, err := os.ReadFile(envPath)
-	require.NoError(t, err)
-	require.Contains(t, string(data), "HOTPLEX_JWT_SECRET=jwt-secret")
 }
 
 func TestStepWriteConfig_InvalidPath(t *testing.T) {
 	t.Parallel()
-	s := stepWriteConfig("/nonexistent/dir/.env", "jwt", "admin", messagingPlatformConfig{}, messagingPlatformConfig{}, false, WizardOptions{})
+	s := stepWriteConfig("/nonexistent/dir/.env", "admin", messagingPlatformConfig{}, messagingPlatformConfig{}, false, WizardOptions{})
 	require.Equal(t, "fail", s.Status)
 }
 
@@ -320,6 +319,9 @@ func TestPromptCommaList(t *testing.T) {
 }
 
 func TestRun_NonInteractive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	s := stepEnvPreCheck()
 	if s.Status == "fail" {
 		t.Skip("skipping: environment pre-check fails on this system: " + s.Detail)
@@ -354,7 +356,6 @@ func TestRun_NonInteractive(t *testing.T) {
 
 	envData, readErr := os.ReadFile(filepath.Join(dir, ".env"))
 	require.NoError(t, readErr)
-	require.Contains(t, string(envData), "HOTPLEX_JWT_SECRET=")
 	require.Contains(t, string(envData), "HOTPLEX_ADMIN_TOKEN_1=")
 
 	configData, configErr := os.ReadFile(configPath)
@@ -370,6 +371,9 @@ func TestRun_NonInteractive(t *testing.T) {
 }
 
 func TestRun_NonInteractive_WithSlack(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	s := stepEnvPreCheck()
 	if s.Status == "fail" {
 		t.Skip("skipping: environment pre-check fails on this system: " + s.Detail)

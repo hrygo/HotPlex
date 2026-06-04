@@ -18,6 +18,32 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
+// waitKillTimeout is the maximum time to wait for Worker.Wait() to return
+// after calling Kill(). If Wait() still hasn't returned, forwardEvents
+// abandons the wait to prevent permanent goroutine blocking.
+const waitKillTimeout = 5 * time.Second
+
+// forwardContext carries per-session mutable state for the event forwarding loop.
+// Ownership: exclusively owned by the single forwardEvents goroutine per session.
+// No concurrent access — all fields are read/written from that goroutine only,
+// except turnTimerFired which uses atomic.Bool for timer callback safety.
+type forwardContext struct {
+	sessionID      string
+	workerType     worker.WorkerType
+	sessPlatform   string
+	sessOwner      string
+	startTime      time.Time
+	turnStartTime  time.Time
+	firstEvent     bool
+	doneReceived   bool
+	myGen          int64
+	turnText       strings.Builder
+	lastError      *events.ErrorData
+	pendingError   *events.Envelope
+	turnTimerFired atomic.Bool
+	turnTimer      *time.Timer
+}
+
 // forwardEvents proxies worker events to the hub with seq assignment.
 // EVT-004: if msgStore is configured, it appends to the event log on done events.
 // AEP-020: after the recv channel closes, calls Worker.Wait() to determine exit
@@ -28,231 +54,335 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			b.log.Error("bridge: panic in forwardEvents", "session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
+
 	workerType := w.Type()
 	b.log.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID, "worker_type", workerType, "resumed", opts.resumed)
 
-	// Cache session info for event capture (avoids per-turn DB lookup).
-	var sessPlatform, sessOwner string
+	fc := &forwardContext{
+		sessionID:     sessionID,
+		workerType:    workerType,
+		startTime:     time.Now(),
+		turnStartTime: time.Now(),
+		firstEvent:    true,
+	}
+
 	if b.collector != nil && b.sm != nil {
 		if si, err := b.sm.Get(context.Background(), sessionID); err == nil {
-			sessPlatform = si.Platform
-			sessOwner = si.OwnerID
+			fc.sessPlatform = si.Platform
+			fc.sessOwner = si.OwnerID
+			if fc.sessOwner == "" {
+				fc.sessOwner = si.UserID
+			}
 		}
 	}
-	startTime := time.Now()
-	turnStartTime := startTime
-	firstEvent := true
-	doneReceived := false
 
-	// Capture reset generation at goroutine start. If a reset happens while
-	// this goroutine is running, the generation will differ when we check
-	// after the recv channel closes, and we exit cleanly without crash handling.
-	var myGen int64
 	if rg, ok := w.(resetGenerationer); ok {
-		myGen = rg.LoadResetGeneration()
+		fc.myGen = rg.LoadResetGeneration()
 	}
 
-	// LLM retry: accumulate turn text and error data for retry detection.
-	var turnText strings.Builder
-	var lastError *events.ErrorData
-	var pendingError *events.Envelope // buffered error event; suppressed if retry triggers
+	acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
+	if acc.Generation == 0 {
+		gen := int64(1)
+		if b.turnsQuerier != nil {
+			genCtx, genCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
+			genCancel()
+			if latest > 0 {
+				gen = latest
+			}
+		}
+		acc.Generation = gen
+	}
+	if acc.TurnCount == 0 && b.turnsQuerier != nil {
+		tnCtx, tnCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation)
+		tnCancel()
+		if err != nil {
+			b.log.Warn("turns: restore turn num", "error", err)
+		}
+		if tn > 0 {
+			acc.TurnCount = tn
+		}
+	}
 
-	// Turn timeout: kill worker if a single turn exceeds the configured duration.
-	// Timer resets on every received event; stops on done.
-	var turnTimerFired atomic.Bool
-	var turnTimer *time.Timer
 	if b.turnTimeout > 0 {
-		turnTimer = time.AfterFunc(b.turnTimeout, func() {
-			if !turnTimerFired.CompareAndSwap(false, true) {
+		fc.turnTimer = time.AfterFunc(b.turnTimeout, func() {
+			if !fc.turnTimerFired.CompareAndSwap(false, true) {
 				return
 			}
 			b.log.Warn("bridge: turn timeout exceeded, terminating worker",
 				"session_id", sessionID, "worker_type", workerType, "turn_timeout", b.turnTimeout)
 			b.sendError(sessionID, events.ErrCodeTurnTimeout, "Turn exceeded %v time limit and was terminated.", b.turnTimeout)
-			b.captureSyntheticEvent(sessionID, "turn_timeout", fmt.Sprintf("Turn exceeded %v time limit", b.turnTimeout), eventstore.SourceTimeout)
+			acc := b.getOrInitAccum(sessionID, "", fc.startTime)
+			b.captureSyntheticEvent(syntheticTurnParams{
+				SessionID:  sessionID,
+				Reason:     "turn_timeout",
+				Message:    fmt.Sprintf("Turn exceeded %v time limit", b.turnTimeout),
+				Source:     eventstore.SourceTimeout,
+				Platform:   fc.sessPlatform,
+				Owner:      fc.sessOwner,
+				Model:      acc.ModelName,
+				Generation: acc.Generation,
+				TurnNum:    acc.TurnCount,
+			})
 			_ = w.Terminate(context.Background())
 		})
-		defer turnTimer.Stop()
+		defer fc.turnTimer.Stop()
 	}
 
 	recvCh := w.Conn().Recv()
-
 	for env := range recvCh {
-
-		if env.Event.Type == events.Error {
-			b.log.Warn("bridge: received error from worker", "session_id", sessionID, "worker_type", workerType, "data", env.Event.Data)
-			if ed, ok := env.Event.Data.(events.ErrorData); ok {
-				lastError = &ed
-			}
-			if b.retryCtrl != nil {
-				cloned := events.Clone(env)
-				cloned.SessionID = sessionID
-				pendingError = cloned
-				continue
-			}
-		} else if b.log.Enabled(context.Background(), slog.LevelDebug) {
-			b.log.Debug("bridge: received event from worker", "session_id", sessionID, "worker_type", workerType, "event_type", env.Event.Type)
-		}
-
-		if firstEvent {
-			b.persistWorkerSessionID(w, sessionID)
-			turnStartTime = time.Now() // exclude worker cold-start from Turn 1
-			firstEvent = false
-		}
-
-		if turnTimer != nil && !turnTimerFired.Load() {
-			turnTimer.Reset(b.turnTimeout)
-		}
-		if turnTimerFired.Load() {
-			continue
-		}
-
-		env = events.Clone(env)
-		env.SessionID = sessionID
-		env.OwnerID = sessOwner
-
-		var capturedDeltaContent string
-		if env.Event.Type == events.MessageDelta || env.Event.Type == events.Message {
-			if content := extractMessageContent(env); content != "" {
-				turnText.WriteString(content)
-				if env.Event.Type == events.MessageDelta {
-					capturedDeltaContent = content
-				}
-			}
-		}
-
-		// Stats accumulation: track tool calls and merge per-turn stats on done.
-		switch env.Event.Type {
-		case events.ToolCall:
-			acc := b.getOrInitAccum(sessionID, "", startTime)
-			acc.ToolCallCount++
-			if tc, ok := asToolCallData(env.Event.Data); ok {
-				if acc.ToolNames == nil {
-					acc.ToolNames = make(map[string]int)
-				}
-				acc.ToolNames[tc.Name]++
-			}
-		case events.Done:
-			if turnTimer != nil {
-				turnTimer.Stop()
-			}
-			acc := b.getOrInitAccum(sessionID, opts.workDir, startTime)
-			if dd, ok := asDoneData(env.Event.Data); ok {
-				acc.mergePerTurnStats(dd)
-			}
-			acc.TurnCount++
-			acc.TurnDurationMs = time.Since(turnStartTime).Milliseconds()
-			acc.computePerTurnDeltas()
-
-			// Query precise context usage from worker via control channel.
-			// Silently falls back to aggregated Done stats on failure.
-			if cr, ok := w.(worker.ControlRequester); ok {
-				fetchContextUsage(cr, acc)
-			}
-
-			b.injectSessionStats(env, acc)
-			acc.resetPerTurn()
-			if b.log.Enabled(context.Background(), slog.LevelDebug) {
-				b.log.Debug("bridge: turn completed",
-					"session_id", sessionID, "worker_type", workerType, "turn", acc.TurnCount,
-					"duration", time.Since(turnStartTime).Round(time.Millisecond),
-					"text_len", turnText.Len(), "tools", acc.ToolCallCount)
-			}
-		}
-
-		// UI Reconciliation (Fallback full message if silent dropped)
-		if env.Event.Type == events.Done {
-			doneReceived = true
-			b.resetCrashLoop(sessionID)
-			if b.hub.GetAndClearDropped(sessionID) {
-				b.log.Warn("bridge: handling dropped deltas before done", "session_id", sessionID, "worker_type", workerType)
-
-				if dataMap, ok := env.Event.Data.(map[string]any); ok {
-					if stats, ok := dataMap["stats"].(map[string]any); ok {
-						stats["dropped"] = true
-					} else {
-						dataMap["stats"] = map[string]any{"dropped": true}
-					}
-				} else if doneData, ok := env.Event.Data.(events.DoneData); ok {
-					doneData.Dropped = true
-					env.Event.Data = doneData
-				} else if doneDataPtr, ok := env.Event.Data.(*events.DoneData); ok {
-					doneDataPtr.Dropped = true
-					env.Event.Data = doneDataPtr
-				}
-			}
-		}
-
-		if err := b.hub.SendToSession(context.Background(), env); err != nil {
-			b.log.Warn("bridge: forward event failed", "err", err, "session_id", sessionID, "worker_type", workerType, "event_type", env.Event.Type)
-		}
-
-		if capturedDeltaContent != "" && b.collector != nil {
-			b.collector.CaptureDeltaString(sessionID, env.Seq, capturedDeltaContent)
-		} else if env.Event.Type != events.MessageDelta {
-			b.captureEvent(sessionID, env.Seq, env.Event.Type, env.Event.Data)
-		}
-
-		// Flush buffered error on non-Done events (no retry decision possible yet).
-		if pendingError != nil && env.Event.Type != events.Done {
-			if err := b.hub.SendToSession(context.Background(), pendingError); err != nil {
-				b.log.Warn("bridge: forward buffered error failed", "err", err, "session_id", sessionID, "worker_type", workerType)
-			}
-			b.captureEvent(sessionID, pendingError.Seq, pendingError.Event.Type, pendingError.Event.Data)
-			pendingError = nil
-		}
-
-		// LLM retry: check after Done is forwarded.
-		if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || turnText.Len() > 0) {
-			if shouldRetry, attempt := b.retryCtrl.ShouldRetry(sessionID, lastError); shouldRetry {
-				pendingError = nil
-				b.autoRetry(context.Background(), w, sessionID, attempt)
-				turnText.Reset()
-				if b.collector != nil {
-					b.collector.ResetSession(sessionID)
-				}
-				lastError = nil
-				continue
-			}
-			if pendingError != nil {
-				if err := b.hub.SendToSession(context.Background(), pendingError); err != nil {
-					b.log.Warn("bridge: forward buffered error failed", "err", err, "session_id", sessionID, "worker_type", workerType)
-				}
-				b.captureEvent(sessionID, pendingError.Seq, pendingError.Event.Type, pendingError.Event.Data)
-				pendingError = nil
-			}
-			b.retryCtrl.RecordSuccess(sessionID)
-			lastError = nil
-		}
-
-		if env.Event.Type == events.Done {
-			turnText.Reset()
-			turnStartTime = time.Now()
-		}
+		b.processForwardedEvent(env, w, opts, fc)
 	}
 
 	// Flush buffered error that never reached a retry decision point.
-	if pendingError != nil {
-		if err := b.hub.SendToSession(context.Background(), pendingError); err != nil {
+	if fc.pendingError != nil {
+		if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
 			b.log.Warn("bridge: flush pending error on exit failed", "session_id", sessionID, "err", err)
 		}
-		b.captureEvent(sessionID, pendingError.Seq, pendingError.Event.Type, pendingError.Event.Data)
-		pendingError = nil
+		b.captureEvent(sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data)
+		fc.pendingError = nil
 	}
 
 	b.handleWorkerExit(w, workerExitParams{
 		sessionID:      sessionID,
 		workerType:     workerType,
 		opts:           opts,
-		startTime:      startTime,
-		myGen:          myGen,
-		doneReceived:   doneReceived,
-		turnText:       turnText.String(),
-		turnTextLen:    turnText.Len(),
-		turnTimerFired: turnTimerFired.Load(),
-		sessPlatform:   sessPlatform,
-		sessOwner:      sessOwner,
+		startTime:      fc.startTime,
+		myGen:          fc.myGen,
+		doneReceived:   fc.doneReceived,
+		turnText:       fc.turnText.String(),
+		turnTextLen:    fc.turnText.Len(),
+		turnTimerFired: fc.turnTimerFired.Load(),
+		sessPlatform:   fc.sessPlatform,
+		sessOwner:      fc.sessOwner,
 	})
+}
+
+// processForwardedEvent handles a single worker event in the forwarding loop.
+func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, opts forwardOpts, fc *forwardContext) {
+	sessionID := fc.sessionID
+	workerType := fc.workerType
+
+	// OCS in-place reset detection.
+	if rg, ok := w.(resetGenerationer); ok {
+		currentGen := rg.LoadResetGeneration()
+		if currentGen != fc.myGen {
+			acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
+			if acc.AppliedResetGen < currentGen {
+				acc.Generation++
+				acc.AppliedResetGen = currentGen
+			}
+			acc.TurnCount = 0
+			fc.turnText.Reset()
+			fc.myGen = currentGen
+		}
+	}
+
+	// Buffer error events for potential LLM retry.
+	if env.Event.Type == events.Error {
+		b.log.Warn("bridge: received error from worker", "session_id", sessionID, "worker_type", workerType, "data", env.Event.Data)
+		if ed, ok := env.Event.Data.(events.ErrorData); ok {
+			fc.lastError = &ed
+		}
+		// When LLM retry is active, buffer the error and suppress forwarding.
+		// The error is flushed only if retry decides NOT to retry (after Done).
+		if b.retryCtrl != nil {
+			cloned := events.Clone(env)
+			cloned.SessionID = sessionID
+			fc.pendingError = cloned
+			return
+		}
+	}
+
+	if fc.firstEvent {
+		b.persistWorkerSessionID(w, sessionID)
+		fc.turnStartTime = time.Now()
+		fc.firstEvent = false
+	}
+
+	// New turn detection: state(running) marks the beginning of a new turn.
+	// Reset doneReceived so crash detection applies to this turn (prevents
+	// stale true from a previous turn masking a crash in the current turn).
+	if env.Event.Type == events.State {
+		fc.doneReceived = false
+	}
+
+	if fc.turnTimer != nil && !fc.turnTimerFired.Load() {
+		fc.turnTimer.Reset(b.turnTimeout)
+	}
+	if fc.turnTimerFired.Load() {
+		return
+	}
+
+	env = events.Clone(env)
+	env.SessionID = sessionID
+	env.OwnerID = fc.sessOwner
+
+	deltaContent, reasoningContent := b.extractTurnContent(env, fc)
+
+	// Stats accumulation.
+	b.accumulateStats(env, w, opts, fc)
+
+	// Done processing: mark received, reconcile dropped deltas.
+	if env.Event.Type == events.Done {
+		fc.doneReceived = true
+		b.resetCrashLoop(sessionID)
+		b.reconcileDroppedDeltas(env, fc)
+	}
+
+	if err := b.hub.SendToSession(context.Background(), env); err != nil {
+		b.log.Warn("bridge: forward event failed", "err", err, "session_id", sessionID, "worker_type", workerType, "event_type", env.Event.Type)
+	}
+
+	b.captureForwardedEvent(env, deltaContent, reasoningContent, fc)
+
+	// Flush buffered error on non-Done events.
+	b.flushPendingError(fc, true)
+
+	// LLM retry: check after Done is forwarded.
+	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
+		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(sessionID, fc.lastError); shouldRetry {
+			fc.pendingError = nil
+			// Pre-register cancel channel before launching goroutine to close
+			// the race window where CancelRetry can't find the channel.
+			cancelCh := make(chan struct{})
+			b.retryCancelMu.Lock()
+			b.retryCancel[sessionID] = cancelCh
+			b.retryCancelMu.Unlock()
+			// Run autoRetry asynchronously so forwardEvents continues reading
+			// from recvCh. This prevents the goroutine from blocking during
+			// the backoff period — if the worker crashes, the for-range loop
+			// detects recvCh closure immediately instead of waiting for the
+			// backoff timer to expire. The goroutine uses shutdownCtx so it
+			// cancels promptly during bridge shutdown.
+			go b.autoRetry(b.shutdownCtx, w, sessionID, attempt, cancelCh)
+			fc.turnText.Reset()
+			if b.collector != nil {
+				b.collector.ResetSession(sessionID)
+			}
+			fc.lastError = nil
+			return // continue — retry produces new events on recv
+		}
+		b.flushPendingError(fc, false)
+		b.retryCtrl.RecordSuccess(sessionID)
+		fc.lastError = nil
+	}
+
+	if env.Event.Type == events.Done {
+		fc.turnText.Reset()
+		fc.turnStartTime = time.Now()
+	}
+
+}
+
+// extractTurnContent extracts message/reasoning content for turn tracking.
+func (b *Bridge) extractTurnContent(env *events.Envelope, fc *forwardContext) (deltaContent, reasoningContent string) {
+	if env.Event.Type == events.MessageDelta || env.Event.Type == events.Message {
+		if content := extractMessageContent(env); content != "" {
+			fc.turnText.WriteString(content)
+			if env.Event.Type == events.MessageDelta {
+				deltaContent = content
+			}
+		}
+	} else if env.Event.Type == events.Reasoning {
+		reasoningContent = extractReasoningContent(env)
+	}
+	return
+}
+
+// accumulateStats tracks tool calls and per-turn stats on done events.
+func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts forwardOpts, fc *forwardContext) {
+	sessionID := fc.sessionID
+
+	switch env.Event.Type {
+	case events.ToolCall:
+		acc := b.getOrInitAccum(sessionID, "", fc.startTime)
+		acc.ToolCallCount++
+		if tc, ok := asToolCallData(env.Event.Data); ok {
+			if acc.ToolNames == nil {
+				acc.ToolNames = make(map[string]int)
+			}
+			acc.ToolNames[tc.Name]++
+		}
+	case events.Done:
+		if fc.turnTimer != nil {
+			fc.turnTimer.Stop()
+		}
+		acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
+		if dd, ok := asDoneData(env.Event.Data); ok {
+			acc.mergePerTurnStats(dd)
+		}
+		acc.TurnCount++
+		acc.TurnDurationMs = time.Since(fc.turnStartTime).Milliseconds()
+		acc.computePerTurnDeltas()
+
+		if cr, ok := w.(worker.ControlRequester); ok {
+			fetchContextUsage(cr, acc)
+		}
+
+		b.injectSessionStats(env, acc)
+		b.captureAssistantTurn(sessionID, env.Seq, acc, fc.turnText.String(),
+			fc.sessOwner, fc.sessPlatform, env.Timestamp)
+		acc.resetPerTurn()
+		if b.log.Enabled(context.Background(), slog.LevelDebug) {
+			b.log.Debug("bridge: turn completed",
+				"session_id", sessionID, "worker_type", fc.workerType, "turn", acc.TurnCount,
+				"duration", time.Since(fc.turnStartTime).Round(time.Millisecond),
+				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount)
+		}
+	}
+}
+
+// reconcileDroppedDeltas marks the done event when deltas were dropped under backpressure.
+func (b *Bridge) reconcileDroppedDeltas(env *events.Envelope, fc *forwardContext) {
+	if !b.hub.GetAndClearDropped(fc.sessionID) {
+		return
+	}
+	b.log.Warn("bridge: handling dropped deltas before done", "session_id", fc.sessionID, "worker_type", fc.workerType)
+
+	if dataMap, ok := env.Event.Data.(map[string]any); ok {
+		if stats, ok := dataMap["stats"].(map[string]any); ok {
+			stats["dropped"] = true
+		} else {
+			dataMap["stats"] = map[string]any{"dropped": true}
+		}
+	} else if doneData, ok := env.Event.Data.(events.DoneData); ok {
+		doneData.Dropped = true
+		env.Event.Data = doneData
+	} else if doneDataPtr, ok := env.Event.Data.(*events.DoneData); ok {
+		doneDataPtr.Dropped = true
+		env.Event.Data = doneDataPtr
+	}
+}
+
+// captureForwardedEvent persists the event for replay.
+func (b *Bridge) captureForwardedEvent(env *events.Envelope, deltaContent, reasoningContent string, fc *forwardContext) {
+	sessionID := fc.sessionID
+	if deltaContent != "" && b.collector != nil {
+		b.collector.CaptureDeltaString(sessionID, env.Seq, deltaContent)
+	} else if reasoningContent != "" && b.collector != nil {
+		b.collector.CaptureReasoningString(sessionID, env.Seq, reasoningContent)
+	} else if env.Event.Type != events.MessageDelta && env.Event.Type != events.Reasoning {
+		b.captureEvent(sessionID, env.Seq, env.Event.Type, env.Event.Data)
+	}
+}
+
+// flushPendingError sends the buffered error event to the client.
+// skipOnDone controls whether to suppress the flush when the current event is Done
+// (used in the main forwarding loop to defer error delivery past retry decision).
+func (b *Bridge) flushPendingError(fc *forwardContext, skipOnDone bool) {
+	if fc.pendingError == nil {
+		return
+	}
+	if skipOnDone && fc.doneReceived {
+		return
+	}
+	if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
+		b.log.Warn("bridge: forward buffered error failed", "err", err, "session_id", fc.sessionID, "worker_type", fc.workerType)
+	}
+	b.captureEvent(fc.sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data)
+	fc.pendingError = nil
 }
 
 // workerExitParams carries the context needed by handleWorkerExit.
@@ -284,7 +414,8 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	}
 
 	// AEP-020: Worker.Recv() closed — get exit code to determine crash vs normal exit.
-	waitTimeout := 2 * time.Second
+	// Must match proc.DefaultGracePeriod (5s) so SIGTERM grace isn't cut short.
+	waitTimeout := 5 * time.Second
 	if b.closed.Load() {
 		waitTimeout = 10 * time.Second
 	}
@@ -304,7 +435,18 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	case <-time.After(waitTimeout):
 		b.log.Warn("bridge: Wait() timed out, force-killing", "session_id", p.sessionID, "worker_type", workerType)
 		_ = w.Kill()
-		<-ch
+		// Secondary timeout: if Wait() still doesn't return after Kill()
+		// (e.g., Go runtime deadlock or zombie process), abandon the wait
+		// instead of blocking forwardEvents forever.
+		killTimeout := time.NewTimer(waitKillTimeout)
+		defer killTimeout.Stop()
+		select {
+		case <-ch:
+			// Wait completed after Kill.
+		case <-killTimeout.C:
+			b.log.Warn("bridge: Wait() did not return after Kill(), abandoning",
+				"session_id", p.sessionID, "worker_type", workerType)
+		}
 	}
 
 	// Resume retry: skip during shutdown and for SIGTERM (exit 143).
@@ -324,6 +466,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		if lastInput == "" {
 			lastInput = p.opts.lastInput
 		}
+		acc := b.getOrInitAccum(p.sessionID, "", p.startTime)
 		if b.attemptResumeFallback(fallbackParams{
 			sessionID:     p.sessionID,
 			workDir:       p.opts.workDir,
@@ -332,6 +475,10 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			workerType:    workerType,
 			lastInput:     lastInput,
 			crashedWorker: w,
+			sessPlatform:  p.sessPlatform,
+			sessOwner:     p.sessOwner,
+			accGeneration: acc.Generation,
+			accModelName:  acc.ModelName,
 		}) {
 			return
 		}
@@ -370,7 +517,17 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount)
 		metrics.WorkerCrashesTotal.WithLabelValues(string(workerType), fmt.Sprintf("%d", exitCode)).Inc()
 		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
-		b.captureSyntheticEvent(p.sessionID, "worker_crash", fmt.Sprintf("Worker crashed with exit code %d", exitCode), eventstore.SourceCrash)
+		b.captureSyntheticEvent(syntheticTurnParams{
+			SessionID:  p.sessionID,
+			Reason:     "worker_crash",
+			Message:    fmt.Sprintf("Worker crashed with exit code %d", exitCode),
+			Source:     eventstore.SourceCrash,
+			Platform:   p.sessPlatform,
+			Owner:      p.sessOwner,
+			Model:      acc.ModelName,
+			Generation: acc.Generation,
+			TurnNum:    acc.TurnCount,
+		})
 	} else if exitCode == -1 {
 		b.sendError(p.sessionID, events.ErrCodeSessionTerminated, "worker terminated (killed)")
 	} else if !p.doneReceived {
@@ -388,9 +545,35 @@ func (b *Bridge) captureEvent(sessionID string, seq int64, eventType events.Kind
 	b.captureDirected(sessionID, seq, eventType, data, "outbound")
 }
 
-// CaptureInbound persists an inbound (user→worker) event for replay.
-func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Kind, data any) {
+// CaptureInboundEvent persists an inbound event for replay only (no turn write).
+// Used for interaction responses (permission/question/elicitation) which are not user turns.
+func (b *Bridge) CaptureInboundEvent(sessionID string, seq int64, eventType events.Kind, data any) {
 	b.captureDirected(sessionID, seq, eventType, data, "inbound")
+}
+
+// CaptureInbound persists an inbound (user→worker) event for replay.
+// Also writes a user turn record when eventType is Input.
+func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Kind, data any, platform, owner string) {
+	b.captureDirected(sessionID, seq, eventType, data, "inbound")
+
+	// Write user turn record for Input events.
+	if eventType == events.Input && b.collector != nil {
+		acc := b.getOrInitAccum(sessionID, "", time.Now())
+		content := extractInputContent(data)
+		turn := &eventstore.TurnWriteRequest{
+			SessionID:  sessionID,
+			Generation: acc.Generation,
+			TurnNum:    acc.TurnCount + 1,
+			Seq:        seq,
+			Role:       eventstore.RoleUser,
+			Content:    content,
+			Platform:   platform,
+			UserID:     owner,
+			Source:     eventstore.SourceNormal,
+			CreatedAt:  time.Now().UnixMilli(),
+		}
+		b.collector.CaptureTurn(turn)
+	}
 }
 
 // captureDirected marshals event data and sends it to the collector with the given direction.
@@ -435,23 +618,105 @@ func truncateToolResultOutput(raw json.RawMessage) json.RawMessage {
 	return truncated
 }
 
+// syntheticTurnParams carries metadata for writing a synthetic turn (crash/timeout/fresh_start).
+type syntheticTurnParams struct {
+	SessionID  string
+	Reason     string
+	Message    string
+	Source     string
+	Platform   string
+	Owner      string
+	Model      string
+	Generation int64
+	TurnNum    int
+}
+
 // captureSyntheticEvent writes a synthetic done-like event for crash/timeout/fresh_start scenarios.
 // Allocates a real seq number to avoid colliding with the AEP "unassigned" convention (seq=0).
-func (b *Bridge) captureSyntheticEvent(sessionID, reason, message, source string) {
+func (b *Bridge) captureSyntheticEvent(p syntheticTurnParams) {
 	if b.collector == nil {
 		return
 	}
 	data, err := json.Marshal(map[string]any{
 		"success":   false,
-		"reason":    reason,
-		"message":   message,
+		"reason":    p.Reason,
+		"message":   p.Message,
 		"synthetic": true,
 	})
 	if err != nil {
 		return
 	}
-	seq := b.hub.NextSeq(sessionID)
-	b.collector.Capture(sessionID, seq, events.Done, data, "outbound", source)
+	seq := b.hub.NextSeq(p.SessionID)
+	b.collector.Capture(p.SessionID, seq, events.Done, data, "outbound", p.Source)
+
+	sFalse := false
+	turn := &eventstore.TurnWriteRequest{
+		SessionID:  p.SessionID,
+		Generation: p.Generation,
+		TurnNum:    p.TurnNum,
+		Seq:        seq,
+		Role:       eventstore.RoleAssistant,
+		Content:    p.Message,
+		Platform:   p.Platform,
+		UserID:     p.Owner,
+		Model:      p.Model,
+		Source:     p.Source,
+		Success:    &sFalse,
+		CreatedAt:  time.Now().UnixMilli(),
+	}
+	b.collector.CaptureTurn(turn)
+}
+
+// captureAssistantTurn writes an assistant turn record from the done event path.
+func (b *Bridge) captureAssistantTurn(sessionID string, seq int64, acc *sessionAccumulator, content, owner, platform string, timestamp int64) {
+	if b.collector == nil {
+		return
+	}
+	var toolsJSON string
+	if len(acc.ToolNames) > 0 {
+		b, _ := json.Marshal(acc.ToolNames)
+		toolsJSON = string(b)
+	}
+	tokensInput := max(acc.PerTurnInput-acc.PerTurnCacheWrite-acc.PerTurnCacheRead, 0)
+	s := true // Normal completion path is always success.
+	success := &s
+
+	turn := &eventstore.TurnWriteRequest{
+		SessionID:        sessionID,
+		Generation:       acc.Generation,
+		TurnNum:          acc.TurnCount,
+		Seq:              seq,
+		Role:             eventstore.RoleAssistant,
+		Content:          content,
+		Platform:         platform,
+		UserID:           owner,
+		Model:            acc.ModelName,
+		Success:          success,
+		Source:           eventstore.SourceNormal,
+		ToolsJSON:        toolsJSON,
+		ToolCount:        acc.ToolCallCount,
+		TokensInput:      tokensInput,
+		TokensCacheWrite: acc.PerTurnCacheWrite,
+		TokensCacheRead:  acc.PerTurnCacheRead,
+		TokensOut:        acc.PerTurnOutput,
+		DurationMs:       acc.TurnDurationMs,
+		CostUSD:          acc.PerTurnCost,
+		CreatedAt:        timestamp,
+	}
+	b.collector.CaptureTurn(turn)
+}
+
+// extractInputContent extracts user input text from event data.
+func extractInputContent(data any) string {
+	switch d := data.(type) {
+	case events.InputData:
+		return d.Content
+	case map[string]any:
+		if c, ok := d["content"].(string); ok {
+			return c
+		}
+	}
+	return ""
 }
 
 // extractMessageContent extracts text content from a message or message_delta event.
@@ -470,26 +735,67 @@ func extractMessageContent(env *events.Envelope) string {
 	return ""
 }
 
+// extractReasoningContent extracts text content from a reasoning event.
+func extractReasoningContent(env *events.Envelope) string {
+	if env.Event.Type != events.Reasoning {
+		return ""
+	}
+	if d, ok := env.Event.Data.(events.ReasoningData); ok {
+		return d.Content
+	}
+	if m, ok := env.Event.Data.(map[string]any); ok {
+		if content, ok := m["content"].(string); ok {
+			return content
+		}
+	}
+	return ""
+}
+
 // getOrInitAccum returns the session accumulator, creating one if needed.
-// gitBranchOf is called inside the lock only when the accumulator first
-// receives a non-empty workDir — a one-time cost per session (up to 2s
-// subprocess). After that, the branch is already set and skipped.
+// gitBranchOf is called outside the lock to avoid blocking all sessions
+// during the ~2s git subprocess. The branch is set on the accumulator
+// after re-acquiring the lock.
 func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) *sessionAccumulator {
-	b.accumMu.Lock()
-	defer b.accumMu.Unlock()
-	if acc, ok := b.accum[sessionID]; ok {
-		if workDir != "" && acc.WorkDir == "" {
+	// Fast path: check if accumulator exists under read lock.
+	b.accumMu.RLock()
+	acc, ok := b.accum[sessionID]
+	needsWorkDir := ok && workDir != "" && acc.WorkDir == ""
+	b.accumMu.RUnlock()
+	if ok {
+		if needsWorkDir {
+			// Resolve git branch outside any lock (up to 2s subprocess).
+			branch := gitBranchOf(workDir)
+			b.accumMu.Lock()
 			acc.WorkDir = workDir
-			acc.GitBranch = gitBranchOf(workDir)
+			acc.GitBranch = branch
+			b.accumMu.Unlock()
 		}
 		return acc
 	}
-	acc := &sessionAccumulator{StartedAt: startTime}
+
+	// Slow path: resolve git branch before acquiring write lock.
+	var branch string
 	if workDir != "" {
-		acc.WorkDir = workDir
-		acc.GitBranch = gitBranchOf(workDir)
+		branch = gitBranchOf(workDir)
+	}
+
+	b.accumMu.Lock()
+	// Double-check after acquiring write lock.
+	if acc, ok := b.accum[sessionID]; ok {
+		if workDir != "" && acc.WorkDir == "" {
+			acc.WorkDir = workDir
+			acc.GitBranch = branch
+		}
+		b.accumMu.Unlock()
+		return acc
+	}
+	acc = &sessionAccumulator{
+		StartedAt: startTime,
+		WorkDir:   workDir,
+		GitBranch: branch,
 	}
 	b.accum[sessionID] = acc
+	b.accumMu.Unlock()
 	return acc
 }
 
@@ -524,7 +830,7 @@ func fetchContextUsage(cr worker.ControlRequester, acc *sessionAccumulator) {
 	ctrlCtx, ctrlCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer ctrlCancel()
 	if resp, err := cr.SendControlRequest(ctrlCtx, "get_context_usage", nil); err == nil {
-		if cu := events.MapContextUsageResponse(resp); cu.MaxTokens > 0 {
+		if cu := events.MapContextUsageResponse(resp); cu.MaxTokens > 0 || cu.TotalTokens > 0 || cu.Model != "" {
 			acc.mergeContextUsage(cu)
 		}
 	}

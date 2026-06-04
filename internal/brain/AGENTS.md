@@ -6,14 +6,14 @@ LLM orchestration layer providing safety guard (input/output validation), intent
 ## STRUCTURE
 ```
 brain/
-  brain.go       # Core interfaces: Brain, StreamingBrain, RoutableBrain, ObservableBrain + global singleton (106 lines)
-  init.go        # Init() orchestration + enhancedBrainWrapper (middleware pipeline assembly) (412 lines)
-  config.go      # 13 sub-configs + 4-tier API key discovery + env loading (484 lines)
-  guard.go       # SafetyGuard: threat detection, per-user rate limit, Chat2Config, self-healing (781 lines)
-  router.go      # IntentRouter: message classification, LRU cache, fast-path detection (606 lines)
-  memory.go      # ContextCompressor + MemoryManager: session compression, preferences, TTL cleanup (653 lines)
-  extractor.go   # ConfigExtractor: Claude Code / OpenCode credential extraction from config files (152 lines)
-  util.go        # UTF-8 safe string truncation (21 lines)
+  brain.go       # Core interfaces: Brain, StreamingBrain, RoutableBrain, ObservableBrain + global singleton
+  init.go        # Init() orchestration + enhancedBrainWrapper (middleware pipeline assembly)
+  config.go      # 13 sub-configs + 4-tier API key discovery + env loading
+  guard.go       # SafetyGuard: threat detection, per-user rate limit, Chat2Config, self-healing
+  router.go      # IntentRouter: message classification, LRU cache, fast-path detection
+  memory.go      # ContextCompressor + MemoryManager: session compression, preferences, TTL cleanup
+  extractor.go   # ConfigExtractor: Claude Code / OpenCode credential extraction from config files
+  util.go        # UTF-8 safe string truncation
   llm/           # LLM client subpackage (see below)
 ```
 

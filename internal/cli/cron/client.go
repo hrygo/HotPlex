@@ -3,7 +3,6 @@ package croncli
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -16,12 +15,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/cli/pidutil"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/cron"
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
-	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 )
 
@@ -31,30 +32,38 @@ type (
 	CronJob = cron.CronJob
 )
 
-// gatewayState mirrors cmd/hotplex/pid.go gatewayState to avoid circular imports.
-type gatewayState struct {
-	PID        int    `json:"pid"`
-	ConfigPath string `json:"config,omitempty"`
-	DevMode    bool   `json:"dev,omitempty"`
-}
-
 // OpenStore opens the config, initializes the DB, and returns cron store + eventstore + cleanup.
-func OpenStore(ctx context.Context, configPath string) (cron.Store, *eventstore.SQLiteStore, func(), error) {
+func OpenStore(ctx context.Context, configPath string) (cron.Store, eventstore.TurnQuerier, func(), error) {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	ss, err := session.NewSQLiteStore(ctx, cfg)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("open session store: %w", err)
+	switch dbutil.ParseDialect(cfg.DB.Driver) {
+	case dbutil.DialectPostgres:
+		db, openErr := dbutil.Open(dbutil.DialectPostgres, &cfg.DB)
+		if openErr != nil {
+			return nil, nil, nil, fmt.Errorf("open postgres: %w", openErr)
+		}
+		if migErr := session.RunMigrations(ctx, db.DB, dbutil.DialectPostgres); migErr != nil {
+			_ = db.Close()
+			return nil, nil, nil, fmt.Errorf("pg migrations: %w", migErr)
+		}
+		cronStore := cron.NewPGStore(db, slog.Default())
+		evStore := eventstore.NewPGStore(db, slog.Default())
+		cleanup := func() { _ = db.Close() }
+		return cronStore, evStore, cleanup, nil
+	default:
+		writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
+		ss, openErr := session.NewSQLiteStore(ctx, cfg, writeMu)
+		if openErr != nil {
+			return nil, nil, nil, fmt.Errorf("open session store: %w", openErr)
+		}
+		cronStore := cron.NewSQLiteStore(ss.DB(), slog.Default(), writeMu)
+		evStore := eventstore.NewSQLiteStore(ss.DB(), writeMu)
+		cleanup := func() { _ = ss.Close() }
+		return cronStore, evStore, cleanup, nil
 	}
-
-	cronStore := cron.NewSQLiteStore(ss.DB(), slog.Default())
-	evStore := eventstore.NewSQLiteStore(ss.DB())
-	cleanup := func() { _ = ss.Close() }
-
-	return cronStore, evStore, cleanup, nil
 }
 
 // ResolveJob resolves a job by ID or name.
@@ -140,34 +149,42 @@ type JobCreateOptions struct {
 }
 
 // resolvePlatform resolves the target platform and routing key with three-level priority:
-// 1. CLI flags (explicit --platform / --platform-key)
+// 1. CLI flags (explicit --platform / --platform-key) — highest, overrides env
 // 2. Environment variables (GATEWAY_PLATFORM, GATEWAY_CHANNEL_ID, GATEWAY_THREAD_ID)
-// 3. Default "cron" (backward compatible)
+// 3. Default "cron" (no delivery)
+//
+// Env-derived keys are always built as baseline; CLI keys override them.
 func resolvePlatform(cliPlatform string, cliPlatformKey map[string]string) (string, map[string]string) {
-	if cliPlatform != "" {
-		return cliPlatform, cliPlatformKey
+	resolved := cliPlatform
+	if resolved == "" {
+		resolved = os.Getenv("GATEWAY_PLATFORM")
+	}
+	if resolved == "" {
+		resolved = "cron"
 	}
 
-	envPlatform := os.Getenv("GATEWAY_PLATFORM")
-	switch envPlatform {
+	key := map[string]string{}
+	switch resolved {
 	case "slack":
-		key := map[string]string{}
 		if ch := os.Getenv("GATEWAY_CHANNEL_ID"); ch != "" {
 			key["channel_id"] = ch
 		}
 		if ts := os.Getenv("GATEWAY_THREAD_ID"); ts != "" {
 			key["thread_ts"] = ts
 		}
-		return "slack", key
 	case "feishu":
-		key := map[string]string{}
 		if chatID := os.Getenv("GATEWAY_CHANNEL_ID"); chatID != "" {
 			key["chat_id"] = chatID
 		}
-		return "feishu", key
+		if msgID := os.Getenv("GATEWAY_THREAD_ID"); msgID != "" {
+			key["message_id"] = msgID
+		}
 	}
 
-	return "cron", nil
+	// CLI platform-key overrides env-derived values.
+	maps.Copy(key, cliPlatformKey)
+
+	return resolved, key
 }
 
 // PrepareJobForCreate builds a CronJob from CLI flags.
@@ -189,7 +206,7 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 		Description:    description,
 		Enabled:        true,
 		Schedule:       sched,
-		Payload:        cron.CronPayload{Kind: payloadKind, Message: message, TargetSessionID: opts.TargetSessionID, AllowedTools: allowedTools, WorkerType: opts.WorkerType},
+		Payload:        cron.CronPayload{Kind: payloadKind, Message: cron.SanitizePrompt(message), TargetSessionID: opts.TargetSessionID, AllowedTools: allowedTools, WorkerType: opts.WorkerType},
 		WorkDir:        workDir,
 		BotID:          botID,
 		OwnerID:        ownerID,
@@ -217,7 +234,10 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 		return nil, err
 	}
 
+	now := time.Now().UnixMilli()
 	job.ID = cron.GenerateJobID()
+	job.CreatedAtMs = now
+	job.UpdatedAtMs = now
 
 	next, err := cron.NextRun(sched, time.Now())
 	if err != nil {
@@ -226,6 +246,27 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 	job.State.NextRunAtMs = next.UnixMilli()
 
 	return job, nil
+}
+
+// CheckMaxJobs enforces the max jobs limit for out-of-process CLI creation.
+// Reads the configured max_jobs (default 50) and checks current job count.
+func CheckMaxJobs(ctx context.Context, store cron.Store, configPath string) error {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return nil // config unavailable, skip check
+	}
+	maxJobs := cfg.Cron.MaxJobs
+	if maxJobs <= 0 {
+		maxJobs = 50
+	}
+	jobs, err := store.List(ctx, false)
+	if err != nil {
+		return nil // store unavailable, skip check
+	}
+	if len(jobs) >= maxJobs {
+		return fmt.Errorf("cron: max jobs limit reached (%d)", maxJobs)
+	}
+	return nil
 }
 
 // TriggerViaAdmin calls the gateway admin API to trigger a job run.
@@ -252,7 +293,7 @@ func TriggerViaAdmin(ctx context.Context, configPath, jobID string) error {
 		return fmt.Errorf("no admin token configured")
 	}
 
-	url := "http://" + addr + "/api/cron/jobs/" + url.PathEscape(jobID) + "/run"
+	url := "http://" + addr + "/admin/cron/jobs/" + url.PathEscape(jobID) + "/run"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -278,37 +319,20 @@ func TriggerViaAdmin(ctx context.Context, configPath, jobID string) error {
 }
 
 // QueryHistory queries the eventstore for a cron job's execution history.
-func QueryHistory(ctx context.Context, store cron.Store, evStore *eventstore.SQLiteStore, idOrName string) (*eventstore.TurnStats, error) {
+func QueryHistory(ctx context.Context, store cron.Store, evStore eventstore.TurnQuerier, idOrName string) (*eventstore.TurnStats, error) {
 	job, err := ResolveJob(store, ctx, idOrName)
 	if err != nil {
 		return nil, err
 	}
 
-	sessionKey := session.DerivePlatformSessionKey(
-		job.OwnerID, worker.TypeClaudeCode,
-		session.PlatformContext{
-			Platform: "cron",
-			BotID:    job.BotID,
-			UserID:   job.OwnerID,
-			WorkDir:  job.WorkDir,
-			ChatID:   job.ID,
-		},
-	)
-
-	return evStore.QueryTurnStats(ctx, sessionKey)
+	return evStore.QueryTurnStats(ctx, job.SessionKey())
 }
 
 // NotifyGateway sends SIGHUP to the running gateway to reload the cron index.
 func NotifyGateway() error {
-	pidPath := filepath.Join(config.HotplexHome(), ".pids", "gateway.pid")
-	data, err := os.ReadFile(pidPath)
+	state, err := pidutil.ReadState()
 	if err != nil {
 		return nil // gateway not running, nothing to notify
-	}
-
-	var state gatewayState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("parse gateway PID file: %w", err)
 	}
 	if state.PID <= 0 {
 		return nil
@@ -321,13 +345,8 @@ func NotifyGateway() error {
 // the running gateway is using. Returns "" if the gateway is not running or
 // the PID file doesn't exist.
 func gatewayConfigPath() string {
-	pidPath := filepath.Join(config.HotplexHome(), ".pids", "gateway.pid")
-	data, err := os.ReadFile(pidPath)
+	state, err := pidutil.ReadState()
 	if err != nil {
-		return ""
-	}
-	var state gatewayState
-	if err := json.Unmarshal(data, &state); err != nil {
 		return ""
 	}
 	if err := proc.IsProcessAlive(state.PID); err != nil {
@@ -344,7 +363,7 @@ func loadConfig(configPath string) (*config.Config, error) {
 
 	loadEnvFile(filepath.Dir(configPath))
 
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}

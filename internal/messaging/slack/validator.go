@@ -10,16 +10,18 @@ import (
 
 // Slack Block Kit constraints per Slack API documentation
 const (
-	maxBlocksPerMessage   = 100
-	maxSectionTextLength  = 3000
-	maxContextElements    = 10
-	maxContextTextLength  = 3000
-	maxActionsElements    = 25
-	maxActionIDLength     = 255
-	maxButtonTextLength   = 75
-	maxButtonValueLength  = 2000
-	maxImageAltTextLength = 2000
-	maxImageURLLength     = 3000
+	maxBlocksPerMessage       = 100
+	maxSectionTextLength      = 3000
+	maxContextElements        = 10
+	maxContextTextLength      = 3000
+	maxActionsElements        = 25
+	maxActionIDLength         = 255
+	maxButtonTextLength       = 75
+	maxButtonValueLength      = 2000
+	maxImageAltTextLength     = 2000
+	maxImageURLLength         = 3000
+	maxDataTableCaptionLength = 3000
+	maxDataTableRows          = 100
 )
 
 // ValidateBlocks checks blocks against Slack's schema constraints.
@@ -101,6 +103,11 @@ func ValidateBlocks(blocks []slack.Block) error {
 					i, blockType, utf8.RuneCountInString(b.Text.Text))
 			}
 
+		case *slack.DataTableBlock:
+			if err := validateDataTableBlock(b, i, blockType); err != nil {
+				return err
+			}
+
 		default:
 			// For unknown block types, attempt basic validation
 			if err := validateUnknownBlock(block, i); err != nil {
@@ -163,6 +170,23 @@ func validateUnknownBlock(_ slack.Block, _ int) error {
 	return nil
 }
 
+// validateDataTableBlock validates a DataTableBlock against Slack constraints.
+func validateDataTableBlock(b *slack.DataTableBlock, i int, blockType slack.MessageBlockType) error {
+	if b.Caption == "" {
+		return fmt.Errorf("block %d (%s): DataTableBlock caption is required",
+			i, blockType)
+	}
+	if utf8.RuneCountInString(b.Caption) > maxDataTableCaptionLength {
+		return fmt.Errorf("block %d (%s): caption length %d exceeds maximum of %d",
+			i, blockType, utf8.RuneCountInString(b.Caption), maxDataTableCaptionLength)
+	}
+	if len(b.Rows) > maxDataTableRows {
+		return fmt.Errorf("block %d (%s): row count %d exceeds maximum of %d",
+			i, blockType, len(b.Rows), maxDataTableRows)
+	}
+	return nil
+}
+
 // SanitizeBlocks fixes common violations by truncating/removing.
 // Returns a new slice containing the sanitized blocks.
 // Note: Block objects may be mutated in-place.
@@ -204,6 +228,9 @@ func SanitizeBlocks(blocks []slack.Block) []slack.Block {
 
 		case *slack.HeaderBlock:
 			sanitized = append(sanitized, sanitizeHeaderBlock(b))
+
+		case *slack.DataTableBlock:
+			sanitized = append(sanitized, sanitizeDataTableBlock(b))
 
 		default:
 			// Keep other block types as-is
@@ -318,6 +345,16 @@ func sanitizeImageBlock(b *slack.ImageBlock) *slack.ImageBlock {
 func sanitizeHeaderBlock(b *slack.HeaderBlock) *slack.HeaderBlock {
 	if b.Text != nil && utf8.RuneCountInString(b.Text.Text) > 150 {
 		b.Text.Text = truncateWithSuffix(b.Text.Text, 150)
+	}
+	return b
+}
+
+func sanitizeDataTableBlock(b *slack.DataTableBlock) *slack.DataTableBlock {
+	if utf8.RuneCountInString(b.Caption) > maxDataTableCaptionLength {
+		b.Caption = truncateWithSuffix(b.Caption, maxDataTableCaptionLength)
+	}
+	if len(b.Rows) > maxDataTableRows {
+		b.Rows = b.Rows[:maxDataTableRows]
 	}
 	return b
 }

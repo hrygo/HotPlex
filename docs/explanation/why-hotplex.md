@@ -2,8 +2,6 @@
 title: 为什么选择 HotPlex
 weight: 1
 description: HotPlex 存在的原因 — 它解决了什么问题，为谁而建，以及为什么这样设计
-persona: all
-difficulty: beginner
 ---
 
 # 为什么选择 HotPlex
@@ -80,7 +78,7 @@ Future Agent ────┘
 
 ### 企业级安全控制
 
-- **JWT 认证** — ES256 签名，session ownership 强校验
+- **API Key + Bot ID 认证** — 简单安全的静态密钥认证
 - **SSRF 防护** — URL 白名单 + IP 阻断 + DNS 重绑定防御
 - **命令审批** — Agent 执行敏感操作前需要用户确认（Permission Hook）
 - **输入审计** — Safety Guard 检测威胁指令，防止 prompt injection
@@ -129,7 +127,7 @@ Agent 是 Worker，Worker 是黑盒。Gateway 不关心 Worker 内部实现，�
 | 需要远程调用 Agent | 通过 Slack/飞书随时随地交互 |
 | 团队共享 AI 能力 | 统一入口、统一配置、统一审计 |
 | 自动化 AI 工作流 | AI-native cron 替代手写脚本 |
-| 企业合规要求 | JWT/SSRF/命令审批/输入审计全套安全体系 |
+| 企业合规要求 | API Key/SSRF/命令审批/输入审计全套安全体系 |
 | 多 Agent 混合使用 | AEP v1 协议统一，切换零成本 |
 | 长时间运行的任务 | Session 持久化，断线不丢上下文 |
 

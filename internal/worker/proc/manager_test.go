@@ -559,3 +559,81 @@ func TestManager_WaitOnce_KillThenWait(t *testing.T) {
 		require.Equal(t, err1, err2)
 	})
 }
+
+// --- TestManager_drainStderr -------------------------------------------------
+
+type mockReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (m *mockReadCloser) Close() error {
+	m.closed = true
+	return nil
+}
+
+func TestManager_drainStderr(t *testing.T) {
+	t.Parallel()
+
+	t.Run("drains and closes pipe", func(t *testing.T) {
+		t.Parallel()
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		rc := &mockReadCloser{Reader: r}
+
+		_, _ = w.WriteString("line1\nline2\n")
+		_ = w.Close()
+
+		m := New(Opts{Logger: slog.Default()})
+		m.drainStderr(rc)
+		require.True(t, rc.closed, "stderr should be closed after drainStderr returns")
+	})
+
+	t.Run("recovers from bufio.ErrTooLong panic", func(t *testing.T) {
+		t.Parallel()
+		rc := &mockReadCloser{Reader: &oversizedReader{}}
+
+		m := New(Opts{Logger: slog.Default()})
+		m.drainStderr(rc)
+		require.True(t, rc.closed, "stderr should be closed even after ErrTooLong panic")
+	})
+
+	t.Run("closes pipe on normal scanner error", func(t *testing.T) {
+		t.Parallel()
+		rc := &mockReadCloser{Reader: &errorReader{}}
+
+		m := New(Opts{Logger: slog.Default()})
+		m.drainStderr(rc)
+		require.True(t, rc.closed, "stderr should be closed after scanner error")
+	})
+
+	t.Run("stderr ownership transferred on Start", func(t *testing.T) {
+		if testRaceEnabled {
+			t.Skip("skipping: real process tests cause TSAN OOM under -race")
+		}
+		t.Parallel()
+		m := New(Opts{Logger: slog.Default()})
+		_, _, stderr, err := m.Start(context.Background(), "echo", []string{"test"}, nil, "")
+		require.NoError(t, err)
+		t.Cleanup(func() { m.Close() })
+		require.Nil(t, stderr, "Start should return nil stderr (ownership transferred to drainStderr)")
+		require.Nil(t, m.stderr, "m.stderr should be nil after ownership transfer")
+	})
+}
+
+// oversizedReader returns a single line that exceeds the scanner's initial buffer.
+type oversizedReader struct{}
+
+func (r *oversizedReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'A'
+	}
+	return len(p), io.EOF
+}
+
+// errorReader always returns a read error.
+type errorReader struct{}
+
+func (r *errorReader) Read(_ []byte) (int, error) {
+	return 0, io.ErrUnexpectedEOF
+}

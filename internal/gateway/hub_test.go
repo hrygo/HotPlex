@@ -324,10 +324,10 @@ func TestHub_SendToSession_GuaranteedQueueFull(t *testing.T) {
 
 	// ── Path 2: drain → send succeeds again ────────────────────────────────
 	// After h.Run drains, the queue is empty and sends succeed.
-	time.Sleep(50 * time.Millisecond) // allow h.Run to drain pending items
-	env := events.NewEnvelope(aep.NewID(), "sess_full", 0, events.Done, events.DoneData{Success: true})
-	err = h.SendToSession(ctx, env)
-	require.NoError(t, err, "send after drain should succeed")
+	require.Eventually(t, func() bool {
+		env := events.NewEnvelope(aep.NewID(), "sess_full", 0, events.Done, events.DoneData{Success: true})
+		return h.SendToSession(ctx, env) == nil
+	}, 3*time.Second, 50*time.Millisecond)
 }
 
 func TestHub_SendToSession_SeqAssignment(t *testing.T) {
@@ -1036,12 +1036,12 @@ func TestHub_HandleHTTP_Success(t *testing.T) {
 	cfg.Security.APIKeys = []string{"test-api-key"} // require this key
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1067,12 +1067,12 @@ func TestHub_HandleHTTP_DeferredAuth(t *testing.T) {
 	cfg.Security.APIKeys = []string{"secret-key"} // require this key
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1090,12 +1090,12 @@ func TestHub_HandleHTTP_WithSessionID(t *testing.T) {
 	cfg.Security.APIKeys = []string{"test-key"}
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1122,12 +1122,12 @@ func TestHub_HandleHTTP_GeneratesSessionID(t *testing.T) {
 	cfg.Security.APIKeys = []string{"test-key"}
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1155,12 +1155,12 @@ func TestHub_HandleHTTP_RejectsInvalidAPIKey(t *testing.T) {
 	cfg.Security.APIKeys = []string{"correct-key"}
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	auth := security.NewAuthenticator(&cfg.Security, nil)
+	auth := security.NewAuthenticator(&cfg.Security)
 	h := newTestHub(t)
 	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
 	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 
-	serveHandler := h.HandleHTTP(auth, handler, bridge)
+	serveHandler := h.HandleHTTP(auth, handler, bridge, nil)
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
@@ -1171,4 +1171,121 @@ func TestHub_HandleHTTP_RejectsInvalidAPIKey(t *testing.T) {
 	_, resp, err := websocket.DefaultDialer.Dial(u, header)
 	require.Error(t, err, "dial should fail with wrong API key")
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestHub_HandleHTTP_CookieAuth verifies that a valid HMAC cookie authenticates
+// the WebSocket upgrade without requiring an API key header.
+func TestHub_HandleHTTP_CookieAuth(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.Security.AllowedOrigins = []string{"*"}
+
+	cookieAuth, err := security.NewCookieAuth()
+	require.NoError(t, err)
+
+	auth := security.NewAuthenticator(&cfg.Security)
+	auth.SetCookieAuth(cookieAuth)
+
+	h := newTestHub(t)
+	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
+	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
+
+	serveHandler := h.HandleHTTP(auth, handler, bridge, cookieAuth)
+	server := httptest.NewServer(serveHandler)
+	defer server.Close()
+
+	// Issue a cookie via CookieAuth.
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	_ = cookieAuth.SetCookie(w, r, "cookie_user")
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+
+	// Connect with the cookie but no API key header.
+	u := "ws" + server.URL[4:]
+	header := http.Header{}
+	header.Set("Cookie", cookies[0].String())
+
+	conn, resp, err := websocket.DefaultDialer.Dial(u, header)
+	require.NoError(t, err, "WebSocket upgrade should succeed with valid cookie")
+	defer conn.Close()
+	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+	require.Eventually(t, func() bool {
+		return h.ConnectionsOpen() > 0
+	}, 2*time.Second, 10*time.Millisecond, "hub should have registered the cookie-authed connection")
+}
+
+// TestHub_HandleHTTP_CookieAuth_InvalidCookie verifies that an invalid cookie
+// falls back to pendingAuth (deferred to init envelope).
+func TestHub_HandleHTTP_CookieAuth_InvalidCookie(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.Security.AllowedOrigins = []string{"*"}
+
+	cookieAuth, err := security.NewCookieAuth()
+	require.NoError(t, err)
+
+	auth := security.NewAuthenticator(&cfg.Security)
+	auth.SetCookieAuth(cookieAuth)
+
+	h := newTestHub(t)
+	handler := NewHandler(HandlerDeps{Log: slog.Default(), Hub: h})
+	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
+
+	serveHandler := h.HandleHTTP(auth, handler, bridge, cookieAuth)
+	server := httptest.NewServer(serveHandler)
+	defer server.Close()
+
+	// Connect with a garbage cookie — should still upgrade (pendingAuth).
+	u := "ws" + server.URL[4:]
+	header := http.Header{}
+	header.Set("Cookie", "webchat_session=invalid_garbage_value")
+
+	conn, resp, err := websocket.DefaultDialer.Dial(u, header)
+	require.NoError(t, err, "WebSocket upgrade should succeed with invalid cookie (pendingAuth fallback)")
+	defer conn.Close()
+	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+}
+
+// TestHub_SendToSession_PlatformConnOwnerID verifies that json:"-" fields
+// (specifically OwnerID) survive the Hub routing pipeline when delivering
+// to platform conns. Regression test: routeMessage's pre-encode path used
+// EncodeJSON which omits json:"-" fields, causing pcEntry to decode an
+// envelope with OwnerID="" — breaking permission request interactions.
+func TestHub_SendToSession_PlatformConnOwnerID(t *testing.T) {
+	t.Parallel()
+
+	h := newTestHub(t)
+	pc := &mockPlatformConn{}
+	h.JoinPlatformSession("s1", pc)
+
+	env := &events.Envelope{
+		Version:   events.Version,
+		ID:        "test-id-1",
+		SessionID: "s1",
+		Seq:       1,
+		Timestamp: time.Now().UnixMilli(),
+		OwnerID:   "ou_test_owner_12345",
+		Event: events.Event{
+			Type: events.PermissionRequest,
+			Data: events.PermissionRequestData{
+				ID:       "req-0",
+				ToolName: "edit",
+			},
+		},
+	}
+
+	err := h.SendToSession(context.Background(), env)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return len(pc.envelopes()) > 0
+	}, 2*time.Second, 10*time.Millisecond, "platform conn should receive the envelope")
+
+	received := pc.envelopes()[0]
+	require.Equal(t, "ou_test_owner_12345", received.OwnerID,
+		"OwnerID must survive Hub routing to platform conn")
+	require.Equal(t, events.PermissionRequest, received.Event.Type)
+	require.Equal(t, "s1", received.SessionID)
 }

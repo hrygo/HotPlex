@@ -5,21 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/cli/pidutil"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/service"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 )
 
 func gatewayPIDPath() string {
-	return filepath.Join(config.HotplexHome(), ".pids", "gateway.pid")
-}
-
-type gatewayState struct {
-	PID        int    `json:"pid"`
-	ConfigPath string `json:"config,omitempty"`
-	DevMode    bool   `json:"dev,omitempty"`
+	return pidutil.PIDPath()
 }
 
 func writeGatewayState(configPath string, devMode bool) error {
@@ -27,7 +24,7 @@ func writeGatewayState(configPath string, devMode bool) error {
 	if err := os.MkdirAll(filepath.Dir(pidPath), 0o755); err != nil {
 		return err
 	}
-	state := gatewayState{
+	state := pidutil.GatewayState{
 		PID:        os.Getpid(),
 		ConfigPath: configPath,
 		DevMode:    devMode,
@@ -36,15 +33,10 @@ func writeGatewayState(configPath string, devMode bool) error {
 	return os.WriteFile(pidPath, data, 0o644)
 }
 
-func readGatewayState() (*gatewayState, error) {
-	data, err := os.ReadFile(gatewayPIDPath())
+func readGatewayState() (*pidutil.GatewayState, error) {
+	state, err := pidutil.ReadState()
 	if err != nil {
 		return nil, fmt.Errorf("gateway not running (no PID file)")
-	}
-
-	var state gatewayState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("invalid PID file content")
 	}
 
 	if err := proc.IsProcessAlive(state.PID); err != nil {
@@ -55,7 +47,7 @@ func readGatewayState() (*gatewayState, error) {
 		return nil, fmt.Errorf("gateway not running (PID %d: %w)", state.PID, err)
 	}
 
-	return &state, nil
+	return state, nil
 }
 
 func removeGatewayState() {
@@ -113,7 +105,10 @@ func findRunningGateway() (*gatewayInstance, error) {
 func stopGateway(inst *gatewayInstance) error {
 	switch inst.Source {
 	case sourcePID:
-		if err := proc.GracefulTerminate(inst.PID); err != nil {
+		// Use Terminate (direct PID signal) instead of GracefulTerminate (process
+		// group signal). The gateway may not be a process group leader when started
+		// in foreground mode (PGID inherited from parent shell).
+		if err := proc.Terminate(inst.PID); err != nil {
 			return fmt.Errorf("stop PID %d: %w", inst.PID, err)
 		}
 		removeGatewayState()
@@ -133,6 +128,29 @@ func waitForProcessExit(pid int, timeout time.Duration) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// cleanupWebchatOrphan terminates a running webchat dev process started by `make dev`.
+// Returns the cleaned-up PID, or 0 if no orphan was found.
+func cleanupWebchatOrphan() int {
+	pidPath := filepath.Join(config.HotplexHome(), ".pids", "hotplex-webchat.pid")
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0
+	}
+	if proc.IsProcessAlive(pid) != nil {
+		_ = os.Remove(pidPath)
+		return 0
+	}
+	if p, err := os.FindProcess(pid); err == nil {
+		_ = p.Kill()
+	}
+	_ = os.Remove(pidPath)
+	return pid
 }
 
 // ─── Restart Cooldown Marker ──────────────────────────────────────────────────

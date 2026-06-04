@@ -14,7 +14,6 @@ type HandlerDeps struct {
 	Hub           *Hub
 	SM            SessionManager
 	Auth          *security.Authenticator
-	JWTValidator  *security.JWTValidator
 	Bridge        *Bridge
 	SkillsLocator SkillsLocator
 }
@@ -24,12 +23,14 @@ type BridgeDeps struct {
 	Log                *slog.Logger
 	Hub                *Hub
 	SM                 bridgeSM
-	EventCollector     *eventstore.Collector // optional; nil means event storage disabled
+	EventCollector     *eventstore.Collector  // optional; nil means event storage disabled
+	TurnsQuerier       eventstore.TurnQuerier // optional; for LatestGeneration on startup
 	RetryCtrl          *LLMRetryController
 	AgentConfigDir     string
 	TurnTimeout        time.Duration
-	WorkerEnv          []string // extra env vars from worker.environment config
-	WorkerEnvBlocklist []string // extra blocklist entries from worker.env_blocklist config
-	CronEnv            []string // env vars injected only into cron platform sessions (e.g. admin API creds)
-	MCPConfigJSON      string   // pre-serialized MCP config JSON; "" = not configured → Claude Code default discovery
+	WorkerEnv          []string            // extra env vars from worker.environment config
+	WorkerEnvBlocklist []string            // extra blocklist entries from worker.env_blocklist config
+	CronEnv            []string            // env vars injected only into cron platform sessions (e.g. admin API creds)
+	MCPConfigJSON      string              // pre-serialized MCP config JSON; "" = not configured → Claude Code default discovery
+	AgentConfigExclude map[string][]string // platform → inject_exclude (global default at "" key)
 }

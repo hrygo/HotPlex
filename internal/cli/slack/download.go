@@ -26,6 +26,8 @@ func DownloadFile(ctx context.Context, client *slack.Client, fileID, outputPath 
 	defer func() { _ = f.Close() }()
 
 	if err := client.GetFileContext(ctx, info.URLPrivateDownload, f); err != nil {
+		_ = f.Close()
+		_ = os.Remove(outputPath)
 		return fmt.Errorf("download file: %w", err)
 	}
 

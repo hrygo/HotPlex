@@ -8,13 +8,12 @@ Standalone Go module (github.com/hrygo/hotplex/client) for connecting to HotPlex
 client.go    # Client struct: Connect, Resume, SendInput, SendPermissionResponse, SendQuestionResponse, SendElicitationResponse, SendControl, SendReset, SendGC, Close, Events
 events.go    # Typed event constants (EventMessageDelta, EventDone, etc.) + data helpers (AsDoneData, AsErrorData, AsToolCallData)
 options.go   # Functional options (AutoReconnect, ClientSessionID, Metadata, Logger, PingInterval)
-token.go     # TokenGenerator for JWT creation
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Client struct | `client.go:33` | url, workerType, authToken, apiKey, state machine |
+| Client struct | `client.go:33` | url, workerType, botID, apiKey, state machine |
 | Connect flow | `client.go:93` | WebSocket dial → send init → recv init_ack → start pumps |
 | Resume session | `client.go:99` | Reconnect with existing session_id |
 | Event stream | `client.go:193` | Events() returns read-only channel of Event structs |
@@ -23,7 +22,7 @@ token.go     # TokenGenerator for JWT creation
 | Heartbeat | `client.go:353` | pingPump: periodic ping at DefaultPingInterval |
 | Event constants | `events.go` | 18+ typed constants matching pkg/events Kind values |
 | Event data helpers | `events.go` | AsDoneData(), AsErrorData(), AsToolCallData(), etc. |
-| Functional options | `options.go` | URL(), WorkerType(), AuthToken(), AutoReconnect(), ClientSessionID(), Metadata() |
+| Functional options | `options.go` | URL(), WorkerType(), BotID(), AutoReconnect(), ClientSessionID(), Metadata() |
 
 ## KEY PATTERNS
 
@@ -43,7 +42,7 @@ token.go     # TokenGenerator for JWT creation
 - Data helpers: `evt.AsDoneData()`, `evt.AsErrorData()`, `evt.AsToolCallData()` for type-safe access
 
 **Functional options pattern**
-- `client.New(ctx, URL(...), WorkerType(...), AuthToken(...), AutoReconnect(true))`
+- `client.New(ctx, URL(...), WorkerType(...), BotID(...), AutoReconnect(true))`
 - `ClientSessionID("my-session-001")` for UUIDv5 deterministic mapping
 - `Metadata(map[string]any{"key": "val"})` for init handshake metadata
 

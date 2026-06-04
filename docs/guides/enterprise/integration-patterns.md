@@ -2,8 +2,6 @@
 title: Integration Patterns Guide
 weight: 23
 description: Reverse proxy, CI/CD, monitoring, custom Worker, SDK integration, and webhook patterns for HotPlex.
-persona: enterprise
-difficulty: advanced
 ---
 
 # Integration Patterns Guide
@@ -236,7 +234,8 @@ worker:
 import "github.com/hrygo/hotplex/client"
 
 client := client.New("ws://localhost:8888/ws",
-    client.WithToken("your-jwt-token"),
+    client.APIKey("your-api-key"),
+    client.BotID("your-bot-id"),
 )
 
 // 创建 Session
@@ -260,7 +259,7 @@ for event := range session.Events() {
 import { HotPlexClient } from '@hotplex/sdk';
 
 const client = new HotPlexClient('ws://localhost:8888/ws', {
-  token: 'your-jwt-token',
+  apiKey: 'your-api-key',
 });
 
 const session = await client.createSession({
@@ -278,7 +277,7 @@ await session.input('分析这个代码库的性能瓶颈');
 ```python
 from hotplex import HotPlexClient
 
-client = HotPlexClient("ws://localhost:8888/ws", token="your-jwt-token")
+client = HotPlexClient("ws://localhost:8888/ws", api_key="your-api-key")
 session = client.create_session(worker_type="claude_code", work_dir="/workspace/project")
 
 for event in session.stream("分析这个代码库的性能瓶颈"):

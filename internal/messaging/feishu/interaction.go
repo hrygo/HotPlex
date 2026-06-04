@@ -11,41 +11,14 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-// sendPermissionRequest posts a permission request card to Feishu.
-// Since the Feishu WS client does not forward card.action.trigger events,
-// the card is display-only — users respond by typing "允许/allow" or "拒绝/deny".
+// sendPermissionRequest posts an interactive permission request card with [允许/拒绝] buttons.
 func (c *FeishuConn) sendPermissionRequest(ctx context.Context, env *events.Envelope) error {
 	data, err := messaging.ExtractPermissionData(env)
 	if err != nil {
 		return fmt.Errorf("feishu: extract permission data: %w", err)
 	}
 
-	// Build header
-	header := fmt.Sprintf("**⚠️ 工具执行授权**\nClaude Code 请求：\n📝 **%s**", data.ToolName)
-	if data.Description != "" && data.Description != data.ToolName {
-		header += fmt.Sprintf("\n> %s", data.Description)
-	}
-
-	// Args preview
-	if len(data.Args) > 0 && data.Args[0] != "{}" {
-		preview := data.Args[0]
-		if len(preview) > 500 {
-			preview = preview[:500] + "..."
-		}
-		// Strip triple backticks to prevent nested code blocks.
-		preview = strings.ReplaceAll(preview, "```", "")
-		header += fmt.Sprintf("\n```\n%s\n```", preview)
-	}
-
-	// Instruction text with request ID for reference
-	footer := fmt.Sprintf("---\n📋 请求ID: `%s`\n💬 回复 **允许/同意/ok** 或 **拒绝/取消/no** 来响应此请求", data.ID)
-
-	cardJSON := buildInteractionCard(header, footer, cardHeader{
-		Title:    "工具执行授权",
-		Subtitle: data.ToolName,
-		Template: headerOrange,
-		Tags:     []cardTag{{Text: "pending", Color: "orange"}},
-	})
+	cardJSON := buildPermissionCardWithButtons(data)
 	chatID := c.chatID
 	c.adapter.Log.Debug("feishu: sending permission request card", "chat", chatID, "request_id", data.ID)
 
@@ -67,40 +40,15 @@ func (c *FeishuConn) sendPermissionRequest(ctx context.Context, env *events.Enve
 	return nil
 }
 
-// sendQuestionRequest posts a question request card to Feishu.
+// sendQuestionRequest posts a question request card using JSON 1.0 format
+// (required for action + copy_text interactive buttons).
 func (c *FeishuConn) sendQuestionRequest(ctx context.Context, env *events.Envelope) error {
 	data, err := messaging.ExtractQuestionData(env)
 	if err != nil {
 		return fmt.Errorf("feishu: extract question data: %w", err)
 	}
 
-	var sb strings.Builder
-	for _, q := range data.Questions {
-		headerLabel := q.Header
-		if headerLabel == "" {
-			headerLabel = "Question"
-		}
-		fmt.Fprintf(&sb, "**%s**\n%s\n", headerLabel, q.Question)
-
-		// List options
-		if len(q.Options) > 0 {
-			for _, opt := range q.Options {
-				label := opt.Label
-				if opt.Description != "" {
-					label += " — " + opt.Description
-				}
-				fmt.Fprintf(&sb, "- %s\n", label)
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	footer := "---\n💬 回复选项文本或自定义答案来响应此问题"
-
-	cardJSON := buildInteractionCard(sb.String(), footer, cardHeader{
-		Title:    "用户输入请求",
-		Template: headerYellow,
-	})
+	cardJSON := buildQuestionCardWithButtons(data)
 
 	chatID := c.chatID
 	if err := c.adapter.sendCardMessage(ctx, chatID, cardJSON); err != nil {
@@ -127,20 +75,7 @@ func (c *FeishuConn) sendElicitationRequest(ctx context.Context, env *events.Env
 		return fmt.Errorf("feishu: extract elicitation data: %w", err)
 	}
 
-	header := fmt.Sprintf("**🔗 MCP Server Request**\n`%s` 请求输入：\n%s", data.MCPServerName, data.Message)
-
-	var footer strings.Builder
-	footer.WriteString("---\n")
-	if data.URL != "" {
-		fmt.Fprintf(&footer, "📎 [外部表单](%s)\n", data.URL)
-	}
-	footer.WriteString("💬 回复 **accept** 或 **decline** 来响应此请求")
-
-	cardJSON := buildInteractionCard(header, footer.String(), cardHeader{
-		Title:    "MCP Server 请求",
-		Subtitle: data.MCPServerName,
-		Template: headerViolet,
-	})
+	cardJSON := buildElicitationCardWithButtons(data)
 
 	chatID := c.chatID
 	if err := c.adapter.sendCardMessage(ctx, chatID, cardJSON); err != nil {
@@ -163,41 +98,13 @@ func (c *FeishuConn) sendElicitationRequest(ctx context.Context, env *events.Env
 // registerInteraction registers a pending interaction with the adapter's manager.
 func (a *Adapter) registerInteraction(requestID, sessionID, ownerID string, kind events.Kind, conn *FeishuConn) {
 	a.Interactions.Register(&messaging.PendingInteraction{
-		ID:        requestID,
-		SessionID: sessionID,
-		OwnerID:   ownerID,
-		Type:      kind,
-		CreatedAt: time.Now(),
-		Timeout:   messaging.DefaultInteractionTimeout,
-		SendResponse: func(metadata map[string]any) {
-			respCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			env := &events.Envelope{
-				Version:   events.Version,
-				ID:        requestID,
-				SessionID: sessionID,
-				Event: events.Event{
-					Type: events.Input,
-					Data: map[string]any{
-						"content":  "",
-						"metadata": metadata,
-					},
-				},
-				OwnerID: ownerID,
-			}
-			if a.Bridge() != nil {
-				if err := a.Bridge().Handle(respCtx, env, conn); err != nil {
-					a.Log.Error("interaction: failed to send response",
-						"request_id", requestID,
-						"session_id", sessionID,
-						"err", err)
-				}
-			} else {
-				a.Log.Error("interaction: bridge not available",
-					"request_id", requestID,
-					"session_id", sessionID)
-			}
-		},
+		ID:           requestID,
+		SessionID:    sessionID,
+		OwnerID:      ownerID,
+		Type:         kind,
+		CreatedAt:    time.Now(),
+		Timeout:      messaging.DefaultInteractionTimeout,
+		SendResponse: messaging.NewSendResponseFunc(a.Log, a.Bridge(), requestID, sessionID, ownerID, conn),
 	})
 }
 
@@ -243,35 +150,22 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, userID stri
 		if !allowed {
 			reason = "user denied"
 		}
-		metadata = map[string]any{
-			"permission_response": map[string]any{
-				"request_id": matched.ID,
-				"allowed":    allowed,
-				"reason":     reason,
-			},
-		}
+		metadata = messaging.BuildPermissionResponse(matched.ID, allowed, reason)
 
 	case events.QuestionRequest:
-		metadata = map[string]any{
-			"question_response": map[string]any{
-				"id": matched.ID,
-				"answers": map[string]string{
-					"_": text, // pass the raw text as the answer
-				},
-			},
-		}
+		metadata = messaging.BuildQuestionResponse(matched.ID, text)
 
 	case events.ElicitationRequest:
-		action := "accept"
-		if normalized == "decline" || normalized == "拒绝" || normalized == "cancel" || normalized == "取消" {
+		action := ""
+		if isElicitationAccept(normalized) {
+			action = "accept"
+		} else if isElicitationDecline(normalized) {
 			action = "decline"
 		}
-		metadata = map[string]any{
-			"elicitation_response": map[string]any{
-				"id":     matched.ID,
-				"action": action,
-			},
+		if action == "" {
+			return false
 		}
+		metadata = messaging.BuildElicitationResponse(matched.ID, action)
 	}
 
 	// Complete (remove) the interaction
@@ -318,19 +212,6 @@ func (a *Adapter) sendCardMessage(ctx context.Context, chatID, cardJSON string) 
 	return nil
 }
 
-// buildInteractionCard builds a CardKit v2 card for interaction requests.
-func buildInteractionCard(body, footer string, header cardHeader) string {
-	elements := []map[string]any{
-		{"tag": "markdown", "content": body},
-	}
-	if footer != "" {
-		elements = append(elements, map[string]any{"tag": "hr"})
-		elements = append(elements, map[string]any{"tag": "markdown", "content": footer})
-	}
-
-	return buildCard(header, map[string]any{"wide_screen_mode": true}, elements)
-}
-
 // isPermissionAllow checks if the normalized text is a permission-allow keyword.
 func isPermissionAllow(s string) bool {
 	switch s {
@@ -351,6 +232,26 @@ func isPermissionDeny(s string) bool {
 	}
 }
 
+// isElicitationAccept checks if the normalized text is an elicitation-accept keyword.
+func isElicitationAccept(s string) bool {
+	switch s {
+	case "accept", "同意", "确认", "ok", "yes", "是", "好", "好的", "allow":
+		return true
+	default:
+		return false
+	}
+}
+
+// isElicitationDecline checks if the normalized text is an elicitation-decline keyword.
+func isElicitationDecline(s string) bool {
+	switch s {
+	case "decline", "拒绝", "取消", "cancel", "no", "否", "不", "不要":
+		return true
+	default:
+		return false
+	}
+}
+
 // truncate shortens a string to maxLen.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -362,7 +263,7 @@ func truncate(s string, maxLen int) string {
 // buildPermissionFallbackText creates plain-text fallback for permission request.
 func buildPermissionFallbackText(data *events.PermissionRequestData) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "⚠️ 工具执行授权\nClaude Code 请求运行: %s\n", data.ToolName)
+	fmt.Fprintf(&sb, "⚠️ 工具执行授权\n工具执行请求: %s\n", data.ToolName)
 
 	if data.Description != "" && data.Description != data.ToolName {
 		fmt.Fprintf(&sb, "描述: %s\n", data.Description)
@@ -386,18 +287,19 @@ func buildQuestionFallbackText(data *events.QuestionRequestData) string {
 	sb.WriteString("❓ 问题请求\n")
 
 	for i, q := range data.Questions {
-		headerLabel := q.Header
+		headerLabel := messaging.SanitizeText(q.Header)
 		if headerLabel == "" {
 			headerLabel = "Question"
 		}
-		fmt.Fprintf(&sb, "\n%s %d: %s\n", headerLabel, i+1, q.Question)
+		fmt.Fprintf(&sb, "\n%s %d: %s\n", headerLabel, i+1, messaging.SanitizeText(q.Question))
 
 		if len(q.Options) > 0 {
 			sb.WriteString("选项:\n")
 			for j, opt := range q.Options {
-				label := opt.Label
-				if opt.Description != "" {
-					label += " — " + opt.Description
+				label := messaging.SanitizeText(opt.Label)
+				desc := messaging.SanitizeText(opt.Description)
+				if desc != "" {
+					label += " — " + desc
 				}
 				fmt.Fprintf(&sb, "  %d. %s\n", j+1, label)
 			}
@@ -405,6 +307,12 @@ func buildQuestionFallbackText(data *events.QuestionRequestData) string {
 	}
 
 	sb.WriteString("\n回复选项文本或自定义答案来响应此问题")
+	for _, q := range data.Questions {
+		if q.MultiSelect {
+			sb.WriteString("\n提示: 此问题支持多选，可一次发送多个选项")
+			break
+		}
+	}
 	return sb.String()
 }
 
@@ -418,6 +326,6 @@ func buildElicitationFallbackText(data *events.ElicitationRequestData) string {
 		fmt.Fprintf(&sb, "\n外部表单: %s\n", data.URL)
 	}
 
-	fmt.Fprintf(&sb, "\n回复 accept 或 decline 来响应此请求")
+	fmt.Fprintf(&sb, "\n回复 accept/同意 或 decline/拒绝 来响应此请求")
 	return sb.String()
 }

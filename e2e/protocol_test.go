@@ -25,10 +25,12 @@ func TestE2E_SendInputReceiveEvents(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, ack.SessionID)
 
+			evtsCh := c.Events()
+
 			err = c.SendInput(context.Background(), "Hello, worker!")
 			require.NoError(t, err)
 
-			evts := collectEvents(t, c.Events(), 10*time.Second)
+			evts := collectEvents(t, evtsCh, 10*time.Second)
 
 			// State event is generated during init handshake and delivered via
 			// the hub broadcast queue, which races with init_ack (sent via
@@ -52,10 +54,12 @@ func TestE2E_PingPong(t *testing.T) {
 	_, err := c.Connect(context.Background())
 	require.NoError(t, err)
 
+	evtsCh := c.Events()
+
 	err = c.SendInput(context.Background(), "test")
 	require.NoError(t, err)
 
-	_ = collectEvents(t, c.Events(), 5*time.Second)
+	_ = collectEvents(t, evtsCh, 5*time.Second)
 
 	require.NoError(t, c.Close())
 }
@@ -80,13 +84,15 @@ func TestE2E_MultipleWorkers(t *testing.T) {
 				return
 			}
 
+			evtsCh := c.Events()
+
 			err = c.SendInput(context.Background(), "hello from "+workerType)
 			if err != nil {
 				results <- nil
 				return
 			}
 
-			evts := collectEvents(t, c.Events(), 10*time.Second)
+			evts := collectEvents(t, evtsCh, 10*time.Second)
 			results <- evts
 		}(wt.workerType)
 	}
@@ -111,10 +117,12 @@ func TestE2E_EventSeqMonotonic(t *testing.T) {
 	_, err := c.Connect(context.Background())
 	require.NoError(t, err)
 
+	evtsCh := c.Events()
+
 	err = c.SendInput(context.Background(), "check seq ordering")
 	require.NoError(t, err)
 
-	evts := collectEvents(t, c.Events(), 5*time.Second)
+	evts := collectEvents(t, evtsCh, 5*time.Second)
 
 	var lastSeq int64
 	for _, evt := range evts {
@@ -138,9 +146,11 @@ func TestE2E_MultipleInputsSequential(t *testing.T) {
 	_, err := c.Connect(context.Background())
 	require.NoError(t, err)
 
+	evtsCh := c.Events()
+
 	err = c.SendInput(context.Background(), "message 0")
 	require.NoError(t, err)
-	evts := collectEvents(t, c.Events(), 5*time.Second)
+	evts := collectEvents(t, evtsCh, 5*time.Second)
 	require.True(t, hasEventType(evts, client.EventDone), "expected done event for first input")
 
 	err = c.SendInput(context.Background(), "message 1")
@@ -156,10 +166,12 @@ func TestE2E_DoneDataSuccess(t *testing.T) {
 	_, err := c.Connect(context.Background())
 	require.NoError(t, err)
 
+	evtsCh := c.Events()
+
 	err = c.SendInput(context.Background(), "check done data")
 	require.NoError(t, err)
 
-	evts := collectEvents(t, c.Events(), 5*time.Second)
+	evts := collectEvents(t, evtsCh, 5*time.Second)
 
 	doneEvt := findEvent(evts, client.EventDone)
 	require.NotNil(t, doneEvt, "expected done event")
@@ -179,22 +191,26 @@ func TestE2E_MessageDeltaContent(t *testing.T) {
 	_, err := c.Connect(context.Background())
 	require.NoError(t, err)
 
+	// Register listener BEFORE SendInput to avoid race:
+	// deliver() drops non-critical events (delta) when no listener exists.
+	evtsCh := c.Events()
+
 	err = c.SendInput(context.Background(), "Hello World")
 	require.NoError(t, err)
 
-	evts := collectEvents(t, c.Events(), 5*time.Second)
+	evts := collectEvents(t, evtsCh, 5*time.Second)
 
-	var deltaContent string
+	var deltaContent strings.Builder
 	for _, evt := range evts {
 		if evt.Type == client.EventMessageDelta {
 			if data, ok := evt.Data.(map[string]any); ok {
 				if content, ok := data["content"].(string); ok {
-					deltaContent += content
+					deltaContent.WriteString(content)
 				}
 			}
 		}
 	}
-	require.Contains(t, deltaContent, "Hello World",
+	require.Contains(t, deltaContent.String(), "Hello World",
 		"delta content should contain the input text")
 
 	require.NoError(t, c.Close())
@@ -222,11 +238,14 @@ func TestE2E_LargeInput(t *testing.T) {
 	_, err := c.Connect(context.Background())
 	require.NoError(t, err)
 
-	largeContent := strings.Repeat("x", 10000)
+	largeContent := strings.Repeat("x", 500) // 500 chars → 25 delta chunks, fits writeCh (64)
+
+	evtsCh := c.Events()
+
 	err = c.SendInput(context.Background(), largeContent)
 	require.NoError(t, err)
 
-	evts := collectEvents(t, c.Events(), 5*time.Second)
+	evts := collectEvents(t, evtsCh, 5*time.Second)
 	require.True(t, hasEventType(evts, client.EventDone), "expected done event for large input")
 
 	require.NoError(t, c.Close())

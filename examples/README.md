@@ -509,15 +509,9 @@ client = HotPlexClient(
 
 ### JWT 认证
 
-在 WebSocket 连接时传递 Bearer Token：
+~~在 WebSocket 连接时传递 Bearer Token：~~
 
-```typescript
-// TypeScript
-const client = new HotPlexClient({
-    url: "ws://localhost:8888",
-    authToken: "Bearer eyJhbGciOiJFUzI1NiIs...",
-});
-```
+> **已移除**: JWT 认证已在 v1.17 中移除，所有客户端统一使用 API Key 认证。
 
 ### Dev 模式
 
@@ -573,7 +567,7 @@ try {
 | `SESSION_NOT_FOUND` | 会话不存在 | 重新创建会话 |
 | `SESSION_TERMINATED` | 会话已终止 | 创建新会话 |
 | `SESSION_EXPIRED` | 会话过期 | 恢复会话或重建 |
-| `UNAUTHORIZED` | 认证失败 | 检查 API Key/JWT |
+| `UNAUTHORIZED` | 认证失败 | 检查 API Key |
 | `INVALID_INPUT` | 输入无效 | 检查消息格式 |
 | `WORKER_TIMEOUT` | Worker 超时 | 增加 timeout 或优化 Worker |
 

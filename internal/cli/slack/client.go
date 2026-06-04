@@ -43,9 +43,11 @@ func LoadConfigAndClient(configPath string) (*config.Config, *slack.Client, erro
 		return nil, nil, fmt.Errorf("resolve config path: %w", err)
 	}
 
-	loadEnvFile(filepath.Dir(configPath))
+	if err := loadEnvFile(filepath.Dir(configPath)); err != nil {
+		return nil, nil, fmt.Errorf("load env file: %w", err)
+	}
 
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load config: %w", err)
 	}
@@ -62,11 +64,14 @@ func LoadConfigAndClient(configPath string) (*config.Config, *slack.Client, erro
 	return cfg, client, nil
 }
 
-func loadEnvFile(dir string) {
+func loadEnvFile(dir string) error {
 	envPath := filepath.Join(dir, ".env")
 	f, err := os.Open(envPath)
 	if err != nil {
-		return
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("open .env: %w", err)
 	}
 	defer f.Close()
 
@@ -89,4 +94,5 @@ func loadEnvFile(dir string) {
 			os.Setenv(key, val)
 		}
 	}
+	return s.Err()
 }

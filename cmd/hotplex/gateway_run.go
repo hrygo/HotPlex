@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -24,34 +25,59 @@ import (
 	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/cron"
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/tracing"
 	"github.com/hrygo/hotplex/internal/webchat"
+	"github.com/hrygo/hotplex/internal/worker/acp"
 	"github.com/hrygo/hotplex/internal/worker/claudecode"
+	"github.com/hrygo/hotplex/internal/worker/codexcli"
 	"github.com/hrygo/hotplex/internal/worker/opencodeserver"
 	"github.com/hrygo/hotplex/internal/worker/proc"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
+// eventStoreProvider combines the query and event-store interfaces needed by all consumers.
+// Both *eventstore.SQLiteStore and the internal pgEventStore satisfy it.
+type eventStoreProvider interface {
+	eventstore.TurnQuerier
+	QueryBySession(ctx context.Context, sessionID string, cursor int64, dir eventstore.CursorDirection, limit int) (*eventstore.EventPage, error)
+	DeleteExpired(ctx context.Context, cutoff time.Time) (int64, error)
+	Close() error
+}
+
+// GatewayDeps holds all dependencies constructed during gateway initialization.
+// These are passed to various components and registrations.
 type GatewayDeps struct {
-	Log            *slog.Logger
-	Config         *config.Config
-	ConfigStore    *config.ConfigStore
-	Hub            *gateway.Hub
-	SessionMgr     *session.Manager
-	EventStore     *eventstore.SQLiteStore
-	EventCollector *eventstore.Collector
-	Auth           *security.Authenticator
-	Handler        *gateway.Handler
-	Bridge         *gateway.Bridge
-	ConfigWatcher  *config.Watcher
-	CronScheduler  *cron.Scheduler
+	Log             *slog.Logger
+	Ctx             context.Context // gateway lifecycle context for graceful shutdown
+	Config          *config.Config
+	ConfigStore     *config.ConfigStore
+	Hub             *gateway.Hub
+	SessionMgr      *session.Manager
+	EventStore      eventStoreProvider
+	EventCollector  *eventstore.Collector
+	Auth            *security.Authenticator
+	Handler         *gateway.Handler
+	Bridge          *gateway.Bridge
+	ConfigWatcher   *config.Watcher
+	CronScheduler   *cron.Scheduler
+	WebhookHandler  *gateway.WebhookHandler // non-nil when webhook is enabled
+	CookieAuth      *security.CookieAuth    // non-nil when webchat is enabled
+	ChatAccessStore messaging.ChatAccessStorer
+	DB              *sql.DB
+	DBResolver      *security.DBResolver
+	APIKeyStore     admin.APIKeyUserStorer
+	WriteMu         *sqlutil.WriteMu
+	ConfigPath      string
+	DevMode         bool
 }
 
 const defaultConfigPath = config.DefaultConfigPath
@@ -90,7 +116,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	log, cfgStore, levelVar := initLogging(cfg)
 	pidTracker, cleanupWG := initOrphanCleanup(ctx, cfg, log)
 
-	tracing.Init(ctx, log, "hotplex-gateway")
+	tracing.Init(ctx, log, "hotplex-gateway", versionString())
 	log.Info("gateway: starting",
 		"go", runtime.Version(),
 		"addr", cfg.Gateway.Addr,
@@ -102,6 +128,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		return err
 	}
 	defer stores.close(log)
+
+	releaseDBStatsManual(log)
 
 	sm, err := session.NewManager(ctx, log, cfg, cfgStore, stores.session)
 	if err != nil {
@@ -135,7 +163,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	var configWatcher *config.Watcher
 	if configPath != "" {
-		configWatcher = config.NewWatcher(log, configPath, nil, cfgStore,
+		configWatcher = config.NewWatcher(log, configPath, cfgStore,
 			func(newCfg *config.Config) {
 				log.Info("config: hot reload applied",
 					"gateway_addr", newCfg.Gateway.Addr,
@@ -181,11 +209,40 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		_ = hub.SendToSession(ctx, env)
 	}
 
-	var jwtValidator *security.JWTValidator
-	if len(cfg.Security.JWTSecret) > 0 {
-		jwtValidator = security.NewJWTValidator(cfg.Security.JWTSecret, cfg.Security.JWTAudience)
+	auth := security.NewAuthenticator(&cfg.Security)
+
+	// API key → user identity resolver: YAML config takes priority over DB (Admin API CRUD).
+	// ChainResolver tries config map first, falls back to DB. Either source may be empty.
+	dbResolver := stores.dbResolver
+	if len(cfg.ResolvedAPIKeyUsers) > 0 {
+		mapResolver := security.NewMapResolver(cfg.ResolvedAPIKeyUsers)
+		auth.SetKeyResolver(security.NewChainResolver(mapResolver, dbResolver))
+		log.Info("gateway: API key resolver: config → database",
+			"mapped_config_keys", len(cfg.ResolvedAPIKeyUsers))
+	} else {
+		auth.SetKeyResolver(dbResolver)
+		log.Info("gateway: API key resolver: database")
 	}
-	auth := security.NewAuthenticator(&cfg.Security, jwtValidator)
+
+	// Preload database-sourced API keys into Phase 1 validation so that
+	// keys created via Admin API are valid immediately after gateway restart.
+	if stores.sqlDB != nil {
+		rows, err := stores.sqlDB.QueryContext(ctx, "SELECT api_key FROM api_key_users")
+		if err != nil {
+			log.Warn("gateway: preload DB API keys failed", "error", err)
+		} else {
+			defer func() { _ = rows.Close() }()
+			for rows.Next() {
+				var key string
+				if rows.Scan(&key) == nil {
+					auth.AddKey(key)
+				}
+			}
+			if err := rows.Err(); err != nil {
+				log.Warn("gateway: preload DB API keys incomplete", "error", err)
+			}
+		}
+	}
 
 	retryCtrl := gateway.NewLLMRetryController(cfg.Worker.AutoRetry, log)
 
@@ -201,6 +258,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Hub:                hub,
 		SM:                 sm,
 		EventCollector:     stores.collector,
+		TurnsQuerier:       stores.event, // SQLiteStore implements TurnQuerier
 		RetryCtrl:          retryCtrl,
 		AgentConfigDir:     agentConfigDir,
 		TurnTimeout:        cfg.Worker.TurnTimeout,
@@ -208,6 +266,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		WorkerEnvBlocklist: cfg.Worker.EnvBlocklist,
 		CronEnv:            buildCronEnv(cfg),
 		MCPConfigJSON:      buildMCPConfigJSON(cfg),
+		AgentConfigExclude: buildAgentConfigExclude(cfg),
 	})
 
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
@@ -217,7 +276,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Hub:           hub,
 		SM:            sm,
 		Auth:          auth,
-		JWTValidator:  jwtValidator,
 		Bridge:        bridge,
 		SkillsLocator: skillsLocator,
 	})
@@ -228,6 +286,12 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	opencodeserver.InitSingleton(log, cfg.Worker.OpenCodeServer)
 	claudecode.InitConfig(cfg.Worker.ClaudeCode)
+	acp.InitConfig(cfg.Worker.ACP)
+	if cfg.Worker.CodexCLI.UseAppServer {
+		codexcli.InitSingleton(log, cfg.Worker.CodexCLI)
+	} else {
+		codexcli.InitConfig(cfg.Worker.CodexCLI)
+	}
 
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if !reflect.DeepEqual(prev.Worker.AutoRetry, next.Worker.AutoRetry) {
@@ -239,9 +303,32 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			auth.ReloadKeys(&next.Security)
 		}
 	})
+
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		if !reflect.DeepEqual(prev.ResolvedAPIKeyUsers, next.ResolvedAPIKeyUsers) {
+			dbR := stores.dbResolver
+			if len(next.ResolvedAPIKeyUsers) > 0 {
+				auth.SetKeyResolver(security.NewChainResolver(security.NewMapResolver(next.ResolvedAPIKeyUsers), dbR))
+			} else {
+				auth.SetKeyResolver(dbR)
+			}
+			log.Info("config: API key resolver updated",
+				"mapped_config_keys", len(next.ResolvedAPIKeyUsers))
+		}
+	})
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if prev.Worker.ClaudeCode.Command != next.Worker.ClaudeCode.Command {
 			claudecode.InitConfig(next.Worker.ClaudeCode)
+		}
+	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		if prev.Worker.CodexCLI.Command != next.Worker.CodexCLI.Command {
+			codexcli.InitConfig(next.Worker.CodexCLI)
+		}
+	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		if !reflect.DeepEqual(prev.Worker.ACP, next.Worker.ACP) {
+			acp.InitConfig(next.Worker.ACP)
 		}
 	})
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
@@ -250,14 +337,30 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			log.Info("config: MCP servers updated", "count", len(next.Worker.ClaudeCode.MCPServers))
 		}
 	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		prevExcl := buildAgentConfigExclude(prev)
+		nextExcl := buildAgentConfigExclude(next)
+		if !reflect.DeepEqual(prevExcl, nextExcl) {
+			bridge.UpdateAgentConfigExclude(nextExcl)
+			log.Info("config: agent config inject_exclude updated")
+		}
+	})
 
 	// Assemble deps and start HTTP + messaging
 
 	// Cron scheduler: init after Bridge, before messaging adapters.
 	if cfg.Cron.Enabled {
-		cronStore := cron.NewSQLiteStore(stores.session.DB(), log)
+		var cronStore cron.Store
+		if stores.cron != nil {
+			cronStore = stores.cron
+		} else {
+			cronStore = cron.NewSQLiteStore(stores.sqlDB, log, stores.writeMu)
+		}
 		cronDelivery = cron.NewDelivery(log,
 			func(ctx context.Context, sessionID string) (string, error) {
+				if err := stores.collector.Flush(); err != nil {
+					log.Warn("cron: flush before query", "error", err)
+				}
 				turns, err := stores.event.QueryTurns(ctx, sessionID, 1, 0)
 				if err != nil || len(turns) == 0 {
 					return "", err
@@ -282,6 +385,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 				DefaultTimeoutSec: cfg.Cron.DefaultTimeoutSec,
 				TickIntervalSec:   cfg.Cron.TickIntervalSec,
 				YAMLConfigPath:    cfg.Cron.YAMLConfigPath,
+				DefaultSandbox:    cfg.Worker.CodexCLI.Sandbox,
 			},
 			ResolveWorkDir: func(job *cron.CronJob) string {
 				return cfgStore.Load().ResolvePlatformWorkDir(job.Platform)
@@ -301,26 +405,50 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		}
 	}
 
+	// Cookie auth: created when webchat is enabled for same-origin browser authentication.
+	var cookieAuth *security.CookieAuth
+	if cfg.WebChat.Enabled {
+		ca, err := security.NewCookieAuth()
+		if err != nil {
+			return fmt.Errorf("create cookie auth: %w", err)
+		}
+		cookieAuth = ca
+		auth.SetCookieAuth(ca)
+		log.Info("gateway: webchat cookie auth enabled")
+		log.Warn("gateway: webchat cookie auth uses shared \"webchat_user\" identity; all visitors share the same session ownership — not suitable for multi-user deployments")
+	}
+
 	mux := http.NewServeMux()
 	deps := &GatewayDeps{
-		Log:            log,
-		Config:         cfg,
-		ConfigStore:    cfgStore,
-		Hub:            hub,
-		SessionMgr:     sm,
-		EventStore:     stores.event,
-		EventCollector: stores.collector,
-		Auth:           auth,
-		Handler:        handler,
-		Bridge:         bridge,
-		ConfigWatcher:  configWatcher,
-		CronScheduler:  cronScheduler,
+		Log:             log,
+		Ctx:             ctx,
+		Config:          cfg,
+		ConfigStore:     cfgStore,
+		Hub:             hub,
+		SessionMgr:      sm,
+		EventStore:      stores.event,
+		EventCollector:  stores.collector,
+		Auth:            auth,
+		Handler:         handler,
+		Bridge:          bridge,
+		ConfigWatcher:   configWatcher,
+		CronScheduler:   cronScheduler,
+		CookieAuth:      cookieAuth,
+		ChatAccessStore: stores.chatAccessOrNew(stores.sqlDB, log),
+		DB:              stores.sqlDB,
+		DBResolver:      dbResolver,
+		APIKeyStore:     stores.apiKeyStore,
+		WriteMu:         stores.writeMu,
+		ConfigPath:      configPath,
+		DevMode:         devMode,
 	}
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).
 	if err := brain.Init(log); err != nil {
 		log.Warn("Brain initialization failed (fail-open)", "error", err)
 	}
+
+	go runEventsGC(ctx, stores, log, cfg.Events.Retention)
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
 
@@ -343,7 +471,15 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	// Webchat SPA fallback
 	var rootHandler http.Handler = mux
 	if cfg.WebChat.Enabled {
-		spa := webchat.Handler()
+		// Warn at boot if the resolved webchat CSP is the package default
+		// (no operator override) or is itself permissive (any-host sources).
+		// ResolveCSP normalises whitespace-only overrides to the default, so
+		// a stray space cannot ship a malformed header silently.
+		if resolved := security.ResolveCSP(security.DefaultWebChatCSP, cfg.Security.CSP); security.IsPermissiveCSP(resolved) {
+			log.Warn("csp: webchat policy is permissive (any http/https/ws/wss host allowed); set security.csp to restrict in production",
+				"service", "webchat")
+		}
+		spa := webchat.Handler(cfg.Security.CSP, cookieAuth)
 		rootHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, pattern := mux.Handler(r)
 			if pattern != "" {
@@ -399,6 +535,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		AdminAddr:       adminAddr,
 		WebChatAddr:     cfg.WebChat.Addr,
 		WebChatEmbedded: cfg.WebChat.Enabled,
+		TLSEnabled:      cfg.Security.TLSEnabled,
+		DBDriver:        cfg.DB.Driver,
 		DBPath:          cfg.DB.Path,
 		PoolMax:         cfg.Pool.MaxSize,
 		PoolIdle:        cfg.Pool.MaxIdlePerUser,
@@ -432,11 +570,11 @@ loop:
 			if err != nil {
 				log.Error("gateway: server failed, exiting", "err", err)
 				cancel()
-				shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, jwtValidator, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+				shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
 				return err
 			}
 			cancel()
-			shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, jwtValidator, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+			shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
 			return nil
 		case <-stopCh:
 			log.Info("gateway: shutdown", "signal", "stopCh")
@@ -445,7 +583,7 @@ loop:
 	}
 
 	cancel()
-	shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, jwtValidator, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+	shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
 	return nil
 }
 
@@ -515,24 +653,92 @@ func initOrphanCleanup(ctx context.Context, cfg *config.Config, log *slog.Logger
 }
 
 type gatewayStores struct {
-	session   *session.SQLiteStore
-	event     *eventstore.SQLiteStore
-	collector *eventstore.Collector
+	session     session.Store
+	event       eventStoreProvider
+	turnQuerier eventstore.TurnQuerier
+	collector   *eventstore.Collector
+	cron        cron.Store
+	chatAccess  messaging.ChatAccessStorer
+	writeMu     *sqlutil.WriteMu // nil when using PostgreSQL (WriteMu is SQLite-only)
+	db          *dbutil.DB
+	sqlDB       *sql.DB
+	dialect     dbutil.Dialect
+	apiKeyStore admin.APIKeyUserStorer
+	dbResolver  *security.DBResolver
+}
+
+// chatAccessOrNew returns the chat-access store if already initialized (PG path),
+// or creates a new SQLite-backed store from the shared connection.
+func (s *gatewayStores) chatAccessOrNew(db *sql.DB, log *slog.Logger) messaging.ChatAccessStorer {
+	if s.chatAccess != nil {
+		return s.chatAccess
+	}
+	return messaging.NewChatAccessStore(db, log, s.writeMu)
 }
 
 func initStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*gatewayStores, error) {
-	sessionStore, err := session.NewSQLiteStore(ctx, cfg)
+	switch dbutil.ParseDialect(cfg.DB.Driver) {
+	case dbutil.DialectPostgres:
+		return initPGStores(ctx, cfg, log)
+	default:
+		return initSQLiteStores(ctx, cfg, log)
+	}
+}
+
+// initSQLiteStores initializes all stores using SQLite (existing logic).
+func initSQLiteStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*gatewayStores, error) {
+	writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
+	sessionStore, err := session.NewSQLiteStore(ctx, cfg, writeMu)
 	if err != nil {
 		return nil, err
 	}
 
 	// EventStore shares the session store's *sql.DB (schema managed by goose migration 002).
-	eventStore := eventstore.NewSQLiteStore(sessionStore.DB())
+	eventStore := eventstore.NewSQLiteStore(sessionStore.DB(), writeMu)
+	dbResolver := security.NewDBResolver(sessionStore.DB(), dbutil.DialectSQLite)
 
 	return &gatewayStores{
-		session:   sessionStore,
-		event:     eventStore,
-		collector: eventstore.NewCollector(eventStore, log),
+		session:     sessionStore,
+		event:       eventStore,
+		turnQuerier: eventStore,
+		collector:   eventstore.NewCollector(eventStore, log),
+		writeMu:     writeMu,
+		sqlDB:       sessionStore.DB(),
+		dialect:     dbutil.DialectSQLite,
+		dbResolver:  dbResolver,
+	}, nil
+}
+
+// initPGStores initializes all stores using PostgreSQL (new driver path).
+func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*gatewayStores, error) {
+	db, err := dbutil.Open(dbutil.DialectPostgres, &cfg.DB)
+	if err != nil {
+		return nil, fmt.Errorf("pg: open db: %w", err)
+	}
+
+	sessionStore, err := session.NewPGStore(ctx, db)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("pg: session store: %w", err)
+	}
+
+	eventStore := eventstore.NewPGStore(db, log)
+	cronStore := cron.NewPGStore(db, log)
+	chatAccessStore := messaging.NewChatAccessPGStore(db, log)
+	dbResolver := security.NewDBResolver(db.DB, dbutil.DialectPostgres)
+
+	return &gatewayStores{
+		session:     sessionStore,
+		event:       eventStore,
+		turnQuerier: eventStore,
+		collector:   eventstore.NewCollector(eventStore, log),
+		cron:        cronStore,
+		chatAccess:  chatAccessStore,
+		db:          db,
+		sqlDB:       db.DB,
+		dialect:     dbutil.DialectPostgres,
+		apiKeyStore: admin.NewAPIKeyUserPGStore(db, dbResolver),
+		dbResolver:  dbResolver,
 	}, nil
 }
 
@@ -542,10 +748,39 @@ func (s *gatewayStores) close(log *slog.Logger) {
 			log.Warn("gateway: event collector close", "err", err)
 		}
 	}
-	// EventStore.Close is a no-op (ownsDB=false); session store owns the shared connection.
+	// For SQLite: EventStore.Close is a no-op (ownsDB=false); session store owns the shared connection.
 	if s.session != nil {
 		if err := s.session.Close(); err != nil {
 			log.Warn("gateway: session store close", "err", err)
+		}
+	}
+	// For PG: close the shared dbutil.DB connection.
+	if s.db != nil {
+		if err := s.db.Close(); err != nil {
+			log.Warn("gateway: db close", "err", err)
+		}
+	}
+}
+
+// runEventsGC periodically deletes expired events and turns.
+func runEventsGC(ctx context.Context, stores *gatewayStores, log *slog.Logger, retention time.Duration) {
+	if retention <= 0 {
+		retention = 720 * time.Hour // default 30 days
+	}
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cutoff := time.Now().Add(-retention)
+			if n, err := stores.event.DeleteExpired(ctx, cutoff); err == nil && n > 0 {
+				log.Info("events gc: deleted expired events", "count", n)
+			}
+			if n, err := stores.turnQuerier.DeleteExpiredTurns(ctx, cutoff); err == nil && n > 0 {
+				log.Info("events gc: deleted expired turns", "count", n)
+			}
 		}
 	}
 }
@@ -557,7 +792,6 @@ func shutdownGateway(
 	msgAdapters []messaging.PlatformAdapterInterface,
 	server *http.Server,
 	adminServer *http.Server,
-	jwtValidator *security.JWTValidator,
 	skillsLocator *skills.Locator,
 	pidTracker *proc.Tracker,
 	cleanupWG *sync.WaitGroup,
@@ -587,6 +821,10 @@ func shutdownGateway(
 		}
 	}
 
+	if deps.WebhookHandler != nil {
+		deps.WebhookHandler.Close()
+	}
+
 	if cronScheduler != nil {
 		cronScheduler.Shutdown(shutdownCtx)
 	}
@@ -596,23 +834,38 @@ func shutdownGateway(
 			log.Warn("messaging: adapter close", "err", err)
 		}
 	}
+	messaging.DefaultBotRegistry().UnregisterAll()
 
 	closeSTTCache(shutdownCtx, log)
 	closeTTSCache(shutdownCtx, log)
 
-	// Terminate all workers BEFORE bridge.Shutdown() so forwardEvents
-	// goroutines (blocked on worker stdout) can exit.
+	// Mark bridge closed FIRST to prevent in-flight message handlers from
+	// creating new sessions/workers during shutdown. Without this, a handler
+	// can pass the b.closed check in StartSession, start a worker, and have
+	// it immediately killed by TerminateAllWorkers below (race #613 defect 2).
+	deps.Bridge.MarkClosed()
+
+	// Terminate all workers so forwardEvents goroutines (blocked on worker
+	// stdout) can exit.
 	deps.SessionMgr.TerminateAllWorkers()
 	opencodeserver.ShutdownSingleton(shutdownCtx)
+	codexcli.ShutdownSingleton(shutdownCtx)
 
-	deps.Bridge.Shutdown(shutdownCtx)
-
-	if jwtValidator != nil {
-		jwtValidator.Stop()
-	}
+	// Wait for forwardEvents goroutines to drain.
+	deps.Bridge.WaitForwarders(shutdownCtx)
 
 	cleanupWG.Wait()
 	pidTracker.RemoveAll()
+
+	// Close eventstore collector BEFORE SessionMgr.Close() to prevent
+	// the collector's background writer from writing to a closed DB.
+	// Collector.Close() is idempotent (sync.Once), so the deferred
+	// stores.close() calling Close() again is safe.
+	if deps.EventCollector != nil {
+		if err := deps.EventCollector.Close(); err != nil {
+			log.Warn("gateway: event collector close", "err", err)
+		}
+	}
 
 	if err := deps.SessionMgr.Close(); err != nil {
 		log.Warn("gateway: session manager close", "err", err)
@@ -651,7 +904,7 @@ func loadConfig(configPath string, devMode bool) (*config.Config, error) {
 
 	loadEnvFile(filepath.Dir(absPath))
 
-	cfg, err := config.Load(absPath, config.LoadOptions{})
+	cfg, err := config.Load(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("config: load %q: %w", absPath, err)
 	}
@@ -770,4 +1023,46 @@ func buildMCPConfigJSON(cfg *config.Config) string {
 		return ""
 	}
 	return string(b)
+}
+
+// buildAgentConfigExclude builds the platform → inject_exclude map for non-platform
+// sessions (webchat/API/cron). The "" key holds the global default; platform-specific
+// keys override it. Nil values are omitted (meaning "not configured, fall through").
+//
+// NOTE: keep platform keys in sync with resolveInjectExcludeForAdmin (bot_config_adapter.go)
+// and applyInjectExclude callers (messaging_init.go).
+func buildAgentConfigExclude(cfg *config.Config) map[string][]string {
+	m := make(map[string][]string)
+	if cfg.AgentConfig.InjectExclude != nil {
+		m[""] = cfg.AgentConfig.InjectExclude
+	}
+	if cfg.Messaging.Slack.InjectExclude != nil {
+		m["slack"] = cfg.Messaging.Slack.InjectExclude
+	}
+	if cfg.Messaging.Feishu.InjectExclude != nil {
+		m["feishu"] = cfg.Messaging.Feishu.InjectExclude
+	}
+	if cfg.Messaging.Yuanxin.InjectExclude != nil {
+		m["yuanxin"] = cfg.Messaging.Yuanxin.InjectExclude
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+func releaseDBStatsManual(log *slog.Logger) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Warn("db-stats: cannot determine home dir for skill manual release", "err", err)
+		return
+	}
+	dir := filepath.Join(home, ".hotplex", "skills")
+	_ = os.MkdirAll(dir, 0o755)
+	path := filepath.Join(dir, "db-stats.md")
+	if err := os.WriteFile(path, []byte(dbutil.SkillManual()), 0o644); err != nil {
+		log.Warn("db-stats: failed to release skill manual", "path", path, "err", err)
+		return
+	}
+	log.Debug("db-stats: skill manual released", "path", path)
 }

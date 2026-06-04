@@ -1,11 +1,17 @@
 package admin
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/cron"
+	"github.com/hrygo/hotplex/internal/session"
 )
 
 func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +66,7 @@ func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	var dbErr string
 	if _, err := a.sm.List(r.Context(), "", "", 1, 0); err != nil {
 		dbHealthy = false
-		dbErr = err.Error()
+		dbErr = "query failed"
 		a.log.Warn("admin: health check DB probe failed", "err", err)
 	}
 
@@ -178,7 +184,7 @@ func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) 
 		} `json:"pool"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
@@ -243,7 +249,7 @@ func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) 
 		Version int `json:"version"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 	if body.Version < 1 {
@@ -253,7 +259,8 @@ func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) 
 
 	_, idx, err := a.configWatcher.Rollback(body.Version)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		a.log.Error("admin: config rollback failed", "error", err)
+		http.Error(w, "rollback failed", http.StatusBadRequest)
 		return
 	}
 
@@ -293,4 +300,40 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 			"worker_health": snap.WorkerHealth,
 		},
 	})
+}
+
+func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminWrite) {
+		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		return
+	}
+	if a.restart == nil {
+		http.Error(w, "restart is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		a.log.Info("admin: initiating gateway restart via helper")
+		if err := a.restart(); err != nil {
+			a.log.Error("admin: restart failed", "err", err)
+		}
+	}()
+
+	respondJSON(w, map[string]any{
+		"status": "restarting",
+	})
+}
+
+// respondStoreError handles store/DB operation errors without leaking internal
+// details. Not-found errors return 404; all others are logged and return 500.
+func respondStoreError(w http.ResponseWriter, log *slog.Logger, op string, err error) {
+	if errors.Is(err, sql.ErrNoRows) ||
+		errors.Is(err, cron.ErrJobNotFound) ||
+		errors.Is(err, session.ErrSessionNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	log.Error(op, "error", err)
+	http.Error(w, "internal error", http.StatusInternalServerError)
 }

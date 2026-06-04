@@ -265,7 +265,19 @@ func (g *SafetyGuard) CheckInput(ctx context.Context, input string) *GuardResult
 func (g *SafetyGuard) CheckInputWithUser(ctx context.Context, input, userID string) *GuardResult {
 	g.totalChecks.Add(1)
 
-	if !g.config.Enabled || !g.config.InputGuardEnabled {
+	// Snapshot shared state under RLock to avoid data races with
+	// concurrent UpdateBanPatterns / AddBanPattern / SetEnabled calls.
+	g.mu.RLock()
+	patterns := g.banPatterns
+	enabled := g.config.Enabled && g.config.InputGuardEnabled
+	maxLen := g.config.MaxInputLength
+	sensitivity := g.config.Sensitivity
+	brain := g.brain
+	responseTimeout := g.config.ResponseTimeout
+	failClosed := g.config.FailClosedOnBrainError
+	g.mu.RUnlock()
+
+	if !enabled {
 		return &GuardResult{
 			Safe:        true,
 			ThreatLevel: ThreatLevelNone,
@@ -290,18 +302,18 @@ func (g *SafetyGuard) CheckInputWithUser(ctx context.Context, input, userID stri
 	}
 
 	// Length check
-	if len(input) > g.config.MaxInputLength {
+	if len(input) > maxLen {
 		return &GuardResult{
 			Safe:        false,
 			ThreatLevel: ThreatLevelLow,
 			ThreatType:  "input_too_long",
-			Reason:      fmt.Sprintf("Input exceeds maximum length of %d characters", g.config.MaxInputLength),
+			Reason:      fmt.Sprintf("Input exceeds maximum length of %d characters", maxLen),
 			Action:      GuardActionBlock,
 		}
 	}
 
 	// Pattern-based detection
-	for _, pattern := range g.banPatterns {
+	for _, pattern := range patterns {
 		if pattern.MatchString(input) {
 			g.blockedInputs.Add(1)
 			g.logger.Warn("Input blocked by pattern match",
@@ -319,8 +331,8 @@ func (g *SafetyGuard) CheckInputWithUser(ctx context.Context, input, userID stri
 	}
 
 	// Use Brain for deeper analysis if available
-	if g.brain != nil && g.config.Sensitivity != "low" {
-		return g.deepInputAnalysis(ctx, input)
+	if brain != nil && sensitivity != "low" {
+		return g.deepInputAnalysis(ctx, input, brain, responseTimeout, failClosed)
 	}
 
 	return &GuardResult{
@@ -371,7 +383,7 @@ func (g *SafetyGuard) evictStaleLimiters() {
 }
 
 // deepInputAnalysis uses Brain for deeper threat analysis.
-func (g *SafetyGuard) deepInputAnalysis(ctx context.Context, input string) *GuardResult {
+func (g *SafetyGuard) deepInputAnalysis(ctx context.Context, input string, brain Brain, responseTimeout time.Duration, failClosed bool) *GuardResult {
 	var analysis struct {
 		Safe        bool        `json:"safe"`
 		ThreatLevel ThreatLevel `json:"threat_level"`
@@ -397,12 +409,12 @@ Return JSON:
   "reason": "explanation"
 }`, truncate(input))
 
-	ctx, cancel := context.WithTimeout(ctx, g.config.ResponseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
 	defer cancel()
 
-	if err := g.brain.Analyze(ctx, prompt, &analysis); err != nil {
+	if err := brain.Analyze(ctx, prompt, &analysis); err != nil {
 		g.logger.Warn("Deep input analysis failed", "error", err)
-		if g.config.FailClosedOnBrainError {
+		if failClosed {
 			return &GuardResult{
 				Safe:        false,
 				ThreatLevel: ThreatLevelMedium,
@@ -455,7 +467,12 @@ Return JSON:
 //
 // Returns GuardResult with SanitizedInput containing the redacted version.
 func (g *SafetyGuard) CheckOutput(output string) *GuardResult {
-	if !g.config.Enabled || !g.config.OutputGuardEnabled {
+	g.mu.RLock()
+	enabled := g.config.Enabled && g.config.OutputGuardEnabled
+	sensitivePatterns := g.sensitivePatterns
+	g.mu.RUnlock()
+
+	if !enabled {
 		return &GuardResult{
 			Safe:        true,
 			ThreatLevel: ThreatLevelNone,
@@ -466,7 +483,7 @@ func (g *SafetyGuard) CheckOutput(output string) *GuardResult {
 	sanitized := output
 	sensitiveFound := false
 
-	for _, pattern := range g.sensitivePatterns {
+	for _, pattern := range sensitivePatterns {
 		if pattern.MatchString(sanitized) {
 			sensitiveFound = true
 			// Replace with redacted version

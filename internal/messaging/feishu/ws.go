@@ -15,6 +15,10 @@ import (
 
 func (a *Adapter) newEventHandler() *dispatcher.EventDispatcher {
 	return dispatcher.NewEventDispatcher("", "").
+		// Callbacks are dispatched before message events in the EventDispatcher
+		// (Do() checks callbackType2CallbackHandler before eventType2EventHandler),
+		// so register card action handlers first to mirror that priority order.
+		OnP2CardActionTrigger(a.handleCardActionTrigger).
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) (err error) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -31,6 +35,16 @@ func (a *Adapter) newEventHandler() *dispatcher.EventDispatcher {
 			return nil
 		}).
 		OnP2MessageReactionDeletedV1(func(_ context.Context, _ *larkim.P2MessageReactionDeletedV1) error {
+			return nil
+		}).
+		OnP2ChatAccessEventBotP2pChatEnteredV1(func(ctx context.Context, event *larkim.P2ChatAccessEventBotP2pChatEnteredV1) (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					a.Log.Error("feishu: panic in chat entered handler", "panic", r, "stack", string(debug.Stack()))
+					err = fmt.Errorf("feishu chat entered panic: %v", r)
+				}
+			}()
+			a.handleChatEntered(ctx, event)
 			return nil
 		})
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging/phrases"
 	"github.com/hrygo/hotplex/internal/messaging/stt"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -36,10 +37,13 @@ type Adapter struct {
 	wsClient           *ws.Client
 	larkClient         *lark.Client
 	botOpenID          string
+	injectExclude      []string
 	transcriber        Transcriber
 	turnSummaryEnabled bool
 	ttsPipeline        *TTSPipeline
+	phrases            *phrases.Phrases
 	botName            string
+	Extras             map[string]any
 
 	mu          sync.RWMutex
 	chatQueue   *ChatQueue
@@ -50,7 +54,14 @@ func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformF
 
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 
-func (a *Adapter) GetBotID() string { return a.botOpenID }
+func (a *Adapter) GetBotID() string           { return a.botOpenID }
+func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
+
+func (a *Adapter) SetPhrases(p *phrases.Phrases) {
+	if p != nil {
+		a.phrases = p
+	}
+}
 
 func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 	// Call base to set hub/sm/handler/bridge.
@@ -70,8 +81,19 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 	if v, ok := config.Extras["turn_summary_enabled"].(bool); ok {
 		a.turnSummaryEnabled = v
 	}
+	if p, ok := config.Extras["phrases"].(*phrases.Phrases); ok && p != nil {
+		a.phrases = p
+	} else {
+		a.phrases = phrases.Defaults()
+	}
 	if p, ok := config.Extras["tts_pipeline"].(*TTSPipeline); ok && p != nil {
 		a.ttsPipeline = p
+	}
+
+	a.Extras = config.Extras
+
+	if v, ok := config.Extras["inject_exclude"].([]string); ok {
+		a.injectExclude = v
 	}
 
 	return nil
@@ -213,13 +235,13 @@ func (a *Adapter) replyOrSend(ctx context.Context, msgID, chatID, text string) e
 }
 
 // SendCronResult delivers a cron job result to a Feishu chat.
+// When message_id is present in platformKey, replies to that message (thread delivery).
 func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey map[string]string) error {
 	chatID := platformKey["chat_id"]
 	if chatID == "" {
 		return fmt.Errorf("feishu: missing chat_id in platform_key")
 	}
-	text = messaging.SanitizeText(text)
-	return a.sendTextMessage(ctx, chatID, text)
+	return a.replyOrSend(ctx, platformKey["message_id"], chatID, messaging.SanitizeText(text))
 }
 
 func (a *Adapter) sendTextMessage(ctx context.Context, chatID, text string) error {

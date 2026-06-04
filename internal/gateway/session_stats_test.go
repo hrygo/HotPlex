@@ -30,8 +30,8 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 			},
 		})
 
-		require.Equal(t, int64(15234), acc.TotalInput)
-		require.Equal(t, int64(15234), acc.ContextFill)
+		require.Equal(t, int64(23434), acc.TotalInput)
+		require.Equal(t, int64(0), acc.ContextFill, "ContextFill must not be set from Done event usage")
 		require.Equal(t, int64(3821), acc.TotalOutput)
 		require.Equal(t, int64(200000), acc.ContextWindow)
 		require.Equal(t, "Sonnet", acc.ModelName)
@@ -53,7 +53,7 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 		})
 
 		require.Equal(t, int64(8400+2000+500), acc.TotalInput)
-		require.Equal(t, int64(8400+2000+500), acc.ContextFill)
+		require.Equal(t, int64(0), acc.ContextFill, "ContextFill must not be set from Done event tokens")
 		require.Equal(t, int64(3634), acc.TotalOutput)
 		require.InDelta(t, 0.0234, acc.TotalCostUSD, 0.0001)
 	})
@@ -65,7 +65,7 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 		require.Equal(t, int64(0), acc.TotalOutput)
 	})
 
-	t.Run("cache tokens not double-counted", func(t *testing.T) {
+	t.Run("cache tokens summed into total input", func(t *testing.T) {
 		acc := &sessionAccumulator{StartedAt: time.Now()}
 		acc.mergePerTurnStats(events.DoneData{
 			Stats: map[string]any{
@@ -80,13 +80,13 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 				},
 			},
 		})
-		require.Equal(t, int64(50000), acc.ContextFill, "ContextFill must equal input_tokens only")
-		require.Equal(t, int64(50000), acc.TotalInput, "TotalInput must not add cache tokens")
+		require.Equal(t, int64(0), acc.ContextFill, "ContextFill must not be set from Done event usage")
+		require.Equal(t, int64(90000), acc.TotalInput, "TotalInput = input + cache_creation + cache_read")
 		pct := acc.computeContextPct()
-		require.Equal(t, 25.0, pct, "context % must be 50000/200000 = 25%%, not inflated by cache")
+		require.Equal(t, 0.0, pct, "context % must be 0 when ContextFill is not set from control channel")
 	})
 
-	t.Run("context fill overwritten by latest turn", func(t *testing.T) {
+	t.Run("total input accumulates across turns, context fill only from control channel", func(t *testing.T) {
 		acc := &sessionAccumulator{StartedAt: time.Now()}
 
 		// Turn 1
@@ -104,10 +104,18 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 				"total_cost_usd": 0.05,
 			},
 		})
-		require.Equal(t, int64(10000), acc.ContextFill)
+		require.Equal(t, int64(0), acc.ContextFill, "ContextFill not set by mergePerTurnStats")
 		require.Equal(t, int64(10000), acc.TotalInput)
 
-		// Turn 2: smaller input — ContextFill reflects latest, TotalInput accumulates
+		// Simulate get_context_usage override for Turn 1
+		acc.mergeContextUsage(&events.ContextUsageData{TotalTokens: 58000, MaxTokens: 200000})
+		require.Equal(t, int64(58000), acc.ContextFill, "ContextFill set by mergeContextUsage")
+
+		// resetPerTurn clears ContextFill
+		acc.resetPerTurn()
+		require.Equal(t, int64(0), acc.ContextFill, "ContextFill cleared by resetPerTurn")
+
+		// Turn 2: smaller input — TotalInput accumulates, ContextFill stays 0 until control channel
 		acc.mergePerTurnStats(events.DoneData{
 			Stats: map[string]any{
 				"usage": map[string]any{
@@ -118,7 +126,7 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 			},
 		})
 
-		require.Equal(t, int64(5000), acc.ContextFill) // latest turn only
+		require.Equal(t, int64(0), acc.ContextFill)    // not set from Done event
 		require.Equal(t, int64(15000), acc.TotalInput) // cumulative
 		require.Equal(t, int64(3000), acc.TotalOutput)
 		require.Equal(t, int64(200000), acc.ContextWindow)
@@ -184,14 +192,15 @@ func TestSessionAccumulator_MergeContextUsage(t *testing.T) {
 		require.Equal(t, int64(100000), acc.ContextFill, "nil ContextUsageData must not change accumulator")
 	})
 
-	t.Run("zero max tokens ignored", func(t *testing.T) {
+	t.Run("zero max tokens updates fill only", func(t *testing.T) {
 		acc := &sessionAccumulator{
 			ContextFill:   100000,
 			ContextWindow: 200000,
 			StartedAt:     time.Now(),
 		}
 		acc.mergeContextUsage(&events.ContextUsageData{TotalTokens: 50000, MaxTokens: 0})
-		require.Equal(t, int64(100000), acc.ContextFill, "zero MaxTokens must not change accumulator")
+		require.Equal(t, int64(50000), acc.ContextFill, "TotalTokens should update ContextFill even with zero MaxTokens")
+		require.Equal(t, int64(200000), acc.ContextWindow, "zero MaxTokens must not change ContextWindow")
 	})
 }
 

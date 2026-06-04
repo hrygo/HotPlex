@@ -16,7 +16,7 @@ func URL(rawurl string) Option {
 	}
 }
 
-// WorkerType sets the worker type (e.g. "claude_code", "opencode_server").
+// WorkerType sets the worker type (e.g. "claude_code", "opencode_server", "codex_cli", "acp").
 func WorkerType(t string) Option {
 	return func(c *Client) error {
 		c.workerType = t
@@ -24,10 +24,11 @@ func WorkerType(t string) Option {
 	}
 }
 
-// AuthToken sets the JWT auth token for gateway authentication.
-func AuthToken(token string) Option {
+// BotID sets the bot identifier for multi-bot isolation.
+// Sent as X-Bot-ID header during WebSocket upgrade and in the init envelope.
+func BotID(id string) Option {
 	return func(c *Client) error {
-		c.authToken = token
+		c.botID = id
 		return nil
 	}
 }

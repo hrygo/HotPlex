@@ -20,7 +20,7 @@ configs/
 ## 快速开始
 
 ```bash
-cp configs/env.example ~/.hotplex/.env   # 填入 HOTPLEX_JWT_SECRET、HOTPLEX_ADMIN_TOKEN_1
+cp configs/env.example ~/.hotplex/.env   # 填入 HOTPLEX_ADMIN_TOKEN_1
 make dev                                # 自动使用 config-dev.yaml
 ```
 
@@ -34,7 +34,6 @@ make dev                                # 自动使用 config-dev.yaml
 | 2 | 父级配置文件 | `inherits` 递归加载，支持多级继承与循环检测 |
 | 3 | 当前配置文件 | `-config` 指定的 YAML |
 | 4 | 环境变量 `HOTPLEX_*` | Viper AutomaticEnv + `applyMessagingEnv()` 手动映射 |
-| 5 | Secrets Provider | JWT/Token 等敏感字段，仅此渠道 |
 
 环境变量映射公式：`HOTPLEX_<SECTION>_<FIELD>`，全大写下划线连接。
 例如 `pool.max_size` → `HOTPLEX_POOL_MAX_SIZE`。
@@ -89,7 +88,7 @@ log:
 | `addr` | string | `:9999` | — | Admin API 监听地址。生产环境应绑定到内网 IP（如 `10.0.0.1:9999`）或通过 `allowed_cidrs` 限制访问 |
 | `tokens` | []string | `[]` | ✅ | 授权令牌列表。通过 `HOTPLEX_ADMIN_TOKEN_1..N` 编号式环境变量设置。每个请求需携带 `Authorization: Bearer <token>` 头。支持多令牌用于无损轮转 |
 | `token_scopes` | map | `{}` | — | 令牌到权限的 RBAC 映射。key 为令牌值，value 为权限列表（如 `["session:read", "session:write"]`）。未映射的令牌使用 `default_scopes` |
-| `default_scopes` | []string | `["session:read", "stats:read", "health:read"]` | — | 未在 `token_scopes` 中显式映射的令牌的默认权限集 |
+| `default_scopes` | []string | `["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]` | — | 未在 `token_scopes` 中显式映射的令牌的默认权限集。`admin:write` 隐含 `admin:read` → `config:read` |
 | `ip_whitelist_enabled` | bool | `false` | — | 启用 CIDR 白名单。开启后仅 `allowed_cidrs` 中的网段可访问 Admin API。Docker/Kubernetes 环境建议使用网络策略替代 |
 | `allowed_cidrs` | []string | `127.0.0.0/8, 10.0.0.0/8` | — | 信任的 CIDR 网段列表。仅当 `ip_whitelist_enabled: true` 时生效 |
 | `rate_limit_enabled` | bool | `true` | ✅ | 启用基于令牌桶的速率限制。按客户端 IP 独立计数，防止单个客户端滥用管理接口 |
@@ -115,13 +114,11 @@ log:
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
 | `api_key_header` | string | `X-API-Key` | — | API Key 认证的 HTTP 头名称。客户端通过此头发送 API Key，Hub 在 WebSocket 升级前校验 |
-| `api_keys` | []string | `[]` | ✅ | 允许访问的 API 密钥列表。通过 `HOTPLEX_SECURITY_API_KEY_1..N` 编号式环境变量设置。为空时不做 API Key 校验（依赖 JWT 或网络策略保护）。热重载时原子替换整个 key 集合，不影响进行中的请求 |
+| `api_keys` | []string | `[]` | ✅ | 允许访问的 API 密钥列表。通过 `HOTPLEX_SECURITY_API_KEY_1..N` 编号式环境变量设置。为空时不做 API Key 校验（依赖网络策略保护）。热重载时原子替换整个 key 集合，不影响进行中的请求 |
 | `tls_enabled` | bool | `false` | — | 启用 TLS（WSS）。生产环境**必须**设为 `true`。启用后网关使用 `tls_cert_file` 和 `tls_key_file` 加载证书 |
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径。仅当 `tls_enabled: true` 时使用 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径。仅当 `tls_enabled: true` 时使用 |
 | `allowed_origins` | []string | `["*"]` | ✅ | CORS 允许的 Origin 列表。WebSocket 升级时 `Upgrader.CheckOrigin` 校验请求的 Origin 头。`["*"]` 允许所有来源（仅开发用），生产应限制为具体域名。热重载即时生效——每次 WS 升级请求读取最新配置 |
-| `jwt_audience` | string | `hotplex-gateway` | — | JWT `aud` 声明的期望值。用于验证令牌的目标受众，防止令牌跨服务复用 |
-| `jwt_secret` | []byte | — | — | JWT 签名密钥（ES256）。**仅**通过 `HOTPLEX_JWT_SECRET` 环境变量提供（base64 编码），禁止写入 YAML。用于签发和验证 session token |
 
 ### session — 会话生命周期
 
@@ -241,7 +238,7 @@ Worker 进程启动时的工作目录遵循以下优先级覆盖逻辑：
 | `bot_token` | string | — | — | Slack Bot User OAuth Token（`xoxb-` 前缀）。用于调用 Slack Web API 发送消息、更新卡片。通过环境变量 `HOTPLEX_MESSAGING_SLACK_BOT_TOKEN` 设置 |
 | `app_token` | string | — | — | Slack App-Level Token（`xapp-` 前缀）。用于建立 Socket Mode WebSocket 连接。需要在 Slack App 配置中启用 Socket Mode 并生成。通过环境变量 `HOTPLEX_MESSAGING_SLACK_APP_TOKEN` 设置 |
 | `socket_mode` | bool | `true` (代码: `false`) | — | 启用 Socket Mode。Socket Mode 通过 WebSocket 与 Slack 服务器通信，无需公网可访问的 HTTP 端点。关闭则需要配置 Events API URL |
-| `worker_type` | string | `claude_code` | — | 为 Slack 会话创建的 Worker 类型。决定使用哪个适配器启动 Worker 进程（`claude_code` = Claude Code CLI，`opencodeserver` = OpenCode Server） |
+| `worker_type` | string | `claude_code` | — | 为 Slack 会话创建的 Worker 类型。`claude_code` = Claude Code CLI，`opencodeserver` = OpenCode Server，`codex_cli` = Codex CLI，`acp` = ACP 兼容 Agent（JSON-RPC 2.0） |
 | `work_dir` | string | — | — | Worker 进程的工作目录。为空时使用 `worker.default_work_dir`。可按平台设置不同目录 |
 | `dm_policy` | string | `allowlist` | — | 私聊（DM）的访问策略。`open` = 允许所有人，`allowlist` = 仅 `allow_from` + `allow_dm_from` 中的用户，`disabled` = 禁止所有私聊 |
 | `group_policy` | string | `allowlist` | — | 频道和群组 DM 的访问策略。选项同 `dm_policy`。`require_mention: true` 时，即使策略允许，也需要 @机器人 才触发 |
@@ -262,7 +259,7 @@ Worker 进程启动时的工作目录遵循以下优先级覆盖逻辑：
 | `enabled` | bool | `false` | — | 启用飞书适配器。启动时通过 WebSocket 连接到飞书服务器，监听消息事件 |
 | `app_id` | string | — | — | 飞书应用 ID（`cli_` 前缀）。在飞书开放平台创建应用后获取。通过环境变量 `HOTPLEX_MESSAGING_FEISHU_APP_ID` 设置 |
 | `app_secret` | string | — | — | 飞书应用密钥。用于获取 tenant_access_token 调用飞书 API。通过环境变量 `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` 设置 |
-| `worker_type` | string | `claude_code` | — | 为飞书会话创建的 Worker 类型。同 Slack 的 `worker_type` |
+| `worker_type` | string | `claude_code` | — | 为飞书会话创建的 Worker 类型。同 Slack 的 `worker_type`（`claude_code` / `opencodeserver` / `codex_cli` / `acp`） |
 | `work_dir` | string | — | — | Worker 进程工作目录。同 Slack 的 `work_dir` |
 | `dm_policy` | string | `allowlist` | — | 单聊访问策略。选项同 Slack |
 | `group_policy` | string | `allowlist` | — | 群组和话题群访问策略。选项同 Slack |
@@ -284,7 +281,6 @@ Worker 进程启动时的工作目录遵循以下优先级覆盖逻辑：
 
 | 变量 | 必填 | 说明 |
 |:-----|:----:|:-----|
-| `HOTPLEX_JWT_SECRET` | **是** | JWT 签名密钥（base64 编码，ES256 算法） |
 | `HOTPLEX_ADMIN_TOKEN_1` | **是** | 主管理端令牌 |
 | `HOTPLEX_ADMIN_TOKEN_2..N` | 否 | 备用管理端令牌（轮转用） |
 | `HOTPLEX_SECURITY_API_KEY_1..N` | 否 | 客户端 API 密钥 |
@@ -331,7 +327,7 @@ Watcher 监听 `-config` 指定文件的变更（500ms 防抖），通过反射�
 | gateway | `broadcast_queue_size` | Go channel 大小在 make 时确定 |
 | log | `format` | slog Handler 在初始化时确定格式 |
 | db | `path` / `wal_mode` | SQLite 连接在启动时建立 |
-| security | `tls_*` / `jwt_secret` | TLS 证书和 JWT 密钥在启动时加载 |
+| security | `tls_*` | TLS 证书在启动时加载 |
 
 > 变更不可热重载字段时，Watcher 会记录日志 `config: static field changed, restart required`，新值存入 ConfigStore 但不产生实际效果，需重启网关才能生效。
 
@@ -362,7 +358,6 @@ Watcher 监听 `-config` 指定文件的变更（500ms 防抖），通过反射�
 
 ## 生产安全清单
 
-- `jwt_secret` 仅通过 `HOTPLEX_JWT_SECRET` 设置，禁止写入 YAML
 - `admin.tokens` 仅通过 `HOTPLEX_ADMIN_TOKEN_1..N` 设置
 - 生产必须 `tls_enabled: true`
 - `admin.addr` 绑定内网或通过 `allowed_cidrs` 限制访问

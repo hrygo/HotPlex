@@ -2,9 +2,10 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -19,13 +20,22 @@ func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code eve
 }
 
 // classifyWorkerError converts worker errors into AEP error codes.
-// Worker processes report termination as "not running" or "closed" errors;
-// these map to ErrCodeSessionTerminated so clients can reconnect rather than
-// treating them as transient internal errors.
+// Worker process death (ErrKindUnavailable) maps to ErrCodeSessionTerminated
+// so clients can reconnect rather than treating them as transient internal errors.
+// Timeout errors (ErrKindTimeout) are not treated as fatal — the worker is still alive.
+// ErrNotImplemented maps to ErrCodeNotSupported for unimplemented worker capabilities.
 func classifyWorkerError(err error) events.ErrorCode {
-	msg := err.Error()
-	if strings.Contains(msg, "not running") || strings.Contains(msg, "closed") {
-		return events.ErrCodeSessionTerminated
+	if errors.Is(err, worker.ErrNotImplemented) {
+		return events.ErrCodeNotSupported
+	}
+	we, ok := errors.AsType[*worker.WorkerError](err)
+	if ok {
+		switch we.Kind {
+		case worker.ErrKindUnavailable:
+			return events.ErrCodeSessionTerminated
+		case worker.ErrKindTimeout:
+			return events.ErrCodeInternalError
+		}
 	}
 	return events.ErrCodeInternalError
 }

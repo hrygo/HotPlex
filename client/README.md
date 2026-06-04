@@ -73,7 +73,7 @@ Functional options pattern, passed to `New`:
 ```go
 client.URL("ws://localhost:8888")           // required
 client.WorkerType("claude_code")            // required
-client.AuthToken("jwt-token")               // JWT bearer token
+client.BotID("bot-123")                     // Bot ID for multi-bot setups
 client.APIKey("sk-xxx")                     // API key header
 client.PingInterval(30 * time.Second)       // heartbeat (default 54s)
 client.ClientSessionID("my-session-001")    // client-managed session ID (UUIDv5 mapped)
@@ -200,17 +200,15 @@ StateTerminated // worker exited
 StateDeleted    // GC'd
 ```
 
-## Token Generation
+## Bot ID (Multi-Bot Setup)
 
 ```go
-gen, err := client.NewTokenGenerator(signingKey)
-if err != nil { /* ... */ }
-
-// Key formats: PEM file path, 64-char hex, or 44-char base64
-token, err := gen.Generate("user-id", []string{"read", "write"}, 1*time.Hour)
-
-// Custom audience (default "gateway")
-gen.WithAudience("custom-aud")
+c, err := client.New(ctx,
+    client.URL("ws://localhost:8888"),
+    client.WorkerType("claude_code"),
+    client.APIKey("ak-xxx"),
+    client.BotID("bot-123"),   // specify target Bot ID
+)
 ```
 
 ## Examples
@@ -219,13 +217,12 @@ gen.WithAudience("custom-aud")
 |------|-------------|
 | [`examples/quickstart.go`](examples/quickstart.go) | Minimal connect & chat |
 | [`examples/complete.go`](examples/complete.go) | Full features: permissions, stats, resume |
-| [`scripts/gen-token/main.go`](scripts/gen-token/main.go) | JWT token generator CLI |
 
 Run an example:
 
 ```bash
 cd client
-HOTPLEX_SIGNING_KEY=<key> go run examples/quickstart.go
+HOTPLEX_API_KEY=<key> go run examples/quickstart.go
 ```
 
 ## Related

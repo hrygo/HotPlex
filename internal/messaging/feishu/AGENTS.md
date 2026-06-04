@@ -56,11 +56,12 @@ Feishu WebSocket → ws.Client.Events → handleMessage() → handleTextMessage(
 2. Each chunk → update message content + cycle reaction (🔄)
 3. Stream complete → final update + ✅ reaction
 
-**Interaction cards (`interaction.go`)**
-- Permission request: display-only card (WS client doesn't forward card.action.trigger)
-- Users respond by typing "允许/allow" or "拒绝/deny"
-- Q&A and elicitation: structured card with instructions
+**Interaction cards (`interaction.go`, `card_action.go`)**
+- Permission/Q&A/elicitation: interactive card with real action buttons (Allow/Deny, Answer, Accept/Decline)
+- Button clicks routed via `EventDispatcher.OnP2CardActionTrigger` → `handleCardActionTrigger` → `InteractionManager.Complete`
+- Text fallback still works: both channels compete via `Complete` atomicity (first-to-respond-wins)
 - 5min auto-deny timeout via InteractionManager
+- `card_template.go` provides 4 button-equipped builders: `buildPermissionCardWithButtons`, `buildQuestionCardWithButtons`, `buildElicitationCardWithButtons`, `buildResolvedCard`
 
 **Chat send queue (`chat_queue.go`)**
 - Per `chatID` serial queue prevents message reordering
@@ -83,4 +84,3 @@ Feishu WebSocket → ws.Client.Events → handleMessage() → handleTextMessage(
 - ❌ Send messages without `chatQueue` — causes reorder in group chats
 - ❌ Skip reaction cleanup on stream abort — always remove ⏳/🔄 on error
 - ❌ Use `math/rand` for dedup TTL — use `crypto/rand` via UUID
-- ❌ Assume card.action.trigger works — WS client doesn't forward them

@@ -138,7 +138,7 @@ func TestEnhancedBrainWrapper_ChatWithModel_Timeout(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()
-			case <-time.After(5 * time.Second):
+			case <-time.After(200 * time.Millisecond):
 				return "slow response", nil
 			}
 		},
@@ -149,7 +149,7 @@ func TestEnhancedBrainWrapper_ChatWithModel_Timeout(t *testing.T) {
 		logger: slog.Default(),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
@@ -157,7 +157,7 @@ func TestEnhancedBrainWrapper_ChatWithModel_Timeout(t *testing.T) {
 	elapsed := time.Since(start)
 
 	assert.Error(t, err)
-	assert.Less(t, elapsed, 3*time.Second)
+	assert.Less(t, elapsed, 200*time.Millisecond)
 }
 
 func TestEnhancedBrainWrapper_AnalyzeWithModel(t *testing.T) {
@@ -375,7 +375,7 @@ func TestEnhancedBrainWrapper_ChatStream_Timeout(t *testing.T) {
 			go func() {
 				defer close(ch)
 				ch <- "token1"
-				time.Sleep(5 * time.Second)
+				time.Sleep(500 * time.Millisecond)
 				ch <- "token2"
 			}()
 			return ch, nil

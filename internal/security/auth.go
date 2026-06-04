@@ -3,9 +3,10 @@ package security
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
+	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/hrygo/hotplex/internal/config"
@@ -15,64 +16,87 @@ import (
 // that cannot send custom headers (CORS restrictions).
 const apiKeyQueryParam = "api_key"
 
+// botIDHeader is the HTTP header for bot identity in multi-bot setups.
+const botIDHeader = "X-Bot-ID"
+
+// botIDQueryParam is the query parameter fallback for browser WebSocket clients.
+const botIDQueryParam = "bot_id"
+
 // Authenticator validates API keys and user credentials.
 type Authenticator struct {
-	mu           sync.RWMutex
-	cfg          *config.SecurityConfig
-	validKey     map[string]bool // set of valid API keys (hashed in production)
-	jwtValidator *JWTValidator   // optional; set when JWT botID extraction is needed at HTTP level
+	mu            sync.RWMutex
+	cfg           *config.SecurityConfig
+	validKey      map[string]bool // config-sourced keys (YAML + env)
+	dbKeys        map[string]bool // database-sourced keys (Admin API CRUD)
+	keyResolver   APIKeyResolver  // optional; maps API keys to user identities. nil = "api_user"
+	devModeLocked bool            // true once any key has existed; prevents dev mode re-enable
+	cookieAuth    *CookieAuth     // optional; HMAC cookie auth (3rd priority after header/query)
 }
 
-// NewAuthenticator creates a new authenticator. jwtValidator may be nil.
-func NewAuthenticator(cfg *config.SecurityConfig, jwtValidator *JWTValidator) *Authenticator {
+// NewAuthenticator creates a new authenticator.
+func NewAuthenticator(cfg *config.SecurityConfig) *Authenticator {
 	validKey := make(map[string]bool)
 	for _, k := range cfg.APIKeys {
 		validKey[k] = true
 	}
 	return &Authenticator{
-		cfg:          cfg,
-		validKey:     validKey,
-		jwtValidator: jwtValidator,
+		cfg:           cfg,
+		validKey:      validKey,
+		dbKeys:        make(map[string]bool),
+		devModeLocked: len(validKey) > 0,
 	}
+}
+
+// SetCookieAuth enables cookie-based authentication as a 3rd priority fallback
+// after header and query param. Typically called when webchat is enabled.
+func (a *Authenticator) SetCookieAuth(ca *CookieAuth) {
+	a.mu.Lock()
+	a.cookieAuth = ca
+	a.mu.Unlock()
 }
 
 // ErrUnauthorized is returned when authentication fails.
 var ErrUnauthorized = errors.New("security: unauthorized")
 
 // AuthenticateRequest validates the request's API key.
-// Returns the user ID, bot ID (from JWT BotID claim), and any error.
-// botID may be empty when no JWT Bearer token is present.
+// Returns the user ID, bot ID (from X-Bot-ID header or bot_id query param), and any error.
 func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, error) {
 	a.mu.RLock()
-	header := a.cfg.APIKeyHeader
-	if header == "" {
-		header = "X-API-Key"
-	}
 
-	// Check header first, then query param (for browser WebSocket clients).
-	key := r.Header.Get(header)
-	if key == "" {
-		key = r.URL.Query().Get(apiKeyQueryParam)
-	}
-	if key == "" {
+	key, found := a.extractAPIKey(r)
+	if !found {
+		// 3rd priority: cookie auth fallback (webchat same-origin).
+		if a.cookieAuth != nil {
+			if uid, ok := a.cookieAuth.Authenticate(r); ok {
+				a.mu.RUnlock()
+				botID := BotIDFromRequest(r)
+				return uid, botID, nil
+			}
+		}
 		a.mu.RUnlock()
 		return "", "", ErrUnauthorized
 	}
 
-	// Key lookup under RLock; map lookup is not constant-time
-	// but acceptable for API keys (small set, low timing sensitivity).
-	defer a.mu.RUnlock()
-
-	if len(a.validKey) == 0 {
-		// No keys configured — allow all (dev mode).
-		return "anonymous", a.BotIDFromRequest(r), nil
+	// Dev mode: no keys configured — allow all.
+	// devModeLocked prevents re-enable after keys have existed (security: auth bypass window).
+	if len(a.validKey) == 0 && len(a.dbKeys) == 0 && !a.devModeLocked {
+		a.mu.RUnlock()
+		botID := BotIDFromRequest(r)
+		return "anonymous", botID, nil
 	}
 
-	if !a.validKey[key] {
+	// Key lookup using constant-time comparison to prevent timing attacks.
+	if !a.authenticateKey(key) {
+		a.mu.RUnlock()
 		return "", "", ErrUnauthorized
 	}
 
-	return "api_user", a.BotIDFromRequest(r), nil
+	// Snapshot resolver under lock, then release before calling external resolver.
+	resolver := a.keyResolver
+	a.mu.RUnlock()
+
+	botID := BotIDFromRequest(r)
+	return resolveUserIDWith(r.Context(), key, resolver), botID, nil
 }
 
 // ReloadKeys dynamically replaces the set of valid API keys.
@@ -84,7 +108,74 @@ func (a *Authenticator) ReloadKeys(cfg *config.SecurityConfig) {
 	a.mu.Lock()
 	a.cfg = cfg
 	a.validKey = validKey
+	if len(validKey) > 0 {
+		a.devModeLocked = true
+	}
 	a.mu.Unlock()
+}
+
+// SetKeyResolver sets the API key → user identity resolver.
+// Nil clears the mapping (all keys return "api_user").
+func (a *Authenticator) SetKeyResolver(r APIKeyResolver) {
+	a.mu.Lock()
+	a.keyResolver = r
+	a.mu.Unlock()
+}
+
+// authenticateKey performs constant-time comparison of the key against the valid key set.
+// Checks both config-sourced and database-sourced keys.
+// Caller must hold at least RLock.
+func (a *Authenticator) authenticateKey(key string) bool {
+	for k := range a.validKey {
+		if subtle.ConstantTimeCompare([]byte(k), []byte(key)) == 1 {
+			return true
+		}
+	}
+	for k := range a.dbKeys {
+		if subtle.ConstantTimeCompare([]byte(k), []byte(key)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// AddKey adds a database-sourced API key to the valid key set.
+// Called by Admin API after creating a new key in the database.
+func (a *Authenticator) AddKey(key string) {
+	a.mu.Lock()
+	a.dbKeys[key] = true
+	a.devModeLocked = true
+	a.mu.Unlock()
+}
+
+// RemoveKey removes a database-sourced API key from the valid key set.
+// Called by Admin API after deleting a key from the database.
+func (a *Authenticator) RemoveKey(key string) {
+	a.mu.Lock()
+	delete(a.dbKeys, key)
+	empty := len(a.validKey) == 0 && len(a.dbKeys) == 0 && a.devModeLocked
+	a.mu.Unlock()
+	if empty {
+		slog.Warn("security: all API keys removed but dev mode is locked — restart gateway to restore anonymous access",
+			"dev_mode_locked", true)
+	}
+}
+
+// resolveUserID returns the user identity for a valid API key.
+// Checks the resolver first; falls back to "api_user" if no mapping exists.
+// Caller must hold at least RLock.
+func (a *Authenticator) resolveUserID(ctx context.Context, key string) string {
+	return resolveUserIDWith(ctx, key, a.keyResolver)
+}
+
+// resolveUserIDWith resolves user identity without holding any lock.
+func resolveUserIDWith(ctx context.Context, key string, resolver APIKeyResolver) string {
+	if resolver != nil {
+		if uid, ok := resolver.Resolve(ctx, key); ok {
+			return uid
+		}
+	}
+	return "api_user"
 }
 
 // ExtractAPIKey returns the API key from header or query param.
@@ -92,12 +183,16 @@ func (a *Authenticator) ReloadKeys(cfg *config.SecurityConfig) {
 func (a *Authenticator) ExtractAPIKey(r *http.Request) (string, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	return a.extractAPIKey(r)
+}
 
+// extractAPIKey reads the API key from the configured header or query param.
+// Caller must hold at least RLock.
+func (a *Authenticator) extractAPIKey(r *http.Request) (string, bool) {
 	header := a.cfg.APIKeyHeader
 	if header == "" {
 		header = "X-API-Key"
 	}
-
 	key := r.Header.Get(header)
 	if key == "" {
 		key = r.URL.Query().Get(apiKeyQueryParam)
@@ -111,43 +206,35 @@ func (a *Authenticator) ExtractAPIKey(r *http.Request) (string, bool) {
 // AuthenticateKey validates an API key string directly.
 // Returns userID if valid, ("", false) if invalid.
 // Handles dev mode (no keys configured → "anonymous").
-func (a *Authenticator) AuthenticateKey(key string) (string, bool) {
+func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	if len(a.validKey) == 0 {
+	if len(a.validKey) == 0 && len(a.dbKeys) == 0 && !a.devModeLocked {
 		// No keys configured — allow all (dev mode).
 		return "anonymous", true
 	}
 
-	if !a.validKey[key] {
+	if !a.authenticateKey(key) {
 		return "", false
 	}
-	return "api_user", true
+	return a.resolveUserID(ctx, key), true
 }
 
-// BotIDFromRequest extracts the BotID claim from a JWT Bearer token in the Authorization header.
-// Returns "" if no token is present or if extraction fails (fail-open).
-func (a *Authenticator) BotIDFromRequest(r *http.Request) string {
-	if a.jwtValidator == nil {
-		return ""
+// BotIDFromRequest extracts the bot ID from X-Bot-ID header or bot_id query param.
+// Returns "" if not provided (no bot isolation).
+//
+// Trust boundary: Bot ID is NOT cryptographically bound to the API key.
+// Any authenticated client can specify any bot ID. This is acceptable because:
+// 1. Bot ID determines routing behavior (which bot configuration to use), not authorization.
+// 2. API key authentication already gates access at the connection level.
+// 3. Cross-bot data isolation is enforced downstream by session key derivation.
+// If API-key-to-bot-ID binding is required, implement a KeyBotBinding resolver.
+func BotIDFromRequest(r *http.Request) string {
+	if v := r.Header.Get(botIDHeader); v != "" {
+		return v
 	}
-	auth := r.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
-		return ""
-	}
-	tokenString := strings.TrimPrefix(auth, "Bearer ")
-	if tokenString == "" {
-		return ""
-	}
-	// SECURITY: Verify the token signature before extracting botID.
-	// We use the same ES256 validation as the full JWT check, but silently
-	// ignore errors (fail-open) since the API key is the primary auth gate.
-	claims, err := a.jwtValidator.Validate(tokenString)
-	if err != nil {
-		return ""
-	}
-	return claims.BotID
+	return r.URL.Query().Get(botIDQueryParam)
 }
 
 // Middleware returns an HTTP middleware that enforces authentication.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/session"
@@ -14,7 +15,7 @@ import (
 
 // BridgeStarter is the narrow interface the executor needs from the gateway Bridge.
 type BridgeStarter interface {
-	StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title string) error
+	StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error
 }
 
 // SessionStateChecker polls session state for completion detection.
@@ -26,17 +27,19 @@ type SessionStateChecker interface {
 
 // Executor runs a single cron job by starting a worker session and delivering the prompt.
 type Executor struct {
-	log    *slog.Logger
-	bridge BridgeStarter
-	sm     SessionStateChecker
+	log     *slog.Logger
+	bridge  BridgeStarter
+	sm      SessionStateChecker
+	sandbox string
 }
 
 // NewExecutor creates a new cron executor.
-func NewExecutor(log *slog.Logger, bridge BridgeStarter, sm SessionStateChecker) *Executor {
+func NewExecutor(log *slog.Logger, bridge BridgeStarter, sm SessionStateChecker, sandbox string) *Executor {
 	return &Executor{
-		log:    log.With("component", "cron_executor"),
-		bridge: bridge,
-		sm:     sm,
+		log:     log.With("component", "cron_executor"),
+		bridge:  bridge,
+		sm:      sm,
+		sandbox: sandbox,
 	}
 }
 
@@ -47,11 +50,13 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 	sessionKey := session.DeriveCronSessionKey(job.ID, time.Now().UnixNano())
 
 	// Merge platform context so the bridge can inject environment variables (like channel_id).
+	// Inject default sandbox first; per-job PlatformKey overrides below.
 	platformKey := make(map[string]string)
+	if e.sandbox != "" {
+		platformKey[worker.SandboxPlatformKey] = e.sandbox
+	}
 	if job.PlatformKey != nil {
-		for k, v := range job.PlatformKey {
-			platformKey[k] = v
-		}
+		maps.Copy(platformKey, job.PlatformKey)
 	}
 	platformKey["cron_job_id"] = job.ID
 	title := fmt.Sprintf("cron:%s", job.Name)
@@ -63,7 +68,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 
 	if err := e.bridge.StartSession(ctx, sessionKey, job.OwnerID, job.BotID,
 		wt, job.Payload.AllowedTools, job.WorkDir,
-		job.Platform, platformKey, title,
+		job.Platform, platformKey, title, "",
 	); err != nil {
 		return "", fmt.Errorf("start cron session: %w", err)
 	}
@@ -73,8 +78,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		return "", fmt.Errorf("cron executor: worker not found after start")
 	}
 
-	prompt := fmt.Sprintf("[cron:%s %s] %s\n%s", job.ID, job.Name,
-		job.Payload.Message, time.Now().Format(time.RFC3339))
+	prompt := formatJobPrompt(job, time.Now())
 	prompt += buildDeliverySuffix(job)
 
 	if err := w.Input(ctx, prompt, nil); err != nil {
@@ -137,14 +141,11 @@ func (e *Executor) waitForCompletion(ctx context.Context, sessionID string, time
 // HasCLIDelivery returns true if the job has sufficient platform info
 // for CLI-based result delivery.
 func HasCLIDelivery(job *CronJob) bool {
-	switch job.Platform {
-	case "slack":
-		return job.PlatformKey["channel_id"] != ""
-	case "feishu":
-		return job.PlatformKey["chat_id"] != ""
-	default:
+	key, ok := RequiredPlatformKey[job.Platform]
+	if !ok {
 		return false
 	}
+	return job.PlatformKey[key] != ""
 }
 
 // buildDeliverySuffix appends CLI delivery instructions to the cron prompt.
@@ -166,7 +167,7 @@ func buildDeliverySuffix(job *CronJob) string {
 }
 
 func buildSlackDelivery(job *CronJob) string {
-	ch := job.PlatformKey["channel_id"]
+	ch := job.PlatformKey[RequiredPlatformKey["slack"]]
 	if ch == "" {
 		return ""
 	}
@@ -174,16 +175,21 @@ func buildSlackDelivery(job *CronJob) string {
 	if ts := job.PlatformKey["thread_ts"]; ts != "" {
 		cmd += fmt.Sprintf(" --thread-ts %s", ts)
 	}
-	return fmt.Sprintf(deliveryBlockFmt, job.Name, cmd)
+	return fmt.Sprintf(deliveryBlockFmt, SanitizeJobName(job.Name), cmd)
 }
 
 func buildFeishuDelivery(job *CronJob) string {
-	chatID := job.PlatformKey["chat_id"]
+	chatID := job.PlatformKey[RequiredPlatformKey["feishu"]]
 	if chatID == "" {
 		return ""
 	}
-	cmd := fmt.Sprintf("lark-cli im +messages-send --as bot --chat-id %s --markdown \"结果内容\"", chatID)
-	return fmt.Sprintf(deliveryBlockFmt, job.Name, cmd)
+	var cmd string
+	if msgID := job.PlatformKey["message_id"]; msgID != "" {
+		cmd = fmt.Sprintf("lark-cli im +messages-reply --as bot --message-id %s --markdown \"结果内容\"", msgID)
+	} else {
+		cmd = fmt.Sprintf("lark-cli im +messages-send --as bot --chat-id %s --markdown \"结果内容\"", chatID)
+	}
+	return fmt.Sprintf(deliveryBlockFmt, SanitizeJobName(job.Name), cmd)
 }
 
 const deliveryBlockFmt = `

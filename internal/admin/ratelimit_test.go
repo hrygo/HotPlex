@@ -24,9 +24,7 @@ func TestRateLimiter_Refill(t *testing.T) {
 	require.False(t, rl.Allow(), "no tokens")
 
 	// Wait for refill (>10ms at 100/s = 1 token per 10ms)
-	time.Sleep(50 * time.Millisecond)
-
-	require.True(t, rl.Allow(), "refilled token")
+	require.Eventually(t, rl.Allow, 500*time.Millisecond, 10*time.Millisecond, "refilled token")
 }
 
 func TestRateLimiter_UpdateRate(t *testing.T) {

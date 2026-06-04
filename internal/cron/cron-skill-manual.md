@@ -83,6 +83,8 @@ hotplex cron create \
   [--timeout <秒>] [--max-retries <次数>] \
   [--delete-after-run] [--silent] \
   [--max-runs <次数>] [--expires-at <RFC3339>]
+# 注：省略 --platform 时自动从 $GATEWAY_PLATFORM / $GATEWAY_CHANNEL_ID 检测投递目标。
+#    仅在会话外创建或需覆盖默认路由时显式指定 --platform / --platform-key。
 ```
 
 必填：`--name`、`--schedule`、`-m`、`--bot-id`、`--owner-id`
@@ -193,6 +195,8 @@ hotplex cron create --attach \
 | `-m`                 | 是       | Prompt，最大4KB                             |
 | `--owner-id`         | 是       | 取自 `$GATEWAY_USER_ID`                     |
 | `--bot-id`           | 是       | 取自 `$GATEWAY_BOT_ID`                      |
+| `--platform`         | 否       | 投递平台（slack/feishu），省略时自动检测    |
+| `--platform-key`     | 否       | 投递路由键 JSON，如 `'{"channel_id":"C123"}'`，省略时自动检测 |
 | `--description`      | 否       | 任务描述                                    |
 | `--work-dir`         | 否       | 取自 `$GATEWAY_WORK_DIR`                    |
 | `--timeout`          | 否       | 单次超时（秒），默认5min                    |
@@ -202,7 +206,25 @@ hotplex cron create --attach \
 | `--max-retries`      | 否       | 失败重试次数，默认0                         |
 | `--max-runs`         | 周期必填 | 成功N次后自动disable                        |
 | `--expires-at`       | 周期必填 | 过期时间（RFC3339）                         |
-| `--worker-type`      | 否       | Agent引擎类型 (claude_code/opencode_server) |
+| `--worker-type`      | 否       | Agent引擎类型 (claude_code/opencode_server/codex_cli/acp) |
 | `--attach`           | 否       | 会话附加模式，需要 `$GATEWAY_SESSION_ID`。省略 `--schedule` 时默认 `at:+10m` |
 
 </field_reference>
+
+<platform_resolution>
+**投递平台自动检测**（三级优先级，通常无需手动指定）：
+
+1. **CLI 显式指定**（最高）：`--platform slack --platform-key '{"channel_id":"C123"}'`
+2. **环境变量自动检测**：从 `$GATEWAY_PLATFORM`、`$GATEWAY_CHANNEL_ID`、`$GATEWAY_THREAD_ID` 读取
+3. **默认回退**：`cron`（不投递到任何聊天平台）
+
+在 gateway 会话内创建时，环境变量已自动注入，**省略 `--platform` 即可**。系统会自动将结果投递到当前聊天。仅在会话外创建或需覆盖默认路由时显式指定。
+
+平台对应的环境变量映射：
+| 平台   | `$GATEWAY_PLATFORM` | `$GATEWAY_CHANNEL_ID` 映射 | `$GATEWAY_THREAD_ID` 映射 |
+| ------ | ------------------- | -------------------------- | ------------------------- |
+| Slack  | `slack`             | `channel_id`               | `thread_ts`               |
+| 飞书   | `feishu`            | `chat_id`                  | `message_id`              |
+
+**注意**：如果检测不到任何平台，job 将以 `cron` 模式创建，执行结果不会投递到聊天。此时 CLI 会输出 warning 提示。
+</platform_resolution>

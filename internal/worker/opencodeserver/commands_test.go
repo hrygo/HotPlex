@@ -88,7 +88,7 @@ func TestServerCommanderQueryContextUsage(t *testing.T) {
 
 	resp, err := c.SendControlRequest(context.Background(), "get_context_usage", nil)
 	require.NoError(t, err)
-	require.Equal(t, 400, resp["totalTokens"])
+	require.Equal(t, 100+30+20, resp["totalTokens"], "totalTokens = last message input + cache_read + cache_write")
 	require.Equal(t, "anthropic/claude-sonnet-4", resp["model"])
 	require.Len(t, resp["categories"], 5)
 }
@@ -115,7 +115,7 @@ func TestServerCommanderQueryContextUsageMultipleMessages(t *testing.T) {
 
 	resp, err := c.SendControlRequest(context.Background(), "get_context_usage", nil)
 	require.NoError(t, err)
-	require.Equal(t, 100+200+50+10+5+50+100+25+5+3, resp["totalTokens"])
+	require.Equal(t, 50+5+3, resp["totalTokens"], "totalTokens = last assistant message input + cache_read + cache_write")
 	require.Equal(t, "openai/gpt-4", resp["model"])
 	categories := resp["categories"].([]map[string]any)
 	require.Len(t, categories, 5)
@@ -397,10 +397,11 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		mode        string
-		checkBody   func(*testing.T, map[string]any)
-		wantSuccess bool
+		name         string
+		mode         string
+		allowedTools []string
+		checkBody    func(*testing.T, map[string]any)
+		wantSuccess  bool
 	}{
 		{
 			name: "bypassPermissions", mode: "bypassPermissions",
@@ -411,6 +412,48 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 			name: "unknown mode", mode: "unknownMode",
 			checkBody: func(t *testing.T, reqBody map[string]any) {
 				require.Equal(t, []any{}, reqBody["permission"])
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "bypassPermissions + allowedTools generates per-tool rules only",
+			mode: "bypassPermissions", allowedTools: []string{"Read", "Bash"},
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				require.Len(t, perms, 2)
+				for _, p := range perms {
+					rule := p.(map[string]any)
+					require.Equal(t, "tool", rule["permission"])
+					require.Equal(t, "allow", rule["action"])
+				}
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "plan + allowedTools includes read-only + per-tool rules",
+			mode: "plan", allowedTools: []string{"Bash"},
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				require.Len(t, perms, 2)
+				readRule := perms[0].(map[string]any)
+				require.Equal(t, "read", readRule["permission"])
+				toolRule := perms[1].(map[string]any)
+				require.Equal(t, "tool", toolRule["permission"])
+				require.Equal(t, "Bash", toolRule["pattern"])
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "default mode + allowedTools generates per-tool rules only",
+			mode: "default", allowedTools: []string{"Edit", "Write"},
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				require.Len(t, perms, 2)
+				for _, p := range perms {
+					rule := p.(map[string]any)
+					require.Equal(t, "tool", rule["permission"])
+					require.Equal(t, "allow", rule["action"])
+				}
 			},
 			wantSuccess: true,
 		},
@@ -431,7 +474,11 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				}
 				w.WriteHeader(http.StatusOK)
 			})
-			resp, err := c.SendControlRequest(context.Background(), "set_permission_mode", map[string]any{"mode": tt.mode})
+			reqBody := map[string]any{"mode": tt.mode}
+			if len(tt.allowedTools) > 0 {
+				reqBody["allowed_tools"] = tt.allowedTools
+			}
+			resp, err := c.SendControlRequest(context.Background(), "set_permission_mode", reqBody)
 			require.NoError(t, err)
 			require.True(t, called)
 			require.Equal(t, tt.mode, resp["mode"])
@@ -869,13 +916,13 @@ func TestWorkerSessionID(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 		t.Cleanup(ts.Close)
 		w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil), client: ts.Client(), httpAddr: ts.URL}
-		w.initHTTPConn("user-1", "sess-from-conn", "")
+		w.initHTTPConn("user-1", "sess-from-conn", "", worker.SessionInfo{})
 		require.Equal(t, "sess-from-conn", w.GetWorkerSessionID())
 	})
 	t.Run("with conn set", func(t *testing.T) {
 		t.Parallel()
 		w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
-		w.initHTTPConn("user-1", "sess-original", "")
+		w.initHTTPConn("user-1", "sess-original", "", worker.SessionInfo{})
 		require.Equal(t, "sess-original", w.GetWorkerSessionID())
 		w.SetWorkerSessionID("sess-updated")
 		require.Equal(t, "sess-updated", w.GetWorkerSessionID())
@@ -943,7 +990,7 @@ func TestWorkerResetContext(t *testing.T) {
 			}))
 			t.Cleanup(ts.Close)
 			w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil), client: ts.Client(), httpAddr: ts.URL}
-			w.initHTTPConn("user-1", "sess-xyz", "")
+			w.initHTTPConn("user-1", "sess-xyz", "", worker.SessionInfo{})
 			err := w.ResetContext(context.Background())
 			if tt.expectError {
 				require.Error(t, err)
@@ -1007,7 +1054,9 @@ func TestConn(t *testing.T) {
 		c.Close()
 		err := c.Send(context.Background(), &events.Envelope{})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "connection closed")
+		var we *worker.WorkerError
+		require.ErrorAs(t, err, &we)
+		require.Equal(t, worker.ErrKindUnavailable, we.Kind)
 	})
 }
 
@@ -1021,7 +1070,7 @@ func TestWorkerCapabilities(t *testing.T) {
 	require.NotNil(t, w.EnvBlocklist())
 	require.Equal(t, "", w.SessionStoreDir())
 	require.Equal(t, 0, w.MaxTurns())
-	require.Equal(t, []string{"text", "code"}, w.Modalities())
+	require.Equal(t, []string{"text", "code", "image"}, w.Modalities())
 }
 
 // Consolidated: worker not-started tests

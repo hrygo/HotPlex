@@ -31,7 +31,6 @@
 package opencodeserver
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -39,6 +38,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -78,8 +78,13 @@ const (
 	// recvChannelSize is the buffer size for SSE event channel.
 	recvChannelSize = 256
 
-	// httpClientTimeout is the timeout for HTTP client operations.
+	// httpClientTimeout is the timeout for general HTTP client operations.
 	httpClientTimeout = 30 * time.Second
+
+	// sendTimeout is the timeout for sending user input to the OCS server.
+	// The OCS POST /session/{id}/message blocks until the turn completes,
+	// so this must be long enough for the longest expected turn.
+	sendTimeout = 5 * time.Minute
 )
 
 // Worker implements the OpenCode Server worker adapter.
@@ -99,7 +104,7 @@ const (
 //
 //   - Single owner: Worker is owned by one session.Manager
 //   - Thread-safe: All public methods are safe for concurrent use
-//   - Goroutines: readSSE runs in separate goroutine, writes to recvCh
+//   - Goroutines: forwardBusEvents runs in a separate goroutine, receives from EventBus channel
 //   - Backpressure: recvCh has 256 buffer, drops messages when full
 type Worker struct {
 	*base.BaseWorker
@@ -108,7 +113,6 @@ type Worker struct {
 	httpConn  *conn
 	httpAddr  string
 	client    *http.Client
-	sseClient *http.Client // separate client without Timeout for SSE
 	cmd       *ServerCommander
 	crashSub  <-chan struct{} // closed when singleton process crashes
 
@@ -164,6 +168,20 @@ func newHTTPClient() *http.Client {
 	}
 }
 
+// newSendClient creates an HTTP client with a longer timeout for sending
+// user input. The OCS POST /session/{id}/message blocks until the turn
+// completes, so the default 30s timeout causes false "server unreachable" errors.
+func newSendClient() *http.Client {
+	return &http.Client{
+		Timeout: sendTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 100,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+}
+
 // ─── Capabilities ─────────────────────────────────────────────────────────────
 
 func (w *Worker) Type() worker.WorkerType { return worker.TypeOpenCodeSrv }
@@ -172,8 +190,13 @@ func (w *Worker) SupportsStreaming() bool { return true }
 func (w *Worker) SupportsTools() bool     { return true }
 func (w *Worker) EnvBlocklist() []string  { return openCodeSrvEnvBlocklist }
 func (w *Worker) SessionStoreDir() string { return "" }
-func (w *Worker) MaxTurns() int           { return 0 }
-func (w *Worker) Modalities() []string    { return []string{"text", "code"} }
+
+// MaxTurns returns 0 (unlimited).
+// B3-1 note: OCS does not support dynamic per-session steps limits.
+// The underlying OpenCode agent may have a predefined steps config,
+// but it cannot be set via the HTTP session API.
+func (w *Worker) MaxTurns() int        { return 0 }
+func (w *Worker) Modalities() []string { return []string{"text", "code", "image"} }
 
 // ─── Worker Lifecycle ─────────────────────────────────────────────────────────
 
@@ -185,19 +208,24 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	// Acquire ref from singleton (starts process if first session)
+	w.Log.Debug("opencodeserver: start step 1 - acquiring server")
 	if err := w.acquireServer(ctx); err != nil {
 		return err
 	}
+	w.Log.Debug("opencodeserver: start step 2 - server acquired", "addr", w.httpAddr)
 
 	// Create new session via HTTP API
+	w.Log.Debug("opencodeserver: start step 3 - creating session", "dir", session.ProjectDir)
 	sessionID, err := w.createSession(ctx, session.ProjectDir)
 	if err != nil {
 		w.releaseOnce.Do(func() { w.singleton.Release() })
 		return fmt.Errorf("opencodeserver: create session: %w", err)
 	}
+	w.Log.Debug("opencodeserver: start step 4 - session created", "ocs_session_id", sessionID)
 
 	w.initSessionConn(ctx, sessionID, session)
 	w.startSSE(sessionID)
+	w.Log.Debug("opencodeserver: start completed")
 	return nil
 }
 
@@ -262,17 +290,46 @@ func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action st
 }
 
 // Resume reconnects to an existing session on the shared OpenCode server.
+// If a WorkerSessionID from a previous Start is available in session.WorkerSessionID,
+// it attempts to reuse that OCS session. Otherwise, it creates a fresh OCS session.
 func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	if err := w.checkNotStarted(); err != nil {
 		return err
 	}
 
+	w.Log.Debug("opencodeserver: resume step 1 - acquiring server")
 	if err := w.acquireServer(ctx); err != nil {
 		return err
 	}
+	w.Log.Debug("opencodeserver: resume step 2 - server acquired", "addr", w.httpAddr)
 
-	w.initSessionConn(ctx, session.SessionID, session)
-	w.startSSE(session.SessionID)
+	// Try to reuse the OCS-internal session if we have one from a previous Start.
+	ocsSessionID := session.WorkerSessionID
+	if ocsSessionID != "" {
+		w.Log.Debug("opencodeserver: resume step 3 - checking session existence", "ocs_session_id", ocsSessionID)
+		if w.ocsSessionExists(ctx, ocsSessionID) {
+			w.Log.Info("opencodeserver: resuming existing OCS session",
+				"ocs_session_id", ocsSessionID, "hotplex_session_id", session.SessionID)
+			w.initSessionConn(ctx, ocsSessionID, session)
+			w.startSSE(ocsSessionID)
+			w.Log.Debug("opencodeserver: resume completed (reused session)")
+			return nil
+		}
+		w.Log.Info("opencodeserver: OCS session not found, creating fresh",
+			"stale_ocs_session_id", ocsSessionID, "hotplex_session_id", session.SessionID)
+	}
+
+	// No valid OCS session - create a new one (conversation context is lost).
+	w.Log.Debug("opencodeserver: resume step 3 - creating fresh session", "dir", session.ProjectDir)
+	newSessionID, err := w.createSession(ctx, session.ProjectDir)
+	if err != nil {
+		w.releaseOnce.Do(func() { w.singleton.Release() })
+		return fmt.Errorf("opencodeserver: resume create session: %w", err)
+	}
+
+	w.initSessionConn(ctx, newSessionID, session)
+	w.startSSE(newSessionID)
+	w.Log.Debug("opencodeserver: resume completed (fresh session)")
 	return nil
 }
 
@@ -390,7 +447,27 @@ func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body ma
 	if w.cmd == nil {
 		return nil, fmt.Errorf("opencode server: commander not initialized")
 	}
-	return w.cmd.SendControlRequest(ctx, subtype, body)
+	result, err := w.cmd.SendControlRequest(ctx, subtype, body)
+	if err != nil {
+		return result, err
+	}
+	// Propagate model + variant from set_model to conn for subsequent messages.
+	if subtype == "set_model" {
+		w.Mu.Lock()
+		conn := w.httpConn
+		w.Mu.Unlock()
+		if conn != nil {
+			conn.mu.Lock()
+			if pm := w.cmd.PendingModel(); pm != nil {
+				conn.allowedModel = &ocsModelRef{ProviderID: pm.ProviderID, ModelID: pm.ModelID}
+			}
+			if v, ok := body["variant"].(string); ok && v != "" {
+				conn.variant = v
+			}
+			conn.mu.Unlock()
+		}
+	}
+	return result, nil
 }
 
 func (w *Worker) Compact(ctx context.Context, args map[string]any) error {
@@ -404,7 +481,26 @@ func (w *Worker) Clear(ctx context.Context) error {
 	if w.cmd == nil {
 		return fmt.Errorf("opencode server: commander not initialized")
 	}
-	return w.cmd.Clear(ctx)
+	oldID := w.cmd.SessionID()
+	if err := w.cmd.Clear(ctx); err != nil {
+		return err
+	}
+	newID := w.cmd.SessionID()
+	if newID == oldID || newID == "" {
+		return nil
+	}
+	// Cancel old SSE goroutine and unsubscribe from old session.
+	w.Mu.Lock()
+	if w.sseCancel != nil {
+		w.sseCancel()
+	}
+	w.Mu.Unlock()
+	w.singleton.Unsubscribe(oldID)
+	// Propagate new session ID to conn + atomic store.
+	w.SetWorkerSessionID(newID)
+	// Re-subscribe EventBus for the new session.
+	w.startSSE(newID)
+	return nil
 }
 
 func (w *Worker) Rewind(ctx context.Context, targetID string) error {
@@ -431,9 +527,18 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 		mode = session.PermissionMode
 	}
 
-	_, err := cmd.SendControlRequest(ctx, "set_permission_mode", map[string]any{
+	body := map[string]any{
 		"mode": mode,
-	})
+	}
+
+	// B3-2 绕行: pass AllowedTools so setPermissionMode can generate
+	// per-tool allow rules. Semantics differ from CC --allowed-tools:
+	// OCS permission rules are session-scoped and pattern-based.
+	if len(session.AllowedTools) > 0 {
+		body["allowed_tools"] = session.AllowedTools
+	}
+
+	_, err := cmd.SendControlRequest(ctx, "set_permission_mode", body)
 	return err
 }
 
@@ -466,20 +571,44 @@ func (w *Worker) createSession(ctx context.Context, projectDir string) (string, 
 	return result.ID, nil
 }
 
-func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string) {
-	w.httpConn = &conn{
+func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string, session worker.SessionInfo) {
+	c := &conn{
 		userID:       userID,
 		sessionID:    sessionID,
 		httpAddr:     w.httpAddr,
 		client:       w.client,
+		sendClient:   newSendClient(),
 		recvCh:       make(chan *events.Envelope, recvChannelSize),
 		log:          w.Log,
 		systemPrompt: systemPrompt,
 	}
+
+	// Parse AllowedModels[0] → "provider/model" or plain "model".
+	if len(session.AllowedModels) > 0 && session.AllowedModels[0] != "" {
+		parts := strings.SplitN(session.AllowedModels[0], "/", 2)
+		ref := &ocsModelRef{ModelID: parts[0]}
+		if len(parts) == 2 {
+			ref.ProviderID = parts[0]
+			ref.ModelID = parts[1]
+		}
+		c.allowedModel = ref
+	}
+
+	// Parse JSONSchema string → map for PromptInput.format.
+	if session.JSONSchema != "" {
+		var schema map[string]any
+		if err := json.Unmarshal([]byte(session.JSONSchema), &schema); err == nil {
+			c.jsonSchema = schema
+		} else {
+			w.Log.Warn("opencodeserver: invalid JSONSchema, ignoring", "err", err)
+		}
+	}
+
+	w.httpConn = c
 }
 
 func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, session worker.SessionInfo) {
-	w.initHTTPConn(session.UserID, serverSessionID, session.SystemPrompt)
+	w.initHTTPConn(session.UserID, serverSessionID, session.SystemPrompt, session)
 	w.cmd = &ServerCommander{
 		client:    w.client,
 		baseURL:   w.httpAddr,
@@ -492,6 +621,23 @@ func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, se
 	w.StartTime = time.Now()
 	w.SetLastIO(w.StartTime)
 	w.Mu.Unlock()
+}
+
+// ocsSessionExists checks whether a session exists on the OpenCode server
+// by issuing a lightweight GET to the session messages endpoint.
+func (w *Worker) ocsSessionExists(ctx context.Context, sessionID string) bool {
+	checkURL := fmt.Sprintf("%s/session/%s/message?limit=1", w.httpAddr, url.QueryEscape(sessionID))
+	req, err := http.NewRequestWithContext(ctx, "GET", checkURL, http.NoBody)
+	if err != nil {
+		return false
+	}
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return false
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // ─── Shared Lifecycle Helpers ──────────────────────────────────────────────────
@@ -513,36 +659,84 @@ func (w *Worker) checkNotStarted() error {
 
 // acquireServer acquires a ref from the singleton process manager.
 func (w *Worker) acquireServer(ctx context.Context) error {
-	httpAddr, client, sseClient, crashSub, err := w.singleton.Acquire(ctx)
+	httpAddr, client, _, crashSub, err := w.singleton.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("opencodeserver: acquire server: %w", err)
 	}
 	w.httpAddr = httpAddr
 	w.client = client
-	w.sseClient = sseClient
 	w.crashSub = crashSub
 	return nil
 }
 
-// startSSE creates a cancellable SSE context and starts the reader goroutine.
+// startSSE subscribes to the singleton EventBus and starts the forwarder goroutine.
 func (w *Worker) startSSE(sessionID string) {
 	sseCtx, sseCancel := context.WithCancel(context.Background())
 	w.Mu.Lock()
 	w.sseCancel = sseCancel
 	w.Mu.Unlock()
-	go w.readSSE(sseCtx, sessionID)
+
+	// Subscribe to global EventBus instead of opening own SSE connection.
+	busCh := w.singleton.Subscribe(sessionID)
+	go w.forwardBusEvents(sseCtx, sessionID, busCh)
 }
 
-// release closes the SSE connection and releases the singleton ref.
-// Shared by Terminate and Kill — they are semantically identical for OCS
-// workers since the shared server process is never killed by individual sessions.
+func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh chan *events.Envelope) {
+	defer func() {
+		if r := recover(); r != nil {
+			w.Log.Error("opencodeserver: forwardBusEvents panic", "session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case env, ok := <-busCh:
+			if !ok {
+				return
+			}
+
+			w.SetLastIO(time.Now())
+
+			w.Mu.Lock()
+			ch := w.httpConn
+			var recvCh chan *events.Envelope
+			if ch != nil {
+				recvCh = ch.recvCh
+			}
+			w.Mu.Unlock()
+
+			if recvCh == nil {
+				return
+			}
+
+			select {
+			case recvCh <- env:
+			default:
+				w.Log.Warn("opencodeserver: recv channel full, dropping message",
+					"event_type", env.Event.Type, "event_id", env.ID)
+			}
+		}
+	}
+}
+
+// release closes the SSE subscription and releases the singleton ref.
 func (w *Worker) release() {
 	w.Mu.Lock()
 	sseCancel := w.sseCancel
+	sessionID := ""
+	if w.httpConn != nil {
+		sessionID = w.httpConn.sessionID
+	}
 	w.Mu.Unlock()
 
 	if sseCancel != nil {
 		sseCancel()
+	}
+
+	if sessionID != "" && w.singleton != nil {
+		w.singleton.Unsubscribe(sessionID)
 	}
 
 	w.releaseOnce.Do(func() {
@@ -558,174 +752,6 @@ func (w *Worker) release() {
 
 	if conn != nil {
 		_ = conn.Close()
-	}
-}
-
-func (w *Worker) readSSE(ctx context.Context, sessionID string) {
-	defer func() {
-		if r := recover(); r != nil {
-			w.Log.Error("opencodeserver: readSSE panic", "session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
-		}
-	}()
-
-	sseURL := fmt.Sprintf("%s/events?session_id=%s", w.httpAddr, url.QueryEscape(sessionID))
-	req, err := http.NewRequestWithContext(ctx, "GET", sseURL, http.NoBody)
-	if err != nil {
-		w.Log.Error("opencodeserver: create SSE request", "session_id", sessionID, "err", err)
-		return
-	}
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Cache-Control", "no-cache")
-
-	resp, err := w.sseClient.Do(req)
-	if err != nil {
-		w.Log.Error("opencodeserver: SSE connect", "session_id", sessionID, "err", err)
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		w.Log.Error("opencodeserver: SSE status",
-			"session_id", sessionID,
-			"status", resp.StatusCode,
-			"body", string(body))
-		return
-	}
-
-	reader := bufio.NewReader(resp.Body)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				w.Log.Debug("opencodeserver: SSE stream ended (EOF)", "session_id", sessionID)
-				return
-			}
-			w.Log.Error("opencodeserver: SSE read", "session_id", sessionID, "err", err)
-			return
-		}
-
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-
-		env, err := aep.DecodeLine([]byte(data))
-		if err != nil {
-			var busEvent struct {
-				Type       string          `json:"type"`
-				Properties json.RawMessage `json:"properties"`
-			}
-			if jsonErr := json.Unmarshal([]byte(data), &busEvent); jsonErr == nil {
-				switch busEvent.Type {
-				case "permission.asked":
-					w.handlePermissionAsked(sessionID, busEvent.Properties)
-				case "question.asked":
-					w.handleQuestionAsked(sessionID, busEvent.Properties)
-				default:
-					w.Log.Debug("opencodeserver: unhandled bus event", "type", busEvent.Type)
-				}
-				continue
-			}
-			w.Log.Warn("opencodeserver: decode SSE data", "session_id", sessionID, "err", err, "data", data)
-			continue
-		}
-
-		env.SessionID = sessionID
-		w.SetLastIO(time.Now())
-
-		w.Mu.Lock()
-		ch := w.httpConn
-		var recvCh chan *events.Envelope
-		if ch != nil {
-			recvCh = ch.recvCh
-		}
-		w.Mu.Unlock()
-
-		if recvCh == nil {
-			w.Log.Debug("opencodeserver: connection closed, stopping SSE reader")
-			return
-		}
-
-		select {
-		case recvCh <- env:
-		default:
-			w.Log.Warn("opencodeserver: recv channel full, dropping message",
-				"event_type", env.Event.Type, "event_id", env.ID)
-		}
-	}
-}
-
-// ─── OpenCode Bus Event Handlers ──────────────────────────────────────────────
-
-func (w *Worker) handlePermissionAsked(sessionID string, props json.RawMessage) {
-	var data struct {
-		ID       string         `json:"id"`
-		Metadata map[string]any `json:"metadata"`
-	}
-	if err := json.Unmarshal(props, &data); err != nil {
-		w.Log.Warn("opencodeserver: parse permission.asked", "session_id", sessionID, "err", err)
-		return
-	}
-
-	toolName, _ := data.Metadata["tool"].(string)
-	args, _ := json.Marshal(data.Metadata)
-	env := events.NewEnvelope(
-		aep.NewID(), sessionID, 0,
-		events.PermissionRequest,
-		events.PermissionRequestData{
-			ID:          data.ID,
-			ToolName:    toolName,
-			Description: toolName,
-			Args:        []string{string(args)},
-			InputRaw:    json.RawMessage(args),
-		},
-	)
-	w.trySend(env)
-}
-
-func (w *Worker) handleQuestionAsked(sessionID string, props json.RawMessage) {
-	var data struct {
-		ID        string            `json:"id"`
-		Questions []events.Question `json:"questions"`
-	}
-	if err := json.Unmarshal(props, &data); err != nil {
-		w.Log.Warn("opencodeserver: parse question.asked", "session_id", sessionID, "err", err)
-		return
-	}
-
-	env := events.NewEnvelope(
-		aep.NewID(), sessionID, 0,
-		events.QuestionRequest,
-		events.QuestionRequestData{
-			ID:        data.ID,
-			Questions: data.Questions,
-		},
-	)
-	w.trySend(env)
-}
-
-func (w *Worker) trySend(env *events.Envelope) {
-	w.Mu.Lock()
-	c := w.httpConn
-	closed := c == nil
-	w.Mu.Unlock()
-
-	if closed {
-		return
-	}
-
-	w.SetLastIO(time.Now())
-	select {
-	case c.recvCh <- env:
-	default:
-		w.Log.Warn("opencodeserver: recv channel full, dropping bus event",
-			"event_type", env.Event.Type)
 	}
 }
 
@@ -776,30 +802,59 @@ type conn struct {
 	sessionID    string
 	httpAddr     string
 	client       *http.Client
+	sendClient   *http.Client // longer timeout for input delivery (OCS blocks until turn completes)
 	recvCh       chan *events.Envelope
 	log          *slog.Logger
 	systemPrompt string
 
+	allowedModel *ocsModelRef   // parsed from SessionInfo.AllowedModels[0]
+	jsonSchema   map[string]any // parsed from SessionInfo.JSONSchema
+	variant      string         // reasoning effort variant (e.g. "high", "low")
+
 	mu        sync.Mutex
 	closed    bool
 	closeOnce sync.Once
+	lastInput string // cached for crash recovery re-delivery
+}
+
+type ocsModelRef struct {
+	ProviderID string `json:"providerID"`
+	ModelID    string `json:"modelID"`
+}
+
+var _ worker.InputRecoverer = (*conn)(nil)
+
+func (c *conn) LastInput() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastInput
 }
 
 func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
-		return fmt.Errorf("opencodeserver: connection closed")
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "opencodeserver: connection closed"}
 	}
 	c.mu.Unlock()
 
 	var content string
 	if msg.Event.Data != nil {
-		if data, ok := msg.Event.Data.(map[string]any); ok {
-			if v, ok := data["content"].(string); ok {
+		switch d := msg.Event.Data.(type) {
+		case map[string]any:
+			if v, ok := d["content"].(string); ok {
 				content = v
 			}
+		case events.InputData:
+			content = d.Content
 		}
+	}
+
+	// Cache last input for crash recovery re-delivery.
+	if content != "" {
+		c.mu.Lock()
+		c.lastInput = content
+		c.mu.Unlock()
 	}
 
 	body := map[string]any{
@@ -807,6 +862,22 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	}
 	if c.systemPrompt != "" {
 		body["system"] = c.systemPrompt
+	}
+	if c.jsonSchema != nil {
+		body["format"] = map[string]any{
+			"type":   "json_schema",
+			"schema": c.jsonSchema,
+		}
+	}
+	c.mu.Lock()
+	allowedModel := c.allowedModel
+	variant := c.variant
+	c.mu.Unlock()
+	if allowedModel != nil {
+		body["model"] = allowedModel
+	}
+	if variant != "" {
+		body["variant"] = variant
 	}
 
 	payload, err := json.Marshal(body)
@@ -821,11 +892,28 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	// Use sendClient (long timeout) for input delivery; fall back to client for tests.
+	sendCl := c.sendClient
+	if sendCl == nil {
+		sendCl = c.client
+	}
+	resp, err := sendCl.Do(req)
 	if err != nil {
+		if isTimeoutError(err) {
+			// Server is alive but response took too long — do not treat as unreachable.
+			return &worker.WorkerError{Kind: worker.ErrKindTimeout, Message: "opencodeserver: input delivery timed out", Cause: err}
+		}
+		if isUnreachableError(err) {
+			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "opencodeserver: server unreachable", Cause: err}
+		}
 		return fmt.Errorf("opencodeserver: send input: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: fmt.Sprintf("opencodeserver: input failed: status %d, body: %s", resp.StatusCode, string(respBody))}
+	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -852,6 +940,26 @@ func (c *conn) Close() error {
 
 func (c *conn) UserID() string    { return c.userID }
 func (c *conn) SessionID() string { return c.sessionID }
+
+// isTimeoutError reports whether the error is a timeout (deadline exceeded or
+// net.Error with Timeout()=true). The server may still be alive and processing.
+func isTimeoutError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	ne, ok := errors.AsType[net.Error](err)
+	return ok && ne.Timeout()
+}
+
+// isUnreachableError reports whether the error indicates the server is actually
+// unreachable (connection refused, DNS failure, etc.) — not a timeout.
+func isUnreachableError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return false // timeout is not unreachable
+	}
+	ne, ok := errors.AsType[net.Error](err)
+	return ok && !ne.Timeout()
+}
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 

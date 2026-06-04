@@ -23,19 +23,29 @@ var jsLineTerminators = [...]byte{0xE2, 0x80, 0xA8, 0xE2, 0x80, 0xA9}
 
 // Encode writes an Envelope to w as a newline-delimited JSON record.
 // NDJSON-safe: U+2028 and U+2029 are escaped to prevent JS parsers truncating.
+// The input envelope is not modified.
 func Encode(w io.Writer, env *events.Envelope) error {
-	env.Version = events.Version
-	if env.Timestamp == 0 {
-		env.Timestamp = nowMillis()
-	}
-	data, err := json.Marshal(env)
+	data, err := marshalEnvelope(env)
 	if err != nil {
-		return fmt.Errorf("aep: marshal envelope: %w", err)
+		return err
 	}
-	data = escapeJSTerminators(data)
-	data = append(data, '\n')
-	_, err = w.Write(data)
+	_, err = w.Write(append(data, '\n'))
 	return err
+}
+
+// marshalEnvelope fills version and timestamp on a shallow copy, then marshals
+// to NDJSON-safe JSON bytes. The input envelope is not modified.
+func marshalEnvelope(env *events.Envelope) ([]byte, error) {
+	c := *env
+	c.Version = events.Version
+	if c.Timestamp == 0 {
+		c.Timestamp = nowMillis()
+	}
+	data, err := json.Marshal(&c)
+	if err != nil {
+		return nil, fmt.Errorf("aep: marshal envelope: %w", err)
+	}
+	return escapeJSTerminators(data), nil
 }
 
 // NDJSONSpec: https://datatracker.ietf.org/doc/html/rfc7464
@@ -97,6 +107,20 @@ func Decode(r io.Reader) (*events.Envelope, error) {
 		return nil, fmt.Errorf("aep: validate envelope: %w", err)
 	}
 
+	return &env, nil
+}
+
+// DecodeLineMinimal decodes a JSON line with minimal validation.
+// Unlike DecodeLine, it does not require session_id or seq — suitable for
+// client→server messages where the Gateway stamps these fields.
+func DecodeLineMinimal(data []byte) (*events.Envelope, error) {
+	var env events.Envelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return nil, fmt.Errorf("aep: unmarshal envelope: %w", err)
+	}
+	if err := ValidateMinimal(&env); err != nil {
+		return nil, fmt.Errorf("aep: validate envelope: %w", err)
+	}
 	return &env, nil
 }
 
@@ -173,16 +197,9 @@ func NewSessionID() string {
 
 // EncodeJSON encodes an envelope to JSON bytes (no trailing newline).
 // NDJSON-safe: U+2028 and U+2029 are escaped.
+// The input envelope is not modified.
 func EncodeJSON(env *events.Envelope) ([]byte, error) {
-	env.Version = events.Version
-	if env.Timestamp == 0 {
-		env.Timestamp = nowMillis()
-	}
-	data, err := json.Marshal(env)
-	if err != nil {
-		return nil, fmt.Errorf("aep: marshal envelope: %w", err)
-	}
-	return escapeJSTerminators(data), nil
+	return marshalEnvelope(env)
 }
 
 // MustMarshal is like EncodeJSON but panics on error.

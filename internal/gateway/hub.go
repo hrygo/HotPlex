@@ -56,8 +56,24 @@ const (
 // platform connection wrappers. It is used as the value type in the
 // sessions routing map.
 type SessionWriter interface {
+	// WriteCtx writes an envelope directly to the connection. Used for
+	// control events and init_ack where init-phase buffering must be bypassed.
 	WriteCtx(ctx context.Context, env *events.Envelope) error
+	// RouteWrite writes an envelope through the Hub routing path. Handles
+	// init-phase buffering (for WS conns) and droppable semantics internally.
+	RouteWrite(ctx context.Context, env *events.Envelope) error
+	// RouteWriteData writes pre-encoded JSON bytes through the Hub routing path.
+	// This avoids redundant re-encoding when the same message is sent to N
+	// connections. The caller provides the event type for metrics and droppable
+	// dispatch. Implementations that cannot consume raw bytes may decode and
+	// re-encode internally.
+	RouteWriteData(data []byte, eventType events.Kind) error
 	Close() error
+	// PreferEnvelope returns true if the connection prefers receiving original
+	// envelopes (via RouteWrite) over pre-encoded bytes (via RouteWriteData).
+	// Platform connections (pcEntry) return true to preserve json:"-" fields;
+	// WebSocket connections return false to benefit from pre-encoded bytes.
+	PreferEnvelope() bool
 }
 
 // Hub is the central message router and connection registry.
@@ -71,6 +87,10 @@ type Hub struct {
 	mu       sync.RWMutex
 	conns    map[*Conn]struct{}                // all active connections
 	sessions map[string]map[SessionWriter]bool // sessionID → connections
+	// everHadConn tracks sessions that have had at least one connection
+	// registered (WS or platform). Used to suppress "event dropped" debug
+	// log noise for sessions that never had connections (e.g. cron jobs).
+	everHadConn map[string]bool
 
 	// Incoming messages from all connections.
 	broadcast chan *EnvelopeWithConn
@@ -117,6 +137,7 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 		cfgStore:       cfgStore,
 		conns:          make(map[*Conn]struct{}),
 		sessions:       make(map[string]map[SessionWriter]bool),
+		everHadConn:    make(map[string]bool),
 		seqGen:         NewSeqGen(),
 		sessionDropped: make(map[string]bool),
 		broadcast:      make(chan *EnvelopeWithConn, broadcastQueueSize(cfg)),
@@ -195,6 +216,7 @@ func (h *Hub) JoinSession(sessionID string, conn *Conn) {
 		h.sessions[sessionID] = make(map[SessionWriter]bool)
 	}
 	h.sessions[sessionID][conn] = true
+	h.everHadConn[sessionID] = true
 }
 
 // LeaveSession unsubscribes conn from a session.
@@ -214,9 +236,23 @@ func (h *Hub) removeSession(sessionID string, conn SessionWriter) {
 		if len(conns) == 0 {
 			delete(h.sessions, sessionID)
 			delete(h.sessionDropped, sessionID)
+			delete(h.everHadConn, sessionID)
 			h.seqGen.Remove(sessionID)
 		}
 	}
+}
+
+// snapshotConns returns a snapshot of all SessionWriters subscribed to a session.
+// The snapshot is taken under RLock and is safe to iterate without holding the lock.
+func (h *Hub) snapshotConns(sessionID string) []SessionWriter {
+	h.mu.RLock()
+	sessionConns := h.sessions[sessionID]
+	conns := make([]SessionWriter, 0, len(sessionConns))
+	for conn := range sessionConns {
+		conns = append(conns, conn)
+	}
+	h.mu.RUnlock()
+	return conns
 }
 
 // JoinPlatformSession subscribes a PlatformConn to receive events for a session.
@@ -245,6 +281,7 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc messaging.PlatformConn) {
 	}
 
 	h.sessions[sessionID][newPCEntry(pc, defaultPCEntryConfig(h.cfgStore.Load()), h.log)] = true
+	h.everHadConn[sessionID] = true
 }
 
 // sendBroadcast sends to the broadcast channel. Returns false if the hub is
@@ -263,7 +300,7 @@ func (h *Hub) sendBroadcast(msg *EnvelopeWithConn) (sent bool) {
 // Control-priority messages bypass the broadcast queue.
 // afterDrain functions are called sequentially after the item is routed by Run.
 func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrain ...func()) error {
-	spanCtx, span := tracing.SpanFromContext(ctx).Start(ctx, "hub.send_to_session")
+	spanCtx, span := tracing.GetTracer().Start(ctx, "hub.send_to_session")
 	defer span.End()
 	span.SetAttributes(
 		tracing.Attr("session_id", env.SessionID),
@@ -310,13 +347,7 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 }
 
 func (h *Hub) sendControlToSession(ctx context.Context, env *events.Envelope) {
-	h.mu.RLock()
-	sessionConns := h.sessions[env.SessionID]
-	conns := make([]SessionWriter, 0, len(sessionConns))
-	for conn := range sessionConns {
-		conns = append(conns, conn)
-	}
-	h.mu.RUnlock()
+	conns := h.snapshotConns(env.SessionID)
 
 	if len(conns) == 0 {
 		metrics.GatewayEventsNoSubscribersDropped.WithLabelValues(string(env.Event.Type)).Inc()
@@ -327,6 +358,7 @@ func (h *Hub) sendControlToSession(ctx context.Context, env *events.Envelope) {
 
 	env = events.Clone(env)
 	for _, conn := range conns {
+		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
 		if err := conn.WriteCtx(ctx, env); err != nil {
 			h.log.Warn("gateway: send to conn failed", "session_id", env.SessionID, "err", err)
 		}
@@ -339,6 +371,7 @@ func (h *Hub) HandleHTTP(
 	auth *security.Authenticator,
 	handler *Handler,
 	bridge *Bridge,
+	cookieAuth *security.CookieAuth,
 ) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -349,13 +382,21 @@ func (h *Hub) HandleHTTP(
 
 		key, found := auth.ExtractAPIKey(r)
 		if found {
-			uid, ok := auth.AuthenticateKey(key)
+			uid, ok := auth.AuthenticateKey(r.Context(), key)
 			if !ok {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 			userID = uid
-			botID = auth.BotIDFromRequest(r)
+			botID = security.BotIDFromRequest(r)
+		} else if cookieAuth != nil {
+			// No API key — try cookie auth before deferring to init envelope.
+			if uid, ok := cookieAuth.Authenticate(r); ok {
+				userID = uid
+				botID = security.BotIDFromRequest(r)
+			} else {
+				pendingAuth = true
+			}
 		} else {
 			// No key at HTTP level — defer to init envelope auth (browser WS clients).
 			pendingAuth = true
@@ -382,7 +423,7 @@ func (h *Hub) HandleHTTP(
 		h.JoinSession(sessionID, c)
 
 		// Start read pump in background. WritePump is started by newConn.
-		go c.ReadPump(handler)
+		go c.ReadPump(handler, handler.sm, auth)
 
 		idLog := userID
 		if pendingAuth {
@@ -422,7 +463,7 @@ func (h *Hub) Run() {
 						h.log.Error("hub: panic in routeMessage", "session_id", msg.Env.SessionID, "panic", r, "stack", string(debug.Stack()))
 					}
 				}()
-				_, span := tracing.SpanFromContext(h.ctx).Start(h.ctx, "hub.broadcast")
+				_, span := tracing.GetTracer().Start(h.ctx, "hub.broadcast")
 				span.SetAttributes(
 					tracing.Attr("session_id", msg.Env.SessionID),
 					tracing.Attr("event_type", string(msg.Env.Event.Type)),
@@ -439,18 +480,20 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
-	h.mu.RLock()
-	sessionConns := h.sessions[msg.Env.SessionID]
-	conns := make([]SessionWriter, 0, len(sessionConns))
-	for conn := range sessionConns {
-		conns = append(conns, conn)
-	}
-	h.mu.RUnlock()
+	conns := h.snapshotConns(msg.Env.SessionID)
 
 	if len(conns) == 0 {
 		metrics.GatewayEventsNoSubscribersDropped.WithLabelValues(string(msg.Env.Event.Type)).Inc()
-		h.log.Debug("gateway: event dropped, no connections",
-			"session_id", msg.Env.SessionID, "event_type", msg.Env.Event.Type)
+		// Suppress debug log for sessions that never had any connection
+		// registered (e.g. cron/internal sessions). These events are expected
+		// to have no subscribers — logging every one is just noise.
+		h.mu.RLock()
+		hadConn := h.everHadConn[msg.Env.SessionID]
+		h.mu.RUnlock()
+		if hadConn {
+			h.log.Debug("gateway: event dropped, no connections",
+				"session_id", msg.Env.SessionID, "event_type", msg.Env.Event.Type)
+		}
 		return
 	}
 
@@ -465,40 +508,33 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 		h.LogHandler(level, fmt.Sprintf("event %s seq=%d", msg.Env.Event.Type, msg.Env.Seq), msg.Env.SessionID)
 	}
 
-	droppable := isDroppable(msg.Env.Event.Type)
-	var encoded []byte
-	var err error
+	// Pre-encode once and distribute raw bytes to all connections.
+	// This avoids N redundant JSON marshal operations (one per conn).
+	data, err := aep.EncodeJSON(msg.Env)
+	if err != nil {
+		h.log.Error("gateway: encode message failed", "session_id", msg.Env.SessionID, "err", err)
+		return
+	}
+
 	for _, conn := range conns {
-		metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(msg.Env.Event.Type)).Inc()
-		if c, ok := conn.(*Conn); ok {
-			// Lazy encode: only compute when first WS conn is seen.
-			if encoded == nil {
-				encoded, err = aep.EncodeJSON(msg.Env)
-				if err != nil {
-					h.log.Warn("gateway: encode failed", "err", err)
-					return
-				}
-			}
-			// Droppable events (message.delta, raw) silently drop instead of disconnecting.
-			var writeErr error
-			if droppable {
-				writeErr = c.TryWriteMessage(websocket.TextMessage, encoded)
-			} else {
-				writeErr = c.WriteMessage(websocket.TextMessage, encoded)
-			}
-			if writeErr != nil {
-				h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", writeErr)
-				_ = conn.Close()
-			}
+		var err error
+		if conn.PreferEnvelope() {
+			// Platform connections need the original envelope to preserve
+			// json:"-" fields (e.g. OwnerID) that EncodeJSON omits.
+			// Use WithoutCancel so cancelled h.ctx doesn't block during
+			// shutdown drain, while preserving tracing propagation.
+			err = conn.RouteWrite(context.WithoutCancel(h.ctx), msg.Env)
 		} else {
-			if err := conn.WriteCtx(context.Background(), msg.Env); err != nil {
-				h.log.Warn("gateway: platform write enqueue failed", "session_id", msg.Env.SessionID, "err", err)
-				_ = conn.Close()
-				h.mu.Lock()
-				h.removeSession(msg.Env.SessionID, conn)
-				h.mu.Unlock()
-			}
+			err = conn.RouteWriteData(data, msg.Env.Event.Type)
 		}
+		if err == nil {
+			continue
+		}
+		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
+		_ = conn.Close()
+		h.mu.Lock()
+		h.removeSession(msg.Env.SessionID, conn)
+		h.mu.Unlock()
 	}
 }
 

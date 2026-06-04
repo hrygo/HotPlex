@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -48,6 +49,12 @@ type Manager struct {
 	allowedTools []string
 	pidKey       string
 
+	// stderrHandler processes each stderr line: level extraction, content folding/suppression.
+	// When nil, DefaultStderrHandler is used (preserves existing behavior).
+	stderrHandler StderrHandler
+	// stderrAttrs are extra slog.Attr injected into every proc:stderr log entry.
+	stderrAttrs []slog.Attr
+
 	// jobHandle stores the Windows Job Object handle for process tree cleanup.
 	// On Unix this is always 0. On Windows, closing this handle kills the entire
 	// process tree (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).
@@ -58,6 +65,13 @@ type Manager struct {
 type Opts struct {
 	Logger       *slog.Logger
 	AllowedTools []string // tools allowed for this worker process
+
+	// StderrHandler customizes how subprocess stderr is processed.
+	// When nil, DefaultStderrHandler is used.
+	StderrHandler StderrHandler
+	// StderrAttrs are extra slog.Attr attached to every proc:stderr log entry
+	// (e.g., worker_type, session_id for filtering).
+	StderrAttrs []slog.Attr
 }
 
 // New creates a new process manager.
@@ -65,9 +79,15 @@ func New(opts Opts) *Manager {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	handler := opts.StderrHandler
+	if handler == nil {
+		handler = &DefaultStderrHandler{}
+	}
 	return &Manager{
-		log:          opts.Logger,
-		allowedTools: opts.AllowedTools,
+		log:           opts.Logger,
+		allowedTools:  opts.AllowedTools,
+		stderrHandler: handler,
+		stderrAttrs:   opts.StderrAttrs,
 	}
 }
 
@@ -96,10 +116,13 @@ func (m *Manager) Start(ctx context.Context, name string, args, env []string, di
 	cmd.Env = security.StripNestedAgent(env)
 
 	// Ensure work dir exists; create if missing.
-	if dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, nil, nil, fmt.Errorf("proc: mkdir workdir %s: %w", dir, err)
-		}
+	// Default to a temp directory when no workdir is configured, preventing
+	// the worker from accidentally inheriting the gateway process's cwd.
+	if dir == "" {
+		dir = filepath.Join(os.TempDir(), "hotplex")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, nil, nil, fmt.Errorf("proc: mkdir workdir %s: %w", dir, err)
 	}
 
 	SetSysProcAttr(cmd)
@@ -172,10 +195,13 @@ func (m *Manager) Start(ctx context.Context, name string, args, env []string, di
 		"dir", dir,
 	)
 
-	// Drain stderr in background.
-	go m.drainStderr()
+	// Drain stderr in background. Transfer ownership to drainStderr
+	// goroutine; closeLocked will skip nil (no double-close).
+	stderrPipe := m.stderr
+	m.stderr = nil
+	go m.drainStderr(stderrPipe)
 
-	return m.stdin, m.stdout, m.stderr, nil
+	return m.stdin, m.stdout, nil, nil
 }
 
 // Terminate gracefully stops the process group and waits for shutdown.
@@ -257,6 +283,8 @@ func (m *Manager) Wait() (int, error) {
 
 	m.waitOnce.Do(func() { m.waitErr = m.cmd.Wait() })
 	m.captureExitCodeLocked()
+	pidKey := m.pidKey
+	m.untrackPID(pidKey)
 	if closeErr := m.closeLocked(); closeErr != nil {
 		m.log.Warn("proc: pipe close after wait", "err", closeErr)
 	}
@@ -378,21 +406,34 @@ func (m *Manager) ReadLine() (string, error) {
 }
 
 // drainStderr drains the stderr pipe in the background.
-func (m *Manager) drainStderr() {
+func (m *Manager) drainStderr(stderr io.ReadCloser) {
+	// Recovery registered first (outermost) so Close() panic is also caught.
 	defer func() {
 		if r := recover(); r != nil {
-			m.log.Error("proc: drainStderr panic", "panic", r)
+			if e, ok := r.(error); ok && errors.Is(e, bufio.ErrTooLong) {
+				m.log.Warn("proc: drainStderr line exceeded buffer limit")
+			} else {
+				m.log.Error("proc: drainStderr unexpected panic", "panic", r)
+			}
 		}
 	}()
-	buf := make([]byte, 4096)
-	for {
-		n, err := m.stderr.Read(buf)
-		if n > 0 {
-			m.log.Info("proc: stderr", "msg", string(buf[:n]))
+	defer func() { _ = stderr.Close() }()
+
+	handler := m.stderrHandler
+	attrs := m.stderrAttrs
+
+	scanner := bufio.NewScanner(stderr)
+	scanner.Buffer(make([]byte, scannerInitSize), scannerMaxSize)
+	for scanner.Scan() {
+		level, msg := handler.Handle(scanner.Text())
+		if msg == "" {
+			continue
 		}
-		if err != nil {
-			break
-		}
+		m.log.LogAttrs(context.Background(), level, "proc: stderr",
+			append([]slog.Attr{slog.String("stderr", msg)}, attrs...)...)
+	}
+	if err := scanner.Err(); err != nil {
+		m.log.Warn("proc: drainStderr ended with error", "error", err)
 	}
 }
 

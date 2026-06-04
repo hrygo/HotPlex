@@ -126,13 +126,11 @@ var reservedTags = []string{
 func sanitize(s string) string {
 	res := s
 	for _, tag := range reservedTags {
-		res = strings.ReplaceAll(res, "<"+tag+">", "&lt;"+tag+"&gt;")
-		res = strings.ReplaceAll(res, "</"+tag+">", "&lt;/"+tag+"&gt;")
-		res = strings.ReplaceAll(res, "<"+tag+" ", "&lt;"+tag+" ")
-
-		tagUpper := strings.ToUpper(tag)
-		res = strings.ReplaceAll(res, "<"+tagUpper+">", "&lt;"+tagUpper+"&gt;")
-		res = strings.ReplaceAll(res, "</"+tagUpper+">", "&lt;/"+tagUpper+"&gt;")
+		for _, t := range []string{tag, strings.ToUpper(tag)} {
+			res = strings.ReplaceAll(res, "<"+t+">", "&lt;"+t+"&gt;")
+			res = strings.ReplaceAll(res, "</"+t+">", "&lt;/"+t+"&gt;")
+			res = strings.ReplaceAll(res, "<"+t+" ", "&lt;"+t+" ")
+		}
 	}
 	return res
 }

@@ -23,7 +23,7 @@ func newTestScheduler(t *testing.T) *Scheduler {
 	return &Scheduler{
 		log:            slog.Default(),
 		store:          store,
-		executor:       NewExecutor(slog.Default(), bridge, sm),
+		executor:       NewExecutor(slog.Default(), bridge, sm, ""),
 		maxConcurrent:  3,
 		maxJobs:        50,
 		defaultTimeout: 5 * time.Minute,
@@ -249,8 +249,8 @@ func TestScheduler_WithinGracePeriod(t *testing.T) {
 		{"missed 1m job by 31s", 60_000, 31 * time.Second, false},   // grace = 30s
 		{"missed 1h job by 20m", 3_600_000, 20 * time.Minute, true}, // grace = 30min
 		{"missed 1h job by 40m", 3_600_000, 40 * time.Minute, false},
-		{"missed 5h job by 1h55m", 18_000_000, 115 * time.Minute, true}, // grace capped at 2h, well within
-		{"missed 5h job by 2h5m", 18_000_000, 125 * time.Minute, false},
+		{"missed 5h job by 15m", 18_000_000, 15 * time.Minute, true},  // grace capped at 30min, within
+		{"missed 5h job by 45m", 18_000_000, 45 * time.Minute, false}, // grace capped at 30min, outside
 	}
 
 	for _, tt := range tests {
@@ -330,8 +330,8 @@ func TestScheduler_ScheduleRetry(t *testing.T) {
 	require.Equal(t, 1, job.State.RetryCount)
 	require.True(t, job.State.NextRunAtMs > before.UnixMilli())
 
-	// Duration should be backoff(2) = 5 minutes.
-	require.WithinDuration(t, before.Add(5*time.Minute), time.UnixMilli(job.State.NextRunAtMs), 2*time.Second)
+	// Duration should be backoff(2) = 1 minute (index 1 after off-by-one fix).
+	require.WithinDuration(t, before.Add(1*time.Minute), time.UnixMilli(job.State.NextRunAtMs), 2*time.Second)
 }
 
 func TestScheduler_MergeJobState(t *testing.T) {

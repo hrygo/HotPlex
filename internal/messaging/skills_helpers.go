@@ -7,11 +7,12 @@ import (
 )
 
 const (
-	SkillsDescMaxRunes   = 80
-	SkillsDescCutRunes   = 77
-	SkillsBlockSoftLimit = 48
-	SkillsBlockHardLimit = 50
-	SkillsPerPage        = 20
+	SkillsDescMaxRunes = 80
+	SkillsDescCutRunes = 77
+	// SkillsPerPage controls pagination for plain-text fallback (Slack) and
+	// the primary path in the Feishu adapter. The Slack DataTableBlock path
+	// uses maxDataTableRows (validator.go) instead.
+	SkillsPerPage = 20
 
 	SourceProject = "project"
 	SourceGlobal  = "global"

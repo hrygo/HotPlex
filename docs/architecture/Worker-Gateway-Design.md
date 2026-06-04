@@ -1,9 +1,5 @@
 ---
-type: prd
-tags:
-  - project/HotPlex
-  - architecture/gateway
-  - agent/runtime
+
 ---
 
 # Worker Gateway Design
@@ -245,7 +241,8 @@ CREATE TABLE sessions (
 | ------- | ----------------------------------------------- | ---------------------------- |
 | Session | `IDLE` 超过 `idle_timeout`（默认 60min）        | → `TERMINATED`，清理 runtime |
 | Session | 总存活超过 `max_lifetime`（默认 24h）           | → `TERMINATED`               |
-| Session | `TERMINATED` 超过 `retention_period`（默认 7d） | → `DELETED`（删除 DB 记录）  |
+| Session | `TERMINATED` cron 类超过 `cron_term_retention`（默认 24h） | → `DELETED`（删除 DB 记录） |
+| Session | `TERMINATED` 其他超过 `term_retention`（默认 7d） | → `DELETED`（删除 DB 记录） |
 
 GC 扫描间隔：60s，后台 goroutine 定期执行。
 
@@ -323,7 +320,7 @@ Lifecycle:   persistent | ephemeral | managed
 | ------------------- | ---------- | ----------- | ---------- | ------------------------------------------- |
 | Claude Code         | stdio      | stream-json | persistent | turn 间进程不退出，热复用                   |
 | **OpenCode Server** | HTTP + SSE | SSE/JSON    | managed    | `opencode serve`，单进程多 session          |
-| ACPX                | —          | —           | —          | ⚠️ **未实现**（`internal/worker/acpx/` 为空目录） |
+| **ACP**             | stdio      | JSON-RPC 2.0 | per-session | 通用 ACP 协议适配器（`internal/worker/acp/`） |
 
 > **Hot-Multiplexing**：persistent Worker 在 turn 结束后**不退出进程**，保持 `idle` 状态等待下一轮 stdin 输入，实现零冷启动。ephemeral Worker 每次执行完毕退出。managed Worker 由外部进程管理生命周期。
 
@@ -1069,7 +1066,7 @@ SELECT * FROM sessions WHERE state != 'deleted';
 | 策略                        | 说明                                                                        |
 | --------------------------- | --------------------------------------------------------------------------- |
 | **Upgrade 阶段认证**（MVP） | WebSocket 握手时通过 query param 或 header 携带 API Key，验证通过后建立连接 |
-| **Per-message JWT**（v1.1） | 每个 Envelope 携带 JWT，支持细粒度权限控制                                  |
+| **Per-message auth**（v1.1） | 每个 Envelope 携带 auth token，支持细粒度权限控制                                  |
 | **Token 刷新**（v1.1）      | 通过 `control.refresh_token` 在不断开连接的情况下刷新凭证                   |
 
 > **参考**: Slack RTM 使用 Upgrade 阶段 token 认证。Discord Gateway 在 init 握手中携带 token。

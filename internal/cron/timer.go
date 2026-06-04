@@ -3,7 +3,6 @@ package cron
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -111,13 +110,23 @@ func (tl *timerLoop) onTick() {
 		}
 
 		// Persist state before execution.
-		if err := s.store.UpdateState(s.ctx, job.ID, job.State); err != nil {
-			s.log.Error("cron: persist state before execution", "job_id", job.ID, "err", err)
+		// If this fails, memory and disk diverge: the in-memory NextRunAtMs is
+		// advanced but disk still has the old value. A crash+restart would cause
+		// re-execution (at-least-once instead of at-most-once). We proceed anyway
+		// because skipping execution here would also be wrong.
+		// Uses background timeout (not s.ctx) so shutdown doesn't cancel the write.
+		pctx, pcancel := s.persistTimeout()
+		if err := s.store.UpdateState(pctx, job.ID, job.State); err != nil {
+			s.log.Error("cron: persist state before execution",
+				"job_id", job.ID, "err", err)
 		}
+		pcancel()
 		if !job.Enabled {
-			if err := s.store.Update(s.ctx, job); err != nil {
+			pctx, pcancel = s.persistTimeout()
+			if err := s.store.SetEnabled(pctx, job.ID, false); err != nil {
 				s.log.Error("cron: persist disabled job", "job_id", job.ID, "err", err)
 			}
+			pcancel()
 			s.mergeJobState(job.ID, job.State, true)
 			continue
 		}
@@ -129,6 +138,23 @@ func (tl *timerLoop) onTick() {
 			continue
 		}
 
+		// Re-check job still exists after acquiring slot — DeleteJob may have
+		// removed it between collectDue and here, wasting a slot on an orphan.
+		//
+		// NOTE: This is a TOCTOU check — the gap between releasing s.mu here
+		// and launching the goroutine means DeleteJob can still win. Consequence
+		// is benign: the orphan goroutine executes on a cloned job, and all
+		// subsequent mergeJobState/persistState calls silently no-op because
+		// the job is no longer in s.jobs. The slot is held until completion but
+		// no data corruption occurs.
+		s.mu.Lock()
+		_, exists := s.jobs[job.ID]
+		s.mu.Unlock()
+		if !exists {
+			tl.releaseSlot()
+			continue
+		}
+
 		// Fresh clone for the goroutine — mergeJobState updated the shared
 		// in-memory entry's State, so we need an independent copy to avoid
 		// data races when executeJob mutates state fields without holding s.mu.
@@ -136,12 +162,17 @@ func (tl *timerLoop) onTick() {
 		s.wg.Add(1)
 		go func(j *CronJob) {
 			defer func() {
-				tl.releaseSlot()
-				s.wg.Done()
 				if r := recover(); r != nil {
 					s.log.Error("cron: panic in executeJob",
 						"job_id", j.ID, "name", j.Name, "panic", r)
+					j.State.RunningAtMs = 0
+					j.State.LastStatus = StatusFailed
+					j.State.ConsecutiveErrs++
+					s.mergeJobState(j.ID, j.State, false)
+					s.persistState(j.ID, j.State)
 				}
+				tl.releaseSlot()
+				s.wg.Done()
 			}()
 			metrics.CronFiresTotal.WithLabelValues(j.Name).Inc()
 			s.executeJob(j)
@@ -176,25 +207,10 @@ func (s *Scheduler) executeJob(job *CronJob) {
 
 	start := time.Now()
 	sessionKey, err := s.executor.Execute(ctx, job, timeout)
-	duration := time.Since(start)
-
-	metrics.CronDurationSeconds.WithLabelValues(job.Name).Observe(duration.Seconds())
+	metrics.CronDurationSeconds.WithLabelValues(job.Name).Observe(time.Since(start).Seconds())
 
 	job.State.LastRunID = sessionKey
-	shouldDisable := s.finishExecution(job, start.UnixMilli(), err, errorType(err))
-
-	if shouldDisable {
-		s.persistAndDisable(job.ID, job.State)
-		return
-	}
-
-	if err != nil {
-		// One-shot retry logic (checked after finishExecution records the error).
-		if job.Schedule.Kind == ScheduleAt && isTemporaryError(err) && job.State.RetryCount < maxRetries(job) {
-			s.scheduleRetry(s.ctx, job)
-			return
-		}
-		s.persistState(job.ID, job.State)
+	if s.handlePostExecution(job, start.UnixMilli(), err, errorType(err)) {
 		return
 	}
 
@@ -202,7 +218,6 @@ func (s *Scheduler) executeJob(job *CronJob) {
 	if s.delivery != nil && !job.Silent && !HasCLIDelivery(job) {
 		s.delivery.Deliver(s.ctx, job, sessionKey)
 	}
-
 	s.applyLifecycle(job)
 }
 
@@ -226,24 +241,35 @@ func (s *Scheduler) executeAttached(job *CronJob) {
 
 	err := s.attachedHandler.Execute(ctx, job)
 
-	shouldDisable := s.finishExecution(job, time.Now().UnixMilli(), err, "attached")
+	if s.handlePostExecution(job, time.Now().UnixMilli(), err, "attached") {
+		return
+	}
+	s.applyLifecycle(job)
+}
+
+// handlePostExecution handles error/disable/retry logic after execution.
+// Returns true if the caller should stop (disabled, retrying, or errored).
+func (s *Scheduler) handlePostExecution(job *CronJob, startedAtMs int64, err error, errType string) bool {
+	shouldDisable := s.finishExecution(job, startedAtMs, err, errType)
+	s.mergeJobState(job.ID, job.State, false)
 
 	if shouldDisable {
 		s.persistAndDisable(job.ID, job.State)
-		return
+		return true
 	}
 
 	if err != nil {
-		// One-shot retry logic (checked after finishExecution records the error).
 		if job.Schedule.Kind == ScheduleAt && isTemporaryError(err) && job.State.RetryCount < maxRetries(job) {
-			s.scheduleRetry(s.ctx, job)
-			return
+			pctx, pcancel := s.persistTimeout()
+			s.scheduleRetry(pctx, job)
+			pcancel()
+			return true
 		}
 		s.persistState(job.ID, job.State)
-		return
+		return true
 	}
 
-	s.applyLifecycle(job)
+	return false
 }
 
 // beginExecution marks a job as running and persists state.
@@ -289,7 +315,9 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 	// One-shot: disable or delete after run (success or permanent error).
 	if job.Schedule.Kind == ScheduleAt {
 		if job.DeleteAfterRun {
-			if err := s.store.Delete(s.persistCtx(), job.ID); err != nil {
+			ctx, cancel := s.persistTimeout()
+			defer cancel()
+			if err := s.store.Delete(ctx, job.ID); err != nil {
 				s.log.Error("cron: delete one-shot job", "job_id", job.ID, "err", err)
 			}
 			s.mu.Lock()
@@ -317,7 +345,9 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 
 	s.persistState(job.ID, job.State)
 	if shouldDisable {
-		if err := s.store.SetEnabled(s.persistCtx(), job.ID, false); err != nil {
+		ctx, cancel := s.persistTimeout()
+		defer cancel()
+		if err := s.store.SetEnabled(ctx, job.ID, false); err != nil {
 			s.log.Error("cron: persist disable", "job_id", job.ID, "err", err)
 		}
 	}
@@ -328,16 +358,25 @@ func (s *Scheduler) applyLifecycle(job *CronJob) {
 // Used for one-shot jobs and auto-disabled jobs after consecutive failures.
 func (s *Scheduler) persistAndDisable(jobID string, state CronJobState) {
 	s.persistState(jobID, state)
-	if err := s.store.SetEnabled(s.persistCtx(), jobID, false); err != nil {
+	ctx, cancel := s.persistTimeout()
+	defer cancel()
+	if err := s.store.SetEnabled(ctx, jobID, false); err != nil {
 		s.log.Error("cron: persist disable", "job_id", jobID, "err", err)
 	}
 	s.mergeJobState(jobID, state, true)
 }
 
+// persistTimeout returns a context with a 5-second timeout for store operations.
+// Used by persist helpers that run outside the scheduler's main context
+// (e.g. final state writes during shutdown, onTick persist calls).
+func (s *Scheduler) persistTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 5*time.Second)
+}
+
 // persistState saves job state to the store, using a background context
 // so final state is not lost during scheduler shutdown.
 func (s *Scheduler) persistState(jobID string, state CronJobState) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := s.persistTimeout()
 	defer cancel()
 	if err := s.store.UpdateState(ctx, jobID, state); err != nil {
 		if errors.Is(err, ErrJobNotFound) {
@@ -348,42 +387,10 @@ func (s *Scheduler) persistState(jobID string, state CronJobState) {
 	}
 }
 
-// persistCtx returns a background context for store operations that must
-// survive scheduler shutdown (e.g., deleting a completed one-shot job).
-func (s *Scheduler) persistCtx() context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	go cancel()
-	return ctx
-}
-
 // jobTimeout returns the timeout for a job, falling back to the scheduler default.
 func (s *Scheduler) jobTimeout(job *CronJob) time.Duration {
 	if job.TimeoutSec > 0 {
 		return time.Duration(job.TimeoutSec) * time.Second
 	}
 	return s.defaultTimeout
-}
-
-// errorType classifies an error for the error_type metric label.
-func errorType(err error) string {
-	if err == nil {
-		return "unknown"
-	}
-	msg := strings.ToLower(err.Error())
-	for _, tok := range []string{"timeout", "deadline exceeded"} {
-		if strings.Contains(msg, tok) {
-			return "timeout"
-		}
-	}
-	for _, tok := range []string{"rate limit", "429"} {
-		if strings.Contains(msg, tok) {
-			return "rate_limit"
-		}
-	}
-	for _, tok := range []string{"500", "502", "503", "504"} {
-		if strings.Contains(msg, tok) {
-			return "server_error"
-		}
-	}
-	return "execution"
 }

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/dbutil"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -20,7 +22,7 @@ type Store interface {
 	List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error)
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
-	DeleteTerminated(ctx context.Context, cutoff time.Time) error
+	DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error
 	DeletePhysical(ctx context.Context, id string) error
 	Compact(ctx context.Context, threshold float64) error
 	GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error)
@@ -29,15 +31,17 @@ type Store interface {
 
 // SQLiteStore implements Store using SQLite.
 type SQLiteStore struct {
-	db  *sql.DB
-	log *slog.Logger
+	db      *sql.DB
+	log     *slog.Logger
+	writeMu *sqlutil.WriteMu
 }
 
 // DB returns the underlying *sql.DB for sharing with other stores (e.g., eventstore).
 func (s *SQLiteStore) DB() *sql.DB { return s.db }
 
 // NewSQLiteStore creates and initializes a new SQLiteStore.
-func NewSQLiteStore(ctx context.Context, cfg *config.Config) (*SQLiteStore, error) {
+// If writeMu is non-nil, all write operations are serialized through it.
+func NewSQLiteStore(ctx context.Context, cfg *config.Config, writeMu *sqlutil.WriteMu) (*SQLiteStore, error) {
 	db, err := openSQLiteDB(cfg, dbOpenOpts{
 		Label:       "session",
 		MaxOpen:     cfg.DB.MaxOpenConns,
@@ -49,12 +53,12 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config) (*SQLiteStore, erro
 		return nil, err
 	}
 
-	if err := runMigrations(ctx, db); err != nil {
+	if err := RunMigrations(ctx, db, dbutil.DialectSQLite); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 
-	return &SQLiteStore{db: db, log: slog.Default().With("component", "session_store")}, nil
+	return &SQLiteStore{db: db, log: slog.Default().With("component", "session_store"), writeMu: writeMu}, nil
 }
 
 func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
@@ -82,16 +86,18 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 		}
 	}
 
-	_, err := s.db.ExecContext(ctx, queries["sessions.upsert_session"],
-		info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
-		info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
-		info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
-		string(ctxJSON),
-	)
-	if err != nil {
-		return fmt.Errorf("session store: upsert: %w", err)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["sessions.upsert_session"],
+			info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
+			info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
+			info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
+			string(ctxJSON), info.Source, info.ClientKey,
+		)
+		if err != nil {
+			return fmt.Errorf("session store: upsert: %w", err)
+		}
+		return nil
+	})
 }
 
 type rowScanner interface{ Scan(dest ...any) error }
@@ -105,7 +111,7 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 	err := sc.Scan(
 		&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State, &info.BotID,
 		&info.Platform, &platformKeyStr, &info.WorkDir, &info.Title,
-		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON,
+		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON, &info.Source, &info.ClientKey,
 	)
 	if err != nil {
 		return nil, err
@@ -196,20 +202,24 @@ func (s *SQLiteStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]stri
 }
 
 // Events lifecycle is managed independently — session deletion does not cascade to events.
-func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
-	_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cutoff)
-	if err != nil {
-		return fmt.Errorf("session store: delete terminated: %w", err)
-	}
-	return nil
+func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
+		if err != nil {
+			return fmt.Errorf("session store: delete terminated: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, queries["store.delete_physical"], id)
-	if err != nil {
-		return fmt.Errorf("session store: delete physical: %w", err)
-	}
-	return nil
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["store.delete_physical"], id)
+		if err != nil {
+			return fmt.Errorf("session store: delete physical: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *SQLiteStore) Close() error {
@@ -217,24 +227,28 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) Compact(ctx context.Context, threshold float64) error {
-	var pageCount, freeCount int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount); err != nil {
-		return fmt.Errorf("session store: compact page_count: %w", err)
-	}
-	if err := s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freeCount); err != nil {
-		return fmt.Errorf("session store: compact freelist_count: %w", err)
-	}
-	if pageCount == 0 || float64(freeCount)/float64(pageCount) < threshold {
-		return nil
-	}
-	s.log.Info("session store: VACUUM starting",
-		"page_count", pageCount, "free_count", freeCount,
-		"ratio", fmt.Sprintf("%.1f%%", float64(freeCount)/float64(pageCount)*100))
-	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		return fmt.Errorf("session store: compact checkpoint: %w", err)
-	}
-	_, err := s.db.ExecContext(ctx, "VACUUM")
-	return err
+	return s.writeMu.WithLock(func() error {
+		var pageCount, freeCount int
+		if err := s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount); err != nil {
+			return fmt.Errorf("session store: compact page_count: %w", err)
+		}
+		if err := s.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freeCount); err != nil {
+			return fmt.Errorf("session store: compact freelist_count: %w", err)
+		}
+		if pageCount == 0 || float64(freeCount)/float64(pageCount) < threshold {
+			return nil
+		}
+		start := time.Now()
+		s.log.Info("session store: VACUUM starting",
+			"page_count", pageCount, "free_count", freeCount,
+			"ratio", fmt.Sprintf("%.1f%%", float64(freeCount)/float64(pageCount)*100))
+		if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+			return fmt.Errorf("session store: compact checkpoint: %w", err)
+		}
+		_, err := s.db.ExecContext(ctx, "VACUUM")
+		s.log.Info("session store: VACUUM completed", "duration", time.Since(start))
+		return err
+	})
 }
 
 func (s *SQLiteStore) GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error) {

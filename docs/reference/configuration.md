@@ -2,8 +2,6 @@
 title: "配置完整参考"
 weight: 3
 description: "HotPlex Worker Gateway 所有配置项的权威参考，覆盖配置文件、环境变量、优先级和热重载机制。"
-persona: "developer|enterprise"
-difficulty: "intermediate"
 ---
 
 # 配置完整参考
@@ -27,6 +25,7 @@ difficulty: "intermediate"
    - [agent_config — Agent 人格与上下文](#38-agent_config--agent-人格与上下文)
    - [skills — Skills 发现](#39-skills--skills-发现)
    - [cron — 定时任务调度器](#310-cron--定时任务调度器)
+   - [webhook — GitHub Webhook 接收器](#3101-webhook--github-webhook-接收器)
    - [messaging — 消息平台](#311-messaging--消息平台)
    - [log — 日志](#312-log--日志)
    - [webchat — Web Chat UI](#313-webchat--web-chat-ui)
@@ -48,15 +47,13 @@ HotPlex 采用分层覆盖策略，**高优先级覆盖低优先级**：
 配置文件 (YAML/JSON/TOML)
   ↓ 被覆盖
 环境变量 (HOTPLEX_*)
-  ↓ 被覆盖
-Secrets Provider (JWT 等敏感字段，仅通过 Provider 加载)
 ```
 
 **要点**：
 
 - 代码默认值让二进制可以在零配置下启动（敏感字段除外）
 - 配置文件是**非敏感值的权威来源**
-- 敏感字段（JWT secret、Admin tokens、API keys）**永远不会从配置文件加载**，只能通过环境变量或 Secrets Provider 注入
+- 敏感字段（Admin tokens、API keys）**永远不会从配置文件加载**，只能通过环境变量或 Secrets Provider 注入
 - 消息平台配置有额外的三级优先级：`platform-level > messaging-level > Default()`
 
 ---
@@ -135,7 +132,7 @@ Admin API 管理端点配置。
 | `addr` | string | `localhost:9999` | `HOTPLEX_ADMIN_ADDR` | Admin API 监听地址。默认仅绑定 localhost |
 | `tokens` | []string | `[]` | `HOTPLEX_ADMIN_TOKEN_1..N` | 认证 token 列表。**只能通过环境变量设置**，支持编号后缀用于轮换 |
 | `token_scopes` | map[string][]string | `nil` | — | 每 token 的权限范围映射 |
-| `default_scopes` | []string | `["session:read", "stats:read", "health:read"]` | — | 未配置 scopes 的 token 的默认权限范围 |
+| `default_scopes` | []string | `["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]` | — | 未配置 scopes 的 token 的默认权限范围。`admin:write` 隐含 `admin:read` → `config:read` |
 | `ip_whitelist_enabled` | bool | `false` | — | 是否启用 IP 白名单 |
 | `allowed_cidrs` | []string | `["127.0.0.0/8", "10.0.0.0/8"]` | — | 允许访问的 CIDR 列表 |
 | `rate_limit_enabled` | bool | `true` | — | 是否启用速率限制 |
@@ -146,19 +143,48 @@ Admin API 管理端点配置。
 
 ### 3.3 db — 数据持久化
 
-SQLite 数据库配置，Session 和 Event Store 共享。
+数据库配置，支持 SQLite（默认）和 PostgreSQL 两种后端。Session、Event Store、Cron 等模块共享同一数据库实例。
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
-| `path` | string | `~/.hotplex/data/hotplex.db` | `HOTPLEX_DB_PATH` | 主数据库文件路径。Session 和 Event 共用 |
-| `events_path` | string | `""` | — | **已废弃**：Event 表已迁移至主数据库，此字段不再使用 |
-| `wal_mode` | bool | `true` | `HOTPLEX_DB_WAL_MODE` | 启用 WAL (Write-Ahead Logging) 模式。生产环境必须开启 |
-| `busy_timeout` | duration | `5s` | — | SQLite 忙等待超时。写入冲突时的重试时间 |
-| `max_open_conns` | int | `3` | — | 最大打开连接数。1 写 + 2 读，适用于共享 Session/Event Store |
-| `vacuum_threshold` | float64 | `0.2` | — | VACUUM 触发阈值。当空闲页占比 ≥ 20% 时自动 VACUUM |
-| `cache_size_kib` | int | `8192` (8MB) | — | SQLite 页面缓存大小（KiB） |
-| `mmap_size_mib` | int | `64` (64MB) | — | SQLite mmap 大小（MiB） |
-| `wal_autocheckpoint` | int | `2000` | — | WAL 自动 checkpoint 页数阈值 |
+| `driver` | string | `"sqlite"` | `HOTPLEX_DB_DRIVER` | 数据库驱动。可选 `"sqlite"` / `"postgres"` / `"pg"` / `"postgresql"` |
+| `sqlite` | object | — | — | SQLite 子配置（见下方）。当 driver 为 sqlite 时生效 |
+| `postgres` | object | — | — | PostgreSQL 子配置（见下方）。当 driver 为 postgres 时生效 |
+
+#### SQLite 配置 (`db.sqlite.*`)
+
+当 `db.driver` 为 `sqlite`（或未设置）时使用。下方遗留字段（`db.path` 等）仍可用于向后兼容，结构化字段优先。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `sqlite.path` | string | `~/.hotplex/data/hotplex.db` | `HOTPLEX_DB_PATH` | 主数据库文件路径。Session 和 Event 共用 |
+| `sqlite.wal_mode` | bool | `true` | `HOTPLEX_DB_WAL_MODE` | 启用 WAL (Write-Ahead Logging) 模式。生产环境必须开启 |
+| `sqlite.busy_timeout` | duration | `5s` | — | SQLite 忙等待超时。写入冲突时的重试时间 |
+| `sqlite.max_open_conns` | int | `3` | — | 最大打开连接数。1 写 + 2 读 |
+| `sqlite.vacuum_threshold` | float64 | `0.2` | — | VACUUM 触发阈值。当空闲页占比 ≥ 20% 时自动 VACUUM |
+| `sqlite.cache_size_kib` | int | `8192` (8MB) | — | SQLite 页面缓存大小（KiB） |
+| `sqlite.mmap_size_mib` | int | `64` (64MB) | — | SQLite mmap 大小（MiB） |
+| `sqlite.wal_autocheckpoint` | int | `2000` | — | WAL 自动 checkpoint 页数阈值 |
+
+> **遗留字段**：`db.path`、`db.wal_mode`、`db.busy_timeout`、`db.max_open_conns`、`db.vacuum_threshold`、`db.cache_size_kib`、`db.mmap_size_mib`、`db.wal_autocheckpoint` 仍可使用，等价于 `db.sqlite.*`。结构化字段优先。`db.events_path` 已废弃。
+
+#### PostgreSQL 配置 (`db.postgres.*`)
+
+当 `db.driver` 设为 `"postgres"` 时使用 PostgreSQL 替代 SQLite。适用于生产环境多实例部署和高并发场景。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `postgres.dsn` | string | — | `HOTPLEX_DB_POSTGRES_DSN` | PostgreSQL 连接字符串。格式：`postgres://user:password@host:port/dbname?sslmode=prefer` |
+| `postgres.max_open_conns` | int | `25` | `HOTPLEX_DB_POSTGRES_MAX_OPEN_CONNS` | 最大打开连接数 |
+
+```yaml
+# PostgreSQL 配置示例
+db:
+  driver: "postgres"
+  postgres:
+    dsn: "postgres://hotplex:secret@db.example.com:5432/hotplex?sslmode=require"
+    max_open_conns: 25
+```
 
 ---
 
@@ -174,8 +200,6 @@ SQLite 数据库配置，Session 和 Event Store 共享。
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径 |
 | `allowed_origins` | []string | `["*"]` | — | WebSocket CORS 允许的 Origin 列表 |
-| `jwt_secret` | []byte | — | `HOTPLEX_JWT_SECRET` | JWT 签名密钥（ES256）。**仅通过环境变量注入**，支持 raw 32 字节或 base64 编码。配置文件中不可设置 |
-| `jwt_audience` | string | `hotplex-gateway` | `HOTPLEX_SECURITY_JWT_AUDIENCE` | JWT audience 声明 |
 | `work_dir_allowed_base_patterns` | []string | `[]` | — | 额外的工作目录白名单模式。支持 `~` 和 `${VAR}` 展开。程序内建默认值：`~/.hotplex/workspace`、`~/workspace`、`~/projects`、`~/work`、`~/dev`、`/var/hotplex/projects` |
 | `work_dir_forbidden_dirs` | []string | `[]` | — | 额外的工作目录黑名单。显式禁止的目录列表 |
 
@@ -188,6 +212,8 @@ Session 生命周期管理配置。
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
 | `retention_period` | duration | `168h` (7天) | `HOTPLEX_SESSION_RETENTION_PERIOD` | 事件和日志的数据保留期。过期数据由 GC 扫描清理 |
+| `term_retention` | duration | `168h` (7天) | `HOTPLEX_SESSION_TERM_RETENTION` | 普通 TERMINATED session 数据库记录保留期。过期后物理删除 |
+| `cron_term_retention` | duration | `24h` | `HOTPLEX_SESSION_CRON_TERM_RETENTION` | Cron 类 TERMINATED session 数据库记录保留期。过期后物理删除 |
 | `gc_scan_interval` | duration | `1m` | — | GC 扫描间隔。定期扫描过期 Session 并清理 |
 | `max_concurrent` | int | `1000` | `HOTPLEX_SESSION_MAX_CONCURRENT` | 最大并发 Session 数。达到上限后新请求被拒绝 |
 
@@ -264,6 +290,51 @@ LLM Provider 返回临时错误（429、529、400 等）时的自动重试配置
 | `ready_poll_interval` | duration | `200ms` | `HOTPLEX_WORKER_OPENCODE_SERVER_READY_POLL_INTERVAL` | 就绪状态轮询间隔 |
 | `http_timeout` | duration | `30s` | `HOTPLEX_WORKER_OPENCODE_SERVER_HTTP_TIMEOUT` | HTTP 请求超时 |
 
+#### 3.7.5 codex_cli — Codex CLI Worker
+
+OpenAI Codex CLI Worker，支持双模式：exec（每次 Turn fork 新进程）和 app-server（单例持久进程，推荐）。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `command` | string | `codex` | `HOTPLEX_WORKER_CODEX_CLI_COMMAND` | Worker 启动命令。支持带子命令 |
+| `model` | string | `""` | `HOTPLEX_WORKER_CODEX_CLI_MODEL` | 模型名称。空值使用 Codex 默认模型（`~/.codex/config.toml`） |
+| `sandbox` | string | `danger-full-access` | `HOTPLEX_WORKER_CODEX_CLI_SANDBOX` | 沙箱模式：`read-only`、`workspace-write`、`danger-full-access` |
+| `approval_mode` | string | `never` | `HOTPLEX_WORKER_CODEX_CLI_APPROVAL_MODE` | 审批模式：`untrusted`（所有操作需审批）、`on-request`（仅高风险操作）、`never`（全自动） |
+| `ephemeral` | bool | `true` | — | 临时会话模式。不持久化到磁盘，Session 结束后数据清除 |
+| `startup_timeout` | duration | `30s` | — | 进程启动超时 |
+| `use_app_server` | bool | `true` | — | 使用持久 app-server 模式（推荐）。`false` 则使用每次 exec 的 one-shot 模式 |
+| `idle_drain_period` | duration | `30m` | — | app-server 模式下空闲排空超时。超时后单例进程关闭 |
+
+#### 3.7.6 acp — ACP 通用 Worker
+
+ACP (Agent Communication Protocol) 通用 Worker，通过 JSON-RPC 2.0 over stdio 连接任何 ACP 兼容的 AI Agent（如 Hermes Agent）。支持流式响应、工具调用、权限请求和 Session 恢复。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `command` | string | `hermes acp` | `HOTPLEX_WORKER_ACP_COMMAND` | ACP Agent 启动命令。支持带子命令，如 `hermes acp` |
+| `auto_approve` | bool | `false` | `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | 自动批准权限请求，无需用户确认 |
+| `args` | []string | `[]` | — | 附加到 command 之后的额外参数列表 |
+| `debug` | bool | `false` | — | 启用 JSON-RPC 协议 trace 日志（调试用） |
+
+**配置示例**：
+
+```yaml
+worker:
+  acp:
+    command: "hermes acp"    # 或其他 ACP 兼容 Agent
+    auto_approve: true       # 自动批准工具调用权限
+    args: ["--verbose"]      # 附加命令行参数
+    debug: true              # 启用协议 trace 日志
+```
+
+**使用方式**：在 messaging 层指定 `worker_type: "acp"` 即可启用：
+
+```yaml
+messaging:
+  worker_type: "acp"         # 全局默认
+  # 或 per-platform / per-bot 指定
+```
+
 ---
 
 ### 3.8 agent_config — Agent 人格与上下文
@@ -274,6 +345,7 @@ Agent B/C 通道配置加载器。
 |------|------|--------|----------|------|
 | `enabled` | bool | `true` | `HOTPLEX_AGENT_CONFIG_ENABLED` | 是否启用 Agent 配置加载（SOUL.md、AGENTS.md 等） |
 | `config_dir` | string | `~/.hotplex/agent-configs` | `HOTPLEX_AGENT_CONFIG_DIR` | 配置文件根目录。支持 `~` 和 `${VAR}` 展开 |
+| `inject_exclude` | []string | `[]` | — | 全局默认排除列表。列出的配置文件（如 `SOUL.md`、`MEMORY.md`）不会被加载和注入。平台级和 Bot 级可覆盖。`META-COGNITION.md` 始终注入（go:embed），不可排除 |
 
 **B 通道**（`<directives>`）：`META-COGNITION.md`（go:embed，始终首位）+ `SOUL.md` + `AGENTS.md` + `SKILLS.md`
 
@@ -301,9 +373,39 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `max_concurrent_runs` | int | `3` | — | 最大并行 Job 执行数 |
 | `max_jobs` | int | `50` | — | 最大注册 Job 数 |
 | `default_timeout_sec` | int | `300` (5分钟) | — | 单 Job 执行超时（秒） |
+| `default_sandbox` | string | `""` | — | Cron Job 的默认 sandbox 模式覆盖。非空时应用于所有 cron Worker |
 | `tick_interval_sec` | int | `60` | — | 调度器 tick 间隔（秒） |
 | `yaml_config_path` | string | `""` | — | 外部 YAML 配置文件路径（可选） |
 | `jobs` | []map | `[]` | — | 内联 Job 定义（可选） |
+
+---
+
+### 3.10.1 webhook — GitHub Webhook 接收器
+
+GitHub Webhook 接收器，用于事件驱动的 Cron 任务触发。当收到匹配的 GitHub 事件（如 PR opened/synchronize）时，自动触发指定的 Cron Job。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `enabled` | bool | `false` | `HOTPLEX_WEBHOOK_ENABLED` | 是否启用 Webhook 接收器 |
+| `secret` | string | `""` | `HOTPLEX_WEBHOOK_SECRET` | GitHub Webhook Secret（用于 HMAC-SHA256 签名验证）。**必须设置，为空时拒绝启动** |
+| `path` | string | `/api/webhook/github` | `HOTPLEX_WEBHOOK_PATH` | HTTP 端点路径 |
+| `max_body_size` | int64 | `1048576` (1MB) | `HOTPLEX_WEBHOOK_MAX_BODY_SIZE` | 请求体最大大小（字节） |
+| `allowed_repos` | []string | `[]` | — | 允许的仓库列表（空 = 接受所有） |
+| `target_job_name` | string | `pr-review-hotplex` | `HOTPLEX_WEBHOOK_TARGET_JOB_NAME` | 匹配事件时触发的 Cron Job 名称 |
+
+**配置示例**：
+
+```yaml
+webhook:
+  enabled: true
+  secret: "${GITHUB_WEBHOOK_SECRET}"   # 通过环境变量注入
+  path: /api/webhook/github
+  allowed_repos:
+    - "owner/repo"
+  target_job_name: "pr-review"
+```
+
+**安全要求**：`secret` 必须与 GitHub Webhook 设置中的 Secret 一致。未设置 secret 时 Webhook 不会注册（安全基线）。
 
 ---
 
@@ -346,7 +448,7 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 
 #### 3.11.4 平台通用配置
 
-每个消息平台（Slack / Feishu）共享以下配置结构。`MessagingPlatformConfig` 字段由共享默认值传播填充，平台级显式设置优先。
+每个消息平台（Slack / Feishu / Yuanxin）共享以下配置结构。`MessagingPlatformConfig` 字段由共享默认值传播填充，平台级显式设置优先。
 
 | 字段 | 类型 | 默认值 | 环境变量前缀 | 说明 |
 |------|------|--------|-------------|------|
@@ -356,6 +458,7 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `dm_policy` | string | `allowlist` | `HOTPLEX_MESSAGING_{PLATFORM}_DM_POLICY` | 私聊消息策略：`allowlist` = 仅允许白名单用户 |
 | `group_policy` | string | `allowlist` | `HOTPLEX_MESSAGING_{PLATFORM}_GROUP_POLICY` | 群聊消息策略：`allowlist` = 仅允许白名单群组 |
 | `require_mention` | bool | `true` | `HOTPLEX_MESSAGING_{PLATFORM}_REQUIRE_MENTION` | 群聊中是否需要 @机器人 才响应 |
+| `inject_exclude` | []string | `[]` | — | 平台级默认排除列表。覆盖 `agent_config.inject_exclude`，被 Bot 级覆盖 |
 | `allow_from` | []string | `[]` | `HOTPLEX_MESSAGING_{PLATFORM}_ALLOW_FROM` | 全局白名单用户/群组（逗号分隔） |
 | `allow_dm_from` | []string | `[]` | `HOTPLEX_MESSAGING_{PLATFORM}_ALLOW_DM_FROM` | 私聊白名单用户（逗号分隔） |
 | `allow_group_from` | []string | `[]` | `HOTPLEX_MESSAGING_{PLATFORM}_ALLOW_GROUP_FROM` | 群聊白名单群组（逗号分隔） |
@@ -366,31 +469,100 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
-| `bot_token` | string | `""` | `HOTPLEX_MESSAGING_SLACK_BOT_TOKEN` | Slack Bot Token（`xoxb-...`） |
-| `app_token` | string | `""` | `HOTPLEX_MESSAGING_SLACK_APP_TOKEN` | Slack App Token（`xapp-...`），Socket Mode 所需 |
+| `bot_token` | string | `""` | `HOTPLEX_MESSAGING_SLACK_BOT_TOKEN` | Slack Bot Token（`xoxb-...`）（单 bot 模式） |
+| `app_token` | string | `""` | `HOTPLEX_MESSAGING_SLACK_APP_TOKEN` | Slack App Token（`xapp-...`），Socket Mode 所需（单 bot 模式） |
 | `socket_mode` | bool | `true` | — | 是否使用 Socket Mode（推荐） |
 | `assistant_api_enabled` | *bool | `nil` | — | 是否启用 Slack Assistant API。nil = 未设置 |
+| `display_name` | string | `""` | — | Assistant 状态和消息中显示的名称（用于品牌化） |
+| `icon_emoji` | string | `""` | — | Assistant 状态和消息中显示的 emoji 图标（如 `:robot_face:`） |
 | `reconnect_base_delay` | duration | — | — | 断线重连基础延迟 |
 | `reconnect_max_delay` | duration | — | — | 断线重连最大延迟 |
+| `bots` | []SlackBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
 
 #### 3.11.6 Feishu 专有配置
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
-| `app_id` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_ID` | 飞书 App ID（`cli_xxxx`） |
-| `app_secret` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` | 飞书 App Secret |
+| `app_id` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_ID` | 飞书 App ID（`cli_xxxx`）（单 bot 模式） |
+| `app_secret` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` | 飞书 App Secret（单 bot 模式） |
+| `bots` | []FeishuBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
 
-#### 3.11.7 配置传播机制
+#### 3.11.7 Yuanxin 专有配置
 
-共享配置通过 `propagateMessagingDefaults()` 从 `messaging` 级传播到各平台：
+Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `tenant` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_TENANT` | Pulsar 租户 |
+| `namespace` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_NAMESPACE` | Pulsar 命名空间 |
+| `pulsar_url` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_PULSAR_URL` | Pulsar Broker URL |
+| `app_id` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_APP_ID` | 应用 ID |
+| `producer_topic` | string | `""` | `HOTPLEX_MESSAGING_YUANXIN_PRODUCER_TOPIC` | 生产者 Topic |
+
+#### 3.11.8 多 Bot 配置（Multi-Bot）
+
+每个平台支持多个独立 bot 实例，各自拥有独立凭证、STT/TTS 配置。
+
+**SlackBotConfig 字段**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | Bot 名称（同一平台内唯一，必填） |
+| `bot_token` | string | Slack Bot Token（`xoxb-...`） |
+| `app_token` | string | Slack App Token（`xapp-...`） |
+| `display_name` | string | 覆盖顶层 Assistant 显示名称（bot 级品牌化） |
+| `icon_emoji` | string | 覆盖顶层 Assistant emoji 图标（bot 级品牌化） |
+| `worker_type` | string | 覆盖 Worker 类型 |
+| `sandbox` | string | 覆盖 CodexCLI sandbox 模式（bot 级） |
+| `acp_command` | string | 覆盖 ACP Agent 启动命令（bot 级，仅 `worker_type: acp` 时生效） |
+| `inject_exclude` | []string | 覆盖 agent config 排除列表（bot 级，覆盖平台级和全局级） |
+| `stt_*` | — | 覆盖 STT 配置（继承平台级 → messaging 级） |
+| `tts_*` | — | 覆盖 TTS 配置（继承平台级 → messaging 级） |
+
+**FeishuBotConfig 字段**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | Bot 名称（同一平台内唯一，必填） |
+| `app_id` | string | 飞书 App ID |
+| `app_secret` | string | 飞书 App Secret |
+| `worker_type` | string | 覆盖 Worker 类型 |
+| `sandbox` | string | 覆盖 CodexCLI sandbox 模式（bot 级） |
+| `acp_command` | string | 覆盖 ACP Agent 启动命令（bot 级，仅 `worker_type: acp` 时生效） |
+| `inject_exclude` | []string | 覆盖 agent config 排除列表（bot 级，覆盖平台级和全局级） |
+| `stt_*` | — | 覆盖 STT 配置 |
+| `tts_*` | — | 覆盖 TTS 配置 |
+
+**向后兼容**：`normalizeSlackBots()`/`normalizeFeishuBots()` 自动将单 bot 顶层凭证归一化为 `bots: [{name: "default"}]`。`bots[]` 非空时忽略顶层凭证。
+
+**限制**：每平台最多 10 个 bot。配置变更需重启生效。
+
+**启动校验**：`hotplex doctor` 的 `messaging.multi_bot_config` checker 检测重复 name、缺失凭证、超限。
+
+**Bot 状态 API**：
 
 ```
-messaging.worker_type  ──→  slack.worker_type (如未设置)
-messaging.stt_*        ──→  slack.stt_* (如未设置)
-messaging.tts_*        ──→  slack.tts_* (如未设置)
+GET /admin/bots          → 列出所有活跃 bot
+GET /admin/bots/{name}   → 单个 bot 详情
 ```
 
-**优先级**：`platform-level (YAML/env) > messaging-level > Default()`
+#### 3.11.9 配置传播机制
+
+共享配置通过 `propagateMessagingDefaults()` 从 `messaging` 级传播到各平台，再传播到每个 bot：
+
+```
+messaging.worker_type  ──→  slack.worker_type (如未设置)  ──→  slack.bots[i].worker_type (如未设置)
+messaging.stt_*        ──→  slack.stt_* (如未设置)        ──→  slack.bots[i].stt_* (如未设置)
+messaging.tts_*        ──→  slack.tts_* (如未设置)        ──→  slack.bots[i].tts_* (如未设置)
+```
+
+`inject_exclude` 使用独立的三级 fallback（通过 `ResolveInjectExclude`）：
+
+```
+agent_config.inject_exclude  ──→  messaging.slack.inject_exclude  ──→  slack.bots[i].inject_exclude
+```
+
+**优先级**：`bot-level > platform-level (YAML/env) > global-level > Default()`
 
 仅 zero-value 字段被填充，已有值不会被覆盖。
 
@@ -465,6 +637,7 @@ HotPlex 通过 `fsnotify` 监听配置文件变更，支持运行时热更新。
 | `admin.requests_per_sec` | Admin API 速率限制 |
 | `admin.burst` | Admin API 突发量 |
 | `admin.tokens` | Admin Token 列表 |
+| `admin.allowed_cidrs` | IP 白名单 CIDR 列表 |
 
 ### 4.2 静态字段（需重启）
 
@@ -480,7 +653,6 @@ HotPlex 通过 `fsnotify` 监听配置文件变更，支持运行时热更新。
 | `security.tls_enabled` | TLS 开关 |
 | `security.tls_cert_file` | TLS 证书路径 |
 | `security.tls_key_file` | TLS 私钥路径 |
-| `security.jwt_secret` | JWT 密钥 |
 | `db.path` | 数据库路径 |
 | `db.wal_mode` | WAL 模式 |
 
@@ -516,7 +688,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 
 | 变量 | 说明 | 示例 |
 |------|------|------|
-| `HOTPLEX_JWT_SECRET` | JWT 签名密钥（ES256，≥32 字节） | `openssl rand -base64 32 \| tr -d '\n'` |
+| `HOTPLEX_SECURITY_API_KEY_1` | API Key（至少配置一个） | `openssl rand -base64 32 \| tr -d '/+=' \| head -c 43` |
 | `HOTPLEX_ADMIN_TOKEN_1` | Admin API 认证 token | `openssl rand -base64 32 \| tr -d '/+=' \| head -c 43` |
 
 ### 5.3 完整环境变量列表
@@ -559,18 +731,32 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_WORKER_OPENCODE_SERVER_HTTP_TIMEOUT` | `worker.opencode_server.http_timeout` | `30s` |
 | `HOTPLEX_WORKER_AUTO_RETRY_ENABLED` | `worker.auto_retry.enabled` | `true` |
 | `HOTPLEX_WORKER_AUTO_RETRY_MAX_RETRIES` | `worker.auto_retry.max_retries` | `9` |
+| `HOTPLEX_WORKER_CODEX_CLI_COMMAND` | `worker.codex_cli.command` | `codex` |
+| `HOTPLEX_WORKER_CODEX_CLI_MODEL` | `worker.codex_cli.model` | `""` |
+| `HOTPLEX_WORKER_CODEX_CLI_SANDBOX` | `worker.codex_cli.sandbox` | `danger-full-access` |
+| `HOTPLEX_WORKER_CODEX_CLI_APPROVAL_MODE` | `worker.codex_cli.approval_mode` | `never` |
+| `HOTPLEX_WORKER_ACP_COMMAND` | `worker.acp.command` | `hermes acp` |
+| `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | `worker.acp.auto_approve` | `false` |
 | `HOTPLEX_WORKER_GH_TOKEN` | 通过 `worker.environment` 注入 | — |
 | `HOTPLEX_WORKER_GITHUB_TOKEN` | 通过 `worker.environment` 注入 | — |
+
+#### Webhook
+
+| 变量 | 对应配置 | 默认值 |
+|------|----------|--------|
+| `HOTPLEX_WEBHOOK_ENABLED` | `webhook.enabled` | `false` |
+| `HOTPLEX_WEBHOOK_SECRET` | `webhook.secret` | `""` |
+| `HOTPLEX_WEBHOOK_PATH` | `webhook.path` | `/api/webhook/github` |
+| `HOTPLEX_WEBHOOK_MAX_BODY_SIZE` | `webhook.max_body_size` | `1048576` |
+| `HOTPLEX_WEBHOOK_TARGET_JOB_NAME` | `webhook.target_job_name` | `pr-review-hotplex` |
 
 #### Security
 
 | 变量 | 对应配置 | 说明 |
 |------|----------|------|
-| `HOTPLEX_JWT_SECRET` | `security.jwt_secret` | 仅通过此变量注入 |
 | `HOTPLEX_ADMIN_TOKEN_1..N` | `admin.tokens` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_1..N` | `security.api_keys` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_HEADER` | `security.api_key_header` | 默认 `X-API-Key` |
-| `HOTPLEX_SECURITY_JWT_AUDIENCE` | `security.jwt_audience` | 默认 `hotplex-gateway` |
 
 #### Agent Config
 
@@ -654,6 +840,24 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_MESSAGING_FEISHU_TTS_MOSS_PORT` | `messaging.feishu.tts_moss_port` |
 | `HOTPLEX_MESSAGING_FEISHU_TTS_MOSS_IDLE_TIMEOUT` | `messaging.feishu.tts_moss_idle_timeout` |
 | `HOTPLEX_MESSAGING_FEISHU_TTS_MOSS_CPU_THREADS` | `messaging.feishu.tts_moss_cpu_threads` |
+
+#### Messaging — Yuanxin
+
+| 变量 | 对应配置 |
+|------|----------|
+| `HOTPLEX_MESSAGING_YUANXIN_ENABLED` | `messaging.yuanxin.enabled` |
+| `HOTPLEX_MESSAGING_YUANXIN_APP_ID` | `messaging.yuanxin.app_id` |
+| `HOTPLEX_MESSAGING_YUANXIN_PULSAR_URL` | `messaging.yuanxin.pulsar_url` |
+| `HOTPLEX_MESSAGING_YUANXIN_TENANT` | `messaging.yuanxin.tenant` |
+| `HOTPLEX_MESSAGING_YUANXIN_NAMESPACE` | `messaging.yuanxin.namespace` |
+| `HOTPLEX_MESSAGING_YUANXIN_PRODUCER_TOPIC` | `messaging.yuanxin.producer_topic` |
+| `HOTPLEX_MESSAGING_YUANXIN_WORKER_TYPE` | `messaging.yuanxin.worker_type` |
+| `HOTPLEX_MESSAGING_YUANXIN_WORK_DIR` | `messaging.yuanxin.work_dir` |
+| `HOTPLEX_MESSAGING_YUANXIN_DM_POLICY` | `messaging.yuanxin.dm_policy` |
+| `HOTPLEX_MESSAGING_YUANXIN_GROUP_POLICY` | `messaging.yuanxin.group_policy` |
+| `HOTPLEX_MESSAGING_YUANXIN_ALLOW_FROM` | `messaging.yuanxin.allow_from` |
+| `HOTPLEX_MESSAGING_YUANXIN_ALLOW_DM_FROM` | `messaging.yuanxin.allow_dm_from` |
+| `HOTPLEX_MESSAGING_YUANXIN_ALLOW_GROUP_FROM` | `messaging.yuanxin.allow_group_from` |
 
 #### Observability
 

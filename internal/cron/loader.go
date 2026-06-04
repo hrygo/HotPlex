@@ -29,6 +29,11 @@ type YAMLJobDef struct {
 
 // LoadFromYAML imports job definitions from YAML config into the store.
 // Uses name as idempotency key: existing jobs are updated, new ones are created.
+//
+// NOTE: There is a brief inconsistency window between individual store writes
+// and the final rebuildIndex() call. During this window, TriggerJob may return
+// ErrJobNotFound for newly-created YAML jobs. This is safe during startup
+// (timer not armed yet) but may surface during runtime hot-reload.
 func (s *Scheduler) LoadFromYAML(ctx context.Context, defs []YAMLJobDef) error {
 	s.log.Info("cron: loading YAML job definitions", "count", len(defs))
 

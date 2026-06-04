@@ -26,11 +26,13 @@ func TestFormatCall(t *testing.T) {
 		// Bash
 		{"Bash with command", "Bash", map[string]any{"command": "make test"}, "⏳ make test"},
 		{"Bash no command", "Bash", map[string]any{}, "⏳ Running command..."},
+		{"Bash multiline", "Bash", map[string]any{"command": "jq -r '\nBuild KR→O mapping\ndef kr_to_o:\n[.key | .]"}, "⏳ jq -r '"},
 
 		// Grep
 		{"Grep with path", "Grep", map[string]any{"pattern": "func main", "path": "src/"}, `🔍 "func main" in src`},
 		{"Grep pattern only", "Grep", map[string]any{"pattern": "hello"}, `🔍 "hello"`},
 		{"Grep no pattern", "Grep", map[string]any{}, "🔍 Searching..."},
+		{"Grep multiline pattern", "Grep", map[string]any{"pattern": "func \\w+\nsecond line"}, `🔍 "func \w+"`},
 
 		// Glob
 		{"Glob with pattern", "Glob", map[string]any{"pattern": "**/*.go"}, "📂 **/*.go"},
@@ -38,11 +40,13 @@ func TestFormatCall(t *testing.T) {
 
 		// Agent
 		{"Agent with description", "Agent", map[string]any{"description": "code-review"}, "🤖 code-review"},
+		{"Agent multiline desc", "Agent", map[string]any{"description": "review\ncode"}, "🤖 review"},
 		{"Agent with subagent_type", "Agent", map[string]any{"subagent_type": "Explore"}, "🤖 Explore"},
 		{"Agent no info", "Agent", map[string]any{}, "🤖 Spawning agent..."},
 
 		// WebSearch / WebFetch
 		{"WebSearch with query", "WebSearch", map[string]any{"query": "golang generics"}, "🌐 Searching golang generics"},
+		{"WebSearch multiline query", "WebSearch", map[string]any{"query": "how to\nuse generics"}, "🌐 Searching how to"},
 		{"WebFetch with url", "WebFetch", map[string]any{"url": "https://example.com"}, "🌐 Fetching https://example.com"},
 		{"WebSearch no query", "WebSearch", map[string]any{}, "🌐 Searching..."},
 
@@ -107,6 +111,10 @@ func TestFormatResult(t *testing.T) {
 		{"Glob single", "Glob", "a.go", "", "1 files"},
 		{"Bash success", "Bash", "ok", "", ""},
 		{"unknown tool", "Other", "output", "", ""},
+		{"Grep exact case (uppercase G)", "GREP", "a\nb\nc", "", "3 matches"},
+		{"Read exact case", "READ", "a\nb", "", "2 lines"},
+		{"Glob exact case", "GLOB", "a\nb\nc", "", "3 files"},
+		{"Mixed case Read", "ReAd", "a\nb\nc\nd", "", "4 lines"},
 	}
 
 	for _, tt := range tests {

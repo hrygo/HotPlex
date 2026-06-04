@@ -1,0 +1,23 @@
+# HotPlex - PostgreSQL Overlay
+#
+# Activates PostgreSQL + pgvector backend and wires gateway dependency.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.pg.yml up -d
+#
+# This overlay:
+#   1. Activates the postgres profile (pgvector:pg16 + backup sidecar)
+#   2. Sets gateway to use PostgreSQL as database driver
+#   3. Adds depends_on so gateway waits for PG to be healthy
+#
+
+services:
+  gateway:
+    environment:
+      - HOTPLEX_DB_DRIVER=postgres
+      # sslmode=disable is safe here: traffic stays within the Docker network.
+      # For non-Docker deployments, use sslmode=prefer or sslmode=require.
+      - HOTPLEX_DB_POSTGRES_DSN=postgres://hotplex:${POSTGRES_PASSWORD:-hotplex}@postgres:5432/hotplex?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy

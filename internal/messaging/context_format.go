@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -88,16 +89,29 @@ func SeverityLabel(severity ContextSeverity) string {
 }
 
 // FormatTokenCount converts a raw token count to a human-friendly string.
-// Examples: 76284 → "~76K", 200000 → "200K", 1500 → "~1.5K", 999 → "999"
+// Examples: 999 → "999", 1500 → "1.5K", 76284 → "76.3K", 999999 → "1M",
+// 1500000 → "1.5M", 2500000000 → "2.5B"
 func FormatTokenCount(tokens int) string {
-	if tokens < 1000 {
+	switch {
+	case tokens < 1_000:
 		return fmt.Sprintf("%d", tokens)
+	case tokens < 999_950:
+		return formatCompact(float64(tokens)/1_000, "K")
+	case tokens < 999_950_000:
+		return formatCompact(float64(tokens)/1_000_000, "M")
+	default:
+		return formatCompact(float64(tokens)/1_000_000_000, "B")
 	}
-	k := float64(tokens) / 1000
-	if k == float64(int(k)) {
-		return fmt.Sprintf("%dK", int(k))
+}
+
+// formatCompact formats v with unit, dropping ".0" for whole numbers.
+// Uses rounding to handle boundary cases (e.g. 999.95K → 1M, not 1000.0K).
+func formatCompact(v float64, unit string) string {
+	r := math.Round(v*10) / 10
+	if r == float64(int(r)) {
+		return fmt.Sprintf("%d%s", int(r), unit)
 	}
-	return fmt.Sprintf("%.1fK", k)
+	return fmt.Sprintf("%.1f%s", r, unit)
 }
 
 // FormatTokenDisplay produces a human-friendly "used / max" string.

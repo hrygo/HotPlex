@@ -97,21 +97,24 @@ func NewCircuitBreaker(config CircuitBreakerConfig) *CircuitBreaker {
 		forceClosed:     atomic.NewBool(false),
 	}
 
-	settings := gobreaker.Settings{
-		Name:        config.Name,
-		MaxRequests: config.HalfOpenMaxRequests,
-		Interval:    config.Interval,
-		Timeout:     config.Timeout,
+	cb.breaker = gobreaker.NewCircuitBreaker(cb.newSettings())
+	return cb
+}
+
+// newSettings returns gobreaker.Settings derived from the current config.
+func (cb *CircuitBreaker) newSettings() gobreaker.Settings {
+	return gobreaker.Settings{
+		Name:        cb.config.Name,
+		MaxRequests: cb.config.HalfOpenMaxRequests,
+		Interval:    cb.config.Interval,
+		Timeout:     cb.config.Timeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
-			return counts.ConsecutiveFailures >= config.MaxFailures
+			return counts.ConsecutiveFailures >= cb.config.MaxFailures
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			cb.onStateChange(from, to)
 		},
 	}
-
-	cb.breaker = gobreaker.NewCircuitBreaker(settings)
-	return cb
 }
 
 // onStateChange handles circuit state changes.
@@ -138,7 +141,7 @@ func (cb *CircuitBreaker) onStateChange(from, to gobreaker.State) {
 			"name", cb.config.Name,
 			"from", from.String(),
 			"to", to.String(),
-			"newState", newState)
+			"new_state", newState)
 	}
 }
 
@@ -162,8 +165,12 @@ func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
 		return fn()
 	}
 
-	// Execute with circuit breaker
-	_, err := cb.breaker.Execute(func() (interface{}, error) {
+	// Snapshot breaker under RLock to prevent data race with Reset()
+	cb.mu.RLock()
+	breaker := cb.breaker
+	cb.mu.RUnlock()
+
+	_, err := breaker.Execute(func() (interface{}, error) {
 		return nil, wrappedFn()
 	})
 
@@ -191,8 +198,12 @@ func (cb *CircuitBreaker) ExecuteWithResult(ctx context.Context, fn func() (inte
 		return fn()
 	}
 
-	// Execute with circuit breaker
-	result, err := cb.breaker.Execute(func() (interface{}, error) {
+	// Snapshot breaker under RLock to prevent data race with Reset()
+	cb.mu.RLock()
+	breaker := cb.breaker
+	cb.mu.RUnlock()
+
+	result, err := breaker.Execute(func() (interface{}, error) {
 		return fn()
 	})
 
@@ -231,6 +242,8 @@ func (cb *CircuitBreaker) Reset() {
 
 	cb.forceOpen.Store(false)
 	cb.forceClosed.Store(false)
+
+	cb.breaker = gobreaker.NewCircuitBreaker(cb.newSettings())
 	cb.state.Store(string(CircuitClosed))
 	cb.lastStateChange.Store(time.Now())
 

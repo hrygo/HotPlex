@@ -93,12 +93,13 @@ func newAdapterWithCapture(t *testing.T) (*Adapter, *[]capturedCall) {
 	bridge := messaging.NewBridge(
 		slog.Default(),
 		messaging.PlatformSlack,
-		nil, // hub (nil → JoinPlatformSession is no-op)
-		nil, // sm
+		nil, // hub (nil JoinPlatformSession is no-op)
 		handler,
 		nil, // starter
 		"test_worker",
+		"",
 		"/tmp",
+		"",
 	)
 	_ = a.ConfigureWith(messaging.AdapterConfig{Bridge: bridge})
 

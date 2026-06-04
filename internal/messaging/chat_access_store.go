@@ -1,0 +1,152 @@
+package messaging
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/hrygo/hotplex/internal/sqlutil"
+)
+
+// ChatAccessType classifies why the chat-entered event fired.
+type ChatAccessType int
+
+const (
+	ChatAccessNew       ChatAccessType = iota // No prior record — first contact.
+	ChatAccessReturning                       // Last activity > 24 h ago.
+	ChatAccessActive                          // Last activity ≤ 24 h — suppress welcome.
+)
+
+// ChatAccessRecord is one row in chat_access_events.
+type ChatAccessRecord struct {
+	EventID       string
+	Platform      string
+	ChatID        string
+	UserID        string
+	BotID         string
+	LastMessageAt int64 // ms epoch, 0 = unknown
+	WelcomeSent   bool
+	CreatedAt     int64 // unix epoch
+}
+
+// ChatAccessStorer abstracts chat access event storage and classification.
+type ChatAccessStorer interface {
+	Record(ctx context.Context, r ChatAccessRecord) (bool, error)
+	Classify(ctx context.Context, platform, chatID, botID, userID string, lastMessageAtMs int64) ChatAccessType
+}
+
+// Compile-time check that ChatAccessStore satisfies ChatAccessStorer.
+var _ ChatAccessStorer = (*ChatAccessStore)(nil)
+
+// ChatAccessStore provides dedup + cooldown + persistence for chat-entered events.
+type ChatAccessStore struct {
+	db      *sql.DB
+	log     *slog.Logger
+	writeMu *sqlutil.WriteMu
+}
+
+// NewChatAccessStore creates a store backed by the shared SQLite connection.
+func NewChatAccessStore(db *sql.DB, log *slog.Logger, writeMu *sqlutil.WriteMu) *ChatAccessStore {
+	return &ChatAccessStore{db: db, log: log, writeMu: writeMu}
+}
+
+// Record inserts the event. Returns false (with nil error) when event_id
+// already exists (duplicate event from the platform).
+func (s *ChatAccessStore) Record(ctx context.Context, r ChatAccessRecord) (bool, error) {
+	now := time.Now().Unix()
+	r.CreatedAt = now
+	var inserted bool
+	err := s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx,
+			`INSERT INTO chat_access_events (event_id, platform, chat_id, user_id, bot_id, last_message_at, welcome_sent, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.EventID, r.Platform, r.ChatID, r.UserID, r.BotID, r.LastMessageAt, boolToInt(r.WelcomeSent), r.CreatedAt,
+		)
+		if err != nil {
+			if isSQLiteUnique(err) {
+				return nil
+			}
+			return fmt.Errorf("chat_access insert: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		inserted = n > 0
+		return nil
+	})
+	return inserted, err
+}
+
+// Classify determines whether a welcome should be sent.
+//
+// Feishu: pass lastMessageAtMs from the event payload.
+// Slack:  pass 0; the function falls back to the DB.
+func (s *ChatAccessStore) Classify(ctx context.Context, platform, chatID, botID, userID string, lastMessageAtMs int64) ChatAccessType {
+	cooldown := int64(3600) // 1 h debounce window in seconds.
+
+	// Check recent row for (platform, chat_id, bot_id).
+	var lastCreatedAt int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT created_at FROM chat_access_events
+		 WHERE platform = ? AND chat_id = ? AND bot_id = ?
+		 ORDER BY created_at DESC LIMIT 1`,
+		platform, chatID, botID,
+	).Scan(&lastCreatedAt)
+
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			s.log.Warn("chat_access: classify query failed", "err", err)
+		}
+		return ChatAccessNew
+	}
+
+	// Existing record — check cooldown.
+	now := time.Now().Unix()
+	if now-lastCreatedAt < cooldown {
+		return ChatAccessActive
+	}
+
+	// Outside cooldown — check activity level.
+
+	// Feishu fast-path: use event payload timestamp directly.
+	if lastMessageAtMs > 0 {
+		lastSec := lastMessageAtMs / 1000
+		since := now - lastSec
+		if since > 3600 {
+			return ChatAccessReturning
+		}
+		return ChatAccessActive
+	}
+
+	// Slack path: check user's last recorded activity.
+	var lastAct int64
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(created_at), 0) FROM chat_access_events
+		 WHERE platform = ? AND user_id = ? AND bot_id = ?`,
+		platform, userID, botID,
+	).Scan(&lastAct)
+	if err != nil {
+		s.log.Warn("chat_access: activity query failed", "err", err)
+		return ChatAccessActive // suppress welcome on DB error to avoid spam
+	}
+	since := now - lastAct
+	if since > 3600 {
+		return ChatAccessReturning
+	}
+	return ChatAccessActive
+}
+
+// boolToInt converts bool to SQLite integer.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// isSQLiteUnique returns true for UNIQUE constraint violations.
+func isSQLiteUnique(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}

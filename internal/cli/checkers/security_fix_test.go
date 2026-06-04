@@ -29,33 +29,6 @@ func setupTestWd(t *testing.T) string {
 	return dir
 }
 
-func TestFixJWTStrength(t *testing.T) {
-	dir := setupTestConfigDir(t)
-	envPath := filepath.Join(dir, ".env")
-
-	require.NoError(t, fixJWTStrength())
-
-	data, err := os.ReadFile(envPath)
-	require.NoError(t, err)
-	content := string(data)
-	require.Contains(t, content, "HOTPLEX_JWT_SECRET=")
-	require.False(t, strings.Contains(content, "JWT_SECRET=") && !strings.Contains(content, "HOTPLEX_JWT_SECRET="))
-}
-
-func TestFixJWTStrength_RemovesLegacy(t *testing.T) {
-	dir := setupTestConfigDir(t)
-	envPath := filepath.Join(dir, ".env")
-	require.NoError(t, os.WriteFile(envPath, []byte("JWT_SECRET=old_value\n"), 0o600))
-
-	require.NoError(t, fixJWTStrength())
-
-	data, err := os.ReadFile(envPath)
-	require.NoError(t, err)
-	content := string(data)
-	require.Contains(t, content, "HOTPLEX_JWT_SECRET=")
-	require.NotContains(t, content, "JWT_SECRET=old_value")
-}
-
 func TestFixAdminToken(t *testing.T) {
 	dir := setupTestConfigDir(t)
 	envPath := filepath.Join(dir, ".env")

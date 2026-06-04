@@ -189,13 +189,12 @@ import (
 // PlatformAdapter is the base type for all messaging platform adapters.
 // Each adapter embeds this struct and implements Start, HandleTextMessage, and Close.
 //
-// [实现说明] hub/sm/handler 使用接口类型（HubInterface, HandlerInterface）而非具体类型，
-// 消除对 internal/gateway 包的直接依赖。SessionManager 为空接口（any）占位。
+// [实现说明] hub/handler 使用接口类型（HubInterface, HandlerInterface）而非具体类型，
+// 消除对 internal/gateway 包的直接依赖。依赖通过 ConfigureWith(AdapterConfig) 一次性注入。
 type PlatformAdapter struct {
 	Log *slog.Logger
 
 	hub     HubInterface
-	sm      SessionManager
 	handler HandlerInterface
 	bridge  *Bridge
 }
@@ -210,27 +209,19 @@ type HandlerInterface interface {
 	Handle(ctx context.Context, env *events.Envelope) error
 }
 
-// SessionManager is an opaque interface for session management.
-// Platform adapters don't call session creation directly; the bridge handles it.
-type SessionManager any
-
 // SessionStarter creates a new gateway session for a platform message.
 // Implemented by gateway.Bridge and injected during wiring.
 type SessionStarter interface {
 	StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir string) error
 }
 
-// SetHub injects the gateway Hub. Called by main.go during wiring.
-func (a *PlatformAdapter) SetHub(hub HubInterface) { a.hub = hub }
-
-// SetSessionManager injects the session manager. Called by main.go during wiring.
-func (a *PlatformAdapter) SetSessionManager(sm SessionManager) { a.sm = sm }
-
-// SetHandler injects the gateway Handler. Called by main.go during wiring.
-func (a *PlatformAdapter) SetHandler(h HandlerInterface) { a.handler = h }
-
-// SetBridge injects the messaging Bridge. Called by main.go during wiring.
-func (a *PlatformAdapter) SetBridge(b *Bridge) { a.bridge = b }
+// ConfigureWith injects all dependencies via AdapterConfig. Called by messaging_init.go during wiring.
+func (a *PlatformAdapter) ConfigureWith(config AdapterConfig) error {
+    a.hub = config.Hub
+    a.handler = config.Handler
+    a.bridge = config.Bridge
+    // ... Gate, BotName, Extras
+}
 
 // PlatformType identifies the messaging platform.
 type PlatformType string
@@ -292,68 +283,35 @@ func New(pt PlatformType, log *slog.Logger) (PlatformAdapterInterface, error) {
 ```go
 // internal/messaging/bridge.go（实际实现）
 
-type ConnFactory func(sessionID string) PlatformConn
-
 type Bridge struct {
-	log         *slog.Logger
-	platform    PlatformType
-	hub         HubInterface
-	sm          SessionManager
-	handler     HandlerInterface
-	starter     SessionStarter       // gateway.Bridge.StartPlatformSession
-	workerType  string
-	workDir     string
-	connFactory ConnFactory          // per-platform conn 工厂
-
-	mu     sync.Mutex
-	joined map[string]bool           // sessionID → already joined (去重)
+	log        *slog.Logger
+	platform   PlatformType
+	hub        HubInterface
+	handler    HandlerInterface
+	starter    SessionStarter
+	workerType string
+	workDir    string
+	adapter    atomic.Value // PlatformAdapterInterface; set via SetAdapter after Start()
 }
 
-func (b *Bridge) Handle(ctx context.Context, env *events.Envelope) error {
-	if env.OwnerID == "" {
-		return fmt.Errorf("messaging bridge: OwnerID not set for platform message")
+// Handle routes a platform message through the gateway.
+// pc is the PlatformConn provided by the adapter (caller manages lifecycle).
+func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformConn) error {
+	// 1. Register platform conn with hub so worker output routes back.
+	if pc != nil && b.hub != nil {
+		b.hub.JoinPlatformSession(env.SessionID, pc)
 	}
-	// 1. Auto-create session if starter is available.
+	// 2. Auto-create session if starter is available.
 	if b.starter != nil {
 		_ = b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir)
-	}
-	// 2. Join platform conn (once per session) so worker output routes back.
-	if b.connFactory != nil && b.hub != nil {
-		b.mu.Lock()
-		if !b.joined[env.SessionID] {
-			pc := b.connFactory(env.SessionID)
-			if pc != nil {
-				b.hub.JoinPlatformSession(env.SessionID, pc)
-				b.joined[env.SessionID] = true
-			}
-		}
-		b.mu.Unlock()
 	}
 	// 3. Route through gateway handler.
 	return b.handler.Handle(ctx, env)
 }
 
-// ─── Slack-specific bridge helpers ─────────────────────────────────────────
-
-// [实现说明] 两个 MakeXxxEnvelope 方法共享 makeEnvelope helper（DRY 优化），
-// 仅 session ID 格式和 metadata 内容不同。
-
-func (b *Bridge) MakeSlackEnvelope(teamID, channelID, threadTS, userID, text string) *events.Envelope {
-	sessionID := fmt.Sprintf("slack:%s:%s:%s:%s", teamID, channelID, threadTS, userID)
-	return b.makeEnvelope(sessionID, userID, text, map[string]any{
-		"platform":   "slack",
-		"team_id":    teamID,
-		"channel_id": channelID,
-	})
-}
-
-func (b *Bridge) MakeFeishuEnvelope(chatID, threadTS, userID, text string) *events.Envelope {
-	sessionID := fmt.Sprintf("feishu:%s:%s:%s", chatID, threadTS, userID)
-	return b.makeEnvelope(sessionID, userID, text, map[string]any{
-		"platform": "feishu",
-		"chat_id":  chatID,
-	})
-}
+// MakeEnvelope creates an AEP input envelope with UUIDv5 session ID.
+// Called by per-adapter makeEnvelope helpers (Slack/Feishu).
+func (b *Bridge) MakeEnvelope(userID, text string, platformCtx session.PlatformContext) *events.Envelope { ... }
 ```
 
 ### 4.4 Hub.JoinPlatformSession（唯一核心改动）
@@ -420,7 +378,7 @@ func pcToConnWrapper(pc PlatformConn) *Conn { /* inline wrapper, ~10 lines */ }
    └─▶ 建立 WebSocket 长连接到 Slack 云
 2. Slack → message event
    └─▶ Adapter.HandleTextMessage(ctx, event.Team, event.Channel, event.User, event.Text)
-       ├─▶ Bridge.MakeSlackEnvelope() → AEP Envelope
+       ├─▶ Bridge.MakeEnvelope() → AEP Envelope
        ├─▶ Bridge.JoinSession(sessionID, platformConn)
        │   └─▶ Hub.JoinPlatformSession() — 注册连接用于接收响应
        └─▶ Bridge.Handle(ctx, env)
@@ -455,7 +413,7 @@ func init() {
 }
 
 type Adapter struct {
-	messaging.PlatformAdapter // embedding for SetHub/SetSM/SetHandler
+	messaging.PlatformAdapter // embedding for ConfigureWith
 
 	app    *slack.App
 	client *slack.Client
@@ -531,7 +489,7 @@ func (a *Adapter) handleMessage(ctx context.Context, ev slackevents.EventsAPIEve
 
 func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelID, userID, text string) error {
 	// Map Slack message to AEP Envelope
-	env := a.Bridge.MakeSlackEnvelope("", channelID, userID, text)
+	env := a.Bridge.MakeEnvelope("", channelID, userID, text)
 	if env == nil {
 		return nil
 	}
@@ -846,7 +804,7 @@ func (r *ChannelRateLimiter) Allow(channelID string) bool {
 1. wsClient.Connect() — 建立飞书 WebSocket 长连接
 2. 飞书 → larkim event (receive message)
    └─▶ Adapter.HandleTextMessage(ctx, chatID, userID, text)
-       ├─▶ Bridge.MakeFeishuEnvelope() → AEP Envelope
+       ├─▶ Bridge.MakeEnvelope() → AEP Envelope
        ├─▶ Bridge.JoinSession(sessionID, platformConn)
        └─▶ Bridge.Handle(ctx, env)
 3. Worker → AEP events → Hub.SendToSession()
@@ -960,7 +918,7 @@ func (a *Adapter) onMessage(ctx context.Context, event *larkim.P2MessageReceiveV
 }
 
 func (a *Adapter) HandleTextMessage(ctx context.Context, chatID, userID, text string) error {
-	env := a.Bridge.MakeFeishuEnvelope(chatID, userID, text)
+	env := a.Bridge.MakeEnvelope(chatID, userID, text)
 	if env == nil {
 		return nil
 	}
@@ -1219,7 +1177,7 @@ func (a *Adapter) streamCardContent(ctx context.Context, cardID, elementID, text
 | 维度 | WebSocket 客户端 | Slack | 飞书 |
 |------|-----------------|-------|------|
 | 连接建立 | 客户端主动 WS 握手 | Socket Mode SDK 连接 Slack | larkws SDK 连接飞书 |
-| 认证 | JWT 握手（网关层） | App Token（SDK 层） | App Token + Token 刷新 |
+| 认证 | API Key（网关层） | App Token（SDK 层） | App Token + Token 刷新 |
 | 会话 ID | client 生成 UUID | `slack:{team}:{channel}:{thread_ts}:{user}` | `feishu:{chat_id}:{thread_ts}:{user_id}` |
 | 消息去重 | WebSocket 本身无重复 | ClientMsgID dedup | message_id dedup |
 | 流式更新 | WebSocket 实时推送 | SDK 原生 `StartStream/AppendStream/StopStream` | CardKit `v1` 流式 API（50 次/秒） |
@@ -1310,7 +1268,7 @@ func (a *Adapter) streamCardContent(ctx context.Context, cardID, elementID, text
 
 ### R7: Handler.Handle 所有权验证
 
-**风险**: WS 模式下 OwnerID 由 JWT 验证填充。平台模式下 OwnerID 从哪里来？
+**风险**: WS 模式下 OwnerID 由 API Key 验证填充。平台模式下 OwnerID 从哪里来？
 **缓解**: PlatformAdapter 在调用 `Bridge.Handle()` 前，验证 SDK 级别的用户身份（Slack user token / 飞书 user access token），并将 user_id 作为 OwnerID 填入 Envelope。平台适配器是受信的内部组件。
 
 ---
@@ -1391,15 +1349,15 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc PlatformConn) {
 | AC-2.1 | `PlatformAdapterInterface` 定义 `Platform()` / `Start()` / `HandleTextMessage()` / `Close()` | 编译通过 | ✅ |
 | AC-2.2 | `init()` 自注册: `Register(PlatformSlack, ...)` 和 `Register(PlatformFeishu, ...)` | 单元测试: `New()` 返回正确类型 | ✅ |
 | AC-2.3 | 未知 platform 类型返回错误 `messaging: unknown platform %q` | 单元测试 | ✅ |
-| AC-2.4 | `SetHub` / `SetSessionManager` / `SetHandler` / `SetBridge` 注入依赖 | 集成测试 | ✅ |
+| AC-2.4 | `ConfigureWith(AdapterConfig)` 注入 Hub/Handler/Bridge/Gate/Extras | 集成测试 | ✅ |
 
 #### AC-3: PlatformBridge 编排
 
 | ID | 验收标准 | 验证方式 | 状态 |
 |----|---------|---------|------|
 | AC-3.1 | `Bridge.Handle()` 验证 `OwnerID` 非空后调用 `handler.Handle()` | 单元测试: OwnerID 空返回错误 | ✅ |
-| AC-3.2 | `MakeSlackEnvelope` 生成 session ID: `slack:{team}:{channel}:{thread_ts}:{user_id}` | 单元测试: 验证格式 | ✅ |
-| AC-3.3 | `MakeFeishuEnvelope` 生成 session ID: `feishu:{chat_id}:{thread_ts}:{user_id}` | 单元测试: 验证格式 | ✅ |
+| AC-3.2 | `MakeEnvelope` 生成 session ID: `slack:{team}:{channel}:{thread_ts}:{user_id}` | 单元测试: 验证格式 | ✅ |
+| AC-3.3 | `MakeEnvelope` 生成 session ID: `feishu:{chat_id}:{thread_ts}:{user_id}` | 单元测试: 验证格式 | ✅ |
 | AC-3.4 | Envelope `Data.content` 去首尾空白，`Data.metadata` 含 platform 标识 | 单元测试 | ✅ |
 
 #### AC-4: Hub.JoinPlatformSession

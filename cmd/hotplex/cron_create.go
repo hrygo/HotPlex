@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -90,10 +91,15 @@ Schedule format:
 					}
 					opts.Attach = true
 					opts.TargetSessionID = sid
-					opts.DeleteAfterRun = true
+					// Only set DeleteAfterRun for one-shot (at) schedules.
+					// For recurring (every) attach jobs, lifecycle is managed by
+					// max_runs/expires_at instead of auto-deletion.
+					if strings.HasPrefix(schedule, "at:") {
+						opts.DeleteAfterRun = true
+					}
 				} else {
 					if schedule == "" {
-						return cmd.Help()
+						return fmt.Errorf("required flag --schedule not set.\nSee 'hotplex cron create --help' for usage")
 					}
 					var missing []string
 					if botID == "" {
@@ -112,7 +118,14 @@ Schedule format:
 					return err
 				}
 
-				if err := store.Create(context.Background(), job); err != nil {
+				// Enforce max jobs limit (best-effort for out-of-process CLI).
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := croncli.CheckMaxJobs(ctx, store, configPath); err != nil {
+					return err
+				}
+
+				if err := store.Create(ctx, job); err != nil {
 					return fmt.Errorf("create job: %w", err)
 				}
 
@@ -121,6 +134,11 @@ Schedule format:
 				fmt.Printf("Created job %s (%s)\n", job.ID, job.Name)
 				fmt.Printf("  Schedule: %s\n", croncli.FormatSchedule(job.Schedule))
 				fmt.Printf("  Next run: %s\n", croncli.FormatTimeMs(job.State.NextRunAtMs))
+
+				if job.Platform == "cron" && !attach && !silent {
+					_, _ = fmt.Fprintf(os.Stderr, "warning: no delivery platform detected.\n")
+					_, _ = fmt.Fprintf(os.Stderr, "  Results will not be sent to any chat. Set --platform or run within a gateway session.\n")
+				}
 				return nil
 			})
 		},
@@ -142,7 +160,7 @@ Schedule format:
 	cmd.Flags().StringVar(&expiresAt, "expires-at", "", "auto-disable after this time RFC3339 (required for every/cron)")
 	cmd.Flags().StringVar(&platform, "platform", "", "target delivery platform (slack|feishu|cron), auto-detected from env if unset")
 	cmd.Flags().StringVar(&platformKey, "platform-key", "", "platform routing key as JSON, e.g. '{\"channel_id\":\"C123\"}'")
-	cmd.Flags().StringVar(&workerType, "worker-type", "", "AI Agent engine to use (e.g. claude_code, opencode_server)")
+	cmd.Flags().StringVar(&workerType, "worker-type", "", "AI Agent engine (claude_code|opencode_server|codex_cli|acp)")
 	cmd.Flags().BoolVar(&attach, "attach", false, "Create attached_session job (requires $GATEWAY_SESSION_ID)")
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("message")

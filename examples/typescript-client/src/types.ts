@@ -60,12 +60,70 @@ export interface ToolCallData {
   id: string;
   name: string;
   input: Record<string, unknown>;
+  title?: string;           // e.g. "read: main.go"
+  kind?: string;            // read/edit/delete/move/search/execute/think/fetch/switch_mode/other
+  locations?: FileLocation[];
 }
 
 export interface ToolResultData {
   id: string;
   output: unknown;
   error?: string;
+  status?: string;  // completed / failed
+  diff?: FileDiff;
+}
+
+// ACP extension: file location reference
+export interface FileLocation {
+  path: string;
+  line?: number;
+}
+
+// ACP extension: structured file diff
+export interface FileDiff {
+  path: string;
+  old_text: string;
+  new_text: string;
+}
+
+export interface QuestionOption {
+  label: string;
+  description?: string;
+  preview?: string;
+}
+
+export interface Question {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multi_select: boolean;
+}
+
+export interface QuestionRequestData {
+  id: string;
+  tool_name?: string;
+  questions: Question[];
+}
+
+export interface QuestionResponseData {
+  id: string;
+  answers: Record<string, string>;
+}
+
+export interface ElicitationRequestData {
+  id: string;
+  mcp_server_name: string;
+  message: string;
+  mode?: string;
+  url?: string;
+  elicitation_id?: string;
+  requested_schema?: Record<string, unknown>;
+}
+
+export interface ElicitationResponseData {
+  id: string;
+  action: string;
+  content?: Record<string, unknown>;
 }
 
 export interface RawData {
@@ -133,6 +191,79 @@ export interface PongData {
   state: SessionState;
 }
 
+export interface ContextCategory {
+  name: string;
+  tokens: number;
+}
+
+export interface ContextSkillInfo {
+  total: number;
+  included: number;
+  tokens: number;
+  names?: string[];
+}
+
+export interface ContextUsageData {
+  total_tokens: number;
+  max_tokens: number;
+  percentage: number;
+  model?: string;
+  categories?: ContextCategory[];
+  memory_files?: number;
+  mcp_tools?: number;
+  agents?: number;
+  skills?: ContextSkillInfo;
+}
+
+export interface SkillsListData {
+  skills: SkillEntry[];
+  total: number;
+  filter?: string;
+}
+
+export interface SkillEntry {
+  name: string;
+  description: string;
+  source: string;
+}
+
+export interface MCPStatusData {
+  servers: MCPServerInfo[];
+}
+
+export interface MCPServerInfo {
+  name: string;
+  status: string;
+}
+
+export interface WorkerCommandData {
+  command: string;
+  args?: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface ToolUpdateData {
+  id: string;
+  status: string;
+  content?: unknown;
+  diff?: FileDiff;
+  raw_output?: string;
+}
+
+export interface PlanData {
+  items: PlanItem[];
+}
+
+export interface PlanItem {
+  content: string;
+  priority: string;
+  status: string;
+}
+
+export interface ModeUpdateData {
+  current_mode_id: string;
+}
+
 // ============================================================================
 // Control Data (from pkg/events/events.go:229-237)
 // ============================================================================
@@ -167,6 +298,7 @@ export interface InitData {
 
 export interface InitAuth {
   token?: string;
+  bot_id?: string;
 }
 
 export interface InitConfig {
@@ -259,6 +391,17 @@ export interface ServerEventDataMap {
   [EventKind.PermissionRequest]: PermissionRequestData;
   [EventKind.Pong]: PongData;
   [EventKind.Control]: ControlData;
+  [EventKind.QuestionRequest]: QuestionRequestData;
+  [EventKind.QuestionResponse]: QuestionResponseData;
+  [EventKind.ElicitationRequest]: ElicitationRequestData;
+  [EventKind.ElicitationResponse]: ElicitationResponseData;
+  [EventKind.ContextUsage]: ContextUsageData;
+  [EventKind.SkillsList]: SkillsListData;
+  [EventKind.MCPStatus]: MCPStatusData;
+  [EventKind.WorkerCmd]: WorkerCommandData;
+  [EventKind.ToolUpdate]: ToolUpdateData;
+  [EventKind.Plan]: PlanData;
+  [EventKind.ModeUpdate]: ModeUpdateData;
 }
 
 export interface ServerEventEnvelopeMap {
@@ -277,6 +420,17 @@ export interface ServerEventEnvelopeMap {
   [EventKind.PermissionRequest]: Envelope<PermissionRequestData>;
   [EventKind.Pong]: Envelope<PongData>;
   [EventKind.Control]: Envelope<ControlData>;
+  [EventKind.QuestionRequest]: Envelope<QuestionRequestData>;
+  [EventKind.QuestionResponse]: Envelope<QuestionResponseData>;
+  [EventKind.ElicitationRequest]: Envelope<ElicitationRequestData>;
+  [EventKind.ElicitationResponse]: Envelope<ElicitationResponseData>;
+  [EventKind.ContextUsage]: Envelope<ContextUsageData>;
+  [EventKind.SkillsList]: Envelope<SkillsListData>;
+  [EventKind.MCPStatus]: Envelope<MCPStatusData>;
+  [EventKind.WorkerCmd]: Envelope<WorkerCommandData>;
+  [EventKind.ToolUpdate]: Envelope<ToolUpdateData>;
+  [EventKind.Plan]: Envelope<PlanData>;
+  [EventKind.ModeUpdate]: Envelope<ModeUpdateData>;
 }
 
 // ============================================================================

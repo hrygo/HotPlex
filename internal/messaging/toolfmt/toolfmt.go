@@ -15,6 +15,9 @@ func FormatCall(name string, input map[string]any) string {
 	if fn, ok := callFormatters[name]; ok && input != nil {
 		return fn(input)
 	}
+	if fn, ok := callFormattersLower[strings.ToLower(name)]; ok && input != nil {
+		return fn(input)
+	}
 	return formatFallbackCall(name, input)
 }
 
@@ -32,20 +35,11 @@ func FormatResult(name string, output any, errMsg string) string {
 	if !ok || s == "" {
 		return ""
 	}
-	lines := strings.Count(s, "\n") + 1
-	switch name {
-	case "Grep":
-		if lines > 0 {
-			return fmt.Sprintf("%d matches", lines)
-		}
-	case "Read":
-		if lines > 1 {
-			return fmt.Sprintf("%d lines", lines)
-		}
-	case "Glob":
-		if lines > 0 {
-			return fmt.Sprintf("%d files", lines)
-		}
+	if fn, ok := resultFormatters[name]; ok {
+		return fn(s)
+	}
+	if fn, ok := resultFormattersLower[strings.ToLower(name)]; ok {
+		return fn(s)
 	}
 	return ""
 }
@@ -70,9 +64,54 @@ func TruncateRunes(s string, max int) string {
 	return string(runes[:max])
 }
 
+// --- Tool result formatters ---
+
+type resultFormatter func(output string) string
+
+var resultFormatters = map[string]resultFormatter{
+	"Grep": func(s string) string {
+		lines := strings.Count(s, "\n") + 1
+		if lines > 0 {
+			return fmt.Sprintf("%d matches", lines)
+		}
+		return ""
+	},
+	"Read": func(s string) string {
+		lines := strings.Count(s, "\n") + 1
+		if lines > 1 {
+			return fmt.Sprintf("%d lines", lines)
+		}
+		return ""
+	},
+	"Glob": func(s string) string {
+		lines := strings.Count(s, "\n") + 1
+		if lines > 0 {
+			return fmt.Sprintf("%d files", lines)
+		}
+		return ""
+	},
+}
+
+var resultFormattersLower map[string]resultFormatter
+
 // --- Tool call formatters ---
 
 type callFormatter func(input map[string]any) string
+
+// callFormattersLower provides case-insensitive lookup for ACP agents
+// that send lowercase tool names (e.g., "read" instead of "Read").
+var callFormattersLower map[string]callFormatter
+
+func init() {
+	callFormattersLower = make(map[string]callFormatter, len(callFormatters))
+	for k, v := range callFormatters {
+		callFormattersLower[strings.ToLower(k)] = v
+	}
+	resultFormattersLower = make(map[string]resultFormatter, len(resultFormatters))
+	for k, v := range resultFormatters {
+		resultFormattersLower[strings.ToLower(k)] = v
+	}
+}
 
 var callFormatters = map[string]callFormatter{
 	"TodoWrite":    formatTodoWrite,
@@ -105,7 +144,7 @@ func formatSimple(prefix, key string) callFormatter {
 		if val == "" {
 			return prefix + "..."
 		}
-		return prefix + " " + val
+		return prefix + " " + firstLine(val)
 	}
 }
 
@@ -114,11 +153,19 @@ func formatBash(input map[string]any) string {
 	if cmd == "" {
 		return "⏳ Running command..."
 	}
-	return "⏳ " + cmd
+	return "⏳ " + firstLine(cmd)
+}
+
+// firstLine returns the first line of s, preventing multi-line content from
+// garbling single-line display areas like the Feishu tool_activity strip.
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }
 
 func formatGrep(input map[string]any) string {
 	pattern, _ := input["pattern"].(string)
+	pattern = firstLine(pattern)
 	if pattern == "" {
 		return "🔍 Searching..."
 	}
@@ -140,7 +187,7 @@ func formatGlob(input map[string]any) string {
 func formatAgent(input map[string]any) string {
 	desc, _ := input["description"].(string)
 	if desc != "" {
-		return "🤖 " + desc
+		return "🤖 " + firstLine(desc)
 	}
 	subagent, _ := input["subagent_type"].(string)
 	if subagent != "" {
@@ -228,9 +275,9 @@ func formatTodoWrite(input map[string]any) string {
 		case "completed":
 			completed++
 		case "in_progress":
-			label := t.activeForm
+			label := firstLine(t.activeForm)
 			if label == "" {
-				label = t.content
+				label = firstLine(t.content)
 			}
 			if label != "" {
 				inProgress = append(inProgress, label)
@@ -258,7 +305,7 @@ func formatFallbackCall(name string, input map[string]any) string {
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
-		val := fmt.Sprintf("%v", input[k])
+		val := firstLine(fmt.Sprintf("%v", input[k]))
 		parts = append(parts, k+"="+TruncateRunes(ShortenPath(val), 30))
 	}
 	return TruncateRunes(name+"("+strings.Join(parts, ", ")+")", 60)

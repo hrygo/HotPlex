@@ -73,25 +73,25 @@ func (p *TTSPipeline) Process(ctx context.Context, fullText, chatID, replyToMsgI
 	}
 
 	// 4. Upload to Feishu + send audio message
-	duration := tts.EstimateAudioDuration(len(opusData))
-	if err := p.sendAudio(ctx, chatID, replyToMsgID, opusData); err != nil {
+	duration := tts.ParseOggDurationMs(opusData)
+	if err := p.sendAudio(ctx, chatID, replyToMsgID, opusData, duration); err != nil {
 		p.log.Warn("tts: send audio failed", "err", err)
 		return
 	}
-	p.log.Info("tts: voice reply sent", "summary_len", len(summary), "duration_s", duration)
+	p.log.Info("tts: voice reply sent", "summary_len", len(summary), "duration_ms", duration)
 }
 
 func (p *TTSPipeline) summarize(ctx context.Context, fullText string) (string, error) {
 	return tts.SummarizeForTTS(ctx, fullText, p.maxChars)
 }
 
-func (p *TTSPipeline) sendAudio(ctx context.Context, chatID, replyToMsgID string, opusData []byte) error {
-	fileKey, err := p.uploadAudio(ctx, opusData)
+func (p *TTSPipeline) sendAudio(ctx context.Context, chatID, replyToMsgID string, opusData []byte, durationMs int) error {
+	fileKey, err := p.uploadAudio(ctx, opusData, durationMs)
 	if err != nil {
 		return fmt.Errorf("upload audio: %w", err)
 	}
 
-	msgContent := fmt.Sprintf(`{"file_key":%q,"duration":%d}`, fileKey, tts.EstimateAudioDurationMs(len(opusData)))
+	msgContent := fmt.Sprintf(`{"file_key":%q}`, fileKey)
 	req := larkim.NewCreateMessageReqBuilder().
 		ReceiveIdType("chat_id").
 		Body(larkim.NewCreateMessageReqBodyBuilder().
@@ -129,11 +129,12 @@ func (p *TTSPipeline) sendAudio(ctx context.Context, chatID, replyToMsgID string
 	return nil
 }
 
-func (p *TTSPipeline) uploadAudio(ctx context.Context, opusData []byte) (string, error) {
+func (p *TTSPipeline) uploadAudio(ctx context.Context, opusData []byte, durationMs int) (string, error) {
 	req := larkim.NewCreateFileReqBuilder().
 		Body(larkim.NewCreateFileReqBodyBuilder().
 			FileType("opus").
 			FileName("tts_reply.opus").
+			Duration(durationMs).
 			File(io.NopCloser(bytes.NewReader(opusData))).
 			Build()).
 		Build()

@@ -18,7 +18,7 @@ func TestNewWatcher(t *testing.T) {
 
 	t.Run("with nil logger and store", func(t *testing.T) {
 		t.Parallel()
-		w := NewWatcher(nil, "/tmp/test.yaml", nil, nil, nil, nil)
+		w := NewWatcher(nil, "/tmp/test.yaml", nil, nil, nil)
 		require.NotNil(t, w)
 		require.NotNil(t, w.log)
 		require.Equal(t, "/tmp/test.yaml", w.path)
@@ -28,9 +28,8 @@ func TestNewWatcher(t *testing.T) {
 	t.Run("with custom params", func(t *testing.T) {
 		t.Parallel()
 		logger := slog.Default()
-		sp := NewEnvSecretsProvider()
 		store := NewConfigStore(Default(), logger)
-		w := NewWatcher(logger, "/tmp/test.yaml", sp, store, nil, nil)
+		w := NewWatcher(logger, "/tmp/test.yaml", store, nil, nil)
 		require.NotNil(t, w)
 		require.Equal(t, logger, w.log)
 		require.Equal(t, store, w.store)
@@ -60,7 +59,7 @@ func TestWatcher_Reload_And_ConfigStore(t *testing.T) {
 		mu.Unlock()
 	})
 
-	w := NewWatcher(logger, tmpFile, nil, store, nil, nil)
+	w := NewWatcher(logger, tmpFile, store, nil, nil)
 	w.SetInitial(cfg)
 
 	// Modify file
@@ -124,7 +123,7 @@ func TestWatcher_Rollback_Triggers_Store(t *testing.T) {
 	cfg2.Gateway.Addr = "127.0.0.1:8082"
 
 	store := NewConfigStore(cfg2, nil)
-	w := NewWatcher(nil, "/tmp/test.yaml", nil, store, nil, nil)
+	w := NewWatcher(nil, "/tmp/test.yaml", store, nil, nil)
 
 	w.muHistory.Lock()
 	w.history = []*Config{cfg1, cfg2}
@@ -177,7 +176,7 @@ func TestWatcher_Start(t *testing.T) {
 	t.Run("successful start with valid dir", func(t *testing.T) {
 		t.Parallel()
 		tmpFile := createTempConfigFile(t)
-		w := NewWatcher(slog.Default(), tmpFile, nil, nil, nil, nil)
+		w := NewWatcher(slog.Default(), tmpFile, nil, nil, nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -193,7 +192,7 @@ func TestWatcher_Start(t *testing.T) {
 		tmpDir := t.TempDir()
 		nonexistentPath := filepath.Join(tmpDir, "nonexistent.yaml")
 
-		w := NewWatcher(slog.Default(), nonexistentPath, nil, nil, nil, nil)
+		w := NewWatcher(slog.Default(), nonexistentPath, nil, nil, nil)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -210,7 +209,7 @@ func TestWatcher_isRelevant(t *testing.T) {
 	t.Parallel()
 
 	tmpFile := createTempConfigFile(t)
-	w := NewWatcher(slog.Default(), tmpFile, nil, nil, nil, nil)
+	w := NewWatcher(slog.Default(), tmpFile, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -267,7 +266,7 @@ func TestWatcher_isRelevant(t *testing.T) {
 func TestWatcher_AuditLog(t *testing.T) {
 	t.Parallel()
 
-	w := NewWatcher(slog.Default(), "/tmp/test.yaml", nil, nil, nil, nil)
+	w := NewWatcher(slog.Default(), "/tmp/test.yaml", nil, nil, nil)
 
 	// Initially empty
 	require.Empty(t, w.AuditLog())
@@ -291,7 +290,7 @@ func TestWatcher_AuditLog(t *testing.T) {
 func TestWatcher_History(t *testing.T) {
 	t.Parallel()
 
-	w := NewWatcher(slog.Default(), "/tmp/test.yaml", nil, nil, nil, nil)
+	w := NewWatcher(slog.Default(), "/tmp/test.yaml", nil, nil, nil)
 
 	// Initially empty
 	require.Empty(t, w.History())
@@ -314,7 +313,7 @@ func TestWatcher_History(t *testing.T) {
 func TestWatcher_Close(t *testing.T) {
 	t.Parallel()
 
-	w := NewWatcher(slog.Default(), "/tmp/test.yaml", nil, nil, nil, nil)
+	w := NewWatcher(slog.Default(), "/tmp/test.yaml", nil, nil, nil)
 
 	// First close should succeed
 	err := w.Close()

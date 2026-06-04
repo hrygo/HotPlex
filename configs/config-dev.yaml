@@ -9,6 +9,8 @@ inherits: config.yaml
 
 admin:
   addr: "127.0.0.1:9999"
+  tokens:
+    - "${ADMIN_TOKEN}"
   rate_limit_enabled: false
 
 gateway:
@@ -29,6 +31,8 @@ pool:
 worker:
   idle_timeout: 30m
   execution_timeout: 30m
+  opencode_server:
+    password: "${OPENCODE_SERVER_PASSWORD}"
 
 log:
   level: "debug"
@@ -40,3 +44,12 @@ messaging:
     enabled: true
   feishu:
     enabled: true
+    worker_type: "claude_code"
+  yuanxin:
+    enabled: false
+    worker_type: "claude_code"
+    work_dir: "./.hotplex/workspace"
+    tenant: "public"
+    namespace: "default"
+    app_id: "${YUANXIN_APP_ID}"
+    pulsar_url: "${YUANXIN_PULSAR_URL}"

@@ -17,8 +17,37 @@ func getScopes(r *http.Request) []string {
 	return nil
 }
 
+// scopeImplies maps a scope to the lower-privilege scopes it grants.
+var scopeImplies = map[string][]string{
+	ScopeAdminWrite: {ScopeAdminRead},
+	ScopeAdminRead:  {ScopeConfigRead},
+}
+
 func hasScope(r *http.Request, required string) bool {
-	return slices.Contains(getScopes(r), required)
+	granted := getScopes(r)
+	if slices.Contains(granted, required) {
+		return true
+	}
+	// Check implied scopes with transitive closure:
+	// admin:write → admin:read → config:read
+	visited := map[string]bool{}
+	queue := make([]string, len(granted))
+	copy(queue, granted)
+	for len(queue) > 0 {
+		s := queue[0]
+		queue = queue[1:]
+		if visited[s] {
+			continue
+		}
+		visited[s] = true
+		if implied, ok := scopeImplies[s]; ok {
+			if slices.Contains(implied, required) {
+				return true
+			}
+			queue = append(queue, implied...)
+		}
+	}
+	return false
 }
 
 // requireScope checks that the request has the required scope.

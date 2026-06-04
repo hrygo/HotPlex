@@ -29,7 +29,14 @@ export const workerType: WorkerType =
   (process.env.HOTPLEX_WEBCHAT_WORKER_TYPE as WorkerType) ?? "claude_code";
 
 export const apiKey: string =
-  process.env.HOTPLEX_WEBCHAT_API_KEY ?? "dev";
+  process.env.HOTPLEX_WEBCHAT_API_KEY ?? "";
+
+// isSameOrigin returns true when the webchat is served from the same origin
+// as the gateway (embedded via go:embed). In this mode, cookie auth is used
+// instead of X-API-Key header, so no build-time secret is needed.
+export function isSameOrigin(): boolean {
+  return typeof window !== "undefined" && !process.env.HOTPLEX_WEBCHAT_WS_URL;
+}
 
 // -- Per-session init config -------------------------------------------
 
@@ -55,3 +62,8 @@ export function httpBase(): string {
       .replace(/\/ws\/?$/, "")
   );
 }
+
+// -- Admin -----------------------------------------------------------------
+
+export const adminUrl: string =
+  process.env.HOTPLEX_WEBCHAT_ADMIN_URL ?? 'http://localhost:9999';

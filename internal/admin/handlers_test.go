@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -46,7 +47,7 @@ func (m *mockSessionManager) Get(_ context.Context, id string) (any, error) {
 	if m.getFn != nil {
 		return m.getFn(id)
 	}
-	return nil, errors.New("not found")
+	return nil, session.ErrSessionNotFound
 }
 func (m *mockSessionManager) Delete(ctx context.Context, id string) error {
 	if m.deleteFn != nil {
@@ -81,7 +82,7 @@ func (m *mockHub) NextSeqPeek(string) int64 { return 42 }
 
 type mockBridge struct{ err error }
 
-func (m *mockBridge) StartSession(context.Context, string, string, string, worker.WorkerType, []string, string, string, map[string]string, string) error {
+func (m *mockBridge) StartSession(context.Context, string, string, string, worker.WorkerType, []string, string, string, map[string]string, string, string, ...string) error {
 	return m.err
 }
 
@@ -96,7 +97,7 @@ func (m *mockConfig) Get() *config.Config {
 	return &config.Config{
 		Admin: config.AdminConfig{
 			Tokens:        []string{"test-token"},
-			DefaultScopes: []string{ScopeSessionRead, ScopeSessionWrite, ScopeSessionKill, ScopeStatsRead, ScopeHealthRead, ScopeAdminRead, ScopeConfigRead},
+			DefaultScopes: []string{ScopeSessionRead, ScopeSessionWrite, ScopeSessionKill, ScopeStatsRead, ScopeHealthRead, ScopeAdminWrite},
 		},
 	}
 }

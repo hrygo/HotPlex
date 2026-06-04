@@ -3,6 +3,7 @@ package tts
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os/exec"
 )
@@ -94,7 +95,7 @@ func isMP3(data []byte) bool {
 }
 
 // EstimateAudioDuration estimates audio duration in seconds from audio bytes.
-// Assumes 48kbps mono ≈ 6000 bytes/sec. Used for logging.
+// Assumes 48kbps mono ≈ 6000 bytes/sec. Used for logging MP3 output.
 func EstimateAudioDuration(audioBytes int) int {
 	if audioBytes <= 0 {
 		return 1
@@ -107,7 +108,46 @@ func EstimateAudioDuration(audioBytes int) int {
 }
 
 // EstimateAudioDurationMs returns audio duration in milliseconds.
-// Required by Feishu audio messages.
+// Used for Slack TTS logging where exact duration is not required.
 func EstimateAudioDurationMs(audioBytes int) int {
 	return EstimateAudioDuration(audioBytes) * 1000
+}
+
+// ParseOggDurationMs extracts duration in milliseconds from Ogg container metadata.
+// It scans Ogg pages for the highest granule position to compute duration.
+// Per RFC 7845, Ogg Opus granule position is always at 48 kHz regardless of output sample rate.
+// Returns 0 if the data is not a valid Ogg stream.
+func ParseOggDurationMs(data []byte) int {
+	const opusInternalRate = 48000
+	if len(data) < 27 {
+		return 0
+	}
+	var lastGranule uint64
+	for i := 0; i <= len(data)-27; {
+		if data[i] == 'O' && data[i+1] == 'g' && data[i+2] == 'g' && data[i+3] == 'S' {
+			granule := binary.LittleEndian.Uint64(data[i+6 : i+14])
+			if granule > lastGranule {
+				lastGranule = granule
+			}
+			numSegments := int(data[i+26])
+			if i+27+numSegments > len(data) {
+				break
+			}
+			bodySize := 0
+			for j := 0; j < numSegments; j++ {
+				bodySize += int(data[i+27+j])
+			}
+			pageSize := 27 + numSegments + bodySize
+			if pageSize <= 0 || i+pageSize > len(data) {
+				break
+			}
+			i += pageSize
+		} else {
+			i++
+		}
+	}
+	if lastGranule == 0 {
+		return 0
+	}
+	return int(lastGranule / (opusInternalRate / 1000))
 }

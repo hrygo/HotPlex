@@ -1,3 +1,9 @@
+---
+title: WebChat 设置与使用
+weight: 18
+description: HotPlex 内置 Web Chat UI 的安装、配置与开发指南
+---
+
 # WebChat 设置与使用
 
 > HotPlex 内置 Web Chat UI 的安装、配置和开发指南
@@ -169,11 +175,16 @@ var StaticFS embed.FS
 
 构建流程：`pnpm build` → `webchat/out/` → `go:embed` → Gateway 二进制
 
-### API Key 认证
+### 认证
 
-WebChat 通过以下方式之一进行认证：
+WebChat 支持两种认证模式，根据部署方式自动选择：
+
+**同源部署（推荐）**：WebChat 由 Gateway 直接提供服务时，使用 **HMAC Cookie 认证**。Gateway 在首次访问时自动签发 HttpOnly、SameSite=Strict 的签名 cookie，后续 WebSocket 连接自动携带，无需配置 API Key。这是最安全的方式——API Key 不会出现在前端代码中。
+
+**跨域部署**：WebChat 部署在不同域名时，回退到以下方式：
 - HTTP Header `X-API-Key`
 - Query Parameter `api_key`（浏览器 WebSocket 的 CORS 兼容方案）
+- Init Envelope 延迟认证（`auth.token` 字段）
 
 开发模式下（未配置 API Key）自动使用 `anonymous` 用户身份。
 

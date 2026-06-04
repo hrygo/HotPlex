@@ -19,27 +19,29 @@ type Bridge struct {
 	log        *slog.Logger
 	platform   PlatformType
 	hub        HubInterface
-	sm         SessionManager
 	handler    HandlerInterface
 	starter    SessionStarter
 	workerType string
+	acpCommand string
 	workDir    string
+	sandbox    string
 	adapter    atomic.Value // stores PlatformAdapterInterface; set after adapter.Start() via SetAdapter
 }
 
 // NewBridge creates a new platform bridge.
 func NewBridge(log *slog.Logger, platform PlatformType, hub HubInterface,
-	sm SessionManager, handler HandlerInterface, starter SessionStarter, workerType, workDir string,
+	handler HandlerInterface, starter SessionStarter, workerType, acpCommand, workDir, sandbox string,
 ) *Bridge {
 	return &Bridge{
 		log:        log.With("component", "messaging_bridge", "platform", string(platform)),
 		platform:   platform,
 		hub:        hub,
-		sm:         sm,
 		handler:    handler,
 		starter:    starter,
 		workerType: workerType,
+		acpCommand: acpCommand,
 		workDir:    workDir,
+		sandbox:    sandbox,
 	}
 }
 
@@ -76,22 +78,31 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 		return fmt.Errorf("messaging bridge: OwnerID not set for platform message")
 	}
 
+	// Register platform conn BEFORE starting the session so that early events
+	// (e.g. state transitions) are routed to the platform instead of being dropped.
+	if pc != nil && b.hub != nil {
+		b.hub.JoinPlatformSession(env.SessionID, pc)
+	}
+
 	// Auto-create session if starter is available.
 	if b.starter != nil {
 		// Extract platform key from envelope metadata for persistence.
 		platform, platformKey := b.extractPlatformKey(env)
+		if b.acpCommand != "" {
+			if platformKey == nil {
+				platformKey = make(map[string]string, 1)
+			}
+			platformKey[worker.ACPCommandPlatformKey] = b.acpCommand
+		}
 		var botID string
+		var injectExclude []string
 		if a := b.getAdapter(); a != nil {
 			botID = a.GetBotID()
+			injectExclude = a.GetInjectExclude()
 		}
-		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, platform, platformKey, botID); err != nil {
+		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, b.sandbox, platform, platformKey, botID, injectExclude...); err != nil {
 			return fmt.Errorf("messaging bridge: session start failed: %w", err)
 		}
-	}
-
-	// Register platform conn so worker output is routed back to the platform.
-	if pc != nil && b.hub != nil {
-		b.hub.JoinPlatformSession(env.SessionID, pc)
 	}
 
 	// Assign monotonically increasing seq (messaging path lacks conn.go's NextSeq call).
@@ -148,39 +159,6 @@ func (b *Bridge) MakeEnvelope(userID, text string, pctx session.PlatformContext)
 		md["user_id"] = pctx.UserID
 	}
 	return b.makeEnvelope(sessionID, userID, text, md)
-}
-
-// MakeSlackEnvelope converts a Slack message to an AEP input envelope.
-// workDir overrides the bridge's default workDir for session key derivation; empty falls back to b.workDir.
-func (b *Bridge) MakeSlackEnvelope(teamID, channelID, threadTS, userID, text, workDir, botID string) *events.Envelope {
-	if workDir == "" {
-		workDir = b.workDir
-	}
-	return b.MakeEnvelope(userID, text, session.PlatformContext{
-		Platform:  string(PlatformSlack),
-		BotID:     botID,
-		TeamID:    teamID,
-		ChannelID: channelID,
-		ThreadTS:  threadTS,
-		UserID:    userID,
-		WorkDir:   workDir,
-	})
-}
-
-// MakeFeishuEnvelope converts a Feishu message to an AEP input envelope.
-// workDir overrides the bridge's default workDir for session key derivation; empty falls back to b.workDir.
-func (b *Bridge) MakeFeishuEnvelope(chatID, threadTS, userID, text, workDir, botID string) *events.Envelope {
-	if workDir == "" {
-		workDir = b.workDir
-	}
-	return b.MakeEnvelope(userID, text, session.PlatformContext{
-		Platform: string(PlatformFeishu),
-		BotID:    botID,
-		ChatID:   chatID,
-		ThreadTS: threadTS,
-		UserID:   userID,
-		WorkDir:  workDir,
-	})
 }
 
 // extractPlatformKey extracts the consistency-mapping inputs from the envelope metadata.

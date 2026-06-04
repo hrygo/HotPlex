@@ -74,6 +74,9 @@ func (p *ConnPool[C]) ClearAndClose() []C {
 }
 
 func (p *ConnPool[C]) Delete(key string) {
+	if p.closed.Load() {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.conns, key)

@@ -69,7 +69,7 @@ func (f *FallbackSynthesizer) Close(ctx context.Context) error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("fallback close errors: %v", errs)
+		return fmt.Errorf("fallback close: %w", errors.Join(errs...))
 	}
 	return nil
 }

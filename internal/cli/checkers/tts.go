@@ -107,7 +107,7 @@ func ttsRequirements() ttsDeps {
 	if configPath == "" {
 		return ttsDeps{}
 	}
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return ttsDeps{}
 	}

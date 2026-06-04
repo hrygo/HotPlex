@@ -312,7 +312,7 @@ func TestLLMRetryController_UpdateConfig_InvalidPattern(t *testing.T) {
 
 func TestLLMRetryController_ConcurrentShouldRetryAndUpdateConfig(t *testing.T) {
 	ctrl := NewLLMRetryController(config.AutoRetryConfig{Enabled: true, MaxRetries: 10}, slog.Default())
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	var wg sync.WaitGroup

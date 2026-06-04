@@ -58,7 +58,7 @@ public class Main {
         HotPlexClient client = HotPlexClient.builder()
             .url("ws://localhost:8888")
             .workerType(WorkerType.CLAUDE_CODE)
-            .authToken("your-api-key")
+            .apiKey("your-api-key")
             .build();
 
         // Register event listeners
@@ -107,7 +107,8 @@ public class Main {
 HotPlexClient client = HotPlexClient.builder()
     .url("ws://localhost:8888")                    // Required
     .workerType(WorkerType.CLAUDE_CODE)            // Required
-    .authToken("your-api-key")                     // Optional
+    .apiKey("your-api-key")                        // Optional
+    .botId("bot-123")                              // Optional (multi-bot isolation)
     .sessionId("existing-session-id")              // Optional (resume session)
     .reconnect(true)                               // Optional (default: true)
     .reconnectMaxAttempts(5)                       // Optional (default: 5)
@@ -313,7 +314,7 @@ Map<String, Object> details = data.getDetails();
 HotPlexClient client1 = HotPlexClient.builder()
     .url("ws://localhost:8888")
     .workerType(WorkerType.CLAUDE_CODE)
-    .authToken("your-key")
+    .apiKey("your-api-key")
     .build();
 
 client1.connect();
@@ -326,7 +327,7 @@ client1.sendInput(InputData.builder()
 HotPlexClient client2 = HotPlexClient.builder()
     .url("ws://localhost:8888")
     .workerType(WorkerType.CLAUDE_CODE)
-    .authToken("your-key")
+    .apiKey("your-api-key")
     .sessionId(sessionId) // Resume
     .build();
 
@@ -445,7 +446,7 @@ try {
 |------|---------|--------|
 | `SESSION_NOT_FOUND` | Session doesn't exist | Create new session |
 | `SESSION_TERMINATED` | Session terminated | Create new session |
-| `UNAUTHORIZED` | Invalid auth token | Check token |
+| `UNAUTHORIZED` | Invalid API key | Check API key |
 | `INVALID_INPUT` | Malformed input | Check message format |
 
 ---
@@ -480,7 +481,7 @@ class ClientTest {
         HotPlexClient client = HotPlexClient.builder()
             .url("ws://localhost:8888")
             .workerType(WorkerType.CLAUDE_CODE)
-            .authToken("test-key")
+            .apiKey("test-key")
             .build();
 
         assertDoesNotThrow(() -> client.connect());

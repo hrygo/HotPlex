@@ -6,12 +6,12 @@ Claude Code binary adapter using stdio transport (`claude --print --session-id`)
 ## STRUCTURE
 ```
 claudecode/
-  worker.go       # Worker struct: Start/Resume/Input/Terminate, CLI arg construction, session file management (855 lines)
-  parser.go       # Parser: Claude JSON streaming → WorkerEvent (11 event types) (385 lines)
-  mapper.go       # Mapper: WorkerEvent → AEP Envelope conversion (288 lines)
-  control.go      # Control request routing: context_usage, mcp_status, set_model, permissions (218 lines)
-  types.go        # WorkerEvent, StreamPayload, ToolCallPayload, ResultPayload, ControlSubtype constants (77 lines)
-  test_helpers.go # Test utilities (113 lines)
+  worker.go       # Worker struct: Start/Resume/Input/Terminate, CLI arg construction, session file management
+  parser.go       # Parser: Claude JSON streaming → WorkerEvent (11 event types)
+  mapper.go       # Mapper: WorkerEvent → AEP Envelope conversion
+  control.go      # Control request routing: context_usage, mcp_status, set_model, permissions
+  types.go        # WorkerEvent, StreamPayload, ToolCallPayload, ResultPayload, ControlSubtype constants
+  test_helpers.go # Test utilities
 ```
 
 ## WHERE TO LOOK

@@ -43,7 +43,7 @@ func setOrAppend(env []string, entry string) []string {
 //
 //	Only vars prefixed with HOTPLEX_WORKER_ are stripped and passed to workers.
 //	Example: HOTPLEX_WORKER_GITHUB_TOKEN=xxx → GITHUB_TOKEN=xxx in worker env.
-//	All other HOTPLEX_* vars (JWT_SECRET, ADMIN_TOKEN, etc.) are gateway-internal
+//	All other HOTPLEX_* vars (ADMIN_TOKEN, etc.) are gateway-internal
 //	and blocked from reaching workers.
 //	When a stripped var exists, the system-level version is dynamically blocked
 //	to prevent the gateway's own secrets from leaking to workers.

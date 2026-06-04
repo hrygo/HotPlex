@@ -71,6 +71,54 @@ func TestParser_ParseLine_Assistant(t *testing.T) {
 	require.Equal(t, "read_file", toolPayload.Name)
 }
 
+func TestParser_ParseLine_Assistant_ThinkingBlock(t *testing.T) {
+	log := newTestLogger()
+	parser := NewParser(log)
+
+	line := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Let me reason about this..."},{"type":"text","text":"The answer is 42."}]}}`
+
+	events, err := parser.ParseLine(line)
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+
+	// First event: thinking → EventStream with StreamThinking type
+	require.Equal(t, EventStream, events[0].Type)
+	thinkingPayload, ok := events[0].Payload.(*StreamPayload)
+	require.True(t, ok)
+	require.Equal(t, string(StreamThinking), thinkingPayload.Type)
+	require.Equal(t, "Let me reason about this...", thinkingPayload.Content)
+
+	// Second event: text
+	require.Equal(t, EventAssistant, events[1].Type)
+	textPayload, ok := events[1].Payload.(*StreamPayload)
+	require.True(t, ok)
+	require.Equal(t, "text", textPayload.Type)
+	require.Equal(t, "The answer is 42.", textPayload.Content)
+}
+
+func TestParser_ParseLine_Assistant_ThinkingBlock_Dedup(t *testing.T) {
+	log := newTestLogger()
+	parser := NewParser(log)
+
+	// Simulate old CLI: stream_event thinking first, then assistant with thinking block
+	streamLine := `{"type":"stream_event","event":{"type":"thinking","message":{"id":"msg_1","content":"partial thinking"}}}`
+	events, err := parser.ParseLine(streamLine)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, EventStream, events[0].Type)
+
+	// Now parse assistant with thinking block — should be skipped (dedup)
+	assistantLine := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"full thinking content"},{"type":"text","text":"Answer"}]}}`
+	events, err = parser.ParseLine(assistantLine)
+	require.NoError(t, err)
+	// Only text event, thinking is deduped
+	require.Len(t, events, 1)
+	require.Equal(t, EventAssistant, events[0].Type)
+	textPayload, ok := events[0].Payload.(*StreamPayload)
+	require.True(t, ok)
+	require.Equal(t, "text", textPayload.Type)
+}
+
 func TestParser_ParseLine_ToolProgress(t *testing.T) {
 	log := newTestLogger()
 	parser := NewParser(log)

@@ -26,7 +26,6 @@ type Handler struct {
 	hub           *Hub
 	sm            SessionManager
 	auth          *security.Authenticator
-	jwtValidator  *security.JWTValidator
 	bridge        *Bridge
 	skillsLocator SkillsLocator
 }
@@ -44,7 +43,6 @@ func NewHandler(deps HandlerDeps) *Handler {
 		hub:           deps.Hub,
 		sm:            deps.SM,
 		auth:          deps.Auth,
-		jwtValidator:  deps.JWTValidator,
 		bridge:        deps.Bridge,
 		skillsLocator: deps.SkillsLocator,
 	}
@@ -54,7 +52,11 @@ func NewHandler(deps HandlerDeps) *Handler {
 func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			h.log.Error("gateway: panic in handler", "panic", r, "stack", string(debug.Stack()))
+			sid := ""
+			if env != nil {
+				sid = env.SessionID
+			}
+			h.log.Error("gateway: panic in handler", "session_id", sid, "panic", r, "stack", string(debug.Stack()))
 			err = fmt.Errorf("handler panic: %v", r)
 		}
 	}()
@@ -79,10 +81,7 @@ func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) 
 }
 
 func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
-	// Cancel pending auto-retry if user sends new input during backoff.
-	if h.bridge != nil {
-		h.bridge.CancelRetry(env.SessionID)
-	}
+	h.cancelRetryIfNeeded(env.SessionID)
 
 	data, ok := env.Event.Data.(map[string]any)
 	if !ok {
@@ -90,59 +89,81 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "malformed input data")
 	}
 
-	content, _ := data["content"].(string)
-
-	// Interaction responses: deliver directly to worker, skipping command detection,
-	// state transitions, and conversation store. Only route when metadata contains
-	// a recognized interaction response key (not platform context metadata).
-	if md, ok := data["metadata"].(map[string]any); ok {
-		if md["permission_response"] != nil ||
-			md["question_response"] != nil ||
-			md["elicitation_response"] != nil {
-			respType := "unknown"
-			switch {
-			case md["permission_response"] != nil:
-				respType = "permission"
-			case md["question_response"] != nil:
-				respType = "question"
-			case md["elicitation_response"] != nil:
-				respType = "elicitation"
-			}
-			w := h.sm.GetWorker(env.SessionID)
-			if w != nil {
-				h.log.Info("gateway: routing interaction response",
-					"type", respType,
-					"session_id", env.SessionID)
-				if err := w.Input(ctx, content, md); err != nil {
-					h.log.Warn("gateway: worker interaction response failed",
-						"err", err,
-						"type", respType,
-						"session_id", env.SessionID)
-				} else if h.bridge != nil {
-					h.bridge.CaptureInbound(env.SessionID, env.Seq, events.Input, env.Event.Data)
-				}
-			} else {
-				h.log.Warn("gateway: interaction response dropped — no worker",
-					"type", respType,
-					"session_id", env.SessionID)
-			}
-			return nil
-		}
+	if h.tryInteractionResponse(ctx, env, data) {
+		return nil
 	}
 
-	// --- Command detection (parity with Slack/Feishu adapters) ---
+	content, _ := data["content"].(string)
+	if handled, err := h.tryCommandDispatch(ctx, env, content); handled {
+		return err
+	}
 
-	// Help command: reply directly without involving the worker.
+	return h.deliverToWorker(ctx, env, content)
+}
+
+func (h *Handler) cancelRetryIfNeeded(sessionID string) {
+	if h.bridge != nil {
+		h.bridge.CancelRetry(sessionID)
+	}
+}
+
+// tryInteractionResponse routes permission/question/elicitation responses directly
+// to the worker, bypassing command detection and state transitions.
+func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelope, data map[string]any) bool {
+	md, ok := data["metadata"].(map[string]any)
+	if !ok {
+		return false
+	}
+	if md["permission_response"] == nil &&
+		md["question_response"] == nil &&
+		md["elicitation_response"] == nil {
+		return false
+	}
+
+	respType := "unknown"
+	switch {
+	case md["permission_response"] != nil:
+		respType = "permission"
+	case md["question_response"] != nil:
+		respType = "question"
+	case md["elicitation_response"] != nil:
+		respType = "elicitation"
+	}
+
+	content, _ := data["content"].(string)
+	w := h.sm.GetWorker(env.SessionID)
+	if w != nil {
+		h.log.Info("gateway: routing interaction response",
+			"type", respType,
+			"session_id", env.SessionID)
+		if err := w.Input(ctx, content, md); err != nil {
+			h.log.Warn("gateway: worker interaction response failed",
+				"err", err,
+				"type", respType,
+				"session_id", env.SessionID)
+		} else if h.bridge != nil {
+			h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, events.Input, env.Event.Data)
+		}
+	} else {
+		h.log.Warn("gateway: interaction response dropped — no worker",
+			"type", respType,
+			"session_id", env.SessionID)
+	}
+	return true
+}
+
+// tryCommandDispatch detects help/control/worker commands and dispatches them.
+// Returns (true, err) if a command was handled, (false, nil) to fall through.
+func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, content string) (handled bool, err error) {
 	if messaging.IsHelpCommand(content) {
 		helpEnv := events.NewEnvelope(
 			aep.NewID(), env.SessionID,
 			h.hub.NextSeq(env.SessionID),
 			events.Message, events.MessageData{Content: messaging.HelpText()},
 		)
-		return h.hub.SendToSession(ctx, helpEnv)
+		return true, h.hub.SendToSession(ctx, helpEnv)
 	}
 
-	// Control command: convert to AEP control event and dispatch.
 	if result := messaging.ParseControlCommand(content); result != nil {
 		data := events.ControlData{Action: result.Action}
 		if result.Arg != "" {
@@ -159,10 +180,9 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 			},
 			OwnerID: env.OwnerID,
 		}
-		return h.handleControl(ctx, ctrlEnv)
+		return true, h.handleControl(ctx, ctrlEnv)
 	}
 
-	// Worker command: convert to AEP worker_cmd event and dispatch.
 	if cmdResult := messaging.ParseWorkerCommand(content); cmdResult != nil {
 		wcmdEnv := &events.Envelope{
 			Version:   events.Version,
@@ -179,12 +199,15 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 			},
 			OwnerID: env.OwnerID,
 		}
-		return h.handleWorkerCommand(ctx, wcmdEnv)
+		return true, h.handleWorkerCommand(ctx, wcmdEnv)
 	}
 
-	// --- End command detection ---
+	return false, nil
+}
 
-	// Check SESSION_BUSY: session must be active.
+// deliverToWorker validates session state, handles IDLE→RUNNING transition,
+// and delivers user input to the worker process.
+func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, content string) error {
 	si, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
 		h.log.Warn("gateway: handleInput session not found", "session_id", env.SessionID, "err", err)
@@ -196,8 +219,6 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active: %s", si.State)
 	}
 
-	// Atomic transition + input. Only needed for IDLE → RUNNING (not CREATED → RUNNING,
-	// which is handled by Bridge.StartSession in performInit). This covers the resume case.
 	if si.State == events.StateIdle {
 		if err := h.sm.TransitionWithInput(ctx, env.SessionID, events.StateRunning, content, nil); err != nil {
 			h.log.Warn("gateway: handleInput transition failed", "session_id", env.SessionID, "err", err)
@@ -205,31 +226,33 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		}
 	}
 
-	// Deliver to worker.
 	w := h.sm.GetWorker(env.SessionID)
-	if w != nil {
-		if h.log.Enabled(ctx, slog.LevelDebug) {
-			runes := []rune(content)
-			preview := string(runes)
-			if len(runes) > 32 {
-				preview = string(runes[:32]) + "..."
-			}
-			h.log.Debug("gateway: delivering input to worker", "session_id", env.SessionID, "content_len", len(content), "preview", preview)
-		}
-		if err := w.Input(ctx, content, nil); err != nil {
-			h.log.Warn("gateway: worker input", "err", err, "session_id", env.SessionID)
-			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker input failed: %v", err)
-		}
-		h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
-		// Capture inbound event for replay (best-effort).
-		if h.bridge != nil {
-			h.bridge.CaptureInbound(env.SessionID, env.Seq, events.Input, env.Event.Data)
-		}
-	} else {
+	if w == nil {
 		h.log.Warn("gateway: handleInput no worker found", "session_id", env.SessionID)
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "no worker attached to session")
 	}
 
+	if h.log.Enabled(ctx, slog.LevelDebug) {
+		runes := []rune(content)
+		preview := string(runes)
+		if len(runes) > 32 {
+			preview = string(runes[:32]) + "..."
+		}
+		h.log.Debug("gateway: delivering input to worker", "session_id", env.SessionID, "content_len", len(content), "preview", preview)
+	}
+	if err := w.Input(ctx, content, nil); err != nil {
+		var we *worker.WorkerError
+		if errors.As(err, &we) && we.Kind == worker.ErrKindTimeout {
+			h.log.Info("gateway: worker input delivery timed out (worker still processing)", "session_id", env.SessionID)
+			return nil
+		}
+		h.log.Warn("gateway: worker input", "err", err, "session_id", env.SessionID)
+		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker input failed: %v", err)
+	}
+	h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
+	if h.bridge != nil {
+		h.bridge.CaptureInbound(env.SessionID, env.Seq, events.Input, env.Event.Data, si.Platform, si.OwnerID)
+	}
 	return nil
 }
 
@@ -316,7 +339,7 @@ type SessionReader interface {
 
 // SessionLifecycle provides session creation and deletion.
 type SessionLifecycle interface {
-	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
 	Delete(ctx context.Context, id string) error
 	DeletePhysical(ctx context.Context, id string) error
 }
@@ -338,9 +361,16 @@ type SessionWorkerManager interface {
 
 // SessionAdmin provides listing, ownership validation, and metadata mutations.
 type SessionAdmin interface {
+	SessionExpirer
 	List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error)
 	ValidateOwnership(ctx context.Context, sessionID, userID, adminUserID string) error
 	UpdateWorkDir(ctx context.Context, id, workDir string) error
+}
+
+// SessionExpirer resets session expiry timers. Extracted as a single-method
+// interface so bridgeSM can compose it alongside reader/lifecycle/transition
+// sub-interfaces without pulling in the full SessionAdmin.
+type SessionExpirer interface {
 	ResetExpiry(ctx context.Context, id string) error
 }
 

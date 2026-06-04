@@ -1,14 +1,32 @@
 /**
  * Gateway API client for session management.
  *
- * These endpoints are on the same port as WebSocket (gateway :8888),
- * using X-API-Key header for authentication.
+ * These endpoints are on the same port as WebSocket (gateway :8888).
+ * Authentication strategy:
+ *   - Same-origin (embedded webchat): credentials: 'same-origin' (cookie auth)
+ *   - Cross-origin (external deployment): X-API-Key header
  */
 
-import { httpBase, apiKey } from "@/lib/config";
+import { httpBase, apiKey, isSameOrigin } from "@/lib/config";
 
 const BASE = httpBase();
-const AUTH_HEADER = { 'X-API-Key': apiKey };
+
+// Build auth options: same-origin uses cookie auth (credentials: same-origin),
+// cross-origin deployments continue using X-API-Key header.
+function authHeaders(): Record<string, string> {
+  if (isSameOrigin()) return {};
+  return apiKey ? { 'X-API-Key': apiKey } : {};
+}
+
+function authOpts(): RequestInit {
+  if (isSameOrigin()) return { credentials: 'same-origin' as RequestCredentials };
+  return {};
+}
+
+// Merge auth headers with custom headers.
+function withAuth(headers?: Record<string, string>): Record<string, string> {
+  return { ...authHeaders(), ...headers };
+}
 
 export interface SessionInfo {
   id: string;
@@ -35,8 +53,10 @@ export interface ListSessionsResponse {
 }
 
 export interface ConversationRecord {
-  id: string;
+  id: number;
   session_id: string;
+  generation: number;
+  turn_num: number;
   seq: number;
   role: string;
   content: string;
@@ -48,11 +68,13 @@ export interface ConversationRecord {
   tools: Record<string, number> | null;
   tool_call_count: number;
   tokens_in: number;
+  tokens_input: number;
+  tokens_cache_write: number;
+  tokens_cache_read: number;
   tokens_out: number;
   duration_ms: number;
   cost_usd: number;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
+  created_at: number;
 }
 
 export interface GetHistoryResponse {
@@ -60,28 +82,49 @@ export interface GetHistoryResponse {
   has_more: boolean;
 }
 
+export class AuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthError';
+  }
+}
+
+function throwIfAuthError(prefix: string, status: number): never | void {
+  if (status === 401) {
+    throw new AuthError(
+      `${prefix} failed: 401 — Authentication failed. Check your API key configuration or consult the documentation.`
+    );
+  }
+}
+
 export async function listSessions(limit = 20, offset = 0, signal?: AbortSignal): Promise<ListSessionsResponse> {
   const res = await fetch(
     `${BASE}/api/sessions?limit=${limit}&offset=${offset}`,
-    { headers: { ...AUTH_HEADER, 'Content-Type': 'application/json' }, signal }
+    { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
+  throwIfAuthError('listSessions', res.status);
   if (!res.ok) throw new Error(`listSessions failed: ${res.status}`);
   return res.json();
 }
 
 export interface CreateSessionOptions {
+  clientSessionId: string;
   workerType?: string;
-  title: string;
+  title?: string;
   workDir?: string;
 }
 
 export async function createSession(opts: CreateSessionOptions, signal?: AbortSignal): Promise<{ session_id: string }> {
   const workerType = opts.workerType ?? 'claude_code';
-  let url = `${BASE}/api/sessions?worker_type=${encodeURIComponent(workerType)}&title=${encodeURIComponent(opts.title)}`;
+  let url = `${BASE}/api/sessions?client_session_id=${encodeURIComponent(opts.clientSessionId)}&worker_type=${encodeURIComponent(workerType)}`;
+  if (opts.title) {
+    url += `&title=${encodeURIComponent(opts.title)}`;
+  }
   if (opts.workDir) {
     url += `&work_dir=${encodeURIComponent(opts.workDir)}`;
   }
-  const res = await fetch(url, { method: 'POST', headers: AUTH_HEADER, signal });
+  const res = await fetch(url, { method: 'POST', headers: authHeaders(), ...authOpts(), signal });
+  throwIfAuthError('createSession', res.status);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(body || `createSession failed: ${res.status}`);
@@ -92,24 +135,26 @@ export async function createSession(opts: CreateSessionOptions, signal?: AbortSi
 export async function deleteSession(id: string, signal?: AbortSignal): Promise<void> {
   const res = await fetch(
     `${BASE}/api/sessions/${id}`,
-    { method: 'DELETE', headers: AUTH_HEADER, signal }
+    { method: 'DELETE', headers: authHeaders(), ...authOpts(), signal }
   );
+  throwIfAuthError('deleteSession', res.status);
   if (!res.ok) throw new Error(`deleteSession failed: ${res.status}`);
 }
 
 export async function getSessionHistory(
   sessionId: string,
-  options?: { beforeSeq?: number; limit?: number; signal?: AbortSignal }
+  options?: { beforeId?: number; limit?: number; signal?: AbortSignal }
 ): Promise<GetHistoryResponse> {
   if (!sessionId?.trim()) {
     throw new Error('getSessionHistory: empty session ID');
   }
   const limit = options?.limit ?? 50;
   let url = `${BASE}/api/sessions/${sessionId}/history?limit=${limit}`;
-  if (options?.beforeSeq) {
-    url += `&before_seq=${options.beforeSeq}`;
+  if (options?.beforeId) {
+    url += `&before_id=${options.beforeId}`;
   }
-  const res = await fetch(url, { headers: { ...AUTH_HEADER, 'Content-Type': 'application/json' }, signal: options?.signal });
+  const res = await fetch(url, { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal: options?.signal });
+  throwIfAuthError('getSessionHistory', res.status);
   if (!res.ok) throw new Error(`getSessionHistory failed: ${res.status}`);
   return res.json();
 }
@@ -133,12 +178,15 @@ export function formatRelativeTime(dateStr: string): string {
 }
 
 export function stateLabel(state: SessionState): string {
+  // NOTE: Labels are intentionally English. Do not translate to Chinese —
+  // the rest of the UI (bot feedback, commands, header) is English too.
+  // If i18n is needed, use a proper i18n framework rather than hardcoded translations.
   const map: Record<SessionState, string> = {
-    created: '待启动',
-    running: '进行中',
-    idle: '空闲',
-    terminated: '已结束',
-    deleted: '已删除',
+    created: 'Created',
+    running: 'Running',
+    idle: 'Idle',
+    terminated: 'Terminated',
+    deleted: 'Deleted',
   };
   return map[state] ?? state;
 }

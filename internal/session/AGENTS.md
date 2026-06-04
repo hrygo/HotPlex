@@ -6,12 +6,12 @@ Session lifecycle manager with SQLite persistence, deterministic session IDs (UU
 ## STRUCTURE
 | File | Purpose |
 |------|---------|
-| `manager.go` | Manager, managedSession, SessionInfo, state transitions (825 lines) |
+| `manager.go` | Manager, managedSession, SessionInfo, state transitions |
 | `store.go` | Store interface, SQLiteStore (371 lines) |
 | `message_store.go` | MessageStore interface, SQLiteMessageStore (301 lines) |
 | `key.go` | DeriveSessionKey (UUIDv5), PlatformContext, DerivePlatformSessionKey (100 lines) |
 | `pool.go` | PoolManager: global + per-user quota + per-user memory tracking (154 lines) |
-| `pgstore.go` | Postgres stub (ErrNotImplemented) |
+| `pg_store.go` | Postgres full implementation using Queryer interface |
 | `queries.go` | embed.FS loader + stripComments for sql/ files |
 | `stores.go` | Multi-store registry (SQLite/Postgres) |
 
@@ -27,7 +27,7 @@ Session lifecycle manager with SQLite persistence, deterministic session IDs (UU
 | SQLite persistence | `store.go:31` SQLiteStore | WAL mode, busy_timeout 5000ms |
 | Message event log | `message_store.go:40` MessageStore | Single-writer goroutine, batch flush 50 items / 100ms |
 | Pool quota + memory | `pool.go` PoolManager | MaxPoolSize global, MaxIdlePerUser per-user, 512MB/worker memory estimate |
-| Postgres stub | `pgstore.go` | ErrNotImplemented — not production-ready |
+| Postgres store | `pg_store.go` | Full PG implementation using Queryer interface |
 | GC goroutine lifecycle | `manager.go:34` gcStop/gcDone channels | Ticker-based expired scan |
 
 ## KEY PATTERNS

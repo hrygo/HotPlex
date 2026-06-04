@@ -2,7 +2,6 @@ package slack
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -16,6 +15,8 @@ type envelopeSendFunc func(ctx context.Context, env *events.Envelope) error
 // notifyStatusFromEvent maps AEP events to processing status indicators.
 func (c *SlackConn) notifyStatusFromEvent(ctx context.Context, env *events.Envelope) {
 	switch env.Event.Type {
+	case events.Reasoning:
+		_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, StatusThinking, "Thinking...")
 	case events.ToolCall:
 		name, input := extractCallNameInput(env)
 		text := toolfmt.FormatCall(name, input)
@@ -34,7 +35,7 @@ func (c *SlackConn) notifyStatusFromEvent(ctx context.Context, env *events.Envel
 		if text == "" {
 			text = "Tool completed"
 		}
-		_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, StatusToolResult, truncateWithSuffix(shortenPaths(text), statusTextLimit))
+		_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, StatusToolResult, truncateWithSuffix(c.adapter.statusMgr.shortenPaths(text), statusTextLimit))
 	default:
 		if env.Event.Type == events.MessageDelta {
 			_ = c.adapter.statusMgr.Notify(ctx, c.channelID, c.threadTS, StatusAnswering, "Composing response...")
@@ -98,7 +99,7 @@ func (c *SlackConn) handleSkillsList(ctx context.Context, env *events.Envelope) 
 	c.notifyStatus(ctx, "Loading skills...")
 	err := c.sendSkillsList(ctx, env)
 	c.clearStatus(ctx)
-	if err == nil || !strings.Contains(err.Error(), "invalid_blocks") {
+	if err == nil || !isInvalidBlocksError(err) {
 		return err
 	}
 	c.adapter.Log.Warn("slack: skills blocks rejected, falling back to plain text", "err", err)

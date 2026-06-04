@@ -14,6 +14,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | --------------------------------------- | ----------------------------------------------------------------- |
 | 我想快速体验                            | [5 分钟快速开始](getting-started.md)                              |
 | 我是普通用户，想用飞书/Slack 和 AI 聊天 | [与 AI 对话](guides/user/chat-with-ai.md)                         |
+| 我是开发者，想通过 WebSocket 集成      | [WebSocket 对接指南](guides/developer/websocket-integration.md)    |
 | 我是开发者，想远程控制 Coding Agent     | [远程 Coding Agent 指南](guides/developer/remote-coding-agent.md) |
 | 我是企业管理员，需要部署到生产环境      | [企业部署指南](guides/enterprise/deployment.md)                   |
 | 我想为 HotPlex 贡献代码                 | [开发环境搭建](guides/contributor/development-setup.md)           |
@@ -29,6 +30,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [Slack 集成](tutorials/slack-integration.md)  | 开发者      | 15 min |
 | [飞书集成](tutorials/feishu-integration.md)   | 开发者      | 15 min |
 | [AI 人格定制](tutorials/agent-personality.md) | 开发者      | 10 min |
+| [Bot 话术定制](tutorials/phrases-customization.md) | 开发者      | 10 min |
 | [定时任务](tutorials/cron-scheduled-tasks.md) | 开发者/用户 | 10 min |
 
 ## 指南
@@ -48,6 +50,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 
 | 指南                                                         | 说明                                  |
 | ------------------------------------------------------------ | ------------------------------------- |
+| [WebSocket 对接](guides/developer/websocket-integration.md)     | AEP 协议、认证、Session 管理、重连机制 |
 | [远程 Coding Agent](guides/developer/remote-coding-agent.md) | 远程控制 AI Agent 编程的最佳实践      |
 | [Session 管理](guides/developer/session-management.md)       | 5 状态机、/gc vs /reset、Resume 机制  |
 | [Context Window 管理](guides/developer/context-window.md)    | /compact、/clear、B/C 通道 token 消耗 |
@@ -64,7 +67,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [企业部署](guides/enterprise/deployment.md)           | 生产环境部署、安全加固、资源管理      |
 | [安全加固](guides/enterprise/security-hardening.md)   | 7 层安全体系详解                      |
 | [可观测性](guides/enterprise/observability.md)        | 日志、Prometheus、OpenTelemetry、告警 |
-| [多租户隔离](guides/enterprise/multi-tenant.md)       | Bot 级隔离、JWT 路由、会话配额        |
+| [多租户隔离](guides/enterprise/multi-tenant.md)       | Bot 级隔离、Bot ID 路由、会话配额        |
 | [合规与审计](guides/enterprise/compliance.md)         | 配置审计、凭据管理、回滚能力          |
 | [灾备恢复](guides/enterprise/disaster-recovery.md)    | RTO/RPO、自动重启、备份策略           |
 | [配置管理](guides/enterprise/config-management.md)    | 5 层优先级、热重载、多环境策略        |
@@ -94,7 +97,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [Admin API 参考](reference/admin-api.md)           | 管理端点、Scope 权限、请求/响应格式 |
 | [AEP 协议参考](reference/aep-protocol.md)          | Agent Exchange Protocol v1 完整规范 |
 | [事件参考](reference/events.md)                    | 全部 AEP 事件类型和数据结构         |
-| [安全策略参考](reference/security-policies.md)     | JWT、SSRF、命令白名单、工具控制     |
+| [安全策略参考](reference/security-policies.md)     | API Key、Bot ID、SSRF、命令白名单、工具控制     |
 | [Metrics 参考](reference/metrics.md)               | Prometheus 指标、scrape 配置        |
 | [术语表](reference/glossary.md)                    | HotPlex 核心术语解释                |
 | [Go SDK 参考](reference/sdk-go.md)                 | Go 客户端 SDK API 文档              |
@@ -113,4 +116,5 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [Agent 配置系统](explanation/agent-config-system.md)     | B/C 双通道、命中即终止、热更新      |
 | [Brain LLM 编排](explanation/brain-llm-orchestration.md) | 意图路由、安全审计、上下文压缩      |
 | [Cron 调度器设计](explanation/cron-design.md)            | AI-native 调度、并发槽、投递机制    |
+| [Phrases 系统设计](explanation/phrases-design.md)        | 加权随机话术池、cascade-append 策略 |
 | [安全模型](explanation/security-model.md)                | 7 层安全体系设计决策和权衡          |

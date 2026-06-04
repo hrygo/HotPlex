@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -114,6 +116,11 @@ func main() {
 	}
 	if err := os.MkdirAll(docsDest, 0o755); err != nil {
 		log.Fatalf("Error creating destination: %v", err)
+	}
+
+	// Fetch Mermaid.js for offline rendering support.
+	if err := fetchMermaidJS(); err != nil {
+		log.Printf("Warning: failed to download mermaid.js for offline use: %v", err)
 	}
 
 	// Phase 1: Discovery via crawling starting from index.md
@@ -246,7 +253,7 @@ func isLocalAsset(dest string) bool {
 		return false
 	}
 	ext := strings.ToLower(filepath.Ext(dest))
-	return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".pdf"
+	return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".pdf" || ext == ".html"
 }
 
 func cleanLink(dest string) string {
@@ -569,6 +576,36 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0o644)
+}
+
+// fetchMermaidJS downloads mermaid.min.js to the output directory so
+// diagrams render in offline environments without CDN access.
+func fetchMermaidJS() error {
+	assetDir := filepath.Join(docsDest, "assets")
+	if err := os.MkdirAll(assetDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir assets: %w", err)
+	}
+
+	resp, err := http.Get("https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js")
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download status %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(filepath.Join(assetDir, "mermaid.min.js"))
+	if err != nil {
+		return fmt.Errorf("create file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+	return nil
 }
 
 func toTitle(s string) string {
@@ -1140,7 +1177,7 @@ const layout = `
             </footer>
         </article>
     </main>
-    <script defer src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script defer src="{{.RelRoot}}assets/mermaid.min.js"></script>
     <script>
         window.addEventListener('load', function() {
             if (typeof mermaid !== 'undefined') {

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -62,47 +61,21 @@ func expandEnvEntry(entry string) (string, bool) {
 	return ExpandEnv(entry), true
 }
 
-// SecretsProvider abstracts how secrets are retrieved.
-type SecretsProvider interface {
-	// Get returns the secret value for the given key, or "" if not found.
-	Get(key string) string
-}
-
-// EnvSecretsProvider retrieves secrets from environment variables.
-type EnvSecretsProvider struct{}
-
-func NewEnvSecretsProvider() *EnvSecretsProvider { return &EnvSecretsProvider{} }
-
-func (p *EnvSecretsProvider) Get(key string) string { return os.Getenv(key) }
-
-// ChainedSecretsProvider tries providers in order until a value is found.
-type ChainedSecretsProvider struct {
-	providers []SecretsProvider
-}
-
-func NewChainedSecretsProvider(providers ...SecretsProvider) *ChainedSecretsProvider {
-	return &ChainedSecretsProvider{providers: providers}
-}
-
-func (p *ChainedSecretsProvider) Get(key string) string {
-	for _, pr := range p.providers {
-		if val := pr.Get(key); val != "" {
-			return val
-		}
-	}
-	return ""
-}
-
 // Validate checks that all required configuration fields are set.
-// Sensitive fields (JWTSecret) are validated separately via RequireSecrets.
 func (c *Config) Validate() []string {
 	var errs []string
 
 	if c.Gateway.Addr == "" {
 		errs = append(errs, "gateway.addr is required (or use default :8080)")
 	}
-	if c.DB.Path == "" {
-		errs = append(errs, "db.path is required (or use default hotplex.db)")
+	if c.DB.Driver == "" || c.DB.Driver == "sqlite" {
+		if c.DB.Path == "" && c.DB.SQLite.Path == "" {
+			errs = append(errs, "db.path or db.sqlite.path is required (or use default hotplex.db)")
+		}
+	} else if strings.EqualFold(c.DB.Driver, "postgres") || strings.EqualFold(c.DB.Driver, "pg") || strings.EqualFold(c.DB.Driver, "postgresql") {
+		if c.DB.Postgres.ConnStr == "" {
+			errs = append(errs, "db.postgres.dsn is required when db.driver is postgres")
+		}
 	}
 	if c.Session.RetentionPeriod <= 0 {
 		errs = append(errs, "session.retention_period must be positive")
@@ -124,25 +97,6 @@ func (c *Config) Validate() []string {
 	return errs
 }
 
-// RequireSecrets validates that all required sensitive fields are present.
-// Returns an error listing any missing secrets. Call after Load.
-func (c *Config) RequireSecrets() error {
-	var missing []string
-	if len(c.Security.JWTSecret) == 0 {
-		if os.Getenv("HOTPLEX_JWT_SECRET") != "" {
-			missing = append(missing, "security.jwt_secret (set but invalid: must decode to >= 32 bytes)")
-		} else {
-			missing = append(missing, "security.jwt_secret")
-		}
-	} else if len(c.Security.JWTSecret) < 32 {
-		missing = append(missing, "security.jwt_secret (must decode to >= 32 bytes for ES256)")
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("config: missing required secrets: %s (set via config file or HOTPLEX_JWT_SECRET env var)", strings.Join(missing, ", "))
-	}
-	return nil
-}
-
 // ─── Config structs ───────────────────────────────────────────────────────────
 
 // Config holds all gateway configuration.
@@ -160,13 +114,19 @@ type Config struct {
 	AgentConfig AgentConfig     `mapstructure:"agent_config"`
 	Skills      SkillsConfig    `mapstructure:"skills"`
 	Cron        CronConfig      `mapstructure:"cron"`
+	Webhook     WebhookConfig   `mapstructure:"webhook"`
+	Events      EventsConfig    `mapstructure:"events"`
 	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
+
+	// ResolvedAPIKeyUsers is the runtime map of expanded API key value → userID.
+	// Populated by resolveAPIKeyUsers() during load. Nil when no mapping configured.
+	ResolvedAPIKeyUsers map[string]string `mapstructure:"-"`
 }
 
 // MessagingConfig holds messaging platform adapter settings.
 // Shared defaults (WorkerType, STTConfig, TTSConfig) are set at this level and propagated
 // to each platform config via propagateMessagingDefaults().
-// DMPolicy and GroupPolicy remain platform-level only (different platforms may have different access policies).
+// Access control fields (DMPolicy, GroupPolicy, RequireMention, AllowFrom, AllowDMFrom, AllowGroupFrom) support per-bot overrides with platform-level fallback.
 // Priority: platform-level > messaging-level > Default().
 type MessagingConfig struct {
 	TurnSummaryEnabled bool `mapstructure:"turn_summary_enabled"`
@@ -177,8 +137,9 @@ type MessagingConfig struct {
 	TTSConfig  `mapstructure:",squash"`
 
 	// Platform-specific configs.
-	Slack  SlackConfig  `mapstructure:"slack"`
-	Feishu FeishuConfig `mapstructure:"feishu"`
+	Slack   SlackConfig   `mapstructure:"slack"`
+	Feishu  FeishuConfig  `mapstructure:"feishu"`
+	Yuanxin YuanxinConfig `mapstructure:"yuanxin"`
 }
 
 // STT constants for provider values.
@@ -285,28 +246,118 @@ type MessagingPlatformConfig struct {
 	AllowDMFrom    []string `mapstructure:"allow_dm_from"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from"`
 
-	STTConfig `mapstructure:",squash"`
-	TTSConfig `mapstructure:",squash"`
+	InjectExclude []string `mapstructure:"inject_exclude"` // platform-level default: files to skip from agent config injection
+	STTConfig     `mapstructure:",squash"`
+	TTSConfig     `mapstructure:",squash"`
 }
 
+// MaxBotsPerPlatform is the maximum number of bots allowed per messaging platform.
+const MaxBotsPerPlatform = 10
+
 // SlackConfig holds Slack Socket Mode adapter settings.
+// Supports single-bot (top-level bot_token/app_token) and multi-bot (bots[]) modes.
+// normalizeSlackBots() resolves the two into a unified Bots slice.
 type SlackConfig struct {
 	MessagingPlatformConfig `mapstructure:",squash"`
 
-	BotToken            string        `mapstructure:"bot_token"`
-	AppToken            string        `mapstructure:"app_token"`
+	// Single-bot credentials (backward compatible).
+	BotToken string `mapstructure:"bot_token"`
+	AppToken string `mapstructure:"app_token"`
+
 	SocketMode          bool          `mapstructure:"socket_mode"`
 	AssistantAPIEnabled *bool         `mapstructure:"assistant_api_enabled"`
 	ReconnectBaseDelay  time.Duration `mapstructure:"reconnect_base_delay"`
 	ReconnectMaxDelay   time.Duration `mapstructure:"reconnect_max_delay"`
+
+	// Branding for Assistant status (paid workspaces).
+	DisplayName string `mapstructure:"display_name,omitempty"`
+	IconEmoji   string `mapstructure:"icon_emoji,omitempty"`
+
+	// Multi-bot configuration. When non-empty, takes precedence over top-level credentials.
+	Bots []SlackBotConfig `mapstructure:"bots"`
+}
+
+// SlackBotConfig holds credentials and per-bot overrides for a single Slack bot.
+type SlackBotConfig struct {
+	Name       string `mapstructure:"name"`
+	BotToken   string `mapstructure:"bot_token"`
+	AppToken   string `mapstructure:"app_token"`
+	WorkerType string `mapstructure:"worker_type,omitempty"`
+	WorkDir    string `mapstructure:"work_dir,omitempty"`
+	Sandbox    string `mapstructure:"sandbox,omitempty"`
+	ACPCommand string `mapstructure:"acp_command,omitempty"` // per-bot ACP agent binary override
+
+	// Per-bot access control (falls back to platform-level when empty).
+	DMPolicy       string   `mapstructure:"dm_policy,omitempty"`
+	GroupPolicy    string   `mapstructure:"group_policy,omitempty"`
+	RequireMention *bool    `mapstructure:"require_mention,omitempty"`
+	AllowFrom      []string `mapstructure:"allow_from,omitempty"`
+	AllowDMFrom    []string `mapstructure:"allow_dm_from,omitempty"`
+	AllowGroupFrom []string `mapstructure:"allow_group_from,omitempty"`
+
+	// Per-bot agent config injection override (falls back to platform-level when nil).
+	// No omitempty: inject_exclude: [] must produce a non-nil empty slice to
+	// explicitly clear the parent-level exclusion (nil = inherit, [] = clear).
+	InjectExclude []string `mapstructure:"inject_exclude"`
+
+	// Per-bot branding override (falls back to platform-level when empty).
+	DisplayName string `mapstructure:"display_name,omitempty"`
+	IconEmoji   string `mapstructure:"icon_emoji,omitempty"`
+
+	STTConfig `mapstructure:",squash"`
+	TTSConfig `mapstructure:",squash"`
 }
 
 // FeishuConfig holds Feishu WebSocket adapter settings.
+// Supports single-bot (top-level app_id/app_secret) and multi-bot (bots[]) modes.
+// normalizeFeishuBots() resolves the two into a unified Bots slice.
 type FeishuConfig struct {
 	MessagingPlatformConfig `mapstructure:",squash"`
 
+	// Single-bot credentials (backward compatible).
 	AppID     string `mapstructure:"app_id"`
 	AppSecret string `mapstructure:"app_secret"`
+
+	// Multi-bot configuration. When non-empty, takes precedence over top-level credentials.
+	Bots []FeishuBotConfig `mapstructure:"bots"`
+}
+
+// FeishuBotConfig holds credentials and per-bot overrides for a single Feishu bot.
+type FeishuBotConfig struct {
+	Name       string `mapstructure:"name"`
+	AppID      string `mapstructure:"app_id"`
+	AppSecret  string `mapstructure:"app_secret"`
+	WorkerType string `mapstructure:"worker_type,omitempty"`
+	WorkDir    string `mapstructure:"work_dir,omitempty"`
+	Sandbox    string `mapstructure:"sandbox,omitempty"`
+	ACPCommand string `mapstructure:"acp_command,omitempty"` // per-bot ACP agent binary override
+
+	// Per-bot access control (falls back to platform-level when empty).
+	DMPolicy       string   `mapstructure:"dm_policy,omitempty"`
+	GroupPolicy    string   `mapstructure:"group_policy,omitempty"`
+	RequireMention *bool    `mapstructure:"require_mention,omitempty"`
+	AllowFrom      []string `mapstructure:"allow_from,omitempty"`
+	AllowDMFrom    []string `mapstructure:"allow_dm_from,omitempty"`
+	AllowGroupFrom []string `mapstructure:"allow_group_from,omitempty"`
+
+	// Per-bot agent config injection override (falls back to platform-level when nil).
+	// No omitempty: inject_exclude: [] must produce a non-nil empty slice to
+	// explicitly clear the parent-level exclusion (nil = inherit, [] = clear).
+	InjectExclude []string `mapstructure:"inject_exclude"`
+
+	STTConfig `mapstructure:",squash"`
+	TTSConfig `mapstructure:",squash"`
+}
+
+// YuanxinConfig holds Yuanxin Pulsar adapter settings.
+type YuanxinConfig struct {
+	MessagingPlatformConfig `mapstructure:",squash"`
+
+	Tenant        string `mapstructure:"tenant"`
+	Namespace     string `mapstructure:"namespace"`
+	PulsarURL     string `mapstructure:"pulsar_url"`
+	AppID         string `mapstructure:"app_id"`
+	ProducerTopic string `mapstructure:"producer_topic"`
 }
 
 type AdminConfig struct {
@@ -365,8 +416,23 @@ type GatewayConfig struct {
 	DeltaCoalesceSize int `mapstructure:"delta_coalesce_size"`
 }
 
-// DBConfig holds SQLite settings shared by all database connections.
+// DBConfig holds database settings.
+// Supports both SQLite and PostgreSQL backends.
+// For backward compatibility, legacy flat fields (Path, WALMode, etc.) are kept
+// on DBConfig. New code should prefer the structured SQLite.* or Postgres.* fields.
 type DBConfig struct {
+	// Driver specifies the database driver: "sqlite" (default) or "postgres".
+	// When set to "postgres", the Postgres sub-config is used instead of SQLite.
+	Driver string `mapstructure:"driver"`
+
+	// SQLite-specific configuration. Also the target for legacy flat fields
+	// when using the sqlite driver (default).
+	SQLite SQLiteConfig `mapstructure:"sqlite"`
+
+	// Postgres-specific configuration. Active when Driver is "postgres".
+	Postgres PostgresConfig `mapstructure:"postgres"`
+
+	// ── Legacy flat fields (deprecated, use SQLite.* instead) ──
 	Path              string        `mapstructure:"path"`
 	EventsPath        string        `mapstructure:"events_path"` // Deprecated: events table now lives in hotplex.db (same as Path)
 	WALMode           bool          `mapstructure:"wal_mode"`
@@ -376,6 +442,109 @@ type DBConfig struct {
 	CacheSizeKiB      int           `mapstructure:"cache_size_kib"`
 	MmapSizeMiB       int           `mapstructure:"mmap_size_mib"`
 	WalAutoCheckpoint int           `mapstructure:"wal_autocheckpoint"`
+}
+
+// DSN returns the connection string for the configured database driver.
+// Delegates to the active sub-config's DSN method based on Driver.
+func (d DBConfig) DSN() string {
+	switch strings.ToLower(d.Driver) {
+	case "postgres", "pg", "postgresql":
+		return d.Postgres.DSN()
+	default:
+		return d.SQLite.DSN()
+	}
+}
+
+// EffectiveSQLitePath returns the effective SQLite database path,
+// preferring the structured SQLite.Path with legacy flat Path as fallback.
+func (d DBConfig) EffectiveSQLitePath() string {
+	if d.SQLite.Path != "" {
+		return d.SQLite.Path
+	}
+	return d.Path
+}
+
+// EffectiveMaxOpenConns returns the effective max open connections,
+// preferring the structured SQLite.MaxOpenConns with legacy flat MaxOpenConns as fallback.
+func (d DBConfig) EffectiveMaxOpenConns() int {
+	if d.SQLite.MaxOpenConns > 0 {
+		return d.SQLite.MaxOpenConns
+	}
+	return d.MaxOpenConns
+}
+
+// EffectiveWALMode returns the effective WAL mode setting.
+// Note: explicitly setting WALMode=false (zero value) falls through to the legacy field.
+// This is acceptable because WALMode=false is not a meaningful config — users who want
+// to disable WAL should omit the field and set the legacy wal_mode: false instead.
+func (d DBConfig) EffectiveWALMode() bool {
+	if d.SQLite.WALMode {
+		return true
+	}
+	return d.WALMode
+}
+
+// EffectiveBusyTimeout returns the effective busy timeout for SQLite.
+func (d DBConfig) EffectiveBusyTimeout() time.Duration {
+	if d.SQLite.BusyTimeout > 0 {
+		return d.SQLite.BusyTimeout
+	}
+	return d.BusyTimeout
+}
+
+// EffectiveCacheSizeKiB returns the effective SQLite cache size in KiB.
+func (d DBConfig) EffectiveCacheSizeKiB() int {
+	if d.SQLite.CacheSizeKiB > 0 {
+		return d.SQLite.CacheSizeKiB
+	}
+	return d.CacheSizeKiB
+}
+
+// EffectiveMmapSizeMiB returns the effective SQLite mmap size in MiB.
+func (d DBConfig) EffectiveMmapSizeMiB() int {
+	if d.SQLite.MmapSizeMiB > 0 {
+		return d.SQLite.MmapSizeMiB
+	}
+	return d.MmapSizeMiB
+}
+
+// EffectiveWalAutoCheckpoint returns the effective WAL auto-checkpoint threshold.
+func (d DBConfig) EffectiveWalAutoCheckpoint() int {
+	if d.SQLite.WalAutoCheckpoint > 0 {
+		return d.SQLite.WalAutoCheckpoint
+	}
+	return d.WalAutoCheckpoint
+}
+
+// SQLiteConfig holds SQLite-specific database settings.
+type SQLiteConfig struct {
+	Path              string        `mapstructure:"path"`
+	WALMode           bool          `mapstructure:"wal_mode"`
+	BusyTimeout       time.Duration `mapstructure:"busy_timeout"`
+	MaxOpenConns      int           `mapstructure:"max_open_conns"`
+	VacuumThreshold   float64       `mapstructure:"vacuum_threshold"`
+	CacheSizeKiB      int           `mapstructure:"cache_size_kib"`
+	MmapSizeMiB       int           `mapstructure:"mmap_size_mib"`
+	WalAutoCheckpoint int           `mapstructure:"wal_autocheckpoint"`
+}
+
+// DSN returns the SQLite database path. Defaults to ":memory:" when empty.
+func (s SQLiteConfig) DSN() string {
+	if s.Path == "" {
+		return ":memory:"
+	}
+	return s.Path
+}
+
+// PostgresConfig holds PostgreSQL-specific database settings.
+type PostgresConfig struct {
+	ConnStr      string `mapstructure:"dsn"`
+	MaxOpenConns int    `mapstructure:"max_open_conns"`
+}
+
+// DSN returns the PostgreSQL connection string. Returns empty when ConnStr is not configured.
+func (p PostgresConfig) DSN() string {
+	return p.ConnStr
 }
 
 // WorkerConfig holds per-worker defaults.
@@ -390,6 +559,8 @@ type WorkerConfig struct {
 	AutoRetry        AutoRetryConfig      `mapstructure:"auto_retry"`
 	OpenCodeServer   OpenCodeServerConfig `mapstructure:"opencode_server"`
 	ClaudeCode       ClaudeCodeConfig     `mapstructure:"claude_code"`
+	CodexCLI         CodexCLIConfig       `mapstructure:"codex_cli"`
+	ACP              ACPConfig            `mapstructure:"acp"`
 	Environment      []string             `mapstructure:"environment"`
 }
 
@@ -420,13 +591,46 @@ type ClaudeCodeConfig struct {
 	MCPServers            map[string]*MCPServerConfig `mapstructure:"mcp_servers"`             // user-configured MCP servers; empty = default discovery
 }
 
+// CodexCLIConfig holds Codex CLI worker startup settings.
+type CodexCLIConfig struct {
+	Command          string        `mapstructure:"command"`             // codex binary path, default "codex"
+	Model            string        `mapstructure:"model"`               // model name, empty = use Codex default
+	Sandbox          string        `mapstructure:"sandbox"`             // sandbox mode, default "danger-full-access"
+	ApprovalMode     string        `mapstructure:"approval_mode"`       // approval mode, default "never"
+	Ephemeral        bool          `mapstructure:"ephemeral"`           // ephemeral sessions, default true
+	Personality      string        `mapstructure:"personality"`         // agent personality for app-server mode, default "friendly"
+	StartupTimeout   time.Duration `mapstructure:"startup_timeout"`     // process startup timeout, default 30s
+	CallTimeout      time.Duration `mapstructure:"call_timeout"`        // JSON-RPC call timeout, default 30s
+	UseAppServer     bool          `mapstructure:"use_app_server"`      // use persistent app-server mode instead of one-shot exec
+	IdleDrainPeriod  time.Duration `mapstructure:"idle_drain_period"`   // idle drain timeout for app-server mode, default 30m
+	Color            bool          `mapstructure:"color"`               // colored output (--color)
+	OutputFile       string        `mapstructure:"output_file"`         // output-only-last-message mode (--output-last-message)
+	StrictConfig     bool          `mapstructure:"strict_config"`       // strict config validation (--strict-config)
+	SkipGitRepoCheck bool          `mapstructure:"skip_git_repo_check"` // bypass git repo check (--skip-git-repo-check)
+	IgnoreUserConfig bool          `mapstructure:"ignore_user_config"`  // ignore user-level config (--ignore-user-config)
+	IgnoreRules      bool          `mapstructure:"ignore_rules"`        // ignore project rules (--ignore-rules)
+	LocalProvider    bool          `mapstructure:"local_provider"`      // force local model provider (--local-provider)
+	ConfigProfile    string        `mapstructure:"config_profile"`      // codex config profile (--profile)
+	BypassHookTrust  bool          `mapstructure:"bypass_hook_trust"`   // bypass hook trust (--dangerously-bypass-hook-trust)
+}
+
 // OpenCodeServerConfig holds OpenCode Server singleton process settings.
 type OpenCodeServerConfig struct {
 	Command           string        `mapstructure:"command"` // binary + optional subcommand, e.g. "opencode" or "opencode serve"
+	Password          string        `mapstructure:"password"`
 	IdleDrainPeriod   time.Duration `mapstructure:"idle_drain_period"`
 	ReadyTimeout      time.Duration `mapstructure:"ready_timeout"`
 	ReadyPollInterval time.Duration `mapstructure:"ready_poll_interval"`
 	HTTPTimeout       time.Duration `mapstructure:"http_timeout"`
+}
+
+// ACPConfig holds ACP (Agent Client Protocol) worker settings.
+// ACP is a universal worker type that connects to any ACP-compatible agent via stdio.
+type ACPConfig struct {
+	Command     string   `mapstructure:"command" json:"command"`                               // ACP agent binary (e.g. "hermes-acp")
+	AutoApprove *bool    `mapstructure:"auto_approve,omitempty" json:"auto_approve,omitempty"` // auto-approve permission requests
+	Args        []string `mapstructure:"args,omitempty" json:"args,omitempty"`                 // extra args appended after the command
+	Debug       bool     `mapstructure:"debug,omitempty" json:"debug,omitempty"`               // enable JSON-RPC protocol trace logging
 }
 
 // AutoRetryConfig controls automatic retry behavior when LLM provider returns
@@ -459,7 +663,6 @@ func (c AutoRetryConfig) Defaults() AutoRetryConfig {
 }
 
 // SecurityConfig holds auth and input validation settings.
-// Sensitive fields (JWTSecret) must be provided via SecretsProvider after Load.
 type SecurityConfig struct {
 	APIKeyHeader   string   `mapstructure:"api_key_header"`
 	APIKeys        []string `mapstructure:"api_keys"`
@@ -467,19 +670,30 @@ type SecurityConfig struct {
 	TLSCertFile    string   `mapstructure:"tls_cert_file"`
 	TLSKeyFile     string   `mapstructure:"tls_key_file"`
 	AllowedOrigins []string `mapstructure:"allowed_origins"`
-	JWTSecret      []byte   `mapstructure:"-"` // loaded via SecretsProvider, never from config file
-	JWTAudience    string   `mapstructure:"jwt_audience"`
+
+	// APIKeyUsers maps environment variable names (or literal key values) to user IDs.
+	// Enterprise multi-user: each API key gets a distinct identity for session isolation.
+	// Keys not present in this map default to "api_user" (backward compatible).
+	APIKeyUsers map[string]string `mapstructure:"api_key_users"`
 
 	// WorkDir security settings
 	WorkDirAllowedBasePatterns []string `mapstructure:"work_dir_allowed_base_patterns"` // extra whitelist patterns (supports ~ and ${VAR})
 	WorkDirForbiddenDirs       []string `mapstructure:"work_dir_forbidden_dirs"`        // extra blacklist directories
+
+	// CSP overrides the Content-Security-Policy header served with the embedded
+	// webchat SPA and docs portal. Empty string keeps the package-level default
+	// (localhost-friendly). Set this when serving from a remote host — the
+	// browser blocks fetch/ws/connect calls that do not match a directive in CSP.
+	CSP string `mapstructure:"csp"`
 }
 
 // SessionConfig holds session lifecycle settings.
 type SessionConfig struct {
-	RetentionPeriod time.Duration `mapstructure:"retention_period"`
-	GCScanInterval  time.Duration `mapstructure:"gc_scan_interval"`
-	MaxConcurrent   int           `mapstructure:"max_concurrent"`
+	RetentionPeriod   time.Duration `mapstructure:"retention_period"`    // max session lifetime (default 7d)
+	GCScanInterval    time.Duration `mapstructure:"gc_scan_interval"`    // GC scan interval (default 1m)
+	MaxConcurrent     int           `mapstructure:"max_concurrent"`      // max concurrent sessions
+	TermRetention     time.Duration `mapstructure:"term_retention"`      // DB retention for terminated sessions (default 7d)
+	CronTermRetention time.Duration `mapstructure:"cron_term_retention"` // DB retention for terminated cron sessions (default 24h)
 }
 
 // PoolConfig holds session pool settings.
@@ -491,13 +705,24 @@ type PoolConfig struct {
 }
 
 type AgentConfig struct {
-	Enabled   bool   `mapstructure:"enabled"`    // enable agent config loading
-	ConfigDir string `mapstructure:"config_dir"` // default: ~/.hotplex/agent-configs/
+	Enabled       bool     `mapstructure:"enabled"`        // enable agent config loading
+	ConfigDir     string   `mapstructure:"config_dir"`     // default: ~/.hotplex/agent-configs/
+	InjectExclude []string `mapstructure:"inject_exclude"` // global default: files to skip from agent config injection
 }
 
 // SkillsConfig holds skill discovery and caching settings.
 type SkillsConfig struct {
 	CacheTTL time.Duration `mapstructure:"cache_ttl"` // TTL for skills list cache, default 5m
+}
+
+// WebhookConfig holds GitHub webhook receiver settings.
+type WebhookConfig struct {
+	MaxBodySize   int64    `mapstructure:"max_body_size"`   // default: 1MB
+	AllowedRepos  []string `mapstructure:"allowed_repos"`   // repos to accept events from; empty = accept all (env override not supported for slices)
+	TargetJobName string   `mapstructure:"target_job_name"` // cron job to trigger on matching events
+	Secret        string   `mapstructure:"secret"`
+	Path          string   `mapstructure:"path"` // default: "/api/webhook/github"
+	Enabled       bool     `mapstructure:"enabled"`
 }
 
 // CronConfig holds AI-native cronjob scheduler settings.
@@ -511,11 +736,15 @@ type CronConfig struct {
 	Jobs              []map[string]any `mapstructure:"jobs"`                // inline job definitions
 }
 
+// EventsConfig holds event and turn retention settings.
+type EventsConfig struct {
+	Retention time.Duration `mapstructure:"retention"` // TTL for events + turns, default 720h (30 days)
+}
+
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 // Default returns a Config with sensible production defaults.
 // All non-sensitive fields have values — the binary runs with zero config.
-// Sensitive fields (JWTSecret) are left empty and must be provided separately.
 func Default() *Config {
 	return &Config{
 		Gateway: GatewayConfig{
@@ -534,6 +763,18 @@ func Default() *Config {
 			DeltaCoalesceSize:     200,
 		},
 		DB: DBConfig{
+			Driver: "sqlite",
+			SQLite: SQLiteConfig{
+				Path:              filepath.Join(HotplexHome(), "data", "hotplex.db"),
+				WALMode:           true,
+				BusyTimeout:       5 * time.Second,
+				MaxOpenConns:      3, // 1 writer + 2 readers for shared session/event store
+				VacuumThreshold:   0.2,
+				CacheSizeKiB:      8192,
+				MmapSizeMiB:       64,
+				WalAutoCheckpoint: 2000,
+			},
+			// Legacy flat fields (kept for backward compat with existing consumers).
 			Path:              filepath.Join(HotplexHome(), "data", "hotplex.db"),
 			EventsPath:        "", // Deprecated: unused, events table lives in hotplex.db
 			WALMode:           true,
@@ -563,17 +804,31 @@ func Default() *Config {
 			ClaudeCode: ClaudeCodeConfig{
 				Command: "claude",
 			},
+			CodexCLI: CodexCLIConfig{
+				Command:         "codex",
+				Sandbox:         "danger-full-access",
+				ApprovalMode:    "never",
+				Ephemeral:       true,
+				Personality:     "friendly",
+				StartupTimeout:  30 * time.Second,
+				CallTimeout:     30 * time.Second,
+				UseAppServer:    true,
+				IdleDrainPeriod: 30 * time.Minute,
+			},
 		},
 		Security: SecurityConfig{
 			APIKeyHeader:   "X-API-Key",
 			APIKeys:        nil,
 			TLSEnabled:     false,
 			AllowedOrigins: []string{"*"},
+			CSP:            "", // empty → webchat/docs use package-level default
 		},
 		Session: SessionConfig{
-			RetentionPeriod: 7 * 24 * time.Hour,
-			GCScanInterval:  1 * time.Minute,
-			MaxConcurrent:   1000,
+			RetentionPeriod:   7 * 24 * time.Hour,
+			GCScanInterval:    1 * time.Minute,
+			MaxConcurrent:     1000,
+			TermRetention:     7 * 24 * time.Hour,
+			CronTermRetention: 24 * time.Hour,
 		},
 		Pool: PoolConfig{
 			MinSize:          0,
@@ -586,7 +841,7 @@ func Default() *Config {
 			Addr:               "localhost:9999",
 			Tokens:             nil,
 			TokenScopes:        nil,
-			DefaultScopes:      []string{"session:read", "stats:read", "health:read"},
+			DefaultScopes:      []string{"session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"},
 			IPWhitelistEnabled: false,
 			AllowedCIDRs:       []string{"127.0.0.0/8", "10.0.0.0/8"},
 			RateLimitEnabled:   true,
@@ -627,6 +882,9 @@ func Default() *Config {
 			Slack: SlackConfig{
 				MessagingPlatformConfig: defaultMessagingPlatformConfig(),
 			},
+			Yuanxin: YuanxinConfig{
+				MessagingPlatformConfig: defaultMessagingPlatformConfig(),
+			},
 		},
 		AgentConfig: AgentConfig{
 			Enabled:   true,
@@ -641,6 +899,15 @@ func Default() *Config {
 			MaxJobs:           50,
 			DefaultTimeoutSec: 300,
 			TickIntervalSec:   60,
+		},
+		Webhook: WebhookConfig{
+			MaxBodySize:   1 << 20, // 1MB
+			Path:          "/api/webhook/github",
+			TargetJobName: "pr-review-hotplex",
+			Enabled:       false,
+		},
+		Events: EventsConfig{
+			Retention: 720 * time.Hour, // 30 days
 		},
 	}
 }
@@ -662,6 +929,15 @@ func propagateMessagingDefaults(cfg *Config) {
 	msg := &cfg.Messaging
 	propagatePlatform(&msg.Slack.MessagingPlatformConfig, msg)
 	propagatePlatform(&msg.Feishu.MessagingPlatformConfig, msg)
+	propagatePlatform(&msg.Yuanxin.MessagingPlatformConfig, msg)
+
+	// Propagate shared defaults into per-bot configs.
+	for i := range msg.Slack.Bots {
+		propagateBotDefaults(&msg.Slack.MessagingPlatformConfig, &msg.Slack.Bots[i].STTConfig, &msg.Slack.Bots[i].TTSConfig)
+	}
+	for i := range msg.Feishu.Bots {
+		propagateBotDefaults(&msg.Feishu.MessagingPlatformConfig, &msg.Feishu.Bots[i].STTConfig, &msg.Feishu.Bots[i].TTSConfig)
+	}
 }
 
 // propagatePlatform fills zero-value fields on the platform from the messaging-level shared config.
@@ -673,31 +949,79 @@ func propagatePlatform(p *MessagingPlatformConfig, msg *MessagingConfig) {
 	p.TTSConfig.FillFrom(msg.TTSConfig)
 }
 
-// ─── Loading ─────────────────────────────────────────────────────────────────
-
-// LoadOptions controls how configuration is loaded.
-type LoadOptions struct {
-	// SecretsProvider supplies sensitive values (e.g. JWT secret, API keys).
-	// If nil, secrets are read from HOTPLEX_* environment variables.
-	SecretsProvider SecretsProvider
+// normalizeSlackBots resolves SlackConfig to a unified Bots slice.
+// If Bots is already populated, it takes precedence.
+// If Bots is empty but top-level BotToken is set, auto-wraps as a single "default" bot.
+func normalizeSlackBots(cfg *SlackConfig) {
+	if len(cfg.Bots) > 0 {
+		return
+	}
+	if cfg.BotToken == "" {
+		return
+	}
+	cfg.Bots = []SlackBotConfig{
+		{Name: "default", BotToken: cfg.BotToken, AppToken: cfg.AppToken},
+	}
 }
+
+// normalizeFeishuBots resolves FeishuConfig to a unified Bots slice.
+// Same backward-compat logic as normalizeSlackBots.
+func normalizeFeishuBots(cfg *FeishuConfig) {
+	if len(cfg.Bots) > 0 {
+		return
+	}
+	if cfg.AppID == "" {
+		return
+	}
+	cfg.Bots = []FeishuBotConfig{
+		{Name: "default", AppID: cfg.AppID, AppSecret: cfg.AppSecret},
+	}
+}
+
+// propagateBotDefaults fills zero-value fields on each bot config from the
+// platform-level MessagingPlatformConfig and messaging-level shared config.
+func propagateBotDefaults(platformCfg *MessagingPlatformConfig, botSTT *STTConfig, botTTS *TTSConfig) {
+	botSTT.FillFrom(platformCfg.STTConfig)
+	botTTS.FillFrom(platformCfg.TTSConfig)
+}
+
+// expandStringFields expands env vars in non-empty string fields.
+func expandStringFields(fields ...*string) {
+	for _, f := range fields {
+		if *f != "" {
+			*f = ExpandEnv(*f)
+		}
+	}
+}
+
+// normalizePathFields resolves ~ and normalizes paths for non-empty string fields.
+func normalizePathFields(fields ...*string) {
+	for _, f := range fields {
+		if *f != "" {
+			if absPath, err := ExpandAndAbs(*f); err == nil {
+				*f = absPath
+			}
+		}
+	}
+}
+
+// ─── Loading ─────────────────────────────────────────────────────────────────
 
 // ErrConfigCycle is returned when a config inheritance chain contains a cycle.
 var ErrConfigCycle = errors.New("config: inheritance cycle detected")
 
 // Load reads configuration from the given file path, then applies defaults
-// and secrets.  Configuration strategy: convention over configuration.
+// and environment overrides.  Configuration strategy: convention over configuration.
 //
 // Load order (later overrides earlier):
 //  1. Sensible defaults (Default())
 //  2. Parent config file (via inherits field), recursively, with cycle detection
 //  3. Config file (YAML/JSON/TOML) — canonical source for non-sensitive values
 //  4. Environment variables (HOTPLEX_*)
-//  5. Secrets provider — only sensitive fields (JWTSecret, etc.)
 //
-// If filePath is empty, only defaults + environment + secrets are used.
-func Load(filePath string, opts LoadOptions) (*Config, error) {
-	cfg, err := loadRecursive(filePath, opts, nil)
+// If filePath is empty, only defaults + environment are used.
+func Load(filePath string) (*Config, error) {
+	cfg, err := loadRecursive(filePath, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -714,11 +1038,16 @@ func Load(filePath string, opts LoadOptions) (*Config, error) {
 	_ = v.BindEnv("log.format")
 	_ = v.BindEnv("db.path")
 	_ = v.BindEnv("db.wal_mode")
+	_ = v.BindEnv("db.driver")
+	_ = v.BindEnv("db.postgres.dsn")
+	_ = v.BindEnv("db.postgres.max_open_conns")
 	_ = v.BindEnv("gateway.addr")
 	_ = v.BindEnv("admin.enabled")
 	_ = v.BindEnv("admin.addr")
 	_ = v.BindEnv("session.max_concurrent")
 	_ = v.BindEnv("session.retention_period")
+	_ = v.BindEnv("session.term_retention")
+	_ = v.BindEnv("session.cron_term_retention")
 	_ = v.BindEnv("pool.max_size")
 	_ = v.BindEnv("pool.max_idle_per_user")
 	_ = v.BindEnv("pool.max_memory_per_user")
@@ -729,13 +1058,22 @@ func Load(filePath string, opts LoadOptions) (*Config, error) {
 	_ = v.BindEnv("worker.auto_retry.enabled")
 	_ = v.BindEnv("worker.auto_retry.max_retries")
 	_ = v.BindEnv("worker.claude_code.command")
+	_ = v.BindEnv("worker.codex_cli.command")
+	_ = v.BindEnv("worker.codex_cli.model")
+	_ = v.BindEnv("worker.codex_cli.sandbox")
+	_ = v.BindEnv("worker.codex_cli.approval_mode")
+	_ = v.BindEnv("worker.acp.command")
+	_ = v.BindEnv("worker.acp.auto_approve")
+	_ = v.BindEnv("worker.acp.args")
+	_ = v.BindEnv("worker.acp.debug")
 	_ = v.BindEnv("worker.opencode_server.command")
 	_ = v.BindEnv("worker.opencode_server.idle_drain_period")
 	_ = v.BindEnv("worker.opencode_server.ready_timeout")
 	_ = v.BindEnv("worker.opencode_server.ready_poll_interval")
 	_ = v.BindEnv("worker.opencode_server.http_timeout")
-	_ = v.BindEnv("security.jwt_audience")
+	_ = v.BindEnv("worker.opencode_server.password")
 	_ = v.BindEnv("security.api_key_header")
+	_ = v.BindEnv("security.csp")
 	_ = v.BindEnv("agent_config.enabled")
 	_ = v.BindEnv("agent_config.config_dir")
 	_ = v.BindEnv("skills.cache_ttl")
@@ -765,6 +1103,11 @@ func Load(filePath string, opts LoadOptions) (*Config, error) {
 	_ = v.BindEnv("messaging.slack.tts_moss_port")
 	_ = v.BindEnv("messaging.slack.tts_moss_idle_timeout")
 	_ = v.BindEnv("messaging.slack.tts_moss_cpu_threads")
+	_ = v.BindEnv("webhook.enabled")
+	_ = v.BindEnv("webhook.secret")
+	_ = v.BindEnv("webhook.path")
+	_ = v.BindEnv("webhook.max_body_size")
+	_ = v.BindEnv("webhook.target_job_name")
 
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("config: environment override: %w", err)
@@ -779,7 +1122,7 @@ func Load(filePath string, opts LoadOptions) (*Config, error) {
 
 // loadRecursive loads a config file and its ancestors, detecting cycles.
 // visited tracks file paths already loaded in the current chain; nil on the root call.
-func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config, error) {
+func loadRecursive(filePath string, visited []string) (*Config, error) {
 	// Start with defaults.
 	cfg := Default()
 
@@ -828,7 +1171,7 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 		if !filepath.IsAbs(parentFile) && filePath != "" {
 			parentFile = filepath.Join(filepath.Dir(filePath), parentFile)
 		}
-		parentCfg, err := loadRecursive(parentFile, opts, ancestors)
+		parentCfg, err := loadRecursive(parentFile, ancestors)
 		if err != nil {
 			return nil, fmt.Errorf("config: inherits %q: %w", parentFile, err)
 		}
@@ -840,23 +1183,12 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 		*cfg = *parentCfg
 	}
 
-	// Apply secrets via provider.  If no provider given, fall back to env vars
-	// (HOTPLEX_JWT_SECRET etc.) for backwards compatibility.
-	sp := opts.SecretsProvider
-	if sp == nil {
-		sp = NewEnvSecretsProvider()
+	// Expand env vars in token slices (supports ${VAR} references in config files).
+	for i, t := range cfg.Admin.Tokens {
+		cfg.Admin.Tokens[i] = ExpandEnv(t)
 	}
-
-	// JWTSecret — only from secrets provider, never from config file.
-	// The secret is base64-encoded (standard or URL-safe) and decoded before use.
-	// This matches the client token generator's key loading behavior.
-	if secret := sp.Get("HOTPLEX_JWT_SECRET"); secret != "" {
-		cfg.Security.JWTSecret = decodeJWTSecret(secret)
-		if cfg.Security.JWTSecret == nil {
-			if _, loaded := warnedEnvEntries.LoadOrStore("jwt_secret_invalid", true); !loaded {
-				slog.Warn("config: HOTPLEX_JWT_SECRET set but invalid format (must be 32-byte raw or base64-encoded 32 bytes)", "length", len(secret))
-			}
-		}
+	for i, k := range cfg.Security.APIKeys {
+		cfg.Security.APIKeys[i] = ExpandEnv(k)
 	}
 
 	// Numbered environment variables for slices (e.g. HOTPLEX_ADMIN_TOKEN_1..N)
@@ -864,8 +1196,15 @@ func loadRecursive(filePath string, opts LoadOptions, visited []string) (*Config
 	cfg.Admin.Tokens = aggregateNumberedEnv(cfg.Admin.Tokens, "HOTPLEX_ADMIN_TOKEN_")
 	cfg.Security.APIKeys = aggregateNumberedEnv(cfg.Security.APIKeys, "HOTPLEX_SECURITY_API_KEY_")
 
+	// Resolve API key → user identity mappings from config.
+	cfg.ResolvedAPIKeyUsers = resolveAPIKeyUsers(cfg.Security.APIKeyUsers, cfg.Security.APIKeys)
+
 	// Messaging platform env var overrides.
 	applyMessagingEnv(cfg)
+
+	// Normalize multi-bot configs (backward compat: single-bot → bots[]).
+	normalizeSlackBots(&cfg.Messaging.Slack)
+	normalizeFeishuBots(&cfg.Messaging.Feishu)
 
 	// Propagate shared messaging defaults to per-platform configs.
 	// Priority: platform-level (YAML/env) > messaging-level > Default().
@@ -896,6 +1235,8 @@ func (c *Config) normalizePaths() {
 		&c.Admin.Addr,
 		&c.Worker.ClaudeCode.Command,
 		&c.Worker.OpenCodeServer.Command,
+		&c.Worker.OpenCodeServer.Password,
+		&c.Worker.CodexCLI.Command,
 		&c.Messaging.Slack.LocalCmd,
 		&c.Messaging.Feishu.LocalCmd,
 		&c.Messaging.Feishu.MossModelDir,
@@ -905,9 +1246,31 @@ func (c *Config) normalizePaths() {
 			*ef = ExpandEnv(*ef)
 		}
 	}
+	// Per-bot env expansion (credentials + paths).
+	var botFields []*string
+	for i := range c.Messaging.Slack.Bots {
+		botFields = append(botFields,
+			&c.Messaging.Slack.Bots[i].BotToken,
+			&c.Messaging.Slack.Bots[i].AppToken,
+			&c.Messaging.Slack.Bots[i].WorkDir,
+			&c.Messaging.Slack.Bots[i].LocalCmd,
+			&c.Messaging.Slack.Bots[i].MossModelDir,
+		)
+	}
+	for i := range c.Messaging.Feishu.Bots {
+		botFields = append(botFields,
+			&c.Messaging.Feishu.Bots[i].AppID,
+			&c.Messaging.Feishu.Bots[i].AppSecret,
+			&c.Messaging.Feishu.Bots[i].WorkDir,
+			&c.Messaging.Feishu.Bots[i].LocalCmd,
+			&c.Messaging.Feishu.Bots[i].MossModelDir,
+		)
+	}
+	expandStringFields(botFields...)
 
 	// 2. Expand ~ and normalize paths.
 	for _, pf := range []*string{
+		&c.DB.SQLite.Path,
 		&c.DB.Path,
 		&c.DB.EventsPath,
 		&c.Worker.DefaultWorkDir,
@@ -917,6 +1280,7 @@ func (c *Config) normalizePaths() {
 		&c.Messaging.Slack.MossModelDir,
 		&c.Messaging.Feishu.WorkDir,
 		&c.Messaging.Feishu.MossModelDir,
+		&c.Messaging.Yuanxin.WorkDir,
 	} {
 		if *pf != "" {
 			absPath, err := ExpandAndAbs(*pf)
@@ -929,6 +1293,15 @@ func (c *Config) normalizePaths() {
 			*pf = absPath
 		}
 	}
+	// Per-bot WorkDir and MossModelDir path normalization.
+	var botPaths []*string
+	for i := range c.Messaging.Slack.Bots {
+		botPaths = append(botPaths, &c.Messaging.Slack.Bots[i].WorkDir, &c.Messaging.Slack.Bots[i].MossModelDir)
+	}
+	for i := range c.Messaging.Feishu.Bots {
+		botPaths = append(botPaths, &c.Messaging.Feishu.Bots[i].WorkDir, &c.Messaging.Feishu.Bots[i].MossModelDir)
+	}
+	normalizePathFields(botPaths...)
 }
 
 // ExpandAndAbs returns an absolute path, resolving ~ and relative paths.
@@ -973,6 +1346,10 @@ func (c *Config) ResolvePlatformWorkDir(platform string) string {
 		if c.Messaging.Feishu.WorkDir != "" {
 			return c.Messaging.Feishu.WorkDir
 		}
+	case "yuanxin":
+		if c.Messaging.Yuanxin.WorkDir != "" {
+			return c.Messaging.Yuanxin.WorkDir
+		}
 	}
 	return c.Worker.DefaultWorkDir
 }
@@ -1013,6 +1390,33 @@ func aggregateNumberedEnv(existing []string, prefix string) []string {
 		}
 	}
 	return existing
+}
+
+// resolveAPIKeyUsers builds a runtime map of expanded API key value → userID.
+// Input map keys are resolved as env var names first, then as literal keys.
+// Returns nil when no valid mappings are found (preserves "api_user" default).
+func resolveAPIKeyUsers(raw map[string]string, expandedKeys []string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	keySet := make(map[string]struct{}, len(expandedKeys))
+	for _, k := range expandedKeys {
+		keySet[k] = struct{}{}
+	}
+	result := make(map[string]string, len(raw))
+	for mapKey, userID := range raw {
+		if envVal := os.Getenv(mapKey); envVal != "" {
+			result[envVal] = userID
+			continue
+		}
+		if _, isKey := keySet[mapKey]; isKey {
+			result[mapKey] = userID
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // applyMessagingEnv overrides messaging config from environment variables.
@@ -1058,6 +1462,29 @@ func applyMessagingEnv(cfg *Config) {
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM", "AllowFrom"},
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_DM_FROM", "AllowDMFrom"},
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_GROUP_FROM", "AllowGroupFrom"},
+		},
+	)
+
+	// Yuanxin
+	applyPlatformEnv(&cfg.Messaging.Yuanxin,
+		[]envMapping{
+			{"HOTPLEX_MESSAGING_YUANXIN_APP_ID", "AppID"},
+			{"HOTPLEX_MESSAGING_YUANXIN_PULSAR_URL", "PulsarURL"},
+			{"HOTPLEX_MESSAGING_YUANXIN_TENANT", "Tenant"},
+			{"HOTPLEX_MESSAGING_YUANXIN_NAMESPACE", "Namespace"},
+			{"HOTPLEX_MESSAGING_YUANXIN_PRODUCER_TOPIC", "ProducerTopic"},
+			{"HOTPLEX_MESSAGING_YUANXIN_WORKER_TYPE", "WorkerType"},
+			{"HOTPLEX_MESSAGING_YUANXIN_WORK_DIR", "WorkDir"},
+			{"HOTPLEX_MESSAGING_YUANXIN_DM_POLICY", "DMPolicy"},
+			{"HOTPLEX_MESSAGING_YUANXIN_GROUP_POLICY", "GroupPolicy"},
+		},
+		[]envMapping{
+			{"HOTPLEX_MESSAGING_YUANXIN_ENABLED", "Enabled"},
+		},
+		[]envMapping{
+			{"HOTPLEX_MESSAGING_YUANXIN_ALLOW_FROM", "AllowFrom"},
+			{"HOTPLEX_MESSAGING_YUANXIN_ALLOW_DM_FROM", "AllowDMFrom"},
+			{"HOTPLEX_MESSAGING_YUANXIN_ALLOW_GROUP_FROM", "AllowGroupFrom"},
 		},
 	)
 
@@ -1202,19 +1629,17 @@ func setSliceField(target any, field, value string) error {
 	return nil
 }
 
-// decodeJWTSecret decodes a base64-encoded JWT secret.
-// It supports both standard base64 and URL-safe base64 (with or without padding).
-// Requires >= 32 bytes (HKDF-derived ECDSA key needs sufficient entropy).
-func decodeJWTSecret(secret string) []byte {
-	if decoded, err := base64.StdEncoding.DecodeString(secret); err == nil && len(decoded) >= 32 {
-		return decoded
+// ResolveInjectExclude resolves the inject_exclude list using 3-level fallback:
+// bot → platform → global. A nil slice means "not configured" and falls back;
+// a non-nil empty slice (e.g. YAML `inject_exclude: []`) means "explicitly clear,
+// override parent level". Returns nil when no exclusion is configured at any level,
+// which means full injection (backward-compatible default).
+func ResolveInjectExclude(global, platform, bot []string) []string {
+	if bot != nil {
+		return bot
 	}
-	if decoded, err := base64.URLEncoding.DecodeString(secret); err == nil && len(decoded) >= 32 {
-		return decoded
+	if platform != nil {
+		return platform
 	}
-	raw := []byte(secret)
-	if len(raw) >= 32 {
-		return raw
-	}
-	return nil
+	return global
 }

@@ -2,16 +2,19 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrJobDisabled is returned when attempting to trigger a disabled job.
+var ErrJobDisabled = errors.New("cron: job is disabled")
 
 // Scheduler manages cron job lifecycle: loading, scheduling, execution, and shutdown.
 type Scheduler struct {
@@ -46,6 +49,7 @@ type Config struct {
 	DefaultTimeoutSec int    `mapstructure:"default_timeout_sec"`
 	TickIntervalSec   int    `mapstructure:"tick_interval_sec"`
 	YAMLConfigPath    string `mapstructure:"yaml_config_path"`
+	DefaultSandbox    string `mapstructure:"default_sandbox,omitempty"`
 }
 
 // WorkDirResolver determines the effective workdir for a cron job when job.WorkDir is empty.
@@ -89,7 +93,7 @@ func New(deps Deps) *Scheduler {
 		defaultTimeout = time.Duration(deps.Cfg.DefaultTimeoutSec) * time.Second
 	}
 	s.defaultTimeout = defaultTimeout
-	s.executor = NewExecutor(deps.Log, deps.Bridge, deps.SessionMgr)
+	s.executor = NewExecutor(deps.Log, deps.Bridge, deps.SessionMgr, deps.Cfg.DefaultSandbox)
 	if deps.AttachedRouter != nil {
 		s.attachedHandler = NewAttachedSessionHandler(deps.Log, deps.AttachedRouter)
 	}
@@ -119,7 +123,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 
 	s.log.Info("cron: scheduler started", "jobs", len(s.jobs))
-	s.releaseSkillManual()
+	ReleaseSkillManual(s.log)
 
 	s.tickLoop.arm(s.nextTickDuration(time.Now()))
 	return nil
@@ -261,26 +265,67 @@ func (s *Scheduler) TriggerJob(ctx context.Context, job *CronJob) error {
 	return nil
 }
 
-// loadFromDB loads all jobs from SQLite into the in-memory index.
+// TriggerByName finds a job by name in the in-memory index and triggers its execution.
+// It reads from s.jobs (source of truth) rather than the store to avoid stale-read windows
+// when the CLI has disabled a job but the DB has not yet been updated.
+func (s *Scheduler) TriggerByName(ctx context.Context, jobName string, extra map[string]string) error {
+	s.mu.Lock()
+	var found *CronJob
+	for _, j := range s.jobs {
+		if j.Name == jobName {
+			found = j
+			break
+		}
+	}
+	if found == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("cron trigger by name: job %q not found: %w", jobName, ErrJobNotFound)
+	}
+	if !found.Enabled {
+		s.mu.Unlock()
+		return fmt.Errorf("cron trigger by name: job %q: %w", jobName, ErrJobDisabled)
+	}
+	job := found.Clone()
+	s.mu.Unlock()
+
+	// Inject extra context (e.g. target_pr from webhook) into PlatformKey.
+	if len(extra) > 0 {
+		if job.PlatformKey == nil {
+			job.PlatformKey = make(map[string]string)
+		}
+		maps.Copy(job.PlatformKey, extra)
+	}
+
+	return s.TriggerJob(ctx, job)
+}
+
+// loadFromDB loads all jobs from the store into the in-memory index.
 // It clears stale running_at_ms, applies catch-up logic for missed jobs within grace period,
 // and recomputes next_run for past-due recurring jobs.
+// Store writes are performed outside s.mu to avoid lock-ordering deadlock with CreateJob/UpdateJob.
 func (s *Scheduler) loadFromDB(ctx context.Context) error {
 	jobs, err := s.store.List(ctx, false)
 	if err != nil {
 		return err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	now := time.Now()
 	var catchUp []*CronJob
 
+	type stateUpdate struct {
+		id    string
+		state CronJobState
+	}
+	var stateUpdates []stateUpdate
+	var jobUpdates []*CronJob
+
+	// First pass: build in-memory index and collect pending store writes.
+	s.mu.Lock()
 	for _, job := range jobs {
 		// Clear stale running_at_ms from previous crash.
 		if job.State.RunningAtMs > 0 {
 			job.State.RunningAtMs = 0
-			_ = s.store.UpdateState(ctx, job.ID, job.State)
+			stateUpdates = append(stateUpdates, stateUpdate{job.ID, job.State})
 		}
 
 		if !job.Enabled || job.State.NextRunAtMs <= 0 {
@@ -303,14 +348,27 @@ func (s *Scheduler) loadFromDB(ctx context.Context) error {
 				if next.IsZero() {
 					// One-shot past due and outside grace → disable.
 					job.Enabled = false
-					_ = s.store.Update(ctx, job)
+					jobUpdates = append(jobUpdates, job)
 				} else {
 					job.State.NextRunAtMs = next.UnixMilli()
-					_ = s.store.UpdateState(ctx, job.ID, job.State)
+					stateUpdates = append(stateUpdates, stateUpdate{job.ID, job.State})
 				}
 			}
 		}
 		s.jobs[job.ID] = job
+	}
+	s.mu.Unlock()
+
+	// Second pass: persist state changes outside the lock to avoid deadlock.
+	for _, u := range stateUpdates {
+		if err := s.store.UpdateState(ctx, u.id, u.state); err != nil {
+			s.log.Error("cron: persist stale state on load", "job_id", u.id, "err", err)
+		}
+	}
+	for _, job := range jobUpdates {
+		if err := s.store.Update(ctx, job); err != nil {
+			s.log.Error("cron: persist disabled job on load", "job_id", job.ID, "err", err)
+		}
 	}
 
 	// Execute catch-up jobs (max 5 immediate, rest staggered 5s).
@@ -319,16 +377,17 @@ func (s *Scheduler) loadFromDB(ctx context.Context) error {
 }
 
 // withinGracePeriod checks whether a missed job is within its grace period.
-// Grace period = 50% of schedule interval, capped at 2 hours.
+// Grace period = 50% of schedule interval, capped at 30 minutes.
 func (s *Scheduler) withinGracePeriod(job *CronJob, now time.Time) bool {
 	missedAt := time.UnixMilli(job.State.NextRunAtMs)
 	elapsed := now.Sub(missedAt)
 
 	interval := s.scheduleInterval(job)
-	grace := interval / 2
-	if grace > 2*time.Hour {
-		grace = 2 * time.Hour
-	}
+	// Grace period = 50% of schedule interval, capped at 30 minutes.
+	// NOTE(behavioral): Previously capped at 2h. The 30min cap means daily/weekly
+	// jobs whose grace window exceeds 30min will not be compensated after a gateway
+	// downtime exceeding 30 minutes. This is intentional — 2h was overly generous.
+	grace := min(interval/2, 30*time.Minute)
 
 	return elapsed <= grace
 }
@@ -363,6 +422,9 @@ func (s *Scheduler) scheduleInterval(job *CronJob) time.Duration {
 
 // scheduleCatchUp executes missed jobs with staggering.
 // First 5 jobs fire immediately; remaining jobs are staggered 5s apart.
+// NOTE: Each catch-up job acquires a concurrency slot via tryAcquireSlot for
+// the full delay + execution duration. This is acceptable because catch-up is
+// a cold-start path (not performance-critical) and concurrency is bounded.
 func (s *Scheduler) scheduleCatchUp(jobs []*CronJob) {
 	if len(jobs) == 0 {
 		return
@@ -468,50 +530,52 @@ func (s *Scheduler) ReloadIndex() {
 }
 
 // rebuildIndex refreshes the in-memory index from the store.
+// Store writes are performed outside s.mu to avoid lock-ordering deadlock
+// with CreateJob/UpdateJob (which acquire writeMu then s.mu).
 func (s *Scheduler) rebuildIndex() {
-	jobs, err := s.store.List(context.Background(), false)
+	ctx, cancel := s.persistTimeout()
+	defer cancel()
+
+	jobs, err := s.store.List(ctx, false)
 	if err != nil {
 		s.log.Error("cron: rebuild index failed", "err", err)
 		return
 	}
 
+	// First pass: build index and collect state patches under lock.
+	var statePatches []struct {
+		id    string
+		state CronJobState
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.jobs = make(map[string]*CronJob, len(jobs))
 	now := time.Now()
 	for _, j := range jobs {
 		if j.Enabled && j.State.NextRunAtMs <= 0 {
-			if next, err := NextRun(j.Schedule, now); err == nil && !next.IsZero() {
+			if next, nerr := NextRun(j.Schedule, now); nerr == nil && !next.IsZero() {
+				j = j.Clone()
 				j.State.NextRunAtMs = next.UnixMilli()
-				if err := s.store.UpdateState(context.Background(), j.ID, j.State); err != nil {
-					s.log.Error("cron: persist next_run on reload", "job_id", j.ID, "err", err)
-				}
+				statePatches = append(statePatches, struct {
+					id    string
+					state CronJobState
+				}{j.ID, j.State})
 			}
 		}
 		s.jobs[j.ID] = j
+	}
+	s.mu.Unlock()
+
+	// Second pass: persist state patches outside the lock.
+	for _, p := range statePatches {
+		if err := s.store.UpdateState(ctx, p.id, p.state); err != nil {
+			s.log.Error("cron: persist next_run on reload", "job_id", p.id, "err", err)
+		}
 	}
 }
 
 // GenerateJobID creates a unique cron job identifier.
 func GenerateJobID() string {
 	return "cron_" + uuid.New().String()
-}
-
-func (s *Scheduler) releaseSkillManual() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		s.log.Warn("cron: cannot determine home dir for skill manual release", "err", err)
-		return
-	}
-	dir := filepath.Join(home, ".hotplex", "skills")
-	_ = os.MkdirAll(dir, 0o755)
-	path := filepath.Join(dir, "cron.md")
-	if err := os.WriteFile(path, []byte(SkillManual()), 0o644); err != nil {
-		s.log.Warn("cron: failed to release skill manual", "path", path, "err", err)
-		return
-	}
-	s.log.Debug("cron: skill manual released", "path", path)
 }
 
 // UpdateConfig applies live configuration changes without restart.

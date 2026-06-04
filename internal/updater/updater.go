@@ -297,6 +297,7 @@ func executablePath() (string, error) {
 }
 
 // findChecksum parses sha256sum output format: "{hash}  {filename}".
+// Tolerates path prefixes (e.g. "dist/hotplex-darwin-arm64").
 func findChecksum(checksums, filename string) (string, error) {
 	for _, line := range strings.Split(checksums, "\n") {
 		line = strings.TrimSpace(line)
@@ -307,7 +308,7 @@ func findChecksum(checksums, filename string) (string, error) {
 		if len(parts) != 2 {
 			continue
 		}
-		if parts[1] == filename {
+		if parts[1] == filename || filepath.Base(parts[1]) == filename {
 			return parts[0], nil
 		}
 	}

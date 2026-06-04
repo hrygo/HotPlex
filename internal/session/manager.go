@@ -23,6 +23,7 @@ import (
 // Errors returned by the session manager.
 var (
 	ErrSessionNotFound   = errors.New("session: not found")
+	ErrSessionNotActive  = errors.New("session: not active")
 	ErrSessionBusy       = errors.New("session: busy")
 	ErrInvalidTransition = errors.New("session: invalid state transition")
 	ErrPoolExhausted     = errors.New("session: pool exhausted")
@@ -30,7 +31,11 @@ var (
 	ErrOwnershipMismatch = errors.New("session: ownership mismatch")
 	ErrMaxTurnsReached   = errors.New("session: max turns reached")
 	ErrWorkerAttached    = errors.New("session: worker already attached")
+	ErrClientKeyTooLong  = errors.New("session: client_key too long")
 )
+
+// MaxClientKeyLen is the maximum allowed length for ClientKey.
+const MaxClientKeyLen = 256
 
 // Manager orchestrates session lifecycle, persistence, and GC.
 type Manager struct {
@@ -43,12 +48,60 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*managedSession
 
+	// runningIndex tracks RUNNING session IDs for O(1) zombie scan.
+	// Protected by riMu (independent of m.mu to avoid lock ordering constraints).
+	riMu         sync.RWMutex
+	runningIndex map[string]struct{}
+
 	gcStop  context.CancelFunc
 	gcDone  chan struct{}
 	gcReset chan time.Duration // signals GC ticker reset
 
 	OnTerminate   func(sessionID string)
 	StateNotifier func(ctx context.Context, sessionID string, state events.SessionState, message string)
+}
+
+// terminatedSessionTTL controls how long TERMINATED sessions remain in memory.
+// After this duration, they are evicted from the in-memory map (DB records preserved).
+const terminatedSessionTTL = 24 * time.Hour
+
+// Session source constants — used for differential DB retention.
+const (
+	SourceCron = "cron" // cron-triggered session (24h retention)
+)
+
+// runningIndex helpers — use riMu (independent of m.mu/ms.mu) to avoid lock ordering issues.
+
+func (m *Manager) addToRunningIndex(id string) {
+	m.riMu.Lock()
+	m.runningIndex[id] = struct{}{}
+	m.riMu.Unlock()
+}
+
+func (m *Manager) removeFromRunningIndex(id string) {
+	m.riMu.Lock()
+	delete(m.runningIndex, id)
+	m.riMu.Unlock()
+}
+
+func (m *Manager) updateRunningIndexForTransition(id string, from, to events.SessionState) {
+	if from == events.StateRunning {
+		m.removeFromRunningIndex(id)
+	}
+	if to == events.StateRunning {
+		m.addToRunningIndex(id)
+	}
+}
+
+// getRunningSessionIDs returns a snapshot of all RUNNING session IDs.
+func (m *Manager) getRunningSessionIDs() []string {
+	m.riMu.RLock()
+	ids := make([]string, 0, len(m.runningIndex))
+	for id := range m.runningIndex {
+		ids = append(ids, id)
+	}
+	m.riMu.RUnlock()
+	return ids
 }
 
 // managedSession holds a session's in-memory state and its mutex.
@@ -94,6 +147,12 @@ type SessionInfo struct {
 	// Title is the user-facing session name. Used as DeriveSessionKey input for WebChat sessions.
 	// Empty for Slack/Feishu sessions (they use DerivePlatformSessionKey instead).
 	Title string `json:"title,omitempty"`
+	// Source identifies the session origin: "" (user-initiated) or "cron" (cron-triggered).
+	// Used for differential DB retention — cron sessions are cleaned up after 24h vs 7d for normal.
+	Source string `json:"source,omitempty"`
+	// ClientKey is the client-provided session_id from the init envelope.
+	// Empty for platform sessions (Slack/Feishu) which use DerivePlatformSessionKey.
+	ClientKey string `json:"client_key,omitempty"`
 }
 
 // NewManager creates a new session manager using the provided Store.
@@ -104,13 +163,14 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 	}
 
 	m := &Manager{
-		log:      log.With("component", "session"),
-		store:    store,
-		cfg:      cfg,
-		cfgStore: cfgStore,
-		pool:     NewPoolManager(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser, cfg.Pool.MaxMemoryPerUser),
-		sessions: make(map[string]*managedSession),
-		gcReset:  make(chan time.Duration, 1),
+		log:          log.With("component", "session"),
+		store:        store,
+		cfg:          cfg,
+		cfgStore:     cfgStore,
+		pool:         NewPoolManager(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser, cfg.Pool.MaxMemoryPerUser),
+		sessions:     make(map[string]*managedSession),
+		runningIndex: make(map[string]struct{}),
+		gcReset:      make(chan time.Duration, 1),
 	}
 
 	// Start background GC.
@@ -125,12 +185,19 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 
 // Create creates a new session and persists it to SQLite.
 func (m *Manager) Create(ctx context.Context, id, userID string, workerType worker.WorkerType, allowedTools []string, workDir, title string) (*SessionInfo, error) {
-	return m.CreateWithBot(ctx, id, userID, "", workerType, allowedTools, "", nil, workDir, title)
+	return m.CreateWithBot(ctx, id, userID, "", workerType, allowedTools, "", nil, workDir, title, "")
 }
 
 // CreateWithBot creates a new session with explicit bot_id and persists it to SQLite.
-func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title string) (*SessionInfo, error) {
+func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*SessionInfo, error) {
+	if len(clientKey) > MaxClientKeyLen {
+		return nil, fmt.Errorf("%w: length %d exceeds maximum %d", ErrClientKeyTooLong, len(clientKey), MaxClientKeyLen)
+	}
 	now := time.Now()
+	source := ""
+	if _, isCron := platformKey["cron_job_id"]; isCron {
+		source = SourceCron
+	}
 	info := &SessionInfo{
 		ID:           id,
 		UserID:       userID,
@@ -145,6 +212,8 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, w
 		PlatformKey:  platformKey,
 		WorkDir:      workDir,
 		Title:        title,
+		Source:       source,
+		ClientKey:    clientKey,
 	}
 
 	if err := m.store.Upsert(ctx, info); err != nil {
@@ -239,32 +308,37 @@ func (m *Manager) UpdateWorkDir(ctx context.Context, id, workDir string) error {
 
 // transitionState performs the common state-transition work: validation,
 // in-memory update, persistence, and notifications.
+// Uses copy-on-write: mutates a snapshot of ms.info, then persists the
+// snapshot. On DB success the snapshot becomes the new ms.info — on failure
+// ms.info is unchanged, eliminating the need for rollback.
 // Caller must hold ms.mu for write; this method temporarily releases ms.mu
 // for the DB write and re-acquires it before returning.
 func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from, to events.SessionState, termReason string) error {
-	ms.info.State = to
-	ms.info.UpdatedAt = time.Now()
+	// Build the candidate state as a value copy (never mutates ms.info in-place).
+	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
+	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
+	candidate := ms.info
+	candidate.State = to
+	candidate.UpdatedAt = time.Now()
 
 	// Set idle expiry when entering IDLE; clear when leaving IDLE.
-	prevIdleExpiresAt := ms.info.IdleExpiresAt
 	if to == events.StateIdle {
-		ms.info.IdleExpiresAt = ptr(time.Now().Add(m.cfg.Worker.IdleTimeout))
+		candidate.IdleExpiresAt = ptr(time.Now().Add(m.cfg.Worker.IdleTimeout))
 	} else {
-		ms.info.IdleExpiresAt = nil
+		candidate.IdleExpiresAt = nil
 	}
 
-	info := ms.info
 	ms.mu.Unlock()
-
-	dbErr := m.store.Upsert(ctx, &info)
-
+	dbErr := m.store.Upsert(ctx, &candidate)
 	ms.mu.Lock()
+
 	if dbErr != nil {
-		ms.info.State = from
-		ms.info.UpdatedAt = time.Now()
-		ms.info.IdleExpiresAt = prevIdleExpiresAt
+		// ms.info untouched — no rollback needed.
 		return dbErr
 	}
+
+	// Commit: replace ms.info with the persisted snapshot.
+	ms.info = candidate
 
 	if to == events.StateTerminated || to == events.StateDeleted {
 		// Record worker execution duration and decrement running gauge before killing.
@@ -312,7 +386,50 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 
 	m.notifyStateChange(ctx, ms.info.ID, to, "")
 
+	m.updateRunningIndexForTransition(ms.info.ID, from, to)
+
 	return nil
+}
+
+// forceTerminateInMemory performs in-memory state cleanup when transitionState fails
+// (DB error or invalid transition). It mirrors transitionState's side effects
+// (metrics, quota release, worker nil) without DB persistence.
+// Caller must hold ms.mu for write. Returns worker to kill outside lock.
+//
+// Design note: the returned worker is Kill()'d (hard) by the caller, whereas
+// transitionState uses Terminate() (graceful SIGTERM + 5s timeout). This is
+// intentional — when DB persistence fails we cannot track the graceful-shutdown
+// window, so a hard kill is the safer choice to guarantee process cleanup.
+func (m *Manager) forceTerminateInMemory(ctx context.Context, ms *managedSession, from events.SessionState, termReason string) worker.Worker {
+	var workerToKill worker.Worker
+	ms.info.State = events.StateTerminated
+	ms.info.UpdatedAt = time.Now()
+
+	// Guard termReason to avoid empty Prometheus label (matches transitionState behavior).
+	if termReason == "" {
+		termReason = "terminated"
+	}
+
+	// Record worker execution duration.
+	if !ms.startedAt.IsZero() && ms.worker != nil {
+		metrics.WorkerExecDuration.WithLabelValues(string(ms.info.WorkerType)).Observe(time.Since(ms.startedAt).Seconds())
+	}
+	// Release quota and decrement running gauge.
+	if ms.worker != nil {
+		metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Dec()
+		m.releaseWorkerQuota(ms)
+		workerToKill = ms.worker
+	}
+	ms.worker = nil // unconditional nil — matches transitionState, prevents double-release
+
+	m.updateRunningIndexForTransition(ms.info.ID, from, events.StateTerminated)
+	metrics.SessionsActive.WithLabelValues(string(from)).Dec()
+	metrics.SessionsActive.WithLabelValues(string(events.StateTerminated)).Inc()
+	metrics.SessionsTerminated.WithLabelValues(termReason).Inc()
+
+	m.notifyStateChange(ctx, ms.info.ID, events.StateTerminated, termReason)
+
+	return workerToKill
 }
 
 // Transition atomically transitions a session to a new state.
@@ -377,16 +494,19 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 			var workerToKill worker.Worker
 			if events.IsValidTransition(from, events.StateTerminated) {
 				if err := m.transitionState(ctx, ms, from, events.StateTerminated, "max_turns"); err != nil {
+					// Deliberate escape hatch: DB persistence failed, but we
+					// force-terminate in-memory to ensure worker cleanup.
+					// DB consistency is sacrificed here — the session may
+					// appear active in DB after restart until GC reaps it.
 					m.log.Error("session: max-turns state transition failed, force-terminating in-memory state",
 						"session_id", id, "err", err)
-					ms.info.State = events.StateTerminated
-					workerToKill = ms.worker
+					workerToKill = m.forceTerminateInMemory(ctx, ms, from, "max_turns")
 				}
 			} else {
+				// Escape hatch: invalid transition — force-terminate in-memory.
 				m.log.Warn("session: max-turns transition invalid, force-terminating in-memory state",
 					"session_id", id, "from_state", from)
-				ms.info.State = events.StateTerminated
-				workerToKill = ms.worker
+				workerToKill = m.forceTerminateInMemory(ctx, ms, from, "max_turns")
 			}
 			ms.mu.Unlock()
 			// Kill worker outside lock only if transitionState did not handle it.
@@ -406,50 +526,81 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 }
 
 // AttachWorker attempts to allocate concurrency quota and pair the worker runtime to the session.
+// Pool quota is acquired outside m.mu to reduce lock contention under burst load.
+// TOCTOU re-validation under m.mu ensures correctness.
 func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	if m == nil {
 		return ErrSessionNotFound
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
+	// Pre-check: read userID and worker status under RLock (no contention with reads).
+	m.mu.RLock()
 	ms, ok := m.sessions[id]
 	if !ok {
+		m.mu.RUnlock()
 		return ErrSessionNotFound
 	}
 	userID := ms.info.UserID
+	ms.mu.RLock()
+	alreadyAttached := ms.worker != nil
+	ms.mu.RUnlock()
+	m.mu.RUnlock()
 
-	if ms.worker != nil {
+	if alreadyAttached {
 		return ErrWorkerAttached
 	}
-	if poolErr := m.pool.Acquire(userID); poolErr != nil {
+
+	// Acquire pool quota (slot + memory) in a single atomic operation.
+	if poolErr := m.pool.AcquireWithMemory(userID); poolErr != nil {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
 			m.log.Warn("session: attach rejected", "err", poolErr, "session_id", id)
-			metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
 			return ErrPoolExhausted
 		}
 		m.log.Warn("session: attach rejected", "kind", pe.Kind, "session_id", id)
 		if pe.Kind == poolErrKindUserQuotaExceeded {
-			metrics.PoolAcquireTotal.WithLabelValues("user_quota_exceeded").Inc()
 			return ErrUserQuotaExceeded
 		}
-		metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
+		if pe.Kind == poolErrKindMemoryExceeded {
+			return ErrMemoryExceeded
+		}
 		return ErrPoolExhausted
 	}
 
-	// RES-008: track per-user estimated memory (RLIMIT_AS=512MB per worker).
-	if err := m.pool.AcquireMemory(userID); err != nil {
-		m.pool.Release(userID) // rollback slot quota
-		metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
-		return ErrMemoryExceeded
+	// Re-validate under write lock (TOCTOU safety).
+	m.mu.Lock()
+	ms, ok = m.sessions[id]
+	if !ok {
+		m.mu.Unlock()
+		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
+		return ErrSessionNotFound
 	}
 	ms.mu.Lock()
+	if ms.worker != nil {
+		ms.mu.Unlock()
+		m.mu.Unlock()
+		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
+		return ErrWorkerAttached
+	}
+	// Reject attach if session is no longer active — prevents Delete/Attach
+	// race where Delete releases locks during DB write and a concurrent
+	// AttachWorker slips in, creating an orphan worker with no session record.
+	if !ms.info.State.IsActive() {
+		ms.mu.Unlock()
+		m.mu.Unlock()
+		m.pool.Release(userID)
+		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
+		return ErrSessionNotActive
+	}
 	ms.worker = w
 	ms.startedAt = time.Now()
+	metrics.PoolAcquireTotal.WithLabelValues("success").Inc()
 	metrics.WorkerStartsTotal.WithLabelValues(string(ms.info.WorkerType), "success").Inc()
 	metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Inc()
 	ms.mu.Unlock()
+	m.mu.Unlock()
 
 	m.log.Debug("session: worker attached", "session_id", id, "user_id", userID)
 	return nil
@@ -534,30 +685,56 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 
 	ms.mu.Lock()
-	hasWorker := ms.worker != nil
+	hadWorkerBefore := ms.worker != nil
 	workerType := ms.info.WorkerType
 	uid := ms.info.UserID
-	prevState := ms.info.State
-	ms.info.State = events.StateDeleted
-	ms.info.UpdatedAt = time.Now()
-	info := ms.info
+	wasRunning := ms.info.State == events.StateRunning
+	// Copy-on-write: build candidate, persist, commit on success.
+	candidate := ms.info
+	candidate.State = events.StateDeleted
+	candidate.UpdatedAt = time.Now()
 	ms.mu.Unlock()
 	m.mu.Unlock()
 
-	if err := m.store.Upsert(ctx, &info); err != nil {
-		ms.mu.Lock()
-		ms.info.State = prevState
-		ms.mu.Unlock()
+	if err := m.store.Upsert(ctx, &candidate); err != nil {
 		return err
 	}
 
+	// Persist succeeded — validate gap before committing in-memory.
+	// This must happen BEFORE setting ms.info = candidate to prevent
+	// leaving the session in DELETED state with a running worker when
+	// a concurrent AttachWorker slipped in during the DB write window.
 	m.mu.Lock()
 	if _, exists := m.sessions[id]; exists {
-		if hasWorker {
+		ms.mu.Lock()
+		hasWorkerAfter := ms.worker != nil
+		// If worker appeared during the gap (was nil before, now non-nil),
+		// a concurrent AttachWorker resurrected the session — abort deletion.
+		if !hadWorkerBefore && hasWorkerAfter {
+			ms.mu.Unlock()
+			m.mu.Unlock()
+			m.log.Warn("session: worker attached during delete gap, rolling back",
+				"session_id", id)
+			// Rollback DB: restore original state (ms.info hasn't been mutated yet).
+			ms.mu.RLock()
+			original := ms.info
+			ms.mu.RUnlock()
+			if rbErr := m.store.Upsert(ctx, &original); rbErr != nil {
+				m.log.Error("session: delete rollback failed", "session_id", id, "err", rbErr)
+			}
+			return nil
+		}
+		// No gap worker — commit candidate and delete atomically under both locks.
+		ms.info = candidate
+		if hasWorkerAfter {
 			metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
 			m.pool.Release(uid)
 		}
+		ms.mu.Unlock()
 		delete(m.sessions, id)
+		if wasRunning {
+			m.removeFromRunningIndex(id)
+		}
 	}
 	m.mu.Unlock()
 
@@ -576,6 +753,7 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 	var workerType string
 	if ok {
 		ms.mu.Lock()
+		wasRunning := ms.info.State == events.StateRunning
 		if ms.worker != nil {
 			workerToKill = ms.worker
 			workerType = string(ms.info.WorkerType)
@@ -584,6 +762,9 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)
+		if wasRunning {
+			m.removeFromRunningIndex(id)
+		}
 	}
 	m.mu.Unlock()
 
@@ -754,12 +935,10 @@ func (m *Manager) RepairRunningSessions(ctx context.Context) (int, error) {
 	return repaired, nil
 }
 
-// Stats returns the active worker pool utilization.
+// Stats returns the current worker pool counts: total active workers,
+// maximum pool size, and number of unique users with active sessions.
 func (m *Manager) Stats() (totalWorkers, maxWorkers, uniqueUsers int) {
 	total, max, users := m.pool.Stats()
-	if max > 0 {
-		metrics.PoolUtilization.Set(float64(total) / float64(max))
-	}
 	return total, max, users
 }
 
@@ -889,21 +1068,22 @@ func (m *Manager) gc(ctx context.Context) {
 	now := time.Now()
 
 	// 0. Zombie IO Polling for RUNNING sessions.
-	// Lock order: m.mu.RLock() → ms.mu.RLock() is consistent with all write paths.
-	m.mu.RLock()
-	var runningSessions []string
+	// Uses runningIndex for O(running) lookup instead of O(total) full scan.
+	runningIDs := m.getRunningSessionIDs()
 	var runningWorkers []worker.Worker
-	for _, ms := range m.sessions {
-		ms.mu.RLock()
-		if ms.info.State == events.StateRunning {
-			runningSessions = append(runningSessions, ms.info.ID)
-			runningWorkers = append(runningWorkers, ms.worker)
+	if len(runningIDs) > 0 {
+		m.mu.RLock()
+		for _, id := range runningIDs {
+			if ms, ok := m.sessions[id]; ok {
+				ms.mu.RLock()
+				runningWorkers = append(runningWorkers, ms.worker)
+				ms.mu.RUnlock()
+			}
 		}
-		ms.mu.RUnlock()
+		m.mu.RUnlock()
 	}
-	m.mu.RUnlock()
 
-	for i, id := range runningSessions {
+	for i, id := range runningIDs {
 		func(id string, w worker.Worker) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -950,25 +1130,64 @@ func (m *Manager) gc(ctx context.Context) {
 	})
 	_ = eg.Wait() // errors already logged inside goroutines
 
-	for _, id := range maxIds {
-		if err := m.TransitionWithReason(ctx, id, events.StateTerminated, "max_lifetime"); err != nil {
-			m.log.Warn("session: gc (max_lifetime) transition", "session_id", id, "err", err)
+	allIds := make([]string, 0, len(maxIds)+len(idleIds))
+	allIds = append(allIds, maxIds...)
+	allIds = append(allIds, idleIds...)
+	if len(allIds) > 0 {
+		// Build a reason map for O(1) lookup. max_lifetime wins if a session
+		// appears in both lists (unlikely but safe to be explicit).
+		reasonMap := make(map[string]string, len(maxIds)+len(idleIds))
+		for _, id := range idleIds {
+			reasonMap[id] = "idle_timeout"
 		}
-	}
-	for _, id := range idleIds {
-		if err := m.TransitionWithReason(ctx, id, events.StateTerminated, "idle_timeout"); err != nil {
-			m.log.Warn("session: gc (idle) transition", "session_id", id, "err", err)
+		for _, id := range maxIds {
+			reasonMap[id] = "max_lifetime"
 		}
+
+		eg2, egCtx2 := errgroup.WithContext(ctx)
+		eg2.SetLimit(5)
+		for _, id := range allIds {
+			id := id
+			eg2.Go(func() error {
+				if err := m.TransitionWithReason(egCtx2, id, events.StateTerminated, reasonMap[id]); err != nil {
+					m.log.Warn("session: gc transition", "session_id", id, "reason", reasonMap[id], "err", err)
+				}
+				return nil // don't propagate individual failures
+			})
+		}
+		_ = eg2.Wait()
 	}
 
-	// 3. Retention cleanup is intentionally NOT performed here.
-	// TERMINATED session records serve as "resume decision flags" — their
-	// existence tells the gateway that a previous session existed and that
-	// the worker's session files may still be on disk (e.g. Claude Code's
-	// ~/.claude/projects/<hash>/sessions/), enabling --resume to restore
-	// the conversation. Deleting DB records would force --session-id (new
-	// session) instead of --resume, losing conversation history.
-	// Physical deletion should be an explicit admin action, not automatic GC.
+	// 3. Evict old TERMINATED sessions from in-memory map to prevent unbounded growth.
+	// DB records are preserved — resume semantics fall back to store.Get when needed.
+	var evicted int
+	m.mu.Lock()
+	for id, ms := range m.sessions {
+		ms.mu.RLock()
+		if ms.info.State == events.StateTerminated && now.Sub(ms.info.UpdatedAt) > terminatedSessionTTL {
+			ms.mu.RUnlock()
+			delete(m.sessions, id)
+			evicted++
+			continue
+		}
+		ms.mu.RUnlock()
+	}
+	m.mu.Unlock()
+	if evicted > 0 {
+		m.log.Info("session: gc evicted TERMINATED sessions from memory",
+			"count", evicted, "ttl", terminatedSessionTTL)
+	}
+	// 4. Delete old TERMINATED sessions from DB with source-based retention.
+	// Cron sessions: CronTermRetention, normal sessions: TermRetention. Events are not cascaded.
+	cfg := m.cfg
+	if m.cfgStore != nil {
+		cfg = m.cfgStore.Load()
+	}
+	cronCutoff := now.Add(-cfg.Session.CronTermRetention)
+	defaultCutoff := now.Add(-cfg.Session.TermRetention)
+	if err := m.store.DeleteTerminated(ctx, cronCutoff, defaultCutoff); err != nil {
+		m.log.Error("session: gc (delete_terminated) failed", "err", err)
+	}
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -998,7 +1217,7 @@ func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state
 	}
 }
 
-func (m *Manager) getManagedSession(_ context.Context, id string) *managedSession {
+func (m *Manager) getManagedSession(ctx context.Context, id string) *managedSession {
 	m.mu.RLock()
 	ms, ok := m.sessions[id]
 	m.mu.RUnlock()
@@ -1006,7 +1225,7 @@ func (m *Manager) getManagedSession(_ context.Context, id string) *managedSessio
 		return ms
 	}
 	// Load from Store.
-	info, err := m.store.Get(context.Background(), id)
+	info, err := m.store.Get(ctx, id)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) {
 			m.log.Error("session: store lookup failed", "session_id", id, "err", err)
@@ -1020,6 +1239,9 @@ func (m *Manager) getManagedSession(_ context.Context, id string) *managedSessio
 	}
 	ms = &managedSession{info: *info, log: m.log.With("worker_type", info.WorkerType, "channel", info.Platform)}
 	m.sessions[id] = ms
+	if info.State == events.StateRunning {
+		m.addToRunningIndex(id)
+	}
 	m.mu.Unlock()
 	return ms
 }

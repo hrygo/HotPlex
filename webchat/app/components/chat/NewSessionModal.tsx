@@ -2,47 +2,35 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { WorkerIcon } from "@/components/icons";
 import { workDir as configWorkDir } from "@/lib/config";
 
 interface WorkerOption {
   id: string;
   name: string;
   description: string;
-  icon: string;
 }
 
 const WORKER_OPTIONS: WorkerOption[] = [
-  {
-    id: "claude_code",
-    name: "Claude Code",
-    description: "Anthropic's coding agent via Claude CLI",
-    icon: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
-  },
-  {
-    id: "opencode_server",
-    name: "OpenCode Server",
-    description: "OpenCode Server protocol adapter",
-    icon: "M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
-  },
+  { id: "claude_code", name: "Claude Code", description: "Anthropic coding agent" },
+  { id: "opencode_server", name: "OpenCode", description: "Server-based code agent" },
+  { id: "codex_cli", name: "Codex CLI", description: "OpenAI coding agent" },
+  { id: "acp", name: "ACP", description: "JSON-RPC agent protocol" },
 ];
 
 interface NewSessionModalProps {
   onConfirm: (title: string, workerType: string, workDir: string) => void;
   onCancel: () => void;
-  existingTitles?: string[];
 }
 
-export function NewSessionModal({ onConfirm, onCancel, existingTitles = [] }: NewSessionModalProps) {
+export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
   const [title, setTitle] = useState("");
   const [selectedWorker, setSelectedWorker] = useState("claude_code");
   const [workDir, setWorkDir] = useState(configWorkDir);
 
   const trimmedTitle = title.trim();
-  const isDuplicate = trimmedTitle.length > 0 && existingTitles.includes(trimmedTitle);
-  const canConfirm = trimmedTitle.length > 0;
 
   const handleConfirm = () => {
-    if (!canConfirm) return;
     onConfirm(trimmedTitle, selectedWorker, workDir.trim());
   };
 
@@ -79,7 +67,7 @@ export function NewSessionModal({ onConfirm, onCancel, existingTitles = [] }: Ne
         {/* Session Title */}
         <div className="px-6 pb-4">
           <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
-            Session Name
+            Session Name (optional)
           </label>
           <input
             id="session-title"
@@ -90,22 +78,12 @@ export function NewSessionModal({ onConfirm, onCancel, existingTitles = [] }: Ne
             placeholder="e.g. HotPlex Bug Fix"
             autoFocus
             className={`w-full px-3 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:ring-2 transition-all font-mono ${
-              isDuplicate
-                ? 'border-[var(--accent-gold)] focus:ring-[rgba(251,191,36,0.15)]'
-                : trimmedTitle.length > 0
-                  ? 'border-[var(--accent-emerald)] focus:ring-[rgba(16,185,129,0.15)]'
-                  : 'border-[var(--border-default)] focus:ring-[rgba(251,191,36,0.1)] focus:border-[var(--amber-border)]'
+              trimmedTitle.length > 0
+                ? 'border-[var(--accent-emerald)] focus:ring-[rgba(16,185,129,0.15)]'
+                : 'border-[var(--border-default)] focus:ring-[rgba(251,191,36,0.1)] focus:border-[var(--amber-border)]'
             }`}
             onKeyDown={(e) => e.stopPropagation()}
           />
-          {isDuplicate && (
-            <p className="text-[10px] text-[var(--accent-gold)] mt-1.5 flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Will reuse existing session
-            </p>
-          )}
         </div>
 
         {/* Worker Selection */}
@@ -125,14 +103,12 @@ export function NewSessionModal({ onConfirm, onCancel, existingTitles = [] }: Ne
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <svg className={`w-4 h-4 ${selectedWorker === w.id ? "text-[var(--accent-gold)]" : "text-[var(--text-muted)]"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={w.icon} />
-                  </svg>
-                  <span className={`text-xs font-bold ${selectedWorker === w.id ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+                  <WorkerIcon type={w.id} className={`w-4 h-4 ${selectedWorker === w.id ? "text-[var(--accent-gold)]" : "text-[var(--text-muted)]"}`} />
+                  <span className={`text-xs font-bold whitespace-nowrap ${selectedWorker === w.id ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
                     {w.name}
                   </span>
                 </div>
-                <p className="text-[10px] text-[var(--text-faint)] leading-relaxed">
+                <p className="text-[10px] text-[var(--text-faint)] whitespace-nowrap">
                   {w.description}
                 </p>
               </button>
@@ -166,8 +142,7 @@ export function NewSessionModal({ onConfirm, onCancel, existingTitles = [] }: Ne
           </button>
           <button
             onClick={handleConfirm}
-            disabled={!canConfirm}
-            className="px-6 py-2 rounded-[var(--radius-md)] bg-[var(--accent-gold)] text-black text-xs font-bold transition-all hover:bg-[var(--accent-gold-bright)] active:scale-[0.98] shadow-[0_4px_16px_rgba(251,191,36,0.15)] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+            className="px-6 py-2 rounded-[var(--radius-md)] bg-[var(--accent-gold)] text-black text-xs font-bold transition-all hover:bg-[var(--accent-gold-bright)] active:scale-[0.98] shadow-[0_4px_16px_rgba(251,191,36,0.15)]"
           >
             Start Session
           </button>

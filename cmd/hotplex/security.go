@@ -22,7 +22,7 @@ func newSecurityCmd() *cobra.Command {
 		Use:   "security",
 		Short: "Run security audit",
 		Long: `Run a security audit on your HotPlex configuration.
-Checks TLS settings, SSRF protection, JWT configuration, and access policies.
+Checks TLS settings, SSRF protection, and access policies.
 Use --fix to automatically resolve issues where possible.`,
 		Example: `  hotplex security                   # Run security audit
   hotplex security -v                # Verbose output
@@ -77,7 +77,7 @@ func checkTLSConfig(_ context.Context, cfgPath string) cli.Diagnostic {
 		}
 	}
 
-	cfg, err := config.Load(cfgPath, config.LoadOptions{})
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return cli.Diagnostic{
 			Name:     name,
@@ -132,7 +132,7 @@ func checkSSRFConfig(_ context.Context, cfgPath string) cli.Diagnostic {
 		}
 	}
 
-	cfg, err := config.Load(cfgPath, config.LoadOptions{})
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return cli.Diagnostic{
 			Name:     name,

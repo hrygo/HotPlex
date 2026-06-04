@@ -54,8 +54,7 @@
 │   │  ├─ ResumeSession()                 │  │    └─→ Handler.Handle()          │     │
 │   │  ├─ forwardEvents(w, sessionID)    │  ├─ JoinSession(pc)                │     │
 │   │  │    goroutine 事件转发           │  │    └─→ Hub.JoinPlatformSession() │     │
-│   │  └─ worker lifecycle               │  ├─ MakeSlackEnvelope()            │     │
-│   │                                      │  ├─ MakeFeishuEnvelope()            │     │
+│   │  └─ worker lifecycle               │  ├─ MakeEnvelope()                  │     │
 │   │                                      │  └─ platform 身份验证                │     │
 │   └────────────────────────────────────┬──────────────────────────────────────┘     │
 │                                        │                                           │
@@ -68,9 +67,9 @@
 │                                        │                                           │
 │                                        ▼                                           │
 │   ┌─────────────────────────────────────────────────────────────────────────┐     │
-│   │                      Worker Registry + Adapters (ACPX 未实现)               │     │
-│   │  ClaudeCode │ OpenCodeSrv │ ~~ACPX~~ │     │
-│   │  (stdio)     │  (HTTP/SSE) │  (—)        │     │
+│   │                      Worker Registry + Adapters                              │     │
+│   │  ClaudeCode │ OpenCodeSrv │ ACP          │     │
+│   │  (stdio)     │  (HTTP/SSE) │ (stdio/RPC)  │     │
 │   └─────────────────────────────────────────────────────────────────────────┘     │
 └──────────────────────────────────────────────────────────────────────────────────────┘
                                          │
@@ -102,7 +101,7 @@ internal/
     worker.go    Worker 接口
     registry.go  自注册工厂
     base/        共享生命周期基座
-    claudecode/ opencodesrv/ pimon/  (acpx/ — ⚠️ 未实现)
+    claudecode/ opencodesrv/ pimon/ acp/
 
   messaging/           ★ NEW (~650 行, 零核心文件改动)
   ├── platform_conn.go       PlatformConn 接口 (WriteCtx + Close)
@@ -324,7 +323,7 @@ PlatformConn 接口 (messaging/platform_conn.go)
 |                | WS 客户端     | Slack 适配器          | 飞书适配器        |
 |----------------|---------------|----------------------|------------------|
 | 连接建立        | WS 握手       | Socket Mode SDK       | larkws SDK        |
-| 认证           | JWT (网关层)   | App Token (SDK 层)    | App Token + 刷新  |
+| 认证           | API Key (网关层)   | App Token (SDK 层)    | App Token + 刷新  |
 | Session ID     | client UUID   | `slack:{team}:{ch}:{user}` | `feishu:{chat}:{user}` |
 | 消息去重       | WS 无重复     | ClientMsgID dedup     | message_id dedup  |
 | 流式输出       | WS 实时推送    | chat.update debounce  | CardKit (无 QPS 限制) |
@@ -348,7 +347,7 @@ PlatformConn 接口 (messaging/platform_conn.go)
 | `worker/worker.go` | 0 行      | 零改动  | 消息经 Handler 路由到现有 Worker         |
 | `pkg/events/`      | 0 行      | 零改动  | 所有字段通用                             |
 | `gateway/conn.go` | 0 行      | 零改动  | Conn.WriteCtx/Close 与 PlatformConn 一致 |
-| `security/jwt.go` | 0 行      | 零改动  | Platform 认证走平台 SDK                  |
+| `security/auth.go` | 0 行      | 零改动  | Platform 认证走平台 SDK                  |
 
 ### 7.2 潜在风险
 
@@ -356,7 +355,7 @@ PlatformConn 接口 (messaging/platform_conn.go)
 |----------------------|------|-------------------------------------------------|
 | pcEntry 存为 `*Conn` 类型 | 低   | 考虑将 `h.sessions` key 显式改为接口             |
 | Platform BotID 为空   | 中   | messaging 包注入 sentinel botID (`"slack"`)      |
-| OwnerID 由 Adapter 预填 | 中   | 从 JWTValidator 获取 signed platform token        |
+| OwnerID 由 Adapter 预填 | 中   | 从 Authenticator 获取 signed platform token        |
 
 ### 7.3 依赖方向
 
@@ -364,7 +363,7 @@ PlatformConn 接口 (messaging/platform_conn.go)
 新 messaging/ 包 ──引用──▶ 现有包 (单向依赖)
   platform_conn.go  → pkg/events
   bridge.go          → internal/gateway (Hub, Handler)
-                      internal/security (JWTValidator)
+                      internal/security (Authenticator)
                       pkg/aep, pkg/events
   slack/adapter.go  → github.com/slack-go/slack
   feishu/adapter.go → github.com/larksuite/oapi-sdk-go/v2

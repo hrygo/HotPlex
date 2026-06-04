@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HotPlex AI Coding Agent Gateway - 核心架构全景图</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #080b11;
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --primary: #8b5cf6;
+            --primary-glow: rgba(139, 92, 246, 0.35);
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.35);
+            --emerald: #10b981;
+            --emerald-glow: rgba(16, 185, 129, 0.35);
+            --orange: #f97316;
+            --orange-glow: rgba(249, 115, 22, 0.35);
+            --pink: #d946ef;
+            --pink-glow: rgba(217, 70, 239, 0.35);
+            --slate: #64748b;
+            --slate-glow: rgba(100, 116, 139, 0.35);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(139, 92, 246, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(6, 182, 212, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.04) 0%, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        /* 顶部装饰条 */
+        .top-bar {
+            height: 4px;
+            background: linear-gradient(90deg, var(--cyan), var(--primary), var(--pink), var(--emerald));
+            width: 100%;
+        }
+
+        /* 头部样式 */
+        header {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 24px 20px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .logo-area {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .logo-title {
+            font-size: 2.2rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ffffff 30%, #a78bfa 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            color: #c084fc;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .logo-subtitle {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .github-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 12px;
+            color: #ffffff;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(10px);
+        }
+
+        .github-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.25);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .github-btn svg {
+            fill: currentColor;
+            width: 20px;
+            height: 20px;
+        }
+
+        /* 页面主要布局 */
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 48px 60px 48px; /* 增加到 48px 留白，防止贴紧浏览器边距 */
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 24px;
+        }
+
+        @media (max-width: 1100px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* 架构图容器 */
+        .diagram-container {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            min-height: 700px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 浮动操作按钮 */
+        .diagram-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .control-btn {
+            background: rgba(17, 24, 39, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-secondary);
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .control-btn:hover {
+            color: #ffffff;
+            background: rgba(17, 24, 39, 0.95);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .control-btn.active {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: transparent;
+        }
+
+        /* SVG 样式与交互 */
+        #architecture-svg {
+            width: 100%;
+            height: auto;
+            max-width: 1000px;
+            display: block;
+        }
+
+        .arch-node {
+            cursor: pointer;
+            transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .arch-node rect {
+            transition: stroke 0.15s ease, stroke-width 0.15s ease, fill-opacity 0.15s ease;
+        }
+
+        /* 悬停与选中节点效果 (采用超轻量硬件加速的 stroke 颜色与不透明度调整，彻底清除昂贵渲染能耗的 SVG drop-shadow filter 滤镜，完美锁帧防闪烁) */
+        .arch-node:hover rect {
+            stroke-width: 2.5px !important;
+            stroke: #ffffff !important;
+            fill-opacity: 0.95 !important;
+        }
+
+        .arch-node:hover text {
+            fill: #ffffff !important;
+        }
+
+        .arch-node.selected rect {
+            stroke-width: 3px !important;
+            stroke: #ffffff !important;
+            fill-opacity: 1 !important;
+        }
+
+        .arch-node.selected text {
+            fill: #ffffff !important;
+            font-weight: 700 !important;
+        }
+
+        /* 连接线动画 */
+        .flow-line {
+            transition: stroke-width 0.3s ease, stroke 0.3s ease, opacity 0.3s ease;
+            stroke-dasharray: 4 4;
+            animation: flowDash 20s linear infinite;
+            opacity: 0.22;
+            /* 默认微弱半透明，极大降低视觉噪点，背景干净整洁 */
+        }
+
+        .flow-line.highlight {
+            stroke-width: 2.5px !important;
+            stroke-dasharray: 6 3;
+            animation: flowDash 8s linear infinite;
+            opacity: 1 !important;
+            /* 激活时高亮全显，动感十足 */
+        }
+
+        @keyframes flowDash {
+            to {
+                stroke-dashoffset: -200;
+            }
+        }
+
+        /* 侧边信息栏 */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .inspector-panel {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 30px 24px;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            position: sticky;
+            top: 24px;
+            /* 剔除 height/all 属性的过渡，避免浏览器在每次 DOM 内容高度变化时，在 0.3 秒的时间内对 backdrop filter blur 进行几百帧的高负荷重复重绘（闪烁元凶） */
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+            min-height: 520px;
+            display: flex;
+            flex-direction: column;
+            will-change: opacity;
+        }
+
+        .inspector-panel.empty {
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            color: var(--text-muted);
+            border-style: dashed;
+        }
+
+        .inspector-panel.empty svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 16px;
+            stroke: var(--text-muted);
+            opacity: 0.5;
+        }
+
+        .inspector-content {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            opacity: 1;
+            transition: opacity 0.2s ease-in-out;
+        }
+
+        .inspector-header {
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding-bottom: 16px;
+        }
+
+        .inspector-badge {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .inspector-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 4px;
+        }
+
+        .inspector-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            word-break: break-all;
+        }
+
+        .inspector-body {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .inspector-section-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .inspector-desc {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .highlights-list {
+            list-style: none;
+        }
+
+        .highlights-list li {
+            position: relative;
+            padding-left: 20px;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+        }
+
+        .highlights-list li::before {
+            content: "✦";
+            position: absolute;
+            left: 0;
+            color: var(--highlight-color, var(--primary));
+        }
+
+        .promo-tag {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            border-left: 3px solid var(--highlight-color, var(--primary));
+        }
+
+        /* 顶部快速部署横幅 */
+        .hero-banner {
+            max-width: 1400px;
+            margin: 0 auto 24px auto;
+            padding: 0 48px; /* 增加到 48px 留白 */
+            width: 100%;
+        }
+
+        .banner-content {
+            background: rgba(17, 24, 39, 0.4);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 14px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .banner-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            flex-grow: 1;
+        }
+
+        .banner-tag {
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+            padding: 4px 10px;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        .banner-text {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .terminal-mini {
+            background: #06090e;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            flex-grow: 1;
+            max-width: 720px;
+            min-width: 280px;
+            position: relative;
+        }
+
+        .terminal-prompt {
+            color: var(--cyan);
+            font-weight: 700;
+            user-select: none;
+        }
+
+        .terminal-cmd {
+            color: #a7f3d0;
+            overflow-x: auto;
+            white-space: nowrap;
+            flex-grow: 1;
+            scrollbar-width: none;
+            /* Firefox */
+        }
+
+        .terminal-cmd::-webkit-scrollbar {
+            display: none;
+            /* Safari & Chrome */
+        }
+
+        .copy-btn-mini {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-secondary);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-weight: 600;
+        }
+
+        .copy-btn-mini:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .banner-right {
+            display: flex;
+            align-items: center;
+        }
+
+        .github-link-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 8px 14px;
+            border-radius: 10px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        /* 移动端/小屏幕布局自适应，安全退回到 24px 留白 */
+        @media (max-width: 768px) {
+            .hero-banner, main, .pitch-container {
+                padding: 0 24px !important;
+            }
+        }
+
+        .github-link-badge:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* 核心卖点推广区块 */
+        .pitch-container {
+            max-width: 1400px;
+            margin: 0 auto 60px auto;
+            padding: 0 48px; /* 增加到 48px 留白，防止贴紧浏览器边距 */
+        }
+
+        .pitch-title {
+            font-size: 1.8rem;
+            font-weight: 800;
+            text-align: center;
+            margin-bottom: 36px;
+            background: linear-gradient(90deg, #ffffff 40%, var(--text-secondary) 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .pitch-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+        }
+
+        .pitch-card {
+            background: rgba(17, 24, 39, 0.4);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s;
+        }
+
+        .pitch-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .pitch-icon {
+            font-size: 2rem;
+            margin-bottom: 16px;
+            display: inline-block;
+        }
+
+        .pitch-h {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 8px;
+        }
+
+        .pitch-p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* 底部 */
+        footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 40px 24px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        footer a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        footer a:hover {
+            color: var(--primary);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="top-bar"></div>
+
+    <header>
+        <div class="logo-area">
+            <h1 class="logo-title">
+                HotPlex Gateway
+                <span class="logo-badge">v1.19.0</span>
+            </h1>
+            <p class="logo-subtitle">AI Coding Agent 统一接入桥梁与核心控制网关</p>
+        </div>
+
+        <div class="header-actions">
+            <a href="https://github.com/hrygo/hotplex" target="_blank" class="github-btn">
+                <svg viewBox="0 0 24 24">
+                    <path
+                        d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577v-2.234c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22v3.293c0 .319.22.694.825.576C20.565 21.795 24 17.3 24 12c0-6.63-5.37-12-12-12z" />
+                </svg>
+                Star on GitHub
+            </a>
+        </div>
+    </header>
+
+    <!-- 快速部署与 GitHub 链接横幅 (位于主容器上方，全款对齐) -->
+    <section class="hero-banner">
+        <div class="banner-content">
+            <div class="banner-left">
+                <span class="banner-tag">极速上手</span>
+                <span class="banner-text">一键安装网关二进制：</span>
+                <div class="terminal-mini">
+                    <span class="terminal-prompt">$</span>
+                    <span class="terminal-cmd" id="install-command">curl -fsSL
+                        https://raw.githubusercontent.com/hrygo/hotplex/main/scripts/install.sh | bash</span>
+                    <button class="copy-btn-mini" id="btn-copy-install">复制命令</button>
+                </div>
+            </div>
+            <div class="banner-right">
+                <a href="https://github.com/hrygo/hotplex" target="_blank" class="github-link-badge">
+                    <svg viewBox="0 0 24 24" width="16" height="16">
+                        <path
+                            d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577v-2.234c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22v3.293c0 .319.22.694.825.576C20.565 21.795 24 17.3 24 12c0-6.63-5.37-12-12-12z"
+                            fill="currentColor" />
+                    </svg>
+                    <span>hrygo/hotplex</span>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <main>
+        <!-- 左侧 SVG 架构图 -->
+        <section class="diagram-container">
+            <div class="diagram-controls">
+                <button class="control-btn" id="btn-highlight-all">展示核心数据流</button>
+                <button class="control-btn active" id="btn-reset-zoom">重置视图</button>
+            </div>
+
+            <svg id="architecture-svg" viewBox="0 0 1020 950" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <!-- 渐变定义 -->
+                    <linearGradient id="grad-cyan" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#083344" />
+                        <stop offset="100%" stop-color="#0e7490" />
+                    </linearGradient>
+                    <linearGradient id="grad-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#2e1065" />
+                        <stop offset="100%" stop-color="#6d28d9" />
+                    </linearGradient>
+                    <linearGradient id="grad-pink" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#4c0519" />
+                        <stop offset="100%" stop-color="#be185d" />
+                    </linearGradient>
+                    <linearGradient id="grad-emerald" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#064e3b" />
+                        <stop offset="100%" stop-color="#047857" />
+                    </linearGradient>
+                    <linearGradient id="grad-orange" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#431407" />
+                        <stop offset="100%" stop-color="#c2410c" />
+                    </linearGradient>
+                    <linearGradient id="grad-slate" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#0f172a" />
+                        <stop offset="100%" stop-color="#334155" />
+                    </linearGradient>
+
+                    <!-- 悬停发光滤镜 -->
+                    <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="6" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                    <filter id="glow-purple" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="6" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                    <filter id="glow-emerald" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="6" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                    <filter id="glow-orange" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="6" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                    <filter id="glow-pink" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="6" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                    <filter id="glow-slate" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="6" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+
+                    <!-- 箭头定义 -->
+                    <marker id="arrow-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6"
+                        orient="auto-start-reverse">
+                        <path d="M 0 1 L 10 5 L 0 9 z" fill="#06b6d4" />
+                    </marker>
+                    <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6"
+                        orient="auto-start-reverse">
+                        <path d="M 0 1 L 10 5 L 0 9 z" fill="#8b5cf6" />
+                    </marker>
+                    <marker id="arrow-emerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6"
+                        orient="auto-start-reverse">
+                        <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981" />
+                    </marker>
+                    <marker id="arrow-orange" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6"
+                        orient="auto-start-reverse">
+                        <path d="M 0 1 L 10 5 L 0 9 z" fill="#f97316" />
+                    </marker>
+                    <marker id="arrow-pink" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6"
+                        orient="auto-start-reverse">
+                        <path d="M 0 1 L 10 5 L 0 9 z" fill="#d946ef" />
+                    </marker>
+                    <marker id="arrow-slate" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6"
+                        orient="auto-start-reverse">
+                        <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
+                    </marker>
+                </defs>
+
+                <!-- 网格背景 (微弱) -->
+                <g stroke="rgba(255, 255, 255, 0.02)" stroke-width="0.5">
+                    <line x1="0" y1="50" x2="1020" y2="50" />
+                    <line x1="0" y1="100" x2="1020" y2="100" />
+                    <line x1="0" y1="150" x2="1020" y2="150" />
+                    <line x1="0" y1="200" x2="1020" y2="200" />
+                    <line x1="0" y1="250" x2="1020" y2="250" />
+                    <line x1="0" y1="300" x2="1020" y2="300" />
+                    <line x1="0" y1="350" x2="1020" y2="350" />
+                    <line x1="0" y1="400" x2="1020" y2="400" />
+                    <line x1="0" y1="450" x2="1020" y2="450" />
+                    <line x1="0" y1="500" x2="1020" y2="500" />
+                    <line x1="0" y1="550" x2="1020" y2="550" />
+                    <line x1="0" y1="600" x2="1020" y2="600" />
+                    <line x1="0" y1="650" x2="1020" y2="650" />
+                    <line x1="0" y1="700" x2="1020" y2="700" />
+                    <line x1="0" y1="750" x2="1020" y2="750" />
+                    <line x1="0" y1="800" x2="1020" y2="800" />
+                    <line x1="0" y1="850" x2="1020" y2="850" />
+                    <line x1="0" y1="900" x2="1020" y2="900" />
+
+                    <line x1="100" y1="0" x2="100" y2="950" />
+                    <line x1="200" y1="0" x2="200" y2="950" />
+                    <line x1="300" y1="0" x2="300" y2="950" />
+                    <line x1="400" y1="0" x2="400" y2="950" />
+                    <line x1="500" y1="0" x2="500" y2="950" />
+                    <line x1="600" y1="0" x2="600" y2="950" />
+                    <line x1="700" y1="0" x2="700" y2="950" />
+                    <line x1="800" y1="0" x2="800" y2="950" />
+                    <line x1="900" y1="0" x2="900" y2="950" />
+                </g>
+
+                <!-- ================= 1. 接入层 (Cyan) ================= -->
+                <!-- 区域边界 -->
+                <rect x="20" y="30" width="980" height="130" rx="14" fill="rgba(6, 182, 212, 0.02)"
+                    stroke="rgba(6, 182, 212, 0.15)" stroke-width="1.5" stroke-dasharray="6 4" />
+                <text x="35" y="55" fill="#06b6d4" font-size="12" font-weight="700" letter-spacing="1">接入与渠道适配层 / ACCESS
+                    & MESSAGING CHANNELS</text>
+
+                <g class="arch-node" data-id="webchat" style="--glow-color: var(--cyan-glow);">
+                    <rect x="40" y="75" width="210" height="65" rx="10" fill="url(#grad-cyan)" stroke="#06b6d4"
+                        stroke-width="1.5" />
+                    <text x="145" y="102" fill="#ffffff" font-size="12.5" font-weight="700" text-anchor="middle">网页端聊天 UI (SPA)</text>
+                    <text x="145" y="122" fill="#a5f3fc" font-size="9.5" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">internal/webchat (Next.js)</text>
+                </g>
+
+                <g class="arch-node" data-id="slack" style="--glow-color: var(--cyan-glow);">
+                    <rect x="280" y="75" width="210" height="65" rx="10" fill="url(#grad-cyan)" stroke="#06b6d4"
+                        stroke-width="1.5" />
+                    <text x="385" y="102" fill="#ffffff" font-size="12.5" font-weight="700" text-anchor="middle">Slack 消息适配器</text>
+                    <text x="385" y="122" fill="#a5f3fc" font-size="9.5" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">Socket Mode / messaging/slack</text>
+                </g>
+
+                <g class="arch-node" data-id="feishu" style="--glow-color: var(--cyan-glow);">
+                    <rect x="520" y="75" width="210" height="65" rx="10" fill="url(#grad-cyan)" stroke="#06b6d4"
+                        stroke-width="1.5" />
+                    <text x="625" y="102" fill="#ffffff" font-size="12.5" font-weight="700"
+                        text-anchor="middle">飞书消息适配器</text>
+                    <text x="625" y="122" fill="#a5f3fc" font-size="9.5" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">WS + STT/TTS / messaging/feishu</text>
+                </g>
+
+                <g class="arch-node" data-id="sdks" style="--glow-color: var(--cyan-glow);">
+                    <rect x="760" y="75" width="210" height="65" rx="10" fill="url(#grad-cyan)" stroke="#06b6d4"
+                        stroke-width="1.5" />
+                    <text x="865" y="102" fill="#ffffff" font-size="12.5" font-weight="700" text-anchor="middle">多语言客户端 SDK</text>
+                    <text x="865" y="122" fill="#a5f3fc" font-size="9.5" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">Go / TS / Python / Java</text>
+                </g>
+
+                <!-- ================= 2. 协议与核心网关层 (Purple) ================= -->
+                <rect x="20" y="190" width="980" height="135" rx="14" fill="rgba(139, 92, 246, 0.02)"
+                    stroke="rgba(139, 92, 246, 0.15)" stroke-width="1.5" stroke-dasharray="6 4" />
+                <text x="35" y="215" fill="#a78bfa" font-size="12" font-weight="700" letter-spacing="1">网关核心与 AEP 协议层 /
+                    CORE GATEWAY & PROTOCOL</text>
+
+                <!-- 连接线 接入层 -> 网关层 (S型平滑流动曲线) -->
+                <path class="flow-line" d="M 145 140 C 145 180, 175 190, 175 230" stroke="#06b6d4" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-cyan)" />
+                <path class="flow-line" d="M 385 140 C 385 180, 500 190, 500 230" stroke="#06b6d4" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-cyan)" />
+                <path class="flow-line" d="M 625 140 C 625 180, 500 190, 500 230" stroke="#06b6d4" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-cyan)" />
+                <path class="flow-line" d="M 865 140 C 865 180, 825 190, 825 230" stroke="#06b6d4" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-cyan)" />
+
+                <g class="arch-node" data-id="aep-protocol" style="--glow-color: var(--primary-glow);">
+                    <rect x="40" y="235" width="270" height="65" rx="10" fill="url(#grad-purple)" stroke="#8b5cf6"
+                        stroke-width="1.5" />
+                    <text x="175" y="263" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">AEP v1
+                        协议引擎 (WebSocket)</text>
+                    <text x="175" y="283" fill="#ddd6fe" font-size="11" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">pkg/events & pkg/aep (AEP.v1)</text>
+                </g>
+
+                <g class="arch-node" data-id="bridge" style="--glow-color: var(--primary-glow);">
+                    <rect x="365" y="235" width="270" height="65" rx="10" fill="url(#grad-purple)" stroke="#8b5cf6"
+                        stroke-width="1.5" />
+                    <text x="500" y="263" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">Bridge
+                        协调器 & 转发流</text>
+                    <text x="500" y="283" fill="#ddd6fe" font-size="11" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">gateway/bridge.go (Backpressure)</text>
+                </g>
+
+                <g class="arch-node" data-id="session" style="--glow-color: var(--primary-glow);">
+                    <rect x="690" y="235" width="270" height="65" rx="10" fill="url(#grad-purple)" stroke="#8b5cf6"
+                        stroke-width="1.5" />
+                    <text x="825" y="263" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">会话管理器
+                        (5状态机)</text>
+                    <text x="825" y="283" fill="#ddd6fe" font-size="11" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">internal/session (SQLite/PostgreSQL)</text>
+                </g>
+
+                <!-- 网关内部连线 -->
+                <path class="flow-line" d="M 310 268 L 365 268" stroke="#8b5cf6" stroke-width="1.5" fill="none"
+                    marker-end="url(#arrow-purple)" />
+                <path class="flow-line" d="M 690 268 L 635 268" stroke="#8b5cf6" stroke-width="1.5" fill="none"
+                    marker-end="url(#arrow-purple)" />
+
+                <!-- ================= 3. BRAIN 智能与安全层 (Pink) ================= -->
+                <rect x="20" y="355" width="980" height="150" rx="14" fill="rgba(217, 70, 239, 0.02)"
+                    stroke="rgba(217, 70, 239, 0.15)" stroke-width="1.5" stroke-dasharray="6 4" />
+                <text x="35" y="380" fill="#f472b6" font-size="12" font-weight="700" letter-spacing="1">BRAIN 智能编排与安全防护层
+                    / BRAIN ENGINE & SECURITY</text>
+
+                <!-- 连线 网关层 -> BRAIN层 (S型平滑流曲线，完美汇聚) -->
+                <path class="flow-line" d="M 500 300 C 500 350, 140 350, 140 400" stroke="#8b5cf6" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-purple)" />
+
+                <g class="arch-node" data-id="brain-router" style="--glow-color: var(--pink-glow);">
+                    <rect x="40" y="405" width="200" height="75" rx="10" fill="url(#grad-pink)" stroke="#d946ef"
+                        stroke-width="1.5" />
+                    <text x="140" y="435" fill="#ffffff" font-size="14" font-weight="700"
+                        text-anchor="middle">意图路由器</text>
+                    <text x="140" y="452" fill="#fbcfe8" font-size="10" text-anchor="middle">意图识别 & LRU 快速缓存</text>
+                    <text x="140" y="468" fill="#fbcfe8" font-size="10" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">brain/router.go</text>
+                </g>
+
+                <g class="arch-node" data-id="bc-channel" style="--glow-color: var(--pink-glow);">
+                    <rect x="280" y="405" width="200" height="75" rx="10" fill="url(#grad-pink)" stroke="#d946ef"
+                        stroke-width="1.5" />
+                    <text x="380" y="435" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">B/C
+                        双通道配置注入</text>
+                    <text x="380" y="452" fill="#fbcfe8" font-size="10" text-anchor="middle">B:元认知/SOUL |
+                        C:上下文/内存</text>
+                    <text x="380" y="468" fill="#fbcfe8" font-size="10" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">agentconfig/BuildSystemPrompt</text>
+                </g>
+
+                <g class="arch-node" data-id="safety-guard" style="--glow-color: var(--pink-glow);">
+                    <rect x="520" y="405" width="200" height="75" rx="10" fill="url(#grad-pink)" stroke="#d946ef"
+                        stroke-width="1.5" />
+                    <text x="620" y="435" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">安全防护 &
+                        Sanitizer</text>
+                    <text x="620" y="452" fill="#fbcfe8" font-size="10" text-anchor="middle">XML Sanitizer / SSRF /
+                        临时文件</text>
+                    <text x="620" y="468" fill="#fbcfe8" font-size="10" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">brain/guard.go</text>
+                </g>
+
+                <g class="arch-node" data-id="llm-decorators" style="--glow-color: var(--pink-glow);">
+                    <rect x="760" y="405" width="200" height="75" rx="10" fill="url(#grad-pink)" stroke="#d946ef"
+                        stroke-width="1.5" />
+                    <text x="860" y="435" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">LLM
+                        客户端装饰链</text>
+                    <text x="860" y="452" fill="#fbcfe8" font-size="10" text-anchor="middle">智能重试/熔断/限流/缓存</text>
+                    <text x="860" y="468" fill="#fbcfe8" font-size="10" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">brain/llm</text>
+                </g>
+
+                <!-- Brain 内部连线 -->
+                <path class="flow-line" d="M 240 442 L 280 442" stroke="#d946ef" stroke-width="1.5" fill="none"
+                    marker-end="url(#arrow-pink)" />
+                <path class="flow-line" d="M 480 442 L 520 442" stroke="#d946ef" stroke-width="1.5" fill="none"
+                    marker-end="url(#arrow-pink)" />
+                <path class="flow-line" d="M 720 442 L 760 442" stroke="#d946ef" stroke-width="1.5" fill="none"
+                    marker-end="url(#arrow-pink)" />
+
+                <!-- ================= 4. 定时任务与自动化层 (Emerald) ================= -->
+                <rect x="20" y="535" width="980" height="120" rx="14" fill="rgba(16, 185, 129, 0.02)"
+                    stroke="rgba(16, 185, 129, 0.15)" stroke-width="1.5" stroke-dasharray="6 4" />
+                <text x="35" y="560" fill="#34d399" font-size="12" font-weight="700" letter-spacing="1">AI 定时任务与自动化引擎 /
+                    CRON & SCHEDULER ENGINE</text>
+
+                <!-- 连线 网关 -> Cron (协调式 S 型曲线) -->
+                <path class="flow-line" d="M 500 300 C 500 420, 260 450, 260 570" stroke="#8b5cf6" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-purple)" />
+
+                <g class="arch-node" data-id="cron-core" style="--glow-color: var(--emerald-glow);">
+                    <rect x="40" y="575" width="440" height="60" rx="10" fill="url(#grad-emerald)" stroke="#10b981"
+                        stroke-width="1.5" />
+                    <text x="260" y="602" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">Cron 调度中心
+                        (内存索引与 Tick 引擎)</text>
+                    <text x="260" y="620" fill="#a7f3d0" font-size="11" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">internal/cron (scheduler.go & timer.go)</text>
+                </g>
+
+                <g class="arch-node" data-id="cron-runner" style="--glow-color: var(--emerald-glow);">
+                    <rect x="520" y="575" width="440" height="60" rx="10" fill="url(#grad-emerald)" stroke="#10b981"
+                        stroke-width="1.5" />
+                    <text x="740" y="602" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">定时执行器 &
+                        消息通道回传</text>
+                    <text x="740" y="620" fill="#a7f3d0" font-size="11" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">executor.go & delivery.go (Feishu/Slack callback)</text>
+                </g>
+
+                <path class="flow-line" d="M 480 605 L 520 605" stroke="#10b981" stroke-width="1.5" fill="none"
+                    marker-end="url(#arrow-emerald)" />
+
+                <!-- ================= 5. 执行沙盒与 Worker (Orange) ================= -->
+                <rect x="20" y="685" width="980" height="120" rx="14" fill="rgba(249, 115, 22, 0.02)"
+                    stroke="rgba(249, 115, 22, 0.15)" stroke-width="1.5" stroke-dasharray="6 4" />
+                <text x="35" y="710" fill="#fb923c" font-size="12" font-weight="700" letter-spacing="1">AGENT 执行沙盒与物理进程层
+                    / WORKER PROCESS & SANDBOX</text>
+
+                <!-- 连线 Brain & Cron -> Worker (多端 S 型精准分配曲线) -->
+                <path class="flow-line" d="M 620 480 C 620 580, 175 620, 175 720" stroke="#d946ef" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-pink)" />
+                <path class="flow-line" d="M 740 635 C 740 670, 825 680, 825 720" stroke="#10b981" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-emerald)" />
+
+                <g class="arch-node" data-id="claude-code" style="--glow-color: var(--orange-glow);">
+                    <rect x="40" y="725" width="270" height="60" rx="10" fill="url(#grad-orange)" stroke="#f97316"
+                        stroke-width="1.5" />
+                    <text x="175" y="752" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">Claude
+                        Code 适配器</text>
+                    <text x="175" y="770" fill="#ffedd5" font-size="11" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">worker/claudecode (stdio pipeline)</text>
+                </g>
+
+                <g class="arch-node" data-id="other-workers" style="--glow-color: var(--orange-glow);">
+                    <rect x="365" y="725" width="270" height="60" rx="10" fill="url(#grad-orange)" stroke="#f97316"
+                        stroke-width="1.5" />
+                    <text x="500" y="752" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">Codex /
+                        OpenCode 适配器</text>
+                    <text x="500" y="770" fill="#ffedd5" font-size="11" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">worker/codexcli & worker/opencodeserver</text>
+                </g>
+
+                <g class="arch-node" data-id="proc-sandbox" style="--glow-color: var(--orange-glow);">
+                    <rect x="690" y="725" width="270" height="60" rx="10" fill="url(#grad-orange)" stroke="#f97316"
+                        stroke-width="1.5" />
+                    <text x="825" y="752" fill="#ffffff" font-size="14" font-weight="700"
+                        text-anchor="middle">物理进程生命周期沙盒</text>
+                    <text x="825" y="770" fill="#ffedd5" font-size="11" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">worker/proc (Unix PGID & Win Job)</text>
+                </g>
+
+                <!-- Worker 内部关联 (以优美的向下 U 型曲线汇聚进物理守护沙盒，完美规避中段节点的遮挡) -->
+                <path class="flow-line" d="M 175 785 C 175 815, 825 815, 825 785" stroke="#f97316" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-orange)" />
+                <path class="flow-line" d="M 500 785 C 500 810, 825 810, 825 785" stroke="#f97316" stroke-width="1.5"
+                    fill="none" marker-end="url(#arrow-orange)" />
+
+                <!-- ================= 6. 运维与周边支持层 (Slate) ================= -->
+                <rect x="20" y="830" width="980" height="100" rx="14" fill="rgba(100, 116, 139, 0.02)"
+                    stroke="rgba(100, 116, 139, 0.15)" stroke-width="1.5" stroke-dasharray="6 4" />
+                <text x="35" y="852" fill="#94a3b8" font-size="12" font-weight="700" letter-spacing="1">一体化 CLI 运维与系统支持
+                    / SYSTEM CLI, DEVOPS & OBSERVABILITY</text>
+
+                <g class="arch-node" data-id="cli-tools" style="--glow-color: var(--slate-glow);">
+                    <rect x="40" y="865" width="200" height="50" rx="8" fill="url(#grad-slate)" stroke="#64748b"
+                        stroke-width="1.5" />
+                    <text x="140" y="890" fill="#ffffff" font-size="13" font-weight="700" text-anchor="middle">一体化 CLI
+                        体系</text>
+                    <text x="140" y="904" fill="#cbd5e1" font-size="9" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">hotplex [onboard/doctor/status...]</text>
+                </g>
+
+                <g class="arch-node" data-id="system-services" style="--glow-color: var(--slate-glow);">
+                    <rect x="280" y="865" width="200" height="50" rx="8" fill="url(#grad-slate)" stroke="#64748b"
+                        stroke-width="1.5" />
+                    <text x="380" y="890" fill="#ffffff" font-size="13" font-weight="700"
+                        text-anchor="middle">跨平台系统服务管理器</text>
+                    <text x="380" y="904" fill="#cbd5e1" font-size="9" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">systemd / launchd / Windows SCM</text>
+                </g>
+
+                <g class="arch-node" data-id="updater" style="--glow-color: var(--slate-glow);">
+                    <rect x="520" y="865" width="200" height="50" rx="8" fill="url(#grad-slate)" stroke="#64748b"
+                        stroke-width="1.5" />
+                    <text x="620" y="890" fill="#ffffff" font-size="13" font-weight="700" text-anchor="middle">自更新机制
+                        (GitHub API)</text>
+                    <text x="620" y="904" fill="#cbd5e1" font-size="9" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">updater/ (SHA256 & Atomic replace)</text>
+                </g>
+
+                <g class="arch-node" data-id="observability" style="--glow-color: var(--slate-glow);">
+                    <rect x="760" y="865" width="200" height="50" rx="8" fill="url(#grad-slate)" stroke="#64748b"
+                        stroke-width="1.5" />
+                    <text x="860" y="890" fill="#ffffff" font-size="13" font-weight="700"
+                        text-anchor="middle">观测性与自托管文档门户</text>
+                    <text x="860" y="904" fill="#cbd5e1" font-size="9" font-family="'JetBrains Mono', monospace"
+                        text-anchor="middle">Prometheus / embed /docs SPA</text>
+                </g>
+            </svg>
+        </section>
+
+        <!-- 右侧交互检查器 (现独占侧边栏，完美对齐) -->
+        <section class="sidebar">
+            <div class="inspector-panel empty" id="inspector">
+                <!-- 空白状态 -->
+                <div class="inspector-empty" id="inspector-empty"
+                    style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; color: var(--text-muted);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round"
+                        stroke-linejoin="round"
+                        style="width: 48px; height: 48px; margin-bottom: 16px; stroke: var(--text-muted); opacity: 0.5;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <h3 style="color:#ffffff; margin-bottom: 8px; font-weight:600;">架构巡检仪已就绪</h3>
+                    <p style="font-size:0.9rem; padding: 0 20px; line-height: 1.6;">
+                        悬停或点击左侧架构图中的任何功能组件，即可实时反编译并预览其核心能力、源码位置与推广卖点！</p>
+                </div>
+                <!-- 实际内容容器 (原生 DOM 驻留，拒绝 innerHTML 高频重建带来的布局跳变与渲染卡顿) -->
+                <div class="inspector-content" id="inspector-content"
+                    style="display: none; flex-direction: column; opacity: 0; transition: opacity 0.15s ease-in-out;">
+                    <div class="inspector-header">
+                        <span class="inspector-badge" id="insp-badge"></span>
+                        <h3 class="inspector-title" id="insp-title"></h3>
+                        <div class="inspector-subtitle" id="insp-subtitle"></div>
+                    </div>
+                    <div class="inspector-body">
+                        <div class="inspector-desc" id="insp-desc"></div>
+
+                        <div>
+                            <h4 class="inspector-section-title" id="insp-section-title">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                    style="margin:0; opacity:0.8; vertical-align: middle; margin-right: 4px;">
+                                    <polygon
+                                        points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2">
+                                    </polygon>
+                                </svg>
+                                核心技术亮点
+                            </h4>
+                            <ul class="highlights-list" id="insp-highlights"></ul>
+                        </div>
+
+                        <div class="promo-tag" id="insp-promo"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 推广卖点 -->
+    <section class="pitch-container">
+        <h2 class="pitch-title">为什么要为你的 AI Agents 选择 HotPlex？</h2>
+        <div class="pitch-grid">
+            <div class="pitch-card">
+                <span class="pitch-icon">🌐</span>
+                <h3 class="pitch-h">AEP v1 统一通讯基准</h3>
+                <p class="pitch-p">采用自研 Agent Exchange Protocol v1 WebSocket 协议，抹平各种 Agent (如 Claude Code、OpenCode)
+                    输出流、状态迁移和交互语境的异构性，实现一套标准、全端分发。</p>
+            </div>
+            <div class="pitch-card">
+                <span class="pitch-icon">🧠</span>
+                <h3 class="pitch-h">独创 B/C 双通道上下文注入</h3>
+                <p class="pitch-p">B 通道强制注入宪法级元认知防御指令 (META-COGNITION)、人设 (SOUL) 与规则，防止攻击注入。C 通道热插拔用户上下文 (USER) 与压缩的历史记忆
+                    (MEMORY)，给 Agent 最精准的大脑。</p>
+            </div>
+            <div class="pitch-card">
+                <span class="pitch-icon">⚡</span>
+                <h3 class="pitch-h">AI 原生定时任务引擎</h3>
+                <p class="pitch-p">支持 Agent 直接利用自然语言在后台编排、创建并托管定时作业。通过 sqlite 持久化、Tick Loop 控制并发与 CAS
+                    锁定、执行指数退避重试，结果异步安全投递回 Slack 或飞书卡片。</p>
+            </div>
+            <div class="pitch-card">
+                <span class="pitch-icon">🛡️</span>
+                <h3 class="pitch-h">物理沙盒与高可用进程控制</h3>
+                <p class="pitch-p">针对 Coding Agent 编写代码的潜在崩溃与死锁，HotPlex 在跨平台层面封装了 Unix PGID 进程组与 Windows Job Object，具备 3
+                    阶段温和注销序列，彻底告别后台僵尸进程。</p>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p>© 2026 HotPlex Gateway Project. 基于 Apache License 2.0 开源协议发布。</p>
+        <p style="margin-top: 10px;">
+            <a href="https://github.com/hrygo/hotplex" target="_blank">GitHub 官方仓库</a> ·
+            <a href="http://localhost:8888/docs" target="_blank">自托管文档中心</a> ·
+            <a href="https://github.com/hrygo/hotplex/issues" target="_blank">提交反馈</a>
+        </p>
+    </footer>
+
+    <script>
+        // 核心组件数据定义
+        const archData = {
+            "webchat": {
+                badge: "Channel / 接入层",
+                title: "网页端聊天 Web Chat UI",
+                subtitle: "internal/webchat/ & webchat/",
+                color: "var(--cyan)",
+                desc: "网关原生集成的现代化高颜值 Next.js SPA 聊天应用。通过 `go:embed` 技术将其完全编译入单个 Go 网关二进制中，做到真正的一键开箱即用，免去复杂的前端部署工作。",
+                highlights: [
+                    "基于 Next.js 14 与 React 打造，提供极致流畅的交互体验",
+                    "通过 Go 内嵌文件系统零摩擦打包成单执行文件",
+                    "原生支持 AEP v1 协议流式输出与状态实时呈现",
+                    "内置 Admin 控制台，直观掌控 API Key、Bot 状态与用户会话"
+                ],
+                promo: "✨ 推广亮点：开箱即用！无需任何前端部署，双击单个 Go 二进制即可获得完整全栈 AI 编程助手体验。"
+            },
+            "slack": {
+                badge: "Channel / 接入层",
+                title: "Slack Socket Mode 适配器",
+                subtitle: "internal/messaging/slack/",
+                color: "var(--cyan)",
+                desc: "实现 Slack 的深度适配，支持 Socket Mode。不需要公网暴露端口或配置 webhook，网关可直接运行在内网或防火墙后，通过长连接安全接收 Slack 的各种事件和斜杠命令。",
+                highlights: [
+                    "支持 Socket Mode 协议，免去配置公网 SSL Webhook 的繁琐工作",
+                    "适配 Slack Block Kit 交互协议，优雅呈现交互式表单、卡片和按钮",
+                    "完整实现书签管理 (Bookmark)、反应 (Reaction) 以及文件上传下载能力",
+                    "智能会话绑定，支持 Channel 级与单聊 (IM) 级的 Agent 隔离"
+                ],
+                promo: "✨ 推广亮点：企业级内网部署神器！无需任何外部域名，直接在内网把 Claude Code 接入公司 Slack。"
+            },
+            "feishu": {
+                badge: "Channel / 接入层",
+                title: "飞书/Lark 多模态适配器",
+                subtitle: "internal/messaging/feishu/",
+                color: "var(--cyan)",
+                desc: "提供深度融合飞书生态的长连接适配，不仅支持标准的文字与交互卡片会话，还针对企业办公场景集成了多模态能力，打通语音转文字 (STT) 与 Edge-TTS 语音合成。",
+                highlights: [
+                    "专为国内企业环境定制，基于飞书 WS 协议接收消息和卡片点击事件",
+                    "融合 SenseVoice 等技术，实现语音下发指令直接触发 AI Agent 编程",
+                    "集成 Edge-TTS 引擎，使 Agent 能够将复杂的代码逻辑与诊断报告用人声朗读回传",
+                    "支持灵活的多 bot 注册，单网关可同时承载多个企业虚拟 Agent 人设"
+                ],
+                promo: "✨ 推广亮点：真正打通语音编程！在飞书里给 Agent 发一段语音，它自动写完代码还能用自然的语音给您汇报成果。"
+            },
+            "sdks": {
+                badge: "Channel / SDKs",
+                title: "多语言客户端 SDK 集成",
+                subtitle: "client/ & examples/",
+                color: "var(--cyan)",
+                desc: "为了方便开发者在自定义业务系统中快速调用 Coding Agent 的能力，HotPlex 封装并提供了多种主流编程语言的轻量级 SDK 客户端，实现了高可用的 AEP 协议通信底座。",
+                highlights: [
+                    "Go SDK 生产级可用，内置事件驱动编程模型与会话自动重连机制",
+                    "TypeScript/TS SDK 完美贴合 Web 浏览器环境与 React 框架",
+                    "Python SDK 原生支持 Asyncio，与各类数据科学或自动化脚本完美融合",
+                    "Java SDK 适配企业级服务端架构体系，提供完整的序列化/反序列化及异常容灾"
+                ],
+                promo: "✨ 推广亮点：全语言赋能！不仅仅是一个聊天 Bot，更能作为您现有内部开发系统、CI/CD 系统的 AI 编程原子插件。"
+            },
+            "aep-protocol": {
+                badge: "Protocol / 协议层",
+                title: "AEP v1 (Agent Exchange Protocol)",
+                subtitle: "pkg/events/ & pkg/aep/",
+                color: "var(--primary)",
+                desc: "自研的 AI Coding Agent 数据流控制协议。基于 WebSocket 传输层，定义了一套高度可扩展的统一 JSON/Binary 结构体，用于解决不同智能体（如 Stdio-Claude、Http-OCS）在通讯协议上的分裂。",
+                highlights: [
+                    "统一流式渲染（MessageDelta）及控制信令（SessionStatus、InitResponse）",
+                    "支持会话快照与重连令牌设计，在网络闪断时瞬间无感恢复会话状态",
+                    "平台无关的结构化卡片协议（Platform Card Payload），一次编写各平台自适应渲染",
+                    "严格的协议序列化与反序列化边界，为高并发事件传输打下高性能坚实基础"
+                ],
+                promo: "✨ 推广亮点：行业的协议基石！抹平不同 AI Agents 协议的异构性，构建标准的 AI 智能体接入网络规范。"
+            },
+            "bridge": {
+                badge: "Gateway Core / 网关核心",
+                title: "Bridge 核心编排器 & 转发流",
+                subtitle: "internal/gateway/bridge.go & bridge_forward.go",
+                color: "var(--primary)",
+                desc: "HotPlex 的生命周期协调大脑，专门处理 WebSocket 会话连接与后台 Agent 物理进程之间的事件转发和数据穿梭。在高负荷流式数据流下，Bridge 是保障网关不崩溃的核心。",
+                highlights: [
+                    "基于 Go 核心的 Single-Goroutine Event Loop 所有权模式，无死锁隐患",
+                    "优秀的流量背压 (Backpressure) 控制机制，拥堵时自动丢弃冗余 Delta 而保留 done/error",
+                    "内置 LLMRetryController 智能重试控制器，自动拦截由于网络闪断导致的 API 报错并指数退避重试",
+                    "细粒度的会话重置（/reset）与 Worker 重建编排逻辑"
+                ],
+                promo: "✨ 推广亮点：硬核并发保障！业界领先的背压控制和事件转发编排，面对数十轮代码流式高并发输出依然稳定丝滑。"
+            },
+            "session": {
+                badge: "Session Store / 会话存储",
+                title: "会话管理器 & SQL 驱动持久层",
+                subtitle: "internal/session/manager.go & dbutil/",
+                color: "var(--primary)",
+                desc: "负责维护用户的对话会话状态与生命周期。结合了极其严格的 5 状态机转移逻辑，通过多存储方言层（SQLite 与 PostgreSQL）确保用户的编程历史与配置永不丢失，并实现并发限制。",
+                highlights: [
+                    "严格限定 5 大状态机迁移图，防止乱序 WebSocket 信令破坏物理进程生命周期",
+                    "使用 UUIDv5 衍生算法，根据 Platform-User 确定性生成无冲突的唯一 Session ID",
+                    "内置 PoolManager，统一协调全局配额与单用户配额，防止恶意挤占物理服务器资源",
+                    "集成 sqlutil 与 WriteMu 写序列化器，在 SQLite 驱动下彻底消除 SQLITE_BUSY 并发锁冲突"
+                ],
+                promo: "✨ 推广亮点：高可用状态机！完备的会话生命周期管理与配额池控制，原生支持 PostgreSQL 弹性扩容，打通高密度企业级部署。"
+            },
+            "brain-router": {
+                badge: "Brain / 智能与安全层",
+                title: "Intent Router 意图路由器",
+                subtitle: "internal/brain/router.go",
+                color: "var(--pink)",
+                desc: "Brain 层的入口处理器。通过对用户输入的文本进行超快语义分析，快速判断用户的意图（例如是需要执行本地代码、触发定时器、修改系统配置还是单纯闲聊），并将请求定向分发给不同的处理单元。",
+                highlights: [
+                    "内置意图识别逻辑，自动匹配最适合的执行路径，大大减少无意义的 Agent 调用延迟",
+                    "支持 LRU 缓存命中机制，对高频重复的命令或问题执行极速短路响应",
+                    "与 Chat2Config 意图感知协同，允许用户通过一句话对网关的复杂策略进行热修改"
+                ],
+                promo: "✨ 推广亮点：极速意图匹配！比传统千篇一律地将消息推给大模型分析相比，HotPlex 具备极速本地/轻量意图路由和缓存短路，响应延迟低至毫秒级。"
+            },
+            "bc-channel": {
+                badge: "Brain / 智能与安全层",
+                title: "B/C 双通道配置注入系统",
+                subtitle: "internal/agentconfig/ BuildSystemPrompt",
+                color: "var(--pink)",
+                desc: "HotPlex 独树一帜的 Prompt 编译器。不同于常见的单系统 Prompt，它将对 Coding Agent 的约束划分为两大独立通道进行编译与组装，以极其优雅的方式解决了指令漂移和 Prompt 注入威胁。",
+                highlights: [
+                    "B 通道 (Directives) 约束机器人核心行为：内置 constitutional 级的 META-COGNITION、SOUL.md 人设、AGENTS.md 规范以及嵌入式 SKILLS.md 技术手册",
+                    "C 通道 (Context) 热插拔注入动态背景：注入当前登录的用户信息 USER.md 与经过上下文压缩的记忆 MEMORY.md",
+                    "严格的 fallback 继承机制：全局配置 → 渠道配置 → 单 Bot 配置，每一层均可被子层精确覆盖且命中终止"
+                ],
+                promo: "✨ 推广亮点：革命性的 B/C 双通道注入！将 Agent 的'宪法宪章'与'用户记忆'进行完美的强隔离与多级合并，确保 Agent 具备顶尖的遵从性且绝不跑题。"
+            },
+            "safety-guard": {
+                badge: "Brain / 智能与安全层",
+                title: "Safety Guard 安全防御与 XML Sanitizer",
+                subtitle: "internal/brain/guard.go & agentconfig/ loader",
+                color: "var(--pink)",
+                desc: "HotPlex 的企业级御林军。在输入/输出流量的咽喉要道设立屏障，自动检测并净化一切潜在的安全风险。尤其是为防御 AI Agent 在调用本地 Shell 和文件操作时的安全隐患进行了极致设计。",
+                highlights: [
+                    "宪法级 META-COGNITION 牢牢锁定于 B 通道首位，确立绝对防御基线",
+                    "内置 XML Sanitizer 强力净化器，阻断 Prompt 伪造 XML 标签试图越权和劫持 Gateway 的注入行为",
+                    "严格杜绝 Shell 直接调用，杜绝硬编码敏感路径，实施严苛的 SSRF 与路径穿越拦截",
+                    "针对 Windows 环境强制采用临时文件安全注入，彻底规避命令行 cmd.exe 字符串截断与逃逸陷阱"
+                ],
+                promo: "✨ 推广亮点：金融级防注入！独家研制的 XML 结构净化与 constitutional 元认知防御机制，在底层断绝了用户通过 Prompt 策反 Agent 的一切可能。"
+            },
+            "llm-decorators": {
+                badge: "Brain / LLM 客户端层",
+                title: "LLM 客户端装饰链与连接底座",
+                subtitle: "internal/brain/llm/ & internal/brain/init.go",
+                color: "var(--pink)",
+                desc: "网关与各大 LLM API (OpenAI, Anthropic 等) 交互的高性能通讯层。支持 4 层 API Key 级联发现。通过优雅的装饰器模式 (Decorator Pattern) 将网络层的所有高并发故障自愈能力封装成一条中间件链条。",
+                highlights: [
+                    "装饰器链：retry (自适应重试) → cache (高频命中间件) → rate limit (自适应限流) → circuit (自发性熔断) → metrics (链路指标)",
+                    "提供优雅的模型路由与动态切换支持，在目标模型 API 崩溃时自动平滑降级到备用大模型",
+                    "精准计算和统计 API Token 开销与成本估算，实时向网关管理员控制台输出链路监控"
+                ],
+                promo: "✨ 推广亮点：金刚石级网络韧性！内置自适应限流与网络断路熔断，能从最恶劣的网络环境里自动愈合，保证 AI 大脑永不断线。"
+            },
+            "cron-core": {
+                badge: "Cron / 定时任务与自动化层",
+                title: "AI 原生 Cron 调度中心与 Tick 引擎",
+                subtitle: "internal/cron/cron.go, timer.go & store.go",
+                color: "var(--emerald)",
+                desc: "HotPlex 特色组件，一个高性能定时作业调度系统。允许 Agent 直接以自然语言（如'提醒我每半小时喝杯水'）创建定时任务。包含内存高度优化的排序索引与基于 SQLite 的作业持久层，无惧网关重启。",
+                highlights: [
+                    "支持标准 `cron` 表达式、固定时间间隔（`every`）以及一次性执行（`at`）三种调度形式",
+                    "极致的 timerLoop 轮询引擎：通过 collectDue 进行到期作业收集，并采用并发 CAS 原子锁分配执行槽位",
+                    "通过 SQLite/PostgreSQL `ErrJobNotFound` 哨兵实现分布式/多网关下的幂等加载",
+                    "提供 YAML 批量配置导入加载器，实现开发人员快速定义预设运维脚本"
+                ],
+                promo: "✨ 推广亮点：首创 AI 原生定时器！让 Agent 自己为自己配置备忘录与自动化任务，即使网关重启，定时作业也能恢复运行、雷打不动。"
+            },
+            "cron-runner": {
+                badge: "Cron / 定时任务与自动化层",
+                title: "定时执行器 & 消息通道回传",
+                subtitle: "internal/cron/executor.go & delivery.go",
+                color: "var(--emerald)",
+                desc: "负责将 Cron Scheduler 到期的作业进行逻辑解包，动态还原 Session 上下文与环境变量，调用 AI Agent 执行，最后将执行产出进行多媒体排版，精准投递回原始触发的 Slack 频道或飞书卡片中。",
+                highlights: [
+                    "动态组装 session、还原 Platform-User 上下文凭证，模拟用户的实时交互输入",
+                    "为 job 注入隔离的内部环境变量，保障定时任务进程的安全运行",
+                    "在任务失败时，自动利用 `retry.go` 的指数退避逻辑重试以对抗偶发性网络拥堵",
+                    "深度定制飞书交互式卡片与 Slack Rich Message，自动呈递格式精美的代码运行报表与健康指标"
+                ],
+                promo: "✨ 推广亮点：闭环自动化！不仅仅是在后台悄悄跑，执行器会将完整的结果优雅打包发回群聊中，真正做到'下指令，定时跑，拿结果'闭环。"
+            },
+            "claude-code": {
+                badge: "Worker / 执行沙盒层",
+                title: "Claude Code 专用高性能适配器",
+                subtitle: "internal/worker/claudecode/",
+                color: "var(--orange)",
+                desc: "针对 Anthropic 官方最强 Coding 终端 Claude Code (Claude 3.7 Sonnet) 进行了极高拟真度的适配。接管其标准输入输出，实现多轮会话跟踪和完全透明的流式交互转发。",
+                highlights: [
+                    "基于标准 `stdio` 管道实现事件流式无损对接",
+                    "针对 `--print` 与 `--session-id` 参数深度调优，确保在并发会话下保持高度稳定性",
+                    "自动对 Claude Code 进行会话级别的状态清理与工作目录保护",
+                    "支持将 Agent 的各种本地操作系统工具调用过程透明且实时地通过 AEP v1 回传给用户审核"
+                ],
+                promo: "✨ 推广亮点：完美驾驭 Claude Code！业界最强的 Coding Agent，配上最懂它的 Go 语言网关适配层，一键化身企业生产力怪兽。"
+            },
+            "other-workers": {
+                badge: "Worker / 执行沙盒层",
+                title: "Codex CLI & OpenCode 多端适配器",
+                subtitle: "internal/worker/codexcli/ & worker/opencodeserver/",
+                color: "var(--orange)",
+                desc: "除了 Claude Code 外，HotPlex 还原生集成了对其他业界优秀 Agent 运行引擎的支持，均继承自通用的 `BaseWorker`，保持了极度纯粹和复用的核心代码体系。",
+                highlights: [
+                    "Codex CLI 适配器：支持传统的 `exec` 单次执行与 `app-server` 双态服务编排",
+                    "OpenCode Server 适配器：完美融合其单例进程守护逻辑，基于 HTTP 请求与服务端事件流 (SSE) 进行极速通信",
+                    "统一共享基类 `base.BaseWorker` 和 `MetadataHandler`，新增自定义 Agent 仅需继承并重写几个简单接口",
+                    "提供端到端的会话初始化四阶段（Init-Handshake-Auth-Ready）握手"
+                ],
+                promo: "✨ 推广亮点：一网打尽所有 Agent！超高兼容的 Worker 架构，未来任何新推出的 Agent CLI 均能在数小时内优雅接引。"
+            },
+            "proc-sandbox": {
+                badge: "Worker / 执行沙盒层",
+                title: "跨平台物理进程生命周期沙盒",
+                subtitle: "internal/worker/proc/",
+                color: "var(--orange)",
+                desc: "这是 HotPlex 运行在操作系统底层对 Coding Agent 进程进行强制物理隔离和管控的杀手级底座。在 Go 进程中直接调用外壳进程极易导致僵尸进程堆积，而本模块彻底解决了此类资源泄露灾难。",
+                highlights: [
+                    "在 POSIX/Unix 系统（macOS & Linux）上，将启动进程编入独立的 PGID 进程组实施隔离",
+                    "在 Windows 系统上，调用底层 SCM API 将 Agent 进程树强行绑定到 OS Job Object",
+                    "设计极其严谨的 3 阶段注销序列：首发 SIGTERM 友好注销 → 宽限 5 秒资源释放 → 终极 SIGKILL 物理剿灭",
+                    "支持 `--detached` 的独立 PGID 进程热重启，即便 Gateway 崩盘重启，Agent 也能维持原样运行"
+                ],
+                promo: "✨ 推广亮点：金融级系统稳定性！通过 PGID 进程组与 Job Object 两大护法，让由于 AI 误操作导致的僵尸进程与失控死循环化为历史。"
+            },
+            "cli-tools": {
+                badge: "Support / 运维与支持层",
+                title: "一体化 CLI 控制管理体系",
+                subtitle: "cmd/hotplex/ & internal/cli/",
+                color: "var(--slate)",
+                desc: "HotPlex 拒绝了庞杂零碎的工具文件堆砌，使用业界先进的 Cobra CLI 框架，将所有的开发、配置、排错、守护功能完美收纳进单个网关二进制中，提供了精美的终端输出与人机交互。",
+                highlights: [
+                    "hotplex onboard：极简交互式配置向导，支持自动检测 Slack & 飞书 API Token 并填写配置",
+                    "hotplex doctor：一键全栈诊断工具，深度剖析 ffmpeg、Go 环境、本地模型及网络情况",
+                    "hotplex status & dev-logs：开发环境下极其友好的实时状态轮询与彩斑日志流输出",
+                    "提供 config 审计、cron 任务 CRUD、security 防护墙动态开闭等超丰富子命令集"
+                ],
+                promo: "✨ 推广亮点：全流程命令行自闭环！集成了 onboard 和 doctor 二合一配置向导，让非技术人员也能在 3 分钟内完成全套网关调试。"
+            },
+            "system-services": {
+                badge: "Support / 运维与支持层",
+                title: "跨平台系统守护服务管理器",
+                subtitle: "cmd/hotplex/service_*.go & internal/service/",
+                color: "var(--slate)",
+                desc: "确保网关能在服务器上作为后台常驻守护进程稳定运行的跨平台驱动包。彻底抛弃了手写配置文件和编写脚本的麻烦，一行命令就能让系统级进程管理软件接管 HotPlex 的起停生杀。",
+                highlights: [
+                    "在 Linux 上，全自动生成并注册 Systemd unit 配置文件",
+                    "在 macOS 上，优雅对接 Launchd plist plist 并加载为用户/系统级 LaunchAgent",
+                    "在 Windows 上，直接注册并嵌入系统的 Service Control Manager (SCM)，免去启动脚本困扰",
+                    "支持 `--level system` 系统级特权启动和非 root 级用户后台常驻启动"
+                ],
+                promo: "✨ 推广亮点：一键守护运行！原生打通 Linux Systemd、macOS Launchd 和 Windows 驱动级 SCM 服务注册，真正实现企业级不间断自启动。"
+            },
+            "updater": {
+                badge: "Support / 运维与支持层",
+                title: "GitHub API 级自更新机制",
+                subtitle: "cmd/hotplex/update.go & internal/updater/",
+                color: "var(--slate)",
+                desc: "为了能够以极快速度在生产环境中应用 AI 领域的最新补丁，HotPlex 封装了一套自动检索和原子自替换的更新引擎。可在网关无损的前提下在数秒内完成核心版本的在线迭代。",
+                highlights: [
+                    "直接拉取 GitHub API 自动鉴别最新 Release 版本，展示变更日志（Changelog）",
+                    "通过 SHA256 指纹校验，确保下载的二进制没有在传输中被篡改或污染",
+                    "极佳的原子替换设计：利用临时文件无损下载，并在最后一步通过系统原子覆盖瞬间完成原址更新",
+                    "参数级更新链：支持 `hotplex update --restart` 更新后无缝优雅重启网关服务"
+                ],
+                promo: "✨ 推广亮点：无感自升华！单条 update 命令自动完成版本核对、指纹指引、原子覆盖与热重启动作，保证软件长青。"
+            },
+            "observability": {
+                badge: "Support / 运维与支持层",
+                title: "全链路观测性与自托管文档门户",
+                subtitle: "internal/metrics/ & internal/docs/out/",
+                color: "var(--slate)",
+                desc: "让 HotPlex 的每一行代码执行、每一个 Agent 调用以及每一次会话都成为可视化和可量化的数据。并且，网关内部集成了一套由静态 Markdown 资源编译而来的中文文档，提供超流畅的高清阅读体验。",
+                highlights: [
+                    "集成 Prometheus 指标收集器，输出会话总数、CPU占用、网关延迟及 API 耗用等核心观测值",
+                    "使用 log/slog 输出规范化的高性能 JSON 格式日志，与 ElasticSearch 等企业日志栈无缝挂接",
+                    "集成自托管文档门户，通过 `go:embed` 直接代理 `http://localhost:8888/docs` 访问",
+                    "完整的教程指南：Slack、飞书集成、人格定制、定时任务等核心领域全覆盖"
+                ],
+                promo: "✨ 推广亮点：看得见的架构！全透明的 Prometheus 指标追踪搭配内置自托管文档，彻底解决大型 Agent 系统的运维黑箱难题。"
+            }
+        };
+
+        // 交互逻辑
+        document.addEventListener("DOMContentLoaded", () => {
+            const svg = document.getElementById("architecture-svg");
+            const inspector = document.getElementById("inspector");
+            const nodes = document.querySelectorAll(".arch-node");
+            const btnHighlightAll = document.getElementById("btn-highlight-all");
+            const btnResetZoom = document.getElementById("btn-reset-zoom");
+            const flowLines = document.querySelectorAll(".flow-line");
+
+            // 获取静态驻留 DOM，避免 innerHTML 重构开销
+            const emptyEl = document.getElementById("inspector-empty");
+            const contentEl = document.getElementById("inspector-content");
+            const badgeEl = document.getElementById("insp-badge");
+            const titleEl = document.getElementById("insp-title");
+            const subtitleEl = document.getElementById("insp-subtitle");
+            const descEl = document.getElementById("insp-desc");
+            const highlightsEl = document.getElementById("insp-highlights");
+            const promoEl = document.getElementById("insp-promo");
+            const sectionTitleEl = document.getElementById("insp-section-title");
+
+            let isHighlighted = false;
+            let hoverTimeout = null;
+
+            // 为每个节点设置颜色变量以支持悬停发光
+            nodes.forEach(node => {
+                const id = node.getAttribute("data-id");
+                if (archData[id]) {
+                    node.style.setProperty("--glow-color", archData[id].color + "66");
+                }
+
+                // 悬停交互 (防抖微延迟，消除快速划过多个节点时的 DOM 震荡)
+                node.addEventListener("mouseenter", () => {
+                    if (node.classList.contains("selected")) return;
+
+                    if (hoverTimeout) clearTimeout(hoverTimeout);
+                    hoverTimeout = setTimeout(() => {
+                        showDetails(id);
+                    }, 40);
+                });
+
+                node.addEventListener("mouseleave", () => {
+                    if (hoverTimeout) clearTimeout(hoverTimeout);
+                });
+
+                // 点击交互
+                node.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    if (hoverTimeout) clearTimeout(hoverTimeout);
+
+                    nodes.forEach(n => n.classList.remove("selected"));
+                    node.classList.add("selected");
+                    showDetails(id, true);
+                    highlightRelatedLines(id);
+                });
+            });
+
+            // 点击空白重置详情
+            svg.addEventListener("click", () => {
+                nodes.forEach(n => n.classList.remove("selected"));
+                flowLines.forEach(l => l.classList.remove("highlight"));
+                resetInspector();
+            });
+
+            // 渲染详情函数 (纯量数据填充更新，不涉及父级模糊背板 backdrop filter 像素重绘)
+            function showDetails(id, isClick = false) {
+                // 如果当前已被点击锁定了其他节点，且当前仅是悬停动作，则不响应悬停更新
+                const currentSelected = document.querySelector(".arch-node.selected");
+                if (currentSelected && !isClick) return;
+
+                const data = archData[id];
+                if (!data) return;
+
+                // 渐出过渡，平滑数据切换
+                contentEl.style.opacity = "0";
+
+                setTimeout(() => {
+                    inspector.classList.remove("empty");
+                    inspector.style.borderStyle = "solid";
+                    inspector.style.borderColor = data.color + "44";
+
+                    // 动态计算高亮色以匹配侧边栏内容
+                    inspector.style.setProperty("--highlight-color", data.color);
+
+                    badgeEl.textContent = data.badge;
+                    badgeEl.style.background = data.color + "1a";
+                    badgeEl.style.border = `1px solid ${data.color}33`;
+                    badgeEl.style.color = data.color;
+
+                    titleEl.textContent = data.title;
+                    subtitleEl.textContent = data.subtitle;
+                    descEl.textContent = data.desc;
+
+                    sectionTitleEl.style.color = data.color;
+
+                    let highlightsHtml = "";
+                    data.highlights.forEach(hl => {
+                        highlightsHtml += `<li style="--highlight-color: ${data.color}">${hl}</li>`;
+                    });
+                    highlightsEl.innerHTML = highlightsHtml;
+
+                    promoEl.textContent = data.promo;
+                    promoEl.style.borderLeft = `3px solid ${data.color}`;
+                    promoEl.style.background = data.color + "08";
+
+                    emptyEl.style.display = "none";
+                    contentEl.style.display = "flex";
+
+                    // 启用 GPU 硬件加速平滑淡入
+                    requestAnimationFrame(() => {
+                        contentEl.style.opacity = "1";
+                    });
+                }, 50);
+            }
+
+            // 重置面板函数
+            function resetInspector() {
+                if (hoverTimeout) clearTimeout(hoverTimeout);
+
+                contentEl.style.opacity = "0";
+
+                setTimeout(() => {
+                    inspector.classList.add("empty");
+                    inspector.style.borderStyle = "dashed";
+                    inspector.style.borderColor = "var(--card-border)";
+
+                    contentEl.style.display = "none";
+                    emptyEl.style.display = "flex";
+                }, 100);
+            }
+
+            // 高亮关联线条逻辑
+            function highlightRelatedLines(id) {
+                flowLines.forEach(l => l.classList.remove("highlight"));
+
+                // 模拟根据节点高亮不同的流向线
+                if (id === "webchat" || id === "slack" || id === "feishu" || id === "sdks") {
+                    flowLines.forEach((l, idx) => {
+                        if (idx <= 3) l.classList.add("highlight");
+                    });
+                } else if (id === "aep-protocol" || id === "bridge" || id === "session") {
+                    flowLines.forEach((l, idx) => {
+                        if (idx === 4 || idx === 5 || idx === 6) l.classList.add("highlight");
+                    });
+                } else if (id === "brain-router" || id === "bc-channel" || id === "safety-guard" || id === "llm-decorators") {
+                    flowLines.forEach((l, idx) => {
+                        if (idx >= 7 && idx <= 10) l.classList.add("highlight");
+                    });
+                } else if (id === "cron-core" || id === "cron-runner") {
+                    flowLines.forEach((l, idx) => {
+                        if (idx === 11 || idx === 12 || idx === 13) l.classList.add("highlight");
+                    });
+                } else if (id === "claude-code" || id === "other-workers" || id === "proc-sandbox") {
+                    flowLines.forEach((l, idx) => {
+                        if (idx >= 14 && idx <= 18) l.classList.add("highlight");
+                    });
+                }
+            }
+
+            // 切换流动画按钮
+            btnHighlightAll.addEventListener("click", () => {
+                isHighlighted = !isHighlighted;
+                if (isHighlighted) {
+                    flowLines.forEach(l => l.classList.add("highlight"));
+                    btnHighlightAll.textContent = "停止动画流";
+                    btnHighlightAll.classList.add("active");
+                } else {
+                    flowLines.forEach(l => l.classList.remove("highlight"));
+                    btnHighlightAll.textContent = "展示核心数据流";
+                    btnHighlightAll.classList.remove("active");
+                }
+            });
+
+            // 重置视图按钮
+            btnResetZoom.addEventListener("click", () => {
+                nodes.forEach(n => n.classList.remove("selected"));
+                flowLines.forEach(l => l.classList.remove("highlight"));
+                isHighlighted = false;
+                btnHighlightAll.textContent = "展示核心数据流";
+                btnHighlightAll.classList.remove("active");
+                resetInspector();
+            });
+
+            // 复制命令行
+            const btnCopyInstall = document.getElementById("btn-copy-install");
+            const installCommand = document.getElementById("install-command").textContent.trim();
+
+            btnCopyInstall.addEventListener("click", () => {
+                navigator.clipboard.writeText(installCommand).then(() => {
+                    btnCopyInstall.textContent = "已复制！";
+                    btnCopyInstall.style.background = "var(--emerald)";
+                    btnCopyInstall.style.color = "#ffffff";
+                    setTimeout(() => {
+                        btnCopyInstall.textContent = "复制";
+                        btnCopyInstall.style.background = "rgba(255, 255, 255, 0.05)";
+                        btnCopyInstall.style.color = "var(--text-secondary)";
+                    }, 2000);
+                }).catch(err => {
+                    console.error("复制失败: ", err);
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>

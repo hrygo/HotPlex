@@ -59,8 +59,8 @@ func (d *Delivery) Deliver(ctx context.Context, job *CronJob, sessionKey string)
 	d.mu.Unlock()
 
 	if err := fn(ctx, job.Platform, job.PlatformKey, response); err != nil {
-		d.log.Warn("cron delivery: deliver failed",
-			"job_id", job.ID, "platform", job.Platform, "err", err)
+		d.log.Error("cron delivery: deliver failed — result permanently lost, no retry mechanism",
+			"job_id", job.ID, "name", job.Name, "platform", job.Platform, "response_len", len(response), "err", err)
 	}
 }
 

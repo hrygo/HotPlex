@@ -5,7 +5,7 @@
 ```bash
 # 1. 设置环境变量
 export HOTPLEX_GATEWAY_URL=ws://localhost:8888
-export HOTPLEX_SIGNING_KEY=your-256-bit-secret-key-min-32-chars
+export HOTPLEX_API_KEY=your-api-key
 
 # 2. 编译项目
 cd examples/java-client
@@ -35,9 +35,9 @@ java -jar target/hotplex-client-1.7.2-SNAPSHOT.jar
   - ErrorCode 枚举
   - SessionState 枚举
 
-- **安全**: JWT Token 生成器
-  - ES256 签名
-  - 与 Go 服务器兼容的密钥派生算法
+- **安全**: API Key + Bot ID 认证
+  - API Key 通过 X-API-Key header 发送
+  - Bot ID 通过 X-Bot-ID header 发送（多 bot 隔离）
 
 - **示例**: QuickStart.java
   - 最小可用示例
@@ -53,7 +53,6 @@ java -jar target/hotplex-client-1.7.2-SNAPSHOT.jar
 ```xml
 <properties>
     <java.version>17</java.version>
-    <jjwt.version>0.12.6</jjwt.version>
 </properties>
 
 <dependencies>
@@ -67,20 +66,6 @@ java -jar target/hotplex-client-1.7.2-SNAPSHOT.jar
     <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
-    </dependency>
-
-    <!-- JJWT for JWT tokens -->
-    <dependency>
-        <groupId>io.jsonwebtoken</groupId>
-        <artifactId>jjwt-api</artifactId>
-        <version>0.12.6</version>
-    </dependency>
-
-    <!-- BouncyCastle for ECDSA -->
-    <dependency>
-        <groupId>org.bouncycastle</groupId>
-        <artifactId>bcprov-jdk18on</artifactId>
-        <version>1.78</version>
     </dependency>
 
     <!-- SLF4J + Logback -->
@@ -127,8 +112,6 @@ examples/java-client/
 │   │   ├── ControlData.java
 │   │   ├── PongData.java
 │   │   └── ProtocolConstants.java
-│   └── security/
-│       └── JwtTokenGenerator.java     # JWT 生成器 (191 行)
 ├── src/main/resources/
 │   ├── application.yml              # Spring Boot 配置
 │   └── logback.xml                  # 日志配置
@@ -158,18 +141,6 @@ private static final Logger log = LoggerFactory.getLogger(HotPlexClient.class);
 ```java
 // 之前: addListener("done", handler)
 // 之后: on("done", handler)
-```
-
-### 问题 4: JWT Generator 参数不匹配
-**解决方案**: 添加构造函数重载，修复方法名
-```java
-// 添加了两参数构造函数
-public JwtTokenGenerator(String secret, String issuer) {
-    this(secret, issuer, "hotplex-gateway");
-}
-
-// 修复方法名: generate -> generateToken
-public String generateToken(String subject, List<String> scopes, long ttlSeconds)
 ```
 
 ## 构建结果
@@ -205,4 +176,3 @@ $ mvn clean package -DskipTests
 - ✅ Spring Boot 3.2.5
 - ✅ WebSocket RFC 6455
 - ✅ AEP v1 Protocol
-- ✅ ES256 JWT (与 Go 服务器兼容)

@@ -1,14 +1,15 @@
 # HotPlex Worker Gateway - Docker Compose
 #
 # Usage:
-#   Development:
-#     docker-compose up -d
+#   Development (SQLite):
+#     docker compose up -d
+#
+#   Development (PostgreSQL + pgvector):
+#     docker compose --profile postgres up -d
 #
 #   Production:
-#     docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-
-version: '3.8'
 
 services:
   gateway:
@@ -21,7 +22,7 @@ services:
     image: hotplex:latest
     container_name: hotplex
     restart: unless-stopped
-    
+
     # Use init to handle zombie processes (critical for spawning workers)
     init: true
 
@@ -29,20 +30,41 @@ services:
       - "${HOTPLEX_PORT:-8888}:8888"   # WebSocket gateway
       - "${HOTPLEX_ADMIN_PORT:-9999}:9999"   # Admin API
 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     environment:
       # Required secrets
       - HOTPLEX_JWT_SECRET=${HOTPLEX_JWT_SECRET:?HOTPLEX_JWT_SECRET is required}
-      - HOTPLEX_ADMIN_TOKEN_1=${HOTPLEX_ADMIN_TOKEN:-admin-token-dev}
+      - HOTPLEX_ADMIN_TOKEN_1=${HOTPLEX_ADMIN_TOKEN:-}
       - HOTPLEX_ADMIN_TOKEN_2=${HOTPLEX_ADMIN_TOKEN_2:-}
 
       # Optional configuration
       - HOTPLEX_LOG_LEVEL=${HOTPLEX_LOG_LEVEL:-info}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       - TZ=${TZ:-Asia/Shanghai}
-      - GOMEMLIMIT=6500MiB
-      
+      - GOMEMLIMIT=4096MiB
+
+      # Proxy (for AI workers accessing external APIs)
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal,.local,.internal
+
+      # Network binding (must be 0.0.0.0 inside container)
+      - HOTPLEX_GATEWAY_ADDR=0.0.0.0:8888
+      - HOTPLEX_ADMIN_ADDR=0.0.0.0:9999
+
       # Claude Code environment
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+
+      # Database — uncomment the two lines below to use PostgreSQL instead of SQLite
+      # sslmode=disable is safe within Docker network; use sslmode=prefer for non-Docker.
+      # - HOTPLEX_DB_DRIVER=postgres
+      # - HOTPLEX_DB_POSTGRES_DSN=postgres://hotplex:${POSTGRES_PASSWORD:-hotplex}@postgres:5432/hotplex?sslmode=disable
+
+      # Git identity (injected into container via entrypoint)
+      - GIT_USER_NAME=${GIT_USER_NAME:-}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
 
     volumes:
       # Configuration
@@ -52,6 +74,9 @@ services:
       - hotplex-data:/var/lib/hotplex/data
       - hotplex-worker-sessions:/home/hotplex/.claude
 
+      # Project workspaces (optional)
+      - ${HOTPLEX_PROJECTS_DIR:-./projects}:/home/hotplex/projects
+
       # Logs
       - hotplex-logs:/var/log/hotplex
 
@@ -59,22 +84,27 @@ services:
       - ./tls:/etc/hotplex/tls:ro
 
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9999/admin/health/ready"]
+      test: ["CMD", "curl", "-f", "http://localhost:9999/admin/health/ready"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 30s
 
     networks:
       - hotplex-network
 
-    # Security options
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
     # Resource limits
     deploy:
@@ -86,31 +116,95 @@ services:
           cpus: '1'
           memory: 2G
 
+  # PostgreSQL with pgvector (optional — uncomment to use instead of SQLite)
+  # When enabled, also set HOTPLEX_DB_DRIVER=postgres and HOTPLEX_DB_POSTGRES_DSN
+  # in the gateway environment section above.
+  # Usage: docker compose --profile postgres up -d
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: hotplex-postgres
+    restart: unless-stopped
+    shm_size: '512m'
+    profiles:
+      - postgres
+    # ⚠️ Development only: bind to localhost. Override POSTGRES_PASSWORD for production.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-hotplex}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hotplex}
+      - POSTGRES_DB=${POSTGRES_DB:-hotplex}
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=32MB
+      -c max_parallel_workers_per_gather=2
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hotplex}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - hotplex-network
+
   # Database backup sidecar
   backup:
-    image: alpine:3.21
+    image: postgres:16-alpine
     container_name: hotplex-backup
     restart: unless-stopped
     depends_on:
-      - gateway
+      postgres:
+        condition: service_healthy
+    profiles:
+      - postgres
     volumes:
-      - hotplex-data:/data:ro
       - backup-storage:/backups
     environment:
-      - BACKUP_INTERVAL=3600  # 1 hour
-      - RETENTION_DAYS=30
-    command: >
-      sh -c "
-        apk add --no-cache sqlite &&
-        mkdir -p /backups &&
+      - BACKUP_INTERVAL=${BACKUP_INTERVAL:-3600}
+      - RETENTION_DAYS=${RETENTION_DAYS:-30}
+      - PGHOST=postgres
+      - PGUSER=${POSTGRES_USER:-hotplex}
+      # ⚠️ PGPASSWORD uses POSTGRES_PASSWORD (default: "hotplex" — development only).
+      # For production, always set a strong password via environment or secrets.
+      - PGPASSWORD=${POSTGRES_PASSWORD:-hotplex}
+      - PGDATABASE=${POSTGRES_DB:-hotplex}
+    entrypoint: >
+      sh -c '
+        trap "echo Backup shutting down; exit 0" SIGTERM SIGINT
         while true; do
-          TIMESTAMP=$$(date +%Y%m%d-%H%M%S) &&
-          sqlite3 /data/hotplex.db \".backup '/backups/hotplex-$$TIMESTAMP.db'\" &&
-          find /backups -name '*.db' -mtime +$$RETENTION_DAYS -delete &&
-          echo \"Backup created: hotplex-$$TIMESTAMP.db at $$(date)\" &&
-          sleep $$BACKUP_INTERVAL
+          TIMESTAMP=$$(date +%Y%m%d-%H%M%S)
+          FILENAME="/backups/hotplex-$$TIMESTAMP.dump"
+          if pg_dump -Fc > "$$FILENAME"; then
+            echo "[$$(date)] Backup OK: $$FILENAME"
+            find /backups -name "*.dump" -mtime +$$RETENTION_DAYS -delete
+          else
+            echo "[$$(date)] Backup FAILED" >&2
+            rm -f "$$FILENAME"
+          fi
+          sleep $$BACKUP_INTERVAL &
+          wait $$!
         done
-      "
+      '
+    healthcheck:
+      test: ["CMD-SHELL", "test $$(find /backups -name '*.dump' -mmin -7200 | wc -l) -gt 0 || exit 1"]
+      interval: 1h
+      timeout: 10s
+      retries: 1
+      start_period: 5m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
     networks:
       - hotplex-network
 
@@ -126,6 +220,11 @@ services:
     volumes:
       - ./configs/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - hotplex-network
 
@@ -145,6 +244,11 @@ services:
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - hotplex-network
 
@@ -153,6 +257,7 @@ volumes:
   hotplex-worker-sessions:
   hotplex-logs:
   backup-storage:
+  postgres-data:
   prometheus-data:
   grafana-data:
 

@@ -29,6 +29,7 @@ export const EventKind = {
   Control: 'control',
   WorkerCommand: 'worker_command',
   ContextUsage: 'context_usage',
+  SkillsList: 'skills_list',
 } as const;
 
 export type EventKind = typeof EventKind[keyof typeof EventKind];
@@ -105,7 +106,8 @@ export type ControlAction = typeof ControlAction[keyof typeof ControlAction];
 export const WorkerType = {
   ClaudeCode: 'claude_code',
   OpenCodeServer: 'opencode_server',
-  PiMono: 'pi-mono',
+  CodexCLI: 'codex_cli',
+  ACP: 'acp',
 } as const;
 
 export type WorkerType = typeof WorkerType[keyof typeof WorkerType];

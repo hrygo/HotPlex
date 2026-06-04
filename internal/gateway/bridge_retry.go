@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/internal/worker"
 )
 
@@ -19,7 +20,9 @@ func (b *Bridge) CancelRetry(sessionID string) {
 }
 
 // autoRetry performs exponential backoff then sends the retry input to the worker.
-func (b *Bridge) autoRetry(ctx context.Context, w worker.Worker, sessionID string, attempt int) {
+// cancelCh is pre-registered by the caller to eliminate the race window between
+// goroutine launch and cancel channel registration.
+func (b *Bridge) autoRetry(ctx context.Context, w worker.Worker, sessionID string, attempt int, cancelCh chan struct{}) {
 	delay := b.retryCtrl.Delay(attempt)
 
 	// Notify user if enabled.
@@ -29,11 +32,7 @@ func (b *Bridge) autoRetry(ctx context.Context, w worker.Worker, sessionID strin
 		_ = b.hub.SendToSession(ctx, notifyEnv)
 	}
 
-	// Register cancel channel.
-	cancelCh := make(chan struct{})
-	b.retryCancelMu.Lock()
-	b.retryCancel[sessionID] = cancelCh
-	b.retryCancelMu.Unlock()
+	// Clean up cancel channel on exit (registered by caller before goroutine launch).
 	defer func() {
 		b.retryCancelMu.Lock()
 		delete(b.retryCancel, sessionID)
@@ -54,6 +53,7 @@ func (b *Bridge) autoRetry(ctx context.Context, w worker.Worker, sessionID strin
 
 	// Send retry input to worker.
 	b.log.Info("bridge: auto-retry sending input", "session_id", sessionID, "attempt", attempt)
+	metrics.RetryAttemptsTotal.WithLabelValues("llm_error").Inc()
 	if err := w.Input(ctx, b.retryCtrl.RetryInput(), nil); err != nil {
 		b.log.Warn("bridge: auto-retry input failed", "session_id", sessionID, "err", err)
 	}

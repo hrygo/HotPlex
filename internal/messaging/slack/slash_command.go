@@ -23,13 +23,20 @@ const (
 
 // SlashRateLimiter provides per-user cooldown for slash commands.
 type SlashRateLimiter struct {
-	cache *TTLCache[string, time.Time]
+	cache    *TTLCache[string, time.Time]
+	cooldown time.Duration
 }
 
 // NewSlashRateLimiter creates a new slash command rate limiter.
 func NewSlashRateLimiter() *SlashRateLimiter {
+	return NewSlashRateLimiterWithCooldown(slashCooldown)
+}
+
+// NewSlashRateLimiterWithCooldown creates a slash command rate limiter with a custom cooldown.
+func NewSlashRateLimiterWithCooldown(cooldown time.Duration) *SlashRateLimiter {
 	return &SlashRateLimiter{
-		cache: NewTTLCache[string, time.Time](slashEntryTTL, slashSweepInterval),
+		cache:    NewTTLCache[string, time.Time](slashEntryTTL, slashSweepInterval),
+		cooldown: cooldown,
 	}
 }
 
@@ -40,7 +47,7 @@ func (r *SlashRateLimiter) Allow(userID string) bool {
 	r.cache.Do(func(items map[string]ttlEntry[time.Time]) {
 		now := time.Now()
 		e, ok := items[userID]
-		if ok && now.Sub(e.Value) < slashCooldown {
+		if ok && now.Sub(e.Value) < r.cooldown {
 			return
 		}
 		items[userID] = ttlEntry[time.Time]{
@@ -152,7 +159,7 @@ func (a *Adapter) deriveSessionIDFromCommand(cmd slack.SlashCommand) string {
 	if conn != nil {
 		workDir = conn.WorkDir()
 	}
-	envelope := a.Bridge().MakeSlackEnvelope(cmd.TeamID, cmd.ChannelID, "", cmd.UserID, "", workDir, a.botID)
+	envelope := a.makeEnvelope(cmd.TeamID, cmd.ChannelID, "", cmd.UserID, "", workDir)
 	if envelope == nil {
 		return ""
 	}

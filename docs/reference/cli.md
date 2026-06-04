@@ -2,8 +2,6 @@
 title: HotPlex CLI 完整参考
 weight: 4
 description: HotPlex 命令行工具所有命令和标志的详尽参考文档
-persona: developer|enterprise
-difficulty: intermediate
 ---
 
 # HotPlex CLI 完整参考
@@ -36,6 +34,7 @@ hotplex
 ├── config           # 配置管理
 │   └── validate     # 验证配置文件
 ├── onboard          # 交互式配置向导
+├── install          # 安装二进制到 PATH
 ├── update           # 自更新
 ├── service          # 系统服务管理
 │   ├── install      # 安装服务
@@ -112,6 +111,7 @@ hotplex gateway stop
 ```bash
 hotplex gateway restart       # 重启，保留原配置
 hotplex gateway restart -d    # 重启为后台守护进程
+hotplex gateway restart --detached  # Worker-initiated restart（独立进程安全隔离）
 ```
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
@@ -119,6 +119,9 @@ hotplex gateway restart -d    # 重启为后台守护进程
 | `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
 | `--dev` | | `bool` | `false` | 开发模式 |
 | `--daemon` | `-d` | `bool` | `false` | 后台守护进程模式 |
+| `--detached` | | `bool` | `false` | 从 Worker 进程内部安全重启 Gateway。Fork 独立 PGID 的 helper 进程执行重启，与调用方 Worker 的生命周期完全隔离。内置 60s 冷却期防止循环重启 |
+
+> `--detached` 适用于 AI Agent（Cron 任务或聊天指令）触发的 Gateway 重启。普通运维场景使用 `gateway restart` 即可。
 
 ---
 
@@ -218,7 +221,7 @@ hotplex doctor --json              # JSON 输出（用于脚本集成）
 
 ### `hotplex security`
 
-对 HotPlex 配置运行安全审计。检查 TLS 设置、SSRF 防护、JWT 配置和访问策略。
+对 HotPlex 配置运行安全审计。检查 TLS 设置、SSRF 防护和访问策略。
 
 **示例**：
 
@@ -249,13 +252,11 @@ hotplex security --json            # JSON 输出
 ```bash
 hotplex config validate                        # 验证默认配置
 hotplex config validate -c /path/to/config.yaml
-hotplex config validate --strict               # 同时检查密钥配置
 ```
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
 | `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
-| `--strict` | | `bool` | `false` | 严格模式，同时验证必需的密钥（JWT、Admin Token 等）是否已设置 |
 
 ---
 
@@ -293,6 +294,29 @@ hotplex onboard --non-interactive \
 | `--feishu-group-policy` | `string` | `allowlist` | 飞书群组策略：`open`、`allowlist`、`disabled` |
 | `--install-service` | `bool` | `false` | 在非交互模式下同时安装为系统服务 |
 | `--service-level` | `string` | `user` | 服务级别：`user` 或 `system`（配合 `--install-service`） |
+
+---
+
+## 二进制安装
+
+### `hotplex install`
+
+将 hotplex 二进制安装到 PATH 中的目录。若已在 PATH 中且内容相同则为 no-op；若二进制不同则原地更新。
+
+安装到新位置时，自动将目标目录添加到 PATH（通过 shell RC 文件 `~/.zshrc`/`~/.bashrc` 或 Windows 用户环境变量）。
+
+**示例**：
+
+```bash
+hotplex install              # 安装到默认位置 (~/.local/bin)
+hotplex install --path /usr/local/bin  # 安装到指定目录
+hotplex install --force                # 强制重新安装
+```
+
+| 标志 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--path` | `string` | `~/.local/bin` | 目标安装目录 |
+| `--force` | `bool` | `false` | 即使已安装也重新安装 |
 
 ---
 
@@ -713,6 +737,7 @@ hotplex cron create \
 | `--expires-at` | | `string` | | 否 | 自动禁用时间（RFC3339 格式） |
 | `--platform` | | `string` | | 否 | 目标投递平台：`slack`、`feishu`、`cron`（未设置时根据 `bot_id` 关联的 session 平台信息推断；若推断失败则默认为 `cron`，不投递结果） |
 | `--platform-key` | | `string` | | 否 | 平台路由键（JSON 对象），如 `'{"channel_id":"C123"}'` |
+| `--worker-type` | | `string` | | 否 | AI Agent 引擎类型：`claude_code`、`opencode_server`、`codex_cli`、`acp`。未设置时使用平台默认 |
 | `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex cron list`

@@ -873,7 +873,7 @@ Batch 6: 3.14.2 (hotplex-setup Skill 重构 — 核心交付物)
 | 3.11 配置预览 | `internal/cli/onboard/wizard.go` | 新增 `displayPreview` |
 | 3.12 Agent 模板 | `internal/cli/onboard/templates/*.md` + `onboard.go` | 增量增强 + 面板引导 |
 | 3.13 STT 引导 | `internal/cli/onboard/wizard.go` | 修改 `stepSTTCheck`（签名变更） |
-| 3.14 Onboard↔Skill | `onboard.go` + `.agent/skills/hotplex-setup/SKILL.md` | 桥接提示 + Skill 重构 |
+| 3.14 Onboard↔Skill | onboard.go + .agents/skills/hotplex-setup/SKILL.md | 桥接提示 + Skill 重构 |
 
 ---
 

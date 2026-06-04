@@ -6,21 +6,21 @@ Cobra CLI entry points for the HotPlex gateway binary. Root command in main.go, 
 ## STRUCTURE
 ```
 cmd/hotplex/
-  main.go            (~54 lines)  cobra root: register gateway, doctor, security, onboard, version subcommands
-  gateway_run.go     (~530 lines) gateway run: DI pipeline decomposed into initLogging, initOrphanCleanup, initStores, shutdownGateway
-  gateway_cmd.go     (~185 lines) gateway subcommand: start/stop/restart + daemon launcher; preserves config path across restarts
-  routes.go          (~127 lines) HTTP route registration: /ws (gateway), /admin/*, /health, /metrics
-  admin_adapters.go  (~116 lines) admin provider adapters: bridge concrete types to admin.Provider interfaces
-  messaging_init.go  (~233 lines) messaging adapter lifecycle: iterate enabled platforms → New → Configure → SetHub/SetSM → Start; STT engine setup
-  doctor.go          (~150 lines) doctor subcommand: run DefaultRegistry checkers, render structured report
-  security.go        (~182 lines) security subcommand: path validation, env isolation checks
-  onboard.go         (~105 lines) onboard subcommand: launch interactive wizard, generate config
-  config_cmd.go      (~61 lines)  config subcommand: validate, dump, show current config
-  status.go          (~95 lines)  status subcommand: check gateway process status via PID file
-  banner.go          (~167 lines) startup banner: ASCII art + config summary + endpoint URLs
-  dev.go             (~29 lines)  dev subcommand: start gateway + webchat concurrently
-  pid.go             (~124 lines) gateway state management: JSON PID file with config path + dev mode, discovery, stop, waitForProcessExit
-  version.go         (~46 lines)  version subcommand: print version string
+  main.go            cobra root: register gateway, doctor, security, onboard, version subcommands
+  gateway_run.go     gateway run: DI pipeline decomposed into initLogging, initOrphanCleanup, initStores, shutdownGateway
+  gateway_cmd.go     gateway subcommand: start/stop/restart + daemon launcher; preserves config path across restarts
+  routes.go          HTTP route registration: /ws (gateway), /admin/*, /health, /metrics
+  admin_adapters.go  admin provider adapters: bridge concrete types to admin.Provider interfaces; botListerAdapter for multi-bot registry
+  messaging_init.go  messaging adapter lifecycle: multi-bot init (platforms × bots loop), fillSlackExtras/fillFeishuExtras, startup validation, STT engine setup
+  doctor.go          doctor subcommand: run DefaultRegistry checkers, render structured report
+  security.go        security subcommand: path validation, env isolation checks
+  onboard.go         onboard subcommand: launch interactive wizard, generate config
+  config_cmd.go      config subcommand: validate, dump, show current config
+  status.go          status subcommand: check gateway process status via PID file
+  banner.go          startup banner: ASCII art + config summary + endpoint URLs
+  dev.go             dev subcommand: start gateway + webchat concurrently
+  pid.go             gateway state management: JSON PID file with config path + dev mode, discovery, stop, waitForProcessExit
+  version.go         version subcommand: print version string
   banner_art.txt                  ASCII art banner content
 ```
 
@@ -32,7 +32,7 @@ cmd/hotplex/
 | Signal handler | `gateway_run.go` | SIGINT/SIGTERM → cancel ctx → ordered shutdown |
 | Shutdown order | `gateway_run.go` | signal → cancel → tracing → hub → configWatcher → sessionMgr → HTTP server |
 | HTTP route registration | `routes.go` | `/ws`, `/admin/*`, `/health`, `/metrics` — add new routes here |
-| Messaging adapter wiring | `messaging_init.go` | `startMessagingAdapters()`: iterate config → Register → Configure → Start |
+| Messaging adapter wiring | `messaging_init.go` | `startMessagingAdapters()`: multi-bot loop (platforms × bots) → validate → Register → Configure → Start; `resolveSlackBot`/`resolveFeishuBot` per-bot config lookup |
 | STT engine setup | `messaging_init.go` | STT engine creation per platform: local/persistent/fallback |
 | Gateway flags | `serve.go` | `-config`, `-addr`, `-log-level` etc. → Viper binding |
 | GatewayDeps struct | `serve.go` | Holds all runtime deps: Hub, SM, Bridge, ConfigStore, LLMRetryController |
@@ -57,9 +57,9 @@ type GatewayDeps struct {
 **Messaging init sequence**
 1. Iterate `config.Messaging.Slack/Feishu` → skip if `!Enabled`
 2. `messaging.New(platformType)` → adapter instance
-3. `adapter.Configure(platformConfig)` → apply credentials/policies
-4. `adapter.SetHub/SetSM/SetHandler/SetBridge` → inject dependencies
-5. `adapter.Start(ctx)` → connect to platform (Socket Mode / WS)
+3. `adapter.ConfigureWith(AdapterConfig)` → inject Hub/Handler/Bridge/Gate/Extras
+4. `adapter.Start(ctx)` → connect to platform (Socket Mode / WS)
+5. `msgBridge.SetAdapter(adapter)` → register adapter for botID resolution
 
 **Route registration (routes.go)**
 - `/ws` → Hub.HandleHTTP (WebSocket upgrade)

@@ -3,7 +3,7 @@
 # Sensible defaults for both dev and prod. Override via:
 #   1. Inheritance: config-dev.yaml / config-prod.yaml (inherits this file)
 #   2. Environment variables: HOTPLEX_* (highest priority, auto-detected if key exists here)
-#   3. Secrets provider: JWT secret, admin tokens (never in config files)
+#   3. Secrets provider: admin tokens (never in config files)
 #
 # Code defaults live in internal/config/config.go:Default().
 
@@ -40,7 +40,7 @@ admin:
   addr: "localhost:9999"
   # Tokens must be provided via HOTPLEX_ADMIN_TOKEN_1..N env vars
   tokens: []
-  default_scopes: ["session:read", "stats:read", "health:read", "admin:write"]
+  default_scopes: ["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]
   ip_whitelist_enabled: false
   allowed_cidrs: ["127.0.0.0/8", "10.0.0.0/8"]
   rate_limit_enabled: true
@@ -52,6 +52,26 @@ admin:
 # ─────────────────────────────────────────────────────────────────────────────
 
 db:
+  # Driver: "sqlite" (default) or "postgres".
+  # When set to "postgres", the postgres sub-config is used.
+  driver: "sqlite"
+
+  # ── SQLite configuration (default) ─────────────────────────────────────
+  # Legacy flat fields (path, wal_mode, etc.) are also supported for backward
+  # compatibility. When both flat and structured fields are present, the
+  # structured fields take precedence.
+  sqlite:
+    path: ~/.hotplex/data/hotplex.db
+    wal_mode: true
+    busy_timeout: 5s
+    max_open_conns: 3         # 1 writer + 2 readers for shared session/event store
+    vacuum_threshold: 0.2     # VACUUM when 20%+ free pages
+    cache_size_kib: 8192
+    mmap_size_mib: 64
+    wal_autocheckpoint: 2000
+
+  # Legacy flat fields (backward compatible, maps to sqlite.*).
+  # These are DEPRECATED — use the structured sqlite.* format instead.
   path: ~/.hotplex/data/hotplex.db
   events_path: ""           # Deprecated: events table lives in hotplex.db
   wal_mode: true
@@ -62,6 +82,12 @@ db:
   mmap_size_mib: 64
   wal_autocheckpoint: 2000
 
+  # ── PostgreSQL configuration (optional) ────────────────────────────────
+  # Uncomment and set driver: "postgres" to use PostgreSQL instead of SQLite.
+  # postgres:
+  #   dsn: "postgres://user:password@localhost:5432/hotplex?sslmode=prefer"
+  #   max_open_conns: 25
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECURITY & AUTH
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,12 +96,36 @@ security:
   api_key_header: "X-API-Key"
   # APIKeys must be provided via HOTPLEX_SECURITY_API_KEY_1..N env vars
   api_keys: []
+  # api_key_users maps API key values (or env var names) to user identities.
+  # When set, the resolved userID flows into session isolation (UUIDv5 key,
+  # SEC-008 cross-user rejection, per-user quotas). Without mapping, all keys
+  # resolve to "api_user" (shared namespace).
+  # Example (env var names resolved at load time):
+  #   api_key_users:
+  #     HOTPLEX_SECURITY_API_KEY_1: "alice"
+  #     HOTPLEX_SECURITY_API_KEY_2: "bob"
+  # Or with literal key values:
+  #   api_key_users:
+  #     "sk-actual-key-value": "alice"
+  api_key_users: {}
+  # Resolver chain: DB (Admin API CRUD) → YAML config. DB entries override config.
+  # No configuration needed — the chain is always active when the table exists.
   tls_enabled: false
   tls_cert_file: "/etc/hotplex/tls/server.crt"
   tls_key_file: "/etc/hotplex/tls/server.key"
   allowed_origins:
     - "*"
-  jwt_audience: "hotplex-gateway"
+  # Content-Security-Policy header served with the embedded webchat SPA and
+  # docs portal. Leave empty to use the package-level default, which is
+  # INTENTIONALLY permissive: connect-src uses the CSP scheme keywords
+  # (http: / https: / ws: / wss:) so the SPA can reach any backend host
+  # without configuration — required for zero-config remote deployments.
+  # A startup WARN log fires when this default is in effect to flag the
+  # production exposure. Pin a strict directive to silence the warning and
+  # restrict the SPA, e.g.:
+  #   csp: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://192.168.1.100:9999 ws://192.168.1.100:9999 wss://*; img-src 'self' data: blob:; font-src 'self' data:"
+  # Can be overridden at runtime by HOTPLEX_SECURITY_CSP env var.
+  csp: ""
 
   # Work directory security settings (convention + configuration)
   # Program defaults (convention over configuration):
@@ -122,6 +172,12 @@ worker:
 
   # Extra environment variables for all worker processes (highest priority).
   # These override all other env sources.
+  # NOTE: these go to workers via cmd.Env (env.go Phase 7), NOT via
+  # --settings JSON (removed in commit fixing #622 — that path broke CCR
+  # which appends its own --settings, causing Claude to error out).
+  # For network env (NO_PROXY, HTTP_PROXY, etc.), the HOTPLEX_WORKER_<NAME>
+  # .env mechanism is preferred — it only sets cmd.Env without polluting
+  # worker.environment defaults.
   environment:
     - GH_TOKEN=${HOTPLEX_WORKER_GH_TOKEN}
     - GITHUB_TOKEN=${HOTPLEX_WORKER_GITHUB_TOKEN}
@@ -158,6 +214,46 @@ worker:
     ready_timeout: 10s
     ready_poll_interval: 200ms
     http_timeout: 30s
+
+  codex_cli:
+    # Command to start Codex CLI worker. Default: "codex"
+    command: "codex"
+    # Model name. Empty = use Codex default model from ~/.codex/config.toml
+    model: ""
+    # Sandbox mode: read-only, workspace-write, danger-full-access
+    sandbox: "workspace-write"
+    # Approval mode: untrusted, on-request, never
+    approval_mode: "never"
+    # Ephemeral sessions (don't persist to disk)
+    ephemeral: true
+    # Process startup timeout
+    startup_timeout: 30s
+    # Use persistent app-server mode (default) instead of one-shot exec
+    use_app_server: true
+    # Idle drain timeout for app-server mode before killing process
+    idle_drain_period: 30m
+
+  # ACP (Agent Communication Protocol) — universal worker for any ACP-compatible agent.
+  # Communicates via JSON-RPC 2.0 over stdio.
+  acp:
+    # Command to start ACP agent. Use space to separate subcommand args.
+    # Override via HOTPLEX_WORKER_ACP_COMMAND environment variable.
+    command: "hermes acp"
+    # Auto-approve permission requests from the agent (no user confirmation needed).
+    # WARNING: auto_approve: true grants full tool access without human review.
+    # Consider keeping false in production environments.
+    auto_approve: false
+    # Extra arguments appended after the command (e.g., model selection, verbose mode).
+    # Override via HOTPLEX_WORKER_ACP_ARGS environment variable.
+    # Note: env var is split on whitespace; quoted values with spaces are not supported.
+    # args:
+    #   - "--model"
+    #   - "claude-sonnet-4-6"
+    # Enable protocol-level debug tracing to ~/.hotplex/logs/acp-trace-*.jsonl.
+    # Override via HOTPLEX_WORKER_ACP_DEBUG environment variable.
+    # WARNING: trace files contain full prompts and agent responses, including
+    # potentially sensitive data. Enable only for debugging and delete after use.
+    debug: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AGENT PERSONALITY & SKILLS (B/C Channels)
@@ -221,12 +317,35 @@ messaging:
     require_mention: true
     # Override shared defaults here if needed, e.g.:
     # tts_provider: "edge"
+    # Assistant status branding (optional):
+    # display_name: "HotPlex AI"
+    # icon_emoji: ":robot_face:"
+    # Multi-bot support (uncomment to use):
+    # bots:
+    #   - name: tech-support
+    #     bot_token: xoxb-xxx
+    #     app_token: xapp-xxx
+    #     soul: tech-support
+    #   - name: hr-bot
+    #     bot_token: xoxb-yyy
+    #     app_token: xapp-yyy
+    #     soul: hr-assistant
 
   feishu:
     enabled: false
     require_mention: true
     # Override shared defaults here if needed, e.g.:
     # tts_provider: "edge"
+    # Multi-bot support (uncomment to use):
+    # bots:
+    #   - name: tech-support
+    #     app_id: cli_xxx
+    #     app_secret: xxx
+    #     soul: tech-support
+    #   - name: hr-bot
+    #     app_id: cli_yyy
+    #     app_secret: yyy
+    #     soul: hr-assistant
 
 # ── Cron Scheduler ─────────────────────────────────────────────────────────
 # AI-native cronjob engine: natural language prompt as payload, results

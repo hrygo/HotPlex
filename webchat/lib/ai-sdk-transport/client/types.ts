@@ -242,6 +242,18 @@ export interface ContextSkillInfo {
   names?: string[];
 }
 
+export interface SkillsListData {
+  skills: SkillEntry[];
+  total: number;
+  filter?: string;
+}
+
+export interface SkillEntry {
+  name: string;
+  description: string;
+  source: string;
+}
+
 // ============================================================================
 // Init Handshake Types (from internal/gateway/init.go)
 // ============================================================================
@@ -257,6 +269,7 @@ export interface InitData {
 
 export interface InitAuth {
   token?: string;
+  bot_id?: string;
 }
 
 export interface InitConfig {
@@ -354,6 +367,7 @@ export interface ServerEventDataMap {
   [EventKind.Pong]: PongData;
   [EventKind.Control]: ControlData;
   [EventKind.ContextUsage]: ContextUsageData;
+  [EventKind.SkillsList]: SkillsListData;
 }
 
 export interface ServerEventEnvelopeMap {
@@ -375,11 +389,11 @@ export interface ServerEventEnvelopeMap {
   [EventKind.Pong]: Envelope<PongData>;
   [EventKind.Control]: Envelope<ControlData>;
   [EventKind.ContextUsage]: Envelope<ContextUsageData>;
+  [EventKind.SkillsList]: Envelope<SkillsListData>;
 }
 
 // ============================================================================
 // Utility Types
-// ============================================================================
 
 export type DeepPartial<T> = {
   [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];

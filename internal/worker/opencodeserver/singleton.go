@@ -3,12 +3,16 @@ package opencodeserver
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +23,7 @@ import (
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/internal/worker/proc"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // SingletonProcessManager manages a single shared `opencode serve` process
@@ -46,6 +51,14 @@ type SingletonProcessManager struct {
 	state    singletonState
 	crashCh  chan struct{} // closed when process exits unexpectedly
 
+	// EventBus dispatches events from the global SSE stream to individual sessions.
+	busMu       sync.RWMutex
+	subscribers map[string]chan *events.Envelope
+	sseCancel   context.CancelFunc
+
+	// Converter maps OCS BusEvents to AEP envelopes.
+	converter *Converter
+
 	idleTimer *time.Timer
 }
 
@@ -69,11 +82,13 @@ func NewSingletonProcessManager(log *slog.Logger, cfg config.OpenCodeServerConfi
 		IdleConnTimeout:     90 * time.Second,
 	}
 	return &SingletonProcessManager{
-		log:       log.With("component", "opencode-server-singleton"),
-		client:    &http.Client{Timeout: cfg.HTTPTimeout, Transport: transport},
-		sseClient: &http.Client{Transport: transport}, // no Timeout for SSE
-		cfg:       cfg,
-		crashCh:   make(chan struct{}),
+		log:         log.With("component", "opencode-server-singleton"),
+		client:      &http.Client{Timeout: cfg.HTTPTimeout, Transport: transport},
+		sseClient:   &http.Client{Transport: transport}, // no Timeout for SSE
+		cfg:         cfg,
+		crashCh:     make(chan struct{}),
+		subscribers: make(map[string]chan *events.Envelope),
+		converter:   NewConverter(),
 	}
 }
 
@@ -132,8 +147,34 @@ func (s *SingletonProcessManager) Release() {
 	}
 }
 
+// Subscribe returns a channel that receives AEP events for the given session ID.
+func (s *SingletonProcessManager) Subscribe(sessionID string) chan *events.Envelope {
+	s.busMu.Lock()
+	defer s.busMu.Unlock()
+
+	if ch, ok := s.subscribers[sessionID]; ok {
+		return ch
+	}
+
+	ch := make(chan *events.Envelope, 256)
+	s.subscribers[sessionID] = ch
+	s.log.Debug("opencode-server-singleton: subscribed", "session_id", sessionID)
+	return ch
+}
+
+// Unsubscribe removes the subscription for the given session ID.
+func (s *SingletonProcessManager) Unsubscribe(sessionID string) {
+	s.busMu.Lock()
+	defer s.busMu.Unlock()
+
+	if ch, ok := s.subscribers[sessionID]; ok {
+		delete(s.subscribers, sessionID)
+		close(ch)
+		s.log.Debug("opencode-server-singleton: unsubscribed", "session_id", sessionID)
+	}
+}
+
 // Shutdown forcefully terminates the process regardless of reference count.
-// Called during gateway shutdown after all workers have been stopped.
 func (s *SingletonProcessManager) Shutdown(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,12 +186,24 @@ func (s *SingletonProcessManager) Shutdown(ctx context.Context) {
 		s.idleTimer = nil
 	}
 
+	if s.sseCancel != nil {
+		s.sseCancel()
+	}
+
 	if s.proc != nil {
 		s.log.Info("opencode-server-singleton: shutdown, killing process")
 		_ = s.proc.Kill()
 		s.proc = nil
 		s.refs = 0
 	}
+
+	// Close all active subscriptions.
+	s.busMu.Lock()
+	for id, ch := range s.subscribers {
+		close(ch)
+		delete(s.subscribers, id)
+	}
+	s.busMu.Unlock()
 }
 
 // IsRunning reports whether the singleton process is currently running.
@@ -177,6 +230,7 @@ func (s *SingletonProcessManager) PID() int {
 // startProcessLocked starts the opencode serve process. Caller must hold s.mu.
 func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error {
 	s.state = stateStarting
+	s.converter.Reset()
 	s.log.Info("opencode-server-singleton: starting opencode serve process")
 
 	// Allocate an ephemeral port.
@@ -235,6 +289,11 @@ func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error 
 
 	// Monitor process exit in background.
 	go s.monitorProcess()
+
+	// Start global SSE reader for all sessions.
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	s.sseCancel = sseCancel
+	go s.readGlobalSSE(sseCtx)
 
 	return nil
 }
@@ -329,6 +388,12 @@ func (s *SingletonProcessManager) monitorProcess() {
 	s.state = stateIdle
 	s.proc = nil
 
+	// Cancel the global SSE reader so it doesn't leak into the next lifecycle.
+	if s.sseCancel != nil {
+		s.sseCancel()
+		s.sseCancel = nil
+	}
+
 	// Notify crash subscribers if process died unexpectedly while sessions are active.
 	if wasRunning && refs > 0 {
 		s.log.Warn("opencode-server-singleton: process crashed", "exit_code", code, "refs", refs)
@@ -338,6 +403,16 @@ func (s *SingletonProcessManager) monitorProcess() {
 		s.log.Info("opencode-server-singleton: process exited", "exit_code", code, "refs", refs)
 	}
 	s.mu.Unlock()
+
+	// Close all subscriber channels outside s.mu to avoid lock nesting with busMu.
+	if wasRunning {
+		s.busMu.Lock()
+		for id, ch := range s.subscribers {
+			close(ch)
+			delete(s.subscribers, id)
+		}
+		s.busMu.Unlock()
+	}
 }
 
 // startIdleDrainLocked starts a timer to kill the process when idle.
@@ -359,8 +434,207 @@ func (s *SingletonProcessManager) startIdleDrainLocked() {
 
 // buildEnv creates the environment for the opencode serve process.
 func (s *SingletonProcessManager) buildEnv() []string {
-	return base.BuildEnv(worker.SessionInfo{}, openCodeSrvEnvBlocklist, "opencode-server")
+	env := base.BuildEnv(worker.SessionInfo{}, openCodeSrvEnvBlocklist, "opencode-server")
+	env = append(env, "OPENCODE_EXPERIMENTAL_EVENT_SYSTEM=true")
+	if s.cfg.Password != "" {
+		env = append(env, "OPENCODE_SERVER_PASSWORD="+s.cfg.Password)
+	}
+	return env
 }
+
+// readGlobalSSE connects to the OCS global event stream and dispatches events to session channels.
+func (s *SingletonProcessManager) readGlobalSSE(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("opencode-server-singleton: readGlobalSSE panic", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+
+	s.mu.Lock()
+	sseURL := s.httpAddr + "/global/event"
+	s.mu.Unlock()
+
+	var attempts int
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if attempts >= sseMaxReconnects {
+			s.log.Error("opencode-server-singleton: SSE max reconnects exceeded", "attempts", attempts)
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", sseURL, http.NoBody)
+		if err != nil {
+			s.log.Error("opencode-server-singleton: create SSE request", "err", err)
+			return
+		}
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Cache-Control", "no-cache")
+
+		resp, err := s.sseClient.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			attempts++
+			s.log.Warn("opencode-server-singleton: SSE connect error, reconnecting",
+				"attempt", attempts, "err", err)
+			s.sseBackoffSleep(ctx, attempts)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			_ = resp.Body.Close()
+			attempts++
+			s.log.Warn("opencode-server-singleton: SSE non-200 status, reconnecting",
+				"status", resp.StatusCode, "attempt", attempts, "body", string(body))
+			s.sseBackoffSleep(ctx, attempts)
+			continue
+		}
+
+		s.log.Debug("opencode-server-singleton: global SSE connected", "url", sseURL)
+
+		gotData := false
+		reader := bufio.NewReader(resp.Body)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				_ = resp.Body.Close()
+				if ctx.Err() != nil {
+					return
+				}
+				if errors.Is(err, io.EOF) {
+					if gotData {
+						attempts = 0
+						s.log.Debug("opencode-server-singleton: global SSE stream ended, reconnecting")
+					} else {
+						attempts++
+						s.log.Debug("opencode-server-singleton: global SSE empty stream, reconnecting with backoff",
+							"attempt", attempts)
+						s.sseBackoffSleep(ctx, attempts)
+					}
+					break
+				}
+				s.log.Warn("opencode-server-singleton: global SSE read error, reconnecting", "err", err)
+				break
+			}
+
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			gotData = true
+			attempts = 0
+			data := strings.TrimPrefix(line, "data: ")
+
+			// Parse and dispatch.
+			s.dispatchOCSEvent([]byte(data))
+		}
+	}
+}
+
+// dispatchOCSEvent parses a raw OCS event and forwards the converted AEP envelopes
+// to the appropriate session channel.
+func (s *SingletonProcessManager) dispatchOCSEvent(data []byte) {
+	var evt ocsGlobalEvent
+	if err := json.Unmarshal(data, &evt); err != nil {
+		return
+	}
+
+	if evt.Payload.Type == "sync" || evt.Payload.Type == "server.connected" ||
+		evt.Payload.Type == "server.heartbeat" || evt.Payload.Type == "global.disposed" {
+		return
+	}
+
+	// session.error may have no sessionID — route via directory or skip.
+	var props struct {
+		SessionID string `json:"sessionID"`
+	}
+	if err := json.Unmarshal(evt.Payload.Properties, &props); err != nil {
+		return
+	}
+	sessionID := props.SessionID
+	if sessionID == "" {
+		// session.error can have optional sessionID — dispatch to all subscribers.
+		if evt.Payload.Type == ocsSessionError {
+			s.dispatchToAllSubscribers(evt.Payload.Properties)
+		}
+		return
+	}
+
+	// Delegate to converter.
+	envs := s.converter.Convert(sessionID, evt.Payload.Type, evt.Payload.Properties)
+	for _, env := range envs {
+		s.sendToSubscriber(sessionID, env)
+	}
+}
+
+// sendToSubscriber delivers a single envelope to the session's channel.
+func (s *SingletonProcessManager) sendToSubscriber(sessionID string, env *events.Envelope) {
+	s.busMu.RLock()
+	ch, ok := s.subscribers[sessionID]
+	if !ok {
+		s.busMu.RUnlock()
+		return
+	}
+	select {
+	case ch <- env:
+	default:
+		s.log.Warn("opencode-server-singleton: session channel full, dropping event",
+			"session_id", sessionID, "type", env.Event.Type)
+	}
+	s.busMu.RUnlock()
+}
+
+// dispatchToAllSubscribers sends session.error to every active subscriber.
+func (s *SingletonProcessManager) dispatchToAllSubscribers(props json.RawMessage) {
+	s.busMu.RLock()
+	defer s.busMu.RUnlock()
+	for sessionID := range s.subscribers {
+		envs := s.converter.Convert(sessionID, ocsSessionError, props)
+		ch := s.subscribers[sessionID]
+		for _, env := range envs {
+			select {
+			case ch <- env:
+			default:
+				s.log.Warn("opencode-server-singleton: session channel full, dropping error event",
+					"session_id", sessionID)
+			}
+		}
+	}
+}
+
+func (s *SingletonProcessManager) sseBackoffSleep(ctx context.Context, attempt int) {
+	dur := min(sseBackoffInitial*time.Duration(1<<min(attempt, 5)), sseBackoffMax)
+	select {
+	case <-ctx.Done():
+	case <-time.After(dur):
+	}
+}
+
+type ocsGlobalEvent struct {
+	Directory string `json:"directory"`
+	Payload   struct {
+		Type       string          `json:"type"`
+		Properties json.RawMessage `json:"properties"`
+	} `json:"payload"`
+}
+
+var (
+	sseMaxReconnects  = 50
+	sseBackoffInitial = 100 * time.Millisecond
+	sseBackoffMax     = 10 * time.Second
+)
 
 // --- package-level singleton ---
 

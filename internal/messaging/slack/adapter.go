@@ -3,6 +3,7 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,7 +15,9 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging/phrases"
 	"github.com/hrygo/hotplex/internal/messaging/stt"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/events"
 
 	"runtime/debug"
@@ -32,6 +35,14 @@ const (
 	mediaTTL         = 24 * time.Hour
 	maxMessageLength = 3800            // Slack limit is ~4000
 	errPrefix        = "\u26a0\ufe0f " // ⚠️
+	// handlerMsgTimeout controls the context timeout for HandleTextMessage.
+	// Covers Bridge.Handle → session start → HTTP request (createSession, initSessionConn).
+	// Does NOT cover acquireServer's process fork (proc.Start is not context-aware).
+	// Set longer than cmd timeout because LLM agentic turns (multi-tool) can take minutes.
+	handlerMsgTimeout = 300 * time.Second
+	// handlerCmdTimeout controls the context timeout for CmdControl/CmdWorker paths.
+	// These are lightweight control-plane operations that should complete quickly.
+	handlerCmdTimeout = 60 * time.Second
 )
 
 // Subtypes that should never be processed.
@@ -78,6 +89,7 @@ type Adapter struct {
 	socketMode         *socketmode.Client
 	botID              string
 	teamID             string
+	injectExclude      []string
 	userCache          *UserCache
 	statusMgr          *StatusManager
 	isAssistantCapable atomic.Bool
@@ -85,6 +97,11 @@ type Adapter struct {
 	transcriber        stt.Transcriber
 	turnSummaryEnabled bool
 	ttsPipeline        *TTSPipeline
+	phrases            *phrases.Phrases
+	Extras             map[string]any
+	botName            string
+	displayName        string
+	iconEmoji          string
 
 	rateLimiter   *ChannelRateLimiter
 	slashLimiter  *SlashRateLimiter
@@ -95,7 +112,14 @@ func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformS
 
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 
-func (a *Adapter) GetBotID() string { return a.botID }
+func (a *Adapter) GetBotID() string           { return a.botID }
+func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
+
+func (a *Adapter) SetPhrases(p *phrases.Phrases) {
+	if p != nil {
+		a.phrases = p
+	}
+}
 
 func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 	// Call base to set hub/sm/handler/bridge.
@@ -107,7 +131,9 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 
 	// Bridge reference and workdir.
 	if config.Bridge != nil {
-		SetWorkDir(config.Bridge.WorkDir())
+		if a.statusMgr != nil {
+			a.statusMgr.SetWorkDir(config.Bridge.WorkDir())
+		}
 	}
 
 	// Shared: gate, backoff delays.
@@ -123,8 +149,29 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 	if v, ok := config.Extras["turn_summary_enabled"].(bool); ok {
 		a.turnSummaryEnabled = v
 	}
+	if p, ok := config.Extras["phrases"].(*phrases.Phrases); ok && p != nil {
+		a.phrases = p
+	} else {
+		a.phrases = phrases.Defaults()
+	}
 	if p, ok := config.Extras["tts_pipeline"].(*TTSPipeline); ok && p != nil {
 		a.ttsPipeline = p
+	}
+
+	a.Extras = config.Extras
+
+	if v, ok := config.Extras["inject_exclude"].([]string); ok {
+		a.injectExclude = v
+	}
+
+	if config.BotName != "" {
+		a.botName = config.BotName
+	}
+	if v := config.ExtrasString("display_name"); v != "" {
+		a.displayName = v
+	}
+	if v := config.ExtrasString("icon_emoji"); v != "" {
+		a.iconEmoji = v
 	}
 
 	return nil
@@ -313,11 +360,15 @@ func (a *Adapter) runSocketMode(ctx context.Context) {
 }
 
 func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsAPIEvent) {
-	msgEvent, ok := event.InnerEvent.Data.(*slackevents.MessageEvent)
-	if !ok {
-		return
+	switch e := event.InnerEvent.Data.(type) {
+	case *slackevents.MessageEvent:
+		a.handleMessageEvent(ctx, e, event.TeamID)
+	case *slackevents.AppHomeOpenedEvent:
+		a.handleAppHomeOpened(ctx, e)
 	}
+}
 
+func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.MessageEvent, teamID string) {
 	if msgEvent.BotID != "" {
 		a.Log.Debug("slack: skipping bot message", "bot_id", msgEvent.BotID)
 		return
@@ -344,7 +395,6 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 		return
 	}
 	text = messaging.SanitizeText(text)
-	teamID := event.TeamID
 
 	channelType := ChannelGroup
 	if channelID != "" && channelID[0] == 'D' {
@@ -447,22 +497,24 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 	case messaging.CmdControl:
 		conn := a.GetOrCreateConn(channelID, threadTS)
 		if conn != nil {
-			conn.handlerMu.Lock()
-			defer conn.handlerMu.Unlock()
+			defer conn.lockHandlerMu()()
 		}
-		a.handleTextControlCommand(ctx, teamID, channelID, threadTS, userID, cmd.Control)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
+		defer cmdCancel()
+		a.handleTextControlCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Control)
 		return
 	case messaging.CmdWorker:
 		conn := a.GetOrCreateConn(channelID, threadTS)
 		if conn != nil {
 			conn.messageTS = msgEvent.TimeStamp
-			conn.handlerMu.Lock()
-			defer conn.handlerMu.Unlock()
+			defer conn.lockHandlerMu()()
 		}
 		if a.isAssistantCapable.Load() && threadTS != "" {
 			_ = a.SetAssistantStatus(ctx, channelID, threadTS, "Processing "+cmd.Worker.Label+"...")
 		}
-		a.handleTextWorkerCommand(ctx, teamID, channelID, threadTS, userID, cmd.Worker)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
+		defer cmdCancel()
+		a.handleTextWorkerCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Worker)
 		return
 	}
 
@@ -473,7 +525,7 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 
 	// Set initial assistant status (native API for paid workspaces)
 	if a.isAssistantCapable.Load() && threadTS != "" {
-		_ = a.SetAssistantStatus(ctx, channelID, threadTS, "Initializing...")
+		_ = a.SetAssistantStatus(ctx, channelID, threadTS, a.phrases.Random("status"))
 	}
 
 	if hasVoice {
@@ -484,6 +536,10 @@ func (a *Adapter) handleEventsAPI(ctx context.Context, event slackevents.EventsA
 
 	if err := a.HandleTextMessage(ctx, platformMsgID, channelID, teamID, threadTS, userID, text); err != nil {
 		a.Log.Warn("slack: handle message failed", "err", err, "channel", channelID, "thread", threadTS, "user", userID)
+		if errors.Is(err, context.DeadlineExceeded) {
+			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
+				"⚠️ Request timed out. The operation took too long and was cancelled. Please try again.")
+		}
 	}
 }
 
@@ -505,14 +561,31 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 		return fmt.Errorf("slack: adapter closed, dropping message for channel %s", channelID)
 	}
 
-	envelope := a.Bridge().MakeSlackEnvelope(teamID, channelID, threadTS, userID, text, conn.WorkDir(), a.botID)
+	envelope := a.makeEnvelope(teamID, channelID, threadTS, userID, text, conn.WorkDir())
 	if envelope == nil {
 		return fmt.Errorf("slack: failed to build envelope")
 	}
 
-	conn.handlerMu.Lock()
-	defer conn.handlerMu.Unlock()
-	return a.Bridge().Handle(ctx, envelope, conn)
+	defer conn.lockHandlerMu()()
+	msgCtx, cancel := context.WithTimeout(ctx, handlerMsgTimeout)
+	defer cancel()
+	return a.Bridge().Handle(msgCtx, envelope, conn)
+}
+
+// makeEnvelope builds an AEP input envelope for a Slack message.
+func (a *Adapter) makeEnvelope(teamID, channelID, threadTS, userID, text, workDir string) *events.Envelope {
+	if workDir == "" {
+		workDir = a.Bridge().WorkDir()
+	}
+	return a.Bridge().MakeEnvelope(userID, text, session.PlatformContext{
+		Platform:  string(messaging.PlatformSlack),
+		BotID:     a.botID,
+		TeamID:    teamID,
+		ChannelID: channelID,
+		ThreadTS:  threadTS,
+		UserID:    userID,
+		WorkDir:   workDir,
+	})
 }
 
 // NewStreamingWriter creates a streaming writer for the given channel/thread.
@@ -621,7 +694,7 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 		return
 	}
 
-	env := a.Bridge().MakeSlackEnvelope(teamID, channelID, threadTS, userID, "", conn.WorkDir(), a.botID)
+	env := a.makeEnvelope(teamID, channelID, threadTS, userID, "", conn.WorkDir())
 	if env == nil {
 		a.Log.Warn("slack: text control command failed to derive session", "action", result.Label)
 		return
@@ -636,6 +709,11 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 
 	if err := a.Bridge().Handle(ctx, ctrlEnv, conn); err != nil {
 		a.Log.Warn("slack: text control command failed", "action", result.Label, "err", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
+				fmt.Sprintf("⚠️ %s timed out. Please try again.", result.Label))
+			return
+		}
 		// Provide user-friendly error message with details
 		errMsg := fmt.Sprintf("❌ Failed to execute %s: %s", result.Label, formatSecurityErrorSlack(err))
 		a.sendEphemeralOrPost(ctx, channelID, threadTS, userID, errMsg)
@@ -677,7 +755,7 @@ func (a *Adapter) handleTextWorkerCommand(ctx context.Context, teamID, channelID
 		return
 	}
 
-	envelope := a.Bridge().MakeSlackEnvelope(teamID, channelID, threadTS, userID, "", conn.WorkDir(), a.botID)
+	envelope := a.makeEnvelope(teamID, channelID, threadTS, userID, "", conn.WorkDir())
 	if envelope == nil {
 		a.Log.Warn("slack: worker command failed to derive session", "command", result.Label)
 		return
@@ -687,6 +765,11 @@ func (a *Adapter) handleTextWorkerCommand(ctx context.Context, teamID, channelID
 
 	if err := a.Bridge().Handle(ctx, cmdEnv, conn); err != nil {
 		a.Log.Warn("slack: worker command failed", "command", result.Label, "err", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
+				fmt.Sprintf("⚠️ %s timed out. Please try again.", result.Label))
+			return
+		}
 		a.sendEphemeralOrPost(ctx, channelID, threadTS, userID, fmt.Sprintf("❌ Failed to execute %s.", result.Label))
 		return
 	}
@@ -721,6 +804,19 @@ func NewSlackConn(adapter *Adapter, channelID, threadTS, workDir string) *SlackC
 	return &SlackConn{adapter: adapter, channelID: channelID, threadTS: threadTS, workDir: workDir}
 }
 
+// lockHandlerMu acquires the per-thread serialization lock.
+// Returns an unlock function for use with defer.
+//
+// Known limitation: Lock() blocks without timeout if another goroutine holds
+// handlerMu. The timeout on the holder side ensures eventual release. A future
+// improvement could use TryLock + retry. Callers should use:
+//
+//	defer conn.lockHandlerMu()()
+func (c *SlackConn) lockHandlerMu() (unlock func()) {
+	c.handlerMu.Lock()
+	return c.handlerMu.Unlock
+}
+
 func (c *SlackConn) WorkDir() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -729,8 +825,13 @@ func (c *SlackConn) WorkDir() string {
 
 func (c *SlackConn) SetWorkDir(dir string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.workDir = dir
+	adapter := c.adapter
+	c.mu.Unlock()
+	// Propagate to StatusManager so $WK substitution uses this conn's workDir.
+	if adapter != nil && adapter.statusMgr != nil {
+		adapter.statusMgr.SetWorkDir(dir)
+	}
 }
 
 // notifyStatus sets processing status (nil-safe for tests).
@@ -855,7 +956,7 @@ func (c *SlackConn) writeWithPostMessage(ctx context.Context, text string, isDel
 	return nil
 }
 
-// tryTableBlocks extracts markdown tables and sends as Block Kit (MarkdownBlock + TableBlock).
+// tryTableBlocks extracts markdown tables and sends as Block Kit (MarkdownBlock + DataTableBlock).
 // Returns error if no tables found or block send fails (caller falls back to text).
 func (c *SlackConn) tryTableBlocks(ctx context.Context, text string) error {
 	segments, tables := ExtractTables(text)
@@ -1066,7 +1167,7 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 		return
 	}
 
-	// Primary: TableBlock with rich per-field layout.
+	// Primary: DataTableBlock with rich per-field layout.
 	blocks := c.buildTurnSummaryTable(d)
 	richText := messaging.FormatTurnSummaryRich(d)
 	if richText == "" {
@@ -1087,13 +1188,13 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 		return
 	}
 
-	if !strings.Contains(err.Error(), "invalid_blocks") {
+	if !isInvalidBlocksError(err) {
 		c.adapter.Log.Warn("turn summary send failed", "err", err)
 		return
 	}
 
 	// Fallback: rich plain text with emoji-prefixed fields.
-	c.adapter.Log.Warn("slack: turn summary TableBlock rejected, falling back to rich text", "err", err)
+	c.adapter.Log.Warn("slack: turn summary DataTableBlock rejected, falling back to rich text", "err", err)
 	fbOpts := []slack.MsgOption{slack.MsgOptionText(richText, false)}
 	if c.threadTS != "" {
 		fbOpts = append(fbOpts, slack.MsgOptionTS(c.threadTS))
@@ -1107,18 +1208,14 @@ func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {
 }
 
 func (c *SlackConn) buildTurnSummaryTable(d messaging.TurnSummaryData) []slack.Block {
-	table := slack.NewTableBlock("turn_summary")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
+	table := slack.NewDataTableBlock("Turn Summary", slack.DataTableBlockOptionBlockID("turn_summary"))
 
 	for _, f := range d.Fields() {
 		val := f.Value
 		if f.Label == "🔧 Tools" {
 			val = formatToolNamesSlack(d.ToolNames, d.ToolCallCount)
 		}
-		table.AddRow(richTextCell(f.Label), richTextCell(val))
+		table.AddRow(dataTableCell(f.Label), dataTableCell(val))
 	}
 
 	return []slack.Block{table}
@@ -1143,7 +1240,7 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	}
 	plainText := messaging.FormatCanonicalText(d)
 
-	// Primary: TableBlock (may be rejected by workspaces without the beta feature)
+	// Primary: DataTableBlock (may be rejected by some workspaces)
 	blocks := c.buildContextUsageTable(d)
 	opts := []slack.MsgOption{
 		slack.MsgOptionBlocks(blocks...),
@@ -1156,12 +1253,12 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	if pErr == nil {
 		return nil
 	}
-	if !strings.Contains(pErr.Error(), "invalid_blocks") {
+	if !isInvalidBlocksError(pErr) {
 		return pErr
 	}
 
 	// Fallback: ContextBlock (universally supported)
-	c.adapter.Log.Warn("slack: context usage TableBlock rejected, falling back to ContextBlock", "err", pErr)
+	c.adapter.Log.Warn("slack: context usage DataTableBlock rejected, falling back to ContextBlock", "err", pErr)
 	fbBlocks := c.buildContextUsageFallback(d)
 	fbOpts := []slack.MsgOption{
 		slack.MsgOptionBlocks(fbBlocks...),
@@ -1174,47 +1271,40 @@ func (c *SlackConn) sendContextUsage(ctx context.Context, env *events.Envelope) 
 	return fbErr
 }
 
-// buildContextUsageTable builds a TableBlock for context usage (primary format).
+// buildContextUsageTable builds a DataTableBlock for context usage (primary format).
 func (c *SlackConn) buildContextUsageTable(d events.ContextUsageData) []slack.Block {
 	info := messaging.BuildContextDisplay(d)
-	table := slack.NewTableBlock("context_usage")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
+	table := slack.NewDataTableBlock("Context Usage", slack.DataTableBlockOptionBlockID("context_usage"))
 
-	table.AddRow(richTextCell(info.Icon+" Context"), richTextCell(fmt.Sprintf("%s %s", info.ProgressBar, info.TokenDisplay)))
+	table.AddRow(dataTableCell(info.Icon+" Context"), dataTableCell(fmt.Sprintf("%s %s", info.ProgressBar, info.TokenDisplay)))
 	if info.Model != "" {
-		table.AddRow(richTextCell("Model"), richTextCell(info.Model))
+		table.AddRow(dataTableCell("Model"), dataTableCell(info.Model))
 	}
 	if len(info.TopCategories) > 0 {
 		catParts := make([]string, len(info.TopCategories))
 		for i, cat := range info.TopCategories {
 			catParts[i] = fmt.Sprintf("%s: %s", cat.Name, messaging.FormatTokenCount(cat.Tokens))
 		}
-		table.AddRow(richTextCell("Top Context"), richTextCell(strings.Join(catParts, ", ")))
+		table.AddRow(dataTableCell("Top Context"), dataTableCell(strings.Join(catParts, ", ")))
 	}
 	if info.ExtrasLine != "" {
-		table.AddRow(richTextCell("Extras"), richTextCell(info.ExtrasLine))
+		table.AddRow(dataTableCell("Extras"), dataTableCell(info.ExtrasLine))
 	}
 	if info.ActionTip != "" {
-		table.AddRow(richTextCell("Tip"), richTextCell(info.ActionTip))
+		table.AddRow(dataTableCell("Tip"), dataTableCell(info.ActionTip))
 	}
 	return []slack.Block{table}
 }
 
-// buildContextUsageFallback builds ContextBlock fallback when TableBlock is rejected.
+// buildContextUsageFallback builds ContextBlock fallback when DataTableBlock is rejected.
 func (c *SlackConn) buildContextUsageFallback(d events.ContextUsageData) []slack.Block {
 	text := slack.NewTextBlockObject("mrkdwn", messaging.FormatCanonicalText(d), false, false)
 	return []slack.Block{slack.NewContextBlock("", text)}
 }
 
-// richTextCell creates a RichTextBlock cell for use in TableBlock rows.
-func richTextCell(text string) *slack.RichTextBlock {
-	section := slack.NewRichTextSection(
-		slack.NewRichTextSectionTextElement(text, nil),
-	)
-	return slack.NewRichTextBlock("", section)
+// dataTableCell creates a plain-text cell for use in DataTableBlock rows.
+func dataTableCell(text string) slack.DataTableCell {
+	return slack.NewDataTableRawTextCell(text)
 }
 
 func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) error {
@@ -1234,14 +1324,10 @@ func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) err
 	}
 	plainText := sb.String()
 
-	table := slack.NewTableBlock("mcp_status")
-	table = table.WithColumnSettings(
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: false},
-		slack.ColumnSetting{Align: slack.ColumnAlignmentLeft, IsWrapped: true},
-	)
-	table.AddRow(richTextCell("🔌 MCP Status"), richTextCell(fmt.Sprintf("%d servers", len(d.Servers))))
+	table := slack.NewDataTableBlock("MCP Status", slack.DataTableBlockOptionBlockID("mcp_status"))
+	table.AddRow(dataTableCell("🔌 MCP Status"), dataTableCell(fmt.Sprintf("%d servers", len(d.Servers))))
 	for _, s := range d.Servers {
-		table.AddRow(richTextCell(messaging.MCPServerIcon(s.Status)+" "+s.Name), richTextCell(s.Status))
+		table.AddRow(dataTableCell(messaging.MCPServerIcon(s.Status)+" "+s.Name), dataTableCell(s.Status))
 	}
 
 	blocks := []slack.Block{table}
@@ -1254,8 +1340,8 @@ func (c *SlackConn) sendMCPStatus(ctx context.Context, env *events.Envelope) err
 	}
 	_, _, err := c.adapter.client.PostMessageContext(ctx, c.channelID, opts...)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid_blocks") {
-			c.adapter.Log.Warn("slack: MCP status TableBlock rejected, falling back to plain text", "err", err)
+		if isInvalidBlocksError(err) {
+			c.adapter.Log.Warn("slack: MCP status DataTableBlock rejected, falling back to plain text", "err", err)
 			fbOpts := []slack.MsgOption{slack.MsgOptionText(plainText, false)}
 			if c.threadTS != "" {
 				fbOpts = append(fbOpts, slack.MsgOptionTS(c.threadTS))

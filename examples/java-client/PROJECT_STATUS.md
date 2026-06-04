@@ -49,10 +49,9 @@
 - [x] 序列号管理
 
 ### 安全特性
-- [x] ES256 JWT 认证
-- [x] 与 Go 服务器兼容的密钥派生
-- [x] 可配置 token TTL
-- [x] Scope 权限系统
+- [x] API Key 认证 (X-API-Key header)
+- [x] Bot ID 多 bot 隔离 (X-Bot-ID header)
+- [x] 可配置认证凭据
 
 ### 开发体验
 - [x] Builder 模式
@@ -76,7 +75,7 @@
 6. ✅ 发送逻辑重复 - 提取 sendEnvelope()
 
 ### Medium Priority (1 项)
-7. ✅ JWT Builder 重复 - 提取 baseBuilder()
+7. ✅ Builder 方法重复 - 提取辅助方法
 
 ### 代码质量
 - ✅ 消除 ~87 行重复代码
@@ -117,7 +116,7 @@ mvn clean package -DskipTests
 
 ### 3. 快速示例
 ```bash
-export HOTPLEX_SIGNING_KEY=$(openssl rand -base64 32)
+export HOTPLEX_API_KEY=your-api-key
 mvn exec:java -Dexec.mainClass="dev.hotplex.example.QuickStart"
 ```
 **预期结果**: 连接到 gateway 并执行示例任务
@@ -135,10 +134,8 @@ examples/java-client/
 │   │   ├── example/             # 示例程序
 │   │   │   ├── QuickStart.java
 │   │   │   └── InteractiveExample.java
-│   │   ├── protocol/            # 协议层
-│   │   │   ├── *.java (24 files)
-│   │   └── security/            # 安全层
-│   │       └── JwtTokenGenerator.java
+│   │   └── protocol/            # 协议层
+│   │   │   └── *.java (24 files)
 │   └── resources/
 │       ├── application.yml
 │       └── logback.xml

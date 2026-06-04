@@ -18,9 +18,17 @@ type PoolOpts struct {
 	MaxIdleTime time.Duration
 }
 
-// OpenDB creates a ready-to-use SQLite connection: ensures parent directory,
-// opens the database, applies standard PRAGMAs, and configures the pool.
-func OpenDB(dbPath string, dbCfg *config.DBConfig, label string, pool PoolOpts) (*sql.DB, error) {
+// OpenDB opens a SQLite database connection with PRAGMAs and pool settings.
+// For PostgreSQL, use dbutil.Open instead.
+func OpenDB(dbPath string, dbCfg *config.DBConfig, dialect, label string, pool PoolOpts) (*sql.DB, error) {
+	if dialect != DialectSQLite {
+		return nil, fmt.Errorf("%s: unsupported dialect: %s (use dbutil.Open for PostgreSQL)", label, dialect)
+	}
+	return openSQLiteDB(dbPath, dbCfg, label, pool)
+}
+
+// openSQLiteDB opens a SQLite database with PRAGMAs and pool settings.
+func openSQLiteDB(dbPath string, dbCfg *config.DBConfig, label string, pool PoolOpts) (*sql.DB, error) {
 	dir := filepath.Dir(dbPath)
 	if dir != "." && dir != "/" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -33,7 +41,7 @@ func OpenDB(dbPath string, dbCfg *config.DBConfig, label string, pool PoolOpts) 
 		return nil, fmt.Errorf("%s: open db: %w", label, err)
 	}
 
-	if err := InitSQLiteDB(db, dbCfg, label); err != nil {
+	if err := InitSQLiteDB(db, dbCfg, DialectSQLite, label); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

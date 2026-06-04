@@ -2,8 +2,6 @@
 title: Session 生命周期
 weight: 3
 description: HotPlex 5 状态机 Session 管理：状态流转、确定性 ID、配额控制与 GC 回收
-persona: developer
-difficulty: intermediate
 ---
 
 # Session 生命周期
@@ -71,7 +69,7 @@ HotPlex 使用 UUIDv5（SHA-1 哈希 + 固定命名空间）生成确定性的 S
 
 **两种 Key 派生方式**：
 
-1. **通用 Key**（`DeriveSessionKey`）：`SHA1(namespace, ownerID|workerType|clientKey|workDir)`，适用于 WebChat 和直连 WebSocket。
+1. **通用 Key**（`DeriveSessionKey`）：`SHA1(namespace, ownerID|workerType|clientKey|workDir)`，适用于 WebChat 和直连 WebSocket。`clientKey` 是客户端传入的 `client_session_id`（REST）或 `session_id`（WS init），经过 `SanitizeText()` 清洗和 `MaxClientKeyLen`（256 字符）长度校验。
 2. **平台 Key**（`DerivePlatformSessionKey`）：根据平台类型拼接不同字段：
    - Slack：`ownerID|wt|slack[|teamID][|channelID][|threadTS][|userID][|workDir]`
    - 飞书：`ownerID|wt|feishu[|chatID][|threadTS][|userID][|workDir]`
@@ -186,7 +184,13 @@ IDLE session 的 idle_expires_at = entered_idle_at + IdleTimeout。
 到期后 TERMINATED，回收暂停的 Worker 进程。
 ```
 
-**特别注意**：GC 不执行物理删除（`DELETE FROM sessions`）。TERMINATED 的记录保留作为"resume 决策标志"——它们的存在告诉 Gateway 可以尝试 `--resume` 恢复对话历史。
+**第 3 层：TERMINATED 记录清理**
+```
+TERMINATED session 按 source 差异化保留：
+  cron 类：updated_at ≤ now - cron_term_retention（默认 24h）→ DELETE
+  其他：updated_at ≤ now - term_retention（默认 7d）→ DELETE
+```
+TERMINATED 记录在保留期内作为"resume 决策标志"——它们的存在告诉 Gateway 可以尝试 `--resume` 恢复对话历史。
 
 ### Fast Reconnect 优化
 
@@ -219,6 +223,7 @@ if ms.info.State == RUNNING && ms.worker != nil {
 3. 无 Worker, CREATED    -> Start (--session-id)
 4. 无 Worker, RUNNING/IDLE/TERMINATED -> Resume (--resume)
    如果 Resume 失败（文件丢失），降级到 Start (--session-id)
+   Resume 和 Start 使用独立的 30s 超时 context，Resume 失败不消耗 Start 的超时预算
 ```
 
 **ResetSession** 使用递增的 generation counter 代替布尔标志，消除了旧设计中的竞态条件——旧 `forwardEvents` goroutine 可以通过 generation 比较准确判断是否应该跳过 crash 处理。

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/messaging/textutil"
 	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -111,9 +112,13 @@ func (c *FeishuConn) getStreamCtrl() *StreamingCardController {
 // resetStreamCtrl replaces a closed streaming controller with a fresh one
 // so subsequent events can create a new card via lazy-init.
 func (c *FeishuConn) resetStreamCtrl() {
+	c.mu.RLock()
+	tc, m, br, wd := c.turnCount, c.lastModel, c.lastBranch, c.workDir
+	c.mu.RUnlock()
 	newCtrl := NewStreamingCardController(
 		c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log,
-		c.adapter.resolveBotName(), c.turnCount, c.lastModel, c.lastBranch, c.workDir,
+		c.adapter.resolveBotName(), tc, m, br, wd,
+		c.adapter.phrases,
 	)
 	c.mu.Lock()
 	c.streamCtrl = newCtrl
@@ -176,6 +181,8 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 		return c.handleToolCall(ctx, env)
 	case events.ToolResult:
 		return c.handleToolResult(ctx, env)
+	case events.ToolUpdate:
+		return c.handleToolUpdate(ctx, env)
 	case events.PermissionRequest:
 		return c.handleInteraction(ctx, env, c.sendPermissionRequest)
 	case events.QuestionRequest:
@@ -196,8 +203,8 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if !ok {
 		return nil
 	}
-	if env.Event.Type == events.MessageDelta && text != "" {
-		text += "\n\n"
+	if env.Event.Type == events.MessageDelta && textutil.EndsWithSentenceTerminator(text) {
+		text += "\n"
 	}
 	text = StripInvalidImageKeys(text)
 	return c.writeContent(ctx, env, text)
@@ -307,6 +314,16 @@ func (c *FeishuConn) handleToolResult(_ context.Context, env *events.Envelope) e
 			ctrl.WriteToolResult(id, output, errMsg)
 		}
 	}
+	return nil
+}
+
+// handleToolUpdate intentionally drops ToolUpdate payloads. In Feishu the tool
+// activity strip is rendered from ToolCall+ToolResult only; intermediate
+// streaming progress (stdout/stderr deltas, diff increments) would require a
+// new card widget that does not exist. We still reset the silence timer so
+// the connection is not marked idle while the worker is actively streaming.
+func (c *FeishuConn) handleToolUpdate(_ context.Context, _ *events.Envelope) error {
+	c.resetSilenceTimer()
 	return nil
 }
 
@@ -498,7 +515,10 @@ func (c *FeishuConn) writeContent(ctx context.Context, env *events.Envelope, tex
 		c.adapter.Log.Info("feishu: streaming card rotated",
 			"old_msg_id", oldMsgID)
 
-		newCtrl := NewStreamingCardController(c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log, c.adapter.resolveBotName(), c.turnCount+1, c.lastModel, c.lastBranch, c.workDir)
+		c.mu.RLock()
+		tc, m, br, wd := c.turnCount, c.lastModel, c.lastBranch, c.workDir
+		c.mu.RUnlock()
+		newCtrl := NewStreamingCardController(c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log, c.adapter.resolveBotName(), tc+1, m, br, wd, c.adapter.phrases)
 		c.mu.Lock()
 		c.streamCtrl = newCtrl
 		if oldMsgID != "" {

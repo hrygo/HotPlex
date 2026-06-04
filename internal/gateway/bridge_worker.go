@@ -3,11 +3,13 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/noop"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -23,12 +25,13 @@ type forwardOpts struct {
 
 // workerLaunchParams holds the parameters for createAndLaunchWorker.
 type workerLaunchParams struct {
-	ctx         context.Context
-	wt          worker.WorkerType
-	workerInfo  worker.SessionInfo
-	platform    string
-	botID       string
-	forwardOpts *forwardOpts
+	ctx           context.Context
+	wt            worker.WorkerType
+	workerInfo    worker.SessionInfo
+	platform      string
+	botID         string
+	forwardOpts   *forwardOpts
+	injectExclude []string // per-session agent config files to skip; nil = use platform default
 }
 
 // workerStartFunc is called after AttachWorker and injectAgentConfig.
@@ -47,6 +50,11 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		params.forwardOpts = &forwardOpts{}
 	}
 
+	start := time.Now()
+	defer func() {
+		metrics.WorkerCreationDuration.WithLabelValues(string(params.wt)).Observe(time.Since(start).Seconds())
+	}()
+
 	w, err := b.wf.NewWorker(params.wt)
 	if err != nil {
 		return nil, fmt.Errorf("bridge: create worker: %w", err)
@@ -63,7 +71,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, fmt.Errorf("bridge: attach worker: %w", err)
 	}
 
-	b.injectAgentConfig(&params.workerInfo, params.platform, params.botID)
+	b.injectAgentConfig(&params.workerInfo, params.platform, params.botID, params.injectExclude)
 
 	if err := startFn(params.ctx, w, params.workerInfo); err != nil {
 		b.sm.DetachWorker(sid)
@@ -104,6 +112,10 @@ type fallbackParams struct {
 	workerType    worker.WorkerType
 	lastInput     string
 	crashedWorker worker.Worker
+	sessPlatform  string
+	sessOwner     string
+	accGeneration int64
+	accModelName  string
 }
 
 // attemptResumeFallback handles a crashed resumed worker with a two-step strategy:
@@ -148,17 +160,16 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		return false
 	}
 
-	workerInfo := b.buildWorkerInfo(si.ID, si.UserID, p.workDir, si)
-	injectSlackEnv(&workerInfo, si.PlatformKey)
-	workerInfo.Env = injectGatewayContext(workerInfo.Env, si.Platform, si.BotID, si.UserID, si.PlatformKey, si.ID, p.workDir)
+	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, p.workDir, si)
 
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
-		ctx:         context.Background(),
-		wt:          si.WorkerType,
-		workerInfo:  workerInfo,
-		platform:    si.Platform,
-		botID:       si.BotID,
-		forwardOpts: &forwardOpts{workDir: p.workDir},
+		ctx:           context.Background(),
+		wt:            si.WorkerType,
+		workerInfo:    workerInfo,
+		platform:      si.Platform,
+		botID:         si.BotID,
+		forwardOpts:   &forwardOpts{workDir: p.workDir},
+		injectExclude: nil, // resolved by injectAgentConfig
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := b.sm.Transition(ctx, p.sessionID, events.StateRunning); err != nil {
@@ -179,7 +190,17 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	}
 
 	// Re-deliver the original input that was lost when the first worker crashed.
-	b.captureSyntheticEvent(p.sessionID, "fresh_start", "Session restarted with context reset after worker crash", eventstore.SourceFreshStart)
+	b.captureSyntheticEvent(syntheticTurnParams{
+		SessionID:  p.sessionID,
+		Reason:     "fresh_start",
+		Message:    "Session restarted with context reset after worker crash",
+		Source:     eventstore.SourceFreshStart,
+		Platform:   p.sessPlatform,
+		Owner:      p.sessOwner,
+		Model:      p.accModelName,
+		Generation: p.accGeneration,
+		TurnNum:    0, // fresh start resets turn count
+	})
 	if p.lastInput != "" {
 		b.log.Info("bridge: re-delivering input to fresh worker", "session_id", p.sessionID, "content_len", len(p.lastInput))
 		if err := w.Input(context.Background(), p.lastInput, nil); err != nil {
@@ -225,15 +246,42 @@ func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Wor
 	b.crashTrackerMu.Unlock()
 }
 
+// resolveInjectExclude returns the inject_exclude list for a platform, falling
+// back from the per-session value to the platform/global default in the atomic
+// config map. botID is reserved for future per-bot resolution (currently unused
+// because per-bot excludes are resolved at adapter time and not persisted in
+// the session record). Used by injectAgentConfig and crash recovery paths.
+func (b *Bridge) resolveInjectExclude(platform, _ string, perSession []string) []string {
+	if perSession != nil {
+		return perSession
+	}
+	if m, ok := b.agentConfigExclude.Load().(map[string][]string); ok {
+		if excl, found := m[platform]; found {
+			return slices.Clone(excl)
+		}
+		if excl, found := m[""]; found {
+			return slices.Clone(excl)
+		}
+	}
+	return nil
+}
+
 // injectAgentConfig loads agent config files and injects the unified system
 // prompt into session info. A no-op when config dir is empty or agent config
 // is not configured.
-func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID string) {
+// injectExclude lists file base names to skip; when nil, falls back to the
+// platform-level default from the atomic config map.
+func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID string, injectExclude []string) {
 	if b.agentConfigDir == "" {
 		return
 	}
-	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_id", botID)
-	configs, err := agentconfig.Load(b.agentConfigDir, platform, botID)
+	injectExclude = b.resolveInjectExclude(platform, botID, injectExclude)
+	if unknown := agentconfig.ValidateExcludeList(injectExclude); len(unknown) > 0 {
+		b.log.Warn("bridge: inject_exclude contains unknown config files",
+			"unknown", unknown, "valid", agentconfig.KnownFiles())
+	}
+	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_id", botID, "exclude", injectExclude)
+	configs, err := agentconfig.Load(b.agentConfigDir, platform, botID, injectExclude...)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid botID") {
 			b.log.Error("bridge: agent config rejected botID",

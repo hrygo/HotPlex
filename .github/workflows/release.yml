@@ -91,16 +91,11 @@ jobs:
           if [ "$VER" = "$REF" ]; then VER="${{ github.event.inputs.version || 'dev' }}"; fi
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
 
-      - name: Install cross-compiler
-        if: matrix.os == 'linux' && matrix.arch == 'arm64'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu
-
       - name: Build
         env:
-          CGO_ENABLED: ${{ matrix.os == 'linux' && '1' || '0' }}
+          CGO_ENABLED: 0
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          CC: ${{ matrix.os == 'linux' && matrix.arch == 'arm64' && 'aarch64-linux-gnu-gcc' || '' }}
           LDFLAGS: -s -w
           VERSION: ${{ steps.version.outputs.version }}
           COMMIT: ${{ github.sha }}
@@ -111,13 +106,6 @@ jobs:
           mkdir -p dist
           go build -ldflags="${LDFLAGS} -X main.version=${VERSION} -X main.commit=${COMMIT}" \
             -o "dist/${NAME}" ./cmd/hotplex
-
-      - name: Compute checksum
-        run: |
-          EXT=""
-          [ "${{ matrix.os }}" = "windows" ] && EXT=".exe"
-          NAME="hotplex-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
-          sha256sum "dist/${NAME}" >> dist/checksums.txt
 
       - uses: actions/upload-artifact@v7
         with:
@@ -140,16 +128,15 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Verify and sort checksums
+      - name: Generate checksums
         run: |
-          echo "=== Release artifacts ==="
-          ls -lh dist/
-          echo ""
+          cd dist
+          sha256sum hotplex-* > checksums.txt
           echo "=== Checksums ==="
-          sort -k2 dist/checksums.txt
+          cat checksums.txt
           echo ""
           echo "=== Integrity check ==="
-          sha256sum --check <(sort -k2 dist/checksums.txt)
+          sha256sum --check checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v3.0.0

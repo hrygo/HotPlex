@@ -16,12 +16,13 @@ func TestBackoff(t *testing.T) {
 		errs      int
 		wantDelay time.Duration
 	}{
-		{"first retry", 0, 30 * time.Second},
-		{"second retry", 1, 1 * time.Minute},
-		{"third retry", 2, 5 * time.Minute},
-		{"fourth retry", 3, 15 * time.Minute},
-		{"fifth retry", 4, 1 * time.Hour},
-		{"exhausted stays at 1h", 5, 1 * time.Hour},
+		{"zero errors", 0, 0},
+		{"first error", 1, 30 * time.Second},
+		{"second error", 2, 1 * time.Minute},
+		{"third error", 3, 5 * time.Minute},
+		{"fourth error", 4, 15 * time.Minute},
+		{"fifth error", 5, 1 * time.Hour},
+		{"exhausted stays at 1h", 6, 1 * time.Hour},
 		{"large count stays at 1h", 100, 1 * time.Hour},
 	}
 

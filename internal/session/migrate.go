@@ -9,20 +9,42 @@ import (
 	"log/slog"
 
 	"github.com/pressly/goose/v3"
+
+	"github.com/hrygo/hotplex/internal/dbutil"
 )
 
 //go:embed sql/migrations/*.sql
 var migrationFS embed.FS
 
-// runMigrations applies all pending goose migrations to the database.
-func runMigrations(ctx context.Context, db *sql.DB) error {
-	migrations, err := fs.Sub(migrationFS, "sql/migrations")
+//go:embed sql/migrations-postgres/*.sql
+var migrationsPGFs embed.FS
+
+// RunMigrations applies all pending goose migrations to the database.
+func RunMigrations(ctx context.Context, db *sql.DB, dialect dbutil.Dialect) error {
+	var (
+		gooseDialect goose.Dialect
+		embedFS      embed.FS
+		subDir       string
+	)
+	switch dialect {
+	case dbutil.DialectSQLite:
+		gooseDialect = goose.DialectSQLite3
+		embedFS = migrationFS
+		subDir = "sql/migrations"
+	case dbutil.DialectPostgres:
+		gooseDialect = goose.DialectPostgres
+		embedFS = migrationsPGFs
+		subDir = "sql/migrations-postgres"
+	default:
+		return fmt.Errorf("unsupported dialect: %s", dialect)
+	}
+	migrations, err := fs.Sub(embedFS, subDir)
 	if err != nil {
 		return fmt.Errorf("session store: migration fs: %w", err)
 	}
 
 	provider, err := goose.NewProvider(
-		goose.DialectSQLite3,
+		gooseDialect,
 		db,
 		migrations,
 		goose.WithDisableGlobalRegistry(true),

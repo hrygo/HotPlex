@@ -114,7 +114,7 @@ func ValidateURL(targetURL string) error {
 	// Layer 3: DNS resolution.
 	ips, err := LookupHost(host)
 	if err != nil {
-		return &SSRFProtectionError{URL: targetURL, Reason: "DNS lookup failed: " + err.Error()}
+		return &SSRFProtectionError{URL: targetURL, Reason: "DNS lookup failed"}
 	}
 
 	// Layer 4: check all resolved IPs against BlockedCIDRs.
@@ -161,7 +161,7 @@ func ValidateURLDoubleResolve(targetURL string) error {
 
 	ips, err := LookupHost(u.Hostname())
 	if err != nil {
-		return &SSRFProtectionError{URL: targetURL, Reason: "DNS re-lookup failed: " + err.Error()}
+		return &SSRFProtectionError{URL: targetURL, Reason: "DNS re-lookup failed"}
 	}
 
 	for _, ipStr := range ips {

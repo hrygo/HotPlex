@@ -27,14 +27,30 @@ func GracefulTerminate(pgid int) error {
 	return windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, uint32(pgid))
 }
 
+// Terminate gracefully stops a single process by PID.
+// On Windows this uses the same mechanism as GracefulTerminate since
+// GenerateConsoleCtrlEvent targets a process group ID.
+func Terminate(pid int) error {
+	return GracefulTerminate(pid)
+}
+
 // ForceKill terminates the process via TerminateProcess.
 // NOTE: Only kills the target process, not its children. The Manager creates a
 // Job Object (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) at process start to handle
 // full tree cleanup. This function serves as a fallback for non-Manager callers.
 func ForceKill(pgid int) error {
-	handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pgid))
+	return forceKillProcess(pgid)
+}
+
+// ForceKillProcess kills a single process by PID (not its group).
+func ForceKillProcess(pid int) error {
+	return forceKillProcess(pid)
+}
+
+func forceKillProcess(pid int) error {
+	handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pid))
 	if err != nil {
-		return fmt.Errorf("open process %d for termination: %w", pgid, err)
+		return fmt.Errorf("open process %d for termination: %w", pid, err)
 	}
 	defer windows.CloseHandle(handle)
 	return windows.TerminateProcess(handle, 1)

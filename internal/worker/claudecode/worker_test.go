@@ -473,6 +473,142 @@ func TestBuildCLIArgs_JSONSchema(t *testing.T) {
 	require.Contains(t, args, "--json-schema", "/schemas/output.json")
 }
 
+func TestBuildCLIArgs_ContinueSession(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:       "test-session",
+		UserID:          "test-user",
+		ProjectDir:      "/tmp",
+		ContinueSession: true,
+	}
+
+	args, err := w.buildCLIArgs(session, false)
+	require.NoError(t, err)
+	require.Contains(t, args, "--continue")
+	require.NotContains(t, args, "--session-id")
+	require.NotContains(t, args, "--resume")
+}
+
+func TestBuildCLIArgs_ForkSession(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:   "fork-session",
+		UserID:      "test-user",
+		ProjectDir:  "/tmp",
+		ForkSession: true,
+	}
+
+	// ForkSession only applies when resume=true
+	args, err := w.buildCLIArgs(session, true)
+	require.NoError(t, err)
+	require.Contains(t, args, "--resume")
+	require.Contains(t, args, "--fork-session")
+}
+
+func TestBuildCLIArgs_ForkSession_IgnoredWithoutResume(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:   "fork-session",
+		UserID:      "test-user",
+		ProjectDir:  "/tmp",
+		ForkSession: true,
+	}
+
+	args, err := w.buildCLIArgs(session, false)
+	require.NoError(t, err)
+	require.NotContains(t, args, "--fork-session")
+}
+
+func TestBuildCLIArgs_ResumeSessionAt(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:       "resume-at-session",
+		UserID:          "test-user",
+		ProjectDir:      "/tmp",
+		ResumeSessionAt: "msg_abc123",
+	}
+
+	args, err := w.buildCLIArgs(session, true)
+	require.NoError(t, err)
+	require.Contains(t, args, "--resume")
+	require.Contains(t, args, "--resume-session-at", "msg_abc123")
+}
+
+func TestBuildCLIArgs_ResumeSessionAt_IgnoredWithoutResume(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:       "resume-at-session",
+		UserID:          "test-user",
+		ProjectDir:      "/tmp",
+		ResumeSessionAt: "msg_abc123",
+	}
+
+	args, err := w.buildCLIArgs(session, false)
+	require.NoError(t, err)
+	require.NotContains(t, args, "--resume-session-at")
+}
+
+func TestBuildCLIArgs_ConfigEnv(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:  "configenv-session",
+		UserID:     "test-user",
+		ProjectDir: "/tmp",
+		ConfigEnv:  []string{"FOO=bar", "BAZ=qux"},
+	}
+
+	args, err := w.buildCLIArgs(session, false)
+	require.NoError(t, err)
+	// ConfigEnv is injected via cmd.Env (env.go Phase 7), NOT via --settings
+	// JSON. See issue #622: --settings collides with CCR's own --settings push
+	// and causes Claude to fail with "Settings file not found: [...]".
+	require.NotContains(t, args, "--settings")
+}
+
+func TestBuildCLIArgs_ConfigEnv_SkipsMalformed(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:  "configenv-session",
+		UserID:     "test-user",
+		ProjectDir: "/tmp",
+		ConfigEnv:  []string{"NOEQUALSSIGN", "VALID=value"},
+	}
+
+	args, err := w.buildCLIArgs(session, false)
+	require.NoError(t, err)
+	require.NotContains(t, args, "--settings")
+}
+
+func TestBuildCLIArgs_ConfigEnv_Empty(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	session := worker.SessionInfo{
+		SessionID:  "configenv-session",
+		UserID:     "test-user",
+		ProjectDir: "/tmp",
+		ConfigEnv:  []string{},
+	}
+
+	args, err := w.buildCLIArgs(session, false)
+	require.NoError(t, err)
+	require.NotContains(t, args, "--settings")
+}
+
 // ─── Mock-based integration tests ──────────────────────────────────────────────
 
 func TestStatusToSessionState(t *testing.T) {

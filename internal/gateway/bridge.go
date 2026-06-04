@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/metrics"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -27,36 +29,37 @@ type resetGenerationer interface {
 }
 
 // bridgeSM is the narrow subset of SessionManager that Bridge needs.
+// Composed from canonical sub-interfaces defined in handler.go to avoid
+// duplicate method declarations.
 type bridgeSM interface {
-	// SessionReader
-	Get(ctx context.Context, id string) (*session.SessionInfo, error)
-	GetWorker(id string) worker.Worker
-	// SessionWorkerManager
-	AttachWorker(id string, w worker.Worker) error
-	DetachWorker(id string)
-	DetachWorkerIf(id string, expected worker.Worker) bool
-	UpdateWorkerSessionID(ctx context.Context, id, workerSessionID string) error
-	// Lifecycle + transitions
-	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title string) (*session.SessionInfo, error)
-	Delete(ctx context.Context, id string) error
-	Transition(ctx context.Context, id string, to events.SessionState) error
-	ResetExpiry(ctx context.Context, id string) error
+	SessionReader
+	SessionLifecycle
+	SessionTransitioner
+	SessionWorkerManager
+	SessionExpirer
 }
 
 // Bridge connects the gateway to the session manager.
 // It runs the read pump in a goroutine and proxies worker events to the hub.
 type Bridge struct {
-	log       *slog.Logger
-	hub       *Hub
-	sm        bridgeSM
-	collector *eventstore.Collector // optional; nil means event storage disabled
-	wf        WorkerFactory
-	retryCtrl *LLMRetryController
+	log          *slog.Logger
+	hub          *Hub
+	sm           bridgeSM
+	collector    *eventstore.Collector  // optional; nil means event storage disabled
+	turnsQuerier eventstore.TurnQuerier // optional; for LatestGeneration on startup
+	wf           WorkerFactory
+	retryCtrl    *LLMRetryController
 
-	fwdWg         sync.WaitGroup // tracks active forwardEvents goroutines
-	closed        atomic.Bool    // set during shutdown to skip crash detection
-	retryCancelMu sync.Mutex
-	retryCancel   map[string]chan struct{} // sessionID → cancel channel
+	fwdWg  sync.WaitGroup // tracks active forwardEvents goroutines
+	closed atomic.Bool    // set during shutdown to skip crash detection
+	// shutdownCtx is stored as a struct field to broadcast shutdown to async
+	// autoRetry goroutines. This is an intentional exception to the "no ctx in
+	// struct" convention — the alternative (passing ctx through every call site)
+	// doesn't reach goroutines spawned from processForwardedEvent.
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc // cancels shutdownCtx on Shutdown()
+	retryCancelMu  sync.Mutex
+	retryCancel    map[string]chan struct{} // sessionID → cancel channel
 
 	agentConfigDir     string        // agent config directory path; "" = disabled
 	turnTimeout        time.Duration // per-turn timeout; 0 = disabled
@@ -64,9 +67,12 @@ type Bridge struct {
 	workerEnvBlocklist []string      // extra blocklist entries from worker.env_blocklist config
 	cronEnv            []string      // env vars injected only into cron platform sessions
 	mcpConfigJSON      atomic.Value  // pre-serialized MCP config JSON string; "" = not configured
+	agentConfigExclude atomic.Value  // map[string][]string: platform → inject_exclude (global default at "" key)
 
-	accum   map[string]*sessionAccumulator // per-session stats accumulator
-	accumMu sync.Mutex
+	accum map[string]*sessionAccumulator // per-session stats accumulator
+	// accumMu protects accum. RWMutex allows concurrent reads in getOrInitAccum
+	// fast path; write lock is used for create/delete/reset operations.
+	accumMu sync.RWMutex
 
 	crashTracker   map[string]*crashHistory // per-session crash loop detection
 	crashTrackerMu sync.Mutex
@@ -78,18 +84,21 @@ type crashHistory struct {
 }
 
 const (
-	crashLoopMax    = 3               // max consecutive crashes before abort
-	crashLoopWindow = 5 * time.Minute // window for counting consecutive crashes
+	crashLoopMax    = 3                // max consecutive crashes before abort
+	crashLoopWindow = 5 * time.Minute  // window for counting consecutive crashes
+	resumeTimeout   = 60 * time.Second // max time for Worker.Resume(); prevents indefinite blocking
 )
 
 // NewBridge creates a new bridge.
 func NewBridge(deps BridgeDeps) *Bridge {
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	b := &Bridge{
 		log:                deps.Log.With("component", "bridge"),
 		hub:                deps.Hub,
 		sm:                 deps.SM,
 		wf:                 defaultWorkerFactory{},
 		collector:          deps.EventCollector,
+		turnsQuerier:       deps.TurnsQuerier,
 		retryCtrl:          deps.RetryCtrl,
 		agentConfigDir:     deps.AgentConfigDir,
 		turnTimeout:        deps.TurnTimeout,
@@ -99,8 +108,11 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		retryCancel:        make(map[string]chan struct{}),
 		accum:              make(map[string]*sessionAccumulator),
 		crashTracker:       make(map[string]*crashHistory),
+		shutdownCtx:        shutdownCtx,
+		shutdownCancel:     shutdownCancel,
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
+	b.agentConfigExclude.Store(deps.AgentConfigExclude)
 	return b
 }
 
@@ -115,21 +127,32 @@ func (b *Bridge) UpdateMCPConfig(json string) {
 	b.mcpConfigJSON.Store(json)
 }
 
+// UpdateAgentConfigExclude atomically updates the platform → inject_exclude map.
+// Used by config hot-reload for non-platform sessions (webchat/API/cron).
+func (b *Bridge) UpdateAgentConfigExclude(m map[string][]string) {
+	b.agentConfigExclude.Store(m)
+}
+
 // StartSession creates a new session and starts a worker.
-func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title string) error {
+func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error {
 	if b.closed.Load() {
 		return fmt.Errorf("bridge: rejecting new session during shutdown")
 	}
 
+	metrics.SessionStartsTotal.WithLabelValues(string(wt)).Inc()
+	start := time.Now()
+	defer func() {
+		metrics.SessionStartDuration.WithLabelValues(string(wt)).Observe(time.Since(start).Seconds())
+	}()
+
 	// Create session in DB with bot_id and allowed_tools.
-	si, err := b.sm.CreateWithBot(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workDir, title)
+	si, err := b.sm.CreateWithBot(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
 	if err != nil {
+		metrics.SessionErrorsTotal.WithLabelValues(string(wt), "create_failed").Inc()
 		return fmt.Errorf("bridge: create session: %w", err)
 	}
 
-	workerInfo := b.buildWorkerInfo(id, userID, workDir, si)
-	injectSlackEnv(&workerInfo, platformKey)
-	workerInfo.Env = injectGatewayContext(workerInfo.Env, platform, botID, userID, platformKey, id, workDir)
+	workerInfo := b.prepareWorkerInfo(id, userID, workDir, si)
 
 	// Inject cron-specific env vars (e.g. admin API creds) only for cron sessions.
 	// Detected via platformKey rather than platform value, since cron executor now
@@ -143,12 +166,13 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 	}
 
 	if _, err := b.createAndLaunchWorker(workerLaunchParams{
-		ctx:         ctx,
-		wt:          wt,
-		workerInfo:  workerInfo,
-		platform:    platform,
-		botID:       botID,
-		forwardOpts: &forwardOpts{workDir: workDir},
+		ctx:           ctx,
+		wt:            wt,
+		workerInfo:    workerInfo,
+		platform:      platform,
+		botID:         botID,
+		forwardOpts:   &forwardOpts{workDir: workDir},
+		injectExclude: injectExclude,
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := w.Start(ctx, info); err != nil {
@@ -161,12 +185,22 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 			_ = b.sm.Delete(ctx, id)
 		},
 	); err != nil {
+		metrics.SessionErrorsTotal.WithLabelValues(string(wt), "start_failed").Inc()
 		return err
 	}
 
 	// Transition to RUNNING. (StateNotifier will emit state event automatically)
 	if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
-		b.log.Warn("bridge: transition to running failed", "session_id", id, "worker_type", wt, "err", err)
+		// Kill the worker to prevent orphan — without this, the worker runs
+		// indefinitely while the session stays in CREATED state, invisible to GC.
+		// forwardEvents will detect the exit and cleanupCrashedWorker transitions
+		// the session to TERMINATED for eventual GC reclamation.
+		b.log.Error("bridge: transition to running failed, terminating orphan worker",
+			"session_id", id, "worker_type", wt, "err", err)
+		if w := b.sm.GetWorker(id); w != nil {
+			_ = w.Terminate(context.Background())
+		}
+		return fmt.Errorf("bridge: transition to running: %w", err)
 	}
 
 	return nil
@@ -190,6 +224,11 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		return err
 	}
 
+	start := time.Now()
+	defer func() {
+		metrics.SessionStartDuration.WithLabelValues(string(si.WorkerType)).Observe(time.Since(start).Seconds())
+	}()
+
 	if si.State == events.StateDeleted {
 		return session.ErrSessionNotFound
 	}
@@ -206,9 +245,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		b.sm.DetachWorker(id)
 	}
 
-	workerInfo := b.buildWorkerInfo(si.ID, si.UserID, workDir, si)
-	injectSlackEnv(&workerInfo, si.PlatformKey)
-	workerInfo.Env = injectGatewayContext(workerInfo.Env, si.Platform, si.BotID, si.UserID, si.PlatformKey, id, workDir)
+	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:         ctx,
 		wt:          si.WorkerType,
@@ -234,7 +271,10 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 				opts.resumed = false
 				return nil
 			}
-			if err := w.Resume(ctx, info); err != nil {
+			resumeCtx, resumeCancel := context.WithTimeout(ctx, resumeTimeout)
+			err := w.Resume(resumeCtx, info)
+			resumeCancel()
+			if err != nil {
 				return fmt.Errorf("bridge: resume start: %w", err)
 			}
 			return nil
@@ -291,10 +331,12 @@ var _ = events.Clone // compile-time check that Clone is accessible
 //  1. No DB record → Create + Start (--session-id)
 //  2. Worker alive → Reuse (forward message)
 //  3. No worker, state=CREATED → Start (--session-id)
-//  4. No worker, state=RUNNING/IDLE/TERMINATED → Resume (--resume)
+//  4. No worker, state=TERMINATED/DELETED → Start fresh (skip resume)
+//  5. No worker, state=RUNNING/IDLE → Resume (--resume)
 //     If Resume fails (files gone/corrupted), fall back to Start (--session-id)
-func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, platform string, platformKey map[string]string, botID string) error {
-	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "platform", platform, "platform_key", platformKey, "bot_id", botID)
+func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string, injectExclude ...string) error {
+	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "sandbox", sandbox, "platform", platform, "platform_key", platformKey, "bot_id", botID)
+	injectSandbox(platformKey, sandbox)
 	si, err := b.sm.Get(ctx, sessionID)
 	if err == nil {
 		if w := b.sm.GetWorker(sessionID); w != nil {
@@ -303,21 +345,40 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 			// is delivered, not silently dropped (bug: worker pointer non-nil after
 			// transitionState nils it, but only after SIGTERM completes asynchronously).
 			if si.State.IsActive() {
+				// Re-inject current sandbox into persisted PlatformKey so
+				// stale values don't remain after bot config changes.
+				injectSandbox(si.PlatformKey, sandbox)
 				return nil
 			}
 		}
 		// Orphan: session record exists but worker is gone.
 		if si.State == events.StateCreated {
 			b.log.Info("bridge: orphan platform session unstarted, starting fresh", "session_id", sessionID)
-			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
 		}
-		// RUNNING/IDLE/TERMINATED — try Resume to preserve conversation history.
+		// TERMINATED/DELETED — start fresh (skip resume).
+		// AttachWorker rejects non-active sessions (IsActive() returns false),
+		// so TERMINATED sessions cannot be resumed. DELETED sessions have no
+		// DB record to resume from. In both cases, startOrResumeOnInUse creates
+		// a new session with the same deterministic key, effectively replacing
+		// the orphaned one.
+		if si.State == events.StateTerminated {
+			b.log.Info("bridge: orphan platform session terminated, starting fresh", "session_id", sessionID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
+		}
+		if si.State == events.StateDeleted {
+			b.log.Info("bridge: orphan platform session already deleted, starting fresh", "session_id", sessionID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
+		}
 		// If Resume fails (session files deleted or corrupted), fall back to Start.
 		b.log.Info("bridge: orphan platform session, resuming", "session_id", sessionID, "state", si.State)
+		// Re-inject current sandbox into the loaded session so resume uses
+		// the latest config, not a potentially stale persisted value.
+		injectSandbox(si.PlatformKey, sandbox)
 		if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
 			b.log.Warn("bridge: resume failed, falling back to new session",
 				"session_id", sessionID, "state", si.State, "err", err)
-			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID)
+			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, injectExclude...)
 		}
 		return nil
 	}
@@ -327,14 +388,14 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 		return fmt.Errorf("bridge: no worker_type configured for platform session %s", sessionID)
 	}
 
-	return b.startOrResumeOnInUse(ctx, sessionID, ownerID, wt, workDir, platform, platformKey, botID)
+	return b.startOrResumeOnInUse(ctx, sessionID, ownerID, wt, workDir, platform, platformKey, botID, injectExclude...)
 }
 
 // startOrResumeOnInUse attempts StartSession; if the worker reports its session
 // files are already in use (leftover from a crashed session), falls back to
 // ResumeSession to recover the existing conversation history.
-func (b *Bridge) startOrResumeOnInUse(ctx context.Context, sessionID, ownerID string, wt worker.WorkerType, workDir, platform string, platformKey map[string]string, botID string) error {
-	if err := b.StartSession(ctx, sessionID, ownerID, botID, wt, nil, workDir, platform, platformKey, ""); err != nil {
+func (b *Bridge) startOrResumeOnInUse(ctx context.Context, sessionID, ownerID string, wt worker.WorkerType, workDir, platform string, platformKey map[string]string, botID string, injectExclude ...string) error {
+	if err := b.StartSession(ctx, sessionID, ownerID, botID, wt, nil, workDir, platform, platformKey, "", "", injectExclude...); err != nil {
 		if isWorkerInUseError(err) {
 			b.log.Info("bridge: worker rejected as in-use, switching to resume", "session_id", sessionID, "err", err)
 			return b.ResumeSession(ctx, sessionID, workDir)
@@ -364,8 +425,43 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 
 	// Worker-level reset: Terminate → delete session files → Start fresh.
 	if err := w.ResetContext(ctx); err != nil {
-		return fmt.Errorf("bridge: reset worker: %w", err)
+		if !errors.Is(err, worker.ErrNotImplemented) {
+			return fmt.Errorf("bridge: reset worker: %w", err)
+		}
+		// Worker doesn't support in-place reset — fall back to Terminate+Start.
+		// NOTE(architecture): Terminate then Start on the same struct is safe for
+		// current workers because Start fully reinitializes internal state. A future
+		// WorkerFactory pattern (new struct per reset) would be cleaner but requires
+		// broader refactoring of the worker lifecycle management.
+		if termErr := w.Terminate(ctx); termErr != nil {
+			b.log.Warn("bridge: reset fallback: terminate failed", "session_id", sessionID, "err", termErr)
+		}
+		si, siErr := b.sm.Get(ctx, sessionID)
+		if siErr != nil {
+			return fmt.Errorf("bridge: reset fallback: get session: %w", siErr)
+		}
+		workerInfo := b.prepareWorkerInfo(sessionID, si.UserID, si.WorkDir, si)
+		if startErr := w.Start(ctx, workerInfo); startErr != nil {
+			return fmt.Errorf("bridge: reset fallback: start: %w", startErr)
+		}
 	}
+
+	// Reset accumulator generation-scoped counters.
+	// TotalInput/TotalOutput/TotalCostUSD are preserved (cumulative).
+	b.accumMu.Lock()
+	if acc, ok := b.accum[sessionID]; ok {
+		acc.TurnCount = 0
+		if rg, ok := w.(resetGenerationer); ok {
+			newGen := rg.LoadResetGeneration()
+			if acc.AppliedResetGen < newGen {
+				acc.Generation++
+				acc.AppliedResetGen = newGen
+			}
+		} else {
+			acc.Generation++
+		}
+	}
+	b.accumMu.Unlock()
 
 	// Workers that reset in-place (no process restart, no Conn replacement)
 	// keep their existing forwardEvents goroutine. Spawning a new one would
@@ -457,7 +553,12 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 	}
 
 	if !resumed {
-		if err := b.StartSession(ctx, newID, si.UserID, si.BotID, si.WorkerType, si.AllowedTools, expanded, si.Platform, si.PlatformKey, si.Title); err != nil {
+		// TODO(inject-per-bot): per-bot injectExclude from the messaging adapter
+		// is not persisted in the session record, so SwitchWorkDir falls back to
+		// platform/global from the atomic config map. Fix requires storing
+		// injectExclude in the session record or giving bridge access to adapters.
+		excl := b.resolveInjectExclude(si.Platform, si.BotID, nil)
+		if err := b.StartSession(ctx, newID, si.UserID, si.BotID, si.WorkerType, si.AllowedTools, expanded, si.Platform, si.PlatformKey, si.Title, "", excl...); err != nil {
 			return nil, fmt.Errorf("switch-workdir: start session: %w", err)
 		}
 		b.log.Info("switch-workdir: created fresh session",
@@ -478,14 +579,33 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 // isWorkerInUseError checks if the worker rejected the session because its
 // session files already exist on disk (e.g. from a mid-start crash).
 func isWorkerInUseError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "already in use")
+	var we *worker.WorkerError
+	return errors.As(err, &we) && we.Kind == worker.ErrKindSessionInUse
 }
 
 // Shutdown signals the bridge that the gateway is shutting down.
 // It sets the closed flag so forwardEvents goroutines skip crash detection,
+// cancels the shutdown context to abort pending auto-retries,
 // then waits for all forwardEvents goroutines to complete or ctx to expire.
 func (b *Bridge) Shutdown(ctx context.Context) {
+	b.MarkClosed()
+	b.WaitForwarders(ctx)
+}
+
+// MarkClosed sets the closed flag and cancels the shutdown context so that:
+//   - New session creation (StartSession/resumeWithOpts) is rejected immediately.
+//   - handleWorkerExit skips crash recovery during shutdown.
+//   - Pending auto-retry goroutines are cancelled.
+//
+// Must be called BEFORE TerminateAllWorkers to prevent the race where an
+// in-flight message handler creates a worker that is immediately killed.
+func (b *Bridge) MarkClosed() {
 	b.closed.Store(true)
+	b.shutdownCancel()
+}
+
+// WaitForwarders waits for all forwardEvents goroutines to complete or ctx to expire.
+func (b *Bridge) WaitForwarders(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {
 		b.fwdWg.Wait()
@@ -541,6 +661,24 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// injectSandbox writes the current sandbox value into the platformKey map
+// so it is persisted and propagated through session resume paths.
+func injectSandbox(platformKey map[string]string, sandbox string) {
+	if sandbox != "" && platformKey != nil {
+		platformKey[worker.SandboxPlatformKey] = sandbox
+	}
+}
+
+// prepareWorkerInfo builds a complete worker.SessionInfo with all standard env
+// injection applied. This consolidates the buildWorkerInfo + injectSlackEnv +
+// injectGatewayContext trio that was previously duplicated across 3 call sites.
+func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
+	info := b.buildWorkerInfo(sessionID, userID, workDir, si)
+	injectSlackEnv(&info, si.PlatformKey)
+	info.Env = injectGatewayContext(info.Env, si.Platform, si.BotID, si.UserID, si.PlatformKey, sessionID, workDir)
+	return info
+}
+
 // buildWorkerInfo constructs a worker.SessionInfo from session metadata,
 // carrying over bridge-level config (workerEnv, blocklist).
 func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
@@ -552,6 +690,12 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		WorkerSessionID: si.WorkerSessionID,
 		ConfigEnv:       b.workerEnv,
 		ConfigBlocklist: b.workerEnvBlocklist,
+		Sandbox:         si.PlatformKey[worker.SandboxPlatformKey],
+		ACPCommand:      si.PlatformKey[worker.ACPCommandPlatformKey],
+		ForkSession:     si.PlatformKey[worker.ForkSessionPlatformKey] == "true",
+		JSONSchema:      si.PlatformKey[worker.JSONSchemaPlatformKey],
+		// TODO: platform adapters (Slack/Feishu) need to populate ForkSession/JSONSchema
+		// into PlatformKey for this wiring to take effect; tracked in UX follow-up.
 	}
 
 	// MCP config injection — 3 scenarios:
@@ -625,6 +769,10 @@ func injectGatewayContext(env map[string]string, platform, botID, userID string,
 	}
 	if teamID := platformKey["team_id"]; teamID != "" {
 		env["GATEWAY_TEAM_ID"] = teamID
+	}
+	// Webhook-triggered context: pr_number injected by TriggerByName extra map.
+	if prNum := platformKey["pr_number"]; prNum != "" {
+		env["TARGET_PR"] = prNum
 	}
 	return env
 }

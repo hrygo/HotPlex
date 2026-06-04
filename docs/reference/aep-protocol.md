@@ -1,3 +1,9 @@
+---
+title: AEP v1 协议参考
+weight: 1
+description: Agent Event Protocol v1 完整参考：事件类型、Envelope 格式、背压机制与错误码
+---
+
 # AEP v1 协议参考
 
 > Agent Event Protocol v1 完整参考文档——事件类型、Envelope 格式、背压机制、错误码
@@ -65,7 +71,8 @@ WebSocket 连接建立后的**第一帧**必须是 `init`，30 秒超时。
     "version": "aep/v1",
     "worker_type": "claude_code",
     "session_id": "sess_xxx",
-    "auth": { "token": "<jwt>" },
+    "title": "可选显示名称",
+    "auth": { "token": "<api-key>" },
     "config": {
       "model": "claude-sonnet-4-6",
       "allowed_tools": ["read_file", "write_file"],
@@ -81,7 +88,14 @@ WebSocket 连接建立后的**第一帧**必须是 `init`，30 秒超时。
 }
 ```
 
-`session_id` 非空时为 Resume 模式，空时创建新 Session。
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| `version` | 是 | 固定 `"aep/v1"` |
+| `worker_type` | 是 | Worker 类型（`claude_code`、`codex_cli`、`acp` 等） |
+| `session_id` | 否 | 空=创建新 Session，非空=Resume 模式。会被清洗和长度校验 |
+| `title` | 否 | 会话显示名称，不参与 Session ID 派生。最大 256 字符，会被清洗 |
+
+`session_id` 和 `title` 均经过 `SanitizeText()` 清洗（移除控制字符、null bytes、BOM、surrogates）和长度校验（最大 256 字符）。超长时返回 `INVALID_MESSAGE` 错误。
 
 ### input（用户输入）
 
@@ -220,6 +234,30 @@ message.start → message.delta* → message.end
 ```
 
 Autonomous 模式下为**通知性质**，Worker 内部执行，Client 无需回传结果。
+
+### tool_update（工具调用中间状态）
+
+```json
+{ "type": "tool_update", "data": { "id": "call_123", "name": "read_file", "status": "in_progress" } }
+```
+
+ACP 专用：映射 `tool_call_update`，报告工具调用的中间状态（`pending` / `in_progress`）。
+
+### plan（计划更新）
+
+```json
+{ "type": "plan", "data": { "entries": [{"id": "1", "text": "Read config file", "status": "completed"}] } }
+```
+
+ACP 专用：映射 `AgentPlanUpdate`，Agent 的计划/任务列表变更通知。
+
+### mode_update（模式切换）
+
+```json
+{ "type": "mode_update", "data": { "mode_id": "code", "name": "Code Mode" } }
+```
+
+ACP 专用：映射 `CurrentModeUpdate`，Agent 执行模式切换通知。
 
 ### state（状态变更）
 
@@ -418,4 +456,4 @@ Heartbeat:      ping ←→ pong
 
 **必须支持**：`init`、`input`、`control`、`ping`、`init_ack`、`message.delta`、`state`、`error`、`done`、`pong`
 
-**可选扩展**：`message.start/end`、`message`、`tool_call/result`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`
+**可选扩展**：`message.start/end`、`message`、`tool_call/result`、`tool_update`、`plan`、`mode_update`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`

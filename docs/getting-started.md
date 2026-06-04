@@ -2,8 +2,6 @@
 title: "HotPlex 5 分钟快速上手"
 weight: 2
 description: "从零开始安装、配置并运行 HotPlex Worker Gateway"
-persona: "all"
-difficulty: "beginner"
 ---
 
 # HotPlex 5 分钟快速上手
@@ -53,12 +51,9 @@ chmod +x hotplex   # macOS / Linux 赋予执行权限
 cp configs/env.example .env
 ```
 
-编辑 `.env`，填入两个必填项：
+编辑 `.env`，填入必填项：
 
 ```bash
-# 生成命令: openssl rand -base64 32 | tr -d '\n'
-HOTPLEX_JWT_SECRET=<your-jwt-secret>
-
 # 生成命令: openssl rand -base64 32 | tr -d '/+=' | head -c 43
 HOTPLEX_ADMIN_TOKEN_1=<your-admin-token>
 ```

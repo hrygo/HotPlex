@@ -15,28 +15,54 @@ type ControlCommandResult struct {
 	Arg    string // optional argument, e.g. path for cd
 }
 
-// slashCommandMap maps slash-form strings to control actions.
-var slashCommandMap = map[string]ControlCommandResult{
-	// GC: reclaim process and resources, session preserved for resume.
-	"/gc":   {Action: events.ControlActionGC, Label: "gc"},
-	"/park": {Action: events.ControlActionGC, Label: "gc"},
-	// Reset: reuse session ID, everything else starts from scratch.
-	"/reset": {Action: events.ControlActionReset, Label: "reset"},
-	"/new":   {Action: events.ControlActionReset, Label: "reset"},
-	"/cd":    {Action: events.ControlActionCD, Label: "cd"},
+// CommandMap is a generic slash + natural language command lookup table.
+type CommandMap[T any] struct {
+	slash   map[string]T
+	natural map[string]T
 }
 
-// naturalLanguageMap maps normalized natural language triggers to control actions.
-// All keys require $ prefix to avoid accidental matches in normal conversation.
-var naturalLanguageMap = map[string]ControlCommandResult{
-	// GC: sleep, suspend — worker stopped but session alive for resume.
-	"$gc": {Action: events.ControlActionGC, Label: "gc"},
-	"$休眠": {Action: events.ControlActionGC, Label: "gc"},
-	"$挂起": {Action: events.ControlActionGC, Label: "gc"},
-	// Reset: start over — same session ID, fresh context.
-	"$重置":    {Action: events.ControlActionReset, Label: "reset"},
-	"$reset": {Action: events.ControlActionReset, Label: "reset"},
+// NewCommandMap creates a command map from slash and natural language entries.
+func NewCommandMap[T any](slash, natural map[string]T) *CommandMap[T] {
+	return &CommandMap[T]{slash: slash, natural: natural}
 }
+
+// Lookup finds a command by normalized text, checking slash entries first.
+func (m *CommandMap[T]) Lookup(normalized string) (T, bool) {
+	if v, ok := m.slash[normalized]; ok {
+		return v, true
+	}
+	return m.LookupNatural(normalized)
+}
+
+// LookupSlash finds a command in the slash entries only.
+func (m *CommandMap[T]) LookupSlash(normalized string) (T, bool) {
+	v, ok := m.slash[normalized]
+	return v, ok
+}
+
+// LookupNatural finds a command in the natural language entries only.
+func (m *CommandMap[T]) LookupNatural(normalized string) (T, bool) {
+	v, ok := m.natural[normalized]
+	return v, ok
+}
+
+// controlCommands maps slash and natural language triggers to control actions.
+var controlCommands = NewCommandMap(
+	map[string]ControlCommandResult{
+		"/gc":    {Action: events.ControlActionGC, Label: "gc"},
+		"/park":  {Action: events.ControlActionGC, Label: "gc"},
+		"/reset": {Action: events.ControlActionReset, Label: "reset"},
+		"/new":   {Action: events.ControlActionReset, Label: "reset"},
+		"/cd":    {Action: events.ControlActionCD, Label: "cd"},
+	},
+	map[string]ControlCommandResult{
+		"$gc":    {Action: events.ControlActionGC, Label: "gc"},
+		"$休眠":    {Action: events.ControlActionGC, Label: "gc"},
+		"$挂起":    {Action: events.ControlActionGC, Label: "gc"},
+		"$重置":    {Action: events.ControlActionReset, Label: "reset"},
+		"$reset": {Action: events.ControlActionReset, Label: "reset"},
+	},
+)
 
 // ParseControlCommand checks whether text is a control command.
 // Returns nil if the text is not a control command.
@@ -51,10 +77,7 @@ func ParseControlCommand(text string) *ControlCommandResult {
 		return &arg
 	}
 
-	if result, ok := slashCommandMap[tl]; ok {
-		return &result
-	}
-	if result, ok := naturalLanguageMap[tl]; ok {
+	if result, ok := controlCommands.Lookup(tl); ok {
 		return &result
 	}
 	return nil
@@ -101,42 +124,41 @@ var workerSlashCommandsWithArgs = map[string]bool{
 	"/effort": true,
 }
 
-// workerSlashMap maps slash-form strings to worker stdio commands.
-var workerSlashMap = map[string]events.WorkerStdioCommand{
-	"/context": events.StdioContextUsage,
-	"/skills":  events.StdioSkills,
-	"/mcp":     events.StdioMCPStatus,
-	"/model":   events.StdioSetModel,
-	"/perm":    events.StdioSetPermMode,
-	"/compact": events.StdioCompact,
-	"/clear":   events.StdioClear,
-	"/effort":  events.StdioEffort,
-	"/rewind":  events.StdioRewind,
-	"/commit":  events.StdioCommit,
-}
-
-// workerNLMap maps natural language triggers to worker stdio commands.
-// All keys require $ prefix to avoid accidental matches in normal conversation.
-var workerNLMap = map[string]events.WorkerStdioCommand{
-	"$context": events.StdioContextUsage,
-	"$上下文":     events.StdioContextUsage,
-	"$skills":  events.StdioSkills,
-	"$技能":      events.StdioSkills,
-	"$mcp":     events.StdioMCPStatus,
-	"$model":   events.StdioSetModel,
-	"$切换模型":    events.StdioSetModel,
-	"$perm":    events.StdioSetPermMode,
-	"$权限模式":    events.StdioSetPermMode,
-	"$compact": events.StdioCompact,
-	"$压缩":      events.StdioCompact,
-	"$clear":   events.StdioClear,
-	"$清空":      events.StdioClear,
-	"$effort":  events.StdioEffort,
-	"$rewind":  events.StdioRewind,
-	"$回退":      events.StdioRewind,
-	"$commit":  events.StdioCommit,
-	"$提交":      events.StdioCommit,
-}
+// workerCommands maps slash and natural language triggers to worker stdio commands.
+var workerCommands = NewCommandMap(
+	map[string]events.WorkerStdioCommand{
+		"/context": events.StdioContextUsage,
+		"/skills":  events.StdioSkills,
+		"/mcp":     events.StdioMCPStatus,
+		"/model":   events.StdioSetModel,
+		"/perm":    events.StdioSetPermMode,
+		"/compact": events.StdioCompact,
+		"/clear":   events.StdioClear,
+		"/effort":  events.StdioEffort,
+		"/rewind":  events.StdioRewind,
+		"/commit":  events.StdioCommit,
+	},
+	map[string]events.WorkerStdioCommand{
+		"$context": events.StdioContextUsage,
+		"$上下文":     events.StdioContextUsage,
+		"$skills":  events.StdioSkills,
+		"$技能":      events.StdioSkills,
+		"$mcp":     events.StdioMCPStatus,
+		"$model":   events.StdioSetModel,
+		"$切换模型":    events.StdioSetModel,
+		"$perm":    events.StdioSetPermMode,
+		"$权限模式":    events.StdioSetPermMode,
+		"$compact": events.StdioCompact,
+		"$压缩":      events.StdioCompact,
+		"$clear":   events.StdioClear,
+		"$清空":      events.StdioClear,
+		"$effort":  events.StdioEffort,
+		"$rewind":  events.StdioRewind,
+		"$回退":      events.StdioRewind,
+		"$commit":  events.StdioCommit,
+		"$提交":      events.StdioCommit,
+	},
+)
 
 // WorkerCommandResult holds the parsed worker stdio command and its arguments.
 type WorkerCommandResult struct {
@@ -157,7 +179,7 @@ func ParseWorkerCommand(text string) *WorkerCommandResult {
 	t = trimTrailingPunct(t)
 
 	base, args := parseWorkerSlashCommands(t)
-	if cmd, ok := workerSlashMap[base]; ok {
+	if cmd, ok := workerCommands.LookupSlash(base); ok {
 		label := base
 		if !workerSlashCommandsWithArgs[base] {
 			args = ""
@@ -169,7 +191,7 @@ func ParseWorkerCommand(text string) *WorkerCommandResult {
 		}
 	}
 
-	if cmd, ok := workerNLMap[t]; ok {
+	if cmd, ok := workerCommands.LookupNatural(t); ok {
 		return &WorkerCommandResult{
 			Command: cmd,
 			Label:   t,

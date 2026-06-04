@@ -1,5 +1,593 @@
 # Changelog
 
+## [1.24.4] - 2026-06-03
+
+### Summary
+
+v1.24.4 是一次 patch 版本更新，聚焦于 **session identity 迁移的安全加固**。PR #635 补全了 WS init 路径缺失的输入清洗和长度校验，隔离了 session 恢复/启动的 context 超时预算，并统一了前端 session ID 生成逻辑。同步更新了 specs 索引和 WebSocket 集成文档。
+
+### Changed
+
+- **Gateway Core**: WS init path now sanitizes `title` and `sessionID` via `messaging.SanitizeText()` — REST API path already had this; the WS path was unguarded. (#635)
+- **Gateway Core**: Resume→Start session fallback uses independent 30s timeout contexts instead of sharing a single budget — a slow resume no longer starves the heavier StartSession. (#635)
+- **Gateway Core**: Replace hardcoded `256` with `session.MaxClientKeyLen` constant in API handler for consistency with session manager's validation. (#635)
+- **WebChat UI**: Replace inline `crypto.randomUUID()` with existing `newSessionId()` utility — provides cross-browser fallback instead of silently failing. (#635)
+- **WebChat UI**: Consolidate `MAIN_SESSION_CLIENT_ID`/`MAIN_SESSION_TITLE` into single `ANCHOR_SESSION_ID` constant. (#635)
+
+### Fixed
+
+- **Session**: Title length validation missing in WS init path — `client_session_id` had a 256-char guard but `title` did not, allowing unbounded input. (#635)
+
+## [1.24.3] - 2026-06-03
+
+### Summary
+
+v1.24.3 是一次 patch 版本更新，修复了 WebSocket 客户端在消息中省略 `session_id` 或 `seq` 字段时触发验证错误的问题。AEP 解码器新增 `ValidateMinimal` 路径，允许这些字段为空——Gateway 会在解码后注入权威值。
+
+### Fixed
+
+- **Gateway Core**: AEP codec rejects client messages with empty `session_id`/`seq` — add `DecodeLineMinimal` path that skips these fields since the Gateway stamps authoritative values after decoding.
+
+## [1.24.2] - 2026-06-03
+
+### Summary
+
+v1.24.2 是一次 patch 版本更新，聚焦于 **会话追踪能力增强** 和 **WebChat 代码质量提升**。新增 `client_key` 持久化到 sessions 表，将 WebSocket init 的 clientSessionID 存入数据库便于调试和会话关联。WebChat 完成组件拆分重构（thread.tsx → 7 个独立组件），修复了 CopyButton 定时器泄漏和会话 worker 名称显示错误。文档门户新增 mermaid.js 离线渲染和 SSO 集成最佳实践。
+
+### Added
+
+- **Session**: Persist `client_key` in sessions table — stores the WebSocket init envelope's `session_id` for debugging and session tracing, with 256-char length validation. (#631)
+- **Docs**: Bundle mermaid.js for offline rendering in self-hosted documentation portal — no CDN dependency. (#631)
+
+### Changed
+
+- **WebChat UI**: Extract thread.tsx (597 lines) into 7 focused components — AssistantMessage, UserMessage, WelcomeScreen, PreAssistantIndicator, ReasoningBlock, CopyButton, MessageActions + shared helpers. (#629)
+- **Docs**: Restructure WebSocket integration guide (17→15 sections), add SSO integration best practices and bidirectional client_key/clientSessionID cross-references. (#631)
+
+### Fixed
+
+- **WebChat UI**: CopyButton `setTimeout` timer not cleared on unmount — potential setState-after-unmount when navigating away within the 2s cooldown window. (#629)
+- **WebChat UI**: Chat header showed global config worker type instead of per-session `worker_type` — now displays correct worker name (Claude/Codex/OpenCode/ACP) per session. (#629)
+
+## [1.24.1] - 2026-06-03
+
+### Summary
+
+v1.24.1 是一次 patch 版本更新，聚焦于 **WebChat Skills 功能修复**。修复了 `$skills` 命令冻结 UI 和返回不完整列表两个核心问题（#624），新增 skills 本地缓存与斜杠命令菜单集成，并通过多轮 PR #626 review 修复了 worker 命令 done 事件、会话切换和错误处理的多个缺陷。
+
+### Added
+
+- **WebChat UI**: Skills caching with 24h TTL — fetched skills are persisted to localStorage (keyed by session ID) and merged into the slash command menu (`/` palette) alongside built-in commands.
+
+### Changed
+
+- **Infrastructure**: Git hooks use `core.hooksPath` instead of symlinks for reliable cross-worktree setup; pre-push validation parallelized for ~50% speed improvement.
+
+### Fixed
+
+- **Gateway Core**: `$skills` returns incomplete list when `homeDir` is empty — global skill directories (`~/.claude/skills`, `~/.agents/skills`, `~/.hotplex/skills`) were skipped or resolved as relative paths. (#624)
+- **Gateway Core**: Worker commands (`$skills`, `$context`, `$mcp`, `$model`, `$perm`) never emit a `done` event, leaving frontend stuck in running state. Synthetic done event now scoped to `StdioSkills` only. (#624)
+- **WebChat UI**: `SkillsList` event undeclared in frontend `EventKind` constants, causing gateway response to be silently dropped. (#624)
+- **WebChat UI**: Slash command menu hard 8-item cap cut off all skills — container scrolling now handles arbitrary list lengths; keyboard navigation auto-scrolls selected item into view.
+
+## [1.24.0] - 2026-06-02
+
+### Summary
+
+v1.24.0 是一次 minor 版本更新，聚焦于 **飞书交互式卡片** 和 **WebChat 会话状态实时性**。飞书适配器新增权限确认、问答确认和 Elicitation 三种交互式卡片按钮，用户无需输入斜杠命令即可在卡片上直接操作。WebChat 修复了 session 状态徽章映射错误和侧边栏无实时更新的问题，状态变更现通过 WebSocket 实时推送到前端并以中文标签展示。
+
+### Added
+
+- **Messaging/Feishu**: Interactive card buttons for permission approval, question confirmation, and elicitation — users can approve/reject/answer directly on Feishu cards without slash commands. (#620)
+- **WebChat UI**: Real-time session state propagation — WebSocket `state` events now flow through the adapter to the session hook, updating sidebar status live without page refresh.
+
+### Changed
+
+- **Messaging/Feishu**: Unify question card to v2 `buildCard` format, matching permission/elicitation card structure. Remove deprecated `buildInteractionCard` and related dead code. (#620)
+
+### Fixed
+
+- **WebChat UI**: Session status badge mapped non-existent `active`/`working` states — backend returns `created`/`running`/`idle`/`terminated`/`deleted`, causing gray fallback for running sessions and zero active count.
+- **WebChat UI**: Replace raw English state strings with Chinese labels in sidebar via `stateLabel()` (running → 进行中, idle → 空闲, etc.).
+- **Messaging/Feishu**: Return "未知操作" feedback card for unknown card action types instead of nil. (#620)
+
+## [1.23.2] - 2026-06-02
+
+### Summary
+
+v1.23.2 是一次 patch 版本更新，聚焦于 **Gateway 生命周期可靠性** 和 **安全正确性**。修复了 shutdown 竞态导致 Worker 启动后即被杀死、session/bridge 多个状态迁移缺陷、安全模块 race condition、AEP 信封 mutation、TTS 侧冷启动 contention 等问题。同时新增 ACP Worker 可插拔 stderr handler 和跨 SDK ACP 事件类型覆盖。
+
+### Added
+
+- **Worker/ACP**: Pluggable stderr handler — `proc.StderrHandler` interface replaces hardcoded Info logging; ACP worker gets a stateful multi-line folder that collapses system prompt echoes, XML blocks, and Python tracebacks into concise summaries. (#618)
+- **Worker/ACP**: Auto-approve by default for sandboxed ACP agents — `*bool` config distinguishes absent from explicit false. (#618)
+- **SDK**: Full ACP extension event coverage across Go/Java/Python/TypeScript — context_usage, skills_list, mcp_status, worker_command, tool_update, plan, mode_update, question/elicitation request/response. (#618)
+- **Worker/ClaudeCode**: Emit assistant thinking content blocks as EventStream events (Claude CLI v2.1.158+ compat) with dedup guard for old CLI versions. (#618)
+
+### Changed
+
+- **Messaging/Feishu**: Release lock before triggering tool flush to avoid deadlock; case-insensitive tool name lookup for ACP agents. (#618)
+- **Messaging/Feishu**: Truncate sdk_logger messages >400 chars to reduce dev log noise. (#618)
+- **Worker/ClaudeCode**: Remove redundant `--settings` JSON from buildCLIArgs that broke CCR (claude-code-router) — env injection via cmd.Env is sufficient. (#619)
+
+### Fixed
+
+- **Gateway Core**: Shutdown race — split `Shutdown()` into `MarkClosed()` + `WaitForwarders()` so in-flight handlers are rejected before worker termination, preventing start-then-kill. (#613)
+- **Gateway Core**: `doneReceived` reset causes false "worker exited without done" errors on single-turn platform sessions — replace immediate reset with new-turn detection. (#613)
+- **Gateway Core**: Eventstore collector close order — close before SessionMgr to prevent writes to closed DB. (#613)
+- **Gateway Core**: Collector.Close() double-close panic — add sync.Once protection. (#617)
+- **Gateway Core**: everHadConn map unbounded growth — delete on removeSession. (#617)
+- **Security**: API key allowlist/blocklist atomicity gap — replace double-lock cycles with single mutex-protected access; add RLock to ValidateBaseDir. (#619)
+- **Security**: Replace real IP with LAN example in CSP comments/tests. (#619)
+- **AEP**: Envelope mutation — extract `marshalEnvelope` with shallow copy to prevent Encode/EncodeJSON from mutating caller's envelope. (#619)
+- **TTS**: MossProcess single-flight start — concurrent callers wait on readyCh instead of contending mutex during ~60s sidecar warmup; detach warmup context from request lifecycle. (#619)
+
+## [1.23.1] - 2026-06-01
+
+### Summary
+
+v1.23.1 是一次 patch 版本更新，修复 v1.23.0 引入的两个回归问题。Claude Code Worker 的临时文件互斥锁导致自死锁，使 bot 完全无响应；ACP Worker 的 turn summary 缺少 token 和成本数据。两者均为 v1.23.0 引入的回归，影响已部署实例的日常使用。
+
+### Fixed
+
+- **Worker/Claudecode**: Resolve self-deadlock in `writeTempFile`/`cleanupTempFiles` — PR #606 added `w.Mu.Lock()` to both functions, but they are called from `startLocked()` which already holds `w.Mu`, causing an instant deadlock that blocks all subsequent messages. Introduce dedicated `tempFilesMu` to preserve the data-race fix without deadlocking the Start path. (#612)
+- **Worker/ACP**: Align `buildStats` output with gateway `sessionAccumulator` format — token counts and cost data were missing because `buildStats()` emitted flat keys incompatible with `mergePerTurnStats()`. Wrap token data in nested `usage` map and store cost as `float64` for JSON round-trip safety. (#610)
+
+## [1.23.0] - 2026-06-01
+
+### Summary
+
+v1.23.0 是一次 minor 版本更新，聚焦于 **CodexCLI 100% 协议覆盖**、**ACP Worker 三阶段补齐**、**Agent 配置注入控制**、**Gateway 核心可靠性修复** 和 **远程部署可用性**。CodexCLI 适配器实现与上游 Codex CLI 的完全协议对等（5 阶段 16 任务，+666 行）。ACP Worker 完成 Phase 1–3 全部功能。新增 inject_exclude 机制支持按文件排除 Agent 配置注入。Gateway Core 修复 session 生命周期竞态、platform conn 路由丢失、autoRetry 阻塞等关键问题，Worker 可靠性覆盖 claudecode/CodexCLI/ACP。Webchat 与 Docs 门户的 CSP 改为可配置且默认宽松，让远程部署零配置即可用并提供启动 warn 提示。
+
+### Added
+
+- **Worker/CodexCLI**: Full protocol upgrade — 100% coverage with upstream Codex CLI. WorkerCommander interface (Compact/Clear/Rewind), Thread lifecycle (Resume/Fork/Archive/Rollback), Turn control (Steer/Interrupt), 5 MCP methods, Review support, 12 CLI flags, 11 Thread management methods. (#592, #604)
+- **Worker/CodexCLI**: Resume on existing manager process — creates new thread without restarting, preserving conversation context.
+- **Worker/CodexCLI**: Exec flags wired through config pipeline — 9 exec-mode flags (color, output_file, strict_config, etc.) configurable per-bot.
+- **Worker/ACP**: Phase 1 core features — complete ACP protocol support for permission bridging, priority-aware backpressure, and bidirectional ACP↔AEP mapping. (#590)
+- **Worker/ACP**: Phase 2 interaction completeness — reset optimization, discovery, and error UX improvements. (#591)
+- **Worker/ACP**: Phase 3 advanced features — protocol version negotiation, multi-agent coordination, debug trace, ForkSession, and JSON Schema validation. (#595)
+- **Worker**: Align OCS/Codex/ACP feishu UI/UX with Claude Code worker — standardized tool names, ToolUpdate event handling, Name fallback for non-ClaudeCode agents.
+- **Configuration**: Per-file injection control (inject_exclude) — configurable blacklist to skip specific agent config files, with 3-level fallback (bot → platform → global). (#594, #603)
+- **Configuration**: Configurable Content-Security-Policy via `security.csp` / `HOTPLEX_SECURITY_CSP` — replaces hardcoded `localhost`-pinned policy that blocked remote deployments. Defaults to a scheme-wide-open connect-src (`http:` / `https:` / `ws:` / `wss:`) so zero-config remote setups work end-to-end, with a startup WARN when the default or a wide-open override is in effect. (#608)
+- **Gateway**: GitHub webhook receiver for event-driven PR review with comprehensive access control. (#581)
+- **Session/Pool**: Atomic `AcquireWithMemory` — single-lock reservation of concurrency + memory quota, replacing the two-step Acquire+AcquireMemory pattern that had rollback complexity and a TOCTOU window. (#606)
+
+### Changed
+
+- **Worker/CodexCLI**: Extract CodexExecFlags into dedicated struct — other worker adapters no longer see CodexCLI-specific flags in shared SessionInfo type.
+- **Gateway Core**: routeMessage uses context.WithoutCancel(h.ctx) for platform conn pre-encoded path, preserving tracing propagation during shutdown drain.
+- **Session**: Concurrent session GC — errgroup with concurrency limit 5 for `max_lifetime` + `idle_timeout` transitions, with O(1) reason lookup via map (max_lifetime precedence). (#606)
+- **Session**: N+1 lock pattern eliminated in `ListActive` / `WorkerHealthStatuses` — readers no longer acquire per-session `ms.mu.RLock` for `ms.info` and `ms.worker` value-type fields assigned under `m.mu`+`ms.mu` on the write path. (#606)
+
+### Fixed
+
+- **Gateway Core**: P0 markdown table parser panic on bare "|" input — add slice bounds guard in feishu and slack table formatters.
+- **Gateway Core**: forwardEvents blocking risk + StartSession orphan worker + Delete/Attach race conditions. (#599, #600, #602)
+- **Gateway Core**: Platform conn routing lost OwnerID during pre-encoded JSON path, causing interactive authorization failure ("OwnerID not set") in Feishu/Slack channels.
+- **Gateway Core**: dev-start clears logs before gateway starts — previous ordering deleted logs after gateway began writing, leaving running process with fd to removed inode.
+- **Gateway Core**: TransitionWithInput escape hatch now calls `forceTerminateInMemory()` to release pool quota, update metrics, nil worker, and notify state change (was leaking pool slots and drifting metrics). (#598, #601)
+- **Gateway Core**: Error events in claudecode/codexcli/opencodeserver mappers now guard against empty message and missing Code field; admin bot API returns unique bot_id via platform:name fallback to prevent React key collision. (#596, #597, #601)
+- **Gateway Core**: PoolAcquireTotal success metric moved from pool.Acquire() to AttachWorker post-validation to eliminate double-count on memory error path. (#522, #601)
+- **Cron**: SessionKey now honors `Payload.WorkerType` instead of always using `claudecode`. Prior cron sessions for non-claudecode workers (codexcli/acp) become orphaned under the old key — their session records remain in storage but are no longer reachable via SessionKey(). This is a correctness fix; no data is deleted. If you rely on history for non-claudecode cron jobs, either re-run them or migrate by updating the SessionKey column manually in your store.
+- **Worker/Claudecode**: `SendControlRequest` lock-merged to eliminate TOCTOU gap between pending request registration and stdin write; `cleanupTempFiles` snapshots under lock to prevent concurrent `writeTempFile` mutation; unmarshal errors for PermissionRequest/QuestionRequest/ElicitationRequest now log instead of silently dropping. (#541, #606)
+- **Worker/CodexCLI**: Wait() deadlock from unclosed doneCh, resume ref leak, lock held during IO, map mutation across goroutines, error swallowing — comprehensive fixes across 4 review rounds. (#593, #604)
+- **Worker/CodexCLI**: Missing mapItemCompleted cases for WebSearch/CollabToolCall — Feishu tool_activity strip showed them as perpetually in-progress.
+- **Worker/CodexCLI**: Multi-file edit visibility in Feishu cards — join all file paths with comma instead of silently discarding beyond the first.
+- **Worker/CodexCLI**: nil-map / typed-nil panic guards in ACP+CodexCLI paths, `CodexItem` cleanup of dead fields, `AppServerWorker` state machine replaces legacy `started` boolean. (#604)
+- **Worker/ACP**: Zombie cleanup timeout + orphan DELETED session invalid resume — cancel timeout adjusted to 2s for reliability on high-load systems.
+- **Messaging/Feishu**: CJK MessageDelta terminator check — previous `0x82` short-circuit was incorrect (`？` U+FF1F / `！` U+FF01 have trailing bytes `0x9F` / `0x81`, only `。` U+3002 is `0x82`), causing line breaks to be dropped after question/exclamation marks. Now always decodes the last rune and compares against the fullwidth terminator set. (#608)
+- **Infrastructure**: E2E listener registration race eliminated in all tests.
+
+## [1.22.0] - 2026-05-30
+
+### Summary
+
+v1.22.0 是一次 minor 版本更新，聚焦于 **ACP Worker 全面实现**、**Cron 并发安全审计** 和 **CodexCLI 生命周期修复**。新增 ACP (Agent Client Protocol) Worker 适配器，使任何 ACP 兼容 Agent（如 Hermes）可作为一线 Worker 运行。Cron 模块经过端到端审计，修复 6 个 P1 竞态条件。CodexCLI 获得 reset 轻量化重构和 zombie 进程修复。Worker sandbox 支持 per-bot 粒度配置，Slack 适配器新增 Assistant branding 能力。
+
+### Added
+
+- **Worker/ACP**: ACP Worker adapter — full implementation of JSON-RPC 2.0 over stdio protocol with bidirectional ACP↔AEP mapping (11 notification types), permission bridging, priority-aware backpressure, and 12 rounds of PR review hardening. 24 tests with -race flag. (#569, #579)
+- **Worker/Codex**: Per-bot sandbox field in Slack/Feishu bot configs for role-based access control.
+- **Messaging/Slack**: Assistant branding — DisplayName/IconEmoji support with bot-level override for custom assistant status. DataTableBlock for skills list rendering. (#565)
+- **Worker**: Add NO_PROXY to worker environment — bypass system proxy (e.g. Clash) for localhost calls, preventing 502 Bad Gateway on local CLIProxyAPI requests.
+
+### Security
+
+- **Worker/Codex**: Default sandbox changed from `workspace-write` to `danger-full-access`. Existing deployments upgrading to v1.22.0 will have Codex workers silently elevated to unrestricted access. Set `sandbox: "workspace-write"` per-bot or at platform level to restore the old behavior.
+
+### Changed
+
+- **Worker/CodexCLI**: ResetContext now uses lightweight thread swap on the same app-server process instead of full Terminate→Start cycle, eliminating 30s reset timeout. (#576)
+- **Worker/CodexCLI**: Skip DEBUG log for high-frequency delta notifications — reduces codex log output from ~80% to <5% of total.
+- **Cron/CLI**: `--platform-key` now merges over environment variable keys instead of replacing them. Previous behavior: CLI keys fully replaced env keys. New behavior: env keys serve as baseline, CLI keys override.
+- **Cron/CLI**: `--attach` with recurring schedules (`every:`) no longer sets `DeleteAfterRun=true`. Only `at:` one-shot attach jobs auto-delete. Recurring attach jobs use `max_runs`/`expires_at` for lifecycle management.
+
+### Fixed
+
+- **Cron**: End-to-end audit — fix 6 P1 race conditions (slot leak, ABBA deadlock, narrow SetEnabled, cancel leak, CLI timestamps, maxJobs gate), 8 P2 design gaps (platform key merge, delivery error escalation, injection detection hardening, upsert atomicity, persist timeout), and 4 P3 edge cases (backoff off-by-one, sanitize boundary). (#574)
+- **Cron**: Grace period cap reduced from 2h to `min(interval/2, 30min)` — gateway downtime exceeding 30min will skip missed cron executions. Previously daily jobs had up to 12h grace, weekly up to 84h. (#574)
+- **Cron**: Resolve platform keys from env vars even with explicit --platform flag, preventing missing channel_id/chat_id in created jobs.
+- **Cron**: Use background timeout in onTick persist calls — s.ctx gets cancelled during Shutdown causing silent persist failures.
+- **CLI/Cron**: Improve missing-arg error messages with --help guidance instead of generic "accepts 1 arg(s), received 0".
+- **Worker/CodexCLI**: Fix reset killing session + zombie process lingering 30min — ResetContext now properly rebuilds thread, Kill immediately force-kills idle singletons. (#575, #576)
+- **Release**: Use awk index() for changelog extraction to prevent field-splitting errors on bracketed version strings.
+
+## [1.21.0] - 2026-05-29
+
+### Summary
+
+v1.21.0 是一次 minor 版本更新，聚焦于 **ACP Worker 通用集成框架** 和 **CodexCLI 稳定性**。新增 ACP (Agent Client Protocol) Worker 集成规格（经过三源交叉审查验证），为 Hermes 等 ACP 兼容 Agent 提供通用对接路径。CodexCLI 适配器获得关键死锁修复和流式输出增强。Slack 适配器完成 DataTableBlock GA 迁移。
+
+### Added
+
+- **Worker/ACP**: ACP Worker integration spec — 11-section design document defining universal ACP agent connectivity via stdio JSON-RPC 2.0. Triple cross-reviewed against ACP SDK, HotPlex source, and Hermes source with 22 corrections applied. (#570)
+- **Messaging/Slack**: Replace beta `TableBlock` with GA `DataTableBlock` (slack-go v0.24.0). All 6 table builders migrated, validator/sanitizer updated, `isInvalidBlocksError` helper unified across 8 call sites. (#566)
+
+### Changed
+
+- **Infrastructure**: Upgrade Go dependencies to latest stable versions. (#562)
+
+### Fixed
+
+- **Worker/CodexCLI**: Fix `readNotifications` mutex deadlock causing 30s handshake timeout — pass stdout directly instead of shared pipe. Fix `context.Background()` SIGKILL race where `defer startCancel()` killed process within 10ms of successful handshake. Expand notification coverage for reasoning, MCP tool calls, warnings, and command execution. Gate token usage by turnID to prevent cross-turn contamination. Add `approvalPolicy` to thread/start params. (#570)
+- **Gateway Core**: Populate metadata in synthetic events — done/error events now include turn statistics and session context. (#563)
+- **UX**: Dev mode lockout warning with upgrade guidance, WebChat 401 error handling with authentication redirect, font preload optimization. (#561)
+- **Worker/CodexCLI**: Batch fix — 5 high-ROI fixes addressing handshake deadlock (#501), notification parsing (#527), thread lifecycle (#526), streaming output (#510), and context propagation (#544). (#564)
+
+## [1.20.0] - 2026-05-29
+
+### Summary
+
+v1.20.0 是一次 minor 版本更新，聚焦于 **新消息平台集成** 和 **安全加固**。新增 Yuanxin (Pulsar) 消息适配器和 `hotplex install` CLI 命令，扩展平台覆盖和安装体验。安全方面修复了 XML 注入绕过、SSRF DNS 信息泄露和 SafetyGuard 数据竞争。Cron 模块经过全面并发安全重构，Admin API 不再泄露内部错误信息。测试稳定性大幅提升，消除了多个 CI flaky test。
+
+### Added
+
+- **Messaging**: Yuanxin messaging adapter via Apache Pulsar — consumer/producer lifecycle, MessageDelta 背压累积, cron 结果投递, multi-round code review (16 commits). (#494)
+- **CLI**: `hotplex install` command — install binary to PATH with cross-platform shell profile detection, extracted shared install utilities from onboard wizard. (#555)
+- **Gateway Core**: TurnCount persistence across gateway restarts — load latest turn_num from DB when in-memory counter is 0, prevent duplicate turn_nums. (#555)
+
+### Changed
+
+- **Cron**: Extract `handlePostExecution` template to eliminate ~80% lifecycle duplication between `executeJob` and `executeAttached`. (#543)
+- **CLI**: Extract `GatewayState` to shared `pidutil` package, removing duplicates across `cmd/hotplex` and `internal/cli`. (#543)
+- **Build**: webchat-embed and docs-build staleness detection via `find -newer` cache pattern, Makefile VERSION variable extraction, 3-stage build status display. (#549)
+- **Tracing**: Rename misleading `SpanFromContext` to `GetTracer`, fix hardcoded version via `serviceVersion` parameter. (#552)
+- **Test**: Parameterize time constants to reduce CI wait times, replace `time.Sleep`+assert with `require.Eventually` across 8 files. (#550)
+
+### Fixed
+
+- **Security**: XML sanitizer missed uppercase attribute tags (e.g. `<RULES x="1">`), allowing prompt injection bypass for all 10 reserved tags. (#517)
+- **Security**: SSRF `ValidateURL` leaked internal DNS topology through error strings in API responses. (#537)
+- **Security**: `SafetyGuard` data race on `banPatterns` and config fields in hot path — add RLock snapshot. (#531)
+- **Security**: `AllowedModels`/`AllowedTools` data race — add RWMutex protection with `RegisterModel`/`RegisterTool` API. (#537)
+- **Security**: Admin API error handlers leaked internal error strings to HTTP responses — add `respondStoreError` with sentinel-based 404 detection. (#552)
+- **Cron**: Unified error classification, `persistCtx` race condition, panic recovery leaving jobs permanently stuck, `loadFromDB` lock ordering deadlock. (#514, #499, #534)
+- **Messaging**: Feishu data race on turn metadata, lock-during-API blocking, chat queue panic leak. (#539)
+- **Messaging**: `Classify()` treated all DB errors as "no record found", causing duplicate welcome messages on transient failures. (#528)
+- **Worker**: codexcli stdout pipe FD leak on early return, stderr buffer `bufio.ErrTooLong` on large lines. (#547)
+- **Gateway Core**: `stopGateway` failed with "no such process" on foreground-started instances — add `Terminate()` for direct PID signaling. (#549)
+- **Gateway Core**: `dev` command missing duplicate-gateway guard, causing port conflicts. (#529)
+- **Circuit Breaker**: `Reset()` caused state divergence with underlying breaker, `Execute` data race on `cb.breaker`. (#532)
+- **Eventstore**: JSON unmarshal errors silently discarded, `flushBatch` cascading warnings on poisoned SQLite tx. (#536)
+- **WebChat UI**: CronSchedule object rendered as React child, cron list grid overflow, JSON parse error on trigger, formatDuration triplication. (#555)
+
+## [1.19.0] - 2026-05-27
+
+### Summary
+
+v1.19.0 是一次 minor 版本更新，聚焦于 **PostgreSQL 双数据库支持** 和 **安全修复**。新增完整的 PostgreSQL 后端（`dbutil.Dialect` 抽象层 + 5 个 PG Store + 9 个 PG 迁移文件），在保留 SQLite 默认后端的同时提供企业级数据库选项。安全方面修复了 Admin API key 认证绕过和 dev mode 重激活漏洞。Gateway Core 和 Messaging 层进行了 SOLID 原则批量重构，提升可维护性和可测试性。
+
+### Added
+
+- **Database**: PostgreSQL dual-database support via `dbutil.Dialect` abstraction — thin dialect layer (5 methods, 120-line Rebind state machine) isolates all SQL differences. 5 PG Store implementations (session, cron, eventstore, chat_access, api_key), 9 PG migration files, Docker Compose PG stack. (#490)
+- **Database**: `db-stats` skill manual with go:embed integration — 4-step database detection, complete schema reference, 9 categories of analytics SQL templates.
+- **Database**: CLI cron commands now support PostgreSQL backend via driver-aware `OpenStore`.
+- **Docker**: Multi-DB Docker Compose setup with `docker-compose.pg.yml`, PostgreSQL init script, dual-mode entrypoint, and production PG config with volume persistence.
+
+### Changed
+
+- **Gateway Core**: SOLID principles batch refactor — extract `prepareWorkerInfo` (eliminate env injection trio), unify `SessionManager` interface hierarchy via embedding, eliminate Hub type assertions via `RouteWrite`, decompose `performInit` into four-phase dispatch, extract `forwardContext` from `forwardEvents`. (#492)
+- **Gateway Core**: Decompose `handleInput` into focused sub-handlers and extract worker command handlers from switch chain for independent testability. (#492)
+- **Messaging**: SOLID + test coverage — extract generic `CommandMap[T]`, move platform-specific envelope builders to adapters, split `platform_adapter.go` into 4 single-responsibility files (types, interfaces, registry, adapter), remove dead `SessionManager` type. (#491)
+- **Database**: `WriteMu` becomes no-op on PostgreSQL (MVCC handles concurrency natively), PG stores use `errors.As` for unique violation detection instead of fragile string matching.
+
+### Fixed
+
+- **Security**: Admin API key authentication bypass — Phase 1 (`authenticateKey`) only checked config-sourced keys, database-created keys were never accepted. Add separate `dbKeys` map synced via `AddKey`/`RemoveKey` and preloaded at startup. (#495)
+- **Security**: Dev mode re-activation vulnerability — add `devModeLocked` flag to `Authenticator`, preventing auth bypass when all DB keys are removed after initial configuration.
+- **Security**: DBResolver PostgreSQL placeholder incompatibility — add dialect field to `DBResolver`, using `dbutil.Dialect.Rebind()` for `$1/$2/...` parameter conversion.
+- **Admin**: `routes.go` omitted `APIKeyStore` and `WriteMu` on PostgreSQL path, causing admin to fall back to SQLite-style store with wrong SQL placeholders.
+- **Gateway Core**: CORS preflight blocking PUT and PATCH — add both methods to `Allow-Methods` header in two locations.
+- **Infrastructure**: CI webchat cache key expanded to include `context/`, `types/`, and `public/` directories to prevent stale builds.
+
+## [1.18.1] - 2026-05-26
+
+### Summary
+
+v1.18.1 是一次 patch 版本更新，聚焦于 **数据库并发稳定性** 和 **Worker 协议层重构**。引入全局 WriteMu 消除 SQLite 并发写入的 SQLITE_BUSY 错误，重构 Claude Code 协议类型到独立包并实现 OCS WorkerCommander（权限控制、Compact 死锁修复）。同时修复了多步 agentic turn 的 token 统计膨胀、Cron job 永久跳过、Slack 消息处理永久阻塞等稳定性问题。
+
+### Changed
+
+- **Worker**: Move Claude Code protocol types from `base` to `claudecode` package, resolving SOLID/DIP violation. Implement `WorkerCommander` for OCS with `allowed_tools` permission enforcement. (#484)
+- **Worker**: Harden `Compact` with context guard and 30s secondary timeout, deprecate unprotected `Stdin()` in favor of `StdinLocked()`. (#484)
+- **Worker**: Fix OCS `Clear` to propagate new session ID to SSE subscription, add `sync.Mutex` to `ServerCommander` preventing data race. (#484)
+- **Gateway Core**: Introduce global `WriteMu` across all SQLite stores to serialize writes and eliminate SQLITE_BUSY errors under concurrent load. (#479)
+- **Gateway Core**: Extract `WriteMu.WithLock()` DRY helper consolidating 16 nil-check-lock-unlock call sites. (#479)
+- **Session**: Add `source` column for differentiated cleanup — cron sessions 24h, normal sessions 7d, with configurable retention. (#477)
+- **Session**: `ContextFill` now reads only from `get_context_usage` control channel, eliminating 2-3x token inflation in multi-step agentic turns. (#477)
+- **Cron**: Validate `platform` matches `PlatformKey` fields (feishu requires `chat_id`, slack requires `channel_id`). (#479)
+
+### Fixed
+
+- **Cron**: `finishExecution` now syncs `RunningAtMs=0` to in-memory state, preventing permanently skipped jobs after timeout or failure. (#488)
+- **Worker**: `turns` table `created_at=0` caused by missing `Timestamp`/`Version` in mapper — switched to `events.NewEnvelope()`. (#485)
+- **Worker**: OCS `handleStepStarted` ignoring `model` field, causing empty `model_usage` in turn stats. (#485)
+- **Messaging/Slack**: `handlerMu` could be held indefinitely when OCS worker start hangs — added 120s context timeout with user feedback. (#481)
+- **Gateway Core**: EventStore `Collector` flush/close ordering and double-release safety net. (#479)
+- **Gateway Core**: PID file accumulation on worker crash path — `proc/manager.Wait()` now calls `untrackPID`. (#479)
+
+## [1.18.0] - 2026-05-22
+
+### Summary
+
+v1.18.0 是一次 minor 版本更新，聚焦于 **认证架构简化** 和 **飞书交互增强**。移除 ES256 JWT 签名体系（~3800 行），替换为 API Key + Bot ID 双字段认证模型，降低部署复杂度并消除密钥管理负担。API Key 验证使用 `subtle.ConstantTimeCompare` 防止时序攻击，resolver 调用移至锁外避免阻塞。飞书 AskUserQuestion 新增 CardKit v2 按钮交互（copy_text 一键复制选项），支持多选题提示。
+
+### Breaking Changes
+
+#### 认证模型变更
+
+- **移除 JWT (ES256) 认证**：不再支持 `Authorization: Bearer <jwt>` 头。所有客户端必须使用 `X-API-Key` 头传递 API key。(#467)
+- **Bot ID 传输变更**：不再通过 JWT `bot_id` claim 传递。改为 `X-Bot-ID` HTTP 头或 `bot_id` query param。服务端通过 `security.BotIDFromRequest(r)` 提取。(#467)
+- **浏览器 WebSocket 客户端**：init envelope 的 `auth.token` 字段语义从 JWT 变为 API key（deferred auth）。(#467)
+- **环境变量**：`HOTPLEX_JWT_SECRET` 已移除。改用 `HOTPLEX_SECURITY_API_KEY_*` 编号式环境变量。(#467)
+- **用户身份**：JWT `sub` claim 的自动 per-user 隔离不再可用。默认身份为 `api_user`。多用户隔离需配置 `APIKeyResolver`（`security.SetKeyResolver()`）将 API key 映射到用户身份。(#467)
+- **`--strict` 标志**：`hotplex config validate --strict` 已移除（用于检查 JWT secret 是否设置，不再适用）。
+
+#### SDK Breaking Changes
+
+| SDK | 移除 | 替代 |
+|-----|------|------|
+| Go Client | `AuthToken()` option, `token.go`, `gen-token/` | `BotID()` option — 发送 `X-Bot-ID` 头 |
+| Java Client | `JwtTokenGenerator`, `.tokenGenerator()`, jjwt/bcprov 依赖 | `.apiKey()` + `.botId()` — 发送 `X-Bot-ID` 头 |
+| TypeScript Client | `generate-test-token.ts`, `jose` 依赖 | `authToken` 字段语义改为 API key（deferred browser auth） |
+| Python Client | — | `auth_token` 参数语义改为 API key |
+
+#### 配置 API 变更
+
+- `config.Load(path, LoadOptions{})` → `config.Load(path)` — 移除 `LoadOptions` 和 `SecretsProvider` 管道。
+- `config.NewWatcher(log, path, sp, store, ...)` → `config.NewWatcher(log, path, store, ...)` — 移除 `SecretsProvider` 参数。
+- `security.NewAuthenticator(cfg, jwtValidator)` → `security.NewAuthenticator(cfg)` — 移除 JWT validator 参数。
+- `security.BotIDFromHeader(r)` → `security.BotIDFromRequest(r)` — 重命名以反映同时读取 header 和 query param。
+
+### Added
+
+- **Messaging/Feishu**: AskUserQuestion CardKit v2 按钮交互 — `copy_text` action 元素替代 markdown 列表，用户点击按钮即可复制选项文本，支持多选题提示和编号回退列表。(#474)
+
+### Changed
+
+- **Security**: API Key 验证改用 `subtle.ConstantTimeCompare` 防止时序攻击（SEC-001）。(#476)
+- **Security**: `AuthenticateRequest` 将 resolver 调用移到读锁外，避免外部网络调用阻塞（CONC-004）。(#476)
+- **Security**: 移除 `cliProtectedVars` 中已废弃的 `GATEWAY_TOKEN` 条目，同步更新 Env-Whitelist 文档。(#476)
+- **Security**: `BotIDFromRequest` 添加信任边界文档注释（SEC-003），明确 Bot ID 未与 API Key 密码学绑定的设计决策。(#476)
+
+### Removed
+
+- `internal/security/jwt.go` — JWT 验证器（ES256 签名、HKDF 密钥派生、JTI 黑名单）。(#467)
+- `client/token.go` — Go SDK JWT token 生成。(#467)
+- `client/scripts/gen-token/` — Go SDK token 生成命令行工具。(#467)
+- `client/examples/08_token_generator/` — Go SDK token 生成示例。(#467)
+- `examples/typescript-client/scripts/generate-test-token.ts` — TS SDK JWT token 生成脚本。(#467)
+- `examples/java-client/src/main/java/dev/hotplex/security/JwtTokenGenerator.java` — Java SDK JWT 生成器。(#467)
+- `golang-jwt/jwt/v5` 依赖 — 不再需要。(#467)
+- `jjwt-api/impl/jackson` + `bcprov-jdk18on` 依赖（Java SDK） — 不再需要。(#467)
+
+### Fixed
+
+- **Messaging/Feishu**: JSON 1.0/2.0 兼容性 — 交互卡片使用 JSON 1.0 以支持 `action` + `copy_text` 元素（JSON 2.0 不支持）。(#474)
+- **Messaging/Feishu**: 选项文本经 `SanitizeText()` 清洗，防止注入。(#474)
+- **SDK/Java**: `QuickStart.java` 变量名 `signingKey` 修正为 `apiKey`。(#476)
+- **Docs**: `integration-patterns.md` SDK 伪代码更新为实际 API（`client.APIKey()`/`client.BotID()`）。(#476)
+
+### Security
+
+- API Key 恒定时间比较（`subtle.ConstantTimeCompare`），替代 `map[string]bool` lookup，消除时序攻击面。(#476)
+- 移除 JWT JTI 黑名单 sweep goroutine 和 HKDF 密钥派生，减少攻击面和资源开销。(#467)
+
+### Migration Guide
+
+**1. 环境变量替换：**
+```bash
+# 旧（已移除）
+export HOTPLEX_JWT_SECRET="$(openssl rand -base64 32)"
+
+# 新
+export HOTPLEX_SECURITY_API_KEY_1="your-api-key"
+export HOTPLEX_ADMIN_TOKEN_1="your-admin-token"
+```
+
+**2. Go SDK 迁移：**
+```go
+// 旧
+client.New(ctx, URL("ws://localhost:8888/ws"), WorkerType("claude_code"), AuthToken("jwt-token"))
+
+// 新
+client.New(ctx, URL("ws://localhost:8888/ws"), WorkerType("claude_code"), BotID("bot-123"))
+```
+
+**3. 多用户隔离：** 如果之前依赖 JWT `sub` 实现用户隔离，需在 Gateway 启动时配置 `APIKeyResolver`：
+```go
+auth.SetKeyResolver(security.NewChainResolver(dbResolver, configResolver))
+```
+
+**4. 浏览器 WebSocket：** init envelope 中 `auth.token` 从传 JWT 改为传 API key，`auth.bot_id` 保持不变。
+
+## [1.17.0] - 2026-05-21
+
+### Summary
+
+v1.17.0 是一次 minor 版本更新，聚焦于 **Admin WebUI 全面升级** 和 **企业级多用户隔离**。Admin 面板新增 Gateway 重启 API、Sessions 页面重构（实时更新/搜索筛选/详情视图）、API Key 用户管理 WebUI、Login 帮助面板，并在 Chat UI 侧边栏底部集成 Admin 入口；安全层新增 APIKeyResolver 实现 API Key → 用户身份映射，激活完整的会话隔离链路（UUIDv5 session key、SEC-008 跨用户拒绝、per-user 配额）；CodexCLI Worker 修复审批死锁和竞态条件；飞书 SDK 升级至 v3.9.1 并完成交互卡片按钮规格设计。
+
+### Added
+
+- **Security**: APIKeyResolver for enterprise multi-user session isolation — ChainResolver (config → DB) maps API keys to user identities, activating UUIDv5 session keys, SEC-008 cross-user rejection, per-user SQL filtering, and PoolManager per-user quotas. Admin API CRUD for api_key_users table with cache coherence. (#468)
+- **WebChat UI**: Admin WebUI overhaul — gateway restart endpoint (POST /admin/restart), sessions page with real-time updates/search/detail view, API Key user management page with create/edit/delete, login help accordion, admin dashboard enhancements with improved layout and stats. (#471, #473)
+- **WebChat UI**: Admin entry in chat sidebar — styled admin dashboard link at sidebar footer with icon container, hover gold accent, and descriptive subtitle. (#473)
+- **Messaging**: Add M/B units to FormatTokenCount for large token values — display as K/M/B suffixes with compact formatting, applied to both Go backend and webchat TS frontend. (#470)
+- **Messaging**: Upgrade Lark SDK to v3.9.1 and add interactive card buttons spec — comprehensive spec for implementing card button callbacks across Feishu/Slack/WebChat, documenting SDK card handler limitation. (#466)
+
+### Changed
+
+- **Worker**: CodexCLI security hardening — extract timeout constants, fix sendEnvelope timer leak with time.NewTimer + Stop(), unify write-mu blocks into writeFrame(), remove personality double-default.
+
+### Fixed
+
+- **Worker**: CodexCLI approval deadlock — server-initiated JSON-RPC requests (approvals) were silently dropped; implement HandlePermissionResponse via RespondServerRequest, add approval method aliases. (#462)
+- **Worker**: CodexCLI Input() TOCTOU race — move nil check into spawn(), enforce StartupTimeout, add 5s timeout for critical event sends, add doneCh-based lifecycle binding. (#462)
+- **Messaging**: FormatTokenCount unit boundary rounding — 999999 now shows "1M" instead of "1000.0K", use threshold-based unit bumping and stale ".0" suffix cleanup.
+- **Admin**: Routing, sessions UX, and login redirect loop — fix Next.js SPA directory-to-html resolution, correct admin URL default from 9090 to 9999, replace router.replace with window.location.replace to fix stale auth state.
+- **Release**: Guard changelog extraction against regex bracket misparse — add line count sanity check for multi-version extraction detection.
+
+## [1.16.0] - 2026-05-20
+
+### Summary
+
+v1.16.0 是一次 minor 版本更新，聚焦于 **第三 Worker 接入** 和 **管理后台**。新增 OpenAI Codex CLI Worker（exec + app-server 双模式），支持 GPT-5/o4 系列模型通过 Web/Slack/飞书使用；Agent Bot Management WebUI 提供完整的可视化管理（Bot CRUD、配置编辑、Prompt 预览、Session/Cron 管理）。EventStore 从 SQLite 视图升级为物化 turns 表（含 cache token 拆分），Claude Code input token 统计修复使其准确计入缓存 token（影响 35-60% 的用量数据）。
+
+### Added
+
+- **Worker**: Codex CLI Worker — third worker type supporting `codex exec --json` (one-shot) and `codex app-server` (persistent JSON-RPC) dual modes, with 11 TurnItem → AEP event mapping, lazy-start singleton process with ref counting and 30m idle drain. (#450)
+- **WebChat UI**: Agent Bot Management WebUI — dashboard, bot list/detail/create/delete, agent config editor (SOUL/AGENTS/SKILLS/USER/MEMORY), system prompt preview, session management, cron management, and connection settings. (#453)
+- **Admin API**: Bot config CRUD and agent config file management — `BotConfigProvider` adapter bridging admin API to messaging config, with scope hierarchy (`admin:write` → `admin:read` → `config:read`). (#453)
+
+### Changed
+
+- **EventStore**: Replace turns views with materialized table — pre-computed turns table written at done/input time via Collector dual-channel, replacing expensive SQLite views (13+ json_extract per row + window functions). Breaking: `TurnRecord.ID string→int64`, `before_seq→before_id` API param, new `generation`/`turn_num`/cache token fields. (#456)
+- **EventStore**: Buffer and aggregate reasoning events — extend delta accumulator pattern to reasoning chunks, reducing SQLite writes from N rows per reasoning block to 1 merged row. (#455)
+- **Configuration**: Change events retention default from 7 to 30 days (168h → 720h). (#456)
+
+### Fixed
+
+- **Gateway Core**: Include cache tokens in Claude Code input token accounting — Anthropic API reports `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` as separate fields; previously only `input_tokens` was counted, dropping ~35-60% of actual usage. (#456)
+- **Worker**: OCS HTTP POST 30s timeout falsely reported "server unreachable" — split error classification into `isTimeoutError`/`isUnreachableError`, add dedicated 5min sendClient for input delivery. (#449)
+- **Messaging**: CardKit empty flush triggering field validation error (99992402) — skip flush when content is empty but lastFlushed has content. (#449)
+- **Messaging**: Messaging bridge event drop — swap `StartPlatformSession`/`JoinPlatformSession` call order so platform conn is registered before state transitions. (#449)
+- **Worker**: Codex CLI app-server mode `appConn.Send` bypassed JSON-RPC by writing raw AEP to stdin — replaced with `ErrNotImplemented` fail-fast. (#458)
+
+## [1.15.0] - 2026-05-18
+
+### Summary
+
+v1.15.0 是一次 minor 版本更新，聚焦于 **OCS V2 Converter 架构升级** 和 **Phrases 话术定制系统**。OCS Worker 引入独立 Converter 结构体替代 V1 消息解析，支持结构化权限/问答事件、reasoning 阶段检测、model/schema/variant 透传；Claude Code Worker 新增 4 项 Session Flags 映射（--continue/--fork-session/--resume-session-at/--settings）；飞书消息适配器完成 Welcome Card 可配置化和 Persona Phrases 系统；Slack 修复 Reasoning 状态映射。
+
+### Added
+
+- **Worker**: OCS V2 Converter architecture — standalone `Converter` struct with typed event parsing, per-session `turnState` tracking, and structured tool call/result conversion, replacing V1 `message.part.delta/updated` parsing. (#434)
+- **Worker**: Structured permission/question events — direct `PermissionRequestData`/`QuestionRequestData` conversion replacing raw passthrough, with Feishu elicitation explicit accept/decline keywords. (#443)
+- **Worker**: Reasoning phase detection — bracket `field="text"` deltas between reasoning lifecycle events to prevent inner monologue leakage in OCS 1.15+ unified `message.part.delta`. (#437)
+- **Worker**: Model/JSONSchema/variant passing — bridge 6 capability gaps between OCS Worker and OpenCode Server (AllowedModels, JSONSchema, variant/reasoning effort, reasoning events, experimental event system, image modality). (#434)
+- **Worker**: Claude Code session flags — map `ContinueSession`/`ForkSession`/`ResumeSessionAt`/`ConfigEnv` to `--continue`, `--fork-session`, `--resume-session-at`, `--settings` CLI flags. (#444)
+- **Messaging**: Configurable welcome card via phrases — extract hardcoded capabilities, quick commands, and closing line into 3 phrase categories with per-bot customization. (#441)
+- **Messaging**: Persona phrases — `persona` and `closings` categories for placeholder status lines and random sign-off on turn completion, with abort-path omission. (#438)
+
+### Changed
+
+- **Worker**: OCS singleton.go reduced by 244 lines — event dispatch fully delegated to V2 Converter with simplified SSE integration. (#434)
+- **Messaging**: Chat access non-blocking — `handleChatEntered` no longer propagates errors, record failures logged as Warn instead of blocking user flow. (#442)
+
+### Fixed
+
+- **Worker**: Fix tool failure edge case — `isFailed=true` with nil Error now reports "tool failed" instead of silently falling through to success path. (#434)
+- **Worker**: Fix cross-process turnState leak — add `Converter.Reset()` called in `startProcessLocked` to prevent stale state across process restarts. (#434)
+- **Worker**: Fix data race on conn.variant/allowedModel — consolidate reads and writes under single `conn.mu` lock acquisition. (#434)
+- **Messaging**: Fix Slack reasoning status — add `events.Reasoning` → `StatusThinking` mapping in `notifyStatusFromEvent`. (#442)
+
+## [1.14.0] - 2026-05-15
+
+### Summary
+
+v1.14.0 是一次 minor 版本更新，聚焦于 **OCS Worker 生产就绪** 和 **零 CGO 构建**。OCS Worker 从单连接 SSE 升级为全局 EventBus 架构，新增指数退避重连、LastInput 崩溃恢复、HTTP 错误分类等关键能力，配合 4 项并发修复消除生产风险。SQLite 驱动统一为纯 Go 实现（modernc.org/sqlite），所有平台支持 `CGO_ENABLED=0` 构建，Linux arm64 不再需要交叉编译器。
+
+### Added
+
+- **Worker**: OCS SSE EventBus — singleton global SSE reader (`GET /global/event`) with per-session channel dispatch, replacing per-worker SSE connections. (#428)
+- **Worker**: SSE reconnection with exponential backoff (500ms initial, 10s max, 20% jitter) and empty-stream detection to prevent CPU-burning tight loops. (#428)
+- **Worker**: LastInput caching via `InputRecoverer` interface for bridge crash recovery re-delivery. (#428)
+- **Worker**: HTTP error classification — server down / 502 / 503 mapped to typed `WorkerError(ErrKindUnavailable)` for gateway retry routing. (#428)
+- **Messaging**: P2P chat entered event — welcome card on first/returning user entry for Feishu (`bot_p2p_chat_entered_v1`) and Slack (`app_home_opened`), with `ChatAccessStore` analytics (new/returning/active classification, 1h cooldown). (#427, #430)
+
+### Changed
+
+- **Infrastructure**: Consolidate to pure-Go SQLite driver (modernc.org/sqlite), removing mattn/go-sqlite3 CGO dependency — enables `CGO_ENABLED=0` across all build targets (Makefile, Dockerfile, release CI) and simplifies cross-compilation.
+- **Eventstore**: Relax collector flush interval from 100ms to 1s and delta flush from 2s to 3s, reducing disk I/O overhead.
+- **Gateway Core**: Remove per-event debug log in bridge forwarding to cut log volume under high throughput.
+
+### Fixed
+
+- **Worker**: Fix shared pointer mutation in `dispatchToAllSubscribers` — convert envelope inside the subscriber loop instead of reusing a shared pointer, which caused all subscribers to receive the last sessionID.
+- **Messaging**: Skip cumulative `message.part.updated` text to prevent Feishu card duplication — cumulative text was appended as incremental delta, causing repeated text in streaming cards.
+- **Worker**: Eliminate test data race on backoff package variables — replace `t.Cleanup` restore with deferred restore after goroutine exit.
+- **Worker**: Prevent tight SSE reconnect loop on empty streams — only reset attempts after reading at least one data line; on empty EOF, apply exponential backoff.
+
+## [1.13.2] - 2026-05-15
+
+### Summary
+
+v1.13.2 是一次 patch 更新，聚焦于 **消息体验增强** 和 **错误处理类型安全**。新增 Phrases 模块，将硬编码的 CLI 提示语和问候语提取为可配置、可扩展的消息池（权重随机 + 级联加载 + per-bot 个性化）；Worker 层引入类型化 `WorkerError` 替代脆弱的字符串匹配错误分类。
+
+### Added
+
+- **Messaging**: Phrases module — extract 28 CLI tips and 8 greetings from feishu placeholder into a shared, configurable message pool with weighted random selection (bot=4, global=2, platform=1), cascade-append loading, per-bot personalization, and B-channel skill manual. (#426)
+
+### Changed
+
+- **Worker**: Replace `strings.Contains` error classification with typed `WorkerError` + `Kind` enum — gateway uses `errors.As` for type-safe routing instead of fragile string matching. (#426)
+
+## [1.13.1] - 2026-05-15
+
+### Summary
+
+v1.13.1 是一次 patch 更新，聚焦于 **架构健壮性与可观测性**。新增 per-bot 配置覆盖能力，支持多 Bot 场景下独立凭证与权限控制；Brain ConfigSpec 注册表消除 35+ 环境变量的静默降级；Gateway 新增 7 项 Prometheus 指标和 admin 审计日志；messaging/eventstore 层完成 DRY 重构减少约 140 行重复代码。
+
+### Added
+
+- **Config**: Per-bot configuration with platform-level fallback — override credentials, work directory, and access control per bot instance, with `${VAR}` env expansion fix. (#415)
+- **Gateway Core**: 7 Prometheus metrics — session starts/errors/duration, init handshake latency, retry attempts/exhaustion, worker creation duration. (#417)
+- **Admin API**: Structured audit logging for write operations + request-level middleware logging (method, path, status, duration, IP). (#417)
+
+### Changed
+
+- **Brain**: ConfigSpec registry (38 entries) replaces 35+ hardcoded `os.Getenv` calls with startup validation and structured warnings. (#420)
+- **Service**: CommandRunner interface — 16+ `exec.Command` calls now injectable for testability. (#420)
+- **Eventstore**: Extract `accumulateDelta`/`getOrCreateAccum` helpers, replace manual reverse with `slices.Reverse`, add dropped counter and `TurnQuerier` interface. (#419)
+- **Messaging**: DRY — extract `createAndEnable` helper from streaming card lifecycle (~45 lines), shared interaction `SendResponse` factory + metadata builders (~96 lines). (#418)
+- **Admin API**: Cron handler test coverage — 28 table-driven tests, 0% → covered. (#420)
+
+### Fixed
+
+- **Config**: Scope `.gitignore` `skills/` to repo root, update MessagingConfig comment. (#416)
+
+## [1.13.0] - 2026-05-14
+
+### Summary
+
+v1.13.0 是一次 minor 版本更新，核心主题是 **多 Bot 支持** 和 **性能优化**。新增 Multi-Bot 架构，允许单个 Gateway 同时运行多个独立 Bot 实例（独立凭证、Soul、Worker 类型），完全向后兼容现有单 Bot 配置。同步引入 Brain/Session 锁优化（lock-dropping）降低锁竞争延迟，以及 Worker 接口去重简化适配器开发。
+
+### Added
+
+- **Messaging**: Multi-bot support — run multiple independent bot instances per platform (Slack/Feishu) with separate credentials, soul, worker type, and STT/TTS config. Backward compatible: single-bot configs auto-wrap into `bots[]` via `normalizeSlackBots`/`normalizeFeishuBots`. (#410)
+- **Messaging**: `BotRegistry` — concurrent-safe runtime registry with Register/Unregister/Get/List/UpdateStatus/UnregisterAll lifecycle operations. (#410)
+- **Admin API**: Bot status endpoints — `GET /admin/bots` lists all registered bots, `GET /admin/bots/{name}` returns single bot details. (#410)
+- **CLI**: Multi-bot config diagnostic checker — validates credential completeness, bot count limits, and name uniqueness. (#410)
+- **Config**: `SlackBotConfig`/`FeishuBotConfig` types with per-bot STT/TTS inheritance via `propagateBotDefaults`. (#410)
+
+### Changed
+
+- **Brain**: Lock-dropping optimization — memory compression and context pruning now release locks before expensive LLM calls, reducing contention on high-concurrency sessions. (#409)
+- **Session**: `runningIndex` + terminated eviction + attach lock-dropping — O(1) active session lookup by key, automatic cleanup of terminated sessions, and non-blocking session attach. (#408)
+- **Worker**: Deduplicate `ControlRequester` and `WorkerCommander` interfaces into unified `Controllable` interface, simplifying worker adapter implementation. (#406)
+- **Cron**: Admin adapter DRY — extract shared adapter logic, add test coverage. (#409)
+
 ## [1.12.0] - 2026-05-13
 
 ### Summary

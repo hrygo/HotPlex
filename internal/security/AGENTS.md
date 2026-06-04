@@ -1,14 +1,13 @@
 # Security Package
 
 ## OVERVIEW
-Security validation layer: JWT/API auth, SSRF protection, safe path resolution, env isolation, command/tool/model allowlists, and rate/size limiting.
+Security validation layer: API auth, SSRF protection, safe path resolution, env isolation, command/tool/model allowlists, and rate/size limiting.
 
 ## STRUCTURE
 
 | File | Purpose |
 |------|---------|
-| `jwt.go` | ES256 JWT validation, JTI blacklist, API key comparison |
-| `auth.go` | Authenticator combining JWT + API key |
+| `auth.go` | Authenticator with API key validation + Bot ID extraction |
 | `ssrf.go` | URL validation against loopback/private/link-local CIDRs |
 | `path.go` | SafePathJoin 5-step validation, dangerous char detection |
 | `env.go` | Env var whitelists, sensitive prefix detection, nested agent stripping |
@@ -22,8 +21,7 @@ Security validation layer: JWT/API auth, SSRF protection, safe path resolution, 
 
 | Task | Location |
 |------|----------|
-| JWT validation / JTI revoke | `jwt.go` — JWTValidator, jtiBlacklist |
-| API key comparison | `jwt.go:245` — ValidateAPIKey (crypto/subtle.ConstantTimeCompare) |
+| API key / Bot ID auth | `auth.go` — Authenticator, BotIDFromRequest |
 | URL SSRF check | `ssrf.go` — ValidateURL |
 | Safe file path | `path.go` — SafePathJoin |
 | Env var isolation | `env.go` + `env_builder.go` |
@@ -34,9 +32,7 @@ Security validation layer: JWT/API auth, SSRF protection, safe path resolution, 
 
 ## KEY PATTERNS
 
-**JWT validation chain**: Parse → verify ES256 signature → validate exp/iat/nbf → check JTI blacklist → extract claims (UserID, Scopes, Role, BotID, SessionID)
-
-**JTI blacklist**: TTL-based in-memory cache with background sweep goroutine; JTI generated via crypto/rand
+**Bot ID transport**: Client sends `X-Bot-ID` header or `bot_id` query param; server extracts via `BotIDFromRequest(r)`. Cross-bot access is rejected at session level.
 
 **SSRF protection**: Protocol check → hostname blocklist → IP prefix check → DNS resolution → blocked CIDRs (loopback 127.0.0.0/8, private 10/8 172.16/12 192.168/16, link-local 169.254.0.0/16 including AWS metadata 169.254.169.254, IPv6)
 
@@ -48,8 +44,7 @@ Security validation layer: JWT/API auth, SSRF protection, safe path resolution, 
 
 ## ANTI-PATTERNS
 
-- JWT algorithms other than ES256 — reject all others
-- math/rand for JTI/token generation — must use crypto/rand
+- math/rand for token generation — must use crypto/rand
 - Shell execution — only claude/opencode binaries, no shell interpreters
 - Path separators in command names — "claude", "opencode" only, no "../opencode"
 - Cross-bot session access — bot_id must match session owner exactly

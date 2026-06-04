@@ -800,3 +800,44 @@ func TestSanitizeArg(t *testing.T) {
 		})
 	}
 }
+
+// ─── Coverage: getters and register functions ─────────────────────────────────
+
+func TestGetAllowedBaseDirs(t *testing.T) {
+	t.Parallel()
+	dirs := GetAllowedBaseDirs()
+	require.NotNil(t, dirs)
+	// Should return a copy, not the original
+	dirs["__test__"] = true
+	dirs2 := GetAllowedBaseDirs()
+	require.False(t, dirs2["__test__"], "GetAllowedBaseDirs must return a defensive copy")
+}
+
+func TestGetForbiddenWorkDirs(t *testing.T) {
+	t.Parallel()
+	dirs := GetForbiddenWorkDirs()
+	require.NotNil(t, dirs)
+	require.NotEmpty(t, dirs, "forbidden dirs should have system directories")
+}
+
+func TestIsProtected(t *testing.T) {
+	t.Parallel()
+	require.True(t, IsProtected("HOME"))
+	require.True(t, IsProtected("PATH"))
+	require.True(t, IsProtected("home"))
+	require.True(t, IsProtected("CLAUDECODE"))
+	require.False(t, IsProtected("MY_VAR"))
+	require.False(t, IsProtected(""))
+}
+
+func TestRegisterTool(t *testing.T) {
+	t.Parallel()
+	RegisterTool("__test_tool__")
+	require.True(t, IsToolAllowed("__test_tool__"))
+}
+
+func TestRegisterModel(t *testing.T) {
+	t.Parallel()
+	RegisterModel("__test_model__")
+	require.True(t, IsModelAllowed("__test_model__"))
+}

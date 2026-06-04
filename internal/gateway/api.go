@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,11 +22,13 @@ import (
 )
 
 // apiSM is the narrow subset of SessionManager that GatewayAPI needs.
+// Composed from canonical sub-interfaces defined in handler.go to avoid
+// duplicate method declarations.
 type apiSM interface {
-	Get(ctx context.Context, id string) (*session.SessionInfo, error)
-	List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error)
-	DeletePhysical(ctx context.Context, id string) error
-	Transition(ctx context.Context, id string, to events.SessionState) error
+	SessionReader
+	SessionLifecycle
+	SessionTransitioner
+	SessionAdmin
 }
 
 type GatewayAPI struct {
@@ -33,7 +36,7 @@ type GatewayAPI struct {
 	sm         apiSM
 	bridge     SessionStarter
 	cfgStore   *config.ConfigStore
-	turnsStore TurnsReader
+	turnsStore eventstore.TurnQuerier
 	eventStore EventStoreReader
 	log        *slog.Logger
 }
@@ -43,13 +46,7 @@ type EventStoreReader interface {
 	QueryBySession(ctx context.Context, sessionID string, cursor int64, dir eventstore.CursorDirection, limit int) (*eventstore.EventPage, error)
 }
 
-// TurnsReader defines the interface for querying conversation turns via the events VIEW.
-type TurnsReader interface {
-	QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*eventstore.TurnRecord, error)
-	QueryTurnsBefore(ctx context.Context, sessionID string, beforeSeq int64, limit int) ([]*eventstore.TurnRecord, error)
-}
-
-func NewGatewayAPI(log *slog.Logger, auth *security.Authenticator, sm apiSM, bridge SessionStarter, cfgStore *config.ConfigStore, turnsStore TurnsReader, eventStore EventStoreReader) *GatewayAPI {
+func NewGatewayAPI(log *slog.Logger, auth *security.Authenticator, sm apiSM, bridge SessionStarter, cfgStore *config.ConfigStore, turnsStore eventstore.TurnQuerier, eventStore EventStoreReader) *GatewayAPI {
 	return &GatewayAPI{auth: auth, sm: sm, bridge: bridge, cfgStore: cfgStore, turnsStore: turnsStore, eventStore: eventStore, log: log.With("component", "api")}
 }
 
@@ -86,6 +83,7 @@ func (g *GatewayAPI) authorizeSession(w http.ResponseWriter, r *http.Request) (s
 func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	userID, _, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
+		g.log.Warn("gateway: list sessions auth failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -113,6 +111,7 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 
 	sessions, err := g.sm.List(r.Context(), userID, platform, limit, offset)
 	if err != nil {
+		g.log.Error("gateway: list sessions failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		http.Error(w, "failed to list sessions", http.StatusInternalServerError)
 		return
 	}
@@ -122,22 +121,34 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	userID, botID, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
+		g.log.Warn("gateway: create session auth failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	clientSessionID := strings.TrimSpace(r.URL.Query().Get("client_session_id"))
+	clientSessionID = messaging.SanitizeText(clientSessionID)
+	if clientSessionID == "" {
+		g.log.Warn("gateway: create session missing client_session_id", "method", r.Method, "path", r.URL.Path)
+		http.Error(w, "client_session_id is required", http.StatusBadRequest)
+		return
+	}
+	if len(clientSessionID) > session.MaxClientKeyLen {
+		g.log.Warn("gateway: create session client_session_id too long", "method", r.Method, "path", r.URL.Path, "len", len(clientSessionID))
+		http.Error(w, fmt.Sprintf("client_session_id too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
+		return
+	}
+
 	title := strings.TrimSpace(r.URL.Query().Get("title"))
 	title = messaging.SanitizeText(title)
+	if len(title) > session.MaxClientKeyLen {
+		g.log.Warn("gateway: create session title too long", "method", r.Method, "path", r.URL.Path, "title_len", len(title))
+		http.Error(w, fmt.Sprintf("title too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
+		return
+	}
+
 	wt := worker.WorkerType(r.URL.Query().Get("worker_type"))
 	if wt == "" {
 		wt = worker.TypeClaudeCode
-	}
-	if title == "" {
-		http.Error(w, "title is required", http.StatusBadRequest)
-		return
-	}
-	if len(title) > 256 {
-		http.Error(w, "title too long (max 256 chars)", http.StatusBadRequest)
-		return
 	}
 
 	// Resolve work dir: use client-provided value or default from config.
@@ -148,6 +159,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	if workDir != "" {
 		expanded, err := validateAndExpandWorkDir(workDir)
 		if err != nil {
+			g.log.Warn("gateway: create session invalid work_dir", "method", r.Method, "path", r.URL.Path, "work_dir", workDir, "err", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -157,7 +169,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	// Derive session ID via UUIDv5 for consistency with WebSocket path.
 	// Both REST and WS use the auth userID ("anonymous" in dev mode, "api_user"
 	// with API keys) so they produce the same derived session ID.
-	id := session.DeriveSessionKey(userID, wt, title, workDir)
+	id := session.DeriveSessionKey(userID, wt, clientSessionID, workDir)
 
 	// Default userID after derivation — bridge expects non-empty.
 	if userID == "" {
@@ -175,7 +187,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = g.sm.DeletePhysical(r.Context(), id)
 	}
 
-	if err := g.bridge.StartSession(r.Context(), id, userID, botID, wt, nil, workDir, platformWebChat, nil, title); err != nil {
+	if err := g.bridge.StartSession(r.Context(), id, userID, botID, wt, nil, workDir, platformWebChat, nil, title, clientSessionID); err != nil {
 		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
 		http.Error(w, "failed to create session", http.StatusInternalServerError)
 		return
@@ -204,6 +216,7 @@ func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := g.sm.DeletePhysical(r.Context(), id); err != nil {
+		g.log.Error("gateway: delete session failed", "session_id", id, "method", r.Method, "path", r.URL.Path, "err", err)
 		http.Error(w, "failed to delete session", http.StatusInternalServerError)
 		return
 	}
@@ -215,10 +228,12 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 		WorkDir string `json:"work_dir"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		g.log.Warn("gateway: switch workdir invalid body", "method", r.Method, "path", r.URL.Path, "err", err)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	if body.WorkDir == "" {
+		g.log.Warn("gateway: switch workdir missing work_dir", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "work_dir is required", http.StatusBadRequest)
 		return
 	}
@@ -226,6 +241,7 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 	// Expand ~ and resolve to absolute path.
 	expanded, err := validateAndExpandWorkDir(body.WorkDir)
 	if err != nil {
+		g.log.Warn("gateway: switch workdir invalid path", "method", r.Method, "path", r.URL.Path, "work_dir", body.WorkDir, "err", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -238,6 +254,7 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if !si.State.IsActive() {
+		g.log.Warn("gateway: switch workdir session not active", "session_id", id, "method", r.Method, "path", r.URL.Path, "state", si.State)
 		http.Error(w, "session not active", http.StatusConflict)
 		return
 	}
@@ -247,9 +264,11 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var pathErr *os.PathError
 		if errors.As(err, &pathErr) || strings.Contains(err.Error(), "not a directory") {
+			g.log.Warn("gateway: switch workdir bad path", "session_id", id, "method", r.Method, "path", r.URL.Path, "err", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		g.log.Error("gateway: switch workdir failed", "session_id", id, "method", r.Method, "path", r.URL.Path, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -274,10 +293,10 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	beforeSeq := int64(0)
-	if bs := r.URL.Query().Get("before_seq"); bs != "" {
-		if v, err := strconv.ParseInt(bs, 10, 64); err == nil && v > 0 {
-			beforeSeq = v
+	beforeID := int64(0)
+	if bid := r.URL.Query().Get("before_id"); bid != "" {
+		if v, err := strconv.ParseInt(bid, 10, 64); err == nil && v > 0 {
+			beforeID = v
 		}
 	}
 
@@ -292,8 +311,8 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 		err     error
 	)
 
-	if beforeSeq > 0 {
-		records, err = g.turnsStore.QueryTurnsBefore(r.Context(), id, beforeSeq, fetchLimit)
+	if beforeID > 0 {
+		records, err = g.turnsStore.QueryTurnsBefore(r.Context(), id, beforeID, fetchLimit)
 	} else {
 		records, err = g.turnsStore.QueryTurns(r.Context(), id, fetchLimit, 0)
 	}

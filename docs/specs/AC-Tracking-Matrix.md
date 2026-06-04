@@ -229,7 +229,7 @@ version: v1.1
 | 153 | **TEST-007** | CI/CD 测试分层执行 | 🔴 P0 | 🟩 PASS | Claude Code | `go test -race ./...` 已配置 |
 | 154 | **TEST-008** | 安全测试：命令注入 + Fuzzing | 🟡 P1 | 🟩 PASS | Claude Code | `security_test.go` 命令注入测试 |
 | 155 | **TEST-009** | 性能测试：k6 阈值验证 | ⚪ P2 | ⬜ TODO | | k6性能测试未实现 |
-| 156 | **TEST-010** | 测试基础设施文档化 | 🟡 P1 | 🟩 PASS | Claude Code | `.agent/rules/testing.md` 测试规范 |
+| 156 | **TEST-010** | 测试基础设施文档化 | 🟡 P1 | 🟩 PASS | Claude Code | `.agents/rules/testing.md` 测试规范 |
 | 157 | **TEST-011** | Benchmark 基准测试 | ⚪ P2 | ⬜ TODO | | `go test -bench` 基准测试未实现 |
 
 ---

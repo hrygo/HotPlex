@@ -1795,25 +1795,24 @@ func TestNotify_EmptyText_ClearsState(t *testing.T) {
 func TestShortenPaths(t *testing.T) {
 	t.Parallel()
 
+	// Create a StatusManager for testing (workDir is per-instance now).
+	sm := &StatusManager{}
+
 	// Home dir substitution
-	require.Equal(t, "~/src/main.go", shortenPaths(homeDir+"/src/main.go"))
-	require.Equal(t, "/usr/local/bin", shortenPaths("/usr/local/bin"))
-	require.Equal(t, "no path here", shortenPaths("no path here"))
+	require.Equal(t, "~/src/main.go", sm.shortenPaths(homeDir+"/src/main.go"))
+	require.Equal(t, "/usr/local/bin", sm.shortenPaths("/usr/local/bin"))
+	require.Equal(t, "no path here", sm.shortenPaths("no path here"))
 
 	// WorkDir substitution takes priority
-	workDirMu.RLock()
-	origWorkDir := workDir
-	workDirMu.RUnlock()
-	SetWorkDir("/tmp/hotplex/workspace")
-	t.Cleanup(func() { SetWorkDir(origWorkDir) })
+	sm.SetWorkDir("/tmp/hotplex/workspace")
 
-	require.Equal(t, "$WK/main.go", shortenPaths("/tmp/hotplex/workspace/main.go"))
-	require.Equal(t, "$WK/sub/file.txt", shortenPaths("/tmp/hotplex/workspace/sub/file.txt"))
+	require.Equal(t, "$WK/main.go", sm.shortenPaths("/tmp/hotplex/workspace/main.go"))
+	require.Equal(t, "$WK/sub/file.txt", sm.shortenPaths("/tmp/hotplex/workspace/sub/file.txt"))
 
 	// Both: workDir first, then homeDir on remaining
-	SetWorkDir(homeDir + "/projects/myapp")
-	require.Equal(t, "$WK/main.go", shortenPaths(homeDir+"/projects/myapp/main.go"))
-	require.Equal(t, "~/other/file.go", shortenPaths(homeDir+"/other/file.go"))
+	sm.SetWorkDir(homeDir + "/projects/myapp")
+	require.Equal(t, "$WK/main.go", sm.shortenPaths(homeDir+"/projects/myapp/main.go"))
+	require.Equal(t, "~/other/file.go", sm.shortenPaths(homeDir+"/other/file.go"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1885,20 +1884,19 @@ func TestAdapter_ConfigureWith_Gate(t *testing.T) {
 }
 
 func TestAdapter_ConfigureWith_BridgeSetsWorkDir(t *testing.T) {
-	origWorkDir := workDir
-	t.Cleanup(func() { workDir = origWorkDir })
-
 	testBridge := messaging.NewBridge(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		messaging.PlatformSlack,
-		nil, nil, nil, nil, "claude_code", "/tmp/hotplex/workspace",
+		nil, nil, nil, "claude_code", "", "/tmp/hotplex/workspace",
+		"",
 	)
 
 	a := &Adapter{}
+	a.statusMgr = NewStatusManager(a, slog.Default())
 	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: testBridge})
 	require.NoError(t, err)
 	require.Same(t, testBridge, a.Bridge())
-	require.Equal(t, "/tmp/hotplex/workspace", workDir)
+	require.Equal(t, "/tmp/hotplex/workspace", a.statusMgr.WorkDir())
 }
 
 type fakeTranscriberForTest struct{}
@@ -1912,6 +1910,54 @@ func TestAdapter_Platform(t *testing.T) {
 	t.Parallel()
 	a := &Adapter{}
 	require.Equal(t, messaging.PlatformSlack, a.Platform())
+}
+
+func TestAdapter_MakeEnvelope(t *testing.T) {
+	t.Parallel()
+
+	br := messaging.NewBridge(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		messaging.PlatformSlack,
+		nil, nil, nil,
+		"claude_code", "", "/tmp/hotplex/workspace",
+		"",
+	)
+
+	a := &Adapter{botID: "B123"}
+	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: br})
+	require.NoError(t, err)
+
+	env := a.makeEnvelope("T1", "C1", "1234.56", "U1", "hello", "")
+
+	require.NotNil(t, env)
+	require.Equal(t, "U1", env.OwnerID)
+	require.NotEmpty(t, env.SessionID)
+
+	data, ok := env.Event.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "hello", data["content"])
+}
+
+func TestAdapter_MakeEnvelope_CustomWorkDir(t *testing.T) {
+	t.Parallel()
+
+	br := messaging.NewBridge(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		messaging.PlatformSlack,
+		nil, nil, nil,
+		"claude_code", "", "/default",
+		"",
+	)
+
+	a := &Adapter{botID: "B123"}
+	err := a.ConfigureWith(messaging.AdapterConfig{Bridge: br})
+	require.NoError(t, err)
+
+	env1 := a.makeEnvelope("T1", "C1", "", "U1", "hi", "/custom")
+	env2 := a.makeEnvelope("T1", "C1", "", "U1", "hi", "")
+
+	// Different workDir → different session ID.
+	require.NotEqual(t, env1.SessionID, env2.SessionID)
 }
 
 // ---------------------------------------------------------------------------
@@ -1983,5 +2029,102 @@ func TestWriteCtx_InteractionEvents_ClosesStream(t *testing.T) {
 			conn.streamWriterMu.Unlock()
 			require.Nil(t, got, "streamWriter should be nil after %s event", tt.name)
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HandlerMu timeout boundary tests
+// ---------------------------------------------------------------------------
+
+func TestHandlerMu_TimeoutReleasesLock(t *testing.T) {
+	t.Parallel()
+	// Verify that handlerMu is correctly released after a context timeout.
+	// This tests the lock-before-timeout pattern used in HandleTextMessage/CmdControl/CmdWorker.
+	conn := &SlackConn{channelID: "C_test", threadTS: "123.000"}
+
+	// Goroutine 1: acquire handlerMu, signal via barrier, then wait for context timeout.
+	locked := make(chan struct{})
+	goroutineDone := make(chan struct{})
+	go func() {
+		defer close(goroutineDone)
+		conn.handlerMu.Lock()
+		defer conn.handlerMu.Unlock()
+		close(locked) // barrier: lock acquired
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		<-ctx.Done() // blocks until timeout
+	}()
+	<-locked // wait until goroutine 1 holds the lock
+
+	// Goroutine 2: try to acquire handlerMu — should block until goroutine 1 finishes.
+	acquired := make(chan struct{})
+	go func() {
+		conn.handlerMu.Lock()
+		defer conn.handlerMu.Unlock()
+		close(acquired)
+	}()
+
+	// After goroutine 1's timeout (50ms) + margin, goroutine 2 should acquire the lock.
+	select {
+	case <-acquired:
+		// Success: mu was released after timeout.
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("handlerMu was not released after context timeout — defer Unlock failed")
+	}
+
+	<-goroutineDone
+}
+
+func TestHandlerMu_MultipleAcquireRelease(t *testing.T) {
+	t.Parallel()
+	// Verify that handlerMu can be acquired multiple times in sequence
+	// (simulating sequential message processing in the same thread).
+	conn := &SlackConn{channelID: "C_test", threadTS: "123.000"}
+
+	for i := 0; i < 5; i++ {
+		conn.handlerMu.Lock()
+		// Simulate a short-lived context timeout as in the production code.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		<-ctx.Done()
+		cancel()
+		conn.handlerMu.Unlock()
+	}
+
+	// If we reach here, the lock was properly acquired and released 5 times.
+}
+
+func TestHandlerMu_TimeoutDoesNotBlockSubsequentCalls(t *testing.T) {
+	t.Parallel()
+	// Verify that after a simulated timeout path, the next goroutine
+	// can immediately acquire the lock (no permanent hold).
+	conn := &SlackConn{channelID: "C_test", threadTS: "123.000"}
+
+	// Simulate one complete timeout cycle: Lock → context timeout → Unlock (via defer).
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn.handlerMu.Lock()
+		defer conn.handlerMu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+		<-ctx.Done()
+	}()
+	<-done
+
+	// Now verify immediate acquisition.
+	acquired := make(chan struct{})
+	go func() {
+		conn.handlerMu.Lock()
+		defer conn.handlerMu.Unlock()
+		close(acquired)
+	}()
+
+	select {
+	case <-acquired:
+		// Lock acquired immediately after previous timeout cycle.
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("handlerMu still held after timeout cycle completed")
 	}
 }

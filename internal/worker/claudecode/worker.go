@@ -1,3 +1,4 @@
+// Package claudecode implements the Claude Code worker adapter via stdio.
 package claudecode
 
 import (
@@ -12,6 +13,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 
 // Compile-time interface compliance checks.
 var _ worker.Worker = (*Worker)(nil)
+var _ worker.WorkerCommander = (*Worker)(nil)
 
 // commandParts stores the space-split command (binary + optional prefix args).
 // Thread-safe via atomic.Value. Default: ["claude"].
@@ -114,7 +117,8 @@ type Worker struct {
 	// tempFiles tracks temp files created for --*-file flags (system prompt,
 	// MCP config). Cleaned up in Terminate. Using files avoids Windows cmd.exe
 	// mangling XML/JSON characters (<, >) in inline arguments.
-	tempFiles []string
+	tempFiles   []string
+	tempFilesMu sync.Mutex // protects tempFiles; separate from w.Mu to avoid deadlock in startLocked
 
 	// readLineFn reads the next line from stdout. If nil, readOutput uses
 	// proc.ReadLine. Inject a func for unit testing without a real process.
@@ -197,6 +201,9 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, resu
 	if err != nil {
 		w.cleanupTempFiles()
 		w.Proc = nil
+		if strings.Contains(err.Error(), "already in use") {
+			return &worker.WorkerError{Kind: worker.ErrKindSessionInUse, Message: "claudecode: session already in use", Cause: err}
+		}
 		return fmt.Errorf("claudecode: start: %w", err)
 	}
 
@@ -252,13 +259,26 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 		args = append(args, "--permission-prompt-tool", "stdio")
 	}
 
-	// Only two session modes:
-	// - resume=true  → --resume <id>
-	// - resume=false → --session-id <id>
-	if resume {
+	// Session mode selection:
+	// 1. ContinueSession (--continue): resume latest session, no ID needed
+	// 2. resume=true + session ID: --resume <id>
+	// 3. New session: --session-id <id>
+	if session.ContinueSession {
+		args = append(args, "--continue")
+	} else if resume {
 		args = append(args, "--resume", aep.ParseSessionID(session.SessionID))
 	} else {
 		args = append(args, "--session-id", aep.ParseSessionID(session.SessionID))
+	}
+
+	// ForkSession: when resuming, fork into a new session (--fork-session).
+	if session.ForkSession && resume {
+		args = append(args, "--fork-session")
+	}
+
+	// ResumeSessionAt: restore session up to a specific message (--resume-session-at).
+	if session.ResumeSessionAt != "" && resume {
+		args = append(args, "--resume-session-at", session.ResumeSessionAt)
 	}
 
 	// Permission mode: default bypass (preserves existing behavior), configurable override.
@@ -337,6 +357,15 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 	if session.IncludeHookEvents {
 		args = append(args, "--include-hook-events")
 	}
+	// ConfigEnv is injected via cmd.Env only (env.go Phase 7), NOT via
+	// --settings JSON. Claude Code's --settings flag is a no-op for env
+	// (cmd.Env is inherited by tool subprocesses) and serializing ConfigEnv
+	// here breaks third-party wrappers that also push --settings:
+	//   - CCR appends its own "--settings /tmp/.../ccr-settings-<hash>.json"
+	//   - Claude receives two --settings values, yargs merges them into an
+	//     array, UZ4()'s "{...}" JSON-shape check fails, and Claude reports
+	//     "Settings file not found: [...]" → exit_code=1 → session crash.
+	// See issue #622.
 	if session.IncludePartialMessages {
 		args = append(args, "--include-partial-messages")
 	}
@@ -360,12 +389,18 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return nil
 	}
 
-	// Normal input: use SendUserMessage for Claude Code's stream-json format
+	// Normal input: use Claude Code's stream-json format
 	// instead of AEP envelope format
 	if baseConn, ok := conn.(*base.Conn); ok {
-		if err := baseConn.SendUserMessage(ctx, content); err != nil {
+		stdin, mu := baseConn.StdinLocked()
+		defer mu.Unlock()
+		if stdin == nil {
+			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
+		}
+		if err := writeStreamInputLocked(stdin, content); err != nil {
 			return fmt.Errorf("claudecode: input: %w", err)
 		}
+		baseConn.SetLastInputLocked(content)
 	} else {
 		// Fallback to AEP envelope for tests with mock connections
 		msg := events.NewEnvelope(
@@ -446,7 +481,7 @@ func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body ma
 	w.Mu.Lock()
 	if w.Proc == nil || !w.Proc.IsRunning() {
 		w.Mu.Unlock()
-		return nil, fmt.Errorf("claudecode: worker process is not running")
+		return nil, &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: worker process is not running"}
 	}
 	ctrl := w.control
 	w.Mu.Unlock()
@@ -688,7 +723,9 @@ func (w *Worker) readOutput(ctx context.Context) {
 							var input struct {
 								Questions []events.Question `json:"questions"`
 							}
-							_ = json.Unmarshal(cr.Input, &input)
+							if err := json.Unmarshal(cr.Input, &input); err != nil {
+								w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
+							}
 							questions = input.Questions
 						}
 						env := events.NewEnvelope(
@@ -711,7 +748,9 @@ func (w *Worker) readOutput(ctx context.Context) {
 						// Other tools → PermissionRequest event
 						var input map[string]any
 						if len(cr.Input) > 0 {
-							_ = json.Unmarshal(cr.Input, &input)
+							if err := json.Unmarshal(cr.Input, &input); err != nil {
+								w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
+							}
 						}
 						args := []string{`{}`}
 						if len(input) > 0 {
@@ -745,7 +784,9 @@ func (w *Worker) readOutput(ctx context.Context) {
 						RequestedSchema map[string]any `json:"requested_schema,omitempty"`
 					}
 					if evt.RawMessage != nil && len(evt.RawMessage.Response) > 0 {
-						_ = json.Unmarshal(evt.RawMessage.Response, &elData)
+						if err := json.Unmarshal(evt.RawMessage.Response, &elData); err != nil {
+							w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
+						}
 					}
 					env := events.NewEnvelope(
 						aep.NewID(),
@@ -784,6 +825,82 @@ func (w *Worker) readOutput(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// ─── WorkerCommander ──────────────────────────────────────────────────────────
+
+// Compact sends the /compact text command to Claude Code.
+// B3-3: uses writeStreamInput directly (bypasses LastInput) since /compact
+// is a control command, not user content that should be re-delivered on crash.
+// Note: args is ignored. Claude Code's /compact does not accept extra parameters
+// (unlike OCS which supports model selection in the summarize request).
+func (w *Worker) Compact(ctx context.Context, _ map[string]any) error {
+	conn := w.Conn()
+	if conn == nil {
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: not started"}
+	}
+	w.Mu.Lock()
+	if w.Proc == nil || !w.Proc.IsRunning() {
+		w.Mu.Unlock()
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: worker process is not running"}
+	}
+	w.Mu.Unlock()
+
+	baseConn, ok := conn.(*base.Conn)
+	if !ok {
+		return worker.ErrNotImplemented
+	}
+	stdin, mu := baseConn.StdinLocked()
+	if stdin == nil {
+		mu.Unlock()
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
+	}
+	defer mu.Unlock()
+
+	// writeStreamInputLocked issues syscall.Write which blocks when the pipe
+	// buffer is full and the reader has stalled. Guard with context cancellation
+	// so the caller is not blocked indefinitely.
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- writeStreamInputLocked(stdin, "/compact")
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		// Wait for the write goroutine to finish so we don't release mu while
+		// a write is in flight. However, syscall.Write blocks at the OS level
+		// and cannot be preempted — if the pipe buffer is full and the worker
+		// process is stalled, this blocks forever. Use a secondary timeout to
+		// bound the wait. The orphaned goroutine will complete when the process
+		// exits and the pipe read end closes (EPIPE).
+		select {
+		case <-errCh:
+		case <-time.After(30 * time.Second):
+			w.Log.Warn("claudecode: compact: write goroutine did not complete within 30s after ctx cancellation, releasing lock")
+		}
+		return fmt.Errorf("claudecode: compact: %w", ctx.Err())
+	}
+}
+
+// Clear is not supported by Claude Code in non-interactive mode.
+func (w *Worker) Clear(_ context.Context) error {
+	return worker.ErrNotImplemented
+}
+
+// Rewind sends a rewind_files control_request to Claude Code.
+// B3-4: uses rewind_files control_request subtype instead of /rewind text command.
+// When targetID is empty, the Claude CLI will rewind to the most recent assistant turn.
+func (w *Worker) Rewind(ctx context.Context, targetID string) error {
+	body := map[string]any{}
+	if targetID != "" {
+		body["target_id"] = targetID
+	}
+	_, err := w.SendControlRequest(ctx, "rewind_files", body)
+	if err != nil {
+		return fmt.Errorf("claudecode: rewind: %w", err)
+	}
+	return nil
 }
 
 // trySend non-blocking sends an envelope to the connection.
@@ -832,7 +949,9 @@ func (w *Worker) writeTempFile(prefix, content string) (string, error) {
 		_ = os.Remove(path)
 		return "", fmt.Errorf("close temp file: %w", err)
 	}
+	w.tempFilesMu.Lock()
 	w.tempFiles = append(w.tempFiles, path)
+	w.tempFilesMu.Unlock()
 	return path, nil
 }
 
@@ -840,7 +959,14 @@ func (w *Worker) writeTempFile(prefix, content string) (string, error) {
 // On Windows, the child process may still hold a file handle briefly after
 // termination, so we retry once after a short delay if deletion fails.
 func (w *Worker) cleanupTempFiles() {
-	for _, path := range w.tempFiles {
+	// Snapshot and clear the slice under w.Mu so a concurrent writeTempFile
+	// cannot append to a slice we are iterating, and so the field is left in
+	// a consistent nil state even if a file removal blocks.
+	w.tempFilesMu.Lock()
+	files := w.tempFiles
+	w.tempFiles = nil
+	w.tempFilesMu.Unlock()
+	for _, path := range files {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			// Retry once after a short delay for Windows file-lock stragglers.
 			time.Sleep(200 * time.Millisecond)
@@ -849,7 +975,6 @@ func (w *Worker) cleanupTempFiles() {
 			}
 		}
 	}
-	w.tempFiles = nil
 }
 
 // joinTools joins tool names with comma.

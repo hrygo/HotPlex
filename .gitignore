@@ -8,6 +8,7 @@ hotplex
 hotplex-*
 hotplex.pid
 !cmd/hotplex
+.docs-patrol-baseline
 !.agent/skills/hotplex-*/
 *.test
 *.out
@@ -15,6 +16,12 @@ hotplex.pid
 *.dylib
 *.exe
 *.dll
+*.pdf
+*.zip
+*.rar
+*.7z
+*.tar.gz
+*.tgz
 
 # --- Go Development ---
 vendor/
@@ -62,6 +69,7 @@ test_output.txt
 *.local.yaml
 *.local.yml
 .agent/settings.local.json
+.agents/settings.local.json
 *.pem
 *.key
 *.cert
@@ -103,9 +111,15 @@ playwright-report/
 __pycache__
 
 # --- Agent & Session State ---
-.agent/scheduled_tasks.lock
-.agent/source-study-progress.json
-.agent/arch-analysis/progress.json
+.agents/skills/*
+!.agents/skills/hotplex-*/
+.agents/skills/hotplex-docs-patrol/.patrol-baseline
+.agent/
+/skills/
+skills-lock.json
+.agents/scheduled_tasks.lock
+.agents/source-study-progress.json
+.agents/arch-analysis/progress.json
 
 # --- Miscellaneous ---
 /.worktrees/
@@ -119,3 +133,8 @@ webchat/*.png
 internal/webchat/out/
 !internal/webchat/out/index.html
 build-docs
+.superpowers/
+
+# Docker local override (developer-specific)
+docker-compose.override.yml
+.hermes

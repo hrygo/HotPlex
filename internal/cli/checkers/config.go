@@ -3,7 +3,6 @@ package checkers
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
@@ -115,7 +114,7 @@ func (c configSyntaxChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	_, err := config.Load(configPath, config.LoadOptions{})
+	_, err := config.Load(configPath)
 	if err == nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),
@@ -154,7 +153,7 @@ func (c configRequiredChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),
@@ -166,12 +165,24 @@ func (c configRequiredChecker) Check(ctx context.Context) cli.Diagnostic {
 	}
 
 	var missing []string
-	if len(cfg.Security.JWTSecret) == 0 {
-		missing = append(missing, "security.jwt_secret")
-	}
 
-	hasWorker := cfg.Messaging.Slack.Enabled || cfg.Messaging.Feishu.Enabled
-	if !hasWorker {
+	if cfg.Messaging.Slack.Enabled {
+		if cfg.Messaging.Slack.BotToken == "" {
+			missing = append(missing, "messaging.slack.bot_token")
+		}
+		if cfg.Messaging.Slack.AppToken == "" {
+			missing = append(missing, "messaging.slack.app_token")
+		}
+	}
+	if cfg.Messaging.Feishu.Enabled {
+		if cfg.Messaging.Feishu.AppID == "" {
+			missing = append(missing, "messaging.feishu.app_id")
+		}
+		if cfg.Messaging.Feishu.AppSecret == "" {
+			missing = append(missing, "messaging.feishu.app_secret")
+		}
+	}
+	if !cfg.Messaging.Slack.Enabled && !cfg.Messaging.Feishu.Enabled {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
@@ -221,7 +232,7 @@ func (c configValuesChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	cfg, err := config.Load(configPath, config.LoadOptions{})
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),
@@ -368,10 +379,6 @@ type configEnvVarsChecker struct{}
 func (c configEnvVarsChecker) Name() string     { return "config.env_vars" }
 func (c configEnvVarsChecker) Category() string { return "config" }
 func (c configEnvVarsChecker) Check(ctx context.Context) cli.Diagnostic {
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		jwtSecret = os.Getenv("HOTPLEX_JWT_SECRET")
-	}
 
 	adminToken := os.Getenv("ADMIN_TOKEN")
 	if adminToken == "" {
@@ -379,9 +386,7 @@ func (c configEnvVarsChecker) Check(ctx context.Context) cli.Diagnostic {
 	}
 
 	var missing []string
-	if jwtSecret == "" {
-		missing = append(missing, "JWT_SECRET (or HOTPLEX_JWT_SECRET)")
-	}
+
 	if adminToken == "" {
 		missing = append(missing, "ADMIN_TOKEN (or HOTPLEX_ADMIN_TOKEN_1)")
 	}
@@ -422,14 +427,6 @@ func fixEnvVars() error {
 	}
 
 	var lines []string
-
-	if !existing["HOTPLEX_JWT_SECRET"] {
-		b := make([]byte, 48)
-		if _, err := rand.Read(b); err != nil {
-			return fmt.Errorf("generate JWT secret: %w", err)
-		}
-		lines = append(lines, fmt.Sprintf("HOTPLEX_JWT_SECRET=%s", base64.StdEncoding.EncodeToString(b)))
-	}
 
 	if !existing["HOTPLEX_ADMIN_TOKEN_1"] {
 		b := make([]byte, 32)

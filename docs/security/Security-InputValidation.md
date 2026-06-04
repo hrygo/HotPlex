@@ -1,9 +1,5 @@
 ---
-type: design
-tags:
-  - project/HotPlex
-  - security/input-validation
-  - security/command-injection
+
 ---
 
 # Security: Input Validation & Command Injection Prevention
@@ -465,7 +461,27 @@ func (l *OutputLimiter) Check(line []byte) error {
 
 ---
 
-## 8. AI Tool 权限控制
+## 8. WebSocket Init 路径输入清洗
+
+所有入口路径的用户输入都必须经过清洗。v1.24.4 起，WS init 路径（`ValidateInit`）与 REST API 路径享有同等的输入保护：
+
+| 输入字段 | 清洗方式 | 长度限制 | 超长错误码 |
+|----------|----------|----------|-----------|
+| `title` | `SanitizeText()` | `MaxClientKeyLen` (256) | `INVALID_MESSAGE` |
+| `session_id` | `SanitizeText()` | 无硬限制（参与 UUIDv5 派生） | — |
+| `client_session_id` (REST) | URL query 参数 | `MaxClientKeyLen` (256) | HTTP 400 |
+
+**`SanitizeText()` 清洗规则**：移除控制字符（保留 `\t`、`\n`）、null bytes、BOM、surrogates。
+
+**REST vs WS 一致性**：
+- REST API (`POST /api/sessions`)：`client_session_id` 和 `title` 均经过长度校验（`session.MaxClientKeyLen`）
+- WS init (`ValidateInit`)：`title` 经过长度校验（`session.MaxClientKeyLen`），`session_id` 经过文本清洗
+
+**`MaxClientKeyLen` 常量**（`internal/session/manager.go`）：统一为 256，替代之前 REST 路径中硬编码的 magic number。Session Manager 的 `CreateWithBot` 内部也对 `clientKey` 进行长度校验，超出返回 `ErrClientKeyTooLong`。
+
+---
+
+## 9. AI Tool 权限控制
 
 > ⚠️ **HotPlex 驱动 Claude Code 执行 AI 生成命令，需要独立的权限策略。**
 >
@@ -473,7 +489,7 @@ func (l *OutputLimiter) Check(line []byte) error {
 
 ---
 
-## 9. 安全检查清单
+## 10. 安全检查清单
 
 - 禁止 `exec.Command("sh", "-c", ...)`
 - 实现命令白名单
@@ -483,11 +499,12 @@ func (l *OutputLimiter) Check(line []byte) error {
 - 实现环境变量白名单
 - 配置文件传递敏感内容
 - 实现输出限制（10MB 单行 + 20MB 会话）
+- WS init 和 REST API 路径均对 `title`/`session_id`/`client_session_id` 执行 `SanitizeText()` 清洗 + 长度校验
 - 安全日志（验证失败记录）
 
 ---
 
-## 9. 参考资料
+## 11. 参考资料
 
 - [OWASP Input Validation Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)
 - [CWE-78: OS Command Injection](https://cwe.mitre.org/data/definitions/78.html)

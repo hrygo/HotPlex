@@ -13,6 +13,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -57,8 +58,8 @@ func (m *mockStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockStore) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
-	args := m.Called(ctx, cutoff)
+func (m *mockStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+	args := m.Called(ctx, cronCutoff, defaultCutoff)
 	return args.Error(0)
 }
 
@@ -107,7 +108,9 @@ func newHandlerWithRealStore(t *testing.T) (*Handler, *session.Manager, *Hub, fu
 	cleanup := func() { os.Remove(tmpPath) }
 
 	cfg.DB.Path = tmpPath
-	store, err := session.NewSQLiteStore(context.Background(), cfg)
+	cfg.DB.SQLite.Path = tmpPath
+	writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
+	store, err := session.NewSQLiteStore(context.Background(), cfg, writeMu)
 	require.NoError(t, err)
 	mgr, err := session.NewManager(context.Background(), slog.Default(), cfg, nil, store)
 	require.NoError(t, err)

@@ -10,7 +10,8 @@ import (
 func TestSlashRateLimiter_Allow(t *testing.T) {
 	t.Parallel()
 
-	rl := NewSlashRateLimiter()
+	cooldown := 100 * time.Millisecond
+	rl := NewSlashRateLimiterWithCooldown(cooldown)
 	defer rl.Stop()
 
 	userID := "U123"
@@ -18,8 +19,7 @@ func TestSlashRateLimiter_Allow(t *testing.T) {
 	require.True(t, rl.Allow(userID), "first request should be allowed")
 	require.False(t, rl.Allow(userID), "second request within cooldown should be rate limited")
 
-	time.Sleep(slashCooldown + 100*time.Millisecond)
-	require.True(t, rl.Allow(userID), "request after cooldown should be allowed")
+	require.Eventually(t, func() bool { return rl.Allow(userID) }, cooldown+200*time.Millisecond, 20*time.Millisecond, "request after cooldown should be allowed")
 }
 
 func TestSlashRateLimiter_DifferentUsers(t *testing.T) {

@@ -443,7 +443,7 @@ workerEnv = append(workerEnv,
 用户说 "30分钟后提醒我检查部署"
   → Worker 从意识层知道 cronjob 可用
   → cat ~/.hotplex/skills/cron.md 读取完整手册
-  → curl POST ${HOTPLEX_ADMIN_API_URL}/api/cron/jobs 创建 cronjob
+  → curl POST ${HOTPLEX_ADMIN_API_URL}/admin/cron/jobs 创建 cronjob
   → 返回确认给用户
 ```
 
@@ -567,13 +567,13 @@ jobs:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/cron/jobs` | List all jobs |
-| GET | `/api/cron/jobs/:id` | Get job detail |
-| POST | `/api/cron/jobs` | Create job |
-| PATCH | `/api/cron/jobs/:id` | Update job |
-| DELETE | `/api/cron/jobs/:id` | Delete job |
-| POST | `/api/cron/jobs/:id/run` | Trigger manual run |
-| GET | `/api/cron/jobs/:id/runs` | Get run history |
+| GET | `/admin/cron/jobs` | List all jobs |
+| GET | `/admin/cron/jobs/{id}` | Get job detail |
+| POST | `/admin/cron/jobs` | Create job |
+| PATCH | `/admin/cron/jobs/{id}` | Update job |
+| DELETE | `/admin/cron/jobs/{id}` | Delete job |
+| POST | `/admin/cron/jobs/{id}/run` | Trigger manual run |
+| GET | `/admin/cron/jobs/{id}/runs` | Get run history |
 
 ---
 

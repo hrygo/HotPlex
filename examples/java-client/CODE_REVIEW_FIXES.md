@@ -139,28 +139,14 @@ public void sendInput(String content, Map<String, Object> metadata) {
 
 ## Medium-Priority Issues (Not Fixed Yet)
 
-### 7. **JWT Builder Duplication** (JwtTokenGenerator.java)
-**Status**: IDENTIFIED but not fixed in this iteration
+### 7. **JwtTokenGenerator (REMOVED)** (JwtTokenGenerator.java)
+**Status**: REMOVED - JWT authentication replaced with API Key + Bot ID
 
-**Issue**: Three near-identical token generation methods with repeated boilerplate.
+The `JwtTokenGenerator` class has been removed from the codebase. Authentication is now handled via HTTP headers:
+- `X-API-Key` for API key authentication
+- `X-Bot-ID` for multi-bot isolation
 
-**Recommendation**:
-```java
-// Extract common builder configuration
-private JwtBuilder baseBuilder(String subject, List<String> scopes, long ttlSeconds) {
-    Instant now = Instant.now();
-    return Jwts.builder()
-            .subject(subject)
-            .issuer(issuer)
-            .audience().add(audience).and()
-            .issuedAt(Date.from(now))
-            .expiration(Date.from(now.plusSeconds(ttlSeconds)))
-            .claim("scopes", scopes)
-            .signWith(keyPair.getPrivate(), Jwts.SIG.ES256);
-}
-```
-
-**Impact**: Would reduce ~40 lines of code, prevent subtle bugs from divergent implementations.
+The `HotPlexClient` builder now uses `.apiKey(String)` and `.botId(String)` instead of `.tokenGenerator(JwtTokenGenerator)`.
 
 ---
 
@@ -246,7 +232,7 @@ Token generated but never used directly in example.
 - **3 new helper methods**: `requireConnected()`, `sendEnvelope()`, `clearListeners()`
 
 ### Deferred to Future Iteration
-- **2 Medium-priority** refactoring opportunities (JWT builder, event routing)
+- **1 Medium-priority** refactoring opportunity (event routing)
 - **3 Low-priority** cosmetic/minor issues
 
 ### Impact
@@ -270,7 +256,7 @@ Token generated but never used directly in example.
    - Updated `sendInput()`, `sendControl()`, `sendPermissionResponse()` to use helpers
 
 2. **JwtTokenGenerator.java**
-   - Reviewed for duplication (not modified in this iteration)
+   - REMOVED - JWT authentication replaced with API Key + Bot ID
 
 3. **QuickStart.java**
    - Reviewed for issues (no changes required)
@@ -279,11 +265,10 @@ Token generated but never used directly in example.
 
 ## Next Steps (Optional)
 
-1. **JWT Refactoring**: Extract `baseBuilder()` method in `JwtTokenGenerator.java`
-2. **Event Routing**: Use `EventKind` enum consistently in `routeEvent()`
-3. **State Consolidation**: Derive `connected` from `state` enum
-4. **Add Unit Tests**: Test listener cleanup, heartbeat timeout logic
-5. **Performance Testing**: Verify no degradation under load
+1. **Event Routing**: Use `EventKind` enum consistently in `routeEvent()`
+2. **State Consolidation**: Derive `connected` from `state` enum
+3. **Add Unit Tests**: Test listener cleanup, heartbeat timeout logic
+4. **Performance Testing**: Verify no degradation under load
 
 ---
 

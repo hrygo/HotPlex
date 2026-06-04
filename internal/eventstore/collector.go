@@ -3,9 +3,11 @@ package eventstore
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hrygo/hotplex/pkg/events"
@@ -14,10 +16,10 @@ import (
 const (
 	collectorChanCap       = 2048
 	collectorBatchMax      = 100
-	collectorFlushInterval = 100 * time.Millisecond
+	collectorFlushInterval = 1 * time.Second
 
 	deltaFlushSize     = 4096 // bytes — flush accumulator when content exceeds this
-	deltaFlushInterval = 2 * time.Second
+	deltaFlushInterval = 3 * time.Second
 )
 
 // StorableTypes is the set of AEP event types eligible for event storage replay.
@@ -48,8 +50,31 @@ func IsStorable(eventType events.Kind) bool {
 }
 
 // captureRequest is a pending write for the background batch writer.
+// event, turn, and flush are mutually exclusive: exactly one is set.
 type captureRequest struct {
 	event *StoredEvent
+	turn  *TurnWriteRequest
+	flush chan struct{} // non-nil: flush marker; closed by runWriter after batch commit
+}
+
+func (r *captureRequest) sessionID() string {
+	if r.event != nil {
+		return r.event.SessionID
+	}
+	if r.turn != nil {
+		return r.turn.SessionID
+	}
+	return ""
+}
+
+func kindOf(req *captureRequest) string {
+	if req.turn != nil {
+		return "turn"
+	}
+	if req.flush != nil {
+		return "flush"
+	}
+	return "event"
 }
 
 // Collector captures AEP events, merges message.delta streams, and writes
@@ -60,24 +85,42 @@ type captureRequest struct {
 //   - Timer: accumulator age exceeds deltaFlushInterval (runWriter ticker)
 //   - Event: MessageEnd or next storable event (hot path, synchronous)
 type Collector struct {
-	store    EventStore
-	captureC chan *captureRequest
-	closeC   chan struct{}
-	closeWg  sync.WaitGroup
-	log      *slog.Logger
+	store     EventStore
+	captureC  chan *captureRequest
+	closeC    chan struct{}
+	closeWg   sync.WaitGroup
+	closeOnce sync.Once
+	log       *slog.Logger
 
-	accumMu sync.Mutex
-	accum   map[string]*deltaAccumulator // sessionID → active delta accumulator
+	flushInterval time.Duration // ticker interval for batch flush (default: collectorFlushInterval)
+	deltaFlush    time.Duration // max age before flushing accumulated deltas (default: deltaFlushInterval)
+
+	accumMu        sync.Mutex
+	accum          map[string]*deltaAccumulator // sessionID → active delta accumulator
+	reasoningAccum map[string]*deltaAccumulator // sessionID → active reasoning accumulator
+	dropped        atomic.Int64
 }
 
 // NewCollector creates a Collector that writes events to store.
 func NewCollector(store EventStore, log *slog.Logger) *Collector {
+	return newCollector(store, log, collectorFlushInterval, deltaFlushInterval)
+}
+
+// NewCollectorWithIntervals creates a Collector with custom flush intervals (for tests).
+func NewCollectorWithIntervals(store EventStore, log *slog.Logger, flush, deltaFlush time.Duration) *Collector {
+	return newCollector(store, log, flush, deltaFlush)
+}
+
+func newCollector(store EventStore, log *slog.Logger, flush, deltaFlush time.Duration) *Collector {
 	c := &Collector{
-		store:    store,
-		captureC: make(chan *captureRequest, collectorChanCap),
-		closeC:   make(chan struct{}),
-		log:      log.With("component", "eventstore-collector"),
-		accum:    make(map[string]*deltaAccumulator),
+		store:          store,
+		captureC:       make(chan *captureRequest, collectorChanCap),
+		closeC:         make(chan struct{}),
+		log:            log.With("component", "eventstore-collector"),
+		flushInterval:  flush,
+		deltaFlush:     deltaFlush,
+		accum:          make(map[string]*deltaAccumulator),
+		reasoningAccum: make(map[string]*deltaAccumulator),
 	}
 	c.closeWg.Add(1)
 	go c.runWriter()
@@ -85,28 +128,22 @@ func NewCollector(store EventStore, log *slog.Logger) *Collector {
 }
 
 // Capture sends an event to the collector for async persistence.
-// If the event is a message.delta, it is accumulated in-memory and merged
-// on message.end or next non-delta event.
+// MessageDelta and Reasoning events are accumulated in-memory and merged
+// on flush trigger (MessageEnd, next storable event, size/timer threshold).
 func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, data json.RawMessage, direction, source string) {
 	if eventType == events.MessageDelta {
-		c.accumMu.Lock()
-		if c.accum == nil {
-			c.accumMu.Unlock()
-			return
-		}
-		acc := c.accum[sessionID]
-		if acc == nil {
-			acc = newDeltaAccumulator()
-			c.accum[sessionID] = acc
-		}
-		acc.append(seq, data)
-		c.accumMu.Unlock()
+		c.flushAndAccumulate(sessionID, seq, false, data)
 		return
 	}
 
-	// MessageEnd triggers flush but is not stored itself.
+	if eventType == events.Reasoning {
+		c.flushAndAccumulate(sessionID, seq, true, data)
+		return
+	}
+
+	// MessageEnd triggers flush of both accumulators but is not stored itself.
 	if eventType == events.MessageEnd {
-		c.flushDelta(sessionID)
+		c.flushBoth(sessionID)
 		return
 	}
 
@@ -114,7 +151,7 @@ func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, 
 		return
 	}
 
-	c.flushDelta(sessionID)
+	c.flushBoth(sessionID)
 
 	req := &captureRequest{event: &StoredEvent{
 		SessionID: sessionID,
@@ -128,53 +165,204 @@ func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, 
 	c.send(req)
 }
 
-func (c *Collector) flushDelta(sessionID string) {
+// flushAndAccumulate holds accumMu once to cross-flush the other accumulator and
+// accumulate the incoming event. isReasoning selects which map to use.
+func (c *Collector) flushAndAccumulate(sessionID string, seq int64, isReasoning bool, data json.RawMessage) {
 	c.accumMu.Lock()
-	acc := c.accum[sessionID]
-	delete(c.accum, sessionID)
+
+	// Cross-flush the other accumulator under the same lock.
+	var flushed *deltaAccumulator
+	if isReasoning {
+		flushed = c.accum[sessionID]
+		delete(c.accum, sessionID)
+	} else {
+		flushed = c.reasoningAccum[sessionID]
+		delete(c.reasoningAccum, sessionID)
+	}
+
+	// Accumulate into target map.
+	var acc *deltaAccumulator
+	if isReasoning {
+		acc = c.getOrCreateReasoningAccum(sessionID)
+	} else {
+		acc = c.getOrCreateAccum(sessionID)
+	}
+	if acc != nil {
+		if err := acc.append(seq, data); err != nil {
+			c.log.Warn("eventstore: delta unmarshal failed", "session_id", sessionID, "err", err)
+		}
+	}
 	c.accumMu.Unlock()
 
-	if acc == nil || acc.count == 0 {
+	if flushed != nil && flushed.count > 0 {
+		c.send(flushed.toRequest(sessionID))
+	}
+}
+
+// flushBoth flushes both delta and reasoning accumulators under a single lock.
+func (c *Collector) flushBoth(sessionID string) {
+	c.accumMu.Lock()
+	dAcc := c.accum[sessionID]
+	delete(c.accum, sessionID)
+	rAcc := c.reasoningAccum[sessionID]
+	delete(c.reasoningAccum, sessionID)
+	c.accumMu.Unlock()
+
+	if dAcc != nil && dAcc.count > 0 {
+		c.send(dAcc.toRequest(sessionID))
+	}
+	if rAcc != nil && rAcc.count > 0 {
+		c.send(rAcc.toRequest(sessionID))
+	}
+}
+
+// getOrCreateAccum returns the delta accumulator for sessionID, creating one if needed.
+// Caller must hold c.accumMu. Returns nil if the collector is closed.
+func (c *Collector) getOrCreateAccum(sessionID string) *deltaAccumulator {
+	if c.accum == nil {
+		return nil
+	}
+	acc := c.accum[sessionID]
+	if acc == nil {
+		acc = newDeltaAccumulator(events.Message)
+		c.accum[sessionID] = acc
+	}
+	return acc
+}
+
+// getOrCreateReasoningAccum returns the reasoning accumulator for sessionID.
+// Caller must hold c.accumMu. Returns nil if the collector is closed.
+func (c *Collector) getOrCreateReasoningAccum(sessionID string) *deltaAccumulator {
+	if c.reasoningAccum == nil {
+		return nil
+	}
+	acc := c.reasoningAccum[sessionID]
+	if acc == nil {
+		acc = newDeltaAccumulator(events.Reasoning)
+		c.reasoningAccum[sessionID] = acc
+	}
+	return acc
+}
+
+// CaptureReasoningString accumulates a reasoning content string directly,
+// skipping the json.Marshal/Unmarshal round-trip of Capture.
+// Flushes immediately when accumulated content exceeds deltaFlushSize.
+func (c *Collector) CaptureReasoningString(sessionID string, seq int64, content string) {
+	c.accumMu.Lock()
+	acc := c.getOrCreateReasoningAccum(sessionID)
+	if acc == nil {
+		c.accumMu.Unlock()
 		return
 	}
-	c.send(acc.toRequest(sessionID))
+	acc.appendRaw(seq, content)
+
+	if acc.content.Len() >= deltaFlushSize {
+		delete(c.reasoningAccum, sessionID)
+		c.accumMu.Unlock()
+		c.send(acc.toRequest(sessionID))
+		return
+	}
+	c.accumMu.Unlock()
 }
 
 func (c *Collector) send(req *captureRequest) {
 	select {
 	case c.captureC <- req:
 	default:
-		c.log.Warn("eventstore: capture channel full, dropping event",
-			"session_id", req.event.SessionID,
-			"seq", req.event.Seq,
-			"type", req.event.Type,
+		c.dropped.Add(1)
+		c.log.Warn("eventstore: capture channel full, dropping",
+			"session_id", req.sessionID(),
+			"kind", kindOf(req),
 		)
+	}
+}
+
+// CaptureTurn sends a turn write request to the collector for async persistence.
+func (c *Collector) CaptureTurn(turn *TurnWriteRequest) {
+	if turn == nil {
+		return
+	}
+	c.send(&captureRequest{turn: turn})
+}
+
+// Flush blocks until all pending writes in the capture channel have been
+// committed to the underlying store. Safe for concurrent use.
+// Returns immediately if the collector is closed.
+func (c *Collector) Flush() error {
+	// Fast path: return immediately if already closed.
+	select {
+	case <-c.closeC:
+		return nil
+	default:
+	}
+
+	done := make(chan struct{})
+	select {
+	case c.captureC <- &captureRequest{flush: done}:
+	case <-c.closeC:
+		return nil
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("eventstore: flush send timeout")
+	}
+	select {
+	case <-done:
+		return nil
+	case <-c.closeC:
+		return nil
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("eventstore: flush wait timeout")
 	}
 }
 
 // Close drains the capture channel and flushes remaining events.
 func (c *Collector) Close() error {
-	// Swap accumulator map under lock, flush outside to avoid deadlock.
-	c.accumMu.Lock()
-	pending := c.accum
-	c.accum = nil
-	c.accumMu.Unlock()
+	c.closeOnce.Do(func() {
+		// Swap accumulator maps under lock, flush outside to avoid deadlock.
+		c.accumMu.Lock()
+		pending := c.accum
+		pendingReasoning := c.reasoningAccum
+		c.accum = nil
+		c.reasoningAccum = nil
+		c.accumMu.Unlock()
 
-	for sid, acc := range pending {
-		if acc.count > 0 {
-			c.send(acc.toRequest(sid))
+		for sid, acc := range pending {
+			if acc.count > 0 {
+				req := acc.toRequest(sid)
+				select {
+				case c.captureC <- req:
+				case <-time.After(5 * time.Second):
+					c.log.Error("eventstore: accumulator flush dropped during close",
+						"session_id", sid, "kind", "turn")
+				}
+			}
 		}
-	}
+		for sid, acc := range pendingReasoning {
+			if acc.count > 0 {
+				req := acc.toRequest(sid)
+				select {
+				case c.captureC <- req:
+				case <-time.After(5 * time.Second):
+					c.log.Error("eventstore: accumulator flush dropped during close",
+						"session_id", sid, "kind", "reasoning")
+				}
+			}
+		}
 
-	close(c.closeC)
-	c.closeWg.Wait()
+		close(c.closeC)
+		c.closeWg.Wait()
+	})
 	return nil
+}
+
+// DroppedEvents returns the total number of events dropped due to a full channel.
+func (c *Collector) DroppedEvents() int64 {
+	return c.dropped.Load()
 }
 
 func (c *Collector) runWriter() {
 	defer c.closeWg.Done()
 
-	ticker := time.NewTicker(collectorFlushInterval)
+	ticker := time.NewTicker(c.flushInterval)
 	defer ticker.Stop()
 
 	var batch []*captureRequest
@@ -192,13 +380,26 @@ func (c *Collector) runWriter() {
 			for {
 				select {
 				case req := <-c.captureC:
+					if req.flush != nil {
+						flush()
+						close(req.flush)
+						continue
+					}
 					batch = append(batch, req)
 				default:
 					flush()
+					if d := c.dropped.Load(); d > 0 {
+						c.log.Warn("eventstore: events dropped during lifetime", "count", d)
+					}
 					return
 				}
 			}
 		case req := <-c.captureC:
+			if req.flush != nil {
+				flush()
+				close(req.flush)
+				continue
+			}
 			batch = append(batch, req)
 			if len(batch) >= collectorBatchMax {
 				flush()
@@ -217,8 +418,14 @@ func (c *Collector) flushTimedOutAccumulators(batch *[]*captureRequest) {
 	now := time.Now()
 	c.accumMu.Lock()
 	for sid, acc := range c.accum {
-		if now.Sub(acc.firstSeenAt) >= deltaFlushInterval {
+		if now.Sub(acc.firstSeenAt) >= c.deltaFlush {
 			delete(c.accum, sid)
+			*batch = append(*batch, acc.toRequest(sid))
+		}
+	}
+	for sid, acc := range c.reasoningAccum {
+		if now.Sub(acc.firstSeenAt) >= c.deltaFlush {
+			delete(c.reasoningAccum, sid)
 			*batch = append(*batch, acc.toRequest(sid))
 		}
 	}
@@ -239,19 +446,38 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 		return
 	}
 
+	done := false
+	defer func() {
+		if !done {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var batchErr error
 	for _, req := range batch {
-		if err := tx.Append(ctx, req.event); err != nil {
+		var err error
+		switch {
+		case req.turn != nil:
+			err = tx.AppendTurn(ctx, req.turn)
+		case req.event != nil:
+			err = tx.Append(ctx, req.event)
+		}
+		if err != nil {
 			c.log.Warn("eventstore: batch append failed",
-				"session_id", req.event.SessionID,
-				"seq", req.event.Seq,
-				"type", req.event.Type,
+				"session_id", req.sessionID(),
+				"kind", kindOf(req),
 				"err", err,
 			)
+			batchErr = err
+			break
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		c.log.Error("eventstore: batch commit", "err", err)
+	if batchErr == nil {
+		if err := tx.Commit(); err != nil {
+			c.log.Error("eventstore: batch commit", "err", err)
+		}
+		done = true
 	}
 }
 
@@ -260,14 +486,10 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 // Flushes immediately when accumulated content exceeds deltaFlushSize.
 func (c *Collector) CaptureDeltaString(sessionID string, seq int64, content string) {
 	c.accumMu.Lock()
-	if c.accum == nil {
+	acc := c.getOrCreateAccum(sessionID)
+	if acc == nil {
 		c.accumMu.Unlock()
 		return
-	}
-	acc := c.accum[sessionID]
-	if acc == nil {
-		acc = newDeltaAccumulator()
-		c.accum[sessionID] = acc
 	}
 	acc.appendRaw(seq, content)
 
@@ -280,15 +502,17 @@ func (c *Collector) CaptureDeltaString(sessionID string, seq int64, content stri
 	c.accumMu.Unlock()
 }
 
-// ResetSession discards any accumulated delta content for the given session.
+// ResetSession discards any accumulated delta and reasoning content for the given session.
 func (c *Collector) ResetSession(sessionID string) {
 	c.accumMu.Lock()
 	delete(c.accum, sessionID)
+	delete(c.reasoningAccum, sessionID)
 	c.accumMu.Unlock()
 }
 
-// deltaAccumulator merges message.delta content in-memory.
+// deltaAccumulator merges streaming content (message.delta or reasoning) in-memory.
 type deltaAccumulator struct {
+	eventType   events.Kind
 	content     strings.Builder
 	seq         int64
 	firstSeq    int64
@@ -297,17 +521,19 @@ type deltaAccumulator struct {
 	firstSeenAt time.Time
 }
 
-func newDeltaAccumulator() *deltaAccumulator {
-	return &deltaAccumulator{}
+func newDeltaAccumulator(eventType events.Kind) *deltaAccumulator {
+	return &deltaAccumulator{eventType: eventType}
 }
 
-func (a *deltaAccumulator) append(seq int64, data json.RawMessage) {
+func (a *deltaAccumulator) append(seq int64, data json.RawMessage) error {
 	var delta struct {
 		Content string `json:"content"`
 	}
-	_ = json.Unmarshal(data, &delta)
-
+	if err := json.Unmarshal(data, &delta); err != nil {
+		return fmt.Errorf("unmarshal delta content: %w", err)
+	}
 	a.appendRaw(seq, delta.Content)
+	return nil
 }
 
 func (a *deltaAccumulator) appendRaw(seq int64, content string) {
@@ -324,13 +550,13 @@ func (a *deltaAccumulator) appendRaw(seq int64, content string) {
 func (a *deltaAccumulator) toRequest(sessionID string) *captureRequest {
 	mergedData, _ := json.Marshal(map[string]any{
 		"content":      a.content.String(),
-		"merged_count": a.lastSeq - a.firstSeq + 1,
+		"merged_count": a.count,
 		"seq_range":    []int64{a.firstSeq, a.lastSeq},
 	})
 	return &captureRequest{event: &StoredEvent{
 		SessionID: sessionID,
 		Seq:       a.seq,
-		Type:      string(events.Message),
+		Type:      string(a.eventType),
 		Data:      mergedData,
 		Direction: "outbound",
 		Source:    SourceNormal,

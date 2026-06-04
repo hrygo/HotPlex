@@ -33,7 +33,7 @@ type Client struct {
 	// config from options
 	url             string
 	workerType      string
-	authToken       string
+	botID           string
 	apiKey          string
 	clientSessionID string
 
@@ -118,6 +118,37 @@ func (e Event) AsReasoningData() (ReasoningData, bool) { return events.DecodeAs[
 // AsStepData parses event data as StepData.
 func (e Event) AsStepData() (StepData, bool) { return events.DecodeAs[StepData](e.Data) }
 
+// AsContextUsageData parses event data as ContextUsageData.
+func (e Event) AsContextUsageData() (ContextUsageData, bool) {
+	return events.DecodeAs[ContextUsageData](e.Data)
+}
+
+// AsSkillsListData parses event data as SkillsListData.
+func (e Event) AsSkillsListData() (SkillsListData, bool) {
+	return events.DecodeAs[SkillsListData](e.Data)
+}
+
+// AsMCPStatusData parses event data as MCPStatusData.
+func (e Event) AsMCPStatusData() (MCPStatusData, bool) { return events.DecodeAs[MCPStatusData](e.Data) }
+
+// AsWorkerCommandData parses event data as WorkerCommandData.
+func (e Event) AsWorkerCommandData() (WorkerCommandData, bool) {
+	return events.DecodeAs[WorkerCommandData](e.Data)
+}
+
+// AsToolUpdateData parses event data as ToolUpdateData.
+func (e Event) AsToolUpdateData() (ToolUpdateData, bool) {
+	return events.DecodeAs[ToolUpdateData](e.Data)
+}
+
+// AsPlanData parses event data as PlanData.
+func (e Event) AsPlanData() (PlanData, bool) { return events.DecodeAs[PlanData](e.Data) }
+
+// AsModeUpdateData parses event data as ModeUpdateData.
+func (e Event) AsModeUpdateData() (ModeUpdateData, bool) {
+	return events.DecodeAs[ModeUpdateData](e.Data)
+}
+
 // AsToolResultData parses event data as ToolResultData.
 func (e Event) AsToolResultData() (ToolResultData, bool) {
 	return events.DecodeAs[ToolResultData](e.Data)
@@ -193,8 +224,8 @@ func (c *Client) Resume(ctx context.Context, sessionID string) (*InitAckData, er
 
 func (c *Client) doConnect(ctx context.Context, sessionID string, isResume bool) (*InitAckData, error) {
 	hdr := http.Header{}
-	if c.authToken != "" {
-		hdr.Set("Authorization", "Bearer "+c.authToken)
+	if c.botID != "" {
+		hdr.Set("X-Bot-ID", c.botID)
 	}
 	if c.apiKey != "" {
 		hdr.Set("X-API-Key", c.apiKey)
@@ -226,8 +257,8 @@ func (c *Client) doConnect(ctx context.Context, sessionID string, isResume bool)
 	if c.metadata != nil {
 		initData["config"] = map[string]any{"metadata": c.metadata}
 	}
-	if c.authToken != "" {
-		initData["auth"] = map[string]any{"token": c.authToken}
+	if c.botID != "" {
+		initData["auth"] = map[string]any{"bot_id": c.botID}
 	}
 	if c.clientSessionID != "" || isResume {
 		initData["session_id"] = sessionID

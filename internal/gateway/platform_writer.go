@@ -78,6 +78,29 @@ func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) 
 	return e
 }
 
+// RouteWrite writes an envelope through the Hub routing path.
+// pcEntry already handles droppable semantics in WriteCtx, so this delegates directly.
+func (e *pcEntry) RouteWrite(ctx context.Context, env *events.Envelope) error {
+	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
+	return e.WriteCtx(ctx, env)
+}
+
+// RouteWriteData decodes pre-encoded bytes and delegates to RouteWrite.
+// pcEntry internally works with envelopes (not raw bytes), so it cannot
+// benefit from the pre-encoding optimization. This fallback ensures
+// pcEntry satisfies the SessionWriter interface.
+func (e *pcEntry) RouteWriteData(data []byte, eventType events.Kind) error {
+	env, err := aep.DecodeLine(data)
+	if err != nil {
+		return err
+	}
+	return e.RouteWrite(context.Background(), env)
+}
+
+// PreferEnvelope returns true: pcEntry needs the original envelope to preserve
+// json:"-" fields (e.g. OwnerID) that EncodeJSON omits from pre-encoded bytes.
+func (e *pcEntry) PreferEnvelope() bool { return true }
+
 func (e *pcEntry) WriteCtx(_ context.Context, env *events.Envelope) error {
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {

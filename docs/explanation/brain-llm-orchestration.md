@@ -2,8 +2,6 @@
 title: Brain/LLM 编排层
 weight: 4
 description: HotPlex Brain 智能中间件：意图路由、安全审计、上下文压缩、4 层 API Key 发现与装饰器链
-persona: developer
-difficulty: advanced
 ---
 
 # Brain/LLM 编排层
@@ -177,7 +175,6 @@ AI 分析（`deepInputAnalysis`）用于检测正则无法捕获的变体攻击�
 - API Keys（`api_key=xxx`）
 - AWS Access Keys（`AKIA...`）
 - Private Keys（`-----BEGIN RSA PRIVATE KEY-----`）
-- JWT Tokens（`eyJ...`）
 - 内网 IP 地址（`10.x`、`172.16-31.x`、`192.168.x`）
 - 数据库连接字符串（`postgres://user:pass@host`）
 - 密码（`password=xxx`）

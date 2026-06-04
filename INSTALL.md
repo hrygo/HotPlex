@@ -176,8 +176,8 @@ hotplex onboard
 
 | Variable | Purpose | Generate |
 |----------|---------|----------|
-| `HOTPLEX_JWT_SECRET` | ES256 JWT signing key | `openssl rand -base64 32` |
 | `HOTPLEX_ADMIN_TOKEN_1` | Admin API bearer token | `openssl rand -base64 32` |
+| `HOTPLEX_SECURITY_API_KEY_1` | Client auth key | `openssl rand -base64 32` |
 
 ### Config File
 
@@ -240,7 +240,7 @@ hotplex gateway status      # check running
 curl http://localhost:9999/admin/health
 
 # 5. WebSocket endpoint
-# ws://localhost:8888 (needs API key or JWT)
+# ws://localhost:8888 (needs API key)
 ```
 
 ## Next Steps
@@ -292,7 +292,7 @@ gh repo star hrygo/hotplex
 | `Checksum mismatch` | Corrupted download | Re-run install; if persists, report issue |
 | `GitHub API rate limit` | Too many unauth API calls | Use `--release <tag>` instead of `--latest` |
 | Permission denied on `/usr/local` | Non-root user writing to system dir | Use `sudo` or `--prefix ~/.local` |
-| `hotplex` runs but won't start gateway | Missing secrets | Run `hotplex onboard` or set `HOTPLEX_JWT_SECRET` |
+| `hotplex` runs but won't start gateway | Missing secrets | Run `hotplex onboard` or set `HOTPLEX_ADMIN_TOKEN_1` |
 | Port 8888/9999 in use | Another process bound | Change `gateway.addr` / `admin.addr` in config |
 | Windows: PATH not updated | Terminal not refreshed | Open new PowerShell/CMD window |
 

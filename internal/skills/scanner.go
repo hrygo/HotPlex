@@ -18,14 +18,32 @@ type skillFrontmatter struct {
 // scanDirs scans all skill directories and returns deduplicated skills.
 // Order: global dirs first, then project dirs (project overrides global by name).
 func scanDirs(homeDir, workDir string) []Skill {
-	dirs := []struct {
-		path   string
-		source string
-	}{
-		{filepath.Join(homeDir, ".claude", "skills"), SourceGlobal},
-		{filepath.Join(homeDir, ".agents", "skills"), SourceGlobal},
-		{filepath.Join(workDir, ".claude", "skills"), SourceProject},
-		{filepath.Join(workDir, ".agents", "skills"), SourceProject},
+	type dirEntry struct {
+		path, source string
+	}
+
+	dirs := make([]dirEntry, 0, 7)
+
+	// Global skill dirs require a valid home directory
+	if homeDir != "" {
+		dirs = append(dirs,
+			dirEntry{filepath.Join(homeDir, ".claude", "skills"), SourceGlobal},
+			dirEntry{filepath.Join(homeDir, ".agents", "skills"), SourceGlobal},
+			dirEntry{filepath.Join(homeDir, ".hotplex", "skills"), SourceGlobal},
+		)
+	}
+
+	dirs = append(dirs,
+		dirEntry{filepath.Join(workDir, ".claude", "skills"), SourceProject},
+		dirEntry{filepath.Join(workDir, ".agents", "skills"), SourceProject},
+	)
+
+	// Also check current working dir (hotplex repo root) if distinct from workDir
+	if cwd, _ := os.Getwd(); cwd != "" && cwd != workDir {
+		dirs = append(dirs,
+			dirEntry{filepath.Join(cwd, ".claude", "skills"), SourceProject},
+			dirEntry{filepath.Join(cwd, ".agents", "skills"), SourceProject},
+		)
 	}
 
 	// Also check current working dir (hotplex repo root) if distinct from workDir

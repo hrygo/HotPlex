@@ -38,7 +38,7 @@ type SessionConn interface {
 
 // Capabilities describes what a worker adapter supports.
 type Capabilities interface {
-	// Type returns the worker type identifier (e.g. "claude_code", "opencode_server").
+	// Type returns the worker type identifier (e.g. "claude_code", "opencode_server", "codex_cli", "acp").
 	Type() WorkerType
 
 	// SupportsResume returns true if the worker can resume a previous session.
@@ -72,7 +72,8 @@ type WorkerType string
 const (
 	TypeClaudeCode  WorkerType = "claude_code"
 	TypeOpenCodeSrv WorkerType = "opencode_server"
-	TypeACPX        WorkerType = "acpx"
+	TypeCodexCLI    WorkerType = "codex_cli"
+	TypeACP         WorkerType = "acp"
 	TypeUnknown     WorkerType = "unknown"
 )
 
@@ -132,6 +133,11 @@ type WorkerHealth struct {
 	Healthy   bool       `json:"healthy"`
 	Uptime    string     `json:"uptime"`
 	Error     string     `json:"error,omitempty"`
+
+	// Agent discovery fields (populated by ACP and similar workers).
+	AgentName       string `json:"agent_name,omitempty"`
+	AgentVersion    string `json:"agent_version,omitempty"`
+	ProtocolVersion int    `json:"protocol_version,omitempty"`
 }
 
 // InputRecoverer is an optional interface for session connections that cache
@@ -205,6 +211,12 @@ type SessionInfo struct {
 	PermissionMode string
 	// SkipPermissions bypasses all permission checks (equivalent to --dangerously-skip-permissions).
 	SkipPermissions bool
+	// Sandbox controls the codex CLI sandbox mode ("read-only", "workspace-write", "danger-full-access").
+	// Empty = use config default. Per-bot override propagated from messaging config.
+	Sandbox string
+	// ACPCommand overrides the global ACP agent binary for this session.
+	// Empty = use worker.acp.command config. Per-bot override propagated via platformKey.
+	ACPCommand string
 	// ContinueSession resumes the latest session in the current directory without a session ID.
 	ContinueSession bool
 	// ForkSession, when resuming, creates a new session ID instead of reusing the existing one.
@@ -212,6 +224,9 @@ type SessionInfo struct {
 	// ResumeSessionAt restores the session up to and including the specified
 	// assistant message ID, discarding later history (--resume-session-at).
 	ResumeSessionAt string
+	// ResumeSessionID is the worker-internal session ID for resuming a previous session.
+	// For one-shot workers (e.g. Codex CLI), this carries the thread ID for resume --last.
+	ResumeSessionID string
 	// MaxTurns limits the number of agentic turns in non-interactive mode.
 	MaxTurns int
 	// Bare runs Claude Code in minimal mode, skipping hooks, LSP, and plugin sync.
@@ -228,4 +243,27 @@ type SessionInfo struct {
 	// IncludePartialMessages exposes partial message blocks as they arrive
 	// (--include-partial-messages).
 	IncludePartialMessages bool
+	// Images carries image file paths for codex exec --image flags.
+	// NOTE: Currently populated only in exec-mode buildArgs() which reads
+	// from SessionInfo directly. Per-session injection through gateway/bridge
+	// is not yet wired. Reserved for future per-session image support.
+	Images []string
 }
+
+// SandboxPlatformKey is the platformKey map key used to propagate sandbox config
+// from bridge/executor through session persistence to the worker.
+const SandboxPlatformKey = "_sandbox"
+
+// ACPCommandPlatformKey is the platformKey map key used to propagate per-bot
+// ACP command override from messaging bridge through session persistence to the ACP worker.
+const ACPCommandPlatformKey = "_acp_command"
+
+// ForkSessionPlatformKey is the platformKey map key used to signal that a session
+// should be forked from an existing session instead of resumed or created fresh.
+// Expected value: "true" (string, checked via == "true" in bridge).
+const ForkSessionPlatformKey = "_fork_session"
+
+// JSONSchemaPlatformKey is the platformKey map key used to inject a JSON Schema
+// for structured output into the first prompt of a session.
+// Expected value: raw JSON Schema string (e.g. '{"type":"object","properties":{...}}').
+const JSONSchemaPlatformKey = "_json_schema"

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -25,6 +27,13 @@ const (
 	ScopeAdminRead    = "admin:read"
 	ScopeAdminWrite   = "admin:write"
 )
+
+// DBExecutor covers the sql.DB methods used by apiKeyUserStore.
+type DBExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
 
 type SessionManagerProvider interface {
 	Stats() (total, max, unique int)
@@ -43,7 +52,7 @@ type HubProvider interface {
 }
 
 type BridgeProvider interface {
-	StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string) error
+	StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error
 }
 
 type ConfigProvider interface {
@@ -64,6 +73,26 @@ type DebugSessionSnapshot struct {
 	HasWorker    bool
 }
 
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// Write captures the implicit WriteHeader(200) call that occurs when handlers
+// write data without first calling WriteHeader. Without this, the underlying
+// http.response.Write() would call its own WriteHeader, bypassing our recorder.
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(b)
+}
+
 type AdminAPI struct {
 	log           *slog.Logger
 	cfg           ConfigProvider
@@ -73,11 +102,16 @@ type AdminAPI struct {
 	bridge        BridgeProvider
 	configWatcher ConfigWatcherProvider
 	cron          CronSchedulerProvider
+	botLister     BotListerProvider
+	botConfig     BotConfigProvider
 	logCollector  LogCollector
-	rateLimiter   atomic.Value // *simpleRateLimiter
-	allowedCIDRs  atomic.Value // []string
+	akStore       APIKeyUserStorer // nil when DB resolver not enabled
+	keyValidator  KeyValidator     // nil when not injected
+	rateLimiter   atomic.Value     // *simpleRateLimiter
+	allowedCIDRs  atomic.Value     // []string
 	version       func() string
 	newSessionID  func() string
+	restart       func() error
 	startedAt     time.Time
 }
 
@@ -90,9 +124,17 @@ type Deps struct {
 	Bridge        BridgeProvider
 	ConfigWatcher ConfigWatcherProvider
 	Cron          CronSchedulerProvider
+	BotLister     BotListerProvider
+	BotConfig     BotConfigProvider
 	LogCollector  LogCollector
 	Version       func() string
 	NewSessionID  func() string
+	Restart       func() error
+	DB            DBExecutor       // Optional: enables API key user CRUD + DB resolver
+	DBResolver    cacheInvalidator // Optional: invalidates DBResolver cache after CUD
+	WriteMu       *sqlutil.WriteMu // Optional: serializes SQLite writes; nil-safe, PG-safe
+	APIKeyStore   APIKeyUserStorer // Optional: pre-built store (e.g. PG); overrides DB-based creation
+	KeyValidator  KeyValidator     // Optional: syncs DB keys into auth layer for Phase 1 validation
 }
 
 func New(deps Deps) *AdminAPI {
@@ -109,10 +151,20 @@ func New(deps Deps) *AdminAPI {
 		bridge:        deps.Bridge,
 		configWatcher: deps.ConfigWatcher,
 		cron:          deps.Cron,
+		botLister:     deps.BotLister,
+		botConfig:     deps.BotConfig,
 		logCollector:  lc,
-		version:       deps.Version,
-		newSessionID:  deps.NewSessionID,
-		startedAt:     time.Now(),
+		keyValidator:  deps.KeyValidator,
+		akStore: func() APIKeyUserStorer {
+			if deps.APIKeyStore != nil {
+				return deps.APIKeyStore
+			}
+			return newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver, deps.WriteMu)
+		}(),
+		version:      deps.Version,
+		newSessionID: deps.NewSessionID,
+		restart:      deps.Restart,
+		startedAt:    time.Now(),
 	}
 	return a
 }
@@ -123,9 +175,22 @@ func (a *AdminAPI) Mux() *http.ServeMux {
 
 func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		addCORSHeaders(w)
+		start := time.Now()
+		sw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		defer func() {
+			a.log.Info("admin: request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", sw.status,
+				"duration", time.Since(start),
+				"ip", clientIP(r),
+			)
+		}()
+
+		addCORSHeaders(sw)
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
+			sw.WriteHeader(http.StatusOK)
 			return
 		}
 
@@ -137,13 +202,13 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 					"method", r.Method,
 					"stack", string(debug.Stack()),
 				)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				http.Error(sw, "internal server error", http.StatusInternalServerError)
 			}
 		}()
 
 		if rl, _ := a.rateLimiter.Load().(*simpleRateLimiter); rl != nil {
 			if !rl.Allow() {
-				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				http.Error(sw, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
 		}
@@ -152,24 +217,30 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 			addr := clientIP(r)
 			if !ipAllowed(addr, cidrs) {
 				a.log.Warn("admin: IP not whitelisted", "ip", addr)
-				http.Error(w, "IP not allowed", http.StatusForbidden)
+				http.Error(sw, "IP not allowed", http.StatusForbidden)
 				return
 			}
 		}
 
+		// Health readiness probe exempt from auth (required for k8s/Docker probes).
+		if r.URL.Path == "/admin/health/ready" {
+			next.ServeHTTP(sw, r)
+			return
+		}
+
 		token := extractBearerToken(r)
 		if token == "" {
-			http.Error(w, "missing admin token", http.StatusUnauthorized)
+			http.Error(sw, "missing admin token", http.StatusUnauthorized)
 			return
 		}
 		scopes, ok := a.validateToken(token)
 		if !ok {
-			http.Error(w, "invalid admin token", http.StatusUnauthorized)
+			http.Error(sw, "invalid admin token", http.StatusUnauthorized)
 			return
 		}
 
 		ctx := context.WithValue(r.Context(), scopeContextKey{}, scopes)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(sw, r.WithContext(ctx))
 	})
 }
 

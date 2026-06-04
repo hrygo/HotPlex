@@ -5,9 +5,6 @@ package e2e_test
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -154,7 +150,7 @@ func (w *simulatedWorker) Input(_ context.Context, content string, _ map[string]
 	if conn == nil {
 		return fmt.Errorf("worker not started")
 	}
-	go conn.emitEvents(content)
+	conn.emitEvents(content)
 	return nil
 }
 
@@ -262,8 +258,8 @@ func (m *mockStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockStore) DeleteTerminated(ctx context.Context, cutoff time.Time) error {
-	args := m.Called(ctx, cutoff)
+func (m *mockStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+	args := m.Called(ctx, cronCutoff, defaultCutoff)
 	return args.Error(0)
 }
 
@@ -290,16 +286,14 @@ func (m *mockStore) Close() error {
 // ─── Test Gateway Setup ─────────────────────────────────────────────────────
 
 type testGateway struct {
-	server   *httptest.Server
-	hub      *gateway.Hub
-	sm       *session.Manager
-	bridge   *gateway.Bridge
-	cfg      *config.Config
-	store    *mockStore
-	log      *slog.Logger
-	cancel   context.CancelFunc
-	jwtKey   *ecdsa.PrivateKey
-	jwtValid *security.JWTValidator
+	server *httptest.Server
+	hub    *gateway.Hub
+	sm     *session.Manager
+	bridge *gateway.Bridge
+	cfg    *config.Config
+	store  *mockStore
+	log    *slog.Logger
+	cancel context.CancelFunc
 }
 
 func setupTestGateway(t *testing.T) *testGateway {
@@ -318,10 +312,6 @@ func setupTestGateway(t *testing.T) *testGateway {
 	cfg.Pool.MaxIdlePerUser = 10
 	cfg.Pool.MaxMemoryPerUser = 0
 
-	// Generate ES256 key for JWT testing.
-	jwtKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	jwtValidator := security.NewJWTValidator(jwtKey, "")
-
 	store := new(mockStore)
 	store.Test(t)
 
@@ -330,7 +320,7 @@ func setupTestGateway(t *testing.T) *testGateway {
 	store.On("Close").Return(nil)
 	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string{}, nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string{}, nil)
-	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time")).Return(nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Return(nil)
 	store.On("List", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("int"), mock.AnythingOfType("int")).Return([]*session.SessionInfo{}, nil)
 	// Get falls back to store when session is not in Manager's in-memory map.
 	// Return not-found for all store lookups (Manager holds sessions in memory after Create).
@@ -341,6 +331,9 @@ func setupTestGateway(t *testing.T) *testGateway {
 
 	hub := gateway.NewHub(log, config.NewConfigStore(cfg, nil))
 
+	auth := security.NewAuthenticator(&cfg.Security)
+	handler := gateway.NewHandler(gateway.HandlerDeps{Log: log, Hub: hub, SM: sm})
+
 	sm.StateNotifier = func(ctx context.Context, sessionID string, state events.SessionState, message string) {
 		env := events.NewEnvelope(aep.NewID(), sessionID, hub.NextSeq(sessionID), events.State, events.StateData{
 			State:   state,
@@ -349,28 +342,23 @@ func setupTestGateway(t *testing.T) *testGateway {
 		_ = hub.SendToSession(ctx, env)
 	}
 
-	handler := gateway.NewHandler(gateway.HandlerDeps{Log: log, Hub: hub, SM: sm, JWTValidator: jwtValidator})
 	bridge := gateway.NewBridge(gateway.BridgeDeps{Log: log, Hub: hub, SM: sm})
 	bridge.SetWorkerFactory(testWorkerFactory{})
 
-	auth := security.NewAuthenticator(&cfg.Security, jwtValidator)
-
 	mux := http.NewServeMux()
-	mux.Handle("/ws", hub.HandleHTTP(auth, handler, bridge))
+	mux.Handle("/ws", hub.HandleHTTP(auth, handler, bridge, nil))
 
 	server := httptest.NewServer(mux)
 
 	tg := &testGateway{
-		server:   server,
-		hub:      hub,
-		sm:       sm,
-		bridge:   bridge,
-		cfg:      cfg,
-		store:    store,
-		log:      log,
-		cancel:   cancel,
-		jwtKey:   jwtKey,
-		jwtValid: jwtValidator,
+		server: server,
+		hub:    hub,
+		sm:     sm,
+		bridge: bridge,
+		cfg:    cfg,
+		store:  store,
+		log:    log,
+		cancel: cancel,
 	}
 
 	t.Cleanup(func() {
@@ -387,33 +375,12 @@ func (tg *testGateway) wsURL() string {
 	return "ws" + strings.TrimPrefix(tg.server.URL, "http") + "/ws"
 }
 
-func (tg *testGateway) generateToken(subject string, ttl time.Duration) string {
-	now := time.Now()
-	claims := jwt.MapClaims{
-		"iss":    "hotplex",
-		"sub":    subject,
-		"aud":    "gateway",
-		"exp":    now.Add(ttl).Unix(),
-		"iat":    now.Unix(),
-		"nbf":    now.Unix(),
-		"jti":    uuid.NewString(),
-		"scopes": []string{"session:write"},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	s, err := token.SignedString(tg.jwtKey)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
-
 func connectClient(t *testing.T, tg *testGateway, workerType string) *client.Client {
 	t.Helper()
-	token := tg.generateToken("test-user", 5*time.Minute)
 	c, err := client.New(context.Background(),
 		client.URL(tg.wsURL()),
 		client.WorkerType(workerType),
-		client.AuthToken(token),
+		client.BotID("test-bot"),
 		client.APIKey("test-key"),
 	)
 	require.NoError(t, err)
@@ -474,5 +441,5 @@ var allWorkerTypes = []struct {
 }{
 	{"claude_code", string(worker.TypeClaudeCode)},
 	{"opencode_server", string(worker.TypeOpenCodeSrv)},
-	{"acpx", string(worker.TypeACPX)},
+	{"acp", string(worker.TypeACP)},
 }

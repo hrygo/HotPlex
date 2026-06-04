@@ -9,8 +9,24 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/events"
 )
+
+// makeEnvelope builds an AEP input envelope for a Feishu message.
+func (a *Adapter) makeEnvelope(chatID, threadTS, userID, text, workDir string) *events.Envelope {
+	if workDir == "" {
+		workDir = a.Bridge().WorkDir()
+	}
+	return a.Bridge().MakeEnvelope(userID, text, session.PlatformContext{
+		Platform: string(messaging.PlatformFeishu),
+		BotID:    a.botOpenID,
+		ChatID:   chatID,
+		ThreadTS: threadTS,
+		UserID:   userID,
+		WorkDir:  workDir,
+	})
+}
 
 func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 	if event.Event == nil || event.Event.Message == nil {
@@ -155,7 +171,7 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 		conn.voiceTriggered.Store(true)
 	}
 
-	envelope := a.Bridge().MakeFeishuEnvelope(channelID, threadKey, userID, text, conn.WorkDir(), a.botOpenID)
+	envelope := a.makeEnvelope(channelID, threadKey, userID, text, conn.WorkDir())
 	if envelope == nil {
 		return fmt.Errorf("feishu: failed to build envelope")
 	}
@@ -169,11 +185,13 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 	if a.checkPendingInteraction(ctx, text, userID, conn) {
 		return nil // text consumed as interaction response
 	}
+	var oldTypingRid, oldPlatformMsgID string
 	conn.mu.Lock()
 	// Clean up stale reactions from previous message before switching platformMsgID.
 	if conn.platformMsgID != "" && conn.platformMsgID != platformMsgID {
 		if conn.typingRid != "" {
-			_ = a.RemoveTypingIndicator(context.Background(), conn.platformMsgID, conn.typingRid)
+			oldTypingRid = conn.typingRid
+			oldPlatformMsgID = conn.platformMsgID
 			conn.typingRid = ""
 		}
 	}
@@ -181,6 +199,10 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 	conn.platformMsgID = platformMsgID
 	conn.chatType = chatType
 	conn.mu.Unlock()
+
+	if oldTypingRid != "" {
+		_ = a.RemoveTypingIndicator(context.Background(), oldPlatformMsgID, oldTypingRid)
+	}
 
 	// Typing indicator: add reaction to user's message (non-blocking, failure is non-fatal).
 	if platformMsgID != "" {
@@ -202,7 +224,7 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 			a.Log.Debug("feishu: skipping placeholder, streaming already active")
 		} else {
 			turnNum, model, branch, workDir := conn.turnHeaderMeta()
-			ctrl := NewStreamingCardController(a.larkClient, a.rateLimiter, a.Log, a.resolveBotName(), turnNum+1, model, branch, workDir)
+			ctrl := NewStreamingCardController(a.larkClient, a.rateLimiter, a.Log, a.resolveBotName(), turnNum+1, model, branch, workDir, a.phrases)
 			conn.EnableStreaming(ctrl)
 
 			// Send placeholder card immediately — same streaming card structure as real messages.
@@ -235,7 +257,7 @@ func (a *Adapter) GetOrCreateConn(chatID, threadKey string) *FeishuConn {
 
 func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, threadKey, platformMsgID string, result *messaging.ControlCommandResult) {
 	conn := a.GetOrCreateConn(chatID, threadKey)
-	envelope := a.Bridge().MakeFeishuEnvelope(chatID, threadKey, userID, "", conn.WorkDir(), a.botOpenID)
+	envelope := a.makeEnvelope(chatID, threadKey, userID, "", conn.WorkDir())
 	if envelope == nil {
 		a.Log.Warn("feishu: text control command failed to derive session", "action", result.Label)
 		return
@@ -298,7 +320,7 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, 
 
 func (a *Adapter) handleTextWorkerCommand(ctx context.Context, chatID, chatType, userID, threadKey, platformMsgID, replyToMsgID string, result *messaging.WorkerCommandResult) {
 	conn := a.GetOrCreateConn(chatID, threadKey)
-	envelope := a.Bridge().MakeFeishuEnvelope(chatID, threadKey, userID, "", conn.WorkDir(), a.botOpenID)
+	envelope := a.makeEnvelope(chatID, threadKey, userID, "", conn.WorkDir())
 	if envelope == nil {
 		a.Log.Warn("feishu: worker command failed to derive session", "command", result.Label)
 		return

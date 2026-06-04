@@ -2,22 +2,22 @@ package dev.hotplex.example;
 
 import dev.hotplex.client.HotPlexClient;
 import dev.hotplex.protocol.*;
-import dev.hotplex.security.JwtTokenGenerator;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
  * HotPlex Gateway - Quick Start Example
- * 
+ *
  * Minimal demo showing how to connect to the gateway and send a simple task.
- * 
+ *
  * Usage:
  *   mvn compile && mvn exec:java -Dexec.mainClass="dev.hotplex.example.QuickStart"
- * 
+ *
  * Environment Variables:
  *   HOTPLEX_GATEWAY_URL - Gateway URL (default: ws://localhost:8888)
- *   HOTPLEX_SIGNING_KEY - JWT signing key (required)
+ *   HOTPLEX_API_KEY     - Gateway API key (required)
+ *   HOTPLEX_BOT_ID      - Bot ID for multi-bot isolation (optional)
  *   HOTPLEX_TASK        - Task to execute (optional)
  */
 public class QuickStart {
@@ -33,10 +33,10 @@ public class QuickStart {
         if (gatewayUrl == null || gatewayUrl.isEmpty()) {
             gatewayUrl = DEFAULT_GATEWAY_URL;
         }
-        String signingKey = System.getenv("HOTPLEX_SIGNING_KEY");
-        if (signingKey == null || signingKey.isEmpty()) {
-            System.err.println("Error: HOTPLEX_SIGNING_KEY environment variable is required");
-            System.err.println("Example: export HOTPLEX_SIGNING_KEY=your-256-bit-secret-key");
+        String apiKey = System.getenv("HOTPLEX_API_KEY");
+        if (apiKey == null || apiKey.isEmpty()) {
+            System.err.println("Error: HOTPLEX_API_KEY environment variable is required");
+            System.err.println("Example: export HOTPLEX_API_KEY=your-api-key");
             System.exit(1);
         }
         String task = System.getenv("HOTPLEX_TASK");
@@ -44,14 +44,14 @@ public class QuickStart {
             task = DEFAULT_TASK;
         }
 
-        // Create JWT token generator
-        JwtTokenGenerator tokenGenerator = new JwtTokenGenerator(signingKey, "hotplex");
+        String botId = System.getenv("HOTPLEX_BOT_ID");
 
         // Create client using builder and use try-with-resources
         try (HotPlexClient client = HotPlexClient.builder()
                 .url(gatewayUrl)
                 .workerType("claude-code")
-                .tokenGenerator(tokenGenerator)
+                .apiKey(apiKey)
+                .botId(botId)
                 .build()) {
 
             // Latch for keeping main thread alive until done
@@ -83,10 +83,9 @@ public class QuickStart {
 
             client.on("error", (ErrorData data) -> {
                 if (data != null) {
-                    System.err.println("\n❌ Error: " + data.getCode() + " - " + data.getMessage());
+                    System.err.println("\n❌ Error: " + data.getCode().getValue() + " - " + data.getMessage());
                 }
                 doneLatch.countDown();
-                System.exit(1);
             });
 
             client.on("disconnected", (String reason) -> {

@@ -1,3 +1,9 @@
+---
+title: 多 Agent 协作
+weight: 15
+description: HotPlex Worker 类型、并发 Session 与多项目工作流指南
+---
+
 # 多 Agent 协作
 
 > HotPlex 的 Worker 类型、并发 Session、多项目工作流指南
@@ -30,6 +36,32 @@ HotPlex Gateway 支持同时运行多个 AI Worker 实例，通过 Session 隔�
   - 通过 `atomic.Pointer` 实现并发安全的单例管理
   - 不支持 per-session 进程隔离
 
+### Codex CLI（`codex_cli`）
+
+- **进程模型**：双模式 — app-server（单例持久进程，默认）或 exec（每次 Turn fork 新进程）
+- **通信方式**：app-server 模式使用 HTTP API；exec 模式使用 stdio
+
+### ACP Agent（`acp`）
+
+- **进程模型**：per-session，每个 Session fork 一个 ACP Agent 子进程
+- **通信方式**：JSON-RPC 2.0 over stdio（NDJSON）
+- **生命周期**：与 Session 绑定，通过 `initialize` → `session/new` 握手创建
+- **特点**：
+  - 通用协议适配，支持任何 ACP 兼容的 AI Agent（如 Hermes Agent）
+  - 支持流式文本/推理输出、工具调用、权限请求
+  - 支持 Session 恢复（`session/load`）
+  - 模型无关：由 Agent 侧决定使用哪个 LLM
+  - 通过 `worker.acp.command` 配置 Agent 启动命令（默认 `hermes acp`）
+
+### Codex CLI (`codex_cli`)
+
+- **生命周期**：app-server 模式首次使用时启动，空闲排空后关闭；exec 模式每次执行后终止
+- **特点**：
+  - 基于 OpenAI Codex CLI，支持沙箱隔离（read-only / workspace-write / danger-full-access）
+  - 三种审批模式：`never`（全自动）、`on-request`（高风险操作）、`untrusted`（全部审批）
+  - 临时会话（`ephemeral`）模式，Session 结束后数据清除
+  - 适合需要 OpenAI 模型（GPT-4o、o3 等）的场景
+
 ### 如何选择
 
 | 场景 | 推荐 Worker | 原因 |
@@ -39,6 +71,8 @@ HotPlex Gateway 支持同时运行多个 AI Worker 实例，通过 Session 隔�
 | 快速问答 | `opencode_server` | 轻量、响应快 |
 | 大量并发用户 | `opencode_server` | 单进程共享，资源开销小 |
 | 需要 MCP server | `claude_code` | 完整的 MCP 支持 |
+| OpenAI 模型场景 | `codex_cli` | 原生支持 GPT-4o、o3 等 OpenAI 模型 |
+| 第三方 ACP Agent | `acp` | JSON-RPC 2.0 over stdio，支持任何 ACP 兼容 Agent（如 Hermes） |
 
 ## Hot-Multiplexing
 

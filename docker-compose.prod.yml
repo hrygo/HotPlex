@@ -1,25 +1,22 @@
 # HotPlex Worker Gateway - Production Docker Compose Override
 #
 # Usage:
-#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-
-version: '3.8'
+# With PostgreSQL:
+#   docker compose -f docker-compose.yml -f docker-compose.pg.yml -f docker-compose.prod.yml up -d
+#
 
 services:
   gateway:
     # Production overrides
     environment:
       - HOTPLEX_LOG_LEVEL=warn
-      - GIN_MODE=release
-      - GOMEMLIMIT=6500MiB
+      - GOMEMLIMIT=4096MiB
 
-    # SQLite High Availability Note:
-    # Standard SQLite on shared volumes (NFS/EFS) is NOT recommended for multiple writers.
-    # If using SQLite, keep replicas: 1. If HA is required, migrate to Postgres.
     deploy:
       mode: replicated
-      replicas: 1 
+      replicas: 1
       resources:
         limits:
           cpus: '4'
@@ -40,7 +37,7 @@ services:
       - "traefik.http.routers.hotplex-gateway.entrypoints=websecure"
       - "traefik.http.routers.hotplex-gateway.tls.certresolver=letsencrypt"
       - "traefik.http.services.hotplex-gateway.loadbalancer.server.port=8888"
-      
+
       # Admin API (protected by token, but we can add IP whitelist here if needed)
       - "traefik.http.routers.hotplex-admin.rule=Host(`${HOTPLEX_ADMIN_DOMAIN:-admin.hotplex.dev}`)"
       - "traefik.http.routers.hotplex-admin.entrypoints=websecure"
@@ -51,20 +48,20 @@ services:
       - traefik-network
       - hotplex-network
 
-  # Traefik reverse proxy
+  # Traefik reverse proxy (v3 — v2.10 is EOL)
   traefik:
-    image: traefik:v2.10
+    image: traefik:v3
     container_name: hotplex-traefik
     restart: unless-stopped
     command:
-      - "--api.dashboard=false" # Disable dashboard in prod or protect it
+      - "--api.dashboard=false"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-network"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      # Auto redirect HTTP to HTTPS
-      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
       - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@hotplex.dev}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
@@ -77,8 +74,9 @@ services:
     networks:
       - traefik-network
 
-  # Prometheus and Grafana are handled via profiles in base compose.
-  # In prod, you might want to use an external monitoring solution.
+  # Do not expose PostgreSQL port in production
+  postgres:
+    ports: !override []
 
 networks:
   traefik-network:

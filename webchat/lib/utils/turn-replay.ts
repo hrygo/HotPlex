@@ -15,10 +15,12 @@ export type { HotPlexMessage };
 
 // -- Types --
 
-/** Matches the backend ConversationRecord JSON shape from GET /api/sessions/{id}/history */
+/** Matches the backend TurnRecord JSON shape from GET /api/sessions/{id}/history */
 export interface ConversationTurn {
-  id: string;
+  id: number;
   session_id: string;
+  generation: number;
+  turn_num: number;
   seq: number;
   role: string; // 'user' | 'assistant'
   content: string;
@@ -30,11 +32,13 @@ export interface ConversationTurn {
   tools: Record<string, number> | null; // e.g. {"Read": 2, "Edit": 1}
   tool_call_count: number;
   tokens_in: number;
+  tokens_input: number;
+  tokens_cache_write: number;
+  tokens_cache_read: number;
   tokens_out: number;
   duration_ms: number;
   cost_usd: number;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
+  created_at: number;
 }
 
 /** History messages only contain text + tool-summary parts */
@@ -72,7 +76,7 @@ export function conversationTurnsToMessages(turns: ConversationTurn[]): HistoryM
 
     const createdAt = new Date(turn.created_at);
     return {
-      // Use role-suffixed ID to prevent session_id:seq collision between user
+      // Use role-suffixed ID to prevent collision between user
       // and assistant turns from the same session (#331).
       id: `turn:${turn.id}:${turn.role}`,
       role: turn.role as 'user' | 'assistant',

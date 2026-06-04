@@ -1,5 +1,10 @@
 package cron
 
+import (
+	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/worker"
+)
+
 // Schedule kinds.
 type ScheduleKind string
 
@@ -56,6 +61,32 @@ type CronJobState struct {
 	RetryCount      int       `json:"retry_count,omitempty"`
 	LastRunID       string    `json:"last_run_id,omitempty"`
 	RunCount        int       `json:"run_count,omitempty"`
+}
+
+// SessionKey derives the deterministic session key for this cron job's execution history.
+//
+// Migration note (v1.22): Prior to this version, SessionKey always used
+// TypeClaudeCode as the worker type regardless of Payload.WorkerType. After
+// upgrade, cron jobs with non-claudecode worker_type values will derive
+// different session keys, orphaning historical session data under the old
+// keys. Affected sessions remain in the store but are no longer reachable
+// via SessionKey(). This is a correctness fix — the old behavior silently
+// misattributed codexcli/acp sessions to claudecode's session space.
+func (j *CronJob) SessionKey() string {
+	wt := worker.WorkerType(j.Payload.WorkerType)
+	if wt == "" {
+		wt = worker.TypeClaudeCode
+	}
+	return session.DerivePlatformSessionKey(
+		j.OwnerID, wt,
+		session.PlatformContext{
+			Platform: "cron",
+			BotID:    j.BotID,
+			UserID:   j.OwnerID,
+			WorkDir:  j.WorkDir,
+			ChatID:   j.ID,
+		},
+	)
 }
 
 // Clone returns a deep copy of the job, including reference-type fields

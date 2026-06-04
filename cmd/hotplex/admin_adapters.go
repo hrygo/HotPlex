@@ -8,6 +8,7 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/gateway"
+	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -82,7 +83,7 @@ func (a *hubAdapter) NextSeqPeek(sessionID string) int64 {
 }
 
 type turnsStoreAdapter struct {
-	es *eventstore.SQLiteStore
+	es eventstore.TurnQuerier
 }
 
 func (a *turnsStoreAdapter) TurnStats(ctx context.Context, sessionID string) (*eventstore.TurnStats, error) {
@@ -93,8 +94,8 @@ type bridgeAdapter struct {
 	bridge *gateway.Bridge
 }
 
-func (a *bridgeAdapter) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title string) error {
-	return a.bridge.StartSession(ctx, id, userID, botID, wt, allowedTools, workDir, platform, platformKey, title)
+func (a *bridgeAdapter) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error {
+	return a.bridge.StartSession(ctx, id, userID, botID, wt, allowedTools, workDir, platform, platformKey, title, clientKey, injectExclude...)
 }
 
 type configAdapter struct {
@@ -114,4 +115,45 @@ func (a *configWatcherAdapter) Rollback(version int) (*config.Config, int, error
 		return nil, -1, errors.New("config watcher is nil")
 	}
 	return a.watcher.Rollback(version)
+}
+
+type botListerAdapter struct {
+	registry *messaging.BotRegistry
+}
+
+func toAdminBotEntry(e *messaging.BotEntry) admin.BotEntry {
+	botID := e.BotID
+	if botID == "" {
+		// Fallback when platform BotID is not yet available (adapter not started).
+		// Use platform:name to guarantee uniqueness across platforms.
+		// NOTE: assumes bot Name does not contain colons — safe for Slack/Feishu
+		// auto-generated names ("default") and all known platform bot name formats.
+		botID = string(e.Platform) + ":" + e.Name
+	}
+	return admin.BotEntry{
+		Name:        e.Name,
+		Platform:    string(e.Platform),
+		BotID:       botID,
+		Status:      string(e.Status),
+		ConnectedAt: e.ConnectedAt.Format("2006-01-02T15:04:05Z"),
+		WorkerType:  e.WorkerType,
+	}
+}
+
+func (a *botListerAdapter) ListBots() []admin.BotEntry {
+	entries := a.registry.ListAll()
+	result := make([]admin.BotEntry, len(entries))
+	for i, e := range entries {
+		result[i] = toAdminBotEntry(e)
+	}
+	return result
+}
+
+func (a *botListerAdapter) GetBot(name string) (*admin.BotEntry, bool) {
+	e, ok := a.registry.GetByName(name)
+	if !ok {
+		return nil, false
+	}
+	entry := toAdminBotEntry(e)
+	return &entry, true
 }

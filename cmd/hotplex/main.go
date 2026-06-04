@@ -7,12 +7,13 @@ import (
 	"github.com/spf13/cobra"
 
 	_ "github.com/hrygo/hotplex/internal/worker/claudecode"
+	_ "github.com/hrygo/hotplex/internal/worker/codexcli"
 	_ "github.com/hrygo/hotplex/internal/worker/opencodeserver"
 	"github.com/hrygo/hotplex/pkg/aep"
 )
 
 var (
-	version   = "v1.12.0"
+	version   = "v1.24.4"
 	buildTime = "unknown"
 )
 
@@ -48,6 +49,7 @@ Quick start:
 		newConfigCmd(),
 		newStatusCmd(),
 		newServiceCmd(),
+		newInstallCmd(),
 		newUpdateCmd(),
 		newSlackCmd(),
 		newCronCmd(),

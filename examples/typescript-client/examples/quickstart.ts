@@ -1,38 +1,40 @@
 /**
  * HotPlex Gateway - Quick Start Example
- * 
+ *
  * Minimal demo showing how to connect to the gateway and send a simple task.
- * 
+ *
  * Usage:
  *   npx tsx examples/quickstart.ts
- * 
+ *
  * Prerequisites:
  *   - HotPlex Gateway running at ws://localhost:8888/ws
  *   - Claude Code CLI installed and accessible
  */
 
 import { HotPlexClient, WorkerType } from '../src/index.js';
-import { generateTestToken } from '../scripts/generate-test-token.js';
+
+// ── Configuration ────────────────────────────────────────────────────────
+
+const GATEWAY_URL = 'ws://localhost:8888/ws';
+const API_KEY = process.env.HOTPLEX_API_KEY || 'dev-api-key';
+
+// ── Main ─────────────────────────────────────────────────────────────────
 
 async function main() {
   console.log('🚀 HotPlex Gateway - Quick Start\n');
 
-  const token = await generateTestToken();
-  
-  // Create client connecting to local gateway
   const client = new HotPlexClient({
-    url: 'ws://localhost:8888/ws',
+    url: GATEWAY_URL,
     workerType: WorkerType.ClaudeCode,
-    apiKey: 'dev-api-key',
-    authToken: token,
+    apiKey: API_KEY,
   });
 
-  // Handle streaming output
+  // ── Event handlers ──────────────────────────────────────────────────
+
   client.on('delta', (data) => {
     process.stdout.write(data.content);
   });
 
-  // Handle completion
   client.on('done', (data) => {
     console.log('\n\n✅ Task completed:', data.success);
     if (data.stats) {
@@ -43,25 +45,37 @@ async function main() {
     client.disconnect();
   });
 
-  // Handle errors
   client.on('error', (data) => {
     console.error('\n❌ Error:', data.code, '-', data.message);
     client.disconnect();
     process.exit(1);
   });
 
+  // ── Graceful shutdown ───────────────────────────────────────────────
+
+  const shutdown = () => {
+    console.log('\n\nInterrupted. Disconnecting...');
+    client.disconnect();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
+  // ── Connect and run ─────────────────────────────────────────────────
+
   try {
-    // Connect (creates new session)
     console.log('Connecting to gateway...');
     const ack = await client.connect();
     console.log(`Connected! Session: ${ack.session_id}\n`);
-    console.log('Sending task to Claude Code...\n');
+    console.log('Sending task...\n');
 
-    // Send a simple task and wait for it to complete
-    await client.sendInputAsync('Write a hello world program in Go that prints "Hello, World!" to stdout.');
+    // sendInputAsync sends the input and returns a Promise that resolves
+    // when the 'done' event arrives (or rejects on 'error').
+    await client.sendInputAsync(
+      'Write a hello world program in Go that prints "Hello, World!" to stdout.',
+    );
 
     console.log('\nAll done!');
-
   } catch (err) {
     console.error('Task failed:', err instanceof Error ? err.message : err);
     client.disconnect();

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
 
 interface Command {
   key: string;
@@ -26,45 +26,47 @@ interface CommandMenuProps {
   onSelect: (value: string) => void;
   isOpen: boolean;
   onClose: () => void;
-  skills?: string[];
+  skills?: SkillEntry[];
 }
 
 export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: CommandMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  const scrollToSelected = useCallback(() => {
+    selectedRef.current?.scrollIntoView({ block: "nearest" });
+  }, []);
 
   const allCommands: Command[] = useMemo(() => [
     ...SLASH_COMMANDS,
-    ...(skills ?? []).map(name => ({
-      key: name,
-      label: name,
-      description: `${name} skill`,
+    ...(skills ?? []).map(s => ({
+      key: `/${s.name}`,
+      label: `/${s.name}`,
+      description: s.description || `${s.name} skill`,
       type: "skill" as const,
     })),
   ], [skills]);
 
-  // Filter commands based on input value
-  // If starts with /, filter only slash commands. Otherwise filter skills.
+  // Filter commands — "/" mode shows both slash commands and skills
   const isSlash = inputValue.startsWith("/");
   const filterText = isSlash ? inputValue.slice(1).toLowerCase() : inputValue.toLowerCase();
 
   const filtered = allCommands.filter(cmd => {
-    if (isSlash) {
-      if (cmd.type !== "slash") return false;
-      if (!filterText) return true; // Show all slash commands if only '/' is typed
-      return cmd.key.toLowerCase().includes(filterText) ||
-             cmd.description.toLowerCase().includes(filterText);
+    if (!isSlash) {
+      if (cmd.type !== "skill") return false;
+      if (!filterText) return false;
     }
-
-    // Skill filtering
-    if (!inputValue) return false;
-    if (cmd.type !== "skill") return false;
+    if (!filterText) return true;
     return cmd.key.toLowerCase().includes(filterText) ||
            cmd.description.toLowerCase().includes(filterText);
-  }).slice(0, 8);
+  });
+  // NOTE: No .slice() limit — container has max-h-[320px] + overflow-y-auto
+  // and scrollIntoView handles keyboard navigation. A hard cap hides skills.
 
   useEffect(() => {
     setSelectedIndex(0);
-  }, [inputValue]);
+    scrollToSelected();
+  }, [inputValue, scrollToSelected]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -73,9 +75,11 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex(prev => (prev + 1) % filtered.length);
+        requestAnimationFrame(scrollToSelected);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setSelectedIndex(prev => (prev - 1 + filtered.length) % filtered.length);
+        requestAnimationFrame(scrollToSelected);
       } else if (e.key === "Enter" && filtered.length > 0) {
         e.preventDefault();
         onSelect(filtered[selectedIndex].key);
@@ -104,6 +108,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
         {filtered.map((cmd, i) => (
           <button
             key={cmd.key}
+            ref={i === selectedIndex ? selectedRef : undefined}
             className={`w-full px-4 py-3 text-left flex flex-col gap-0.5 transition-all ${
               i === selectedIndex
                 ? "bg-[var(--bg-hover)] translate-x-1"

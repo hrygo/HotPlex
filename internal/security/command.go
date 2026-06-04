@@ -15,6 +15,7 @@ var (
 	allowedCommands = map[string]bool{
 		"claude":   true,
 		"opencode": true,
+		"codex":    true,
 	}
 )
 

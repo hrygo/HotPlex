@@ -1,9 +1,7 @@
 ---
 title: "安全策略参考"
 weight: 9
-description: "JWT、SSRF、命令白名单、Tool 控制、API Key 等安全配置完整参考"
-persona: "developer"
-difficulty: "advanced"
+description: "API Key、SSRF、命令白名单、Tool 控制等安全配置完整参考"
 ---
 
 # 安全策略参考
@@ -14,81 +12,9 @@ difficulty: "advanced"
 
 HotPlex Gateway 的安全策略分布在多个配置层：环境变量、`config.yaml`、SQLite 持久化配置。本文档按安全域组织所有配置项。
 
-## JWT 配置
+## API Key 认证
 
-### 环境变量
-
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `HOTPLEX_JWT_SECRET` | 是 | JWT 签名密钥。使用 `openssl rand -base64 32` 生成 |
-
-### 签名算法
-
-ES256（ECDSA P-256）是唯一允许的签名算法。源码实现位于 `internal/security/jwt.go`：
-
-```go
-// 拒绝所有非 ES256 的签名方法
-switch token.Method.Alg() {
-case "ES256":
-    // 唯一允许的算法
-default:
-    return nil, fmt.Errorf("rejected signing method: %v", token.Header["alg"])
-}
-```
-
-### Claims 结构
-
-| 字段 | JSON Key | 类型 | 说明 |
-|------|----------|------|------|
-| Issuer | `iss` | string | 固定值 `hotplex` |
-| Subject | `sub` | string | 用户 ID |
-| Audience | `aud` | string | 受众（可配置校验） |
-| ExpiresAt | `exp` | timestamp | 过期时间 |
-| IssuedAt | `iat` | timestamp | 签发时间 |
-| NotBefore | `nbf` | timestamp | 生效时间 |
-| ID | `jti` | string | 唯一 ID（UUID v4），用于撤销检测 |
-| UserID | `user_id` | string | 用户标识 |
-| Scopes | `scopes` | []string | 权限范围 |
-| Role | `role` | string | 角色 |
-| BotID | `bot_id` | string | Bot 标识 |
-| SessionID | `session_id` | string | Session 标识 |
-
-### 密钥派生（HKDF）
-
-当配置为 `[]byte`（原始密钥）时，通过 HKDF (RFC 5869) 从字节派生 ECDSA P-256 密钥。info 参数 `"hotplex-ecdsa-p256"` 将派生密钥绑定到特定上下文，防止跨协议密钥复用：
-
-```go
-func deriveECDSAP256Key(secret []byte) *ecdsa.PrivateKey {
-    // HKDF-SHA256 extract-then-expand
-    scalarBytes, _ := hkdf.Key(sha256.New, secret, nil, "hotplex-ecdsa-p256", 32)
-    s := new(big.Int).SetBytes(scalarBytes)
-    N := elliptic.P256().Params().N
-    s.Mod(s, new(big.Int).Sub(N, big.NewInt(1)))
-    s.Add(s, big.NewInt(1))         // scalar ∈ [1, N-1]
-    x, y := elliptic.P256().ScalarBaseMult(s.Bytes())
-    return &ecdsa.PrivateKey{...}
-}
-```
-
-> **升级注意**：v1.11.3 从 `copy(secret)` 直接截断改为 HKDF。同一个 `HOTPLEX_JWT_SECRET` 会派生出不同的 ECDSA 密钥对，所有旧 token 在升级后立即失效。Go Client SDK 已同步更新。
-
-### JTI 黑名单
-
-| 参数 | 值 | 说明 |
-|------|------|------|
-| 存储 | `sync.Map` | 并发安全 |
-| 清理间隔 | 60s | 后台 goroutine |
-| TTL | Token TTL × 2 | 默认为 Token 过期时间的 2 倍 |
-
-### Token 生命周期
-
-| 类型 | 推荐 TTL |
-|------|---------|
-| Access Token | 5 分钟 |
-| Gateway Token | 1 小时 |
-| Refresh Token | 7 天 |
-
-## API Key 配置
+API Key 通过 `HOTPLEX_SECURITY_API_KEY_1..N` 环境变量设置。为空时进入 dev mode（允许所有请求）。
 
 ### 环境变量
 

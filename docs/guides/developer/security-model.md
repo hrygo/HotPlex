@@ -1,3 +1,9 @@
+---
+title: 开发者安全指南
+weight: 16
+description: HotPlex Gateway 安全机制配置：API Key、Bot ID、SSRF 防御、命令白名单与进程隔离
+---
+
 # 开发者安全指南
 
 > 理解和配置 HotPlex Gateway 的安全机制，确保 Agent 安全运行
@@ -7,7 +13,7 @@
 HotPlex Gateway 采用纵深防御（Defense in Depth）策略，通过七层安全机制保护系统：
 
 ```
-网络层 → JWT/API Key 认证 → SSRF 防护 → 命令白名单 → 环境隔离 → Tool 控制 → 输出限制
+网络层 → API Key + Bot ID 认证 → SSRF 防护 → 命令白名单 → 环境隔离 → Tool 控制 → 输出限制
 ```
 
 开发者需要理解每层安全机制以正确配置和使用。本文档聚焦权限请求、Tool 访问控制和安全配置最佳实践。
@@ -143,19 +149,27 @@ Cron 执行和 Session 启动时，Gateway 注入以下环境变量：
 
 开发模式下未配置 API Key 时，所有请求以 `anonymous` 身份通过。生产环境必须配置 API Key。
 
-### JWT（ES256）
+### API Key + Bot ID 认证
 
-`internal/security/jwt.go` 强制使用 ES256（ECDSA P-256）签名算法：
+`internal/security/auth.go` 提供认证机制：
 
-- 拒绝所有非 ES256 的签名方法
-- JTI 黑名单防止 Token 重放攻击
-- `bot_id` claim 实现多 Bot 隔离
+1. **API Key**：通过 `X-API-Key` Header 或 `?api_key=` Query Param 携带。`Authenticator` 在内存 `map` 中验证，支持热重载（`ReloadKeys`）。
+2. **Bot ID**：通过 `X-Bot-ID` Header 或 `bot_id` 查询参数指定 Bot 身份。每个 Bot 只能操作属于自己的 Session，**禁止跨 Bot 访问**。使用 `security.BotIDFromRequest(r)` 提取 Bot ID。
 
-### JTI 黑名单
+开发模式下未配置 API Key 时，所有请求以 `anonymous` 身份通过。生产环境必须配置 API Key。
 
-被撤销的 Token 通过内存黑名单（`jtiBlacklist`）追踪：
-- `sync.Map` 存储 `jti → expiry`
-- 后台 goroutine 每 60s 清理过期条目
+### APIKeyResolver（多用户映射）
+
+通过 `security.SetKeyResolver()` 设置自定义的 `APIKeyResolver`，可将 API Key 映射到不同的 userID，实现用户级会话隔离：
+
+```go
+security.SetKeyResolver(func(key string) (userID string, ok bool) {
+    // 自定义映射逻辑：查数据库、查配置等
+    return resolveKeyToUser(key)
+})
+```
+
+未设置 resolver 时，所有 API Key 认证的请求统一使用 `api_user` 身份。
 
 ## 安全配置最佳实践
 
@@ -185,9 +199,8 @@ security:
 
 ### 3. 定期轮换密钥
 
-- JWT 签名密钥定期轮换
 - API Key 定期更新
-- 使用 JTI 黑名单机制撤销旧 Token
+- 使用编号式环境变量（`HOTPLEX_SECURITY_API_KEY_1`、`_2`）支持无损轮转
 
 ### 4. 审计日志
 

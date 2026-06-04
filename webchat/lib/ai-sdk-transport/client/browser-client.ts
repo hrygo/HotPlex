@@ -50,7 +50,6 @@ import {
   createWorkerCommandEnvelope,
   serializeEnvelope,
   deserializeEnvelope,
-  newSessionId,
   isInitAck,
 } from './envelope';
 
@@ -81,6 +80,7 @@ export interface BrowserClientEvents {
   throttle: (data: ControlData, env: Envelope) => void;
   pong: (data: PongData, env: Envelope) => void;
   contextUsage: (data: ContextUsageData, env: Envelope) => void;
+  skillsList: (data: import('./types').SkillsListData, env: Envelope) => void;
 }
 
 // ============================================================================
@@ -409,6 +409,10 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
       case EventKind.ContextUsage:
         this.emit('contextUsage', event.data as ContextUsageData, env);
+        break;
+
+      case EventKind.SkillsList:
+        this.emit('skillsList', event.data as import('./types').SkillsListData, env);
         break;
     }
   }

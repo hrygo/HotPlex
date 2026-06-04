@@ -1,10 +1,7 @@
 ---
-persona: enterprise
-difficulty: advanced
-title: Security Hardening 企业安全加固指南
+title: 企业安全加固指南
 weight: 22
-last_updated: 2026-05-13
-version: v1.11.3
+description: HotPlex Gateway 生产安全加固全流程：API Key、Bot ID、SSRF 防御、命令白名单、网络隔离与合规审计
 ---
 
 # Security Hardening 企业安全加固指南
@@ -50,41 +47,13 @@ location /ws {
 
 **零密钥 = 开发模式**：未配置 API Key 时自动降级为 `anonymous` 用户，**生产环境必须配置至少一个 Key**。
 
-### 2.2 JWT ES256 Token
+### 2.2 Bot ID 隔离
 
-仅接受 **ES256**（ECDSA P-256）签名算法，拒绝其他所有算法：
+通过 `X-Bot-ID` Header 或 `bot_id` 查询参数指定 Bot 身份。每个 Bot 只能操作属于自己的 Session，**禁止跨 Bot 访问**。使用 `security.BotIDFromRequest(r)` 提取 Bot ID。
 
-```go
-// 算法白名单，仅 ES256
-switch token.Method.Alg() {
-case "ES256":
-    // 验证签名
-default:
-    return fmt.Errorf("rejected signing method: %v (only ES256)", alg)
-}
-```
+### 2.3 APIKeyResolver（多用户映射）
 
-**JWT Claims 结构**（RFC 7519 + HotPlex 扩展）：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `iss` | string | 固定 `hotplex` |
-| `sub` | string | 用户 ID |
-| `aud` | string | 受众校验 |
-| `exp` / `iat` / `nbf` | timestamp | 生命周期 |
-| `jti` | UUID | 防重放，支持黑名单撤销 |
-| `user_id` | string | 用户标识 |
-| `bot_id` | string | Bot 隔离 ID |
-| `scopes` | []string | 权限范围 |
-| `role` | string | 角色 |
-
-### 2.3 Bot ID 隔离
-
-JWT 中 `bot_id` Claim 经过签名验证后提取。每个 Bot 只能操作属于自己的 Session，**禁止跨 Bot 访问**。即使 API Key 相同，不同 `bot_id` 的请求也被严格隔离。
-
-### 2.4 Token 撤销
-
-JTI 黑名单机制：每个 Token 的 `jti` 可被加入内存黑名单，后台每分钟自动清理过期条目。支持 `RevokeToken(jti, ttl)` 单 Token 撤销。
+通过 `security.SetKeyResolver()` 设置自定义的 `APIKeyResolver`，可将 API Key 映射到不同的 userID，实现用户级会话隔离。未设置 resolver 时，所有 API Key 认证的请求统一使用 `api_user` 身份。
 
 ---
 
@@ -150,7 +119,7 @@ allowedCommands = map[string]bool{
 
 ```
 HOTPLEX_WORKER_GITHUB_TOKEN=xxx  →  GITHUB_TOKEN=xxx（Worker 环境可见）
-HOTPLEX_JWT_SECRET=yyy           →  完全不可见（Gateway 内部变量）
+HOTPLEX_GATEWAY_TOKEN=yyy           →  完全不可见（Gateway 内部变量）
 ```
 
 当剥离后的 Key 与系统变量冲突时，系统版本被**动态阻断**，防止 Gateway 自身密钥泄漏到 Worker。
@@ -205,14 +174,13 @@ Risky / Network / System 类工具在开发模式下可用，但 Bash 命令受�
 |---|--------|------|
 | 1 | Gateway 绑定 localhost，未暴露公网 | ☐ |
 | 2 | 至少配置一个 API Key（生产环境） | ☐ |
-| 3 | JWT 使用 ES256 签名 | ☐ |
-| 4 | `bot_id` 隔离验证生效 | ☐ |
-| 5 | SSRF BlockedCIDRs 覆盖私有/元数据地址 | ☐ |
-| 6 | Worker 命令白名单仅含 claude/opencode | ☐ |
-| 7 | `HOTPLEX_WORKER_` 前缀隔离正确配置 | ☐ |
-| 8 | 生产环境使用 `ProductionAllowedTools`（3 工具） | ☐ |
-| 9 | Output Limits 未被修改 | ☐ |
-| 10 | TLS 由反向代理终止 | ☐ |
+| 3 | Bot ID 隔离验证生效（Header + Query） | ☐ |
+| 4 | SSRF BlockedCIDRs 覆盖私有/元数据地址 | ☐ |
+| 5 | Worker 命令白名单仅含 claude/opencode | ☐ |
+| 6 | `HOTPLEX_WORKER_` 前缀隔离正确配置 | ☐ |
+| 7 | 生产环境使用 `ProductionAllowedTools`（3 工具） | ☐ |
+| 8 | Output Limits 未被修改 | ☐ |
+| 9 | TLS 由反向代理终止 | ☐ |
 
 ---
 
@@ -220,8 +188,7 @@ Risky / Network / System 类工具在开发模式下可用，但 Bash 命令受�
 
 | 模块 | 文件 |
 |------|------|
-| API Key + JWT 认证 | `internal/security/auth.go` |
-| JWT ES256 验证 | `internal/security/jwt.go` |
+| API Key 认证 + Bot ID | `internal/security/auth.go` |
 | SSRF 4 层防护 | `internal/security/ssrf.go` |
 | 命令白名单 + Bash 策略 | `internal/security/command.go` |
 | 环境变量隔离 | `internal/security/env.go` |

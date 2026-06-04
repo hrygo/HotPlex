@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -68,7 +67,7 @@ func TestBridge_Shutdown_RejectNewSession(t *testing.T) {
 
 	// After shutdown, StartSession should be rejected.
 	err := b.StartSession(context.Background(), "sess-closed", "u", "b",
-		worker.TypeClaudeCode, nil, "", "", nil, "")
+		worker.TypeClaudeCode, nil, "", "", nil, "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "shutdown")
 }
@@ -196,10 +195,9 @@ func TestGetOrInitAccum(t *testing.T) {
 	log := slog.Default()
 	sm := new(mockBridgeSM)
 	b := &Bridge{
-		log:     log,
-		sm:      sm,
-		accum:   make(map[string]*sessionAccumulator),
-		accumMu: sync.Mutex{},
+		log:   log,
+		sm:    sm,
+		accum: make(map[string]*sessionAccumulator),
 	}
 
 	acc1 := b.getOrInitAccum("sess-1", "", time.Now())
@@ -216,10 +214,9 @@ func TestGetOrInitAccum_LazyUpdate(t *testing.T) {
 	t.Parallel()
 	log := slog.Default()
 	b := &Bridge{
-		log:     log,
-		sm:      new(mockBridgeSM),
-		accum:   make(map[string]*sessionAccumulator),
-		accumMu: sync.Mutex{},
+		log:   log,
+		sm:    new(mockBridgeSM),
+		accum: make(map[string]*sessionAccumulator),
 	}
 
 	// First call creates accumulator with empty workDir.
@@ -242,10 +239,9 @@ func TestGetOrInitAccum_EmptyWorkDirNoOp(t *testing.T) {
 	t.Parallel()
 	log := slog.Default()
 	b := &Bridge{
-		log:     log,
-		sm:      new(mockBridgeSM),
-		accum:   make(map[string]*sessionAccumulator),
-		accumMu: sync.Mutex{},
+		log:   log,
+		sm:    new(mockBridgeSM),
+		accum: make(map[string]*sessionAccumulator),
 	}
 
 	acc := b.getOrInitAccum("sess-1", "", time.Now())
@@ -395,7 +391,7 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 			})
 
 			info := &worker.SessionInfo{}
-			b.injectAgentConfig(info, tt.platform, tt.botID)
+			b.injectAgentConfig(info, tt.platform, tt.botID, nil)
 
 			if tt.wantEmpty {
 				assert.Empty(t, info.SystemPrompt)
@@ -531,6 +527,21 @@ func TestInjectGatewayContext(t *testing.T) {
 			workDir:   "/tmp",
 			want: map[string]string{
 				"GATEWAY_CHANNEL_ID": "C_PRIORITY",
+			},
+		},
+		{
+			name:     "pr_number mapped to TARGET_PR",
+			platform: "cron",
+			botID:    "B1",
+			userID:   "U1",
+			platformKey: map[string]string{
+				"pr_number": "42",
+				"trigger":   "webhook",
+			},
+			sessionID: "sess-webhook",
+			workDir:   "/tmp",
+			want: map[string]string{
+				"TARGET_PR": "42",
 			},
 		},
 	}

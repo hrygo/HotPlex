@@ -113,11 +113,11 @@ func startRealAdapter(t *testing.T, cfg semiConfig) (*Adapter, *[]capturedCall, 
 		logger,
 		messaging.PlatformSlack,
 		nil, // hub
-		nil, // sm
 		handler,
 		nil,    // starter
 		"noop", // use noop worker to avoid launching real AI
 		"/tmp",
+		"",
 	)
 
 	a := &Adapter{
@@ -248,7 +248,7 @@ func TestSemi_AssistantProbeResult(t *testing.T) {
 // TestSemi_SessionIDFormat verifies that session IDs produced from real
 // Slack events have the correct 4-segment slack:{team}:{channel}:{thread}:{user} format.
 //
-// AC: 2.1-2 — MakeSlackEnvelope receives correct teamID/threadTS
+// AC: 2.1-2 — adapter.makeEnvelope receives correct teamID/threadTS
 // AC: 2.1-3 — session ID four segments complete
 // AC: 2.1-4 — threadTS empty when no thread (DM)
 func TestSemi_SessionIDFormat(t *testing.T) {

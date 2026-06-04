@@ -18,6 +18,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/messaging"
 
+	"github.com/hrygo/hotplex/internal/messaging/phrases"
 	"github.com/hrygo/hotplex/internal/metrics"
 )
 
@@ -114,6 +115,7 @@ type StreamingCardController struct {
 	model     string
 	branch    string
 	workDir   string
+	phrases   *phrases.Phrases
 
 	// Close metadata — turn summary injected before card finalization.
 	closeMeta   atomic.Pointer[messaging.TurnSummaryData]
@@ -139,7 +141,7 @@ const (
 	flushSize     = 30                     // rune count threshold for immediate flush trigger
 )
 
-func NewStreamingCardController(client *lark.Client, limiter *FeishuRateLimiter, log *slog.Logger, agentName string, turnNum int, model, branch, workDir string) *StreamingCardController {
+func NewStreamingCardController(client *lark.Client, limiter *FeishuRateLimiter, log *slog.Logger, agentName string, turnNum int, model, branch, workDir string, phr *phrases.Phrases) *StreamingCardController {
 	var p atomic.Int32
 	p.Store(int32(PhaseIdle))
 	return &StreamingCardController{
@@ -151,6 +153,7 @@ func NewStreamingCardController(client *lark.Client, limiter *FeishuRateLimiter,
 		model:           model,
 		branch:          branch,
 		workDir:         workDir,
+		phrases:         phr,
 		cardKitOK:       true,
 		elementID:       streamingElementID,
 		flushDone:       make(chan struct{}),
@@ -173,12 +176,13 @@ func (c *StreamingCardController) WriteToolCall(id, name string, input map[strin
 	}
 	text := formatToolCall(name, input)
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.toolEntries = append(c.toolEntries, toolEntry{id: id, name: name, text: text})
 	if len(c.toolEntries) > maxToolEntries {
 		c.toolEntries = c.toolEntries[len(c.toolEntries)-maxToolEntries:]
 	}
 	c.toolDirty = true
+	c.mu.Unlock()
+	c.triggerToolFlush()
 }
 
 // WriteToolResult marks the matching tool entry as done by ID and sets the result summary.
@@ -187,14 +191,31 @@ func (c *StreamingCardController) WriteToolResult(id string, output any, errMsg 
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var found bool
 	for i := range c.toolEntries {
-		if c.toolEntries[i].id == id {
-			c.toolEntries[i].done = true
-			c.toolEntries[i].result = formatToolResult(c.toolEntries[i].name, output, errMsg)
-			c.toolDirty = true
-			return
+		if c.toolEntries[i].id != id {
+			continue
 		}
+		c.toolEntries[i].done = true
+		c.toolEntries[i].result = formatToolResult(c.toolEntries[i].name, output, errMsg)
+		c.toolDirty = true
+		found = true
+		break
+	}
+	c.mu.Unlock()
+	if found {
+		c.triggerToolFlush()
+	}
+}
+
+// triggerToolFlush ensures the flush loop is running and signals an immediate flush.
+// This is necessary because tool events can arrive before any text Write() calls,
+// leaving the tool_activity strip stale until the first text content arrives.
+func (c *StreamingCardController) triggerToolFlush() {
+	c.startFlushLoop()
+	select {
+	case c.flushTrigger <- struct{}{}:
+	default:
 	}
 }
 
@@ -286,32 +307,7 @@ func (c *StreamingCardController) EnsureCard(ctx context.Context, chatID, chatTy
 		return nil
 	}
 
-	// Step 2: Convert msg_id → card_id so streaming updates target the message's card.
-	cardID, err := c.idConvert(ctx, msgID)
-	if err != nil {
-		c.log.Warn("feishu: id_convert failed, using IM patch fallback",
-			"err", err)
-		c.cardKitOK = false
-	} else {
-		c.mu.Lock()
-		c.cardID = cardID
-		c.mu.Unlock()
-
-		// Step 3: Enable streaming on the card.
-		if err := c.enableStreaming(ctx); err != nil {
-			c.log.Warn("feishu: enable streaming failed, using IM patch fallback",
-				"err", err)
-			c.cardKitOK = false
-		} else {
-			c.streamingActive = true
-		}
-	}
-
-	if !c.transition(PhaseStreaming) {
-		return fmt.Errorf("feishu: cannot transition to streaming")
-	}
-	c.startFlushLoop()
-	return nil
+	return c.createAndEnable(ctx, msgID)
 }
 
 // SendPlaceholder sends a streaming card immediately with a placeholder message.
@@ -324,7 +320,7 @@ func (c *StreamingCardController) SendPlaceholder(ctx context.Context, chatID, c
 		return fmt.Errorf("feishu: cannot transition from %s to creating", c.getPhase())
 	}
 
-	placeholder := buildPlaceholderText()
+	placeholder := buildPlaceholderText(c.phrases)
 	c.mu.Lock()
 	c.chatType = chatType
 	c.replyToMsgID = replyToMsgID
@@ -332,12 +328,12 @@ func (c *StreamingCardController) SendPlaceholder(ctx context.Context, chatID, c
 	c.placeholder = placeholder
 	c.mu.Unlock()
 
-	// Step 1: Send card message with placeholder content.
+	personaActivity := buildPersonaText(c.phrases)
 	contentJSON := buildStreamingCard(
 		cardHeader{Title: c.agentName, Template: headerWathet, Tags: turnTags(c.turnNum, c.model, c.branch, c.workDir)},
 		truncateForSummary(placeholder),
 		placeholder,
-		"",
+		personaActivity,
 	)
 	msgID, err := c.sendCardMessageRaw(ctx, chatID, chatType, contentJSON)
 	if err != nil {
@@ -359,19 +355,29 @@ func (c *StreamingCardController) SendPlaceholder(ctx context.Context, chatID, c
 		return nil
 	}
 
-	// Step 2: Convert msg_id → card_id.
+	return c.createAndEnable(ctx, msgID)
+}
+
+// createAndEnable performs the shared post-send lifecycle: idConvert → enableStreaming
+// → transition to PhaseStreaming → startFlushLoop. The caller is responsible for
+// setting c.msgID and c.streamingActive, and for checking the PhaseCompleted race
+// before calling this method.
+func (c *StreamingCardController) createAndEnable(ctx context.Context, msgID string) error {
+	// Convert msg_id → card_id so streaming updates target the message's card.
 	cardID, err := c.idConvert(ctx, msgID)
 	if err != nil {
-		c.log.Warn("feishu: id_convert failed for placeholder", "err", err)
+		c.log.Warn("feishu: id_convert failed, using IM patch fallback",
+			"err", err)
 		c.cardKitOK = false
 	} else {
 		c.mu.Lock()
 		c.cardID = cardID
 		c.mu.Unlock()
 
-		// Step 3: Enable streaming on the card.
+		// Enable streaming on the card.
 		if err := c.enableStreaming(ctx); err != nil {
-			c.log.Warn("feishu: enable streaming failed for placeholder", "err", err)
+			c.log.Warn("feishu: enable streaming failed, using IM patch fallback",
+				"err", err)
 			c.cardKitOK = false
 		} else {
 			c.streamingActive = true
@@ -647,7 +653,14 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		"last_flushed_len", len(c.lastFlushed))
 
 	finalFlushOK := false
-	if c.cardKitOK && c.cardID != "" {
+	// Skip final flush when content is empty — CardKit rejects empty content
+	// with code 99992402. If lastFlushed has content, the streaming card already
+	// displays it from the periodic flush loop.
+	if content == "" && c.lastFlushed != "" {
+		c.log.Debug("feishu: skipping final flush, content empty (already flushed)",
+			"last_flushed_len", len(c.lastFlushed))
+		finalFlushOK = true
+	} else if c.cardKitOK && c.cardID != "" {
 		seq := int(c.sequence.Add(1))
 		if err := c.flushCardKitElement(ctx, c.elementID, content, seq); err != nil {
 			c.log.Warn("feishu: final cardkit flush failed, attempting IM patch fallback",
@@ -710,7 +723,7 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		Title:    c.agentName,
 		Template: headerBlue,
 		Tags:     c.closeTags(),
-	}, content)
+	}, content, true)
 
 	return nil
 }
@@ -741,20 +754,30 @@ func (c *StreamingCardController) Abort(ctx context.Context) error {
 		Title:    c.agentName,
 		Template: headerGrey,
 		Tags:     turnTags(c.turnNum, c.model, c.branch, c.workDir),
-	}, "")
+	}, "", false)
 
 	return nil
 }
 
 // buildFinalElements builds the elements list for the final card (Close/Abort).
-// Tool activity is transient and excluded from the final card.
-func (c *StreamingCardController) buildFinalElements(body string) []map[string]any {
-	return []map[string]any{
+// On normal Close (showClosing=true), the tool_activity strip shows a closing phrase;
+// on Abort (showClosing=false) or when no closing is available, the strip is omitted.
+func (c *StreamingCardController) buildFinalElements(body string, showClosing bool) []map[string]any {
+	elements := []map[string]any{
 		{"tag": "markdown", "element_id": streamingElementID, "content": body},
 	}
+	if showClosing {
+		if closing := buildClosingText(c.phrases); closing != "" {
+			elements = append(elements,
+				map[string]any{"tag": "hr"},
+				map[string]any{"tag": "markdown", "element_id": toolActivityElementID, "content": closing},
+			)
+		}
+	}
+	return elements
 }
 
-func (c *StreamingCardController) updateHeader(ctx context.Context, cardID string, header cardHeader, body string) {
+func (c *StreamingCardController) updateHeader(ctx context.Context, cardID string, header cardHeader, body string, showClosing bool) {
 	if cardID == "" {
 		return
 	}
@@ -764,7 +787,7 @@ func (c *StreamingCardController) updateHeader(ctx context.Context, cardID strin
 			"streaming_mode": false,
 			"summary":        map[string]any{"content": truncateForSummary(body)},
 		},
-		c.buildFinalElements(body),
+		c.buildFinalElements(body, showClosing),
 	)
 
 	reqBody := larkcardkit.NewUpdateCardReqBodyBuilder().
@@ -928,7 +951,8 @@ func (c *StreamingCardController) flushCardKitElement(ctx context.Context, eleme
 	if !resp.Success() {
 		return fmt.Errorf("cardkit element content failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
-	c.log.Debug("feishu: cardkit element content flushed", "card_id", c.cardID, "seq", seq, "content_len", len(content))
+	c.log.Debug("feishu: cardkit element content flushed",
+		"card_id", c.cardID, "seq", seq, "content_len", len(content))
 	return nil
 }
 
@@ -974,7 +998,7 @@ func (c *StreamingCardController) flushIMPatchWithConfig(ctx context.Context, co
 }
 
 func (c *StreamingCardController) doFlushIMPatch(ctx context.Context, header cardHeader, config map[string]any, content string, final bool) error {
-	elements := c.buildFinalElements(content)
+	elements := c.buildFinalElements(content, final)
 	contentJSON := buildCard(header, config, elements)
 
 	body := larkim.NewPatchMessageReqBodyBuilder().

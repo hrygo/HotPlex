@@ -2,7 +2,6 @@ package feishu
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -14,78 +13,6 @@ import (
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/pkg/events"
 )
-
-// ─── buildInteractionCard ─────────────────────────────────────────────────────
-
-func TestBuildInteractionCard(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		body   string
-		footer string
-	}{
-		{
-			name:   "body only",
-			body:   "Hello **world**",
-			footer: "",
-		},
-		{
-			name:   "body and footer",
-			body:   "Header\n\n---\n",
-			footer: "Reply **yes** or **no**",
-		},
-		{
-			name:   "empty strings",
-			body:   "",
-			footer: "",
-		},
-		{
-			name:   "unicode content",
-			body:   "你好世界 🔔",
-			footer: "回复 **允许** 或 **拒绝**",
-		},
-		{
-			name:   "markdown heavy",
-			body:   "```\ncode block\n```\n**bold** and _italic_",
-			footer: "Option 1\nOption 2\nOption 3",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := buildInteractionCard(tt.body, tt.footer, cardHeader{Title: "Test"})
-
-			// Verify it's valid JSON
-			var card map[string]any
-			require.NoError(t, json.Unmarshal([]byte(got), &card), "output must be valid JSON")
-
-			// Verify structure
-			require.Equal(t, "2.0", card["schema"])
-			require.NotNil(t, card["config"])
-			require.NotNil(t, card["body"])
-
-			body := card["body"].(map[string]any)
-			elements, ok := body["elements"].([]any)
-			require.True(t, ok)
-
-			// Body markdown element
-			require.GreaterOrEqual(t, len(elements), 1)
-			firstEl, ok := elements[0].(map[string]any)
-			require.True(t, ok)
-			require.Equal(t, "markdown", firstEl["tag"])
-			require.Equal(t, tt.body, firstEl["content"])
-
-			// Footer: if non-empty, expect hr + markdown
-			if tt.footer != "" {
-				require.Equal(t, 3, len(elements), "expect hr + footer markdown")
-				require.Equal(t, "hr", elements[1].(map[string]any)["tag"])
-				footerEl := elements[2].(map[string]any)
-				require.Equal(t, "markdown", footerEl["tag"])
-				require.Equal(t, tt.footer, footerEl["content"])
-			}
-		})
-	}
-}
 
 // ─── truncate ─────────────────────────────────────────────────────────────────
 // NOTE: truncate uses byte indexing, not rune. Multi-byte UTF-8 characters
@@ -187,24 +114,6 @@ func TestInteractionManager_Empty(t *testing.T) {
 	m := messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.Equal(t, 0, m.Len())
 	require.Empty(t, m.GetAll())
-}
-
-// ─── buildInteractionCard JSON output ────────────────────────────────────────
-
-func TestBuildInteractionCard_EscapeHTML(t *testing.T) {
-	t.Parallel()
-	// HTML special chars must NOT be escaped in JSON output
-	got := buildInteractionCard("<test> & \"quotes\"", "", cardHeader{Title: "EscTest"})
-	var card map[string]any
-	require.NoError(t, json.Unmarshal([]byte(got), &card))
-	body := card["body"].(map[string]any)
-	elements := body["elements"].([]any)
-	markdown := elements[0].(map[string]any)
-	// JSON encoder by default escapes < > &, but we use SetEscapeHTML(false)
-	// Actually SetEscapeHTML(false) means it won't escape. Let's verify.
-	content := markdown["content"].(string)
-	// The content should be preserved as-is
-	require.Equal(t, "<test> & \"quotes\"", content)
 }
 
 // ─── interaction manager: Len/GetAll ──────────────────────────────────────────

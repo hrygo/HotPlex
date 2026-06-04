@@ -98,7 +98,7 @@ func gatewayHealthURL(configPath string) string {
 		return defaultHealthURL
 	}
 	loadEnvFile(filepath.Dir(absPath))
-	cfg, err := config.Load(absPath, config.LoadOptions{})
+	cfg, err := config.Load(absPath)
 	if err != nil {
 		return defaultHealthURL
 	}

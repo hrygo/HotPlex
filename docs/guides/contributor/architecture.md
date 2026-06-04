@@ -2,13 +2,14 @@
 title: 架构概览
 weight: 31
 description: HotPlex Gateway 系统架构全景视图，帮助贡献者理解各组件职责与交互方式
-persona: contributor
-difficulty: intermediate
 ---
 
 # 架构概览
 
 > 阅读本文后，你将理解 HotPlex Gateway 的整体架构、核心模块职责、数据流路径和关键设计决策。
+
+> [!TIP]
+> 我们为您准备了 **[✨ 交互式功能架构全景图 (Interactive Dashboard)](../../architecture/hotplex_architecture.html)**。在此交互网页中，您可以悬停并点击各底层模块（如 *B/C 双通道配置注入*、*意图路由器*、*物理执行沙盒* 等），查看高亮组件职责与核心包路径，并能一键演示全双工 WebSocket 消息数据流脉冲奔跑特效。
 
 ## 概述
 
@@ -136,6 +137,8 @@ CREATED → RUNNING → IDLE → TERMINATED → DELETED
 |------|------|------|
 | `Bridge` | `messaging/bridge.go` | SessionStarter + ConnFactory |
 | `PlatformAdapter` | `messaging/platform_adapter.go` | 基础适配器接口 |
+| `BotRegistry` | `messaging/bot_registry.go` | 并发安全多 bot 注册表（Register/Get/Unregister） |
+| `config.go` | `messaging/config.go` | `AdapterConfig` 含 `BotName` 字段 |
 | `slack/` | `messaging/slack/` | Slack Socket Mode 适配器 |
 | `feishu/` | `messaging/feishu/` | 飞书 WS 适配器 + STT |
 | `tts/` | `messaging/tts/` | Edge-TTS 语音合成 + FFmpeg Opus 转换 |
@@ -221,12 +224,12 @@ LLM 调用的统一编排层，提供意图分发、安全审计、上下文压�
 |------|------|------|
 | `config/` | `internal/config/` | Viper 配置 + 热重载 + 继承 + 审计/回滚 |
 | `agentconfig/` | `internal/agentconfig/` | B/C 双通道 Agent 人格/上下文加载器 |
-| `security/` | `internal/security/` | JWT (ES256)、SSRF 防护、路径安全 |
+| `security/` | `internal/security/` | API Key、Bot ID、SSRF 防护、路径安全 |
 | `eventstore/` | `internal/eventstore/` | 会话事件持久化 + delta 聚合 |
 | `metrics/` | `internal/metrics/` | Prometheus 指标 |
 | `service/` | `internal/service/` | 跨平台系统服务管理（systemd/launchd/SCM） |
 | `updater/` | `internal/updater/` | 自更新（GitHub API、sha256 校验、原子替换） |
-| `sqlutil/` | `internal/sqlutil/` | SQLite CGO/no-CGO 驱动切换 |
+| `sqlutil/` | `internal/sqlutil/` | SQLite 驱动（modernc.org/sqlite，纯 Go） |
 
 ## 核心数据流
 

@@ -15,9 +15,11 @@ import {
   listSessions,
   createSession,
   deleteSession,
+  AuthError,
   type SessionInfo,
 } from '@/lib/api/sessions';
 import { workerType as defaultWorkerType, workDir as configWorkDir } from '@/lib/config';
+import { newSessionId } from '@/lib/ai-sdk-transport/client/envelope';
 import { logger } from '@/lib/logger';
 
 export interface UseSessionsOptions {
@@ -40,6 +42,7 @@ export interface UseSessionsReturn {
   removeSession: (id: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   handleSessionSelect: (id: string) => void;
+  updateSessionState: (sessionId: string, state: string) => void;
 }
 
 export function useSessions({
@@ -61,9 +64,9 @@ export function useSessions({
   const STORAGE_KEY = 'hotplex_active_session_id';
   const DEFAULT_WORKER_TYPE = defaultWorkerType;
 
-  // Deterministic anchor session title — ensures the first auto-created session
-  // maps to the same server-side key via DeriveSessionKey(userID, workerType, title, workDir).
-  const MAIN_SESSION_TITLE = 'main';
+  // Deterministic anchor session — ensures the first auto-created session
+  // maps to the same server-side key via DeriveSessionKey(userID, workerType, "main", workDir).
+  const ANCHOR_SESSION_ID = 'main';
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -113,14 +116,14 @@ export function useSessions({
         isCreating.current = true;
         try {
           const effectiveWorkDir = configWorkDir || undefined;
-          const { session_id } = await createSession({ workerType: DEFAULT_WORKER_TYPE, title: MAIN_SESSION_TITLE, workDir: effectiveWorkDir });
+          const { session_id } = await createSession({ clientSessionId: ANCHOR_SESSION_ID, workerType: DEFAULT_WORKER_TYPE, title: ANCHOR_SESSION_ID, workDir: effectiveWorkDir });
           const now = new Date().toISOString();
           const newSession: SessionInfo = {
             id: session_id,
             user_id: '',
             worker_type: DEFAULT_WORKER_TYPE,
             state: 'created',
-            title: MAIN_SESSION_TITLE,
+            title: ANCHOR_SESSION_ID,
             work_dir: effectiveWorkDir,
             created_at: now,
             updated_at: now,
@@ -134,7 +137,7 @@ export function useSessions({
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load sessions');
+      setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to load sessions'));
     } finally {
       setIsLoading(false);
     }
@@ -160,7 +163,7 @@ export function useSessions({
     isCreating.current = true;
     setIsLoading(true);
     try {
-      const { session_id } = await createSession({ workerType: wt, title, workDir: effectiveWorkDir });
+      const { session_id } = await createSession({ clientSessionId: newSessionId(), workerType: wt, title: title || undefined, workDir: effectiveWorkDir });
       const now = new Date().toISOString();
       const newSession: SessionInfo = {
         id: session_id,
@@ -177,7 +180,7 @@ export function useSessions({
       onSelectRef.current(session_id);
       localStorage.setItem(STORAGE_KEY, session_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create session');
+      setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to create session'));
     } finally {
       setIsLoading(false);
       isCreating.current = false;
@@ -196,7 +199,7 @@ export function useSessions({
       await deleteSession(id);
     } catch (e) {
       logger.error('Sessions', 'Failed to delete session', { error: String(e) });
-      // Revert optimistic remove on failure
+      setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to delete session'));
       refreshSessions();
     }
   }, [activeSession, refreshSessions]);
@@ -212,6 +215,11 @@ export function useSessions({
   const openPanel = useCallback(() => setIsOpen(true), []);
   const closePanel = useCallback(() => setIsOpen(false), []);
 
+  const updateSessionState = useCallback((sessionId: string, state: string) => {
+    setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, state: state as SessionInfo['state'] } : s));
+    setActiveSession(prev => prev?.id === sessionId ? { ...prev, state: state as SessionInfo['state'] } : prev);
+  }, []);
+
   return {
     sessions,
     activeSession,
@@ -225,5 +233,6 @@ export function useSessions({
     removeSession,
     selectSession,
     handleSessionSelect,
+    updateSessionState,
   };
 }

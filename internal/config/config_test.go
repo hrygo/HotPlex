@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +21,8 @@ func TestDefault(t *testing.T) {
 	require.Equal(t, 5, cfg.Pool.MaxIdlePerUser)
 	require.Equal(t, 7*24*time.Hour, cfg.Session.RetentionPeriod)
 	require.Equal(t, 1*time.Minute, cfg.Session.GCScanInterval)
+	require.Equal(t, 7*24*time.Hour, cfg.Session.TermRetention)
+	require.Equal(t, 24*time.Hour, cfg.Session.CronTermRetention)
 	require.False(t, cfg.Security.TLSEnabled)
 	require.True(t, cfg.Admin.Enabled)
 	require.Equal(t, "localhost:9999", cfg.Admin.Addr)
@@ -72,6 +73,7 @@ func TestConfig_Validate(t *testing.T) {
 			cfg: func() Config {
 				c := *Default()
 				c.DB.Path = ""
+				c.DB.SQLite.Path = ""
 				return c
 			}(),
 			errCnt: 1, // missing path only
@@ -100,6 +102,7 @@ func TestConfig_Validate(t *testing.T) {
 				c := *Default()
 				c.Gateway.Addr = ""
 				c.DB.Path = ""
+				c.DB.SQLite.Path = ""
 				return c
 			}(),
 			errCnt: 3, // missing addr + missing path + TLS warning
@@ -284,49 +287,10 @@ func TestExpandEnvEntry(t *testing.T) {
 	}
 }
 
-func TestEnvSecretsProvider(t *testing.T) {
-	t.Parallel()
-
-	os.Setenv("TEST_SECRET", "secret123")
-	defer os.Unsetenv("TEST_SECRET")
-
-	p := NewEnvSecretsProvider()
-	require.Equal(t, "secret123", p.Get("TEST_SECRET"))
-	require.Empty(t, p.Get("NONEXISTENT"))
-}
-
-func TestChainedSecretsProvider(t *testing.T) {
-	t.Parallel()
-
-	p := NewChainedSecretsProvider(
-		&staticProvider{data: map[string]string{"key1": "from-first"}},
-		&staticProvider{data: map[string]string{"key1": "from-second", "key2": "from-second"}},
-	)
-
-	require.Equal(t, "from-first", p.Get("key1"))  // first provider wins
-	require.Equal(t, "from-second", p.Get("key2")) // only in second
-	require.Empty(t, p.Get("key3"))                // neither has it
-}
-
-type staticProvider struct {
-	data map[string]string
-}
-
-func (p *staticProvider) Get(key string) string {
-	return p.data[key]
-}
-
-func TestChainedSecretsProvider_Empty(t *testing.T) {
-	t.Parallel()
-
-	p := NewChainedSecretsProvider()
-	require.Empty(t, p.Get("anything"))
-}
-
 func TestLoad_FileNotFound(t *testing.T) {
 	t.Parallel()
 
-	_, err := Load("/nonexistent/config.yaml", LoadOptions{})
+	_, err := Load("/nonexistent/config.yaml")
 	require.Error(t, err)
 }
 
@@ -347,7 +311,7 @@ func TestLoad_Inheritance_CycleDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Load(baseCfg, LoadOptions{})
+	_, err := Load(baseCfg)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrConfigCycle)
 }
@@ -364,7 +328,7 @@ func TestLoad_Inheritance_SelfReference(t *testing.T) {
 	}
 	tmp.Close()
 
-	_, err = Load(tmp.Name(), LoadOptions{})
+	_, err = Load(tmp.Name())
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrConfigCycle)
 }
@@ -387,7 +351,7 @@ func TestLoad_Inheritance_ThreeLevelChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(leafCfg, LoadOptions{})
+	cfg, err := Load(leafCfg)
 	require.NoError(t, err)
 	// Leaf overrides mid, mid overrides base.
 	require.Equal(t, ":7070", cfg.Gateway.Addr)
@@ -406,7 +370,7 @@ func TestLoad_Inheritance_NoInherits(t *testing.T) {
 	}
 	tmp.Close()
 
-	cfg, err := Load(tmp.Name(), LoadOptions{})
+	cfg, err := Load(tmp.Name())
 	require.NoError(t, err)
 	require.Equal(t, ":6060", cfg.Gateway.Addr)
 	require.Equal(t, 5, cfg.Pool.MaxSize)
@@ -433,7 +397,7 @@ func TestLoad_Inheritance_PathExpansion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(childPath, LoadOptions{})
+	cfg, err := Load(childPath)
 	require.NoError(t, err)
 	require.Equal(t, ":8001", cfg.Gateway.Addr)
 }
@@ -448,63 +412,12 @@ func TestLoad_NumberedEnv(t *testing.T) {
 		os.Unsetenv("HOTPLEX_SECURITY_API_KEY_1")
 	}()
 
-	cfg, err := Load("", LoadOptions{})
+	cfg, err := Load("")
 	require.NoError(t, err)
 
 	require.Contains(t, cfg.Admin.Tokens, "token1")
 	require.Contains(t, cfg.Admin.Tokens, "token2")
 	require.Contains(t, cfg.Security.APIKeys, "key1")
-}
-
-func TestConfig_RequireSecrets(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		cfg         Config
-		expectError bool
-	}{
-		{
-			name: "JWT secret present",
-			cfg: Config{
-				Security: SecurityConfig{
-					JWTSecret: decodeJWTSecret("c2VjcmV0LXNlY3JldC1zZWNyZXQtc2VjcmV0MTIzNDU="),
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "JWT secret missing",
-			cfg: Config{
-				Security: SecurityConfig{
-					JWTSecret: []byte{},
-				},
-			},
-			expectError: true,
-		},
-		{
-			name: "JWT secret present but short",
-			cfg: Config{
-				Security: SecurityConfig{
-					JWTSecret: decodeJWTSecret("c2hvcnQ="), // "short" in base64
-				},
-			},
-			expectError: true, // Now rejects non-32-byte keys
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			err := tt.cfg.RequireSecrets()
-			if tt.expectError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
 }
 
 func TestAutoRetryConfig_Defaults(t *testing.T) {
@@ -553,76 +466,6 @@ func TestAutoRetryConfig_Defaults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			result := tt.input.Defaults()
-			require.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestDecodeJWTSecret(t *testing.T) {
-	t.Parallel()
-
-	// Valid 32-byte secret
-	validSecret32 := make([]byte, 32)
-	for i := range validSecret32 {
-		validSecret32[i] = byte(i)
-	}
-	validSecretB64 := base64.StdEncoding.EncodeToString(validSecret32)
-	validSecretURLB64 := base64.URLEncoding.EncodeToString(validSecret32)
-
-	// 48-byte secret (e.g. openssl rand -base64 48)
-	validSecret48 := make([]byte, 48)
-	for i := range validSecret48 {
-		validSecret48[i] = byte(i)
-	}
-	validSecret48B64 := base64.StdEncoding.EncodeToString(validSecret48)
-
-	tests := []struct {
-		name     string
-		input    string
-		expected []byte
-	}{
-		{
-			name:     "standard base64 32 bytes",
-			input:    validSecretB64,
-			expected: validSecret32,
-		},
-		{
-			name:     "URL-safe base64 32 bytes",
-			input:    validSecretURLB64,
-			expected: validSecret32,
-		},
-		{
-			name:     "raw 32-byte string",
-			input:    string(validSecret32),
-			expected: validSecret32,
-		},
-		{
-			name:     "base64 48 bytes accepted",
-			input:    validSecret48B64,
-			expected: validSecret48,
-		},
-		{
-			name:     "raw 48-byte string accepted",
-			input:    string(validSecret48),
-			expected: validSecret48,
-		},
-		{
-			name:     "other string (not 32 bytes)",
-			input:    "short",
-			expected: nil,
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			result := decodeJWTSecret(tt.input)
 			require.Equal(t, tt.expected, result)
 		})
 	}
@@ -902,7 +745,7 @@ db:
 	require.NoError(t, err)
 	tempFile.Close()
 
-	cfg, err := Load(tempFile.Name(), LoadOptions{})
+	cfg, err := Load(tempFile.Name())
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	require.Equal(t, ":8888", cfg.Gateway.Addr)
@@ -997,6 +840,101 @@ func TestPropagateMessagingDefaults(t *testing.T) {
 	})
 }
 
+func TestNormalizeSlackBots(t *testing.T) {
+	t.Parallel()
+
+	t.Run("backward compat wraps single-bot config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &SlackConfig{BotToken: "xoxb-aaa", AppToken: "xapp-bbb"}
+		normalizeSlackBots(cfg)
+		require.Len(t, cfg.Bots, 1)
+		require.Equal(t, "default", cfg.Bots[0].Name)
+		require.Equal(t, "xoxb-aaa", cfg.Bots[0].BotToken)
+		require.Equal(t, "xapp-bbb", cfg.Bots[0].AppToken)
+	})
+
+	t.Run("bots array takes precedence", func(t *testing.T) {
+		t.Parallel()
+		cfg := &SlackConfig{
+			BotToken: "xoxb-legacy",
+			AppToken: "xapp-legacy",
+			Bots: []SlackBotConfig{
+				{Name: "bot1", BotToken: "xoxb-new", AppToken: "xapp-new"},
+			},
+		}
+		normalizeSlackBots(cfg)
+		require.Len(t, cfg.Bots, 1)
+		require.Equal(t, "bot1", cfg.Bots[0].Name)
+		require.Equal(t, "xoxb-new", cfg.Bots[0].BotToken)
+	})
+
+	t.Run("empty config produces no bots", func(t *testing.T) {
+		t.Parallel()
+		cfg := &SlackConfig{}
+		normalizeSlackBots(cfg)
+		require.Empty(t, cfg.Bots)
+	})
+}
+
+func TestNormalizeFeishuBots(t *testing.T) {
+	t.Parallel()
+
+	t.Run("backward compat wraps single-bot config", func(t *testing.T) {
+		t.Parallel()
+		cfg := &FeishuConfig{AppID: "cli_xxx", AppSecret: "secret"}
+		normalizeFeishuBots(cfg)
+		require.Len(t, cfg.Bots, 1)
+		require.Equal(t, "default", cfg.Bots[0].Name)
+		require.Equal(t, "cli_xxx", cfg.Bots[0].AppID)
+		require.Equal(t, "secret", cfg.Bots[0].AppSecret)
+	})
+
+	t.Run("bots array takes precedence", func(t *testing.T) {
+		t.Parallel()
+		cfg := &FeishuConfig{
+			AppID:     "cli_legacy",
+			AppSecret: "old_secret",
+			Bots: []FeishuBotConfig{
+				{Name: "bot1", AppID: "cli_new", AppSecret: "new_secret"},
+			},
+		}
+		normalizeFeishuBots(cfg)
+		require.Len(t, cfg.Bots, 1)
+		require.Equal(t, "bot1", cfg.Bots[0].Name)
+	})
+
+	t.Run("empty config produces no bots", func(t *testing.T) {
+		t.Parallel()
+		cfg := &FeishuConfig{}
+		normalizeFeishuBots(cfg)
+		require.Empty(t, cfg.Bots)
+	})
+}
+
+func TestPropagateMessagingDefaults_MultiBot(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates STT/TTS to each bot", func(t *testing.T) {
+		t.Parallel()
+		cfg := Default()
+		cfg.Messaging.Slack.Bots = []SlackBotConfig{
+			{Name: "bot1"},
+			{Name: "bot2", STTConfig: STTConfig{Provider: "feishu"}},
+		}
+		cfg.Messaging.Feishu.Bots = []FeishuBotConfig{
+			{Name: "bot3"},
+		}
+		propagateMessagingDefaults(cfg)
+
+		// bot1 inherits messaging-level STT default.
+		require.Equal(t, "local", cfg.Messaging.Slack.Bots[0].Provider)
+		// bot2 has explicit provider, preserved.
+		require.Equal(t, "feishu", cfg.Messaging.Slack.Bots[1].Provider)
+		// bot3 inherits.
+		require.Equal(t, "local", cfg.Messaging.Feishu.Bots[0].Provider)
+	})
+}
+
 func TestMessagingLevelEnvVars(t *testing.T) {
 	// Not parallel — modifies global env vars.
 	envVars := []string{
@@ -1060,4 +998,86 @@ func TestMessagingLevelEnvVars(t *testing.T) {
 	require.Equal(t, 19000, cfg.Messaging.MossPort)
 	require.Equal(t, 15*time.Minute, cfg.Messaging.MossIdleTimeout)
 	require.Equal(t, 4, cfg.Messaging.MossCpuThreads)
+}
+
+func TestResolveAPIKeyUsers(t *testing.T) {
+	t.Run("nil input returns nil", func(t *testing.T) {
+		result := resolveAPIKeyUsers(nil, []string{"sk-1"})
+		assertNilKeyMap(t, result)
+	})
+
+	t.Run("empty input returns nil", func(t *testing.T) {
+		result := resolveAPIKeyUsers(map[string]string{}, []string{"sk-1"})
+		assertNilKeyMap(t, result)
+	})
+
+	t.Run("env var name resolved to value", func(t *testing.T) {
+		t.Setenv("TEST_SK_ALICE", "sk-actual-alice-key")
+		defer os.Unsetenv("TEST_SK_ALICE")
+
+		raw := map[string]string{"TEST_SK_ALICE": "alice"}
+		expanded := []string{"sk-actual-alice-key", "sk-other"}
+		result := resolveAPIKeyUsers(raw, expanded)
+		require.Equal(t, map[string]string{"sk-actual-alice-key": "alice"}, result)
+	})
+
+	t.Run("literal key value matched from expanded keys", func(t *testing.T) {
+		raw := map[string]string{"sk-literal": "bob"}
+		expanded := []string{"sk-literal", "sk-other"}
+		result := resolveAPIKeyUsers(raw, expanded)
+		require.Equal(t, map[string]string{"sk-literal": "bob"}, result)
+	})
+
+	t.Run("unknown key ignored", func(t *testing.T) {
+		raw := map[string]string{"sk-unknown": "charlie"}
+		expanded := []string{"sk-different"}
+		result := resolveAPIKeyUsers(raw, expanded)
+		assertNilKeyMap(t, result)
+	})
+
+	t.Run("mixed env and literal keys", func(t *testing.T) {
+		t.Setenv("TEST_SK_ENV", "sk-env-value")
+		defer os.Unsetenv("TEST_SK_ENV")
+
+		raw := map[string]string{
+			"TEST_SK_ENV": "env-user",
+			"sk-literal":  "lit-user",
+		}
+		expanded := []string{"sk-env-value", "sk-literal"}
+		result := resolveAPIKeyUsers(raw, expanded)
+		require.Equal(t, map[string]string{
+			"sk-env-value": "env-user",
+			"sk-literal":   "lit-user",
+		}, result)
+	})
+}
+
+func assertNilKeyMap(t *testing.T, v map[string]string) {
+	require.Nil(t, v)
+}
+
+func TestResolveInjectExclude(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                  string
+		global, platform, bot []string
+		want                  []string
+	}{
+		{"all nil", nil, nil, nil, nil},
+		{"bot wins", []string{"A"}, []string{"B"}, []string{"C"}, []string{"C"}},
+		{"platform wins when bot nil", []string{"A"}, []string{"B"}, nil, []string{"B"}},
+		{"global wins when rest nil", []string{"A"}, nil, nil, []string{"A"}},
+		{"bot empty slice overrides", []string{"A"}, []string{"B"}, []string{}, []string{}},
+		{"platform empty slice overrides", []string{"A"}, []string{}, nil, []string{}},
+		{"global empty slice is returned", []string{}, nil, nil, []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ResolveInjectExclude(tt.global, tt.platform, tt.bot)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }

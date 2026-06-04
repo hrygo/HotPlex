@@ -2,8 +2,6 @@
 title: HotPlex 术语表
 weight: 10
 description: HotPlex Worker Gateway 全部核心术语的权威中英文对照参考，覆盖协议、架构、模块和运维概念。
-persona: all
-difficulty: beginner
 ---
 
 # HotPlex 术语表
@@ -99,7 +97,7 @@ Session 垃圾回收机制（`internal/session/manager.go`）。定期扫描（�
 - **IDLE 超时**：`idle_expires_at ≤ now` → TERMINATED
 - **最大生命周期**：`expires_at ≤ now` → TERMINATED
 - **僵尸检测**：RUNNING session 的 `LastIO()` 超过 execution_timeout（默认 30 分钟）→ TERMINATED
-- **保留期清理**：TERMINATED session 的 `updated_at ≤ now - retention_period` → DELETE
+- **保留期清理**：TERMINATED session 按 source 差异化保留：cron 类保留 24h、其他保留 7d（`cron_term_retention` / `term_retention`），过期后 `DELETE FROM sessions`
 
 ---
 

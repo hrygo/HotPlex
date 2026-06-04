@@ -29,9 +29,14 @@ type FeishuRateLimiter struct {
 
 // NewFeishuRateLimiter creates a rate limiter with standard intervals.
 func NewFeishuRateLimiter() *FeishuRateLimiter {
+	return NewFeishuRateLimiterWithLimits(100*time.Millisecond, 1500*time.Millisecond)
+}
+
+// NewFeishuRateLimiterWithLimits creates a rate limiter with custom intervals (for tests).
+func NewFeishuRateLimiterWithLimits(cardKit, patch time.Duration) *FeishuRateLimiter {
 	return &FeishuRateLimiter{
-		cardKitLimit: 100 * time.Millisecond,
-		patchLimit:   1500 * time.Millisecond,
+		cardKitLimit: cardKit,
+		patchLimit:   patch,
 		lastCardKit:  make(map[string]time.Time),
 		lastPatch:    make(map[string]time.Time),
 		done:         make(chan struct{}),

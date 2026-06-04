@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -9,28 +9,32 @@ import { useQueryState, parseAsString } from 'nuqs';
 import { useHotPlexRuntime } from '@/lib/adapters/hotplex-runtime-adapter';
 import { useSessions } from '@/lib/hooks/useSessions';
 import { Thread } from '@/components/assistant-ui/thread';
-import { BrandIcon } from '@/components/icons';
+import { BrandIcon, WORKER_DISPLAY } from '@/components/icons';
 import { SessionPanel } from './SessionPanel';
 import { NewSessionModal } from './NewSessionModal';
 import { MetricsBar } from '@/components/assistant-ui/MetricsBar';
-import { workerType, workDir, httpBase, type ConnectionState } from '@/lib/config';
+import { workerType as defaultWorkerType, workDir, httpBase, type ConnectionState } from '@/lib/config';
 import type { SessionMetrics } from '@/lib/hooks/useMetrics';
+import { useSkillsCache } from '@/lib/hooks/useSkillsCache';
 
 function ChatInterface({
   sessionId,
   overrideWorkDir,
   onMetricsChange,
+  onSessionStateChange,
 }: {
   sessionId: string | null;
   overrideWorkDir?: string;
   onMetricsChange?: (metrics: SessionMetrics) => void;
+  onSessionStateChange?: (state: string) => void;
 }) {
-  const [skills, setSkills] = useState<string[]>([]);
+  const { skills, mergeSkills } = useSkillsCache(sessionId);
   const adapter = useHotPlexRuntime({
     sessionId: sessionId ?? undefined,
     overrideWorkDir,
     onMetricsChange,
-    onSkillsChange: setSkills,
+    onSkillsChange: mergeSkills,
+    onSessionStateChange,
   });
 
   const runtime = useExternalStoreRuntime(adapter);
@@ -63,7 +67,6 @@ export default function ChatContainer() {
   const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(null);
 
   // nuqs deep link params
-  const [urlWorker] = useQueryState('worker', parseAsString);
   const [urlDir] = useQueryState('dir', parseAsString);
 
   const {
@@ -74,6 +77,7 @@ export default function ChatContainer() {
     createNewSession,
     removeSession,
     sessions,
+    updateSessionState,
   } = useSessions({
     onSelect: () => {},
   });
@@ -128,7 +132,7 @@ export default function ChatContainer() {
                   <h1 className="text-xs font-display font-bold text-[var(--text-primary)] leading-none mb-0.5">HotPlex Agent</h1>
                   <p className="text-[9px] text-[var(--text-faint)] font-mono uppercase tracking-widest flex items-center gap-1.5">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent-emerald)] shadow-[0_0_6px_var(--accent-emerald)]" />
-                    Active · {workerType}
+                    Active · {WORKER_DISPLAY[activeSession?.worker_type ?? defaultWorkerType] ?? activeSession?.worker_type ?? defaultWorkerType}
                   </p>
                   {(urlDir || workDir) && (
                     <p className="text-[9px] text-[var(--text-faint)] font-mono mt-0.5 truncate max-w-[200px]" title={urlDir || workDir}>
@@ -151,7 +155,7 @@ export default function ChatContainer() {
                   href={`${httpBase()}/docs/`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-[var(--accent-gold)] bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 hover:bg-[var(--accent-gold)] hover:text-black rounded-full transition-all font-bold text-[10px] uppercase tracking-wider shadow-sm mr-1"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[var(--accent-gold)] bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 hover:bg-[var(--accent-gold)] hover:text-black rounded-full transition-all font-bold text-[10px] uppercase tracking-wider shadow-sm"
                   title="Documentation"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -205,6 +209,7 @@ export default function ChatContainer() {
               sessionId={activeSessionId}
               overrideWorkDir={urlDir ?? undefined}
               onMetricsChange={setSessionMetrics}
+              onSessionStateChange={(state) => activeSessionId && updateSessionState(activeSessionId, state)}
             />
           )}
         </div>
@@ -215,7 +220,6 @@ export default function ChatContainer() {
         <NewSessionModal
           onConfirm={handleModalConfirm}
           onCancel={() => setShowNewModal(false)}
-          existingTitles={sessions.filter(s => s.title).map(s => s.title!)}
         />
       )}
     </div>

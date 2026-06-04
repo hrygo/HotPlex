@@ -10,7 +10,8 @@ import type { ExternalStoreAdapter, ThreadMessageLike, AppendMessage } from '@as
 import { BrowserHotPlexClient } from '@/lib/ai-sdk-transport';
 import type { InitConfig, ContextUsageData, PermissionRequestData, QuestionRequestData, ElicitationRequestData } from '@/lib/ai-sdk-transport/client/types';
 import { WorkerStdioCommand } from '@/lib/ai-sdk-transport/client/constants';
-import { wsUrl, workerType, apiKey, workDir, allowedTools, type ConnectionState } from '@/lib/config';
+import { wsUrl, workerType, apiKey, isSameOrigin, workDir, allowedTools, type ConnectionState } from '@/lib/config';
+import { TODO_TOOLS } from '@/lib/tool-categories';
 import { useMetrics } from '@/lib/hooks/useMetrics';
 import { getSessionHistory, type ConversationRecord } from '@/lib/api/sessions';
 import { conversationTurnsToMessages } from '@/lib/utils/turn-replay';
@@ -48,7 +49,9 @@ export interface UseHotPlexRuntimeConfig {
   /** Called when session metrics update (for dashboard display). */
   onMetricsChange?: (metrics: import('@/lib/hooks/useMetrics').SessionMetrics) => void;
   /** Called when skills list is fetched from the worker. */
-  onSkillsChange?: (skills: string[]) => void;
+  onSkillsChange?: (skills: import('@/lib/ai-sdk-transport/client/types').SkillEntry[]) => void;
+  /** Called when session lifecycle state changes (running/idle/terminated etc). */
+  onSessionStateChange?: (state: string) => void;
   /** Custom welcome suggestions shown when thread is empty. */
   suggestions?: readonly ThreadSuggestion[];
 }
@@ -56,13 +59,7 @@ export interface UseHotPlexRuntimeConfig {
 // Content-signature prefix length for dedup — covers most short/medium responses.
 const CONTENT_SIG_PREFIX = 300;
 
-const DEFAULT_SUGGESTIONS: readonly ThreadSuggestion[] = [
-  { title: '帮我写一个 React 组件', label: '代码', prompt: '帮我写一个 React 组件' },
-  { title: '解释这段代码的逻辑', label: '学习', prompt: '解释这段代码的逻辑' },
-  { title: '帮我调试这个错误', label: '调试', prompt: '帮我调试这个错误' },
-  { title: '重构这段代码让它更简洁', label: '重构', prompt: '重构这段代码让它更简洁' },
-  { title: '解释系统架构设计', label: '架构', prompt: '解释系统架构设计' },
-];
+const DEFAULT_SUGGESTIONS: readonly ThreadSuggestion[] = [];
 
 // ============================================================================
 // Message Converter
@@ -115,27 +112,25 @@ function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
 // History Conversion Helpers
 // ============================================================================
 
+// Extract min database turn ID from message IDs for cursor-based pagination.
+// Message ID format: "turn:{dbId}:{role}".
+function extractMinDbId(messages: { id: string }[]): number {
+  if (messages.length === 0) return 0;
+  let min = Number.MAX_SAFE_INTEGER;
+  for (const m of messages) {
+    if (!m.id.startsWith('turn:')) continue;
+    const parts = m.id.split(':');
+    const dbId = parts.length >= 2 ? parseInt(parts[1], 10) : 0;
+    if (dbId > 0 && dbId < min) min = dbId;
+  }
+  return min === Number.MAX_SAFE_INTEGER ? 0 : min;
+}
+
 // Convert ConversationRecord[] from API to HotPlexMessage[]
 function historyToMessages(records: ConversationRecord[]): HotPlexMessage[] {
   const turns = records.map(r => ({
-    id: r.id,
-    session_id: r.session_id,
-    seq: r.seq,
-    role: r.role,
-    content: r.content,
-    platform: r.platform,
-    user_id: r.user_id,
-    model: r.model,
+    ...r,
     success: r.success == null ? null : !!r.success,
-    source: r.source,
-    tools: r.tools,
-    tool_call_count: r.tool_call_count,
-    tokens_in: r.tokens_in,
-    tokens_out: r.tokens_out,
-    duration_ms: r.duration_ms,
-    cost_usd: r.cost_usd,
-    metadata: r.metadata,
-    created_at: r.created_at,
   }));
   return conversationTurnsToMessages(turns).map(m => ({
     id: m.id,
@@ -175,6 +170,7 @@ export function useHotPlexRuntime({
   overrideWorkDir,
   onMetricsChange,
   onSkillsChange,
+  onSessionStateChange,
   suggestions: configSuggestions,
 }: UseHotPlexRuntimeConfig = {}): ExternalStoreAdapter<HotPlexMessage> {
   // State
@@ -205,6 +201,8 @@ export function useHotPlexRuntime({
   // Stable ref for skills callback — avoids adding to useEffect deps
   const onSkillsChangeRef = useRef(onSkillsChange);
   onSkillsChangeRef.current = onSkillsChange;
+  const onSessionStateChangeRef = useRef(onSessionStateChange);
+  onSessionStateChangeRef.current = onSessionStateChange;
 
   // Track whether skills have been fetched (only after first turn completes)
   const skillsFetchedRef = useRef(false);
@@ -212,8 +210,8 @@ export function useHotPlexRuntime({
   // Track pending interaction requests for response routing
   const interactionMapRef = useRef<Map<string, { type: 'permission' | 'question' | 'elicitation' }>>(new Map());
 
-  // Cache min seq for cursor-based pagination (avoid O(n) scan on each load)
-  const minSeqRef = useRef<number>(0);
+  // Cache min turn ID for cursor-based pagination (avoid O(n) scan on each load)
+  const minIdRef = useRef<number>(0);
 
   // Metrics tracking (spec §4.5 — Token & latency dashboard)
   const { sessionMetrics, startTurn, recordTurn } = useMetrics();
@@ -262,13 +260,9 @@ export function useHotPlexRuntime({
             });
             return [...serverMessages, ...liveOnly];
           });
-          // Update minSeq cache for cursor-based pagination
+          // Update minId cache for cursor-based pagination
           if (serverMessages.length > 0) {
-            const minSeq = Math.min(...serverMessages.map(m => {
-              const seq = parseInt(m.id.split('_').pop() || '0', 10);
-              return seq > 0 ? seq : Number.MAX_SAFE_INTEGER;
-            }));
-            minSeqRef.current = minSeq === Number.MAX_SAFE_INTEGER ? 0 : minSeq;
+            minIdRef.current = extractMinDbId(serverMessages);
           }
         }
         setHistoryHasMore(res.has_more);
@@ -312,8 +306,8 @@ export function useHotPlexRuntime({
     const client = new BrowserHotPlexClient({
       url: wsUrl,
       workerType,
-      apiKey,
-      authToken: apiKey, // pass via init envelope auth.token for deferred auth
+      apiKey: isSameOrigin() ? undefined : apiKey,
+      authToken: isSameOrigin() ? undefined : apiKey,
       initConfig,
       heartbeat: {
         pingIntervalMs: 20000,
@@ -405,7 +399,7 @@ export function useHotPlexRuntime({
       setIsRunning(true);
     };
 
-    const handleDelta = (data: MessageDeltaData, env: Envelope) => {
+    const handleDelta = (data: MessageDeltaData, _env: Envelope) => {
       if (!data) return;
       pendingDelta += data.content || '';
       if (!deltaRafId) {
@@ -454,9 +448,7 @@ export function useHotPlexRuntime({
       setIsRunning(false);
     };
 
-    const TODO_TOOLS = new Set(['todo', 'todowrite', 'todo_write', 'task_list', 'checklist']);
-
-    const handleToolCall = (data: ToolCallData, env: Envelope) => {
+    const handleToolCall = (data: ToolCallData, _env: Envelope) => {
       if (!data) return;
       setMessages((prev) => {
         const lastMessage = prev[prev.length - 1];
@@ -485,7 +477,7 @@ export function useHotPlexRuntime({
       });
     };
 
-    const handleToolResult = (data: ToolResultData, env: Envelope) => {
+    const handleToolResult = (data: ToolResultData, _env: Envelope) => {
       if (!data) return;
       setMessages((prev) => {
         const lastMessage = prev[prev.length - 1];
@@ -558,8 +550,6 @@ export function useHotPlexRuntime({
 
       const hasData = data && (data.code || data.message);
       if (hasData) {
-        const detailsStr = data.details ? ` Details: ${JSON.stringify(data.details)}` : '';
-        const eventStr = env?.id ? ` EventID: ${env.id}` : '';
         if (isResumeRetry) {
           logger.warn('RuntimeAdapter', 'Worker recovery triggered', { code: data.code, message: data.message, details: data.details, eventId: env?.id });
         } else {
@@ -602,7 +592,7 @@ export function useHotPlexRuntime({
           errorMessage = "You've reached the rate limit. Please wait a moment before sending more messages.";
           break;
         case 'UNAUTHORIZED':
-          errorMessage = "Authentication failed. Please check your API key or connection settings.";
+          errorMessage = "Authentication failed: 401 — Check your API key configuration or consult the documentation.";
           break;
         case 'WORKER_OUTPUT_LIMIT':
           errorMessage = "The agent produced too much output and was terminated. Try to narrow down your request.";
@@ -679,10 +669,15 @@ export function useHotPlexRuntime({
     client.on('messageStart', handleMessageStart);
     client.on('toolCall', handleToolCall);
     client.on('toolResult', handleToolResult);
+    client.on('state', (data: { state: string }) => {
+      onSessionStateChangeRef.current?.(data.state);
+    });
 
     const handleContextUsage = (data: ContextUsageData) => {
       const names = data?.skills?.names ?? [];
-      onSkillsChangeRef.current?.(names);
+      // ContextUsage only has names, not full entries — pass minimal entries
+      const entries = names.map(name => ({ name, description: '', source: 'context' }));
+      onSkillsChangeRef.current?.(entries);
 
       // Inject into last assistant message's parts (same pattern as turn-summary in handleDone)
       setMessages((prev) => {
@@ -697,6 +692,12 @@ export function useHotPlexRuntime({
       });
     };
     client.on('contextUsage', handleContextUsage);
+    const handleSkillsList = (data: import('@/lib/ai-sdk-transport/client/types').SkillsListData) => {
+      skillsFetchedRef.current = true;
+      const entries = data?.skills ?? [];
+      onSkillsChangeRef.current?.(entries);
+    };
+    client.on('skillsList', handleSkillsList);
 
     // Interaction event handlers — inject as tool-call parts for PermissionCard rendering
     const handlePermissionRequest = (data: PermissionRequestData, _env: Envelope) => {
@@ -783,6 +784,7 @@ export function useHotPlexRuntime({
       client.off('toolCall', handleToolCall);
       client.off('toolResult', handleToolResult);
       client.off('contextUsage', handleContextUsage);
+      client.off('skillsList', handleSkillsList);
       client.off('permissionRequest', handlePermissionRequest);
       client.off('questionRequest', handleQuestionRequest);
       client.off('elicitationRequest', handleElicitationRequest);
@@ -931,11 +933,11 @@ export function useHotPlexRuntime({
     historyLoadingRef.current = true;
 
     try {
-      // Use cached minSeq for cursor (updated when loading history from server)
-      const cursorSeq = minSeqRef.current;
-      if (!cursorSeq) return { hasMore: false };
+      // Use cached minId for cursor (updated when loading history from server)
+      const cursorId = minIdRef.current;
+      if (!cursorId) return { hasMore: false };
 
-      const res = await getSessionHistory(sid, { beforeSeq: cursorSeq, limit: 50 });
+      const res = await getSessionHistory(sid, { beforeId: cursorId, limit: 50 });
       if (res.records.length > 0) {
         const olderMessages = historyToMessages(res.records);
         setMessages(prev => {
@@ -943,13 +945,10 @@ export function useHotPlexRuntime({
           const newOnly = olderMessages.filter(m => !existingIds.has(m.id));
           return [...newOnly, ...prev];
         });
-        // Update minSeq cache for next page
+        // Update minId cache for next page
         if (olderMessages.length > 0) {
-          const minSeq = Math.min(...olderMessages.map(m => {
-            const seq = parseInt(m.id.split('_').pop() || '0', 10);
-            return seq > 0 ? seq : Number.MAX_SAFE_INTEGER;
-          }));
-          minSeqRef.current = minSeq === Number.MAX_SAFE_INTEGER ? cursorSeq : minSeq;
+          const extracted = extractMinDbId(olderMessages);
+          minIdRef.current = extracted || cursorId;
         }
       }
       setHistoryHasMore(res.has_more);
