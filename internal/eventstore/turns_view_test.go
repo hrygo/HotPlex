@@ -201,8 +201,6 @@ func TestTurnsView_IncompleteTurn(t *testing.T) {
 	})
 }
 
-func raw(s string) json.RawMessage { return json.RawMessage(s) }
-
 func TestTurnsView_UserInputJoinsSession(t *testing.T) {
 	store := newTestStoreWithViews(t)
 	ctx := context.Background()
