@@ -541,6 +541,10 @@ func processFile(path string, nav []NavItem) error {
 	content := buf.String()
 	// Removed naive strings.ReplaceAll, now handled by linkTransformer
 
+	// Wrap tables in scrollable containers for horizontal overflow
+	content = strings.ReplaceAll(content, "<table>", `<div class="table-wrap"><table>`)
+	content = strings.ReplaceAll(content, "</table>", "</table></div>")
+
 	page.Content = template.HTML(content)
 	page.Nav = nav
 	page.ActivePath = strings.TrimSuffix(normalizePath(relPath), ".md") + ".html"
@@ -957,29 +961,47 @@ const layout = `
         .prose a:hover { border-bottom-color: var(--clay); }
 
         /* Tables */
-        .prose table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            margin: 40px 0;
-            font-size: 15px;
+        .table-wrap {
+            overflow-x: auto;
             border: 1px solid var(--gray-300);
             border-radius: 12px;
-            overflow: hidden;
+            margin: 40px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        .prose table {
+            width: max-content;
+            min-width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 13.5px;
         }
         .prose th {
             background: var(--gray-50);
             text-align: left;
-            padding: 14px 20px;
+            padding: 10px 14px;
             border-bottom: 1px solid var(--gray-300);
             color: var(--slate);
             font-weight: 600;
             font-family: var(--font-display);
+            font-size: 12px;
+            white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
         }
         .prose td {
-            padding: 14px 20px;
+            padding: 10px 14px;
             border-bottom: 1px solid var(--gray-100);
             color: var(--gray-700);
+            vertical-align: top;
+        }
+        .prose td code {
+            white-space: nowrap;
+            font-size: 0.82em;
+            padding: 2px 5px;
+        }
+        .prose th code {
+            white-space: nowrap;
+            font-size: 0.88em;
         }
         .prose tr:last-child td { border-bottom: none; }
 
