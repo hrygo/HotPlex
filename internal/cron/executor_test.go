@@ -191,6 +191,8 @@ func TestBuildWebhookPrefix_WebhookTrigger(t *testing.T) {
 	require.Contains(t, prefix, "PR #642")
 	require.Contains(t, prefix, "TARGET_PR=642")
 	require.Contains(t, prefix, "WEBHOOK")
+	require.Contains(t, prefix, "仅审查")
+	require.Contains(t, prefix, "不要枚举")
 }
 
 func TestBuildWebhookPrefix_CronTrigger(t *testing.T) {

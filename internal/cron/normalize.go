@@ -94,6 +94,9 @@ func formatJobPrompt(job *CronJob, scheduledAt time.Time) string {
 // via webhook (PlatformKey contains trigger=webhook and pr_number).
 // This ensures the LLM targets the specific PR without enumerating all open PRs.
 func buildWebhookPrefix(job *CronJob) string {
+	if job.PlatformKey == nil {
+		return ""
+	}
 	prNum := job.PlatformKey["pr_number"]
 	if job.PlatformKey["trigger"] != "webhook" || prNum == "" {
 		return ""
