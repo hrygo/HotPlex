@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"html/template"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/adrg/frontmatter"
@@ -40,6 +42,7 @@ type Page struct {
 	ActivePath  string
 	RelRoot     string
 	ModTime     string
+	HasMermaid  bool
 }
 
 type NavItem struct {
@@ -121,6 +124,11 @@ func main() {
 	// Fetch Mermaid.js for offline rendering support.
 	if err := fetchMermaidJS(); err != nil {
 		log.Printf("Warning: failed to download mermaid.js for offline use: %v", err)
+	}
+
+	// Fetch Google Fonts for offline/GFW-friendly rendering.
+	if err := fetchGoogleFonts(); err != nil {
+		log.Printf("Warning: failed to download Google Fonts: %v", err)
 	}
 
 	// Phase 1: Discovery via crawling starting from index.md
@@ -546,6 +554,8 @@ func processFile(path string, nav []NavItem) error {
 	content = strings.ReplaceAll(content, "</table>", "</table></div>")
 
 	page.Content = template.HTML(content)
+	page.HasMermaid = strings.Contains(content, "language-mermaid") ||
+		strings.Contains(content, "language-graph")
 	page.Nav = nav
 	page.ActivePath = strings.TrimSuffix(normalizePath(relPath), ".md") + ".html"
 
@@ -612,6 +622,119 @@ func fetchMermaidJS() error {
 	return nil
 }
 
+// fontURL is the Google Fonts CSS endpoint used by the documentation.
+// Weights are trimmed to only what the CSS template uses (400-700) to keep
+// the embedded binary size reasonable. Noto Serif SC (CJK serif fallback)
+// is excluded: at 5.7 MB for just 2 weights it dominates binary size, and
+// system CJK serif fonts (Songti SC / SimSun / Noto Serif CJK) provide
+// an acceptable fallback for the small amount of Chinese text in the docs.
+const fontURL = "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700&family=JetBrains+Mono:ital,wght@0,400;0,700;1,400&family=Outfit:wght@400;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400&display=swap"
+
+// fontFileRe matches font file URLs in Google Fonts CSS (woff2 preferred).
+var fontFileRe = regexp.MustCompile(`url\((https://fonts\.gstatic\.com/[^)]+)\)`)
+
+// fetchGoogleFonts downloads Google Fonts CSS and font files locally so the
+// documentation works without external network access and avoids GFW latency.
+func fetchGoogleFonts() error {
+	fontDir := filepath.Join(docsDest, "assets", "fonts")
+	if err := os.MkdirAll(fontDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir fonts: %w", err)
+	}
+
+	// Request woff2 format via user-agent (Google Fonts returns woff2 for modern browsers).
+	// Use a 30s timeout to avoid hanging on GFW-interfered networks.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", fontURL, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("download CSS: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download CSS status %d", resp.StatusCode)
+	}
+
+	cssBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read CSS: %w", err)
+	}
+	css := string(cssBytes)
+
+	// Download each font file and rewrite URLs to local paths.
+	matches := fontFileRe.FindAllStringSubmatch(css, -1)
+	seen := make(map[string]string) // remote URL -> local filename
+
+	for _, m := range matches {
+		remoteURL := m[1]
+		if local, ok := seen[remoteURL]; ok {
+			css = strings.ReplaceAll(css, "url("+remoteURL+")", "url("+local+")")
+			continue
+		}
+
+		// Derive a stable filename from the URL path.
+		base := filepath.Base(remoteURL)
+		// Remove query string if present.
+		if idx := strings.Index(base, "?"); idx >= 0 {
+			base = base[:idx]
+		}
+		localFile := base
+		localPath := filepath.Join(fontDir, localFile)
+
+		fontReqCtx, fontCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		fontReq, err := http.NewRequestWithContext(fontReqCtx, "GET", remoteURL, http.NoBody)
+		if err != nil {
+			fontCancel()
+			log.Printf("Warning: failed to create font request %s: %v", remoteURL, err)
+			continue
+		}
+		fontResp, err := http.DefaultClient.Do(fontReq)
+		if err != nil {
+			fontCancel()
+			log.Printf("Warning: failed to download font %s: %v", remoteURL, err)
+			continue
+		}
+		if fontResp.StatusCode != http.StatusOK {
+			_ = fontResp.Body.Close()
+			fontCancel()
+			log.Printf("Warning: font download %s returned status %d", remoteURL, fontResp.StatusCode)
+			continue
+		}
+		// LimitReader caps each font file to 2 MB to defend against
+		// unexpected responses (e.g. HTML error pages from CDNs).
+		fontData, err := io.ReadAll(io.LimitReader(fontResp.Body, 2<<20))
+		_ = fontResp.Body.Close()
+		fontCancel()
+		if err != nil {
+			log.Printf("Warning: failed to read font %s: %v", remoteURL, err)
+			continue
+		}
+
+		if err := os.WriteFile(localPath, fontData, 0o644); err != nil {
+			log.Printf("Warning: failed to write font %s: %v", localPath, err)
+			continue
+		}
+
+		seen[remoteURL] = localFile
+		css = strings.ReplaceAll(css, "url("+remoteURL+")", "url("+localFile+")")
+	}
+
+	// Write the rewritten CSS.
+	cssPath := filepath.Join(fontDir, "fonts.css")
+	if err := os.WriteFile(cssPath, []byte(css), 0o644); err != nil {
+		return fmt.Errorf("write fonts.css: %w", err)
+	}
+
+	fmt.Printf("Downloaded %d font files to %s\n", len(seen), fontDir)
+	return nil
+}
+
 func toTitle(s string) string {
 	if s == "" {
 		return ""
@@ -663,10 +786,8 @@ const layout = `
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} | HotPlex Docs</title>
     <link rel="icon" type="image/png" href="{{.RelRoot}}assets/logo.png">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Noto+Serif+SC:wght@200..900&family=Outfit:wght@100..900&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Noto+Serif+SC:wght@200..900&family=Outfit:wght@100..900&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap"></noscript>
+    <link rel="preload" href="{{.RelRoot}}assets/fonts/fonts.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="{{.RelRoot}}assets/fonts/fonts.css"></noscript>
     <style>
         :root {
             --ivory:    #FAF9F5;
@@ -1032,6 +1153,7 @@ const layout = `
             border: 1px solid var(--gray-300);
         }
 
+        {{if .HasMermaid}}
         /* Mermaid */
         .mermaid {
             background: var(--white);
@@ -1054,6 +1176,7 @@ const layout = `
             margin: 0;
             padding: 0;
         }
+        {{end}}
 
         /* Callouts / Blockquotes */
         .prose blockquote {
@@ -1199,9 +1322,10 @@ const layout = `
             </footer>
         </article>
     </main>
-    <script defer src="{{.RelRoot}}assets/mermaid.min.js"></script>
+    {{if .HasMermaid}}<script defer src="{{.RelRoot}}assets/mermaid.min.js"></script>{{end}}
     <script>
         window.addEventListener('load', function() {
+            {{if .HasMermaid}}
             if (typeof mermaid !== 'undefined') {
                 // 1. Convert code blocks to div.mermaid
                 const blocks = document.querySelectorAll('pre code.language-mermaid, pre code.language-graph');
@@ -1215,13 +1339,14 @@ const layout = `
                 });
 
                 // 2. Initialize and Render
-                mermaid.initialize({ 
+                mermaid.initialize({
                     startOnLoad: false,
                     theme: 'neutral',
                     securityLevel: 'loose'
                 });
                 mermaid.init(undefined, '.mermaid');
             }
+            {{end}}
 
             // Add copy buttons to code blocks
             document.querySelectorAll('.prose pre').forEach(pre => {
