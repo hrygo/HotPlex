@@ -14,6 +14,20 @@ func addCORSHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key")
 }
 
+// CreateSession creates a new session.
+//
+// @Summary      Create session
+// @Description  Creates a new AI agent session. Requires session:write scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        session_id   query    string  false  "Custom session ID (auto-generated if omitted)"
+// @Param        user_id      query    string  false  "User identity"           default(anonymous)
+// @Param        worker_type  query    string  false  "Worker type"             default(claudecode)
+// @Success      200          {object}  CreateSessionResponse
+// @Failure      403          {object}  ErrorResponse  "Insufficient scope: need session:write"
+// @Failure      500          {object}  ErrorResponse  "Failed to create session"
+// @Router       /admin/sessions [post]
 func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionWrite) {
 		http.Error(w, "insufficient scope: need session:write", http.StatusForbidden)
@@ -45,6 +59,21 @@ func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]string{"session_id": id})
 }
 
+// ListSessions returns all sessions visible to the admin.
+//
+// @Summary      List sessions
+// @Description  Lists all sessions, optionally filtered by user_id and platform. Requires session:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        user_id   query    string  false  "Filter by user ID"
+// @Param        platform  query    string  false  "Filter by platform (webchat/slack/feishu)"
+// @Param        limit     query    int     false  "Max results"  default(100)
+// @Param        offset    query    int     false  "Pagination offset"  default(0)
+// @Success      200       {object}  SessionListResponse
+// @Failure      403       {object}  ErrorResponse  "Insufficient scope: need session:read"
+// @Failure      500       {object}  ErrorResponse  "Failed to list sessions"
+// @Router       /admin/sessions [get]
 func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionRead) {
 		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)
@@ -80,6 +109,18 @@ func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetSession returns details for a single session.
+//
+// @Summary      Get session
+// @Description  Returns full session details by ID. Requires session:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        id   path      string  true  "Session ID"
+// @Success      200  {object}  object
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need session:read"
+// @Failure      404  {object}  ErrorResponse  "Session not found"
+// @Router       /admin/sessions/{id} [get]
 func (a *AdminAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionRead) {
 		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)
@@ -95,6 +136,17 @@ func (a *AdminAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, si)
 }
 
+// DeleteSession deletes a session by ID.
+//
+// @Summary      Delete session
+// @Description  Permanently deletes a session. Requires session:delete scope.
+// @Tags         Admin API
+// @Security     AdminBearerAuth
+// @Param        id   path  string  true  "Session ID"
+// @Success      204  "Session deleted"
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need session:delete"
+// @Failure      500  {object}  ErrorResponse  "Failed to delete session"
+// @Router       /admin/sessions/{id} [delete]
 func (a *AdminAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionKill) {
 		http.Error(w, "insufficient scope: need session:delete", http.StatusForbidden)
@@ -113,6 +165,17 @@ func (a *AdminAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// TerminateSession gracefully terminates a session's worker.
+//
+// @Summary      Terminate session
+// @Description  Sends termination signal to the session worker (SIGTERM then SIGKILL). Requires session:write scope.
+// @Tags         Admin API
+// @Security     AdminBearerAuth
+// @Param        id   path  string  true  "Session ID"
+// @Success      204  "Session terminated"
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need session:write"
+// @Failure      500  {object}  ErrorResponse  "Failed to terminate session"
+// @Router       /admin/sessions/{id}/terminate [post]
 func (a *AdminAPI) TerminateSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionWrite) {
 		http.Error(w, "insufficient scope: need session:write", http.StatusForbidden)
@@ -131,6 +194,16 @@ func (a *AdminAPI) TerminateSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// PoolStats returns session pool statistics.
+//
+// @Summary      Get pool stats
+// @Description  Returns total, max, and per-user session pool counts. Requires stats:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {object}  PoolStatsResponse
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need stats:read"
+// @Router       /admin/sessions/pool [get]
 func (a *AdminAPI) PoolStats(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeStatsRead) {
 		http.Error(w, "insufficient scope: need stats:read", http.StatusForbidden)
@@ -144,6 +217,19 @@ func (a *AdminAPI) PoolStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleSessionStats returns turn statistics for a session.
+//
+// @Summary      Get session stats
+// @Description  Returns turn count and token usage statistics for a session. Requires session:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        id   path      string  true  "Session ID"
+// @Success      200  {object}  object
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need session:read"
+// @Failure      404  {object}  ErrorResponse  "Session not found"
+// @Failure      503  {object}  ErrorResponse  "Turn stats not available"
+// @Router       /admin/sessions/{id}/stats [get]
 func (a *AdminAPI) HandleSessionStats(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionRead) {
 		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)

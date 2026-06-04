@@ -19,6 +19,16 @@ type CronSchedulerProvider interface {
 }
 
 // HandleCronList returns all cron jobs.
+//
+// @Summary      List cron jobs
+// @Description  Returns all configured cron jobs. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {array}   object
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      500  {object}  ErrorResponse  "Internal error"
+// @Router       /admin/cron/jobs [get]
 func (a *AdminAPI) HandleCronList(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
 		return
@@ -36,6 +46,17 @@ func (a *AdminAPI) HandleCronList(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCronGet returns a single cron job.
+//
+// @Summary      Get cron job
+// @Description  Returns details for a single cron job by ID. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        id   path      string  true  "Cron job ID"
+// @Success      200  {object}  object
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      404  {object}  ErrorResponse  "Job not found"
+// @Router       /admin/cron/jobs/{id} [get]
 func (a *AdminAPI) HandleCronGet(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
 		return
@@ -54,6 +75,18 @@ func (a *AdminAPI) HandleCronGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCronCreate creates a new cron job.
+//
+// @Summary      Create cron job
+// @Description  Creates a new scheduled cron job. Requires admin:write scope.
+// @Tags         Admin API
+// @Accept       json
+// @Security     AdminBearerAuth
+// @Param        body  body  object  true  "Cron job definition"
+// @Success      201   "Job created"
+// @Failure      400   {object}  ErrorResponse  "Invalid JSON"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      500   {object}  ErrorResponse  "Internal error"
+// @Router       /admin/cron/jobs [post]
 func (a *AdminAPI) HandleCronCreate(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
 		return
@@ -76,6 +109,19 @@ func (a *AdminAPI) HandleCronCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCronUpdate updates an existing cron job.
+//
+// @Summary      Update cron job
+// @Description  Partially updates an existing cron job. Requires admin:write scope.
+// @Tags         Admin API
+// @Accept       json
+// @Security     AdminBearerAuth
+// @Param        id    path  string  true  "Cron job ID"
+// @Param        body  body  object  true  "Fields to update"
+// @Success      204   "Job updated"
+// @Failure      400   {object}  ErrorResponse  "Invalid JSON"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      404   {object}  ErrorResponse  "Job not found"
+// @Router       /admin/cron/jobs/{id} [patch]
 func (a *AdminAPI) HandleCronUpdate(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
 		return
@@ -99,6 +145,16 @@ func (a *AdminAPI) HandleCronUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCronDelete deletes a cron job.
+//
+// @Summary      Delete cron job
+// @Description  Permanently deletes a cron job. Requires admin:write scope.
+// @Tags         Admin API
+// @Security     AdminBearerAuth
+// @Param        id   path  string  true  "Cron job ID"
+// @Success      204  "Job deleted"
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      404  {object}  ErrorResponse  "Job not found"
+// @Router       /admin/cron/jobs/{id} [delete]
 func (a *AdminAPI) HandleCronDelete(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
 		return
@@ -117,6 +173,16 @@ func (a *AdminAPI) HandleCronDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCronTrigger manually triggers a cron job run.
+//
+// @Summary      Trigger cron job
+// @Description  Manually triggers an immediate run of a cron job. Requires admin:write scope.
+// @Tags         Admin API
+// @Security     AdminBearerAuth
+// @Param        id   path  string  true  "Cron job ID"
+// @Success      202  "Job triggered"
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      404  {object}  ErrorResponse  "Job not found"
+// @Router       /admin/cron/jobs/{id}/run [post]
 func (a *AdminAPI) HandleCronTrigger(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
 		return
@@ -134,7 +200,18 @@ func (a *AdminAPI) HandleCronTrigger(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// HandleCronRunHistory returns the turn history for a cron job's latest run.
+// HandleCronRunHistory returns the run history for a cron job.
+//
+// @Summary      Get cron job run history
+// @Description  Returns the execution history for a cron job. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        id   path      string  true  "Cron job ID"
+// @Success      200  {array}   object
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      404  {object}  ErrorResponse  "Job not found"
+// @Router       /admin/cron/jobs/{id}/runs [get]
 func (a *AdminAPI) HandleCronRunHistory(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
 		return

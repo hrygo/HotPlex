@@ -192,6 +192,14 @@ func main() {
 		log.Printf("Warning: failed to copy logo.webp: %v", err)
 	}
 
+	// Copy swagger.json for Scalar API console
+	swaggerDst := filepath.Join(docsDest, "swagger", "swagger.json")
+	if err := os.MkdirAll(filepath.Dir(swaggerDst), 0o755); err != nil {
+		log.Printf("Warning: failed to create swagger output dir: %v", err)
+	} else if err := copyFile(filepath.Join("docs", "swagger", "swagger.json"), swaggerDst); err != nil {
+		log.Printf("Warning: failed to copy swagger.json: %v", err)
+	}
+
 	// Phase 3: Process discovered markdown files
 	for relPath := range discoveredFiles {
 		srcPath := filepath.Join(docsSrc, relPath)
@@ -548,10 +556,6 @@ func processFile(path string, nav []NavItem) error {
 
 	content := buf.String()
 	// Removed naive strings.ReplaceAll, now handled by linkTransformer
-
-	// Wrap tables in scrollable containers for horizontal overflow
-	content = strings.ReplaceAll(content, "<table>", `<div class="table-wrap"><table>`)
-	content = strings.ReplaceAll(content, "</table>", "</table></div>")
 
 	page.Content = template.HTML(content)
 	page.HasMermaid = strings.Contains(content, "language-mermaid") ||
@@ -1082,47 +1086,29 @@ const layout = `
         .prose a:hover { border-bottom-color: var(--clay); }
 
         /* Tables */
-        .table-wrap {
-            overflow-x: auto;
-            border: 1px solid var(--gray-300);
-            border-radius: 12px;
-            margin: 40px 0;
-            -webkit-overflow-scrolling: touch;
-        }
         .prose table {
-            width: max-content;
-            min-width: 100%;
+            width: 100%;
             border-collapse: separate;
             border-spacing: 0;
-            font-size: 13.5px;
+            margin: 40px 0;
+            font-size: 15px;
+            border: 1px solid var(--gray-300);
+            border-radius: 12px;
+            overflow: hidden;
         }
         .prose th {
             background: var(--gray-50);
             text-align: left;
-            padding: 10px 14px;
+            padding: 14px 20px;
             border-bottom: 1px solid var(--gray-300);
             color: var(--slate);
             font-weight: 600;
             font-family: var(--font-display);
-            font-size: 12px;
-            white-space: nowrap;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
         }
         .prose td {
-            padding: 10px 14px;
+            padding: 14px 20px;
             border-bottom: 1px solid var(--gray-100);
             color: var(--gray-700);
-            vertical-align: top;
-        }
-        .prose td code {
-            white-space: nowrap;
-            font-size: 0.82em;
-            padding: 2px 5px;
-        }
-        .prose th code {
-            white-space: nowrap;
-            font-size: 0.88em;
         }
         .prose tr:last-child td { border-bottom: none; }
 

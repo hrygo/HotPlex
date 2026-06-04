@@ -14,6 +14,17 @@ import (
 	"github.com/hrygo/hotplex/internal/session"
 )
 
+// HandleStats returns gateway runtime statistics.
+//
+// @Summary      Get gateway statistics
+// @Description  Returns uptime, active sessions, WebSocket connections, and per-worker-type aggregates.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {object}  StatsResponse
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need stats:read"
+// @Failure      503  {object}  ErrorResponse  "Failed to query sessions"
+// @Router       /admin/stats [get]
 func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeStatsRead) {
 		http.Error(w, "insufficient scope: need stats:read", http.StatusForbidden)
@@ -60,6 +71,16 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleHealth reports the health of all gateway components.
+//
+// @Summary      Get gateway health
+// @Description  Returns health status for gateway, database, and workers. Requires health:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {object}  HealthResponse
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need health:read"
+// @Router       /admin/health [get]
 func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	cfg := a.cfg.Get()
 	dbHealthy := true
@@ -100,6 +121,17 @@ func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleWorkerHealth reports per-worker health statuses.
+//
+// @Summary      Get worker health
+// @Description  Returns health status for each connected worker. Returns 503 if any worker is unhealthy.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {object}  WorkerHealthResponse
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need health:read"
+// @Failure      503  {object}  WorkerHealthResponse  "One or more workers are unhealthy"
+// @Router       /admin/health/workers [get]
 func (a *AdminAPI) HandleWorkerHealth(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeHealthRead) {
 		http.Error(w, "insufficient scope: need health:read", http.StatusForbidden)
@@ -127,6 +159,17 @@ func (a *AdminAPI) HandleWorkerHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
+// HandleLogs returns recent gateway log entries.
+//
+// @Summary      Get recent logs
+// @Description  Returns the most recent log entries from the in-memory ring buffer. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        limit  query    int  false  "Max entries to return (1-1000)"  default(100)
+// @Success      200    {object}  LogsResponse
+// @Failure      403    {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Router       /admin/logs [get]
 func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminRead) {
 		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
@@ -149,6 +192,19 @@ func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleConfigValidate validates a partial gateway configuration without applying it.
+//
+// @Summary      Validate config
+// @Description  Validates a partial configuration object and returns any errors or warnings. Requires config:read scope.
+// @Tags         Admin API
+// @Accept       json
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        body  body      ConfigValidateRequest  true  "Partial configuration to validate"
+// @Success      200   {object}  ConfigValidateResponse
+// @Failure      400   {object}  ConfigValidateResponse  "Validation failed"
+// @Failure      403   {object}  ErrorResponse           "Insufficient scope: need config:read"
+// @Router       /admin/config/validate [post]
 func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeConfigRead) {
 		http.Error(w, "insufficient scope: need config:read", http.StatusForbidden)
@@ -236,6 +292,20 @@ func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// HandleConfigRollback rolls back the gateway configuration to a previous version.
+//
+// @Summary      Rollback config
+// @Description  Reverts the live configuration to a specified history version. Requires config:read scope.
+// @Tags         Admin API
+// @Accept       json
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        body  body      RollbackRequest  true  "Version to roll back to"
+// @Success      200   {object}  RollbackResponse
+// @Failure      400   {object}  ErrorResponse  "Invalid version or rollback failed"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need config:read"
+// @Failure      503   {object}  ErrorResponse  "Config rollback not available"
+// @Router       /admin/config/rollback [post]
 func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeConfigRead) {
 		http.Error(w, "insufficient scope: need config:read", http.StatusForbidden)
@@ -272,6 +342,18 @@ func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// HandleDebugSession returns extended debug information for a session.
+//
+// @Summary      Debug session
+// @Description  Returns session details plus debug snapshot including worker state and turn count. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        id   path      string  true  "Session ID"
+// @Success      200  {object}  DebugSessionResponse
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      404  {object}  ErrorResponse  "Session not found"
+// @Router       /admin/debug/sessions/{id} [get]
 func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminRead) {
 		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
@@ -302,6 +384,17 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleRestart initiates a graceful gateway restart.
+//
+// @Summary      Restart gateway
+// @Description  Triggers a graceful gateway restart via the restart helper. Requires admin:write scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {object}  RestartResponse
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      503  {object}  ErrorResponse  "Restart not configured"
+// @Router       /admin/restart [post]
 func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminWrite) {
 		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)

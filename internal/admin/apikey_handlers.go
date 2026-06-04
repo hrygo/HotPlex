@@ -177,6 +177,17 @@ func (s *apiKeyUserStore) delete(ctx context.Context, id int64) error {
 	})
 }
 
+// HandleAPIKeyUserList returns all API key users.
+//
+// @Summary      List API key users
+// @Description  Returns all API key user records. API keys are masked in the response. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {array}   APIKeyUser
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      500  {object}  ErrorResponse  "Internal error"
+// @Router       /admin/api-keys [get]
 func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
 		respondJSON(w, []APIKeyUser{})
@@ -197,6 +208,20 @@ func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, users)
 }
 
+// HandleAPIKeyUserCreate creates a new API key user.
+//
+// @Summary      Create API key user
+// @Description  Creates a new API key user. If api_key is omitted, one is auto-generated. Returns the full API key only on creation. Requires admin:write scope.
+// @Tags         Admin API
+// @Accept       json
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        body  body      CreateAPIKeyRequest  true  "API key user to create"
+// @Success      201   {object}  APIKeyUser
+// @Failure      400   {object}  ErrorResponse  "Invalid JSON or validation failed"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      500   {object}  ErrorResponse  "Create failed"
+// @Router       /admin/api-keys [post]
 func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
@@ -230,6 +255,19 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 	respondJSON(w, u)
 }
 
+// HandleAPIKeyUserGet returns a single API key user.
+//
+// @Summary      Get API key user
+// @Description  Returns a single API key user by ID. API key is masked. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        id   path      int  true  "API key user ID"
+// @Success      200  {object}  APIKeyUser
+// @Failure      400  {object}  ErrorResponse  "Invalid ID"
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      404  {object}  ErrorResponse  "Not found"
+// @Router       /admin/api-keys/{id} [get]
 func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
@@ -250,6 +288,21 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, u)
 }
 
+// HandleAPIKeyUserUpdate updates an existing API key user.
+//
+// @Summary      Update API key user
+// @Description  Updates the user_id and description of an existing API key user. The api_key itself is immutable. Requires admin:write scope.
+// @Tags         Admin API
+// @Accept       json
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        id    path      int              true  "API key user ID"
+// @Param        body  body      CreateAPIKeyRequest  true  "Fields to update"
+// @Success      200   {object}  APIKeyUser
+// @Failure      400   {object}  ErrorResponse  "Invalid JSON or validation failed"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      404   {object}  ErrorResponse  "Not found"
+// @Router       /admin/api-keys/{id} [patch]
 func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
@@ -292,6 +345,18 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 	respondJSON(w, APIKeyUser{ID: id, APIKey: maskAPIKey(oldUser.APIKey), UserID: u.UserID, Description: u.Description})
 }
 
+// HandleAPIKeyUserDelete deletes an API key user.
+//
+// @Summary      Delete API key user
+// @Description  Permanently deletes an API key user and revokes the associated API key. Requires admin:write scope.
+// @Tags         Admin API
+// @Security     AdminBearerAuth
+// @Param        id   path  int  true  "API key user ID"
+// @Success      204  "Deleted"
+// @Failure      400  {object}  ErrorResponse  "Invalid ID"
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      404  {object}  ErrorResponse  "Not found"
+// @Router       /admin/api-keys/{id} [delete]
 func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
