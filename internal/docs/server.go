@@ -20,8 +20,8 @@ var fileServer = http.FileServerFS(docsFS)
 // treated as empty.
 func Handler(csp string) http.Handler {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		setCacheHeaders(w, r.URL.Path)
-		fileServer.ServeHTTP(w, r)
+		rw := &cacheHeaderSniffer{ResponseWriter: w, path: r.URL.Path}
+		fileServer.ServeHTTP(rw, r)
 	})
 	return security.SecurityHeaders(
 		security.DefaultDocsCSP, csp,
@@ -32,6 +32,39 @@ func Handler(csp string) http.Handler {
 }
 
 // --- Cache-Control ---
+
+// cacheHeaderSniffer delays Cache-Control header assignment until after the
+// file server writes its status code. This prevents caching headers from
+// being set on error responses (e.g. 404 Not Found).
+type cacheHeaderSniffer struct {
+	http.ResponseWriter
+	path        string
+	codeWritten bool
+}
+
+func (s *cacheHeaderSniffer) WriteHeader(code int) {
+	if !s.codeWritten {
+		s.codeWritten = true
+		if code < 400 {
+			setCacheHeaders(s.ResponseWriter, s.path)
+		}
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *cacheHeaderSniffer) Write(b []byte) (int, error) {
+	if !s.codeWritten {
+		s.codeWritten = true
+		// Implicit 200 — safe to cache.
+		setCacheHeaders(s.ResponseWriter, s.path)
+	}
+	return s.ResponseWriter.Write(b)
+}
+
+// Unwrap returns the underlying ResponseWriter for http.ResponseController.
+func (s *cacheHeaderSniffer) Unwrap() http.ResponseWriter {
+	return s.ResponseWriter
+}
 
 // setCacheHeaders sets Cache-Control based on file extension:
 //   - Static assets (.js, .css, .png, .webp, .jpg, .svg, .woff2): 1 year, immutable
@@ -103,6 +136,10 @@ func gzipMiddleware(next http.Handler) http.Handler {
 type gzipResponseWriter struct {
 	gw *gzip.Writer
 	http.ResponseWriter
+}
+
+func (w *gzipResponseWriter) WriteHeader(code int) {
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {

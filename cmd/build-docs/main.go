@@ -622,7 +622,6 @@ func fetchMermaidJS() error {
 }
 
 // fontURL is the Google Fonts CSS endpoint used by the documentation.
-// fontURL is the Google Fonts CSS endpoint used by the documentation.
 // Weights are trimmed to only what the CSS template uses (400-700) to keep
 // the embedded binary size reasonable. Noto Serif SC (CJK serif fallback)
 // is excluded: at 5.7 MB for just 2 weights it dominates binary size, and
@@ -684,7 +683,12 @@ func fetchGoogleFonts() error {
 		localFile := base
 		localPath := filepath.Join(fontDir, localFile)
 
-		fontResp, err := http.Get(remoteURL)
+		fontReq, err := http.NewRequestWithContext(context.Background(), "GET", remoteURL, http.NoBody)
+		if err != nil {
+			log.Printf("Warning: failed to create font request %s: %v", remoteURL, err)
+			continue
+		}
+		fontResp, err := http.DefaultClient.Do(fontReq)
 		if err != nil {
 			log.Printf("Warning: failed to download font %s: %v", remoteURL, err)
 			continue
@@ -693,6 +697,10 @@ func fetchGoogleFonts() error {
 		_ = fontResp.Body.Close()
 		if err != nil {
 			log.Printf("Warning: failed to read font %s: %v", remoteURL, err)
+			continue
+		}
+		if fontResp.StatusCode != http.StatusOK {
+			log.Printf("Warning: font download %s returned status %d", remoteURL, fontResp.StatusCode)
 			continue
 		}
 
