@@ -189,6 +189,8 @@ jobs:
       - uses: ./.github/actions/setup-go-webchat
 
       - name: Verify + Vet + Build
+        env:
+          CGO_ENABLED: '0'
         run: go mod verify && go vet ./... && go build ./...
 
       - name: Build & validate docs
@@ -201,6 +203,8 @@ jobs:
         run: make check-swagger
 
       - name: Build gateway binary
+        env:
+          CGO_ENABLED: '0'
         run: |
           mkdir -p bin
           go build -o bin/hotplex ./cmd/hotplex
