@@ -55,7 +55,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 
 	start := time.Now()
 	defer func() {
-		observability.WorkerCreationDuration().Record(context.Background(), time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(params.wt))))
+		observability.WorkerCreationDuration().Record(params.ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(params.wt))))
 	}()
 
 	w, err := b.wf.NewWorker(params.wt)

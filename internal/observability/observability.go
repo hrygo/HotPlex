@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"crypto/tls"
 
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
@@ -24,6 +27,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
 	nooptrace "go.opentelemetry.io/otel/trace/noop"
+	"google.golang.org/grpc/credentials"
 )
 
 var (
@@ -134,7 +138,7 @@ func Shutdown(ctx context.Context) error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("observability shutdown errors: %v", errs)
+		return fmt.Errorf("observability shutdown: %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -255,7 +259,7 @@ func otlpInsecureOption(insecure bool) otlptracegrpc.Option {
 	if insecure {
 		return otlptracegrpc.WithInsecure()
 	}
-	return otlptracegrpc.WithTLSCredentials(nil)
+	return otlptracegrpc.WithTLSCredentials(credentials.NewTLS(&tls.Config{}))
 }
 
 func otlpCompressorOption(enabled bool) otlptracegrpc.Option {
@@ -269,7 +273,7 @@ func otlpMetricInsecureOption(insecure bool) otlpmetricgrpc.Option {
 	if insecure {
 		return otlpmetricgrpc.WithInsecure()
 	}
-	return otlpmetricgrpc.WithTLSCredentials(nil)
+	return otlpmetricgrpc.WithTLSCredentials(credentials.NewTLS(&tls.Config{}))
 }
 
 func otlpMetricCompressorOption(enabled bool) otlpmetricgrpc.Option {

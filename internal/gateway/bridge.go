@@ -145,7 +145,7 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID string, wt 
 	observability.SessionStartAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(wt))))
 	start := time.Now()
 	defer func() {
-		observability.SessionStartDuration().Record(context.Background(), time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(wt))))
+		observability.SessionStartDuration().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(wt))))
 	}()
 
 	// Create session in DB with bot_id and allowed_tools.
