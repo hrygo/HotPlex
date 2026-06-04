@@ -67,7 +67,7 @@ runs:
       uses: actions/cache@v5
       with:
         path: internal/docs/out
-        key: docs-${{ hashFiles('docs/**/*.md', 'docs/swagger/swagger.json', 'cmd/build-docs/**') }}
+        key: docs-${{ hashFiles('docs/**/*.md', 'cmd/hotplex/doc.go', 'internal/admin/*.go', 'internal/gateway/api.go', 'cmd/build-docs/**') }}
 
     - name: Build docs
       if: steps.docs-cache.outputs.cache-hit != 'true'

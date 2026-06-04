@@ -1,3 +1,6 @@
+// Package admin defines request/response types used exclusively for OpenAPI schema generation.
+// These types are referenced by swaggo annotations on HTTP handlers and do not participate
+// in runtime serialization — handlers construct responses via respondJSON(map[string]any{...}).
 package admin
 
 // ErrorResponse is the standard error envelope returned by all endpoints.
@@ -31,9 +34,8 @@ type GatewaySessionListResponse struct {
 }
 
 // GatewayCreateSessionResponse is returned by POST /api/sessions.
-type GatewayCreateSessionResponse struct {
-	SessionID string `json:"session_id" example:"550e8400-e29b-41d4-a716-446655440000"`
-}
+// Aliased to CreateSessionResponse — same shape, separate name for Gateway API tag grouping.
+type GatewayCreateSessionResponse = CreateSessionResponse
 
 // SwitchWorkDirRequest is the request body for POST /api/sessions/{id}/cd.
 type SwitchWorkDirRequest struct {
@@ -91,9 +93,9 @@ type HealthResponse struct {
 
 // WorkerHealthResponse is returned by GET /admin/health/workers.
 type WorkerHealthResponse struct {
-	Status    string        `json:"status" example:"ok"`
-	Workers   []interface{} `json:"workers"`
-	CheckedAt string        `json:"checked_at" example:"2024-01-01T00:00:00Z"`
+	Status    string `json:"status" example:"ok"`
+	Workers   []any  `json:"workers"`
+	CheckedAt string `json:"checked_at" example:"2024-01-01T00:00:00Z"`
 }
 
 // LogEntry is a single log record returned by GET /admin/logs.
@@ -190,11 +192,11 @@ type DebugSessionResponse struct {
 
 // DebugInfo holds debug details for a session.
 type DebugInfo struct {
-	Available    bool        `json:"available"`
-	HasWorker    bool        `json:"has_worker"`
-	TurnCount    int         `json:"turn_count"`
-	LastSeqSent  interface{} `json:"last_seq_sent"`
-	WorkerHealth interface{} `json:"worker_health"`
+	Available    bool `json:"available"`
+	HasWorker    bool `json:"has_worker"`
+	TurnCount    int  `json:"turn_count"`
+	LastSeqSent  any  `json:"last_seq_sent"`
+	WorkerHealth any  `json:"worker_health"`
 }
 
 // RestartResponse is returned by POST /admin/restart.
@@ -222,4 +224,140 @@ type WriteAgentConfigRequest struct {
 type CreateBotRequest struct {
 	Name string `json:"name" example:"my-bot"`
 	BotConfigAttrs
+}
+
+// CronJobCreateRequest is the request body for POST /admin/cron/jobs.
+type CronJobCreateRequest struct {
+	Name        string `json:"name" example:"daily-health"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	Schedule    struct {
+		Kind    string `json:"kind" example:"cron"`
+		At      string `json:"at,omitempty" example:"2026-01-01T09:00:00+08:00"`
+		EveryMs int64  `json:"every_ms,omitempty" example:"1800000"`
+		Expr    string `json:"expr,omitempty" example:"0 9 * * 1-5"`
+		TZ      string `json:"tz,omitempty" example:"Asia/Shanghai"`
+	} `json:"schedule"`
+	Payload struct {
+		Kind            string   `json:"kind" example:"isolated_session"`
+		Message         string   `json:"message"`
+		TargetSessionID string   `json:"target_session_id,omitempty"`
+		AllowedTools    []string `json:"allowed_tools,omitempty"`
+		WorkerType      string   `json:"worker_type,omitempty"`
+	} `json:"payload"`
+	WorkDir        string            `json:"work_dir,omitempty"`
+	BotID          string            `json:"bot_id" example:"bot_xxx"`
+	OwnerID        string            `json:"owner_id" example:"ou_xxx"`
+	Platform       string            `json:"platform,omitempty"`
+	PlatformKey    map[string]string `json:"platform_key,omitempty"`
+	TimeoutSec     int               `json:"timeout_sec,omitempty"`
+	DeleteAfterRun bool              `json:"delete_after_run,omitempty"`
+	Silent         bool              `json:"silent,omitempty"`
+	MaxRetries     int               `json:"max_retries,omitempty"`
+	MaxRuns        int               `json:"max_runs,omitempty"`
+	ExpiresAt      string            `json:"expires_at,omitempty" example:"2027-01-01T00:00:00+08:00"`
+}
+
+// CronJobUpdateRequest is the request body for PATCH /admin/cron/jobs/{id}.
+// All fields are optional; only provided fields are updated.
+type CronJobUpdateRequest = CronJobCreateRequest
+
+// CronJobResponse is returned by GET /admin/cron/jobs/{id}.
+type CronJobResponse struct {
+	ID          string `json:"id" example:"cj_abc123"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	Schedule    struct {
+		Kind    string `json:"kind"`
+		At      string `json:"at,omitempty"`
+		EveryMs int64  `json:"every_ms,omitempty"`
+		Expr    string `json:"expr,omitempty"`
+		TZ      string `json:"tz,omitempty"`
+	} `json:"schedule"`
+	Payload struct {
+		Kind            string   `json:"kind"`
+		Message         string   `json:"message"`
+		TargetSessionID string   `json:"target_session_id,omitempty"`
+		AllowedTools    []string `json:"allowed_tools,omitempty"`
+		WorkerType      string   `json:"worker_type,omitempty"`
+	} `json:"payload"`
+	WorkDir        string            `json:"work_dir,omitempty"`
+	BotID          string            `json:"bot_id,omitempty"`
+	OwnerID        string            `json:"owner_id,omitempty"`
+	Platform       string            `json:"platform,omitempty"`
+	PlatformKey    map[string]string `json:"platform_key,omitempty"`
+	TimeoutSec     int               `json:"timeout_sec,omitempty"`
+	DeleteAfterRun bool              `json:"delete_after_run,omitempty"`
+	Silent         bool              `json:"silent,omitempty"`
+	MaxRetries     int               `json:"max_retries,omitempty"`
+	MaxRuns        int               `json:"max_runs,omitempty"`
+	ExpiresAt      string            `json:"expires_at,omitempty"`
+	State          struct {
+		NextRunAtMs     int64  `json:"next_run_at_ms"`
+		LastRunAtMs     int64  `json:"last_run_at_ms"`
+		RunningAtMs     int64  `json:"running_at_ms"`
+		LastStatus      string `json:"last_status,omitempty"`
+		ConsecutiveErrs int    `json:"consecutive_errors"`
+		RunCount        int    `json:"run_count,omitempty"`
+	} `json:"state"`
+	CreatedAtMs int64 `json:"created_at_ms"`
+	UpdatedAtMs int64 `json:"updated_at_ms"`
+}
+
+// SessionDetailResponse is returned by GET /admin/sessions/{id} and GET /api/sessions/{id}.
+type SessionDetailResponse struct {
+	ID              string            `json:"id" example:"550e8400-e29b-41d4-a716-446655440000"`
+	UserID          string            `json:"user_id"`
+	OwnerID         string            `json:"owner_id,omitempty"`
+	BotID           string            `json:"bot_id,omitempty"`
+	WorkerType      string            `json:"worker_type"`
+	State           string            `json:"state" example:"running"`
+	CreatedAt       string            `json:"created_at"`
+	UpdatedAt       string            `json:"updated_at"`
+	ExpiresAt       string            `json:"expires_at,omitempty"`
+	IdleExpiresAt   string            `json:"idle_expires_at,omitempty"`
+	Context         map[string]any    `json:"context,omitempty"`
+	WorkerSessionID string            `json:"worker_session_id,omitempty"`
+	AllowedTools    []string          `json:"allowed_tools,omitempty"`
+	Platform        string            `json:"platform,omitempty"`
+	PlatformKey     map[string]string `json:"platform_key,omitempty"`
+	WorkDir         string            `json:"work_dir,omitempty"`
+	Title           string            `json:"title,omitempty"`
+	Source          string            `json:"source,omitempty"`
+	ClientKey       string            `json:"client_key,omitempty"`
+}
+
+// SessionStatsResponse is returned by GET /admin/sessions/{id}/stats.
+type SessionStatsResponse struct {
+	SessionID          string             `json:"session_id"`
+	Generation         int64              `json:"generation"`
+	TotalTurns         int                `json:"total_turns"`
+	SuccessTurns       int                `json:"success_turns"`
+	FailedTurns        int                `json:"failed_turns"`
+	TotalDurMs         int64              `json:"total_duration_ms"`
+	TotalCostUSD       float64            `json:"total_cost_usd"`
+	TotalTokIn         int64              `json:"total_tokens_in"`
+	TotalTokInput      int64              `json:"total_tokens_input"`
+	TotalTokCacheWrite int64              `json:"total_tokens_cache_write"`
+	TotalTokCacheRead  int64              `json:"total_tokens_cache_read"`
+	TotalTokOut        int64              `json:"total_tokens_out"`
+	Turns              []SessionStatsItem `json:"turns"`
+}
+
+// SessionStatsItem is a single turn in SessionStatsResponse.
+type SessionStatsItem struct {
+	TurnNum          int     `json:"turn_num"`
+	Seq              int64   `json:"seq"`
+	Success          bool    `json:"success"`
+	DurationMs       int64   `json:"duration_ms"`
+	CostUSD          float64 `json:"cost_usd"`
+	TokensIn         int64   `json:"tokens_in"`
+	TokensInput      int64   `json:"tokens_input"`
+	TokensCacheWrite int64   `json:"tokens_cache_write"`
+	TokensCacheRead  int64   `json:"tokens_cache_read"`
+	TokensOut        int64   `json:"tokens_out"`
+	Model            string  `json:"model"`
+	Source           string  `json:"source"`
+	CreatedAt        int64   `json:"created_at"`
 }
