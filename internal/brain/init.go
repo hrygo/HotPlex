@@ -11,11 +11,6 @@ import (
 // Init initializes the global Brain from environmental variables.
 // It detects the provider and sets the Global Brain instance.
 //
-// IMPORTANT: This function MUST be called before using any Brain-dependent features:
-//   - GlobalIntentRouter() requires Global() to be non-nil
-//   - GlobalCompressor() requires Global() to be non-nil
-//   - GlobalGuard() requires Global() to be non-nil
-//
 // If HOTPLEX_BRAIN_API_KEY is not set, Brain is disabled and features gracefully degrade.
 func Init(logger *slog.Logger) error {
 	config := LoadConfigFromEnv()
@@ -120,58 +115,13 @@ func Init(logger *slog.Logger) error {
 		timeout:        time.Duration(config.Model.TimeoutS) * time.Second, // Pre-compute timeout
 	})
 
-	// 5. Initialize specialized brain components
-	if config.IntentRouter.Enabled {
-		InitIntentRouter(IntentRouterConfig{
-			Enabled:             config.IntentRouter.Enabled,
-			ConfidenceThreshold: config.IntentRouter.ConfidenceThreshold,
-			CacheSize:           config.IntentRouter.CacheSize,
-		}, logger)
-	}
-
-	if config.Memory.Enabled {
-		sessionTTL, _ := time.ParseDuration(config.Memory.SessionTTL)
-		if sessionTTL == 0 {
-			sessionTTL = 24 * time.Hour
-		}
-		InitMemory(CompressionConfig{
-			Enabled:          config.Memory.Enabled,
-			TokenThreshold:   config.Memory.TokenThreshold,
-			TargetTokenCount: config.Memory.TargetTokenCount,
-			PreserveTurns:    config.Memory.PreserveTurns,
-			MaxSummaryTokens: config.Memory.MaxSummaryTokens,
-			CompressionRatio: config.Memory.CompressionRatio,
-			SessionTTL:       sessionTTL,
-		}, logger)
-	}
-
-	if config.Guard.Enabled {
-		if err := InitGuard(GuardConfig{
-			Enabled:                config.Guard.Enabled,
-			InputGuardEnabled:      config.Guard.InputGuardEnabled,
-			OutputGuardEnabled:     config.Guard.OutputGuardEnabled,
-			Chat2ConfigEnabled:     config.Guard.Chat2ConfigEnabled,
-			MaxInputLength:         config.Guard.MaxInputLength,
-			ScanDepth:              config.Guard.ScanDepth,
-			Sensitivity:            config.Guard.Sensitivity,
-			AdminUsers:             config.Guard.AdminUsers,
-			AdminChannels:          config.Guard.AdminChannels,
-			ResponseTimeout:        config.Guard.ResponseTimeout,
-			RateLimitRPS:           config.Guard.RateLimitRPS,
-			RateLimitBurst:         config.Guard.RateLimitBurst,
-			FailClosedOnBrainError: config.Guard.FailClosedOnBrainError,
-		}, logger); err != nil {
-			logger.Warn("Failed to initialize SafetyGuard", "error", err)
-		}
-	}
-
+	// 5. Log initialization result
 	logger.Info("Native Brain initialized",
 		"provider", config.Model.Provider,
 		"protocol", config.Model.Protocol,
 		"model", config.Model.Model,
 		"cache", config.Cache.Enabled,
-		"metrics", config.Metrics.Enabled,
-		"intent_router", config.IntentRouter.Enabled)
+		"metrics", config.Metrics.Enabled)
 
 	return nil
 }

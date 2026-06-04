@@ -109,18 +109,6 @@ func SetGlobal(b Brain) {
 	}
 }
 
-// GetRouter returns the global router if the brain supports routing.
-func GetRouter() *llm.Router {
-	if rb, ok := Global().(interface{ GetRouter() *llm.Router }); ok {
-		return rb.GetRouter()
-	}
-	return nil
-}
-
-// GetRateLimiter returns the global rate limiter if available.
-func GetRateLimiter() *llm.RateLimiter {
-	if rb, ok := Global().(interface{ GetRateLimiter() *llm.RateLimiter }); ok {
-		return rb.GetRateLimiter()
-	}
-	return nil
-}
+// Close shuts down the global Brain and releases resources.
+// Safe to call even if Brain was never initialized.
+func Close() { SetGlobal(nil) }
