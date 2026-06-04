@@ -268,6 +268,15 @@ CommandMenu），Gateway Core 获得了连接稳定性修复（CAS race guard、
 |:---|:---|
 | `Dockerfile` | `LABEL version="1.x.x"` |
 
+### 4.6 API 文档
+
+| 文件 | 模式 | 示例 |
+|:---|:---|:---|
+| `cmd/hotplex/doc.go` | swaggo 注解 `@version X.X.X` | `1.2.0` |
+| `docs/swagger/swagger.json` | `"version": "X.X.X"` | `1.2.0` |
+
+> **注意**：`swagger.json` 由 `swag init` 从 `doc.go` 注解自动生成，但当前为手动提交。更新 `doc.go` 后需同步更新 `swagger.json` 中的 `"version"` 字段。
+
 ### 验证命令
 
 更新后，验证所有位置都已更改：
@@ -280,7 +289,8 @@ git diff
 grep -rn "1\.2\.0" cmd/hotplex/main.go Makefile webchat/package.json \
   examples/typescript-client/package.json examples/python-client/pyproject.toml \
   examples/python-client/hotplex_client/__init__.py examples/java-client/pom.xml \
-  Dockerfile README.md README_zh.md AGENTS.md
+  Dockerfile cmd/hotplex/doc.go docs/swagger/swagger.json \
+  README.md README_zh.md AGENTS.md
 ```
 
 ## 步骤 5：验证
@@ -329,6 +339,8 @@ git add \
   examples/python-client/hotplex_client/__init__.py \
   examples/java-client/pom.xml \
   Dockerfile \
+  cmd/hotplex/doc.go \
+  docs/swagger/swagger.json \
   README.md \
   README_zh.md \
   AGENTS.md \
@@ -534,12 +546,13 @@ gh release view vX.X.X
 ## 关键提醒
 
 > [!IMPORTANT]
-> **同步检查**：以下位置的版本号必须全部匹配，共 12 处：
+> **同步检查**：以下位置的版本号必须全部匹配，共 14 处：
 > - **Go 核心**：`cmd/hotplex/main.go`、`Makefile`（版本通过 `gateway_run.go` → `tracing.Init` 传入）
 > - **WebChat UI**：`webchat/package.json`（页面状态栏 `v{version}-stable`）
 > - **SDK**：`examples/{typescript,python,java}-client/` 各自的版本文件
 > - **文档**：`README.md` badge、`README_zh.md` badge、`AGENTS.md` 头部
 > - **基础设施**：`Dockerfile`
+> - **API 文档**：`cmd/hotplex/doc.go`（swaggo 注解）、`docs/swagger/swagger.json`（OpenAPI version）
 > - **Changelog**：`CHANGELOG.md` 头部
 >
 > CI workflow 通过 ldflags 从 git tag 覆盖 `main.version`，但源文件必须对本地构建一致。

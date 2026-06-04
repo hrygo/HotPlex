@@ -53,7 +53,7 @@ func (a *AdminAPI) HandleCronList(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Security     AdminBearerAuth
 // @Param        id   path      string  true  "Cron job ID"
-// @Success      200  {object}  object
+// @Success      200  {object}  CronJobResponse
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
 // @Failure      404  {object}  ErrorResponse  "Job not found"
 // @Router       /admin/cron/jobs/{id} [get]
@@ -81,7 +81,7 @@ func (a *AdminAPI) HandleCronGet(w http.ResponseWriter, r *http.Request) {
 // @Tags         Admin API
 // @Accept       json
 // @Security     AdminBearerAuth
-// @Param        body  body  object  true  "Cron job definition"
+// @Param        body  body  CronJobCreateRequest  true  "Cron job definition"
 // @Success      201   "Job created"
 // @Failure      400   {object}  ErrorResponse  "Invalid JSON"
 // @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
@@ -116,7 +116,7 @@ func (a *AdminAPI) HandleCronCreate(w http.ResponseWriter, r *http.Request) {
 // @Accept       json
 // @Security     AdminBearerAuth
 // @Param        id    path  string  true  "Cron job ID"
-// @Param        body  body  object  true  "Fields to update"
+// @Param        body  body  CronJobUpdateRequest  true  "Fields to update"
 // @Success      204   "Job updated"
 // @Failure      400   {object}  ErrorResponse  "Invalid JSON"
 // @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"

@@ -117,7 +117,7 @@ func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Security     AdminBearerAuth
 // @Param        id   path      string  true  "Session ID"
-// @Success      200  {object}  object
+// @Success      200  {object}  SessionDetailResponse
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need session:read"
 // @Failure      404  {object}  ErrorResponse  "Session not found"
 // @Router       /admin/sessions/{id} [get]
@@ -225,7 +225,7 @@ func (a *AdminAPI) PoolStats(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Security     AdminBearerAuth
 // @Param        id   path      string  true  "Session ID"
-// @Success      200  {object}  object
+// @Success      200  {object}  SessionStatsResponse
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need session:read"
 // @Failure      404  {object}  ErrorResponse  "Session not found"
 // @Failure      503  {object}  ErrorResponse  "Turn stats not available"

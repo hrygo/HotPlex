@@ -21,8 +21,8 @@ const DefaultWebChatCSP = "default-src 'self'; " +
 
 // DefaultDocsCSP is the fallback CSP for the self-hosted docs portal. It is
 // the same scheme-wide-open connect-src as the webchat default, plus jsDelivr
-// for scripts. Google Fonts have been localized (served from 'self') so the
-// external font/style allow-lists are no longer needed.
+// for scripts. Google Fonts and Scalar fonts have been localized (served from
+// 'self') so no external font/style allow-lists are needed.
 const DefaultDocsCSP = "default-src 'self'; " +
 	"script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
 	"style-src 'self' 'unsafe-inline'; " +

@@ -556,6 +556,8 @@ func processFile(path string, nav []NavItem) error {
 
 	content := buf.String()
 	// Removed naive strings.ReplaceAll, now handled by linkTransformer
+	content = strings.ReplaceAll(content, "<table>", `<div class="table-wrap"><table>`)
+	content = strings.ReplaceAll(content, "</table>", `</table></div>`)
 
 	page.Content = template.HTML(content)
 	page.HasMermaid = strings.Contains(content, "language-mermaid") ||
@@ -1086,15 +1088,28 @@ const layout = `
         .prose a:hover { border-bottom-color: var(--clay); }
 
         /* Tables */
+        /* Table scroll wrapper */
+        .table-wrap {
+            overflow-x: auto;
+            border-radius: 12px;
+            border: 1px solid var(--gray-300);
+            margin: 40px 0;
+        }
+        .table-wrap::-webkit-scrollbar {
+            height: 6px;
+        }
+        .table-wrap::-webkit-scrollbar-thumb {
+            background: var(--gray-300);
+            border-radius: 3px;
+        }
         .prose table {
             width: 100%;
             border-collapse: separate;
             border-spacing: 0;
-            margin: 40px 0;
             font-size: 15px;
-            border: 1px solid var(--gray-300);
-            border-radius: 12px;
-            overflow: hidden;
+            border: none;
+            border-radius: 0;
+            margin: 0;
         }
         .prose th {
             background: var(--gray-50);

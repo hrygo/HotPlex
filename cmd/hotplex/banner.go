@@ -161,6 +161,7 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 		lines = append(lines, sectionPad("Admin UI", "http://"+s.WebChatAddr+"/admin"))
 	}
 	lines = append(lines, sectionPad("Docs", "http://"+s.GatewayAddr+"/docs/"))
+	lines = append(lines, sectionPad("API Console", "http://"+s.GatewayAddr+"/docs/reference/api-console.html"))
 	if s.AdminAddr != "" {
 		lines = append(lines, sectionPad("Admin API", "http://"+s.AdminAddr))
 	}

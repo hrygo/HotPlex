@@ -115,7 +115,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [为什么选择 HotPlex](explanation/why-hotplex.md)         | 痛点、解法、架构哲学、适用场景      |
 | [Session 生命周期](explanation/session-lifecycle.md)     | 5 状态机、UUIDv5、GC 策略、背压机制 |
 | [Agent 配置系统](explanation/agent-config-system.md)     | B/C 双通道、命中即终止、热更新      |
-| [Brain LLM 编排](explanation/brain-llm-orchestration.md) | 意图路由、安全审计、上下文压缩      |
+| [Brain LLM 编排](explanation/brain-llm-orchestration.md) | Chat 接口、CircuitBreaker、输出脱敏      |
 | [Cron 调度器设计](explanation/cron-design.md)            | AI-native 调度、并发槽、投递机制    |
 | [Phrases 系统设计](explanation/phrases-design.md)        | 加权随机话术池、cascade-append 策略 |
 | [安全模型](explanation/security-model.md)                | 7 层安全体系设计决策和权衡          |

@@ -135,6 +135,9 @@ internal/webchat/out/
 build-docs
 .superpowers/
 
+# --- Generated API Spec (build artifact) ---
+docs/swagger/swagger.json
+
 # Docker local override (developer-specific)
 docker-compose.override.yml
 .hermes

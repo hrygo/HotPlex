@@ -233,7 +233,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Security     ApiKeyAuth
 // @Param        id   path      string  true  "Session ID"
-// @Success      200  {object}  object
+// @Success      200  {object}  admin.SessionDetailResponse
 // @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
 // @Failure      403  {object}  admin.ErrorResponse  "Ownership required"
 // @Failure      404  {object}  admin.ErrorResponse  "Session not found"

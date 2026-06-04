@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.25.0] - 2026-06-04
+
+### Summary
+
+v1.25.0 是一次 minor 版本更新，聚焦于 **可观测性现代化** 和 **API 文档基础设施**。新增 OTel 原生可观测性包（统一替换 split metrics/tracing，~55 个指标，AEP trace_id 注入），以及 swaggo 注解 + Scalar 控制台的 API 文档混合生成。Brain 模块完成大规模瘦身（删除 ~5700 行死代码），文档中心获得显著性能优化（消除 3.2MB 浪费 + gzip + 缓存）。
+
+### Added
+
+- **Infrastructure**: OTel-native observability package — unified `internal/observability/` replacing split `internal/metrics/` + `internal/tracing/`, ~55 metrics via OTel Meter API, trace_id injection in AEP metadata, W3C TraceContext + Baggage propagation, zero direct prometheus/client_golang in application code. (#642)
+- **Docs**: API documentation with swaggo annotations + Scalar console — auto-generated `swagger.json` from Go source, interactive API explorer at `/docs/api`. (#632)
+- **Infrastructure**: OTel Collector service in docker-compose (monitoring profile), aligned alert rules and SLO definitions with actual metric names. (#642)
+
+### Changed
+
+- **Brain**: Remove dead subsystems (IntentRouter, SafetyGuard, ContextCompressor) — ~5,700 lines deleted, collapse 4 Brain interfaces to single `Brain: Chat + ChatWithOptions`. (#638)
+- **Brain**: Integrate CircuitBreaker into Chat/ChatWithOptions via `Execute()`, extract `RedactSensitive()` to `security/sanitize.go`. (#638)
+- **Docs**: Performance optimization — conditional mermaid.js loading (1/56 pages), gzip compression (~70% size reduction), cache headers, Google Fonts localization at build time. (#644)
+- **WebChat UI**: Redesign worker icons (Claude Code sparkle, Codex terminal, ACP lightning) with unified `WorkerIcon` component. (#637)
+
+### Fixed
+
+- **Cron**: Webhook trigger ignores TARGET_PR — inject explicit prefix into worker prompt directing review to specified PR. (#647)
+- **Gateway Core**: Session resume fails after GC (TERMINATED→RUNNING) — move state transition before `AttachWorker` so session is active during check. (#642)
+- **Gateway Core**: Webhook test race condition — `triggered.Add(1)` moved inside mutex critical section. (#642)
+- **WebChat UI**: Connection lifecycle fixes — zombie WebSocket after disconnect, SESSION_TERMINATED graceful handling, assistant message cross-turn dedup. (#642)
+- **Brain**: Latency metrics timer started after LLM call instead of before — always recorded as ~0ms. (#638)
+- **SDK**: TypeScript client wrong event type in init envelope (control→init), Java client wrong message priority, Go client missing `Title()` option.
+
 ## [1.24.4] - 2026-06-03
 
 ### Summary

@@ -119,12 +119,12 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		gw := &gzipResponseWriter{gw: gz, ResponseWriter: w}
 		next.ServeHTTP(gw, r)
 
-		// Only close the gzip writer (flushing the gzip footer) if we actually
-		// wrote compressed data. For bodyless responses (304, 204, 1xx) the gzip
-		// writer was never written to, so we intentionally skip Close() to avoid
-		// writing a gzip footer to the underlying ResponseWriter.
 		if gw.compressed {
 			_ = gz.Close()
+		} else if gw.wroteHeader {
+			// Bodyless response (304, 204, 1xx) — WriteHeader was stored
+			// but never forwarded because Write was never called.
+			w.WriteHeader(gw.code)
 		}
 	})
 }
@@ -133,6 +133,10 @@ func gzipMiddleware(next http.Handler) http.Handler {
 // It defers Content-Encoding/Vary header setup and gzip writer activation
 // until the first Write call, so that bodyless responses (304, 204, 1xx)
 // pass through without gzip artifacts.
+//
+// Crucially, WriteHeader is NOT forwarded to the underlying ResponseWriter
+// until Write is called. This prevents Go's net/http from snapshotting the
+// header map before Content-Encoding and Content-Length have been updated.
 type gzipResponseWriter struct {
 	gw *gzip.Writer
 	http.ResponseWriter
@@ -155,7 +159,10 @@ func (w *gzipResponseWriter) WriteHeader(code int) {
 		w.code = code
 		w.wroteHeader = true
 	}
-	w.ResponseWriter.WriteHeader(code)
+	// Intentionally NOT forwarding to underlying ResponseWriter yet.
+	// Go's net/http snapshots the header map on WriteHeader; we must
+	// defer the forward until Write so that Content-Encoding and
+	// Content-Length modifications are included in the snapshot.
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
@@ -165,7 +172,7 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	}
 
 	if !shouldCompress(w.code) {
-		// Bodyless response code — pass through without gzip.
+		w.ResponseWriter.WriteHeader(w.code)
 		return w.ResponseWriter.Write(b)
 	}
 
@@ -174,6 +181,7 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 		w.Header().Set("Vary", "Accept-Encoding")
 		w.Header().Del("Content-Length")
 		w.compressed = true
+		w.ResponseWriter.WriteHeader(w.code)
 	}
 	return w.gw.Write(b)
 }
