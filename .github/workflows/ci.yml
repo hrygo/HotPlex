@@ -190,7 +190,7 @@ jobs:
         run: go mod verify && go vet ./... && go build ./...
 
       - name: Build & validate docs (includes swagger generation)
-        run: make docs-build
+        run: go install github.com/swaggo/swag/cmd/swag@v1.16.4 && make docs-build
 
       - name: Build gateway binary
         run: |

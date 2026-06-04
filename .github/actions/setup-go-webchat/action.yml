@@ -69,6 +69,11 @@ runs:
         path: internal/docs/out
         key: docs-${{ hashFiles('docs/**/*.md', 'cmd/hotplex/doc.go', 'internal/admin/*.go', 'internal/gateway/api.go', 'cmd/build-docs/**') }}
 
+    - name: Install swag
+      if: steps.docs-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: go install github.com/swaggo/swag/cmd/swag@v1.16.4
+
     - name: Build docs
       if: steps.docs-cache.outputs.cache-hit != 'true'
       shell: bash
