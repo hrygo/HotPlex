@@ -28,7 +28,7 @@ scrape_configs:
       - targets: ['localhost:9090']
     metrics_path: /metrics
 
-  # Scrape HotPlex Worker Gateway
+  # Scrape HotPlex Worker Gateway (direct — always available)
   - job_name: 'hotplex'
     static_configs:
       - targets: ['gateway:9999']
@@ -37,11 +37,17 @@ scrape_configs:
     scrape_timeout: 5s
     honor_labels: true
     relabel_configs:
-      # Add cluster label from external_labels
       - replacement: '${cluster}'
         target_label: cluster
-      # Normalize instance label
       - source_labels: [__address__]
         regex: '(.+):\d+'
         replacement: '${1}'
         target_label: instance
+
+  # Scrape OTel Collector metrics (when monitoring profile is active)
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 5s

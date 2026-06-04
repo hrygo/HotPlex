@@ -13,6 +13,8 @@ services:
     environment:
       - HOTPLEX_LOG_LEVEL=warn
       - GOMEMLIMIT=4096MiB
+      - OTEL_SDK_DISABLED=false
+      - DEPLOY_ENV=production
 
     deploy:
       mode: replicated

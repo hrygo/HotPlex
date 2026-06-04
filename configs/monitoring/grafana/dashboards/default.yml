@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'HotPlex'
+    orgId: 1
+    folder: 'HotPlex'
+    type: file
+    disableDeletion: true
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

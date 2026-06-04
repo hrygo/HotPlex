@@ -41,9 +41,14 @@ services:
 
       # Optional configuration
       - HOTPLEX_LOG_LEVEL=${HOTPLEX_LOG_LEVEL:-info}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       - TZ=${TZ:-Asia/Shanghai}
       - GOMEMLIMIT=4096MiB
+
+      # ── OpenTelemetry ──────────────────────────────────────────────────────
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-hotplex-gateway}
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-false}
+      - DEPLOY_ENV=${DEPLOY_ENV:-production}
 
       # Proxy (for AI workers accessing external APIs)
       - HTTP_PROXY=${HTTP_PROXY:-}
@@ -217,9 +222,37 @@ services:
       - monitoring
     ports:
       - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-otlp-receiver'
+      - '--storage.tsdb.retention.time=15d'
     volumes:
       - ./configs/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./configs/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - hotplex-network
+
+  # OTel Collector — receives OTLP, exports to Prometheus
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: hotplex-otel-collector
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter (scraped by prometheus)
+    volumes:
+      - ./configs/monitoring/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    command:
+      - '--config=/etc/otelcol/config.yaml'
     logging:
       driver: json-file
       options:
@@ -240,8 +273,11 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./configs/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./configs/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
     depends_on:
       - prometheus
     logging:
