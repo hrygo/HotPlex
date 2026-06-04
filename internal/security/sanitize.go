@@ -1,4 +1,7 @@
 // Package security provides sanitization utilities for redacting sensitive data.
+//
+// TODO: Wire RedactSensitive into output pipeline (bridge_forward.go or XML sanitizer)
+// to sanitize Worker responses before they reach end users.
 package security
 
 import "regexp"

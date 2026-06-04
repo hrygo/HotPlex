@@ -169,10 +169,6 @@ func TestEnhancedBrainWrapper_RecordMetrics_NoCostCalc(t *testing.T) {
 	wrapper.recordMetrics(nil, "gpt-4o", "prompt", "result", nil)
 }
 
-// ========================================
-// recordMetricsForAnalyze Tests
-// ========================================
-
 func TestInit_Disabled(t *testing.T) {
 	// Save and restore global state
 	oldBrain := globalBrain
@@ -478,9 +474,6 @@ func TestConfig_OpenCodeWorkerExtract(t *testing.T) {
 }
 
 // ========================================
-// recordMetrics with real timer
-// ========================================
-
 func TestEnhancedBrainWrapper_RecordMetrics_WithRealTimer(t *testing.T) {
 	mockClient := &mockLLMClientForBrain{
 		chatFn: func(ctx context.Context, prompt string) (string, error) {
