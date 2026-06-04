@@ -78,7 +78,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		return "", fmt.Errorf("cron executor: worker not found after start")
 	}
 
-	prompt := formatJobPrompt(job, time.Now())
+	prompt := buildWebhookPrefix(job) + formatJobPrompt(job, time.Now())
 	prompt += buildDeliverySuffix(job)
 
 	if err := w.Input(ctx, prompt, nil); err != nil {

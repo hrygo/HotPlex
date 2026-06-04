@@ -90,6 +90,28 @@ func formatJobPrompt(job *CronJob, scheduledAt time.Time) string {
 		job.Payload.Message, scheduledAt.Format(time.RFC3339))
 }
 
+// buildWebhookPrefix returns a prefix injected when a cron job is triggered
+// via webhook (PlatformKey contains trigger=webhook and pr_number).
+// This ensures the LLM targets the specific PR without enumerating all open PRs.
+func buildWebhookPrefix(job *CronJob) string {
+	if job.PlatformKey == nil {
+		return ""
+	}
+	prNum := job.PlatformKey["pr_number"]
+	if job.PlatformKey["trigger"] != "webhook" || prNum == "" {
+		return ""
+	}
+	// Defense-in-depth: reject non-numeric pr_number to prevent injection
+	// via PlatformKey (e.g. SQLite deserialization or UpdateJob API path).
+	for _, r := range prNum {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return fmt.Sprintf("⚠️ WEBHOOK 触发：仅审查 PR #%s。不要枚举其他 open PR。"+
+		" 环境变量 TARGET_PR=%s 已设置，直接使用 $TARGET_PR 作为目标 PR。\n\n", prNum, prNum)
+}
+
 // ValidateJob performs full validation on a CronJob before creation/update.
 func ValidateJob(job *CronJob) error {
 	if job.Name == "" {
