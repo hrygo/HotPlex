@@ -94,7 +94,9 @@ var precompressedExts = map[string]bool{
 }
 
 // gzipMiddleware compresses responses with gzip when the client accepts it.
-// It skips pre-compressed formats and small responses.
+// It skips pre-compressed formats and responses with no body (1xx, 204, 304).
+// Content-Encoding and Vary headers are deferred until the first Write call
+// to avoid leaking gzip headers on bodyless responses (RFC 7232 §4.1).
 func gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
@@ -113,31 +115,68 @@ func gzipMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		defer func() { _ = gz.Close() }()
 
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Vary", "Accept-Encoding")
-		w.Header().Del("Content-Length")
-		next.ServeHTTP(&gzipResponseWriter{gw: gz, ResponseWriter: w}, r)
+		gw := &gzipResponseWriter{gw: gz, ResponseWriter: w}
+		next.ServeHTTP(gw, r)
+
+		// Only close the gzip writer (flushing footer) if we actually compressed data.
+		if gw.compressed {
+			_ = gz.Close()
+		}
 	})
 }
 
 // gzipResponseWriter wraps http.ResponseWriter to write gzip-compressed data.
+// It defers Content-Encoding/Vary header setup and gzip writer activation
+// until the first Write call, so that bodyless responses (304, 204, 1xx)
+// pass through without gzip artifacts.
 type gzipResponseWriter struct {
 	gw *gzip.Writer
 	http.ResponseWriter
+	compressed  bool
+	code        int
+	wroteHeader bool
+}
+
+// shouldCompress reports whether the given status code allows a response body.
+// 1xx, 204 (No Content), and 304 (Not Modified) MUST NOT include a body
+// (RFC 7230 §3.3, RFC 7232 §4.1).
+func shouldCompress(code int) bool {
+	return code < 300 || (code >= 400 && code != 429)
 }
 
 func (w *gzipResponseWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.code = code
+		w.wroteHeader = true
+	}
 	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.code = 200
+		w.wroteHeader = true
+	}
+
+	if !shouldCompress(w.code) {
+		// Bodyless response code — pass through without gzip.
+		return w.ResponseWriter.Write(b)
+	}
+
+	if !w.compressed {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+		w.Header().Del("Content-Length")
+		w.compressed = true
+	}
 	return w.gw.Write(b)
 }
 
 func (w *gzipResponseWriter) Flush() {
-	_ = w.gw.Flush()
+	if w.compressed {
+		_ = w.gw.Flush()
+	}
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}

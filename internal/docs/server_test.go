@@ -253,3 +253,65 @@ func TestCacheHeaderSniffer_Unwrap(t *testing.T) {
 
 	require.Equal(t, rec, s.Unwrap())
 }
+
+func TestGzipMiddleware_Skips304NotModified(t *testing.T) {
+	t.Parallel()
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotModified)
+		// No body — 304 MUST NOT have a body per RFC 7232.
+	})
+
+	handler := gzipMiddleware(inner)
+	req := httptest.NewRequest(http.MethodGet, "/docs/index.html", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotModified, rec.Code)
+	require.Empty(t, rec.Header().Get("Content-Encoding"), "304 should not have Content-Encoding")
+	require.Empty(t, rec.Body.Bytes(), "304 should not have a body")
+}
+
+func TestGzipMiddleware_Skips204NoContent(t *testing.T) {
+	t.Parallel()
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	handler := gzipMiddleware(inner)
+	req := httptest.NewRequest(http.MethodGet, "/docs/index.html", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Empty(t, rec.Header().Get("Content-Encoding"), "204 should not have Content-Encoding")
+	require.Empty(t, rec.Body.Bytes(), "204 should not have a body")
+}
+
+func TestGzipMiddleware_304ThenWriteIsPassthrough(t *testing.T) {
+	t.Parallel()
+
+	// If handler writes body after 304 (buggy handler), it should pass through
+	// without gzip wrapping rather than corrupt the stream.
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotModified)
+		_, _ = w.Write([]byte("should not be gzipped"))
+	})
+
+	handler := gzipMiddleware(inner)
+	req := httptest.NewRequest(http.MethodGet, "/docs/index.html", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotModified, rec.Code)
+	require.Empty(t, rec.Header().Get("Content-Encoding"))
+	// Body passes through as-is (not gzip encoded).
+	require.Equal(t, "should not be gzipped", rec.Body.String())
+}
