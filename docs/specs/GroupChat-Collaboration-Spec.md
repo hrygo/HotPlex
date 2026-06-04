@@ -2,8 +2,10 @@
 type: spec
 tags: [project/HotPlex, feature/multi-bot-collaboration, area/messaging]
 date: 2026-06-03
-status: proposed
+status: archived
 progress: 0
+archived_reason: "Gateway-level multi-bot orchestration reimplements Agent-level multi-agent capabilities (Claude Code native subagents). No incremental value — see PR #636 closure comment."
+archived_date: 2026-06-04
 ---
 
 # 群聊多 Bot 协作
