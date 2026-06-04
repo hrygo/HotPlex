@@ -129,17 +129,36 @@ func TestCacheHeaders_DirectoryIndex(t *testing.T) {
 	require.Equal(t, "public, max-age=3600", rec.Header().Get("Cache-Control"))
 }
 
-func TestCacheControlMiddleware_SetsVary(t *testing.T) {
+func TestGzipMiddleware_SetsVaryOnCompressedResponses(t *testing.T) {
 	t.Parallel()
 
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	handler := cacheControlMiddleware(inner)
+	handler := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("some content"))
+	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/docs/index.html", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
+
 	handler.ServeHTTP(rec, req)
 
 	require.Equal(t, "Accept-Encoding", rec.Header().Get("Vary"))
+}
+
+func TestGzipMiddleware_NoVaryOnSkippedResponses(t *testing.T) {
+	t.Parallel()
+
+	handler := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("binary"))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/docs/assets/logo.png", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	require.Empty(t, rec.Header().Get("Vary"), "precompressed formats should not get Vary header")
 }
 
 func TestCacheHeaderSniffer_Caches200Responses(t *testing.T) {

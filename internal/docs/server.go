@@ -25,9 +25,7 @@ func Handler(csp string) http.Handler {
 	})
 	return security.SecurityHeaders(
 		security.DefaultDocsCSP, csp,
-		cacheControlMiddleware(
-			gzipMiddleware(h),
-		),
+		gzipMiddleware(h),
 	)
 }
 
@@ -85,15 +83,6 @@ func setCacheHeaders(w http.ResponseWriter, path string) {
 	}
 }
 
-// cacheControlMiddleware sets Vary: Accept-Encoding so caches (CDN, browser)
-// store separate entries for compressed and uncompressed variants.
-func cacheControlMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Vary", "Accept-Encoding")
-		next.ServeHTTP(w, r)
-	})
-}
-
 // --- Gzip Compression ---
 
 // precompressedExts lists file extensions for responses that should NOT be
@@ -127,6 +116,7 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		defer func() { _ = gz.Close() }()
 
 		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
 		w.Header().Del("Content-Length")
 		next.ServeHTTP(&gzipResponseWriter{gw: gz, ResponseWriter: w}, r)
 	})

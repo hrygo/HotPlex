@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/adrg/frontmatter"
@@ -641,7 +642,10 @@ func fetchGoogleFonts() error {
 	}
 
 	// Request woff2 format via user-agent (Google Fonts returns woff2 for modern browsers).
-	req, err := http.NewRequestWithContext(context.Background(), "GET", fontURL, http.NoBody)
+	// Use a 30s timeout to avoid hanging on GFW-interfered networks.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", fontURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -683,7 +687,7 @@ func fetchGoogleFonts() error {
 		localFile := base
 		localPath := filepath.Join(fontDir, localFile)
 
-		fontReq, err := http.NewRequestWithContext(context.Background(), "GET", remoteURL, http.NoBody)
+		fontReq, err := http.NewRequestWithContext(ctx, "GET", remoteURL, http.NoBody)
 		if err != nil {
 			log.Printf("Warning: failed to create font request %s: %v", remoteURL, err)
 			continue
