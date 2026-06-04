@@ -13,9 +13,12 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/messaging"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // pcEntry wraps a PlatformConn with an async writeLoop goroutine and delta
@@ -34,6 +37,7 @@ type pcEntry struct {
 	done    chan struct{}
 	closeMu sync.Once
 	log     *slog.Logger
+	ctx     context.Context
 }
 
 type pcEntryConfig struct {
@@ -65,7 +69,7 @@ func defaultPCEntryConfig(cfg *config.Config) pcEntryConfig {
 	return c
 }
 
-func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) *pcEntry {
+func newPCEntry(ctx context.Context, pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) *pcEntry {
 	e := &pcEntry{
 		pc:      pc,
 		ch:      make(chan *events.Envelope, cfg.WriteBuffer),
@@ -73,6 +77,7 @@ func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) 
 		done:    make(chan struct{}),
 		cfg:     cfg,
 		log:     log,
+		ctx:     ctx,
 	}
 	go e.writeLoop()
 	return e
@@ -81,7 +86,7 @@ func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) 
 // RouteWrite writes an envelope through the Hub routing path.
 // pcEntry already handles droppable semantics in WriteCtx, so this delegates directly.
 func (e *pcEntry) RouteWrite(ctx context.Context, env *events.Envelope) error {
-	metrics.GatewayMessagesTotal.WithLabelValues("outgoing", string(env.Event.Type)).Inc()
+	observability.GatewayMessages().Add(ctx, 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", string(env.Event.Type))))
 	return e.WriteCtx(ctx, env)
 }
 
@@ -101,17 +106,17 @@ func (e *pcEntry) RouteWriteData(data []byte, eventType events.Kind) error {
 // json:"-" fields (e.g. OwnerID) that EncodeJSON omits from pre-encoded bytes.
 func (e *pcEntry) PreferEnvelope() bool { return true }
 
-func (e *pcEntry) WriteCtx(_ context.Context, env *events.Envelope) error {
+func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {
-			metrics.GatewayPlatformDroppedTotal.WithLabelValues(string(env.Event.Type)).Inc()
+			observability.GatewayPlatformDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
 			return nil
 		}
 		select {
 		case e.ch <- env:
 			return nil
 		default:
-			metrics.GatewayPlatformDroppedTotal.WithLabelValues(string(env.Event.Type)).Inc()
+			observability.GatewayPlatformDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
 			return nil
 		}
 	}
@@ -174,7 +179,7 @@ func (e *pcEntry) writeLoop() {
 				},
 			},
 		}
-		metrics.GatewayDeltaFlushTotal.Inc()
+		observability.GatewayDeltaFlush().Add(e.ctx, 1)
 		db.Reset()
 		runeCount = 0
 		if timer != nil {
@@ -199,7 +204,7 @@ func (e *pcEntry) writeLoop() {
 				}
 				db.WriteString(content)
 				runeCount += utf8.RuneCountInString(content)
-				metrics.GatewayDeltaCoalescedTotal.Inc()
+				observability.GatewayDeltaCoalesced().Add(e.ctx, 1)
 
 				if runeCount >= e.cfg.CoalesceSize {
 					flush(pendingSID)

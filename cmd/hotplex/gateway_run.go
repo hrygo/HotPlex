@@ -29,11 +29,11 @@ import (
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/sqlutil"
-	"github.com/hrygo/hotplex/internal/tracing"
 	"github.com/hrygo/hotplex/internal/webchat"
 	"github.com/hrygo/hotplex/internal/worker/acp"
 	"github.com/hrygo/hotplex/internal/worker/claudecode"
@@ -116,7 +116,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	log, cfgStore, levelVar := initLogging(cfg)
 	pidTracker, cleanupWG := initOrphanCleanup(ctx, cfg, log)
 
-	tracing.Init(ctx, log, "hotplex-gateway", versionString())
+	obsCfg := observability.DefaultConfig()
+	obsCfg.ServiceVersion = versionString()
+	observability.Init(ctx, log, obsCfg)
 	log.Info("gateway: starting",
 		"go", runtime.Version(),
 		"addr", cfg.Gateway.Addr,
@@ -799,8 +801,8 @@ func shutdownGateway(
 ) {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer func() {
-		if err := tracing.Shutdown(shutdownCtx); err != nil {
-			log.Warn("tracing: shutdown", "error", err)
+		if err := observability.Shutdown(shutdownCtx); err != nil {
+			log.Warn("observability: shutdown", "error", err)
 		}
 		shutdownCancel()
 	}()

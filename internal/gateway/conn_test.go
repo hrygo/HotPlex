@@ -1141,7 +1141,7 @@ func (m *mockBridgeSM) CreateWithBot(ctx context.Context, id, userID, botID stri
 	return args.Get(0).(*session.SessionInfo), args.Error(1)
 }
 
-func (m *mockBridgeSM) AttachWorker(id string, w worker.Worker) error {
+func (m *mockBridgeSM) AttachWorker(_ context.Context, id string, w worker.Worker) error {
 	args := m.Called(id, w)
 	return args.Error(0)
 }

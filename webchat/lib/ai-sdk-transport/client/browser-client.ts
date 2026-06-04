@@ -193,13 +193,23 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   }
 
   private _doConnect(sessionId: string | undefined): Promise<InitAckData> {
+    // Prevent zombie connections: if the client was explicitly closed via
+    // disconnect(), do not create a new WebSocket. This guards against a
+    // race where a pending reconnect timer fires after React effect cleanup
+    // has already torn down the component.
+    if (this.closed) {
+      return Promise.reject(new Error('Client is closed'));
+    }
+
     this._connecting = true;
     return new Promise((resolve, reject) => {
       this.pendingConnectReject = reject;
       try {
         const prevWs = this.ws;
         if (prevWs) {
-          // Detach handler AND close the socket to avoid server having two active connections
+          // Detach handler AND close the socket to avoid server having two active connections.
+          // The close event from prevWs is already handled by the `activeWs !== this.ws`
+          // guard in the addEventListener close handler, so no reconnection storm occurs.
           prevWs.onclose = null;
           prevWs.close();
         }
@@ -603,7 +613,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this.emit('reconnecting', this.reconnectAttempt);
 
     this.reconnectTimer = setTimeout(async () => {
-      if (!this._sessionId) return;
+      if (!this._sessionId || this.closed) return;
 
       try {
         await this._doConnect(this._sessionId);

@@ -7,7 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hrygo/hotplex/internal/metrics"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/hrygo/hotplex/internal/observability"
 )
 
 // timerLoop manages the scheduler's timer-driven tick cycle.
@@ -174,7 +177,7 @@ func (tl *timerLoop) onTick() {
 				tl.releaseSlot()
 				s.wg.Done()
 			}()
-			metrics.CronFiresTotal.WithLabelValues(j.Name).Inc()
+			observability.CronFires().Add(s.ctx, 1, metric.WithAttributes(attribute.String("job_name", j.Name)))
 			s.executeJob(j)
 		}(execJob)
 	}
@@ -207,7 +210,7 @@ func (s *Scheduler) executeJob(job *CronJob) {
 
 	start := time.Now()
 	sessionKey, err := s.executor.Execute(ctx, job, timeout)
-	metrics.CronDurationSeconds.WithLabelValues(job.Name).Observe(time.Since(start).Seconds())
+	observability.CronDuration().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("job_name", job.Name)))
 
 	job.State.LastRunID = sessionKey
 	if s.handlePostExecution(job, start.UnixMilli(), err, errorType(err)) {
@@ -227,7 +230,7 @@ func (s *Scheduler) executeAttached(job *CronJob) {
 	if s.attachedHandler == nil {
 		s.log.Warn("cron: attached_session execution skipped, no attached router",
 			"job_id", job.ID, "name", job.Name)
-		metrics.CronAttachedTotal.WithLabelValues("no_router").Inc()
+		observability.CronAttached().Add(s.ctx, 1, metric.WithAttributes(attribute.String("result", "no_router")))
 		job.State.LastStatus = StatusFailed
 		s.persistState(job.ID, job.State)
 		return
@@ -293,7 +296,7 @@ func (s *Scheduler) finishExecution(job *CronJob, startedAtMs int64, err error, 
 			"job_id", job.ID, "name", job.Name, "err", err)
 		job.State.LastStatus = StatusFailed
 		job.State.ConsecutiveErrs++
-		metrics.CronErrorsTotal.WithLabelValues(job.Name, errType).Inc()
+		observability.CronErrors().Add(s.ctx, 1, metric.WithAttributes(attribute.String("job_name", job.Name), attribute.String("error_type", errType)))
 
 		if job.State.ConsecutiveErrs >= maxConsecutiveErrors {
 			s.log.Warn("cron: auto-disabling job after consecutive failures",

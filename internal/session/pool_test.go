@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestPoolAcquire_Release(t *testing.T) {
 	pool := NewPoolManager(nil, 10, 3, 0)
 
 	// First acquire succeeds
-	err := pool.Acquire("user1")
+	err := pool.Acquire(context.Background(), "user1")
 	require.Nil(t, err)
 
 	total, max, users := pool.Stats()
@@ -27,7 +28,7 @@ func TestPoolAcquire_Release(t *testing.T) {
 	require.Equal(t, 10, max)
 	require.Equal(t, 1, users)
 
-	pool.Release("user1")
+	pool.Release(context.Background(), "user1")
 
 	total, _, users = pool.Stats()
 	require.Equal(t, 0, total)
@@ -39,11 +40,11 @@ func TestPoolAcquire_GlobalLimit(t *testing.T) {
 
 	pool := NewPoolManager(nil, 2, 10, 0)
 
-	require.Nil(t, pool.Acquire("user1"))
-	require.Nil(t, pool.Acquire("user2"))
+	require.Nil(t, pool.Acquire(context.Background(), "user1"))
+	require.Nil(t, pool.Acquire(context.Background(), "user2"))
 
 	// Third should fail due to global limit
-	err := pool.Acquire("user3")
+	err := pool.Acquire(context.Background(), "user3")
 	require.NotNil(t, err)
 	pe := new(PoolError)
 	require.ErrorAs(t, err, &pe)
@@ -57,11 +58,11 @@ func TestPoolAcquire_UserQuotaLimit(t *testing.T) {
 
 	pool := NewPoolManager(nil, 10, 2, 0)
 
-	require.Nil(t, pool.Acquire("user1"))
-	require.Nil(t, pool.Acquire("user1"))
+	require.Nil(t, pool.Acquire(context.Background(), "user1"))
+	require.Nil(t, pool.Acquire(context.Background(), "user1"))
 
 	// Third for same user fails
-	err := pool.Acquire("user1")
+	err := pool.Acquire(context.Background(), "user1")
 	require.NotNil(t, err)
 	pe := new(PoolError)
 	require.ErrorAs(t, err, &pe)
@@ -71,7 +72,7 @@ func TestPoolAcquire_UserQuotaLimit(t *testing.T) {
 	require.Equal(t, 2, pe.Max)
 
 	// Different user succeeds
-	require.Nil(t, pool.Acquire("user2"))
+	require.Nil(t, pool.Acquire(context.Background(), "user2"))
 }
 
 func TestPoolAcquire_Unlimited(t *testing.T) {
@@ -81,7 +82,7 @@ func TestPoolAcquire_Unlimited(t *testing.T) {
 	pool := NewPoolManager(nil, 0, 0, 0)
 
 	for i := 0; i < 100; i++ {
-		err := pool.Acquire("user1")
+		err := pool.Acquire(context.Background(), "user1")
 		require.Nil(t, err, "acquire %d should succeed", i)
 	}
 
@@ -95,10 +96,10 @@ func TestPoolRelease_UserCountGoesToZero(t *testing.T) {
 
 	pool := NewPoolManager(nil, 10, 3, 0)
 
-	require.NoError(t, pool.Acquire("user1"))
-	require.NoError(t, pool.Acquire("user1"))
-	pool.Release("user1")
-	pool.Release("user1")
+	require.NoError(t, pool.Acquire(context.Background(), "user1"))
+	require.NoError(t, pool.Acquire(context.Background(), "user1"))
+	pool.Release(context.Background(), "user1")
+	pool.Release(context.Background(), "user1")
 
 	_, _, users := pool.Stats()
 	require.Equal(t, 0, users)
@@ -110,8 +111,8 @@ func TestPoolRelease_Underflow(t *testing.T) {
 	pool := NewPoolManager(nil, 10, 3, 0)
 
 	// Release without acquire is guarded — no underflow.
-	pool.Release("user1")
-	pool.Release("user1")
+	pool.Release(context.Background(), "user1")
+	pool.Release(context.Background(), "user1")
 
 	total, _, users := pool.Stats()
 	require.Equal(t, 0, total) // guard prevents negative total
@@ -131,10 +132,10 @@ func TestPoolStats_MultiUser(t *testing.T) {
 
 	pool := NewPoolManager(nil, 100, 5, 0)
 
-	require.NoError(t, pool.Acquire("user1"))
-	require.NoError(t, pool.Acquire("user1"))
-	require.NoError(t, pool.Acquire("user2"))
-	require.NoError(t, pool.Acquire("user3"))
+	require.NoError(t, pool.Acquire(context.Background(), "user1"))
+	require.NoError(t, pool.Acquire(context.Background(), "user1"))
+	require.NoError(t, pool.Acquire(context.Background(), "user2"))
+	require.NoError(t, pool.Acquire(context.Background(), "user3"))
 
 	total, _, users := pool.Stats()
 	require.Equal(t, 4, total)
@@ -149,14 +150,14 @@ func TestPoolRelease_AfterGCTransitions(t *testing.T) {
 	pool := NewPoolManager(nil, 100, 3, 0)
 
 	// Simulate multiple sessions per user
-	require.Nil(t, pool.Acquire("user1"))
-	require.Nil(t, pool.Acquire("user1"))
+	require.Nil(t, pool.Acquire(context.Background(), "user1"))
+	require.Nil(t, pool.Acquire(context.Background(), "user1"))
 
 	// GC transitions one session to terminated → release quota
-	pool.Release("user1")
+	pool.Release(context.Background(), "user1")
 
 	// Now one slot is available for user1
-	require.Nil(t, pool.Acquire("user1"))
+	require.Nil(t, pool.Acquire(context.Background(), "user1"))
 }
 
 // ─── ValidTransitions table ──────────────────────────────────────────────────
@@ -266,12 +267,12 @@ func TestPoolAttachMemory_Integrated(t *testing.T) {
 	// Simulates: Acquire + AcquireMemory → Release + ReleaseMemory.
 	pool := NewPoolManager(nil, 10, 5, 1<<30)
 
-	require.Nil(t, pool.Acquire("user1"))
+	require.Nil(t, pool.Acquire(context.Background(), "user1"))
 	require.Nil(t, pool.AcquireMemory("user1"))
 
 	require.Equal(t, int64(workerMemoryEstimate), pool.UserMemory("user1"))
 
-	pool.Release("user1")
+	pool.Release(context.Background(), "user1")
 	pool.ReleaseMemory("user1")
 
 	require.Equal(t, int64(0), pool.UserMemory("user1"))
@@ -281,9 +282,9 @@ func TestPoolAcquireWithMemory_Success(t *testing.T) {
 	t.Parallel()
 
 	pool := NewPoolManager(nil, 10, 5, 1<<30)
-	require.Nil(t, pool.AcquireWithMemory("user1"))
+	require.Nil(t, pool.AcquireWithMemory(context.Background(), "user1"))
 	require.Equal(t, int64(workerMemoryEstimate), pool.UserMemory("user1"))
-	pool.Release("user1")
+	pool.Release(context.Background(), "user1")
 	require.Equal(t, int64(0), pool.UserMemory("user1"))
 }
 
@@ -293,43 +294,43 @@ func TestPoolAcquireWithMemory_MemoryExceeded(t *testing.T) {
 	// Limit to 1 worker's worth of memory.
 	pool := NewPoolManager(nil, 10, 5, int64(workerMemoryEstimate))
 
-	require.Nil(t, pool.AcquireWithMemory("user1"))
+	require.Nil(t, pool.AcquireWithMemory(context.Background(), "user1"))
 
-	err := pool.AcquireWithMemory("user1")
+	err := pool.AcquireWithMemory(context.Background(), "user1")
 	require.Error(t, err)
 	var pe *PoolError
 	require.True(t, errors.As(err, &pe))
 	require.Equal(t, poolErrKindMemoryExceeded, pe.Kind)
 
-	pool.Release("user1")
+	pool.Release(context.Background(), "user1")
 }
 
 func TestPoolAcquireWithMemory_PoolExhausted(t *testing.T) {
 	t.Parallel()
 
 	pool := NewPoolManager(nil, 1, 5, 0)
-	require.Nil(t, pool.AcquireWithMemory("user1"))
+	require.Nil(t, pool.AcquireWithMemory(context.Background(), "user1"))
 
-	err := pool.AcquireWithMemory("user2")
+	err := pool.AcquireWithMemory(context.Background(), "user2")
 	require.Error(t, err)
 	var pe *PoolError
 	require.True(t, errors.As(err, &pe))
 	require.Equal(t, poolErrKindExhausted, pe.Kind)
 
-	pool.Release("user1")
+	pool.Release(context.Background(), "user1")
 }
 
 func TestPoolAcquireWithMemory_UserQuotaExceeded(t *testing.T) {
 	t.Parallel()
 
 	pool := NewPoolManager(nil, 10, 1, 0)
-	require.Nil(t, pool.AcquireWithMemory("user1"))
+	require.Nil(t, pool.AcquireWithMemory(context.Background(), "user1"))
 
-	err := pool.AcquireWithMemory("user1")
+	err := pool.AcquireWithMemory(context.Background(), "user1")
 	require.Error(t, err)
 	var pe *PoolError
 	require.True(t, errors.As(err, &pe))
 	require.Equal(t, poolErrKindUserQuotaExceeded, pe.Kind)
 
-	pool.Release("user1")
+	pool.Release(context.Background(), "user1")
 }

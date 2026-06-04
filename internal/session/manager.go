@@ -9,12 +9,15 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/hrygo/hotplex/internal/config"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -36,6 +39,67 @@ var (
 
 // MaxClientKeyLen is the maximum allowed length for ClientKey.
 const MaxClientKeyLen = 256
+
+// Atomic gauge state for ObservableGauge callbacks.
+// These track counts that were previously GaugeVec.Inc/Dec in promauto.
+var (
+	sessionsActiveByState sync.Map // map[string]*atomic.Int64 — key is state name
+	workersRunningByType  sync.Map // map[string]*atomic.Int64 — key is worker_type
+)
+
+// sessionsActiveGauge tracks the count of sessions per state.
+func sessionsActiveGauge(key string) *atomic.Int64 {
+	v, _ := sessionsActiveByState.LoadOrStore(key, &atomic.Int64{})
+	g, _ := v.(*atomic.Int64)
+	return g
+}
+
+// workersRunningGauge tracks the count of running workers per type.
+func workersRunningGauge(key string) *atomic.Int64 {
+	v, _ := workersRunningByType.LoadOrStore(key, &atomic.Int64{})
+	g, _ := v.(*atomic.Int64)
+	return g
+}
+
+func init() {
+	observability.RegisterGaugeCallbacks(func(m metric.Meter) {
+		sessionGauge, err := m.Int64ObservableGauge(
+			"hotplex.session.active",
+			metric.WithDescription("Number of active sessions by state"),
+		)
+		if err != nil {
+			slog.Warn("session: failed to create session.active gauge", "err", err)
+			return
+		}
+		_, _ = m.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+			sessionsActiveByState.Range(func(key, val any) bool {
+				k, _ := key.(string)
+				v, _ := val.(*atomic.Int64)
+				o.ObserveInt64(sessionGauge, v.Load(), metric.WithAttributes(attribute.String("state", k)))
+				return true
+			})
+			return nil
+		}, sessionGauge)
+
+		workerGauge, err := m.Int64ObservableGauge(
+			"hotplex.worker.running",
+			metric.WithDescription("Number of currently running workers"),
+		)
+		if err != nil {
+			slog.Warn("session: failed to create worker.running gauge", "err", err)
+			return
+		}
+		_, _ = m.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+			workersRunningByType.Range(func(key, val any) bool {
+				k, _ := key.(string)
+				v, _ := val.(*atomic.Int64)
+				o.ObserveInt64(workerGauge, v.Load(), metric.WithAttributes(attribute.String("worker_type", k)))
+				return true
+			})
+			return nil
+		}, workerGauge)
+	})
+}
 
 // Manager orchestrates session lifecycle, persistence, and GC.
 type Manager struct {
@@ -225,8 +289,8 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, w
 	m.mu.Unlock()
 
 	m.log.Info("session: created", "session_id", id, "user_id", userID, "worker_type", workerType, "bot_id", botID)
-	metrics.SessionsTotal.WithLabelValues(string(workerType)).Inc()
-	metrics.SessionsActive.WithLabelValues(string(events.StateCreated)).Inc()
+	observability.SessionCreated().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(workerType))))
+	sessionsActiveGauge(string(events.StateCreated)).Add(1)
 	return info, nil
 }
 
@@ -343,13 +407,13 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	if to == events.StateTerminated || to == events.StateDeleted {
 		// Record worker execution duration and decrement running gauge before killing.
 		if !ms.startedAt.IsZero() && ms.worker != nil {
-			metrics.WorkerExecDuration.WithLabelValues(string(ms.info.WorkerType)).Observe(time.Since(ms.startedAt).Seconds())
+			observability.WorkerExecDuration().Record(ctx, time.Since(ms.startedAt).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(ms.info.WorkerType))))
 		}
 		if ms.worker != nil {
-			metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Dec()
+			workersRunningGauge(string(ms.info.WorkerType)).Add(-1)
 			// Release quota only when worker is still attached (DetachWorker may
 			// have already released it on the bridge cleanup path).
-			m.releaseWorkerQuota(ms)
+			m.releaseWorkerQuota(ctx, ms)
 		}
 		// Gracefully terminate the worker process with 5s grace period.
 		// Safe: ms.mu is held by the caller, and worker.Terminate() does not
@@ -370,18 +434,18 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	m.log.Info("session: transitioned", "session_id", ms.info.ID, "from", from, "to", to)
 
 	// Update active sessions gauge.
-	metrics.SessionsActive.WithLabelValues(string(from)).Dec()
-	metrics.SessionsActive.WithLabelValues(string(to)).Inc()
+	sessionsActiveGauge(string(from)).Add(-1)
+	sessionsActiveGauge(string(to)).Add(1)
 
 	// Record termination reason.
 	if to == events.StateTerminated {
 		if termReason == "" {
 			termReason = "terminated"
 		}
-		metrics.SessionsTerminated.WithLabelValues(termReason).Inc()
+		observability.SessionTerminated().Add(ctx, 1, metric.WithAttributes(attribute.String("reason", termReason)))
 	}
 	if to == events.StateDeleted {
-		metrics.SessionsDeleted.Inc()
+		observability.SessionDeleted().Add(ctx, 1)
 	}
 
 	m.notifyStateChange(ctx, ms.info.ID, to, "")
@@ -412,20 +476,20 @@ func (m *Manager) forceTerminateInMemory(ctx context.Context, ms *managedSession
 
 	// Record worker execution duration.
 	if !ms.startedAt.IsZero() && ms.worker != nil {
-		metrics.WorkerExecDuration.WithLabelValues(string(ms.info.WorkerType)).Observe(time.Since(ms.startedAt).Seconds())
+		observability.WorkerExecDuration().Record(ctx, time.Since(ms.startedAt).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(ms.info.WorkerType))))
 	}
 	// Release quota and decrement running gauge.
 	if ms.worker != nil {
-		metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Dec()
-		m.releaseWorkerQuota(ms)
+		workersRunningGauge(string(ms.info.WorkerType)).Add(-1)
+		m.releaseWorkerQuota(ctx, ms)
 		workerToKill = ms.worker
 	}
 	ms.worker = nil // unconditional nil — matches transitionState, prevents double-release
 
 	m.updateRunningIndexForTransition(ms.info.ID, from, events.StateTerminated)
-	metrics.SessionsActive.WithLabelValues(string(from)).Dec()
-	metrics.SessionsActive.WithLabelValues(string(events.StateTerminated)).Inc()
-	metrics.SessionsTerminated.WithLabelValues(termReason).Inc()
+	sessionsActiveGauge(string(from)).Add(-1)
+	sessionsActiveGauge(string(events.StateTerminated)).Add(1)
+	observability.SessionTerminated().Add(ctx, 1, metric.WithAttributes(attribute.String("reason", termReason)))
 
 	m.notifyStateChange(ctx, ms.info.ID, events.StateTerminated, termReason)
 
@@ -528,7 +592,7 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 // AttachWorker attempts to allocate concurrency quota and pair the worker runtime to the session.
 // Pool quota is acquired outside m.mu to reduce lock contention under burst load.
 // TOCTOU re-validation under m.mu ensures correctness.
-func (m *Manager) AttachWorker(id string, w worker.Worker) error {
+func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) error {
 	if m == nil {
 		return ErrSessionNotFound
 	}
@@ -551,7 +615,7 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	}
 
 	// Acquire pool quota (slot + memory) in a single atomic operation.
-	if poolErr := m.pool.AcquireWithMemory(userID); poolErr != nil {
+	if poolErr := m.pool.AcquireWithMemory(ctx, userID); poolErr != nil {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
 			m.log.Warn("session: attach rejected", "err", poolErr, "session_id", id)
@@ -572,16 +636,16 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	ms, ok = m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		m.pool.Release(userID)
-		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
+		m.pool.Release(ctx, userID)
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrSessionNotFound
 	}
 	ms.mu.Lock()
 	if ms.worker != nil {
 		ms.mu.Unlock()
 		m.mu.Unlock()
-		m.pool.Release(userID)
-		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
+		m.pool.Release(ctx, userID)
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrWorkerAttached
 	}
 	// Reject attach if session is no longer active — prevents Delete/Attach
@@ -590,15 +654,15 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	if !ms.info.State.IsActive() {
 		ms.mu.Unlock()
 		m.mu.Unlock()
-		m.pool.Release(userID)
-		metrics.PoolAcquireTotal.WithLabelValues("toctou_retry").Inc()
+		m.pool.Release(ctx, userID)
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrSessionNotActive
 	}
 	ms.worker = w
 	ms.startedAt = time.Now()
-	metrics.PoolAcquireTotal.WithLabelValues("success").Inc()
-	metrics.WorkerStartsTotal.WithLabelValues(string(ms.info.WorkerType), "success").Inc()
-	metrics.WorkersRunning.WithLabelValues(string(ms.info.WorkerType)).Inc()
+	observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "success")))
+	observability.WorkerStarts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(ms.info.WorkerType)), attribute.String("result", "success")))
+	workersRunningGauge(string(ms.info.WorkerType)).Add(1)
 	ms.mu.Unlock()
 	m.mu.Unlock()
 
@@ -622,8 +686,8 @@ func (m *Manager) GetWorker(id string) worker.Worker {
 
 // releaseWorkerQuota releases both concurrency slot and memory quota.
 // pool.Release now handles both slot and memory under a single lock.
-func (m *Manager) releaseWorkerQuota(ms *managedSession) {
-	m.pool.Release(ms.info.UserID)
+func (m *Manager) releaseWorkerQuota(ctx context.Context, ms *managedSession) {
+	m.pool.Release(ctx, ms.info.UserID)
 }
 
 // DetachWorker removes the worker from the session and releases the concurrency quota.
@@ -664,8 +728,8 @@ func (m *Manager) detachWorkerUnchecked(id string, expected worker.Worker) bool 
 	ms.mu.Unlock()
 
 	if hasWorker {
-		metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
-		m.pool.Release(uid)
+		workersRunningGauge(string(workerType)).Add(-1)
+		m.pool.Release(context.Background(), uid)
 		m.log.Debug("session: worker detached", "session_id", id)
 	}
 	return true
@@ -727,8 +791,8 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		// No gap worker — commit candidate and delete atomically under both locks.
 		ms.info = candidate
 		if hasWorkerAfter {
-			metrics.WorkersRunning.WithLabelValues(string(workerType)).Dec()
-			m.pool.Release(uid)
+			workersRunningGauge(string(workerType)).Add(-1)
+			m.pool.Release(ctx, uid)
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)
@@ -757,8 +821,8 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 		if ms.worker != nil {
 			workerToKill = ms.worker
 			workerType = string(ms.info.WorkerType)
-			metrics.WorkersRunning.WithLabelValues(workerType).Dec()
-			m.releaseWorkerQuota(ms)
+			workersRunningGauge(workerType).Add(-1)
+			m.releaseWorkerQuota(ctx, ms)
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)

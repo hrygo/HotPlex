@@ -6,15 +6,19 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/messaging"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // ─── Message Handler ─────────────────────────────────────────────────────────
@@ -215,8 +219,27 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	}
 
 	if !si.State.IsActive() {
-		h.log.Warn("gateway: handleInput session not active", "session_id", env.SessionID, "state", si.State)
-		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active: %s", si.State)
+		// Auto-resume TERMINATED sessions so the user can continue on the
+		// same WebSocket connection after clicking stop (which sends terminate).
+		if si.State == events.StateTerminated && h.bridge != nil {
+			h.log.Info("gateway: auto-resuming terminated session", "session_id", env.SessionID)
+			resumeCtx, resumeCancel := context.WithTimeout(ctx, 30*time.Second)
+			resumeErr := h.bridge.ResumeSession(resumeCtx, env.SessionID, si.WorkDir)
+			resumeCancel()
+			if resumeErr != nil {
+				h.log.Warn("gateway: auto-resume failed", "session_id", env.SessionID, "err", resumeErr)
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "session resume failed: %v", resumeErr)
+			}
+			si, err = h.sm.Get(ctx, env.SessionID)
+			if err != nil {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found after resume")
+			}
+			if !si.State.IsActive() {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active after resume: %s", si.State)
+			}
+		} else {
+			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active: %s", si.State)
+		}
 	}
 
 	if si.State == events.StateIdle {
@@ -297,7 +320,7 @@ var passthroughMetricLabel = map[events.Kind]string{
 
 func (h *Handler) passthroughToSession(ctx context.Context, env *events.Envelope) error {
 	if label, ok := passthroughMetricLabel[env.Event.Type]; ok {
-		metrics.GatewayEventsTotal.WithLabelValues(label, "s2c").Inc()
+		observability.GatewayEvents().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", label), attribute.String("direction", "s2c")))
 	}
 	return h.hub.SendToSession(ctx, env)
 }
@@ -353,7 +376,7 @@ type SessionTransitioner interface {
 
 // SessionWorkerManager provides worker attachment and detachment.
 type SessionWorkerManager interface {
-	AttachWorker(id string, w worker.Worker) error
+	AttachWorker(ctx context.Context, id string, w worker.Worker) error
 	DetachWorker(id string)
 	DetachWorkerIf(id string, expected worker.Worker) bool
 	UpdateWorkerSessionID(ctx context.Context, id, workerSessionID string) error
