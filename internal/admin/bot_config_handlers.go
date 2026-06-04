@@ -9,6 +9,16 @@ import (
 )
 
 // HandleListBotConfigs returns all registered bot configurations.
+//
+// @Summary      List bot configs
+// @Description  Returns full configuration for all registered bots. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {array}   BotConfigEntry
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      500  {object}  ErrorResponse  "Internal error"
+// @Router       /admin/bots/config [get]
 // GET /admin/bots/config
 func (a *AdminAPI) HandleListBotConfigs(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
@@ -27,6 +37,17 @@ func (a *AdminAPI) HandleListBotConfigs(w http.ResponseWriter, r *http.Request) 
 }
 
 // HandleGetBotConfig returns the full configuration for a single bot.
+//
+// @Summary      Get bot config
+// @Description  Returns the full configuration including agent config summary for a single bot. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        name  path      string  true  "Bot name"
+// @Success      200   {object}  BotConfigEntry
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      404   {object}  ErrorResponse  "Bot not found"
+// @Router       /admin/bots/{name}/config [get]
 // GET /admin/bots/{name}/config
 func (a *AdminAPI) HandleGetBotConfig(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
@@ -50,6 +71,19 @@ func (a *AdminAPI) HandleGetBotConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleGetAgentConfigFile reads a single agent config file for a bot.
+//
+// @Summary      Get agent config file
+// @Description  Returns the content of a single agent config file (SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md). Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        name  path      string  true  "Bot name"
+// @Param        file  path      string  true  "Config file name"  Enums(SOUL.md,AGENTS.md,SKILLS.md,USER.md,MEMORY.md)
+// @Success      200   {object}  AgentConfigFile
+// @Failure      400   {object}  ErrorResponse  "Invalid config file name"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      404   {object}  ErrorResponse  "File not found"
+// @Router       /admin/bots/{name}/config/{file} [get]
 // GET /admin/bots/{name}/config/{file}
 func (a *AdminAPI) HandleGetAgentConfigFile(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
@@ -79,6 +113,17 @@ func (a *AdminAPI) HandleGetAgentConfigFile(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleSystemPromptPreview returns the assembled system prompt for a bot.
+//
+// @Summary      Preview system prompt
+// @Description  Returns the fully assembled system prompt for a bot, combining all agent config files. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        name  path      string  true  "Bot name"
+// @Success      200   {object}  SystemPromptPreviewResponse
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      404   {object}  ErrorResponse  "Bot not found"
+// @Router       /admin/bots/{name}/preview [get]
 // GET /admin/bots/{name}/preview
 func (a *AdminAPI) HandleSystemPromptPreview(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
@@ -102,6 +147,18 @@ func (a *AdminAPI) HandleSystemPromptPreview(w http.ResponseWriter, r *http.Requ
 }
 
 // HandleUpdateBotConfig applies partial updates to an existing bot configuration.
+//
+// @Summary      Update bot config
+// @Description  Partially updates an existing bot's configuration attributes. Requires admin:write scope.
+// @Tags         Admin API
+// @Accept       json
+// @Security     AdminBearerAuth
+// @Param        name  path  string          true  "Bot name"
+// @Param        body  body  BotConfigAttrs  true  "Config fields to update"
+// @Success      204   "Config updated"
+// @Failure      400   {object}  ErrorResponse  "Invalid JSON or update failed"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Router       /admin/bots/{name} [patch]
 // PATCH /admin/bots/{name}
 func (a *AdminAPI) HandleUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
@@ -132,6 +189,17 @@ func (a *AdminAPI) HandleUpdateBotConfig(w http.ResponseWriter, r *http.Request)
 }
 
 // HandleCreateBot registers a new bot.
+//
+// @Summary      Create bot
+// @Description  Registers a new bot with the specified platform configuration. Requires admin:write scope.
+// @Tags         Admin API
+// @Accept       json
+// @Security     AdminBearerAuth
+// @Param        body  body  CreateBotRequest  true  "Bot creation request"
+// @Success      201   "Bot created"
+// @Failure      400   {object}  ErrorResponse  "Invalid JSON or missing bot name"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Router       /admin/bots [post]
 // POST /admin/bots
 func (a *AdminAPI) HandleCreateBot(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
@@ -162,6 +230,17 @@ func (a *AdminAPI) HandleCreateBot(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleDeleteBot removes a bot registration.
+//
+// @Summary      Delete bot
+// @Description  Removes a bot registration by name. Returns 409 if the bot is currently running. Requires admin:write scope.
+// @Tags         Admin API
+// @Security     AdminBearerAuth
+// @Param        name  path  string  true  "Bot name"
+// @Success      204   "Bot deleted"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      404   {object}  ErrorResponse  "Bot not found"
+// @Failure      409   {object}  ErrorResponse  "Bot is currently running"
+// @Router       /admin/bots/{name} [delete]
 // DELETE /admin/bots/{name}
 func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
@@ -190,6 +269,19 @@ func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleWriteAgentConfigFile writes content to a single agent config file for a bot.
+//
+// @Summary      Write agent config file
+// @Description  Writes content to a single agent config file (SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md). Requires admin:write scope.
+// @Tags         Admin API
+// @Accept       json
+// @Security     AdminBearerAuth
+// @Param        name  path  string                 true  "Bot name"
+// @Param        file  path  string                 true  "Config file name"  Enums(SOUL.md,AGENTS.md,SKILLS.md,USER.md,MEMORY.md)
+// @Param        body  body  WriteAgentConfigRequest  true  "File content"
+// @Success      204   "File written"
+// @Failure      400   {object}  ErrorResponse  "Invalid config file or write failed"
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Router       /admin/bots/{name}/config/{file} [put]
 // PUT /admin/bots/{name}/config/{file}
 func (a *AdminAPI) HandleWriteAgentConfigFile(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {

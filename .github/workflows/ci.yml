@@ -13,6 +13,7 @@ on:
       - 'internal/webchat/**'
       - 'configs/**'
       - 'docs/**/*.md'
+      - 'docs/swagger/**'
       - 'cmd/build-docs/**'
       - '.github/workflows/**'
   pull_request:
@@ -27,6 +28,7 @@ on:
       - 'internal/webchat/**'
       - 'configs/**'
       - 'docs/**/*.md'
+      - 'docs/swagger/**'
       - 'cmd/build-docs/**'
       - '.github/workflows/**'
 
@@ -191,6 +193,12 @@ jobs:
 
       - name: Build & validate docs
         run: make docs-build
+
+      - name: Install swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Check swagger freshness
+        run: make check-swagger
 
       - name: Build gateway binary
         run: |

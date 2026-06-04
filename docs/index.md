@@ -90,20 +90,21 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 
 权威、完整的技术细节。
 
-| 参考                                               | 说明                                |
-| -------------------------------------------------- | ----------------------------------- |
-| [CLI 命令参考](reference/cli.md)                   | 全部 38 个 CLI 子命令和参数         |
-| [配置参考](reference/configuration.md)             | 全部 14 个配置段的字段级文档        |
-| [Admin API 参考](reference/admin-api.md)           | 管理端点、Scope 权限、请求/响应格式 |
-| [AEP 协议参考](reference/aep-protocol.md)          | Agent Exchange Protocol v1 完整规范 |
-| [事件参考](reference/events.md)                    | 全部 AEP 事件类型和数据结构         |
-| [安全策略参考](reference/security-policies.md)     | API Key、Bot ID、SSRF、命令白名单、工具控制     |
-| [Metrics 参考](reference/metrics.md)               | Prometheus 指标、scrape 配置        |
-| [术语表](reference/glossary.md)                    | HotPlex 核心术语解释                |
-| [Go SDK 参考](reference/sdk-go.md)                 | Go 客户端 SDK API 文档              |
-| [TypeScript SDK 参考](reference/sdk-typescript.md) | TypeScript SDK API 文档             |
-| [Python SDK 参考](reference/sdk-python.md)         | Python SDK API 文档                 |
-| [Java SDK 参考](reference/sdk-java.md)             | Java SDK API 文档                   |
+| 参考                                               | 说明                                         |
+| -------------------------------------------------- | -------------------------------------------- |
+| [CLI 命令参考](reference/cli.md)                   | 全部 38 个 CLI 子命令和参数                  |
+| [配置参考](reference/configuration.md)             | 全部 14 个配置段的字段级文档                 |
+| [Admin API 参考](reference/admin-api.md)           | 管理端点、Scope 权限、请求/响应格式          |
+| [API 控制台](reference/api-console.html)           | 交互式 Scalar 控制台，可在线测试所有端点     |
+| [AEP 协议参考](reference/aep-protocol.md)          | Agent Exchange Protocol v1 完整规范          |
+| [事件参考](reference/events.md)                    | 全部 AEP 事件类型和数据结构                  |
+| [安全策略参考](reference/security-policies.md)     | API Key、Bot ID、SSRF、命令白名单、工具控制  |
+| [Metrics 参考](reference/metrics.md)               | Prometheus 指标、scrape 配置                 |
+| [术语表](reference/glossary.md)                    | HotPlex 核心术语解释                         |
+| [Go SDK 参考](reference/sdk-go.md)                 | Go 客户端 SDK API 文档                       |
+| [TypeScript SDK 参考](reference/sdk-typescript.md) | TypeScript SDK API 文档                      |
+| [Python SDK 参考](reference/sdk-python.md)         | Python SDK API 文档                          |
+| [Java SDK 参考](reference/sdk-java.md)             | Java SDK API 文档                            |
 
 ## 概念解释
 
