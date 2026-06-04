@@ -80,6 +80,20 @@ func (g *GatewayAPI) authorizeSession(w http.ResponseWriter, r *http.Request) (s
 	return id, si, true
 }
 
+// ListSessions returns sessions belonging to the authenticated user.
+//
+// @Summary      List sessions
+// @Description  Returns paginated list of sessions for the caller's user identity. Default platform filter is "webchat"; pass platform=all to include all platforms.
+// @Tags         Gateway API
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Param        limit     query    int     false  "Maximum results (1-500)"                                      default(100)
+// @Param        offset    query    int     false  "Pagination offset"                                             default(0)
+// @Param        platform  query    string  false  "Platform filter (webchat/slack/feishu/all)"  default(webchat)
+// @Success      200  {object}  admin.GatewaySessionListResponse
+// @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
+// @Failure      500  {object}  admin.ErrorResponse  "Internal error"
+// @Router       /api/sessions [get]
 func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	userID, _, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
@@ -118,6 +132,22 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{"sessions": sessions, "limit": limit, "offset": offset, "platform": platform})
 }
 
+// CreateSession creates a new AI agent session.
+//
+// @Summary      Create session
+// @Description  Creates a new AI agent session. client_session_id is required and must be unique per user. Uses UUIDv5 derivation for idempotency.
+// @Tags         Gateway API
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Param        client_session_id  query    string  true   "Client-provided session identifier (max 128 chars)"
+// @Param        title              query    string  false  "Human-readable session title"
+// @Param        worker_type        query    string  false  "Worker type"      default(claudecode)
+// @Param        work_dir           query    string  false  "Working directory"
+// @Success      200  {object}  admin.GatewayCreateSessionResponse
+// @Failure      400  {object}  admin.ErrorResponse  "Missing or invalid client_session_id"
+// @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
+// @Failure      500  {object}  admin.ErrorResponse  "Failed to create session"
+// @Router       /api/sessions [post]
 func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	userID, botID, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
@@ -195,6 +225,19 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]string{"session_id": id})
 }
 
+// GetSession returns details for a single session.
+//
+// @Summary      Get session
+// @Description  Returns full session details. Ownership check: caller must own the session.
+// @Tags         Gateway API
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Param        id   path      string  true  "Session ID"
+// @Success      200  {object}  object
+// @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
+// @Failure      403  {object}  admin.ErrorResponse  "Ownership required"
+// @Failure      404  {object}  admin.ErrorResponse  "Session not found"
+// @Router       /api/sessions/{id} [get]
 func (g *GatewayAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 	_, si, ok := g.authorizeSession(w, r)
 	if !ok {
@@ -203,6 +246,19 @@ func (g *GatewayAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, si)
 }
 
+// DeleteSession terminates and deletes a session.
+//
+// @Summary      Delete session
+// @Description  Gracefully terminates the worker and physically deletes the session. Ownership check applies.
+// @Tags         Gateway API
+// @Security     ApiKeyAuth
+// @Param        id   path  string  true  "Session ID"
+// @Success      204  "Session deleted"
+// @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
+// @Failure      403  {object}  admin.ErrorResponse  "Ownership required"
+// @Failure      404  {object}  admin.ErrorResponse  "Session not found"
+// @Failure      500  {object}  admin.ErrorResponse  "Failed to delete session"
+// @Router       /api/sessions/{id} [delete]
 func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	id, _, ok := g.authorizeSession(w, r)
 	if !ok {
@@ -223,6 +279,23 @@ func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// SwitchWorkDir changes the working directory for a session.
+//
+// @Summary      Switch working directory
+// @Description  Changes the working directory for an active session. Creates a new derived session ID. Ownership check applies.
+// @Tags         Gateway API
+// @Accept       json
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Param        id    path      string                     true  "Session ID"
+// @Param        body  body      admin.SwitchWorkDirRequest  true  "New working directory"
+// @Success      200   {object}  admin.SwitchWorkDirResponse
+// @Failure      400   {object}  admin.ErrorResponse  "Invalid body or path"
+// @Failure      401   {object}  admin.ErrorResponse  "Unauthorized"
+// @Failure      403   {object}  admin.ErrorResponse  "Ownership required"
+// @Failure      409   {object}  admin.ErrorResponse  "Session not active"
+// @Failure      500   {object}  admin.ErrorResponse  "Internal error"
+// @Router       /api/sessions/{id}/cd [post]
 func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		WorkDir string `json:"work_dir"`
@@ -280,6 +353,21 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetHistory returns turn history for a session.
+//
+// @Summary      Get session history
+// @Description  Returns paginated turn records for a session. Use before_id for cursor-based pagination. Ownership check applies.
+// @Tags         Gateway API
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Param        id         path      string  true   "Session ID"
+// @Param        limit      query     int     false  "Max records (1-200)"  default(50)
+// @Param        before_id  query     int     false  "Return records before this turn ID"
+// @Success      200  {object}  admin.HistoryResponse
+// @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
+// @Failure      403  {object}  admin.ErrorResponse  "Ownership required"
+// @Failure      500  {object}  admin.ErrorResponse  "Failed to get history"
+// @Router       /api/sessions/{id}/history [get]
 func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 	id, _, ok := g.authorizeSession(w, r)
 	if !ok {
@@ -335,6 +423,22 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{"records": records, "has_more": hasMore})
 }
 
+// GetEvents returns AEP events for a session.
+//
+// @Summary      Get session events
+// @Description  Returns paginated AEP events for a session. Use cursor and direction for navigation. Ownership check applies.
+// @Tags         Gateway API
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Param        id         path      string  true   "Session ID"
+// @Param        limit      query     int     false  "Max events (1-1000)"                              default(200)
+// @Param        cursor     query     int     false  "Cursor sequence number"
+// @Param        direction  query     string  false  "Cursor direction (after/before/latest)"  default(latest)
+// @Success      200  {object}  admin.EventsResponse
+// @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
+// @Failure      403  {object}  admin.ErrorResponse  "Ownership required"
+// @Failure      500  {object}  admin.ErrorResponse  "Failed to get events"
+// @Router       /api/sessions/{id}/events [get]
 func (g *GatewayAPI) GetEvents(w http.ResponseWriter, r *http.Request) {
 	if g.eventStore == nil {
 		respondJSON(w, map[string]any{"events": []any{}, "oldest_seq": 0, "newest_seq": 0, "has_older": false})

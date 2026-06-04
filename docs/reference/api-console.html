@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <title>HotPlex API Console</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { margin: 0; padding: 0; }
+    </style>
+  </head>
+  <body>
+    <script
+      id="api-reference"
+      data-url="/docs/swagger/swagger.json"
+      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.26.0/dist/browser/standalone.min.js"
+    ></script>
+    <script>
+      // Configure multiple servers since Admin API (port 9999) and Gateway API (port 8888)
+      // run on different ports. Scalar will show a server selector in the UI.
+      document.getElementById('api-reference').dataset.configuration = JSON.stringify({
+        servers: [
+          { url: window.location.protocol + '//' + window.location.hostname + ':8888', description: 'Gateway API (port 8888)' },
+          { url: window.location.protocol + '//' + window.location.hostname + ':9999', description: 'Admin API (port 9999)' }
+        ],
+        theme: 'default'
+      });
+    </script>
+  </body>
+</html>

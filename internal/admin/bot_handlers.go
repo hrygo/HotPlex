@@ -21,6 +21,15 @@ type BotEntry struct {
 }
 
 // HandleListBots returns all registered bots.
+//
+// @Summary      List bots
+// @Description  Returns all registered bots and their current connection status. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Success      200  {array}   BotEntry
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Router       /admin/bots [get]
 func (a *AdminAPI) HandleListBots(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
 		return
@@ -35,6 +44,17 @@ func (a *AdminAPI) HandleListBots(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleGetBot returns details for a single bot by name.
+//
+// @Summary      Get bot
+// @Description  Returns details for a single registered bot. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        name  path      string  true  "Bot name"
+// @Success      200   {object}  BotEntry
+// @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Failure      404   {object}  ErrorResponse  "Bot not found"
+// @Router       /admin/bots/{name} [get]
 func (a *AdminAPI) HandleGetBot(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
 		return

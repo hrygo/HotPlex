@@ -8,6 +8,9 @@ description: HotPlex Gateway 管理 API 完整参考：Session 管理、Cron 任
 
 HotPlex Admin API 提供网关运维管理能力：会话管理、健康检查、监控指标、配置审计、日志查询和定时任务控制。默认监听 `localhost:9999`，独立于网关主端口（`8888`）。
 
+> **交互式 API 控制台**：可直接在浏览器中浏览和测试所有端点 → [打开 API 控制台](api-console.html)
+> （基于 OpenAPI 规范自动生成，与代码保持同步）
+
 ## 认证
 
 所有 Admin 端点（`/admin/health` 和 `/admin/health/ready` 除外）均需 Bearer Token 认证。Token 通过以下两种方式传递：
