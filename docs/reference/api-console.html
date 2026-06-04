@@ -16,19 +16,18 @@
         display: flex;
         flex-direction: column;
         font-family: 'Inter', system-ui, sans-serif;
+        background: #FAF9F5;
       }
 
-      /* ── Brand Header (40px) ─────────────────────────── */
+      /* ── Brand Header ───────────────────────────────── */
       .hp-header {
-        flex-shrink: 0;
+        flex: 0 0 40px;
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0 20px;
-        height: 40px;
         background: #FAF9F5;
         border-bottom: 1px solid #EBEAE4;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         z-index: 999;
       }
 
@@ -52,36 +51,50 @@
         letter-spacing: -0.01em;
       }
 
+      .hp-header-sep {
+        width: 1px;
+        height: 14px;
+        background: #EBEAE4;
+      }
+
       .hp-header-badge {
-        font-size: 9px;
-        font-weight: 600;
-        color: #C35A3E;
-        background: rgba(195, 90, 62, 0.08);
-        padding: 2px 6px;
-        border-radius: 3px;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
+        font-size: 10px;
+        font-weight: 500;
+        color: #7A7973;
+        letter-spacing: 0.02em;
       }
 
       .hp-back {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 4px;
         font-size: 12px;
         color: #7A7973;
         text-decoration: none;
-        transition: color 0.15s;
+        padding: 4px 10px;
+        border-radius: 6px;
+        transition: all 0.15s;
       }
 
-      .hp-back:hover { color: #C35A3E; }
+      .hp-back:hover {
+        color: #C35A3E;
+        background: rgba(195, 90, 62, 0.06);
+      }
+
       .hp-back svg { width: 14px; height: 14px; }
 
-      /* ── Scalar Container (remaining height) ─────────── */
+      /* ── Scalar Container ───────────────────────────── */
       .scalar-wrap {
         flex: 1;
         min-height: 0;
-        overflow: hidden;
         position: relative;
+      }
+
+      /* Force Scalar web component to fill its container */
+      .scalar-wrap scalar-api-reference {
+        display: block;
+        height: 100%;
+        width: 100%;
       }
 
       /* Loading placeholder */
@@ -91,6 +104,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        gap: 10px;
         background: #FAF9F5;
         color: #7A7973;
         font-size: 14px;
@@ -100,18 +114,17 @@
       .scalar-loading.hidden { opacity: 0; pointer-events: none; }
 
       .scalar-loading .spinner {
-        width: 20px;
-        height: 20px;
+        width: 18px;
+        height: 18px;
         border: 2px solid #EBEAE4;
         border-top-color: #C35A3E;
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
-        margin-right: 10px;
       }
 
       @keyframes spin { to { transform: rotate(360deg); } }
 
-      /* ── Scalar Theme Overrides ──────────────────────── */
+      /* ── Scalar Theme ───────────────────────────────── */
       :root {
         --scalar-color-accent: #C35A3E;
         --scalar-color-accent-soft: rgba(195, 90, 62, 0.1);
@@ -127,14 +140,20 @@
         --scalar-radius: 8px;
         --scalar-radius-lg: 12px;
       }
+
+      @media (max-width: 768px) {
+        .hp-header { padding: 0 12px; }
+        .hp-header-title { font-size: 12px; }
+        .hp-header-sep, .hp-header-badge { display: none; }
+      }
     </style>
   </head>
   <body>
-    <!-- Brand Header (40px fixed) -->
     <div class="hp-header">
       <a href="/docs/" class="hp-header-left">
         <img src="/docs/assets/logo.webp" alt="HotPlex" />
         <span class="hp-header-title">HotPlex</span>
+        <span class="hp-header-sep"></span>
         <span class="hp-header-badge">API Console</span>
       </a>
       <a href="/docs/" class="hp-back">
@@ -145,7 +164,6 @@
       </a>
     </div>
 
-    <!-- Scalar API Reference (fills remaining viewport) -->
     <div class="scalar-wrap">
       <div class="scalar-loading" id="scalar-loading">
         <div class="spinner"></div>
