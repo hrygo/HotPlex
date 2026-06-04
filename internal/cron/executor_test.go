@@ -53,7 +53,8 @@ func (m *mockSessionStateChecker) Transition(_ context.Context, _ string, _ even
 
 // mockWorker implements worker.Worker for testing with minimal stubs.
 type mockWorker struct {
-	inputErr error
+	inputErr  error
+	lastInput string // captures the prompt sent via Input
 }
 
 func (m *mockWorker) Type() worker.WorkerType                             { return worker.TypeClaudeCode }
@@ -65,7 +66,8 @@ func (m *mockWorker) SessionStoreDir() string                             { retu
 func (m *mockWorker) MaxTurns() int                                       { return 0 }
 func (m *mockWorker) Modalities() []string                                { return []string{"text"} }
 func (m *mockWorker) Start(_ context.Context, _ worker.SessionInfo) error { return nil }
-func (m *mockWorker) Input(_ context.Context, _ string, _ map[string]any) error {
+func (m *mockWorker) Input(_ context.Context, prompt string, _ map[string]any) error {
+	m.lastInput = prompt
 	return m.inputErr
 }
 func (m *mockWorker) Resume(_ context.Context, _ worker.SessionInfo) error { return nil }
@@ -177,4 +179,76 @@ func TestBuildDeliverySuffix_NonSilentWithPlatform(t *testing.T) {
 	job.Platform = "feishu"
 	job.PlatformKey = map[string]string{"chat_id": "oc_123"}
 	require.NotEmpty(t, buildDeliverySuffix(job))
+}
+
+func TestBuildWebhookPrefix_WebhookTrigger(t *testing.T) {
+	t.Parallel()
+
+	job := testJob()
+	job.PlatformKey = map[string]string{"trigger": "webhook", "pr_number": "642"}
+
+	prefix := buildWebhookPrefix(job)
+	require.Contains(t, prefix, "PR #642")
+	require.Contains(t, prefix, "TARGET_PR=642")
+	require.Contains(t, prefix, "WEBHOOK")
+	require.Contains(t, prefix, "仅审查")
+	require.Contains(t, prefix, "不要枚举")
+}
+
+func TestBuildWebhookPrefix_CronTrigger(t *testing.T) {
+	t.Parallel()
+
+	job := testJob()
+	job.PlatformKey = nil
+
+	require.Empty(t, buildWebhookPrefix(job))
+}
+
+func TestBuildWebhookPrefix_WebhookWithoutPrNumber(t *testing.T) {
+	t.Parallel()
+
+	job := testJob()
+	job.PlatformKey = map[string]string{"trigger": "webhook"}
+
+	require.Empty(t, buildWebhookPrefix(job))
+}
+
+func TestBuildWebhookPrefix_PrNumberWithoutTrigger(t *testing.T) {
+	t.Parallel()
+
+	job := testJob()
+	job.PlatformKey = map[string]string{"pr_number": "642"}
+
+	require.Empty(t, buildWebhookPrefix(job))
+}
+
+func TestBuildWebhookPrefix_NonNumericPrNumber(t *testing.T) {
+	t.Parallel()
+
+	job := testJob()
+	job.PlatformKey = map[string]string{"trigger": "webhook", "pr_number": "642; rm -rf /"}
+
+	require.Empty(t, buildWebhookPrefix(job))
+}
+
+func TestExecutor_Execute_WebhookPromptContainsPrefix(t *testing.T) {
+	t.Parallel()
+
+	bridge := &mockBridge{}
+	mw := &mockWorker{}
+	sm := &mockSessionStateChecker{
+		defaultSession: &session.SessionInfo{State: "terminated"},
+		defaultWorker:  mw,
+	}
+
+	e := NewExecutor(slog.Default(), bridge, sm, "")
+
+	job := testJob()
+	job.PlatformKey = map[string]string{"trigger": "webhook", "pr_number": "642"}
+
+	_, err := e.Execute(context.Background(), job, 5*time.Second)
+	require.NoError(t, err)
+	require.Contains(t, mw.lastInput, "WEBHOOK")
+	require.Contains(t, mw.lastInput, "PR #642")
+	require.Contains(t, mw.lastInput, "TARGET_PR=642")
 }
