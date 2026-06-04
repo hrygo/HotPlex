@@ -213,8 +213,19 @@ func TestGzipResponseWriter_WriteHeaderPassthrough(t *testing.T) {
 	gw := gzip.NewWriter(rec)
 	w := &gzipResponseWriter{gw: gw, ResponseWriter: rec}
 
+	// WriteHeader stores the code but does NOT forward to underlying
+	// ResponseWriter yet — that happens on the first Write call.
 	w.WriteHeader(http.StatusNotFound)
+	require.Equal(t, http.StatusNotFound, w.code)
+	require.True(t, w.wroteHeader)
+	// rec.Code should still be 200 (default) because WriteHeader is deferred.
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Write triggers the deferred WriteHeader forward with gzip headers.
+	_, err := w.Write([]byte("not found"))
+	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 	require.NoError(t, gw.Close())
 }
 
