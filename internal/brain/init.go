@@ -13,9 +13,8 @@ import (
 //
 // If HOTPLEX_BRAIN_API_KEY is not set, Brain is disabled and features gracefully degrade.
 func Init(logger *slog.Logger) error {
-	config := LoadConfigFromEnv()
+	config, validationErrs := LoadConfigFromEnv()
 
-	_, validationErrs := LoadAndValidate()
 	for _, err := range validationErrs {
 		logger.Warn("Brain config validation warning", "error", err)
 	}
@@ -138,7 +137,7 @@ func Init(logger *slog.Logger) error {
 	return nil
 }
 
-// enhancedBrainWrapper satisfies Brain, StreamingBrain, RoutableBrain, and ObservableBrain interfaces.
+// enhancedBrainWrapper satisfies the Brain interface.
 type enhancedBrainWrapper struct {
 	client         llm.LLMClient
 	config         Config
@@ -165,6 +164,8 @@ func (w *enhancedBrainWrapper) ChatWithOptions(ctx context.Context, prompt strin
 		return "", err
 	}
 
+	timer := w.startMetricsTimer(model, "chat")
+
 	var result string
 	var err error
 	if w.circuitBreaker != nil {
@@ -179,7 +180,6 @@ func (w *enhancedBrainWrapper) ChatWithOptions(ctx context.Context, prompt strin
 		result, err = w.client.ChatWithOptions(ctx, prompt, opts)
 	}
 
-	timer := w.startMetricsTimer(model, "chat")
 	w.recordMetrics(timer, model, prompt, result, err)
 
 	return result, err

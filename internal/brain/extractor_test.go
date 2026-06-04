@@ -108,7 +108,7 @@ func TestConfig_ThreeTierPriority(t *testing.T) {
 		defer func() { _ = os.Unsetenv("HOTPLEX_BRAIN_MODEL") }()
 		defer func() { _ = os.Unsetenv("ANTHROPIC_API_KEY") }()
 
-		config := LoadConfigFromEnv()
+		config, _ := LoadConfigFromEnv()
 		assert.Equal(t, "b1-key", config.Model.APIKey) // Wait, I need to check APIKey field in LoadConfigFromEnv return
 		// Wait, LoadConfigFromEnv returns Config which has Model ModelConfig.
 		// But ModelConfig doesn't have APIKey?

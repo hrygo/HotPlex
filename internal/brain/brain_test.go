@@ -34,7 +34,7 @@ func TestConfig_LoadFromEnv(t *testing.T) {
 		_ = os.Unsetenv("HOTPLEX_BRAIN_RETRY_MAX_WAIT_MS")
 	}()
 
-	config := LoadConfigFromEnv()
+	config, _ := LoadConfigFromEnv()
 
 	assert.True(t, config.Enabled)
 	assert.Equal(t, "openai", config.Model.Provider)
@@ -62,7 +62,7 @@ func TestConfig_DefaultValues(t *testing.T) {
 	_ = os.Setenv("HOTPLEX_BRAIN_API_KEY", "test-key")
 	_ = os.Setenv("HOTPLEX_BRAIN_PROVIDER", "openai")
 
-	config := LoadConfigFromEnv()
+	config, _ := LoadConfigFromEnv()
 
 	assert.True(t, config.Enabled)
 	assert.Equal(t, "openai", config.Model.Provider)

@@ -370,7 +370,7 @@ func TestConfig_OpenAIEndpointFallback(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "oa-test-key")
 	t.Setenv("OPENAI_BASE_URL", "https://custom.openai.com/v1")
 
-	config := LoadConfigFromEnv()
+	config, _ := LoadConfigFromEnv()
 
 	assert.Equal(t, "https://custom.openai.com/v1", config.Model.Endpoint)
 }
@@ -440,7 +440,7 @@ func TestConfig_MetricsServiceName(t *testing.T) {
 	t.Setenv("HOTPLEX_BRAIN_API_KEY", "key")
 	t.Setenv("HOTPLEX_BRAIN_METRICS_SERVICE_NAME", "custom-service")
 
-	config := LoadConfigFromEnv()
+	config, _ := LoadConfigFromEnv()
 	assert.Equal(t, "custom-service", config.Metrics.ServiceName)
 }
 
@@ -448,7 +448,7 @@ func TestConfig_RouterStrategy(t *testing.T) {
 	t.Setenv("HOTPLEX_BRAIN_API_KEY", "key")
 	t.Setenv("HOTPLEX_BRAIN_ROUTER_STRATEGY", "latency_priority")
 
-	config := LoadConfigFromEnv()
+	config, _ := LoadConfigFromEnv()
 	assert.Equal(t, "latency_priority", config.Router.DefaultStage)
 }
 
@@ -463,7 +463,7 @@ func TestConfig_OpenCodeWorkerExtract(t *testing.T) {
 	t.Setenv("SILICONFLOW_API_KEY", "")
 	t.Setenv("DEEPSEEK_API_KEY", "")
 
-	config := LoadConfigFromEnv()
+	config, _ := LoadConfigFromEnv()
 
 	// If real opencode config exists and has the provider/model format,
 	// provider/protocol should equal the parsed provider name.

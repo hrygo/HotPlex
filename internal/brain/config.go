@@ -149,7 +149,7 @@ type Config struct {
 //  2. Worker config files    — scan ~/.claude/settings.json then ~/.config/opencode/opencode.json
 //  3. System env vars        — scan ANTHROPIC_API_KEY → OPENAI_API_KEY → SILICONFLOW_API_KEY → DEEPSEEK_API_KEY
 //  4. Disabled               — no key found, Brain degrades gracefully
-func LoadConfigFromEnv() Config {
+func LoadConfigFromEnv() (Config, []error) {
 	// ── 1. Brain's own configuration (HOTPLEX_BRAIN_*) ──
 	if apiKey := os.Getenv("HOTPLEX_BRAIN_API_KEY"); apiKey != "" {
 		provider := getEnv("HOTPLEX_BRAIN_PROVIDER", "openai")
@@ -160,8 +160,8 @@ func LoadConfigFromEnv() Config {
 
 	// ── 2. Worker config discovery ──
 	if getBoolEnv("HOTPLEX_BRAIN_WORKER_EXTRACT", true) {
-		if cfg := extractFromWorker(); cfg != nil {
-			return *cfg
+		if cfg, _ := extractFromWorker(); cfg != nil {
+			return *cfg, nil
 		}
 	}
 
@@ -201,7 +201,7 @@ var extractors = []struct {
 }
 
 // extractFromWorker scans worker config files in order; first hit wins.
-func extractFromWorker() *Config {
+func extractFromWorker() (*Config, []error) {
 	for _, ext := range extractors {
 		extracted, err := ext.extract()
 		if err != nil || extracted == nil || extracted.APIKey == "" {
@@ -222,17 +222,16 @@ func extractFromWorker() *Config {
 
 		provider := ext.provider
 		protocol := ext.protocol
-		// OpenCode uses "provider/model" format — extract provider from prefix.
 		if strings.Contains(model, "/") {
 			parts := strings.SplitN(model, "/", 2)
 			provider = parts[0]
 			protocol = provider
 		}
 
-		cfg := buildConfig(extracted.APIKey, provider, protocol, model, endpoint)
-		return &cfg
+		cfg, errs := buildConfig(extracted.APIKey, provider, protocol, model, endpoint)
+		return &cfg, errs
 	}
-	return nil
+	return nil, nil
 }
 
 func protocolForProvider(provider string) string {
@@ -251,15 +250,15 @@ func defaultModelForProtocol(protocol string) string {
 
 // buildConfig constructs a Config from resolved values.
 // Sub-config fields are populated via the configRegistry.
-func buildConfig(apiKey, provider, protocol, model, endpoint string) Config {
-	cfg, _ := LoadAndValidate()
+func buildConfig(apiKey, provider, protocol, model, endpoint string) (Config, []error) {
+	cfg, errs := LoadAndValidate()
 	cfg.Enabled = apiKey != ""
 	cfg.Model.Provider = provider
 	cfg.Model.Protocol = protocol
 	cfg.Model.APIKey = apiKey
 	cfg.Model.Model = model
 	cfg.Model.Endpoint = endpoint
-	return cfg
+	return cfg, errs
 }
 
 func parseRouterModels(s string) []llm.ModelConfig {
