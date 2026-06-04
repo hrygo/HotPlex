@@ -467,12 +467,6 @@ export function useHotPlexRuntime({
         const handleReasoning = (data: ReasoningData, _env: Envelope) => {
             if (!data) return;
 
-            // DEBUG: trace reasoning event
-            logger.debug("RuntimeAdapter", "handleReasoning", {
-                contentLen: (data.content || "").length,
-                hasPrevStreaming: false,
-            });
-
             setMessages((prev) => {
                 const lastMessage = prev[prev.length - 1];
                 if (
@@ -492,22 +486,10 @@ export function useHotPlexRuntime({
                             text: data.content || "",
                         });
                     }
-                    // DEBUG: trace reasoning update
-                    logger.debug("RuntimeAdapter", "handleReasoning update", {
-                        id: lastMessage.id,
-                        prevParts: lastMessage.parts.length,
-                        newParts: parts.length,
-                    });
                     return [...prev.slice(0, -1), { ...lastMessage, parts }];
                 }
                 const fallbackId = `assistant-${Date.now()}`;
                 streamingFallbackId = fallbackId;
-                // DEBUG: trace reasoning fallback creation
-                logger.debug(
-                    "RuntimeAdapter",
-                    "handleReasoning create fallback",
-                    { id: fallbackId, contentLen: (data.content || "").length },
-                );
                 return [
                     ...prev,
                     {
@@ -530,9 +512,6 @@ export function useHotPlexRuntime({
             if (!deltaRafId) {
                 deltaRafId = requestAnimationFrame(flushDelta);
             }
-            logger.debug("RuntimeAdapter", "delta received", {
-                contentLen: (data.content || "").length,
-            });
         };
 
         const handleMessage = (data: MessageData, env: Envelope) => {
@@ -658,24 +637,11 @@ export function useHotPlexRuntime({
                             data: data.stats._session,
                         });
                     }
-                    // DEBUG: trace done
-                    logger.debug("RuntimeAdapter", "handleDone", {
-                        id: lastMessage.id,
-                        prevStatus: lastMessage.status,
-                        totalParts: parts.length,
-                        partTypes: parts.map((p) => p.type).join(","),
-                        hasSession: !!data?.stats?._session,
-                    });
                     return [
                         ...prev.slice(0, -1),
                         { ...lastMessage, status: "complete" as const, parts },
                     ];
                 }
-                // DEBUG: trace done with no assistant message
-                logger.debug("RuntimeAdapter", "handleDone no assistant", {
-                    lastRole: lastMessage?.role,
-                    lastStatus: lastMessage?.status,
-                });
                 return prev;
             });
 
@@ -1366,15 +1332,6 @@ export function useHotPlexRuntime({
                 }
                 return true;
             });
-        // DEBUG: trace adapter message pipeline
-        if (result.length > 0) {
-            logger.debug("RuntimeAdapter", "adapterMessages", {
-                rawCount: messages.length,
-                filteredCount: result.length,
-                ids: result.map((m) => `${m.role[0]}:${m.id.slice(0, 20)}`),
-                isRunning,
-            });
-        }
         return result;
     }, [messages]);
 

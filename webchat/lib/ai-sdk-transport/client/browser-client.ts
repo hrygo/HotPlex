@@ -332,10 +332,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   private _routeEvent(env: Envelope): void {
     const { event } = env;
 
-    if (event.type !== 'pong') {
-      logger.debug('BrowserClient', 'event received', { type: event.type, id: env.id, sessionId: env.session_id });
-    }
-
     switch (event.type) {
       case EventKind.Error:
         const errData = event.data as ErrorData;
