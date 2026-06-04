@@ -387,20 +387,23 @@ GROUP BY user_id ORDER BY cost_usd DESC LIMIT 10;
 ```
 
 ```sql
--- 缓存命中率
+-- 缓存命中率（cache_read 占总 prompt token 的比例）
+-- total_prompt = input + cache_read + cache_write
 -- SQLite:
-SELECT 
-  ROUND(SUM(tokens_cache_read)*100.0/NULLIF(SUM(tokens_input),0), 1) AS cache_hit_pct,
+SELECT
+  ROUND(SUM(tokens_cache_read)*100.0/NULLIF(SUM(tokens_input)+SUM(tokens_cache_read)+SUM(tokens_cache_write),0), 1) AS cache_hit_pct,
   SUM(tokens_input) AS total_input,
   SUM(tokens_cache_write) AS cache_write,
-  SUM(tokens_cache_read) AS cache_read
+  SUM(tokens_cache_read) AS cache_read,
+  SUM(tokens_input)+SUM(tokens_cache_read)+SUM(tokens_cache_write) AS total_prompt_tokens
 FROM turns WHERE role='assistant' AND tokens_input > 0;
 -- PostgreSQL:
-SELECT 
-  ROUND((SUM(tokens_cache_read)*100.0/NULLIF(SUM(tokens_input),0))::numeric, 1) AS cache_hit_pct,
+SELECT
+  ROUND((SUM(tokens_cache_read)*100.0/NULLIF(SUM(tokens_input)+SUM(tokens_cache_read)+SUM(tokens_cache_write),0))::numeric, 1) AS cache_hit_pct,
   SUM(tokens_input) AS total_input,
   SUM(tokens_cache_write) AS cache_write,
-  SUM(tokens_cache_read) AS cache_read
+  SUM(tokens_cache_read) AS cache_read,
+  SUM(tokens_input)+SUM(tokens_cache_read)+SUM(tokens_cache_write) AS total_prompt_tokens
 FROM turns WHERE role='assistant' AND tokens_input > 0;
 ```
 
