@@ -687,24 +687,32 @@ func fetchGoogleFonts() error {
 		localFile := base
 		localPath := filepath.Join(fontDir, localFile)
 
-		fontReq, err := http.NewRequestWithContext(ctx, "GET", remoteURL, http.NoBody)
+		fontReqCtx, fontCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		fontReq, err := http.NewRequestWithContext(fontReqCtx, "GET", remoteURL, http.NoBody)
 		if err != nil {
+			fontCancel()
 			log.Printf("Warning: failed to create font request %s: %v", remoteURL, err)
 			continue
 		}
 		fontResp, err := http.DefaultClient.Do(fontReq)
 		if err != nil {
+			fontCancel()
 			log.Printf("Warning: failed to download font %s: %v", remoteURL, err)
 			continue
 		}
-		fontData, err := io.ReadAll(fontResp.Body)
-		_ = fontResp.Body.Close()
-		if err != nil {
-			log.Printf("Warning: failed to read font %s: %v", remoteURL, err)
+		if fontResp.StatusCode != http.StatusOK {
+			_ = fontResp.Body.Close()
+			fontCancel()
+			log.Printf("Warning: font download %s returned status %d", remoteURL, fontResp.StatusCode)
 			continue
 		}
-		if fontResp.StatusCode != http.StatusOK {
-			log.Printf("Warning: font download %s returned status %d", remoteURL, fontResp.StatusCode)
+		// LimitReader caps each font file to 2 MB to defend against
+		// unexpected responses (e.g. HTML error pages from CDNs).
+		fontData, err := io.ReadAll(io.LimitReader(fontResp.Body, 2<<20))
+		_ = fontResp.Body.Close()
+		fontCancel()
+		if err != nil {
+			log.Printf("Warning: failed to read font %s: %v", remoteURL, err)
 			continue
 		}
 

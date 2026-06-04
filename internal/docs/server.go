@@ -119,7 +119,10 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		gw := &gzipResponseWriter{gw: gz, ResponseWriter: w}
 		next.ServeHTTP(gw, r)
 
-		// Only close the gzip writer (flushing footer) if we actually compressed data.
+		// Only close the gzip writer (flushing the gzip footer) if we actually
+		// wrote compressed data. For bodyless responses (304, 204, 1xx) the gzip
+		// writer was never written to, so we intentionally skip Close() to avoid
+		// writing a gzip footer to the underlying ResponseWriter.
 		if gw.compressed {
 			_ = gz.Close()
 		}
@@ -140,7 +143,9 @@ type gzipResponseWriter struct {
 
 // shouldCompress reports whether the given status code allows a response body.
 // 1xx, 204 (No Content), and 304 (Not Modified) MUST NOT include a body
-// (RFC 7230 §3.3, RFC 7232 §4.1).
+// (RFC 7230 §3.3, RFC 7232 §4.1). 429 (Too Many Requests) is excluded because
+// reverse proxies and CDNs may return short retry-after responses that should
+// not be compressed (avoiding unnecessary CPU on rate-limited requests).
 func shouldCompress(code int) bool {
 	return code < 300 || (code >= 400 && code != 429)
 }
