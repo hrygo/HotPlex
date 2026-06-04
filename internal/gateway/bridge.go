@@ -248,6 +248,16 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		b.sm.DetachWorker(id)
 	}
 
+	// Transition TERMINATED sessions to RUNNING before attaching the worker.
+	// AttachWorker rejects non-active sessions, so we must promote the state
+	// first.  IDLE/CREATED sessions are active and can be attached as-is.
+	if si.State == events.StateTerminated {
+		if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
+			return fmt.Errorf("bridge: pre-attach transition TERMINATED→RUNNING: %w", err)
+		}
+		si.State = events.StateRunning
+	}
+
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:         ctx,
@@ -258,7 +268,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		forwardOpts: &opts,
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
-			// Transition IDLE/RESUMED/TERMINATED sessions to RUNNING.
+			// Defensive: IDLE/CREATED → RUNNING; TERMINATED is pre-attach transitioned.
 			if si.State != events.StateRunning {
 				if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
 					return err

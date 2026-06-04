@@ -163,6 +163,14 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		return false
 	}
 
+	if si.State == events.StateTerminated {
+		if err := b.sm.Transition(context.Background(), p.sessionID, events.StateRunning); err != nil {
+			b.log.Error("bridge: pre-attach transition for fresh start", "session_id", p.sessionID, "err", err)
+			return false
+		}
+		si.State = events.StateRunning
+	}
+
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, p.workDir, si)
 
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
@@ -175,8 +183,10 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		injectExclude: nil, // resolved by injectAgentConfig
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
-			if err := b.sm.Transition(ctx, p.sessionID, events.StateRunning); err != nil {
-				b.log.Warn("bridge: transition to running for fresh start", "session_id", p.sessionID, "err", err)
+			if si.State != events.StateRunning {
+				if err := b.sm.Transition(ctx, p.sessionID, events.StateRunning); err != nil {
+					b.log.Warn("bridge: transition to running for fresh start", "session_id", p.sessionID, "err", err)
+				}
 			}
 			if err := w.Start(ctx, info); err != nil {
 				b.log.Warn("bridge: fresh worker start failed", "session_id", p.sessionID, "err", err)
