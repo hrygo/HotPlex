@@ -36,6 +36,7 @@ type Client struct {
 	botID           string
 	apiKey          string
 	clientSessionID string
+	title           string
 
 	// heartbeat config
 	pingInterval time.Duration
@@ -262,6 +263,9 @@ func (c *Client) doConnect(ctx context.Context, sessionID string, isResume bool)
 	}
 	if c.clientSessionID != "" || isResume {
 		initData["session_id"] = sessionID
+	}
+	if c.title != "" {
+		initData["title"] = c.title
 	}
 
 	env := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Init, initData)

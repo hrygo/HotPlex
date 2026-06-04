@@ -617,7 +617,7 @@ public class HotPlexClient extends TextWebSocketHandler implements AutoCloseable
 
         try {
             InputData inputData = new InputData(content, metadata);
-            Envelope envelope = createEnvelope(EventKind.Input.getValue(), inputData, "control");
+            Envelope envelope = createEnvelope(EventKind.Input.getValue(), inputData, "data");
             sendEnvelope(envelope);
             log.debug("Sent input envelope");
         } catch (Exception e) {

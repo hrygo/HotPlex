@@ -58,6 +58,15 @@ func ClientSessionID(id string) Option {
 	}
 }
 
+// Title sets the session display name, sent in the init handshake.
+// This is purely cosmetic and does not affect session ID derivation (since v1.24).
+func Title(title string) Option {
+	return func(c *Client) error {
+		c.title = title
+		return nil
+	}
+}
+
 // AutoReconnect enables automatic reconnection with exponential backoff.
 func AutoReconnect(enabled bool) Option {
 	return func(c *Client) error {

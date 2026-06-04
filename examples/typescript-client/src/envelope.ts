@@ -138,7 +138,7 @@ export function createInitEnvelope(
     newEventId(),
     sessionId || '',
     0,
-    EventKind.Control,
+    'init',
     data,
     'control' as Priority
   );

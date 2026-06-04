@@ -90,7 +90,7 @@ describe('Envelope Helpers', () => {
       const env = createInitEnvelope(undefined, 'claude_code', undefined, 'test-token');
       
       expect(env.version).toBe(AEP_VERSION);
-      expect(env.event.type).toBe(EventKind.Control);
+      expect(env.event.type).toBe('init');
       expect(env.event.data.version).toBe(AEP_VERSION);
       expect(env.event.data.worker_type).toBe('claude_code');
       expect(env.event.data.auth?.token).toBe('test-token');

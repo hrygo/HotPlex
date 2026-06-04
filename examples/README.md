@@ -325,6 +325,8 @@ Client                           Gateway                    Worker
 |------|------|------|
 | `claude-code` | stdio/NDJSON | Claude Code CLI |
 | `opencode-server` | HTTP/SSE | OpenCode Server |
+| `codex-cli` | exec/app-server | Codex CLI |
+| `acp` | JSON-RPC 2.0/stdio | 任意 ACP 兼容 Agent |
 
 ### 会话生命周期
 
