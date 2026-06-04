@@ -34,9 +34,11 @@ Agent 配置的指令通道（Directives Channel），以 XML `<directives>` 标
 
 ### Brain
 
-HotPlex 的 LLM 编排层（`internal/brain/`），提供四个独立接口（能力递增），通过 `enhancedBrainWrapper` 统一实现：`Brain`（基础文本生成）、`StreamingBrain`（流式输出）、`RoutableBrain`（模型路由）、`ObservableBrain`（指标观测）。这四个接口是概念层级（Interface Segregation Principle），而非代码继承关系。
+HotPlex 的 LLM 编排层（`internal/brain/`），提供单一 `Brain` 接口（`Chat` + `ChatWithOptions`）。通过 `enhancedBrainWrapper` 实现，内部集成超时控制、模型路由、请求限流、熔断保护和指标记录。
 
-Brain 通过装饰器链（decorator chain）组合功能：retry → cache → rate limit → circuit breaker → metrics。核心子模块包括 Intent Router（意图分发）、Safety Guard（安全审计）、Context Compressor（上下文压缩）和 LLM 客户端子包（OpenAI/Anthropic 适配 + 模型路由 + 成本估算）。
+Brain 通过装饰器链（decorator chain）组合功能：retry → cache。Rate limiting 和 circuit breaker 在 wrapper 内部直接处理，避免双重限流并确保 metrics 计时准确。LLM 客户端子包（`internal/brain/llm/`）提供 OpenAI/Anthropic 适配 + 模型路由 + 成本估算。
+
+输出脱敏功能（`security.RedactSensitive`）已提取到 `internal/security/sanitize.go` 作为独立工具，不依赖 Brain 模块。
 
 ### Bridge
 
@@ -58,7 +60,7 @@ Agent 配置的上下文通道（Context Channel），以 XML `<context>` 标签
 
 ### Context Compressor
 
-Brain 模块的上下文压缩组件（`internal/brain/memory.go`）。当对话 token 数超过阈值（默认 8000）时，保留最近 N 轮（默认 5 轮），将更早的对话通过 Brain AI 总结压缩为摘要，防止 LLM 上下文窗口溢出。同时管理用户偏好提取和 TTL 清理。
+~~Brain 模块的上下文压缩组件~~。已在 v1.25 中移除。对话 token 管理现由 Worker（Claude Code）原生处理，Brain 模块专注于 LLM 客户端能力。
 
 ### Cron
 
@@ -121,9 +123,7 @@ Hub 实现背压策略：`message.delta` 和 `raw` 类型事件在通道满时�
 
 ### Intent Router
 
-Brain 模块的意图分发组件（`internal/brain/router.go`），将用户消息分类为四种意图：`chat`（闲聊，Brain 直接响应）、`command`（状态/配置查询，Brain 处理）、`task`（代码操作，转发到 Worker）和 `unknown`（默认转发到 Worker 以保安全）。
-
-内置快速路径检测：问候语（"hi"、"hello"）→ chat，状态命令（"ping"、"status"）→ command，代码关键词（"function"、"debug"）→ task。LRU 缓存减少重复的 Brain API 调用。
+~~Brain 模块的意图分发组件~~。已在 v1.25 中移除。消息路由现由 Gateway 直接处理，所有用户消息统一转发到 Worker，无需中间意图分类层。
 
 ---
 
@@ -212,13 +212,7 @@ WebSocket 连接的读写泵（`internal/gateway/conn.go`）。ReadPump 在独�
 
 ### Safety Guard
 
-Brain 模块的安全审计组件（`internal/brain/guard.go`），提供三层防护：
-
-- **输入验证**：正则模式匹配（快速路径）+ Brain AI 威胁分类（深度分析），检测 prompt 注入、越狱等攻击
-- **输出清洗**：模式匹配 + 脱敏处理，移除 API key、凭证、内部 IP 等敏感信息
-- **Chat2Config**：自然语言配置变更（默认禁用，存在安全风险）
-
-检测结果分为三种动作：allow（安全）、block（威胁）、sanitize（脱敏后放行）。
+~~Brain 模块的安全审计组件~~。已在 v1.25 中移除。输出脱敏功能（`security.RedactSensitive`）已提取到 `internal/security/sanitize.go` 作为独立工具，提供 7 种敏感数据模式检测（API key、AWS key、PEM 块、JWT、内网 IP、数据库连接串、密码）。
 
 ### Seq (Sequence Number)
 

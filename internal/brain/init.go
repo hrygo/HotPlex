@@ -110,8 +110,8 @@ func Init(logger *slog.Logger) error {
 		client = llm.NewCachedClient(client, config.Cache.Size)
 	}
 
-	// Rate limiting handled by enhancedBrainWrapper.applyRateLimit
-	// (not as a decorator, to avoid double rate limiting).
+	// Rate limiting handled by wrapper.applyRateLimit (not as a decorator,
+	// to avoid double rate limiting with provider-built-in limits).
 
 	// 4. Register global brain instance
 	SetGlobal(&enhancedBrainWrapper{
@@ -137,7 +137,7 @@ func Init(logger *slog.Logger) error {
 	return nil
 }
 
-// enhancedBrainWrapper satisfies the Brain interface.
+// enhancedBrainWrapper implements the Brain interface.
 type enhancedBrainWrapper struct {
 	client         llm.LLMClient
 	config         Config
@@ -258,9 +258,9 @@ func (w *enhancedBrainWrapper) recordMetrics(timer *llm.RequestTimer, model, pro
 	timer.Record(int64(inputTokens), int64(outputTokens), cost, err)
 }
 
-// Close releases resources held by the brain wrapper.
+// Close releases resources held by the wrapper.
 // Stops the rate limiter's queue-processing goroutine to prevent leaks
-// on hot-reload (where a new brain is created and the old one is discarded).
+// on hot-reload (where a new brain replaces the old one).
 func (w *enhancedBrainWrapper) Close() {
 	if w.rateLimiter != nil {
 		w.rateLimiter.Close()

@@ -898,7 +898,7 @@
                         text-anchor="middle">意图路由器</text>
                     <text x="140" y="452" fill="#fbcfe8" font-size="10" text-anchor="middle">意图识别 & LRU 快速缓存</text>
                     <text x="140" y="468" fill="#fbcfe8" font-size="10" font-family="'JetBrains Mono', monospace"
-                        text-anchor="middle">brain/router.go</text>
+                        text-anchor="middle">brain/init.go</text>
                 </g>
 
                 <g class="arch-node" data-id="bc-channel" style="--glow-color: var(--pink-glow);">
@@ -920,7 +920,7 @@
                     <text x="620" y="452" fill="#fbcfe8" font-size="10" text-anchor="middle">XML Sanitizer / SSRF /
                         临时文件</text>
                     <text x="620" y="468" fill="#fbcfe8" font-size="10" font-family="'JetBrains Mono', monospace"
-                        text-anchor="middle">brain/guard.go</text>
+                        text-anchor="middle">security/sanitize.go</text>
                 </g>
 
                 <g class="arch-node" data-id="llm-decorators" style="--glow-color: var(--pink-glow);">
@@ -1254,7 +1254,7 @@
             "brain-router": {
                 badge: "Brain / 智能与安全层",
                 title: "Intent Router 意图路由器",
-                subtitle: "internal/brain/router.go",
+                subtitle: "internal/brain/init.go",
                 color: "var(--pink)",
                 desc: "Brain 层的入口处理器。通过对用户输入的文本进行超快语义分析，快速判断用户的意图（例如是需要执行本地代码、触发定时器、修改系统配置还是单纯闲聊），并将请求定向分发给不同的处理单元。",
                 highlights: [
@@ -1280,7 +1280,7 @@
             "safety-guard": {
                 badge: "Brain / 智能与安全层",
                 title: "Safety Guard 安全防御与 XML Sanitizer",
-                subtitle: "internal/brain/guard.go & agentconfig/ loader",
+                subtitle: "internal/security/sanitize.go & agentconfig/ loader",
                 color: "var(--pink)",
                 desc: "HotPlex 的企业级御林军。在输入/输出流量的咽喉要道设立屏障，自动检测并净化一切潜在的安全风险。尤其是为防御 AI Agent 在调用本地 Shell 和文件操作时的安全隐患进行了极致设计。",
                 highlights: [
