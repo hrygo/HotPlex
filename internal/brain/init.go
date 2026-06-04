@@ -11,16 +11,10 @@ import (
 // Init initializes the global Brain from environmental variables.
 // It detects the provider and sets the Global Brain instance.
 //
-// IMPORTANT: This function MUST be called before using any Brain-dependent features:
-//   - GlobalIntentRouter() requires Global() to be non-nil
-//   - GlobalCompressor() requires Global() to be non-nil
-//   - GlobalGuard() requires Global() to be non-nil
-//
 // If HOTPLEX_BRAIN_API_KEY is not set, Brain is disabled and features gracefully degrade.
 func Init(logger *slog.Logger) error {
-	config := LoadConfigFromEnv()
+	config, validationErrs := LoadConfigFromEnv()
 
-	_, validationErrs := LoadAndValidate()
 	for _, err := range validationErrs {
 		logger.Warn("Brain config validation warning", "error", err)
 	}
@@ -69,6 +63,17 @@ func Init(logger *slog.Logger) error {
 		})
 	}
 
+	var circuitBreaker *llm.CircuitBreaker
+	if config.CircuitBreaker.Enabled {
+		circuitBreaker = llm.NewCircuitBreaker(llm.CircuitBreakerConfig{
+			Name:        "brain",
+			MaxFailures: uint32(config.CircuitBreaker.MaxFailures),
+			Interval:    config.CircuitBreaker.Interval,
+			Timeout:     config.CircuitBreaker.Timeout,
+			Logger:      logger,
+		})
+	}
+
 	var router *llm.Router
 	if config.Router.Enabled {
 		modelConfigs := config.Router.Models
@@ -105,8 +110,8 @@ func Init(logger *slog.Logger) error {
 		client = llm.NewCachedClient(client, config.Cache.Size)
 	}
 
-	// Rate limiting handled by enhancedBrainWrapper.applyRateLimit
-	// (not as a decorator, to avoid double rate limiting).
+	// Rate limiting handled by wrapper.applyRateLimit (not as a decorator,
+	// to avoid double rate limiting with provider-built-in limits).
 
 	// 4. Register global brain instance
 	SetGlobal(&enhancedBrainWrapper{
@@ -116,67 +121,23 @@ func Init(logger *slog.Logger) error {
 		costCalculator: costCalculator,
 		router:         router,
 		rateLimiter:    rateLimiter,
+		circuitBreaker: circuitBreaker,
 		logger:         logger,
 		timeout:        time.Duration(config.Model.TimeoutS) * time.Second, // Pre-compute timeout
 	})
 
-	// 5. Initialize specialized brain components
-	if config.IntentRouter.Enabled {
-		InitIntentRouter(IntentRouterConfig{
-			Enabled:             config.IntentRouter.Enabled,
-			ConfidenceThreshold: config.IntentRouter.ConfidenceThreshold,
-			CacheSize:           config.IntentRouter.CacheSize,
-		}, logger)
-	}
-
-	if config.Memory.Enabled {
-		sessionTTL, _ := time.ParseDuration(config.Memory.SessionTTL)
-		if sessionTTL == 0 {
-			sessionTTL = 24 * time.Hour
-		}
-		InitMemory(CompressionConfig{
-			Enabled:          config.Memory.Enabled,
-			TokenThreshold:   config.Memory.TokenThreshold,
-			TargetTokenCount: config.Memory.TargetTokenCount,
-			PreserveTurns:    config.Memory.PreserveTurns,
-			MaxSummaryTokens: config.Memory.MaxSummaryTokens,
-			CompressionRatio: config.Memory.CompressionRatio,
-			SessionTTL:       sessionTTL,
-		}, logger)
-	}
-
-	if config.Guard.Enabled {
-		if err := InitGuard(GuardConfig{
-			Enabled:                config.Guard.Enabled,
-			InputGuardEnabled:      config.Guard.InputGuardEnabled,
-			OutputGuardEnabled:     config.Guard.OutputGuardEnabled,
-			Chat2ConfigEnabled:     config.Guard.Chat2ConfigEnabled,
-			MaxInputLength:         config.Guard.MaxInputLength,
-			ScanDepth:              config.Guard.ScanDepth,
-			Sensitivity:            config.Guard.Sensitivity,
-			AdminUsers:             config.Guard.AdminUsers,
-			AdminChannels:          config.Guard.AdminChannels,
-			ResponseTimeout:        config.Guard.ResponseTimeout,
-			RateLimitRPS:           config.Guard.RateLimitRPS,
-			RateLimitBurst:         config.Guard.RateLimitBurst,
-			FailClosedOnBrainError: config.Guard.FailClosedOnBrainError,
-		}, logger); err != nil {
-			logger.Warn("Failed to initialize SafetyGuard", "error", err)
-		}
-	}
-
+	// 5. Log initialization result
 	logger.Info("Native Brain initialized",
 		"provider", config.Model.Provider,
 		"protocol", config.Model.Protocol,
 		"model", config.Model.Model,
 		"cache", config.Cache.Enabled,
-		"metrics", config.Metrics.Enabled,
-		"intent_router", config.IntentRouter.Enabled)
+		"metrics", config.Metrics.Enabled)
 
 	return nil
 }
 
-// enhancedBrainWrapper satisfies Brain, StreamingBrain, RoutableBrain, and ObservableBrain interfaces.
+// enhancedBrainWrapper implements the Brain interface.
 type enhancedBrainWrapper struct {
 	client         llm.LLMClient
 	config         Config
@@ -184,12 +145,13 @@ type enhancedBrainWrapper struct {
 	costCalculator *llm.CostCalculator
 	router         *llm.Router
 	rateLimiter    *llm.RateLimiter
+	circuitBreaker *llm.CircuitBreaker
 	logger         *slog.Logger
 	timeout        time.Duration // Pre-computed timeout for hot path
 }
 
 func (w *enhancedBrainWrapper) Chat(ctx context.Context, prompt string) (string, error) {
-	return w.ChatWithModel(ctx, "", prompt)
+	return w.ChatWithOptions(ctx, prompt, llm.ChatOptions{})
 }
 
 func (w *enhancedBrainWrapper) ChatWithOptions(ctx context.Context, prompt string, opts llm.ChatOptions) (string, error) {
@@ -203,48 +165,24 @@ func (w *enhancedBrainWrapper) ChatWithOptions(ctx context.Context, prompt strin
 	}
 
 	timer := w.startMetricsTimer(model, "chat")
-	result, err := w.client.ChatWithOptions(ctx, prompt, opts)
+
+	var result string
+	var err error
+	if w.circuitBreaker != nil {
+		cbErr := w.circuitBreaker.Execute(ctx, func() error {
+			result, err = w.client.ChatWithOptions(ctx, prompt, opts)
+			return err
+		})
+		if cbErr != nil {
+			err = cbErr
+		}
+	} else {
+		result, err = w.client.ChatWithOptions(ctx, prompt, opts)
+	}
+
 	w.recordMetrics(timer, model, prompt, result, err)
 
 	return result, err
-}
-
-func (w *enhancedBrainWrapper) Analyze(ctx context.Context, prompt string, target any) error {
-	return w.AnalyzeWithModel(ctx, "", prompt, target)
-}
-
-func (w *enhancedBrainWrapper) ChatWithModel(ctx context.Context, model, prompt string) (string, error) {
-	ctx, cancel := w.applyTimeout(ctx)
-	defer cancel()
-
-	model = w.selectModel(ctx, model, llm.ScenarioChat)
-
-	if err := w.applyRateLimit(ctx, model); err != nil {
-		return "", err
-	}
-
-	timer := w.startMetricsTimer(model, "chat")
-	result, err := w.client.Chat(ctx, prompt)
-	w.recordMetrics(timer, model, prompt, result, err)
-
-	return result, err
-}
-
-func (w *enhancedBrainWrapper) AnalyzeWithModel(ctx context.Context, model, prompt string, target any) error {
-	ctx, cancel := w.applyTimeout(ctx)
-	defer cancel()
-
-	model = w.selectModel(ctx, model, llm.ScenarioAnalyze)
-
-	if err := w.applyRateLimit(ctx, model); err != nil {
-		return err
-	}
-
-	timer := w.startMetricsTimer(model, "analyze")
-	err := w.client.Analyze(ctx, prompt, target)
-	w.recordMetricsForAnalyze(timer, model, prompt, err)
-
-	return err
 }
 
 // applyTimeout applies the configured timeout to the context.
@@ -320,123 +258,9 @@ func (w *enhancedBrainWrapper) recordMetrics(timer *llm.RequestTimer, model, pro
 	timer.Record(int64(inputTokens), int64(outputTokens), cost, err)
 }
 
-// recordMetricsForAnalyze records metrics for an analyze operation.
-func (w *enhancedBrainWrapper) recordMetricsForAnalyze(timer *llm.RequestTimer, model, prompt string, err error) {
-	if timer == nil {
-		return
-	}
-
-	inputTokens := 0
-	cost := 0.0
-	if w.costCalculator != nil {
-		inputTokens = w.costCalculator.CountTokens(prompt)
-		cost, _ = w.costCalculator.CalculateCost(model, inputTokens, 100)
-		_, _, _ = w.costCalculator.TrackRequest("default", model, inputTokens, 100)
-	}
-	timer.Record(int64(inputTokens), 100, cost, err)
-}
-
-func (w *enhancedBrainWrapper) ChatStream(ctx context.Context, prompt string) (<-chan string, error) {
-	// Apply pre-computed timeout. cancel is deferred inside the goroutine
-	// so the timeout context outlives this function call.
-	var streamCancel context.CancelFunc
-	if w.timeout > 0 {
-		ctx, streamCancel = context.WithTimeout(ctx, w.timeout)
-	}
-
-	model := w.selectModel(ctx, "", llm.ScenarioChat)
-	if err := w.applyRateLimit(ctx, model); err != nil {
-		if streamCancel != nil {
-			streamCancel()
-		}
-		return nil, err
-	}
-
-	timer := w.startMetricsTimer(model, "chat_stream")
-	inputTokens := 0
-	if w.costCalculator != nil {
-		inputTokens = w.costCalculator.CountTokens(prompt)
-	}
-
-	stream, err := w.client.ChatStream(ctx, prompt)
-	if err != nil {
-		if streamCancel != nil {
-			streamCancel()
-		}
-		if timer != nil {
-			timer.Record(int64(inputTokens), 0, 0, err)
-		}
-		return nil, err
-	}
-
-	outputChan := make(chan string)
-
-	go func() {
-		if streamCancel != nil {
-			defer streamCancel()
-		}
-		defer close(outputChan)
-		if stream == nil {
-			return
-		}
-		var outputTokens int
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case token, ok := <-stream:
-				if !ok {
-					if timer != nil {
-						cost := 0.0
-						if w.costCalculator != nil {
-							cost, _ = w.costCalculator.CalculateCost(model, inputTokens, outputTokens)
-							_, _, _ = w.costCalculator.TrackRequest("stream", model, inputTokens, outputTokens)
-						}
-						timer.Record(int64(inputTokens), int64(outputTokens), cost, nil)
-					}
-					return
-				}
-				if w.costCalculator != nil {
-					outputTokens += w.costCalculator.CountTokens(token)
-				}
-				select {
-				case outputChan <- token:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-
-	return outputChan, nil
-}
-
-func (w *enhancedBrainWrapper) HealthCheck(ctx context.Context) HealthStatus {
-	return w.client.HealthCheck(ctx)
-}
-
-func (w *enhancedBrainWrapper) GetMetrics() llm.MetricsStats {
-	if w.metrics == nil {
-		return llm.MetricsStats{}
-	}
-	return w.metrics.GetStats()
-}
-
-func (w *enhancedBrainWrapper) GetCostCalculator() *llm.CostCalculator {
-	return w.costCalculator
-}
-
-func (w *enhancedBrainWrapper) GetRouter() *llm.Router {
-	return w.router
-}
-
-func (w *enhancedBrainWrapper) GetRateLimiter() *llm.RateLimiter {
-	return w.rateLimiter
-}
-
-// Close releases resources held by the brain wrapper.
+// Close releases resources held by the wrapper.
 // Stops the rate limiter's queue-processing goroutine to prevent leaks
-// on hot-reload (where a new brain is created and the old one is discarded).
+// on hot-reload (where a new brain replaces the old one).
 func (w *enhancedBrainWrapper) Close() {
 	if w.rateLimiter != nil {
 		w.rateLimiter.Close()

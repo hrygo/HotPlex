@@ -11,13 +11,7 @@
 //	├── Cost (cost tracking)
 //	├── RateLimit (throttling)
 //	├── Router (model routing)
-//	├── CircuitBreaker (fault tolerance)
-//	├── Failover (provider failover)
-//	├── Budget (budget limits)
-//	├── Priority (request prioritization)
-//	├── IntentRouter (message classification)
-//	├── Memory (context compression)
-//	└── Guard (safety guardrails)
+//	└── CircuitBreaker (fault tolerance)
 //
 // # Environment Variables
 //
@@ -114,47 +108,6 @@ type CircuitBreakerConfig struct {
 	Interval    time.Duration // Interval for resetting failure count
 }
 
-// === Intent Router Configuration ===
-
-// IntentRouterFeatureConfig configures intent routing features.
-type IntentRouterFeatureConfig struct {
-	Enabled             bool    `json:"enabled"`              // Enable intent routing
-	ConfidenceThreshold float64 `json:"confidence_threshold"` // Minimum confidence for classification
-	CacheSize           int     `json:"cache_size"`           // Cache size for classification results
-}
-
-// === Memory Compression Configuration ===
-
-// MemoryCompressionConfig configures context compression.
-type MemoryCompressionConfig struct {
-	Enabled          bool    // Enable context compression
-	TokenThreshold   int     // Trigger compression at this token count
-	TargetTokenCount int     // Target tokens after compression
-	PreserveTurns    int     // Recent turns to preserve during compression
-	MaxSummaryTokens int     // Maximum tokens for summary
-	CompressionRatio float64 // Target compression ratio (0.0-1.0)
-	SessionTTL       string  // Session time-to-live (e.g., "24h")
-}
-
-// === Safety Guard Configuration ===
-
-// SafetyGuardFeatureConfig configures safety guardrails.
-type SafetyGuardFeatureConfig struct {
-	Enabled                bool          // Enable safety guard
-	InputGuardEnabled      bool          // Enable input validation
-	OutputGuardEnabled     bool          // Enable output sanitization
-	Chat2ConfigEnabled     bool          // Enable natural language config changes (security risk)
-	MaxInputLength         int           // Maximum input length
-	ScanDepth              int           // Depth for nested context scanning
-	Sensitivity            string        // Detection sensitivity: "low", "medium", "high"
-	AdminUsers             []string      // User IDs with admin privileges
-	AdminChannels          []string      // Channel IDs with admin privileges
-	ResponseTimeout        time.Duration // Timeout for Brain API calls
-	RateLimitRPS           float64       // Requests per second per user (0 = disabled)
-	RateLimitBurst         int           // Burst capacity per user
-	FailClosedOnBrainError bool          // Block input when deep analysis fails (e.g. LLM down)
-}
-
 // === Main Config ===
 
 // Config holds the configuration for the Global Brain.
@@ -186,12 +139,6 @@ type Config struct {
 	Router RouterConfig
 	// CircuitBreaker is the circuit breaker configuration.
 	CircuitBreaker CircuitBreakerConfig
-	// IntentRouter is the intent router feature configuration.
-	IntentRouter IntentRouterFeatureConfig
-	// Memory is the memory compression feature configuration.
-	Memory MemoryCompressionConfig
-	// Guard is the safety guard feature configuration.
-	Guard SafetyGuardFeatureConfig
 }
 
 // LoadConfigFromEnv loads the brain configuration from environment variables.
@@ -202,7 +149,7 @@ type Config struct {
 //  2. Worker config files    — scan ~/.claude/settings.json then ~/.config/opencode/opencode.json
 //  3. System env vars        — scan ANTHROPIC_API_KEY → OPENAI_API_KEY → SILICONFLOW_API_KEY → DEEPSEEK_API_KEY
 //  4. Disabled               — no key found, Brain degrades gracefully
-func LoadConfigFromEnv() Config {
+func LoadConfigFromEnv() (Config, []error) {
 	// ── 1. Brain's own configuration (HOTPLEX_BRAIN_*) ──
 	if apiKey := os.Getenv("HOTPLEX_BRAIN_API_KEY"); apiKey != "" {
 		provider := getEnv("HOTPLEX_BRAIN_PROVIDER", "openai")
@@ -213,8 +160,8 @@ func LoadConfigFromEnv() Config {
 
 	// ── 2. Worker config discovery ──
 	if getBoolEnv("HOTPLEX_BRAIN_WORKER_EXTRACT", true) {
-		if cfg := extractFromWorker(); cfg != nil {
-			return *cfg
+		if cfg, errs := extractFromWorker(); cfg != nil {
+			return *cfg, errs
 		}
 	}
 
@@ -254,7 +201,7 @@ var extractors = []struct {
 }
 
 // extractFromWorker scans worker config files in order; first hit wins.
-func extractFromWorker() *Config {
+func extractFromWorker() (*Config, []error) {
 	for _, ext := range extractors {
 		extracted, err := ext.extract()
 		if err != nil || extracted == nil || extracted.APIKey == "" {
@@ -275,17 +222,16 @@ func extractFromWorker() *Config {
 
 		provider := ext.provider
 		protocol := ext.protocol
-		// OpenCode uses "provider/model" format — extract provider from prefix.
 		if strings.Contains(model, "/") {
 			parts := strings.SplitN(model, "/", 2)
 			provider = parts[0]
 			protocol = provider
 		}
 
-		cfg := buildConfig(extracted.APIKey, provider, protocol, model, endpoint)
-		return &cfg
+		cfg, errs := buildConfig(extracted.APIKey, provider, protocol, model, endpoint)
+		return &cfg, errs
 	}
-	return nil
+	return nil, nil
 }
 
 func protocolForProvider(provider string) string {
@@ -304,15 +250,15 @@ func defaultModelForProtocol(protocol string) string {
 
 // buildConfig constructs a Config from resolved values.
 // Sub-config fields are populated via the configRegistry.
-func buildConfig(apiKey, provider, protocol, model, endpoint string) Config {
-	cfg, _ := LoadAndValidate()
+func buildConfig(apiKey, provider, protocol, model, endpoint string) (Config, []error) {
+	cfg, errs := LoadAndValidate()
 	cfg.Enabled = apiKey != ""
 	cfg.Model.Provider = provider
 	cfg.Model.Protocol = protocol
 	cfg.Model.APIKey = apiKey
 	cfg.Model.Model = model
 	cfg.Model.Endpoint = endpoint
-	return cfg
+	return cfg, errs
 }
 
 func parseRouterModels(s string) []llm.ModelConfig {
@@ -425,43 +371,6 @@ var configRegistry = []ConfigSpec{
 		Validate: positiveDuration},
 	{Name: "circuit_breaker_interval", EnvKey: "HOTPLEX_BRAIN_CIRCUIT_BREAKER_INTERVAL", Default: "60s",
 		Validate: positiveDuration},
-	// IntentRouter
-	{Name: "intent_router_enabled", EnvKey: "HOTPLEX_BRAIN_INTENT_ROUTER_ENABLED", Default: "true"},
-	{Name: "intent_router_confidence", EnvKey: "HOTPLEX_BRAIN_INTENT_ROUTER_CONFIDENCE", Default: "0.7",
-		Validate: confidenceRange},
-	{Name: "intent_router_cache_size", EnvKey: "HOTPLEX_BRAIN_INTENT_ROUTER_CACHE_SIZE", Default: "1000",
-		Validate: positiveInt},
-	// Memory
-	{Name: "memory_enabled", EnvKey: "HOTPLEX_BRAIN_MEMORY_ENABLED", Default: "true"},
-	{Name: "memory_token_threshold", EnvKey: "HOTPLEX_BRAIN_MEMORY_TOKEN_THRESHOLD", Default: "8000",
-		Validate: positiveInt},
-	{Name: "memory_target_tokens", EnvKey: "HOTPLEX_BRAIN_MEMORY_TARGET_TOKENS", Default: "2000",
-		Validate: positiveInt},
-	{Name: "memory_preserve_turns", EnvKey: "HOTPLEX_BRAIN_MEMORY_PRESERVE_TURNS", Default: "5",
-		Validate: nonNegativeInt},
-	{Name: "memory_max_summary_tokens", EnvKey: "HOTPLEX_BRAIN_MEMORY_MAX_SUMMARY_TOKENS", Default: "500",
-		Validate: positiveInt},
-	{Name: "memory_compression_ratio", EnvKey: "HOTPLEX_BRAIN_MEMORY_COMPRESSION_RATIO", Default: "0.25",
-		Validate: compressionRatioRange},
-	{Name: "memory_session_ttl", EnvKey: "HOTPLEX_BRAIN_MEMORY_SESSION_TTL", Default: "24h"},
-	// Guard
-	{Name: "guard_enabled", EnvKey: "HOTPLEX_BRAIN_GUARD_ENABLED", Default: "true"},
-	{Name: "guard_input_enabled", EnvKey: "HOTPLEX_BRAIN_GUARD_INPUT_ENABLED", Default: "true"},
-	{Name: "guard_output_enabled", EnvKey: "HOTPLEX_BRAIN_GUARD_OUTPUT_ENABLED", Default: "true"},
-	{Name: "chat2config_enabled", EnvKey: "HOTPLEX_BRAIN_CHAT2CONFIG_ENABLED", Default: "false"},
-	{Name: "guard_max_input_length", EnvKey: "HOTPLEX_BRAIN_GUARD_MAX_INPUT_LENGTH", Default: "100000",
-		Validate: nonNegativeInt},
-	{Name: "guard_scan_depth", EnvKey: "HOTPLEX_BRAIN_GUARD_SCAN_DEPTH", Default: "3",
-		Validate: nonNegativeInt},
-	{Name: "guard_sensitivity", EnvKey: "HOTPLEX_BRAIN_GUARD_SENSITIVITY", Default: "medium",
-		Validate: sensitivityLevel},
-	{Name: "guard_response_timeout", EnvKey: "HOTPLEX_BRAIN_GUARD_RESPONSE_TIMEOUT", Default: "10s",
-		Validate: positiveDuration},
-	{Name: "guard_rate_limit_rps", EnvKey: "HOTPLEX_BRAIN_GUARD_RATE_LIMIT_RPS", Default: "10",
-		Validate: nonNegativeFloat},
-	{Name: "guard_rate_limit_burst", EnvKey: "HOTPLEX_BRAIN_GUARD_RATE_LIMIT_BURST", Default: "20",
-		Validate: nonNegativeInt},
-	{Name: "guard_fail_closed_on_brain_error", EnvKey: "HOTPLEX_BRAIN_GUARD_FAIL_CLOSED_ON_BRAIN_ERROR", Default: "false"},
 }
 
 // --- Validation helpers ---
@@ -508,37 +417,6 @@ func positiveDuration(val string) error {
 		return fmt.Errorf("must be positive, got %s", d)
 	}
 	return nil
-}
-
-func confidenceRange(val string) error {
-	n, err := strconv.ParseFloat(val, 64)
-	if err != nil {
-		return fmt.Errorf("invalid float %q", val)
-	}
-	if n < 0 || n > 1 {
-		return fmt.Errorf("must be between 0 and 1, got %f", n)
-	}
-	return nil
-}
-
-func compressionRatioRange(val string) error {
-	n, err := strconv.ParseFloat(val, 64)
-	if err != nil {
-		return fmt.Errorf("invalid float %q", val)
-	}
-	if n <= 0 || n >= 1 {
-		return fmt.Errorf("must be between 0 and 1 exclusive, got %f", n)
-	}
-	return nil
-}
-
-func sensitivityLevel(val string) error {
-	switch val {
-	case "low", "medium", "high":
-		return nil
-	default:
-		return fmt.Errorf("must be low, medium, or high, got %q", val)
-	}
 }
 
 // --- Parse helpers ---
@@ -626,32 +504,6 @@ func LoadAndValidate() (Config, []error) {
 	cfg.CircuitBreaker.MaxFailures = getInt(values["circuit_breaker_max_failures"])
 	cfg.CircuitBreaker.Timeout = getDuration(values["circuit_breaker_timeout"])
 	cfg.CircuitBreaker.Interval = getDuration(values["circuit_breaker_interval"])
-
-	cfg.IntentRouter.Enabled = getBool(values["intent_router_enabled"])
-	cfg.IntentRouter.ConfidenceThreshold = getFloat(values["intent_router_confidence"])
-	cfg.IntentRouter.CacheSize = getInt(values["intent_router_cache_size"])
-
-	cfg.Memory.Enabled = getBool(values["memory_enabled"])
-	cfg.Memory.TokenThreshold = getInt(values["memory_token_threshold"])
-	cfg.Memory.TargetTokenCount = getInt(values["memory_target_tokens"])
-	cfg.Memory.PreserveTurns = getInt(values["memory_preserve_turns"])
-	cfg.Memory.MaxSummaryTokens = getInt(values["memory_max_summary_tokens"])
-	cfg.Memory.CompressionRatio = getFloat(values["memory_compression_ratio"])
-	cfg.Memory.SessionTTL = values["memory_session_ttl"]
-
-	cfg.Guard.Enabled = getBool(values["guard_enabled"])
-	cfg.Guard.InputGuardEnabled = getBool(values["guard_input_enabled"])
-	cfg.Guard.OutputGuardEnabled = getBool(values["guard_output_enabled"])
-	cfg.Guard.Chat2ConfigEnabled = getBool(values["chat2config_enabled"])
-	cfg.Guard.MaxInputLength = getInt(values["guard_max_input_length"])
-	cfg.Guard.ScanDepth = getInt(values["guard_scan_depth"])
-	cfg.Guard.Sensitivity = values["guard_sensitivity"]
-	cfg.Guard.AdminUsers = parseStringList(os.Getenv("HOTPLEX_BRAIN_ADMIN_USERS"))
-	cfg.Guard.AdminChannels = parseStringList(os.Getenv("HOTPLEX_BRAIN_ADMIN_CHANNELS"))
-	cfg.Guard.ResponseTimeout = getDuration(values["guard_response_timeout"])
-	cfg.Guard.RateLimitRPS = getFloat(values["guard_rate_limit_rps"])
-	cfg.Guard.RateLimitBurst = getInt(values["guard_rate_limit_burst"])
-	cfg.Guard.FailClosedOnBrainError = getBool(values["guard_fail_closed_on_brain_error"])
 
 	return cfg, errs
 }

@@ -9,7 +9,7 @@ description: HotPlex Gateway 系统架构全景视图，帮助贡献者理解各
 > 阅读本文后，你将理解 HotPlex Gateway 的整体架构、核心模块职责、数据流路径和关键设计决策。
 
 > [!TIP]
-> 我们为您准备了 **[✨ 交互式功能架构全景图 (Interactive Dashboard)](../../architecture/hotplex_architecture.html)**。在此交互网页中，您可以悬停并点击各底层模块（如 *B/C 双通道配置注入*、*意图路由器*、*物理执行沙盒* 等），查看高亮组件职责与核心包路径，并能一键演示全双工 WebSocket 消息数据流脉冲奔跑特效。
+> 我们为您准备了 **[✨ 交互式功能架构全景图 (Interactive Dashboard)](../../architecture/hotplex_architecture.html)**。在此交互网页中，您可以悬停并点击各底层模块（如 *B/C 双通道配置注入*、*LLM 编排层*、*物理执行沙盒* 等），查看高亮组件职责与核心包路径，并能一键演示全双工 WebSocket 消息数据流脉冲奔跑特效。
 
 ## 概述
 
@@ -206,17 +206,15 @@ type Worker interface {
 
 **位置**：`internal/brain/`
 
-LLM 调用的统一编排层，提供意图分发、安全审计、上下文压缩等能力。
+LLM 调用的统一编排层，支持 TTS 摘要生成和可选的输出脱敏处理。
 
 | 文件 | 职责 |
 |------|------|
-| `brain.go` | 核心接口 + 全局单例 |
-| `init.go` | Init() 编排 + 中间件链 (retry → cache → rate limit) |
-| `config.go` | 13 子配置 + 4 层 API key 发现 |
-| `guard.go` | 输入/输出安全审计、威胁检测 |
-| `router.go` | 意图分发、LRU 缓存、快速路径检测 |
-| `memory.go` | 上下文压缩 + 用户偏好提取 + TTL 清理 |
-| `llm/` | OpenAI/Anthropic 客户端 + 装饰器链 |
+| `brain.go` | Brain 接口 (Chat + ChatWithOptions) + 全局单例 |
+| `init.go` | Init() 编排 + enhancedBrainWrapper (retry → cache + 熔断/限流) |
+| `config.go` | 8 子配置 + 4 层 API key 发现 |
+| `extractor.go` | Worker 配置文件凭证提取 |
+| `llm/` | OpenAI/Anthropic 客户端 + 装饰器链 (retry/cache) + 路由/熔断/限流/指标 |
 
 ### 7. 支撑模块
 

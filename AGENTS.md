@@ -117,14 +117,11 @@
 - `interaction.go` - `InteractionManager` 权限/Q&A 管理
 
 **Brain** (`internal/brain/`)：
-- `brain.go` - 核心接口 (Brain/StreamingBrain/RoutableBrain/ObservableBrain) + 全局单例
-- `init.go` - Init() 编排 + enhancedBrainWrapper 中间件链 (retry → cache → rate limit)
-- `config.go` - 13 子配置 + 4 层 API key 发现
-- `guard.go` - 输入/输出安全审计 (Safety Guard)、威胁检测、Chat2Config
-- `router.go` - 意图分发 (Intent Router)、LRU 缓存、快速路径检测
-- `memory.go` - 上下文压缩 + 用户偏好提取 + TTL 清理
+- `brain.go` - 核心接口 (Brain: Chat + ChatWithOptions) + 全局单例
+- `init.go` - Init() 编排 + enhancedBrainWrapper (装饰器链 retry → cache + 熔断/限流)
+- `config.go` - 8 子配置 + 4 层 API key 发现
 - `extractor.go` - 从 Claude Code / OpenCode 配置文件提取凭证
-- `llm/` - LLM 客户端子包：OpenAI/Anthropic 客户端 + 装饰器链 (retry/cache/ratelimit/circuit/metrics) + 模型路由 + 成本估算
+- `llm/` - LLM 客户端子包：OpenAI/Anthropic 客户端 + 装饰器链 (retry/cache) + 模型路由 + 成本估算 + 熔断/限流/指标
 
 **Agent Config** (`internal/agentconfig/`)：
 - `Load` - 配置加载

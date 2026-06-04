@@ -811,9 +811,7 @@ func shutdownGateway(
 
 	skillsLocator.Close()
 
-	if guard := brain.GlobalGuard(); guard != nil {
-		guard.Close()
-	}
+	brain.Close()
 
 	if deps.ConfigWatcher != nil {
 		if err := deps.ConfigWatcher.Close(); err != nil {
