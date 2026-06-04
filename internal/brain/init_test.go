@@ -19,14 +19,10 @@ import (
 // Mock LLM Client for Brain Init Tests
 // ========================================
 
-// mockLLMClientForBrain implements llmClient interface for testing.
+// mockLLMClientForBrain implements llm.LLMClient interface for testing.
 type mockLLMClientForBrain struct {
-	chatFn       func(ctx context.Context, prompt string) (string, error)
-	analyzeFn    func(ctx context.Context, prompt string, target any) error
-	streamFn     func(ctx context.Context, prompt string) (<-chan string, error)
-	healthFn     func(ctx context.Context) HealthStatus
-	chatCount    int
-	analyzeCount int
+	chatFn    func(ctx context.Context, prompt string) (string, error)
+	chatCount int
 }
 
 func (m *mockLLMClientForBrain) Chat(ctx context.Context, prompt string) (string, error) {
@@ -42,31 +38,17 @@ func (m *mockLLMClientForBrain) ChatWithOptions(ctx context.Context, prompt stri
 }
 
 func (m *mockLLMClientForBrain) Analyze(ctx context.Context, prompt string, target any) error {
-	m.analyzeCount++
-	if m.analyzeFn != nil {
-		return m.analyzeFn(ctx, prompt, target)
-	}
 	return json.Unmarshal([]byte(`{"result": "mock"}`), target)
 }
 
 func (m *mockLLMClientForBrain) ChatStream(ctx context.Context, prompt string) (<-chan string, error) {
-	if m.streamFn != nil {
-		return m.streamFn(ctx, prompt)
-	}
 	ch := make(chan string)
-	go func() {
-		defer close(ch)
-		ch <- "token1"
-		ch <- "token2"
-	}()
+	close(ch)
 	return ch, nil
 }
 
-func (m *mockLLMClientForBrain) HealthCheck(ctx context.Context) HealthStatus {
-	if m.healthFn != nil {
-		return m.healthFn(ctx)
-	}
-	return HealthStatus{Healthy: true}
+func (m *mockLLMClientForBrain) HealthCheck(ctx context.Context) llm.HealthStatus {
+	return llm.HealthStatus{Healthy: true}
 }
 
 // ========================================
@@ -86,115 +68,6 @@ func TestEnhancedBrainWrapper_Chat(t *testing.T) {
 	assert.Equal(t, "mock chat response", result)
 	assert.Equal(t, 1, mockClient.chatCount)
 }
-
-func TestEnhancedBrainWrapper_Analyze(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-		logger: slog.Default(),
-	}
-
-	var result struct {
-		Result string `json:"result"`
-	}
-	err := wrapper.Analyze(context.Background(), "analyze this", &result)
-	require.NoError(t, err)
-	assert.Equal(t, "mock", result.Result)
-	assert.Equal(t, 1, mockClient.analyzeCount)
-}
-
-func TestEnhancedBrainWrapper_ChatWithModel(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-		logger: slog.Default(),
-	}
-
-	// With explicit model
-	result, err := wrapper.ChatWithModel(context.Background(), "gpt-4o-mini", "hello")
-	require.NoError(t, err)
-	assert.Equal(t, "mock chat response", result)
-}
-
-func TestEnhancedBrainWrapper_ChatWithModel_DefaultModel(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-		logger: slog.Default(),
-	}
-
-	// Empty model string should fall back to config default
-	result, err := wrapper.ChatWithModel(context.Background(), "", "hello")
-	require.NoError(t, err)
-	assert.Equal(t, "mock chat response", result)
-}
-
-func TestEnhancedBrainWrapper_ChatWithModel_Timeout(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{
-		chatFn: func(ctx context.Context, prompt string) (string, error) {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(200 * time.Millisecond):
-				return "slow response", nil
-			}
-		},
-	}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o", TimeoutS: 1}},
-		logger: slog.Default(),
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-
-	start := time.Now()
-	_, err := wrapper.Chat(ctx, "test")
-	elapsed := time.Since(start)
-
-	assert.Error(t, err)
-	assert.Less(t, elapsed, 200*time.Millisecond)
-}
-
-func TestEnhancedBrainWrapper_AnalyzeWithModel(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-		logger: slog.Default(),
-	}
-
-	var result struct {
-		Result string `json:"result"`
-	}
-	err := wrapper.AnalyzeWithModel(context.Background(), "gpt-4o-mini", "analyze", &result)
-	require.NoError(t, err)
-	assert.Equal(t, "mock", result.Result)
-}
-
-func TestEnhancedBrainWrapper_HealthCheck(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{
-		healthFn: func(ctx context.Context) HealthStatus {
-			return HealthStatus{Healthy: true, Provider: "mock", Model: "gpt-4o"}
-		},
-	}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{},
-	}
-
-	status := wrapper.HealthCheck(context.Background())
-	assert.True(t, status.Healthy)
-	assert.Equal(t, "mock", status.Provider)
-}
-
-// ========================================
-// applyTimeout Tests
-// ========================================
 
 func TestEnhancedBrainWrapper_ApplyTimeout_WithConfig(t *testing.T) {
 	wrapper := &enhancedBrainWrapper{
@@ -300,166 +173,6 @@ func TestEnhancedBrainWrapper_RecordMetrics_NoCostCalc(t *testing.T) {
 // recordMetricsForAnalyze Tests
 // ========================================
 
-func TestEnhancedBrainWrapper_RecordMetricsForAnalyze_NilTimer(t *testing.T) {
-	wrapper := &enhancedBrainWrapper{}
-	wrapper.recordMetricsForAnalyze(nil, "gpt-4o", "prompt", nil)
-}
-
-// ========================================
-// ChatStream Tests
-// ========================================
-
-func TestEnhancedBrainWrapper_ChatStream(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-	}
-
-	stream, err := wrapper.ChatStream(context.Background(), "hello")
-	require.NoError(t, err)
-	require.NotNil(t, stream)
-
-	tokens := []string{}
-	for token := range stream {
-		tokens = append(tokens, token)
-	}
-	assert.Equal(t, []string{"token1", "token2"}, tokens)
-}
-
-func TestEnhancedBrainWrapper_ChatStream_Error(t *testing.T) {
-	expectedErr := fmt.Errorf("stream error")
-	mockClient := &mockLLMClientForBrain{
-		streamFn: func(ctx context.Context, prompt string) (<-chan string, error) {
-			return nil, expectedErr
-		},
-	}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-	}
-
-	_, err := wrapper.ChatStream(context.Background(), "hello")
-	assert.Error(t, err)
-	assert.Equal(t, expectedErr, err)
-}
-
-func TestEnhancedBrainWrapper_ChatStream_NilStream(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{
-		streamFn: func(ctx context.Context, prompt string) (<-chan string, error) {
-			return nil, nil
-		},
-	}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-	}
-
-	stream, err := wrapper.ChatStream(context.Background(), "hello")
-	require.NoError(t, err)
-
-	// nil stream should result in empty output
-	tokens := []string{}
-	if stream != nil {
-		for token := range stream {
-			tokens = append(tokens, token)
-		}
-	}
-	assert.Empty(t, tokens)
-}
-
-func TestEnhancedBrainWrapper_ChatStream_Timeout(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{
-		streamFn: func(ctx context.Context, prompt string) (<-chan string, error) {
-			ch := make(chan string)
-			go func() {
-				defer close(ch)
-				ch <- "token1"
-				time.Sleep(500 * time.Millisecond)
-				ch <- "token2"
-			}()
-			return ch, nil
-		},
-	}
-	// Use TimeoutS=0 to avoid applyTimeout's defer cancel issue
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-	}
-
-	// Use a short context timeout to test stream interruption
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	stream, err := wrapper.ChatStream(ctx, "hello")
-	require.NoError(t, err)
-
-	tokens := []string{}
-	if stream != nil {
-		for token := range stream {
-			tokens = append(tokens, token)
-		}
-	}
-	// Should get token1 but not token2 due to timeout
-	assert.Equal(t, []string{"token1"}, tokens)
-}
-
-func TestEnhancedBrainWrapper_ChatStream_WithCostCalc(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{}
-	costCalc := llm.NewCostCalculator()
-	wrapper := &enhancedBrainWrapper{
-		client:         mockClient,
-		config:         Config{Model: ModelConfig{Model: "gpt-4o"}},
-		costCalculator: costCalc,
-	}
-
-	stream, err := wrapper.ChatStream(context.Background(), "hello")
-	require.NoError(t, err)
-
-	tokens := []string{}
-	if stream != nil {
-		for token := range stream {
-			tokens = append(tokens, token)
-		}
-	}
-	assert.Equal(t, []string{"token1", "token2"}, tokens)
-}
-
-// ========================================
-// GetMetrics Tests
-// ========================================
-
-func TestEnhancedBrainWrapper_GetMetrics_NilMetrics(t *testing.T) {
-	wrapper := &enhancedBrainWrapper{
-		metrics: nil,
-	}
-
-	stats := wrapper.GetMetrics()
-	assert.Empty(t, stats.TotalRequests)
-}
-
-// ========================================
-// GetCostCalculator Tests
-// ========================================
-
-func TestEnhancedBrainWrapper_GetCostCalculator(t *testing.T) {
-	costCalc := llm.NewCostCalculator()
-	wrapper := &enhancedBrainWrapper{
-		costCalculator: costCalc,
-	}
-
-	result := wrapper.GetCostCalculator()
-	assert.NotNil(t, result)
-}
-
-// ========================================// ========================================
-
-// ========================================// ========================================
-
-// ========================================
-// Init Tests
-// ========================================
-
 func TestInit_Disabled(t *testing.T) {
 	// Save and restore global state
 	oldBrain := globalBrain
@@ -483,16 +196,6 @@ func TestInit_Disabled(t *testing.T) {
 
 // ========================================
 // Interface Compliance
-// ========================================
-
-func TestEnhancedBrainWrapper_ImplementsLLMClient(t *testing.T) {
-	// Compile-time check already exists in brain.go,
-	// but verify the wrapper can be assigned
-	var _ llm.LLMClient = (*enhancedBrainWrapper)(nil)
-}
-
-// ========================================
-// getBoolEnv Tests
 // ========================================
 
 func TestGetBoolEnv(t *testing.T) {
@@ -801,31 +504,8 @@ func TestEnhancedBrainWrapper_RecordMetrics_WithRealTimer(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "response text", result)
 
-	stats := wrapper.GetMetrics()
+	stats := metricsCollector.GetStats()
 	assert.Greater(t, stats.TotalRequests, int64(0))
-}
-
-func TestEnhancedBrainWrapper_RecordMetricsForAnalyze_WithRealTimer(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{}
-	metricsCollector := llm.NewMetricsCollector(llm.MetricsConfig{
-		Enabled:           true,
-		ServiceName:       "test",
-		MaxLatencySamples: 1000,
-	})
-	costCalc := llm.NewCostCalculator()
-	wrapper := &enhancedBrainWrapper{
-		client:         mockClient,
-		config:         Config{Model: ModelConfig{Model: "gpt-4o"}},
-		metrics:        metricsCollector,
-		costCalculator: costCalc,
-	}
-
-	var result struct {
-		Result string `json:"result"`
-	}
-	err := wrapper.Analyze(context.Background(), "analyze this", &result)
-	require.NoError(t, err)
-	assert.Equal(t, "mock", result.Result)
 }
 
 func TestEnhancedBrainWrapper_RecordMetrics_ErrorPath(t *testing.T) {
@@ -851,117 +531,10 @@ func TestEnhancedBrainWrapper_RecordMetrics_ErrorPath(t *testing.T) {
 	_, err := wrapper.Chat(context.Background(), "test")
 	assert.Error(t, err)
 
-	stats := wrapper.GetMetrics()
+	stats := metricsCollector.GetStats()
 	// Error requests still get recorded
 	assert.Greater(t, stats.TotalRequests, int64(0))
 }
-
-// ========================================
-// GetMetrics with metrics
-// ========================================
-
-func TestEnhancedBrainWrapper_GetMetrics_WithMetrics(t *testing.T) {
-	metricsCollector := llm.NewMetricsCollector(llm.MetricsConfig{
-		Enabled:           true,
-		ServiceName:       "test-service",
-		MaxLatencySamples: 1000,
-	})
-	wrapper := &enhancedBrainWrapper{
-		metrics: metricsCollector,
-	}
-
-	stats := wrapper.GetMetrics()
-	assert.Equal(t, int64(0), stats.TotalRequests)
-}
-
-// ========================================
-// AnalyzeWithModel error path
-// ========================================
-
-func TestEnhancedBrainWrapper_AnalyzeWithModel_Error(t *testing.T) {
-	expectedErr := fmt.Errorf("analyze error")
-	mockClient := &mockLLMClientForBrain{
-		analyzeFn: func(ctx context.Context, prompt string, target any) error {
-			return expectedErr
-		},
-	}
-	wrapper := &enhancedBrainWrapper{
-		client: mockClient,
-		config: Config{Model: ModelConfig{Model: "gpt-4o"}},
-	}
-
-	var result struct{}
-	err := wrapper.AnalyzeWithModel(context.Background(), "", "analyze", &result)
-	assert.Error(t, err)
-	assert.Equal(t, expectedErr, err)
-}
-
-// ========================================// ========================================
-
-// ========================================
-// brain.go global functions
-// ========================================
-
-// ========================================
-// ChatStream with nil return and metrics
-// ========================================
-
-func TestEnhancedBrainWrapper_ChatStream_NilStreamWithMetrics(t *testing.T) {
-	mockClient := &mockLLMClientForBrain{
-		streamFn: func(ctx context.Context, prompt string) (<-chan string, error) {
-			return nil, nil
-		},
-	}
-	metricsCollector := llm.NewMetricsCollector(llm.MetricsConfig{
-		Enabled:           true,
-		ServiceName:       "test",
-		MaxLatencySamples: 1000,
-	})
-	costCalc := llm.NewCostCalculator()
-	wrapper := &enhancedBrainWrapper{
-		client:         mockClient,
-		config:         Config{Model: ModelConfig{Model: "gpt-4o"}},
-		metrics:        metricsCollector,
-		costCalculator: costCalc,
-	}
-
-	stream, err := wrapper.ChatStream(context.Background(), "hello")
-	require.NoError(t, err)
-
-	tokens := []string{}
-	if stream != nil {
-		for token := range stream {
-			tokens = append(tokens, token)
-		}
-	}
-	assert.Empty(t, tokens)
-}
-
-func TestEnhancedBrainWrapper_ChatStream_StreamErrorWithMetrics(t *testing.T) {
-	expectedErr := fmt.Errorf("stream error")
-	mockClient := &mockLLMClientForBrain{
-		streamFn: func(ctx context.Context, prompt string) (<-chan string, error) {
-			return nil, expectedErr
-		},
-	}
-	metricsCollector := llm.NewMetricsCollector(llm.MetricsConfig{
-		Enabled:           true,
-		ServiceName:       "test",
-		MaxLatencySamples: 1000,
-	})
-	wrapper := &enhancedBrainWrapper{
-		client:  mockClient,
-		config:  Config{Model: ModelConfig{Model: "gpt-4o"}},
-		metrics: metricsCollector,
-	}
-
-	_, err := wrapper.ChatStream(context.Background(), "hello")
-	assert.Error(t, err)
-}
-
-// ========================================
-// parseRouterModels edge cases
-// ========================================
 
 func TestParseRouterModels_InvalidCostFields(t *testing.T) {
 	// Non-numeric cost fields should default to 0

@@ -37,11 +37,8 @@ type LLMClient interface {
 var (
 	_ LLMClient = (*OpenAIClient)(nil)
 	_ LLMClient = (*AnthropicClient)(nil)
-	_ LLMClient = (*RateLimitedClient)(nil)
 	_ LLMClient = (*CachedClient)(nil)
 	_ LLMClient = (*RetryClient)(nil)
-	_ LLMClient = (*CircuitClient)(nil)
-	_ LLMClient = (*MetricsClient)(nil)
 )
 
 // OpenAIClient implements OpenAI-compatible LLM interactions.
