@@ -17,6 +17,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | 我是开发者，想通过 WebSocket 集成      | [WebSocket 对接指南](guides/developer/websocket-integration.md)    |
 | 我是开发者，想远程控制 Coding Agent     | [远程 Coding Agent 指南](guides/developer/remote-coding-agent.md) |
 | 我是企业管理员，需要部署到生产环境      | [企业部署指南](guides/enterprise/deployment.md)                   |
+| 我想在线测试 API 接口                    | [API 控制台](reference/api-console.html)                           |
 | 我想为 HotPlex 贡献代码                 | [开发环境搭建](guides/contributor/development-setup.md)           |
 | 我在评估 HotPlex 是否适合我             | [为什么选择 HotPlex](explanation/why-hotplex.md)                  |
 

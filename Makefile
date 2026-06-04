@@ -320,7 +320,8 @@ docs-build: swagger
 		echo "  $(CYAN)Docs$(RESET)$(DIM) building from scratch...$(RESET)"; \
 		go run cmd/build-docs/main.go; \
 	elif find docs cmd/build-docs -newer internal/docs/out \
-		\( -name "*.md" -o -name "*.go" -o -name "*.yaml" -o -name "*.png" -o -name "*.svg" -o -name "*.json" \) \
+		\( -name "*.md" -o -name "*.go" -o -name "*.yaml" -o -name "*.png" -o -name "*.svg" -o -name "*.html" \) \
+		! -path "docs/swagger/*" \
 		-print 2>/dev/null | head -n 1 | grep -q .; then \
 		echo "  $(CYAN)Docs$(RESET)$(DIM) rebuilding (source changed)...$(RESET)"; \
 		go run cmd/build-docs/main.go; \

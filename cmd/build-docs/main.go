@@ -113,6 +113,13 @@ func (t *linkTransformer) Transform(node *ast.Document, _ text.Reader, _ parser.
 }
 
 func main() {
+	// Preserve downloaded assets across rebuilds to avoid re-downloading
+	// ~25s of network I/O (mermaid 11s + fonts 14s).
+	assetTmp := docsDest + ".assets.tmp"
+	assetSrc := filepath.Join(docsDest, "assets")
+	_ = os.RemoveAll(assetTmp)
+	_ = os.Rename(assetSrc, assetTmp) // ok if src doesn't exist
+
 	// Clean destination
 	if err := os.RemoveAll(docsDest); err != nil {
 		log.Printf("Warning: failed to clean destination: %v", err)
@@ -120,6 +127,9 @@ func main() {
 	if err := os.MkdirAll(docsDest, 0o755); err != nil {
 		log.Fatalf("Error creating destination: %v", err)
 	}
+
+	// Restore cached assets (mermaid.js, fonts, etc.)
+	_ = os.Rename(assetTmp, assetSrc)
 
 	// Fetch Mermaid.js for offline rendering support.
 	if err := fetchMermaidJS(); err != nil {
@@ -606,26 +616,41 @@ func fetchMermaidJS() error {
 		return fmt.Errorf("mkdir assets: %w", err)
 	}
 
-	resp, err := http.Get("https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js")
+	dst := filepath.Join(assetDir, "mermaid.min.js")
+	if info, err := os.Stat(dst); err == nil && info.Size() > 0 {
+		return nil
+	}
+
+	return downloadFile("https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js", dst, 10<<20)
+}
+
+// downloadFile downloads a URL to a local file. Skips if dst already exists
+// and is non-empty. Limits response body to maxBytes.
+func downloadFile(url, dst string, maxBytes int64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download status %d", resp.StatusCode)
+		return fmt.Errorf("status %d", resp.StatusCode)
 	}
 
-	f, err := os.Create(filepath.Join(assetDir, "mermaid.min.js"))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 	if err != nil {
-		return fmt.Errorf("create file: %w", err)
+		return fmt.Errorf("read body: %w", err)
 	}
-	defer func() { _ = f.Close() }()
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		return fmt.Errorf("write file: %w", err)
-	}
-	return nil
+	return os.WriteFile(dst, data, 0o644)
 }
 
 // fontURL is the Google Fonts CSS endpoint used by the documentation.
@@ -645,6 +670,11 @@ func fetchGoogleFonts() error {
 	fontDir := filepath.Join(docsDest, "assets", "fonts")
 	if err := os.MkdirAll(fontDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir fonts: %w", err)
+	}
+
+	// Skip entirely if fonts.css already exists (all fonts cached).
+	if _, err := os.Stat(filepath.Join(fontDir, "fonts.css")); err == nil {
+		return nil
 	}
 
 	// Request woff2 format via user-agent (Google Fonts returns woff2 for modern browsers).

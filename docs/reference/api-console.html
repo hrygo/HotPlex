@@ -4,25 +4,119 @@
     <title>HotPlex API Console</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/docs/assets/logo.png" />
     <style>
-      body { margin: 0; padding: 0; }
+      /* ── HotPlex Brand Header ────────────────────────────── */
+      .hp-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 24px;
+        background: #FAF9F5;
+        border-bottom: 1px solid #EBEAE4;
+        font-family: 'Inter', system-ui, sans-serif;
+        position: sticky;
+        top: 0;
+        z-index: 999;
+      }
+      .hp-header-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+      }
+      .hp-header-left img {
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+      }
+      .hp-header-title {
+        font-weight: 700;
+        font-size: 15px;
+        color: #0F0F0E;
+        letter-spacing: -0.01em;
+      }
+      .hp-header-badge {
+        font-size: 10px;
+        font-weight: 600;
+        color: #C35A3E;
+        background: rgba(195, 90, 62, 0.08);
+        padding: 2px 7px;
+        border-radius: 4px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .hp-back {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 13px;
+        color: #7A7973;
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+      .hp-back:hover { color: #C35A3E; }
+      .hp-back svg { width: 16px; height: 16px; }
+
+      /* ── Scalar Theme Overrides ─────────────────────────── */
+      :root {
+        --scalar-color-accent: #C35A3E;
+        --scalar-color-accent-soft: rgba(195, 90, 62, 0.1);
+        --scalar-background-1: #FFFFFF;
+        --scalar-background-2: #FAF9F5;
+        --scalar-background-3: #F5F4F0;
+        --scalar-border-color: #EBEAE4;
+        --scalar-color-1: #0F0F0E;
+        --scalar-color-2: #3D3D3A;
+        --scalar-color-3: #7A7973;
+        --scalar-font: 'Inter', system-ui, -apple-system, sans-serif;
+        --scalar-font-code: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+        --scalar-radius: 8px;
+        --scalar-radius-lg: 12px;
+      }
     </style>
   </head>
   <body>
+    <!-- HotPlex Brand Header -->
+    <div class="hp-header">
+      <a href="/docs/" class="hp-header-left">
+        <img src="/docs/assets/logo.webp" alt="HotPlex" />
+        <span class="hp-header-title">HotPlex</span>
+        <span class="hp-header-badge">API Console</span>
+      </a>
+      <a href="/docs/" class="hp-back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        返回文档
+      </a>
+    </div>
+
+    <!-- Scalar API Reference -->
     <script
       id="api-reference"
       data-url="/docs/swagger/swagger.json"
       src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.26.0/dist/browser/standalone.min.js"
     ></script>
     <script>
-      // Configure multiple servers since Admin API (port 9999) and Gateway API (port 8888)
-      // run on different ports. Scalar will show a server selector in the UI.
       document.getElementById('api-reference').dataset.configuration = JSON.stringify({
         servers: [
           { url: window.location.protocol + '//' + window.location.hostname + ':8888', description: 'Gateway API (port 8888)' },
           { url: window.location.protocol + '//' + window.location.hostname + ':9999', description: 'Admin API (port 9999)' }
         ],
-        theme: 'default'
+        theme: 'light',
+        withDefaultFonts: false,
+        hideModels: false,
+        customCss: `
+          /* Shrink sidebar headings */
+          .scalar-api-reference .sidebar-section-title {
+            font-family: 'Inter', system-ui, sans-serif;
+          }
+          /* Smooth the card corners */
+          .scalar-api-reference .endpoint-card {
+            border-radius: 12px;
+          }
+        `
       });
     </script>
   </body>
