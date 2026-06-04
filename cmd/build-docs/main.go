@@ -136,6 +136,11 @@ func main() {
 		log.Printf("Warning: failed to download mermaid.js for offline use: %v", err)
 	}
 
+	// Fetch Scalar standalone JS for offline API Console.
+	if err := fetchScalarJS(); err != nil {
+		log.Printf("Warning: failed to download Scalar JS for offline use: %v", err)
+	}
+
 	// Fetch Google Fonts for offline/GFW-friendly rendering.
 	if err := fetchGoogleFonts(); err != nil {
 		log.Printf("Warning: failed to download Google Fonts: %v", err)
@@ -622,6 +627,22 @@ func fetchMermaidJS() error {
 	}
 
 	return downloadFile("https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js", dst, 10<<20)
+}
+
+// fetchScalarJS downloads the Scalar API Reference standalone JS for
+// offline API Console access without CDN dependency.
+func fetchScalarJS() error {
+	refDir := filepath.Join(docsDest, "reference")
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir reference: %w", err)
+	}
+
+	dst := filepath.Join(refDir, "standalone.min.js")
+	if info, err := os.Stat(dst); err == nil && info.Size() > 0 {
+		return nil
+	}
+
+	return downloadFile("https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.26.0/dist/browser/standalone.min.js", dst, 10<<20)
 }
 
 // downloadFile downloads a URL to a local file. Skips if dst already exists

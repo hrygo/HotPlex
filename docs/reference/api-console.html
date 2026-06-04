@@ -5,60 +5,113 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/png" href="/docs/assets/logo.png" />
+    <link rel="preload" href="/docs/assets/fonts/fonts.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="/docs/assets/fonts/fonts.css"></noscript>
     <style>
-      /* ── HotPlex Brand Header ────────────────────────────── */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      html, body { height: 100%; overflow: hidden; }
+
+      body {
+        display: flex;
+        flex-direction: column;
+        font-family: 'Inter', system-ui, sans-serif;
+      }
+
+      /* ── Brand Header (40px) ─────────────────────────── */
       .hp-header {
+        flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 10px 24px;
+        padding: 0 20px;
+        height: 40px;
         background: #FAF9F5;
         border-bottom: 1px solid #EBEAE4;
-        font-family: 'Inter', system-ui, sans-serif;
-        position: sticky;
-        top: 0;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         z-index: 999;
       }
+
       .hp-header-left {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         text-decoration: none;
       }
+
       .hp-header-left img {
-        width: 26px;
-        height: 26px;
-        border-radius: 6px;
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
       }
+
       .hp-header-title {
         font-weight: 700;
-        font-size: 15px;
+        font-size: 13px;
         color: #0F0F0E;
         letter-spacing: -0.01em;
       }
+
       .hp-header-badge {
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 600;
         color: #C35A3E;
         background: rgba(195, 90, 62, 0.08);
-        padding: 2px 7px;
-        border-radius: 4px;
+        padding: 2px 6px;
+        border-radius: 3px;
         letter-spacing: 0.04em;
         text-transform: uppercase;
       }
+
       .hp-back {
         display: flex;
         align-items: center;
-        gap: 5px;
-        font-size: 13px;
+        gap: 4px;
+        font-size: 12px;
         color: #7A7973;
         text-decoration: none;
-        transition: color 0.2s;
+        transition: color 0.15s;
       }
-      .hp-back:hover { color: #C35A3E; }
-      .hp-back svg { width: 16px; height: 16px; }
 
-      /* ── Scalar Theme Overrides ─────────────────────────── */
+      .hp-back:hover { color: #C35A3E; }
+      .hp-back svg { width: 14px; height: 14px; }
+
+      /* ── Scalar Container (remaining height) ─────────── */
+      .scalar-wrap {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        position: relative;
+      }
+
+      /* Loading placeholder */
+      .scalar-loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #FAF9F5;
+        color: #7A7973;
+        font-size: 14px;
+        transition: opacity 0.3s;
+      }
+
+      .scalar-loading.hidden { opacity: 0; pointer-events: none; }
+
+      .scalar-loading .spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid #EBEAE4;
+        border-top-color: #C35A3E;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        margin-right: 10px;
+      }
+
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* ── Scalar Theme Overrides ──────────────────────── */
       :root {
         --scalar-color-accent: #C35A3E;
         --scalar-color-accent-soft: rgba(195, 90, 62, 0.1);
@@ -77,7 +130,7 @@
     </style>
   </head>
   <body>
-    <!-- HotPlex Brand Header -->
+    <!-- Brand Header (40px fixed) -->
     <div class="hp-header">
       <a href="/docs/" class="hp-header-left">
         <img src="/docs/assets/logo.webp" alt="HotPlex" />
@@ -92,32 +145,49 @@
       </a>
     </div>
 
-    <!-- Scalar API Reference -->
-    <script
-      id="api-reference"
-      data-url="/docs/swagger/swagger.json"
-      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.26.0/dist/browser/standalone.min.js"
-    ></script>
-    <script>
-      document.getElementById('api-reference').dataset.configuration = JSON.stringify({
-        servers: [
-          { url: window.location.protocol + '//' + window.location.hostname + ':8888', description: 'Gateway API (port 8888)' },
-          { url: window.location.protocol + '//' + window.location.hostname + ':9999', description: 'Admin API (port 9999)' }
-        ],
-        theme: 'light',
-        withDefaultFonts: false,
-        hideModels: false,
-        customCss: `
-          /* Shrink sidebar headings */
-          .scalar-api-reference .sidebar-section-title {
-            font-family: 'Inter', system-ui, sans-serif;
+    <!-- Scalar API Reference (fills remaining viewport) -->
+    <div class="scalar-wrap">
+      <div class="scalar-loading" id="scalar-loading">
+        <div class="spinner"></div>
+        Loading API Console...
+      </div>
+      <script
+        id="api-reference"
+        data-url="/docs/swagger/swagger.json"
+        src="standalone.min.js"
+      ></script>
+      <script>
+        document.getElementById('api-reference').dataset.configuration = JSON.stringify({
+          servers: [
+            { url: window.location.protocol + '//' + window.location.hostname + ':8888', description: 'Gateway API (port 8888)' },
+            { url: window.location.protocol + '//' + window.location.hostname + ':9999', description: 'Admin API (port 9999)' }
+          ],
+          theme: 'light',
+          withDefaultFonts: false,
+          hideModels: false,
+          customCss: `
+            .scalar-api-reference .sidebar-section-title {
+              font-family: 'Inter', system-ui, sans-serif;
+            }
+            .scalar-api-reference .endpoint-card {
+              border-radius: 12px;
+            }
+          `
+        });
+        // Hide loading spinner once Scalar renders
+        var observer = new MutationObserver(function() {
+          var el = document.querySelector('scalar-api-reference');
+          if (el && el.shadowRoot && el.shadowRoot.querySelector('.scalar-api-reference')) {
+            document.getElementById('scalar-loading').classList.add('hidden');
+            observer.disconnect();
           }
-          /* Smooth the card corners */
-          .scalar-api-reference .endpoint-card {
-            border-radius: 12px;
-          }
-        `
-      });
-    </script>
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        // Fallback: hide after 8s regardless
+        setTimeout(function() {
+          document.getElementById('scalar-loading').classList.add('hidden');
+        }, 8000);
+      </script>
+    </div>
   </body>
 </html>
