@@ -117,6 +117,9 @@ func Clone(env *Envelope) *Envelope {
 	if m, ok := env.Event.Data.(map[string]any); ok && m != nil {
 		c.Event.Data = deepCopyMap(m)
 	}
+	if env.Metadata != nil {
+		c.Metadata = deepCopyMap(env.Metadata)
+	}
 	return &c
 }
 

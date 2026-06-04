@@ -62,26 +62,43 @@ func workersRunningGauge(key string) *atomic.Int64 {
 }
 
 func init() {
-	// Register ObservableGauge callbacks for session/worker gauges.
-	_, _ = observability.Meter().RegisterCallback(func(ctx context.Context, o metric.Observer) error {
-		sessionsActiveByState.Range(func(key, val any) bool {
-			k, _ := key.(string)
-			v, _ := val.(*atomic.Int64)
-			o.ObserveInt64(observability.SessionActive(), v.Load(), metric.WithAttributes(attribute.String("state", k)))
-			return true
-		})
-		return nil
-	}, observability.SessionActive())
+	observability.RegisterGaugeCallbacks(func(m metric.Meter) {
+		sessionGauge, err := m.Int64ObservableGauge(
+			"hotplex.session.active",
+			metric.WithDescription("Number of active sessions by state"),
+		)
+		if err != nil {
+			slog.Warn("session: failed to create session.active gauge", "err", err)
+			return
+		}
+		_, _ = m.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+			sessionsActiveByState.Range(func(key, val any) bool {
+				k, _ := key.(string)
+				v, _ := val.(*atomic.Int64)
+				o.ObserveInt64(sessionGauge, v.Load(), metric.WithAttributes(attribute.String("state", k)))
+				return true
+			})
+			return nil
+		}, sessionGauge)
 
-	_, _ = observability.Meter().RegisterCallback(func(ctx context.Context, o metric.Observer) error {
-		workersRunningByType.Range(func(key, val any) bool {
-			k, _ := key.(string)
-			v, _ := val.(*atomic.Int64)
-			o.ObserveInt64(observability.WorkerRunning(), v.Load(), metric.WithAttributes(attribute.String("worker_type", k)))
-			return true
-		})
-		return nil
-	}, observability.WorkerRunning())
+		workerGauge, err := m.Int64ObservableGauge(
+			"hotplex.worker.running",
+			metric.WithDescription("Number of currently running workers"),
+		)
+		if err != nil {
+			slog.Warn("session: failed to create worker.running gauge", "err", err)
+			return
+		}
+		_, _ = m.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+			workersRunningByType.Range(func(key, val any) bool {
+				k, _ := key.(string)
+				v, _ := val.(*atomic.Int64)
+				o.ObserveInt64(workerGauge, v.Load(), metric.WithAttributes(attribute.String("worker_type", k)))
+				return true
+			})
+			return nil
+		}, workerGauge)
+	})
 }
 
 // Manager orchestrates session lifecycle, persistence, and GC.
@@ -396,7 +413,7 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 			workersRunningGauge(string(ms.info.WorkerType)).Add(-1)
 			// Release quota only when worker is still attached (DetachWorker may
 			// have already released it on the bridge cleanup path).
-			m.releaseWorkerQuota(ms)
+			m.releaseWorkerQuota(ctx, ms)
 		}
 		// Gracefully terminate the worker process with 5s grace period.
 		// Safe: ms.mu is held by the caller, and worker.Terminate() does not
@@ -464,7 +481,7 @@ func (m *Manager) forceTerminateInMemory(ctx context.Context, ms *managedSession
 	// Release quota and decrement running gauge.
 	if ms.worker != nil {
 		workersRunningGauge(string(ms.info.WorkerType)).Add(-1)
-		m.releaseWorkerQuota(ms)
+		m.releaseWorkerQuota(ctx, ms)
 		workerToKill = ms.worker
 	}
 	ms.worker = nil // unconditional nil — matches transitionState, prevents double-release
@@ -575,7 +592,7 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 // AttachWorker attempts to allocate concurrency quota and pair the worker runtime to the session.
 // Pool quota is acquired outside m.mu to reduce lock contention under burst load.
 // TOCTOU re-validation under m.mu ensures correctness.
-func (m *Manager) AttachWorker(id string, w worker.Worker) error {
+func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) error {
 	if m == nil {
 		return ErrSessionNotFound
 	}
@@ -598,7 +615,7 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	}
 
 	// Acquire pool quota (slot + memory) in a single atomic operation.
-	if poolErr := m.pool.AcquireWithMemory(userID); poolErr != nil {
+	if poolErr := m.pool.AcquireWithMemory(ctx, userID); poolErr != nil {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
 			m.log.Warn("session: attach rejected", "err", poolErr, "session_id", id)
@@ -619,16 +636,16 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	ms, ok = m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		m.pool.Release(userID)
-		observability.PoolAcquire().Add(context.Background(), 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
+		m.pool.Release(ctx, userID)
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrSessionNotFound
 	}
 	ms.mu.Lock()
 	if ms.worker != nil {
 		ms.mu.Unlock()
 		m.mu.Unlock()
-		m.pool.Release(userID)
-		observability.PoolAcquire().Add(context.Background(), 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
+		m.pool.Release(ctx, userID)
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrWorkerAttached
 	}
 	// Reject attach if session is no longer active — prevents Delete/Attach
@@ -637,14 +654,14 @@ func (m *Manager) AttachWorker(id string, w worker.Worker) error {
 	if !ms.info.State.IsActive() {
 		ms.mu.Unlock()
 		m.mu.Unlock()
-		m.pool.Release(userID)
-		observability.PoolAcquire().Add(context.Background(), 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
+		m.pool.Release(ctx, userID)
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrSessionNotActive
 	}
 	ms.worker = w
 	ms.startedAt = time.Now()
-	observability.PoolAcquire().Add(context.Background(), 1, metric.WithAttributes(attribute.String("result", "success")))
-	observability.WorkerStarts().Add(context.Background(), 1, metric.WithAttributes(attribute.String("worker_type", string(ms.info.WorkerType)), attribute.String("result", "success")))
+	observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "success")))
+	observability.WorkerStarts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(ms.info.WorkerType)), attribute.String("result", "success")))
 	workersRunningGauge(string(ms.info.WorkerType)).Add(1)
 	ms.mu.Unlock()
 	m.mu.Unlock()
@@ -669,8 +686,8 @@ func (m *Manager) GetWorker(id string) worker.Worker {
 
 // releaseWorkerQuota releases both concurrency slot and memory quota.
 // pool.Release now handles both slot and memory under a single lock.
-func (m *Manager) releaseWorkerQuota(ms *managedSession) {
-	m.pool.Release(ms.info.UserID)
+func (m *Manager) releaseWorkerQuota(ctx context.Context, ms *managedSession) {
+	m.pool.Release(ctx, ms.info.UserID)
 }
 
 // DetachWorker removes the worker from the session and releases the concurrency quota.
@@ -712,7 +729,7 @@ func (m *Manager) detachWorkerUnchecked(id string, expected worker.Worker) bool 
 
 	if hasWorker {
 		workersRunningGauge(string(workerType)).Add(-1)
-		m.pool.Release(uid)
+		m.pool.Release(context.Background(), uid)
 		m.log.Debug("session: worker detached", "session_id", id)
 	}
 	return true
@@ -775,7 +792,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		ms.info = candidate
 		if hasWorkerAfter {
 			workersRunningGauge(string(workerType)).Add(-1)
-			m.pool.Release(uid)
+			m.pool.Release(ctx, uid)
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)
@@ -805,7 +822,7 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 			workerToKill = ms.worker
 			workerType = string(ms.info.WorkerType)
 			workersRunningGauge(workerType).Add(-1)
-			m.releaseWorkerQuota(ms)
+			m.releaseWorkerQuota(ctx, ms)
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)

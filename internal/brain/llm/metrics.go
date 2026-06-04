@@ -155,6 +155,7 @@ func NewMetricsCollector(config MetricsConfig) *MetricsCollector {
 
 // RecordRequest records a completed request with metrics.
 func (mc *MetricsCollector) RecordRequest(
+	ctx context.Context,
 	model string,
 	scenario string,
 	inputTokens int64,
@@ -192,47 +193,47 @@ func (mc *MetricsCollector) RecordRequest(
 		}
 
 		// Record latency
-		mc.requestLatency.Record(context.Background(), latencyMs, metric.WithAttributes(attrs...))
+		mc.requestLatency.Record(ctx, latencyMs, metric.WithAttributes(attrs...))
 
 		// Record tokens
-		mc.inputTokenCounter.Add(context.Background(), inputTokens, metric.WithAttributes(attrs...))
-		mc.outputTokenCounter.Add(context.Background(), outputTokens, metric.WithAttributes(attrs...))
+		mc.inputTokenCounter.Add(ctx, inputTokens, metric.WithAttributes(attrs...))
+		mc.outputTokenCounter.Add(ctx, outputTokens, metric.WithAttributes(attrs...))
 
 		// Record cost
 		if cost > 0 {
-			mc.costCounter.Add(context.Background(), cost, metric.WithAttributes(attrs...))
+			mc.costCounter.Add(ctx, cost, metric.WithAttributes(attrs...))
 		}
 
 		// Record error
 		if err != nil {
-			mc.errorCounter.Add(context.Background(), 1, metric.WithAttributes(attrs...))
+			mc.errorCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 		}
 	}
 }
 
 // RecordRoutingDecision records a routing decision.
-func (mc *MetricsCollector) RecordRoutingDecision(scenario Scenario, strategy RouteStrategy, model string) {
+func (mc *MetricsCollector) RecordRoutingDecision(ctx context.Context, scenario Scenario, strategy RouteStrategy, model string) {
 	if mc.meter != nil {
 		attrs := []attribute.KeyValue{
 			attribute.String("scenario", string(scenario)),
 			attribute.String("strategy", string(strategy)),
 			attribute.String("model", model),
 		}
-		mc.routingCounter.Add(context.Background(), 1, metric.WithAttributes(attrs...))
+		mc.routingCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 	}
 }
 
 // StartRequest increments the active request counter.
-func (mc *MetricsCollector) StartRequest() {
+func (mc *MetricsCollector) StartRequest(ctx context.Context) {
 	if mc.meter != nil {
-		mc.activeRequestsGauge.Add(context.Background(), 1)
+		mc.activeRequestsGauge.Add(ctx, 1)
 	}
 }
 
 // EndRequest decrements the active request counter.
-func (mc *MetricsCollector) EndRequest() {
+func (mc *MetricsCollector) EndRequest(ctx context.Context) {
 	if mc.meter != nil {
-		mc.activeRequestsGauge.Add(context.Background(), -1)
+		mc.activeRequestsGauge.Add(ctx, -1)
 	}
 }
 
@@ -283,6 +284,7 @@ type MetricsStats struct {
 
 // RequestTimer helps track request timing.
 type RequestTimer struct {
+	ctx       context.Context
 	startTime time.Time
 	model     string
 	scenario  string
@@ -290,11 +292,12 @@ type RequestTimer struct {
 }
 
 // NewRequestTimer creates a new request timer.
-func NewRequestTimer(metrics *MetricsCollector, model, scenario string) *RequestTimer {
+func NewRequestTimer(ctx context.Context, metrics *MetricsCollector, model, scenario string) *RequestTimer {
 	if metrics != nil {
-		metrics.StartRequest()
+		metrics.StartRequest(ctx)
 	}
 	return &RequestTimer{
+		ctx:       ctx,
 		startTime: time.Now(),
 		model:     model,
 		scenario:  scenario,
@@ -309,6 +312,68 @@ func (rt *RequestTimer) Record(inputTokens, outputTokens int64, cost float64, er
 	}
 
 	latencyMs := float64(time.Since(rt.startTime).Milliseconds())
-	rt.metrics.RecordRequest(rt.model, rt.scenario, inputTokens, outputTokens, cost, latencyMs, err)
-	rt.metrics.EndRequest()
+	rt.metrics.RecordRequest(rt.ctx, rt.model, rt.scenario, inputTokens, outputTokens, cost, latencyMs, err)
+	rt.metrics.EndRequest(rt.ctx)
+}
+
+// MetricsClient wraps an LLM client with metrics collection.
+type MetricsClient struct {
+	client  LLMClient
+	metrics *MetricsCollector
+	model   string
+}
+
+// Client returns the underlying client for component extraction.
+func (m *MetricsClient) Client() LLMClient {
+	return m.client
+}
+
+// NewMetricsClient creates a new metrics-enabled client wrapper.
+func NewMetricsClient(client LLMClient, metrics *MetricsCollector, model string) *MetricsClient {
+	return &MetricsClient{
+		client:  client,
+		metrics: metrics,
+		model:   model,
+	}
+}
+
+// Chat implements the Chat method with metrics collection.
+func (m *MetricsClient) Chat(ctx context.Context, prompt string) (string, error) {
+	timer := NewRequestTimer(ctx, m.metrics, m.model, "chat")
+	result, err := m.client.Chat(ctx, prompt)
+	timer.Record(0, 0, 0, err) // Token counts estimated elsewhere
+	return result, err
+}
+
+func (m *MetricsClient) ChatWithOptions(ctx context.Context, prompt string, opts ChatOptions) (string, error) {
+	timer := NewRequestTimer(ctx, m.metrics, m.model, "chat")
+	result, err := m.client.ChatWithOptions(ctx, prompt, opts)
+	timer.Record(0, 0, 0, err)
+	return result, err
+}
+
+// Analyze implements the Analyze method with metrics collection.
+func (m *MetricsClient) Analyze(ctx context.Context, prompt string, target any) error {
+	timer := NewRequestTimer(ctx, m.metrics, m.model, "analyze")
+	err := m.client.Analyze(ctx, prompt, target)
+	timer.Record(0, 0, 0, err)
+	return err
+}
+
+// ChatStream implements the ChatStream method with metrics collection.
+func (m *MetricsClient) ChatStream(ctx context.Context, prompt string) (<-chan string, error) {
+	timer := NewRequestTimer(ctx, m.metrics, m.model, "stream")
+	result, err := m.client.ChatStream(ctx, prompt)
+	timer.Record(0, 0, 0, err)
+	return result, err
+}
+
+// HealthCheck implements the HealthCheck method.
+func (m *MetricsClient) HealthCheck(ctx context.Context) HealthStatus {
+	return m.client.HealthCheck(ctx)
+}
+
+// GetMetrics returns the underlying metrics collector for stats retrieval.
+func (m *MetricsClient) GetMetrics() *MetricsCollector {
+	return m.metrics
 }

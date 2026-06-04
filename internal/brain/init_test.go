@@ -144,7 +144,7 @@ func TestEnhancedBrainWrapper_StartMetricsTimer_NilMetrics(t *testing.T) {
 		metrics: nil,
 	}
 
-	timer := wrapper.startMetricsTimer("gpt-4o", "chat")
+	timer := wrapper.startMetricsTimer(context.Background(), "gpt-4o", "chat")
 	assert.Nil(t, timer)
 }
 

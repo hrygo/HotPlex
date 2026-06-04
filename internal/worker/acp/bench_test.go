@@ -3,6 +3,7 @@ package acp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
@@ -34,7 +35,7 @@ func BenchmarkMapNotification(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		m.MapNotification(notif)
+		m.MapNotification(context.Background(), notif)
 	}
 }
 
@@ -63,11 +64,11 @@ func BenchmarkMapNotification_Stream(b *testing.B) {
 		for j := 0; j < 1000; j++ {
 			switch j % 10 {
 			case 0:
-				m.MapNotification(thoughtNotif)
+				m.MapNotification(context.Background(), thoughtNotif)
 			case 5:
-				m.MapNotification(toolNotif)
+				m.MapNotification(context.Background(), toolNotif)
 			default:
-				m.MapNotification(textNotif)
+				m.MapNotification(context.Background(), textNotif)
 			}
 		}
 		m.Reset()
@@ -169,6 +170,6 @@ func BenchmarkMapNotification_Plan(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		m.MapNotification(notif)
+		m.MapNotification(context.Background(), notif)
 	}
 }

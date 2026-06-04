@@ -559,7 +559,7 @@
           "editorMode": "code",
           "expr": "sum(rate(hotplex_gateway_errors_total[5m])) by (error_code)",
           "instant": false,
-          "legendFormat": "{{component}} - {{error_code}}",
+          "legendFormat": "{{error_code}}",
           "range": true,
           "refId": "A"
         }
@@ -915,7 +915,7 @@
         "name": "component",
         "options": [],
         "query": {
-          "query": "label_values(hotplex_errors_total, component)",
+          "query": "label_values(hotplex_gateway_errors_total, error_code)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,

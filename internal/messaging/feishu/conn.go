@@ -510,11 +510,11 @@ func (c *FeishuConn) writeContent(ctx context.Context, env *events.Envelope, tex
 		if err := streamCtrl.Close(closeCtx); err != nil {
 			c.adapter.Log.Warn("feishu: failed to close rotated card",
 				"old_msg_id", oldMsgID, "err", err)
-			observability.StreamingCardRotationFailures().Add(context.Background(), 1, metric.WithAttributes(attribute.String("phase", "close_old")))
+			observability.StreamingCardRotationFailures().Add(ctx, 1, metric.WithAttributes(attribute.String("phase", "close_old")))
 		}
 		closeCancel()
 
-		observability.StreamingCardRotations().Add(context.Background(), 1)
+		observability.StreamingCardRotations().Add(ctx, 1)
 		c.adapter.Log.Info("feishu: streaming card rotated",
 			"old_msg_id", oldMsgID)
 
@@ -538,7 +538,7 @@ func (c *FeishuConn) writeContent(ctx context.Context, env *events.Envelope, tex
 			if err := streamCtrl.EnsureCard(ctx, chatID, chatType, replyToMsgID, text); err != nil {
 				c.adapter.Log.Warn("feishu: streaming card init failed, falling back to static", "err", err)
 				c.mu.Lock()
-				observability.StreamingCardRotationFailures().Add(context.Background(), 1, metric.WithAttributes(attribute.String("phase", "ensure_card")))
+				observability.StreamingCardRotationFailures().Add(ctx, 1, metric.WithAttributes(attribute.String("phase", "ensure_card")))
 				c.streamCtrl = nil
 				c.mu.Unlock()
 			} else {

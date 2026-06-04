@@ -40,6 +40,7 @@ var noopMeter = noop.NewMeterProvider().Meter("hotplex-gateway")
 var noopTracer = nooptrace.NewTracerProvider().Tracer("hotplex-gateway")
 
 func Init(ctx context.Context, log *slog.Logger, cfg Config) func(context.Context) error {
+	setInstrumentLogger(log)
 	initOnce.Do(func() {
 		globalShutdown = func(context.Context) error { return nil }
 
@@ -47,6 +48,7 @@ func Init(ctx context.Context, log *slog.Logger, cfg Config) func(context.Contex
 			globalMeter = noopMeter
 			globalTracer = noopTracer
 			log.Info("observability: disabled via OTEL_SDK_DISABLED=true")
+			runGaugeCallbacks()
 			return
 		}
 
@@ -55,6 +57,7 @@ func Init(ctx context.Context, log *slog.Logger, cfg Config) func(context.Contex
 			log.Warn("observability: resource creation failed, using no-op", "err", err)
 			globalMeter = noopMeter
 			globalTracer = noopTracer
+			runGaugeCallbacks()
 			return
 		}
 
@@ -74,6 +77,8 @@ func Init(ctx context.Context, log *slog.Logger, cfg Config) func(context.Contex
 			"environment", cfg.Environment,
 			"sample_rate", cfg.SampleRate,
 		)
+
+		runGaugeCallbacks()
 	})
 	return globalShutdown
 }
@@ -83,6 +88,30 @@ func Meter() metric.Meter {
 		return noopMeter
 	}
 	return globalMeter
+}
+
+// gaugeCallbackRegistrars holds functions that register ObservableGauge callbacks.
+// Populated via RegisterGaugeCallbacks() from packages that own gauge state
+// (session, pool). Called once during Init() after the real MeterProvider is set.
+var gaugeCallbackRegistrars []func(metric.Meter)
+
+// RegisterGaugeCallbacks registers a function to be called once after Init()
+// sets up the real MeterProvider. The callback receives the live meter and can
+// register ObservableGauge callbacks that depend on real instruments.
+// This replaces the broken pattern of calling Meter().RegisterCallback() from
+// package init() (which returns noopMeter before Init() runs).
+func RegisterGaugeCallbacks(fn func(metric.Meter)) {
+	gaugeCallbackRegistrars = append(gaugeCallbackRegistrars, fn)
+}
+
+// runGaugeCallbacks invokes all registered gauge callbacks with the live meter.
+// Called at the end of Init() after globalMeter is set.
+func runGaugeCallbacks() {
+	if globalMeter != nil && globalMeter != noopMeter {
+		for _, fn := range gaugeCallbackRegistrars {
+			fn(globalMeter)
+		}
+	}
 }
 
 func Tracer() trace.Tracer {
@@ -150,8 +179,8 @@ func initTracing(ctx context.Context, log *slog.Logger, cfg Config, res *resourc
 
 	exp, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
-		otlptracegrpc.WithInsecure(),
-		otlptracegrpc.WithCompressor("gzip"),
+		otlpInsecureOption(cfg.OTLPInsecure),
+		otlpCompressorOption(cfg.OTLPCompression),
 	)
 	if err != nil {
 		log.Warn("observability: OTLP trace exporter creation failed", "err", err)
@@ -194,8 +223,8 @@ func initMetrics(ctx context.Context, log *slog.Logger, cfg Config, res *resourc
 	if cfg.OTLPEndpoint != "" {
 		metricExp, err := otlpmetricgrpc.New(ctx,
 			otlpmetricgrpc.WithEndpoint(cfg.OTLPEndpoint),
-			otlpmetricgrpc.WithInsecure(),
-			otlpmetricgrpc.WithCompressor("gzip"),
+			otlpMetricInsecureOption(cfg.OTLPInsecure),
+			otlpMetricCompressorOption(cfg.OTLPCompression),
 		)
 		if err != nil {
 			log.Warn("observability: OTLP metric exporter creation failed", "err", err)
@@ -222,6 +251,34 @@ func initMetrics(ctx context.Context, log *slog.Logger, cfg Config, res *resourc
 // from the OTel MeterProvider. The OTel Prometheus exporter internally
 // uses prometheus/client_golang; this function provides the isolation
 // boundary so application code never imports prometheus directly.
+func otlpInsecureOption(insecure bool) otlptracegrpc.Option {
+	if insecure {
+		return otlptracegrpc.WithInsecure()
+	}
+	return otlptracegrpc.WithTLSCredentials(nil)
+}
+
+func otlpCompressorOption(enabled bool) otlptracegrpc.Option {
+	if enabled {
+		return otlptracegrpc.WithCompressor("gzip")
+	}
+	return nil
+}
+
+func otlpMetricInsecureOption(insecure bool) otlpmetricgrpc.Option {
+	if insecure {
+		return otlpmetricgrpc.WithInsecure()
+	}
+	return otlpmetricgrpc.WithTLSCredentials(nil)
+}
+
+func otlpMetricCompressorOption(enabled bool) otlpmetricgrpc.Option {
+	if enabled {
+		return otlpmetricgrpc.WithCompressor("gzip")
+	}
+	return nil
+}
+
 func MetricsHandler() http.Handler {
 	return promhttp.Handler()
 }

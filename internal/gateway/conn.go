@@ -178,7 +178,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 		if err != nil {
 			// Detect missed pong (read deadline exceeded).
 			if isReadTimeout(err) {
-				observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", "pong_timeout")))
+				observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", "pong_timeout")))
 				if c.hb.MarkMissed() {
 					c.log.Warn("gateway: max missed pongs, disconnecting",
 						"session_id", c.sessionID)
@@ -188,7 +188,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 			if !errors.Is(err, websocket.ErrCloseSent) {
 				c.log.Debug("gateway: read error", "session_id", c.sessionID, "err", err)
 			}
-			observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", "read_error")))
+			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", "read_error")))
 			return
 		}
 
@@ -198,11 +198,11 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 		env, err := aep.DecodeLineMinimal(data)
 		if err != nil {
 			c.sendError(events.ErrCodeInvalidMessage, err.Error())
-			observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
+			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
 			continue
 		}
 
-		observability.GatewayMessages().Add(context.Background(), 1, metric.WithAttributes(attribute.String("direction", "incoming"), attribute.String("event_type", string(env.Event.Type))))
+		observability.GatewayMessages().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("direction", "incoming"), attribute.String("event_type", string(env.Event.Type))))
 
 		// Stamp session ID, sequence number, and owner ID.
 		env.SessionID = c.sessionID
@@ -244,7 +244,7 @@ func (c *Conn) performInit(auth connAuth, sm connSM) error {
 	defer span.End()
 	start := time.Now()
 	defer func() {
-		observability.GatewayInitHandshakeDuration().Record(context.Background(), time.Since(start).Seconds())
+		observability.GatewayInitHandshakeDuration().Record(c.hub.ctx, time.Since(start).Seconds())
 	}()
 
 	env, initData, err := c.readAndValidateInit()
@@ -277,22 +277,22 @@ func (c *Conn) readAndValidateInit() (*events.Envelope, InitData, error) {
 	env, err := aep.DecodeLineMinimal(data)
 	if err != nil {
 		c.sendInitError(events.ErrCodeInvalidMessage, "malformed message: "+err.Error())
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
 		return nil, InitData{}, err
 	}
 
 	if env.Event.Type != events.Init {
 		c.sendInitError(events.ErrCodeProtocolViolation, "expected init as first message, got "+string(env.Event.Type))
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeProtocolViolation))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeProtocolViolation))))
 		return nil, InitData{}, fmt.Errorf("expected init, got %s", env.Event.Type)
 	}
 
-	observability.GatewayMessages().Add(context.Background(), 1, metric.WithAttributes(attribute.String("direction", "incoming"), attribute.String("event_type", string(events.Init))))
+	observability.GatewayMessages().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("direction", "incoming"), attribute.String("event_type", string(events.Init))))
 
 	initData, initErr := ValidateInit(env)
 	if initErr != nil {
 		c.sendInitError(initErr.Code, initErr.Message)
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(initErr.Code))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(initErr.Code))))
 		return nil, InitData{}, initErr
 	}
 
@@ -332,7 +332,7 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 	expanded, err := validateAndExpandWorkDir(workDir)
 	if err != nil {
 		c.sendInitError(events.ErrCodeInvalidMessage, err.Error())
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
 		return "", nil, err
 	}
 	workDir = expanded
@@ -351,7 +351,7 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 
 	if !c.hub.InitThrottle.Check(sessionID) {
 		c.sendInitError(events.ErrCodeRateLimited, "too many failed attempts, please back off")
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeRateLimited))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeRateLimited))))
 		return "", nil, fmt.Errorf("init throttled for session %s", sessionID)
 	}
 
@@ -383,6 +383,14 @@ func (c *Conn) resolveSessionState(sessionID string, initData InitData, workDir 
 		return sessionID, result, handleErr
 	}
 
+	// Preserve original client_key from existing session to prevent
+	// overwrite when reconnecting with the server-assigned session_id
+	// (webchat stores the server UUID in localStorage, not the original
+	// client key like "main" or "sess_xxx").
+	if si.ClientKey != "" {
+		clientKey = si.ClientKey
+	}
+
 	switch si.State {
 	case events.StateCreated:
 		result, stateErr := c.startCreatedSession(sessionID, initData, workDir, sm, si, clientKey)
@@ -407,14 +415,14 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 		if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			c.sendInitError(events.ErrCodeInternalError, "failed to create session")
-			observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
 			return nil, fmt.Errorf("create session: %w", err)
 		}
 		si, err := sm.Get(context.Background(), sessionID)
 		if err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			c.sendInitError(events.ErrCodeInternalError, "session not found after creation")
-			observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
 			return nil, fmt.Errorf("get session after start: %w", err)
 		}
 		return si, nil
@@ -437,7 +445,7 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to start session")
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
 		return nil, fmt.Errorf("start unstarted session: %w", err)
 	}
 	si, err := sm.Get(context.Background(), sessionID)
@@ -462,7 +470,7 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 		initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, fmt.Sprintf("failed to recreate deleted session: %v", err))
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
 		return nil, fmt.Errorf("recreate deleted session: %w", err)
 	}
 	si, err := sm.Get(context.Background(), sessionID)
@@ -503,11 +511,11 @@ func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *s
 		startCtx, startCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer startCancel()
 		if err := c.starter.StartSession(startCtx, sessionID, c.userID, c.botID,
-			initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
+			si.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			msg := fmt.Sprintf("resume failed (%v), then start also failed (%v)", resumeErr, err)
 			c.sendInitError(events.ErrCodeInternalError, msg)
-			observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
 			return nil, fmt.Errorf("start session after resume fallback: %w", err)
 		}
 	}
@@ -520,12 +528,12 @@ func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *s
 }
 
 // finalizeInit performs security checks, sends init_ack, and marks init complete.
-func (c *Conn) finalizeInit(sessionID string, si *session.SessionInfo, initData InitData, span trace.Span) error {
+func (c *Conn) finalizeInit(sessionID string, si *session.SessionInfo, _ InitData, span trace.Span) error {
 	// SEC-008: reject cross-user access on reconnect.
 	if c.userID != "" && si.UserID != "" && c.userID != si.UserID {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeUnauthorized, "user_id mismatch")
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeUnauthorized))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeUnauthorized))))
 		return fmt.Errorf("user_id mismatch: connection=%s session=%s", c.userID, si.UserID)
 	}
 
@@ -533,7 +541,7 @@ func (c *Conn) finalizeInit(sessionID string, si *session.SessionInfo, initData 
 	if c.botID != "" && si.BotID != "" && c.botID != si.BotID {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeUnauthorized, "bot_id mismatch")
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeUnauthorized))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeUnauthorized))))
 		return fmt.Errorf("bot_id mismatch: connection=%s session=%s", c.botID, si.BotID)
 	}
 
@@ -544,18 +552,18 @@ func (c *Conn) finalizeInit(sessionID string, si *session.SessionInfo, initData 
 	c.userID = si.UserID
 	c.mu.Unlock()
 
-	ack := BuildInitAck(sessionID, si.State, initData.WorkerType)
+	ack := BuildInitAck(sessionID, si.State, si.WorkerType)
 	ack.Seq = c.hub.NextSeq(sessionID)
 	if err := c.WriteCtx(context.Background(), ack); err != nil {
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
 		return fmt.Errorf("send init_ack: %w", err)
 	}
-	observability.GatewayMessages().Add(context.Background(), 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", InitAck)))
+	observability.GatewayMessages().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", InitAck)))
 
 	c.markInitDone()
 
 	c.log.Info("gateway: init complete", "session_id", sessionID,
-		"worker_type", initData.WorkerType, "state", si.State)
+		"worker_type", si.WorkerType, "state", si.State)
 	span.SetStatus(codes.Ok, "init complete")
 	return nil
 }
@@ -677,7 +685,7 @@ func (c *Conn) RouteWriteData(data []byte, eventType events.Kind) error {
 // writeDispatch is the shared write-path for both RouteWrite and RouteWriteData.
 // It handles metrics, init-phase buffering, and droppable vs reliable dispatch.
 func (c *Conn) writeDispatch(data []byte, eventType events.Kind) error {
-	observability.GatewayMessages().Add(context.Background(), 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", string(eventType))))
+	observability.GatewayMessages().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", string(eventType))))
 	if handled, err := c.bufferOrReject(data); handled {
 		return err
 	}
@@ -695,7 +703,7 @@ func (c *Conn) sendData(data []byte) error {
 		return nil
 	default:
 		c.log.Warn("gateway: slow client, write channel full, disconnecting", "session_id", c.sessionID)
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", "slow_client")))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", "slow_client")))
 		_ = c.Close()
 		return errors.New("write channel full, slow client disconnected")
 	}
@@ -708,7 +716,7 @@ func (c *Conn) trySendData(data []byte) error {
 	case c.writeCh <- data:
 		return nil
 	default:
-		observability.GatewayDeltasDropped().Add(context.Background(), 1)
+		observability.GatewayDeltasDropped().Add(c.hub.ctx, 1)
 		return nil
 	}
 }
@@ -729,7 +737,7 @@ func (c *Conn) WriteMessage(msgType int, data []byte) error {
 	default:
 		// Slow client — write channel full. Disconnect to protect Hub.Run.
 		c.log.Warn("gateway: slow client, write channel full, disconnecting", "session_id", c.sessionID)
-		observability.GatewayErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("error_code", "slow_client")))
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", "slow_client")))
 		_ = c.Close()
 		return errors.New("write channel full, slow client disconnected")
 	}
@@ -818,6 +826,6 @@ func (c *Conn) sendError(code events.ErrorCode, msg string) {
 		Code:    code,
 		Message: msg,
 	})
-	observability.GatewayMessages().Add(context.Background(), 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", string(events.Error))))
+	observability.GatewayMessages().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", string(events.Error))))
 	_ = c.WriteCtx(context.Background(), env)
 }

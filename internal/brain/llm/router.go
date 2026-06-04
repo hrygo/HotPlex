@@ -101,7 +101,7 @@ func (r *Router) SelectModel(ctx context.Context, scenario Scenario, strategy Ro
 	if preferredModel, ok := r.config.ScenarioModelMap[scenario]; ok {
 		for i := range r.config.Models {
 			if r.config.Models[i].Name == preferredModel && r.config.Models[i].Enabled {
-				r.logRouting(scenario, strategy, preferredModel, "scenario_mapping")
+				r.logRouting(ctx, scenario, strategy, preferredModel, "scenario_mapping")
 				return &r.config.Models[i], nil
 			}
 		}
@@ -136,7 +136,7 @@ func (r *Router) SelectModel(ctx context.Context, scenario Scenario, strategy Ro
 		return nil, fmt.Errorf("no enabled models available")
 	}
 
-	r.logRouting(scenario, strategy, selected.Name, string(strategy))
+	r.logRouting(ctx, scenario, strategy, selected.Name, string(strategy))
 	return selected, nil
 }
 
@@ -208,7 +208,7 @@ func (r *Router) selectBalanced(scenario Scenario) *ModelConfig {
 }
 
 // logRouting logs the routing decision.
-func (r *Router) logRouting(scenario Scenario, strategy RouteStrategy, model, reason string) {
+func (r *Router) logRouting(ctx context.Context, scenario Scenario, strategy RouteStrategy, model, reason string) {
 	if r.config.Logger != nil {
 		r.config.Logger.Debug("model routed",
 			"scenario", scenario,
@@ -217,7 +217,7 @@ func (r *Router) logRouting(scenario Scenario, strategy RouteStrategy, model, re
 			"reason", reason)
 	}
 	if r.metrics != nil {
-		r.metrics.RecordRoutingDecision(scenario, strategy, model)
+		r.metrics.RecordRoutingDecision(ctx, scenario, strategy, model)
 	}
 }
 

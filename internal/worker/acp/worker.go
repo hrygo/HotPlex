@@ -862,7 +862,7 @@ func (w *Worker) readLoop(ctx context.Context) {
 				tw.Log("←", notif)
 			}
 			w.SetLastIO(time.Now())
-			envelopes := w.mapper.MapNotification(notif)
+			envelopes := w.mapper.MapNotification(ctx, notif)
 			for _, env := range envelopes {
 				conn.TrySend(env)
 			}

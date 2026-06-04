@@ -37,7 +37,7 @@ func (m *mockAPISM) CreateWithBot(ctx context.Context, id, userID, botID string,
 	return args.Get(0).(*session.SessionInfo), args.Error(1)
 }
 
-func (m *mockAPISM) AttachWorker(id string, w worker.Worker) error {
+func (m *mockAPISM) AttachWorker(_ context.Context, id string, w worker.Worker) error {
 	return m.Called(id, w).Error(0)
 }
 

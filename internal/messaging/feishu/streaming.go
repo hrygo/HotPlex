@@ -490,7 +490,7 @@ func (c *StreamingCardController) Flush(ctx context.Context) error {
 					"err", err, "failed_flushes", c.failedFlushes)
 				c.cardKitOK = false
 				c.mu.Unlock()
-				observability.StreamingCardFlushFallbacks().Add(context.Background(), 1)
+				observability.StreamingCardFlushFallbacks().Add(ctx, 1)
 			}
 		} else {
 			c.mu.Lock()

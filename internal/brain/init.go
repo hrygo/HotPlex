@@ -164,7 +164,7 @@ func (w *enhancedBrainWrapper) ChatWithOptions(ctx context.Context, prompt strin
 		return "", err
 	}
 
-	timer := w.startMetricsTimer(model, "chat")
+	timer := w.startMetricsTimer(ctx, model, "chat")
 
 	var result string
 	var err error
@@ -183,6 +183,44 @@ func (w *enhancedBrainWrapper) ChatWithOptions(ctx context.Context, prompt strin
 	w.recordMetrics(timer, model, prompt, result, err)
 
 	return result, err
+}
+
+func (w *enhancedBrainWrapper) Analyze(ctx context.Context, prompt string, target any) error {
+	return w.AnalyzeWithModel(ctx, "", prompt, target)
+}
+
+func (w *enhancedBrainWrapper) ChatWithModel(ctx context.Context, model, prompt string) (string, error) {
+	ctx, cancel := w.applyTimeout(ctx)
+	defer cancel()
+
+	model = w.selectModel(ctx, model, llm.ScenarioChat)
+
+	if err := w.applyRateLimit(ctx, model); err != nil {
+		return "", err
+	}
+
+	timer := w.startMetricsTimer(ctx, model, "chat")
+	result, err := w.client.Chat(ctx, prompt)
+	w.recordMetrics(timer, model, prompt, result, err)
+
+	return result, err
+}
+
+func (w *enhancedBrainWrapper) AnalyzeWithModel(ctx context.Context, model, prompt string, target any) error {
+	ctx, cancel := w.applyTimeout(ctx)
+	defer cancel()
+
+	model = w.selectModel(ctx, model, llm.ScenarioAnalyze)
+
+	if err := w.applyRateLimit(ctx, model); err != nil {
+		return err
+	}
+
+	timer := w.startMetricsTimer(ctx, model, "analyze")
+	err := w.client.Analyze(ctx, prompt, target)
+	w.recordMetricsForAnalyze(timer, model, prompt, err)
+
+	return err
 }
 
 // applyTimeout applies the configured timeout to the context.
@@ -233,9 +271,9 @@ func (w *enhancedBrainWrapper) applyRateLimit(ctx context.Context, model string)
 }
 
 // startMetricsTimer starts a metrics timer for the given model and operation.
-func (w *enhancedBrainWrapper) startMetricsTimer(model, operation string) *llm.RequestTimer {
+func (w *enhancedBrainWrapper) startMetricsTimer(ctx context.Context, model, operation string) *llm.RequestTimer {
 	if w.metrics != nil {
-		return llm.NewRequestTimer(w.metrics, model, operation)
+		return llm.NewRequestTimer(ctx, w.metrics, model, operation)
 	}
 	return nil
 }
@@ -258,7 +296,121 @@ func (w *enhancedBrainWrapper) recordMetrics(timer *llm.RequestTimer, model, pro
 	timer.Record(int64(inputTokens), int64(outputTokens), cost, err)
 }
 
-// Close releases resources held by the wrapper.
+// recordMetricsForAnalyze records metrics for an analyze operation.
+func (w *enhancedBrainWrapper) recordMetricsForAnalyze(timer *llm.RequestTimer, model, prompt string, err error) {
+	if timer == nil {
+		return
+	}
+
+	inputTokens := 0
+	cost := 0.0
+	if w.costCalculator != nil {
+		inputTokens = w.costCalculator.CountTokens(prompt)
+		cost, _ = w.costCalculator.CalculateCost(model, inputTokens, 100)
+		_, _, _ = w.costCalculator.TrackRequest("default", model, inputTokens, 100)
+	}
+	timer.Record(int64(inputTokens), 100, cost, err)
+}
+
+func (w *enhancedBrainWrapper) ChatStream(ctx context.Context, prompt string) (<-chan string, error) {
+	// Apply pre-computed timeout. cancel is deferred inside the goroutine
+	// so the timeout context outlives this function call.
+	var streamCancel context.CancelFunc
+	if w.timeout > 0 {
+		ctx, streamCancel = context.WithTimeout(ctx, w.timeout)
+	}
+
+	model := w.selectModel(ctx, "", llm.ScenarioChat)
+	if err := w.applyRateLimit(ctx, model); err != nil {
+		if streamCancel != nil {
+			streamCancel()
+		}
+		return nil, err
+	}
+
+	timer := w.startMetricsTimer(ctx, model, "chat_stream")
+	inputTokens := 0
+	if w.costCalculator != nil {
+		inputTokens = w.costCalculator.CountTokens(prompt)
+	}
+
+	stream, err := w.client.ChatStream(ctx, prompt)
+	if err != nil {
+		if streamCancel != nil {
+			streamCancel()
+		}
+		if timer != nil {
+			timer.Record(int64(inputTokens), 0, 0, err)
+		}
+		return nil, err
+	}
+
+	outputChan := make(chan string)
+
+	go func() {
+		if streamCancel != nil {
+			defer streamCancel()
+		}
+		defer close(outputChan)
+		if stream == nil {
+			return
+		}
+		var outputTokens int
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case token, ok := <-stream:
+				if !ok {
+					if timer != nil {
+						cost := 0.0
+						if w.costCalculator != nil {
+							cost, _ = w.costCalculator.CalculateCost(model, inputTokens, outputTokens)
+							_, _, _ = w.costCalculator.TrackRequest("stream", model, inputTokens, outputTokens)
+						}
+						timer.Record(int64(inputTokens), int64(outputTokens), cost, nil)
+					}
+					return
+				}
+				if w.costCalculator != nil {
+					outputTokens += w.costCalculator.CountTokens(token)
+				}
+				select {
+				case outputChan <- token:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return outputChan, nil
+}
+
+func (w *enhancedBrainWrapper) HealthCheck(ctx context.Context) llm.HealthStatus {
+	return w.client.HealthCheck(ctx)
+}
+
+func (w *enhancedBrainWrapper) GetMetrics() llm.MetricsStats {
+	if w.metrics == nil {
+		return llm.MetricsStats{}
+	}
+	return w.metrics.GetStats()
+}
+
+func (w *enhancedBrainWrapper) GetCostCalculator() *llm.CostCalculator {
+	return w.costCalculator
+}
+
+func (w *enhancedBrainWrapper) GetRouter() *llm.Router {
+	return w.router
+}
+
+func (w *enhancedBrainWrapper) GetRateLimiter() *llm.RateLimiter {
+	return w.rateLimiter
+}
+
+// Close releases resources held by the brain wrapper.
 // Stops the rate limiter's queue-processing goroutine to prevent leaks
 // on hot-reload (where a new brain replaces the old one).
 func (w *enhancedBrainWrapper) Close() {

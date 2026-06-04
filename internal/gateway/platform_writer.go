@@ -37,6 +37,7 @@ type pcEntry struct {
 	done    chan struct{}
 	closeMu sync.Once
 	log     *slog.Logger
+	ctx     context.Context
 }
 
 type pcEntryConfig struct {
@@ -68,7 +69,7 @@ func defaultPCEntryConfig(cfg *config.Config) pcEntryConfig {
 	return c
 }
 
-func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) *pcEntry {
+func newPCEntry(ctx context.Context, pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) *pcEntry {
 	e := &pcEntry{
 		pc:      pc,
 		ch:      make(chan *events.Envelope, cfg.WriteBuffer),
@@ -76,6 +77,7 @@ func newPCEntry(pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) 
 		done:    make(chan struct{}),
 		cfg:     cfg,
 		log:     log,
+		ctx:     ctx,
 	}
 	go e.writeLoop()
 	return e
@@ -104,17 +106,17 @@ func (e *pcEntry) RouteWriteData(data []byte, eventType events.Kind) error {
 // json:"-" fields (e.g. OwnerID) that EncodeJSON omits from pre-encoded bytes.
 func (e *pcEntry) PreferEnvelope() bool { return true }
 
-func (e *pcEntry) WriteCtx(_ context.Context, env *events.Envelope) error {
+func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {
-			observability.GatewayPlatformDropped().Add(context.Background(), 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
+			observability.GatewayPlatformDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
 			return nil
 		}
 		select {
 		case e.ch <- env:
 			return nil
 		default:
-			observability.GatewayPlatformDropped().Add(context.Background(), 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
+			observability.GatewayPlatformDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
 			return nil
 		}
 	}
@@ -177,7 +179,7 @@ func (e *pcEntry) writeLoop() {
 				},
 			},
 		}
-		observability.GatewayDeltaFlush().Add(context.Background(), 1)
+		observability.GatewayDeltaFlush().Add(e.ctx, 1)
 		db.Reset()
 		runeCount = 0
 		if timer != nil {
@@ -202,7 +204,7 @@ func (e *pcEntry) writeLoop() {
 				}
 				db.WriteString(content)
 				runeCount += utf8.RuneCountInString(content)
-				observability.GatewayDeltaCoalesced().Add(context.Background(), 1)
+				observability.GatewayDeltaCoalesced().Add(e.ctx, 1)
 
 				if runeCount >= e.cfg.CoalesceSize {
 					flush(pendingSID)

@@ -67,7 +67,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		noopw.SetConn(noop.NewConn(sid, params.workerInfo.UserID))
 	}
 
-	if err := b.sm.AttachWorker(sid, w); err != nil {
+	if err := b.sm.AttachWorker(params.ctx, sid, w); err != nil {
 		if attachErrFn != nil {
 			attachErrFn(w, err)
 		}

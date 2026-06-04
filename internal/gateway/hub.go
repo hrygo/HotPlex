@@ -293,7 +293,7 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc messaging.PlatformConn) {
 		}
 	}
 
-	h.sessions[sessionID][newPCEntry(pc, defaultPCEntryConfig(h.cfgStore.Load()), h.log)] = true
+	h.sessions[sessionID][newPCEntry(h.ctx, pc, defaultPCEntryConfig(h.cfgStore.Load()), h.log)] = true
 	h.everHadConn[sessionID] = true
 }
 
@@ -321,12 +321,20 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 		attribute.String("priority", string(env.Priority)),
 	)
 
-	// Inject trace_id into AEP metadata
+	// Inject trace_id into AEP metadata.
+	// Copy-on-write: if Metadata is shared, create a new map to avoid data races
+	// when the same envelope is processed by multiple goroutines.
 	if sc := trace.SpanContextFromContext(spanCtx); sc.IsValid() {
 		if env.Metadata == nil {
-			env.Metadata = make(map[string]any)
+			env.Metadata = map[string]any{"trace_id": sc.TraceID().String()}
+		} else {
+			copied := make(map[string]any, len(env.Metadata)+1)
+			for k, v := range env.Metadata {
+				copied[k] = v
+			}
+			copied["trace_id"] = sc.TraceID().String()
+			env.Metadata = copied
 		}
-		env.Metadata["trace_id"] = sc.TraceID().String()
 	}
 
 	// Assign sequence number before sending to broadcast queue or clients.

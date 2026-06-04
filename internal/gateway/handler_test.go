@@ -337,7 +337,7 @@ func (tc workerCommandTestCase) run(t *testing.T) {
 	require.NoError(t, mgr.Transition(ctx, sid, targetState))
 
 	if testCtx.w != nil && targetState == events.StateRunning {
-		require.NoError(t, mgr.AttachWorker(sid, testCtx.w))
+		require.NoError(t, mgr.AttachWorker(context.Background(), sid, testCtx.w))
 	}
 
 	var data any = events.WorkerCommandData{Command: tc.command}
@@ -881,9 +881,9 @@ func (m *mockInputSM) TransitionWithInput(_ context.Context, _ string, _ events.
 func (m *mockInputSM) TransitionWithReason(_ context.Context, _ string, _ events.SessionState, _ string) error {
 	return nil
 }
-func (m *mockInputSM) AttachWorker(_ string, _ worker.Worker) error  { return nil }
-func (m *mockInputSM) DetachWorker(_ string)                         {}
-func (m *mockInputSM) DetachWorkerIf(_ string, _ worker.Worker) bool { return false }
+func (m *mockInputSM) AttachWorker(_ context.Context, _ string, _ worker.Worker) error { return nil }
+func (m *mockInputSM) DetachWorker(_ string)                                           {}
+func (m *mockInputSM) DetachWorkerIf(_ string, _ worker.Worker) bool                   { return false }
 func (m *mockInputSM) UpdateWorkerSessionID(_ context.Context, _ string, _ string) error {
 	return nil
 }

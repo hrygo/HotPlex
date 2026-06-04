@@ -56,7 +56,7 @@ func NewLLMRetryController(cfg config.AutoRetryConfig, log *slog.Logger) *LLMRet
 // Matching on accumulated output would cause false positives since Claude Code
 // output may legitimately contain strings like "500" or "INTERNAL_ERROR"
 // (e.g., in code comments, JSON data, error messages).
-func (c *LLMRetryController) ShouldRetry(sessionID string, errData *events.ErrorData) (bool, int) {
+func (c *LLMRetryController) ShouldRetry(ctx context.Context, sessionID string, errData *events.ErrorData) (bool, int) {
 	if errData == nil {
 		return false, 0
 	}
@@ -93,7 +93,7 @@ func (c *LLMRetryController) ShouldRetry(sessionID string, errData *events.Error
 	attempt := c.attempts[sessionID] + 1
 	if attempt > c.config.MaxRetries {
 		c.log.Info("llm_retry: max retries exhausted", "session_id", sessionID, "max", c.config.MaxRetries)
-		observability.RetryExhaustion().Add(context.Background(), 1)
+		observability.RetryExhaustion().Add(ctx, 1)
 		return false, 0
 	}
 	c.attempts[sessionID] = attempt

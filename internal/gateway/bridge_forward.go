@@ -245,7 +245,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 
 	// LLM retry: check after Done is forwarded.
 	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
-		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(sessionID, fc.lastError); shouldRetry {
+		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(context.TODO(), sessionID, fc.lastError); shouldRetry {
 			fc.pendingError = nil
 			// Pre-register cancel channel before launching goroutine to close
 			// the race window where CancelRetry can't find the channel.
@@ -518,7 +518,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		b.log.Warn("bridge: worker exited with non-zero code, sending crash error",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode,
 			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount)
-		observability.WorkerCrashes().Add(context.Background(), 1, metric.WithAttributes(attribute.String("worker_type", string(workerType)), attribute.String("exit_code", fmt.Sprintf("%d", exitCode))))
+		observability.WorkerCrashes().Add(context.TODO(), 1, metric.WithAttributes(attribute.String("worker_type", string(workerType)), attribute.String("exit_code", fmt.Sprintf("%d", exitCode))))
 		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
 		b.captureSyntheticEvent(syntheticTurnParams{
 			SessionID:  p.sessionID,

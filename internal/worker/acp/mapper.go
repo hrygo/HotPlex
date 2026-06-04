@@ -78,7 +78,7 @@ func (m *ACPMapper) SetTurnActive() { m.turnActive.Store(true) }
 // MapNotification converts an ACP notification to zero or more AEP Envelopes.
 // Optimized: discriminator + hot-path content (message/thought chunks) extracted
 // in a single unmarshal pass, eliminating triple-deserialization on the streaming path.
-func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelope {
+func (m *ACPMapper) MapNotification(ctx context.Context, notif *JSONRPCNotification) []*events.Envelope {
 	if notif.Method != "session/update" {
 		m.log.Debug("acp mapper: skipping non-session/update notification", "method", notif.Method)
 		return nil
@@ -108,11 +108,11 @@ func (m *ACPMapper) MapNotification(notif *JSONRPCNotification) []*events.Envelo
 	case "agent_thought_chunk":
 		return m.mapAgentThoughtChunkText(disc.Content.Text)
 	case "tool_call":
-		return m.mapToolCall(params.Update)
+		return m.mapToolCall(ctx, params.Update)
 	case "tool_call_update":
 		return m.mapToolCallUpdate(params.Update)
 	case "usage_update":
-		m.updateUsage(params.Update)
+		m.updateUsage(ctx, params.Update)
 		return nil // internal tracking, stats included in Done
 	case "plan":
 		return m.mapPlan(params.Update)
@@ -245,7 +245,7 @@ type acpToolCallUpdate struct {
 	Diff       json.RawMessage `json:"diff,omitempty"`
 }
 
-func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
+func (m *ACPMapper) mapToolCall(ctx context.Context, raw json.RawMessage) []*events.Envelope {
 	var u acpToolCallUpdate
 	if err := json.Unmarshal(raw, &u); err != nil {
 		return nil
@@ -304,7 +304,7 @@ func (m *ACPMapper) mapToolCall(raw json.RawMessage) []*events.Envelope {
 	if toolKind == "" {
 		toolKind = "other"
 	}
-	observability.ACPToolCalls().Add(context.Background(), 1, metric.WithAttributes(attribute.String("kind", toolKind)))
+	observability.ACPToolCalls().Add(ctx, 1, metric.WithAttributes(attribute.String("kind", toolKind)))
 
 	return []*events.Envelope{m.newEnvelope(events.ToolCall, data)}
 }
@@ -510,7 +510,7 @@ func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {
 // ─── Usage Tracking ──────────────────────────────────────────────────────────
 
 // updateUsage parses a usage_update notification and accumulates into the snapshot.
-func (m *ACPMapper) updateUsage(raw json.RawMessage) {
+func (m *ACPMapper) updateUsage(ctx context.Context, raw json.RawMessage) {
 	var u struct {
 		InputTokens       int `json:"inputTokens"`
 		OutputTokens      int `json:"outputTokens"`
@@ -563,7 +563,7 @@ func (m *ACPMapper) updateUsage(raw json.RawMessage) {
 		"cached_write": u.CachedWriteTokens,
 	} {
 		if val > 0 {
-			observability.ACPPromptTokens().Add(context.Background(), int64(val), metric.WithAttributes(attribute.String("type", label)))
+			observability.ACPPromptTokens().Add(ctx, int64(val), metric.WithAttributes(attribute.String("type", label)))
 		}
 	}
 }

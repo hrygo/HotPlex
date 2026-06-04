@@ -177,7 +177,7 @@ func (tl *timerLoop) onTick() {
 				tl.releaseSlot()
 				s.wg.Done()
 			}()
-			observability.CronFires().Add(context.Background(), 1, metric.WithAttributes(attribute.String("job_name", j.Name)))
+			observability.CronFires().Add(s.ctx, 1, metric.WithAttributes(attribute.String("job_name", j.Name)))
 			s.executeJob(j)
 		}(execJob)
 	}
@@ -230,7 +230,7 @@ func (s *Scheduler) executeAttached(job *CronJob) {
 	if s.attachedHandler == nil {
 		s.log.Warn("cron: attached_session execution skipped, no attached router",
 			"job_id", job.ID, "name", job.Name)
-		observability.CronAttached().Add(context.Background(), 1, metric.WithAttributes(attribute.String("result", "no_router")))
+		observability.CronAttached().Add(s.ctx, 1, metric.WithAttributes(attribute.String("result", "no_router")))
 		job.State.LastStatus = StatusFailed
 		s.persistState(job.ID, job.State)
 		return
@@ -296,7 +296,7 @@ func (s *Scheduler) finishExecution(job *CronJob, startedAtMs int64, err error, 
 			"job_id", job.ID, "name", job.Name, "err", err)
 		job.State.LastStatus = StatusFailed
 		job.State.ConsecutiveErrs++
-		observability.CronErrors().Add(context.Background(), 1, metric.WithAttributes(attribute.String("job_name", job.Name), attribute.String("error_type", errType)))
+		observability.CronErrors().Add(s.ctx, 1, metric.WithAttributes(attribute.String("job_name", job.Name), attribute.String("error_type", errType)))
 
 		if job.State.ConsecutiveErrs >= maxConsecutiveErrors {
 			s.log.Warn("cron: auto-disabling job after consecutive failures",

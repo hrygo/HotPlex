@@ -174,7 +174,7 @@ func TestHandleInput_Success(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, "hello", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil).Maybe()
-	mgr.AttachWorker(sid, w)
+	mgr.AttachWorker(context.Background(), sid, w)
 
 	env := inputEnvelope(sid, "hello")
 	err = handler.handleInput(context.Background(), env)
@@ -229,7 +229,7 @@ func TestHandleInput_RunningSession_AcceptsInput(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, "hello", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil).Maybe()
-	mgr.AttachWorker(sid, w)
+	mgr.AttachWorker(context.Background(), sid, w)
 
 	env := inputEnvelope(sid, "hello")
 	err = handler.handleInput(context.Background(), env)
@@ -251,7 +251,7 @@ func TestHandleInput_InteractionResponse_Permission(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, "", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil).Maybe()
-	mgr.AttachWorker(sid, w)
+	mgr.AttachWorker(context.Background(), sid, w)
 
 	md := map[string]any{
 		"permission_response": map[string]any{
@@ -280,7 +280,7 @@ func TestHandleInput_InteractionResponse_Question(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, "", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil).Maybe()
-	mgr.AttachWorker(sid, w)
+	mgr.AttachWorker(context.Background(), sid, w)
 
 	md := map[string]any{
 		"question_response": map[string]any{
@@ -306,7 +306,7 @@ func TestHandleInput_InteractionResponse_Elicitation(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, "", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil).Maybe()
-	mgr.AttachWorker(sid, w)
+	mgr.AttachWorker(context.Background(), sid, w)
 
 	md := map[string]any{
 		"elicitation_response": map[string]any{
@@ -351,7 +351,7 @@ func TestHandleInput_PlatformMetadataNotRouted(t *testing.T) {
 	// Normal input path: handler calls w.Input(ctx, content, nil) — third arg is nil.
 	w.On("Input", mock.Anything, "hello", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil).Maybe()
-	mgr.AttachWorker(sid, w)
+	mgr.AttachWorker(context.Background(), sid, w)
 
 	// Platform context metadata (from messaging/bridge MakeEnvelope) should NOT
 	// trigger the interaction response short-circuit.
@@ -534,7 +534,7 @@ func TestHandle_InputRoute(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, "test", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil).Maybe()
-	mgr.AttachWorker(sid, w)
+	mgr.AttachWorker(context.Background(), sid, w)
 
 	env := inputEnvelope(sid, "test")
 	err = handler.Handle(context.Background(), env)
