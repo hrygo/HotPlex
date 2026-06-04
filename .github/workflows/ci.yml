@@ -94,6 +94,8 @@ jobs:
           build-webchat: 'false'
 
       - name: Verify + Vet
+        env:
+          CGO_ENABLED: '0'
         run: go mod verify && go vet ./...
 
       - name: Determine test scope
@@ -130,6 +132,7 @@ jobs:
       - name: Run tests with race detector + coverage
         env:
           SCOPE: ${{ steps.scope.outputs.pkgs }}
+          CGO_ENABLED: '0'
         run: |
           ALL_PKGS=$(go list ./... | grep -v \
             -e 'internal/worker/proc' \
