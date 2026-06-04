@@ -192,14 +192,6 @@ func main() {
 		log.Printf("Warning: failed to copy logo.webp: %v", err)
 	}
 
-	// Copy swagger.json for Scalar API console
-	swaggerDst := filepath.Join(docsDest, "swagger", "swagger.json")
-	if err := os.MkdirAll(filepath.Dir(swaggerDst), 0o755); err != nil {
-		log.Printf("Warning: failed to create swagger output dir: %v", err)
-	} else if err := copyFile(filepath.Join("docs", "swagger", "swagger.json"), swaggerDst); err != nil {
-		log.Printf("Warning: failed to copy swagger.json: %v", err)
-	}
-
 	// Phase 3: Process discovered markdown files
 	for relPath := range discoveredFiles {
 		srcPath := filepath.Join(docsSrc, relPath)

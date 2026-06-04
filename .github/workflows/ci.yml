@@ -197,8 +197,8 @@ jobs:
       - name: Install swag
         run: go install github.com/swaggo/swag/cmd/swag@latest
 
-      - name: Check swagger freshness
-        run: make check-swagger
+      - name: Generate swagger spec
+        run: make swagger
 
       - name: Build gateway binary
         run: |

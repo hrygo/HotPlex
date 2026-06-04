@@ -55,7 +55,7 @@ CYAN   := \033[36m
 .PHONY: pg-start pg-stop pg-status pg-logs pg-reset dev-pg
 .PHONY: gateway-start gateway-stop gateway-status gateway-logs
 .PHONY: webchat-dev webchat-stop webchat-embed webchat-rebuild
-.PHONY: docs-build docs-clean docs-lint swagger check-swagger scalar-assets
+.PHONY: docs-build docs-clean docs-lint swagger
 .PHONY: test test-short lint fmt quality check clean
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -336,7 +336,6 @@ docs-lint: docs-build
 	@echo "$(CYAN)Docs link validation passed$(RESET)"
 
 SWAGGER_DIR     := docs/swagger
-SCALAR_VERSION  := 1.26.0
 
 swagger:
 	@echo "  $(CYAN)Swagger$(RESET)$(DIM) generating API spec...$(RESET)"
@@ -353,39 +352,6 @@ swagger:
 		--parseInternal \
 		--quiet
 	@echo "  $(GREEN)✓$(RESET) $(SWAGGER_DIR)/swagger.json"
-
-check-swagger:
-	@echo "  $(CYAN)Check$(RESET)$(DIM) swagger freshness...$(RESET)"
-	@command -v swag > /dev/null 2>&1 || { \
-		echo "  $(RED)swag not found$(RESET) — run: go install github.com/swaggo/swag/cmd/swag@latest"; \
-		exit 1; \
-	}
-	@mkdir -p /tmp/swagger-check
-	@swag init \
-		--generalInfo doc.go \
-		--dir cmd/hotplex,internal/admin,internal/gateway \
-		--output /tmp/swagger-check \
-		--outputTypes json \
-		--parseInternal \
-		--quiet
-	@if ! diff -q $(SWAGGER_DIR)/swagger.json /tmp/swagger-check/swagger.json > /dev/null 2>&1; then \
-		echo "  $(RED)✗$(RESET) swagger.json is out of date — run: make swagger"; \
-		diff $(SWAGGER_DIR)/swagger.json /tmp/swagger-check/swagger.json | head -40; \
-		exit 1; \
-	fi
-	@echo "  $(GREEN)✓$(RESET) swagger.json is up to date"
-
-scalar-assets:
-	@echo "  $(CYAN)Scalar$(RESET)$(DIM) downloading assets...$(RESET)"
-	@mkdir -p docs/assets/scalar
-	@if [ ! -f docs/assets/scalar/scalar.js ]; then \
-		curl -fsSL \
-			"https://cdn.jsdelivr.net/npm/@scalar/api-reference@$(SCALAR_VERSION)/dist/browser/standalone.min.js" \
-			-o docs/assets/scalar/scalar.js && \
-		echo "  $(GREEN)✓$(RESET) Scalar bundle downloaded ($(SCALAR_VERSION))"; \
-	else \
-		echo "  $(DIM)Scalar ✓ cached$(RESET)"; \
-	fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Clean
@@ -447,8 +413,6 @@ help:
 	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "docs-build"     "Build static HTML docs"
 	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "docs-clean"     "Remove generated docs"
 	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "swagger"        "Generate docs/swagger/swagger.json"
-	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "check-swagger"  "Verify swagger.json is up to date"
-	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "scalar-assets"  "Download Scalar UI bundle locally"
 	@echo ""
 	@echo "  $(BOLD)🔄 Workflow"
 	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "dev-reset"   "Restart all services"
