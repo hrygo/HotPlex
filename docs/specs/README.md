@@ -25,6 +25,7 @@
 | [pr-review-webhook-driven.md](./pr-review-webhook-driven.md) | PR Review Webhook 触发 — GitHub Webhook 驱动自动化代码审查 | implemented | 2026-05-30 | 90% |
 | [Turns-Materialized-Table-Spec.md](./Turns-Materialized-Table-Spec.md) | Turns 物化表 — eventstore 物化为独立表提升查询性能 | proposed | 2026-05-19 | 0% |
 | [API-Documentation-Hybrid-Generation-Spec.md](./API-Documentation-Hybrid-Generation-Spec.md) | API 文档混合生成 — 手写 + 自动生成方案降低维护风险 | proposed | 2026-06-03 | 0% |
+| [Observability-Spec.md](./Observability-Spec.md) | 统一可观测性体系 — OTel Native 架构，70 指标，Tracing，告警，SLO | proposed | 2026-06-04 | 0% |
 
 ### Worker 与 Session
 

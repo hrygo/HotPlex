@@ -2,7 +2,9 @@
 # HotPlex Worker Gateway - SLO Definitions
 # =============================================================================
 # Purpose: Define Service Level Objectives using OpenSLO specification
-# Based on: Observability-Design.md §5.2-5.3
+# Based on: docs/specs/Observability-Spec.md §8
+# Generated: 2026-06-04
+# Notes: All SLOs reference ACTUAL metric names from the observability spec.
 # =============================================================================
 
 apiVersion: openslo/v1
@@ -11,7 +13,7 @@ metadata:
   name: hotplex-session-creation-success-rate
   displayName: "Session Creation Success Rate"
   description: >
-    Measures the percentage of successfully created sessions versus failed attempts.
+    Measures the percentage of successfully started sessions vs failed attempts.
     Target: 99.5% success rate.
 spec:
   service: hotplex-gateway
@@ -19,56 +21,36 @@ spec:
     thresholdMetric:
       source: prometheus
       query: |
-        sum(rate(hotplex_sessions_created_total[5m])) /
-        (sum(rate(hotplex_sessions_created_total[5m])) + sum(rate(hotplex_sessions_create_errors_total[5m])))
-      # Note: Assumes hotplex_sessions_create_errors_total exists for failed sessions
-      # If only total count exists, use: sum(rate(hotplex_sessions_created_total[5m])) - sum(rate(hotplex_sessions_create_errors_total[5m]))
+        sum(rate(hotplex_session_start_attempts_total[5m]))
+          /
+        (
+          sum(rate(hotplex_session_start_attempts_total[5m]))
+            +
+          sum(rate(hotplex_session_start_errors_total[5m]))
+        )
   objectives:
     - displayName: "99.5% Success Rate"
       target: 0.995
-      slice: "status=success"
   timeWindow:
     - duration: 30d
       isRolling: true
   alerting:
     name: session-creation-slo-alert
+    burnRate:
+      - window: 1h
+        threshold: 14.4
+      - window: 6h
+        threshold: 6
     descriptions:
-      - "Session creation success rate below target"
+      - "Session creation success rate below 99.5% target"
 ---
 apiVersion: openslo/v1
 kind: SLO
 metadata:
-  name: hotplex-response-latency-p99
-  displayName: "Response Latency P99"
-  description: >
-    Measures the 99th percentile event processing latency.
-    Target: P99 < 5 seconds.
-spec:
-  service: hotplex-gateway
-  sli:
-    thresholdMetric:
-      source: prometheus
-      query: |
-        histogram_quantile(0.99, rate(hotplex_event_duration_seconds_bucket[5m]))
-  objectives:
-    - displayName: "P99 < 5s"
-      target: 5.0
-      op: lt  # Less than operator for latency SLOs
-  timeWindow:
-    - duration: 30d
-      isRolling: true
-  alerting:
-    name: latency-slo-alert
-    descriptions:
-      - "P99 response latency exceeds 5 seconds"
----
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: hotplex-availability
+  name: hotplex-worker-availability
   displayName: "Worker Availability"
   description: >
-    Measures the percentage of active workers versus total (active + crashed).
+    Measures the percentage of successful worker starts vs total starts (including crashes).
     Target: 99% worker availability.
 spec:
   service: hotplex-gateway
@@ -76,47 +58,81 @@ spec:
     thresholdMetric:
       source: prometheus
       query: |
-        sum(rate(hotplex_worker_processes_active[5m])) /
-        (sum(rate(hotplex_worker_processes_active[5m])) + sum(rate(hotplex_worker_crashes_total[5m])))
-      # Alternative if using gauge instead of rate:
-      # hotplex_worker_processes_active / (hotplex_worker_processes_active + hotplex_worker_crashes_total)
+        sum(rate(hotplex_worker_starts_total{result="success"}[5m]))
+          /
+        (
+          sum(rate(hotplex_worker_starts_total[5m]))
+            +
+          sum(rate(hotplex_worker_crashes_total[5m]))
+        )
   objectives:
     - displayName: "99% Availability"
       target: 0.99
-      slice: "status=active"
   timeWindow:
     - duration: 30d
       isRolling: true
   alerting:
     name: worker-availability-slo-alert
+    burnRate:
+      - window: 1h
+        threshold: 14.4
+      - window: 6h
+        threshold: 6
     descriptions:
-      - "Worker availability below target"
+      - "Worker availability below 99% target"
 ---
 apiVersion: openslo/v1
 kind: SLO
 metadata:
-  name: hotplex-waf-accuracy
-  displayName: "WAF Accuracy"
+  name: hotplex-worker-execution-latency-p99
+  displayName: "Worker Execution Latency P99"
   description: >
-    Measures Web Application Firewall accuracy (block rate vs false positives).
-    Target: > 99.9% accuracy.
+    Measures the 99th percentile of worker execution duration.
+    Target: P99 < 300 seconds.
 spec:
   service: hotplex-gateway
   sli:
     thresholdMetric:
       source: prometheus
       query: |
-        sum(rate(hotplex_waf_blocked_attacks_total[5m])) /
-        (sum(rate(hotplex_waf_blocked_attacks_total[5m])) + sum(rate(hotplex_waf_false_positives_total[5m])))
-      # Note: Assumes hotplex_waf_blocked_attacks_total and hotplex_waf_false_positives_total metrics exist
+        histogram_quantile(0.99,
+          rate(hotplex_worker_execution_duration_seconds_bucket[5m])
+        ) < 300
   objectives:
-    - displayName: "99.9% Accuracy"
-      target: 0.999
-      slice: "type=accuracy"
+    - displayName: "P99 < 300s"
+      target: 1.0
   timeWindow:
     - duration: 30d
       isRolling: true
   alerting:
-    name: waf-accuracy-slo-alert
+    name: worker-latency-slo-alert
     descriptions:
-      - "WAF accuracy below target"
+      - "Worker execution P99 latency exceeds 300 seconds"
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: hotplex-gateway-http-latency-p99
+  displayName: "HTTP Request Latency P99"
+  description: >
+    Measures the 99th percentile of HTTP request duration.
+    Target: P99 < 1 second.
+spec:
+  service: hotplex-gateway
+  sli:
+    thresholdMetric:
+      source: prometheus
+      query: |
+        histogram_quantile(0.99,
+          rate(http_server_request_duration_seconds_bucket[5m])
+        ) < 1
+  objectives:
+    - displayName: "P99 < 1s"
+      target: 1.0
+  timeWindow:
+    - duration: 30d
+      isRolling: true
+  alerting:
+    name: http-latency-slo-alert
+    descriptions:
+      - "HTTP request P99 latency exceeds 1 second"

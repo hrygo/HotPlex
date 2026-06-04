@@ -2,35 +2,28 @@
 # HotPlex Worker Gateway - Prometheus Alerting Rules
 # =============================================================================
 # Purpose: Define alert rules for critical system conditions
-# Based on: Observability-Design.md §5.4
-# Notes: Alerts are symptom-based, not root-cause-based
+# Based on: docs/specs/Observability-Spec.md §7
+# Generated: 2026-06-04
+# Notes: All rules reference ACTUAL metric names from the observability spec.
+#        Alerts are symptom-based, not root-cause-based.
 # =============================================================================
 
 groups:
+  # ---------------------------------------------------------------------------
+  # Session Alerts
+  # ---------------------------------------------------------------------------
   - name: hotplex-session-alerts
     interval: 30s
     rules:
-      # -----------------------------------------------------------------------------
-      # CRITICAL: Session Creation Failure Rate
-      # -----------------------------------------------------------------------------
-      # Condition: >1% failure rate for 5 minutes
-      # Severity: critical
-      # Reason: Indicates systemic issue preventing new sessions
-      # -----------------------------------------------------------------------------
-      - alert: HighSessionCreationFailureRate
+      # CRITICAL: Session creation failure rate > 1% for 5 minutes
+      - alert: SessionCreationFailureRate
         expr: |
           (
-            sum(rate(hotplex_sessions_create_errors_total[5m])) > 0
+            sum(rate(hotplex_session_start_errors_total[5m])) > 0
             and
-            sum(rate(hotplex_sessions_create_errors_total[5m])) /
-            sum(rate(hotplex_sessions_created_total[5m])) > 0.01
-          )
-          or
-          (
-            sum(rate(hotplex_errors_total{error_code="session_create_failed"}[5m])) > 0
-            and
-            sum(rate(hotplex_errors_total{error_code="session_create_failed"}[5m])) /
-            sum(rate(hotplex_sessions_created_total[5m])) > 0.01
+            sum(rate(hotplex_session_start_errors_total[5m]))
+              /
+            sum(rate(hotplex_session_start_attempts_total[5m])) > 0.01
           )
         for: 5m
         labels:
@@ -40,22 +33,35 @@ groups:
         annotations:
           summary: "Session creation failure rate exceeds 1%"
           description: >
-            Session creation is failing at elevated rate.
-            Current failure rate is {{ $value | printf "%.2f" }}%.
-            Investigate worker pool status and database connectivity.
-          runbook_url: "https://wiki.hotplex.dev/runbooks/session-creation-failures"
+            Session start is failing at elevated rate.
+            Current failure rate: {{ $value | humanizePercentage }}.
+            Check worker pool, database connectivity, and API key status.
 
-      # -----------------------------------------------------------------------------
-      # WARNING: Session Success Rate Below SLO
-      # -----------------------------------------------------------------------------
-      # Condition: Success rate < 99.5% for 5 minutes
-      # Severity: warning
-      # Reason: SLO boundary violation
-      # -----------------------------------------------------------------------------
+      # CRITICAL: Abnormal session termination (crash, zombie)
+      - alert: SessionAbnormalTermination
+        expr: |
+          rate(hotplex_session_terminated_total{reason=~"crash|zombie"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: hotplex-gateway
+          team: platform
+        annotations:
+          summary: "Session abnormally terminated (crash or zombie)"
+          description: >
+            Session(s) terminated with reason {{ $labels.reason }}.
+            Rate: {{ $value | printf "%.3f" }}/s.
+
+      # WARNING: Session success rate below SLO (99.5%)
       - alert: SessionSuccessRateBelowSLO
         expr: |
-          sum(rate(hotplex_sessions_created_total[5m])) /
-          (sum(rate(hotplex_sessions_created_total[5m])) + sum(rate(hotplex_errors_total{component="session"}[5m]))) < 0.995
+          sum(rate(hotplex_session_start_attempts_total[5m]))
+            /
+          (
+            sum(rate(hotplex_session_start_attempts_total[5m]))
+              +
+            sum(rate(hotplex_session_start_errors_total[5m]))
+          ) < 0.995
         for: 5m
         labels:
           severity: warning
@@ -64,185 +70,239 @@ groups:
         annotations:
           summary: "Session success rate below SLO target (99.5%)"
           description: >
-            Session success rate is {{ $value | printf "%.3f" }}%, below the 99.5% SLO target.
+            Current success rate: {{ $value | humanizePercentage }}.
+            Target: 99.5%.
 
-  - name: hotplex-latency-alerts
+  # ---------------------------------------------------------------------------
+  # Worker Alerts
+  # ---------------------------------------------------------------------------
+  - name: hotplex-worker-alerts
     interval: 30s
     rules:
-      # -----------------------------------------------------------------------------
-      # WARNING: High Latency (P99)
-      # -----------------------------------------------------------------------------
-      # Condition: P99 latency > 5 seconds for 5 minutes
-      # Severity: warning
-      # Reason: Degraded user experience
-      # -----------------------------------------------------------------------------
-      - alert: HighLatency
-        expr: |
-          histogram_quantile(0.99, rate(hotplex_event_duration_seconds_bucket[5m])) > 5
-        for: 5m
-        labels:
-          severity: warning
-          service: hotplex-gateway
-          team: platform
-        annotations:
-          summary: "P99 event processing latency exceeds 5 seconds"
-          description: >
-            Event processing P99 latency is {{ $value | printf "%.2f" }}s.
-            Users may experience slow response times.
-          runbook_url: "https://wiki.hotplex.dev/runbooks/high-latency"
-
-      # -----------------------------------------------------------------------------
-      # WARNING: High Latency (P95)
-      # -----------------------------------------------------------------------------
-      # Condition: P95 latency > 2 seconds for 5 minutes
-      # Severity: warning
-      # Reason: Noticeable latency degradation
-      # -----------------------------------------------------------------------------
-      - alert: HighLatencyP95
-        expr: |
-          histogram_quantile(0.95, rate(hotplex_event_duration_seconds_bucket[5m])) > 2
-        for: 5m
-        labels:
-          severity: warning
-          service: hotplex-gateway
-        annotations:
-          summary: "P95 event processing latency exceeds 2 seconds"
-          description: >
-            Event processing P95 latency is {{ $value | printf "%.2f" }}s.
-
-  - name: hotplex-alerts
-    interval: 30s
-    rules:
-      # -----------------------------------------------------------------------------
-      # WARNING: Worker Crash Rate Elevated
-      # -----------------------------------------------------------------------------
-      # Condition: Worker crash rate > 0.1/sec for 2 minutes
-      # Severity: warning
-      # Reason: Indicates unstable worker processes
-      # -----------------------------------------------------------------------------
+      # WARNING: Worker crash rate > 1% of starts for 5 minutes
       - alert: HighWorkerCrashRate
         expr: |
-          sum(rate(hotplex_worker_crashes_total[5m])) > 0.1
-        for: 2m
-        labels:
-          severity: warning
-          service: hotplex-gateway
-          team: platform
-        annotations:
-          summary: "Worker crash rate is elevated"
-          description: >
-            Worker crash rate is {{ $value | printf "%.3f" }} crashes/second.
-            Investigate worker logs and resource constraints.
-          runbook_url: "https://wiki.hotplex.dev/runbooks/worker-crashes"
-
-      # -----------------------------------------------------------------------------
-      # CRITICAL: Worker Pool Exhausted
-      # -----------------------------------------------------------------------------
-      # Condition: Pool utilization >= 95% for 10 minutes
-      # Severity: critical
-      # Reason: No capacity for new sessions
-      # -----------------------------------------------------------------------------
-      - alert: WorkerPoolExhausted
-        expr: |
-          hotplex_worker_processes_active / hotplex_worker_processes_max >= 0.95
-        for: 10m
-        labels:
-          severity: critical
-          service: hotplex-gateway
-          team: platform
-        annotations:
-          summary: "Worker pool at 95% capacity"
-          description: >
-            Worker pool utilization is {{ $value | printf "%.1f" }}%.
-            New sessions may be rejected. Consider scaling worker pool.
-          runbook_url: "https://wiki.hotplex.dev/runbooks/worker-pool-exhausted"
-
-      # -----------------------------------------------------------------------------
-      # WARNING: High Worker Memory Usage
-      # -----------------------------------------------------------------------------
-      # Condition: Worker memory > 90% of limit for 5 minutes
-      # Severity: warning
-      # Reason: Risk of OOM kills
-      # -----------------------------------------------------------------------------
-      - alert: HighWorkerMemoryUsage
-        expr: |
-          hotplex_worker_memory_bytes / hotplex_worker_memory_limit > 0.9
+          sum(rate(hotplex_worker_crashes_total[5m]))
+            /
+          sum(rate(hotplex_worker_starts_total[5m])) > 0.01
         for: 5m
         labels:
           severity: warning
           service: hotplex-gateway
+          team: platform
         annotations:
-          summary: "Worker memory usage above 90%"
+          summary: "Worker crash rate is elevated (> 1%)"
           description: >
-            Worker memory usage is at {{ $value | printf "%.1f" }}%.
-            Risk of OOM kills if sustained.
+            Crash rate: {{ $value | humanizePercentage }}.
+            Check worker logs and resource constraints.
 
-      # -----------------------------------------------------------------------------
-      # CRITICAL: No Active Workers
-      # -----------------------------------------------------------------------------
-      # Condition: No active workers for 1 minute
-      # Severity: critical
-      # Reason: Complete service outage
-      # -----------------------------------------------------------------------------
+      # CRITICAL: No active workers for 1 minute — complete outage
       - alert: NoActiveWorkers
         expr: |
-          sum(hotplex_worker_processes_active) == 0
+          sum(hotplex_worker_running) == 0
         for: 1m
         labels:
           severity: critical
           service: hotplex-gateway
           team: platform
         annotations:
-          summary: "No active workers in pool"
+          summary: "No active workers in pool — service outage"
           description: >
-            All workers have crashed or been terminated.
-            Service is unable to process sessions.
-          runbook_url: "https://wiki.hotplex.dev/runbooks/no-active-workers"
+            All workers are stopped. Service cannot process sessions.
+            Check gateway logs and worker binary availability.
 
-  - name: hotplex-connection-alerts
+      # WARNING: High worker memory usage (> 90% of limit)
+      - alert: HighWorkerMemoryUsage
+        expr: |
+          hotplex_worker_memory_bytes > 483183820  # 90% of 512MB
+        for: 5m
+        labels:
+          severity: warning
+          service: hotplex-gateway
+        annotations:
+          summary: "Worker memory usage above 90% of 512MB"
+          description: >
+            Worker {{ $labels.worker_type }} using {{ $value | humanize }}B.
+            Risk of OOM kill if sustained.
+
+  # ---------------------------------------------------------------------------
+  # Pool Alerts
+  # ---------------------------------------------------------------------------
+  - name: hotplex-pool-alerts
     interval: 30s
     rules:
-      # -----------------------------------------------------------------------------
-      # WARNING: High WebSocket Connection Churn
-      # -----------------------------------------------------------------------------
-      # Condition: Connection close rate > 10% of connection rate for 5 minutes
-      # Severity: warning
-      # Reason: May indicate unstable clients or network issues
-      # -----------------------------------------------------------------------------
+      # CRITICAL: Pool utilization >= 95% for 10 minutes
+      - alert: PoolExhaustion
+        expr: |
+          hotplex_pool_utilization_ratio >= 0.95
+        for: 10m
+        labels:
+          severity: critical
+          service: hotplex-gateway
+          team: platform
+        annotations:
+          summary: "Worker pool at 95% capacity — new sessions rejected"
+          description: >
+            Pool utilization: {{ $value | humanizePercentage }}.
+            New sessions are being rejected. Consider scaling.
+
+      # WARNING: Pool double-release bugs detected
+      - alert: PoolDoubleReleaseBug
+        expr: |
+          increase(hotplex_pool_release_errors_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: hotplex-gateway
+        annotations:
+          summary: "Pool double-release error detected (code bug)"
+          description: >
+            {{ $value }} double-release errors in the last hour.
+            This indicates a mutex/lifecycle bug in pool management.
+
+  # ---------------------------------------------------------------------------
+  # Latency Alerts
+  # ---------------------------------------------------------------------------
+  - name: hotplex-latency-alerts
+    interval: 30s
+    rules:
+      # WARNING: Worker execution P99 > 300s for 10 minutes
+      - alert: HighWorkerLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            rate(hotplex_worker_execution_duration_seconds_bucket[5m])
+          ) > 300
+        for: 10m
+        labels:
+          severity: warning
+          service: hotplex-gateway
+          team: platform
+        annotations:
+          summary: "Worker execution P99 latency exceeds 300s"
+          description: >
+            P99 worker latency: {{ $value | printf "%.1f" }}s.
+            Workers may be stuck or overloaded.
+
+      # WARNING: Init handshake P99 > 5s for 5 minutes
+      - alert: HighInitLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            rate(hotplex_gateway_init_handshake_duration_seconds_bucket[5m])
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: hotplex-gateway
+        annotations:
+          summary: "WS init handshake P99 latency exceeds 5s"
+          description: >
+            Init handshake P99: {{ $value | printf "%.1f" }}s.
+            Check session manager and database performance.
+
+      # WARNING: HTTP server P99 > 1s for 5 minutes
+      - alert: HighHTTPLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            rate(http_server_request_duration_seconds_bucket[5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: hotplex-gateway
+        annotations:
+          summary: "HTTP server P99 latency exceeds 1s"
+          description: >
+            HTTP P99 latency: {{ $value | printf "%.2f" }}s.
+            Check downstream dependencies.
+
+  # ---------------------------------------------------------------------------
+  # Gateway Alerts
+  # ---------------------------------------------------------------------------
+  - name: hotplex-gateway-alerts
+    interval: 30s
+    rules:
+      # WARNING: Delta drop rate > 10/s for 5 minutes (severe backpressure)
+      - alert: HighDeltaDropRate
+        expr: |
+          rate(hotplex_gateway_deltas_dropped_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: hotplex-gateway
+          team: platform
+        annotations:
+          summary: "Delta event drop rate exceeds 10/s (severe backpressure)"
+          description: >
+            Drop rate: {{ $value | printf "%.1f" }}/s.
+            Clients may experience missing streaming content.
+
+      # WARNING: Error rate > 1/s for 5 minutes
+      - alert: HighErrorRate
+        expr: |
+          rate(hotplex_gateway_errors_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: hotplex-gateway
+        annotations:
+          summary: "Gateway error rate exceeds 1/s"
+          description: >
+            Error rate: {{ $value | printf "%.2f" }}/s.
+            Error code: {{ $labels.error_code }}.
+
+      # WARNING: High WebSocket connection churn (> 10% close rate)
       - alert: HighConnectionChurn
         expr: |
-          sum(rate(hotplex_ws_connections_closed_total[5m])) /
-          sum(rate(hotplex_ws_connections_total[5m])) > 0.1
+          rate(hotplex_gateway_messages_total{direction="incoming",event_type="close"}[5m])
+            /
+          rate(hotplex_gateway_messages_total{direction="incoming"}[5m]) > 0.1
         for: 5m
         labels:
           severity: warning
           service: hotplex-gateway
         annotations:
-          summary: "High WebSocket connection churn rate"
+          summary: "High WebSocket connection churn detected"
           description: >
-            Connection churn rate is {{ $value | printf "%.1f" }}%.
-            Many connections are being closed and reestablished.
+            Connection close rate is high. Clients may be unstable.
 
-  - name: hotplex-error-alerts
+  # ---------------------------------------------------------------------------
+  # Cron Alerts
+  # ---------------------------------------------------------------------------
+  - name: hotplex-cron-alerts
     interval: 30s
     rules:
-      # -----------------------------------------------------------------------------
-      # WARNING: High Error Rate by Component
-      # -----------------------------------------------------------------------------
-      # Condition: Error rate > 1% for any component for 5 minutes
-      # Severity: warning
-      # Reason: Component-specific issue
-      # -----------------------------------------------------------------------------
-      - alert: HighErrorRateByComponent
+      # WARNING: Any cron job failure in the last 10 minutes
+      - alert: CronJobFailures
         expr: |
-          sum(rate(hotplex_errors_total[5m])) by (component, error_code) /
-          sum(rate(hotplex_requests_total[5m])) by (component) > 0.01
+          rate(hotplex_cron_errors_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: hotplex-gateway
+        annotations:
+          summary: "Cron job {{ $labels.job_name }} is failing"
+          description: >
+            Error type: {{ $labels.error_type }}.
+            Job: {{ $labels.job_name }}.
+
+  # ---------------------------------------------------------------------------
+  # Brain LLM Alerts
+  # ---------------------------------------------------------------------------
+  - name: hotplex-brain-alerts
+    interval: 30s
+    rules:
+      # WARNING: Brain LLM error rate > 0.1/s for 5 minutes
+      - alert: BrainHighErrorRate
+        expr: |
+          rate(hotplex_brain_errors_total[5m]) > 0.1
         for: 5m
         labels:
           severity: warning
           service: hotplex-gateway
         annotations:
-          summary: "High error rate for component {{ $labels.component }}"
+          summary: "Brain LLM error rate is elevated"
           description: >
-            Component {{ $labels.component }} error code {{ $labels.error_code }}
-            has error rate of {{ $value | printf "%.2f" }}%.
+            Error rate: {{ $value | printf "%.2f" }}/s.
+            Model: {{ $labels.model }}.
+
+
