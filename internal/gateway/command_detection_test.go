@@ -136,7 +136,7 @@ func TestHandleInput_HelpCommand_DoesNotReachWorker(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil)
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, serverConn := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -166,7 +166,7 @@ func TestHandleInput_ControlCommand_GC(t *testing.T) {
 
 	w := new(mockWorkerForHandler)
 	w.On("Terminate", mock.Anything).Return(nil)
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -194,7 +194,7 @@ func TestHandleInput_ControlCommand_Reset(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("ResetContext", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil)
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -222,7 +222,7 @@ func TestHandleInput_ControlCommand_DoesNotReachWorker(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	// Only expect Terminate (called by handleGC), never Input.
 	w.On("Terminate", mock.Anything).Return(nil)
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -247,7 +247,7 @@ func TestHandleInput_ControlCommand_NaturalLanguageGC(t *testing.T) {
 
 	w := new(mockWorkerForHandler)
 	w.On("Terminate", mock.Anything).Return(nil)
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -281,7 +281,7 @@ func TestHandleInput_WorkerCommand_Context(t *testing.T) {
 			"percentage":  float64(5),
 		},
 	}
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -306,7 +306,7 @@ func TestHandleInput_WorkerCommand_Compact(t *testing.T) {
 	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
 
 	w := &mockCommanderWorker{}
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -329,7 +329,7 @@ func TestHandleInput_WorkerCommand_DoesNotSendAsPlainInput(t *testing.T) {
 	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
 
 	w := &mockCommanderWorker{}
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -357,7 +357,7 @@ func TestHandleInput_NormalText_PassesToWorker(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, "hello world", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil)
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -383,7 +383,7 @@ func TestHandleInput_NormalText_LooksLikeCommandButIsNot(t *testing.T) {
 	// "please help me with this" contains "help" but is NOT a help command.
 	w.On("Input", mock.Anything, "please help me with this", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil)
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })
@@ -409,7 +409,7 @@ func TestHandleInput_SlashPrefixNotInMaps_PassesToWorker(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	w.On("Input", mock.Anything, "/unknown_command", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil)
-	require.NoError(t, mgr.AttachWorker(sid, w))
+	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
 	clientConn, _ := newTestWSConnPair(t)
 	t.Cleanup(func() { clientConn.Close() })

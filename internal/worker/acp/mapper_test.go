@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -33,7 +34,7 @@ func TestMapNotification_AgentMessageChunk(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	// First chunk: message.start + message.delta
 	require.Len(t, envs, 2)
 	require.Equal(t, events.MessageStart, envs[0].Event.Type)
@@ -43,7 +44,7 @@ func TestMapNotification_AgentMessageChunk(t *testing.T) {
 	require.Equal(t, "Hello", delta.Content)
 
 	// Second chunk: only message.delta (no message.start)
-	envs2 := m.MapNotification(notif)
+	envs2 := m.MapNotification(context.Background(), notif)
 	require.Len(t, envs2, 1)
 	require.Equal(t, events.MessageDelta, envs2[0].Event.Type)
 }
@@ -66,7 +67,7 @@ func TestMapNotification_AgentThoughtChunk(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Len(t, envs, 1)
 	require.Equal(t, events.Reasoning, envs[0].Event.Type)
 
@@ -95,7 +96,7 @@ func TestMapNotification_ToolCall(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Len(t, envs, 1)
 	require.Equal(t, events.ToolCall, envs[0].Event.Type)
 
@@ -124,7 +125,7 @@ func TestMapNotification_ToolCallUpdate_InProgress(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Len(t, envs, 1)
 	require.Equal(t, events.ToolUpdate, envs[0].Event.Type)
 }
@@ -147,7 +148,7 @@ func TestMapNotification_ToolCallUpdate_Completed(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Len(t, envs, 1)
 	require.Equal(t, events.ToolResult, envs[0].Event.Type)
 
@@ -177,7 +178,7 @@ func TestMapNotification_Plan(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Len(t, envs, 1)
 	require.Equal(t, events.Plan, envs[0].Event.Type)
 
@@ -205,7 +206,7 @@ func TestMapNotification_ModeUpdate(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Len(t, envs, 1)
 	require.Equal(t, events.ModeUpdate, envs[0].Event.Type)
 
@@ -230,7 +231,7 @@ func TestMapNotification_ConfigOptionUpdate(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Len(t, envs, 1)
 	require.Equal(t, events.Raw, envs[0].Event.Type)
 
@@ -255,7 +256,7 @@ func TestMapNotification_UserMessageChunk_Ignored(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Nil(t, envs)
 }
 
@@ -364,7 +365,7 @@ func TestMapNotification_NonSessionUpdate(t *testing.T) {
 		Params:  mustMarshal(map[string]any{}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Nil(t, envs)
 }
 

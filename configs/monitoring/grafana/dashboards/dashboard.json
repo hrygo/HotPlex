@@ -105,7 +105,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "hotplex_sessions_active",
+          "expr": "hotplex_session_active",
           "instant": true,
           "legendFormat": "Active Sessions",
           "range": false,
@@ -196,7 +196,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(hotplex_events_sent_total[1m])) by (kind)",
+          "expr": "sum(rate(hotplex_gateway_messages_total[1m])) by (event_type)",
           "instant": false,
           "legendFormat": "{{kind}}",
           "range": true,
@@ -341,7 +341,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, rate(hotplex_event_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, rate(hotplex_worker_execution_duration_seconds_bucket[5m]))",
           "instant": false,
           "legendFormat": "P50",
           "range": true,
@@ -353,7 +353,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, rate(hotplex_event_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, rate(hotplex_worker_execution_duration_seconds_bucket[5m]))",
           "hide": false,
           "instant": false,
           "legendFormat": "P95",
@@ -366,7 +366,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, rate(hotplex_event_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.99, rate(hotplex_worker_execution_duration_seconds_bucket[5m]))",
           "hide": false,
           "instant": false,
           "legendFormat": "P99",
@@ -557,9 +557,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(hotplex_errors_total[5m])) by (component, error_code)",
+          "expr": "sum(rate(hotplex_gateway_errors_total[5m])) by (error_code)",
           "instant": false,
-          "legendFormat": "{{component}} - {{error_code}}",
+          "legendFormat": "{{error_code}}",
           "range": true,
           "refId": "A"
         }
@@ -626,7 +626,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(hotplex_sessions_created_total[5m])) / (sum(rate(hotplex_sessions_created_total[5m])) + sum(rate(hotplex_errors_total{component=\"session\"}[5m])))",
+          "expr": "sum(rate(hotplex_session_created_total[5m])) / (sum(rate(hotplex_session_created_total[5m])) + sum(rate(hotplex_session_start_errors_total[5m])))",
           "instant": true,
           "legendFormat": "Session Success Rate",
           "range": false,
@@ -695,7 +695,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(hotplex_worker_processes_active) / (sum(hotplex_worker_processes_active) + sum(rate(hotplex_worker_crashes_total[5m])))",
+          "expr": "sum(hotplex_worker_running) / (sum(hotplex_worker_running) + sum(rate(hotplex_worker_crashes_total[5m])))",
           "instant": true,
           "legendFormat": "Worker Availability",
           "range": false,
@@ -764,7 +764,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(sum(hotplex_worker_processes_active) / sum(hotplex_worker_processes_max)) * 100",
+          "expr": "hotplex_pool_utilization_ratio * 100",
           "instant": true,
           "legendFormat": "Pool Utilization",
           "range": false,
@@ -833,7 +833,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, rate(hotplex_event_duration_seconds_bucket[5m])) * 1000",
+          "expr": "histogram_quantile(0.99, rate(hotplex_worker_execution_duration_seconds_bucket[5m])) * 1000",
           "instant": true,
           "legendFormat": "P99 Latency",
           "range": false,
@@ -907,7 +907,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(hotplex_errors_total, component)",
+        "definition": "label_values(hotplex_gateway_errors_total, error_code)",
         "hide": 0,
         "includeAll": true,
         "label": "Component",
@@ -915,7 +915,7 @@
         "name": "component",
         "options": [],
         "query": {
-          "query": "label_values(hotplex_errors_total, component)",
+          "query": "label_values(hotplex_gateway_errors_total, error_code)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,

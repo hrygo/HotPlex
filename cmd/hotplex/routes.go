@@ -5,13 +5,14 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/hrygo/hotplex/internal/admin"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/docs"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
 )
 
@@ -130,7 +131,7 @@ func setupRoutes(
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	adminMux.Handle("GET /admin/metrics", promhttp.Handler())
+	adminMux.Handle("GET /admin/metrics", observability.MetricsHandler())
 
 	adminMux.HandleFunc("GET /admin/stats", adminAPI.HandleStats)
 	adminMux.HandleFunc("GET /admin/health/workers", adminAPI.HandleWorkerHealth)
@@ -208,5 +209,10 @@ func setupRoutes(
 
 	// Webchat SPA is NOT registered on the mux directly.
 	// Instead, the caller wraps the mux with a fallback handler below.
-	return adminAPI.Middleware(adminMux)
+	h := adminAPI.Middleware(adminMux)
+	return otelhttp.NewHandler(h, "hotplex-gateway",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return r.Method + " " + r.URL.Path
+		}),
+	)
 }

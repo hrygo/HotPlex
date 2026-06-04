@@ -320,8 +320,8 @@ type mockTrigger struct {
 }
 
 func (m *mockTrigger) TriggerByName(_ context.Context, _ string, extra map[string]string) error {
-	m.triggered.Add(1)
 	m.mu.Lock()
+	m.triggered.Add(1)
 	m.lastExtra = extra
 	m.mu.Unlock()
 	return nil

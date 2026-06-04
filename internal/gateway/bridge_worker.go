@@ -9,10 +9,13 @@ import (
 
 	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/eventstore"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/noop"
 	"github.com/hrygo/hotplex/pkg/events"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // forwardOpts configures the forwardEvents goroutine behavior.
@@ -52,7 +55,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 
 	start := time.Now()
 	defer func() {
-		metrics.WorkerCreationDuration.WithLabelValues(string(params.wt)).Observe(time.Since(start).Seconds())
+		observability.WorkerCreationDuration().Record(params.ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(params.wt))))
 	}()
 
 	w, err := b.wf.NewWorker(params.wt)
@@ -64,7 +67,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		noopw.SetConn(noop.NewConn(sid, params.workerInfo.UserID))
 	}
 
-	if err := b.sm.AttachWorker(sid, w); err != nil {
+	if err := b.sm.AttachWorker(params.ctx, sid, w); err != nil {
 		if attachErrFn != nil {
 			attachErrFn(w, err)
 		}
@@ -160,6 +163,14 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		return false
 	}
 
+	if si.State == events.StateTerminated {
+		if err := b.sm.Transition(context.Background(), p.sessionID, events.StateRunning); err != nil {
+			b.log.Error("bridge: pre-attach transition for fresh start", "session_id", p.sessionID, "err", err)
+			return false
+		}
+		si.State = events.StateRunning
+	}
+
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, p.workDir, si)
 
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
@@ -172,8 +183,10 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		injectExclude: nil, // resolved by injectAgentConfig
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
-			if err := b.sm.Transition(ctx, p.sessionID, events.StateRunning); err != nil {
-				b.log.Warn("bridge: transition to running for fresh start", "session_id", p.sessionID, "err", err)
+			if si.State != events.StateRunning {
+				if err := b.sm.Transition(ctx, p.sessionID, events.StateRunning); err != nil {
+					b.log.Warn("bridge: transition to running for fresh start", "session_id", p.sessionID, "err", err)
+				}
 			}
 			if err := w.Start(ctx, info); err != nil {
 				b.log.Warn("bridge: fresh worker start failed", "session_id", p.sessionID, "err", err)

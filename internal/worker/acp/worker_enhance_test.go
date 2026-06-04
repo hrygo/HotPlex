@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -118,7 +119,7 @@ func TestUpdateUsage_AccumulatesTokens(t *testing.T) {
 		"contextSize":   200000,
 		"contextUsed":   5000,
 	})
-	m.updateUsage(raw)
+	m.updateUsage(context.Background(), raw)
 
 	snap := m.LastUsage()
 	require.Equal(t, 100, snap.InputTokens)
@@ -146,7 +147,7 @@ func TestUpdateUsage_AccumulatesAcrossMultiple(t *testing.T) {
 			"outputTokens":  tc.output,
 			"totalTokens":   tc.total,
 		})
-		m.updateUsage(raw)
+		m.updateUsage(context.Background(), raw)
 	}
 
 	snap := m.LastUsage()
@@ -166,7 +167,7 @@ func TestUpdateUsage_CostAccumulation(t *testing.T) {
 			"currency": "USD",
 		},
 	})
-	m.updateUsage(raw)
+	m.updateUsage(context.Background(), raw)
 
 	snap := m.LastUsage()
 	require.NotNil(t, snap.Cost)
@@ -183,7 +184,7 @@ func TestUpdateUsage_CostMultipleAccumulates(t *testing.T) {
 			"sessionUpdate": "usage_update",
 			"cost":          map[string]any{"amount": amt, "currency": "USD"},
 		})
-		m.updateUsage(raw)
+		m.updateUsage(context.Background(), raw)
 	}
 
 	snap := m.LastUsage()
@@ -194,7 +195,7 @@ func TestUpdateUsage_InvalidJSON_Skipped(t *testing.T) {
 	t.Parallel()
 	m := newTestMapper()
 	// Should not panic on malformed update.
-	m.updateUsage(json.RawMessage(`{bad json`))
+	m.updateUsage(context.Background(), json.RawMessage(`{bad json`))
 	snap := m.LastUsage()
 	require.Equal(t, 0, snap.InputTokens)
 }
@@ -205,11 +206,11 @@ func TestUpdateUsage_ContextSizeOverwrites(t *testing.T) {
 
 	// Context size is absolute snapshot, not cumulative.
 	raw1 := mustMarshal(map[string]any{"sessionUpdate": "usage_update", "contextSize": 100})
-	m.updateUsage(raw1)
+	m.updateUsage(context.Background(), raw1)
 	require.Equal(t, 100, m.LastUsage().ContextSize)
 
 	raw2 := mustMarshal(map[string]any{"sessionUpdate": "usage_update", "contextSize": 200})
-	m.updateUsage(raw2)
+	m.updateUsage(context.Background(), raw2)
 	require.Equal(t, 200, m.LastUsage().ContextSize)
 }
 
@@ -221,7 +222,7 @@ func TestReset_ClearsUsage(t *testing.T) {
 		"sessionUpdate": "usage_update",
 		"inputTokens":   500,
 	})
-	m.updateUsage(raw)
+	m.updateUsage(context.Background(), raw)
 	require.Equal(t, 500, m.LastUsage().InputTokens)
 
 	m.Reset()
@@ -252,7 +253,7 @@ func TestBuildStats_IncludesUsageSnapshot(t *testing.T) {
 		"contextUsed":   25000,
 		"cost":          map[string]any{"amount": 0.42, "currency": "USD"},
 	})
-	m.updateUsage(raw)
+	m.updateUsage(context.Background(), raw)
 
 	// Build stats from a prompt result.
 	stats := m.buildStats(&PromptResult{
@@ -309,7 +310,7 @@ func TestMapNotification_UsageUpdate_NoEnvelopes(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Nil(t, envs) // usage_update returns nil envelopes, data is internal.
 
 	// But usage was accumulated.

@@ -95,6 +95,10 @@ type Envelope struct {
 	SessionID string   `json:"session_id"`
 	Timestamp int64    `json:"timestamp"`
 	Event     Event    `json:"event"`
+	// Metadata carries opaque metadata injected by the gateway
+	// (e.g., trace_id for distributed tracing context propagation).
+	// TODO: inject trace_id via gateway hub.SendToSession (hub.go)
+	Metadata map[string]any `json:"metadata,omitempty"`
 	// OwnerID is the authenticated user who owns this envelope.
 	// Set by the gateway at init time and used for ownership validation.
 	// Not serialized over the wire.
@@ -113,6 +117,9 @@ func Clone(env *Envelope) *Envelope {
 	c := *env
 	if m, ok := env.Event.Data.(map[string]any); ok && m != nil {
 		c.Event.Data = deepCopyMap(m)
+	}
+	if env.Metadata != nil {
+		c.Metadata = deepCopyMap(env.Metadata)
 	}
 	return &c
 }

@@ -453,7 +453,7 @@ func TestMapNotification_UnknownUpdateType_Skipped(t *testing.T) {
 		}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Nil(t, envs)
 }
 
@@ -467,7 +467,7 @@ func TestMapNotification_NonSessionUpdate_Skipped(t *testing.T) {
 		Params:  mustMarshal(map[string]any{}),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Nil(t, envs)
 }
 
@@ -481,7 +481,7 @@ func TestMapNotification_MalformedParams_Skipped(t *testing.T) {
 		Params:  json.RawMessage(`{invalid}`),
 	}
 
-	envs := m.MapNotification(notif)
+	envs := m.MapNotification(context.Background(), notif)
 	require.Nil(t, envs)
 }
 

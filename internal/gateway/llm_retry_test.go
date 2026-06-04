@@ -31,14 +31,14 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 
 	t.Run("disabled", func(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(false, nil), log)
-		ok, attempt := ctrl.ShouldRetry("s1", nil)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", nil)
 		assert.False(t, ok)
 		assert.Zero(t, attempt)
 	})
 
 	t.Run("nil error data", func(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
-		ok, attempt := ctrl.ShouldRetry("s1", nil)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", nil)
 		assert.False(t, ok)
 		assert.Zero(t, attempt)
 	})
@@ -46,7 +46,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 	t.Run("no match", func(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
 		errData := &events.ErrorData{Message: "normal response, no error"}
-		ok, attempt := ctrl.ShouldRetry("s1", errData)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.False(t, ok)
 		assert.Zero(t, attempt)
 	})
@@ -54,7 +54,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 	t.Run("429 rate limit in error message", func(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
 		errData := &events.ErrorData{Message: "API rate limit exceeded"}
-		ok, attempt := ctrl.ShouldRetry("s1", errData)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.True(t, ok)
 		assert.Equal(t, 1, attempt)
 	})
@@ -62,7 +62,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 	t.Run("529 overloaded in error data", func(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
 		errData := &events.ErrorData{Message: "service overloaded"}
-		ok, attempt := ctrl.ShouldRetry("s1", errData)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.True(t, ok)
 		assert.Equal(t, 1, attempt)
 	})
@@ -70,7 +70,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 	t.Run("network error code", func(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
 		errData := &events.ErrorData{Code: events.ErrorCode("ECONNREFUSED")}
-		ok, attempt := ctrl.ShouldRetry("s1", errData)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.True(t, ok)
 		assert.Equal(t, 1, attempt)
 	})
@@ -78,7 +78,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 	t.Run("internal error in code", func(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
 		errData := &events.ErrorData{Code: events.ErrorCode("INTERNAL_ERROR")}
-		ok, attempt := ctrl.ShouldRetry("s1", errData)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.True(t, ok)
 		assert.Equal(t, 1, attempt)
 	})
@@ -91,7 +91,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 		// The pattern `(500|502|503)` matching in text is the old (buggy) behavior.
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
 		// No error event = no retry, regardless of what turn output contained
-		ok, _ := ctrl.ShouldRetry("s1", nil)
+		ok, _ := ctrl.ShouldRetry(context.Background(), "s1", nil)
 		assert.False(t, ok, "no error event means no retry")
 	})
 
@@ -99,7 +99,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 		cfg := makeCfg(true, []string{`(?i)quota exceeded`})
 		ctrl := NewLLMRetryController(cfg, log)
 		errData := &events.ErrorData{Message: "you have quota exceeded today"}
-		ok, attempt := ctrl.ShouldRetry("s1", errData)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.True(t, ok)
 		assert.Equal(t, 1, attempt)
 	})
@@ -108,7 +108,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 		cfg := makeCfg(true, []string{`(?i)quota exceeded`})
 		ctrl := NewLLMRetryController(cfg, log)
 		errData := &events.ErrorData{Message: "normal request processed"}
-		ok, _ := ctrl.ShouldRetry("s1", errData)
+		ok, _ := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.False(t, ok)
 	})
 
@@ -116,19 +116,19 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
 		errData := &events.ErrorData{Message: "rate limit error"}
 		// Attempt 1
-		ok1, attempt1 := ctrl.ShouldRetry("s1", errData)
+		ok1, attempt1 := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		require.True(t, ok1)
 		assert.Equal(t, 1, attempt1)
 		// Attempt 2
-		ok2, attempt2 := ctrl.ShouldRetry("s1", errData)
+		ok2, attempt2 := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		require.True(t, ok2)
 		assert.Equal(t, 2, attempt2)
 		// Attempt 3
-		ok3, attempt3 := ctrl.ShouldRetry("s1", errData)
+		ok3, attempt3 := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		require.True(t, ok3)
 		assert.Equal(t, 3, attempt3)
 		// Attempt 4 - exhausted
-		ok4, _ := ctrl.ShouldRetry("s1", errData)
+		ok4, _ := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.False(t, ok4)
 	})
 
@@ -137,10 +137,10 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 		errData := &events.ErrorData{Message: "error 429"}
 		// Exhaust s1
 		for i := 0; i < 4; i++ {
-			ctrl.ShouldRetry("s1", errData)
+			ctrl.ShouldRetry(context.Background(), "s1", errData)
 		}
 		// s2 should start fresh at attempt 1
-		ok, attempt := ctrl.ShouldRetry("s2", errData)
+		ok, attempt := ctrl.ShouldRetry(context.Background(), "s2", errData)
 		assert.True(t, ok)
 		assert.Equal(t, 1, attempt)
 	})
@@ -148,7 +148,7 @@ func TestLLMRetryController_ShouldRetry(t *testing.T) {
 	t.Run("case insensitive", func(t *testing.T) {
 		ctrl := NewLLMRetryController(makeCfg(true, nil), log)
 		errData := &events.ErrorData{Message: "TOO MANY REQUESTS"}
-		ok, _ := ctrl.ShouldRetry("s1", errData)
+		ok, _ := ctrl.ShouldRetry(context.Background(), "s1", errData)
 		assert.True(t, ok)
 	})
 }
@@ -213,15 +213,15 @@ func TestLLMRetryController_RecordSuccess(t *testing.T) {
 	errData := &events.ErrorData{Message: "429 error"}
 
 	// Build up attempts
-	ctrl.ShouldRetry("s1", errData)
-	ctrl.ShouldRetry("s1", errData)
-	ctrl.ShouldRetry("s1", errData)
+	ctrl.ShouldRetry(context.Background(), "s1", errData)
+	ctrl.ShouldRetry(context.Background(), "s1", errData)
+	ctrl.ShouldRetry(context.Background(), "s1", errData)
 
 	// Record success resets counter
 	ctrl.RecordSuccess("s1")
 
 	// Next retry should be attempt 1 again
-	ok, attempt := ctrl.ShouldRetry("s1", errData)
+	ok, attempt := ctrl.ShouldRetry(context.Background(), "s1", errData)
 	assert.True(t, ok)
 	assert.Equal(t, 1, attempt)
 }
@@ -335,7 +335,7 @@ func TestLLMRetryController_ConcurrentShouldRetryAndUpdateConfig(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for ctx.Err() == nil {
-			ctrl.ShouldRetry("session-1", &events.ErrorData{Message: "500 server error"})
+			ctrl.ShouldRetry(context.Background(), "session-1", &events.ErrorData{Message: "500 server error"})
 		}
 	}()
 

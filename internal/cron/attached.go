@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
 	"time"
 
-	"github.com/hrygo/hotplex/internal/metrics"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -52,7 +54,7 @@ func (h *AttachedSessionHandler) Execute(ctx context.Context, job *CronJob) erro
 
 	info, err := h.router.GetSessionInfo(ctx, sid)
 	if err != nil {
-		metrics.CronAttachedTotal.WithLabelValues("session_not_found").Inc()
+		observability.CronAttached().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "session_not_found")))
 		return fmt.Errorf("callback: session %s not found: %w", sid, err)
 	}
 
@@ -65,7 +67,7 @@ func (h *AttachedSessionHandler) Execute(ctx context.Context, job *CronJob) erro
 	switch info.State {
 	case events.StateRunning:
 		if err := h.router.InjectInput(ctx, sid, prompt, metadata); err != nil {
-			metrics.CronAttachedTotal.WithLabelValues("inject_failed").Inc()
+			observability.CronAttached().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "inject_failed")))
 			return fmt.Errorf("callback: inject into running session: %w", err)
 		}
 		h.log.Info("callback: injected into running session",
@@ -73,25 +75,25 @@ func (h *AttachedSessionHandler) Execute(ctx context.Context, job *CronJob) erro
 
 	case events.StateIdle, events.StateTerminated:
 		if err := h.router.ResumeAndInput(ctx, sid, info.WorkDir, prompt, metadata); err != nil {
-			metrics.CronAttachedTotal.WithLabelValues("resume_failed").Inc()
+			observability.CronAttached().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "resume_failed")))
 			return fmt.Errorf("callback: resume session %s: %w", sid, err)
 		}
 		h.log.Info("callback: resumed and injected",
 			"session_id", sid, "job_id", job.ID, "from_state", info.State)
 
 	case events.StateDeleted:
-		metrics.CronAttachedTotal.WithLabelValues("session_not_found").Inc()
+		observability.CronAttached().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "session_not_found")))
 		return fmt.Errorf("callback: session %s is deleted, aborting", sid)
 
 	case events.StateCreated:
-		metrics.CronAttachedTotal.WithLabelValues("session_not_found").Inc()
+		observability.CronAttached().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "session_not_found")))
 		return fmt.Errorf("callback: session %s is in CREATED state (never started), aborting", sid)
 
 	default:
-		metrics.CronAttachedTotal.WithLabelValues("session_not_found").Inc()
+		observability.CronAttached().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "session_not_found")))
 		return fmt.Errorf("callback: session %s in unexpected state %s", sid, info.State)
 	}
 
-	metrics.CronAttachedTotal.WithLabelValues("success").Inc()
+	observability.CronAttached().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "success")))
 	return nil
 }

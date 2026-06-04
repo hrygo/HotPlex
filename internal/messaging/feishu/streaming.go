@@ -17,9 +17,8 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 
 	"github.com/hrygo/hotplex/internal/messaging"
-
 	"github.com/hrygo/hotplex/internal/messaging/phrases"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 )
 
 type CardPhase int32
@@ -491,7 +490,7 @@ func (c *StreamingCardController) Flush(ctx context.Context) error {
 					"err", err, "failed_flushes", c.failedFlushes)
 				c.cardKitOK = false
 				c.mu.Unlock()
-				metrics.StreamingCardFlushFallbacks.Inc()
+				observability.StreamingCardFlushFallbacks().Add(ctx, 1)
 			}
 		} else {
 			c.mu.Lock()

@@ -1,13 +1,41 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"log/slog"
-
+	"math"
 	"sync"
+	"sync/atomic"
 
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
+
+var poolUtilization atomic.Uint64 // stores math.Float64bits
+
+func init() {
+	observability.RegisterGaugeCallbacks(func(m metric.Meter) {
+		poolGauge, err := m.Float64ObservableGauge(
+			"hotplex.pool.utilization",
+			metric.WithDescription("Pool utilization ratio (0-1)"),
+		)
+		if err != nil {
+			slog.Warn("pool: failed to create pool.utilization gauge", "err", err)
+			return
+		}
+		_, _ = m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+			o.ObserveFloat64(poolGauge, math.Float64frombits(poolUtilization.Load()))
+			return nil
+		}, poolGauge)
+	})
+}
+
+func setPoolUtilization(v float64) {
+	poolUtilization.Store(math.Float64bits(v))
+}
 
 // PoolManager manages per-user and global concurrency quotas for worker sessions.
 type PoolManager struct {
@@ -64,27 +92,27 @@ func (e *PoolError) Error() string {
 
 // Acquire attempts to reserve a concurrency slot for userID.
 // It returns nil on success, or a PoolError describing the failure.
-func (p *PoolManager) Acquire(userID string) error {
+func (p *PoolManager) Acquire(ctx context.Context, userID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.acquireLocked(userID, false)
+	return p.acquireLocked(ctx, userID, false)
 }
 
 // acquireLocked reserves a concurrency slot (and optionally memory) for userID.
 // Caller must hold p.mu.
-func (p *PoolManager) acquireLocked(userID string, reserveMemory bool) error {
+func (p *PoolManager) acquireLocked(ctx context.Context, userID string, reserveMemory bool) error {
 	if p.maxSize > 0 && p.totalCount >= p.maxSize {
-		metrics.PoolAcquireTotal.WithLabelValues("pool_exhausted").Inc()
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "pool_exhausted")))
 		return &PoolError{Kind: poolErrKindExhausted, Current: p.totalCount, Max: p.maxSize}
 	}
 	if p.maxIdlePerUser > 0 && p.userCount[userID] >= p.maxIdlePerUser {
-		metrics.PoolAcquireTotal.WithLabelValues("user_quota_exceeded").Inc()
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "user_quota_exceeded")))
 		return &PoolError{Kind: poolErrKindUserQuotaExceeded, UserID: userID, Current: p.userCount[userID], Max: p.maxIdlePerUser}
 	}
 	if reserveMemory && p.maxMemoryPerUser > 0 {
 		used := p.userMemory[userID]
 		if used+workerMemoryEstimate > p.maxMemoryPerUser {
-			metrics.PoolAcquireTotal.WithLabelValues("memory_exceeded").Inc()
+			observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "memory_exceeded")))
 			p.log.Warn("pool: memory quota exceeded", "user_id", userID,
 				"used_mb", used/(1024*1024),
 				"limit_mb", p.maxMemoryPerUser/(1024*1024),
@@ -97,7 +125,7 @@ func (p *PoolManager) acquireLocked(userID string, reserveMemory bool) error {
 	p.userCount[userID]++
 	p.totalCount++
 	if p.maxSize > 0 {
-		metrics.PoolUtilization.Set(float64(p.totalCount) / float64(p.maxSize))
+		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
 	}
 	p.log.Debug("pool: acquired", "user_id", userID, "total", p.totalCount)
 	return nil
@@ -108,22 +136,22 @@ func (p *PoolManager) acquireLocked(userID string, reserveMemory bool) error {
 // This avoids the TOCTOU race that exists when Acquire + AcquireMemory are called
 // separately: between the two calls, another goroutine could observe the slot
 // taken but memory not yet reserved, leading to quota accounting drift.
-func (p *PoolManager) AcquireWithMemory(userID string) error {
+func (p *PoolManager) AcquireWithMemory(ctx context.Context, userID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.acquireLocked(userID, true)
+	return p.acquireLocked(ctx, userID, true)
 }
 
 // Release frees a concurrency slot previously acquired for userID.
 // Also releases memory quota under the same lock.
-func (p *PoolManager) Release(userID string) {
+func (p *PoolManager) Release(ctx context.Context, userID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.userCount[userID] <= 0 || p.totalCount <= 0 {
 		p.log.Error("pool: release without acquire — possible double-release", "user_id", userID,
 			"user_count", p.userCount[userID], "total", p.totalCount)
-		metrics.PoolReleaseErrorsTotal.Inc()
+		observability.PoolReleaseErrors().Add(ctx, 1)
 		// Best-effort memory cleanup to prevent quota leak on accounting bug.
 		p.releaseMemoryLocked(userID)
 		return
@@ -135,7 +163,7 @@ func (p *PoolManager) Release(userID string) {
 	p.totalCount--
 	total := p.totalCount
 	if p.maxSize > 0 {
-		metrics.PoolUtilization.Set(float64(total) / float64(p.maxSize))
+		setPoolUtilization(float64(total) / float64(p.maxSize))
 	}
 	p.releaseMemoryLocked(userID)
 	p.log.Debug("pool: released", "user_id", userID, "total", total)
@@ -158,7 +186,7 @@ func (p *PoolManager) UpdateLimits(maxSize, maxIdlePerUser int) {
 	p.maxSize = maxSize
 	p.maxIdlePerUser = maxIdlePerUser
 	if p.maxSize > 0 {
-		metrics.PoolUtilization.Set(float64(p.totalCount) / float64(p.maxSize))
+		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
 	}
 	p.log.Info("pool: limits updated", "old_max", old, "new_max", maxSize, "max_per_user", maxIdlePerUser)
 }

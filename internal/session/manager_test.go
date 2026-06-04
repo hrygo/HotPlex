@@ -833,7 +833,7 @@ func TestManager_AttachWorker_Success(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_attach", w)
+	err = m.AttachWorker(context.Background(), "sess_attach", w)
 	require.NoError(t, err)
 
 	// Verify pool slot acquired
@@ -873,7 +873,7 @@ func TestManager_AttachWorker_PoolExhausted(t *testing.T) {
 	w.On("Terminate", mock.Anything).Return(nil)
 
 	// First session exhausts the global pool
-	err = m.AttachWorker("sess_exhaust", w)
+	err = m.AttachWorker(context.Background(), "sess_exhaust", w)
 	require.NoError(t, err)
 
 	// Second session (different user) fails due to global limit
@@ -890,7 +890,7 @@ func TestManager_AttachWorker_PoolExhausted(t *testing.T) {
 	m.mu.Unlock()
 	w2 := newMockWorker(worker.TypeClaudeCode, 0)
 	w2.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_exhaust2", w2)
+	err = m.AttachWorker(context.Background(), "sess_exhaust2", w2)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrPoolExhausted))
 }
@@ -924,7 +924,7 @@ func TestManager_AttachWorker_UserQuotaExceeded(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_quota", w)
+	err = m.AttachWorker(context.Background(), "sess_quota", w)
 	require.NoError(t, err)
 
 	// Second session for same user → quota exceeded
@@ -941,7 +941,7 @@ func TestManager_AttachWorker_UserQuotaExceeded(t *testing.T) {
 	m.mu.Unlock()
 	w2 := newMockWorker(worker.TypeClaudeCode, 0)
 	w2.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_quota2", w2)
+	err = m.AttachWorker(context.Background(), "sess_quota2", w2)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrUserQuotaExceeded))
 }
@@ -975,7 +975,7 @@ func TestManager_AttachWorker_MemoryExceeded_Rollback(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_mem", w)
+	err = m.AttachWorker(context.Background(), "sess_mem", w)
 	require.NoError(t, err)
 
 	// Detach first worker, then reattach succeeds (memory freed)
@@ -988,7 +988,7 @@ func TestManager_AttachWorker_MemoryExceeded_Rollback(t *testing.T) {
 	// Second worker on same session after detach — succeeds since memory is freed
 	w2 := newMockWorker(worker.TypeClaudeCode, 0)
 	w2.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_mem", w2)
+	err = m.AttachWorker(context.Background(), "sess_mem", w2)
 	require.NoError(t, err)
 }
 
@@ -1019,13 +1019,13 @@ func TestManager_AttachWorker_AlreadyAttached(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_double", w)
+	err = m.AttachWorker(context.Background(), "sess_double", w)
 	require.NoError(t, err)
 
 	// Second attach on same session → ErrWorkerAttached (no quota acquired)
 	w2 := newMockWorker(worker.TypeClaudeCode, 0)
 	w2.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_double", w2)
+	err = m.AttachWorker(context.Background(), "sess_double", w2)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrWorkerAttached))
 
@@ -1050,7 +1050,7 @@ func TestManager_AttachWorker_NotFound(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_missing", w)
+	err = m.AttachWorker(context.Background(), "sess_missing", w)
 	require.Error(t, err)
 }
 
@@ -1083,7 +1083,7 @@ func TestManager_DetachWorker_WithWorker(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_detach", w)
+	err = m.AttachWorker(context.Background(), "sess_detach", w)
 	require.NoError(t, err)
 
 	m.DetachWorker("sess_detach")
@@ -1194,7 +1194,7 @@ func TestManager_DebugSnapshot_WithWorker(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	_ = m.AttachWorker("sess_debug", w)
+	_ = m.AttachWorker(context.Background(), "sess_debug", w)
 
 	snap, ok := m.DebugSnapshot("sess_debug")
 	require.True(t, ok)
@@ -1282,11 +1282,11 @@ func TestManager_ReleaseWorkerQuota(t *testing.T) {
 	// Attach and release
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	_ = m.AttachWorker("sess_quota_rel", w)
+	_ = m.AttachWorker(context.Background(), "sess_quota_rel", w)
 	total, _, _ := m.Stats()
 	require.Equal(t, 1, total)
 
-	m.releaseWorkerQuota(ms)
+	m.releaseWorkerQuota(context.Background(), ms)
 	total, _, _ = m.Stats()
 	require.Equal(t, 0, total)
 }
@@ -1321,7 +1321,7 @@ func TestManager_TransitionTerminated_NilsWorker(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	_ = m.AttachWorker("sess_worker_nil", w)
+	_ = m.AttachWorker(context.Background(), "sess_worker_nil", w)
 
 	total, _, _ := m.Stats()
 	require.Equal(t, 1, total)
@@ -1371,7 +1371,7 @@ func TestManager_WorkerHealthStatuses(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	_ = m.AttachWorker("sess_health", w)
+	_ = m.AttachWorker(context.Background(), "sess_health", w)
 
 	statuses := m.WorkerHealthStatuses()
 	require.Len(t, statuses, 1)
@@ -1428,7 +1428,7 @@ func TestManager_GC_ZombieDetection(t *testing.T) {
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
 	w.lastIO = now.Add(-31 * time.Minute) // zombie: no IO beyond 30m default execution_timeout
-	_ = m.AttachWorker("sess_zombie", w)
+	_ = m.AttachWorker(context.Background(), "sess_zombie", w)
 
 	store.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
 	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
@@ -1472,7 +1472,7 @@ func TestManager_GC_NoZombieWhenRecentIO(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.lastIO = now // very recent IO
-	_ = m.AttachWorker("sess_healthy", w)
+	_ = m.AttachWorker(context.Background(), "sess_healthy", w)
 
 	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
 	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
@@ -1970,7 +1970,7 @@ func TestManager_DetachWorkerIf_CAS_Success(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_cas_ok", w)
+	err = m.AttachWorker(context.Background(), "sess_cas_ok", w)
 	require.NoError(t, err)
 
 	// Detach with the correct expected worker → success.
@@ -2010,7 +2010,7 @@ func TestManager_DetachWorkerIf_CAS_Mismatch(t *testing.T) {
 
 	w := newMockWorker(worker.TypeClaudeCode, 0)
 	w.On("Terminate", mock.Anything).Return(nil)
-	err = m.AttachWorker("sess_cas_mismatch", w)
+	err = m.AttachWorker(context.Background(), "sess_cas_mismatch", w)
 	require.NoError(t, err)
 
 	// Try to detach with a different worker instance → CAS failure.

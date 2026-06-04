@@ -15,8 +15,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/hrygo/hotplex/internal/config"
-	"github.com/hrygo/hotplex/internal/metrics"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
@@ -411,7 +414,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.SetWorkerSessionID(acpSessID)
 
 	// Record handshake latency.
-	metrics.ACPHandshakeDuration.Observe(time.Since(now).Seconds())
+	observability.ACPHandshakeDuration().Record(ctx, time.Since(now).Seconds())
 
 	// Create mapper.
 	mapper := w.testMapper
@@ -774,10 +777,10 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 	var outcome any
 	if allowed {
 		outcome = pm.FormatAllowedOutcome()
-		metrics.ACPPermissionRequestsTotal.WithLabelValues("approved").Inc()
+		observability.ACPPermissionRequests().Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "approved")))
 	} else {
 		outcome = pm.FormatDeniedOutcome()
-		metrics.ACPPermissionRequestsTotal.WithLabelValues("denied").Inc()
+		observability.ACPPermissionRequests().Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "denied")))
 	}
 
 	w.Mu.Lock()
@@ -859,7 +862,7 @@ func (w *Worker) readLoop(ctx context.Context) {
 				tw.Log("←", notif)
 			}
 			w.SetLastIO(time.Now())
-			envelopes := w.mapper.MapNotification(notif)
+			envelopes := w.mapper.MapNotification(ctx, notif)
 			for _, env := range envelopes {
 				conn.TrySend(env)
 			}
@@ -887,7 +890,7 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 		// Check auto-approve.
 		if w.autoApprove.Load() {
 			_ = w.client.RespondRequest(ctx, req.ID, pm.FormatAllowedOutcome())
-			metrics.ACPPermissionRequestsTotal.WithLabelValues("approved").Inc()
+			observability.ACPPermissionRequests().Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "approved")))
 			return
 		}
 
