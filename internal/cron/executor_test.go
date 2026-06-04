@@ -222,6 +222,15 @@ func TestBuildWebhookPrefix_PrNumberWithoutTrigger(t *testing.T) {
 	require.Empty(t, buildWebhookPrefix(job))
 }
 
+func TestBuildWebhookPrefix_NonNumericPrNumber(t *testing.T) {
+	t.Parallel()
+
+	job := testJob()
+	job.PlatformKey = map[string]string{"trigger": "webhook", "pr_number": "642; rm -rf /"}
+
+	require.Empty(t, buildWebhookPrefix(job))
+}
+
 func TestExecutor_Execute_WebhookPromptContainsPrefix(t *testing.T) {
 	t.Parallel()
 

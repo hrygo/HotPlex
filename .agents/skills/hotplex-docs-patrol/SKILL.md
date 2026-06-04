@@ -128,7 +128,7 @@ git push fork docs/patrol-$(date +%Y-%m-%d)
 gh pr create \
   --title "docs(patrol): YYYY-MM-DD 文档维护" \
   --body "## Summary\n<每个修复点一行>\n\nCloses #<issue-number>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
-  --head aaronwong1989:docs/patrol-$(date +%Y-%m-%d) \
+  --head $(git remote get-url fork | sed -E 's|.*[:/]([^/]+)/[^.]+.*|\1|'):docs/patrol-$(date +%Y-%m-%d) \
   --base main
 ```
 
