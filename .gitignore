@@ -138,3 +138,4 @@ build-docs
 # Docker local override (developer-specific)
 docker-compose.override.yml
 .hermes
+
