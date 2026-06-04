@@ -102,33 +102,58 @@ make docs-build
 
 ## 行动与收尾
 
-小修复当场提交：
+### 无修复
+
+巡逻发现无需维护 → 仅更新基线，无需创建分支或 PR。
+
+### 有修复 — 完整交付流程
 
 ```bash
-git checkout -b docs/patrol-$(date +%Y-%m-%d) main
+# 1. 创建当日巡逻分支（基于 main）
+git checkout main && git merge origin/main --ff-only
+git checkout -b docs/patrol-$(date +%Y-%m-%d)
+
+# 2. 提交修复
 git add <修复的文件>
 git commit -m "docs(patrol): <一句话说明修复内容>"
+
+# 3. 创建 GitHub Issue
+gh issue create \
+  --title "docs(patrol): YYYY-MM-DD 文档维护" \
+  --body "<修复摘要：每个文件一句话>" \
+  --label "documentation"
+
+# 4. Push 到 fork，创建 PR
+git push fork docs/patrol-$(date +%Y-%m-%d)
+gh pr create \
+  --title "docs(patrol): YYYY-MM-DD 文档维护" \
+  --body "## Summary\n<每个修复点一行>\n\nCloses #<issue-number>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
+  --head aaronwong1989:docs/patrol-$(date +%Y-%m-%d) \
+  --base main
 ```
 
-不要 push，不要创建 PR。提交留痕即可，合并由维护者决定。
+**交付物是已提交的 PR**，不是本地 commit。
 
-**收尾必须**：无论是否有修复，巡逻结束时更新基线状态文件：
+### 收尾必须
+
+无论是否有修复，巡逻结束时更新基线状态文件：
 
 ```bash
+# 切回 main 并更新基线
+git checkout main
 git rev-parse HEAD > .docs-patrol-baseline
 ```
-
-需要人工决策的问题（内容疑似过时但无法确认、结构性建议）创建 GitHub Issue，标签 `docs-staleness` 或 `docs-improvement`。
 
 ## 输出格式
 
 **变更摘要** — 自 `<baseline>` 以来 N 个提交，影响 M 个代码区域，映射到 K 篇潜在受影响文档。经分析，J 篇需要维护 / 无文档需要维护。
 
-**当场修复** — 每项一行：文件路径 + 修复内容 + commit hash
+**有修复时**：
+- 修复内容 — 每项一行：文件路径 + 修复内容
+- Issue — 链接
+- PR — 链接（交付物）
 
-**需关注** — 每项一行：问题描述 + Issue 链接
-
-无修复无关注时：
+**无修复时**：
 
 ```
 文档中心巡逻 YYYY-MM-DD — N 篇文档。自上次巡逻以来 X 个提交，经分析无文档影响。
