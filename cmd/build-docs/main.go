@@ -622,7 +622,13 @@ func fetchMermaidJS() error {
 }
 
 // fontURL is the Google Fonts CSS endpoint used by the documentation.
-const fontURL = "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Noto+Serif+SC:wght@200..900&family=Outfit:wght@100..900&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap"
+// fontURL is the Google Fonts CSS endpoint used by the documentation.
+// Weights are trimmed to only what the CSS template uses (400-700) to keep
+// the embedded binary size reasonable. Noto Serif SC (CJK serif fallback)
+// is excluded: at 5.7 MB for just 2 weights it dominates binary size, and
+// system CJK serif fonts (Songti SC / SimSun / Noto Serif CJK) provide
+// an acceptable fallback for the small amount of Chinese text in the docs.
+const fontURL = "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700&family=JetBrains+Mono:ital,wght@0,400;0,700;1,400&family=Outfit:wght@400;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400&display=swap"
 
 // fontFileRe matches font file URLs in Google Fonts CSS (woff2 preferred).
 var fontFileRe = regexp.MustCompile(`url\((https://fonts\.gstatic\.com/[^)]+)\)`)
