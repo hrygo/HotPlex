@@ -160,8 +160,8 @@ func LoadConfigFromEnv() (Config, []error) {
 
 	// ── 2. Worker config discovery ──
 	if getBoolEnv("HOTPLEX_BRAIN_WORKER_EXTRACT", true) {
-		if cfg, _ := extractFromWorker(); cfg != nil {
-			return *cfg, nil
+		if cfg, errs := extractFromWorker(); cfg != nil {
+			return *cfg, errs
 		}
 	}
 
