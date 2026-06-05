@@ -33,7 +33,7 @@ HotPlex 支持 3 种 Worker，各自使用私有协议：
 | Worker | Transport | Protocol | 支持 Agent 数 |
 |--------|-----------|----------|-------------|
 | ClaudeCode | stdio | Claude stream-json | 1 |
-| CodexCLI | stdio / HTTP | Codex exec / app-server | 1 |
+| CodexCLI | stdio / HTTP | app-server | 1 |
 | OpenCodeServer | HTTP+SSE | SSE/JSON | 1 |
 
 每种 Worker 需要独立的协议解析器、事件映射器、测试套件。新 Agent 接入成本高。
@@ -94,7 +94,7 @@ ACP (Agent Client Protocol) 是一个开放协议（JSON-RPC 2.0 over stdio）�
 | Worker | Transport | Protocol | 支持 Agent 数 | 新 Agent 接入 |
 |--------|-----------|----------|-------------|-------------|
 | ClaudeCode | stdio | stream-json | 1 | 写新 Worker |
-| CodexCLI | stdio/HTTP | exec/app-server | 1 | 写新 Worker |
+| CodexCLI | stdio/HTTP | app-server | 1 | 写新 Worker |
 | OpenCodeServer | HTTP+SSE | SSE/JSON | 1 | 写新 Worker |
 | **ACP** | **stdio** | **JSON-RPC 2.0（通用）** | **无限** | **改配置** |
 

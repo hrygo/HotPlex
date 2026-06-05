@@ -9,31 +9,17 @@ date: 2026-05-18
 status: draft
 progress: 0
 estimated_hours: 20
-depends_on:
-  - docs/specs/Codex-CLI-Worker-Spec.md
 ---
 
-# Codex App-Server Worker 集成规格（v2 持久化模式）
+# Codex App-Server Worker 集成规格
 
-> **目标**：将 Codex CLI Worker 从 one-shot `codex exec` 模式升级为 `codex app-server` 持久化进程模式，实现真正的流式输出、零冷启动多轮复用，以及与 OpenCode Server 一致的 Singleton 架构。
+> **目标**：将 Codex CLI Worker 集成为 `codex app-server` 持久化进程模式，实现真正的流式输出、零冷启动多轮复用，以及与 OpenCode Server 一致的 Singleton 架构。
 
 ---
 
 ## 1. 背景与动机
 
-### 1.1 现状
-
-Codex CLI Worker v1（`internal/worker/codexcli/`）使用 `codex exec --json` 作为 one-shot 子进程：
-
-| 维度 | v1 (`codex exec`) | 问题 |
-|------|-------------------|------|
-| 进程生命周期 | 每 turn 新 spawn | 冷启动 ~200ms/turn |
-| 流式输出 | 一次性 JSONL（无 delta） | 用户体验不如 Claude Code 逐 token 流式 |
-| 多轮对话 | `resume --last` 重新 spawn | 每次重建上下文，浪费 token |
-| 审批交互 | `--ask-for-approval never` | 无法处理用户审批 |
-| 架构模式 | Per-session 进程 | 与 OCS singleton 模式不一致 |
-
-### 1.2 Codex App-Server 概述
+### 1.1 Codex App-Server 概述
 
 `codex app-server` 是 OpenAI Codex CLI 的**官方持久化服务器模式**，被 Codex VS Code 扩展、桌面应用和 Web 界面内部使用：
 
@@ -48,14 +34,14 @@ Codex CLI Worker v1（`internal/worker/codexcli/`）使用 `codex exec --json` �
 | **审批交互** | ✅ 双向 `serverRequest/approval` |
 | **多路复用** | 单进程服务多个 Thread，按 `threadId` 路由事件 |
 
-### 1.3 升级价值
+### 1.2 核心价值
 
-| 改进 | v1 → v2 |
-|------|---------|
+| 改进 | 说明 |
+|------|------|
 | **真正流式输出** | `item/agentMessage/delta` → AEP `message.delta` 逐 token |
 | **零冷启动** | 进程常驻，turn 切换 < 10ms |
 | **会话持久化** | Thread 自动 SQLite 保存，resume 无需额外处理 |
-| **审批交互** | 双向协议，不再需要 `--ask-for-approval never` |
+| **审批交互** | 双向协议 `serverRequest/approval` |
 | **架构一致** | 与 OpenCode Server 完全相同的 Singleton 模式 |
 
 ---
@@ -94,7 +80,7 @@ Worker (per-session 轻量适配器)
 | 成熟度 | 稳定 | experimental / unsupported |
 | 故障恢复 | proc.Manager 管理，PGID 隔离 | 需自行处理断连重连 |
 
-**选择 stdio 模式**：与当前 `codex exec` 和 Claude Code Worker 使用相同的 `proc.Manager` 子进程管道，无需端口管理。
+**选择 stdio 模式**：与 Claude Code Worker 使用相同的 `proc.Manager` 子进程管道，无需端口管理。
 
 ### 2.3 架构定位
 
@@ -129,8 +115,8 @@ Gateway (AEP v1) ──协议桥接──► Codex AppServer Worker ──JSON-R
 | `thread/started` | `{thread: {id, status}}` | 线程已创建并加载 |
 | `thread/status/changed` | `{threadId, status}` | 线程状态变更 |
 | `thread/closed` | `{threadId}` | 线程已卸载 |
-| `item/started` | `{item: {id, type, ...}}` | Item 开始（同 exec --json） |
-| `item/completed` | `{item: {id, type, text, ...}}` | Item 完成（同 exec --json） |
+| `item/started` | `{item: {id, type, ...}}` | Item 开始 |
+| `item/completed` | `{item: {id, type, text, ...}}` | Item 完成 |
 | `item/agentMessage/delta` | `{itemId, textDelta}` | **逐 token 流式 delta** |
 | `turn/started` | `{turn: {id}}` | Turn 开始执行 |
 | `turn/completed` | `{turn: {id, usage: {input, output}}}` | Turn 完成 |
@@ -157,7 +143,7 @@ Gateway (AEP v1) ──协议桥接──► Codex AppServer Worker ──JSON-R
 
 ### 3.4 Delta 状态机
 
-`item/agentMessage/delta` 是 v2 的核心改进。Mapper 需要维护 message 状态追踪：
+`item/agentMessage/delta` 是流式输出的核心。Mapper 需要维护 message 状态追踪：
 
 ```
 item/started(type=agent_message) → message.start (首次)
@@ -174,7 +160,7 @@ item/completed(type=agent_message)→ message.end (终结)
 | # | 文件 | 改动类型 | 说明 |
 |:--|:-----|:---------|:-----|
 | 1 | `internal/worker/codexcli/manager.go` | **新建** | `CodexAppServerManager` — 单例进程管理（仿 OCS singleton.go） |
-| 2 | `internal/worker/codexcli/worker.go` | **重写** | 从 one-shot spawn → singleton 轻量适配器 |
+| 2 | `internal/worker/codexcli/worker.go` | **重写** | Singleton 轻量适配器 |
 | 3 | `internal/worker/codexcli/commands.go` | **新建** | JSON-RPC 控制请求（仿 OCS commands.go） |
 | 4 | `internal/worker/codexcli/parser.go` | **修改** | `ParseLine` → `ParseNotification`，增加 JSON-RPC 帧解析 |
 | 5 | `internal/worker/codexcli/mapper.go` | **修改** | 新增 `item/agentMessage/delta` → `message.delta` 映射，message 状态追踪 |
@@ -310,9 +296,9 @@ func (m *CodexAppServerManager) handshake() error {
 }
 ```
 
-### Step 2: Worker 重写（worker.go）
+### Step 2: Worker 实现（worker.go）
 
-从 one-shot spawn 模式改为 singleton 引用模式：
+Singleton 引用模式：
 
 ```go
 type Worker struct {
@@ -693,31 +679,23 @@ Phase 5 — 测试与文档（2h，可选）
 
 ---
 
-## 10. 与 v1 的兼容性
+## 10. 架构模式
 
-v1（`codex exec`）和 v2（`codex app-server`）可在同一 `codexcli` 包中共存，通过配置切换：
+`codex app-server` 采用 Singleton 模式，与 OpenCode Server 一致：
 
 ```go
 // worker.go init()
 func init() {
     worker.Register(worker.TypeCodexCLI, func() (worker.Worker, error) {
-        cfg := GetConfig()
-        if cfg.UseAppServer {
-            return &AppServerWorker{...}, nil  // v2 持久化模式
-        }
-        return &ExecWorker{...}, nil           // v1 one-shot 模式
+        return &AppServerWorker{...}, nil
     })
 }
 ```
 
-或在 `gateway_run.go` 中根据配置调用不同的初始化函数：
+在 `gateway_run.go` 中初始化单例管理器：
 
 ```go
-if cfg.Worker.CodexCLI.UseAppServer {
-    codexcli.InitSingleton(log, cfg.Worker.CodexCLI)
-} else {
-    codexcli.InitConfig(cfg.Worker.CodexCLI)
-}
+codexcli.InitSingleton(log, cfg.Worker.CodexCLI)
 ```
 
 ---

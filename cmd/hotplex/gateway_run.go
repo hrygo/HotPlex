@@ -289,11 +289,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	opencodeserver.InitSingleton(log, cfg.Worker.OpenCodeServer)
 	claudecode.InitConfig(cfg.Worker.ClaudeCode)
 	acp.InitConfig(cfg.Worker.ACP)
-	if cfg.Worker.CodexCLI.UseAppServer {
-		codexcli.InitSingleton(log, cfg.Worker.CodexCLI)
-	} else {
-		codexcli.InitConfig(cfg.Worker.CodexCLI)
-	}
+	codexcli.InitSingleton(log, cfg.Worker.CodexCLI)
 
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if !reflect.DeepEqual(prev.Worker.AutoRetry, next.Worker.AutoRetry) {

@@ -33,7 +33,6 @@ const (
 
 const (
 	defaultCallTimeout       = 30 * time.Second
-	defaultStartupTimeout    = 30 * time.Second
 	criticalEventSendTimeout = 5 * time.Second
 	scannerInitSize          = 64 * 1024        // 64 KB
 	scannerMaxSize           = 10 * 1024 * 1024 // 10 MB
