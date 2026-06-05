@@ -195,6 +195,16 @@ type WorkerSessionIDHandler interface {
 	GetWorkerSessionID() string
 }
 
+// SystemPromptUpdater is an optional interface for workers that support
+// updating their stored system prompt at runtime (e.g. during /reset).
+// Workers that do not implement this interface will continue using the
+// system prompt from their initial Start() call.
+// Bridge detects implementations via type assertion and calls this before
+// ResetContext so the worker's next session uses the reloaded agent config.
+type SystemPromptUpdater interface {
+	UpdateSystemPrompt(prompt string)
+}
+
 // SessionInfo contains metadata about a session needed by the worker to start/resume.
 type SessionInfo struct {
 	SessionID    string

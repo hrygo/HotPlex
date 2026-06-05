@@ -80,8 +80,8 @@ HotPlex 配置加载 **完全没有继承关系**，遵循**命中即终止 (Hit
 
 ## 5. 工程限制与安全边界
 
-*   **规模限制**：单文件最大 **8KB**，单会话总加载最大 **40KB**。YAML frontmatter 在网关层自动剔除（不占 Token），但修改时须保持格式正确。
-*   **热加载限制**：配置仅在会话初始化（或 `/reset`）时载入。运行中修改不会立即生效，须等待 Session 重启或手动 `/reset`。
+*   **规模限制**：单文件最大 **8000 字符**，单会话总加载最大 **40000 字符**。YAML frontmatter 在网关层自动剔除（不占 Token），但修改时须保持格式正确。
+*   **热加载限制**：配置仅在会话初始化（或 `/reset`）时载入。运行中修改不会立即生效，须等待 Session 重启或手动 `/reset`（注：OCS Worker 暂不支持，见 #664）。
 *   **XML 注入安全 (XML Sanitizer)**：
     配置装载层强制开启 XML Sanitizer，所有保留标签（包含 `agent-configuration`, `directives`, `context`, `persona`, `rules`, `skills`, `user`, `memory`, `hotplex`, `notice`）在装配拼入系统提示词时均会被自动转义。请勿在回复或配置文件中试图通过拼凑这些标签来篡改系统行为。
 

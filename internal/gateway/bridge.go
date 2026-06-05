@@ -417,6 +417,20 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("bridge: reset worker: %w", err)
 	}
 
+	// Reload agent config so the worker's next session picks up file changes.
+	if si, err := b.sm.Get(ctx, sessionID); err == nil {
+		if su, ok := w.(worker.SystemPromptUpdater); ok {
+			info := &worker.SessionInfo{SystemPrompt: ""}
+			b.injectAgentConfig(info, si.Platform, si.BotID, nil)
+			if info.SystemPrompt != "" {
+				su.UpdateSystemPrompt(info.SystemPrompt)
+				b.log.Info("bridge: reset reloaded agent config",
+					"session_id", sessionID, "platform", si.Platform, "bot_id", si.BotID,
+					"prompt_len", len(info.SystemPrompt))
+			}
+		}
+	}
+
 	b.accumMu.Lock()
 	if acc, ok := b.accum[sessionID]; ok {
 		acc.TurnCount.Store(0)
