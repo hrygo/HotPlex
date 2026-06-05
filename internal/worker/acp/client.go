@@ -36,6 +36,8 @@ type ACPClient struct {
 	RequestCh chan *JSONRPCRequest
 
 	done chan struct{} // closed when read loop exits
+
+	dropCount atomic.Int64 // notifications dropped since last log
 }
 
 // NewACPClient creates a new ACP client communicating over the given pipes.
@@ -48,7 +50,7 @@ func NewACPClient(stdin io.Writer, stdout io.Reader, log *slog.Logger) *ACPClien
 		scanner:        NewScanner(stdout),
 		log:            log,
 		pending:        make(map[string]chan *JSONRPCResponse),
-		NotificationCh: make(chan *JSONRPCNotification, 64),
+		NotificationCh: make(chan *JSONRPCNotification, 256),
 		RequestCh:      make(chan *JSONRPCRequest, 16),
 		done:           make(chan struct{}),
 	}
@@ -245,7 +247,9 @@ func (c *ACPClient) readLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			default:
-				c.log.Warn("acp client: notification channel full, dropping", "method", m.Method)
+				if n := c.dropCount.Add(1); n%100 == 1 {
+					c.log.Warn("acp client: notification channel full, dropping", "method", m.Method, "total_dropped", n)
+				}
 			}
 		case *JSONRPCRequest:
 			select {

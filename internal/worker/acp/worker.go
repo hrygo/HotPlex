@@ -853,6 +853,17 @@ func (w *Worker) respondToServerRequest(ctx context.Context, reqID, kind string,
 
 // ─── readLoop ────────────────────────────────────────────────────────────────
 
+func (w *Worker) processNotification(ctx context.Context, notif *JSONRPCNotification, conn *acpConn) {
+	if tw := w.trace.Load(); tw != nil {
+		tw.Log("←", notif)
+	}
+	w.SetLastIO(time.Now())
+	envelopes := w.mapper.MapNotification(ctx, notif)
+	for _, env := range envelopes {
+		conn.TrySend(env)
+	}
+}
+
 func (w *Worker) readLoop(ctx context.Context) {
 	// Capture conn under lock for consistent access pattern.
 	w.Mu.Lock()
@@ -885,13 +896,19 @@ func (w *Worker) readLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if tw := w.trace.Load(); tw != nil {
-				tw.Log("←", notif)
-			}
-			w.SetLastIO(time.Now())
-			envelopes := w.mapper.MapNotification(ctx, notif)
-			for _, env := range envelopes {
-				conn.TrySend(env)
+			w.processNotification(ctx, notif, conn)
+			// Drain queued notifications to handle bursts.
+			drained := false
+			for !drained {
+				select {
+				case n, ok := <-w.client.NotificationCh:
+					if !ok {
+						return
+					}
+					w.processNotification(ctx, n, conn)
+				default:
+					drained = true
+				}
 			}
 		case req, ok := <-w.client.RequestCh:
 			if !ok {
