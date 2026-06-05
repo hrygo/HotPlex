@@ -5,7 +5,6 @@ package proc
 import (
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -24,7 +23,7 @@ func getChildren(pid int, _ *slog.Logger) []int {
 }
 
 func readChildrenFile(pid int) []int {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "task", strconv.Itoa(pid), "children"))
+	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/task/" + strconv.Itoa(pid) + "/children")
 	if err != nil {
 		return nil
 	}
@@ -52,7 +51,7 @@ func scanChildrenFromProcStat(pid int) []int {
 		if err != nil {
 			continue
 		}
-		statBytes, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
+		statBytes, err := os.ReadFile("/proc/" + entry.Name() + "/stat")
 		if err != nil {
 			continue
 		}
