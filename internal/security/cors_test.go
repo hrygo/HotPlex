@@ -99,7 +99,7 @@ func TestCORSMiddleware(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
-		require.Equal(t, "Origin", rec.Header().Get("Vary"))
+		require.Empty(t, rec.Header().Get("Vary"), "wildcard should not set Vary: Origin")
 		require.Equal(t, "GET, POST, PUT, PATCH, DELETE, OPTIONS", rec.Header().Get("Access-Control-Allow-Methods"))
 		require.Equal(t, "Content-Type, Authorization, X-Api-Key", rec.Header().Get("Access-Control-Allow-Headers"))
 	})
@@ -197,21 +197,22 @@ func TestCORSMiddleware(t *testing.T) {
 func TestSetCORSHeaders(t *testing.T) {
 	t.Parallel()
 
-	t.Run("wildcard sets all headers", func(t *testing.T) {
+	t.Run("wildcard sets headers without Vary", func(t *testing.T) {
 		t.Parallel()
 		rec := httptest.NewRecorder()
 		SetCORSHeaders(rec, []string{"*"}, "https://any.com")
 
 		require.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
-		require.Equal(t, "Origin", rec.Header().Get("Vary"))
+		require.Empty(t, rec.Header().Get("Vary"), "wildcard should not set Vary: Origin")
 	})
 
-	t.Run("matching origin sets headers", func(t *testing.T) {
+	t.Run("matching origin sets headers with Vary", func(t *testing.T) {
 		t.Parallel()
 		rec := httptest.NewRecorder()
 		SetCORSHeaders(rec, []string{"https://app.example.com"}, "https://app.example.com")
 
 		require.Equal(t, "https://app.example.com", rec.Header().Get("Access-Control-Allow-Origin"))
+		require.Equal(t, "Origin", rec.Header().Get("Vary"), "echo-back mode must set Vary: Origin")
 	})
 
 	t.Run("non-matching origin sets no headers", func(t *testing.T) {

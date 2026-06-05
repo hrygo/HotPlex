@@ -29,7 +29,7 @@ func ResolveOrigin(requestOrigin string, allowedOrigins []string) string {
 //   - Access-Control-Allow-Origin: the matched origin (or "*" for wildcard)
 //   - Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
 //   - Access-Control-Allow-Headers: Content-Type, Authorization, X-Api-Key
-//   - Vary: Origin (prevents cache poisoning when origin-specific)
+//   - Vary: Origin (prevents cache poisoning when origin-specific; omitted for wildcard)
 //
 // OPTIONS requests receive a 200 response without calling the next handler.
 func CORSMiddleware(originsFn func() []string) func(http.Handler) http.Handler {
@@ -64,9 +64,15 @@ func SetCORSHeaders(w http.ResponseWriter, allowedOrigins []string, requestOrigi
 
 // writeCORSHeaders writes the standard CORS response headers for the given
 // resolved origin value.
+//
+// Vary: Origin is only set in echo-back mode (origin != "*") to avoid
+// degrading CDN cache efficiency in wildcard mode where the response is
+// identical for all origins.
 func writeCORSHeaders(w http.ResponseWriter, origin string) {
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key")
-	w.Header().Set("Vary", "Origin")
+	if origin != "*" {
+		w.Header().Set("Vary", "Origin")
+	}
 }
