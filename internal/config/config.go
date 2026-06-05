@@ -93,8 +93,9 @@ func (c *Config) Validate() []string {
 	if c.Log.Format != "" && c.Log.Format != "json" && c.Log.Format != "text" {
 		errs = append(errs, "log.format must be either 'json' or 'text'")
 	}
-	// Exec mode was removed; silently force app-server mode.
+	// Exec mode was removed; force app-server mode.
 	if !c.Worker.CodexCLI.UseAppServer {
+		slog.Warn("config: codex_cli.use_app_server is deprecated, forcing app-server mode")
 		c.Worker.CodexCLI.UseAppServer = true
 	}
 

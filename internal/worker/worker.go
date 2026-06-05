@@ -134,7 +134,7 @@ type Worker interface {
 // Gateway reads this to decide orchestration without knowing Worker internals.
 type ResetResult struct {
 	// ConnReplaced indicates whether the worker replaced its underlying connection.
-	// true  = Worker restarted the process or rebuilt the connection (e.g. Claude Code, Codex Exec).
+	// true  = Worker restarted the process or rebuilt the connection (e.g. Claude Code, Codex CLI).
 	//         Gateway must spawn a new forwardEvents goroutine.
 	// false = Worker reset in-place without replacing the connection (e.g. OCS HTTP reset, ACP new session).
 	//         The existing forwardEvents goroutine continues running.

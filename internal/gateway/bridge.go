@@ -437,7 +437,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()
-		b.forwardEvents(w, sessionID, forwardOpts{ctx: ctx})
+		b.forwardEvents(w, sessionID, forwardOpts{ctx: context.Background()})
 	}()
 
 	return nil

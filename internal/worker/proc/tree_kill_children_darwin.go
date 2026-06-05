@@ -4,8 +4,9 @@ package proc
 
 import (
 	"log/slog"
-	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // getChildren returns the PIDs of direct child processes of the given PID.
@@ -28,47 +29,45 @@ func getChildren(pid int, _ *slog.Logger) []int {
 // getParentPID returns the parent PID of the given process using sysctl.
 // Returns 0 if the process doesn't exist or info can't be retrieved.
 func getParentPID(pid int) int {
-	// kern.proc.pid.<pid> returns a []C.kinfo_proc (externKinfoProc)
-	// The kinfo_proc structure has ki_ppid at a known offset.
-	// On macOS arm64/x86_64, kinfo_proc.kp_proc.p_ppid is at offset 24.
 	name := []int32{1, 14, 1, int32(pid)} // CTL_KERN, KERN_PROC, KERN_PROC_PID, pid
 
-	var buf []byte
-	bufLen := uintptr(0)
-
+	var bufLen uintptr
 	// First call: get required buffer size.
-	_, _, errno := syscall.Syscall6(
-		syscall.SYS___SYSCTL,
-		uintptr(unsafe.Pointer(&name[0])),
+	_, _, errno := syscall6(
+		unsafe.Pointer(&name[0]),
 		4,
 		0,
 		uintptr(unsafe.Pointer(&bufLen)),
-		0,
-		0,
 	)
 	if errno != 0 || bufLen == 0 {
 		return 0
 	}
 
-	buf = make([]byte, bufLen)
-	_, _, errno = syscall.Syscall6(
-		syscall.SYS___SYSCTL,
-		uintptr(unsafe.Pointer(&name[0])),
+	buf := make([]byte, bufLen)
+	_, _, errno = syscall6(
+		unsafe.Pointer(&name[0]),
 		4,
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(unsafe.Pointer(&bufLen)),
-		0,
-		0,
 	)
 	if errno != 0 {
 		return 0
 	}
 
-	// kinfo_proc layout on macOS:
-	// kp_proc (extern_proc) starts at offset 0
-	//   extern_proc.p_ppid is at offset 24 (after p_stat, p_pid, etc.)
-	if len(buf) < 32 {
+	// Parse using the typed KinfoProc struct to avoid fragile hardcoded offsets.
+	// Eproc.Ppid is the parent PID provided by the kernel.
+	var kp unix.KinfoProc
+	if uintptr(len(buf)) < unsafe.Sizeof(kp) {
 		return 0
 	}
-	return int(*(*int32)(unsafe.Pointer(&buf[24])))
+	kp = *(*unix.KinfoProc)(unsafe.Pointer(&buf[0]))
+	return int(kp.Eproc.Ppid)
+}
+
+// syscall6 wraps syscall.Syscall6 for sysctl calls.
+func syscall6(name unsafe.Pointer, namelen, oldp, oldlenp uintptr) (uintptr, uintptr, unix.Errno) {
+	return unix.Syscall6(
+		unix.SYS___SYSCTL,
+		uintptr(name), namelen, oldp, oldlenp, 0, 0,
+	)
 }

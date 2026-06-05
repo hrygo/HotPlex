@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -84,19 +85,29 @@ func (c *Conn) Inject(env *events.Envelope) {
 // Shared by Conn.Inject, ACP conn.Inject, and OCS conn.Inject
 // so that internal_reset events are never silently dropped under normal load.
 func InjectWithTimeout(ch chan<- *events.Envelope, env *events.Envelope, log *slog.Logger, sessionID string) {
+	// Try fast non-blocking send first.
 	select {
 	case ch <- env:
 		return
 	default:
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	select {
-	case ch <- env:
-	case <-ctx.Done():
-		log.Warn("base: inject dropped after timeout, recv channel full",
-			"session_id", sessionID, "event_type", env.Event.Type)
+	// Fall back to blocking with timeout.
+	const injectTimeout = 2 * time.Second
+	deadline := time.Now().Add(injectTimeout)
+	for {
+		select {
+		case ch <- env:
+			return
+		default:
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		// Yield to allow the consumer to drain.
+		runtime.Gosched()
 	}
+	log.Warn("base: inject dropped after timeout, recv channel full",
+		"session_id", sessionID, "event_type", env.Event.Type)
 }
 
 // WriteMu returns the mutex that protects stdin writes.
