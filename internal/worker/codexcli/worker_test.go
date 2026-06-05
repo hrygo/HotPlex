@@ -1178,6 +1178,639 @@ func TestIntegrationStartSavesSessionAndResetRestarts(t *testing.T) {
 	require.NotEqual(t, firstThreadID, secondThreadID, "threadID should change after reset")
 }
 
+// ─── appConn.Send Tests ──────────────────────────────────────────────────
+
+func TestAppConnSendReturnsErrNotImplemented(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+	ch := make(chan *events.Envelope, 1)
+	conn := &appConn{
+		userID:    "user-1",
+		sessionID: "sess-1",
+		recvCh:    ch,
+		manager:   mgr,
+	}
+
+	env := events.NewEnvelope("id-1", "sess-1", 1, events.MessageStart, nil)
+	err := conn.Send(context.Background(), env)
+	require.ErrorIs(t, err, worker.ErrNotImplemented)
+}
+
+// ─── Compact Tests ────────────────────────────────────────────────────────
+
+func TestCompactNoThread(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Compact(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no active thread")
+}
+
+func TestCompactDelegatesToManager(t *testing.T) {
+	t.Parallel()
+
+	// Set up a manager with a fake stdin pipe so Call won't panic on write,
+	// but will timeout since there's no real process responding.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-compact",
+	}
+
+	err := wk.Compact(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: compact:")
+}
+
+// ─── Clear Tests ──────────────────────────────────────────────────────────
+
+func TestClearNoThread(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Clear(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no active thread")
+}
+
+func TestClearDelegatesToResetContext(t *testing.T) {
+	t.Parallel()
+
+	// Clear calls ResetContext internally.
+	// ResetContext → cleanupOldThread → Notify(thread/unsubscribe) needs stdin.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	recvCh := make(chan *events.Envelope, 1)
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-clear",
+		doneCh:     make(chan struct{}),
+		conn:       &appConn{recvCh: recvCh},
+	}
+
+	err := wk.Clear(context.Background())
+	require.NoError(t, err)
+
+	_, ok := <-recvCh
+	require.False(t, ok)
+}
+
+func TestClearWithActiveTurn(t *testing.T) {
+	t.Parallel()
+
+	// Clear with a turnID should attempt InterruptTurn before ResetContext.
+	// InterruptTurn's Notify needs a stdin writer. Provide a fake pipe.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	recvCh := make(chan *events.Envelope, 1)
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-clear2",
+		turnID:     "turn-active",
+		doneCh:     make(chan struct{}),
+		conn:       &appConn{recvCh: recvCh},
+	}
+
+	err := wk.Clear(context.Background())
+	require.NoError(t, err)
+}
+
+// ─── Rewind Tests ─────────────────────────────────────────────────────────
+
+func TestRewindNoThread(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Rewind(context.Background(), "1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no active thread")
+}
+
+func TestRewindDefaultOne(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-rewind",
+	}
+
+	// Empty targetID defaults to 1 turn.
+	err := wk.Rewind(context.Background(), "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: rewind:")
+}
+
+func TestRewindExplicitCount(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-rewind2",
+	}
+
+	// Valid count.
+	err := wk.Rewind(context.Background(), "3")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: rewind:")
+}
+
+func TestRewindInvalidCount(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-rewind3",
+	}
+
+	// Invalid count string falls back to default 1.
+	err := wk.Rewind(context.Background(), "abc")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: rewind:")
+}
+
+// ─── Input Expanded Tests ─────────────────────────────────────────────────
+
+func TestInputPermissionResponseHandled(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Input(context.Background(), "hello", map[string]any{
+		"permission_response": map[string]any{
+			"request_id": "req-1",
+			"allowed":    true,
+		},
+	})
+	// HandlePermissionResponse returns error (no pending server request),
+	// but Input returns the error from DispatchMetadata.
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending server request")
+}
+
+func TestInputQuestionResponseHandled(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Input(context.Background(), "hello", map[string]any{
+		"question_response": map[string]any{
+			"id": "req-2",
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending server request")
+}
+
+func TestInputElicitationResponseHandled(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Input(context.Background(), "hello", map[string]any{
+		"elicitation_response": map[string]any{
+			"id":     "req-3",
+			"action": "accept",
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending server request")
+}
+
+func TestInputMetadataNilPassesThrough(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	// nil metadata → DispatchMetadata returns (false, nil) → falls through
+	// to threadID check → "not started" error.
+	err := w.Input(context.Background(), "hello", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not started")
+}
+
+func TestInputCallsTurnStart(t *testing.T) {
+	t.Parallel()
+
+	// Set up a manager with fake stdin so Call can write but will timeout.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-input",
+	}
+
+	err := wk.Input(context.Background(), "hello world", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: turn/start:")
+}
+
+// ─── Wait Expanded Tests ──────────────────────────────────────────────────
+
+func TestWaitDoneChPath(t *testing.T) {
+	t.Parallel()
+
+	doneCh := make(chan struct{})
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		doneCh:     doneCh,
+	}
+
+	// Close doneCh to unblock Wait.
+	go func() { close(doneCh) }()
+
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
+func TestWaitCrashSubPath(t *testing.T) {
+	t.Parallel()
+
+	crashCh := make(chan struct{})
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		crashSub:   crashCh,
+		doneCh:     make(chan struct{}),
+	}
+
+	// Close crashCh to simulate process crash.
+	go func() { close(crashCh) }()
+
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 1, code, "crash should return exit code 1")
+}
+
+func TestWaitNilCrashSubReturnsImmediately(t *testing.T) {
+	t.Parallel()
+
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		crashSub:   nil,
+	}
+
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
+// ─── SendControlRequest Tests ─────────────────────────────────────────────
+
+func TestSendControlRequestNotStarted(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	_, err := w.SendControlRequest(context.Background(), "set_model", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not started")
+}
+
+func TestSendControlRequestSetModel(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	w.commands = NewServerCommander(w.manager, "thr-1")
+
+	_, err := w.SendControlRequest(context.Background(), "set_model", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "set_model not supported")
+}
+
+// ─── Conn Tests ───────────────────────────────────────────────────────────
+
+func TestConnAfterStartReturnsAppConn(t *testing.T) {
+	t.Parallel()
+
+	recvCh := make(chan *events.Envelope, 1)
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{IdleDrainPeriod: time.Minute}),
+		conn: &appConn{
+			userID:    "u1",
+			sessionID: "s1",
+			recvCh:    recvCh,
+		},
+	}
+
+	c := w.Conn()
+	require.NotNil(t, c)
+	require.Equal(t, "u1", c.UserID())
+	require.Equal(t, "s1", c.SessionID())
+}
+
+// ─── sandboxFromSession Tests ─────────────────────────────────────────────
+
+func TestSandboxFromSession(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		session  worker.SessionInfo
+		default_ string
+		want     string
+	}{
+		{name: "session override", session: worker.SessionInfo{Sandbox: "docker"}, default_: "workspace-write", want: "docker"},
+		{name: "fallback to default", session: worker.SessionInfo{}, default_: "workspace-write", want: "workspace-write"},
+		{name: "empty both", session: worker.SessionInfo{}, default_: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sandboxFromSession(tt.session, tt.default_)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// ─── buildThreadStartParams Tests ─────────────────────────────────────────
+
+func TestBuildThreadStartParams(t *testing.T) {
+	t.Parallel()
+
+	t.Run("minimal config", func(t *testing.T) {
+		t.Parallel()
+		params := buildThreadStartParams(worker.SessionInfo{ProjectDir: "/tmp"}, Config{})
+		require.Equal(t, "/tmp", params["cwd"])
+		_, hasModel := params["model"]
+		require.False(t, hasModel)
+		_, hasEphemeral := params["ephemeral"]
+		require.False(t, hasEphemeral)
+	})
+
+	t.Run("full config", func(t *testing.T) {
+		t.Parallel()
+		params := buildThreadStartParams(
+			worker.SessionInfo{
+				ProjectDir:      "/home/user/project",
+				Sandbox:         "docker",
+				SkipPermissions: true,
+				Images:          []string{"img1.png"},
+				JSONSchema:      `{"type":"object"}`,
+				AllowedDirs:     []string{"/data"},
+			},
+			Config{
+				Model:            "o3",
+				Sandbox:          "workspace-write",
+				Ephemeral:        true,
+				ApprovalMode:     "on-request",
+				Personality:      "friendly",
+				Color:            true,
+				StrictConfig:     true,
+				SkipGitRepoCheck: true,
+				IgnoreUserConfig: true,
+				IgnoreRules:      true,
+				LocalProvider:    true,
+				BypassHookTrust:  true,
+				OutputFile:       "/tmp/out.md",
+				ConfigProfile:    "dev",
+			},
+		)
+		require.Equal(t, "o3", params["model"])
+		require.Equal(t, "docker", params["sandbox"]) // session override
+		require.Equal(t, true, params["ephemeral"])
+		require.Equal(t, "never", params["approvalPolicy"]) // SkipPermissions → "never"
+		require.Equal(t, "friendly", params["personality"])
+		require.Equal(t, true, params["color"])
+		require.Equal(t, true, params["strictConfig"])
+		require.Equal(t, true, params["skipGitRepoCheck"])
+		require.Equal(t, true, params["ignoreUserConfig"])
+		require.Equal(t, true, params["ignoreRules"])
+		require.Equal(t, true, params["localProvider"])
+		require.Equal(t, true, params["bypassHookTrust"])
+		require.Equal(t, "/tmp/out.md", params["outputFile"])
+		require.Equal(t, "dev", params["profile"])
+		require.NotNil(t, params["images"])
+		require.Equal(t, `{"type":"object"}`, params["outputSchema"])
+		require.NotNil(t, params["additionalDirectories"])
+	})
+
+	t.Run("no skip permissions uses config approval", func(t *testing.T) {
+		t.Parallel()
+		params := buildThreadStartParams(
+			worker.SessionInfo{ProjectDir: "/tmp"},
+			Config{ApprovalMode: "on-failure"},
+		)
+		require.Equal(t, "on-failure", params["approvalPolicy"])
+	})
+}
+
+// ─── resolveConfig Tests ──────────────────────────────────────────────────
+
+func TestResolveConfig(t *testing.T) {
+	t.Parallel()
+
+	prev := GetConfig()
+	defer InitConfig(prev)
+
+	InitConfig(config.CodexCLIConfig{
+		Command:      "/usr/local/bin/codex",
+		Model:        "o3",
+		Sandbox:      "docker",
+		ApprovalMode: "never",
+		Personality:  "friendly",
+		Ephemeral:    true,
+		Color:        true,
+	})
+
+	cfg := resolveConfig()
+	require.Equal(t, "/usr/local/bin/codex", cfg.Command)
+	require.Equal(t, "o3", cfg.Model)
+	require.Equal(t, "docker", cfg.Sandbox)
+	require.Equal(t, "never", cfg.ApprovalMode)
+	require.Equal(t, "friendly", cfg.Personality)
+	require.True(t, cfg.Ephemeral)
+	require.True(t, cfg.Color)
+}
+
+// ─── Singleton Tests ─────────────────────────────────────────────────────
+
+func TestSingletonLifecycle(t *testing.T) {
+	InitSingleton(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		Command:         "codex",
+	})
+	t.Cleanup(func() { ShutdownSingleton(context.Background()) })
+
+	s := GetSingleton()
+	require.NotNil(t, s)
+	require.False(t, s.IsRunning())
+}
+
+func TestShutdownSingletonNil(t *testing.T) {
+	// Shutdown with nil singleton should not panic.
+	ShutdownSingleton(context.Background())
+}
+
+// ─── ServerCommander Tests ───────────────────────────────────────────────
+
+func TestServerCommanderCompact(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	sc := NewServerCommander(mgr, "thr-sc")
+	err := sc.Compact(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: compact:")
+}
+
+func TestServerCommanderUnknownSubtype(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	sc := NewServerCommander(mgr, "thr-sc")
+
+	_, err := sc.SendControlRequest(context.Background(), "unknown_subtype", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown control subtype")
+}
+
+func TestServerCommanderMCPOAuthMissingName(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	sc := NewServerCommander(mgr, "thr-sc")
+
+	_, err := sc.SendControlRequest(context.Background(), "mcp_oauth", map[string]any{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing server_name")
+}
+
 func TestIntegrationKillImmediatelyTerminatesIdleProcess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping: requires codex binary")
