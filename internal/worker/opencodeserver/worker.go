@@ -952,15 +952,12 @@ func (c *conn) UserID() string    { return c.userID }
 func (c *conn) SessionID() string { return c.sessionID }
 
 // Inject enqueues a synthetic event into the recv channel for in-place reset signaling.
-// Uses a 5s timeout to avoid silently dropping critical reset events when the channel is full,
-// matching the ACP acpConn.TrySend behavior.
+// Uses non-blocking send to match ACP/base.Conn behavior.
 func (c *conn) Inject(env *events.Envelope) {
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
 	select {
 	case c.recvCh <- env:
-	case <-timer.C:
-		c.log.Warn("ocs: inject timed out, recv channel full", "session_id", c.sessionID, "event_type", env.Event.Type)
+	default:
+		c.log.Warn("ocs: inject dropped, recv channel full", "session_id", c.sessionID, "event_type", env.Event.Type)
 	}
 }
 

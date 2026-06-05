@@ -36,6 +36,7 @@ type forwardContext struct {
 	sessPlatform   string
 	sessOwner      string
 	workDir        string
+	ctx            context.Context
 	startTime      time.Time
 	turnStartTime  time.Time
 	firstEvent     bool
@@ -71,6 +72,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		sessionID:     sessionID,
 		workerType:    workerType,
 		workDir:       opts.workDir,
+		ctx:           opts.ctx,
 		startTime:     time.Now(),
 		turnStartTime: time.Now(),
 		firstEvent:    true,
@@ -90,7 +92,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	if acc.Generation == 0 {
 		gen := int64(1)
 		if b.turnsQuerier != nil {
-			genCtx, genCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			genCtx, genCancel := context.WithTimeout(opts.ctx, 3*time.Second)
 			latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
 			genCancel()
 			if latest > 0 {
@@ -100,7 +102,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		acc.Generation = gen
 	}
 	if acc.TurnCount == 0 && b.turnsQuerier != nil {
-		tnCtx, tnCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		tnCtx, tnCancel := context.WithTimeout(opts.ctx, 3*time.Second)
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation)
 		tnCancel()
 		if err != nil {

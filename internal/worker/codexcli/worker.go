@@ -430,6 +430,10 @@ func (w *AppServerWorker) release() {
 }
 
 func (w *AppServerWorker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
+	// Increment reset generation so the OLD forwardEvents goroutine can detect
+	// it's stale and skip cleanupCrashedWorker (which would detach the NEW worker).
+	w.IncResetGeneration()
+
 	w.mu.Lock()
 	origSess := w.origSession
 	w.mu.Unlock()
@@ -520,6 +524,8 @@ func (w *AppServerWorker) Clear(ctx context.Context) error {
 	if turnID != "" {
 		_ = w.manager.InterruptTurn(tid, turnID)
 	}
+	// ConnReplaced is ignored: Clear is invoked over WorkerCommander (HTTP REST),
+	// bridge doesn't restart forwardEvents on Clear.
 	_, err := w.ResetContext(ctx)
 	return err
 }

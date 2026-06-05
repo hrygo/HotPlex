@@ -509,6 +509,8 @@ func (w *Worker) LastIO() time.Time {
 // The original session configuration (AllowedTools, SystemPrompt, MCPConfig, etc.)
 // is preserved from the first Start call via origSession.
 func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
+	w.IncResetGeneration()
+
 	w.Mu.Lock()
 	orig := w.origSession
 	w.Mu.Unlock()

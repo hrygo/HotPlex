@@ -20,10 +20,11 @@ import (
 
 // forwardOpts configures the forwardEvents goroutine behavior.
 type forwardOpts struct {
-	resumed    bool   // true if this goroutine was spawned by ResumeSession
-	workDir    string // workDir to use for resume retry
-	retryDepth int    // number of resume retries attempted (limits to 1)
-	lastInput  string // inherited lastInput from previous retry goroutine; used as fallback when retry worker never receives input
+	ctx        context.Context // parent context for cancellation propagation
+	resumed    bool            // true if this goroutine was spawned by ResumeSession
+	workDir    string          // workDir to use for resume retry
+	retryDepth int             // number of resume retries attempted (limits to 1)
+	lastInput  string          // inherited lastInput from previous retry goroutine; used as fallback when retry worker never receives input
 }
 
 // workerLaunchParams holds the parameters for createAndLaunchWorker.
