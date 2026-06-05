@@ -52,7 +52,7 @@ estimated_hours: 8
 | 工具调用 | `acc.ToolNames / ToolCallCount` (L128-134) | done 时 |
 | token/cost/duration | `acc.snapshot()` (L154 注入) | `injectSessionStats` 后 |
 | session 元数据 | `sessPlatform / sessOwner` (L35-41 缓存) | goroutine 启动时 |
-| generation | bridge resetGeneration 机制 | goroutine 启动时 |
+| generation | worker.ResetGenerationer 机制 | goroutine 启动时 |
 
 在 L154（injectSessionStats）与 L155（resetPerTurn）之间，数据完全就绪。
 
@@ -423,7 +423,7 @@ OCS 返回 `ResetResult{ConnReplaced: false}`，同一 `forwardEvents` goroutine
 ```go
 // bridge_forward.go forwardEvents() 循环内
 // 现有代码已有 myGen 检测（L50-52）
-if rg, ok := w.(resetGenerationer); ok {
+if rg, ok := w.(worker.ResetGenerationer); ok {
     currentGen := rg.LoadResetGeneration()
     if currentGen != myGen {
         // OCS in-place reset detected
@@ -443,7 +443,7 @@ if rg, ok := w.(resetGenerationer); ok {
 
 ```go
 // bridge.go ResetSession()
-if rg, ok := w.(resetGenerationer); ok {
+if rg, ok := w.(worker.ResetGenerationer); ok {
     rg.IncResetGeneration()
 }
 // ... ResetContext() ...
@@ -924,7 +924,7 @@ make check
 
 ### Phase 2：Accumulator
 
-5. `session_stats.go`：generation + cache write/read 字段 + resetGeneration 方法
+5. `session_stats.go`：generation + cache write/read 字段 + ResetGeneration 方法
 6. `session_stats_test.go`：generation + cache 测试
 
 ### Phase 3：Bridge 写入
