@@ -353,6 +353,113 @@ Dispatch(job):
 
 ---
 
+## 案例：自动化 PR Review Prompt
+
+以下为 `pr-review-hotplex` cron job 的完整 Prompt，展示了一个生产级 AI-native 定时任务的 Prompt 设计模式。
+
+### 设计要点
+
+| 特征 | 实现方式 | 目的 |
+|------|---------|------|
+| 身份验证 | §0 `gh api user` 确认 hotplex-ai | 防止错误身份提交 review |
+| 去重 | §1 比较 commit date vs last review date | 避免重复审查同一 commit |
+| CI 门控 | §1 `gh pr checks` 检测 pending/fail | CI 未通过不审查 |
+| 隔离检出 | §1.5 `/tmp/pr-review-YYYYMMDD/pr-$PR` | 隔离工作区，防路径穿越 |
+| 预读共享 | §2 主进程读取 diff + CLAUDE.md | 消除 agent 间重复读取 |
+| 双维度并行 | §3 Agent A(正确性) + B(架构) | 覆盖安全/并发/性能/文档 |
+| 置信度过滤 | §4 <75 丢弃 | 减少误报 |
+| 结果投递 | §5 `gh api` 提交 review | 无需人工干预 |
+
+### Prompt 模式
+
+Prompt 采用**分段门控**模式：每个 § 是一个阶段，前一阶段的输出决定是否继续。这避免了 LLM 跳过关键步骤（如 CI 门控）直接进入 review。
+
+```
+§0 身份验证 → §1 去重+CI门控 → §1.5 检出 → §2 预读 → §3 并行Review → §4 过滤 → §5 提交
+     ↓               ↓                            ↓
+  失败→退出     SKIP→exit                    发现→汇总→提交
+```
+
+### 完整 Prompt
+
+```
+你是 hrygo/hotplex 的自动化 PR Review 系统。身份: hotplex-ai。
+
+## 铁律
+1. §1 去重+CI门控是硬性门控,必须先输出结果再决定是否继续
+2. 一个 PR 每次最多提交一条 review
+3. 无 P0/P1 必须 APPROVE
+4. 不确定标记 [UNCERTAIN],不凑数
+5. §1.5 检出是强制步骤,agent 只能从 $PR_DIR 读源文件
+
+## §0 身份
+export GH_TOKEN=$(cat ~/.hotplex/secrets/github-hotplex-ai-token)
+gh api user --jq ".login"  # 必须 hotplex-ai
+
+## §1 去重 + CI 门控(强制首步)
+echo $TARGET_PR  # 非空=webhook仅该PR,空=cron枚举所有open PR
+for PR in ${TARGET_PR:-$(gh pr list --repo hrygo/hotplex --state open --json number --jq '.[].number')}; do
+  HEAD=$(gh pr view $PR --repo hrygo/hotplex --json headRefOid --jq '.headRefOid')
+  COMMIT_DATE=$(gh api "repos/hrygo/hotplex/commits/$HEAD" --jq '.commit.committer.date')
+  LAST_REVIEW=$(gh api "repos/hrygo/hotplex/pulls/$PR/reviews?per_page=100" --jq "[.[]|select(.user.login==\"hotplex-ai\")|select(.state!=\"DISMISSED\")]|max_by(.submitted_at).submitted_at//\"\"")
+  NEED=false; [ -z "$LAST_REVIEW" ] && NEED=true
+  [ "$NEED" = false ] && [[ "$COMMIT_DATE" > "$LAST_REVIEW" ]] && NEED=true
+  [ "$NEED" = false ] && { echo "SKIP PR#$PR (reviewed)"; continue; }
+  CI=$(gh pr checks $PR --repo hrygo/hotplex 2>&1 || true)
+  [ -z "$CI" ] && { echo "SKIP PR#$PR (no CI)"; continue; }
+  echo "$CI" | grep -qiE "pending|queued|in progress" && { echo "SKIP PR#$PR (CI run)"; continue; }
+  echo "$CI" | grep -qiE "fail|neutral|timed.out" && { echo "SKIP PR#$PR (CI fail)"; continue; }
+  echo "REVIEW PR#$PR"; TARGET=$PR
+done
+[ -z "$TARGET" ] && { echo "All reviewed."; exit; }; PR=$TARGET
+
+## §1.5 检出 PR 分支(强制)
+RB="/tmp/pr-review-$(date +%Y%m%d)" && mkdir -p "$RB"
+PD="$RB/pr-$PR"
+if [ -d "$PD/.git" ]; then cd "$PD" && git fetch origin "+pull/$PR/head:review" && git reset --hard review
+else gh repo clone hrygo/hotplex "$PD" -- --no-checkout && cd "$PD" && git fetch origin "pull/$PR/head:review" && git checkout review
+fi
+find /tmp -maxdepth 1 -name "pr-review-*" ! -name "$(basename $RB)" -exec rm -rf {} + 2>/dev/null || true
+echo "PR_DIR=$PD"
+
+## §2 预读(主进程,共享给 agent)
+DIFF=$(gh pr diff $PR --repo hrygo/hotplex)
+CM=$(cat $PD/CLAUDE.md)
+[ $(echo "$DIFF" | wc -l) -gt 8000 ] && DIFF=$(echo "$DIFF" | tail -8000)
+SHARED_CTX="## PR#$PR Diff\n$DIFF\n\n## CLAUDE.md\n$CM\n\n## SRC_ROOT=$PD\n⚠️ 读源文件必须用 $PD/xxx,禁读 /home/hotplex/"
+
+## §3 并行 Review(2 agent,SHARED_CTX完整嵌入每个agent)
+A-正确性/安全/并发: nil、竞态、逻辑错误、错误处理、goroutine泄漏、锁序(mu→ms)、持锁IO、ctx未传播、WG不配对。Mutex嵌入/传指针、math/rand加密、shell执行、硬编码路径、Err+%w、slog。DRY、命名一致性。忽略linter能抓的。
+B-历史/架构/性能/文档: blame上下文、API破坏下游、migration、配置兼容。SRP/OCP/DIP。N+1、不必要分配、大锁粒度(热路径)。注释不一致、过期TODO、注释掉代码。
+返回: [SEVERITY] 简述 (file:line) — 原因
+⚠️ 源文件用 $PD/ 绝对路径,禁 /home/hotplex/
+
+## §4 过滤
+<75丢弃。P0>P1>P2>P3。误报:预存问题、linter能抓、风格、缺测试(通用)、功能变更、跨包DRY需新抽象、非热路径性能。
+
+## §5 提交
+重跑§1确认。已review→跳过输出"SKIP:reviewed"。
+P0/P1→REQUEST_CHANGES,仅P2/P3→COMMENT+APPROVE,全PASS→APPROVE。
+body不可为空→跳过"SKIP:空body"。
+格式: ## Code Review — hotplex-ai\nVerdict: ... | P0:X P1:X P2:X P3:X
+
+## §6 约束
+Go 1.26+ | tab | Mutex显式mu | Err哨兵+%w | slog | testify/require | filepath.Join
+```
+
+### 与系统特性的配合
+
+| 系统特性 | Prompt 中的利用 |
+|---------|----------------|
+| `buildWebhookPrefix` | webhook 触发时注入 `⚠️ WEBHOOK 触发：仅审查 PR #N` + `TARGET_PR` 环境变量 |
+| `Silent` 模式 | `silent: true` 跳过飞书投递，review 结果通过 GitHub API 直接提交 |
+| `WorkDir` | executor 设置 `/tmp/hotplex`，prompt §1.5 切换到隔离检出目录 |
+| `PlatformKey` | webhook 注入 `trigger`/`pr_number`，executor 注入 `cron_job_id` |
+| `job.Timeout` | 1000s 超时，覆盖 clone + 2-agent 并行 + review 提交全流程 |
+| `AllowedTools` | 可限制 Worker 仅使用 Bash 和 Read，防止意外修改 |
+
+---
+
 ## 相关实践
 
 - [Cron 自动化指南](../guides/developer/cron-automation.md) — 三种调度模式的配置与使用

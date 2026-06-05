@@ -36,32 +36,28 @@ func setupRoutes(
 
 	gatewayAPI := gateway.NewGatewayAPI(log, auth, sm, bridge, deps.ConfigStore, deps.EventStore, deps.EventStore)
 
-	// withCORS wraps a handler to inject CORS headers.
-	withCORS := func(h http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			h(w, r)
-		}
+	// CORS middleware reads allowed origins from config (supports hot-reload).
+	corsOriginsFn := func() []string {
+		return deps.ConfigStore.Load().Security.AllowedOrigins
+	}
+	corsMw := security.CORSMiddleware(corsOriginsFn)
+
+	if slices.Contains(cfg.Security.AllowedOrigins, "*") {
+		log.Warn("cors: allowed_origins contains '*' — all origins permitted; set security.allowed_origins in production")
 	}
 
-	mux.HandleFunc("GET /api/sessions", withCORS(gatewayAPI.ListSessions))
-	mux.HandleFunc("POST /api/sessions", withCORS(gatewayAPI.CreateSession))
-	mux.HandleFunc("GET /api/sessions/{id}", withCORS(gatewayAPI.GetSession))
-	mux.HandleFunc("DELETE /api/sessions/{id}", withCORS(gatewayAPI.DeleteSession))
-	mux.HandleFunc("POST /api/sessions/{id}/cd", withCORS(gatewayAPI.SwitchWorkDir))
-	mux.HandleFunc("GET /api/sessions/{id}/history", withCORS(gatewayAPI.GetHistory))
-	mux.HandleFunc("GET /api/sessions/{id}/events", withCORS(gatewayAPI.GetEvents))
-	mux.HandleFunc("OPTIONS /api/sessions", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
-	mux.HandleFunc("OPTIONS /api/sessions/", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
-	mux.HandleFunc("OPTIONS /api/sessions/{id}", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
-	mux.HandleFunc("OPTIONS /api/sessions/{id}/history", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
-	mux.HandleFunc("OPTIONS /api/sessions/{id}/events", withCORS(func(w http.ResponseWriter, r *http.Request) {}))
+	mux.Handle("GET /api/sessions", corsMw(http.HandlerFunc(gatewayAPI.ListSessions)))
+	mux.Handle("POST /api/sessions", corsMw(http.HandlerFunc(gatewayAPI.CreateSession)))
+	mux.Handle("GET /api/sessions/{id}", corsMw(http.HandlerFunc(gatewayAPI.GetSession)))
+	mux.Handle("DELETE /api/sessions/{id}", corsMw(http.HandlerFunc(gatewayAPI.DeleteSession)))
+	mux.Handle("POST /api/sessions/{id}/cd", corsMw(http.HandlerFunc(gatewayAPI.SwitchWorkDir)))
+	mux.Handle("GET /api/sessions/{id}/history", corsMw(http.HandlerFunc(gatewayAPI.GetHistory)))
+	mux.Handle("GET /api/sessions/{id}/events", corsMw(http.HandlerFunc(gatewayAPI.GetEvents)))
+	mux.Handle("OPTIONS /api/sessions", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	mux.Handle("OPTIONS /api/sessions/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	mux.Handle("OPTIONS /api/sessions/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	mux.Handle("OPTIONS /api/sessions/{id}/history", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	mux.Handle("OPTIONS /api/sessions/{id}/events", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 
 	mux.Handle("GET /ws", hub.HandleHTTP(auth, handler, bridge, deps.CookieAuth))
 
@@ -78,18 +74,19 @@ func setupRoutes(
 	}
 
 	adminAPI := admin.New(admin.Deps{
-		Log:           log,
-		Config:        configAdapter,
-		SessionMgr:    sessionAdapter,
-		TurnStats:     turnsAdapter,
-		Hub:           hubAdapter,
-		Bridge:        bridgeAdapter,
-		ConfigWatcher: configWatcherAdapter,
-		Cron:          cronProvider,
-		BotLister:     &botListerAdapter{registry: messaging.DefaultBotRegistry()},
-		BotConfig:     newBotConfigAdapter(deps.ConfigStore, cfg.AgentConfig.ConfigDir, ""),
-		Version:       versionString,
-		NewSessionID:  newSessionID,
+		Log:              log,
+		Config:           configAdapter,
+		SessionMgr:       sessionAdapter,
+		TurnStats:        turnsAdapter,
+		Hub:              hubAdapter,
+		Bridge:           bridgeAdapter,
+		ConfigWatcher:    configWatcherAdapter,
+		Cron:             cronProvider,
+		BotLister:        &botListerAdapter{registry: messaging.DefaultBotRegistry()},
+		BotConfig:        newBotConfigAdapter(deps.ConfigStore, cfg.AgentConfig.ConfigDir, ""),
+		Version:          versionString,
+		NewSessionID:     newSessionID,
+		AllowedOriginsFn: corsOriginsFn,
 		Restart: func() error {
 			inst, err := findRunningGateway()
 			if err != nil {
@@ -206,6 +203,11 @@ func setupRoutes(
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/docs/assets/logo.png", http.StatusMovedPermanently)
 	})
+
+	// security.txt (RFC 9116) — contact info from config, no hardcoded domains.
+	mux.Handle("GET /.well-known/security.txt", security.SecurityTxtHandler(
+		func() string { return deps.ConfigStore.Load().Security.SecurityContact },
+	))
 
 	// Webchat SPA is NOT registered on the mux directly.
 	// Instead, the caller wraps the mux with a fallback handler below.

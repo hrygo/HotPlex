@@ -16,20 +16,21 @@ import (
 // without requiring a restart. All other fields are treated as static.
 // Format: "TopLevel.NestedField" (matches mapstructure tags).
 var hotReloadableFields = map[string]bool{
-	"log.level":                true,
-	"session.gc_scan_interval": true,
-	"pool.max_size":            true,
-	"pool.max_idle_per_user":   true,
-	"security.api_keys":        true,
-	"security.allowed_origins": true,
-	"worker.max_lifetime":      true,
-	"worker.idle_timeout":      true,
-	"worker.execution_timeout": true,
-	"worker.auto_retry":        true,
-	"admin.requests_per_sec":   true,
-	"admin.burst":              true,
-	"admin.tokens":             true,
-	"admin.allowed_cidrs":      true,
+	"log.level":                 true,
+	"session.gc_scan_interval":  true,
+	"pool.max_size":             true,
+	"pool.max_idle_per_user":    true,
+	"security.api_keys":         true,
+	"security.allowed_origins":  true,
+	"security.security_contact": true,
+	"worker.max_lifetime":       true,
+	"worker.idle_timeout":       true,
+	"worker.execution_timeout":  true,
+	"worker.auto_retry":         true,
+	"admin.requests_per_sec":    true,
+	"admin.burst":               true,
+	"admin.tokens":              true,
+	"admin.allowed_cidrs":       true,
 }
 
 // staticFields are config fields that require a restart to take effect.

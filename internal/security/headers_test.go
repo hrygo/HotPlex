@@ -110,3 +110,21 @@ func TestSecurityHeaders(t *testing.T) {
 		require.Equal(t, strict, rec.Header().Get("Content-Security-Policy"))
 	})
 }
+
+func TestDefaultDocsCSP_NotPermissive(t *testing.T) {
+	t.Parallel()
+	// After tightening, docs CSP should NOT contain permissive connect-src
+	// (no bare http:/https:/ws:/wss: scheme keywords).
+	require.False(t, IsPermissiveCSP(DefaultDocsCSP),
+		"DefaultDocsCSP connect-src should be restricted to 'self' only")
+	// Verify connect-src 'self' is present (not accidentally removed).
+	require.Contains(t, DefaultDocsCSP, "connect-src 'self';")
+}
+
+func TestDefaultWebChatCSP_IsPermissive(t *testing.T) {
+	t.Parallel()
+	// WebChat CSP intentionally keeps permissive connect-src for WebSocket
+	// connections to the gateway (ws:/wss: scheme keywords).
+	require.True(t, IsPermissiveCSP(DefaultWebChatCSP),
+		"DefaultWebChatCSP should remain permissive for zero-config remote deployments")
+}
