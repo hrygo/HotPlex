@@ -492,6 +492,14 @@ func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body ma
 	return ctrl.SendControlRequest(ctx, subtype, body)
 }
 
+// UpdateSystemPrompt updates the stored origSession.SystemPrompt so that
+// the next ResetContext uses the reloaded agent config.
+func (w *Worker) UpdateSystemPrompt(prompt string) {
+	w.Mu.Lock()
+	w.origSession.SystemPrompt = prompt
+	w.Mu.Unlock()
+}
+
 func (w *Worker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }

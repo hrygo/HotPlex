@@ -667,3 +667,81 @@ func TestBuildWorkerInfo_MCPInjection(t *testing.T) {
 		})
 	}
 }
+
+// ─── Test ResetSession Reloads Agent Config ──────────────────────────────────
+
+// mockPromptUpdater is a mockBridgeWorker that also implements SystemPromptUpdater.
+type mockPromptUpdater struct {
+	mockBridgeWorker
+	updatedPrompt string
+}
+
+func (m *mockPromptUpdater) UpdateSystemPrompt(prompt string) {
+	m.updatedPrompt = prompt
+}
+
+var _ worker.SystemPromptUpdater = (*mockPromptUpdater)(nil)
+
+func TestResetSession_ReloadsAgentConfig(t *testing.T) {
+	t.Parallel()
+
+	// Set up agent config dir with a SOUL.md
+	dir := t.TempDir()
+	writeAgentConfigFile(t, dir, "SOUL.md", "Updated persona v2.")
+
+	hub := newTestHub(t)
+	sm := new(mockBridgeSM)
+	b := NewBridge(BridgeDeps{
+		Log:            slog.Default(),
+		Hub:            hub,
+		SM:             sm,
+		AgentConfigDir: dir,
+	})
+
+	sid := "test-reset-reload-session"
+	mw := &mockPromptUpdater{}
+
+	sm.On("GetWorker", sid).Return(mw)
+	sm.On("Get", sid).Return(&session.SessionInfo{
+		ID:       sid,
+		Platform: "webchat",
+		BotID:    "bot-1",
+	}, nil)
+
+	err := b.ResetSession(context.Background(), sid)
+	require.NoError(t, err)
+
+	assert.Contains(t, mw.updatedPrompt, "Updated persona v2.")
+	sm.AssertExpectations(t)
+}
+
+func TestResetSession_NoUpdater_NoReload(t *testing.T) {
+	t.Parallel()
+
+	// Set up agent config dir so we can verify it's NOT used when worker lacks SystemPromptUpdater.
+	dir := t.TempDir()
+	writeAgentConfigFile(t, dir, "SOUL.md", "Should not appear.")
+
+	hub := newTestHub(t)
+	sm := new(mockBridgeSM)
+	b := NewBridge(BridgeDeps{
+		Log:            slog.Default(),
+		Hub:            hub,
+		SM:             sm,
+		AgentConfigDir: dir,
+	})
+
+	sid := "test-no-updater"
+	mw := &mockBridgeWorker{} // does NOT implement SystemPromptUpdater
+
+	sm.On("GetWorker", sid).Return(mw)
+	sm.On("Get", sid).Return(&session.SessionInfo{
+		ID:       sid,
+		Platform: "webchat",
+	}, nil)
+
+	err := b.ResetSession(context.Background(), sid)
+	require.NoError(t, err)
+	// No crash, no panic — worker without SystemPromptUpdater is silently skipped.
+	sm.AssertExpectations(t)
+}

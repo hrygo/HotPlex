@@ -634,6 +634,17 @@ func (w *Worker) supportsCapability(name string) bool {
 	return true
 }
 
+// ─── UpdateSystemPrompt ──────────────────────────────────────────────────
+
+// UpdateSystemPrompt replaces the stored system prompt and resets the injection
+// flag so the next user input in the new ACP session carries the reloaded config.
+func (w *Worker) UpdateSystemPrompt(prompt string) {
+	w.Mu.Lock()
+	w.systemPrompt = prompt
+	w.Mu.Unlock()
+	w.systemPromptInjected.Store(false)
+}
+
 // ─── ResetContext ────────────────────────────────────────────────────────────
 
 func (w *Worker) ResetContext(ctx context.Context) error {

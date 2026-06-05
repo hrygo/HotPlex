@@ -854,6 +854,14 @@ func (w *AppServerWorker) Health() worker.WorkerHealth {
 	return w.BaseWorker.Health(worker.TypeCodexCLI)
 }
 
+// UpdateSystemPrompt updates the stored origSession.SystemPrompt so that
+// the next ResetContext uses the reloaded agent config.
+func (w *AppServerWorker) UpdateSystemPrompt(prompt string) {
+	w.mu.Lock()
+	w.origSession.SystemPrompt = prompt
+	w.mu.Unlock()
+}
+
 func (w *AppServerWorker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }
