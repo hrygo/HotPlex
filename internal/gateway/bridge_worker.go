@@ -236,7 +236,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 // by a concurrent ResumeSession or attemptResumeFallback.
 func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Worker) {
 	acc := b.getOrInitAccum(sessionID, "", time.Now())
-	b.log.Debug("bridge: cleaning up crashed worker", "session_id", sessionID, "turn_count", acc.TurnCount)
+	b.log.Debug("bridge: cleaning up crashed worker", "session_id", sessionID, "turn_count", acc.TurnCount.Load())
 	if b.sm == nil {
 		return
 	}

@@ -260,6 +260,10 @@ func (m *Manager) Kill() error {
 	// to kill orphaned descendants that escaped the PGID.
 	m.closeJobHandle()
 	if m.pgid > 0 {
+		// ForceKill(pgid) is redundant here — ForceKillTree also calls it
+		// internally (idempotent SIGKILL). Kept for clarity: the explicit
+		// kill(-pgid) targets the main process group, while ForceKillTree
+		// handles orphaned children that created their own process groups.
 		_ = ForceKill(m.pgid)
 		ForceKillTree(m.pgid, m.log)
 		m.log.Info("proc: force killed", "pgid", m.pgid)

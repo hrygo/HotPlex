@@ -419,7 +419,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 
 	b.accumMu.Lock()
 	if acc, ok := b.accum[sessionID]; ok {
-		acc.TurnCount = 0
+		acc.TurnCount.Store(0)
 		if result.ConnReplaced {
 			acc.Generation.Add(1)
 		}

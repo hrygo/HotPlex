@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -664,6 +665,91 @@ func TestBuildWorkerInfo_MCPInjection(t *testing.T) {
 			info := b.buildWorkerInfo("session-1", "user-1", "/tmp", si)
 			assert.Equal(t, tt.wantMCP, info.MCPConfig, "MCPConfig mismatch")
 			assert.Equal(t, tt.wantStrict, info.StrictMCPConfig, "StrictMCPConfig mismatch")
+		})
+	}
+}
+
+func TestHandleInternalReset(t *testing.T) {
+	t.Parallel()
+
+	gen := int64(5)
+	tests := []struct {
+		name       string
+		data       any
+		wantGenSet bool
+	}{
+		{
+			name:       "typed InternalResetData",
+			data:       events.InternalResetData{Generation: gen},
+			wantGenSet: true,
+		},
+		{
+			name:       "map with int64 generation",
+			data:       map[string]any{"generation": int64(5)},
+			wantGenSet: true,
+		},
+		{
+			name:       "map with float64 generation",
+			data:       map[string]any{"generation": float64(5)},
+			wantGenSet: true,
+		},
+		{
+			name:       "map with json.Number generation",
+			data:       map[string]any{"generation": json.Number("5")},
+			wantGenSet: true,
+		},
+		{
+			name:       "map without generation key",
+			data:       map[string]any{"other": "value"},
+			wantGenSet: false,
+		},
+		{
+			name:       "map with string generation",
+			data:       map[string]any{"generation": "not-a-number"},
+			wantGenSet: false,
+		},
+		{
+			name:       "unknown type",
+			data:       "invalid",
+			wantGenSet: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			hub := newTestHub(t)
+			b := &Bridge{
+				log:   slog.Default(),
+				sm:    new(mockBridgeSM),
+				hub:   hub,
+				accum: make(map[string]*sessionAccumulator),
+			}
+
+			env := &events.Envelope{
+				Event: events.Event{
+					Type: events.KindInternalReset,
+					Data: tt.data,
+				},
+			}
+
+			fc := &forwardContext{
+				sessionID: "sess-test",
+			}
+
+			acc := b.getOrInitAccum("sess-test", "", time.Now())
+			acc.Generation.Store(10)
+
+			b.handleInternalReset(env, "sess-test", fc)
+
+			if tt.wantGenSet {
+				assert.Equal(t, int32(0), acc.TurnCount.Load())
+				assert.Equal(t, int64(11), acc.Generation.Load())
+			} else {
+				assert.Equal(t, int32(0), acc.TurnCount.Load())
+				assert.Equal(t, int64(10), acc.Generation.Load())
+			}
 		})
 	}
 }

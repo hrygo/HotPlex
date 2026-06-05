@@ -13,7 +13,7 @@ import (
 type sessionAccumulator struct {
 	Generation      atomic.Int64 // session reset generation (monotonic), atomic for concurrent access
 	AppliedResetGen atomic.Int64 // last worker resetGen applied to Generation (idempotent guard)
-	TurnCount       int          // generation-scoped turn counter
+	TurnCount       atomic.Int32 // generation-scoped turn counter (atomic for concurrent access)
 	ToolCallCount   int
 	TotalCostUSD    float64
 	TotalInput      int64 // cumulative input tokens consumed across turns
@@ -167,7 +167,7 @@ func (a *sessionAccumulator) snapshot() map[string]any {
 		}
 	}
 	return map[string]any{
-		"turn_count":       a.TurnCount,
+		"turn_count":       a.TurnCount.Load(),
 		"tool_call_count":  a.ToolCallCount,
 		"duration":         elapsed.Round(time.Second).String(),
 		"duration_seconds": elapsed.Seconds(),

@@ -101,7 +101,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		}
 		acc.Generation.Store(gen)
 	}
-	if acc.TurnCount == 0 && b.turnsQuerier != nil {
+	if acc.TurnCount.Load() == 0 && b.turnsQuerier != nil {
 		tnCtx, tnCancel := context.WithTimeout(opts.ctx, 3*time.Second)
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()
@@ -109,7 +109,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			b.log.Warn("turns: restore turn num", "error", err)
 		}
 		if tn > 0 {
-			acc.TurnCount = tn
+			acc.TurnCount.Store(int32(tn))
 		}
 	}
 
@@ -131,7 +131,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 				Owner:      fc.sessOwner,
 				Model:      acc.ModelName,
 				Generation: acc.Generation.Load(),
-				TurnNum:    acc.TurnCount,
+				TurnNum:    int(acc.TurnCount.Load()),
 			})
 			_ = w.Terminate(context.Background())
 		})
@@ -305,6 +305,12 @@ func (b *Bridge) handleInternalReset(env *events.Envelope, sessionID string, fc 
 			data = events.InternalResetData{Generation: v}
 		case float64:
 			data = events.InternalResetData{Generation: int64(v)}
+		case json.Number:
+			if n, err := v.Int64(); err == nil {
+				data = events.InternalResetData{Generation: n}
+			} else {
+				return
+			}
 		default:
 			return
 		}
@@ -316,7 +322,7 @@ func (b *Bridge) handleInternalReset(env *events.Envelope, sessionID string, fc 
 		acc.Generation.Add(1)
 		acc.AppliedResetGen.Store(data.Generation)
 	}
-	acc.TurnCount = 0
+	acc.TurnCount.Store(0)
 	fc.turnText.Reset()
 }
 
@@ -342,7 +348,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 		if dd, ok := asDoneData(env.Event.Data); ok {
 			acc.mergePerTurnStats(dd)
 		}
-		acc.TurnCount++
+		acc.TurnCount.Add(1)
 		acc.TurnDurationMs = time.Since(fc.turnStartTime).Milliseconds()
 		acc.computePerTurnDeltas()
 
@@ -356,7 +362,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 		acc.resetPerTurn()
 		if b.log.Enabled(context.Background(), slog.LevelDebug) {
 			b.log.Debug("bridge: turn completed",
-				"session_id", sessionID, "worker_type", fc.workerType, "turn", acc.TurnCount,
+				"session_id", sessionID, "worker_type", fc.workerType, "turn", acc.TurnCount.Load(),
 				"duration", time.Since(fc.turnStartTime).Round(time.Millisecond),
 				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount)
 		}
@@ -552,7 +558,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		acc := b.getOrInitAccum(p.sessionID, "", p.startTime)
 		b.log.Warn("bridge: worker exited with non-zero code, sending crash error",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode,
-			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount)
+			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount.Load())
 		observability.WorkerCrashes().Add(context.TODO(), 1, metric.WithAttributes(attribute.String("worker_type", string(workerType)), attribute.String("exit_code", fmt.Sprintf("%d", exitCode))))
 		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
 		b.captureSyntheticEvent(syntheticTurnParams{
@@ -564,7 +570,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			Owner:      p.sessOwner,
 			Model:      acc.ModelName,
 			Generation: acc.Generation.Load(),
-			TurnNum:    acc.TurnCount,
+			TurnNum:    int(acc.TurnCount.Load()),
 		})
 	} else if exitCode == -1 {
 		b.sendError(p.sessionID, events.ErrCodeSessionTerminated, "worker terminated (killed)")
@@ -618,7 +624,7 @@ func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64
 		turn := &eventstore.TurnWriteRequest{
 			SessionID:  sessionID,
 			Generation: acc.Generation.Load(),
-			TurnNum:    acc.TurnCount + 1,
+			TurnNum:    int(acc.TurnCount.Load()) + 1,
 			Seq:        seq,
 			Role:       eventstore.RoleUser,
 			Content:    content,
@@ -739,7 +745,7 @@ func (b *Bridge) captureAssistantTurn(sessionID string, seq int64, acc *sessionA
 	turn := &eventstore.TurnWriteRequest{
 		SessionID:        sessionID,
 		Generation:       acc.Generation.Load(),
-		TurnNum:          acc.TurnCount,
+		TurnNum:          int(acc.TurnCount.Load()),
 		Seq:              seq,
 		Role:             eventstore.RoleAssistant,
 		Content:          content,

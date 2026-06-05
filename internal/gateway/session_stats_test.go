@@ -218,7 +218,6 @@ func TestSessionAccumulator_Snapshot_Precise(t *testing.T) {
 
 func TestSessionAccumulator_Snapshot(t *testing.T) {
 	acc := &sessionAccumulator{
-		TurnCount:     3,
 		ToolCallCount: 12,
 		TotalInput:    48434,
 		TotalOutput:   7821,
@@ -228,9 +227,10 @@ func TestSessionAccumulator_Snapshot(t *testing.T) {
 		ModelName:     "Sonnet",
 		StartedAt:     time.Now().Add(-222 * time.Second),
 	}
+	acc.TurnCount.Store(3)
 
 	snap := acc.snapshot()
-	require.Equal(t, 3, snap["turn_count"])
+	require.Equal(t, int32(3), snap["turn_count"])
 	require.Equal(t, 12, snap["tool_call_count"])
 	require.Equal(t, int64(48434), snap["total_input_tok"])
 	require.Equal(t, int64(7821), snap["total_output_tok"])
