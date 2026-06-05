@@ -538,6 +538,21 @@ func (w *Worker) Terminate(ctx context.Context) error {
 		_ = conn.Close()
 	}
 
+	// Close the stdout pipe to unblock client.readLoop's bufio.Scanner.Scan().
+	// Without this, Scan() blocks forever when the process is idle because
+	// context cancellation does NOT interrupt an in-progress Scan() call.
+	// Closing the pipe causes Scan() to return io.EOF, which lets readLoop
+	// exit and close the client.Done() channel promptly.
+	// proc.Close() is idempotent — the subsequent BaseWorker.Terminate →
+	// proc.Terminate → m.Close() call path will be a harmless no-op since
+	// stdin/stdout are already nil.
+	w.Mu.Lock()
+	proc := w.Proc
+	w.Mu.Unlock()
+	if proc != nil {
+		_ = proc.Close()
+	}
+
 	// Clear stale pending permission/request entries (session teardown cleanup).
 	w.pendingPerm.Range(func(key, _ any) bool {
 		w.pendingPerm.Delete(key)

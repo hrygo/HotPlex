@@ -377,7 +377,12 @@ func (m *Manager) UpdateWorkDir(ctx context.Context, id, workDir string) error {
 // ms.info is unchanged, eliminating the need for rollback.
 // Caller must hold ms.mu for write; this method temporarily releases ms.mu
 // for the DB write and re-acquires it before returning.
-func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from, to events.SessionState, termReason string) error {
+// Returns a worker.Worker that the caller must Terminate (or Kill) outside
+// the session mutex to avoid blocking concurrent reads during graceful shutdown.
+//
+// IMPORTANT: the caller MUST NOT call Terminate/Kill on the returned worker
+// while holding ms.mu — doing so re-introduces the deadlock described in #655.
+func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from, to events.SessionState, termReason string) (worker.Worker, error) {
 	// Build the candidate state as a value copy (never mutates ms.info in-place).
 	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
 	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
@@ -398,37 +403,29 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 
 	if dbErr != nil {
 		// ms.info untouched — no rollback needed.
-		return dbErr
+		return nil, dbErr
 	}
 
 	// Commit: replace ms.info with the persisted snapshot.
 	ms.info = candidate
 
-	if to == events.StateTerminated || to == events.StateDeleted {
-		// Record worker execution duration and decrement running gauge before killing.
-		if !ms.startedAt.IsZero() && ms.worker != nil {
+	// Capture worker reference and nil under lock to prevent DetachWorker from
+	// releasing quota a second time. The caller must Terminate the returned
+	// worker OUTSIDE the session mutex — worker.Terminate() can block for
+	// seconds during graceful shutdown (SIGTERM + grace period), and holding
+	// ms.mu during that time blocks all concurrent reads (Get, GetWorker).
+	var workerToTerminate worker.Worker
+	if (to == events.StateTerminated || to == events.StateDeleted) && ms.worker != nil {
+		// Record worker execution duration and decrement running gauge.
+		if !ms.startedAt.IsZero() {
 			observability.WorkerExecDuration().Record(ctx, time.Since(ms.startedAt).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(ms.info.WorkerType))))
 		}
-		if ms.worker != nil {
-			workersRunningGauge(string(ms.info.WorkerType)).Add(-1)
-			// Release quota only when worker is still attached (DetachWorker may
-			// have already released it on the bridge cleanup path).
-			m.releaseWorkerQuota(ctx, ms)
-		}
-		// Gracefully terminate the worker process with 5s grace period.
-		// Safe: ms.mu is held by the caller, and worker.Terminate() does not
-		// acquire any session manager locks (it uses syscall.Kill only).
-		if ms.worker != nil {
-			terminateCtx, cancel := context.WithTimeout(ctx, base.GracefulShutdownTimeout)
-			defer cancel()
-			if err := ms.worker.Terminate(terminateCtx); err != nil {
-				m.log.Warn("session: worker terminate failed", "session_id", ms.info.ID, "err", err)
-			}
-			// Nil the pointer to prevent DetachWorker from releasing quota a
-			// second time (e.g. when forwardEvents goroutine exits after the
-			// worker process dies). Without this, pool.totalCount underflows.
-			ms.worker = nil
-		}
+		workersRunningGauge(string(ms.info.WorkerType)).Add(-1)
+		// Release quota only when worker is still attached (DetachWorker may
+		// have already released it on the bridge cleanup path).
+		m.releaseWorkerQuota(ctx, ms)
+		workerToTerminate = ms.worker
+		ms.worker = nil
 	}
 
 	m.log.Info("session: transitioned", "session_id", ms.info.ID, "from", from, "to", to)
@@ -452,7 +449,23 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 
 	m.updateRunningIndexForTransition(ms.info.ID, from, to)
 
-	return nil
+	return workerToTerminate, nil
+}
+
+// terminateWorkerGracefully sends SIGTERM with a full grace period timeout.
+// Uses context.WithoutCancel to inherit OTel trace context from ctx while
+// ensuring the grace period is not shortened by parent cancellation — the
+// previous code used the parent ctx directly, allowing parent cancel (e.g.
+// GC tick ctx) to truncate the graceful shutdown window before SIGKILL fires.
+func (m *Manager) terminateWorkerGracefully(ctx context.Context, w worker.Worker, sessionID string) {
+	if w == nil {
+		return
+	}
+	terminateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), base.GracefulShutdownTimeout)
+	defer cancel()
+	if err := w.Terminate(terminateCtx); err != nil {
+		m.log.Warn("session: worker terminate failed", "session_id", sessionID, "err", err)
+	}
 }
 
 // forceTerminateInMemory performs in-memory state cleanup when transitionState fails
@@ -506,6 +519,9 @@ func (m *Manager) Transition(ctx context.Context, id string, to events.SessionSt
 // TransitionWithReason transitions a session with an explicit termination reason.
 // termReason is used as the label value for SessionsTerminated when transitioning
 // to StateTerminated (e.g., "idle_timeout", "max_lifetime", "zombie", "admin_kill").
+//
+// Uses explicit ms.mu.Unlock() instead of defer — worker.Terminate() must run
+// outside the session mutex to prevent blocking concurrent reads (#655).
 func (m *Manager) TransitionWithReason(ctx context.Context, id string, to events.SessionState, termReason string) error {
 	if m == nil {
 		return ErrSessionNotFound
@@ -516,17 +532,20 @@ func (m *Manager) TransitionWithReason(ctx context.Context, id string, to events
 	}
 
 	ms.mu.Lock()
-	defer ms.mu.Unlock()
-
 	from := ms.info.State
 	if from == to {
+		ms.mu.Unlock()
 		return nil // idempotent: already in target state
 	}
 	if !events.IsValidTransition(from, to) {
+		ms.mu.Unlock()
 		return fmt.Errorf("%w: %s → %s", ErrInvalidTransition, from, to)
 	}
 
-	return m.transitionState(ctx, ms, from, to, termReason)
+	workerToTerminate, err := m.transitionState(ctx, ms, from, to, termReason)
+	ms.mu.Unlock()
+	m.terminateWorkerGracefully(ctx, workerToTerminate, id)
+	return err
 }
 
 // TransitionWithInput performs a state transition and processes user input
@@ -554,10 +573,12 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 		if maxTurns > 0 && ms.TurnCount > maxTurns {
 			m.log.Warn("session: max turns exceeded, initiating anti-pollution restart",
 				"session_id", id, "turn_count", ms.TurnCount, "max_turns", maxTurns)
-			// transitionState handles worker termination when target is TERMINATED.
+			// transitionState returns worker to terminate outside lock.
 			var workerToKill worker.Worker
+			var workerToTerminate worker.Worker
 			if events.IsValidTransition(from, events.StateTerminated) {
-				if err := m.transitionState(ctx, ms, from, events.StateTerminated, "max_turns"); err != nil {
+				wt, err := m.transitionState(ctx, ms, from, events.StateTerminated, "max_turns")
+				if err != nil {
 					// Deliberate escape hatch: DB persistence failed, but we
 					// force-terminate in-memory to ensure worker cleanup.
 					// DB consistency is sacrificed here — the session may
@@ -565,6 +586,8 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 					m.log.Error("session: max-turns state transition failed, force-terminating in-memory state",
 						"session_id", id, "err", err)
 					workerToKill = m.forceTerminateInMemory(ctx, ms, from, "max_turns")
+				} else {
+					workerToTerminate = wt
 				}
 			} else {
 				// Escape hatch: invalid transition — force-terminate in-memory.
@@ -573,8 +596,10 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 				workerToKill = m.forceTerminateInMemory(ctx, ms, from, "max_turns")
 			}
 			ms.mu.Unlock()
-			// Kill worker outside lock only if transitionState did not handle it.
-			if workerToKill != nil {
+			// Terminate/kill worker outside lock (only one will be non-nil).
+			if workerToTerminate != nil {
+				m.terminateWorkerGracefully(ctx, workerToTerminate, id)
+			} else if workerToKill != nil {
 				if err := workerToKill.Kill(); err != nil {
 					m.log.Warn("session: worker kill failed during max-turns cleanup",
 						"session_id", id, "err", err)
@@ -584,8 +609,9 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 		}
 	}
 
-	err := m.transitionState(ctx, ms, from, to, "client_input")
+	workerToTerminate, err := m.transitionState(ctx, ms, from, to, "client_input")
 	ms.mu.Unlock()
+	m.terminateWorkerGracefully(ctx, workerToTerminate, id)
 	return err
 }
 
