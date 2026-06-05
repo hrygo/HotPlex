@@ -302,7 +302,7 @@ func (b *Bridge) handleInternalReset(env *events.Envelope, sessionID string, fc 
 	default:
 		return
 	}
-	acc := b.getOrInitAccum(sessionID, "", fc.startTime)
+	acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
 	if acc.AppliedResetGen < data.Generation {
 		acc.Generation++
 		acc.AppliedResetGen = data.Generation
