@@ -430,16 +430,14 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 		return nil
 	}
 
-	// Increment reset generation BEFORE spawning new forwardEvents so the OLD
-	// goroutine detects the generation mismatch and skips cleanupCrashedWorker.
-	if rg, ok := w.(worker.ResetGenerationer); ok {
-		rg.IncResetGeneration()
-	}
+	// The worker already incremented resetGeneration in its ResetContext
+	// (before terminating the old process), so the OLD forwardEvents goroutine
+	// can detect the generation mismatch. No need to increment again here.
 
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()
-		b.forwardEvents(w, sessionID, forwardOpts{})
+		b.forwardEvents(w, sessionID, forwardOpts{ctx: ctx})
 	}()
 
 	return nil

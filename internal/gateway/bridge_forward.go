@@ -448,13 +448,11 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	// goroutine is already managing the replacement worker. This OLD goroutine must
 	// exit silently — cleanupCrashedWorker would detach the NEW worker and delete
 	// the accumulator, breaking the session.
-	if p.resetGen > 0 {
-		if rg, ok := w.(worker.ResetGenerationer); ok && rg.LoadResetGeneration() != p.resetGen {
-			b.log.Info("bridge: worker exit from stale forwardEvents after reset, skipping cleanup",
-				"session_id", p.sessionID, "worker_type", workerType,
-				"my_gen", p.resetGen, "current_gen", rg.LoadResetGeneration())
-			return
-		}
+	if rg, ok := w.(worker.ResetGenerationer); ok && rg.LoadResetGeneration() != p.resetGen {
+		b.log.Info("bridge: worker exit from stale forwardEvents after reset, skipping cleanup",
+			"session_id", p.sessionID, "worker_type", workerType,
+			"my_gen", p.resetGen, "current_gen", rg.LoadResetGeneration())
+		return
 	}
 
 	// AEP-020: Worker.Recv() closed — get exit code to determine crash vs normal exit.

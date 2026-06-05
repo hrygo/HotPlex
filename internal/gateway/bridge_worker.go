@@ -53,6 +53,9 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	if params.forwardOpts == nil {
 		params.forwardOpts = &forwardOpts{}
 	}
+	if params.forwardOpts.ctx == nil {
+		params.forwardOpts.ctx = params.ctx
+	}
 
 	start := time.Now()
 	defer func() {
