@@ -418,7 +418,7 @@ if acc.Generation == 0 {
 
 **OCS Worker（in-place 重置）**：
 
-OCS 实现了 `InPlaceReseter`，同一 `forwardEvents` goroutine 继续运行。需要在 goroutine 内部检测重置：
+OCS 返回 `ResetResult{ConnReplaced: false}`，同一 `forwardEvents` goroutine 继续运行。Worker 通过 `EventInjector.Inject()` 发送 `internal_reset` 事件：
 
 ```go
 // bridge_forward.go forwardEvents() 循环内

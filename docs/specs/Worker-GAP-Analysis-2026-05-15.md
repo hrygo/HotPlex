@@ -76,8 +76,8 @@
 |------|:--:|:---:|------|
 | `Worker` | ✅ | ✅ | 核心生命周期 |
 | `ControlRequester` | ✅ | ✅ | `SendControlRequest` |
-| `SessionFileChecker` | ✅ | ❌ | `HasSessionFiles()` — Resume 前检查文件是否存在 |
-| `InPlaceReseter` | ❌ | ✅ | 就地重置（HTTP API vs 杀进程） |
+| ~~`SessionFileChecker`~~ | — | — | 已删除，逻辑内化到 Claude Code worker |
+| ~~`InPlaceReseter`~~ | — | — | 已删除，由 `ResetResult{ConnReplaced}` 替代 |
 | `WorkerCommander` | ❌ | ✅ | `Compact/Clear/Rewind` 结构化命令 |
 | `WorkerSessionIDHandler` | ❌ | ✅ | 内部 session ID 管理 |
 | `InputRecoverer` | ❌ | ✅ | 崩溃恢复时重新投递输入 |

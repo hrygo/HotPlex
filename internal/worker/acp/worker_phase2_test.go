@@ -613,7 +613,7 @@ func TestClear_IncResetGeneration(t *testing.T) {
 	require.Equal(t, genBefore+1, genAfter, "Clear should increment reset generation exactly once")
 }
 
-func TestResetContext_DoesNotIncResetGeneration(t *testing.T) {
+func TestResetContext_IncrementsResetGeneration(t *testing.T) {
 	t.Parallel()
 
 	agentStdinR, agentStdinW := io.Pipe()

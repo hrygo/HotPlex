@@ -35,6 +35,7 @@ type forwardContext struct {
 	workerType     worker.WorkerType
 	sessPlatform   string
 	sessOwner      string
+	workDir        string
 	startTime      time.Time
 	turnStartTime  time.Time
 	firstEvent     bool
@@ -63,6 +64,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	fc := &forwardContext{
 		sessionID:     sessionID,
 		workerType:    workerType,
+		workDir:       opts.workDir,
 		startTime:     time.Now(),
 		turnStartTime: time.Now(),
 		firstEvent:    true,
@@ -111,7 +113,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			b.log.Warn("bridge: turn timeout exceeded, terminating worker",
 				"session_id", sessionID, "worker_type", workerType, "turn_timeout", b.turnTimeout)
 			b.sendError(sessionID, events.ErrCodeTurnTimeout, "Turn exceeded %v time limit and was terminated.", b.turnTimeout)
-			acc := b.getOrInitAccum(sessionID, "", fc.startTime)
+			acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
 			b.captureSyntheticEvent(syntheticTurnParams{
 				SessionID:  sessionID,
 				Reason:     "turn_timeout",
@@ -569,6 +571,23 @@ func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Ki
 	// Write user turn record for Input events.
 	if eventType == events.Input && b.collector != nil {
 		acc := b.getOrInitAccum(sessionID, "", time.Now())
+		// Synchronous Generation initialization to prevent race (#658):
+		// forwardEvents initializes acc.Generation asynchronously, but CaptureInbound
+		// may be called from the Handler goroutine before that init completes.
+		// Without this guard, user turns get Generation=0 while assistant turns get Generation=1+,
+		// making the first user turn invisible after page refresh.
+		if acc.Generation == 0 {
+			gen := int64(1)
+			if b.turnsQuerier != nil {
+				genCtx, genCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
+				genCancel()
+				if latest > 0 {
+					gen = latest
+				}
+			}
+			acc.Generation = gen
+		}
 		content := extractInputContent(data)
 		turn := &eventstore.TurnWriteRequest{
 			SessionID:  sessionID,

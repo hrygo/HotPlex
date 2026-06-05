@@ -118,8 +118,9 @@ type Worker interface {
 
 	// ResetContext clears the worker's runtime context.
 	// The worker decides the implementation:
-	//   - Workers that support in-place reset: send internal reset signal
-	//   - Others: terminate + start (physically deletes session files)
+	//   - Per-process workers (Claude Code, Codex): terminate + restart process, return ConnReplaced=true.
+	//   - In-place workers (OCS, ACP): reset via API/RPC, emit internal_reset event, return ConnReplaced=false.
+	// Gateway reads ResetResult.ConnReplaced to decide whether to spawn a new forwardEvents goroutine.
 	// Note: Gateway layer has already called sm.ClearContext() to clear SessionInfo.Context.
 	ResetContext(ctx context.Context) (ResetResult, error)
 }
