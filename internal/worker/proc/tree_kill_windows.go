@@ -3,6 +3,7 @@
 package proc
 
 import (
+	"context"
 	"log/slog"
 	"time"
 )
@@ -11,4 +12,5 @@ import (
 func ForceKillTree(pgid int, log *slog.Logger) {}
 
 // GracefulTerminateTree is a no-op on Windows where Job Objects handle tree cleanup.
-func GracefulTerminateTree(pgid int, gracePeriod time.Duration, log *slog.Logger) {}
+func GracefulTerminateTree(ctx context.Context, pgid int, gracePeriod time.Duration, log *slog.Logger) {
+}

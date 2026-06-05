@@ -71,21 +71,19 @@ func TestGetChildren_Empty(t *testing.T) {
 
 func TestGetPGID_ValidProcess(t *testing.T) {
 	t.Parallel()
-	log := slog.Default()
 
 	cmd := exec.Command("sleep", "5")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
 
-	pgid := getPGID(cmd.Process.Pid, log)
+	pgid := getPGID(cmd.Process.Pid)
 	require.Greater(t, pgid, 0)
 }
 
 func TestGetPGID_NonexistentProcess(t *testing.T) {
 	t.Parallel()
-	log := slog.Default()
 
-	pgid := getPGID(9999999, log)
+	pgid := getPGID(9999999)
 	require.Equal(t, -1, pgid)
 }

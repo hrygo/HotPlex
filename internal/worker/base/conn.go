@@ -73,9 +73,13 @@ func (c *Conn) TrySend(env *events.Envelope) bool {
 	}
 }
 
-// Inject enqueues a synthetic event via TrySend for in-place reset signaling.
+// Inject enqueues a synthetic event for in-place reset signaling.
+// Logs a warning if the recv channel is full (event dropped).
 func (c *Conn) Inject(env *events.Envelope) {
-	c.TrySend(env)
+	if !c.TrySend(env) {
+		c.log.Warn("base: inject dropped, recv channel full",
+			"session_id", c.sessionID, "event_type", env.Event.Type)
+	}
 }
 
 // WriteMu returns the mutex that protects stdin writes.

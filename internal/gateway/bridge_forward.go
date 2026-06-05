@@ -61,6 +61,12 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	workerType := w.Type()
 	b.log.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID, "worker_type", workerType, "resumed", opts.resumed)
 
+	// Capture reset generation at goroutine start to detect stale goroutine after /reset.
+	var myResetGen int64
+	if rg, ok := w.(worker.ResetGenerationer); ok {
+		myResetGen = rg.LoadResetGeneration()
+	}
+
 	fc := &forwardContext{
 		sessionID:     sessionID,
 		workerType:    workerType,
@@ -155,6 +161,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		turnTimerFired: fc.turnTimerFired.Load(),
 		sessPlatform:   fc.sessPlatform,
 		sessOwner:      fc.sessOwner,
+		resetGen:       myResetGen,
 	})
 }
 
@@ -317,7 +324,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 
 	switch env.Event.Type {
 	case events.ToolCall:
-		acc := b.getOrInitAccum(sessionID, "", fc.startTime)
+		acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
 		acc.ToolCallCount++
 		if tc, ok := asToolCallData(env.Event.Data); ok {
 			if acc.ToolNames == nil {
@@ -417,6 +424,10 @@ type workerExitParams struct {
 	turnTimerFired bool
 	sessPlatform   string
 	sessOwner      string
+	// resetGen is the resetGeneration captured when forwardEvents started.
+	// If the current generation differs, another reset replaced this goroutine's
+	// worker and we must NOT cleanupCrashedWorker (would detach the NEW worker).
+	resetGen int64
 }
 
 // handleWorkerExit processes worker exit after the recv channel closes.
@@ -424,6 +435,19 @@ type workerExitParams struct {
 // and performs cleanup.
 func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	workerType := p.workerType
+
+	// P0 guard: if the worker was reset (generation changed), a NEW forwardEvents
+	// goroutine is already managing the replacement worker. This OLD goroutine must
+	// exit silently — cleanupCrashedWorker would detach the NEW worker and delete
+	// the accumulator, breaking the session.
+	if p.resetGen > 0 {
+		if rg, ok := w.(worker.ResetGenerationer); ok && rg.LoadResetGeneration() != p.resetGen {
+			b.log.Info("bridge: worker exit from stale forwardEvents after reset, skipping cleanup",
+				"session_id", p.sessionID, "worker_type", workerType,
+				"my_gen", p.resetGen, "current_gen", rg.LoadResetGeneration())
+			return
+		}
+	}
 
 	// AEP-020: Worker.Recv() closed — get exit code to determine crash vs normal exit.
 	// Must match proc.DefaultGracePeriod (5s) so SIGTERM grace isn't cut short.

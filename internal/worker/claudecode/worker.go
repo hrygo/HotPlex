@@ -508,9 +508,6 @@ func (w *Worker) LastIO() time.Time {
 //
 // The original session configuration (AllowedTools, SystemPrompt, MCPConfig, etc.)
 // is preserved from the first Start call via origSession.
-//
-// The caller (Bridge.ResetSession) must set intentionalExit before calling this
-// so that forwardEvents skips crash handling for the old process.
 func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	w.Mu.Lock()
 	orig := w.origSession

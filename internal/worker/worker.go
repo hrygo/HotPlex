@@ -167,6 +167,16 @@ type EventInjector interface {
 	Inject(env *events.Envelope)
 }
 
+// ResetGenerationer is an optional interface for workers that track a monotonic
+// reset generation counter. forwardEvents captures the generation at goroutine
+// start and checks after recvCh closes — if the current generation differs, the
+// worker was reset by a NEW forwardEvents goroutine and this OLD goroutine must
+// NOT cleanupCrashedWorker.
+type ResetGenerationer interface {
+	IncResetGeneration() int64
+	LoadResetGeneration() int64
+}
+
 // WorkerSessionIDHandler is an optional interface for workers that manage
 // their own internal session IDs separate from the Gateway session ID.
 // Bridge detects implementations via type assertion and uses them to
@@ -229,7 +239,7 @@ type SessionInfo struct {
 	// assistant message ID, discarding later history (--resume-session-at).
 	ResumeSessionAt string
 	// ResumeSessionID is the worker-internal session ID for resuming a previous session.
-	// For one-shot workers (e.g. Codex CLI), this carries the thread ID for resume --last.
+	// For Codex CLI, this carries the thread ID for resume --last.
 	ResumeSessionID string
 	// MaxTurns limits the number of agentic turns in non-interactive mode.
 	MaxTurns int
@@ -247,10 +257,9 @@ type SessionInfo struct {
 	// IncludePartialMessages exposes partial message blocks as they arrive
 	// (--include-partial-messages).
 	IncludePartialMessages bool
-	// Images carries image file paths for codex exec --image flags.
-	// NOTE: Currently populated only in exec-mode buildArgs() which reads
-	// from SessionInfo directly. Per-session injection through gateway/bridge
-	// is not yet wired. Reserved for future per-session image support.
+	// Images carries image file paths for Codex CLI --image flags.
+	// Populated from SessionInfo by buildThreadStartParams. Per-session
+	// injection through gateway/bridge is not yet wired.
 	Images []string
 }
 
