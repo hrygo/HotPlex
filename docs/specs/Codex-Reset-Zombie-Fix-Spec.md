@@ -103,12 +103,12 @@ bridge.go:ResetSession (line 379)
 
 **对比 ExecWorker 为什么没问题**：ExecWorker 是 per-session 进程，`ResetContext` 调用 `BaseWorker.Terminate(ctx)` 杀死实际进程 → `Wait()` 立即返回（进程退出）。
 
-**对比 OCS 为什么没问题**：OCS 实现 `InPlaceReseter`，bridge 不启动新 forwardEvents，原地复用 goroutine。
+**对比 OCS 为什么没问题**：OCS 返回 `ResetResult{ConnReplaced: false}`，bridge 不启动新 forwardEvents，原地复用 goroutine。
 
 **AppServerWorker 的独特性**：
 - 共享单例进程（不因 reset 而死）
 - `release()` 关闭 subscriber channel（不像 OCS 用 HTTP 轮询）
-- 不实现 `InPlaceReseter`（bridge 会启动新 forwardEvents）
+- 返回 `ResetResult{ConnReplaced: true}`（bridge 会启动新 forwardEvents）
 - `ResetContext` 不调用 `Start()`（新 forwardEvents 读已关闭的 recvCh）
 
 ### 2.2 Bug B 根因链
@@ -324,7 +324,7 @@ func (w *AppServerWorker) Kill() error {
 
 **不影响的组件**：
 - ExecWorker（per-session 进程，ResetContext 走完全不同的路径）
-- OCS Worker（实现 InPlaceReseter，不走新 forwardEvents 路径）
+- OCS Worker（返回 `ResetResult{ConnReplaced: false}`，不走新 forwardEvents 路径）
 - Claude Code Worker（per-session 进程）
 - 其他 worker 适配器
 

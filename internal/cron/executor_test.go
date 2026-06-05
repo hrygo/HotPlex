@@ -77,7 +77,9 @@ func (m *mockWorker) Wait() (int, error)                                   { ret
 func (m *mockWorker) Conn() worker.SessionConn                             { return nil }
 func (m *mockWorker) Health() worker.WorkerHealth                          { return worker.WorkerHealth{} }
 func (m *mockWorker) LastIO() time.Time                                    { return time.Time{} }
-func (m *mockWorker) ResetContext(_ context.Context) error                 { return nil }
+func (m *mockWorker) ResetContext(_ context.Context) (worker.ResetResult, error) {
+	return worker.ResetResult{}, nil
+}
 
 var errTestNotFound = context.DeadlineExceeded
 

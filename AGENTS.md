@@ -129,7 +129,7 @@
 
 **Worker**：
 - `claudecode/` - Claude Code 适配器 (stdio, `--print --session-id`)
-- `codexcli/` - Codex CLI 适配器 (exec + app-server 双模式)
+- `codexcli/` - Codex CLI 适配器 (app-server 单例模式)
 - `opencodeserver/` - Open Code Server 适配器（单例进程, HTTP+SSE）
 - `acp/` - ACP 通用适配器（JSON-RPC 2.0 over stdio，支持任何 ACP 兼容 Agent）
 - `proc/` - 跨平台进程生命周期管理 (PGID/Job Object)

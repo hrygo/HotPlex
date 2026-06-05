@@ -346,21 +346,21 @@ var _ worker.InputRecoverer = (*acpConn)(nil)
 
 **目标**：减少 /reset 的资源开销，避免每次都杀进程重建。
 
-**实际接口签名**（`worker.go:84`）：`ResetContext(ctx context.Context) error` — 无 session 参数。
+**实际接口签名**（`worker.go:84`）：`ResetContext(ctx context.Context) (ResetResult, error)` — 返回 `ResetResult{ConnReplaced bool}` 描述重置结果。
 
-**Bridge 行为验证**（`bridge.go:381-438`）：
+**Bridge 行为**（已重构，`InPlaceReseter` 已删除）：
 
 ```
-1. ResetContext() 成功 → 检查 InPlaceReseter
-   ├─ InPlaceReset() == true → 保持 forwardEvents goroutine（不重建）
-   └─ 未实现/返回 false → 重建 forwardEvents goroutine
+1. ResetContext() 成功 → 读取 ResetResult.ConnReplaced
+   ├─ ConnReplaced == true → 重建 forwardEvents goroutine
+   └─ ConnReplaced == false → 保持 forwardEvents goroutine
 2. ResetContext() 返回 ErrNotImplemented → Terminate + Start（全量重建）
 ```
 
-**方案**：P1 实现 session/new 复用进程 + InPlaceReseter：
+**方案**：P1 实现 session/new 复用进程 + `ResetResult{ConnReplaced: false}` + `internal_reset` 事件：
 
 ```go
-func (w *Worker) ResetContext(ctx context.Context) error {
+func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
     w.Mu.Lock()
     defer w.Mu.Unlock()
 
@@ -372,28 +372,27 @@ func (w *Worker) ResetContext(ctx context.Context) error {
     result, err := w.client.NewSession(ctx, w.cwd, mcpServers)
     if err != nil {
         // 回退由 Bridge 处理（Terminate + Start）
-        return fmt.Errorf("acp reset: %w", err)
+        return worker.ResetResult{}, fmt.Errorf("acp reset: %w", err)
     }
     w.acpSessionID = result.SessionID
     w.mapper.Reset()
 
-    // 3. 通知 resetGenerationer（由 BaseWorker 继承）
-    w.IncResetGeneration()
+    // 3. 通过 EventInjector 注入 internal_reset 事件（替代 resetGenerationer）
+    w.conn.Inject(events.NewInternalReset(w.LoadResetGeneration()))
 
-    return nil
+    return worker.ResetResult{ConnReplaced: false}, nil
 }
 
-// InPlaceReseter — 告诉 Bridge 不重建 forwardEvents goroutine
-func (w *Worker) InPlaceReset() bool { return true }
-
-var _ worker.InPlaceReseter = (*Worker)(nil)
+// InPlaceReseter and resetGenerationer interfaces have been deleted.
+// Replaced by: ResetResult{ConnReplaced: false} + internal_reset event via EventInjector.
 ```
 
 **关键机制**：
 
-- `BaseWorker` 已提供 `IncResetGeneration()`/`LoadResetGeneration()`（满足 `resetGenerationer` 接口）
-- `forwardEvents` goroutine 在 `processForwardedEvent` 开头检测 generation 变更，自动重置 accumulator
-- `InPlaceReseter.InPlaceReset() == true` 阻止 Bridge 重建 forwardEvents goroutine
+- `BaseWorker` 已提供 `IncResetGeneration()`/`LoadResetGeneration()` 用于 generation 计数
+- Worker 通过 `conn.Inject()` 将 `internal_reset` 事件注入 Recv() 流
+- `forwardEvents` goroutine 在 `handleInternalReset` 中处理该事件，更新 accumulator
+- `ResetResult{ConnReplaced: false}` 告知 Bridge 保持现有 forwardEvents goroutine
 
 **验收标准**：
 
@@ -990,8 +989,8 @@ func BenchmarkPrompt_FullTurn(b *testing.B)        // 完整 prompt turn（mock 
 | FR-01 | `WorkerCommander` | `internal/worker/interfaces.go:12` | `Compact(ctx, map[string]any) error` / `Clear(ctx) error` / `Rewind(ctx, string) error` | ✅ Clear=session/new, Compact/Rewind=ErrNotImplemented |
 | FR-02 | `ControlRequester` | `internal/worker/interfaces.go:6` | `SendControlRequest(ctx, string, map[string]any) (map[string]any, error)` | ✅ usage_update 缓存映射 |
 | FR-05 | `InputRecoverer` | `internal/worker/worker.go:141` | `LastInput() string` | ✅ acpConn 新增字段 |
-| FR-07 | `InPlaceReseter` | `internal/worker/worker.go:157` | `InPlaceReset() bool` | ✅ 返回 true |
-| FR-07 | `resetGenerationer` | `bridge.go:26`（Bridge 内部） | `IncResetGeneration()/LoadResetGeneration()` | ✅ BaseWorker 已提供，ACP 自动继承 |
+| FR-07 | `ResetResult{ConnReplaced}` | `internal/worker/worker.go` | `ResetContext() (ResetResult, error)` | ✅ 返回 `ConnReplaced: false` |
+| FR-07 | `EventInjector` | `internal/worker/worker.go` | `Inject(*events.Envelope)` | ✅ acpConn.Inject 注入 internal_reset 事件 |
 
 ### 8.2 数据流验证
 
@@ -1013,7 +1012,7 @@ func BenchmarkPrompt_FullTurn(b *testing.B)        // 完整 prompt turn（mock 
 | `set_model` | `worker_cmds.go:111` | 不支持（无 ControlRequester） | `client.SetSessionModel()`（ControlRequester） |
 | `get_context_usage` | `bridge_forward.go:297-299` | 不调用（无 ControlRequester） | 从 mapper 缓存提取（ControlRequester） |
 | 崩溃恢复重投递 | `bridge_forward.go:426-430` | 无 lastInput（无 InputRecoverer） | 从 acpConn 读取（InputRecoverer） |
-| reset forwardEvents | `bridge.go:428-438` | 每次重建（无 InPlaceReseter） | 保持 goroutine（InPlaceReseter） |
+| reset forwardEvents | `bridge.go` | 根据 `ResetResult.ConnReplaced` 决定 | 保持 goroutine（`ConnReplaced: false` + `internal_reset` 事件） |
 
 ### 8.4 已发现的不可行项
 
@@ -1053,7 +1052,7 @@ func BenchmarkPrompt_FullTurn(b *testing.B)        // 完整 prompt turn（mock 
 | 任务 | 改动范围 | 依赖 | 预估 |
 |------|---------|------|------|
 | FR-06: Question/Elicitation | ACP Worker（worker.go + readLoop） | 无 | 4h |
-| FR-07: ResetContext 改进 | ACP Worker（worker.go）+ InPlaceReseter | FR-01 | 4h |
+| FR-07: ResetContext 改进 | ACP Worker（worker.go）+ `ResetResult` + `EventInjector` | FR-01 | 4h |
 | U-02: Agent 发现与健康检查 | ACP Worker（worker.go） | 无 | 2h |
 | U-03: 错误信息可操作性 | ACP Worker（worker.go） | 无 | 2h |
 | T-02/T-03: 扩展测试 | ACP Worker | FR-06~07 | 4h |
@@ -1109,7 +1108,7 @@ func BenchmarkPrompt_FullTurn(b *testing.B)        // 完整 prompt turn（mock 
 | 飞书/Slack 适配器 | Plan/ModeUpdate/ToolUpdate 渲染 | UX-01~04 |
 | Bridge | ~~SystemPrompt 注入~~（已由 injectAgentConfig 实现） | ~~FR-04~~ |
 | Bridge | ForkSession/JSONSchema 传递 | FR-08, FR-09 |
-| Bridge | forwardEvents 生命周期 | FR-07（InPlaceReseter） |
+| Bridge | forwardEvents 生命周期 | FR-07（`ResetResult.ConnReplaced` + `internal_reset`） |
 | Prometheus | 指标采集 | NFR-04 |
 
 ### 已有机制复用（无需新建）

@@ -93,6 +93,11 @@ func (c *Config) Validate() []string {
 	if c.Log.Format != "" && c.Log.Format != "json" && c.Log.Format != "text" {
 		errs = append(errs, "log.format must be either 'json' or 'text'")
 	}
+	// Exec mode was removed; force app-server mode.
+	if !c.Worker.CodexCLI.UseAppServer {
+		slog.Warn("config: codex_cli.use_app_server is deprecated, forcing app-server mode")
+		c.Worker.CodexCLI.UseAppServer = true
+	}
 
 	return errs
 }
@@ -601,7 +606,7 @@ type CodexCLIConfig struct {
 	Personality      string        `mapstructure:"personality"`         // agent personality for app-server mode, default "friendly"
 	StartupTimeout   time.Duration `mapstructure:"startup_timeout"`     // process startup timeout, default 30s
 	CallTimeout      time.Duration `mapstructure:"call_timeout"`        // JSON-RPC call timeout, default 30s
-	UseAppServer     bool          `mapstructure:"use_app_server"`      // use persistent app-server mode instead of one-shot exec
+	UseAppServer     bool          `mapstructure:"use_app_server"`      // deprecated: always true, app-server is the only mode
 	IdleDrainPeriod  time.Duration `mapstructure:"idle_drain_period"`   // idle drain timeout for app-server mode, default 30m
 	Color            bool          `mapstructure:"color"`               // colored output (--color)
 	OutputFile       string        `mapstructure:"output_file"`         // output-only-last-message mode (--output-last-message)

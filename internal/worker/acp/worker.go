@@ -33,7 +33,6 @@ var (
 	_ worker.WorkerSessionIDHandler = (*Worker)(nil)
 	_ worker.WorkerCommander        = (*Worker)(nil)
 	_ worker.ControlRequester       = (*Worker)(nil)
-	_ worker.InPlaceReseter         = (*Worker)(nil)
 	_ base.MetadataHandler          = (*Worker)(nil)
 )
 
@@ -634,17 +633,41 @@ func (w *Worker) supportsCapability(name string) bool {
 	return true
 }
 
-// ─── ResetContext ────────────────────────────────────────────────────────────
+// ─── UpdateSystemPrompt ──────────────────────────────────────────────────
 
-func (w *Worker) ResetContext(ctx context.Context) error {
-	// Reuse the same process: cancel current turn, create new session.
-	// Equivalent to Clear() but called by Bridge.ResetSession.
-	return w.resetSession(ctx)
+// UpdateSystemPrompt replaces the stored system prompt and resets the injection
+// flag so the next user input in the new ACP session carries the reloaded config.
+func (w *Worker) UpdateSystemPrompt(prompt string) {
+	w.Mu.Lock()
+	w.systemPrompt = prompt
+	w.Mu.Unlock()
+	w.systemPromptInjected.Store(false)
 }
 
-// InPlaceReset tells Bridge not to rebuild the forwardEvents goroutine.
-// The existing goroutine detects generation changes via resetGenerationer.
-func (w *Worker) InPlaceReset() bool { return true }
+// ─── ResetContext ────────────────────────────────────────────────────────────
+
+func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
+	// Reuse the same process: cancel current turn, create new session.
+	// Equivalent to Clear() but called by Bridge.ResetSession.
+	if err := w.resetSession(ctx); err != nil {
+		return worker.ResetResult{}, err
+	}
+
+	w.IncResetGeneration()
+	w.Mu.Lock()
+	conn := w.conn
+	w.Mu.Unlock()
+	if conn != nil {
+		conn.Inject(&events.Envelope{
+			Event: events.Event{
+				Type: events.KindInternalReset,
+				Data: events.InternalResetData{Generation: w.LoadResetGeneration()},
+			},
+		})
+	}
+
+	return worker.ResetResult{ConnReplaced: false}, nil
+}
 
 // resetSession is the shared logic for Clear() and ResetContext():
 // cancel current turn, create new ACP session within the same process.
@@ -841,6 +864,17 @@ func (w *Worker) respondToServerRequest(ctx context.Context, reqID, kind string,
 
 // ─── readLoop ────────────────────────────────────────────────────────────────
 
+func (w *Worker) processNotification(ctx context.Context, notif *JSONRPCNotification, conn *acpConn) {
+	if tw := w.trace.Load(); tw != nil {
+		tw.Log("←", notif)
+	}
+	w.SetLastIO(time.Now())
+	envelopes := w.mapper.MapNotification(ctx, notif)
+	for _, env := range envelopes {
+		conn.TrySend(env)
+	}
+}
+
 func (w *Worker) readLoop(ctx context.Context) {
 	// Capture conn under lock for consistent access pattern.
 	w.Mu.Lock()
@@ -873,13 +907,20 @@ func (w *Worker) readLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if tw := w.trace.Load(); tw != nil {
-				tw.Log("←", notif)
-			}
-			w.SetLastIO(time.Now())
-			envelopes := w.mapper.MapNotification(ctx, notif)
-			for _, env := range envelopes {
-				conn.TrySend(env)
+			w.processNotification(ctx, notif, conn)
+			// Drain queued notifications to handle bursts.
+			// Cap iterations so RequestCh is not starved under high throughput.
+			const maxDrain = 16
+			for i := 0; i < maxDrain; i++ {
+				select {
+				case n, ok := <-w.client.NotificationCh:
+					if !ok {
+						return
+					}
+					w.processNotification(ctx, n, conn)
+				default:
+					return
+				}
 			}
 		case req, ok := <-w.client.RequestCh:
 			if !ok {

@@ -48,7 +48,7 @@ func NewACPClient(stdin io.Writer, stdout io.Reader, log *slog.Logger) *ACPClien
 		scanner:        NewScanner(stdout),
 		log:            log,
 		pending:        make(map[string]chan *JSONRPCResponse),
-		NotificationCh: make(chan *JSONRPCNotification, 64),
+		NotificationCh: make(chan *JSONRPCNotification, 256),
 		RequestCh:      make(chan *JSONRPCRequest, 16),
 		done:           make(chan struct{}),
 	}
@@ -245,7 +245,6 @@ func (c *ACPClient) readLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			default:
-				c.log.Warn("acp client: notification channel full, dropping", "method", m.Method)
 			}
 		case *JSONRPCRequest:
 			select {

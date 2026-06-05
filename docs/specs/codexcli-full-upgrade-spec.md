@@ -24,11 +24,10 @@
 
 | 维度 | 当前覆盖率 | 目标 |
 |------|-----------|------|
-| Exec 事件类型 | 7/8 (87%) | 8/8 (100%) |
 | Item 类型映射 | 6/9 (67%) | 9/9 (100%) |
 | AppServer JSON-RPC 方法 | 5/25+ (≤20%) | 25/25+ (100%) |
 | AppServer 通知 | 14/20 (70%) | 20/20 (100%) |
-| Exec CLI 标志传递 | 6/14 (43%) | 14/14 (100%) |
+| CLI 标志传递 | 6/14 (43%) | 14/14 (100%) |
 | 交互式响应 | 1/3 (33%) | 3/3 (100%) |
 | WorkerCommander 方法 | 0/3 (0%) | 3/3 (100%) |
 | 模态 | 2/3 (67%) | 3/3 (100%) |
@@ -72,25 +71,23 @@
 4. **`worker.go`** —— `readOutput()` 中不必退出循环于 `EventItemUpdated`（它不是终止事件）。
 
 **QA**: 
-- 执行 `codex exec --json "create a file"` → 确认 item.updated 事件被解析并映射为 AEP 信封
+- 确认 `item.updated` 事件被解析并映射为 AEP 信封
 - 确认 MessageDelta 流不被重复计数
 
 ---
 
 ### Task 0.2: 更新模态声明——添加 `image`
 
-**文件**: `internal/worker/codexcli/worker.go`（两处：`ExecWorker.Modalities()` 和 `AppServerWorker.Modalities()`）
+**文件**: `internal/worker/codexcli/worker.go`（`AppServerWorker.Modalities()`）
 
 **背景**: Codex CLI 上游通过 `--image`/`-i` 标志（`shared_options.rs:10-18`）原生支持图像。HotPlex 声明 `Modalities() = ["text", "code"]` 但应声明 `["text", "code", "image"]`。
 
 **修改**:
 ```go
 // 之前
-func (w *ExecWorker) Modalities() []string    { return []string{"text", "code"} }
 func (w *AppServerWorker) Modalities() []string { return []string{"text", "code"} }
 
 // 之后
-func (w *ExecWorker) Modalities() []string    { return []string{"text", "code", "image"} }
 func (w *AppServerWorker) Modalities() []string { return []string{"text", "code", "image"} }
 ```
 
@@ -150,25 +147,17 @@ Claude Code 将 Compact/Clear/Rewind 实现为结构化操作；Codex CLI 对应
    ```
 
 3. **`worker.go`** —— 将 `ServerCommander` 作为接口暴露给 `AppServerWorker`：
-   ```go
-   func (w *AppServerWorker) Compact(ctx context.Context, args map[string]any) error {
-       return w.commands.Compact(ctx, args)
-   }
-   func (w *AppServerWorker) Clear(ctx context.Context) error {
-       return w.commands.Clear(ctx)
-   }
-   func (w *AppServerWorker) Rewind(ctx context.Context, targetID string) error {
-       return w.commands.Rewind(ctx, targetID)
-   }
-   ```
-
-4. **`worker.go`** —— `ExecWorker` 同样添加（必要时可返回 `ErrNotImplemented` 并附带解释性日志）：
-   ```go
-   func (w *ExecWorker) Compact(ctx context.Context, args map[string]any) error {
-       return fmt.Errorf("codexcli: compact not supported in exec mode; use app-server mode")
-   }
-   // Clear, Rewind 同理
-   ```
+    ```go
+    func (w *AppServerWorker) Compact(ctx context.Context, args map[string]any) error {
+        return w.commands.Compact(ctx, args)
+    }
+    func (w *AppServerWorker) Clear(ctx context.Context) error {
+        return w.commands.Clear(ctx)
+    }
+    func (w *AppServerWorker) Rewind(ctx context.Context, targetID string) error {
+        return w.commands.Rewind(ctx, targetID)
+    }
+    ```
 
 **QA**: 
 - 在 WebChat/Slack/飞书中发送 `/compact` → 确认通过 `ServerCommander.Compact()` 分发（非 `w.Input()`）
@@ -198,7 +187,7 @@ Claude Code 将 Compact/Clear/Rewind 实现为结构化操作；Codex CLI 对应
    }
    ```
 
-2. **`worker.go`** —— `ExecWorker.HandleQuestionResponse`：记录该单次模式不支持此功能，并返回错误。
+2. **`worker.go`** —— `AppServerWorker.HandleQuestionResponse` 同上。
 
 **QA**: 向 Codex CLI 发送需要 AskUserQuestion 的提示词 → 确认问题已传递至用户 → 用户回答后确认响应已发送。
 
@@ -267,7 +256,7 @@ Claude Code 将 Compact/Clear/Rewind 实现为结构化操作；Codex CLI 对应
    ```
 
 **QA**: 
-- 对每种 Item 类型，确认从 `codex exec --json` 输出中解析
+- 对每种 Item 类型，确认从 Codex CLI 输出中解析
 - 确认 AEP 信封格式与现有模式一致
 - 对不熟悉的上游代码，需从 `~/tmp/codex/codex-rs/exec/src/exec_events.rs` 获得精确的字段定义
 
@@ -422,9 +411,9 @@ Claude Code 将 Compact/Clear/Rewind 实现为结构化操作；Codex CLI 对应
 > **预计工时**: ~6h
 > **风险**: 低（纯追加性修改）
 
-### Task 3.1: Exec CLI 标志传递
+### Task 3.1: CLI 标志传递
 
-**文件**: `internal/worker/codexcli/worker.go` (`buildArgs`), `internal/config/config.go`
+**文件**: `internal/worker/codexcli/worker.go` (`buildThreadStartParams`), `internal/config/config.go`
 
 **上游源文件**: `~/tmp/codex/codex-rs/exec/src/cli.rs`, `~/tmp/codex/codex-rs/utils/cli/src/shared_options.rs`
 
@@ -537,7 +526,6 @@ var EnvBlocklist = []string{"HOTPLEX_", "CODEX_", "CODEXCLI"}
 | 测试用例 | 输入 | 预期输出 | 验证方法 |
 |-----------|-------|--------|-----------|
 | /compact（AppServerWorker） | `Compact(ctx, nil)` | `thread/compact/start` 请求已发送至 Manager | 集成测试 |
-| /compact（ExecWorker） | `Compact(ctx, nil)` | `ErrNotImplemented` 并附带解释性错误消息 | 单元测试 |
 | HandleQuestionResponse | `HandleQuestionResponse(ctx, "req1", {"q1":"a"})` | `RespondServerRequest` 已调用 | 集成测试 |
 | HandleElicitationResponse | `HandleElicitationResponse(ctx, "req1", "accept", {...})` | `RespondServerRequest` 已调用 | 集成测试 |
 | CollabToolCall 已映射 | `{"type":"collab_tool_call",...}` | `ToolCall(collab:X)` AEP 信封 | 单元测试 |
@@ -567,9 +555,9 @@ var EnvBlocklist = []string{"HOTPLEX_", "CODEX_", "CODEXCLI"}
 
 | 测试用例 | 输入 | 预期输出 | 验证方法 |
 |-----------|-------|--------|-----------|
-| buildArgs --image | `session.Images = ["a.png"]` | `["exec","--json","--image","a.png",...]` | 单元测试 |
-| buildArgs --output-schema | `session.JSONSchema = "{}"` | `["exec","--json","--output-schema","/tmp/...",...]` | 单元测试 |
-| buildArgs --add-dir | `session.AllowedDirs = ["/tmp"]` | `["exec","--json","--add-dir","/tmp",...]` | 单元测试 |
+| buildArgs --image | `session.Images = ["a.png"]` | `["--image","a.png",...]` | 单元测试 |
+| buildArgs --output-schema | `session.JSONSchema = "{}"` | `["--output-schema","/tmp/...",...]` | 单元测试 |
+| buildArgs --add-dir | `session.AllowedDirs = ["/tmp"]` | `["--add-dir","/tmp",...]` | 单元测试 |
 
 ### Phase 4 QA
 
@@ -637,7 +625,7 @@ Phase 4 (无依赖)
 | AppServer 单例管理器死锁 | 网关挂起 | 遵循现有的 mutex 排序（`m.mu` → `writeMu`）；所有新方法复用 `Call()` 的超时机制 |
 | `thread/compact/start` 或 `turn/steer` 可能无响应地挂起 | Worker 挂起 | Manager 的 `Call()` 已设置 30s 超时（`defaultCallTimeout`） |
 | Wire format 错误（如 spec 中之前错误的 `mcp/server/listStatus`） | JSON-RPC 调用失败 | 所有方法名已通过上游 `common.rs` 的 `#[serde(rename)]` 定义验证 |
-| 破坏现有的 ExecWorker 行为 | 功能回归 | 首先运行现有测试；使用 `t.Parallel()` 隔离新测试 |
+| 破坏现有的 AppServerWorker 行为 | 功能回归 | 首先运行现有测试；使用 `t.Parallel()` 隔离新测试 |
 
 ---
 
@@ -646,7 +634,6 @@ Phase 4 (无依赖)
 | 术语 | 定义 |
 |------|------------|
 | **AEP** | Agent 交换协议 —— HotPlex 的 WebSocket 事件协议 |
-| **Exec 模式** | 单次 `codex exec --json <prompt>` —— 每次输入对应一个进程 |
 | **AppServer 模式** | 持久的 `codex app-server` —— 所有会话共享一个 JSON-RPC 进程 |
 | **WorkerCommander** | 支持 Compact/Clear/Rewind 直通命令的 Worker 接口 |
 | **Thread** | Codex CLI 会话 —— 包含多个轮次（turns） |

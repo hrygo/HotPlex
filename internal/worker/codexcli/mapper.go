@@ -28,25 +28,6 @@ func NewMapper(sessionID string) *Mapper {
 	}
 }
 
-// Map converts a CodexEvent (exec mode JSONL) to AEP envelopes.
-func (m *Mapper) Map(event *CodexEvent) []*events.Envelope {
-	switch event.Type {
-	case EventItemStarted:
-		return m.mapItemStarted(event.Item)
-	case EventItemUpdated:
-		return m.mapItemUpdated(event.Item)
-	case EventItemCompleted:
-		return m.mapItemCompleted(event.Item)
-	case EventTurnCompleted:
-		return m.mapTurnCompleted(event.Usage)
-	case EventTurnFailed:
-		return m.mapTurnFailed()
-	case EventError:
-		return m.mapError(event.Message)
-	}
-	return nil
-}
-
 // MapNotification converts a JSON-RPC notification (app-server mode) to AEP envelopes.
 func (m *Mapper) MapNotification(method string, params json.RawMessage) []*events.Envelope {
 	switch method {
@@ -326,7 +307,7 @@ func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {
 	return nil
 }
 
-// mapItemUpdated handles incremental updates to an item (exec-mode item.updated events).
+// mapItemUpdated handles incremental updates to an item (item.updated events).
 // It emits deltas for streamed content rather than the full summary emitted on completion.
 func (m *Mapper) mapItemUpdated(item *CodexItem) []*events.Envelope {
 	if item == nil {
@@ -389,31 +370,10 @@ func (m *Mapper) mapItemUpdated(item *CodexItem) []*events.Envelope {
 	}
 }
 
-func (m *Mapper) mapTurnCompleted(usage *CodexUsage) []*events.Envelope {
-	return []*events.Envelope{
-		newEnvelope(events.Done, events.DoneData{
-			Success: true,
-			Stats:   buildUsageStats(usage),
-		}, m.sessionID, m.nextSeq()),
-	}
-}
-
 func (m *Mapper) mapTurnFailed() []*events.Envelope {
 	return []*events.Envelope{
 		newEnvelope(events.Error, events.ErrorData{
 			Code: "TURN_FAILED", Message: "turn failed",
-		}, m.sessionID, m.nextSeq()),
-		newEnvelope(events.Done, events.DoneData{Success: false}, m.sessionID, m.nextSeq()),
-	}
-}
-
-func (m *Mapper) mapError(msg string) []*events.Envelope {
-	if msg == "" {
-		msg = "unknown error"
-	}
-	return []*events.Envelope{
-		newEnvelope(events.Error, events.ErrorData{
-			Code: "CODEX_ERROR", Message: msg,
 		}, m.sessionID, m.nextSeq()),
 		newEnvelope(events.Done, events.DoneData{Success: false}, m.sessionID, m.nextSeq()),
 	}
@@ -734,24 +694,6 @@ func extractTurnID(params json.RawMessage) string {
 	}
 	_ = json.Unmarshal(params, &p)
 	return p.Turn.ID
-}
-
-// buildUsageStats builds DoneData.Stats from exec-mode CodexUsage.
-// Uses nested "usage" format compatible with sessionAccumulator.mergePerTurnStats().
-func buildUsageStats(usage *CodexUsage) map[string]any {
-	if usage == nil {
-		return nil
-	}
-	usageMap := map[string]any{
-		"input_tokens":  int64(usage.InputTokens),
-		"output_tokens": int64(usage.OutputTokens),
-	}
-	if usage.CachedInputTokens > 0 {
-		usageMap["cache_read_input_tokens"] = int64(usage.CachedInputTokens)
-	}
-	return map[string]any{
-		"usage": usageMap,
-	}
 }
 
 // ─── messageTracker ─────────────────────────────────────────────────────

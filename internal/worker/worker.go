@@ -12,6 +12,11 @@ import (
 // ErrNotImplemented is returned for unimplemented worker methods.
 var ErrNotImplemented = errors.New("worker: not implemented")
 
+// ErrFellBackToFreshStart is returned by Resume when session files are missing
+// and the worker falls back to a fresh Start(). Bridge callers use this to
+// clear the "resumed" flag so forwardEvents applies normal retry logic.
+var ErrFellBackToFreshStart = errors.New("worker: resume fell back to fresh start")
+
 // ─── SessionConn ─────────────────────────────────────────────────────────────
 
 // SessionConn represents the bidirectional communication channel between
@@ -118,10 +123,22 @@ type Worker interface {
 
 	// ResetContext clears the worker's runtime context.
 	// The worker decides the implementation:
-	//   - Workers that support in-place reset: send internal reset signal
-	//   - Others: terminate + start (physically deletes session files)
+	//   - Per-process workers (Claude Code, Codex): terminate + restart process, return ConnReplaced=true.
+	//   - In-place workers (OCS, ACP): reset via API/RPC, emit internal_reset event, return ConnReplaced=false.
+	// Gateway reads ResetResult.ConnReplaced to decide whether to spawn a new forwardEvents goroutine.
 	// Note: Gateway layer has already called sm.ClearContext() to clear SessionInfo.Context.
-	ResetContext(ctx context.Context) error
+	ResetContext(ctx context.Context) (ResetResult, error)
+}
+
+// ResetResult describes the outcome of a ResetContext call.
+// Gateway reads this to decide orchestration without knowing Worker internals.
+type ResetResult struct {
+	// ConnReplaced indicates whether the worker replaced its underlying connection.
+	// true  = Worker restarted the process or rebuilt the connection (e.g. Claude Code, Codex CLI).
+	//         Gateway must spawn a new forwardEvents goroutine.
+	// false = Worker reset in-place without replacing the connection (e.g. OCS HTTP reset, ACP new session).
+	//         The existing forwardEvents goroutine continues running.
+	ConnReplaced bool
 }
 
 // WorkerHealth reports the runtime health of a worker process.
@@ -147,20 +164,26 @@ type InputRecoverer interface {
 	LastInput() string
 }
 
-// SessionFileChecker is an optional interface for workers that can verify
-// whether session files still exist on disk. Bridge uses this before resume
-// to fall back to a fresh start when files have been garbage-collected.
-type SessionFileChecker interface {
-	HasSessionFiles(sessionID string) bool
+// EventInjector is an optional interface for SessionConn implementations
+// that support injecting synthetic events into the Recv() stream.
+// In-place-reset workers use this to emit internal_reset events that
+// forwardEvents processes without client forwarding.
+type EventInjector interface {
+	Inject(env *events.Envelope)
 }
 
-// InPlaceReseter is an optional interface for workers whose ResetContext
-// resets state in-place without replacing the Conn or restarting the process.
-// Bridge.ResetSession uses this to decide whether to spawn a new forwardEvents
-// goroutine: in-place resets keep the existing goroutine, while process-restart
-// resets (the default) need a new one.
-type InPlaceReseter interface {
-	InPlaceReset() bool
+// ResetGenerationer is an optional interface for workers that track a monotonic
+// reset generation counter. forwardEvents captures the generation at goroutine
+// start and checks after recvCh closes — if the current generation differs, the
+// worker was reset by a NEW forwardEvents goroutine and this OLD goroutine must
+// NOT cleanupCrashedWorker.
+//
+// Workers that return ResetResult{ConnReplaced:true} from ResetContext MUST
+// implement this interface (typically via embedding BaseWorker). Failure to
+// implement it causes the stale-goroutine guard to be silently skipped.
+type ResetGenerationer interface {
+	IncResetGeneration() int64
+	LoadResetGeneration() int64
 }
 
 // WorkerSessionIDHandler is an optional interface for workers that manage
@@ -170,6 +193,16 @@ type InPlaceReseter interface {
 type WorkerSessionIDHandler interface {
 	SetWorkerSessionID(id string)
 	GetWorkerSessionID() string
+}
+
+// SystemPromptUpdater is an optional interface for workers that support
+// updating their stored system prompt at runtime (e.g. during /reset).
+// Workers that do not implement this interface will continue using the
+// system prompt from their initial Start() call.
+// Bridge detects implementations via type assertion and calls this before
+// ResetContext so the worker's next session uses the reloaded agent config.
+type SystemPromptUpdater interface {
+	UpdateSystemPrompt(prompt string)
 }
 
 // SessionInfo contains metadata about a session needed by the worker to start/resume.
@@ -225,7 +258,7 @@ type SessionInfo struct {
 	// assistant message ID, discarding later history (--resume-session-at).
 	ResumeSessionAt string
 	// ResumeSessionID is the worker-internal session ID for resuming a previous session.
-	// For one-shot workers (e.g. Codex CLI), this carries the thread ID for resume --last.
+	// For Codex CLI, this carries the thread ID for resume --last.
 	ResumeSessionID string
 	// MaxTurns limits the number of agentic turns in non-interactive mode.
 	MaxTurns int
@@ -243,10 +276,9 @@ type SessionInfo struct {
 	// IncludePartialMessages exposes partial message blocks as they arrive
 	// (--include-partial-messages).
 	IncludePartialMessages bool
-	// Images carries image file paths for codex exec --image flags.
-	// NOTE: Currently populated only in exec-mode buildArgs() which reads
-	// from SessionInfo directly. Per-session injection through gateway/bridge
-	// is not yet wired. Reserved for future per-session image support.
+	// Images carries image file paths for Codex CLI --image flags.
+	// Populated from SessionInfo by buildThreadStartParams. Per-session
+	// injection through gateway/bridge is not yet wired.
 	Images []string
 }
 

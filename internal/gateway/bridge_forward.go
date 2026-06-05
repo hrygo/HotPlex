@@ -35,11 +35,12 @@ type forwardContext struct {
 	workerType     worker.WorkerType
 	sessPlatform   string
 	sessOwner      string
+	workDir        string
+	ctx            context.Context
 	startTime      time.Time
 	turnStartTime  time.Time
 	firstEvent     bool
 	doneReceived   bool
-	myGen          int64
 	turnText       strings.Builder
 	lastError      *events.ErrorData
 	pendingError   *events.Envelope
@@ -61,9 +62,17 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	workerType := w.Type()
 	b.log.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID, "worker_type", workerType, "resumed", opts.resumed)
 
+	// Capture reset generation at goroutine start to detect stale goroutine after /reset.
+	var myResetGen int64
+	if rg, ok := w.(worker.ResetGenerationer); ok {
+		myResetGen = rg.LoadResetGeneration()
+	}
+
 	fc := &forwardContext{
 		sessionID:     sessionID,
 		workerType:    workerType,
+		workDir:       opts.workDir,
+		ctx:           opts.ctx,
 		startTime:     time.Now(),
 		turnStartTime: time.Now(),
 		firstEvent:    true,
@@ -79,32 +88,28 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		}
 	}
 
-	if rg, ok := w.(resetGenerationer); ok {
-		fc.myGen = rg.LoadResetGeneration()
-	}
-
 	acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
-	if acc.Generation == 0 {
+	if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
 		gen := int64(1)
 		if b.turnsQuerier != nil {
-			genCtx, genCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			genCtx, genCancel := context.WithTimeout(opts.ctx, 3*time.Second)
 			latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
 			genCancel()
 			if latest > 0 {
 				gen = latest
 			}
 		}
-		acc.Generation = gen
+		acc.Generation.Store(gen)
 	}
-	if acc.TurnCount == 0 && b.turnsQuerier != nil {
-		tnCtx, tnCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation)
+	if acc.TurnCount.Load() == 0 && b.turnsQuerier != nil {
+		tnCtx, tnCancel := context.WithTimeout(opts.ctx, 3*time.Second)
+		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()
 		if err != nil {
 			b.log.Warn("turns: restore turn num", "error", err)
 		}
 		if tn > 0 {
-			acc.TurnCount = tn
+			acc.TurnCount.Store(int32(tn))
 		}
 	}
 
@@ -116,7 +121,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 			b.log.Warn("bridge: turn timeout exceeded, terminating worker",
 				"session_id", sessionID, "worker_type", workerType, "turn_timeout", b.turnTimeout)
 			b.sendError(sessionID, events.ErrCodeTurnTimeout, "Turn exceeded %v time limit and was terminated.", b.turnTimeout)
-			acc := b.getOrInitAccum(sessionID, "", fc.startTime)
+			acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
 			b.captureSyntheticEvent(syntheticTurnParams{
 				SessionID:  sessionID,
 				Reason:     "turn_timeout",
@@ -125,8 +130,8 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 				Platform:   fc.sessPlatform,
 				Owner:      fc.sessOwner,
 				Model:      acc.ModelName,
-				Generation: acc.Generation,
-				TurnNum:    acc.TurnCount,
+				Generation: acc.Generation.Load(),
+				TurnNum:    int(acc.TurnCount.Load()),
 			})
 			_ = w.Terminate(context.Background())
 		})
@@ -152,13 +157,13 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		workerType:     workerType,
 		opts:           opts,
 		startTime:      fc.startTime,
-		myGen:          fc.myGen,
 		doneReceived:   fc.doneReceived,
 		turnText:       fc.turnText.String(),
 		turnTextLen:    fc.turnText.Len(),
 		turnTimerFired: fc.turnTimerFired.Load(),
 		sessPlatform:   fc.sessPlatform,
 		sessOwner:      fc.sessOwner,
+		resetGen:       myResetGen,
 	})
 }
 
@@ -167,19 +172,10 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	sessionID := fc.sessionID
 	workerType := fc.workerType
 
-	// OCS in-place reset detection.
-	if rg, ok := w.(resetGenerationer); ok {
-		currentGen := rg.LoadResetGeneration()
-		if currentGen != fc.myGen {
-			acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
-			if acc.AppliedResetGen < currentGen {
-				acc.Generation++
-				acc.AppliedResetGen = currentGen
-			}
-			acc.TurnCount = 0
-			fc.turnText.Reset()
-			fc.myGen = currentGen
-		}
+	// Handle internal reset events from in-place-reset workers (OCS, ACP).
+	if env.Event.Type == events.KindInternalReset {
+		b.handleInternalReset(env, sessionID, fc)
+		return
 	}
 
 	// Buffer error events for potential LLM retry.
@@ -294,14 +290,50 @@ func (b *Bridge) extractTurnContent(env *events.Envelope, fc *forwardContext) (d
 	return
 }
 
+func (b *Bridge) handleInternalReset(env *events.Envelope, sessionID string, fc *forwardContext) {
+	var data events.InternalResetData
+	switch d := env.Event.Data.(type) {
+	case events.InternalResetData:
+		data = d
+	case map[string]any:
+		gen, exists := d["generation"]
+		if !exists {
+			return
+		}
+		switch v := gen.(type) {
+		case int64:
+			data = events.InternalResetData{Generation: v}
+		case float64:
+			data = events.InternalResetData{Generation: int64(v)}
+		case json.Number:
+			if n, err := v.Int64(); err == nil {
+				data = events.InternalResetData{Generation: n}
+			} else {
+				return
+			}
+		default:
+			return
+		}
+	default:
+		return
+	}
+	acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
+	if acc.AppliedResetGen.Load() < data.Generation {
+		acc.Generation.Add(1)
+		acc.AppliedResetGen.Store(data.Generation)
+	}
+	acc.TurnCount.Store(0)
+	fc.turnText.Reset()
+}
+
 // accumulateStats tracks tool calls and per-turn stats on done events.
 func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts forwardOpts, fc *forwardContext) {
 	sessionID := fc.sessionID
 
 	switch env.Event.Type {
 	case events.ToolCall:
-		acc := b.getOrInitAccum(sessionID, "", fc.startTime)
-		acc.ToolCallCount++
+		acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
+		acc.ToolCallCount.Add(1)
 		if tc, ok := asToolCallData(env.Event.Data); ok {
 			if acc.ToolNames == nil {
 				acc.ToolNames = make(map[string]int)
@@ -316,7 +348,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 		if dd, ok := asDoneData(env.Event.Data); ok {
 			acc.mergePerTurnStats(dd)
 		}
-		acc.TurnCount++
+		acc.TurnCount.Add(1)
 		acc.TurnDurationMs = time.Since(fc.turnStartTime).Milliseconds()
 		acc.computePerTurnDeltas()
 
@@ -330,9 +362,9 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 		acc.resetPerTurn()
 		if b.log.Enabled(context.Background(), slog.LevelDebug) {
 			b.log.Debug("bridge: turn completed",
-				"session_id", sessionID, "worker_type", fc.workerType, "turn", acc.TurnCount,
+				"session_id", sessionID, "worker_type", fc.workerType, "turn", acc.TurnCount.Load(),
 				"duration", time.Since(fc.turnStartTime).Round(time.Millisecond),
-				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount)
+				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount.Load())
 		}
 	}
 }
@@ -394,13 +426,16 @@ type workerExitParams struct {
 	workerType     worker.WorkerType
 	opts           forwardOpts
 	startTime      time.Time
-	myGen          int64
 	doneReceived   bool
 	turnText       string
 	turnTextLen    int
 	turnTimerFired bool
 	sessPlatform   string
 	sessOwner      string
+	// resetGen is the resetGeneration captured when forwardEvents started.
+	// If the current generation differs, another reset replaced this goroutine's
+	// worker and we must NOT cleanupCrashedWorker (would detach the NEW worker).
+	resetGen int64
 }
 
 // handleWorkerExit processes worker exit after the recv channel closes.
@@ -409,10 +444,14 @@ type workerExitParams struct {
 func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	workerType := p.workerType
 
-	// Check reset generation: if a reset happened while this goroutine was
-	// running, the generation counter will differ from our captured value.
-	if rg, ok := w.(resetGenerationer); ok && rg.LoadResetGeneration() != p.myGen {
-		b.log.Info("bridge: worker reset, old forwardEvents exiting", "session_id", p.sessionID, "worker_type", workerType, "my_gen", p.myGen, "cur_gen", rg.LoadResetGeneration())
+	// P0 guard: if the worker was reset (generation changed), a NEW forwardEvents
+	// goroutine is already managing the replacement worker. This OLD goroutine must
+	// exit silently — cleanupCrashedWorker would detach the NEW worker and delete
+	// the accumulator, breaking the session.
+	if rg, ok := w.(worker.ResetGenerationer); ok && rg.LoadResetGeneration() != p.resetGen {
+		b.log.Info("bridge: worker exit from stale forwardEvents after reset, skipping cleanup",
+			"session_id", p.sessionID, "worker_type", workerType,
+			"my_gen", p.resetGen, "current_gen", rg.LoadResetGeneration())
 		return
 	}
 
@@ -480,7 +519,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			crashedWorker: w,
 			sessPlatform:  p.sessPlatform,
 			sessOwner:     p.sessOwner,
-			accGeneration: acc.Generation,
+			accGeneration: acc.Generation.Load(),
 			accModelName:  acc.ModelName,
 		}) {
 			return
@@ -517,7 +556,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		acc := b.getOrInitAccum(p.sessionID, "", p.startTime)
 		b.log.Warn("bridge: worker exited with non-zero code, sending crash error",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode,
-			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount)
+			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount.Load())
 		observability.WorkerCrashes().Add(context.TODO(), 1, metric.WithAttributes(attribute.String("worker_type", string(workerType)), attribute.String("exit_code", fmt.Sprintf("%d", exitCode))))
 		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
 		b.captureSyntheticEvent(syntheticTurnParams{
@@ -528,8 +567,8 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			Platform:   p.sessPlatform,
 			Owner:      p.sessOwner,
 			Model:      acc.ModelName,
-			Generation: acc.Generation,
-			TurnNum:    acc.TurnCount,
+			Generation: acc.Generation.Load(),
+			TurnNum:    int(acc.TurnCount.Load()),
 		})
 	} else if exitCode == -1 {
 		b.sendError(p.sessionID, events.ErrCodeSessionTerminated, "worker terminated (killed)")
@@ -556,17 +595,34 @@ func (b *Bridge) CaptureInboundEvent(sessionID string, seq int64, eventType even
 
 // CaptureInbound persists an inbound (user→worker) event for replay.
 // Also writes a user turn record when eventType is Input.
-func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Kind, data any, platform, owner string) {
+func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64, eventType events.Kind, data any, platform, owner string) {
 	b.captureDirected(sessionID, seq, eventType, data, "inbound")
 
 	// Write user turn record for Input events.
 	if eventType == events.Input && b.collector != nil {
 		acc := b.getOrInitAccum(sessionID, "", time.Now())
+		// Synchronous Generation initialization to prevent race (#658):
+		// forwardEvents initializes acc.Generation asynchronously, but CaptureInbound
+		// may be called from the Handler goroutine before that init completes.
+		// Without this guard, user turns get Generation=0 while assistant turns get Generation=1+,
+		// making the first user turn invisible after page refresh.
+		if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
+			gen := int64(1)
+			if b.turnsQuerier != nil {
+				genCtx, genCancel := context.WithTimeout(ctx, 3*time.Second)
+				latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
+				genCancel()
+				if latest > 0 {
+					gen = latest
+				}
+			}
+			acc.Generation.Store(gen)
+		}
 		content := extractInputContent(data)
 		turn := &eventstore.TurnWriteRequest{
 			SessionID:  sessionID,
-			Generation: acc.Generation,
-			TurnNum:    acc.TurnCount + 1,
+			Generation: acc.Generation.Load(),
+			TurnNum:    int(acc.TurnCount.Load()) + 1,
 			Seq:        seq,
 			Role:       eventstore.RoleUser,
 			Content:    content,
@@ -686,8 +742,8 @@ func (b *Bridge) captureAssistantTurn(sessionID string, seq int64, acc *sessionA
 
 	turn := &eventstore.TurnWriteRequest{
 		SessionID:        sessionID,
-		Generation:       acc.Generation,
-		TurnNum:          acc.TurnCount,
+		Generation:       acc.Generation.Load(),
+		TurnNum:          int(acc.TurnCount.Load()),
 		Seq:              seq,
 		Role:             eventstore.RoleAssistant,
 		Content:          content,
@@ -697,7 +753,7 @@ func (b *Bridge) captureAssistantTurn(sessionID string, seq int64, acc *sessionA
 		Success:          success,
 		Source:           eventstore.SourceNormal,
 		ToolsJSON:        toolsJSON,
-		ToolCount:        acc.ToolCallCount,
+		ToolCount:        int(acc.ToolCallCount.Load()),
 		TokensInput:      tokensInput,
 		TokensCacheWrite: acc.PerTurnCacheWrite,
 		TokensCacheRead:  acc.PerTurnCacheRead,

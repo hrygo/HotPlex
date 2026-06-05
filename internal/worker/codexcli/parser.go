@@ -11,17 +11,6 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-func (p *Parser) ParseLine(line string) (*CodexEvent, error) {
-	var event CodexEvent
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
-		return nil, fmt.Errorf("parse jsonl: %w", err)
-	}
-	if event.Type == "" {
-		return nil, fmt.Errorf("parse jsonl: missing event type")
-	}
-	return &event, nil
-}
-
 func (p *Parser) ParseNotification(line string) (method string, params json.RawMessage, err error) {
 	var frame struct {
 		ID     *int64          `json:"id"`

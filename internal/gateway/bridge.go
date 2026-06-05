@@ -24,13 +24,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// resetGenerationer is an optional interface for workers that support
-// reset-aware crash handling via a monotonic generation counter.
-type resetGenerationer interface {
-	IncResetGeneration() int64
-	LoadResetGeneration() int64
-}
-
 // bridgeSM is the narrow subset of SessionManager that Bridge needs.
 // Composed from canonical sub-interfaces defined in handler.go to avoid
 // duplicate method declarations.
@@ -268,27 +261,19 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		forwardOpts: &opts,
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
-			// Defensive: IDLE/CREATED → RUNNING; TERMINATED is pre-attach transitioned.
 			if si.State != events.StateRunning {
 				if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
 					return err
 				}
 			}
-			// Zombie GC may delete session files; fall back to fresh start if missing.
-			if fc, ok := w.(worker.SessionFileChecker); ok && !fc.HasSessionFiles(info.SessionID) {
-				b.log.Info("bridge: session files missing, falling back to fresh start",
-					"session_id", id)
-				if err := w.Start(ctx, info); err != nil {
-					return fmt.Errorf("bridge: fresh start after missing files: %w", err)
-				}
-				opts.resumed = false
-				return nil
-			}
 			resumeCtx, resumeCancel := context.WithTimeout(ctx, resumeTimeout)
 			err := w.Resume(resumeCtx, info)
 			resumeCancel()
-			if err != nil {
+			if err != nil && !errors.Is(err, worker.ErrFellBackToFreshStart) {
 				return fmt.Errorf("bridge: resume start: %w", err)
+			}
+			if errors.Is(err, worker.ErrFellBackToFreshStart) {
+				opts.resumed = false
 			}
 			return nil
 		},
@@ -427,68 +412,46 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("bridge: reset: no worker for session %s", sessionID)
 	}
 
-	// Increment reset generation so OLD forwardEvents detects the reset
-	// after its recv channel closes and exits cleanly without crash handling.
-	// The generation counter is monotonic, eliminating the race that existed
-	// with the previous boolean flag (where ResetSession reset the flag to
-	// false before OLD forwardEvents could check it).
-	if rg, ok := w.(resetGenerationer); ok {
-		rg.IncResetGeneration()
+	result, err := w.ResetContext(ctx)
+	if err != nil {
+		return fmt.Errorf("bridge: reset worker: %w", err)
 	}
 
-	// Worker-level reset: Terminate → delete session files → Start fresh.
-	if err := w.ResetContext(ctx); err != nil {
-		if !errors.Is(err, worker.ErrNotImplemented) {
-			return fmt.Errorf("bridge: reset worker: %w", err)
-		}
-		// Worker doesn't support in-place reset — fall back to Terminate+Start.
-		// NOTE(architecture): Terminate then Start on the same struct is safe for
-		// current workers because Start fully reinitializes internal state. A future
-		// WorkerFactory pattern (new struct per reset) would be cleaner but requires
-		// broader refactoring of the worker lifecycle management.
-		if termErr := w.Terminate(ctx); termErr != nil {
-			b.log.Warn("bridge: reset fallback: terminate failed", "session_id", sessionID, "err", termErr)
-		}
-		si, siErr := b.sm.Get(ctx, sessionID)
-		if siErr != nil {
-			return fmt.Errorf("bridge: reset fallback: get session: %w", siErr)
-		}
-		workerInfo := b.prepareWorkerInfo(sessionID, si.UserID, si.WorkDir, si)
-		if startErr := w.Start(ctx, workerInfo); startErr != nil {
-			return fmt.Errorf("bridge: reset fallback: start: %w", startErr)
+	// Reload agent config so the worker's next session picks up file changes.
+	if si, err := b.sm.Get(ctx, sessionID); err == nil {
+		if su, ok := w.(worker.SystemPromptUpdater); ok {
+			info := &worker.SessionInfo{SystemPrompt: ""}
+			b.injectAgentConfig(info, si.Platform, si.BotID, nil)
+			if info.SystemPrompt != "" {
+				su.UpdateSystemPrompt(info.SystemPrompt)
+				b.log.Info("bridge: reset reloaded agent config",
+					"session_id", sessionID, "platform", si.Platform, "bot_id", si.BotID,
+					"prompt_len", len(info.SystemPrompt))
+			}
 		}
 	}
 
-	// Reset accumulator generation-scoped counters.
-	// TotalInput/TotalOutput/TotalCostUSD are preserved (cumulative).
 	b.accumMu.Lock()
 	if acc, ok := b.accum[sessionID]; ok {
-		acc.TurnCount = 0
-		if rg, ok := w.(resetGenerationer); ok {
-			newGen := rg.LoadResetGeneration()
-			if acc.AppliedResetGen < newGen {
-				acc.Generation++
-				acc.AppliedResetGen = newGen
-			}
-		} else {
-			acc.Generation++
+		acc.TurnCount.Store(0)
+		if result.ConnReplaced {
+			acc.Generation.Add(1)
 		}
 	}
 	b.accumMu.Unlock()
 
-	// Workers that reset in-place (no process restart, no Conn replacement)
-	// keep their existing forwardEvents goroutine. Spawning a new one would
-	// create two goroutines reading from the same recvCh.
-	if ipr, ok := w.(worker.InPlaceReseter); ok && ipr.InPlaceReset() {
+	if !result.ConnReplaced {
 		return nil
 	}
 
-	// Start new forwardEvents goroutine for the restarted worker.
-	// Track with fwdWg so Shutdown() waits for it (previously missing).
+	// The worker already incremented resetGeneration in its ResetContext
+	// (before terminating the old process), so the OLD forwardEvents goroutine
+	// can detect the generation mismatch. No need to increment again here.
+
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()
-		b.forwardEvents(w, sessionID, forwardOpts{})
+		b.forwardEvents(w, sessionID, forwardOpts{ctx: context.Background()})
 	}()
 
 	return nil

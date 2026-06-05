@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -159,11 +160,11 @@ func TestSessionAccumulator_ResetPerTurn(t *testing.T) {
 		PrevTotalOut:  50,
 		PrevTotalCost: 0.01,
 		ToolNames:     map[string]int{"Read": 2},
-		ToolCallCount: 5,
-		PerTurnInput:  100,
-		PerTurnOutput: 50,
-		PerTurnCost:   0.01,
 	}
+	acc.ToolCallCount.Store(5)
+	acc.PerTurnInput = 100
+	acc.PerTurnOutput = 50
+	acc.PerTurnCost = 0.01
 
 	acc.resetPerTurn()
 
@@ -171,7 +172,7 @@ func TestSessionAccumulator_ResetPerTurn(t *testing.T) {
 	assert.Equal(t, int64(0), acc.PerTurnOutput)
 	assert.Equal(t, 0.0, acc.PerTurnCost)
 	assert.Nil(t, acc.ToolNames)
-	assert.Equal(t, 0, acc.ToolCallCount)
+	assert.Equal(t, int32(0), acc.ToolCallCount.Load())
 }
 
 func TestSessionAccumulator_NegativeDeltasClamped(t *testing.T) {
@@ -262,7 +263,7 @@ func TestInjectSessionStats(t *testing.T) {
 	b := NewBridge(BridgeDeps{Log: log, Hub: hub, SM: sm})
 
 	acc := b.getOrInitAccum("sess-1", "", time.Now())
-	acc.ToolCallCount = 4
+	acc.ToolCallCount.Store(4)
 
 	env := &events.Envelope{
 		Event: events.Event{
@@ -666,4 +667,167 @@ func TestBuildWorkerInfo_MCPInjection(t *testing.T) {
 			assert.Equal(t, tt.wantStrict, info.StrictMCPConfig, "StrictMCPConfig mismatch")
 		})
 	}
+}
+
+func TestHandleInternalReset(t *testing.T) {
+	t.Parallel()
+
+	gen := int64(5)
+	tests := []struct {
+		name       string
+		data       any
+		wantGenSet bool
+	}{
+		{
+			name:       "typed InternalResetData",
+			data:       events.InternalResetData{Generation: gen},
+			wantGenSet: true,
+		},
+		{
+			name:       "map with int64 generation",
+			data:       map[string]any{"generation": int64(5)},
+			wantGenSet: true,
+		},
+		{
+			name:       "map with float64 generation",
+			data:       map[string]any{"generation": float64(5)},
+			wantGenSet: true,
+		},
+		{
+			name:       "map with json.Number generation",
+			data:       map[string]any{"generation": json.Number("5")},
+			wantGenSet: true,
+		},
+		{
+			name:       "map without generation key",
+			data:       map[string]any{"other": "value"},
+			wantGenSet: false,
+		},
+		{
+			name:       "map with string generation",
+			data:       map[string]any{"generation": "not-a-number"},
+			wantGenSet: false,
+		},
+		{
+			name:       "unknown type",
+			data:       "invalid",
+			wantGenSet: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			hub := newTestHub(t)
+			b := &Bridge{
+				log:   slog.Default(),
+				sm:    new(mockBridgeSM),
+				hub:   hub,
+				accum: make(map[string]*sessionAccumulator),
+			}
+
+			env := &events.Envelope{
+				Event: events.Event{
+					Type: events.KindInternalReset,
+					Data: tt.data,
+				},
+			}
+
+			fc := &forwardContext{
+				sessionID: "sess-test",
+			}
+
+			acc := b.getOrInitAccum("sess-test", "", time.Now())
+			acc.Generation.Store(10)
+
+			b.handleInternalReset(env, "sess-test", fc)
+
+			if tt.wantGenSet {
+				assert.Equal(t, int32(0), acc.TurnCount.Load())
+				assert.Equal(t, int64(11), acc.Generation.Load())
+			} else {
+				assert.Equal(t, int32(0), acc.TurnCount.Load())
+				assert.Equal(t, int64(10), acc.Generation.Load())
+			}
+		})
+	}
+}
+
+// ─── Test ResetSession Reloads Agent Config ──────────────────────────────────
+
+// mockPromptUpdater is a mockBridgeWorker that also implements SystemPromptUpdater.
+type mockPromptUpdater struct {
+	mockBridgeWorker
+	updatedPrompt string
+}
+
+func (m *mockPromptUpdater) UpdateSystemPrompt(prompt string) {
+	m.updatedPrompt = prompt
+}
+
+var _ worker.SystemPromptUpdater = (*mockPromptUpdater)(nil)
+
+func TestResetSession_ReloadsAgentConfig(t *testing.T) {
+	t.Parallel()
+
+	// Set up agent config dir with a SOUL.md
+	dir := t.TempDir()
+	writeAgentConfigFile(t, dir, "SOUL.md", "Updated persona v2.")
+
+	hub := newTestHub(t)
+	sm := new(mockBridgeSM)
+	b := NewBridge(BridgeDeps{
+		Log:            slog.Default(),
+		Hub:            hub,
+		SM:             sm,
+		AgentConfigDir: dir,
+	})
+
+	sid := "test-reset-reload-session"
+	mw := &mockPromptUpdater{}
+
+	sm.On("GetWorker", sid).Return(mw)
+	sm.On("Get", sid).Return(&session.SessionInfo{
+		ID:       sid,
+		Platform: "webchat",
+		BotID:    "bot-1",
+	}, nil)
+
+	err := b.ResetSession(context.Background(), sid)
+	require.NoError(t, err)
+
+	assert.Contains(t, mw.updatedPrompt, "Updated persona v2.")
+	sm.AssertExpectations(t)
+}
+
+func TestResetSession_NoUpdater_NoReload(t *testing.T) {
+	t.Parallel()
+
+	// Set up agent config dir so we can verify it's NOT used when worker lacks SystemPromptUpdater.
+	dir := t.TempDir()
+	writeAgentConfigFile(t, dir, "SOUL.md", "Should not appear.")
+
+	hub := newTestHub(t)
+	sm := new(mockBridgeSM)
+	b := NewBridge(BridgeDeps{
+		Log:            slog.Default(),
+		Hub:            hub,
+		SM:             sm,
+		AgentConfigDir: dir,
+	})
+
+	sid := "test-no-updater"
+	mw := &mockBridgeWorker{} // does NOT implement SystemPromptUpdater
+
+	sm.On("GetWorker", sid).Return(mw)
+	sm.On("Get", sid).Return(&session.SessionInfo{
+		ID:       sid,
+		Platform: "webchat",
+	}, nil)
+
+	err := b.ResetSession(context.Background(), sid)
+	require.NoError(t, err)
+	// No crash, no panic — worker without SystemPromptUpdater is silently skipped.
+	sm.AssertExpectations(t)
 }

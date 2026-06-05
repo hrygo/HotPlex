@@ -81,10 +81,10 @@ type SessionConn interface {
 
 | 接口 | 方法 | 用途 |
 |------|------|------|
-| `SessionFileChecker` | `HasSessionFiles(sessionID) bool` | resume 前检查磁盘会话文件是否存在 |
 | `InputRecoverer` | `LastInput() string` | 缓存最后输入用于崩溃恢复 |
-| `InPlaceReseter` | `InPlaceReset() bool` | 标记 ResetContext 是否原地重置 |
 | `WorkerSessionIDHandler` | `SetWorkerSessionID` / `GetWorkerSessionID` | 管理 Worker 内部会话 ID |
+| `ControlRequester` | `SendControlRequest` | 支持控制请求（如权限响应） |
+| `WorkerCommander` | `Compact` / `Clear` / `Rewind` | 支持 compact/clear/rewind 命令 |
 
 ## 分步实现
 
@@ -268,12 +268,12 @@ func (w *Worker) LastIO() time.Time {
     return w.BaseWorker.LastIO()
 }
 
-func (w *Worker) ResetContext(ctx context.Context) error {
+func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
     if err := w.Terminate(ctx); err != nil {
-        return fmt.Errorf("myagent: reset terminate: %w", err)
+        return worker.ResetResult{}, fmt.Errorf("myagent: reset terminate: %w", err)
     }
-    // 重新 Start 即可（也可删除 session 文件后 Start）
-    return nil
+    // Per-process workers return ConnReplaced: true (Gateway spawns new forwardEvents).
+    return worker.ResetResult{ConnReplaced: true}, nil
 }
 ```
 

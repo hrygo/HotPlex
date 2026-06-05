@@ -2,13 +2,11 @@ package codexcli
 
 import "encoding/json"
 
-// CodexEvent is the top-level JSONL event from codex exec --json.
+// CodexEvent is a Codex JSONL event.
 type CodexEvent struct {
-	Type     string      `json:"type"`
-	Item     *CodexItem  `json:"item,omitempty"`
-	ThreadID string      `json:"thread_id,omitempty"`
-	Usage    *CodexUsage `json:"usage,omitempty"`
-	Message  string      `json:"message,omitempty"`
+	Type    string     `json:"type"`
+	Item    *CodexItem `json:"item,omitempty"`
+	Message string     `json:"message,omitempty"`
 }
 
 // CodexItem represents a single turn item within a codex turn.
@@ -42,15 +40,6 @@ type CodexItem struct {
 	// TodoList fields
 	TodoItems []CodexTodoItem `json:"todo_items,omitempty"`
 	Data      json.RawMessage `json:"data,omitempty"` // generic payload for error items
-}
-
-// CodexUsage holds token usage statistics from turn.completed (exec mode).
-// Fields use camelCase to match codex exec serde serialization.
-type CodexUsage struct {
-	InputTokens           int `json:"inputTokens"`
-	CachedInputTokens     int `json:"cachedInputTokens"`
-	OutputTokens          int `json:"outputTokens"`
-	ReasoningOutputTokens int `json:"reasoningOutputTokens"`
 }
 
 // CodexTokenUsage holds per-turn or cumulative token usage from app-server

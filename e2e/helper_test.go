@@ -204,8 +204,8 @@ func (w *simulatedWorker) LastIO() time.Time {
 	return time.Now()
 }
 
-func (w *simulatedWorker) ResetContext(_ context.Context) error {
-	return nil
+func (w *simulatedWorker) ResetContext(_ context.Context) (worker.ResetResult, error) {
+	return worker.ResetResult{}, nil
 }
 
 // testWorkerFactory creates simulated workers for tests.

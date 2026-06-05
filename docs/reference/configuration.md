@@ -293,7 +293,7 @@ LLM Provider 返回临时错误（429、529、400 等）时的自动重试配置
 
 #### 3.7.5 codex_cli — Codex CLI Worker
 
-OpenAI Codex CLI Worker，支持双模式：exec（每次 Turn fork 新进程）和 app-server（单例持久进程，推荐）。
+OpenAI Codex CLI Worker，使用 app-server 单例持久进程模式，通过 JSON-RPC 2.0 over stdio 通信。
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
@@ -302,11 +302,10 @@ OpenAI Codex CLI Worker，支持双模式：exec（每次 Turn fork 新进程）
 | `sandbox` | string | `danger-full-access` | `HOTPLEX_WORKER_CODEX_CLI_SANDBOX` | 沙箱模式：`read-only`、`workspace-write`、`danger-full-access` |
 | `approval_mode` | string | `never` | `HOTPLEX_WORKER_CODEX_CLI_APPROVAL_MODE` | 审批模式：`untrusted`（所有操作需审批）、`on-request`（仅高风险操作）、`never`（全自动） |
 | `ephemeral` | bool | `true` | — | 临时会话模式。不持久化到磁盘，Session 结束后数据清除 |
-| `personality` | string | `friendly` | — | Agent 人格模式，用于 app-server 模式 |
+| `personality` | string | `friendly` | — | Agent 人格模式 |
 | `startup_timeout` | duration | `30s` | — | 进程启动超时 |
 | `call_timeout` | duration | `30s` | — | JSON-RPC 调用超时 |
-| `use_app_server` | bool | `true` | — | 使用持久 app-server 模式（推荐）。`false` 则使用每次 exec 的 one-shot 模式 |
-| `idle_drain_period` | duration | `30m` | — | app-server 模式下空闲排空超时。超时后单例进程关闭 |
+| `idle_drain_period` | duration | `30m` | — | 空闲排空超时。超时后单例进程关闭 |
 | `color` | bool | `false` | — | 启用彩色输出（传递 `--color` 给 Codex CLI） |
 | `output_file` | string | `""` | — | 输出最后一条消息到文件（传递 `--output-last-message` 给 Codex CLI） |
 | `strict_config` | bool | `false` | — | 严格配置校验（传递 `--strict-config`） |

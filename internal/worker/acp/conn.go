@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -134,3 +135,7 @@ func (c *acpConn) LastInput() string {
 
 func (c *acpConn) UserID() string    { return c.userID }
 func (c *acpConn) SessionID() string { return c.sessionID }
+
+func (c *acpConn) Inject(env *events.Envelope) {
+	base.InjectWithTimeout(c.recvCh, env, c.log, c.sessionID)
+}

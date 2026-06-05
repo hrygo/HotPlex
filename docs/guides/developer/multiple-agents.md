@@ -38,8 +38,8 @@ HotPlex Gateway 支持同时运行多个 AI Worker 实例，通过 Session 隔�
 
 ### Codex CLI（`codex_cli`）
 
-- **进程模型**：双模式 — app-server（单例持久进程，默认）或 exec（每次 Turn fork 新进程）
-- **通信方式**：app-server 模式使用 HTTP API；exec 模式使用 stdio
+- **进程模型**：单例模式，全局共享一个 `codex app-server` 进程
+- **通信方式**：JSON-RPC 2.0 over stdio
 
 ### ACP Agent（`acp`）
 
@@ -55,7 +55,7 @@ HotPlex Gateway 支持同时运行多个 AI Worker 实例，通过 Session 隔�
 
 ### Codex CLI (`codex_cli`)
 
-- **生命周期**：app-server 模式首次使用时启动，空闲排空后关闭；exec 模式每次执行后终止
+- **生命周期**：首次使用时启动，空闲排空后关闭
 - **特点**：
   - 基于 OpenAI Codex CLI，支持沙箱隔离（read-only / workspace-write / danger-full-access）
   - 三种审批模式：`never`（全自动）、`on-request`（高风险操作）、`untrusted`（全部审批）

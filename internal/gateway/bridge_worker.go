@@ -20,10 +20,11 @@ import (
 
 // forwardOpts configures the forwardEvents goroutine behavior.
 type forwardOpts struct {
-	resumed    bool   // true if this goroutine was spawned by ResumeSession
-	workDir    string // workDir to use for resume retry
-	retryDepth int    // number of resume retries attempted (limits to 1)
-	lastInput  string // inherited lastInput from previous retry goroutine; used as fallback when retry worker never receives input
+	ctx        context.Context // parent context for cancellation propagation
+	resumed    bool            // true if this goroutine was spawned by ResumeSession
+	workDir    string          // workDir to use for resume retry
+	retryDepth int             // number of resume retries attempted (limits to 1)
+	lastInput  string          // inherited lastInput from previous retry goroutine; used as fallback when retry worker never receives input
 }
 
 // workerLaunchParams holds the parameters for createAndLaunchWorker.
@@ -51,6 +52,9 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	sid := params.workerInfo.SessionID
 	if params.forwardOpts == nil {
 		params.forwardOpts = &forwardOpts{}
+	}
+	if params.forwardOpts.ctx == nil {
+		params.forwardOpts.ctx = params.ctx
 	}
 
 	start := time.Now()
@@ -235,7 +239,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 // by a concurrent ResumeSession or attemptResumeFallback.
 func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Worker) {
 	acc := b.getOrInitAccum(sessionID, "", time.Now())
-	b.log.Debug("bridge: cleaning up crashed worker", "session_id", sessionID, "turn_count", acc.TurnCount)
+	b.log.Debug("bridge: cleaning up crashed worker", "session_id", sessionID, "turn_count", acc.TurnCount.Load())
 	if b.sm == nil {
 		return
 	}

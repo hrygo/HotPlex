@@ -18,267 +18,12 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-func TestParserParseLine(t *testing.T) {
-	t.Parallel()
-
-	p := NewParser()
-
-	t.Run("agent_message", func(t *testing.T) {
-		t.Parallel()
-		line := `{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Hello world"}}`
-		event, err := p.ParseLine(line)
-		require.NoError(t, err)
-		require.Equal(t, EventItemCompleted, event.Type)
-		require.NotNil(t, event.Item)
-		require.Equal(t, "agent_message", event.Item.Type)
-		require.Equal(t, "Hello world", event.Item.Text)
-	})
-
-	t.Run("thread_started", func(t *testing.T) {
-		t.Parallel()
-		line := `{"type":"thread.started","thread_id":"thread-123"}`
-		event, err := p.ParseLine(line)
-		require.NoError(t, err)
-		require.Equal(t, EventThreadStarted, event.Type)
-		require.Equal(t, "thread-123", event.ThreadID)
-	})
-
-	t.Run("turn_completed_with_usage", func(t *testing.T) {
-		t.Parallel()
-		line := `{"type":"turn.completed","usage":{"inputTokens":100,"cachedInputTokens":20,"outputTokens":50,"reasoningOutputTokens":5}}`
-		event, err := p.ParseLine(line)
-		require.NoError(t, err)
-		require.Equal(t, EventTurnCompleted, event.Type)
-		require.NotNil(t, event.Usage)
-		require.Equal(t, 100, event.Usage.InputTokens)
-		require.Equal(t, 50, event.Usage.OutputTokens)
-		require.Equal(t, 20, event.Usage.CachedInputTokens)
-		require.Equal(t, 5, event.Usage.ReasoningOutputTokens)
-	})
-
-	t.Run("error_event", func(t *testing.T) {
-		t.Parallel()
-		line := `{"type":"error","message":"something went wrong"}`
-		event, err := p.ParseLine(line)
-		require.NoError(t, err)
-		require.Equal(t, EventError, event.Type)
-		require.Equal(t, "something went wrong", event.Message)
-	})
-
-	t.Run("invalid_json", func(t *testing.T) {
-		t.Parallel()
-		_, err := p.ParseLine("not json")
-		require.Error(t, err)
-	})
-
-	t.Run("missing_type", func(t *testing.T) {
-		t.Parallel()
-		_, err := p.ParseLine(`{"item":{"id":"1","type":"agent_message"}}`)
-		require.Error(t, err)
-	})
-}
-
-func TestMapperMap(t *testing.T) {
-	t.Parallel()
-
-	m := NewMapper("session-1")
-
-	t.Run("agent_message_to_delta", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:   "item_1",
-				Type: "agent_message",
-				Text: "Hello, I found the bug",
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.MessageDelta, envs[0].Event.Type)
-		md, ok := envs[0].Event.Data.(events.MessageDeltaData)
-		require.True(t, ok)
-		require.Equal(t, "Hello, I found the bug", md.Content)
-	})
-
-	t.Run("reasoning_to_reasoning", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:          "item_1",
-				Type:        "reasoning",
-				SummaryText: []string{"Step 1: analyze", "Step 2: fix"},
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.Reasoning, envs[0].Event.Type)
-		rd, ok := envs[0].Event.Data.(events.ReasoningData)
-		require.True(t, ok)
-		require.Equal(t, "Step 1: analyze\nStep 2: fix", rd.Content)
-	})
-
-	t.Run("command_execution_started_to_toolcall", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemStarted,
-			Item: &CodexItem{
-				ID:      "item_1",
-				Type:    "command_execution",
-				Command: "ls -la",
-				CWD:     "/home/user",
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.ToolCall, envs[0].Event.Type)
-		tc, ok := envs[0].Event.Data.(events.ToolCallData)
-		require.True(t, ok)
-		require.Equal(t, "Bash", tc.Name)
-		require.Equal(t, "ls -la", tc.Input["command"])
-	})
-
-	t.Run("command_execution_completed_to_toolresult", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:       "item_1",
-				Type:     "command_execution",
-				Stdout:   "file1\nfile2",
-				ExitCode: 0,
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.ToolResult, envs[0].Event.Type)
-		tr, ok := envs[0].Event.Data.(events.ToolResultData)
-		require.True(t, ok)
-		require.Equal(t, "file1\nfile2", tr.Output)
-	})
-
-	t.Run("turn_completed_to_done", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventTurnCompleted,
-			Usage: &CodexUsage{
-				InputTokens:       100,
-				CachedInputTokens: 20,
-				OutputTokens:      50,
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.Done, envs[0].Event.Type)
-		dd, ok := envs[0].Event.Data.(events.DoneData)
-		require.True(t, ok)
-		require.True(t, dd.Success)
-		usage, ok := dd.Stats["usage"].(map[string]any)
-		require.True(t, ok, "stats should have nested 'usage' map")
-		require.Equal(t, int64(100), usage["input_tokens"])
-		require.Equal(t, int64(50), usage["output_tokens"])
-		require.Equal(t, int64(20), usage["cache_read_input_tokens"])
-	})
-
-	t.Run("turn_failed_to_error_and_done", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{Type: EventTurnFailed}
-		envs := m.Map(event)
-		require.Len(t, envs, 2)
-		require.Equal(t, events.Error, envs[0].Event.Type)
-		require.Equal(t, events.Done, envs[1].Event.Type)
-		dd, ok := envs[1].Event.Data.(events.DoneData)
-		require.True(t, ok)
-		require.False(t, dd.Success)
-	})
-
-	t.Run("error_event_to_error_and_done", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type:    EventError,
-			Message: "API rate limit exceeded",
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 2)
-		require.Equal(t, events.Error, envs[0].Event.Type)
-		ed, ok := envs[0].Event.Data.(events.ErrorData)
-		require.True(t, ok)
-		require.Equal(t, "API rate limit exceeded", ed.Message)
-	})
-
-	t.Run("file_change_started_to_toolcall", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemStarted,
-			Item: &CodexItem{
-				ID:   "item_1",
-				Type: "file_change",
-				Changes: map[string]CodexFileChange{
-					"main.go": {FilePath: "main.go"},
-				},
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.ToolCall, envs[0].Event.Type)
-		tc, ok := envs[0].Event.Data.(events.ToolCallData)
-		require.True(t, ok)
-		require.Equal(t, "Edit", tc.Name)
-	})
-
-	t.Run("mcp_tool_call_started_to_toolcall", func(t *testing.T) {
-		t.Parallel()
-		args := json.RawMessage(`{"query":"test"}`)
-		event := &CodexEvent{
-			Type: EventItemStarted,
-			Item: &CodexItem{
-				ID:        "item_1",
-				Type:      "mcp_tool_call",
-				Server:    "github",
-				Tool:      "search",
-				Arguments: args,
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.ToolCall, envs[0].Event.Type)
-		tc, ok := envs[0].Event.Data.(events.ToolCallData)
-		require.True(t, ok)
-		require.Equal(t, "search", tc.Name)
-	})
-
-	t.Run("nil_item_returns_nil", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: nil,
-		}
-		envs := m.Map(event)
-		require.Nil(t, envs)
-	})
-}
-
 func TestTypeRegistration(t *testing.T) {
 	types := []string{}
 	for _, wt := range worker.RegisteredTypes() {
 		types = append(types, string(wt))
 	}
 	require.Contains(t, types, string(worker.TypeCodexCLI))
-}
-
-func TestCapabilities(t *testing.T) {
-	t.Parallel()
-
-	w := &ExecWorker{BaseWorker: base.NewBaseWorker(nil, nil)}
-
-	require.Equal(t, worker.TypeCodexCLI, w.Type())
-	require.True(t, w.SupportsResume())
-	require.True(t, w.SupportsStreaming())
-	require.True(t, w.SupportsTools())
-	require.NotEmpty(t, w.EnvBlocklist())
-	require.Contains(t, w.Modalities(), "text")
-	require.Contains(t, w.Modalities(), "code")
 }
 
 // ─── v2 MapNotification Tests ───────────────────────────────────────────
@@ -791,259 +536,6 @@ func TestAppServerWorkerConnNilBeforeStart(t *testing.T) {
 	require.Nil(t, w.Conn())
 }
 
-// ─── ExecWorker Lifecycle Tests ─────────────────────────────────────────
-
-func newTestExecWorker(t *testing.T) *ExecWorker {
-	t.Helper()
-	return &ExecWorker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
-}
-
-func TestExecWorkerStart(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	err := w.Start(context.Background(), worker.SessionInfo{
-		SessionID:  "sess-1",
-		ProjectDir: t.TempDir(),
-	})
-	require.NoError(t, err)
-	require.True(t, w.started)
-	require.Equal(t, "sess-1", w.sessionID)
-
-	// Double start should error
-	err = w.Start(context.Background(), worker.SessionInfo{SessionID: "sess-2"})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "already started")
-}
-
-func TestExecWorkerTerminateWithoutCancel(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	require.Nil(t, w.cancel)
-	err := w.Terminate(context.Background())
-	require.NoError(t, err)
-}
-
-func TestExecWorkerTerminateWithCancel(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	w.cancel = cancel
-
-	err := w.Terminate(context.Background())
-	require.NoError(t, err)
-	require.Error(t, ctx.Err()) // cancelled
-}
-
-func TestExecWorkerResetContext(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	_ = w.Start(context.Background(), worker.SessionInfo{
-		SessionID:  "sess-1",
-		ProjectDir: t.TempDir(),
-	})
-	w.threadID = "thread-old"
-	w.readLineFn = func() (string, error) { return "", nil }
-
-	err := w.ResetContext(context.Background())
-	require.NoError(t, err)
-	require.False(t, w.started)
-	require.Empty(t, w.threadID)
-	require.Nil(t, w.readLineFn)
-}
-
-func TestExecWorkerInputNoProcessReturnsErrNotImplemented(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	_ = w.Start(context.Background(), worker.SessionInfo{
-		SessionID:  "sess-1",
-		ProjectDir: t.TempDir(),
-	})
-
-	// Input without a running process should try spawn, which will fail
-	// because there's no actual codex binary. This is expected.
-	err := w.Input(context.Background(), "hello", nil)
-	require.Error(t, err)
-}
-
-func TestExecWorkerHandlePermissionResponse(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	err := w.HandlePermissionResponse(context.Background(), "req-1", true, "")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
-}
-
-func TestExecWorkerHandleQuestionResponse(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	err := w.HandleQuestionResponse(context.Background(), "req-1", nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
-}
-
-func TestExecWorkerHandleElicitationResponse(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	err := w.HandleElicitationResponse(context.Background(), "req-1", "", nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
-}
-
-func TestExecWorkerHealthAndLastIO(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	health := w.Health()
-	require.Equal(t, worker.TypeCodexCLI, health.Type)
-
-	lastIO := w.LastIO()
-	require.True(t, lastIO.IsZero() || !lastIO.IsZero())
-}
-
-func TestExecWorkerSetTestConn(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	require.Nil(t, w.Conn())
-
-	// After setting test conn, Conn() returns it
-	mockConn := &mockSessionConn{}
-	w.SetTestConn(mockConn)
-	require.Equal(t, mockConn, w.Conn())
-}
-
-func TestExecWorkerSetReadLineFn(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	w.SetReadLineFn(func() (string, error) { return "", nil })
-	require.NotNil(t, w.readLineFn)
-}
-
-func TestExecWorkerReadOutput(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	_ = w.Start(context.Background(), worker.SessionInfo{
-		SessionID:  "sess-1",
-		ProjectDir: t.TempDir(),
-	})
-
-	// Simulate stdout with turn.completed to trigger return
-	stdout := strings.NewReader(
-		`{"type":"turn.completed","usage":{"inputTokens":10,"outputTokens":5}}` + "\n",
-	)
-	conn := base.NewConn(slog.Default(), nil, "user-1", "sess-1")
-	mockConn := &mockSessionConn{sendCh: make(chan *events.Envelope, 10)}
-	w.SetTestConn(mockConn)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	w.readOutput(ctx, stdout, conn)
-}
-
-func TestExecWorkerReadOutputEmptyLine(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	_ = w.Start(context.Background(), worker.SessionInfo{
-		SessionID:  "sess-1",
-		ProjectDir: t.TempDir(),
-	})
-
-	stdout := strings.NewReader("\n\n{\"type\":\"turn.completed\"}\n")
-	conn := base.NewConn(slog.Default(), nil, "user-1", "sess-1")
-	w.SetTestConn(&mockSessionConn{sendCh: make(chan *events.Envelope, 10)})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	w.readOutput(ctx, stdout, conn)
-}
-
-func TestExecWorkerReadOutputCancelled(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	_ = w.Start(context.Background(), worker.SessionInfo{
-		SessionID:  "sess-1",
-		ProjectDir: t.TempDir(),
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
-
-	// Should return quickly due to cancelled context
-	stdout := strings.NewReader("")
-	conn := base.NewConn(slog.Default(), nil, "user-1", "sess-1")
-	w.readOutput(ctx, stdout, conn)
-}
-
-func TestExecWorkerBuildArgs(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	w.cfg = Config{
-		Sandbox:      "workspace-write",
-		ApprovalMode: "never",
-	}
-
-	session := worker.SessionInfo{
-		SessionID:       "sess-1",
-		ProjectDir:      "/tmp/project",
-		ResumeSessionID: "",
-	}
-
-	args := w.buildArgs(session, "fix the bug")
-	require.Contains(t, args, "exec")
-	require.Contains(t, args, "--json")
-	require.Contains(t, args, "fix the bug")
-}
-
-func TestExecWorkerBuildArgsWithResume(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	w.cfg = Config{Sandbox: "workspace-write", ApprovalMode: "never"}
-
-	session := worker.SessionInfo{
-		SessionID:       "sess-1",
-		ProjectDir:      "/tmp/project",
-		ResumeSessionID: "thread-123",
-	}
-
-	args := w.buildArgs(session, "continue")
-	require.Contains(t, args, "resume")
-	require.Contains(t, args, "thread-123")
-}
-
-func TestExecWorkerBuildArgsWithModel(t *testing.T) {
-	t.Parallel()
-
-	w := newTestExecWorker(t)
-	w.cfg = Config{
-		Sandbox:      "workspace-write",
-		ApprovalMode: "never",
-		Model:        "o3",
-	}
-
-	session := worker.SessionInfo{
-		SessionID:  "sess-1",
-		ProjectDir: "/tmp/project",
-	}
-
-	args := w.buildArgs(session, "test")
-	require.Contains(t, args, "-m")
-	require.Contains(t, args, "o3")
-}
-
 // ─── AppServerWorker Lifecycle Tests ─────────────────────────────────────
 
 func newTestAppServerWorker(t *testing.T) *AppServerWorker {
@@ -1140,152 +632,6 @@ func TestAppServerWorkerInputNoThreadID(t *testing.T) {
 	require.Contains(t, err.Error(), "not started")
 }
 
-// ─── mapItemCompleted branch tests ───────────────────────────────────────
-
-func TestMapperMapItemCompletedBranches(t *testing.T) {
-	t.Parallel()
-
-	m := NewMapper("session-1")
-
-	t.Run("file_change_completed", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:     "item_1",
-				Type:   ItemFileChange,
-				Status: "completed",
-				Stderr: "",
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.ToolResult, envs[0].Event.Type)
-		tr := envs[0].Event.Data.(events.ToolResultData)
-		require.Equal(t, "completed", tr.Output)
-	})
-
-	t.Run("file_change_failed", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:     "item_1",
-				Type:   ItemFileChange,
-				Status: "error",
-				Stderr: "permission denied",
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		tr := envs[0].Event.Data.(events.ToolResultData)
-		require.Equal(t, "failed", tr.Output)
-		require.Equal(t, "permission denied", tr.Error)
-	})
-
-	t.Run("mcp_tool_call_completed", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:     "item_1",
-				Type:   ItemMCPToolCall,
-				Result: json.RawMessage(`{"files":["a.go"]}`),
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		tr := envs[0].Event.Data.(events.ToolResultData)
-		require.Contains(t, tr.Output, "a.go")
-	})
-
-	t.Run("mcp_tool_call_with_error", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:    "item_1",
-				Type:  ItemMCPToolCall,
-				Error: &CodexItemError{Message: "timeout"},
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		tr := envs[0].Event.Data.(events.ToolResultData)
-		require.Equal(t, "timeout", tr.Error)
-	})
-
-	t.Run("plan_item", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:   "item_1",
-				Type: ItemPlan,
-				Text: "I will refactor the module",
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		require.Equal(t, events.State, envs[0].Event.Type)
-		sd := envs[0].Event.Data.(events.StateData)
-		require.Equal(t, events.SessionState("planning"), sd.State)
-	})
-
-	t.Run("item_error", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{
-				ID:   "item_1",
-				Type: ItemError,
-				Error: &CodexItemError{
-					Message: "test error",
-				},
-			},
-		}
-		envs := m.Map(event)
-		require.Len(t, envs, 1)
-		ted := envs[0].Event.Data.(events.ErrorData)
-		require.Contains(t, ted.Message, "test error")
-	})
-
-	t.Run("unknown_item_type", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemCompleted,
-			Item: &CodexItem{ID: "item_1", Type: "unknown_type"},
-		}
-		envs := m.Map(event)
-		require.Nil(t, envs)
-	})
-}
-
-// ─── mapItemStarted branch tests ─────────────────────────────────────────
-
-func TestMapperMapItemStartedBranches(t *testing.T) {
-	t.Parallel()
-
-	m := NewMapper("session-1")
-
-	t.Run("unknown_item_started", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{
-			Type: EventItemStarted,
-			Item: &CodexItem{ID: "item_1", Type: "unknown"},
-		}
-		envs := m.Map(event)
-		require.Nil(t, envs)
-	})
-
-	t.Run("nil_item_started", func(t *testing.T) {
-		t.Parallel()
-		event := &CodexEvent{Type: EventItemStarted, Item: nil}
-		envs := m.Map(event)
-		require.Nil(t, envs)
-	})
-}
-
 // ─── appConn tests ────────────────────────────────────────────────────────
 
 func TestAppConnSendRecvClose(t *testing.T) {
@@ -1337,13 +683,6 @@ func TestAppConnTrySendFull(t *testing.T) {
 	require.False(t, conn.TrySend(events.NewEnvelope("id-2", "sess-1", 2, events.Done, events.DoneData{})))
 }
 
-// ─── buildUsageStats edge case ────────────────────────────────────────────
-
-func TestBuildUsageStatsNil(t *testing.T) {
-	result := buildUsageStats(nil)
-	require.Nil(t, result)
-}
-
 // ─── ParseNotification/ParseResponse edge cases ───────────────────────────
 
 func TestParseNotificationMissingParams(t *testing.T) {
@@ -1384,7 +723,7 @@ func TestAppServerWorkerResetContext(t *testing.T) {
 
 	w := newTestAppServerWorker(t)
 	// Don't set threadID to avoid triggering Notify on a nil manager connection
-	err := w.ResetContext(context.Background())
+	_, err := w.ResetContext(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, w.threadID)
 	require.Nil(t, w.recvCh)
@@ -1628,36 +967,6 @@ func TestMapNotificationApprovalMethodNames(t *testing.T) {
 	}
 }
 
-// ─── Mock Helpers ──────────────────────────────────────────────────────────
-
-type mockSessionConn struct {
-	sendCh chan *events.Envelope
-}
-
-func (m *mockSessionConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
-	return nil
-}
-func (m *mockSessionConn) Send(ctx context.Context, env *events.Envelope) error {
-	select {
-	case m.sendCh <- env:
-		return nil
-	default:
-		return fmt.Errorf("channel full")
-	}
-}
-func (m *mockSessionConn) TrySend(env *events.Envelope) bool {
-	select {
-	case m.sendCh <- env:
-		return true
-	default:
-		return false
-	}
-}
-func (m *mockSessionConn) Recv() <-chan *events.Envelope { return m.sendCh }
-func (m *mockSessionConn) Close() error                  { return nil }
-func (m *mockSessionConn) UserID() string                { return "user-1" }
-func (m *mockSessionConn) SessionID() string             { return "sess-1" }
-
 // ─── Issue #575: Reset kills session + Zombie process fix tests ──────────
 
 // testConfigWithDefaults sets a known-good config for integration tests and
@@ -1694,7 +1003,7 @@ func TestResetContextClearsStateAndResetsOnce(t *testing.T) {
 	}
 	w.origSession = worker.SessionInfo{}
 
-	err := w.ResetContext(context.Background())
+	_, err := w.ResetContext(context.Background())
 	require.NoError(t, err)
 
 	// Old recvCh should be closed by appConn.Close().
@@ -1736,7 +1045,7 @@ func TestResetContextRestartsFromSavedSession(t *testing.T) {
 		conn:        &appConn{recvCh: oldRecvCh},
 	}
 
-	err := wk.ResetContext(context.Background())
+	_, err := wk.ResetContext(context.Background())
 
 	// Old conn should be closed.
 	_, ok := <-oldRecvCh
@@ -1859,7 +1168,7 @@ func TestIntegrationStartSavesSessionAndResetRestarts(t *testing.T) {
 	w.mu.Unlock()
 	require.NotEmpty(t, firstThreadID)
 
-	err = w.ResetContext(context.Background())
+	_, err = w.ResetContext(context.Background())
 	require.NoError(t, err)
 
 	w.mu.Lock()
@@ -1867,6 +1176,639 @@ func TestIntegrationStartSavesSessionAndResetRestarts(t *testing.T) {
 	w.mu.Unlock()
 	require.NotEmpty(t, secondThreadID)
 	require.NotEqual(t, firstThreadID, secondThreadID, "threadID should change after reset")
+}
+
+// ─── appConn.Send Tests ──────────────────────────────────────────────────
+
+func TestAppConnSendReturnsErrNotImplemented(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+	ch := make(chan *events.Envelope, 1)
+	conn := &appConn{
+		userID:    "user-1",
+		sessionID: "sess-1",
+		recvCh:    ch,
+		manager:   mgr,
+	}
+
+	env := events.NewEnvelope("id-1", "sess-1", 1, events.MessageStart, nil)
+	err := conn.Send(context.Background(), env)
+	require.ErrorIs(t, err, worker.ErrNotImplemented)
+}
+
+// ─── Compact Tests ────────────────────────────────────────────────────────
+
+func TestCompactNoThread(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Compact(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no active thread")
+}
+
+func TestCompactDelegatesToManager(t *testing.T) {
+	t.Parallel()
+
+	// Set up a manager with a fake stdin pipe so Call won't panic on write,
+	// but will timeout since there's no real process responding.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-compact",
+	}
+
+	err := wk.Compact(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: compact:")
+}
+
+// ─── Clear Tests ──────────────────────────────────────────────────────────
+
+func TestClearNoThread(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Clear(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no active thread")
+}
+
+func TestClearDelegatesToResetContext(t *testing.T) {
+	t.Parallel()
+
+	// Clear calls ResetContext internally.
+	// ResetContext → cleanupOldThread → Notify(thread/unsubscribe) needs stdin.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	recvCh := make(chan *events.Envelope, 1)
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-clear",
+		doneCh:     make(chan struct{}),
+		conn:       &appConn{recvCh: recvCh},
+	}
+
+	err := wk.Clear(context.Background())
+	require.NoError(t, err)
+
+	_, ok := <-recvCh
+	require.False(t, ok)
+}
+
+func TestClearWithActiveTurn(t *testing.T) {
+	t.Parallel()
+
+	// Clear with a turnID should attempt InterruptTurn before ResetContext.
+	// InterruptTurn's Notify needs a stdin writer. Provide a fake pipe.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	recvCh := make(chan *events.Envelope, 1)
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-clear2",
+		turnID:     "turn-active",
+		doneCh:     make(chan struct{}),
+		conn:       &appConn{recvCh: recvCh},
+	}
+
+	err := wk.Clear(context.Background())
+	require.NoError(t, err)
+}
+
+// ─── Rewind Tests ─────────────────────────────────────────────────────────
+
+func TestRewindNoThread(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Rewind(context.Background(), "1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no active thread")
+}
+
+func TestRewindDefaultOne(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-rewind",
+	}
+
+	// Empty targetID defaults to 1 turn.
+	err := wk.Rewind(context.Background(), "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: rewind:")
+}
+
+func TestRewindExplicitCount(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-rewind2",
+	}
+
+	// Valid count.
+	err := wk.Rewind(context.Background(), "3")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: rewind:")
+}
+
+func TestRewindInvalidCount(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-rewind3",
+	}
+
+	// Invalid count string falls back to default 1.
+	err := wk.Rewind(context.Background(), "abc")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: rewind:")
+}
+
+// ─── Input Expanded Tests ─────────────────────────────────────────────────
+
+func TestInputPermissionResponseHandled(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Input(context.Background(), "hello", map[string]any{
+		"permission_response": map[string]any{
+			"request_id": "req-1",
+			"allowed":    true,
+		},
+	})
+	// HandlePermissionResponse returns error (no pending server request),
+	// but Input returns the error from DispatchMetadata.
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending server request")
+}
+
+func TestInputQuestionResponseHandled(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Input(context.Background(), "hello", map[string]any{
+		"question_response": map[string]any{
+			"id": "req-2",
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending server request")
+}
+
+func TestInputElicitationResponseHandled(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	err := w.Input(context.Background(), "hello", map[string]any{
+		"elicitation_response": map[string]any{
+			"id":     "req-3",
+			"action": "accept",
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending server request")
+}
+
+func TestInputMetadataNilPassesThrough(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	// nil metadata → DispatchMetadata returns (false, nil) → falls through
+	// to threadID check → "not started" error.
+	err := w.Input(context.Background(), "hello", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not started")
+}
+
+func TestInputCallsTurnStart(t *testing.T) {
+	t.Parallel()
+
+	// Set up a manager with fake stdin so Call can write but will timeout.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-input",
+	}
+
+	err := wk.Input(context.Background(), "hello world", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: turn/start:")
+}
+
+// ─── Wait Expanded Tests ──────────────────────────────────────────────────
+
+func TestWaitDoneChPath(t *testing.T) {
+	t.Parallel()
+
+	doneCh := make(chan struct{})
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		doneCh:     doneCh,
+	}
+
+	// Close doneCh to unblock Wait.
+	go func() { close(doneCh) }()
+
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
+func TestWaitCrashSubPath(t *testing.T) {
+	t.Parallel()
+
+	crashCh := make(chan struct{})
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		crashSub:   crashCh,
+		doneCh:     make(chan struct{}),
+	}
+
+	// Close crashCh to simulate process crash.
+	go func() { close(crashCh) }()
+
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 1, code, "crash should return exit code 1")
+}
+
+func TestWaitNilCrashSubReturnsImmediately(t *testing.T) {
+	t.Parallel()
+
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		crashSub:   nil,
+	}
+
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
+// ─── SendControlRequest Tests ─────────────────────────────────────────────
+
+func TestSendControlRequestNotStarted(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	_, err := w.SendControlRequest(context.Background(), "set_model", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not started")
+}
+
+func TestSendControlRequestSetModel(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	w.commands = NewServerCommander(w.manager, "thr-1")
+
+	_, err := w.SendControlRequest(context.Background(), "set_model", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "set_model not supported")
+}
+
+// ─── Conn Tests ───────────────────────────────────────────────────────────
+
+func TestConnAfterStartReturnsAppConn(t *testing.T) {
+	t.Parallel()
+
+	recvCh := make(chan *events.Envelope, 1)
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{IdleDrainPeriod: time.Minute}),
+		conn: &appConn{
+			userID:    "u1",
+			sessionID: "s1",
+			recvCh:    recvCh,
+		},
+	}
+
+	c := w.Conn()
+	require.NotNil(t, c)
+	require.Equal(t, "u1", c.UserID())
+	require.Equal(t, "s1", c.SessionID())
+}
+
+// ─── sandboxFromSession Tests ─────────────────────────────────────────────
+
+func TestSandboxFromSession(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		session  worker.SessionInfo
+		default_ string
+		want     string
+	}{
+		{name: "session override", session: worker.SessionInfo{Sandbox: "docker"}, default_: "workspace-write", want: "docker"},
+		{name: "fallback to default", session: worker.SessionInfo{}, default_: "workspace-write", want: "workspace-write"},
+		{name: "empty both", session: worker.SessionInfo{}, default_: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sandboxFromSession(tt.session, tt.default_)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// ─── buildThreadStartParams Tests ─────────────────────────────────────────
+
+func TestBuildThreadStartParams(t *testing.T) {
+	t.Parallel()
+
+	t.Run("minimal config", func(t *testing.T) {
+		t.Parallel()
+		params := buildThreadStartParams(worker.SessionInfo{ProjectDir: "/tmp"}, Config{})
+		require.Equal(t, "/tmp", params["cwd"])
+		_, hasModel := params["model"]
+		require.False(t, hasModel)
+		_, hasEphemeral := params["ephemeral"]
+		require.False(t, hasEphemeral)
+	})
+
+	t.Run("full config", func(t *testing.T) {
+		t.Parallel()
+		params := buildThreadStartParams(
+			worker.SessionInfo{
+				ProjectDir:      "/home/user/project",
+				Sandbox:         "docker",
+				SkipPermissions: true,
+				Images:          []string{"img1.png"},
+				JSONSchema:      `{"type":"object"}`,
+				AllowedDirs:     []string{"/data"},
+			},
+			Config{
+				Model:            "o3",
+				Sandbox:          "workspace-write",
+				Ephemeral:        true,
+				ApprovalMode:     "on-request",
+				Personality:      "friendly",
+				Color:            true,
+				StrictConfig:     true,
+				SkipGitRepoCheck: true,
+				IgnoreUserConfig: true,
+				IgnoreRules:      true,
+				LocalProvider:    true,
+				BypassHookTrust:  true,
+				OutputFile:       "/tmp/out.md",
+				ConfigProfile:    "dev",
+			},
+		)
+		require.Equal(t, "o3", params["model"])
+		require.Equal(t, "docker", params["sandbox"]) // session override
+		require.Equal(t, true, params["ephemeral"])
+		require.Equal(t, "never", params["approvalPolicy"]) // SkipPermissions → "never"
+		require.Equal(t, "friendly", params["personality"])
+		require.Equal(t, true, params["color"])
+		require.Equal(t, true, params["strictConfig"])
+		require.Equal(t, true, params["skipGitRepoCheck"])
+		require.Equal(t, true, params["ignoreUserConfig"])
+		require.Equal(t, true, params["ignoreRules"])
+		require.Equal(t, true, params["localProvider"])
+		require.Equal(t, true, params["bypassHookTrust"])
+		require.Equal(t, "/tmp/out.md", params["outputFile"])
+		require.Equal(t, "dev", params["profile"])
+		require.NotNil(t, params["images"])
+		require.Equal(t, `{"type":"object"}`, params["outputSchema"])
+		require.NotNil(t, params["additionalDirectories"])
+	})
+
+	t.Run("no skip permissions uses config approval", func(t *testing.T) {
+		t.Parallel()
+		params := buildThreadStartParams(
+			worker.SessionInfo{ProjectDir: "/tmp"},
+			Config{ApprovalMode: "on-failure"},
+		)
+		require.Equal(t, "on-failure", params["approvalPolicy"])
+	})
+}
+
+// ─── resolveConfig Tests ──────────────────────────────────────────────────
+
+func TestResolveConfig(t *testing.T) {
+	t.Parallel()
+
+	prev := GetConfig()
+	defer InitConfig(prev)
+
+	InitConfig(config.CodexCLIConfig{
+		Command:      "/usr/local/bin/codex",
+		Model:        "o3",
+		Sandbox:      "docker",
+		ApprovalMode: "never",
+		Personality:  "friendly",
+		Ephemeral:    true,
+		Color:        true,
+	})
+
+	cfg := resolveConfig()
+	require.Equal(t, "/usr/local/bin/codex", cfg.Command)
+	require.Equal(t, "o3", cfg.Model)
+	require.Equal(t, "docker", cfg.Sandbox)
+	require.Equal(t, "never", cfg.ApprovalMode)
+	require.Equal(t, "friendly", cfg.Personality)
+	require.True(t, cfg.Ephemeral)
+	require.True(t, cfg.Color)
+}
+
+// ─── Singleton Tests ─────────────────────────────────────────────────────
+
+func TestSingletonLifecycle(t *testing.T) {
+	InitSingleton(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		Command:         "codex",
+	})
+	t.Cleanup(func() { ShutdownSingleton(context.Background()) })
+
+	s := GetSingleton()
+	require.NotNil(t, s)
+	require.False(t, s.IsRunning())
+}
+
+func TestShutdownSingletonNil(t *testing.T) {
+	// Shutdown with nil singleton should not panic.
+	ShutdownSingleton(context.Background())
+}
+
+// ─── ServerCommander Tests ───────────────────────────────────────────────
+
+func TestServerCommanderCompact(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, r)
+	}()
+	t.Cleanup(func() { _ = w.Close(); <-done })
+
+	sc := NewServerCommander(mgr, "thr-sc")
+	err := sc.Compact(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "codexcli: compact:")
+}
+
+func TestServerCommanderUnknownSubtype(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	sc := NewServerCommander(mgr, "thr-sc")
+
+	_, err := sc.SendControlRequest(context.Background(), "unknown_subtype", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown control subtype")
+}
+
+func TestServerCommanderMCPOAuthMissingName(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	sc := NewServerCommander(mgr, "thr-sc")
+
+	_, err := sc.SendControlRequest(context.Background(), "mcp_oauth", map[string]any{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing server_name")
 }
 
 func TestIntegrationKillImmediatelyTerminatesIdleProcess(t *testing.T) {

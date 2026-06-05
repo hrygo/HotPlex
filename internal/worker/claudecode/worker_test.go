@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -145,6 +146,10 @@ func TestClaudeCodeWorker_Resume_WithBinary(t *testing.T) {
 	}
 
 	err := w.Resume(ctx, session)
+	if errors.Is(err, worker.ErrFellBackToFreshStart) {
+		_ = w.Kill()
+		return
+	}
 	require.NoError(t, err)
 
 	conn := w.Conn()
@@ -782,11 +787,11 @@ func TestHasSessionFiles_NoFiles(t *testing.T) {
 	t.Parallel()
 
 	w := New()
-	require.False(t, w.HasSessionFiles("sess_test-uuid-1234"))
+	require.False(t, w.hasSessionFiles("sess_test-uuid-1234"))
 }
 
 // TestHasSessionFiles_EmptySessionEnvDir verifies that a stale empty session-env
-// directory does NOT cause HasSessionFiles to return true (issue #172).
+// directory does NOT cause hasSessionFiles to return true (issue #172).
 func TestHasSessionFiles_EmptySessionEnvDir(t *testing.T) {
 	t.Parallel()
 
