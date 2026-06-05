@@ -121,6 +121,6 @@ func (w *Worker) LastIO() time.Time {
 }
 
 // ResetContext is a no-op for the noop worker.
-func (w *Worker) ResetContext(_ context.Context) error {
-	return nil
+func (w *Worker) ResetContext(_ context.Context) (worker.ResetResult, error) {
+	return worker.ResetResult{}, nil
 }

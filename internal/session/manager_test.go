@@ -799,9 +799,9 @@ func (w *mockWorker) Health() worker.WorkerHealth {
 	return w.health
 }
 func (w *mockWorker) LastIO() time.Time { return w.lastIO }
-func (w *mockWorker) ResetContext(ctx context.Context) error {
+func (w *mockWorker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	args := w.Called(ctx)
-	return args.Error(0)
+	return args.Get(0).(worker.ResetResult), args.Error(1)
 }
 
 // ─── AttachWorker tests ───────────────────────────────────────────────────────

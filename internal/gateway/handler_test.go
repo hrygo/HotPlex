@@ -151,7 +151,7 @@ func (h *testableHandler) handleReset(ctx context.Context, sessionID, ownerID st
 	// 3. Worker reset
 	w := h.sm.GetWorker(sessionID)
 	if w != nil {
-		if err := w.ResetContext(ctx); err != nil {
+		if _, err := w.ResetContext(ctx); err != nil {
 			return err
 		}
 	}
@@ -241,9 +241,9 @@ func (m *mockWorkerForHandler) LastIO() time.Time {
 	args := m.Called()
 	return args.Get(0).(time.Time)
 }
-func (m *mockWorkerForHandler) ResetContext(ctx context.Context) error {
+func (m *mockWorkerForHandler) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	args := m.Called(ctx)
-	return args.Error(0)
+	return args.Get(0).(worker.ResetResult), args.Error(1)
 }
 
 // ─── handleReset tests ──────────────────────────────────────────────────────
@@ -602,7 +602,7 @@ func TestHandler_HandleReset_Success(t *testing.T) {
 	sm.On("Get", "sess1").Return(&session.SessionInfo{ID: "sess1", State: events.StateRunning}, nil)
 	sm.On("ClearContext", ctx, "sess1").Return(nil)
 	sm.On("GetWorker", "sess1").Return(w)
-	w.On("ResetContext", ctx).Return(nil)
+	w.On("ResetContext", ctx).Return(worker.ResetResult{}, nil)
 	sm.On("TransitionWithReason", ctx, "sess1", events.StateRunning, "reset").Return(nil)
 
 	err := h.handleReset(ctx, "sess1", "user1")
@@ -667,7 +667,7 @@ func TestHandler_HandleReset_WorkerResetFails(t *testing.T) {
 	sm.On("Get", "sess1").Return(&session.SessionInfo{ID: "sess1", State: events.StateRunning}, nil)
 	sm.On("ClearContext", ctx, "sess1").Return(nil)
 	sm.On("GetWorker", "sess1").Return(w)
-	w.On("ResetContext", ctx).Return(errors.New("worker reset failed"))
+	w.On("ResetContext", ctx).Return(worker.ResetResult{}, errors.New("worker reset failed"))
 
 	err := h.handleReset(ctx, "sess1", "user1")
 	require.Error(t, err)
@@ -842,7 +842,7 @@ func TestHandler_HandleGC_Idempotent(t *testing.T) {
 func TestWorker_ResetContext_Noop(t *testing.T) {
 	t.Parallel()
 	w := noopworker.NewWorker()
-	err := w.ResetContext(context.Background())
+	_, err := w.ResetContext(context.Background())
 	require.NoError(t, err)
 }
 

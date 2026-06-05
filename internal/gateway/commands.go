@@ -133,7 +133,7 @@ func (h *Handler) handleReset(ctx context.Context, env *events.Envelope) error {
 		// Test mode (no bridge): reset worker directly.
 		w := h.sm.GetWorker(env.SessionID)
 		if w != nil {
-			if err := w.ResetContext(ctx); err != nil {
+			if _, err := w.ResetContext(ctx); err != nil {
 				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker reset failed: %v", err)
 			}
 		}

@@ -145,17 +145,11 @@ func TestHandleElicitationResponse_NoPendingRequest(t *testing.T) {
 
 // ─── FR-07: ResetContext + InPlaceReset ────────────────────────────────────────
 
-func TestInPlaceReset_ReturnsTrue(t *testing.T) {
-	t.Parallel()
-	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
-	require.True(t, w.InPlaceReset())
-}
-
 func TestResetContext_DelegatesToResetSession(t *testing.T) {
 	t.Parallel()
 	// Verify ResetContext no longer returns ErrNotImplemented.
 	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
-	err := w.ResetContext(context.Background())
+	_, err := w.ResetContext(context.Background())
 	require.Error(t, err)
 	// Should be "worker not started" not ErrNotImplemented.
 	require.False(t, errors.Is(err, worker.ErrNotImplemented))
@@ -487,11 +481,6 @@ func TestMapNotification_MalformedParams_Skipped(t *testing.T) {
 
 // ─── Compile-time interface checks ─────────────────────────────────────────────
 
-func TestWorkerImplementsInPlaceReseter(t *testing.T) {
-	t.Parallel()
-	var _ worker.InPlaceReseter = (*Worker)(nil)
-}
-
 func TestWorkerImplementsMetadataHandler(t *testing.T) {
 	t.Parallel()
 	var _ interface {
@@ -667,11 +656,11 @@ func TestResetContext_DoesNotIncResetGeneration(t *testing.T) {
 		}
 	}()
 
-	err := w.ResetContext(ctx)
+	_, err := w.ResetContext(ctx)
 	require.NoError(t, err)
 
 	genAfter := w.LoadResetGeneration()
-	require.Equal(t, genBefore, genAfter, "ResetContext should NOT increment generation (Bridge does it)")
+	require.Equal(t, genBefore+1, genAfter, "ResetContext should increment generation to track reset sequence")
 }
 
 func TestFmtStartError_ExecError(t *testing.T) {

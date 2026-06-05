@@ -41,6 +41,10 @@ const (
 	MCPStatus           Kind = "mcp_status"     // Worker MCP server status (S→C)
 	WorkerCmd           Kind = "worker_command" // Gateway → Worker stdio command trigger (C→S)
 
+	// Internal lifecycle kinds — emitted by workers into their event stream
+	// for gateway-internal coordination. Never forwarded to clients.
+	KindInternalReset Kind = "internal_reset" // worker in-place reset notification
+
 	// ACP extension kinds — any ACP-compatible agent may emit these.
 	ToolUpdate Kind = "tool_update" // intermediate tool call status (ACP tool_call_update)
 	Plan       Kind = "plan"        // plan/todo update (ACP AgentPlanUpdate)
@@ -460,6 +464,12 @@ type PlanItem struct {
 // Maps from ACP CurrentModeUpdate: currentModeId references modes from session/new.
 type ModeUpdateData struct {
 	CurrentModeID string `json:"current_mode_id"`
+}
+
+// InternalResetData carries reset generation information for the internal_reset event.
+// Emitted by in-place-reset workers (OCS, ACP) after resetting state.
+type InternalResetData struct {
+	Generation int64 `json:"generation"`
 }
 
 // ContextSkillInfo carries skill-related context usage.

@@ -157,6 +157,10 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 }
 
 func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
+	if !w.hasSessionFiles(session.SessionID) {
+		w.Log.Info("claude-code: session files missing, fresh start")
+		return w.Start(ctx, session)
+	}
 	w.Mu.Lock()
 	defer w.Mu.Unlock()
 	return w.startLocked(ctx, session, true)
@@ -507,13 +511,13 @@ func (w *Worker) LastIO() time.Time {
 //
 // The caller (Bridge.ResetSession) must set intentionalExit before calling this
 // so that forwardEvents skips crash handling for the old process.
-func (w *Worker) ResetContext(ctx context.Context) error {
+func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	w.Mu.Lock()
 	orig := w.origSession
 	w.Mu.Unlock()
 
 	if err := w.Terminate(ctx); err != nil {
-		return fmt.Errorf("claudecode: reset terminate: %w", err)
+		return worker.ResetResult{}, fmt.Errorf("claudecode: reset terminate: %w", err)
 	}
 
 	// Delete session files so --session-id won't hit "already in use".
@@ -532,7 +536,10 @@ func (w *Worker) ResetContext(ctx context.Context) error {
 	// Reuse original session config (AllowedTools, SystemPrompt, MCPConfig, etc.)
 	// but clear WorkerSessionID since the Claude session files were deleted.
 	orig.WorkerSessionID = ""
-	return w.Start(ctx, orig)
+	if err := w.Start(ctx, orig); err != nil {
+		return worker.ResetResult{}, err
+	}
+	return worker.ResetResult{ConnReplaced: true}, nil
 }
 
 // sessionFileGlobs returns glob patterns for Claude Code session files.
@@ -545,10 +552,10 @@ func sessionFileGlobs(homeDir, parsedID string) []string {
 	}
 }
 
-// HasSessionFiles checks whether the JSONL conversation file exists on disk.
+// hasSessionFiles checks whether the JSONL conversation file exists on disk.
 // Only JSONL files indicate a resumable session; empty session-env directories
 // are insufficient and must not trigger the resume path.
-func (w *Worker) HasSessionFiles(sessionID string) bool {
+func (w *Worker) hasSessionFiles(sessionID string) bool {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		// Fail-open: assume files exist so normal resume path is attempted.

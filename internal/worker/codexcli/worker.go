@@ -294,19 +294,10 @@ func (w *ExecWorker) Input(ctx context.Context, content string, metadata map[str
 }
 
 func (w *ExecWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
-	w.mu.Lock()
-	w.started = false
-	w.threadID = ""
-	w.mu.Unlock()
-
-	if err := w.BaseWorker.Terminate(ctx); err != nil {
-		w.Log.Warn("codexcli: resume terminate", "error", err)
-	}
-
-	return w.Start(ctx, session)
+	return w.Start(ctx, session) // Exec mode has no session persistence, always fresh start
 }
 
-func (w *ExecWorker) ResetContext(ctx context.Context) error {
+func (w *ExecWorker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	if err := w.BaseWorker.Terminate(ctx); err != nil {
 		w.Log.Warn("codexcli: reset terminate", "error", err)
 	}
@@ -315,7 +306,7 @@ func (w *ExecWorker) ResetContext(ctx context.Context) error {
 	w.threadID = ""
 	w.readLineFn = nil
 	w.mu.Unlock()
-	return nil
+	return worker.ResetResult{ConnReplaced: true}, nil
 }
 
 func (w *ExecWorker) Terminate(ctx context.Context) error {
@@ -826,7 +817,7 @@ func (w *AppServerWorker) release() {
 	}
 }
 
-func (w *AppServerWorker) ResetContext(ctx context.Context) error {
+func (w *AppServerWorker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	w.mu.Lock()
 	origSess := w.origSession
 	w.mu.Unlock()
@@ -839,9 +830,12 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) error {
 		w.mu.Lock()
 		w.closeAndMarkDone()
 		w.mu.Unlock()
-		return nil
+		return worker.ResetResult{}, nil
 	}
-	return w.startNewThread(origSess, "reset")
+	if err := w.startNewThread(origSess, "reset"); err != nil {
+		return worker.ResetResult{}, err
+	}
+	return worker.ResetResult{ConnReplaced: true}, nil
 }
 
 func (w *AppServerWorker) Conn() worker.SessionConn {
@@ -914,7 +908,8 @@ func (w *AppServerWorker) Clear(ctx context.Context) error {
 	if turnID != "" {
 		_ = w.manager.InterruptTurn(tid, turnID)
 	}
-	return w.ResetContext(ctx)
+	_, err := w.ResetContext(ctx)
+	return err
 }
 
 // Rewind drops turns from the end of the thread. targetID is interpreted as the

@@ -121,7 +121,18 @@ type Worker interface {
 	//   - Workers that support in-place reset: send internal reset signal
 	//   - Others: terminate + start (physically deletes session files)
 	// Note: Gateway layer has already called sm.ClearContext() to clear SessionInfo.Context.
-	ResetContext(ctx context.Context) error
+	ResetContext(ctx context.Context) (ResetResult, error)
+}
+
+// ResetResult describes the outcome of a ResetContext call.
+// Gateway reads this to decide orchestration without knowing Worker internals.
+type ResetResult struct {
+	// ConnReplaced indicates whether the worker replaced its underlying connection.
+	// true  = Worker restarted the process or rebuilt the connection (e.g. Claude Code, Codex Exec).
+	//         Gateway must spawn a new forwardEvents goroutine.
+	// false = Worker reset in-place without replacing the connection (e.g. OCS HTTP reset, ACP new session).
+	//         The existing forwardEvents goroutine continues running.
+	ConnReplaced bool
 }
 
 // WorkerHealth reports the runtime health of a worker process.
@@ -147,20 +158,12 @@ type InputRecoverer interface {
 	LastInput() string
 }
 
-// SessionFileChecker is an optional interface for workers that can verify
-// whether session files still exist on disk. Bridge uses this before resume
-// to fall back to a fresh start when files have been garbage-collected.
-type SessionFileChecker interface {
-	HasSessionFiles(sessionID string) bool
-}
-
-// InPlaceReseter is an optional interface for workers whose ResetContext
-// resets state in-place without replacing the Conn or restarting the process.
-// Bridge.ResetSession uses this to decide whether to spawn a new forwardEvents
-// goroutine: in-place resets keep the existing goroutine, while process-restart
-// resets (the default) need a new one.
-type InPlaceReseter interface {
-	InPlaceReset() bool
+// EventInjector is an optional interface for SessionConn implementations
+// that support injecting synthetic events into the Recv() stream.
+// In-place-reset workers use this to emit internal_reset events that
+// forwardEvents processes without client forwarding.
+type EventInjector interface {
+	Inject(env *events.Envelope)
 }
 
 // WorkerSessionIDHandler is an optional interface for workers that manage

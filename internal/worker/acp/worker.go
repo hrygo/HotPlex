@@ -33,7 +33,6 @@ var (
 	_ worker.WorkerSessionIDHandler = (*Worker)(nil)
 	_ worker.WorkerCommander        = (*Worker)(nil)
 	_ worker.ControlRequester       = (*Worker)(nil)
-	_ worker.InPlaceReseter         = (*Worker)(nil)
 	_ base.MetadataHandler          = (*Worker)(nil)
 )
 
@@ -636,15 +635,28 @@ func (w *Worker) supportsCapability(name string) bool {
 
 // ─── ResetContext ────────────────────────────────────────────────────────────
 
-func (w *Worker) ResetContext(ctx context.Context) error {
+func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	// Reuse the same process: cancel current turn, create new session.
 	// Equivalent to Clear() but called by Bridge.ResetSession.
-	return w.resetSession(ctx)
-}
+	if err := w.resetSession(ctx); err != nil {
+		return worker.ResetResult{}, err
+	}
 
-// InPlaceReset tells Bridge not to rebuild the forwardEvents goroutine.
-// The existing goroutine detects generation changes via resetGenerationer.
-func (w *Worker) InPlaceReset() bool { return true }
+	w.IncResetGeneration()
+	w.Mu.Lock()
+	conn := w.conn
+	w.Mu.Unlock()
+	if conn != nil {
+		conn.Inject(&events.Envelope{
+			Event: events.Event{
+				Type: events.KindInternalReset,
+				Data: events.InternalResetData{Generation: w.LoadResetGeneration()},
+			},
+		})
+	}
+
+	return worker.ResetResult{ConnReplaced: false}, nil
+}
 
 // resetSession is the shared logic for Clear() and ResetContext():
 // cancel current turn, create new ACP session within the same process.

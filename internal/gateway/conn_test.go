@@ -1252,7 +1252,9 @@ func (m *mockBridgeWorker) Wait() (int, error)                                  
 func (m *mockBridgeWorker) Conn() worker.SessionConn                            { return m.conn }
 func (m *mockBridgeWorker) Health() worker.WorkerHealth                         { return worker.WorkerHealth{} }
 func (m *mockBridgeWorker) LastIO() time.Time                                   { return time.Now() }
-func (m *mockBridgeWorker) ResetContext(context.Context) error                  { return nil }
+func (m *mockBridgeWorker) ResetContext(context.Context) (worker.ResetResult, error) {
+	return worker.ResetResult{}, nil
+}
 
 var _ worker.Worker = (*mockBridgeWorker)(nil)
 

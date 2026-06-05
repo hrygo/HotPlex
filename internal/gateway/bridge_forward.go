@@ -39,7 +39,6 @@ type forwardContext struct {
 	turnStartTime  time.Time
 	firstEvent     bool
 	doneReceived   bool
-	myGen          int64
 	turnText       strings.Builder
 	lastError      *events.ErrorData
 	pendingError   *events.Envelope
@@ -77,10 +76,6 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 				fc.sessOwner = si.UserID
 			}
 		}
-	}
-
-	if rg, ok := w.(resetGenerationer); ok {
-		fc.myGen = rg.LoadResetGeneration()
 	}
 
 	acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
@@ -152,7 +147,6 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		workerType:     workerType,
 		opts:           opts,
 		startTime:      fc.startTime,
-		myGen:          fc.myGen,
 		doneReceived:   fc.doneReceived,
 		turnText:       fc.turnText.String(),
 		turnTextLen:    fc.turnText.Len(),
@@ -167,19 +161,10 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	sessionID := fc.sessionID
 	workerType := fc.workerType
 
-	// OCS in-place reset detection.
-	if rg, ok := w.(resetGenerationer); ok {
-		currentGen := rg.LoadResetGeneration()
-		if currentGen != fc.myGen {
-			acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
-			if acc.AppliedResetGen < currentGen {
-				acc.Generation++
-				acc.AppliedResetGen = currentGen
-			}
-			acc.TurnCount = 0
-			fc.turnText.Reset()
-			fc.myGen = currentGen
-		}
+	// Handle internal reset events from in-place-reset workers (OCS, ACP).
+	if env.Event.Type == events.KindInternalReset {
+		b.handleInternalReset(env, sessionID, fc)
+		return
 	}
 
 	// Buffer error events for potential LLM retry.
@@ -294,6 +279,36 @@ func (b *Bridge) extractTurnContent(env *events.Envelope, fc *forwardContext) (d
 	return
 }
 
+func (b *Bridge) handleInternalReset(env *events.Envelope, sessionID string, fc *forwardContext) {
+	var data events.InternalResetData
+	switch d := env.Event.Data.(type) {
+	case events.InternalResetData:
+		data = d
+	case map[string]any:
+		gen, exists := d["generation"]
+		if !exists {
+			return
+		}
+		switch v := gen.(type) {
+		case int64:
+			data = events.InternalResetData{Generation: v}
+		case float64:
+			data = events.InternalResetData{Generation: int64(v)}
+		default:
+			return
+		}
+	default:
+		return
+	}
+	acc := b.getOrInitAccum(sessionID, "", fc.startTime)
+	if acc.AppliedResetGen < data.Generation {
+		acc.Generation++
+		acc.AppliedResetGen = data.Generation
+	}
+	acc.TurnCount = 0
+	fc.turnText.Reset()
+}
+
 // accumulateStats tracks tool calls and per-turn stats on done events.
 func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts forwardOpts, fc *forwardContext) {
 	sessionID := fc.sessionID
@@ -394,7 +409,6 @@ type workerExitParams struct {
 	workerType     worker.WorkerType
 	opts           forwardOpts
 	startTime      time.Time
-	myGen          int64
 	doneReceived   bool
 	turnText       string
 	turnTextLen    int
@@ -408,13 +422,6 @@ type workerExitParams struct {
 // and performs cleanup.
 func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	workerType := p.workerType
-
-	// Check reset generation: if a reset happened while this goroutine was
-	// running, the generation counter will differ from our captured value.
-	if rg, ok := w.(resetGenerationer); ok && rg.LoadResetGeneration() != p.myGen {
-		b.log.Info("bridge: worker reset, old forwardEvents exiting", "session_id", p.sessionID, "worker_type", workerType, "my_gen", p.myGen, "cur_gen", rg.LoadResetGeneration())
-		return
-	}
 
 	// AEP-020: Worker.Recv() closed — get exit code to determine crash vs normal exit.
 	// Must match proc.DefaultGracePeriod (5s) so SIGTERM grace isn't cut short.

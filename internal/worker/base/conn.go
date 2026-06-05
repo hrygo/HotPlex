@@ -73,6 +73,11 @@ func (c *Conn) TrySend(env *events.Envelope) bool {
 	}
 }
 
+// Inject enqueues a synthetic event via TrySend for in-place reset signaling.
+func (c *Conn) Inject(env *events.Envelope) {
+	c.TrySend(env)
+}
+
 // WriteMu returns the mutex that protects stdin writes.
 // ControlHandler should use this same mutex to serialize stdin access.
 func (c *Conn) WriteMu() *sync.Mutex {

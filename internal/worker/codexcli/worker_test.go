@@ -848,7 +848,7 @@ func TestExecWorkerResetContext(t *testing.T) {
 	w.threadID = "thread-old"
 	w.readLineFn = func() (string, error) { return "", nil }
 
-	err := w.ResetContext(context.Background())
+	_, err := w.ResetContext(context.Background())
 	require.NoError(t, err)
 	require.False(t, w.started)
 	require.Empty(t, w.threadID)
@@ -1384,7 +1384,7 @@ func TestAppServerWorkerResetContext(t *testing.T) {
 
 	w := newTestAppServerWorker(t)
 	// Don't set threadID to avoid triggering Notify on a nil manager connection
-	err := w.ResetContext(context.Background())
+	_, err := w.ResetContext(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, w.threadID)
 	require.Nil(t, w.recvCh)
@@ -1694,7 +1694,7 @@ func TestResetContextClearsStateAndResetsOnce(t *testing.T) {
 	}
 	w.origSession = worker.SessionInfo{}
 
-	err := w.ResetContext(context.Background())
+	_, err := w.ResetContext(context.Background())
 	require.NoError(t, err)
 
 	// Old recvCh should be closed by appConn.Close().
@@ -1736,7 +1736,7 @@ func TestResetContextRestartsFromSavedSession(t *testing.T) {
 		conn:        &appConn{recvCh: oldRecvCh},
 	}
 
-	err := wk.ResetContext(context.Background())
+	_, err := wk.ResetContext(context.Background())
 
 	// Old conn should be closed.
 	_, ok := <-oldRecvCh
@@ -1859,7 +1859,7 @@ func TestIntegrationStartSavesSessionAndResetRestarts(t *testing.T) {
 	w.mu.Unlock()
 	require.NotEmpty(t, firstThreadID)
 
-	err = w.ResetContext(context.Background())
+	_, err = w.ResetContext(context.Background())
 	require.NoError(t, err)
 
 	w.mu.Lock()

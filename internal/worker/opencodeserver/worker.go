@@ -57,7 +57,6 @@ import (
 var (
 	_ worker.Worker           = (*Worker)(nil)
 	_ worker.SessionConn      = (*conn)(nil)
-	_ worker.InPlaceReseter   = (*Worker)(nil)
 	_ worker.ControlRequester = (*Worker)(nil)
 	_ worker.WorkerCommander  = (*Worker)(nil)
 )
@@ -408,7 +407,7 @@ func (w *Worker) LastIO() time.Time {
 }
 
 // ResetContext clears the worker runtime context in-place via HTTP API.
-func (w *Worker) ResetContext(ctx context.Context) error {
+func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	w.Mu.Lock()
 	sessionID := ""
 	if w.httpConn != nil {
@@ -419,29 +418,40 @@ func (w *Worker) ResetContext(ctx context.Context) error {
 	w.Mu.Unlock()
 
 	if sessionID == "" || httpAddr == "" {
-		return fmt.Errorf("opencodeserver: reset: worker not started")
+		return worker.ResetResult{}, fmt.Errorf("opencodeserver: reset: worker not started")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", httpAddr+"/session/"+url.PathEscape(sessionID)+"/reset", http.NoBody)
 	if err != nil {
-		return fmt.Errorf("opencodeserver: reset: new request: %w", err)
+		return worker.ResetResult{}, fmt.Errorf("opencodeserver: reset: new request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("opencodeserver: reset: http request: %w", err)
+		return worker.ResetResult{}, fmt.Errorf("opencodeserver: reset: http request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
-		return fmt.Errorf("opencodeserver: reset: status %d: %s", resp.StatusCode, string(body))
+		return worker.ResetResult{}, fmt.Errorf("opencodeserver: reset: status %d: %s", resp.StatusCode, string(body))
 	}
-	return nil
-}
 
-// InPlaceReset indicates context reset is in-place via HTTP, no process restart.
-func (w *Worker) InPlaceReset() bool { return true }
+	w.IncResetGeneration()
+	w.Mu.Lock()
+	c := w.httpConn
+	w.Mu.Unlock()
+	if c != nil {
+		c.Inject(&events.Envelope{
+			Event: events.Event{
+				Type: events.KindInternalReset,
+				Data: events.InternalResetData{Generation: w.LoadResetGeneration()},
+			},
+		})
+	}
+
+	return worker.ResetResult{ConnReplaced: false}, nil
+}
 
 func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
 	if w.cmd == nil {
@@ -940,6 +950,15 @@ func (c *conn) Close() error {
 
 func (c *conn) UserID() string    { return c.userID }
 func (c *conn) SessionID() string { return c.sessionID }
+
+// Inject enqueues a synthetic event into the recv channel for in-place reset signaling.
+func (c *conn) Inject(env *events.Envelope) {
+	select {
+	case c.recvCh <- env:
+	default:
+		c.log.Warn("ocs: inject dropped, recv channel full")
+	}
+}
 
 // isTimeoutError reports whether the error is a timeout (deadline exceeded or
 // net.Error with Timeout()=true). The server may still be alive and processing.

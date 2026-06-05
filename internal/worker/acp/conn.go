@@ -134,3 +134,8 @@ func (c *acpConn) LastInput() string {
 
 func (c *acpConn) UserID() string    { return c.userID }
 func (c *acpConn) SessionID() string { return c.sessionID }
+
+// Inject enqueues a synthetic event via TrySend for in-place reset signaling.
+func (c *acpConn) Inject(env *events.Envelope) {
+	c.TrySend(env)
+}

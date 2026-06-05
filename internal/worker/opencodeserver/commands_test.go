@@ -929,11 +929,6 @@ func TestWorkerSessionID(t *testing.T) {
 	})
 }
 
-func TestWorkerInPlaceReset(t *testing.T) {
-	t.Parallel()
-	require.True(t, New().InPlaceReset())
-}
-
 func TestWorkerDelegatesCmdNil(t *testing.T) {
 	t.Parallel()
 	w := New()
@@ -952,7 +947,7 @@ func TestWorkerDelegatesCmdNil(t *testing.T) {
 
 func TestWorkerResetContextNotStarted(t *testing.T) {
 	t.Parallel()
-	err := New().ResetContext(context.Background())
+	_, err := New().ResetContext(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "worker not started")
 }
@@ -991,7 +986,7 @@ func TestWorkerResetContext(t *testing.T) {
 			t.Cleanup(ts.Close)
 			w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil), client: ts.Client(), httpAddr: ts.URL}
 			w.initHTTPConn("user-1", "sess-xyz", "", worker.SessionInfo{})
-			err := w.ResetContext(context.Background())
+			_, err := w.ResetContext(context.Background())
 			if tt.expectError {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.errorContains)

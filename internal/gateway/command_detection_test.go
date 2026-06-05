@@ -192,7 +192,7 @@ func TestHandleInput_ControlCommand_Reset(t *testing.T) {
 	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
 
 	w := new(mockWorkerForHandler)
-	w.On("ResetContext", mock.Anything).Return(nil)
+	w.On("ResetContext", mock.Anything).Return(worker.ResetResult{}, nil)
 	w.On("Terminate", mock.Anything).Return(nil)
 	require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
 
