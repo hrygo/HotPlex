@@ -93,6 +93,11 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 
 	err := e.waitForCompletion(ctx, sessionKey, timeout)
 
+	if err != nil {
+		e.log.Error("cron executor: session execution failed",
+			"session_id", sessionKey, "timeout", timeout, "err", err)
+	}
+
 	// Explicitly terminate the session to ensure the worker process exits immediately.
 	// We use context.Background() with a short timeout to ensure termination happens
 	// even if the original context is canceled.

@@ -318,3 +318,91 @@ func TestConfigRequired_EmptyPath(t *testing.T) {
 
 	require.Equal(t, cli.StatusFail, d.Status)
 }
+
+func TestConfigRequired_FeishuMultiBotAllPresent(t *testing.T) {
+	// t.Setenv — cannot use t.Parallel.
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	dbDir := filepath.Join(dir, "data")
+	require.NoError(t, os.MkdirAll(dbDir, 0o755))
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_SECRET", "")
+	t.Setenv("BOT1_SECRET", "secret1")
+	t.Setenv("BOT2_SECRET", "secret2")
+	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  feishu:\n    enabled: true\n    bots:\n      - name: hephaestus\n        app_id: \"cli_a954eab23678dbb5\"\n        app_secret: \"${BOT1_SECRET}\"\n      - name: bailaoban\n        app_id: \"cli_a934ebe1a2b81bb3\"\n        app_secret: \"${BOT2_SECRET}\"\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	defer resetConfigPath()
+	SetConfigPath(path)
+
+	c := configRequiredChecker{}
+	d := c.Check(context.Background())
+
+	require.Equal(t, cli.StatusPass, d.Status, "multi-bot feishu with all credentials should pass, got: %s", d.Detail)
+}
+
+func TestConfigRequired_FeishuMultiBotMissingCredential(t *testing.T) {
+	// t.Setenv — cannot use t.Parallel.
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	dbDir := filepath.Join(dir, "data")
+	require.NoError(t, os.MkdirAll(dbDir, 0o755))
+	// bot1 has app_id but no app_secret; bot2 is complete.
+	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  feishu:\n    enabled: true\n    bots:\n      - name: hephaestus\n        app_id: \"cli_a954eab23678dbb5\"\n      - name: bailaoban\n        app_id: \"cli_a934ebe1a2b81bb3\"\n        app_secret: \"secret2\"\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	defer resetConfigPath()
+	SetConfigPath(path)
+
+	c := configRequiredChecker{}
+	d := c.Check(context.Background())
+
+	require.Equal(t, cli.StatusFail, d.Status)
+	require.Contains(t, d.Detail, `bots["hephaestus"].app_secret`)
+}
+
+func TestConfigRequired_SlackMultiBotAllPresent(t *testing.T) {
+	// t.Setenv — cannot use t.Parallel.
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	dbDir := filepath.Join(dir, "data")
+	require.NoError(t, os.MkdirAll(dbDir, 0o755))
+	t.Setenv("SLACK_BOT1_TOKEN", "xoxb-1")
+	t.Setenv("SLACK_BOT1_APP", "xapp-1")
+	t.Setenv("SLACK_BOT2_TOKEN", "xoxb-2")
+	t.Setenv("SLACK_BOT2_APP", "xapp-2")
+	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n    bots:\n      - name: primary\n        bot_token: \"${SLACK_BOT1_TOKEN}\"\n        app_token: \"${SLACK_BOT1_APP}\"\n      - name: secondary\n        bot_token: \"${SLACK_BOT2_TOKEN}\"\n        app_token: \"${SLACK_BOT2_APP}\"\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	defer resetConfigPath()
+	SetConfigPath(path)
+
+	c := configRequiredChecker{}
+	d := c.Check(context.Background())
+
+	require.Equal(t, cli.StatusPass, d.Status, "multi-bot slack with all credentials should pass, got: %s", d.Detail)
+}
+
+func TestConfigRequired_SlackMultiBotMissingCredential(t *testing.T) {
+	// t.Setenv — cannot use t.Parallel.
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	dbDir := filepath.Join(dir, "data")
+	require.NoError(t, os.MkdirAll(dbDir, 0o755))
+	// bot1 missing app_token.
+	t.Setenv("SLACK_BOT1_TOKEN", "xoxb-1")
+	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n    bots:\n      - name: primary\n        bot_token: \"${SLACK_BOT1_TOKEN}\"\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	defer resetConfigPath()
+	SetConfigPath(path)
+
+	c := configRequiredChecker{}
+	d := c.Check(context.Background())
+
+	require.Equal(t, cli.StatusFail, d.Status)
+	require.Contains(t, d.Detail, `bots["primary"].app_token`)
+}

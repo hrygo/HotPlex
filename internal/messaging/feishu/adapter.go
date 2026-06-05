@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +16,7 @@ import (
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	"github.com/larksuite/oapi-sdk-go/v3/ws"
 
+	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/messaging/phrases"
 	"github.com/hrygo/hotplex/internal/messaging/stt"
@@ -131,6 +135,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 
 	a.Log.Info("feishu: starting WebSocket connection")
 	go a.runWebSocket(ctx)
+	go a.cleanupMedia(ctx)
 
 	return nil
 }
@@ -372,4 +377,60 @@ func extractTextFromContent(content string) string {
 		return ""
 	}
 	return tc.Text
+}
+
+const (
+	feishuMediaCleanupInterval = 6 * time.Hour
+	feishuMediaTTL             = 24 * time.Hour
+)
+
+// feishuMediaSubdirs lists the media subdirectories owned by the Feishu adapter.
+// This excludes adapter-owned subdirectories like "slack/" to prevent cross-adapter cleanup.
+var feishuMediaSubdirs = []string{"images", "files", "audios", "videos", "stickers"}
+
+// cleanupMedia periodically removes old media files downloaded from Feishu.
+// Only cleans Feishu-owned subdirectories to avoid interfering with the Slack adapter's cleanup.
+func (a *Adapter) cleanupMedia(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.Log.Error("feishu: panic in cleanupMedia", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+
+	// Run immediate cleanup on startup to handle stale files from previous runs.
+	a.doCleanupMedia()
+
+	ticker := time.NewTicker(feishuMediaCleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.doCleanupMedia()
+		}
+	}
+}
+
+func (a *Adapter) doCleanupMedia() {
+	mediaBase := filepath.Join(config.TempBaseDir(), "media")
+	for _, sub := range feishuMediaSubdirs {
+		a.cleanupMediaInDir(filepath.Join(mediaBase, sub))
+	}
+}
+
+func (a *Adapter) cleanupMediaInDir(dir string) {
+	a.Log.Debug("feishu: cleaning up media files", "dir", dir)
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && time.Since(info.ModTime()) > feishuMediaTTL {
+			if err := os.Remove(path); err != nil {
+				a.Log.Warn("feishu: failed to remove old media file", "path", path, "err", err)
+			}
+		}
+		return nil
+	})
 }

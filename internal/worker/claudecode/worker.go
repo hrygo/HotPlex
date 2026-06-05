@@ -952,12 +952,17 @@ func (w *Worker) nextSeq() int64 {
 // writeTempFile writes content to a temp file and tracks it for cleanup.
 // Returns the absolute path to the file. The file is deleted in cleanupTempFiles
 // which is called from Terminate.
+// Files are created under config.TempBaseDir()/worker/ for unified cleanup.
 func (w *Worker) writeTempFile(prefix, content string) (string, error) {
 	ext := ".txt"
 	if prefix == "mcp-config" {
 		ext = ".json"
 	}
-	f, err := os.CreateTemp("", "hotplex-"+prefix+"-*"+ext)
+	dir := filepath.Join(config.TempBaseDir(), "worker")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create worker temp dir: %w", err)
+	}
+	f, err := os.CreateTemp(dir, "hotplex-"+prefix+"-*"+ext)
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
