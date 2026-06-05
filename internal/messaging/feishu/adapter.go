@@ -384,14 +384,22 @@ const (
 	feishuMediaTTL             = 24 * time.Hour
 )
 
+// feishuMediaSubdirs lists the media subdirectories owned by the Feishu adapter.
+// This excludes adapter-owned subdirectories like "slack/" to prevent cross-adapter cleanup.
+var feishuMediaSubdirs = []string{"images", "files", "audios", "videos", "stickers"}
+
 // cleanupMedia periodically removes old media files downloaded from Feishu.
-// This aligns with the Slack adapter's media cleanup behavior.
+// Only cleans Feishu-owned subdirectories to avoid interfering with the Slack adapter's cleanup.
 func (a *Adapter) cleanupMedia(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			a.Log.Error("feishu: panic in cleanupMedia", "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
+
+	// Run immediate cleanup on startup to handle stale files from previous runs.
+	a.doCleanupMedia()
+
 	ticker := time.NewTicker(feishuMediaCleanupInterval)
 	defer ticker.Stop()
 
@@ -400,8 +408,15 @@ func (a *Adapter) cleanupMedia(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			a.cleanupMediaInDir(filepath.Join(config.TempBaseDir(), "media"))
+			a.doCleanupMedia()
 		}
+	}
+}
+
+func (a *Adapter) doCleanupMedia() {
+	mediaBase := filepath.Join(config.TempBaseDir(), "media")
+	for _, sub := range feishuMediaSubdirs {
+		a.cleanupMediaInDir(filepath.Join(mediaBase, sub))
 	}
 }
 

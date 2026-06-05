@@ -651,58 +651,64 @@ func cleanupStaleTempFiles(log *slog.Logger) {
 		}
 	}
 
-	// Clean media directory: remove files older than 24h (aligns with Slack TTL).
-	if entries, err := os.ReadDir(mediaDir); err == nil {
-		cutoff := time.Now().Add(-24 * time.Hour)
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-			if info.ModTime().Before(cutoff) {
-				p := filepath.Join(mediaDir, e.Name())
-				if err := os.Remove(p); err == nil {
-					cleaned++
-				}
+	// Clean media directory: recursive walk to remove files older than 24h.
+	// Adapter-owned subdirectories (e.g., "slack/") are also cleaned here at
+	// startup; the adapters' periodic goroutines handle ongoing maintenance.
+	cutoff := time.Now().Add(-24 * time.Hour)
+	_ = filepath.Walk(mediaDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && info.ModTime().Before(cutoff) {
+			if removeErr := os.Remove(path); removeErr == nil {
+				cleaned++
 			}
 		}
-	}
+		return nil
+	})
 
 	// Also scan legacy temp files scattered in os.TempDir() root (pre-unification).
-	cleaned += cleanupLegacyTempFiles(log)
+	cleaned += cleanupLegacyTempFiles()
 
 	if cleaned > 0 {
 		log.Info("gateway: cleaned stale temp files", "count", cleaned)
 	}
 }
 
-// cleanupLegacyTempFiles scans the system temp dir root for hotplex temp files
-// from before the unified worker/ subdirectory was introduced.
-func cleanupLegacyTempFiles(_ *slog.Logger) int {
-	tmpDir := os.TempDir()
+// cleanupLegacyTempFiles scans for hotplex temp files from before the unified
+// worker/ subdirectory was introduced. Searches both /tmp (hardcoded path used
+// by the old TempBaseDir) and os.TempDir() (in case TMPDIR was overridden).
+func cleanupLegacyTempFiles() int {
+	// Pre-unification files were created by os.CreateTemp("", ...) which uses
+	// os.TempDir(). On stock Linux this is /tmp, but TMPDIR overrides change it.
+	// Search both /tmp and os.TempDir() to cover all cases.
+	searchDirs := []string{"/tmp"}
+	if td := os.TempDir(); td != "/tmp" {
+		searchDirs = append(searchDirs, td)
+	}
 	patterns := []string{
 		"hotplex-append-system-prompt-*",
 		"hotplex-mcp-config-*",
 		"hotplex-system-prompt-*",
+		"hotplex-update-*",
 	}
 	cutoff := time.Now().Add(-2 * time.Hour)
 	cleaned := 0
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(filepath.Join(tmpDir, pattern))
-		if err != nil {
-			continue
-		}
-		for _, p := range matches {
-			info, err := os.Stat(p)
+	for _, dir := range searchDirs {
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(filepath.Join(dir, pattern))
 			if err != nil {
 				continue
 			}
-			if info.ModTime().Before(cutoff) {
-				if err := os.Remove(p); err == nil {
-					cleaned++
+			for _, p := range matches {
+				info, err := os.Stat(p)
+				if err != nil {
+					continue
+				}
+				if info.ModTime().Before(cutoff) {
+					if err := os.Remove(p); err == nil {
+						cleaned++
+					}
 				}
 			}
 		}
