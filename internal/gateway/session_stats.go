@@ -14,7 +14,8 @@ type sessionAccumulator struct {
 	Generation      atomic.Int64 // session reset generation (monotonic), atomic for concurrent access
 	AppliedResetGen atomic.Int64 // last worker resetGen applied to Generation (idempotent guard)
 	TurnCount       atomic.Int32 // generation-scoped turn counter (atomic for concurrent access)
-	ToolCallCount   int
+	ToolCallCount   atomic.Int32
+	genInitialized  atomic.Bool // CAS guard: only one goroutine initializes Generation from DB
 	TotalCostUSD    float64
 	TotalInput      int64 // cumulative input tokens consumed across turns
 	TotalOutput     int64
@@ -118,7 +119,7 @@ func (a *sessionAccumulator) resetPerTurn() {
 	a.PrevCacheWrite = a.TotalCacheWrite
 	a.PrevCacheRead = a.TotalCacheRead
 	a.ToolNames = nil
-	a.ToolCallCount = 0
+	a.ToolCallCount.Store(0)
 	a.PerTurnInput = 0
 	a.PerTurnOutput = 0
 	a.PerTurnCost = 0
@@ -168,7 +169,7 @@ func (a *sessionAccumulator) snapshot() map[string]any {
 	}
 	return map[string]any{
 		"turn_count":       a.TurnCount.Load(),
-		"tool_call_count":  a.ToolCallCount,
+		"tool_call_count":  a.ToolCallCount.Load(),
 		"duration":         elapsed.Round(time.Second).String(),
 		"duration_seconds": elapsed.Seconds(),
 		"total_input_tok":  a.TotalInput,

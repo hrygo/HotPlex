@@ -89,7 +89,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	}
 
 	acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
-	if acc.Generation.Load() == 0 {
+	if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
 		gen := int64(1)
 		if b.turnsQuerier != nil {
 			genCtx, genCancel := context.WithTimeout(opts.ctx, 3*time.Second)
@@ -333,7 +333,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 	switch env.Event.Type {
 	case events.ToolCall:
 		acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
-		acc.ToolCallCount++
+		acc.ToolCallCount.Add(1)
 		if tc, ok := asToolCallData(env.Event.Data); ok {
 			if acc.ToolNames == nil {
 				acc.ToolNames = make(map[string]int)
@@ -364,7 +364,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 			b.log.Debug("bridge: turn completed",
 				"session_id", sessionID, "worker_type", fc.workerType, "turn", acc.TurnCount.Load(),
 				"duration", time.Since(fc.turnStartTime).Round(time.Millisecond),
-				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount)
+				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount.Load())
 		}
 	}
 }
@@ -606,7 +606,7 @@ func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64
 		// may be called from the Handler goroutine before that init completes.
 		// Without this guard, user turns get Generation=0 while assistant turns get Generation=1+,
 		// making the first user turn invisible after page refresh.
-		if acc.Generation.Load() == 0 {
+		if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
 			gen := int64(1)
 			if b.turnsQuerier != nil {
 				genCtx, genCancel := context.WithTimeout(ctx, 3*time.Second)
@@ -753,7 +753,7 @@ func (b *Bridge) captureAssistantTurn(sessionID string, seq int64, acc *sessionA
 		Success:          success,
 		Source:           eventstore.SourceNormal,
 		ToolsJSON:        toolsJSON,
-		ToolCount:        acc.ToolCallCount,
+		ToolCount:        int(acc.ToolCallCount.Load()),
 		TokensInput:      tokensInput,
 		TokensCacheWrite: acc.PerTurnCacheWrite,
 		TokensCacheRead:  acc.PerTurnCacheRead,

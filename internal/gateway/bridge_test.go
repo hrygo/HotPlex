@@ -160,11 +160,11 @@ func TestSessionAccumulator_ResetPerTurn(t *testing.T) {
 		PrevTotalOut:  50,
 		PrevTotalCost: 0.01,
 		ToolNames:     map[string]int{"Read": 2},
-		ToolCallCount: 5,
-		PerTurnInput:  100,
-		PerTurnOutput: 50,
-		PerTurnCost:   0.01,
 	}
+	acc.ToolCallCount.Store(5)
+	acc.PerTurnInput = 100
+	acc.PerTurnOutput = 50
+	acc.PerTurnCost = 0.01
 
 	acc.resetPerTurn()
 
@@ -172,7 +172,7 @@ func TestSessionAccumulator_ResetPerTurn(t *testing.T) {
 	assert.Equal(t, int64(0), acc.PerTurnOutput)
 	assert.Equal(t, 0.0, acc.PerTurnCost)
 	assert.Nil(t, acc.ToolNames)
-	assert.Equal(t, 0, acc.ToolCallCount)
+	assert.Equal(t, int32(0), acc.ToolCallCount.Load())
 }
 
 func TestSessionAccumulator_NegativeDeltasClamped(t *testing.T) {
@@ -263,7 +263,7 @@ func TestInjectSessionStats(t *testing.T) {
 	b := NewBridge(BridgeDeps{Log: log, Hub: hub, SM: sm})
 
 	acc := b.getOrInitAccum("sess-1", "", time.Now())
-	acc.ToolCallCount = 4
+	acc.ToolCallCount.Store(4)
 
 	env := &events.Envelope{
 		Event: events.Event{
