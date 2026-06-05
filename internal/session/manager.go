@@ -379,6 +379,9 @@ func (m *Manager) UpdateWorkDir(ctx context.Context, id, workDir string) error {
 // for the DB write and re-acquires it before returning.
 // Returns a worker.Worker that the caller must Terminate (or Kill) outside
 // the session mutex to avoid blocking concurrent reads during graceful shutdown.
+//
+// IMPORTANT: the caller MUST NOT call Terminate/Kill on the returned worker
+// while holding ms.mu — doing so re-introduces the deadlock described in #655.
 func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from, to events.SessionState, termReason string) (worker.Worker, error) {
 	// Build the candidate state as a value copy (never mutates ms.info in-place).
 	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
@@ -451,7 +454,9 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 
 // terminateWorkerGracefully sends SIGTERM with a full grace period timeout.
 // Uses context.WithoutCancel to inherit OTel trace context from ctx while
-// ensuring the grace period is not shortened by parent cancellation.
+// ensuring the grace period is not shortened by parent cancellation — the
+// previous code used the parent ctx directly, allowing parent cancel (e.g.
+// GC tick ctx) to truncate the graceful shutdown window before SIGKILL fires.
 func (m *Manager) terminateWorkerGracefully(ctx context.Context, w worker.Worker, sessionID string) {
 	if w == nil {
 		return
@@ -514,6 +519,9 @@ func (m *Manager) Transition(ctx context.Context, id string, to events.SessionSt
 // TransitionWithReason transitions a session with an explicit termination reason.
 // termReason is used as the label value for SessionsTerminated when transitioning
 // to StateTerminated (e.g., "idle_timeout", "max_lifetime", "zombie", "admin_kill").
+//
+// Uses explicit ms.mu.Unlock() instead of defer — worker.Terminate() must run
+// outside the session mutex to prevent blocking concurrent reads (#655).
 func (m *Manager) TransitionWithReason(ctx context.Context, id string, to events.SessionState, termReason string) error {
 	if m == nil {
 		return ErrSessionNotFound
