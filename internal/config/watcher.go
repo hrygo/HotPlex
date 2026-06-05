@@ -105,6 +105,10 @@ func NewWatcher(log *slog.Logger, path string, store *ConfigStore, onChange func
 	if log == nil {
 		log = slog.Default()
 	}
+	// Expand ~ and make absolute so fsnotify can resolve the directory.
+	if expanded, err := ExpandAndAbs(path); err == nil {
+		path = expanded
+	}
 	return &Watcher{
 		log:           log,
 		path:          path,
