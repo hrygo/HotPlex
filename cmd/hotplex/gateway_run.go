@@ -115,6 +115,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	log, cfgStore, levelVar := initLogging(cfg)
 	pidTracker, cleanupWG := initOrphanCleanup(ctx, cfg, log)
+	cleanupStaleTempFiles(log)
 
 	obsCfg := observability.DefaultConfig()
 	obsCfg.ServiceVersion = versionString()
@@ -619,6 +620,94 @@ func initLogging(cfg *config.Config) (*slog.Logger, *config.ConfigStore, *slog.L
 	slog.SetDefault(log)
 
 	return log, cfgStore, levelVar
+}
+
+// cleanupStaleTempFiles removes orphaned temp files from previous gateway runs.
+// Files younger than 2 hours are preserved (may be in active use by a worker
+// from a previous process that hasn't terminated yet).
+func cleanupStaleTempFiles(log *slog.Logger) {
+	baseDir := config.TempBaseDir()
+	workerDir := filepath.Join(baseDir, "worker")
+	mediaDir := filepath.Join(baseDir, "media")
+
+	// Clean worker temp directory: remove files older than 2h.
+	cleaned := 0
+	if entries, err := os.ReadDir(workerDir); err == nil {
+		cutoff := time.Now().Add(-2 * time.Hour)
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				p := filepath.Join(workerDir, e.Name())
+				if err := os.Remove(p); err == nil {
+					cleaned++
+				}
+			}
+		}
+	}
+
+	// Clean media directory: remove files older than 24h (aligns with Slack TTL).
+	if entries, err := os.ReadDir(mediaDir); err == nil {
+		cutoff := time.Now().Add(-24 * time.Hour)
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				p := filepath.Join(mediaDir, e.Name())
+				if err := os.Remove(p); err == nil {
+					cleaned++
+				}
+			}
+		}
+	}
+
+	// Also scan legacy temp files scattered in os.TempDir() root (pre-unification).
+	cleaned += cleanupLegacyTempFiles(log)
+
+	if cleaned > 0 {
+		log.Info("gateway: cleaned stale temp files", "count", cleaned)
+	}
+}
+
+// cleanupLegacyTempFiles scans the system temp dir root for hotplex temp files
+// from before the unified worker/ subdirectory was introduced.
+func cleanupLegacyTempFiles(_ *slog.Logger) int {
+	tmpDir := os.TempDir()
+	patterns := []string{
+		"hotplex-append-system-prompt-*",
+		"hotplex-mcp-config-*",
+		"hotplex-system-prompt-*",
+	}
+	cutoff := time.Now().Add(-2 * time.Hour)
+	cleaned := 0
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(filepath.Join(tmpDir, pattern))
+		if err != nil {
+			continue
+		}
+		for _, p := range matches {
+			info, err := os.Stat(p)
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				if err := os.Remove(p); err == nil {
+					cleaned++
+				}
+			}
+		}
+	}
+	return cleaned
 }
 
 func initOrphanCleanup(ctx context.Context, cfg *config.Config, log *slog.Logger) (*proc.Tracker, *sync.WaitGroup) {

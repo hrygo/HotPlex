@@ -167,19 +167,53 @@ func (c configRequiredChecker) Check(ctx context.Context) cli.Diagnostic {
 	var missing []string
 
 	if cfg.Messaging.Slack.Enabled {
-		if cfg.Messaging.Slack.BotToken == "" {
-			missing = append(missing, "messaging.slack.bot_token")
-		}
-		if cfg.Messaging.Slack.AppToken == "" {
-			missing = append(missing, "messaging.slack.app_token")
+		if len(cfg.Messaging.Slack.Bots) > 0 {
+			// Multi-bot mode: check each bot's credentials.
+			for i, bot := range cfg.Messaging.Slack.Bots {
+				prefix := fmt.Sprintf("messaging.slack.bots[%d]", i)
+				if bot.Name != "" {
+					prefix = fmt.Sprintf("messaging.slack.bots[%q]", bot.Name)
+				}
+				if bot.BotToken == "" {
+					missing = append(missing, prefix+".bot_token")
+				}
+				if bot.AppToken == "" {
+					missing = append(missing, prefix+".app_token")
+				}
+			}
+		} else {
+			// Single-bot mode: check top-level credentials.
+			if cfg.Messaging.Slack.BotToken == "" {
+				missing = append(missing, "messaging.slack.bot_token")
+			}
+			if cfg.Messaging.Slack.AppToken == "" {
+				missing = append(missing, "messaging.slack.app_token")
+			}
 		}
 	}
 	if cfg.Messaging.Feishu.Enabled {
-		if cfg.Messaging.Feishu.AppID == "" {
-			missing = append(missing, "messaging.feishu.app_id")
-		}
-		if cfg.Messaging.Feishu.AppSecret == "" {
-			missing = append(missing, "messaging.feishu.app_secret")
+		if len(cfg.Messaging.Feishu.Bots) > 0 {
+			// Multi-bot mode: check each bot's credentials.
+			for i, bot := range cfg.Messaging.Feishu.Bots {
+				prefix := fmt.Sprintf("messaging.feishu.bots[%d]", i)
+				if bot.Name != "" {
+					prefix = fmt.Sprintf("messaging.feishu.bots[%q]", bot.Name)
+				}
+				if bot.AppID == "" {
+					missing = append(missing, prefix+".app_id")
+				}
+				if bot.AppSecret == "" {
+					missing = append(missing, prefix+".app_secret")
+				}
+			}
+		} else {
+			// Single-bot mode: check top-level credentials.
+			if cfg.Messaging.Feishu.AppID == "" {
+				missing = append(missing, "messaging.feishu.app_id")
+			}
+			if cfg.Messaging.Feishu.AppSecret == "" {
+				missing = append(missing, "messaging.feishu.app_secret")
+			}
 		}
 	}
 	if !cfg.Messaging.Slack.Enabled && !cfg.Messaging.Feishu.Enabled {

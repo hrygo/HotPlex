@@ -293,9 +293,12 @@ func (s *Scheduler) finishExecution(job *CronJob, startedAtMs int64, err error, 
 
 	if err != nil {
 		s.log.Error("cron: job execution failed",
-			"job_id", job.ID, "name", job.Name, "err", err)
+			"job_id", job.ID, "name", job.Name, "error_type", errType, "err", err)
 		job.State.LastStatus = StatusFailed
 		job.State.ConsecutiveErrs++
+		s.log.Info("cron: error state recorded",
+			"job_id", job.ID, "name", job.Name,
+			"last_status", job.State.LastStatus, "consecutive_errors", job.State.ConsecutiveErrs)
 		observability.CronErrors().Add(s.ctx, 1, metric.WithAttributes(attribute.String("job_name", job.Name), attribute.String("error_type", errType)))
 
 		if job.State.ConsecutiveErrs >= maxConsecutiveErrors {
