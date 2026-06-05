@@ -34,6 +34,7 @@ location /ws {
 | `admin.addr` | `localhost:9999` | 禁止公网暴露 |
 | TLS 终止 | 不内置 | 由 Nginx/Caddy 处理 |
 | CORS | 默认限制 | 按需配置 `allowed_origins` |
+| security.txt | 默认禁用 | 配置 `security.security_contact` 启用（RFC 9116） |
 
 > **禁止**将 Gateway 直接绑定到 `0.0.0.0`。所有外部流量必须经过反向代理。
 
@@ -196,3 +197,5 @@ Risky / Network / System 类工具在开发模式下可用，但 Bash 命令受�
 | 路径安全 | `internal/security/path.go` |
 | Tool 访问控制 | `internal/security/tool.go` |
 | 输出限制 | `internal/security/limits.go` |
+| CORS 中间件 | `internal/security/cors.go` |
+| security.txt 端点 | `internal/security/securitytxt.go` |
