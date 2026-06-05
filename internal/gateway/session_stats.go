@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/hrygo/hotplex/pkg/events"
@@ -10,9 +11,9 @@ import (
 // sessionAccumulator tracks session-level statistics across turns.
 // One instance per session, stored in Bridge.accum.
 type sessionAccumulator struct {
-	Generation      int64 // session reset generation (monotonic)
-	AppliedResetGen int64 // last worker resetGen applied to Generation (idempotent guard)
-	TurnCount       int   // generation-scoped turn counter
+	Generation      atomic.Int64 // session reset generation (monotonic), atomic for concurrent access
+	AppliedResetGen atomic.Int64 // last worker resetGen applied to Generation (idempotent guard)
+	TurnCount       int          // generation-scoped turn counter
 	ToolCallCount   int
 	TotalCostUSD    float64
 	TotalInput      int64 // cumulative input tokens consumed across turns

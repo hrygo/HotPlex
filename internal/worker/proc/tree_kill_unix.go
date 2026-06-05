@@ -3,10 +3,8 @@
 package proc
 
 import (
-	"context"
 	"log/slog"
 	"syscall"
-	"time"
 )
 
 // ForceKillTree sends SIGKILL to the entire process group identified by pgid,
@@ -35,47 +33,6 @@ func ForceKillTree(pgid int, log *slog.Logger) {
 		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !IsProcessNotExist(err) {
 			log.Debug("proc: failed to kill orphan", "pid", pid, "err", err)
 		}
-	}
-}
-
-// GracefulTerminateTree sends SIGTERM to the entire process group identified by pgid,
-// then recursively discovers and terminates any orphaned descendant processes.
-// After the grace period (or context cancellation), it escalates to SIGKILL.
-func GracefulTerminateTree(ctx context.Context, pgid int, gracePeriod time.Duration, log *slog.Logger) {
-	if pgid <= 0 {
-		return
-	}
-
-	descendants := findDescendants(pgid, log)
-
-	_ = GracefulTerminate(pgid)
-
-	for _, pid := range descendants {
-		_ = syscall.Kill(pid, syscall.SIGTERM)
-	}
-
-	if len(descendants) > 0 {
-		log.Info("proc: sent SIGTERM to orphaned descendants",
-			"root_pid", pgid, "count", len(descendants))
-	}
-
-	select {
-	case <-time.After(gracePeriod):
-	case <-ctx.Done():
-	}
-
-	_ = ForceKill(pgid)
-	newOrphans := findDescendants(pgid, log)
-	merged := make([]int, 0, len(descendants)+len(newOrphans))
-	merged = append(merged, descendants...)
-	merged = append(merged, newOrphans...)
-	seen := make(map[int]bool)
-	for _, pid := range merged {
-		if seen[pid] {
-			continue
-		}
-		seen[pid] = true
-		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 }
 

@@ -11,16 +11,12 @@ import (
 // getChildren returns the PIDs of direct child processes of the given PID.
 // Uses sysctl KERN_PROC_PID to enumerate processes, then filters by PPID match.
 func getChildren(pid int, _ *slog.Logger) []int {
-	// Use kern.proc.pid.* to get process info, then filter by ppid.
-	// On macOS, we use syscall.Sysctl to read the process list.
-	// KERN_PROC_PID = 1 (see sysctl.h)
 	var children []int
 
-	// Try sysctl approach: iterate potential PIDs and check ppid.
-	// Since there's no direct "children of PID" syscall on macOS,
-	// we use kern.proc.pid to check each candidate.
-	// For efficiency with small trees, we limit the scan range.
-	const maxScanPID = 65536
+	// sysctl KERN_PROC_PID per-candidate is O(N) syscalls.
+	// Most systems have <4096 processes; cap the scan to avoid 131K syscalls
+	// on the worker shutdown path.
+	const maxScanPID = 4096
 	for candidate := 1; candidate < maxScanPID; candidate++ {
 		if ppid := getParentPID(candidate); ppid == pid {
 			children = append(children, candidate)

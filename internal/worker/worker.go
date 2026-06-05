@@ -177,6 +177,10 @@ type EventInjector interface {
 // start and checks after recvCh closes — if the current generation differs, the
 // worker was reset by a NEW forwardEvents goroutine and this OLD goroutine must
 // NOT cleanupCrashedWorker.
+//
+// Workers that return ResetResult{ConnReplaced:true} from ResetContext MUST
+// implement this interface (typically via embedding BaseWorker). Failure to
+// implement it causes the stale-goroutine guard to be silently skipped.
 type ResetGenerationer interface {
 	IncResetGeneration() int64
 	LoadResetGeneration() int64

@@ -421,7 +421,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	if acc, ok := b.accum[sessionID]; ok {
 		acc.TurnCount = 0
 		if result.ConnReplaced {
-			acc.Generation++
+			acc.Generation.Add(1)
 		}
 	}
 	b.accumMu.Unlock()

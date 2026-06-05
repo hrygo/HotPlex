@@ -89,7 +89,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	}
 
 	acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
-	if acc.Generation == 0 {
+	if acc.Generation.Load() == 0 {
 		gen := int64(1)
 		if b.turnsQuerier != nil {
 			genCtx, genCancel := context.WithTimeout(opts.ctx, 3*time.Second)
@@ -99,11 +99,11 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 				gen = latest
 			}
 		}
-		acc.Generation = gen
+		acc.Generation.Store(gen)
 	}
 	if acc.TurnCount == 0 && b.turnsQuerier != nil {
 		tnCtx, tnCancel := context.WithTimeout(opts.ctx, 3*time.Second)
-		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation)
+		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()
 		if err != nil {
 			b.log.Warn("turns: restore turn num", "error", err)
@@ -130,7 +130,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 				Platform:   fc.sessPlatform,
 				Owner:      fc.sessOwner,
 				Model:      acc.ModelName,
-				Generation: acc.Generation,
+				Generation: acc.Generation.Load(),
 				TurnNum:    acc.TurnCount,
 			})
 			_ = w.Terminate(context.Background())
@@ -312,9 +312,9 @@ func (b *Bridge) handleInternalReset(env *events.Envelope, sessionID string, fc 
 		return
 	}
 	acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
-	if acc.AppliedResetGen < data.Generation {
-		acc.Generation++
-		acc.AppliedResetGen = data.Generation
+	if acc.AppliedResetGen.Load() < data.Generation {
+		acc.Generation.Add(1)
+		acc.AppliedResetGen.Store(data.Generation)
 	}
 	acc.TurnCount = 0
 	fc.turnText.Reset()
@@ -515,7 +515,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			crashedWorker: w,
 			sessPlatform:  p.sessPlatform,
 			sessOwner:     p.sessOwner,
-			accGeneration: acc.Generation,
+			accGeneration: acc.Generation.Load(),
 			accModelName:  acc.ModelName,
 		}) {
 			return
@@ -563,7 +563,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			Platform:   p.sessPlatform,
 			Owner:      p.sessOwner,
 			Model:      acc.ModelName,
-			Generation: acc.Generation,
+			Generation: acc.Generation.Load(),
 			TurnNum:    acc.TurnCount,
 		})
 	} else if exitCode == -1 {
@@ -602,7 +602,7 @@ func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64
 		// may be called from the Handler goroutine before that init completes.
 		// Without this guard, user turns get Generation=0 while assistant turns get Generation=1+,
 		// making the first user turn invisible after page refresh.
-		if acc.Generation == 0 {
+		if acc.Generation.Load() == 0 {
 			gen := int64(1)
 			if b.turnsQuerier != nil {
 				genCtx, genCancel := context.WithTimeout(ctx, 3*time.Second)
@@ -612,12 +612,12 @@ func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64
 					gen = latest
 				}
 			}
-			acc.Generation = gen
+			acc.Generation.Store(gen)
 		}
 		content := extractInputContent(data)
 		turn := &eventstore.TurnWriteRequest{
 			SessionID:  sessionID,
-			Generation: acc.Generation,
+			Generation: acc.Generation.Load(),
 			TurnNum:    acc.TurnCount + 1,
 			Seq:        seq,
 			Role:       eventstore.RoleUser,
@@ -738,7 +738,7 @@ func (b *Bridge) captureAssistantTurn(sessionID string, seq int64, acc *sessionA
 
 	turn := &eventstore.TurnWriteRequest{
 		SessionID:        sessionID,
-		Generation:       acc.Generation,
+		Generation:       acc.Generation.Load(),
 		TurnNum:          acc.TurnCount,
 		Seq:              seq,
 		Role:             eventstore.RoleAssistant,

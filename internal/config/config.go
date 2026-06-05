@@ -93,6 +93,9 @@ func (c *Config) Validate() []string {
 	if c.Log.Format != "" && c.Log.Format != "json" && c.Log.Format != "text" {
 		errs = append(errs, "log.format must be either 'json' or 'text'")
 	}
+	if !c.Worker.CodexCLI.UseAppServer {
+		errs = append(errs, "codex_cli.use_app_server is deprecated; exec mode removed, app-server is the only mode")
+	}
 
 	return errs
 }
