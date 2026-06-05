@@ -449,6 +449,20 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	return workerToTerminate, nil
 }
 
+// terminateWorkerGracefully sends SIGTERM with a full grace period timeout.
+// Uses context.WithoutCancel to inherit OTel trace context from ctx while
+// ensuring the grace period is not shortened by parent cancellation.
+func (m *Manager) terminateWorkerGracefully(ctx context.Context, w worker.Worker, sessionID string) {
+	if w == nil {
+		return
+	}
+	terminateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), base.GracefulShutdownTimeout)
+	defer cancel()
+	if err := w.Terminate(terminateCtx); err != nil {
+		m.log.Warn("session: worker terminate failed", "session_id", sessionID, "err", err)
+	}
+}
+
 // forceTerminateInMemory performs in-memory state cleanup when transitionState fails
 // (DB error or invalid transition). It mirrors transitionState's side effects
 // (metrics, quota release, worker nil) without DB persistence.
@@ -522,15 +536,7 @@ func (m *Manager) TransitionWithReason(ctx context.Context, id string, to events
 
 	workerToTerminate, err := m.transitionState(ctx, ms, from, to, termReason)
 	ms.mu.Unlock()
-	// Terminate worker outside the session mutex to prevent blocking concurrent
-	// reads (Get, GetWorker) during the potentially slow graceful shutdown.
-	if workerToTerminate != nil {
-		terminateCtx, cancel := context.WithTimeout(context.Background(), base.GracefulShutdownTimeout)
-		defer cancel()
-		if termErr := workerToTerminate.Terminate(terminateCtx); termErr != nil {
-			m.log.Warn("session: worker terminate failed", "session_id", id, "err", termErr)
-		}
-	}
+	m.terminateWorkerGracefully(ctx, workerToTerminate, id)
 	return err
 }
 
@@ -584,12 +590,7 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 			ms.mu.Unlock()
 			// Terminate/kill worker outside lock (only one will be non-nil).
 			if workerToTerminate != nil {
-				terminateCtx, cancel := context.WithTimeout(context.Background(), base.GracefulShutdownTimeout)
-				defer cancel()
-				if termErr := workerToTerminate.Terminate(terminateCtx); termErr != nil {
-					m.log.Warn("session: worker terminate failed during max-turns cleanup",
-						"session_id", id, "err", termErr)
-				}
+				m.terminateWorkerGracefully(ctx, workerToTerminate, id)
 			} else if workerToKill != nil {
 				if err := workerToKill.Kill(); err != nil {
 					m.log.Warn("session: worker kill failed during max-turns cleanup",
@@ -602,13 +603,7 @@ func (m *Manager) TransitionWithInput(ctx context.Context, id string, to events.
 
 	workerToTerminate, err := m.transitionState(ctx, ms, from, to, "client_input")
 	ms.mu.Unlock()
-	if workerToTerminate != nil {
-		terminateCtx, cancel := context.WithTimeout(context.Background(), base.GracefulShutdownTimeout)
-		defer cancel()
-		if termErr := workerToTerminate.Terminate(terminateCtx); termErr != nil {
-			m.log.Warn("session: worker terminate failed", "session_id", id, "err", termErr)
-		}
-	}
+	m.terminateWorkerGracefully(ctx, workerToTerminate, id)
 	return err
 }
 
