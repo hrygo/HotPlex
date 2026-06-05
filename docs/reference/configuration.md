@@ -202,6 +202,7 @@ db:
 | `allowed_origins` | []string | `["*"]` | — | WebSocket CORS 允许的 Origin 列表 |
 | `work_dir_allowed_base_patterns` | []string | `[]` | — | 额外的工作目录白名单模式。支持 `~` 和 `${VAR}` 展开。程序内建默认值：`~/.hotplex/workspace`、`~/workspace`、`~/projects`、`~/work`、`~/dev`、`/var/hotplex/projects` |
 | `work_dir_forbidden_dirs` | []string | `[]` | — | 额外的工作目录黑名单。显式禁止的目录列表 |
+| `csp` | string | `""` | `HOTPLEX_SECURITY_CSP` | Content-Security-Policy 头覆盖，用于嵌入式 WebChat 和文档门户。空字符串使用内建默认值（适合 localhost）。远程部署时需设置，否则浏览器会阻止 fetch/ws/connect 调用 |
 
 ---
 
@@ -301,9 +302,20 @@ OpenAI Codex CLI Worker，支持双模式：exec（每次 Turn fork 新进程）
 | `sandbox` | string | `danger-full-access` | `HOTPLEX_WORKER_CODEX_CLI_SANDBOX` | 沙箱模式：`read-only`、`workspace-write`、`danger-full-access` |
 | `approval_mode` | string | `never` | `HOTPLEX_WORKER_CODEX_CLI_APPROVAL_MODE` | 审批模式：`untrusted`（所有操作需审批）、`on-request`（仅高风险操作）、`never`（全自动） |
 | `ephemeral` | bool | `true` | — | 临时会话模式。不持久化到磁盘，Session 结束后数据清除 |
+| `personality` | string | `friendly` | — | Agent 人格模式，用于 app-server 模式 |
 | `startup_timeout` | duration | `30s` | — | 进程启动超时 |
+| `call_timeout` | duration | `30s` | — | JSON-RPC 调用超时 |
 | `use_app_server` | bool | `true` | — | 使用持久 app-server 模式（推荐）。`false` 则使用每次 exec 的 one-shot 模式 |
 | `idle_drain_period` | duration | `30m` | — | app-server 模式下空闲排空超时。超时后单例进程关闭 |
+| `color` | bool | `false` | — | 启用彩色输出（传递 `--color` 给 Codex CLI） |
+| `output_file` | string | `""` | — | 输出最后一条消息到文件（传递 `--output-last-message` 给 Codex CLI） |
+| `strict_config` | bool | `false` | — | 严格配置校验（传递 `--strict-config`） |
+| `skip_git_repo_check` | bool | `false` | — | 跳过 Git 仓库检查（传递 `--skip-git-repo-check`） |
+| `ignore_user_config` | bool | `false` | — | 忽略用户级配置（传递 `--ignore-user-config`） |
+| `ignore_rules` | bool | `false` | — | 忽略项目规则（传递 `--ignore-rules`） |
+| `local_provider` | bool | `false` | — | 强制使用本地模型提供者（传递 `--local-provider`） |
+| `config_profile` | string | `""` | — | Codex 配置 profile（传递 `--profile`） |
+| `bypass_hook_trust` | bool | `false` | — | 绕过 hook 信任检查（传递 `--dangerously-bypass-hook-trust`） |
 
 #### 3.7.6 acp — ACP 通用 Worker
 
@@ -757,6 +769,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_ADMIN_TOKEN_1..N` | `admin.tokens` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_1..N` | `security.api_keys` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_HEADER` | `security.api_key_header` | 默认 `X-API-Key` |
+| `HOTPLEX_SECURITY_CSP` | `security.csp` | Content-Security-Policy 头覆盖（空 = 内建默认） |
 
 #### Agent Config
 
