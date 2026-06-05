@@ -269,10 +269,11 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 
 	if m.proc != nil {
 		m.log.Info("codex-app-server: shutdown, killing process")
-		// Use ForceKill(pgid) instead of proc.Kill() to avoid deadlock
-		// with monitorProcess's Wait() (see KillIfIdle for rationale).
+		// Use ForceKill(pgid) + ForceKillTree instead of proc.Kill() to
+		// avoid deadlock with monitorProcess's Wait() (see KillIfIdle).
 		if m.pgid > 0 {
 			_ = proc.ForceKill(m.pgid)
+			proc.ForceKillTree(m.pgid, m.log)
 		} else {
 			_ = m.proc.Kill()
 		}
@@ -1028,6 +1029,7 @@ func (m *CodexAppServerManager) KillIfIdle() {
 	if shouldKill {
 		m.log.Info("codex-app-server: killing idle process immediately", "pgid", pgid)
 		_ = proc.ForceKill(pgid)
+		proc.ForceKillTree(pgid, m.log)
 		// monitorProcess will observe the exit, set state to stateIdle, and clean up.
 	}
 }

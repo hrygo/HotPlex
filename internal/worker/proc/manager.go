@@ -256,11 +256,12 @@ func (m *Manager) Kill() error {
 	}
 
 	// closeJobHandle triggers KILL_ON_JOB_CLOSE on Windows, killing the
-	// entire process tree. ForceKill is a fallback for when Job Object
-	// creation failed (jobHandle == 0).
+	// entire process tree. On Unix, ForceKillTree walks the process tree
+	// to kill orphaned descendants that escaped the PGID.
 	m.closeJobHandle()
 	if m.pgid > 0 {
 		_ = ForceKill(m.pgid)
+		ForceKillTree(m.pgid, m.log)
 		m.log.Info("proc: force killed", "pgid", m.pgid)
 	}
 	m.waitOnce.Do(func() { m.waitErr = m.cmd.Wait() })
