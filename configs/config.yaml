@@ -113,6 +113,15 @@ security:
   tls_enabled: false
   tls_cert_file: "/etc/hotplex/tls/server.crt"
   tls_key_file: "/etc/hotplex/tls/server.key"
+  # Allowed CORS origins for gateway API, admin API, and WebSocket connections.
+  # Default: ["*"] (allows all origins — suitable for development).
+  # Production: pin to specific origins to prevent cross-origin attacks, e.g.:
+  #   allowed_origins:
+  #     - "https://app.example.com"
+  #     - "https://admin.example.com"
+  # Can be overridden at runtime by HOTPLEX_SECURITY_ALLOWED_ORIGINS env var
+  # (comma-separated list, e.g. "https://app.example.com,https://admin.example.com").
+  # A startup WARN log fires when wildcard "*" is in effect.
   allowed_origins:
     - "*"
   # Content-Security-Policy header served with the embedded webchat SPA and
@@ -126,6 +135,11 @@ security:
   #   csp: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://192.168.1.100:9999 ws://192.168.1.100:9999 wss://*; img-src 'self' data: blob:; font-src 'self' data:"
   # Can be overridden at runtime by HOTPLEX_SECURITY_CSP env var.
   csp: ""
+  # Contact URI for /.well-known/security.txt (RFC 9116).
+  # When set, the security.txt endpoint is enabled. Empty = disabled.
+  # Examples: "mailto:security@example.com", "https://example.com/security-policy"
+  # Can be overridden at runtime by HOTPLEX_SECURITY_SECURITY_CONTACT env var.
+  security_contact: ""
 
   # Work directory security settings (convention + configuration)
   # Program defaults (convention over configuration):

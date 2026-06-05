@@ -459,15 +459,57 @@ func TestMiddleware_IPWhitelist(t *testing.T) {
 }
 
 func TestMiddleware_CORS(t *testing.T) {
-	api := newTestAPI()
-	handler := api.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodOptions, "/", nil)
+	t.Parallel()
 
-	handler.ServeHTTP(w, r)
+	t.Run("default wildcard allows all origins", func(t *testing.T) {
+		t.Parallel()
+		api := newTestAPI()
+		handler := api.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodOptions, "/", nil)
 
-	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		handler.ServeHTTP(w, r)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("specific origin matches request", func(t *testing.T) {
+		t.Parallel()
+		api := newTestAPI(func(d *Deps) {
+			d.AllowedOriginsFn = func() []string {
+				return []string{"https://admin.example.com"}
+			}
+		})
+		handler := api.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodOptions, "/", nil)
+		r.Header.Set("Origin", "https://admin.example.com")
+
+		handler.ServeHTTP(w, r)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, "https://admin.example.com", w.Header().Get("Access-Control-Allow-Origin"))
+		require.Equal(t, "Origin", w.Header().Get("Vary"))
+	})
+
+	t.Run("non-matching origin gets no CORS headers", func(t *testing.T) {
+		t.Parallel()
+		api := newTestAPI(func(d *Deps) {
+			d.AllowedOriginsFn = func() []string {
+				return []string{"https://admin.example.com"}
+			}
+		})
+		handler := api.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodOptions, "/", nil)
+		r.Header.Set("Origin", "https://evil.com")
+
+		handler.ServeHTTP(w, r)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	})
 }
 
 func TestMiddleware_PanicRecovery(t *testing.T) {

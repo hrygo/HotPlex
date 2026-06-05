@@ -685,6 +685,11 @@ type SecurityConfig struct {
 	// (localhost-friendly). Set this when serving from a remote host — the
 	// browser blocks fetch/ws/connect calls that do not match a directive in CSP.
 	CSP string `mapstructure:"csp"`
+
+	// SecurityContact enables /.well-known/security.txt (RFC 9116) when non-empty.
+	// Examples: "mailto:security@example.com", "https://example.com/security".
+	// Overridable via HOTPLEX_SECURITY_SECURITY_CONTACT env var.
+	SecurityContact string `mapstructure:"security_contact"`
 }
 
 // SessionConfig holds session lifecycle settings.
@@ -817,11 +822,12 @@ func Default() *Config {
 			},
 		},
 		Security: SecurityConfig{
-			APIKeyHeader:   "X-API-Key",
-			APIKeys:        nil,
-			TLSEnabled:     false,
-			AllowedOrigins: []string{"*"},
-			CSP:            "", // empty → webchat/docs use package-level default
+			APIKeyHeader:    "X-API-Key",
+			APIKeys:         nil,
+			TLSEnabled:      false,
+			AllowedOrigins:  []string{"*"},
+			CSP:             "", // empty → webchat/docs use package-level default
+			SecurityContact: "",
 		},
 		Session: SessionConfig{
 			RetentionPeriod:   7 * 24 * time.Hour,
@@ -1074,6 +1080,8 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("worker.opencode_server.password")
 	_ = v.BindEnv("security.api_key_header")
 	_ = v.BindEnv("security.csp")
+	_ = v.BindEnv("security.allowed_origins")
+	_ = v.BindEnv("security.security_contact")
 	_ = v.BindEnv("agent_config.enabled")
 	_ = v.BindEnv("agent_config.config_dir")
 	_ = v.BindEnv("skills.cache_ttl")

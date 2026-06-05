@@ -12,6 +12,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -94,47 +95,49 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 }
 
 type AdminAPI struct {
-	log           *slog.Logger
-	cfg           ConfigProvider
-	sm            SessionManagerProvider
-	turnStore     TurnStatsProvider
-	hub           HubProvider
-	bridge        BridgeProvider
-	configWatcher ConfigWatcherProvider
-	cron          CronSchedulerProvider
-	botLister     BotListerProvider
-	botConfig     BotConfigProvider
-	logCollector  LogCollector
-	akStore       APIKeyUserStorer // nil when DB resolver not enabled
-	keyValidator  KeyValidator     // nil when not injected
-	rateLimiter   atomic.Value     // *simpleRateLimiter
-	allowedCIDRs  atomic.Value     // []string
-	version       func() string
-	newSessionID  func() string
-	restart       func() error
-	startedAt     time.Time
+	log              *slog.Logger
+	cfg              ConfigProvider
+	sm               SessionManagerProvider
+	turnStore        TurnStatsProvider
+	hub              HubProvider
+	bridge           BridgeProvider
+	configWatcher    ConfigWatcherProvider
+	cron             CronSchedulerProvider
+	botLister        BotListerProvider
+	botConfig        BotConfigProvider
+	logCollector     LogCollector
+	akStore          APIKeyUserStorer // nil when DB resolver not enabled
+	keyValidator     KeyValidator     // nil when not injected
+	rateLimiter      atomic.Value     // *simpleRateLimiter
+	allowedCIDRs     atomic.Value     // []string
+	allowedOriginsFn func() []string  // returns allowed CORS origins from config
+	version          func() string
+	newSessionID     func() string
+	restart          func() error
+	startedAt        time.Time
 }
 
 type Deps struct {
-	Log           *slog.Logger
-	Config        ConfigProvider
-	SessionMgr    SessionManagerProvider
-	TurnStats     TurnStatsProvider
-	Hub           HubProvider
-	Bridge        BridgeProvider
-	ConfigWatcher ConfigWatcherProvider
-	Cron          CronSchedulerProvider
-	BotLister     BotListerProvider
-	BotConfig     BotConfigProvider
-	LogCollector  LogCollector
-	Version       func() string
-	NewSessionID  func() string
-	Restart       func() error
-	DB            DBExecutor       // Optional: enables API key user CRUD + DB resolver
-	DBResolver    cacheInvalidator // Optional: invalidates DBResolver cache after CUD
-	WriteMu       *sqlutil.WriteMu // Optional: serializes SQLite writes; nil-safe, PG-safe
-	APIKeyStore   APIKeyUserStorer // Optional: pre-built store (e.g. PG); overrides DB-based creation
-	KeyValidator  KeyValidator     // Optional: syncs DB keys into auth layer for Phase 1 validation
+	Log              *slog.Logger
+	Config           ConfigProvider
+	SessionMgr       SessionManagerProvider
+	TurnStats        TurnStatsProvider
+	Hub              HubProvider
+	Bridge           BridgeProvider
+	ConfigWatcher    ConfigWatcherProvider
+	Cron             CronSchedulerProvider
+	BotLister        BotListerProvider
+	BotConfig        BotConfigProvider
+	LogCollector     LogCollector
+	Version          func() string
+	NewSessionID     func() string
+	Restart          func() error
+	AllowedOriginsFn func() []string  // Optional: returns allowed CORS origins; defaults to ["*"] when nil
+	DB               DBExecutor       // Optional: enables API key user CRUD + DB resolver
+	DBResolver       cacheInvalidator // Optional: invalidates DBResolver cache after CUD
+	WriteMu          *sqlutil.WriteMu // Optional: serializes SQLite writes; nil-safe, PG-safe
+	APIKeyStore      APIKeyUserStorer // Optional: pre-built store (e.g. PG); overrides DB-based creation
+	KeyValidator     KeyValidator     // Optional: syncs DB keys into auth layer for Phase 1 validation
 }
 
 func New(deps Deps) *AdminAPI {
@@ -165,6 +168,12 @@ func New(deps Deps) *AdminAPI {
 		newSessionID: deps.NewSessionID,
 		restart:      deps.Restart,
 		startedAt:    time.Now(),
+		allowedOriginsFn: func() []string {
+			if deps.AllowedOriginsFn != nil {
+				return deps.AllowedOriginsFn()
+			}
+			return []string{"*"}
+		},
 	}
 	return a
 }
@@ -188,7 +197,7 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 			)
 		}()
 
-		addCORSHeaders(sw)
+		security.SetCORSHeaders(sw, a.allowedOriginsFn(), r.Header.Get("Origin"))
 		if r.Method == http.MethodOptions {
 			sw.WriteHeader(http.StatusOK)
 			return

@@ -19,14 +19,16 @@ const DefaultWebChatCSP = "default-src 'self'; " +
 	"img-src 'self' data: blob:; " +
 	"font-src 'self' data:"
 
-// DefaultDocsCSP is the fallback CSP for the self-hosted docs portal. It is
-// the same scheme-wide-open connect-src as the webchat default, plus jsDelivr
-// for scripts. Scalar API Reference loads web fonts from fonts.scalar.com.
-// Google Fonts have been localized (served from 'self').
+// DefaultDocsCSP is the fallback CSP for the self-hosted docs portal.
+// connect-src is restricted to 'self' only: the docs portal fetches the
+// OpenAPI spec and makes API Console "Try It" calls to the same origin.
+// Fonts loaded via CSS @font-face are governed by font-src, not connect-src.
+// Scripts loaded via <script> are governed by script-src, not connect-src.
+// Operators needing broader connectivity can override via security.csp.
 const DefaultDocsCSP = "default-src 'self'; " +
 	"script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
 	"style-src 'self' 'unsafe-inline'; " +
-	"connect-src 'self' http: https: ws: wss: data: blob:; " +
+	"connect-src 'self'; " +
 	"img-src 'self' data: blob:; " +
 	"font-src 'self' data: https://cdn.jsdelivr.net https://fonts.scalar.com"
 
