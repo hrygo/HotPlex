@@ -269,8 +269,11 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 			resumeCtx, resumeCancel := context.WithTimeout(ctx, resumeTimeout)
 			err := w.Resume(resumeCtx, info)
 			resumeCancel()
-			if err != nil {
+			if err != nil && !errors.Is(err, worker.ErrFellBackToFreshStart) {
 				return fmt.Errorf("bridge: resume start: %w", err)
+			}
+			if errors.Is(err, worker.ErrFellBackToFreshStart) {
+				opts.resumed = false
 			}
 			return nil
 		},

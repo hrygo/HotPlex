@@ -951,14 +951,8 @@ func (c *conn) Close() error {
 func (c *conn) UserID() string    { return c.userID }
 func (c *conn) SessionID() string { return c.sessionID }
 
-// Inject enqueues a synthetic event into the recv channel for in-place reset signaling.
-// Uses non-blocking send to match ACP/base.Conn behavior.
 func (c *conn) Inject(env *events.Envelope) {
-	select {
-	case c.recvCh <- env:
-	default:
-		c.log.Warn("ocs: inject dropped, recv channel full", "session_id", c.sessionID, "event_type", env.Event.Type)
-	}
+	base.InjectWithTimeout(c.recvCh, env, c.log, c.sessionID)
 }
 
 // isTimeoutError reports whether the error is a timeout (deadline exceeded or

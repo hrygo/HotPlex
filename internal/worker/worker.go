@@ -12,6 +12,11 @@ import (
 // ErrNotImplemented is returned for unimplemented worker methods.
 var ErrNotImplemented = errors.New("worker: not implemented")
 
+// ErrFellBackToFreshStart is returned by Resume when session files are missing
+// and the worker falls back to a fresh Start(). Bridge callers use this to
+// clear the "resumed" flag so forwardEvents applies normal retry logic.
+var ErrFellBackToFreshStart = errors.New("worker: resume fell back to fresh start")
+
 // ─── SessionConn ─────────────────────────────────────────────────────────────
 
 // SessionConn represents the bidirectional communication channel between

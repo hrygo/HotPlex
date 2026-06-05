@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -145,6 +146,10 @@ func TestClaudeCodeWorker_Resume_WithBinary(t *testing.T) {
 	}
 
 	err := w.Resume(ctx, session)
+	if errors.Is(err, worker.ErrFellBackToFreshStart) {
+		_ = w.Kill()
+		return
+	}
 	require.NoError(t, err)
 
 	conn := w.Conn()

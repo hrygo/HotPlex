@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
@@ -74,11 +75,27 @@ func (c *Conn) TrySend(env *events.Envelope) bool {
 }
 
 // Inject enqueues a synthetic event for in-place reset signaling.
-// Logs a warning if the recv channel is full (event dropped).
+// Blocks up to 2s waiting for channel space; logs a warning if dropped.
 func (c *Conn) Inject(env *events.Envelope) {
-	if !c.TrySend(env) {
-		c.log.Warn("base: inject dropped, recv channel full",
-			"session_id", c.sessionID, "event_type", env.Event.Type)
+	InjectWithTimeout(c.recvCh, env, c.log, c.sessionID)
+}
+
+// InjectWithTimeout sends env into ch with a 2s timeout.
+// Shared by Conn.Inject, ACP conn.Inject, and OCS conn.Inject
+// so that internal_reset events are never silently dropped under normal load.
+func InjectWithTimeout(ch chan<- *events.Envelope, env *events.Envelope, log *slog.Logger, sessionID string) {
+	select {
+	case ch <- env:
+		return
+	default:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	select {
+	case ch <- env:
+	case <-ctx.Done():
+		log.Warn("base: inject dropped after timeout, recv channel full",
+			"session_id", sessionID, "event_type", env.Event.Type)
 	}
 }
 

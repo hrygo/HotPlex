@@ -92,6 +92,11 @@ var claudeCodeEnvBlocklist = []string{
 	"HOTPLEX_",
 }
 
+// ErrFellBackToFreshStart is returned by Resume when session files are missing
+// and the worker falls back to Start(). Callers can use this to adjust behavior
+// (e.g., clearing the "resumed" flag in forwardOpts).
+var ErrFellBackToFreshStart = worker.ErrFellBackToFreshStart
+
 // Default session store directory.
 const defaultSessionStoreDir = ".claude/projects"
 
@@ -159,7 +164,10 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	if !w.hasSessionFiles(session.SessionID) {
 		w.Log.Info("claude-code: session files missing, fresh start")
-		return w.Start(ctx, session)
+		if err := w.Start(ctx, session); err != nil {
+			return err
+		}
+		return ErrFellBackToFreshStart
 	}
 	w.Mu.Lock()
 	defer w.Mu.Unlock()

@@ -274,7 +274,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	}
 	h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
 	if h.bridge != nil {
-		h.bridge.CaptureInbound(env.SessionID, env.Seq, events.Input, env.Event.Data, si.Platform, si.OwnerID)
+		h.bridge.CaptureInbound(ctx, env.SessionID, env.Seq, events.Input, env.Event.Data, si.Platform, si.OwnerID)
 	}
 	return nil
 }

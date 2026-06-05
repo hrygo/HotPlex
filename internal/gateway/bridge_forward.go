@@ -591,7 +591,7 @@ func (b *Bridge) CaptureInboundEvent(sessionID string, seq int64, eventType even
 
 // CaptureInbound persists an inbound (user→worker) event for replay.
 // Also writes a user turn record when eventType is Input.
-func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Kind, data any, platform, owner string) {
+func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64, eventType events.Kind, data any, platform, owner string) {
 	b.captureDirected(sessionID, seq, eventType, data, "inbound")
 
 	// Write user turn record for Input events.
@@ -605,7 +605,7 @@ func (b *Bridge) CaptureInbound(sessionID string, seq int64, eventType events.Ki
 		if acc.Generation == 0 {
 			gen := int64(1)
 			if b.turnsQuerier != nil {
-				genCtx, genCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				genCtx, genCancel := context.WithTimeout(ctx, 3*time.Second)
 				latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
 				genCancel()
 				if latest > 0 {
