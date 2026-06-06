@@ -149,21 +149,31 @@ HotPlex 支持**三级 fallback**，每个文件独立解析，命中即终止�
 ```
 全局级：~/.hotplex/agent-configs/SOUL.md
 平台级：~/.hotplex/agent-configs/slack/SOUL.md
-Bot 级：~/.hotplex/agent-configs/slack/U12345/SOUL.md
+Bot 级：~/.hotplex/agent-configs/slack/my-bot/SOUL.md
 ```
 
-解析顺序：Bot 级 → 平台级 → 全局级，第一个非空文件生效。
+Bot 级目录名使用 YAML 配置中 `bots[].name` 的值（如 `"my-bot"`），而非平台运行时 ID。单 Bot 模式无 Bot 级目录，直接使用平台级。解析顺序：Bot 级 → 平台级 → 全局级，第一个非空文件生效。
 
-### 示例：为特定 Slack Bot 定制人格
+### 示例：为特定 Bot 定制人格
 
-假设 Slack Bot ID 为 `U88888`，给它一个不同的角色：
+假设 YAML 配置中定义了一个名为 `dev-bot` 的 Bot：
+
+```yaml
+messaging:
+  slack:
+    bots:
+      - name: "dev-bot"
+        bot_token: "xoxb-..."
+```
+
+给它一个不同的人格：
 
 ```bash
-mkdir -p ~/.hotplex/agent-configs/slack/U88888
+mkdir -p ~/.hotplex/agent-configs/slack/dev-bot
 ```
 
 ```markdown
-<!-- ~/.hotplex/agent-configs/slack/U88888/SOUL.md -->
+<!-- ~/.hotplex/agent-configs/slack/dev-bot/SOUL.md -->
 
 # 人格
 
@@ -176,12 +186,12 @@ mkdir -p ~/.hotplex/agent-configs/slack/U88888
 - 故障排查时按排查树逐步推进
 ```
 
-此时 `U88888` 使用 DevOps 人格，其他 Bot 仍使用全局 `SOUL.md`。`AGENTS.md`、`USER.md` 等文件同理，各自独立 fallback。
+此时 `dev-bot` 使用 DevOps 人格，其他 Bot 仍使用全局 `SOUL.md`。`AGENTS.md`、`USER.md` 等文件同理，各自独立 fallback。
 
 > **重要**：Bot 级文件存在时（即使是空文件），该 Bot **不会**读取平台级和全局级的同名文件。如需基于全局修改，先复制再编辑：
 >
 > ```bash
-> cp ~/.hotplex/agent-configs/SOUL.md ~/.hotplex/agent-configs/slack/U88888/SOUL.md
+> cp ~/.hotplex/agent-configs/SOUL.md ~/.hotplex/agent-configs/slack/dev-bot/SOUL.md
 > # 然后编辑 Bot 级文件
 > ```
 
