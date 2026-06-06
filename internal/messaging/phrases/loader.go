@@ -1,10 +1,14 @@
 package phrases
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+// ErrInvalidBotName is returned when botName contains path traversal components.
+var ErrInvalidBotName = errors.New("phrases: invalid botName")
 
 // Load reads PHRASES.md from all levels with cascade-append:
 //
@@ -30,7 +34,7 @@ func Load(dir, platform, botName string) (*Phrases, error) {
 
 	if botName != "" {
 		if filepath.Base(botName) != botName || botName == "." || botName == ".." {
-			return nil, fmt.Errorf("phrases: invalid botName %q: path traversal detected", botName)
+			return nil, fmt.Errorf("%w: %q: path traversal detected", ErrInvalidBotName, botName)
 		}
 		levels = append(levels, loadLevel{
 			path:   filepath.Join(dir, platform, botName, "PHRASES.md"),

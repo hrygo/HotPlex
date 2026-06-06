@@ -184,6 +184,22 @@ func resolveFile(dir, platform, botName, fileName string) (string, error) {
 		if content != "" {
 			return content, nil
 		}
+		// 2b. Legacy backward compat: dir/platform/default/fileName
+		// Before PR #679, single-bot mode used "default" as botName. If a user
+		// created configs under {platform}/default/ between #678 and #679, this
+		// fallback ensures they are still discovered. New deployments should use
+		// platform-level (dir/platform/fileName) instead.
+		if botName == "" {
+			content, err := readFile(filepath.Join(dir, platform, "default"), fileName)
+			if err != nil {
+				return "", err
+			}
+			if content != "" {
+				slog.Warn("agentconfig: legacy default/ directory detected; move files to platform-level",
+					"platform", platform, "file", fileName)
+				return content, nil
+			}
+		}
 	}
 	// 3. Global-level: dir/fileName
 	return readFile(dir, fileName)

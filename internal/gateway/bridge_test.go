@@ -330,8 +330,21 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 				return dir
 			},
 			platform:    "webchat",
-			botID:       "my-bot",
+			botName:     "my-bot",
 			wantContain: "Bot soul.",
+		},
+		{
+			name: "empty botName skips bot-level",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				writeAgentConfigFile(t, dir, "webchat/SOUL.md", "Platform soul.")
+				writeAgentConfigFile(t, dir, "webchat/orphaned-bot/SOUL.md", "Orphaned soul.")
+				return dir
+			},
+			platform:    "webchat",
+			botID:       "orphaned-bot",
+			botName:     "",
+			wantContain: "Platform soul.",
 		},
 		{
 			name: "empty bot uses platform",
@@ -366,14 +379,15 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 			wantEmpty: true,
 		},
 		{
-			name: "path traversal rejected",
+			name: "path traversal rejected via botName",
 			setup: func(t *testing.T) string {
 				dir := t.TempDir()
 				writeAgentConfigFile(t, dir, "webchat/SOUL.md", "Platform soul.")
 				return dir
 			},
 			platform:  "webchat",
-			botID:     "../etc",
+			botID:     "some-bot",
+			botName:   "../etc",
 			wantEmpty: true,
 		},
 	}

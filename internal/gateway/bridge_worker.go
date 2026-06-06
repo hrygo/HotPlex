@@ -294,18 +294,16 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, 
 	if b.agentConfigDir == "" {
 		return
 	}
-	// Use botName for path resolution; fall back to botID for webchat/API compat.
-	effectiveName := botName
-	if effectiveName == "" && botID != "" {
-		effectiveName = botID
-	}
+	// botName is the YAML config name for agent-config path resolution.
+	// When empty (single-bot mode / webchat / API), bot-level lookup is skipped
+	// and resolution falls through to platform-level automatically.
 	injectExclude = b.resolveInjectExclude(platform, botID, injectExclude)
 	if unknown := agentconfig.ValidateExcludeList(injectExclude); len(unknown) > 0 {
 		b.log.Warn("bridge: inject_exclude contains unknown config files",
 			"unknown", unknown, "valid", agentconfig.KnownFiles())
 	}
 	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "exclude", injectExclude)
-	configs, err := agentconfig.Load(b.agentConfigDir, platform, effectiveName, injectExclude...)
+	configs, err := agentconfig.Load(b.agentConfigDir, platform, botName, injectExclude...)
 	if err != nil {
 		if errors.Is(err, agentconfig.ErrInvalidBotName) {
 			b.log.Error("bridge: agent config rejected",

@@ -43,6 +43,7 @@ func newTestStore(t *testing.T) *SQLiteStore {
 			payload_data     TEXT NOT NULL,
 			work_dir         TEXT NOT NULL DEFAULT '',
 			bot_id           TEXT NOT NULL DEFAULT '',
+			bot_name         TEXT NOT NULL DEFAULT '',
 			owner_id         TEXT NOT NULL DEFAULT '',
 			platform         TEXT NOT NULL DEFAULT '',
 			platform_key     TEXT NOT NULL DEFAULT '{}',

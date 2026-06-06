@@ -116,6 +116,7 @@ type CronJob struct {
 	Payload        CronPayload       `json:"payload"`
 	WorkDir        string            `json:"work_dir,omitempty"`
 	BotID          string            `json:"bot_id,omitempty"`
+	BotName        string            `json:"bot_name,omitempty"`
 	OwnerID        string            `json:"owner_id,omitempty"`
 	Platform       string            `json:"platform,omitempty"`
 	PlatformKey    map[string]string `json:"platform_key,omitempty"`

@@ -14,6 +14,8 @@ import (
 )
 
 // BridgeStarter is the narrow interface the executor needs from the gateway Bridge.
+// NOTE: The botName parameter is propagated from CronJob.BotName. If empty,
+// per-bot agent-config is unavailable for cron sessions (pre-existing limitation).
 type BridgeStarter interface {
 	StartSession(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error
 }
@@ -66,7 +68,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		wt = worker.TypeClaudeCode // Default
 	}
 
-	if err := e.bridge.StartSession(ctx, sessionKey, job.OwnerID, job.BotID, "",
+	if err := e.bridge.StartSession(ctx, sessionKey, job.OwnerID, job.BotID, job.BotName,
 		wt, job.Payload.AllowedTools, job.WorkDir,
 		job.Platform, platformKey, title, "",
 	); err != nil {

@@ -43,12 +43,12 @@ func (s *pgStore) Create(ctx context.Context, job *CronJob) error {
 	}
 
 	query := s.dialect.Rebind(`INSERT INTO cron_jobs (` + jobColumns + `)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 
 	_, err = s.db.ExecContext(ctx, query,
 		job.ID, job.Name, job.Description, s.dialect.BoolValue(job.Enabled),
 		job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-		job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
+		job.WorkDir, job.BotID, job.BotName, job.OwnerID, job.Platform, platformKeyData,
 		job.TimeoutSec, s.dialect.BoolValue(job.DeleteAfterRun), s.dialect.BoolValue(job.Silent),
 		job.MaxRetries, job.MaxRuns, job.ExpiresAt,
 		stateData, job.CreatedAtMs, job.UpdatedAtMs,
@@ -71,7 +71,7 @@ func (s *pgStore) Update(ctx context.Context, job *CronJob) error {
 	query := s.dialect.Rebind(`UPDATE cron_jobs SET
 		name = ?, description = ?, enabled = ?,
 		schedule_kind = ?, schedule_data = ?, payload_kind = ?, payload_data = ?,
-		work_dir = ?, bot_id = ?, owner_id = ?, platform = ?, platform_key = ?,
+		work_dir = ?, bot_id = ?, bot_name = ?, owner_id = ?, platform = ?, platform_key = ?,
 		timeout_sec = ?, delete_after_run = ?, silent = ?, max_retries = ?,
 		max_runs = ?, expires_at = ?,
 		state = ?, updated_at = ?
@@ -80,7 +80,7 @@ func (s *pgStore) Update(ctx context.Context, job *CronJob) error {
 	res, err := s.db.ExecContext(ctx, query,
 		job.Name, job.Description, s.dialect.BoolValue(job.Enabled),
 		job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-		job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
+		job.WorkDir, job.BotID, job.BotName, job.OwnerID, job.Platform, platformKeyData,
 		job.TimeoutSec, s.dialect.BoolValue(job.DeleteAfterRun), s.dialect.BoolValue(job.Silent),
 		job.MaxRetries, job.MaxRuns, job.ExpiresAt,
 		stateData, job.UpdatedAtMs,
@@ -222,7 +222,7 @@ func (s *pgStore) UpsertByName(ctx context.Context, job *CronJob) error {
 	job.UpdatedAtMs = time.Now().UnixMilli()
 
 	query := s.dialect.Rebind(`INSERT INTO cron_jobs (` + jobColumns + `)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (name) DO UPDATE SET
 			name = EXCLUDED.name,
 			description = EXCLUDED.description,
@@ -233,6 +233,7 @@ func (s *pgStore) UpsertByName(ctx context.Context, job *CronJob) error {
 			payload_data = EXCLUDED.payload_data,
 			work_dir = EXCLUDED.work_dir,
 			bot_id = EXCLUDED.bot_id,
+			bot_name = EXCLUDED.bot_name,
 			owner_id = EXCLUDED.owner_id,
 			platform = EXCLUDED.platform,
 			platform_key = EXCLUDED.platform_key,
@@ -249,7 +250,7 @@ func (s *pgStore) UpsertByName(ctx context.Context, job *CronJob) error {
 	_, err = s.db.ExecContext(ctx, query,
 		job.ID, job.Name, job.Description, s.dialect.BoolValue(job.Enabled),
 		job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-		job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
+		job.WorkDir, job.BotID, job.BotName, job.OwnerID, job.Platform, platformKeyData,
 		job.TimeoutSec, s.dialect.BoolValue(job.DeleteAfterRun), s.dialect.BoolValue(job.Silent),
 		job.MaxRetries, job.MaxRuns, job.ExpiresAt,
 		stateData, job.CreatedAtMs, job.UpdatedAtMs,
@@ -279,7 +280,7 @@ func scanJobRowPG(s scanner) (*CronJob, error) {
 	err := s.Scan(
 		&job.ID, &job.Name, &job.Description, &enabled,
 		&job.Schedule.Kind, &schedData, &job.Payload.Kind, &payloadData,
-		&job.WorkDir, &job.BotID, &job.OwnerID, &job.Platform, &platformKeyData,
+		&job.WorkDir, &job.BotID, &job.BotName, &job.OwnerID, &job.Platform, &platformKeyData,
 		&job.TimeoutSec, &deleteAfterRun, &silent, &job.MaxRetries, &job.MaxRuns, &job.ExpiresAt,
 		&stateData, &job.CreatedAtMs, &job.UpdatedAtMs,
 	)

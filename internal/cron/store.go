@@ -51,7 +51,7 @@ func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 
 const jobColumns = `id, name, description, enabled,
 		schedule_kind, schedule_data, payload_kind, payload_data,
-		work_dir, bot_id, owner_id, platform, platform_key,
+		work_dir, bot_id, bot_name, owner_id, platform, platform_key,
 		timeout_sec, delete_after_run, silent, max_retries, max_runs, expires_at,
 		state, created_at, updated_at`
 
@@ -217,10 +217,10 @@ func (s *SQLiteStore) createLocked(ctx context.Context, job *CronJob) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO cron_jobs (`+jobColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Name, job.Description, boolToInt(job.Enabled),
 		job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-		job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
+		job.WorkDir, job.BotID, job.BotName, job.OwnerID, job.Platform, platformKeyData,
 		job.TimeoutSec, boolToInt(job.DeleteAfterRun), boolToInt(job.Silent), job.MaxRetries, job.MaxRuns, job.ExpiresAt,
 		stateData, job.CreatedAtMs, job.UpdatedAtMs,
 	)
@@ -240,14 +240,14 @@ func (s *SQLiteStore) updateLocked(ctx context.Context, job *CronJob) error {
 		UPDATE cron_jobs SET
 			name = ?, description = ?, enabled = ?,
 			schedule_kind = ?, schedule_data = ?, payload_kind = ?, payload_data = ?,
-			work_dir = ?, bot_id = ?, owner_id = ?, platform = ?, platform_key = ?,
+			work_dir = ?, bot_id = ?, bot_name = ?, owner_id = ?, platform = ?, platform_key = ?,
 			timeout_sec = ?, delete_after_run = ?, silent = ?, max_retries = ?,
 			max_runs = ?, expires_at = ?,
 			state = ?, updated_at = ?
 		WHERE id = ?`,
 		job.Name, job.Description, boolToInt(job.Enabled),
 		job.Schedule.Kind, schedData, job.Payload.Kind, payloadData,
-		job.WorkDir, job.BotID, job.OwnerID, job.Platform, platformKeyData,
+		job.WorkDir, job.BotID, job.BotName, job.OwnerID, job.Platform, platformKeyData,
 		job.TimeoutSec, boolToInt(job.DeleteAfterRun), boolToInt(job.Silent), job.MaxRetries,
 		job.MaxRuns, job.ExpiresAt,
 		stateData, job.UpdatedAtMs,
@@ -281,7 +281,7 @@ func scanJobRow(s scanner) (*CronJob, error) {
 	err := s.Scan(
 		&job.ID, &job.Name, &job.Description, &enabled,
 		&job.Schedule.Kind, &schedData, &job.Payload.Kind, &payloadData,
-		&job.WorkDir, &job.BotID, &job.OwnerID, &job.Platform, &platformKeyData,
+		&job.WorkDir, &job.BotID, &job.BotName, &job.OwnerID, &job.Platform, &platformKeyData,
 		&job.TimeoutSec, &deleteAfterRun, &silent, &job.MaxRetries, &job.MaxRuns, &job.ExpiresAt,
 		&stateData, &job.CreatedAtMs, &job.UpdatedAtMs,
 	)
@@ -309,6 +309,7 @@ func copyJobDefinition(dst, src *CronJob) {
 	dst.Description = src.Description
 	dst.WorkDir = src.WorkDir
 	dst.BotID = src.BotID
+	dst.BotName = src.BotName
 	dst.OwnerID = src.OwnerID
 	dst.Platform = src.Platform
 	dst.PlatformKey = src.PlatformKey
