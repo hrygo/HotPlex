@@ -199,10 +199,11 @@ db:
 | `tls_enabled` | bool | `false` | — | 是否启用 TLS。非 localhost 地址时强烈建议开启 |
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径 |
-| `allowed_origins` | []string | `["*"]` | — | WebSocket CORS 允许的 Origin 列表 |
+| `allowed_origins` | []string | `["*"]` | `HOTPLEX_SECURITY_ALLOWED_ORIGINS` | CORS 允许的 Origin 列表，覆盖 Gateway API、Admin API 和 WebSocket 连接。通配符 `*` 允许所有来源；指定域名时回显匹配的 Origin 并设置 `Vary: Origin` 头 |
 | `work_dir_allowed_base_patterns` | []string | `[]` | — | 额外的工作目录白名单模式。支持 `~` 和 `${VAR}` 展开。程序内建默认值：`~/.hotplex/workspace`、`~/workspace`、`~/projects`、`~/work`、`~/dev`、`/var/hotplex/projects` |
 | `work_dir_forbidden_dirs` | []string | `[]` | — | 额外的工作目录黑名单。显式禁止的目录列表 |
 | `csp` | string | `""` | `HOTPLEX_SECURITY_CSP` | Content-Security-Policy 头覆盖，用于嵌入式 WebChat 和文档门户。空字符串使用内建默认值（适合 localhost）。远程部署时需设置，否则浏览器会阻止 fetch/ws/connect 调用 |
+| `security_contact` | string | `""` | `HOTPLEX_SECURITY_SECURITY_CONTACT` | 安全联系 URI，启用 `/.well-known/security.txt`（RFC 9116）。空字符串 = 禁用。示例：`mailto:security@example.com`、`https://example.com/security` |
 
 ---
 
@@ -641,6 +642,7 @@ HotPlex 通过 `fsnotify` 监听配置文件变更，支持运行时热更新。
 | `pool.max_idle_per_user` | 每用户最大空闲 Session |
 | `security.api_keys` | API Key 列表 |
 | `security.allowed_origins` | CORS Origin 列表 |
+| `security.security_contact` | security.txt 联系方式 |
 | `worker.max_lifetime` | Worker 最大存活时间 |
 | `worker.idle_timeout` | Worker 空闲超时 |
 | `worker.execution_timeout` | 执行超时 |
@@ -769,6 +771,8 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_SECURITY_API_KEY_1..N` | `security.api_keys` | 编号后缀，支持轮换 |
 | `HOTPLEX_SECURITY_API_KEY_HEADER` | `security.api_key_header` | 默认 `X-API-Key` |
 | `HOTPLEX_SECURITY_CSP` | `security.csp` | Content-Security-Policy 头覆盖（空 = 内建默认） |
+| `HOTPLEX_SECURITY_ALLOWED_ORIGINS` | `security.allowed_origins` | 逗号分隔的 CORS Origin 列表 |
+| `HOTPLEX_SECURITY_SECURITY_CONTACT` | `security.security_contact` | 安全联系 URI，启用 `/.well-known/security.txt` |
 
 #### Agent Config
 
