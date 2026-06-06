@@ -67,7 +67,7 @@ func TestBridge_Shutdown_RejectNewSession(t *testing.T) {
 	b.Shutdown(context.Background())
 
 	// After shutdown, StartSession should be rejected.
-	err := b.StartSession(context.Background(), "sess-closed", "u", "b",
+	err := b.StartSession(context.Background(), "sess-closed", "u", "b", "",
 		worker.TypeClaudeCode, nil, "", "", nil, "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "shutdown")
@@ -317,6 +317,7 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 		setup       func(t *testing.T) string // returns config dir
 		platform    string
 		botID       string
+		configName  string
 		wantContain string
 		wantEmpty   bool
 	}{
@@ -392,7 +393,7 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 			})
 
 			info := &worker.SessionInfo{}
-			b.injectAgentConfig(info, tt.platform, tt.botID, nil)
+			b.injectAgentConfig(info, tt.platform, tt.configName, tt.botID, nil)
 
 			if tt.wantEmpty {
 				assert.Empty(t, info.SystemPrompt)
@@ -411,6 +412,7 @@ func TestInjectGatewayContext(t *testing.T) {
 		env         map[string]string
 		platform    string
 		botID       string
+		configName  string
 		userID      string
 		platformKey map[string]string
 		sessionID   string

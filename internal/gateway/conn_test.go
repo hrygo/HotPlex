@@ -1133,8 +1133,8 @@ type mockBridgeSM struct {
 	mock.Mock
 }
 
-func (m *mockBridgeSM) CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error) {
-	args := m.Called(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
+func (m *mockBridgeSM) CreateWithBot(ctx context.Context, id, userID, botID, configName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error) {
+	args := m.Called(ctx, id, userID, botID, configName, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -1425,7 +1425,7 @@ func TestBridge_StartSession_Success(t *testing.T) {
 		WorkerType: worker.TypeClaudeCode,
 		State:      events.StateCreated,
 	}
-	sm.On("CreateWithBot", mock.Anything, "sess_start", "user1", "", worker.TypeClaudeCode, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(sessionInfo, nil)
+	sm.On("CreateWithBot", mock.Anything, "sess_start", "user1", "", "", worker.TypeClaudeCode, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(sessionInfo, nil)
 	sm.On("AttachWorker", "sess_start", mock.Anything).Return(nil)
 	sm.On("Transition", mock.Anything, "sess_start", events.StateRunning).Return(nil)
 
@@ -1445,7 +1445,7 @@ func TestBridge_StartSession_Success(t *testing.T) {
 	// we replace it after construction (field injection for tests).
 	b.wf = wf
 
-	err := b.StartSession(ctx, "sess_start", "user1", "", worker.TypeClaudeCode, nil, "", "", nil, "", "")
+	err := b.StartSession(ctx, "sess_start", "user1", "", "", worker.TypeClaudeCode, nil, "", "", nil, "", "")
 	require.NoError(t, err, "StartSession should succeed")
 
 	sm.AssertExpectations(t)
@@ -1457,7 +1457,7 @@ func TestBridge_StartSession_CreateFails(t *testing.T) {
 	sm := &mockBridgeSM{Mock: mock.Mock{}}
 	sm.Test(t)
 
-	sm.On("CreateWithBot", mock.Anything, "sess_fail", "user1", "", worker.TypeClaudeCode, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	sm.On("CreateWithBot", mock.Anything, "sess_fail", "user1", "", "", worker.TypeClaudeCode, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, errors.New("create failed"))
 
 	h := newTestHub(t)
@@ -1465,7 +1465,7 @@ func TestBridge_StartSession_CreateFails(t *testing.T) {
 	// Inject a worker factory that would fail if Start were called.
 	b.wf = &failingWorkerFactory{}
 
-	err := b.StartSession(context.Background(), "sess_fail", "user1", "", worker.TypeClaudeCode, nil, "", "", nil, "", "")
+	err := b.StartSession(context.Background(), "sess_fail", "user1", "", "", worker.TypeClaudeCode, nil, "", "", nil, "", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "create failed")
 

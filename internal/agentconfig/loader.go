@@ -30,25 +30,26 @@ const MaxTotalChars = 40_000
 
 // Load reads all config files from dir using 3-level per-file fallback:
 //
-//  1. dir/{platform}/{botID}/{file}    — bot-level (highest priority)
-//  2. dir/{platform}/{file}            — platform-level
-//  3. dir/{file}                       — global-level
+//  1. dir/{platform}/{configName}/{file} — bot-level (highest priority)
+//  2. dir/{platform}/{file}             — platform-level
+//  3. dir/{file}                        — global-level
 //
 // Each file resolves independently. Missing files fall through to the next level.
 // Platform can be "slack", "feishu", "webchat", or "" (no platform-level lookup).
-// botID is used directly as directory name (e.g., Slack UserID, Feishu OpenID).
+// configName is the YAML config name (e.g., "my-bot"). When empty (single-bot mode),
+// bot-level lookup is skipped and resolution falls through to platform-level.
 // injectExclude lists file base names to skip (e.g., ["SOUL.md", "MEMORY.md"]).
 // Files listed in injectExclude are not loaded; their corresponding config fields
 // remain empty. META-COGNITION.md is never excluded (go:embed, always injected).
 // Returns AgentConfigs with frontmatter stripped and size limits enforced.
-func Load(dir, platform, botID string, injectExclude ...string) (*AgentConfigs, error) {
+func Load(dir, platform, configName string, injectExclude ...string) (*AgentConfigs, error) {
 	if dir == "" {
 		return &AgentConfigs{}, nil
 	}
 
-	// Path safety: botID must not contain path traversal components.
-	if botID != "" && filepath.Base(botID) != botID {
-		return nil, fmt.Errorf("agentconfig: invalid botID %q: path separators not allowed", botID)
+	// Path safety: configName must not contain path traversal components.
+	if configName != "" && filepath.Base(configName) != configName {
+		return nil, fmt.Errorf("agentconfig: invalid configName %q: path separators not allowed", configName)
 	}
 
 	c := &AgentConfigs{}
@@ -58,7 +59,7 @@ func Load(dir, platform, botID string, injectExclude ...string) (*AgentConfigs, 
 		if shouldExclude(baseName, injectExclude) {
 			return nil
 		}
-		content, err := resolveFile(dir, platform, botID, baseName)
+		content, err := resolveFile(dir, platform, configName, baseName)
 		if err != nil {
 			return err
 		}
@@ -159,10 +160,10 @@ func HasGlobalFiles(dir string) bool {
 // Non-NotExist I/O errors (e.g., permission denied) are propagated immediately
 // rather than falling through — a file that exists but is unreadable indicates
 // a real configuration problem that should not be silently masked.
-func resolveFile(dir, platform, botID, fileName string) (string, error) {
-	// 1. Bot-level: dir/platform/botID/fileName
-	if botID != "" && platform != "" {
-		content, err := readFile(filepath.Join(dir, platform, botID), fileName)
+func resolveFile(dir, platform, configName, fileName string) (string, error) {
+	// 1. Bot-level: dir/platform/configName/fileName
+	if configName != "" && platform != "" {
+		content, err := readFile(filepath.Join(dir, platform, configName), fileName)
 		if err != nil {
 			return "", err
 		}

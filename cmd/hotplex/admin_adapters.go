@@ -95,7 +95,7 @@ type bridgeAdapter struct {
 }
 
 func (a *bridgeAdapter) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error {
-	return a.bridge.StartSession(ctx, id, userID, botID, wt, allowedTools, workDir, platform, platformKey, title, clientKey, injectExclude...)
+	return a.bridge.StartSession(ctx, id, userID, botID, "", wt, allowedTools, workDir, platform, platformKey, title, clientKey, injectExclude...)
 }
 
 type configAdapter struct {
@@ -127,7 +127,7 @@ func toAdminBotEntry(e *messaging.BotEntry) admin.BotEntry {
 		// Fallback when platform BotID is not yet available (adapter not started).
 		// Use platform:name to guarantee uniqueness across platforms.
 		// NOTE: assumes bot Name does not contain colons — safe for Slack/Feishu
-		// auto-generated names ("default") and all known platform bot name formats.
+		// auto-generated names ("") and all known platform bot name formats.
 		botID = string(e.Platform) + ":" + e.Name
 	}
 	return admin.BotEntry{

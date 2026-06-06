@@ -848,7 +848,7 @@ func TestNormalizeSlackBots(t *testing.T) {
 		cfg := &SlackConfig{BotToken: "xoxb-aaa", AppToken: "xapp-bbb"}
 		normalizeSlackBots(cfg)
 		require.Len(t, cfg.Bots, 1)
-		require.Equal(t, "default", cfg.Bots[0].Name)
+		require.Equal(t, "", cfg.Bots[0].Name)
 		require.Equal(t, "xoxb-aaa", cfg.Bots[0].BotToken)
 		require.Equal(t, "xapp-bbb", cfg.Bots[0].AppToken)
 	})
@@ -884,7 +884,7 @@ func TestNormalizeFeishuBots(t *testing.T) {
 		cfg := &FeishuConfig{AppID: "cli_xxx", AppSecret: "secret"}
 		normalizeFeishuBots(cfg)
 		require.Len(t, cfg.Bots, 1)
-		require.Equal(t, "default", cfg.Bots[0].Name)
+		require.Equal(t, "", cfg.Bots[0].Name)
 		require.Equal(t, "cli_xxx", cfg.Bots[0].AppID)
 		require.Equal(t, "secret", cfg.Bots[0].AppSecret)
 	})

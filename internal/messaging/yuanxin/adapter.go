@@ -50,6 +50,7 @@ var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 var _ messaging.CronResultSender = (*Adapter)(nil)
 
 func (a *Adapter) GetBotID() string           { return a.appID }
+func (a *Adapter) GetConfigName() string      { return "" }
 func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
 
 // ConfigureWith initializes adapter fields. Must be called before Start;

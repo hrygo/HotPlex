@@ -125,7 +125,7 @@ func TestLoad(t *testing.T) {
 		dir := t.TempDir()
 		_, err := Load(dir, "slack", "../etc")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid botID")
+		require.Contains(t, err.Error(), "invalid configName")
 	})
 
 	t.Run("path traversal with dots rejected", func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestLoad(t *testing.T) {
 		dir := t.TempDir()
 		_, err := Load(dir, "slack", "foo/bar")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid botID")
+		require.Contains(t, err.Error(), "invalid configName")
 	})
 
 	t.Run("empty file falls through to next level", func(t *testing.T) {

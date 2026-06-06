@@ -10,14 +10,14 @@ import (
 //
 //  1. dir/PHRASES.md (global, weight 2)
 //  2. dir/{platform}/PHRASES.md (platform, weight 1)
-//  3. dir/{platform}/{botID}/PHRASES.md (bot, weight 4)
+//  3. dir/{platform}/{configName}/PHRASES.md (bot, weight 4)
 //
 // Each level's entries are appended to the pool, never replaced.
 // Higher-level entries have higher selection weight in Random().
 // Code defaults (weight 1) are only included as fallback when no
 // external configuration exists for a given category.
 // Missing directory or file is not an error — skips gracefully.
-func Load(dir, platform, botID string) (*Phrases, error) {
+func Load(dir, platform, configName string) (*Phrases, error) {
 	type loadLevel struct {
 		path   string
 		weight int
@@ -28,12 +28,12 @@ func Load(dir, platform, botID string) (*Phrases, error) {
 		{filepath.Join(dir, platform, "PHRASES.md"), WeightPlatform},
 	}
 
-	if botID != "" {
-		if filepath.Base(botID) != botID {
-			return nil, fmt.Errorf("phrases: invalid botID %q: path traversal detected", botID)
+	if configName != "" {
+		if filepath.Base(configName) != configName {
+			return nil, fmt.Errorf("phrases: invalid configName %q: path traversal detected", configName)
 		}
 		levels = append(levels, loadLevel{
-			path:   filepath.Join(dir, platform, botID, "PHRASES.md"),
+			path:   filepath.Join(dir, platform, configName, "PHRASES.md"),
 			weight: WeightBot,
 		})
 	}

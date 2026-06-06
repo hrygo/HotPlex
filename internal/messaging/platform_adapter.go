@@ -79,3 +79,7 @@ func (a *PlatformAdapter) CloseSharedState() {
 // GetInjectExclude returns nil by default. Adapters that support per-bot inject_exclude
 // should override this method or embed the value from their Extras.
 func (a *PlatformAdapter) GetInjectExclude() []string { return nil }
+
+// GetConfigName returns "" by default. Adapters that support multi-bot config names
+// should override this method. Returns "" for single-bot mode (use platform-level directory).
+func (a *PlatformAdapter) GetConfigName() string { return "" }

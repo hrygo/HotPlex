@@ -41,6 +41,7 @@ type Adapter struct {
 	wsClient           *ws.Client
 	larkClient         *lark.Client
 	botOpenID          string
+	configName         string // YAML config name for agent-config path resolution
 	injectExclude      []string
 	transcriber        Transcriber
 	turnSummaryEnabled bool
@@ -59,6 +60,7 @@ func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformF
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 
 func (a *Adapter) GetBotID() string           { return a.botOpenID }
+func (a *Adapter) GetConfigName() string      { return a.configName }
 func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
 
 func (a *Adapter) SetPhrases(p *phrases.Phrases) {
@@ -77,6 +79,9 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 	// Feishu-specific: credentials.
 	a.appID = config.ExtrasString("app_id")
 	a.appSecret = config.ExtrasString("app_secret")
+
+	// Store YAML config name for agent-config path resolution.
+	a.configName = config.BotName
 
 	// Platform-specific extras.
 	if t, ok := config.Extras["transcriber"].(Transcriber); ok && t != nil {

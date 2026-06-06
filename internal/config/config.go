@@ -962,7 +962,8 @@ func propagatePlatform(p *MessagingPlatformConfig, msg *MessagingConfig) {
 
 // normalizeSlackBots resolves SlackConfig to a unified Bots slice.
 // If Bots is already populated, it takes precedence.
-// If Bots is empty but top-level BotToken is set, auto-wraps as a single "default" bot.
+// If Bots is empty but top-level BotToken is set, auto-wraps as a single bot
+// with empty name (single-bot mode → agent-config uses platform-level directory).
 func normalizeSlackBots(cfg *SlackConfig) {
 	if len(cfg.Bots) > 0 {
 		return
@@ -971,7 +972,7 @@ func normalizeSlackBots(cfg *SlackConfig) {
 		return
 	}
 	cfg.Bots = []SlackBotConfig{
-		{Name: "default", BotToken: cfg.BotToken, AppToken: cfg.AppToken},
+		{Name: "", BotToken: cfg.BotToken, AppToken: cfg.AppToken},
 	}
 }
 
@@ -985,7 +986,7 @@ func normalizeFeishuBots(cfg *FeishuConfig) {
 		return
 	}
 	cfg.Bots = []FeishuBotConfig{
-		{Name: "default", AppID: cfg.AppID, AppSecret: cfg.AppSecret},
+		{Name: "", AppID: cfg.AppID, AppSecret: cfg.AppSecret},
 	}
 }
 

@@ -29,7 +29,7 @@ type mockAPISM struct {
 	mock.Mock
 }
 
-func (m *mockAPISM) CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir string, title string, clientKey string) (*session.SessionInfo, error) {
+func (m *mockAPISM) CreateWithBot(ctx context.Context, id, userID, botID, _ string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir string, title string, clientKey string) (*session.SessionInfo, error) {
 	args := m.Called(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -115,7 +115,7 @@ type mockAPIBridge struct {
 	mock.Mock
 }
 
-func (m *mockAPIBridge) StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title, clientKey string, _ ...string) error {
+func (m *mockAPIBridge) StartSession(ctx context.Context, id, userID, botID, _ string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title, clientKey string, _ ...string) error {
 	return m.Called(ctx, id, userID, botID, wt, allowedTools, workDir, platform, platformKey, title, clientKey).Error(0)
 }
 

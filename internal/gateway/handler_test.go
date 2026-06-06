@@ -867,7 +867,7 @@ func (m *mockInputSM) GetWorker(id string) worker.Worker {
 	}
 	return args.Get(0).(worker.Worker)
 }
-func (m *mockInputSM) CreateWithBot(_ context.Context, _ string, _ string, _ string, _ worker.WorkerType, _ []string, _ string, _ map[string]string, _ string, _ string, _ string) (*session.SessionInfo, error) {
+func (m *mockInputSM) CreateWithBot(_ context.Context, _ string, _ string, _ string, _ string, _ worker.WorkerType, _ []string, _ string, _ map[string]string, _ string, _ string, _ string) (*session.SessionInfo, error) {
 	return nil, nil
 }
 func (m *mockInputSM) Delete(_ context.Context, _ string) error         { return nil }
