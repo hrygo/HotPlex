@@ -272,13 +272,12 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 
 			// Hint: global agent-config files without bot-level directory.
 			if appCfg.AgentConfig.Enabled && appCfg.AgentConfig.ConfigDir != "" {
-				if botID := adapter.GetBotID(); botID != "" {
-					botDir := filepath.Join(appCfg.AgentConfig.ConfigDir, string(pt), botID)
+				if entry.Name != "" {
+					botDir := filepath.Join(appCfg.AgentConfig.ConfigDir, string(pt), entry.Name)
 					if _, err := os.Stat(botDir); os.IsNotExist(err) && agentconfig.HasGlobalFiles(appCfg.AgentConfig.ConfigDir) {
 						log.Warn("agent-config: global files found but no bot-level directory",
 							"platform", pt,
 							"bot", entry.Name,
-							"bot_id", botID,
 							"bot_dir", botDir)
 					}
 				}

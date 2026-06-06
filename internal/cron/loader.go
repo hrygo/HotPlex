@@ -16,6 +16,7 @@ type YAMLJobDef struct {
 	Prompt         string   `mapstructure:"prompt" yaml:"prompt"`
 	WorkDir        string   `mapstructure:"work_dir" yaml:"work_dir"`
 	BotID          string   `mapstructure:"bot_id" yaml:"bot_id"`
+	BotName        string   `mapstructure:"bot_name" yaml:"bot_name"`
 	OwnerID        string   `mapstructure:"owner_id" yaml:"owner_id"`
 	Platform       string   `mapstructure:"platform" yaml:"platform"`
 	TimeoutSec     int      `mapstructure:"timeout_sec" yaml:"timeout_sec"`
@@ -104,6 +105,7 @@ func yamlDefToJob(def YAMLJobDef) (*CronJob, error) {
 		},
 		WorkDir:        def.WorkDir,
 		BotID:          def.BotID,
+		BotName:        def.BotName,
 		OwnerID:        def.OwnerID,
 		Platform:       def.Platform,
 		PlatformKey:    map[string]string{},
