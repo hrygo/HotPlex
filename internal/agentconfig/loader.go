@@ -51,9 +51,8 @@ func Load(dir, platform, botName string, injectExclude ...string) (*AgentConfigs
 		return &AgentConfigs{}, nil
 	}
 
-	// Path safety: botName must not contain path separators or traversal components.
-	if botName != "" && (filepath.Base(botName) != botName || botName == "." || botName == "..") {
-		return nil, fmt.Errorf("%w: %q: path traversal not allowed", ErrInvalidBotName, botName)
+	if err := ValidateBotName(botName); err != nil {
+		return nil, err
 	}
 
 	c := &AgentConfigs{}

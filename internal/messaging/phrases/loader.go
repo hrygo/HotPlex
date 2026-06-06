@@ -1,14 +1,16 @@
 package phrases
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/hrygo/hotplex/internal/agentconfig"
 )
 
-// ErrInvalidBotName is returned when botName contains path traversal components.
-var ErrInvalidBotName = errors.New("phrases: invalid botName")
+// ErrInvalidBotName is an alias for agentconfig.ErrInvalidBotName.
+// Kept for backward compatibility; validation is delegated to agentconfig.ValidateBotName.
+var ErrInvalidBotName = agentconfig.ErrInvalidBotName
 
 // Load reads PHRASES.md from all levels with cascade-append:
 //
@@ -33,11 +35,19 @@ func Load(dir, platform, botName string) (*Phrases, error) {
 	}
 
 	if botName != "" {
-		if filepath.Base(botName) != botName || botName == "." || botName == ".." {
-			return nil, fmt.Errorf("%w: %q: path traversal detected", ErrInvalidBotName, botName)
+		if err := agentconfig.ValidateBotName(botName); err != nil {
+			return nil, err
 		}
 		levels = append(levels, loadLevel{
 			path:   filepath.Join(dir, platform, botName, "PHRASES.md"),
+			weight: WeightBot,
+		})
+	} else if platform != "" {
+		// Legacy backward compat: before PR #679, single-bot mode used "default"
+		// as botName. If a user created phrases under {platform}/default/ between
+		// #678 and #679, this fallback ensures they are still discovered.
+		levels = append(levels, loadLevel{
+			path:   filepath.Join(dir, platform, "default", "PHRASES.md"),
 			weight: WeightBot,
 		})
 	}

@@ -267,10 +267,8 @@ func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Wor
 
 // resolveInjectExclude returns the inject_exclude list for a platform, falling
 // back from the per-session value to the platform/global default in the atomic
-// config map. botID is reserved for future per-bot resolution (currently unused
-// because per-bot excludes are resolved at adapter time and not persisted in
-// the session record). Used by injectAgentConfig and crash recovery paths.
-func (b *Bridge) resolveInjectExclude(platform, _ string, perSession []string) []string {
+// config map. Used by injectAgentConfig and crash recovery paths.
+func (b *Bridge) resolveInjectExclude(platform string, perSession []string) []string {
 	if perSession != nil {
 		return perSession
 	}
@@ -297,7 +295,7 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, 
 	// botName is the YAML config name for agent-config path resolution.
 	// When empty (single-bot mode / webchat / API), bot-level lookup is skipped
 	// and resolution falls through to platform-level automatically.
-	injectExclude = b.resolveInjectExclude(platform, botID, injectExclude)
+	injectExclude = b.resolveInjectExclude(platform, injectExclude)
 	if unknown := agentconfig.ValidateExcludeList(injectExclude); len(unknown) > 0 {
 		b.log.Warn("bridge: inject_exclude contains unknown config files",
 			"unknown", unknown, "valid", agentconfig.KnownFiles())

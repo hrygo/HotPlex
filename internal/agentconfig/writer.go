@@ -13,8 +13,8 @@ func ResolveFilePath(dir, platform, botName, fileName string) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("agentconfig: empty dir")
 	}
-	if botName != "" && (filepath.Base(botName) != botName || botName == "." || botName == "..") {
-		return "", fmt.Errorf("%w: %q: path traversal not allowed", ErrInvalidBotName, botName)
+	if err := ValidateBotName(botName); err != nil {
+		return "", err
 	}
 
 	var parent string
