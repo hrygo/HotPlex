@@ -17,6 +17,10 @@ import (
 // ErrInvalidBotName is returned when botName contains path traversal components.
 var ErrInvalidBotName = errors.New("agentconfig: invalid botName")
 
+// LegacyDefaultBotName is the directory name used for single-bot agent-config
+// before PR #679. Kept for backward compatibility during migration.
+const LegacyDefaultBotName = "default"
+
 // AgentConfigs holds loaded content for all agent config files.
 type AgentConfigs struct {
 	Soul   string // SOUL.md   (B channel)
@@ -189,7 +193,7 @@ func resolveFile(dir, platform, botName, fileName string) (string, error) {
 		// fallback ensures they are still discovered. New deployments should use
 		// platform-level (dir/platform/fileName) instead.
 		if botName == "" {
-			content, err := readFile(filepath.Join(dir, platform, "default"), fileName)
+			content, err := readFile(filepath.Join(dir, platform, LegacyDefaultBotName), fileName)
 			if err != nil {
 				return "", err
 			}

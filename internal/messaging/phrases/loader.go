@@ -2,14 +2,15 @@ package phrases
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/hrygo/hotplex/internal/agentconfig"
 )
 
-// ErrInvalidBotName is an alias for agentconfig.ErrInvalidBotName.
-// Kept for backward compatibility; validation is delegated to agentconfig.ValidateBotName.
+// ErrInvalidBotName aliases agentconfig.ErrInvalidBotName so callers of
+// phrases.Load can use errors.Is without importing agentconfig directly.
 var ErrInvalidBotName = agentconfig.ErrInvalidBotName
 
 // Load reads PHRASES.md from all levels with cascade-append:
@@ -46,10 +47,15 @@ func Load(dir, platform, botName string) (*Phrases, error) {
 		// Legacy backward compat: before PR #679, single-bot mode used "default"
 		// as botName. If a user created phrases under {platform}/default/ between
 		// #678 and #679, this fallback ensures they are still discovered.
-		levels = append(levels, loadLevel{
-			path:   filepath.Join(dir, platform, "default", "PHRASES.md"),
-			weight: WeightBot,
-		})
+		legacyPath := filepath.Join(dir, platform, agentconfig.LegacyDefaultBotName, "PHRASES.md")
+		if _, err := os.Stat(legacyPath); err == nil {
+			slog.Warn("phrases: legacy default/ directory detected; move files to platform-level",
+				"platform", platform)
+			levels = append(levels, loadLevel{
+				path:   legacyPath,
+				weight: WeightBot,
+			})
+		}
 	}
 
 	// Collect external entries by category.

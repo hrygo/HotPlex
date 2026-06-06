@@ -92,6 +92,13 @@ func ResolvedSource(dir, platform, botName, fileName string) string {
 		if _, err := os.Stat(p); err == nil {
 			return "platform"
 		}
+		// 2b. Legacy backward compat: dir/platform/default/fileName
+		if botName == "" {
+			p := filepath.Join(dir, platform, LegacyDefaultBotName, fileName)
+			if _, err := os.Stat(p); err == nil {
+				return "bot"
+			}
+		}
 	}
 	// 3. Global-level
 	p := filepath.Join(dir, fileName)
