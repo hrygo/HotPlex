@@ -96,7 +96,7 @@ func ResolvedSource(dir, platform, botName, fileName string) string {
 		if botName == "" {
 			p := filepath.Join(dir, platform, LegacyDefaultBotName, fileName)
 			if _, err := os.Stat(p); err == nil {
-				return "bot"
+				return "legacy"
 			}
 		}
 	}
