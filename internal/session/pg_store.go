@@ -69,7 +69,7 @@ func (s *pgStore) Upsert(ctx context.Context, info *SessionInfo) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, s.queries["sessions.upsert_session"],
-		info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
+		info.ID, info.UserID, info.OwnerID, info.BotID, info.BotName, info.WorkerSessionID, info.WorkerType, string(info.State),
 		info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
 		info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
 		string(ctxJSON), info.Source, info.ClientKey,

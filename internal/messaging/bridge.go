@@ -96,13 +96,13 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 		}
 		var botID string
 		var injectExclude []string
-		var configName string
+		var botName string
 		if a := b.getAdapter(); a != nil {
 			botID = a.GetBotID()
 			injectExclude = a.GetInjectExclude()
-			configName = a.GetConfigName()
+			botName = a.GetBotName()
 		}
-		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, b.sandbox, platform, platformKey, botID, configName, injectExclude...); err != nil {
+		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, b.sandbox, platform, platformKey, botID, botName, injectExclude...); err != nil {
 			return fmt.Errorf("messaging bridge: session start failed: %w", err)
 		}
 	}

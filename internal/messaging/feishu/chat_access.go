@@ -85,11 +85,11 @@ func (a *Adapter) sendWelcomeCard(ctx context.Context, chatID string, accessType
 	if text == "" {
 		text = "Hi，我是 {bot_name}，你的 AI 编程助手！"
 	}
-	text = strings.ReplaceAll(text, "{bot_name}", a.resolveBotName())
+	text = strings.ReplaceAll(text, "{bot_name}", a.resolveDisplayName())
 	body := buildWelcomeBody(text, a.phrases)
 
 	cardJSON := buildCard(
-		cardHeader{Title: a.resolveBotName(), Template: headerBlue},
+		cardHeader{Title: a.resolveDisplayName(), Template: headerBlue},
 		map[string]any{"wide_screen_mode": true},
 		[]map[string]any{{"tag": "markdown", "content": body}},
 	)

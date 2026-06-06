@@ -136,7 +136,7 @@ func (m *mockBotIDAdapter) ConfigureWith(_ AdapterConfig) error { return nil }
 func (m *mockBotIDAdapter) GetBotID() string                    { return m.botID }
 func (m *mockBotIDAdapter) GetInjectExclude() []string          { return nil }
 
-func (m *mockBotIDAdapter) GetConfigName() string { return "" }
+func (m *mockBotIDAdapter) GetBotName() string { return "" }
 
 // mockHandler implements HandlerInterface.
 type mockHandler struct{}
@@ -145,12 +145,12 @@ func (m *mockHandler) Handle(_ context.Context, _ *events.Envelope) error { retu
 
 // mockStarter captures botID passed to StartPlatformSession.
 type mockStarter struct {
-	startFn func(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID, configName string) error
+	startFn func(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID, botName string) error
 }
 
-func (s *mockStarter) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID, configName string, _ ...string) error {
+func (s *mockStarter) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID, botName string, _ ...string) error {
 	if s.startFn != nil {
-		return s.startFn(ctx, sessionID, ownerID, workerType, workDir, sandbox, platform, platformKey, botID, configName)
+		return s.startFn(ctx, sessionID, ownerID, workerType, workDir, sandbox, platform, platformKey, botID, botName)
 	}
 	return nil
 }

@@ -362,7 +362,7 @@ type SessionReader interface {
 
 // SessionLifecycle provides session creation and deletion.
 type SessionLifecycle interface {
-	CreateWithBot(ctx context.Context, id, userID, botID, configName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
 	Delete(ctx context.Context, id string) error
 	DeletePhysical(ctx context.Context, id string) error
 }

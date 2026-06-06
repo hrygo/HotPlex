@@ -317,7 +317,7 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 		setup       func(t *testing.T) string // returns config dir
 		platform    string
 		botID       string
-		configName  string
+		botName     string
 		wantContain string
 		wantEmpty   bool
 	}{
@@ -393,7 +393,7 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 			})
 
 			info := &worker.SessionInfo{}
-			b.injectAgentConfig(info, tt.platform, tt.configName, tt.botID, nil)
+			b.injectAgentConfig(info, tt.platform, tt.botName, tt.botID, nil)
 
 			if tt.wantEmpty {
 				assert.Empty(t, info.SystemPrompt)
@@ -412,7 +412,7 @@ func TestInjectGatewayContext(t *testing.T) {
 		env         map[string]string
 		platform    string
 		botID       string
-		configName  string
+		botName     string
 		userID      string
 		platformKey map[string]string
 		sessionID   string

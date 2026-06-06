@@ -37,7 +37,7 @@ type connSM interface {
 	Get(ctx context.Context, id string) (*session.SessionInfo, error)
 	GetWorker(id string) worker.Worker
 	Transition(ctx context.Context, id string, to events.SessionState) error
-	CreateWithBot(ctx context.Context, id, userID, botID, configName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
 	DeletePhysical(ctx context.Context, id string) error
 }
 
@@ -49,7 +49,7 @@ type connAuth interface {
 // SessionStarter initiates a worker session. It is the only Bridge capability
 // used by Conn (called once during the AEP init handshake).
 type SessionStarter interface {
-	StartSession(ctx context.Context, id, userID, botID, configName string,
+	StartSession(ctx context.Context, id, userID, botID, botName string,
 		wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string, clientKey string, injectExclude ...string) error
 	ResumeSession(ctx context.Context, id string, workDir string) error
 	SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir string) (*SwitchWorkDirResult, error)

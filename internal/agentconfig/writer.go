@@ -7,19 +7,19 @@ import (
 )
 
 // ResolveFilePath returns the bot-level path for a config file and ensures
-// the parent directory exists. It validates that configName contains no path
-// separators to prevent directory traversal.
-func ResolveFilePath(dir, platform, configName, fileName string) (string, error) {
+// the parent directory exists. It validates that botName contains no path
+// separators or traversal components.
+func ResolveFilePath(dir, platform, botName, fileName string) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("agentconfig: empty dir")
 	}
-	if configName != "" && filepath.Base(configName) != configName {
-		return "", fmt.Errorf("agentconfig: invalid configName %q: path separators not allowed", configName)
+	if botName != "" && (filepath.Base(botName) != botName || botName == "." || botName == "..") {
+		return "", fmt.Errorf("%w: %q: path traversal not allowed", ErrInvalidBotName, botName)
 	}
 
 	var parent string
-	if configName != "" && platform != "" {
-		parent = filepath.Join(dir, platform, configName)
+	if botName != "" && platform != "" {
+		parent = filepath.Join(dir, platform, botName)
 	} else if platform != "" {
 		parent = filepath.Join(dir, platform)
 	} else {
@@ -36,12 +36,12 @@ func ResolveFilePath(dir, platform, configName, fileName string) (string, error)
 // WriteFile atomically writes content to a bot-level config file.
 // It validates that content size does not exceed maxBytes, creates a temp
 // file in the same directory, writes content, then renames to the target path.
-func WriteFile(dir, platform, configName, fileName, content string, maxBytes int) error {
+func WriteFile(dir, platform, botName, fileName, content string, maxBytes int) error {
 	if len(content) > maxBytes {
 		return fmt.Errorf("agentconfig: content size %d exceeds limit %d", len(content), maxBytes)
 	}
 
-	target, err := ResolveFilePath(dir, platform, configName, fileName)
+	target, err := ResolveFilePath(dir, platform, botName, fileName)
 	if err != nil {
 		return err
 	}
@@ -78,10 +78,10 @@ func WriteFile(dir, platform, configName, fileName, content string, maxBytes int
 // ResolvedSource reports which level a config file resolves from by checking
 // os.Stat at each level in priority order. Returns "bot", "platform", "global",
 // or "" if the file is not found at any level.
-func ResolvedSource(dir, platform, configName, fileName string) string {
+func ResolvedSource(dir, platform, botName, fileName string) string {
 	// 1. Bot-level
-	if configName != "" && platform != "" {
-		p := filepath.Join(dir, platform, configName, fileName)
+	if botName != "" && platform != "" {
+		p := filepath.Join(dir, platform, botName, fileName)
 		if _, err := os.Stat(p); err == nil {
 			return "bot"
 		}

@@ -29,9 +29,9 @@ type PlatformAdapterInterface interface {
 	// GetBotID returns the platform bot identity (Slack UserID, Feishu OpenID, etc.).
 	GetBotID() string
 
-	// GetConfigName returns the YAML config name for agent-config path resolution.
+	// GetBotName returns the YAML config name for agent-config path resolution.
 	// Returns "" for single-bot mode (use platform-level directory).
-	GetConfigName() string
+	GetBotName() string
 
 	// GetInjectExclude returns the per-bot agent config files to skip from injection.
 	// Returns nil when no exclusion is configured (full injection).
@@ -57,5 +57,5 @@ type HandlerInterface interface {
 // SessionStarter creates a new gateway session for a platform message.
 // Implemented by gateway.Bridge and injected during wiring.
 type SessionStarter interface {
-	StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID, configName string, injectExclude ...string) error
+	StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID, botName string, injectExclude ...string) error
 }

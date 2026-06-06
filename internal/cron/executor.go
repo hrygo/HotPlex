@@ -15,7 +15,7 @@ import (
 
 // BridgeStarter is the narrow interface the executor needs from the gateway Bridge.
 type BridgeStarter interface {
-	StartSession(ctx context.Context, id, userID, botID, configName string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error
+	StartSession(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error
 }
 
 // SessionStateChecker polls session state for completion detection.

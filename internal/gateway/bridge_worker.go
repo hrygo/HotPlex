@@ -2,9 +2,9 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/agentconfig"
@@ -34,7 +34,7 @@ type workerLaunchParams struct {
 	workerInfo    worker.SessionInfo
 	platform      string
 	botID         string
-	configName    string
+	botName       string
 	forwardOpts   *forwardOpts
 	injectExclude []string // per-session agent config files to skip; nil = use platform default
 }
@@ -79,7 +79,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, fmt.Errorf("bridge: attach worker: %w", err)
 	}
 
-	b.injectAgentConfig(&params.workerInfo, params.platform, params.configName, params.botID, params.injectExclude)
+	b.injectAgentConfig(&params.workerInfo, params.platform, params.botName, params.botID, params.injectExclude)
 
 	if err := startFn(params.ctx, w, params.workerInfo); err != nil {
 		b.sm.DetachWorker(sid)
@@ -184,7 +184,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		workerInfo:    workerInfo,
 		platform:      si.Platform,
 		botID:         si.BotID,
-		configName:    si.ConfigName,
+		botName:       si.BotName,
 		forwardOpts:   &forwardOpts{workDir: p.workDir},
 		injectExclude: nil, // resolved by injectAgentConfig
 	},
@@ -290,12 +290,12 @@ func (b *Bridge) resolveInjectExclude(platform, _ string, perSession []string) [
 // is not configured.
 // injectExclude lists file base names to skip; when nil, falls back to the
 // platform-level default from the atomic config map.
-func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, configName, botID string, injectExclude []string) {
+func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, botID string, injectExclude []string) {
 	if b.agentConfigDir == "" {
 		return
 	}
-	// Use configName for path resolution; fall back to botID for webchat/API compat.
-	effectiveName := configName
+	// Use botName for path resolution; fall back to botID for webchat/API compat.
+	effectiveName := botName
 	if effectiveName == "" && botID != "" {
 		effectiveName = botID
 	}
@@ -304,29 +304,29 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, configNam
 		b.log.Warn("bridge: inject_exclude contains unknown config files",
 			"unknown", unknown, "valid", agentconfig.KnownFiles())
 	}
-	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "config_name", configName, "bot_id", botID, "exclude", injectExclude)
+	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "exclude", injectExclude)
 	configs, err := agentconfig.Load(b.agentConfigDir, platform, effectiveName, injectExclude...)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid") {
+		if errors.Is(err, agentconfig.ErrInvalidBotName) {
 			b.log.Error("bridge: agent config rejected",
-				"dir", b.agentConfigDir, "platform", platform, "config_name", configName, "bot_id", botID, "err", err)
+				"dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "err", err)
 		} else {
 			b.log.Warn("bridge: agent config load failed",
-				"dir", b.agentConfigDir, "platform", platform, "config_name", configName, "bot_id", botID, "err", err)
+				"dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "err", err)
 		}
 		return
 	}
 	if configs.IsEmpty() {
 		b.log.Warn("bridge: agent config empty, no files found",
-			"dir", b.agentConfigDir, "platform", platform, "config_name", configName, "bot_id", botID)
+			"dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID)
 		return
 	}
 
 	if prompt := agentconfig.BuildSystemPrompt(configs); prompt != "" {
 		info.SystemPrompt = prompt
-		b.log.Info("bridge: agent config injected", "prompt_len", len(prompt), "platform", platform, "config_name", configName, "bot_id", botID)
+		b.log.Info("bridge: agent config injected", "prompt_len", len(prompt), "platform", platform, "bot_name", botName, "bot_id", botID)
 	} else {
-		b.log.Debug("bridge: agent config loaded but prompt empty", "platform", platform, "config_name", configName, "bot_id", botID)
+		b.log.Debug("bridge: agent config loaded but prompt empty", "platform", platform, "bot_name", botName, "bot_id", botID)
 	}
 }
 

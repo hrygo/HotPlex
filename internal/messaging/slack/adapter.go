@@ -113,7 +113,7 @@ func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformS
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 
 func (a *Adapter) GetBotID() string           { return a.botID }
-func (a *Adapter) GetConfigName() string      { return a.botName }
+func (a *Adapter) GetBotName() string         { return a.botName }
 func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
 
 func (a *Adapter) SetPhrases(p *phrases.Phrases) {

@@ -88,7 +88,7 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 
 	return s.writeMu.WithLock(func() error {
 		_, err := s.db.ExecContext(ctx, queries["sessions.upsert_session"],
-			info.ID, info.UserID, info.OwnerID, info.BotID, info.WorkerSessionID, info.WorkerType, string(info.State),
+			info.ID, info.UserID, info.OwnerID, info.BotID, info.BotName, info.WorkerSessionID, info.WorkerType, string(info.State),
 			info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
 			info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
 			string(ctxJSON), info.Source, info.ClientKey,
@@ -109,7 +109,7 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 	var createdAt, updatedAt time.Time
 
 	err := sc.Scan(
-		&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State, &info.BotID,
+		&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State, &info.BotID, &info.BotName,
 		&info.Platform, &platformKeyStr, &info.WorkDir, &info.Title,
 		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON, &info.Source, &info.ClientKey,
 	)
