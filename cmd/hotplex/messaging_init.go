@@ -251,7 +251,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			// Must happen AFTER adapter.Start() so BotID is resolved from the platform.
 			homeDir, _ := os.UserHomeDir()
 			phrasesDir := filepath.Join(homeDir, ".hotplex", "phrases")
-			phr, phrasesErr := phrases.Load(phrasesDir, string(entry.Platform), entry.BotID)
+			phr, phrasesErr := phrases.Load(phrasesDir, string(entry.Platform), entry.Name)
 			if phrasesErr != nil {
 				log.Warn("phrases: load failed, using defaults", "error", phrasesErr)
 				phr = phrases.Defaults()

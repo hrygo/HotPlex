@@ -57,7 +57,7 @@ type HubProvider interface {
 // have no platform bot context (webchat/API sessions). This is intentional —
 // admin sessions use platform-level agent-config, never per-bot configs.
 type BridgeProvider interface {
-	StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error
+	StartSession(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error
 }
 
 type ConfigProvider interface {
