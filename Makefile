@@ -211,11 +211,11 @@ dev: dev-start
 	@echo ""
 
 dev-start:
-	@rm -f logs/*.log
 	@$(MAKE) gateway-start
 	@$(MAKE) webchat-dev || echo "  $(YELLOW)⚠$(RESET) Webchat skipped (run 'cd webchat && pnpm install' to fix)"
 
 dev-stop: webchat-stop gateway-stop
+	@rm -f logs/*.log
 	@echo "  $(GREEN)✓ Dev environment stopped$(RESET)"
 
 dev-status:
@@ -265,7 +265,7 @@ pg-reset:
 # Gateway
 # ─────────────────────────────────────────────────────────────────────────────
 
-gateway-start: build
+gateway-start:
 	@./scripts/dev.sh start gateway
 
 gateway-stop:

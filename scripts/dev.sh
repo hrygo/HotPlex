@@ -134,7 +134,6 @@ start_gateway() {
         fi
     fi
 
-    : > "$GATEWAY_LOG"
     "$binary" gateway start -c "$CONFIG" 2>> "$GATEWAY_LOG" &
     local bg_pid=$!
     echo $bg_pid > "$GATEWAY_PID"
@@ -200,14 +199,14 @@ tail_gateway() {
 # ── WebChat ────────────────────────────────────────────────────────────────────
 
 webchat_running() {
-    [[ -f "$WEBCHAT_PID" ]] && kill -0 "$(cat "$WEBCHAT_PID")" 2>/dev/null
+    [[ -f "$WEBCHAT_PID" ]] && kill -0 "$(read_pid "$WEBCHAT_PID")" 2>/dev/null
 }
 
 start_webchat() {
     mkdir -p "$LOG_DIR"
 
     if webchat_running; then
-        warn "Web-chat already running (PID $(cat "$WEBCHAT_PID"))"
+        warn "Web-chat already running (PID $(read_pid "$WEBCHAT_PID"))"
         return 0
     fi
 
@@ -252,7 +251,7 @@ stop_webchat() {
 
 status_webchat() {
     if webchat_running; then
-        echo -e "${GREEN}🟢 Web-chat running${NC} (PID $(cat "$WEBCHAT_PID")) → http://localhost:$WEBCHAT_PORT"
+        echo -e "${GREEN}🟢 Web-chat running${NC} (PID $(read_pid "$WEBCHAT_PID")) → http://localhost:$WEBCHAT_PORT"
     else
         local ghost; ghost=$(lsof -ti:"$WEBCHAT_PORT" 2>/dev/null || true)
         if [[ -n "$ghost" ]]; then
