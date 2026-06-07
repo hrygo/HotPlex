@@ -13,7 +13,7 @@
 │       └── PHRASES.md        # 特定 bot（权重 4，最高优先）
 └── slack/
     ├── PHRASES.md
-    └── U12345/
+    └── <botName>/
         └── PHRASES.md
 ```
 

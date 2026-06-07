@@ -8,12 +8,14 @@ func IntFloat(v any) int {
 }
 
 // ToInt64 converts any numeric value to int64.
-// Handles float64, int, int64, and json.Number.
+// Handles float64, int, int32, int64, and json.Number.
 func ToInt64(v any) int64 {
 	switch n := v.(type) {
 	case float64:
 		return int64(n)
 	case int:
+		return int64(n)
+	case int32:
 		return int64(n)
 	case int64:
 		return n
@@ -26,12 +28,14 @@ func ToInt64(v any) int64 {
 }
 
 // ToFloat64 converts any numeric value to float64.
-// Handles float64, int, int64, and json.Number.
+// Handles float64, int, int32, int64, and json.Number.
 func ToFloat64(v any) float64 {
 	switch n := v.(type) {
 	case float64:
 		return n
 	case int:
+		return float64(n)
+	case int32:
 		return float64(n)
 	case int64:
 		return float64(n)

@@ -13,7 +13,7 @@ description: "Cross-session context memory"
 此文件支持 3 级 fallback，高优先级完整替换低优先级：
 - 全局级：~/.hotplex/agent-configs/MEMORY.md（本文件）
 - 平台级：~/.hotplex/agent-configs/slack/MEMORY.md
-- Bot 级：~/.hotplex/agent-configs/slack/U12345/MEMORY.md
+- Bot 级：~/.hotplex/agent-configs/slack/<botName>/MEMORY.md
 
 使用 `hotplex-setup` skill 进行交互式个性化配置。修改后对新会话生效。
 

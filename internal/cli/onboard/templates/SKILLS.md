@@ -63,6 +63,6 @@ STT 自动转写语音为文本，等同文本处理。TTS 支持语音合成输
 此文件支持 3 级 fallback，高优先级完整替换低优先级：
 - 全局级：~/.hotplex/agent-configs/SKILLS.md（本文件）
 - 平台级：~/.hotplex/agent-configs/slack/SKILLS.md
-- Bot 级：~/.hotplex/agent-configs/slack/U12345/SKILLS.md
+- Bot 级：~/.hotplex/agent-configs/slack/<botName>/SKILLS.md
 
 使用 `hotplex-setup` skill 进行交互式个性化配置。修改后对新会话生效。

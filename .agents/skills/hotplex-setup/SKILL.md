@@ -218,7 +218,7 @@ bots[].worker_type → <platform>.worker_type → HOTPLEX_MESSAGING_<PLATFORM>_W
 3. 调整 SOUL.md 仅改用户明确要求的部分
 4. 展示 diff 确认后写入
 
-规则：幂等、最小变更、不覆盖已个性化内容。配置层级：全局 → 平台（slack/）→ Bot（slack/U12345/）。
+规则：幂等、最小变更、不覆盖已个性化内容。配置层级：全局 → 平台（slack/）→ Bot（slack/<botName>/）。
 
 ---
 
