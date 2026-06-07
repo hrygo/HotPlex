@@ -518,11 +518,11 @@ func CronDeliveryRetry() metric.Int64Counter {
 	cronDeliveryRetryInit.Do(func() {
 		var err error
 		cronDeliveryRetry, err = Meter().Int64Counter(
-			"hotplex.cron.delivery.retry",
+			"hotplex.cron.delivery.result",
 			metric.WithDescription("Cron delivery retry attempts by status (success|exhausted|permanent)"),
 		)
 		if err != nil {
-			warnInstrument("hotplex.cron.delivery.retry", err)
+			warnInstrument("hotplex.cron.delivery.result", err)
 		}
 	})
 	return cronDeliveryRetry

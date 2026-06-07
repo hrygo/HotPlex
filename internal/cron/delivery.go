@@ -244,7 +244,8 @@ func (d *Delivery) flushPending(ctx context.Context) {
 }
 
 // retryBackoff computes the backoff duration for a given attempt number.
-// Uses exponential backoff: 30s, 1m, 2m, capped at 5m.
+// With maxRetryAttempts=3, the actual backoff window is ~3 minutes (60s + 120s).
+// The 5m cap is reserved for future use if maxRetryAttempts is raised.
 // Unlike retry.backoff (table-based, for job execution retry up to 1h),
 // this is purpose-built for delivery retry with a shorter cap.
 func retryBackoff(attempt int) time.Duration {

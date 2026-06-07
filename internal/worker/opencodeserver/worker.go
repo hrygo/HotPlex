@@ -893,6 +893,7 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	jsonSchema := c.jsonSchema
 	allowedModel := c.allowedModel
 	variant := c.variant
+	sessionID := c.sessionID
 	c.mu.Unlock()
 	if systemPrompt != "" {
 		body["system"] = systemPrompt
@@ -915,7 +916,7 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 		return fmt.Errorf("opencodeserver: marshal input: %w", err)
 	}
 
-	msgURL := fmt.Sprintf("%s/session/%s/message", c.httpAddr, url.PathEscape(c.sessionID))
+	msgURL := fmt.Sprintf("%s/session/%s/message", c.httpAddr, url.PathEscape(sessionID))
 	req, err := http.NewRequestWithContext(ctx, "POST", msgURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return fmt.Errorf("opencodeserver: create request: %w", err)
