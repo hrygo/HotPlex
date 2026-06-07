@@ -231,7 +231,7 @@ configs/   - 配置文件
 - **C 通道**（`<context>`，可被 B 通道覆盖）：
   - `<user>` = `USER.md`
   - `<memory>` = `MEMORY.md`
-- 三级 fallback：全局 → 平台（slack/）→ Bot（slack/U12345/），每文件独立解析，命中即终止
+- 三级 fallback：全局 → 平台（slack/）→ Bot（slack/<botName>/），每文件独立解析，命中即终止
 - 配置热更新：仅在 session 初始化或 `/reset` 时加载，运行中修改不立即生效
 
 ### 配置陷阱（高发反直觉点）

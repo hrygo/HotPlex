@@ -201,7 +201,7 @@ Worker 进程启动时的工作目录遵循以下优先级覆盖逻辑：
 | 字段 | 类型 | 默认值 | 热重载 | 说明 |
 |:-----|:-----|:-------|:------:|:-----|
 | `enabled` | bool | `true` | — | 是否启用 Agent 配置注入。关闭后 Agent 将仅使用代码内建的通用提示词。 |
-| `config_dir` | string | `~/.hotplex/agent-configs` | — | 配置文件根目录。支持 **per-bot 3 级目录 fallback**，按文件独立解析：`<config_dir>/<platform>/<botID>/<file>` → `<config_dir>/<platform>/<file>` → `<config_dir>/<file>`，命中第一个非空文件即停止。有效平台值：`slack`、`feishu`、`webchat`、`""`（仅全局级） |
+| `config_dir` | string | `~/.hotplex/agent-configs` | — | 配置文件根目录。支持 **per-bot 3 级目录 fallback**，按文件独立解析：`<config_dir>/<platform>/<botName>/<file>` → `<config_dir>/<platform>/<file>` → `<config_dir>/<file>`，命中第一个非空文件即停止。有效平台值：`slack`、`feishu`、`webchat`、`""`（仅全局级） |
 
 ### skills — 技能管理
 
