@@ -223,6 +223,6 @@ func (c agentConfigGlobalFilesChecker) Check(_ context.Context) cli.Diagnostic {
 		Status:   cli.StatusWarn,
 		Message:  fmt.Sprintf("Global config files apply to all bots: %s", strings.Join(global, ", ")),
 		Detail:   dir,
-		FixHint:  fmt.Sprintf("Move to per-bot directory for isolation:\n  mkdir -p %s/slack/<BOT_ID>\n  mv %s %s/slack/<BOT_ID>/", dir, filepath.Join(dir, global[0]), dir),
+		FixHint:  fmt.Sprintf("Move to per-bot directory for isolation:\n  mkdir -p %s/slack/<botName>\n  mv %s %s/slack/<botName>/", dir, filepath.Join(dir, global[0]), dir),
 	}
 }

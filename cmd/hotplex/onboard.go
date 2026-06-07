@@ -188,6 +188,6 @@ func displayAgentConfigPanel(created []string) {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "  %s\n", output.Dim("根据需要编辑这些文件来定制 Agent 行为。"))
 	fmt.Fprintf(os.Stderr, "  %s\n", output.Dim("修改后对新会话生效（下次创建 session 时加载）。"))
-	fmt.Fprintf(os.Stderr, "  %s\n\n", output.Dim("支持平台和 Bot 级覆盖：slack/SOUL.md、slack/U12345/SOUL.md"))
+	fmt.Fprintf(os.Stderr, "  %s\n\n", output.Dim("支持平台和 Bot 级覆盖：slack/SOUL.md、slack/<botName>/SOUL.md"))
 	fmt.Fprintf(os.Stderr, "  %s\n", output.Dim("使用 hotplex-setup skill 交互式定制 Agent 人格和偏好。"))
 }
