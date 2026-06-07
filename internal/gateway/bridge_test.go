@@ -67,8 +67,7 @@ func TestBridge_Shutdown_RejectNewSession(t *testing.T) {
 	b.Shutdown(context.Background())
 
 	// After shutdown, StartSession should be rejected.
-	err := b.StartSession(context.Background(), "sess-closed", "u", "b", "",
-		worker.TypeClaudeCode, nil, "", "", nil, "", "")
+	err := b.StartSession(context.Background(), worker.SessionStartParams{ID: "sess-closed", UserID: "u", BotID: "b", WorkerType: worker.TypeClaudeCode})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "shutdown")
 }

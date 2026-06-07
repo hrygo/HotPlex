@@ -289,7 +289,7 @@ func TestGenerateJobID(t *testing.T) {
 // panicBridge panics on StartSession to test panic recovery in onTick.
 type panicBridge struct{}
 
-func (panicBridge) StartSession(_ context.Context, _, _, _, _ string, _ worker.WorkerType, _ []string, _, _ string, _ map[string]string, _, _ string, _ ...string) error {
+func (panicBridge) StartSession(_ context.Context, _ worker.SessionStartParams) error {
 	panic("test panic in bridge")
 }
 

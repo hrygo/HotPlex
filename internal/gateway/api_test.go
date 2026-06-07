@@ -115,8 +115,8 @@ type mockAPIBridge struct {
 	mock.Mock
 }
 
-func (m *mockAPIBridge) StartSession(ctx context.Context, id, userID, botID, _ string, wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title, clientKey string, _ ...string) error {
-	return m.Called(ctx, id, userID, botID, wt, allowedTools, workDir, platform, platformKey, title, clientKey).Error(0)
+func (m *mockAPIBridge) StartSession(ctx context.Context, p worker.SessionStartParams) error {
+	return m.Called(ctx, p).Error(0)
 }
 
 func (m *mockAPIBridge) ResumeSession(ctx context.Context, id string, workDir string) error {
@@ -221,8 +221,7 @@ func TestCreateSession_WithClientSessionID(t *testing.T) {
 
 	// Get returns not found → no idempotency path
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
-	bridge.On("StartSession", mock.Anything, mock.Anything, "anonymous", "", worker.TypeClaudeCode,
-		([]string)(nil), "", "webchat", map[string]string(nil), "my-title", "client-1").Return(nil)
+	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
 
 	w := httptest.NewRecorder()
 	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=client-1&title=my-title", nil))
@@ -255,8 +254,7 @@ func TestCreateSession_ClientSessionIDOnlyNoTitle(t *testing.T) {
 
 	// title is optional, client_session_id alone should work
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
-	bridge.On("StartSession", mock.Anything, mock.Anything, "anonymous", "", worker.TypeClaudeCode,
-		([]string)(nil), "", "webchat", map[string]string(nil), "", "csid-only").Return(nil)
+	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
 
 	w := httptest.NewRecorder()
 	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=csid-only", nil))
@@ -291,8 +289,7 @@ func TestCreateSession_DeletedSessionRecreated(t *testing.T) {
 	deleted := &session.SessionInfo{ID: "deleted-id", State: events.StateDeleted}
 	sm.On("Get", mock.Anything).Return(deleted, nil)
 	sm.On("DeletePhysical", mock.Anything, mock.Anything).Return(nil)
-	bridge.On("StartSession", mock.Anything, mock.Anything, "anonymous", "",
-		worker.TypeClaudeCode, ([]string)(nil), "", "webchat", map[string]string(nil), "test", "test-csid").Return(nil)
+	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
 
 	w := httptest.NewRecorder()
 	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=test-csid&title=test", nil))
@@ -309,9 +306,7 @@ func TestCreateSession_BridgeError(t *testing.T) {
 	api := newTestAPI(t, sm, bridge)
 
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
-	bridge.On("StartSession", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(errTestBridge)
+	bridge.On("StartSession", mock.Anything, mock.Anything).Return(errTestBridge)
 
 	w := httptest.NewRecorder()
 	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=fail&title=fail", nil))
@@ -329,9 +324,7 @@ func TestCreateSession_WithWorkDir(t *testing.T) {
 	api := newTestAPI(t, sm, bridge)
 
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
-	bridge.On("StartSession", mock.Anything, mock.Anything, "anonymous", "",
-		worker.TypeClaudeCode, ([]string)(nil), mock.Anything, "webchat", map[string]string(nil), "with-workdir", "workdir-csid").
-		Return(nil)
+	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
 
 	w := httptest.NewRecorder()
 	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=workdir-csid&title=with-workdir&work_dir=/tmp", nil))

@@ -55,6 +55,13 @@ func Load(dir, platform, botName string, injectExclude ...string) (*AgentConfigs
 		return &AgentConfigs{}, nil
 	}
 
+	// Defense-in-depth: sanitize platform to prevent path traversal.
+	// Values are internal constants ("slack", "feishu", "webchat"), but
+	// filepath.Base neutralizes any future injection without breaking empty string.
+	if platform != "" {
+		platform = filepath.Base(platform)
+	}
+
 	if err := ValidateBotName(botName); err != nil {
 		return nil, err
 	}
@@ -198,7 +205,7 @@ func resolveFile(dir, platform, botName, fileName string) (string, error) {
 				return "", err
 			}
 			if content != "" {
-				slog.Warn("agentconfig: legacy default/ directory detected; move files to platform-level",
+				slog.Debug("agentconfig: legacy default/ directory detected; move files to platform-level",
 					"platform", platform, "file", fileName)
 				return content, nil
 			}

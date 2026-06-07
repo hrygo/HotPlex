@@ -288,6 +288,10 @@ func (b *Bridge) resolveInjectExclude(platform string, perSession []string) []st
 // is not configured.
 // injectExclude lists file base names to skip; when nil, falls back to the
 // platform-level default from the atomic config map.
+//
+// Parameter order note: botName (YAML config name, e.g. "my-bot") comes before
+// botID (platform runtime ID, e.g. "U12345") because botName is the primary key
+// for agent-config path resolution, while botID is only used for logging.
 func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, botID string, injectExclude []string) {
 	if b.agentConfigDir == "" {
 		return

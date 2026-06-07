@@ -94,8 +94,8 @@ type bridgeAdapter struct {
 	bridge *gateway.Bridge
 }
 
-func (a *bridgeAdapter) StartSession(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error {
-	return a.bridge.StartSession(ctx, id, userID, botID, botName, wt, allowedTools, workDir, platform, platformKey, title, clientKey, injectExclude...)
+func (a *bridgeAdapter) StartSession(ctx context.Context, p worker.SessionStartParams) error {
+	return a.bridge.StartSession(ctx, p)
 }
 
 type configAdapter struct {
@@ -123,15 +123,19 @@ type botListerAdapter struct {
 
 func toAdminBotEntry(e *messaging.BotEntry) admin.BotEntry {
 	botID := e.BotID
+	displayName := e.Name
+	if displayName == "" {
+		// Single-bot mode: auto-generated Name is empty. Provide a human-readable
+		// fallback so the admin UI shows "slack (default)" instead of just "slack:".
+		displayName = string(e.Platform) + " (default)"
+	}
 	if botID == "" {
 		// Fallback when platform BotID is not yet available (adapter not started).
 		// Use platform:name to guarantee uniqueness across platforms.
-		// NOTE: assumes bot Name does not contain colons — safe for Slack/Feishu
-		// auto-generated names ("") and all known platform bot name formats.
 		botID = string(e.Platform) + ":" + e.Name
 	}
 	return admin.BotEntry{
-		Name:        e.Name,
+		Name:        displayName,
 		Platform:    string(e.Platform),
 		BotID:       botID,
 		Status:      string(e.Status),

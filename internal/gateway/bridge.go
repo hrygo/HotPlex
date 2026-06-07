@@ -130,30 +130,30 @@ func (b *Bridge) UpdateAgentConfigExclude(m map[string][]string) {
 }
 
 // StartSession creates a new session and starts a worker.
-func (b *Bridge) StartSession(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error {
+func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) error {
 	if b.closed.Load() {
 		return fmt.Errorf("bridge: rejecting new session during shutdown")
 	}
 
-	observability.SessionStartAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(wt))))
+	observability.SessionStartAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
 	start := time.Now()
 	defer func() {
-		observability.SessionStartDuration().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(wt))))
+		observability.SessionStartDuration().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
 	}()
 
 	// Create session in DB with bot_id and allowed_tools.
-	si, err := b.sm.CreateWithBot(ctx, id, userID, botID, botName, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
+	si, err := b.sm.CreateWithBot(ctx, p.ID, p.UserID, p.BotID, p.BotName, p.WorkerType, p.AllowedTools, p.Platform, p.PlatformKey, p.WorkDir, p.Title, p.ClientKey)
 	if err != nil {
-		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(wt)), attribute.String("error_type", "create_failed")))
+		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "create_failed")))
 		return fmt.Errorf("bridge: create session: %w", err)
 	}
 
-	workerInfo := b.prepareWorkerInfo(id, userID, workDir, si)
+	workerInfo := b.prepareWorkerInfo(p.ID, p.UserID, p.WorkDir, si)
 
 	// Inject cron-specific env vars (e.g. admin API creds) only for cron sessions.
 	// Detected via platformKey rather than platform value, since cron executor now
 	// passes the job's actual platform for correct agent config resolution.
-	if _, isCron := platformKey["cron_job_id"]; isCron && len(b.cronEnv) > 0 {
+	if _, isCron := p.PlatformKey["cron_job_id"]; isCron && len(b.cronEnv) > 0 {
 		for _, kv := range b.cronEnv {
 			if i := strings.IndexByte(kv, '='); i >= 0 {
 				workerInfo.Env[kv[:i]] = kv[i+1:]
@@ -163,38 +163,38 @@ func (b *Bridge) StartSession(ctx context.Context, id, userID, botID, botName st
 
 	if _, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:           ctx,
-		wt:            wt,
+		wt:            p.WorkerType,
 		workerInfo:    workerInfo,
-		platform:      platform,
-		botID:         botID,
-		botName:       botName,
-		forwardOpts:   &forwardOpts{workDir: workDir},
-		injectExclude: injectExclude,
+		platform:      p.Platform,
+		botID:         p.BotID,
+		botName:       p.BotName,
+		forwardOpts:   &forwardOpts{workDir: p.WorkDir},
+		injectExclude: p.InjectExclude,
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := w.Start(ctx, info); err != nil {
-				_ = b.sm.Delete(ctx, id)
+				_ = b.sm.Delete(ctx, p.ID)
 				return fmt.Errorf("bridge: start worker: %w", err)
 			}
 			return nil
 		},
 		func(_ worker.Worker, _ error) {
-			_ = b.sm.Delete(ctx, id)
+			_ = b.sm.Delete(ctx, p.ID)
 		},
 	); err != nil {
-		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(wt)), attribute.String("error_type", "start_failed")))
+		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "start_failed")))
 		return err
 	}
 
 	// Transition to RUNNING. (StateNotifier will emit state event automatically)
-	if err := b.sm.Transition(ctx, id, events.StateRunning); err != nil {
+	if err := b.sm.Transition(ctx, p.ID, events.StateRunning); err != nil {
 		// Kill the worker to prevent orphan — without this, the worker runs
 		// indefinitely while the session stays in CREATED state, invisible to GC.
 		// forwardEvents will detect the exit and cleanupCrashedWorker transitions
 		// the session to TERMINATED for eventual GC reclamation.
 		b.log.Error("bridge: transition to running failed, terminating orphan worker",
-			"session_id", id, "worker_type", wt, "err", err)
-		if w := b.sm.GetWorker(id); w != nil {
+			"session_id", p.ID, "worker_type", p.WorkerType, "err", err)
+		if w := b.sm.GetWorker(p.ID); w != nil {
 			_ = w.Terminate(context.Background())
 		}
 		return fmt.Errorf("bridge: transition to running: %w", err)
@@ -395,7 +395,17 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, w
 // files are already in use (leftover from a crashed session), falls back to
 // ResumeSession to recover the existing conversation history.
 func (b *Bridge) startOrResumeOnInUse(ctx context.Context, sessionID, ownerID string, wt worker.WorkerType, workDir, platform string, platformKey map[string]string, botID, botName string, injectExclude ...string) error {
-	if err := b.StartSession(ctx, sessionID, ownerID, botID, botName, wt, nil, workDir, platform, platformKey, "", "", injectExclude...); err != nil {
+	if err := b.StartSession(ctx, worker.SessionStartParams{
+		ID:            sessionID,
+		UserID:        ownerID,
+		BotID:         botID,
+		BotName:       botName,
+		WorkerType:    wt,
+		WorkDir:       workDir,
+		Platform:      platform,
+		PlatformKey:   platformKey,
+		InjectExclude: injectExclude,
+	}); err != nil {
 		if isWorkerInUseError(err) {
 			b.log.Info("bridge: worker rejected as in-use, switching to resume", "session_id", sessionID, "err", err)
 			return b.ResumeSession(ctx, sessionID, workDir)
@@ -536,7 +546,19 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 		// platform/global from the atomic config map. Fix requires storing
 		// injectExclude in the session record or giving bridge access to adapters.
 		excl := b.resolveInjectExclude(si.Platform, nil)
-		if err := b.StartSession(ctx, newID, si.UserID, si.BotID, si.BotName, si.WorkerType, si.AllowedTools, expanded, si.Platform, si.PlatformKey, si.Title, "", excl...); err != nil {
+		if err := b.StartSession(ctx, worker.SessionStartParams{
+			ID:            newID,
+			UserID:        si.UserID,
+			BotID:         si.BotID,
+			BotName:       si.BotName,
+			WorkerType:    si.WorkerType,
+			AllowedTools:  si.AllowedTools,
+			WorkDir:       expanded,
+			Platform:      si.Platform,
+			PlatformKey:   si.PlatformKey,
+			Title:         si.Title,
+			InjectExclude: excl,
+		}); err != nil {
 			return nil, fmt.Errorf("switch-workdir: start session: %w", err)
 		}
 		b.log.Info("switch-workdir: created fresh session",

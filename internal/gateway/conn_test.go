@@ -1445,7 +1445,7 @@ func TestBridge_StartSession_Success(t *testing.T) {
 	// we replace it after construction (field injection for tests).
 	b.wf = wf
 
-	err := b.StartSession(ctx, "sess_start", "user1", "", "", worker.TypeClaudeCode, nil, "", "", nil, "", "")
+	err := b.StartSession(ctx, worker.SessionStartParams{ID: "sess_start", UserID: "user1", WorkerType: worker.TypeClaudeCode})
 	require.NoError(t, err, "StartSession should succeed")
 
 	sm.AssertExpectations(t)
@@ -1465,7 +1465,7 @@ func TestBridge_StartSession_CreateFails(t *testing.T) {
 	// Inject a worker factory that would fail if Start were called.
 	b.wf = &failingWorkerFactory{}
 
-	err := b.StartSession(context.Background(), "sess_fail", "user1", "", "", worker.TypeClaudeCode, nil, "", "", nil, "", "")
+	err := b.StartSession(context.Background(), worker.SessionStartParams{ID: "sess_fail", UserID: "user1", WorkerType: worker.TypeClaudeCode})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "create failed")
 

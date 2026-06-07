@@ -9,6 +9,16 @@ import (
 	"github.com/hrygo/hotplex/internal/agentconfig"
 )
 
+// sanitizePlatform prevents path traversal through the platform parameter.
+// Values are internal constants ("slack", "feishu", "webchat"), but
+// filepath.Base neutralizes any future injection without breaking empty string.
+func sanitizePlatform(platform string) string {
+	if platform == "" {
+		return ""
+	}
+	return filepath.Base(platform)
+}
+
 // ErrInvalidBotName aliases agentconfig.ErrInvalidBotName so callers of
 // phrases.Load can use errors.Is without importing agentconfig directly.
 var ErrInvalidBotName = agentconfig.ErrInvalidBotName
@@ -30,6 +40,9 @@ func Load(dir, platform, botName string) (*Phrases, error) {
 		weight int
 	}
 
+	// Defense-in-depth: sanitize platform to prevent path traversal.
+	platform = sanitizePlatform(platform)
+
 	levels := []loadLevel{
 		{filepath.Join(dir, "PHRASES.md"), WeightGlobal},
 		{filepath.Join(dir, platform, "PHRASES.md"), WeightPlatform},
@@ -49,7 +62,7 @@ func Load(dir, platform, botName string) (*Phrases, error) {
 		// #678 and #679, this fallback ensures they are still discovered.
 		legacyPath := filepath.Join(dir, platform, agentconfig.LegacyDefaultBotName, "PHRASES.md")
 		if _, err := os.Stat(legacyPath); err == nil {
-			slog.Warn("phrases: legacy default/ directory detected; move files to platform-level",
+			slog.Debug("phrases: legacy default/ directory detected; move files to platform-level",
 				"platform", platform)
 			levels = append(levels, loadLevel{
 				path:   legacyPath,
