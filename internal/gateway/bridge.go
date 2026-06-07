@@ -135,6 +135,15 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		return fmt.Errorf("bridge: rejecting new session during shutdown")
 	}
 
+	// Validate and expand workDir for all callers.
+	if p.WorkDir != "" {
+		expanded, err := validateAndExpandWorkDir(p.WorkDir)
+		if err != nil {
+			return fmt.Errorf("bridge: invalid work dir: %w", err)
+		}
+		p.WorkDir = expanded
+	}
+
 	observability.SessionStartAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
 	start := time.Now()
 	defer func() {
