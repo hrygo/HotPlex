@@ -308,7 +308,7 @@ func writeAgentConfigFile(t *testing.T, dir, name, content string) {
 	require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o644))
 }
 
-func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
+func TestBridge_InjectAgentConfig_BotNameResolution(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {

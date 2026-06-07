@@ -22,6 +22,7 @@ func newCronCreateCmd() *cobra.Command {
 		description    string
 		workDir        string
 		botID          string
+		botName        string
 		ownerID        string
 		timeoutSec     int
 		allowedTools   string
@@ -86,6 +87,9 @@ Schedule format:
 					if botID == "" {
 						botID = os.Getenv("GATEWAY_BOT_ID")
 					}
+					if botName == "" {
+						botName = os.Getenv("GATEWAY_BOT_NAME")
+					}
 					if ownerID == "" {
 						ownerID = os.Getenv("GATEWAY_USER_ID")
 					}
@@ -113,7 +117,7 @@ Schedule format:
 					}
 				}
 
-				job, err := croncli.PrepareJobForCreate(name, schedule, message, description, workDir, botID, ownerID, timeoutSec, tools, opts)
+				job, err := croncli.PrepareJobForCreate(name, schedule, message, description, workDir, botID, botName, ownerID, timeoutSec, tools, opts)
 				if err != nil {
 					return err
 				}
@@ -150,6 +154,7 @@ Schedule format:
 	cmd.Flags().StringVar(&description, "description", "", "job description")
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "working directory")
 	cmd.Flags().StringVar(&botID, "bot-id", "", "bot ID (required)")
+	cmd.Flags().StringVar(&botName, "bot-name", "", "bot name for agent config resolution")
 	cmd.Flags().StringVar(&ownerID, "owner-id", "", "owner ID (required)")
 	cmd.Flags().IntVar(&timeoutSec, "timeout", 0, "execution timeout in seconds")
 	cmd.Flags().StringVar(&allowedTools, "allowed-tools", "", "comma-separated tool list")

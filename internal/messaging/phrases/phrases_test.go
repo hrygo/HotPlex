@@ -224,7 +224,7 @@ func TestLoadPathTraversalDotDot(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoadEmptyBotID(t *testing.T) {
+func TestLoadEmptyBotName(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "PHRASES.md"), []byte("## Test\n- item\n"), 0o644))

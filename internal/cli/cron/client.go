@@ -188,7 +188,7 @@ func resolvePlatform(cliPlatform string, cliPlatformKey map[string]string) (stri
 }
 
 // PrepareJobForCreate builds a CronJob from CLI flags.
-func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID, ownerID string, timeoutSec int, allowedTools []string, opts JobCreateOptions) (*cron.CronJob, error) {
+func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID, botName, ownerID string, timeoutSec int, allowedTools []string, opts JobCreateOptions) (*cron.CronJob, error) {
 	sched, err := ParseSchedule(scheduleRaw)
 	if err != nil {
 		return nil, err
@@ -209,6 +209,7 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 		Payload:        cron.CronPayload{Kind: payloadKind, Message: cron.SanitizePrompt(message), TargetSessionID: opts.TargetSessionID, AllowedTools: allowedTools, WorkerType: opts.WorkerType},
 		WorkDir:        workDir,
 		BotID:          botID,
+		BotName:        botName,
 		OwnerID:        ownerID,
 		Platform:       platform,
 		PlatformKey:    platformKey,

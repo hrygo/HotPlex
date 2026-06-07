@@ -60,7 +60,7 @@ func TestParseSchedule_EveryMs(t *testing.T) {
 func TestPrepareJobForCreate(t *testing.T) {
 	job, err := PrepareJobForCreate(
 		"test-job", "every:5m", "say hello", "a test",
-		"/tmp/work", "bot-1", "owner-1", 300, nil, JobCreateOptions{
+		"/tmp/work", "bot-1", "", "owner-1", 300, nil, JobCreateOptions{
 			Platform:  "cron",
 			MaxRuns:   50,
 			ExpiresAt: "2099-01-01T00:00:00Z",
@@ -82,7 +82,7 @@ func TestPrepareJobForCreate_DefaultLifecycle(t *testing.T) {
 	// Recurring job without lifecycle opts gets safe defaults.
 	job, err := PrepareJobForCreate(
 		"default-lifecycle", "every:30m", "test", "", "",
-		"bot-1", "owner-1", 0, nil, JobCreateOptions{Platform: "cron"},
+		"bot-1", "", "owner-1", 0, nil, JobCreateOptions{Platform: "cron"},
 	)
 	require.NoError(t, err)
 	require.Equal(t, 10, job.MaxRuns)
@@ -96,7 +96,7 @@ func TestPrepareJobForCreate_OneShotNoLifecycle(t *testing.T) {
 	// One-shot jobs don't need lifecycle constraints.
 	job, err := PrepareJobForCreate(
 		"one-shot", "at:2099-01-01T00:00:00Z", "test", "", "",
-		"bot-1", "owner-1", 0, nil, JobCreateOptions{Platform: "cron"},
+		"bot-1", "", "owner-1", 0, nil, JobCreateOptions{Platform: "cron"},
 	)
 	require.NoError(t, err)
 	require.Equal(t, 0, job.MaxRuns)
@@ -121,7 +121,7 @@ func TestPrepareJobForCreate_MissingFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := PrepareJobForCreate(tt.jobName, tt.sched, tt.msg, "", "", tt.botID, tt.ownerID, 0, nil, JobCreateOptions{MaxRuns: 10, ExpiresAt: "2099-01-01T00:00:00Z"})
+			_, err := PrepareJobForCreate(tt.jobName, tt.sched, tt.msg, "", "", tt.botID, "", tt.ownerID, 0, nil, JobCreateOptions{MaxRuns: 10, ExpiresAt: "2099-01-01T00:00:00Z"})
 			require.Error(t, err)
 		})
 	}
@@ -189,7 +189,7 @@ func TestParseSchedule_Relative(t *testing.T) {
 func TestPrepareJobForCreate_Callback(t *testing.T) {
 	job, err := PrepareJobForCreate(
 		"callback-test", "at:+5m", "check result", "", "",
-		"bot-1", "owner-1", 0, nil, JobCreateOptions{
+		"bot-1", "", "owner-1", 0, nil, JobCreateOptions{
 			Platform:        "cron",
 			Attach:          true,
 			TargetSessionID: "sess_abc",

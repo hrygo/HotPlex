@@ -68,6 +68,7 @@ Schedule format:
 	cmd.Flags().String("description", "", "job description")
 	cmd.Flags().String("work-dir", "", "working directory")
 	cmd.Flags().String("bot-id", "", "bot ID")
+	cmd.Flags().String("bot-name", "", "bot name for agent config resolution")
 	cmd.Flags().String("owner-id", "", "owner ID")
 	cmd.Flags().Int("timeout", 0, "execution timeout in seconds")
 	cmd.Flags().String("allowed-tools", "", "comma-separated tool list")
@@ -107,6 +108,10 @@ func applyFlags(cmd *cobra.Command, job *cron.CronJob) bool {
 	}
 	if cmd.Flags().Changed("bot-id") {
 		job.BotID, _ = cmd.Flags().GetString("bot-id")
+		changed = true
+	}
+	if cmd.Flags().Changed("bot-name") {
+		job.BotName, _ = cmd.Flags().GetString("bot-name")
 		changed = true
 	}
 	if cmd.Flags().Changed("owner-id") {

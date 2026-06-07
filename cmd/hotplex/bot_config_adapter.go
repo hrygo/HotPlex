@@ -158,6 +158,9 @@ func (a *botConfigAdapter) CreateBot(ctx context.Context, name string, attrs *ad
 	if name == "" {
 		return fmt.Errorf("bot name must not be empty")
 	}
+	if err := agentconfig.ValidateBotName(name); err != nil {
+		return fmt.Errorf("invalid bot name: %w", err)
+	}
 
 	// Check that the name does not already exist in the registry.
 	registry := messaging.DefaultBotRegistry()
