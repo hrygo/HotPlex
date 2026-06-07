@@ -20,10 +20,11 @@ hotplex cron create \
   --schedule "every:5m" \
   -m "检查系统健康状态，汇总异常事件" \
   --bot-id "$GATEWAY_BOT_ID" \
+  --bot-name "$GATEWAY_BOT_NAME" \
   --owner-id "$GATEWAY_USER_ID"
 ```
 
-> 环境变量 `GATEWAY_BOT_ID` 和 `GATEWAY_USER_ID` 在 Worker 进程中自动注入，直接使用即可。
+> 环境变量 `GATEWAY_BOT_ID`、`GATEWAY_BOT_NAME` 和 `GATEWAY_USER_ID` 在 Worker 进程中自动注入，直接使用即可。
 
 创建成功后，CLI 返回任务 ID。从此刻起，Worker 每 5 分钟执行一次 Prompt，结果发送到你的 Slack/飞书。
 
@@ -227,6 +228,23 @@ hotplex cron delete daily-health
 
 HotPlex 的 Brain 意图识别会解析自然语言中的时间表达和频率意图，自动选择合适的 schedule 类型并组装 CLI 命令执行。你不需要手动拼命令，直接说就行。
 
+## 7. 多 Bot 场景
+
+当同一平台配置了多个 Bot 时，定时任务需要指定 `--bot-name` 来确保使用正确的 Agent 配置（SOUL.md、AGENTS.md 等）：
+
+```bash
+# 多 Bot 场景：指定 bot-name 确保加载正确的 agent config
+hotplex cron create \
+  --name "daily-review" \
+  --schedule "cron:0 9 * * 1-5" \
+  -m "生成本日代码审查报告" \
+  --bot-id "$GATEWAY_BOT_ID" \
+  --bot-name "$GATEWAY_BOT_NAME" \
+  --owner-id "$GATEWAY_USER_ID"
+```
+
+如果不指定 `--bot-name`，任务会回退到平台级 Agent 配置（跳过 Bot 级查找）。单 Bot 场景下无需指定。
+
 ## 参数速查
 
 | 参数 | 必填 | 说明 |
@@ -235,6 +253,7 @@ HotPlex 的 Brain 意图识别会解析自然语言中的时间表达和频率�
 | `--schedule` | 是 | 调度表达式（`cron:` / `every:` / `at:`） |
 | `-m` | 是 | Prompt，最大 4KB |
 | `--bot-id` | 是 | 取自 `$GATEWAY_BOT_ID` |
+| `--bot-name` | 否 | Bot 的 YAML 配置名（用于 Agent Config 路径解析），取自 `$GATEWAY_BOT_NAME`。多 Bot 场景下建议填写，确保任务加载正确的 Bot 级配置 |
 | `--owner-id` | 是 | 取自 `$GATEWAY_USER_ID` |
 | `--timeout` | 否 | 单次超时秒数，默认使用调度器配置（默认 5 分钟），可通过此参数覆盖 |
 | `--max-runs` | 否 | 成功 N 次后自动 disable |
