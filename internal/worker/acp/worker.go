@@ -902,7 +902,8 @@ func (w *Worker) processNotification(ctx context.Context, notif *JSONRPCNotifica
 // drainNotificationCh empties all buffered notifications from NotificationCh.
 // Called by readLoop in response to a drain signal from Input().
 func (w *Worker) drainNotificationCh(ctx context.Context, conn *acpConn) {
-	for {
+	const maxDrain = 256
+	for i := 0; i < maxDrain; i++ {
 		select {
 		case n, ok := <-w.client.NotificationCh:
 			if !ok {
@@ -949,7 +950,7 @@ func (w *Worker) readLoop(ctx context.Context) {
 			w.drainNotificationCh(ctx, conn)
 			select {
 			case w.drainDoneCh <- struct{}{}:
-			case <-ctx.Done():
+			default: // already consumed or buffered
 			}
 		case notif, ok := <-w.client.NotificationCh:
 			if !ok {
