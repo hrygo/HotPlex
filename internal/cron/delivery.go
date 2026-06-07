@@ -105,7 +105,7 @@ func (d *Delivery) deliverResult(ctx context.Context, job *CronJob, response str
 		if isTemporaryError(err) {
 			status = "exhausted"
 		}
-		observability.CronDeliveryRetry().Add(ctx, 1,
+		observability.CronDeliveryRetry().Add(context.Background(), 1,
 			metric.WithAttributes(
 				attribute.String("status", status),
 				attribute.String("platform", job.Platform),
@@ -119,7 +119,7 @@ func (d *Delivery) deliverResult(ctx context.Context, job *CronJob, response str
 
 	// Record success on retry (attempt > 1 means this was a retry).
 	if attempt > 1 {
-		observability.CronDeliveryRetry().Add(ctx, 1,
+		observability.CronDeliveryRetry().Add(context.Background(), 1,
 			metric.WithAttributes(
 				attribute.String("status", "success"),
 				attribute.String("platform", job.Platform),
@@ -151,17 +151,32 @@ func (d *Delivery) enqueue(job *CronJob, result string, attempt int, nextAt time
 }
 
 // StartRetryLoop launches the background retry goroutine.
+// Idempotent: safe to call multiple times; only the first call starts the loop.
 func (d *Delivery) StartRetryLoop(ctx context.Context) {
-	d.stop = make(chan struct{})
+	d.mu.Lock()
+	if d.stop != nil {
+		// Already started.
+		d.mu.Unlock()
+		return
+	}
+	stop := make(chan struct{})
+	d.stop = stop
 	d.wg.Add(1)
-	go d.retryLoop(ctx)
+	d.mu.Unlock()
+
+	go d.retryLoop(ctx, stop)
 }
 
 // StopRetryLoop signals the retry goroutine to stop and waits for it to drain.
+// Idempotent: safe to call multiple times; only the first call signals stop.
 func (d *Delivery) StopRetryLoop() {
+	d.mu.Lock()
 	if d.stop != nil {
 		close(d.stop)
+		d.stop = nil
 	}
+	d.mu.Unlock()
+
 	d.wg.Wait()
 
 	// Log remaining pending deliveries as permanently lost.
@@ -177,7 +192,9 @@ func (d *Delivery) StopRetryLoop() {
 }
 
 // retryLoop periodically drains the retry queue.
-func (d *Delivery) retryLoop(ctx context.Context) {
+// stop is captured at goroutine start to avoid reading d.stop field
+// after StopRetryLoop nils it.
+func (d *Delivery) retryLoop(ctx context.Context, stop chan struct{}) {
 	defer d.wg.Done()
 
 	ticker := time.NewTicker(retryTickInterval)
@@ -187,7 +204,7 @@ func (d *Delivery) retryLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-d.stop:
+		case <-stop:
 			return
 		case <-ticker.C:
 			d.flushPending(ctx)

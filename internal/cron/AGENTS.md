@@ -14,7 +14,8 @@ cron/
   schedule.go    # NextRun/ValidateSchedule: 3 schedule kinds via robfig/cron/v3 parser
   executor.go    # Executor: starts worker session, sends prompt, waits for completion
   attached.go    # AttachedSessionHandler: dispatch callback into existing session
-  delivery.go    # Delivery: extract response + route to platform (Slack/Feishu)
+  delivery.go    # Delivery: extract response + route to platform, in-memory retry queue with exponential backoff
+  errors.go      # classifyError: string-based error classification (timeout/rate_limit/server/exec)
   loader.go      # LoadFromYAML: name-idempotent upsert from YAML defs
   retry.go       # backoff schedule, isTemporaryError, scheduleRetry
   normalize.go   # ValidateJob, ValidateJobPrompt, threat detection, lifecycle constraints
@@ -39,7 +40,7 @@ cron/
 | Prompt injection guard | `normalize.go:28` ValidateJobPrompt | 6 threat patterns, 4KB limit |
 | Executor | `executor.go:29` Executor | StartSession → send prompt → poll completion |
 | Attached session dispatch | `attached.go:28` AttachedSessionHandler | ResumeAndInput (idle/terminated) or InjectInput (running) |
-| Result delivery | `delivery.go:16` Delivery | ResponseExtractor + PlatformDeliverer, per-platform routing |
+| Result delivery | `delivery.go:16` Delivery | ResponseExtractor + PlatformDeliverer + retry queue + retryLoop |
 | YAML batch import | `loader.go:32` LoadFromYAML | Name-based idempotent upsert, recompute next_run |
 | Backoff retry | `retry.go:10` backoff | 30s→1m→5m→15m→1h exponential, isTemporaryError classification |
 | Skill manual | `skill.go` SkillManual | go:embed cron-skill-manual.md, released to B channel |
@@ -81,6 +82,12 @@ arm(duration) → timer fires → collectDue(now) → for each due job:
 - `ResponseExtractor`: extracts last assistant response from completed session
 - `PlatformDeliverer`: routes to platform (Slack chat.postMessage / Feishu reply)
 - Skipped when: no extractor, empty response, platform is "cron" (self-originated), or silent=true
+- **Delivery retry**: in-memory FIFO queue, max 100 entries, max 3 attempts per delivery
+  - Retries transient failures (429, timeout, 5xx) with exponential backoff (30s → 1m → 2m, capped 5m)
+  - Permanent failures (403, 404) logged and discarded immediately
+  - Background `retryLoop` goroutine (10s tick) drains due entries via `flushPending`
+  - Lifecycle: `StartRetryLoop`/`StopRetryLoop` managed by Scheduler, idempotent
+  - Metric: `hotplex.cron.delivery.retry{status,platform}` (success/exhausted/permanent)
 
 **Backoff retry (retry.go)**
 - Schedule: 30s → 1m → 5m → 15m → 1h (capped)

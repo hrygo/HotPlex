@@ -20,6 +20,7 @@ commands.go       # ServerCommander: HTTP REST for Compact/Clear/Rewind + Contro
 | Add control request subtype | `commands.go` `SendControlRequest()` switch |
 | Fix model resolution | `commands.go` `lastKnownModel()` — queries messages for providerID/modelID |
 | Fix rewind resolution | `commands.go` `lastAssistantMessageID()` — queries messages for last assistant info.id |
+| Update system prompt | `worker.go` `UpdateSystemPrompt` — updates `conn.systemPrompt` under `conn.mu` |
 
 ## KEY PATTERNS
 
@@ -33,6 +34,8 @@ commands.go       # ServerCommander: HTTP REST for Compact/Clear/Rewind + Contro
 **Rewind auto-resolve**: If no `targetID`, queries `/session/{id}/message` for last assistant message's `info.id`
 
 **OCS message format**: `info.id` (message ID), `info.providerID`, `info.modelID` at `info` level (not nested under `info.model` — that's only on user messages)
+
+**SystemPromptUpdater**: Worker implements `worker.SystemPromptUpdater` — bridge calls `UpdateSystemPrompt` after `ResetContext` to push refreshed system prompt. Updates `conn.systemPrompt` under `conn.mu`, which is sent per-message in `conn.Send` under the same lock.
 
 **HTTP client**: Shared `http.Client` with 30s timeout; `doGet`/`doPost`/`doRequest` helpers with JSON marshaling
 
