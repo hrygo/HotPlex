@@ -363,7 +363,7 @@ Agent B/C 通道配置加载器。
 
 **C 通道**（`<context>`）：`USER.md` + `MEMORY.md`
 
-**三级 fallback**：全局 → 平台（slack/） → Bot（slack/U12345/），每文件独立解析，命中即终止。
+**三级 fallback**：全局 → 平台（slack/） → Bot（slack/{botName}/），每文件独立解析，命中即终止。Bot 级目录名使用 YAML 配置中 `bots[].name` 的值。
 
 ---
 
@@ -545,7 +545,7 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 | `stt_*` | — | 覆盖 STT 配置 |
 | `tts_*` | — | 覆盖 TTS 配置 |
 
-**向后兼容**：`normalizeSlackBots()`/`normalizeFeishuBots()` 自动将单 bot 顶层凭证归一化为 `bots: [{name: "default"}]`。`bots[]` 非空时忽略顶层凭证。
+**向后兼容**：`normalizeSlackBots()`/`normalizeFeishuBots()` 自动将单 bot 顶层凭证归一化为 `bots: [{name: ""}]`（空名称，表示单 Bot 模式）。`bots[]` 非空时忽略顶层凭证。
 
 **限制**：每平台最多 10 个 bot。配置变更需重启生效。
 
