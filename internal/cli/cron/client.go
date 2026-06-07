@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/cli/pidutil"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/cron"
@@ -192,6 +193,12 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 	sched, err := ParseSchedule(scheduleRaw)
 	if err != nil {
 		return nil, err
+	}
+
+	if botName != "" {
+		if err := agentconfig.ValidateBotName(botName); err != nil {
+			return nil, fmt.Errorf("invalid bot_name: %w", err)
+		}
 	}
 
 	platform, platformKey := resolvePlatform(opts.Platform, opts.PlatformKey)

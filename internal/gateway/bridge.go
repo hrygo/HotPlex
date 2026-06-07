@@ -437,7 +437,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 			if info.SystemPrompt != "" {
 				su.UpdateSystemPrompt(info.SystemPrompt)
 				b.log.Info("bridge: reset reloaded agent config",
-					"session_id", sessionID, "platform", si.Platform, "bot_id", si.BotID,
+					"session_id", sessionID, "platform", si.Platform, "bot_id", si.BotID, "bot_name", si.BotName,
 					"prompt_len", len(info.SystemPrompt))
 			}
 		}
@@ -675,7 +675,7 @@ func injectSandbox(platformKey map[string]string, sandbox string) {
 func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
 	info := b.buildWorkerInfo(sessionID, userID, workDir, si)
 	injectSlackEnv(&info, si.PlatformKey)
-	info.Env = injectGatewayContext(info.Env, si.Platform, si.BotID, si.UserID, si.PlatformKey, sessionID, workDir)
+	info.Env = injectGatewayContext(info.Env, si.Platform, si.BotID, si.BotName, si.UserID, si.PlatformKey, sessionID, workDir)
 	return info
 }
 
@@ -750,12 +750,15 @@ func validateAndExpandWorkDir(input string) (string, error) {
 // without parsing logs or gateway internals.
 //
 // Existing HOTPLEX_SLACK_* vars are preserved for backward compatibility.
-func injectGatewayContext(env map[string]string, platform, botID, userID string, platformKey map[string]string, sessionID, workDir string) map[string]string {
+func injectGatewayContext(env map[string]string, platform, botID, botName, userID string, platformKey map[string]string, sessionID, workDir string) map[string]string {
 	if env == nil {
 		env = make(map[string]string)
 	}
 	env["GATEWAY_PLATFORM"] = platform
 	env["GATEWAY_BOT_ID"] = botID
+	if botName != "" {
+		env["GATEWAY_BOT_NAME"] = botName
+	}
 	env["GATEWAY_USER_ID"] = userID
 	env["GATEWAY_SESSION_ID"] = sessionID
 	if workDir != "" {

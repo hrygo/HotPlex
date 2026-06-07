@@ -309,7 +309,9 @@ func copyJobDefinition(dst, src *CronJob) {
 	dst.Description = src.Description
 	dst.WorkDir = src.WorkDir
 	dst.BotID = src.BotID
-	dst.BotName = src.BotName
+	if src.BotName != "" {
+		dst.BotName = src.BotName
+	}
 	dst.OwnerID = src.OwnerID
 	dst.Platform = src.Platform
 	dst.PlatformKey = src.PlatformKey

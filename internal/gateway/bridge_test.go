@@ -560,6 +560,27 @@ func TestInjectGatewayContext(t *testing.T) {
 				"TARGET_PR": "42",
 			},
 		},
+		{
+			name:     "botName injected as GATEWAY_BOT_NAME",
+			platform: "feishu",
+			botID:    "ou_bot123",
+			botName:  "my-bot",
+			userID:   "U1",
+			platformKey: map[string]string{
+				"chat_id": "oc_chat",
+			},
+			sessionID: "sess-botname",
+			workDir:   "/tmp",
+			want: map[string]string{
+				"GATEWAY_BOT_NAME":   "my-bot",
+				"GATEWAY_PLATFORM":   "feishu",
+				"GATEWAY_BOT_ID":     "ou_bot123",
+				"GATEWAY_USER_ID":    "U1",
+				"GATEWAY_CHANNEL_ID": "oc_chat",
+				"GATEWAY_SESSION_ID": "sess-botname",
+				"GATEWAY_WORK_DIR":   "/tmp",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -568,7 +589,7 @@ func TestInjectGatewayContext(t *testing.T) {
 
 			// Nil env test: function should initialize the map.
 			if tt.env == nil {
-				tt.env = injectGatewayContext(tt.env, tt.platform, tt.botID, tt.userID, tt.platformKey, tt.sessionID, tt.workDir)
+				tt.env = injectGatewayContext(tt.env, tt.platform, tt.botID, tt.botName, tt.userID, tt.platformKey, tt.sessionID, tt.workDir)
 				require.NotNil(t, tt.env, "env should be initialized")
 				for k, v := range tt.want {
 					assert.Equal(t, v, tt.env[k], "env[%q]", k)
@@ -576,7 +597,7 @@ func TestInjectGatewayContext(t *testing.T) {
 				return
 			}
 
-			tt.env = injectGatewayContext(tt.env, tt.platform, tt.botID, tt.userID, tt.platformKey, tt.sessionID, tt.workDir)
+			tt.env = injectGatewayContext(tt.env, tt.platform, tt.botID, tt.botName, tt.userID, tt.platformKey, tt.sessionID, tt.workDir)
 
 			for k, v := range tt.want {
 				assert.Equal(t, v, tt.env[k], "env[%q]", k)

@@ -233,7 +233,7 @@ func (s *pgStore) UpsertByName(ctx context.Context, job *CronJob) error {
 			payload_data = EXCLUDED.payload_data,
 			work_dir = EXCLUDED.work_dir,
 			bot_id = EXCLUDED.bot_id,
-			bot_name = EXCLUDED.bot_name,
+			bot_name = CASE WHEN EXCLUDED.bot_name != '' THEN EXCLUDED.bot_name ELSE cron_jobs.bot_name END,
 			owner_id = EXCLUDED.owner_id,
 			platform = EXCLUDED.platform,
 			platform_key = EXCLUDED.platform_key,

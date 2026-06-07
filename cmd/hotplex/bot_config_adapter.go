@@ -243,8 +243,6 @@ func (a *botConfigAdapter) DeleteBot(ctx context.Context, name string) error {
 
 	cfg := a.cfgStore.Load()
 
-	// Enforce max bots per platform limit.
-
 	switch platform {
 	case "slack":
 		idx := findSlackBotIndex(cfg, name)
@@ -318,8 +316,6 @@ func resolveInjectExcludeForAdmin(cfg *config.Config, platform, botName string) 
 // extractBotAttrs builds BotConfigAttrs from the config for a specific bot.
 func extractBotAttrs(cfg *config.Config, platform, name string) *admin.BotConfigAttrs {
 	attrs := &admin.BotConfigAttrs{}
-
-	// Enforce max bots per platform limit.
 
 	switch platform {
 	case "slack":
