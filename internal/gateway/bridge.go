@@ -225,6 +225,16 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		return fmt.Errorf("bridge: rejecting resume during shutdown")
 	}
 
+	// Validate workDir for consistency with StartSession.
+	if workDir != "" {
+		expanded, err := validateAndExpandWorkDir(workDir)
+		if err != nil {
+			return fmt.Errorf("bridge: invalid resume work dir: %w", err)
+		}
+		workDir = expanded
+		opts.workDir = expanded
+	}
+
 	si, err := b.sm.Get(ctx, id)
 	if err != nil {
 		return err

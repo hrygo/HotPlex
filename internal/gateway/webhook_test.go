@@ -543,9 +543,9 @@ func TestWebhookHandler_Dedup(t *testing.T) {
 		wg.Wait()
 
 		require.Eventually(t, func() bool { return trigger.count() >= 1 }, 3*time.Second, 50*time.Millisecond)
-		// With atomic LoadOrStore dedup, we should see at most 2 triggers
-		// (one from the first LoadOrStore winner, possibly one more from cooldown expiry race).
-		// Without the fix, 10 concurrent requests could trigger 10 times.
+		// With atomic LoadOrStore dedup, concurrent requests for the same PR
+		// should produce at most 1 trigger (the first LoadOrStore winner).
+		// Allow up to 3 for rare races between expired-entry Store and new LoadOrStore.
 		require.LessOrEqual(t, trigger.count(), 3, "dedup should prevent most duplicate triggers")
 	})
 }
