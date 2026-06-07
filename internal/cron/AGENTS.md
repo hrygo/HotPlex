@@ -26,24 +26,24 @@ cron/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Scheduler lifecycle | `cron.go:17` Scheduler struct | Start/Shutdown/CreateJob/UpdateJob/DeleteJob |
-| Timer tick engine | `timer.go:14` timerLoop | arm/stop/tryAcquireSlot (CAS concurrency cap) |
-| Concurrency control | `timer.go:27` tryAcquireSlot | atomic CAS with maxConcurrent limit |
-| Job CRUD | `cron.go:151` CreateJob, UpdateJob, DeleteJob | Validate + persist + rebuild index |
+| Scheduler lifecycle | `cron.go` Scheduler struct | Start/Shutdown/CreateJob/UpdateJob/DeleteJob |
+| Timer tick engine | `timer.go` timerLoop | arm/stop/tryAcquireSlot (CAS concurrency cap) |
+| Concurrency control | `timer.go` tryAcquireSlot | atomic CAS with maxConcurrent limit |
+| Job CRUD | `cron.go` CreateJob, UpdateJob, DeleteJob | Validate + persist + rebuild index |
 | In-memory index | `cron.go` rebuildIndex/mergeJobState | map[string]*CronJob, reloaded on mutation |
-| Store interface | `store.go:19` Store | Create/Update/Delete/Get/GetByName/List/UpdateState/SetEnabled/UpsertByName |
-| SQLite persistence | `store.go:31` SQLiteStore | WAL mode, writeMu for SQLITE_BUSY prevention |
-| Job data model | `types.go:97` CronJob | ID, Name, Schedule, Payload, State, lifecycle fields |
+| Store interface | `store.go` Store | Create/Update/Delete/Get/GetByName/List/UpdateState/SetEnabled/UpsertByName |
+| SQLite persistence | `store.go` SQLiteStore | WAL mode, writeMu for SQLITE_BUSY prevention |
+| Job data model | `types.go` CronJob | ID, Name, Schedule, Payload, State, lifecycle fields |
 | Schedule types | `schedule.go` | at (one-shot RFC3339), every (interval ms), cron (5-field expr + tz) |
-| Schedule validation | `schedule.go:61` ValidateSchedule | at: parse RFC3339, every: min 60s, cron: robfig parser |
-| Job validation | `normalize.go:44` ValidateJob | Required fields, schedule, prompt, platform_key, lifecycle constraints |
-| Prompt injection guard | `normalize.go:28` ValidateJobPrompt | 6 threat patterns, 4KB limit |
-| Executor | `executor.go:29` Executor | StartSession → send prompt → poll completion |
-| Attached session dispatch | `attached.go:28` AttachedSessionHandler | ResumeAndInput (idle/terminated) or InjectInput (running) |
-| Result delivery | `delivery.go:16` Delivery | ResponseExtractor + PlatformDeliverer + retry queue + retryLoop |
-| YAML batch import | `loader.go:32` LoadFromYAML | Name-based idempotent upsert, recompute next_run |
+| Schedule validation | `schedule.go` ValidateSchedule | at: parse RFC3339, every: min 60s, cron: robfig parser |
+| Job validation | `normalize.go` ValidateJob | Required fields, schedule, prompt, platform_key, lifecycle constraints |
+| Prompt injection guard | `normalize.go` ValidateJobPrompt | 6 threat patterns, 4KB limit |
+| Executor | `executor.go` Executor | StartSession → send prompt → poll completion |
+| Attached session dispatch | `attached.go` AttachedSessionHandler | ResumeAndInput (idle/terminated) or InjectInput (running) |
+| Result delivery | `delivery.go` Delivery | ResponseExtractor + PlatformDeliverer + retry queue + retryLoop |
+| YAML batch import | `loader.go` LoadFromYAML | Name-based idempotent upsert, recompute next_run |
 | Error classification | `errors.go` | classifyError (timeout/network/rate_limit/server/exec), isTemporaryError |
-| Backoff retry | `retry.go:10` backoff | 30s→1m→5m→15m→1h exponential, scheduleRetry |
+| Backoff retry | `retry.go` backoff | 30s→1m→5m→15m→1h exponential, scheduleRetry (job retry; see delivery.go for delivery retry) |
 | Skill manual | `skill.go` SkillManual | go:embed cron-skill-manual.md, released to B channel |
 
 ## KEY PATTERNS

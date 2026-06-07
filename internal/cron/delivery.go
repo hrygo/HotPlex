@@ -106,7 +106,9 @@ func (d *Delivery) deliverResult(ctx context.Context, job *CronJob, response str
 		if isTemporaryError(err) {
 			status = "exhausted"
 		}
-		observability.CronDeliveryRetry().Add(context.Background(), 1,
+		// Use caller ctx to preserve trace linkage; OTel synchronous
+		// counters record regardless of ctx cancellation.
+		observability.CronDeliveryRetry().Add(ctx, 1,
 			metric.WithAttributes(
 				attribute.String("status", status),
 				attribute.String("platform", job.Platform),
@@ -120,7 +122,7 @@ func (d *Delivery) deliverResult(ctx context.Context, job *CronJob, response str
 
 	// Record success on retry (attempt > 1 means this was a retry).
 	if attempt > 1 {
-		observability.CronDeliveryRetry().Add(context.Background(), 1,
+		observability.CronDeliveryRetry().Add(ctx, 1,
 			metric.WithAttributes(
 				attribute.String("status", "success"),
 				attribute.String("platform", job.Platform),
@@ -243,6 +245,8 @@ func (d *Delivery) flushPending(ctx context.Context) {
 
 // retryBackoff computes the backoff duration for a given attempt number.
 // Uses exponential backoff: 30s, 1m, 2m, capped at 5m.
+// Unlike retry.backoff (table-based, for job execution retry up to 1h),
+// this is purpose-built for delivery retry with a shorter cap.
 func retryBackoff(attempt int) time.Duration {
 	d := initialBackoff
 	for i := 1; i < attempt; i++ {

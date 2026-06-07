@@ -6,6 +6,8 @@ import (
 )
 
 // backoffDurations defines exponential backoff intervals for consecutive failures.
+// Used for job execution retry (up to 1h); see delivery.retryBackoff for
+// platform delivery retry (capped at 5m).
 var backoffDurations = []time.Duration{
 	30 * time.Second,
 	1 * time.Minute,
