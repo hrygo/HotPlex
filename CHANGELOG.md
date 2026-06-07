@@ -4,7 +4,7 @@
 
 ### Summary
 
-v1.26.0 是一次 minor 版本更新，聚焦于 **多 Bot 配置体验** 和 **Worker 架构现代化**。核心变更将 Agent 配置路径从平台运行时 ID（`ou_xxx`/`U04ABC`）迁移为 YAML 配置名（`my-bot`），使路径可读且不受 Bot 重命名影响。Gateway 层会话状态编排下沉至 Worker 层，消除 3 个 gateway 接口和 7 处类型断言。安全方面新增可配置 CORS origins 和 RFC 9116 security.txt 端点。
+v1.26.0 是一次 minor 版本更新，聚焦于 **多 Bot 配置体验** 和 **Worker 架构现代化**。核心变更将 Agent 配置路径从平台运行时 ID（`ou_xxx`/`U04ABC`）迁移为 YAML 配置名（`my-bot`），使路径可读且不受 Bot 重命名影响。Gateway 层会话状态编排下沉至 Worker 层，消除 3 个 gateway 接口和 7 处类型断言。安全方面新增可配置 CORS origins 和 RFC 9116 security.txt 端点。ACP Worker 新增通知排空机制解决输出丢失问题。
 
 ### Added
 
@@ -25,6 +25,9 @@ v1.26.0 是一次 minor 版本更新，聚焦于 **多 Bot 配置体验** 和 **
 ### Fixed
 
 - **Session**: GC deadlock — `worker.Terminate()` moved outside session mutex, preventing blocking all concurrent reads during graceful shutdown. (#656)
+- **Worker**: ACP notification drain — channel handshake ensures `MessageDelta` reaches bridge before `Done`, fixing empty text output for all ACP turns. (#685)
+- **Gateway Core**: TERMINATED session now attempts resume with fallback to fresh start — idle_timeout/gc no longer lose conversation context. (#683)
+- **Events**: `ToInt64`/`ToFloat64` handle `int32` type — atomic counter values from `sessionAccumulator` no longer cause turn summary loss and feishu card instability. (#688)
 - **Cron**: Timeout errors now logged with `error_type` + state confirmation in executor. (#667)
 - **CLI**: `doctor config.required` checker now recognizes multi-bot YAML configurations. (#671)
 - **Configuration**: Config watcher `~` expansion — `fsnotify` failed with "no such file" when home directory was specified with tilde. (#673, #674)
