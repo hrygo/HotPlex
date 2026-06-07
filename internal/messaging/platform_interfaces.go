@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 
+	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -57,5 +58,5 @@ type HandlerInterface interface {
 // SessionStarter creates a new gateway session for a platform message.
 // Implemented by gateway.Bridge and injected during wiring.
 type SessionStarter interface {
-	StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID, botName string, injectExclude ...string) error
+	StartPlatformSession(ctx context.Context, params worker.SessionStartParams) error
 }

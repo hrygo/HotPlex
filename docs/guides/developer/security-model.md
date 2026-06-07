@@ -125,7 +125,8 @@ Cron 执行和 Session 启动时，Gateway 注入以下环境变量：
 
 | 变量 | 说明 |
 |------|------|
-| `GATEWAY_BOT_ID` | 当前 Bot 的 ID |
+| `GATEWAY_BOT_ID` | 当前 Bot 的平台运行时 ID（如 `U12345`） |
+| `GATEWAY_BOT_NAME` | 当前 Bot 的 YAML 配置名（如 `my-bot`），用于 agent config 路径解析 |
 | `GATEWAY_USER_ID` | 当前用户的 ID |
 | `GATEWAY_SESSION_ID` | 当前 Session 的 ID |
 

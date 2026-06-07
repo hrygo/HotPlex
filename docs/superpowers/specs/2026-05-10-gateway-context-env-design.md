@@ -18,6 +18,7 @@ Inject a unified set of `GATEWAY_*` environment variables into all worker proces
 |----------|---------------|-----------------|---------|
 | `GATEWAY_PLATFORM` | `"slack"` | `"feishu"` | `slack` |
 | `GATEWAY_BOT_ID` | `botID` | `botOpenID` | `B12345` |
+| `GATEWAY_BOT_NAME` | `botName` | `botName` | `my-bot` |
 | `GATEWAY_USER_ID` | `userID` | `userID` | `U12345` |
 | `GATEWAY_CHANNEL_ID` | `channel_id` | `chat_id` | `C12345` |
 | `GATEWAY_THREAD_ID` | `thread_ts` | `message_id` | `1234.56` |

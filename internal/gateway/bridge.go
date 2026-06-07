@@ -334,7 +334,9 @@ var _ = events.Clone // compile-time check that Clone is accessible
 //  4. No worker, state=TERMINATED/DELETED → Start fresh (skip resume)
 //  5. No worker, state=RUNNING/IDLE → Resume (--resume)
 //     If Resume fails (files gone/corrupted), fall back to Start (--session-id)
-func (b *Bridge) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID, botName string, injectExclude ...string) error {
+func (b *Bridge) StartPlatformSession(ctx context.Context, params worker.SessionStartParams) error {
+	sessionID, ownerID, workerType, workDir, sandbox, platform := params.ID, params.UserID, string(params.WorkerType), params.WorkDir, params.PlatformKey["_sandbox"], params.Platform
+	platformKey, botID, botName, injectExclude := params.PlatformKey, params.BotID, params.BotName, params.InjectExclude
 	b.log.Debug("bridge: StartPlatformSession called", "session_id", sessionID, "owner_id", ownerID, "worker_type", workerType, "work_dir", workDir, "sandbox", sandbox, "platform", platform, "platform_key", platformKey, "bot_id", botID, "bot_name", botName)
 	injectSandbox(platformKey, sandbox)
 	si, err := b.sm.Get(ctx, sessionID)

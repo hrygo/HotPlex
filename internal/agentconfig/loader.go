@@ -205,7 +205,7 @@ func resolveFile(dir, platform, botName, fileName string) (string, error) {
 				return "", err
 			}
 			if content != "" {
-				slog.Debug("agentconfig: legacy default/ directory detected; move files to platform-level",
+				slog.Warn("agentconfig: legacy default/ directory detected; move files to platform-level",
 					"platform", platform, "file", fileName)
 				return content, nil
 			}

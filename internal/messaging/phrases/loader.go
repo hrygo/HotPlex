@@ -62,7 +62,7 @@ func Load(dir, platform, botName string) (*Phrases, error) {
 		// #678 and #679, this fallback ensures they are still discovered.
 		legacyPath := filepath.Join(dir, platform, agentconfig.LegacyDefaultBotName, "PHRASES.md")
 		if _, err := os.Stat(legacyPath); err == nil {
-			slog.Debug("phrases: legacy default/ directory detected; move files to platform-level",
+			slog.Warn("phrases: legacy default/ directory detected; move files to platform-level",
 				"platform", platform)
 			levels = append(levels, loadLevel{
 				path:   legacyPath,
