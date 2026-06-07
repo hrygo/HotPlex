@@ -86,18 +86,12 @@ func (m *Mapper) Map(evt *WorkerEvent) ([]*events.Envelope, error) {
 			return nil, fmt.Errorf("mapper: result payload is not *ResultPayload: %T", evt.Payload)
 		}
 		return m.mapResult(payload)
-	case EventSystem:
+	case EventSystem, EventSessionState:
 		raw, ok := evt.Payload.(json.RawMessage)
 		if !ok {
-			return nil, fmt.Errorf("mapper: system payload is not json.RawMessage: %T", evt.Payload)
+			return nil, fmt.Errorf("mapper: %s payload is not json.RawMessage: %T", evt.Type, evt.Payload)
 		}
-		return m.mapRawStringPayload(raw, m.mapSystem)
-	case EventSessionState:
-		raw, ok := evt.Payload.(json.RawMessage)
-		if !ok {
-			return nil, fmt.Errorf("mapper: session_state payload is not json.RawMessage: %T", evt.Payload)
-		}
-		return m.mapRawStringPayload(raw, m.mapSessionState)
+		return m.mapRawStringPayload(raw, m.mapState)
 	default:
 		return nil, fmt.Errorf("mapper: unknown event type: %v", evt.Type)
 	}
@@ -216,8 +210,8 @@ func (m *Mapper) mapResult(p *ResultPayload) ([]*events.Envelope, error) {
 	}, nil
 }
 
-// mapSystem converts system status to state event.
-func (m *Mapper) mapSystem(status string) (*events.Envelope, error) { //nolint:unparam // consistent mapper API
+// mapState converts system/session_state status to state event.
+func (m *Mapper) mapState(status string) (*events.Envelope, error) {
 	state, ok := statusToSessionState(status)
 	if !ok {
 		return nil, nil
@@ -234,22 +228,89 @@ func (m *Mapper) mapSystem(status string) (*events.Envelope, error) { //nolint:u
 	), nil
 }
 
-// mapSessionState converts session_state_changed to state event.
-func (m *Mapper) mapSessionState(stateStr string) (*events.Envelope, error) { //nolint:unparam // consistent mapper API
-	state, ok := statusToSessionState(stateStr)
-	if !ok {
-		return nil, nil
+// MapControl maps a control-request event to AEP envelopes.
+// All control-event AEP construction is consolidated here, removing inline
+// json.Unmarshal calls and RawMessage access from the worker layer.
+func (m *Mapper) MapControl(cr *ControlRequestPayload) []*events.Envelope {
+	switch cr.Subtype {
+	case string(ControlCanUseTool):
+		if cr.ToolName == "AskUserQuestion" {
+			return []*events.Envelope{m.mapQuestionRequest(cr)}
+		}
+		return []*events.Envelope{m.mapPermissionRequest(cr)}
+	case "elicitation":
+		return []*events.Envelope{m.mapElicitationRequest(cr)}
+	default:
+		return nil
 	}
+}
 
+// mapQuestionRequest builds a QuestionRequest envelope from AskUserQuestion control.
+func (m *Mapper) mapQuestionRequest(cr *ControlRequestPayload) *events.Envelope {
+	var questions []events.Question
+	if len(cr.Input) > 0 {
+		var input struct {
+			Questions []events.Question `json:"questions"`
+		}
+		if err := json.Unmarshal(cr.Input, &input); err != nil {
+			m.log.Warn("mapper: question unmarshal failed", "err", err)
+		}
+		questions = input.Questions
+	}
 	return events.NewEnvelope(
-		aep.NewID(),
-		m.sessionID,
-		m.seqGen(),
-		events.State,
-		events.StateData{
-			State: state,
+		aep.NewID(), m.sessionID, m.seqGen(),
+		events.QuestionRequest,
+		events.QuestionRequestData{
+			ID:        cr.RequestID,
+			ToolName:  cr.ToolName,
+			Questions: questions,
 		},
-	), nil
+	)
+}
+
+// mapPermissionRequest builds a PermissionRequest envelope for tool approval.
+func (m *Mapper) mapPermissionRequest(cr *ControlRequestPayload) *events.Envelope {
+	var input map[string]any
+	if len(cr.Input) > 0 {
+		if err := json.Unmarshal(cr.Input, &input); err != nil {
+			m.log.Warn("mapper: permission input unmarshal failed", "err", err)
+		}
+	}
+	args := []string{"{}"}
+	if len(input) > 0 {
+		if s, err := json.Marshal(input); err == nil {
+			args = []string{string(s)}
+		}
+	}
+	return events.NewEnvelope(
+		aep.NewID(), m.sessionID, m.seqGen(),
+		events.PermissionRequest,
+		events.PermissionRequestData{
+			ID:          cr.RequestID,
+			ToolName:    cr.ToolName,
+			Description: cr.ToolName,
+			Args:        args,
+			InputRaw:    cr.Input,
+		},
+	)
+}
+
+// mapElicitationRequest builds an ElicitationRequest envelope.
+// Uses pre-parsed Elicitation fields from ControlRequestPayload (parsed in parser).
+func (m *Mapper) mapElicitationRequest(cr *ControlRequestPayload) *events.Envelope {
+	data := events.ElicitationRequestData{ID: cr.RequestID}
+	if cr.Elicitation != nil {
+		data.MCPServerName = cr.Elicitation.MCPServerName
+		data.Message = cr.Elicitation.Message
+		data.Mode = cr.Elicitation.Mode
+		data.URL = cr.Elicitation.URL
+		data.ElicitationID = cr.Elicitation.ElicitationID
+		data.RequestedSchema = cr.Elicitation.RequestedSchema
+	}
+	return events.NewEnvelope(
+		aep.NewID(), m.sessionID, m.seqGen(),
+		events.ElicitationRequest, data,
+	)
 }
 
 func mapContextUsageResponse(raw map[string]any) *events.ContextUsageData {

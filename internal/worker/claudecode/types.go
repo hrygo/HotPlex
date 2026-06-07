@@ -78,4 +78,18 @@ type ControlRequestPayload struct {
 	Subtype   string          `json:"subtype"`
 	ToolName  string          `json:"tool_name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
+
+	// Elicitation fields are populated by the parser for subtype="elicitation".
+	// This avoids re-parsing raw bytes in the worker/mapper layer.
+	Elicitation *ElicitationPayload `json:"-"`
+}
+
+// ElicitationPayload holds MCP elicitation-specific fields parsed once in the parser.
+type ElicitationPayload struct {
+	MCPServerName   string         `json:"mcp_server_name"`
+	Message         string         `json:"message"`
+	Mode            string         `json:"mode,omitempty"`
+	URL             string         `json:"url,omitempty"`
+	ElicitationID   string         `json:"elicitation_id,omitempty"`
+	RequestedSchema map[string]any `json:"requested_schema,omitempty"`
 }

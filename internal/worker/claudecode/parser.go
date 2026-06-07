@@ -409,14 +409,33 @@ func (p *Parser) parseControlRequest(msg *SDKMessage) ([]*WorkerEvent, error) {
 		}}, nil
 
 	default:
-		// can_use_tool, set_permission_mode, set_model, mcp_status, etc.
-		// worker.go dispatches by Subtype: can_use_tool → gateway, set_*/mcp_* → auto-success.
+		// can_use_tool, set_permission_mode, set_model, mcp_status, elicitation, etc.
+		// Parse elicitation-specific fields once in the parser so the
+		// mapper layer never accesses RawMessage directly.
+		if req.Subtype == "elicitation" {
+			req.Elicitation = p.parseElicitationFields(payload)
+		}
 		return []*WorkerEvent{{
 			Type:       EventControl,
 			Payload:    &req,
 			RawMessage: msg,
 		}}, nil
 	}
+}
+
+// parseElicitationFields extracts elicitation-specific fields from the raw
+// control_request payload. Called once in the parser so the mapper layer
+// does not need to access RawMessage directly.
+func (p *Parser) parseElicitationFields(raw json.RawMessage) *ElicitationPayload {
+	if len(raw) == 0 {
+		return nil
+	}
+	var el ElicitationPayload
+	if err := json.Unmarshal(raw, &el); err != nil {
+		p.log.Warn("parser: elicitation unmarshal failed", "err", err)
+		return nil
+	}
+	return &el
 }
 
 // parseSystem handles system messages.
