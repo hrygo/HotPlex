@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.26.1] - 2026-06-08
+
+### Summary
+
+v1.26.1 是一次 patch 版本更新，修复 ACP Worker 启动后首轮 prompt 返回空文本的关键 bug，以及 `make dev-reset` 的日志清理竞态问题。
+
+### Fixed
+
+- **Worker**: ACP readLoop goroutine exited prematurely after initial handshake notifications — burst drain loop used `return` (exits entire function) instead of labeled `break`, killing the notification consumer before any prompt text arrived.
+- **Infrastructure**: `make dev-reset` log cleanup raced with running gateway — restructured as three-phase stop→clean→start sequence with confirmed process termination before file deletion.
+
 ## [1.26.0] - 2026-06-07
 
 ### Summary
