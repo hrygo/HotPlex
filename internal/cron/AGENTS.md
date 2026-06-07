@@ -17,7 +17,8 @@ cron/
   delivery.go    # Delivery: extract response + route to platform, in-memory retry queue with exponential backoff
   errors.go      # classifyError: string-based error classification (timeout/rate_limit/server/exec)
   loader.go      # LoadFromYAML: name-idempotent upsert from YAML defs
-  retry.go       # backoff schedule, isTemporaryError, scheduleRetry
+  errors.go      # classifyError: string-based error classification (timeout/network/rate_limit/server/exec), isTemporaryError
+  retry.go       # backoff schedule, scheduleRetry
   normalize.go   # ValidateJob, ValidateJobPrompt, threat detection, lifecycle constraints
   skill.go       # go:embed cron-skill-manual.md → B channel skill manual
   cron-skill-manual.md  # Embedded cron management manual for worker agents
@@ -42,7 +43,8 @@ cron/
 | Attached session dispatch | `attached.go:28` AttachedSessionHandler | ResumeAndInput (idle/terminated) or InjectInput (running) |
 | Result delivery | `delivery.go:16` Delivery | ResponseExtractor + PlatformDeliverer + retry queue + retryLoop |
 | YAML batch import | `loader.go:32` LoadFromYAML | Name-based idempotent upsert, recompute next_run |
-| Backoff retry | `retry.go:10` backoff | 30s→1m→5m→15m→1h exponential, isTemporaryError classification |
+| Error classification | `errors.go` | classifyError (timeout/rate_limit/server/exec), isTemporaryError |
+| Backoff retry | `retry.go:10` backoff | 30s→1m→5m→15m→1h exponential, scheduleRetry |
 | Skill manual | `skill.go` SkillManual | go:embed cron-skill-manual.md, released to B channel |
 
 ## KEY PATTERNS

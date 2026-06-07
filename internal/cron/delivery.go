@@ -43,6 +43,7 @@ type Delivery struct {
 	extract   ResponseExtractor
 	deliverFn PlatformDeliverer
 
+	// queue is an in-memory FIFO retry queue. Entries are lost on process restart.
 	queue []pendingDelivery
 	wg    sync.WaitGroup
 	stop  chan struct{}
