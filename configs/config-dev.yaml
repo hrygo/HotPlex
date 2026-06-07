@@ -34,7 +34,7 @@ worker:
   opencode_server:
     password: "${OPENCODE_SERVER_PASSWORD}"
   acp:
-    debug: true
+    debug: false
 
 log:
   level: "debug"
