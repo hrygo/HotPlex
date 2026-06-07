@@ -309,6 +309,9 @@ func copyJobDefinition(dst, src *CronJob) {
 	dst.Description = src.Description
 	dst.WorkDir = src.WorkDir
 	dst.BotID = src.BotID
+	// BotName: conditional overwrite preserves existing value when caller
+	// passes empty (e.g. cron update that doesn't change bot assignment).
+	// Matches PG upsert CASE WHEN semantics in pg_store.go.
 	if src.BotName != "" {
 		dst.BotName = src.BotName
 	}

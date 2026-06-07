@@ -49,7 +49,19 @@ Worker 进程新增 `GATEWAY_BOT_NAME` 环境变量注入，Cron 任务可通过
 
 ### 旧版配置目录兼容
 
-如果升级前已存在 `{platform}/default/` 目录下的配置文件（单 Bot 模式的旧路径），系统会自动回退查找并输出 `slog.Warn` 日志提示迁移。
+本次升级将单 Bot 归一化从 `Name:"default"` 改为 `Name:""`（空字符串）。这意味着单 Bot 模式下 Agent 配置直接使用平台级目录（如 `feishu/SOUL.md`），不再创建 `default/` 子目录。
+
+**受影响用户**：在 v1.25.0 之前的版本中已手动创建 `~/.hotplex/agent-configs/{platform}/default/` 目录并放入配置文件的用户。
+
+**Legacy fallback 行为**：
+- 系统在解析 Agent 配置时，若 `botName` 为空且平台级目录未找到目标文件，会自动回退检查 `{platform}/default/` 目录
+- 触发 fallback 时会输出 `slog.Warn` 日志提示迁移
+
+**建议迁移路径**（二选一）：
+1. **推荐**：将配置文件从 `default/` 移至平台级目录：`mv ~/.hotplex/agent-configs/feishu/default/* ~/.hotplex/agent-configs/feishu/`
+2. **替代**：在 YAML 中显式配置 `name: "default"` 使其成为正式的 bot-level 配置（此时路径保持 `feishu/default/SOUL.md` 不变）
+
+单 Bot 模式未手动创建 `default/` 目录的用户不受影响。
 
 ---
 
@@ -126,5 +138,5 @@ hotplex gateway status
 
 1. 停止 Gateway
 2. 恢复旧版二进制
-3. 数据库新增的 `bot_name` 列不影响旧版运行（旧版忽略未知列）
+3. 数据库新增的 `bot_name` 列不影响旧版运行（旧版 binary 的 SELECT 查询使用显式列名，不包含 `bot_name`，因此忽略该列）
 4. 如果已重命名配置目录，需要改回 Bot 运行时 ID 名称
