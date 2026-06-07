@@ -55,10 +55,11 @@ import (
 
 // Compile-time interface compliance checks.
 var (
-	_ worker.Worker           = (*Worker)(nil)
-	_ worker.SessionConn      = (*conn)(nil)
-	_ worker.ControlRequester = (*Worker)(nil)
-	_ worker.WorkerCommander  = (*Worker)(nil)
+	_ worker.Worker              = (*Worker)(nil)
+	_ worker.SessionConn         = (*conn)(nil)
+	_ worker.ControlRequester    = (*Worker)(nil)
+	_ worker.WorkerCommander     = (*Worker)(nil)
+	_ worker.SystemPromptUpdater = (*Worker)(nil)
 )
 
 // Env blocklist for OpenCode Server worker.
@@ -518,6 +519,23 @@ func (w *Worker) Rewind(ctx context.Context, targetID string) error {
 		return fmt.Errorf("opencode server: commander not initialized")
 	}
 	return w.cmd.Rewind(ctx, targetID)
+}
+
+// UpdateSystemPrompt updates the stored system prompt on the active HTTP connection.
+// This is called by bridge after ResetContext to push a refreshed system prompt
+// without requiring a full worker restart. OCS sends the system prompt per-message,
+// so updating it here ensures subsequent messages carry the new prompt.
+func (w *Worker) UpdateSystemPrompt(prompt string) {
+	w.Mu.Lock()
+	conn := w.httpConn
+	w.Mu.Unlock()
+
+	if conn == nil {
+		return
+	}
+	conn.mu.Lock()
+	conn.systemPrompt = prompt
+	conn.mu.Unlock()
 }
 
 // ─── Internal Methods ─────────────────────────────────────────────────────────
