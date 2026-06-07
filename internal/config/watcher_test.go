@@ -210,6 +210,7 @@ func TestWatcher_isRelevant(t *testing.T) {
 
 	tmpFile := createTempConfigFile(t)
 	w := NewWatcher(slog.Default(), tmpFile, nil, nil, nil)
+	differentPath := filepath.Join(t.TempDir(), "other.yaml")
 
 	tests := []struct {
 		name     string
@@ -233,7 +234,7 @@ func TestWatcher_isRelevant(t *testing.T) {
 		},
 		{
 			name:     "Write event for different path",
-			event:    fsnotify.Event{Name: "/tmp/other.yaml", Op: fsnotify.Write},
+			event:    fsnotify.Event{Name: differentPath, Op: fsnotify.Write},
 			expected: false,
 		},
 		{
