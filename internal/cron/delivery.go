@@ -169,14 +169,20 @@ func (d *Delivery) StartRetryLoop(ctx context.Context) {
 }
 
 // StopRetryLoop signals the retry goroutine to stop and waits for it to drain.
-// Idempotent: safe to call multiple times; only the first call signals stop.
+// Idempotent: safe to call multiple times; only the first call signals stop and drains.
 func (d *Delivery) StopRetryLoop() {
+	stopped := false
 	d.mu.Lock()
 	if d.stop != nil {
 		close(d.stop)
 		d.stop = nil
+		stopped = true
 	}
 	d.mu.Unlock()
+
+	if !stopped {
+		return
+	}
 
 	d.wg.Wait()
 
