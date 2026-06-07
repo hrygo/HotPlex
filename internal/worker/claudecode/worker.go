@@ -30,6 +30,12 @@ import (
 var _ worker.Worker = (*Worker)(nil)
 var _ worker.WorkerCommander = (*Worker)(nil)
 
+// trySender is a named interface for non-blocking envelope send.
+// Production: *base.Conn. Tests: mockConn. Compile-time safe.
+type trySender interface {
+	TrySend(env *events.Envelope) bool
+}
+
 // commandParts stores the space-split command (binary + optional prefix args).
 // Thread-safe via atomic.Value. Default: ["claude"].
 var commandParts atomic.Value // []string
@@ -736,99 +742,22 @@ func (w *Worker) readOutput(ctx context.Context) {
 				if !ok {
 					continue
 				}
-				switch cr.Subtype {
-				case string(ControlCanUseTool):
-					if cr.ToolName == "AskUserQuestion" {
-						// AskUserQuestion → QuestionRequest event
-						var questions []events.Question
-						if len(cr.Input) > 0 {
-							var input struct {
-								Questions []events.Question `json:"questions"`
-							}
-							if err := json.Unmarshal(cr.Input, &input); err != nil {
-								w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
-							}
-							questions = input.Questions
-						}
-						env := events.NewEnvelope(
-							aep.NewID(),
-							w.sessionID,
-							w.nextSeq(),
-							events.QuestionRequest,
-							events.QuestionRequestData{
-								ID:        cr.RequestID,
-								ToolName:  cr.ToolName,
-								Questions: questions,
-							},
-						)
-						w.trySend(env)
-					} else {
-						// Check auto-approve list before forwarding to user
-						if autoApproveTool(w.control, cr) {
-							continue
-						}
-						// Other tools → PermissionRequest event
-						var input map[string]any
-						if len(cr.Input) > 0 {
-							if err := json.Unmarshal(cr.Input, &input); err != nil {
-								w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
-							}
-						}
-						args := []string{`{}`}
-						if len(input) > 0 {
-							if s, err := json.Marshal(input); err == nil {
-								args = []string{string(s)}
-							}
-						}
-						env := events.NewEnvelope(
-							aep.NewID(),
-							w.sessionID,
-							w.nextSeq(),
-							events.PermissionRequest,
-							events.PermissionRequestData{
-								ID:          cr.RequestID,
-								ToolName:    cr.ToolName,
-								Description: cr.ToolName,
-								Args:        args,
-								InputRaw:    cr.Input,
-							},
-						)
-						w.trySend(env)
+				// Check auto-approve before mapping for permission requests
+				if cr.Subtype == string(ControlCanUseTool) && cr.ToolName != "AskUserQuestion" {
+					if autoApproveTool(w.control, cr) {
+						continue
 					}
-				case "elicitation":
-					// MCP Elicitation → ElicitationRequest event
-					var elData struct {
-						MCPServerName   string         `json:"mcp_server_name"`
-						Message         string         `json:"message"`
-						Mode            string         `json:"mode,omitempty"`
-						URL             string         `json:"url,omitempty"`
-						ElicitationID   string         `json:"elicitation_id,omitempty"`
-						RequestedSchema map[string]any `json:"requested_schema,omitempty"`
-					}
-					if evt.RawMessage != nil && len(evt.RawMessage.Response) > 0 {
-						if err := json.Unmarshal(evt.RawMessage.Response, &elData); err != nil {
-							w.BaseWorker.Log.Warn("claudecode: control unmarshal failed", "session_id", w.sessionID, "err", err)
-						}
-					}
-					env := events.NewEnvelope(
-						aep.NewID(),
-						w.sessionID,
-						w.nextSeq(),
-						events.ElicitationRequest,
-						events.ElicitationRequestData{
-							ID:              cr.RequestID,
-							MCPServerName:   elData.MCPServerName,
-							Message:         elData.Message,
-							Mode:            elData.Mode,
-							URL:             elData.URL,
-							ElicitationID:   elData.ElicitationID,
-							RequestedSchema: elData.RequestedSchema,
-						},
-					)
-					w.trySend(env)
-				default:
+				}
+				// Delegate control-event mapping to Mapper.MapControl.
+				// For non-mapped subtypes (set_*, mcp_*), MapControl returns nil
+				// and we auto-success via HandlePayload.
+				envs := w.mapper.MapControl(cr)
+				if len(envs) == 0 {
 					// set_*, mcp_*, etc.: auto-success
 					_, _ = w.control.HandlePayload(cr)
+				}
+				for _, env := range envs {
+					w.trySend(env)
 				}
 
 			default:
@@ -933,8 +862,8 @@ func (w *Worker) trySend(env *events.Envelope) {
 		return
 	}
 
-	// Duck-typed interface: *base.Conn (production) and mockConn (tests) both satisfy it.
-	ts, ok := conn.(interface{ TrySend(*events.Envelope) bool })
+	// Named interface: *base.Conn (production) and mockConn (tests) both satisfy it.
+	ts, ok := conn.(trySender)
 	if !ok {
 		w.BaseWorker.Log.Warn("claudecode: trySend conn type unsupported", "session_id", w.sessionID, "type", fmt.Sprintf("%T", conn))
 		return
