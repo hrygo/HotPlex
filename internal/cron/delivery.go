@@ -83,14 +83,14 @@ func (d *Delivery) Deliver(ctx context.Context, job *CronJob, sessionKey string)
 
 // deliverResult attempts delivery and enqueues for retry on retriable failures.
 func (d *Delivery) deliverResult(ctx context.Context, job *CronJob, response string, attempt int) {
-	if d.deliverFn == nil {
-		d.log.Debug("cron delivery: no platform deliverer configured", "platform", job.Platform)
-		return
-	}
-
 	d.mu.Lock()
 	fn := d.deliverFn
 	d.mu.Unlock()
+
+	if fn == nil {
+		d.log.Debug("cron delivery: no platform deliverer configured", "platform", job.Platform)
+		return
+	}
 
 	if err := fn(ctx, job.Platform, job.PlatformKey, response); err != nil {
 		if isTemporaryError(err) && attempt < maxRetryAttempts {
