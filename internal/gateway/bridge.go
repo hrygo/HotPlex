@@ -331,9 +331,11 @@ var _ = events.Clone // compile-time check that Clone is accessible
 //  1. No DB record → Create + Start (--session-id)
 //  2. Worker alive → Reuse (forward message)
 //  3. No worker, state=CREATED → Start (--session-id)
-//  4. No worker, state=TERMINATED/DELETED → Start fresh (skip resume)
-//  5. No worker, state=RUNNING/IDLE → Resume (--resume)
-//     If Resume fails (files gone/corrupted), fall back to Start (--session-id)
+//  4. No worker, state=TERMINATED → Resume (--resume), fallback to Start
+//     Preserves conversation context for idle_timeout/max_lifetime/gc/crash paths.
+//     After /reset, session files are already deleted so Resume falls back naturally.
+//  5. No worker, state=DELETED → Start fresh (no DB record to resume)
+//  6. No worker, state=RUNNING/IDLE → Resume (--resume), fallback to Start
 func (b *Bridge) StartPlatformSession(ctx context.Context, params worker.SessionStartParams) error {
 	sessionID, ownerID, workerType, workDir, sandbox, platform := params.ID, params.UserID, string(params.WorkerType), params.WorkDir, params.PlatformKey["_sandbox"], params.Platform
 	platformKey, botID, botName, injectExclude := params.PlatformKey, params.BotID, params.BotName, params.InjectExclude
@@ -358,15 +360,21 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, params worker.Session
 			b.log.Info("bridge: orphan platform session unstarted, starting fresh", "session_id", sessionID)
 			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, botName, injectExclude...)
 		}
-		// TERMINATED/DELETED — start fresh (skip resume).
-		// AttachWorker rejects non-active sessions (IsActive() returns false),
-		// so TERMINATED sessions cannot be resumed. DELETED sessions have no
-		// DB record to resume from. In both cases, startOrResumeOnInUse creates
-		// a new session with the same deterministic key, effectively replacing
-		// the orphaned one.
+		// TERMINATED — try resume first to preserve conversation context.
+		// ResumeSession handles TERMINATED→RUNNING transition internally.
+		// If session files are missing (e.g. after /reset deleted them),
+		// the worker's Resume() falls back to fresh start automatically.
+		// This restores pre-fe8dae54 behavior where all orphan sessions
+		// attempted resume regardless of state. Fixes #682.
 		if si.State == events.StateTerminated {
-			b.log.Info("bridge: orphan platform session terminated, starting fresh", "session_id", sessionID)
-			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, botName, injectExclude...)
+			b.log.Info("bridge: orphan platform session terminated, attempting resume", "session_id", sessionID)
+			injectSandbox(si.PlatformKey, sandbox)
+			if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
+				b.log.Warn("bridge: resume failed for terminated session, falling back to new session",
+					"session_id", sessionID, "err", err)
+				return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, botName, injectExclude...)
+			}
+			return nil
 		}
 		if si.State == events.StateDeleted {
 			b.log.Info("bridge: orphan platform session already deleted, starting fresh", "session_id", sessionID)
