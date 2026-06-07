@@ -251,7 +251,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			// Must happen AFTER adapter.Start() so BotID is resolved from the platform.
 			homeDir, _ := os.UserHomeDir()
 			phrasesDir := filepath.Join(homeDir, ".hotplex", "phrases")
-			phr, phrasesErr := phrases.Load(phrasesDir, string(entry.Platform), entry.BotID)
+			phr, phrasesErr := phrases.Load(phrasesDir, string(entry.Platform), entry.Name)
 			if phrasesErr != nil {
 				log.Warn("phrases: load failed, using defaults", "error", phrasesErr)
 				phr = phrases.Defaults()
@@ -272,13 +272,12 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 
 			// Hint: global agent-config files without bot-level directory.
 			if appCfg.AgentConfig.Enabled && appCfg.AgentConfig.ConfigDir != "" {
-				if botID := adapter.GetBotID(); botID != "" {
-					botDir := filepath.Join(appCfg.AgentConfig.ConfigDir, string(pt), botID)
+				if entry.Name != "" {
+					botDir := filepath.Join(appCfg.AgentConfig.ConfigDir, string(pt), entry.Name)
 					if _, err := os.Stat(botDir); os.IsNotExist(err) && agentconfig.HasGlobalFiles(appCfg.AgentConfig.ConfigDir) {
 						log.Warn("agent-config: global files found but no bot-level directory",
 							"platform", pt,
 							"bot", entry.Name,
-							"bot_id", botID,
 							"bot_dir", botDir)
 					}
 				}

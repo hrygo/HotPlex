@@ -184,6 +184,7 @@ type SessionInfo struct {
 	UserID        string              `json:"user_id"`
 	OwnerID       string              `json:"owner_id,omitempty"` // authenticated owner; falls back to UserID when nil
 	BotID         string              `json:"bot_id,omitempty"`   // SEC-007: bot isolation
+	BotName       string              `json:"bot_name,omitempty"` // YAML config name for agent-config resolution
 	WorkerType    worker.WorkerType   `json:"worker_type"`
 	State         events.SessionState `json:"state"`
 	CreatedAt     time.Time           `json:"created_at"`
@@ -249,11 +250,11 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 
 // Create creates a new session and persists it to SQLite.
 func (m *Manager) Create(ctx context.Context, id, userID string, workerType worker.WorkerType, allowedTools []string, workDir, title string) (*SessionInfo, error) {
-	return m.CreateWithBot(ctx, id, userID, "", workerType, allowedTools, "", nil, workDir, title, "")
+	return m.CreateWithBot(ctx, id, userID, "", "", workerType, allowedTools, "", nil, workDir, title, "")
 }
 
 // CreateWithBot creates a new session with explicit bot_id and persists it to SQLite.
-func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*SessionInfo, error) {
+func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*SessionInfo, error) {
 	if len(clientKey) > MaxClientKeyLen {
 		return nil, fmt.Errorf("%w: length %d exceeds maximum %d", ErrClientKeyTooLong, len(clientKey), MaxClientKeyLen)
 	}
@@ -266,6 +267,7 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID string, w
 		ID:           id,
 		UserID:       userID,
 		BotID:        botID,
+		BotName:      botName,
 		WorkerType:   workerType,
 		State:        events.StateCreated,
 		CreatedAt:    now,

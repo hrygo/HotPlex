@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/cli/pidutil"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/cron"
@@ -188,10 +189,16 @@ func resolvePlatform(cliPlatform string, cliPlatformKey map[string]string) (stri
 }
 
 // PrepareJobForCreate builds a CronJob from CLI flags.
-func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID, ownerID string, timeoutSec int, allowedTools []string, opts JobCreateOptions) (*cron.CronJob, error) {
+func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID, botName, ownerID string, timeoutSec int, allowedTools []string, opts JobCreateOptions) (*cron.CronJob, error) {
 	sched, err := ParseSchedule(scheduleRaw)
 	if err != nil {
 		return nil, err
+	}
+
+	if botName != "" {
+		if err := agentconfig.ValidateBotName(botName); err != nil {
+			return nil, fmt.Errorf("invalid bot_name: %w", err)
+		}
 	}
 
 	platform, platformKey := resolvePlatform(opts.Platform, opts.PlatformKey)
@@ -209,6 +216,7 @@ func PrepareJobForCreate(name, scheduleRaw, message, description, workDir, botID
 		Payload:        cron.CronPayload{Kind: payloadKind, Message: cron.SanitizePrompt(message), TargetSessionID: opts.TargetSessionID, AllowedTools: allowedTools, WorkerType: opts.WorkerType},
 		WorkDir:        workDir,
 		BotID:          botID,
+		BotName:        botName,
 		OwnerID:        ownerID,
 		Platform:       platform,
 		PlatformKey:    platformKey,

@@ -35,7 +35,7 @@ func cronJobColumns() []string {
 	return []string{
 		"id", "name", "description", "enabled",
 		"schedule_kind", "schedule_data", "payload_kind", "payload_data",
-		"work_dir", "bot_id", "owner_id", "platform", "platform_key",
+		"work_dir", "bot_id", "bot_name", "owner_id", "platform", "platform_key",
 		"timeout_sec", "delete_after_run", "silent", "max_retries", "max_runs", "expires_at",
 		"state", "created_at", "updated_at",
 	}
@@ -69,14 +69,14 @@ func TestPGStore_CreateJob(t *testing.T) {
 	stateJSON, _ := json.Marshal(job.State)
 
 	createSQL := dbutil.DialectPostgres.Rebind(
-		`INSERT INTO cron_jobs (` + jobColumns + `) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO cron_jobs (` + jobColumns + `) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 
 	mock.ExpectExec(regexp.QuoteMeta(createSQL)).
 		WithArgs(
 			job.ID, job.Name, job.Description, true,
 			string(job.Schedule.Kind), string(schedJSON),
 			string(job.Payload.Kind), string(payloadJSON),
-			job.WorkDir, job.BotID, job.OwnerID, job.Platform, string(platformKeyJSON),
+			job.WorkDir, job.BotID, job.BotName, job.OwnerID, job.Platform, string(platformKeyJSON),
 			job.TimeoutSec, false, false,
 			job.MaxRetries, job.MaxRuns, job.ExpiresAt,
 			string(stateJSON), job.CreatedAtMs, job.UpdatedAtMs,
@@ -104,7 +104,7 @@ func TestPGStore_GetJob(t *testing.T) {
 	rows := sqlmock.NewRows(cronJobColumns()).
 		AddRow("job-1", "test-job", "desc", 1,
 			"every", string(schedJSON), "isolated_session", string(payloadJSON),
-			"/work", "bot-1", "user-1", "slack", "null",
+			"/work", "bot-1", "", "user-1", "slack", "null",
 			30, 0, 0, 3, 10, "2027-01-01T00:00:00Z",
 			string(stateJSON), now, now)
 
@@ -160,12 +160,12 @@ func TestPGStore_ListJobs(t *testing.T) {
 	rows := sqlmock.NewRows(cronJobColumns()).
 		AddRow("job-1", "job-a", "", 1,
 			"every", string(schedJSON), "isolated_session", string(payloadJSON),
-			"", "bot-1", "user-1", "slack", "null",
+			"", "bot-1", "", "user-1", "slack", "null",
 			0, 0, 0, 0, 0, "",
 			string(stateJSON), now, now).
 		AddRow("job-2", "job-b", "", 0,
 			"cron", `{"kind":"cron","expr":"0 9 * * *"}`, "isolated_session", string(payloadJSON),
-			"", "bot-2", "user-2", "feishu", "null",
+			"", "bot-2", "", "user-2", "feishu", "null",
 			0, 0, 0, 0, 5, "2027-01-01T00:00:00Z",
 			string(stateJSON), now, now)
 

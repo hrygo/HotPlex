@@ -96,11 +96,31 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 		}
 		var botID string
 		var injectExclude []string
+		var botName string
 		if a := b.getAdapter(); a != nil {
 			botID = a.GetBotID()
 			injectExclude = a.GetInjectExclude()
+			botName = a.GetBotName()
 		}
-		if err := b.starter.StartPlatformSession(ctx, env.SessionID, env.OwnerID, b.workerType, b.workDir, b.sandbox, platform, platformKey, botID, injectExclude...); err != nil {
+		params := worker.SessionStartParams{
+			ID:            env.SessionID,
+			UserID:        env.OwnerID,
+			BotID:         botID,
+			BotName:       botName,
+			WorkerType:    worker.WorkerType(b.workerType),
+			WorkDir:       b.workDir,
+			Platform:      platform,
+			PlatformKey:   platformKey,
+			InjectExclude: injectExclude,
+		}
+		// Inject sandbox into PlatformKey so gateway can extract it.
+		if b.sandbox != "" {
+			if params.PlatformKey == nil {
+				params.PlatformKey = make(map[string]string, 1)
+			}
+			params.PlatformKey["_sandbox"] = b.sandbox
+		}
+		if err := b.starter.StartPlatformSession(ctx, params); err != nil {
 			return fmt.Errorf("messaging bridge: session start failed: %w", err)
 		}
 	}

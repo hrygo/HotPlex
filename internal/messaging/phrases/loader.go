@@ -2,40 +2,73 @@ package phrases
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+
+	"github.com/hrygo/hotplex/internal/agentconfig"
 )
+
+// sanitizePlatform prevents path traversal through the platform parameter.
+// Values are internal constants ("slack", "feishu", "webchat"), but
+// filepath.Base neutralizes any future injection without breaking empty string.
+func sanitizePlatform(platform string) string {
+	if platform == "" {
+		return ""
+	}
+	return filepath.Base(platform)
+}
+
+// ErrInvalidBotName aliases agentconfig.ErrInvalidBotName so callers of
+// phrases.Load can use errors.Is without importing agentconfig directly.
+var ErrInvalidBotName = agentconfig.ErrInvalidBotName
 
 // Load reads PHRASES.md from all levels with cascade-append:
 //
 //  1. dir/PHRASES.md (global, weight 2)
 //  2. dir/{platform}/PHRASES.md (platform, weight 1)
-//  3. dir/{platform}/{botID}/PHRASES.md (bot, weight 4)
+//  3. dir/{platform}/{botName}/PHRASES.md (bot, weight 4)
 //
 // Each level's entries are appended to the pool, never replaced.
 // Higher-level entries have higher selection weight in Random().
 // Code defaults (weight 1) are only included as fallback when no
 // external configuration exists for a given category.
 // Missing directory or file is not an error — skips gracefully.
-func Load(dir, platform, botID string) (*Phrases, error) {
+func Load(dir, platform, botName string) (*Phrases, error) {
 	type loadLevel struct {
 		path   string
 		weight int
 	}
+
+	// Defense-in-depth: sanitize platform to prevent path traversal.
+	platform = sanitizePlatform(platform)
 
 	levels := []loadLevel{
 		{filepath.Join(dir, "PHRASES.md"), WeightGlobal},
 		{filepath.Join(dir, platform, "PHRASES.md"), WeightPlatform},
 	}
 
-	if botID != "" {
-		if filepath.Base(botID) != botID {
-			return nil, fmt.Errorf("phrases: invalid botID %q: path traversal detected", botID)
+	if botName != "" {
+		if err := agentconfig.ValidateBotName(botName); err != nil {
+			return nil, err
 		}
 		levels = append(levels, loadLevel{
-			path:   filepath.Join(dir, platform, botID, "PHRASES.md"),
+			path:   filepath.Join(dir, platform, botName, "PHRASES.md"),
 			weight: WeightBot,
 		})
+	} else if platform != "" {
+		// Legacy backward compat: before PR #679, single-bot mode used "default"
+		// as botName. If a user created phrases under {platform}/default/ between
+		// #678 and #679, this fallback ensures they are still discovered.
+		legacyPath := filepath.Join(dir, platform, agentconfig.LegacyDefaultBotName, "PHRASES.md")
+		if _, err := os.Stat(legacyPath); err == nil {
+			slog.Warn("phrases: legacy default/ directory detected; move files to platform-level",
+				"platform", platform)
+			levels = append(levels, loadLevel{
+				path:   legacyPath,
+				weight: WeightBot,
+			})
+		}
 	}
 
 	// Collect external entries by category.

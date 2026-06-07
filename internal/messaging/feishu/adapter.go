@@ -41,12 +41,13 @@ type Adapter struct {
 	wsClient           *ws.Client
 	larkClient         *lark.Client
 	botOpenID          string
+	botName            string // YAML config name for agent-config path resolution
 	injectExclude      []string
 	transcriber        Transcriber
 	turnSummaryEnabled bool
 	ttsPipeline        *TTSPipeline
 	phrases            *phrases.Phrases
-	botName            string
+	displayName        string
 	Extras             map[string]any
 
 	mu          sync.RWMutex
@@ -59,6 +60,7 @@ func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformF
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 
 func (a *Adapter) GetBotID() string           { return a.botOpenID }
+func (a *Adapter) GetBotName() string         { return a.botName }
 func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
 
 func (a *Adapter) SetPhrases(p *phrases.Phrases) {
@@ -77,6 +79,9 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 	// Feishu-specific: credentials.
 	a.appID = config.ExtrasString("app_id")
 	a.appSecret = config.ExtrasString("app_secret")
+
+	// Store YAML config name for agent-config path resolution.
+	a.botName = config.BotName
 
 	// Platform-specific extras.
 	if t, ok := config.Extras["transcriber"].(Transcriber); ok && t != nil {
@@ -174,21 +179,21 @@ func (a *Adapter) fetchBotInfo(ctx context.Context) error {
 	}
 	a.botOpenID = result.Bot.OpenID
 	if result.Bot.AppName != "" {
-		a.botName = result.Bot.AppName
+		a.displayName = result.Bot.AppName
 	} else {
-		a.botName = "HotPlex"
+		a.displayName = "HotPlex"
 	}
-	a.Log.Info("feishu: bot identity resolved", "open_id", a.botOpenID, "name", a.botName)
+	a.Log.Info("feishu: bot identity resolved", "open_id", a.botOpenID, "name", a.displayName)
 	return nil
 }
 
-// resolveBotName returns the bot display name (set during Start by fetchBotInfo).
+// resolveDisplayName returns the bot display name (set during Start by fetchBotInfo).
 // Falls back to "HotPlex" if the name was not resolved.
-func (a *Adapter) resolveBotName() string {
-	if a.botName == "" {
+func (a *Adapter) resolveDisplayName() string {
+	if a.displayName == "" {
 		return "HotPlex"
 	}
-	return a.botName
+	return a.displayName
 }
 
 func (a *Adapter) Close(ctx context.Context) error {
@@ -254,7 +259,7 @@ func (a *Adapter) sendTextMessage(ctx context.Context, chatID, text string) erro
 		return fmt.Errorf("feishu: lark client not initialized")
 	}
 
-	cardJSON := buildCardContent(text, cardHeader{Title: a.resolveBotName()})
+	cardJSON := buildCardContent(text, cardHeader{Title: a.resolveDisplayName()})
 	a.Log.Debug("feishu: sending card message", "chat", chatID, "content_len", len(cardJSON))
 
 	_, err := larkCreateMessage(ctx, a.larkClient, chatID, cardJSON)
@@ -267,7 +272,7 @@ func (a *Adapter) sendTextMessage(ctx context.Context, chatID, text string) erro
 
 //nolint:unparam // replyInThread reserved for future thread reply support
 func (a *Adapter) replyMessage(ctx context.Context, messageID, content string, replyInThread bool) error {
-	cardJSON := buildCardContent(content, cardHeader{Title: a.resolveBotName()})
+	cardJSON := buildCardContent(content, cardHeader{Title: a.resolveDisplayName()})
 	preview := cardJSON
 	if len(preview) > 200 {
 		preview = preview[:200] + "..."

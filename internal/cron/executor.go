@@ -15,7 +15,7 @@ import (
 
 // BridgeStarter is the narrow interface the executor needs from the gateway Bridge.
 type BridgeStarter interface {
-	StartSession(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, workDir, platform string, platformKey map[string]string, title, clientKey string, injectExclude ...string) error
+	StartSession(ctx context.Context, p worker.SessionStartParams) error
 }
 
 // SessionStateChecker polls session state for completion detection.
@@ -66,10 +66,18 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		wt = worker.TypeClaudeCode // Default
 	}
 
-	if err := e.bridge.StartSession(ctx, sessionKey, job.OwnerID, job.BotID,
-		wt, job.Payload.AllowedTools, job.WorkDir,
-		job.Platform, platformKey, title, "",
-	); err != nil {
+	if err := e.bridge.StartSession(ctx, worker.SessionStartParams{
+		ID:           sessionKey,
+		UserID:       job.OwnerID,
+		BotID:        job.BotID,
+		BotName:      job.BotName,
+		WorkerType:   wt,
+		AllowedTools: job.Payload.AllowedTools,
+		WorkDir:      job.WorkDir,
+		Platform:     job.Platform,
+		PlatformKey:  platformKey,
+		Title:        title,
+	}); err != nil {
 		return "", fmt.Errorf("start cron session: %w", err)
 	}
 

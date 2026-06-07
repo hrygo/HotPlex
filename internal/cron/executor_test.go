@@ -18,7 +18,7 @@ type mockBridge struct {
 	startErr error
 }
 
-func (m *mockBridge) StartSession(_ context.Context, _, _, _ string, _ worker.WorkerType, _ []string, _, _ string, _ map[string]string, _, _ string, _ ...string) error {
+func (m *mockBridge) StartSession(_ context.Context, _ worker.SessionStartParams) error {
 	return m.startErr
 }
 

@@ -37,7 +37,7 @@ type connSM interface {
 	Get(ctx context.Context, id string) (*session.SessionInfo, error)
 	GetWorker(id string) worker.Worker
 	Transition(ctx context.Context, id string, to events.SessionState) error
-	CreateWithBot(ctx context.Context, id, userID, botID string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
 	DeletePhysical(ctx context.Context, id string) error
 }
 
@@ -49,8 +49,7 @@ type connAuth interface {
 // SessionStarter initiates a worker session. It is the only Bridge capability
 // used by Conn (called once during the AEP init handshake).
 type SessionStarter interface {
-	StartSession(ctx context.Context, id, userID, botID string,
-		wt worker.WorkerType, allowedTools []string, workDir string, platform string, platformKey map[string]string, title string, clientKey string, injectExclude ...string) error
+	StartSession(ctx context.Context, p worker.SessionStartParams) error
 	ResumeSession(ctx context.Context, id string, workDir string) error
 	SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir string) (*SwitchWorkDirResult, error)
 }
@@ -412,7 +411,17 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	}
 
 	if c.starter != nil {
-		if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
+		if err := c.starter.StartSession(context.Background(), worker.SessionStartParams{
+			ID:           sessionID,
+			UserID:       c.userID,
+			BotID:        c.botID,
+			WorkerType:   initData.WorkerType,
+			AllowedTools: initData.Config.AllowedTools,
+			WorkDir:      workDir,
+			Platform:     platformWebChat,
+			Title:        initData.Title,
+			ClientKey:    clientKey,
+		}); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			c.sendInitError(events.ErrCodeInternalError, "failed to create session")
 			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -429,7 +438,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	}
 
 	// Test mode: create directly via session manager.
-	si, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, initData.Title, clientKey)
+	si, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, initData.Title, clientKey)
 	if err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to create session")
@@ -442,7 +451,17 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 	if c.starter == nil {
 		return si, nil // no starter in test mode, session stays CREATED
 	}
-	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
+	if err := c.starter.StartSession(context.Background(), worker.SessionStartParams{
+		ID:           sessionID,
+		UserID:       c.userID,
+		BotID:        c.botID,
+		WorkerType:   initData.WorkerType,
+		AllowedTools: initData.Config.AllowedTools,
+		WorkDir:      workDir,
+		Platform:     platformWebChat,
+		Title:        initData.Title,
+		ClientKey:    clientKey,
+	}); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to start session")
 		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -460,14 +479,23 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 	_ = sm.DeletePhysical(context.Background(), sessionID)
 	if c.starter == nil {
 		// Test mode: re-create session directly since the old one was physically deleted.
-		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, initData.Title, clientKey)
+		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, initData.Title, clientKey)
 		if err != nil {
 			return nil, fmt.Errorf("recreate deleted session (test mode): %w", err)
 		}
 		return newSI, nil
 	}
-	if err := c.starter.StartSession(context.Background(), sessionID, c.userID, c.botID,
-		initData.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
+	if err := c.starter.StartSession(context.Background(), worker.SessionStartParams{
+		ID:           sessionID,
+		UserID:       c.userID,
+		BotID:        c.botID,
+		WorkerType:   initData.WorkerType,
+		AllowedTools: initData.Config.AllowedTools,
+		WorkDir:      workDir,
+		Platform:     platformWebChat,
+		Title:        initData.Title,
+		ClientKey:    clientKey,
+	}); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, fmt.Sprintf("failed to recreate deleted session: %v", err))
 		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -510,8 +538,17 @@ func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *s
 	if resumeErr != nil {
 		startCtx, startCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer startCancel()
-		if err := c.starter.StartSession(startCtx, sessionID, c.userID, c.botID,
-			si.WorkerType, initData.Config.AllowedTools, workDir, platformWebChat, nil, initData.Title, clientKey); err != nil {
+		if err := c.starter.StartSession(startCtx, worker.SessionStartParams{
+			ID:           sessionID,
+			UserID:       c.userID,
+			BotID:        c.botID,
+			WorkerType:   si.WorkerType,
+			AllowedTools: initData.Config.AllowedTools,
+			WorkDir:      workDir,
+			Platform:     platformWebChat,
+			Title:        initData.Title,
+			ClientKey:    clientKey,
+		}); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			msg := fmt.Sprintf("resume failed (%v), then start also failed (%v)", resumeErr, err)
 			c.sendInitError(events.ErrCodeInternalError, msg)

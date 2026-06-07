@@ -42,16 +42,15 @@ func (a *botConfigAdapter) GetBotConfig(ctx context.Context, name string) (*admi
 
 	cfg := a.cfgStore.Load()
 	platform := string(entry.Platform)
-	botID := entry.BotID
 
 	attrs := extractBotAttrs(cfg, platform, name)
 	excl := resolveInjectExcludeForAdmin(cfg, platform, name)
-	summary := getAgentConfigSummary(platform, botID, a.agentConfigDir, excl...)
+	summary := getAgentConfigSummary(platform, name, a.agentConfigDir, excl...)
 
 	return &admin.BotConfigEntry{
 		Name:         entry.Name,
 		Platform:     platform,
-		BotID:        botID,
+		BotID:        entry.BotID,
 		Status:       string(entry.Status),
 		ConnectedAt:  entry.ConnectedAt.Format("2006-01-02T15:04:05Z"),
 		Config:       attrs,
@@ -70,7 +69,7 @@ func (a *botConfigAdapter) ListBotConfigs(ctx context.Context) ([]admin.BotConfi
 		platform := string(e.Platform)
 		attrs := extractBotAttrs(cfg, platform, e.Name)
 		excl := resolveInjectExcludeForAdmin(cfg, platform, e.Name)
-		summary := getAgentConfigSummary(platform, e.BotID, a.agentConfigDir, excl...)
+		summary := getAgentConfigSummary(platform, e.Name, a.agentConfigDir, excl...)
 
 		result = append(result, admin.BotConfigEntry{
 			Name:         e.Name,
@@ -87,19 +86,19 @@ func (a *botConfigAdapter) ListBotConfigs(ctx context.Context) ([]admin.BotConfi
 
 // GetAgentConfigFile reads a single agent config file for a bot.
 func (a *botConfigAdapter) GetAgentConfigFile(ctx context.Context, botName string, file admin.AgentConfigFileName) (*admin.AgentConfigFile, error) {
-	platform, botID, ok := resolvePlatformAndBotID(botName)
+	platform, ok := resolvePlatformForBot(botName)
 	if !ok {
 		return nil, fmt.Errorf("bot %q not found in registry", botName)
 	}
 
 	excl := resolveInjectExcludeForAdmin(a.cfgStore.Load(), platform, botName)
-	configs, err := agentconfig.Load(a.agentConfigDir, platform, botID, excl...)
+	configs, err := agentconfig.Load(a.agentConfigDir, platform, botName, excl...)
 	if err != nil {
 		return nil, fmt.Errorf("load agent config: %w", err)
 	}
 
 	content := getConfigField(configs, file)
-	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, botID, string(file))
+	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, botName, string(file))
 
 	return &admin.AgentConfigFile{
 		Content: content,
@@ -111,13 +110,13 @@ func (a *botConfigAdapter) GetAgentConfigFile(ctx context.Context, botName strin
 
 // GetSystemPromptPreview returns the assembled B+C channel system prompt for the named bot.
 func (a *botConfigAdapter) GetSystemPromptPreview(ctx context.Context, botName string) (string, error) {
-	platform, botID, ok := resolvePlatformAndBotID(botName)
+	platform, ok := resolvePlatformForBot(botName)
 	if !ok {
 		return "", fmt.Errorf("bot %q not found in registry", botName)
 	}
 
 	excl := resolveInjectExcludeForAdmin(a.cfgStore.Load(), platform, botName)
-	configs, err := agentconfig.Load(a.agentConfigDir, platform, botID, excl...)
+	configs, err := agentconfig.Load(a.agentConfigDir, platform, botName, excl...)
 	if err != nil {
 		return "", fmt.Errorf("load agent config: %w", err)
 	}
@@ -127,7 +126,7 @@ func (a *botConfigAdapter) GetSystemPromptPreview(ctx context.Context, botName s
 
 // UpdateBotConfig applies partial updates to an existing bot configuration.
 func (a *botConfigAdapter) UpdateBotConfig(ctx context.Context, name string, attrs *admin.BotConfigAttrs) error {
-	platform, _, ok := resolvePlatformAndBotID(name)
+	platform, ok := resolvePlatformForBot(name)
 	if !ok {
 		return fmt.Errorf("bot %q not found in registry", name)
 	}
@@ -158,6 +157,9 @@ func (a *botConfigAdapter) UpdateBotConfig(ctx context.Context, name string, att
 func (a *botConfigAdapter) CreateBot(ctx context.Context, name string, attrs *admin.BotConfigAttrs) error {
 	if name == "" {
 		return fmt.Errorf("bot name must not be empty")
+	}
+	if err := agentconfig.ValidateBotName(name); err != nil {
+		return fmt.Errorf("invalid bot name: %w", err)
 	}
 
 	// Check that the name does not already exist in the registry.
@@ -227,7 +229,7 @@ func (a *botConfigAdapter) CreateBot(ctx context.Context, name string, attrs *ad
 
 // DeleteBot removes a bot registration by name.
 func (a *botConfigAdapter) DeleteBot(ctx context.Context, name string) error {
-	platform, _, ok := resolvePlatformAndBotID(name)
+	platform, ok := resolvePlatformForBot(name)
 	if !ok {
 		return fmt.Errorf("bot %q not found in registry", name)
 	}
@@ -240,8 +242,6 @@ func (a *botConfigAdapter) DeleteBot(ctx context.Context, name string) error {
 	}
 
 	cfg := a.cfgStore.Load()
-
-	// Enforce max bots per platform limit.
 
 	switch platform {
 	case "slack":
@@ -265,12 +265,12 @@ func (a *botConfigAdapter) DeleteBot(ctx context.Context, name string) error {
 
 // WriteAgentConfigFile writes content to a single agent config file for the named bot.
 func (a *botConfigAdapter) WriteAgentConfigFile(ctx context.Context, botName string, file admin.AgentConfigFileName, content string) error {
-	platform, botID, ok := resolvePlatformAndBotID(botName)
+	platform, ok := resolvePlatformForBot(botName)
 	if !ok {
 		return fmt.Errorf("bot %q not found in registry", botName)
 	}
 
-	if err := agentconfig.WriteFile(a.agentConfigDir, platform, botID, string(file), content, agentconfig.MaxFileChars); err != nil {
+	if err := agentconfig.WriteFile(a.agentConfigDir, platform, botName, string(file), content, agentconfig.MaxFileChars); err != nil {
 		return fmt.Errorf("write agent config file: %w", err)
 	}
 	return nil
@@ -280,15 +280,15 @@ func (a *botConfigAdapter) WriteAgentConfigFile(ctx context.Context, botName str
 // Helper functions
 // ---------------------------------------------------------------------------
 
-// resolvePlatformAndBotID looks up the bot name in the global registry and
-// returns its platform and bot ID.
-func resolvePlatformAndBotID(name string) (platform, botID string, ok bool) {
+// resolvePlatformForBot looks up the bot name in the global registry and
+// returns its platform type.
+func resolvePlatformForBot(name string) (platform string, ok bool) {
 	registry := messaging.DefaultBotRegistry()
 	entry, found := registry.GetByName(name)
 	if !found {
-		return "", "", false
+		return "", false
 	}
-	return string(entry.Platform), entry.BotID, true
+	return string(entry.Platform), true
 }
 
 // resolveInjectExcludeForAdmin resolves the inject_exclude list for a bot
@@ -316,8 +316,6 @@ func resolveInjectExcludeForAdmin(cfg *config.Config, platform, botName string) 
 // extractBotAttrs builds BotConfigAttrs from the config for a specific bot.
 func extractBotAttrs(cfg *config.Config, platform, name string) *admin.BotConfigAttrs {
 	attrs := &admin.BotConfigAttrs{}
-
-	// Enforce max bots per platform limit.
 
 	switch platform {
 	case "slack":
@@ -413,8 +411,8 @@ func extractBotAttrs(cfg *config.Config, platform, name string) *admin.BotConfig
 }
 
 // getAgentConfigSummary returns a summary of all agent config files for a bot.
-func getAgentConfigSummary(platform, botID, agentConfigDir string, injectExclude ...string) *admin.AgentConfigSummary {
-	configs, err := agentconfig.Load(agentConfigDir, platform, botID, injectExclude...)
+func getAgentConfigSummary(platform, botName, agentConfigDir string, injectExclude ...string) *admin.AgentConfigSummary {
+	configs, err := agentconfig.Load(agentConfigDir, platform, botName, injectExclude...)
 	if err != nil || configs == nil {
 		return nil
 	}
@@ -434,7 +432,7 @@ func getAgentConfigSummary(platform, botID, agentConfigDir string, injectExclude
 		if file.value == "" {
 			continue
 		}
-		source := agentconfig.ResolvedSource(agentConfigDir, platform, botID, string(file.field))
+		source := agentconfig.ResolvedSource(agentConfigDir, platform, botName, string(file.field))
 		meta := &admin.AgentConfigMeta{
 			Source: source,
 			Size:   len(file.value),

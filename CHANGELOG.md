@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.26.0] - 2026-06-07
+
+### Summary
+
+v1.26.0 是一次 minor 版本更新，聚焦于 **多 Bot 配置体验** 和 **Worker 架构现代化**。核心变更将 Agent 配置路径从平台运行时 ID（`ou_xxx`/`U04ABC`）迁移为 YAML 配置名（`my-bot`），使路径可读且不受 Bot 重命名影响。Gateway 层会话状态编排下沉至 Worker 层，消除 3 个 gateway 接口和 7 处类型断言。安全方面新增可配置 CORS origins 和 RFC 9116 security.txt 端点。
+
+### Added
+
+- **Configuration**: Agent config path resolution uses YAML `bots[].name` instead of platform runtime IDs — readable paths (`feishu/my-bot/SOUL.md`), stable across Bot renames, with `ValidateBotName` path-traversal guard. (#678, #679)
+- **Configuration**: `GATEWAY_BOT_NAME` environment variable injected into Worker processes; Cron `--bot-name` flag for multi-Bot agent-config isolation.
+- **Worker**: `SystemPromptUpdater` interface — workers reload agent config on `/reset` without session recreation. (#659)
+- **Worker**: `ForceKillTree` — kill orphaned child processes that escape PGID (e.g. MCP servers spawned by Codex). Platform-native `/proc` (Linux) and `sysctl` (macOS) child discovery. (#659)
+- **Security**: Configurable CORS origins (`security.allowed_origins`), RFC 9116 `security.txt` endpoint (`security.contact`), tightened docs CSP `connect-src` to `'self'`. (#663)
+- **Worker**: `SessionStartParams` struct replacing 11–13 positional parameters across `StartSession`/`StartPlatformSession` interfaces. (#679)
+
+### Changed
+
+- **Gateway Core**: Session state orchestration pushed from Bridge into Worker layer — workers return `ResetResult{ConnReplaced}`, emit `internal_reset` events. `ResetGenerationer` atomic guard prevents stale goroutine interference. (#659)
+- **Worker**: CodexCLI exec mode removed — app-server singleton is the sole implementation. `use_app_server` config deprecated and auto-normalized. (#659)
+- **Infrastructure**: Temp file management unified — `os.TempDir()` with `hotplex/worker/` subdirectory, gateway startup cleanup for orphaned files (>2h worker, >24h media). (#675)
+- **CLI**: Setup skill rewritten for v1.25.0+ production alignment — 4-phase decision tree, 48% shorter. (#677)
+
+### Fixed
+
+- **Session**: GC deadlock — `worker.Terminate()` moved outside session mutex, preventing blocking all concurrent reads during graceful shutdown. (#656)
+- **Cron**: Timeout errors now logged with `error_type` + state confirmation in executor. (#667)
+- **CLI**: `doctor config.required` checker now recognizes multi-bot YAML configurations. (#671)
+- **Configuration**: Config watcher `~` expansion — `fsnotify` failed with "no such file" when home directory was specified with tilde. (#673, #674)
+- **Docs**: API Console localized Scalar JS — CDN unreachable from Chinese servers caused infinite spinner. Layout redesigned to fit header + Scalar in one viewport.
+
 ## [1.25.0] - 2026-06-04
 
 ### Summary

@@ -67,8 +67,7 @@ func TestBridge_Shutdown_RejectNewSession(t *testing.T) {
 	b.Shutdown(context.Background())
 
 	// After shutdown, StartSession should be rejected.
-	err := b.StartSession(context.Background(), "sess-closed", "u", "b",
-		worker.TypeClaudeCode, nil, "", "", nil, "", "")
+	err := b.StartSession(context.Background(), worker.SessionStartParams{ID: "sess-closed", UserID: "u", BotID: "b", WorkerType: worker.TypeClaudeCode})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "shutdown")
 }
@@ -309,7 +308,7 @@ func writeAgentConfigFile(t *testing.T, dir, name, content string) {
 	require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o644))
 }
 
-func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
+func TestBridge_InjectAgentConfig_BotNameResolution(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -317,6 +316,7 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 		setup       func(t *testing.T) string // returns config dir
 		platform    string
 		botID       string
+		botName     string
 		wantContain string
 		wantEmpty   bool
 	}{
@@ -329,8 +329,21 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 				return dir
 			},
 			platform:    "webchat",
-			botID:       "my-bot",
+			botName:     "my-bot",
 			wantContain: "Bot soul.",
+		},
+		{
+			name: "empty botName skips bot-level",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				writeAgentConfigFile(t, dir, "webchat/SOUL.md", "Platform soul.")
+				writeAgentConfigFile(t, dir, "webchat/orphaned-bot/SOUL.md", "Orphaned soul.")
+				return dir
+			},
+			platform:    "webchat",
+			botID:       "orphaned-bot",
+			botName:     "",
+			wantContain: "Platform soul.",
 		},
 		{
 			name: "empty bot uses platform",
@@ -365,14 +378,15 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 			wantEmpty: true,
 		},
 		{
-			name: "path traversal rejected",
+			name: "path traversal rejected via botName",
 			setup: func(t *testing.T) string {
 				dir := t.TempDir()
 				writeAgentConfigFile(t, dir, "webchat/SOUL.md", "Platform soul.")
 				return dir
 			},
 			platform:  "webchat",
-			botID:     "../etc",
+			botID:     "some-bot",
+			botName:   "../etc",
 			wantEmpty: true,
 		},
 	}
@@ -392,7 +406,7 @@ func TestBridge_InjectAgentConfig_BotIDResolution(t *testing.T) {
 			})
 
 			info := &worker.SessionInfo{}
-			b.injectAgentConfig(info, tt.platform, tt.botID, nil)
+			b.injectAgentConfig(info, tt.platform, tt.botName, tt.botID, nil)
 
 			if tt.wantEmpty {
 				assert.Empty(t, info.SystemPrompt)
@@ -411,6 +425,7 @@ func TestInjectGatewayContext(t *testing.T) {
 		env         map[string]string
 		platform    string
 		botID       string
+		botName     string
 		userID      string
 		platformKey map[string]string
 		sessionID   string
@@ -545,6 +560,27 @@ func TestInjectGatewayContext(t *testing.T) {
 				"TARGET_PR": "42",
 			},
 		},
+		{
+			name:     "botName injected as GATEWAY_BOT_NAME",
+			platform: "feishu",
+			botID:    "ou_bot123",
+			botName:  "my-bot",
+			userID:   "U1",
+			platformKey: map[string]string{
+				"chat_id": "oc_chat",
+			},
+			sessionID: "sess-botname",
+			workDir:   "/tmp",
+			want: map[string]string{
+				"GATEWAY_BOT_NAME":   "my-bot",
+				"GATEWAY_PLATFORM":   "feishu",
+				"GATEWAY_BOT_ID":     "ou_bot123",
+				"GATEWAY_USER_ID":    "U1",
+				"GATEWAY_CHANNEL_ID": "oc_chat",
+				"GATEWAY_SESSION_ID": "sess-botname",
+				"GATEWAY_WORK_DIR":   "/tmp",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -553,7 +589,7 @@ func TestInjectGatewayContext(t *testing.T) {
 
 			// Nil env test: function should initialize the map.
 			if tt.env == nil {
-				tt.env = injectGatewayContext(tt.env, tt.platform, tt.botID, tt.userID, tt.platformKey, tt.sessionID, tt.workDir)
+				tt.env = injectGatewayContext(tt.env, tt.platform, tt.botID, tt.botName, tt.userID, tt.platformKey, tt.sessionID, tt.workDir)
 				require.NotNil(t, tt.env, "env should be initialized")
 				for k, v := range tt.want {
 					assert.Equal(t, v, tt.env[k], "env[%q]", k)
@@ -561,7 +597,7 @@ func TestInjectGatewayContext(t *testing.T) {
 				return
 			}
 
-			tt.env = injectGatewayContext(tt.env, tt.platform, tt.botID, tt.userID, tt.platformKey, tt.sessionID, tt.workDir)
+			tt.env = injectGatewayContext(tt.env, tt.platform, tt.botID, tt.botName, tt.userID, tt.platformKey, tt.sessionID, tt.workDir)
 
 			for k, v := range tt.want {
 				assert.Equal(t, v, tt.env[k], "env[%q]", k)

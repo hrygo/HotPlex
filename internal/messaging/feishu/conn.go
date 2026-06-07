@@ -120,7 +120,7 @@ func (c *FeishuConn) resetStreamCtrl() {
 	c.mu.RUnlock()
 	newCtrl := NewStreamingCardController(
 		c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log,
-		c.adapter.resolveBotName(), tc, m, br, wd,
+		c.adapter.resolveDisplayName(), tc, m, br, wd,
 		c.adapter.phrases,
 	)
 	c.mu.Lock()
@@ -521,7 +521,7 @@ func (c *FeishuConn) writeContent(ctx context.Context, env *events.Envelope, tex
 		c.mu.RLock()
 		tc, m, br, wd := c.turnCount, c.lastModel, c.lastBranch, c.workDir
 		c.mu.RUnlock()
-		newCtrl := NewStreamingCardController(c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log, c.adapter.resolveBotName(), tc+1, m, br, wd, c.adapter.phrases)
+		newCtrl := NewStreamingCardController(c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log, c.adapter.resolveDisplayName(), tc+1, m, br, wd, c.adapter.phrases)
 		c.mu.Lock()
 		c.streamCtrl = newCtrl
 		if oldMsgID != "" {
@@ -568,7 +568,7 @@ func (c *FeishuConn) writeContent(ctx context.Context, env *events.Envelope, tex
 
 func (c *FeishuConn) sendTurnSummaryCard(d messaging.TurnSummaryData) {
 	cardJSON := buildTurnSummaryCard(d, cardHeader{
-		Title:    c.adapter.resolveBotName(),
+		Title:    c.adapter.resolveDisplayName(),
 		Template: headerBlue,
 		Tags:     turnTags(d.TurnCount, d.ModelName, d.GitBranch, c.WorkDir()),
 	})

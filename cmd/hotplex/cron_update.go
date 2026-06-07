@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	croncli "github.com/hrygo/hotplex/internal/cli/cron"
 	"github.com/hrygo/hotplex/internal/cron"
 )
@@ -34,7 +35,9 @@ Schedule format:
 					return err
 				}
 
-				if applyFlags(cmd, job) {
+				if changed, err := applyFlags(cmd, job); err != nil {
+					return err
+				} else if changed {
 					if err := cron.ValidateJob(job); err != nil {
 						return err
 					}
@@ -68,6 +71,7 @@ Schedule format:
 	cmd.Flags().String("description", "", "job description")
 	cmd.Flags().String("work-dir", "", "working directory")
 	cmd.Flags().String("bot-id", "", "bot ID")
+	cmd.Flags().String("bot-name", "", "bot name for agent config resolution")
 	cmd.Flags().String("owner-id", "", "owner ID")
 	cmd.Flags().Int("timeout", 0, "execution timeout in seconds")
 	cmd.Flags().String("allowed-tools", "", "comma-separated tool list")
@@ -82,7 +86,7 @@ Schedule format:
 }
 
 // applyFlags applies changed CLI flags to the job and returns true if any were changed.
-func applyFlags(cmd *cobra.Command, job *cron.CronJob) bool {
+func applyFlags(cmd *cobra.Command, job *cron.CronJob) (bool, error) {
 	changed := false
 
 	if cmd.Flags().Changed("schedule") {
@@ -107,6 +111,13 @@ func applyFlags(cmd *cobra.Command, job *cron.CronJob) bool {
 	}
 	if cmd.Flags().Changed("bot-id") {
 		job.BotID, _ = cmd.Flags().GetString("bot-id")
+		changed = true
+	}
+	if cmd.Flags().Changed("bot-name") {
+		job.BotName, _ = cmd.Flags().GetString("bot-name")
+		if err := agentconfig.ValidateBotName(job.BotName); err != nil {
+			return false, fmt.Errorf("invalid bot_name: %w", err)
+		}
 		changed = true
 	}
 	if cmd.Flags().Changed("owner-id") {
@@ -151,5 +162,5 @@ func applyFlags(cmd *cobra.Command, job *cron.CronJob) bool {
 		changed = true
 	}
 
-	return changed
+	return changed, nil
 }

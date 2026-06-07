@@ -55,12 +55,12 @@ HotPlex 将所有配置分为两个通道，使用 XML 嵌套表达结构性优�
 每个配置文件通过 3 级 fallback 独立查找：
 
 ```
-1. dir/{platform}/{botID}/{file}   -- Bot 级（最高优先级）
+1. dir/{platform}/{botName}/{file} -- Bot 级（最高优先级）
 2. dir/{platform}/{file}           -- 平台级
 3. dir/{file}                      -- 全局级
 ```
 
-找到文件就停止，**不会合并多个层级**。
+找到文件就停止，**不会合并多个层级**。`botName` 是 YAML 配置中的 `bots[].name` 字段（如 `"my-bot"`），而非平台运行时 ID。单 Bot 模式下 `botName` 为空，Bot 级查找被跳过，直接从平台级开始解析。
 
 **为什么不用继承（合并所有层级）？**
 
@@ -89,13 +89,13 @@ META-COGNITION 定义了 Worker 的**身份边界**——明确告知 Agent "你
 
 ### 配置加载流程
 
-`Load(dir, platform, botID, injectExclude...)` 的完整执行路径：
+`Load(dir, platform, botName, injectExclude...)` 的完整执行路径：
 
 ```
-1. 路径安全检查：filepath.Base(botID) == botID（防止路径穿越）
+1. 路径安全检查：ValidateBotName(botName)（防止路径穿越）
 2. 逐文件加载（SOUL → AGENTS → SKILLS → USER → MEMORY）：
    a. 检查 injectExclude：如文件名在排除列表中，跳过加载
-   b. 调用 resolveFile(dir, platform, botID, fileName)
+   b. 调用 resolveFile(dir, platform, botName, fileName)
    c. 按三级 fallback 查找文件
    d. 读取文件内容，剥离 YAML frontmatter
    e. 检查单文件大小限制（MaxFileChars = 8000 字符）

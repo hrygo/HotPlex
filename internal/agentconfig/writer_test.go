@@ -40,7 +40,7 @@ func TestWriteFile_RejectsPathTraversal(t *testing.T) {
 
 	err := WriteFile(dir, "slack", "../evil", "SOUL.md", "pwned", 100)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path separators not allowed")
+	require.Contains(t, err.Error(), "path traversal not allowed")
 }
 
 func TestResolvedSource_BotLevel(t *testing.T) {

@@ -243,7 +243,7 @@ if ms.info.State == RUNNING && ms.worker != nil {
 ### 并发安全边界
 
 - **锁顺序必须严格遵守**：`Manager.mu -> managedSession.mu`，违反此顺序会死锁。
-- **Worker.Terminate() 在 ms.mu 持有时调用**：这是安全的，因为 Terminate 只使用 syscall.Kill，不获取任何 Session Manager 锁。
+- **Worker.Terminate() 必须在 ms.mu 释放后调用**：`transitionState` 返回需要终止的 Worker 引用，由调用方在锁外执行 Terminate。这是为了避免 Terminate 阻塞（进程优雅关闭可能耗时数秒）期间锁住所有并发读操作（Get、GetWorker），导致 Session 永久无响应（#655）。
 - **callback 调用（OnTerminate、StateNotifier）在独立 goroutine 中执行**：防止用户回调阻塞 GC 循环。
 
 ## 参考

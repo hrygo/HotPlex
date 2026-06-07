@@ -103,8 +103,8 @@ func TestBridge_Handle_ExtractsBotID(t *testing.T) {
 
 	var capturedBotID string
 	b.starter = &mockStarter{
-		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ string, _ map[string]string, botID string) error {
-			capturedBotID = botID
+		startFn: func(params worker.SessionStartParams) error {
+			capturedBotID = params.BotID
 			return nil
 		},
 	}
@@ -136,6 +136,8 @@ func (m *mockBotIDAdapter) ConfigureWith(_ AdapterConfig) error { return nil }
 func (m *mockBotIDAdapter) GetBotID() string                    { return m.botID }
 func (m *mockBotIDAdapter) GetInjectExclude() []string          { return nil }
 
+func (m *mockBotIDAdapter) GetBotName() string { return "" }
+
 // mockHandler implements HandlerInterface.
 type mockHandler struct{}
 
@@ -143,12 +145,12 @@ func (m *mockHandler) Handle(_ context.Context, _ *events.Envelope) error { retu
 
 // mockStarter captures botID passed to StartPlatformSession.
 type mockStarter struct {
-	startFn func(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string) error
+	startFn func(params worker.SessionStartParams) error
 }
 
-func (s *mockStarter) StartPlatformSession(ctx context.Context, sessionID, ownerID, workerType, workDir, sandbox, platform string, platformKey map[string]string, botID string, _ ...string) error {
+func (s *mockStarter) StartPlatformSession(_ context.Context, params worker.SessionStartParams) error {
 	if s.startFn != nil {
-		return s.startFn(ctx, sessionID, ownerID, workerType, workDir, sandbox, platform, platformKey, botID)
+		return s.startFn(params)
 	}
 	return nil
 }
@@ -162,8 +164,8 @@ func TestBridge_Handle_NilAdapter_EmptyBotID(t *testing.T) {
 
 	var capturedBotID string
 	b.starter = &mockStarter{
-		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ string, _ map[string]string, botID string) error {
-			capturedBotID = botID
+		startFn: func(params worker.SessionStartParams) error {
+			capturedBotID = params.BotID
 			return nil
 		},
 	}
@@ -228,7 +230,7 @@ func TestBridge_Handle_StartError(t *testing.T) {
 	b := newTestBridge()
 	b.handler = &mockHandler{}
 	b.starter = &mockStarter{
-		startFn: func(_ context.Context, _ string, _ string, _ string, _ string, _ string, _ string, _ map[string]string, _ string) error {
+		startFn: func(_ worker.SessionStartParams) error {
 			return fmt.Errorf("pool exhausted")
 		},
 	}

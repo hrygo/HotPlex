@@ -120,12 +120,12 @@ func TestLoad(t *testing.T) {
 		// SOUL.slack.md is NOT loaded — old suffix mechanism removed.
 	})
 
-	t.Run("path traversal botID rejected", func(t *testing.T) {
+	t.Run("path traversal botName rejected", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		_, err := Load(dir, "slack", "../etc")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid botID")
+		require.Contains(t, err.Error(), "invalid botName")
 	})
 
 	t.Run("path traversal with dots rejected", func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestLoad(t *testing.T) {
 		dir := t.TempDir()
 		_, err := Load(dir, "slack", "foo/bar")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid botID")
+		require.Contains(t, err.Error(), "invalid botName")
 	})
 
 	t.Run("empty file falls through to next level", func(t *testing.T) {
@@ -198,7 +198,7 @@ func TestLoad(t *testing.T) {
 		require.Contains(t, err.Error(), "agentconfig: read")
 	})
 
-	t.Run("botID ignored when platform is empty", func(t *testing.T) {
+	t.Run("botName ignored when platform is empty", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "SOUL.md", "Global soul.")

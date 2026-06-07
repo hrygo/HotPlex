@@ -82,6 +82,24 @@ const (
 	TypeUnknown     WorkerType = "unknown"
 )
 
+// SessionStartParams encapsulates the parameters for creating a new worker session.
+// Introduced to reduce the risk of parameter ordering errors (e.g. botName vs botID)
+// across the 13-parameter StartSession call chain.
+type SessionStartParams struct {
+	ID            string            // session ID (deterministic UUIDv5 or random)
+	UserID        string            // owner of the session
+	BotID         string            // platform runtime ID (e.g. "U12345"), for logging and session isolation
+	BotName       string            // YAML config name (e.g. "my-bot"), for agent-config path resolution
+	WorkerType    WorkerType        // worker adapter type
+	AllowedTools  []string          // tool whitelist (nil = no restriction)
+	WorkDir       string            // project directory for the worker
+	Platform      string            // messaging platform ("slack", "feishu", "webchat", "")
+	PlatformKey   map[string]string // platform-specific context (channel IDs, cron metadata, etc.)
+	Title         string            // session title (display only)
+	ClientKey     string            // client session key for persistence
+	InjectExclude []string          // agent config files to skip from injection
+}
+
 // ─── Worker ─────────────────────────────────────────────────────────────────
 
 // Worker is the main interface that all worker adapters must implement.

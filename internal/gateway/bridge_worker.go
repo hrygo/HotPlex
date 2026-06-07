@@ -2,9 +2,9 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/agentconfig"
@@ -34,6 +34,7 @@ type workerLaunchParams struct {
 	workerInfo    worker.SessionInfo
 	platform      string
 	botID         string
+	botName       string
 	forwardOpts   *forwardOpts
 	injectExclude []string // per-session agent config files to skip; nil = use platform default
 }
@@ -78,7 +79,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, fmt.Errorf("bridge: attach worker: %w", err)
 	}
 
-	b.injectAgentConfig(&params.workerInfo, params.platform, params.botID, params.injectExclude)
+	b.injectAgentConfig(&params.workerInfo, params.platform, params.botName, params.botID, params.injectExclude)
 
 	if err := startFn(params.ctx, w, params.workerInfo); err != nil {
 		b.sm.DetachWorker(sid)
@@ -183,6 +184,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		workerInfo:    workerInfo,
 		platform:      si.Platform,
 		botID:         si.BotID,
+		botName:       si.BotName,
 		forwardOpts:   &forwardOpts{workDir: p.workDir},
 		injectExclude: nil, // resolved by injectAgentConfig
 	},
@@ -265,10 +267,8 @@ func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Wor
 
 // resolveInjectExclude returns the inject_exclude list for a platform, falling
 // back from the per-session value to the platform/global default in the atomic
-// config map. botID is reserved for future per-bot resolution (currently unused
-// because per-bot excludes are resolved at adapter time and not persisted in
-// the session record). Used by injectAgentConfig and crash recovery paths.
-func (b *Bridge) resolveInjectExclude(platform, _ string, perSession []string) []string {
+// config map. Used by injectAgentConfig and crash recovery paths.
+func (b *Bridge) resolveInjectExclude(platform string, perSession []string) []string {
 	if perSession != nil {
 		return perSession
 	}
@@ -288,38 +288,45 @@ func (b *Bridge) resolveInjectExclude(platform, _ string, perSession []string) [
 // is not configured.
 // injectExclude lists file base names to skip; when nil, falls back to the
 // platform-level default from the atomic config map.
-func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botID string, injectExclude []string) {
+//
+// Parameter order note: botName (YAML config name, e.g. "my-bot") comes before
+// botID (platform runtime ID, e.g. "U12345") because botName is the primary key
+// for agent-config path resolution, while botID is only used for logging.
+func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, botID string, injectExclude []string) {
 	if b.agentConfigDir == "" {
 		return
 	}
-	injectExclude = b.resolveInjectExclude(platform, botID, injectExclude)
+	// botName is the YAML config name for agent-config path resolution.
+	// When empty (single-bot mode / webchat / API), bot-level lookup is skipped
+	// and resolution falls through to platform-level automatically.
+	injectExclude = b.resolveInjectExclude(platform, injectExclude)
 	if unknown := agentconfig.ValidateExcludeList(injectExclude); len(unknown) > 0 {
 		b.log.Warn("bridge: inject_exclude contains unknown config files",
 			"unknown", unknown, "valid", agentconfig.KnownFiles())
 	}
-	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_id", botID, "exclude", injectExclude)
-	configs, err := agentconfig.Load(b.agentConfigDir, platform, botID, injectExclude...)
+	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "exclude", injectExclude)
+	configs, err := agentconfig.Load(b.agentConfigDir, platform, botName, injectExclude...)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid botID") {
-			b.log.Error("bridge: agent config rejected botID",
-				"dir", b.agentConfigDir, "platform", platform, "bot_id", botID, "err", err)
+		if errors.Is(err, agentconfig.ErrInvalidBotName) {
+			b.log.Error("bridge: agent config rejected",
+				"dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "err", err)
 		} else {
 			b.log.Warn("bridge: agent config load failed",
-				"dir", b.agentConfigDir, "platform", platform, "bot_id", botID, "err", err)
+				"dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "err", err)
 		}
 		return
 	}
 	if configs.IsEmpty() {
 		b.log.Warn("bridge: agent config empty, no files found",
-			"dir", b.agentConfigDir, "platform", platform, "bot_id", botID)
+			"dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID)
 		return
 	}
 
 	if prompt := agentconfig.BuildSystemPrompt(configs); prompt != "" {
 		info.SystemPrompt = prompt
-		b.log.Info("bridge: agent config injected", "prompt_len", len(prompt), "platform", platform, "bot_id", botID)
+		b.log.Info("bridge: agent config injected", "prompt_len", len(prompt), "platform", platform, "bot_name", botName, "bot_id", botID)
 	} else {
-		b.log.Debug("bridge: agent config loaded but prompt empty", "platform", platform, "bot_id", botID)
+		b.log.Debug("bridge: agent config loaded but prompt empty", "platform", platform, "bot_name", botName, "bot_id", botID)
 	}
 }
 

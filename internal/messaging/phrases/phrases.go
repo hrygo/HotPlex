@@ -17,7 +17,7 @@ const (
 	WeightDefault  = 1 // code defaults (fallback only)
 	WeightPlatform = 1 // ~/.hotplex/phrases/{platform}/PHRASES.md
 	WeightGlobal   = 2 // ~/.hotplex/phrases/PHRASES.md
-	WeightBot      = 4 // ~/.hotplex/phrases/{platform}/{botID}/PHRASES.md
+	WeightBot      = 4 // ~/.hotplex/phrases/{platform}/{botName}/PHRASES.md
 )
 
 // Phrases holds categorized message pools used for procedural UI feedback.
