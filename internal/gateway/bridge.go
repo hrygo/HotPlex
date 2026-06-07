@@ -135,6 +135,15 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		return fmt.Errorf("bridge: rejecting new session during shutdown")
 	}
 
+	// Validate and expand workDir for all callers.
+	if p.WorkDir != "" {
+		expanded, err := validateAndExpandWorkDir(p.WorkDir)
+		if err != nil {
+			return fmt.Errorf("bridge: invalid work dir: %w", err)
+		}
+		p.WorkDir = expanded
+	}
+
 	observability.SessionStartAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
 	start := time.Now()
 	defer func() {
@@ -214,6 +223,16 @@ func (b *Bridge) ResumeSession(ctx context.Context, id, workDir string) error {
 func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts forwardOpts) error {
 	if b.closed.Load() {
 		return fmt.Errorf("bridge: rejecting resume during shutdown")
+	}
+
+	// Validate workDir for consistency with StartSession.
+	if workDir != "" {
+		expanded, err := validateAndExpandWorkDir(workDir)
+		if err != nil {
+			return fmt.Errorf("bridge: invalid resume work dir: %w", err)
+		}
+		workDir = expanded
+		opts.workDir = expanded
 	}
 
 	si, err := b.sm.Get(ctx, id)

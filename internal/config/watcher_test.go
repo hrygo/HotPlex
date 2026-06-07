@@ -210,6 +210,7 @@ func TestWatcher_isRelevant(t *testing.T) {
 
 	tmpFile := createTempConfigFile(t)
 	w := NewWatcher(slog.Default(), tmpFile, nil, nil, nil)
+	differentPath := filepath.Join(t.TempDir(), "other.yaml")
 
 	tests := []struct {
 		name     string
@@ -233,7 +234,7 @@ func TestWatcher_isRelevant(t *testing.T) {
 		},
 		{
 			name:     "Write event for different path",
-			event:    fsnotify.Event{Name: "/tmp/other.yaml", Op: fsnotify.Write},
+			event:    fsnotify.Event{Name: differentPath, Op: fsnotify.Write},
 			expected: false,
 		},
 		{
@@ -337,5 +338,9 @@ func createTempConfigFile(t *testing.T) string {
 	err := os.WriteFile(tmpFile, []byte(content), 0644)
 	require.NoError(t, err)
 
-	return tmpFile
+	// Resolve symlinks so the path matches what NewWatcher stores internally
+	// (NewWatcher calls ExpandAndAbs which runs EvalSymlinks).
+	resolved, err := filepath.EvalSymlinks(tmpFile)
+	require.NoError(t, err)
+	return resolved
 }

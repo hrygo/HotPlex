@@ -245,6 +245,8 @@ func (c *ACPClient) readLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			default:
+				c.log.Warn("acp client: notification channel full, dropping",
+					"method", m.Method, "channel_cap", cap(c.NotificationCh))
 			}
 		case *JSONRPCRequest:
 			select {

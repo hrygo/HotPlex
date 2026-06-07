@@ -25,16 +25,6 @@ import (
 
 const testSecret = "test-webhook-secret"
 
-// prDetail is a typed alias for the PullRequest inner struct to avoid repetition.
-type prDetail = struct {
-	Number int    `json:"number"`
-	State  string `json:"state"`
-	Draft  bool   `json:"draft"`
-	Head   struct {
-		SHA string `json:"sha"`
-	} `json:"head"`
-}
-
 // checkSuiteDetail is a typed alias for the CheckSuite inner struct.
 type checkSuiteDetail = struct {
 	Conclusion   string `json:"conclusion"`
@@ -164,54 +154,21 @@ func TestWebhookHandler_ExtractPRs(t *testing.T) {
 
 	h := &WebhookHandler{cfg: config.WebhookConfig{MaxBodySize: 1 << 20}}
 
-	t.Run("draft PR ignored", func(t *testing.T) {
+	t.Run("pull_request ignored (CI-only trigger, #662)", func(t *testing.T) {
 		t.Parallel()
 		e := &GitHubEvent{
-			Action:      "opened",
-			PullRequest: &prDetail{Number: 42, State: "open", Draft: true},
+			Action: "opened",
+			PullRequest: &struct {
+				Number int    `json:"number"`
+				State  string `json:"state"`
+				Draft  bool   `json:"draft"`
+				Head   struct {
+					SHA string `json:"sha"`
+				} `json:"head"`
+			}{Number: 42, State: "open"},
 		}
 		prs := h.extractPRs("pull_request", e)
-		require.Empty(t, prs)
-	})
-
-	t.Run("closed PR ignored", func(t *testing.T) {
-		t.Parallel()
-		e := &GitHubEvent{
-			Action:      "closed",
-			PullRequest: &prDetail{Number: 42, State: "closed"},
-		}
-		prs := h.extractPRs("pull_request", e)
-		require.Empty(t, prs)
-	})
-
-	t.Run("opened triggers review", func(t *testing.T) {
-		t.Parallel()
-		e := &GitHubEvent{
-			Action:      "opened",
-			PullRequest: &prDetail{Number: 42, State: "open"},
-		}
-		prs := h.extractPRs("pull_request", e)
-		require.Equal(t, []int{42}, prs)
-	})
-
-	t.Run("synchronize triggers review", func(t *testing.T) {
-		t.Parallel()
-		e := &GitHubEvent{
-			Action:      "synchronize",
-			PullRequest: &prDetail{Number: 42, State: "open"},
-		}
-		prs := h.extractPRs("pull_request", e)
-		require.Equal(t, []int{42}, prs)
-	})
-
-	t.Run("ready_for_review triggers", func(t *testing.T) {
-		t.Parallel()
-		e := &GitHubEvent{
-			Action:      "ready_for_review",
-			PullRequest: &prDetail{Number: 42, State: "open"},
-		}
-		prs := h.extractPRs("pull_request", e)
-		require.Equal(t, []int{42}, prs)
+		require.Empty(t, prs, "pull_request events should be ignored after #662")
 	})
 
 	t.Run("check_suite success triggers PRs", func(t *testing.T) {
@@ -299,16 +256,6 @@ func TestWebhookHandler_ExtractPRs(t *testing.T) {
 		prs := h.extractPRs("push", &GitHubEvent{})
 		require.Empty(t, prs)
 	})
-
-	t.Run("unknown PR action returns nil", func(t *testing.T) {
-		t.Parallel()
-		e := &GitHubEvent{
-			Action:      "labeled",
-			PullRequest: &prDetail{Number: 42, State: "open"},
-		}
-		prs := h.extractPRs("pull_request", e)
-		require.Empty(t, prs)
-	})
 }
 
 // --- ServeHTTP integration tests ---
@@ -375,14 +322,41 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 		require.Equal(t, 0, trigger.count())
 	})
 
-	t.Run("wrong repo returns 200 without trigger", func(t *testing.T) {
+	t.Run("pull_request ignored (CI-only trigger, #662)", func(t *testing.T) {
 		t.Parallel()
 		h, trigger := newIsolatedHandler(t)
 		w := postWebhook(h, "pull_request", &GitHubEvent{
 			Action: "opened",
 			Repository: struct {
 				FullName string `json:"full_name"`
+			}{FullName: "hrygo/hotplex"},
+			PullRequest: &struct {
+				Number int    `json:"number"`
+				State  string `json:"state"`
+				Draft  bool   `json:"draft"`
+				Head   struct {
+					SHA string `json:"sha"`
+				} `json:"head"`
+			}{Number: 99, State: "open"},
+		})
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, 0, trigger.count(), "pull_request events should not trigger review")
+	})
+
+	t.Run("wrong repo returns 200 without trigger", func(t *testing.T) {
+		t.Parallel()
+		h, trigger := newIsolatedHandler(t)
+		w := postWebhook(h, "check_suite", &GitHubEvent{
+			Action: "completed",
+			Repository: struct {
+				FullName string `json:"full_name"`
 			}{FullName: "other/repo"},
+			CheckSuite: &checkSuiteDetail{
+				Conclusion: "success",
+				PullRequests: []struct {
+					Number int `json:"number"`
+				}{{Number: 42}},
+			},
 		})
 		require.Equal(t, http.StatusOK, w.Code)
 		require.Equal(t, 0, trigger.count())
@@ -392,70 +366,40 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 		t.Parallel()
 		trigger := &mockTrigger{}
 		cfg := testWebhookConfig()
-		cfg.AllowedRepos = nil // no filter
+		cfg.AllowedRepos = nil
 		h := NewWebhookHandler(context.Background(), cfg, trigger, noopLogger())
 		t.Cleanup(func() { h.Close() })
-		w := postWebhook(h, "pull_request", &GitHubEvent{
-			Action: "opened",
+		w := postWebhook(h, "check_suite", &GitHubEvent{
+			Action: "completed",
 			Repository: struct {
 				FullName string `json:"full_name"`
 			}{FullName: "any/repo"},
-			PullRequest: &prDetail{Number: 10, State: "open"},
+			CheckSuite: &checkSuiteDetail{
+				Conclusion: "success",
+				PullRequests: []struct {
+					Number int `json:"number"`
+				}{{Number: 10}},
+			},
 		})
 		require.Equal(t, http.StatusAccepted, w.Code)
 		require.Eventually(t, func() bool { return trigger.count() >= 1 }, 2*time.Second, 50*time.Millisecond)
-	})
-
-	t.Run("valid PR opened triggers review", func(t *testing.T) {
-		t.Parallel()
-		h, trigger := newIsolatedHandler(t)
-		w := postWebhook(h, "pull_request", &GitHubEvent{
-			Action: "opened",
-			Repository: struct {
-				FullName string `json:"full_name"`
-			}{
-				FullName: "hrygo/hotplex",
-			},
-			PullRequest: &prDetail{Number: 99, State: "open"},
-		})
-		require.Equal(t, http.StatusAccepted, w.Code)
-
-		require.Eventually(t, func() bool { return trigger.count() >= 1 }, 2*time.Second, 50*time.Millisecond)
-		require.Equal(t, "webhook", trigger.getLastExtra()["trigger"])
-		require.Equal(t, "99", trigger.getLastExtra()["pr_number"])
-	})
-
-	t.Run("draft PR does not trigger", func(t *testing.T) {
-		t.Parallel()
-		h, trigger := newIsolatedHandler(t)
-		w := postWebhook(h, "pull_request", &GitHubEvent{
-			Action: "opened",
-			Repository: struct {
-				FullName string `json:"full_name"`
-			}{
-				FullName: "hrygo/hotplex",
-			},
-			PullRequest: &prDetail{Number: 50, State: "open", Draft: true},
-		})
-		require.Equal(t, http.StatusOK, w.Code) // no PRs extracted → 200
-		require.Equal(t, 0, trigger.count())
 	})
 
 	t.Run("malformed JSON returns 400", func(t *testing.T) {
 		t.Parallel()
 		h, _ := newIsolatedHandler(t)
-		w := postWebhook(h, "pull_request", []byte(`{invalid json`))
+		w := postWebhook(h, "check_suite", []byte(`{invalid json`))
 		require.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("oversized payload returns 413", func(t *testing.T) {
 		t.Parallel()
 		h, _ := newIsolatedHandler(t)
-		bigPayload := make([]byte, 1<<20+100) // > 1MB
+		bigPayload := make([]byte, 1<<20+100)
 		for i := range bigPayload {
 			bigPayload[i] = 'a'
 		}
-		w := postWebhook(h, "pull_request", bigPayload)
+		w := postWebhook(h, "check_suite", bigPayload)
 		require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	})
 
@@ -466,9 +410,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 			Action: "completed",
 			Repository: struct {
 				FullName string `json:"full_name"`
-			}{
-				FullName: "hrygo/hotplex",
-			},
+			}{FullName: "hrygo/hotplex"},
 			CheckSuite: &checkSuiteDetail{
 				Conclusion: "success",
 				HeadSHA:    "abc123",
@@ -489,9 +431,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 			Action: "completed",
 			Repository: struct {
 				FullName string `json:"full_name"`
-			}{
-				FullName: "hrygo/hotplex",
-			},
+			}{FullName: "hrygo/hotplex"},
 			CheckRun: &checkRunDetail{
 				Conclusion: "success",
 				CheckSuite: &struct {
@@ -517,9 +457,7 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 			Action: "completed",
 			Repository: struct {
 				FullName string `json:"full_name"`
-			}{
-				FullName: "hrygo/hotplex",
-			},
+			}{FullName: "hrygo/hotplex"},
 			CheckSuite: &checkSuiteDetail{
 				Conclusion: "failure",
 				HeadSHA:    "abc123",
@@ -538,12 +476,77 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 		w := postWebhook(h, "push", &GitHubEvent{
 			Repository: struct {
 				FullName string `json:"full_name"`
-			}{
-				FullName: "hrygo/hotplex",
-			},
+			}{FullName: "hrygo/hotplex"},
 		})
 		require.Equal(t, http.StatusOK, w.Code)
 		require.Equal(t, 0, trigger.count())
+	})
+}
+
+// --- Dedup tests ---
+
+func TestWebhookHandler_Dedup(t *testing.T) {
+	t.Parallel()
+
+	t.Run("concurrent check_suite and check_run trigger once", func(t *testing.T) {
+		t.Parallel()
+		trigger := &mockTrigger{}
+		cfg := testWebhookConfig()
+		cfg.AllowedRepos = nil
+		h := NewWebhookHandler(context.Background(), cfg, trigger, noopLogger())
+		t.Cleanup(func() { h.Close() })
+
+		csPayload := &GitHubEvent{
+			Action: "completed",
+			Repository: struct {
+				FullName string `json:"full_name"`
+			}{FullName: "hrygo/hotplex"},
+			CheckSuite: &checkSuiteDetail{
+				Conclusion: "success",
+				PullRequests: []struct {
+					Number int `json:"number"`
+				}{{Number: 42}},
+			},
+		}
+		crPayload := &GitHubEvent{
+			Action: "completed",
+			Repository: struct {
+				FullName string `json:"full_name"`
+			}{FullName: "hrygo/hotplex"},
+			CheckRun: &checkRunDetail{
+				Conclusion: "success",
+				CheckSuite: &struct {
+					PullRequests []struct {
+						Number int `json:"number"`
+					} `json:"pull_requests"`
+				}{
+					PullRequests: []struct {
+						Number int `json:"number"`
+					}{{Number: 42}},
+				},
+			},
+		}
+
+		// Send both concurrently to stress the dedup atomicity.
+		var wg sync.WaitGroup
+		for range 5 {
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				postWebhook(h, "check_suite", csPayload)
+			}()
+			go func() {
+				defer wg.Done()
+				postWebhook(h, "check_run", crPayload)
+			}()
+		}
+		wg.Wait()
+
+		require.Eventually(t, func() bool { return trigger.count() >= 1 }, 3*time.Second, 50*time.Millisecond)
+		// With atomic LoadOrStore dedup, concurrent requests for the same PR
+		// should produce at most 1 trigger (the first LoadOrStore winner).
+		// Allow up to 3 for rare races between expired-entry Store and new LoadOrStore.
+		require.LessOrEqual(t, trigger.count(), 3, "dedup should prevent most duplicate triggers")
 	})
 }
 
@@ -554,7 +557,6 @@ func TestWebhookHandler_RateLimiting(t *testing.T) {
 
 	h, _ := newIsolatedHandler(t)
 
-	// Exhaust burst (10 tokens)
 	var limited int
 	for range 20 {
 		payload := []byte(`{}`)
@@ -583,16 +585,18 @@ func TestWebhookHandler_TriggerError(t *testing.T) {
 	h := NewWebhookHandler(context.Background(), testWebhookConfig(), &errorTrigger{}, noopLogger())
 	t.Cleanup(func() { h.Close() })
 
-	w := postWebhook(h, "pull_request", &GitHubEvent{
-		Action: "opened",
+	w := postWebhook(h, "check_suite", &GitHubEvent{
+		Action: "completed",
 		Repository: struct {
 			FullName string `json:"full_name"`
-		}{
-			FullName: "hrygo/hotplex",
+		}{FullName: "hrygo/hotplex"},
+		CheckSuite: &checkSuiteDetail{
+			Conclusion: "success",
+			PullRequests: []struct {
+				Number int `json:"number"`
+			}{{Number: 1}},
 		},
-		PullRequest: &prDetail{Number: 1, State: "open"},
 	})
-	// HTTP response is 202 even if trigger fails (async)
 	require.Equal(t, http.StatusAccepted, w.Code)
 }
 

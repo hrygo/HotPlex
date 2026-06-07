@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/session"
@@ -73,7 +75,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		BotName:      job.BotName,
 		WorkerType:   wt,
 		AllowedTools: job.Payload.AllowedTools,
-		WorkDir:      job.WorkDir,
+		WorkDir:      e.resolveWorkDir(job),
 		Platform:     job.Platform,
 		PlatformKey:  platformKey,
 		Title:        title,
@@ -116,6 +118,18 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 	}
 
 	return sessionKey, err
+}
+
+// resolveWorkDir computes the working directory for a cron job execution.
+// Webhook-triggered PR reviews get a per-PR directory under the OS temp dir;
+// all other executions (cron fallback, etc.) use the job's static WorkDir.
+func (e *Executor) resolveWorkDir(job *CronJob) string {
+	prNum := job.PlatformKey["pr_number"]
+	if prNum != "" && job.PlatformKey["trigger"] == "webhook" {
+		return filepath.Join(os.TempDir(),
+			fmt.Sprintf("pr-review-%s/pr-%s", time.Now().Format("20060102"), prNum))
+	}
+	return job.WorkDir
 }
 
 func (e *Executor) waitForCompletion(ctx context.Context, sessionID string, timeout time.Duration) error {

@@ -23,6 +23,8 @@ import (
 )
 
 // GitHubEvent represents the common fields of GitHub webhook payloads.
+// PullRequest fields are retained for JSON deserialization even though
+// extractPRs no longer handles pull_request events (CI-only trigger, #662).
 type GitHubEvent struct {
 	Action     string `json:"action"`
 	Repository struct {
@@ -62,7 +64,7 @@ type JobTrigger interface {
 const maxConcurrentTriggers = 5
 
 // triggerDedupCooldown prevents duplicate triggers for the same PR within this window.
-const triggerDedupCooldown = 60 * time.Second
+const triggerDedupCooldown = 300 * time.Second
 
 // WebhookHandler handles incoming GitHub webhook requests.
 type WebhookHandler struct {
@@ -197,16 +199,17 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	jobName := h.cfg.TargetJobName
 	repo := event.Repository.FullName
 	for _, prNum := range prNumbers {
-		// Dedup: skip if the same PR was triggered within the cooldown window.
-		// Key includes repo to avoid cross-repo collision when AllowedRepos is empty.
+		// Dedup: atomically check and mark to prevent TOCTOU race when
+		// check_suite and check_run arrive near-simultaneously.
 		prKey := repo + "#" + strconv.Itoa(prNum)
-		if last, ok := h.dedup.Load(prKey); ok {
-			if t, _ := last.(time.Time); time.Since(t) < triggerDedupCooldown {
+		now := time.Now()
+		if actual, loaded := h.dedup.LoadOrStore(prKey, now); loaded {
+			if t, _ := actual.(time.Time); now.Sub(t) < triggerDedupCooldown {
 				h.log.Info("webhook: skipping duplicate trigger", "pr", prNum)
 				continue
 			}
+			h.dedup.Store(prKey, now)
 		}
-		h.dedup.Store(prKey, time.Now())
 
 		select {
 		case h.sem <- struct{}{}:
@@ -259,41 +262,33 @@ func (h *WebhookHandler) verifySignature(payload []byte, sig string) bool {
 }
 
 // extractPRs returns PR numbers that need review based on event type and action.
+// Only check_suite and check_run events are handled — pull_request events are
+// ignored to prevent triggering before CI completes (issue #662).
 func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 	switch eventType {
-	case "pull_request":
-		if e.PullRequest == nil || e.PullRequest.State != "open" || e.PullRequest.Draft {
-			return nil
-		}
-		switch e.Action {
-		case "opened", "synchronize", "reopened", "ready_for_review":
-			return []int{e.PullRequest.Number}
-		}
-
 	case "check_suite":
 		if e.CheckSuite == nil || e.CheckSuite.Conclusion != "success" {
 			return nil
 		}
-		// NOTE: check_suite/check_run PullRequests may include draft or already-merged
-		// PRs (GitHub associates suites with commits, not PR state). We intentionally
-		// don't filter here — the downstream agent's CI gate will skip irrelevant PRs.
-		prs := make([]int, 0, len(e.CheckSuite.PullRequests))
-		for _, pr := range e.CheckSuite.PullRequests {
-			prs = append(prs, pr.Number)
-		}
-		return prs
-
+		return extractPRNumbers(e.CheckSuite.PullRequests)
 	case "check_run":
 		if e.CheckRun == nil || e.CheckRun.Conclusion != "success" || e.CheckRun.CheckSuite == nil {
 			return nil
 		}
-		prs := make([]int, 0, len(e.CheckRun.CheckSuite.PullRequests))
-		for _, pr := range e.CheckRun.CheckSuite.PullRequests {
-			prs = append(prs, pr.Number)
-		}
-		return prs
+		return extractPRNumbers(e.CheckRun.CheckSuite.PullRequests)
 	}
 	return nil
+}
+
+// extractPRNumbers extracts PR numbers from the inline PullRequests structs.
+func extractPRNumbers(prs []struct {
+	Number int `json:"number"`
+}) []int {
+	numbers := make([]int, 0, len(prs))
+	for _, pr := range prs {
+		numbers = append(numbers, pr.Number)
+	}
+	return numbers
 }
 
 // extractRepoFromPing attempts to extract the repository full name from a ping payload.
