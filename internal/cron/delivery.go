@@ -239,7 +239,13 @@ func (d *Delivery) flushPending(ctx context.Context) {
 	d.mu.Unlock()
 
 	for _, pd := range due {
-		d.deliverResult(ctx, pd.job, pd.result, pd.attempt)
+		// Use background context when scheduler ctx is cancelled (shutdown window)
+		// to allow final delivery attempts rather than failing with context cancelled.
+		deliverCtx := ctx
+		if ctx.Err() != nil {
+			deliverCtx = context.Background()
+		}
+		d.deliverResult(deliverCtx, pd.job, pd.result, pd.attempt)
 	}
 }
 

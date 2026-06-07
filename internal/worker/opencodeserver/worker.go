@@ -130,8 +130,14 @@ type Worker struct {
 var _ worker.WorkerSessionIDHandler = (*Worker)(nil)
 
 func (w *Worker) GetWorkerSessionID() string {
-	if w.httpConn != nil {
-		return w.httpConn.sessionID
+	w.Mu.Lock()
+	conn := w.httpConn
+	w.Mu.Unlock()
+	if conn != nil {
+		conn.mu.Lock()
+		sid := conn.sessionID
+		conn.mu.Unlock()
+		return sid
 	}
 	if v := w.workerSessionID.Load(); v != nil {
 		if sid, ok := v.(string); ok {
@@ -144,7 +150,9 @@ func (w *Worker) GetWorkerSessionID() string {
 func (w *Worker) SetWorkerSessionID(id string) {
 	w.workerSessionID.Store(id)
 	if w.httpConn != nil {
+		w.httpConn.mu.Lock()
 		w.httpConn.sessionID = id
+		w.httpConn.mu.Unlock()
 	}
 }
 
