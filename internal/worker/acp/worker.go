@@ -163,6 +163,12 @@ type Worker struct {
 	conn   *acpConn
 	cancel context.CancelFunc
 
+	// drainCh signals readLoop to drain all buffered notifications from NotificationCh.
+	// drainDoneCh signals back when the drain is complete.
+	// readLoop is the sole consumer of NotificationCh — Input() must not read it directly.
+	drainCh     chan struct{}
+	drainDoneCh chan struct{}
+
 	// pendingPerm stores the permission mapping for in-flight permission requests.
 	pendingPerm sync.Map // requestID (string) → *PermissionMapResult
 
@@ -428,6 +434,9 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.SetConnLocked(nil) // base.Conn not used; acpConn is returned via Conn() override.
 	w.Mu.Unlock()
 
+	w.drainCh = make(chan struct{})
+	w.drainDoneCh = make(chan struct{}, 1)
+
 	// Start worker read loop.
 	go w.readLoop(childCtx)
 
@@ -501,22 +510,18 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	}
 
 	// Drain pending notifications before sending Done.
-	// Prompt() returns after the JSON-RPC response arrives, but the
-	// readLoop goroutine may still have agent_message_chunk notifications
-	// buffered in NotificationCh. Without draining, Done reaches the
-	// bridge before MessageDelta, resulting in text_len=0.
-	drainTimer := time.NewTimer(200 * time.Millisecond)
-	defer drainTimer.Stop()
-drainLoop:
-	for {
+	// Signal readLoop (the sole consumer of NotificationCh) to flush
+	// any buffered notifications. This avoids a race between Input()
+	// and readLoop competing for NotificationCh.
+	drainCtx, drainCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer drainCancel()
+	select {
+	case w.drainCh <- struct{}{}:
 		select {
-		case n := <-w.client.NotificationCh:
-			w.processNotification(ctx, n, conn)
-		case <-drainTimer.C:
-			break drainLoop
-		default:
-			break drainLoop
+		case <-w.drainDoneCh:
+		case <-drainCtx.Done():
 		}
+	case <-drainCtx.Done():
 	}
 
 	// Emit done sequence.
@@ -894,6 +899,24 @@ func (w *Worker) processNotification(ctx context.Context, notif *JSONRPCNotifica
 	}
 }
 
+// drainNotificationCh empties all buffered notifications from NotificationCh.
+// Called by readLoop in response to a drain signal from Input().
+func (w *Worker) drainNotificationCh(ctx context.Context, conn *acpConn) {
+	for {
+		select {
+		case n, ok := <-w.client.NotificationCh:
+			if !ok {
+				return
+			}
+			w.processNotification(ctx, n, conn)
+		case <-ctx.Done():
+			return
+		default:
+			return
+		}
+	}
+}
+
 func (w *Worker) readLoop(ctx context.Context) {
 	// Capture conn under lock for consistent access pattern.
 	w.Mu.Lock()
@@ -922,6 +945,12 @@ func (w *Worker) readLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-w.drainCh:
+			w.drainNotificationCh(ctx, conn)
+			select {
+			case w.drainDoneCh <- struct{}{}:
+			case <-ctx.Done():
+			}
 		case notif, ok := <-w.client.NotificationCh:
 			if !ok {
 				return
