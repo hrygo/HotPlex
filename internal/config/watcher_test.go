@@ -337,5 +337,9 @@ func createTempConfigFile(t *testing.T) string {
 	err := os.WriteFile(tmpFile, []byte(content), 0644)
 	require.NoError(t, err)
 
-	return tmpFile
+	// Resolve symlinks so the path matches what NewWatcher stores internally
+	// (NewWatcher calls ExpandAndAbs which runs EvalSymlinks).
+	resolved, err := filepath.EvalSymlinks(tmpFile)
+	require.NoError(t, err)
+	return resolved
 }
