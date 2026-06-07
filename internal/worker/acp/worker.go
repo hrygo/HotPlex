@@ -500,6 +500,25 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return fmt.Errorf("acp: prompt: %w", promptErr)
 	}
 
+	// Drain pending notifications before sending Done.
+	// Prompt() returns after the JSON-RPC response arrives, but the
+	// readLoop goroutine may still have agent_message_chunk notifications
+	// buffered in NotificationCh. Without draining, Done reaches the
+	// bridge before MessageDelta, resulting in text_len=0.
+	drainTimer := time.NewTimer(200 * time.Millisecond)
+	defer drainTimer.Stop()
+drainLoop:
+	for {
+		select {
+		case n := <-w.client.NotificationCh:
+			w.processNotification(ctx, n, conn)
+		case <-drainTimer.C:
+			break drainLoop
+		default:
+			break drainLoop
+		}
+	}
+
 	// Emit done sequence.
 	envs := w.mapper.MapPromptResponse(result)
 	for _, env := range envs {
