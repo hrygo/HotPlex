@@ -888,19 +888,21 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	body := map[string]any{
 		"parts": []map[string]any{{"type": "text", "text": content}},
 	}
-	if c.systemPrompt != "" {
-		body["system"] = c.systemPrompt
-	}
-	if c.jsonSchema != nil {
-		body["format"] = map[string]any{
-			"type":   "json_schema",
-			"schema": c.jsonSchema,
-		}
-	}
 	c.mu.Lock()
+	systemPrompt := c.systemPrompt
+	jsonSchema := c.jsonSchema
 	allowedModel := c.allowedModel
 	variant := c.variant
 	c.mu.Unlock()
+	if systemPrompt != "" {
+		body["system"] = systemPrompt
+	}
+	if jsonSchema != nil {
+		body["format"] = map[string]any{
+			"type":   "json_schema",
+			"schema": jsonSchema,
+		}
+	}
 	if allowedModel != nil {
 		body["model"] = allowedModel
 	}
