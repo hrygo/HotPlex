@@ -33,6 +33,8 @@ worker:
   execution_timeout: 30m
   opencode_server:
     password: "${OPENCODE_SERVER_PASSWORD}"
+  acp:
+    debug: true
 
 log:
   level: "debug"
