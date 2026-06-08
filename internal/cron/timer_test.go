@@ -31,8 +31,8 @@ func TestErrorType(t *testing.T) {
 		{"502", errors.New("502 bad gateway"), "server_error"},
 		{"503", errors.New("503 unavailable"), "server_error"},
 		{"504", errors.New("504 service unavailable"), "server_error"},
-		{"connection refused", errors.New("dial tcp: connection refused"), "timeout"},
-		{"temporary", errors.New("temporary failure"), "timeout"},
+		{"connection refused", errors.New("dial tcp: connection refused"), "network"},
+		{"temporary", errors.New("temporary failure"), "network"},
 		{"execution", errors.New("worker not found"), "execution"},
 		{"other", errors.New("something else"), "execution"},
 	}

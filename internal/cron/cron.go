@@ -126,6 +126,12 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	ReleaseSkillManual(s.log)
 
 	s.tickLoop.arm(s.nextTickDuration(time.Now()))
+
+	// Start delivery retry loop.
+	if s.delivery != nil {
+		s.delivery.StartRetryLoop(ctx)
+	}
+
 	return nil
 }
 
@@ -133,10 +139,17 @@ func (s *Scheduler) Start(ctx context.Context) error {
 func (s *Scheduler) Shutdown(ctx context.Context) {
 	s.log.Info("cron: shutting down scheduler")
 	s.closed.Store(true)
+	s.tickLoop.stop()
+
+	// Stop delivery retry loop before cancelling ctx so retryLoop
+	// exits via the stop channel (graceful) rather than ctx.Done().
+	if s.delivery != nil {
+		s.delivery.StopRetryLoop()
+	}
+
 	if s.cancelFn != nil {
 		s.cancelFn()
 	}
-	s.tickLoop.stop()
 
 	done := make(chan struct{})
 	go func() {

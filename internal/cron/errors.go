@@ -9,6 +9,7 @@ type errClass string
 
 const (
 	errClassTimeout   errClass = "timeout"
+	errClassNetwork   errClass = "network"
 	errClassRateLimit errClass = "rate_limit"
 	errClassServer    errClass = "server_error"
 	errClassExec      errClass = "execution"
@@ -30,8 +31,8 @@ func classifyError(err error) errClass {
 	if isHTTPStatus(msg) {
 		return errClassServer
 	}
-	if containsAny(msg, "connection refused", "temporary") {
-		return errClassTimeout
+	if containsAny(msg, "connection refused", "temporary failure", "temporary error", "connection reset", "broken pipe", "dns resolution", "dns lookup", "no route") {
+		return errClassNetwork
 	}
 	return errClassExec
 }
@@ -55,7 +56,7 @@ func isTemporaryError(err error) bool {
 		return false
 	}
 	switch classifyError(err) {
-	case errClassTimeout, errClassRateLimit, errClassServer:
+	case errClassTimeout, errClassNetwork, errClassRateLimit, errClassServer:
 		return true
 	default:
 		return false

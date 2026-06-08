@@ -182,13 +182,17 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := w.Start(ctx, info); err != nil {
-				_ = b.sm.Delete(ctx, p.ID)
+				// Use Background() to ensure DB delete succeeds even if the
+				// request-scoped ctx has been cancelled (e.g. Slack 300s timeout).
+				_ = b.sm.Delete(context.Background(), p.ID)
 				return fmt.Errorf("bridge: start worker: %w", err)
 			}
 			return nil
 		},
 		func(_ worker.Worker, _ error) {
-			_ = b.sm.Delete(ctx, p.ID)
+			// Use Background() for same reason as above — the attach failure
+			// cleanup must not depend on the caller's ctx lifetime.
+			_ = b.sm.Delete(context.Background(), p.ID)
 		},
 	); err != nil {
 		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "start_failed")))
@@ -197,15 +201,17 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 
 	// Transition to RUNNING. (StateNotifier will emit state event automatically)
 	if err := b.sm.Transition(ctx, p.ID, events.StateRunning); err != nil {
-		// Kill the worker to prevent orphan — without this, the worker runs
-		// indefinitely while the session stays in CREATED state, invisible to GC.
-		// forwardEvents will detect the exit and cleanupCrashedWorker transitions
-		// the session to TERMINATED for eventual GC reclamation.
-		b.log.Error("bridge: transition to running failed, terminating orphan worker",
+		// Worker started successfully but DB state transition failed — the session
+		// is stuck in CREATED with no GC path (GC only sweeps IDLE/RUNNING/TERMINATED).
+		// Terminate the orphan worker AND delete the session to prevent permanent
+		// resource leaks. Use Background() to ensure cleanup succeeds even if the
+		// request-scoped ctx was the cause of the transition failure.
+		b.log.Error("bridge: transition to running failed, cleaning up orphan",
 			"session_id", p.ID, "worker_type", p.WorkerType, "err", err)
 		if w := b.sm.GetWorker(p.ID); w != nil {
 			_ = w.Terminate(context.Background())
 		}
+		_ = b.sm.Delete(context.Background(), p.ID)
 		return fmt.Errorf("bridge: transition to running: %w", err)
 	}
 
@@ -298,7 +304,17 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 			}
 			return nil
 		},
-		nil, // no extra cleanup on attach failure for resume
+		func(_ worker.Worker, _ error) {
+			// Roll back to TERMINATED if AttachWorker fails (pool full, ctx
+			// cancelled, etc.). Without this, the session stays in RUNNING
+			// with no worker and no forwardEvents goroutine for self-healing.
+			bgCtx, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer bgCancel()
+			if err := b.sm.Transition(bgCtx, id, events.StateTerminated); err != nil {
+				b.log.Warn("bridge: resume attach-error rollback to TERMINATED failed",
+					"session_id", id, "err", err)
+			}
+		},
 	)
 	if err != nil {
 		return err

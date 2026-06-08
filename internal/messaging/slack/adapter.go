@@ -527,6 +527,10 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 	// Set initial assistant status (native API for paid workspaces)
 	if a.isAssistantCapable.Load() && threadTS != "" {
 		_ = a.SetAssistantStatus(ctx, channelID, threadTS, a.phrases.Random("status"))
+	} else if msgEvent.TimeStamp != "" {
+		// DM first message — no thread context for assistant status API.
+		// Fall back to emoji reaction on the user message for visual feedback.
+		_ = a.SetStatus(ctx, channelID, msgEvent.TimeStamp, StatusThinking, a.phrases.Random("status"))
 	}
 
 	if hasVoice {
@@ -537,9 +541,22 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 
 	if err := a.HandleTextMessage(ctx, platformMsgID, channelID, teamID, threadTS, userID, text); err != nil {
 		a.Log.Warn("slack: handle message failed", "err", err, "channel", channelID, "thread", threadTS, "user", userID)
+
+		// Clear the "Thinking..." status indicator so the user doesn't see
+		// a permanent spinner. Safe to call even if status was never set.
+		if a.isAssistantCapable.Load() && threadTS != "" {
+			_ = a.ClearStatus(ctx, channelID, threadTS)
+		}
+
+		// Always notify the user of the failure, not just on timeout.
+		// Without this, non-timeout errors (session start failure, worker
+		// errors, config issues) are silently swallowed.
 		if errors.Is(err, context.DeadlineExceeded) {
 			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
 				"⚠️ Request timed out. The operation took too long and was cancelled. Please try again.")
+		} else {
+			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
+				"⚠️ Failed to process your message. Please try again or use /reset to restart the session.")
 		}
 	}
 }

@@ -509,6 +509,25 @@ func CronAttached() metric.Int64Counter {
 	return cronAttached
 }
 
+var (
+	cronDeliveryRetry     metric.Int64Counter
+	cronDeliveryRetryInit sync.Once
+)
+
+func CronDeliveryRetry() metric.Int64Counter {
+	cronDeliveryRetryInit.Do(func() {
+		var err error
+		cronDeliveryRetry, err = Meter().Int64Counter(
+			"hotplex.cron.delivery.result",
+			metric.WithDescription("Cron delivery outcomes by status (success|exhausted|permanent)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.cron.delivery.result", err)
+		}
+	})
+	return cronDeliveryRetry
+}
+
 // ─── Streaming Card Instruments ─────────────────────────────────────
 
 var (

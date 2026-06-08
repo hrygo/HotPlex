@@ -76,6 +76,13 @@ func (c *SlackConn) handleError(ctx context.Context, env *events.Envelope) error
 
 	if errMsg := messaging.ExtractErrorMessage(env); errMsg != "" {
 		go func() { _ = c.writeWithPostMessage(ctx, FormatMrkdwn(errPrefix+errMsg), false) }()
+	} else {
+		// Worker produced an error event with an empty message — still
+		// notify the user so they know something went wrong, rather than
+		// seeing the status vanish with no explanation.
+		go func() {
+			_ = c.writeWithPostMessage(ctx, FormatMrkdwn(errPrefix+"An internal error occurred. Please try again or use /reset."), false)
+		}()
 	}
 	return nil
 }

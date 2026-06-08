@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -35,6 +36,7 @@ type pcEntry struct {
 	ch      chan *events.Envelope
 	closeCh chan struct{} // signals Close() was called
 	done    chan struct{}
+	closed  atomic.Bool // fast-path check to avoid send-on-closed-channel
 	closeMu sync.Once
 	log     *slog.Logger
 	ctx     context.Context
@@ -106,7 +108,21 @@ func (e *pcEntry) RouteWriteData(data []byte, eventType events.Kind) error {
 // json:"-" fields (e.g. OwnerID) that EncodeJSON omits from pre-encoded bytes.
 func (e *pcEntry) PreferEnvelope() bool { return true }
 
-func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) error {
+func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error) {
+	// Recover from send-on-closed-channel panic caused by the TOCTOU window
+	// between closed.Load() and the channel send. The atomic guard narrows
+	// this window to nanoseconds, but recover() eliminates it entirely.
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("platform conn closed")
+		}
+	}()
+
+	// Fast-path: skip channel send if already closed.
+	if e.closed.Load() {
+		return errors.New("platform conn closed")
+	}
+
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {
 			observability.GatewayPlatformDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
@@ -140,6 +156,7 @@ func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) error {
 func (e *pcEntry) Close() error {
 	var err error
 	e.closeMu.Do(func() {
+		e.closed.Store(true) // set before closing channel to prevent WriteCtx races
 		close(e.closeCh)
 		close(e.ch) // signal writeLoop to drain and exit
 		<-e.done
