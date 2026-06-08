@@ -308,7 +308,8 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 			// Roll back to TERMINATED if AttachWorker fails (pool full, ctx
 			// cancelled, etc.). Without this, the session stays in RUNNING
 			// with no worker and no forwardEvents goroutine for self-healing.
-			bgCtx := context.Background()
+			bgCtx, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer bgCancel()
 			if err := b.sm.Transition(bgCtx, id, events.StateTerminated); err != nil {
 				b.log.Warn("bridge: resume attach-error rollback to TERMINATED failed",
 					"session_id", id, "err", err)
