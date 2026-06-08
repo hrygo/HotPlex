@@ -166,6 +166,7 @@ increase(hotplex_pool_release_errors_total[1h])
 | `hotplex.cron.errors` | Counter | 执行错误数，label: `job_name`, `error_type` |
 | `hotplex.cron.duration` | Histogram | 执行时长，label: `job_name` |
 | `hotplex.cron.attached` | Counter | Session-attached cron 投递次数 |
+| `hotplex.cron.delivery.result` | Counter | 投递结果，label: `status`（success / exhausted / permanent） |
 
 ### 常用查询
 
