@@ -235,6 +235,9 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	w.Log.Debug("opencodeserver: start step 4 - session created", "ocs_session_id", sessionID)
 
 	w.initSessionConn(ctx, sessionID, session)
+	// Persist OCS session ID immediately so resume can find it even if
+	// release() races with the delayed persistWorkerSessionID in bridge.
+	w.SetWorkerSessionID(sessionID)
 	w.startSSE(sessionID)
 	w.Log.Debug("opencodeserver: start completed")
 	return nil
@@ -322,6 +325,7 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 			w.Log.Info("opencodeserver: resuming existing OCS session",
 				"ocs_session_id", ocsSessionID, "hotplex_session_id", session.SessionID)
 			w.initSessionConn(ctx, ocsSessionID, session)
+			w.SetWorkerSessionID(ocsSessionID)
 			w.startSSE(ocsSessionID)
 			w.Log.Debug("opencodeserver: resume completed (reused session)")
 			return nil
@@ -339,6 +343,7 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	}
 
 	w.initSessionConn(ctx, newSessionID, session)
+	w.SetWorkerSessionID(newSessionID)
 	w.startSSE(newSessionID)
 	w.Log.Debug("opencodeserver: resume completed (fresh session)")
 	return nil
@@ -360,20 +365,26 @@ func (w *Worker) Kill() error {
 
 // Wait reports exit code based on whether the singleton process crashed.
 // 0 = normal session end, 1 = process crashed.
-// Blocks briefly to allow crash detection after Release(); aligns with the
-// blocking Wait() contract defined in the Worker interface.
+// It checks for crash signal without blocking indefinitely; Terminate/Kill
+// should already have been called before Wait, so the release path is handled
+// by those methods.
 func (w *Worker) Wait() (int, error) {
 	if w.singleton == nil {
 		return 0, fmt.Errorf("opencodeserver: not started")
 	}
 
-	w.releaseOnce.Do(func() { w.singleton.Release() })
+	// Ensure release happens if Terminate/Kill was never called (defensive).
+	w.releaseOnce.Do(func() {
+		w.release()
+	})
 
+	// Non-blocking crash check: if the process crashed, crashSub is already
+	// closed. If not, we return immediately — no need to block 2 seconds.
 	select {
 	case <-w.crashSub:
 		return 1, nil // process crashed
-	case <-time.After(2 * time.Second):
-		return 0, nil // no crash detected within grace window
+	default:
+		return 0, nil
 	}
 }
 
@@ -760,11 +771,14 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 	}
 }
 
-// release closes the SSE subscription and releases the singleton ref.
+// release closes the SSE subscription, deletes the server-side session, and
+// releases the singleton ref.
 func (w *Worker) release() {
 	w.Mu.Lock()
 	sseCancel := w.sseCancel
 	sessionID := ""
+	httpAddr := w.httpAddr
+	client := w.client
 	if w.httpConn != nil {
 		sessionID = w.httpConn.getSessionID()
 	}
@@ -776,6 +790,12 @@ func (w *Worker) release() {
 
 	if sessionID != "" && w.singleton != nil {
 		w.singleton.Unsubscribe(sessionID)
+	}
+
+	// Delete the server-side session to prevent resource accumulation.
+	// Best-effort: errors are logged but do not block cleanup.
+	if sessionID != "" && httpAddr != "" && client != nil {
+		w.deleteOCSSession(sessionID, httpAddr, client)
 	}
 
 	w.releaseOnce.Do(func() {
@@ -791,6 +811,29 @@ func (w *Worker) release() {
 
 	if conn != nil {
 		_ = conn.Close()
+	}
+}
+
+// deleteOCSSession sends DELETE /session/{id} to the OCS server to clean up
+// server-side session state. Best-effort — failures are logged, not returned.
+func (w *Worker) deleteOCSSession(sessionID, httpAddr string, client *http.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "DELETE", httpAddr+"/session/"+url.PathEscape(sessionID), http.NoBody)
+	if err != nil {
+		w.Log.Debug("opencodeserver: delete session request error", "err", err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		w.Log.Debug("opencodeserver: delete session failed", "session_id", sessionID, "err", err)
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		w.Log.Debug("opencodeserver: delete session unexpected status",
+			"session_id", sessionID, "status", resp.StatusCode)
 	}
 }
 

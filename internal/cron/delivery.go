@@ -93,7 +93,8 @@ func (d *Delivery) deliverResult(ctx context.Context, job *CronJob, response str
 	}
 
 	if err := fn(ctx, job.Platform, job.PlatformKey, response); err != nil {
-		if isTemporaryError(err) && attempt < maxRetryAttempts {
+		transient := isTemporaryError(err)
+		if transient && attempt < maxRetryAttempts {
 			backoff := retryBackoff(attempt)
 			d.log.Warn("cron delivery: transient failure, enqueuing for retry",
 				"job_id", job.ID, "name", job.Name, "attempt", attempt,
@@ -103,7 +104,7 @@ func (d *Delivery) deliverResult(ctx context.Context, job *CronJob, response str
 		}
 
 		status := "permanent"
-		if isTemporaryError(err) {
+		if transient {
 			status = "exhausted"
 		}
 		// Use caller ctx to preserve trace linkage; OTel synchronous
@@ -135,22 +136,25 @@ func (d *Delivery) deliverResult(ctx context.Context, job *CronJob, response str
 // enqueue adds a pending delivery to the retry queue.
 // Evicts the oldest entry if the queue is full.
 func (d *Delivery) enqueue(job *CronJob, result string, attempt int, nextAt time.Time) {
+	var evicted *pendingDelivery
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	if len(d.queue) >= maxQueueSize {
-		evicted := d.queue[0]
+		e := d.queue[0]
+		evicted = &e
 		d.queue = d.queue[1:]
-		d.log.Warn("cron delivery: retry queue full, evicting oldest entry",
-			"evicted_job_id", evicted.job.ID, "evicted_name", evicted.job.Name)
 	}
-
 	d.queue = append(d.queue, pendingDelivery{
 		job:     job,
 		result:  result,
 		attempt: attempt,
 		nextAt:  nextAt,
 	})
+	d.mu.Unlock()
+
+	if evicted != nil {
+		d.log.Warn("cron delivery: retry queue full, evicting oldest entry",
+			"evicted_job_id", evicted.job.ID, "evicted_name", evicted.job.Name)
+	}
 }
 
 // StartRetryLoop launches the background retry goroutine.

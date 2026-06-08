@@ -345,6 +345,9 @@ func (s *SingletonProcessManager) discoverPort(stdout *os.File, timeout time.Dur
 	case r := <-ch:
 		return r.port, r.err
 	case <-time.After(timeout):
+		// Close stdout to unblock the scanner goroutine on timeout.
+		// The goroutine's defer will get os.ErrClosed, which is harmless.
+		_ = stdout.Close()
 		return 0, fmt.Errorf("timeout discovering port")
 	}
 }
