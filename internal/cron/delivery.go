@@ -249,25 +249,24 @@ func (d *Delivery) flushPending(ctx context.Context) {
 	d.queue = remaining
 	d.mu.Unlock()
 
+	// When the scheduler ctx is cancelled (shutdown), use a shared 60s budget
+	// across all due entries instead of a per-entry 30s timeout. This bounds
+	// total shutdown time regardless of queue depth.
+	var shutdownCancel context.CancelFunc
+	deliverCtx := ctx
+	if ctx.Err() != nil {
+		deliverCtx, shutdownCancel = context.WithTimeout(context.Background(), 60*time.Second)
+		defer shutdownCancel()
+	}
+
 	for _, pd := range due {
-		// Use background context with timeout when scheduler ctx is cancelled
-		// (shutdown window) to allow final delivery attempts rather than failing
-		// with context cancelled.
-		deliverCtx := ctx
-		if ctx.Err() != nil {
-			var cancel context.CancelFunc
-			deliverCtx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-			d.deliverResult(deliverCtx, pd.job, pd.result, pd.attempt)
-			cancel()
-			continue
-		}
 		d.deliverResult(deliverCtx, pd.job, pd.result, pd.attempt)
 	}
 }
 
 // retryBackoff computes the backoff duration for a given attempt number.
-// With maxRetryAttempts=3, the actual backoff window is ~3 minutes (60s + 120s).
-// The 5m cap is reserved for future use if maxRetryAttempts is raised.
+// With maxRetryAttempts=3, the actual retry window is ~90s (30s + 60s).
+// The 2m and 5m caps are reserved for future use if maxRetryAttempts is raised.
 // Unlike retry.backoff (table-based, for job execution retry up to 1h),
 // this is purpose-built for delivery retry with a shorter cap.
 func retryBackoff(attempt int) time.Duration {

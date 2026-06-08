@@ -108,9 +108,17 @@ func (e *pcEntry) RouteWriteData(data []byte, eventType events.Kind) error {
 // json:"-" fields (e.g. OwnerID) that EncodeJSON omits from pre-encoded bytes.
 func (e *pcEntry) PreferEnvelope() bool { return true }
 
-func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) error {
-	// Fast-path: skip channel send if already closed. This prevents a rare
-	// send-on-closed-channel panic when Close() and WriteCtx race.
+func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error) {
+	// Recover from send-on-closed-channel panic caused by the TOCTOU window
+	// between closed.Load() and the channel send. The atomic guard narrows
+	// this window to nanoseconds, but recover() eliminates it entirely.
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("platform conn closed")
+		}
+	}()
+
+	// Fast-path: skip channel send if already closed.
 	if e.closed.Load() {
 		return errors.New("platform conn closed")
 	}

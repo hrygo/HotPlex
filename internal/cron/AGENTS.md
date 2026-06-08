@@ -85,7 +85,7 @@ arm(duration) → timer fires → collectDue(now) → for each due job:
 - Skipped when: no extractor, empty response, platform is "cron" (self-originated), or silent=true
 - **Delivery retry**: in-memory FIFO queue, max 100 entries, max 3 attempts per delivery
   - ⚠️ Queue is in-memory only; entries are lost on process restart
-  - Retries transient failures (429, timeout, 5xx) with exponential backoff (30s → 1m → 2m, capped 5m)
+  - Retries transient failures (429, timeout, 5xx) with exponential backoff (30s → 1m, capped 5m; 2m+ unused at maxRetryAttempts=3)
   - Permanent failures (403, 404) logged and discarded immediately
   - Background `retryLoop` goroutine (10s tick) drains due entries via `flushPending`
   - Lifecycle: `StartRetryLoop`/`StopRetryLoop` managed by Scheduler, idempotent

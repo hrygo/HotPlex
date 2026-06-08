@@ -114,14 +114,18 @@ func TestFlushPending_TransientFailure(t *testing.T) {
 	require.Equal(t, 2, d.queue[0].attempt) // attempt incremented
 
 	// Second flush: fails again, enqueued for retry.
+	d.mu.Lock()
 	d.queue[0].nextAt = time.Now().Add(-time.Second) // make it due
+	d.mu.Unlock()
 	d.flushPending(context.Background())
 	require.Equal(t, int32(2), calls.Load())
 	require.Len(t, d.queue, 1)
 	require.Equal(t, 3, d.queue[0].attempt) // attempt incremented again
 
 	// Third flush: succeeds.
+	d.mu.Lock()
 	d.queue[0].nextAt = time.Now().Add(-time.Second)
+	d.mu.Unlock()
 	d.flushPending(context.Background())
 	require.Equal(t, int32(3), calls.Load())
 	require.Empty(t, d.queue) // removed on success
