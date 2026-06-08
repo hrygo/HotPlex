@@ -45,11 +45,6 @@ type apiKeyStoreBase struct {
 	writeMu     *sqlutil.WriteMu // nil-safe; PG dialect = no-op
 }
 
-// prepareQuery applies dialect placeholder rebind (e.g. ? → $1, $2).
-func (b *apiKeyStoreBase) prepareQuery(q string) string {
-	return b.dialect.Rebind(q)
-}
-
 // ensureAPIKey generates a random API key (hpk_ prefix) if not already set.
 func (b *apiKeyStoreBase) ensureAPIKey(u *APIKeyUser) error {
 	if u.APIKey != "" {
@@ -100,7 +95,7 @@ func (b *apiKeyStoreBase) list(ctx context.Context) ([]APIKeyUser, error) {
 func (b *apiKeyStoreBase) get(ctx context.Context, id int64) (*APIKeyUser, error) {
 	var u APIKeyUser
 	err := b.db.QueryRowContext(ctx,
-		b.prepareQuery("SELECT id, api_key, user_id, description, created_at, updated_at FROM api_key_users WHERE id = ?"), id,
+		b.dialect.Rebind("SELECT id, api_key, user_id, description, created_at, updated_at FROM api_key_users WHERE id = ?"), id,
 	).Scan(&u.ID, &u.APIKey, &u.UserID, &u.Description, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("admin: get api key user: %w", err)
@@ -109,7 +104,7 @@ func (b *apiKeyStoreBase) get(ctx context.Context, id int64) (*APIKeyUser, error
 }
 
 func (b *apiKeyStoreBase) delete(ctx context.Context, id int64) error {
-	query := b.prepareQuery("DELETE FROM api_key_users WHERE id = ?")
+	query := b.dialect.Rebind("DELETE FROM api_key_users WHERE id = ?")
 	return b.writeMu.WithLock(func() error {
 		res, err := b.db.ExecContext(ctx, query, id)
 		if err != nil {

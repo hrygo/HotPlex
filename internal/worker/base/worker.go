@@ -59,47 +59,41 @@ func NewBaseWorker(log *slog.Logger, cfg *config.Config) *BaseWorker {
 	}
 }
 
-// withProc executes fn while holding a snapshot of w.Proc. If Proc is nil, it
-// returns nil immediately. On success, Proc is nil'd under the mutex. This
-// eliminates the repeated lock-get-nil-unlock pattern across Terminate/Kill.
-func (w *BaseWorker) withProc(fn func(*proc.Manager) error) error {
+// withProcResult executes fn with a snapshot of w.Proc. If Proc is nil,
+// returns (zero, errNil). On success, Proc is nil'd under the mutex.
+// This eliminates the repeated lock-snapshot-nil-clear pattern.
+func withProcResult[T any](w *BaseWorker, fn func(*proc.Manager) (T, error), zero T, errNil error) (T, error) {
 	w.Mu.Lock()
 	p := w.Proc
 	w.Mu.Unlock()
 
 	if p == nil {
-		return nil
+		return zero, errNil
 	}
-	if err := fn(p); err != nil {
-		return err
+
+	result, err := fn(p)
+	if err != nil {
+		return result, err
 	}
 
 	w.Mu.Lock()
 	w.Proc = nil
 	w.Mu.Unlock()
 
-	return nil
+	return result, nil
+}
+
+// withProc executes fn with a snapshot of w.Proc. If Proc is nil, returns nil.
+func (w *BaseWorker) withProc(fn func(*proc.Manager) error) error {
+	_, err := withProcResult(w, func(p *proc.Manager) (struct{}, error) {
+		return struct{}{}, fn(p)
+	}, struct{}{}, nil)
+	return err
 }
 
 // withProcCode is the (int, error) variant of withProc, used by Wait.
 func (w *BaseWorker) withProcCode(fn func(*proc.Manager) (int, error)) (int, error) {
-	w.Mu.Lock()
-	p := w.Proc
-	w.Mu.Unlock()
-
-	if p == nil {
-		return -1, fmt.Errorf("base: not started")
-	}
-	code, err := fn(p)
-	if err != nil {
-		return code, err
-	}
-
-	w.Mu.Lock()
-	w.Proc = nil
-	w.Mu.Unlock()
-
-	return code, nil
+	return withProcResult(w, fn, -1, fmt.Errorf("base: not started"))
 }
 
 // Terminate gracefully stops the worker process: SIGTERM → 5s grace → SIGKILL.

@@ -400,18 +400,12 @@ func (s *PersistentSTT) shutdownProcess(ctx context.Context) {
 
 // trackPID writes the current PGID to the global PID file tracker.
 func (s *PersistentSTT) trackPID() {
-	if tracker := proc.GlobalTracker(); tracker != nil {
-		if err := tracker.Write(s.pidKey, s.pgid); err != nil {
-			s.log.Warn("persistent stt: pidfile write", "err", err, "key", s.pidKey)
-		}
-	}
+	proc.TrackPID(s.pidKey, s.pgid, s.log, "persistent stt")
 }
 
 // untrackPID removes the PID file entry for this process.
 func (s *PersistentSTT) untrackPID() {
-	if tracker := proc.GlobalTracker(); tracker != nil {
-		_ = tracker.Remove(s.pidKey)
-	}
+	proc.UntrackPID(s.pidKey)
 }
 
 // kill force-kills immediately and cleans up.

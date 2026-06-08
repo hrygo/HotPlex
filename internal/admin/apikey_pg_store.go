@@ -39,7 +39,7 @@ func (s *pgStore) create(ctx context.Context, u *APIKeyUser) error {
 	}
 	// created_at and updated_at use DEFAULT NOW() in the Postgres schema.
 	return s.writeMu.WithLock(func() error {
-		query := s.prepareQuery("INSERT INTO api_key_users (api_key, user_id, description) VALUES (?, ?, ?) RETURNING id")
+		query := s.dialect.Rebind("INSERT INTO api_key_users (api_key, user_id, description) VALUES (?, ?, ?) RETURNING id")
 		if err := s.db.QueryRowContext(ctx, query, u.APIKey, u.UserID, u.Description).Scan(&u.ID); err != nil {
 			return fmt.Errorf("admin: create api key user: %w", err)
 		}
@@ -51,7 +51,7 @@ func (s *pgStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
 	// NOTE: api_key is immutable after creation — never add it to SET clause
 	// without also calling KeyValidator.RemoveKey(old) + AddKey(new).
 	return s.writeMu.WithLock(func() error {
-		query := s.prepareQuery("UPDATE api_key_users SET user_id = ?, description = ?, updated_at = NOW() WHERE id = ?")
+		query := s.dialect.Rebind("UPDATE api_key_users SET user_id = ?, description = ?, updated_at = NOW() WHERE id = ?")
 		res, err := s.db.ExecContext(ctx, query, u.UserID, u.Description, id)
 		if err != nil {
 			return fmt.Errorf("admin: update api key user: %w", err)
