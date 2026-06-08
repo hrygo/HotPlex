@@ -59,18 +59,19 @@ func NewBaseWorker(log *slog.Logger, cfg *config.Config) *BaseWorker {
 	}
 }
 
-// Terminate gracefully stops the worker process: SIGTERM → 5s grace → SIGKILL.
-func (w *BaseWorker) Terminate(ctx context.Context) error {
+// withProc executes fn while holding a snapshot of w.Proc. If Proc is nil, it
+// returns nil immediately. On success, Proc is nil'd under the mutex. This
+// eliminates the repeated lock-get-nil-unlock pattern across Terminate/Kill.
+func (w *BaseWorker) withProc(fn func(*proc.Manager) error) error {
 	w.Mu.Lock()
-	proc := w.Proc
+	p := w.Proc
 	w.Mu.Unlock()
 
-	if proc == nil {
+	if p == nil {
 		return nil
 	}
-
-	if err := proc.Terminate(ctx, GracefulShutdownTimeout); err != nil {
-		return fmt.Errorf("base: terminate: %w", err)
+	if err := fn(p); err != nil {
+		return err
 	}
 
 	w.Mu.Lock()
@@ -80,40 +81,18 @@ func (w *BaseWorker) Terminate(ctx context.Context) error {
 	return nil
 }
 
-// Kill immediately terminates the worker process with SIGKILL.
-func (w *BaseWorker) Kill() error {
+// withProcCode is the (int, error) variant of withProc, used by Wait.
+func (w *BaseWorker) withProcCode(fn func(*proc.Manager) (int, error)) (int, error) {
 	w.Mu.Lock()
-	proc := w.Proc
+	p := w.Proc
 	w.Mu.Unlock()
 
-	if proc == nil {
-		return nil
-	}
-
-	if err := proc.Kill(); err != nil {
-		return fmt.Errorf("base: kill: %w", err)
-	}
-
-	w.Mu.Lock()
-	w.Proc = nil
-	w.Mu.Unlock()
-
-	return nil
-}
-
-// Wait blocks until the worker process exits, returning the exit code.
-func (w *BaseWorker) Wait() (int, error) {
-	w.Mu.Lock()
-	proc := w.Proc
-	w.Mu.Unlock()
-
-	if proc == nil {
+	if p == nil {
 		return -1, fmt.Errorf("base: not started")
 	}
-
-	code, err := proc.Wait()
+	code, err := fn(p)
 	if err != nil {
-		return code, fmt.Errorf("base: wait: %w", err)
+		return code, err
 	}
 
 	w.Mu.Lock()
@@ -121,6 +100,37 @@ func (w *BaseWorker) Wait() (int, error) {
 	w.Mu.Unlock()
 
 	return code, nil
+}
+
+// Terminate gracefully stops the worker process: SIGTERM → 5s grace → SIGKILL.
+func (w *BaseWorker) Terminate(ctx context.Context) error {
+	return w.withProc(func(p *proc.Manager) error {
+		if err := p.Terminate(ctx, GracefulShutdownTimeout); err != nil {
+			return fmt.Errorf("base: terminate: %w", err)
+		}
+		return nil
+	})
+}
+
+// Kill immediately terminates the worker process with SIGKILL.
+func (w *BaseWorker) Kill() error {
+	return w.withProc(func(p *proc.Manager) error {
+		if err := p.Kill(); err != nil {
+			return fmt.Errorf("base: kill: %w", err)
+		}
+		return nil
+	})
+}
+
+// Wait blocks until the worker process exits, returning the exit code.
+func (w *BaseWorker) Wait() (int, error) {
+	return w.withProcCode(func(p *proc.Manager) (int, error) {
+		code, err := p.Wait()
+		if err != nil {
+			return code, fmt.Errorf("base: wait: %w", err)
+		}
+		return code, nil
+	})
 }
 
 // Health returns a snapshot of the worker's runtime health.
