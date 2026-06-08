@@ -261,7 +261,7 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 
 	msg := events.NewEnvelope(
 		aep.NewID(),
-		conn.sessionID,
+		conn.getSessionID(),
 		0,
 		events.Input,
 		events.InputData{
@@ -397,7 +397,7 @@ func (w *Worker) Health() worker.WorkerHealth {
 
 	w.Mu.Lock()
 	if w.httpConn != nil {
-		health.SessionID = w.httpConn.sessionID
+		health.SessionID = w.httpConn.getSessionID()
 	}
 	if !w.StartTime.IsZero() {
 		health.Uptime = time.Since(w.StartTime).Round(time.Second).String()
@@ -423,7 +423,7 @@ func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	w.Mu.Lock()
 	sessionID := ""
 	if w.httpConn != nil {
-		sessionID = w.httpConn.sessionID
+		sessionID = w.httpConn.getSessionID()
 	}
 	httpAddr := w.httpAddr
 	client := w.client
@@ -766,7 +766,7 @@ func (w *Worker) release() {
 	sseCancel := w.sseCancel
 	sessionID := ""
 	if w.httpConn != nil {
-		sessionID = w.httpConn.sessionID
+		sessionID = w.httpConn.getSessionID()
 	}
 	w.Mu.Unlock()
 
@@ -980,11 +980,25 @@ func (c *conn) Close() error {
 	return nil
 }
 
-func (c *conn) UserID() string    { return c.userID }
-func (c *conn) SessionID() string { return c.sessionID }
+func (c *conn) UserID() string { return c.userID }
+
+func (c *conn) SessionID() string {
+	c.mu.Lock()
+	sid := c.sessionID
+	c.mu.Unlock()
+	return sid
+}
+
+// getSessionID reads sessionID under conn.mu for internal use.
+func (c *conn) getSessionID() string {
+	c.mu.Lock()
+	sid := c.sessionID
+	c.mu.Unlock()
+	return sid
+}
 
 func (c *conn) Inject(env *events.Envelope) {
-	base.InjectWithTimeout(c.recvCh, env, c.log, c.sessionID)
+	base.InjectWithTimeout(c.recvCh, env, c.log, c.getSessionID())
 }
 
 // isTimeoutError reports whether the error is a timeout (deadline exceeded or
