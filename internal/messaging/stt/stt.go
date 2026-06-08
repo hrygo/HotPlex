@@ -326,11 +326,7 @@ func (s *PersistentSTT) start(_ context.Context) error {
 	s.jobHandle = proc.CreateAndAssignJob(s.pgid, s.log)
 
 	// Track PID for orphan cleanup.
-	if tracker := proc.GlobalTracker(); tracker != nil {
-		if err := tracker.Write(s.pidKey, s.pgid); err != nil {
-			s.log.Warn("persistent stt: pidfile write", "err", err, "key", s.pidKey)
-		}
-	}
+	s.trackPID()
 
 	// Set up line scanner for stdout (64KB init, 10MB cap).
 	buf := make([]byte, 64*1024)
@@ -397,11 +393,25 @@ func (s *PersistentSTT) shutdownProcess(ctx context.Context) {
 	s.started = false
 
 	// Clean up PID file.
+	s.untrackPID()
+
+	s.log.Info("persistent stt: stopped")
+}
+
+// trackPID writes the current PGID to the global PID file tracker.
+func (s *PersistentSTT) trackPID() {
+	if tracker := proc.GlobalTracker(); tracker != nil {
+		if err := tracker.Write(s.pidKey, s.pgid); err != nil {
+			s.log.Warn("persistent stt: pidfile write", "err", err, "key", s.pidKey)
+		}
+	}
+}
+
+// untrackPID removes the PID file entry for this process.
+func (s *PersistentSTT) untrackPID() {
 	if tracker := proc.GlobalTracker(); tracker != nil {
 		_ = tracker.Remove(s.pidKey)
 	}
-
-	s.log.Info("persistent stt: stopped")
 }
 
 // kill force-kills immediately and cleans up.
@@ -424,9 +434,7 @@ func (s *PersistentSTT) kill() {
 	s.started = false
 
 	// Clean up PID file.
-	if tracker := proc.GlobalTracker(); tracker != nil {
-		_ = tracker.Remove(s.pidKey)
-	}
+	s.untrackPID()
 }
 
 // forceKillAndWait closes the Job Object, force-kills the process group, and waits for exit.
