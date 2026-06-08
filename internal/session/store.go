@@ -24,7 +24,6 @@ type Store interface {
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
 	DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error
 	DeletePhysical(ctx context.Context, id string) error
-	Compact(ctx context.Context, threshold float64) error
 	GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error)
 	Close() error
 }
@@ -61,35 +60,44 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config, writeMu *sqlutil.Wr
 	return &SQLiteStore{db: db, log: slog.Default().With("component", "session_store"), writeMu: writeMu}, nil
 }
 
-func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-	}
-
-	var ctxJSON []byte
+// marshalSessionJSON serializes the Context and PlatformKey fields for Upsert.
+func marshalSessionJSON(info *SessionInfo) (ctxJSON, pkJSON []byte, err error) {
 	if info.Context != nil {
-		var err error
 		ctxJSON, err = json.Marshal(info.Context)
 		if err != nil {
-			return fmt.Errorf("session store: marshal context: %w", err)
+			return nil, nil, fmt.Errorf("session store: marshal context: %w", err)
 		}
 	}
-
-	var platformKeyJSON []byte
 	if info.PlatformKey != nil {
-		var err2 error
-		platformKeyJSON, err2 = json.Marshal(info.PlatformKey)
-		if err2 != nil {
-			return fmt.Errorf("session store: marshal platform key: %w", err2)
+		pkJSON, err = json.Marshal(info.PlatformKey)
+		if err != nil {
+			return nil, nil, fmt.Errorf("session store: marshal platform key: %w", err)
 		}
+	}
+	return ctxJSON, pkJSON, nil
+}
+
+// upsertTimeout ensures the context has a deadline, defaulting to 5 seconds.
+func upsertTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, 5*time.Second)
+}
+
+func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
+	ctx, cancel := upsertTimeout(ctx)
+	defer cancel()
+
+	ctxJSON, pkJSON, err := marshalSessionJSON(info)
+	if err != nil {
+		return err
 	}
 
 	return s.writeMu.WithLock(func() error {
 		_, err := s.db.ExecContext(ctx, queries["sessions.upsert_session"],
 			info.ID, info.UserID, info.OwnerID, info.BotID, info.BotName, info.WorkerSessionID, info.WorkerType, string(info.State),
-			info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
+			info.Platform, string(pkJSON), info.WorkDir, info.Title,
 			info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
 			string(ctxJSON), info.Source, info.ClientKey,
 		)

@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -44,33 +43,17 @@ func NewPGStore(ctx context.Context, db *dbutil.DB) (Store, error) {
 // Upsert inserts or updates a session record.
 // Unlike SQLiteStore, no write serialization is needed — PG handles concurrency natively.
 func (s *pgStore) Upsert(ctx context.Context, info *SessionInfo) error {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
+	ctx, cancel := upsertTimeout(ctx)
+	defer cancel()
+
+	ctxJSON, pkJSON, err := marshalSessionJSON(info)
+	if err != nil {
+		return err
 	}
 
-	var ctxJSON []byte
-	if info.Context != nil {
-		var err error
-		ctxJSON, err = json.Marshal(info.Context)
-		if err != nil {
-			return fmt.Errorf("session store: marshal context: %w", err)
-		}
-	}
-
-	var platformKeyJSON []byte
-	if info.PlatformKey != nil {
-		var err2 error
-		platformKeyJSON, err2 = json.Marshal(info.PlatformKey)
-		if err2 != nil {
-			return fmt.Errorf("session store: marshal platform key: %w", err2)
-		}
-	}
-
-	_, err := s.db.ExecContext(ctx, s.queries["sessions.upsert_session"],
+	_, err = s.db.ExecContext(ctx, s.queries["sessions.upsert_session"],
 		info.ID, info.UserID, info.OwnerID, info.BotID, info.BotName, info.WorkerSessionID, info.WorkerType, string(info.State),
-		info.Platform, string(platformKeyJSON), info.WorkDir, info.Title,
+		info.Platform, string(pkJSON), info.WorkDir, info.Title,
 		info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
 		string(ctxJSON), info.Source, info.ClientKey,
 	)
@@ -151,12 +134,6 @@ func (s *pgStore) DeletePhysical(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("session store: delete physical: %w", err)
 	}
-	return nil
-}
-
-// Compact is a no-op for PostgreSQL. PG handles bloat automatically with autovacuum;
-// there is no equivalent of SQLite VACUUM needed for routine session table maintenance.
-func (s *pgStore) Compact(_ context.Context, _ float64) error {
 	return nil
 }
 

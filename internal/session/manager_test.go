@@ -64,11 +64,6 @@ func (m *mockStore) DeletePhysical(ctx context.Context, id string) error {
 	return args.Error(0)
 }
 
-func (m *mockStore) Compact(ctx context.Context, threshold float64) error {
-	args := m.Called(ctx, threshold)
-	return args.Error(0)
-}
-
 func (m *mockStore) GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error) {
 	args := m.Called(ctx, state)
 	return args.Get(0).([]string), args.Error(1)
