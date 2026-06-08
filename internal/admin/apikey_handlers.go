@@ -129,7 +129,6 @@ func (b *apiKeyStoreBase) delete(ctx context.Context, id int64) error {
 // PG-backed callers use pgStore (apikey_pg_store.go) instead.
 type apiKeyUserStore struct {
 	apiKeyStoreBase
-	writeMu *sqlutil.WriteMu
 }
 
 // APIKeyUserStorer defines CRUD operations for API key user records.
@@ -166,7 +165,6 @@ func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator, writ
 			rebind:      nil,
 			withLock:    writeMu.WithLock,
 		},
-		writeMu: writeMu,
 	}
 }
 
