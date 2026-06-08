@@ -19,8 +19,11 @@ func newAPIKeyPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	db := &dbutil.DB{DB: mockDB}
 
 	store := &pgStore{
-		db:      db,
-		dialect: dbutil.DialectPostgres,
+		apiKeyStoreBase: apiKeyStoreBase{
+			db:       db,
+			rebind:   dbutil.DialectPostgres.Rebind,
+			withLock: func(fn func() error) error { return fn() },
+		},
 	}
 
 	return store, mock, func() {
