@@ -386,13 +386,18 @@ func (w *AppServerWorker) shutdown() {
 }
 
 func (w *AppServerWorker) Wait() (int, error) {
-	if w.crashSub == nil {
+	w.mu.Lock()
+	crashSub := w.crashSub
+	doneCh := w.doneCh
+	w.mu.Unlock()
+
+	if doneCh == nil && crashSub == nil {
 		return 0, nil
 	}
 	select {
-	case <-w.crashSub:
+	case <-crashSub:
 		return 1, nil
-	case <-w.doneCh:
+	case <-doneCh:
 		return 0, nil
 	}
 }
@@ -406,7 +411,6 @@ func (w *AppServerWorker) release() {
 	w.released = true
 	w.closed = true
 	doneCh := w.doneCh
-	w.doneCh = nil
 	tid := w.threadID
 	w.mu.Unlock()
 

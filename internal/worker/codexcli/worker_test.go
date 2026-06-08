@@ -1572,6 +1572,104 @@ func TestWaitNilCrashSubReturnsImmediately(t *testing.T) {
 
 // ─── SendControlRequest Tests ─────────────────────────────────────────────
 
+func TestWaitAfterReleaseReturnsImmediately(t *testing.T) {
+	t.Parallel()
+
+	// Regression test for #691: Wait() must not block after release() nil'd doneCh.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		doneCh:     make(chan struct{}),
+		crashSub:   make(chan struct{}),
+	}
+
+	// Simulate the zombie GC path: Terminate -> shutdown -> release()
+	w.release()
+
+	// Wait() must return immediately, not block on nil channel.
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
+func TestWaitBlocksUntilRelease(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		doneCh:     make(chan struct{}),
+		crashSub:   make(chan struct{}),
+	}
+
+	waitDone := make(chan int, 1)
+	go func() {
+		code, _ := w.Wait()
+		waitDone <- code
+	}()
+
+	// Wait should be blocked.
+	select {
+	case <-waitDone:
+		t.Fatal("Wait should block before release")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Release unblocks Wait.
+	w.release()
+
+	select {
+	case code := <-waitDone:
+		require.Equal(t, 0, code)
+	case <-time.After(time.Second):
+		t.Fatal("Wait should unblock after release")
+	}
+}
+
+func TestWaitNilBothChannelsReturnsZero(t *testing.T) {
+	t.Parallel()
+
+	// Both crashSub and doneCh are nil — Wait must return immediately.
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+	}
+
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
+func TestTerminateThenKillNoPanic(t *testing.T) {
+	t.Parallel()
+
+	// Verify double release (Terminate + Kill) does not panic from double-close.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+	})
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		doneCh:     make(chan struct{}),
+		crashSub:   make(chan struct{}),
+	}
+
+	require.NotPanics(t, func() {
+		_ = w.Terminate(context.Background())
+		_ = w.Kill()
+	})
+
+	// Wait still works after double release.
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
 func TestSendControlRequestNotStarted(t *testing.T) {
 	t.Parallel()
 
