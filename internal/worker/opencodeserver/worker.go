@@ -149,10 +149,13 @@ func (w *Worker) GetWorkerSessionID() string {
 
 func (w *Worker) SetWorkerSessionID(id string) {
 	w.workerSessionID.Store(id)
-	if w.httpConn != nil {
-		w.httpConn.mu.Lock()
-		w.httpConn.sessionID = id
-		w.httpConn.mu.Unlock()
+	w.Mu.Lock()
+	conn := w.httpConn
+	w.Mu.Unlock()
+	if conn != nil {
+		conn.mu.Lock()
+		conn.sessionID = id
+		conn.mu.Unlock()
 	}
 }
 

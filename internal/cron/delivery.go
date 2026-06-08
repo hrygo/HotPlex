@@ -214,6 +214,7 @@ func (d *Delivery) retryLoop(ctx context.Context, stop chan struct{}) {
 		case <-ctx.Done():
 			return
 		case <-stop:
+			d.flushPending(ctx)
 			return
 		case <-ticker.C:
 			d.flushPending(ctx)
@@ -239,11 +240,16 @@ func (d *Delivery) flushPending(ctx context.Context) {
 	d.mu.Unlock()
 
 	for _, pd := range due {
-		// Use background context when scheduler ctx is cancelled (shutdown window)
-		// to allow final delivery attempts rather than failing with context cancelled.
+		// Use background context with timeout when scheduler ctx is cancelled
+		// (shutdown window) to allow final delivery attempts rather than failing
+		// with context cancelled.
 		deliverCtx := ctx
 		if ctx.Err() != nil {
-			deliverCtx = context.Background()
+			var cancel context.CancelFunc
+			deliverCtx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+			d.deliverResult(deliverCtx, pd.job, pd.result, pd.attempt)
+			cancel()
+			continue
 		}
 		d.deliverResult(deliverCtx, pd.job, pd.result, pd.attempt)
 	}
