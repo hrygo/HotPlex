@@ -31,7 +31,7 @@ func classifyError(err error) errClass {
 	if isHTTPStatus(msg) {
 		return errClassServer
 	}
-	if containsAny(msg, "connection refused", "temporary", "connection reset", "broken pipe", "dns", "no route") {
+	if containsAny(msg, "connection refused", "temporary failure", "temporary error", "connection reset", "broken pipe", "dns", "no route") {
 		return errClassNetwork
 	}
 	return errClassExec
