@@ -41,8 +41,8 @@ type apiKeyStoreBase struct {
 	db          DBExecutor
 	mu          sync.Mutex
 	invalidator cacheInvalidator
-	dialect     dbutil.Dialect     // DialectSQLite or DialectPostgres; controls placeholder style
-	writeMu     *sqlutil.WriteMu   // nil-safe; PG dialect = no-op
+	dialect     dbutil.Dialect   // DialectSQLite or DialectPostgres; controls placeholder style
+	writeMu     *sqlutil.WriteMu // nil-safe; PG dialect = no-op
 }
 
 // prepareQuery applies dialect placeholder rebind (e.g. ? → $1, $2).
