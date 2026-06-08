@@ -279,11 +279,7 @@ func (p *MossProcess) spawn() error {
 	p.started = true
 
 	// Track PID for orphan cleanup.
-	if tracker := proc.GlobalTracker(); tracker != nil {
-		if err := tracker.Write(p.pidKey, p.pgid); err != nil {
-			p.log.Warn("tts moss: pidfile write", "err", err)
-		}
-	}
+	p.trackPID()
 
 	return nil
 }
@@ -313,6 +309,22 @@ func (p *MossProcess) waitForReady(ctx context.Context) error {
 		time.Sleep(mossReadyInterval)
 	}
 	return fmt.Errorf("moss sidecar warmup timed out after %v", mossReadyTimeout)
+}
+
+// trackPID registers the process PID with the global tracker for orphan cleanup.
+func (p *MossProcess) trackPID() {
+	if tracker := proc.GlobalTracker(); tracker != nil {
+		if err := tracker.Write(p.pidKey, p.pgid); err != nil {
+			p.log.Warn("tts moss: pidfile write", "err", err)
+		}
+	}
+}
+
+// untrackPID removes the process PID from the global tracker.
+func (p *MossProcess) untrackPID() {
+	if tracker := proc.GlobalTracker(); tracker != nil {
+		_ = tracker.Remove(p.pidKey)
+	}
 }
 
 // terminate cancels the idle monitor and shuts down the subprocess.
@@ -356,9 +368,7 @@ func (p *MossProcess) shutdownProcess() {
 	}
 
 	// Clean up PID file.
-	if tracker := proc.GlobalTracker(); tracker != nil {
-		_ = tracker.Remove(p.pidKey)
-	}
+	p.untrackPID()
 
 	p.started = false
 	p.cmd = nil

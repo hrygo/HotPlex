@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 )
 
@@ -40,16 +41,13 @@ type apiKeyStoreBase struct {
 	db          DBExecutor
 	mu          sync.Mutex
 	invalidator cacheInvalidator
-	rebind      func(string) string      // nil for SQLite, dialect.Rebind for PG
-	withLock    func(func() error) error // writeMu.WithLock for SQLite, identity for PG
+	dialect     dbutil.Dialect     // DialectSQLite or DialectPostgres; controls placeholder style
+	writeMu     *sqlutil.WriteMu   // nil-safe; PG dialect = no-op
 }
 
-// prepareQuery applies dialect rebind if configured.
+// prepareQuery applies dialect placeholder rebind (e.g. ? → $1, $2).
 func (b *apiKeyStoreBase) prepareQuery(q string) string {
-	if b.rebind != nil {
-		return b.rebind(q)
-	}
-	return q
+	return b.dialect.Rebind(q)
 }
 
 // ensureAPIKey generates a random API key (hpk_ prefix) if not already set.
@@ -112,7 +110,7 @@ func (b *apiKeyStoreBase) get(ctx context.Context, id int64) (*APIKeyUser, error
 
 func (b *apiKeyStoreBase) delete(ctx context.Context, id int64) error {
 	query := b.prepareQuery("DELETE FROM api_key_users WHERE id = ?")
-	return b.withLock(func() error {
+	return b.writeMu.WithLock(func() error {
 		res, err := b.db.ExecContext(ctx, query, id)
 		if err != nil {
 			return fmt.Errorf("admin: delete api key user: %w", err)
@@ -162,8 +160,8 @@ func newAPIKeyUserStoreWithInvalidator(db DBExecutor, inv cacheInvalidator, writ
 		apiKeyStoreBase: apiKeyStoreBase{
 			db:          db,
 			invalidator: inv,
-			rebind:      nil,
-			withLock:    writeMu.WithLock,
+			dialect:     dbutil.DialectSQLite,
+			writeMu:     writeMu,
 		},
 	}
 }
@@ -175,7 +173,7 @@ func (s *apiKeyUserStore) create(ctx context.Context, u *APIKeyUser) error {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	return s.withLock(func() error {
+	return s.writeMu.WithLock(func() error {
 		res, err := s.db.ExecContext(ctx,
 			"INSERT INTO api_key_users (api_key, user_id, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 			u.APIKey, u.UserID, u.Description, now, now)
@@ -195,7 +193,7 @@ func (s *apiKeyUserStore) update(ctx context.Context, id int64, u *APIKeyUser) e
 	now := time.Now().UTC().Format(time.RFC3339)
 	// NOTE: api_key is immutable after creation — never add it to SET clause
 	// without also calling KeyValidator.RemoveKey(old) + AddKey(new).
-	return s.withLock(func() error {
+	return s.writeMu.WithLock(func() error {
 		res, err := s.db.ExecContext(ctx,
 			"UPDATE api_key_users SET user_id = ?, description = ?, updated_at = ? WHERE id = ?",
 			u.UserID, u.Description, now, id)
