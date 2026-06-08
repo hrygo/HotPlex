@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.26.2] - 2026-06-08
+
+### Summary
+
+v1.26.2 是一次 patch 版本更新，聚焦于 **Cron 投递可靠性** 和 **OpenCode Server 生命周期加固**。新增 Cron 投递重试机制（指数退避，最多 3 次），OCS Worker 实现 SystemPromptUpdater 接口支持动态刷新系统提示词。同时包含大量并发安全修复（OCS sessionID 数据竞争、platform_writer 通道防护、bridge 会话泄漏防护）和 Slack 适配器错误处理改进。
+
+### Added
+
+- **Cron**: Delivery retry with exponential backoff — in-memory retry queue (max 100 entries) for transient failures (429, timeout, 5xx), up to 3 retries with 30s→1m→2m backoff, new `hotplex.cron.delivery.result` metric. (#577)
+- **Worker**: OCS `SystemPromptUpdater` interface — `UpdateSystemPrompt` method updates conn.systemPrompt under mutex, enables bridge to push refreshed system prompt after `/reset` without session recreation. (#664)
+- **Observability**: `hotplex.cron.delivery.result` metric with `{status,platform}` labels — records all delivery outcomes (success, exhausted, permanent, transient).
+
+### Fixed
+
+- **Worker**: OCS sessionID data race — 6 read sites accessed `conn.sessionID` without mutex; unified via `getSessionID()` helper, symmetric with write-side lock discipline. (#664)
+- **Gateway Core**: Bridge lifecycle hardening — delete orphaned session on transition-to-running failure, rollback resume attach-failure to TERMINATED, 5s timeout on rollback context. (#577)
+- **Gateway Core**: Platform writer send-on-closed-channel — `recover()` guard eliminates TOCTOU window, `atomic.Bool` closed flag prevents writes after disconnect. (#577)
+- **Messaging**: Slack adapter clears Thinking status on error and shows generic error feedback; fallback message for empty error events. (#577)
+- **Worker**: OCS singleton goroutine leak — close stdout on `discoverPort` timeout; server-side session DELETE in `release()` for resource cleanup; non-blocking Wait() crash check eliminates 2s goroutine leak. (#664)
+
 ## [1.26.1] - 2026-06-08
 
 ### Summary
