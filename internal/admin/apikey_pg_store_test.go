@@ -19,8 +19,11 @@ func newAPIKeyPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	db := &dbutil.DB{DB: mockDB}
 
 	store := &pgStore{
-		db:      db,
-		dialect: dbutil.DialectPostgres,
+		apiKeyStoreBase: apiKeyStoreBase{
+			db:      db,
+			dialect: dbutil.DialectPostgres,
+			writeMu: nil, // nil-safe; WithLock calls fn directly
+		},
 	}
 
 	return store, mock, func() {

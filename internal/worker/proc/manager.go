@@ -323,18 +323,12 @@ func (m *Manager) SetPIDKey(key string) {
 // trackPID writes the current PGID to the tracker. Must be called after Start()
 // when m.pgid is set. Safe to call even if tracker is nil.
 func (m *Manager) trackPID() {
-	if t := GlobalTracker(); t != nil && m.pidKey != "" {
-		if err := t.Write(m.pidKey, m.pgid); err != nil {
-			m.log.Warn("proc: pidfile write", "key", m.pidKey, "err", err)
-		}
-	}
+	TrackPID(m.pidKey, m.pgid, m.log, "proc")
 }
 
 // untrackPID removes the PID file for key. Safe to call even if tracker is nil.
 func (m *Manager) untrackPID(key string) {
-	if t := GlobalTracker(); t != nil && key != "" {
-		_ = t.Remove(key)
-	}
+	UntrackPID(key)
 }
 
 // IsRunning returns true if the process has been started and has not exited.

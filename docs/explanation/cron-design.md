@@ -206,6 +206,10 @@ else -> Gateway 投递（Delivery 模块通过 SDK 发送）
 if platform="" || platform="cron" -> 不投递
 ```
 
+**投递重试**：Gateway 投递失败时，临时性错误（429、timeout、5xx）会进入内存重试队列，最多重试 3 次，指数退避 30s → 1m → 2m（上限 5m）。永久性错误（403、404）立即丢弃并记录日志。重试队列容量 100 条目（FIFO 驱逐），后台 `retryLoop` 以 10s tick 间隔检查到期重试。优雅关闭时，队列中残留的重试被记录为永久丢失。
+
+**注意**：重试队列是内存中的，进程重启后未执行的重试会丢失。这适用于绝大多数场景——投递失败通常是临时性的（限流、网络抖动），在几秒到几分钟内重试即可恢复。
+
 **Silent 模式**：当 `job.Silent = true` 时，跳过所有投递逻辑。用于"静默检查"类型的任务——只执行不通知。
 
 ### Catch-up 机制：错过任务的补偿
@@ -335,7 +339,7 @@ Dispatch(job):
 
 4. **at 类型无持久重试队列**：`at` 类型的重试通过 `scheduleRetry` 在内存中调度。如果 Gateway 在重试等待期间重启，重试机会丢失。持久重试需要将重试状态写入 DB，当前未实现。
 
-5. **CLI 投递的可靠性**：CLI 投递依赖 Worker 执行 `hotplex slack send-message` 命令。如果 Worker 崩溃或忽略投递指令，结果会丢失。Gateway 投递（Delivery 模块）更可靠，但需要额外的基础设施支持（EventStore + SDK 回调）。
+5. **CLI 投递的可靠性**：CLI 投递依赖 Worker 执行 `hotplex slack send-message` 命令。如果 Worker 崩溃或忽略投递指令，结果会丢失。Gateway 投递（Delivery 模块）更可靠——内置临时错误重试（最多 3 次，指数退避），且通过 EventStore + SDK 回调独立于 Worker 生命周期。
 
 ## 参考
 

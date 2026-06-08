@@ -59,68 +59,72 @@ func NewBaseWorker(log *slog.Logger, cfg *config.Config) *BaseWorker {
 	}
 }
 
-// Terminate gracefully stops the worker process: SIGTERM → 5s grace → SIGKILL.
-func (w *BaseWorker) Terminate(ctx context.Context) error {
+// withProcResult executes fn with a snapshot of w.Proc. If Proc is nil,
+// returns (zero, errNil). On success, Proc is nil'd under the mutex.
+// This eliminates the repeated lock-snapshot-nil-clear pattern.
+func withProcResult[T any](w *BaseWorker, fn func(*proc.Manager) (T, error), zero T, errNil error) (T, error) {
 	w.Mu.Lock()
-	proc := w.Proc
+	p := w.Proc
 	w.Mu.Unlock()
 
-	if proc == nil {
-		return nil
+	if p == nil {
+		return zero, errNil
 	}
 
-	if err := proc.Terminate(ctx, GracefulShutdownTimeout); err != nil {
-		return fmt.Errorf("base: terminate: %w", err)
+	result, err := fn(p)
+	if err != nil {
+		return result, err
 	}
 
 	w.Mu.Lock()
 	w.Proc = nil
 	w.Mu.Unlock()
 
-	return nil
+	return result, nil
+}
+
+// withProc executes fn with a snapshot of w.Proc. If Proc is nil, returns nil.
+func (w *BaseWorker) withProc(fn func(*proc.Manager) error) error {
+	_, err := withProcResult(w, func(p *proc.Manager) (struct{}, error) {
+		return struct{}{}, fn(p)
+	}, struct{}{}, nil)
+	return err
+}
+
+// withProcCode is the (int, error) variant of withProc, used by Wait.
+func (w *BaseWorker) withProcCode(fn func(*proc.Manager) (int, error)) (int, error) {
+	return withProcResult(w, fn, -1, fmt.Errorf("base: not started"))
+}
+
+// Terminate gracefully stops the worker process: SIGTERM → 5s grace → SIGKILL.
+func (w *BaseWorker) Terminate(ctx context.Context) error {
+	return w.withProc(func(p *proc.Manager) error {
+		if err := p.Terminate(ctx, GracefulShutdownTimeout); err != nil {
+			return fmt.Errorf("base: terminate: %w", err)
+		}
+		return nil
+	})
 }
 
 // Kill immediately terminates the worker process with SIGKILL.
 func (w *BaseWorker) Kill() error {
-	w.Mu.Lock()
-	proc := w.Proc
-	w.Mu.Unlock()
-
-	if proc == nil {
+	return w.withProc(func(p *proc.Manager) error {
+		if err := p.Kill(); err != nil {
+			return fmt.Errorf("base: kill: %w", err)
+		}
 		return nil
-	}
-
-	if err := proc.Kill(); err != nil {
-		return fmt.Errorf("base: kill: %w", err)
-	}
-
-	w.Mu.Lock()
-	w.Proc = nil
-	w.Mu.Unlock()
-
-	return nil
+	})
 }
 
 // Wait blocks until the worker process exits, returning the exit code.
 func (w *BaseWorker) Wait() (int, error) {
-	w.Mu.Lock()
-	proc := w.Proc
-	w.Mu.Unlock()
-
-	if proc == nil {
-		return -1, fmt.Errorf("base: not started")
-	}
-
-	code, err := proc.Wait()
-	if err != nil {
-		return code, fmt.Errorf("base: wait: %w", err)
-	}
-
-	w.Mu.Lock()
-	w.Proc = nil
-	w.Mu.Unlock()
-
-	return code, nil
+	return w.withProcCode(func(p *proc.Manager) (int, error) {
+		code, err := p.Wait()
+		if err != nil {
+			return code, fmt.Errorf("base: wait: %w", err)
+		}
+		return code, nil
+	})
 }
 
 // Health returns a snapshot of the worker's runtime health.
