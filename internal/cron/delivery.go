@@ -195,6 +195,11 @@ func (d *Delivery) StopRetryLoop() {
 	d.mu.Unlock()
 
 	for _, pd := range remaining {
+		observability.CronDeliveryRetry().Add(context.Background(), 1,
+			metric.WithAttributes(
+				attribute.String("status", "exhausted"),
+				attribute.String("platform", pd.job.Platform),
+			))
 		d.log.Error("cron delivery: shutdown with pending retry, result permanently lost",
 			"job_id", pd.job.ID, "name", pd.job.Name, "attempt", pd.attempt, "platform", pd.job.Platform)
 	}
@@ -205,6 +210,8 @@ func (d *Delivery) StopRetryLoop() {
 // after StopRetryLoop nils it.
 func (d *Delivery) retryLoop(ctx context.Context, stop chan struct{}) {
 	defer d.wg.Done()
+	// Best-effort flush on any exit path (stop, ctx cancellation, or ticker).
+	defer d.flushPending(ctx)
 
 	ticker := time.NewTicker(retryTickInterval)
 	defer ticker.Stop()
@@ -214,7 +221,6 @@ func (d *Delivery) retryLoop(ctx context.Context, stop chan struct{}) {
 		case <-ctx.Done():
 			return
 		case <-stop:
-			d.flushPending(ctx)
 			return
 		case <-ticker.C:
 			d.flushPending(ctx)
