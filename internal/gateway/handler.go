@@ -270,7 +270,15 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 			return nil
 		}
 		h.log.Warn("gateway: worker input", "err", err, "session_id", env.SessionID)
-		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker input failed: %v", err)
+		code := classifyWorkerError(err)
+		// ErrKindUnavailable (e.g. ACP session lost) means the worker's
+		// internal session is dead but the process may still be alive.
+		// Send SESSION_TERMINATED so the client can reconnect, and trigger
+		// crash cleanup so forwardEvents exits and the worker is replaced.
+		if code == events.ErrCodeSessionTerminated {
+			h.bridge.cleanupCrashedWorker(env.SessionID, w)
+		}
+		return h.sendErrorf(ctx, env, code, "worker input failed: %v", err)
 	}
 	h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
 	if h.bridge != nil {
