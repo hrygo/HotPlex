@@ -816,14 +816,20 @@ func (c *StreamingCardController) idConvert(ctx context.Context, messageID strin
 			return cardID, nil
 		}
 		lastErr = err
+		// Don't retry on permanent errors (auth failure, invalid message).
+		if isPermanentAPIError(err) {
+			return "", lastErr
+		}
 		if attempt < 2 {
 			backoff := time.Duration(100<<attempt) * time.Millisecond // 100, 200, 400ms
-			c.log.Debug("feishu: id_convert failed, retrying",
+			c.log.Warn("feishu: id_convert failed, retrying",
 				"attempt", attempt+1, "backoff", backoff, "err", lastErr)
+			timer := time.NewTimer(backoff)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return "", ctx.Err()
-			case <-time.After(backoff):
+			case <-timer.C:
 			}
 		}
 	}
@@ -851,6 +857,34 @@ func (c *StreamingCardController) idConvertOnce(ctx context.Context, messageID s
 	}
 	c.log.Debug("feishu: id_convert succeeded", "msg_id", messageID, "card_id", *resp.Data.CardId)
 	return *resp.Data.CardId, nil
+}
+
+// isPermanentAPIError reports whether an idConvert error is non-retryable.
+// Parses the "code=%d" pattern from idConvertOnce error messages.
+// Permanent codes: auth/permission errors (99991400-99991404, 99991409),
+// invalid param (99991419), resource not found (99991448).
+func isPermanentAPIError(err error) bool {
+	s := err.Error()
+	// Only parse errors from resp.Success() == false path.
+	if !strings.HasPrefix(s, "cardkit id_convert failed: code=") {
+		return false // network/parse errors are retryable
+	}
+	var code int
+	if _, serr := fmt.Sscanf(s, "cardkit id_convert failed: code=%d", &code); serr != nil {
+		return false
+	}
+	// Lark permanent error code ranges:
+	// - 99991400-99991404: authentication/authorization failures
+	// - 99991409: permission denied
+	// - 99991419: invalid parameter
+	// - 99991448: resource not found
+	switch {
+	case code >= 99991400 && code <= 99991404:
+		return true
+	case code == 99991409, code == 99991419, code == 99991448:
+		return true
+	}
+	return false
 }
 
 func (c *StreamingCardController) sendCardMessage(ctx context.Context, chatID, content string) (string, error) {

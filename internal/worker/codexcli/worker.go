@@ -352,13 +352,22 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 // ─── AppServerWorker lifecycle ────────────────────────────────────────
 
 func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
+	// CodexCLI uses an ephemeral singleton process with no persistent
+	// thread state — Resume on a fresh/terminated worker is semantically
+	// identical to Start. Delegate to Start which handles Acquire + thread
+	// creation, then report fallback so Bridge adjusts bookkeeping.
+	//
+	// Acquire/Release lifecycle: Start() calls Acquire() (increments ref
+	// count on the singleton manager). Terminate/Kill calls release() which
+	// calls Release() (decrements). Resume→Start re-acquires a slot, which
+	// is correct — the old slot was released on Terminate.
+	//
+	// appStateNew is reachable when Bridge creates a fresh AppServerWorker
+	// via the factory (init() + worker.Register) and then calls Resume()
+	// instead of Start() — e.g., when startOrResumeOnInUse reuses a worker
+	// that was registered but never started.
 	w.mu.Lock()
 	if w.state == appStateNew || w.state == appStateTerminated {
-		// CodexCLI uses an ephemeral singleton process with no persistent
-		// thread state — Resume on a fresh/terminated worker is semantically
-		// identical to Start. Delegate to Start which handles Acquire + thread
-		// creation, then report fallback so Bridge adjusts bookkeeping.
-		//
 		// Reset to appStateNew so Start()'s guard (state != appStateNew) passes.
 		// For terminated workers, release() already cleaned up manager refs;
 		// resetLifecycleState re-creates the doneCh channel.

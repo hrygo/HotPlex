@@ -92,6 +92,10 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
 		gen := int64(1)
 		if b.turnsQuerier != nil {
+			// Use Background() instead of opts.ctx: these are short DB
+			// reads (<3s) to restore turn counters. opts.ctx is scoped to
+			// the inbound request and may expire before the queries finish
+			// on slow worker startups, causing "context canceled" failures.
 			genCtx, genCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
 			genCancel()
@@ -102,6 +106,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		acc.Generation.Store(gen)
 	}
 	if acc.TurnCount.Load() == 0 && b.turnsQuerier != nil {
+		// Background() — same rationale as LatestGeneration above.
 		tnCtx, tnCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()

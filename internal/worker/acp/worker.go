@@ -1071,21 +1071,25 @@ func (w *Worker) fmtHandshakeError(err error) error {
 	return fmt.Errorf("acp: initialize handshake: %w", err)
 }
 
-// isFatalRPCError reports whether a JSON-RPC error is fatal — meaning the
-// worker session is permanently lost and cannot recover without restart.
+// isFatalRPCError reports whether a JSON-RPC error is fatal for the current
+// prompt — meaning the underlying agent session is lost and Bridge must
+// trigger crash recovery (Terminate + Start) to create a fresh session.
 // Non-fatal errors (rate limit, permission denied, content policy) are
 // business-level and the worker can continue serving.
+//
+// Uses substring matching rather than error codes because ACP agents vary
+// widely in error schema. This is intentionally conservative: a false negative
+// (missed fatal error) simply falls through to the nil return, which is the
+// pre-existing behavior. A false positive (non-session error containing a
+// matched substring) would trigger an unnecessary restart — acceptable given
+// the rarity of such collisions in practice.
 func isFatalRPCError(err *JSONRPCError) bool {
 	msg := strings.ToLower(err.Message)
-
-	// Session-level fatal errors: the agent has lost the session internally.
-	// No amount of retrying will fix this — the session is gone.
 	if strings.Contains(msg, "session not found") ||
 		strings.Contains(msg, "session expired") ||
 		strings.Contains(msg, "session does not exist") ||
 		strings.Contains(msg, "invalid session") {
 		return true
 	}
-
 	return false
 }
