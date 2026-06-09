@@ -28,6 +28,12 @@ func TestIsFatalRPCError(t *testing.T) {
 		// Case normalization.
 		{name: "uppercase", message: "SESSION NOT FOUND", want: true},
 		{name: "mixed case", message: "Session Expired", want: true},
+
+		// Boundary: non-fatal context with matching substrings.
+		{name: "session alone", message: "your session preferences have been saved", want: false},
+		{name: "not found without session", message: "resource not found in database", want: false},
+		{name: "expired without session", message: "token expired, please re-authenticate", want: false},
+		{name: "invalid without session", message: "invalid request body", want: false},
 	}
 
 	for _, tt := range tests {

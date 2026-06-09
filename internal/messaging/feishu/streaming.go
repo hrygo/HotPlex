@@ -875,7 +875,7 @@ func isPermanentAPIError(err error) bool {
 		return false // network/parse errors are retryable
 	}
 	var code int
-	if _, serr := fmt.Sscanf(s, "cardkit id_convert failed: code=%d", &code); serr != nil {
+	if n, serr := fmt.Sscanf(s, "cardkit id_convert failed: code=%d", &code); serr != nil || n != 1 {
 		return false
 	}
 	// Lark permanent error code ranges:
