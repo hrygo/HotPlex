@@ -453,11 +453,10 @@ func TestForwardBusEvents_DroppableEventDiscard(t *testing.T) {
 	deltaEnv := events.NewEnvelope(aep.NewID(), "test-ses", 0, events.MessageDelta, events.MessageDeltaData{Content: "x"})
 	busCh <- deltaEnv
 
-	// Give goroutine time to process.
-	time.Sleep(50 * time.Millisecond)
-
-	// recvCh should still have only the original event (the droppable was dropped).
-	require.Len(t, recvCh, 1, "droppable event should have been dropped when recvCh is full")
+	// Verify recvCh never gets the droppable event (it was silently dropped).
+	require.Eventually(t, func() bool {
+		return len(recvCh) == 1 // only the pre-filled event remains
+	}, 200*time.Millisecond, 10*time.Millisecond, "droppable event should have been dropped when recvCh is full")
 }
 
 func TestForwardBusEvents_ClosedConnStops(t *testing.T) {

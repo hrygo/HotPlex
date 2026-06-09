@@ -184,7 +184,6 @@ func (s *SingletonProcessManager) Unsubscribe(sessionID string) {
 // Shutdown forcefully terminates the process regardless of reference count.
 func (s *SingletonProcessManager) Shutdown(ctx context.Context) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.state = stateStopped
 
@@ -204,7 +203,10 @@ func (s *SingletonProcessManager) Shutdown(ctx context.Context) {
 		s.refs = 0
 	}
 
-	// Close all active subscriptions.
+	s.mu.Unlock()
+
+	// Close all active subscriptions outside s.mu to avoid lock nesting
+	// with busMu (consistent with monitorProcess pattern).
 	s.closeAllSubscribers()
 }
 

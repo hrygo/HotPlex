@@ -380,14 +380,14 @@ func (w *Worker) Wait() (int, error) {
 
 	// Non-blocking crash check: if the process crashed, crashSub is already
 	// closed. If not, we return immediately — no need to block 2 seconds.
-	// If the singleton has already recovered (monitorProcess restarts
-	// automatically), treat as normal exit — the bridge will re-attach.
+	// If a subsequent Acquire already recovered the singleton (new process),
+	// IsRunning() returns true and we report a clean exit.
 	select {
 	case <-w.crashSub:
 		if w.singleton.IsRunning() {
-			return 0, nil
+			return 0, nil // recovered by subsequent Acquire
 		}
-		return 1, nil // process crashed
+		return 1, nil // process crashed, not yet recovered
 	default:
 		return 0, nil
 	}
