@@ -163,6 +163,11 @@ func (s *SingletonProcessManager) Subscribe(sessionID string) chan *events.Envel
 }
 
 // Unsubscribe removes the subscription for the given session ID.
+//
+// Precondition: the caller MUST cancel the SSE context (sseCancel) before
+// calling Unsubscribe to ensure the forwardBusEvents goroutine has exited.
+// Failure to do so may leave a goroutine that sends to the removed channel
+// (handled gracefully by trySendEnvelope's recover, but still a leak).
 func (s *SingletonProcessManager) Unsubscribe(sessionID string) {
 	s.busMu.Lock()
 	defer s.busMu.Unlock()
@@ -630,22 +635,40 @@ func (s *SingletonProcessManager) dispatchToAllSubscribers(props json.RawMessage
 	}
 }
 
-// sendCritical performs a blocking write with timeout to guarantee critical
-// event delivery. Recovers from panics on closed channels (race with release).
-// Must NOT be called while holding busMu — the write may block.
-func (s *SingletonProcessManager) sendCritical(ch chan *events.Envelope, env *events.Envelope, sessionID string) {
+// trySendEnvelope attempts to send env to ch, recovering from send-on-closed-channel
+// panics (TOCTOU race with conn/subscriber Close between the closed check and send).
+// If block is true, waits up to timeout for the channel to become available.
+// Returns true if the event was sent successfully.
+func trySendEnvelope(ch chan *events.Envelope, env *events.Envelope, block bool, timeout time.Duration) (sent bool) {
 	defer func() {
-		if r := recover(); r != nil {
-			s.log.Debug("opencode-server-singleton: send to closed subscriber channel",
-				"session_id", sessionID, "type", env.Event.Type)
+		if recover() != nil {
+			sent = false
 		}
 	}()
-	timer := time.NewTimer(criticalEventSendTimeout)
-	defer timer.Stop()
+	if block {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case ch <- env:
+			return true
+		case <-timer.C:
+			return false
+		}
+	}
 	select {
 	case ch <- env:
-	case <-timer.C:
-		s.log.Warn("opencode-server-singleton: critical event send timed out, subscriber stuck",
+		return true
+	default:
+		return false
+	}
+}
+
+// sendCritical performs a blocking write with timeout to guarantee critical
+// event delivery. Delegates to trySendEnvelope for TOCTOU-safe send.
+// Must NOT be called while holding busMu — the write may block.
+func (s *SingletonProcessManager) sendCritical(ch chan *events.Envelope, env *events.Envelope, sessionID string) {
+	if !trySendEnvelope(ch, env, true, criticalEventSendTimeout) {
+		s.log.Debug("opencode-server-singleton: critical event send failed (channel closed or stuck)",
 			"session_id", sessionID, "type", env.Event.Type)
 	}
 }
@@ -679,6 +702,13 @@ const criticalEventSendTimeout = 5 * time.Second
 
 // isDroppable reports whether an event kind can be silently dropped under
 // backpressure (same logic as gateway/hub.go isDroppable).
+//
+// Reasoning is intentionally NOT droppable: chain-of-thought content is
+// user-visible and may be the only output for reasoning-heavy tasks.
+// Dropping it would silently lose substantive work product. If sustained
+// backpressure makes Reasoning delta delivery a bottleneck, the fix is
+// to coalesce deltas server-side (like MessageDelta aggregation), not to
+// drop them.
 func isDroppable(kind events.Kind) bool {
 	return kind == events.MessageDelta || kind == events.Raw
 }

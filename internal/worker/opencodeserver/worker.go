@@ -774,23 +774,21 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 			}
 
 			if isDroppable(env.Event.Type) {
-				select {
-				case recvCh <- env:
-				default:
-					w.Log.Warn("opencodeserver: recv channel full, dropping droppable event",
+				if !trySendEnvelope(recvCh, env, false, 0) {
+					w.Log.Warn("opencodeserver: recv channel full or closed, dropping droppable event",
 						"event_type", env.Event.Type, "event_id", env.ID)
 				}
 				continue
 			}
 
 			// Critical event: block with timeout to guarantee delivery.
-			timer := time.NewTimer(criticalEventSendTimeout)
-			select {
-			case recvCh <- env:
-				timer.Stop()
-			case <-timer.C:
-				w.Log.Warn("opencodeserver: critical event send timed out, recv channel stuck",
+			// trySendEnvelope recovers from send-on-closed-channel panics
+			// (TOCTOU race: conn.Close can close recvCh between our closed
+			// check above and the actual send).
+			if !trySendEnvelope(recvCh, env, true, criticalEventSendTimeout) {
+				w.Log.Warn("opencodeserver: critical event send failed (channel closed or stuck)",
 					"event_type", env.Event.Type, "event_id", env.ID)
+				return
 			}
 		}
 	}

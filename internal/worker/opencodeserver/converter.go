@@ -290,6 +290,9 @@ func (c *Converter) handleSessionStatus(sessionID string, props json.RawMessage)
 	switch data.Status.Type {
 	case "idle":
 		stats := c.takeStats(sessionID)
+		if stats == nil {
+			return nil
+		}
 		return []*events.Envelope{
 			events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
 				events.DoneData{Success: true, Stats: stats}),

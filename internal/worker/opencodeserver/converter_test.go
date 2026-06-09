@@ -295,10 +295,7 @@ func TestConverter_SessionStatus_Idle_NoUsage(t *testing.T) {
 	c := newTestConverter()
 	props := rawProps(t, map[string]any{"status": map[string]any{"type": "idle"}})
 	envs := c.Convert("s1", ocsSessionStatus, props)
-	require.Len(t, envs, 1)
-	require.Equal(t, events.Done, envs[0].Event.Type)
-	dd := envs[0].Event.Data.(events.DoneData)
-	require.Nil(t, dd.Stats, "no usage → Stats is nil")
+	require.Empty(t, envs, "no usage stats → skip duplicate Done (V1 nil-guard)")
 }
 
 func TestConverter_SessionStatus_Busy(t *testing.T) {
