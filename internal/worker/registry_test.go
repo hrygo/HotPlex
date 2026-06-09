@@ -152,6 +152,14 @@ func TestCanResumeTerminated(t *testing.T) {
 			require.False(t, CanResumeTerminated(TypeOpenCodeSrv))
 		})
 	})
+
+	t.Run("builder returning error caches false", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeCodexCLI, func() (Worker, error) { return nil, fmt.Errorf("not ready") })
+			// Builder error cached as false — matches CodexCLI singleton not-yet-ready case.
+			require.False(t, CanResumeTerminated(TypeCodexCLI))
+		})
+	})
 }
 
 type resumingTestWorker struct{ registryTestWorker }

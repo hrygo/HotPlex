@@ -2,7 +2,7 @@
 
 **Issue**: #691
 **Severity**: P2 (goroutine leak + 日志噪音 + 30 分钟僵尸)
-**Scope**: `internal/worker/codexcli/worker.go`, `internal/worker/codexcli/manager.go`
+**Scope**: `internal/worker/codexcli/worker.go`, `internal/worker/codexcli/manager.go`, `internal/worker/codexcli/mapper.go`
 **Prerequisite**: 熟悉 `CodexAppServerManager` singleton 模式和 bridge `handleWorkerExit` 流程
 
 ---

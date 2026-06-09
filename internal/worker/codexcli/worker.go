@@ -423,6 +423,9 @@ func (w *AppServerWorker) release() {
 	w.mu.Unlock()
 
 	if doneCh != nil {
+		// Close but do NOT nil: Wait() relies on receiving from a closed
+		// channel (returns immediately). closeAndMarkDone() additionally
+		// nils for error-path reuse via resetLifecycleState().
 		close(doneCh)
 	}
 

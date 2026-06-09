@@ -37,9 +37,14 @@ func Register(t WorkerType, b Builder) {
 	registry[t] = b
 
 	// Eagerly cache CanResumeTerminated by creating one temporary instance.
+	// Builder error (e.g. CodexCLI GetSingleton not ready) implies cannot resume.
 	if w, err := b(); err == nil {
 		capCacheMu.Lock()
 		capCache[t] = w != nil && w.CanResumeTerminated()
+		capCacheMu.Unlock()
+	} else {
+		capCacheMu.Lock()
+		capCache[t] = false
 		capCacheMu.Unlock()
 	}
 }
