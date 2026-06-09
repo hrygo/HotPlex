@@ -275,7 +275,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		// internal session is dead but the process may still be alive.
 		// Send SESSION_TERMINATED so the client can reconnect, and trigger
 		// crash cleanup so forwardEvents exits and the worker is replaced.
-		if code == events.ErrCodeSessionTerminated {
+		if code == events.ErrCodeSessionTerminated && h.bridge != nil {
 			h.bridge.cleanupCrashedWorker(env.SessionID, w)
 		}
 		return h.sendErrorf(ctx, env, code, "worker input failed: %v", err)
