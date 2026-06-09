@@ -74,6 +74,7 @@ func (c *acpConn) TrySend(env *events.Envelope) bool {
 }
 
 // isDroppable reports whether an event type can be silently discarded under backpressure.
+// Keep in sync with: gateway/hub.isDroppable, opencodeserver.singleton.isDroppable.
 func isDroppable(kind events.Kind) bool {
 	return kind == events.MessageDelta || kind == events.Raw
 }

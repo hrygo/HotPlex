@@ -723,7 +723,6 @@ func isDroppable(kind events.Kind) bool {
 
 // closeAllSubscribers closes and removes all subscriber channels.
 // This signals forwardBusEvents goroutines to exit (channel closed → !ok).
-// closeAllSubscribers closes and removes all subscriber channels.
 //
 // Concurrency safety: may be called concurrently from up to 3 paths (readGlobalSSE
 // defer, monitorProcess, Shutdown). This is safe because: (1) close(ch) on an
