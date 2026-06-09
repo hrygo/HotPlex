@@ -503,8 +503,17 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		for _, env := range envs {
 			conn.TrySend(env)
 		}
-		// JSONRPCError is an expected agent error — don't wrap.
-		if _, ok := errors.AsType[*JSONRPCError](promptErr); ok {
+		// Classify JSONRPCError: fatal errors (session lost) must propagate
+		// to Bridge so crash recovery can trigger. Business errors (rate limit,
+		// permission denied) are expected and return nil.
+		if rpcErr, ok := errors.AsType[*JSONRPCError](promptErr); ok {
+			if isFatalRPCError(rpcErr) {
+				return &worker.WorkerError{
+					Kind:    worker.ErrKindUnavailable,
+					Message: fmt.Sprintf("acp: session lost: %s", rpcErr.Message),
+					Cause:   rpcErr,
+				}
+			}
 			return nil
 		}
 		return fmt.Errorf("acp: prompt: %w", promptErr)
@@ -1060,4 +1069,23 @@ func (w *Worker) fmtHandshakeError(err error) error {
 		return fmt.Errorf("acp: handshake timed out after 30s. Check: 1) agent is running 2) API keys are configured 3) network connectivity: %w", err)
 	}
 	return fmt.Errorf("acp: initialize handshake: %w", err)
+}
+
+// isFatalRPCError reports whether a JSON-RPC error is fatal — meaning the
+// worker session is permanently lost and cannot recover without restart.
+// Non-fatal errors (rate limit, permission denied, content policy) are
+// business-level and the worker can continue serving.
+func isFatalRPCError(err *JSONRPCError) bool {
+	msg := strings.ToLower(err.Message)
+
+	// Session-level fatal errors: the agent has lost the session internally.
+	// No amount of retrying will fix this — the session is gone.
+	if strings.Contains(msg, "session not found") ||
+		strings.Contains(msg, "session expired") ||
+		strings.Contains(msg, "session does not exist") ||
+		strings.Contains(msg, "invalid session") {
+		return true
+	}
+
+	return false
 }

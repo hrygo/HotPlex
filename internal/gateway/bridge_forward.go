@@ -92,7 +92,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
 		gen := int64(1)
 		if b.turnsQuerier != nil {
-			genCtx, genCancel := context.WithTimeout(opts.ctx, 3*time.Second)
+			genCtx, genCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
 			genCancel()
 			if latest > 0 {
@@ -102,7 +102,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		acc.Generation.Store(gen)
 	}
 	if acc.TurnCount.Load() == 0 && b.turnsQuerier != nil {
-		tnCtx, tnCancel := context.WithTimeout(opts.ctx, 3*time.Second)
+		tnCtx, tnCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()
 		if err != nil {

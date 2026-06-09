@@ -354,8 +354,21 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	w.mu.Lock()
 	if w.state == appStateNew || w.state == appStateTerminated {
+		// CodexCLI uses an ephemeral singleton process with no persistent
+		// thread state — Resume on a fresh/terminated worker is semantically
+		// identical to Start. Delegate to Start which handles Acquire + thread
+		// creation, then report fallback so Bridge adjusts bookkeeping.
+		//
+		// Reset to appStateNew so Start()'s guard (state != appStateNew) passes.
+		// For terminated workers, release() already cleaned up manager refs;
+		// resetLifecycleState re-creates the doneCh channel.
+		w.state = appStateNew
 		w.mu.Unlock()
-		return fmt.Errorf("codexcli: app-server not started (state=%d)", w.state)
+		w.resetLifecycleState()
+		if err := w.Start(ctx, session); err != nil {
+			return err
+		}
+		return worker.ErrFellBackToFreshStart
 	}
 	w.state = appStateStarting
 	w.mu.Unlock()

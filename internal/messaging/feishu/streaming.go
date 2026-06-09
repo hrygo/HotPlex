@@ -809,6 +809,28 @@ func (c *StreamingCardController) updateHeader(ctx context.Context, cardID strin
 }
 
 func (c *StreamingCardController) idConvert(ctx context.Context, messageID string) (string, error) {
+	var lastErr error
+	for attempt := range 3 {
+		cardID, err := c.idConvertOnce(ctx, messageID)
+		if err == nil {
+			return cardID, nil
+		}
+		lastErr = err
+		if attempt < 2 {
+			backoff := time.Duration(100<<attempt) * time.Millisecond // 100, 200, 400ms
+			c.log.Debug("feishu: id_convert failed, retrying",
+				"attempt", attempt+1, "backoff", backoff, "err", lastErr)
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+	}
+	return "", lastErr
+}
+
+func (c *StreamingCardController) idConvertOnce(ctx context.Context, messageID string) (string, error) {
 	body := larkcardkit.NewIdConvertCardReqBodyBuilder().
 		MessageId(messageID).
 		Build()
