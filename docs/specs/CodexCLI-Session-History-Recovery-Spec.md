@@ -64,12 +64,14 @@ worker.Start(info) → startNewThread()
 worker.Input(content)  ← 用户首条消息
   └→ injectHistoryPrefix(content)
        ↓
-     "<conversation_history>
+     "---
+      CONVERSATION_HISTORY_START
       [User]: 现在开始我发 ping，你回复 汪
       [Assistant]: 收到，以后你发 ping 我就回 汪
       [User]: ping
       [Assistant]: 汪
-      </conversation_history>
+      CONVERSATION_HISTORY_END
+      ---
 
       ping"                              ← 实际用户消息
   ↓
@@ -212,7 +214,8 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
     w.mu.Unlock()
 
     var sb strings.Builder
-    sb.WriteString("<conversation_history>\n")
+    sb.WriteString("---
+      CONVERSATION_HISTORY_START\n")
     sb.WriteString("Below is the conversation history from a previous session. ")
     sb.WriteString("Use it as context to maintain continuity.\n\n")
     for _, turn := range history {
@@ -227,7 +230,8 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
         sb.WriteString(turn.Content)
         sb.WriteString("\n\n")
     }
-    sb.WriteString("</conversation_history>\n\n")
+    sb.WriteString("CONVERSATION_HISTORY_END
+      ---\n\n")
     sb.WriteString(content)
     return sb.String()
 }
@@ -287,7 +291,8 @@ func (w *AppServerWorker) cleanupOldThread() {
 
 | 测试用例 | 验证 |
 |----------|------|
-| `TestInjectHistoryPrefix` | 验证格式化输出包含 `[User]`/`[Assistant]` 标记和 `<conversation_history>` 标签 |
+| `TestInjectHistoryPrefix` | 验证格式化输出包含 `[User]`/`[Assistant]` 标记和 `---
+      CONVERSATION_HISTORY_START` 标签 |
 | `TestInjectHistoryPrefixIdempotent` | 验证第二次调用 `injectHistoryPrefix` 不修改 content（`historyInjected` 标志） |
 | `TestInjectHistoryPrefixEmpty` | `pendingHistory` 为空/nil 时返回原 content |
 | `TestInjectHistoryPrefixSkipsEmpty` | 空 Content 的 turn 被跳过 |

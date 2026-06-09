@@ -389,7 +389,8 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
 		default:
 			continue
 		}
-		sb.WriteString(turn.Content)
+		escaped := strings.ReplaceAll(turn.Content, "CONVERSATION_HISTORY_", "")
+		sb.WriteString(escaped)
 		sb.WriteString("\n\n")
 	}
 	sb.WriteString("CONVERSATION_HISTORY_END\n")
@@ -517,6 +518,7 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) (worker.ResetResult,
 		w.mu.Unlock()
 		return worker.ResetResult{ConnReplaced: true}, nil
 	}
+	origSess.ConversationHistory = nil // /reset clears context, do not re-inject old history
 	if err := w.startNewThread(origSess, "reset"); err != nil {
 		return worker.ResetResult{}, err
 	}
