@@ -157,7 +157,7 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		return fmt.Errorf("bridge: create session: %w", err)
 	}
 
-	workerInfo := b.prepareWorkerInfo(p.ID, p.UserID, p.WorkDir, si)
+	workerInfo := b.prepareWorkerInfo(ctx, p.ID, p.UserID, p.WorkDir, si)
 
 	// Inject cron-specific env vars (e.g. admin API creds) only for cron sessions.
 	// Detected via platformKey rather than platform value, since cron executor now
@@ -277,7 +277,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		si.State = events.StateRunning
 	}
 
-	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
+	workerInfo := b.prepareWorkerInfo(ctx, si.ID, si.UserID, workDir, si)
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:         ctx,
 		wt:          si.WorkerType,
@@ -725,17 +725,26 @@ func injectSandbox(platformKey map[string]string, sandbox string) {
 // prepareWorkerInfo builds a complete worker.SessionInfo with all standard env
 // injection applied. This consolidates the buildWorkerInfo + injectSlackEnv +
 // injectGatewayContext trio that was previously duplicated across 3 call sites.
-func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
+func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
 	info := b.buildWorkerInfo(sessionID, userID, workDir, si)
 
 	// Populate conversation history from turns table for context recovery.
 	if b.turnsQuerier != nil {
-		if turns, err := b.turnsQuerier.QueryTurns(context.Background(), sessionID, 50, 0); err == nil && len(turns) > 0 {
+		turns, err := b.turnsQuerier.QueryTurns(ctx, sessionID, 50, 0)
+		if err != nil {
+			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
+		} else if len(turns) > 0 {
+			const maxHistoryTokens = 20000
 			history := make([]worker.ConversationTurn, 0, len(turns))
+			tokensUsed := 0
 			for _, t := range turns {
 				if t.Content == "" {
 					continue
 				}
+				if tokensUsed+int(t.TokensIn) > maxHistoryTokens {
+					break
+				}
+				tokensUsed += int(t.TokensIn)
 				history = append(history, worker.ConversationTurn{
 					Role:    t.Role,
 					Content: t.Content,
