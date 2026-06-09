@@ -13,9 +13,12 @@ import (
 func withRegistry(t *testing.T, fn func()) {
 	t.Helper()
 	orig := registry
+	origCap := capCache
 	registry = make(map[WorkerType]Builder)
+	capCache = make(map[WorkerType]bool)
 	fn()
 	registry = orig
+	capCache = origCap
 }
 
 func TestRegister(t *testing.T) {
@@ -114,6 +117,45 @@ func TestRegisteredTypes(t *testing.T) {
 		})
 	})
 }
+
+func TestCanResumeTerminated(t *testing.T) {
+	t.Run("returns cached value from register-time", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeClaudeCode, func() (Worker, error) {
+				return &registryTestWorker{}, nil
+			})
+			require.False(t, CanResumeTerminated(TypeClaudeCode))
+		})
+	})
+
+	t.Run("returns false for unknown type", func(t *testing.T) {
+		withRegistry(t, func() {
+			require.False(t, CanResumeTerminated(WorkerType("nonexistent")))
+		})
+	})
+
+	t.Run("returns true when worker supports it", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeACP, func() (Worker, error) {
+				return &resumingTestWorker{}, nil
+			})
+			require.True(t, CanResumeTerminated(TypeACP))
+		})
+	})
+
+	t.Run("builder returning nil worker skips cache", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeOpenCodeSrv, func() (Worker, error) { return nil, nil })
+			// No cache entry; fallback creates a new instance which returns false.
+			require.False(t, CanResumeTerminated(TypeOpenCodeSrv))
+		})
+	})
+}
+
+type resumingTestWorker struct{ registryTestWorker }
+
+func (*resumingTestWorker) CanResumeTerminated() bool { return true }
+func (*resumingTestWorker) SupportsResume() bool      { return true }
 
 // registryTestWorker is a minimal Worker stub used only in TestNewWorker.
 type registryTestWorker struct{}

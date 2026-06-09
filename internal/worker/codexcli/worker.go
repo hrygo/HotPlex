@@ -249,7 +249,7 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 
 // closeAndMarkDone closes doneCh and marks the worker as closed.
 // This ensures Wait() is always unblocked even on error paths (P1 fix).
-// Idempotent: safe to call after release() which closes doneCh without niling it.
+// Guarded by w.closed; safe after release() which sets w.closed=true under the same mutex.
 // Caller must hold w.mu.
 func (w *AppServerWorker) closeAndMarkDone() {
 	if w.closed {

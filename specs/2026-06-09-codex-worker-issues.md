@@ -1,5 +1,11 @@
 # Spec: Codex CLI Worker 问题诊断与修复方案
 
+> **Implementation Record** (2026-06-09): 最终实现与本文原始建议有两处关键偏离：
+>
+> 1. **Terminated session skip 机制**：原文建议 CodexCLI 的 `Resume()` 返回特殊错误让 bridge 重试（§P1 方案 B）。实际实现为 `CanResumeTerminated() bool` 能力接口——CodexCLI 返回 `false`，bridge 在 `StartPlatformSession` 中跳过 resume 直接走 `startOrResumeOnInUse`。这比错误码方案更显式，且对所有 Worker 类型可扩展。
+>
+> 2. **能力查询性能**：初始实现 `CanResumeTerminated()` 每次调用临时实例化 Worker。后改为 register-time 缓存（`registry.go: capCache`），在 `Register()` 时创建一个临时实例并缓存结果，后续查询零分配。
+
 **日期**: 2026-06-09
 **版本**: v1.26.2
 **日志源**: `logs/hotplex.log` (当前 session) + `~/.hotplex/logs/gateway.log` (历史)

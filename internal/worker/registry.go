@@ -13,6 +13,11 @@ type Builder func() (Worker, error)
 var (
 	registryMu sync.RWMutex
 	registry   = make(map[WorkerType]Builder)
+
+	// Capability cache: populated once at Register() time to avoid
+	// creating temporary worker instances for capability queries.
+	capCache   = make(map[WorkerType]bool)
+	capCacheMu sync.RWMutex
 )
 
 // Register registers a new worker builder for the given worker type.
@@ -27,6 +32,13 @@ func Register(t WorkerType, b Builder) {
 		panic("worker: register called twice for type " + string(t))
 	}
 	registry[t] = b
+
+	// Eagerly cache CanResumeTerminated by creating one temporary instance.
+	if w, err := b(); err == nil && w != nil {
+		capCacheMu.Lock()
+		capCache[t] = w.CanResumeTerminated()
+		capCacheMu.Unlock()
+	}
 }
 
 // NewWorker creates a new Worker instance for the specified worker type.
@@ -54,10 +66,17 @@ func RegisteredTypes() []WorkerType {
 
 // CanResumeTerminated returns true if the given worker type supports
 // resuming sessions in TERMINATED state (orphan recovery).
-// It creates a temporary worker instance to query capabilities.
+// Uses register-time capability cache — no temporary worker allocation.
 func CanResumeTerminated(t WorkerType) bool {
+	capCacheMu.RLock()
+	v, ok := capCache[t]
+	capCacheMu.RUnlock()
+	if ok {
+		return v
+	}
+	// Fallback for types registered before capability caching existed.
 	w, err := NewWorker(t)
-	if err != nil {
+	if err != nil || w == nil {
 		return false
 	}
 	return w.CanResumeTerminated()
