@@ -418,24 +418,26 @@ func (w *AppServerWorker) release() {
 	w.closed = true
 	doneCh := w.doneCh
 	tid := w.threadID
+	conn := w.conn
+	mgr := w.manager
 	w.mu.Unlock()
 
 	if doneCh != nil {
 		close(doneCh)
 	}
 
-	if w.manager != nil && tid != "" {
-		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
+	if mgr != nil && tid != "" {
+		_ = mgr.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
 			ThreadID: tid,
 		})
-		w.manager.Unsubscribe(tid)
+		mgr.Unsubscribe(tid)
 		// Close recvCh so forwardEvents exits its range loop.
 		// Must happen after Unsubscribe (removes from dispatch map) to
 		// avoid racing with in-flight dispatchNotification sends.
-		if w.conn != nil {
-			_ = w.conn.Close()
+		if conn != nil {
+			_ = conn.Close()
 		}
-		w.manager.Release()
+		mgr.Release()
 	}
 }
 

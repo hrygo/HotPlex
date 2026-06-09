@@ -145,10 +145,10 @@ func TestCanResumeTerminated(t *testing.T) {
 		})
 	})
 
-	t.Run("builder returning nil worker skips cache", func(t *testing.T) {
+	t.Run("builder returning nil worker caches false", func(t *testing.T) {
 		withRegistry(t, func() {
 			Register(TypeOpenCodeSrv, func() (Worker, error) { return nil, nil })
-			// No cache entry; fallback creates a new instance which returns false.
+			// nil worker is cached as false — no fallback allocation.
 			require.False(t, CanResumeTerminated(TypeOpenCodeSrv))
 		})
 	})

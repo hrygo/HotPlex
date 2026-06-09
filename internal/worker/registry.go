@@ -22,6 +22,9 @@ var (
 
 // Register registers a new worker builder for the given worker type.
 // It panics if the builder is nil or if a type is registered twice.
+//
+// Register eagerly invokes b() once to cache CanResumeTerminated capability;
+// builders with expensive initialization should ensure construction is lightweight.
 func Register(t WorkerType, b Builder) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -34,9 +37,9 @@ func Register(t WorkerType, b Builder) {
 	registry[t] = b
 
 	// Eagerly cache CanResumeTerminated by creating one temporary instance.
-	if w, err := b(); err == nil && w != nil {
+	if w, err := b(); err == nil {
 		capCacheMu.Lock()
-		capCache[t] = w.CanResumeTerminated()
+		capCache[t] = w != nil && w.CanResumeTerminated()
 		capCacheMu.Unlock()
 	}
 }
