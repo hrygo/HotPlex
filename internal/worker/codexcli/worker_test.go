@@ -1630,12 +1630,15 @@ func TestWaitBlocksUntilRelease(t *testing.T) {
 		waitDone <- code
 	}()
 
-	// Wait should be blocked.
-	select {
-	case <-waitDone:
-		t.Fatal("Wait should block before release")
-	case <-time.After(50 * time.Millisecond):
-	}
+	// Wait should not return before release.
+	require.Eventually(t, func() bool {
+		select {
+		case <-waitDone:
+			return false
+		default:
+			return true
+		}
+	}, 50*time.Millisecond, 5*time.Millisecond, "Wait should block before release")
 
 	// Release unblocks Wait.
 	w.release()

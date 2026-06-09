@@ -37,7 +37,9 @@ func Register(t WorkerType, b Builder) {
 	registry[t] = b
 
 	// Eagerly cache CanResumeTerminated by creating one temporary instance.
-	// Builder error (e.g. CodexCLI GetSingleton not ready) implies cannot resume.
+	// NOTE: This is a register-time snapshot; it does not reflect runtime state
+	// changes. Workers whose CanResumeTerminated depends on runtime conditions
+	// should return the base value here and handle runtime checks at call sites.
 	if w, err := b(); err == nil {
 		capCacheMu.Lock()
 		capCache[t] = w != nil && w.CanResumeTerminated()
@@ -82,10 +84,8 @@ func CanResumeTerminated(t WorkerType) bool {
 	if ok {
 		return v
 	}
-	// Fallback for types registered before capability caching existed.
-	w, err := NewWorker(t)
-	if err != nil || w == nil {
-		return false
-	}
-	return w.CanResumeTerminated()
+	// Fallback: should not be reached in normal operation (all types cached at
+	// Register time). Returns false rather than allocating a temporary worker,
+	// since builders may acquire resources (processes, connections).
+	return false
 }
