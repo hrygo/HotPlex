@@ -727,6 +727,24 @@ func injectSandbox(platformKey map[string]string, sandbox string) {
 // injectGatewayContext trio that was previously duplicated across 3 call sites.
 func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
 	info := b.buildWorkerInfo(sessionID, userID, workDir, si)
+
+	// Populate conversation history from turns table for context recovery.
+	if b.turnsQuerier != nil {
+		if turns, err := b.turnsQuerier.QueryTurns(context.Background(), sessionID, 50, 0); err == nil && len(turns) > 0 {
+			history := make([]worker.ConversationTurn, 0, len(turns))
+			for _, t := range turns {
+				if t.Content == "" {
+					continue
+				}
+				history = append(history, worker.ConversationTurn{
+					Role:    t.Role,
+					Content: t.Content,
+				})
+			}
+			info.ConversationHistory = history
+		}
+	}
+
 	injectSlackEnv(&info, si.PlatformKey)
 	info.Env = injectGatewayContext(info.Env, si.Platform, si.BotID, si.BotName, si.UserID, si.PlatformKey, sessionID, workDir)
 	return info
