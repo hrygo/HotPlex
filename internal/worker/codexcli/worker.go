@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -354,7 +355,7 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 	}
 	w.StartTime = time.Now()
 	w.SetLastIO(w.StartTime)
-	w.pendingHistory = session.ConversationHistory
+	w.pendingHistory = slices.Clone(session.ConversationHistory)
 	w.historyInjected = false
 	w.mu.Unlock()
 
@@ -375,7 +376,8 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
 	w.mu.Unlock()
 
 	var sb strings.Builder
-	sb.WriteString("<conversation_history>\n")
+	sb.WriteString("---\n")
+	sb.WriteString("CONVERSATION_HISTORY_START\n")
 	sb.WriteString("Below is the conversation history from a previous session. ")
 	sb.WriteString("Use it as context to maintain continuity.\n\n")
 	for _, turn := range history {
@@ -390,7 +392,8 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
 		sb.WriteString(turn.Content)
 		sb.WriteString("\n\n")
 	}
-	sb.WriteString("</conversation_history>\n\n")
+	sb.WriteString("CONVERSATION_HISTORY_END\n")
+	sb.WriteString("---\n\n")
 	sb.WriteString(content)
 	return sb.String()
 }

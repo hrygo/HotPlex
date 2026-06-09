@@ -42,7 +42,7 @@ type Bridge struct {
 	hub          *Hub
 	sm           bridgeSM
 	collector    *eventstore.Collector  // optional; nil means event storage disabled
-	turnsQuerier eventstore.TurnQuerier // optional; for LatestGeneration on startup
+	turnsQuerier eventstore.TurnQuerier // optional; for LatestGeneration on startup and history recovery for CodexCLI
 	wf           WorkerFactory
 	retryCtrl    *LLMRetryController
 
@@ -729,22 +729,23 @@ func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workD
 	info := b.buildWorkerInfo(sessionID, userID, workDir, si)
 
 	// Populate conversation history from turns table for context recovery.
-	if b.turnsQuerier != nil {
+	// Only CodexCLI worker needs this — other workers have native resume.
+	if si.WorkerType == worker.TypeCodexCLI && b.turnsQuerier != nil {
 		turns, err := b.turnsQuerier.QueryTurns(ctx, sessionID, 50, 0)
 		if err != nil {
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
 		} else if len(turns) > 0 {
-			const maxHistoryTokens = 20000
+			const maxHistoryChars = 50000
 			history := make([]worker.ConversationTurn, 0, len(turns))
-			tokensUsed := 0
+			charsUsed := 0
 			for _, t := range turns {
 				if t.Content == "" {
 					continue
 				}
-				if tokensUsed+int(t.TokensIn) > maxHistoryTokens {
+				if charsUsed+len(t.Content) > maxHistoryChars {
 					break
 				}
-				tokensUsed += int(t.TokensIn)
+				charsUsed += len(t.Content)
 				history = append(history, worker.ConversationTurn{
 					Role:    t.Role,
 					Content: t.Content,

@@ -1955,12 +1955,12 @@ func TestInjectHistoryPrefix(t *testing.T) {
 
 	result := w.injectHistoryPrefix("ping")
 
-	require.Contains(t, result, "<conversation_history>")
+	require.Contains(t, result, "CONVERSATION_HISTORY_START")
 	require.Contains(t, result, "[User]: 现在开始我发 ping，你回复 汪")
 	require.Contains(t, result, "[Assistant]: 收到，以后你发 ping 我就回 汪")
 	require.Contains(t, result, "[User]: ping")
 	require.Contains(t, result, "[Assistant]: 汪")
-	require.Contains(t, result, "</conversation_history>")
+	require.Contains(t, result, "CONVERSATION_HISTORY_END")
 	require.True(t, strings.HasSuffix(result, "ping"), "actual user message should follow history block")
 	require.True(t, w.historyInjected)
 	require.Nil(t, w.pendingHistory)
@@ -1977,7 +1977,7 @@ func TestInjectHistoryPrefixIdempotent(t *testing.T) {
 	}
 
 	first := w.injectHistoryPrefix("message1")
-	require.Contains(t, first, "<conversation_history>")
+	require.Contains(t, first, "CONVERSATION_HISTORY_START")
 
 	second := w.injectHistoryPrefix("message2")
 	require.Equal(t, "message2", second, "second call should return unmodified content")

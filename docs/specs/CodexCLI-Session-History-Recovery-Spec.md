@@ -314,7 +314,7 @@ make check        # 完整 CI
 
 ## 6. Future Improvements (Out of Scope)
 
-- **Token 预算控制**: 基于 `TurnRecord.TokensIn` 累计，动态决定注入多少轮历史
+- **~Token 预算控制~**: ~~基于 `TurnRecord.TokensIn` 累计~~ → 已实现：字符级预算 `maxHistoryChars=50000`，按 `len(turn.Content)` 累计
 - **历史摘要**: 对长对话生成摘要替代全文注入，减少 token 消耗
 - **配置化**: 将历史条数上限（当前硬编码 50）暴露为 YAML 配置项
 - **Tool 事件注入**: 当前仅注入 text turn，未来可选择性注入 tool_call/tool_result
