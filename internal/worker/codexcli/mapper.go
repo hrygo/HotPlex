@@ -78,6 +78,8 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 		"item/commandExecution/requestApproval",
 		"item/fileChange/requestApproval":
 		return m.mapNotifApproval(params)
+	case "mcpServer/elicitation/request":
+		return m.mapNotifElicitation(params)
 	case "thread/started":
 		return nil
 	case "item/reasoning/summaryTextDelta":
@@ -427,6 +429,34 @@ func (m *Mapper) mapNotifApproval(params json.RawMessage) []*events.Envelope {
 			ID:          p.RequestID,
 			ToolName:    p.ToolName,
 			Description: desc,
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func (m *Mapper) mapNotifElicitation(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		RequestID       string         `json:"requestId"`
+		MCPServerName   string         `json:"mcpServerName"`
+		Message         string         `json:"message"`
+		Mode            string         `json:"mode,omitempty"`
+		URL             string         `json:"url,omitempty"`
+		ElicitationID   string         `json:"elicitationId,omitempty"`
+		RequestedSchema map[string]any `json:"requestedSchema,omitempty"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		slog.Debug("codexcli: unmarshal elicitation params", "err", err, "raw", string(params))
+		return nil
+	}
+
+	return []*events.Envelope{
+		newEnvelope(events.ElicitationRequest, events.ElicitationRequestData{
+			ID:              p.RequestID,
+			MCPServerName:   p.MCPServerName,
+			Message:         p.Message,
+			Mode:            p.Mode,
+			URL:             p.URL,
+			ElicitationID:   p.ElicitationID,
+			RequestedSchema: p.RequestedSchema,
 		}, m.sessionID, m.nextSeq()),
 	}
 }

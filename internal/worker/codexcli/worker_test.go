@@ -967,6 +967,30 @@ func TestMapNotificationApprovalMethodNames(t *testing.T) {
 	}
 }
 
+func TestMapNotificationElicitation(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+	params := json.RawMessage(`{"requestId":"el_1","mcpServerName":"fs","message":"Allow file access?","mode":"confirm"}`)
+	envs := m.MapNotification("mcpServer/elicitation/request", params)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ElicitationRequest, envs[0].Event.Type)
+	el, ok := envs[0].Event.Data.(events.ElicitationRequestData)
+	require.True(t, ok)
+	require.Equal(t, "el_1", el.ID)
+	require.Equal(t, "fs", el.MCPServerName)
+	require.Equal(t, "Allow file access?", el.Message)
+	require.Equal(t, "confirm", el.Mode)
+}
+
+func TestMapNotificationElicitationBadJSON(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+	envs := m.MapNotification("mcpServer/elicitation/request", json.RawMessage(`{bad`))
+	require.Nil(t, envs)
+}
+
 // ─── Issue #575: Reset kills session + Zombie process fix tests ──────────
 
 // testConfigWithDefaults sets a known-good config for integration tests and
