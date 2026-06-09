@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -389,4 +393,186 @@ func TestInput_ElicitationResponse_Decline(t *testing.T) {
 	require.Equal(t, "decline", receivedBody["action"])
 	_, hasContent := receivedBody["content"]
 	require.False(t, hasContent)
+}
+
+// ─── P0-2 + P1-1 + P1-2: forwardBusEvents / Wait crash recovery ───────────
+
+func TestForwardBusEvents_CriticalEventDelivery(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	recvCh := make(chan *events.Envelope, 256)
+	w.httpConn = &conn{
+		sessionID: "test-ses",
+		userID:    "u1",
+		recvCh:    recvCh,
+		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	busCh := make(chan *events.Envelope, 16)
+	go w.forwardBusEvents(ctx, "test-ses", busCh)
+
+	// Send a critical event (Done).
+	doneEnv := events.NewEnvelope(aep.NewID(), "test-ses", 0, events.Done, events.DoneData{Success: true})
+	busCh <- doneEnv
+
+	// Should arrive on recvCh.
+	select {
+	case got := <-recvCh:
+		require.Equal(t, events.Done, got.Event.Type)
+	case <-time.After(2 * time.Second):
+		t.Fatal("critical Done event not received on recvCh")
+	}
+}
+
+func TestForwardBusEvents_DroppableEventDiscard(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	recvCh := make(chan *events.Envelope, 1) // capacity 1
+	// Fill the channel to simulate backpressure.
+	recvCh <- events.NewEnvelope(aep.NewID(), "test-ses", 0, events.State, nil)
+
+	w.httpConn = &conn{
+		sessionID: "test-ses",
+		userID:    "u1",
+		recvCh:    recvCh,
+		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	busCh := make(chan *events.Envelope, 16)
+	go w.forwardBusEvents(ctx, "test-ses", busCh)
+
+	// Send a droppable event (MessageDelta) — should be silently dropped.
+	deltaEnv := events.NewEnvelope(aep.NewID(), "test-ses", 0, events.MessageDelta, events.MessageDeltaData{Content: "x"})
+	busCh <- deltaEnv
+
+	// Give goroutine time to process.
+	time.Sleep(50 * time.Millisecond)
+
+	// recvCh should still have only the original event (the droppable was dropped).
+	require.Len(t, recvCh, 1, "droppable event should have been dropped when recvCh is full")
+}
+
+func TestForwardBusEvents_ClosedConnStops(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	recvCh := make(chan *events.Envelope, 16)
+	c := &conn{
+		sessionID: "test-ses",
+		userID:    "u1",
+		recvCh:    recvCh,
+		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	w.httpConn = c
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	busCh := make(chan *events.Envelope, 16)
+	done := make(chan struct{})
+	go func() {
+		w.forwardBusEvents(ctx, "test-ses", busCh)
+		close(done)
+	}()
+
+	// Close the conn while forwardBusEvents is running.
+	c.Close()
+
+	// Send an event — forwardBusEvents should detect closed and exit.
+	busCh <- events.NewEnvelope(aep.NewID(), "test-ses", 0, events.Done, nil)
+
+	select {
+	case <-done:
+		// forwardBusEvents exited — expected.
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwardBusEvents should have exited after conn.Close()")
+	}
+}
+
+func TestForwardBusEvents_CancelledCtx(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	recvCh := make(chan *events.Envelope, 16)
+	w.httpConn = &conn{
+		sessionID: "test-ses",
+		userID:    "u1",
+		recvCh:    recvCh,
+		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	busCh := make(chan *events.Envelope, 16)
+
+	done := make(chan struct{})
+	go func() {
+		w.forwardBusEvents(ctx, "test-ses", busCh)
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+		// Exited via context cancellation — expected.
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwardBusEvents should have exited on context cancellation")
+	}
+}
+
+func TestWait_CrashSub_RecoveredSingleton(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+
+	// Set up a singleton that IsRunning() = true (simulates recovered after crash).
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{}
+	mgr := NewSingletonProcessManager(log, cfg)
+	mgr.mu.Lock()
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+
+	w.singleton = mgr
+
+	// Create a closed crashSub (simulates crash signal already fired).
+	crashCh := make(chan struct{})
+	close(crashCh)
+	w.crashSub = crashCh
+
+	// Wait should return 0 because singleton has recovered.
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code, "Wait should return 0 when singleton has recovered after crash")
+}
+
+func TestWait_CrashSub_NotRecovered(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{}
+	mgr := NewSingletonProcessManager(log, cfg)
+	// state is idle by default → IsRunning() = false.
+
+	w.singleton = mgr
+
+	// Closed crashSub.
+	crashCh := make(chan struct{})
+	close(crashCh)
+	w.crashSub = crashCh
+
+	// Wait should return 1 because singleton is NOT running.
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 1, code, "Wait should return 1 when singleton has NOT recovered")
 }

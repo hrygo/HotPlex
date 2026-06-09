@@ -319,12 +319,9 @@ func TestConverter_SessionStatus_Retry(t *testing.T) {
 
 func TestConverter_SessionIdle(t *testing.T) {
 	c := newTestConverter()
+	// No state accumulated → session.idle does not emit Done.
 	envs := c.Convert("s1", ocsSessionIdle, nil)
-	require.Len(t, envs, 1)
-	require.Equal(t, events.Done, envs[0].Event.Type)
-	dd := envs[0].Event.Data.(events.DoneData)
-	require.True(t, dd.Success)
-	require.Nil(t, dd.Stats, "no usage accumulated → Stats is nil")
+	require.Empty(t, envs, "session.idle with no prior state should not emit Done")
 }
 
 func TestConverter_SessionIdle_WithUsage(t *testing.T) {
@@ -590,10 +587,7 @@ func TestConverter_DualDone_IdleFirst(t *testing.T) {
 	require.Equal(t, events.Done, envs[0].Event.Type)
 
 	envs = c.Convert(sid, ocsSessionIdle, nil)
-	require.Len(t, envs, 1)
-	require.Equal(t, events.Done, envs[0].Event.Type)
-	dd := envs[0].Event.Data.(events.DoneData)
-	require.Nil(t, dd.Stats, "state already cleared → Stats is nil")
+	require.Empty(t, envs, "session.idle after session.status(idle) should not emit duplicate Done")
 }
 
 func TestConverter_Reset(t *testing.T) {
@@ -727,4 +721,75 @@ func TestConverter_ReasoningPhase_Reset(t *testing.T) {
 	}))
 	require.Len(t, envs, 1)
 	require.Equal(t, events.MessageDelta, envs[0].Event.Type)
+}
+
+// ─── P1-3: step.failed → session.idle duplicate Done prevention ────────────
+
+func TestConverter_StepFailed_ThenSessionIdle_NoDuplicateDone(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-dup-done"
+
+	// 1. Accumulate some state via step events.
+	c.Convert(sid, ocsStepStarted, rawProps(t, map[string]any{
+		"model": map[string]any{"providerID": "p", "modelID": "m"},
+	}))
+	c.Convert(sid, ocsStepEnded, rawProps(t, map[string]any{
+		"cost": 0.01, "tokens": map[string]any{"input": 100, "output": 50},
+	}))
+
+	// 2. step.failed clears state and emits Error + Done{Success:false}.
+	envs := c.Convert(sid, ocsStepFailed, rawProps(t, map[string]any{
+		"error": map[string]any{"message": "boom"},
+	}))
+	require.Len(t, envs, 2)
+	require.Equal(t, events.Error, envs[0].Event.Type)
+	require.Equal(t, events.Done, envs[1].Event.Type)
+
+	// 3. Subsequent session.idle should NOT produce a duplicate Done.
+	envs = c.Convert(sid, ocsSessionIdle, nil)
+	require.Empty(t, envs, "session.idle after step.failed should not emit duplicate Done")
+}
+
+func TestConverter_SessionError_ThenSessionIdle_NoDuplicateDone(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-err-idle"
+
+	// 1. Accumulate state.
+	c.Convert(sid, ocsStepEnded, rawProps(t, map[string]any{
+		"cost": 0.05, "tokens": map[string]any{"input": 200},
+	}))
+
+	// 2. session.error clears state and emits Error + Done{Success:false}.
+	envs := c.Convert(sid, ocsSessionError, rawProps(t, map[string]any{
+		"error": map[string]any{"name": "APIError", "data": map[string]any{"message": "timeout"}},
+	}))
+	require.Len(t, envs, 2)
+	require.Equal(t, events.Error, envs[0].Event.Type)
+	require.Equal(t, events.Done, envs[1].Event.Type)
+
+	// 3. Subsequent session.idle should NOT produce a duplicate Done.
+	envs = c.Convert(sid, ocsSessionIdle, nil)
+	require.Empty(t, envs, "session.idle after session.error should not emit duplicate Done")
+}
+
+func TestConverter_SessionIdle_WithStats_EmitsDone(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-idle-ok"
+
+	// Accumulate state, then session.idle should emit Done{Success:true}.
+	c.Convert(sid, ocsStepEnded, rawProps(t, map[string]any{
+		"cost": 0.02, "tokens": map[string]any{"input": 50, "output": 30},
+	}))
+	envs := c.Convert(sid, ocsSessionIdle, nil)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Done, envs[0].Event.Type)
+}
+
+func TestConverter_SessionIdle_NoStats_SkipsDone(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-idle-nostats"
+
+	// No state accumulated → session.idle produces nothing.
+	envs := c.Convert(sid, ocsSessionIdle, nil)
+	require.Empty(t, envs, "session.idle with no prior state should not emit Done")
 }

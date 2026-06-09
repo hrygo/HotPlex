@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/pkg/aep"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 func TestNewSingletonProcessManager(t *testing.T) {
@@ -270,4 +272,121 @@ func TestSingletonProcessManager_Acquire_ReturnsSSEClient(t *testing.T) {
 	require.NotNil(t, client)
 	require.NotNil(t, sseClient, "sseClient should be returned")
 	require.NotNil(t, crashCh)
+}
+
+// ─── P0-1 + P0-2: closeAllSubscribers / isDroppable / sendCritical ────────
+
+func TestIsDroppable(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isDroppable(events.MessageDelta), "MessageDelta should be droppable")
+	require.True(t, isDroppable(events.Raw), "Raw should be droppable")
+	require.False(t, isDroppable(events.Done), "Done should not be droppable")
+	require.False(t, isDroppable(events.Error), "Error should not be droppable")
+	require.False(t, isDroppable(events.State), "State should not be droppable")
+	require.False(t, isDroppable(events.MessageStart), "MessageStart should not be droppable")
+}
+
+func TestCloseAllSubscribers(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{}
+	mgr := NewSingletonProcessManager(log, cfg)
+
+	// Manually add subscribers.
+	ch1 := make(chan *events.Envelope, 16)
+	ch2 := make(chan *events.Envelope, 16)
+	mgr.busMu.Lock()
+	mgr.subscribers["s1"] = ch1
+	mgr.subscribers["s2"] = ch2
+	mgr.busMu.Unlock()
+
+	mgr.closeAllSubscribers()
+
+	// Channels should be closed — reading from them returns immediately.
+	_, ok1 := <-ch1
+	_, ok2 := <-ch2
+	require.False(t, ok1, "subscriber ch1 should be closed")
+	require.False(t, ok2, "subscriber ch2 should be closed")
+
+	// Map should be empty.
+	mgr.busMu.RLock()
+	n := len(mgr.subscribers)
+	mgr.busMu.RUnlock()
+	require.Zero(t, n)
+}
+
+func TestCloseAllSubscribers_Empty(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{}
+	mgr := NewSingletonProcessManager(log, cfg)
+
+	// No subscribers — should not panic.
+	mgr.closeAllSubscribers()
+}
+
+func TestSendCritical_Success(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{}
+	mgr := NewSingletonProcessManager(log, cfg)
+
+	ch := make(chan *events.Envelope, 1)
+	env := events.NewEnvelope(aep.NewID(), "s1", 0, events.Done, events.DoneData{Success: true})
+
+	mgr.sendCritical(ch, env, "s1")
+
+	select {
+	case got := <-ch:
+		require.Equal(t, events.Done, got.Event.Type)
+	default:
+		t.Fatal("critical event should have been sent")
+	}
+}
+
+func TestSendCritical_ClosedChannel(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{}
+	mgr := NewSingletonProcessManager(log, cfg)
+
+	ch := make(chan *events.Envelope, 1)
+	close(ch) // Close before sending.
+
+	env := events.NewEnvelope(aep.NewID(), "s1", 0, events.Done, events.DoneData{Success: true})
+
+	// Should not panic — recover catches send on closed channel.
+	mgr.sendCritical(ch, env, "s1")
+}
+
+func TestSendCritical_Timeout(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{}
+	mgr := NewSingletonProcessManager(log, cfg)
+
+	// Full channel, no reader — will timeout.
+	ch := make(chan *events.Envelope, 1)
+	ch <- events.NewEnvelope(aep.NewID(), "s1", 0, events.State, nil) // fill buffer
+
+	env := events.NewEnvelope(aep.NewID(), "s1", 0, events.Done, events.DoneData{Success: true})
+
+	done := make(chan struct{})
+	go func() {
+		mgr.sendCritical(ch, env, "s1")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Completed (after timeout) — expected.
+	case <-time.After(criticalEventSendTimeout + 2*time.Second):
+		t.Fatal("sendCritical should have timed out")
+	}
 }

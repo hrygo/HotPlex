@@ -374,14 +374,19 @@ func (w *Worker) Wait() (int, error) {
 	}
 
 	// Ensure release happens if Terminate/Kill was never called (defensive).
-	w.releaseOnce.Do(func() {
-		w.release()
-	})
+	// Call release() directly — it uses releaseOnce internally for the
+	// singleton.Release() call, so this is safe even if already released.
+	w.release()
 
 	// Non-blocking crash check: if the process crashed, crashSub is already
 	// closed. If not, we return immediately — no need to block 2 seconds.
+	// If the singleton has already recovered (monitorProcess restarts
+	// automatically), treat as normal exit — the bridge will re-attach.
 	select {
 	case <-w.crashSub:
+		if w.singleton.IsRunning() {
+			return 0, nil
+		}
 		return 1, nil // process crashed
 	default:
 		return 0, nil
@@ -753,7 +758,14 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 			ch := w.httpConn
 			var recvCh chan *events.Envelope
 			if ch != nil {
+				ch.mu.Lock()
+				if ch.closed {
+					ch.mu.Unlock()
+					w.Mu.Unlock()
+					return
+				}
 				recvCh = ch.recvCh
+				ch.mu.Unlock()
 			}
 			w.Mu.Unlock()
 
@@ -761,10 +773,23 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 				return
 			}
 
+			if isDroppable(env.Event.Type) {
+				select {
+				case recvCh <- env:
+				default:
+					w.Log.Warn("opencodeserver: recv channel full, dropping droppable event",
+						"event_type", env.Event.Type, "event_id", env.ID)
+				}
+				continue
+			}
+
+			// Critical event: block with timeout to guarantee delivery.
+			timer := time.NewTimer(criticalEventSendTimeout)
 			select {
 			case recvCh <- env:
-			default:
-				w.Log.Warn("opencodeserver: recv channel full, dropping message",
+				timer.Stop()
+			case <-timer.C:
+				w.Log.Warn("opencodeserver: critical event send timed out, recv channel stuck",
 					"event_type", env.Event.Type, "event_id", env.ID)
 			}
 		}

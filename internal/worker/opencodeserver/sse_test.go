@@ -228,10 +228,19 @@ func TestReadGlobalSSE_DispatchesSessionIdle(t *testing.T) {
 		rw.Header().Set("Content-Type", "text/event-stream")
 		flusher := rw.(http.Flusher)
 
-		evt := ocsEvent(t, "session.idle", map[string]any{
+		// Send step.ended first to accumulate state, then session.idle to emit Done.
+		evt1 := ocsEvent(t, "session.next.step.ended", map[string]any{
+			"sessionID": "ses_1",
+			"cost":      0.01,
+			"tokens":    map[string]any{"input": 100, "output": 50},
+		})
+		fmt.Fprint(rw, evt1)
+		flusher.Flush()
+
+		evt2 := ocsEvent(t, "session.idle", map[string]any{
 			"sessionID": "ses_1",
 		})
-		fmt.Fprint(rw, evt)
+		fmt.Fprint(rw, evt2)
 		flusher.Flush()
 		<-r.Context().Done()
 	})
@@ -463,8 +472,15 @@ func TestReadGlobalSSE_UnsubscribeDuringDispatch(t *testing.T) {
 	// Unsubscribe — second event should be silently dropped (no panic).
 	s.Unsubscribe("ses_1")
 
-	_, ok := <-ch
-	require.False(t, ok, "channel should be closed after unsubscribe")
+	// Wait for the second SSE event to be dispatched; since subscriber is
+	// removed, it should not arrive on ch.
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case env := <-ch:
+		t.Fatalf("should not receive event after unsubscribe, got: %v", env)
+	default:
+		// Expected: no event received.
+	}
 }
 
 // NOTE: Tests that patch package-level backoff vars must NOT use t.Parallel()
@@ -827,12 +843,15 @@ func TestUnsubscribe_DoubleSafe(t *testing.T) {
 
 	s, _ := newSingletonWithSSE(t, nil)
 
-	ch := s.Subscribe("ses_1")
+	_ = s.Subscribe("ses_1")
 	s.Unsubscribe("ses_1")
-	s.Unsubscribe("ses_1")
+	s.Unsubscribe("ses_1") // should not panic
 
-	_, ok := <-ch
-	require.False(t, ok, "channel should be closed")
+	// Verify subscriber is removed from map.
+	s.busMu.RLock()
+	_, exists := s.subscribers["ses_1"]
+	s.busMu.RUnlock()
+	require.False(t, exists, "subscriber should be removed from map")
 }
 
 // ─── LastInput Tests ──────────────────────────────────────────────────────────
