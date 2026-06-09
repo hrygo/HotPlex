@@ -1937,3 +1937,101 @@ func TestIntegrationKillImmediatelyTerminatesIdleProcess(t *testing.T) {
 		return !mgr.IsRunning()
 	}, 5*time.Second, 100*time.Millisecond, "process should be killed immediately, not after idle drain")
 }
+
+// ─── Conversation History Injection Tests ────────────────────────────────
+
+func TestInjectHistoryPrefix(t *testing.T) {
+	t.Parallel()
+
+	w := &AppServerWorker{
+		pendingHistory: []worker.ConversationTurn{
+			{Role: "user", Content: "现在开始我发 ping，你回复 汪"},
+			{Role: "assistant", Content: "收到，以后你发 ping 我就回 汪"},
+			{Role: "user", Content: "ping"},
+			{Role: "assistant", Content: "汪"},
+		},
+		historyInjected: false,
+	}
+
+	result := w.injectHistoryPrefix("ping")
+
+	require.Contains(t, result, "CONVERSATION_HISTORY_START")
+	require.Contains(t, result, "[User]: 现在开始我发 ping，你回复 汪")
+	require.Contains(t, result, "[Assistant]: 收到，以后你发 ping 我就回 汪")
+	require.Contains(t, result, "[User]: ping")
+	require.Contains(t, result, "[Assistant]: 汪")
+	require.Contains(t, result, "CONVERSATION_HISTORY_END")
+	require.True(t, strings.HasSuffix(result, "ping"), "actual user message should follow history block")
+	require.True(t, w.historyInjected)
+	require.Nil(t, w.pendingHistory)
+}
+
+func TestInjectHistoryPrefixIdempotent(t *testing.T) {
+	t.Parallel()
+
+	w := &AppServerWorker{
+		pendingHistory: []worker.ConversationTurn{
+			{Role: "user", Content: "hello"},
+		},
+		historyInjected: false,
+	}
+
+	first := w.injectHistoryPrefix("message1")
+	require.Contains(t, first, "CONVERSATION_HISTORY_START")
+
+	second := w.injectHistoryPrefix("message2")
+	require.Equal(t, "message2", second, "second call should return unmodified content")
+}
+
+func TestInjectHistoryPrefixEmpty(t *testing.T) {
+	t.Parallel()
+
+	w := &AppServerWorker{
+		pendingHistory:  nil,
+		historyInjected: false,
+	}
+	require.Equal(t, "hello", w.injectHistoryPrefix("hello"))
+
+	w2 := &AppServerWorker{
+		pendingHistory:  []worker.ConversationTurn{},
+		historyInjected: false,
+	}
+	require.Equal(t, "hello", w2.injectHistoryPrefix("hello"))
+}
+
+func TestInjectHistoryPrefixSkipsEmptyContent(t *testing.T) {
+	t.Parallel()
+
+	w := &AppServerWorker{
+		pendingHistory: []worker.ConversationTurn{
+			{Role: "user", Content: ""},
+			{Role: "assistant", Content: "response"},
+			{Role: "system", Content: "ignored role"},
+			{Role: "user", Content: "actual input"},
+		},
+		historyInjected: false,
+	}
+
+	result := w.injectHistoryPrefix("ping")
+
+	require.Contains(t, result, "[Assistant]: response")
+	require.Contains(t, result, "[User]: actual input")
+	require.NotContains(t, result, "[System]: ", "unknown roles should be skipped")
+}
+
+func TestInjectHistoryPrefixCleanupOldThreadReset(t *testing.T) {
+	t.Parallel()
+
+	w := &AppServerWorker{
+		pendingHistory: []worker.ConversationTurn{
+			{Role: "user", Content: "hello"},
+		},
+		historyInjected: false,
+	}
+
+	w.cleanupOldThread()
+
+	require.Nil(t, w.pendingHistory)
+	require.False(t, w.historyInjected)
+	require.Equal(t, "test", w.injectHistoryPrefix("test"))
+}

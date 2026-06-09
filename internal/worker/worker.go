@@ -304,6 +304,19 @@ type SessionInfo struct {
 	// Populated from SessionInfo by buildThreadStartParams. Per-session
 	// injection through gateway/bridge is not yet wired.
 	Images []string
+	// ConversationHistory carries prior turns for pre-seeding a new worker
+	// thread. Populated by the bridge when resuming/recreating a session
+	// with existing history. Workers that support native resume (Claude Code
+	// --resume) ignore this; workers that always create fresh threads
+	// (CodexCLI) use it to inject context into the first user input.
+	ConversationHistory []ConversationTurn
+}
+
+// ConversationTurn represents a single turn in a conversation history,
+// used to seed context when a worker cannot natively resume its session.
+type ConversationTurn struct {
+	Role    string // "user" | "assistant"
+	Content string
 }
 
 // SandboxPlatformKey is the platformKey map key used to propagate sandbox config

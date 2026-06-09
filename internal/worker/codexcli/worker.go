@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,6 +106,11 @@ type AppServerWorker struct {
 	// origSession preserves the SessionInfo from the most recent Start()
 	// call so that ResetContext can re-establish a fresh thread after cleanup.
 	origSession worker.SessionInfo
+
+	// pendingHistory stores ConversationHistory from SessionInfo for injection
+	// into the first user input of a new thread. Cleared after injection.
+	pendingHistory  []worker.ConversationTurn
+	historyInjected bool
 }
 
 // appConn implements worker.SessionConn for the app-server mode.
@@ -207,6 +214,8 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		return nil
 	}
 
+	content = w.injectHistoryPrefix(content)
+
 	w.mu.Lock()
 	tid := w.threadID
 	w.mu.Unlock()
@@ -275,6 +284,8 @@ func (w *AppServerWorker) cleanupOldThread() {
 	oldThreadID := w.threadID
 	w.recvCh = nil
 	w.conn = nil
+	w.pendingHistory = nil
+	w.historyInjected = false
 	w.mu.Unlock()
 
 	if oldConn != nil {
@@ -344,9 +355,48 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 	}
 	w.StartTime = time.Now()
 	w.SetLastIO(w.StartTime)
+	w.pendingHistory = slices.Clone(session.ConversationHistory)
+	w.historyInjected = false
 	w.mu.Unlock()
 
 	return nil
+}
+
+// injectHistoryPrefix prepends conversation history to the first user
+// input of a new thread. After injection, pendingHistory is cleared.
+func (w *AppServerWorker) injectHistoryPrefix(content string) string {
+	w.mu.Lock()
+	if w.historyInjected || len(w.pendingHistory) == 0 {
+		w.mu.Unlock()
+		return content
+	}
+	history := w.pendingHistory
+	w.pendingHistory = nil
+	w.historyInjected = true
+	w.mu.Unlock()
+
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString("CONVERSATION_HISTORY_START\n")
+	sb.WriteString("Below is the conversation history from a previous session. ")
+	sb.WriteString("Use it as context to maintain continuity.\n\n")
+	for _, turn := range history {
+		switch turn.Role {
+		case "user":
+			sb.WriteString("[User]: ")
+		case "assistant":
+			sb.WriteString("[Assistant]: ")
+		default:
+			continue
+		}
+		escaped := strings.ReplaceAll(turn.Content, "CONVERSATION_HISTORY_", "")
+		sb.WriteString(escaped)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("CONVERSATION_HISTORY_END\n")
+	sb.WriteString("---\n\n")
+	sb.WriteString(content)
+	return sb.String()
 }
 
 // ─── AppServerWorker lifecycle ────────────────────────────────────────
@@ -468,6 +518,7 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) (worker.ResetResult,
 		w.mu.Unlock()
 		return worker.ResetResult{ConnReplaced: true}, nil
 	}
+	origSess.ConversationHistory = nil // /reset clears context, do not re-inject old history
 	if err := w.startNewThread(origSess, "reset"); err != nil {
 		return worker.ResetResult{}, err
 	}
