@@ -13,10 +13,18 @@ type Builder func() (Worker, error)
 var (
 	registryMu sync.RWMutex
 	registry   = make(map[WorkerType]Builder)
+
+	// Capability cache: populated once at Register() time to avoid
+	// creating temporary worker instances for capability queries.
+	capCache   = make(map[WorkerType]bool)
+	capCacheMu sync.RWMutex
 )
 
 // Register registers a new worker builder for the given worker type.
 // It panics if the builder is nil or if a type is registered twice.
+//
+// Register eagerly invokes b() once to cache CanResumeTerminated capability;
+// builders with expensive initialization should ensure construction is lightweight.
 func Register(t WorkerType, b Builder) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -27,6 +35,20 @@ func Register(t WorkerType, b Builder) {
 		panic("worker: register called twice for type " + string(t))
 	}
 	registry[t] = b
+
+	// Eagerly cache CanResumeTerminated by creating one temporary instance.
+	// NOTE: This is a register-time snapshot; it does not reflect runtime state
+	// changes. Workers whose CanResumeTerminated depends on runtime conditions
+	// should return the base value here and handle runtime checks at call sites.
+	if w, err := b(); err == nil {
+		capCacheMu.Lock()
+		capCache[t] = w != nil && w.CanResumeTerminated()
+		capCacheMu.Unlock()
+	} else {
+		capCacheMu.Lock()
+		capCache[t] = false
+		capCacheMu.Unlock()
+	}
 }
 
 // NewWorker creates a new Worker instance for the specified worker type.
@@ -50,4 +72,20 @@ func RegisteredTypes() []WorkerType {
 		types = append(types, t)
 	}
 	return types
+}
+
+// CanResumeTerminated returns true if the given worker type supports
+// resuming sessions in TERMINATED state (orphan recovery).
+// Uses register-time capability cache — no temporary worker allocation.
+func CanResumeTerminated(t WorkerType) bool {
+	capCacheMu.RLock()
+	v, ok := capCache[t]
+	capCacheMu.RUnlock()
+	if ok {
+		return v
+	}
+	// Fallback: should not be reached in normal operation (all types cached at
+	// Register time). Returns false rather than allocating a temporary worker,
+	// since builders may acquire resources (processes, connections).
+	return false
 }

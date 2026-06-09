@@ -144,14 +144,15 @@ func (c *appConn) Close() error {
 func (c *appConn) UserID() string    { return c.userID }
 func (c *appConn) SessionID() string { return c.sessionID }
 
-func (w *AppServerWorker) Type() worker.WorkerType { return worker.TypeCodexCLI }
-func (w *AppServerWorker) SupportsResume() bool    { return true }
-func (w *AppServerWorker) SupportsStreaming() bool { return true }
-func (w *AppServerWorker) SupportsTools() bool     { return true }
-func (w *AppServerWorker) EnvBlocklist() []string  { return EnvBlocklist }
-func (w *AppServerWorker) SessionStoreDir() string { return "" }
-func (w *AppServerWorker) MaxTurns() int           { return 0 }
-func (w *AppServerWorker) Modalities() []string    { return []string{"text", "code", "image"} }
+func (w *AppServerWorker) Type() worker.WorkerType   { return worker.TypeCodexCLI }
+func (w *AppServerWorker) SupportsResume() bool      { return true }
+func (w *AppServerWorker) CanResumeTerminated() bool { return false }
+func (w *AppServerWorker) SupportsStreaming() bool   { return true }
+func (w *AppServerWorker) SupportsTools() bool       { return true }
+func (w *AppServerWorker) EnvBlocklist() []string    { return EnvBlocklist }
+func (w *AppServerWorker) SessionStoreDir() string   { return "" }
+func (w *AppServerWorker) MaxTurns() int             { return 0 }
+func (w *AppServerWorker) Modalities() []string      { return []string{"text", "code", "image"} }
 
 func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
 	if w.commands == nil {
@@ -248,8 +249,17 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 
 // closeAndMarkDone closes doneCh and marks the worker as closed.
 // This ensures Wait() is always unblocked even on error paths (P1 fix).
+// Guarded by w.closed; safe after release() which sets w.closed=true under the same mutex.
+//
+// Unlike release() which closes doneCh but keeps it non-nil (Wait() needs
+// to receive from a closed channel), this path additionally nils doneCh
+// because it is only called on Start error paths (before Wait() is invoked)
+// and resetLifecycleState() expects doneCh == nil to create a fresh channel.
 // Caller must hold w.mu.
 func (w *AppServerWorker) closeAndMarkDone() {
+	if w.closed {
+		return
+	}
 	w.closed = true
 	if w.doneCh != nil {
 		close(w.doneCh)
@@ -278,13 +288,14 @@ func (w *AppServerWorker) cleanupOldThread() {
 
 // resetLifecycleState resets lifecycle state for a new thread attempt.
 // After calling this, Terminate/Kill can release the new thread cleanly.
+// Always creates a fresh doneCh: after release(), doneCh may be closed-but-non-nil
+// (release() no longer nils it to fix #691), which would cause Wait() to return
+// immediately instead of blocking for the new thread's lifecycle.
 func (w *AppServerWorker) resetLifecycleState() {
 	w.mu.Lock()
 	w.closed = false
 	w.released = false
-	if w.doneCh == nil {
-		w.doneCh = make(chan struct{})
-	}
+	w.doneCh = make(chan struct{})
 	w.mu.Unlock()
 }
 
@@ -386,13 +397,18 @@ func (w *AppServerWorker) shutdown() {
 }
 
 func (w *AppServerWorker) Wait() (int, error) {
-	if w.crashSub == nil {
+	w.mu.Lock()
+	crashSub := w.crashSub
+	doneCh := w.doneCh
+	w.mu.Unlock()
+
+	if doneCh == nil && crashSub == nil {
 		return 0, nil
 	}
 	select {
-	case <-w.crashSub:
+	case <-crashSub:
 		return 1, nil
-	case <-w.doneCh:
+	case <-doneCh:
 		return 0, nil
 	}
 }
@@ -406,26 +422,30 @@ func (w *AppServerWorker) release() {
 	w.released = true
 	w.closed = true
 	doneCh := w.doneCh
-	w.doneCh = nil
 	tid := w.threadID
+	conn := w.conn
+	mgr := w.manager
 	w.mu.Unlock()
 
 	if doneCh != nil {
+		// Close but do NOT nil: Wait() relies on receiving from a closed
+		// channel (returns immediately). closeAndMarkDone() additionally
+		// nils for error-path reuse via resetLifecycleState().
 		close(doneCh)
 	}
 
-	if w.manager != nil && tid != "" {
-		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
+	if mgr != nil && tid != "" {
+		_ = mgr.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
 			ThreadID: tid,
 		})
-		w.manager.Unsubscribe(tid)
+		mgr.Unsubscribe(tid)
 		// Close recvCh so forwardEvents exits its range loop.
 		// Must happen after Unsubscribe (removes from dispatch map) to
 		// avoid racing with in-flight dispatchNotification sends.
-		if w.conn != nil {
-			_ = w.conn.Close()
+		if conn != nil {
+			_ = conn.Close()
 		}
-		w.manager.Release()
+		mgr.Release()
 	}
 }
 

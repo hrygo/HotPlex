@@ -207,14 +207,15 @@ type Worker struct {
 
 // ─── Capabilities ────────────────────────────────────────────────────────────
 
-func (w *Worker) Type() worker.WorkerType { return worker.TypeACP }
-func (w *Worker) SupportsResume() bool    { return true }
-func (w *Worker) SupportsStreaming() bool { return true }
-func (w *Worker) SupportsTools() bool     { return true }
-func (w *Worker) EnvBlocklist() []string  { return append([]string{}, acpEnvBlocklist...) }
-func (w *Worker) SessionStoreDir() string { return "" }
-func (w *Worker) MaxTurns() int           { return 0 }
-func (w *Worker) Modalities() []string    { return []string{"text", "code", "image"} }
+func (w *Worker) Type() worker.WorkerType   { return worker.TypeACP }
+func (w *Worker) SupportsResume() bool      { return true }
+func (w *Worker) CanResumeTerminated() bool { return true }
+func (w *Worker) SupportsStreaming() bool   { return true }
+func (w *Worker) SupportsTools() bool       { return true }
+func (w *Worker) EnvBlocklist() []string    { return append([]string{}, acpEnvBlocklist...) }
+func (w *Worker) SessionStoreDir() string   { return "" }
+func (w *Worker) MaxTurns() int             { return 0 }
+func (w *Worker) Modalities() []string      { return []string{"text", "code", "image"} }
 
 // ─── WorkerSessionIDHandler ──────────────────────────────────────────────────
 

@@ -1227,6 +1227,7 @@ type mockBridgeWorker struct {
 
 func (m *mockBridgeWorker) Type() worker.WorkerType                             { return m.workerType }
 func (m *mockBridgeWorker) SupportsResume() bool                                { return true }
+func (m *mockBridgeWorker) CanResumeTerminated() bool                           { return true }
 func (m *mockBridgeWorker) SupportsStreaming() bool                             { return true }
 func (m *mockBridgeWorker) SupportsTools() bool                                 { return true }
 func (m *mockBridgeWorker) EnvBlocklist() []string                              { return nil }

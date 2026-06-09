@@ -59,6 +59,7 @@ type mockWorker struct {
 
 func (m *mockWorker) Type() worker.WorkerType                             { return worker.TypeClaudeCode }
 func (m *mockWorker) SupportsResume() bool                                { return false }
+func (m *mockWorker) CanResumeTerminated() bool                           { return false }
 func (m *mockWorker) SupportsStreaming() bool                             { return true }
 func (m *mockWorker) SupportsTools() bool                                 { return true }
 func (m *mockWorker) EnvBlocklist() []string                              { return nil }

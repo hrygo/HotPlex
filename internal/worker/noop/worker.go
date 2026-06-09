@@ -21,14 +21,15 @@ var (
 // Capabilities is a stub Capabilities for framework testing.
 type Capabilities struct{}
 
-func (Capabilities) Type() worker.WorkerType { return worker.TypeUnknown }
-func (Capabilities) SupportsResume() bool    { return false }
-func (Capabilities) SupportsStreaming() bool { return false }
-func (Capabilities) SupportsTools() bool     { return false }
-func (Capabilities) EnvBlocklist() []string  { return nil }
-func (Capabilities) SessionStoreDir() string { return "" }
-func (Capabilities) MaxTurns() int           { return 0 }
-func (Capabilities) Modalities() []string    { return nil }
+func (Capabilities) Type() worker.WorkerType   { return worker.TypeUnknown }
+func (Capabilities) SupportsResume() bool      { return false }
+func (Capabilities) CanResumeTerminated() bool { return false }
+func (Capabilities) SupportsStreaming() bool   { return false }
+func (Capabilities) SupportsTools() bool       { return false }
+func (Capabilities) EnvBlocklist() []string    { return nil }
+func (Capabilities) SessionStoreDir() string   { return "" }
+func (Capabilities) MaxTurns() int             { return 0 }
+func (Capabilities) Modalities() []string      { return nil }
 
 // Conn is a stub SessionConn that drops all messages.
 type Conn struct {

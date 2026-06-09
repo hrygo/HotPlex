@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,9 +15,12 @@ import (
 func withRegistry(t *testing.T, fn func()) {
 	t.Helper()
 	orig := registry
+	origCap := capCache
 	registry = make(map[WorkerType]Builder)
+	capCache = make(map[WorkerType]bool)
 	fn()
 	registry = orig
+	capCache = origCap
 }
 
 func TestRegister(t *testing.T) {
@@ -115,6 +120,53 @@ func TestRegisteredTypes(t *testing.T) {
 	})
 }
 
+func TestCanResumeTerminated(t *testing.T) {
+	t.Run("returns cached value from register-time", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeClaudeCode, func() (Worker, error) {
+				return &registryTestWorker{}, nil
+			})
+			require.False(t, CanResumeTerminated(TypeClaudeCode))
+		})
+	})
+
+	t.Run("returns false for unknown type", func(t *testing.T) {
+		withRegistry(t, func() {
+			require.False(t, CanResumeTerminated(WorkerType("nonexistent")))
+		})
+	})
+
+	t.Run("returns true when worker supports it", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeACP, func() (Worker, error) {
+				return &resumingTestWorker{}, nil
+			})
+			require.True(t, CanResumeTerminated(TypeACP))
+		})
+	})
+
+	t.Run("builder returning nil worker caches false", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeOpenCodeSrv, func() (Worker, error) { return nil, nil })
+			// nil worker is cached as false — no fallback allocation.
+			require.False(t, CanResumeTerminated(TypeOpenCodeSrv))
+		})
+	})
+
+	t.Run("builder returning error caches false", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeCodexCLI, func() (Worker, error) { return nil, fmt.Errorf("not ready") })
+			// Builder error cached as false — matches CodexCLI singleton not-yet-ready case.
+			require.False(t, CanResumeTerminated(TypeCodexCLI))
+		})
+	})
+}
+
+type resumingTestWorker struct{ registryTestWorker }
+
+func (*resumingTestWorker) CanResumeTerminated() bool { return true }
+func (*resumingTestWorker) SupportsResume() bool      { return true }
+
 // registryTestWorker is a minimal Worker stub used only in TestNewWorker.
 type registryTestWorker struct{}
 
@@ -132,11 +184,36 @@ func (*registryTestWorker) LastIO() time.Time                                   
 func (*registryTestWorker) ResetContext(context.Context) (ResetResult, error) {
 	return ResetResult{}, nil
 }
-func (*registryTestWorker) Type() WorkerType        { return TypeClaudeCode }
-func (*registryTestWorker) SupportsResume() bool    { return false }
-func (*registryTestWorker) SupportsStreaming() bool { return false }
-func (*registryTestWorker) SupportsTools() bool     { return false }
-func (*registryTestWorker) EnvBlocklist() []string  { return nil }
-func (*registryTestWorker) SessionStoreDir() string { return "" }
-func (*registryTestWorker) MaxTurns() int           { return 0 }
-func (*registryTestWorker) Modalities() []string    { return nil }
+func (*registryTestWorker) Type() WorkerType          { return TypeClaudeCode }
+func (*registryTestWorker) SupportsResume() bool      { return false }
+func (*registryTestWorker) CanResumeTerminated() bool { return false }
+func (*registryTestWorker) SupportsStreaming() bool   { return false }
+func (*registryTestWorker) SupportsTools() bool       { return false }
+func (*registryTestWorker) EnvBlocklist() []string    { return nil }
+func (*registryTestWorker) SessionStoreDir() string   { return "" }
+func (*registryTestWorker) MaxTurns() int             { return 0 }
+func (*registryTestWorker) Modalities() []string      { return nil }
+
+func TestWorkerError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Error returns message", func(t *testing.T) {
+		t.Parallel()
+		e := &WorkerError{Kind: ErrKindUnavailable, Message: "worker dead", Cause: fmt.Errorf("io: closed")}
+		require.Equal(t, "worker dead", e.Error())
+	})
+
+	t.Run("Unwrap returns cause", func(t *testing.T) {
+		t.Parallel()
+		inner := fmt.Errorf("io: closed")
+		e := &WorkerError{Kind: ErrKindUnavailable, Message: "worker dead", Cause: inner}
+		require.ErrorIs(t, e, inner)
+		require.Equal(t, inner, errors.Unwrap(e))
+	})
+
+	t.Run("nil cause unwraps to nil", func(t *testing.T) {
+		t.Parallel()
+		e := &WorkerError{Kind: ErrKindTimeout, Message: "timed out"}
+		require.Nil(t, errors.Unwrap(e))
+	})
+}

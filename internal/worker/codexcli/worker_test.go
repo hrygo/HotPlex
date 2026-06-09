@@ -967,6 +967,30 @@ func TestMapNotificationApprovalMethodNames(t *testing.T) {
 	}
 }
 
+func TestMapNotificationElicitation(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+	params := json.RawMessage(`{"requestId":"el_1","mcpServerName":"fs","message":"Allow file access?","mode":"confirm"}`)
+	envs := m.MapNotification("mcpServer/elicitation/request", params)
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ElicitationRequest, envs[0].Event.Type)
+	el, ok := envs[0].Event.Data.(events.ElicitationRequestData)
+	require.True(t, ok)
+	require.Equal(t, "el_1", el.ID)
+	require.Equal(t, "fs", el.MCPServerName)
+	require.Equal(t, "Allow file access?", el.Message)
+	require.Equal(t, "confirm", el.Mode)
+}
+
+func TestMapNotificationElicitationBadJSON(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-1")
+	envs := m.MapNotification("mcpServer/elicitation/request", json.RawMessage(`{bad`))
+	require.Nil(t, envs)
+}
+
 // ─── Issue #575: Reset kills session + Zombie process fix tests ──────────
 
 // testConfigWithDefaults sets a known-good config for integration tests and
@@ -1571,6 +1595,82 @@ func TestWaitNilCrashSubReturnsImmediately(t *testing.T) {
 }
 
 // ─── SendControlRequest Tests ─────────────────────────────────────────────
+
+func TestWaitAfterReleaseReturnsImmediately(t *testing.T) {
+	t.Parallel()
+
+	// Regression test for #691: Wait() must not block after release() nil'd doneCh.
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		doneCh:     make(chan struct{}),
+		crashSub:   make(chan struct{}),
+	}
+
+	// Simulate the zombie GC path: Terminate -> shutdown -> release().
+	w.release()
+
+	// Wait() must return immediately, not block on nil channel.
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
+func TestWaitBlocksUntilRelease(t *testing.T) {
+	t.Parallel()
+
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		doneCh:     make(chan struct{}),
+		crashSub:   make(chan struct{}),
+	}
+
+	waitDone := make(chan int, 1)
+	go func() {
+		code, _ := w.Wait()
+		waitDone <- code
+	}()
+
+	// Wait should not return before release.
+	require.Eventually(t, func() bool {
+		select {
+		case <-waitDone:
+			return false
+		default:
+			return true
+		}
+	}, 50*time.Millisecond, 5*time.Millisecond, "Wait should block before release")
+
+	// Release unblocks Wait.
+	w.release()
+
+	select {
+	case code := <-waitDone:
+		require.Equal(t, 0, code)
+	case <-time.After(time.Second):
+		t.Fatal("Wait should unblock after release")
+	}
+}
+
+func TestTerminateThenKillNoPanic(t *testing.T) {
+	t.Parallel()
+
+	// Verify double release (Terminate + Kill) does not panic from double-close.
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		doneCh:     make(chan struct{}),
+		crashSub:   make(chan struct{}),
+	}
+
+	require.NotPanics(t, func() {
+		_ = w.Terminate(context.Background())
+		_ = w.Kill()
+	})
+
+	// Wait still works after double release.
+	code, err := w.Wait()
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
 
 func TestSendControlRequestNotStarted(t *testing.T) {
 	t.Parallel()
