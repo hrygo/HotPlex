@@ -444,7 +444,7 @@ func (m *Mapper) mapNotifElicitation(params json.RawMessage) []*events.Envelope 
 		RequestedSchema map[string]any `json:"requestedSchema,omitempty"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
-		slog.Debug("codexcli: unmarshal elicitation params", "err", err, "raw", string(params))
+		slog.Warn("codexcli: unmarshal elicitation params", "err", err, "raw", string(params))
 		return nil
 	}
 

@@ -248,8 +248,12 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 
 // closeAndMarkDone closes doneCh and marks the worker as closed.
 // This ensures Wait() is always unblocked even on error paths (P1 fix).
+// Idempotent: safe to call after release() which closes doneCh without niling it.
 // Caller must hold w.mu.
 func (w *AppServerWorker) closeAndMarkDone() {
+	if w.closed {
+		return
+	}
 	w.closed = true
 	if w.doneCh != nil {
 		close(w.doneCh)
@@ -278,13 +282,14 @@ func (w *AppServerWorker) cleanupOldThread() {
 
 // resetLifecycleState resets lifecycle state for a new thread attempt.
 // After calling this, Terminate/Kill can release the new thread cleanly.
+// Always creates a fresh doneCh: after release(), doneCh may be closed-but-non-nil
+// (release() no longer nils it to fix #691), which would cause Wait() to return
+// immediately instead of blocking for the new thread's lifecycle.
 func (w *AppServerWorker) resetLifecycleState() {
 	w.mu.Lock()
 	w.closed = false
 	w.released = false
-	if w.doneCh == nil {
-		w.doneCh = make(chan struct{})
-	}
+	w.doneCh = make(chan struct{})
 	w.mu.Unlock()
 }
 
