@@ -861,6 +861,11 @@ func (c *StreamingCardController) idConvertOnce(ctx context.Context, messageID s
 
 // isPermanentAPIError reports whether an idConvert error is non-retryable.
 // Parses the "code=%d" pattern from idConvertOnce error messages.
+// NOTE: This is intentionally coupled to idConvertOnce's error format.
+// If that format changes, this function silently treats all errors as
+// retryable — a safe default (extra retries on a permanent error waste
+// ~700ms but cause no harm). A typed error would eliminate this coupling
+// but adds complexity disproportionate to a private helper with one caller.
 // Permanent codes: auth/permission errors (99991400-99991404, 99991409),
 // invalid param (99991419), resource not found (99991448).
 func isPermanentAPIError(err error) bool {
@@ -1025,10 +1030,12 @@ func (c *StreamingCardController) flushCardKitWithRetry(ctx context.Context, con
 			backoff := time.Duration(50<<attempt) * time.Millisecond // 50, 100, 200ms
 			c.log.Debug("feishu: cardkit flush failed, retrying",
 				"attempt", attempt+1, "backoff", backoff, "err", lastErr)
+			timer := time.NewTimer(backoff)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return ctx.Err()
-			case <-time.After(backoff):
+			case <-timer.C:
 			}
 		}
 	}

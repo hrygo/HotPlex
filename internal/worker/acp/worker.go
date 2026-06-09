@@ -1088,7 +1088,8 @@ func isFatalRPCError(err *JSONRPCError) bool {
 	if strings.Contains(msg, "session not found") ||
 		strings.Contains(msg, "session expired") ||
 		strings.Contains(msg, "session does not exist") ||
-		strings.Contains(msg, "invalid session") {
+		strings.Contains(msg, "invalid session id") ||
+		strings.Contains(msg, "invalid session state") {
 		return true
 	}
 	return false
