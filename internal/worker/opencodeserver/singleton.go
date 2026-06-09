@@ -616,6 +616,12 @@ func (s *SingletonProcessManager) sendToSubscriber(sessionID string, env *events
 
 // dispatchToAllSubscribers sends session.error to every active subscriber.
 // Releases busMu before writing to avoid blocking other dispatches.
+//
+// Design trade-off: after releasing busMu, the channel snapshot may race with
+// concurrent closeAllSubscribers (shutdown). sendCritical's recover handles the
+// resulting send-on-closed-channel panic, so delivery during shutdown is best-effort —
+// session.error may be silently dropped. This is acceptable because the shutdown
+// itself signals failure to callers via crashCh.
 func (s *SingletonProcessManager) dispatchToAllSubscribers(props json.RawMessage) {
 	s.busMu.RLock()
 	type item struct {
@@ -717,6 +723,15 @@ func isDroppable(kind events.Kind) bool {
 
 // closeAllSubscribers closes and removes all subscriber channels.
 // This signals forwardBusEvents goroutines to exit (channel closed → !ok).
+// closeAllSubscribers closes and removes all subscriber channels.
+//
+// Concurrency safety: may be called concurrently from up to 3 paths (readGlobalSSE
+// defer, monitorProcess, Shutdown). This is safe because: (1) close(ch) on an
+// already-closed channel panics, but busMu serializes map access so each channel
+// is closed exactly once; (2) a second concurrent call sees an empty map (no-op).
+//
+// Invariant: after the process transitions to stopped, no new subscribers can be
+// added because Acquire rejects stateStopped. This guarantees the map only shrinks.
 func (s *SingletonProcessManager) closeAllSubscribers() {
 	s.busMu.Lock()
 	n := len(s.subscribers)
