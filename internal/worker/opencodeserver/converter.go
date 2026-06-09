@@ -290,6 +290,9 @@ func (c *Converter) handleSessionStatus(sessionID string, props json.RawMessage)
 	switch data.Status.Type {
 	case "idle":
 		stats := c.takeStats(sessionID)
+		if stats == nil {
+			return nil
+		}
 		return []*events.Envelope{
 			events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
 				events.DoneData{Success: true, Stats: stats}),
@@ -311,6 +314,11 @@ func (c *Converter) handleSessionStatus(sessionID string, props json.RawMessage)
 
 func (c *Converter) handleSessionIdle(sessionID string) []*events.Envelope {
 	stats := c.takeStats(sessionID)
+	// If state was already cleared by handleStepFailed or handleSessionError,
+	// a Done was already emitted — skip to prevent duplicate Done events.
+	if stats == nil {
+		return nil
+	}
 	return []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
 			events.DoneData{Success: true, Stats: stats}),

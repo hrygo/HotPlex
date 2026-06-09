@@ -161,11 +161,21 @@ func TestReadGlobalSSE_DispatchesSessionStatus(t *testing.T) {
 		rw.Header().Set("Content-Type", "text/event-stream")
 		flusher := rw.(http.Flusher)
 
-		evt := ocsEvent(t, "session.status", map[string]any{
+		// First: session.next.step.ended with token usage to populate converter stats.
+		evt := ocsEvent(t, "session.next.step.ended", map[string]any{
+			"sessionID": "ses_1",
+			"cost":      0.001,
+			"tokens":    map[string]any{"input": 100, "output": 50},
+		})
+		fmt.Fprint(rw, evt)
+		flusher.Flush()
+
+		// Second: session.status(idle) — with stats present, emits Done.
+		evt2 := ocsEvent(t, "session.status", map[string]any{
 			"sessionID": "ses_1",
 			"status":    map[string]any{"type": "idle"},
 		})
-		fmt.Fprint(rw, evt)
+		fmt.Fprint(rw, evt2)
 		flusher.Flush()
 		<-r.Context().Done()
 	})
@@ -228,10 +238,19 @@ func TestReadGlobalSSE_DispatchesSessionIdle(t *testing.T) {
 		rw.Header().Set("Content-Type", "text/event-stream")
 		flusher := rw.(http.Flusher)
 
-		evt := ocsEvent(t, "session.idle", map[string]any{
+		// Send step.ended first to accumulate state, then session.idle to emit Done.
+		evt1 := ocsEvent(t, "session.next.step.ended", map[string]any{
+			"sessionID": "ses_1",
+			"cost":      0.01,
+			"tokens":    map[string]any{"input": 100, "output": 50},
+		})
+		fmt.Fprint(rw, evt1)
+		flusher.Flush()
+
+		evt2 := ocsEvent(t, "session.idle", map[string]any{
 			"sessionID": "ses_1",
 		})
-		fmt.Fprint(rw, evt)
+		fmt.Fprint(rw, evt2)
 		flusher.Flush()
 		<-r.Context().Done()
 	})
@@ -425,6 +444,7 @@ func TestReadGlobalSSE_MultipleSessions(t *testing.T) {
 func TestReadGlobalSSE_UnsubscribeDuringDispatch(t *testing.T) {
 	t.Parallel()
 
+	secondSent := make(chan struct{})
 	s, _ := newSingletonWithSSE(t, func(rw http.ResponseWriter, r *http.Request) {
 		rw.Header().Set("Content-Type", "text/event-stream")
 		flusher := rw.(http.Flusher)
@@ -438,7 +458,7 @@ func TestReadGlobalSSE_UnsubscribeDuringDispatch(t *testing.T) {
 		fmt.Fprint(rw, evt)
 		flusher.Flush()
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) // server-side pacing between events
 
 		evt2 := ocsEvent(t, "message.part.delta", map[string]any{
 			"sessionID": "ses_1",
@@ -448,6 +468,7 @@ func TestReadGlobalSSE_UnsubscribeDuringDispatch(t *testing.T) {
 		})
 		fmt.Fprint(rw, evt2)
 		flusher.Flush()
+		close(secondSent)
 		<-r.Context().Done()
 	})
 
@@ -463,8 +484,17 @@ func TestReadGlobalSSE_UnsubscribeDuringDispatch(t *testing.T) {
 	// Unsubscribe — second event should be silently dropped (no panic).
 	s.Unsubscribe("ses_1")
 
-	_, ok := <-ch
-	require.False(t, ok, "channel should be closed after unsubscribe")
+	// Wait for server to flush the second event, then verify it never
+	// arrives on the unsubscribed channel.
+	<-secondSent
+	require.Never(t, func() bool {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}, 200*time.Millisecond, 20*time.Millisecond, "should not receive events after unsubscribe")
 }
 
 // NOTE: Tests that patch package-level backoff vars must NOT use t.Parallel()
@@ -827,12 +857,15 @@ func TestUnsubscribe_DoubleSafe(t *testing.T) {
 
 	s, _ := newSingletonWithSSE(t, nil)
 
-	ch := s.Subscribe("ses_1")
+	_ = s.Subscribe("ses_1")
 	s.Unsubscribe("ses_1")
-	s.Unsubscribe("ses_1")
+	s.Unsubscribe("ses_1") // should not panic
 
-	_, ok := <-ch
-	require.False(t, ok, "channel should be closed")
+	// Verify subscriber is removed from map.
+	s.busMu.RLock()
+	_, exists := s.subscribers["ses_1"]
+	s.busMu.RUnlock()
+	require.False(t, exists, "subscriber should be removed from map")
 }
 
 // ─── LastInput Tests ──────────────────────────────────────────────────────────

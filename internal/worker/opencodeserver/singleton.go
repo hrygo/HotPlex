@@ -163,13 +163,20 @@ func (s *SingletonProcessManager) Subscribe(sessionID string) chan *events.Envel
 }
 
 // Unsubscribe removes the subscription for the given session ID.
+//
+// Precondition: the caller MUST cancel the SSE context (sseCancel) before
+// calling Unsubscribe to ensure the forwardBusEvents goroutine has exited.
+// Failure to do so may leave a goroutine that sends to the removed channel
+// (handled gracefully by trySendEnvelope's recover, but still a leak).
 func (s *SingletonProcessManager) Unsubscribe(sessionID string) {
 	s.busMu.Lock()
 	defer s.busMu.Unlock()
 
-	if ch, ok := s.subscribers[sessionID]; ok {
+	if _, ok := s.subscribers[sessionID]; ok {
+		// Do NOT close the channel here — sendCritical/sendToSubscriber may
+		// still hold a reference and write to it concurrently. The forward-
+		// BusEvents goroutine exits via ctx cancellation or closeAllSubscribers.
 		delete(s.subscribers, sessionID)
-		close(ch)
 		s.log.Debug("opencode-server-singleton: unsubscribed", "session_id", sessionID)
 	}
 }
@@ -177,7 +184,6 @@ func (s *SingletonProcessManager) Unsubscribe(sessionID string) {
 // Shutdown forcefully terminates the process regardless of reference count.
 func (s *SingletonProcessManager) Shutdown(ctx context.Context) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.state = stateStopped
 
@@ -197,13 +203,11 @@ func (s *SingletonProcessManager) Shutdown(ctx context.Context) {
 		s.refs = 0
 	}
 
-	// Close all active subscriptions.
-	s.busMu.Lock()
-	for id, ch := range s.subscribers {
-		close(ch)
-		delete(s.subscribers, id)
-	}
-	s.busMu.Unlock()
+	s.mu.Unlock()
+
+	// Close all active subscriptions outside s.mu to avoid lock nesting
+	// with busMu (consistent with monitorProcess pattern).
+	s.closeAllSubscribers()
 }
 
 // IsRunning reports whether the singleton process is currently running.
@@ -409,12 +413,7 @@ func (s *SingletonProcessManager) monitorProcess() {
 
 	// Close all subscriber channels outside s.mu to avoid lock nesting with busMu.
 	if wasRunning {
-		s.busMu.Lock()
-		for id, ch := range s.subscribers {
-			close(ch)
-			delete(s.subscribers, id)
-		}
-		s.busMu.Unlock()
+		s.closeAllSubscribers()
 	}
 }
 
@@ -451,6 +450,11 @@ func (s *SingletonProcessManager) readGlobalSSE(ctx context.Context) {
 		if r := recover(); r != nil {
 			s.log.Error("opencode-server-singleton: readGlobalSSE panic", "panic", r, "stack", string(debug.Stack()))
 		}
+		// Close all subscriber channels when the SSE reader exits for any reason.
+		// For ctx.Done() (intentional shutdown), monitorProcess or Shutdown handles
+		// this — but we do it here too as a safety net. For unexpected exits (max
+		// reconnects, fatal errors), this is the ONLY notification subscribers get.
+		s.closeAllSubscribers()
 	}()
 
 	s.mu.Lock()
@@ -583,6 +587,9 @@ func (s *SingletonProcessManager) dispatchOCSEvent(data []byte) {
 }
 
 // sendToSubscriber delivers a single envelope to the session's channel.
+// Critical events (Done, Error, State, PermissionRequest, etc.) use a blocking
+// write with 5s timeout to guarantee delivery. Droppable events (MessageDelta,
+// Raw) use non-blocking sends to avoid backpressure propagation.
 func (s *SingletonProcessManager) sendToSubscriber(sessionID string, env *events.Envelope) {
 	s.busMu.RLock()
 	ch, ok := s.subscribers[sessionID]
@@ -590,30 +597,87 @@ func (s *SingletonProcessManager) sendToSubscriber(sessionID string, env *events
 		s.busMu.RUnlock()
 		return
 	}
-	select {
-	case ch <- env:
-	default:
-		s.log.Warn("opencode-server-singleton: session channel full, dropping event",
-			"session_id", sessionID, "type", env.Event.Type)
+
+	if isDroppable(env.Event.Type) {
+		select {
+		case ch <- env:
+		default:
+			s.log.Warn("opencode-server-singleton: session channel full, dropping droppable event",
+				"session_id", sessionID, "type", env.Event.Type)
+		}
+		s.busMu.RUnlock()
+		return
 	}
+
+	// Critical event: block with timeout to guarantee delivery.
 	s.busMu.RUnlock()
+	s.sendCritical(ch, env, sessionID)
 }
 
 // dispatchToAllSubscribers sends session.error to every active subscriber.
+// Releases busMu before writing to avoid blocking other dispatches.
+//
+// Design trade-off: after releasing busMu, the channel snapshot may race with
+// concurrent closeAllSubscribers (shutdown). sendCritical's recover handles the
+// resulting send-on-closed-channel panic, so delivery during shutdown is best-effort —
+// session.error may be silently dropped. This is acceptable because the shutdown
+// itself signals failure to callers via crashCh.
 func (s *SingletonProcessManager) dispatchToAllSubscribers(props json.RawMessage) {
 	s.busMu.RLock()
-	defer s.busMu.RUnlock()
+	type item struct {
+		ch        chan *events.Envelope
+		sessionID string
+		envs      []*events.Envelope
+	}
+	var items []item
 	for sessionID := range s.subscribers {
 		envs := s.converter.Convert(sessionID, ocsSessionError, props)
-		ch := s.subscribers[sessionID]
-		for _, env := range envs {
-			select {
-			case ch <- env:
-			default:
-				s.log.Warn("opencode-server-singleton: session channel full, dropping error event",
-					"session_id", sessionID)
-			}
+		items = append(items, item{ch: s.subscribers[sessionID], sessionID: sessionID, envs: envs})
+	}
+	s.busMu.RUnlock()
+
+	for _, it := range items {
+		for _, env := range it.envs {
+			s.sendCritical(it.ch, env, it.sessionID)
 		}
+	}
+}
+
+// trySendEnvelope attempts to send env to ch, recovering from send-on-closed-channel
+// panics (TOCTOU race with conn/subscriber Close between the closed check and send).
+// If block is true, waits up to timeout for the channel to become available.
+// Returns true if the event was sent successfully.
+func trySendEnvelope(ch chan *events.Envelope, env *events.Envelope, block bool, timeout time.Duration) (sent bool) {
+	defer func() {
+		if recover() != nil {
+			sent = false
+		}
+	}()
+	if block {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case ch <- env:
+			return true
+		case <-timer.C:
+			return false
+		}
+	}
+	select {
+	case ch <- env:
+		return true
+	default:
+		return false
+	}
+}
+
+// sendCritical performs a blocking write with timeout to guarantee critical
+// event delivery. Delegates to trySendEnvelope for TOCTOU-safe send.
+// Must NOT be called while holding busMu — the write may block.
+func (s *SingletonProcessManager) sendCritical(ch chan *events.Envelope, env *events.Envelope, sessionID string) {
+	if !trySendEnvelope(ch, env, true, criticalEventSendTimeout) {
+		s.log.Debug("opencode-server-singleton: critical event send failed (channel closed or stuck)",
+			"session_id", sessionID, "type", env.Event.Type)
 	}
 }
 
@@ -638,6 +702,47 @@ var (
 	sseBackoffInitial = 100 * time.Millisecond
 	sseBackoffMax     = 10 * time.Second
 )
+
+// criticalEventSendTimeout is the maximum time to wait when sending a
+// critical event (Done/Error/State) to a subscriber channel.
+// Matches ACP safeSend and CodexCLI criticalEventSendTimeout.
+const criticalEventSendTimeout = 5 * time.Second
+
+// isDroppable reports whether an event kind can be silently dropped under
+// backpressure (same logic as gateway/hub.go isDroppable).
+//
+// Reasoning is intentionally NOT droppable: chain-of-thought content is
+// user-visible and may be the only output for reasoning-heavy tasks.
+// Dropping it would silently lose substantive work product. If sustained
+// backpressure makes Reasoning delta delivery a bottleneck, the fix is
+// to coalesce deltas server-side (like MessageDelta aggregation), not to
+// drop them.
+func isDroppable(kind events.Kind) bool {
+	return kind == events.MessageDelta || kind == events.Raw
+}
+
+// closeAllSubscribers closes and removes all subscriber channels.
+// This signals forwardBusEvents goroutines to exit (channel closed → !ok).
+//
+// Concurrency safety: may be called concurrently from up to 3 paths (readGlobalSSE
+// defer, monitorProcess, Shutdown). This is safe because: (1) close(ch) on an
+// already-closed channel panics, but busMu serializes map access so each channel
+// is closed exactly once; (2) a second concurrent call sees an empty map (no-op).
+//
+// Invariant: after the process transitions to stopped, no new subscribers can be
+// added because Acquire rejects stateStopped. This guarantees the map only shrinks.
+func (s *SingletonProcessManager) closeAllSubscribers() {
+	s.busMu.Lock()
+	n := len(s.subscribers)
+	for id, ch := range s.subscribers {
+		close(ch)
+		delete(s.subscribers, id)
+	}
+	s.busMu.Unlock()
+	if n > 0 {
+		s.log.Warn("opencode-server-singleton: closed all subscriber channels", "count", n)
+	}
+}
 
 // --- package-level singleton ---
 

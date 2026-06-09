@@ -375,15 +375,20 @@ func (w *Worker) Wait() (int, error) {
 	}
 
 	// Ensure release happens if Terminate/Kill was never called (defensive).
-	w.releaseOnce.Do(func() {
-		w.release()
-	})
+	// Call release() directly — it uses releaseOnce internally for the
+	// singleton.Release() call, so this is safe even if already released.
+	w.release()
 
 	// Non-blocking crash check: if the process crashed, crashSub is already
 	// closed. If not, we return immediately — no need to block 2 seconds.
+	// If a subsequent Acquire already recovered the singleton (new process),
+	// IsRunning() returns true and we report a clean exit.
 	select {
 	case <-w.crashSub:
-		return 1, nil // process crashed
+		if w.singleton.IsRunning() {
+			return 0, nil // recovered by subsequent Acquire
+		}
+		return 1, nil // process crashed, not yet recovered
 	default:
 		return 0, nil
 	}
@@ -754,7 +759,14 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 			ch := w.httpConn
 			var recvCh chan *events.Envelope
 			if ch != nil {
+				ch.mu.Lock()
+				if ch.closed {
+					ch.mu.Unlock()
+					w.Mu.Unlock()
+					return
+				}
 				recvCh = ch.recvCh
+				ch.mu.Unlock()
 			}
 			w.Mu.Unlock()
 
@@ -762,11 +774,22 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 				return
 			}
 
-			select {
-			case recvCh <- env:
-			default:
-				w.Log.Warn("opencodeserver: recv channel full, dropping message",
+			if isDroppable(env.Event.Type) {
+				if !trySendEnvelope(recvCh, env, false, 0) {
+					w.Log.Warn("opencodeserver: recv channel full or closed, dropping droppable event",
+						"event_type", env.Event.Type, "event_id", env.ID)
+				}
+				continue
+			}
+
+			// Critical event: block with timeout to guarantee delivery.
+			// trySendEnvelope recovers from send-on-closed-channel panics
+			// (TOCTOU race: conn.Close can close recvCh between our closed
+			// check above and the actual send).
+			if !trySendEnvelope(recvCh, env, true, criticalEventSendTimeout) {
+				w.Log.Warn("opencodeserver: critical event send failed (channel closed or stuck)",
 					"event_type", env.Event.Type, "event_id", env.ID)
+				return
 			}
 		}
 	}

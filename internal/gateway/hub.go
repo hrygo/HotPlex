@@ -35,6 +35,8 @@ func isReadTimeout(err error) bool {
 }
 
 // isDroppable reports whether an event kind can be dropped under backpressure.
+// Note: Reasoning is NOT droppable — see opencodeserver.singleton.isDroppable for rationale.
+// Keep in sync with: opencodeserver.singleton.isDroppable, acp.conn.isDroppable.
 func isDroppable(kind events.Kind) bool {
 	return kind == events.MessageDelta || kind == events.Raw
 }
