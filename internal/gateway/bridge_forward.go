@@ -115,8 +115,8 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		acc.Generation.Store(gen)
 	}
 	if acc.TurnCount.Load() == 0 && b.turnsQuerier != nil {
-		// shutdownCtx — same rationale as LatestGeneration above.
-		tnCtx, tnCancel := context.WithTimeout(b.shutdownCtx, 3*time.Second)
+		// bgCtx() — same rationale as LatestGeneration above.
+		tnCtx, tnCancel := context.WithTimeout(b.bgCtx(), 3*time.Second)
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()
 		if err != nil {
