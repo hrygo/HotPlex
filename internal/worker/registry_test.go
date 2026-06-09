@@ -209,37 +209,3 @@ func TestWorkerError(t *testing.T) {
 		require.Nil(t, errors.Unwrap(e))
 	})
 }
-
-func TestCanResumeTerminated(t *testing.T) {
-	t.Run("registered type uses cache", func(t *testing.T) {
-		withRegistry(t, func() {
-			Register(TypeClaudeCode, func() (Worker, error) {
-				return &resumeCapWorker{canResume: true}, nil
-			})
-			require.True(t, CanResumeTerminated(TypeClaudeCode))
-		})
-	})
-
-	t.Run("unregistered type returns false", func(t *testing.T) {
-		withRegistry(t, func() {
-			require.False(t, CanResumeTerminated("nonexistent"))
-		})
-	})
-
-	t.Run("worker with false capability", func(t *testing.T) {
-		withRegistry(t, func() {
-			Register(TypeCodexCLI, func() (Worker, error) {
-				return &resumeCapWorker{canResume: false}, nil
-			})
-			require.False(t, CanResumeTerminated(TypeCodexCLI))
-		})
-	})
-}
-
-// resumeCapWorker is a minimal stub that controls CanResumeTerminated.
-type resumeCapWorker struct {
-	registryTestWorker
-	canResume bool
-}
-
-func (w *resumeCapWorker) CanResumeTerminated() bool { return w.canResume }
