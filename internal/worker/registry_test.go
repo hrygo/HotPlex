@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -183,3 +185,61 @@ func (*registryTestWorker) EnvBlocklist() []string    { return nil }
 func (*registryTestWorker) SessionStoreDir() string   { return "" }
 func (*registryTestWorker) MaxTurns() int             { return 0 }
 func (*registryTestWorker) Modalities() []string      { return nil }
+
+func TestWorkerError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Error returns message", func(t *testing.T) {
+		t.Parallel()
+		e := &WorkerError{Kind: ErrKindUnavailable, Message: "worker dead", Cause: fmt.Errorf("io: closed")}
+		require.Equal(t, "worker dead", e.Error())
+	})
+
+	t.Run("Unwrap returns cause", func(t *testing.T) {
+		t.Parallel()
+		inner := fmt.Errorf("io: closed")
+		e := &WorkerError{Kind: ErrKindUnavailable, Message: "worker dead", Cause: inner}
+		require.ErrorIs(t, e, inner)
+		require.Equal(t, inner, errors.Unwrap(e))
+	})
+
+	t.Run("nil cause unwraps to nil", func(t *testing.T) {
+		t.Parallel()
+		e := &WorkerError{Kind: ErrKindTimeout, Message: "timed out"}
+		require.Nil(t, errors.Unwrap(e))
+	})
+}
+
+func TestCanResumeTerminated(t *testing.T) {
+	t.Run("registered type uses cache", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeClaudeCode, func() (Worker, error) {
+				return &resumeCapWorker{canResume: true}, nil
+			})
+			require.True(t, CanResumeTerminated(TypeClaudeCode))
+		})
+	})
+
+	t.Run("unregistered type returns false", func(t *testing.T) {
+		withRegistry(t, func() {
+			require.False(t, CanResumeTerminated("nonexistent"))
+		})
+	})
+
+	t.Run("worker with false capability", func(t *testing.T) {
+		withRegistry(t, func() {
+			Register(TypeCodexCLI, func() (Worker, error) {
+				return &resumeCapWorker{canResume: false}, nil
+			})
+			require.False(t, CanResumeTerminated(TypeCodexCLI))
+		})
+	})
+}
+
+// resumeCapWorker is a minimal stub that controls CanResumeTerminated.
+type resumeCapWorker struct {
+	registryTestWorker
+	canResume bool
+}
+
+func (w *resumeCapWorker) CanResumeTerminated() bool { return w.canResume }
