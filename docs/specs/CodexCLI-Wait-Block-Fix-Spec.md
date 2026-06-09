@@ -130,7 +130,13 @@ func (w *AppServerWorker) Wait() (int, error) {
 
 ### 3.3 Fix 3: Resume 死代码路径（代码质量）
 
-**文件**: `internal/worker/codexcli/worker.go`
+**文件**: `internal/gateway/bridge.go`（实际实现位置）
+
+> **Note**: 原始 spec 建议在 `resumeWithOpts` 或 `createAndLaunchWorker` 中跳过 resume。
+> 实际实现位于 `StartPlatformSession` 的 `StateTerminated` 分支（bridge.go:404-412），
+> 通过查询 `worker.CanResumeTerminated(wt)` capability 接口跳过无效 resume。
+> CodexCLI 的 `CanResumeTerminated()` 返回 `false`，因为 singleton 进程在 release 时被终止，
+> thread context 已不可恢复。
 
 当前 bridge resume 流程对 CodexCLI 必定失败：
 1. `resumeWithOpts()` 创建新的 `AppServerWorker`（state=`appStateNew`）
@@ -139,7 +145,7 @@ func (w *AppServerWorker) Wait() (int, error) {
 
 这是正确行为（CodexCLI 不支持跨进程 resume），但每次 resume 都浪费一次 acquire + config load + detach/attach 周期。
 
-**改进**: 在 `resumeWithOpts` 或 `createAndLaunchWorker` 中，对 `codex_cli` worker type 跳过 resume 尝试，直接走 `Start()`。
+**改进**: 通过 `worker.Capabilities.CanResumeTerminated()` 接口，在 bridge 层跳过不可恢复的 terminated session resume，直接走 `startOrResumeOnInUse`。新增 worker 类型只需实现 `CanResumeTerminated()` 返回正确值，无需修改 bridge。
 
 ---
 

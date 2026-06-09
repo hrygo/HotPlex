@@ -51,3 +51,14 @@ func RegisteredTypes() []WorkerType {
 	}
 	return types
 }
+
+// CanResumeTerminated returns true if the given worker type supports
+// resuming sessions in TERMINATED state (orphan recovery).
+// It creates a temporary worker instance to query capabilities.
+func CanResumeTerminated(t WorkerType) bool {
+	w, err := NewWorker(t)
+	if err != nil {
+		return false
+	}
+	return w.CanResumeTerminated()
+}

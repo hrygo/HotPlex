@@ -402,11 +402,11 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, params worker.Session
 		// This restores pre-fe8dae54 behavior where all orphan sessions
 		// attempted resume regardless of state. Fixes #682.
 		if si.State == events.StateTerminated {
-			// CodexCLI terminated sessions always fail resume because the
-			// app-server singleton process was killed on release. Skip the
-			// dead path to avoid double agent-config load and WARN spam.
-			if si.WorkerType == worker.TypeCodexCLI {
-				b.log.Info("bridge: skipping resume for terminated codex_cli session", "session_id", sessionID)
+			// Some workers (e.g. CodexCLI with singleton process) cannot
+			// resume terminated sessions. Query capability instead of type switch.
+			if !worker.CanResumeTerminated(worker.WorkerType(workerType)) {
+				b.log.Info("bridge: skipping resume for terminated session, worker cannot resume terminated state",
+					"session_id", sessionID, "worker_type", workerType)
 				injectSandbox(si.PlatformKey, sandbox)
 				return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, botName, injectExclude...)
 			}

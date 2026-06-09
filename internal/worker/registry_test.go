@@ -132,11 +132,12 @@ func (*registryTestWorker) LastIO() time.Time                                   
 func (*registryTestWorker) ResetContext(context.Context) (ResetResult, error) {
 	return ResetResult{}, nil
 }
-func (*registryTestWorker) Type() WorkerType        { return TypeClaudeCode }
-func (*registryTestWorker) SupportsResume() bool    { return false }
-func (*registryTestWorker) SupportsStreaming() bool { return false }
-func (*registryTestWorker) SupportsTools() bool     { return false }
-func (*registryTestWorker) EnvBlocklist() []string  { return nil }
-func (*registryTestWorker) SessionStoreDir() string { return "" }
-func (*registryTestWorker) MaxTurns() int           { return 0 }
-func (*registryTestWorker) Modalities() []string    { return nil }
+func (*registryTestWorker) Type() WorkerType          { return TypeClaudeCode }
+func (*registryTestWorker) SupportsResume() bool      { return false }
+func (*registryTestWorker) CanResumeTerminated() bool { return false }
+func (*registryTestWorker) SupportsStreaming() bool   { return false }
+func (*registryTestWorker) SupportsTools() bool       { return false }
+func (*registryTestWorker) EnvBlocklist() []string    { return nil }
+func (*registryTestWorker) SessionStoreDir() string   { return "" }
+func (*registryTestWorker) MaxTurns() int             { return 0 }
+func (*registryTestWorker) Modalities() []string      { return nil }

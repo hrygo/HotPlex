@@ -151,13 +151,14 @@ func New() *Worker {
 
 func (w *Worker) Type() worker.WorkerType { return worker.TypeClaudeCode }
 
-func (w *Worker) SupportsResume() bool    { return true }
-func (w *Worker) SupportsStreaming() bool { return true }
-func (w *Worker) SupportsTools() bool     { return true }
-func (w *Worker) EnvBlocklist() []string  { return claudeCodeEnvBlocklist }
-func (w *Worker) SessionStoreDir() string { return defaultSessionStoreDir }
-func (w *Worker) MaxTurns() int           { return 0 }
-func (w *Worker) Modalities() []string    { return []string{"text", "code", "image"} }
+func (w *Worker) SupportsResume() bool      { return true }
+func (w *Worker) CanResumeTerminated() bool { return true }
+func (w *Worker) SupportsStreaming() bool   { return true }
+func (w *Worker) SupportsTools() bool       { return true }
+func (w *Worker) EnvBlocklist() []string    { return claudeCodeEnvBlocklist }
+func (w *Worker) SessionStoreDir() string   { return defaultSessionStoreDir }
+func (w *Worker) MaxTurns() int             { return 0 }
+func (w *Worker) Modalities() []string      { return []string{"text", "code", "image"} }
 
 // ─── Worker Lifecycle ─────────────────────────────────────────────────────────
 

@@ -202,14 +202,15 @@ type mockWorkerForHandler struct {
 	mock.Mock
 }
 
-func (m *mockWorkerForHandler) Type() worker.WorkerType { return worker.TypeClaudeCode }
-func (m *mockWorkerForHandler) SupportsResume() bool    { return true }
-func (m *mockWorkerForHandler) SupportsStreaming() bool { return true }
-func (m *mockWorkerForHandler) SupportsTools() bool     { return true }
-func (m *mockWorkerForHandler) EnvBlocklist() []string  { return nil }
-func (m *mockWorkerForHandler) SessionStoreDir() string { return "" }
-func (m *mockWorkerForHandler) MaxTurns() int           { return 0 }
-func (m *mockWorkerForHandler) Modalities() []string    { return []string{"text"} }
+func (m *mockWorkerForHandler) Type() worker.WorkerType   { return worker.TypeClaudeCode }
+func (m *mockWorkerForHandler) SupportsResume() bool      { return true }
+func (m *mockWorkerForHandler) CanResumeTerminated() bool { return true }
+func (m *mockWorkerForHandler) SupportsStreaming() bool   { return true }
+func (m *mockWorkerForHandler) SupportsTools() bool       { return true }
+func (m *mockWorkerForHandler) EnvBlocklist() []string    { return nil }
+func (m *mockWorkerForHandler) SessionStoreDir() string   { return "" }
+func (m *mockWorkerForHandler) MaxTurns() int             { return 0 }
+func (m *mockWorkerForHandler) Modalities() []string      { return []string{"text"} }
 
 func (m *mockWorkerForHandler) Start(ctx context.Context, session worker.SessionInfo) error {
 	args := m.Called(ctx, session)

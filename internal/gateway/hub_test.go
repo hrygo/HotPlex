@@ -995,6 +995,7 @@ type fakeWorker struct {
 
 func (f *fakeWorker) Type() worker.WorkerType                             { return f.workerType }
 func (f *fakeWorker) SupportsResume() bool                                { return true }
+func (f *fakeWorker) CanResumeTerminated() bool                           { return true }
 func (f *fakeWorker) SupportsStreaming() bool                             { return true }
 func (f *fakeWorker) SupportsTools() bool                                 { return true }
 func (f *fakeWorker) EnvBlocklist() []string                              { return nil }

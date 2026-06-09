@@ -195,12 +195,13 @@ func newSendClient() *http.Client {
 
 // ─── Capabilities ─────────────────────────────────────────────────────────────
 
-func (w *Worker) Type() worker.WorkerType { return worker.TypeOpenCodeSrv }
-func (w *Worker) SupportsResume() bool    { return true }
-func (w *Worker) SupportsStreaming() bool { return true }
-func (w *Worker) SupportsTools() bool     { return true }
-func (w *Worker) EnvBlocklist() []string  { return openCodeSrvEnvBlocklist }
-func (w *Worker) SessionStoreDir() string { return "" }
+func (w *Worker) Type() worker.WorkerType   { return worker.TypeOpenCodeSrv }
+func (w *Worker) SupportsResume() bool      { return true }
+func (w *Worker) CanResumeTerminated() bool { return true }
+func (w *Worker) SupportsStreaming() bool   { return true }
+func (w *Worker) SupportsTools() bool       { return true }
+func (w *Worker) EnvBlocklist() []string    { return openCodeSrvEnvBlocklist }
+func (w *Worker) SessionStoreDir() string   { return "" }
 
 // MaxTurns returns 0 (unlimited).
 // B3-1 note: OCS does not support dynamic per-session steps limits.

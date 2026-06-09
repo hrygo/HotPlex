@@ -49,6 +49,12 @@ type Capabilities interface {
 	// SupportsResume returns true if the worker can resume a previous session.
 	SupportsResume() bool
 
+	// CanResumeTerminated returns true if the worker can resume a session
+	// that is in TERMINATED state (orphan recovery). Workers using shared
+	// singleton processes (e.g. CodexCLI) return false because the singleton
+	// process was killed on release and the thread context is gone.
+	CanResumeTerminated() bool
+
 	// SupportsStreaming returns true if the worker emits streaming (delta) events.
 	SupportsStreaming() bool
 

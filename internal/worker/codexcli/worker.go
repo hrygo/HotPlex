@@ -144,14 +144,15 @@ func (c *appConn) Close() error {
 func (c *appConn) UserID() string    { return c.userID }
 func (c *appConn) SessionID() string { return c.sessionID }
 
-func (w *AppServerWorker) Type() worker.WorkerType { return worker.TypeCodexCLI }
-func (w *AppServerWorker) SupportsResume() bool    { return true }
-func (w *AppServerWorker) SupportsStreaming() bool { return true }
-func (w *AppServerWorker) SupportsTools() bool     { return true }
-func (w *AppServerWorker) EnvBlocklist() []string  { return EnvBlocklist }
-func (w *AppServerWorker) SessionStoreDir() string { return "" }
-func (w *AppServerWorker) MaxTurns() int           { return 0 }
-func (w *AppServerWorker) Modalities() []string    { return []string{"text", "code", "image"} }
+func (w *AppServerWorker) Type() worker.WorkerType   { return worker.TypeCodexCLI }
+func (w *AppServerWorker) SupportsResume() bool      { return true }
+func (w *AppServerWorker) CanResumeTerminated() bool { return false }
+func (w *AppServerWorker) SupportsStreaming() bool   { return true }
+func (w *AppServerWorker) SupportsTools() bool       { return true }
+func (w *AppServerWorker) EnvBlocklist() []string    { return EnvBlocklist }
+func (w *AppServerWorker) SessionStoreDir() string   { return "" }
+func (w *AppServerWorker) MaxTurns() int             { return 0 }
+func (w *AppServerWorker) Modalities() []string      { return []string{"text", "code", "image"} }
 
 func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
 	if w.commands == nil {
