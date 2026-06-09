@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.26.3] - 2026-06-09
+
+### Summary
+
+v1.26.3 是一次 patch 版本更新，聚焦于 **CodexCLI 和 OCS Worker 稳定性**。修复 CodexCLI `Wait()` 永久阻塞导致 goroutine 泄漏、elicitation 请求被静默丢弃、terminated session 无效 resume 三个缺陷；修复 OCS Worker SSE 读取器静默死亡导致会话挂起、关键事件被丢弃等六项并发安全缺陷。同时新增 `CanResumeTerminated()` 能力接口，统一了 Worker 类型级别的 terminated session 恢复策略。
+
+### Changed
+
+- **Worker**: Add `CanResumeTerminated()` capability to Worker interface — CodexCLI returns `false` (singleton killed on release), all others return `true`. Bridge uses this instead of hard-coded type switch to skip resume for terminated sessions. (#692)
+- **Worker**: Register-time capability cache (`capCache`) in registry — `CanResumeTerminated()` queries cached value instead of creating temporary worker instances.
+- **Infrastructure**: DRY extractions across messaging STT/TTS PID tracking, worker base lock pattern, session store Upsert JSON helpers, and admin API key store CRUD. (#695)
+
+### Fixed
+
+- **Worker**: CodexCLI `Wait()` permanent block — `release()` niled `doneCh`, causing `Wait()` to receive from nil channel forever. Fix: atomic capture under mutex, `release()` closes but does not nil. (#691)
+- **Worker**: CodexCLI `mcpServer/elicitation/request` silently dropped — mapper had no case for this notification type, causing Codex agent permission prompts to hang indefinitely. (#698)
+- **Worker**: CodexCLI terminated session dead resume path — resume always failed (singleton killed), producing WARN spam and double config load before falling back to fresh start. (#699)
+- **Worker**: OCS SSE reader silent death — fatal errors now close all subscriber channels via `closeAllSubscribers()`, unblocking `forwardEvents` goroutines. (#697)
+- **Worker**: OCS critical events silently dropped — two-hop pipeline (singleton → worker) now classifies events as droppable/critical; critical events use blocking send with 5s timeout. (#697)
+- **Worker**: OCS `crashSub` false positive — `Wait()` checks `IsRunning()` when crashSub fires; returns 0 if singleton recovered. (#697)
+- **Worker**: OCS channel panic race — `forwardBusEvents` checks `conn.closed` under mutex before writing to recvCh. (#697)
+- **Worker**: OCS duplicate Done events — `handleSessionIdle` returns nil when stats already cleared by prior error handler. (#697)
+- **Worker**: OCS `sync.Once` reentrant deadlock — `Wait()` called `release()` via `releaseOnce.Do`, but `release()` itself called `releaseOnce.Do`. Fixed by calling `release()` directly (idempotent). (#697)
+
 ## [1.26.2] - 2026-06-08
 
 ### Summary
