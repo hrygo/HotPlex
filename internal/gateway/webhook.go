@@ -262,8 +262,15 @@ func (h *WebhookHandler) verifySignature(payload []byte, sig string) bool {
 }
 
 // extractPRs returns PR numbers that need review based on event type and action.
-// Only check_suite and check_run events are handled — pull_request events are
-// ignored to prevent triggering before CI completes (issue #662).
+//
+// Two trigger paths:
+//  1. check_suite/check_run (CI-only, preferred): triggers only after CI succeeds,
+//     ensuring review sees final code. This is the primary path for origin PRs.
+//  2. pull_request (fork fallback): triggers on opened/synchronize/reopened for
+//     open, non-draft PRs. This covers fork PRs where check_suite events from
+//     the fork's CI are not forwarded to the origin repo's webhook (GitHub limitation).
+//     Dedup ensures that if a check_suite also arrives (origin PRs), only the first
+//     trigger wins.
 func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 	switch eventType {
 	case "check_suite":
@@ -276,6 +283,16 @@ func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 			return nil
 		}
 		return extractPRNumbers(e.CheckRun.CheckSuite.PullRequests)
+	case "pull_request":
+		// Fork PR fallback: trigger on new commits or new/open PRs.
+		// Skip closed/merged/draft PRs and non-actionable events (labeled, etc.).
+		if e.PullRequest == nil || e.PullRequest.State != "open" || e.PullRequest.Draft {
+			return nil
+		}
+		switch e.Action {
+		case "opened", "synchronize", "reopened":
+			return []int{e.Number}
+		}
 	}
 	return nil
 }
