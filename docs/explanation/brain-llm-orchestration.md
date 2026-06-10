@@ -6,7 +6,7 @@ description: HotPlex Brain 智能中间件：单接口设计、装饰器链、4 
 
 # Brain/LLM 编排层
 
-> HotPlex Brain 是一个可选的 LLM 编排层，为 TTS 摘要等内部功能提供 LLM 能力。当未配置 API Key 时，所有依赖功能优雅降级。
+> HotPlex Brain 是一个可选的 LLM 编排层，为 TTS 摘要、会话历史压缩等内部功能提供 LLM 能力。当未配置 API Key 时，所有依赖功能优雅降级。
 
 ## 核心问题
 
@@ -15,6 +15,7 @@ HotPlex 的核心执行路径是：用户消息 → Gateway → Worker（Claude 
 Brain 层存在的价值是**为 Gateway 内部功能提供 LLM 能力**，而不需要启动完整的 Worker 进程：
 
 - TTS 语音合成前的文本摘要（`tts.SummarizeForTTS`）— 使用 `Brain.ChatWithOptions()` 生成摘要
+- 会话历史压缩（`gateway.HistoryCompressor`）— 当 CodexCLI 恢复会话时，使用 Brain 智能压缩过长的对话历史，保留关键语义
 - 输出脱敏（已提取到 `internal/security/sanitize.go`）— 独立工具，不依赖 Brain
 
 Brain 层充当轻量级 LLM 客户端——低成本、可配置，为 Gateway 内部服务。
@@ -113,7 +114,7 @@ Brain 使用 `sync.RWMutex` 保护全局实例。所有组件的 public 方法�
 
 ## 权衡与限制
 
-1. **Brain 不可用时的功能降级**：当没有配置 API Key 时，Brain 完全禁用。TTS 摘要等功能跳过 Brain 步骤，使用原始文本。功能不受影响，但智能性降低。
+1. **Brain 不可用时的功能降级**：当没有配置 API Key 时，Brain 完全禁用。TTS 摘要跳过 Brain 步骤，使用原始文本；会话历史压缩回退到截断（truncation），丢弃最早的对话轮次。功能不受影响，但智能性降低。
 
 2. **模型路由的有限策略**：只支持 `cost_priority` 和 `latency_priority` 两种策略，不支持基于场景的动态策略切换。
 
@@ -125,6 +126,7 @@ Brain 使用 `sync.RWMutex` 保护全局实例。所有组件的 public 方法�
 - `internal/brain/init.go` — 初始化编排 + enhancedBrainWrapper
 - `internal/brain/config.go` — 8 子配置 + 4 层 API Key 发现
 - `internal/brain/extractor.go` — Worker 配置文件凭证提取
+- `internal/gateway/history_compress.go` — 会话历史压缩（Brain 消费者）
 - `internal/security/sanitize.go` — 独立输出脱敏工具（提取自 Brain）
 
 ---
