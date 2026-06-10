@@ -150,7 +150,12 @@ func TestCompressHistory_SummaryExceedsBudget(t *testing.T) {
 	result := c.CompressHistory(context.Background(), turns, "s1", mockBrainFn(mock))
 
 	require.True(t, result.Compressed)
-	require.True(t, len(result.Turns[0].Content) <= maxHistoryChars)
+	// compressBudget = maxHistoryChars - 4 recent turns × 4000 chars each = 34000.
+	// The summary turn alone must fit within this budget, not the full maxHistoryChars.
+	compressBudget := maxHistoryChars - 4*4000
+	require.True(t, len(result.Turns[0].Content) <= compressBudget,
+		"summary (%d bytes) should fit within compress budget (%d bytes)",
+		len(result.Turns[0].Content), compressBudget)
 }
 
 func TestCompressHistory_BrainReturnsEmpty(t *testing.T) {

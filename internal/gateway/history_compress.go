@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/brain/llm"
@@ -152,7 +153,7 @@ func (c *HistoryCompressor) CompressHistory(
 		"session_id", sessionID,
 		"original_chars", totalChars,
 		"final_chars", finalChars,
-		"compress_ratio", fmt.Sprintf("%.0f%%", float64(1)*100-float64(len(result))/float64(compressChars)*100),
+		"compress_ratio", fmt.Sprintf("%.0f%%", (1.0-float64(len(result))/float64(compressChars))*100),
 		"turns_compressed", len(compressGroup),
 		"turns_kept", len(keepGroup))
 
@@ -271,11 +272,13 @@ func formatTurns(turns []turnWithChars) string {
 }
 
 // truncateResult builds a CompressResult by truncating turns to fit within budget.
-// Takes the most recent turns that fit (drops oldest first).
+// Iterates from newest to oldest so that when the first (oldest) turn alone
+// exceeds the budget, we still return the most recent turns that fit.
 func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult {
 	history := make([]worker.ConversationTurn, 0, len(turns))
 	charsUsed := 0
-	for _, t := range turns {
+	for i := len(turns) - 1; i >= 0; i-- {
+		t := turns[i]
 		if charsUsed+t.chars > maxHistoryChars {
 			break
 		}
@@ -285,6 +288,10 @@ func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult
 			Content: t.content,
 		})
 	}
+	// Reverse to restore chronological order.
+	for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
+		history[i], history[j] = history[j], history[i]
+	}
 	return CompressResult{
 		Turns:         history,
 		Compressed:    false,
@@ -293,37 +300,45 @@ func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult
 	}
 }
 
-// truncateAtBoundary truncates s to at most maxLen characters, breaking at
+// truncateAtBoundary truncates s to at most maxLen bytes, breaking at
 // the last newline within the limit for cleaner output.
+// maxLen is a byte budget (not rune count); we back up to a valid UTF-8
+// boundary to avoid splitting multi-byte characters.
 func truncateAtBoundary(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
+	if len(s) <= maxLen {
 		return s
 	}
-	// Scan backward for a newline.
+	// Scan backward for a newline within the byte budget.
 	for i := maxLen - 1; i >= 0; i-- {
-		if runes[i] == '\n' {
-			return string(runes[:i])
+		if s[i] == '\n' {
+			return s[:i]
 		}
 	}
-	return string(runes[:maxLen])
+	// No newline found; back up to a valid UTF-8 boundary.
+	for maxLen > 0 && !utf8.RuneStart(s[maxLen]) {
+		maxLen--
+	}
+	return s[:maxLen]
 }
 
 // truncateHead truncates the text from the head (dropping oldest content)
-// to fit within maxLen. Scans forward to find the first newline after maxLen
-// to avoid splitting mid-turn.
+// to fit within maxLen bytes. Scans forward to find the first newline after
+// maxLen to avoid splitting mid-turn.
 func truncateHead(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
+	if len(s) <= maxLen {
 		return s
 	}
-	// Scan forward from maxLen for a clean break point.
-	for i := maxLen; i < len(runes) && i < maxLen+200; i++ {
-		if runes[i] == '\n' {
-			return string(runes[i+1:])
+	// Advance to valid UTF-8 boundary first.
+	for maxLen < len(s) && !utf8.RuneStart(s[maxLen]) {
+		maxLen++
+	}
+	// Scan forward for a clean break point.
+	for i := maxLen; i < len(s) && i < maxLen+200; i++ {
+		if s[i] == '\n' {
+			return s[i+1:]
 		}
 	}
-	return string(runes[maxLen:])
+	return s[maxLen:]
 }
 
 // ─── Prompt Templates ─────────────────────────────────────────────────

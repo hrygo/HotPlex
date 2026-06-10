@@ -674,6 +674,12 @@ func (b *Bridge) WaitForwarders(ctx context.Context) {
 
 // defaultBrainFn adapts brain.Global() to the compressorBrain interface.
 // Returns nil if Brain is not configured (graceful degradation).
+//
+// Race note: brain.Global() returns a snapshot that could be replaced by
+// config hot-reload between this call and the actual ChatWithOptions invocation.
+// This is an acceptable tradeoff: the worst case is a stale (but still valid)
+// Brain client being used for one compression cycle — functionally correct,
+// just potentially using an older config or API key.
 func defaultBrainFn() compressorBrain {
 	b := brain.Global()
 	if b == nil {
@@ -748,7 +754,10 @@ func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workD
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
 		} else if len(turns) > 0 {
 			compressor := NewHistoryCompressor(b.log, b.hub)
-			result := compressor.CompressHistory(ctx, turns, sessionID, defaultBrainFn)
+			// Use context.Background() for compression: the Brain call may take
+			// up to 45s and should complete even if the user disconnects, so the
+			// result is available for the next reconnect.
+			result := compressor.CompressHistory(context.Background(), turns, sessionID, defaultBrainFn)
 			info.ConversationHistory = result.Turns
 		}
 	}
