@@ -3,6 +3,7 @@ package codexcli
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -407,9 +408,14 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
 
 // generateBoundaryID returns a cryptographically random 8-char hex string
 // used to make history sentinel markers unique per injection call.
+// Falls back to timestamp-based ID if the system entropy source is unavailable.
 func generateBoundaryID() string {
 	var buf [4]byte
-	_, _ = rand.Read(buf[:])
+	if _, err := rand.Read(buf[:]); err != nil {
+		// Fallback: use timestamp-derived bytes. crypto/rand.Read only fails
+		// in extreme sandbox environments; this preserves uniqueness.
+		binary.LittleEndian.PutUint32(buf[:], uint32(time.Now().UnixNano()))
+	}
 	return hex.EncodeToString(buf[:])
 }
 

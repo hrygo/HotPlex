@@ -65,12 +65,12 @@ worker.Input(content)  ← 用户首条消息
   └→ injectHistoryPrefix(content)
        ↓
      "---
-      CONVERSATION_HISTORY_START
+      CONVERSATION_HISTORY_<hex>_START
       [User]: 现在开始我发 ping，你回复 汪
       [Assistant]: 收到，以后你发 ping 我就回 汪
       [User]: ping
       [Assistant]: 汪
-      CONVERSATION_HISTORY_END
+      CONVERSATION_HISTORY_<hex>_END
       ---
 
       ping"                              ← 实际用户消息
@@ -125,19 +125,14 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
     info := b.buildWorkerInfo(sessionID, userID, workDir, si)
 
     // Populate conversation history from turns table for context recovery.
-    if b.turnsQuerier != nil {
+    // Skip for fresh sessions (CREATED state) — no history to recover.
+    if si.State != events.StateCreated && b.turnsQuerier != nil {
         if turns, err := b.turnsQuerier.QueryTurns(context.Background(), sessionID, 50, 0); err == nil && len(turns) > 0 {
-            history := make([]worker.ConversationTurn, 0, len(turns))
-            for _, t := range turns {
-                if t.Content == "" {
-                    continue
-                }
-                history = append(history, worker.ConversationTurn{
-                    Role:    t.Role,
-                    Content: t.Content,
-                })
-            }
-            info.ConversationHistory = history
+            // Use HistoryCompressor for smart truncation/compression when
+            // history exceeds the character budget (50k chars).
+            compressor := NewHistoryCompressor(b.log, b.hub)
+            result := compressor.CompressHistory(context.Background(), turns, sessionID, defaultBrainFn)
+            info.ConversationHistory = result.Turns
         }
     }
 
@@ -150,8 +145,10 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 **设计决策**:
 - **最近 50 条 turn**（约 25 轮对话），足够覆盖短期间断场景
 - 空内容 turn 跳过
+- **StateCreated 守卫**：跳过新创建 session（无历史可恢复），避免无效 DB 查询
+- **智能压缩**：历史超过 50k×1.2 字符时，通过 Brain LLM 压缩旧 turns 为摘要，保留最近 4 条原样
+- Brain 不可用/失败时降级为截断（与原始行为兼容）
 - 查询失败静默忽略（不阻塞 session 创建）
-- `b.turnsQuerier` 已是 Bridge 字段（bridge.go:45），无需新依赖注入
 
 ### 3.3 CodexCLI 消费历史 — `internal/worker/codexcli/worker.go`
 
@@ -202,6 +199,8 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 ```go
 // injectHistoryPrefix prepends conversation history to the first user input
 // of a new thread. After injection, pendingHistory is cleared.
+// Uses a unique boundary ID (crypto/rand hex) per injection call to avoid
+// collisions with user content containing the sentinel markers.
 func (w *AppServerWorker) injectHistoryPrefix(content string) string {
     w.mu.Lock()
     if w.historyInjected || len(w.pendingHistory) == 0 {
@@ -213,9 +212,10 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
     w.historyInjected = true
     w.mu.Unlock()
 
+    boundaryID := generateBoundaryID() // crypto/rand 8-char hex
     var sb strings.Builder
     sb.WriteString("---
-      CONVERSATION_HISTORY_START\n")
+      CONVERSATION_HISTORY_" + boundaryID + "_START\n")
     sb.WriteString("Below is the conversation history from a previous session. ")
     sb.WriteString("Use it as context to maintain continuity.\n\n")
     for _, turn := range history {
@@ -230,7 +230,7 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
         sb.WriteString(turn.Content)
         sb.WriteString("\n\n")
     }
-    sb.WriteString("CONVERSATION_HISTORY_END
+    sb.WriteString("CONVERSATION_HISTORY_" + boundaryID + "_END
       ---\n\n")
     sb.WriteString(content)
     return sb.String()
