@@ -408,6 +408,14 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 		return nil, dbErr
 	}
 
+	// Preserve WorkerSessionID if it was set concurrently while the lock
+	// was released during Upsert. Without this guard, the candidate copy
+	// (taken before the concurrent update) overwrites both DB and in-memory
+	// with a stale empty value, breaking session resume for ACP workers.
+	if candidate.WorkerSessionID == "" && ms.info.WorkerSessionID != "" {
+		candidate.WorkerSessionID = ms.info.WorkerSessionID
+	}
+
 	// Commit: replace ms.info with the persisted snapshot.
 	ms.info = candidate
 

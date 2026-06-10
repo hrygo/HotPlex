@@ -86,6 +86,12 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, err
 	}
 
+	// Persist WorkerSessionID immediately after worker start so it survives
+	// gateway restart even if no turn events arrive (SIGTERM before first
+	// Prompt). Without this, transitionState races with the deferred persist
+	// in forwardEvents and may overwrite the DB row with an empty value.
+	b.persistWorkerSessionID(w, sid)
+
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()

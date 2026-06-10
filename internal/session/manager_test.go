@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2372,4 +2373,88 @@ func TestGC_EvictsOldTerminatedSessions(t *testing.T) {
 	m.mu.RUnlock()
 	require.False(t, oldOk, "TERMINATED session older than TTL should be evicted from memory")
 	require.True(t, recentOk, "TERMINATED session within TTL should remain in memory")
+}
+
+// ─── transitionState WorkerSessionID preservation tests ─────────────────────────
+
+// raceStore wraps mockStore to inject a concurrent UpdateWorkerSessionID call
+// during the Upsert window (when ms.mu is released), reproducing the race that
+// causes WorkerSessionID loss (#709).
+type raceStore struct {
+	mockStore
+	onUpsert func() // called inside Upsert while ms.mu is released
+}
+
+func (r *raceStore) Upsert(ctx context.Context, info *SessionInfo) error {
+	if r.onUpsert != nil {
+		r.onUpsert()
+	}
+	return r.mockStore.Upsert(ctx, info)
+}
+
+func TestTransition_PreservesWorkerSessionID_OnConcurrentUpdate(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	store := &raceStore{}
+	store.Test(t)
+
+	store.On("Close").Return(nil)
+	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Maybe().Return([]string(nil), nil)
+	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Maybe().Return([]string(nil), nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Maybe().Return(nil)
+	m, err := NewManager(ctx, nil, cfg, nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	// Seed a RUNNING session with empty WorkerSessionID (simulates post-Start
+	// state before persistWorkerSessionID fires).
+	now := time.Now()
+	seed := &SessionInfo{
+		ID:         "sess_race_wsid",
+		UserID:     "user1",
+		WorkerType: worker.TypeACP,
+		State:      events.StateRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	m.mu.Lock()
+	m.sessions["sess_race_wsid"] = &managedSession{info: *seed}
+	m.mu.Unlock()
+
+	// Set up the race: during Transition's Upsert (ms.mu released), a
+	// concurrent goroutine calls UpdateWorkerSessionID.
+	var callCount atomic.Int32
+	started := make(chan struct{})
+	done := make(chan struct{})
+
+	store.onUpsert = func() {
+		if callCount.Add(1) == 1 {
+			// First Upsert call (from Transition). Trigger concurrent update.
+			close(started)
+			<-done // Wait for concurrent update to finish.
+		}
+		// Subsequent Upsert calls (from UpdateWorkerSessionID) pass through.
+	}
+
+	go func() {
+		<-started // Wait for Transition's Upsert to start.
+		_ = m.UpdateWorkerSessionID(ctx, "sess_race_wsid", "hermes_session_abc")
+		close(done)
+	}()
+
+	// The mockStore Upsert needs to be set up for both calls.
+	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+
+	// Transition RUNNING → IDLE. The candidate snapshot has empty WorkerSessionID,
+	// but the concurrent UpdateWorkerSessionID sets it to "hermes_session_abc".
+	err = m.Transition(ctx, "sess_race_wsid", events.StateIdle)
+	require.NoError(t, err)
+
+	// Verify WorkerSessionID is preserved, not overwritten by the stale candidate.
+	info, _ := m.Get(context.Background(), "sess_race_wsid")
+	require.Equal(t, events.StateIdle, info.State, "state should transition to IDLE")
+	require.Equal(t, "hermes_session_abc", info.WorkerSessionID,
+		"WorkerSessionID must be preserved when set concurrently during transition")
 }
