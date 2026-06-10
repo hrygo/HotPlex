@@ -706,7 +706,8 @@ func (w *Worker) GetWorkerSessionID() string {
 2. `readOutput()` 从 `step_start` 事件提取 session ID
 3. `persistWorkerSessionID()` 在 `createAndLaunchWorker()` Worker 启动后立即调用（best-effort optimization），`forwardEvents()` 首个事件时作为 correctness guarantee 再调一次
 4. `sm.UpdateWorkerSessionID()` 持久化到 SQLite `sessions.worker_session_id` 字段
-5. `transitionState` 在锁释放窗口期间保护 WorkerSessionID 不被并发覆盖
+
+**并发保护**：`transitionState` 在锁释放窗口期间保护 WorkerSessionID 不被并发覆盖。
 
 ### 7.3 Resume 支持
 

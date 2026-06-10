@@ -93,7 +93,8 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	//
 	// Synchronous call is acceptable for SQLite (<1ms). For PostgreSQL,
 	// network round-trip adds 1–5ms per call under load; in bulk cron
-	// scenarios (N concurrent triggers), this serializes N DB writes in the
+	// scenarios (N concurrent triggers, typically 1–10, max capped by
+	// PoolManager.MaxPoolSize = 20), this serializes N DB writes in the
 	// caller goroutine. If PG latency becomes a bottleneck, move this into
 	// forwardEvents' first-event branch (which already does a persist) or
 	// make it async via a write-behind queue.

@@ -663,8 +663,8 @@ var (
 	sessionGuardRePersistFailures     metric.Int64Counter
 	sessionGuardRePersistFailuresInit sync.Once
 
-	sessionGuardRePersistStaleWrites     metric.Int64Counter
-	sessionGuardRePersistStaleWritesInit sync.Once
+	sessionGuardRePersistConcurrentOverwrite     metric.Int64Counter
+	sessionGuardRePersistConcurrentOverwriteInit sync.Once
 )
 
 func SessionGuardRePersistFailures() metric.Int64Counter {
@@ -681,18 +681,18 @@ func SessionGuardRePersistFailures() metric.Int64Counter {
 	return sessionGuardRePersistFailures
 }
 
-func SessionGuardRePersistStaleWrites() metric.Int64Counter {
-	sessionGuardRePersistStaleWritesInit.Do(func() {
+func SessionGuardRePersistConcurrentOverwrites() metric.Int64Counter {
+	sessionGuardRePersistConcurrentOverwriteInit.Do(func() {
 		var err error
-		sessionGuardRePersistStaleWrites, err = Meter().Int64Counter(
-			"hotplex.session.guard.repersist.stale_writes",
-			metric.WithDescription("transitionState guard detected stale WorkerSessionID after re-persist lock window"),
+		sessionGuardRePersistConcurrentOverwrite, err = Meter().Int64Counter(
+			"hotplex.session.guard.repersist.concurrent_overwrite",
+			metric.WithDescription("transitionState guard detected concurrent WorkerSessionID overwrite during re-persist lock window"),
 		)
 		if err != nil {
-			warnInstrument("hotplex.session.guard.repersist.stale_writes", err)
+			warnInstrument("hotplex.session.guard.repersist.concurrent_overwrite", err)
 		}
 	})
-	return sessionGuardRePersistStaleWrites
+	return sessionGuardRePersistConcurrentOverwrite
 }
 
 // ─── Retry Instruments ──────────────────────────────────────────────

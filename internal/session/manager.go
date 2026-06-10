@@ -443,7 +443,7 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 		// next persist opportunity restores consistency.
 		if ms.info.WorkerSessionID != candidate.WorkerSessionID {
 			candidate.WorkerSessionID = ms.info.WorkerSessionID
-			observability.SessionGuardRePersistStaleWrites().Add(ctx, 1)
+			observability.SessionGuardRePersistConcurrentOverwrites().Add(ctx, 1)
 		}
 	}
 

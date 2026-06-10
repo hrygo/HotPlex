@@ -210,8 +210,9 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 
 	if fc.firstEvent {
 		// Safety-net: persist again on first event in case the post-launch
-		// persist was lost (e.g., store flush delay). The authoritative call
-		// now lives in createAndLaunchWorker.
+		// persist was incomplete. Scenarios: (1) GetWorkerSessionID() had not
+		// returned a value at launch time; (2) guard re-persist in transitionState
+		// failed; (3) gateway crashed between launch and first event.
 		b.persistWorkerSessionID(opts.ctx, w, sessionID)
 		fc.turnStartTime = time.Now()
 		fc.firstEvent = false
