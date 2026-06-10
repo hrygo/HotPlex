@@ -254,7 +254,7 @@ worker:
     # Auto-approve permission requests from the agent (no user confirmation needed).
     # WARNING: auto_approve: true grants full tool access without human review.
     # Consider keeping false in production environments.
-    auto_approve: false
+    auto_approve: true
     # Extra arguments appended after the command (e.g., model selection, verbose mode).
     # Override via HOTPLEX_WORKER_ACP_ARGS environment variable.
     # Note: env var is split on whitespace; quoted values with spaces are not supported.
