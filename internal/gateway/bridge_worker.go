@@ -90,6 +90,10 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	// gateway restart even if no turn events arrive (SIGTERM before first
 	// Prompt). Without this, transitionState races with the deferred persist
 	// in forwardEvents and may overwrite the DB row with an empty value.
+	// NOTE: synchronous call is acceptable here (SQLite write < 1ms). For
+	// high-concurrency batch scenarios (e.g. bulk cron triggers), consider
+	// moving this into forwardEvents' first-event branch or making it async,
+	// since forwardEvents already has a safety-net persist.
 	b.persistWorkerSessionID(params.ctx, w, sid)
 
 	b.fwdWg.Add(1)

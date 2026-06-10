@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2132,7 +2133,7 @@ func TestManager_UpdateWorkerSessionID(t *testing.T) {
 	require.Equal(t, "ocs_internal_123", info.WorkerSessionID)
 }
 
-func TestManager_UpdateWorkerSessionID_SameValue_NoUpsert(t *testing.T) {
+func TestManager_UpdateWorkerSessionID_SameValue_Idempotent(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2159,7 +2160,7 @@ func TestManager_UpdateWorkerSessionID_SameValue_NoUpsert(t *testing.T) {
 	m.sessions["sess_wsid_same"] = &managedSession{info: *seed}
 	m.mu.Unlock()
 
-	// Same value — Upsert should NOT be called
+	// Same value — fast-path returns early, no Upsert needed.
 	err = m.UpdateWorkerSessionID(ctx, "sess_wsid_same", "existing_id")
 	require.NoError(t, err)
 }
@@ -2465,4 +2466,77 @@ func TestTransition_PreservesWorkerSessionID_OnConcurrentUpdate(t *testing.T) {
 	require.NotNil(t, dbInfo, "at least one Upsert should have occurred")
 	require.Equal(t, "hermes_session_abc", dbInfo.WorkerSessionID,
 		"last DB Upsert must contain the preserved WorkerSessionID")
+}
+
+func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+
+	gs := &guardErrStore{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	gs.Test(t)
+	gs.On("Close").Return(nil)
+	gs.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Maybe().Return([]string(nil), nil)
+	gs.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Maybe().Return([]string(nil), nil)
+	gs.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Maybe().Return(nil)
+	gs.mockStore.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Maybe().Return(nil)
+
+	m, err := NewManager(ctx, nil, cfg, nil, gs)
+	require.NoError(t, err)
+	defer m.Close()
+
+	now := time.Now()
+	seed := &SessionInfo{
+		ID:         "sess_guard_err",
+		UserID:     "user1",
+		WorkerType: worker.TypeACP,
+		State:      events.StateRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	m.mu.Lock()
+	m.sessions["sess_guard_err"] = &managedSession{info: *seed}
+	m.mu.Unlock()
+
+	go func() {
+		<-gs.started
+		_ = m.UpdateWorkerSessionID(ctx, "sess_guard_err", "hermes_session_xyz")
+		close(gs.done)
+	}()
+
+	err = m.Transition(ctx, "sess_guard_err", events.StateIdle)
+	require.NoError(t, err)
+
+	// In-memory state must have WorkerSessionID even when guard re-persist
+	// fails, because candidate already captured it before ms.info = candidate.
+	info, _ := m.Get(context.Background(), "sess_guard_err")
+	require.Equal(t, events.StateIdle, info.State)
+	require.Equal(t, "hermes_session_xyz", info.WorkerSessionID,
+		"in-memory WorkerSessionID must be preserved even if guard re-persist fails")
+}
+
+// guardErrStore shadows Upsert to inject a concurrent UpdateWorkerSessionID
+// during the first Upsert (Transition main), then fails on the guard re-persist
+// (call 3+). Used by TestTransition_GuardRePersistError_InMemoryConsistent.
+type guardErrStore struct {
+	mockStore
+	upsertCount atomic.Int32
+	started     chan struct{}
+	done        chan struct{}
+}
+
+func (g *guardErrStore) Upsert(ctx context.Context, info *SessionInfo) error {
+	n := g.upsertCount.Add(1)
+	if n == 1 {
+		close(g.started)
+		<-g.done
+	}
+	if n >= 3 {
+		return fmt.Errorf("simulated guard persist failure")
+	}
+	return nil
 }

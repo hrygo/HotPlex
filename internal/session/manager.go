@@ -419,13 +419,16 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// with a stale empty value, breaking session resume for ACP workers.
 	if candidate.WorkerSessionID == "" && ms.info.WorkerSessionID != "" {
 		candidate.WorkerSessionID = ms.info.WorkerSessionID
-		// Re-persist outside lock to avoid blocking concurrent reads,
-		// consistent with the main Upsert above.
 		ms.mu.Unlock()
 		if dbErr := m.store.Upsert(ctx, &candidate); dbErr != nil {
 			m.log.Error("session: failed to re-persist WorkerSessionID after guard", "err", dbErr)
 		}
 		ms.mu.Lock()
+		// Preserve any concurrent update that arrived during the second
+		// Upsert's lock-release window (residual theoretical race).
+		if ms.info.WorkerSessionID != candidate.WorkerSessionID {
+			candidate.WorkerSessionID = ms.info.WorkerSessionID
+		}
 	}
 
 	// Commit: replace ms.info with the persisted snapshot.
@@ -954,6 +957,9 @@ func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID
 	}
 
 	ms.mu.Lock()
+	// Fast-path check is done inside updateSession's apply closure to avoid
+	// TOCTOU: the lock is released between this check and updateSession acquiring
+	// it, during which transitionState can overwrite WorkerSessionID.
 	if ms.info.WorkerSessionID == workerSessionID {
 		ms.mu.Unlock()
 		return nil
