@@ -258,6 +258,13 @@ func (m *ACPMapper) mapToolCall(ctx context.Context, raw json.RawMessage) []*eve
 	if input == nil {
 		input = make(map[string]any)
 	}
+	// Normalize ACP keys to match toolfmt formatters.
+	// ACP agents use "path" for file operations, but toolfmt expects "file_path".
+	if p, ok := input["path"]; ok {
+		if _, exists := input["file_path"]; !exists {
+			input["file_path"] = p
+		}
+	}
 
 	// Extract tool name and file locations from content.
 	type contentItem struct {
