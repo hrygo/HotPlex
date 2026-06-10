@@ -1080,20 +1080,21 @@ func TestResetContextRestartsFromSavedSession(t *testing.T) {
 	require.Contains(t, err.Error(), "codexcli: reset thread/start:")
 }
 
-func TestKillCallsKillIfIdle(t *testing.T) {
-	// Verify Kill() calls manager.KillIfIdle() after release().
+func TestKillDoesNotCallKillIfIdle(t *testing.T) {
+	// Verify Kill() no longer calls KillIfIdle() — the singleton process
+	// is only stopped via idle drain or explicit ShutdownSingleton().
 	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
 		IdleDrainPeriod: time.Minute,
 	})
 
 	// Simulate a running process with refs=1 and stateRunning.
-	// Use pgid=0 so KillIfIdle's shouldKill guard is false (pgid must be >0),
-	// which avoids calling ForceKill on a real PGID in CI while still
-	// testing the stateRunning code path.
 	mgr.mu.Lock()
 	mgr.state = stateRunning
 	mgr.refs = 1
 	mgr.pgid = 0
+	// Start an idle timer so we can verify it remains untouched.
+	mgr.idleTimer = time.AfterFunc(time.Minute, func() {})
+	timerBefore := mgr.idleTimer
 	mgr.mu.Unlock()
 
 	w := &AppServerWorker{
@@ -1111,11 +1112,13 @@ func TestKillCallsKillIfIdle(t *testing.T) {
 	require.True(t, w.closed, "closed should be true after Kill")
 	w.mu.Unlock()
 
-	// KillIfIdle was called: idleTimer should be nil (stopped).
+	// KillIfIdle was NOT called: idleTimer should still be active.
 	mgr.mu.Lock()
 	timer := mgr.idleTimer
 	mgr.mu.Unlock()
-	require.Nil(t, timer, "idle timer should be stopped by KillIfIdle")
+	require.NotNil(t, timer, "idle timer should NOT be stopped — KillIfIdle removed from shutdown()")
+	require.Equal(t, timerBefore, timer, "idle timer reference unchanged")
+	timer.Stop()
 }
 
 func TestKillIfIdleKillsWhenIdle(t *testing.T) {

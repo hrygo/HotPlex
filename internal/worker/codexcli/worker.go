@@ -473,13 +473,13 @@ func (w *AppServerWorker) Kill() error {
 	return nil
 }
 
-// shutdown releases the worker's manager subscription and kills the singleton
-// process if no other sessions hold refs. Called by both Terminate and Kill.
+// shutdown releases the worker's manager subscription and decrements the
+// singleton ref count. The singleton process is NOT killed here — it will
+// naturally stop via idle drain (refs==0 for IdleDrainPeriod) or explicit
+// ShutdownSingleton(). This prevents GC from killing a shared process when
+// reclaiming sessions.
 func (w *AppServerWorker) shutdown() {
 	w.release()
-	if w.manager != nil {
-		w.manager.KillIfIdle()
-	}
 }
 
 func (w *AppServerWorker) Wait() (int, error) {
