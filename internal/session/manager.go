@@ -391,7 +391,8 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// TODO: shallow copy + lock release during Upsert means any concurrent updateSession
 	// field mutation can be overwritten by the stale candidate commit. WorkerSessionID
 	// is protected by the guard below (residual theoretical window in the
-	// guard second Upsert — see #709); other scalar fields are not protected.
+	// guard second Upsert — track CAS/lock-dual-upsert fix under #709);
+	// other scalar fields are not protected.
 	candidate := ms.info
 	candidate.State = to
 	candidate.UpdatedAt = time.Now()
