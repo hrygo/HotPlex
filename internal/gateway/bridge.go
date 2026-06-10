@@ -730,11 +730,15 @@ func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workD
 
 	// Populate conversation history from turns table for context recovery.
 	// Only CodexCLI worker needs this — other workers have native resume.
-	if si.WorkerType == worker.TypeCodexCLI && b.turnsQuerier != nil {
+	// Skip for fresh sessions (StateCreated) that have zero turns by definition.
+	if si.WorkerType == worker.TypeCodexCLI && si.State != events.StateCreated && b.turnsQuerier != nil {
 		turns, err := b.turnsQuerier.QueryTurns(ctx, sessionID, 50, 0)
 		if err != nil {
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
 		} else if len(turns) > 0 {
+			// ~12.5k tokens at 4 chars/token; balances context richness against
+			// first-turn latency and LLM input limits. CodexCLI has no native
+			// resume, so injected history is the sole continuity mechanism.
 			const maxHistoryChars = 50000
 			history := make([]worker.ConversationTurn, 0, len(turns))
 			charsUsed := 0

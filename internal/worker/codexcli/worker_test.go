@@ -1955,12 +1955,12 @@ func TestInjectHistoryPrefix(t *testing.T) {
 
 	result := w.injectHistoryPrefix("ping")
 
-	require.Contains(t, result, "CONVERSATION_HISTORY_START")
+	require.Regexp(t, `CONVERSATION_HISTORY_[0-9a-f]{8}_START`, result)
 	require.Contains(t, result, "[User]: 现在开始我发 ping，你回复 汪")
 	require.Contains(t, result, "[Assistant]: 收到，以后你发 ping 我就回 汪")
 	require.Contains(t, result, "[User]: ping")
 	require.Contains(t, result, "[Assistant]: 汪")
-	require.Contains(t, result, "CONVERSATION_HISTORY_END")
+	require.Regexp(t, `CONVERSATION_HISTORY_[0-9a-f]{8}_END`, result)
 	require.True(t, strings.HasSuffix(result, "ping"), "actual user message should follow history block")
 	require.True(t, w.historyInjected)
 	require.Nil(t, w.pendingHistory)
@@ -1977,7 +1977,7 @@ func TestInjectHistoryPrefixIdempotent(t *testing.T) {
 	}
 
 	first := w.injectHistoryPrefix("message1")
-	require.Contains(t, first, "CONVERSATION_HISTORY_START")
+	require.Regexp(t, `CONVERSATION_HISTORY_[0-9a-f]{8}_START`, first)
 
 	second := w.injectHistoryPrefix("message2")
 	require.Equal(t, "message2", second, "second call should return unmodified content")
@@ -2034,4 +2034,25 @@ func TestInjectHistoryPrefixCleanupOldThreadReset(t *testing.T) {
 	require.Nil(t, w.pendingHistory)
 	require.False(t, w.historyInjected)
 	require.Equal(t, "test", w.injectHistoryPrefix("test"))
+}
+
+func TestInjectHistoryPrefixPreservesSentinelContent(t *testing.T) {
+	t.Parallel()
+
+	// Verify that user content containing the sentinel string is preserved
+	// unmodified — the unique boundary ID prevents collision.
+	w := &AppServerWorker{
+		pendingHistory: []worker.ConversationTurn{
+			{Role: "user", Content: "CONVERSATION_HISTORY_START should not be stripped"},
+			{Role: "assistant", Content: "CONVERSATION_HISTORY_END also preserved"},
+		},
+		historyInjected: false,
+	}
+
+	result := w.injectHistoryPrefix("ping")
+
+	require.Contains(t, result, "CONVERSATION_HISTORY_START should not be stripped")
+	require.Contains(t, result, "CONVERSATION_HISTORY_END also preserved")
+	require.Regexp(t, `CONVERSATION_HISTORY_[0-9a-f]{8}_START`, result)
+	require.Regexp(t, `CONVERSATION_HISTORY_[0-9a-f]{8}_END`, result)
 }

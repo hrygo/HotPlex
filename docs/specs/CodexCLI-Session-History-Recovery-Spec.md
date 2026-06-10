@@ -174,7 +174,7 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 
     // Store conversation history for first-input injection.
     w.mu.Lock()
-    w.pendingHistory = session.ConversationHistory
+    w.pendingHistory = slices.Clone(session.ConversationHistory)
     w.historyInjected = false
     w.mu.Unlock()
 
