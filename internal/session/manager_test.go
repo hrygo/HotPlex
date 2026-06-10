@@ -2547,13 +2547,16 @@ func (g *guardErrStore) Upsert(ctx context.Context, info *SessionInfo) error {
 		g.sawFirst.Store(true)
 		close(g.started)
 		<-g.done
-		g.lastSuccessful.Store(info)
+		// Don't store lastSuccessful here: candidate.WorkerSessionID is
+		// empty at this point and would overwrite the value from the
+		// concurrent UpdateWorkerSessionID Upsert.
 		return nil
 	}
 	// Subsequent calls: UpdateWorkerSessionID (succeed) then guard re-persist (fail).
 	if g.failNextUpsert.CompareAndSwap(true, false) {
 		return fmt.Errorf("simulated guard persist failure")
 	}
-	g.lastSuccessful.Store(info)
+	infoCopy := *info
+	g.lastSuccessful.Store(&infoCopy)
 	return nil
 }
