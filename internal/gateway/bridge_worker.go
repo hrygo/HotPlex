@@ -89,7 +89,12 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	// Best-effort async persist so WorkerSessionID survives gateway restart
 	// even if no turn events arrive (SIGTERM before first Prompt). The
 	// correctness guarantee comes from forwardEvents' first-event safety-net.
-	go b.persistWorkerSessionIDInternal(params.ctx, w, sid, false)
+	// Tracked by fwdWg so graceful shutdown waits for the DB write to complete.
+	b.fwdWg.Add(1)
+	go func() {
+		defer b.fwdWg.Done()
+		b.persistWorkerSessionIDInternal(params.ctx, w, sid, false)
+	}()
 
 	b.fwdWg.Add(1)
 	go func() {
