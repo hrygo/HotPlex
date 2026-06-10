@@ -278,8 +278,9 @@ func (w *AppServerWorker) cleanupOldThread() {
 | 全新 session（无历史） | `QueryTurns` 返回空，`ConversationHistory` 为 nil，`injectHistoryPrefix` 返回原 content |
 | 查询失败 | 静默忽略，session 正常创建（无历史恢复） |
 | 用户执行 /reset | generation 递增，`QueryTurns` 按新 generation 查询，只看到新历史 |
-| 长对话（>50 turns） | 只取最近 50 条，早期上下文丢弃 |
-| 助手回复含长文本/代码 | 完整注入，可能消耗较多 token |
+| 长对话（>50 turns） | 只取最近 50 条；总量 > 60k 字符时，旧 turns 通过 Brain LLM 压缩为摘要，最近 4 条保留原样 |
+| 压缩失败/Brain 不可用 | 降级为截断：从最近的 turns 中取字符预算内能容纳的部分 |
+| 助手回复含长文本/代码 | 压缩或截断至 50k 字符预算内注入 |
 
 ---
 
@@ -319,8 +320,9 @@ make check        # 完整 CI
 
 ## 6. Future Improvements (Out of Scope)
 
-- **~Token 预算控制~**: ~~基于 `TurnRecord.TokensIn` 累计~~ → 已实现：字符级预算 `maxHistoryChars=50000`，按 `len(turn.Content)` 累计
-- **历史摘要**: 对长对话生成摘要替代全文注入，减少 token 消耗
+- **~Token 预算控制~**: ~~基于 `TurnRecord.TokensIn` 累计~~ → ✅ 已实现：字符级预算 `maxHistoryChars=50000`，按 `len(turn.Content)` 累计
+- **~历史摘要~**: ~~对长对话生成摘要替代全文注入~~ → ✅ 已实现：`HistoryCompressor` + Brain LLM 智能压缩，60-70% 压缩率，保留最近 4 条原样
+- **压缩结果缓存**: 将 Brain 压缩结果缓存到 session store（key=sessionID），下次重连复用，避免重复 LLM 调用
 - **配置化**: 将历史条数上限（当前硬编码 50）暴露为 YAML 配置项
 - **Tool 事件注入**: 当前仅注入 text turn，未来可选择性注入 tool_call/tool_result
 - **上游 thread resume**: 推动 codex app-server 支持 `thread/resume` API，从根本上解决
