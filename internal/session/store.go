@@ -29,6 +29,8 @@ type Store interface {
 	Close() error
 }
 
+var _ Store = (*SQLiteStore)(nil)
+
 // SQLiteStore implements Store using SQLite.
 type SQLiteStore struct {
 	db      *sql.DB

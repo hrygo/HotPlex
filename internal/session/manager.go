@@ -388,11 +388,10 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// Build the candidate state as a value copy (never mutates ms.info in-place).
 	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
 	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
-	// TODO: shallow copy + lock release during Upsert means any concurrent updateSession
-	// field mutation can be overwritten by the stale candidate commit. WorkerSessionID
-	// is protected by the guard below (residual theoretical window in the
-	// guard second Upsert — track CAS/lock-dual-upsert fix under #709);
-	// other scalar fields are not protected.
+	// WorkerSessionID is protected by the targeted SQL UPDATE guard below
+	// (lines ~426-440); other scalar fields have a theoretical stale-write
+	// window during the lock release for DB I/O, mitigated by the safety-net
+	// persist on first event (see #709).
 	candidate := ms.info
 	candidate.State = to
 	candidate.UpdatedAt = time.Now()
@@ -420,9 +419,12 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	//
 	// NOTE: This targeted SQL UPDATE avoids full-row Upsert's risk of overwriting
 	// concurrent field changes (UpdatedAt, ExpiresAt, Source, etc.) made during
-	// the unlock window. The residual race (concurrent UpdateWorkerSessionID
-	// during the ~µs SQL window) is mitigated by forwardEvents' first-event
-	// safety-net persist.
+	// the unlock window. There is a theoretical second race: a concurrent
+	// UpdateWorkerSessionID that acquires ms.mu during the µs SQL window and
+	// sets a different WorkerSessionID, which our stale "wsid" then overwrites.
+	// Accepted because (a) the window is ~µs, (b) forwardEvents' first-event
+	// safety-net persist (EnsureWorkerSessionID) will repair the row, and
+	// (c) the concurrent overwrite detection below re-syncs in-memory state.
 	if candidate.WorkerSessionID == "" && ms.info.WorkerSessionID != "" {
 		wsid := ms.info.WorkerSessionID
 		candidate.WorkerSessionID = wsid
@@ -959,10 +961,10 @@ func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID
 	return m.updateWorkerSessionID(ctx, id, workerSessionID, false)
 }
 
-// UpdateWorkerSessionIDForce persists the worker-internal session ID, bypassing
+// EnsureWorkerSessionID persists the worker-internal session ID, bypassing
 // the fast-path skip. Used by the safety-net caller (forwardEvents) to repair
 // stale DB rows after guard re-persist failures.
-func (m *Manager) UpdateWorkerSessionIDForce(ctx context.Context, id, workerSessionID string) error {
+func (m *Manager) EnsureWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
 	return m.updateWorkerSessionID(ctx, id, workerSessionID, true)
 }
 

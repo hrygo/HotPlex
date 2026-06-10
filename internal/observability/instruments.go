@@ -671,11 +671,11 @@ func SessionGuardRePersistFailures() metric.Int64Counter {
 	sessionGuardRePersistFailuresInit.Do(func() {
 		var err error
 		sessionGuardRePersistFailures, err = Meter().Int64Counter(
-			"hotplex.session.guard.repersist.failures",
+			"hotplex.session.transition.guard_repersist_failures",
 			metric.WithDescription("transitionState guard re-persist failures (WorkerSessionID)"),
 		)
 		if err != nil {
-			warnInstrument("hotplex.session.guard.repersist.failures", err)
+			warnInstrument("hotplex.session.transition.guard_repersist_failures", err)
 		}
 	})
 	return sessionGuardRePersistFailures
@@ -685,11 +685,11 @@ func SessionGuardRePersistConcurrentOverwrites() metric.Int64Counter {
 	sessionGuardRePersistConcurrentOverwriteInit.Do(func() {
 		var err error
 		sessionGuardRePersistConcurrentOverwrite, err = Meter().Int64Counter(
-			"hotplex.session.guard.repersist.concurrent_overwrite",
+			"hotplex.session.transition.guard_repersist_overwrites",
 			metric.WithDescription("transitionState guard detected concurrent WorkerSessionID overwrite during re-persist lock window"),
 		)
 		if err != nil {
-			warnInstrument("hotplex.session.guard.repersist.concurrent_overwrite", err)
+			warnInstrument("hotplex.session.transition.guard_repersist_overwrites", err)
 		}
 	})
 	return sessionGuardRePersistConcurrentOverwrite

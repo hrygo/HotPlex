@@ -1194,7 +1194,7 @@ func (m *mockBridgeSM) UpdateWorkerSessionID(ctx context.Context, id, workerSess
 	return args.Error(0)
 }
 
-func (m *mockBridgeSM) UpdateWorkerSessionIDForce(ctx context.Context, id, workerSessionID string) error {
+func (m *mockBridgeSM) EnsureWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
 	args := m.Called(ctx, id, workerSessionID)
 	return args.Error(0)
 }

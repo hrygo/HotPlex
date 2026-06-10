@@ -100,7 +100,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	return w, nil
 }
 
-func (b *Bridge) persistWorkerSessionIDForce(ctx context.Context, w worker.Worker, sessionID string) {
+func (b *Bridge) persistWorkerSessionIDEnsure(ctx context.Context, w worker.Worker, sessionID string) {
 	b.persistWorkerSessionIDInternal(ctx, w, sessionID, true)
 }
 
@@ -120,7 +120,7 @@ func (b *Bridge) persistWorkerSessionIDInternal(ctx context.Context, w worker.Wo
 	}
 	var err error
 	if force {
-		err = b.sm.UpdateWorkerSessionIDForce(ctx, sessionID, workerSID)
+		err = b.sm.EnsureWorkerSessionID(ctx, sessionID, workerSID)
 	} else {
 		err = b.sm.UpdateWorkerSessionID(ctx, sessionID, workerSID)
 	}

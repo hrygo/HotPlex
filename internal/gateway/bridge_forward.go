@@ -213,7 +213,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		// persist was incomplete. Scenarios: (1) GetWorkerSessionID() had not
 		// returned a value at launch time; (2) guard re-persist in transitionState
 		// failed; (3) gateway crashed between launch and first event.
-		b.persistWorkerSessionIDForce(opts.ctx, w, sessionID)
+		b.persistWorkerSessionIDEnsure(opts.ctx, w, sessionID)
 		fc.turnStartTime = time.Now()
 		fc.firstEvent = false
 	}
