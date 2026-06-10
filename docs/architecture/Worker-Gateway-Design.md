@@ -119,7 +119,7 @@ type WorkerSessionIDHandler interface {
 **实现者**：
 - **OpenCode Server**：使用 HTTP 连接中的 session ID
 
-**持久化时机**：`bridge.forwardEvents()` 收到第一个 worker 事件时，调用 `persistWorkerSessionID()` 更新 DB。
+**持久化时机**：`bridge.createAndLaunchWorker()` 在 Worker 启动后立即持久化；`bridge.forwardEvents()` 收到第一个事件时作为安全兜底再次调用。`transitionState` 在锁释放窗口期间保护 WorkerSessionID 不被并发覆盖。
 
 ### 5.2 状态机
 

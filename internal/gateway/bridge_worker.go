@@ -102,9 +102,12 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 }
 
 func (b *Bridge) persistWorkerSessionID(ctx context.Context, w worker.Worker, sessionID string) {
-	// Persist must survive request cancellation — detach from request-scoped ctx.
-	if ctx == nil || ctx.Err() != nil {
+	// Persist must survive request cancellation — detach from request-scoped ctx
+	// while preserving OTel trace context.
+	if ctx == nil {
 		ctx = context.Background()
+	} else {
+		ctx = context.WithoutCancel(ctx)
 	}
 	handler, ok := w.(worker.WorkerSessionIDHandler)
 	if !ok {

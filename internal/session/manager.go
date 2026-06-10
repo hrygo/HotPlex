@@ -417,10 +417,13 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// with a stale empty value, breaking session resume for ACP workers.
 	if candidate.WorkerSessionID == "" && ms.info.WorkerSessionID != "" {
 		candidate.WorkerSessionID = ms.info.WorkerSessionID
-		// Re-persist to keep DB consistent with in-memory.
+		// Re-persist outside lock to avoid blocking concurrent reads,
+		// consistent with the main Upsert above.
+		ms.mu.Unlock()
 		if dbErr := m.store.Upsert(ctx, &candidate); dbErr != nil {
 			m.log.Error("session: failed to re-persist WorkerSessionID after guard", "err", dbErr)
 		}
+		ms.mu.Lock()
 	}
 
 	// Commit: replace ms.info with the persisted snapshot.
