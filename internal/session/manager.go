@@ -388,6 +388,9 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// Build the candidate state as a value copy (never mutates ms.info in-place).
 	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
 	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
+	// TODO: shallow copy + lock release during Upsert means any concurrent updateSession
+	// field mutation can be overwritten by the stale candidate commit. WorkerSessionID
+	// is protected by the guard below; other scalar fields are not (see #709).
 	candidate := ms.info
 	candidate.State = to
 	candidate.UpdatedAt = time.Now()

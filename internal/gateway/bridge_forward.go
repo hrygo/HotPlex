@@ -209,7 +209,10 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	}
 
 	if fc.firstEvent {
-		b.persistWorkerSessionID(w, sessionID)
+		// Safety-net: persist again on first event in case the post-launch
+		// persist was lost (e.g., store flush delay). The authoritative call
+		// now lives in createAndLaunchWorker.
+		b.persistWorkerSessionID(opts.ctx, w, sessionID)
 		fc.turnStartTime = time.Now()
 		fc.firstEvent = false
 	}
