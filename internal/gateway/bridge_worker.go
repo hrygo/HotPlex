@@ -90,9 +90,13 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	// gateway restart even if no turn events arrive (SIGTERM before first
 	// Prompt). This is a best-effort optimization; the correctness guarantee
 	// comes from forwardEvents' first-event safety-net persist.
-	// NOTE: synchronous call is acceptable here (SQLite write < 1ms). For
-	// high-concurrency batch scenarios (e.g. bulk cron triggers), consider
-	// moving this into forwardEvents' first-event branch or making it async.
+	//
+	// Synchronous call is acceptable for SQLite (<1ms). For PostgreSQL,
+	// network round-trip adds 1–5ms per call under load; in bulk cron
+	// scenarios (N concurrent triggers), this serializes N DB writes in the
+	// caller goroutine. If PG latency becomes a bottleneck, move this into
+	// forwardEvents' first-event branch (which already does a persist) or
+	// make it async via a write-behind queue.
 	b.persistWorkerSessionID(params.ctx, w, sid)
 
 	b.fwdWg.Add(1)

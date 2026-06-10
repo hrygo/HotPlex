@@ -417,6 +417,14 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// was released during Upsert. Without this guard, the candidate copy
 	// (taken before the concurrent update) overwrites both DB and in-memory
 	// with a stale empty value, breaking session resume for ACP workers.
+	//
+	// NOTE: This second Upsert re-introduces a lock-release window. The
+	// residual race is theoretical (requires concurrent UpdateWorkerSessionID
+	// during the ~µs Upsert window) and is mitigated by forwardEvents'
+	// first-event safety-net persist. A CAS-based approach (e.g. WHERE
+	// worker_session_id = '' in SQL) or lock-dual-upsert pattern could
+	// eliminate this window entirely but adds complexity; deferred until
+	// the residual race is observed in production metrics.
 	if candidate.WorkerSessionID == "" && ms.info.WorkerSessionID != "" {
 		candidate.WorkerSessionID = ms.info.WorkerSessionID
 		ms.mu.Unlock()
@@ -430,6 +438,9 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 		ms.mu.Lock()
 		// Preserve any concurrent update that arrived during the second
 		// Upsert's lock-release window (residual theoretical race).
+		// In the extreme case where this also races, the in-memory value
+		// will be correct but the DB row may remain stale until forwardEvents'
+		// next persist opportunity restores consistency.
 		if ms.info.WorkerSessionID != candidate.WorkerSessionID {
 			candidate.WorkerSessionID = ms.info.WorkerSessionID
 		}
@@ -964,8 +975,9 @@ func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID
 	// Fast-path: skip DB write when value is unchanged. The check runs outside
 	// updateSession's atomic apply closure, so a concurrent transitionState can
 	// overwrite WorkerSessionID between this unlock and updateSession's re-lock.
-	// This is safe: transitionState's guard restores the value, and forwardEvents
-	// has a safety-net persist.
+	// This is safe: transitionState's guard restores the value in most cases;
+	// if the guard's own second Upsert also races (extremely rare), forwardEvents'
+	// safety-net persist will restore consistency on the next persist opportunity.
 	if ms.info.WorkerSessionID == workerSessionID {
 		ms.mu.Unlock()
 		return nil
