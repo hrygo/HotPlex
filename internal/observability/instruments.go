@@ -662,6 +662,9 @@ func ACPHandshakeDuration() metric.Float64Histogram {
 var (
 	sessionGuardRePersistFailures     metric.Int64Counter
 	sessionGuardRePersistFailuresInit sync.Once
+
+	sessionGuardRePersistStaleWrites     metric.Int64Counter
+	sessionGuardRePersistStaleWritesInit sync.Once
 )
 
 func SessionGuardRePersistFailures() metric.Int64Counter {
@@ -676,6 +679,20 @@ func SessionGuardRePersistFailures() metric.Int64Counter {
 		}
 	})
 	return sessionGuardRePersistFailures
+}
+
+func SessionGuardRePersistStaleWrites() metric.Int64Counter {
+	sessionGuardRePersistStaleWritesInit.Do(func() {
+		var err error
+		sessionGuardRePersistStaleWrites, err = Meter().Int64Counter(
+			"hotplex.session.guard.repersist.stale_writes",
+			metric.WithDescription("transitionState guard detected stale WorkerSessionID after re-persist lock window"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.session.guard.repersist.stale_writes", err)
+		}
+	})
+	return sessionGuardRePersistStaleWrites
 }
 
 // ─── Retry Instruments ──────────────────────────────────────────────

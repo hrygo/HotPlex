@@ -2160,9 +2160,12 @@ func TestManager_UpdateWorkerSessionID_SameValue_Idempotent(t *testing.T) {
 	m.sessions["sess_wsid_same"] = &managedSession{info: *seed}
 	m.mu.Unlock()
 
-	// Same value — fast-path returns early, no Upsert needed.
+	// Same value — no fast-path skip; Upsert is always called so DB row
+	// stays consistent even if a prior guard re-persist failed.
+	store.On("Upsert", mock.Anything, mock.Anything).Return(nil)
 	err = m.UpdateWorkerSessionID(ctx, "sess_wsid_same", "existing_id")
 	require.NoError(t, err)
+	store.AssertCalled(t, "Upsert", mock.Anything, mock.Anything)
 }
 
 func TestManager_UpdateWorkerSessionID_NotFound(t *testing.T) {

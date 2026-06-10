@@ -443,6 +443,7 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 		// next persist opportunity restores consistency.
 		if ms.info.WorkerSessionID != candidate.WorkerSessionID {
 			candidate.WorkerSessionID = ms.info.WorkerSessionID
+			observability.SessionGuardRePersistStaleWrites().Add(ctx, 1)
 		}
 	}
 
@@ -971,20 +972,10 @@ func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID
 		return ErrSessionNotFound
 	}
 
-	ms.mu.Lock()
-	// Fast-path: skip DB write when value is unchanged. The check runs outside
-	// updateSession's atomic apply closure, so a concurrent transitionState can
-	// overwrite WorkerSessionID between this unlock and updateSession's re-lock.
-	// This is safe: transitionState's guard restores the value in most cases;
-	// if the guard's own second Upsert also races (extremely rare), forwardEvents'
-	// safety-net persist will restore consistency on the next persist opportunity.
-	if ms.info.WorkerSessionID == workerSessionID {
-		ms.mu.Unlock()
-		return nil
-	}
-	ms.mu.Unlock()
-
 	return m.updateSession(ctx, ms, func(info *SessionInfo) func() {
+		// No fast-path skip: even when the in-memory value matches, the DB row
+		// may be stale (guard re-persist failed, transitionState overwrote it).
+		// The safety-net caller (forwardEvents) relies on this path to repair DB.
 		prev := info.WorkerSessionID
 		info.WorkerSessionID = workerSessionID
 		return func() { info.WorkerSessionID = prev }
