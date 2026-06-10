@@ -12,6 +12,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"unicode/utf8"
+
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/messaging/textutil"
 	"github.com/hrygo/hotplex/internal/observability"
@@ -38,6 +40,7 @@ type FeishuConn struct {
 	lastBranch        string // cached from last TurnSummaryData
 	lastSummarySentMs atomic.Int64
 	voiceTriggered    atomic.Bool
+	paraCharCount     int // per-session cumulative character counter for paragraph breaking
 }
 
 func NewFeishuConn(adapter *Adapter, chatID, threadKey, workDir string) *FeishuConn {
@@ -206,8 +209,17 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if !ok {
 		return nil
 	}
-	if env.Event.Type == events.MessageDelta && textutil.EndsWithSentenceTerminator(text) {
-		text += "\n"
+	if env.Event.Type == events.MessageDelta {
+		c.mu.Lock()
+		c.paraCharCount += utf8.RuneCountInString(text)
+		shouldBreak := c.paraCharCount > 200 && textutil.EndsWithSentenceTerminator(text)
+		if shouldBreak {
+			c.paraCharCount = 0
+		}
+		c.mu.Unlock()
+		if shouldBreak {
+			text += "\n\n"
+		}
 	}
 	text = StripInvalidImageKeys(text)
 	return c.writeContent(ctx, env, text)
@@ -241,6 +253,11 @@ func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error
 	if streamCtrl != nil && streamCtrl.IsCreated() {
 		fullText = streamCtrl.Content()
 	}
+
+	// Reset paragraph counter for next turn.
+	c.mu.Lock()
+	c.paraCharCount = 0
+	c.mu.Unlock()
 
 	var closeErr error
 	if streamCtrl != nil && streamCtrl.IsCreated() {
@@ -282,6 +299,10 @@ func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error
 func (c *FeishuConn) handleError(ctx context.Context, env *events.Envelope) error {
 	streamCtrl := c.clearActiveIndicators(ctx)
 	c.adapter.Interactions.CancelAll(env.SessionID)
+	// Reset paragraph counter on error.
+	c.mu.Lock()
+	c.paraCharCount = 0
+	c.mu.Unlock()
 	if streamCtrl != nil && streamCtrl.IsCreated() {
 		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := streamCtrl.Close(closeCtx); err != nil {
