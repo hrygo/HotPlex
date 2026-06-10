@@ -237,7 +237,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	w.initSessionConn(ctx, sessionID, session)
 	// Persist OCS session ID immediately so resume can find it even if
-	// release() races with the delayed persistWorkerSessionID in bridge.
+	// release() races with the persistWorkerSessionID in bridge.
 	w.SetWorkerSessionID(sessionID)
 	w.startSSE(sessionID)
 	w.Log.Debug("opencodeserver: start completed")

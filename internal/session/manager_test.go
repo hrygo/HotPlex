@@ -2382,10 +2382,12 @@ func TestGC_EvictsOldTerminatedSessions(t *testing.T) {
 // causes WorkerSessionID loss (#709).
 type raceStore struct {
 	mockStore
-	onUpsert func() // called inside Upsert while ms.mu is released
+	onUpsert   func()                      // called inside Upsert while ms.mu is released
+	lastUpsert atomic.Pointer[SessionInfo] // captures the last Upserted info
 }
 
 func (r *raceStore) Upsert(ctx context.Context, info *SessionInfo) error {
+	r.lastUpsert.Store(info)
 	if r.onUpsert != nil {
 		r.onUpsert()
 	}
@@ -2452,9 +2454,15 @@ func TestTransition_PreservesWorkerSessionID_OnConcurrentUpdate(t *testing.T) {
 	err = m.Transition(ctx, "sess_race_wsid", events.StateIdle)
 	require.NoError(t, err)
 
-	// Verify WorkerSessionID is preserved, not overwritten by the stale candidate.
+	// Verify WorkerSessionID is preserved in-memory.
 	info, _ := m.Get(context.Background(), "sess_race_wsid")
 	require.Equal(t, events.StateIdle, info.State, "state should transition to IDLE")
 	require.Equal(t, "hermes_session_abc", info.WorkerSessionID,
 		"WorkerSessionID must be preserved when set concurrently during transition")
+
+	// Verify the guard re-persisted to DB with the correct WorkerSessionID.
+	dbInfo := store.lastUpsert.Load()
+	require.NotNil(t, dbInfo, "at least one Upsert should have occurred")
+	require.Equal(t, "hermes_session_abc", dbInfo.WorkerSessionID,
+		"last DB Upsert must contain the preserved WorkerSessionID")
 }
