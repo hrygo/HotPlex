@@ -657,6 +657,27 @@ func ACPHandshakeDuration() metric.Float64Histogram {
 	return acpHandshakeDuration
 }
 
+// ─── Session Guard Instruments ────────────────────────────────────
+
+var (
+	sessionGuardRePersistFailures     metric.Int64Counter
+	sessionGuardRePersistFailuresInit sync.Once
+)
+
+func SessionGuardRePersistFailures() metric.Int64Counter {
+	sessionGuardRePersistFailuresInit.Do(func() {
+		var err error
+		sessionGuardRePersistFailures, err = Meter().Int64Counter(
+			"hotplex.session.guard.repersist.failures",
+			metric.WithDescription("transitionState guard re-persist failures (WorkerSessionID)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.session.guard.repersist.failures", err)
+		}
+	})
+	return sessionGuardRePersistFailures
+}
+
 // ─── Retry Instruments ──────────────────────────────────────────────
 
 var (

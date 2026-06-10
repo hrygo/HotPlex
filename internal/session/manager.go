@@ -431,7 +431,7 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 		if dbErr := m.store.Upsert(ctx, &candidate); dbErr != nil {
 			// DB write failed — in-memory is correct but DB row is stale.
 			// Gateway restart will lose WorkerSessionID, breaking resume.
-			// TODO(#709): add Prometheus counter for this path.
+			observability.SessionGuardRePersistFailures().Add(ctx, 1)
 			m.log.Error("session: failed to re-persist WorkerSessionID after guard",
 				"session_id", candidate.ID, "worker_session_id", candidate.WorkerSessionID, "err", dbErr)
 		}
