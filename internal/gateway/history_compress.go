@@ -117,16 +117,19 @@ func (c *HistoryCompressor) CompressHistory(
 
 	// 6. Format compress group into text block.
 	compressText := formatTurns(compressGroup)
-	compressChars := len(compressText)
+	if compressText == "" {
+		// All turns had non-user/assistant roles; nothing compressible.
+		return c.truncateResult(filtered)
+	}
 
 	// Pre-truncate if exceeds brain input cap (drop oldest first).
-	if compressChars > brainInputCap {
+	if len(compressText) > brainInputCap {
 		compressText = truncateHead(compressText, brainInputCap)
 		c.log.Debug("history: pre-truncated compress input to brain cap",
 			"session_id", sessionID,
-			"original", compressChars,
-			"capped", brainInputCap)
+			"capped", len(compressText))
 	}
+	compressChars := len(compressText) // recalculate after potential truncation
 
 	// 7. Call Brain for compression.
 	result, ok := c.callBrain(ctx, sessionID, compressText, len(compressGroup), compressChars, compressBudget, brainFn)
@@ -149,11 +152,15 @@ func (c *HistoryCompressor) CompressHistory(
 	}
 
 	finalChars := len(result) + recentChars
+	compressRatio := "N/A"
+	if compressChars > 0 {
+		compressRatio = fmt.Sprintf("%.0f%%", (1.0-float64(len(result))/float64(compressChars))*100)
+	}
 	c.log.Info("history: compressed conversation history",
 		"session_id", sessionID,
 		"original_chars", totalChars,
 		"final_chars", finalChars,
-		"compress_ratio", fmt.Sprintf("%.0f%%", (1.0-float64(len(result))/float64(compressChars))*100),
+		"compress_ratio", compressRatio,
 		"turns_compressed", len(compressGroup),
 		"turns_kept", len(keepGroup))
 

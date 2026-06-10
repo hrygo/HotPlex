@@ -23,8 +23,9 @@ import (
 )
 
 // GitHubEvent represents the common fields of GitHub webhook payloads.
-// PullRequest fields are retained for JSON deserialization even though
-// extractPRs no longer handles pull_request events (CI-only trigger, #662).
+// PullRequest fields are used by the fork-fallback path in extractPRs
+// for pull_request events (opened/synchronize/reopened on open, non-draft PRs).
+// Origin PRs are primarily triggered via check_suite/check_run (CI-only, #662).
 type GitHubEvent struct {
 	Action     string `json:"action"`
 	Repository struct {
