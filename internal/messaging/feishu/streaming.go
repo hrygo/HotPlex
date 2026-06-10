@@ -809,6 +809,34 @@ func (c *StreamingCardController) updateHeader(ctx context.Context, cardID strin
 }
 
 func (c *StreamingCardController) idConvert(ctx context.Context, messageID string) (string, error) {
+	var lastErr error
+	for attempt := range 3 {
+		cardID, err := c.idConvertOnce(ctx, messageID)
+		if err == nil {
+			return cardID, nil
+		}
+		lastErr = err
+		// Don't retry on permanent errors (auth failure, invalid message).
+		if isPermanentAPIError(err) {
+			return "", lastErr
+		}
+		if attempt < 2 {
+			backoff := time.Duration(100<<attempt) * time.Millisecond // 100, 200, 400ms
+			c.log.Warn("feishu: id_convert failed, retrying",
+				"attempt", attempt+1, "backoff", backoff, "err", lastErr)
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return "", ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return "", lastErr
+}
+
+func (c *StreamingCardController) idConvertOnce(ctx context.Context, messageID string) (string, error) {
 	body := larkcardkit.NewIdConvertCardReqBodyBuilder().
 		MessageId(messageID).
 		Build()
@@ -829,6 +857,39 @@ func (c *StreamingCardController) idConvert(ctx context.Context, messageID strin
 	}
 	c.log.Debug("feishu: id_convert succeeded", "msg_id", messageID, "card_id", *resp.Data.CardId)
 	return *resp.Data.CardId, nil
+}
+
+// isPermanentAPIError reports whether an idConvert error is non-retryable.
+// Parses the "code=%d" pattern from idConvertOnce error messages.
+// NOTE: This is intentionally coupled to idConvertOnce's error format.
+// If that format changes, this function silently treats all errors as
+// retryable — a safe default (extra retries on a permanent error waste
+// ~700ms but cause no harm). A typed error would eliminate this coupling
+// but adds complexity disproportionate to a private helper with one caller.
+// Permanent codes: auth/permission errors (99991400-99991404, 99991409),
+// invalid param (99991419), resource not found (99991448).
+func isPermanentAPIError(err error) bool {
+	s := err.Error()
+	// Only parse errors from resp.Success() == false path.
+	if !strings.HasPrefix(s, "cardkit id_convert failed: code=") {
+		return false // network/parse errors are retryable
+	}
+	var code int
+	if n, serr := fmt.Sscanf(s, "cardkit id_convert failed: code=%d", &code); serr != nil || n != 1 {
+		return false
+	}
+	// Lark permanent error code ranges:
+	// - 99991400-99991404: authentication/authorization failures
+	// - 99991409: permission denied
+	// - 99991419: invalid parameter
+	// - 99991448: resource not found
+	switch {
+	case code >= 99991400 && code <= 99991404:
+		return true
+	case code == 99991409, code == 99991419, code == 99991448:
+		return true
+	}
+	return false
 }
 
 func (c *StreamingCardController) sendCardMessage(ctx context.Context, chatID, content string) (string, error) {
@@ -969,10 +1030,12 @@ func (c *StreamingCardController) flushCardKitWithRetry(ctx context.Context, con
 			backoff := time.Duration(50<<attempt) * time.Millisecond // 50, 100, 200ms
 			c.log.Debug("feishu: cardkit flush failed, retrying",
 				"attempt", attempt+1, "backoff", backoff, "err", lastErr)
+			timer := time.NewTimer(backoff)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return ctx.Err()
-			case <-time.After(backoff):
+			case <-timer.C:
 			}
 		}
 	}

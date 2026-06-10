@@ -503,8 +503,17 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		for _, env := range envs {
 			conn.TrySend(env)
 		}
-		// JSONRPCError is an expected agent error — don't wrap.
-		if _, ok := errors.AsType[*JSONRPCError](promptErr); ok {
+		// Classify JSONRPCError: fatal errors (session lost) must propagate
+		// to Bridge so crash recovery can trigger. Business errors (rate limit,
+		// permission denied) are expected and return nil.
+		if rpcErr, ok := errors.AsType[*JSONRPCError](promptErr); ok {
+			if isFatalRPCError(rpcErr) {
+				return &worker.WorkerError{
+					Kind:    worker.ErrKindUnavailable,
+					Message: fmt.Sprintf("acp: session lost: %s", rpcErr.Message),
+					Cause:   rpcErr,
+				}
+			}
 			return nil
 		}
 		return fmt.Errorf("acp: prompt: %w", promptErr)
@@ -1060,4 +1069,28 @@ func (w *Worker) fmtHandshakeError(err error) error {
 		return fmt.Errorf("acp: handshake timed out after 30s. Check: 1) agent is running 2) API keys are configured 3) network connectivity: %w", err)
 	}
 	return fmt.Errorf("acp: initialize handshake: %w", err)
+}
+
+// isFatalRPCError reports whether a JSON-RPC error is fatal for the current
+// prompt — meaning the underlying agent session is lost and Bridge must
+// trigger crash recovery (Terminate + Start) to create a fresh session.
+// Non-fatal errors (rate limit, permission denied, content policy) are
+// business-level and the worker can continue serving.
+//
+// Uses substring matching rather than error codes because ACP agents vary
+// widely in error schema. This is intentionally conservative: a false negative
+// (missed fatal error) simply falls through to the nil return, which is the
+// pre-existing behavior. A false positive (non-session error containing a
+// matched substring) would trigger an unnecessary restart — acceptable given
+// the rarity of such collisions in practice.
+func isFatalRPCError(err *JSONRPCError) bool {
+	msg := strings.ToLower(err.Message)
+	if strings.Contains(msg, "session not found") ||
+		strings.Contains(msg, "session expired") ||
+		strings.Contains(msg, "session does not exist") ||
+		strings.Contains(msg, "invalid session id") ||
+		strings.Contains(msg, "invalid session state") {
+		return true
+	}
+	return false
 }

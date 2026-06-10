@@ -52,6 +52,15 @@ type forwardContext struct {
 // EVT-004: if msgStore is configured, it appends to the event log on done events.
 // AEP-020: after the recv channel closes, calls Worker.Wait() to determine exit
 // code and sets DoneData.Success accordingly (non-zero exit = crash = success=false).
+// bgCtx returns a background context scoped to the gateway lifecycle.
+// Falls back to context.Background() when shutdownCtx is nil (unit tests).
+func (b *Bridge) bgCtx() context.Context {
+	if b.shutdownCtx != nil {
+		return b.shutdownCtx
+	}
+	return context.Background()
+}
+
 func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOpts) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -92,7 +101,11 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
 		gen := int64(1)
 		if b.turnsQuerier != nil {
-			genCtx, genCancel := context.WithTimeout(opts.ctx, 3*time.Second)
+			// Use shutdownCtx as parent: these are short DB reads (<3s) to
+			// restore turn counters. opts.ctx is scoped to the inbound request
+			// and may expire on slow worker startups. shutdownCtx is cancelled
+			// on gateway shutdown, ensuring DB queries don't block graceful stop.
+			genCtx, genCancel := context.WithTimeout(b.bgCtx(), 3*time.Second)
 			latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
 			genCancel()
 			if latest > 0 {
@@ -102,7 +115,8 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		acc.Generation.Store(gen)
 	}
 	if acc.TurnCount.Load() == 0 && b.turnsQuerier != nil {
-		tnCtx, tnCancel := context.WithTimeout(opts.ctx, 3*time.Second)
+		// bgCtx() — same rationale as LatestGeneration above.
+		tnCtx, tnCancel := context.WithTimeout(b.bgCtx(), 3*time.Second)
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()
 		if err != nil {
@@ -609,7 +623,8 @@ func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64
 		if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
 			gen := int64(1)
 			if b.turnsQuerier != nil {
-				genCtx, genCancel := context.WithTimeout(ctx, 3*time.Second)
+				// shutdownCtx — same rationale as forwardEvents LatestGeneration.
+				genCtx, genCancel := context.WithTimeout(b.bgCtx(), 3*time.Second)
 				latest, _ := b.turnsQuerier.LatestGeneration(genCtx, sessionID)
 				genCancel()
 				if latest > 0 {
