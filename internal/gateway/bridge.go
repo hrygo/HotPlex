@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -671,6 +672,16 @@ func (b *Bridge) WaitForwarders(ctx context.Context) {
 	}
 }
 
+// defaultBrainFn adapts brain.Global() to the compressorBrain interface.
+// Returns nil if Brain is not configured (graceful degradation).
+func defaultBrainFn() compressorBrain {
+	b := brain.Global()
+	if b == nil {
+		return nil
+	}
+	return b
+}
+
 // buildNotifyEnvelope creates a synthetic Message event for user notifications.
 func buildNotifyEnvelope(sessionID, msg string, seq int64) *events.Envelope {
 	return events.NewEnvelope(aep.NewID(), sessionID, seq, events.Message, map[string]any{"content": msg})
@@ -736,26 +747,9 @@ func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workD
 		if err != nil {
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
 		} else if len(turns) > 0 {
-			// ~12.5k tokens at 4 chars/token; balances context richness against
-			// first-turn latency and LLM input limits. CodexCLI has no native
-			// resume, so injected history is the sole continuity mechanism.
-			const maxHistoryChars = 50000
-			history := make([]worker.ConversationTurn, 0, len(turns))
-			charsUsed := 0
-			for _, t := range turns {
-				if t.Content == "" {
-					continue
-				}
-				if charsUsed+len(t.Content) > maxHistoryChars {
-					break
-				}
-				charsUsed += len(t.Content)
-				history = append(history, worker.ConversationTurn{
-					Role:    t.Role,
-					Content: t.Content,
-				})
-			}
-			info.ConversationHistory = history
+			compressor := NewHistoryCompressor(b.log, b.hub)
+			result := compressor.CompressHistory(ctx, turns, sessionID, defaultBrainFn)
+			info.ConversationHistory = result.Turns
 		}
 	}
 

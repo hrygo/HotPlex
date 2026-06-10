@@ -1,0 +1,352 @@
+package gateway
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/hrygo/hotplex/internal/brain"
+	"github.com/hrygo/hotplex/internal/brain/llm"
+	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/worker"
+)
+
+// ─── Constants ────────────────────────────────────────────────────────
+
+const (
+	maxHistoryChars        = 50000  // total budget for injected history (~12.5k tokens)
+	keepRecentN            = 4      // number of recent turns to keep uncompressed
+	brainInputCap          = 100000 // Brain LLM input limit in characters
+	compressThresholdRatio = 1.2    // only compress when total > budget × ratio (adaptive)
+	compressTimeout        = 45 * time.Second
+)
+
+// ─── Types ────────────────────────────────────────────────────────────
+
+// HistoryCompressor uses Brain to intelligently compress conversation history
+// when it exceeds the character budget, preserving recent turns verbatim.
+type HistoryCompressor struct {
+	log *slog.Logger
+	hub *Hub // for progress notifications; nil = silent
+}
+
+// CompressResult holds the outcome of a compression attempt.
+type CompressResult struct {
+	Turns         []worker.ConversationTurn
+	Compressed    bool
+	OriginalChars int
+	FinalChars    int
+}
+
+// compressorBrain is a local interface for Brain dependency injection.
+// Production code injects brain.Global(); tests inject a mock.
+type compressorBrain interface {
+	ChatWithOptions(ctx context.Context, prompt string, opts brain.ChatOptions) (string, error)
+}
+
+// ─── Constructor ──────────────────────────────────────────────────────
+
+func NewHistoryCompressor(log *slog.Logger, hub *Hub) *HistoryCompressor {
+	return &HistoryCompressor{log: log, hub: hub}
+}
+
+// ─── Core Algorithm ──────────────────────────────────────────────────
+
+// CompressHistory compresses older conversation turns using Brain when
+// total content exceeds the character budget. Recent turns are preserved
+// verbatim for fresh context. Falls back to truncation on any failure.
+func (c *HistoryCompressor) CompressHistory(
+	ctx context.Context,
+	turns []*eventstore.TurnRecord,
+	sessionID string,
+	brainFn func() compressorBrain,
+) CompressResult {
+	// 1. Filter empty-content turns and build preliminary list.
+	filtered := make([]turnWithChars, 0, len(turns))
+	totalChars := 0
+	for _, t := range turns {
+		if t.Content == "" {
+			continue
+		}
+		filtered = append(filtered, turnWithChars{
+			role:      t.Role,
+			content:   t.Content,
+			chars:     len(t.Content),
+			createdAt: t.CreatedAt,
+		})
+		totalChars += len(t.Content)
+	}
+
+	if len(filtered) == 0 {
+		return CompressResult{}
+	}
+
+	// 2. Self-adaptive: skip compression for moderate overruns.
+	threshold := int(float64(maxHistoryChars) * compressThresholdRatio)
+	if totalChars <= threshold {
+		return c.truncateResult(filtered)
+	}
+
+	// 3. Partition into compress group (older) and keep group (recent).
+	splitIdx := max(len(filtered)-keepRecentN, 0)
+	compressGroup := filtered[:splitIdx]
+	keepGroup := filtered[splitIdx:]
+
+	// If no older turns to compress, just truncate the keep group.
+	if len(compressGroup) == 0 {
+		return c.truncateResult(filtered)
+	}
+
+	// 4. Calculate budgets.
+	recentChars := sumChars(keepGroup)
+	compressBudget := maxHistoryChars - recentChars
+	if compressBudget <= 0 {
+		// Recent turns alone exceed budget — hard truncate recent group.
+		c.log.Warn("history: recent turns exceed budget, truncating",
+			"session_id", sessionID,
+			"recent_chars", recentChars,
+			"budget", maxHistoryChars)
+		return c.truncateResult(filtered)
+	}
+
+	// 5. Send progress notification.
+	c.notifyProgress(sessionID, len(compressGroup), totalChars)
+
+	// 6. Format compress group into text block.
+	compressText := formatTurns(compressGroup)
+	compressChars := len(compressText)
+
+	// Pre-truncate if exceeds brain input cap (drop oldest first).
+	if compressChars > brainInputCap {
+		compressText = truncateHead(compressText, brainInputCap)
+		c.log.Debug("history: pre-truncated compress input to brain cap",
+			"session_id", sessionID,
+			"original", compressChars,
+			"capped", brainInputCap)
+	}
+
+	// 7. Call Brain for compression.
+	result, ok := c.callBrain(ctx, sessionID, compressText, len(compressGroup), compressChars, compressBudget, brainFn)
+	if !ok {
+		// Brain failed — fall back to truncation.
+		return c.truncateResult(filtered)
+	}
+
+	// 8. Build final history: [summary turn] + [recent turns].
+	final := make([]worker.ConversationTurn, 0, 1+len(keepGroup))
+	final = append(final, worker.ConversationTurn{
+		Role:    "assistant",
+		Content: result,
+	})
+	for _, t := range keepGroup {
+		final = append(final, worker.ConversationTurn{
+			Role:    t.role,
+			Content: t.content,
+		})
+	}
+
+	finalChars := len(result) + recentChars
+	c.log.Info("history: compressed conversation history",
+		"session_id", sessionID,
+		"original_chars", totalChars,
+		"final_chars", finalChars,
+		"compress_ratio", fmt.Sprintf("%.0f%%", float64(1)*100-float64(len(result))/float64(compressChars)*100),
+		"turns_compressed", len(compressGroup),
+		"turns_kept", len(keepGroup))
+
+	return CompressResult{
+		Turns:         final,
+		Compressed:    true,
+		OriginalChars: totalChars,
+		FinalChars:    finalChars,
+	}
+}
+
+// ─── Brain Interaction ────────────────────────────────────────────────
+
+func (c *HistoryCompressor) callBrain(
+	ctx context.Context,
+	sessionID, compressText string,
+	turnCount, compressChars, compressBudget int,
+	brainFn func() compressorBrain,
+) (string, bool) {
+	b := brainFn()
+	if b == nil {
+		c.log.Warn("history: brain not configured, falling back to truncation",
+			"session_id", sessionID)
+		return "", false
+	}
+
+	systemPrompt := fmt.Sprintf(historyCompressSystemPrompt, compressBudget, compressBudget/4)
+	userPrompt := fmt.Sprintf(historyCompressUserTemplate,
+		turnCount, compressChars, compressText, compressBudget)
+
+	compressCtx, cancel := context.WithTimeout(ctx, compressTimeout)
+	defer cancel()
+
+	opts := brain.ChatOptions{
+		MaxTokens:    4096,
+		Temperature:  llm.FloatPtr(0.3),
+		SystemPrompt: systemPrompt,
+	}
+
+	result, err := b.ChatWithOptions(compressCtx, userPrompt, opts)
+	if err != nil {
+		c.log.Warn("history: brain compression failed, falling back to truncation",
+			"session_id", sessionID, "error", err)
+		return "", false
+	}
+
+	result = strings.TrimSpace(result)
+	if result == "" {
+		c.log.Warn("history: brain returned empty summary, falling back to truncation",
+			"session_id", sessionID)
+		return "", false
+	}
+
+	// Hard-truncate summary if still over budget (no double-compression).
+	if len(result) > compressBudget {
+		result = truncateAtBoundary(result, compressBudget)
+		c.log.Warn("history: summary exceeded budget, truncated",
+			"session_id", sessionID,
+			"summary_len", len(result),
+			"budget", compressBudget)
+	}
+
+	return result, true
+}
+
+// ─── Progress Notification ────────────────────────────────────────────
+
+func (c *HistoryCompressor) notifyProgress(sessionID string, compressCount, totalChars int) {
+	if c.hub == nil {
+		return
+	}
+	msg := fmt.Sprintf("正在压缩对话历史（%d 条 → 摘要，共 %d 字符）...", compressCount, totalChars)
+	seq := c.hub.NextSeq(sessionID)
+	env := buildNotifyEnvelope(sessionID, msg, seq)
+	// Best-effort send; failure is non-critical.
+	_ = c.hub.SendToSession(context.Background(), env)
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+type turnWithChars struct {
+	role      string
+	content   string
+	chars     int
+	createdAt int64 // unix millis from TurnRecord.CreatedAt
+}
+
+func sumChars(turns []turnWithChars) int {
+	total := 0
+	for _, t := range turns {
+		total += t.chars
+	}
+	return total
+}
+
+func formatTurns(turns []turnWithChars) string {
+	var sb strings.Builder
+	for _, t := range turns {
+		switch t.role {
+		case "user":
+			sb.WriteString("[User")
+		case "assistant":
+			sb.WriteString("[Assistant")
+		default:
+			continue
+		}
+		if t.createdAt > 0 {
+			sb.WriteString(" ")
+			sb.WriteString(time.UnixMilli(t.createdAt).Format("2006-01-02 15:04"))
+		}
+		sb.WriteString("]: ")
+		sb.WriteString(t.content)
+		sb.WriteString("\n\n")
+	}
+	return sb.String()
+}
+
+// truncateResult builds a CompressResult by truncating turns to fit within budget.
+// Takes the most recent turns that fit (drops oldest first).
+func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult {
+	history := make([]worker.ConversationTurn, 0, len(turns))
+	charsUsed := 0
+	for _, t := range turns {
+		if charsUsed+t.chars > maxHistoryChars {
+			break
+		}
+		charsUsed += t.chars
+		history = append(history, worker.ConversationTurn{
+			Role:    t.role,
+			Content: t.content,
+		})
+	}
+	return CompressResult{
+		Turns:         history,
+		Compressed:    false,
+		OriginalChars: sumChars(turns),
+		FinalChars:    charsUsed,
+	}
+}
+
+// truncateAtBoundary truncates s to at most maxLen characters, breaking at
+// the last newline within the limit for cleaner output.
+func truncateAtBoundary(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	// Scan backward for a newline.
+	for i := maxLen - 1; i >= 0; i-- {
+		if runes[i] == '\n' {
+			return string(runes[:i])
+		}
+	}
+	return string(runes[:maxLen])
+}
+
+// truncateHead truncates the text from the head (dropping oldest content)
+// to fit within maxLen. Scans forward to find the first newline after maxLen
+// to avoid splitting mid-turn.
+func truncateHead(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	// Scan forward from maxLen for a clean break point.
+	for i := maxLen; i < len(runes) && i < maxLen+200; i++ {
+		if runes[i] == '\n' {
+			return string(runes[i+1:])
+		}
+	}
+	return string(runes[maxLen:])
+}
+
+// ─── Prompt Templates ─────────────────────────────────────────────────
+
+const historyCompressSystemPrompt = `你是一位对话历史压缩助手。你的任务是将多轮对话历史压缩为简洁的摘要。
+
+输出规范：
+1. 纯文本，保留关键技术术语、文件名、决策点和结论
+2. 控制在 %d 字符以内（约 %d tokens）
+3. 使用 [User] 和 [Assistant] 标记保持对话结构
+4. 保留所有代码变更描述和文件路径
+5. 保留错误信息和解决方案
+6. 压缩率目标：将原始内容压缩到 30-40%%（去除 60-70%% 的冗余内容）
+
+压缩策略：
+- 合并相似主题的多轮对话
+- 省略重复的确认/否定回复和中间调试过程
+- 保留所有工具调用结果的关键信息
+- 保留用户明确要求/决策的完整表述
+- 时间线标记：[较早] ... [中间] ... [较近]`
+
+const historyCompressUserTemplate = `请将以下 %d 轮对话历史（共 %d 字符）压缩为简洁摘要：
+
+%s
+
+要求：压缩后控制在 %d 字符以内，保留关键上下文、技术细节和决策点。输出压缩率 60-70%%。`
