@@ -2505,6 +2505,8 @@ func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
 	go func() {
 		<-gs.started
 		_ = m.UpdateWorkerSessionID(ctx, "sess_guard_err", "hermes_session_xyz")
+		// After concurrent update completes, the next Upsert is the guard re-persist.
+		gs.failNextUpsert.Store(true)
 		close(gs.done)
 	}()
 
@@ -2517,26 +2519,41 @@ func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
 	require.Equal(t, events.StateIdle, info.State)
 	require.Equal(t, "hermes_session_xyz", info.WorkerSessionID,
 		"in-memory WorkerSessionID must be preserved even if guard re-persist fails")
+
+	// Verify the last successful DB write captured the preserved value.
+	// The guard re-persist failed, so the last *successful* Upsert should
+	// contain the WorkerSessionID from UpdateWorkerSessionID.
+	dbInfo := gs.lastSuccessful.Load()
+	require.NotNil(t, dbInfo, "at least one successful Upsert should have occurred")
+	require.Equal(t, "hermes_session_xyz", dbInfo.WorkerSessionID,
+		"last successful DB Upsert must contain the preserved WorkerSessionID")
 }
 
 // guardErrStore shadows Upsert to inject a concurrent UpdateWorkerSessionID
-// during the first Upsert (Transition main), then fails on the guard re-persist
-// (call 3+). Used by TestTransition_GuardRePersistError_InMemoryConsistent.
+// during the main transition Upsert, then fails on the guard re-persist using
+// a semantic flag rather than call-count heuristics.
 type guardErrStore struct {
 	mockStore
-	upsertCount atomic.Int32
-	started     chan struct{}
-	done        chan struct{}
+	failNextUpsert atomic.Bool // set by goroutine: next Upsert after concurrent update should fail
+	sawFirst       atomic.Bool // set after the first Upsert (transition main) begins
+	started        chan struct{}
+	done           chan struct{}
+	lastSuccessful atomic.Pointer[SessionInfo]
 }
 
 func (g *guardErrStore) Upsert(ctx context.Context, info *SessionInfo) error {
-	n := g.upsertCount.Add(1)
-	if n == 1 {
+	if !g.sawFirst.Load() {
+		// Main transition Upsert — synchronize and always succeed.
+		g.sawFirst.Store(true)
 		close(g.started)
 		<-g.done
+		g.lastSuccessful.Store(info)
+		return nil
 	}
-	if n >= 3 {
+	// Subsequent calls: UpdateWorkerSessionID (succeed) then guard re-persist (fail).
+	if g.failNextUpsert.CompareAndSwap(true, false) {
 		return fmt.Errorf("simulated guard persist failure")
 	}
+	g.lastSuccessful.Store(info)
 	return nil
 }

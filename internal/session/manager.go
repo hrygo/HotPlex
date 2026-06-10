@@ -421,7 +421,11 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 		candidate.WorkerSessionID = ms.info.WorkerSessionID
 		ms.mu.Unlock()
 		if dbErr := m.store.Upsert(ctx, &candidate); dbErr != nil {
-			m.log.Error("session: failed to re-persist WorkerSessionID after guard", "err", dbErr)
+			// DB write failed — in-memory is correct but DB row is stale.
+			// Gateway restart will lose WorkerSessionID, breaking resume.
+			// TODO(#709): add Prometheus counter for this path.
+			m.log.Error("session: failed to re-persist WorkerSessionID after guard",
+				"session_id", candidate.ID, "worker_session_id", candidate.WorkerSessionID, "err", dbErr)
 		}
 		ms.mu.Lock()
 		// Preserve any concurrent update that arrived during the second
@@ -957,9 +961,11 @@ func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID
 	}
 
 	ms.mu.Lock()
-	// Fast-path check is done inside updateSession's apply closure to avoid
-	// TOCTOU: the lock is released between this check and updateSession acquiring
-	// it, during which transitionState can overwrite WorkerSessionID.
+	// Fast-path: skip DB write when value is unchanged. The check runs outside
+	// updateSession's atomic apply closure, so a concurrent transitionState can
+	// overwrite WorkerSessionID between this unlock and updateSession's re-lock.
+	// This is safe: transitionState's guard restores the value, and forwardEvents
+	// has a safety-net persist.
 	if ms.info.WorkerSessionID == workerSessionID {
 		ms.mu.Unlock()
 		return nil
