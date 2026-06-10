@@ -86,19 +86,10 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, err
 	}
 
-	// Persist WorkerSessionID immediately after worker start so it survives
-	// gateway restart even if no turn events arrive (SIGTERM before first
-	// Prompt). This is a best-effort optimization; the correctness guarantee
-	// comes from forwardEvents' first-event safety-net persist.
-	//
-	// Synchronous call is acceptable for SQLite (<1ms). For PostgreSQL,
-	// network round-trip adds 1–5ms per call under load; in bulk cron
-	// scenarios (N concurrent triggers, typically 1–10, max capped by
-	// PoolManager.MaxPoolSize = 20), this serializes N DB writes in the
-	// caller goroutine. If PG latency becomes a bottleneck, move this into
-	// forwardEvents' first-event branch (which already does a persist) or
-	// make it async via a write-behind queue.
-	b.persistWorkerSessionID(params.ctx, w, sid)
+	// Best-effort async persist so WorkerSessionID survives gateway restart
+	// even if no turn events arrive (SIGTERM before first Prompt). The
+	// correctness guarantee comes from forwardEvents' first-event safety-net.
+	go b.persistWorkerSessionIDInternal(params.ctx, w, sid, false)
 
 	b.fwdWg.Add(1)
 	go func() {
@@ -109,7 +100,11 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	return w, nil
 }
 
-func (b *Bridge) persistWorkerSessionID(ctx context.Context, w worker.Worker, sessionID string) {
+func (b *Bridge) persistWorkerSessionIDForce(ctx context.Context, w worker.Worker, sessionID string) {
+	b.persistWorkerSessionIDInternal(ctx, w, sessionID, true)
+}
+
+func (b *Bridge) persistWorkerSessionIDInternal(ctx context.Context, w worker.Worker, sessionID string, force bool) {
 	// Persist must survive request cancellation — detach from request-scoped ctx
 	// while preserving OTel trace context.
 	if ctx != nil {
@@ -123,7 +118,13 @@ func (b *Bridge) persistWorkerSessionID(ctx context.Context, w worker.Worker, se
 	if workerSID == "" {
 		return
 	}
-	if err := b.sm.UpdateWorkerSessionID(ctx, sessionID, workerSID); err != nil {
+	var err error
+	if force {
+		err = b.sm.UpdateWorkerSessionIDForce(ctx, sessionID, workerSID)
+	} else {
+		err = b.sm.UpdateWorkerSessionID(ctx, sessionID, workerSID)
+	}
+	if err != nil {
 		b.log.Warn("bridge: failed to persist worker session ID", "session_id", sessionID, "worker_session_id", workerSID, "err", err)
 	} else {
 		b.log.Debug("bridge: persisted worker session ID", "session_id", sessionID, "worker_session_id", workerSID)

@@ -388,6 +388,7 @@ type SessionWorkerManager interface {
 	DetachWorker(id string)
 	DetachWorkerIf(id string, expected worker.Worker) bool
 	UpdateWorkerSessionID(ctx context.Context, id, workerSessionID string) error
+	UpdateWorkerSessionIDForce(ctx context.Context, id, workerSessionID string) error
 }
 
 // SessionAdmin provides listing, ownership validation, and metadata mutations.

@@ -418,30 +418,22 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// (taken before the concurrent update) overwrites both DB and in-memory
 	// with a stale empty value, breaking session resume for ACP workers.
 	//
-	// NOTE: This second Upsert re-introduces a lock-release window. The
-	// residual race is theoretical (requires concurrent UpdateWorkerSessionID
-	// during the ~µs Upsert window) and is mitigated by forwardEvents'
-	// first-event safety-net persist. A CAS-based approach (e.g. WHERE
-	// worker_session_id = '' in SQL) or lock-dual-upsert pattern could
-	// eliminate this window entirely but adds complexity; deferred until
-	// the residual race is observed in production metrics.
+	// NOTE: This targeted SQL UPDATE avoids full-row Upsert's risk of overwriting
+	// concurrent field changes (UpdatedAt, ExpiresAt, Source, etc.) made during
+	// the unlock window. The residual race (concurrent UpdateWorkerSessionID
+	// during the ~µs SQL window) is mitigated by forwardEvents' first-event
+	// safety-net persist.
 	if candidate.WorkerSessionID == "" && ms.info.WorkerSessionID != "" {
-		candidate.WorkerSessionID = ms.info.WorkerSessionID
+		wsid := ms.info.WorkerSessionID
+		candidate.WorkerSessionID = wsid
 		ms.mu.Unlock()
-		if dbErr := m.store.Upsert(ctx, &candidate); dbErr != nil {
-			// DB write failed — in-memory is correct but DB row is stale.
-			// Gateway restart will lose WorkerSessionID, breaking resume.
+		if dbErr := m.store.UpdateWorkerSessionIDSQL(ctx, candidate.ID, wsid); dbErr != nil {
 			observability.SessionGuardRePersistFailures().Add(ctx, 1)
 			m.log.Error("session: failed to re-persist WorkerSessionID after guard",
-				"session_id", candidate.ID, "worker_session_id", candidate.WorkerSessionID, "err", dbErr)
+				"session_id", candidate.ID, "worker_session_id", wsid, "err", dbErr)
 		}
 		ms.mu.Lock()
-		// Preserve any concurrent update that arrived during the second
-		// Upsert's lock-release window (residual theoretical race).
-		// In the extreme case where this also races, the in-memory value
-		// will be correct but the DB row may remain stale until forwardEvents'
-		// next persist opportunity restores consistency.
-		if ms.info.WorkerSessionID != candidate.WorkerSessionID {
+		if ms.info.WorkerSessionID != wsid {
 			candidate.WorkerSessionID = ms.info.WorkerSessionID
 			observability.SessionGuardRePersistConcurrentOverwrites().Add(ctx, 1)
 		}
@@ -964,6 +956,17 @@ func (m *Manager) ClearContext(ctx context.Context, sessionID string) error {
 // Workers that manage their own session IDs (OpenCode Server) call this
 // to store the ID so it can be restored on resume.
 func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
+	return m.updateWorkerSessionID(ctx, id, workerSessionID, false)
+}
+
+// UpdateWorkerSessionIDForce persists the worker-internal session ID, bypassing
+// the fast-path skip. Used by the safety-net caller (forwardEvents) to repair
+// stale DB rows after guard re-persist failures.
+func (m *Manager) UpdateWorkerSessionIDForce(ctx context.Context, id, workerSessionID string) error {
+	return m.updateWorkerSessionID(ctx, id, workerSessionID, true)
+}
+
+func (m *Manager) updateWorkerSessionID(ctx context.Context, id, workerSessionID string, force bool) error {
 	if m == nil {
 		return ErrSessionNotFound
 	}
@@ -972,10 +975,19 @@ func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID
 		return ErrSessionNotFound
 	}
 
+	// Fast-path skip when in-memory matches — safe for normal callers since
+	// the guard now uses targeted SQL. Force mode (safety-net) always writes
+	// to repair stale DB rows from guard re-persist failures.
+	if !force {
+		ms.mu.RLock()
+		same := ms.info.WorkerSessionID == workerSessionID
+		ms.mu.RUnlock()
+		if same {
+			return nil
+		}
+	}
+
 	return m.updateSession(ctx, ms, func(info *SessionInfo) func() {
-		// No fast-path skip: even when the in-memory value matches, the DB row
-		// may be stale (guard re-persist failed, transitionState overwrote it).
-		// The safety-net caller (forwardEvents) relies on this path to repair DB.
 		prev := info.WorkerSessionID
 		info.WorkerSessionID = workerSessionID
 		return func() { info.WorkerSessionID = prev }

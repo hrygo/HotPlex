@@ -87,6 +87,10 @@ func (m *mockAPISM) UpdateWorkerSessionID(ctx context.Context, id, workerSession
 	return m.Called(ctx, id, workerSessionID).Error(0)
 }
 
+func (m *mockAPISM) UpdateWorkerSessionIDForce(ctx context.Context, id, workerSessionID string) error {
+	return m.Called(ctx, id, workerSessionID).Error(0)
+}
+
 func (m *mockAPISM) ResetExpiry(ctx context.Context, id string) error {
 	return m.Called(ctx, id).Error(0)
 }

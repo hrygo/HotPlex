@@ -63,6 +63,18 @@ func (s *pgStore) Upsert(ctx context.Context, info *SessionInfo) error {
 	return nil
 }
 
+// UpdateWorkerSessionIDSQL performs a targeted UPDATE on the worker_session_id
+// column only, avoiding the full-row overwrite of Upsert.
+func (s *pgStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
+	ctx, cancel := upsertTimeout(ctx)
+	defer cancel()
+	_, err := s.db.ExecContext(ctx, s.queries["sessions.update_worker_session_id"], workerSessionID, id)
+	if err != nil {
+		return fmt.Errorf("session store: update worker session id: %w", err)
+	}
+	return nil
+}
+
 // Get loads a session by ID. Returns ErrSessionNotFound if not found.
 func (s *pgStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	info, err := scanSession(s.db.QueryRowContext(ctx, s.queries["store.get_session"], id))

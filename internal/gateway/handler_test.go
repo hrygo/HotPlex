@@ -888,6 +888,9 @@ func (m *mockInputSM) DetachWorkerIf(_ string, _ worker.Worker) bool            
 func (m *mockInputSM) UpdateWorkerSessionID(_ context.Context, _ string, _ string) error {
 	return nil
 }
+func (m *mockInputSM) UpdateWorkerSessionIDForce(_ context.Context, _ string, _ string) error {
+	return nil
+}
 func (m *mockInputSM) List(_ context.Context, _ string, _ string, _ int, _ int) ([]*session.SessionInfo, error) {
 	return nil, nil
 }

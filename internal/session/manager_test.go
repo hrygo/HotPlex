@@ -33,6 +33,11 @@ func (m *mockStore) Upsert(ctx context.Context, info *SessionInfo) error {
 	return args.Error(0)
 }
 
+func (m *mockStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
+	args := m.Called(ctx, id, workerSessionID)
+	return args.Error(0)
+}
+
 func (m *mockStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
@@ -2160,12 +2165,17 @@ func TestManager_UpdateWorkerSessionID_SameValue_Idempotent(t *testing.T) {
 	m.sessions["sess_wsid_same"] = &managedSession{info: *seed}
 	m.mu.Unlock()
 
-	// Same value — no fast-path skip; Upsert is always called so DB row
-	// stays consistent even if a prior guard re-persist failed.
-	store.On("Upsert", mock.Anything, mock.Anything).Return(nil)
+	// Same value — fast-path skip: Upsert should not be called by
+	// UpdateWorkerSessionID when in-memory matches and force=false.
+	beforeCount := len(store.Calls)
+	store.On("Upsert", mock.Anything, mock.Anything).Maybe().Return(nil)
 	err = m.UpdateWorkerSessionID(ctx, "sess_wsid_same", "existing_id")
 	require.NoError(t, err)
-	store.AssertCalled(t, "Upsert", mock.Anything, mock.Anything)
+	// No new Upsert calls from UpdateWorkerSessionID (fast-path skip).
+	for _, call := range store.Calls[beforeCount:] {
+		require.NotEqual(t, "Upsert", call.Method,
+			"UpdateWorkerSessionID with same value should not trigger Upsert (fast-path)")
+	}
 }
 
 func TestManager_UpdateWorkerSessionID_NotFound(t *testing.T) {
@@ -2452,6 +2462,7 @@ func TestTransition_PreservesWorkerSessionID_OnConcurrentUpdate(t *testing.T) {
 
 	// The mockStore Upsert needs to be set up for both calls.
 	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+	store.On("UpdateWorkerSessionIDSQL", ctx, "sess_race_wsid", "hermes_session_abc").Return(nil)
 
 	// Transition RUNNING → IDLE. The candidate snapshot has empty WorkerSessionID,
 	// but the concurrent UpdateWorkerSessionID sets it to "hermes_session_abc".
@@ -2464,11 +2475,11 @@ func TestTransition_PreservesWorkerSessionID_OnConcurrentUpdate(t *testing.T) {
 	require.Equal(t, "hermes_session_abc", info.WorkerSessionID,
 		"WorkerSessionID must be preserved when set concurrently during transition")
 
-	// Verify the guard re-persisted to DB with the correct WorkerSessionID.
+	// Verify the concurrent UpdateWorkerSessionID Upsert has the correct WorkerSessionID.
 	dbInfo := store.lastUpsert.Load()
 	require.NotNil(t, dbInfo, "at least one Upsert should have occurred")
 	require.Equal(t, "hermes_session_abc", dbInfo.WorkerSessionID,
-		"last DB Upsert must contain the preserved WorkerSessionID")
+		"DB Upsert from concurrent UpdateWorkerSessionID must contain the preserved WorkerSessionID")
 }
 
 func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
@@ -2509,7 +2520,7 @@ func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
 		<-gs.started
 		_ = m.UpdateWorkerSessionID(ctx, "sess_guard_err", "hermes_session_xyz")
 		// After concurrent update completes, the next Upsert is the guard re-persist.
-		gs.failNextUpsert.Store(true)
+		gs.failNextSQL.Store(true)
 		close(gs.done)
 	}()
 
@@ -2523,43 +2534,51 @@ func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
 	require.Equal(t, "hermes_session_xyz", info.WorkerSessionID,
 		"in-memory WorkerSessionID must be preserved even if guard re-persist fails")
 
-	// Verify the last successful DB write captured the preserved value.
-	// The guard re-persist failed, so the last *successful* Upsert should
-	// contain the WorkerSessionID from UpdateWorkerSessionID.
+	// Verify the guard attempted to persist the correct WorkerSessionID
+	// (even though it failed). The last successful Upsert (from concurrent
+	// UpdateWorkerSessionID) also has the correct value.
 	dbInfo := gs.lastSuccessful.Load()
 	require.NotNil(t, dbInfo, "at least one successful Upsert should have occurred")
 	require.Equal(t, "hermes_session_xyz", dbInfo.WorkerSessionID,
 		"last successful DB Upsert must contain the preserved WorkerSessionID")
+	sqlWSID := gs.lastSQLWSID.Load()
+	require.NotNil(t, sqlWSID, "guard should have attempted UpdateWorkerSessionIDSQL")
+	require.Equal(t, "hermes_session_xyz", *sqlWSID,
+		"guard SQL UPDATE must target the preserved WorkerSessionID")
 }
 
 // guardErrStore shadows Upsert to inject a concurrent UpdateWorkerSessionID
-// during the main transition Upsert, then fails on the guard re-persist using
-// a semantic flag rather than call-count heuristics.
+// during the main transition Upsert, then fails the guard re-persist
+// (UpdateWorkerSessionIDSQL) using a semantic flag.
 type guardErrStore struct {
 	mockStore
-	failNextUpsert atomic.Bool // set by goroutine: next Upsert after concurrent update should fail
+	failNextSQL    atomic.Bool // set by goroutine: next UpdateWorkerSessionIDSQL should fail
 	sawFirst       atomic.Bool // set after the first Upsert (transition main) begins
 	started        chan struct{}
 	done           chan struct{}
 	lastSuccessful atomic.Pointer[SessionInfo]
+	lastSQLWSID    atomic.Pointer[string] // captures the wsid from UpdateWorkerSessionIDSQL
 }
 
 func (g *guardErrStore) Upsert(ctx context.Context, info *SessionInfo) error {
 	if !g.sawFirst.Load() {
-		// Main transition Upsert — synchronize and always succeed.
+		// Main transition Upsert -- synchronize and always succeed.
 		g.sawFirst.Store(true)
 		close(g.started)
 		<-g.done
-		// Don't store lastSuccessful here: candidate.WorkerSessionID is
-		// empty at this point and would overwrite the value from the
-		// concurrent UpdateWorkerSessionID Upsert.
 		return nil
 	}
-	// Subsequent calls: UpdateWorkerSessionID (succeed) then guard re-persist (fail).
-	if g.failNextUpsert.CompareAndSwap(true, false) {
-		return fmt.Errorf("simulated guard persist failure")
-	}
+	// Subsequent Upsert calls (from UpdateWorkerSessionID).
 	infoCopy := *info
 	g.lastSuccessful.Store(&infoCopy)
+	return nil
+}
+
+func (g *guardErrStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
+	wsid := workerSessionID
+	g.lastSQLWSID.Store(&wsid)
+	if g.failNextSQL.CompareAndSwap(true, false) {
+		return fmt.Errorf("simulated guard persist failure")
+	}
 	return nil
 }
