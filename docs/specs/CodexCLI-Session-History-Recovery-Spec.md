@@ -11,7 +11,7 @@
 
 CodexCLI worker 使用 `codex app-server` 单例进程管理 thread。所有 thread 历史存储在进程内存中，无磁盘持久化。
 
-当 session 空闲超过 30 分钟，Zombie GC 终止 session → app-server 进程被 KillIfIdle 杀死 → 所有对话历史随进程销毁。用户下次发消息时，创建全新 thread，无法记住之前的指令。
+当 session 空闲超过 30 分钟，Zombie GC 终止 session → app-server 进程被 shutdown 终止（idle drain 或进程回收）→ 所有对话历史随进程销毁。用户下次发消息时，创建全新 thread，无法记住之前的指令。
 
 **复现场景**（2026-06-09 22:05–22:41 实际日志）:
 
@@ -19,14 +19,14 @@ CodexCLI worker 使用 `codex app-server` 单例进程管理 thread。所有 thr
 |------|------|
 | 22:05:04 | 用户发送 "现在开始我发 ping，你回复 汪"，session `092bc1ab` 处理 |
 | 22:05:23 | Session 最后 IO |
-| 22:36:21 | Zombie GC 终止 session（30 分钟无 IO），KillIfIdle 立即杀死 app-server 进程 |
+| 22:36:21 | Zombie GC 终止 session（30 分钟无 IO），shutdown 释放引用 → idle drain 杀死 app-server 进程 |
 | 22:41:48 | 用户在同一 Slack thread 发 "ping"，Resume 失败 → 创建全新 session/thread |
 | 22:41:49 | Agent 回复 "pong" 而非 "汪" — 历史完全丢失 |
 
 **根因链**:
 
 1. **Zombie GC**（30 min execution timeout）终止空闲 session
-2. **KillIfIdle** 立即杀死 app-server 进程（绕过 30 分钟 drain timer）
+2. **shutdown 释放引用** → idle drain timer 到期杀死 app-server 进程（或进程被回收）
 3. **Thread 历史全丢** — 仅存于进程内存，无持久化
 4. **Resume 创建新 thread** — `startNewThread()` 调用 `thread/start` 创建全新 thread
 5. **thread/start 协议不支持恢复** — `ThreadStartParams` 无 threadId 字段
