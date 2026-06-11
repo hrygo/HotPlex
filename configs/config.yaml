@@ -235,8 +235,11 @@ worker:
     # Model name. Empty = use Codex default model from ~/.codex/config.toml
     model: ""
     # Sandbox mode: read-only, workspace-write, danger-full-access
+    # YOLO mode (default): danger-full-access grants full filesystem + network access.
+    # For restricted sandbox, use workspace-write or read-only.
     sandbox: "danger-full-access"
     # Approval mode: untrusted, on-request, never
+    # YOLO mode (default): never skips all approval prompts — commands run immediately.
     approval_mode: "never"
     # Ephemeral sessions (don't persist to disk)
     ephemeral: true

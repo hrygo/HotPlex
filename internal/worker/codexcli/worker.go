@@ -684,6 +684,9 @@ func sandboxFromSession(session worker.SessionInfo, defaultSandbox string) strin
 
 // buildThreadStartParams constructs the JSON-RPC params for "thread/start".
 // Shared by Start() and ResetContext() to avoid duplication.
+//
+// Default YOLO mode: danger-full-access sandbox + never approval.
+// Codex source confirms DangerFullAccess grants full network + filesystem access.
 func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]any {
 	approvalMode := cfg.ApprovalMode
 	if session.SkipPermissions {
