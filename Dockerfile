@@ -72,7 +72,7 @@ ARG DEBIAN_MIRROR
 
 LABEL org.opencontainers.image.title="HotPlex Worker Gateway"
 LABEL org.opencontainers.image.description="AI Coding Agent access layer"
-LABEL org.opencontainers.image.version="1.26.3"
+LABEL org.opencontainers.image.version="1.27.0"
 LABEL org.opencontainers.image.source="https://github.com/hotplex/hotplex"
 LABEL org.opencontainers.image.revision="${GIT_SHA}"
 LABEL org.opencontainers.image.created="${BUILD_TIME}"

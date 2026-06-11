@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.27.0] - 2026-06-11
+
+### Summary
+
+v1.27.0 是一次 minor 版本更新，聚焦于 **Worker 会话恢复** 和 **消息质量**。CodexCLI 新增基于 turns 表的会话历史恢复 + Brain LLM 智能压缩（替代硬截断），飞书适配器引入智能段落分割（累计字符阈值 + 句末触发）。同时修复 ACP WorkerSessionID 持久化竞态条件、CodexCLI 崩溃恢复、ACP 通知丢包等多项可靠性问题。
+
+### Added
+
+- **Worker**: CodexCLI conversation history recovery — query persistent turns table on session resume, inject structured history prefix into new thread via crypto/rand boundary ID. (#704)
+- **Worker**: Smart history compression via Brain LLM — new `HistoryCompressor` module replaces hard truncation with intelligent summarization when history exceeds budget (60k chars), with graceful truncation fallback when Brain is unavailable. (#704)
+- **Gateway Core**: `pull_request` webhook trigger for fork PR support — dedup'd dual-path design (check_suite preferred, pull_request fallback) with 5min cooldown. (#704)
+- **Messaging**: Feishu smart paragraph break — cumulative char threshold (200 chars) + sentence-end trigger replaces naive single-newline append, producing proper double-newline paragraph separation. (#707)
+- **Observability**: `hotplex.session.transition.guard_repersist_overwrites` and `hotplex.session.transition.concurrent_overwrite` Prometheus counters for WorkerSessionID persist monitoring. (#710)
+
+### Changed
+
+- **Worker**: CodexCLI YOLO mode — default sandbox changed to `danger-full-access` for unrestricted network and filesystem access with `never` approval. (#704)
+- **Worker**: CodexCLI `shutdown()` no longer calls `KillIfIdle` — singleton process lifecycle managed by idle drain or explicit `ShutdownSingleton`, aligned with OCS pattern. (#704)
+- **Configuration**: ACP `auto_approve` default changed from `false` to `true` — sandboxed agents don't need manual approval.
+
+### Fixed
+
+- **Worker**: ACP WorkerSessionID persistence race condition — three-layer defense: targeted SQL UPDATE in `createAndLaunchWorker`, `transitionState` guard preserving concurrent updates, `forwardEvents` safety-net with forced persist. (#710)
+- **Worker**: ACP readLoop burst drain increased from 16→128 to prevent notification drops under high throughput (1402 observed in 2min). (#702)
+- **Worker**: ACP fatal JSONRPC errors now classified as `ErrKindUnavailable` to correctly trigger Bridge crash recovery; business errors (rate limit) continue returning nil. (#702)
+- **Worker**: CodexCLI crash recovery extended to fresh sessions (previously only resumed), using `!doneReceived` instead of `exitCode` as trigger for robust crash detection. (#702)
+- **Worker**: ACP rawInput `path` key normalized to `file_path` for toolfmt — file operations now show descriptive status instead of generic placeholder.
+- **Gateway Core**: ForwardEvents turn count restore uses `bgCtx()` (shutdown-scoped) instead of request `ctx`, preventing DB query failures on user disconnect. (#702)
+- **Messaging**: Feishu `id_convert` retries 3x with exponential backoff (100ms→200ms→400ms) for transient API failures, with permanent error skip (auth/404). (#702)
+
 ## [1.26.3] - 2026-06-09
 
 ### Summary
