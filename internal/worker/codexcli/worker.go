@@ -504,6 +504,9 @@ func (w *AppServerWorker) Wait() (int, error) {
 	}
 	select {
 	case <-crashSub:
+		if w.manager != nil {
+			return w.manager.CrashExitCode(), nil
+		}
 		return 1, nil
 	case <-doneCh:
 		return 0, nil

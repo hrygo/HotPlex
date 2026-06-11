@@ -114,16 +114,11 @@ func (b *Bridge) persistWorkerSessionIDEnsure(ctx context.Context, w worker.Work
 	b.persistWorkerSessionIDInternal(ctx, w, sessionID, true)
 }
 
-func (b *Bridge) persistWorkerSessionIDInternal(ctx context.Context, w worker.Worker, sessionID string, force bool) {
-	// Persist must survive request cancellation with an independent context
-	// (avoids inheriting the request deadline). context.WithoutCancel
-	// preserves all context values (trace, baggage, links) while removing
-	// cancellation, consistent with transitionState guard's usage.
-	if ctx != nil {
-		ctx = context.WithoutCancel(ctx)
-	} else {
-		ctx = context.Background()
-	}
+func (b *Bridge) persistWorkerSessionIDInternal(_ context.Context, w worker.Worker, sessionID string, force bool) {
+	// Use Background to fully detach from the request context. The async DB
+	// write outlives the request, so inheriting trace baggage would mislead
+	// trace analysis (spans from a completed request's children).
+	ctx := context.Background()
 	handler, ok := w.(worker.WorkerSessionIDHandler)
 	if !ok {
 		return
@@ -160,9 +155,12 @@ type fallbackParams struct {
 	accModelName  string
 }
 
-// attemptResumeFallback handles a crashed resumed worker with a two-step strategy:
+// attemptResumeFallback handles a crashed worker with a two-step strategy:
 //  1. retryDepth < 1: Retry resume once to preserve conversation history (transient failures).
 //  2. retryDepth >= 1: Fall back to fresh start — conversation data is permanently lost.
+//
+// Applies to both fresh and resumed sessions. Workers that cannot resume
+// will gracefully fall back to fresh Start() via ErrFellBackToFreshStart.
 //
 // Returns true if a new forwardEvents goroutine took over.
 func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
