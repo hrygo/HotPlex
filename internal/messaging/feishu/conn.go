@@ -12,8 +12,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"unicode/utf8"
-
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/messaging/textutil"
 	"github.com/hrygo/hotplex/internal/observability"
@@ -40,7 +38,7 @@ type FeishuConn struct {
 	lastBranch        string // cached from last TurnSummaryData
 	lastSummarySentMs atomic.Int64
 	voiceTriggered    atomic.Bool
-	paraCharCount     int // per-session cumulative character counter for paragraph breaking
+	paraBreaker       textutil.ParagraphBreaker
 }
 
 func NewFeishuConn(adapter *Adapter, chatID, threadKey, workDir string) *FeishuConn {
@@ -211,11 +209,7 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	}
 	if env.Event.Type == events.MessageDelta {
 		c.mu.Lock()
-		c.paraCharCount += utf8.RuneCountInString(text)
-		shouldBreak := c.paraCharCount > 150 && textutil.EndsWithSentenceTerminator(text)
-		if shouldBreak {
-			c.paraCharCount = 0
-		}
+		shouldBreak := c.paraBreaker.Add(text)
 		c.mu.Unlock()
 		if shouldBreak {
 			text += "\n\n"
@@ -256,7 +250,7 @@ func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error
 
 	// Reset paragraph counter for next turn.
 	c.mu.Lock()
-	c.paraCharCount = 0
+	c.paraBreaker.Reset()
 	c.mu.Unlock()
 
 	var closeErr error
@@ -301,7 +295,7 @@ func (c *FeishuConn) handleError(ctx context.Context, env *events.Envelope) erro
 	c.adapter.Interactions.CancelAll(env.SessionID)
 	// Reset paragraph counter on error.
 	c.mu.Lock()
-	c.paraCharCount = 0
+	c.paraBreaker.Reset()
 	c.mu.Unlock()
 	if streamCtrl != nil && streamCtrl.IsCreated() {
 		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)

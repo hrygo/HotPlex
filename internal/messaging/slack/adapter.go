@@ -17,6 +17,7 @@ import (
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/messaging/phrases"
 	"github.com/hrygo/hotplex/internal/messaging/stt"
+	"github.com/hrygo/hotplex/internal/messaging/textutil"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/events"
 
@@ -815,6 +816,7 @@ type SlackConn struct {
 
 	lastSummarySentMs atomic.Int64 // unix ms of last successful turn summary send
 	voiceTriggered    atomic.Bool
+	paraBreaker       textutil.ParagraphBreaker
 }
 
 // NewSlackConn creates a platform connection bound to a channel/thread.
