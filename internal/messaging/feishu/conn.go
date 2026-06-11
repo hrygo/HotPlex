@@ -212,7 +212,7 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if env.Event.Type == events.MessageDelta {
 		c.mu.Lock()
 		c.paraCharCount += utf8.RuneCountInString(text)
-		shouldBreak := c.paraCharCount > 200 && textutil.EndsWithSentenceTerminator(text)
+		shouldBreak := c.paraCharCount > 150 && textutil.EndsWithSentenceTerminator(text)
 		if shouldBreak {
 			c.paraCharCount = 0
 		}

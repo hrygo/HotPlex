@@ -13,48 +13,48 @@ func TestParagraphBreak_NoBreakBelowThreshold(t *testing.T) {
 	adapter := newTestAdapter(t)
 	c := newTestConn(adapter, "")
 
-	text := strings.Repeat("a", 199) + "\u3002"
+	text := strings.Repeat("a", 149) + "\u3002"
 	c.mu.Lock()
 	c.paraCharCount += utf8.RuneCountInString(text)
-	shouldBreak := c.paraCharCount > 200 && endsWithSentenceTerminator(text)
+	shouldBreak := c.paraCharCount > 150 && endsWithSentenceTerminator(text)
 	c.mu.Unlock()
 
-	require.False(t, shouldBreak, "200 runes (not > 200), should not break")
-	require.Equal(t, 200, c.paraCharCount)
+	require.False(t, shouldBreak, "150 runes (not > 150), should not break")
+	require.Equal(t, 150, c.paraCharCount)
 }
 
-func TestParagraphBreak_TriggerAt201(t *testing.T) {
+func TestParagraphBreak_TriggerAt151(t *testing.T) {
 	t.Parallel()
 	adapter := newTestAdapter(t)
 	c := newTestConn(adapter, "")
 
 	c.mu.Lock()
-	c.paraCharCount = 200
+	c.paraCharCount = 150
 	delta := "\u3002"
 	c.paraCharCount += utf8.RuneCountInString(delta)
-	shouldBreak := c.paraCharCount > 200 && endsWithSentenceTerminator(delta)
+	shouldBreak := c.paraCharCount > 150 && endsWithSentenceTerminator(delta)
 	if shouldBreak {
 		c.paraCharCount = 0
 	}
 	c.mu.Unlock()
 
-	require.True(t, shouldBreak, "201 > 200 with terminator, should break")
+	require.True(t, shouldBreak, "151 > 150 with terminator, should break")
 	require.Equal(t, 0, c.paraCharCount, "counter should reset")
 }
 
-func TestParagraphBreak_Boundary200(t *testing.T) {
+func TestParagraphBreak_Boundary150(t *testing.T) {
 	t.Parallel()
 	adapter := newTestAdapter(t)
 	c := newTestConn(adapter, "")
 
 	c.mu.Lock()
-	c.paraCharCount = 199
+	c.paraCharCount = 149
 	delta := "a"
 	c.paraCharCount += utf8.RuneCountInString(delta)
-	shouldBreak := c.paraCharCount > 200 && endsWithSentenceTerminator(delta)
+	shouldBreak := c.paraCharCount > 150 && endsWithSentenceTerminator(delta)
 	c.mu.Unlock()
 
-	require.False(t, shouldBreak, "exactly 200 is not > 200")
+	require.False(t, shouldBreak, "exactly 150 is not > 150")
 }
 
 func TestParagraphBreak_NoTerminatorNoBreak(t *testing.T) {
@@ -66,7 +66,7 @@ func TestParagraphBreak_NoTerminatorNoBreak(t *testing.T) {
 	c.paraCharCount = 500
 	delta := "hello"
 	c.paraCharCount += utf8.RuneCountInString(delta)
-	shouldBreak := c.paraCharCount > 200 && endsWithSentenceTerminator(delta)
+	shouldBreak := c.paraCharCount > 150 && endsWithSentenceTerminator(delta)
 	c.mu.Unlock()
 
 	require.False(t, shouldBreak, "no terminator, no break")
@@ -78,10 +78,10 @@ func TestParagraphBreak_CJKTerminator(t *testing.T) {
 	c := newTestConn(adapter, "")
 
 	c.mu.Lock()
-	c.paraCharCount = 200
+	c.paraCharCount = 150
 	delta := "\uff01" // '！'
 	c.paraCharCount += utf8.RuneCountInString(delta)
-	shouldBreak := c.paraCharCount > 200 && endsWithSentenceTerminator(delta)
+	shouldBreak := c.paraCharCount > 150 && endsWithSentenceTerminator(delta)
 	if shouldBreak {
 		c.paraCharCount = 0
 	}
@@ -97,10 +97,10 @@ func TestParagraphBreak_ResetAfterBreak(t *testing.T) {
 	c := newTestConn(adapter, "")
 
 	c.mu.Lock()
-	c.paraCharCount = 200
+	c.paraCharCount = 150
 	delta1 := "\u3002"
 	c.paraCharCount += utf8.RuneCountInString(delta1)
-	if c.paraCharCount > 200 && endsWithSentenceTerminator(delta1) {
+	if c.paraCharCount > 150 && endsWithSentenceTerminator(delta1) {
 		c.paraCharCount = 0
 	}
 	require.Equal(t, 0, c.paraCharCount)
@@ -118,7 +118,7 @@ func TestParagraphBreak_SessionIsolation(t *testing.T) {
 	c2 := newTestConn(adapter, "")
 
 	c1.mu.Lock()
-	c1.paraCharCount = 200
+	c1.paraCharCount = 150
 	c1.mu.Unlock()
 
 	c2.mu.Lock()
