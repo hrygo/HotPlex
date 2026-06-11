@@ -817,7 +817,7 @@ func Default() *Config {
 			CodexCLI: CodexCLIConfig{
 				Command:         "codex",
 				Sandbox:         "danger-full-access",
-				ApprovalMode:    "never",
+				ApprovalMode:    "on-request",
 				Ephemeral:       true,
 				Personality:     "friendly",
 				StartupTimeout:  30 * time.Second,

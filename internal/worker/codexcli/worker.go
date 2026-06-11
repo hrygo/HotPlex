@@ -685,15 +685,13 @@ func sandboxFromSession(session worker.SessionInfo, defaultSandbox string) strin
 // buildThreadStartParams constructs the JSON-RPC params for "thread/start".
 // Shared by Start() and ResetContext() to avoid duplication.
 func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]any {
-	approvalMode := cfg.ApprovalMode
-	if session.SkipPermissions {
-		approvalMode = "never"
-	}
+	// approvalPolicy "on-request" lets the agent request permission for
+	// elevated operations (network, etc); HotPlex auto-approves all requests.
 	params := map[string]any{
 		"cwd":            session.ProjectDir,
 		"sandbox":        sandboxFromSession(session, cfg.Sandbox),
 		"personality":    cfg.Personality,
-		"approvalPolicy": approvalMode,
+		"approvalPolicy": cfg.ApprovalMode,
 	}
 	if cfg.Model != "" {
 		params["model"] = cfg.Model

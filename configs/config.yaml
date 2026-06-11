@@ -237,7 +237,7 @@ worker:
     # Sandbox mode: read-only, workspace-write, danger-full-access
     sandbox: "workspace-write"
     # Approval mode: untrusted, on-request, never
-    approval_mode: "never"
+    approval_mode: "on-request"
     # Ephemeral sessions (don't persist to disk)
     ephemeral: true
     # Process startup timeout

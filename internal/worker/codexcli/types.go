@@ -151,7 +151,7 @@ type ThreadStartParams struct {
 	Sandbox        string `json:"sandbox,omitempty"`
 	Personality    string `json:"personality,omitempty"`
 	Ephemeral      bool   `json:"ephemeral,omitempty"`
-	ApprovalPolicy string `json:"approvalPolicy,omitempty"` // "never" | "on-request" | "on-failure" | "untrusted"
+	ApprovalPolicy string `json:"approvalPolicy,omitempty"` // "on-request" | "on-failure" | "never" | "untrusted"
 }
 
 type ThreadStartResult struct {
