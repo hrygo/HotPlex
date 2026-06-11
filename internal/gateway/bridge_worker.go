@@ -86,6 +86,21 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, err
 	}
 
+	// Best-effort async persist so WorkerSessionID survives gateway restart
+	// even if no turn events arrive (SIGTERM before first Prompt). The
+	// correctness guarantee comes from forwardEvents' first-event safety-net.
+	// Tracked by fwdWg so graceful shutdown waits for the DB write to complete.
+	b.fwdWg.Add(1)
+	go func() {
+		defer b.fwdWg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				b.log.Error("bridge: panic in persistWorkerSessionID", "session_id", sid, "panic", r)
+			}
+		}()
+		b.persistWorkerSessionIDInternal(params.ctx, w, sid, false)
+	}()
+
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()
@@ -95,7 +110,15 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	return w, nil
 }
 
-func (b *Bridge) persistWorkerSessionID(w worker.Worker, sessionID string) {
+func (b *Bridge) persistWorkerSessionIDEnsure(ctx context.Context, w worker.Worker, sessionID string) {
+	b.persistWorkerSessionIDInternal(ctx, w, sessionID, true)
+}
+
+func (b *Bridge) persistWorkerSessionIDInternal(_ context.Context, w worker.Worker, sessionID string, force bool) {
+	// Use Background to fully detach from the request context. The async DB
+	// write outlives the request, so inheriting trace baggage would mislead
+	// trace analysis (spans from a completed request's children).
+	ctx := context.Background()
 	handler, ok := w.(worker.WorkerSessionIDHandler)
 	if !ok {
 		return
@@ -104,7 +127,13 @@ func (b *Bridge) persistWorkerSessionID(w worker.Worker, sessionID string) {
 	if workerSID == "" {
 		return
 	}
-	if err := b.sm.UpdateWorkerSessionID(context.Background(), sessionID, workerSID); err != nil {
+	var err error
+	if force {
+		err = b.sm.EnsureWorkerSessionID(ctx, sessionID, workerSID)
+	} else {
+		err = b.sm.UpdateWorkerSessionID(ctx, sessionID, workerSID)
+	}
+	if err != nil {
 		b.log.Warn("bridge: failed to persist worker session ID", "session_id", sessionID, "worker_session_id", workerSID, "err", err)
 	} else {
 		b.log.Debug("bridge: persisted worker session ID", "session_id", sessionID, "worker_session_id", workerSID)
@@ -126,9 +155,12 @@ type fallbackParams struct {
 	accModelName  string
 }
 
-// attemptResumeFallback handles a crashed resumed worker with a two-step strategy:
+// attemptResumeFallback handles a crashed worker with a two-step strategy:
 //  1. retryDepth < 1: Retry resume once to preserve conversation history (transient failures).
 //  2. retryDepth >= 1: Fall back to fresh start — conversation data is permanently lost.
+//
+// Applies to both fresh and resumed sessions. Workers that cannot resume
+// will gracefully fall back to fresh Start() via ErrFellBackToFreshStart.
 //
 // Returns true if a new forwardEvents goroutine took over.
 func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {

@@ -291,6 +291,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	claudecode.InitConfig(cfg.Worker.ClaudeCode)
 	acp.InitConfig(cfg.Worker.ACP)
 	codexcli.InitSingleton(log, cfg.Worker.CodexCLI)
+	if cfg.Worker.CodexCLI.Sandbox == "danger-full-access" {
+		log.Warn("codexcli: sandbox is danger-full-access (YOLO mode) — full filesystem + network access",
+			"hint", "set codex_cli.sandbox to workspace-write or read-only for restricted environments")
+	}
 
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if !reflect.DeepEqual(prev.Worker.AutoRetry, next.Worker.AutoRetry) {

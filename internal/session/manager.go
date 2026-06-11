@@ -388,6 +388,10 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// Build the candidate state as a value copy (never mutates ms.info in-place).
 	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
 	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
+	// WorkerSessionID is protected by the targeted SQL UPDATE guard below;
+	// other scalar fields have a theoretical stale-write
+	// window during the lock release for DB I/O, mitigated by the safety-net
+	// persist on first event (see #709).
 	candidate := ms.info
 	candidate.State = to
 	candidate.UpdatedAt = time.Now()
@@ -406,6 +410,42 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	if dbErr != nil {
 		// ms.info untouched — no rollback needed.
 		return nil, dbErr
+	}
+
+	// Preserve WorkerSessionID if it was set concurrently while the lock
+	// was released during Upsert. Without this guard, the candidate copy
+	// (taken before the concurrent update) overwrites both DB and in-memory
+	// with a stale empty value, breaking session resume for ACP workers.
+	//
+	// NOTE: This targeted SQL UPDATE avoids full-row Upsert's risk of overwriting
+	// concurrent field changes (UpdatedAt, ExpiresAt, Source, etc.) made during
+	// the unlock window. There is a theoretical second race: a concurrent
+	// UpdateWorkerSessionID that acquires ms.mu during the µs SQL window and
+	// sets a different WorkerSessionID, which our stale "wsid" then overwrites.
+	// Accepted because (a) the window is ~µs, (b) forwardEvents' first-event
+	// safety-net persist (EnsureWorkerSessionID) will repair the row, and
+	// (c) the concurrent overwrite detection below re-syncs in-memory state.
+	if candidate.WorkerSessionID == "" && ms.info.WorkerSessionID != "" {
+		wsid := ms.info.WorkerSessionID
+		candidate.WorkerSessionID = wsid
+		ms.mu.Unlock()
+		guardCtx := context.WithoutCancel(ctx)
+		dbErr := m.store.UpdateWorkerSessionIDSQL(guardCtx, candidate.ID, wsid)
+		ms.mu.Lock()
+		if dbErr != nil {
+			// Roll back in-memory value to maintain consistency with DB
+			// (both empty). The safety-net (EnsureWorkerSessionID) will
+			// repair on first event.
+			candidate.WorkerSessionID = ""
+			observability.SessionGuardRePersistFailures().Add(ctx, 1)
+			m.log.Error("session: failed to re-persist WorkerSessionID after guard",
+				"session_id", candidate.ID, "worker_session_id", wsid, "err", dbErr)
+		} else if ms.info.WorkerSessionID != wsid {
+			// SQL succeeded but a concurrent writer changed the value while
+			// the lock was released — re-sync in-memory snapshot.
+			candidate.WorkerSessionID = ms.info.WorkerSessionID
+			observability.SessionGuardRePersistConcurrentOverwrites().Add(ctx, 1)
+		}
 	}
 
 	// Commit: replace ms.info with the persisted snapshot.
@@ -925,6 +965,17 @@ func (m *Manager) ClearContext(ctx context.Context, sessionID string) error {
 // Workers that manage their own session IDs (OpenCode Server) call this
 // to store the ID so it can be restored on resume.
 func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
+	return m.updateWorkerSessionID(ctx, id, workerSessionID, false)
+}
+
+// EnsureWorkerSessionID persists the worker-internal session ID, bypassing
+// the fast-path skip. Used by the safety-net caller (forwardEvents) to repair
+// stale DB rows after guard re-persist failures.
+func (m *Manager) EnsureWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
+	return m.updateWorkerSessionID(ctx, id, workerSessionID, true)
+}
+
+func (m *Manager) updateWorkerSessionID(ctx context.Context, id, workerSessionID string, force bool) error {
 	if m == nil {
 		return ErrSessionNotFound
 	}
@@ -933,18 +984,35 @@ func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID
 		return ErrSessionNotFound
 	}
 
-	ms.mu.Lock()
-	if ms.info.WorkerSessionID == workerSessionID {
-		ms.mu.Unlock()
-		return nil
+	// Fast-path skip when in-memory matches. Force mode (safety-net) always
+	// writes to repair stale DB rows.
+	if !force {
+		ms.mu.RLock()
+		same := ms.info.WorkerSessionID == workerSessionID
+		ms.mu.RUnlock()
+		if same {
+			return nil
+		}
 	}
+
+	// Update in-memory under lock, then persist via targeted SQL.
+	// Uses UpdateWorkerSessionIDSQL rather than updateSession→Upsert because
+	// the Upsert ON CONFLICT clause intentionally excludes worker_session_id
+	// to prevent stale writes during transitionState's lock-release window.
+	ms.mu.Lock()
+	prev := ms.info.WorkerSessionID
+	ms.info.WorkerSessionID = workerSessionID
 	ms.mu.Unlock()
 
-	return m.updateSession(ctx, ms, func(info *SessionInfo) func() {
-		prev := info.WorkerSessionID
-		info.WorkerSessionID = workerSessionID
-		return func() { info.WorkerSessionID = prev }
-	})
+	if err := m.store.UpdateWorkerSessionIDSQL(ctx, id, workerSessionID); err != nil {
+		// Roll back in-memory on DB failure.
+		ms.mu.Lock()
+		ms.info.WorkerSessionID = prev
+		ms.mu.Unlock()
+		return err
+	}
+
+	return nil
 }
 
 // DebugSessionSnapshot holds safe-to-expose debug info for a managed session.

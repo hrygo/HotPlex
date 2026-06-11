@@ -491,7 +491,7 @@ func (w *Worker) GetWorkerSessionID() string {
 }
 ```
 
-**持久化时机**：`bridge.forwardEvents()` 收到第一个 worker 事件时，`persistWorkerSessionID()` 调用 `GetWorkerSessionID()` 并更新 DB。
+**持久化时机**：`bridge.createAndLaunchWorker()` 在 Worker 启动后异步持久化（best-effort optimization）；`bridge.forwardEvents()` 收到第一个事件时作为 correctness guarantee 强制再次调用（`Force` 变体，绕过 fast-path）。`transitionState` 在锁释放窗口期间使用针对性 SQL UPDATE（`UpdateWorkerSessionIDSQL`）保护 WorkerSessionID 不被并发覆盖，避免全行 Upsert 覆盖其他字段。Guard 的二次写入存在残留竞态窗口（详见 #709）。
 
 ### 9.2 Session 生命周期
 

@@ -968,8 +968,9 @@ func (w *Worker) readLoop(ctx context.Context) {
 			}
 			w.processNotification(ctx, notif, conn)
 			// Drain queued notifications to handle bursts.
-			// Cap iterations so RequestCh is not starved under high throughput.
-			const maxDrain = 16
+			// Cap at half the channel capacity to balance burst draining
+			// with RequestCh fairness under high throughput.
+			const maxDrain = 128
 		drain:
 			for i := 0; i < maxDrain; i++ {
 				select {

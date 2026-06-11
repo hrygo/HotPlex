@@ -461,6 +461,11 @@ func (m *mockSessionStoreForBotID) Upsert(ctx context.Context, info *session.Ses
 	return args.Error(0)
 }
 
+func (m *mockSessionStoreForBotID) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
+	args := m.Called(ctx, id, workerSessionID)
+	return args.Error(0)
+}
+
 func (m *mockSessionStoreForBotID) Get(ctx context.Context, id string) (*session.SessionInfo, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
@@ -1185,6 +1190,11 @@ func (m *mockBridgeSM) List(ctx context.Context, userID, platform string, limit,
 }
 
 func (m *mockBridgeSM) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
+	args := m.Called(ctx, id, workerSessionID)
+	return args.Error(0)
+}
+
+func (m *mockBridgeSM) EnsureWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
 	args := m.Called(ctx, id, workerSessionID)
 	return args.Error(0)
 }

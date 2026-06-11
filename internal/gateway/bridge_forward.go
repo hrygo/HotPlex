@@ -209,7 +209,11 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	}
 
 	if fc.firstEvent {
-		b.persistWorkerSessionID(w, sessionID)
+		// Safety-net: persist again on first event in case the post-launch
+		// persist was incomplete. Scenarios: (1) GetWorkerSessionID() had not
+		// returned a value at launch time; (2) guard re-persist in transitionState
+		// failed; (3) gateway crashed between launch and first event.
+		b.persistWorkerSessionIDEnsure(opts.ctx, w, sessionID)
 		fc.turnStartTime = time.Now()
 		fc.firstEvent = false
 	}
@@ -505,8 +509,11 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		}
 	}
 
-	// Resume retry: skip during shutdown and for SIGTERM (exit 143).
-	fallbackAttempted := !b.closed.Load() && exitCode != 0 && exitCode != 143 && p.opts.resumed && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
+	// Crash recovery retry: attempt when the worker exited without completing
+	// its turn (no "done" received). Skip during shutdown, SIGTERM (143),
+	// Applies to both fresh and resumed sessions — Resume() gracefully falls back
+	// to fresh Start() for workers that cannot preserve conversation history.
+	fallbackAttempted := b.sm != nil && !b.closed.Load() && !p.doneReceived && exitCode != 143 && exitCode != -1 && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
 	if fallbackAttempted && p.turnTextLen == 0 && time.Since(p.startTime) < 5*time.Second {
 		b.log.Info("bridge: session files missing after resume, skipping retry",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)

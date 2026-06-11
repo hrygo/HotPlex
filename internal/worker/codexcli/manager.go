@@ -54,13 +54,14 @@ type CodexAppServerManager struct {
 	log *slog.Logger
 	cfg config.CodexCLIConfig
 
-	mu      sync.Mutex
-	proc    *proc.Manager
-	stdin   io.WriteCloser
-	stdout  io.Reader
-	refs    int
-	state   managerState
-	crashCh chan struct{} // closed when process exits unexpectedly
+	mu            sync.Mutex
+	proc          *proc.Manager
+	stdin         io.WriteCloser
+	stdout        io.Reader
+	refs          int
+	state         managerState
+	crashCh       chan struct{} // closed when process exits unexpectedly
+	crashExitCode int           // OS exit code set before crashCh is closed
 
 	// pending maps JSON-RPC request IDs to response channels.
 	pending sync.Map // map[int64]chan *JSONRPCResponse
@@ -105,6 +106,14 @@ func NewCodexAppServerManager(log *slog.Logger, cfg config.CodexCLIConfig) *Code
 }
 
 // Acquire increments the reference count and starts the process if needed.
+// CrashExitCode returns the OS exit code from the last process crash.
+// Only valid after the crash channel returned by Acquire has been closed.
+func (m *CodexAppServerManager) CrashExitCode() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.crashExitCode
+}
+
 // Returns a crash notification channel that is closed when the process exits
 // unexpectedly. Workers should check this channel in their Wait() implementation.
 func (m *CodexAppServerManager) Acquire(ctx context.Context) (<-chan struct{}, error) {
@@ -958,6 +967,7 @@ func (m *CodexAppServerManager) monitorProcess() {
 
 	if wasRunning && refs > 0 {
 		m.log.Warn("codex-app-server: process crashed", "exit_code", code, "refs", refs)
+		m.crashExitCode = code
 		close(m.crashCh)
 		m.crashCh = make(chan struct{})
 	} else {

@@ -18,6 +18,7 @@ import (
 // Store defines the interface for session persistence.
 type Store interface {
 	Upsert(ctx context.Context, info *SessionInfo) error
+	UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error
 	Get(ctx context.Context, id string) (*SessionInfo, error)
 	List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error)
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
@@ -27,6 +28,8 @@ type Store interface {
 	GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error)
 	Close() error
 }
+
+var _ Store = (*SQLiteStore)(nil)
 
 // SQLiteStore implements Store using SQLite.
 type SQLiteStore struct {
@@ -103,6 +106,20 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 		)
 		if err != nil {
 			return fmt.Errorf("session store: upsert: %w", err)
+		}
+		return nil
+	})
+}
+
+// UpdateWorkerSessionIDSQL performs a targeted UPDATE on the worker_session_id
+// column only, avoiding the full-row overwrite of Upsert.
+func (s *SQLiteStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
+	ctx, cancel := upsertTimeout(ctx)
+	defer cancel()
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["sessions.update_worker_session_id"], workerSessionID, id)
+		if err != nil {
+			return fmt.Errorf("session store: update worker session id: %w", err)
 		}
 		return nil
 	})

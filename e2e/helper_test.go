@@ -227,6 +227,11 @@ func (m *mockStore) Upsert(ctx context.Context, info *session.SessionInfo) error
 	return args.Error(0)
 }
 
+func (m *mockStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
+	args := m.Called(ctx, id, workerSessionID)
+	return args.Error(0)
+}
+
 func (m *mockStore) Get(ctx context.Context, id string) (*session.SessionInfo, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {

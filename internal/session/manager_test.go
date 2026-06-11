@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +30,11 @@ func (m *mockStore) Upsert(ctx context.Context, info *SessionInfo) error {
 			*info = *ms
 		}
 	}
+	return args.Error(0)
+}
+
+func (m *mockStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
+	args := m.Called(ctx, id, workerSessionID)
 	return args.Error(0)
 }
 
@@ -2121,7 +2128,7 @@ func TestManager_UpdateWorkerSessionID(t *testing.T) {
 	m.sessions["sess_wsid"] = &managedSession{info: *seed}
 	m.mu.Unlock()
 
-	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+	store.On("UpdateWorkerSessionIDSQL", mock.Anything, "sess_wsid", "ocs_internal_123").Return(nil)
 
 	err = m.UpdateWorkerSessionID(ctx, "sess_wsid", "ocs_internal_123")
 	require.NoError(t, err)
@@ -2131,7 +2138,7 @@ func TestManager_UpdateWorkerSessionID(t *testing.T) {
 	require.Equal(t, "ocs_internal_123", info.WorkerSessionID)
 }
 
-func TestManager_UpdateWorkerSessionID_SameValue_NoUpsert(t *testing.T) {
+func TestManager_UpdateWorkerSessionID_SameValue_Idempotent(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2158,9 +2165,17 @@ func TestManager_UpdateWorkerSessionID_SameValue_NoUpsert(t *testing.T) {
 	m.sessions["sess_wsid_same"] = &managedSession{info: *seed}
 	m.mu.Unlock()
 
-	// Same value — Upsert should NOT be called
+	// Same value — fast-path skip: Upsert should not be called by
+	// UpdateWorkerSessionID when in-memory matches and force=false.
+	beforeCount := len(store.Calls)
+	store.On("Upsert", mock.Anything, mock.Anything).Maybe().Return(nil)
 	err = m.UpdateWorkerSessionID(ctx, "sess_wsid_same", "existing_id")
 	require.NoError(t, err)
+	// No new Upsert calls from UpdateWorkerSessionID (fast-path skip).
+	for _, call := range store.Calls[beforeCount:] {
+		require.NotEqual(t, "Upsert", call.Method,
+			"UpdateWorkerSessionID with same value should not trigger Upsert (fast-path)")
+	}
 }
 
 func TestManager_UpdateWorkerSessionID_NotFound(t *testing.T) {
@@ -2372,4 +2387,191 @@ func TestGC_EvictsOldTerminatedSessions(t *testing.T) {
 	m.mu.RUnlock()
 	require.False(t, oldOk, "TERMINATED session older than TTL should be evicted from memory")
 	require.True(t, recentOk, "TERMINATED session within TTL should remain in memory")
+}
+
+// ─── transitionState WorkerSessionID preservation tests ─────────────────────────
+
+// raceStore wraps mockStore to inject a concurrent UpdateWorkerSessionID call
+// during the Upsert window (when ms.mu is released), reproducing the race that
+// causes WorkerSessionID loss (#709).
+type raceStore struct {
+	mockStore
+	onUpsert   func()                      // called inside Upsert while ms.mu is released
+	lastUpsert atomic.Pointer[SessionInfo] // captures the last Upserted info
+}
+
+func (r *raceStore) Upsert(ctx context.Context, info *SessionInfo) error {
+	r.lastUpsert.Store(info)
+	if r.onUpsert != nil {
+		r.onUpsert()
+	}
+	return r.mockStore.Upsert(ctx, info)
+}
+
+func TestTransition_PreservesWorkerSessionID_OnConcurrentUpdate(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	store := &raceStore{}
+	store.Test(t)
+
+	store.On("Close").Return(nil)
+	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Maybe().Return([]string(nil), nil)
+	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Maybe().Return([]string(nil), nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Maybe().Return(nil)
+	m, err := NewManager(ctx, nil, cfg, nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	// Seed a RUNNING session with empty WorkerSessionID (simulates post-Start
+	// state before persistWorkerSessionID fires).
+	now := time.Now()
+	seed := &SessionInfo{
+		ID:         "sess_race_wsid",
+		UserID:     "user1",
+		WorkerType: worker.TypeACP,
+		State:      events.StateRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	m.mu.Lock()
+	m.sessions["sess_race_wsid"] = &managedSession{info: *seed}
+	m.mu.Unlock()
+
+	// Set up the race: during Transition's Upsert (ms.mu released), a
+	// concurrent goroutine calls UpdateWorkerSessionID.
+	var callCount atomic.Int32
+	started := make(chan struct{})
+	done := make(chan struct{})
+
+	store.onUpsert = func() {
+		if callCount.Add(1) == 1 {
+			// First Upsert call (from Transition). Trigger concurrent update.
+			close(started)
+			<-done // Wait for concurrent update to finish.
+		}
+		// Subsequent Upsert calls (from UpdateWorkerSessionID) pass through.
+	}
+
+	go func() {
+		<-started // Wait for Transition's Upsert to start.
+		_ = m.UpdateWorkerSessionID(ctx, "sess_race_wsid", "hermes_session_abc")
+		close(done)
+	}()
+
+	// The mockStore Upsert needs to be set up for both calls.
+	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+	store.On("UpdateWorkerSessionIDSQL", mock.Anything, "sess_race_wsid", "hermes_session_abc").Return(nil)
+
+	// Transition RUNNING → IDLE. The candidate snapshot has empty WorkerSessionID,
+	// but the concurrent UpdateWorkerSessionID sets it to "hermes_session_abc".
+	err = m.Transition(ctx, "sess_race_wsid", events.StateIdle)
+	require.NoError(t, err)
+
+	// Verify WorkerSessionID is preserved in-memory.
+	info, _ := m.Get(context.Background(), "sess_race_wsid")
+	require.Equal(t, events.StateIdle, info.State, "state should transition to IDLE")
+	require.Equal(t, "hermes_session_abc", info.WorkerSessionID,
+		"WorkerSessionID must be preserved when set concurrently during transition")
+
+	// Verify the concurrent UpdateWorkerSessionID used targeted SQL (not Upsert).
+	store.AssertCalled(t, "UpdateWorkerSessionIDSQL", mock.Anything, "sess_race_wsid", "hermes_session_abc")
+}
+
+func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+
+	gs := &guardErrStore{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	gs.Test(t)
+	gs.On("Close").Return(nil)
+	gs.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Maybe().Return([]string(nil), nil)
+	gs.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Maybe().Return([]string(nil), nil)
+	gs.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).Maybe().Return(nil)
+	gs.mockStore.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Maybe().Return(nil)
+
+	m, err := NewManager(ctx, nil, cfg, nil, gs)
+	require.NoError(t, err)
+	defer m.Close()
+
+	now := time.Now()
+	seed := &SessionInfo{
+		ID:         "sess_guard_err",
+		UserID:     "user1",
+		WorkerType: worker.TypeACP,
+		State:      events.StateRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	m.mu.Lock()
+	m.sessions["sess_guard_err"] = &managedSession{info: *seed}
+	m.mu.Unlock()
+
+	go func() {
+		<-gs.started
+		_ = m.UpdateWorkerSessionID(ctx, "sess_guard_err", "hermes_session_xyz")
+		// After concurrent update completes, the next Upsert is the guard re-persist.
+		gs.failNextSQL.Store(true)
+		close(gs.done)
+	}()
+
+	err = m.Transition(ctx, "sess_guard_err", events.StateIdle)
+	require.NoError(t, err)
+
+	// In-memory state must have WorkerSessionID even when guard re-persist
+	// fails, because candidate already captured it before ms.info = candidate.
+	info, _ := m.Get(context.Background(), "sess_guard_err")
+	require.Equal(t, events.StateIdle, info.State)
+	require.Equal(t, "", info.WorkerSessionID,
+		"in-memory WorkerSessionID must be rolled back to empty when guard re-persist fails (safety-net will repair)")
+
+	// Verify UpdateWorkerSessionIDSQL was called: first by the concurrent
+	// UpdateWorkerSessionID (succeeded), then by the guard (failed).
+	// lastSQLWSID captures the last call's value (the guard's attempt).
+	sqlWSID := gs.lastSQLWSID.Load()
+	require.NotNil(t, sqlWSID, "guard should have attempted UpdateWorkerSessionIDSQL")
+	require.Equal(t, "hermes_session_xyz", *sqlWSID,
+		"guard SQL UPDATE must target the preserved WorkerSessionID")
+}
+
+// guardErrStore shadows Upsert to inject a concurrent UpdateWorkerSessionID
+// during the main transition Upsert, then fails the guard re-persist
+// (UpdateWorkerSessionIDSQL) using a semantic flag.
+type guardErrStore struct {
+	mockStore
+	failNextSQL    atomic.Bool // set by goroutine: next UpdateWorkerSessionIDSQL should fail
+	sawFirst       atomic.Bool // set after the first Upsert (transition main) begins
+	started        chan struct{}
+	done           chan struct{}
+	lastSuccessful atomic.Pointer[SessionInfo]
+	lastSQLWSID    atomic.Pointer[string] // captures the wsid from UpdateWorkerSessionIDSQL
+}
+
+func (g *guardErrStore) Upsert(ctx context.Context, info *SessionInfo) error {
+	if !g.sawFirst.Load() {
+		// Main transition Upsert -- synchronize and always succeed.
+		g.sawFirst.Store(true)
+		close(g.started)
+		<-g.done
+		return nil
+	}
+	// Subsequent Upsert calls (from UpdateWorkerSessionID).
+	infoCopy := *info
+	g.lastSuccessful.Store(&infoCopy)
+	return nil
+}
+
+func (g *guardErrStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
+	wsid := workerSessionID
+	g.lastSQLWSID.Store(&wsid)
+	if g.failNextSQL.CompareAndSwap(true, false) {
+		return fmt.Errorf("simulated guard persist failure")
+	}
+	return nil
 }

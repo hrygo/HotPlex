@@ -33,9 +33,14 @@ func init() {
 }
 
 type Config struct {
-	Command          string
-	Model            string
-	Sandbox          string
+	Command string
+	Model   string
+	// Sandbox mode: read-only, workspace-write, danger-full-access.
+	// Default YOLO mode (danger-full-access) grants full filesystem + network access.
+	// Existing deployments without explicit config will gain elevated permissions.
+	Sandbox string
+	// Approval mode: untrusted, on-request, never.
+	// Default YOLO mode (never) skips all approval prompts — commands run immediately.
 	ApprovalMode     string
 	Ephemeral        bool
 	Personality      string
@@ -499,6 +504,9 @@ func (w *AppServerWorker) Wait() (int, error) {
 	}
 	select {
 	case <-crashSub:
+		if w.manager != nil {
+			return w.manager.CrashExitCode(), nil
+		}
 		return 1, nil
 	case <-doneCh:
 		return 0, nil
@@ -684,6 +692,11 @@ func sandboxFromSession(session worker.SessionInfo, defaultSandbox string) strin
 
 // buildThreadStartParams constructs the JSON-RPC params for "thread/start".
 // Shared by Start() and ResetContext() to avoid duplication.
+//
+// Default YOLO mode: danger-full-access sandbox + never approval.
+// DangerFullAccess grants full network + filesystem access (Codex source).
+// ⚠ This is a security-sensitive default — deployments should explicitly
+// set sandbox to workspace-write or read-only for restricted environments.
 func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]any {
 	approvalMode := cfg.ApprovalMode
 	if session.SkipPermissions {
