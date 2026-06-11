@@ -152,6 +152,14 @@ type ThreadStartParams struct {
 	Personality    string `json:"personality,omitempty"`
 	Ephemeral      bool   `json:"ephemeral,omitempty"`
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"` // "never" (YOLO) | "on-request" | "on-failure" | "untrusted"
+
+	// Agent-configs injection. BaseInstructions carries the merged B/C channel
+	// system prompt from bridge.injectAgentConfig(). Mapped to the app-server
+	// thread/start "baseInstructions" field (ThreadStartParams.base_instructions
+	// in Rust). DeveloperInstructions is reserved for future use — higher
+	// priority than BaseInstructions when both are set.
+	BaseInstructions      string `json:"baseInstructions,omitempty"`
+	DeveloperInstructions string `json:"developerInstructions,omitempty"`
 }
 
 type ThreadStartResult struct {

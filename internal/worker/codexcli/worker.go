@@ -83,6 +83,7 @@ func resolveConfig() Config {
 var _ worker.Worker = (*AppServerWorker)(nil)
 var _ worker.WorkerCommander = (*AppServerWorker)(nil)
 var _ worker.ControlRequester = (*AppServerWorker)(nil)
+var _ worker.SystemPromptUpdater = (*AppServerWorker)(nil)
 
 type appState int
 
@@ -750,5 +751,13 @@ func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]a
 	if cfg.ConfigProfile != "" {
 		params["profile"] = cfg.ConfigProfile
 	}
+	// Agent-configs injection: bridge.injectAgentConfig() writes the merged
+	// B/C channel prompt into session.SystemPrompt. Forward it as baseInstructions
+	// so codex app-server uses it as the system prompt base.
+	if session.SystemPrompt != "" {
+		params["baseInstructions"] = session.SystemPrompt
+	}
+	// developerInstructions is reserved for future use — higher priority than
+	// baseInstructions. Do not set until SessionInfo gains a corresponding field.
 	return params
 }
