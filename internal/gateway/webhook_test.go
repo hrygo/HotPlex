@@ -156,36 +156,32 @@ func TestWebhookHandler_ExtractPRs(t *testing.T) {
 
 	t.Run("pull_request opened triggers PR", func(t *testing.T) {
 		t.Parallel()
-		e := &GitHubEvent{
-			Action: "opened",
-			Number: 42,
-			PullRequest: &struct {
-				Number int    `json:"number"`
-				State  string `json:"state"`
-				Draft  bool   `json:"draft"`
-				Head   struct {
-					SHA string `json:"sha"`
-				} `json:"head"`
-			}{Number: 42, State: "open"},
-		}
+		pr := &struct {
+			Number int    `json:"number"`
+			State  string `json:"state"`
+			Draft  bool   `json:"draft"`
+			Head   struct {
+				SHA string `json:"sha"`
+			} `json:"head"`
+		}{Number: 42, State: "open"}
+		pr.Head.SHA = "abc123"
+		e := &GitHubEvent{Action: "opened", Number: 42, PullRequest: pr}
 		prs := h.extractPRs("pull_request", e)
 		require.Equal(t, []int{42}, prs)
 	})
 
 	t.Run("pull_request synchronize triggers PR", func(t *testing.T) {
 		t.Parallel()
-		e := &GitHubEvent{
-			Action: "synchronize",
-			Number: 706,
-			PullRequest: &struct {
-				Number int    `json:"number"`
-				State  string `json:"state"`
-				Draft  bool   `json:"draft"`
-				Head   struct {
-					SHA string `json:"sha"`
-				} `json:"head"`
-			}{Number: 706, State: "open"},
-		}
+		pr := &struct {
+			Number int    `json:"number"`
+			State  string `json:"state"`
+			Draft  bool   `json:"draft"`
+			Head   struct {
+				SHA string `json:"sha"`
+			} `json:"head"`
+		}{Number: 706, State: "open"}
+		pr.Head.SHA = "def456"
+		e := &GitHubEvent{Action: "synchronize", Number: 706, PullRequest: pr}
 		prs := h.extractPRs("pull_request", e)
 		require.Equal(t, []int{706}, prs)
 	})
@@ -398,20 +394,22 @@ func TestWebhookHandler_ServeHTTP(t *testing.T) {
 	t.Run("pull_request opened triggers review", func(t *testing.T) {
 		t.Parallel()
 		h, trigger := newIsolatedHandler(t)
+		pr := &struct {
+			Number int    `json:"number"`
+			State  string `json:"state"`
+			Draft  bool   `json:"draft"`
+			Head   struct {
+				SHA string `json:"sha"`
+			} `json:"head"`
+		}{Number: 99, State: "open"}
+		pr.Head.SHA = "abc123"
 		w := postWebhook(h, "pull_request", &GitHubEvent{
 			Action: "opened",
 			Number: 99,
 			Repository: struct {
 				FullName string `json:"full_name"`
 			}{FullName: "hrygo/hotplex"},
-			PullRequest: &struct {
-				Number int    `json:"number"`
-				State  string `json:"state"`
-				Draft  bool   `json:"draft"`
-				Head   struct {
-					SHA string `json:"sha"`
-				} `json:"head"`
-			}{Number: 99, State: "open"},
+			PullRequest: pr,
 		})
 		require.Equal(t, http.StatusAccepted, w.Code)
 		require.Eventually(t, func() bool { return trigger.count() >= 1 }, 2*time.Second, 50*time.Millisecond)

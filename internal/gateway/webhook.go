@@ -69,15 +69,16 @@ const triggerDedupCooldown = 300 * time.Second
 
 // WebhookHandler handles incoming GitHub webhook requests.
 type WebhookHandler struct {
-	cfg     config.WebhookConfig
-	trigger JobTrigger
-	limiter *rate.Limiter
-	sem     chan struct{} // bounds concurrent trigger goroutines
-	log     *slog.Logger
-	baseCtx context.Context    // gateway lifecycle context for async goroutines
-	cancel  context.CancelFunc // cancels in-flight triggers on shutdown
-	dedup   sync.Map           // "repo#pr_number" -> time.Time; cooldown-based dedup
-	wg      sync.WaitGroup     // tracks in-flight trigger + sweeper goroutines
+	cfg       config.WebhookConfig
+	trigger   JobTrigger
+	limiter   *rate.Limiter
+	sem       chan struct{} // bounds concurrent trigger goroutines
+	log       *slog.Logger
+	baseCtx   context.Context    // gateway lifecycle context for async goroutines
+	cancel    context.CancelFunc // cancels in-flight triggers on shutdown
+	dedup     sync.Map           // "repo#pr_number" -> time.Time; cooldown-based dedup
+	wg        sync.WaitGroup     // tracks in-flight trigger + sweeper goroutines
+	closeOnce sync.Once          // ensures Close is idempotent
 }
 
 // NewWebhookHandler creates a new GitHub webhook handler.
@@ -102,11 +103,13 @@ func NewWebhookHandler(baseCtx context.Context, cfg config.WebhookConfig, trigge
 // Close cancels in-flight trigger goroutines, stops the dedup sweeper,
 // and waits for all goroutines to finish. Safe to call multiple times.
 func (h *WebhookHandler) Close() {
-	h.cancel()
-	h.wg.Wait()
-	h.dedup.Range(func(key, _ any) bool {
-		h.dedup.Delete(key)
-		return true
+	h.closeOnce.Do(func() {
+		h.cancel()
+		h.wg.Wait()
+		h.dedup.Range(func(key, _ any) bool {
+			h.dedup.Delete(key)
+			return true
+		})
 	})
 }
 
@@ -286,8 +289,9 @@ func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 		return extractPRNumbers(e.CheckRun.CheckSuite.PullRequests)
 	case "pull_request":
 		// Fork PR fallback: trigger on new commits or new/open PRs.
-		// Skip closed/merged/draft PRs and non-actionable events (labeled, etc.).
-		if e.PullRequest == nil || e.PullRequest.State != "open" || e.PullRequest.Draft {
+		// Skip closed/merged/draft PRs, missing SHA, and non-actionable events.
+		if e.PullRequest == nil || e.PullRequest.Head.SHA == "" ||
+			e.PullRequest.State != "open" || e.PullRequest.Draft {
 			return nil
 		}
 		switch e.Action {

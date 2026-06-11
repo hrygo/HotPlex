@@ -20,7 +20,7 @@ const (
 	maxHistoryBytes        = 50000  // total byte budget for injected history (~12.5k tokens)
 	keepRecentN            = 4      // number of recent turns to keep uncompressed
 	brainInputCap          = 100000 // Brain LLM input limit in bytes
-	compressThresholdRatio = 1.2    // only compress when total > budget × ratio (adaptive)
+	compressThresholdRatio = 1.2    // only compress when total > budget × ratio (adaptive); 1.2× avoids costly Brain calls for moderate overruns that truncation handles well
 	compressTimeout        = 45 * time.Second
 )
 
@@ -234,8 +234,10 @@ func (c *HistoryCompressor) notifyProgress(sessionID string, compressCount, tota
 	msg := fmt.Sprintf("正在压缩对话历史（%d 条 → 摘要，共 %d 字符）...", compressCount, totalChars)
 	seq := c.hub.NextSeq(sessionID)
 	env := buildNotifyEnvelope(sessionID, msg, seq)
-	// Best-effort send; failure is non-critical.
-	_ = c.hub.SendToSession(context.Background(), env)
+	// Best-effort send with short timeout; failure is non-critical.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = c.hub.SendToSession(ctx, env)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────
