@@ -228,7 +228,7 @@ func (c *HistoryCompressor) callBrain(
 // ─── Progress Notification ────────────────────────────────────────────
 
 func (c *HistoryCompressor) notifyProgress(sessionID string, compressCount, totalChars int) {
-	if c.hub == nil {
+	if c.hub == nil || !c.hub.HasActiveConn(sessionID) {
 		return
 	}
 	msg := fmt.Sprintf("正在压缩对话历史（%d 条 → 摘要，共 %d 字符）...", compressCount, totalChars)
@@ -301,7 +301,7 @@ func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult
 		c.log.Warn("history: all turns exceed byte budget, history empty",
 			"turn_count", len(turns),
 			"budget", maxHistoryBytes,
-			"largest_turn_bytes", len(turns[len(turns)-1].content))
+			"newest_turn_bytes", len(turns[len(turns)-1].content))
 	}
 	return CompressResult{
 		Turns:         history,
@@ -316,7 +316,7 @@ func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult
 // maxLen is a byte budget (not rune count); we back up to a valid UTF-8
 // boundary to avoid splitting multi-byte characters.
 func truncateAtBoundary(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 || len(s) <= maxLen {
 		return s
 	}
 	// Scan backward for a newline within the byte budget.

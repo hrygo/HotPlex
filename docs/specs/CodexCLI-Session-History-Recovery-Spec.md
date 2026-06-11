@@ -121,17 +121,20 @@ ConversationHistory []ConversationTurn
 在 `prepareWorkerInfo()` 中，`buildWorkerInfo()` 之后、`injectSlackEnv()` 之前，查询 turns 表：
 
 ```go
-func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
+func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
     info := b.buildWorkerInfo(sessionID, userID, workDir, si)
 
     // Populate conversation history from turns table for context recovery.
+    // Only CodexCLI worker needs this — other workers have native resume.
     // Skip for fresh sessions (CREATED state) — no history to recover.
-    if si.State != events.StateCreated && b.turnsQuerier != nil {
-        if turns, err := b.turnsQuerier.QueryTurns(context.Background(), sessionID, 50, 0); err == nil && len(turns) > 0 {
-            // Use HistoryCompressor for smart truncation/compression when
-            // history exceeds the character budget (50k chars).
+    if si.WorkerType == worker.TypeCodexCLI && si.State != events.StateCreated && b.turnsQuerier != nil {
+        turns, err := b.turnsQuerier.QueryTurns(b.shutdownCtx, sessionID, 50, 0)
+        if err != nil {
+            b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
+        } else if len(turns) > 0 {
+            // Use shutdownCtx: compression survives user disconnect but cancels on gateway shutdown.
             compressor := NewHistoryCompressor(b.log, b.hub)
-            result := compressor.CompressHistory(context.Background(), turns, sessionID, defaultBrainFn)
+            result := compressor.CompressHistory(b.shutdownCtx, turns, sessionID, defaultBrainFn)
             info.ConversationHistory = result.Turns
         }
     }

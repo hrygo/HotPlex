@@ -413,7 +413,7 @@ func generateBoundaryID() string {
 	var buf [4]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		// Fallback: use timestamp-derived bytes. crypto/rand.Read only fails
-		// in extreme sandbox environments; high probability of uniqueness.
+		// in extreme sandbox environments; acceptable collision resistance for non-cryptographic use.
 		binary.LittleEndian.PutUint32(buf[:], uint32(time.Now().UnixNano()))
 	}
 	return hex.EncodeToString(buf[:])
@@ -480,10 +480,10 @@ func (w *AppServerWorker) Kill() error {
 }
 
 // shutdown releases the worker's manager subscription and decrements the
-// singleton ref count. The singleton process is NOT killed here — it will
-// naturally stop via idle drain (refs==0 for IdleDrainPeriod) or explicit
-// ShutdownSingleton() called during gateway shutdown (gateway_run.go).
-// This prevents GC from killing a shared process when reclaiming sessions.
+// singleton ref count. Unlike per-session workers, the shared AppServer
+// singleton process is NOT killed here — it stops via idle drain or
+// explicit ShutdownSingleton(). This prevents GC from killing a shared
+// process when reclaiming sessions.
 func (w *AppServerWorker) shutdown() {
 	w.release()
 }
