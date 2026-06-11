@@ -2462,7 +2462,7 @@ func TestTransition_PreservesWorkerSessionID_OnConcurrentUpdate(t *testing.T) {
 
 	// The mockStore Upsert needs to be set up for both calls.
 	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
-	store.On("UpdateWorkerSessionIDSQL", ctx, "sess_race_wsid", "hermes_session_abc").Return(nil)
+	store.On("UpdateWorkerSessionIDSQL", mock.Anything, "sess_race_wsid", "hermes_session_abc").Return(nil)
 
 	// Transition RUNNING → IDLE. The candidate snapshot has empty WorkerSessionID,
 	// but the concurrent UpdateWorkerSessionID sets it to "hermes_session_abc".
@@ -2531,8 +2531,8 @@ func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
 	// fails, because candidate already captured it before ms.info = candidate.
 	info, _ := m.Get(context.Background(), "sess_guard_err")
 	require.Equal(t, events.StateIdle, info.State)
-	require.Equal(t, "hermes_session_xyz", info.WorkerSessionID,
-		"in-memory WorkerSessionID must be preserved even if guard re-persist fails")
+	require.Equal(t, "", info.WorkerSessionID,
+		"in-memory WorkerSessionID must be rolled back to empty when guard re-persist fails (safety-net will repair)")
 
 	// Verify the guard attempted to persist the correct WorkerSessionID
 	// (even though it failed). The last successful Upsert (from concurrent

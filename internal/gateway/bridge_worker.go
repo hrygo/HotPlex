@@ -16,6 +16,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // forwardOpts configures the forwardEvents goroutine behavior.
@@ -110,10 +111,18 @@ func (b *Bridge) persistWorkerSessionIDEnsure(ctx context.Context, w worker.Work
 }
 
 func (b *Bridge) persistWorkerSessionIDInternal(ctx context.Context, w worker.Worker, sessionID string, force bool) {
-	// Persist must survive request cancellation — detach from request-scoped ctx
-	// while preserving OTel trace context.
+	// Persist must survive request cancellation with an independent context
+	// (avoids inheriting the request deadline). OTel trace context is
+	// explicitly propagated via trace.ContextWithSpan so the write remains
+	// observable.
 	if ctx != nil {
-		ctx = context.WithoutCancel(ctx)
+		pCtx := context.Background()
+		if span := trace.SpanContextFromContext(ctx); span.IsValid() {
+			pCtx = trace.ContextWithSpanContext(pCtx, span)
+		}
+		ctx = pCtx
+	} else {
+		ctx = context.Background()
 	}
 	handler, ok := w.(worker.WorkerSessionIDHandler)
 	if !ok {

@@ -429,7 +429,12 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 		wsid := ms.info.WorkerSessionID
 		candidate.WorkerSessionID = wsid
 		ms.mu.Unlock()
-		if dbErr := m.store.UpdateWorkerSessionIDSQL(ctx, candidate.ID, wsid); dbErr != nil {
+		guardCtx := context.WithoutCancel(ctx)
+		if dbErr := m.store.UpdateWorkerSessionIDSQL(guardCtx, candidate.ID, wsid); dbErr != nil {
+			// Roll back in-memory value to maintain consistency with DB
+			// (both empty). The safety-net (EnsureWorkerSessionID) will
+			// repair on first event.
+			candidate.WorkerSessionID = ""
 			observability.SessionGuardRePersistFailures().Add(ctx, 1)
 			m.log.Error("session: failed to re-persist WorkerSessionID after guard",
 				"session_id", candidate.ID, "worker_session_id", wsid, "err", dbErr)
@@ -977,9 +982,15 @@ func (m *Manager) updateWorkerSessionID(ctx context.Context, id, workerSessionID
 		return ErrSessionNotFound
 	}
 
-	// Fast-path skip when in-memory matches — safe for normal callers since
-	// the guard now uses targeted SQL. Force mode (safety-net) always writes
-	// to repair stale DB rows from guard re-persist failures.
+	// Fast-path skip when in-memory matches. There is a TOCTOU window between
+	// RUnlock and updateSession.Lock, during which transitionState's guard could
+	// modify ms.info.WorkerSessionID. This is safe because: (1) the guard uses
+	// targeted SQL (UpdateWorkerSessionIDSQL), not full-row Upsert, so concurrent
+	// Upsert in updateSession won't overwrite worker_session_id; (2) the Upsert
+	// ON CONFLICT clause does not include worker_session_id in its UPDATE SET,
+	// so the fast-path's subsequent Upsert is a no-op for this field; (3) the
+	// safety-net (EnsureWorkerSessionID) repairs any stale DB row on first event.
+	// Force mode (safety-net) always writes to repair stale DB rows.
 	if !force {
 		ms.mu.RLock()
 		same := ms.info.WorkerSessionID == workerSessionID

@@ -119,7 +119,7 @@ type WorkerSessionIDHandler interface {
 **实现者**：
 - **OpenCode Server**：使用 HTTP 连接中的 session ID
 
-**持久化时机**：`bridge.createAndLaunchWorker()` 在 Worker 启动后立即持久化（best-effort optimization）；`bridge.forwardEvents()` 收到第一个事件时作为 correctness guarantee 再次调用。`transitionState` 在锁释放窗口期间保护 WorkerSessionID 不被并发覆盖。Guard 的二次 Upsert 存在残留竞态窗口（详见 #709 tracking），已大幅缩小但未完全消除。
+**持久化时机**：`bridge.createAndLaunchWorker()` 在 Worker 启动后异步持久化（best-effort optimization）；`bridge.forwardEvents()` 收到第一个事件时作为 correctness guarantee 再次调用（`EnsureWorkerSessionID` 变体，绕过 fast-path）。`transitionState` 在锁释放窗口期间使用针对性 SQL UPDATE（`UpdateWorkerSessionIDSQL`）保护 WorkerSessionID 不被并发覆盖，避免全行 Upsert 覆盖其他字段。Guard 的针对性 SQL UPDATE 存在残留竞态窗口（详见 #709 tracking），已大幅缩小但未完全消除。
 
 ### 5.2 状态机
 
