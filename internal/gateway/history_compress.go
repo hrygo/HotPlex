@@ -74,7 +74,6 @@ func (c *HistoryCompressor) CompressHistory(
 		filtered = append(filtered, turnWithChars{
 			role:      t.Role,
 			content:   t.Content,
-			bytes:     len(t.Content),
 			createdAt: t.CreatedAt,
 		})
 		totalChars += len(t.Content)
@@ -244,14 +243,13 @@ func (c *HistoryCompressor) notifyProgress(sessionID string, compressCount, tota
 type turnWithChars struct {
 	role      string
 	content   string
-	bytes     int
 	createdAt int64 // unix millis from TurnRecord.CreatedAt
 }
 
 func sumChars(turns []turnWithChars) int {
 	total := 0
 	for _, t := range turns {
-		total += t.bytes
+		total += len(t.content)
 	}
 	return total
 }
@@ -286,10 +284,10 @@ func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult
 	bytesUsed := 0
 	for i := len(turns) - 1; i >= 0; i-- {
 		t := turns[i]
-		if bytesUsed+t.bytes > maxHistoryBytes {
+		if bytesUsed+len(t.content) > maxHistoryBytes {
 			break
 		}
-		bytesUsed += t.bytes
+		bytesUsed += len(t.content)
 		history = append(history, worker.ConversationTurn{
 			Role:    t.role,
 			Content: t.content,
@@ -303,7 +301,7 @@ func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult
 		c.log.Warn("history: all turns exceed byte budget, history empty",
 			"turn_count", len(turns),
 			"budget", maxHistoryBytes,
-			"largest_turn_bytes", turns[len(turns)-1].bytes)
+			"largest_turn_bytes", len(turns[len(turns)-1].content))
 	}
 	return CompressResult{
 		Turns:         history,
@@ -346,7 +344,7 @@ func truncateHead(s string, maxLen int) string {
 		maxLen++
 	}
 	// Scan forward for a clean break point.
-	for i := maxLen; i < len(s) && i < maxLen+200; i++ {
+	for i := maxLen; i < len(s) && i < maxLen+1024; i++ {
 		if s[i] == '\n' {
 			return s[i+1:]
 		}
@@ -360,7 +358,7 @@ const historyCompressSystemPrompt = `你是一位对话历史压缩助手。你�
 
 输出规范：
 1. 纯文本，保留关键技术术语、文件名、决策点和结论
-2. 控制在 %d 字符以内（约 %d tokens）
+2. 控制在 %d 字节以内（约 %d tokens）
 3. 使用 [User] 和 [Assistant] 标记保持对话结构
 4. 保留所有代码变更描述和文件路径
 5. 保留错误信息和解决方案
@@ -377,4 +375,4 @@ const historyCompressUserTemplate = `请将以下 %d 轮对话历史（共 %d �
 
 %s
 
-要求：压缩后控制在 %d 字符以内，保留关键上下文、技术细节和决策点。输出压缩率 60-70%%。`
+要求：压缩后控制在 %d 字节以内，保留关键上下文、技术细节和决策点。输出压缩率 60-70%%。`

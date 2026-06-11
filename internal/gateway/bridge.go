@@ -754,10 +754,9 @@ func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workD
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
 		} else if len(turns) > 0 {
 			compressor := NewHistoryCompressor(b.log, b.hub)
-			// Use context.Background() for compression: the Brain call may take
-			// up to 45s and should complete even if the user disconnects, so the
-			// result is available for the next reconnect.
-			result := compressor.CompressHistory(context.Background(), turns, sessionID, defaultBrainFn)
+			// Use shutdownCtx as parent: compression should survive user disconnect
+			// but still be cancelled on gateway shutdown to avoid blocking Shutdown().
+			result := compressor.CompressHistory(b.shutdownCtx, turns, sessionID, defaultBrainFn)
 			info.ConversationHistory = result.Turns
 		}
 	}

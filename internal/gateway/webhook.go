@@ -291,8 +291,8 @@ func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 			return nil
 		}
 		switch e.Action {
-		case "opened", "synchronize", "reopened":
-			return []int{e.Number}
+		case "opened", "synchronize", "reopened", "ready_for_review":
+			return []int{e.PullRequest.Number}
 		}
 	}
 	return nil

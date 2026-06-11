@@ -413,7 +413,7 @@ func generateBoundaryID() string {
 	var buf [4]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		// Fallback: use timestamp-derived bytes. crypto/rand.Read only fails
-		// in extreme sandbox environments; this preserves uniqueness.
+		// in extreme sandbox environments; high probability of uniqueness.
 		binary.LittleEndian.PutUint32(buf[:], uint32(time.Now().UnixNano()))
 	}
 	return hex.EncodeToString(buf[:])
