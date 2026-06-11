@@ -72,7 +72,7 @@ func (c *HistoryCompressor) CompressHistory(
 	}
 
 	if len(filtered) == 0 {
-		return CompressResult{}
+		return CompressResult{Turns: []worker.ConversationTurn{}}
 	}
 
 	// 2. Self-adaptive: skip compression for moderate overruns.
@@ -171,7 +171,7 @@ func (c *HistoryCompressor) CompressHistory(
 func (c *HistoryCompressor) TruncateHistory(turns []*eventstore.TurnRecord) CompressResult {
 	filtered := filterEmptyTurns(turns)
 	if len(filtered) == 0 {
-		return CompressResult{}
+		return CompressResult{Turns: []worker.ConversationTurn{}}
 	}
 	return c.truncateResult(filtered)
 }

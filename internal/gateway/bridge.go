@@ -705,6 +705,26 @@ type compressCacheEntry struct {
 	latestTurnCreatedAt int64 // unix millis of the newest turn used; mismatch = stale
 }
 
+// resolveCachedHistory checks the compressCache for a valid cached result.
+// Returns (turns, true) on cache hit, (nil, false) on miss/stale/invalid.
+// Stale or invalid entries are cleaned up automatically.
+func (b *Bridge) resolveCachedHistory(sessionID string, latestCreatedAt int64) ([]worker.ConversationTurn, bool) {
+	cached, ok := b.compressCache.Load(sessionID)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := cached.(*compressCacheEntry)
+	if !ok {
+		b.compressCache.Delete(sessionID)
+		return nil, false
+	}
+	if entry.latestTurnCreatedAt == latestCreatedAt {
+		return entry.turns, true
+	}
+	b.compressCache.Delete(sessionID)
+	return nil, false
+}
+
 // buildNotifyEnvelope creates a synthetic Message event for user notifications.
 func buildNotifyEnvelope(sessionID, msg string, seq int64) *events.Envelope {
 	return events.NewEnvelope(aep.NewID(), sessionID, seq, events.Message, map[string]any{"content": msg})
@@ -774,19 +794,10 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 			latestCreatedAt := turns[len(turns)-1].CreatedAt
 
 			// Check async compression cache: if turns haven't changed, reuse result.
-			if cached, ok := b.compressCache.Load(sessionID); ok {
-				if entry, ok := cached.(*compressCacheEntry); ok {
-					if entry.latestTurnCreatedAt == latestCreatedAt {
-						info.ConversationHistory = entry.turns
-						b.log.Debug("bridge: using cached compressed history",
-							"session_id", sessionID, "turns", len(entry.turns))
-					} else {
-						// Turn set changed - stale cache, invalidate.
-						b.compressCache.Delete(sessionID)
-					}
-				} else {
-					b.compressCache.Delete(sessionID)
-				}
+			if cached, hit := b.resolveCachedHistory(sessionID, latestCreatedAt); hit {
+				info.ConversationHistory = cached
+				b.log.Debug("bridge: using cached compressed history",
+					"session_id", sessionID, "turns", len(cached))
 			}
 
 			// Cache miss: inject truncated history immediately (sub-ms),
