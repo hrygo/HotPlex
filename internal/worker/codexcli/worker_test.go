@@ -1787,7 +1787,7 @@ func TestBuildThreadStartParams(t *testing.T) {
 		require.Equal(t, "o3", params["model"])
 		require.Equal(t, "docker", params["sandbox"]) // session override
 		require.Equal(t, true, params["ephemeral"])
-		require.Equal(t, "on-request", params["approvalPolicy"])
+		require.Equal(t, "never", params["approvalPolicy"]) // SkipPermissions → "never"
 		require.Equal(t, "friendly", params["personality"])
 		require.Equal(t, true, params["color"])
 		require.Equal(t, true, params["strictConfig"])
