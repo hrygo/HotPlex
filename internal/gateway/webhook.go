@@ -23,8 +23,9 @@ import (
 )
 
 // GitHubEvent represents the common fields of GitHub webhook payloads.
-// PullRequest fields are retained for JSON deserialization even though
-// extractPRs no longer handles pull_request events (CI-only trigger, #662).
+// PullRequest fields are used by the fork-fallback path in extractPRs
+// for pull_request events (opened/synchronize/reopened on open, non-draft PRs).
+// Origin PRs are primarily triggered via check_suite/check_run (CI-only, #662).
 type GitHubEvent struct {
 	Action     string `json:"action"`
 	Repository struct {
@@ -68,15 +69,16 @@ const triggerDedupCooldown = 300 * time.Second
 
 // WebhookHandler handles incoming GitHub webhook requests.
 type WebhookHandler struct {
-	cfg     config.WebhookConfig
-	trigger JobTrigger
-	limiter *rate.Limiter
-	sem     chan struct{} // bounds concurrent trigger goroutines
-	log     *slog.Logger
-	baseCtx context.Context    // gateway lifecycle context for async goroutines
-	cancel  context.CancelFunc // cancels in-flight triggers on shutdown
-	dedup   sync.Map           // "repo#pr_number" -> time.Time; cooldown-based dedup
-	wg      sync.WaitGroup     // tracks in-flight trigger + sweeper goroutines
+	cfg       config.WebhookConfig
+	trigger   JobTrigger
+	limiter   *rate.Limiter
+	sem       chan struct{} // bounds concurrent trigger goroutines
+	log       *slog.Logger
+	baseCtx   context.Context    // gateway lifecycle context for async goroutines
+	cancel    context.CancelFunc // cancels in-flight triggers on shutdown
+	dedup     sync.Map           // "repo#pr_number" -> time.Time; cooldown-based dedup
+	wg        sync.WaitGroup     // tracks in-flight trigger + sweeper goroutines
+	closeOnce sync.Once          // ensures Close is idempotent
 }
 
 // NewWebhookHandler creates a new GitHub webhook handler.
@@ -101,11 +103,13 @@ func NewWebhookHandler(baseCtx context.Context, cfg config.WebhookConfig, trigge
 // Close cancels in-flight trigger goroutines, stops the dedup sweeper,
 // and waits for all goroutines to finish. Safe to call multiple times.
 func (h *WebhookHandler) Close() {
-	h.cancel()
-	h.wg.Wait()
-	h.dedup.Range(func(key, _ any) bool {
-		h.dedup.Delete(key)
-		return true
+	h.closeOnce.Do(func() {
+		h.cancel()
+		h.wg.Wait()
+		h.dedup.Range(func(key, _ any) bool {
+			h.dedup.Delete(key)
+			return true
+		})
 	})
 }
 
@@ -262,8 +266,15 @@ func (h *WebhookHandler) verifySignature(payload []byte, sig string) bool {
 }
 
 // extractPRs returns PR numbers that need review based on event type and action.
-// Only check_suite and check_run events are handled — pull_request events are
-// ignored to prevent triggering before CI completes (issue #662).
+//
+// Two trigger paths:
+//  1. check_suite/check_run (CI-only, preferred): triggers only after CI succeeds,
+//     ensuring review sees final code. This is the primary path for origin PRs.
+//  2. pull_request (fork fallback): triggers on opened/synchronize/reopened for
+//     open, non-draft PRs. This covers fork PRs where check_suite events from
+//     the fork's CI are not forwarded to the origin repo's webhook (GitHub limitation).
+//     Dedup ensures that if a check_suite also arrives (origin PRs), only the first
+//     trigger wins.
 func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 	switch eventType {
 	case "check_suite":
@@ -276,6 +287,17 @@ func (h *WebhookHandler) extractPRs(eventType string, e *GitHubEvent) []int {
 			return nil
 		}
 		return extractPRNumbers(e.CheckRun.CheckSuite.PullRequests)
+	case "pull_request":
+		// Fork PR fallback: trigger on new commits or new/open PRs.
+		// Skip closed/merged/draft PRs, missing SHA, and non-actionable events.
+		if e.PullRequest == nil || e.PullRequest.Head.SHA == "" ||
+			e.PullRequest.State != "open" || e.PullRequest.Draft {
+			return nil
+		}
+		switch e.Action {
+		case "opened", "synchronize", "reopened", "ready_for_review":
+			return []int{e.PullRequest.Number}
+		}
 	}
 	return nil
 }

@@ -311,6 +311,13 @@ func (h *Hub) sendBroadcast(msg *EnvelopeWithConn) (sent bool) {
 	}
 }
 
+// HasActiveConn reports whether the session has at least one active connection.
+func (h *Hub) HasActiveConn(sessionID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.sessions[sessionID]) > 0
+}
+
 // SendToSession delivers a message to all connections subscribed to a session.
 // Control-priority messages bypass the broadcast queue.
 // afterDrain functions are called sequentially after the item is routed by Run.

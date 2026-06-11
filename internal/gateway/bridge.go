@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -157,7 +158,7 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		return fmt.Errorf("bridge: create session: %w", err)
 	}
 
-	workerInfo := b.prepareWorkerInfo(ctx, p.ID, p.UserID, p.WorkDir, si)
+	workerInfo := b.prepareWorkerInfo(p.ID, p.UserID, p.WorkDir, si)
 
 	// Inject cron-specific env vars (e.g. admin API creds) only for cron sessions.
 	// Detected via platformKey rather than platform value, since cron executor now
@@ -277,7 +278,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		si.State = events.StateRunning
 	}
 
-	workerInfo := b.prepareWorkerInfo(ctx, si.ID, si.UserID, workDir, si)
+	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:         ctx,
 		wt:          si.WorkerType,
@@ -671,6 +672,22 @@ func (b *Bridge) WaitForwarders(ctx context.Context) {
 	}
 }
 
+// defaultBrainFn adapts brain.Global() to the compressorBrain interface.
+// Returns nil if Brain is not configured (graceful degradation).
+//
+// Race note: brain.Global() returns a snapshot that could be replaced by
+// config hot-reload between this call and the actual ChatWithOptions invocation.
+// This is an acceptable tradeoff: the worst case is a stale (but still valid)
+// Brain client being used for one compression cycle — functionally correct,
+// just potentially using an older config or API key.
+func defaultBrainFn() compressorBrain {
+	b := brain.Global()
+	if b == nil {
+		return nil
+	}
+	return b
+}
+
 // buildNotifyEnvelope creates a synthetic Message event for user notifications.
 func buildNotifyEnvelope(sessionID, msg string, seq int64) *events.Envelope {
 	return events.NewEnvelope(aep.NewID(), sessionID, seq, events.Message, map[string]any{"content": msg})
@@ -725,33 +742,22 @@ func injectSandbox(platformKey map[string]string, sandbox string) {
 // prepareWorkerInfo builds a complete worker.SessionInfo with all standard env
 // injection applied. This consolidates the buildWorkerInfo + injectSlackEnv +
 // injectGatewayContext trio that was previously duplicated across 3 call sites.
-func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
+func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
 	info := b.buildWorkerInfo(sessionID, userID, workDir, si)
 
 	// Populate conversation history from turns table for context recovery.
 	// Only CodexCLI worker needs this — other workers have native resume.
-	if si.WorkerType == worker.TypeCodexCLI && b.turnsQuerier != nil {
-		turns, err := b.turnsQuerier.QueryTurns(ctx, sessionID, 50, 0)
+	// Skip for fresh sessions (StateCreated) that have zero turns by definition.
+	if si.WorkerType == worker.TypeCodexCLI && si.State != events.StateCreated && b.turnsQuerier != nil {
+		turns, err := b.turnsQuerier.QueryTurns(b.shutdownCtx, sessionID, 50, 0)
 		if err != nil {
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
 		} else if len(turns) > 0 {
-			const maxHistoryChars = 50000
-			history := make([]worker.ConversationTurn, 0, len(turns))
-			charsUsed := 0
-			for _, t := range turns {
-				if t.Content == "" {
-					continue
-				}
-				if charsUsed+len(t.Content) > maxHistoryChars {
-					break
-				}
-				charsUsed += len(t.Content)
-				history = append(history, worker.ConversationTurn{
-					Role:    t.Role,
-					Content: t.Content,
-				})
-			}
-			info.ConversationHistory = history
+			compressor := NewHistoryCompressor(b.log, b.hub)
+			// Use shutdownCtx as parent: compression should survive user disconnect
+			// but still be cancelled on gateway shutdown to avoid blocking Shutdown().
+			result := compressor.CompressHistory(b.shutdownCtx, turns, sessionID, defaultBrainFn)
+			info.ConversationHistory = result.Turns
 		}
 	}
 

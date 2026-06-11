@@ -11,7 +11,7 @@
 
 CodexCLI worker 使用 `codex app-server` 单例进程管理 thread。所有 thread 历史存储在进程内存中，无磁盘持久化。
 
-当 session 空闲超过 30 分钟，Zombie GC 终止 session → app-server 进程被 KillIfIdle 杀死 → 所有对话历史随进程销毁。用户下次发消息时，创建全新 thread，无法记住之前的指令。
+当 session 空闲超过 30 分钟，Zombie GC 终止 session → app-server 进程被 shutdown 终止（idle drain 或进程回收）→ 所有对话历史随进程销毁。用户下次发消息时，创建全新 thread，无法记住之前的指令。
 
 **复现场景**（2026-06-09 22:05–22:41 实际日志）:
 
@@ -19,14 +19,14 @@ CodexCLI worker 使用 `codex app-server` 单例进程管理 thread。所有 thr
 |------|------|
 | 22:05:04 | 用户发送 "现在开始我发 ping，你回复 汪"，session `092bc1ab` 处理 |
 | 22:05:23 | Session 最后 IO |
-| 22:36:21 | Zombie GC 终止 session（30 分钟无 IO），KillIfIdle 立即杀死 app-server 进程 |
+| 22:36:21 | Zombie GC 终止 session（30 分钟无 IO），shutdown 释放引用 → idle drain 杀死 app-server 进程 |
 | 22:41:48 | 用户在同一 Slack thread 发 "ping"，Resume 失败 → 创建全新 session/thread |
 | 22:41:49 | Agent 回复 "pong" 而非 "汪" — 历史完全丢失 |
 
 **根因链**:
 
 1. **Zombie GC**（30 min execution timeout）终止空闲 session
-2. **KillIfIdle** 立即杀死 app-server 进程（绕过 30 分钟 drain timer）
+2. **shutdown 释放引用** → idle drain timer 到期杀死 app-server 进程（或进程被回收）
 3. **Thread 历史全丢** — 仅存于进程内存，无持久化
 4. **Resume 创建新 thread** — `startNewThread()` 调用 `thread/start` 创建全新 thread
 5. **thread/start 协议不支持恢复** — `ThreadStartParams` 无 threadId 字段
@@ -65,12 +65,12 @@ worker.Input(content)  ← 用户首条消息
   └→ injectHistoryPrefix(content)
        ↓
      "---
-      CONVERSATION_HISTORY_START
+      CONVERSATION_HISTORY_<hex>_START
       [User]: 现在开始我发 ping，你回复 汪
       [Assistant]: 收到，以后你发 ping 我就回 汪
       [User]: ping
       [Assistant]: 汪
-      CONVERSATION_HISTORY_END
+      CONVERSATION_HISTORY_<hex>_END
       ---
 
       ping"                              ← 实际用户消息
@@ -121,23 +121,21 @@ ConversationHistory []ConversationTurn
 在 `prepareWorkerInfo()` 中，`buildWorkerInfo()` 之后、`injectSlackEnv()` 之前，查询 turns 表：
 
 ```go
-func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
+func (b *Bridge) prepareWorkerInfo(ctx context.Context, sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
     info := b.buildWorkerInfo(sessionID, userID, workDir, si)
 
     // Populate conversation history from turns table for context recovery.
-    if b.turnsQuerier != nil {
-        if turns, err := b.turnsQuerier.QueryTurns(context.Background(), sessionID, 50, 0); err == nil && len(turns) > 0 {
-            history := make([]worker.ConversationTurn, 0, len(turns))
-            for _, t := range turns {
-                if t.Content == "" {
-                    continue
-                }
-                history = append(history, worker.ConversationTurn{
-                    Role:    t.Role,
-                    Content: t.Content,
-                })
-            }
-            info.ConversationHistory = history
+    // Only CodexCLI worker needs this — other workers have native resume.
+    // Skip for fresh sessions (CREATED state) — no history to recover.
+    if si.WorkerType == worker.TypeCodexCLI && si.State != events.StateCreated && b.turnsQuerier != nil {
+        turns, err := b.turnsQuerier.QueryTurns(b.shutdownCtx, sessionID, 50, 0)
+        if err != nil {
+            b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
+        } else if len(turns) > 0 {
+            // Use shutdownCtx: compression survives user disconnect but cancels on gateway shutdown.
+            compressor := NewHistoryCompressor(b.log, b.hub)
+            result := compressor.CompressHistory(b.shutdownCtx, turns, sessionID, defaultBrainFn)
+            info.ConversationHistory = result.Turns
         }
     }
 
@@ -150,8 +148,10 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 **设计决策**:
 - **最近 50 条 turn**（约 25 轮对话），足够覆盖短期间断场景
 - 空内容 turn 跳过
+- **StateCreated 守卫**：跳过新创建 session（无历史可恢复），避免无效 DB 查询
+- **智能压缩**：历史超过 50k×1.2 字符时，通过 Brain LLM 压缩旧 turns 为摘要，保留最近 4 条原样
+- Brain 不可用/失败时降级为截断（与原始行为兼容）
 - 查询失败静默忽略（不阻塞 session 创建）
-- `b.turnsQuerier` 已是 Bridge 字段（bridge.go:45），无需新依赖注入
 
 ### 3.3 CodexCLI 消费历史 — `internal/worker/codexcli/worker.go`
 
@@ -174,7 +174,7 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 
     // Store conversation history for first-input injection.
     w.mu.Lock()
-    w.pendingHistory = session.ConversationHistory
+    w.pendingHistory = slices.Clone(session.ConversationHistory)
     w.historyInjected = false
     w.mu.Unlock()
 
@@ -202,6 +202,8 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 ```go
 // injectHistoryPrefix prepends conversation history to the first user input
 // of a new thread. After injection, pendingHistory is cleared.
+// Uses a unique boundary ID (crypto/rand hex) per injection call to avoid
+// collisions with user content containing the sentinel markers.
 func (w *AppServerWorker) injectHistoryPrefix(content string) string {
     w.mu.Lock()
     if w.historyInjected || len(w.pendingHistory) == 0 {
@@ -213,9 +215,10 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
     w.historyInjected = true
     w.mu.Unlock()
 
+    boundaryID := generateBoundaryID() // crypto/rand 8-char hex
     var sb strings.Builder
     sb.WriteString("---
-      CONVERSATION_HISTORY_START\n")
+      CONVERSATION_HISTORY_" + boundaryID + "_START\n")
     sb.WriteString("Below is the conversation history from a previous session. ")
     sb.WriteString("Use it as context to maintain continuity.\n\n")
     for _, turn := range history {
@@ -230,7 +233,7 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
         sb.WriteString(turn.Content)
         sb.WriteString("\n\n")
     }
-    sb.WriteString("CONVERSATION_HISTORY_END
+    sb.WriteString("CONVERSATION_HISTORY_" + boundaryID + "_END
       ---\n\n")
     sb.WriteString(content)
     return sb.String()
@@ -278,8 +281,9 @@ func (w *AppServerWorker) cleanupOldThread() {
 | 全新 session（无历史） | `QueryTurns` 返回空，`ConversationHistory` 为 nil，`injectHistoryPrefix` 返回原 content |
 | 查询失败 | 静默忽略，session 正常创建（无历史恢复） |
 | 用户执行 /reset | generation 递增，`QueryTurns` 按新 generation 查询，只看到新历史 |
-| 长对话（>50 turns） | 只取最近 50 条，早期上下文丢弃 |
-| 助手回复含长文本/代码 | 完整注入，可能消耗较多 token |
+| 长对话（>50 turns） | 只取最近 50 条；总量 > 60k 字符时，旧 turns 通过 Brain LLM 压缩为摘要，最近 4 条保留原样 |
+| 压缩失败/Brain 不可用 | 降级为截断：从最近的 turns 中取字符预算内能容纳的部分 |
+| 助手回复含长文本/代码 | 压缩或截断至 50k 字符预算内注入 |
 
 ---
 
@@ -319,8 +323,9 @@ make check        # 完整 CI
 
 ## 6. Future Improvements (Out of Scope)
 
-- **~Token 预算控制~**: ~~基于 `TurnRecord.TokensIn` 累计~~ → 已实现：字符级预算 `maxHistoryChars=50000`，按 `len(turn.Content)` 累计
-- **历史摘要**: 对长对话生成摘要替代全文注入，减少 token 消耗
+- **~Token 预算控制~**: ~~基于 `TurnRecord.TokensIn` 累计~~ → ✅ 已实现：字符级预算 `maxHistoryChars=50000`，按 `len(turn.Content)` 累计
+- **~历史摘要~**: ~~对长对话生成摘要替代全文注入~~ → ✅ 已实现：`HistoryCompressor` + Brain LLM 智能压缩，60-70% 压缩率，保留最近 4 条原样
+- **压缩结果缓存**: 将 Brain 压缩结果缓存到 session store（key=sessionID），下次重连复用，避免重复 LLM 调用
 - **配置化**: 将历史条数上限（当前硬编码 50）暴露为 YAML 配置项
 - **Tool 事件注入**: 当前仅注入 text turn，未来可选择性注入 tool_call/tool_result
 - **上游 thread resume**: 推动 codex app-server 支持 `thread/resume` API，从根本上解决

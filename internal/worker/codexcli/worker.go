@@ -2,6 +2,9 @@ package codexcli
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -364,6 +367,9 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 
 // injectHistoryPrefix prepends conversation history to the first user
 // input of a new thread. After injection, pendingHistory is cleared.
+// A unique boundary ID is generated per injection call so that the
+// sentinel markers cannot collide with real content, eliminating the
+// need for destructive content sanitization.
 func (w *AppServerWorker) injectHistoryPrefix(content string) string {
 	w.mu.Lock()
 	if w.historyInjected || len(w.pendingHistory) == 0 {
@@ -375,9 +381,11 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
 	w.historyInjected = true
 	w.mu.Unlock()
 
+	boundary := generateBoundaryID()
+
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	sb.WriteString("CONVERSATION_HISTORY_START\n")
+	fmt.Fprintf(&sb, "CONVERSATION_HISTORY_%s_START\n", boundary)
 	sb.WriteString("Below is the conversation history from a previous session. ")
 	sb.WriteString("Use it as context to maintain continuity.\n\n")
 	for _, turn := range history {
@@ -389,14 +397,26 @@ func (w *AppServerWorker) injectHistoryPrefix(content string) string {
 		default:
 			continue
 		}
-		escaped := strings.ReplaceAll(turn.Content, "CONVERSATION_HISTORY_", "")
-		sb.WriteString(escaped)
+		sb.WriteString(turn.Content)
 		sb.WriteString("\n\n")
 	}
-	sb.WriteString("CONVERSATION_HISTORY_END\n")
+	fmt.Fprintf(&sb, "CONVERSATION_HISTORY_%s_END\n", boundary)
 	sb.WriteString("---\n\n")
 	sb.WriteString(content)
 	return sb.String()
+}
+
+// generateBoundaryID returns a cryptographically random 8-char hex string
+// used to make history sentinel markers unique per injection call.
+// Falls back to timestamp-based ID if the system entropy source is unavailable.
+func generateBoundaryID() string {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// Fallback: use timestamp-derived bytes. crypto/rand.Read only fails
+		// in extreme sandbox environments; acceptable collision resistance for non-cryptographic use.
+		binary.LittleEndian.PutUint32(buf[:], uint32(time.Now().UnixNano()))
+	}
+	return hex.EncodeToString(buf[:])
 }
 
 // ─── AppServerWorker lifecycle ────────────────────────────────────────
@@ -459,13 +479,13 @@ func (w *AppServerWorker) Kill() error {
 	return nil
 }
 
-// shutdown releases the worker's manager subscription and kills the singleton
-// process if no other sessions hold refs. Called by both Terminate and Kill.
+// shutdown releases the worker's manager subscription and decrements the
+// singleton ref count. Unlike per-session workers, the shared AppServer
+// singleton process is NOT killed here — it stops via idle drain or
+// explicit ShutdownSingleton(). This prevents GC from killing a shared
+// process when reclaiming sessions.
 func (w *AppServerWorker) shutdown() {
 	w.release()
-	if w.manager != nil {
-		w.manager.KillIfIdle()
-	}
 }
 
 func (w *AppServerWorker) Wait() (int, error) {

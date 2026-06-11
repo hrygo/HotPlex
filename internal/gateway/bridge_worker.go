@@ -176,7 +176,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		si.State = events.StateRunning
 	}
 
-	workerInfo := b.prepareWorkerInfo(context.Background(), si.ID, si.UserID, p.workDir, si)
+	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, p.workDir, si)
 
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:           context.Background(),
