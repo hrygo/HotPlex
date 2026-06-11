@@ -8,7 +8,7 @@
 
 - [约定与规范](#约定与规范)
 - [项目结构](#项目结构)
-- [开发指南](#开发指南)
+- [开发指南](#开发指南)（含 [PR Review 修复循环](#pr-review-修复循环)）
 - [配置参考](#配置参考)
 - [命令参考](#命令参考)
 - [附录](#附录)
@@ -215,6 +215,31 @@ configs/   - 配置文件
 **平台分离**：
 - 使用 `*_unix.go` / `*_windows.go` build tags
 - CI 必须通过 Linux + macOS + Windows 三平台测试
+
+### PR Review 修复循环
+
+Review cron 是定时触发（30min），不是 push webhook。手动触发 + 轮询是可靠路径：
+
+```
+push → 轮询已有 review → 手动触发 → 轮询新 review → 修复 → push → 循环
+终止：无新代码缺陷 + PR approved
+```
+
+**去重**：webhook（CI 成功自动触发）与手动 `trigger` 共享同一 cron job，`RunningAtMs` CAS 保证同 job 不并发。**先轮询再触发**——若 webhook 已提交 review 则跳过触发。
+
+```bash
+# 检查已有 review（push 时间之后）
+gh api repos/hrygo/hotplex/pulls/{N}/reviews \
+  --jq '[.[] | select(.submitted_at > "{push_time}")] | length'
+
+# 手动触发（仅当无新 review 时）
+hotplex cron trigger pr-review-hotplex
+
+# 获取最新 review 内容
+gh api repos/hrygo/hotplex/pulls/{N}/reviews --jq 'max_by(.id) | .body'
+```
+
+**优先级**：P0/P1 必修 → P2 有价值修 / 大型提 Issue → P3 轻量修 / 忽略
 
 ---
 

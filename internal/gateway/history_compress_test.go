@@ -8,8 +8,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"sync"
+
 	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/worker"
 )
 
 // mockBrain implements compressorBrain for testing.
@@ -208,6 +211,129 @@ func TestCompressHistory_RecentTurnsExceedBudget(t *testing.T) {
 
 	require.False(t, result.Compressed)
 	require.True(t, result.FinalChars <= maxHistoryBytes)
+}
+
+func TestTruncateHistory_BasicTruncation(t *testing.T) {
+	t.Parallel()
+
+	c := NewHistoryCompressor(slog.Default(), nil)
+
+	// 20 turns × 4000 chars = 80k > 50k budget → should truncate.
+	turns := makeLargeTurns(20, 4000)
+
+	result := c.TruncateHistory(turns)
+
+	require.False(t, result.Compressed)
+	require.True(t, result.FinalChars <= maxHistoryBytes)
+	require.NotEmpty(t, result.Turns)
+	require.True(t, result.OriginalChars > maxHistoryBytes,
+		"original should exceed budget to test truncation")
+}
+
+func TestTruncateHistory_AllTurnsFit(t *testing.T) {
+	t.Parallel()
+
+	c := NewHistoryCompressor(slog.Default(), nil)
+
+	turns := []*eventstore.TurnRecord{
+		turn("user", "hello"),
+		turn("assistant", "hi"),
+		turn("user", "how are you?"),
+	}
+
+	result := c.TruncateHistory(turns)
+
+	require.False(t, result.Compressed)
+	require.Len(t, result.Turns, 3)
+	require.Equal(t, "hello", result.Turns[0].Content)
+}
+
+func TestTruncateHistory_EmptyTurns(t *testing.T) {
+	t.Parallel()
+
+	c := NewHistoryCompressor(slog.Default(), nil)
+
+	result := c.TruncateHistory(nil)
+	require.False(t, result.Compressed)
+	require.Empty(t, result.Turns)
+
+	// All turns have empty content.
+	turns := []*eventstore.TurnRecord{turn("user", ""), turn("assistant", "")}
+	result = c.TruncateHistory(turns)
+	require.False(t, result.Compressed)
+	require.Empty(t, result.Turns)
+}
+
+func TestTruncateHistory_FiltersEmptyContent(t *testing.T) {
+	t.Parallel()
+
+	c := NewHistoryCompressor(slog.Default(), nil)
+
+	turns := []*eventstore.TurnRecord{
+		turn("user", ""),
+		turn("assistant", "response"),
+		turn("user", ""),
+		turn("assistant", "response2"),
+	}
+
+	result := c.TruncateHistory(turns)
+	require.Len(t, result.Turns, 2)
+	require.Equal(t, "response", result.Turns[0].Content)
+	require.Equal(t, "response2", result.Turns[1].Content)
+}
+
+func TestTruncateHistory_PreservesChronologicalOrder(t *testing.T) {
+	t.Parallel()
+
+	c := NewHistoryCompressor(slog.Default(), nil)
+
+	// Create turns where only recent ones fit within budget.
+	turns := []*eventstore.TurnRecord{
+		turn("user", makeLargeString(30000)),
+		turn("assistant", makeLargeString(30000)),
+		turn("user", "recent1"),
+		turn("assistant", "recent2"),
+	}
+
+	result := c.TruncateHistory(turns)
+
+	// Result should be chronologically ordered (oldest first).
+	require.False(t, result.Compressed)
+	require.True(t, len(result.Turns) >= 2)
+	// Last turns should be the recent small ones.
+	last := result.Turns[len(result.Turns)-1]
+	require.Equal(t, "recent2", last.Content)
+}
+
+func TestCompressCache_InvalidationOnTurnChange(t *testing.T) {
+	t.Parallel()
+
+	// Simulate cache behavior: same latestTurnCreatedAt = cache hit,
+	// different = cache miss (invalidate).
+	cache := &sync.Map{}
+
+	entry1 := &compressCacheEntry{
+		turns:               []worker.ConversationTurn{{Role: "assistant", Content: "summary"}},
+		latestTurnCreatedAt: 1000,
+	}
+	cache.Store("s1", entry1)
+
+	// Same timestamp → hit.
+	if cached, ok := cache.Load("s1"); ok {
+		e := cached.(*compressCacheEntry)
+		require.Equal(t, int64(1000), e.latestTurnCreatedAt)
+		require.Len(t, e.turns, 1)
+	}
+
+	// Different timestamp → miss → invalidate.
+	if cached, ok := cache.Load("s1"); ok {
+		e := cached.(*compressCacheEntry)
+		if e.latestTurnCreatedAt != 2000 {
+			cache.Delete("s1")
+		}
+	}
+	_, ok := cache.Load("s1")
+	require.False(t, ok, "cache should be invalidated after timestamp mismatch")
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────

@@ -67,6 +67,11 @@ type Bridge struct {
 	agentConfigExclude atomic.Value  // map[string][]string: platform → inject_exclude (global default at "" key)
 
 	accum map[string]*sessionAccumulator // per-session stats accumulator
+
+	// compressCache stores async compression results keyed by sessionID.
+	// Entries are invalidated when the latest turn's CreatedAt changes
+	// (turns are append-only, so timestamp stability implies content stability).
+	compressCache sync.Map // sessionID → *compressCacheEntry
 	// accumMu protects accum. RWMutex allows concurrent reads in getOrInitAccum
 	// fast path; write lock is used for create/delete/reset operations.
 	accumMu sync.RWMutex
@@ -688,6 +693,12 @@ func defaultBrainFn() compressorBrain {
 	return b
 }
 
+// compressCacheEntry stores the result of async history compression.
+type compressCacheEntry struct {
+	turns               []worker.ConversationTurn
+	latestTurnCreatedAt int64 // unix millis of the newest turn used; mismatch = stale
+}
+
 // buildNotifyEnvelope creates a synthetic Message event for user notifications.
 func buildNotifyEnvelope(sessionID, msg string, seq int64) *events.Envelope {
 	return events.NewEnvelope(aep.NewID(), sessionID, seq, events.Message, map[string]any{"content": msg})
@@ -754,10 +765,44 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
 		} else if len(turns) > 0 {
 			compressor := NewHistoryCompressor(b.log, b.hub)
-			// Use shutdownCtx as parent: compression should survive user disconnect
-			// but still be cancelled on gateway shutdown to avoid blocking Shutdown().
-			result := compressor.CompressHistory(b.shutdownCtx, turns, sessionID, defaultBrainFn)
-			info.ConversationHistory = result.Turns
+			latestCreatedAt := turns[len(turns)-1].CreatedAt
+
+			// Check async compression cache: if turns haven't changed, reuse result.
+			if cached, ok := b.compressCache.Load(sessionID); ok {
+				if entry, ok := cached.(*compressCacheEntry); ok {
+					if entry.latestTurnCreatedAt == latestCreatedAt {
+						info.ConversationHistory = entry.turns
+						b.log.Debug("bridge: using cached compressed history",
+							"session_id", sessionID, "turns", len(entry.turns))
+					} else {
+						// Turn set changed - stale cache, invalidate.
+						b.compressCache.Delete(sessionID)
+					}
+				} else {
+					b.compressCache.Delete(sessionID)
+				}
+			}
+
+			// Cache miss: inject truncated history immediately (sub-ms),
+			// then fire async Brain compression for next resume.
+			if info.ConversationHistory == nil {
+				result := compressor.TruncateHistory(turns)
+				info.ConversationHistory = result.Turns
+				b.log.Debug("bridge: truncated history injected, scheduling async compression",
+					"session_id", sessionID, "turns", len(result.Turns))
+
+				b.fwdWg.Add(1)
+				go func() {
+					defer b.fwdWg.Done()
+					asyncResult := compressor.CompressHistory(b.shutdownCtx, turns, sessionID, defaultBrainFn)
+					if asyncResult.Compressed {
+						b.compressCache.Store(sessionID, &compressCacheEntry{
+							turns:               asyncResult.Turns,
+							latestTurnCreatedAt: latestCreatedAt,
+						})
+					}
+				}()
+			}
 		}
 	}
 

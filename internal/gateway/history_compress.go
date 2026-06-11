@@ -171,6 +171,29 @@ func (c *HistoryCompressor) CompressHistory(
 	}
 }
 
+// ─── Fast Path ────────────────────────────────────────────────────────
+
+// TruncateHistory is a fast (sub-millisecond) path that truncates turns to
+// fit within the character budget without calling Brain. Used for immediate
+// injection while async compression runs in the background.
+func (c *HistoryCompressor) TruncateHistory(turns []*eventstore.TurnRecord) CompressResult {
+	filtered := make([]turnWithChars, 0, len(turns))
+	for _, t := range turns {
+		if t.Content == "" {
+			continue
+		}
+		filtered = append(filtered, turnWithChars{
+			role:      t.Role,
+			content:   t.Content,
+			createdAt: t.CreatedAt,
+		})
+	}
+	if len(filtered) == 0 {
+		return CompressResult{}
+	}
+	return c.truncateResult(filtered)
+}
+
 // ─── Brain Interaction ────────────────────────────────────────────────
 
 func (c *HistoryCompressor) callBrain(
