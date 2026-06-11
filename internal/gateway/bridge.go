@@ -510,6 +510,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 		}
 	}
 	b.accumMu.Unlock()
+	b.compressCache.Delete(sessionID)
 
 	if !result.ConnReplaced {
 		return nil
@@ -649,6 +650,11 @@ func isWorkerInUseError(err error) bool {
 func (b *Bridge) Shutdown(ctx context.Context) {
 	b.MarkClosed()
 	b.WaitForwarders(ctx)
+	// Clear compressCache after all async compression goroutines have finished.
+	b.compressCache.Range(func(key, _ any) bool {
+		b.compressCache.Delete(key)
+		return true
+	})
 }
 
 // MarkClosed sets the closed flag and cancels the shutdown context so that:
@@ -791,6 +797,11 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 				b.log.Debug("bridge: truncated history injected, scheduling async compression",
 					"session_id", sessionID, "turns", len(result.Turns))
 
+				// Skip async compression during shutdown to avoid spawning
+				// goroutines that fwdWg.Wait() must then wait for.
+				if b.closed.Load() {
+					return info
+				}
 				b.fwdWg.Add(1)
 				go func() {
 					defer b.fwdWg.Done()
