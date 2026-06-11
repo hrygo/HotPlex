@@ -388,8 +388,8 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 	// Build the candidate state as a value copy (never mutates ms.info in-place).
 	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
 	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
-	// WorkerSessionID is protected by the targeted SQL UPDATE guard below
-	// (lines ~426-440); other scalar fields have a theoretical stale-write
+	// WorkerSessionID is protected by the targeted SQL UPDATE guard below;
+	// other scalar fields have a theoretical stale-write
 	// window during the lock release for DB I/O, mitigated by the safety-net
 	// persist on first event (see #709).
 	candidate := ms.info
