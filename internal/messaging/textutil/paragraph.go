@@ -2,10 +2,10 @@ package textutil
 
 import "unicode/utf8"
 
-// ParaBreakThreshold is the cumulative character count after which a
+// paraBreakThreshold is the cumulative character count after which a
 // paragraph break (\n\n) is inserted at the next sentence terminator.
 // 150 runes ≈ 8–10 lines on mobile, optimal for CJK reading rhythm.
-const ParaBreakThreshold = 150
+const paraBreakThreshold = 150
 
 // ParagraphBreaker tracks cumulative character count across streaming
 // deltas and decides when to inject a paragraph break.
@@ -15,11 +15,11 @@ type ParagraphBreaker struct {
 
 // Add accumulates the rune count of the latest delta and returns true
 // when a paragraph break should be inserted: the cumulative count
-// exceeds ParaBreakThreshold AND the delta ends with a sentence
+// exceeds paraBreakThreshold AND the delta ends with a sentence
 // terminator. On break the internal counter resets to zero.
 func (pb *ParagraphBreaker) Add(delta string) bool {
 	pb.count += utf8.RuneCountInString(delta)
-	if pb.count > ParaBreakThreshold && EndsWithSentenceTerminator(delta) {
+	if pb.count > paraBreakThreshold && EndsWithSentenceTerminator(delta) {
 		pb.count = 0
 		return true
 	}
