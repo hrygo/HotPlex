@@ -1,7 +1,10 @@
+-- WorkerSessionID write semantics:
+--   INSERT path: writes worker_session_id on initial session creation.
+--   UPDATE path: intentionally excludes worker_session_id to avoid overwriting
+--     the authoritative value set by UpdateWorkerSessionIDSQL.
 INSERT INTO sessions (id, user_id, owner_id, bot_id, bot_name, worker_session_id, worker_type, state, platform, platform_key_json, work_dir, title, created_at, updated_at, expires_at, idle_expires_at, context_json, source, client_key)
  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
  ON CONFLICT(id) DO UPDATE SET
--- worker_session_id intentionally excluded: managed by UpdateWorkerSessionIDSQL
   state=excluded.state,
   owner_id=CASE WHEN excluded.owner_id != '' THEN excluded.owner_id ELSE sessions.owner_id END,
   bot_name=CASE WHEN excluded.bot_name != '' THEN excluded.bot_name ELSE sessions.bot_name END,

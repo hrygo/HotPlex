@@ -686,7 +686,7 @@ func SessionGuardRePersistConcurrentOverwrites() metric.Int64Counter {
 		var err error
 		sessionGuardRePersistConcurrentOverwrite, err = Meter().Int64Counter(
 			"hotplex.session.transition.guard_repersist_overwrites",
-			metric.WithDescription("transitionState guard detected concurrent WorkerSessionID overwrite during re-persist lock window"),
+			metric.WithDescription("transitionState guard detected WorkerSessionID changed by another goroutine after re-persist"),
 		)
 		if err != nil {
 			warnInstrument("hotplex.session.transition.guard_repersist_overwrites", err)

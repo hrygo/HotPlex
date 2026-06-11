@@ -65,6 +65,8 @@ func (s *pgStore) Upsert(ctx context.Context, info *SessionInfo) error {
 
 // UpdateWorkerSessionIDSQL performs a targeted UPDATE on the worker_session_id
 // column only, avoiding the full-row overwrite of Upsert.
+// Concurrency safety: relies on PostgreSQL MVCC single-row UPDATE atomicity
+// (no writeMu needed, unlike SQLite store which serializes via writeMu).
 func (s *pgStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
 	ctx, cancel := upsertTimeout(ctx)
 	defer cancel()

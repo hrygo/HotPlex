@@ -8,6 +8,7 @@ tags:
 date: 2026-06-11
 status: draft
 progress: 0
+out_of_scope: This spec describes BaseInstructions/DeveloperInstructions injection for Codex Worker — not implemented in the current PR (fix/709). Tracked separately.
 estimated_hours: 4
 ---
 
@@ -86,11 +87,10 @@ type ThreadStartParams struct {
 }
 ```
 
-### 1.4 `codex exec` 模式同样不支持
+### 1.4 `codex exec` 模式已废弃
 
-同期的 `exec/src/lib.rs:948-974` 中 `thread_start_params_from_config` 也使用
-`..ThreadStartParams::default()` 填充，`base_instructions` 和 `developer_instructions` 都是 `None`。
-exec CLI 本身没有暴露任何 flag 来设置它们。此 spec 仅覆盖 `app-server` 模式，不覆盖 `codex exec`。
+HotPlex 曾通过 `codex exec` 模式（CLI 子进程）使用 Codex，但该模式已被废弃移除。
+当前仅保留 `codex app-server` 模式（单例 HTTP+SSE JSON-RPC），本 spec 仅覆盖此模式。
 
 ---
 
@@ -159,7 +159,7 @@ func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]a
 
 **关于 developerInstructions 的决策**：`developerInstructions`（对应 Rust 侧的 `ConfigOverrides`）
 优先级高于 `baseInstructions`。当前 `SessionInfo.SystemPromptReplace` 在 Codex Worker 中没有对应概念
-（`codex exec` 使用 `--system-prompt` flag，但 `codex app-server` 没有等价的 runtime flag），
+（`codex app-server` 没有等价的 runtime flag），
 暂不映射。如果未来需要，可以通过 `developerInstructions` 实现更高优先级的指令覆盖。
 
 ### 3.3 `ResetContext` 确保 SystemPrompt 持久化
@@ -295,14 +295,13 @@ Session Resume:
 - [ ] `TestBuildThreadStartParams` 覆盖 `DeveloperInstructions` 始终不存在的场景
 - [ ] 所有测试通过，无 regression
 
-### AC-10: `codex exec` 模式不受影响
+### AC-10: 其他 Worker 零影响
 
 **Given** 本 spec 仅修改 `codexcli/` 包
 **When** 部署变更
 **Then** 以下条件全部满足：
 - [ ] `internal/worker/claudecode/`、`internal/worker/acp/`、`internal/worker/opencodeserver/` 零改动
-- [ ] `codex exec` 相关代码（`exec/src/lib.rs`）零改动
-- [ ] `codex exec` 模式的 behavior 完全不变
+- [ ] 非 Codex Worker 的 behavior 完全不变
 
 ---
 
@@ -348,7 +347,7 @@ if session.SystemPrompt != "" {
 
 | 项目 | 理由 |
 |------|------|
-| `codex exec` 模式支持 | `exec` 是独立 Rust 二进制，不通过 app-server 协议；且 exec 没有 flag 暴露 baseInstructions |
+| `codex exec` 模式 | 已废弃移除，不在本 spec 范围内 |
 | `developerInstructions` 实际使用 | 当前 `SessionInfo` 没有对应概念，保留字段供未来扩展 |
 | `nReplace` / `SystemPromptReplace` 映射 | Codex app-server 协议层没有明确的 "replace" 语义，现有 `baseInstructions` 是追加语义 |
 | `codex` 二进制零修改 | HotPlex 侧的单向修改即可，app-server 协议已经全量支持额外字段容忍 |

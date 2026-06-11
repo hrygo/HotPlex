@@ -237,6 +237,8 @@ worker:
     # Sandbox mode: read-only, workspace-write, danger-full-access
     # YOLO mode (default): danger-full-access grants full filesystem + network access.
     # For restricted sandbox, use workspace-write or read-only.
+    # ⚠ Default changed from workspace-write to danger-full-access in v1.26 —
+    #   existing deployments without explicit sandbox config will gain elevated permissions.
     sandbox: "danger-full-access"
     # Approval mode: untrusted, on-request, never
     # YOLO mode (default): never skips all approval prompts — commands run immediately.
