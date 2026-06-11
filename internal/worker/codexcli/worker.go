@@ -83,6 +83,7 @@ func resolveConfig() Config {
 var _ worker.Worker = (*AppServerWorker)(nil)
 var _ worker.WorkerCommander = (*AppServerWorker)(nil)
 var _ worker.ControlRequester = (*AppServerWorker)(nil)
+var _ worker.SystemPromptUpdater = (*AppServerWorker)(nil)
 
 type appState int
 
