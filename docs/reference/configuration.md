@@ -324,7 +324,7 @@ ACP (Agent Communication Protocol) 通用 Worker，通过 JSON-RPC 2.0 over stdi
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
 | `command` | string | `hermes acp` | `HOTPLEX_WORKER_ACP_COMMAND` | ACP Agent 启动命令。支持带子命令，如 `hermes acp` |
-| `auto_approve` | bool | `false` | `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | 自动批准权限请求，无需用户确认 |
+| `auto_approve` | bool | `true` | `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | 自动批准权限请求，无需用户确认 |
 | `args` | []string | `[]` | — | 附加到 command 之后的额外参数列表 |
 | `debug` | bool | `false` | — | 启用 JSON-RPC 协议 trace 日志（调试用） |
 
@@ -749,7 +749,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_WORKER_CODEX_CLI_SANDBOX` | `worker.codex_cli.sandbox` | `danger-full-access` |
 | `HOTPLEX_WORKER_CODEX_CLI_APPROVAL_MODE` | `worker.codex_cli.approval_mode` | `never` |
 | `HOTPLEX_WORKER_ACP_COMMAND` | `worker.acp.command` | `hermes acp` |
-| `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | `worker.acp.auto_approve` | `false` |
+| `HOTPLEX_WORKER_ACP_AUTO_APPROVE` | `worker.acp.auto_approve` | `true` |
 | `HOTPLEX_WORKER_GH_TOKEN` | 通过 `worker.environment` 注入 | — |
 | `HOTPLEX_WORKER_GITHUB_TOKEN` | 通过 `worker.environment` 注入 | — |
 
