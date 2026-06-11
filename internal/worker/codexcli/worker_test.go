@@ -1803,6 +1803,32 @@ func TestBuildThreadStartParams(t *testing.T) {
 		require.NotNil(t, params["additionalDirectories"])
 	})
 
+	t.Run("system prompt injected as baseInstructions", func(t *testing.T) {
+		t.Parallel()
+		params := buildThreadStartParams(
+			worker.SessionInfo{
+				ProjectDir:   "/tmp",
+				SystemPrompt: "You are a helpful assistant. Follow SOUL.md guidelines.",
+			},
+			Config{},
+		)
+		require.Equal(t, "You are a helpful assistant. Follow SOUL.md guidelines.", params["baseInstructions"])
+		_, hasDevInstr := params["developerInstructions"]
+		require.False(t, hasDevInstr, "developerInstructions should never be set by buildThreadStartParams")
+	})
+
+	t.Run("empty system prompt omits baseInstructions", func(t *testing.T) {
+		t.Parallel()
+		params := buildThreadStartParams(
+			worker.SessionInfo{ProjectDir: "/tmp"},
+			Config{},
+		)
+		_, hasBase := params["baseInstructions"]
+		require.False(t, hasBase, "baseInstructions should be absent when SystemPrompt is empty")
+		_, hasDev := params["developerInstructions"]
+		require.False(t, hasDev, "developerInstructions should never be set")
+	})
+
 	t.Run("no skip permissions uses config approval", func(t *testing.T) {
 		t.Parallel()
 		params := buildThreadStartParams(
