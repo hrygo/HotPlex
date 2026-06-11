@@ -291,6 +291,7 @@ func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Wor
 	b.accumMu.Lock()
 	delete(b.accum, sessionID)
 	b.accumMu.Unlock()
+	b.compressCache.Delete(sessionID)
 
 	b.crashTrackerMu.Lock()
 	delete(b.crashTracker, sessionID)

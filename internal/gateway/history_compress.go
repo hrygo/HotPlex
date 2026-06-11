@@ -65,18 +65,10 @@ func (c *HistoryCompressor) CompressHistory(
 	brainFn func() compressorBrain,
 ) CompressResult {
 	// 1. Filter empty-content turns and build preliminary list.
-	filtered := make([]turnWithChars, 0, len(turns))
+	filtered := filterEmptyTurns(turns)
 	totalChars := 0
-	for _, t := range turns {
-		if t.Content == "" {
-			continue
-		}
-		filtered = append(filtered, turnWithChars{
-			role:      t.Role,
-			content:   t.Content,
-			createdAt: t.CreatedAt,
-		})
-		totalChars += len(t.Content)
+	for _, t := range filtered {
+		totalChars += len(t.content)
 	}
 
 	if len(filtered) == 0 {
@@ -171,6 +163,19 @@ func (c *HistoryCompressor) CompressHistory(
 	}
 }
 
+// ─── Fast Path ────────────────────────────────────────────────────────
+
+// TruncateHistory is a fast (sub-millisecond) path that truncates turns to
+// fit within the character budget without calling Brain. Used for immediate
+// injection while async compression runs in the background.
+func (c *HistoryCompressor) TruncateHistory(turns []*eventstore.TurnRecord) CompressResult {
+	filtered := filterEmptyTurns(turns)
+	if len(filtered) == 0 {
+		return CompressResult{}
+	}
+	return c.truncateResult(filtered)
+}
+
 // ─── Brain Interaction ────────────────────────────────────────────────
 
 func (c *HistoryCompressor) callBrain(
@@ -246,6 +251,23 @@ type turnWithChars struct {
 	role      string
 	content   string
 	createdAt int64 // unix millis from TurnRecord.CreatedAt
+}
+
+// filterEmptyTurns filters out turns with empty content, converting
+// TurnRecord pointers to turnWithChars. Shared by CompressHistory and TruncateHistory.
+func filterEmptyTurns(turns []*eventstore.TurnRecord) []turnWithChars {
+	filtered := make([]turnWithChars, 0, len(turns))
+	for _, t := range turns {
+		if t.Content == "" {
+			continue
+		}
+		filtered = append(filtered, turnWithChars{
+			role:      t.Role,
+			content:   t.Content,
+			createdAt: t.CreatedAt,
+		})
+	}
+	return filtered
 }
 
 func sumChars(turns []turnWithChars) int {
