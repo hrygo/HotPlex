@@ -82,7 +82,7 @@ func TestCompressHistory_BrainNotConfigured(t *testing.T) {
 
 	// Should fall back to truncation.
 	require.False(t, result.Compressed)
-	require.True(t, result.FinalChars <= maxHistoryChars)
+	require.True(t, result.FinalChars <= maxHistoryBytes)
 	require.NotEmpty(t, result.Turns)
 }
 
@@ -101,7 +101,7 @@ func TestCompressHistory_BrainCallFails(t *testing.T) {
 	result := c.CompressHistory(context.Background(), turns, "s1", mockBrainFn(mock))
 
 	require.False(t, result.Compressed)
-	require.True(t, result.FinalChars <= maxHistoryChars)
+	require.True(t, result.FinalChars <= maxHistoryBytes)
 }
 
 func TestCompressHistory_SuccessfulCompression(t *testing.T) {
@@ -130,7 +130,7 @@ func TestCompressHistory_SuccessfulCompression(t *testing.T) {
 	require.Equal(t, turns[len(turns)-4].Content, result.Turns[1].Content)
 
 	require.True(t, result.FinalChars < result.OriginalChars)
-	require.True(t, result.FinalChars <= maxHistoryChars)
+	require.True(t, result.FinalChars <= maxHistoryBytes)
 }
 
 func TestCompressHistory_SummaryExceedsBudget(t *testing.T) {
@@ -150,9 +150,9 @@ func TestCompressHistory_SummaryExceedsBudget(t *testing.T) {
 	result := c.CompressHistory(context.Background(), turns, "s1", mockBrainFn(mock))
 
 	require.True(t, result.Compressed)
-	// compressBudget = maxHistoryChars - 4 recent turns × 4000 chars each = 34000.
-	// The summary turn alone must fit within this budget, not the full maxHistoryChars.
-	compressBudget := maxHistoryChars - 4*4000
+	// compressBudget = maxHistoryBytes - 4 recent turns × 4000 chars each = 34000.
+	// The summary turn alone must fit within this budget, not the full maxHistoryBytes.
+	compressBudget := maxHistoryBytes - 4*4000
 	require.True(t, len(result.Turns[0].Content) <= compressBudget,
 		"summary (%d bytes) should fit within compress budget (%d bytes)",
 		len(result.Turns[0].Content), compressBudget)
@@ -204,7 +204,7 @@ func TestCompressHistory_RecentTurnsExceedBudget(t *testing.T) {
 	result := c.CompressHistory(context.Background(), turns, "s1", nilBrainFn)
 
 	require.False(t, result.Compressed)
-	require.True(t, result.FinalChars <= maxHistoryChars)
+	require.True(t, result.FinalChars <= maxHistoryBytes)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────

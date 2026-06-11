@@ -17,9 +17,9 @@ import (
 // ─── Constants ────────────────────────────────────────────────────────
 
 const (
-	maxHistoryChars        = 50000  // total budget for injected history (~12.5k tokens)
+	maxHistoryBytes        = 50000  // total byte budget for injected history (~12.5k tokens)
 	keepRecentN            = 4      // number of recent turns to keep uncompressed
-	brainInputCap          = 100000 // Brain LLM input limit in characters
+	brainInputCap          = 100000 // Brain LLM input limit in bytes
 	compressThresholdRatio = 1.2    // only compress when total > budget × ratio (adaptive)
 	compressTimeout        = 45 * time.Second
 )
@@ -74,7 +74,7 @@ func (c *HistoryCompressor) CompressHistory(
 		filtered = append(filtered, turnWithChars{
 			role:      t.Role,
 			content:   t.Content,
-			chars:     len(t.Content),
+			bytes:     len(t.Content),
 			createdAt: t.CreatedAt,
 		})
 		totalChars += len(t.Content)
@@ -85,7 +85,7 @@ func (c *HistoryCompressor) CompressHistory(
 	}
 
 	// 2. Self-adaptive: skip compression for moderate overruns.
-	threshold := int(float64(maxHistoryChars) * compressThresholdRatio)
+	threshold := int(float64(maxHistoryBytes) * compressThresholdRatio)
 	if totalChars <= threshold {
 		return c.truncateResult(filtered)
 	}
@@ -102,13 +102,13 @@ func (c *HistoryCompressor) CompressHistory(
 
 	// 4. Calculate budgets.
 	recentChars := sumChars(keepGroup)
-	compressBudget := maxHistoryChars - recentChars
+	compressBudget := maxHistoryBytes - recentChars
 	if compressBudget <= 0 {
 		// Recent turns alone exceed budget — hard truncate recent group.
 		c.log.Warn("history: recent turns exceed budget, truncating",
 			"session_id", sessionID,
 			"recent_chars", recentChars,
-			"budget", maxHistoryChars)
+			"budget", maxHistoryBytes)
 		return c.truncateResult(filtered)
 	}
 
@@ -244,14 +244,14 @@ func (c *HistoryCompressor) notifyProgress(sessionID string, compressCount, tota
 type turnWithChars struct {
 	role      string
 	content   string
-	chars     int
+	bytes     int
 	createdAt int64 // unix millis from TurnRecord.CreatedAt
 }
 
 func sumChars(turns []turnWithChars) int {
 	total := 0
 	for _, t := range turns {
-		total += t.chars
+		total += t.bytes
 	}
 	return total
 }
@@ -283,13 +283,13 @@ func formatTurns(turns []turnWithChars) string {
 // exceeds the budget, we still return the most recent turns that fit.
 func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult {
 	history := make([]worker.ConversationTurn, 0, len(turns))
-	charsUsed := 0
+	bytesUsed := 0
 	for i := len(turns) - 1; i >= 0; i-- {
 		t := turns[i]
-		if charsUsed+t.chars > maxHistoryChars {
+		if bytesUsed+t.bytes > maxHistoryBytes {
 			break
 		}
-		charsUsed += t.chars
+		bytesUsed += t.bytes
 		history = append(history, worker.ConversationTurn{
 			Role:    t.role,
 			Content: t.content,
@@ -299,11 +299,17 @@ func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult
 	for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
 		history[i], history[j] = history[j], history[i]
 	}
+	if len(history) == 0 && len(turns) > 0 {
+		c.log.Warn("history: all turns exceed byte budget, history empty",
+			"turn_count", len(turns),
+			"budget", maxHistoryBytes,
+			"largest_turn_bytes", turns[len(turns)-1].bytes)
+	}
 	return CompressResult{
 		Turns:         history,
 		Compressed:    false,
 		OriginalChars: sumChars(turns),
-		FinalChars:    charsUsed,
+		FinalChars:    bytesUsed,
 	}
 }
 

@@ -482,8 +482,8 @@ func (w *AppServerWorker) Kill() error {
 // shutdown releases the worker's manager subscription and decrements the
 // singleton ref count. The singleton process is NOT killed here — it will
 // naturally stop via idle drain (refs==0 for IdleDrainPeriod) or explicit
-// ShutdownSingleton(). This prevents GC from killing a shared process when
-// reclaiming sessions.
+// ShutdownSingleton() called during gateway shutdown (gateway_run.go).
+// This prevents GC from killing a shared process when reclaiming sessions.
 func (w *AppServerWorker) shutdown() {
 	w.release()
 }
