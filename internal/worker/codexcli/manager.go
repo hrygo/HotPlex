@@ -995,14 +995,34 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 		"period", m.cfg.IdleDrainPeriod)
 	m.idleTimer = time.AfterFunc(m.cfg.IdleDrainPeriod, func() {
 		m.mu.Lock()
-		defer m.mu.Unlock()
-
-		if m.refs == 0 && m.state == stateRunning && m.proc != nil {
-			m.log.Info("codex-app-server: idle drain expired, killing process")
-			_ = m.proc.Kill()
-			// monitorProcess will set state to stateIdle and clean up.
+		if m.idleTimer == nil {
+			// Timer was already stopped (e.g. by KillIfIdle or Acquire).
+			m.mu.Unlock()
+			return
 		}
+		shouldKill := m.refs == 0 && m.state == stateRunning && m.pgid > 0
+		pgid := m.pgid
+		m.mu.Unlock()
+
+		if shouldKill {
+			m.log.Info("codex-app-server: idle drain expired, killing process")
+			// Use ForceKill + ForceKillTree instead of m.proc.Kill() to avoid
+			// deadlock: proc.Manager.Kill() acquires proc.mu and calls
+			// cmd.Wait(), which blocks until the child exits. Meanwhile
+			// monitorProcess's Wait() already holds proc.mu inside its own
+			// cmd.Wait() call. Kill() would block on proc.mu.Lock() while
+			// holding m.mu, making the entire manager unusable. ForceKill
+			// sends SIGKILL by PGID without touching proc.mu, so
+			// monitorProcess's Wait() observes the exit and runs cleanup.
+			_ = proc.ForceKill(pgid)
+			proc.ForceKillTree(pgid, m.log)
+			// monitorProcess will observe the exit, set state to stateIdle,
+			// and clean up.
+		}
+
+		m.mu.Lock()
 		m.idleTimer = nil
+		m.mu.Unlock()
 	})
 }
 
