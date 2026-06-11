@@ -6,9 +6,9 @@ tags:
   - agent-config
   - system-prompt
 date: 2026-06-11
-status: draft
+status: spec-only
 progress: 0
-out_of_scope: This spec describes BaseInstructions/DeveloperInstructions injection for Codex Worker — not implemented in the current PR (fix/709). Tracked separately.
+out_of_scope: This spec describes BaseInstructions/DeveloperInstructions injection for Codex Worker — not implemented in the current PR (fix/709). Tracked separately. This document is a design reference only; progress will be updated when implementation begins.
 estimated_hours: 4
 ---
 

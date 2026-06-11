@@ -430,7 +430,9 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 		candidate.WorkerSessionID = wsid
 		ms.mu.Unlock()
 		guardCtx := context.WithoutCancel(ctx)
-		if dbErr := m.store.UpdateWorkerSessionIDSQL(guardCtx, candidate.ID, wsid); dbErr != nil {
+		dbErr := m.store.UpdateWorkerSessionIDSQL(guardCtx, candidate.ID, wsid)
+		ms.mu.Lock()
+		if dbErr != nil {
 			// Roll back in-memory value to maintain consistency with DB
 			// (both empty). The safety-net (EnsureWorkerSessionID) will
 			// repair on first event.
@@ -438,9 +440,9 @@ func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from,
 			observability.SessionGuardRePersistFailures().Add(ctx, 1)
 			m.log.Error("session: failed to re-persist WorkerSessionID after guard",
 				"session_id", candidate.ID, "worker_session_id", wsid, "err", dbErr)
-		}
-		ms.mu.Lock()
-		if ms.info.WorkerSessionID != wsid {
+		} else if ms.info.WorkerSessionID != wsid {
+			// SQL succeeded but a concurrent writer changed the value while
+			// the lock was released — re-sync in-memory snapshot.
 			candidate.WorkerSessionID = ms.info.WorkerSessionID
 			observability.SessionGuardRePersistConcurrentOverwrites().Add(ctx, 1)
 		}

@@ -1,7 +1,12 @@
 -- WorkerSessionID write semantics:
---   INSERT path: writes worker_session_id on initial session creation.
---   UPDATE path: intentionally excludes worker_session_id to avoid overwriting
---     the authoritative value set by UpdateWorkerSessionIDSQL.
+--   INSERT path: writes worker_session_id on initial session creation (value is
+--     empty at this point — the Worker hasn't started yet).
+--   UPDATE path (ON CONFLICT SET): intentionally excludes worker_session_id.
+--     The authoritative value is set post-launch by UpdateWorkerSessionIDSQL.
+--     Including it here would overwrite the targeted UPDATE on every Upsert call
+--     (e.g. heartbeat), silently breaking the transitionState guard + safety-net
+--     two-layer persistence design.
+--   See also: manager.go transitionState guard (WorkerSessionID empty→nonempty).
 INSERT INTO sessions (id, user_id, owner_id, bot_id, bot_name, worker_session_id, worker_type, state, platform, platform_key_json, work_dir, title, created_at, updated_at, expires_at, idle_expires_at, context_json, source, client_key)
  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
  ON CONFLICT(id) DO UPDATE SET
