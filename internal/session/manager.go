@@ -982,15 +982,8 @@ func (m *Manager) updateWorkerSessionID(ctx context.Context, id, workerSessionID
 		return ErrSessionNotFound
 	}
 
-	// Fast-path skip when in-memory matches. There is a TOCTOU window between
-	// RUnlock and updateSession.Lock, during which transitionState's guard could
-	// modify ms.info.WorkerSessionID. This is safe because: (1) the guard uses
-	// targeted SQL (UpdateWorkerSessionIDSQL), not full-row Upsert, so concurrent
-	// Upsert in updateSession won't overwrite worker_session_id; (2) the Upsert
-	// ON CONFLICT clause does not include worker_session_id in its UPDATE SET,
-	// so the fast-path's subsequent Upsert is a no-op for this field; (3) the
-	// safety-net (EnsureWorkerSessionID) repairs any stale DB row on first event.
-	// Force mode (safety-net) always writes to repair stale DB rows.
+	// Fast-path skip when in-memory matches. Force mode (safety-net) always
+	// writes to repair stale DB rows.
 	if !force {
 		ms.mu.RLock()
 		same := ms.info.WorkerSessionID == workerSessionID
@@ -1000,11 +993,24 @@ func (m *Manager) updateWorkerSessionID(ctx context.Context, id, workerSessionID
 		}
 	}
 
-	return m.updateSession(ctx, ms, func(info *SessionInfo) func() {
-		prev := info.WorkerSessionID
-		info.WorkerSessionID = workerSessionID
-		return func() { info.WorkerSessionID = prev }
-	})
+	// Update in-memory under lock, then persist via targeted SQL.
+	// Uses UpdateWorkerSessionIDSQL rather than updateSession→Upsert because
+	// the Upsert ON CONFLICT clause intentionally excludes worker_session_id
+	// to prevent stale writes during transitionState's lock-release window.
+	ms.mu.Lock()
+	prev := ms.info.WorkerSessionID
+	ms.info.WorkerSessionID = workerSessionID
+	ms.mu.Unlock()
+
+	if err := m.store.UpdateWorkerSessionIDSQL(ctx, id, workerSessionID); err != nil {
+		// Roll back in-memory on DB failure.
+		ms.mu.Lock()
+		ms.info.WorkerSessionID = prev
+		ms.mu.Unlock()
+		return err
+	}
+
+	return nil
 }
 
 // DebugSessionSnapshot holds safe-to-expose debug info for a managed session.

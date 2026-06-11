@@ -214,22 +214,35 @@ Worker 内部处于 tool 执行阶段时，Gateway 不区分 — 状态仍为 `R
 ```sql
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    owner_id TEXT,
+    bot_id TEXT,
+    bot_name TEXT NOT NULL DEFAULT '',
     worker_session_id TEXT,
     worker_type TEXT NOT NULL,
-    state TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('created', 'running', 'idle', 'terminated', 'deleted')),
+    platform TEXT NOT NULL DEFAULT '',
+    platform_key_json TEXT NOT NULL DEFAULT '',
+    work_dir TEXT,
+    title TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     expires_at DATETIME,
-    is_active BOOLEAN NOT NULL DEFAULT 0,
-    context_json TEXT
+    idle_expires_at DATETIME,
+    context_json TEXT,
+    source TEXT NOT NULL DEFAULT '',
+    client_key TEXT NOT NULL DEFAULT ''
 );
 ```
 
 ### 6.2 约束
 
-- `id`：UUID
+- `id`：UUID（UUIDv5 确定性派生，见 `DeriveSessionKey`）
+- `user_id`：创建者 ID
+- `owner_id`：实际所有者（默认等同 `user_id`，Cron 场景下为 cron 触发者）
+- `bot_id`：关联 Bot ID（多 bot 场景）
+- `worker_session_id`：Worker 内部 session ID（用于 resume 恢复，通过 targeted SQL `UpdateWorkerSessionIDSQL` 持久化）
 - `state`：受限枚举（`created`, `running`, `idle`, `terminated`, `deleted`）
-- `is_active`：仅用于标记是否存在 runtime
 - SQLite 使用 **WAL mode**（Write-Ahead Logging），允许并发读取、串行写入
 - 写入操作通过**单写 goroutine** 串行化，避免 SQLite 的写锁竞争
 
@@ -1026,7 +1039,7 @@ SELECT * FROM sessions WHERE state != 'deleted';
 | 状态         | 操作                                                                                            |
 | ------------ | ----------------------------------------------------------------------------------------------- |
 | `RUNNING`    | → `TERMINATED`（runtime 已丢失），发送 `error(WORKER_CRASH)` + `done(false)` 如果有活跃 WS 连接 |
-| `IDLE`       | 保持（runtime 需重新 attach），标记 `is_active = false`                                         |
+| `IDLE`       | 保持（runtime 需重新 attach）                                                                   |
 | `CREATED`    | 可重启（启动新 runtime）                                                                        |
 | `TERMINATED` | 保持不变                                                                                        |
 

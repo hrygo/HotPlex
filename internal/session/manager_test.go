@@ -2128,7 +2128,7 @@ func TestManager_UpdateWorkerSessionID(t *testing.T) {
 	m.sessions["sess_wsid"] = &managedSession{info: *seed}
 	m.mu.Unlock()
 
-	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+	store.On("UpdateWorkerSessionIDSQL", mock.Anything, "sess_wsid", "ocs_internal_123").Return(nil)
 
 	err = m.UpdateWorkerSessionID(ctx, "sess_wsid", "ocs_internal_123")
 	require.NoError(t, err)
@@ -2475,11 +2475,8 @@ func TestTransition_PreservesWorkerSessionID_OnConcurrentUpdate(t *testing.T) {
 	require.Equal(t, "hermes_session_abc", info.WorkerSessionID,
 		"WorkerSessionID must be preserved when set concurrently during transition")
 
-	// Verify the concurrent UpdateWorkerSessionID Upsert has the correct WorkerSessionID.
-	dbInfo := store.lastUpsert.Load()
-	require.NotNil(t, dbInfo, "at least one Upsert should have occurred")
-	require.Equal(t, "hermes_session_abc", dbInfo.WorkerSessionID,
-		"DB Upsert from concurrent UpdateWorkerSessionID must contain the preserved WorkerSessionID")
+	// Verify the concurrent UpdateWorkerSessionID used targeted SQL (not Upsert).
+	store.AssertCalled(t, "UpdateWorkerSessionIDSQL", mock.Anything, "sess_race_wsid", "hermes_session_abc")
 }
 
 func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
@@ -2534,13 +2531,9 @@ func TestTransition_GuardRePersistError_InMemoryConsistent(t *testing.T) {
 	require.Equal(t, "", info.WorkerSessionID,
 		"in-memory WorkerSessionID must be rolled back to empty when guard re-persist fails (safety-net will repair)")
 
-	// Verify the guard attempted to persist the correct WorkerSessionID
-	// (even though it failed). The last successful Upsert (from concurrent
-	// UpdateWorkerSessionID) also has the correct value.
-	dbInfo := gs.lastSuccessful.Load()
-	require.NotNil(t, dbInfo, "at least one successful Upsert should have occurred")
-	require.Equal(t, "hermes_session_xyz", dbInfo.WorkerSessionID,
-		"last successful DB Upsert must contain the preserved WorkerSessionID")
+	// Verify UpdateWorkerSessionIDSQL was called: first by the concurrent
+	// UpdateWorkerSessionID (succeeded), then by the guard (failed).
+	// lastSQLWSID captures the last call's value (the guard's attempt).
 	sqlWSID := gs.lastSQLWSID.Load()
 	require.NotNil(t, sqlWSID, "guard should have attempted UpdateWorkerSessionIDSQL")
 	require.Equal(t, "hermes_session_xyz", *sqlWSID,
