@@ -306,17 +306,15 @@ func TestTruncateHistory_PreservesChronologicalOrder(t *testing.T) {
 func TestResolveCachedHistory_AllBranches(t *testing.T) {
 	t.Parallel()
 
-	b := &Bridge{}
-
 	t.Run("cache miss", func(t *testing.T) {
-		t.Parallel()
+		b := &Bridge{}
 		turns, hit := b.resolveCachedHistory("miss-session", 1000)
 		require.False(t, hit)
 		require.Nil(t, turns)
 	})
 
 	t.Run("cache hit", func(t *testing.T) {
-		t.Parallel()
+		b := &Bridge{}
 		expected := []worker.ConversationTurn{{Role: "assistant", Content: "summary"}}
 		b.compressCache.Store("hit-session", &compressCacheEntry{
 			turns:               expected,
@@ -328,7 +326,7 @@ func TestResolveCachedHistory_AllBranches(t *testing.T) {
 	})
 
 	t.Run("stale cache invalidated", func(t *testing.T) {
-		t.Parallel()
+		b := &Bridge{}
 		b.compressCache.Store("stale-session", &compressCacheEntry{
 			turns:               []worker.ConversationTurn{{Role: "assistant", Content: "old"}},
 			latestTurnCreatedAt: 1000,
@@ -341,7 +339,7 @@ func TestResolveCachedHistory_AllBranches(t *testing.T) {
 	})
 
 	t.Run("invalid type deleted", func(t *testing.T) {
-		t.Parallel()
+		b := &Bridge{}
 		b.compressCache.Store("bad-type-session", "not-a-cache-entry")
 		turns, hit := b.resolveCachedHistory("bad-type-session", 1000)
 		require.False(t, hit)
