@@ -8,8 +8,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"sync"
-
 	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -305,35 +303,50 @@ func TestTruncateHistory_PreservesChronologicalOrder(t *testing.T) {
 	require.Equal(t, "recent2", last.Content)
 }
 
-func TestCompressCache_InvalidationOnTurnChange(t *testing.T) {
+func TestResolveCachedHistory_AllBranches(t *testing.T) {
 	t.Parallel()
 
-	// Simulate cache behavior: same latestTurnCreatedAt = cache hit,
-	// different = cache miss (invalidate).
-	cache := &sync.Map{}
+	t.Run("cache miss", func(t *testing.T) {
+		b := &Bridge{}
+		turns, hit := b.resolveCachedHistory("miss-session", 1000)
+		require.False(t, hit)
+		require.Nil(t, turns)
+	})
 
-	entry1 := &compressCacheEntry{
-		turns:               []worker.ConversationTurn{{Role: "assistant", Content: "summary"}},
-		latestTurnCreatedAt: 1000,
-	}
-	cache.Store("s1", entry1)
+	t.Run("cache hit", func(t *testing.T) {
+		b := &Bridge{}
+		expected := []worker.ConversationTurn{{Role: "assistant", Content: "summary"}}
+		b.compressCache.Store("hit-session", &compressCacheEntry{
+			turns:               expected,
+			latestTurnCreatedAt: 1000,
+		})
+		turns, hit := b.resolveCachedHistory("hit-session", 1000)
+		require.True(t, hit)
+		require.Equal(t, expected, turns)
+	})
 
-	// Same timestamp → hit.
-	if cached, ok := cache.Load("s1"); ok {
-		e := cached.(*compressCacheEntry)
-		require.Equal(t, int64(1000), e.latestTurnCreatedAt)
-		require.Len(t, e.turns, 1)
-	}
+	t.Run("stale cache invalidated", func(t *testing.T) {
+		b := &Bridge{}
+		b.compressCache.Store("stale-session", &compressCacheEntry{
+			turns:               []worker.ConversationTurn{{Role: "assistant", Content: "old"}},
+			latestTurnCreatedAt: 1000,
+		})
+		turns, hit := b.resolveCachedHistory("stale-session", 2000)
+		require.False(t, hit)
+		require.Nil(t, turns)
+		_, exists := b.compressCache.Load("stale-session")
+		require.False(t, exists, "stale entry should be deleted")
+	})
 
-	// Different timestamp → miss → invalidate.
-	if cached, ok := cache.Load("s1"); ok {
-		e := cached.(*compressCacheEntry)
-		if e.latestTurnCreatedAt != 2000 {
-			cache.Delete("s1")
-		}
-	}
-	_, ok := cache.Load("s1")
-	require.False(t, ok, "cache should be invalidated after timestamp mismatch")
+	t.Run("invalid type deleted", func(t *testing.T) {
+		b := &Bridge{}
+		b.compressCache.Store("bad-type-session", "not-a-cache-entry")
+		turns, hit := b.resolveCachedHistory("bad-type-session", 1000)
+		require.False(t, hit)
+		require.Nil(t, turns)
+		_, exists := b.compressCache.Load("bad-type-session")
+		require.False(t, exists, "invalid entry should be deleted")
+	})
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────

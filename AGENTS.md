@@ -222,7 +222,7 @@ Review cron 是定时触发（30min），不是 push webhook。手动触发 + �
 
 ```
 push → 轮询已有 review → 手动触发 → 轮询新 review → 修复 → push → 循环
-终止：无新代码缺陷 + PR approved
+终止：reviewer 无有价值的新发现（APPROVED 是必要条件，不是充分条件）
 ```
 
 **去重**：webhook（CI 成功自动触发）与手动 `trigger` 共享同一 cron job，`RunningAtMs` CAS 保证同 job 不并发。**先轮询再触发**——若 webhook 已提交 review 则跳过触发。
