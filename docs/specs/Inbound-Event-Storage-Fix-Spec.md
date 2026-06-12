@@ -10,7 +10,7 @@ tags:
   - eventstore
   - bug/high
 date: 2026-05-07
-status: proposed
+status: implemented
 priority: high
 estimated_hours: 4
 ---
