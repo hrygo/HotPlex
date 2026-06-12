@@ -324,7 +324,7 @@ hotplex install --force                # 强制重新安装
 
 ### `hotplex update`
 
-检查并安装最新版本。从 GitHub Releases 下载二进制文件，验证 sha256 校验和后原子替换。
+检查并安装最新版本。从 GitHub Releases 下载归档文件（tar.gz / zip），解压并验证 sha256 校验和后原子替换。
 
 支持平台：`linux/amd64`、`linux/arm64`、`darwin/amd64`、`darwin/arm64`、`windows/amd64`、`windows/arm64`。
 

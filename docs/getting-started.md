@@ -20,21 +20,22 @@ HotPlex 是 AI Coding Agent 统一接入层，让你通过 Slack、飞书或 Web
 
 ### 1. 安装
 
-从 [GitHub Releases](https://github.com/hrygo/hotplex/releases/latest) 获取对应平台的单文件二进制程序。你可以直接点击下载，或使用命令行一键获取：
+从 [GitHub Releases](https://github.com/hrygo/hotplex/releases/latest) 下载对应平台的归档文件并解压：
 
 **macOS (Apple Silicon)**
 ```bash
-curl -L -o hotplex https://github.com/hrygo/hotplex/releases/latest/download/hotplex-darwin-arm64
+curl -L https://github.com/hrygo/hotplex/releases/latest/download/hotplex-darwin-arm64.tar.gz | tar xz
 ```
 
 **Linux (AMD64)**
 ```bash
-curl -L -o hotplex https://github.com/hrygo/hotplex/releases/latest/download/hotplex-linux-amd64
+curl -L https://github.com/hrygo/hotplex/releases/latest/download/hotplex-linux-amd64.tar.gz | tar xz
 ```
 
 **Windows (AMD64)**
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/hrygo/hotplex/releases/latest/download/hotplex-windows-amd64.exe" -OutFile "hotplex.exe"
+Invoke-WebRequest -Uri "https://github.com/hrygo/hotplex/releases/latest/download/hotplex-windows-amd64.zip" -OutFile "hotplex.zip"
+Expand-Archive -Path hotplex.zip -DestinationPath .
 ```
 
 ```bash
