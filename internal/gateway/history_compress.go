@@ -316,6 +316,9 @@ func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult
 		content := t.content
 		if len(content) > remaining {
 			content = truncateAtBoundary(content, remaining)
+			if content == "" {
+				continue
+			}
 			c.log.Warn("history: turn truncated to fit budget",
 				"turn_role", t.role,
 				"original_bytes", len(t.content),
