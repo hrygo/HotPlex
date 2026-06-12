@@ -303,6 +303,46 @@ func TestTruncateHistory_PreservesChronologicalOrder(t *testing.T) {
 	require.Equal(t, "recent2", last.Content)
 }
 
+func TestTruncateHistory_OversizedTurnTruncated(t *testing.T) {
+	t.Parallel()
+
+	c := NewHistoryCompressor(slog.Default(), nil)
+
+	// Single turn that exceeds maxHistoryBytes — must be truncated, not discarded.
+	turns := []*eventstore.TurnRecord{
+		turn("assistant", makeLargeString(80000)),
+	}
+
+	result := c.TruncateHistory(turns)
+
+	require.False(t, result.Compressed)
+	require.Len(t, result.Turns, 1, "oversized turn should be truncated, not discarded")
+	require.True(t, len(result.Turns[0].Content) <= maxHistoryBytes)
+	require.True(t, len(result.Turns[0].Content) > 0, "truncated content must not be empty")
+	require.True(t, result.FinalChars <= maxHistoryBytes)
+}
+
+func TestTruncateHistory_NewestTurnPreservedWhenOversized(t *testing.T) {
+	t.Parallel()
+
+	c := NewHistoryCompressor(slog.Default(), nil)
+
+	// Two oversized turns — newest should always get at least partial content.
+	turns := []*eventstore.TurnRecord{
+		turn("user", makeLargeString(60000)),
+		turn("assistant", makeLargeString(60000)),
+	}
+
+	result := c.TruncateHistory(turns)
+
+	require.False(t, result.Compressed)
+	require.NotEmpty(t, result.Turns, "at least the newest turn must be preserved")
+	// Newest turn (chronologically last) should have partial content.
+	last := result.Turns[len(result.Turns)-1]
+	require.True(t, len(last.Content) > 0, "newest turn must have content")
+	require.True(t, result.FinalChars <= maxHistoryBytes)
+}
+
 func TestResolveCachedHistory_AllBranches(t *testing.T) {
 	t.Parallel()
 

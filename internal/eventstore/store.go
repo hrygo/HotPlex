@@ -427,28 +427,12 @@ func (s *SQLiteStore) Close() error {
 	return nil
 }
 
-// resolveGeneration returns the latest generation for a session, or ErrNotFound if no turns exist.
-func (s *SQLiteStore) resolveGeneration(ctx context.Context, sessionID string) (int64, error) {
-	gen, err := s.LatestGeneration(ctx, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	if gen == 0 {
-		return 0, ErrNotFound
-	}
-	return gen, nil
-}
-
 // QueryTurns fetches conversation turns from the materialized turns table.
-// Automatically resolves the latest generation for the session.
+// Uses a CTE to resolve the latest generation and select in a single SQL round-trip.
 func (s *SQLiteStore) QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error) {
-	gen, err := s.resolveGeneration(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, queries["turns.query"], sessionID, gen, limit, offset)
+	rows, err := s.db.QueryContext(ctx, queries["turns.query_with_gen"], sessionID, sessionID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: query turns: %w", err)
 	}
@@ -476,31 +460,32 @@ func (s *SQLiteStore) QueryTurnsBefore(ctx context.Context, sessionID string, be
 }
 
 // QueryTurnStats returns aggregated turn statistics for a session's latest generation.
+// Uses a CTE to resolve the latest generation and select in a single SQL round-trip.
 func (s *SQLiteStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error) {
-	gen, err := s.resolveGeneration(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, queries["turns.stats"], sessionID, gen)
+	rows, err := s.db.QueryContext(ctx, queries["turns.stats_with_gen"], sessionID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: query turn stats: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	stats := &TurnStats{SessionID: sessionID, Generation: gen}
+	stats := &TurnStats{SessionID: sessionID}
 	for rows.Next() {
 		var ts TurnStatItem
+		var gen int64
 		var success sql.NullInt64
 		var toolsJSON sql.NullString
 		var toolCount sql.NullInt64
-		if err := rows.Scan(&ts.TurnNum, &ts.Seq, &success, &ts.Source,
+		if err := rows.Scan(&gen, &ts.TurnNum, &ts.Seq, &success, &ts.Source,
 			&toolsJSON, &toolCount,
 			&ts.TokensInput, &ts.TokensCacheWrite, &ts.TokensCacheRead, &ts.TokensIn,
 			&ts.TokensOut, &ts.DurationMs, &ts.CostUSD, &ts.Model, &ts.CreatedAt); err != nil {
 			slog.Warn("eventstore: scan turn stats row", "session_id", sessionID, "error", err)
 			continue
+		}
+		if stats.Generation == 0 {
+			stats.Generation = gen
 		}
 		ts.Success = success.Valid && success.Int64 == 1
 		stats.TotalTurns++

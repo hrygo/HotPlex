@@ -213,25 +213,10 @@ func (t *pgEventTx) Rollback() error {
 // TurnQuerier implementation
 // ---------------------------------------------------------------------------
 
-func (s *pgStore) resolveGeneration(ctx context.Context, sessionID string) (int64, error) {
-	gen, err := s.LatestGeneration(ctx, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	if gen == 0 {
-		return 0, ErrNotFound
-	}
-	return gen, nil
-}
-
 func (s *pgStore) QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error) {
-	gen, err := s.resolveGeneration(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("eventstore: resolve generation: %w", err)
-	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, s.sql["turns.query"], sessionID, gen, limit, offset)
+	rows, err := s.db.QueryContext(ctx, s.sql["turns.query_with_gen"], sessionID, sessionID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: query turns: %w", err)
 	}
@@ -257,30 +242,30 @@ func (s *pgStore) QueryTurnsBefore(ctx context.Context, sessionID string, before
 }
 
 func (s *pgStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error) {
-	gen, err := s.resolveGeneration(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("eventstore: resolve generation: %w", err)
-	}
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, s.sql["turns.stats"], sessionID, gen)
+	rows, err := s.db.QueryContext(ctx, s.sql["turns.stats_with_gen"], sessionID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: query turn stats: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	stats := &TurnStats{SessionID: sessionID, Generation: gen}
+	stats := &TurnStats{SessionID: sessionID}
 	for rows.Next() {
 		var ts TurnStatItem
+		var gen int64
 		var success sql.NullBool
 		var toolsJSON sql.NullString
 		var toolCount sql.NullInt64
-		if err := rows.Scan(&ts.TurnNum, &ts.Seq, &success, &ts.Source,
+		if err := rows.Scan(&gen, &ts.TurnNum, &ts.Seq, &success, &ts.Source,
 			&toolsJSON, &toolCount,
 			&ts.TokensInput, &ts.TokensCacheWrite, &ts.TokensCacheRead, &ts.TokensIn,
 			&ts.TokensOut, &ts.DurationMs, &ts.CostUSD, &ts.Model, &ts.CreatedAt); err != nil {
 			s.log.Warn("eventstore: scan turn stats row", "session_id", sessionID, "error", err)
 			continue
+		}
+		if stats.Generation == 0 {
+			stats.Generation = gen
 		}
 		ts.Success = success.Valid && success.Bool
 		stats.TotalTurns++
