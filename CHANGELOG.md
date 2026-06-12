@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.29.0] - 2026-06-13
+
+### Summary
+
+v1.29.0 是一次 minor 版本更新，聚焦于 **发布产物归档化** 和 **会话存储可靠性**。GitHub Release 资产从裸二进制迁移至 tar.gz/zip 归档（压缩率 ~31%，71MB→22MB），自更新和安装脚本均已完成适配并保持向后兼容。EventStore 合并 resolveGeneration 为 CTE 单次查询（2→1 DB round-trip），超长 turn 截断改为换行边界保留而非整条丢弃。ACP Worker 新增 sessionId 空值防御，防止历史遗留 session 数据导致 "session not found" 错误。
+
+### Added
+
+- **CLI**: Release archive format — GitHub Release assets now publish as `hotplex-{os}-{arch}.tar.gz` (unix) / `.zip` (windows) with ~31% compression ratio. Updater and install scripts download, verify checksum, then extract. Legacy raw binary fallback for pre-archive releases. (#729)
+
+### Changed
+
+- **Gateway Core**: EventStore CTE merge — combine `resolveGeneration` + `SELECT` into single CTE for `QueryTurns` and `QueryTurnStats`, reducing DB round-trips from 2 to 1 (both SQLite and PostgreSQL). (#716, #727)
+- **Gateway Core**: Oversized turn truncation now cuts at newline boundary instead of discarding entire turn, preserving partial content for the newest turn. (#715, #727)
+
+### Fixed
+
+- **Worker**: ACP sessionId empty guard — reject empty sessionId from agent in `callSessionMethod` and `Prompt`, preventing "session not found" errors when resuming sessions with missing worker_session_id in DB. (#732)
+
 ## [1.28.0] - 2026-06-12
 
 ### Summary
