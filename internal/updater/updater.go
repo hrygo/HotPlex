@@ -119,6 +119,7 @@ func (u *Updater) Check(ctx context.Context) (*CheckResult, error) {
 
 	want := u.assetName()
 	legacy := u.binaryName()
+	assetName := want // archive name by default
 	var downloadURL, checksumURL string
 	var isLegacy bool
 	for _, a := range release.Assets {
@@ -129,6 +130,7 @@ func (u *Updater) Check(ctx context.Context) (*CheckResult, error) {
 			// Fallback: pre-archive releases publish raw binaries.
 			if downloadURL == "" {
 				downloadURL = a.BrowserDownloadURL
+				assetName = legacy
 				isLegacy = true
 			}
 		case "checksums.txt":
@@ -143,7 +145,7 @@ func (u *Updater) Check(ctx context.Context) (*CheckResult, error) {
 		CurrentVersion:  u.CurrentVersion,
 		LatestVersion:   release.TagName,
 		UpdateAvailable: !versionEqual(u.CurrentVersion, release.TagName),
-		AssetName:       want,
+		AssetName:       assetName,
 		DownloadURL:     downloadURL,
 		ChecksumURL:     checksumURL,
 		IsLegacyBinary:  isLegacy,
@@ -158,17 +160,16 @@ func (u *Updater) Download(ctx context.Context, url string) (string, error) {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 
-	// Use a dedicated client without Timeout so context controls the deadline.
-	dlCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
-	req = req.WithContext(dlCtx)
-
-	client := &http.Client{} // no Timeout; relies on context
+	// Use a client without Timeout so context controls the deadline.
+	dlClient := &http.Client{}
 	if u.Client != nil {
-		client = u.Client
+		dlClient = &http.Client{
+			Transport: u.Client.Transport,
+			Jar:       u.Client.Jar,
+		}
 	}
 
-	resp, err := client.Do(req)
+	resp, err := dlClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download archive: %w", err)
 	}

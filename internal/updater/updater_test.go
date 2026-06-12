@@ -298,6 +298,7 @@ func TestCheck_LegacyBinaryFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.UpdateAvailable)
 	require.True(t, result.IsLegacyBinary)
+	require.Equal(t, "hotplex-darwin-arm64", result.AssetName)
 	require.Equal(t, "http://example.com/binary", result.DownloadURL)
 }
 
