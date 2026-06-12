@@ -51,9 +51,9 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/hrygo/hotplex/main/scri
 **What the install script does:**
 1. Detect OS and architecture (darwin/linux × amd64/arm64, windows × amd64/arm64)
 2. Resolve version: `--latest` calls GitHub API, `--release` uses explicit tag
-3. Download binary: `hotplex-{os}-{arch}[.exe]` from GitHub Releases
+3. Download archive: `hotplex-{os}-{arch}.tar.gz` (unix) or `.zip` (windows) from GitHub Releases
 4. Download `checksums.txt` and verify SHA256
-5. Move binary to `$PREFIX/bin/hotplex` and `chmod +x`
+5. Extract binary from archive and move to `$PREFIX/bin/hotplex`
 6. Check PATH — if install dir not in PATH, print shell-specific export command
 7. Run `hotplex version` to verify
 
@@ -113,11 +113,13 @@ docker compose up -d
 
 **Dependencies:** `curl` or `wget` (required), `sha256sum` or `shasum` (optional, for checksum)
 
-**Binary naming:** `hotplex-{os}-{arch}`
-- `hotplex-darwin-amd64`
-- `hotplex-darwin-arm64`
-- `hotplex-linux-amd64`
-- `hotplex-linux-arm64`
+**Archive naming:** `hotplex-{os}-{arch}.tar.gz`
+- `hotplex-darwin-amd64.tar.gz`
+- `hotplex-darwin-arm64.tar.gz`
+- `hotplex-linux-amd64.tar.gz`
+- `hotplex-linux-arm64.tar.gz`
+
+**Binary inside archive:** `hotplex-{os}-{arch}`
 
 **Permissions:** Writing to `/usr/*` prefixes requires sudo. Use `--prefix ~/.local` for user-local install.
 
@@ -136,9 +138,11 @@ docker compose up -d
 | `-Uninstall` | switch | Remove binary and PATH entry |
 | `-Help` | switch | Show usage |
 
-**Binary naming:** `hotplex-windows-{arch}.exe`
-- `hotplex-windows-amd64.exe`
-- `hotplex-windows-arm64.exe`
+**Archive naming:** `hotplex-windows-{arch}.zip`
+- `hotplex-windows-amd64.zip`
+- `hotplex-windows-arm64.zip`
+
+**Binary inside archive:** `hotplex-windows-{arch}.exe``
 
 **Default prefix:**
 - Admin: `$env:ProgramFiles\HotPlex`
@@ -301,15 +305,19 @@ gh repo star hrygo/hotplex
 GitHub Release assets follow this naming convention:
 
 ```
-hotplex-{os}-{arch}[.exe]
+hotplex-{os}-{arch}.tar.gz  (unix)
+hotplex-{os}-{arch}.zip     (windows)
 checksums.txt
 ```
 
 Platforms: `darwin/amd64`, `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, `windows/arm64`
 
+**Binary inside archive:** `hotplex-{os}-{arch}[.exe]`
+
 Checksum format (sha256sum compatible):
 ```
-{hash}  dist/hotplex-{os}-{arch}[.exe]
+{hash}  dist/hotplex-{os}-{arch}.tar.gz
+{hash}  dist/hotplex-{os}-{arch}.zip
 ```
 
 ## Upgrade
