@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.28.0] - 2026-06-12
+
+### Summary
+
+v1.28.0 是一次 minor 版本更新，聚焦于 **会话历史压缩** 和 **跨平台消息质量**。Gateway 新增基于 Brain LLM 的异步历史压缩（替代硬截断），Slack 和飞书共享统一的段落分割器提升移动端阅读体验，Codex Worker 支持 agent-configs 系统提示词注入。同时修复 CodexCLI idle drain 死锁导致 manager 完全不可用的关键缺陷。
+
+### Added
+
+- **Gateway Core**: Async history compression with Brain LLM — TruncateHistory fast path (sub-ms) injects truncated history immediately, async Brain compression produces cached summary for next resume. (#714)
+- **Messaging**: Shared `ParagraphBreaker` for Slack + Feishu — unified threshold (150 chars) and sentence-end detection, extracted into `textutil` package. Slack gains paragraph breaks in streaming deltas. (#719)
+- **Worker**: Codex agent-configs injection — `SystemPrompt` (merged B/C channel prompt) now forwarded to codex app-server via `thread/start` `baseInstructions` parameter. Previously agent-configs had no effect on Codex Worker. (#722)
+
+### Changed
+
+- **Messaging**: Paragraph break threshold reduced from 200 → 150 chars based on mobile readability research (~8–10 lines produces better reading rhythm).
+
+### Fixed
+
+- **Worker**: CodexCLI idle drain deadlock — timer callback held `CodexAppServerManager.mu` while calling `proc.Kill()`, which blocked acquiring `proc.mu` already held by `monitorProcess`. Fix: snapshot pgid under lock, unlock, then SIGKILL directly via `proc.ForceKill(pgid)` without touching proc mutex. (#725)
+- **Gateway Core**: Async history compression edge cases — empty slice replaces nil to prevent meaningless async compression, extracted `resolveCachedHistory` with full test coverage. (#720)
+
 ## [1.27.0] - 2026-06-11
 
 ### Summary
