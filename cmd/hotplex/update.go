@@ -23,8 +23,8 @@ func newUpdateCmd() *cobra.Command {
 		Short: "Update hotplex to the latest version",
 		Long: `Check for updates and install the latest version of hotplex.
 
-Downloads the binary from GitHub Releases, verifies the sha256 checksum,
-and atomically replaces the running binary.
+Downloads the archive from GitHub Releases, verifies the sha256 checksum,
+extracts the binary, and atomically replaces the running binary.
 
 Supports all platforms: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64,
 windows/amd64, windows/arm64.`,
@@ -78,20 +78,32 @@ windows/amd64, windows/arm64.`,
 				return err
 			}
 
-			// Download.
+			// Download archive (or legacy raw binary).
 			fmt.Fprintf(os.Stderr, "  Downloading %s ...\n", result.AssetName)
-			tmpPath, err := u.Download(ctx, result.DownloadURL)
+			archivePath, err := u.Download(ctx, result.DownloadURL)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = os.Remove(tmpPath) }()
+			defer func() { _ = os.Remove(archivePath) }()
 
 			// Verify checksum.
 			fmt.Fprintf(os.Stderr, "  Verifying checksum...\n")
-			if err := u.VerifyChecksum(ctx, result.ChecksumURL, result.AssetName, tmpPath); err != nil {
+			if err := u.VerifyChecksum(ctx, result.ChecksumURL, result.AssetName, archivePath); err != nil {
 				return fmt.Errorf("checksum verification failed: %w", err)
 			}
 
+			// Extract binary from archive (skip for legacy raw binary releases).
+			var tmpPath string
+			if result.IsLegacyBinary {
+				tmpPath = archivePath
+			} else {
+				fmt.Fprintf(os.Stderr, "  Extracting...\n")
+				tmpPath, err = u.Extract(archivePath)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = os.Remove(tmpPath) }()
+			}
 			// Detect running gateway before replacing.
 			gatewayInst, gatewayErr := findRunningGateway()
 

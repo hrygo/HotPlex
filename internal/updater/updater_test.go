@@ -1,6 +1,9 @@
 package updater
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -41,17 +44,18 @@ func releaseJSON(tag string, assets []Asset) string {
 }
 
 func TestAssetName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		goos   string
 		goarch string
 		want   string
 	}{
-		{"darwin", "arm64", "hotplex-darwin-arm64"},
-		{"darwin", "amd64", "hotplex-darwin-amd64"},
-		{"linux", "amd64", "hotplex-linux-amd64"},
-		{"linux", "arm64", "hotplex-linux-arm64"},
-		{"windows", "amd64", "hotplex-windows-amd64.exe"},
-		{"windows", "arm64", "hotplex-windows-arm64.exe"},
+		{"darwin", "arm64", "hotplex-darwin-arm64.tar.gz"},
+		{"darwin", "amd64", "hotplex-darwin-amd64.tar.gz"},
+		{"linux", "amd64", "hotplex-linux-amd64.tar.gz"},
+		{"linux", "arm64", "hotplex-linux-arm64.tar.gz"},
+		{"windows", "amd64", "hotplex-windows-amd64.zip"},
+		{"windows", "arm64", "hotplex-windows-arm64.zip"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos+"/"+tt.goarch, func(t *testing.T) {
@@ -62,11 +66,31 @@ func TestAssetName(t *testing.T) {
 	}
 }
 
+func TestBinaryName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		goos   string
+		goarch string
+		want   string
+	}{
+		{"darwin", "arm64", "hotplex-darwin-arm64"},
+		{"linux", "amd64", "hotplex-linux-amd64"},
+		{"windows", "amd64", "hotplex-windows-amd64.exe"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos+"/"+tt.goarch, func(t *testing.T) {
+			t.Parallel()
+			u := &Updater{GOOS: tt.goos, GOARCH: tt.goarch}
+			require.Equal(t, tt.want, u.binaryName())
+		})
+	}
+}
+
 func TestCheck_UpdateAvailable(t *testing.T) {
 	t.Parallel()
 	u, _ := testUpdater(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, releaseJSON("v1.4.0", []Asset{
-			{Name: "hotplex-darwin-arm64", BrowserDownloadURL: "http://example.com/binary"},
+			{Name: "hotplex-darwin-arm64.tar.gz", BrowserDownloadURL: "http://example.com/archive"},
 			{Name: "checksums.txt", BrowserDownloadURL: "http://example.com/checksums"},
 		}))
 	}))
@@ -74,7 +98,7 @@ func TestCheck_UpdateAvailable(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.UpdateAvailable)
 	require.Equal(t, "v1.4.0", result.LatestVersion)
-	require.Equal(t, "http://example.com/binary", result.DownloadURL)
+	require.Equal(t, "http://example.com/archive", result.DownloadURL)
 	require.Equal(t, "http://example.com/checksums", result.ChecksumURL)
 }
 
@@ -82,7 +106,7 @@ func TestCheck_AlreadyUpToDate(t *testing.T) {
 	t.Parallel()
 	u, _ := testUpdater(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, releaseJSON("v1.3.0", []Asset{
-			{Name: "hotplex-darwin-arm64", BrowserDownloadURL: "http://example.com/binary"},
+			{Name: "hotplex-darwin-arm64.tar.gz", BrowserDownloadURL: "http://example.com/archive"},
 			{Name: "checksums.txt", BrowserDownloadURL: "http://example.com/checksums"},
 		}))
 	}))
@@ -122,12 +146,12 @@ func TestCheck_AssetNotFound(t *testing.T) {
 	t.Parallel()
 	u, _ := testUpdater(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, releaseJSON("v1.4.0", []Asset{
-			{Name: "hotplex-linux-amd64", BrowserDownloadURL: "http://example.com/binary"},
+			{Name: "hotplex-linux-amd64.tar.gz", BrowserDownloadURL: "http://example.com/archive"},
 		}))
 	}))
 	_, err := u.Check(context.Background())
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "no binary found")
+	require.Contains(t, err.Error(), "no archive found")
 }
 
 func TestCheck_NonOKStatus(t *testing.T) {
@@ -140,16 +164,87 @@ func TestCheck_NonOKStatus(t *testing.T) {
 	require.Contains(t, err.Error(), "HTTP 500")
 }
 
-func TestDownload_Success(t *testing.T) {
+func makeTarGz(t *testing.T, binaryName string, content []byte) []byte {
+	t.Helper()
+	var buf strings.Builder
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: binaryName,
+		Mode: 0o755,
+		Size: int64(len(content)),
+	}))
+	_, err := tw.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, gw.Close())
+	return []byte(buf.String())
+}
+
+func makeZip(t *testing.T, binaryName string, content []byte) []byte {
+	t.Helper()
+	var buf strings.Builder
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create(binaryName)
+	require.NoError(t, err)
+	_, err = w.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	return []byte(buf.String())
+}
+
+func TestDownload_TarGz(t *testing.T) {
 	t.Parallel()
 	content := []byte("fake-binary-content")
+	archive := makeTarGz(t, "hotplex-darwin-arm64", content)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(content)
+		_, _ = w.Write(archive)
 	}))
 	t.Cleanup(server.Close)
 
-	u := &Updater{Client: server.Client()}
+	u := &Updater{Client: server.Client(), GOOS: "darwin", GOARCH: "arm64"}
 	path, err := u.Download(context.Background(), server.URL)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	// Download returns archive bytes, not extracted binary
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, archive, data)
+}
+
+func TestDownload_Zip(t *testing.T) {
+	t.Parallel()
+	content := []byte("fake-windows-binary")
+	archive := makeZip(t, "hotplex-windows-amd64.exe", content)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(archive)
+	}))
+	t.Cleanup(server.Close)
+
+	u := &Updater{Client: server.Client(), GOOS: "windows", GOARCH: "amd64"}
+	path, err := u.Download(context.Background(), server.URL)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, archive, data)
+}
+
+func TestExtract_TarGz(t *testing.T) {
+	t.Parallel()
+	content := []byte("fake-binary-content")
+	archive := makeTarGz(t, "hotplex-darwin-arm64", content)
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "archive.tar.gz")
+	require.NoError(t, os.WriteFile(archivePath, archive, 0o644))
+
+	u := &Updater{GOOS: "darwin", GOARCH: "arm64"}
+	path, err := u.Extract(archivePath)
 	require.NoError(t, err)
 	defer os.Remove(path)
 
@@ -158,16 +253,77 @@ func TestDownload_Success(t *testing.T) {
 	require.Equal(t, content, data)
 }
 
+func TestExtract_Zip(t *testing.T) {
+	t.Parallel()
+	content := []byte("fake-windows-binary")
+	archive := makeZip(t, "hotplex-windows-amd64.exe", content)
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "archive.zip")
+	require.NoError(t, os.WriteFile(archivePath, archive, 0o644))
+
+	u := &Updater{GOOS: "windows", GOARCH: "amd64"}
+	path, err := u.Extract(archivePath)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, content, data)
+}
+
+func TestExtract_BinaryNotFoundInArchive(t *testing.T) {
+	t.Parallel()
+	archive := makeTarGz(t, "wrong-binary-name", []byte("x"))
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "archive.tar.gz")
+	require.NoError(t, os.WriteFile(archivePath, archive, 0o644))
+
+	u := &Updater{GOOS: "darwin", GOARCH: "arm64"}
+	_, err := u.Extract(archivePath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found in archive")
+}
+
+func TestCheck_LegacyBinaryFallback(t *testing.T) {
+	t.Parallel()
+	u, _ := testUpdater(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, releaseJSON("v1.4.0", []Asset{
+			{Name: "hotplex-darwin-arm64", BrowserDownloadURL: "http://example.com/binary"},
+			{Name: "checksums.txt", BrowserDownloadURL: "http://example.com/checksums"},
+		}))
+	}))
+	result, err := u.Check(context.Background())
+	require.NoError(t, err)
+	require.True(t, result.UpdateAvailable)
+	require.True(t, result.IsLegacyBinary)
+	require.Equal(t, "hotplex-darwin-arm64", result.AssetName)
+	require.Equal(t, "http://example.com/binary", result.DownloadURL)
+}
+
+func TestDownload_NonOKStatus(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+
+	u := &Updater{Client: server.Client()}
+	_, err := u.Download(context.Background(), server.URL)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "HTTP 404")
+}
+
 func TestVerifyChecksum_Success(t *testing.T) {
 	t.Parallel()
-	// Create a temp file with known content
 	tmp := t.TempDir()
-	filePath := filepath.Join(tmp, "hotplex-darwin-arm64")
-	content := []byte("fake-binary")
+	filePath := filepath.Join(tmp, "hotplex-darwin-arm64.tar.gz")
+	content := []byte("fake-archive")
 	require.NoError(t, os.WriteFile(filePath, content, 0o644))
 
 	hash := sha256.Sum256(content)
-	checksumLine := fmt.Sprintf("%s  hotplex-darwin-arm64", fmt.Sprintf("%x", hash[:]))
+	checksumLine := fmt.Sprintf("%s  hotplex-darwin-arm64.tar.gz", fmt.Sprintf("%x", hash[:]))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(checksumLine))
@@ -175,23 +331,23 @@ func TestVerifyChecksum_Success(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	u := &Updater{Client: server.Client()}
-	err := u.VerifyChecksum(context.Background(), server.URL, "hotplex-darwin-arm64", filePath)
+	err := u.VerifyChecksum(context.Background(), server.URL, "hotplex-darwin-arm64.tar.gz", filePath)
 	require.NoError(t, err)
 }
 
 func TestVerifyChecksum_Mismatch(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
-	filePath := filepath.Join(tmp, "hotplex-darwin-arm64")
+	filePath := filepath.Join(tmp, "hotplex-darwin-arm64.tar.gz")
 	require.NoError(t, os.WriteFile(filePath, []byte("content"), 0o644))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("0000000000000000  hotplex-darwin-arm64"))
+		_, _ = w.Write([]byte("0000000000000000  hotplex-darwin-arm64.tar.gz"))
 	}))
 	t.Cleanup(server.Close)
 
 	u := &Updater{Client: server.Client()}
-	err := u.VerifyChecksum(context.Background(), server.URL, "hotplex-darwin-arm64", filePath)
+	err := u.VerifyChecksum(context.Background(), server.URL, "hotplex-darwin-arm64.tar.gz", filePath)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "checksum mismatch")
 }
@@ -199,16 +355,16 @@ func TestVerifyChecksum_Mismatch(t *testing.T) {
 func TestVerifyChecksum_MissingEntry(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
-	filePath := filepath.Join(tmp, "hotplex-darwin-arm64")
+	filePath := filepath.Join(tmp, "hotplex-darwin-arm64.tar.gz")
 	require.NoError(t, os.WriteFile(filePath, []byte("x"), 0o644))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("abc123  hotplex-linux-amd64"))
+		_, _ = w.Write([]byte("abc123  hotplex-linux-amd64.tar.gz"))
 	}))
 	t.Cleanup(server.Close)
 
 	u := &Updater{Client: server.Client()}
-	err := u.VerifyChecksum(context.Background(), server.URL, "hotplex-darwin-arm64", filePath)
+	err := u.VerifyChecksum(context.Background(), server.URL, "hotplex-darwin-arm64.tar.gz", filePath)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found in checksums.txt")
 }
@@ -216,7 +372,7 @@ func TestVerifyChecksum_MissingEntry(t *testing.T) {
 func TestVerifyChecksum_NoURL(t *testing.T) {
 	t.Parallel()
 	u := &Updater{Client: http.DefaultClient}
-	err := u.VerifyChecksum(context.Background(), "", "hotplex-darwin-arm64", "/dev/null")
+	err := u.VerifyChecksum(context.Background(), "", "hotplex-darwin-arm64.tar.gz", "/dev/null")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "skipping verification")
 }
@@ -225,15 +381,12 @@ func TestReplace_Success(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 
-	// Create fake "current binary"
 	currentBin := filepath.Join(tmp, "hotplex")
 	require.NoError(t, os.WriteFile(currentBin, []byte("old"), 0o755))
 
-	// Create fake "new binary"
 	newBin := filepath.Join(tmp, "hotplex-new")
 	require.NoError(t, os.WriteFile(newBin, []byte("new"), 0o755))
 
-	// Test the rename pattern directly
 	backupPath := currentBin + ".old"
 	require.NoError(t, os.Rename(currentBin, backupPath))
 	require.NoError(t, os.Rename(newBin, currentBin))
@@ -243,7 +396,6 @@ func TestReplace_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("new"), data)
 
-	// New binary file should no longer exist at old path
 	_, err = os.Stat(newBin)
 	require.True(t, os.IsNotExist(err))
 }
@@ -266,19 +418,18 @@ func TestVersionEqual(t *testing.T) {
 
 func TestFindChecksum(t *testing.T) {
 	t.Parallel()
-	checksums := "abc123  hotplex-linux-amd64\ndef456  hotplex-darwin-arm64\n"
-	hash, err := findChecksum(checksums, "hotplex-darwin-arm64")
+	checksums := "abc123  hotplex-linux-amd64.tar.gz\ndef456  hotplex-darwin-arm64.tar.gz\n"
+	hash, err := findChecksum(checksums, "hotplex-darwin-arm64.tar.gz")
 	require.NoError(t, err)
 	require.Equal(t, "def456", hash)
 
-	_, err = findChecksum(checksums, "hotplex-windows-amd64.exe")
+	_, err = findChecksum(checksums, "hotplex-windows-amd64.zip")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
 
 func TestIsWritable(t *testing.T) {
 	t.Parallel()
-	// Test with a temp file instead of the running binary to avoid "text file busy" on Linux CI.
 	tmp := t.TempDir()
 	f := filepath.Join(tmp, "test-binary")
 	require.NoError(t, os.WriteFile(f, []byte("x"), 0o755))
@@ -287,7 +438,6 @@ func TestIsWritable(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, f, path)
 
-	// Read-only file should fail.
 	readOnly := filepath.Join(tmp, "readonly")
 	require.NoError(t, os.WriteFile(readOnly, []byte("x"), 0o444))
 	_, err = testIsWritablePath(readOnly)
@@ -305,32 +455,18 @@ func testIsWritablePath(path string) (string, error) {
 
 func TestIsDocker(t *testing.T) {
 	t.Parallel()
-	// In a test environment, IsDocker should return false (no /.dockerenv)
 	require.False(t, IsDocker())
 }
 
 func TestCheck_ContextCancelled(t *testing.T) {
 	t.Parallel()
 	u, _ := testUpdater(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done() // block until client cancels
+		<-r.Context().Done()
 	}))
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 	_, err := u.Check(ctx)
 	require.Error(t, err)
-}
-
-func TestDownload_NonOKStatus(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(server.Close)
-
-	u := &Updater{Client: server.Client()}
-	_, err := u.Download(context.Background(), server.URL)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "HTTP 404")
 }
 
 func TestVerifyChecksum_HTTPError(t *testing.T) {
@@ -341,14 +477,7 @@ func TestVerifyChecksum_HTTPError(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	u := &Updater{Client: server.Client()}
-	err := u.VerifyChecksum(context.Background(), server.URL, "hotplex-darwin-arm64", "/dev/null")
+	err := u.VerifyChecksum(context.Background(), server.URL, "hotplex-darwin-arm64.tar.gz", "/dev/null")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "HTTP 500")
-}
-
-func TestAssetName_NonWindows(t *testing.T) {
-	t.Parallel()
-	u := &Updater{GOOS: "linux", GOARCH: "amd64"}
-	require.Equal(t, "hotplex-linux-amd64", u.assetName())
-	require.False(t, strings.HasSuffix(u.assetName(), ".exe"))
 }
