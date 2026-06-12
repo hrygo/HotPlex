@@ -301,31 +301,39 @@ func formatTurns(turns []turnWithChars) string {
 }
 
 // truncateResult builds a CompressResult by truncating turns to fit within budget.
-// Iterates from newest to oldest so that when the first (oldest) turn alone
-// exceeds the budget, we still return the most recent turns that fit.
+// Iterates from newest to oldest so that the most recent turns are prioritized.
+// Oversized turns are truncated at a newline boundary rather than discarded entirely,
+// ensuring at least partial content from the newest turn is always preserved.
 func (c *HistoryCompressor) truncateResult(turns []turnWithChars) CompressResult {
 	history := make([]worker.ConversationTurn, 0, len(turns))
 	bytesUsed := 0
 	for i := len(turns) - 1; i >= 0; i-- {
 		t := turns[i]
-		if bytesUsed+len(t.content) > maxHistoryBytes {
+		remaining := maxHistoryBytes - bytesUsed
+		if remaining <= 0 {
 			break
 		}
-		bytesUsed += len(t.content)
+		content := t.content
+		if len(content) > remaining {
+			content = truncateAtBoundary(content, remaining)
+			if content == "" {
+				continue
+			}
+			c.log.Warn("history: turn truncated to fit budget",
+				"turn_role", t.role,
+				"original_bytes", len(t.content),
+				"truncated_bytes", len(content),
+				"budget", maxHistoryBytes)
+		}
+		bytesUsed += len(content)
 		history = append(history, worker.ConversationTurn{
 			Role:    t.role,
-			Content: t.content,
+			Content: content,
 		})
 	}
 	// Reverse to restore chronological order.
 	for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
 		history[i], history[j] = history[j], history[i]
-	}
-	if len(history) == 0 && len(turns) > 0 {
-		c.log.Warn("history: all turns exceed byte budget, history empty",
-			"turn_count", len(turns),
-			"budget", maxHistoryBytes,
-			"newest_turn_bytes", len(turns[len(turns)-1].content))
 	}
 	return CompressResult{
 		Turns:         history,
