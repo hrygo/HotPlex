@@ -1,10 +1,10 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    HotPlex Worker Gateway — Binary Installer (Windows)
+    HotPlex Worker Gateway — Installer (Windows)
 
 .DESCRIPTION
-    Downloads a GitHub release binary and installs it.
+    Downloads a GitHub release archive, verifies checksum, extracts and installs.
     For config, secrets, and service setup, run: hotplex onboard
 
 .PARAMETER Prefix

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# HotPlex Worker Gateway — Binary Installer (macOS / Linux)
+# HotPlex Worker Gateway — Installer (macOS / Linux)
 #
-# Downloads a GitHub release binary and installs it.
+# Downloads a GitHub release archive, verifies checksum, extracts and installs.
 # For config, secrets, and service setup, run: hotplex onboard
 #
 # Usage:
