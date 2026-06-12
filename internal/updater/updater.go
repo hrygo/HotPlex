@@ -2,6 +2,9 @@
 package updater
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -64,8 +67,17 @@ func New(currentVersion string) *Updater {
 	}
 }
 
-// assetName returns the expected binary name for the current platform.
+// assetName returns the expected archive name for the current platform.
 func (u *Updater) assetName() string {
+	base := fmt.Sprintf("hotplex-%s-%s", u.GOOS, u.GOARCH)
+	if u.GOOS == "windows" {
+		return base + ".zip"
+	}
+	return base + ".tar.gz"
+}
+
+// binaryName returns the expected binary file name inside the archive.
+func (u *Updater) binaryName() string {
 	name := fmt.Sprintf("hotplex-%s-%s", u.GOOS, u.GOARCH)
 	if u.GOOS == "windows" {
 		name += ".exe"
@@ -115,7 +127,7 @@ func (u *Updater) Check(ctx context.Context) (*CheckResult, error) {
 		}
 	}
 	if downloadURL == "" {
-		return nil, fmt.Errorf("no binary found for %s in release %s", want, release.TagName)
+		return nil, fmt.Errorf("no archive found for %s in release %s", want, release.TagName)
 	}
 
 	return &CheckResult{
@@ -128,10 +140,10 @@ func (u *Updater) Check(ctx context.Context) (*CheckResult, error) {
 	}, nil
 }
 
-// Download fetches the binary to a temp file and returns its path.
+// Download fetches the archive, extracts the binary to a temp file, and returns its path.
 // Caller is responsible for cleaning up the temp file.
 func (u *Updater) Download(ctx context.Context, url string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -143,7 +155,7 @@ func (u *Updater) Download(ctx context.Context, url string) (string, error) {
 
 	resp, err := u.Client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("download binary: %w", err)
+		return "", fmt.Errorf("download archive: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -151,23 +163,108 @@ func (u *Updater) Download(ctx context.Context, url string) (string, error) {
 		return "", fmt.Errorf("download failed with HTTP %d", resp.StatusCode)
 	}
 
-	tmp, err := os.CreateTemp("", "hotplex-update-*")
+	// Save archive to temp, then extract binary.
+	archiveFile, err := os.CreateTemp("", "hotplex-update-archive-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
-	tmpPath := tmp.Name()
+	archivePath := archiveFile.Name()
 
-	if _, err := io.Copy(tmp, io.LimitReader(resp.Body, 200<<20)); err != nil { // 200MB max
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("write download: %w", err)
+	if _, err := io.Copy(archiveFile, io.LimitReader(resp.Body, 200<<20)); err != nil { // 200MB max
+		_ = archiveFile.Close()
+		_ = os.Remove(archivePath)
+		return "", fmt.Errorf("write archive: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("close temp file: %w", err)
-	}
+	_ = archiveFile.Close()
 
-	return tmpPath, nil
+	binaryPath, err := u.extractBinary(archivePath)
+	_ = os.Remove(archivePath)
+	if err != nil {
+		return "", err
+	}
+	return binaryPath, nil
+}
+
+// extractBinary extracts the platform binary from a tar.gz or zip archive.
+func (u *Updater) extractBinary(archivePath string) (string, error) {
+	want := u.binaryName()
+	if u.GOOS == "windows" {
+		return u.extractFromZip(archivePath, want)
+	}
+	return u.extractFromTarGz(archivePath, want)
+}
+
+func (u *Updater) extractFromTarGz(archivePath, want string) (string, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return "", fmt.Errorf("open archive: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return "", fmt.Errorf("decompress gzip: %w", err)
+	}
+	defer func() { _ = gz.Close() }()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("read tar: %w", err)
+		}
+		if hdr.Typeflag == tar.TypeReg && filepath.Base(hdr.Name) == want {
+			out, err := os.CreateTemp("", "hotplex-update-*")
+			if err != nil {
+				return "", fmt.Errorf("create temp file: %w", err)
+			}
+			if _, err := io.Copy(out, io.LimitReader(tr, 200<<20)); err != nil {
+				_ = out.Close()
+				_ = os.Remove(out.Name())
+				return "", fmt.Errorf("extract binary: %w", err)
+			}
+			_ = out.Close()
+			return out.Name(), nil
+		}
+	}
+	return "", fmt.Errorf("binary %s not found in archive", want)
+}
+
+func (u *Updater) extractFromZip(archivePath, want string) (string, error) {
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return "", fmt.Errorf("open zip: %w", err)
+	}
+	defer func() { _ = zr.Close() }()
+
+	for _, f := range zr.File {
+		if !f.Mode().IsRegular() || filepath.Base(f.Name) != want {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", fmt.Errorf("open entry: %w", err)
+		}
+
+		out, err := os.CreateTemp("", "hotplex-update-*")
+		if err != nil {
+			_ = rc.Close()
+			return "", fmt.Errorf("create temp file: %w", err)
+		}
+		_, err = io.Copy(out, io.LimitReader(rc, 200<<20))
+		_ = rc.Close()
+		if err != nil {
+			_ = out.Close()
+			_ = os.Remove(out.Name())
+			return "", fmt.Errorf("extract binary: %w", err)
+		}
+		_ = out.Close()
+		return out.Name(), nil
+	}
+	return "", fmt.Errorf("binary %s not found in archive", want)
 }
 
 // VerifyChecksum downloads checksums.txt and compares sha256 of the file at path.

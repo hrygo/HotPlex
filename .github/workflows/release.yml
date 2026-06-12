@@ -82,6 +82,10 @@ jobs:
 
       - run: go mod download
 
+      - name: Install zip utility
+        if: matrix.os == 'windows'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zip
+
       - name: Compute version
         id: version
         run: |
@@ -103,9 +107,18 @@ jobs:
           EXT=""
           [ "${{ matrix.os }}" = "windows" ] && EXT=".exe"
           NAME="hotplex-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+          ARCHIVE="hotplex-${{ matrix.os }}-${{ matrix.arch }}"
           mkdir -p dist
           go build -ldflags="${LDFLAGS} -X main.version=${VERSION} -X main.commit=${COMMIT}" \
             -o "dist/${NAME}" ./cmd/hotplex
+
+          # Pack archive: tar.gz for unix, zip for windows
+          cd dist
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            zip -9 "${ARCHIVE}.zip" "${NAME}"
+          else
+            tar -czf "${ARCHIVE}.tar.gz" "${NAME}"
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
@@ -131,7 +144,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum hotplex-* > checksums.txt
+          sha256sum hotplex-*.tar.gz hotplex-*.zip > checksums.txt
           echo "=== Checksums ==="
           cat checksums.txt
           echo ""
@@ -145,7 +158,8 @@ jobs:
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           generate_release_notes: true
           files: |
-            dist/hotplex-*
+            dist/hotplex-*.tar.gz
+            dist/hotplex-*.zip
             dist/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

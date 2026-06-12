@@ -163,9 +163,10 @@ if ($Release -notmatch '^v\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$') {
 
 # ── Download ─────────────────────────────────────────────────────────────────
 
+$ArchiveName = "hotplex-windows-${Arch}.zip"
 $BinaryName = "hotplex-windows-${Arch}.exe"
 $BaseUrl = "https://github.com/$Repo/releases/download/$Release"
-$DownloadUrl = "$BaseUrl/$BinaryName"
+$DownloadUrl = "$BaseUrl/$ArchiveName"
 $ChecksumUrl = "$BaseUrl/checksums.txt"
 
 $TmpDir = Join-Path $env:TEMP "hotplex-install-$(Get-Random)"
@@ -174,26 +175,26 @@ New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
 $Success = $false
 
 try {
-    # Download binary
+    # Download archive
     Write-Info "Downloading hotplex $Release for windows/$Arch..."
-    $BinaryPath = Join-Path $TmpDir $BinaryName
+    $ArchivePath = Join-Path $TmpDir $ArchiveName
 
     $PrevProgress = $ProgressPreference
     $ProgressPreference = "SilentlyContinue"
     try {
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $BinaryPath -UseBasicParsing
+        Invoke-WebRequest -Uri $DownloadUrl -OutFile $ArchivePath -UseBasicParsing
     } catch {
         Write-Err "Download failed: $($_.Exception.Message)"
-        Write-Host "The release may not include Windows binaries."
+        Write-Host "The release may not include Windows archives."
         Write-Host "Check available releases at: https://github.com/$Repo/releases"
         return
     }
     $ProgressPreference = $PrevProgress
 
     # Verify file is not empty
-    $FileSize = (Get-Item $BinaryPath).Length
+    $FileSize = (Get-Item $ArchivePath).Length
     if ($FileSize -eq 0) {
-        Write-Err "Downloaded file is empty — release binary may not exist for this platform."
+        Write-Err "Downloaded file is empty — release archive may not exist for this platform."
         return
     }
 
@@ -205,10 +206,10 @@ try {
         Invoke-WebRequest -Uri $ChecksumUrl -OutFile $ChecksumPath -UseBasicParsing
         $ProgressPreference = $PrevProgress
 
-        $ExpectedLine = Get-Content $ChecksumPath | Where-Object { $_ -like "*$BinaryName*" } | Select-Object -First 1
+        $ExpectedLine = Get-Content $ChecksumPath | Where-Object { $_ -like "*$ArchiveName*" } | Select-Object -First 1
         if ($ExpectedLine) {
             $Expected = ($ExpectedLine -split "\s+")[0]
-            $Actual = (Get-FileHash -Path $BinaryPath -Algorithm SHA256).Hash.ToLower()
+            $Actual = (Get-FileHash -Path $ArchivePath -Algorithm SHA256).Hash.ToLower()
             if ($Expected -ne $Actual) {
                 Write-Err "Checksum mismatch!"
                 Write-Host "  Expected: $Expected"
@@ -217,16 +218,20 @@ try {
             }
             Write-Info "Checksum verified."
         } else {
-            Write-Warn "Binary not found in checksums file — skipping verification."
+            Write-Warn "Archive not found in checksums file — skipping verification."
         }
     } catch {
         Write-Warn "Checksums file unavailable — skipping verification."
     }
 
-    # ── Install ────────────────────────────────────────────────────────────────
+    # ── Extract and install ────────────────────────────────────────────────────
+
+    $ExtractDir = Join-Path $TmpDir "extracted"
+    Expand-Archive -Path $ArchivePath -DestinationPath $ExtractDir -Force
+    $ExtractedBinary = Join-Path $ExtractDir $BinaryName
 
     New-Item -ItemType Directory -Path $Prefix -Force | Out-Null
-    Copy-Item $BinaryPath $TargetPath -Force
+    Copy-Item $ExtractedBinary $TargetPath -Force
 
     Write-Info "Installed: $TargetPath"
 

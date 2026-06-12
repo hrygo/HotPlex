@@ -133,11 +133,11 @@ TARGET="$PREFIX/bin/$BIN_NAME"
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-BINARY_NAME="hotplex-${OS}-${ARCH}"
+ARCHIVE_NAME="hotplex-${OS}-${ARCH}.tar.gz"
 CHECKSUM_NAME="checksums.txt"
 BASE_URL="https://github.com/${REPO}/releases/download/${RELEASE}"
 
-BINARY_PATH="${WORK_DIR}/${BINARY_NAME}"
+ARCHIVE_PATH="${WORK_DIR}/${ARCHIVE_NAME}"
 CHECKSUM_PATH="${WORK_DIR}/${CHECKSUM_NAME}"
 
 info "Downloading hotplex ${RELEASE} for ${OS}/${ARCH}..."
@@ -145,16 +145,16 @@ mkdir -p "$PREFIX/bin"
 
 DL_OK=false
 if [[ "$DL_CMD" == "curl" ]]; then
-    curl -fSL --progress-bar "${BASE_URL}/${BINARY_NAME}" -o "$BINARY_PATH" && DL_OK=true
+    curl -fSL --progress-bar "${BASE_URL}/${ARCHIVE_NAME}" -o "$ARCHIVE_PATH" && DL_OK=true
 else
-    wget -q --show-progress "${BASE_URL}/${BINARY_NAME}" -O "$BINARY_PATH" && DL_OK=true
+    wget -q --show-progress "${BASE_URL}/${ARCHIVE_NAME}" -O "$ARCHIVE_PATH" && DL_OK=true
 fi
 
-$DL_OK || die "Download failed. Release ${RELEASE} may not include a binary for ${OS}/${ARCH}.
+$DL_OK || die "Download failed. Release ${RELEASE} may not include an archive for ${OS}/${ARCH}.
 
   Check available releases: https://github.com/${REPO}/releases"
-[[ $(stat -f%z "$BINARY_PATH" 2>/dev/null || stat -c%s "$BINARY_PATH") -eq 0 ]] \
-    && die "Downloaded file is empty — release binary may not exist for this platform."
+[[ $(stat -f%z "$ARCHIVE_PATH" 2>/dev/null || stat -c%s "$ARCHIVE_PATH") -eq 0 ]] \
+    && die "Downloaded file is empty — release archive may not exist for this platform."
 
 # ── Verify checksum ──────────────────────────────────────────────────────────
 
@@ -168,28 +168,31 @@ if [[ -n "$HASH_CMD" ]]; then
     fi
 
     if $DL_OK && [[ -f "$CHECKSUM_PATH" ]]; then
-        EXPECTED=$(grep "$BINARY_NAME" "$CHECKSUM_PATH" | awk '{print $1}')
+        EXPECTED=$(grep "$ARCHIVE_NAME" "$CHECKSUM_PATH" | awk '{print $1}')
         if [[ -n "$EXPECTED" ]]; then
             if [[ "$HASH_CMD" == "sha256sum" ]]; then
-                ACTUAL=$(sha256sum "$BINARY_PATH" | awk '{print $1}')
+                ACTUAL=$(sha256sum "$ARCHIVE_PATH" | awk '{print $1}')
             else
-                ACTUAL=$(shasum -a 256 "$BINARY_PATH" | awk '{print $1}')
+                ACTUAL=$(shasum -a 256 "$ARCHIVE_PATH" | awk '{print $1}')
             fi
             if [[ "$EXPECTED" != "$ACTUAL" ]]; then
                 die "Checksum mismatch! Expected: $EXPECTED  Actual: $ACTUAL"
             fi
             info "Checksum verified."
         else
-            warn "Binary not found in checksums file — skipping verification."
+            warn "Archive not found in checksums file — skipping verification."
         fi
     else
         warn "Checksums file unavailable — skipping verification."
     fi
 fi
 
-# ── Install ──────────────────────────────────────────────────────────────────
+# ── Extract and install ──────────────────────────────────────────────────────
 
-mv "$BINARY_PATH" "$TARGET"
+tar -xzf "$ARCHIVE_PATH" -C "$WORK_DIR" "hotplex-${OS}-${ARCH}"
+EXTRACTED="${WORK_DIR}/hotplex-${OS}-${ARCH}"
+[[ -f "$EXTRACTED" ]] || die "Binary hotplex-${OS}-${ARCH} not found in archive."
+mv "$EXTRACTED" "$TARGET"
 chmod +x "$TARGET"
 
 # ── Verify installation ─────────────────────────────────────────────────────
