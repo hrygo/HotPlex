@@ -97,6 +97,9 @@ func (c *ACPClient) ResumeSession(ctx context.Context, sessionID, cwd string, mc
 // Prompt sends a user message to the active session and waits for the response.
 // Notifications received during the prompt are dispatched to NotificationCh.
 func (c *ACPClient) Prompt(ctx context.Context, sessionID, content string) (*PromptResult, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("acp prompt: empty sessionId")
+	}
 	params := map[string]any{
 		"sessionId": sessionID,
 		"prompt": []map[string]string{
@@ -366,6 +369,9 @@ func (c *ACPClient) callSessionMethod(ctx context.Context, method string, params
 	var result SessionResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, fmt.Errorf("acp %s: unmarshal: %w", label, err)
+	}
+	if result.SessionID == "" {
+		return nil, fmt.Errorf("acp %s: agent returned empty sessionId", label)
 	}
 	return &result, nil
 }
