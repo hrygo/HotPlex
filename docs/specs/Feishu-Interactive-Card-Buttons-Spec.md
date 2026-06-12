@@ -2,7 +2,7 @@
 type: spec
 tags: [project/HotPlex, messaging/feishu, messaging/slack, webchat, platform-adapter]
 date: 2026-05-20
-status: draft
+status: implemented
 priority: high
 estimated_hours: 20
 last_updated: 2026-05-21

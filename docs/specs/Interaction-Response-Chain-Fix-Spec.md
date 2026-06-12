@@ -9,7 +9,7 @@ tags:
   - worker/opencodeserver
   - bug/critical
 date: 2026-05-04
-status: proposed
+status: implemented
 priority: critical
 estimated_hours: 12
 ---

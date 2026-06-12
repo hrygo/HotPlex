@@ -5,7 +5,7 @@ tags:
   - messaging/feishu
   - cardkit-v2
 date: 2026-05-08
-status: draft
+status: implemented
 progress: 0
 ---
 

@@ -3,7 +3,7 @@ type: spec
 tags:
   - project/HotPlex
 date: 2026-04-22
-status: draft
+status: implemented
 progress: 20
 ---
 # HotPlex 配置热重载方案 (AEP-005)

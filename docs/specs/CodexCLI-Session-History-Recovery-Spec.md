@@ -1,3 +1,8 @@
+---
+type: spec
+status: implemented
+---
+
 # Feature: CodexCLI 会话历史恢复 — 从 Turn 表重建上下文
 
 **Issue**: CodexCLI worker 无法会话保持

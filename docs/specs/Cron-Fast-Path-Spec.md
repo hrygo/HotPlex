@@ -1,7 +1,7 @@
 # Cron Fast Path — In-Session Callback Specification
 
 **Version**: 2.1
-**Status**: Ready for Implementation
+**Status**: Implemented
 **Supersedes**: v1.1 Draft, v2.0 Draft
 **Related**: [AI-Native-Cronjob-Spec.md](AI-Native-Cronjob-Spec.md)
 

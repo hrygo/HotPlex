@@ -6,7 +6,7 @@ tags:
   - architecture/integration
   - persistent-process
 date: 2026-05-18
-status: draft
+status: implemented
 progress: 0
 estimated_hours: 20
 ---

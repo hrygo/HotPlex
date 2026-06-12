@@ -6,7 +6,7 @@ tags:
   - perf
   - refactor
 date: 2026-05-19
-status: proposed
+status: implemented
 priority: P1
 estimated_hours: 8
 ---

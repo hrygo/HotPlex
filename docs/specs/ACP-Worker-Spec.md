@@ -7,7 +7,7 @@ tags:
   - protocol/acp
   - agent/hermes
 date: 2026-05-29
-status: proposed
+status: implemented
 progress: 0
 estimated_hours: 24
 supersedes:
