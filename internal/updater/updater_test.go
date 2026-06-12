@@ -208,9 +208,10 @@ func TestDownload_TarGz(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(path)
 
+	// Download returns archive bytes, not extracted binary
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Equal(t, content, data)
+	require.Equal(t, archive, data)
 }
 
 func TestDownload_Zip(t *testing.T) {
@@ -230,22 +231,74 @@ func TestDownload_Zip(t *testing.T) {
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
+	require.Equal(t, archive, data)
+}
+
+func TestExtract_TarGz(t *testing.T) {
+	t.Parallel()
+	content := []byte("fake-binary-content")
+	archive := makeTarGz(t, "hotplex-darwin-arm64", content)
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "archive.tar.gz")
+	require.NoError(t, os.WriteFile(archivePath, archive, 0o644))
+
+	u := &Updater{GOOS: "darwin", GOARCH: "arm64"}
+	path, err := u.Extract(archivePath)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
 	require.Equal(t, content, data)
 }
 
-func TestDownload_BinaryNotFoundInArchive(t *testing.T) {
+func TestExtract_Zip(t *testing.T) {
+	t.Parallel()
+	content := []byte("fake-windows-binary")
+	archive := makeZip(t, "hotplex-windows-amd64.exe", content)
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "archive.zip")
+	require.NoError(t, os.WriteFile(archivePath, archive, 0o644))
+
+	u := &Updater{GOOS: "windows", GOARCH: "amd64"}
+	path, err := u.Extract(archivePath)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, content, data)
+}
+
+func TestExtract_BinaryNotFoundInArchive(t *testing.T) {
 	t.Parallel()
 	archive := makeTarGz(t, "wrong-binary-name", []byte("x"))
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(archive)
-	}))
-	t.Cleanup(server.Close)
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "archive.tar.gz")
+	require.NoError(t, os.WriteFile(archivePath, archive, 0o644))
 
-	u := &Updater{Client: server.Client(), GOOS: "darwin", GOARCH: "arm64"}
-	_, err := u.Download(context.Background(), server.URL)
+	u := &Updater{GOOS: "darwin", GOARCH: "arm64"}
+	_, err := u.Extract(archivePath)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found in archive")
+}
+
+func TestCheck_LegacyBinaryFallback(t *testing.T) {
+	t.Parallel()
+	u, _ := testUpdater(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, releaseJSON("v1.4.0", []Asset{
+			{Name: "hotplex-darwin-arm64", BrowserDownloadURL: "http://example.com/binary"},
+			{Name: "checksums.txt", BrowserDownloadURL: "http://example.com/checksums"},
+		}))
+	}))
+	result, err := u.Check(context.Background())
+	require.NoError(t, err)
+	require.True(t, result.UpdateAvailable)
+	require.True(t, result.IsLegacyBinary)
+	require.Equal(t, "http://example.com/binary", result.DownloadURL)
 }
 
 func TestDownload_NonOKStatus(t *testing.T) {

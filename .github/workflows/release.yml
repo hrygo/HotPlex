@@ -160,6 +160,9 @@ jobs:
           files: |
             dist/hotplex-*.tar.gz
             dist/hotplex-*.zip
+            dist/hotplex-darwin-*
+            dist/hotplex-linux-*
+            dist/hotplex-windows-*.exe
             dist/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

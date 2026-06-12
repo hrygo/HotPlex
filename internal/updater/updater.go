@@ -43,6 +43,7 @@ type CheckResult struct {
 	AssetName       string
 	DownloadURL     string
 	ChecksumURL     string
+	IsLegacyBinary  bool // true when downloading a pre-archive raw binary
 }
 
 // Updater holds configuration for update operations.
@@ -117,11 +118,19 @@ func (u *Updater) Check(ctx context.Context) (*CheckResult, error) {
 	}
 
 	want := u.assetName()
+	legacy := u.binaryName()
 	var downloadURL, checksumURL string
+	var isLegacy bool
 	for _, a := range release.Assets {
 		switch a.Name {
 		case want:
 			downloadURL = a.BrowserDownloadURL
+		case legacy:
+			// Fallback: pre-archive releases publish raw binaries.
+			if downloadURL == "" {
+				downloadURL = a.BrowserDownloadURL
+				isLegacy = true
+			}
 		case "checksums.txt":
 			checksumURL = a.BrowserDownloadURL
 		}
@@ -137,10 +146,11 @@ func (u *Updater) Check(ctx context.Context) (*CheckResult, error) {
 		AssetName:       want,
 		DownloadURL:     downloadURL,
 		ChecksumURL:     checksumURL,
+		IsLegacyBinary:  isLegacy,
 	}, nil
 }
 
-// Download fetches the archive, extracts the binary to a temp file, and returns its path.
+// Download fetches the archive to a temp file and returns its path.
 // Caller is responsible for cleaning up the temp file.
 func (u *Updater) Download(ctx context.Context, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
@@ -148,12 +158,17 @@ func (u *Updater) Download(ctx context.Context, url string) (string, error) {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 
-	// Use a longer timeout for binary download via context.
+	// Use a dedicated client without Timeout so context controls the deadline.
 	dlCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	req = req.WithContext(dlCtx)
 
-	resp, err := u.Client.Do(req)
+	client := &http.Client{} // no Timeout; relies on context
+	if u.Client != nil {
+		client = u.Client
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download archive: %w", err)
 	}
@@ -163,7 +178,6 @@ func (u *Updater) Download(ctx context.Context, url string) (string, error) {
 		return "", fmt.Errorf("download failed with HTTP %d", resp.StatusCode)
 	}
 
-	// Save archive to temp, then extract binary.
 	archiveFile, err := os.CreateTemp("", "hotplex-update-archive-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
@@ -177,8 +191,13 @@ func (u *Updater) Download(ctx context.Context, url string) (string, error) {
 	}
 	_ = archiveFile.Close()
 
+	return archivePath, nil
+}
+
+// Extract reads the archive at archivePath and extracts the platform binary to a temp file.
+// Caller is responsible for cleaning up the returned path.
+func (u *Updater) Extract(archivePath string) (string, error) {
 	binaryPath, err := u.extractBinary(archivePath)
-	_ = os.Remove(archivePath)
 	if err != nil {
 		return "", err
 	}
@@ -216,7 +235,8 @@ func (u *Updater) extractFromTarGz(archivePath, want string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read tar: %w", err)
 		}
-		if hdr.Typeflag == tar.TypeReg && filepath.Base(hdr.Name) == want {
+		if hdr.Typeflag == tar.TypeReg && filepath.Base(hdr.Name) == want &&
+			!strings.Contains(hdr.Name, "..") && !filepath.IsAbs(hdr.Name) {
 			out, err := os.CreateTemp("", "hotplex-update-*")
 			if err != nil {
 				return "", fmt.Errorf("create temp file: %w", err)
