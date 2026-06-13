@@ -409,10 +409,7 @@ func (s *SQLiteStore) QueryTurnStats(ctx context.Context, sessionID string) (*Tu
 	}
 	defer func() { _ = rows.Close() }()
 
-	return collectTurnStats(rows, sessionID, func() (any, func() bool) {
-		var nv sql.NullInt64
-		return &nv, func() bool { return nv.Valid && nv.Int64 == 1 }
-	}, slog.Default())
+	return collectTurnStats(rows, sessionID, func() successScanner { return &sqliteSuccessScanner{} }, slog.Default())
 }
 
 // LatestGeneration returns the maximum generation for a session, or 0 if no turns exist.

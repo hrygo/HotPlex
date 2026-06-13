@@ -189,10 +189,7 @@ func (s *pgStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnSt
 	}
 	defer func() { _ = rows.Close() }()
 
-	return collectTurnStats(rows, sessionID, func() (any, func() bool) {
-		var nv sql.NullBool
-		return &nv, func() bool { return nv.Valid && nv.Bool }
-	}, s.log)
+	return collectTurnStats(rows, sessionID, func() successScanner { return &pgSuccessScanner{} }, s.log)
 }
 
 func (s *pgStore) LatestGeneration(ctx context.Context, sessionID string) (int64, error) {

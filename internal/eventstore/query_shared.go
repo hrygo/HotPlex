@@ -48,7 +48,7 @@ func queryBySession(ctx context.Context, qe queryExecer, q map[string]string, se
 
 	events, err := scanEvents(rows)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("eventstore: scan events: %w", err)
 	}
 
 	hasMore := len(events) > limit
@@ -106,31 +106,51 @@ func turnStatScanDest(gen *int64, ts *TurnStatItem, successPtr, toolsJSON, toolC
 	}
 }
 
+// successScanner abstracts the dialect-specific success column (SQLite INTEGER
+// via sql.NullInt64, Postgres BOOLEAN via sql.NullBool) for turn-stat scanning.
+// A single instance is reused across all rows in a stat result — ScanPointer
+// returns the same destination each row and Decode reads the latest scan — so
+// there is no per-row allocation on the hot read path.
+type successScanner interface {
+	ScanPointer() any // scan destination, reused each row
+	Decode() bool     // decodes the most recently scanned value
+}
+
+type sqliteSuccessScanner struct{ v sql.NullInt64 }
+
+func (s *sqliteSuccessScanner) ScanPointer() any { return &s.v }
+func (s *sqliteSuccessScanner) Decode() bool     { return s.v.Valid && s.v.Int64 == 1 }
+
+type pgSuccessScanner struct{ v sql.NullBool }
+
+func (s *pgSuccessScanner) ScanPointer() any { return &s.v }
+func (s *pgSuccessScanner) Decode() bool     { return s.v.Valid && s.v.Bool }
+
 // collectTurnStats iterates turn-stat rows and accumulates them into a TurnStats.
 // It is shared by SQLiteStore and pgStore; the only dialect-specific concern is
-// the success column (INTEGER vs BOOLEAN), supplied via newSuccess which returns
-// a fresh scan destination pointer and a decoder invoked after Scan.
+// the success column (INTEGER vs BOOLEAN), supplied via newScanner which returns
+// a reusable successScanner created once before the row loop.
 func collectTurnStats(
 	rows *sql.Rows,
 	sessionID string,
-	newSuccess func() (ptr any, decode func() bool),
+	newScanner func() successScanner,
 	log *slog.Logger,
 ) (*TurnStats, error) {
+	scanner := newScanner()
 	stats := &TurnStats{SessionID: sessionID}
 	for rows.Next() {
 		var ts TurnStatItem
 		var gen int64
 		var toolsJSON sql.NullString
 		var toolCount sql.NullInt64
-		successPtr, decode := newSuccess()
-		if err := rows.Scan(turnStatScanDest(&gen, &ts, successPtr, &toolsJSON, &toolCount)...); err != nil {
+		if err := rows.Scan(turnStatScanDest(&gen, &ts, scanner.ScanPointer(), &toolsJSON, &toolCount)...); err != nil {
 			log.Warn("eventstore: scan turn stats row", "session_id", sessionID, "error", err)
 			continue
 		}
 		if stats.Generation == 0 {
 			stats.Generation = gen
 		}
-		ts.Success = decode()
+		ts.Success = scanner.Decode()
 		stats.TotalTurns++
 		if ts.Success {
 			stats.SuccessTurns++
