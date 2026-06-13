@@ -21,6 +21,16 @@ func SetConfigPath(path string) {
 	configPath = path
 }
 
+// loadConfig loads the config from the configured path. Returns (nil, nil) when
+// no path is set, so callers distinguish "not configured" from a load error
+// without repeating the empty-check + Load boilerplate at every call site.
+func loadConfig() (*config.Config, error) {
+	if configPath == "" {
+		return nil, nil
+	}
+	return config.Load(configPath)
+}
+
 // ─── config.exists ────────────────────────────────────────────────────────────
 
 type configExistsChecker struct{}

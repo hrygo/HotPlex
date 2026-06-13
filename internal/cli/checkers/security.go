@@ -66,11 +66,9 @@ func resolveAdminToken() string {
 	if val := os.Getenv("HOTPLEX_ADMIN_TOKEN_1"); val != "" {
 		return val
 	}
-	if configPath != "" {
-		cfg, err := config.Load(configPath)
-		if err == nil && len(cfg.Admin.Tokens) > 0 {
-			return cfg.Admin.Tokens[0]
-		}
+	cfg, err := loadConfig()
+	if err == nil && cfg != nil && len(cfg.Admin.Tokens) > 0 {
+		return cfg.Admin.Tokens[0]
 	}
 	return ""
 }
