@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/hrygo/hotplex/internal/dbutil"
@@ -64,7 +65,7 @@ func (s *pgStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
-			return fmt.Errorf("admin: api key user ID %d not found", id)
+			return fmt.Errorf("admin: api key user ID %d not found: %w", id, sql.ErrNoRows)
 		}
 		return nil
 	})

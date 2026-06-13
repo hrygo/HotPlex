@@ -117,7 +117,7 @@ func (b *apiKeyStoreBase) delete(ctx context.Context, id int64) error {
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
-			return fmt.Errorf("admin: api key user ID %d not found", id)
+			return fmt.Errorf("admin: api key user ID %d not found: %w", id, sql.ErrNoRows)
 		}
 		return nil
 	})
@@ -236,7 +236,7 @@ func (s *apiKeyUserStore) update(ctx context.Context, id int64, u *APIKeyUser) e
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
-			return fmt.Errorf("admin: api key user ID %d not found", id)
+			return fmt.Errorf("admin: api key user ID %d not found: %w", id, sql.ErrNoRows)
 		}
 		return nil
 	})

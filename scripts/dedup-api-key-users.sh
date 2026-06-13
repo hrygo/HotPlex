@@ -10,6 +10,11 @@
 #
 # Safety:
 #   - Exits if DB file does not exist.
+#   - Aborts with a non-zero exit if any DB query fails. A failure is NEVER
+#     silently mistaken for "no duplicates" — otherwise an operator could skip
+#     dedup and let migration 016 (CREATE UNIQUE INDEX) fail.
+#   - Runs the delete within an explicit BEGIN/COMMIT (ROLLBACK on error),
+#     matching the Postgres variant.
 #   - Exits if no duplicates found.
 #   - Prints affected rows before deletion.
 set -euo pipefail
@@ -33,9 +38,19 @@ fi
 
 SQLITE="sqlite3 \"$DB\""
 
+# sqlite_query runs a statement via sqlite3 and propagates its exit status and
+# stderr. Do NOT redirect stderr away: a failure must surface rather than be
+# misread as an empty (no-duplicates) result.
+sqlite_query() {
+	eval "$SQLITE" "$1"
+}
+
 echo "=== Checking for duplicate user_id in api_key_users ==="
 
-DUPES=$(eval "$SQLITE" "SELECT user_id, COUNT(*) as cnt FROM api_key_users GROUP BY user_id HAVING cnt > 1;")
+if ! DUPES=$(sqlite_query "SELECT user_id, COUNT(*) as cnt FROM api_key_users GROUP BY user_id HAVING cnt > 1;"); then
+	echo "Error: failed to query for duplicates — check the database file and path." >&2
+	exit 1
+fi
 if [[ -z "$DUPES" ]]; then
 	echo "No duplicates found. Safe to apply migration 016."
 	exit 0
@@ -45,12 +60,18 @@ echo "Duplicate user_ids found:"
 echo "$DUPES"
 echo ""
 
-AFFECTED=$(eval "$SQLITE" "SELECT COUNT(*) FROM api_key_users WHERE rowid NOT IN (SELECT MAX(rowid) FROM api_key_users GROUP BY user_id);")
+if ! AFFECTED=$(sqlite_query "SELECT COUNT(*) FROM api_key_users WHERE rowid NOT IN (SELECT MAX(rowid) FROM api_key_users GROUP BY user_id);"); then
+	echo "Error: failed to count affected rows." >&2
+	exit 1
+fi
 echo "Rows to delete: $AFFECTED"
 echo ""
 
 echo "Details of rows to be removed:"
-eval "$SQLITE" "SELECT rowid, id, user_id, api_key FROM api_key_users WHERE rowid NOT IN (SELECT MAX(rowid) FROM api_key_users GROUP BY user_id) ORDER BY user_id, rowid;"
+if ! sqlite_query "SELECT rowid, id, user_id, api_key FROM api_key_users WHERE rowid NOT IN (SELECT MAX(rowid) FROM api_key_users GROUP BY user_id) ORDER BY user_id, rowid;"; then
+	echo "Error: failed to fetch duplicate row details." >&2
+	exit 1
+fi
 echo ""
 
 if $DRY_RUN; then
@@ -59,8 +80,14 @@ if $DRY_RUN; then
 fi
 
 echo "Deleting $AFFECTED duplicate row(s)..."
-eval "$SQLITE" "DELETE FROM api_key_users WHERE rowid NOT IN (SELECT MAX(rowid) FROM api_key_users GROUP BY user_id);"
+if ! sqlite_query "BEGIN; DELETE FROM api_key_users WHERE rowid NOT IN (SELECT MAX(rowid) FROM api_key_users GROUP BY user_id); COMMIT;"; then
+	echo "Error: delete failed; transaction rolled back." >&2
+	exit 1
+fi
 
-REMAINING=$(eval "$SQLITE" "SELECT COUNT(*) FROM api_key_users;")
+if ! REMAINING=$(sqlite_query "SELECT COUNT(*) FROM api_key_users;"); then
+	echo "Error: failed to count remaining rows." >&2
+	exit 1
+fi
 echo "Done. Remaining rows: $REMAINING"
 echo "You can now safely apply migration 016 (CREATE UNIQUE INDEX)."
