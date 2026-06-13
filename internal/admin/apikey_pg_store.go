@@ -41,6 +41,9 @@ func (s *pgStore) create(ctx context.Context, u *APIKeyUser) error {
 	return s.writeMu.WithLock(func() error {
 		query := s.dialect.Rebind("INSERT INTO api_key_users (api_key, user_id, description) VALUES (?, ?, ?) RETURNING id")
 		if err := s.db.QueryRowContext(ctx, query, u.APIKey, u.UserID, u.Description).Scan(&u.ID); err != nil {
+			if s.dialect.IsUniqueViolation(err) {
+				return fmt.Errorf("admin: create api key user: %w", ErrUserIDExists)
+			}
 			return fmt.Errorf("admin: create api key user: %w", err)
 		}
 		return nil
@@ -54,6 +57,9 @@ func (s *pgStore) update(ctx context.Context, id int64, u *APIKeyUser) error {
 		query := s.dialect.Rebind("UPDATE api_key_users SET user_id = ?, description = ?, updated_at = NOW() WHERE id = ?")
 		res, err := s.db.ExecContext(ctx, query, u.UserID, u.Description, id)
 		if err != nil {
+			if s.dialect.IsUniqueViolation(err) {
+				return fmt.Errorf("admin: update api key user: %w", ErrUserIDExists)
+			}
 			return fmt.Errorf("admin: update api key user: %w", err)
 		}
 		n, _ := res.RowsAffected()

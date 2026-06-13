@@ -102,6 +102,12 @@
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "user_id already exists",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Create failed",
                         "schema": {
@@ -262,6 +268,12 @@
                     },
                     "404": {
                         "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "user_id already exists",
                         "schema": {
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }

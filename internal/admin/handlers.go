@@ -419,8 +419,13 @@ func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 // respondStoreError handles store/DB operation errors without leaking internal
-// details. Not-found errors return 404; all others are logged and return 500.
+// details. Duplicate-user errors return 409 Conflict; not-found errors return 404;
+// all others are logged and return 500.
 func respondStoreError(w http.ResponseWriter, log *slog.Logger, op string, err error) {
+	if errors.Is(err, ErrUserIDExists) {
+		http.Error(w, "user_id already exists", http.StatusConflict)
+		return
+	}
 	if errors.Is(err, sql.ErrNoRows) ||
 		errors.Is(err, cron.ErrJobNotFound) ||
 		errors.Is(err, session.ErrSessionNotFound) {

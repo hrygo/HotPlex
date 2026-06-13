@@ -85,10 +85,15 @@ export default function APIKeysPage() {
       setFormError('User ID is required');
       return;
     }
+    const trimmedId = formUserId.trim();
+    if (keys.some((k) => k.user_id === trimmedId)) {
+      setFormError('This User ID already has an API key');
+      return;
+    }
     try {
       setFormError(null);
       const result = await createAPIKey({
-        user_id: formUserId.trim(),
+        user_id: trimmedId,
         description: formDesc.trim() || undefined,
       });
       setCreatedKey(result.api_key);
@@ -97,9 +102,13 @@ export default function APIKeysPage() {
       setFormUserId('');
       setFormDesc('');
     } catch (err) {
-      setFormError(
-        err instanceof Error ? err.message : 'Failed to create API key',
-      );
+      const status = (err as any).status;
+      if (status === 409) {
+        setFormError('This User ID already has an API key');
+      } else {
+        const msg = err instanceof Error ? err.message : 'Failed to create API key';
+        setFormError(msg);
+      }
     }
   };
 

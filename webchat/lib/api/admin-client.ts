@@ -71,7 +71,9 @@ export async function adminFetch<T>(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(body || `Admin request failed: ${res.status}`);
+    const err = new Error(body || `Admin request failed: ${res.status}`);
+    (err as any).status = res.status;
+    throw err;
   }
 
   if (res.status === 204 || res.status === 202) {
