@@ -5,7 +5,7 @@ tags:
   - messaging/feishu
   - platform-adapter
 date: 2026-04-19
-status: in-progress
+status: implemented
 progress: 70
 priority: high
 estimated_hours: 40

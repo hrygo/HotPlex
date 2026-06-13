@@ -6,7 +6,7 @@ tags:
   - eventstore
   - performance
 date: 2026-05-04
-status: proposed
+status: implemented
 priority: high
 estimated_hours: 8
 ---

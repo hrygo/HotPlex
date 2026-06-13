@@ -3,8 +3,8 @@ type: spec
 tags:
   - project/HotPlex
 date: 2026-05-12
-status: draft
-progress: 0
+status: implemented
+progress: 100
 ---
 
 # Gateway 自重启能力方案 (AEP-006)
