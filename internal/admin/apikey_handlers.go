@@ -3,8 +3,10 @@ package admin
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +17,9 @@ import (
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 )
+
+// ErrUserIDExists indicates a duplicate user_id when creating/updating an API key user.
+var ErrUserIDExists = errors.New("admin: user_id already exists")
 
 // maskAPIKey returns a masked version showing only first 8 and last 4 chars.
 func maskAPIKey(key string) string {
@@ -112,10 +117,37 @@ func (b *apiKeyStoreBase) delete(ctx context.Context, id int64) error {
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
-			return fmt.Errorf("admin: api key user ID %d not found", id)
+			return fmt.Errorf("admin: api key user ID %d not found: %w", id, sql.ErrNoRows)
 		}
 		return nil
 	})
+}
+
+// getByUserID returns the API key user with the given user_id, or nil if none.
+func (b *apiKeyStoreBase) getByUserID(ctx context.Context, userID string) (*APIKeyUser, error) {
+	query := b.dialect.Rebind("SELECT id, api_key, user_id, description, created_at, updated_at FROM api_key_users WHERE user_id = ?")
+	var u APIKeyUser
+	err := b.db.QueryRowContext(ctx, query, userID).Scan(&u.ID, &u.APIKey, &u.UserID, &u.Description, &u.CreatedAt, &u.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("admin: get api key user by user_id: %w", err)
+	}
+	return &u, nil
+}
+
+// requireUniqueUserID checks that no other API key user (excluding excludeID) uses the given userID.
+// Returns ErrUserIDExists on conflict, or any DB error from the lookup.
+func (a *AdminAPI) requireUniqueUserID(ctx context.Context, userID string, excludeID int64) error {
+	existing, err := a.akStore.getByUserID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("admin: check unique user_id: %w", err)
+	}
+	if existing != nil && existing.ID != excludeID {
+		return fmt.Errorf("admin: check unique user_id: %w", ErrUserIDExists)
+	}
+	return nil
 }
 
 // apiKeyUserStore implements APIKeyUserStorer backed by SQLite.
@@ -128,6 +160,7 @@ type apiKeyUserStore struct {
 type APIKeyUserStorer interface {
 	list(ctx context.Context) ([]APIKeyUser, error)
 	get(ctx context.Context, id int64) (*APIKeyUser, error)
+	getByUserID(ctx context.Context, userID string) (*APIKeyUser, error)
 	create(ctx context.Context, u *APIKeyUser) error
 	update(ctx context.Context, id int64, u *APIKeyUser) error
 	delete(ctx context.Context, id int64) error
@@ -173,6 +206,9 @@ func (s *apiKeyUserStore) create(ctx context.Context, u *APIKeyUser) error {
 			"INSERT INTO api_key_users (api_key, user_id, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
 			u.APIKey, u.UserID, u.Description, now, now)
 		if err != nil {
+			if s.dialect.IsUniqueViolation(err) {
+				return fmt.Errorf("admin: create api key user: %w", ErrUserIDExists)
+			}
 			return fmt.Errorf("admin: create api key user: %w", err)
 		}
 		id, err := res.LastInsertId()
@@ -193,11 +229,14 @@ func (s *apiKeyUserStore) update(ctx context.Context, id int64, u *APIKeyUser) e
 			"UPDATE api_key_users SET user_id = ?, description = ?, updated_at = ? WHERE id = ?",
 			u.UserID, u.Description, now, id)
 		if err != nil {
+			if s.dialect.IsUniqueViolation(err) {
+				return fmt.Errorf("admin: update api key user: %w", ErrUserIDExists)
+			}
 			return fmt.Errorf("admin: update api key user: %w", err)
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
-			return fmt.Errorf("admin: api key user ID %d not found", id)
+			return fmt.Errorf("admin: api key user ID %d not found: %w", id, sql.ErrNoRows)
 		}
 		return nil
 	})
@@ -246,6 +285,7 @@ func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) 
 // @Success      201   {object}  APIKeyUser
 // @Failure      400   {object}  ErrorResponse  "Invalid JSON or validation failed"
 // @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      409   {object}  ErrorResponse  "user_id already exists"
 // @Failure      500   {object}  ErrorResponse  "Create failed"
 // @Router       /admin/api-keys [post]
 func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request) {
@@ -266,9 +306,12 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 		http.Error(w, "description too long (max 512 chars)", http.StatusBadRequest)
 		return
 	}
+	if err := a.requireUniqueUserID(r.Context(), u.UserID, 0); err != nil {
+		respondStoreError(w, a.log, "admin: check unique user_id", err)
+		return
+	}
 	if err := a.akStore.create(r.Context(), &u); err != nil {
-		a.log.Error("admin: create api key user", "error", err)
-		http.Error(w, "create failed", http.StatusInternalServerError)
+		respondStoreError(w, a.log, "admin: create api key user", err)
 		return
 	}
 	if inv := a.akStore.Invalidator(); inv != nil {
@@ -293,6 +336,7 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 // @Failure      400  {object}  ErrorResponse  "Invalid ID"
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
 // @Failure      404  {object}  ErrorResponse  "Not found"
+// @Failure      500  {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [get]
 func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
@@ -307,7 +351,9 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := a.akStore.get(r.Context(), id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		// Distinguish not-found (404) from transient DB failures (500);
+		// get() wraps sql.ErrNoRows via %w so respondStoreError can detect it.
+		respondStoreError(w, a.log, "admin: get api key user", err)
 		return
 	}
 	u.APIKey = maskAPIKey(u.APIKey)
@@ -328,6 +374,8 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 // @Failure      400   {object}  ErrorResponse  "Invalid JSON or validation failed"
 // @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
 // @Failure      404   {object}  ErrorResponse  "Not found"
+// @Failure      409   {object}  ErrorResponse  "user_id already exists"
+// @Failure      500   {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [patch]
 func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
@@ -356,9 +404,15 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 
 	oldUser, err := a.akStore.get(r.Context(), id)
 	if err != nil {
-		a.log.Error("admin: get api key user for update", "error", err)
-		http.Error(w, "api key user not found", http.StatusNotFound)
+		// Distinguish not-found (404) from transient DB failures (500).
+		respondStoreError(w, a.log, "admin: get api key user for update", err)
 		return
+	}
+	if u.UserID != oldUser.UserID {
+		if err := a.requireUniqueUserID(r.Context(), u.UserID, id); err != nil {
+			respondStoreError(w, a.log, "admin: check unique user_id", err)
+			return
+		}
 	}
 
 	if err := a.akStore.update(r.Context(), id, &u); err != nil {
@@ -382,6 +436,7 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 // @Failure      400  {object}  ErrorResponse  "Invalid ID"
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
 // @Failure      404  {object}  ErrorResponse  "Not found"
+// @Failure      500  {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [delete]
 func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
@@ -397,8 +452,8 @@ func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request
 
 	u, err := a.akStore.get(r.Context(), id)
 	if err != nil {
-		a.log.Error("admin: get api key user for delete", "error", err)
-		http.Error(w, "api key user not found", http.StatusNotFound)
+		// Distinguish not-found (404) from transient DB failures (500).
+		respondStoreError(w, a.log, "admin: get api key user for delete", err)
 		return
 	}
 
