@@ -621,68 +621,97 @@ func buildTTSSynthesizer(ttsCfg config.TTSConfig, log *slog.Logger) tts.Synthesi
 	return shared
 }
 
+// gateSpec holds the 6 access-control fields at their resolved base value
+// (platform-level). It is the starting point for mergeGate.
+type gateSpec struct {
+	dm, group string
+	mention   bool
+	from      []string
+	dmFrom    []string
+	groupFrom []string
+}
+
+// gateOverride holds per-bot access-control overrides. Zero/nil values mean
+// "inherit from base".
+type gateOverride struct {
+	dm, group string
+	mention   *bool // nil = inherit
+	from      []string
+	dmFrom    []string
+	groupFrom []string
+}
+
+// mergeGate applies non-zero/non-nil bot overrides over the platform-level base,
+// then constructs a Gate. Shared by Slack and Feishu gate resolution so the
+// override precedence rules live in one place.
+func mergeGate(base gateSpec, bot gateOverride) *messaging.Gate {
+	if bot.dm != "" {
+		base.dm = bot.dm
+	}
+	if bot.group != "" {
+		base.group = bot.group
+	}
+	if bot.mention != nil {
+		base.mention = *bot.mention
+	}
+	if len(bot.from) > 0 {
+		base.from = bot.from
+	}
+	if len(bot.dmFrom) > 0 {
+		base.dmFrom = bot.dmFrom
+	}
+	if len(bot.groupFrom) > 0 {
+		base.groupFrom = bot.groupFrom
+	}
+	return messaging.NewGate(base.dm, base.group, base.mention, base.from, base.dmFrom, base.groupFrom)
+}
+
 // resolveSlackGate builds a Gate for a Slack bot, using per-bot fields
 // with platform-level fallback for any unset values.
 func resolveSlackGate(platformCfg config.SlackConfig, botCfg *config.SlackBotConfig) *messaging.Gate {
-	dm := platformCfg.DMPolicy
-	group := platformCfg.GroupPolicy
-	mention := platformCfg.RequireMention
-	from := platformCfg.AllowFrom
-	dmFrom := platformCfg.AllowDMFrom
-	groupFrom := platformCfg.AllowGroupFrom
-
+	base := gateSpec{
+		dm:        platformCfg.DMPolicy,
+		group:     platformCfg.GroupPolicy,
+		mention:   platformCfg.RequireMention,
+		from:      platformCfg.AllowFrom,
+		dmFrom:    platformCfg.AllowDMFrom,
+		groupFrom: platformCfg.AllowGroupFrom,
+	}
+	var bot gateOverride
 	if botCfg != nil {
-		if botCfg.DMPolicy != "" {
-			dm = botCfg.DMPolicy
-		}
-		if botCfg.GroupPolicy != "" {
-			group = botCfg.GroupPolicy
-		}
-		if botCfg.RequireMention != nil {
-			mention = *botCfg.RequireMention
-		}
-		if len(botCfg.AllowFrom) > 0 {
-			from = botCfg.AllowFrom
-		}
-		if len(botCfg.AllowDMFrom) > 0 {
-			dmFrom = botCfg.AllowDMFrom
-		}
-		if len(botCfg.AllowGroupFrom) > 0 {
-			groupFrom = botCfg.AllowGroupFrom
+		bot = gateOverride{
+			dm:        botCfg.DMPolicy,
+			group:     botCfg.GroupPolicy,
+			mention:   botCfg.RequireMention,
+			from:      botCfg.AllowFrom,
+			dmFrom:    botCfg.AllowDMFrom,
+			groupFrom: botCfg.AllowGroupFrom,
 		}
 	}
-	return messaging.NewGate(dm, group, mention, from, dmFrom, groupFrom)
+	return mergeGate(base, bot)
 }
 
 // resolveFeishuGate builds a Gate for a Feishu bot, using per-bot fields
 // with platform-level fallback for any unset values.
 func resolveFeishuGate(platformCfg config.FeishuConfig, botCfg *config.FeishuBotConfig) *messaging.Gate {
-	dm := platformCfg.DMPolicy
-	group := platformCfg.GroupPolicy
-	mention := platformCfg.RequireMention
-	from := platformCfg.AllowFrom
-	dmFrom := platformCfg.AllowDMFrom
-	groupFrom := platformCfg.AllowGroupFrom
-
+	base := gateSpec{
+		dm:        platformCfg.DMPolicy,
+		group:     platformCfg.GroupPolicy,
+		mention:   platformCfg.RequireMention,
+		from:      platformCfg.AllowFrom,
+		dmFrom:    platformCfg.AllowDMFrom,
+		groupFrom: platformCfg.AllowGroupFrom,
+	}
+	var bot gateOverride
 	if botCfg != nil {
-		if botCfg.DMPolicy != "" {
-			dm = botCfg.DMPolicy
-		}
-		if botCfg.GroupPolicy != "" {
-			group = botCfg.GroupPolicy
-		}
-		if botCfg.RequireMention != nil {
-			mention = *botCfg.RequireMention
-		}
-		if len(botCfg.AllowFrom) > 0 {
-			from = botCfg.AllowFrom
-		}
-		if len(botCfg.AllowDMFrom) > 0 {
-			dmFrom = botCfg.AllowDMFrom
-		}
-		if len(botCfg.AllowGroupFrom) > 0 {
-			groupFrom = botCfg.AllowGroupFrom
+		bot = gateOverride{
+			dm:        botCfg.DMPolicy,
+			group:     botCfg.GroupPolicy,
+			mention:   botCfg.RequireMention,
+			from:      botCfg.AllowFrom,
+			dmFrom:    botCfg.AllowDMFrom,
+			groupFrom: botCfg.AllowGroupFrom,
 		}
 	}
-	return messaging.NewGate(dm, group, mention, from, dmFrom, groupFrom)
+	return mergeGate(base, bot)
 }
