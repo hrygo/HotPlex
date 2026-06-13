@@ -8,8 +8,8 @@ tags:
   - area/gateway
   - area/session
 date: 2026-05-30
-status: draft
-progress: 0
+status: implemented
+progress: 100
 estimated_hours: 4
 ---
 

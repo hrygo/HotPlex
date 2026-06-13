@@ -5,13 +5,13 @@ tags:
   - area/gateway
   - area/session
 date: 2026-06-05
-status: draft
-progress: 0
+status: implemented
+progress: 100
 ---
 # 首轮 Turn 历史记录丢失修复 (First Turn History Missing Fix)
 
 > **Issue**: #658
-> **Status**: Draft
+> **Status**: Implemented
 > **Date**: 2026-06-05
 
 ## 问题描述
@@ -33,7 +33,9 @@ progress: 0
 
 **竞态窗口**：如果 `CaptureInbound` 在 `forwardEvents` 完成初始化之前读取 `acc.Generation`，user turn 以 `Generation=0` 写入。后续 `forwardEvents` 将 `acc.Generation` 设为 `1`，assistant turn 以 `Generation=1` 写入。
 
-**后果**：`QueryTurns` 使用 `resolveGeneration` 查询 `MAX(generation)` = 1，然后 `WHERE generation = 1` 过滤，导致 `Generation=0` 的 user turn 不可见。
+**后果**：`QueryTurns` 查询 `MAX(generation)` = 1，然后 `WHERE generation = 1` 过滤，导致 `Generation=0` 的 user turn 不可见。
+
+> **注**：PR #727 将 `resolveGeneration` 两步查询合并为 CTE（`WITH latest_gen AS (...)` 单条 SQL），消除了竞态窗口中 generation 查询与过滤之间的两次 DB 往返。竞态根因（`acc.Generation` 初始化不同步）仍存在，但 CTE 方案确保了 `QueryTurns` 的原子性和正确性。
 
 ### 竞态时序
 
@@ -181,4 +183,5 @@ SELECT id, generation, role FROM turns WHERE session_id = ? ORDER BY id ASC LIMI
 - **相关 Spec**：`docs/specs/Turns-Materialized-Table-Spec.md`
 - **相关代码**：`internal/gateway/bridge_forward.go:559-580`（CaptureInbound）
 - **相关代码**：`internal/gateway/bridge_forward.go:86-98`（forwardEvents Generation 初始化）
-- **相关代码**：`internal/eventstore/store.go:444-457`（QueryTurns generation 过滤）
+- **相关代码**：`internal/eventstore/store.go`（QueryTurns CTE 合并 generation 解析，PR #727）
+- **相关代码**：`internal/eventstore/sql/queries/turns.query_with_gen.sql`（CTE SQL 模板）

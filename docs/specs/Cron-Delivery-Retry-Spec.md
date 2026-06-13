@@ -2,7 +2,7 @@
 
 **Issue**: cron delivery retry (follow-up to #574 audit)
 **Priority**: P2
-**Status**: Draft
+**Status**: Implemented
 **Author**: Claude Code Audit
 **Date**: 2026-05-30
 

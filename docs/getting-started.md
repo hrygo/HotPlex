@@ -20,30 +20,50 @@ HotPlex 是 AI Coding Agent 统一接入层，让你通过 Slack、飞书或 Web
 
 ### 1. 安装
 
-从 [GitHub Releases](https://github.com/hrygo/hotplex/releases/latest) 获取对应平台的单文件二进制程序。你可以直接点击下载，或使用命令行一键获取：
+从 [GitHub Releases](https://github.com/hrygo/hotplex/releases/latest) 下载对应平台的归档文件并解压。
+解压后二进制文件名为 `hotplex-{os}-{arch}`（如 `hotplex-darwin-arm64`），建议重命名：
 
 **macOS (Apple Silicon)**
 ```bash
-curl -L -o hotplex https://github.com/hrygo/hotplex/releases/latest/download/hotplex-darwin-arm64
+curl -L https://github.com/hrygo/hotplex/releases/latest/download/hotplex-darwin-arm64.tar.gz | tar xz
+chmod +x hotplex-darwin-arm64 && mv hotplex-darwin-arm64 hotplex
+```
+
+**macOS (Intel)**
+```bash
+curl -L https://github.com/hrygo/hotplex/releases/latest/download/hotplex-darwin-amd64.tar.gz | tar xz
+chmod +x hotplex-darwin-amd64 && mv hotplex-darwin-amd64 hotplex
 ```
 
 **Linux (AMD64)**
 ```bash
-curl -L -o hotplex https://github.com/hrygo/hotplex/releases/latest/download/hotplex-linux-amd64
+curl -L https://github.com/hrygo/hotplex/releases/latest/download/hotplex-linux-amd64.tar.gz | tar xz
+chmod +x hotplex-linux-amd64 && mv hotplex-linux-amd64 hotplex
+```
+
+**Linux (ARM64)**
+```bash
+curl -L https://github.com/hrygo/hotplex/releases/latest/download/hotplex-linux-arm64.tar.gz | tar xz
+chmod +x hotplex-linux-arm64 && mv hotplex-linux-arm64 hotplex
 ```
 
 **Windows (AMD64)**
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/hrygo/hotplex/releases/latest/download/hotplex-windows-amd64.exe" -OutFile "hotplex.exe"
+Invoke-WebRequest -Uri "https://github.com/hrygo/hotplex/releases/latest/download/hotplex-windows-amd64.zip" -OutFile "hotplex.zip"
+Expand-Archive -Path hotplex.zip -DestinationPath .
+Rename-Item hotplex-windows-amd64.exe hotplex.exe
 ```
 
-```bash
-chmod +x hotplex   # macOS / Linux 赋予执行权限
+**Windows (ARM64)**
+```powershell
+Invoke-WebRequest -Uri "https://github.com/hrygo/hotplex/releases/latest/download/hotplex-windows-arm64.zip" -OutFile "hotplex.zip"
+Expand-Archive -Path hotplex.zip -DestinationPath .
+Rename-Item hotplex-windows-arm64.exe hotplex.exe
 ```
 
 或从源码构建：`git clone` → `make build`，产物在 `bin/` 目录。
 
-验证：`hotplex version`，应输出版本号（如 `v1.11.0` 或更高版本）。
+验证：`hotplex version`，应输出版本号（如 `v1.28.0` 或更高版本）。
 
 ### 2. 环境配置
 

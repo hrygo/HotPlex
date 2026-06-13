@@ -6,9 +6,9 @@ tags:
   - agent-config
   - system-prompt
 date: 2026-06-11
-status: spec-only
-progress: 0
-out_of_scope: This spec describes BaseInstructions/DeveloperInstructions injection for Codex Worker — not implemented in the current PR (fix/709). Tracked separately. This document is a design reference only; progress will be updated when implementation begins.
+status: implemented
+progress: 100
+out_of_scope: BaseInstructions/DeveloperInstructions injection — implemented via bridge.injectAgentConfig → worker.go buildThreadStartParams → JSON-RPC baseInstructions. DeveloperInstructions reserved for future use.
 estimated_hours: 4
 ---
 

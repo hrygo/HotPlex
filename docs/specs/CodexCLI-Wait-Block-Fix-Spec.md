@@ -1,3 +1,8 @@
+---
+type: spec
+status: implemented
+---
+
 # Fix: CodexCLI AppServerWorker.Wait() 永久阻塞
 
 **Issue**: #691

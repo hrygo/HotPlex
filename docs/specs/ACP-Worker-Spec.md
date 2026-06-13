@@ -7,8 +7,8 @@ tags:
   - protocol/acp
   - agent/hermes
 date: 2026-05-29
-status: proposed
-progress: 0
+status: implemented
+progress: 100
 estimated_hours: 24
 supersedes:
   - Worker-ACPX-Spec.md

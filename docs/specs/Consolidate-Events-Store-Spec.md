@@ -6,7 +6,7 @@ tags:
   - eventstore
   - refactor
 date: 2026-05-04
-status: proposed
+status: implemented
 priority: P2
 estimated_hours: 8
 ---
