@@ -142,7 +142,7 @@ docker compose up -d
 - `hotplex-windows-amd64.zip`
 - `hotplex-windows-arm64.zip`
 
-**Binary inside archive:** `hotplex-windows-{arch}.exe``
+**Binary inside archive:** `hotplex-windows-{arch}.exe`
 
 **Default prefix:**
 - Admin: `$env:ProgramFiles\HotPlex`
