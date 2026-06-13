@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/hrygo/hotplex/internal/cli"
-	"github.com/hrygo/hotplex/internal/config"
 )
 
 type ttsEnvironmentChecker struct{}
@@ -104,11 +103,8 @@ func (d ttsDeps) any() bool {
 
 // ttsRequirements determines which TTS dependencies are needed based on config.
 func ttsRequirements() ttsDeps {
-	if configPath == "" {
-		return ttsDeps{}
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
+	cfg, err := loadConfig()
+	if err != nil || cfg == nil {
 		return ttsDeps{}
 	}
 

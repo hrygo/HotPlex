@@ -109,7 +109,8 @@ type multiBotConfigChecker struct{}
 func (c multiBotConfigChecker) Name() string     { return "messaging.multi_bot_config" }
 func (c multiBotConfigChecker) Category() string { return "messaging" }
 func (c multiBotConfigChecker) Check(ctx context.Context) cli.Diagnostic {
-	if configPath == "" {
+	cfg, err := loadConfig()
+	if cfg == nil && err == nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
@@ -117,8 +118,6 @@ func (c multiBotConfigChecker) Check(ctx context.Context) cli.Diagnostic {
 			Message:  "Config path not set, skipping multi-bot check",
 		}
 	}
-
-	cfg, err := config.Load(configPath)
 	if err != nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),

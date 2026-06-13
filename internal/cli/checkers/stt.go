@@ -87,11 +87,8 @@ func (c sttEnvironmentChecker) Check(ctx context.Context) cli.Diagnostic {
 
 // sttRequirements determines which STT dependencies are needed based on config.
 func sttRequirements() (needsPython, needsFFmpeg bool) {
-	if configPath == "" {
-		return false, false
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
+	cfg, err := loadConfig()
+	if err != nil || cfg == nil {
 		return false, false
 	}
 	if cfg.Messaging.Slack.Enabled {
