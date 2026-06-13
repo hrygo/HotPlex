@@ -48,7 +48,8 @@ func queryBySession(ctx context.Context, qe queryExecer, q map[string]string, se
 
 	events, err := scanEvents(rows)
 	if err != nil {
-		return nil, fmt.Errorf("eventstore: scan events: %w", err)
+		// scanEvents already wraps its driver error as "eventstore: scan: ...".
+		return nil, err
 	}
 
 	hasMore := len(events) > limit

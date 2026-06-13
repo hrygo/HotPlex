@@ -201,7 +201,7 @@ configs/   - 配置文件
 | LLM 重试        | `internal/gateway/llm_retry.go`  | 可重试错误检测                                             |
 | Worker 启动命令 | `configs/config.yaml`            | `claude_code.command` / `opencode_server.command` / `codex_cli.command` / `acp.command` |
 | 路由注册        | `cmd/hotplex/routes.go`          | HTTP 路由                                                  |
-| 多 bot 配置     | `internal/config/config.go`      | `SlackBotConfig`/`FeishuBotConfig`、normalize、propagation |
+| 多 bot 配置     | `internal/config/config_types.go` | `SlackBotConfig`/`FeishuBotConfig`（normalize/propagation 见 `config_defaults.go`） |
 | Bot 状态 API    | `internal/admin/bot_handlers.go` | `BotListerProvider` + HTTP handlers                        |
 
 ### 跨平台兼容
@@ -262,12 +262,12 @@ gh api repos/hrygo/hotplex/pulls/{N}/reviews --jq 'max_by(.id) | .body'
 ### 配置陷阱（高发反直觉点）
 
 - **`.env` 来源**: `make dev` / `scripts/dev.sh:16-18` `source` 的是 **repo-local `<project>/.env`**，**不是** `~/.hotplex/.env`。后者是运行实例的 home 配置（PID/db/agent-configs 父目录），**不被 dev.sh 加载**。如要调整 dev 行为，编辑 `<project>/.env`；`~/.hotplex/.env` 仅供生产/服务安装路径使用。
-- **Worker 解析 5 级 fallback**（`internal/config/config.go:propagatePlatform` + `:937-940`）：
+- **Worker 解析 5 级 fallback**（`internal/config/config_defaults.go:propagatePlatform` + `:210-211`）：
   1. `bots[].worker_type`（per-bot YAML，单 bot 模式下不可用）
   2. `feishu.worker_type`（YAML 平台级，dev → `configs/config-dev.yaml:47`，base → `configs/config.yaml:318`）
   3. `HOTPLEX_MESSAGING_FEISHU_WORKER_TYPE`（env 平台级，`.env:74`，env 覆盖 YAML）
   4. `messaging.worker_type`（YAML 共享默认，`configs/config.yaml:276`）
-  5. 编译默认 `claude_code`（`config.go:855`）
+  5. 编译默认 `claude_code`（`config_defaults.go:127`）
 - **`inject_exclude` 边界**（`internal/agentconfig/loader.go:106`）：5 个可排除文件 `SOUL.md` / `AGENTS.md` / `SKILLS.md` / `USER.md` / `MEMORY.md`；`META-COGNITION.md` 是 `go:embed` **强制注入首位，无法被排除**（Worker 身份边界）。3 级 fallback：bot > platform > global；nil 继承父级，`[]string{}` 显式清空。
 - **dev YAML vs home YAML**: `configs/config-dev.yaml` 通过 `inherits: config.yaml` 覆盖基础，是 dev-only 覆盖层；`~/.hotplex/config.yaml` 是运行实例配置（影响服务安装路径）。两者**独立**，不互通。
 
