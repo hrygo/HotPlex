@@ -4,11 +4,11 @@ tags:
   - project/HotPlex
 date: 2026-04-22
 status: implemented
-progress: 20
+progress: 100
 ---
 # HotPlex 配置热重载方案 (AEP-005)
 
-**状态**：草案 (Draft)  
+**状态**：Implemented  
 **所有者**：Antigravity  
 **更新日期**：2026-04-22
 

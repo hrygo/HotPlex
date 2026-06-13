@@ -9,7 +9,6 @@ tags:
   - architecture
 date: 2026-05-26
 status: implemented
-status: proposed
 priority: P1
 estimated_hours: 60
 ---
@@ -18,7 +17,7 @@ estimated_hours: 60
 
 > **版本**: v1.0  
 > **日期**: 2026-05-26  
-> **状态**: Proposed  
+> **状态**: Implemented
 > **Issue**: [#487](https://github.com/hrygo/hotplex/issues/487)
 > **概述**: 在保持现有 SQLite 生产级支持的前提下，新增 PostgreSQL 作为可选数据库后端。通过 `dbutil.Dialect` 抽象层隔离 SQL 方言差异，零侵入改造现有 Store 接口。
 

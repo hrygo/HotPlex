@@ -8,7 +8,7 @@ tags:
   - agent/hermes
 date: 2026-05-29
 status: implemented
-progress: 0
+progress: 100
 estimated_hours: 24
 supersedes:
   - Worker-ACPX-Spec.md

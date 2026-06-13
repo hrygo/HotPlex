@@ -6,7 +6,7 @@ tags:
   - cardkit-v2
 date: 2026-05-08
 status: implemented
-progress: 0
+progress: 100
 ---
 
 # 飞书卡片 Header 增强规格书

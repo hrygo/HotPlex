@@ -9,8 +9,7 @@ tags:
   - area/session
 date: 2026-05-30
 status: implemented
-status: draft
-progress: 0
+progress: 100
 estimated_hours: 4
 ---
 

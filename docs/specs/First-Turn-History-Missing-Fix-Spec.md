@@ -11,7 +11,7 @@ progress: 100
 # 首轮 Turn 历史记录丢失修复 (First Turn History Missing Fix)
 
 > **Issue**: #658
-> **Status**: Draft
+> **Status**: Implemented
 > **Date**: 2026-06-05
 
 ## 问题描述
