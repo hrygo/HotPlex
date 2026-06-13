@@ -336,6 +336,7 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 // @Failure      400  {object}  ErrorResponse  "Invalid ID"
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
 // @Failure      404  {object}  ErrorResponse  "Not found"
+// @Failure      500  {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [get]
 func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
@@ -350,7 +351,9 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := a.akStore.get(r.Context(), id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		// Distinguish not-found (404) from transient DB failures (500);
+		// get() wraps sql.ErrNoRows via %w so respondStoreError can detect it.
+		respondStoreError(w, a.log, "admin: get api key user", err)
 		return
 	}
 	u.APIKey = maskAPIKey(u.APIKey)
@@ -372,6 +375,7 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 // @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:write"
 // @Failure      404   {object}  ErrorResponse  "Not found"
 // @Failure      409   {object}  ErrorResponse  "user_id already exists"
+// @Failure      500   {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [patch]
 func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
@@ -400,8 +404,8 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 
 	oldUser, err := a.akStore.get(r.Context(), id)
 	if err != nil {
-		a.log.Error("admin: get api key user for update", "error", err)
-		http.Error(w, "api key user not found", http.StatusNotFound)
+		// Distinguish not-found (404) from transient DB failures (500).
+		respondStoreError(w, a.log, "admin: get api key user for update", err)
 		return
 	}
 	if u.UserID != oldUser.UserID {
@@ -432,6 +436,7 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 // @Failure      400  {object}  ErrorResponse  "Invalid ID"
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
 // @Failure      404  {object}  ErrorResponse  "Not found"
+// @Failure      500  {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [delete]
 func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request) {
 	if a.akStore == nil {
@@ -447,8 +452,8 @@ func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request
 
 	u, err := a.akStore.get(r.Context(), id)
 	if err != nil {
-		a.log.Error("admin: get api key user for delete", "error", err)
-		http.Error(w, "api key user not found", http.StatusNotFound)
+		// Distinguish not-found (404) from transient DB failures (500).
+		respondStoreError(w, a.log, "admin: get api key user for delete", err)
 		return
 	}
 

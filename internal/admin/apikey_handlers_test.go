@@ -247,3 +247,35 @@ func TestHandleAPIKeyUserDelete_SyncsKeyValidator(t *testing.T) {
 	require.True(t, strings.HasPrefix(kv.removed[0], "hpk_"), "RemoveKey should receive the full key")
 	require.Empty(t, kv.added)
 }
+
+// TestHandleAPIKeyUser_NotFound locks in the not-found path after the get()
+// error-handling refactor: a missing record surfaces sql.ErrNoRows through %w
+// and respondStoreError must map it to 404 (not 500).
+func TestHandleAPIKeyUser_NotFound(t *testing.T) {
+	api, _ := setupAPIKeyStore(t) // empty table → every lookup misses
+
+	// GET non-existent → 404
+	r := httptest.NewRequest("GET", "/admin/api-keys/{id}", nil)
+	r.SetPathValue("id", "9999")
+	r = withScope(r, ScopeAdminRead)
+	w := httptest.NewRecorder()
+	api.HandleAPIKeyUserGet(w, r)
+	require.Equal(t, http.StatusNotFound, w.Code)
+
+	// UPDATE non-existent → 404 (valid body so validation passes; failure is at get())
+	body := `{"user_id":"ghost","description":""}`
+	r = httptest.NewRequest("PATCH", "/admin/api-keys/{id}", strings.NewReader(body))
+	r.SetPathValue("id", "9999")
+	r = withScope(r, ScopeAdminWrite)
+	w = httptest.NewRecorder()
+	api.HandleAPIKeyUserUpdate(w, r)
+	require.Equal(t, http.StatusNotFound, w.Code)
+
+	// DELETE non-existent → 404
+	r = httptest.NewRequest("DELETE", "/admin/api-keys/{id}", nil)
+	r.SetPathValue("id", "9999")
+	r = withScope(r, ScopeAdminWrite)
+	w = httptest.NewRecorder()
+	api.HandleAPIKeyUserDelete(w, r)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
