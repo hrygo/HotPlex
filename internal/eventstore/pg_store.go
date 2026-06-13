@@ -80,68 +80,7 @@ func (s *pgStore) BeginTx(ctx context.Context) (EventTx, error) {
 func (s *pgStore) QueryBySession(ctx context.Context, sessionID string, cursor int64, dir CursorDirection, limit int) (*EventPage, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
-	if limit <= 0 {
-		limit = 200
-	}
-	if limit > 1000 {
-		limit = 1000
-	}
-
-	// Fetch one extra to detect has_more.
-	fetchLimit := limit + 1
-
-	var rows *sql.Rows
-	var err error
-
-	switch dir {
-	case CursorAfter:
-		rows, err = s.db.QueryContext(ctx, s.sql["query_after"], sessionID, cursor, fetchLimit)
-	case CursorBefore:
-		rows, err = s.db.QueryContext(ctx, s.sql["query_before"], sessionID, cursor, fetchLimit)
-	default: // CursorLatest
-		rows, err = s.db.QueryContext(ctx, s.sql["query_latest"], sessionID, fetchLimit)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("eventstore: query: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	events, err := scanEvents(rows)
-	if err != nil {
-		return nil, fmt.Errorf("eventstore: scan events: %w", err)
-	}
-
-	hasMore := len(events) > limit
-	if hasMore {
-		events = events[:limit]
-	}
-
-	// For DESC queries (CursorLatest, CursorBefore), reverse to ASC order.
-	if dir == CursorLatest || dir == CursorBefore {
-		slices.Reverse(events)
-	}
-
-	page := &EventPage{
-		Events: events,
-	}
-
-	if len(events) > 0 {
-		page.OldestSeq = events[0].Seq
-		page.NewestSeq = events[len(events)-1].Seq
-	}
-
-	if len(events) > 0 {
-		switch dir {
-		case CursorLatest, CursorBefore:
-			page.HasOlder = hasMore
-		default:
-			var exists int
-			err := s.db.QueryRowContext(ctx, s.sql["has_older"], sessionID, page.OldestSeq).Scan(&exists)
-			page.HasOlder = err == nil && exists == 1
-		}
-	}
-
-	return page, nil
+	return queryBySession(ctx, s.db, s.sql, sessionID, cursor, dir, limit)
 }
 
 func (s *pgStore) DeleteBySession(ctx context.Context, sessionID string) error {
@@ -250,43 +189,10 @@ func (s *pgStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnSt
 	}
 	defer func() { _ = rows.Close() }()
 
-	stats := &TurnStats{SessionID: sessionID}
-	for rows.Next() {
-		var ts TurnStatItem
-		var gen int64
-		var success sql.NullBool
-		var toolsJSON sql.NullString
-		var toolCount sql.NullInt64
-		if err := rows.Scan(&gen, &ts.TurnNum, &ts.Seq, &success, &ts.Source,
-			&toolsJSON, &toolCount,
-			&ts.TokensInput, &ts.TokensCacheWrite, &ts.TokensCacheRead, &ts.TokensIn,
-			&ts.TokensOut, &ts.DurationMs, &ts.CostUSD, &ts.Model, &ts.CreatedAt); err != nil {
-			s.log.Warn("eventstore: scan turn stats row", "session_id", sessionID, "error", err)
-			continue
-		}
-		if stats.Generation == 0 {
-			stats.Generation = gen
-		}
-		ts.Success = success.Valid && success.Bool
-		stats.TotalTurns++
-		if ts.Success {
-			stats.SuccessTurns++
-		} else {
-			stats.FailedTurns++
-		}
-		stats.TotalDurMs += ts.DurationMs
-		stats.TotalCostUSD += ts.CostUSD
-		stats.TotalTokIn += ts.TokensIn
-		stats.TotalTokInput += ts.TokensInput
-		stats.TotalTokCacheWrite += ts.TokensCacheWrite
-		stats.TotalTokCacheRead += ts.TokensCacheRead
-		stats.TotalTokOut += ts.TokensOut
-		stats.Turns = append(stats.Turns, ts)
-	}
-	if stats.TotalTurns == 0 {
-		return nil, ErrNotFound
-	}
-	return stats, rows.Err()
+	return collectTurnStats(rows, sessionID, func() (any, func() bool) {
+		var nv sql.NullBool
+		return &nv, func() bool { return nv.Valid && nv.Bool }
+	}, s.log)
 }
 
 func (s *pgStore) LatestGeneration(ctx context.Context, sessionID string) (int64, error) {
@@ -334,11 +240,7 @@ func scanTurnsPG(rows *sql.Rows) ([]*TurnRecord, error) {
 		var r TurnRecord
 		var success sql.NullBool
 		var toolsJSON sql.NullString
-		if err := rows.Scan(&r.ID, &r.SessionID, &r.Generation, &r.TurnNum, &r.Seq, &r.Role, &r.Content,
-			&r.Platform, &r.UserID, &r.Model, &success, &r.Source,
-			&toolsJSON, &r.ToolCount,
-			&r.TokensInput, &r.TokensCacheWrite, &r.TokensCacheRead, &r.TokensIn,
-			&r.TokensOut, &r.DurationMs, &r.CostUSD, &r.CreatedAt); err != nil {
+		if err := rows.Scan(turnScanDest(&r, &success, &toolsJSON)...); err != nil {
 			return nil, fmt.Errorf("eventstore: scan turn: %w", err)
 		}
 		if success.Valid {
