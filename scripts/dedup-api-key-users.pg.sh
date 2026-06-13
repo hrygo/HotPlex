@@ -31,13 +31,17 @@ if [[ "${2:-}" == "--dry-run" ]]; then
 	DRY_RUN=true
 fi
 
-PSQL="psql \"$PG_URI\" -t -A"
+# Array form avoids re-evaluating $PG_URI via eval (passwords with shell
+# metacharacters stay literal). ON_ERROR_STOP=1 makes SQL-level errors
+# (missing table, permission denied, syntax) set a non-zero exit status, so
+# they abort below instead of being silently treated as "no duplicates".
+PSQL=(psql "$PG_URI" -t -A -v ON_ERROR_STOP=1)
 
-# psql_query runs a statement via psql and propagates psql's exit status and
-# stderr. Do NOT redirect stderr away: a connection/auth failure must surface
-# rather than be misread as an empty (no-duplicates) result.
+# psql_query runs a statement via psql and propagates its exit status and
+# stderr. Do NOT redirect stderr away: any failure must surface rather than be
+# misread as an empty (no-duplicates) result.
 psql_query() {
-	eval "$PSQL" -c "$1"
+	"${PSQL[@]}" -c "$1"
 }
 
 echo "=== Checking for duplicate user_id in api_key_users ==="

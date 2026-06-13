@@ -36,13 +36,15 @@ if [[ ! -f "$DB" ]]; then
 	exit 1
 fi
 
-SQLITE="sqlite3 \"$DB\""
+# Array form avoids re-evaluating $DB via eval (paths with shell metacharacters
+# stay literal).
+SQLITE=(sqlite3 "$DB")
 
 # sqlite_query runs a statement via sqlite3 and propagates its exit status and
 # stderr. Do NOT redirect stderr away: a failure must surface rather than be
 # misread as an empty (no-duplicates) result.
 sqlite_query() {
-	eval "$SQLITE" "$1"
+	"${SQLITE[@]}" "$1"
 }
 
 echo "=== Checking for duplicate user_id in api_key_users ==="
