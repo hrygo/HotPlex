@@ -212,13 +212,13 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 | PATCH | `/admin/api-keys/{id}` | `admin:write` | 更新映射 |
 | DELETE | `/admin/api-keys/{id}` | `admin:write` | 删除映射 |
 
-**POST /admin/api-keys** — 创建 API Key → UserID 映射。JSON body 含 `user_id`（必填，最长 128 字符）和 `description`（可选，最长 512 字符）。API Key 由系统自动生成（32 字节随机 hex）。返回 `201 Created`；若 `user_id` 已存在则返回 `409 Conflict`。
+**POST /admin/api-keys** — 创建 API Key → UserID 映射。JSON body 含 `user_id`（必填，最长 128 字符）和 `description`（可选，最长 512 字符）。API Key 由系统自动生成（24 字节随机 hex）。返回 `201 Created`；若 `user_id` 已存在则返回 `409 Conflict`。
 
 **GET /admin/api-keys** — 返回所有映射列表，`api_key` 字段自动脱敏（仅显示前 8 + 后 4 位）。
 
-**PATCH /admin/api-keys/{id}`** — 更新指定映射的 `user_id` 和 `description`。若新 `user_id` 与其他映射冲突则返回 `409 Conflict`。
+**PATCH /admin/api-keys/{id}** — 更新指定映射的 `user_id` 和 `description`。若新 `user_id` 与其他映射冲突则返回 `409 Conflict`。
 
-**DELETE /admin/api-keys/{id}`** — 物理删除映射，同时清除缓存的 resolver 条目。
+**DELETE /admin/api-keys/{id}** — 物理删除映射，同时清除缓存的 resolver 条目。
 
 ## Gateway API 端点
 
