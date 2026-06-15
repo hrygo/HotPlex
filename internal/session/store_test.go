@@ -117,7 +117,7 @@ func TestSQLiteStore_List_DefaultLimit(t *testing.T) {
 	helperUpsert(t, store, "sess_list2", "user1", events.StateIdle)
 
 	// limit=0 should default to 100
-	sessions, err := store.List(ctx, "", "", 0, 0)
+	sessions, err := store.List(ctx, "", "", "", 0, 0)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(sessions), 2)
 }

@@ -82,7 +82,7 @@ func TestListSessions_IncludesWorkspaceID(t *testing.T) {
 		State: events.StateCreated, WorkDir: "/tmp/q", WorkspaceID: "ws-list",
 		CreatedAt: now, UpdatedAt: now,
 	}))
-	list, err := store.List(ctx, "u2", "", 10, 0)
+	list, err := store.List(ctx, "u2", "", "", 10, 0)
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	require.Equal(t, "ws-list", list[0].WorkspaceID)

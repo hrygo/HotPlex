@@ -85,6 +85,15 @@ func (g *GatewayAPI) authorizeSession(w http.ResponseWriter, r *http.Request) (s
 		http.Error(w, "ownership required", http.StatusForbidden)
 		return "", nil, false
 	}
+	// WebChat 多租户防御深度：会话绑定的 workspace 必须仍属当前用户（spec §9.3）。
+	// 平台/cron 会话 workspace_id 为空，跳过此检查（向后兼容）。
+	if si.WorkspaceID != "" && g.wsStore != nil {
+		ws, wsErr := g.wsStore.GetWorkspaceByID(r.Context(), si.WorkspaceID)
+		if wsErr != nil || ws.OwnerUserID != userID {
+			writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "ownership required")
+			return "", nil, false
+		}
+	}
 	return id, si, true
 }
 
@@ -131,13 +140,23 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sessions, err := g.sm.List(r.Context(), userID, platform, limit, offset)
+	// workspace_id 可选过滤（WebChat 多 workspace，spec §9.3）。归属校验后下推到 SQL。
+	workspaceFilter := r.URL.Query().Get("workspace_id")
+	if workspaceFilter != "" && g.wsStore != nil {
+		ws, wsErr := g.wsStore.GetWorkspaceByID(r.Context(), workspaceFilter)
+		if wsErr != nil || ws.OwnerUserID != userID {
+			writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
+			return
+		}
+	}
+
+	sessions, err := g.sm.List(r.Context(), userID, platform, workspaceFilter, limit, offset)
 	if err != nil {
 		g.log.Error("gateway: list sessions failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		http.Error(w, "failed to list sessions", http.StatusInternalServerError)
 		return
 	}
-	respondJSON(w, map[string]any{"sessions": sessions, "limit": limit, "offset": offset, "platform": platform})
+	respondJSON(w, map[string]any{"sessions": sessions, "limit": limit, "offset": offset, "platform": platform, "workspace_id": workspaceFilter})
 }
 
 // CreateSession creates a new AI agent session bound to a workspace (WebChat multi-tenant, spec ①).

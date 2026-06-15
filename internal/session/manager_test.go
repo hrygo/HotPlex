@@ -46,8 +46,8 @@ func (m *mockStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	return args.Get(0).(*SessionInfo), args.Error(1)
 }
 
-func (m *mockStore) List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error) {
-	args := m.Called(ctx, userID, platform, limit, offset)
+func (m *mockStore) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error) {
+	args := m.Called(ctx, userID, platform, workspaceID, limit, offset)
 	return args.Get(0).([]*SessionInfo), args.Error(1)
 }
 
@@ -624,9 +624,9 @@ func TestManager_List(t *testing.T) {
 		{ID: "sess_1", UserID: "user1", WorkerType: worker.TypeClaudeCode, State: events.StateRunning},
 		{ID: "sess_2", UserID: "user2", WorkerType: worker.TypeClaudeCode, State: events.StateIdle},
 	}
-	store.On("List", ctx, "", "", 50, 0).Return(expected, nil)
+	store.On("List", ctx, "", "", "", 50, 0).Return(expected, nil)
 
-	list, err := m.List(ctx, "", "", 50, 0)
+	list, err := m.List(ctx, "", "", "", 50, 0)
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 }

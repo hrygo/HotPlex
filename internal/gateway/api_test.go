@@ -75,8 +75,8 @@ func (m *mockAPISM) DeletePhysical(ctx context.Context, id string) error {
 	return m.Called(ctx, id).Error(0)
 }
 
-func (m *mockAPISM) List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error) {
-	args := m.Called(ctx, userID, platform, limit, offset)
+func (m *mockAPISM) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*session.SessionInfo, error) {
+	args := m.Called(ctx, userID, platform, workspaceID, limit, offset)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -473,7 +473,7 @@ func TestListSessions(t *testing.T) {
 		{ID: "s1", State: events.StateRunning, CreatedAt: now},
 		{ID: "s2", State: events.StateIdle, CreatedAt: now},
 	}
-	sm.On("List", mock.Anything, "anonymous", "webchat", 100, 0).Return(sessions, nil)
+	sm.On("List", mock.Anything, "anonymous", "webchat", mock.Anything, 100, 0).Return(sessions, nil)
 
 	w := httptest.NewRecorder()
 	api.ListSessions(w, authedReq("GET", "/api/sessions", nil))

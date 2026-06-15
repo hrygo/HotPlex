@@ -1077,8 +1077,8 @@ func (m *Manager) Lock(id string) (release func(), err error) {
 }
 
 // List returns all sessions from Store. Use ListActive for in-memory active sessions only.
-func (m *Manager) List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error) {
-	return m.store.List(ctx, userID, platform, limit, offset)
+func (m *Manager) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error) {
+	return m.store.List(ctx, userID, platform, workspaceID, limit, offset)
 }
 
 // ListActive returns in-memory active sessions (no DB round-trip).

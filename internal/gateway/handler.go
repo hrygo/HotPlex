@@ -394,7 +394,7 @@ type SessionWorkerManager interface {
 // SessionAdmin provides listing, ownership validation, and metadata mutations.
 type SessionAdmin interface {
 	SessionExpirer
-	List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error)
+	List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*session.SessionInfo, error)
 	ValidateOwnership(ctx context.Context, sessionID, userID, adminUserID string) error
 	UpdateWorkDir(ctx context.Context, id, workDir string) error
 }

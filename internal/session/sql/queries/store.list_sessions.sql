@@ -5,4 +5,5 @@ SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type,
  WHERE state != 'deleted'
    AND (? = '' OR user_id = ?)
    AND (? = '' OR platform = ?)
+   AND (? = '' OR workspace_id = ?)
  ORDER BY created_at DESC LIMIT ? OFFSET ?;

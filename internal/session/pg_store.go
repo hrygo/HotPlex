@@ -90,11 +90,11 @@ func (s *pgStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 }
 
 // List returns sessions with pagination, excluding soft-deleted records.
-func (s *pgStore) List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error) {
+func (s *pgStore) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, s.queries["store.list_sessions"], userID, userID, platform, platform, limit, offset)
+	rows, err := s.db.QueryContext(ctx, s.queries["store.list_sessions"], userID, userID, platform, platform, workspaceID, workspaceID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("session store: list: %w", err)
 	}

@@ -48,8 +48,8 @@ func (m *mockStore) Get(ctx context.Context, id string) (*session.SessionInfo, e
 	return args.Get(0).(*session.SessionInfo), args.Error(1)
 }
 
-func (m *mockStore) List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error) {
-	args := m.Called(ctx, userID, platform, limit, offset)
+func (m *mockStore) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*session.SessionInfo, error) {
+	args := m.Called(ctx, userID, platform, workspaceID, limit, offset)
 	return args.Get(0).([]*session.SessionInfo), args.Error(1)
 }
 
