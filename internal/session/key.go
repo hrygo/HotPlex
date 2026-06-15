@@ -2,6 +2,7 @@ package session
 
 import (
 	"crypto/sha1"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,19 @@ var hotplexNamespace = uuid.MustParse("urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd4
 // CronNamespace is a sub-namespace derived from hotplexNamespace for cron session isolation.
 // Cron sessions use this namespace to guarantee they never collide with feishu/slack sessions.
 var CronNamespace = uuid.NewHash(sha1.New(), hotplexNamespace, []byte("cron"), 5)
+
+// ErrInvalidWorkDir is returned when workDir contains the "|" separator, which
+// could cause a theoretical hash collision in DeriveSessionKey (review P3 fix).
+var ErrInvalidWorkDir = errors.New("workDir must not contain '|'")
+
+// ValidateWorkDir checks that workDir does not contain the "|" delimiter used
+// internally by DeriveSessionKey to concatenate hash fields.
+func ValidateWorkDir(workDir string) error {
+	if strings.Contains(workDir, "|") {
+		return ErrInvalidWorkDir
+	}
+	return nil
+}
 
 // DeriveSessionKey generates a deterministic server-side session ID using UUIDv5.
 // Same (ownerID, workerType, clientKey, workspaceID, workDir) always maps to the same session.

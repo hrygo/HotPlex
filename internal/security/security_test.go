@@ -168,6 +168,7 @@ func TestValidateWorkDir(t *testing.T) {
 		{"other user home rejected", "/home/otheruser/workspace", true},
 		{"other user usr/local rejected", "/usr/local/otheruser/bin", true},
 		{"usr/local without username rejected", "/usr/local/bin", true},
+		{"pipe separator rejected", tmpDir + "|workspace", true},
 	}
 
 	for _, tt := range tests {

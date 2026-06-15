@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -169,7 +170,10 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 		// CAS failed: another concurrent accept claimed this invitation first.
 		// Disable the orphaned user to prevent a login-able account bypassing
 		// the one-time invitation semantics (review P1 fix).
-		_ = h.store.UpdateUserStatus(ctx, uid, "disabled", h.nowUnix())
+		if derr := h.store.UpdateUserStatus(ctx, uid, "disabled", h.nowUnix()); derr != nil {
+			slog.Error("failed to disable orphaned user after invitation CAS failure",
+				"user_id", uid, "invitation_id", inv.ID, "err", derr)
+		}
 		writeAppError(w, http.StatusConflict, "INVITATION_USED", "invitation already used")
 		return
 	}
