@@ -19,12 +19,20 @@ var hotplexNamespace = uuid.MustParse("urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd4
 var CronNamespace = uuid.NewHash(sha1.New(), hotplexNamespace, []byte("cron"), 5)
 
 // DeriveSessionKey generates a deterministic server-side session ID using UUIDv5.
-// Same (ownerID, workerType, clientKey, workDir) always maps to the same session.
+// Same (ownerID, workerType, clientKey, workspaceID, workDir) always maps to the same session.
 // clientKey is a client-provided opaque identifier: REST API uses client_session_id,
 // WebSocket init uses session_id field. Title is NOT a valid clientKey (since v1.25).
-func DeriveSessionKey(ownerID string, wt worker.WorkerType, clientKey, workDir string) string {
+//
+// workspaceID is the WebChat multitenancy anchor (spec §7 方案3). When non-empty it
+// participates in the hash; when empty it is omitted entirely, preserving the legacy
+// 4-field hash for platform/cron callers (backward compatible — existing session keys unchanged).
+func DeriveSessionKey(ownerID string, wt worker.WorkerType, clientKey, workspaceID, workDir string) string {
 	// UUIDv5 = SHA-1(namespace+name) — deterministic, no randomness.
-	name := ownerID + "|" + string(wt) + "|" + clientKey + "|" + workDir
+	name := ownerID + "|" + string(wt) + "|" + clientKey
+	if workspaceID != "" {
+		name += "|" + workspaceID
+	}
+	name += "|" + workDir
 	id := uuid.NewHash(sha1.New(), hotplexNamespace, []byte(name), 5)
 	return id.String()
 }

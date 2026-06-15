@@ -199,7 +199,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	// Derive session ID via UUIDv5 for consistency with WebSocket path.
 	// Both REST and WS use the auth userID ("anonymous" in dev mode, "api_user"
 	// with API keys) so they produce the same derived session ID.
-	id := session.DeriveSessionKey(userID, wt, clientSessionID, workDir)
+	id := session.DeriveSessionKey(userID, wt, clientSessionID, "", workDir)
 
 	// Default userID after derivation — bridge expects non-empty.
 	if userID == "" {

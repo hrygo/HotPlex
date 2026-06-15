@@ -345,7 +345,7 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 		}
 	}
 	if sessionID == "" {
-		sessionID = session.DeriveSessionKey(c.userID, initData.WorkerType, env.SessionID, workDir)
+		sessionID = session.DeriveSessionKey(c.userID, initData.WorkerType, env.SessionID, "", workDir)
 	}
 
 	if !c.hub.InitThrottle.Check(sessionID) {
