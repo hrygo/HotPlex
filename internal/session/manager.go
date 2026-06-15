@@ -313,13 +313,20 @@ func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) er
 		m.mu.Unlock()
 		return ErrSessionNotFound
 	}
+	// Write ms.info under ms.mu (not just m.mu) to prevent data race with
+	// Get/transitionState readers that access ms.info under ms.mu after
+	// releasing m.mu (review P1 fix — lock ordering: m.mu → ms.mu).
+	ms.mu.Lock()
 	ms.info.WorkspaceID = workspaceID
 	info := ms.info
+	ms.mu.Unlock()
 	m.mu.Unlock()
 	if err := m.store.Upsert(ctx, &info); err != nil {
-		// Rollback in-memory on DB failure to prevent divergence (review P2-1).
+		// Rollback in-memory on DB failure to prevent divergence.
 		m.mu.Lock()
+		ms.mu.Lock()
 		ms.info.WorkspaceID = ""
+		ms.mu.Unlock()
 		m.mu.Unlock()
 		return err
 	}

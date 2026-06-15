@@ -199,6 +199,14 @@ func setupRoutes(
 		}
 	}
 
+	// TODO(spec ⑥): Register WebChat multi-tenant HTTP endpoints when login UI ships.
+	//   - POST /api/auth/login, /api/auth/logout, GET /api/auth/me
+	//   - POST /api/auth/accept-invite
+	//   - POST/GET/PUT/DELETE /api/workspaces/*
+	//   - POST/GET/DELETE /api/admin/invitations
+	// Handlers are implemented in internal/gateway/{auth,workspace}_handlers.go
+	// but intentionally not wired until the frontend login flow is ready.
+
 	// Global favicon fallback using docs logo
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/docs/assets/logo.png", http.StatusMovedPermanently)
