@@ -30,7 +30,7 @@ func newAdminCmd() *cobra.Command {
 		RunE:  runAdminCreate,
 	}
 	create.Flags().String("username", "", "用户名（必填）")
-	create.Flags().String("password", "", "密码（省略则交互式提示不回显；最少 8 字符）")
+	create.Flags().String("password", "", "密码（省略则交互式提示不回显；最少 8 字符）。安全提示: --password 作为进程参数对同机其他用户经 ps/proc 可见，生产环境请使用交互式输入")
 	create.Flags().Bool("admin", true, "创建为 admin 角色")
 	_ = create.MarkFlagRequired("username")
 	cmd.AddCommand(create)

@@ -251,7 +251,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	// work_dir is immutable and comes from the workspace (spec §6.2).
 	workDir := ws.WorkDir
 	if err := session.ValidateWorkDir(workDir); err != nil {
-		slog.Error("workspace workDir failed validation", "workspace_id", workspaceID, "err", err)
+		g.log.Error("workspace workDir failed validation", "method", r.Method, "path", r.URL.Path, "workspace_id", workspaceID, "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INVALID_WORK_DIR", "workspace work_dir is invalid")
 		return
 	}

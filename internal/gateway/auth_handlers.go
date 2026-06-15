@@ -168,10 +168,11 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.store.MarkInvitationUsed(ctx, inv.ID, uid, h.nowUnix()); err != nil {
 		// CAS failed: another concurrent accept claimed this invitation first.
-		// Disable the orphaned user to prevent a login-able account bypassing
-		// the one-time invitation semantics (review P1 fix).
-		if derr := h.store.UpdateUserStatus(ctx, uid, "disabled", h.nowUnix()); derr != nil {
-			slog.Error("failed to disable orphaned user after invitation CAS failure",
+		// Physically delete the orphaned user so the username is freed for a
+		// subsequent legitimate invitation (review P2 fix — disable left the
+		// username permanently occupied, blocking recovery).
+		if derr := h.store.DeleteUser(ctx, uid); derr != nil {
+			slog.Error("failed to delete orphaned user after invitation CAS failure",
 				"user_id", uid, "invitation_id", inv.ID, "err", derr)
 		}
 		writeAppError(w, http.StatusConflict, "INVITATION_USED", "invitation already used")
@@ -182,10 +183,18 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 // isUniqueViolation detects a UNIQUE constraint violation across SQLite and PG.
+// Uses driver-specific error types where possible; falls back to error string
+// matching for drivers that don't expose structured codes.
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
 	}
+	// pgx/v5: check for *pgconn.PgError with SQLSTATE 23505
+	var pgErr interface{ SQLState() string }
+	if errors.As(err, &pgErr) && pgErr.SQLState() == "23505" {
+		return true
+	}
+	// SQLite (modernc.org/sqlite): fallback to string match
 	msg := err.Error()
 	return strings.Contains(msg, "UNIQUE") || strings.Contains(msg, "23505")
 }

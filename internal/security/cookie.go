@@ -18,6 +18,9 @@ const (
 	cookieName = "webchat_session"
 
 	// cookieMaxAge is the cookie lifetime (spec 附录 B: 7 days).
+	// NOTE: increased from 24h to 7d in multitenancy spec ① — this is a
+	// backward-incompatible change for deployments relying on short cookie
+	// lifetime. No config override provided; document in CHANGELOG.
 	cookieMaxAge = 7 * 24 * time.Hour
 
 	// refreshAfter is the sliding-refresh threshold: cookies older than half
