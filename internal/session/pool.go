@@ -41,23 +41,26 @@ func setPoolUtilization(v float64) {
 type PoolManager struct {
 	log *slog.Logger
 
-	mu         sync.Mutex
-	totalCount int
-	userCount  map[string]int   // userID → active session count
-	userMemory map[string]int64 // userID → total estimated memory bytes (sum of RLIMIT_AS caps)
+	mu             sync.Mutex
+	totalCount     int
+	userCount      map[string]int   // userID → active session count
+	userMemory     map[string]int64 // userID → total estimated memory bytes (sum of RLIMIT_AS caps)
+	workspaceCount map[string]int   // workspaceID → active session count (WebChat multi-tenant, spec ①)
 
 	maxSize          int   // 0 = unlimited
 	maxIdlePerUser   int   // 0 = unlimited
 	maxMemoryPerUser int64 // bytes; 0 = unlimited
+	maxPerWorkspace  int   // 0 = unlimited (WebChat per-workspace concurrency, spec ①)
 }
 
 // Default per-worker memory estimate (matches RLIMIT_AS in proc/manager.go).
 const workerMemoryEstimate = 512 * 1024 * 1024 // 512 MB
 
 const (
-	poolErrKindExhausted         = "exhausted"
-	poolErrKindUserQuotaExceeded = "user_quota_exceeded"
-	poolErrKindMemoryExceeded    = "memory_exceeded"
+	poolErrKindExhausted              = "exhausted"
+	poolErrKindUserQuotaExceeded      = "user_quota_exceeded"
+	poolErrKindMemoryExceeded         = "memory_exceeded"
+	poolErrKindWorkspaceQuotaExceeded = "workspace_quota_exceeded" // WebChat per-workspace (spec ①)
 )
 
 // NewPoolManager creates a PoolManager with the given limits.
@@ -69,10 +72,20 @@ func NewPoolManager(log *slog.Logger, maxSize, maxIdlePerUser int, maxMemoryPerU
 		log:              log,
 		userCount:        make(map[string]int),
 		userMemory:       make(map[string]int64),
+		workspaceCount:   make(map[string]int),
 		maxSize:          maxSize,
 		maxIdlePerUser:   maxIdlePerUser,
 		maxMemoryPerUser: maxMemoryPerUser,
 	}
+}
+
+// NewPoolManagerWithWorkspace creates a PoolManager with an additional per-workspace
+// concurrency limit (WebChat multi-tenant, spec ①). maxPerWorkspace == 0 disables the
+// workspace layer (platform/cron sessions are unaffected, equivalent to NewPoolManager).
+func NewPoolManagerWithWorkspace(log *slog.Logger, maxSize, maxIdlePerUser int, maxMemoryPerUser int64, maxPerWorkspace int) *PoolManager {
+	p := NewPoolManager(log, maxSize, maxIdlePerUser, maxMemoryPerUser)
+	p.maxPerWorkspace = maxPerWorkspace
+	return p
 }
 
 // PoolError records why a pool operation failed.
@@ -95,12 +108,13 @@ func (e *PoolError) Error() string {
 func (p *PoolManager) Acquire(ctx context.Context, userID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.acquireLocked(ctx, userID, false)
+	return p.acquireLocked(ctx, userID, "", false)
 }
 
 // acquireLocked reserves a concurrency slot (and optionally memory) for userID.
+// workspaceID != "" (WebChat sessions) additionally enforces the per-workspace limit.
 // Caller must hold p.mu.
-func (p *PoolManager) acquireLocked(ctx context.Context, userID string, reserveMemory bool) error {
+func (p *PoolManager) acquireLocked(ctx context.Context, userID, workspaceID string, reserveMemory bool) error {
 	if p.maxSize > 0 && p.totalCount >= p.maxSize {
 		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "pool_exhausted")))
 		return &PoolError{Kind: poolErrKindExhausted, Current: p.totalCount, Max: p.maxSize}
@@ -108,6 +122,10 @@ func (p *PoolManager) acquireLocked(ctx context.Context, userID string, reserveM
 	if p.maxIdlePerUser > 0 && p.userCount[userID] >= p.maxIdlePerUser {
 		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "user_quota_exceeded")))
 		return &PoolError{Kind: poolErrKindUserQuotaExceeded, UserID: userID, Current: p.userCount[userID], Max: p.maxIdlePerUser}
+	}
+	if workspaceID != "" && p.maxPerWorkspace > 0 && p.workspaceCount[workspaceID] >= p.maxPerWorkspace {
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "workspace_quota_exceeded")))
+		return &PoolError{Kind: poolErrKindWorkspaceQuotaExceeded, Current: p.workspaceCount[workspaceID], Max: p.maxPerWorkspace}
 	}
 	if reserveMemory && p.maxMemoryPerUser > 0 {
 		used := p.userMemory[userID]
@@ -124,10 +142,13 @@ func (p *PoolManager) acquireLocked(ctx context.Context, userID string, reserveM
 
 	p.userCount[userID]++
 	p.totalCount++
+	if workspaceID != "" {
+		p.workspaceCount[workspaceID]++
+	}
 	if p.maxSize > 0 {
 		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
 	}
-	p.log.Debug("pool: acquired", "user_id", userID, "total", p.totalCount)
+	p.log.Debug("pool: acquired", "user_id", userID, "workspace_id", workspaceID, "total", p.totalCount)
 	return nil
 }
 
@@ -139,7 +160,16 @@ func (p *PoolManager) acquireLocked(ctx context.Context, userID string, reserveM
 func (p *PoolManager) AcquireWithMemory(ctx context.Context, userID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.acquireLocked(ctx, userID, true)
+	return p.acquireLocked(ctx, userID, "", true)
+}
+
+// AcquireForWorkspace reserves a slot honoring global + per-user + per-workspace +
+// memory limits (WebChat multi-tenant, spec ①). workspaceID == "" (platform/cron
+// sessions) skips the per-workspace layer — equivalent to AcquireWithMemory.
+func (p *PoolManager) AcquireForWorkspace(ctx context.Context, userID, workspaceID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.acquireLocked(ctx, userID, workspaceID, true)
 }
 
 // Release frees a concurrency slot previously acquired for userID.
@@ -147,26 +177,50 @@ func (p *PoolManager) AcquireWithMemory(ctx context.Context, userID string) erro
 func (p *PoolManager) Release(ctx context.Context, userID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.releaseCoreLocked(ctx, userID) {
+		p.log.Debug("pool: released", "user_id", userID, "total", p.totalCount)
+	}
+}
 
+// ReleaseForWorkspace releases a slot acquired via AcquireForWorkspace (WebChat
+// multi-tenant, spec ①). workspaceID == "" behaves like Release.
+func (p *PoolManager) ReleaseForWorkspace(ctx context.Context, userID, workspaceID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.releaseCoreLocked(ctx, userID) {
+		return
+	}
+	if workspaceID != "" && p.workspaceCount[workspaceID] > 0 {
+		p.workspaceCount[workspaceID]--
+		if p.workspaceCount[workspaceID] <= 0 {
+			delete(p.workspaceCount, workspaceID)
+		}
+	}
+	p.log.Debug("pool: released", "user_id", userID, "workspace_id", workspaceID, "total", p.totalCount)
+}
+
+// releaseCoreLocked decrements user/total/memory counters and returns true on success.
+// Returns false (and logs + best-effort memory cleanup) on double-release.
+// Caller must hold p.mu.
+func (p *PoolManager) releaseCoreLocked(ctx context.Context, userID string) bool {
 	if p.userCount[userID] <= 0 || p.totalCount <= 0 {
 		p.log.Error("pool: release without acquire — possible double-release", "user_id", userID,
 			"user_count", p.userCount[userID], "total", p.totalCount)
 		observability.PoolReleaseErrors().Add(ctx, 1)
 		// Best-effort memory cleanup to prevent quota leak on accounting bug.
 		p.releaseMemoryLocked(userID)
-		return
+		return false
 	}
 	p.userCount[userID]--
 	if p.userCount[userID] <= 0 {
 		delete(p.userCount, userID)
 	}
 	p.totalCount--
-	total := p.totalCount
 	if p.maxSize > 0 {
-		setPoolUtilization(float64(total) / float64(p.maxSize))
+		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
 	}
 	p.releaseMemoryLocked(userID)
-	p.log.Debug("pool: released", "user_id", userID, "total", total)
+	return true
 }
 
 // Stats returns the current pool utilization.

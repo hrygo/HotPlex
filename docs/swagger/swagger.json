@@ -1826,7 +1826,10 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Creates a new AI agent session. client_session_id is required and must be unique per user. Uses UUIDv5 derivation for idempotency.",
+                "description": "Creates a new AI agent session. workspace_id and client_session_id are required. The workspace must be owned by the caller (403 WORKSPACE_FORBIDDEN otherwise). work_dir is taken from the workspace (immutable). Session id is UUIDv5 derived from (userID, workerType, clientKey, workspaceID, workDir) — 方案3.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -1836,30 +1839,39 @@
                 "summary": "Create session",
                 "parameters": [
                     {
-                        "type": "string",
+                        "description": "Workspace ID (caller must own it)",
+                        "name": "workspace_id",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
                         "description": "Client-provided session identifier (max 128 chars)",
                         "name": "client_session_id",
-                        "in": "query",
-                        "required": true
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
                     },
                     {
-                        "type": "string",
                         "description": "Human-readable session title",
                         "name": "title",
-                        "in": "query"
+                        "in": "body",
+                        "schema": {
+                            "type": "string"
+                        }
                     },
                     {
-                        "type": "string",
                         "default": "claudecode",
                         "description": "Worker type",
                         "name": "worker_type",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Working directory",
-                        "name": "work_dir",
-                        "in": "query"
+                        "in": "body",
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {
@@ -1870,13 +1882,25 @@
                         }
                     },
                     "400": {
-                        "description": "Missing or invalid client_session_id",
+                        "description": "Missing client_session_id or workspace_id",
                         "schema": {
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "WORKSPACE_FORBIDDEN: not your workspace",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "WORKSPACE_NOT_FOUND",
                         "schema": {
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }

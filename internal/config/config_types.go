@@ -616,6 +616,7 @@ type PoolConfig struct {
 	MaxSize          int   `mapstructure:"max_size"`
 	MaxIdlePerUser   int   `mapstructure:"max_idle_per_user"`
 	MaxMemoryPerUser int64 `mapstructure:"max_memory_per_user"` // bytes; 0 = unlimited
+	MaxPerWorkspace  int   `mapstructure:"max_per_workspace"`   // WebChat per-workspace concurrency (spec ①); 0 = unlimited
 }
 
 type AgentConfig struct {

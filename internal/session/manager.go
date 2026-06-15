@@ -235,7 +235,7 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 		store:        store,
 		cfg:          cfg,
 		cfgStore:     cfgStore,
-		pool:         NewPoolManager(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser, cfg.Pool.MaxMemoryPerUser),
+		pool:         NewPoolManagerWithWorkspace(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser, cfg.Pool.MaxMemoryPerUser, cfg.Pool.MaxPerWorkspace),
 		sessions:     make(map[string]*managedSession),
 		runningIndex: make(map[string]struct{}),
 		gcReset:      make(chan time.Duration, 1),
@@ -696,6 +696,7 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 		return ErrSessionNotFound
 	}
 	userID := ms.info.UserID
+	workspaceID := ms.info.WorkspaceID
 	ms.mu.RLock()
 	alreadyAttached := ms.worker != nil
 	ms.mu.RUnlock()
@@ -706,7 +707,7 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	}
 
 	// Acquire pool quota (slot + memory) in a single atomic operation.
-	if poolErr := m.pool.AcquireWithMemory(ctx, userID); poolErr != nil {
+	if poolErr := m.pool.AcquireForWorkspace(ctx, userID, workspaceID); poolErr != nil {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
 			m.log.Warn("session: attach rejected", "err", poolErr, "session_id", id)
@@ -727,7 +728,7 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	ms, ok = m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		m.pool.Release(ctx, userID)
+		m.pool.ReleaseForWorkspace(ctx, userID, workspaceID)
 		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrSessionNotFound
 	}
@@ -735,7 +736,7 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	if ms.worker != nil {
 		ms.mu.Unlock()
 		m.mu.Unlock()
-		m.pool.Release(ctx, userID)
+		m.pool.ReleaseForWorkspace(ctx, userID, workspaceID)
 		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrWorkerAttached
 	}
@@ -745,7 +746,7 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	if !ms.info.State.IsActive() {
 		ms.mu.Unlock()
 		m.mu.Unlock()
-		m.pool.Release(ctx, userID)
+		m.pool.ReleaseForWorkspace(ctx, userID, workspaceID)
 		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrSessionNotActive
 	}
@@ -778,7 +779,7 @@ func (m *Manager) GetWorker(id string) worker.Worker {
 // releaseWorkerQuota releases both concurrency slot and memory quota.
 // pool.Release now handles both slot and memory under a single lock.
 func (m *Manager) releaseWorkerQuota(ctx context.Context, ms *managedSession) {
-	m.pool.Release(ctx, ms.info.UserID)
+	m.pool.ReleaseForWorkspace(ctx, ms.info.UserID, ms.info.WorkspaceID)
 }
 
 // DetachWorker removes the worker from the session and releases the concurrency quota.
@@ -816,11 +817,12 @@ func (m *Manager) detachWorkerUnchecked(id string, expected worker.Worker) bool 
 	workerType := ms.info.WorkerType
 	ms.worker = nil
 	uid := ms.info.UserID
+	wsID := ms.info.WorkspaceID
 	ms.mu.Unlock()
 
 	if hasWorker {
 		workersRunningGauge(string(workerType)).Add(-1)
-		m.pool.Release(context.Background(), uid)
+		m.pool.ReleaseForWorkspace(context.Background(), uid, wsID)
 		m.log.Debug("session: worker detached", "session_id", id)
 	}
 	return true
@@ -883,7 +885,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		ms.info = candidate
 		if hasWorkerAfter {
 			workersRunningGauge(string(workerType)).Add(-1)
-			m.pool.Release(ctx, uid)
+			m.pool.ReleaseForWorkspace(ctx, uid, ms.info.WorkspaceID)
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)
