@@ -3,7 +3,7 @@
 **日期**: 2026-06-15
 **状态**: Planning（spec ① 已设计，②-⑥ 待逐个 brainstorm）
 **分支**: main · **基线版本**: v1.29.0 (fb857af1)
-**关联设计**: [`2026-06-15-webchat-multitenancy-foundation-design.md`](./2026-06-15-webchat-multitenancy-foundation-design.md)（spec ①）
+**关联设计**: [`WebChat-Multitenancy-Foundation-Design-Spec.md`](./WebChat-Multitenancy-Foundation-Design-Spec.md)（spec ①）
 
 ---
 
@@ -11,11 +11,13 @@
 
 将 WebChat 从"共享 `webchat_user` 身份的匿名前端"升级为**一等公民**，提供完整的用户级多租户能力：
 
-- 用户级 workspace 隔离（per-user per-bot / per-workspace / per-worker）
+- 用户级 workspace 隔离（per-user per-workspace per-worker；WebChat 会话**不选 Bot**，见 spec ① §2.4）
 - 用户级 worker 选择、workspace 选择、agent-configs 配置
 - 用户基于这些资源创建会话，完善的隔离与配额
 
 **多租户形态**：单组织·多终端用户（一个 HotPlex 实例服务一组受信用户，每人独立身份与 workspace，互不可见）。
+
+**双轨定位（spec ① §2.1 已确立）**：多租户能力**仅限 WebChat 轨**（团队共享一个实例，用户级隔离）；**Message Channel 轨（Slack/Feishu，个人独享实例）保持现状**，永不引入 User/Workspace/per-user 配置。本路线图所有 spec（①-⑥）都只作用于 WebChat 轨。
 
 ---
 
@@ -28,8 +30,8 @@
         │
         ├──────────────┐
         ▼              ▼
-② per-user/per-ws   ③ 用户级 worker 选择
-   配置继承             （配置 fallback 链 + API）
+② per-ws 配置继承     ③ workspace 级 worker 选择
+   （团队默认→ws 自定义） （ws.worker_preference + fallback 链）
         │              │
         ├──────────────┤
         ▼              ▼
@@ -43,7 +45,7 @@
 ```
 
 **依赖逻辑**：
-- ①是地基，所有 per-user 能力都依赖真实的 user_id。
+- ①是地基，所有 workspace 级能力都依赖真实的 user_id + workspace_id（§2 以 workspace 为中心的模型）。
 - ②③④ 可在 ① 之后并行推进（互不依赖）。
 - ⑤依赖 ①②（配额细化到配置维度需要 ②的配置模型）。
 - ⑥是集大成，依赖 ①②③④全部就绪才能提供完整前端体验。
@@ -56,7 +58,7 @@
 
 | spec | 标题 | 状态 | 文档 |
 |---|---|---|---|
-| ① | 身份 + workspace + 隔离 | ✅ 设计完成，待实现 | [foundation-design](./2026-06-15-webchat-multitenancy-foundation-design.md) |
+| ① | 身份 + workspace + 隔离 | ✅ 设计完成，待实现 | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
 
 阶段 A 交付后：WebChat 后端具备真实用户身份、workspace 实体、会话隔离、多租户配额框架。验收通过 HTTP API 测试（webchat 前端生产登录 UI 归阶段 C）。
 
@@ -64,8 +66,8 @@
 
 | spec | 标题 | 依赖 | 核心改动 |
 |---|---|---|---|
-| ② | per-user / per-workspace agent-configs 继承 | ① | 改造 `loader.go` fallback 链，新增 per-user / per-workspace 层 |
-| ③ | 用户级 worker 选择 | ① | 改造 worker_type fallback 链 + API，填充 `workspaces.worker_preference` |
+| ② | per-workspace agent-configs 自定义 | ① | 改造 `loader.go`，WebChat 轨走两层（团队默认 → workspace 自定义） |
+| ③ | workspace 级 worker 选择 | ① | worker_type fallback 链（WebChat 轨：团队默认 → workspace）+ API，填充 `workspaces.worker_preference` |
 | ④ | OAuth/SSO provider 落地 | ① | `IdentityProvider` 第二实现（飞书/Slack/OIDC） |
 
 阶段 B 交付后：用户可在 workspace 级定制 agent-configs 与 worker，且可用 OAuth 登录（企业 SSO 体验）。
@@ -83,36 +85,38 @@
 
 ## 4. 各 spec 详细规划
 
-### spec ② — per-user / per-workspace agent-configs 继承
+### spec ② — per-workspace agent-configs 自定义（两层继承）
 
-**目标**：让同一 bot 下不同用户/不同 workspace 拥有不同的 agent-configs（SOUL/AGENTS/SKILLS/USER/MEMORY 等），而非现状的全局/bot 级共享。
+**目标**：让 WebChat 轨的 agent-configs（SOUL/AGENTS/SKILLS/USER/MEMORY 等）走 spec ① §2.4 确立的**两层继承**（团队默认 → workspace 自定义），而非现状的全局/Bot 级共享。同一团队内不同 workspace 拥有各自定制。
 
-**现状**：三级 fallback 全局 → 平台 → bot（`internal/agentconfig/loader.go:177-216`），完全无 per-user 层。同一 bot 所有用户共享同一套配置。
+**现状**：Message Channel 轨的三级 fallback 全局 → 平台 → Bot（`internal/agentconfig/loader.go`）——**这条链保持不动**。WebChat 轨需新增独立解析路径。
 
 **关键改动点**：
-- `internal/agentconfig/loader.go` `Load` 函数签名：新增 user/workspace 维度参数。
-- `resolveFile` 路径解析：新增 per-user / per-workspace 目录层（如 `dir/{platform}/{botName}/{userID}/` 或经 workspace_id）。
-- `internal/gateway/bridge_worker.go:328` `injectAgentConfig`：传递 user/workspace 参数。
+- `internal/agentconfig/loader.go`：WebChat 轨按 `workspace_id` 解析，两层优先级：workspace 自定义 > 团队默认。**不引入 per-user 层**（spec ① §2.4 决策）。
+- `internal/gateway/bridge_worker.go` `injectAgentConfig`：WebChat 会话传 `workspace_id`，Message Channel 会话维持原路径。
 - 填充 `workspaces.agent_config_overrides`（spec ① 建表留空字段）。
 - 遵守 META-COGNITION 约束：B 通道无条件覆盖 C 通道；`META-COGNITION.md` 仍 go:embed 强制注入首位，不可排除。
+- **双轨隔离**：agent-configs 解析必须按 session 是否带 `workspace_id` 分流，绝不污染 Message Channel 的三级链。
 
-**验收**：两个用户/两个 workspace 各自加载不同 agent-configs，互不影响；单元测试覆盖新 fallback 层优先级。
+**验收**：两个 workspace 各自加载不同 agent-configs，互不影响；Message Channel 轨配置行为零变化；单元测试覆盖两条独立解析路径。
 
 **风险**：fallback 层数增加后的路径解析复杂度与性能（需评估缓存）。
 
 ### spec ③ — 用户级 worker 选择
 
-**目标**：用户（调用方）能在 workspace 级选择用哪个 worker（claude_code / opencode_server / codex_cli / acp），而非完全由配置决定。
+**目标**：调用方（前端/用户）能在 workspace 级选择用哪个 worker（claude_code / opencode_server / codex_cli / acp），WebChat 轨走 spec ① §2.4 的两层（团队默认 → workspace 选择）。
 
-**现状**：用户完全不能选 worker（`cmd/hotplex/messaging_init.go:152-157` 的 fallback 链），webchat API init 的 `worker_type` 参数仅限 API 调用方。
+**现状**：Message Channel 轨的 worker_type 由 Bot → 平台 → messaging → 默认 决定（`config_defaults.go`），webchat API init 的 `worker_type` 仅限 API 调用方。WebChat 轨的 `workspaces.worker_preference` 字段已由 spec ① 预留。
 
 **关键改动点**：
 - 填充 `workspaces.worker_preference`（spec ① 建表留空字段）。
-- 改造 worker_type fallback 链：`workspace.worker_preference`（新，最高）→ bot 级 → 平台级 → messaging → 编译默认。
+- WebChat 轨 worker_type fallback：`workspace.worker_preference`（最高）→ 团队默认。**不含 Bot 级**（WebChat 会话不选 Bot，spec ① §2.4）。
 - `CreateSession`（spec ① 已改造）消费 `workspace.worker_preference`。
+- Message Channel 轨 fallback 链保持不变（双轨隔离）。
+- 凭证仍由 worker 二进制自管（spec ① §2.5），本 spec 只选 worker type。
 - 前端选择 UI 归 spec ⑥。
 
-**验收**：workspace 设置 worker 偏好后，新会话使用该 worker；未设置走原 fallback；白名单约束（仅 4 类合法 worker）。
+**验收**：workspace 设置 worker 偏好后，新会话使用该 worker；未设置走团队默认；白名单约束（仅 4 类合法 worker）；Message Channel 轨行为零变化。
 
 **风险**：worker 切换的会话连续性（同一 workspace 切 worker = 不同 session key = 新会话）。
 
@@ -158,7 +162,7 @@
 - workspace 切换 UI（侧边栏/下拉）。
 - worker 选择 UI（消费 spec ③ 的 `worker_preference`）。
 - agent-configs 编辑 UI（消费 spec ② 的 `agent_config_overrides`）。
-- 移除 spec ① 标记的过渡状态（webchat 生产登录断开）。
+- 移除 spec ① §8.4 标记的过渡状态（webchat 生产登录断开）。
 
 **验收**：端到端跑通——用户登录 → 看到自己的 workspace → 选择 worker/配置 → 创建隔离会话。
 
@@ -168,8 +172,11 @@
 
 ## 5. 范围排除（明确不做）
 
-- **多组织 SaaS**：不引入"组织/租户"实体（那是真多租户 SaaS 形态）。协作场景暂以"不同用户指向同一 work_dir"解决。
-- **workspace 多成员协作**：YAGNI。workspace 私有。
+- **Message Channel 多租户化**：永不。Slack/Feishu 轨保持个人独享现状，不引入 User/Workspace/per-user 配置（spec ① §2.1 双轨完全隔离）。
+- **多组织 SaaS**：不引入"组织/租户"实体（那是真多租户 SaaS 形态）。跨用户协作暂以"不同 workspace 指向同一 work_dir"解决。
+- **workspace 多成员协作**：YAGNI。workspace 私有（仅 owner 可见）。
+- **Worker 凭证管理**：永不。凭证由 worker 二进制自管，HotPlex 不存储/注入/代理（spec ① §2.5）。
+- **WebChat 选 Bot**：永不。WebChat 会话不关联 Bot（spec ① §2.4），Bot 概念仅 Message Channel 轨用。
 - **公开自助注册**：仅 admin 邀请制。
 
 ---
@@ -178,7 +185,7 @@
 
 以下决策不阻塞 spec ①，但应在启动对应 spec 前 brainstorm 时明确：
 
-1. **spec ② 配置覆盖粒度**：per-user 还是 per-workspace，或两层并存？目录结构如何组织？
+1. **spec ② 配置继承层数**：~~per-user 还是 per-workspace~~ ✅ spec ① §2.4 已拍板——**两层（团队默认 → workspace 自定义），无 per-user 层**。spec ② 只需确定 workspace 自定义的存储形式（DB 字段 `agent_config_overrides` vs 目录文件）。
 2. **spec ④ OAuth provider 优先级**：先飞书、先 Slack，还是先通用 OIDC？账号合并策略？
 3. **spec ⑤ 是否需要计费**：纯配额，还是含用量统计/计费基础？
 4. **spec ⑥ 前端技术栈演进**：继续 Next.js + assistant-ui，还是重构？
