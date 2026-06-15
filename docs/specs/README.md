@@ -26,6 +26,8 @@
 | [Turns-Materialized-Table-Spec.md](./Turns-Materialized-Table-Spec.md) | Turns 物化表 — eventstore 物化为独立表提升查询性能 | proposed | 2026-05-19 | 0% |
 | [API-Documentation-Hybrid-Generation-Spec.md](./API-Documentation-Hybrid-Generation-Spec.md) | API 文档混合生成 — 手写 + 自动生成方案降低维护风险 | proposed | 2026-06-03 | 0% |
 | [Observability-Spec.md](./Observability-Spec.md) | 统一可观测性体系 — OTel Native 架构，70 指标，Tracing，告警，SLO | proposed | 2026-06-04 | 0% |
+| [WebChat-Multitenancy-Foundation-Design-Spec.md](./WebChat-Multitenancy-Foundation-Design-Spec.md) | WebChat 多租户地基（spec ①） — 身份/workspace/隔离/配额后端地基设计 | draft | 2026-06-15 | 0% |
+| [WebChat-Multitenancy-Roadmap-Spec.md](./WebChat-Multitenancy-Roadmap-Spec.md) | WebChat 多租户路线图 — 后续 spec ②-⑥ 阶段规划与依赖编排 | proposed | 2026-06-15 | 0% |
 
 ### Worker 与 Session
 
@@ -94,12 +96,12 @@
 - **implemented**: 8 个 — Per-Bot-Agent-Config, Turn-Summary-WorkDir-Fix, Worker-User-Interaction, Slack-Stream-Rotation, Gateway-Self-Restart, Multi-Bot-Support, Agent-Config-Injection-Control, Slack-Block-Kit-Upgrade
 - **approved**: 1 个 — OCS-Production-Readiness
 - **verified**: 1 个 — ACP-Worker-Enhancement
-- **draft**: 12 个 — Gateway-Async-Init, Feishu-Adapter, Hot-Reload, Session-History, Turn-Summary, CLI-Self-Service, Onboard-UX, TTS-Engine, Codex-Reset-Zombie-Fix, Cron-Delivery-Retry, Feishu-Card-Header, Feishu-Interactive-Card-Buttons, Codex-CLI-Full-Upgrade
-- **proposed**: 10 个 — GroupChat-Collaboration, Dual-Database-Support, Consolidate-Events-Store, Delta-Optimization, Interaction-Response-Chain-Fix, Inbound-Event-Storage-Fix, Onboard-Go-Embed-AST, WebChat-v2-Revamp, Windows-Support, Turns-Materialized-Table, API-Documentation-Hybrid-Generation
+- **draft**: 13 个 — Gateway-Async-Init, Feishu-Adapter, Hot-Reload, Session-History, Turn-Summary, CLI-Self-Service, Onboard-UX, TTS-Engine, Codex-Reset-Zombie-Fix, Cron-Delivery-Retry, Feishu-Card-Header, Feishu-Interactive-Card-Buttons, Codex-CLI-Full-Upgrade, WebChat-Multitenancy-Foundation
+- **proposed**: 11 个 — GroupChat-Collaboration, Dual-Database-Support, Consolidate-Events-Store, Delta-Optimization, Interaction-Response-Chain-Fix, Inbound-Event-Storage-Fix, Onboard-Go-Embed-AST, WebChat-v2-Revamp, Windows-Support, Turns-Materialized-Table, API-Documentation-Hybrid-Generation, WebChat-Multitenancy-Roadmap
 
 ### 按领域分类
 
-- **架构/Gateway**: 16 个
+- **架构/Gateway**: 18 个
 - **Worker/Session**: 10 个
 - **平台适配**: 5 个
 - **定时任务**: 3 个
