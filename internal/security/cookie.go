@@ -17,8 +17,12 @@ const (
 	// cookieName is the HTTP cookie name for webchat session authentication.
 	cookieName = "webchat_session"
 
-	// cookieMaxAge is the default cookie lifetime (24 hours).
-	cookieMaxAge = 24 * time.Hour
+	// cookieMaxAge is the cookie lifetime (spec 附录 B: 7 days).
+	cookieMaxAge = 7 * 24 * time.Hour
+
+	// refreshAfter is the sliding-refresh threshold: cookies older than half
+	// the TTL are reissued on authentication (spec §8.3).
+	refreshAfter = cookieMaxAge / 2
 
 	// hmacKeyLen is the HMAC secret key length in bytes.
 	hmacKeyLen = 32
@@ -81,14 +85,48 @@ func (c *CookieAuth) Authenticate(r *http.Request) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	return c.verify(cookie.Value)
+	uid, _, ok := c.verify(cookie.Value)
+	return uid, ok
 }
 
-// sign creates a signed cookie value: Base64(timestamp|userID|hexHMAC).
+// AuthenticateAndMaybeRefresh authenticates and, if the cookie is past half its
+// TTL (refreshAfter), reissues a fresh cookie on w (sliding refresh, spec §8.3).
+func (c *CookieAuth) AuthenticateAndMaybeRefresh(w http.ResponseWriter, r *http.Request) (string, bool) {
+	cookie, err := r.Cookie(cookieName)
+	if err != nil {
+		return "", false
+	}
+	uid, issuedAt, ok := c.verify(cookie.Value)
+	if !ok {
+		return "", false
+	}
+	if time.Since(issuedAt) > refreshAfter {
+		// Direct write: bypass SetCookie's skip-if-valid optimization so the
+		// sliding refresh actually reissues a fresh cookie.
+		c.setCookieAt(w, r, uid, time.Now())
+	}
+	return uid, true
+}
+
+// setCookieAt writes a cookie signed at issuedAt directly (bypasses SetCookie's
+// skip-if-valid optimization). Used by sliding refresh and tests.
+func (c *CookieAuth) setCookieAt(w http.ResponseWriter, r *http.Request, userID string, issuedAt time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    c.signAt(userID, issuedAt),
+		Path:     "/",
+		MaxAge:   int(c.maxAge.Seconds()),
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// signAt creates a signed cookie value with an explicit issue time: Base64(timestamp|userID|hexHMAC).
 // The HMAC signature is hex-encoded to avoid binary bytes in the delimited format,
 // making the cookie value safe for debugging and unambiguous to parse.
-func (c *CookieAuth) sign(userID string) string {
-	ts := time.Now().Unix()
+func (c *CookieAuth) signAt(userID string, issuedAt time.Time) string {
+	ts := issuedAt.Unix()
 	payload := fmt.Sprintf("%d|%s", ts, userID)
 
 	mac := hmac.New(sha256.New, c.secret)
@@ -98,16 +136,22 @@ func (c *CookieAuth) sign(userID string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + sig))
 }
 
-// verify parses and validates a signed cookie value.
-func (c *CookieAuth) verify(encoded string) (string, bool) {
+// sign creates a signed cookie value at the current time (back-compat shorthand for signAt).
+func (c *CookieAuth) sign(userID string) string {
+	return c.signAt(userID, time.Now())
+}
+
+// verify parses and validates a signed cookie value, returning the userID,
+// issue time, and validity. The issue time enables sliding refresh (§8.3).
+func (c *CookieAuth) verify(encoded string) (string, time.Time, bool) {
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", false
+		return "", time.Time{}, false
 	}
 
 	parts := strings.SplitN(string(raw), "|", 3)
 	if len(parts) != 3 {
-		return "", false
+		return "", time.Time{}, false
 	}
 
 	tsStr, userID, sigHex := parts[0], parts[1], parts[2]
@@ -115,16 +159,17 @@ func (c *CookieAuth) verify(encoded string) (string, bool) {
 	// Check timestamp freshness.
 	ts, err := strconv.ParseInt(tsStr, 10, 64)
 	if err != nil {
-		return "", false
+		return "", time.Time{}, false
 	}
-	if time.Since(time.Unix(ts, 0)) > c.maxAge {
-		return "", false
+	issuedAt := time.Unix(ts, 0)
+	if time.Since(issuedAt) > c.maxAge {
+		return "", time.Time{}, false
 	}
 
 	// Decode hex-encoded HMAC signature.
 	sig, err := hex.DecodeString(sigHex)
 	if err != nil {
-		return "", false
+		return "", time.Time{}, false
 	}
 
 	// Verify HMAC signature (constant-time comparison via hmac.Equal).
@@ -134,10 +179,10 @@ func (c *CookieAuth) verify(encoded string) (string, bool) {
 	expected := mac.Sum(nil)
 
 	if !hmac.Equal(sig, expected) {
-		return "", false
+		return "", time.Time{}, false
 	}
 
-	return userID, true
+	return userID, issuedAt, true
 }
 
 // isHTTPS determines if the request was made over HTTPS.
