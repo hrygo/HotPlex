@@ -33,11 +33,12 @@ func newTestSessionStore(t *testing.T) session.UserWorkspaceStore {
 const testBcryptCostGateway = 4
 
 type testAuthEnv struct {
-	auth     *security.Authenticator
-	cookie   *security.CookieAuth
-	store    session.UserWorkspaceStore
-	idp      *security.LocalAccountProvider
-	handlers *AuthHandlers
+	auth       *security.Authenticator
+	cookie     *security.CookieAuth
+	store      session.UserWorkspaceStore
+	idp        *security.LocalAccountProvider
+	handlers   *AuthHandlers
+	wsHandlers *WorkspaceHandlers
 }
 
 func newTestAuthEnv(t *testing.T) *testAuthEnv {
@@ -55,7 +56,8 @@ func newTestAuthEnv(t *testing.T) *testAuthEnv {
 	auth.SetCookieAuth(ca)
 	auth.SetIdentityProvider(idp)
 	h := NewAuthHandlers(auth, ca, store, idp)
-	return &testAuthEnv{auth: auth, cookie: ca, store: store, idp: idp, handlers: h}
+	ws := NewWorkspaceHandlers(store, ca, auth)
+	return &testAuthEnv{auth: auth, cookie: ca, store: store, idp: idp, handlers: h, wsHandlers: ws}
 }
 
 func (e *testAuthEnv) loginAs(t *testing.T, user, pass string, wantStatus int) string {
