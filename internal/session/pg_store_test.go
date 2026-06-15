@@ -25,7 +25,7 @@ func newPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	// Rebind all queries to PG $N placeholders manually (same as NewPGStore does).
 	q := make(map[string]string)
 	q["store.get_session"] = dbutil.DialectPostgres.Rebind(
-		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, '') FROM sessions WHERE id = ?")
+		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, ''), COALESCE(workspace_id, '') FROM sessions WHERE id = ?")
 	q["store.delete_terminated"] = dbutil.DialectPostgres.Rebind(
 		"DELETE FROM sessions WHERE state = ? AND ((source = 'cron' AND updated_at <= ?) OR (source != 'cron' AND updated_at <= ?))")
 	q["store.get_sessions_by_state"] = dbutil.DialectPostgres.Rebind(
@@ -50,7 +50,7 @@ func sessionColumns() []string {
 	return []string{
 		"id", "user_id", "owner_id", "worker_session_id", "worker_type", "state", "bot_id", "bot_name",
 		"platform", "platform_key_json", "work_dir", "title",
-		"created_at", "updated_at", "expires_at", "idle_expires_at", "context_json", "source", "client_key",
+		"created_at", "updated_at", "expires_at", "idle_expires_at", "context_json", "source", "client_key", "workspace_id",
 	}
 }
 
@@ -63,10 +63,10 @@ func TestPGStore_Get_Found(t *testing.T) {
 	rows := sqlmock.NewRows(sessionColumns()).
 		AddRow("sess-1", "user-1", "owner-1", "", "claude_code", string(events.StateRunning), "bot-1", "",
 			"slack", `{"channel_id":"C123"}`, "/work", "My Session",
-			now, now, nil, nil, `{"key":"value"}`, "", "")
+			now, now, nil, nil, `{"key":"value"}`, "", "", "")
 
 	q := dbutil.DialectPostgres.Rebind(
-		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, '') FROM sessions WHERE id = ?")
+		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, ''), COALESCE(workspace_id, '') FROM sessions WHERE id = ?")
 
 	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs("sess-1").WillReturnRows(rows)
 
@@ -85,7 +85,7 @@ func TestPGStore_Get_NotFound(t *testing.T) {
 	defer cleanup()
 
 	q := dbutil.DialectPostgres.Rebind(
-		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, '') FROM sessions WHERE id = ?")
+		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, ''), COALESCE(workspace_id, '') FROM sessions WHERE id = ?")
 
 	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs("nonexistent").WillReturnError(sql.ErrNoRows)
 

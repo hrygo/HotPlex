@@ -218,6 +218,9 @@ type SessionInfo struct {
 	// ClientKey is the client-provided session_id from the init envelope.
 	// Empty for platform sessions (Slack/Feishu) which use DerivePlatformSessionKey.
 	ClientKey string `json:"client_key,omitempty"`
+	// WorkspaceID is the WebChat multitenancy anchor (spec ① §6.4).
+	// Empty for platform/cron sessions (Slack/Feishu) — they have no workspace.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 // NewManager creates a new session manager using the provided Store.
