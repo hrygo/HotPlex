@@ -419,7 +419,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		cookieAuth = ca
 		auth.SetCookieAuth(ca)
 		log.Info("gateway: webchat cookie auth enabled")
-		log.Warn("gateway: webchat cookie auth uses shared \"webchat_user\" identity; all visitors share the same session ownership — not suitable for multi-user deployments")
 	}
 
 	mux := http.NewServeMux()

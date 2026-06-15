@@ -166,6 +166,10 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.MarkInvitationUsed(ctx, inv.ID, uid, h.nowUnix()); err != nil {
+		// CAS failed: another concurrent accept claimed this invitation first.
+		// Disable the orphaned user to prevent a login-able account bypassing
+		// the one-time invitation semantics (review P1 fix).
+		_ = h.store.UpdateUserStatus(ctx, uid, "disabled", h.nowUnix())
 		writeAppError(w, http.StatusConflict, "INVITATION_USED", "invitation already used")
 		return
 	}
@@ -209,7 +213,11 @@ func (h *AuthHandlers) AdminCreateInvitation(w http.ResponseWriter, r *http.Requ
 	if ttl <= 0 {
 		ttl = defaultInvitationTTL
 	}
-	code := security.GenerateInviteCode()
+	code, err := security.GenerateInviteCode()
+	if err != nil {
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "generate invite code failed")
+		return
+	}
 	inv := &session.Invitation{
 		ID: uuid.NewString(), Code: code, CreatedBy: uid,
 		Role: req.Role, ExpiresAt: h.nowUnix() + int64(ttl),

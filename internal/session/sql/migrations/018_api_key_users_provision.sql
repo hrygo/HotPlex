@@ -25,5 +25,7 @@ SET user_id = (SELECT u.id FROM users u WHERE u.username = 'apikey:' || api_key_
 WHERE EXISTS (SELECT 1 FROM users u WHERE u.username = 'apikey:' || api_key_users.user_id);
 
 -- +goose Down
--- 不可逆还原（原 user_id 字符串已被覆盖）。Down 仅清空 provision 的 users 行。
+-- 不可逆还原（原 user_id 字符串已被覆盖）。
+-- 先置空 api_key_users.user_id 保持引用完整性，再清空 provision 的 users 行。
+UPDATE api_key_users SET user_id = '' WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'apikey:%');
 DELETE FROM users WHERE username LIKE 'apikey:%';

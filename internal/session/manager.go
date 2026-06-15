@@ -316,7 +316,14 @@ func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) er
 	ms.info.WorkspaceID = workspaceID
 	info := ms.info
 	m.mu.Unlock()
-	return m.store.Upsert(ctx, &info)
+	if err := m.store.Upsert(ctx, &info); err != nil {
+		// Rollback in-memory on DB failure to prevent divergence (review P2-1).
+		m.mu.Lock()
+		ms.info.WorkspaceID = ""
+		m.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 // Get returns a snapshot of a session by ID. Returns ErrSessionNotFound if not found.
