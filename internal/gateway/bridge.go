@@ -627,6 +627,7 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 			Platform:      si.Platform,
 			PlatformKey:   si.PlatformKey,
 			Title:         si.Title,
+			WorkspaceID:   si.WorkspaceID,
 			InjectExclude: excl,
 		}); err != nil {
 			return nil, fmt.Errorf("switch-workdir: start session: %w", err)

@@ -87,3 +87,44 @@ func TestListSessions_IncludesWorkspaceID(t *testing.T) {
 	require.Len(t, list, 1)
 	require.Equal(t, "ws-list", list[0].WorkspaceID)
 }
+
+// TestUpsert_EmptyThenSet_WorkspaceID_Persisted 验证真实流程「先空 INSERT → SetWorkspaceID → 重启读取」
+// 回归 P0 bug：空串 ” 被写入 DB（非 NULL），ON CONFLICT 的 IS NULL 防护失效导致 SetWorkspaceID 静默丢失。
+func TestUpsert_EmptyThenSet_WorkspaceID_Persisted(t *testing.T) {
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	// 1. 模拟 CreateWithBot：首次 INSERT 时 WorkspaceID 为空串
+	info := &SessionInfo{
+		ID: "sess-setws", UserID: "u1", OwnerID: "u1", WorkerType: worker.TypeClaudeCode,
+		State: events.StateCreated, WorkDir: "/tmp/p", WorkspaceID: "",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, store.Upsert(ctx, info))
+
+	// 2. 模拟 SetWorkspaceID：第二次 Upsert 带 workspace_id
+	info.WorkspaceID = "ws-bound"
+	info.UpdatedAt = now.Add(time.Second)
+	require.NoError(t, store.Upsert(ctx, info))
+
+	// 3. 模拟重启后读取：workspace_id 必须持久化
+	got, err := store.Get(ctx, "sess-setws")
+	require.NoError(t, err)
+	require.Equal(t, "ws-bound", got.WorkspaceID, "SetWorkspaceID 后 workspace_id 必须持久化（不可被空串防护静默丢弃）")
+}
+
+// TestUpsert_EmptyWorkspaceID_ReadsAsEmpty 验证空 workspace_id 的 session 读取后仍为空（向后兼容）。
+func TestUpsert_EmptyWorkspaceID_ReadsAsEmpty(t *testing.T) {
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	now := time.Now()
+	require.NoError(t, store.Upsert(ctx, &SessionInfo{
+		ID: "sess-empty-ws", UserID: "u1", OwnerID: "u1", WorkerType: worker.TypeClaudeCode,
+		State: events.StateCreated, WorkDir: "/tmp/p", WorkspaceID: "",
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	got, err := store.Get(ctx, "sess-empty-ws")
+	require.NoError(t, err)
+	require.Equal(t, "", got.WorkspaceID, "空 workspace_id 读取后仍为空")
+}

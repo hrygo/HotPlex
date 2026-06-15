@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/sqlutil"
@@ -60,24 +61,44 @@ func runAdminCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
-	store, err := session.NewSQLiteStore(context.Background(), cfg, writeMu)
-	if err != nil {
-		return fmt.Errorf("open session store: %w", err)
+	var userStore security.UserStore
+	switch dbutil.ParseDialect(cfg.DB.Driver) {
+	case dbutil.DialectPostgres:
+		db, err := dbutil.Open(dbutil.DialectPostgres, &cfg.DB)
+		if err != nil {
+			return fmt.Errorf("open pg db: %w", err)
+		}
+		defer func() { _ = db.Close() }()
+		s, err := session.NewPGStore(context.Background(), db)
+		if err != nil {
+			return fmt.Errorf("open pg session store: %w", err)
+		}
+		ws, ok := s.(session.UserWorkspaceStore)
+		if !ok {
+			return fmt.Errorf("pg session store does not implement UserWorkspaceStore")
+		}
+		userStore = ws
+	default:
+		writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
+		s, err := session.NewSQLiteStore(context.Background(), cfg, writeMu)
+		if err != nil {
+			return fmt.Errorf("open session store: %w", err)
+		}
+		userStore = s
+		defer func() { _ = s.Close() }()
 	}
-	defer func() { _ = store.Close() }()
 
 	role := "user"
 	if isAdmin {
 		role = "admin"
 	}
-	idp := security.NewLocalAccountProvider(store, security.BcryptCostDefault)
+	idp := security.NewLocalAccountProvider(userStore, security.BcryptCostDefault)
 	hash, err := idp.HashPassword(password)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
 	u := &security.User{ID: uuid.NewString(), Username: username, PasswordHash: hash, Role: role, Status: "active"}
-	if err := store.CreateUser(context.Background(), u, time.Now().Unix()); err != nil {
+	if err := userStore.CreateUser(context.Background(), u, time.Now().Unix()); err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
 	_, _ = fmt.Fprintf(os.Stdout, "created %s user %q (id=%s)\n", role, username, u.ID)

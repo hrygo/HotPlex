@@ -20,5 +20,5 @@ INSERT INTO sessions (id, user_id, owner_id, bot_id, bot_name, worker_session_id
   context_json=excluded.context_json,
   source=CASE WHEN excluded.source != '' THEN excluded.source ELSE sessions.source END,
   client_key=CASE WHEN excluded.client_key != '' THEN excluded.client_key ELSE sessions.client_key END,
-  -- workspace_id 创建后不可变：仅当原值为 NULL（首次写入）时接受，防后续 upsert 覆盖。
-  workspace_id=CASE WHEN sessions.workspace_id IS NULL THEN excluded.workspace_id ELSE sessions.workspace_id END;
+  -- workspace_id 创建后不可变：仅当原值为 NULL 或空串（未绑定）时接受，防后续 upsert 覆盖。
+  workspace_id=CASE WHEN sessions.workspace_id IS NULL OR sessions.workspace_id = '' THEN excluded.workspace_id ELSE sessions.workspace_id END;
