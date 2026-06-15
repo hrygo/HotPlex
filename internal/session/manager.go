@@ -299,6 +299,26 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 	return info, nil
 }
 
+// SetWorkspaceID binds a session to a workspace and persists the change (spec ①).
+// Called by the WebChat multi-tenant path (Bridge.StartSession) after CreateWithBot.
+// Empty workspaceID is a no-op (platform/cron sessions remain unbound — backward
+// compatible with the legacy 4-field session key).
+func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) error {
+	if workspaceID == "" {
+		return nil
+	}
+	m.mu.Lock()
+	ms, ok := m.sessions[id]
+	if !ok {
+		m.mu.Unlock()
+		return ErrSessionNotFound
+	}
+	ms.info.WorkspaceID = workspaceID
+	info := ms.info
+	m.mu.Unlock()
+	return m.store.Upsert(ctx, &info)
+}
+
 // Get returns a snapshot of a session by ID. Returns ErrSessionNotFound if not found.
 // The returned *SessionInfo is a copy safe to read without holding locks.
 func (m *Manager) Get(ctx context.Context, id string) (*SessionInfo, error) {

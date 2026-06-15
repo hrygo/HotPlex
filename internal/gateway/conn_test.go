@@ -1204,6 +1204,11 @@ func (m *mockBridgeSM) ResetExpiry(ctx context.Context, id string) error {
 	return args.Error(0)
 }
 
+func (m *mockBridgeSM) SetWorkspaceID(ctx context.Context, id, workspaceID string) error {
+	args := m.Called(ctx, id, workspaceID)
+	return args.Error(0)
+}
+
 func (m *mockBridgeSM) UpdateWorkDir(ctx context.Context, id, workDir string) error {
 	args := m.Called(ctx, id, workDir)
 	return args.Error(0)

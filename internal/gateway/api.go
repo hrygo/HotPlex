@@ -38,6 +38,7 @@ type GatewayAPI struct {
 	cfgStore   *config.ConfigStore
 	turnsStore eventstore.TurnQuerier
 	eventStore EventStoreReader
+	wsStore    WorkspaceReader // WebChat 多租户 workspace 归属校验（spec ①）；nil = 未启用
 	log        *slog.Logger
 }
 
@@ -46,8 +47,15 @@ type EventStoreReader interface {
 	QueryBySession(ctx context.Context, sessionID string, cursor int64, dir eventstore.CursorDirection, limit int) (*eventstore.EventPage, error)
 }
 
-func NewGatewayAPI(log *slog.Logger, auth *security.Authenticator, sm apiSM, bridge SessionStarter, cfgStore *config.ConfigStore, turnsStore eventstore.TurnQuerier, eventStore EventStoreReader) *GatewayAPI {
-	return &GatewayAPI{auth: auth, sm: sm, bridge: bridge, cfgStore: cfgStore, turnsStore: turnsStore, eventStore: eventStore, log: log.With("component", "api")}
+// WorkspaceReader defines the subset of UserWorkspaceStore needed by the sessions
+// API for workspace ownership validation (spec ①). Kept narrow so unit tests can
+// mock a single method instead of the full UserWorkspaceStore.
+type WorkspaceReader interface {
+	GetWorkspaceByID(ctx context.Context, id string) (*session.Workspace, error)
+}
+
+func NewGatewayAPI(log *slog.Logger, auth *security.Authenticator, sm apiSM, bridge SessionStarter, cfgStore *config.ConfigStore, turnsStore eventstore.TurnQuerier, eventStore EventStoreReader, wsStore WorkspaceReader) *GatewayAPI {
+	return &GatewayAPI{auth: auth, sm: sm, bridge: bridge, cfgStore: cfgStore, turnsStore: turnsStore, eventStore: eventStore, wsStore: wsStore, log: log.With("component", "api")}
 }
 
 func respondJSON(w http.ResponseWriter, v any) {
@@ -132,20 +140,23 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{"sessions": sessions, "limit": limit, "offset": offset, "platform": platform})
 }
 
-// CreateSession creates a new AI agent session.
+// CreateSession creates a new AI agent session bound to a workspace (WebChat multi-tenant, spec ①).
 //
 // @Summary      Create session
-// @Description  Creates a new AI agent session. client_session_id is required and must be unique per user. Uses UUIDv5 derivation for idempotency.
+// @Description  Creates a new AI agent session. workspace_id and client_session_id are required. The workspace must be owned by the caller (403 WORKSPACE_FORBIDDEN otherwise). work_dir is taken from the workspace (immutable). Session id is UUIDv5 derived from (userID, workerType, clientKey, workspaceID, workDir) — 方案3.
 // @Tags         Gateway API
+// @Accept       json
 // @Produce      json
 // @Security     ApiKeyAuth
-// @Param        client_session_id  query    string  true   "Client-provided session identifier (max 128 chars)"
-// @Param        title              query    string  false  "Human-readable session title"
-// @Param        worker_type        query    string  false  "Worker type"      default(claudecode)
-// @Param        work_dir           query    string  false  "Working directory"
+// @Param        workspace_id      body     string  true   "Workspace ID (caller must own it)"
+// @Param        client_session_id body     string  true   "Client-provided session identifier (max 128 chars)"
+// @Param        title             body     string  false  "Human-readable session title"
+// @Param        worker_type       body     string  false  "Worker type"      default(claudecode)
 // @Success      200  {object}  admin.GatewayCreateSessionResponse
-// @Failure      400  {object}  admin.ErrorResponse  "Missing or invalid client_session_id"
+// @Failure      400  {object}  admin.ErrorResponse  "Missing client_session_id or workspace_id"
 // @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
+// @Failure      403  {object}  admin.ErrorResponse  "WORKSPACE_FORBIDDEN: not your workspace"
+// @Failure      404  {object}  admin.ErrorResponse  "WORKSPACE_NOT_FOUND"
 // @Failure      500  {object}  admin.ErrorResponse  "Failed to create session"
 // @Router       /api/sessions [post]
 func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +166,30 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	clientSessionID := strings.TrimSpace(r.URL.Query().Get("client_session_id"))
+
+	// Parse JSON body (preferred for WebChat multi-tenant) with query fallback
+	// for legacy callers (client_session_id / title / worker_type as query params).
+	var body struct {
+		WorkspaceID     string `json:"workspace_id"`
+		ClientSessionID string `json:"client_session_id"`
+		Title           string `json:"title"`
+		WorkerType      string `json:"worker_type"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body) // best-effort; query params may be used instead
+	}
+	clientSessionID := body.ClientSessionID
+	if clientSessionID == "" {
+		clientSessionID = strings.TrimSpace(r.URL.Query().Get("client_session_id"))
+	}
+	workspaceID := body.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	}
+	title := body.Title
+	if title == "" {
+		title = strings.TrimSpace(r.URL.Query().Get("title"))
+	}
 	clientSessionID = messaging.SanitizeText(clientSessionID)
 	if clientSessionID == "" {
 		g.log.Warn("gateway: create session missing client_session_id", "method", r.Method, "path", r.URL.Path)
@@ -167,8 +201,6 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("client_session_id too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
 		return
 	}
-
-	title := strings.TrimSpace(r.URL.Query().Get("title"))
 	title = messaging.SanitizeText(title)
 	if len(title) > session.MaxClientKeyLen {
 		g.log.Warn("gateway: create session title too long", "method", r.Method, "path", r.URL.Path, "title_len", len(title))
@@ -176,30 +208,45 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wt := worker.WorkerType(r.URL.Query().Get("worker_type"))
+	// workspace_id is mandatory on the WebChat multi-tenant track (spec ①): it
+	// anchors the session key (方案3) and supplies the immutable work_dir.
+	if workspaceID == "" {
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "workspace_id is required")
+		return
+	}
+	if g.wsStore == nil {
+		g.log.Error("gateway: workspace store not configured", "method", r.Method, "path", r.URL.Path)
+		http.Error(w, "workspace store unavailable", http.StatusInternalServerError)
+		return
+	}
+	ws, err := g.wsStore.GetWorkspaceByID(r.Context(), workspaceID)
+	if err != nil {
+		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "workspace not found")
+		return
+	}
+	if ws.OwnerUserID != userID {
+		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "ownership required")
+		return
+	}
+
+	// work_dir is immutable and comes from the workspace (spec §6.2).
+	workDir := ws.WorkDir
+
+	// worker_type resolution: body/query > workspace.WorkerPreference > default.
+	wt := worker.WorkerType(body.WorkerType)
+	if wt == "" {
+		wt = worker.WorkerType(r.URL.Query().Get("worker_type"))
+	}
+	if wt == "" {
+		wt = worker.WorkerType(ws.WorkerPreference)
+	}
 	if wt == "" {
 		wt = worker.TypeClaudeCode
 	}
 
-	// Resolve work dir: use client-provided value or default from config.
-	workDir := r.URL.Query().Get("work_dir")
-	if workDir == "" {
-		workDir = g.cfgStore.Load().Worker.DefaultWorkDir
-	}
-	if workDir != "" {
-		expanded, err := validateAndExpandWorkDir(workDir)
-		if err != nil {
-			g.log.Warn("gateway: create session invalid work_dir", "method", r.Method, "path", r.URL.Path, "work_dir", workDir, "err", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		workDir = expanded
-	}
-
-	// Derive session ID via UUIDv5 for consistency with WebSocket path.
-	// Both REST and WS use the auth userID ("anonymous" in dev mode, "api_user"
-	// with API keys) so they produce the same derived session ID.
-	id := session.DeriveSessionKey(userID, wt, clientSessionID, "", workDir)
+	// Session key 方案3: workspace_id participates in the UUIDv5 hash (spec §7).
+	// Same (userID, wt, clientKey, workspaceID, workDir) → same session id.
+	id := session.DeriveSessionKey(userID, wt, clientSessionID, ws.ID, workDir)
 
 	// Default userID after derivation — bridge expects non-empty.
 	if userID == "" {
@@ -218,14 +265,15 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := g.bridge.StartSession(r.Context(), worker.SessionStartParams{
-		ID:         id,
-		UserID:     userID,
-		BotID:      botID,
-		WorkerType: wt,
-		WorkDir:    workDir,
-		Platform:   platformWebChat,
-		Title:      title,
-		ClientKey:  clientSessionID,
+		ID:          id,
+		UserID:      userID,
+		BotID:       botID,
+		WorkerType:  wt,
+		WorkDir:     workDir,
+		Platform:    platformWebChat,
+		Title:       title,
+		ClientKey:   clientSessionID,
+		WorkspaceID: ws.ID,
 	}); err != nil {
 		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
 		http.Error(w, "failed to create session", http.StatusInternalServerError)

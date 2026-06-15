@@ -75,6 +75,7 @@ type GatewayDeps struct {
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
 	APIKeyStore     admin.APIKeyUserStorer
+	WorkspaceStore  session.UserWorkspaceStore
 	WriteMu         *sqlutil.WriteMu
 	ConfigPath      string
 	DevMode         bool
@@ -441,6 +442,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		DB:              stores.sqlDB,
 		DBResolver:      dbResolver,
 		APIKeyStore:     stores.apiKeyStore,
+		WorkspaceStore:  stores.wsStore,
 		WriteMu:         stores.writeMu,
 		ConfigPath:      configPath,
 		DevMode:         devMode,
@@ -761,6 +763,7 @@ type gatewayStores struct {
 	sqlDB       *sql.DB
 	dialect     dbutil.Dialect
 	apiKeyStore admin.APIKeyUserStorer
+	wsStore     session.UserWorkspaceStore
 	dbResolver  *security.DBResolver
 }
 
@@ -796,6 +799,7 @@ func initSQLiteStores(ctx context.Context, cfg *config.Config, log *slog.Logger)
 
 	return &gatewayStores{
 		session:     sessionStore,
+		wsStore:     sessionStore,
 		event:       eventStore,
 		turnQuerier: eventStore,
 		collector:   eventstore.NewCollector(eventStore, log),
@@ -824,8 +828,17 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 	chatAccessStore := messaging.NewChatAccessPGStore(db, log)
 	dbResolver := security.NewDBResolver(db.DB, dbutil.DialectPostgres)
 
+	// NewPGStore returns the narrow Store interface; assert the concrete *pgStore
+	// also satisfies UserWorkspaceStore (workspace CRUD, spec ①).
+	wsStore, ok := sessionStore.(session.UserWorkspaceStore)
+	if !ok {
+		_ = db.Close()
+		return nil, fmt.Errorf("pg: session store does not implement UserWorkspaceStore")
+	}
+
 	return &gatewayStores{
 		session:     sessionStore,
+		wsStore:     wsStore,
 		event:       eventStore,
 		turnQuerier: eventStore,
 		collector:   eventstore.NewCollector(eventStore, log),

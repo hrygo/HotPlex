@@ -103,6 +103,7 @@ type SessionStartParams struct {
 	PlatformKey   map[string]string // platform-specific context (channel IDs, cron metadata, etc.)
 	Title         string            // session title (display only)
 	ClientKey     string            // client session key for persistence
+	WorkspaceID   string            // WebChat 多租户锚（spec ①）；平台/cron 会话为空
 	InjectExclude []string          // agent config files to skip from injection
 }
 

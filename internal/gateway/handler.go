@@ -406,6 +406,13 @@ type SessionExpirer interface {
 	ResetExpiry(ctx context.Context, id string) error
 }
 
+// SessionWorkspaceBinder binds a session to a workspace (WebChat multi-tenant, spec ①).
+// Kept as a separate sub-interface so apiSM (GatewayAPI) does not need it — only
+// bridgeSM composes it, since workspace binding happens inside Bridge.StartSession.
+type SessionWorkspaceBinder interface {
+	SetWorkspaceID(ctx context.Context, id, workspaceID string) error
+}
+
 // SessionManager composes all session sub-interfaces for full management.
 type SessionManager interface {
 	SessionReader

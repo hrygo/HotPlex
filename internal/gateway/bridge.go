@@ -34,6 +34,7 @@ type bridgeSM interface {
 	SessionTransitioner
 	SessionWorkerManager
 	SessionExpirer
+	SessionWorkspaceBinder
 }
 
 // Bridge connects the gateway to the session manager.
@@ -161,6 +162,15 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 	if err != nil {
 		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "create_failed")))
 		return fmt.Errorf("bridge: create session: %w", err)
+	}
+
+	// Bind session to workspace (WebChat multi-tenant, spec ①). No-op for
+	// platform/cron sessions where WorkspaceID is empty. Non-fatal on failure:
+	// the session is created unbound rather than aborted.
+	if p.WorkspaceID != "" {
+		if err := b.sm.SetWorkspaceID(ctx, p.ID, p.WorkspaceID); err != nil {
+			b.log.Warn("bridge: bind workspace failed", "session_id", p.ID, "workspace_id", p.WorkspaceID, "err", err)
+		}
 	}
 
 	workerInfo := b.prepareWorkerInfo(p.ID, p.UserID, p.WorkDir, si)

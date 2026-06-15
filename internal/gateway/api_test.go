@@ -189,12 +189,44 @@ func newTestAuth(t *testing.T) *security.Authenticator {
 
 func newTestAPI(t *testing.T, sm *mockAPISM, bridge *mockAPIBridge) *GatewayAPI {
 	t.Helper()
-	return NewGatewayAPI(slog.Default(), newTestAuth(t), sm, bridge, config.NewConfigStore(&config.Config{}, nil), nil, nil)
+	return NewGatewayAPI(slog.Default(), newTestAuth(t), sm, bridge, config.NewConfigStore(&config.Config{}, nil), nil, nil, nil)
 }
 
 func newTestAPIWithTurns(t *testing.T, sm *mockAPISM, bridge *mockAPIBridge, turnsStore *mockTurnsStore) *GatewayAPI {
 	t.Helper()
-	return NewGatewayAPI(slog.Default(), newTestAuth(t), sm, bridge, config.NewConfigStore(&config.Config{}, nil), turnsStore, nil)
+	return NewGatewayAPI(slog.Default(), newTestAuth(t), sm, bridge, config.NewConfigStore(&config.Config{}, nil), turnsStore, nil, nil)
+}
+
+// mockAPIWorkspace mocks WorkspaceReader for CreateSession (workspace ownership) tests.
+type mockAPIWorkspace struct {
+	mock.Mock
+}
+
+func (m *mockAPIWorkspace) GetWorkspaceByID(ctx context.Context, id string) (*session.Workspace, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*session.Workspace), args.Error(1)
+}
+
+var _ WorkspaceReader = (*mockAPIWorkspace)(nil)
+
+// newTestAPIWithWorkspace wires a mock WorkspaceReader so CreateSession can run
+// its workspace ownership check.
+func newTestAPIWithWorkspace(t *testing.T, sm *mockAPISM, bridge *mockAPIBridge, ws *mockAPIWorkspace) *GatewayAPI {
+	t.Helper()
+	return NewGatewayAPI(slog.Default(), newTestAuth(t), sm, bridge, config.NewConfigStore(&config.Config{}, nil), nil, nil, ws)
+}
+
+// ownedWorkspaceMock returns a WorkspaceReader mock whose GetWorkspaceByID always
+// yields a workspace owned by the given user (default "anonymous" in dev mode).
+func ownedWorkspaceMock(owner, workDir string) *mockAPIWorkspace {
+	ws := new(mockAPIWorkspace)
+	ws.On("GetWorkspaceByID", mock.Anything, mock.Anything).Return(&session.Workspace{
+		ID: "ws-test", OwnerUserID: owner, WorkDir: workDir, Status: "active",
+	}, nil)
+	return ws
 }
 
 func authedReq(method, target string, body io.Reader) *http.Request {
@@ -221,16 +253,17 @@ func TestCreateSession_WithClientSessionID(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
-	api := newTestAPI(t, sm, bridge)
+	api := newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/proj"))
 
 	// Get returns not found → no idempotency path
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
 	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
 
+	body := strings.NewReader(`{"workspace_id":"ws-test","client_session_id":"client-1","title":"my-title"}`)
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=client-1&title=my-title", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions", body))
 
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp map[string]string
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	require.NotEmpty(t, resp["session_id"])
@@ -250,18 +283,48 @@ func TestCreateSession_MissingClientSessionID(t *testing.T) {
 	require.Contains(t, w.Body.String(), "client_session_id is required")
 }
 
-func TestCreateSession_ClientSessionIDOnlyNoTitle(t *testing.T) {
+func TestCreateSession_MissingWorkspaceID(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
 	api := newTestAPI(t, sm, bridge)
+
+	w := httptest.NewRecorder()
+	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=c1", nil))
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "workspace_id is required")
+}
+
+func TestCreateSession_WorkspaceForbidden(t *testing.T) {
+	t.Parallel()
+	sm := new(mockAPISM)
+	bridge := new(mockAPIBridge)
+	ws := new(mockAPIWorkspace)
+	ws.On("GetWorkspaceByID", mock.Anything, "ws-other").Return(&session.Workspace{
+		ID: "ws-other", OwnerUserID: "someone-else", WorkDir: "/tmp/p", Status: "active",
+	}, nil)
+	api := newTestAPIWithWorkspace(t, sm, bridge, ws)
+
+	w := httptest.NewRecorder()
+	api.CreateSession(w, authedReq("POST", "/api/sessions?workspace_id=ws-other&client_session_id=c1", nil))
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "WORKSPACE_FORBIDDEN")
+}
+
+func TestCreateSession_ClientSessionIDOnlyNoTitle(t *testing.T) {
+	t.Parallel()
+	sm := new(mockAPISM)
+	bridge := new(mockAPIBridge)
+	api := newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/proj"))
 
 	// title is optional, client_session_id alone should work
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
 	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=csid-only", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?workspace_id=ws-test&client_session_id=csid-only", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	bridge.AssertExpectations(t)
@@ -271,14 +334,14 @@ func TestCreateSession_IdempotentActiveSession(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
-	api := newTestAPI(t, sm, bridge)
+	api := newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/proj"))
 
 	active := &session.SessionInfo{ID: "existing-id", State: events.StateRunning}
 	sm.On("Get", mock.Anything).Return(active, nil)
 	// bridge.StartSession should NOT be called
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=test&title=test", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?workspace_id=ws-test&client_session_id=test&title=test", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	bridge.AssertNotCalled(t, "StartSession", mock.Anything)
@@ -288,7 +351,7 @@ func TestCreateSession_DeletedSessionRecreated(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
-	api := newTestAPI(t, sm, bridge)
+	api := newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/proj"))
 
 	deleted := &session.SessionInfo{ID: "deleted-id", State: events.StateDeleted}
 	sm.On("Get", mock.Anything).Return(deleted, nil)
@@ -296,7 +359,7 @@ func TestCreateSession_DeletedSessionRecreated(t *testing.T) {
 	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=test-csid&title=test", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?workspace_id=ws-test&client_session_id=test-csid&title=test", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	sm.AssertCalled(t, "DeletePhysical", mock.Anything, mock.Anything)
@@ -307,13 +370,13 @@ func TestCreateSession_BridgeError(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
-	api := newTestAPI(t, sm, bridge)
+	api := newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/proj"))
 
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
 	bridge.On("StartSession", mock.Anything, mock.Anything).Return(errTestBridge)
 
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=fail&title=fail", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?workspace_id=ws-test&client_session_id=fail&title=fail", nil))
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 	require.Contains(t, w.Body.String(), "failed to create session")
@@ -321,19 +384,25 @@ func TestCreateSession_BridgeError(t *testing.T) {
 
 var errTestBridge = fmt.Errorf("test bridge error")
 
-func TestCreateSession_WithWorkDir(t *testing.T) {
+// TestCreateSession_WorkDirFromWorkspace: work_dir comes from the workspace
+// (immutable, spec §6.2), never from the request query.
+func TestCreateSession_WorkDirFromWorkspace(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
-	api := newTestAPI(t, sm, bridge)
+	api := newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/ws-dir"))
 
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
-	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
+	// Capture StartSession params to verify WorkDir == workspace's, not the query's.
+	bridge.On("StartSession", mock.Anything, mock.MatchedBy(func(p worker.SessionStartParams) bool {
+		return p.WorkDir == "/tmp/hotplex/ws-dir" && p.WorkspaceID == "ws-test"
+	})).Return(nil)
 
+	// work_dir query must be ignored.
 	w := httptest.NewRecorder()
-	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=workdir-csid&title=with-workdir&work_dir=/tmp", nil))
+	api.CreateSession(w, authedReq("POST", "/api/sessions?workspace_id=ws-test&client_session_id=wd&work_dir=/tmp/IGNORED", nil))
 
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	bridge.AssertExpectations(t)
 }
 
