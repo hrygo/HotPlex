@@ -121,6 +121,41 @@ func TestWorkspacesStore_CountActiveSessions(t *testing.T) {
 	require.Equal(t, 0, n, "新 workspace 无活跃会话")
 }
 
+func TestWorkspacesStore_DeleteIfEmpty_NoSessions(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "p", WorkDir: "/tmp/x"}, 1700000000))
+
+	// 无活跃会话：原子删除成功。
+	require.NoError(t, store.DeleteWorkspaceIfEmpty(ctx, "ws-1"))
+	_, err := store.GetWorkspaceByID(ctx, "ws-1")
+	require.ErrorIs(t, err, ErrWorkspaceNotFound, "workspace 应已删除")
+}
+
+func TestWorkspacesStore_DeleteIfEmpty_BlockedByActiveSession(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "p", WorkDir: "/tmp/x"}, 1700000000))
+
+	// 插入一条活跃会话（state=running, workspace_id=ws-1）模拟 Count↔Delete 间的并发新建。
+	_, err := store.db.ExecContext(ctx, queries["sessions.upsert_session"],
+		"sess-1", "u-1", "u-1", "", "", "", "claude_code", "running", "webchat", "{}", "/tmp/x", "",
+		int64(1700000000), int64(1700000000), int64(1800000000), int64(1800000000), "{}", "", "ck-1", "ws-1")
+	require.NoError(t, err)
+
+	// 有活跃会话：原子删除拒绝（防 TOCTOU 后 workspace_id 悬空）。
+	err = store.DeleteWorkspaceIfEmpty(ctx, "ws-1")
+	require.ErrorIs(t, err, ErrWorkspaceNotEmpty)
+	// workspace 仍存在（未被删）。
+	got, gerr := store.GetWorkspaceByID(ctx, "ws-1")
+	require.NoError(t, gerr)
+	require.Equal(t, "ws-1", got.ID)
+}
+
 // --- invitations ---
 
 func TestInvitationsStore_CreateAndMarkUsedCAS(t *testing.T) {

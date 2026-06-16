@@ -1848,7 +1848,7 @@
                         }
                     },
                     {
-                        "description": "Client-provided session identifier (max 128 chars)",
+                        "description": "Client-provided session identifier (max 256 chars)",
                         "name": "client_session_id",
                         "in": "body",
                         "required": true,

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -186,16 +187,12 @@ func (h *WorkspaceHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
 	}
-	n, err := h.store.CountActiveSessionsInWorkspace(r.Context(), ws.ID)
-	if err != nil {
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "count failed")
-		return
-	}
-	if n > 0 {
-		writeAppError(w, http.StatusConflict, "WORKSPACE_NOT_EMPTY", "workspace has active sessions")
-		return
-	}
-	if err := h.store.DeleteWorkspace(r.Context(), ws.ID); err != nil {
+	// 原子删除：仅当无活跃会话时成功，防 Count↔Delete TOCTOU（spec §9.1）。
+	if err := h.store.DeleteWorkspaceIfEmpty(r.Context(), ws.ID); err != nil {
+		if errors.Is(err, session.ErrWorkspaceNotEmpty) {
+			writeAppError(w, http.StatusConflict, "WORKSPACE_NOT_EMPTY", "workspace has active sessions")
+			return
+		}
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")
 		return
 	}

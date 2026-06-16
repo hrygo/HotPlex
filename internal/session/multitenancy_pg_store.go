@@ -122,6 +122,19 @@ func (s *pgStore) DeleteWorkspace(ctx context.Context, id string) error {
 	return err
 }
 
+// DeleteWorkspaceIfEmpty 原子删除：仅当无活跃会话时成功（防 TOCTOU，spec §9.1）。
+func (s *pgStore) DeleteWorkspaceIfEmpty(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, s.queries["workspaces.delete_if_empty"], id, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrWorkspaceNotEmpty
+	}
+	return nil
+}
+
 func (s *pgStore) CountActiveSessionsInWorkspace(ctx context.Context, workspaceID string) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, s.queries["workspaces.count_active_sessions"], workspaceID).Scan(&n)

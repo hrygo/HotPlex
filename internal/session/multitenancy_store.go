@@ -35,6 +35,7 @@ type Invitation struct {
 // Multitenancy store sentinels.
 var (
 	ErrWorkspaceNotFound     = errors.New("session: workspace not found")
+	ErrWorkspaceNotEmpty     = errors.New("session: workspace has active sessions")
 	ErrInvitationNotFound    = errors.New("session: invitation not found")
 	ErrInvitationAlreadyUsed = errors.New("session: invitation already used")
 )
@@ -56,6 +57,9 @@ type UserWorkspaceStore interface {
 	GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error)
 	UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error
 	DeleteWorkspace(ctx context.Context, id string) error
+	// DeleteWorkspaceIfEmpty 原子删除：仅当无活跃会话时成功，防 Count↔Delete TOCTOU（spec §9.1）。
+	// 返回 ErrWorkspaceNotEmpty 若期间有新活跃会话。
+	DeleteWorkspaceIfEmpty(ctx context.Context, id string) error
 	CountActiveSessionsInWorkspace(ctx context.Context, workspaceID string) (int, error)
 	// invitations
 	CreateInvitation(ctx context.Context, inv *Invitation, now int64) error
@@ -249,6 +253,21 @@ func (s *SQLiteStore) DeleteWorkspace(ctx context.Context, id string) error {
 	return s.writeMu.WithLock(func() error {
 		_, err := s.db.ExecContext(ctx, queries["workspaces.delete"], id)
 		return err
+	})
+}
+
+// DeleteWorkspaceIfEmpty 原子删除：仅当无活跃会话时成功（防 TOCTOU，spec §9.1）。
+func (s *SQLiteStore) DeleteWorkspaceIfEmpty(ctx context.Context, id string) error {
+	return s.writeMu.WithLock(func() error {
+		res, err := s.db.ExecContext(ctx, queries["workspaces.delete_if_empty"], id, id)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return ErrWorkspaceNotEmpty
+		}
+		return nil
 	})
 }
 

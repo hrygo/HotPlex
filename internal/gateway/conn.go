@@ -829,6 +829,7 @@ func (c *Conn) bufferOrReject(data []byte) (bool, error) {
 func (c *Conn) markInitDone() {
 	c.mu.Lock()
 	c.initDone = true
+	needClose := false
 flushLoop:
 	for _, data := range c.initPending {
 		if c.closed {
@@ -838,12 +839,16 @@ flushLoop:
 		case c.writeCh <- data:
 		default:
 			c.log.Warn("gateway: init flush write channel full", "session_id", c.sessionID)
-			_ = c.Close()
+			needClose = true
 			break flushLoop
 		}
 	}
 	c.initPending = nil
 	c.mu.Unlock()
+	// 锁外调 Close：Close 内部获取 c.mu，sync.Mutex 不可重入，持锁调用会自死锁。
+	if needClose {
+		_ = c.Close()
+	}
 }
 
 // PreferEnvelope returns false: WebSocket connections benefit from pre-encoded
