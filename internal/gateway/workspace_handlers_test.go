@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -134,4 +135,93 @@ func TestWorkspace_RequiresAuth(t *testing.T) {
 	w := httptest.NewRecorder()
 	env.wsHandlers.List(w, req)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func (e *testAuthEnv) patchWorkspace(t *testing.T, cookie, id, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+id, bytes.NewReader([]byte(body)))
+	req.SetPathValue("id", id)
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	e.wsHandlers.Update(w, req)
+	return w
+}
+
+func TestWorkspace_PatchAgentConfigOverrides_Validation(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-patch")
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "valid overrides accepted",
+			body:       `{"agent_config_overrides":"{\"SOUL.md\":\"x\",\"USER.md\":\"y\"}"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "empty object clears overrides",
+			body:       `{"agent_config_overrides":"{}"}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "invalid JSON rejected",
+			body:       `{"agent_config_overrides":"{not json"}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "INVALID_CONFIG_JSON",
+		},
+		{
+			name:       "unknown key rejected",
+			body:       `{"agent_config_overrides":"{\"META-COGNITION.md\":\"x\"}"}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "UNKNOWN_CONFIG_FILE",
+		},
+		{
+			name:       "non-string value rejected",
+			body:       `{"agent_config_overrides":"{\"SOUL.md\":123}"}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "INVALID_CONFIG_VALUE",
+		},
+		{
+			name:       "oversized file rejected",
+			body:       `{"agent_config_overrides":"{\"SOUL.md\":\"` + strings.Repeat("a", 8001) + `\"}"}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "CONFIG_TOO_LARGE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			w := env.patchWorkspace(t, cookie, ws.ID, tt.body)
+			require.Equal(t, tt.wantStatus, w.Code, "body=%s", w.Body.String())
+			if tt.wantCode != "" {
+				require.Contains(t, w.Body.String(), tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestWorkspace_PatchAgentConfigOverrides_Persists(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-persist")
+
+	w := env.patchWorkspace(t, cookie, ws.ID, `{"agent_config_overrides":"{\"SOUL.md\":\"ws-soul\"}"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// Get round-trips the stored JSON (inner quotes are escaped by outer JSON encoding)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID, nil)
+	req.SetPathValue("id", ws.ID)
+	req.Header.Set("Cookie", cookie)
+	gr := httptest.NewRecorder()
+	env.wsHandlers.Get(gr, req)
+	require.Equal(t, http.StatusOK, gr.Code)
+	require.Contains(t, gr.Body.String(), `\"SOUL.md\":\"ws-soul\"`)
 }
