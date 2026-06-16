@@ -406,7 +406,7 @@ func TestBridge_InjectAgentConfig_BotNameResolution(t *testing.T) {
 			})
 
 			info := &worker.SessionInfo{}
-			b.injectAgentConfig(info, tt.platform, tt.botName, tt.botID, nil)
+			b.injectAgentConfig(info, tt.platform, tt.botName, tt.botID, nil, nil)
 
 			if tt.wantEmpty {
 				assert.Empty(t, info.SystemPrompt)

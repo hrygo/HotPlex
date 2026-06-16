@@ -59,13 +59,14 @@ type Bridge struct {
 	retryCancelMu  sync.Mutex
 	retryCancel    map[string]chan struct{} // sessionID → cancel channel
 
-	agentConfigDir     string        // agent config directory path; "" = disabled
-	turnTimeout        time.Duration // per-turn timeout; 0 = disabled
-	workerEnv          []string      // extra env vars from worker.environment config
-	workerEnvBlocklist []string      // extra blocklist entries from worker.env_blocklist config
-	cronEnv            []string      // env vars injected only into cron platform sessions
-	mcpConfigJSON      atomic.Value  // pre-serialized MCP config JSON string; "" = not configured
-	agentConfigExclude atomic.Value  // map[string][]string: platform → inject_exclude (global default at "" key)
+	agentConfigDir     string                   // agent config directory path; "" = disabled
+	turnTimeout        time.Duration            // per-turn timeout; 0 = disabled
+	workerEnv          []string                 // extra env vars from worker.environment config
+	workerEnvBlocklist []string                 // extra blocklist entries from worker.env_blocklist config
+	cronEnv            []string                 // env vars injected only into cron platform sessions
+	mcpConfigJSON      atomic.Value             // pre-serialized MCP config JSON string; "" = not configured
+	agentConfigExclude atomic.Value             // map[string][]string: platform → inject_exclude (global default at "" key)
+	wsStore            WorkspaceOverridesReader // per-workspace agent-config overrides resolver (spec ②); nil = Message Channel track
 
 	accum map[string]*sessionAccumulator // per-session stats accumulator
 
@@ -108,6 +109,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		workerEnv:          deps.WorkerEnv,
 		workerEnvBlocklist: deps.WorkerEnvBlocklist,
 		cronEnv:            deps.CronEnv,
+		wsStore:            deps.WSStore,
 		retryCancel:        make(map[string]chan struct{}),
 		accum:              make(map[string]*sessionAccumulator),
 		crashTracker:       make(map[string]*crashHistory),
@@ -187,14 +189,15 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 	}
 
 	if _, err := b.createAndLaunchWorker(workerLaunchParams{
-		ctx:           ctx,
-		wt:            p.WorkerType,
-		workerInfo:    workerInfo,
-		platform:      p.Platform,
-		botID:         p.BotID,
-		botName:       p.BotName,
-		forwardOpts:   &forwardOpts{workDir: p.WorkDir},
-		injectExclude: p.InjectExclude,
+		ctx:                ctx,
+		wt:                 p.WorkerType,
+		workerInfo:         workerInfo,
+		platform:           p.Platform,
+		botID:              p.BotID,
+		botName:            p.BotName,
+		forwardOpts:        &forwardOpts{workDir: p.WorkDir},
+		injectExclude:      p.InjectExclude,
+		workspaceOverrides: b.resolveWorkspaceOverrides(p.WorkspaceID),
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := w.Start(ctx, info); err != nil {
@@ -295,13 +298,14 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
-		ctx:         ctx,
-		wt:          si.WorkerType,
-		workerInfo:  workerInfo,
-		platform:    si.Platform,
-		botID:       si.BotID,
-		botName:     si.BotName,
-		forwardOpts: &opts,
+		ctx:                ctx,
+		wt:                 si.WorkerType,
+		workerInfo:         workerInfo,
+		platform:           si.Platform,
+		botID:              si.BotID,
+		botName:            si.BotName,
+		forwardOpts:        &opts,
+		workspaceOverrides: b.resolveWorkspaceOverrides(si.WorkspaceID),
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if si.State != events.StateRunning {
@@ -502,7 +506,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	if si, err := b.sm.Get(ctx, sessionID); err == nil {
 		if su, ok := w.(worker.SystemPromptUpdater); ok {
 			info := &worker.SessionInfo{SystemPrompt: ""}
-			b.injectAgentConfig(info, si.Platform, si.BotName, si.BotID, nil)
+			b.injectAgentConfig(info, si.Platform, si.BotName, si.BotID, nil, nil)
 			if info.SystemPrompt != "" {
 				su.UpdateSystemPrompt(info.SystemPrompt)
 				b.log.Info("bridge: reset reloaded agent config",
