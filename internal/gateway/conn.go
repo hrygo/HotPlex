@@ -336,6 +336,14 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 	}
 	workDir = expanded
 
+	// Reject "|" in the client-provided session_id: it flows into
+	// DeriveSessionKey's hash name and would alias session keys (review P3).
+	if verr := session.ValidateClientKey(env.SessionID); verr != nil {
+		c.sendInitError(events.ErrCodeProtocolViolation, "session_id must not contain '|'")
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeProtocolViolation))))
+		return "", nil, fmt.Errorf("init: invalid session_id: %w", verr)
+	}
+
 	var sessionID string
 	var preResolved *session.SessionInfo
 	if env.SessionID != "" {

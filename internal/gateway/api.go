@@ -168,7 +168,7 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Security     ApiKeyAuth
 // @Param        workspace_id      body     string  true   "Workspace ID (caller must own it)"
-// @Param        client_session_id body     string  true   "Client-provided session identifier (max 128 chars)"
+// @Param        client_session_id body     string  true   "Client-provided session identifier (max 256 chars)"
 // @Param        title             body     string  false  "Human-readable session title"
 // @Param        worker_type       body     string  false  "Worker type"      default(claudecode)
 // @Success      200  {object}  admin.GatewayCreateSessionResponse
@@ -218,6 +218,13 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	if len(clientSessionID) > session.MaxClientKeyLen {
 		g.log.Warn("gateway: create session client_session_id too long", "method", r.Method, "path", r.URL.Path, "len", len(clientSessionID))
 		http.Error(w, fmt.Sprintf("client_session_id too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
+		return
+	}
+	// Reject "|" in client_session_id: it is client-controlled and flows into
+	// DeriveSessionKey's hash name, where it would alias session keys (review P3).
+	if err := session.ValidateClientKey(clientSessionID); err != nil {
+		g.log.Warn("gateway: create session invalid client_session_id", "method", r.Method, "path", r.URL.Path)
+		http.Error(w, "client_session_id must not contain '|'", http.StatusBadRequest)
 		return
 	}
 	title = messaging.SanitizeText(title)

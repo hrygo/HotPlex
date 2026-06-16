@@ -32,6 +32,23 @@ func ValidateWorkDir(workDir string) error {
 	return nil
 }
 
+// ErrInvalidClientKey is returned when clientKey contains the "|" separator.
+// clientKey is client-controlled (REST client_session_id / WebSocket init
+// session_id) and flows directly into DeriveSessionKey's hash name, so a "|"
+// would collide with the field separators and alias a different (clientKey,
+// workspaceID) pair onto the same session key (review P3 fix).
+var ErrInvalidClientKey = errors.New("clientKey must not contain '|'")
+
+// ValidateClientKey checks that clientKey does not contain the "|" delimiter.
+// Entry points that feed user input into DeriveSessionKey must validate first
+// to prevent session-key aliasing.
+func ValidateClientKey(clientKey string) error {
+	if strings.Contains(clientKey, "|") {
+		return ErrInvalidClientKey
+	}
+	return nil
+}
+
 // DeriveSessionKey generates a deterministic server-side session ID using UUIDv5.
 // Same (ownerID, workerType, clientKey, workspaceID, workDir) always maps to the same session.
 // clientKey is a client-provided opaque identifier: REST API uses client_session_id,

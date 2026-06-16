@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1055,6 +1056,114 @@ func TestManager_AttachWorker_NotFound(t *testing.T) {
 	w.On("Terminate", mock.Anything).Return(nil)
 	err = m.AttachWorker(context.Background(), "sess_missing", w)
 	require.Error(t, err)
+}
+
+// TestManager_AttachWorker_SetWorkspaceID_Race: concurrent SetWorkspaceID (writes
+// ms.info.WorkspaceID) and AttachWorker (reads ms.info.WorkspaceID) must not
+// trigger the race detector. Review P1: AttachWorker must read ms.info fields
+// under ms.mu — matching Get's lock discipline — instead of under m.mu.RLock
+// alone. Run with -race.
+func TestManager_AttachWorker_SetWorkspaceID_Race(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil).Maybe()
+	m, err := NewManager(ctx, nil, cfg, nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	m.mu.Lock()
+	m.sessions["sess_race"] = &managedSession{info: SessionInfo{
+		ID:          "sess_race",
+		UserID:      "u1",
+		WorkerType:  worker.TypeClaudeCode,
+		State:       events.StateCreated,
+		WorkspaceID: "wsA",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}}
+	m.mu.Unlock()
+
+	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
+
+	// Hammer AttachWorker and SetWorkspaceID concurrently. Before the P1 fix,
+	// AttachWorker read ms.info.WorkspaceID under m.mu.RLock only (not ms.mu),
+	// racing the SetWorkspaceID write under ms.mu — -race reports it.
+	var wg sync.WaitGroup
+	const goroutines = 100
+	wg.Add(goroutines * 2)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			_ = m.AttachWorker(ctx, "sess_race", w)
+		}()
+		go func(i int) {
+			defer wg.Done()
+			workspaceID := "wsA"
+			if i%2 == 1 {
+				workspaceID = "wsB"
+			}
+			_ = m.SetWorkspaceID(ctx, "sess_race", workspaceID)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestManager_AttachWorker_QuotaNoDriftAfterWorkspaceChange: when SetWorkspaceID
+// flips ms.info.WorkspaceID between Acquire and Detach, the per-workspace quota
+// slot acquired at attach time must be released against the SAME workspace it
+// was acquired on (review P2 — quota drift). DetachWorker must use the
+// attach-time workspaceID, not the live ms.info.WorkspaceID, or wsA leaks and a
+// fresh wsA attach is rejected.
+func TestManager_AttachWorker_QuotaNoDriftAfterWorkspaceChange(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.Pool.MaxPerWorkspace = 1 // one slot per workspace
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("Upsert", mock.Anything, mock.AnythingOfType("*session.SessionInfo")).Return(nil).Maybe()
+	m, err := NewManager(ctx, nil, cfg, nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	seed := func(id, workspaceID string) {
+		m.mu.Lock()
+		m.sessions[id] = &managedSession{info: SessionInfo{
+			ID:          id,
+			UserID:      "u1",
+			WorkerType:  worker.TypeClaudeCode,
+			State:       events.StateCreated,
+			WorkspaceID: workspaceID,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}}
+		m.mu.Unlock()
+	}
+
+	w := newMockWorker(worker.TypeClaudeCode, 0)
+	w.On("Terminate", mock.Anything).Return(nil)
+
+	// s1 attaches on wsA, consuming wsA's only per-workspace slot.
+	seed("s1", "wsA")
+	require.NoError(t, m.AttachWorker(ctx, "s1", w))
+
+	// Flip s1's workspace to wsB AFTER attach. A buggy detach that reads live
+	// ms.info.WorkspaceID would release wsB (never acquired) and strand wsA.
+	require.NoError(t, m.SetWorkspaceID(ctx, "s1", "wsB"))
+	m.DetachWorker("s1")
+
+	// wsA's slot must have been released, so a fresh wsA session can attach.
+	seed("s2", "wsA")
+	require.NoError(t, m.AttachWorker(ctx, "s2", w),
+		"wsA quota leaked: DetachWorker released the wrong workspace (P2 drift)")
 }
 
 // ─── DetachWorker tests ───────────────────────────────────────────────────────

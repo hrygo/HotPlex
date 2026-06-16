@@ -588,7 +588,11 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 		pc.FromMap(si.PlatformKey)
 		newID = session.DerivePlatformSessionKey(si.UserID, si.WorkerType, pc)
 	} else {
-		newID = aep.NewSessionID()
+		// WebChat / direct-WS: derive deterministically from (owner, workerType,
+		// clientKey, workspace, workDir) so switch-workdir is resumable with a
+		// stable ID (review P2). Mirrors DerivePlatformSessionKey's doc note
+		// (key.go) which directs Web callers to DeriveSessionKey directly.
+		newID = session.DeriveSessionKey(si.UserID, si.WorkerType, si.ClientKey, si.WorkspaceID, expanded)
 	}
 
 	// Try to resume existing target session first (preserve conversation history).

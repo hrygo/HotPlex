@@ -170,12 +170,18 @@ func (m *Manager) getRunningSessionIDs() []string {
 
 // managedSession holds a session's in-memory state and its mutex.
 type managedSession struct {
-	info      SessionInfo
-	worker    worker.Worker
-	TurnCount int
-	startedAt time.Time
-	log       *slog.Logger
-	mu        sync.RWMutex // protects state transitions and input handling; reads use RLock
+	info   SessionInfo
+	worker worker.Worker
+	// attachedWorkspaceID is the workspaceID captured under ms.mu at attach
+	// time and used to pair every pool-quota release with its acquire. It is
+	// deliberately decoupled from ms.info.WorkspaceID so a concurrent
+	// SetWorkspaceID cannot strand a quota slot on the wrong workspace
+	// (review P2 quota-drift fix). Reads/writes are guarded by ms.mu.
+	attachedWorkspaceID string
+	TurnCount           int
+	startedAt           time.Time
+	log                 *slog.Logger
+	mu                  sync.RWMutex // protects state transitions and input handling; reads use RLock
 }
 
 // SessionInfo is the in-memory session metadata.
@@ -702,16 +708,19 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 		return ErrSessionNotFound
 	}
 
-	// Pre-check: read userID and worker status under RLock (no contention with reads).
+	// Pre-check: read userID, workspaceID and worker status under ms.mu.
+	// ms.info.WorkspaceID is a mutable field (written by SetWorkspaceID under
+	// ms.mu), so reading it under ms.mu matches Get's lock discipline and keeps
+	// the race detector quiet if a future writer ever drops m.mu (review P1).
 	m.mu.RLock()
 	ms, ok := m.sessions[id]
 	if !ok {
 		m.mu.RUnlock()
 		return ErrSessionNotFound
 	}
+	ms.mu.RLock()
 	userID := ms.info.UserID
 	workspaceID := ms.info.WorkspaceID
-	ms.mu.RLock()
 	alreadyAttached := ms.worker != nil
 	ms.mu.RUnlock()
 	m.mu.RUnlock()
@@ -765,6 +774,11 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 		return ErrSessionNotActive
 	}
 	ms.worker = w
+	// Pin quota ownership to the workspace acquired above so every later
+	// release (DetachWorker/Delete/transition) returns the slot to the SAME
+	// workspace, even if SetWorkspaceID mutates ms.info.WorkspaceID in between
+	// (review P2 quota-drift fix).
+	ms.attachedWorkspaceID = workspaceID
 	ms.startedAt = time.Now()
 	observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "success")))
 	observability.WorkerStarts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(ms.info.WorkerType)), attribute.String("result", "success")))
@@ -793,7 +807,10 @@ func (m *Manager) GetWorker(id string) worker.Worker {
 // releaseWorkerQuota releases both concurrency slot and memory quota.
 // pool.Release now handles both slot and memory under a single lock.
 func (m *Manager) releaseWorkerQuota(ctx context.Context, ms *managedSession) {
-	m.pool.ReleaseForWorkspace(ctx, ms.info.UserID, ms.info.WorkspaceID)
+	// Release against the workspace the quota was acquired on at attach time
+	// (attachedWorkspaceID), not the possibly-since-changed ms.info.WorkspaceID,
+	// so the release always pairs with its acquire (review P2 quota-drift fix).
+	m.pool.ReleaseForWorkspace(ctx, ms.info.UserID, ms.attachedWorkspaceID)
 }
 
 // DetachWorker removes the worker from the session and releases the concurrency quota.
@@ -831,7 +848,9 @@ func (m *Manager) detachWorkerUnchecked(id string, expected worker.Worker) bool 
 	workerType := ms.info.WorkerType
 	ms.worker = nil
 	uid := ms.info.UserID
-	wsID := ms.info.WorkspaceID
+	// Release against the workspace the quota was acquired on at attach time
+	// (review P2 quota-drift fix), not the live ms.info.WorkspaceID.
+	wsID := ms.attachedWorkspaceID
 	ms.mu.Unlock()
 
 	if hasWorker {
@@ -899,7 +918,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		ms.info = candidate
 		if hasWorkerAfter {
 			workersRunningGauge(string(workerType)).Add(-1)
-			m.pool.ReleaseForWorkspace(ctx, uid, ms.info.WorkspaceID)
+			// Release against the workspace the quota was acquired on at attach
+			// time (review P2 quota-drift fix), not the live ms.info.WorkspaceID.
+			m.pool.ReleaseForWorkspace(ctx, uid, ms.attachedWorkspaceID)
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)
