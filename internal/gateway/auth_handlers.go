@@ -136,6 +136,27 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "code, username, password required")
 		return
 	}
+	// Validate username format BEFORE touching the invitation: a malformed or
+	// reserved-namespace ("apikey:") username must not consume a one-time code
+	// (review fix — prevents both invite-burning and migration-018 namespace
+	// collision / identity takeover).
+	if err := security.ValidateUsername(req.Username); err != nil {
+		writeAppError(w, http.StatusBadRequest, "INVALID_USERNAME",
+			"username must be 3-64 chars, [a-zA-Z0-9_.-], and not start with 'apikey:'")
+		return
+	}
+	// Validate password length BEFORE consuming the invitation: bcrypt rejects
+	// passwords >72 bytes (GenerateFromPassword returns bcrypt.ErrPasswordTooLong),
+	// which would otherwise burn the one-time code and surface as a confusing 500.
+	// Min 8 mirrors the `hotplex admin create` CLI policy (review fix).
+	if len(req.Password) > 72 {
+		writeAppError(w, http.StatusBadRequest, "INVALID_PASSWORD", "password too long (max 72 bytes)")
+		return
+	}
+	if len(req.Password) < 8 {
+		writeAppError(w, http.StatusBadRequest, "INVALID_PASSWORD", "password too short (min 8 chars)")
+		return
+	}
 	ctx := r.Context()
 	inv, err := h.store.GetInvitationByCode(ctx, req.Code)
 	if err != nil {
@@ -192,7 +213,11 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 
 // isUniqueViolation detects a UNIQUE constraint violation across SQLite and PG.
 // Uses driver-specific error types where possible; falls back to error string
-// matching for drivers that don't expose structured codes.
+// matching for drivers that don't expose structured codes. The SQLite arm uses
+// the exact phrase "UNIQUE constraint failed" (matching dbutil.Dialect's
+// canonical IsUniqueViolation) rather than a looser "UNIQUE" substring, so an
+// unrelated SQLite error whose text happens to contain "UNIQUE" is not
+// misclassified as a constraint violation (review fix).
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
@@ -202,9 +227,8 @@ func isUniqueViolation(err error) bool {
 	if errors.As(err, &pgErr) && pgErr.SQLState() == "23505" {
 		return true
 	}
-	// SQLite (modernc.org/sqlite): fallback to string match
-	msg := err.Error()
-	return strings.Contains(msg, "UNIQUE") || strings.Contains(msg, "23505")
+	// SQLite (modernc.org/sqlite): exact-phrase match (no structured code).
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 // --- admin endpoints (spec §11.2, require admin role) ---

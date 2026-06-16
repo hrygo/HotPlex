@@ -19,24 +19,16 @@ var hotplexNamespace = uuid.MustParse("urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd4
 // Cron sessions use this namespace to guarantee they never collide with feishu/slack sessions.
 var CronNamespace = uuid.NewHash(sha1.New(), hotplexNamespace, []byte("cron"), 5)
 
-// ErrInvalidWorkDir is returned when workDir contains the "|" separator, which
-// could cause a theoretical hash collision in DeriveSessionKey (review P3 fix).
-var ErrInvalidWorkDir = errors.New("workDir must not contain '|'")
-
-// ValidateWorkDir checks that workDir does not contain the "|" delimiter used
-// internally by DeriveSessionKey to concatenate hash fields.
-func ValidateWorkDir(workDir string) error {
-	if strings.Contains(workDir, "|") {
-		return ErrInvalidWorkDir
-	}
-	return nil
-}
-
 // ErrInvalidClientKey is returned when clientKey contains the "|" separator.
 // clientKey is client-controlled (REST client_session_id / WebSocket init
 // session_id) and flows directly into DeriveSessionKey's hash name, so a "|"
 // would collide with the field separators and alias a different (clientKey,
 // workspaceID) pair onto the same session key (review P3 fix).
+//
+// Note: work_dir "|" rejection is handled by security.ValidateWorkDir (the full
+// path-safety validator, which also rejects "|"). An earlier session-scope
+// ValidateWorkDir subset was removed as a confusing same-named duplicate
+// (review fix).
 var ErrInvalidClientKey = errors.New("clientKey must not contain '|'")
 
 // ValidateClientKey checks that clientKey does not contain the "|" delimiter.

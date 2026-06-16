@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -151,7 +152,7 @@ func TestAcceptInvite_ExpiredInvitation(t *testing.T) {
 		ID: "inv-exp", Code: "EXPIRED1", CreatedBy: "u-admin", Role: "user", ExpiresAt: 1000,
 	}, 1700000000))
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/accept-invite",
-		bytes.NewReader([]byte(`{"code":"EXPIRED1","username":"x","password":"x1234567"}`)))
+		bytes.NewReader([]byte(`{"code":"EXPIRED1","username":"newuser","password":"x1234567"}`)))
 	w := httptest.NewRecorder()
 	env.handlers.AcceptInvite(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)
@@ -227,4 +228,71 @@ func TestAcceptInvite_UsernameTaken_ConsumesInvitation(t *testing.T) {
 	env.handlers.AcceptInvite(w3, req3)
 	require.Equal(t, http.StatusBadRequest, w3.Code, w3.Body.String())
 	require.Contains(t, w3.Body.String(), "INVITATION_USED", "邀请码必须已被消费")
+}
+
+// TestAcceptInvite_InvalidUsername_PreservesInvitation 验证非法用户名（含保留命名空间
+// "apikey:"）在消费邀请码之前被拒——邀请码保持未消费，可被合法用户继续使用（review fix）。
+func TestAcceptInvite_InvalidUsername_PreservesInvitation(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	env.handlers.AdminCreateInvitation(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.NotEmpty(t, resp.Code)
+
+	// 保留命名空间用户名 → 拒绝。
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/accept-invite", bytes.NewReader(
+		[]byte(`{"code":"`+resp.Code+`","username":"apikey:evil","password":"n00bpass123"}`)))
+	w2 := httptest.NewRecorder()
+	env.handlers.AcceptInvite(w2, req2)
+	require.Equal(t, http.StatusBadRequest, w2.Code, w2.Body.String())
+	require.Contains(t, w2.Body.String(), "INVALID_USERNAME")
+
+	// 邀请码未被消费：用合法用户名再次 accept 应成功。
+	req3 := httptest.NewRequest(http.MethodPost, "/api/auth/accept-invite", bytes.NewReader(
+		[]byte(`{"code":"`+resp.Code+`","username":"legituser","password":"n00bpass123"}`)))
+	w3 := httptest.NewRecorder()
+	env.handlers.AcceptInvite(w3, req3)
+	require.Equal(t, http.StatusOK, w3.Code, "邀请码必须仍可用 body=%s", w3.Body.String())
+}
+
+// TestAcceptInvite_PasswordTooLong_PreservesInvitation 验证 >72 字节密码在消费邀请码
+// 之前被拒——防止 bcrypt 错误烧毁一次性邀请码（review fix）。
+func TestAcceptInvite_PasswordTooLong_PreservesInvitation(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	env.handlers.AdminCreateInvitation(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.NotEmpty(t, resp.Code)
+
+	// 73 字节密码 → 拒绝（bcrypt 上限 72）。
+	longPW := strings.Repeat("a", 73)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/accept-invite", bytes.NewReader(
+		[]byte(`{"code":"`+resp.Code+`","username":"legituser","password":"`+longPW+`"}`)))
+	w2 := httptest.NewRecorder()
+	env.handlers.AcceptInvite(w2, req2)
+	require.Equal(t, http.StatusBadRequest, w2.Code, w2.Body.String())
+	require.Contains(t, w2.Body.String(), "INVALID_PASSWORD")
+
+	// 邀请码未被消费：用合法密码再次 accept 应成功。
+	req3 := httptest.NewRequest(http.MethodPost, "/api/auth/accept-invite", bytes.NewReader(
+		[]byte(`{"code":"`+resp.Code+`","username":"legituser","password":"n00bpass123"}`)))
+	w3 := httptest.NewRecorder()
+	env.handlers.AcceptInvite(w3, req3)
+	require.Equal(t, http.StatusOK, w3.Code, "邀请码必须仍可用 body=%s", w3.Body.String())
 }

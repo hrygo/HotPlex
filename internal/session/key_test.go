@@ -298,13 +298,3 @@ func TestPlatformContext_FromMap_BotID(t *testing.T) {
 	pc2.FromMap(map[string]string{"team_id": "T001"})
 	require.Empty(t, pc2.BotID)
 }
-
-// TestValidateWorkDir_RejectsPipe: workDir containing "|" must be rejected (review P3 fix).
-func TestValidateWorkDir_RejectsPipe(t *testing.T) {
-	t.Parallel()
-
-	require.NoError(t, ValidateWorkDir("/tmp/hotplex/workspace"))
-	require.NoError(t, ValidateWorkDir(""))
-	require.ErrorIs(t, ValidateWorkDir("/tmp/hotplex|workspace"), ErrInvalidWorkDir)
-	require.ErrorIs(t, ValidateWorkDir("/tmp/a|b|c"), ErrInvalidWorkDir)
-}

@@ -55,6 +55,15 @@ func runAdminCreate(cmd *cobra.Command, _ []string) error {
 	if len(password) < 8 {
 		return fmt.Errorf("password too short (min 8 chars)")
 	}
+	// Validate username format: reject the reserved "apikey:" namespace and
+	// enforce charset/length. Without this a bootstrap operator could create a
+	// user whose name collides with migration 018's provisioned-user namespace,
+	// turning its WHERE NOT EXISTS guard into an identity-takeover vector
+	// (review fix).
+	if err := security.ValidateUsername(username); err != nil {
+		return fmt.Errorf("invalid username: must be %d-%d chars, [a-zA-Z0-9_.-], and not start with %q",
+			security.UsernameMinLen, security.UsernameMaxLen, security.ReservedUsernamePrefix)
+	}
 
 	cfg, err := loadConfig(configPath, false)
 	if err != nil {

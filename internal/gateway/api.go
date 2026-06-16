@@ -257,7 +257,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 
 	// work_dir is immutable and comes from the workspace (spec §6.2).
 	workDir := ws.WorkDir
-	if err := session.ValidateWorkDir(workDir); err != nil {
+	if err := security.ValidateWorkDir(workDir); err != nil {
 		g.log.Error("workspace workDir failed validation", "method", r.Method, "path", r.URL.Path, "workspace_id", workspaceID, "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INVALID_WORK_DIR", "workspace work_dir is invalid")
 		return
@@ -417,6 +417,20 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 	if !si.State.IsActive() {
 		g.log.Warn("gateway: switch workdir session not active", "session_id", id, "method", r.Method, "path", r.URL.Path, "state", si.State)
 		writeAppError(w, http.StatusConflict, "SESSION_NOT_ACTIVE", "session not active")
+		return
+	}
+
+	// Workspace-bound WebChat sessions derive work_dir from their workspace, which
+	// is immutable (spec §6.2 — enforced at CreateSession, api.go ~L258). Allowing
+	// /cd here would start the worker in a directory its workspace doesn't own
+	// while keeping the session bound to the original workspace, breaking that
+	// invariant — and (because DeleteWorkspaceIfEmpty counts active sessions by
+	// workspace_id, not work_dir) could let another workspace be hard-deleted
+	// while a worker is still running in its directory (review fix).
+	// Platform/messaging sessions (WorkspaceID == "") legitimately support /cd.
+	if si.WorkspaceID != "" {
+		writeAppError(w, http.StatusBadRequest, "WORK_DIR_IMMUTABLE",
+			"work_dir is immutable for workspace-bound sessions; use a different workspace")
 		return
 	}
 

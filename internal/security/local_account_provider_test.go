@@ -83,6 +83,22 @@ func TestLocalAccountProvider_DisabledUser(t *testing.T) {
 	requireIdentityCode(t, err, ErrCodeUserDisabled)
 }
 
+// TestLocalAccountProvider_DisabledUserWrongPasswordIsInvalidCredentials verifies
+// the anti-enumeration invariant: a disabled account probed with the WRONG
+// password must return INVALID_CREDENTIALS (indistinguishable from a nonexistent
+// user), NOT USER_DISABLED. Surfacing USER_DISABLED on a wrong password would let
+// an attacker enumerate which harvested usernames exist and are disabled
+// (review fix — disabled check now runs AFTER password verification).
+func TestLocalAccountProvider_DisabledUserWrongPasswordIsInvalidCredentials(t *testing.T) {
+	t.Parallel()
+	store := &stubUserStore{byUsername: map[string]*User{}}
+	prov := NewLocalAccountProvider(store, testBcryptCost)
+	store.byUsername["bob"] = &User{ID: "u-2", Username: "bob", PasswordHash: mustHash(t, "s3cret", testBcryptCost), Status: "disabled"}
+
+	_, err := prov.Authenticate(context.Background(), LoginCredentials{Username: "bob", Password: "wrong-password"})
+	requireIdentityCode(t, err, ErrCodeInvalidCredentials)
+}
+
 func TestLocalAccountProvider_EmptyHashBlocksLogin(t *testing.T) {
 	t.Parallel()
 	store := &stubUserStore{byUsername: map[string]*User{}}

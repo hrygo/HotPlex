@@ -29,8 +29,12 @@ func NewLocalAccountProvider(store UserStore, bcryptCost int) *LocalAccountProvi
 }
 
 // Authenticate validates login credentials and returns the user ID (spec §8.2).
-// All failure modes except "disabled" return INVALID_CREDENTIALS to prevent
-// username enumeration.
+// Anti-enumeration invariant: a caller WITHOUT the correct password must never
+// learn whether the username exists or is disabled. All wrong-password cases
+// (user-not-found, API-key-provisioned, disabled, bad-password) collapse to a
+// single INVALID_CREDENTIALS response. USER_DISABLED is surfaced ONLY after the
+// password is verified correct — so an attacker probing with a guessed password
+// cannot distinguish a disabled real account from a nonexistent one (review fix).
 func (p *LocalAccountProvider) Authenticate(ctx context.Context, creds Credentials) (string, error) {
 	lc, ok := creds.(LoginCredentials)
 	if !ok {
@@ -48,11 +52,15 @@ func (p *LocalAccountProvider) Authenticate(ctx context.Context, creds Credentia
 	if u.PasswordHash == "" {
 		return "", errInvalidCredentials
 	}
-	if u.Status == "disabled" {
-		return "", errUserDisabled
-	}
+	// Verify the password FIRST. A wrong password must never reveal account
+	// existence or status — return INVALID_CREDENTIALS regardless of disabled.
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(lc.Password)); err != nil {
 		return "", errInvalidCredentials
+	}
+	// Password correct: now safe to surface the disabled state to the genuine
+	// account holder without leaking it to password-probing attackers.
+	if u.Status == "disabled" {
+		return "", errUserDisabled
 	}
 	return u.ID, nil
 }

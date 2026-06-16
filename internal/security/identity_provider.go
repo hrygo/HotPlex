@@ -4,6 +4,7 @@ package security
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // User is the canonical user record surfaced to the identity layer.
@@ -68,3 +69,48 @@ const (
 	ErrCodeUserDisabled       = "USER_DISABLED"
 	ErrCodeUserNotFound       = "USER_NOT_FOUND"
 )
+
+// Username policy bounds (spec §8 account-login channel).
+const (
+	UsernameMinLen = 3
+	UsernameMaxLen = 64
+)
+
+// ReservedUsernamePrefix is the namespace migration 018 uses to provision
+// API-key pseudo-users (username = "apikey:" || user_id). A real account with
+// this prefix would collide with that namespace: it becomes fully account-login
+// able (blurring the API-key vs account-login boundary migration 018 relies on)
+// and can hijack migration 018's WHERE NOT EXISTS guard into re-pointing a
+// legitimate API key at the attacker-controlled account (identity takeover).
+// ValidateUsername rejects it (code-review fix).
+const ReservedUsernamePrefix = "apikey:"
+
+// ErrInvalidUsername is returned by ValidateUsername on any policy violation.
+var ErrInvalidUsername = errors.New("security: invalid username")
+
+// ValidateUsername enforces the account-login username policy: length 3-64,
+// charset [a-zA-Z0-9_.-], and must not collide with the reserved API-key
+// namespace. Applied at every user-creation entry point (accept-invite, admin
+// CLI) so the reserved prefix can never reach the users table (review fix).
+func ValidateUsername(username string) error {
+	if len(username) < UsernameMinLen || len(username) > UsernameMaxLen {
+		return ErrInvalidUsername
+	}
+	// Explicit reserved-namespace guard (the charset check below also rejects
+	// the ":" in the prefix; kept for documentation and to survive a future
+	// charset relaxation).
+	if strings.HasPrefix(username, ReservedUsernamePrefix) {
+		return ErrInvalidUsername
+	}
+	for _, r := range username {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == '.':
+		default:
+			return ErrInvalidUsername
+		}
+	}
+	return nil
+}

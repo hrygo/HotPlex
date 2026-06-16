@@ -592,6 +592,31 @@ func TestSwitchWorkDir_SessionNotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestSwitchWorkDir_WorkspaceBoundRejected 验证工作区绑定的 WebChat session 不能
+// 通过 /cd 切换 work_dir——work_dir 来自工作区且不可变（spec §6.2）。切换会破坏
+// "work_dir 来自 workspace" 不变量，并可能让另一工作区在 worker 仍在跑时被删
+// （review fix）。
+func TestSwitchWorkDir_WorkspaceBoundRejected(t *testing.T) {
+	t.Parallel()
+	sm := new(mockAPISM)
+	bridge := new(mockAPIBridge)
+	api := newTestAPI(t, sm, bridge)
+
+	// WorkspaceID 非空 = 工作区绑定的 WebChat session。
+	si := &session.SessionInfo{ID: "sess-ws", State: events.StateRunning, UserID: "anonymous", WorkspaceID: "ws-1"}
+	sm.On("Get", "sess-ws").Return(si, nil)
+	// bridge.SwitchWorkDir 必须不被调用。
+	bridge.AssertNotCalled(t, "SwitchWorkDir")
+
+	mux := setupMux(api)
+	w := httptest.NewRecorder()
+	req := authedReq("POST", "/api/sessions/sess-ws/cd", strings.NewReader(`{"work_dir":"/tmp"}`))
+	mux.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "WORK_DIR_IMMUTABLE")
+}
+
 // ─── GetHistory tests ───────────────────────────────────────────────────────────
 
 func TestGetHistory_Success(t *testing.T) {
