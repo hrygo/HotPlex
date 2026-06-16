@@ -1,7 +1,7 @@
 # WebChat 一等公民化与多租户路线图
 
 **日期**: 2026-06-15
-**状态**: Planning（spec ① 已设计，②-⑥ 待逐个 brainstorm）
+**状态**: spec ① 实现完成 Phase 0-7（[PR #746](https://github.com/hrygo/hotplex/pull/746)，待 review）；②-⑥ 待逐个 brainstorm
 **分支**: main · **基线版本**: v1.29.0 (fb857af1)
 **关联设计**: [`WebChat-Multitenancy-Foundation-Design-Spec.md`](./WebChat-Multitenancy-Foundation-Design-Spec.md)（spec ①）
 
@@ -23,10 +23,10 @@
 
 ## 2. 子系统分解与依赖
 
-整个愿景拆成 **6 个独立 spec**，有明确依赖顺序。spec ①（地基）已设计完成，②-⑥ 各自走独立的 design → plan → implementation 周期。
+整个愿景拆成 **6 个独立 spec**，有明确依赖顺序。spec ①（地基）已实现完成（Phase 0-7，PR #746），②-⑥ 各自走独立的 design → plan → implementation 周期。
 
 ```
-① 身份 + workspace + 隔离（地基，已设计）   ← 一切的前提
+① 身份 + workspace + 隔离（地基，✅ 已实现 PR#746）← 一切的前提
         │
         ├──────────────┐
         ▼              ▼
@@ -54,13 +54,13 @@
 
 ## 3. 阶段规划
 
-### 阶段 A：地基（进行中）
+### 阶段 A：地基（spec ① 实现完成，待合入）
 
 | spec | 标题 | 状态 | 文档 |
 |---|---|---|---|
-| ① | 身份 + workspace + 隔离 | ✅ 设计完成，待实现 | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
+| ① | 身份 + workspace + 隔离 | ✅ 实现完成 Phase 0-7（[PR #746](https://github.com/hrygo/hotplex/pull/746)，待 review） | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
 
-阶段 A 交付后：WebChat 后端具备真实用户身份、workspace 实体、会话隔离、多租户配额框架。验收通过 HTTP API 测试（webchat 前端生产登录 UI 归阶段 C）。
+阶段 A 已交付（PR #746）：WebChat 后端具备真实用户身份、workspace 实体、会话隔离（ListSessions SQL 级 workspace 过滤 + authorizeSession 二次校验）、多租户配额（PoolManager 全局 + per-user + per-workspace 三层并发）。`make check` 通过。剩余增量（SwitchWorkDir 重映射 / 迁移验证测试 / 旧 webchat 会话清理 / e2e 集成测试）作为 spec ① 后续提交，不阻塞阶段 B 启动。
 
 ### 阶段 B：能力补全（① 之后并行）
 
@@ -196,8 +196,8 @@
 ## 7. 推进节奏
 
 - 每个 spec 独立 brainstorm → 设计文档（`docs/specs/`）→ writing-plans → 实现。
-- spec ① 实现完成并合入后，启动 spec ②③④（可并行）。
+- spec ① 已实现完成（Phase 0-7，PR #746），合入后启动 spec ②③④（可并行）。
 - spec ⑥ 在 ②③④就绪后启动。
 - 路线图文档随各 spec 推进更新状态。
 
-**下一步**：审阅 spec ① 设计文档 → 通过后用 writing-plans 生成 spec ① 实现计划。
+**下一步**：spec ① PR #746 review 合入 → 启动 spec ②③④ brainstorm（per-workspace agent-configs / workspace 级 worker 选择 / OAuth SSO，三者互不依赖可并行）。spec ① 剩余增量（SwitchWorkDir 重映射 / 迁移验证 / e2e）可穿插提交。
