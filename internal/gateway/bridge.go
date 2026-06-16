@@ -506,7 +506,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	if si, err := b.sm.Get(ctx, sessionID); err == nil {
 		if su, ok := w.(worker.SystemPromptUpdater); ok {
 			info := &worker.SessionInfo{SystemPrompt: ""}
-			b.injectAgentConfig(info, si.Platform, si.BotName, si.BotID, nil, nil)
+			b.injectAgentConfig(info, si.Platform, si.BotName, si.BotID, nil, b.resolveWorkspaceOverrides(si.WorkspaceID))
 			if info.SystemPrompt != "" {
 				su.UpdateSystemPrompt(info.SystemPrompt)
 				b.log.Info("bridge: reset reloaded agent config",
