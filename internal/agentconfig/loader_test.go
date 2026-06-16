@@ -443,3 +443,86 @@ func TestLoadWithInjectExclude(t *testing.T) {
 		require.Equal(t, "Rules.", cfg.Agents)
 	})
 }
+
+func TestLoadForWorkspace(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil overrides inherits team defaults", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "team-soul")
+		writeFile(t, dir, "AGENTS.md", "team-rules")
+
+		cfg, err := LoadForWorkspace(dir, "webchat", nil)
+		require.NoError(t, err)
+		require.Equal(t, "team-soul", cfg.Soul)
+		require.Equal(t, "team-rules", cfg.Agents)
+	})
+
+	t.Run("override replaces team default per-file", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "team-soul")
+		writeFile(t, dir, "AGENTS.md", "team-rules")
+
+		overrides := map[string]string{"SOUL.md": "ws-soul"}
+		cfg, err := LoadForWorkspace(dir, "webchat", overrides)
+		require.NoError(t, err)
+		require.Equal(t, "ws-soul", cfg.Soul)      // overridden
+		require.Equal(t, "team-rules", cfg.Agents) // inherited
+	})
+
+	t.Run("empty override value inherits team default", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "team-soul")
+
+		overrides := map[string]string{"SOUL.md": ""}
+		cfg, err := LoadForWorkspace(dir, "webchat", overrides)
+		require.NoError(t, err)
+		require.Equal(t, "team-soul", cfg.Soul) // empty value does not override
+	})
+
+	t.Run("override without team default applies", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir() // no team files
+
+		overrides := map[string]string{"USER.md": "ws-user"}
+		cfg, err := LoadForWorkspace(dir, "webchat", overrides)
+		require.NoError(t, err)
+		require.Equal(t, "ws-user", cfg.User)
+	})
+
+	t.Run("injectExclude wins over override", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SOUL.md", "team-soul")
+
+		overrides := map[string]string{"SOUL.md": "ws-soul"}
+		cfg, err := LoadForWorkspace(dir, "webchat", overrides, "SOUL.md")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Soul) // excluded even though overridden
+	})
+
+	t.Run("unknown override keys ignored (defense-in-depth)", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		overrides := map[string]string{"META-COGNITION.md": "evil", "foo.md": "x", "SOUL.md": "ws-soul"}
+		cfg, err := LoadForWorkspace(dir, "webchat", overrides)
+		require.NoError(t, err)
+		require.Equal(t, "ws-soul", cfg.Soul)
+		// unknown keys silently ignored; META-COGNITION never appears in AgentConfigs
+	})
+
+	t.Run("platform-level team default resolves before override", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "webchat/AGENTS.md", "webchat-team-rules") // platform-level
+
+		overrides := map[string]string{"SOUL.md": "ws-soul"}
+		cfg, err := LoadForWorkspace(dir, "webchat", overrides)
+		require.NoError(t, err)
+		require.Equal(t, "ws-soul", cfg.Soul)              // override
+		require.Equal(t, "webchat-team-rules", cfg.Agents) // platform-level team default
+	})
+}

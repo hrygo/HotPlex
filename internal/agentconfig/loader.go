@@ -277,3 +277,47 @@ func (c *AgentConfigs) IsEmpty() bool {
 	return c.Soul == "" && c.Agents == "" && c.Skills == "" &&
 		c.User == "" && c.Memory == ""
 }
+
+// LoadForWorkspace resolves WebChat-track agent configs via two-level inheritance:
+// team defaults (loaded from dir via Load with botName="") → workspace overrides.
+//
+// Each non-empty override entry replaces the corresponding team-default field.
+// injectExclude has highest priority: an excluded file is never injected even if
+// overridden. Unknown override keys are silently ignored (defense-in-depth —
+// ValidateOverrides rejects them at write time).
+//
+// The Message Channel track calls Load directly; this function is WebChat-only.
+// See design spec §5.
+func LoadForWorkspace(dir, platform string, overrides map[string]string, injectExclude ...string) (*AgentConfigs, error) {
+	base, err := Load(dir, platform, "", injectExclude...)
+	if err != nil {
+		return nil, err
+	}
+	applyOverrides(base, overrides, injectExclude)
+	return base, nil
+}
+
+// applyOverrides applies per-file overrides onto base in place. Only keys in
+// configFiles are applied; empty values do not override; excluded files are skipped.
+func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclude []string) {
+	set := func(baseName, val string, target *string) {
+		if val == "" || shouldExclude(baseName, injectExclude) {
+			return
+		}
+		*target = val
+	}
+	for k, v := range overrides {
+		switch k {
+		case "SOUL.md":
+			set(k, v, &base.Soul)
+		case "AGENTS.md":
+			set(k, v, &base.Agents)
+		case "SKILLS.md":
+			set(k, v, &base.Skills)
+		case "USER.md":
+			set(k, v, &base.User)
+		case "MEMORY.md":
+			set(k, v, &base.Memory)
+		}
+	}
+}
