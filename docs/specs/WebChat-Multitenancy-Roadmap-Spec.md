@@ -1,7 +1,7 @@
 # WebChat 一等公民化与多租户路线图
 
 **日期**: 2026-06-16
-**状态**: spec ① 实现完成 Phase 0-7 + review 修复 R4-R7（[PR #746](https://github.com/hrygo/hotplex/pull/746)，P1 阻塞项已修待 re-review）；②-⑥ 待逐个 brainstorm
+**状态**: spec ① 实现完成 Phase 0-7 + review 修复 R4-R8（[PR #746](https://github.com/hrygo/hotplex/pull/746)，P1 阻塞项已修待 re-review）；②-⑥ 待逐个 brainstorm
 **分支**: main · **基线版本**: v1.29.0 (fb857af1)
 **关联设计**: [`WebChat-Multitenancy-Foundation-Design-Spec.md`](./WebChat-Multitenancy-Foundation-Design-Spec.md)（spec ①）
 
@@ -58,15 +58,16 @@
 
 | spec | 标题 | 状态 | 文档 |
 |---|---|---|---|
-| ① | 身份 + workspace + 隔离 | ✅ 实现完成 Phase 0-7 + review 修复 R4-R7（[PR #746](https://github.com/hrygo/hotplex/pull/746)，待 re-review） | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
+| ① | 身份 + workspace + 隔离 | ✅ 实现完成 Phase 0-7 + review 修复 R4-R8（[PR #746](https://github.com/hrygo/hotplex/pull/746)，待 re-review） | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
 
 阶段 A 已交付（PR #746）：WebChat 后端具备真实用户身份、workspace 实体、会话隔离（ListSessions SQL 级 workspace 过滤 + authorizeSession 二次校验）、多租户配额（PoolManager 全局 + per-user + per-workspace 三层并发）。`make check` 通过。剩余增量（迁移验证测试 / 旧 webchat 会话清理 / e2e 集成测试）作为 spec ① 后续提交，不阻塞阶段 B 启动。
 
-**Review 修复进展（R4-R7，7 轮迭代）**：
+**Review 修复进展（R4-R8，8 轮迭代）**：
 - **R4-R6**（`b7f07092` / `62dfd3bd` / `e7f65f7b`）修复 hotplex-ai reviewer 的并发/语义问题：P1 **AttachWorker 读 WorkspaceID data race**（`manager.go:711-726` 将 info 读取纳入 `ms.mu` 作用域，与 `Get` 锁序一致）、P2 配额计数漂移（re-validate 复用 pre-check 的 workspaceID 参与 pool 操作）、P2 SwitchWorkDir 确定性 session key（改用 `DeriveSessionKey`）、P3 clientKey `|` 校验（防 session key 别名化）。
 - **R7**（`e61a644c`）修复静态 code review 的安全/质量问题：AdminListUsers **密码哈希泄漏**（`User.PasswordHash` 加 `json:"-"`）、AcceptInvite **用户名枚举**（先 CAS 消费邀请码再建用户，消除持单码无限枚举）、`/api/sessions/*` 错误响应统一 JSON envelope、列表分页（`ListInvitations`/`AdminListUsers` 支持 limit/offset）+ `users.created_at` 索引（迁移 019）、scanUser 时间戳赋值（消除死扫描）、Logout cookie 清理（`CookieAuth.Clear`）、admin 判定去重（`resolveCookieAdmin`）。
+- **R8**（`0ddd1b54`）修复剩余 P3 + 预存缺陷：DeleteWorkspace COUNT+DELETE **TOCTOU 原子化**（`DeleteWorkspaceIfEmpty` 条件 DELETE，`NOT EXISTS` 活跃会话）、conn.go `markInitDone` **持锁调 Close 自死锁**（`Close` 也获取 `c.mu`，sync.Mutex 不可重入；改为设标志、锁外调 Close）、swagger.json client_session_id 长度同步（128→256）。
 
-PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 R6 修复**，待 reviewer re-review 确认。剩余 P3（DeleteWorkspace COUNT+DELETE TOCTOU / MarkInvitationUsed 错误语义区分 / migration 018 缓存失效窗口）作为后续迭代，不阻塞合入。
+PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 R6 修复**，待 reviewer re-review 确认。剩余 P3 中 DeleteWorkspace TOCTOU / swagger 长度 / conn.go 自死锁已在 R8 修复；migration 018 缓存经评估为**当前架构安全**（migrate 在 store 构造时执行、dbResolver 其后创建为空缓存实例，restart 即清）；MarkInvitationUsed 错误语义由 R7 AcceptInvite 前置检查 + CAS 已覆盖——均不阻塞合入。
 
 ### 阶段 B：能力补全（① 之后并行）
 
@@ -206,4 +207,4 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 - spec ⑥ 在 ②③④就绪后启动。
 - 路线图文档随各 spec 推进更新状态。
 
-**下一步**：PR #746 re-review 合入（P1 AttachWorker race 已在 R6 修复，R7 完成安全/质量加固）→ 启动 spec ②③④ brainstorm（per-workspace agent-configs / workspace 级 worker 选择 / OAuth SSO，三者互不依赖可并行）。spec ① 剩余增量（review P3：DeleteWorkspace TOCTOU / MarkInvitationUsed 语义 / migration 018 缓存；迁移验证 / e2e）可穿插提交。
+**下一步**：PR #746 re-review 合入（P1 AttachWorker race 已在 R6 修复，R7 安全/质量加固，R8 剩余 P3 + conn.go 自死锁）→ 启动 spec ②③④ brainstorm（per-workspace agent-configs / workspace 级 worker 选择 / OAuth SSO，三者互不依赖可并行）。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。
