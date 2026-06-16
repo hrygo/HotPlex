@@ -271,6 +271,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		CronEnv:            buildCronEnv(cfg),
 		MCPConfigJSON:      buildMCPConfigJSON(cfg),
 		AgentConfigExclude: buildAgentConfigExclude(cfg),
+		WSStore:            stores.wsStore,
 	})
 
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
