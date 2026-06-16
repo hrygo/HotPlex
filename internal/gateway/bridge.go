@@ -197,7 +197,7 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		botName:            p.BotName,
 		forwardOpts:        &forwardOpts{workDir: p.WorkDir},
 		injectExclude:      p.InjectExclude,
-		workspaceOverrides: b.resolveWorkspaceOverrides(p.WorkspaceID),
+		workspaceOverrides: b.resolveWorkspaceOverrides(ctx, p.WorkspaceID),
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if err := w.Start(ctx, info); err != nil {
@@ -305,7 +305,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		botID:              si.BotID,
 		botName:            si.BotName,
 		forwardOpts:        &opts,
-		workspaceOverrides: b.resolveWorkspaceOverrides(si.WorkspaceID),
+		workspaceOverrides: b.resolveWorkspaceOverrides(ctx, si.WorkspaceID),
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if si.State != events.StateRunning {
@@ -506,7 +506,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	if si, err := b.sm.Get(ctx, sessionID); err == nil {
 		if su, ok := w.(worker.SystemPromptUpdater); ok {
 			info := &worker.SessionInfo{SystemPrompt: ""}
-			b.injectAgentConfig(info, si.Platform, si.BotName, si.BotID, nil, b.resolveWorkspaceOverrides(si.WorkspaceID))
+			b.injectAgentConfig(info, si.Platform, si.BotName, si.BotID, nil, b.resolveWorkspaceOverrides(ctx, si.WorkspaceID))
 			if info.SystemPrompt != "" {
 				su.UpdateSystemPrompt(info.SystemPrompt)
 				b.log.Info("bridge: reset reloaded agent config",

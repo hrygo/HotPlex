@@ -294,6 +294,7 @@ func LoadForWorkspace(dir, platform string, overrides map[string]string, injectE
 		return nil, err
 	}
 	applyOverrides(base, overrides, injectExclude)
+	enforceTotalLimit(base)
 	return base, nil
 }
 
@@ -304,7 +305,10 @@ func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclu
 		if val == "" || shouldExclude(baseName, injectExclude) {
 			return
 		}
-		*target = val
+		// Strip frontmatter defensively — overrides are API-edited content that may
+		// be pasted from files; the file track strips via Load, this mirrors it so
+		// raw --- blocks never leak into the system prompt. See spec §4.2.
+		*target = stripFrontmatter(val)
 	}
 	for k, v := range overrides {
 		switch k {
@@ -319,5 +323,37 @@ func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclu
 		case "MEMORY.md":
 			set(k, v, &base.Memory)
 		}
+	}
+}
+
+// enforceTotalLimit truncates merged config fields so the combined size stays within
+// MaxTotalChars. Load already enforces this on team defaults, but overrides can grow
+// individual fields beyond the budget (write-side ValidateOverrides caps each override
+// at MaxFileChars, not the merged total); this re-checks the merged result as
+// defense-in-depth. Truncates in field order (SOUL→AGENTS→SKILLS→USER→MEMORY).
+func enforceTotalLimit(c *AgentConfigs) {
+	fields := []struct {
+		name   string
+		target *string
+	}{
+		{"SOUL.md", &c.Soul},
+		{"AGENTS.md", &c.Agents},
+		{"SKILLS.md", &c.Skills},
+		{"USER.md", &c.User},
+		{"MEMORY.md", &c.Memory},
+	}
+	total := 0
+	for _, f := range fields {
+		n := len(*f.target)
+		if rem := MaxTotalChars - total; n > rem {
+			if rem < 0 {
+				rem = 0
+			}
+			slog.Warn("agentconfig: merged config exceeds total limit after overrides, truncated",
+				"file", f.name, "original", n, "remaining", rem, "limit", MaxTotalChars)
+			*f.target = (*f.target)[:rem]
+			n = rem
+		}
+		total += n
 	}
 }

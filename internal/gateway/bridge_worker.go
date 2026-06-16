@@ -220,7 +220,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		botName:            si.BotName,
 		forwardOpts:        &forwardOpts{workDir: p.workDir},
 		injectExclude:      nil, // resolved by injectAgentConfig
-		workspaceOverrides: b.resolveWorkspaceOverrides(si.WorkspaceID),
+		workspaceOverrides: b.resolveWorkspaceOverrides(context.Background(), si.WorkspaceID),
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if si.State != events.StateRunning {
@@ -321,12 +321,13 @@ func (b *Bridge) resolveInjectExclude(platform string, perSession []string) []st
 // resolveWorkspaceOverrides fetches a workspace's agent-config overrides and parses
 // them. Returns nil for empty workspaceID (Message Channel track) or nil wsStore, and
 // degrades to nil (team defaults) on any fetch/parse error — never blocks worker launch.
-// See design spec §7.3.
-func (b *Bridge) resolveWorkspaceOverrides(workspaceID string) map[string]string {
+// ctx propagates request-scoped cancellation/deadline and the OTel trace span to the
+// workspace DB query. See design spec §7.3.
+func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID string) map[string]string {
 	if workspaceID == "" || b.wsStore == nil {
 		return nil
 	}
-	ws, err := b.wsStore.GetWorkspaceByID(context.Background(), workspaceID)
+	ws, err := b.wsStore.GetWorkspaceByID(ctx, workspaceID)
 	if err != nil {
 		b.log.Warn("bridge: fetch workspace overrides failed, degrading to team defaults",
 			"workspace_id", workspaceID, "err", err)

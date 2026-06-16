@@ -526,3 +526,33 @@ func TestLoadForWorkspace(t *testing.T) {
 		require.Equal(t, "webchat-team-rules", cfg.Agents) // platform-level team default
 	})
 }
+
+func TestLoadForWorkspaceStripsFrontmatterOnOverride(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir() // no team files
+
+	// Override pasted with YAML frontmatter (e.g. copied from a file) must be
+	// stripped before injection, mirroring the file track's Load behavior.
+	overrides := map[string]string{"SOUL.md": "---\nversion: 1\n---\nsoul-body"}
+	cfg, err := LoadForWorkspace(dir, "webchat", overrides)
+	require.NoError(t, err)
+	require.Equal(t, "soul-body", cfg.Soul)
+}
+
+func TestEnforceTotalLimit(t *testing.T) {
+	t.Parallel()
+
+	// enforceTotalLimit is defense-in-depth: under the 5-file whitelist with
+	// MaxFileChars=8000, overrides can never push the merged total past
+	// MaxTotalChars=40000 via LoadForWorkspace (5*8000=40000). This unit test
+	// constructs an over-budget config directly to verify the truncation guard.
+	over := strings.Repeat("a", MaxTotalChars)
+	cfg := &AgentConfigs{Soul: over, Agents: over} // 2 * MaxTotalChars
+
+	enforceTotalLimit(cfg)
+
+	total := len(cfg.Soul) + len(cfg.Agents) + len(cfg.Skills) + len(cfg.User) + len(cfg.Memory)
+	require.LessOrEqual(t, total, MaxTotalChars)
+	require.Equal(t, MaxTotalChars, len(cfg.Soul)) // first field consumes full budget
+	require.Empty(t, cfg.Agents)                   // subsequent fields truncated to 0
+}

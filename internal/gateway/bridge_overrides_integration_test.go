@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,7 +62,7 @@ func TestBridge_WorkspaceWithoutOverrides_InheritsTeamDefault(t *testing.T) {
 func buildPromptFor(t *testing.T, dir string, store *stubWSStore, workspaceID string) string {
 	t.Helper()
 	b := &Bridge{log: testLogger(t), wsStore: store, agentConfigDir: dir}
-	overrides := b.resolveWorkspaceOverrides(workspaceID)
+	overrides := b.resolveWorkspaceOverrides(context.Background(), workspaceID)
 	cfg, err := agentconfig.LoadForWorkspace(dir, "webchat", overrides)
 	require.NoError(t, err)
 	return agentconfig.BuildSystemPrompt(cfg)
