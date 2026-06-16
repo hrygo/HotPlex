@@ -51,11 +51,11 @@ func TestValidateOverrides(t *testing.T) {
 			raw:     `{"SOUL.md":"` + strings.Repeat("a", MaxFileChars+1) + `"}`,
 			wantErr: ErrConfigTooLarge,
 		},
-		{
-			name:    "total exceeds MaxTotalChars",
-			raw:     `{"SOUL.md":"` + strings.Repeat("a", MaxTotalChars+1) + `"}`,
-			wantErr: ErrConfigTooLarge,
-		},
+		// The total-limit branch (sum > MaxTotalChars) is unreachable under the current
+		// 5-file whitelist with MaxFileChars=8000: max sum = 5*8000 = 40000 = MaxTotalChars,
+		// never exceeds. The check in validate.go is defense-in-depth (matches loader.go's
+		// Load total budget) and activates only if configFiles grows or MaxFileChars rises.
+		// The per-file case above covers the oversized-input rejection path.
 		{
 			name: "empty object clears overrides",
 			raw:  `{}`,
