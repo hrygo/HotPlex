@@ -231,6 +231,7 @@ Session 资源池配额管理。
 | `max_size` | int | `100` | `HOTPLEX_POOL_MAX_SIZE` | 池最大大小。系统级 Session 总量上限 |
 | `max_idle_per_user` | int | `5` | `HOTPLEX_POOL_MAX_IDLE_PER_USER` | 每用户最大空闲 Session 数 |
 | `max_memory_per_user` | int64 | `3221225472` (3GB) | `HOTPLEX_POOL_MAX_MEMORY_PER_USER` | 每用户最大内存配额（字节）。0 表示无限制 |
+| `max_per_workspace` | int | `0` | — | WebChat 多租户每 workspace 最大活跃 Session（v1.29.1+，spec ①）。0 = 无限制；默认禁用，WebChat 部署按需配置 |
 
 ---
 

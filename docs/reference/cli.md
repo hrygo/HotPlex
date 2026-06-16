@@ -44,6 +44,8 @@ hotplex
 │   ├── restart      # 重启服务
 │   ├── status       # 服务状态
 │   └── logs         # 查看日志
+├── admin            # 用户与账号管理
+│   └── create       # 创建账号（bootstrap admin 等）
 ├── slack            # Slack 消息操作
 │   ├── send-message      # 发送消息
 │   ├── update-message    # 更新消息
@@ -869,6 +871,36 @@ hotplex cron history daily-health --json
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `<id\|name>` | 是 | 任务 ID 或名称 |
+
+---
+
+## Admin 账号管理
+
+用户与账号管理命令。用于 WebChat 多租户部署的 bootstrap admin 创建等场景（v1.29.1+）。
+
+### `hotplex admin create`
+
+创建账号（首个 admin，或后续普通用户）。直接读写 session 数据库，无需 Gateway 运行。
+
+**示例**：
+
+```bash
+hotplex admin create --username bootstrap              # 交互式输入密码（不回显，推荐）
+hotplex admin create --username alice --password '...' # 通过参数指定密码
+hotplex admin create --username bob --admin=false      # 创建普通用户（非 admin 角色）
+hotplex admin create --username ops --config /path/config.yaml
+```
+
+> `hotplex admin create` 属于 WebChat 多租户功能（v1.29.1 起的后端地基）；面向终端用户的登录与 workspace 管理 UI 将在后续版本上线，当前可先用此命令 bootstrap 首个 admin 账号。
+
+| 标志 | 类型 | 默认值 | 必填 | 说明 |
+|------|------|--------|------|------|
+| `--username` | `string` | | 是 | 用户名（3-64 字符，仅 `[a-zA-Z0-9_.-]`，不可 `apikey:` 开头） |
+| `--password` | `string` | | 否 | 密码（省略则交互式不回显；最少 8 字符）。⚠️ 作为进程参数对同机其他用户经 `ps`/`/proc` 可见，生产环境请使用交互式输入 |
+| `--admin` | `bool` | `true` | 否 | 创建为 admin 角色 |
+| `--config` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+
+密码使用 bcrypt（cost=12）存储。用户名保留命名空间 `apikey:` 检查用于防止与 API key 伪用户冲突导致的身份接管。
 
 ---
 
