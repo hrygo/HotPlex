@@ -23,7 +23,7 @@ func (a *sessionManagerAdapter) Stats() (int, int, int) {
 }
 
 func (a *sessionManagerAdapter) List(ctx context.Context, userID, platform string, limit, offset int) ([]any, error) {
-	sessions, err := a.sm.List(ctx, userID, platform, limit, offset)
+	sessions, err := a.sm.List(ctx, userID, platform, "", limit, offset)
 	if err != nil {
 		return nil, err
 	}

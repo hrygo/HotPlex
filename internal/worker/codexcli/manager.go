@@ -889,7 +889,7 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 		"item/reasoning/textDelta", "item/commandExecution/outputDelta",
 		"thread/tokenUsage/updated":
 	default:
-		m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "threadId", params.ThreadID)
+		m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "thread_id", params.ThreadID)
 	}
 
 	m.subMu.Lock()

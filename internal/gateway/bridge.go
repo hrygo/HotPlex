@@ -34,6 +34,7 @@ type bridgeSM interface {
 	SessionTransitioner
 	SessionWorkerManager
 	SessionExpirer
+	SessionWorkspaceBinder
 }
 
 // Bridge connects the gateway to the session manager.
@@ -161,6 +162,15 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 	if err != nil {
 		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "create_failed")))
 		return fmt.Errorf("bridge: create session: %w", err)
+	}
+
+	// Bind session to workspace (WebChat multi-tenant, spec ①). No-op for
+	// platform/cron sessions where WorkspaceID is empty. Non-fatal on failure:
+	// the session is created unbound rather than aborted.
+	if p.WorkspaceID != "" {
+		if err := b.sm.SetWorkspaceID(ctx, p.ID, p.WorkspaceID); err != nil {
+			b.log.Warn("bridge: bind workspace failed", "session_id", p.ID, "workspace_id", p.WorkspaceID, "err", err)
+		}
 	}
 
 	workerInfo := b.prepareWorkerInfo(p.ID, p.UserID, p.WorkDir, si)
@@ -578,7 +588,11 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 		pc.FromMap(si.PlatformKey)
 		newID = session.DerivePlatformSessionKey(si.UserID, si.WorkerType, pc)
 	} else {
-		newID = aep.NewSessionID()
+		// WebChat / direct-WS: derive deterministically from (owner, workerType,
+		// clientKey, workspace, workDir) so switch-workdir is resumable with a
+		// stable ID (review P2). Mirrors DerivePlatformSessionKey's doc note
+		// (key.go) which directs Web callers to DeriveSessionKey directly.
+		newID = session.DeriveSessionKey(si.UserID, si.WorkerType, si.ClientKey, si.WorkspaceID, expanded)
 	}
 
 	// Try to resume existing target session first (preserve conversation history).
@@ -617,6 +631,7 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 			Platform:      si.Platform,
 			PlatformKey:   si.PlatformKey,
 			Title:         si.Title,
+			WorkspaceID:   si.WorkspaceID,
 			InjectExclude: excl,
 		}); err != nil {
 			return nil, fmt.Errorf("switch-workdir: start session: %w", err)

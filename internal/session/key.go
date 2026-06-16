@@ -2,6 +2,7 @@ package session
 
 import (
 	"crypto/sha1"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -18,13 +19,43 @@ var hotplexNamespace = uuid.MustParse("urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd4
 // Cron sessions use this namespace to guarantee they never collide with feishu/slack sessions.
 var CronNamespace = uuid.NewHash(sha1.New(), hotplexNamespace, []byte("cron"), 5)
 
+// ErrInvalidClientKey is returned when clientKey contains the "|" separator.
+// clientKey is client-controlled (REST client_session_id / WebSocket init
+// session_id) and flows directly into DeriveSessionKey's hash name, so a "|"
+// would collide with the field separators and alias a different (clientKey,
+// workspaceID) pair onto the same session key (review P3 fix).
+//
+// Note: work_dir "|" rejection is handled by security.ValidateWorkDir (the full
+// path-safety validator, which also rejects "|"). An earlier session-scope
+// ValidateWorkDir subset was removed as a confusing same-named duplicate
+// (review fix).
+var ErrInvalidClientKey = errors.New("clientKey must not contain '|'")
+
+// ValidateClientKey checks that clientKey does not contain the "|" delimiter.
+// Entry points that feed user input into DeriveSessionKey must validate first
+// to prevent session-key aliasing.
+func ValidateClientKey(clientKey string) error {
+	if strings.Contains(clientKey, "|") {
+		return ErrInvalidClientKey
+	}
+	return nil
+}
+
 // DeriveSessionKey generates a deterministic server-side session ID using UUIDv5.
-// Same (ownerID, workerType, clientKey, workDir) always maps to the same session.
+// Same (ownerID, workerType, clientKey, workspaceID, workDir) always maps to the same session.
 // clientKey is a client-provided opaque identifier: REST API uses client_session_id,
 // WebSocket init uses session_id field. Title is NOT a valid clientKey (since v1.25).
-func DeriveSessionKey(ownerID string, wt worker.WorkerType, clientKey, workDir string) string {
+//
+// workspaceID is the WebChat multitenancy anchor (spec §7 方案3). When non-empty it
+// participates in the hash; when empty it is omitted entirely, preserving the legacy
+// 4-field hash for platform/cron callers (backward compatible — existing session keys unchanged).
+func DeriveSessionKey(ownerID string, wt worker.WorkerType, clientKey, workspaceID, workDir string) string {
 	// UUIDv5 = SHA-1(namespace+name) — deterministic, no randomness.
-	name := ownerID + "|" + string(wt) + "|" + clientKey + "|" + workDir
+	name := ownerID + "|" + string(wt) + "|" + clientKey
+	if workspaceID != "" {
+		name += "|" + workspaceID
+	}
+	name += "|" + workDir
 	id := uuid.NewHash(sha1.New(), hotplexNamespace, []byte(name), 5)
 	return id.String()
 }

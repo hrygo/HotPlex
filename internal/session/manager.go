@@ -170,12 +170,18 @@ func (m *Manager) getRunningSessionIDs() []string {
 
 // managedSession holds a session's in-memory state and its mutex.
 type managedSession struct {
-	info      SessionInfo
-	worker    worker.Worker
-	TurnCount int
-	startedAt time.Time
-	log       *slog.Logger
-	mu        sync.RWMutex // protects state transitions and input handling; reads use RLock
+	info   SessionInfo
+	worker worker.Worker
+	// attachedWorkspaceID is the workspaceID captured under ms.mu at attach
+	// time and used to pair every pool-quota release with its acquire. It is
+	// deliberately decoupled from ms.info.WorkspaceID so a concurrent
+	// SetWorkspaceID cannot strand a quota slot on the wrong workspace
+	// (review P2 quota-drift fix). Reads/writes are guarded by ms.mu.
+	attachedWorkspaceID string
+	TurnCount           int
+	startedAt           time.Time
+	log                 *slog.Logger
+	mu                  sync.RWMutex // protects state transitions and input handling; reads use RLock
 }
 
 // SessionInfo is the in-memory session metadata.
@@ -218,6 +224,9 @@ type SessionInfo struct {
 	// ClientKey is the client-provided session_id from the init envelope.
 	// Empty for platform sessions (Slack/Feishu) which use DerivePlatformSessionKey.
 	ClientKey string `json:"client_key,omitempty"`
+	// WorkspaceID is the WebChat multitenancy anchor (spec ① §6.4).
+	// Empty for platform/cron sessions (Slack/Feishu) — they have no workspace.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 // NewManager creates a new session manager using the provided Store.
@@ -232,7 +241,7 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 		store:        store,
 		cfg:          cfg,
 		cfgStore:     cfgStore,
-		pool:         NewPoolManager(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser, cfg.Pool.MaxMemoryPerUser),
+		pool:         NewPoolManagerWithWorkspace(log, cfg.Pool.MaxSize, cfg.Pool.MaxIdlePerUser, cfg.Pool.MaxMemoryPerUser, cfg.Pool.MaxPerWorkspace),
 		sessions:     make(map[string]*managedSession),
 		runningIndex: make(map[string]struct{}),
 		gcReset:      make(chan time.Duration, 1),
@@ -294,6 +303,40 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 	observability.SessionCreated().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(workerType))))
 	sessionsActiveGauge(string(events.StateCreated)).Add(1)
 	return info, nil
+}
+
+// SetWorkspaceID binds a session to a workspace and persists the change (spec ①).
+// Called by the WebChat multi-tenant path (Bridge.StartSession) after CreateWithBot.
+// Empty workspaceID is a no-op (platform/cron sessions remain unbound — backward
+// compatible with the legacy 4-field session key).
+func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) error {
+	if workspaceID == "" {
+		return nil
+	}
+	m.mu.Lock()
+	ms, ok := m.sessions[id]
+	if !ok {
+		m.mu.Unlock()
+		return ErrSessionNotFound
+	}
+	// Write ms.info under ms.mu (not just m.mu) to prevent data race with
+	// Get/transitionState readers that access ms.info under ms.mu after
+	// releasing m.mu (review P1 fix — lock ordering: m.mu → ms.mu).
+	ms.mu.Lock()
+	ms.info.WorkspaceID = workspaceID
+	info := ms.info
+	ms.mu.Unlock()
+	m.mu.Unlock()
+	if err := m.store.Upsert(ctx, &info); err != nil {
+		// Rollback in-memory on DB failure to prevent divergence.
+		m.mu.Lock()
+		ms.mu.Lock()
+		ms.info.WorkspaceID = ""
+		ms.mu.Unlock()
+		m.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 // Get returns a snapshot of a session by ID. Returns ErrSessionNotFound if not found.
@@ -665,15 +708,19 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 		return ErrSessionNotFound
 	}
 
-	// Pre-check: read userID and worker status under RLock (no contention with reads).
+	// Pre-check: read userID, workspaceID and worker status under ms.mu.
+	// ms.info.WorkspaceID is a mutable field (written by SetWorkspaceID under
+	// ms.mu), so reading it under ms.mu matches Get's lock discipline and keeps
+	// the race detector quiet if a future writer ever drops m.mu (review P1).
 	m.mu.RLock()
 	ms, ok := m.sessions[id]
 	if !ok {
 		m.mu.RUnlock()
 		return ErrSessionNotFound
 	}
-	userID := ms.info.UserID
 	ms.mu.RLock()
+	userID := ms.info.UserID
+	workspaceID := ms.info.WorkspaceID
 	alreadyAttached := ms.worker != nil
 	ms.mu.RUnlock()
 	m.mu.RUnlock()
@@ -683,7 +730,7 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	}
 
 	// Acquire pool quota (slot + memory) in a single atomic operation.
-	if poolErr := m.pool.AcquireWithMemory(ctx, userID); poolErr != nil {
+	if poolErr := m.pool.AcquireForWorkspace(ctx, userID, workspaceID); poolErr != nil {
 		var pe *PoolError
 		if !errors.As(poolErr, &pe) {
 			m.log.Warn("session: attach rejected", "err", poolErr, "session_id", id)
@@ -704,7 +751,7 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	ms, ok = m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		m.pool.Release(ctx, userID)
+		m.pool.ReleaseForWorkspace(ctx, userID, workspaceID)
 		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrSessionNotFound
 	}
@@ -712,7 +759,7 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	if ms.worker != nil {
 		ms.mu.Unlock()
 		m.mu.Unlock()
-		m.pool.Release(ctx, userID)
+		m.pool.ReleaseForWorkspace(ctx, userID, workspaceID)
 		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrWorkerAttached
 	}
@@ -722,11 +769,16 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	if !ms.info.State.IsActive() {
 		ms.mu.Unlock()
 		m.mu.Unlock()
-		m.pool.Release(ctx, userID)
+		m.pool.ReleaseForWorkspace(ctx, userID, workspaceID)
 		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
 		return ErrSessionNotActive
 	}
 	ms.worker = w
+	// Pin quota ownership to the workspace acquired above so every later
+	// release (DetachWorker/Delete/transition) returns the slot to the SAME
+	// workspace, even if SetWorkspaceID mutates ms.info.WorkspaceID in between
+	// (review P2 quota-drift fix).
+	ms.attachedWorkspaceID = workspaceID
 	ms.startedAt = time.Now()
 	observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "success")))
 	observability.WorkerStarts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(ms.info.WorkerType)), attribute.String("result", "success")))
@@ -755,7 +807,10 @@ func (m *Manager) GetWorker(id string) worker.Worker {
 // releaseWorkerQuota releases both concurrency slot and memory quota.
 // pool.Release now handles both slot and memory under a single lock.
 func (m *Manager) releaseWorkerQuota(ctx context.Context, ms *managedSession) {
-	m.pool.Release(ctx, ms.info.UserID)
+	// Release against the workspace the quota was acquired on at attach time
+	// (attachedWorkspaceID), not the possibly-since-changed ms.info.WorkspaceID,
+	// so the release always pairs with its acquire (review P2 quota-drift fix).
+	m.pool.ReleaseForWorkspace(ctx, ms.info.UserID, ms.attachedWorkspaceID)
 }
 
 // DetachWorker removes the worker from the session and releases the concurrency quota.
@@ -793,11 +848,14 @@ func (m *Manager) detachWorkerUnchecked(id string, expected worker.Worker) bool 
 	workerType := ms.info.WorkerType
 	ms.worker = nil
 	uid := ms.info.UserID
+	// Release against the workspace the quota was acquired on at attach time
+	// (review P2 quota-drift fix), not the live ms.info.WorkspaceID.
+	wsID := ms.attachedWorkspaceID
 	ms.mu.Unlock()
 
 	if hasWorker {
 		workersRunningGauge(string(workerType)).Add(-1)
-		m.pool.Release(context.Background(), uid)
+		m.pool.ReleaseForWorkspace(context.Background(), uid, wsID)
 		m.log.Debug("session: worker detached", "session_id", id)
 	}
 	return true
@@ -860,7 +918,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		ms.info = candidate
 		if hasWorkerAfter {
 			workersRunningGauge(string(workerType)).Add(-1)
-			m.pool.Release(ctx, uid)
+			// Release against the workspace the quota was acquired on at attach
+			// time (review P2 quota-drift fix), not the live ms.info.WorkspaceID.
+			m.pool.ReleaseForWorkspace(ctx, uid, ms.attachedWorkspaceID)
 		}
 		ms.mu.Unlock()
 		delete(m.sessions, id)
@@ -1054,8 +1114,8 @@ func (m *Manager) Lock(id string) (release func(), err error) {
 }
 
 // List returns all sessions from Store. Use ListActive for in-memory active sessions only.
-func (m *Manager) List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error) {
-	return m.store.List(ctx, userID, platform, limit, offset)
+func (m *Manager) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error) {
+	return m.store.List(ctx, userID, platform, workspaceID, limit, offset)
 }
 
 // ListActive returns in-memory active sessions (no DB round-trip).

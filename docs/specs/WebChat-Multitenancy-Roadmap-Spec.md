@@ -1,7 +1,7 @@
 # WebChat 一等公民化与多租户路线图
 
-**日期**: 2026-06-15
-**状态**: Planning（spec ① 已设计，②-⑥ 待逐个 brainstorm）
+**日期**: 2026-06-16
+**状态**: spec ① 实现完成 Phase 0-7 + review 修复 R4-R9（[PR #746](https://github.com/hrygo/hotplex/pull/746)，P1 阻塞项已修待 re-review）；②-⑥ 待逐个 brainstorm
 **分支**: main · **基线版本**: v1.29.0 (fb857af1)
 **关联设计**: [`WebChat-Multitenancy-Foundation-Design-Spec.md`](./WebChat-Multitenancy-Foundation-Design-Spec.md)（spec ①）
 
@@ -23,10 +23,10 @@
 
 ## 2. 子系统分解与依赖
 
-整个愿景拆成 **6 个独立 spec**，有明确依赖顺序。spec ①（地基）已设计完成，②-⑥ 各自走独立的 design → plan → implementation 周期。
+整个愿景拆成 **6 个独立 spec**，有明确依赖顺序。spec ①（地基）已实现完成（Phase 0-7，PR #746），②-⑥ 各自走独立的 design → plan → implementation 周期。
 
 ```
-① 身份 + workspace + 隔离（地基，已设计）   ← 一切的前提
+① 身份 + workspace + 隔离（地基，✅ 已实现 PR#746）← 一切的前提
         │
         ├──────────────┐
         ▼              ▼
@@ -54,13 +54,28 @@
 
 ## 3. 阶段规划
 
-### 阶段 A：地基（进行中）
+### 阶段 A：地基（spec ① 实现完成，待合入）
 
 | spec | 标题 | 状态 | 文档 |
 |---|---|---|---|
-| ① | 身份 + workspace + 隔离 | ✅ 设计完成，待实现 | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
+| ① | 身份 + workspace + 隔离 | ✅ 实现完成 Phase 0-7 + review 修复 R4-R9（[PR #746](https://github.com/hrygo/hotplex/pull/746)，待 re-review） | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
 
-阶段 A 交付后：WebChat 后端具备真实用户身份、workspace 实体、会话隔离、多租户配额框架。验收通过 HTTP API 测试（webchat 前端生产登录 UI 归阶段 C）。
+阶段 A 已交付（PR #746）：WebChat 后端具备真实用户身份、workspace 实体、会话隔离（ListSessions SQL 级 workspace 过滤 + authorizeSession 二次校验）、多租户配额（PoolManager 全局 + per-user + per-workspace 三层并发）。`make check` 通过。剩余增量（迁移验证测试 / 旧 webchat 会话清理 / e2e 集成测试）作为 spec ① 后续提交，不阻塞阶段 B 启动。
+
+**Review 修复进展（R4-R9，9 轮迭代）**：
+- **R4-R6**（`b7f07092` / `62dfd3bd` / `e7f65f7b`）修复 hotplex-ai reviewer 的并发/语义问题：P1 **AttachWorker 读 WorkspaceID data race**（`manager.go:711-726` 将 info 读取纳入 `ms.mu` 作用域，与 `Get` 锁序一致）、P2 配额计数漂移（re-validate 复用 pre-check 的 workspaceID 参与 pool 操作）、P2 SwitchWorkDir 确定性 session key（改用 `DeriveSessionKey`）、P3 clientKey `|` 校验（防 session key 别名化）。
+- **R7**（`e61a644c`）修复静态 code review 的安全/质量问题：AdminListUsers **密码哈希泄漏**（`User.PasswordHash` 加 `json:"-"`）、AcceptInvite **用户名枚举**（先 CAS 消费邀请码再建用户，消除持单码无限枚举）、`/api/sessions/*` 错误响应统一 JSON envelope、列表分页（`ListInvitations`/`AdminListUsers` 支持 limit/offset）+ `users.created_at` 索引（迁移 019）、scanUser 时间戳赋值（消除死扫描）、Logout cookie 清理（`CookieAuth.Clear`）、admin 判定去重（`resolveCookieAdmin`）。
+- **R8**（`0ddd1b54`）修复剩余 P3 + 预存缺陷：DeleteWorkspace COUNT+DELETE **TOCTOU 原子化**（`DeleteWorkspaceIfEmpty` 条件 DELETE，`NOT EXISTS` 活跃会话）、conn.go `markInitDone` **持锁调 Close 自死锁**（`Close` 也获取 `c.mu`，sync.Mutex 不可重入；改为设标志、锁外调 Close）、swagger.json client_session_id 长度同步（128→256）。
+- **R9**（max-effort code review：9 finder 角度 × 验证 × sweep，48→38→35 条发现）修复 5 项 CONFIRMED 安全/正确性 + 2 项清理，其余归类为 spec ⑥ 跟进：
+  - 🔴 **用户名枚举（disabled oracle）**：`LocalAccountProvider.Authenticate` 原先在密码校验**前**返回 `USER_DISABLED`，攻击者用错误密码即可区分「真实但被禁用的账户」与「不存在账户」。改为先 bcrypt 校验密码，密码正确才暴露 disabled 状态（`local_account_provider.go`）。
+  - 🔴 **用户名 `apikey:` 命名空间冲突 → 身份接管**：AcceptInvite 与 `hotplex admin create` 对用户名零校验，允许 `apikey:<x>` 冲突 migration 018 的 API-key 伪用户命名空间，可劫持 `WHERE NOT EXISTS` 守卫将合法 API key 重新指向攻击者控制的 admin 账户。新增 `security.ValidateUsername`（长度 3-64、charset `[a-zA-Z0-9_.-]`、拒绝 `apikey:` 前缀），两处创建入口强制校验。
+  - 🔴 **一次性邀请码被密码错误烧毁**：AcceptInvite 先 `MarkInvitationUsed` 再 `HashPassword`，>72 字节密码触发 bcrypt 错误 → 500 + 邀请码永久消费、无用户创建。改为消费前校验密码长度（max 72 / min 8），非法输入直接 400 且不消费邀请码。
+  - 🔴 **SwitchWorkDir 破坏 work_dir 来自 workspace 不变量**：`/cd` 让工作区绑定的 WebChat session 跑到任意 work_dir（仍绑定原 workspace），可致另一工作区在 worker 仍在跑时被 `DeleteWorkspaceIfEmpty` 硬删。对 `WorkspaceID != ""` 的 session 拒绝 `/cd`（`api.go`），平台/messaging session（无 WorkspaceID）行为不变。
+  - 🟡 **isUniqueViolation 子串匹配过宽**：本地实现用 `strings.Contains(msg,"UNIQUE")` 比 `dbutil.Dialect.IsUniqueViolation` 的精确短语 `"UNIQUE constraint failed"` 更宽，可能误分类无关错误。对齐为精确短语匹配。
+  - 🟡 **`session.ValidateWorkDir` 重复定义**：与 `security.ValidateWorkDir`（本 PR 已含 `|` 校验）同名但语义更弱的子集重复，易误导维护者。删除 session 包副本，`api.go` 改用更强的 `security.ValidateWorkDir`（`|` 拒绝已由 security_test 覆盖）。
+  - **spec ⑥ 跟进项（不在 spec ① 修复，已记录）**：① 全部 auth/workspace HTTP handler 尚未在 `routes.go` 注册（登录 UI 由 spec ⑥ 交付，故此 PR 为潜伏代码）；② **disable 用户不影响已认证 session**（`AuthenticateRequest` 不查 `users.status`，cookie 7 天 / API key 永久有效）——spec ⑥ 接线登录后须加 per-request 状态校验或缓存+失效；③ cookie HMAC secret 仅内存生成、重启即失效，spec ⑥ 需持久化/共享；④ WS init 路径创建 session 不绑定 workspace（绕过 workspace 防御 + 方案3 键分叉），WS workspace 绑定随 spec ⑥ 接线；⑤ `POST /api/sessions` 强制 workspace_id（webchat 客户端尚未发送），随 spec ⑥ workspace 选择 UI 一并更新前端；⑥ migration 018 对旧 API-key WS 会话存在 `DeriveSessionKey` 派生键断裂（迁移注释已记录），升级时产生孤儿行。
+
+PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 R6 修复**，待 reviewer re-review 确认。剩余 P3 中 DeleteWorkspace TOCTOU / swagger 长度 / conn.go 自死锁已在 R8 修复；migration 018 缓存经评估为**当前架构安全**（migrate 在 store 构造时执行、dbResolver 其后创建为空缓存实例，restart 即清）；MarkInvitationUsed 错误语义由 R7 AcceptInvite 前置检查 + CAS 已覆盖——均不阻塞合入。
 
 ### 阶段 B：能力补全（① 之后并行）
 
@@ -196,8 +211,8 @@
 ## 7. 推进节奏
 
 - 每个 spec 独立 brainstorm → 设计文档（`docs/specs/`）→ writing-plans → 实现。
-- spec ① 实现完成并合入后，启动 spec ②③④（可并行）。
+- spec ① 已实现完成（Phase 0-7，PR #746），合入后启动 spec ②③④（可并行）。
 - spec ⑥ 在 ②③④就绪后启动。
 - 路线图文档随各 spec 推进更新状态。
 
-**下一步**：审阅 spec ① 设计文档 → 通过后用 writing-plans 生成 spec ① 实现计划。
+**下一步**：PR #746 re-review 合入（P1 AttachWorker race 已在 R6 修复，R7 安全/质量加固，R8 剩余 P3 + conn.go 自死锁）→ 启动 spec ②③④ brainstorm（per-workspace agent-configs / workspace 级 worker 选择 / OAuth SSO，三者互不依赖可并行）。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。

@@ -20,7 +20,7 @@ type Store interface {
 	Upsert(ctx context.Context, info *SessionInfo) error
 	UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error
 	Get(ctx context.Context, id string) (*SessionInfo, error)
-	List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error)
+	List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error)
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
 	DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error
@@ -102,7 +102,7 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 			info.ID, info.UserID, info.OwnerID, info.BotID, info.BotName, info.WorkerSessionID, info.WorkerType, string(info.State),
 			info.Platform, string(pkJSON), info.WorkDir, info.Title,
 			info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
-			string(ctxJSON), info.Source, info.ClientKey,
+			string(ctxJSON), info.Source, info.ClientKey, nullableString(info.WorkspaceID),
 		)
 		if err != nil {
 			return fmt.Errorf("session store: upsert: %w", err)
@@ -136,7 +136,7 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 	err := sc.Scan(
 		&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State, &info.BotID, &info.BotName,
 		&info.Platform, &platformKeyStr, &info.WorkDir, &info.Title,
-		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON, &info.Source, &info.ClientKey,
+		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON, &info.Source, &info.ClientKey, &info.WorkspaceID,
 	)
 	if err != nil {
 		return nil, err
@@ -174,11 +174,11 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*SessionInfo, error) 
 	return info, nil
 }
 
-func (s *SQLiteStore) List(ctx context.Context, userID, platform string, limit, offset int) ([]*SessionInfo, error) {
+func (s *SQLiteStore) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, queries["store.list_sessions"], userID, userID, platform, platform, limit, offset)
+	rows, err := s.db.QueryContext(ctx, queries["store.list_sessions"], userID, userID, platform, platform, workspaceID, workspaceID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("session store: list: %w", err)
 	}

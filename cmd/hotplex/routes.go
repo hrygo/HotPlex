@@ -34,7 +34,7 @@ func setupRoutes(
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	gatewayAPI := gateway.NewGatewayAPI(log, auth, sm, bridge, deps.ConfigStore, deps.EventStore, deps.EventStore)
+	gatewayAPI := gateway.NewGatewayAPI(log, auth, sm, bridge, deps.ConfigStore, deps.EventStore, deps.EventStore, deps.WorkspaceStore)
 
 	// CORS middleware reads allowed origins from config (supports hot-reload).
 	corsOriginsFn := func() []string {
@@ -198,6 +198,14 @@ func setupRoutes(
 			log.Info("webhook handler registered", "path", cfg.Webhook.Path)
 		}
 	}
+
+	// TODO(spec ⑥): Register WebChat multi-tenant HTTP endpoints when login UI ships.
+	//   - POST /api/auth/login, /api/auth/logout, GET /api/auth/me
+	//   - POST /api/auth/accept-invite
+	//   - POST/GET/PUT/DELETE /api/workspaces/*
+	//   - POST/GET/DELETE /api/admin/invitations
+	// Handlers are implemented in internal/gateway/{auth,workspace}_handlers.go
+	// but intentionally not wired until the frontend login flow is ready.
 
 	// Global favicon fallback using docs logo
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {

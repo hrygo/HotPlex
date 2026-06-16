@@ -80,6 +80,16 @@ func (r *DBResolver) Invalidate(key string) {
 	r.cache.Delete(key)
 }
 
+// InvalidateAll clears all cached entries. Called after migrations that change
+// user_id values (e.g. migration 018 remaps api_key_users.user_id to users.id).
+// The 60s TTL would otherwise serve stale IDs after such migrations.
+func (r *DBResolver) InvalidateAll() {
+	r.cache.Range(func(k, _ any) bool {
+		r.cache.Delete(k)
+		return true
+	})
+}
+
 func (r *DBResolver) Resolve(ctx context.Context, key string) (string, bool) {
 	// Check cache first.
 	if v, ok := r.cache.Load(key); ok {

@@ -46,9 +46,16 @@ func GetForbiddenWorkDirs() []string {
 //  2. Must be clean (no ".." components).
 //  3. Must not be or reside under a forbidden system directory.
 //  4. Symlinks are resolved and the real path is also checked against the blacklist.
+//  5. Must not contain "|" — this is the delimiter used by session.DeriveSessionKey
+//     to concatenate hash fields; a "|" in the path could cause a theoretical
+//     session-key collision (review P3 fix).
 func ValidateWorkDir(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("security: work dir must not be empty")
+	}
+
+	if strings.ContainsRune(dir, '|') {
+		return fmt.Errorf("security: work dir must not contain '|'")
 	}
 
 	cleaned := filepath.Clean(dir)

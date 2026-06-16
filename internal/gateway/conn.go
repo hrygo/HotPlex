@@ -336,6 +336,14 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 	}
 	workDir = expanded
 
+	// Reject "|" in the client-provided session_id: it flows into
+	// DeriveSessionKey's hash name and would alias session keys (review P3).
+	if verr := session.ValidateClientKey(env.SessionID); verr != nil {
+		c.sendInitError(events.ErrCodeProtocolViolation, "session_id must not contain '|'")
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeProtocolViolation))))
+		return "", nil, fmt.Errorf("init: invalid session_id: %w", verr)
+	}
+
 	var sessionID string
 	var preResolved *session.SessionInfo
 	if env.SessionID != "" {
@@ -345,7 +353,7 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 		}
 	}
 	if sessionID == "" {
-		sessionID = session.DeriveSessionKey(c.userID, initData.WorkerType, env.SessionID, workDir)
+		sessionID = session.DeriveSessionKey(c.userID, initData.WorkerType, env.SessionID, "", workDir)
 	}
 
 	if !c.hub.InitThrottle.Check(sessionID) {
@@ -821,6 +829,7 @@ func (c *Conn) bufferOrReject(data []byte) (bool, error) {
 func (c *Conn) markInitDone() {
 	c.mu.Lock()
 	c.initDone = true
+	needClose := false
 flushLoop:
 	for _, data := range c.initPending {
 		if c.closed {
@@ -830,12 +839,16 @@ flushLoop:
 		case c.writeCh <- data:
 		default:
 			c.log.Warn("gateway: init flush write channel full", "session_id", c.sessionID)
-			_ = c.Close()
+			needClose = true
 			break flushLoop
 		}
 	}
 	c.initPending = nil
 	c.mu.Unlock()
+	// 锁外调 Close：Close 内部获取 c.mu，sync.Mutex 不可重入，持锁调用会自死锁。
+	if needClose {
+		_ = c.Close()
+	}
 }
 
 // PreferEnvelope returns false: WebSocket connections benefit from pre-encoded

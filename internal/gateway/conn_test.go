@@ -474,8 +474,8 @@ func (m *mockSessionStoreForBotID) Get(ctx context.Context, id string) (*session
 	return args.Get(0).(*session.SessionInfo), args.Error(1)
 }
 
-func (m *mockSessionStoreForBotID) List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error) {
-	args := m.Called(ctx, userID, platform, limit, offset)
+func (m *mockSessionStoreForBotID) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*session.SessionInfo, error) {
+	args := m.Called(ctx, userID, platform, workspaceID, limit, offset)
 	return args.Get(0).([]*session.SessionInfo), args.Error(1)
 }
 
@@ -578,7 +578,7 @@ func TestBotIDIsolation_CreateMismatch(t *testing.T) {
 		botBob         = "bot_bob"
 	)
 	// Derive the server session ID using the same algorithm as conn.go:DeriveSessionKey.
-	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
+	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, "", expandedSafeTestWorkDir)
 
 	// Phase 1: client A connects with bot_alice token and creates a session.
 	store1 := new(mockSessionStoreForBotID)
@@ -710,7 +710,7 @@ func TestBotIDIsolation_MatchAllowed(t *testing.T) {
 		workerType     = "claude-code"
 		botID          = "bot_team_a"
 	)
-	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
+	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst, "", expandedSafeTestWorkDir)
 
 	store := new(mockSessionStoreForBotID)
 	store.Test(t)
@@ -781,10 +781,10 @@ func TestUserIDOwnership_MismatchRejected(t *testing.T) {
 		workerType     = "claude-code"
 		botID          = "bot_shared"
 	)
-	derivedSIDAlice := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
+	derivedSIDAlice := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, "", expandedSafeTestWorkDir)
 	// Bob's derived key is different from alice's, but mock returns alice's session
 	// to simulate a key collision or direct UUID lookup scenario.
-	derivedSIDBob := session.DeriveSessionKey("bob", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
+	derivedSIDBob := session.DeriveSessionKey("bob", worker.WorkerType(workerType), sessionIDConst, "", expandedSafeTestWorkDir)
 
 	// Session exists, owned by "alice".
 	existingSession := &session.SessionInfo{
@@ -857,7 +857,7 @@ func TestUserIDOwnership_MatchAllowed(t *testing.T) {
 		workerType     = "claude-code"
 		botID          = "bot_team"
 	)
-	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
+	derivedSID := session.DeriveSessionKey("alice", worker.WorkerType(workerType), sessionIDConst, "", expandedSafeTestWorkDir)
 
 	existingSession := &session.SessionInfo{
 		ID:         derivedSID,
@@ -928,7 +928,7 @@ func TestUserIDOwnership_EmptyConnectionUserID_Allowed(t *testing.T) {
 		botID          = "bot_anon_reconnect"
 	)
 	// Empty userID in DeriveSessionKey produces a different key than "alice".
-	derivedSIDEmpty := session.DeriveSessionKey("", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
+	derivedSIDEmpty := session.DeriveSessionKey("", worker.WorkerType(workerType), sessionIDConst, "", expandedSafeTestWorkDir)
 
 	// Session owned by "alice".
 	existingSession := &session.SessionInfo{
@@ -997,7 +997,7 @@ func TestBotIDIsolation_EmptyBotIDAllowed(t *testing.T) {
 		sessionIDConst = "sess_no_bot"
 		workerType     = "claude-code"
 	)
-	derivedSID := session.DeriveSessionKey("anon", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
+	derivedSID := session.DeriveSessionKey("anon", worker.WorkerType(workerType), sessionIDConst, "", expandedSafeTestWorkDir)
 
 	store := new(mockSessionStoreForBotID)
 	store.Test(t)
@@ -1060,7 +1060,7 @@ func TestBotIDIsolation_NewSessionStoresBotID(t *testing.T) {
 		workerType     = "claude-code"
 		botID          = "bot_new_session"
 	)
-	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst, expandedSafeTestWorkDir)
+	derivedSID := session.DeriveSessionKey("user1", worker.WorkerType(workerType), sessionIDConst, "", expandedSafeTestWorkDir)
 
 	store := new(mockSessionStoreForBotID)
 	store.Test(t)
@@ -1181,8 +1181,8 @@ func (m *mockBridgeSM) DeletePhysical(ctx context.Context, id string) error {
 	return args.Error(0)
 }
 
-func (m *mockBridgeSM) List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error) {
-	args := m.Called(ctx, userID, platform, limit, offset)
+func (m *mockBridgeSM) List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*session.SessionInfo, error) {
+	args := m.Called(ctx, userID, platform, workspaceID, limit, offset)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -1201,6 +1201,11 @@ func (m *mockBridgeSM) EnsureWorkerSessionID(ctx context.Context, id, workerSess
 
 func (m *mockBridgeSM) ResetExpiry(ctx context.Context, id string) error {
 	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *mockBridgeSM) SetWorkspaceID(ctx context.Context, id, workspaceID string) error {
+	args := m.Called(ctx, id, workspaceID)
 	return args.Error(0)
 }
 

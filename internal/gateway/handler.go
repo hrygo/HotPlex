@@ -394,7 +394,7 @@ type SessionWorkerManager interface {
 // SessionAdmin provides listing, ownership validation, and metadata mutations.
 type SessionAdmin interface {
 	SessionExpirer
-	List(ctx context.Context, userID, platform string, limit, offset int) ([]*session.SessionInfo, error)
+	List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*session.SessionInfo, error)
 	ValidateOwnership(ctx context.Context, sessionID, userID, adminUserID string) error
 	UpdateWorkDir(ctx context.Context, id, workDir string) error
 }
@@ -404,6 +404,13 @@ type SessionAdmin interface {
 // sub-interfaces without pulling in the full SessionAdmin.
 type SessionExpirer interface {
 	ResetExpiry(ctx context.Context, id string) error
+}
+
+// SessionWorkspaceBinder binds a session to a workspace (WebChat multi-tenant, spec ①).
+// Kept as a separate sub-interface so apiSM (GatewayAPI) does not need it — only
+// bridgeSM composes it, since workspace binding happens inside Bridge.StartSession.
+type SessionWorkspaceBinder interface {
+	SetWorkspaceID(ctx context.Context, id, workspaceID string) error
 }
 
 // SessionManager composes all session sub-interfaces for full management.

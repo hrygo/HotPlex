@@ -71,14 +71,13 @@ func Handler(csp string, cookieAuth *security.CookieAuth) http.Handler {
 		}
 
 		// SPA fallback: serve index.html for all non-file paths.
-		// Issue a cookie if cookieAuth is configured and request lacks a valid one.
-		if cookieAuth != nil {
-			// TODO(security): support real user identity via login/OAuth.
-			// Currently all webchat visitors share "webchat_user" identity.
-			// This is sufficient for single-user webchat but prevents cookie-authed
-			// users from accessing sessions created by specific API key identities.
-			_ = cookieAuth.SetCookie(w, r, "webchat_user")
-		}
+		// WebChat no longer auto-issues a fixed "webchat_user" cookie (spec §8.4
+		// transition state). In production mode, unauthenticated visitors must log
+		// in via /api/auth/login to obtain a real users.id cookie. The login UI is
+		// delivered by spec ⑥; until then the webchat production front-end is
+		// intentionally disconnected. Dev mode (no auth configured) falls back to
+		// the Authenticator's "anonymous" identity. cookieAuth is retained on the
+		// signature for API compatibility and future same-origin refresh use.
 		w.Header().Set("Cache-Control", "no-cache")
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)

@@ -26,11 +26,12 @@ const botIDQueryParam = "bot_id"
 type Authenticator struct {
 	mu            sync.RWMutex
 	cfg           *config.SecurityConfig
-	validKey      map[string]bool // config-sourced keys (YAML + env)
-	dbKeys        map[string]bool // database-sourced keys (Admin API CRUD)
-	keyResolver   APIKeyResolver  // optional; maps API keys to user identities. nil = "api_user"
-	devModeLocked bool            // true once any key has existed; prevents dev mode re-enable
-	cookieAuth    *CookieAuth     // optional; HMAC cookie auth (3rd priority after header/query)
+	validKey      map[string]bool  // config-sourced keys (YAML + env)
+	dbKeys        map[string]bool  // database-sourced keys (Admin API CRUD)
+	keyResolver   APIKeyResolver   // optional; maps API keys to user identities. nil = "api_user"
+	devModeLocked bool             // true once any key has existed; prevents dev mode re-enable
+	cookieAuth    *CookieAuth      // optional; HMAC cookie auth (3rd priority after header/query)
+	idp           IdentityProvider // optional; account-login provider (LocalAccountProvider / future OAuth)
 }
 
 // NewAuthenticator creates a new authenticator.
@@ -53,6 +54,22 @@ func (a *Authenticator) SetCookieAuth(ca *CookieAuth) {
 	a.mu.Lock()
 	a.cookieAuth = ca
 	a.mu.Unlock()
+}
+
+// SetIdentityProvider wires the account-login identity provider (LocalAccountProvider
+// now, OAuthProvider later). Optional: nil disables account-login + Lookup.
+func (a *Authenticator) SetIdentityProvider(idp IdentityProvider) {
+	a.mu.Lock()
+	a.idp = idp
+	a.mu.Unlock()
+}
+
+// IdentityProvider returns the wired provider (may be nil). Used by handlers
+// for user Lookup (e.g. /api/auth/me) and admin role checks.
+func (a *Authenticator) IdentityProvider() IdentityProvider {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.idp
 }
 
 // ErrUnauthorized is returned when authentication fails.

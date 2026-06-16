@@ -100,6 +100,7 @@ func Default() *Config {
 			MaxSize:          100,
 			MaxIdlePerUser:   5,
 			MaxMemoryPerUser: 3 << 30, // 3 GB
+			MaxPerWorkspace:  0,       // disabled by default; WebChat deployments configure per-workspace concurrency
 		},
 		Admin: AdminConfig{
 			Enabled:            true,
