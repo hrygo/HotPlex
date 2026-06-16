@@ -164,7 +164,7 @@ func TestInvitationsStore_List(t *testing.T) {
 	require.NoError(t, store.CreateInvitation(ctx, &Invitation{ID: "inv-1", Code: "C1", CreatedBy: "admin-1", Role: "user", ExpiresAt: 1800000000}, 1700000000))
 	require.NoError(t, store.CreateInvitation(ctx, &Invitation{ID: "inv-2", Code: "C2", CreatedBy: "admin-1", Role: "user", ExpiresAt: 1800000000}, 1700000001))
 
-	list, err := store.ListInvitations(ctx)
+	list, err := store.ListInvitations(ctx, 100, 0)
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 }

@@ -68,21 +68,21 @@ func respondJSON(w http.ResponseWriter, v any) {
 func (g *GatewayAPI) authorizeSession(w http.ResponseWriter, r *http.Request) (string, *session.SessionInfo, bool) {
 	userID, _, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
 		return "", nil, false
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		http.Error(w, "session id required", http.StatusBadRequest)
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "session id required")
 		return "", nil, false
 	}
 	si, err := g.sm.Get(r.Context(), id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		writeAppError(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return "", nil, false
 	}
 	if si.UserID != userID {
-		http.Error(w, "ownership required", http.StatusForbidden)
+		writeAppError(w, http.StatusForbidden, "FORBIDDEN", "ownership required")
 		return "", nil, false
 	}
 	// WebChat 多租户防御深度：会话绑定的 workspace 必须仍属当前用户（spec §9.3）。
@@ -115,7 +115,7 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	userID, _, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
 		g.log.Warn("gateway: list sessions auth failed", "method", r.Method, "path", r.URL.Path, "err", err)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
 		return
 	}
 	limit := 100
@@ -153,7 +153,7 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	sessions, err := g.sm.List(r.Context(), userID, platform, workspaceFilter, limit, offset)
 	if err != nil {
 		g.log.Error("gateway: list sessions failed", "method", r.Method, "path", r.URL.Path, "err", err)
-		http.Error(w, "failed to list sessions", http.StatusInternalServerError)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to list sessions")
 		return
 	}
 	respondJSON(w, map[string]any{"sessions": sessions, "limit": limit, "offset": offset, "platform": platform, "workspace_id": workspaceFilter})
@@ -182,7 +182,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	userID, botID, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
 		g.log.Warn("gateway: create session auth failed", "method", r.Method, "path", r.URL.Path, "err", err)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
 		return
 	}
 
@@ -212,25 +212,25 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	clientSessionID = messaging.SanitizeText(clientSessionID)
 	if clientSessionID == "" {
 		g.log.Warn("gateway: create session missing client_session_id", "method", r.Method, "path", r.URL.Path)
-		http.Error(w, "client_session_id is required", http.StatusBadRequest)
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "client_session_id is required")
 		return
 	}
 	if len(clientSessionID) > session.MaxClientKeyLen {
 		g.log.Warn("gateway: create session client_session_id too long", "method", r.Method, "path", r.URL.Path, "len", len(clientSessionID))
-		http.Error(w, fmt.Sprintf("client_session_id too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("client_session_id too long (max %d chars)", session.MaxClientKeyLen))
 		return
 	}
 	// Reject "|" in client_session_id: it is client-controlled and flows into
 	// DeriveSessionKey's hash name, where it would alias session keys (review P3).
 	if err := session.ValidateClientKey(clientSessionID); err != nil {
 		g.log.Warn("gateway: create session invalid client_session_id", "method", r.Method, "path", r.URL.Path)
-		http.Error(w, "client_session_id must not contain '|'", http.StatusBadRequest)
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "client_session_id must not contain '|'")
 		return
 	}
 	title = messaging.SanitizeText(title)
 	if len(title) > session.MaxClientKeyLen {
 		g.log.Warn("gateway: create session title too long", "method", r.Method, "path", r.URL.Path, "title_len", len(title))
-		http.Error(w, fmt.Sprintf("title too long (max %d chars)", session.MaxClientKeyLen), http.StatusBadRequest)
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("title too long (max %d chars)", session.MaxClientKeyLen))
 		return
 	}
 
@@ -242,7 +242,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if g.wsStore == nil {
 		g.log.Error("gateway: workspace store not configured", "method", r.Method, "path", r.URL.Path)
-		http.Error(w, "workspace store unavailable", http.StatusInternalServerError)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "workspace store unavailable")
 		return
 	}
 	ws, err := g.wsStore.GetWorkspaceByID(r.Context(), workspaceID)
@@ -307,7 +307,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: ws.ID,
 	}); err != nil {
 		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
-		http.Error(w, "failed to create session", http.StatusInternalServerError)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to create session")
 		return
 	}
 	respondJSON(w, map[string]string{"session_id": id})
@@ -361,7 +361,7 @@ func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	if err := g.sm.DeletePhysical(r.Context(), id); err != nil {
 		g.log.Error("gateway: delete session failed", "session_id", id, "method", r.Method, "path", r.URL.Path, "err", err)
-		http.Error(w, "failed to delete session", http.StatusInternalServerError)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to delete session")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -390,12 +390,12 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		g.log.Warn("gateway: switch workdir invalid body", "method", r.Method, "path", r.URL.Path, "err", err)
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 		return
 	}
 	if body.WorkDir == "" {
 		g.log.Warn("gateway: switch workdir missing work_dir", "method", r.Method, "path", r.URL.Path)
-		http.Error(w, "work_dir is required", http.StatusBadRequest)
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "work_dir is required")
 		return
 	}
 
@@ -403,7 +403,7 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 	expanded, err := validateAndExpandWorkDir(body.WorkDir)
 	if err != nil {
 		g.log.Warn("gateway: switch workdir invalid path", "method", r.Method, "path", r.URL.Path, "work_dir", body.WorkDir, "err", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeAppError(w, http.StatusBadRequest, "INVALID_WORK_DIR", err.Error())
 		return
 	}
 	body.WorkDir = expanded
@@ -416,7 +416,7 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 
 	if !si.State.IsActive() {
 		g.log.Warn("gateway: switch workdir session not active", "session_id", id, "method", r.Method, "path", r.URL.Path, "state", si.State)
-		http.Error(w, "session not active", http.StatusConflict)
+		writeAppError(w, http.StatusConflict, "SESSION_NOT_ACTIVE", "session not active")
 		return
 	}
 
@@ -426,11 +426,11 @@ func (g *GatewayAPI) SwitchWorkDir(w http.ResponseWriter, r *http.Request) {
 		var pathErr *os.PathError
 		if errors.As(err, &pathErr) || strings.Contains(err.Error(), "not a directory") {
 			g.log.Warn("gateway: switch workdir bad path", "session_id", id, "method", r.Method, "path", r.URL.Path, "err", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAppError(w, http.StatusBadRequest, "INVALID_WORK_DIR", err.Error())
 			return
 		}
 		g.log.Error("gateway: switch workdir failed", "session_id", id, "method", r.Method, "path", r.URL.Path, "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
 		return
 	}
 
@@ -499,7 +499,7 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		g.log.Error("gateway: get history failed", "session_id", id, "err", err)
-		http.Error(w, "failed to get history", http.StatusInternalServerError)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to get history")
 		return
 	}
 
@@ -569,7 +569,7 @@ func (g *GatewayAPI) GetEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		g.log.Error("gateway: get events failed", "session_id", id, "err", err)
-		http.Error(w, "failed to get events", http.StatusInternalServerError)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to get events")
 		return
 	}
 

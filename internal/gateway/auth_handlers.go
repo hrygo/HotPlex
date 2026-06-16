@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,10 +87,7 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 
 // Logout: POST /api/auth/logout — clears the cookie.
 func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name: "webchat_session", Value: "", Path: "/",
-		MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode,
-	})
+	h.cookieAuth.Clear(w, r)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -122,6 +120,12 @@ type acceptInviteRequest struct {
 }
 
 // AcceptInvite: POST /api/auth/accept-invite (spec §8.6 invitation registration).
+//
+// 顺序设计（防用户名枚举）：先 CAS 消费邀请码，再创建用户，冲突时不回滚。
+// 旧实现先做 GetUserByUsername 预检查再消费码 —— 用户名冲突不消耗码，攻击者持单个
+// 有效码即可无限枚举已注册用户名。新顺序让每次探测都消耗一个一次性码，枚举成本
+// 从 O(1 码) 升至 O(N 码)，码由 admin 控制故枚举不再可行。代价：合法用户用户名
+// 冲突时码被消费，需 admin 重新发码（一次性码的安全语义）。
 func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 	var req acceptInviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -146,37 +150,41 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusBadRequest, "INVITATION_EXPIRED", "invitation expired")
 		return
 	}
-	if existing, _ := h.store.GetUserByUsername(ctx, req.Username); existing != nil {
-		writeAppError(w, http.StatusConflict, "USERNAME_TAKEN", "username taken")
+
+	// 先 CAS 消费邀请码（spec §8.6）：防用户名枚举。用 inv.CreatedBy（admin，已存在，
+	// 满足 used_by 的 FK 约束）作占位消费；用户创建成功后再更新为真实接受者。
+	// 用户名冲突时码已被消费（不回滚 = 不重新引入枚举），攻击者每次探测消耗一个一次性码。
+	if err := h.store.MarkInvitationUsed(ctx, inv.ID, inv.CreatedBy, h.nowUnix()); err != nil {
+		writeAppError(w, http.StatusBadRequest, "INVITATION_USED", "invitation already used")
 		return
 	}
+
 	hash, err := h.idp.HashPassword(req.Password)
 	if err != nil {
+		slog.Error("accept-invite: hash password failed; invitation consumed",
+			"invitation_id", inv.ID, "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "hash error")
 		return
 	}
 	uid := uuid.NewString()
 	u := &security.User{ID: uid, Username: req.Username, PasswordHash: hash, Role: inv.Role, Status: "active"}
 	if err := h.store.CreateUser(ctx, u, h.nowUnix()); err != nil {
-		// Race: another accept grabbed the username first.
+		// 邀请码已被消费且不回滚（回滚会重新引入枚举）。用户名冲突 = 码失效，
+		// 合法用户需联系 admin 重新发码（一次性码的安全语义）。
 		if isUniqueViolation(err) {
 			writeAppError(w, http.StatusConflict, "USERNAME_TAKEN", "username taken")
 			return
 		}
+		slog.Error("accept-invite: create user failed; invitation consumed",
+			"invitation_id", inv.ID, "user_id", uid, "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "create user failed")
 		return
 	}
-	if err := h.store.MarkInvitationUsed(ctx, inv.ID, uid, h.nowUnix()); err != nil {
-		// CAS failed: another concurrent accept claimed this invitation first.
-		// Physically delete the orphaned user so the username is freed for a
-		// subsequent legitimate invitation (review P2 fix — disable left the
-		// username permanently occupied, blocking recovery).
-		if derr := h.store.DeleteUser(ctx, uid); derr != nil {
-			slog.Error("failed to delete orphaned user after invitation CAS failure",
-				"user_id", uid, "invitation_id", inv.ID, "err", derr)
-		}
-		writeAppError(w, http.StatusConflict, "INVITATION_USED", "invitation already used")
-		return
+	// 用户已创建（uid 存在，满足 FK），将占位 used_by 更新为真实接受者。
+	// 非关键失败：码已消费、用户已建，仅 used_by 审计指向 admin，记日志即可。
+	if err := h.store.SetInvitationUsedBy(ctx, inv.ID, inv.CreatedBy, uid); err != nil {
+		slog.Error("accept-invite: set invitation used_by failed",
+			"invitation_id", inv.ID, "user_id", uid, "err", err)
 	}
 	_ = h.cookieAuth.SetCookie(w, r, uid)
 	respondJSON(w, map[string]string{"user_id": uid})
@@ -200,6 +208,23 @@ func isUniqueViolation(err error) bool {
 }
 
 // --- admin endpoints (spec §11.2, require admin role) ---
+
+// parsePagination 从 query 解析 limit/offset：limit 默认 100、上限 1000，offset 默认 0。
+// 供 admin 列表端点统一分页，避免无界查询（spec §11.2）。
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit, offset = 100, 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 1000 {
+			limit = v
+		}
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+	return limit, offset
+}
 
 type createInvitationRequest struct {
 	Role string `json:"role"` // 'user' | 'admin'
@@ -247,12 +272,13 @@ func (h *AuthHandlers) AdminListInvitations(w http.ResponseWriter, r *http.Reque
 	if _, ok := h.requireAdmin(w, r); !ok {
 		return
 	}
-	invs, err := h.store.ListInvitations(r.Context())
+	limit, offset := parsePagination(r)
+	invs, err := h.store.ListInvitations(r.Context(), limit, offset)
 	if err != nil {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
 		return
 	}
-	respondJSON(w, map[string]any{"invitations": invs})
+	respondJSON(w, map[string]any{"invitations": invs, "limit": limit, "offset": offset})
 }
 
 // AdminDeleteInvitation: DELETE /api/admin/invitations/{id}
@@ -273,12 +299,13 @@ func (h *AuthHandlers) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireAdmin(w, r); !ok {
 		return
 	}
-	users, err := h.store.ListUsers(r.Context(), 1000, 0)
+	limit, offset := parsePagination(r)
+	users, err := h.store.ListUsers(r.Context(), limit, offset)
 	if err != nil {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
 		return
 	}
-	respondJSON(w, map[string]any{"users": users})
+	respondJSON(w, map[string]any{"users": users, "limit": limit, "offset": offset})
 }
 
 type updateUserStatusRequest struct {
@@ -330,4 +357,24 @@ func (h *AuthHandlers) requireAdmin(w http.ResponseWriter, r *http.Request) (str
 		return "", false
 	}
 	return uid, true
+}
+
+// resolveCookieAdmin 解析 cookie 认证用户是否为 active admin，返回 (user, ok)。
+// 供 WorkspaceHandlers.isAdmin 复用，保证包内 admin 判定语义（role==admin && status==active）
+// 单一定义。AuthHandlers.requireAdmin 因需区分错误码（NO_IDP/USER_DISABLED/FORBIDDEN）
+// 保留自有分支，但其判定与此处同源。
+func resolveCookieAdmin(cookieAuth *security.CookieAuth, auth *security.Authenticator, r *http.Request) (*security.User, bool) {
+	idp := auth.IdentityProvider()
+	if idp == nil {
+		return nil, false
+	}
+	uid, ok := cookieAuth.Authenticate(r)
+	if !ok {
+		return nil, false
+	}
+	u, err := idp.Lookup(r.Context(), uid)
+	if err != nil || u.Role != "admin" || u.Status != "active" {
+		return nil, false
+	}
+	return u, true
 }

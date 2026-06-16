@@ -61,7 +61,8 @@ type UserWorkspaceStore interface {
 	CreateInvitation(ctx context.Context, inv *Invitation, now int64) error
 	GetInvitationByCode(ctx context.Context, code string) (*Invitation, error)
 	MarkInvitationUsed(ctx context.Context, id, usedBy string, now int64) error
-	ListInvitations(ctx context.Context) ([]*Invitation, error)
+	SetInvitationUsedBy(ctx context.Context, id, oldUsedBy, newUsedBy string) error
+	ListInvitations(ctx context.Context, limit, offset int) ([]*Invitation, error)
 	DeleteInvitation(ctx context.Context, id string) error
 }
 
@@ -83,12 +84,13 @@ func nullableString(s string) any {
 
 func scanUser(sc rowScanner) (*security.User, error) {
 	var u security.User
-	var createdAt, updatedAt, lastLogin sql.NullInt64
+	var lastLogin sql.NullInt64 // last_login_at 可空（用户从未登录时为 NULL）
 	err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Status,
-		&createdAt, &updatedAt, &lastLogin)
+		&u.CreatedAt, &u.UpdatedAt, &lastLogin)
 	if err != nil {
 		return nil, err
 	}
+	u.LastLoginAt = lastLogin.Int64 // NULL → 0
 	return &u, nil
 }
 
@@ -288,8 +290,20 @@ func (s *SQLiteStore) MarkInvitationUsed(ctx context.Context, id, usedBy string,
 	})
 }
 
-func (s *SQLiteStore) ListInvitations(ctx context.Context) ([]*Invitation, error) {
-	rows, err := s.db.QueryContext(ctx, queries["invitations.list"])
+// SetInvitationUsedBy 将 CAS 消费时的占位 used_by（inv.CreatedBy）更新为真实接受者。
+// AcceptInvite 在用户创建成功后调用（uid 已存在，满足 FK）。
+func (s *SQLiteStore) SetInvitationUsedBy(ctx context.Context, id, oldUsedBy, newUsedBy string) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["invitations.set_used_by"], newUsedBy, id, oldUsedBy)
+		return err
+	})
+}
+
+func (s *SQLiteStore) ListInvitations(ctx context.Context, limit, offset int) ([]*Invitation, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, queries["invitations.list"], limit, offset)
 	if err != nil {
 		return nil, err
 	}

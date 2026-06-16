@@ -332,7 +332,7 @@ func TestPGMultitenancy_ListInvitations(t *testing.T) {
 		AddRow("inv-1", "C1", "admin", "user", nil, int64(200), int64(100), nil).
 		AddRow("inv-2", "C2", "admin", "user", nil, int64(300), int64(150), nil)
 	mock.ExpectQuery(regexp.QuoteMeta(q)).WillReturnRows(rows)
-	list, err := store.ListInvitations(context.Background())
+	list, err := store.ListInvitations(context.Background(), 100, 0)
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 }

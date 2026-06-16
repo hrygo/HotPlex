@@ -188,6 +188,20 @@ func (c *CookieAuth) verify(encoded string) (string, time.Time, bool) {
 	return userID, issuedAt, true
 }
 
+// Clear expires the session cookie immediately (logout). Encapsulates the cookie
+// name + attributes so callers never hardcode the name literal (spec §8.2).
+func (c *CookieAuth) Clear(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
 // isHTTPS determines if the request was made over HTTPS.
 // Checks TLS state and X-Forwarded-Proto header (set by reverse proxies).
 // Note: X-Forwarded-Proto is trusted unconditionally — a misconfigured or

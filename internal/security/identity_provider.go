@@ -10,12 +10,15 @@ import (
 // Defined in security (not session) to keep the dependency direction single:
 // session implements UserStore; security never imports session.
 type User struct {
-	ID           string
-	Username     string
-	PasswordHash string
-	Role         string // "admin" | "user"
-	Status       string // "active" | "disabled"
-	DisplayName  string
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"-"`      // 永不序列化：bcrypt 哈希禁止离开服务端（防 AdminListUsers 泄漏，spec §11.2）
+	Role         string `json:"role"`   // "admin" | "user"
+	Status       string `json:"status"` // "active" | "disabled"
+	DisplayName  string `json:"display_name"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+	LastLoginAt  int64  `json:"last_login_at"` // 0 = 从未登录（DB NULL）
 }
 
 // ErrUserNotFound is returned by UserStore when no user matches the lookup.

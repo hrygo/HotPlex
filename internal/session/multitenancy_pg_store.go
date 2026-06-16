@@ -156,8 +156,17 @@ func (s *pgStore) MarkInvitationUsed(ctx context.Context, id, usedBy string, now
 	return nil
 }
 
-func (s *pgStore) ListInvitations(ctx context.Context) ([]*Invitation, error) {
-	rows, err := s.db.QueryContext(ctx, s.queries["invitations.list"])
+// SetInvitationUsedBy 将 CAS 消费时的占位 used_by（inv.CreatedBy）更新为真实接受者。
+func (s *pgStore) SetInvitationUsedBy(ctx context.Context, id, oldUsedBy, newUsedBy string) error {
+	_, err := s.db.ExecContext(ctx, s.queries["invitations.set_used_by"], newUsedBy, id, oldUsedBy)
+	return err
+}
+
+func (s *pgStore) ListInvitations(ctx context.Context, limit, offset int) ([]*Invitation, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, s.queries["invitations.list"], limit, offset)
 	if err != nil {
 		return nil, err
 	}

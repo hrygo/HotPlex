@@ -42,17 +42,10 @@ func (h *WorkspaceHandlers) requireAuth(w http.ResponseWriter, r *http.Request) 
 }
 
 // isAdmin reports whether the current cookie user is an active admin.
+// 委托 resolveCookieAdmin，使 admin 判定与 AuthHandlers.requireAdmin 同源（spec §11.2）。
 func (h *WorkspaceHandlers) isAdmin(r *http.Request) bool {
-	idp := h.auth.IdentityProvider()
-	if idp == nil {
-		return false
-	}
-	uid, ok := h.cookieAuth.Authenticate(r)
-	if !ok {
-		return false
-	}
-	u, err := idp.Lookup(r.Context(), uid)
-	return err == nil && u.Role == "admin" && u.Status == "active"
+	_, ok := resolveCookieAdmin(h.cookieAuth, h.auth, r)
+	return ok
 }
 
 type createWorkspaceRequest struct {

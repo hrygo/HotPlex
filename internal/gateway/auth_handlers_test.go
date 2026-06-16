@@ -170,3 +170,61 @@ func TestAdminEndpoint_RequiresAdmin(t *testing.T) {
 	env.handlers.AdminListInvitations(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, "普通用户不能访问 admin 端点")
 }
+
+// TestAdminListUsers_OmitsPasswordHash 验证 AdminListUsers 不泄漏 bcrypt 哈希（spec §11.2）。
+// security.User.PasswordHash 带 json:"-"，序列化必须剔除。
+func TestAdminListUsers_OmitsPasswordHash(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.createUser(t, "alice", "alicepass1", "user")
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	env.handlers.AdminListUsers(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	body := w.Body.String()
+	require.Contains(t, body, `"username":"admin"`, "应返回用户列表")
+	require.NotContains(t, body, "password_hash", "PasswordHash 不得序列化")
+	require.NotContains(t, body, "PasswordHash", "PasswordHash 不得序列化")
+	require.NotContains(t, body, "$2", "bcrypt 哈希前缀不得出现在响应")
+}
+
+// TestAcceptInvite_UsernameTaken_ConsumesInvitation 验证用户名冲突时邀请码已被消费，
+// 使攻击者无法用单个码无限枚举已注册用户名（spec §8.6 防枚举）。
+func TestAcceptInvite_UsernameTaken_ConsumesInvitation(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.createUser(t, "taken", "takenpass1", "user") // 预占用用户名
+
+	// admin 创建邀请码。
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	env.handlers.AdminCreateInvitation(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.NotEmpty(t, resp.Code)
+
+	// 用已占用用户名 accept → 用户名冲突（但邀请码已消费，不回滚）。
+	accReq := []byte(`{"code":"` + resp.Code + `","username":"taken","password":"n00bpass123"}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/accept-invite", bytes.NewReader(accReq))
+	w2 := httptest.NewRecorder()
+	env.handlers.AcceptInvite(w2, req2)
+	require.Equal(t, http.StatusConflict, w2.Code, w2.Body.String())
+	require.Contains(t, w2.Body.String(), "USERNAME_TAKEN")
+
+	// 同码再次 accept 必须返回 INVITATION_USED —— 证明码已被消费，枚举无成本不可行。
+	req3 := httptest.NewRequest(http.MethodPost, "/api/auth/accept-invite", bytes.NewReader(
+		[]byte(`{"code":"`+resp.Code+`","username":"freshname","password":"n00bpass123"}`)))
+	w3 := httptest.NewRecorder()
+	env.handlers.AcceptInvite(w3, req3)
+	require.Equal(t, http.StatusBadRequest, w3.Code, w3.Body.String())
+	require.Contains(t, w3.Body.String(), "INVITATION_USED", "邀请码必须已被消费")
+}
