@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.29.1] - 2026-06-16
+
+### Summary
+
+v1.29.1 是一次 patch 版本更新，聚焦于 **API Key 安全约束加固**。新增 user_id 与 API Key 的 1:1 唯一映射约束（数据库层 UNIQUE INDEX + 应用层预检 + 409 Conflict），防止同一用户绑定多个 API Key 带来的权限边界模糊风险。同时修正 API Key 查询的错误码映射（此前将数据库瞬时故障误报为 404 Not Found，掩盖真实错误）。附带 config 包职责拆分（1659 行 god file → 5 文件）与 EventStore/gate/checkers 的内部去重重构（零行为变更，对最终用户无影响）。
+
+### Security
+
+- **Security**: Enforce 1:1 user_id ↔ API Key mapping — migration 016 adds a `UNIQUE INDEX` on `api_key_users(user_id)` for both SQLite and PostgreSQL, backed by an application-layer `requireUniqueUserID` pre-check that returns 409 Conflict on duplicate attempts. The DB constraint serves as defense-in-depth. Includes standalone dedup scripts (SQLite + PG) with fail-closed guards for resolving pre-existing duplicates before migration. (#741)
+
+### Fixed
+
+- **Security**: API Key lookup error-code accuracy — `HandleAPIKeyUserGet/Update/Delete` previously returned a blanket 404 on any `get()` failure, masking transient DB/connection errors as not-found. Now maps `sql.ErrNoRows` → 404 while other DB errors → 500; `update()`/`delete()` not-found (concurrent-delete window) also aligned to 404 via `%w sql.ErrNoRows` wrapping. Swagger updated with matching 500 responses. (#741)
+
 ## [1.29.0] - 2026-06-13
 
 ### Summary
