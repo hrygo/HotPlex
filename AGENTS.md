@@ -152,7 +152,7 @@
 - `config/` - Viper 配置 + 热重载 + 继承 + 审计/回滚。消息层共享默认值（WorkerType, STT, TTS）通过 `FillFrom()` 传播到平台配置。三级优先级：platform > messaging > Default()。多 bot 支持：`SlackBotConfig`/`FeishuBotConfig` + `normalizeSlackBots`/`normalizeFeishuBots` 向后兼容归一化
 - `security/` - API Key 认证（`Authenticator`）、Bot ID 提取（`BotIDFromRequest`）、SSRF 防护、路径安全
 - `skills/` - Skills 发现
-- `metrics/` - Prometheus 指标
+- `observability/` - Prometheus 指标 + OpenTelemetry 分布式追踪（30+ 指标、W3C TraceContext 传播、`sync.Once` 懒注册 + noop 降级）
 - `service/` - 跨平台系统服务管理（systemd/launchd/SCM）
 - `eventstore/` - 会话事件持久化 + delta 聚合
 - `updater/` - 自更新（GitHub API、sha256 校验、原子替换）
