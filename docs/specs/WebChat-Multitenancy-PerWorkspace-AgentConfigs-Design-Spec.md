@@ -87,7 +87,7 @@ WebChat 会话当前 `botName=""`（`bridge_worker.go:333` 注释），走 `plat
 | 解析入口 | **新增 `LoadForWorkspace` 独立函数** | 双轨物理隔离最彻底；`Load` 零改动向后兼容；符合 spec ① §5「接口扩展而非替换」 |
 | JSON 结构 | **flat map**（文件名 → 内容） | 键即文件名，与 `resolveFile`/`injectExclude` 按文件名模型零映射成本 |
 | admin 锁定机制 | **不做**（YAGNI） | 第一版全开放；未来如需「锁定 AGENTS.md」可增量加 `locked_files` 字段 |
-| 数据流载体 | `workerLaunchParams` 携带已解析 `workspaceOverrides map` | 保持 `injectAgentConfig` 纯函数（无 store 依赖），与现有设计一致 |
+| 数据流载体 | `workerLaunchParams` 携带已解析 `workspaceOverrides map` | 保持 `injectAgentConfig` 纯函数（不查 store）；解析集中在 bridge helper（Bridge 加窄接口 `WSStore` 依赖，因 resume/fresh-start 在 bridge 内部触发） |
 
 ---
 
@@ -203,11 +203,18 @@ type workerLaunchParams struct {
 }
 ```
 
-### 7.3 调用方填充 overrides
+### 7.3 Bridge 统一解析 overrides（helper）
 
-- **CreateSession**（`api.go`）：已在 spec ① 查 workspace 取 `work_dir`（`api.go:266-276`），顺手取 `AgentConfigOverrides` → 解析为 `map[string]string` → 填入 `workerLaunchParams.WorkspaceOverrides`。
-- **resume 路径**（worker 重启）：从 `session.workspace_id` 查 workspace 取 overrides 填入。具体调用点在实现计划细化。
-- 解析失败（DB 中 JSON 损坏）：`log.Warn` + 降级为 `nil`（走团队默认 `Load`），不阻断 worker 启动。
+代码精读发现：`createAndLaunchWorker` 有 **3 个调用点**——StartSession（`bridge.go:189`）、resume（`bridge.go:297`）、fresh-start（`bridge_worker.go:213`）。其中 resume 与 fresh-start 在 **Bridge 内部触发**（worker 崩溃恢复 / 重连），不经 `api.go`。故 overrides 解析必须由 Bridge 自己完成，不能依赖外部调用方（如 `CreateSession`）传入。
+
+方案：Bridge 新增**窄接口**依赖 + helper，3 点统一调用：
+
+- **窄接口** `WorkspaceOverridesReader`：仅需 `GetWorkspaceByID(ctx, id) (*session.Workspace, error)`（复用 spec ① `WorkspaceReader` 思路，`api.go:50`）。
+- **`BridgeDeps.WSStore`**（`deps.go:22` 加字段）：`gateway_run.go:260` NewBridge 传 `deps.WorkspaceStore`（spec ① 已有，`gateway_run.go:78`）。
+- **helper `b.resolveWorkspaceOverrides(workspaceID string) map[string]string`**：`workspaceID == ""` → `nil`（Message Channel 轨）；否则查 WSStore → `ValidateOverrides`（§8.2）解析 → 失败 `log.Warn` + 返回 `nil`（降级团队默认，不阻断 worker 启动）。
+- **3 个调用点统一**：`workspaceOverrides: b.resolveWorkspaceOverrides(<wid>)`，其中 `<wid>` 取自 `p.WorkspaceID`（StartSession，`worker.SessionStartParams.WorkspaceID` 已有，`worker.go:106`）或 `si.WorkspaceID`（resume/fresh-start，`session.SessionInfo.WorkspaceID` 已有，`manager.go:227`）。
+
+**`api.go CreateSession` 无需改动**：workspace 查询已在（`api.go:248`），`p.WorkspaceID` 已填，overrides 解析集中在 bridge helper。
 
 ### 7.4 `injectAgentConfig` 分流
 
@@ -226,9 +233,9 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, 
 
 `createAndLaunchWorker:82` 透传 `params.workspaceOverrides`。
 
-### 7.5 设计选择：传 map 而非 workspaceID
+### 7.5 设计选择：workerLaunchParams 携带已解析 map
 
-保持 `injectAgentConfig` **纯函数**（无 store 依赖，易测试），与现有设计一致。调用方负责查询解析；`Bridge` 不新增 workspace store 依赖。
+`workerLaunchParams.WorkspaceOverrides` 是**已解析的 `map[string]string`**（由 §7.3 helper 填充），而非 workspaceID。这保持 `injectAgentConfig` **纯函数**（不查 store、不解析 JSON，易测试）——store 查询与 JSON 解析集中在 bridge helper，`injectAgentConfig` 只做「有 overrides → `LoadForWorkspace`，无 → `Load`」的分流。
 
 ---
 
@@ -341,12 +348,13 @@ func ValidateOverrides(raw string) (map[string]string, error)
 |---|---|
 | `internal/agentconfig/loader.go` | 新增 `LoadForWorkspace` + `applyOverrides` |
 | `internal/agentconfig/validate.go`（新） | `ValidateOverrides`（JSON/键/类型/size 校验） |
-| `internal/agentconfig/loader_test.go`（新或扩展） | `LoadForWorkspace` + 回归测试 |
-| `internal/gateway/bridge_worker.go` | `workerLaunchParams` 加 `workspaceOverrides`；`injectAgentConfig` 签名 + 分流；`:82` 透传 |
-| `internal/gateway/api.go` | `CreateSession` 取 workspace overrides → 解析 → 填 params |
-| `internal/gateway/bridge.go` / resume 路径 | worker 重启时填 workspace overrides（实现计划细化调用点） |
+| `internal/agentconfig/loader_test.go`（扩展） | `LoadForWorkspace` + `ValidateOverrides` + `Load` 回归测试 |
+| `internal/gateway/deps.go` | `BridgeDeps` 加 `WSStore WorkspaceOverridesReader` 字段 |
+| `internal/gateway/bridge.go` | 新增 `WorkspaceOverridesReader` 接口 + `resolveWorkspaceOverrides` helper；StartSession(:189)/resume(:297) 调用点填 `workspaceOverrides` |
+| `internal/gateway/bridge_worker.go` | `workerLaunchParams` 加 `workspaceOverrides`；fresh-start(:213) 调用点填；`injectAgentConfig` 签名 + 分流；`:82` 透传 |
+| `cmd/hotplex/gateway_run.go` | NewBridge 调用(:260) 传 `WSStore: deps.WorkspaceStore` |
 | `internal/gateway/workspace_handlers.go` | PATCH `agent_config_overrides` 加三层校验 |
-| `internal/gateway/workspace_handlers_test.go`（新或扩展） | PATCH 校验测试 |
+| `internal/gateway/workspace_handlers_test.go`（扩展） | PATCH 校验测试 |
 
 **无新迁移**（复用 spec ① `017_multitenancy_tables.sql:23` 的 `agent_config_overrides` 列）。
 
