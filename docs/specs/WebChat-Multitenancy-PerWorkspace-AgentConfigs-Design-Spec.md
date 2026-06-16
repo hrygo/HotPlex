@@ -125,6 +125,8 @@ WebChat 会话当前 `botName=""`（`bridge_worker.go:333` 注释），走 `plat
 | 单文件 | ≤ 8 000 chars | `agentconfig.MaxFileChars`（`loader.go:34`） |
 | 总量 | ≤ 40 000 chars | `agentconfig.MaxTotalChars`（`loader.go:37`） |
 
+> **合并截断提示**：上表约束由 PATCH 入口 `ValidateOverrides` 校验 override 自身。合并 team default 后总量可能超 `MaxTotalChars`（team default 单文件可达 ~39000 chars），此时 `LoadForWorkspace` 的 `enforceTotalLimit` 按字段顺序静默截断（`slog.Warn`）。PATCH 侧无法预知 team default 大小，该截断对用户不可见——属 defense-in-depth 权衡（见 §5 `LoadForWorkspace`）。
+
 ---
 
 ## 5. 两层继承解析（LoadForWorkspace）

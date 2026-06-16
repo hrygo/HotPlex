@@ -305,10 +305,7 @@ func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclu
 		if val == "" || shouldExclude(baseName, injectExclude) {
 			return
 		}
-		// Strip frontmatter defensively — overrides are API-edited content that may
-		// be pasted from files; the file track strips via Load, this mirrors it so
-		// raw --- blocks never leak into the system prompt. See spec §4.2.
-		*target = stripFrontmatter(val)
+		*target = val
 	}
 	for k, v := range overrides {
 		switch k {
@@ -346,9 +343,6 @@ func enforceTotalLimit(c *AgentConfigs) {
 	for _, f := range fields {
 		n := len(*f.target)
 		if rem := MaxTotalChars - total; n > rem {
-			if rem < 0 {
-				rem = 0
-			}
 			slog.Warn("agentconfig: merged config exceeds total limit after overrides, truncated",
 				"file", f.name, "original", n, "remaining", rem, "limit", MaxTotalChars)
 			*f.target = (*f.target)[:rem]

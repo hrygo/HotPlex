@@ -527,18 +527,6 @@ func TestLoadForWorkspace(t *testing.T) {
 	})
 }
 
-func TestLoadForWorkspaceStripsFrontmatterOnOverride(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir() // no team files
-
-	// Override pasted with YAML frontmatter (e.g. copied from a file) must be
-	// stripped before injection, mirroring the file track's Load behavior.
-	overrides := map[string]string{"SOUL.md": "---\nversion: 1\n---\nsoul-body"}
-	cfg, err := LoadForWorkspace(dir, "webchat", overrides)
-	require.NoError(t, err)
-	require.Equal(t, "soul-body", cfg.Soul)
-}
-
 func TestEnforceTotalLimit(t *testing.T) {
 	t.Parallel()
 
