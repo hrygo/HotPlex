@@ -69,6 +69,7 @@ type UserWorkspaceStore interface {
 	CreateWorkspace(ctx context.Context, w *Workspace, now int64) error
 	GetWorkspaceByID(ctx context.Context, id string) (*Workspace, error)
 	ListWorkspacesByOwner(ctx context.Context, ownerUserID string) ([]*Workspace, error)
+	ListAllWorkspaces(ctx context.Context) ([]*Workspace, error)
 	GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error)
 	UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error
 	DeleteWorkspace(ctx context.Context, id string) error
@@ -247,6 +248,25 @@ func (s *SQLiteStore) GetWorkspaceByID(ctx context.Context, id string) (*Workspa
 
 func (s *SQLiteStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string) ([]*Workspace, error) {
 	rows, err := s.db.QueryContext(ctx, queries["workspaces.list_by_owner"], ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*Workspace
+	for rows.Next() {
+		w, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// ListAllWorkspaces returns all active workspaces regardless of owner. Used by the
+// gateway startup scan to detect stale/invalid agent_config_overrides (spec ② #749).
+func (s *SQLiteStore) ListAllWorkspaces(ctx context.Context) ([]*Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, queries["workspaces.list_all"])
 	if err != nil {
 		return nil, err
 	}

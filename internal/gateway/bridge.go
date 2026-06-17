@@ -67,6 +67,7 @@ type Bridge struct {
 	mcpConfigJSON      atomic.Value             // pre-serialized MCP config JSON string; "" = not configured
 	agentConfigExclude atomic.Value             // map[string][]string: platform → inject_exclude (global default at "" key)
 	wsStore            WorkspaceOverridesReader // per-workspace agent-config overrides resolver (spec ②); nil = Message Channel track
+	warnedOverrides    sync.Map                 // workspaceID → struct{}: dedup override-degrade warnings (#749)
 
 	accum map[string]*sessionAccumulator // per-session stats accumulator
 

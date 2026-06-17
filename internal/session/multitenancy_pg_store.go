@@ -103,6 +103,24 @@ func (s *pgStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string)
 	return out, rows.Err()
 }
 
+// ListAllWorkspaces returns all active workspaces regardless of owner (PG backend).
+func (s *pgStore) ListAllWorkspaces(ctx context.Context) ([]*Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["workspaces.list_all"])
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*Workspace
+	for rows.Next() {
+		w, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error) {
 	w, err := scanWorkspace(s.db.QueryRowContext(ctx, s.queries["workspaces.get_by_owner_and_workdir"], ownerUserID, workDir))
 	if errors.Is(err, sql.ErrNoRows) {

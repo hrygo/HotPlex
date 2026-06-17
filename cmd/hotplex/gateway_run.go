@@ -275,6 +275,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		WSStore:            stores.wsStore,
 	})
 
+	// One-time validation sweep: surface stale/invalid agent_config_overrides
+	// written before spec ② write-time validation (#749). Non-blocking.
+	gateway.ScanWorkspaceOverrides(ctx, stores.wsStore, log)
+
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
 
 	handler := gateway.NewHandler(gateway.HandlerDeps{

@@ -109,6 +109,27 @@ func TestWorkspacesStore_ListByOwnerIsolated(t *testing.T) {
 	}
 }
 
+func TestWorkspacesStore_ListAllWorkspaces(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-2", Username: "bob", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "a", WorkDir: "/tmp/a", AgentConfigOverrides: `{"SOUL.md":"x"}`}, 1700000000))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-2", OwnerUserID: "u-2", Name: "b", WorkDir: "/tmp/b"}, 1700000000))
+
+	all, err := store.ListAllWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, all, 2, "ListAllWorkspaces returns workspaces across all owners")
+	ids := map[string]bool{}
+	for _, w := range all {
+		ids[w.ID] = true
+		require.Equal(t, "active", w.Status)
+	}
+	require.True(t, ids["ws-1"])
+	require.True(t, ids["ws-2"])
+}
+
 func TestWorkspacesStore_CountActiveSessions(t *testing.T) {
 	t.Parallel()
 	store, _ := helperDB(t)
