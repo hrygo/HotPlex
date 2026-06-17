@@ -20,6 +20,8 @@ var hotReloadableFields = map[string]bool{
 	"session.gc_scan_interval":  true,
 	"pool.max_size":             true,
 	"pool.max_idle_per_user":    true,
+	"pool.max_memory_per_user":  true, // spec ⑤
+	"pool.max_per_workspace":    true, // spec ⑤
 	"security.api_keys":         true,
 	"security.allowed_origins":  true,
 	"security.security_contact": true,

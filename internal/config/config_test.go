@@ -97,6 +97,33 @@ func TestConfig_Validate(t *testing.T) {
 			errCnt: 1, // invalid pool only
 		},
 		{
+			name: "negative pool max_idle_per_user (spec ⑤)",
+			cfg: func() Config {
+				c := *Default()
+				c.Pool.MaxIdlePerUser = -1
+				return c
+			}(),
+			errCnt: 1,
+		},
+		{
+			name: "negative pool max_per_workspace (spec ⑤)",
+			cfg: func() Config {
+				c := *Default()
+				c.Pool.MaxPerWorkspace = -1
+				return c
+			}(),
+			errCnt: 1,
+		},
+		{
+			name: "negative pool max_memory_per_user (spec ⑤)",
+			cfg: func() Config {
+				c := *Default()
+				c.Pool.MaxMemoryPerUser = -1
+				return c
+			}(),
+			errCnt: 1,
+		},
+		{
 			name: "multiple errors",
 			cfg: func() Config {
 				c := *Default()

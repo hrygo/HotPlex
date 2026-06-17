@@ -84,6 +84,15 @@ func (c *Config) Validate() []string {
 	if c.Pool.MaxSize <= 0 {
 		errs = append(errs, "pool.max_size must be positive")
 	}
+	if c.Pool.MaxIdlePerUser < 0 {
+		errs = append(errs, "pool.max_idle_per_user must be non-negative")
+	}
+	if c.Pool.MaxPerWorkspace < 0 {
+		errs = append(errs, "pool.max_per_workspace must be non-negative")
+	}
+	if c.Pool.MaxMemoryPerUser < 0 {
+		errs = append(errs, "pool.max_memory_per_user must be non-negative")
+	}
 	// Warn (not error) for TLS on non-local address.
 	if !c.Security.TLSEnabled &&
 		!strings.Contains(c.Gateway.Addr, "localhost") &&
