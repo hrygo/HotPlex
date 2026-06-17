@@ -16,6 +16,14 @@ import (
 
 var poolUtilization atomic.Uint64 // stores math.Float64bits
 
+// 指标快照(atomic,gauge 回调无锁读取;snapshotMetricsLocked 持 mu 写)。
+var (
+	metricActiveSessions     atomic.Int64
+	metricDistinctUsers      atomic.Int64
+	metricDistinctWorkspaces atomic.Int64
+	metricMemoryReserved     atomic.Int64
+)
+
 func init() {
 	observability.RegisterGaugeCallbacks(func(m metric.Meter) {
 		poolGauge, err := m.Float64ObservableGauge(
@@ -38,8 +46,27 @@ func setPoolUtilization(v float64) {
 }
 
 // snapshotMetricsLocked 将当前 pool 状态写入 atomic 快照变量供 gauge 回调无锁读取。
-// 调用方必须持有 p.mu。(Task 2 will fill in the implementation.)
-func (p *PoolManager) snapshotMetricsLocked() {}
+// 调用方必须持有 p.mu。
+func (p *PoolManager) snapshotMetricsLocked() {
+	metricActiveSessions.Store(int64(p.totalCount))
+	metricDistinctUsers.Store(int64(len(p.userCount)))
+	metricDistinctWorkspaces.Store(int64(len(p.workspaceCount)))
+	metricMemoryReserved.Store(p.totalMemoryReserved())
+	if p.maxSize > 0 {
+		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
+	} else {
+		setPoolUtilization(0)
+	}
+}
+
+// totalMemoryReserved 返回全局已预留内存(所有用户之和)。调用方持 p.mu。
+func (p *PoolManager) totalMemoryReserved() int64 {
+	var sum int64
+	for _, m := range p.userMemory {
+		sum += m
+	}
+	return sum
+}
 
 // PoolManager manages per-user and global concurrency quotas for worker sessions.
 type PoolManager struct {
@@ -158,9 +185,7 @@ func (p *PoolManager) acquireLocked(ctx context.Context, userID, workspaceID str
 	if workspaceID != "" {
 		p.workspaceCount[workspaceID]++
 	}
-	if p.maxSize > 0 {
-		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
-	}
+	p.snapshotMetricsLocked()
 	p.log.Debug("pool: acquired", "user_id", userID, "workspace_id", workspaceID, "total", p.totalCount)
 	return nil
 }
@@ -229,9 +254,7 @@ func (p *PoolManager) releaseCoreLocked(ctx context.Context, userID string) bool
 		delete(p.userCount, userID)
 	}
 	p.totalCount--
-	if p.maxSize > 0 {
-		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
-	}
+	p.snapshotMetricsLocked()
 	p.releaseMemoryLocked(userID)
 	return true
 }
@@ -289,6 +312,7 @@ func (p *PoolManager) AcquireMemory(userID string) error {
 		}
 		p.userMemory[userID] = used + workerMemoryEstimate
 	}
+	p.snapshotMetricsLocked()
 	return nil
 }
 
@@ -300,6 +324,7 @@ func (p *PoolManager) ReleaseMemory(userID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.releaseMemoryLocked(userID)
+	p.snapshotMetricsLocked()
 }
 
 // releaseMemoryLocked frees memory quota. Caller must hold p.mu.
