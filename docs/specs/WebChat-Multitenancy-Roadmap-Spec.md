@@ -1,7 +1,7 @@
 # WebChat 一等公民化与多租户路线图
 
 **日期**: 2026-06-16
-**状态**: spec ① 已合入（[PR #746](https://github.com/hrygo/hotplex/pull/746)，`44f461ff`）；spec ② 实现完成待 review（[PR #748](https://github.com/hrygo/hotplex/pull/748)）；③-⑥ 待逐个 brainstorm
+**状态**: spec ① 已合入（[PR #746](https://github.com/hrygo/hotplex/pull/746)，`44f461ff`）；spec ② 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）；③-⑥ 待逐个 brainstorm
 **分支**: main · **基线版本**: v1.29.0 (fb857af1)
 **关联设计**: [`WebChat-Multitenancy-Foundation-Design-Spec.md`](./WebChat-Multitenancy-Foundation-Design-Spec.md)（spec ①）
 
@@ -81,7 +81,7 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 
 | spec | 标题 | 依赖 | 核心改动 |
 |---|---|---|---|
-| ② | per-workspace agent-configs 自定义 | ① | ✅ 实现完成待 review（[PR #748](https://github.com/hrygo/hotplex/pull/748)）：`LoadForWorkspace` 双轨隔离 + Bridge `WSStore` helper + PATCH 三层校验，[设计](./WebChat-Multitenancy-PerWorkspace-AgentConfigs-Design-Spec.md) |
+| ② | per-workspace agent-configs 自定义 | ① | ✅ 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）：`LoadForWorkspace` 双轨隔离 + Bridge `WSStore` helper + PATCH 三层校验，[设计](./WebChat-Multitenancy-PerWorkspace-AgentConfigs-Design-Spec.md) |
 | ③ | workspace 级 worker 选择 | ① | worker_type fallback 链（WebChat 轨：团队默认 → workspace）+ API，填充 `workspaces.worker_preference` |
 | ④ | OAuth/SSO provider 落地 | ① | `IdentityProvider` 第二实现（飞书/Slack/OIDC） |
 
@@ -211,8 +211,8 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 ## 7. 推进节奏
 
 - 每个 spec 独立 brainstorm → 设计文档（`docs/specs/`）→ writing-plans → 实现。
-- spec ① 已合入（PR #746）。spec ② 实现完成待 review（PR #748）。spec ③④ 可并行启动。
+- spec ① 已合入（PR #746）。spec ② 已合入（PR #748）。spec ③④ 可并行启动。
 - spec ⑥ 在 ②③④就绪后启动。
 - 路线图文档随各 spec 推进更新状态。
 
-**下一步**：PR #748（spec ②）待 review 合入 → 启动 spec ③④ brainstorm（workspace 级 worker 选择 / OAuth SSO，互不依赖可并行；spec ③ `CreateSession` 已消费 `worker_preference`，主要补白名单校验，工作量最小）。spec ⑤⑥ 待 ③④ 就绪。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。
+**下一步**：spec ② 已合入（PR #748）→ 启动 spec ③④ brainstorm（workspace 级 worker 选择 / OAuth SSO，互不依赖可并行；spec ③ `CreateSession` 已消费 `worker_preference`，主要补白名单校验，工作量最小）。spec ⑤⑥ 待 ③④ 就绪。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。
