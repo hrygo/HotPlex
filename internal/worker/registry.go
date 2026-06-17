@@ -3,7 +3,6 @@ package worker
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 )
 
@@ -88,11 +87,13 @@ func ValidateType(wt WorkerType) error {
 	if wt == "" {
 		return nil
 	}
-	registered := RegisteredTypes()
-	if slices.Contains(registered, wt) {
+	registryMu.RLock()
+	_, ok := registry[wt]
+	registryMu.RUnlock()
+	if ok {
 		return nil
 	}
-	return fmt.Errorf("%w: %q not in registered types %v", ErrInvalidWorkerType, wt, registered)
+	return fmt.Errorf("%w: %q not in registered types %v", ErrInvalidWorkerType, wt, RegisteredTypes())
 }
 
 // CanResumeTerminated returns true if the given worker type supports

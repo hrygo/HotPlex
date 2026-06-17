@@ -12,15 +12,32 @@ import (
 
 // withRegistry saves the current registry state, runs fn, then restores it.
 // This prevents test pollution when Register modifies the global registry.
+//
+// The swap of the package-level registry/capCache is performed under their
+// respective mutexes so the exchange is race-free (ValidateType/NewWorker/
+// RegisteredTypes read under the same locks). fn itself runs unlocked because
+// it typically calls Register, which acquires the locks itself — holding them
+// across fn would deadlock. Callers must keep subtests non-parallel since fn
+// mutates process-global state (see TestRegister).
 func withRegistry(t *testing.T, fn func()) {
 	t.Helper()
+	registryMu.Lock()
+	capCacheMu.Lock()
 	orig := registry
 	origCap := capCache
 	registry = make(map[WorkerType]Builder)
 	capCache = make(map[WorkerType]bool)
+	registryMu.Unlock()
+	capCacheMu.Unlock()
+
 	fn()
+
+	registryMu.Lock()
+	capCacheMu.Lock()
 	registry = orig
 	capCache = origCap
+	registryMu.Unlock()
+	capCacheMu.Unlock()
 }
 
 func TestRegister(t *testing.T) {
