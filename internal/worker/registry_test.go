@@ -217,3 +217,51 @@ func TestWorkerError(t *testing.T) {
 		require.Nil(t, errors.Unwrap(e))
 	})
 }
+
+func TestValidateType(t *testing.T) {
+	// The worker package's own tests don't import adapter packages, so the
+	// global registry is empty here. Simulate the production registry by
+	// registering the 4 known types (mirrors each adapter's init() Register).
+	// Registry is global shared state — no t.Parallel on subtests (see TestRegister).
+	withRegistry(t, func() {
+		for _, wt := range []WorkerType{TypeClaudeCode, TypeOpenCodeSrv, TypeCodexCLI, TypeACP} {
+			Register(wt, func() (Worker, error) { return nil, nil })
+		}
+
+		registered := RegisteredTypes()
+
+		tests := []struct {
+			name    string
+			wt      WorkerType
+			wantErr bool
+		}{
+			{"empty inherits default", "", false},
+			{"claude_code valid", TypeClaudeCode, false},
+			{"opencode_server valid", TypeOpenCodeSrv, false},
+			{"codex_cli valid", TypeCodexCLI, false},
+			{"acp valid", TypeACP, false},
+			{"unknown sentinel rejected", TypeUnknown, true},
+			{"garbage rejected", WorkerType("bogus_worker"), true},
+			{"case sensitive uppercase rejected", WorkerType("CLAUDE_CODE"), true},
+			{"case sensitive capitalized rejected", WorkerType("Claude_Code"), true},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				err := ValidateType(tt.wt)
+				if tt.wantErr {
+					require.Error(t, err)
+					require.ErrorIs(t, err, ErrInvalidWorkerType)
+					return
+				}
+				require.NoError(t, err)
+			})
+		}
+
+		// Sanity: the 4 valid constants are actually in RegisteredTypes()
+		// (guards against a future worker package losing its init() Register).
+		require.Contains(t, registered, TypeClaudeCode)
+		require.Contains(t, registered, TypeOpenCodeSrv)
+		require.Contains(t, registered, TypeCodexCLI)
+		require.Contains(t, registered, TypeACP)
+	})
+}

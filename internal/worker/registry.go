@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -72,6 +74,25 @@ func RegisteredTypes() []WorkerType {
 		types = append(types, t)
 	}
 	return types
+}
+
+// ErrInvalidWorkerType signals a worker type that is not registered.
+// Returned by ValidateType for non-empty types absent from RegisteredTypes().
+var ErrInvalidWorkerType = errors.New("invalid worker type")
+
+// ValidateType returns nil for an empty wt (means "inherit default") or for any
+// registered worker type. A non-empty unregistered type returns ErrInvalidWorkerType.
+// Used by both the PATCH workspace handler and CreateSession to reject unknown
+// worker types at the boundary instead of at worker launch. See spec ③ §4.
+func ValidateType(wt WorkerType) error {
+	if wt == "" {
+		return nil
+	}
+	registered := RegisteredTypes()
+	if slices.Contains(registered, wt) {
+		return nil
+	}
+	return fmt.Errorf("%w: %q not in registered types %v", ErrInvalidWorkerType, wt, registered)
 }
 
 // CanResumeTerminated returns true if the given worker type supports
