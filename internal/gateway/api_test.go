@@ -451,6 +451,33 @@ func TestCreateSession_WorkerTypeValidation(t *testing.T) {
 	}
 }
 
+func TestCreateSession_StaleWorkerPreferenceDegradesToDefault(t *testing.T) {
+	t.Parallel()
+	sm := new(mockAPISM)
+	bridge := new(mockAPIBridge)
+	// Workspace carries a stale, unvalidated worker_preference (written before
+	// the PATCH gate existed, or via a bypass write). It must NOT yield a 400
+	// (the caller didn't supply worker_type) and must NOT reach worker launch
+	// with the bad value — degrade to the default instead. See review P2.
+	ws := new(mockAPIWorkspace)
+	ws.On("GetWorkspaceByID", mock.Anything, mock.Anything).Return(&session.Workspace{
+		ID: "ws-test", OwnerUserID: "anonymous", WorkDir: "/tmp/hotplex/proj",
+		WorkerPreference: "bogus_stale", Status: "active",
+	}, nil)
+	api := newTestAPIWithWorkspace(t, sm, bridge, ws)
+
+	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
+	bridge.On("StartSession", mock.Anything, mock.MatchedBy(func(p worker.SessionStartParams) bool {
+		return p.WorkerType == worker.TypeClaudeCode
+	})).Return(nil)
+
+	w := httptest.NewRecorder()
+	api.CreateSession(w, authedReq("POST", "/api/sessions?workspace_id=ws-test&client_session_id=stale", nil))
+
+	require.Equal(t, http.StatusOK, w.Code, "resp=%s", w.Body.String())
+	bridge.AssertExpectations(t)
+}
+
 var errTestBridge = fmt.Errorf("test bridge error")
 
 // TestCreateSession_WorkDirFromWorkspace: work_dir comes from the workspace

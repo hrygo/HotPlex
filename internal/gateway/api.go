@@ -268,17 +268,27 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	if wt == "" {
 		wt = worker.WorkerType(r.URL.Query().Get("worker_type"))
 	}
-	// Validate request-supplied worker_type (body/query) at the boundary.
-	// ws.WorkerPreference is already validated on PATCH write; the default
-	// constant needs no check. See spec ③ §7.2.
+	// Validate request-supplied worker_type (body/query) at the boundary → 400
+	// on unknown types. See spec ③ §7.2.
 	if wt != "" {
 		if err := worker.ValidateType(wt); err != nil {
 			writeAppError(w, http.StatusBadRequest, "INVALID_WORKER_TYPE", err.Error())
 			return
 		}
 	}
+	// Fall back to the workspace preference. PATCH validates on write, but a
+	// stale row written before that gate existed (spec ①-②), or a bypass write
+	// (migration/manual SQL), could hold an unvalidated value. Re-validate and
+	// degrade to the default rather than failing late at worker launch (review P2).
 	if wt == "" {
-		wt = worker.WorkerType(ws.WorkerPreference)
+		if pref := worker.WorkerType(ws.WorkerPreference); pref != "" {
+			if err := worker.ValidateType(pref); err == nil {
+				wt = pref
+			} else {
+				g.log.Warn("workspace worker_preference invalid, falling back to default",
+					"workspace_id", ws.ID, "worker_preference", pref, "err", err)
+			}
+		}
 	}
 	if wt == "" {
 		wt = worker.TypeClaudeCode
