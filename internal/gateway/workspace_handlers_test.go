@@ -225,3 +225,60 @@ func TestWorkspace_PatchAgentConfigOverrides_Persists(t *testing.T) {
 	require.Equal(t, http.StatusOK, gr.Code)
 	require.Contains(t, gr.Body.String(), `\"SOUL.md\":\"ws-soul\"`)
 }
+
+func TestWorkspace_PatchWorkerPreference_Whitelist(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-wp")
+
+	// The gateway test binary does not import the real worker adapters, so the
+	// registry holds only testNoopType ("noop_gateway_test", registered in init).
+	// Use it as the stand-in for "a valid registered type" — the 4 real
+	// constants are validated at the worker-package boundary (TestValidateType).
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantCode   string
+	}{
+		{"valid registered type", `{"worker_preference":"` + string(testNoopType) + `"}`, http.StatusOK, ""},
+		{"empty keeps default", `{"worker_preference":""}`, http.StatusOK, ""},
+		{"unknown rejected", `{"worker_preference":"bogus"}`, http.StatusBadRequest, "INVALID_WORKER_TYPE"},
+		{"TypeUnknown rejected", `{"worker_preference":"unknown"}`, http.StatusBadRequest, "INVALID_WORKER_TYPE"},
+		{"case sensitive rejected", `{"worker_preference":"Claude_Code"}`, http.StatusBadRequest, "INVALID_WORKER_TYPE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			w := env.patchWorkspace(t, cookie, ws.ID, tt.body)
+			require.Equal(t, tt.wantStatus, w.Code, "body=%s", w.Body.String())
+			if tt.wantCode != "" {
+				require.Contains(t, w.Body.String(), tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestWorkspace_PatchWorkerPreference_Persists(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-wp-persist")
+
+	// Set a valid preference (testNoopType is the registered test worker).
+	w := env.patchWorkspace(t, cookie, ws.ID, `{"worker_preference":"`+string(testNoopType)+`"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// Re-fetch and confirm persisted (not just echoed in the PATCH response).
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID, nil)
+	req.SetPathValue("id", ws.ID)
+	req.Header.Set("Cookie", cookie)
+	gr := httptest.NewRecorder()
+	env.wsHandlers.Get(gr, req)
+	require.Equal(t, http.StatusOK, gr.Code)
+	var got session.Workspace
+	require.NoError(t, json.NewDecoder(gr.Body).Decode(&got))
+	require.Equal(t, string(testNoopType), got.WorkerPreference)
+}
