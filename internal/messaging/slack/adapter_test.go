@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1282,13 +1285,32 @@ func TestClearStatus_CleansEmojiEvenWhenAssistantCapable(t *testing.T) {
 // testAdapter creates an Adapter with a non-nil slack.Client (dummy token)
 // so that the "client not initialized" guard is bypassed and the method
 // exercises its full code path. PostMessageContext will fail with invalid_auth.
+var (
+	testSlackServerOnce sync.Once
+	testSlackServerInst *httptest.Server
+)
+
+// testSlackServer returns a package-level stub Slack API server that replies
+// to every endpoint with {"ok":false,"error":"invalid_auth"}, so tests can
+// exercise the full client code path without real network egress — a dummy
+// token fails instantly on localhost instead of TLS-handshaking slack.com.
+func testSlackServer() *httptest.Server {
+	testSlackServerOnce.Do(func() {
+		testSlackServerInst = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":false,"error":"invalid_auth"}`))
+		}))
+	})
+	return testSlackServerInst
+}
+
 func testAdapter() *Adapter {
 	return &Adapter{
 		BaseAdapter: messaging.BaseAdapter[*SlackConn]{
 			PlatformAdapter: messaging.PlatformAdapter{Log: slog.New(slog.NewTextHandler(io.Discard, nil))},
 			ConnPool:        messaging.NewConnPool[*SlackConn](nil),
 		},
-		client:        slack.New("x-test-token"),
+		client:        slack.New("x-test-token", slack.OptionAPIURL(testSlackServer().URL+"/")),
 		activeStreams: make(map[string]*NativeStreamingWriter),
 	}
 }
