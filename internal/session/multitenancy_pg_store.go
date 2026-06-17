@@ -199,3 +199,24 @@ func (s *pgStore) DeleteInvitation(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, s.queries["invitations.delete"], id)
 	return err
 }
+
+// --- pgStore: user identities (spec ④) ---
+
+func (s *pgStore) GetUserIdentityByProviderSubject(ctx context.Context, provider, subject string) (*UserIdentity, error) {
+	id, err := scanIdentity(s.db.QueryRowContext(ctx, s.queries["identities.get_by_provider_subject"], provider, subject))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrIdentityNotFound
+	}
+	return id, err
+}
+
+func (s *pgStore) CreateUserIdentity(ctx context.Context, id *UserIdentity, now int64) error {
+	_, err := s.db.ExecContext(ctx, s.queries["identities.create"],
+		id.ID, id.UserID, id.Provider, id.Subject, id.DisplayName, id.Email, now, now)
+	return err
+}
+
+func (s *pgStore) UpdateUserIdentityProfile(ctx context.Context, id, displayName, email string, now int64) error {
+	_, err := s.db.ExecContext(ctx, s.queries["identities.update_profile"], displayName, email, now, id)
+	return err
+}

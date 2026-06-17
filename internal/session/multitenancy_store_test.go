@@ -203,3 +203,88 @@ func TestInvitationsStore_List(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 }
+
+// --- user identities (spec ④) ---
+
+func TestIdentities_CreateAndGet(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	// Create a user first.
+	u := &security.User{ID: "u-sso-1", Username: "keycloak:sub123", Role: "user", Status: "active"}
+	require.NoError(t, store.CreateUser(ctx, u, 1700000000))
+
+	// Create an identity.
+	ident := &UserIdentity{
+		ID:          "ident-1",
+		UserID:      "u-sso-1",
+		Provider:    "keycloak",
+		Subject:     "sub123",
+		DisplayName: "Alice",
+		Email:       "alice@example.com",
+	}
+	require.NoError(t, store.CreateUserIdentity(ctx, ident, 1700000001))
+
+	// Lookup by (provider, subject).
+	got, err := store.GetUserIdentityByProviderSubject(ctx, "keycloak", "sub123")
+	require.NoError(t, err)
+	require.Equal(t, "ident-1", got.ID)
+	require.Equal(t, "u-sso-1", got.UserID)
+	require.Equal(t, "Alice", got.DisplayName)
+}
+
+func TestIdentities_GetByProviderSubject_NotFound(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	_, err := store.GetUserIdentityByProviderSubject(context.Background(), "keycloak", "nonexistent")
+	require.ErrorIs(t, err, ErrIdentityNotFound)
+}
+
+func TestIdentities_UpdateProfile(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	u := &security.User{ID: "u-sso-2", Username: "authing:sub456", Role: "user", Status: "active"}
+	require.NoError(t, store.CreateUser(ctx, u, 1700000000))
+
+	ident := &UserIdentity{
+		ID:          "ident-2",
+		UserID:      "u-sso-2",
+		Provider:    "authing",
+		Subject:     "sub456",
+		DisplayName: "Bob",
+		Email:       "bob@old.com",
+	}
+	require.NoError(t, store.CreateUserIdentity(ctx, ident, 1700000001))
+
+	// Update profile from IdP.
+	require.NoError(t, store.UpdateUserIdentityProfile(ctx, "ident-2", "Bob Smith", "bob@new.com", 1700000002))
+
+	got, err := store.GetUserIdentityByProviderSubject(ctx, "authing", "sub456")
+	require.NoError(t, err)
+	require.Equal(t, "Bob Smith", got.DisplayName)
+	require.Equal(t, "bob@new.com", got.Email)
+}
+
+func TestIdentities_UniqueProviderSubject(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	u := &security.User{ID: "u-sso-3", Username: "oidc:sub789", Role: "user", Status: "active"}
+	require.NoError(t, store.CreateUser(ctx, u, 1700000000))
+
+	ident1 := &UserIdentity{
+		ID: "ident-3a", UserID: "u-sso-3", Provider: "oidc", Subject: "sub789",
+	}
+	require.NoError(t, store.CreateUserIdentity(ctx, ident1, 1700000001))
+
+	// Same provider+subject should fail (UNIQUE constraint).
+	ident2 := &UserIdentity{
+		ID: "ident-3b", UserID: "u-sso-3", Provider: "oidc", Subject: "sub789",
+	}
+	err := store.CreateUserIdentity(ctx, ident2, 1700000002)
+	require.Error(t, err, "duplicate provider+subject must fail")
+}

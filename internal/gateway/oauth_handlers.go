@@ -1,0 +1,254 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/hrygo/hotplex/internal/security"
+	"github.com/hrygo/hotplex/internal/session"
+)
+
+// OAuthHandlers holds dependencies for OIDC SSO endpoints (spec ④).
+type OAuthHandlers struct {
+	oauthManager *security.OAuthManager
+	cookieAuth   *security.CookieAuth
+	store        session.UserWorkspaceStore
+	log          *slog.Logger
+	now          func() time.Time
+}
+
+// NewOAuthHandlers constructs OAuth SSO handlers.
+func NewOAuthHandlers(oauthManager *security.OAuthManager, cookieAuth *security.CookieAuth, store session.UserWorkspaceStore, log *slog.Logger) *OAuthHandlers {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &OAuthHandlers{
+		oauthManager: oauthManager,
+		cookieAuth:   cookieAuth,
+		store:        store,
+		log:          log.With("component", "oauth_handler"),
+		now:          time.Now,
+	}
+}
+
+// Providers: GET /api/auth/oauth/providers
+// Lists configured SSO providers for the login page to render buttons.
+func (h *OAuthHandlers) Providers(w http.ResponseWriter, r *http.Request) {
+	providers := h.oauthManager.List()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"providers": providers,
+	})
+}
+
+// Login: GET /api/auth/oauth/{provider}/login
+// Initiates the OIDC authorization code flow. Generates state + PKCE verifier,
+// stores them in a signed short-lived cookie, and redirects to the IdP.
+func (h *OAuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
+	providerName := r.PathValue("provider")
+	if providerName == "" {
+		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "provider required")
+		return
+	}
+
+	provider, ok := h.oauthManager.Lookup(providerName)
+	if !ok {
+		writeAppError(w, http.StatusNotFound, "PROVIDER_NOT_FOUND", "provider not configured")
+		return
+	}
+
+	state, codeVerifier, codeChallenge, err := security.GenerateStateAndVerifier()
+	if err != nil {
+		h.log.Error("generate state failed", "provider", providerName, "err", err)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "state generation failed")
+		return
+	}
+
+	// Store state + PKCE verifier in signed cookie (5min TTL).
+	security.SetStateCookie(w, r, h.cookieAuth, security.StateCookiePayload{
+		State:        state,
+		CodeVerifier: codeVerifier,
+		Provider:     providerName,
+		IssuedAt:     h.now(),
+	})
+
+	authURL := provider.BuildAuthURL(security.AuthURLOption{
+		State:         state,
+		CodeChallenge: codeChallenge,
+	})
+
+	h.log.Debug("oauth login redirect", "provider", providerName, "state", state[:8]+"...")
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// Callback: GET /api/auth/oauth/{provider}/callback
+// Handles the IdP redirect after user authentication. Validates state (CSRF),
+// exchanges code for tokens, verifies ID Token, finds or creates the user,
+// and issues a session cookie.
+func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
+	providerName := r.PathValue("provider")
+	if providerName == "" {
+		redirectAuthError(w, r, "BAD_REQUEST")
+		return
+	}
+
+	provider, ok := h.oauthManager.Lookup(providerName)
+	if !ok {
+		redirectAuthError(w, r, "PROVIDER_NOT_FOUND")
+		return
+	}
+
+	// Check for IdP error response.
+	if errCode := r.URL.Query().Get("error"); errCode != "" {
+		h.log.Warn("oauth callback: idp error", "provider", providerName, "error", errCode)
+		redirectAuthError(w, r, "IDP_ERROR")
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	if code == "" || state == "" {
+		redirectAuthError(w, r, "BAD_REQUEST")
+		return
+	}
+
+	// Verify state cookie (CSRF + PKCE verifier + provider binding).
+	payload, err := security.VerifyStateCookie(r, h.cookieAuth, state, providerName)
+	if err != nil {
+		h.log.Warn("oauth callback: state verification failed", "provider", providerName, "err", err)
+		redirectAuthError(w, r, classifyStateError(err))
+		return
+	}
+
+	// Exchange authorization code for tokens (with PKCE verifier).
+	exchangeResult, err := provider.ExchangeCode(r.Context(), code, payload.CodeVerifier)
+	if err != nil {
+		h.log.Error("oauth callback: token exchange failed", "provider", providerName, "err", err)
+		redirectAuthError(w, r, "CODE_EXCHANGE_FAILED")
+		return
+	}
+
+	// Verify ID Token signature and extract claims.
+	claims, err := provider.VerifyAndExtractClaims(r.Context(), exchangeResult.IDToken)
+	if err != nil {
+		h.log.Error("oauth callback: id_token verification failed", "provider", providerName, "err", err)
+		redirectAuthError(w, r, "ID_TOKEN_INVALID")
+		return
+	}
+
+	// Find or create user from SSO identity.
+	userID, err := h.getOrCreateUser(r.Context(), providerName, claims)
+	if err != nil {
+		h.log.Error("oauth callback: user creation failed", "provider", providerName, "subject", claims.Subject, "err", err)
+		redirectAuthError(w, r, "USER_CREATE_FAILED")
+		return
+	}
+
+	// Issue session cookie (same as password login).
+	if err := h.cookieAuth.SetCookie(w, r, userID); err != nil {
+		h.log.Error("oauth callback: cookie issuance failed", "provider", providerName, "err", err)
+		redirectAuthError(w, r, "INTERNAL")
+		return
+	}
+
+	// Clear the OAuth state cookie (one-time use).
+	security.ClearStateCookie(w, r)
+
+	// Touch last login.
+	_ = h.store.TouchUserLastLogin(r.Context(), userID, h.now().Unix())
+
+	h.log.Info("oauth login success", "provider", providerName, "subject", claims.Subject, "user_id", userID)
+
+	// Redirect to webchat home (spec ⑥ will handle post-login routing).
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// getOrCreateUser implements the spec ④ §8.1 account association:
+// - Look up by (provider, subject) → found: update profile, return user_id.
+// - Not found: create users row + user_identities row, return user_id.
+func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string, claims *security.OIDCClaims) (string, error) {
+	now := h.now().Unix()
+
+	// Check if identity already exists.
+	identity, err := h.store.GetUserIdentityByProviderSubject(ctx, providerName, claims.Subject)
+	if err == nil {
+		// Identity exists — update display_name/email from IdP (IdP is authoritative).
+		if identity.DisplayName != claims.DisplayName || identity.Email != claims.Email {
+			_ = h.store.UpdateUserIdentityProfile(ctx, identity.ID, claims.DisplayName, claims.Email, now)
+		}
+		// Verify user is not disabled.
+		user, err := h.store.GetUserByID(ctx, identity.UserID)
+		if err != nil {
+			return "", err
+		}
+		if user.Status == "disabled" {
+			return "", &security.IdentityError{Code: security.ErrCodeUserDisabled}
+		}
+		return identity.UserID, nil
+	}
+	if !errors.Is(err, session.ErrIdentityNotFound) {
+		return "", err
+	}
+
+	// First login: create user + identity.
+	userID := uuid.NewString()
+	username := providerName + ":" + claims.Subject
+
+	err = h.store.CreateUser(ctx, &security.User{
+		ID:           userID,
+		Username:     username,
+		PasswordHash: "", // SSO-only account; empty hash = no password login
+		Role:         "user",
+		DisplayName:  claims.DisplayName,
+		Status:       "active",
+	}, now)
+	if err != nil {
+		return "", err
+	}
+
+	identityID := uuid.NewString()
+	err = h.store.CreateUserIdentity(ctx, &session.UserIdentity{
+		ID:          identityID,
+		UserID:      userID,
+		Provider:    providerName,
+		Subject:     claims.Subject,
+		DisplayName: claims.DisplayName,
+		Email:       claims.Email,
+	}, now)
+	if err != nil {
+		return "", err
+	}
+
+	return userID, nil
+}
+
+// redirectAuthError redirects to webchat home with an auth_error query param.
+// spec ⑥ frontend will render an error message from this param.
+func redirectAuthError(w http.ResponseWriter, r *http.Request, code string) {
+	security.ClearStateCookie(w, r)
+	http.Redirect(w, r, "/?auth_error="+code, http.StatusFound)
+}
+
+// classifyStateError maps state verification errors to error codes.
+func classifyStateError(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "expired"):
+		return "STATE_EXPIRED"
+	case strings.Contains(msg, "provider mismatch"):
+		return "PROVIDER_MISMATCH"
+	case strings.Contains(msg, "csrf"):
+		return "CSRF_DETECTED"
+	case strings.Contains(msg, "cookie missing"):
+		return "CSRF_DETECTED"
+	default:
+		return "STATE_INVALID"
+	}
+}
