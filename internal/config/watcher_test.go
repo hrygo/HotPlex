@@ -326,6 +326,20 @@ func TestWatcher_Close(t *testing.T) {
 
 }
 
+// TestHotReloadableFields_PoolQuotas: spec ⑤ — all 4 pool quota keys are hot-reloadable.
+func TestHotReloadableFields_PoolQuotas(t *testing.T) {
+	t.Parallel()
+	required := []string{
+		"pool.max_size",
+		"pool.max_idle_per_user",
+		"pool.max_memory_per_user",
+		"pool.max_per_workspace",
+	}
+	for _, f := range required {
+		require.True(t, hotReloadableFields[f], "missing hot-reloadable field: %s", f)
+	}
+}
+
 // ─── Helper Functions ───────────────────────────────────────────────────────
 
 func createTempConfigFile(t *testing.T) string {
