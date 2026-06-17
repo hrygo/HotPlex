@@ -1,7 +1,7 @@
 # WebChat 一等公民化与多租户路线图
 
 **日期**: 2026-06-16
-**状态**: spec ① 已合入（[PR #746](https://github.com/hrygo/hotplex/pull/746)，`44f461ff`）；spec ② 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）；spec ③ 已合入（[PR #753](https://github.com/hrygo/hotplex/pull/753)，`207d47e3`）；spec ⑤ 已合入（[PR #755](https://github.com/hrygo/hotplex/pull/755)）；④/⑥ 待逐个 brainstorm
+**状态**: spec ① 已合入（[PR #746](https://github.com/hrygo/hotplex/pull/746)）；spec ② 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）；spec ③ 已合入（[PR #753](https://github.com/hrygo/hotplex/pull/753)）；spec ④ 已合入（`feat/webchat-oauth-sso`，企业 SSO OIDC）；spec ⑤ 已合入（[PR #755](https://github.com/hrygo/hotplex/pull/755)）；⑥ 待 brainstorm
 **分支**: main · **基线版本**: v1.29.0 (fb857af1)
 **关联设计**: [`WebChat-Multitenancy-Foundation-Design-Spec.md`](./WebChat-Multitenancy-Foundation-Design-Spec.md)（spec ①）
 
@@ -209,4 +209,4 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 - spec ⑥ 在 ②③④就绪后启动。
 - 路线图文档随各 spec 推进更新状态。
 
-**下一步**：spec ⑤ 已合入（[PR #755](https://github.com/hrygo/hotplex/pull/755)）→ 启动 spec ④/⑥ brainstorm（OAuth SSO / 前端一等公民化）。spec ④ 需先拍板 §6.2 的 provider 优先级与账号合并策略；spec ⑥ 待 ④ 就绪后集成。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。
+**下一步**：spec ④ 已实现（标准 OIDC，覆盖派拉/玉符/阿里云/腾讯云/宁盾/Authing/竹云/华为 OneAccess/TOPIAM + Keycloak/Okta/Azure AD 等）→ 启动 spec ⑥ brainstorm（webchat 前端一等公民化）。spec ⑥ 依赖 ①②③④⑤ 全部就绪（✅），可立即启动。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。
