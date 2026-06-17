@@ -67,21 +67,3 @@ func TestMetrics_SnapshotUpdatesOnRelease(t *testing.T) {
 	require.Equal(t, int64(0), usersAfter)
 	require.Equal(t, int64(0), workspacesAfter)
 }
-
-// TestMetrics_GaugesRegistered verifies the 4 new OTel gauges are registered
-// (init() created them without returning an error). We cannot assert gauge VALUES
-// here because the snapshot atomics are package-global and overwritten by every
-// PoolManager instance in the test binary (flaky). Registration + the per-instance
-// snapshot logic test (TestMetrics_SnapshotLogic) together cover the contract.
-func TestMetrics_GaugesRegistered(t *testing.T) {
-	t.Parallel()
-	// init() has already run (package load). The fact that the package compiled and
-	// other pool tests create PoolManagers without panic confirms the gauge callback
-	// registered. We exercise the code path by creating a pool and acquiring/releasing,
-	// which triggers snapshotMetricsLocked → writes the atomics the gauges read.
-	p := NewPoolManagerWithWorkspace(slog.Default(), 100, 5, 0, 3)
-	ctx := context.Background()
-	require.NoError(t, p.AcquireForWorkspace(ctx, "u1", "ws-1"))
-	p.ReleaseForWorkspace(ctx, "u1", "ws-1")
-	// No panic, no error — gauge callback registration is sound.
-}

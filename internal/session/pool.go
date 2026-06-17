@@ -290,8 +290,8 @@ func (p *PoolManager) releaseCoreLocked(ctx context.Context, userID string) bool
 		delete(p.userCount, userID)
 	}
 	p.totalCount--
-	p.snapshotMetricsLocked()
 	p.releaseMemoryLocked(userID)
+	p.snapshotMetricsLocked()
 	return true
 }
 

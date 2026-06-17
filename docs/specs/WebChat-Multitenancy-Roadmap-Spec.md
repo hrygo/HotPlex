@@ -156,20 +156,9 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 
 ### spec ⑤ — 多租户配额增强（✅ 已合入 PR #755）
 
-**交付摘要**：`Limits` struct 4 限额（全局/user/workspace 并发 + 全局等待队列）支持热重载（`UpdateLimits` 原子替换 + 4 个 atomic int64 双缓冲快照读），新增 4 个 Prometheus 聚合 gauge（全局/用户/workspace 维度的 active/dirty/waiting），配置层校验拒绝负数（`configs/config.yaml` 热编辑即报错），驱逐策略保持"不驱逐已运行 worker"不变量（`TestQuotaRace` race 压测验证）。详细设计见 [`WebChat-Multitenancy-Quota-Enhancement-Design-Spec.md`](./WebChat-Multitenancy-Quota-Enhancement-Design-Spec.md)。
+**交付摘要**：`Limits` struct（4 字段：全局/per-user/per-workspace 并发 + per-user 内存）支持运行时热重载——`UpdateLimits(Limits)` 在 `p.mu` 下原子替换 4 限额，降额不驱逐已运行 worker；`snapshotMetricsLocked()` 在 acquire/release/update 各持锁点写 4 个 package-global `atomic.Int64` 快照（单缓冲，gauge 回调无锁读），新增 4 个低基数聚合 gauge（`active_sessions`/`distinct_users`/`distinct_workspaces`/`memory_reserved_bytes`）+ 复用现有 `utilization`；config watcher 解锁全部 4 个 `pool.*` 热重载键，config 校验拒绝负数（`max_size` 仍要求 >0）。`TestPool_ConcurrentMixedOperations` race 压测 + `TestUpdateLimits_DoesNotEvict` 不驱逐不变量覆盖。详见 [`WebChat-Multitenancy-Quota-Enhancement-Design-Spec.md`](./WebChat-Multitenancy-Quota-Enhancement-Design-Spec.md)。
 
-**目标**：细化配额到内存维度（per-workspace），可选提供用量统计/计费基础。
-
-**现状**：spec ① 的 PoolManager 三层（全局 + per-user + per-workspace 并发），内存维度不细分到 workspace。
-
-**关键改动点**：
-- `internal/session/pool.go`：per-workspace 内存配额层。
-- 可选：`metrics/` 新增 per-user/per-workspace 用量 Prometheus 指标。
-- 配额配置热重载。
-
-**验收**：workspace 内存超限拒绝新会话；指标可观测。
-
-**风险**：内存估算准确性（现状固定 512MB/worker，`pool.go:55`）。
+**scope 拍板（brainstorm）**：原计划含 per-workspace 内存配额层，但固定内存估算（512MB/worker）下与现有 `max_per_workspace` 并发层数学等价（冗余），故**不做**；纯配额增强，不含计费/用量落盘。详见设计 §1.1 排除清单。
 
 ### spec ⑥ — webchat 前端一等公民化
 
