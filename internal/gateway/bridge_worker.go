@@ -321,8 +321,9 @@ func (b *Bridge) resolveInjectExclude(platform string, perSession []string) []st
 // resolveWorkspaceOverrides fetches a workspace's agent-config overrides and parses
 // them. Returns nil for empty workspaceID (Message Channel track) or nil wsStore, and
 // degrades to nil (team defaults) on any fetch/parse error — never blocks worker launch.
-// ctx propagates request-scoped cancellation/deadline and the OTel trace span to the
-// workspace DB query. See design spec §7.3.
+// ctx propagates request-scoped cancellation/deadline to the workspace DB query (the
+// store layer uses standard QueryRowContext without otelsql instrumentation, so ctx
+// does not auto-generate an OTel DB span). See design spec §7.3.
 func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID string) map[string]string {
 	if workspaceID == "" || b.wsStore == nil {
 		return nil
