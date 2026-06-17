@@ -139,6 +139,11 @@ sum by (event_type) (rate(hotplex_gateway_messages_total{direction="outgoing"}[5
 |------|------|------|
 | `hotplex.pool.acquire` | Counter | 配额获取尝试次数，label: `result` |
 | `hotplex.pool.release.errors` | Counter | 双重释放错误数（表示 bug） |
+| `hotplex.pool.utilization` | ObservableGauge (float) | 资源池利用率（0-1），活跃会话数 / `max_size` |
+| `hotplex.pool.active_sessions` | ObservableGauge | 活跃 worker 会话数（全局，含 platform/cron） |
+| `hotplex.pool.distinct_users` | ObservableGauge | 至少有一个活跃会话的去重用户数 |
+| `hotplex.pool.distinct_workspaces` | ObservableGauge | 至少有一个活跃会话的去重 WebChat workspace 数（不含 platform 会话，spec ⑤） |
+| `hotplex.pool.memory_reserved_bytes` | ObservableGauge | per-user 内存配额下预留的字节数（仅 `max_memory_per_user` 设置时累加；512MB/worker 估算值，非实际 RSS，spec ⑤） |
 
 ### 获取结果标签
 
@@ -147,6 +152,8 @@ sum by (event_type) (rate(hotplex_gateway_messages_total{direction="outgoing"}[5
 | `success` | 成功获取 |
 | `pool_exhausted` | 全局 Worker 数已满 |
 | `user_quota_exceeded` | 单用户 Session 数已满 |
+| `workspace_quota_exceeded` | 单 workspace Session 数已满（`max_per_workspace`，spec ①） |
+| `memory_exceeded` | 单用户内存配额超限（`max_memory_per_user`） |
 
 ### 常用查询
 
