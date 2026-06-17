@@ -174,7 +174,7 @@ o.ObserveInt64(...) × 4 + o.ObserveFloat64(utilization)
 ### 4.1 配置校验（config 包，扩展现有）
 
 - 现状 `config.go:85` 已有 `"pool.max_size must be positive"` 校验。
-- 扩展：4 个 `pool.max_*` 均 `>= 0`（0 = unlimited，负数非法）。加载时报错汇总，拒绝启动。
+- 扩展：`max_size` 保持 `> 0`（pool 必须有全局上限，0 非法）；其余 3 字段（`max_idle_per_user` / `max_per_workspace` / `max_memory_per_user`）允许 `0`（= unlimited），仅拒绝负数。加载时报错汇总，拒绝启动。
 - 内存字段单位 = bytes。
 
 ### 4.2 热重载边界
