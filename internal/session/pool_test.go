@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -333,4 +334,76 @@ func TestPoolAcquireWithMemory_UserQuotaExceeded(t *testing.T) {
 	require.Equal(t, poolErrKindUserQuotaExceeded, pe.Kind)
 
 	pool.Release(context.Background(), "user1")
+}
+
+// TestUpdateLimits_AllFourHotReload: UpdateLimits applies all four quota fields
+// atomically under p.mu; new Acquire calls observe the new limits immediately (spec ⑤).
+// 检查顺序在 acquireLocked 中是 global → per-user → per-workspace → memory,
+// 所以测试针对每条分支构造"该分支是首个失败点"的场景。
+func TestUpdateLimits_AllFourHotReload(t *testing.T) {
+	t.Parallel()
+	// 初始:global 100, per-user 5, per-ws 3, per-user-mem 10GB
+	p := NewPoolManagerWithWorkspace(slog.Default(), 100, 5, 10*1024*1024*1024, 3)
+	ctx := context.Background()
+
+	// u1 占用 ws-1(global=1, u1 count=1, ws-1 count=1, u1 mem=512MB)
+	require.NoError(t, p.AcquireForWorkspace(ctx, "u1", "ws-1"))
+
+	var pe *PoolError
+
+	// ── 场景 A:global 收紧 → exhausted(u2 受 global 限制先于 per-user 拦截) ──
+	p.UpdateLimits(Limits{
+		MaxSize:          1,
+		MaxIdlePerUser:   5, // 放宽,使 per-user 不先触发
+		MaxPerWorkspace:  3,
+		MaxMemoryPerUser: 10 * 1024 * 1024 * 1024,
+	})
+	err := p.Acquire(ctx, "u2")
+	require.ErrorAs(t, err, &pe)
+	require.Equal(t, poolErrKindExhausted, pe.Kind)
+
+	// ── 场景 B:per-user 收紧 → user_quota_exceeded(global 放宽,使 per-user 成首个失败点) ──
+	p.UpdateLimits(Limits{
+		MaxSize:          100,
+		MaxIdlePerUser:   1,
+		MaxPerWorkspace:  3,
+		MaxMemoryPerUser: 10 * 1024 * 1024 * 1024,
+	})
+	err = p.AcquireForWorkspace(ctx, "u1", "ws-2")
+	require.ErrorAs(t, err, &pe)
+	require.Equal(t, poolErrKindUserQuotaExceeded, pe.Kind)
+
+	// ── 场景 C:per-workspace 收紧 → workspace_quota_exceeded
+	// (用新用户 u3 避开 u1 的 per-user 限制;ws-1 已有 1 个,MaxPerWorkspace=1) ──
+	p.UpdateLimits(Limits{
+		MaxSize:          100,
+		MaxIdlePerUser:   5,
+		MaxPerWorkspace:  1,
+		MaxMemoryPerUser: 10 * 1024 * 1024 * 1024,
+	})
+	err = p.AcquireForWorkspace(ctx, "u3", "ws-1")
+	require.ErrorAs(t, err, &pe)
+	require.Equal(t, poolErrKindWorkspaceQuotaExceeded, pe.Kind)
+
+	// ── 场景 D:per-user-memory 收紧 → memory_exceeded
+	// (用新用户 u4 + 新 ws-3 避开其他限制;mem=1B 时 512MB 估算必超) ──
+	p.UpdateLimits(Limits{
+		MaxSize:          100,
+		MaxIdlePerUser:   5,
+		MaxPerWorkspace:  3,
+		MaxMemoryPerUser: 1, // 1 字节
+	})
+	err = p.AcquireForWorkspace(ctx, "u4", "ws-3")
+	require.ErrorAs(t, err, &pe)
+	require.Equal(t, poolErrKindMemoryExceeded, pe.Kind)
+
+	// ── 场景 E:放宽全部 4 维 → 释放并重新 Acquire 成功,证明 UpdateLimits 是可逆的 ──
+	p.UpdateLimits(Limits{
+		MaxSize:          100,
+		MaxIdlePerUser:   5,
+		MaxPerWorkspace:  3,
+		MaxMemoryPerUser: 10 * 1024 * 1024 * 1024,
+	})
+	p.ReleaseForWorkspace(ctx, "u1", "ws-1")
+	require.NoError(t, p.AcquireForWorkspace(ctx, "u1", "ws-2"))
 }

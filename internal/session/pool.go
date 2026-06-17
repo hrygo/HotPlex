@@ -37,6 +37,10 @@ func setPoolUtilization(v float64) {
 	poolUtilization.Store(math.Float64bits(v))
 }
 
+// snapshotMetricsLocked 将当前 pool 状态写入 atomic 快照变量供 gauge 回调无锁读取。
+// 调用方必须持有 p.mu。(Task 2 will fill in the implementation.)
+func (p *PoolManager) snapshotMetricsLocked() {}
+
 // PoolManager manages per-user and global concurrency quotas for worker sessions.
 type PoolManager struct {
 	log *slog.Logger
@@ -51,6 +55,15 @@ type PoolManager struct {
 	maxIdlePerUser   int   // 0 = unlimited
 	maxMemoryPerUser int64 // bytes; 0 = unlimited
 	maxPerWorkspace  int   // 0 = unlimited (WebChat per-workspace concurrency, spec ①)
+}
+
+// Limits 是 PoolManager 的运行时限额集合,镜像 config.PoolConfig。
+// 所有字段 0 = unlimited。UpdateLimits 在持 p.mu 下原子覆盖全部字段。
+type Limits struct {
+	MaxSize          int   // 全局最大活跃 Worker
+	MaxIdlePerUser   int   // per-user 最大并发 session
+	MaxPerWorkspace  int   // WebChat per-workspace 并发(spec ①)
+	MaxMemoryPerUser int64 // bytes;per-user 内存
 }
 
 // Default per-worker memory estimate (matches RLIMIT_AS in proc/manager.go).
@@ -230,19 +243,28 @@ func (p *PoolManager) Stats() (total, maxSize, uniqueUsers int) {
 	return p.totalCount, p.maxSize, len(p.userCount)
 }
 
-// UpdateLimits dynamically adjusts the pool limits.
-// If maxSize is reduced below the current total, existing sessions are NOT evicted —
-// new Acquire calls will be rejected until sessions are naturally released.
-func (p *PoolManager) UpdateLimits(maxSize, maxIdlePerUser int) {
+// UpdateLimits 动态调整全部 4 个限额(spec ⑤)。
+// 若某维限额被降到当前占用之下,已运行 session 不被驱逐 —— 新 Acquire 将被拒,
+// 直到 session 自然 Release。所有 gauge 快照在此重算(utilization 的分母 maxSize 可能变了)。
+func (p *PoolManager) UpdateLimits(l Limits) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	old := p.maxSize
-	p.maxSize = maxSize
-	p.maxIdlePerUser = maxIdlePerUser
-	if p.maxSize > 0 {
-		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
+	old := Limits{
+		MaxSize:          p.maxSize,
+		MaxIdlePerUser:   p.maxIdlePerUser,
+		MaxPerWorkspace:  p.maxPerWorkspace,
+		MaxMemoryPerUser: p.maxMemoryPerUser,
 	}
-	p.log.Info("pool: limits updated", "old_max", old, "new_max", maxSize, "max_per_user", maxIdlePerUser)
+	p.maxSize = l.MaxSize
+	p.maxIdlePerUser = l.MaxIdlePerUser
+	p.maxPerWorkspace = l.MaxPerWorkspace
+	p.maxMemoryPerUser = l.MaxMemoryPerUser
+	p.snapshotMetricsLocked()
+	p.log.Info("pool: limits updated",
+		"old_max", old.MaxSize, "new_max", l.MaxSize,
+		"old_per_user", old.MaxIdlePerUser, "new_per_user", l.MaxIdlePerUser,
+		"old_per_ws", old.MaxPerWorkspace, "new_per_ws", l.MaxPerWorkspace,
+		"old_mem_mb", old.MaxMemoryPerUser/(1024*1024), "new_mem_mb", l.MaxMemoryPerUser/(1024*1024))
 }
 
 // Deprecated: AcquireMemory is TOCTOU-unsafe when called separately from
