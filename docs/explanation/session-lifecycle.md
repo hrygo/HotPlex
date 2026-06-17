@@ -69,7 +69,7 @@ HotPlex 使用 UUIDv5（SHA-1 哈希 + 固定命名空间）生成确定性的 S
 
 **两种 Key 派生方式**：
 
-1. **通用 Key**（`DeriveSessionKey`）：`SHA1(namespace, ownerID|workerType|clientKey|workDir)`，适用于 WebChat 和直连 WebSocket。`clientKey` 是客户端传入的 `client_session_id`（REST）或 `session_id`（WS init），经过 `SanitizeText()` 清洗和 `MaxClientKeyLen`（256 字符）长度校验。
+1. **通用 Key**（`DeriveSessionKey`）：`SHA1(namespace, ownerID|workerType|clientKey[|workspaceID]|workDir)`，适用于 WebChat 和直连 WebSocket。`clientKey` 是客户端传入的 `client_session_id`（REST）或 `session_id`（WS init），经过 `SanitizeText()` 清洗和 `MaxClientKeyLen`（256 字符）长度校验。`workspaceID` 是 WebChat 多租户锚点（spec ① 方案3），仅非空时加入派生——不同 workspace 即使其余字段相同也得到不同 Session Key；切换 workspace 或 worker_type 均产生新 Key（spec ③ 锁定此不变量）。
 2. **平台 Key**（`DerivePlatformSessionKey`）：根据平台类型拼接不同字段：
    - Slack：`ownerID|wt|slack[|teamID][|channelID][|threadTS][|userID][|workDir]`
    - 飞书：`ownerID|wt|feishu[|chatID][|threadTS][|userID][|workDir]`
