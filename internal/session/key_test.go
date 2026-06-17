@@ -34,6 +34,22 @@ func TestDeriveSessionKey_DifferentTuples(t *testing.T) {
 	require.NotEqual(t, key1, key5, "different workDir → different key")
 }
 
+// TestDeriveSessionKey_SwitchWorkerType_NewKey locks the session-continuity
+// invariant for spec ③ §8: switching workspace.worker_preference changes wt in
+// DeriveSessionKey, yielding a new session key (a new session) — existing
+// sessions keyed on the old wt are untouched.
+func TestDeriveSessionKey_SwitchWorkerType_NewKey(t *testing.T) {
+	t.Parallel()
+	const owner, clientKey, wsID, workDir = "u1", "s1", "ws-1", "/tmp/hotplex/ws"
+	keyCC := DeriveSessionKey(owner, worker.TypeClaudeCode, clientKey, wsID, workDir)
+	keyOCS := DeriveSessionKey(owner, worker.TypeOpenCodeSrv, clientKey, wsID, workDir)
+	require.NotEqual(t, keyCC, keyOCS,
+		"switching worker_type must produce a new session key (new session), not resume the old one")
+	// The original key is stable — re-deriving with the same wt reproduces it,
+	// so an existing session is not disturbed when the preference changes.
+	require.Equal(t, keyCC, DeriveSessionKey(owner, worker.TypeClaudeCode, clientKey, wsID, workDir))
+}
+
 // TestDeriveSessionKey_WorkspaceIDParticipates: non-empty workspaceID changes the key (spec §7 方案3).
 func TestDeriveSessionKey_WorkspaceIDParticipates(t *testing.T) {
 	t.Parallel()
