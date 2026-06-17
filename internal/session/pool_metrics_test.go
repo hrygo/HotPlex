@@ -30,7 +30,7 @@ func TestMetrics_SnapshotLogic(t *testing.T) {
 	active := int64(p.totalCount)
 	users := int64(len(p.userCount))
 	workspaces := int64(len(p.workspaceCount))
-	mem := p.totalMemoryReserved()
+	mem := p.totalMemoryReservedBytes
 	p.mu.Unlock()
 
 	require.Equal(t, int64(3), active)                   // 2 (u1) + 1 (u2)

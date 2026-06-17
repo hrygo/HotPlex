@@ -87,7 +87,7 @@ func (p *PoolManager) snapshotMetricsLocked() {
 	metricActiveSessions.Store(int64(p.totalCount))
 	metricDistinctUsers.Store(int64(len(p.userCount)))
 	metricDistinctWorkspaces.Store(int64(len(p.workspaceCount)))
-	metricMemoryReserved.Store(p.totalMemoryReserved())
+	metricMemoryReserved.Store(p.totalMemoryReservedBytes)
 	if p.maxSize > 0 {
 		setPoolUtilization(float64(p.totalCount) / float64(p.maxSize))
 	} else {
@@ -95,24 +95,16 @@ func (p *PoolManager) snapshotMetricsLocked() {
 	}
 }
 
-// totalMemoryReserved 返回全局已预留内存(所有用户之和)。调用方持 p.mu。
-func (p *PoolManager) totalMemoryReserved() int64 {
-	var sum int64
-	for _, m := range p.userMemory {
-		sum += m
-	}
-	return sum
-}
-
 // PoolManager manages per-user and global concurrency quotas for worker sessions.
 type PoolManager struct {
 	log *slog.Logger
 
-	mu             sync.Mutex
-	totalCount     int
-	userCount      map[string]int   // userID → active session count
-	userMemory     map[string]int64 // userID → total estimated memory bytes (sum of RLIMIT_AS caps)
-	workspaceCount map[string]int   // workspaceID → active session count (WebChat multi-tenant, spec ①)
+	mu                       sync.Mutex
+	totalCount               int
+	userCount                map[string]int   // userID → active session count
+	userMemory               map[string]int64 // userID → total estimated memory bytes
+	totalMemoryReservedBytes int64            // running sum of userMemory values; O(1) snapshot (avoids持锁 O(n) 遍历)
+	workspaceCount           map[string]int   // workspaceID → active session count (WebChat multi-tenant, spec ①)
 
 	maxSize          int   // 0 = unlimited
 	maxIdlePerUser   int   // 0 = unlimited
@@ -129,7 +121,9 @@ type Limits struct {
 	MaxMemoryPerUser int64 // bytes;per-user 内存
 }
 
-// Default per-worker memory estimate (matches RLIMIT_AS in proc/manager.go).
+// Default per-worker memory estimate. Historical constant carried from spec ①;
+// no longer corresponds to a process-level cap (RLIMIT_AS is disabled — see
+// internal/worker/proc/memlimit_linux.go). Used only as a rough accounting unit.
 const workerMemoryEstimate = 512 * 1024 * 1024 // 512 MB
 
 const (
@@ -214,6 +208,7 @@ func (p *PoolManager) acquireLocked(ctx context.Context, userID, workspaceID str
 			return &PoolError{Kind: poolErrKindMemoryExceeded, UserID: userID}
 		}
 		p.userMemory[userID] = used + workerMemoryEstimate
+		p.totalMemoryReservedBytes += workerMemoryEstimate
 	}
 
 	p.userCount[userID]++
@@ -347,6 +342,7 @@ func (p *PoolManager) AcquireMemory(userID string) error {
 			return &PoolError{Kind: poolErrKindMemoryExceeded, UserID: userID}
 		}
 		p.userMemory[userID] = used + workerMemoryEstimate
+		p.totalMemoryReservedBytes += workerMemoryEstimate
 	}
 	p.snapshotMetricsLocked()
 	return nil
@@ -367,11 +363,15 @@ func (p *PoolManager) ReleaseMemory(userID string) {
 func (p *PoolManager) releaseMemoryLocked(userID string) {
 	if p.maxMemoryPerUser > 0 {
 		used := p.userMemory[userID]
+		var delta int64
 		if used >= workerMemoryEstimate {
+			delta = workerMemoryEstimate
 			p.userMemory[userID] = used - workerMemoryEstimate
 		} else if used > 0 {
+			delta = used
 			p.userMemory[userID] = 0
 		}
+		p.totalMemoryReservedBytes -= delta
 		if p.userMemory[userID] <= 0 {
 			delete(p.userMemory, userID)
 		}

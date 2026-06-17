@@ -22,7 +22,7 @@
 - **per-workspace 内存配额层** — 固定估算（512MB/worker）下与 `max_per_workspace` 并发层数学等价（内存 = 会话数 × 512MB），两者同时设则紧者恒生效、松者永不触发，属功能冗余。仅在改用 worker-type 区分估算后才有独立价值，而本 spec 沿用固定估算。
 - **计费 / 用量统计 / 历史落盘** — 路线图 §6.3 拍板为纯配额增强；用量台账/计费基础若将来需要，另立 spec。
 - **per-workspace 单独配额** — 全局统一值已满足"每人相同上限"的公平语义；per-workspace 可配需动 `workspaces` 表 + admin API，YAGNI。
-- **worker-type 区分内存估算** — 沿用固定 `workerMemoryEstimate = 512MB`（匹配 `proc/manager.go` RLIMIT_AS）。
+- **worker-type 区分内存估算** — 沿用固定 `workerMemoryEstimate = 512MB`（历史常量，沿用 spec ①；RLIMIT_AS 已禁用见 `proc/memlimit_linux.go`，不再对应进程级硬限）。
 - **降额主动驱逐** — 自然释放，运维主动降额的代价由"期间新 Acquire 被拒"承担，spec 文档明示。
 
 ### 1.2 验收标准
