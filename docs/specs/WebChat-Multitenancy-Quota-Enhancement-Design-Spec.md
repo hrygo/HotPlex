@@ -22,7 +22,7 @@
 - **per-workspace 内存配额层** — 固定估算（512MB/worker）下与 `max_per_workspace` 并发层数学等价（内存 = 会话数 × 512MB），两者同时设则紧者恒生效、松者永不触发，属功能冗余。仅在改用 worker-type 区分估算后才有独立价值，而本 spec 沿用固定估算。
 - **计费 / 用量统计 / 历史落盘** — 路线图 §6.3 拍板为纯配额增强；用量台账/计费基础若将来需要，另立 spec。
 - **per-workspace 单独配额** — 全局统一值已满足"每人相同上限"的公平语义；per-workspace 可配需动 `workspaces` 表 + admin API，YAGNI。
-- **worker-type 区分内存估算** — 沿用固定 `workerMemoryEstimate = 512MB`（历史常量，沿用 spec ①；RLIMIT_AS 已禁用见 `proc/memlimit_linux.go`，不再对应进程级硬限）。
+- **worker-type 区分内存估算** — 沿用固定 `workerMemoryEstimate = 512MB`（历史常量，沿用 spec ①；本项目已停止调用 RLIMIT_AS，见 `proc/memlimit_linux.go`，故该值仅作粗略记账单位，不对应进程级内存硬限）。
 - **降额主动驱逐** — 自然释放，运维主动降额的代价由"期间新 Acquire 被拒"承担，spec 文档明示。
 
 ### 1.2 验收标准
@@ -39,29 +39,24 @@
 改动集中在 3 个文件，无新包、无跨模块依赖。
 
 ```
-internal/session/pool.go        ← 核心:Limits struct + UpdateLimits(Limits) + 4 gauge 快照
+internal/session/pool.go        ← 核心:UpdateLimits(config.PoolConfig) + snapshotMetricsLocked + 5 atomic gauge 快照
 internal/config/watcher.go      ← 解锁 2 个热重载键
-cmd/hotplex/gateway_run.go      ← 热重载回调传完整 Limits
+cmd/hotplex/gateway_run.go      ← 热重载回调传 next.Pool
 ```
 
-### 2.1 组件 1：`pool.Limits` struct（pool.go）
+### 2.1 组件 1：`UpdateLimits` 收 `config.PoolConfig`（pool.go）
+
+直接复用 `config.PoolConfig` 作为运行时限额载体，不再维护独立的 `session.Limits` 镜像 struct——逐字段复制 `config.PoolConfig` 会在新增字段时静默漂移（漏传 / 漏热重载检测）。
 
 ```go
-// Limits 镜像 config.PoolConfig 的运行时限额集合。0 = unlimited。
-type Limits struct {
-    MaxSize          int   // 全局最大活跃 Worker
-    MaxIdlePerUser   int   // per-user 最大并发 session
-    MaxPerWorkspace  int   // WebChat per-workspace 并发（spec ①）
-    MaxMemoryPerUser int64 // bytes；per-user 内存
-}
-
 // UpdateLimits 动态调整全部 4 个限额。替换旧的 (maxSize, maxIdlePerUser) 二参签名。
-// 若 maxSize 被降到当前 totalCount 之下，已运行 session 不被驱逐 —— 新 Acquire 将被拒，
-// 直到 session 自然 Release。
-func (p *PoolManager) UpdateLimits(l Limits)
+// 仅消费 PoolConfig 的 MaxSize / MaxIdlePerUser / MaxPerWorkspace / MaxMemoryPerUser
+// 四字段（MinSize 忽略）。若某维被降到当前占用之下，已运行 session 不被驱逐 ——
+// 新 Acquire 将被拒，直到 session 自然 Release。
+func (p *PoolManager) UpdateLimits(l config.PoolConfig)
 ```
 
-- 字段语义/默认值/`0=unlimited` 约定与 `config.PoolConfig` 完全一致。
+- `0 = unlimited` 约定与 `config.PoolConfig` 一致。
 - 旧二参 `UpdateLimits(maxSize, maxIdlePerUser int)` 唯一调用点是 `gateway_run.go:199`，直接迁移为新签名。调用点单一，且 pool 包无外部 SDK 消费者，**不留废弃别名**（避免 backwards-compat shim，符合项目反模式规范）。
 
 ### 2.2 组件 2：热重载解锁（watcher.go）
@@ -80,7 +75,7 @@ func (p *PoolManager) UpdateLimits(l Limits)
 "pool.max_per_workspace":   true,
 ```
 
-watcher 检测到任一 `pool.*` 变更 → 触发现有回调 → `gateway_run.go:199` 热重载路径组装 `Limits`（从 `next.Pool` 读 4 字段）调 `UpdateLimits`。
+watcher 检测到任一 `pool.*` 变更 → 触发现有回调 → `gateway_run.go:199` 热重载回调用 `prev.Pool != next.Pool` 判变更，直接传 `next.Pool`（`config.PoolConfig`）调 `UpdateLimits`。
 
 ### 2.3 组件 3：聚合指标（pool.go）
 
@@ -91,7 +86,7 @@ watcher 检测到任一 `pool.*` 变更 → 触发现有回调 → `gateway_run.
 | `hotplex.pool.active_sessions` | int64 | 全局活跃 session 总数（含 platform/cron） |
 | `hotplex.pool.distinct_users` | int64 | 去重 user 数 |
 | `hotplex.pool.distinct_workspaces` | int64 | 去重 WebChat workspace 数（`workspaceID != ""`） |
-| `hotplex.pool.memory_reserved_bytes` | int64 | 全局已预留内存（活跃会话 × 512MB 估算） |
+| `hotplex.pool.memory_reserved_bytes` | int64 | per-user 内存配额下已预留字节（仅 `max_memory_per_user` 设置时累计；512MB/worker 估算，非真实 RSS） |
 
 保留现有 `hotplex.pool.utilization`（float64，基于 `maxSize`）与 `PoolAcquire{result=...}` counter（已覆盖 4 种拒绝原因：`pool_exhausted` / `user_quota_exceeded` / `workspace_quota_exceeded` / `memory_exceeded`），零改动。
 
@@ -125,11 +120,11 @@ config.yaml 改 pool.max_memory_per_user: 3GB → 1GB
 config watcher 检测变更（4 个 pool.* 键均在白名单）
         │
         ▼
-gateway_run.go:199 热重载回调（现有路径）
-        │  组装 Limits{MaxSize, MaxIdlePerUser, MaxPerWorkspace, MaxMemoryPerUser}（从 next.Pool）
+gateway_run.go:199 热重载回调（prev.Pool != next.Pool 判变更）
+        │  直接传 next.Pool（config.PoolConfig）
         ▼
-pool.UpdateLimits(Limits)
-        │  mu.Lock → 覆盖 4 字段 → snapshotMetricsLocked() → mu.Unlock
+pool.UpdateLimits(next.Pool)
+        │  mu.Lock → 覆盖 4 字段 →（maxMemoryPerUser >0→0 时清空 userMemory/total）→ snapshotMetricsLocked() → mu.Unlock
         ▼
 日志: "pool: limits updated"（含 4 个新旧值）
         │
@@ -159,9 +154,11 @@ o.ObserveInt64(...) × 4 + o.ObserveFloat64(utilization)
 
 | 触发位置 | 动作 |
 |---|---|
-| `acquireLocked` 末尾 | 计数自增后（替代原 `setPoolUtilization` 单调用） |
-| `releaseCoreLocked` 末尾 | 计数自减后 |
-| `UpdateLimits` 内 | 覆盖阈值后（utilization 因分母 `maxSize` 变化需重算） |
+| `acquireLocked` 末尾 | 计数自增后 |
+| `releaseCoreLocked` 末尾 | 计数自减后（`Release` / `ReleaseForWorkspace` 共用） |
+| `ReleaseForWorkspace` 末尾 | `workspaceCount` 递减后**再快照一次**——`releaseCoreLocked` 的快照早于 workspace 递减，否则 `distinct_workspaces` 慢一拍（见 §4.7） |
+| `UpdateLimits` 内 | 覆盖阈值后（utilization 分母 `maxSize` 变化需重算） |
+| `AcquireMemory` / `ReleaseMemory` 末尾 | deprecated 路径同样维护快照，保证 memory-only 操作不丢指标 |
 
 ### 3.4 流 C：拒绝路径（无变化，仅复用）
 
@@ -185,6 +182,7 @@ o.ObserveInt64(...) × 4 + o.ObserveFloat64(utilization)
 ### 4.3 降额不驱逐的不变量
 
 - `UpdateLimits` 只写字段，不遍历 session、不调 Terminate。已超额状态是暂态 —— Release 自然收敛。
+- **memory 层禁用（`>0→0`）即时清零**：`UpdateLimits` 检测到 `max_memory_per_user` 从正数降为 0 时，立即清空 `userMemory` 与 `totalMemoryReservedBytes`，让 `memory_reserved_bytes` 即时归零。`releaseMemoryLocked` 已去掉 `maxMemoryPerUser>0` 守卫、本可随 drain 清理，但即时清零避免 gauge 滞后到所有 session Release。反向（`0→正数`）不重建——无法在不新增计数器的前提下得知哪些活跃 session 占内存，该方向仅 under-count（宽松），旧 session Release 后自洽。
 - **风险明示**：若 `max_memory_per_user` 从 1GB 降到 512MB 而用户正占 1GB，期间该用户新 Acquire 永远被拒，直到释放。这是运维主动降额的预期代价。
 
 ### 4.4 双轨隔离（spec ① 既有约束，spec ⑤ 保持）
@@ -199,9 +197,14 @@ o.ObserveInt64(...) × 4 + o.ObserveFloat64(utilization)
 
 ### 4.6 并发安全
 
-- 所有 `Limits` 字段读写均在 `p.mu` 内；gauge 读走 atomic 快照，不碰 `mu`。
+- 所有限额字段读写均在 `p.mu` 内；gauge 读走 atomic 快照，不碰 `mu`。
 - `UpdateLimits` 与 Acquire/Release 互斥 —— 无新竞态。
 - 快照写（持 `mu` 时 `atomic.Store`）与快照读（gauge 回调 `atomic.Load`）—— 标准 atomic 模式，无撕裂。
+- **单实例假设**：5 个 atomic 快照变量是包级全局，由唯一 `PoolManager` 实例写入。多实例会互相覆盖；若未来引入 per-tenant pool，需移到 struct 并改为捕获实例的回调（代码内已留 TODO）。
+
+### 4.7 distinct_workspaces 快照时机
+
+`releaseCoreLocked`（被 `Release` / `ReleaseForWorkspace` 共用）在末尾调 `snapshotMetricsLocked()`，但 `ReleaseForWorkspace` 在其返回**后**才递减 `workspaceCount`。若不补快照，`distinct_workspaces` 会慢一个 release，且 pool 排空后永久卡在非零值。故 `ReleaseForWorkspace` 在 workspace 递减后**再调一次** `snapshotMetricsLocked()`。`acquireLocked` 的 `workspaceCount++` 在快照之前，故 acquire 侧无此问题。
 
 ---
 
@@ -213,11 +216,12 @@ o.ObserveInt64(...) × 4 + o.ObserveFloat64(utilization)
 
 | 测试 | 验证点 |
 |---|---|
-| `TestUpdateLimits_AllFourHotReload` | 构造 pool → Acquire 几个 → `UpdateLimits(Limits{...})` 改 4 字段 → 新 Acquire 按新阈值被拒/通过 |
+| `TestUpdateLimits_AllFourHotReload` | 构造 pool → Acquire → `UpdateLimits(config.PoolConfig{...})` 改 4 字段 → 新 Acquire 按新阈值被拒/通过 |
 | `TestUpdateLimits_DoesNotEvict` | 占满配额 → `UpdateLimits` 降额 → 已 Acquire 的 session 仍计数（无强制释放）；仅新 Acquire 被拒 |
-| `TestMetrics_AggregateGauges` | Acquire N 个（user/workspace 混合）→ 读内部 atomic 快照 → 断言 4 值正确（active / distinct_users / distinct_workspaces / memory_reserved） |
-| `TestMetrics_ReleasesDecrement` | Acquire → Release → 快照回归基线（无泄漏） |
-| `TestMetrics_WorkspaceIsolation` | platform session（ws=""）不进 distinct_workspaces；WebChat session 进 |
+| `TestUpdateLimits_MemoryQuotaToggleOff` | `max_memory_per_user` 正数→0 禁用 → `totalMemoryReservedBytes`/`userMemory` 即时清零；release 后无泄漏/负值 |
+| `TestPool_ConcurrentMixedOperations` | 并发 Acquire/Release/UpdateLimits（`-race`）→ 计数不漂移、无数据竞争 |
+| `TestMetrics_SnapshotLogic` | Acquire N 个（user/workspace 混合）→ 断言 pool 内部状态（active / distinct_users / distinct_workspaces / memory_reserved） |
+| `TestMetrics_SnapshotUpdatesOnRelease` | Acquire → Release → 内部状态回归基线（无泄漏） |
 
 ### 5.2 config 包测试
 
@@ -249,11 +253,13 @@ o.ObserveInt64(...) × 4 + o.ObserveFloat64(utilization)
 
 | 文件 | 改动 |
 |---|---|
-| `internal/session/pool.go` | 新增 `Limits` struct；`UpdateLimits(Limits)` 替换二参版；`snapshotMetricsLocked()` + 5 atomic；4 新 gauge 注册；移除散落 `setPoolUtilization` 调用（并入 snapshot） |
+| `internal/session/pool.go` | `UpdateLimits(config.PoolConfig)` 替换二参版（直接收 config 类型，无镜像 struct）；`snapshotMetricsLocked()` + 5 atomic gauge；`releaseMemoryLocked` 去掉 `>0` 守卫；`ReleaseForWorkspace` 末尾补快照；memory 层禁用即时清零；gauge 描述澄清 |
 | `internal/config/watcher.go` | 白名单加 `pool.max_memory_per_user` / `pool.max_per_workspace` |
 | `internal/config/config.go` | `pool.max_*` 校验改 `>= 0`（扩展负数拒绝） |
-| `cmd/hotplex/gateway_run.go` | 热重载回调组装 `Limits`（4 字段）调新 `UpdateLimits` |
-| `internal/session/pool_test.go` | 5 个新测试 |
+| `internal/config/config_loader.go` | `BindEnv("pool.max_per_workspace")` |
+| `cmd/hotplex/gateway_run.go` | 热重载回调用 `prev.Pool != next.Pool` 判变更，传 `next.Pool` 调 `UpdateLimits` |
+| `internal/session/pool_test.go` | `TestUpdateLimits_AllFourHotReload` / `TestUpdateLimits_DoesNotEvict` / `TestUpdateLimits_MemoryQuotaToggleOff` / `TestPool_ConcurrentMixedOperations`（race） |
+| `internal/session/pool_metrics_test.go` | `TestMetrics_SnapshotLogic` / `TestMetrics_SnapshotUpdatesOnRelease`（断言 pool 内部状态，非包全局 atomic） |
 | `internal/config/*_test.go` | 负数校验测试 |
 
 无 DB 迁移、无新 API 端点、无前端改动。
