@@ -34,10 +34,46 @@ func init() {
 			slog.Warn("pool: failed to create pool.utilization gauge", "err", err)
 			return
 		}
+		activeGauge, err := m.Int64ObservableGauge(
+			"hotplex.pool.active_sessions",
+			metric.WithDescription("Active worker sessions (global, includes platform/cron)"),
+		)
+		if err != nil {
+			slog.Warn("pool: failed to create pool.active_sessions gauge", "err", err)
+			return
+		}
+		usersGauge, err := m.Int64ObservableGauge(
+			"hotplex.pool.distinct_users",
+			metric.WithDescription("Distinct users with at least one active session"),
+		)
+		if err != nil {
+			slog.Warn("pool: failed to create pool.distinct_users gauge", "err", err)
+			return
+		}
+		wsGauge, err := m.Int64ObservableGauge(
+			"hotplex.pool.distinct_workspaces",
+			metric.WithDescription("Distinct WebChat workspaces with at least one active session (platform sessions excluded)"),
+		)
+		if err != nil {
+			slog.Warn("pool: failed to create pool.distinct_workspaces gauge", "err", err)
+			return
+		}
+		memGauge, err := m.Int64ObservableGauge(
+			"hotplex.pool.memory_reserved_bytes",
+			metric.WithDescription("Estimated reserved memory in bytes (active sessions x 512MB, global aggregate)"),
+		)
+		if err != nil {
+			slog.Warn("pool: failed to create pool.memory_reserved_bytes gauge", "err", err)
+			return
+		}
 		_, _ = m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 			o.ObserveFloat64(poolGauge, math.Float64frombits(poolUtilization.Load()))
+			o.ObserveInt64(activeGauge, metricActiveSessions.Load())
+			o.ObserveInt64(usersGauge, metricDistinctUsers.Load())
+			o.ObserveInt64(wsGauge, metricDistinctWorkspaces.Load())
+			o.ObserveInt64(memGauge, metricMemoryReserved.Load())
 			return nil
-		}, poolGauge)
+		}, poolGauge, activeGauge, usersGauge, wsGauge, memGauge)
 	})
 }
 
