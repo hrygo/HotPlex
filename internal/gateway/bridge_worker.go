@@ -29,14 +29,15 @@ type forwardOpts struct {
 
 // workerLaunchParams holds the parameters for createAndLaunchWorker.
 type workerLaunchParams struct {
-	ctx           context.Context
-	wt            worker.WorkerType
-	workerInfo    worker.SessionInfo
-	platform      string
-	botID         string
-	botName       string
-	forwardOpts   *forwardOpts
-	injectExclude []string // per-session agent config files to skip; nil = use platform default
+	ctx                context.Context
+	wt                 worker.WorkerType
+	workerInfo         worker.SessionInfo
+	platform           string
+	botID              string
+	botName            string
+	forwardOpts        *forwardOpts
+	injectExclude      []string          // per-session agent config files to skip; nil = use platform default
+	workspaceOverrides map[string]string // WebChat per-workspace config overrides (spec ②); nil = Message Channel track → Load
 }
 
 // workerStartFunc is called after AttachWorker and injectAgentConfig.
@@ -79,7 +80,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, fmt.Errorf("bridge: attach worker: %w", err)
 	}
 
-	b.injectAgentConfig(&params.workerInfo, params.platform, params.botName, params.botID, params.injectExclude)
+	b.injectAgentConfig(&params.workerInfo, params.platform, params.botName, params.botID, params.injectExclude, params.workspaceOverrides)
 
 	if err := startFn(params.ctx, w, params.workerInfo); err != nil {
 		b.sm.DetachWorker(sid)
@@ -211,14 +212,15 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, p.workDir, si)
 
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
-		ctx:           context.Background(),
-		wt:            si.WorkerType,
-		workerInfo:    workerInfo,
-		platform:      si.Platform,
-		botID:         si.BotID,
-		botName:       si.BotName,
-		forwardOpts:   &forwardOpts{workDir: p.workDir},
-		injectExclude: nil, // resolved by injectAgentConfig
+		ctx:                context.Background(),
+		wt:                 si.WorkerType,
+		workerInfo:         workerInfo,
+		platform:           si.Platform,
+		botID:              si.BotID,
+		botName:            si.BotName,
+		forwardOpts:        &forwardOpts{workDir: p.workDir},
+		injectExclude:      nil, // resolved by injectAgentConfig
+		workspaceOverrides: b.resolveWorkspaceOverrides(context.Background(), si.WorkspaceID),
 	},
 		func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
 			if si.State != events.StateRunning {
@@ -316,16 +318,45 @@ func (b *Bridge) resolveInjectExclude(platform string, perSession []string) []st
 	return nil
 }
 
+// resolveWorkspaceOverrides fetches a workspace's agent-config overrides and parses
+// them. Returns nil for empty workspaceID (Message Channel track) or nil wsStore, and
+// degrades to nil (team defaults) on any fetch/parse error — never blocks worker launch.
+// ctx propagates request-scoped cancellation/deadline to the workspace DB query (the
+// store layer uses standard QueryRowContext without otelsql instrumentation, so ctx
+// does not auto-generate an OTel DB span). See design spec §7.3.
+func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID string) map[string]string {
+	if workspaceID == "" || b.wsStore == nil {
+		return nil
+	}
+	ws, err := b.wsStore.GetWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		b.log.Warn("bridge: fetch workspace overrides failed, degrading to team defaults",
+			"workspace_id", workspaceID, "err", err)
+		return nil
+	}
+	overrides, err := agentconfig.ValidateOverrides(ws.AgentConfigOverrides)
+	if err != nil {
+		b.log.Warn("bridge: parse workspace overrides failed, degrading to team defaults",
+			"workspace_id", workspaceID, "err", err)
+		return nil
+	}
+	return overrides
+}
+
 // injectAgentConfig loads agent config files and injects the unified system
 // prompt into session info. A no-op when config dir is empty or agent config
 // is not configured.
 // injectExclude lists file base names to skip; when nil, falls back to the
 // platform-level default from the atomic config map.
 //
+// workspaceOverrides selects the WebChat track (LoadForWorkspace) when non-nil;
+// nil selects the Message Channel track (Load with botName). WebChat sessions
+// don't select a bot, so botName is intentionally not passed to LoadForWorkspace.
+//
 // Parameter order note: botName (YAML config name, e.g. "my-bot") comes before
 // botID (platform runtime ID, e.g. "U12345") because botName is the primary key
 // for agent-config path resolution, while botID is only used for logging.
-func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, botID string, injectExclude []string) {
+func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, botID string, injectExclude []string, workspaceOverrides map[string]string) {
 	if b.agentConfigDir == "" {
 		return
 	}
@@ -337,8 +368,14 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, 
 		b.log.Warn("bridge: inject_exclude contains unknown config files",
 			"unknown", unknown, "valid", agentconfig.KnownFiles())
 	}
-	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "exclude", injectExclude)
-	configs, err := agentconfig.Load(b.agentConfigDir, platform, botName, injectExclude...)
+	b.log.Debug("bridge: loading agent config", "dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID, "exclude", injectExclude, "workspace_overrides", workspaceOverrides != nil)
+	var configs *agentconfig.AgentConfigs
+	var err error
+	if workspaceOverrides != nil {
+		configs, err = agentconfig.LoadForWorkspace(b.agentConfigDir, platform, workspaceOverrides, injectExclude...)
+	} else {
+		configs, err = agentconfig.Load(b.agentConfigDir, platform, botName, injectExclude...)
+	}
 	if err != nil {
 		if errors.Is(err, agentconfig.ErrInvalidBotName) {
 			b.log.Error("bridge: agent config rejected",

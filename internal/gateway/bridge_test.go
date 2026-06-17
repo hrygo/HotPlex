@@ -406,7 +406,7 @@ func TestBridge_InjectAgentConfig_BotNameResolution(t *testing.T) {
 			})
 
 			info := &worker.SessionInfo{}
-			b.injectAgentConfig(info, tt.platform, tt.botName, tt.botID, nil)
+			b.injectAgentConfig(info, tt.platform, tt.botName, tt.botID, nil, nil)
 
 			if tt.wantEmpty {
 				assert.Empty(t, info.SystemPrompt)
@@ -834,6 +834,47 @@ func TestResetSession_ReloadsAgentConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Contains(t, mw.updatedPrompt, "Updated persona v2.")
+	sm.AssertExpectations(t)
+}
+
+func TestResetSession_WebChatWorkspaceOverrides(t *testing.T) {
+	t.Parallel()
+
+	// Team default on disk; workspace override must win after reset (spec ②).
+	// Regression guard: ResetSession must pass resolveWorkspaceOverrides(si.WorkspaceID),
+	// not nil — otherwise WebChat /reset silently drops workspace config and falls back
+	// to team defaults.
+	dir := t.TempDir()
+	writeAgentConfigFile(t, dir, "SOUL.md", "team-soul")
+
+	hub := newTestHub(t)
+	sm := new(mockBridgeSM)
+	ws := &session.Workspace{ID: "ws-reset", AgentConfigOverrides: `{"SOUL.md":"ws-soul"}`}
+	b := NewBridge(BridgeDeps{
+		Log:            slog.Default(),
+		Hub:            hub,
+		SM:             sm,
+		AgentConfigDir: dir,
+		WSStore:        &stubWSStore{ws: ws},
+	})
+
+	sid := "test-reset-webchat-overrides"
+	mw := &mockPromptUpdater{}
+
+	sm.On("GetWorker", sid).Return(mw)
+	sm.On("Get", sid).Return(&session.SessionInfo{
+		ID:          sid,
+		Platform:    "webchat",
+		WorkspaceID: "ws-reset",
+	}, nil)
+
+	err := b.ResetSession(context.Background(), sid)
+	require.NoError(t, err)
+
+	// Workspace override wins over team default — proves ResetSession resolves
+	// overrides for WebChat sessions, not hardcoded nil.
+	assert.Contains(t, mw.updatedPrompt, "ws-soul")
+	assert.NotContains(t, mw.updatedPrompt, "team-soul")
 	sm.AssertExpectations(t)
 }
 

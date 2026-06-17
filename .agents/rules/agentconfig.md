@@ -29,3 +29,11 @@ paths:
 - 限制：单文件 8KB / 总量 40KB | YAML frontmatter 自动剥离
 - 安全：`ValidateBotName(botName)` 防路径穿越（含 `"."` / `".."` 检查）
 - 注入排除：`injectExclude` 按文件名（大小写不敏感）跳过加载；3 级配置（bot → platform → global），nil 继承，空 slice 覆盖清空
+
+**双轨（spec ②）**：WebChat 多租户轨与 Message Channel 轨隔离解析，互不污染。
+
+- **Message Channel 轨**（Slack/Feishu）：`Load` 三级 fallback（全局 → 平台 → Bot），如上，零改动。
+- **WebChat 轨**：`LoadForWorkspace(dir, platform, overrides, injectExclude...)` 两层继承——团队默认（`Load` base）→ workspace overrides 逐文件覆盖（命中即终止，空值继承默认，`injectExclude` 优先级最高）。
+- **workspace overrides**：DB JSON flat map（`workspaces.agent_config_overrides` 列，复用 spec ① 无新迁移），`ValidateOverrides` 校验键白名单/类型/size（PATCH 写入侧 + Bridge 读取侧复用同一函数）。
+- **分流判据**：`injectAgentConfig` 以 `workspaceOverrides != nil` 区分双轨；`Bridge.resolveWorkspaceOverrides(workspaceID)` 按 `workspace_id` 解析（空 → nil → Message Channel 轨）。3 个 worker 启动调用点（StartSession / resume / fresh-start）+ ResetSession 均经此 helper。
+- **不可覆盖**：`META-COGNITION.md` 不在 5 文件白名单（SOUL/AGENTS/SKILLS/USER/MEMORY），PATCH 拒、`applyOverrides` 忽略，物理不可覆盖。

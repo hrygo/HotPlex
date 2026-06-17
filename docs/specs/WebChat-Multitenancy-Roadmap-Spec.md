@@ -1,7 +1,7 @@
 # WebChat 一等公民化与多租户路线图
 
 **日期**: 2026-06-16
-**状态**: spec ① 实现完成 Phase 0-7 + review 修复 R4-R9（[PR #746](https://github.com/hrygo/hotplex/pull/746)，P1 阻塞项已修待 re-review）；②-⑥ 待逐个 brainstorm
+**状态**: spec ① 已合入（[PR #746](https://github.com/hrygo/hotplex/pull/746)，`44f461ff`）；spec ② 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）；③-⑥ 待逐个 brainstorm
 **分支**: main · **基线版本**: v1.29.0 (fb857af1)
 **关联设计**: [`WebChat-Multitenancy-Foundation-Design-Spec.md`](./WebChat-Multitenancy-Foundation-Design-Spec.md)（spec ①）
 
@@ -54,11 +54,11 @@
 
 ## 3. 阶段规划
 
-### 阶段 A：地基（spec ① 实现完成，待合入）
+### 阶段 A：地基（spec ① 已合入）
 
 | spec | 标题 | 状态 | 文档 |
 |---|---|---|---|
-| ① | 身份 + workspace + 隔离 | ✅ 实现完成 Phase 0-7 + review 修复 R4-R9（[PR #746](https://github.com/hrygo/hotplex/pull/746)，待 re-review） | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
+| ① | 身份 + workspace + 隔离 | ✅ 已合入（[PR #746](https://github.com/hrygo/hotplex/pull/746)，`44f461ff`） | [foundation-design](./WebChat-Multitenancy-Foundation-Design-Spec.md) |
 
 阶段 A 已交付（PR #746）：WebChat 后端具备真实用户身份、workspace 实体、会话隔离（ListSessions SQL 级 workspace 过滤 + authorizeSession 二次校验）、多租户配额（PoolManager 全局 + per-user + per-workspace 三层并发）。`make check` 通过。剩余增量（迁移验证测试 / 旧 webchat 会话清理 / e2e 集成测试）作为 spec ① 后续提交，不阻塞阶段 B 启动。
 
@@ -81,7 +81,7 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 
 | spec | 标题 | 依赖 | 核心改动 |
 |---|---|---|---|
-| ② | per-workspace agent-configs 自定义 | ① | 改造 `loader.go`，WebChat 轨走两层（团队默认 → workspace 自定义） |
+| ② | per-workspace agent-configs 自定义 | ① | ✅ 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）：`LoadForWorkspace` 双轨隔离 + Bridge `WSStore` helper + PATCH 三层校验，[设计](./WebChat-Multitenancy-PerWorkspace-AgentConfigs-Design-Spec.md) |
 | ③ | workspace 级 worker 选择 | ① | worker_type fallback 链（WebChat 轨：团队默认 → workspace）+ API，填充 `workspaces.worker_preference` |
 | ④ | OAuth/SSO provider 落地 | ① | `IdentityProvider` 第二实现（飞书/Slack/OIDC） |
 
@@ -211,8 +211,8 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 ## 7. 推进节奏
 
 - 每个 spec 独立 brainstorm → 设计文档（`docs/specs/`）→ writing-plans → 实现。
-- spec ① 已实现完成（Phase 0-7，PR #746），合入后启动 spec ②③④（可并行）。
+- spec ① 已合入（PR #746）。spec ② 已合入（PR #748）。spec ③④ 可并行启动。
 - spec ⑥ 在 ②③④就绪后启动。
 - 路线图文档随各 spec 推进更新状态。
 
-**下一步**：PR #746 re-review 合入（P1 AttachWorker race 已在 R6 修复，R7 安全/质量加固，R8 剩余 P3 + conn.go 自死锁）→ 启动 spec ②③④ brainstorm（per-workspace agent-configs / workspace 级 worker 选择 / OAuth SSO，三者互不依赖可并行）。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。
+**下一步**：spec ② 已合入（PR #748）→ 启动 spec ③④ brainstorm（workspace 级 worker 选择 / OAuth SSO，互不依赖可并行；spec ③ `CreateSession` 已消费 `worker_preference`，主要补白名单校验，工作量最小）。spec ⑤⑥ 待 ③④ 就绪。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。

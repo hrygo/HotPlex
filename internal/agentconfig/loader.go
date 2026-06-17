@@ -277,3 +277,77 @@ func (c *AgentConfigs) IsEmpty() bool {
 	return c.Soul == "" && c.Agents == "" && c.Skills == "" &&
 		c.User == "" && c.Memory == ""
 }
+
+// LoadForWorkspace resolves WebChat-track agent configs via two-level inheritance:
+// team defaults (loaded from dir via Load with botName="") → workspace overrides.
+//
+// Each non-empty override entry replaces the corresponding team-default field.
+// injectExclude has highest priority: an excluded file is never injected even if
+// overridden. Unknown override keys are silently ignored (defense-in-depth —
+// ValidateOverrides rejects them at write time).
+//
+// The Message Channel track calls Load directly; this function is WebChat-only.
+// See design spec §5.
+func LoadForWorkspace(dir, platform string, overrides map[string]string, injectExclude ...string) (*AgentConfigs, error) {
+	base, err := Load(dir, platform, "", injectExclude...)
+	if err != nil {
+		return nil, err
+	}
+	applyOverrides(base, overrides, injectExclude)
+	enforceTotalLimit(base)
+	return base, nil
+}
+
+// applyOverrides applies per-file overrides onto base in place. Only keys in
+// configFiles are applied; empty values do not override; excluded files are skipped.
+func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclude []string) {
+	set := func(baseName, val string, target *string) {
+		if val == "" || shouldExclude(baseName, injectExclude) {
+			return
+		}
+		*target = val
+	}
+	for k, v := range overrides {
+		switch k {
+		case "SOUL.md":
+			set(k, v, &base.Soul)
+		case "AGENTS.md":
+			set(k, v, &base.Agents)
+		case "SKILLS.md":
+			set(k, v, &base.Skills)
+		case "USER.md":
+			set(k, v, &base.User)
+		case "MEMORY.md":
+			set(k, v, &base.Memory)
+		}
+	}
+}
+
+// enforceTotalLimit truncates merged config fields so the combined size stays within
+// MaxTotalChars. Load already enforces this on team defaults, but overrides can grow
+// individual fields beyond the budget (write-side ValidateOverrides caps each override
+// at MaxFileChars, not the merged total); this re-checks the merged result as
+// defense-in-depth. Truncates in field order (SOUL→AGENTS→SKILLS→USER→MEMORY).
+func enforceTotalLimit(c *AgentConfigs) {
+	fields := []struct {
+		name   string
+		target *string
+	}{
+		{"SOUL.md", &c.Soul},
+		{"AGENTS.md", &c.Agents},
+		{"SKILLS.md", &c.Skills},
+		{"USER.md", &c.User},
+		{"MEMORY.md", &c.Memory},
+	}
+	total := 0
+	for _, f := range fields {
+		n := len(*f.target)
+		if rem := MaxTotalChars - total; n > rem {
+			slog.Warn("agentconfig: merged config exceeds total limit after overrides, truncated",
+				"file", f.name, "original", n, "remaining", rem, "limit", MaxTotalChars)
+			*f.target = (*f.target)[:rem]
+			n = rem
+		}
+		total += n
+	}
+}

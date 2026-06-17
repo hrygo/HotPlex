@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
@@ -160,6 +161,19 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		ws.Name = req.Name
 	}
 	if req.AgentConfigOverrides != "" {
+		if _, err := agentconfig.ValidateOverrides(req.AgentConfigOverrides); err != nil {
+			switch {
+			case errors.Is(err, agentconfig.ErrInvalidConfigJSON):
+				writeAppError(w, http.StatusBadRequest, "INVALID_CONFIG_JSON", err.Error())
+			case errors.Is(err, agentconfig.ErrUnknownConfigFile):
+				writeAppError(w, http.StatusBadRequest, "UNKNOWN_CONFIG_FILE", err.Error())
+			case errors.Is(err, agentconfig.ErrConfigTooLarge):
+				writeAppError(w, http.StatusBadRequest, "CONFIG_TOO_LARGE", err.Error())
+			default:
+				writeAppError(w, http.StatusBadRequest, "INVALID_CONFIG_VALUE", err.Error())
+			}
+			return
+		}
 		ws.AgentConfigOverrides = req.AgentConfigOverrides
 	}
 	if req.WorkerPreference != "" {

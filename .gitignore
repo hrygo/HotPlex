@@ -115,6 +115,7 @@ __pycache__
 !.agents/skills/hotplex-*/
 .agents/skills/hotplex-docs-patrol/.patrol-baseline
 .agent/
+.omo/
 /skills/
 skills-lock.json
 .agents/scheduled_tasks.lock
