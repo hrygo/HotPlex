@@ -382,48 +382,73 @@ func TestCreateSession_BridgeError(t *testing.T) {
 	require.Contains(t, w.Body.String(), "failed to create session")
 }
 
-func TestCreateSession_InvalidWorkerType(t *testing.T) {
+func TestCreateSession_WorkerTypeValidation(t *testing.T) {
 	t.Parallel()
 
-	// Invalid worker_type must be rejected at the boundary (400) before reaching
-	// DeriveSessionKey / bridge.StartSession, so those mocks are intentionally
-	// left unset for the invalid cases.
-	invalidCases := []struct {
+	// worker_type is validated at the boundary whether supplied via query param
+	// (?worker_type=) or JSON body ({"worker_type":...}). Both parse paths
+	// (api.go:267-270) are independent and must reject unknown types with 400
+	// INVALID_WORKER_TYPE before reaching DeriveSessionKey / bridge.StartSession
+	// (so mocks are intentionally unset for invalid cases). See spec ③ §7.2/§10.
+	//
+	// testNoopType ("noop_gateway_test") is the registered test worker — the 4
+	// real constants are validated at the worker-package boundary (TestValidateType).
+	newAPI := func(t *testing.T) (*GatewayAPI, *mockAPISM, *mockAPIBridge) {
+		sm := new(mockAPISM)
+		bridge := new(mockAPIBridge)
+		return newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/proj")), sm, bridge
+	}
+
+	invalid := []struct {
 		name string
 		url  string
+		body string
 	}{
-		{"query bogus rejected", "/api/sessions?workspace_id=ws-test&client_session_id=c1&worker_type=bogus"},
-		{"query TypeUnknown rejected", "/api/sessions?workspace_id=ws-test&client_session_id=c2&worker_type=unknown"},
-		{"query case sensitive rejected", "/api/sessions?workspace_id=ws-test&client_session_id=c3&worker_type=Claude_Code"},
+		{"query bogus", "/api/sessions?workspace_id=ws-test&client_session_id=cq1&worker_type=bogus", ""},
+		{"query TypeUnknown", "/api/sessions?workspace_id=ws-test&client_session_id=cq2&worker_type=unknown", ""},
+		{"query case sensitive", "/api/sessions?workspace_id=ws-test&client_session_id=cq3&worker_type=Claude_Code", ""},
+		{"body bogus", "/api/sessions?workspace_id=ws-test&client_session_id=cb1", `{"worker_type":"bogus"}`},
+		{"body TypeUnknown", "/api/sessions?workspace_id=ws-test&client_session_id=cb2", `{"worker_type":"unknown"}`},
+		{"body case sensitive", "/api/sessions?workspace_id=ws-test&client_session_id=cb3", `{"worker_type":"Claude_Code"}`},
 	}
-	for _, tt := range invalidCases {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tt := range invalid {
+		t.Run("invalid/"+tt.name, func(t *testing.T) {
 			t.Parallel()
-			sm := new(mockAPISM)
-			bridge := new(mockAPIBridge)
-			api := newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/proj"))
-
+			api, _, _ := newAPI(t)
 			w := httptest.NewRecorder()
-			api.CreateSession(w, authedReq("POST", tt.url, nil))
+			var body io.Reader
+			if tt.body != "" {
+				body = strings.NewReader(tt.body)
+			}
+			api.CreateSession(w, authedReq("POST", tt.url, body))
 			require.Equal(t, http.StatusBadRequest, w.Code, "resp=%s", w.Body.String())
 			require.Contains(t, w.Body.String(), "INVALID_WORKER_TYPE")
 		})
 	}
 
-	t.Run("valid query worker_type accepted", func(t *testing.T) {
-		t.Parallel()
-		// testNoopType is the registered test worker; a valid type passes boundary
-		// validation and proceeds to bridge.StartSession (mocked to succeed).
-		sm := new(mockAPISM)
-		bridge := new(mockAPIBridge)
-		api := newTestAPIWithWorkspace(t, sm, bridge, ownedWorkspaceMock("anonymous", "/tmp/hotplex/proj"))
-		sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
-		bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
-
-		w := httptest.NewRecorder()
-		api.CreateSession(w, authedReq("POST", "/api/sessions?workspace_id=ws-test&client_session_id=c-valid&worker_type="+string(testNoopType), nil))
-		require.Equal(t, http.StatusOK, w.Code, "resp=%s", w.Body.String())
-	})
+	valid := []struct {
+		name string
+		url  string
+		body string
+	}{
+		{"query", "/api/sessions?workspace_id=ws-test&client_session_id=cvq&worker_type=" + string(testNoopType), ""},
+		{"body", "/api/sessions?workspace_id=ws-test&client_session_id=cvb", `{"worker_type":"` + string(testNoopType) + `"}`},
+	}
+	for _, tt := range valid {
+		t.Run("valid/"+tt.name, func(t *testing.T) {
+			t.Parallel()
+			api, sm, bridge := newAPI(t)
+			sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
+			bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
+			w := httptest.NewRecorder()
+			var body io.Reader
+			if tt.body != "" {
+				body = strings.NewReader(tt.body)
+			}
+			api.CreateSession(w, authedReq("POST", tt.url, body))
+			require.Equal(t, http.StatusOK, w.Code, "resp=%s", w.Body.String())
+		})
+	}
 }
 
 var errTestBridge = fmt.Errorf("test bridge error")
