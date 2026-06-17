@@ -58,6 +58,7 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("pool.max_size")
 	_ = v.BindEnv("pool.max_idle_per_user")
 	_ = v.BindEnv("pool.max_memory_per_user")
+	_ = v.BindEnv("pool.max_per_workspace")
 	_ = v.BindEnv("worker.default_work_dir")
 	_ = v.BindEnv("worker.max_lifetime")
 	_ = v.BindEnv("worker.idle_timeout")

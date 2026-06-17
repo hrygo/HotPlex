@@ -1,7 +1,7 @@
 # WebChat 一等公民化与多租户路线图
 
 **日期**: 2026-06-16
-**状态**: spec ① 已合入（[PR #746](https://github.com/hrygo/hotplex/pull/746)，`44f461ff`）；spec ② 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）；③-⑥ 待逐个 brainstorm
+**状态**: spec ① 已合入（[PR #746](https://github.com/hrygo/hotplex/pull/746)，`44f461ff`）；spec ② 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）；spec ③ 已合入（[PR #753](https://github.com/hrygo/hotplex/pull/753)，`207d47e3`）；spec ⑤ 已合入（[PR #755](https://github.com/hrygo/hotplex/pull/755)）；④/⑥ 待逐个 brainstorm
 **分支**: main · **基线版本**: v1.29.0 (fb857af1)
 **关联设计**: [`WebChat-Multitenancy-Foundation-Design-Spec.md`](./WebChat-Multitenancy-Foundation-Design-Spec.md)（spec ①）
 
@@ -31,6 +31,7 @@
         ├──────────────┐
         ▼              ▼
 ② per-ws 配置继承     ③ workspace 级 worker 选择
+ （✅ PR#748）          （✅ PR#753）
    （团队默认→ws 自定义） （ws.worker_preference + fallback 链）
         │              │
         ├──────────────┤
@@ -82,7 +83,7 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 | spec | 标题 | 依赖 | 核心改动 |
 |---|---|---|---|
 | ② | per-workspace agent-configs 自定义 | ① | ✅ 已合入（[PR #748](https://github.com/hrygo/hotplex/pull/748)）：`LoadForWorkspace` 双轨隔离 + Bridge `WSStore` helper + PATCH 三层校验，[设计](./WebChat-Multitenancy-PerWorkspace-AgentConfigs-Design-Spec.md) |
-| ③ | workspace 级 worker 选择 | ① | worker_type fallback 链（WebChat 轨：团队默认 → workspace）+ API，填充 `workspaces.worker_preference` |
+| ③ | workspace 级 worker 选择 | ① | ✅ 已合入（[PR #753](https://github.com/hrygo/hotplex/pull/753)，`207d47e3`）：`worker.ValidateType` 白名单 + `worker_preference` fallback 链 + CreateSession/PATCH API + DeriveSessionKey 切 worker-type 回归，[设计](./WebChat-Multitenancy-WorkspaceWorker-Design-Spec.md) |
 | ④ | OAuth/SSO provider 落地 | ① | `IdentityProvider` 第二实现（飞书/Slack/OIDC） |
 
 阶段 B 交付后：用户可在 workspace 级定制 agent-configs 与 worker，且可用 OAuth 登录（企业 SSO 体验）。
@@ -91,7 +92,7 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 
 | spec | 标题 | 依赖 | 核心改动 |
 |---|---|---|---|
-| ⑤ | 多租户配额增强 | ①② | PoolManager 内存维度细化到 workspace、可选计费/用量统计 |
+| ⑤ | 多租户配额增强 | ①② | ✅ 已合入（[PR #755](https://github.com/hrygo/hotplex/pull/755)）：`Limits` struct 4 限额热重载 + 4 聚合 gauge，[设计](./WebChat-Multitenancy-Quota-Enhancement-Design-Spec.md) |
 | ⑥ | webchat 前端一等公民化 | ①②③④ | 登录页、workspace 切换、worker 选择、配置编辑 UI |
 
 阶段 C 交付后：愿景达成——WebChat 完整多租户一等公民体验。
@@ -117,7 +118,9 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 
 **风险**：fallback 层数增加后的路径解析复杂度与性能（需评估缓存）。
 
-### spec ③ — 用户级 worker 选择
+### spec ③ — 用户级 worker 选择（✅ 已合入 PR #753）
+
+**交付摘要**：`internal/worker/registry.go` 新增 `ValidateType` + `ErrInvalidWorkerType` 白名单（仅 claude_code / opencode_server / codex_cli / acp）；WebChat 轨 worker_type fallback `workspace.worker_preference` → 团队默认；`CreateSession` 支持 body/query 传入 worker_type 并校验；`PATCH /api/workspaces/{id}` 支持 worker_preference 白名单；`DeriveSessionKey` 切 worker-type 生成新 session key（同 workspace 切 worker = 新会话，回归覆盖）；gateway 对 stale `worker_preference` 做防御性降级到默认。详细设计见 [`WebChat-Multitenancy-WorkspaceWorker-Design-Spec.md`](./WebChat-Multitenancy-WorkspaceWorker-Design-Spec.md)。
 
 **目标**：调用方（前端/用户）能在 workspace 级选择用哪个 worker（claude_code / opencode_server / codex_cli / acp），WebChat 轨走 spec ① §2.4 的两层（团队默认 → workspace 选择）。
 
@@ -151,20 +154,11 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 
 **风险**：强依赖 bot OAuth 配置（若未配置飞书/Slack 则需独立 OIDC）；多 provider 同一用户的账号合并策略。
 
-### spec ⑤ — 多租户配额增强
+### spec ⑤ — 多租户配额增强（✅ 已合入 PR #755）
 
-**目标**：细化配额到内存维度（per-workspace），可选提供用量统计/计费基础。
+**交付摘要**：`Limits` struct（4 字段：全局/per-user/per-workspace 并发 + per-user 内存）支持运行时热重载——`UpdateLimits(Limits)` 在 `p.mu` 下原子替换 4 限额，降额不驱逐已运行 worker；`snapshotMetricsLocked()` 在 acquire/release/update 各持锁点写 4 个 package-global `atomic.Int64` 快照（单缓冲，gauge 回调无锁读），新增 4 个低基数聚合 gauge（`active_sessions`/`distinct_users`/`distinct_workspaces`/`memory_reserved_bytes`）+ 复用现有 `utilization`；config watcher 解锁全部 4 个 `pool.*` 热重载键，config 校验拒绝负数（`max_size` 仍要求 >0）。`TestPool_ConcurrentMixedOperations` race 压测 + `TestUpdateLimits_DoesNotEvict` 不驱逐不变量覆盖。详见 [`WebChat-Multitenancy-Quota-Enhancement-Design-Spec.md`](./WebChat-Multitenancy-Quota-Enhancement-Design-Spec.md)。
 
-**现状**：spec ① 的 PoolManager 三层（全局 + per-user + per-workspace 并发），内存维度不细分到 workspace。
-
-**关键改动点**：
-- `internal/session/pool.go`：per-workspace 内存配额层。
-- 可选：`metrics/` 新增 per-user/per-workspace 用量 Prometheus 指标。
-- 配额配置热重载。
-
-**验收**：workspace 内存超限拒绝新会话；指标可观测。
-
-**风险**：内存估算准确性（现状固定 512MB/worker，`pool.go:55`）。
+**scope 拍板（brainstorm）**：原计划含 per-workspace 内存配额层，但固定内存估算（512MB/worker）下与现有 `max_per_workspace` 并发层数学等价（冗余），故**不做**；纯配额增强，不含计费/用量落盘。详见设计 §1.1 排除清单。
 
 ### spec ⑥ — webchat 前端一等公民化
 
@@ -211,8 +205,8 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 ## 7. 推进节奏
 
 - 每个 spec 独立 brainstorm → 设计文档（`docs/specs/`）→ writing-plans → 实现。
-- spec ① 已合入（PR #746）。spec ② 已合入（PR #748）。spec ③④ 可并行启动。
+- spec ① 已合入（PR #746）。spec ② 已合入（PR #748）。spec ③ 已合入（PR #753）。spec ④⑤ 可并行启动（互不依赖）。
 - spec ⑥ 在 ②③④就绪后启动。
 - 路线图文档随各 spec 推进更新状态。
 
-**下一步**：spec ② 已合入（PR #748）→ 启动 spec ③④ brainstorm（workspace 级 worker 选择 / OAuth SSO，互不依赖可并行；spec ③ `CreateSession` 已消费 `worker_preference`，主要补白名单校验，工作量最小）。spec ⑤⑥ 待 ③④ 就绪。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。
+**下一步**：spec ⑤ 已合入（[PR #755](https://github.com/hrygo/hotplex/pull/755)）→ 启动 spec ④/⑥ brainstorm（OAuth SSO / 前端一等公民化）。spec ④ 需先拍板 §6.2 的 provider 优先级与账号合并策略；spec ⑥ 待 ④ 就绪后集成。spec ① 剩余增量（迁移验证 / 旧 webchat 会话清理 / e2e）可穿插提交。

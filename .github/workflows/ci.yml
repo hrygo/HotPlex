@@ -167,69 +167,9 @@ jobs:
         if: always()
         run: go tool cover -func=coverage.out 2>/dev/null | tail -1 || true
 
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: coverage
-          path: coverage.out
-
-  # ── Build verification + Lint (parallel with Test) ────────────────────
-  # Builds with webchat (uses cached output when available).
-  # Runs vet + build + lint — all static checks in one job.
-  build:
-    needs: [large-file-guard]
-    name: Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: ./.github/actions/setup-go-webchat
-
-      - name: Verify + Vet + Build
-        run: go mod verify && go vet ./... && go build ./...
-
-      - name: Build & validate docs (includes swagger generation)
-        run: go install github.com/swaggo/swag/cmd/swag@v1.16.4 && make docs-build
-
-      - name: Build gateway binary
-        run: |
-          mkdir -p bin
-          go build -o bin/hotplex ./cmd/hotplex
-
-      - name: Verify binary
-        run: test -x ./bin/hotplex && ./bin/hotplex --help
-
-      - name: Lint
-        uses: golangci/golangci-lint-action@v9.2.0
-        with:
-          version: v2.11.4
-          args: --timeout=10m
-
-  # ── Coverage gate ───────────────────────────────────────────────────────
-  coverage-check:
-    needs: [test]
-    if: always() && needs.test.result == 'success'
-    name: Coverage Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26'
-          cache: false
-
-      - name: Download coverage
-        uses: actions/download-artifact@v7
-        with:
-          name: coverage
-          path: coverage-artifacts
-
       - name: Check per-package coverage thresholds
         run: |
-          COV_FILE="coverage-artifacts/coverage.out"
+          COV_FILE="coverage.out"
 
           # Skip if coverage file is empty (no packages affected)
           if [ ! -s "$COV_FILE" ] || [ "$(wc -l < "$COV_FILE")" -le 1 ]; then
@@ -322,3 +262,42 @@ jobs:
             exit 1
           fi
           echo "All package coverage thresholds met."
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+
+  # ── Build verification + Lint (parallel with Test) ────────────────────
+  # Builds with webchat (uses cached output when available).
+  # Runs vet + build + lint — all static checks in one job.
+  build:
+    needs: [large-file-guard]
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-go-webchat
+
+      - name: Verify + Vet + Build
+        run: go mod verify && go vet ./... && go build ./...
+
+      - name: Build & validate docs (includes swagger generation)
+        run: go install github.com/swaggo/swag/cmd/swag@v1.16.4 && make docs-build
+
+      - name: Build gateway binary
+        run: |
+          mkdir -p bin
+          go build -o bin/hotplex ./cmd/hotplex
+
+      - name: Verify binary
+        run: test -x ./bin/hotplex && ./bin/hotplex --help
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9.2.0
+        with:
+          version: v2.11.4
+          args: --timeout=10m
