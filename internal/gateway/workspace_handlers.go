@@ -12,6 +12,7 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/worker"
 )
 
 // WorkspaceHandlers serves /api/workspaces (spec §9.1, §11.3).
@@ -177,6 +178,10 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		ws.AgentConfigOverrides = req.AgentConfigOverrides
 	}
 	if req.WorkerPreference != "" {
+		if err := worker.ValidateType(worker.WorkerType(req.WorkerPreference)); err != nil {
+			writeAppError(w, http.StatusBadRequest, "INVALID_WORKER_TYPE", err.Error())
+			return
+		}
 		ws.WorkerPreference = req.WorkerPreference
 	}
 	if err := h.store.UpdateWorkspace(r.Context(), ws, h.nowUnix()); err != nil {
