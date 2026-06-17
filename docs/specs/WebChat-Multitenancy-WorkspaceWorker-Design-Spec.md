@@ -79,7 +79,7 @@ spec ①（地基）已为 spec ③ 预留并实现了大半基础设施：
 
 ## 4. 白名单校验（ValidateType）
 
-新增 `worker.ValidateType`，放在 worker 包（紧邻 WorkerType/RegisteredTypes 定义）：
+新增 `worker.ValidateType`，放在 worker 包（紧邻 WorkerType/RegisteredTypes 定义）。下方为示意伪代码，**以代码为准**（实现用锁内 `registry` map 直查而非 `for range RegisteredTypes()`，零分配，见 `registry.go`）：
 
 ```go
 // internal/worker/worker.go（或 registry.go）
@@ -165,7 +165,9 @@ if wt != "" {
 		return
 	}
 }
-// 后续 fallback 到 ws.WorkerPreference / default 不变（api.go:271-272）
+// 后续 fallback 到 ws.WorkerPreference 时再 ValidateType（防御旁路写/存量脏数据，
+// review P2）：非法则 warn + 降级 default，不 400（非请求侧错误）、不带到 worker
+// launch；最后空则用 TypeClaudeCode default。见 api.go 实现。
 ```
 
 ---
