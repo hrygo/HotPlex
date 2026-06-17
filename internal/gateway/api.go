@@ -268,6 +268,15 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	if wt == "" {
 		wt = worker.WorkerType(r.URL.Query().Get("worker_type"))
 	}
+	// Validate request-supplied worker_type (body/query) at the boundary.
+	// ws.WorkerPreference is already validated on PATCH write; the default
+	// constant needs no check. See spec ③ §7.2.
+	if wt != "" {
+		if err := worker.ValidateType(wt); err != nil {
+			writeAppError(w, http.StatusBadRequest, "INVALID_WORKER_TYPE", err.Error())
+			return
+		}
+	}
 	if wt == "" {
 		wt = worker.WorkerType(ws.WorkerPreference)
 	}
