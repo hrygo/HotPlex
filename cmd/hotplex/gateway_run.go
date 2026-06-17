@@ -195,16 +195,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		}
 	})
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
-		if prev.Pool.MaxSize != next.Pool.MaxSize ||
-			prev.Pool.MaxIdlePerUser != next.Pool.MaxIdlePerUser ||
-			prev.Pool.MaxPerWorkspace != next.Pool.MaxPerWorkspace ||
-			prev.Pool.MaxMemoryPerUser != next.Pool.MaxMemoryPerUser {
-			sm.Pool().UpdateLimits(session.Limits{
-				MaxSize:          next.Pool.MaxSize,
-				MaxIdlePerUser:   next.Pool.MaxIdlePerUser,
-				MaxPerWorkspace:  next.Pool.MaxPerWorkspace,
-				MaxMemoryPerUser: next.Pool.MaxMemoryPerUser,
-			})
+		if prev.Pool != next.Pool {
+			sm.Pool().UpdateLimits(next.Pool)
 		}
 	})
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {

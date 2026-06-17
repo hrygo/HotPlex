@@ -44,7 +44,7 @@ func TestDeriveCronSessionKey_UUIDv5Format(t *testing.T) {
 func TestPool_UpdateLimits(t *testing.T) {
 	t.Parallel()
 	p := NewPoolManager(slog.Default(), 10, 3, 0)
-	p.UpdateLimits(Limits{MaxSize: 20, MaxIdlePerUser: 5})
+	p.UpdateLimits(config.PoolConfig{MaxSize: 20, MaxIdlePerUser: 5})
 	total, max, users := p.Stats()
 	require.Equal(t, 0, total)
 	require.Equal(t, 20, max)

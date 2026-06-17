@@ -355,7 +355,7 @@ func TestUpdateLimits_AllFourHotReload(t *testing.T) {
 	var pe *PoolError
 
 	// ── 场景 A:global 收紧 → exhausted(u2 受 global 限制先于 per-user 拦截) ──
-	p.UpdateLimits(Limits{
+	p.UpdateLimits(config.PoolConfig{
 		MaxSize:          1,
 		MaxIdlePerUser:   5, // 放宽,使 per-user 不先触发
 		MaxPerWorkspace:  3,
@@ -366,7 +366,7 @@ func TestUpdateLimits_AllFourHotReload(t *testing.T) {
 	require.Equal(t, poolErrKindExhausted, pe.Kind)
 
 	// ── 场景 B:per-user 收紧 → user_quota_exceeded(global 放宽,使 per-user 成首个失败点) ──
-	p.UpdateLimits(Limits{
+	p.UpdateLimits(config.PoolConfig{
 		MaxSize:          100,
 		MaxIdlePerUser:   1,
 		MaxPerWorkspace:  3,
@@ -378,7 +378,7 @@ func TestUpdateLimits_AllFourHotReload(t *testing.T) {
 
 	// ── 场景 C:per-workspace 收紧 → workspace_quota_exceeded
 	// (用新用户 u3 避开 u1 的 per-user 限制;ws-1 已有 1 个,MaxPerWorkspace=1) ──
-	p.UpdateLimits(Limits{
+	p.UpdateLimits(config.PoolConfig{
 		MaxSize:          100,
 		MaxIdlePerUser:   5,
 		MaxPerWorkspace:  1,
@@ -390,7 +390,7 @@ func TestUpdateLimits_AllFourHotReload(t *testing.T) {
 
 	// ── 场景 D:per-user-memory 收紧 → memory_exceeded
 	// (用新用户 u4 + 新 ws-3 避开其他限制;mem=1B 时 512MB 估算必超) ──
-	p.UpdateLimits(Limits{
+	p.UpdateLimits(config.PoolConfig{
 		MaxSize:          100,
 		MaxIdlePerUser:   5,
 		MaxPerWorkspace:  3,
@@ -401,7 +401,7 @@ func TestUpdateLimits_AllFourHotReload(t *testing.T) {
 	require.Equal(t, poolErrKindMemoryExceeded, pe.Kind)
 
 	// ── 场景 E:放宽全部 4 维 → 释放并重新 Acquire 成功,证明 UpdateLimits 是可逆的 ──
-	p.UpdateLimits(Limits{
+	p.UpdateLimits(config.PoolConfig{
 		MaxSize:          100,
 		MaxIdlePerUser:   5,
 		MaxPerWorkspace:  3,
@@ -428,7 +428,7 @@ func TestUpdateLimits_DoesNotEvict(t *testing.T) {
 	// (acquireLocked 用严格 > 比较: used+estimate > limit → 1GB+512MB > 1GB)。
 	// 选 2*estimate 而非 1*estimate 是为了让释放 1 个 slot 后能恰好再拿 1 个
 	// (used 512MB + estimate 512MB == 1024MB,不 > limit)。
-	p.UpdateLimits(Limits{
+	p.UpdateLimits(config.PoolConfig{
 		MaxSize:          100,
 		MaxIdlePerUser:   5,
 		MaxPerWorkspace:  3,
@@ -475,7 +475,7 @@ func TestPool_ConcurrentMixedOperations(t *testing.T) {
 	}()
 	// UpdateLimits concurrently — 20 hot reloads while Acquire/Release runs
 	for i := 0; i < 20; i++ {
-		p.UpdateLimits(Limits{
+		p.UpdateLimits(config.PoolConfig{
 			MaxSize:          50,
 			MaxIdlePerUser:   10,
 			MaxPerWorkspace:  4,
@@ -490,4 +490,44 @@ func TestPool_ConcurrentMixedOperations(t *testing.T) {
 		total, _, _ := p.Stats()
 		return total == 0
 	}, time.Second, 10*time.Millisecond)
+}
+
+// TestUpdateLimits_MemoryQuotaToggleOff: hot-reloading max_memory_per_user from
+// positive to 0 (disable) must not strand userMemory entries or inflate the
+// memory_reserved snapshot. Before the fix, releaseMemoryLocked skipped cleanup
+// when maxMemoryPerUser==0, so the running total leaked forever (spec ⑤ review #2).
+func TestUpdateLimits_MemoryQuotaToggleOff(t *testing.T) {
+	t.Parallel()
+	p := NewPoolManagerWithWorkspace(slog.Default(), 100, 5, 10*1024*1024*1024, 3)
+	ctx := context.Background()
+
+	// 2 个 workspace session,每个预留 512MB → total 1GB
+	require.NoError(t, p.AcquireForWorkspace(ctx, "u1", "ws-1"))
+	require.NoError(t, p.AcquireForWorkspace(ctx, "u1", "ws-1"))
+
+	p.mu.Lock()
+	require.Equal(t, int64(2*workerMemoryEstimate), p.totalMemoryReservedBytes)
+	require.NotEmpty(t, p.userMemory)
+	p.mu.Unlock()
+
+	// 热重载禁用内存层
+	p.UpdateLimits(config.PoolConfig{
+		MaxSize: 100, MaxIdlePerUser: 5, MaxPerWorkspace: 3, MaxMemoryPerUser: 0,
+	})
+
+	// 禁用瞬间:gauge 源(totalMemoryReservedBytes)立即归零,userMemory 清空
+	p.mu.Lock()
+	totalAfterToggle := p.totalMemoryReservedBytes
+	memMapAfterToggle := len(p.userMemory)
+	p.mu.Unlock()
+	require.Equal(t, int64(0), totalAfterToggle, "totalMemoryReservedBytes must reset to 0 on disable")
+	require.Equal(t, 0, memMapAfterToggle, "userMemory must be cleared on disable")
+
+	// release 不产生负值/泄漏
+	p.ReleaseForWorkspace(ctx, "u1", "ws-1")
+	p.ReleaseForWorkspace(ctx, "u1", "ws-1")
+	p.mu.Lock()
+	finalTotal := p.totalMemoryReservedBytes
+	p.mu.Unlock()
+	require.Equal(t, int64(0), finalTotal, "no leak/negative after release post-disable")
 }

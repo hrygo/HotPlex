@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/observability"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -17,6 +18,9 @@ import (
 var poolUtilization atomic.Uint64 // stores math.Float64bits
 
 // 指标快照(atomic,gauge 回调无锁读取;snapshotMetricsLocked 持 mu 写)。
+//
+// TODO(单实例假设): 这些包全局 atomic 由唯一 PoolManager 实例写入(snapshotMetricsLocked)。
+// 多实例会互相覆盖;未来若引入 per-tenant pool,需移到 PoolManager struct 并改为捕获实例的回调。
 var (
 	metricActiveSessions     atomic.Int64
 	metricDistinctUsers      atomic.Int64
@@ -60,7 +64,7 @@ func init() {
 		}
 		memGauge, err := m.Int64ObservableGauge(
 			"hotplex.pool.memory_reserved_bytes",
-			metric.WithDescription("Estimated reserved memory in bytes (active sessions x 512MB, global aggregate)"),
+			metric.WithDescription("Reserved memory under per-user quota in bytes (only accumulated when pool.max_memory_per_user is set; 512MB/worker estimate, not actual RSS)"),
 		)
 		if err != nil {
 			slog.Warn("pool: failed to create pool.memory_reserved_bytes gauge", "err", err)
@@ -110,15 +114,6 @@ type PoolManager struct {
 	maxIdlePerUser   int   // 0 = unlimited
 	maxMemoryPerUser int64 // bytes; 0 = unlimited
 	maxPerWorkspace  int   // 0 = unlimited (WebChat per-workspace concurrency, spec ①)
-}
-
-// Limits 是 PoolManager 的运行时限额集合,镜像 config.PoolConfig。
-// 所有字段 0 = unlimited。UpdateLimits 在持 p.mu 下原子覆盖全部字段。
-type Limits struct {
-	MaxSize          int   // 全局最大活跃 Worker
-	MaxIdlePerUser   int   // per-user 最大并发 session
-	MaxPerWorkspace  int   // WebChat per-workspace 并发(spec ①)
-	MaxMemoryPerUser int64 // bytes;per-user 内存
 }
 
 // Default per-worker memory estimate. Historical constant carried from spec ①;
@@ -265,6 +260,9 @@ func (p *PoolManager) ReleaseForWorkspace(ctx context.Context, userID, workspace
 			delete(p.workspaceCount, workspaceID)
 		}
 	}
+	// workspaceCount 在 releaseCoreLocked 快照之后才递减;重新快照,否则
+	// distinct_workspaces 永远慢一拍,且 pool 排空后卡在非零值(spec ⑤ review #1)。
+	p.snapshotMetricsLocked()
 	p.log.Debug("pool: released", "user_id", userID, "workspace_id", workspaceID, "total", p.totalCount)
 }
 
@@ -300,10 +298,16 @@ func (p *PoolManager) Stats() (total, maxSize, uniqueUsers int) {
 // UpdateLimits 动态调整全部 4 个限额(spec ⑤)。
 // 若某维限额被降到当前占用之下,已运行 session 不被驱逐 —— 新 Acquire 将被拒,
 // 直到 session 自然 Release。所有 gauge 快照在此重算(utilization 的分母 maxSize 可能变了)。
-func (p *PoolManager) UpdateLimits(l Limits) {
+//
+// max_memory_per_user 从正数热重载为 0(禁用)时,立即清空 userMemory 与
+// totalMemoryReservedBytes:releaseMemoryLocked 已去掉 maxMemoryPerUser>0 守卫,
+// 旧条目本可随自然 Release 清理,但此处即时归零让 memory_reserved_bytes 不必
+// 等 drain 即反映"限制已取消"。反向(0→正数)不重建 —— 无法在不新增计数器的前提
+// 下得知哪些活跃 session 占内存,该方向仅 under-count(宽松),旧 session Release 后自洽。
+func (p *PoolManager) UpdateLimits(l config.PoolConfig) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	old := Limits{
+	old := config.PoolConfig{
 		MaxSize:          p.maxSize,
 		MaxIdlePerUser:   p.maxIdlePerUser,
 		MaxPerWorkspace:  p.maxPerWorkspace,
@@ -313,6 +317,10 @@ func (p *PoolManager) UpdateLimits(l Limits) {
 	p.maxIdlePerUser = l.MaxIdlePerUser
 	p.maxPerWorkspace = l.MaxPerWorkspace
 	p.maxMemoryPerUser = l.MaxMemoryPerUser
+	if old.MaxMemoryPerUser > 0 && p.maxMemoryPerUser == 0 {
+		p.userMemory = make(map[string]int64)
+		p.totalMemoryReservedBytes = 0
+	}
 	p.snapshotMetricsLocked()
 	p.log.Info("pool: limits updated",
 		"old_max", old.MaxSize, "new_max", l.MaxSize,
@@ -359,22 +367,26 @@ func (p *PoolManager) ReleaseMemory(userID string) {
 	p.snapshotMetricsLocked()
 }
 
-// releaseMemoryLocked frees memory quota. Caller must hold p.mu.
+// releaseMemoryLocked frees one worker's worth of memory quota. Caller must hold p.mu.
+//
+// 总是执行清理(不受 maxMemoryPerUser>0 守卫):热重载可把 max_memory_per_user 从正数
+// 调到 0(禁用),若仍按守卫跳过,旧 session 的 Release 无法清理遗留 userMemory 条目 →
+// memory_reserved_bytes 永久虚高 + map 泄漏(spec ⑤ review #2)。userMemory[userID] 为空
+// 时 delta=0、delete 不存在 key 均 no-op,故对从未预留内存的 session(plain Acquire /
+// 内存层禁用期间 acquire)无副作用。
 func (p *PoolManager) releaseMemoryLocked(userID string) {
-	if p.maxMemoryPerUser > 0 {
-		used := p.userMemory[userID]
-		var delta int64
-		if used >= workerMemoryEstimate {
-			delta = workerMemoryEstimate
-			p.userMemory[userID] = used - workerMemoryEstimate
-		} else if used > 0 {
-			delta = used
-			p.userMemory[userID] = 0
-		}
-		p.totalMemoryReservedBytes -= delta
-		if p.userMemory[userID] <= 0 {
-			delete(p.userMemory, userID)
-		}
+	used := p.userMemory[userID]
+	var delta int64
+	if used >= workerMemoryEstimate {
+		delta = workerMemoryEstimate
+		p.userMemory[userID] = used - workerMemoryEstimate
+	} else if used > 0 {
+		delta = used
+		p.userMemory[userID] = 0
+	}
+	p.totalMemoryReservedBytes -= delta
+	if p.userMemory[userID] <= 0 {
+		delete(p.userMemory, userID)
 	}
 }
 
