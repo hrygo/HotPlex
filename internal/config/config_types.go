@@ -24,6 +24,7 @@ type Config struct {
 	Skills      SkillsConfig    `mapstructure:"skills"`
 	Cron        CronConfig      `mapstructure:"cron"`
 	Webhook     WebhookConfig   `mapstructure:"webhook"`
+	OAuth       OAuthConfig     `mapstructure:"oauth"`
 	Events      EventsConfig    `mapstructure:"events"`
 	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 

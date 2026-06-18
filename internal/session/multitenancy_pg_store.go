@@ -103,6 +103,24 @@ func (s *pgStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string)
 	return out, rows.Err()
 }
 
+// ListAllWorkspaces returns all active workspaces regardless of owner (PG backend).
+func (s *pgStore) ListAllWorkspaces(ctx context.Context) ([]*Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["workspaces.list_all"])
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*Workspace
+	for rows.Next() {
+		w, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error) {
 	w, err := scanWorkspace(s.db.QueryRowContext(ctx, s.queries["workspaces.get_by_owner_and_workdir"], ownerUserID, workDir))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -197,5 +215,26 @@ func (s *pgStore) ListInvitations(ctx context.Context, limit, offset int) ([]*In
 
 func (s *pgStore) DeleteInvitation(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, s.queries["invitations.delete"], id)
+	return err
+}
+
+// --- pgStore: user identities (spec ④) ---
+
+func (s *pgStore) GetUserIdentityByProviderSubject(ctx context.Context, provider, subject string) (*UserIdentity, error) {
+	id, err := scanIdentity(s.db.QueryRowContext(ctx, s.queries["identities.get_by_provider_subject"], provider, subject))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrIdentityNotFound
+	}
+	return id, err
+}
+
+func (s *pgStore) CreateUserIdentity(ctx context.Context, id *UserIdentity, now int64) error {
+	_, err := s.db.ExecContext(ctx, s.queries["identities.create"],
+		id.ID, id.UserID, id.Provider, id.Subject, id.DisplayName, id.Email, now, now)
+	return err
+}
+
+func (s *pgStore) UpdateUserIdentityProfile(ctx context.Context, id, displayName, email string, now int64) error {
+	_, err := s.db.ExecContext(ctx, s.queries["identities.update_profile"], displayName, email, now, id)
 	return err
 }

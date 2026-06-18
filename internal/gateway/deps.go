@@ -21,10 +21,12 @@ type HandlerDeps struct {
 }
 
 // WorkspaceOverridesReader is the narrow workspace-store subset Bridge needs to
-// resolve per-workspace agent-config overrides (spec ② §7.3). Kept separate from
-// session.UserWorkspaceStore so tests mock a single method.
+// resolve per-workspace agent-config overrides (spec ② §7.3), plus the startup
+// scan to detect stale/invalid overrides (#749). Kept separate from
+// session.UserWorkspaceStore so tests mock a minimal surface.
 type WorkspaceOverridesReader interface {
 	GetWorkspaceByID(ctx context.Context, id string) (*session.Workspace, error)
+	ListAllWorkspaces(ctx context.Context) ([]*session.Workspace, error)
 }
 
 // BridgeDeps groups all dependencies for Bridge construction.

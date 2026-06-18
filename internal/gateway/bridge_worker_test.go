@@ -1,9 +1,11 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +27,13 @@ type stubWSStore struct {
 
 func (s *stubWSStore) GetWorkspaceByID(_ context.Context, _ string) (*session.Workspace, error) {
 	return s.ws, s.err
+}
+
+func (s *stubWSStore) ListAllWorkspaces(_ context.Context) ([]*session.Workspace, error) {
+	if s.ws != nil {
+		return []*session.Workspace{s.ws}, nil
+	}
+	return nil, nil
 }
 
 // newBridgeForOverrideTest builds a minimal Bridge with only wsStore + log set,
@@ -78,5 +87,34 @@ func TestResolveWorkspaceOverrides(t *testing.T) {
 		ws := &session.Workspace{ID: "ws-1", AgentConfigOverrides: `{bad`}
 		b := newBridgeForOverrideTest(t, ws, nil)
 		require.Nil(t, b.resolveWorkspaceOverrides(context.Background(), "ws-1"))
+	})
+
+	t.Run("warn dedup: repeated degrade warns once, then re-arms on success (#749)", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		h := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
+		ws := &session.Workspace{ID: "ws-dedup", AgentConfigOverrides: `{bad`}
+		b := &Bridge{
+			log:     slog.New(h),
+			wsStore: &stubWSStore{ws: ws},
+		}
+		// Three consecutive degrade calls — only first should warn.
+		b.resolveWorkspaceOverrides(context.Background(), "ws-dedup")
+		b.resolveWorkspaceOverrides(context.Background(), "ws-dedup")
+		b.resolveWorkspaceOverrides(context.Background(), "ws-dedup")
+		warnCount := strings.Count(buf.String(), "level=WARN")
+		require.Equal(t, 1, warnCount, "expected exactly 1 warn for repeated degrade, got %d: %s", warnCount, buf.String())
+
+		// Fix overrides → valid resolution clears the flag.
+		ws.AgentConfigOverrides = `{"SOUL.md":"fixed"}`
+		b.resolveWorkspaceOverrides(context.Background(), "ws-dedup")
+		// No new warn from success path.
+		require.Equal(t, 1, strings.Count(buf.String(), "level=WARN"))
+
+		// Break again → new warn appears (flag was cleared).
+		ws.AgentConfigOverrides = `{broken`
+		b.resolveWorkspaceOverrides(context.Background(), "ws-dedup")
+		require.Equal(t, 2, strings.Count(buf.String(), "level=WARN"),
+			"expected warn re-armed after success, got: %s", buf.String())
 	})
 }

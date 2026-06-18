@@ -199,13 +199,29 @@ func setupRoutes(
 		}
 	}
 
-	// TODO(spec ⑥): Register WebChat multi-tenant HTTP endpoints when login UI ships.
-	//   - POST /api/auth/login, /api/auth/logout, GET /api/auth/me
-	//   - POST /api/auth/accept-invite
-	//   - POST/GET/PUT/DELETE /api/workspaces/*
-	//   - POST/GET/DELETE /api/admin/invitations
-	// Handlers are implemented in internal/gateway/{auth,workspace}_handlers.go
-	// but intentionally not wired until the frontend login flow is ready.
+	// WebChat multi-tenant auth endpoints (spec ① + spec ④).
+	// Wired when cookieAuth is available (webchat enabled).
+	if deps.CookieAuth != nil && deps.WorkspaceStore != nil {
+		// Account-login handlers (spec ①): requires LocalAccountProvider.
+		// LocalAccountProvider is created lazily from WorkspaceStore + bcrypt cost.
+		lap := security.NewLocalAccountProvider(deps.WorkspaceStore, security.BcryptCostDefault)
+		authHandlers := gateway.NewAuthHandlers(auth, deps.CookieAuth, deps.WorkspaceStore, lap)
+		mux.Handle("POST /api/auth/login", corsMw(http.HandlerFunc(authHandlers.Login)))
+		mux.Handle("POST /api/auth/logout", corsMw(http.HandlerFunc(authHandlers.Logout)))
+		mux.Handle("GET /api/auth/me", corsMw(http.HandlerFunc(authHandlers.Me)))
+		mux.Handle("POST /api/auth/accept-invite", corsMw(http.HandlerFunc(authHandlers.AcceptInvite)))
+		log.Info("auth endpoints registered", "channels", "login,logout,me,accept-invite")
+
+		// OAuth SSO handlers (spec ④): requires OAuthManager with providers.
+		if deps.OAuthManager != nil && deps.OAuthManager.HasProviders() {
+			oauthHandlers := gateway.NewOAuthHandlers(deps.OAuthManager, deps.CookieAuth, deps.WorkspaceStore, log)
+			mux.Handle("GET /api/auth/oauth/providers", corsMw(http.HandlerFunc(oauthHandlers.Providers)))
+			mux.Handle("GET /api/auth/oauth/{provider}/login", http.HandlerFunc(oauthHandlers.Login))
+			mux.Handle("GET /api/auth/oauth/{provider}/callback", http.HandlerFunc(oauthHandlers.Callback))
+			// Note: login/callback are redirect flows, CORS not needed (browser navigates directly).
+			log.Info("oauth SSO endpoints registered", "providers", deps.OAuthManager.List())
+		}
+	}
 
 	// Global favicon fallback using docs logo
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {

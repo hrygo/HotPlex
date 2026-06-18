@@ -330,17 +330,28 @@ func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID stri
 	}
 	ws, err := b.wsStore.GetWorkspaceByID(ctx, workspaceID)
 	if err != nil {
-		b.log.Warn("bridge: fetch workspace overrides failed, degrading to team defaults",
-			"workspace_id", workspaceID, "err", err)
+		b.warnOverrideDegrade(workspaceID, "fetch workspace overrides failed, degrading to team defaults", err)
 		return nil
 	}
 	overrides, err := agentconfig.ValidateOverrides(ws.AgentConfigOverrides)
 	if err != nil {
-		b.log.Warn("bridge: parse workspace overrides failed, degrading to team defaults",
-			"workspace_id", workspaceID, "err", err)
+		b.warnOverrideDegrade(workspaceID, "parse workspace overrides failed, degrading to team defaults", err)
 		return nil
 	}
+	// Valid overrides (or empty): clear any prior warning flag so a future
+	// regression is warned again (#749).
+	b.warnedOverrides.Delete(workspaceID)
 	return overrides
+}
+
+// warnOverrideDegrade logs a degrading warning at most once per workspaceID per
+// process lifetime, preventing log spam under high-crash session loops (#749).
+// The warning is re-armed when the workspace later resolves successfully.
+func (b *Bridge) warnOverrideDegrade(workspaceID, msg string, err error) {
+	if _, loaded := b.warnedOverrides.LoadOrStore(workspaceID, struct{}{}); loaded {
+		return
+	}
+	b.log.Warn("bridge: "+msg, "workspace_id", workspaceID, "err", err)
 }
 
 // injectAgentConfig loads agent config files and injects the unified system

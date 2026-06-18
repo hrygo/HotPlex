@@ -32,12 +32,27 @@ type Invitation struct {
 	UsedAt    *int64 // nil = unused
 }
 
+// UserIdentity binds an OAuth/OIDC identity to a local user (spec ④).
+// One user may have multiple identities (different IdPs); each (provider, subject)
+// pair uniquely maps to a single user_id via UNIQUE constraint.
+type UserIdentity struct {
+	ID          string // UUID
+	UserID      string // FK → users.id
+	Provider    string // provider name (config key)
+	Subject     string // IdP subject (OIDC "sub" claim)
+	DisplayName string // synced from IdP
+	Email       string // synced from IdP (not used for auto-merge)
+	CreatedAt   int64
+	UpdatedAt   int64
+}
+
 // Multitenancy store sentinels.
 var (
 	ErrWorkspaceNotFound     = errors.New("session: workspace not found")
 	ErrWorkspaceNotEmpty     = errors.New("session: workspace has active sessions")
 	ErrInvitationNotFound    = errors.New("session: invitation not found")
 	ErrInvitationAlreadyUsed = errors.New("session: invitation already used")
+	ErrIdentityNotFound      = errors.New("session: user identity not found")
 )
 
 // UserWorkspaceStore is the store capability surface used by gateway auth/workspace
@@ -54,6 +69,7 @@ type UserWorkspaceStore interface {
 	CreateWorkspace(ctx context.Context, w *Workspace, now int64) error
 	GetWorkspaceByID(ctx context.Context, id string) (*Workspace, error)
 	ListWorkspacesByOwner(ctx context.Context, ownerUserID string) ([]*Workspace, error)
+	ListAllWorkspaces(ctx context.Context) ([]*Workspace, error)
 	GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error)
 	UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error
 	DeleteWorkspace(ctx context.Context, id string) error
@@ -68,6 +84,10 @@ type UserWorkspaceStore interface {
 	SetInvitationUsedBy(ctx context.Context, id, oldUsedBy, newUsedBy string) error
 	ListInvitations(ctx context.Context, limit, offset int) ([]*Invitation, error)
 	DeleteInvitation(ctx context.Context, id string) error
+	// user identities (spec ④ SSO)
+	GetUserIdentityByProviderSubject(ctx context.Context, provider, subject string) (*UserIdentity, error)
+	CreateUserIdentity(ctx context.Context, id *UserIdentity, now int64) error
+	UpdateUserIdentityProfile(ctx context.Context, id, displayName, email string, now int64) error
 }
 
 // Compile-time assertions that both stores satisfy UserWorkspaceStore.
@@ -96,6 +116,16 @@ func scanUser(sc rowScanner) (*security.User, error) {
 	}
 	u.LastLoginAt = lastLogin.Int64 // NULL → 0
 	return &u, nil
+}
+
+func scanIdentity(sc rowScanner) (*UserIdentity, error) {
+	var id UserIdentity
+	err := sc.Scan(&id.ID, &id.UserID, &id.Provider, &id.Subject, &id.DisplayName,
+		&id.Email, &id.CreatedAt, &id.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
 }
 
 func scanWorkspace(sc rowScanner) (*Workspace, error) {
@@ -233,6 +263,25 @@ func (s *SQLiteStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID str
 	return out, rows.Err()
 }
 
+// ListAllWorkspaces returns all active workspaces regardless of owner. Used by the
+// gateway startup scan to detect stale/invalid agent_config_overrides (spec ② #749).
+func (s *SQLiteStore) ListAllWorkspaces(ctx context.Context) ([]*Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, queries["workspaces.list_all"])
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*Workspace
+	for rows.Next() {
+		w, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error) {
 	w, err := scanWorkspace(s.db.QueryRowContext(ctx, queries["workspaces.get_by_owner_and_workdir"], ownerUserID, workDir))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -341,6 +390,31 @@ func (s *SQLiteStore) ListInvitations(ctx context.Context, limit, offset int) ([
 func (s *SQLiteStore) DeleteInvitation(ctx context.Context, id string) error {
 	return s.writeMu.WithLock(func() error {
 		_, err := s.db.ExecContext(ctx, queries["invitations.delete"], id)
+		return err
+	})
+}
+
+// --- SQLiteStore: user identities (spec ④) ---
+
+func (s *SQLiteStore) GetUserIdentityByProviderSubject(ctx context.Context, provider, subject string) (*UserIdentity, error) {
+	id, err := scanIdentity(s.db.QueryRowContext(ctx, queries["identities.get_by_provider_subject"], provider, subject))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrIdentityNotFound
+	}
+	return id, err
+}
+
+func (s *SQLiteStore) CreateUserIdentity(ctx context.Context, id *UserIdentity, now int64) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["identities.create"],
+			id.ID, id.UserID, id.Provider, id.Subject, id.DisplayName, id.Email, now, now)
+		return err
+	})
+}
+
+func (s *SQLiteStore) UpdateUserIdentityProfile(ctx context.Context, id, displayName, email string, now int64) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["identities.update_profile"], displayName, email, now, id)
 		return err
 	})
 }

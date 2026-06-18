@@ -71,6 +71,7 @@ type GatewayDeps struct {
 	CronScheduler   *cron.Scheduler
 	WebhookHandler  *gateway.WebhookHandler // non-nil when webhook is enabled
 	CookieAuth      *security.CookieAuth    // non-nil when webchat is enabled
+	OAuthManager    *security.OAuthManager  // non-nil when SSO providers are configured
 	ChatAccessStore messaging.ChatAccessStorer
 	DB              *sql.DB
 	DBResolver      *security.DBResolver
@@ -274,6 +275,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		WSStore:            stores.wsStore,
 	})
 
+	// One-time validation sweep: surface stale/invalid agent_config_overrides
+	// written before spec ② write-time validation (#749). Non-blocking.
+	gateway.ScanWorkspaceOverrides(ctx, stores.wsStore, log)
+
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
 
 	handler := gateway.NewHandler(gateway.HandlerDeps{
@@ -422,6 +427,22 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		log.Info("gateway: webchat cookie auth enabled")
 	}
 
+	// OAuth manager: created when SSO providers are configured (spec ④).
+	// Requires cookieAuth for signing state cookies.
+	var oauthManager *security.OAuthManager
+	if cookieAuth != nil {
+		oauthManager = security.NewOAuthManager(cookieAuth)
+		if err := cfg.OAuth.Validate(); err != nil {
+			log.Warn("oauth config validation failed", "error", err)
+		} else if len(cfg.OAuth.Providers) > 0 {
+			count, err := oauthManager.Reload(ctx, cfg.OAuth)
+			if err != nil {
+				log.Error("oauth manager init failed", "error", err)
+			}
+			log.Info("gateway: oauth SSO providers loaded", "count", count)
+		}
+	}
+
 	mux := http.NewServeMux()
 	deps := &GatewayDeps{
 		Log:             log,
@@ -438,6 +459,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		ConfigWatcher:   configWatcher,
 		CronScheduler:   cronScheduler,
 		CookieAuth:      cookieAuth,
+		OAuthManager:    oauthManager,
 		ChatAccessStore: stores.chatAccessOrNew(stores.sqlDB, log),
 		DB:              stores.sqlDB,
 		DBResolver:      dbResolver,
