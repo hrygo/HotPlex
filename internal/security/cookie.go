@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -87,8 +88,12 @@ func NewCookieAuth(configuredSecret string) (*CookieAuth, error) {
 				return nil, fmt.Errorf("security: generate cookie secret: %w", err)
 			}
 			hexStr := hex.EncodeToString(secretBytes)
-			_ = os.MkdirAll(filepath.Dir(keyPath), 0o700)
-			_ = os.WriteFile(keyPath, []byte(hexStr), 0o600)
+			if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+				slog.Warn("security: failed to create cookie secret dir", "dir", filepath.Dir(keyPath), "err", err)
+			}
+			if err := os.WriteFile(keyPath, []byte(hexStr), 0o600); err != nil {
+				slog.Warn("security: failed to persist cookie secret — restart will invalidate all login cookies", "path", keyPath, "err", err)
+			}
 		}
 	}
 
