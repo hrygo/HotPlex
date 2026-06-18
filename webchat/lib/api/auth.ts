@@ -43,6 +43,11 @@ export interface OAuthProvider {
   display_name: string;
 }
 
+export interface LoginResult {
+  user_id: string;
+  first_login: boolean;
+}
+
 // BootstrapStatus: whether any admin exists. Drives the first-time-setup guide
 // on the login page. Public endpoint (no auth).
 export async function getBootstrapStatus(signal?: AbortSignal): Promise<boolean> {
@@ -72,7 +77,7 @@ export async function getMe(signal?: AbortSignal): Promise<User> {
 }
 
 // Login
-export async function login(username: string, password: string, signal?: AbortSignal): Promise<User> {
+export async function login(username: string, password: string, signal?: AbortSignal): Promise<LoginResult> {
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: withAuth({ 'Content-Type': 'application/json' }),
@@ -101,7 +106,7 @@ export async function logout(signal?: AbortSignal): Promise<void> {
 }
 
 // Accept Invite
-export async function acceptInvite(code: string, username: string, password: string, signal?: AbortSignal): Promise<User> {
+export async function acceptInvite(code: string, username: string, password: string, signal?: AbortSignal): Promise<LoginResult> {
   const res = await fetch(`${BASE}/api/auth/accept-invite`, {
     method: 'POST',
     headers: withAuth({ 'Content-Type': 'application/json' }),

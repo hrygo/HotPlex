@@ -42,11 +42,42 @@ function LoadingScreen({ text }: { text: string }) {
   );
 }
 
+function OnboardingWelcome({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-lg rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-7 shadow-[var(--shadow-lg)] animate-fade-in-up">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--accent-gold)]/10">
+            <BrandIcon size={32} />
+          </div>
+          <div>
+            <h2 className="font-display text-lg font-black text-[var(--text-primary)]">欢迎来到 HotPlex</h2>
+            <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider">几步开始你的第一次对话</p>
+          </div>
+        </div>
+        <ol className="space-y-2.5 text-sm text-[var(--text-secondary)]">
+          <li><span className="font-bold text-[var(--accent-gold)]">1.</span> 在设置中创建你的第一个 workspace(工作目录)</li>
+          <li><span className="font-bold text-[var(--accent-gold)]">2.</span> 选择 worker 类型(claude_code / codex 等)</li>
+          <li><span className="font-bold text-[var(--accent-gold)]">3.</span> 在对话框输入任务,开始编码</li>
+        </ol>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-6 w-full rounded-lg bg-[var(--accent-gold)] px-4 py-2.5 text-xs font-bold uppercase tracking-widest text-black hover:bg-[var(--accent-gold-bright)]"
+        >
+          开始使用
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InnerPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const authError = searchParams.get('auth_error');
   const [checking, setChecking] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     if (authError) {
@@ -58,6 +89,12 @@ function InnerPage() {
       try {
         await getMe();
         setChecking(false);
+        try {
+          if (localStorage.getItem('hotplex.onboarding') === '1') {
+            setShowOnboarding(true);
+            localStorage.removeItem('hotplex.onboarding');
+          }
+        } catch {}
       } catch {
         router.replace('/login');
       }
@@ -70,7 +107,14 @@ function InnerPage() {
     return <LoadingScreen text="Verifying authentication..." />;
   }
 
-  return <ChatUI />;
+  return (
+    <>
+      <ChatUI />
+      {showOnboarding && (
+        <OnboardingWelcome onClose={() => setShowOnboarding(false)} />
+      )}
+    </>
+  );
 }
 
 export default function Page() {

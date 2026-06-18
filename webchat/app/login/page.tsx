@@ -135,7 +135,10 @@ function InnerLoginPage() {
     setLoading(true);
     setError('');
     try {
-      await login(loginUsername.trim(), loginPassword);
+      const result = await login(loginUsername.trim(), loginPassword);
+      if (result.first_login) {
+        try { localStorage.setItem('hotplex.onboarding', '1'); } catch {}
+      }
       router.push('/');
     } catch (err: any) {
       setError(mapAuthError(err.message) || err.message || '登录失败，请检查用户名或密码。');
@@ -152,6 +155,7 @@ function InnerLoginPage() {
     setError('');
     try {
       await acceptInvite(inviteCode.trim(), registerUsername.trim(), registerPassword);
+      try { localStorage.setItem('hotplex.onboarding', '1'); } catch {}
       router.push('/');
     } catch (err: any) {
       setError(mapAuthError(err.message) || err.message || '注册失败，请检查邀请码和表单项。');
