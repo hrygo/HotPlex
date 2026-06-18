@@ -91,6 +91,22 @@ func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// BootstrapStatus: GET /api/auth/bootstrap-status — whether any admin exists.
+//
+// Public (no auth): the login page polls this to guide first-time setup.
+// Registered OUTSIDE the CookieAuth-gated auth block in routes.go so it stays
+// reachable when the system is not yet bootstrapped (CookieAuth may be nil).
+func BootstrapStatus(store session.UserWorkspaceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		has, err := store.HasAdmin(r.Context())
+		if err != nil {
+			writeAppError(w, http.StatusInternalServerError, "INTERNAL", "check bootstrap status")
+			return
+		}
+		respondJSON(w, map[string]bool{"bootstrapped": has})
+	}
+}
+
 // Me: GET /api/auth/me — returns the current user's profile.
 func (h *AuthHandlers) Me(w http.ResponseWriter, r *http.Request) {
 	uid, ok := h.currentUserID(r)

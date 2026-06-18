@@ -296,3 +296,30 @@ func TestAcceptInvite_PasswordTooLong_PreservesInvitation(t *testing.T) {
 	env.handlers.AcceptInvite(w3, req3)
 	require.Equal(t, http.StatusOK, w3.Code, "邀请码必须仍可用 body=%s", w3.Body.String())
 }
+
+func TestBootstrapStatus_EmptyAndAfterAdmin(t *testing.T) {
+	t.Parallel()
+	store := newTestSessionStore(t)
+	h := BootstrapStatus(store)
+
+	// 空库 → bootstrapped:false
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/bootstrap-status", nil)
+	h.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Bootstrapped bool `json:"bootstrapped"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.False(t, body.Bootstrapped)
+
+	// 创建 admin → true
+	require.NoError(t, store.CreateUser(context.Background(), &security.User{
+		ID: "u-1", Username: "admin", PasswordHash: "$2a$12$fake", Role: "admin", Status: "active",
+	}, 1700000000))
+
+	rr2 := httptest.NewRecorder()
+	h.ServeHTTP(rr2, httptest.NewRequest(http.MethodGet, "/api/auth/bootstrap-status", nil))
+	require.NoError(t, json.Unmarshal(rr2.Body.Bytes(), &body))
+	require.True(t, body.Bootstrapped)
+}

@@ -199,6 +199,14 @@ func setupRoutes(
 		}
 	}
 
+	// bootstrap-status is intentionally registered OUTSIDE the CookieAuth-gated
+	// auth block below: it must stay reachable before any admin exists (the very
+	// state the login page needs to detect). Only requires the workspace store.
+	if deps.WorkspaceStore != nil {
+		mux.Handle("GET /api/auth/bootstrap-status", corsMw(gateway.BootstrapStatus(deps.WorkspaceStore)))
+		mux.Handle("OPTIONS /api/auth/bootstrap-status", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	}
+
 	// WebChat multi-tenant auth endpoints (spec ① + spec ④).
 	// Wired when cookieAuth is available (webchat enabled).
 	if deps.CookieAuth != nil && deps.WorkspaceStore != nil {
