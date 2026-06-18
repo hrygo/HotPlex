@@ -146,8 +146,14 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 	// Find or create user from SSO identity.
 	userID, err := h.getOrCreateUser(r.Context(), providerName, claims)
 	if err != nil {
-		h.log.Error("oauth callback: user creation failed", "provider", providerName, "subject", claims.Subject, "err", err)
-		redirectAuthError(w, r, "USER_CREATE_FAILED")
+		var idErr *security.IdentityError
+		if errors.As(err, &idErr) && idErr.Code == security.ErrCodeUserDisabled {
+			h.log.Warn("oauth callback: user disabled", "provider", providerName, "subject", claims.Subject)
+			redirectAuthError(w, r, "USER_DISABLED")
+		} else {
+			h.log.Error("oauth callback: user creation failed", "provider", providerName, "subject", claims.Subject, "err", err)
+			redirectAuthError(w, r, "USER_CREATE_FAILED")
+		}
 		return
 	}
 
@@ -201,16 +207,31 @@ func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string
 	userID := uuid.NewString()
 	username := providerName + ":" + claims.Subject
 
-	err = h.store.CreateUser(ctx, &security.User{
-		ID:           userID,
-		Username:     username,
-		PasswordHash: "", // SSO-only account; empty hash = no password login
-		Role:         "user",
-		DisplayName:  claims.DisplayName,
-		Status:       "active",
-	}, now)
-	if err != nil {
+	// Idempotent create path (P1): a prior first-login attempt may have left an
+	// orphaned users row (CreateUser succeeded, CreateUserIdentity failed on a
+	// transient DB error). On retry GetUserIdentityByProviderSubject still misses,
+	// so we re-check by username before insert. If found, we reuse that user row
+	// and only (re)create the identity, avoiding a UNIQUE(username) violation that
+	// would permanently lock out the SSO identity.
+	existing, err := h.store.GetUserByUsername(ctx, username)
+	if err != nil && !errors.Is(err, security.ErrUserNotFound) {
 		return "", err
+	}
+	if existing != nil {
+		// Recover orphaned user row from a crashed prior first-login.
+		userID = existing.ID
+	} else {
+		err = h.store.CreateUser(ctx, &security.User{
+			ID:           userID,
+			Username:     username,
+			PasswordHash: "", // SSO-only account; empty hash = no password login
+			Role:         "user",
+			DisplayName:  claims.DisplayName,
+			Status:       "active",
+		}, now)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	identityID := uuid.NewString()
