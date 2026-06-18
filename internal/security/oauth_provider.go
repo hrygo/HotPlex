@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -54,11 +56,20 @@ type OAuthProvider struct {
 	oauth2   *oauth2.Config
 }
 
+// oidcDiscoveryTimeout is the maximum time allowed for OIDC provider discovery.
+// Prevents config hot-reload from hanging when an IdP endpoint is unreachable.
+const oidcDiscoveryTimeout = 10 * time.Second
+
 // NewOAuthProvider discovers the OIDC provider endpoints and constructs a
 // verified client. Returns error if discovery fails (IdP unreachable, invalid
 // issuer URL, malformed discovery document).
+//
+// A dedicated HTTP client with oidcDiscoveryTimeout is injected via
+// oidc.ClientContext to prevent unbounded blocking on slow/dead IdPs.
 func NewOAuthProvider(ctx context.Context, cfg OAuthProviderConfig, callbackURL string) (*OAuthProvider, error) {
-	provider, err := oidc.NewProvider(ctx, cfg.Issuer)
+	httpClient := &http.Client{Timeout: oidcDiscoveryTimeout}
+	discoveryCtx := oidc.ClientContext(ctx, httpClient)
+	provider, err := oidc.NewProvider(discoveryCtx, cfg.Issuer)
 	if err != nil {
 		return nil, fmt.Errorf("oauth provider %q: discovery failed for issuer %q: %w", cfg.Name, cfg.Issuer, err)
 	}

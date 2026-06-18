@@ -44,7 +44,7 @@ func TestNewAuthenticator(t *testing.T) {
 			t.Parallel()
 			auth := NewAuthenticator(tt.cfg)
 			require.NotNil(t, auth)
-			require.Equal(t, tt.want, len(auth.validKey))
+			require.Equal(t, tt.want, auth.numValidKeys)
 		})
 	}
 }

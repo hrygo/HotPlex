@@ -880,6 +880,10 @@ func (s *gatewayStores) close(log *slog.Logger) {
 			log.Warn("gateway: event collector close", "err", err)
 		}
 	}
+	// Stop DBResolver's background cleanup goroutine before closing DB connections.
+	if s.dbResolver != nil {
+		s.dbResolver.Close()
+	}
 	// For SQLite: EventStore.Close is a no-op (ownsDB=false); session store owns the shared connection.
 	if s.session != nil {
 		if err := s.session.Close(); err != nil {
