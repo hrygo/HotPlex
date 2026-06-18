@@ -81,8 +81,13 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "cookie error")
 		return
 	}
+	// 在 touch 前读原 last_login_at,判定是否首次登录(供前端 onboarding)。
+	firstLogin := false
+	if u, lerr := h.idp.Lookup(r.Context(), uid); lerr == nil && u.LastLoginAt == 0 {
+		firstLogin = true
+	}
 	_ = h.store.TouchUserLastLogin(r.Context(), uid, h.nowUnix()) // non-critical on success
-	respondJSON(w, map[string]string{"user_id": uid})
+	respondJSON(w, map[string]any{"user_id": uid, "first_login": firstLogin})
 }
 
 // Logout: POST /api/auth/logout — clears the cookie.
@@ -224,7 +229,7 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 			"invitation_id", inv.ID, "user_id", uid, "err", err)
 	}
 	_ = h.cookieAuth.SetCookie(w, r, uid)
-	respondJSON(w, map[string]string{"user_id": uid})
+	respondJSON(w, map[string]any{"user_id": uid, "first_login": true})
 }
 
 // isUniqueViolation detects a UNIQUE constraint violation across SQLite and PG.

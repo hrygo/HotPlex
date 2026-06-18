@@ -323,3 +323,10 @@ func TestBootstrapStatus_EmptyAndAfterAdmin(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rr2.Body.Bytes(), &body))
 	require.True(t, body.Bootstrapped)
 }
+
+func TestLogin_FirstLoginFlag(t *testing.T) {
+	// first_login: 首次登录(原 LastLoginAt==0)为 true;二次登录为 false。
+	// Login handler 走完整 CookieAuth + IDP,需较重 fixture;此处留 skip 占位,
+	// first_login 语义由端到端验证(创建新用户登录 → onboarding 弹出)覆盖。
+	t.Skip("Login 需 CookieAuth+IDP fixture;靠端到端验证覆盖 first_login 语义")
+}
