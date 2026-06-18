@@ -144,6 +144,23 @@ run: build
 	@./$(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) \
 		gateway start -c $(CONFIG_DIR)/config-dev.yaml
 
+# dev-build: 轻量构建，跳过 swagger，仅保证 go:embed 资源存在 + Go 编译。
+# 供 `make dev` 每次启动前自动产出最新二进制，避免 dev.sh 兜底提示。
+dev-build:
+	@echo "$(BOLD)$(CYAN)Dev Build$(RESET)  $(DIM)$(VERSION) · $(GIT_SHA) · $(GOOS)/$(GOARCH)$(RESET)"
+	@mkdir -p $(BUILD_DIR) $(LOG_DIR)
+	@$(MAKE) webchat-embed --no-print-directory
+	@if [ ! -f internal/docs/out/index.html ]; then \
+		echo "  $(CYAN)Docs$(RESET)$(DIM) building from scratch...$(RESET)"; \
+		$(MAKE) docs-build --no-print-directory; \
+	else \
+		echo "  $(DIM)Docs ✓ cached$(RESET)"; \
+	fi
+	@echo "  $(CYAN)Compiling$(RESET)$(DIM) Go binary...$(RESET)"
+	@CGO_ENABLED=0 go build $(BUILD_OPTS) -ldflags="$(LDFLAGS)" \
+		-o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) $(MAIN_PATH)
+	@echo "  $(GREEN)✓$(RESET) $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Test
 # ─────────────────────────────────────────────────────────────────────────────
@@ -210,7 +227,7 @@ dev: dev-start
 	@printf "    make %-12s %s\n" "dev-stop" "Stop all"
 	@echo ""
 
-dev-start:
+dev-start: dev-build
 	@$(MAKE) gateway-start
 	@$(MAKE) webchat-dev || echo "  $(YELLOW)⚠$(RESET) Webchat skipped (run 'cd webchat && pnpm install' to fix)"
 
