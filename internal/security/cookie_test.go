@@ -30,7 +30,7 @@ func TestCookieAuthSignVerify(t *testing.T) {
 	require.Len(t, cookies, 1)
 	require.Equal(t, cookieName, cookies[0].Name)
 	require.True(t, cookies[0].HttpOnly)
-	require.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
+	require.Equal(t, http.SameSiteNoneMode, cookies[0].SameSite)
 
 	// Verify the cookie in a new request.
 	r2 := httptest.NewRequest("GET", "/", nil)
@@ -150,6 +150,30 @@ func TestCookieSecureFlag(t *testing.T) {
 	cookies3 := w3.Result().Cookies()
 	require.Len(t, cookies3, 1)
 	require.True(t, cookies3[0].Secure, "Secure flag should be true for X-Forwarded-Proto: https")
+}
+
+func TestCookieSecureFlagLoopback(t *testing.T) {
+	t.Parallel()
+
+	// Loopback origins (localhost / 127.0.0.1 / ::1, any port) are secure
+	// contexts in modern browsers, so Secure cookies may be set over plain
+	// http during local development — enabling cookie exchange between dev
+	// origins like 127.0.0.1:3000 (frontend) and localhost:8888 (gateway).
+	ca, err := NewCookieAuth("")
+	require.NoError(t, err)
+
+	for _, host := range []string{"localhost:8888", "127.0.0.1:8888", "[::1]:8888"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Host = host
+		err = ca.SetCookie(w, r, "user1")
+		require.NoError(t, err)
+
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
+		require.True(t, cookies[0].Secure, "Secure should be true for loopback host %q", host)
+		require.Equal(t, http.SameSiteNoneMode, cookies[0].SameSite)
+	}
 }
 
 func TestCookieNoRepeatIssue(t *testing.T) {
