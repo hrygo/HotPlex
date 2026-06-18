@@ -15,7 +15,7 @@ import (
 func TestCookieAuthSignVerify(t *testing.T) {
 	t.Parallel()
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
@@ -44,7 +44,7 @@ func TestCookieAuthSignVerify(t *testing.T) {
 func TestCookieAuthExpiry(t *testing.T) {
 	t.Parallel()
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	// Create a cookie with a manually-expired timestamp.
@@ -75,7 +75,7 @@ func TestCookieAuthExpiry(t *testing.T) {
 func TestCookieAuthTamper(t *testing.T) {
 	t.Parallel()
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
@@ -116,7 +116,7 @@ func TestCookieAuthTamper(t *testing.T) {
 func TestCookieSecureFlag(t *testing.T) {
 	t.Parallel()
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	// HTTP request — Secure should be false.
@@ -155,7 +155,7 @@ func TestCookieSecureFlag(t *testing.T) {
 func TestCookieNoRepeatIssue(t *testing.T) {
 	t.Parallel()
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	// First request: issues a cookie.
@@ -178,7 +178,7 @@ func TestCookieNoRepeatIssue(t *testing.T) {
 func TestAuthenticateRequestCookie(t *testing.T) {
 	t.Parallel()
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	auth := NewAuthenticator(&config.SecurityConfig{APIKeyHeader: "X-API-Key"})
@@ -209,7 +209,7 @@ func TestAuthenticateRequestCookie(t *testing.T) {
 func TestCookieAuthWithBotID(t *testing.T) {
 	t.Parallel()
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	auth := NewAuthenticator(&config.SecurityConfig{APIKeyHeader: "X-API-Key"})

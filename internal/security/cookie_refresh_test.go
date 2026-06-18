@@ -13,7 +13,7 @@ import (
 
 func TestCookieAuth_SetAndVerify(t *testing.T) {
 	t.Parallel()
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -31,7 +31,7 @@ func TestCookieAuth_SetAndVerify(t *testing.T) {
 
 func TestCookieAuth_SlidingRefreshNearExpiry(t *testing.T) {
 	t.Parallel()
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	// Cookie issued 6 days ago; TTL is 7 days → past half-TTL threshold (3.5d) → refresh.
@@ -52,7 +52,7 @@ func TestCookieAuth_SlidingRefreshNearExpiry(t *testing.T) {
 
 func TestCookieAuth_NoRefreshWhenFresh(t *testing.T) {
 	t.Parallel()
-	ca, _ := NewCookieAuth()
+	ca, _ := NewCookieAuth("")
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	require.NoError(t, ca.SetCookie(w, r, "u-1"))
@@ -69,7 +69,7 @@ func TestCookieAuth_NoRefreshWhenFresh(t *testing.T) {
 
 func TestCookieAuth_ExpiredRejected(t *testing.T) {
 	t.Parallel()
-	ca, _ := NewCookieAuth()
+	ca, _ := NewCookieAuth("")
 	// Issued 8 days ago, exceeds 7-day TTL → rejected.
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()

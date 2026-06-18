@@ -265,6 +265,7 @@ export interface InitData {
   auth?: InitAuth;
   config?: InitConfig;
   client_caps?: ClientCaps;
+  workspace_id?: string;
 }
 
 export interface InitAuth {
@@ -318,6 +319,7 @@ export interface HotPlexClientConfig {
   workerType: WorkerType;
   apiKey?: string;
   authToken?: string;
+  workspaceId?: string;
   reconnect?: ReconnectConfig;
   heartbeat?: HeartbeatConfig;
   /** Per-session init config forwarded to the gateway in the AEP init handshake. */

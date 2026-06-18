@@ -97,9 +97,13 @@ function throwIfAuthError(prefix: string, status: number): never | void {
   }
 }
 
-export async function listSessions(limit = 20, offset = 0, signal?: AbortSignal): Promise<ListSessionsResponse> {
+export async function listSessions(limit = 20, offset = 0, workspaceId?: string, signal?: AbortSignal): Promise<ListSessionsResponse> {
+  let url = `${BASE}/api/sessions?limit=${limit}&offset=${offset}`;
+  if (workspaceId) {
+    url += `&workspace_id=${encodeURIComponent(workspaceId)}`;
+  }
   const res = await fetch(
-    `${BASE}/api/sessions?limit=${limit}&offset=${offset}`,
+    url,
     { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
   throwIfAuthError('listSessions', res.status);
@@ -112,6 +116,7 @@ export interface CreateSessionOptions {
   workerType?: string;
   title?: string;
   workDir?: string;
+  workspaceId?: string;
 }
 
 export async function createSession(opts: CreateSessionOptions, signal?: AbortSignal): Promise<{ session_id: string }> {
@@ -122,6 +127,9 @@ export async function createSession(opts: CreateSessionOptions, signal?: AbortSi
   }
   if (opts.workDir) {
     url += `&work_dir=${encodeURIComponent(opts.workDir)}`;
+  }
+  if (opts.workspaceId) {
+    url += `&workspace_id=${encodeURIComponent(opts.workspaceId)}`;
   }
   const res = await fetch(url, { method: 'POST', headers: authHeaders(), ...authOpts(), signal });
   throwIfAuthError('createSession', res.status);

@@ -1173,7 +1173,7 @@ func TestHub_HandleHTTP_CookieAuth(t *testing.T) {
 	cfg := config.Default()
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	cookieAuth, err := security.NewCookieAuth()
+	cookieAuth, err := security.NewCookieAuth("")
 	require.NoError(t, err)
 
 	auth := security.NewAuthenticator(&cfg.Security)
@@ -1216,7 +1216,7 @@ func TestHub_HandleHTTP_CookieAuth_InvalidCookie(t *testing.T) {
 	cfg := config.Default()
 	cfg.Security.AllowedOrigins = []string{"*"}
 
-	cookieAuth, err := security.NewCookieAuth()
+	cookieAuth, err := security.NewCookieAuth("")
 	require.NoError(t, err)
 
 	auth := security.NewAuthenticator(&cfg.Security)

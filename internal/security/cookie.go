@@ -6,11 +6,16 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 const (
@@ -46,14 +51,49 @@ type CookieAuth struct {
 	maxAge time.Duration
 }
 
-// NewCookieAuth creates a CookieAuth with a cryptographically random HMAC key.
-func NewCookieAuth() (*CookieAuth, error) {
-	secret := make([]byte, hmacKeyLen)
-	if _, err := rand.Read(secret); err != nil {
-		return nil, fmt.Errorf("security: generate cookie secret: %w", err)
+// NewCookieAuth creates a CookieAuth with the given configured secret or falls back to filesystem persistence.
+// If running inside a unit test, it uses a random in-memory key to avoid filesystem side effects.
+func NewCookieAuth(configuredSecret string) (*CookieAuth, error) {
+	if flag.Lookup("test.v") != nil {
+		secretBytes := make([]byte, hmacKeyLen)
+		if _, err := rand.Read(secretBytes); err != nil {
+			return nil, fmt.Errorf("security: generate cookie secret for test: %w", err)
+		}
+		return &CookieAuth{
+			secret: secretBytes,
+			maxAge: cookieMaxAge,
+		}, nil
 	}
+
+	var secretBytes []byte
+	if configuredSecret != "" {
+		h := sha256.Sum256([]byte(configuredSecret))
+		secretBytes = h[:]
+	} else {
+		keyPath := filepath.Join(config.HotplexHome(), "data", "cookie_secret.key")
+		data, err := os.ReadFile(keyPath)
+		if err == nil {
+			dataStr := strings.TrimSpace(string(data))
+			if hexBytes, err := hex.DecodeString(dataStr); err == nil && len(hexBytes) == hmacKeyLen {
+				secretBytes = hexBytes
+			} else if len(data) == hmacKeyLen {
+				secretBytes = data
+			}
+		}
+
+		if secretBytes == nil {
+			secretBytes = make([]byte, hmacKeyLen)
+			if _, err := rand.Read(secretBytes); err != nil {
+				return nil, fmt.Errorf("security: generate cookie secret: %w", err)
+			}
+			hexStr := hex.EncodeToString(secretBytes)
+			_ = os.MkdirAll(filepath.Dir(keyPath), 0o700)
+			_ = os.WriteFile(keyPath, []byte(hexStr), 0o600)
+		}
+	}
+
 	return &CookieAuth{
-		secret: secret,
+		secret: secretBytes,
 		maxAge: cookieMaxAge,
 	}, nil
 }

@@ -671,3 +671,101 @@ func TestDevMode_DisabledByDBKeys(t *testing.T) {
 	_, ok = auth.AuthenticateKey(context.Background(), "hpk_first")
 	require.False(t, ok, "removed key should no longer authenticate")
 }
+
+type mockIDP struct {
+	LookupFunc func(ctx context.Context, userID string) (*User, error)
+}
+
+func (m *mockIDP) Authenticate(ctx context.Context, creds Credentials) (string, error) {
+	return "", nil
+}
+
+func (m *mockIDP) Lookup(ctx context.Context, userID string) (*User, error) {
+	if m.LookupFunc != nil {
+		return m.LookupFunc(ctx, userID)
+	}
+	return nil, ErrUserNotFound
+}
+
+func TestAuthenticator_DisabledUser(t *testing.T) {
+	t.Parallel()
+
+	// 1. AuthenticateKey
+	auth := NewAuthenticator(&config.SecurityConfig{
+		APIKeys: []string{"sk-test"},
+	})
+
+	idp := &mockIDP{
+		LookupFunc: func(ctx context.Context, userID string) (*User, error) {
+			if userID == "active_uid" {
+				return &User{ID: "active_uid", Status: "active"}, nil
+			}
+			if userID == "disabled_uid" {
+				return &User{ID: "disabled_uid", Status: "disabled"}, nil
+			}
+			return nil, ErrUserNotFound
+		},
+	}
+	auth.SetIdentityProvider(idp)
+
+	// Stub a key resolver using NewMapResolver
+	auth.SetKeyResolver(NewMapResolver(map[string]string{
+		"sk-test":   "disabled_uid",
+		"sk-active": "active_uid",
+	}))
+
+	// Try AuthenticateKey with a key that maps to disabled_uid
+	_, ok := auth.AuthenticateKey(context.Background(), "sk-test")
+	require.False(t, ok, "disabled user key authentication should fail")
+
+	// Try AuthenticateKey with a key that maps to active_uid
+	auth.ReloadKeys(&config.SecurityConfig{
+		APIKeys: []string{"sk-test", "sk-active"},
+	})
+	uid, ok := auth.AuthenticateKey(context.Background(), "sk-active")
+	require.True(t, ok)
+	require.Equal(t, "active_uid", uid)
+
+	// 2. AuthenticateRequest (API Key)
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-API-Key", "sk-test")
+	_, _, err := auth.AuthenticateRequest(req)
+	require.ErrorIs(t, err, ErrUnauthorized, "disabled user request should be unauthorized")
+
+	reqActive := httptest.NewRequest("GET", "/test", nil)
+	reqActive.Header.Set("X-API-Key", "sk-active")
+	uidRes, _, err := auth.AuthenticateRequest(reqActive)
+	require.NoError(t, err)
+	require.Equal(t, "active_uid", uidRes)
+
+	// 3. AuthenticateRequest (Cookie)
+	ca, err := NewCookieAuth("")
+	require.NoError(t, err)
+	auth.SetCookieAuth(ca)
+
+	// Setup requests
+	w1 := httptest.NewRecorder()
+	r1 := httptest.NewRequest("GET", "/", nil)
+	err = ca.SetCookie(w1, r1, "disabled_uid")
+	require.NoError(t, err)
+
+	cookies1 := w1.Result().Cookies()
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.AddCookie(cookies1[0])
+
+	_, _, err = auth.AuthenticateRequest(r2)
+	require.ErrorIs(t, err, ErrUnauthorized, "disabled user cookie authentication should fail")
+
+	w2 := httptest.NewRecorder()
+	r3 := httptest.NewRequest("GET", "/", nil)
+	err = ca.SetCookie(w2, r3, "active_uid")
+	require.NoError(t, err)
+
+	cookies2 := w2.Result().Cookies()
+	r4 := httptest.NewRequest("GET", "/", nil)
+	r4.AddCookie(cookies2[0])
+
+	uidRes, _, err = auth.AuthenticateRequest(r4)
+	require.NoError(t, err)
+	require.Equal(t, "active_uid", uidRes)
+}

@@ -85,7 +85,14 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		// 3rd priority: cookie auth fallback (webchat same-origin).
 		if a.cookieAuth != nil {
 			if uid, ok := a.cookieAuth.Authenticate(r); ok {
+				idp := a.idp
 				a.mu.RUnlock()
+				if idp != nil && uid != "anonymous" && uid != "api_user" {
+					u, err := idp.Lookup(r.Context(), uid)
+					if err != nil || u.Status == "disabled" {
+						return "", "", ErrUnauthorized
+					}
+				}
 				botID := BotIDFromRequest(r)
 				return uid, botID, nil
 			}
@@ -110,10 +117,19 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 
 	// Snapshot resolver under lock, then release before calling external resolver.
 	resolver := a.keyResolver
+	idp := a.idp
 	a.mu.RUnlock()
 
+	uid := resolveUserIDWith(r.Context(), key, resolver)
+	if idp != nil && uid != "anonymous" && uid != "api_user" {
+		u, err := idp.Lookup(r.Context(), uid)
+		if err != nil || u.Status == "disabled" {
+			return "", "", ErrUnauthorized
+		}
+	}
+
 	botID := BotIDFromRequest(r)
-	return resolveUserIDWith(r.Context(), key, resolver), botID, nil
+	return uid, botID, nil
 }
 
 // ReloadKeys dynamically replaces the set of valid API keys.
@@ -178,13 +194,6 @@ func (a *Authenticator) RemoveKey(key string) {
 	}
 }
 
-// resolveUserID returns the user identity for a valid API key.
-// Checks the resolver first; falls back to "api_user" if no mapping exists.
-// Caller must hold at least RLock.
-func (a *Authenticator) resolveUserID(ctx context.Context, key string) string {
-	return resolveUserIDWith(ctx, key, a.keyResolver)
-}
-
 // resolveUserIDWith resolves user identity without holding any lock.
 func resolveUserIDWith(ctx context.Context, key string, resolver APIKeyResolver) string {
 	if resolver != nil {
@@ -225,17 +234,28 @@ func (a *Authenticator) extractAPIKey(r *http.Request) (string, bool) {
 // Handles dev mode (no keys configured → "anonymous").
 func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string, bool) {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-
 	if len(a.validKey) == 0 && len(a.dbKeys) == 0 && !a.devModeLocked {
 		// No keys configured — allow all (dev mode).
+		a.mu.RUnlock()
 		return "anonymous", true
 	}
 
 	if !a.authenticateKey(key) {
+		a.mu.RUnlock()
 		return "", false
 	}
-	return a.resolveUserID(ctx, key), true
+	resolver := a.keyResolver
+	idp := a.idp
+	a.mu.RUnlock()
+
+	uid := resolveUserIDWith(ctx, key, resolver)
+	if idp != nil && uid != "anonymous" && uid != "api_user" {
+		u, err := idp.Lookup(ctx, uid)
+		if err != nil || u.Status == "disabled" {
+			return "", false
+		}
+	}
+	return uid, true
 }
 
 // BotIDFromRequest extracts the bot ID from X-Bot-ID header or bot_id query param.

@@ -45,7 +45,7 @@ type testAuthEnv struct {
 func newTestAuthEnv(t *testing.T) *testAuthEnv {
 	t.Helper()
 	store := newTestSessionStore(t)
-	ca, err := security.NewCookieAuth()
+	ca, err := security.NewCookieAuth("")
 	require.NoError(t, err)
 	idp := security.NewLocalAccountProvider(store, testBcryptCostGateway)
 	hash, err := idp.HashPassword("adminpass")
