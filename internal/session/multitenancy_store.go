@@ -12,13 +12,13 @@ import (
 // Workspace is a per-user named project directory (spec §6.2).
 // work_dir is immutable after creation (enters session key derivation, spec §7).
 type Workspace struct {
-	ID                   string
-	OwnerUserID          string
-	Name                 string
-	WorkDir              string
-	AgentConfigOverrides string // JSON; spec ② fills, spec ① stays empty
-	WorkerPreference     string // spec ③ fills
-	Status               string
+	ID                   string `json:"id"`
+	OwnerUserID          string `json:"owner_user_id"`
+	Name                 string `json:"name"`
+	WorkDir              string `json:"work_dir"`
+	AgentConfigOverrides string `json:"agent_config_overrides"` // JSON value; spec ② fills, spec ① stays empty
+	WorkerPreference     string `json:"worker_preference"`      // spec ③ fills
+	Status               string `json:"status"`
 }
 
 // Invitation is a one-time invite code (spec §6.3).
