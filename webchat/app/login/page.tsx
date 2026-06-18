@@ -82,6 +82,15 @@ function InnerLoginPage() {
     check();
   }, []);
 
+  // ?invite=CODE → 预填邀请码并切到 Accept Invite tab
+  useEffect(() => {
+    const code = searchParams.get('invite');
+    if (code) {
+      setInviteCode(code);
+      setActiveTab('register');
+    }
+  }, [searchParams]);
+
   // Pre-check if already logged in, redirect to "/"
   useEffect(() => {
     const checkUser = async () => {
@@ -291,6 +300,17 @@ function InnerLoginPage() {
               >
                 {loading ? 'Processing...' : 'Sign In'}
               </button>
+
+              <p className="pt-1 text-center text-[11px] text-[var(--text-muted)]">
+                收到邀请码?{' '}
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab('register'); setError(''); }}
+                  className="font-bold text-[var(--accent-gold)] hover:underline"
+                >
+                  立即注册 →
+                </button>
+              </p>
             </form>
           ) : (
             <form onSubmit={handleRegisterSubmit} className="space-y-4">
@@ -307,6 +327,9 @@ function InnerLoginPage() {
                   className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-all focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20 font-mono"
                 />
               </div>
+              <p className="-mt-2 mb-1 text-[10px] text-[var(--text-faint)]">
+                邀请码由管理员发放。没有?请联系管理员获取。
+              </p>
 
               <div>
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
