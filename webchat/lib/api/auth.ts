@@ -43,6 +43,21 @@ export interface OAuthProvider {
   display_name: string;
 }
 
+// BootstrapStatus: whether any admin exists. Drives the first-time-setup guide
+// on the login page. Public endpoint (no auth).
+export async function getBootstrapStatus(signal?: AbortSignal): Promise<boolean> {
+  const res = await fetch(`${BASE}/api/auth/bootstrap-status`, {
+    ...authOpts(),
+    signal,
+  });
+  if (!res.ok) {
+    // Degrade: treat unreachable as "bootstrapped" so the normal login form shows.
+    return true;
+  }
+  const data = await res.json();
+  return Boolean(data?.bootstrapped);
+}
+
 // Me (Get current profile)
 export async function getMe(signal?: AbortSignal): Promise<User> {
   const res = await fetch(`${BASE}/api/auth/me`, {

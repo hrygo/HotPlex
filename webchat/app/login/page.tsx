@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BrandIcon } from '@/components/icons';
 import { httpBase } from '@/lib/config';
-import { login, acceptInvite, getOAuthProviders, getMe, type OAuthProvider } from '@/lib/api/auth';
+import { login, acceptInvite, getOAuthProviders, getMe, getBootstrapStatus, type OAuthProvider } from '@/lib/api/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 
 function mapAuthError(code: string | null): string | null {
@@ -54,6 +54,7 @@ function InnerLoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(mapAuthError(authErrorParam) || '');
   const [providers, setProviders] = useState<OAuthProvider[]>([]);
+  const [bootstrapped, setBootstrapped] = useState<boolean | null>(null);
 
   // Fetch OAuth Providers
   useEffect(() => {
@@ -67,6 +68,18 @@ function InnerLoginPage() {
       }
     };
     fetchProviders();
+  }, []);
+
+  // Detect bootstrap state: if no admin exists yet, show setup guide instead of the form.
+  useEffect(() => {
+    const check = async () => {
+      try {
+        setBootstrapped(await getBootstrapStatus());
+      } catch {
+        setBootstrapped(true); // degrade to normal login
+      }
+    };
+    check();
   }, []);
 
   // Pre-check if already logged in, redirect to "/"
@@ -120,6 +133,59 @@ function InnerLoginPage() {
     setLoading(true);
     window.location.href = `${httpBase()}/api/auth/oauth/${providerName}/login`;
   };
+
+  if (bootstrapped === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-base)]">
+        <div className="w-6 h-6 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (bootstrapped === false) {
+    const cmd = `hotplex admin create --username <name> --config configs/config-dev.yaml`;
+    return (
+      <div className="relative flex min-h-screen items-center justify-center bg-[var(--bg-base)] px-4">
+        <div className="bg-mesh opacity-50" />
+        <div className="noise-overlay" />
+        <div className="w-full max-w-md animate-fade-in-up z-10 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-8 shadow-[var(--shadow-lg)] backdrop-blur-xl">
+          <div className="mb-5 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-[var(--accent-gold)]/10">
+              <BrandIcon size={48} className="animate-float" />
+            </div>
+            <h1 className="font-display text-2xl font-black tracking-tight text-[var(--text-primary)]">
+              初始化管理员账号
+            </h1>
+            <p className="mt-2 text-xs text-[var(--text-muted)] leading-relaxed">
+              这是全新部署,还没有管理员账号。请在服务器上运行以下命令创建首个管理员,然后刷新此页。
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <code className="text-xs font-mono text-[var(--text-secondary)] break-all">{cmd}</code>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(cmd)}
+                className="shrink-0 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              >
+                复制
+              </button>
+            </div>
+          </div>
+          <p className="mt-4 text-center text-[10px] text-[var(--text-faint)] leading-relaxed">
+            密码交互式输入(≥8 字符)。用户名 [a-zA-Z0-9_.-],不可以 apikey: 开头。
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-5 w-full rounded-lg bg-[var(--accent-gold)] px-4 py-2.5 text-xs font-bold uppercase tracking-widest text-black hover:bg-[var(--accent-gold-bright)]"
+          >
+            创建后刷新
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-[var(--bg-base)] px-4">
