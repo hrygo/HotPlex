@@ -415,9 +415,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		}
 	}
 
-	// Cookie auth: created when webchat is enabled for same-origin browser authentication.
+	// Cookie auth: created when webchat is enabled or when WebChat address is configured
+	// (supporting external dev/production frontends), or when running in devMode.
 	var cookieAuth *security.CookieAuth
-	if cfg.WebChat.Enabled {
+	if cfg.WebChat.Enabled || cfg.WebChat.Addr != "" || devMode {
 		ca, err := security.NewCookieAuth(cfg.Security.CookieSecret)
 		if err != nil {
 			return fmt.Errorf("create cookie auth: %w", err)
