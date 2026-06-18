@@ -255,7 +255,8 @@ func setupRoutes(
 
 		log.Info("auth, admin, and workspaces endpoints registered", "channels", "login,logout,me,accept-invite,workspaces,admin")
 
-		// OAuth SSO handlers (spec ④): requires OAuthManager with providers.
+		// OAuth SSO handlers (spec ④): when OAuthManager has providers,
+		// register the full SSO flow (providers list + login + callback).
 		if deps.OAuthManager != nil && deps.OAuthManager.HasProviders() {
 			oauthHandlers := gateway.NewOAuthHandlers(deps.OAuthManager, deps.CookieAuth, deps.WorkspaceStore, log)
 			mux.Handle("GET /api/auth/oauth/providers", corsMw(http.HandlerFunc(oauthHandlers.Providers)))
@@ -263,6 +264,14 @@ func setupRoutes(
 			mux.Handle("GET /api/auth/oauth/{provider}/callback", http.HandlerFunc(oauthHandlers.Callback))
 			// Note: login/callback are redirect flows, CORS not needed (browser navigates directly).
 			log.Info("oauth SSO endpoints registered", "providers", deps.OAuthManager.List())
+		} else {
+			// Always expose providers discovery so a cross-origin browser gets
+			// 200 + CORS headers instead of a CORS-masked 404 spamming the login
+			// console when SSO is unconfigured. Returns an empty list.
+			mux.Handle("GET /api/auth/oauth/providers", corsMw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte("[]"))
+			})))
 		}
 	}
 

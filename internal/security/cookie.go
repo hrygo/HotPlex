@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ const (
 // crypto/rand and is never stored on disk or embedded in the binary.
 //
 // Cookie format: Base64(timestamp|userID|hex(HMAC-SHA256(timestamp|userID, secret)))
-// Cookie attributes: HttpOnly, SameSite=Strict, Path=/, conditional Secure, 24h Max-Age.
+// Cookie attributes: HttpOnly, SameSite=None, Path=/, Secure (HTTPS or loopback dev), 7d Max-Age.
 //
 // Immutability: the secret and maxAge fields are set once at construction and never
 // modified. This allows safe concurrent access from both Hub.HandleHTTP (WS upgrade)
@@ -120,8 +121,8 @@ func (c *CookieAuth) SetCookie(w http.ResponseWriter, r *http.Request, userID st
 		Path:     "/",
 		MaxAge:   int(c.maxAge.Seconds()),
 		HttpOnly: true,
-		Secure:   isHTTPS(r),
-		SameSite: http.SameSiteStrictMode,
+		Secure:   cookieSecure(r),
+		SameSite: http.SameSiteNoneMode,
 	})
 	return nil
 }
@@ -165,8 +166,8 @@ func (c *CookieAuth) setCookieAt(w http.ResponseWriter, r *http.Request, userID 
 		Path:     "/",
 		MaxAge:   int(c.maxAge.Seconds()),
 		HttpOnly: true,
-		Secure:   isHTTPS(r),
-		SameSite: http.SameSiteStrictMode,
+		Secure:   cookieSecure(r),
+		SameSite: http.SameSiteNoneMode,
 	})
 }
 
@@ -242,8 +243,8 @@ func (c *CookieAuth) Clear(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isHTTPS(r),
-		SameSite: http.SameSiteStrictMode,
+		Secure:   cookieSecure(r),
+		SameSite: http.SameSiteNoneMode,
 	})
 }
 
@@ -258,4 +259,25 @@ func isHTTPS(r *http.Request) bool {
 		return true
 	}
 	return r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+// isLocalhost reports whether the request is served from a loopback host
+// (localhost / 127.0.0.1 / ::1, any port). Chrome and Firefox treat these
+// http origins as secure contexts, which lets Secure cookies be set over plain
+// http — so a dev frontend on one loopback host:port (e.g. 127.0.0.1:3000)
+// can exchange SameSite=None; Secure cookies with a gateway on another
+// (e.g. localhost:8888) even though 127.0.0.1 and localhost are cross-site.
+func isLocalhost(r *http.Request) bool {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// cookieSecure reports whether the Secure flag may be set on a cookie:
+// HTTPS anywhere, or any loopback origin (a secure context in modern browsers,
+// allowing Secure cookies over plain http during local development).
+func cookieSecure(r *http.Request) bool {
+	return isHTTPS(r) || isLocalhost(r)
 }
