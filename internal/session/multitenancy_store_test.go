@@ -51,6 +51,33 @@ func TestUsersStore_ListAndUpdateStatus(t *testing.T) {
 	require.Equal(t, "disabled", disabled.Status)
 }
 
+func TestUsersStore_HasAdmin(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	// 空库:无 admin
+	got, err := store.HasAdmin(ctx)
+	require.NoError(t, err)
+	require.False(t, got)
+
+	// 非 admin 用户不计入
+	require.NoError(t, store.CreateUser(ctx, &security.User{
+		ID: "u-1", Username: "alice", PasswordHash: "$2a$12$fake", Role: "user", Status: "active",
+	}, 1700000000))
+	got, err = store.HasAdmin(ctx)
+	require.NoError(t, err)
+	require.False(t, got)
+
+	// 出现 admin → true
+	require.NoError(t, store.CreateUser(ctx, &security.User{
+		ID: "u-2", Username: "bob", PasswordHash: "$2a$12$fake", Role: "admin", Status: "active",
+	}, 1700000000))
+	got, err = store.HasAdmin(ctx)
+	require.NoError(t, err)
+	require.True(t, got)
+}
+
 // --- workspaces ---
 
 func TestWorkspacesStore_CreateUniqueConflict(t *testing.T) {

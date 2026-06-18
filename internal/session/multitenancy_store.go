@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/hrygo/hotplex/internal/security"
 )
@@ -61,6 +62,7 @@ var (
 type UserWorkspaceStore interface {
 	security.UserStore
 	// users
+	HasAdmin(ctx context.Context) (bool, error)
 	ListUsers(ctx context.Context, limit, offset int) ([]*security.User, error)
 	UpdateUserStatus(ctx context.Context, id, status string, now int64) error
 	DeleteUser(ctx context.Context, id string) error
@@ -226,6 +228,18 @@ func (s *SQLiteStore) TouchUserLastLogin(ctx context.Context, userID string, now
 		_, err := s.db.ExecContext(ctx, queries["users.touch_last_login"], now, now, userID)
 		return err
 	})
+}
+
+func (s *SQLiteStore) HasAdmin(ctx context.Context) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, queries["users.has_admin"]).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("has admin: %w", err)
+	}
+	return true, nil
 }
 
 // --- SQLiteStore: workspaces ---
