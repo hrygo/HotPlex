@@ -82,7 +82,7 @@ export async function login(username: string, password: string, signal?: AbortSi
   });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.message || `Login failed: ${res.status}`);
+    throw new Error(errData?.error?.code || errData?.error?.message || `Login failed: ${res.status}`);
   }
   return res.json();
 }
@@ -111,7 +111,7 @@ export async function acceptInvite(code: string, username: string, password: str
   });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.message || `Accept invite failed: ${res.status}`);
+    throw new Error(errData?.error?.code || errData?.error?.message || `Accept invite failed: ${res.status}`);
   }
   return res.json();
 }

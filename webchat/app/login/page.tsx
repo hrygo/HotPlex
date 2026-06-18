@@ -10,16 +10,36 @@ import { AnimatePresence, motion } from 'framer-motion';
 function mapAuthError(code: string | null): string | null {
   if (!code) return null;
   switch (code) {
+    // 登录凭证
+    case 'INVALID_CREDENTIALS':
+      return '用户名或密码错误,请重试。';
+    case 'USER_DISABLED':
+      return '此账号已被管理员禁用,请联系系统管理员。';
+    case 'NO_IDP':
+      return '登录服务未就绪,请稍后再试或联系管理员。';
+    // 注册 — 用户名/密码
+    case 'INVALID_USERNAME':
+      return '用户名格式无效:需 3-64 字符,仅 [a-zA-Z0-9_.-],且不能以 apikey: 开头。';
+    case 'INVALID_PASSWORD':
+      return '密码长度无效:需 8-72 字符。';
+    case 'USERNAME_TAKEN':
+      return '该用户名已被占用。若你刚用此邀请码注册,邀请码已消耗,请联系管理员重新发码后换名重试。';
+    // 注册 — 邀请码
+    case 'INVITATION_NOT_FOUND':
+      return '邀请码不存在,请检查后重试。';
+    case 'INVITATION_USED':
+      return '邀请码已被使用(每个码仅一次)。请联系管理员重新发放。';
+    case 'INVITATION_EXPIRED':
+      return '邀请码已过期。请联系管理员重新发放。';
+    // SSO
     case 'STATE_EXPIRED':
-      return '登录状态已过期，请重新登录。';
+      return '登录状态已过期,请重新登录。';
     case 'PROVIDER_MISMATCH':
       return '第三方登录服务商不匹配。';
     case 'CSRF_DETECTED':
-      return '检测到跨站请求伪造(CSRF)，请确保浏览器启用了 Cookie 并重试。';
+      return '检测到跨站请求伪造(CSRF),请确保浏览器启用了 Cookie 并重试。';
     case 'STATE_INVALID':
-      return '登录状态无效，请重新登录。';
-    case 'USER_DISABLED':
-      return '此账号已被管理员禁用，请联系系统管理员。';
+      return '登录状态无效,请重新登录。';
     case 'USER_CREATE_FAILED':
       return '从单点登录(SSO)创建用户账号失败。';
     case 'CODE_EXCHANGE_FAILED':
@@ -29,9 +49,11 @@ function mapAuthError(code: string | null): string | null {
     case 'IDP_ERROR':
       return '第三方登录服务商返回错误。';
     case 'UNAUTHORIZED':
-      return '会话未授权，请先登录。';
+      return '会话未授权,请先登录。';
+    case 'BAD_REQUEST':
+      return '请求参数缺失,请填写完整后重试。';
     default:
-      return `认证错误: ${code}`;
+      return `操作失败(${code}),请重试或联系管理员。`;
   }
 }
 
@@ -116,7 +138,7 @@ function InnerLoginPage() {
       await login(loginUsername.trim(), loginPassword);
       router.push('/');
     } catch (err: any) {
-      setError(err.message || '登录失败，请检查用户名或密码。');
+      setError(mapAuthError(err.message) || err.message || '登录失败，请检查用户名或密码。');
     } finally {
       setLoading(false);
     }
@@ -132,7 +154,7 @@ function InnerLoginPage() {
       await acceptInvite(inviteCode.trim(), registerUsername.trim(), registerPassword);
       router.push('/');
     } catch (err: any) {
-      setError(err.message || '注册失败，请检查邀请码和表单项。');
+      setError(mapAuthError(err.message) || err.message || '注册失败，请检查邀请码和表单项。');
     } finally {
       setLoading(false);
     }
