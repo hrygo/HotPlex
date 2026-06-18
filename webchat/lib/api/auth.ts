@@ -9,7 +9,8 @@ function authHeaders(): Record<string, string> {
 
 function authOpts(): RequestInit {
   if (isSameOrigin()) return { credentials: 'same-origin' as RequestCredentials };
-  return {};
+  // Cross-origin: include cookies so the cookie-based login session works.
+  return { credentials: 'include' as RequestCredentials };
 }
 
 function withAuth(headers?: Record<string, string>): Record<string, string> {

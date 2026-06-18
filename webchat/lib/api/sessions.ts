@@ -4,15 +4,14 @@
  * These endpoints are on the same port as WebSocket (gateway :8888).
  * Authentication strategy:
  *   - Same-origin (embedded webchat): credentials: 'same-origin' (cookie auth)
- *   - Cross-origin (external deployment): X-API-Key header
+ *   - Cross-origin (external frontend): credentials: 'include' (cookie auth)
  */
 
 import { httpBase, apiKey, isSameOrigin } from "@/lib/config";
 
 const BASE = httpBase();
 
-// Build auth options: same-origin uses cookie auth (credentials: same-origin),
-// cross-origin deployments continue using X-API-Key header.
+// Auth headers: X-API-Key attached in cross-origin mode (optional, alongside cookie).
 function authHeaders(): Record<string, string> {
   if (isSameOrigin()) return {};
   return apiKey ? { 'X-API-Key': apiKey } : {};
@@ -20,7 +19,8 @@ function authHeaders(): Record<string, string> {
 
 function authOpts(): RequestInit {
   if (isSameOrigin()) return { credentials: 'same-origin' as RequestCredentials };
-  return {};
+  // Cross-origin: include cookies so the cookie-based login session works.
+  return { credentials: 'include' as RequestCredentials };
 }
 
 // Merge auth headers with custom headers.
