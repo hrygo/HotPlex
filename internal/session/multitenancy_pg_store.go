@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/hrygo/hotplex/internal/security"
 )
@@ -68,6 +69,18 @@ func (s *pgStore) DeleteUser(ctx context.Context, id string) error {
 func (s *pgStore) TouchUserLastLogin(ctx context.Context, userID string, now int64) error {
 	_, err := s.db.ExecContext(ctx, s.queries["users.touch_last_login"], now, now, userID)
 	return err
+}
+
+func (s *pgStore) HasAdmin(ctx context.Context) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, s.queries["users.has_admin"]).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("has admin: %w", err)
+	}
+	return true, nil
 }
 
 // --- pgStore: workspaces ---

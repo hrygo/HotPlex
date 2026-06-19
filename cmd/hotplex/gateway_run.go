@@ -415,10 +415,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		}
 	}
 
-	// Cookie auth: created when webchat is enabled for same-origin browser authentication.
+	// Cookie auth: created when webchat is enabled or when WebChat address is configured
+	// (supporting external dev/production frontends), or when running in devMode.
 	var cookieAuth *security.CookieAuth
-	if cfg.WebChat.Enabled {
-		ca, err := security.NewCookieAuth()
+	if cfg.WebChat.Enabled || cfg.WebChat.Addr != "" || devMode {
+		ca, err := security.NewCookieAuth(cfg.Security.CookieSecret)
 		if err != nil {
 			return fmt.Errorf("create cookie auth: %w", err)
 		}
@@ -879,6 +880,10 @@ func (s *gatewayStores) close(log *slog.Logger) {
 		if err := s.collector.Close(); err != nil {
 			log.Warn("gateway: event collector close", "err", err)
 		}
+	}
+	// Stop DBResolver's background cleanup goroutine before closing DB connections.
+	if s.dbResolver != nil {
+		s.dbResolver.Close()
 	}
 	// For SQLite: EventStore.Close is a no-op (ownsDB=false); session store owns the shared connection.
 	if s.session != nil {

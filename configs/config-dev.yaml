@@ -20,6 +20,14 @@ webchat:
   addr: "127.0.0.1:3000"
   enabled: false # dev mode uses next dev server for hot reload
 
+# Pin specific dev origins (not "*") so the gateway emits
+# Access-Control-Allow-Credentials — required for cross-origin cookie auth
+# (webchat login flow). Next dev server may surface as 127.0.0.1 or localhost.
+security:
+  allowed_origins:
+    - "http://127.0.0.1:3000"
+    - "http://localhost:3000"
+
 session:
   retention_period: 24h
   max_concurrent: 100

@@ -282,3 +282,40 @@ func TestWorkspace_PatchWorkerPreference_Persists(t *testing.T) {
 	require.NoError(t, json.NewDecoder(gr.Body).Decode(&got))
 	require.Equal(t, string(testNoopType), got.WorkerPreference)
 }
+
+// TestWorkspace_JSONWireContract guards the snake_case wire contract consumed by
+// webchat (webchat/lib/api/workspaces.ts). Decode into a raw map — NOT
+// session.Workspace — so the assertion sees the actual on-wire keys. A struct
+// round-trip masks tag bugs because both encode and decode share the same struct.
+func TestWorkspace_JSONWireContract(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-wire")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	env.wsHandlers.List(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Workspaces []json.RawMessage `json:"workspaces"`
+		Limit      int               `json:"limit"`
+		Offset     int               `json:"offset"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Workspaces, 1)
+	require.Equal(t, 100, resp.Limit, "ListWorkspacesResponse.limit must be echoed (default 100)")
+	require.Equal(t, 0, resp.Offset, "ListWorkspacesResponse.offset must be echoed")
+
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(resp.Workspaces[0], &m))
+	require.Equal(t, "proj", m["name"], "snake_case wire contract; actual keys: %#v", m)
+	require.Contains(t, m, "id")
+	require.Contains(t, m, "work_dir")
+	require.Contains(t, m, "owner_user_id")
+	require.Contains(t, m, "created_at", "workspace wire contract must carry created_at")
+	require.Contains(t, m, "updated_at", "workspace wire contract must carry updated_at")
+	require.NotContains(t, m, "Name", "PascalCase field leaked onto the wire")
+}

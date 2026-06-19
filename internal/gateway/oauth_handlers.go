@@ -144,7 +144,7 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Find or create user from SSO identity.
-	userID, err := h.getOrCreateUser(r.Context(), providerName, claims)
+	userID, firstLogin, err := h.getOrCreateUser(r.Context(), providerName, claims)
 	if err != nil {
 		var idErr *security.IdentityError
 		if errors.As(err, &idErr) && idErr.Code == security.ErrCodeUserDisabled {
@@ -172,14 +172,21 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("oauth login success", "provider", providerName, "subject", claims.Subject, "user_id", userID)
 
-	// Redirect to webchat home (spec ⑥ will handle post-login routing).
-	http.Redirect(w, r, "/", http.StatusFound)
+	// Redirect to webchat home. Echo first_login for first-time SSO users so the
+	// frontend triggers onboarding — mirroring password login's first_login flag
+	// (all three login paths now share one onboarding contract). Determined by
+	// getOrCreateUser from LastLoginAt BEFORE this handler's TouchUserLastLogin.
+	dest := "/"
+	if firstLogin {
+		dest = "/?first_login=1"
+	}
+	http.Redirect(w, r, dest, http.StatusFound)
 }
 
 // getOrCreateUser implements the spec ④ §8.1 account association:
 // - Look up by (provider, subject) → found: update profile, return user_id.
 // - Not found: create users row + user_identities row, return user_id.
-func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string, claims *security.OIDCClaims) (string, error) {
+func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string, claims *security.OIDCClaims) (userID string, firstLogin bool, err error) {
 	now := h.now().Unix()
 
 	// Check if identity already exists.
@@ -192,20 +199,22 @@ func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string
 		// Verify user is not disabled.
 		user, err := h.store.GetUserByID(ctx, identity.UserID)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if user.Status == "disabled" {
-			return "", &security.IdentityError{Code: security.ErrCodeUserDisabled}
+			return "", false, &security.IdentityError{Code: security.ErrCodeUserDisabled}
 		}
-		return identity.UserID, nil
+		// Returning user: first login iff they have never logged in before.
+		return identity.UserID, user.LastLoginAt == 0, nil
 	}
 	if !errors.Is(err, session.ErrIdentityNotFound) {
-		return "", err
+		return "", false, err
 	}
 
 	// First login: create user + identity.
-	userID := uuid.NewString()
+	userID = uuid.NewString()
 	username := providerName + ":" + claims.Subject
+	firstLogin = true // new SSO identity; never logged in (recovered orphan may reset below)
 
 	// Idempotent create path (P1): a prior first-login attempt may have left an
 	// orphaned users row (CreateUser succeeded, CreateUserIdentity failed on a
@@ -215,11 +224,12 @@ func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string
 	// would permanently lock out the SSO identity.
 	existing, err := h.store.GetUserByUsername(ctx, username)
 	if err != nil && !errors.Is(err, security.ErrUserNotFound) {
-		return "", err
+		return "", false, err
 	}
 	if existing != nil {
 		// Recover orphaned user row from a crashed prior first-login.
 		userID = existing.ID
+		firstLogin = existing.LastLoginAt == 0
 	} else {
 		err = h.store.CreateUser(ctx, &security.User{
 			ID:           userID,
@@ -230,7 +240,7 @@ func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string
 			Status:       "active",
 		}, now)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 
@@ -244,10 +254,10 @@ func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string
 		Email:       claims.Email,
 	}, now)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	return userID, nil
+	return userID, firstLogin, nil
 }
 
 // redirectAuthError redirects to webchat home with an auth_error query param.

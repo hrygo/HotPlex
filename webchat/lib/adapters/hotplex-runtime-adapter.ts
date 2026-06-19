@@ -78,6 +78,8 @@ type ThreadSuggestion = { title: string; label: string; prompt: string };
 export interface UseHotPlexRuntimeConfig {
     /** Initial session ID to resume (calls resume() instead of connect()). */
     sessionId?: string;
+    /** Active workspace ID (spec ⑥) */
+    workspaceId?: string;
     /** Override workDir from URL deep link (spec §5.2). */
     overrideWorkDir?: string;
     /** Called when session metrics update (for dashboard display). */
@@ -223,6 +225,7 @@ function historyToMessages(records: ConversationRecord[]): HotPlexMessage[] {
  */
 export function useHotPlexRuntime({
     sessionId,
+    workspaceId,
     overrideWorkDir,
     onMetricsChange,
     onSkillsChange,
@@ -395,6 +398,7 @@ export function useHotPlexRuntime({
             workerType,
             apiKey: isSameOrigin() ? undefined : apiKey,
             authToken: isSameOrigin() ? undefined : apiKey,
+            workspaceId,
             initConfig,
             heartbeat: {
                 pingIntervalMs: 20000,
@@ -1048,7 +1052,7 @@ export function useHotPlexRuntime({
             client.disconnect();
             clientRef.current = null;
         };
-    }, [sessionId]);
+    }, [sessionId, workspaceId]);
 
     // Track pending connection-wait state so useEffect cleanup can tear it down
     const connectionWaitRef = useRef<{

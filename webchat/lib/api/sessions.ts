@@ -4,15 +4,14 @@
  * These endpoints are on the same port as WebSocket (gateway :8888).
  * Authentication strategy:
  *   - Same-origin (embedded webchat): credentials: 'same-origin' (cookie auth)
- *   - Cross-origin (external deployment): X-API-Key header
+ *   - Cross-origin (external frontend): credentials: 'include' (cookie auth)
  */
 
 import { httpBase, apiKey, isSameOrigin } from "@/lib/config";
 
 const BASE = httpBase();
 
-// Build auth options: same-origin uses cookie auth (credentials: same-origin),
-// cross-origin deployments continue using X-API-Key header.
+// Auth headers: X-API-Key attached in cross-origin mode (optional, alongside cookie).
 function authHeaders(): Record<string, string> {
   if (isSameOrigin()) return {};
   return apiKey ? { 'X-API-Key': apiKey } : {};
@@ -20,7 +19,8 @@ function authHeaders(): Record<string, string> {
 
 function authOpts(): RequestInit {
   if (isSameOrigin()) return { credentials: 'same-origin' as RequestCredentials };
-  return {};
+  // Cross-origin: include cookies so the cookie-based login session works.
+  return { credentials: 'include' as RequestCredentials };
 }
 
 // Merge auth headers with custom headers.
@@ -97,9 +97,13 @@ function throwIfAuthError(prefix: string, status: number): never | void {
   }
 }
 
-export async function listSessions(limit = 20, offset = 0, signal?: AbortSignal): Promise<ListSessionsResponse> {
+export async function listSessions(limit = 20, offset = 0, workspaceId?: string, signal?: AbortSignal): Promise<ListSessionsResponse> {
+  let url = `${BASE}/api/sessions?limit=${limit}&offset=${offset}`;
+  if (workspaceId) {
+    url += `&workspace_id=${encodeURIComponent(workspaceId)}`;
+  }
   const res = await fetch(
-    `${BASE}/api/sessions?limit=${limit}&offset=${offset}`,
+    url,
     { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
   throwIfAuthError('listSessions', res.status);
@@ -112,6 +116,7 @@ export interface CreateSessionOptions {
   workerType?: string;
   title?: string;
   workDir?: string;
+  workspaceId?: string;
 }
 
 export async function createSession(opts: CreateSessionOptions, signal?: AbortSignal): Promise<{ session_id: string }> {
@@ -122,6 +127,9 @@ export async function createSession(opts: CreateSessionOptions, signal?: AbortSi
   }
   if (opts.workDir) {
     url += `&work_dir=${encodeURIComponent(opts.workDir)}`;
+  }
+  if (opts.workspaceId) {
+    url += `&workspace_id=${encodeURIComponent(opts.workspaceId)}`;
   }
   const res = await fetch(url, { method: 'POST', headers: authHeaders(), ...authOpts(), signal });
   throwIfAuthError('createSession', res.status);

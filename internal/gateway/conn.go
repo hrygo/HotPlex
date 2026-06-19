@@ -52,6 +52,7 @@ type SessionStarter interface {
 	StartSession(ctx context.Context, p worker.SessionStartParams) error
 	ResumeSession(ctx context.Context, id string, workDir string) error
 	SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir string) (*SwitchWorkDirResult, error)
+	GetWorkspaceByID(ctx context.Context, id string) (*session.Workspace, error)
 }
 
 var _ SessionStarter = (*Bridge)(nil) // compile-time: Bridge implements SessionStarter
@@ -62,9 +63,10 @@ type Conn struct {
 	wc  *websocket.Conn
 	hub *Hub
 
-	sessionID string
-	userID    string
-	botID     string // SEC-007: bot isolation tag from X-Bot-ID header or init envelope
+	sessionID   string
+	userID      string
+	botID       string // SEC-007: bot isolation tag from X-Bot-ID header or init envelope
+	workspaceID string // workspace ID
 
 	// pendingAuth defers authentication to the init envelope (browser WS clients).
 	pendingAuth bool
@@ -328,6 +330,34 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 	if workDir == "" {
 		workDir = c.hub.cfgStore.Load().Worker.DefaultWorkDir
 	}
+
+	var workspaceID string
+	if initData.WorkspaceID != "" {
+		if c.starter == nil {
+			workspaceID = initData.WorkspaceID
+		} else {
+			ws, err := c.starter.GetWorkspaceByID(context.Background(), initData.WorkspaceID)
+			if err != nil {
+				c.sendInitError(events.ErrCodeInvalidMessage, "workspace not found")
+				observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
+				return "", nil, err
+			}
+			if ws.Status == "disabled" {
+				c.sendInitError(events.ErrCodeInvalidMessage, "workspace is disabled")
+				observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
+				return "", nil, fmt.Errorf("init: workspace %s is disabled", initData.WorkspaceID)
+			}
+			if ws.OwnerUserID != "anonymous" && ws.OwnerUserID != c.userID {
+				c.sendInitError(events.ErrCodeInvalidMessage, "workspace access denied")
+				observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
+				return "", nil, fmt.Errorf("init: workspace %s access denied for user %s", initData.WorkspaceID, c.userID)
+			}
+			workDir = ws.WorkDir
+			workspaceID = ws.ID
+		}
+	}
+	c.workspaceID = workspaceID
+
 	expanded, err := validateAndExpandWorkDir(workDir)
 	if err != nil {
 		c.sendInitError(events.ErrCodeInvalidMessage, err.Error())
@@ -353,7 +383,13 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 		}
 	}
 	if sessionID == "" {
-		sessionID = session.DeriveSessionKey(c.userID, initData.WorkerType, env.SessionID, "", workDir)
+		sessionID = session.DeriveSessionKey(c.userID, initData.WorkerType, env.SessionID, workspaceID, workDir)
+	}
+
+	if preResolved != nil && preResolved.WorkspaceID != workspaceID {
+		c.sendInitError(events.ErrCodeInvalidMessage, "session workspace mismatch")
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
+		return "", nil, fmt.Errorf("init: session %s workspace mismatch", sessionID)
 	}
 
 	if !c.hub.InitThrottle.Check(sessionID) {
@@ -429,6 +465,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 			Platform:     platformWebChat,
 			Title:        initData.Title,
 			ClientKey:    clientKey,
+			WorkspaceID:  c.workspaceID,
 		}); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			c.sendInitError(events.ErrCodeInternalError, "failed to create session")
@@ -469,6 +506,7 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 		Platform:     platformWebChat,
 		Title:        initData.Title,
 		ClientKey:    clientKey,
+		WorkspaceID:  c.workspaceID,
 	}); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to start session")
@@ -503,6 +541,7 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 		Platform:     platformWebChat,
 		Title:        initData.Title,
 		ClientKey:    clientKey,
+		WorkspaceID:  c.workspaceID,
 	}); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, fmt.Sprintf("failed to recreate deleted session: %v", err))

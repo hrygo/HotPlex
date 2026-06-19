@@ -97,13 +97,18 @@ export function createInitEnvelope(
   sessionId: string | undefined,
   workerType: string,
   config?: InitData['config'],
-  authToken?: string
+  authToken?: string,
+  workspaceId?: string
 ): Envelope<InitData> {
   const data: InitData = {
     version: AEP_VERSION,
     worker_type: workerType as InitData['worker_type'],
     config,
   };
+
+  if (workspaceId) {
+    data.workspace_id = workspaceId;
+  }
 
   if (authToken) {
     data.auth = { token: authToken };

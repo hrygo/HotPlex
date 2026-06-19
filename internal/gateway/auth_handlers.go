@@ -81,14 +81,40 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "cookie error")
 		return
 	}
+	// 在 touch 前读原 last_login_at,判定是否首次登录(供前端 onboarding)。
+	firstLogin := false
+	if u, lerr := h.idp.Lookup(r.Context(), uid); lerr == nil && u.LastLoginAt == 0 {
+		firstLogin = true
+	}
 	_ = h.store.TouchUserLastLogin(r.Context(), uid, h.nowUnix()) // non-critical on success
-	respondJSON(w, map[string]string{"user_id": uid})
+	respondJSON(w, map[string]any{"user_id": uid, "first_login": firstLogin})
 }
 
 // Logout: POST /api/auth/logout — clears the cookie.
 func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 	h.cookieAuth.Clear(w, r)
 	w.WriteHeader(http.StatusOK)
+}
+
+// BootstrapStatus: GET /api/auth/bootstrap-status — whether any admin exists.
+//
+// Public (no auth): the login page polls this to guide first-time setup.
+// Registered OUTSIDE the CookieAuth-gated auth block in routes.go so it stays
+// reachable when the system is not yet bootstrapped (CookieAuth may be nil).
+func BootstrapStatus(store session.UserWorkspaceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		has, err := store.HasAdmin(r.Context())
+		if err != nil {
+			writeAppError(w, http.StatusInternalServerError, "INTERNAL", "check bootstrap status")
+			return
+		}
+		// Public, unauthenticated endpoint polled by the login page on load.
+		// Cache briefly to dampen scripted/automated load — bootstrap state
+		// changes rarely (only on first admin creation), so 30s is a safe TTL.
+		// (Pairs with idx_users_role migration 021 for the underlying query.)
+		w.Header().Set("Cache-Control", "public, max-age=30")
+		respondJSON(w, map[string]bool{"bootstrapped": has})
+	}
 }
 
 // Me: GET /api/auth/me — returns the current user's profile.
@@ -108,9 +134,11 @@ func (h *AuthHandlers) Me(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "user not found")
 		return
 	}
-	respondJSON(w, map[string]string{
-		"id": u.ID, "username": u.Username, "role": u.Role, "status": u.Status,
-	})
+	// Return the full user profile; PasswordHash is json:"-" so it never
+	// leaves the server. This fills display_name/created_at/updated_at/
+	// last_login_at expected by the frontend User type, which the minimal
+	// string map omitted (webchat/lib/api/auth.ts).
+	respondJSON(w, u)
 }
 
 type acceptInviteRequest struct {
@@ -208,7 +236,7 @@ func (h *AuthHandlers) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 			"invitation_id", inv.ID, "user_id", uid, "err", err)
 	}
 	_ = h.cookieAuth.SetCookie(w, r, uid)
-	respondJSON(w, map[string]string{"user_id": uid})
+	respondJSON(w, map[string]any{"user_id": uid, "first_login": true})
 }
 
 // isUniqueViolation detects a UNIQUE constraint violation across SQLite and PG.

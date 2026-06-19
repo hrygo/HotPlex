@@ -12,7 +12,7 @@ import (
 func TestOAuthManager_Empty(t *testing.T) {
 	t.Parallel()
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	m := NewOAuthManager(ca)
@@ -31,7 +31,7 @@ func TestOAuthManager_ReloadSuccess(t *testing.T) {
 	mock := newMockOIDCServer(t)
 	t.Cleanup(mock.close)
 
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 	m := NewOAuthManager(ca)
 
@@ -196,7 +196,7 @@ func TestOAuthManager_ReloadRediscoverOnClientIDChange(t *testing.T) {
 
 func mustCookieAuth(t *testing.T) *CookieAuth {
 	t.Helper()
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 	return ca
 }

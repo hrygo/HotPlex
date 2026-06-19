@@ -576,6 +576,7 @@ func (c AutoRetryConfig) Defaults() AutoRetryConfig {
 type SecurityConfig struct {
 	APIKeyHeader   string   `mapstructure:"api_key_header"`
 	APIKeys        []string `mapstructure:"api_keys"`
+	CookieSecret   string   `mapstructure:"cookie_secret"`
 	TLSEnabled     bool     `mapstructure:"tls_enabled"`
 	TLSCertFile    string   `mapstructure:"tls_cert_file"`
 	TLSKeyFile     string   `mapstructure:"tls_key_file"`

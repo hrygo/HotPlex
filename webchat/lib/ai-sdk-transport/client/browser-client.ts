@@ -139,6 +139,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       workerType: config.workerType,
       apiKey: config.apiKey,
       authToken: config.authToken,
+      workspaceId: config.workspaceId,
       initConfig: config.initConfig,
       reconnect: config.reconnect ?? { enabled: true },
       heartbeat: config.heartbeat ?? {},
@@ -224,6 +225,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           this.config.workerType,
           this.config.initConfig,
           this.config.authToken,
+          this.config.workspaceId
         );
 
         const onOpen = () => {

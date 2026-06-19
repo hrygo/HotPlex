@@ -21,12 +21,13 @@ const WORKER_OPTIONS: WorkerOption[] = [
 interface NewSessionModalProps {
   onConfirm: (title: string, workerType: string, workDir: string) => void;
   onCancel: () => void;
+  defaultWorkDir?: string;
 }
 
-export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
+export function NewSessionModal({ onConfirm, onCancel, defaultWorkDir }: NewSessionModalProps) {
   const [title, setTitle] = useState("");
   const [selectedWorker, setSelectedWorker] = useState("claude_code");
-  const [workDir, setWorkDir] = useState(configWorkDir);
+  const [workDir, setWorkDir] = useState(defaultWorkDir || configWorkDir);
 
   const trimmedTitle = title.trim();
 

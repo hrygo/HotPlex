@@ -135,6 +135,14 @@ func (m *mockAPIBridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWork
 	return args.Get(0).(*SwitchWorkDirResult), args.Error(1)
 }
 
+func (m *mockAPIBridge) GetWorkspaceByID(ctx context.Context, id string) (*session.Workspace, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*session.Workspace), args.Error(1)
+}
+
 // ─── Mock TurnsReader for API tests ────────────────────────────────
 
 type mockTurnsStore struct {

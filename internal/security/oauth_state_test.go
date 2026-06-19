@@ -25,7 +25,7 @@ func TestGenerateStateAndVerifier(t *testing.T) {
 
 func TestStateCookie_SetAndVerify(t *testing.T) {
 	t.Parallel()
-	ca, err := NewCookieAuth()
+	ca, err := NewCookieAuth("")
 	require.NoError(t, err)
 
 	state, verifier, _, _ := GenerateStateAndVerifier()
@@ -55,7 +55,7 @@ func TestStateCookie_SetAndVerify(t *testing.T) {
 
 func TestStateCookie_CSRFDetected(t *testing.T) {
 	t.Parallel()
-	ca, _ := NewCookieAuth()
+	ca, _ := NewCookieAuth("")
 
 	state, verifier, _, _ := GenerateStateAndVerifier()
 	payload := StateCookiePayload{
@@ -78,7 +78,7 @@ func TestStateCookie_CSRFDetected(t *testing.T) {
 
 func TestStateCookie_ProviderMismatch(t *testing.T) {
 	t.Parallel()
-	ca, _ := NewCookieAuth()
+	ca, _ := NewCookieAuth("")
 
 	state, verifier, _, _ := GenerateStateAndVerifier()
 	payload := StateCookiePayload{
@@ -101,7 +101,7 @@ func TestStateCookie_ProviderMismatch(t *testing.T) {
 
 func TestStateCookie_Expired(t *testing.T) {
 	t.Parallel()
-	ca, _ := NewCookieAuth()
+	ca, _ := NewCookieAuth("")
 
 	state, verifier, _, _ := GenerateStateAndVerifier()
 	payload := StateCookiePayload{
@@ -125,7 +125,7 @@ func TestStateCookie_Expired(t *testing.T) {
 
 func TestStateCookie_Tampered(t *testing.T) {
 	t.Parallel()
-	ca, _ := NewCookieAuth()
+	ca, _ := NewCookieAuth("")
 
 	w := httptest.NewRecorder()
 	// Set a tampered cookie directly.
@@ -145,7 +145,7 @@ func TestStateCookie_Tampered(t *testing.T) {
 
 func TestStateCookie_Missing(t *testing.T) {
 	t.Parallel()
-	ca, _ := NewCookieAuth()
+	ca, _ := NewCookieAuth("")
 	r := httptest.NewRequest(http.MethodGet, "/callback", nil)
 	_, err := VerifyStateCookie(r, ca, "any", "any")
 	require.Error(t, err)

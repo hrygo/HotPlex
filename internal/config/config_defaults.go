@@ -83,6 +83,7 @@ func Default() *Config {
 		Security: SecurityConfig{
 			APIKeyHeader:    "X-API-Key",
 			APIKeys:         nil,
+			CookieSecret:    "",
 			TLSEnabled:      false,
 			AllowedOrigins:  []string{"*"},
 			CSP:             "", // empty → webchat/docs use package-level default

@@ -139,6 +139,14 @@ func (b *Bridge) UpdateAgentConfigExclude(m map[string][]string) {
 	b.agentConfigExclude.Store(m)
 }
 
+// GetWorkspaceByID retrieves a workspace by its ID from the workspace store.
+func (b *Bridge) GetWorkspaceByID(ctx context.Context, id string) (*session.Workspace, error) {
+	if b.wsStore == nil {
+		return nil, fmt.Errorf("bridge: workspace store is not configured")
+	}
+	return b.wsStore.GetWorkspaceByID(ctx, id)
+}
+
 // StartSession creates a new session and starts a worker.
 func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) error {
 	if b.closed.Load() {

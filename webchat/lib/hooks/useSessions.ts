@@ -27,6 +27,8 @@ export interface UseSessionsOptions {
   onSelect: (sessionId: string) => void;
   /** Initial session to restore (e.g., from URL or localStorage). */
   initialSessionId?: string | null;
+  /** Active workspace ID (spec ⑥) */
+  workspaceId?: string;
 }
 
 export interface UseSessionsReturn {
@@ -48,6 +50,7 @@ export interface UseSessionsReturn {
 export function useSessions({
   onSelect,
   initialSessionId,
+  workspaceId,
 }: UseSessionsOptions): UseSessionsReturn {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeSession, setActiveSession] = useState<SessionInfo | null>(null);
@@ -61,7 +64,7 @@ export function useSessions({
   initialRef.current = initialSessionId;
 
   const isCreating = useRef(false);
-  const STORAGE_KEY = 'hotplex_active_session_id';
+  const STORAGE_KEY = workspaceId ? `hotplex_active_session_id_${workspaceId}` : 'hotplex_active_session_id';
   const DEFAULT_WORKER_TYPE = defaultWorkerType;
 
   // Deterministic anchor session — ensures the first auto-created session
@@ -70,8 +73,9 @@ export function useSessions({
 
   const refreshSessions = useCallback(async () => {
     try {
+      setIsLoading(true);
       setError(null);
-      const { sessions: list } = await listSessions(20, 0);
+      const { sessions: list } = await listSessions(20, 0, workspaceId);
       const filtered = list.filter(s => s.state !== 'deleted');
       setSessions(filtered);
 
@@ -116,7 +120,13 @@ export function useSessions({
         isCreating.current = true;
         try {
           const effectiveWorkDir = configWorkDir || undefined;
-          const { session_id } = await createSession({ clientSessionId: ANCHOR_SESSION_ID, workerType: DEFAULT_WORKER_TYPE, title: ANCHOR_SESSION_ID, workDir: effectiveWorkDir });
+          const { session_id } = await createSession({
+            clientSessionId: ANCHOR_SESSION_ID,
+            workerType: DEFAULT_WORKER_TYPE,
+            title: ANCHOR_SESSION_ID,
+            workDir: effectiveWorkDir,
+            workspaceId
+          });
           const now = new Date().toISOString();
           const newSession: SessionInfo = {
             id: session_id,
@@ -135,26 +145,31 @@ export function useSessions({
         } finally {
           isCreating.current = false;
         }
+      } else {
+        // No sessions and we shouldn't auto-create (e.g. initId is set or already checking),
+        // or there is a savedId. In any case, if none matched, clear active session.
+        if (filtered.length === 0) {
+          setActiveSession(null);
+        }
       }
     } catch (e) {
       setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to load sessions'));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [workspaceId, STORAGE_KEY, DEFAULT_WORKER_TYPE]);
 
-  // Load sessions on mount
+  // Load sessions when mount or workspaceId changes
   useEffect(() => {
     refreshSessions();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [workspaceId, refreshSessions]);
 
   const selectSession = useCallback((session: SessionInfo) => {
     setActiveSession(session);
     onSelectRef.current(session.id);
     localStorage.setItem(STORAGE_KEY, session.id);
     setIsOpen(false);
-  }, []);
+  }, [STORAGE_KEY]);
 
   const createNewSession = useCallback(async (title: string, workerType?: string, workDir?: string) => {
     const wt = workerType || DEFAULT_WORKER_TYPE;
@@ -163,7 +178,13 @@ export function useSessions({
     isCreating.current = true;
     setIsLoading(true);
     try {
-      const { session_id } = await createSession({ clientSessionId: newSessionId(), workerType: wt, title: title || undefined, workDir: effectiveWorkDir });
+      const { session_id } = await createSession({
+        clientSessionId: newSessionId(),
+        workerType: wt,
+        title: title || undefined,
+        workDir: effectiveWorkDir,
+        workspaceId
+      });
       const now = new Date().toISOString();
       const newSession: SessionInfo = {
         id: session_id,
@@ -185,7 +206,7 @@ export function useSessions({
       setIsLoading(false);
       isCreating.current = false;
     }
-  }, []);
+  }, [workspaceId, STORAGE_KEY, DEFAULT_WORKER_TYPE]);
 
   const removeSession = useCallback(async (id: string) => {
     // Optimistic remove
@@ -202,7 +223,7 @@ export function useSessions({
       setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to delete session'));
       refreshSessions();
     }
-  }, [activeSession, refreshSessions]);
+  }, [activeSession, refreshSessions, STORAGE_KEY]);
 
   // Handle manual session selection
   const handleSessionSelect = useCallback((id: string) => {

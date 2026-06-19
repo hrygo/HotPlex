@@ -73,6 +73,9 @@ func writeCORSHeaders(w http.ResponseWriter, origin string) {
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key")
 	if origin != "*" {
+		// Echo-back (pinned origin): emit Allow-Credentials so cookie auth works
+		// cross-origin. Wildcard "*" cannot use credentials per the CORS spec.
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Vary", "Origin")
 	}
 }

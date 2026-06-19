@@ -199,20 +199,64 @@ func setupRoutes(
 		}
 	}
 
+	// bootstrap-status is intentionally registered OUTSIDE the CookieAuth-gated
+	// auth block below: it must stay reachable before any admin exists (the very
+	// state the login page needs to detect). Only requires the workspace store.
+	if deps.WorkspaceStore != nil {
+		mux.Handle("GET /api/auth/bootstrap-status", corsMw(gateway.BootstrapStatus(deps.WorkspaceStore)))
+		mux.Handle("OPTIONS /api/auth/bootstrap-status", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	}
+
 	// WebChat multi-tenant auth endpoints (spec ① + spec ④).
 	// Wired when cookieAuth is available (webchat enabled).
 	if deps.CookieAuth != nil && deps.WorkspaceStore != nil {
 		// Account-login handlers (spec ①): requires LocalAccountProvider.
 		// LocalAccountProvider is created lazily from WorkspaceStore + bcrypt cost.
 		lap := security.NewLocalAccountProvider(deps.WorkspaceStore, security.BcryptCostDefault)
+		auth.SetIdentityProvider(lap)
+
 		authHandlers := gateway.NewAuthHandlers(auth, deps.CookieAuth, deps.WorkspaceStore, lap)
 		mux.Handle("POST /api/auth/login", corsMw(http.HandlerFunc(authHandlers.Login)))
 		mux.Handle("POST /api/auth/logout", corsMw(http.HandlerFunc(authHandlers.Logout)))
 		mux.Handle("GET /api/auth/me", corsMw(http.HandlerFunc(authHandlers.Me)))
 		mux.Handle("POST /api/auth/accept-invite", corsMw(http.HandlerFunc(authHandlers.AcceptInvite)))
-		log.Info("auth endpoints registered", "channels", "login,logout,me,accept-invite")
 
-		// OAuth SSO handlers (spec ④): requires OAuthManager with providers.
+		// App-level Admin endpoints
+		mux.Handle("POST /api/admin/invitations", corsMw(http.HandlerFunc(authHandlers.AdminCreateInvitation)))
+		mux.Handle("GET /api/admin/invitations", corsMw(http.HandlerFunc(authHandlers.AdminListInvitations)))
+		mux.Handle("DELETE /api/admin/invitations/{id}", corsMw(http.HandlerFunc(authHandlers.AdminDeleteInvitation)))
+		mux.Handle("GET /api/admin/users", corsMw(http.HandlerFunc(authHandlers.AdminListUsers)))
+		mux.Handle("PATCH /api/admin/users/{id}", corsMw(http.HandlerFunc(authHandlers.AdminUpdateUserStatus)))
+
+		// OPTIONS preflight handlers for Auth & Admin APIs
+		mux.Handle("OPTIONS /api/auth/login", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/auth/logout", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/auth/me", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/auth/accept-invite", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/invitations", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/invitations/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/invitations/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/users", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/users/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/users/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+
+		// Workspaces CRUD endpoints
+		wsHandlers := gateway.NewWorkspaceHandlers(deps.WorkspaceStore, deps.CookieAuth, auth)
+		mux.Handle("POST /api/workspaces", corsMw(http.HandlerFunc(wsHandlers.Create)))
+		mux.Handle("GET /api/workspaces", corsMw(http.HandlerFunc(wsHandlers.List)))
+		mux.Handle("GET /api/workspaces/{id}", corsMw(http.HandlerFunc(wsHandlers.Get)))
+		mux.Handle("PATCH /api/workspaces/{id}", corsMw(http.HandlerFunc(wsHandlers.Update)))
+		mux.Handle("DELETE /api/workspaces/{id}", corsMw(http.HandlerFunc(wsHandlers.Delete)))
+
+		// OPTIONS preflight handlers for Workspaces API
+		mux.Handle("OPTIONS /api/workspaces", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/workspaces/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/workspaces/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+
+		log.Info("auth, admin, and workspaces endpoints registered", "channels", "login,logout,me,accept-invite,workspaces,admin")
+
+		// OAuth SSO handlers (spec ④): when OAuthManager has providers,
+		// register the full SSO flow (providers list + login + callback).
 		if deps.OAuthManager != nil && deps.OAuthManager.HasProviders() {
 			oauthHandlers := gateway.NewOAuthHandlers(deps.OAuthManager, deps.CookieAuth, deps.WorkspaceStore, log)
 			mux.Handle("GET /api/auth/oauth/providers", corsMw(http.HandlerFunc(oauthHandlers.Providers)))
@@ -220,6 +264,14 @@ func setupRoutes(
 			mux.Handle("GET /api/auth/oauth/{provider}/callback", http.HandlerFunc(oauthHandlers.Callback))
 			// Note: login/callback are redirect flows, CORS not needed (browser navigates directly).
 			log.Info("oauth SSO endpoints registered", "providers", deps.OAuthManager.List())
+		} else {
+			// Always expose providers discovery so a cross-origin browser gets
+			// 200 + CORS headers instead of a CORS-masked 404 spamming the login
+			// console when SSO is unconfigured. Returns an empty list.
+			mux.Handle("GET /api/auth/oauth/providers", corsMw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte("[]"))
+			})))
 		}
 	}
 

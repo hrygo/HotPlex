@@ -19,13 +19,14 @@ const (
 
 // InitData is the payload of a client → gateway init message.
 type InitData struct {
-	Version    string            `json:"version"`
-	WorkerType worker.WorkerType `json:"worker_type"`
-	SessionID  string            `json:"session_id,omitempty"`
-	Title      string            `json:"title,omitempty"`
-	Auth       InitAuth          `json:"auth,omitempty"`
-	Config     InitConfig        `json:"config,omitempty"`
-	ClientCaps ClientCaps        `json:"client_caps,omitempty"`
+	Version     string            `json:"version"`
+	WorkerType  worker.WorkerType `json:"worker_type"`
+	SessionID   string            `json:"session_id,omitempty"`
+	Title       string            `json:"title,omitempty"`
+	WorkspaceID string            `json:"workspace_id,omitempty"`
+	Auth        InitAuth          `json:"auth,omitempty"`
+	Config      InitConfig        `json:"config,omitempty"`
+	ClientCaps  ClientCaps        `json:"client_caps,omitempty"`
 }
 
 // InitAuth carries authentication data embedded in the init envelope.
@@ -154,6 +155,9 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 	}
 	sessionID = messaging.SanitizeText(sessionID)
 
+	workspaceID, _ := data["workspace_id"].(string)
+	workspaceID = messaging.SanitizeText(workspaceID)
+
 	var auth InitAuth
 	if authData, ok := data["auth"].(map[string]any); ok {
 		if token, ok := authData["token"].(string); ok {
@@ -206,12 +210,13 @@ func ValidateInit(env *events.Envelope) (InitData, *InitError) {
 	}
 
 	return InitData{
-		Version:    version,
-		WorkerType: worker.WorkerType(wt),
-		SessionID:  sessionID,
-		Title:      title,
-		Auth:       auth,
-		Config:     cfg,
+		Version:     version,
+		WorkerType:  worker.WorkerType(wt),
+		SessionID:   sessionID,
+		Title:       title,
+		WorkspaceID: workspaceID,
+		Auth:        auth,
+		Config:      cfg,
 	}, nil
 }
 

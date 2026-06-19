@@ -3,7 +3,7 @@ package security
 
 import (
 	"context"
-	"crypto/subtle"
+	"crypto/sha256"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -23,28 +23,36 @@ const botIDHeader = "X-Bot-ID"
 const botIDQueryParam = "bot_id"
 
 // Authenticator validates API keys and user credentials.
+//
+// API keys are stored as SHA256 hashes in memory — the raw key is never kept
+// after hashing. This provides O(1) lookup with a single hash computation per
+// request and eliminates timing side-channels (map lookup is constant-time
+// regardless of key count).
 type Authenticator struct {
 	mu            sync.RWMutex
 	cfg           *config.SecurityConfig
-	validKey      map[string]bool  // config-sourced keys (YAML + env)
-	dbKeys        map[string]bool  // database-sourced keys (Admin API CRUD)
-	keyResolver   APIKeyResolver   // optional; maps API keys to user identities. nil = "api_user"
-	devModeLocked bool             // true once any key has existed; prevents dev mode re-enable
-	cookieAuth    *CookieAuth      // optional; HMAC cookie auth (3rd priority after header/query)
-	idp           IdentityProvider // optional; account-login provider (LocalAccountProvider / future OAuth)
+	validKeyHash  map[[32]byte]bool // SHA256 hashes of config-sourced keys
+	dbKeyHash     map[[32]byte]bool // SHA256 hashes of database-sourced keys
+	numValidKeys  int               // count of config keys (for dev-mode check)
+	numDBKeys     int               // count of DB keys (for dev-mode check)
+	keyResolver   APIKeyResolver    // optional; maps API keys to user identities. nil = "api_user"
+	devModeLocked bool              // true once any key has existed; prevents dev mode re-enable
+	cookieAuth    *CookieAuth       // optional; HMAC cookie auth (3rd priority after header/query)
+	idp           IdentityProvider  // optional; account-login provider (LocalAccountProvider / future OAuth)
 }
 
 // NewAuthenticator creates a new authenticator.
 func NewAuthenticator(cfg *config.SecurityConfig) *Authenticator {
-	validKey := make(map[string]bool)
+	hashes := make(map[[32]byte]bool, len(cfg.APIKeys))
 	for _, k := range cfg.APIKeys {
-		validKey[k] = true
+		hashes[sha256.Sum256([]byte(k))] = true
 	}
 	return &Authenticator{
 		cfg:           cfg,
-		validKey:      validKey,
-		dbKeys:        make(map[string]bool),
-		devModeLocked: len(validKey) > 0,
+		validKeyHash:  hashes,
+		dbKeyHash:     make(map[[32]byte]bool),
+		numValidKeys:  len(hashes),
+		devModeLocked: len(hashes) > 0,
 	}
 }
 
@@ -83,20 +91,21 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	key, found := a.extractAPIKey(r)
 	if !found {
 		// 3rd priority: cookie auth fallback (webchat same-origin).
+		// Disabled-user enforcement is shared via AuthenticateActiveCookie with
+		// the WS upgrade and workspace REST paths.
+		a.mu.RUnlock()
 		if a.cookieAuth != nil {
-			if uid, ok := a.cookieAuth.Authenticate(r); ok {
-				a.mu.RUnlock()
+			if uid, ok := a.AuthenticateActiveCookie(r); ok {
 				botID := BotIDFromRequest(r)
 				return uid, botID, nil
 			}
 		}
-		a.mu.RUnlock()
 		return "", "", ErrUnauthorized
 	}
 
 	// Dev mode: no keys configured — allow all.
 	// devModeLocked prevents re-enable after keys have existed (security: auth bypass window).
-	if len(a.validKey) == 0 && len(a.dbKeys) == 0 && !a.devModeLocked {
+	if a.numValidKeys == 0 && a.numDBKeys == 0 && !a.devModeLocked {
 		a.mu.RUnlock()
 		botID := BotIDFromRequest(r)
 		return "anonymous", botID, nil
@@ -110,22 +119,73 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 
 	// Snapshot resolver under lock, then release before calling external resolver.
 	resolver := a.keyResolver
+	idp := a.idp
 	a.mu.RUnlock()
 
+	uid := resolveUserIDWith(r.Context(), key, resolver)
+	if idp != nil && uid != "anonymous" && uid != "api_user" {
+		u, err := idp.Lookup(r.Context(), uid)
+		if err != nil || u.Status == "disabled" {
+			return "", "", ErrUnauthorized
+		}
+	}
+
 	botID := BotIDFromRequest(r)
-	return resolveUserIDWith(r.Context(), key, resolver), botID, nil
+	return uid, botID, nil
+}
+
+// AuthenticateActiveCookie authenticates a cookie-bearing request and rejects
+// disabled users. It mirrors the disabled-user enforcement of the API-key path
+// (AuthenticateKey / AuthenticateRequest) so that a valid cookie alone can no
+// longer grant access to a user disabled by an admin, for the cookie's full 7d
+// lifetime.
+//
+// Returns (userID, true) only when the CookieAuth is configured, the request
+// carries a valid HMAC cookie, and the user is not disabled. The idp lookup is
+// skipped in dev mode (nil idp) and for system identities ("anonymous",
+// "api_user"), matching AuthenticateRequest semantics. ("", false) is returned
+// when there is no cookie, the cookie is invalid, the user is disabled, or the
+// lookup fails.
+//
+// Hub.HandleHTTP (WS upgrade) and WorkspaceHandlers.requireAuth use this so the
+// cookie-auth paths share one disabled-user enforcement definition with the
+// REST API.
+func (a *Authenticator) AuthenticateActiveCookie(r *http.Request) (string, bool) {
+	// Snapshot cookieAuth/idp under RLock: SetCookieAuth/SetIdentityProvider
+	// mutate them under the write lock, so an unlocked field read would race if
+	// a hot reload ever reconfigures them at runtime (caught by -race). Snapshot
+	// the pointers, release the lock, then do IO (Authenticate/Lookup).
+	a.mu.RLock()
+	cookieAuth := a.cookieAuth
+	idp := a.idp
+	a.mu.RUnlock()
+	if cookieAuth == nil {
+		return "", false
+	}
+	uid, ok := cookieAuth.Authenticate(r)
+	if !ok {
+		return "", false
+	}
+	if idp != nil && uid != "anonymous" && uid != "api_user" {
+		u, err := idp.Lookup(r.Context(), uid)
+		if err != nil || u.Status == "disabled" {
+			return "", false
+		}
+	}
+	return uid, true
 }
 
 // ReloadKeys dynamically replaces the set of valid API keys.
 func (a *Authenticator) ReloadKeys(cfg *config.SecurityConfig) {
-	validKey := make(map[string]bool)
+	hashes := make(map[[32]byte]bool, len(cfg.APIKeys))
 	for _, k := range cfg.APIKeys {
-		validKey[k] = true
+		hashes[sha256.Sum256([]byte(k))] = true
 	}
 	a.mu.Lock()
 	a.cfg = cfg
-	a.validKey = validKey
-	if len(validKey) > 0 {
+	a.validKeyHash = hashes
+	a.numValidKeys = len(hashes)
+	if len(hashes) > 0 {
 		a.devModeLocked = true
 	}
 	a.mu.Unlock()
@@ -139,28 +199,24 @@ func (a *Authenticator) SetKeyResolver(r APIKeyResolver) {
 	a.mu.Unlock()
 }
 
-// authenticateKey performs constant-time comparison of the key against the valid key set.
-// Checks both config-sourced and database-sourced keys.
+// authenticateKey checks the incoming key against stored SHA256 hashes.
+// O(1) lookup: hash the input once, then check both hash maps.
 // Caller must hold at least RLock.
 func (a *Authenticator) authenticateKey(key string) bool {
-	for k := range a.validKey {
-		if subtle.ConstantTimeCompare([]byte(k), []byte(key)) == 1 {
-			return true
-		}
+	h := sha256.Sum256([]byte(key))
+	if a.validKeyHash[h] {
+		return true
 	}
-	for k := range a.dbKeys {
-		if subtle.ConstantTimeCompare([]byte(k), []byte(key)) == 1 {
-			return true
-		}
-	}
-	return false
+	return a.dbKeyHash[h]
 }
 
 // AddKey adds a database-sourced API key to the valid key set.
 // Called by Admin API after creating a new key in the database.
 func (a *Authenticator) AddKey(key string) {
+	h := sha256.Sum256([]byte(key))
 	a.mu.Lock()
-	a.dbKeys[key] = true
+	a.dbKeyHash[h] = true
+	a.numDBKeys = len(a.dbKeyHash)
 	a.devModeLocked = true
 	a.mu.Unlock()
 }
@@ -168,21 +224,16 @@ func (a *Authenticator) AddKey(key string) {
 // RemoveKey removes a database-sourced API key from the valid key set.
 // Called by Admin API after deleting a key from the database.
 func (a *Authenticator) RemoveKey(key string) {
+	h := sha256.Sum256([]byte(key))
 	a.mu.Lock()
-	delete(a.dbKeys, key)
-	empty := len(a.validKey) == 0 && len(a.dbKeys) == 0 && a.devModeLocked
+	delete(a.dbKeyHash, h)
+	a.numDBKeys = len(a.dbKeyHash)
+	empty := a.numValidKeys == 0 && a.numDBKeys == 0 && a.devModeLocked
 	a.mu.Unlock()
 	if empty {
 		slog.Warn("security: all API keys removed but dev mode is locked — restart gateway to restore anonymous access",
 			"dev_mode_locked", true)
 	}
-}
-
-// resolveUserID returns the user identity for a valid API key.
-// Checks the resolver first; falls back to "api_user" if no mapping exists.
-// Caller must hold at least RLock.
-func (a *Authenticator) resolveUserID(ctx context.Context, key string) string {
-	return resolveUserIDWith(ctx, key, a.keyResolver)
 }
 
 // resolveUserIDWith resolves user identity without holding any lock.
@@ -225,17 +276,28 @@ func (a *Authenticator) extractAPIKey(r *http.Request) (string, bool) {
 // Handles dev mode (no keys configured → "anonymous").
 func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string, bool) {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	if len(a.validKey) == 0 && len(a.dbKeys) == 0 && !a.devModeLocked {
+	if a.numValidKeys == 0 && a.numDBKeys == 0 && !a.devModeLocked {
 		// No keys configured — allow all (dev mode).
+		a.mu.RUnlock()
 		return "anonymous", true
 	}
 
 	if !a.authenticateKey(key) {
+		a.mu.RUnlock()
 		return "", false
 	}
-	return a.resolveUserID(ctx, key), true
+	resolver := a.keyResolver
+	idp := a.idp
+	a.mu.RUnlock()
+
+	uid := resolveUserIDWith(ctx, key, resolver)
+	if idp != nil && uid != "anonymous" && uid != "api_user" {
+		u, err := idp.Lookup(ctx, uid)
+		if err != nil || u.Status == "disabled" {
+			return "", false
+		}
+	}
+	return uid, true
 }
 
 // BotIDFromRequest extracts the bot ID from X-Bot-ID header or bot_id query param.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/hrygo/hotplex/internal/security"
 )
@@ -11,25 +12,32 @@ import (
 // Workspace is a per-user named project directory (spec §6.2).
 // work_dir is immutable after creation (enters session key derivation, spec §7).
 type Workspace struct {
-	ID                   string
-	OwnerUserID          string
-	Name                 string
-	WorkDir              string
-	AgentConfigOverrides string // JSON; spec ② fills, spec ① stays empty
-	WorkerPreference     string // spec ③ fills
-	Status               string
+	ID                   string `json:"id"`
+	OwnerUserID          string `json:"owner_user_id"`
+	Name                 string `json:"name"`
+	WorkDir              string `json:"work_dir"`
+	AgentConfigOverrides string `json:"agent_config_overrides"` // JSON value; spec ② fills, spec ① stays empty
+	WorkerPreference     string `json:"worker_preference"`      // spec ③ fills
+	Status               string `json:"status"`
+	CreatedAt            int64  `json:"created_at"`
+	UpdatedAt            int64  `json:"updated_at"`
 }
 
 // Invitation is a one-time invite code (spec §6.3).
+// json tags are required: AdminListInvitations responds with the struct
+// directly, so without them the field names serialize as PascalCase and the
+// snake_case frontend (auth.ts Invitation) reads undefined for every field —
+// including id, which made revoke hit DELETE /invitations/undefined (PR #762
+// review P0).
 type Invitation struct {
-	ID        string
-	Code      string
-	CreatedBy string
-	Role      string
-	UsedBy    *string // nil = unused
-	ExpiresAt int64
-	CreatedAt int64
-	UsedAt    *int64 // nil = unused
+	ID        string  `json:"id"`
+	Code      string  `json:"code"`
+	CreatedBy string  `json:"created_by"`
+	Role      string  `json:"role"`
+	UsedBy    *string `json:"used_by,omitempty"` // nil = unused
+	ExpiresAt int64   `json:"expires_at"`
+	CreatedAt int64   `json:"created_at,omitempty"`
+	UsedAt    *int64  `json:"used_at,omitempty"` // nil = unused
 }
 
 // UserIdentity binds an OAuth/OIDC identity to a local user (spec ④).
@@ -61,6 +69,7 @@ var (
 type UserWorkspaceStore interface {
 	security.UserStore
 	// users
+	HasAdmin(ctx context.Context) (bool, error)
 	ListUsers(ctx context.Context, limit, offset int) ([]*security.User, error)
 	UpdateUserStatus(ctx context.Context, id, status string, now int64) error
 	DeleteUser(ctx context.Context, id string) error
@@ -139,6 +148,8 @@ func scanWorkspace(sc rowScanner) (*Workspace, error) {
 	}
 	w.AgentConfigOverrides = overrides.String
 	w.WorkerPreference = pref.String
+	w.CreatedAt = createdAt.Int64
+	w.UpdatedAt = updatedAt.Int64
 	return &w, nil
 }
 
@@ -226,6 +237,18 @@ func (s *SQLiteStore) TouchUserLastLogin(ctx context.Context, userID string, now
 		_, err := s.db.ExecContext(ctx, queries["users.touch_last_login"], now, now, userID)
 		return err
 	})
+}
+
+func (s *SQLiteStore) HasAdmin(ctx context.Context) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, queries["users.has_admin"]).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("has admin: %w", err)
+	}
+	return true, nil
 }
 
 // --- SQLiteStore: workspaces ---
