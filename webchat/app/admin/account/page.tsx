@@ -22,7 +22,7 @@ export default function AccountPage() {
     setLoading(true);
     getMe()
       .then((u) => { if (!cancelled) setUser(u); })
-      .catch((err) => { if (!cancelled) setError(String(err)); })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
@@ -49,7 +49,7 @@ export default function AccountPage() {
     <div className="min-h-screen bg-[var(--bg-base)] p-6">
       <div className="max-w-2xl mx-auto">
         <h1 className="text-xl font-display font-bold text-[var(--text-primary)] mb-1">Account</h1>
-        <p className="text-xs text-[var(--text-faint)] mb-6">Your workspace credential profile</p>
+        <p className="text-xs text-[var(--text-faint)] mb-6">Your account profile</p>
 
         <div className="rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 space-y-4">
           {/* Avatar + name */}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   getMe,
   adminListUsers,
@@ -11,6 +11,7 @@ import {
   type User,
   type Invitation,
 } from '@/lib/api/auth';
+import { useAdminUI } from '@/context/admin-ui-context';
 
 const selectClass =
   'w-full rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)] transition-colors appearance-none';
@@ -28,6 +29,8 @@ function formatDate(ms: number): string {
 }
 
 export default function MembersPage() {
+  const { confirm, showToast } = useAdminUI();
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userLoaded, setUserLoaded] = useState(false);
 
@@ -37,6 +40,7 @@ export default function MembersPage() {
 
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [invitesLoading, setInvitesLoading] = useState(false);
+  const [invitesError, setInvitesError] = useState<string | null>(null);
 
   const [inviteRole, setInviteRole] = useState<'user' | 'admin'>('user');
   const [inviteTTL, setInviteTTL] = useState(86400);
@@ -44,6 +48,7 @@ export default function MembersPage() {
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
@@ -72,11 +77,12 @@ export default function MembersPage() {
 
   const loadInvitations = useCallback(async () => {
     setInvitesLoading(true);
+    setInvitesError(null);
     try {
       const res = await adminListInvitations();
       setInvitations(res.invitations ?? []);
-    } catch {
-      // ignore — list is best-effort
+    } catch (err) {
+      setInvitesError(err instanceof Error ? err.message : 'Failed to load invitations');
     } finally {
       setInvitesLoading(false);
     }
@@ -88,26 +94,46 @@ export default function MembersPage() {
     loadInvitations();
   }, [currentUser, loadUsers, loadInvitations]);
 
+  // Clear the copy-reset timer on unmount to avoid setState after unmount.
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
+
   const handleToggle = async (u: User) => {
+    const next: 'active' | 'disabled' = u.status === 'active' ? 'disabled' : 'active';
+    const isDisable = next === 'disabled';
+    const ok = await confirm(
+      isDisable ? 'Disable user' : 'Enable user',
+      isDisable
+        ? `Disable "${u.username}"? They will lose access immediately.`
+        : `Enable "${u.username}"? They will regain access.`,
+      { destructive: isDisable, confirmLabel: isDisable ? 'Disable' : 'Enable' },
+    );
+    if (!ok) return;
     setTogglingId(u.id);
     try {
-      const next = u.status === 'active' ? 'disabled' : 'active';
       await adminUpdateUserStatus(u.id, next);
       setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, status: next } : x)));
+      showToast(`${u.username} ${next}`, 'success');
     } catch (err) {
-      setUsersError(err instanceof Error ? err.message : 'Failed to update user');
+      showToast(err instanceof Error ? err.message : 'Failed to update user', 'error');
     } finally {
       setTogglingId(null);
     }
   };
 
   const handleRevoke = async (id: string) => {
+    const ok = await confirm(
+      'Revoke invitation',
+      'Revoke this invitation key? It can no longer be used to register.',
+      { destructive: true, confirmLabel: 'Revoke' },
+    );
+    if (!ok) return;
     setRevokingId(id);
     try {
       await adminDeleteInvitation(id);
       setInvitations((prev) => prev.filter((i) => i.id !== id));
-    } catch {
-      // ignore — keep stale, user can retry
+      showToast('Invitation revoked', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to revoke invitation', 'error');
     } finally {
       setRevokingId(null);
     }
@@ -120,6 +146,7 @@ export default function MembersPage() {
     try {
       const inv = await adminCreateInvitation(inviteRole, inviteTTL);
       setGeneratedCode(inv.code);
+      showToast('Invitation generated', 'success');
       loadInvitations();
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : 'Failed to create invitation');
@@ -132,9 +159,10 @@ export default function MembersPage() {
     try {
       await navigator.clipboard.writeText(code);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      // ignore
+      showToast('Failed to copy to clipboard', 'error');
     }
   };
 
@@ -314,7 +342,9 @@ export default function MembersPage() {
           <div>
             <h2 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">Pending Invitations</h2>
             <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 min-h-[120px]">
-              {invitesLoading ? (
+              {invitesError ? (
+                <p className="text-xs text-[var(--accent-coral)] py-6 text-center">{invitesError}</p>
+              ) : invitesLoading ? (
                 <p className="text-xs text-[var(--text-faint)] py-6 text-center">Loading invitations...</p>
               ) : invitations.length === 0 ? (
                 <p className="text-xs text-[var(--text-faint)] py-6 text-center">No pending invitation keys.</p>
