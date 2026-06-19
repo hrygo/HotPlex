@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import Link from 'next/link';
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -13,7 +14,7 @@ import { BrandIcon, WORKER_DISPLAY } from '@/components/icons';
 import { SessionPanel } from './SessionPanel';
 import { NewSessionModal } from './NewSessionModal';
 import { MetricsBar } from '@/components/assistant-ui/MetricsBar';
-import { workerType as defaultWorkerType, workDir, httpBase, type ConnectionState } from '@/lib/config';
+import { workerType as defaultWorkerType, httpBase, type ConnectionState } from '@/lib/config';
 import type { SessionMetrics } from '@/lib/hooks/useMetrics';
 import { useSkillsCache } from '@/lib/hooks/useSkillsCache';
 import {
@@ -34,7 +35,7 @@ import {
   type User,
   type Invitation,
 } from '@/lib/api/auth';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 function ChatInterface({
   sessionId,
@@ -95,15 +96,8 @@ export default function ChatContainer() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
-  const [workspacesLoading, setWorkspacesLoading] = useState(true);
   
   // Modals state
-  const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
-  const [newWorkspaceName, setNewWorkspaceName] = useState('');
-  const [newWorkspaceDir, setNewWorkspaceDir] = useState('');
-  const [newWorkspaceLoading, setNewWorkspaceLoading] = useState(false);
-  const [newWorkspaceError, setNewWorkspaceError] = useState('');
-
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'general' | 'ai' | 'members' | 'profile'>('general');
 
@@ -119,7 +113,6 @@ export default function ChatContainer() {
   // Fetch workspaces list
   const loadWorkspaces = useCallback(async (selectId?: string) => {
     try {
-      setWorkspacesLoading(true);
       const res = await listWorkspaces();
       let list = res.workspaces || [];
 
@@ -142,8 +135,6 @@ export default function ChatContainer() {
       }
     } catch (err) {
       console.error('Failed to load workspaces', err);
-    } finally {
-      setWorkspacesLoading(false);
     }
   }, []);
 
@@ -155,25 +146,6 @@ export default function ChatContainer() {
     setActiveWorkspace(ws);
     localStorage.setItem('hotplex_active_workspace_id', ws.id);
     setSessionMetrics(null); // Reset metrics on workspace switch
-  };
-
-  const handleCreateWorkspaceSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newWorkspaceName.trim() || !newWorkspaceDir.trim()) return;
-
-    setNewWorkspaceLoading(true);
-    setNewWorkspaceError('');
-    try {
-      const ws = await createWorkspace(newWorkspaceName.trim(), newWorkspaceDir.trim());
-      setNewWorkspaceName('');
-      setNewWorkspaceDir('');
-      setShowNewWorkspaceModal(false);
-      await loadWorkspaces(ws.id);
-    } catch (err: any) {
-      setNewWorkspaceError(err.message || 'Failed to create workspace.');
-    } finally {
-      setNewWorkspaceLoading(false);
-    }
   };
 
   const handleLogout = async () => {
@@ -257,9 +229,9 @@ export default function ChatContainer() {
               );
             })}
 
-            {/* Create Workspace Button */}
-            <button
-              onClick={() => setShowNewWorkspaceModal(true)}
+            {/* Create Workspace Button → full-page workspace management */}
+            <Link
+              href="/admin/workspaces/new"
               className="w-12 h-12 rounded-3xl hover:rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--accent-gold)] transition-all duration-300 group"
               title="Create Workspace"
             >
@@ -271,7 +243,7 @@ export default function ChatContainer() {
               <div className="absolute left-[80px] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-2.5 py-1.5 rounded-lg text-xs font-bold font-display text-[var(--text-primary)] whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 z-50 shadow-md">
                 Create Workspace
               </div>
-            </button>
+            </Link>
           </div>
         </div>
 
@@ -443,25 +415,6 @@ export default function ChatContainer() {
         />
       )}
 
-      {/* 5. Create Workspace Modal */}
-      {showNewWorkspaceModal && (
-        <CreateWorkspaceDialog
-          loading={newWorkspaceLoading}
-          error={newWorkspaceError}
-          onSubmit={handleCreateWorkspaceSubmit}
-          name={newWorkspaceName}
-          setName={setNewWorkspaceName}
-          dir={newWorkspaceDir}
-          setDir={setNewWorkspaceDir}
-          onCancel={() => {
-            setShowNewWorkspaceModal(false);
-            setNewWorkspaceName('');
-            setNewWorkspaceDir('');
-            setNewWorkspaceError('');
-          }}
-        />
-      )}
-
       {/* 6. Settings Modal */}
       {showSettingsModal && activeWorkspace && (
         <SettingsModal
@@ -481,103 +434,6 @@ export default function ChatContainer() {
         />
       )}
     </div>
-  );
-}
-
-// Sub-component: Create Workspace Dialog
-function CreateWorkspaceDialog({
-  onSubmit,
-  name,
-  setName,
-  dir,
-  setDir,
-  loading,
-  error,
-  onCancel,
-}: {
-  onSubmit: (e: React.FormEvent) => void;
-  name: string;
-  setName: (v: string) => void;
-  dir: string;
-  setDir: (v: string) => void;
-  loading: boolean;
-  error: string;
-  onCancel: () => void;
-}) {
-  return (
-    <motion.div
-      className="fixed inset-0 z-[300] flex items-center justify-center"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
-      <motion.div
-        className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-6 shadow-2xl z-10"
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-      >
-        <h3 className="font-display font-bold text-lg text-[var(--text-primary)] mb-1">
-          Create Workspace
-        </h3>
-        <p className="text-xs text-[var(--text-muted)] mb-4 leading-relaxed">
-          Workspaces organize your AI coding configurations and working directories.
-        </p>
-
-        {error && (
-          <div className="mb-4 rounded-lg border border-[var(--accent-coral)]/30 bg-[var(--accent-coral)]/10 p-3 text-xs text-[var(--accent-coral)]">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-              Workspace Name
-            </label>
-            <input
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. My Next Project"
-              className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-              Workspace Root Directory
-            </label>
-            <input
-              type="text"
-              required
-              value={dir}
-              onChange={(e) => setDir(e.target.value)}
-              placeholder="e.g. /Users/name/projects/my-app"
-              className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20 font-mono"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 rounded-lg text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-5 py-2 rounded-lg bg-[var(--accent-gold)] text-black text-xs font-bold hover:bg-[var(--accent-gold-bright)] shadow-md"
-            >
-              {loading ? 'Creating...' : 'Create'}
-            </button>
-          </div>
-        </form>
-      </motion.div>
-    </motion.div>
   );
 }
 
