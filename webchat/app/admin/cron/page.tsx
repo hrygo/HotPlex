@@ -1,12 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
 import { formatDuration } from '@/lib/utils/format-duration';
 import { formatRelative as formatTime } from '@/lib/utils/format-time';
 import type { CronJob } from '@/lib/types/admin';
+import { useResource } from '@/hooks/use-resource';
+import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,40 +32,25 @@ function formatSchedule(s: CronJob['schedule']): string {
 
 export default function CronPage() {
   const { showToast, confirm } = useAdminUI();
-  const [jobs, setJobs] = useState<CronJob[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: jobs, loading, error, reload } = useResource<CronJob[]>(
+    () => listCronJobs(),
+    [],
+  );
+  const jobList = jobs ?? [];
   const [filter, setFilter] = useState<FilterOption>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-
-  const loadJobs = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await listCronJobs();
-      setJobs(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load cron jobs');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadJobs();
-  }, [loadJobs]);
 
   // ---------------------------------------------------------------------------
   // Derived data
   // ---------------------------------------------------------------------------
 
-  const filtered = jobs.filter((j) => {
+  const filtered = jobList.filter((j) => {
     if (filter === 'all') return true;
     if (filter === 'enabled') return j.enabled;
     return !j.enabled;
   });
 
-  const enabledCount = jobs.filter((j) => j.enabled).length;
+  const enabledCount = jobList.filter((j) => j.enabled).length;
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -80,9 +67,7 @@ export default function CronPage() {
     try {
       setActionLoading(job.id);
       await updateCronJob(job.id, { enabled: next });
-      setJobs((prev) =>
-        prev.map((j) => (j.id === job.id ? { ...j, enabled: next } : j)),
-      );
+      await reload();
       showToast(`Cron job "${job.name}" ${next ? 'enabled' : 'disabled'} successfully.`, 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : `Failed to ${label} cron job`, 'error');
@@ -118,7 +103,7 @@ export default function CronPage() {
     try {
       setActionLoading(id);
       await deleteCronJob(id);
-      setJobs((prev) => prev.filter((j) => j.id !== id));
+      await reload();
       showToast(`Cron job "${name}" successfully deleted.`, 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to delete cron job', 'error');
@@ -142,7 +127,7 @@ export default function CronPage() {
             </h1>
             {!loading && !error && (
               <span className="text-[11px] font-mono text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)]">
-                {enabledCount} enabled / {jobs.length} total
+                {enabledCount} enabled / {jobList.length} total
               </span>
             )}
           </div>
@@ -162,7 +147,7 @@ export default function CronPage() {
 
             {/* Refresh */}
             <button
-              onClick={loadJobs}
+              onClick={reload}
               disabled={loading}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40"
             >
@@ -175,40 +160,16 @@ export default function CronPage() {
         </div>
 
         {/* Loading */}
-        {loading && (
-          <div className="flex items-center justify-center py-24">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-6 h-6 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs text-[var(--text-faint)]">Loading cron jobs...</span>
-            </div>
-          </div>
-        )}
+        {loading && <LoadingState label="Loading cron jobs..." />}
 
         {/* Error */}
-        {error && (
-          <div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-[var(--accent-coral)]">{error}</p>
-              <button
-                onClick={loadJobs}
-                className="text-xs font-medium text-[var(--accent-coral)] underline underline-offset-2 hover:text-[var(--accent-coral)]/80 transition-colors"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
+        {error && <ErrorState message={error} onRetry={reload} />}
 
         {/* Empty state */}
         {!loading && !error && filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-10 w-10 text-[var(--text-faint)] mb-4">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5m-9-6h.008v.008H12v-.008ZM12 15h.008v.008H12V15Zm0 2.25h.008v.008H12v-.008ZM9.75 15h.008v.008H9.75V15Zm0 2.25h.008v.008H9.75v-.008ZM7.5 15h.008v.008H7.5V15Zm0 2.25h.008v.008H7.5v-.008Zm6.75-4.5h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V15Zm0 2.25h.008v.008h-.008v-.008Zm2.25-4.5h.008v.008H16.5v-.008Zm0 2.25h.008v.008H16.5V15Z" />
-            </svg>
-            <p className="text-sm text-[var(--text-muted)]">
-              {filter !== 'all' ? `No ${filter} cron jobs found.` : 'No cron jobs configured yet.'}
-            </p>
-          </div>
+          <EmptyState
+            title={filter !== 'all' ? `No ${filter} cron jobs found.` : 'No cron jobs configured yet.'}
+          />
         )}
 
         {/* Table */}

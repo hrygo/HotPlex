@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   getMe,
   adminListUsers,
@@ -13,6 +13,8 @@ import {
 } from '@/lib/api/auth';
 import { useAdminUI } from '@/context/admin-ui-context';
 import { formatDate } from '@/lib/utils/format-time';
+import { useResource } from '@/hooks/use-resource';
+import { LoadingState, ErrorState } from '@/components/admin/resource-states';
 
 const selectClass =
   'w-full rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)] transition-colors appearance-none';
@@ -26,13 +28,24 @@ export default function MembersPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userLoaded, setUserLoaded] = useState(false);
 
-  const [users, setUsers] = useState<User[]>([]);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [usersError, setUsersError] = useState<string | null>(null);
+  // Fetch users/invitations only once currentUser resolves as admin. The
+  // fetcher returns an empty array while the role is unknown or non-admin,
+  // and the deps array re-triggers a real fetch when the role flips to admin.
+  const { data: usersData, loading: usersLoading, error: usersError, reload: reloadUsers } =
+    useResource<User[]>(async () => {
+      if (currentUser?.role !== 'admin') return [];
+      const res = await adminListUsers();
+      return res.users ?? [];
+    }, [currentUser?.role]);
+  const users = usersData ?? [];
 
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [invitesLoading, setInvitesLoading] = useState(false);
-  const [invitesError, setInvitesError] = useState<string | null>(null);
+  const { data: invitesData, loading: invitesLoading, error: invitesError, reload: reloadInvites } =
+    useResource<Invitation[]>(async () => {
+      if (currentUser?.role !== 'admin') return [];
+      const res = await adminListInvitations();
+      return res.invitations ?? [];
+    }, [currentUser?.role]);
+  const invitations = invitesData ?? [];
 
   const [inviteRole, setInviteRole] = useState<'user' | 'admin'>('user');
   const [inviteTTL, setInviteTTL] = useState(86400);
@@ -54,38 +67,6 @@ export default function MembersPage() {
     return () => { cancelled = true; };
   }, []);
 
-  const loadUsers = useCallback(async () => {
-    setUsersLoading(true);
-    setUsersError(null);
-    try {
-      const res = await adminListUsers();
-      setUsers(res.users ?? []);
-    } catch (err) {
-      setUsersError(err instanceof Error ? err.message : 'Failed to load users');
-    } finally {
-      setUsersLoading(false);
-    }
-  }, []);
-
-  const loadInvitations = useCallback(async () => {
-    setInvitesLoading(true);
-    setInvitesError(null);
-    try {
-      const res = await adminListInvitations();
-      setInvitations(res.invitations ?? []);
-    } catch (err) {
-      setInvitesError(err instanceof Error ? err.message : 'Failed to load invitations');
-    } finally {
-      setInvitesLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (currentUser?.role !== 'admin') return;
-    loadUsers();
-    loadInvitations();
-  }, [currentUser, loadUsers, loadInvitations]);
-
   // Clear the copy-reset timer on unmount to avoid setState after unmount.
   useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
 
@@ -103,7 +84,7 @@ export default function MembersPage() {
     setTogglingId(u.id);
     try {
       await adminUpdateUserStatus(u.id, next);
-      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, status: next } : x)));
+      await reloadUsers();
       showToast(`${u.username} ${next}`, 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to update user', 'error');
@@ -122,7 +103,7 @@ export default function MembersPage() {
     setRevokingId(id);
     try {
       await adminDeleteInvitation(id);
-      setInvitations((prev) => prev.filter((i) => i.id !== id));
+      await reloadInvites();
       showToast('Invitation revoked', 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to revoke invitation', 'error');
@@ -139,7 +120,7 @@ export default function MembersPage() {
       const inv = await adminCreateInvitation(inviteRole, inviteTTL);
       setGeneratedCode(inv.code);
       showToast('Invitation generated', 'success');
-      loadInvitations();
+      await reloadInvites();
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : 'Failed to create invitation');
     } finally {
@@ -189,7 +170,7 @@ export default function MembersPage() {
             <p className="text-xs text-[var(--text-faint)] mt-1">Manage team members and invitation keys</p>
           </div>
           <button
-            onClick={() => { loadUsers(); loadInvitations(); }}
+            onClick={() => { reloadUsers(); reloadInvites(); }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors text-[11px] font-bold uppercase tracking-wider"
           >
             Refresh

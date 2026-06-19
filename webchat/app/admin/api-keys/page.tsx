@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAdminUI } from '@/context/admin-ui-context';
 import {
   listAPIKeys,
@@ -9,6 +9,8 @@ import {
 } from '@/lib/api/admin-apikeys';
 import type { APIKeyUser } from '@/lib/types/admin';
 import { formatRelative as formatTime } from '@/lib/utils/format-time';
+import { useResource } from '@/hooks/use-resource';
+import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,9 +27,11 @@ function maskKey(key: string): string {
 
 export default function APIKeysPage() {
   const { showToast, confirm } = useAdminUI();
-  const [keys, setKeys] = useState<APIKeyUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, reload } = useResource<APIKeyUser[]>(
+    async () => (await listAPIKeys()) ?? [],
+    [],
+  );
+  const keys = data ?? [];
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Dialog state
@@ -39,25 +43,6 @@ export default function APIKeysPage() {
   const [formUserId, setFormUserId] = useState('');
   const [formDesc, setFormDesc] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
-
-  const loadKeys = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await listAPIKeys();
-      setKeys(data ?? []);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to load API keys',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadKeys();
-  }, [loadKeys]);
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -80,8 +65,8 @@ export default function APIKeysPage() {
         description: formDesc.trim() || undefined,
       });
       setCreatedKey(result.api_key);
-      // Insert with masked key into list — full key only shown in dialog.
-      setKeys((prev) => [{ ...result, api_key: maskKey(result.api_key) }, ...prev]);
+      // Refetch to refresh the list with the masked key.
+      await reload();
       setFormUserId('');
       setFormDesc('');
     } catch (err) {
@@ -113,7 +98,7 @@ export default function APIKeysPage() {
     try {
       setActionLoading(id.toString());
       await deleteAPIKey(id);
-      setKeys((prev) => prev.filter((k) => k.id !== id));
+      await reload();
       showToast('API key successfully deleted', 'success');
     } catch (err) {
       showToast(
@@ -182,7 +167,7 @@ export default function APIKeysPage() {
               Create Key
             </button>
             <button
-              onClick={loadKeys}
+              onClick={reload}
               disabled={loading}
               className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"
             >
@@ -206,59 +191,24 @@ export default function APIKeysPage() {
         </div>
 
         {/* Loading */}
-        {loading && (
-          <div className="flex items-center justify-center py-24">
-            <div className="flex flex-col items-center gap-3">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent-gold)] border-t-transparent" />
-              <span className="text-xs text-[var(--text-faint)]">
-                Loading API keys...
-              </span>
-            </div>
-          </div>
-        )}
+        {loading && <LoadingState label="Loading API keys..." />}
 
         {/* Error */}
-        {error && (
-          <div className="rounded-[var(--radius-md)] border border-[rgba(244,63,94,0.15)] bg-[rgba(244,63,94,0.08)] p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-[var(--accent-coral)]">{error}</p>
-              <button
-                onClick={loadKeys}
-                className="text-xs font-medium text-[var(--accent-coral)] underline underline-offset-2 transition-colors hover:text-[var(--accent-coral)]/80"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
+        {error && <ErrorState message={error} onRetry={reload} />}
 
         {/* Empty state */}
         {!loading && !error && keys.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-              stroke="currentColor"
-              className="mb-4 h-10 w-10 text-[var(--text-faint)]"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"
-              />
-            </svg>
-            <p className="mb-3 text-sm text-[var(--text-muted)]">
-              No API keys configured yet.
-            </p>
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--accent-gold)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-gold)]/90"
-            >
-              Create First Key
-            </button>
-          </div>
+          <EmptyState
+            title="No API keys configured yet."
+            action={
+              <button
+                onClick={openCreate}
+                className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--accent-gold)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-[var(--bg-base)] transition-colors hover:bg-[var(--accent-gold)]/90"
+              >
+                Create First Key
+              </button>
+            }
+          />
         )}
 
         {/* Table */}
