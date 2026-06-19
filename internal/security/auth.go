@@ -151,15 +151,23 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 // cookie-auth paths share one disabled-user enforcement definition with the
 // REST API.
 func (a *Authenticator) AuthenticateActiveCookie(r *http.Request) (string, bool) {
-	if a.cookieAuth == nil {
+	// Snapshot cookieAuth/idp under RLock: SetCookieAuth/SetIdentityProvider
+	// mutate them under the write lock, so an unlocked field read would race if
+	// a hot reload ever reconfigures them at runtime (caught by -race). Snapshot
+	// the pointers, release the lock, then do IO (Authenticate/Lookup).
+	a.mu.RLock()
+	cookieAuth := a.cookieAuth
+	idp := a.idp
+	a.mu.RUnlock()
+	if cookieAuth == nil {
 		return "", false
 	}
-	uid, ok := a.cookieAuth.Authenticate(r)
+	uid, ok := cookieAuth.Authenticate(r)
 	if !ok {
 		return "", false
 	}
-	if a.idp != nil && uid != "anonymous" && uid != "api_user" {
-		u, err := a.idp.Lookup(r.Context(), uid)
+	if idp != nil && uid != "anonymous" && uid != "api_user" {
+		u, err := idp.Lookup(r.Context(), uid)
 		if err != nil || u.Status == "disabled" {
 			return "", false
 		}
