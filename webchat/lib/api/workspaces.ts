@@ -42,18 +42,31 @@ export interface ListWorkspacesResponse {
 // JSON.stringify on write, JSON.parse on read. Mismatching this causes the
 // PATCH to 400 ("cannot unmarshal object into string") and GET to feed a raw
 // JSON string into the editor (PR #762 review P0).
+// parseOverrides 规范化后端存储的 overrides（JSON 字符串或已解析对象）为
+// Record<string,string>。仅接受纯对象（排除数组/null）、强制值为字符串，
+// 防御历史脏数据（手动 SQL 植入的非对象/非字符串值）在首次 save 时触发
+// INVALID_CONFIG_JSON 400（PR #762 review P3：纯防御性，正常写入路径不会
+// 产生脏数据，后端 ValidateOverrides 已在写入时双重拦截）。
 function parseOverrides(raw: unknown): Record<string, string> {
+  const normalize = (obj: unknown): Record<string, string> => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      // ValidateOverrides 要求键值均为字符串 markdown；丢弃 null/对象/数组值。
+      if (v === null || v === undefined || typeof v === 'object') continue;
+      out[k] = String(v);
+    }
+    return out;
+  };
   if (typeof raw === 'string') {
     if (!raw) return {};
     try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+      return normalize(JSON.parse(raw));
     } catch {
       return {};
     }
   }
-  if (raw && typeof raw === 'object') return raw as Record<string, string>;
-  return {};
+  return normalize(raw);
 }
 
 function normalizeWorkspace(raw: any): Workspace {
