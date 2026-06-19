@@ -769,3 +769,70 @@ func TestAuthenticator_DisabledUser(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "active_uid", uidRes)
 }
+
+// TestAuthenticateActiveCookie covers the cookie-path disabled-user enforcement
+// shared by Hub.HandleHTTP (WS upgrade) and WorkspaceHandlers.requireAuth. A
+// valid cookie alone must not grant access to a user disabled by an admin.
+func TestAuthenticateActiveCookie(t *testing.T) {
+	t.Parallel()
+
+	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"sk-test"}})
+	auth.SetIdentityProvider(&mockIDP{
+		LookupFunc: func(ctx context.Context, userID string) (*User, error) {
+			switch userID {
+			case "active_uid":
+				return &User{ID: "active_uid", Status: "active"}, nil
+			case "disabled_uid":
+				return &User{ID: "disabled_uid", Status: "disabled"}, nil
+			}
+			return nil, ErrUserNotFound
+		},
+	})
+
+	ca, err := NewCookieAuth("")
+	require.NoError(t, err)
+	auth.SetCookieAuth(ca)
+
+	cookieFor := func(uid string) *http.Cookie {
+		t.Helper()
+		w := httptest.NewRecorder()
+		require.NoError(t, ca.SetCookie(w, httptest.NewRequest("GET", "/", nil), uid))
+		return w.Result().Cookies()[0]
+	}
+	reqWithCookie := func(c *http.Cookie) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.AddCookie(c)
+		return r
+	}
+
+	// Active user — passes.
+	uid, ok := auth.AuthenticateActiveCookie(reqWithCookie(cookieFor("active_uid")))
+	require.True(t, ok)
+	require.Equal(t, "active_uid", uid)
+
+	// Disabled user — rejected (the fix: cookie alone must not bypass disable).
+	_, ok = auth.AuthenticateActiveCookie(reqWithCookie(cookieFor("disabled_uid")))
+	require.False(t, ok, "disabled user cookie must be rejected")
+
+	// No cookie — rejected.
+	_, ok = auth.AuthenticateActiveCookie(httptest.NewRequest("GET", "/", nil))
+	require.False(t, ok)
+
+	// Invalid cookie (right name, bad value) — rejected.
+	rBad := httptest.NewRequest("GET", "/", nil)
+	rBad.AddCookie(&http.Cookie{Name: cookieName, Value: "garbage"})
+	_, ok = auth.AuthenticateActiveCookie(rBad)
+	require.False(t, ok)
+
+	// Nil CookieAuth (cookie auth not configured) — rejected.
+	authNoCookie := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"sk-test"}})
+	_, ok = authNoCookie.AuthenticateActiveCookie(httptest.NewRequest("GET", "/", nil))
+	require.False(t, ok)
+
+	// Dev mode (nil idp) — valid cookie passes without status lookup.
+	authDev := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"sk-test"}})
+	authDev.SetCookieAuth(ca)
+	uid, ok = authDev.AuthenticateActiveCookie(reqWithCookie(cookieFor("anyone")))
+	require.True(t, ok)
+	require.Equal(t, "anyone", uid)
+}

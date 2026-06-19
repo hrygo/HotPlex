@@ -56,7 +56,12 @@ export async function getBootstrapStatus(signal?: AbortSignal): Promise<boolean>
     signal,
   });
   if (!res.ok) {
-    // Degrade: treat unreachable as "bootstrapped" so the normal login form shows.
+    // Degrade: treat unreachable as "bootstrapped" so the normal login form
+    // shows (better than blocking login on a transient backend error). A 5xx
+    // (e.g. DB outage) is logged so it is not silently masked.
+    if (res.status >= 500) {
+      console.warn('bootstrap-status check failed', res.status);
+    }
     return true;
   }
   const data = await res.json();

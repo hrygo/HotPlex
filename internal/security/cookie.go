@@ -278,6 +278,15 @@ func isLocalhost(r *http.Request) bool {
 // cookieSecure reports whether the Secure flag may be set on a cookie:
 // HTTPS anywhere, or any loopback origin (a secure context in modern browsers,
 // allowing Secure cookies over plain http during local development).
+//
+// Deployment note: cookies use SameSite=None, which the browser rejects unless
+// Secure is also set. On a non-loopback plaintext HTTP deployment (intranet IP,
+// or a reverse proxy that strips X-Forwarded-Proto) this returns false → the
+// login responds 200 but the browser silently drops the cookie → every
+// subsequent request 401s. Production MUST terminate TLS at the edge (or proxy
+// X-Forwarded-Proto correctly). SameSite=None is the CSRF trade-off for
+// cross-origin webchat; it is mitigated by Secure and by state-changing
+// endpoints requiring a valid HMAC cookie (no additional CSRF token today).
 func cookieSecure(r *http.Request) bool {
 	return isHTTPS(r) || isLocalhost(r)
 }

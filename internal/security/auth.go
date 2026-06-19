@@ -91,21 +91,15 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	key, found := a.extractAPIKey(r)
 	if !found {
 		// 3rd priority: cookie auth fallback (webchat same-origin).
+		// Disabled-user enforcement is shared via AuthenticateActiveCookie with
+		// the WS upgrade and workspace REST paths.
+		a.mu.RUnlock()
 		if a.cookieAuth != nil {
-			if uid, ok := a.cookieAuth.Authenticate(r); ok {
-				idp := a.idp
-				a.mu.RUnlock()
-				if idp != nil && uid != "anonymous" && uid != "api_user" {
-					u, err := idp.Lookup(r.Context(), uid)
-					if err != nil || u.Status == "disabled" {
-						return "", "", ErrUnauthorized
-					}
-				}
+			if uid, ok := a.AuthenticateActiveCookie(r); ok {
 				botID := BotIDFromRequest(r)
 				return uid, botID, nil
 			}
 		}
-		a.mu.RUnlock()
 		return "", "", ErrUnauthorized
 	}
 
@@ -138,6 +132,39 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 
 	botID := BotIDFromRequest(r)
 	return uid, botID, nil
+}
+
+// AuthenticateActiveCookie authenticates a cookie-bearing request and rejects
+// disabled users. It mirrors the disabled-user enforcement of the API-key path
+// (AuthenticateKey / AuthenticateRequest) so that a valid cookie alone can no
+// longer grant access to a user disabled by an admin, for the cookie's full 7d
+// lifetime.
+//
+// Returns (userID, true) only when the CookieAuth is configured, the request
+// carries a valid HMAC cookie, and the user is not disabled. The idp lookup is
+// skipped in dev mode (nil idp) and for system identities ("anonymous",
+// "api_user"), matching AuthenticateRequest semantics. ("", false) is returned
+// when there is no cookie, the cookie is invalid, the user is disabled, or the
+// lookup fails.
+//
+// Hub.HandleHTTP (WS upgrade) and WorkspaceHandlers.requireAuth use this so the
+// cookie-auth paths share one disabled-user enforcement definition with the
+// REST API.
+func (a *Authenticator) AuthenticateActiveCookie(r *http.Request) (string, bool) {
+	if a.cookieAuth == nil {
+		return "", false
+	}
+	uid, ok := a.cookieAuth.Authenticate(r)
+	if !ok {
+		return "", false
+	}
+	if a.idp != nil && uid != "anonymous" && uid != "api_user" {
+		u, err := a.idp.Lookup(r.Context(), uid)
+		if err != nil || u.Status == "disabled" {
+			return "", false
+		}
+	}
+	return uid, true
 }
 
 // ReloadKeys dynamically replaces the set of valid API keys.

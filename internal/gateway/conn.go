@@ -465,6 +465,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 			Platform:     platformWebChat,
 			Title:        initData.Title,
 			ClientKey:    clientKey,
+			WorkspaceID:  c.workspaceID,
 		}); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			c.sendInitError(events.ErrCodeInternalError, "failed to create session")

@@ -108,6 +108,11 @@ func BootstrapStatus(store session.UserWorkspaceStore) http.HandlerFunc {
 			writeAppError(w, http.StatusInternalServerError, "INTERNAL", "check bootstrap status")
 			return
 		}
+		// Public, unauthenticated endpoint polled by the login page on load.
+		// Cache briefly to dampen scripted/automated load — bootstrap state
+		// changes rarely (only on first admin creation), so 30s is a safe TTL.
+		// (Pairs with idx_users_role migration 021 for the underlying query.)
+		w.Header().Set("Cache-Control", "public, max-age=30")
 		respondJSON(w, map[string]bool{"bootstrapped": has})
 	}
 }
@@ -129,9 +134,11 @@ func (h *AuthHandlers) Me(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "user not found")
 		return
 	}
-	respondJSON(w, map[string]string{
-		"id": u.ID, "username": u.Username, "role": u.Role, "status": u.Status,
-	})
+	// Return the full user profile; PasswordHash is json:"-" so it never
+	// leaves the server. This fills display_name/created_at/updated_at/
+	// last_login_at expected by the frontend User type, which the minimal
+	// string map omitted (webchat/lib/api/auth.ts).
+	respondJSON(w, u)
 }
 
 type acceptInviteRequest struct {

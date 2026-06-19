@@ -31,8 +31,9 @@ func NewWorkspaceHandlers(store session.UserWorkspaceStore, cookieAuth *security
 func (h *WorkspaceHandlers) nowUnix() int64 { return h.now().Unix() }
 
 func (h *WorkspaceHandlers) currentUser(r *http.Request) (string, bool) {
-	uid, ok := h.cookieAuth.Authenticate(r)
-	return uid, ok
+	// Delegate to AuthenticateActiveCookie so disabled users are rejected on
+	// the cookie path, matching the REST API and WS upgrade enforcement.
+	return h.auth.AuthenticateActiveCookie(r)
 }
 
 func (h *WorkspaceHandlers) requireAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -106,7 +107,17 @@ func (h *WorkspaceHandlers) List(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
 		return
 	}
-	respondJSON(w, map[string]any{"workspaces": wss})
+	limit, offset := parsePagination(r)
+	// Per-owner workspace counts are small; the store returns all active rows
+	// (already ordered by created_at ASC), so we paginate in memory and echo
+	// the requested limit/offset to satisfy the ListWorkspacesResponse contract.
+	start := min(offset, len(wss))
+	end := min(start+limit, len(wss))
+	respondJSON(w, map[string]any{
+		"workspaces": wss[start:end],
+		"limit":      limit,
+		"offset":     offset,
+	})
 }
 
 // Get: GET /api/workspaces/{id}

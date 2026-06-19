@@ -429,7 +429,9 @@ func (h *Hub) HandleHTTP(
 			botID = security.BotIDFromRequest(r)
 		} else if cookieAuth != nil {
 			// No API key — try cookie auth before deferring to init envelope.
-			if uid, ok := cookieAuth.Authenticate(r); ok {
+			// AuthenticateActiveCookie rejects disabled users (shared with the
+			// REST API); a disabled/invalid cookie falls back to init envelope.
+			if uid, ok := auth.AuthenticateActiveCookie(r); ok {
 				userID = uid
 				botID = security.BotIDFromRequest(r)
 			} else {

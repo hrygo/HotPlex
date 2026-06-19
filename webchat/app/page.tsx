@@ -76,6 +76,7 @@ function InnerPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const authError = searchParams.get('auth_error');
+  const firstLogin = searchParams.get('first_login') === '1';
   const [checking, setChecking] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -90,9 +91,15 @@ function InnerPage() {
         await getMe();
         setChecking(false);
         try {
-          if (localStorage.getItem('hotplex.onboarding') === '1') {
+          // Onboarding triggers from password login (localStorage flag set by
+          // login()) or SSO callback (/?first_login=1 redirect). Both paths
+          // share the OnboardingWelcome card (spec ⑥ three-path parity).
+          if (firstLogin || localStorage.getItem('hotplex.onboarding') === '1') {
             setShowOnboarding(true);
             localStorage.removeItem('hotplex.onboarding');
+            if (firstLogin) {
+              router.replace('/'); // strip query so refresh won't re-trigger
+            }
           }
         } catch {}
       } catch {
@@ -101,7 +108,7 @@ function InnerPage() {
     };
 
     checkAuth();
-  }, [router, authError]);
+  }, [router, authError, firstLogin]);
 
   if (checking) {
     return <LoadingScreen text="Verifying authentication..." />;

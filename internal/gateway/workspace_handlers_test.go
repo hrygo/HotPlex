@@ -301,9 +301,13 @@ func TestWorkspace_JSONWireContract(t *testing.T) {
 
 	var resp struct {
 		Workspaces []json.RawMessage `json:"workspaces"`
+		Limit      int               `json:"limit"`
+		Offset     int               `json:"offset"`
 	}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	require.Len(t, resp.Workspaces, 1)
+	require.Equal(t, 100, resp.Limit, "ListWorkspacesResponse.limit must be echoed (default 100)")
+	require.Equal(t, 0, resp.Offset, "ListWorkspacesResponse.offset must be echoed")
 
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(resp.Workspaces[0], &m))
@@ -311,5 +315,7 @@ func TestWorkspace_JSONWireContract(t *testing.T) {
 	require.Contains(t, m, "id")
 	require.Contains(t, m, "work_dir")
 	require.Contains(t, m, "owner_user_id")
+	require.Contains(t, m, "created_at", "workspace wire contract must carry created_at")
+	require.Contains(t, m, "updated_at", "workspace wire contract must carry updated_at")
 	require.NotContains(t, m, "Name", "PascalCase field leaked onto the wire")
 }

@@ -19,6 +19,8 @@ type Workspace struct {
 	AgentConfigOverrides string `json:"agent_config_overrides"` // JSON value; spec ② fills, spec ① stays empty
 	WorkerPreference     string `json:"worker_preference"`      // spec ③ fills
 	Status               string `json:"status"`
+	CreatedAt            int64  `json:"created_at"`
+	UpdatedAt            int64  `json:"updated_at"`
 }
 
 // Invitation is a one-time invite code (spec §6.3).
@@ -141,6 +143,8 @@ func scanWorkspace(sc rowScanner) (*Workspace, error) {
 	}
 	w.AgentConfigOverrides = overrides.String
 	w.WorkerPreference = pref.String
+	w.CreatedAt = createdAt.Int64
+	w.UpdatedAt = updatedAt.Int64
 	return &w, nil
 }
 

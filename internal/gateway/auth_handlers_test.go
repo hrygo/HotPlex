@@ -113,6 +113,11 @@ func TestMeHandler_ReturnsProfile(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"username":"admin"`)
 	require.Contains(t, w.Body.String(), `"role":"admin"`)
+	// Full User profile (P2-2): display_name/created_at/updated_at must be on
+	// the wire to satisfy webchat/lib/api/auth.ts User type.
+	require.Contains(t, w.Body.String(), `"display_name"`, "me must return display_name")
+	require.Contains(t, w.Body.String(), `"created_at"`, "me must return created_at")
+	require.Contains(t, w.Body.String(), `"updated_at"`, "me must return updated_at")
 }
 
 func TestAcceptInvite_CreatesUserAndIssuesCookie(t *testing.T) {
@@ -312,6 +317,8 @@ func TestBootstrapStatus_EmptyAndAfterAdmin(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	require.False(t, body.Bootstrapped)
+	// Public endpoint: cache briefly to dampen scripted load (P2-1).
+	require.Equal(t, "public, max-age=30", rr.Header().Get("Cache-Control"))
 
 	// 创建 admin → true
 	require.NoError(t, store.CreateUser(context.Background(), &security.User{
