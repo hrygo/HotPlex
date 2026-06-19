@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
+import { DeleteButton } from '@/components/admin/delete-button';
 import { getWorkspace, updateWorkspace, deleteWorkspace } from '@/lib/api/workspaces';
 import type { Workspace } from '@/lib/api/workspaces';
 import { AgentConfigEditor } from '@/components/admin/agent-config-editor';
@@ -124,68 +125,6 @@ function GeneralTab({
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// DeleteButton — two-step confirm
-// ---------------------------------------------------------------------------
-
-function DeleteButton({ workspaceId, workspaceName }: { workspaceId: string; workspaceName: string }) {
-  const router = useRouter();
-  const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleDelete = async () => {
-    setDeleting(true);
-    setError(null);
-    try {
-      await deleteWorkspace(workspaceId);
-      router.push('/admin/workspaces');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete workspace');
-      setDeleting(false);
-    }
-  };
-
-  if (confirming) {
-    return (
-      <div className="mt-6 pt-6 border-t border-[var(--border-subtle)]">
-        <div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.06)] border border-[rgba(244,63,94,0.12)] p-4">
-          <p className="text-sm text-[var(--accent-coral)] font-medium mb-3">
-            Delete &ldquo;{workspaceName}&rdquo;? This action cannot be undone.
-          </p>
-          {error && <p className="text-xs text-[var(--accent-coral)] mb-3">{error}</p>}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-bold bg-[var(--accent-coral)] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-            >
-              {deleting ? 'Deleting...' : 'Yes, Delete'}
-            </button>
-            <button
-              onClick={() => { setConfirming(false); setError(null); }}
-              className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold text-[var(--text-faint)] hover:text-[var(--text-secondary)] transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-6 pt-6 border-t border-[var(--border-subtle)]">
-      <button
-        onClick={() => setConfirming(true)}
-        className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold text-[var(--accent-coral)] border border-[rgba(244,63,94,0.2)] hover:bg-[rgba(244,63,94,0.06)] transition-colors"
-      >
-        Delete Workspace
-      </button>
     </div>
   );
 }
@@ -376,7 +315,7 @@ export function WorkspaceDetailView() {
       {activeTab === 'general' && (
         <div>
           <GeneralTab workspace={workspace} onChanged={setWorkspace} />
-          <DeleteButton workspaceId={workspace.id} workspaceName={workspace.name} />
+          <DeleteButton resourceName={workspace.name} buttonLabel="Delete Workspace" redirectHref="/admin/workspaces" onDelete={() => deleteWorkspace(workspace.id)} />
         </div>
       )}
 
