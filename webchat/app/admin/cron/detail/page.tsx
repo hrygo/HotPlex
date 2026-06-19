@@ -92,7 +92,6 @@ export default function CronDetailPage() {
 
   // Editable fields
   const [schedule, setSchedule] = useState('');
-  const [scheduleObj, setScheduleObj] = useState<CronSchedule | null>(null);
   const [message, setMessage] = useState('');
   const [maxRuns, setMaxRuns] = useState<string>('');
   const [enabled, setEnabled] = useState(true);
@@ -120,7 +119,6 @@ export default function CronDetailPage() {
       } else {
         setJob(found);
         setSchedule(formatScheduleStr(found.schedule));
-        setScheduleObj(found.schedule ?? null);
         setMessage(found.payload?.message ?? '');
         setMaxRuns(found.max_runs != null ? String(found.max_runs) : '');
         setEnabled(found.enabled);
@@ -473,7 +471,6 @@ export default function CronDetailPage() {
               <button
                 onClick={() => {
                   setSchedule(formatScheduleStr(job.schedule));
-                  setScheduleObj(job.schedule ?? null);
                   setMessage(job.payload?.message ?? '');
                   setMaxRuns(job.max_runs != null ? String(job.max_runs) : '');
                   setEnabled(job.enabled);

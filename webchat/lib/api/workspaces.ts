@@ -1,21 +1,4 @@
-import { httpBase, apiKey, isSameOrigin } from "@/lib/config";
-
-const BASE = httpBase();
-
-function authHeaders(): Record<string, string> {
-  if (isSameOrigin()) return {};
-  return apiKey ? { 'X-API-Key': apiKey } : {};
-}
-
-function authOpts(): RequestInit {
-  if (isSameOrigin()) return { credentials: 'same-origin' as RequestCredentials };
-  // Cross-origin: include cookies so the cookie-based login session works.
-  return { credentials: 'include' as RequestCredentials };
-}
-
-function withAuth(headers?: Record<string, string>): Record<string, string> {
-  return { ...authHeaders(), ...headers };
-}
+import { BASE, authHeaders, authOpts, withAuth } from "@/lib/api/client";
 
 export interface Workspace {
   id: string;

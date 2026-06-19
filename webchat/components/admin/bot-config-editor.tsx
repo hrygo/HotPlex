@@ -3,21 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { getAgentFile, writeAgentFile } from '@/lib/api/admin-bots';
 import type { AgentConfigFile } from '@/lib/types/admin';
-
-interface ConfigFileDef {
-  key: string;
-  file: string;
-  label: string;
-  description: string;
-}
-
-const CONFIG_FILES: ConfigFileDef[] = [
-  { key: 'soul', file: 'SOUL.md', label: 'Soul', description: 'Bot personality & identity' },
-  { key: 'agents', file: 'AGENTS.md', label: 'Agents', description: 'Behavior rules & guidelines' },
-  { key: 'skills', file: 'SKILLS.md', label: 'Skills', description: 'Capabilities & tool usage' },
-  { key: 'user', file: 'USER.md', label: 'User', description: 'User-specific preferences' },
-  { key: 'memory', file: 'MEMORY.md', label: 'Memory', description: 'Persistent context & notes' },
-];
+import { CONFIG_FILES } from './agent-config-file-list';
 
 export function BotConfigEditor({ botName }: { botName: string }) {
   const [activeFile, setActiveFile] = useState<string>('soul');

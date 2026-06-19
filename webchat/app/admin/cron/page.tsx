@@ -6,7 +6,6 @@ import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/li
 import { useAdminUI } from '@/context/admin-ui-context';
 import { formatDuration } from '@/lib/utils/format-duration';
 import type { CronJob } from '@/lib/types/admin';
-import type { CronSchedule } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
 // Helpers

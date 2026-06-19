@@ -30,7 +30,6 @@ interface ModalState {
 
 interface AdminUIContextType {
 	showToast: (message: string, type: ToastType, duration?: number) => void;
-	alert: (title: string, message: string, type?: ToastType) => Promise<void>;
 	confirm: (title: string, message: string, options?: ModalOptions) => Promise<boolean>;
 }
 
@@ -57,23 +56,6 @@ export function AdminUIProvider({ children }: { children: React.ReactNode }) {
 		}, duration);
 	}, []);
 
-	const alert = useCallback((title: string, message: string, type: ToastType = 'info'): Promise<void> => {
-		return new Promise<void>((resolve) => {
-			setModal({
-				isOpen: true,
-				title,
-				message,
-				mode: 'alert',
-				type,
-				confirmLabel: 'OK',
-				resolve: () => {
-					setModal(null);
-					resolve();
-				},
-			});
-		});
-	}, []);
-
 	const confirm = useCallback((
 		title: string,
 		message: string,
@@ -98,7 +80,7 @@ export function AdminUIProvider({ children }: { children: React.ReactNode }) {
 	}, []);
 
 	return (
-		<AdminUIContext.Provider value={{ showToast, alert, confirm }}>
+		<AdminUIContext.Provider value={{ showToast, confirm }}>
 			{children}
 
 			{/* Custom Promise-resolved Overlays & Dialogs */}
