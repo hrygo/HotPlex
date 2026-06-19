@@ -24,15 +24,20 @@ type Workspace struct {
 }
 
 // Invitation is a one-time invite code (spec §6.3).
+// json tags are required: AdminListInvitations responds with the struct
+// directly, so without them the field names serialize as PascalCase and the
+// snake_case frontend (auth.ts Invitation) reads undefined for every field —
+// including id, which made revoke hit DELETE /invitations/undefined (PR #762
+// review P0).
 type Invitation struct {
-	ID        string
-	Code      string
-	CreatedBy string
-	Role      string
-	UsedBy    *string // nil = unused
-	ExpiresAt int64
-	CreatedAt int64
-	UsedAt    *int64 // nil = unused
+	ID        string  `json:"id"`
+	Code      string  `json:"code"`
+	CreatedBy string  `json:"created_by"`
+	Role      string  `json:"role"`
+	UsedBy    *string `json:"used_by,omitempty"` // nil = unused
+	ExpiresAt int64   `json:"expires_at"`
+	CreatedAt int64   `json:"created_at,omitempty"`
+	UsedAt    *int64  `json:"used_at,omitempty"` // nil = unused
 }
 
 // UserIdentity binds an OAuth/OIDC identity to a local user (spec ④).

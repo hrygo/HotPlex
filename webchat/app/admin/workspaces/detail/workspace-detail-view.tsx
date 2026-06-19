@@ -18,7 +18,7 @@ const inputClass =
 function formatDate(ms: number): string {
   if (!ms) return '—';
   try {
-    return new Date(ms).toLocaleString();
+    return new Date(ms * 1000).toLocaleString();
   } catch {
     return '—';
   }

@@ -35,7 +35,7 @@ export interface Invitation {
   role: 'admin' | 'user';
   expires_at: number;
   created_at?: number;
-  consumed_at?: number;
+  used_at?: number;
 }
 
 export interface OAuthProvider {

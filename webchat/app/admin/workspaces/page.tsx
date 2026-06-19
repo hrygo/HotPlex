@@ -8,7 +8,7 @@ import type { Workspace } from '@/lib/api/workspaces';
 function formatDate(ms: number): string {
   if (!ms) return '—';
   try {
-    return new Date(ms).toLocaleDateString(undefined, {
+    return new Date(ms * 1000).toLocaleDateString(undefined, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',

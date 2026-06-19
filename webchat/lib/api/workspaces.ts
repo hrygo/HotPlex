@@ -35,13 +35,42 @@ export interface ListWorkspacesResponse {
   offset: number;
 }
 
+// Backend stores agent_config_overrides as a JSON *string* column
+// (Workspace.AgentConfigOverrides is `string`, validated by
+// agentconfig.ValidateOverrides which json.Unmarshal's it). The frontend
+// works with a parsed object, so we (de)serialize at this API boundary:
+// JSON.stringify on write, JSON.parse on read. Mismatching this causes the
+// PATCH to 400 ("cannot unmarshal object into string") and GET to feed a raw
+// JSON string into the editor (PR #762 review P0).
+function parseOverrides(raw: unknown): Record<string, string> {
+  if (typeof raw === 'string') {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  }
+  if (raw && typeof raw === 'object') return raw as Record<string, string>;
+  return {};
+}
+
+function normalizeWorkspace(raw: any): Workspace {
+  return { ...raw, agent_config_overrides: parseOverrides(raw?.agent_config_overrides) };
+}
+
 export async function listWorkspaces(limit = 100, offset = 0, signal?: AbortSignal): Promise<ListWorkspacesResponse> {
   const res = await fetch(
     `${BASE}/api/workspaces?limit=${limit}&offset=${offset}`,
     { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
   if (!res.ok) throw new Error(`listWorkspaces failed: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  return {
+    ...data,
+    workspaces: (data.workspaces ?? []).map(normalizeWorkspace),
+  };
 }
 
 export async function createWorkspace(name: string, workDir: string, signal?: AbortSignal): Promise<Workspace> {
@@ -59,7 +88,7 @@ export async function createWorkspace(name: string, workDir: string, signal?: Ab
     const text = await res.text();
     throw new Error(text || `createWorkspace failed: ${res.status}`);
   }
-  return res.json();
+  return normalizeWorkspace(await res.json());
 }
 
 export async function getWorkspace(id: string, signal?: AbortSignal): Promise<Workspace> {
@@ -68,7 +97,7 @@ export async function getWorkspace(id: string, signal?: AbortSignal): Promise<Wo
     { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
   if (!res.ok) throw new Error(`getWorkspace failed: ${res.status}`);
-  return res.json();
+  return normalizeWorkspace(await res.json());
 }
 
 export interface UpdateWorkspaceOptions {
@@ -81,7 +110,8 @@ export async function updateWorkspace(id: string, opts: UpdateWorkspaceOptions, 
   const body: any = {};
   if (opts.name !== undefined) body.name = opts.name;
   if (opts.workerPreference !== undefined) body.worker_preference = opts.workerPreference;
-  if (opts.agentConfigOverrides !== undefined) body.agent_config_overrides = opts.agentConfigOverrides;
+  // Backend expects a JSON string, not an object (see parseOverrides note).
+  if (opts.agentConfigOverrides !== undefined) body.agent_config_overrides = JSON.stringify(opts.agentConfigOverrides);
 
   const res = await fetch(
     `${BASE}/api/workspaces/${id}`,
@@ -97,7 +127,7 @@ export async function updateWorkspace(id: string, opts: UpdateWorkspaceOptions, 
     const text = await res.text();
     throw new Error(text || `updateWorkspace failed: ${res.status}`);
   }
-  return res.json();
+  return normalizeWorkspace(await res.json());
 }
 
 export async function deleteWorkspace(id: string, signal?: AbortSignal): Promise<void> {
