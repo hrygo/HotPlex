@@ -6,6 +6,7 @@ import { listSessions, terminateSession, deleteSession } from '@/lib/api/admin-s
 import { SessionStatusBadge } from '@/components/admin/session-status-badge';
 import { useAdminUI } from '@/context/admin-ui-context';
 import type { AdminSessionInfo } from '@/lib/types/admin';
+import { formatRelative as formatTime, formatDateTime } from '@/lib/utils/format-time';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -18,34 +19,6 @@ type SortOption = 'last_active' | 'created';
 function truncateId(id: string): string {
   if (id.length <= 12) return id;
   return `${id.slice(0, 8)}...${id.slice(-4)}`;
-}
-
-function formatTime(iso?: string): string {
-  if (!iso) return '--';
-  const date = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHour = Math.floor(diffMs / 3600000);
-  const diffDay = Math.floor(diffMs / 86400000);
-
-  if (diffMin < 1) return 'now';
-  if (diffMin < 60) return `${diffMin}m`;
-  if (diffHour < 24) return `${diffHour}h`;
-  if (diffDay < 7) return `${diffDay}d`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function formatDateTime(iso?: string): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
 }
 
 // ---------------------------------------------------------------------------

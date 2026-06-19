@@ -4,19 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { listWorkspaces } from '@/lib/api/workspaces';
 import type { Workspace } from '@/lib/api/workspaces';
-
-function formatDate(ms: number): string {
-  if (!ms) return '—';
-  try {
-    return new Date(ms * 1000).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return '—';
-  }
-}
+import { formatDate } from '@/lib/utils/format-time';
 
 export default function WorkspacesPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -222,7 +210,7 @@ export default function WorkspacesPage() {
                 </div>
 
                 <div className="mt-3 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-[10px] text-[var(--text-faint)]">
-                  <span>Created {formatDate(w.created_at)}</span>
+                  <span>Created {formatDate(w.created_at * 1000)}</span>
                   <span className="opacity-0 group-hover:opacity-100 text-[var(--accent-gold)] transition-opacity">Open →</span>
                 </div>
               </Link>

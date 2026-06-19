@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
 import { formatDuration } from '@/lib/utils/format-duration';
+import { formatRelative as formatTime } from '@/lib/utils/format-time';
 import type { CronJob } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
@@ -21,31 +22,6 @@ function formatSchedule(s: CronJob['schedule']): string {
     case 'at': return s.at ?? '—';
     default: return s.kind ?? '—';
   }
-}
-
-function formatTime(ms?: number): string {
-  if (!ms) return '--';
-  const date = new Date(ms);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHour = Math.floor(diffMs / 3600000);
-  const diffDay = Math.floor(diffMs / 86400000);
-
-  if (diffSec < 0) {
-    const futureMs = -diffMs;
-    const futureMin = Math.floor(futureMs / 60000);
-    const futureHour = Math.floor(futureMs / 3600000);
-    if (futureMin < 60) return `in ${futureMin}m`;
-    if (futureHour < 24) return `in ${futureHour}h`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  }
-  if (diffSec < 60) return 'Just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHour < 24) return `${diffHour}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 // ---------------------------------------------------------------------------

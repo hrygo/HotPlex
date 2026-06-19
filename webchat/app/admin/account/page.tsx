@@ -2,15 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getMe, type User } from '@/lib/api/auth';
-
-function formatDateTime(ms: number | undefined): string {
-  if (!ms) return '—';
-  try {
-    return new Date(ms * 1000).toLocaleString();
-  } catch {
-    return '—';
-  }
-}
+import { formatDateTime } from '@/lib/utils/format-time';
 
 export default function AccountPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -90,11 +82,11 @@ export default function AccountPage() {
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-[var(--text-faint)] font-semibold uppercase">Created</span>
-              <span className="text-[var(--text-primary)]">{formatDateTime(user.created_at)}</span>
+              <span className="text-[var(--text-primary)]">{formatDateTime(user.created_at * 1000)}</span>
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-[var(--text-faint)] font-semibold uppercase">Last Login</span>
-              <span className="text-[var(--text-primary)]">{formatDateTime(user.last_login_at)}</span>
+              <span className="text-[var(--text-primary)]">{formatDateTime((user.last_login_at ?? 0) * 1000)}</span>
             </div>
           </div>
         </div>

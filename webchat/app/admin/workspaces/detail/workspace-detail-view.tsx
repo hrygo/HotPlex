@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { getWorkspace, updateWorkspace, deleteWorkspace } from '@/lib/api/workspaces';
 import type { Workspace } from '@/lib/api/workspaces';
 import { AgentConfigEditor } from '@/components/admin/agent-config-editor';
+import { formatDateTime as fmtDateTime } from '@/lib/utils/format-time';
 
 type WorkerType = 'claude_code' | 'opencode_server' | 'codex_cli' | 'acp';
 
@@ -14,15 +15,6 @@ const selectClass =
 
 const inputClass =
   'w-full rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)] transition-colors font-mono';
-
-function formatDate(ms: number): string {
-  if (!ms) return '—';
-  try {
-    return new Date(ms * 1000).toLocaleString();
-  } catch {
-    return '—';
-  }
-}
 
 // ---------------------------------------------------------------------------
 // GeneralTab — name (editable) + immutable fields + delete
@@ -104,7 +96,7 @@ function GeneralTab({
                 Created
               </label>
               <div className="px-4 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-                <p className="text-sm text-[var(--text-primary)]">{formatDate(workspace.created_at)}</p>
+                <p className="text-sm text-[var(--text-primary)]">{fmtDateTime(workspace.created_at * 1000)}</p>
               </div>
             </div>
           </div>

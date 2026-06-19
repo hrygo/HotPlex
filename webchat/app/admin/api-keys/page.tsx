@@ -8,28 +8,11 @@ import {
   deleteAPIKey,
 } from '@/lib/api/admin-apikeys';
 import type { APIKeyUser } from '@/lib/types/admin';
+import { formatRelative as formatTime } from '@/lib/utils/format-time';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatTime(iso?: string): string {
-  if (!iso) return '--';
-  const date = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHour = Math.floor(diffMs / 3600000);
-  const diffDay = Math.floor(diffMs / 86400000);
-  if (diffMin < 1) return 'Just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHour < 24) return `${diffHour}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-  });
-}
 
 function maskKey(key: string): string {
   if (key.length <= 12) return '****';

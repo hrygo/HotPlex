@@ -12,21 +12,13 @@ import {
   type Invitation,
 } from '@/lib/api/auth';
 import { useAdminUI } from '@/context/admin-ui-context';
+import { formatDate } from '@/lib/utils/format-time';
 
 const selectClass =
   'w-full rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)] transition-colors appearance-none';
 
 const labelClass =
   'block text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1.5';
-
-function formatDate(ms: number): string {
-  if (!ms) return '—';
-  try {
-    return new Date(ms * 1000).toLocaleDateString();
-  } catch {
-    return '—';
-  }
-}
 
 export default function MembersPage() {
   const { confirm, showToast } = useAdminUI();
@@ -249,7 +241,7 @@ export default function MembersPage() {
                           {u.status}
                         </span>
                       </td>
-                      <td className="p-3 text-[var(--text-faint)] font-mono">{formatDate(u.created_at)}</td>
+                      <td className="p-3 text-[var(--text-faint)] font-mono">{formatDate(u.created_at * 1000)}</td>
                       <td className="p-3 text-right">
                         {u.id !== currentUser?.id && (
                           <button
@@ -358,7 +350,7 @@ export default function MembersPage() {
                       <div className="min-w-0 flex-1 pr-3">
                         <div className="text-[var(--text-primary)] font-bold truncate select-all">{i.code}</div>
                         <div className="text-[9px] text-[var(--text-faint)] uppercase mt-0.5">
-                          Role: {i.role} · Expires: {formatDate(i.expires_at)}
+                          Role: {i.role} · Expires: {formatDate(i.expires_at * 1000)}
                         </div>
                       </div>
                       <button

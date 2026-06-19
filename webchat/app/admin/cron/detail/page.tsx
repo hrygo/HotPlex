@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
 import { formatDuration } from '@/lib/utils/format-duration';
+import { formatDateTime } from '@/lib/utils/format-time';
 import type { CronJob, CronSchedule } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
@@ -60,19 +61,6 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
       </p>
     </div>
   );
-}
-
-function formatDateTime(value?: string | number): string {
-  if (!value) return '—';
-  const date = typeof value === 'number' ? new Date(value) : new Date(value);
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
 }
 
 // ---------------------------------------------------------------------------
