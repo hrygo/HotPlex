@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createBot } from '@/lib/api/admin-bots';
@@ -65,7 +65,6 @@ export default function NewBotPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
-  const [success, setSuccess] = useState(false);
   const [touched, setTouched] = useState<Set<string>>(new Set());
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -103,8 +102,7 @@ export default function NewBotPage() {
     return errors;
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function handleSubmit() {
     setError(null);
 
     // Touch all fields to show errors
@@ -139,7 +137,6 @@ export default function NewBotPage() {
 
     createBot(body)
       .then(() => {
-        setSuccess(true);
         router.push('/admin/bots');
       })
       .catch((err: unknown) => {
@@ -148,26 +145,6 @@ export default function NewBotPage() {
       .finally(() => {
         setSubmitting(false);
       });
-  }
-
-  if (success) {
-    return (
-      <div className="min-h-screen bg-[var(--bg-base)] p-6">
-        <div className="max-w-2xl mx-auto px-6 py-8">
-          <div className="rounded-[var(--radius-md)] bg-[rgba(16,185,129,0.08)] border border-[rgba(16,185,129,0.15)] p-4">
-            <p className="text-sm text-[var(--accent-emerald)]">
-              Bot created. Restart gateway to apply.
-            </p>
-          </div>
-          <Link
-            href="/admin/bots"
-            className="inline-flex items-center gap-1.5 mt-4 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            Back to Bots
-          </Link>
-        </div>
-      </div>
-    );
   }
 
   function fieldBorder(field: string): string {
@@ -203,7 +180,7 @@ export default function NewBotPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-8">
+        <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-8">
           {/* Section 1: Basic Info */}
           <section className="space-y-4 pb-8 border-b border-[var(--border-subtle)]">
             <h2 className="text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider">

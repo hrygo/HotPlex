@@ -1,60 +1,8 @@
-const SESSION_STATUS_MAP: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-  running: {
-    bg: 'rgba(52, 211, 153, 0.12)',
-    text: 'text-[var(--accent-emerald)]',
-    dot: 'bg-[var(--accent-emerald)]',
-    label: 'Running',
-  },
-  created: {
-    bg: 'rgba(96, 165, 250, 0.12)',
-    text: 'text-[var(--accent-blue)]',
-    dot: 'bg-[var(--accent-blue)]',
-    label: 'Created',
-  },
-  idle: {
-    bg: 'rgba(245, 158, 11, 0.12)',
-    text: 'text-[var(--accent-amber)]',
-    dot: 'bg-[var(--accent-amber)]',
-    label: 'Idle',
-  },
-  terminated: {
-    bg: 'rgba(161, 161, 170, 0.12)',
-    text: 'text-[var(--text-muted)]',
-    dot: 'bg-[var(--text-muted)]',
-    label: 'Terminated',
-  },
-  deleted: {
-    bg: 'rgba(161, 161, 170, 0.12)',
-    text: 'text-[var(--text-muted)]',
-    dot: 'bg-[var(--text-muted)]',
-    label: 'Deleted',
-  },
-  error: {
-    bg: 'rgba(244, 63, 94, 0.12)',
-    text: 'text-[var(--accent-coral)]',
-    dot: 'bg-[var(--accent-coral)]',
-    label: 'Error',
-  },
-};
+import { StatusBadge, SESSION_STATUS_MAP } from './status-badge';
 
-const DEFAULT_SESSION_STYLE = {
-  bg: 'rgba(255, 255, 255, 0.06)',
-  text: 'text-[var(--text-muted)]',
-  dot: 'bg-[var(--text-muted)]',
-  label: '',
-};
-
+// Thin wrapper kept so session call sites stay unchanged
+// (`<SessionStatusBadge state={x} />`). The rendering lives in the shared
+// StatusBadge; only the status→style map differs.
 export function SessionStatusBadge({ state }: { state: string }) {
-  const style = SESSION_STATUS_MAP[state] ?? DEFAULT_SESSION_STYLE;
-  const label = style.label || state;
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${style.text}`}
-      style={{ background: style.bg }}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-      {label}
-    </span>
-  );
+  return <StatusBadge status={state} map={SESSION_STATUS_MAP} />;
 }

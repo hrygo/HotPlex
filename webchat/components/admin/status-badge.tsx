@@ -1,10 +1,23 @@
 'use client';
 
-interface StatusBadgeProps {
-  status: string;
+export interface StatusStyle {
+  bg: string;
+  text: string;
+  dot: string;
+  label: string;
 }
 
-const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string; label: string }> = {
+export type StatusMap = Record<string, StatusStyle>;
+
+const DEFAULT_STYLE: StatusStyle = {
+  bg: 'rgba(255, 255, 255, 0.06)',
+  text: 'text-[var(--text-muted)]',
+  dot: 'bg-[var(--text-muted)]',
+  label: '',
+};
+
+// Bot connection status (connected / disconnected / error).
+const BOT_STATUS_MAP: StatusMap = {
   connected: {
     bg: 'rgba(52, 211, 153, 0.12)',
     text: 'text-[var(--accent-emerald)]',
@@ -25,15 +38,52 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string; lab
   },
 };
 
-const DEFAULT_STYLE = {
-  bg: 'rgba(255, 255, 255, 0.06)',
-  text: 'text-[var(--text-muted)]',
-  dot: 'bg-[var(--text-muted)]',
-  label: '',
+// Session lifecycle status (running / created / idle / terminated / deleted / error).
+export const SESSION_STATUS_MAP: StatusMap = {
+  running: {
+    bg: 'rgba(52, 211, 153, 0.12)',
+    text: 'text-[var(--accent-emerald)]',
+    dot: 'bg-[var(--accent-emerald)]',
+    label: 'Running',
+  },
+  created: {
+    bg: 'rgba(96, 165, 250, 0.12)',
+    text: 'text-[var(--accent-blue)]',
+    dot: 'bg-[var(--accent-blue)]',
+    label: 'Created',
+  },
+  idle: {
+    bg: 'rgba(245, 158, 11, 0.12)',
+    text: 'text-[var(--accent-amber)]',
+    dot: 'bg-[var(--accent-amber)]',
+    label: 'Idle',
+  },
+  terminated: {
+    bg: 'rgba(161, 161, 170, 0.12)',
+    text: 'text-[var(--text-muted)]',
+    dot: 'bg-[var(--text-muted)]',
+    label: 'Terminated',
+  },
+  deleted: {
+    bg: 'rgba(161, 161, 170, 0.12)',
+    text: 'text-[var(--text-muted)]',
+    dot: 'bg-[var(--text-muted)]',
+    label: 'Deleted',
+  },
+  error: {
+    bg: 'rgba(244, 63, 94, 0.12)',
+    text: 'text-[var(--accent-coral)]',
+    dot: 'bg-[var(--accent-coral)]',
+    label: 'Error',
+  },
 };
 
-export function StatusBadge({ status }: StatusBadgeProps) {
-  const style = STATUS_STYLES[status] ?? DEFAULT_STYLE;
+// Generic status badge. Defaults to the bot connection map; pass `map` for
+// other status domains (e.g. SESSION_STATUS_MAP). Previously this and
+// SessionStatusBadge were two near-identical components differing only in
+// their status→style map (PR-1b consolidation).
+export function StatusBadge({ status, map = BOT_STATUS_MAP }: { status: string; map?: StatusMap }) {
+  const style = map[status] ?? DEFAULT_STYLE;
   const label = style.label || status;
 
   return (
