@@ -236,6 +236,50 @@ Gateway API（`/api/sessions`）监听在网关主端口（`8888`），面向客
 
 所有 Gateway API 端点启用 CORS（`Access-Control-Allow-Origin: *`），支持 `GET`、`POST`、`DELETE`、`OPTIONS` 方法。
 
+### WebChat 多租户端点（spec ① / ④ / ⑥）
+
+WebChat 多租户登录与工作区管理端点，同样监听在网关主端口 `8888`，使用 **Cookie 认证**（登录后签发的 HMAC Cookie，非 API Key）。仅在启用 WebChat 多租户（`CookieAuth` + `WorkspaceStore` 就绪）时注册，普通 SDK/WebSocket 集成不涉及。
+
+**账号登录（spec ①）**：
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| POST | `/api/auth/login` | 无 | 内建账号登录（username/password），成功签发 Cookie |
+| POST | `/api/auth/logout` | Cookie | 登出并清除 Cookie |
+| GET | `/api/auth/me` | Cookie | 当前登录用户信息 |
+| POST | `/api/auth/accept-invite` | 邀请凭证 | 接受邀请加入 workspace |
+| GET | `/api/auth/bootstrap-status` | 无 | 首次部署引导状态（是否已存在管理员），登录页据此决定是否引导建号 |
+
+**企业 SSO（spec ④，OIDC + PKCE）**：
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| GET | `/api/auth/oauth/providers` | 无 | 列出已配置的 SSO provider（登录页据此渲染按钮） |
+| GET | `/api/auth/oauth/{provider}/login` | 无 | 发起 OIDC 登录，重定向到 IdP（name 须匹配 `[a-z0-9-]+`） |
+| GET | `/api/auth/oauth/{provider}/callback` | state cookie | OIDC 回调，完成 token exchange + ID Token 验证后签发 Cookie |
+
+**Workspace 管理（spec ⑥ A1）**：
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| POST | `/api/workspaces` | Cookie | 创建 workspace |
+| GET | `/api/workspaces` | Cookie | 列出当前用户可访问的 workspace |
+| GET | `/api/workspaces/{id}` | Cookie | workspace 详情（含归属校验） |
+| PATCH | `/api/workspaces/{id}` | Cookie | 更新 workspace |
+| DELETE | `/api/workspaces/{id}` | Cookie | 删除 workspace |
+
+**Workspace 用户与邀请管理（spec ⑥，admin 维度）**：
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| GET | `/api/admin/users` | Cookie | 列出 workspace 用户 |
+| PATCH | `/api/admin/users/{id}` | Cookie | 启用/禁用用户（disable 后 per-request 即时拦截） |
+| POST | `/api/admin/invitations` | Cookie | 创建邀请码 |
+| GET | `/api/admin/invitations` | Cookie | 列出邀请 |
+| DELETE | `/api/admin/invitations/{id}` | Cookie | 删除邀请 |
+
+> ⚠️ **注意区分**：此处的 `/api/admin/*`（端口 `8888`，Cookie 认证，WebChat workspace 维度）与本页上方「认证」章节描述的 Admin API（端口 `9999`，Bearer Token，网关运维维度）是**两套独立端点**，认证模型和作用域完全不同，不要混淆。
+
 **POST /admin/cron/jobs** — JSON body 含 `name`、`schedule`（cron:/every:/at: 前缀）、`message`、`bot_id`、`owner_id`、`enabled`。返回 `201 Created`。
 
 **PATCH /admin/cron/jobs/{id}** — 部分更新，JSON body。返回 `204 No Content`。
