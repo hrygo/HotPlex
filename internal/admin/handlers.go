@@ -7,10 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/cron"
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/session"
 )
 
@@ -38,35 +38,34 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	byType := make(map[string]map[string]any)
+	byType := make(map[string]any)
 	for _, si := range sessions {
 		siMap, ok := si.(map[string]any)
 		if !ok {
 			continue
 		}
 		key, _ := siMap["worker_type"].(string)
-		if byType[key] == nil {
-			byType[key] = map[string]any{
+		m, _ := byType[key].(map[string]any)
+		if m == nil {
+			m = map[string]any{
 				"sessions":        0,
 				"avg_memory_mb":   0,
 				"avg_cpu_percent": 0,
 			}
+			byType[key] = m
 		}
-		m := byType[key]
 		m["sessions"] = m["sessions"].(int) + 1 //nolint:errcheck // guaranteed by filter logic
 	}
 
-	respondJSON(w, map[string]any{
-		"gateway": map[string]any{
-			"uptime_seconds":        int(time.Since(a.startedAt).Seconds()),
-			"websocket_connections": a.hub.ConnectionsOpen(),
-			"sessions_active":       total,
-			"sessions_total":        len(sessions),
+	respondJSON(w, StatsResponse{
+		Gateway: GatewayStatsDetail{
+			UptimeSeconds:        int(time.Since(a.startedAt).Seconds()),
+			WebsocketConnections: a.hub.ConnectionsOpen(),
+			SessionsActive:       total,
+			SessionsTotal:        len(sessions),
 		},
-		"workers": byType,
-		"database": map[string]any{
-			"sessions_count": len(sessions),
-		},
+		Workers:  byType,
+		Database: DatabaseStatsDetail{SessionsCount: len(sessions)},
 	})
 }
 
@@ -101,7 +100,7 @@ func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 
 	dbCheck := map[string]any{
 		"status": map[bool]string{true: "healthy", false: "unhealthy"}[dbHealthy],
-		"type":   cfg.DB.Driver,
+		"type":   string(dbutil.ParseDialect(cfg.DB.Driver)),
 		"path":   cfg.DB.Path,
 	}
 	if dbErr != "" {
@@ -178,12 +177,7 @@ func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
 		return
 	}
-	limit := 100
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 1000 {
-			limit = v
-		}
-	}
+	limit, _ := parsePagination(r)
 	logs, total := a.logCollector.Recent(limit)
 	if logs == nil {
 		logs = []logEntry{}

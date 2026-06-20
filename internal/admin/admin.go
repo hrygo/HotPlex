@@ -182,10 +182,6 @@ func New(deps Deps) *AdminAPI {
 	return a
 }
 
-func (a *AdminAPI) Mux() *http.ServeMux {
-	return http.NewServeMux()
-}
-
 func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

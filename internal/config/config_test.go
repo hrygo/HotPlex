@@ -79,6 +79,15 @@ func TestConfig_Validate(t *testing.T) {
 			errCnt: 1, // missing path only
 		},
 		{
+			name: "unknown db driver rejected (fail-fast, P2-1)",
+			cfg: func() Config {
+				c := *Default()
+				c.DB.Driver = "mysql"
+				return c
+			}(),
+			errCnt: 1, // unknown driver rejected, no silent fallback to sqlite
+		},
+		{
 			name: "non-positive retention period",
 			cfg: func() Config {
 				c := *Default()

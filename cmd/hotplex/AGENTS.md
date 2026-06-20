@@ -63,7 +63,7 @@ type GatewayDeps struct {
 
 **Route registration (routes.go)**
 - `/ws` → Hub.HandleHTTP (WebSocket upgrade)
-- `/admin/*` → AdminAPI.Mux() (scoped auth)
+- `/admin/*` → AdminAPI handlers + Middleware (scoped auth)
 - `/health` → liveness probe
 - `/metrics` → Prometheus handler
 

@@ -77,6 +77,8 @@ func (c *Config) Validate() []string {
 		if c.DB.Postgres.ConnStr == "" {
 			errs = append(errs, "db.postgres.dsn is required when db.driver is postgres")
 		}
+	} else {
+		errs = append(errs, `db.driver must be "sqlite" or "postgres" (got: `+c.DB.Driver+`)`)
 	}
 	if c.Session.RetentionPeriod <= 0 {
 		errs = append(errs, "session.retention_period must be positive")

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -77,21 +76,9 @@ func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)
 		return
 	}
-	limit := 100
-	offset := 0
 	platform := r.URL.Query().Get("platform")
 	userID := r.URL.Query().Get("user_id")
-
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
-			offset = v
-		}
-	}
+	limit, offset := parsePagination(r)
 
 	sessions, err := a.sm.List(r.Context(), userID, platform, limit, offset)
 	if err != nil {
