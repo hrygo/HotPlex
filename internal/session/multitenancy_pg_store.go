@@ -61,11 +61,6 @@ func (s *pgStore) UpdateUserStatus(ctx context.Context, id, status string, now i
 	return err
 }
 
-func (s *pgStore) DeleteUser(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, s.queries["users.delete"], id)
-	return err
-}
-
 func (s *pgStore) TouchUserLastLogin(ctx context.Context, userID string, now int64) error {
 	_, err := s.db.ExecContext(ctx, s.queries["users.touch_last_login"], now, now, userID)
 	return err

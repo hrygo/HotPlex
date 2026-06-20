@@ -66,7 +66,6 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 		"workers": byType,
 		"database": map[string]any{
 			"sessions_count": len(sessions),
-			"db_size_mb":     0,
 		},
 	})
 }
@@ -102,7 +101,7 @@ func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 
 	dbCheck := map[string]any{
 		"status": map[bool]string{true: "healthy", false: "unhealthy"}[dbHealthy],
-		"type":   "sqlite",
+		"type":   cfg.DB.Driver,
 		"path":   cfg.DB.Path,
 	}
 	if dbErr != "" {
