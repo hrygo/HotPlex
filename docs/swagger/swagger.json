@@ -2938,9 +2938,6 @@
         "admin.DatabaseStatsDetail": {
             "type": "object",
             "properties": {
-                "db_size_mb": {
-                    "type": "integer"
-                },
                 "sessions_count": {
                     "type": "integer"
                 }

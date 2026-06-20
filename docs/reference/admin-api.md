@@ -118,7 +118,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 | GET | `/admin/stats` | `stats:read` | 网关聚合统计 |
 | GET | `/admin/metrics` | `stats:read` | Prometheus 格式指标 |
 
-**GET /admin/stats** — 返回 `gateway`（uptime/websocket_connections/sessions_active/sessions_total）、`workers`（按 worker_type 分组统计）和 `database`（sessions_count/db_size_mb）。
+**GET /admin/stats** — 返回 `gateway`（uptime/websocket_connections/sessions_active/sessions_total）、`workers`（按 worker_type 分组统计）和 `database`（sessions_count）。
 
 ### 配置管理
 
