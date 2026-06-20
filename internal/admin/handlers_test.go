@@ -260,6 +260,7 @@ func TestHandleHealth(t *testing.T) {
 	api := newTestAPI()
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/health", nil)
+	r = withScope(r, ScopeHealthRead)
 
 	api.HandleHealth(w, r)
 
@@ -279,6 +280,7 @@ func TestHandleHealth_Degraded(t *testing.T) {
 	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/health", nil)
+	r = withScope(r, ScopeHealthRead)
 
 	api.HandleHealth(w, r)
 

@@ -82,6 +82,10 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need health:read"
 // @Router       /admin/health [get]
 func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeHealthRead) {
+		http.Error(w, "insufficient scope: need health:read", http.StatusForbidden)
+		return
+	}
 	cfg := a.cfg.Get()
 	dbHealthy := true
 	var dbErr string
