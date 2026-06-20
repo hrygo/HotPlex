@@ -7,7 +7,7 @@
  *   - Cross-origin (external frontend): credentials: 'include' (cookie auth)
  */
 
-import { BASE, authHeaders, authOpts, withAuth } from "@/lib/api/client";
+import { BASE, authHeaders, authOpts, withAuth, extractApiError } from "@/lib/api/client";
 
 export interface SessionInfo {
   id: string;
@@ -88,7 +88,7 @@ export async function listSessions(limit = 20, offset = 0, workspaceId?: string,
     { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
   throwIfAuthError('listSessions', res.status);
-  if (!res.ok) throw new Error(`listSessions failed: ${res.status}`);
+  if (!res.ok) throw new Error(await extractApiError(res, `listSessions failed: ${res.status}`));
   return res.json();
 }
 
@@ -114,10 +114,7 @@ export async function createSession(opts: CreateSessionOptions, signal?: AbortSi
   }
   const res = await fetch(url, { method: 'POST', headers: authHeaders(), ...authOpts(), signal });
   throwIfAuthError('createSession', res.status);
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(body || `createSession failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await extractApiError(res, `createSession failed: ${res.status}`));
   return res.json();
 }
 
@@ -127,7 +124,7 @@ export async function deleteSession(id: string, signal?: AbortSignal): Promise<v
     { method: 'DELETE', headers: authHeaders(), ...authOpts(), signal }
   );
   throwIfAuthError('deleteSession', res.status);
-  if (!res.ok) throw new Error(`deleteSession failed: ${res.status}`);
+  if (!res.ok) throw new Error(await extractApiError(res, `deleteSession failed: ${res.status}`));
 }
 
 export async function getSessionHistory(
@@ -144,7 +141,7 @@ export async function getSessionHistory(
   }
   const res = await fetch(url, { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal: options?.signal });
   throwIfAuthError('getSessionHistory', res.status);
-  if (!res.ok) throw new Error(`getSessionHistory failed: ${res.status}`);
+  if (!res.ok) throw new Error(await extractApiError(res, `getSessionHistory failed: ${res.status}`));
   return res.json();
 }
 

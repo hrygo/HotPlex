@@ -31,3 +31,15 @@ export function authOpts(): RequestInit {
 export function withAuth(headers?: Record<string, string>): Record<string, string> {
   return { ...authHeaders(), ...headers };
 }
+
+// Parse the backend's structured error envelope {error:{code,message}}
+// (written by gateway writeAppError). Returns the most specific message
+// available, falling back to a status-derived string when the body is not
+// JSON or lacks the envelope. Centralizing this fixes the prior mismatch
+// where some calls read the non-existent top-level `message` field (→ the
+// semantic error code like USER_DISABLED/FORBIDDEN was discarded in favor
+// of a generic "Create invitation failed: 403").
+export async function extractApiError(res: Response, fallback: string): Promise<string> {
+  const errData = await res.json().catch(() => ({}));
+  return errData?.error?.code || errData?.error?.message || fallback;
+}

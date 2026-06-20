@@ -1,4 +1,4 @@
-import { BASE, authHeaders, authOpts, withAuth } from "@/lib/api/client";
+import { BASE, authHeaders, authOpts, withAuth, extractApiError } from "@/lib/api/client";
 
 export interface Workspace {
   id: string;
@@ -61,7 +61,7 @@ export async function listWorkspaces(limit = 100, offset = 0, signal?: AbortSign
     `${BASE}/api/workspaces?limit=${limit}&offset=${offset}`,
     { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
-  if (!res.ok) throw new Error(`listWorkspaces failed: ${res.status}`);
+  if (!res.ok) throw new Error(await extractApiError(res, `listWorkspaces failed: ${res.status}`));
   const data = await res.json();
   return {
     ...data,
@@ -80,10 +80,7 @@ export async function createWorkspace(name: string, workDir: string, signal?: Ab
       signal,
     }
   );
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `createWorkspace failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await extractApiError(res, `createWorkspace failed: ${res.status}`));
   return normalizeWorkspace(await res.json());
 }
 
@@ -92,7 +89,7 @@ export async function getWorkspace(id: string, signal?: AbortSignal): Promise<Wo
     `${BASE}/api/workspaces/${id}`,
     { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal }
   );
-  if (!res.ok) throw new Error(`getWorkspace failed: ${res.status}`);
+  if (!res.ok) throw new Error(await extractApiError(res, `getWorkspace failed: ${res.status}`));
   return normalizeWorkspace(await res.json());
 }
 
@@ -119,10 +116,7 @@ export async function updateWorkspace(id: string, opts: UpdateWorkspaceOptions, 
       signal,
     }
   );
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `updateWorkspace failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await extractApiError(res, `updateWorkspace failed: ${res.status}`));
   return normalizeWorkspace(await res.json());
 }
 
@@ -131,5 +125,5 @@ export async function deleteWorkspace(id: string, signal?: AbortSignal): Promise
     `${BASE}/api/workspaces/${id}`,
     { method: 'DELETE', headers: authHeaders(), ...authOpts(), signal }
   );
-  if (!res.ok) throw new Error(`deleteWorkspace failed: ${res.status}`);
+  if (!res.ok) throw new Error(await extractApiError(res, `deleteWorkspace failed: ${res.status}`));
 }

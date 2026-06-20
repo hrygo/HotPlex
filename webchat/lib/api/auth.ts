@@ -1,4 +1,4 @@
-import { BASE, authHeaders, authOpts, withAuth } from "@/lib/api/client";
+import { BASE, authHeaders, authOpts, withAuth, extractApiError } from "@/lib/api/client";
 
 export interface User {
   id: string;
@@ -59,7 +59,7 @@ export async function getMe(signal?: AbortSignal): Promise<User> {
     signal,
   });
   if (!res.ok) {
-    throw new Error(`getMe failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `getMe failed: ${res.status}`));
   }
   return res.json();
 }
@@ -74,8 +74,7 @@ export async function login(username: string, password: string, signal?: AbortSi
     signal,
   });
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData?.error?.code || errData?.error?.message || `Login failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `Login failed: ${res.status}`));
   }
   return res.json();
 }
@@ -89,7 +88,7 @@ export async function logout(signal?: AbortSignal): Promise<void> {
     signal,
   });
   if (!res.ok) {
-    throw new Error(`Logout failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `Logout failed: ${res.status}`));
   }
 }
 
@@ -103,8 +102,7 @@ export async function acceptInvite(code: string, username: string, password: str
     signal,
   });
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData?.error?.code || errData?.error?.message || `Accept invite failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `Accept invite failed: ${res.status}`));
   }
   return res.json();
 }
@@ -133,8 +131,7 @@ export async function adminCreateInvitation(role: 'admin' | 'user', ttlSeconds?:
     signal,
   });
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.message || `Create invitation failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `Create invitation failed: ${res.status}`));
   }
   return res.json();
 }
@@ -153,8 +150,7 @@ export async function adminListInvitations(limit = 100, offset = 0, signal?: Abo
     signal,
   });
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.message || `List invitations failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `List invitations failed: ${res.status}`));
   }
   return res.json();
 }
@@ -168,8 +164,7 @@ export async function adminDeleteInvitation(id: string, signal?: AbortSignal): P
     signal,
   });
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.message || `Delete invitation failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `Delete invitation failed: ${res.status}`));
   }
 }
 
@@ -187,8 +182,7 @@ export async function adminListUsers(limit = 100, offset = 0, signal?: AbortSign
     signal,
   });
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.message || `List users failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `List users failed: ${res.status}`));
   }
   return res.json();
 }
@@ -203,7 +197,6 @@ export async function adminUpdateUserStatus(id: string, status: 'active' | 'disa
     signal,
   });
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.message || `Update user status failed: ${res.status}`);
+    throw new Error(await extractApiError(res, `Update user status failed: ${res.status}`));
   }
 }
