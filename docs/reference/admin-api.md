@@ -102,7 +102,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `limit` | int | 100 | 每页数量 |
+| `limit` | int | 100 | 每页数量（上限 1000） |
 | `offset` | int | 0 | 偏移量 |
 | `platform` | string | "" | 按平台过滤 |
 | `user_id` | string | "" | 按用户过滤 |

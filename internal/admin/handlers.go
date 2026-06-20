@@ -40,15 +40,17 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 
 	byType := make(map[string]any)
 	for _, si := range sessions {
-		siMap, ok := si.(map[string]any)
+		s, ok := si.(*session.SessionInfo)
 		if !ok {
 			continue
 		}
-		key, _ := siMap["worker_type"].(string)
+		key := string(s.WorkerType)
 		m, _ := byType[key].(map[string]any)
 		if m == nil {
 			m = map[string]any{
-				"sessions":        0,
+				"sessions": 0,
+				// avg_memory_mb / avg_cpu_percent stay 0: SessionInfo carries no
+				// per-session memory/cpu stats, so there is no aggregation source yet.
 				"avg_memory_mb":   0,
 				"avg_cpu_percent": 0,
 			}
@@ -368,9 +370,8 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 		a.log.Warn("admin: failed to get debug snapshot", "session_id", id)
 	}
 
-	siMap, _ := si.(map[string]any)
 	respondJSON(w, map[string]any{
-		"session": siMap,
+		"session": si,
 		"debug": map[string]any{
 			"available":     dbgOK,
 			"has_worker":    snap.HasWorker,
