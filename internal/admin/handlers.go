@@ -12,6 +12,7 @@ import (
 	"github.com/hrygo/hotplex/internal/cron"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/web"
 )
 
 // HandleStats returns gateway runtime statistics.
@@ -179,7 +180,7 @@ func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
 		return
 	}
-	limit, _ := parsePagination(r)
+	limit, _ := web.ParsePagination(r)
 	logs, total := a.logCollector.Recent(limit)
 	if logs == nil {
 		logs = []logEntry{}

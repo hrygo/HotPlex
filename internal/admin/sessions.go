@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 
+	"github.com/hrygo/hotplex/internal/web"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -78,7 +79,7 @@ func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	platform := r.URL.Query().Get("platform")
 	userID := r.URL.Query().Get("user_id")
-	limit, offset := parsePagination(r)
+	limit, offset := web.ParsePagination(r)
 
 	sessions, err := a.sm.List(r.Context(), userID, platform, limit, offset)
 	if err != nil {

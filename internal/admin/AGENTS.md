@@ -37,10 +37,10 @@ response.go      # JSON response helpers
 - TokenScopes map: per-token scope list
 - DefaultScopes: fallback when token found but no specific scopes
 
-**Mux setup**
-- New(deps) creates AdminAPI
-- Mux() returns *http.ServeMux (routes registered externally)
-- Middleware() wraps with rate-limit → IP check → token auth → scope injection
+**Routing & Middleware**
+- `New(deps)` creates AdminAPI (no embedded ServeMux)
+- Routes are registered externally in `cmd/hotplex/routes.go` onto `http.NewServeMux()` via `adminAPI.Handle*` methods (AdminAPI exposes no `Mux()`)
+- `Middleware(next)` wraps: rate-limit → IP check → token auth → scope injection
 
 ## ANTI-PATTERNS
 - ❌ Import internal/gateway or internal/session directly — use Provider interfaces

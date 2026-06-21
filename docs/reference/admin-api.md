@@ -254,7 +254,7 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 | POST | `/api/auth/login` | 无 | 内建账号登录（username/password），成功签发 Cookie |
 | POST | `/api/auth/logout` | Cookie | 登出并清除 Cookie |
 | GET | `/api/auth/me` | Cookie | 当前登录用户信息 |
-| POST | `/api/auth/accept-invite` | 无（邀请码） | 凭邀请码（body `code`）注册本地账号加入 workspace |
+| POST | `/api/auth/accept-invite` | 无（邀请码） | 凭邀请码（body `code`）注册本地账号并**自动登录**（签发 cookie，返回 `first_login:true`），加入 workspace |
 | GET | `/api/auth/bootstrap-status` | 无 | 首次部署引导状态（是否已存在管理员），登录页据此决定是否引导建号 |
 
 **企业 SSO（spec ④，OIDC + PKCE）**：

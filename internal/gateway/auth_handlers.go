@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/web"
 )
 
 // AppError is the JSON error envelope for multitenancy API endpoints (spec §12).
@@ -260,23 +260,8 @@ func isUniqueViolation(err error) bool {
 }
 
 // --- admin endpoints (spec §11.2, require admin role) ---
-
-// parsePagination 从 query 解析 limit/offset：limit 默认 100、上限 1000，offset 默认 0。
-// 供 admin 列表端点统一分页，避免无界查询（spec §11.2）。
-func parsePagination(r *http.Request) (limit, offset int) {
-	limit, offset = 100, 0
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 1000 {
-			limit = v
-		}
-	}
-	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
-			offset = v
-		}
-	}
-	return limit, offset
-}
+// Pagination helper is shared via internal/web.ParsePagination (PR #764 review:
+// dedup with the admin port — both now clamp to the same MaxLimit).
 
 type createInvitationRequest struct {
 	Role string `json:"role"` // 'user' | 'admin'
@@ -324,7 +309,7 @@ func (h *AuthHandlers) AdminListInvitations(w http.ResponseWriter, r *http.Reque
 	if _, ok := h.requireAdmin(w, r); !ok {
 		return
 	}
-	limit, offset := parsePagination(r)
+	limit, offset := web.ParsePagination(r)
 	invs, err := h.store.ListInvitations(r.Context(), limit, offset)
 	if err != nil {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
@@ -351,7 +336,7 @@ func (h *AuthHandlers) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireAdmin(w, r); !ok {
 		return
 	}
-	limit, offset := parsePagination(r)
+	limit, offset := web.ParsePagination(r)
 	users, err := h.store.ListUsers(r.Context(), limit, offset)
 	if err != nil {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
