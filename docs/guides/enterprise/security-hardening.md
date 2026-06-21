@@ -56,6 +56,33 @@ location /ws {
 
 通过 `security.SetKeyResolver()` 设置自定义的 `APIKeyResolver`，可将 API Key 映射到不同的 userID，实现用户级会话隔离。未设置 resolver 时，所有 API Key 认证的请求统一使用 `api_user` 身份。
 
+### 2.4 WebChat 用户认证（内建账号 + 企业 SSO）
+
+WebChat 多租户化后（spec ⑥）**强制登录**，废除匿名 `webchat_user` 身份。除上文的 API Key（适用于服务端客户端 / SDK 直连）外，WebChat 浏览器端使用两套用户身份认证：
+
+**内建账号**（spec ①）：username/password 本地账号，由 admin 通过邀请码（`POST /api/admin/invitations`）创建。首次部署尚无任何账号时，登录页依据 `GET /api/auth/bootstrap-status` 引导创建首个管理员。
+
+**企业 SSO**（spec ④）：标准 OIDC Authorization Code flow + PKCE，一套实现覆盖全部主流 IdP（Keycloak / Okta / Azure AD / Google Workspace 等）。配置 `oauth.providers[]` 后，登录页通过 `GET /api/auth/oauth/providers` 渲染 SSO 按钮，点击跳转 `GET /api/auth/oauth/{provider}/login` → IdP 认证 → `GET /api/auth/oauth/{provider}/callback` 回调。回调链路依次执行 **state 校验（防 CSRF）→ token exchange → id_token 签名验证 → 用户创建/查找 → 签发 HMAC Cookie**。
+
+> 配置详见 [配置参考 — oauth](../../reference/configuration.md#314-oauth--webchat--ssooidc)。`client_secret` 当前为明文写入 YAML（暂不支持 `${ENV_VAR}` 展开），须通过文件权限和密钥管理体系保护。
+
+### 2.5 HMAC Cookie 认证（登录态）
+
+`POST /api/auth/login`（内建账号）或 OAuth 回调成功后，Gateway 签发 HMAC-SHA256 签名 cookie 作为登录态凭证，后续 WebSocket 连接自动携带，无需 API Key。
+
+| 安全属性 | 值 | 作用 |
+|---------|------|------|
+| `HttpOnly` | 启用 | JavaScript 无法读取，防 XSS 窃取 |
+| `SameSite` | `None` | 支持跨域 WebChat 部署（须配合 Secure） |
+| `Secure` | HTTPS 自动启用 | 跨域时网关必须 HTTPS（浏览器拒绝非 Secure 的 SameSite=None cookie） |
+| 签名算法 | HMAC-SHA256 | 服务端密钥签名，无法伪造 |
+| 密钥持久化 | `~/.hotplex/data/cookie_secret.key`（权限 `0600`） | 重启后仍有效；可由 `security.cookie_secret` 显式配置覆盖 |
+| 有效期 | 7 天 | 限制凭证有效期 |
+
+**CSRF 权衡**：HMAC 签名仅防伪造，不防 CSRF。OAuth flow 的 CSRF 由 OIDC `state` token 防护（见 2.4 回调链路）；内建账号登录的 CSRF 由前端另行防护。
+
+**认证优先级**：HTTP Header → Query Param → Cookie → Init Envelope。Cookie 作为第 3 优先级 fallback，不影响 Header/Query 类客户端。认证原理详见 [安全模型 — HMAC Cookie 认证](../../explanation/security-model.md#hmac-cookie-认证webchat-多租户)。
+
 ---
 
 ## 3. SSRF 防护（4 层校验）
@@ -176,12 +203,15 @@ Risky / Network / System 类工具在开发模式下可用，但 Bash 命令受�
 | 1 | Gateway 绑定 localhost，未暴露公网 | ☐ |
 | 2 | 至少配置一个 API Key（生产环境） | ☐ |
 | 3 | Bot ID 隔离验证生效（Header + Query） | ☐ |
-| 4 | SSRF BlockedCIDRs 覆盖私有/元数据地址 | ☐ |
-| 5 | Worker 命令白名单仅含 claude/opencode | ☐ |
-| 6 | `HOTPLEX_WORKER_` 前缀隔离正确配置 | ☐ |
-| 7 | 生产环境使用 `ProductionAllowedTools`（3 工具） | ☐ |
-| 8 | Output Limits 未被修改 | ☐ |
-| 9 | TLS 由反向代理终止 | ☐ |
+| 4 | WebChat 多租户强制登录生效（无 `webchat_user` 匿名身份残留） | ☐ |
+| 5 | OAuth `client_secret` 与 `~/.hotplex/data/cookie_secret.key`（权限 `0600`）妥善保管 | ☐ |
+| 6 | 跨域 WebChat 部署网关已启用 HTTPS（SameSite=None cookie 依赖） | ☐ |
+| 7 | SSRF BlockedCIDRs 覆盖私有/元数据地址 | ☐ |
+| 8 | Worker 命令白名单仅含 claude/opencode | ☐ |
+| 9 | `HOTPLEX_WORKER_` 前缀隔离正确配置 | ☐ |
+| 10 | 生产环境使用 `ProductionAllowedTools`（3 工具） | ☐ |
+| 11 | Output Limits 未被修改 | ☐ |
+| 12 | TLS 由反向代理终止 | ☐ |
 
 ---
 
@@ -190,6 +220,10 @@ Risky / Network / System 类工具在开发模式下可用，但 Bash 命令受�
 | 模块 | 文件 |
 |------|------|
 | API Key 认证 + Bot ID | `internal/security/auth.go` |
+| OAuth/OIDC SSO | `internal/security/oauth_provider.go`、`oauth_manager.go`、`oauth_state.go` |
+| OAuth 回调路由 | `internal/gateway/oauth_handlers.go` |
+| HMAC Cookie 认证 | `internal/security/cookie.go` |
+| 内建账号 provider | `internal/security/local_account_provider.go` |
 | SSRF 4 层防护 | `internal/security/ssrf.go` |
 | 命令白名单 + Bash 策略 | `internal/security/command.go` |
 | 环境变量隔离 | `internal/security/env.go` |
