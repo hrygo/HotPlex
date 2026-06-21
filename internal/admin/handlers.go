@@ -56,7 +56,7 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 			}
 			byType[key] = m
 		}
-		m["sessions"] = m["sessions"].(int) + 1 //nolint:errcheck // guaranteed by filter logic
+		m["sessions"] = m["sessions"].(int) + 1 //nolint:errcheck // m["sessions"] always int: set in the m==nil init branch above
 	}
 
 	respondJSON(w, StatsResponse{
@@ -370,6 +370,10 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 		a.log.Warn("admin: failed to get debug snapshot", "session_id", id)
 	}
 
+	// Returns the full SessionInfo (Context, PlatformKey, WorkDir, Title may carry PII) by
+	// design: this is an admin-only debug endpoint gated by ScopeAdminRead above, and these
+	// fields are required for session troubleshooting. Do not JSON-whitelist them without an
+	// admin-visible alternative; track field-level redaction as a separate concern if ever needed.
 	respondJSON(w, map[string]any{
 		"session": si,
 		"debug": map[string]any{

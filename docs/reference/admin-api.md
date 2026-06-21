@@ -163,6 +163,13 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 | POST | `/admin/cron/jobs/{id}/run` | `admin:write` | 手动触发执行 |
 | GET | `/admin/cron/jobs/{id}/runs` | `admin:read` | 执行历史 |
 
+**请求体约定**：
+
+- **POST /admin/cron/jobs** — JSON body 含 `name`、`schedule`（cron:/every:/at: 前缀）、`message`、`bot_id`、`owner_id`、`enabled`。返回 `201 Created`。
+- **PATCH /admin/cron/jobs/{id}** — 部分更新，JSON body。返回 `204 No Content`。
+- **POST /admin/cron/jobs/{id}/run** — 手动触发（异步），返回 `202 Accepted`。
+- **GET /admin/cron/jobs/{id}/runs** — 查询执行历史。
+
 Cron 未启用时返回 `503 Service Unavailable`。
 
 ### Bot 管理
@@ -247,7 +254,7 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 | POST | `/api/auth/login` | 无 | 内建账号登录（username/password），成功签发 Cookie |
 | POST | `/api/auth/logout` | Cookie | 登出并清除 Cookie |
 | GET | `/api/auth/me` | Cookie | 当前登录用户信息 |
-| POST | `/api/auth/accept-invite` | 邀请凭证 | 接受邀请加入 workspace |
+| POST | `/api/auth/accept-invite` | 无（邀请码） | 凭邀请码（body `code`）注册本地账号加入 workspace |
 | GET | `/api/auth/bootstrap-status` | 无 | 首次部署引导状态（是否已存在管理员），登录页据此决定是否引导建号 |
 
 **企业 SSO（spec ④，OIDC + PKCE）**：
@@ -279,14 +286,6 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 | DELETE | `/api/admin/invitations/{id}` | Cookie | 删除邀请 |
 
 > ⚠️ **注意区分**：此处的 `/api/admin/*`（端口 `8888`，Cookie 认证，WebChat workspace 维度）与本页上方「认证」章节描述的 Admin API（端口 `9999`，Bearer Token，网关运维维度）是**两套独立端点**，认证模型和作用域完全不同，不要混淆。
-
-**POST /admin/cron/jobs** — JSON body 含 `name`、`schedule`（cron:/every:/at: 前缀）、`message`、`bot_id`、`owner_id`、`enabled`。返回 `201 Created`。
-
-**PATCH /admin/cron/jobs/{id}** — 部分更新，JSON body。返回 `204 No Content`。
-
-**POST /admin/cron/jobs/{id}/run** — 手动触发（异步），返回 `202 Accepted`。
-
-**GET /admin/cron/jobs/{id}/runs** — 查询执行历史。
 
 ## 错误响应格式
 

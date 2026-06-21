@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-18-agent-management-webui-design.md`
 
+> **📜 历史规划文档**：本文档为 2026-05-18 的实现规划快照。实际实现已演进（前端 stats 契约、类型命名等与下方示例代码可能不一致），**现行实现以代码 `internal/admin/`、`webchat/` 与 [`docs/reference/admin-api.md`](../../reference/admin-api.md) 为准**，本规划仅作设计决策历史记录。
+
 ---
 
 ## File Structure

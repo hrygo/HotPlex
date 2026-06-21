@@ -206,6 +206,8 @@ db:
 | `csp` | string | `""` | `HOTPLEX_SECURITY_CSP` | Content-Security-Policy 头覆盖，用于嵌入式 WebChat 和文档门户。空字符串使用内建默认值（适合 localhost）。远程部署时需设置，否则浏览器会阻止 fetch/ws/connect 调用 |
 | `security_contact` | string | `""` | `HOTPLEX_SECURITY_SECURITY_CONTACT` | 安全联系 URI，启用 `/.well-known/security.txt`（RFC 9116）。空字符串 = 禁用。示例：`mailto:security@example.com`、`https://example.com/security` |
 
+> **WebChat Cookie 签名密钥**：WebChat 多租户登录 cookie 的 HMAC-SHA256 密钥**不是配置项**——Gateway 首次启动时由 `crypto/rand` 自动生成，持久化到 `~/.hotplex/data/cookie_secret.key`（权限 `0600`），重启后复用，无法通过 YAML/env 设置。详见 [WebChat 设置 — HMAC Cookie 认证](../guides/developer/webchat-setup.md#认证)。
+
 ---
 
 ### 3.5 session — 会话管理
@@ -621,7 +623,7 @@ WebChat 多租户的企业单点登录（SSO）配置（spec ④）。基于标�
 | `display_name` | string | — | 登录页展示的人类可读标签（spec ⑥） |
 | `issuer` | string | — | OIDC issuer URL。discovery 端点自动解析为 `{issuer}/.well-known/openid-configuration` |
 | `client_id` | string | — | 在 IdP 注册的 OAuth2 client id |
-| `client_secret` | string | — | OAuth2 client secret。支持 `${ENV_VAR}` 展开 |
+| `client_secret` | string | — | OAuth2 client secret（明文写入，暂不支持 `${ENV_VAR}` 展开） |
 | `scopes` | []string | `["openid","profile"]` | 请求的 OIDC scopes |
 | `username_claim` | string | `""` | 可选 claim 名覆盖；为空时用 OIDC 标准 claim |
 | `display_name_claim` | string | `""` | 同上，显示名 claim |
@@ -639,7 +641,7 @@ oauth:
       display_name: "企业 SSO"
       issuer: "https://sso.example.com/realms/main"
       client_id: "hotplex"
-      client_secret: "${OAUTH_KEYCLOAK_SECRET}"
+      client_secret: "your-keycloak-client-secret"  # 明文（${ENV} 展开暂未实现）
 ```
 
 ---

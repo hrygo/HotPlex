@@ -80,34 +80,35 @@ Browser ──init envelope──> Conn.ReadPump
 
 浏览器 WebSocket 客户端因 CORS 限制无法发送自定义 HTTP Header，因此认证被延迟到首帧 `init` Envelope。服务端在 `HandleHTTP` 阶段检测到无 API Key 时设置 `pendingAuth` 标记，待 `ReadPump` 收到 `init` 后从 `auth.token` 字段提取并校验。
 
-#### HMAC Cookie 认证（同源 WebChat）
+#### HMAC Cookie 认证（WebChat 多租户）
 
-同源部署的 WebChat SPA 使用 HMAC-SHA256 签名 cookie 替代构建时嵌入 API Key，消除前端 JS bundle 凭证泄露风险。
+WebChat 多租户化后（spec ⑥ / §8.4），HMAC-SHA256 签名 cookie 替代构建时嵌入的固定 API Key，消除前端 JS bundle 凭证泄露风险。**登录成功后才签发**——不再在 `GET /` 自动下发固定的匿名 cookie，未登录访问被重定向到 `/login`。
 
 ```
-Gateway 启动 ──> crypto/rand 生成 HMAC key
+Gateway 启动 ──> crypto/rand 生成 HMAC key（持久化 ~/.hotplex/data/cookie_secret.key）
      │
      ▼
-Browser ──GET /──> SPA handler (index.html fallback)
-                    └─ SetCookie: HttpOnly, SameSite=Strict, 24h expiry
+Browser ──POST /api/auth/login──> AuthHandlers.Login
+              (账号 / SSO 回调)    └─ 校验通过 → SetCookie: HttpOnly, SameSite=None; Secure, 7d expiry
+                                   └─ cookie 绑定真实 users.id 身份
      │
      ▼
 Browser ──WS Upgrade──> Hub.HandleHTTP
      (cookie 自动携带)   ├─ CookieAuth.VerifyCookie() 签名+过期校验
-                         ├─ 通过 → "webchat_user" 身份
-                         └─ 失败 → fallback to init envelope
+                         ├─ 通过 → 登录用户身份（users.id）
+                         └─ 失败 → 拒绝（401）/ 跨域 fallback to init envelope
 ```
 
 **安全属性**：
 - **HttpOnly**：JavaScript 无法读取，防止 XSS 窃取
-- **SameSite=Strict**：仅同源请求携带，阻止 CSRF
-- **HMAC-SHA256**：服务端随机密钥签名，无法伪造
-- **24 小时过期**：限制凭证有效期
-- **Secure 标记**：HTTPS 环境自动启用
+- **SameSite=None; Secure**：跨域 WebChat 部署携带（CSRF trade-off，由 HMAC 签名 + OIDC state token 防护）
+- **HMAC-SHA256**：服务端随机密钥签名，无法伪造；密钥权限 `0600`，重启后仍有效
+- **7 天过期**：限制凭证有效期
+- **Secure 标记**：HTTPS 环境自动启用；跨域时网关须 HTTPS（浏览器拒绝非 Secure 的 SameSite=None cookie）
 
 **认证优先级**：HTTP Header → Query Param → **Cookie** → Init Envelope。Cookie 作为第 3 优先级 fallback，仅在同源 WebChat 场景自动生效，不影响其他客户端。
 
-**已知限制**：所有同源 WebChat 用户共享 `webchat_user` 身份，无法区分单个用户。跨域部署仍需使用 Init Envelope 认证。
+> spec §8.4 已废除「所有 WebChat 用户共享 `webchat_user` 匿名身份」的旧行为（`GET /` 自动签发）。多租户模式下 cookie 绑定真实登录用户，可精确区分与隔离。
 
 #### Dev 模式
 
