@@ -1122,7 +1122,7 @@ curl -H "X-API-Key: your-key" \
       "worker_type": "claude_code",
       "state": "idle",
       "title": "代码审查",
-      "client_key": "550e8400-e29b-41d4-a716-446655440000",
+      "client_key": "ws_abc123",
       "platform": "webchat",
       "work_dir": "/home/user/project",
       "created_at": "2026-06-03T10:00:00Z",
@@ -1646,7 +1646,7 @@ curl -X POST http://localhost:8888/api/workspaces \
 
 ```json
 {
-  "id": "ws_abc123",
+  "id": "7c9f6b2a-3e4d-4a8f-9b1c-2d5e7f8a9b0c",
   "owner_user_id": "u_svc1",
   "name": "my-project",
   "work_dir": "/home/user/project",
@@ -1654,12 +1654,12 @@ curl -X POST http://localhost:8888/api/workspaces \
 }
 ```
 
-`owner_user_id` 自动设为 api-key 对应的 `users.id`；`work_dir` 创建后不可变。
+`owner_user_id` 自动设为 api-key 对应的 `users.id`；`work_dir` 创建后不可变。`id` 为无前缀 UUIDv4（服务端 `uuid.NewString()` 生成，无 `ws_` 等前缀）。
 
 **②（可选）配置偏好 Worker + agent 配置覆盖**：
 
 ```bash
-curl -X PATCH http://localhost:8888/api/workspaces/ws_abc123 \
+curl -X PATCH http://localhost:8888/api/workspaces/7c9f6b2a-3e4d-4a8f-9b1c-2d5e7f8a9b0c \
   -H "X-API-Key: hpk_your_key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1682,7 +1682,7 @@ curl -X PATCH http://localhost:8888/api/workspaces/ws_abc123 \
     "data": {
       "version": "aep/v1",
       "worker_type": "claude_code",
-      "workspace_id": "ws_abc123"
+      "workspace_id": "7c9f6b2a-3e4d-4a8f-9b1c-2d5e7f8a9b0c"
     }
   }
 }

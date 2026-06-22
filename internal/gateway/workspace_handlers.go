@@ -33,11 +33,11 @@ func (h *WorkspaceHandlers) nowUnix() int64 { return h.now().Unix() }
 
 func (h *WorkspaceHandlers) currentUser(r *http.Request) (string, bool) {
 	// Dual-channel auth (spec ⑦ Phase 1): api-key header/query first (machine
-	// integration), cookie second (WebChat UI). AuthenticateRequest already
-	// chains these two with shared disabled-user enforcement, matching the
-	// REST session API (api.go:69) and WS upgrade (hub.go:432). Aligning
-	// workspace REST on the same chain makes workspace a cross-channel tenant
-	// anchor: the same users.id owns workspaces regardless of entry channel.
+	// integration), cookie second (WebChat UI). AuthenticateRequest chains these
+	// two with shared disabled-user enforcement — the same enforcement used by
+	// the REST session API and the WS upgrade path. Aligning workspace REST on
+	// the same chain makes workspace a cross-channel tenant anchor: the same
+	// users.id owns workspaces regardless of entry channel.
 	uid, _, err := h.auth.AuthenticateRequest(r)
 	if err != nil {
 		return "", false
@@ -54,8 +54,16 @@ func (h *WorkspaceHandlers) requireAuth(w http.ResponseWriter, r *http.Request) 
 	return uid, true
 }
 
-// isAdmin reports whether the current cookie user is an active admin.
-// 委托 resolveCookieAdmin，使 admin 判定与 AuthHandlers.requireAdmin 同源（spec §11.2）。
+// isAdmin reports whether the request carries an active admin cookie.
+//
+// Channel-binding policy (spec ⑦ Phase 1): the admin bypass is intentionally
+// cookie-only — it reuses resolveCookieAdmin (the same authority check
+// AuthHandlers.requireAdmin applies to /api/admin/*). Identity (currentUser)
+// instead resolves via AuthenticateRequest (api-key first), so the two are
+// independent: a request with both api-key + admin cookie takes uid from the
+// api-key while admin authority still rides on the cookie. Safe today because
+// every api-key user has role=user; Phase 2 P2.7 (issue #772) may unify them
+// on the AuthenticateRequest uid.
 func (h *WorkspaceHandlers) isAdmin(r *http.Request) bool {
 	_, ok := resolveCookieAdmin(h.cookieAuth, h.auth, r)
 	return ok
