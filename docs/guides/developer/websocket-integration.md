@@ -21,6 +21,7 @@ description: 面向第三方开发者，从快速上手到高级特性，完整�
 - [13. 错误码参考](#13-错误码参考)
 - [14. 常见问题](#14-常见问题)
 - [15. SSO 集成最佳实践](#15-sso-集成最佳实践)
+- [16. Workspace：跨通道租户接入（spec ⑦）](#16-workspace跨通道租户接入spec-⑦)
 
 ---
 
@@ -301,6 +302,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `version`                 | 是   | 固定 `"aep/v1"`                                     |
 | `worker_type`             | 是   | Worker 类型（`claude_code`、`codex_cli`、`acp` 等） |
 | `title`                   | 否   | 会话显示名称，不参与 Session ID 派生。最大 256 字符，自动清洗 |
+| `workspace_id`            | 否   | Workspace ID（spec ⑦）。绑定后 work_dir/配置来自 workspace，并参与 Session ID 派生（§16） |
 | `auth.token`              | 条件 | 无 API Key Header/Query 时必需                      |
 | `auth.bot_id`             | 否   | 多 Bot 隔离，优先级低于 Header/Query                |
 | `config.work_dir`         | 否   | 工作目录，安全校验                                  |
@@ -375,8 +377,10 @@ init { session_id: X }
 **派生公式**：
 
 ```
-Session ID = UUIDv5(userID | workerType | clientSessionID | workDir)
+Session ID = UUIDv5(userID | workerType | clientSessionID | [workspaceID] | workDir)
 ```
+
+> `workspaceID` 仅在 `init.data.workspace_id` 非空时参与派生（spec ⑦，§16）。为空时完全省略，保持平台/cron 调用方的向后兼容——旧 4 字段派生的 Session ID 不变。
 
 **clientSessionID 是什么**：你在 init 信封 `session_id` 字段传入的值。它**不是** Session ID 本身，只是派生函数的一个输入。该值会被 Gateway 持久化为 `client_key`（可通过 `GET /api/sessions` 的 `client_key` 字段取回，见 §11.1）。
 
@@ -523,13 +527,14 @@ init 握手时，Gateway 根据 Session 状态自动决策：
 
 ### 5.6 会话隔离
 
-Session ID 由四个维度派生，任何维度不同都会产生不同的 Session：
+Session ID 由五个维度派生（`workspaceID` 可选），任何维度不同都会产生不同的 Session：
 
 | 维度                | 说明                                       | 隔离效果             |
 | ------------------- | ------------------------------------------ | -------------------- |
 | **userID**          | API Key Resolver 映射（或默认 `api_user`） | 不同用户 -> 不同会话 |
 | **workerType**      | `claude_code` 等                           | 不同引擎 → 不同会话  |
 | **clientSessionID** | 客户端生成的 ID                            | 不同 tab → 不同会话  |
+| **workspaceID**     | `init.data.workspace_id`（可选，spec ⑦）  | 不同 workspace → 不同会话（见 §16） |
 | **workDir**         | 工作目录                                   | 不同项目 → 不同会话  |
 
 **多用户隔离**：使用 API Key 认证时所有用户默认都是 `api_user`，无法隔离。服务端管理员可为不同用户分配不同 API Key，实现用户级隔离：
@@ -1609,3 +1614,100 @@ ws.send(JSON.stringify({
 4. **user_id 隔离**：确保每个 SSO 用户映射到唯一的 `user_id`（≤128 字符），HotPlex 使用此值隔离会话空间
 5. **API Key 轮换**：删除旧 Key → 创建新 Key → 更新 BFF 缓存。无需重启 Gateway
 6. **WebSocket 认证限制**：浏览器无法在 WebSocket 升级请求中设置自定义 HTTP 头。对于方案 B，只能通过 init 信封的 `auth.token` 字段传递 API Key；对于方案 A，BFF 可通过 query param 或代理注入
+
+---
+
+## 16. Workspace：跨通道租户接入（spec ⑦）
+
+Workspace 是 HotPlex 的**跨通道租户锚**：一个 workspace 绑定一个 `work_dir`、一个偏好 Worker 类型、一组 agent 配置覆盖。api-key 机器租户与 WebChat 人类用户**共用同一套 workspace 机制**——同一个 `users.id` 无论通过哪种通道认证，都能拥有并管理自己的 workspace（底层身份统一来自 migration 018：api-key 在 `users` 表是一行 `apikey:*` 用户，`password_hash` 为空仅允许 api-key 通道）。
+
+### 16.1 何时使用 workspace
+
+| 场景 | 用 workspace | 说明 |
+| ---- | ------------ | ---- |
+| 第三方系统接入多项目 | ✅ 推荐 | 每个项目一个 workspace，隔离 work_dir + agent 配置，免每次 init 传 `config.work_dir` |
+| 单项目快速接入 | 可选 | 也可直接用 `config.work_dir`，不建 workspace |
+| 多租户 SaaS | ✅ 推荐 | 每个租户/团队分配独立 api-key + 独立 workspace |
+
+workspace 的价值：`work_dir` / `worker_preference` / `agent_config_overrides` 一次配置、多次复用，且 session 配额/隔离以 workspace 为锚。
+
+### 16.2 api-key 用户端到端示例
+
+**前置**：服务端已通过 `api_key_users` 表为你的 api-key 建立到 `users.id` 的映射（migration 018 模型）。联系管理员或用 Admin API（§15.4）创建。
+
+**① 创建 workspace**（REST，双鉴权：`X-API-Key` 或同源 Cookie 均可）：
+
+```bash
+curl -X POST http://localhost:8888/api/workspaces \
+  -H "X-API-Key: hpk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"my-project","work_dir":"/home/user/project"}'
+```
+
+```json
+{
+  "id": "ws_abc123",
+  "owner_user_id": "u_svc1",
+  "name": "my-project",
+  "work_dir": "/home/user/project",
+  "status": "active"
+}
+```
+
+`owner_user_id` 自动设为 api-key 对应的 `users.id`；`work_dir` 创建后不可变。
+
+**②（可选）配置偏好 Worker + agent 配置覆盖**：
+
+```bash
+curl -X PATCH http://localhost:8888/api/workspaces/ws_abc123 \
+  -H "X-API-Key: hpk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "worker_preference":"claude_code",
+    "agent_config_overrides":"{\"SOUL.md\":\"你是一个专注于代码审查的助手\"}"
+  }'
+```
+
+**③ WS init 绑定 workspace**（`init.data.workspace_id`）：
+
+```json
+{
+  "version": "aep/v1",
+  "id": "evt_...",
+  "session_id": "",
+  "seq": 0,
+  "timestamp": 1710000000000,
+  "event": {
+    "type": "init",
+    "data": {
+      "version": "aep/v1",
+      "worker_type": "claude_code",
+      "workspace_id": "ws_abc123"
+    }
+  }
+}
+```
+
+绑定后：
+- session 的 `work_dir` **来自 workspace**（忽略 `config.work_dir`）
+- Session ID 派生纳入 `workspaceID`（§5.2），同 workspace 内用 `clientSessionID` 区分多会话
+- owner 校验：`workspace.owner_user_id` 必须等于 api-key 对应的 `users.id`，否则 `INVALID_MESSAGE: workspace access denied`
+
+### 16.3 workspace CRUD 速查
+
+| 操作 | 方法 | 路径 | 说明 |
+| ---- | ---- | ---- | ---- |
+| 创建 | POST | `/api/workspaces` | body: `{name, work_dir}`；`work_dir` 安全校验 + per-owner 唯一 |
+| 列表 | GET | `/api/workspaces` | 只返回当前身份拥有的（`ListWorkspacesByOwner`） |
+| 查询 | GET | `/api/workspaces/{id}` | owner 或 admin 可读 |
+| 更新 | PATCH | `/api/workspaces/{id}` | `name` / `worker_preference` / `agent_config_overrides`（`work_dir` 不可变） |
+| 删除 | DELETE | `/api/workspaces/{id}` | 仅当无活跃 session 时（`WORKSPACE_NOT_EMPTY` 否则） |
+
+所有端点同时接受 `X-API-Key`（机器通道）与同源 Cookie（WebChat 通道），鉴权链与 `/api/sessions` 一致（spec ⑦ Phase 1）。
+
+### 16.4 隔离与安全保证
+
+- **owner-only**：api-key 用户只能访问 `owner_user_id` 等于自己的 workspace，跨 owner 访问返回 `WORKSPACE_FORBIDDEN`
+- **session 绑定不可变**：session 一旦绑定 workspace，不可切换；重连时 init 的 `workspace_id` 必须与首次一致（`session workspace mismatch`）
+- **配额计费**：workspace session 计入 owner 的 per-user 配额（`PoolManager`，api-key 用户与人类用户同等对待）
+- **禁用即拦**：`users.status == "disabled"` 的 api-key 用户，所有 workspace 请求被 per-request 拦截（与 REST session API 同一条 `AuthenticateRequest` 拦截链）
