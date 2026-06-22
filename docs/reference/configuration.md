@@ -29,7 +29,8 @@ description: "HotPlex Worker Gateway 所有配置项的权威参考，覆盖配�
    - [messaging — 消息平台](#311-messaging--消息平台)
    - [log — 日志](#312-log--日志)
    - [webchat — Web Chat UI](#313-webchat--web-chat-ui)
-   - [inherits — 配置继承](#314-inherits--配置继承)
+   - [oauth — WebChat 企业 SSO（OIDC）](#314-oauth--webchat--ssooidc)
+   - [inherits — 配置继承](#315-inherits--)
 4. [热重载](#4-热重载)
 5. [环境变量速查](#5-环境变量速查)
 
@@ -204,6 +205,7 @@ db:
 | `work_dir_forbidden_dirs` | []string | `[]` | — | 额外的工作目录黑名单。显式禁止的目录列表 |
 | `csp` | string | `""` | `HOTPLEX_SECURITY_CSP` | Content-Security-Policy 头覆盖，用于嵌入式 WebChat 和文档门户。空字符串使用内建默认值（适合 localhost）。远程部署时需设置，否则浏览器会阻止 fetch/ws/connect 调用 |
 | `security_contact` | string | `""` | `HOTPLEX_SECURITY_SECURITY_CONTACT` | 安全联系 URI，启用 `/.well-known/security.txt`（RFC 9116）。空字符串 = 禁用。示例：`mailto:security@example.com`、`https://example.com/security` |
+| `cookie_secret` | string | `""` | `HOTPLEX_SECURITY_COOKIE_SECRET` | WebChat 多租户登录 cookie 的 HMAC-SHA256 密钥。空时由 `crypto/rand` 自动生成并持久化到 `~/.hotplex/data/cookie_secret.key`（权限 `0600`）；非空时取其 SHA256 digest 作密钥并**跳过文件生成**（配置优先，适用于多实例共享固定密钥）。详见 [WebChat 设置 — HMAC Cookie 认证](../guides/developer/webchat-setup.md#authentication) |
 
 ---
 
@@ -599,7 +601,51 @@ agent_config.inject_exclude  ──→  messaging.slack.inject_exclude  ──�
 
 ---
 
-### 3.14 inherits — 配置继承
+### 3.14 oauth — WebChat 企业 SSO（OIDC）
+
+WebChat 多租户的企业单点登录（SSO）配置（spec ④）。基于标准 OIDC Authorization Code flow + PKCE，一套实现覆盖全部主流 IdP（Keycloak / Okta / Azure AD / Google Workspace，以及国内的派拉 / 玉符 / 阿里云 IDaaS / 腾讯云 IDaaS / 宁盾 / Authing / 竹云 / 华为 OneAccess / TOPIAM）。
+
+> 该配置块为 **WebChat 专用**，独立于 Slack/Feishu 的 bot 配置（后者属于 Message Channel 轨道）。仅在启用 WebChat 多租户登录时生效。与内建账号登录（spec ①）并存，均为一等公民。
+
+顶层结构：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `external_url` | string | `""` | 构造 OAuth callback URL 的基础地址。为空时从请求 Host 头推导（同源部署）；反向代理后公共 URL 与内部不同时必须显式设置 |
+| `providers` | []OAuthProvider | `nil` | OIDC 身份提供者列表。多个 provider 在登录页渲染为多个 SSO 按钮（spec ⑥） |
+
+**provider 字段**：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | string | — | provider 唯一标识。出现在 URL 路径（`/api/auth/oauth/{name}/login`）和 `user_identities.provider`。必须匹配 `[a-z0-9-]+`（URL 安全 + 防路径穿越） |
+| `display_name` | string | — | 登录页展示的人类可读标签（spec ⑥） |
+| `issuer` | string | — | OIDC issuer URL。discovery 端点自动解析为 `{issuer}/.well-known/openid-configuration` |
+| `client_id` | string | — | 在 IdP 注册的 OAuth2 client id |
+| `client_secret` | string | — | OAuth2 client secret（明文写入，暂不支持 `${ENV_VAR}` 展开） |
+| `scopes` | []string | `["openid","profile"]` | 请求的 OIDC scopes |
+| `username_claim` | string | `""` | 可选 claim 名覆盖；为空时用 OIDC 标准 claim |
+| `display_name_claim` | string | `""` | 同上，显示名 claim |
+| `email_claim` | string | `""` | 同上，email claim |
+
+**安全设计**：强制 PKCE（S256），即使 authorization code 被截获也无法 exchange；state cookie HMAC 签名（5min TTL）绑定 provider 防 CSRF；ID Token 经 JWKS 签名 + iss/aud/exp 校验；`(provider, subject)` 首次登录自动建号，**不按 email 自动合并账号**。
+
+**配置示例**：
+
+```yaml
+oauth:
+  external_url: "https://hotplex.example.com"
+  providers:
+    - name: "keycloak"
+      display_name: "企业 SSO"
+      issuer: "https://sso.example.com/realms/main"
+      client_id: "hotplex"
+      client_secret: "your-keycloak-client-secret"  # 明文（${ENV} 展开暂未实现）
+```
+
+---
+
+### 3.15 inherits — 配置继承
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|

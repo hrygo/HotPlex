@@ -175,18 +175,21 @@ var StaticFS embed.FS
 
 构建流程：`pnpm build` → `webchat/out/` → `go:embed` → Gateway 二进制
 
-### 认证
+### 认证（Authentication）
 
-WebChat 支持两种认证模式，根据部署方式自动选择：
+> WebChat 多租户化后（spec ⑥）**强制登录**：废除匿名 `webchat_user` 身份，未登录用户自动重定向到 `/login`。
 
-**同源部署（推荐）**：WebChat 由 Gateway 直接提供服务时，使用 **HMAC Cookie 认证**。Gateway 在首次访问时自动签发 HttpOnly、SameSite=Strict 的签名 cookie，后续 WebSocket 连接自动携带，无需配置 API Key。这是最安全的方式——API Key 不会出现在前端代码中。
+**用户登录方式**（登录成功后签发 HMAC Cookie）：
 
-**跨域部署**：WebChat 部署在不同域名时，回退到以下方式：
+- **内建账号**（spec ①）：username/password 本地账号，由 admin 通过邀请码（`/api/admin/invitations`）创建。首次部署尚无任何账号时，登录页根据 `GET /api/auth/bootstrap-status` 引导创建首个管理员。
+- **企业 SSO**（spec ④）：标准 OIDC Authorization Code flow + PKCE。在 `oauth.providers[]` 配置 IdP（Keycloak / Okta / Azure AD 等）后，登录页渲染对应 SSO 按钮，点击跳转 IdP 完成认证。详见 [配置参考 — oauth](../../reference/configuration.md#314-oauth--webchat--ssooidc)。
+
+**HMAC Cookie 认证**：登录成功后 Gateway 签发 HttpOnly、SameSite=None; Secure 的签名 cookie（7 天有效），后续 WebSocket 连接自动携带，无需配置 API Key。SameSite=None 支持跨域 WebChat 部署（CSRF 由 HMAC 签名防护），跨域时网关须 HTTPS（浏览器拒绝非 Secure 的 SameSite=None cookie）。Cookie HMAC secret 持久化到 `~/.hotplex/data/cookie_secret.key`（权限 0600），重启后仍有效。
+
+**跨域部署 / SDK 集成**：WebChat 部署在不同域名，或客户端 SDK 直连 Gateway 时，回退到 API Key 认证：
 - HTTP Header `X-API-Key`
 - Query Parameter `api_key`（浏览器 WebSocket 的 CORS 兼容方案）
 - Init Envelope 延迟认证（`auth.token` 字段）
-
-开发模式下（未配置 API Key）自动使用 `anonymous` 用户身份。
 
 ---
 

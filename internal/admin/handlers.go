@@ -7,11 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/cron"
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/web"
 )
 
 // HandleStats returns gateway runtime statistics.
@@ -38,36 +39,36 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	byType := make(map[string]map[string]any)
+	byType := make(map[string]any)
 	for _, si := range sessions {
-		siMap, ok := si.(map[string]any)
+		s, ok := si.(*session.SessionInfo)
 		if !ok {
 			continue
 		}
-		key, _ := siMap["worker_type"].(string)
-		if byType[key] == nil {
-			byType[key] = map[string]any{
-				"sessions":        0,
+		key := string(s.WorkerType)
+		m, _ := byType[key].(map[string]any)
+		if m == nil {
+			m = map[string]any{
+				"sessions": 0,
+				// avg_memory_mb / avg_cpu_percent stay 0: SessionInfo carries no
+				// per-session memory/cpu stats, so there is no aggregation source yet.
 				"avg_memory_mb":   0,
 				"avg_cpu_percent": 0,
 			}
+			byType[key] = m
 		}
-		m := byType[key]
-		m["sessions"] = m["sessions"].(int) + 1 //nolint:errcheck // guaranteed by filter logic
+		m["sessions"] = m["sessions"].(int) + 1 //nolint:errcheck // m["sessions"] always int: set in the m==nil init branch above
 	}
 
-	respondJSON(w, map[string]any{
-		"gateway": map[string]any{
-			"uptime_seconds":        int(time.Since(a.startedAt).Seconds()),
-			"websocket_connections": a.hub.ConnectionsOpen(),
-			"sessions_active":       total,
-			"sessions_total":        len(sessions),
+	respondJSON(w, StatsResponse{
+		Gateway: GatewayStatsDetail{
+			UptimeSeconds:        int(time.Since(a.startedAt).Seconds()),
+			WebsocketConnections: a.hub.ConnectionsOpen(),
+			SessionsActive:       total,
+			SessionsTotal:        len(sessions),
 		},
-		"workers": byType,
-		"database": map[string]any{
-			"sessions_count": len(sessions),
-			"db_size_mb":     0,
-		},
+		Workers:  byType,
+		Database: DatabaseStatsDetail{SessionsCount: len(sessions)},
 	})
 }
 
@@ -82,6 +83,10 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need health:read"
 // @Router       /admin/health [get]
 func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeHealthRead) {
+		http.Error(w, "insufficient scope: need health:read", http.StatusForbidden)
+		return
+	}
 	cfg := a.cfg.Get()
 	dbHealthy := true
 	var dbErr string
@@ -98,7 +103,7 @@ func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 
 	dbCheck := map[string]any{
 		"status": map[bool]string{true: "healthy", false: "unhealthy"}[dbHealthy],
-		"type":   "sqlite",
+		"type":   string(dbutil.ParseDialect(cfg.DB.Driver)),
 		"path":   cfg.DB.Path,
 	}
 	if dbErr != "" {
@@ -175,12 +180,7 @@ func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
 		return
 	}
-	limit := 100
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 1000 {
-			limit = v
-		}
-	}
+	limit, _ := web.ParsePagination(r)
 	logs, total := a.logCollector.Recent(limit)
 	if logs == nil {
 		logs = []logEntry{}
@@ -371,9 +371,12 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 		a.log.Warn("admin: failed to get debug snapshot", "session_id", id)
 	}
 
-	siMap, _ := si.(map[string]any)
+	// Returns the full SessionInfo (Context, PlatformKey, WorkDir, Title may carry PII) by
+	// design: this is an admin-only debug endpoint gated by ScopeAdminRead above, and these
+	// fields are required for session troubleshooting. Do not JSON-whitelist them without an
+	// admin-visible alternative; track field-level redaction as a separate concern if ever needed.
 	respondJSON(w, map[string]any{
-		"session": siMap,
+		"session": si,
 		"debug": map[string]any{
 			"available":     dbgOK,
 			"has_worker":    snap.HasWorker,

@@ -74,7 +74,6 @@ type GatewayStatsDetail struct {
 // DatabaseStatsDetail holds database statistics.
 type DatabaseStatsDetail struct {
 	SessionsCount int `json:"sessions_count"`
-	DBSizeMB      int `json:"db_size_mb"`
 }
 
 // StatsResponse is returned by GET /admin/stats.

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
 import { formatDuration } from '@/lib/utils/format-duration';
+import { formatDateTime } from '@/lib/utils/format-time';
 import type { CronJob, CronSchedule } from '@/lib/types/admin';
 
 // ---------------------------------------------------------------------------
@@ -62,19 +63,6 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
   );
 }
 
-function formatDateTime(value?: string | number): string {
-  if (!value) return '—';
-  const date = typeof value === 'number' ? new Date(value) : new Date(value);
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Page Component
 // ---------------------------------------------------------------------------
@@ -92,7 +80,6 @@ export default function CronDetailPage() {
 
   // Editable fields
   const [schedule, setSchedule] = useState('');
-  const [scheduleObj, setScheduleObj] = useState<CronSchedule | null>(null);
   const [message, setMessage] = useState('');
   const [maxRuns, setMaxRuns] = useState<string>('');
   const [enabled, setEnabled] = useState(true);
@@ -120,7 +107,6 @@ export default function CronDetailPage() {
       } else {
         setJob(found);
         setSchedule(formatScheduleStr(found.schedule));
-        setScheduleObj(found.schedule ?? null);
         setMessage(found.payload?.message ?? '');
         setMaxRuns(found.max_runs != null ? String(found.max_runs) : '');
         setEnabled(found.enabled);
@@ -473,7 +459,6 @@ export default function CronDetailPage() {
               <button
                 onClick={() => {
                   setSchedule(formatScheduleStr(job.schedule));
-                  setScheduleObj(job.schedule ?? null);
                   setMessage(job.payload?.message ?? '');
                   setMaxRuns(job.max_runs != null ? String(job.max_runs) : '');
                   setEnabled(job.enabled);

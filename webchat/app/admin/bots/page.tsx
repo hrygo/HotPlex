@@ -1,46 +1,34 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { listBots } from '@/lib/api/admin-bots';
 import type { BotConfigEntry } from '@/lib/types/admin';
 import { BotCard } from '@/components/admin/bot-card';
+import { useResource } from '@/hooks/use-resource';
+import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
 
 export default function BotsPage() {
-  const [bots, setBots] = useState<BotConfigEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await listBots();
-      setBots(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load bots');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data: bots, loading, error, reload } = useResource<BotConfigEntry[]>(
+    () => listBots(),
+    [],
+  );
+  const botList = bots ?? [];
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return bots;
+    if (!query.trim()) return botList;
     const q = query.toLowerCase();
-    return bots.filter(
+    return botList.filter(
       (b) =>
         b.name.toLowerCase().includes(q) ||
         b.platform.toLowerCase().includes(q) ||
         b.bot_id.toLowerCase().includes(q),
     );
-  }, [bots, query]);
+  }, [botList, query]);
 
-  const onlineCount = bots.filter((b) => b.status === 'connected').length;
+  const onlineCount = botList.filter((b) => b.status === 'connected').length;
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)] p-6">
@@ -52,7 +40,7 @@ export default function BotsPage() {
             {!loading && !error && (
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-mono text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)]">
-                  {bots.length}
+                  {botList.length}
                 </span>
                 {onlineCount > 0 && (
                   <span className="text-[11px] font-mono text-[var(--accent-emerald)] px-2 py-0.5 rounded-full bg-[rgba(16,185,129,0.08)]">
@@ -64,7 +52,7 @@ export default function BotsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={load}
+              onClick={reload}
               disabled={loading}
               className="inline-flex items-center justify-center w-8 h-8 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
               title="Refresh"
@@ -96,7 +84,7 @@ export default function BotsPage() {
         </div>
 
         {/* Search */}
-        {!loading && !error && bots.length > 0 && (
+        {!loading && !error && botList.length > 0 && (
           <div className="relative mb-5">
             <svg
               className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]"
@@ -134,51 +122,29 @@ export default function BotsPage() {
         )}
 
         {/* Loading */}
-        {loading && (
-          <div className="flex items-center justify-center py-24">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-6 h-6 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs text-[var(--text-faint)]">Loading bots...</span>
-            </div>
-          </div>
-        )}
+        {loading && <LoadingState label="Loading bots..." />}
 
         {/* Error */}
-        {error && (
-          <div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-[var(--accent-coral)]">{error}</p>
-              <button
-                onClick={load}
-                className="text-xs text-[var(--accent-coral)] hover:underline"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
+        {error && <ErrorState message={error} onRetry={reload} />}
 
         {/* Empty state */}
-        {!loading && !error && bots.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-16 h-16 mb-4 rounded-2xl bg-[var(--bg-hover)] flex items-center justify-center">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">No bots configured</p>
-            <p className="text-xs text-[var(--text-faint)] mb-5">Create your first bot to connect a messaging platform.</p>
-            <Link
-              href="/admin/bots/new"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors"
-            >
-              + New Bot
-            </Link>
-          </div>
+        {!loading && !error && botList.length === 0 && (
+          <EmptyState
+            title="No bots configured"
+            description="Create your first bot to connect a messaging platform."
+            action={
+              <Link
+                href="/admin/bots/new"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors"
+              >
+                + New Bot
+              </Link>
+            }
+          />
         )}
 
         {/* Search no results */}
-        {!loading && !error && bots.length > 0 && filtered.length === 0 && (
+        {!loading && !error && botList.length > 0 && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-sm text-[var(--text-muted)] mb-1">
               No bots matching &ldquo;{query}&rdquo;

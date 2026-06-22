@@ -187,6 +187,39 @@ func TestListSessions_Success(t *testing.T) {
 	require.Contains(t, resp, "sessions")
 }
 
+func TestHandleStats_WorkersAggregation(t *testing.T) {
+	t.Parallel()
+	api := newTestAPI(func(d *Deps) {
+		d.SessionMgr = &mockSessionManager{
+			statsFn: func() (total, max, unique int) { return 3, 10, 3 },
+			listFn: func(_ context.Context, _, _ string, _, _ int) ([]any, error) {
+				return []any{
+					&session.SessionInfo{ID: "s1", WorkerType: worker.TypeClaudeCode},
+					&session.SessionInfo{ID: "s2", WorkerType: worker.TypeClaudeCode},
+					&session.SessionInfo{ID: "s3", WorkerType: worker.TypeOpenCodeSrv},
+				}, nil
+			},
+		}
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/stats", nil)
+	r = withScope(r, ScopeStatsRead)
+
+	api.HandleStats(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp StatsResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	// workers must aggregate by WorkerType (was always {} before the si.(*SessionInfo) fix)
+	require.Len(t, resp.Workers, 2)
+	cc, ok := resp.Workers[string(worker.TypeClaudeCode)].(map[string]any)
+	require.True(t, ok, "claude_code aggregate missing")
+	require.Equal(t, float64(2), cc["sessions"])
+	ocs, ok := resp.Workers[string(worker.TypeOpenCodeSrv)].(map[string]any)
+	require.True(t, ok, "opencode_server aggregate missing")
+	require.Equal(t, float64(1), ocs["sessions"])
+}
+
 func TestGetSession_NotFound(t *testing.T) {
 	api := newTestAPI()
 	w := httptest.NewRecorder()
@@ -260,6 +293,7 @@ func TestHandleHealth(t *testing.T) {
 	api := newTestAPI()
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/health", nil)
+	r = withScope(r, ScopeHealthRead)
 
 	api.HandleHealth(w, r)
 
@@ -279,6 +313,7 @@ func TestHandleHealth_Degraded(t *testing.T) {
 	})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/health", nil)
+	r = withScope(r, ScopeHealthRead)
 
 	api.HandleHealth(w, r)
 

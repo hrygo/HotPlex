@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 import { getBot, deleteBot, updateBot } from '@/lib/api/admin-bots';
 import { BotConfigEditor } from '@/components/admin/bot-config-editor';
+import { DeleteButton } from '@/components/admin/delete-button';
 import { SystemPromptPreview } from '@/components/admin/system-prompt-preview';
 import { StatusBadge } from '@/components/admin/status-badge';
 import type { BotConfigEntry } from '@/lib/types/admin';
@@ -397,68 +397,6 @@ function AccessEditor({
 }
 
 // ---------------------------------------------------------------------------
-// DeleteButton
-// ---------------------------------------------------------------------------
-
-function DeleteButton({ botName }: { botName: string }) {
-	const router = useRouter();
-	const [confirming, setConfirming] = useState(false);
-	const [deleting, setDeleting] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	const handleDelete = async () => {
-		setDeleting(true);
-		setError(null);
-		try {
-			await deleteBot(botName);
-			router.push('/admin/bots');
-		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Failed to delete bot');
-			setDeleting(false);
-		}
-	};
-
-	if (confirming) {
-		return (
-			<div className="mt-6 pt-6 border-t border-[var(--border-subtle)]">
-				<div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.06)] border border-[rgba(244,63,94,0.12)] p-4">
-					<p className="text-sm text-[var(--accent-coral)] font-medium mb-3">
-						Delete &ldquo;{botName}&rdquo;? This action cannot be undone.
-					</p>
-					{error && <p className="text-xs text-[var(--accent-coral)] mb-3">{error}</p>}
-					<div className="flex items-center gap-2">
-						<button
-							onClick={handleDelete}
-							disabled={deleting}
-							className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-bold bg-[var(--accent-coral)] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-						>
-							{deleting ? 'Deleting...' : 'Yes, Delete'}
-						</button>
-						<button
-							onClick={() => { setConfirming(false); setError(null); }}
-							className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold text-[var(--text-faint)] hover:text-[var(--text-secondary)] transition-colors"
-						>
-							Cancel
-						</button>
-					</div>
-				</div>
-			</div>
-		);
-	}
-
-	return (
-		<div className="mt-6 pt-6 border-t border-[var(--border-subtle)]">
-			<button
-				onClick={() => setConfirming(true)}
-				className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold text-[var(--accent-coral)] border border-[rgba(244,63,94,0.2)] hover:bg-[rgba(244,63,94,0.06)] transition-colors"
-			>
-				Delete Bot
-			</button>
-		</div>
-	);
-}
-
-// ---------------------------------------------------------------------------
 // Main BotDetailView
 // ---------------------------------------------------------------------------
 
@@ -579,7 +517,7 @@ export function BotDetailView() {
 			{activeTab === 'overview' && (
 				<div>
 					<OverviewEditor bot={bot} botName={name} />
-					<DeleteButton botName={name} />
+					<DeleteButton resourceName={name} buttonLabel="Delete Bot" redirectHref="/admin/bots" onDelete={() => deleteBot(name)} />
 				</div>
 			)}
 

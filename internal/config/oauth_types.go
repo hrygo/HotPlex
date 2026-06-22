@@ -39,7 +39,7 @@ type OAuthProviderConfig struct {
 	// ClientID is the OAuth2 client identifier registered with the IdP.
 	ClientID string `mapstructure:"client_id"`
 
-	// ClientSecret is the OAuth2 client secret. Supports ${ENV_VAR} expansion.
+	// ClientSecret is the OAuth2 client secret.
 	ClientSecret string `mapstructure:"client_secret"`
 
 	// Scopes are the OIDC scopes to request. Defaults to ["openid", "profile"].

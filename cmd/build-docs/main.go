@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -803,6 +804,10 @@ func toTitle(s string) string {
 
 var hrefRegex = regexp.MustCompile(`href="([^"]*\.html[^"]*)"`)
 
+// idAttrRegex matches element id attributes. The leading \s ensures derived
+// attributes like "data-id" are not mistaken for an anchor target.
+var idAttrRegex = regexp.MustCompile(`\sid="([^"]+)"`)
+
 func validateLinks(dest string) error {
 	var broken []string
 	_ = filepath.Walk(dest, func(path string, info os.FileInfo, err error) error {
@@ -815,16 +820,36 @@ func validateLinks(dest string) error {
 
 		for _, m := range hrefRegex.FindAllSubmatch(data, -1) {
 			href := string(m[1])
-			if strings.HasPrefix(href, "http") || strings.HasPrefix(href, "#") {
+			if strings.HasPrefix(href, "http") {
 				continue
 			}
-			// Strip query/fragment
-			if idx := strings.IndexAny(href, "#?"); idx >= 0 {
-				href = href[:idx]
+			// Separate path from fragment (e.g. "page.html#section").
+			frag := ""
+			pathPart := href
+			if before, after, ok := strings.Cut(href, "#"); ok {
+				pathPart = before
+				frag = after
 			}
-			target := filepath.Join(dir, href)
-			if _, err := os.Stat(target); err != nil {
-				broken = append(broken, fmt.Sprintf("%s → %s", rel, string(m[1])))
+			// Strip query string from the path component.
+			if before, _, ok := strings.Cut(pathPart, "?"); ok {
+				pathPart = before
+			}
+
+			// Resolve target file (in-page fragment targets the current file).
+			targetData := data
+			if pathPart != "" {
+				target := filepath.Join(dir, pathPart)
+				if _, err := os.Stat(target); err != nil {
+					broken = append(broken, fmt.Sprintf("%s → %s (file not found)", rel, href))
+					continue
+				}
+				if frag != "" {
+					targetData, _ = os.ReadFile(target)
+				}
+			}
+
+			if frag != "" && !hasAnchorID(targetData, frag) {
+				broken = append(broken, fmt.Sprintf("%s → %s (anchor not found)", rel, href))
 			}
 		}
 		return nil
@@ -833,6 +858,21 @@ func validateLinks(dest string) error {
 		return fmt.Errorf("%d broken links:\n  %s", len(broken), strings.Join(broken, "\n  "))
 	}
 	return nil
+}
+
+// hasAnchorID reports whether data defines an element id equal to frag.
+// goldmark percent-encodes non-ASCII bytes in href fragments while leaving id
+// attributes raw, so decode before comparing against the (ASCII) id.
+func hasAnchorID(data []byte, frag string) bool {
+	if decoded, err := url.QueryUnescape(frag); err == nil {
+		frag = decoded
+	}
+	for _, m := range idAttrRegex.FindAllSubmatch(data, -1) {
+		if string(m[1]) == frag {
+			return true
+		}
+	}
+	return false
 }
 
 const layout = `

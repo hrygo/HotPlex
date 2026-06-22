@@ -254,6 +254,10 @@ func (s *apiKeyUserStore) update(ctx context.Context, id int64, u *APIKeyUser) e
 // @Failure      500  {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys [get]
 func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminRead) {
+		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
+		return
+	}
 	if a.akStore == nil {
 		respondJSON(w, []APIKeyUser{})
 		return
@@ -289,6 +293,10 @@ func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) 
 // @Failure      500   {object}  ErrorResponse  "Create failed"
 // @Router       /admin/api-keys [post]
 func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminWrite) {
+		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		return
+	}
 	if a.akStore == nil {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
 		return
@@ -339,6 +347,10 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 // @Failure      500  {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [get]
 func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminRead) {
+		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
+		return
+	}
 	if a.akStore == nil {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
 		return
@@ -378,6 +390,10 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 // @Failure      500   {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [patch]
 func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminWrite) {
+		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		return
+	}
 	if a.akStore == nil {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
 		return
@@ -439,6 +455,10 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 // @Failure      500  {object}  ErrorResponse  "Internal error"
 // @Router       /admin/api-keys/{id} [delete]
 func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminWrite) {
+		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		return
+	}
 	if a.akStore == nil {
 		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
 		return

@@ -1,45 +1,21 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { listWorkspaces } from '@/lib/api/workspaces';
 import type { Workspace } from '@/lib/api/workspaces';
-
-function formatDate(ms: number): string {
-  if (!ms) return '—';
-  try {
-    return new Date(ms * 1000).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return '—';
-  }
-}
+import { formatDate } from '@/lib/utils/format-time';
+import { useResource } from '@/hooks/use-resource';
+import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
 
 export default function WorkspacesPage() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await listWorkspaces();
-      setWorkspaces(data.workspaces ?? []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load workspaces');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, loading, error, reload } = useResource<Workspace[]>(
+    async () => (await listWorkspaces()).workspaces ?? [],
+    [],
+  );
+  const workspaces = data ?? [];
 
   const filtered = useMemo(() => {
     if (!query.trim()) return workspaces;
@@ -67,7 +43,7 @@ export default function WorkspacesPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={load}
+              onClick={reload}
               disabled={loading}
               className="inline-flex items-center justify-center w-8 h-8 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
               title="Refresh"
@@ -137,46 +113,25 @@ export default function WorkspacesPage() {
         )}
 
         {/* Loading */}
-        {loading && (
-          <div className="flex items-center justify-center py-24">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-6 h-6 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs text-[var(--text-faint)]">Loading workspaces...</span>
-            </div>
-          </div>
-        )}
+        {loading && <LoadingState label="Loading workspaces..." />}
 
         {/* Error */}
-        {error && (
-          <div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-[var(--accent-coral)]">{error}</p>
-              <button onClick={load} className="text-xs text-[var(--accent-coral)] hover:underline">
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
+        {error && <ErrorState message={error} onRetry={reload} />}
 
         {/* Empty state */}
         {!loading && !error && workspaces.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-16 h-16 mb-4 rounded-2xl bg-[var(--bg-hover)] flex items-center justify-center">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9Z" />
-                <path d="M3 9h18" />
-                <path d="M8 13h4" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">No workspaces yet</p>
-            <p className="text-xs text-[var(--text-faint)] mb-5">Create your first workspace to scope a chat environment.</p>
-            <Link
-              href="/admin/workspaces/new"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors"
-            >
-              + New Workspace
-            </Link>
-          </div>
+          <EmptyState
+            title="No workspaces yet"
+            description="Create your first workspace to scope a chat environment."
+            action={
+              <Link
+                href="/admin/workspaces/new"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors"
+              >
+                + New Workspace
+              </Link>
+            }
+          />
         )}
 
         {/* Search no results */}
@@ -222,7 +177,7 @@ export default function WorkspacesPage() {
                 </div>
 
                 <div className="mt-3 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-[10px] text-[var(--text-faint)]">
-                  <span>Created {formatDate(w.created_at)}</span>
+                  <span>Created {formatDate(w.created_at * 1000)}</span>
                   <span className="opacity-0 group-hover:opacity-100 text-[var(--accent-gold)] transition-opacity">Open →</span>
                 </div>
               </Link>

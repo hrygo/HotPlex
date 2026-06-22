@@ -12,6 +12,7 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/web"
 	"github.com/hrygo/hotplex/internal/worker"
 )
 
@@ -107,7 +108,7 @@ func (h *WorkspaceHandlers) List(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
 		return
 	}
-	limit, offset := parsePagination(r)
+	limit, offset := web.ParsePagination(r)
 	// Per-owner workspace counts are small; the store returns all active rows
 	// (already ordered by created_at ASC), so we paginate in memory and echo
 	// the requested limit/offset to satisfy the ListWorkspacesResponse contract.

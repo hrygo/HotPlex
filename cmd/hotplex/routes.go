@@ -121,7 +121,7 @@ func setupRoutes(
 		})
 	}
 
-	adminMux := adminAPI.Mux()
+	adminMux := http.NewServeMux()
 
 	adminMux.HandleFunc("GET /admin/health/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

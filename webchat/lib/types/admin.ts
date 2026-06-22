@@ -120,11 +120,3 @@ export interface APIKeyUser {
   created_at?: string;
   updated_at?: string;
 }
-
-// --- Stats ---
-
-export interface GatewayStats {
-  uptime_seconds: number;
-  total_sessions: number;
-  active_sessions: number;
-}

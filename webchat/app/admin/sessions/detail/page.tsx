@@ -7,6 +7,7 @@ import { listSessions, terminateSession } from '@/lib/api/admin-sessions';
 import { SessionStatusBadge } from '@/components/admin/session-status-badge';
 import { useAdminUI } from '@/context/admin-ui-context';
 import type { AdminSessionInfo } from '@/lib/types/admin';
+import { formatDateTime } from '@/lib/utils/format-time';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,18 +24,6 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
       </p>
     </div>
   );
-}
-
-function formatDateTime(iso?: string): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
 }
 
 // ---------------------------------------------------------------------------

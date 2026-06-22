@@ -72,7 +72,6 @@ type UserWorkspaceStore interface {
 	HasAdmin(ctx context.Context) (bool, error)
 	ListUsers(ctx context.Context, limit, offset int) ([]*security.User, error)
 	UpdateUserStatus(ctx context.Context, id, status string, now int64) error
-	DeleteUser(ctx context.Context, id string) error
 	TouchUserLastLogin(ctx context.Context, userID string, now int64) error
 	// workspaces
 	CreateWorkspace(ctx context.Context, w *Workspace, now int64) error
@@ -221,13 +220,6 @@ func (s *SQLiteStore) ListUsers(ctx context.Context, limit, offset int) ([]*secu
 func (s *SQLiteStore) UpdateUserStatus(ctx context.Context, id, status string, now int64) error {
 	return s.writeMu.WithLock(func() error {
 		_, err := s.db.ExecContext(ctx, queries["users.update_status"], status, now, id)
-		return err
-	})
-}
-
-func (s *SQLiteStore) DeleteUser(ctx context.Context, id string) error {
-	return s.writeMu.WithLock(func() error {
-		_, err := s.db.ExecContext(ctx, queries["users.delete"], id)
 		return err
 	})
 }

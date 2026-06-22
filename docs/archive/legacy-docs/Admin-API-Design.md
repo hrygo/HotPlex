@@ -10,6 +10,8 @@ tags:
 
 > HotPlex v1.0 Admin API 设计文档，提供 session 管理、统计查询、健康检查等管理能力。
 
+> **⚠️ 归档文档（legacy）**：本文件为 v1.0 早期设计稿，保留作历史参考。**当前 Admin API 契约以 [`docs/reference/admin-api.md`](../../reference/admin-api.md) 为准**，下方示例载荷、字段命名可能与现行实现不符。
+
 ---
 
 ## 1. 功能目标
