@@ -32,9 +32,17 @@ func NewWorkspaceHandlers(store session.UserWorkspaceStore, cookieAuth *security
 func (h *WorkspaceHandlers) nowUnix() int64 { return h.now().Unix() }
 
 func (h *WorkspaceHandlers) currentUser(r *http.Request) (string, bool) {
-	// Delegate to AuthenticateActiveCookie so disabled users are rejected on
-	// the cookie path, matching the REST API and WS upgrade enforcement.
-	return h.auth.AuthenticateActiveCookie(r)
+	// Dual-channel auth (spec ⑦ Phase 1): api-key header/query first (machine
+	// integration), cookie second (WebChat UI). AuthenticateRequest already
+	// chains these two with shared disabled-user enforcement, matching the
+	// REST session API (api.go:69) and WS upgrade (hub.go:432). Aligning
+	// workspace REST on the same chain makes workspace a cross-channel tenant
+	// anchor: the same users.id owns workspaces regardless of entry channel.
+	uid, _, err := h.auth.AuthenticateRequest(r)
+	if err != nil {
+		return "", false
+	}
+	return uid, true
 }
 
 func (h *WorkspaceHandlers) requireAuth(w http.ResponseWriter, r *http.Request) (string, bool) {

@@ -319,3 +319,142 @@ func TestWorkspace_JSONWireContract(t *testing.T) {
 	require.Contains(t, m, "updated_at", "workspace wire contract must carry updated_at")
 	require.NotContains(t, m, "Name", "PascalCase field leaked onto the wire")
 }
+
+// ---------------------------------------------------------------------------
+// spec ⑦ Phase 1: api-key channel workspace access (cross-channel tenant)
+// ---------------------------------------------------------------------------
+
+const testAPIKeyHeader = "X-API-Key"
+
+func (e *testAuthEnv) createWorkspaceWithAPIKey(t *testing.T, key, name, workDir string) *session.Workspace {
+	t.Helper()
+	body := []byte(`{"name":"` + name + `","work_dir":"` + workDir + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req.Header.Set(testAPIKeyHeader, key)
+	w := httptest.NewRecorder()
+	e.wsHandlers.Create(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "create ws (api-key) body=%s", w.Body.String())
+	var ws session.Workspace
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&ws))
+	return &ws
+}
+
+func (e *testAuthEnv) listWorkspacesWithAPIKey(t *testing.T, key string) []*session.Workspace {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	req.Header.Set(testAPIKeyHeader, key)
+	w := httptest.NewRecorder()
+	e.wsHandlers.List(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "list ws (api-key) body=%s", w.Body.String())
+	var resp struct {
+		Workspaces []*session.Workspace `json:"workspaces"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	return resp.Workspaces
+}
+
+// TestWorkspace_APIKey_CRUD: api-key 服务账号可通过 X-API-Key header 完成 workspace
+// 全 CRUD，owner_user_id 落到 api-key 对应的 users.id（migration 018 模型）。
+func TestWorkspace_APIKey_CRUD(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1")
+
+	// Create — owner must be the api-key user, not "api_user" or "anonymous".
+	ws := env.createWorkspaceWithAPIKey(t, "svc1-key", "svc-proj", "/tmp/hotplex-ws-apikey-crud")
+	require.NotEmpty(t, ws.ID)
+	require.Equal(t, "u-svc1", ws.OwnerUserID, "workspace owner must resolve to the api-key user's users.id")
+
+	// List → only this api-key user's workspaces.
+	require.Len(t, env.listWorkspacesWithAPIKey(t, "svc1-key"), 1)
+
+	// Get via api-key.
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID, nil)
+	req.SetPathValue("id", ws.ID)
+	req.Header.Set(testAPIKeyHeader, "svc1-key")
+	w := httptest.NewRecorder()
+	env.wsHandlers.Get(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Update name via api-key.
+	req2 := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+ws.ID, bytes.NewReader([]byte(`{"name":"svc-renamed"}`)))
+	req2.SetPathValue("id", ws.ID)
+	req2.Header.Set(testAPIKeyHeader, "svc1-key")
+	w2 := httptest.NewRecorder()
+	env.wsHandlers.Update(w2, req2)
+	require.Equal(t, http.StatusOK, w2.Code)
+
+	// Delete via api-key.
+	req3 := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+ws.ID, nil)
+	req3.SetPathValue("id", ws.ID)
+	req3.Header.Set(testAPIKeyHeader, "svc1-key")
+	w3 := httptest.NewRecorder()
+	env.wsHandlers.Delete(w3, req3)
+	require.Equal(t, http.StatusOK, w3.Code)
+}
+
+// TestWorkspace_APIKey_Isolation: two api-key service accounts cannot see each
+// other's workspaces — the owner check (conn.go:350 / workspace_handlers.go:135)
+// enforces per-tenant isolation across the api-key channel just as it does for
+// cookie users (TestWorkspace_Isolation_AcrossUsers).
+func TestWorkspace_APIKey_Isolation(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1")
+	env.addAPIKeyUser(t, "svc2-key", "u-svc2", "apikey:svc2")
+
+	ws1 := env.createWorkspaceWithAPIKey(t, "svc1-key", "svc1-proj", "/tmp/hotplex-ws-apikey-iso1")
+
+	// svc2 lists → sees nothing of svc1's.
+	list := env.listWorkspacesWithAPIKey(t, "svc2-key")
+	require.Len(t, list, 0)
+
+	// svc2 tries to read svc1's workspace → 403.
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws1.ID, nil)
+	req.SetPathValue("id", ws1.ID)
+	req.Header.Set(testAPIKeyHeader, "svc2-key")
+	w := httptest.NewRecorder()
+	env.wsHandlers.Get(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "WORKSPACE_FORBIDDEN")
+}
+
+// TestWorkspace_APIKey_Priority_Over_Cookie: when a request carries BOTH an
+// api-key header and a cookie, the api-key identity wins. This is the spec ⑦
+// contract — the machine channel is authoritative for programmatic integrations
+// and must not silently inherit an operator's browser cookie. Without this
+// guarantee a third-party integration run from an admin's browser would create
+// workspaces owned by the admin instead of the service account.
+func TestWorkspace_APIKey_Priority_Over_Cookie(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1")
+	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	body := []byte(`{"name":"dual-channel","work_dir":"/tmp/hotplex-ws-apikey-prio"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req.Header.Set(testAPIKeyHeader, "svc1-key")
+	req.Header.Set("Cookie", cookieAdmin)
+	w := httptest.NewRecorder()
+	env.wsHandlers.Create(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var ws session.Workspace
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&ws))
+	require.Equal(t, "u-svc1", ws.OwnerUserID, "api-key identity must win over cookie when both are present")
+	require.NotEqual(t, "u-admin", ws.OwnerUserID)
+}
+
+// TestWorkspace_APIKey_Invalid_Rejected: an unregistered api-key is rejected
+// with 401, matching the cookie-path enforcement (TestWorkspace_RequiresAuth).
+func TestWorkspace_APIKey_Invalid_Rejected(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1") // lock dev mode via AddKey
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	req.Header.Set(testAPIKeyHeader, "bogus-key")
+	w := httptest.NewRecorder()
+	env.wsHandlers.List(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+}

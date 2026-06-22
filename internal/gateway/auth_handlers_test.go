@@ -40,6 +40,7 @@ type testAuthEnv struct {
 	idp        *security.LocalAccountProvider
 	handlers   *AuthHandlers
 	wsHandlers *WorkspaceHandlers
+	apiKeyMap  map[string]string // accumulated by addAPIKeyUser → fed to MapResolver
 }
 
 func newTestAuthEnv(t *testing.T) *testAuthEnv {
@@ -78,6 +79,25 @@ func (e *testAuthEnv) createUser(t *testing.T, name, pass, role string) {
 	require.NoError(t, e.store.CreateUser(context.Background(), &security.User{
 		ID: "u-" + name, Username: name, PasswordHash: hash, Role: role, Status: "active",
 	}, 1700000000))
+}
+
+// addAPIKeyUser provisions a service-account user reachable only via the api-key
+// channel. password_hash=” blocks the account-login path (migration 018 model),
+// so this user can never log in via /api/auth/login but resolves normally when
+// the X-API-Key header is presented. The key is registered both with the
+// authenticator (AddKey, enabling devModeLocked) and a MapResolver wired via
+// SetKeyResolver so AuthenticateRequest maps it to uid (spec ⑦ Phase 1).
+func (e *testAuthEnv) addAPIKeyUser(t *testing.T, key, uid, username string) {
+	t.Helper()
+	require.NoError(t, e.store.CreateUser(context.Background(), &security.User{
+		ID: uid, Username: username, PasswordHash: "", Role: "user", Status: "active",
+	}, 1700000000))
+	if e.apiKeyMap == nil {
+		e.apiKeyMap = map[string]string{}
+	}
+	e.apiKeyMap[key] = uid
+	e.auth.SetKeyResolver(security.NewMapResolver(e.apiKeyMap))
+	e.auth.AddKey(key)
 }
 
 func TestLoginHandler_SuccessIssuesCookie(t *testing.T) {
