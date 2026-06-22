@@ -175,7 +175,7 @@ var StaticFS embed.FS
 
 构建流程：`pnpm build` → `webchat/out/` → `go:embed` → Gateway 二进制
 
-### 认证
+### 认证（Authentication）
 
 > WebChat 多租户化后（spec ⑥）**强制登录**：废除匿名 `webchat_user` 身份，未登录用户自动重定向到 `/login`。
 

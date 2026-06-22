@@ -205,7 +205,7 @@ db:
 | `work_dir_forbidden_dirs` | []string | `[]` | — | 额外的工作目录黑名单。显式禁止的目录列表 |
 | `csp` | string | `""` | `HOTPLEX_SECURITY_CSP` | Content-Security-Policy 头覆盖，用于嵌入式 WebChat 和文档门户。空字符串使用内建默认值（适合 localhost）。远程部署时需设置，否则浏览器会阻止 fetch/ws/connect 调用 |
 | `security_contact` | string | `""` | `HOTPLEX_SECURITY_SECURITY_CONTACT` | 安全联系 URI，启用 `/.well-known/security.txt`（RFC 9116）。空字符串 = 禁用。示例：`mailto:security@example.com`、`https://example.com/security` |
-| `cookie_secret` | string | `""` | `HOTPLEX_SECURITY_COOKIE_SECRET` | WebChat 多租户登录 cookie 的 HMAC-SHA256 密钥。空时由 `crypto/rand` 自动生成并持久化到 `~/.hotplex/data/cookie_secret.key`（权限 `0600`）；非空时取其 SHA256 digest 作密钥并**跳过文件生成**（配置优先，适用于多实例共享固定密钥）。详见 [WebChat 设置 — HMAC Cookie 认证](../guides/developer/webchat-setup.md#认证) |
+| `cookie_secret` | string | `""` | `HOTPLEX_SECURITY_COOKIE_SECRET` | WebChat 多租户登录 cookie 的 HMAC-SHA256 密钥。空时由 `crypto/rand` 自动生成并持久化到 `~/.hotplex/data/cookie_secret.key`（权限 `0600`）；非空时取其 SHA256 digest 作密钥并**跳过文件生成**（配置优先，适用于多实例共享固定密钥）。详见 [WebChat 设置 — HMAC Cookie 认证](../guides/developer/webchat-setup.md#authentication) |
 
 ---
 

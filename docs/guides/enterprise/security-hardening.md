@@ -79,9 +79,9 @@ WebChat 多租户化后（spec ⑥）**强制登录**，废除匿名 `webchat_us
 | 密钥持久化 | `~/.hotplex/data/cookie_secret.key`（权限 `0600`） | 重启后仍有效；可由 `security.cookie_secret` 显式配置覆盖 |
 | 有效期 | 7 天 | 限制凭证有效期 |
 
-**CSRF 权衡**：HMAC 签名仅防伪造，不防 CSRF。OAuth flow 的 CSRF 由 OIDC `state` token 防护（见 2.4 回调链路）；内建账号登录的 CSRF 由前端另行防护。
+**CSRF 权衡**：HMAC 签名仅防伪造，不防 CSRF。OAuth flow 的 CSRF 由 OIDC `state` token 防护（见 2.4 回调链路）；内建账号登录路径当前依赖同源部署 + Secure/HttpOnly cookie 降低风险，**暂无额外 CSRF token 防护**（`internal/security/cookie.go` 已注释标注 SameSite=None 的 CSRF 权衡，后续可补 Origin 校验或 double-submit token）。
 
-**认证优先级**：HTTP Header → Query Param → Cookie → Init Envelope。Cookie 作为第 3 优先级 fallback，不影响 Header/Query 类客户端。认证原理详见 [安全模型 — HMAC Cookie 认证](../../explanation/security-model.md#hmac-cookie-认证webchat-多租户)。
+**认证优先级**：HTTP Header → Query Param → Cookie → Init Envelope。Cookie 作为第 3 优先级 fallback，不影响 Header/Query 类客户端。认证原理详见 [安全模型 — HMAC Cookie 认证](../../explanation/security-model.md#hmac-cookie-webchat-)。
 
 ---
 

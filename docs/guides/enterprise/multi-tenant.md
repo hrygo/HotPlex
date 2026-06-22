@@ -22,7 +22,7 @@ HotPlex 采用 **Bot-centric 隔离模型**：每个 Bot（Slack Bot / Feishu Ap
 | 资源隔离 | Per-user Session/Memory 配额 | 用户级别 |
 | 访问控制 | DM/Group policy + allowlist | 平台级别 |
 
-> **两套多租户维度**：本文聚焦 **Bot-centric 隔离**（Slack/Feishu Bot 作为租户单元，适用于消息平台接入）。WebChat 另提供 **用户/workspace 维度**的多租户——强制登录（内建账号 + 企业 OIDC SSO）+ workspace 隔离，详见 [WebChat 设置 — 认证](../developer/webchat-setup.md#认证) 与 [配置参考 — oauth](../../reference/configuration.md#314-oauth--webchat--ssooidc)。
+> **两套多租户维度**：本文聚焦 **Bot-centric 隔离**（Slack/Feishu Bot 作为租户单元，适用于消息平台接入）。WebChat 另提供 **用户/workspace 维度**的多租户——强制登录（内建账号 + 企业 OIDC SSO）+ workspace 隔离，详见 [WebChat 设置 — 认证](../developer/webchat-setup.md#authentication) 与 [配置参考 — oauth](../../reference/configuration.md#314-oauth--webchat--ssooidc)。
 
 ---
 
