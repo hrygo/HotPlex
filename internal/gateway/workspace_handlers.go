@@ -18,15 +18,14 @@ import (
 
 // WorkspaceHandlers serves /api/workspaces (spec §9.1, §11.3).
 type WorkspaceHandlers struct {
-	store      session.UserWorkspaceStore
-	cookieAuth *security.CookieAuth
-	auth       *security.Authenticator
-	now        func() time.Time
+	store session.UserWorkspaceStore
+	auth  *security.Authenticator
+	now   func() time.Time
 }
 
 // NewWorkspaceHandlers constructs workspace CRUD handlers.
-func NewWorkspaceHandlers(store session.UserWorkspaceStore, cookieAuth *security.CookieAuth, auth *security.Authenticator) *WorkspaceHandlers {
-	return &WorkspaceHandlers{store: store, cookieAuth: cookieAuth, auth: auth, now: time.Now}
+func NewWorkspaceHandlers(store session.UserWorkspaceStore, auth *security.Authenticator) *WorkspaceHandlers {
+	return &WorkspaceHandlers{store: store, auth: auth, now: time.Now}
 }
 
 func (h *WorkspaceHandlers) nowUnix() int64 { return h.now().Unix() }
@@ -54,19 +53,24 @@ func (h *WorkspaceHandlers) requireAuth(w http.ResponseWriter, r *http.Request) 
 	return uid, true
 }
 
-// isAdmin reports whether the request carries an active admin cookie.
+// isAdmin reports whether uid is an active admin (role==admin && status==active).
 //
-// Channel-binding policy (spec ⑦ Phase 1): the admin bypass is intentionally
-// cookie-only — it reuses resolveCookieAdmin (the same authority check
-// AuthHandlers.requireAdmin applies to /api/admin/*). Identity (currentUser)
-// instead resolves via AuthenticateRequest (api-key first), so the two are
-// independent: a request with both api-key + admin cookie takes uid from the
-// api-key while admin authority still rides on the cookie. Safe today because
-// every api-key user has role=user; Phase 2 P2.7 (issue #772) may unify them
-// on the AuthenticateRequest uid.
-func (h *WorkspaceHandlers) isAdmin(r *http.Request) bool {
-	_, ok := resolveCookieAdmin(h.cookieAuth, h.auth, r)
-	return ok
+// Same-source authority (spec ⑦ P2.7): uid is the identity currentUser already
+// resolved via AuthenticateRequest (api-key first, cookie fallback), so
+// identity and admin authority now derive from the same channel. This closes
+// the cross-channel ambiguity flagged in the PR #773 review (P2-1, finding B):
+// a request carrying both api-key + admin cookie no longer earns the bypass
+// from the cookie alone — the resolved uid itself must be an admin.
+func (h *WorkspaceHandlers) isAdmin(r *http.Request, uid string) bool {
+	idp := h.auth.IdentityProvider()
+	if idp == nil {
+		return false
+	}
+	u, err := idp.Lookup(r.Context(), uid)
+	if err != nil || u.Role != "admin" || u.Status != "active" {
+		return false
+	}
+	return true
 }
 
 type createWorkspaceRequest struct {
@@ -148,7 +152,7 @@ func (h *WorkspaceHandlers) Get(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
 		return
 	}
-	if ws.OwnerUserID != uid && !h.isAdmin(r) {
+	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
 	}
@@ -182,7 +186,7 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
 		return
 	}
-	if ws.OwnerUserID != uid && !h.isAdmin(r) {
+	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
 	}
@@ -230,7 +234,7 @@ func (h *WorkspaceHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
 		return
 	}
-	if ws.OwnerUserID != uid && !h.isAdmin(r) {
+	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
 	}

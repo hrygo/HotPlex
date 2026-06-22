@@ -395,23 +395,3 @@ func (h *AuthHandlers) requireAdmin(w http.ResponseWriter, r *http.Request) (str
 	}
 	return uid, true
 }
-
-// resolveCookieAdmin 解析 cookie 认证用户是否为 active admin，返回 (user, ok)。
-// 供 WorkspaceHandlers.isAdmin 复用，保证包内 admin 判定语义（role==admin && status==active）
-// 单一定义。AuthHandlers.requireAdmin 因需区分错误码（NO_IDP/USER_DISABLED/FORBIDDEN）
-// 保留自有分支，但其判定与此处同源。
-func resolveCookieAdmin(cookieAuth *security.CookieAuth, auth *security.Authenticator, r *http.Request) (*security.User, bool) {
-	idp := auth.IdentityProvider()
-	if idp == nil {
-		return nil, false
-	}
-	uid, ok := cookieAuth.Authenticate(r)
-	if !ok {
-		return nil, false
-	}
-	u, err := idp.Lookup(r.Context(), uid)
-	if err != nil || u.Role != "admin" || u.Status != "active" {
-		return nil, false
-	}
-	return u, true
-}

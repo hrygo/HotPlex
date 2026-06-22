@@ -445,15 +445,14 @@ func TestWorkspace_APIKey_Priority_Over_Cookie(t *testing.T) {
 	require.NotEqual(t, "u-admin", ws.OwnerUserID)
 }
 
-// TestWorkspace_MixedCredentials_AdminCookieBypass: documents the current
-// channel-binding behavior of isAdmin (spec ⑦ Phase 1). When a request carries
-// BOTH an api-key (non-owner service account) AND a valid admin cookie, the
-// admin cookie grants the admin bypass even though currentUser resolves the
-// identity to the api-key user. This is intentional — admin authority is
-// cookie-only (see the isAdmin doc) — and safe because the cookie-holder is a
-// proven admin. Phase 2 P2.7 (issue #772) may unify identity/authority on the
-// AuthenticateRequest uid, which would flip this expectation to 403.
-func TestWorkspace_MixedCredentials_AdminCookieBypass(t *testing.T) {
+// TestWorkspace_MixedCredentials_NoBypassForNonAdminAPIKey: spec ⑦ P2.7 —
+// identity and admin authority are now same-source (both derive from the
+// AuthenticateRequest uid). A request carrying BOTH an api-key (non-owner
+// service account, role=user) AND a valid admin cookie resolves uid to the
+// api-key user, so the admin bypass does NOT apply — the cookie no longer
+// grants authority on its own. This flips the pre-P2.7 behavior (when isAdmin
+// was cookie-only) documented in the PR #773 review P2-1 finding.
+func TestWorkspace_MixedCredentials_NoBypassForNonAdminAPIKey(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)
 	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1")
@@ -462,14 +461,36 @@ func TestWorkspace_MixedCredentials_AdminCookieBypass(t *testing.T) {
 	wsAdmin := env.createWorkspace(t, cookieAdmin, "admin-proj", "/tmp/hotplex-ws-mixed-admin")
 
 	// Request carries svc1's api-key (non-owner uid) + admin's cookie.
-	// isAdmin sees the admin cookie → bypass grants access despite non-owner uid.
+	// uid resolves to u-svc1 (role=user) → isAdmin=false → 403, even with the
+	// admin cookie present (authority is now same-source, not cookie-bound).
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsAdmin.ID, nil)
 	req.SetPathValue("id", wsAdmin.ID)
 	req.Header.Set(testAPIKeyHeader, "svc1-key")
 	req.Header.Set("Cookie", cookieAdmin)
 	w := httptest.NewRecorder()
 	env.wsHandlers.Get(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "admin cookie bypass grants access even when uid resolves to a non-owner api-key identity (see isAdmin channel-binding policy)")
+	require.Equal(t, http.StatusForbidden, w.Code, "same-source authority: admin cookie must not grant bypass when uid resolves to a non-admin api-key identity")
+	require.Contains(t, w.Body.String(), "WORKSPACE_FORBIDDEN")
+}
+
+// TestWorkspace_AdminCookie_CanReadOthers: spec ⑦ P2.7 — a cookie-authenticated
+// admin (uid resolves to a role=admin user) still earns the admin bypass under
+// same-source authority, so it can read any workspace regardless of owner.
+// Guards against the P2.7 change over-tightening and locking out genuine admins.
+func TestWorkspace_AdminCookie_CanReadOthers(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.createUser(t, "alice", "alicepass1", "user")
+	cookieAlice := env.loginAs(t, "alice", "alicepass1", http.StatusOK)
+	wsAlice := env.createWorkspace(t, cookieAlice, "alice-proj", "/tmp/hotplex-ws-admin-read")
+
+	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsAlice.ID, nil)
+	req.SetPathValue("id", wsAlice.ID)
+	req.Header.Set("Cookie", cookieAdmin)
+	w := httptest.NewRecorder()
+	env.wsHandlers.Get(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "admin uid (role=admin) must retain the bypass under same-source authority")
 }
 
 // TestWorkspace_APIKey_Invalid_Rejected: an unregistered api-key is rejected

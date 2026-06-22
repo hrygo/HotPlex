@@ -58,7 +58,7 @@ func newTestAuthEnv(t *testing.T) *testAuthEnv {
 	auth.SetCookieAuth(ca)
 	auth.SetIdentityProvider(idp)
 	h := NewAuthHandlers(auth, ca, store, idp)
-	ws := NewWorkspaceHandlers(store, ca, auth)
+	ws := NewWorkspaceHandlers(store, auth)
 	return &testAuthEnv{auth: auth, cookie: ca, store: store, idp: idp, handlers: h, wsHandlers: ws}
 }
 
