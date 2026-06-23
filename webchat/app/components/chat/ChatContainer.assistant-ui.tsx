@@ -13,6 +13,7 @@ import { Thread } from '@/components/assistant-ui/thread';
 import { BrandIcon, WORKER_DISPLAY } from '@/components/icons';
 import { SessionPanel } from './SessionPanel';
 import { NewSessionModal } from './NewSessionModal';
+import { SettingsModal } from './settings-modal/settings-modal';
 import { MetricsBar } from '@/components/assistant-ui/MetricsBar';
 import { workerType as defaultWorkerType, httpBase, type ConnectionState } from '@/lib/config';
 import type { SessionMetrics } from '@/lib/hooks/useMetrics';
@@ -22,7 +23,7 @@ import {
   createWorkspace,
   type Workspace,
 } from '@/lib/api/workspaces';
-import { logout } from '@/lib/api/auth';
+import { logout, getMe, type User } from '@/lib/api/auth';
 
 function ChatInterface({
   sessionId,
@@ -75,6 +76,8 @@ export default function ChatContainer() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
   const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(null);
 
   // nuqs deep link params
@@ -115,6 +118,13 @@ export default function ChatContainer() {
   useEffect(() => {
     loadWorkspaces();
   }, [loadWorkspaces]);
+
+  // Fetch current user profile (Profile tab + Members tab gating)
+  useEffect(() => {
+    let mounted = true;
+    getMe().then((u) => { if (mounted) setCurrentUser(u); }).catch(() => { /* not logged in or unreachable */ });
+    return () => { mounted = false; };
+  }, []);
 
   const handleSwitchWorkspace = (ws: Workspace) => {
     setActiveWorkspace(ws);
@@ -261,17 +271,17 @@ export default function ChatContainer() {
             </svg>
             <span className="hidden md:inline">Docs</span>
           </a>
-          {/* Settings — Phase 3: opens SettingsModal (linked to /admin until SettingsModal lands) */}
-          <Link
-            href="/admin"
+          {/* Settings — opens SettingsModal (Phase 3) */}
+          <button
+            onClick={() => setSettingsOpen(true)}
             className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all"
-            title="Settings & Admin"
+            title="Settings"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-          </Link>
+          </button>
           {/* Logout */}
           <button
             onClick={handleLogout}
@@ -346,6 +356,18 @@ export default function ChatContainer() {
           defaultWorkDir={activeWorkspace?.work_dir}
         />
       )}
+
+      {/* Settings Modal (Phase 3) */}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        workspace={activeWorkspace}
+        currentUser={currentUser}
+        onWorkspaceUpdated={(ws) => {
+          setActiveWorkspace(ws);
+          setWorkspaces((prev) => prev.map((w) => (w.id === ws.id ? ws : w)));
+        }}
+      />
     </div>
   );
 }
