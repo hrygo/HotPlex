@@ -513,6 +513,7 @@ per-workspace 并发上限：复用 `config.SecurityConfig` 或新增 `config.Qu
 | `WORK_DIR_TAKEN` | 409 | per-user work_dir 1:1 冲突 |
 | `WORK_DIR_IMMUTABLE` | 400 | 尝试修改 work_dir |
 | `WORKSPACE_NOT_EMPTY` | 409 | 删除时有活跃会话 |
+| `WORKSPACE_VERSION_MISMATCH` | 409 | 并发更新冲突（乐观锁 CAS 失败，客户端应重新 Get 再重试） |
 | `USER_DISABLED` | 403 | 用户已禁用 |
 | `USERNAME_TAKEN` | 409 | 用户名已存在 |
 

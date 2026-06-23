@@ -58,6 +58,7 @@ type UserIdentity struct {
 var (
 	ErrWorkspaceNotFound     = errors.New("session: workspace not found")
 	ErrWorkspaceNotEmpty     = errors.New("session: workspace has active sessions")
+	ErrWorkspaceConflict     = errors.New("session: workspace version conflict (concurrent update)")
 	ErrInvitationNotFound    = errors.New("session: invitation not found")
 	ErrInvitationAlreadyUsed = errors.New("session: invitation already used")
 	ErrIdentityNotFound      = errors.New("session: user identity not found")
@@ -305,11 +306,24 @@ func (s *SQLiteStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUs
 	return w, err
 }
 
+// UpdateWorkspace applies the in-memory workspace fields to the row, guarded by
+// an optimistic-concurrency CAS on updated_at (review P3-1): the WHERE clause
+// binds the caller's cached updated_at, so a concurrent update that bumped it
+// makes this affect 0 rows → ErrWorkspaceConflict. The writeMu scope keeps the
+// read-modify-write atomic against other SQLiteStore writers; PG relies on MVCC.
 func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error {
 	return s.writeMu.WithLock(func() error {
-		_, err := s.db.ExecContext(ctx, queries["workspaces.update"],
-			w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), now, w.ID)
-		return err
+		res, err := s.db.ExecContext(ctx, queries["workspaces.update"],
+			w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), now, w.ID, w.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return ErrWorkspaceConflict
+		}
+		w.UpdatedAt = now
+		return nil
 	})
 }
 
