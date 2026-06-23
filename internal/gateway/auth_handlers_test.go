@@ -15,6 +15,7 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 )
 
 // newTestSessionStore builds an isolated SQLite store running all migrations.
@@ -24,7 +25,7 @@ func newTestSessionStore(t *testing.T) session.UserWorkspaceStore {
 	cfg.DB.Path = filepath.Join(t.TempDir(), "test.db")
 	cfg.DB.SQLite.Path = cfg.DB.Path
 	cfg.DB.WALMode = true
-	store, err := session.NewSQLiteStore(context.Background(), cfg, nil)
+	store, err := session.NewSQLiteStore(context.Background(), cfg, sqlutil.NewWriteMu(sqlutil.DialectSQLite))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store
