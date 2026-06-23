@@ -71,8 +71,23 @@ export async function adminFetch<T>(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    const err = new Error(body || `Admin request failed: ${res.status}`);
+    // P2.8: admin API now returns JSON error envelope {"error":{code,message}}.
+    // Parse it to surface the human-readable message; fall back to raw body for
+    // non-JSON responses (backward compat with any plain-text error path).
+    let message = body || `Admin request failed: ${res.status}`;
+    let code: string | undefined;
+    try {
+      const envelope = JSON.parse(body);
+      if (envelope?.error?.message) {
+        message = envelope.error.message;
+        code = envelope.error.code;
+      }
+    } catch {
+      // not JSON — keep raw body as message
+    }
+    const err = new Error(message);
     (err as any).status = res.status;
+    if (code) (err as any).code = code;
     throw err;
   }
 

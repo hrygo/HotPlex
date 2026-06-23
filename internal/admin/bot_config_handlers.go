@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/hrygo/hotplex/internal/web"
 )
 
 // HandleListBotConfigs returns all registered bot configurations.
@@ -54,12 +56,12 @@ func (a *AdminAPI) HandleGetBotConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.botConfig == nil {
-		http.Error(w, "bot config provider not available", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
 		return
 	}
 	name := r.PathValue("name")
 	if name == "" {
-		http.Error(w, "missing bot name", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing bot name")
 		return
 	}
 	result, err := a.botConfig.GetBotConfig(r.Context(), name)
@@ -90,18 +92,18 @@ func (a *AdminAPI) HandleGetAgentConfigFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if a.botConfig == nil {
-		http.Error(w, "bot config provider not available", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
 		return
 	}
 	name := r.PathValue("name")
 	if name == "" {
-		http.Error(w, "missing bot name", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing bot name")
 		return
 	}
 	fileStr := r.PathValue("file")
 	fileName := AgentConfigFileName(fileStr)
 	if !ValidConfigFiles[fileName] {
-		http.Error(w, fmt.Sprintf("invalid config file %q", fileStr), http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid config file %q", fileStr))
 		return
 	}
 	result, err := a.botConfig.GetAgentConfigFile(r.Context(), name, fileName)
@@ -130,12 +132,12 @@ func (a *AdminAPI) HandleSystemPromptPreview(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if a.botConfig == nil {
-		http.Error(w, "bot config provider not available", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
 		return
 	}
 	name := r.PathValue("name")
 	if name == "" {
-		http.Error(w, "missing bot name", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing bot name")
 		return
 	}
 	result, err := a.botConfig.GetSystemPromptPreview(r.Context(), name)
@@ -165,23 +167,23 @@ func (a *AdminAPI) HandleUpdateBotConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if a.botConfig == nil {
-		http.Error(w, "bot config provider not available", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
 		return
 	}
 	name := r.PathValue("name")
 	if name == "" {
-		http.Error(w, "missing bot name", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing bot name")
 		return
 	}
 	var body map[string]any
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON")
 		return
 	}
 	attrs := extractBotConfigAttrs(body)
 	if err := a.botConfig.UpdateBotConfig(r.Context(), name, attrs); err != nil {
 		a.log.Error("admin: update bot config", "err", err)
-		http.Error(w, "update failed", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "update failed")
 		return
 	}
 	a.log.Info("admin: bot config updated", "bot", name, "admin", adminKeyPrefix(r))
@@ -206,23 +208,23 @@ func (a *AdminAPI) HandleCreateBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.botConfig == nil {
-		http.Error(w, "bot config provider not available", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
 		return
 	}
 	var body map[string]any
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON")
 		return
 	}
 	name, _ := body["name"].(string)
 	if name == "" {
-		http.Error(w, "missing bot name", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing bot name")
 		return
 	}
 	attrs := extractBotConfigAttrs(body)
 	if err := a.botConfig.CreateBot(r.Context(), name, attrs); err != nil {
 		a.log.Error("admin: create bot", "err", err)
-		http.Error(w, "create failed", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "create failed")
 		return
 	}
 	a.log.Info("admin: bot created", "bot", name, "admin", adminKeyPrefix(r))
@@ -247,18 +249,18 @@ func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.botConfig == nil {
-		http.Error(w, "bot config provider not available", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
 		return
 	}
 	name := r.PathValue("name")
 	if name == "" {
-		http.Error(w, "missing bot name", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing bot name")
 		return
 	}
 	if err := a.botConfig.DeleteBot(r.Context(), name); err != nil {
 		if errors.Is(err, ErrBotRunning) {
 			a.log.Error("admin: delete bot conflict", "bot", name, "error", err)
-			http.Error(w, "bot is currently running", http.StatusConflict)
+			web.WriteAppError(w, http.StatusConflict, "CONFLICT", "bot is currently running")
 		} else {
 			respondStoreError(w, a.log, "admin: delete bot", err)
 		}
@@ -288,18 +290,18 @@ func (a *AdminAPI) HandleWriteAgentConfigFile(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if a.botConfig == nil {
-		http.Error(w, "bot config provider not available", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
 		return
 	}
 	name := r.PathValue("name")
 	if name == "" {
-		http.Error(w, "missing bot name", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing bot name")
 		return
 	}
 	fileStr := r.PathValue("file")
 	fileName := AgentConfigFileName(fileStr)
 	if !ValidConfigFiles[fileName] {
-		http.Error(w, fmt.Sprintf("invalid config file %q", fileStr), http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid config file %q", fileStr))
 		return
 	}
 
@@ -307,13 +309,13 @@ func (a *AdminAPI) HandleWriteAgentConfigFile(w http.ResponseWriter, r *http.Req
 		Content string `json:"content"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON")
 		return
 	}
 
 	if err := a.botConfig.WriteAgentConfigFile(r.Context(), name, fileName, body.Content); err != nil {
 		a.log.Error("admin: write agent config file", "err", err)
-		http.Error(w, "write failed", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "write failed")
 		return
 	}
 	a.log.Info("admin: agent config file written", "bot", name, "file", fileStr, "admin", adminKeyPrefix(r))

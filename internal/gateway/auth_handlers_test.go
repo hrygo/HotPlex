@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/admin"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
@@ -41,6 +42,7 @@ type testAuthEnv struct {
 	idp        *security.LocalAccountProvider
 	handlers   *AuthHandlers
 	wsHandlers *WorkspaceHandlers
+	userAdmin  *admin.UserAdminHandlers
 	apiKeyMap  map[string]string // accumulated by addAPIKeyUser → fed to MapResolver
 }
 
@@ -60,7 +62,8 @@ func newTestAuthEnv(t *testing.T) *testAuthEnv {
 	auth.SetIdentityProvider(idp)
 	h := NewAuthHandlers(auth, ca, store, idp)
 	ws := NewWorkspaceHandlers(store, auth)
-	return &testAuthEnv{auth: auth, cookie: ca, store: store, idp: idp, handlers: h, wsHandlers: ws}
+	ua := admin.NewUserAdminHandlers(store, auth, ca, idp)
+	return &testAuthEnv{auth: auth, cookie: ca, store: store, idp: idp, handlers: h, wsHandlers: ws, userAdmin: ua}
 }
 
 func (e *testAuthEnv) loginAs(t *testing.T, user, pass string, wantStatus int) string {
@@ -150,7 +153,7 @@ func TestAcceptInvite_CreatesUserAndIssuesCookie(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
 	req.Header.Set("Cookie", cookie)
 	w := httptest.NewRecorder()
-	env.handlers.AdminCreateInvitation(w, req)
+	env.userAdmin.CreateInvitation(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp struct {
 		Code string `json:"code"`
@@ -194,7 +197,7 @@ func TestAdminEndpoint_RequiresAdmin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/invitations", nil)
 	req.Header.Set("Cookie", cookie)
 	w := httptest.NewRecorder()
-	env.handlers.AdminListInvitations(w, req)
+	env.userAdmin.ListInvitations(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, "普通用户不能访问 admin 端点")
 }
 
@@ -209,7 +212,7 @@ func TestAdminListUsers_OmitsPasswordHash(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
 	req.Header.Set("Cookie", cookie)
 	w := httptest.NewRecorder()
-	env.handlers.AdminListUsers(w, req)
+	env.userAdmin.ListUsers(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	body := w.Body.String()
@@ -231,7 +234,7 @@ func TestAcceptInvite_UsernameTaken_ConsumesInvitation(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
 	req.Header.Set("Cookie", cookie)
 	w := httptest.NewRecorder()
-	env.handlers.AdminCreateInvitation(w, req)
+	env.userAdmin.CreateInvitation(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp struct {
 		Code string `json:"code"`
@@ -265,7 +268,7 @@ func TestAcceptInvite_InvalidUsername_PreservesInvitation(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
 	req.Header.Set("Cookie", cookie)
 	w := httptest.NewRecorder()
-	env.handlers.AdminCreateInvitation(w, req)
+	env.userAdmin.CreateInvitation(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp struct {
 		Code string `json:"code"`
@@ -298,7 +301,7 @@ func TestAcceptInvite_PasswordTooLong_PreservesInvitation(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
 	req.Header.Set("Cookie", cookie)
 	w := httptest.NewRecorder()
-	env.handlers.AdminCreateInvitation(w, req)
+	env.userAdmin.CreateInvitation(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp struct {
 		Code string `json:"code"`

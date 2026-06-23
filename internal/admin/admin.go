@@ -14,6 +14,7 @@ import (
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/sqlutil"
+	"github.com/hrygo/hotplex/internal/web"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -211,13 +212,13 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 					"method", r.Method,
 					"stack", string(debug.Stack()),
 				)
-				http.Error(sw, "internal server error", http.StatusInternalServerError)
+				web.WriteAppError(sw, http.StatusInternalServerError, "INTERNAL", "internal server error")
 			}
 		}()
 
 		if rl, _ := a.rateLimiter.Load().(*simpleRateLimiter); rl != nil {
 			if !rl.Allow() {
-				http.Error(sw, "rate limit exceeded", http.StatusTooManyRequests)
+				web.WriteAppError(sw, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
 				return
 			}
 		}
@@ -226,7 +227,7 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 			addr := clientIP(r)
 			if !ipAllowed(addr, cidrs) {
 				a.log.Warn("admin: IP not whitelisted", "ip", addr)
-				http.Error(sw, "IP not allowed", http.StatusForbidden)
+				web.WriteAppError(sw, http.StatusForbidden, "FORBIDDEN", "IP not allowed")
 				return
 			}
 		}
@@ -239,12 +240,12 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 
 		token := extractBearerToken(r)
 		if token == "" {
-			http.Error(sw, "missing admin token", http.StatusUnauthorized)
+			web.WriteAppError(sw, http.StatusUnauthorized, "UNAUTHORIZED", "missing admin token")
 			return
 		}
 		scopes, ok := a.validateToken(token)
 		if !ok {
-			http.Error(sw, "invalid admin token", http.StatusUnauthorized)
+			web.WriteAppError(sw, http.StatusUnauthorized, "UNAUTHORIZED", "invalid admin token")
 			return
 		}
 

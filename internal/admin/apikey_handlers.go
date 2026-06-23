@@ -16,6 +16,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/sqlutil"
+	"github.com/hrygo/hotplex/internal/web"
 )
 
 // ErrUserIDExists indicates a duplicate user_id when creating/updating an API key user.
@@ -255,7 +256,7 @@ func (s *apiKeyUserStore) update(ctx context.Context, id int64, u *APIKeyUser) e
 // @Router       /admin/api-keys [get]
 func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminRead) {
-		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:read")
 		return
 	}
 	if a.akStore == nil {
@@ -265,7 +266,7 @@ func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) 
 	users, err := a.akStore.list(r.Context())
 	if err != nil {
 		a.log.Error("admin: list api key users", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 		return
 	}
 	if users == nil {
@@ -294,24 +295,24 @@ func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) 
 // @Router       /admin/api-keys [post]
 func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminWrite) {
-		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:write")
 		return
 	}
 	if a.akStore == nil {
-		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
+		web.WriteAppError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "database resolver not enabled")
 		return
 	}
 	var u APIKeyUser
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&u); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid json")
 		return
 	}
 	if u.UserID == "" || len(u.UserID) > 128 {
-		http.Error(w, "user_id is required (max 128 chars)", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "user_id is required (max 128 chars)")
 		return
 	}
 	if len(u.Description) > 512 {
-		http.Error(w, "description too long (max 512 chars)", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "description too long (max 512 chars)")
 		return
 	}
 	if err := a.requireUniqueUserID(r.Context(), u.UserID, 0); err != nil {
@@ -348,17 +349,17 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 // @Router       /admin/api-keys/{id} [get]
 func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminRead) {
-		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:read")
 		return
 	}
 	if a.akStore == nil {
-		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
+		web.WriteAppError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "database resolver not enabled")
 		return
 	}
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid id")
 		return
 	}
 	u, err := a.akStore.get(r.Context(), id)
@@ -391,30 +392,30 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/api-keys/{id} [patch]
 func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminWrite) {
-		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:write")
 		return
 	}
 	if a.akStore == nil {
-		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
+		web.WriteAppError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "database resolver not enabled")
 		return
 	}
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid id")
 		return
 	}
 	var u APIKeyUser
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&u); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid json")
 		return
 	}
 	if u.UserID == "" || len(u.UserID) > 128 {
-		http.Error(w, "user_id is required (max 128 chars)", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "user_id is required (max 128 chars)")
 		return
 	}
 	if len(u.Description) > 512 {
-		http.Error(w, "description too long (max 512 chars)", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "description too long (max 512 chars)")
 		return
 	}
 
@@ -456,17 +457,17 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 // @Router       /admin/api-keys/{id} [delete]
 func (a *AdminAPI) HandleAPIKeyUserDelete(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminWrite) {
-		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:write")
 		return
 	}
 	if a.akStore == nil {
-		http.Error(w, "database resolver not enabled", http.StatusNotImplemented)
+		web.WriteAppError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "database resolver not enabled")
 		return
 	}
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid id")
 		return
 	}
 

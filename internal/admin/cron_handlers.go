@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
+	"github.com/hrygo/hotplex/internal/web"
 )
 
 // CronSchedulerProvider abstracts the cron scheduler for the admin API.
@@ -62,7 +64,7 @@ func (a *AdminAPI) HandleCronGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.cron == nil {
-		http.Error(w, "cron scheduler not enabled", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "cron scheduler not enabled")
 		return
 	}
 	id := r.PathValue("id")
@@ -92,12 +94,12 @@ func (a *AdminAPI) HandleCronCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.cron == nil {
-		http.Error(w, "cron scheduler not enabled", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "cron scheduler not enabled")
 		return
 	}
 	var body map[string]any
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON")
 		return
 	}
 	if err := a.cron.CreateJob(r.Context(), body); err != nil {
@@ -127,13 +129,13 @@ func (a *AdminAPI) HandleCronUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.cron == nil {
-		http.Error(w, "cron scheduler not enabled", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "cron scheduler not enabled")
 		return
 	}
 	id := r.PathValue("id")
 	var body map[string]any
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON")
 		return
 	}
 	if err := a.cron.UpdateJob(r.Context(), id, body); err != nil {
@@ -160,7 +162,7 @@ func (a *AdminAPI) HandleCronDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.cron == nil {
-		http.Error(w, "cron scheduler not enabled", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "cron scheduler not enabled")
 		return
 	}
 	id := r.PathValue("id")
@@ -188,7 +190,7 @@ func (a *AdminAPI) HandleCronTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.cron == nil {
-		http.Error(w, "cron scheduler not enabled", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "cron scheduler not enabled")
 		return
 	}
 	id := r.PathValue("id")
@@ -217,7 +219,7 @@ func (a *AdminAPI) HandleCronRunHistory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if a.cron == nil {
-		http.Error(w, "cron scheduler not enabled", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "cron scheduler not enabled")
 		return
 	}
 	id := r.PathValue("id")

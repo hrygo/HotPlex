@@ -289,17 +289,31 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 
 ## 错误响应格式
 
-所有错误使用纯文本响应（`text/plain`），非 JSON：
+所有错误统一返回 JSON envelope（`Content-Type: application/json`），形状为：
 
-| 状态码 | 含义 | 典型场景 |
-|--------|------|----------|
-| 400 | 请求无效 | JSON 解析失败、参数校验错误 |
-| 401 | 未认证 | Token 缺失或无效 |
-| 403 | 权限不足 | Scope 不满足 |
-| 404 | 资源不存在 | Session/Cron Job 未找到 |
-| 429 | 请求过频 | 触发 Rate Limit |
-| 500 | 内部错误 | Handler panic、服务不可用 |
-| 503 | 服务不可用 | 数据库故障、Cron 未启用 |
+```json
+{"error":{"code":"NOT_FOUND","message":"resource not found"}}
+```
+
+`code` 为机器可读的大写下划线标识符，`message` 为人类可读的英文描述。客户端应依据 `code` 做分支，而非解析 `message`。此信封由 `web.WriteAppError` 统一生成，Admin API（Bearer）与 `/api/admin/*`（Cookie）共用同一形状。
+
+### 错误码表
+
+| HTTP | code | 典型场景 |
+|------|------|----------|
+| 400 | `BAD_REQUEST` | JSON 解析失败、参数校验错误、非法枚举值 |
+| 401 | `UNAUTHORIZED` | Token 缺失或无效 |
+| 401 | `INVALID_CREDENTIALS` | Cookie 会话失效或未登录 |
+| 403 | `INSUFFICIENT_SCOPE` | Bearer Token scope 不满足（Admin API） |
+| 403 | `FORBIDDEN` | 非管理员访问管理端点 |
+| 403 | `USER_DISABLED` | 用户已被禁用 |
+| 404 | `NOT_FOUND` | Session/Cron Job/Invitation 未找到 |
+| 409 | `CONFLICT` | 资源状态冲突 |
+| 429 | `RATE_LIMITED` | 触发 Rate Limit |
+| 500 | `INTERNAL` | Handler panic、未分类内部错误 |
+| 501 | `NOT_IMPLEMENTED` | 该接口尚未实现 |
+| 503 | `SERVICE_UNAVAILABLE` | 数据库故障、Cron 未启用 |
+| 503 | `NO_IDP` | 未配置身份提供者 |
 
 ## 常用操作示例
 

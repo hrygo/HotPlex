@@ -29,18 +29,6 @@ const NAV_ITEMS = [
     exact: false,
   },
   {
-    label: 'Workspaces',
-    href: '/admin/workspaces',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9Z" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 9h18" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M8 13h4" />
-      </svg>
-    ),
-    exact: false,
-  },
-  {
     label: 'Sessions',
     href: '/admin/sessions',
     icon: (
@@ -81,17 +69,7 @@ const NAV_ITEMS = [
     exact: false,
   },
   {
-    label: 'Account',
-    href: '/admin/account',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-      </svg>
-    ),
-    exact: false,
-  },
-  {
-    label: 'Settings',
+    label: 'Connection',
     href: '/admin/settings',
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">

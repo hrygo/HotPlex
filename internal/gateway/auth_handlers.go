@@ -15,17 +15,11 @@ import (
 	"github.com/hrygo/hotplex/internal/web"
 )
 
-// AppError is the JSON error envelope for multitenancy API endpoints (spec §12).
-type AppError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// writeAppError writes a structured JSON error (spec §12 error codes).
+// writeAppError writes a structured JSON error envelope (spec §12 error codes).
+// Thin wrapper over web.WriteAppError so gateway multitenancy handlers and the
+// admin API share one error shape (P2.8 unification).
 func writeAppError(w http.ResponseWriter, status int, code, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": AppError{Code: code, Message: msg}})
+	web.WriteAppError(w, status, code, msg)
 }
 
 // AuthHandlers holds dependencies for authentication + admin endpoints (spec §8, §11.1-11.2).
@@ -262,136 +256,8 @@ func isUniqueViolation(err error) bool {
 // --- admin endpoints (spec §11.2, require admin role) ---
 // Pagination helper is shared via internal/web.ParsePagination (PR #764 review:
 // dedup with the admin port — both now clamp to the same MaxLimit).
-
-type createInvitationRequest struct {
-	Role string `json:"role"` // 'user' | 'admin'
-	TTL  int    `json:"ttl"`  // seconds; 0 = default 7 days
-}
-
-const defaultInvitationTTL = 7 * 24 * 3600
-
-// AdminCreateInvitation: POST /api/admin/invitations
-func (h *AuthHandlers) AdminCreateInvitation(w http.ResponseWriter, r *http.Request) {
-	uid, ok := h.requireAdmin(w, r)
-	if !ok {
-		return
-	}
-	var req createInvitationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid body")
-		return
-	}
-	if req.Role != "user" && req.Role != "admin" {
-		req.Role = "user"
-	}
-	ttl := req.TTL
-	if ttl <= 0 {
-		ttl = defaultInvitationTTL
-	}
-	code, err := security.GenerateInviteCode()
-	if err != nil {
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "generate invite code failed")
-		return
-	}
-	inv := &session.Invitation{
-		ID: uuid.NewString(), Code: code, CreatedBy: uid,
-		Role: req.Role, ExpiresAt: h.nowUnix() + int64(ttl),
-	}
-	if err := h.store.CreateInvitation(r.Context(), inv, h.nowUnix()); err != nil {
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "create invitation failed")
-		return
-	}
-	respondJSON(w, map[string]any{"id": inv.ID, "code": code, "role": inv.Role, "expires_at": inv.ExpiresAt})
-}
-
-// AdminListInvitations: GET /api/admin/invitations
-func (h *AuthHandlers) AdminListInvitations(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
-		return
-	}
-	limit, offset := web.ParsePagination(r)
-	invs, err := h.store.ListInvitations(r.Context(), limit, offset)
-	if err != nil {
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
-		return
-	}
-	respondJSON(w, map[string]any{"invitations": invs, "limit": limit, "offset": offset})
-}
-
-// AdminDeleteInvitation: DELETE /api/admin/invitations/{id}
-func (h *AuthHandlers) AdminDeleteInvitation(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
-		return
-	}
-	id := r.PathValue("id")
-	if err := h.store.DeleteInvitation(r.Context(), id); err != nil {
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-// AdminListUsers: GET /api/admin/users
-func (h *AuthHandlers) AdminListUsers(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
-		return
-	}
-	limit, offset := web.ParsePagination(r)
-	users, err := h.store.ListUsers(r.Context(), limit, offset)
-	if err != nil {
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
-		return
-	}
-	respondJSON(w, map[string]any{"users": users, "limit": limit, "offset": offset})
-}
-
-type updateUserStatusRequest struct {
-	Status string `json:"status"` // 'active' | 'disabled'
-}
-
-// AdminUpdateUserStatus: PATCH /api/admin/users/{id}
-func (h *AuthHandlers) AdminUpdateUserStatus(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
-		return
-	}
-	id := r.PathValue("id")
-	var req updateUserStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid body")
-		return
-	}
-	if req.Status != "active" && req.Status != "disabled" {
-		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid status")
-		return
-	}
-	if err := h.store.UpdateUserStatus(r.Context(), id, req.Status, h.nowUnix()); err != nil {
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-// requireAdmin validates the current user is an active admin.
-// Returns (uid, true) on success; writes an error and returns ("", false) otherwise.
-func (h *AuthHandlers) requireAdmin(w http.ResponseWriter, r *http.Request) (string, bool) {
-	uid, ok := h.cookieAuth.Authenticate(r)
-	if !ok {
-		writeAppError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "not authenticated")
-		return "", false
-	}
-	idp := h.auth.IdentityProvider()
-	if idp == nil {
-		writeAppError(w, http.StatusServiceUnavailable, "NO_IDP", "no identity provider")
-		return "", false
-	}
-	u, err := idp.Lookup(r.Context(), uid)
-	if err != nil || u.Status != "active" {
-		writeAppError(w, http.StatusForbidden, "USER_DISABLED", "user disabled")
-		return "", false
-	}
-	if u.Role != "admin" {
-		writeAppError(w, http.StatusForbidden, "FORBIDDEN", "admin only")
-		return "", false
-	}
-	return uid, true
-}
+//
+// The /api/admin/* handlers (invitations/users CRUD) were migrated to
+// internal/admin/user_handlers.go (UserAdminHandlers) in P2.6 — admin code now
+// lives in the admin package. Routes still mount on the gateway mux (cookie
+// auth) at /api/admin/* in cmd/hotplex/routes.go.

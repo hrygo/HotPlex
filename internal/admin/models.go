@@ -3,9 +3,18 @@
 // in runtime serialization — handlers construct responses via respondJSON(map[string]any{...}).
 package admin
 
+// AppError is the schema-only mirror of web.AppError (internal/web). Defined
+// locally rather than imported so swaggo can resolve the type during OpenAPI
+// generation; the runtime envelope is produced by web.WriteAppError.
+type AppError struct {
+	Code    string `json:"code" example:"NOT_FOUND"`
+	Message string `json:"message" example:"resource not found"`
+}
+
 // ErrorResponse is the standard error envelope returned by all endpoints.
+// Shape: {"error":{"code":...,"message":...}} (see web.WriteAppError).
 type ErrorResponse struct {
-	Error string `json:"error" example:"not found"`
+	Error AppError `json:"error"`
 }
 
 // StatusResponse is returned for simple ok/status operations.
