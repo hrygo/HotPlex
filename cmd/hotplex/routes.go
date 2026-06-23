@@ -241,7 +241,7 @@ func setupRoutes(
 		mux.Handle("OPTIONS /api/admin/users/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 
 		// Workspaces CRUD endpoints
-		wsHandlers := gateway.NewWorkspaceHandlers(deps.WorkspaceStore, deps.CookieAuth, auth)
+		wsHandlers := gateway.NewWorkspaceHandlers(deps.WorkspaceStore, auth)
 		mux.Handle("POST /api/workspaces", corsMw(http.HandlerFunc(wsHandlers.Create)))
 		mux.Handle("GET /api/workspaces", corsMw(http.HandlerFunc(wsHandlers.List)))
 		mux.Handle("GET /api/workspaces/{id}", corsMw(http.HandlerFunc(wsHandlers.Get)))

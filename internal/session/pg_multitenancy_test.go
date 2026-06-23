@@ -32,10 +32,11 @@ func newPGMultitenancyMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 		"users.touch_last_login":              d.Rebind("UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?"),
 		"workspaces.create":                   d.Rebind("INSERT INTO workspaces (id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, 'active', ?, ?)"),
 		"workspaces.get_by_id":                d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE id = ?"),
-		"workspaces.list_by_owner":            d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND status = 'active' ORDER BY created_at ASC"),
+		"workspaces.list_by_owner":            d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND status = 'active' ORDER BY created_at ASC LIMIT ? OFFSET ?"),
 		"workspaces.get_by_owner_and_workdir": d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND work_dir = ? AND status = 'active'"),
 		"workspaces.update":                   d.Rebind("UPDATE workspaces SET name = ?, agent_config_overrides = ?, worker_preference = ?, updated_at = ? WHERE id = ?"),
 		"workspaces.delete":                   d.Rebind("DELETE FROM workspaces WHERE id = ?"),
+		"workspaces.delete_if_empty":          d.Rebind("DELETE FROM workspaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle'))"),
 		"workspaces.count_active_sessions":    d.Rebind("SELECT COUNT(*) FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle')"),
 		"invitations.create":                  d.Rebind("INSERT INTO invitations (id, code, created_by, role, used_by, expires_at, created_at, used_at) VALUES (?, ?, ?, ?, NULL, ?, ?, NULL)"),
 		"invitations.get_by_code":             d.Rebind("SELECT id, code, created_by, role, used_by, expires_at, created_at, used_at FROM invitations WHERE code = ?"),
@@ -207,8 +208,8 @@ func TestPGMultitenancy_ListWorkspacesByOwner(t *testing.T) {
 	q := store.queries["workspaces.list_by_owner"]
 	rows := sqlmock.NewRows(workspaceColumns()).
 		AddRow("ws-1", "u-1", "a", "/tmp/a", nil, nil, "active", int64(100), int64(100))
-	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs("u-1").WillReturnRows(rows)
-	list, err := store.ListWorkspacesByOwner(context.Background(), "u-1")
+	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs("u-1", 100, 0).WillReturnRows(rows)
+	list, err := store.ListWorkspacesByOwner(context.Background(), "u-1", 100, 0)
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 }
@@ -266,6 +267,44 @@ func TestPGMultitenancy_CountActiveSessionsInWorkspace(t *testing.T) {
 	n, err := store.CountActiveSessionsInWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	require.Equal(t, 3, n)
+}
+
+// DeleteWorkspaceIfEmpty 三态：成功删除 / 有活跃会话（409）/ 已被并发删除（404）。
+// PG 版必须与 SQLite 版行为一致（PR #773 reviewer P1）。
+
+func TestPGMultitenancy_DeleteWorkspaceIfEmpty(t *testing.T) {
+	t.Parallel()
+	store, mock, cleanup := newPGMultitenancyMock(t)
+	defer cleanup()
+	q := store.queries["workspaces.delete_if_empty"]
+	mock.ExpectExec(regexp.QuoteMeta(q)).WithArgs("ws-1", "ws-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, store.DeleteWorkspaceIfEmpty(context.Background(), "ws-1"))
+}
+
+func TestPGMultitenancy_DeleteWorkspaceIfEmpty_NotEmpty(t *testing.T) {
+	t.Parallel()
+	store, mock, cleanup := newPGMultitenancyMock(t)
+	defer cleanup()
+	q := store.queries["workspaces.delete_if_empty"]
+	mock.ExpectExec(regexp.QuoteMeta(q)).WithArgs("ws-1", "ws-1").WillReturnResult(sqlmock.NewResult(0, 0))
+	// RowsAffected==0 → 重新检查存在性：workspace 仍存在 → 有活跃会话阻塞 → ErrWorkspaceNotEmpty。
+	getQ := store.queries["workspaces.get_by_id"]
+	rows := sqlmock.NewRows(workspaceColumns()).AddRow("ws-1", "u-1", "p", "/tmp/x", nil, nil, "active", int64(100), int64(100))
+	mock.ExpectQuery(regexp.QuoteMeta(getQ)).WithArgs("ws-1").WillReturnRows(rows)
+	require.ErrorIs(t, store.DeleteWorkspaceIfEmpty(context.Background(), "ws-1"), ErrWorkspaceNotEmpty)
+}
+
+func TestPGMultitenancy_DeleteWorkspaceIfEmpty_AlreadyDeletedReturnsNotFound(t *testing.T) {
+	t.Parallel()
+	store, mock, cleanup := newPGMultitenancyMock(t)
+	defer cleanup()
+	q := store.queries["workspaces.delete_if_empty"]
+	mock.ExpectExec(regexp.QuoteMeta(q)).WithArgs("ws-1", "ws-1").WillReturnResult(sqlmock.NewResult(0, 0))
+	// RowsAffected==0 → 重新检查存在性：workspace 已被并发 actor 删除 → ErrWorkspaceNotFound。
+	// 修复前 PG 版一律返回 ErrWorkspaceNotEmpty（误导 409），handler 的 404 分支不可达。
+	getQ := store.queries["workspaces.get_by_id"]
+	mock.ExpectQuery(regexp.QuoteMeta(getQ)).WithArgs("ws-1").WillReturnError(sql.ErrNoRows)
+	require.ErrorIs(t, store.DeleteWorkspaceIfEmpty(context.Background(), "ws-1"), ErrWorkspaceNotFound)
 }
 
 // --- PG invitations ---

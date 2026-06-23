@@ -94,8 +94,8 @@ func (s *pgStore) GetWorkspaceByID(ctx context.Context, id string) (*Workspace, 
 	return w, err
 }
 
-func (s *pgStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string) ([]*Workspace, error) {
-	rows, err := s.db.QueryContext(ctx, s.queries["workspaces.list_by_owner"], ownerUserID)
+func (s *pgStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string, limit, offset int) ([]*Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["workspaces.list_by_owner"], ownerUserID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +149,13 @@ func (s *pgStore) DeleteWorkspace(ctx context.Context, id string) error {
 }
 
 // DeleteWorkspaceIfEmpty 原子删除：仅当无活跃会话时成功（防 TOCTOU，spec §9.1）。
+//
+// RowsAffected==0 有两种成因，必须区分（与 SQLite 版一致）：
+//   - workspace 存在但有活跃会话 → ErrWorkspaceNotEmpty（HTTP 409）
+//   - workspace 已被并发 actor 删除 → ErrWorkspaceNotFound（HTTP 404）
+//
+// PG 无 writeMu（数据库自身 MVCC 已保证查询隔离），重新检查 GetWorkspaceByID
+// 即可区分两种成因，使 handler 的 ErrWorkspaceNotFound 分支在 PG 下可达。
 func (s *pgStore) DeleteWorkspaceIfEmpty(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, s.queries["workspaces.delete_if_empty"], id, id)
 	if err != nil {
@@ -156,6 +163,12 @@ func (s *pgStore) DeleteWorkspaceIfEmpty(ctx context.Context, id string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
+		if _, err := s.GetWorkspaceByID(ctx, id); err != nil {
+			if errors.Is(err, ErrWorkspaceNotFound) {
+				return ErrWorkspaceNotFound
+			}
+			return err
+		}
 		return ErrWorkspaceNotEmpty
 	}
 	return nil
