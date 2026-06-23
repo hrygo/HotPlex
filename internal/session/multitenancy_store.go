@@ -76,7 +76,7 @@ type UserWorkspaceStore interface {
 	// workspaces
 	CreateWorkspace(ctx context.Context, w *Workspace, now int64) error
 	GetWorkspaceByID(ctx context.Context, id string) (*Workspace, error)
-	ListWorkspacesByOwner(ctx context.Context, ownerUserID string) ([]*Workspace, error)
+	ListWorkspacesByOwner(ctx context.Context, ownerUserID string, limit, offset int) ([]*Workspace, error)
 	ListAllWorkspaces(ctx context.Context) ([]*Workspace, error)
 	GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error)
 	UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error
@@ -261,8 +261,8 @@ func (s *SQLiteStore) GetWorkspaceByID(ctx context.Context, id string) (*Workspa
 	return w, err
 }
 
-func (s *SQLiteStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string) ([]*Workspace, error) {
-	rows, err := s.db.QueryContext(ctx, queries["workspaces.list_by_owner"], ownerUserID)
+func (s *SQLiteStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string, limit, offset int) ([]*Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, queries["workspaces.list_by_owner"], ownerUserID, limit, offset)
 	if err != nil {
 		return nil, err
 	}

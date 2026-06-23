@@ -123,19 +123,16 @@ func (h *WorkspaceHandlers) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	wss, err := h.store.ListWorkspacesByOwner(r.Context(), uid)
+	limit, offset := web.ParsePagination(r)
+	// LIMIT/OFFSET 下推到 store 层（PR #773 P2）：跨通道租户接入后 api-key 通道可能
+	// 程序化批量创建 workspace，内存分页会退化为无界查询。
+	wss, err := h.store.ListWorkspacesByOwner(r.Context(), uid, limit, offset)
 	if err != nil {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
 		return
 	}
-	limit, offset := web.ParsePagination(r)
-	// Per-owner workspace counts are small; the store returns all active rows
-	// (already ordered by created_at ASC), so we paginate in memory and echo
-	// the requested limit/offset to satisfy the ListWorkspacesResponse contract.
-	start := min(offset, len(wss))
-	end := min(start+limit, len(wss))
 	respondJSON(w, map[string]any{
-		"workspaces": wss[start:end],
+		"workspaces": wss,
 		"limit":      limit,
 		"offset":     offset,
 	})

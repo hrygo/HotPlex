@@ -128,7 +128,7 @@ func TestWorkspacesStore_ListByOwnerIsolated(t *testing.T) {
 	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-2", OwnerUserID: "u-1", Name: "b", WorkDir: "/tmp/b"}, 1700000000))
 	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-3", OwnerUserID: "u-2", Name: "c", WorkDir: "/tmp/c"}, 1700000000))
 
-	list, err := store.ListWorkspacesByOwner(ctx, "u-1")
+	list, err := store.ListWorkspacesByOwner(ctx, "u-1", 100, 0)
 	require.NoError(t, err)
 	require.Len(t, list, 2, "只返回 owner=u-1 的 workspace")
 	for _, w := range list {

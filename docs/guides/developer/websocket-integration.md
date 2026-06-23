@@ -1708,6 +1708,6 @@ curl -X PATCH http://localhost:8888/api/workspaces/7c9f6b2a-3e4d-4a8f-9b1c-2d5e7
 ### 16.4 隔离与安全保证
 
 - **owner-only**：api-key 用户只能访问 `owner_user_id` 等于自己的 workspace，跨 owner 访问返回 `WORKSPACE_FORBIDDEN`
-- **session 绑定不可变**：session 一旦绑定 workspace，不可切换；重连时 init 的 `workspace_id` 必须与首次一致（`session workspace mismatch`）
+- **session 绑定不可变**：同一 session（即重连时携带原 `clientSessionID` 命中已有 session）绑定的 workspace 不可切换；此时 init 的 `workspace_id` 必须与首次一致，否则返回 `session workspace mismatch`。若客户端以新 `clientSessionID` 发起 init，视为创建新 session，可绑定任意归属当前用户的 workspace（`conn.go` 仅在 `preResolved != nil` 路径强制校验）
 - **配额计费**：workspace session 计入 owner 的 per-user 配额（`PoolManager`，api-key 用户与人类用户同等对待）
 - **禁用即拦**：`users.status == "disabled"` 的 api-key 用户，所有 workspace 请求被 per-request 拦截（与 REST session API 同一条 `AuthenticateRequest` 拦截链）
