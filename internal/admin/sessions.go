@@ -24,7 +24,7 @@ import (
 // @Router       /admin/sessions [post]
 func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionWrite) {
-		http.Error(w, "insufficient scope: need session:write", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need session:write")
 		return
 	}
 	id := r.URL.Query().Get("session_id")
@@ -46,7 +46,7 @@ func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		WorkerType: wt,
 	}); err != nil {
 		a.log.Error("admin: create session failed", "err", err)
-		http.Error(w, "failed to create session", http.StatusInternalServerError)
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to create session")
 		return
 	}
 
@@ -74,7 +74,7 @@ func (a *AdminAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/sessions [get]
 func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionRead) {
-		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need session:read")
 		return
 	}
 	platform := r.URL.Query().Get("platform")
@@ -84,7 +84,7 @@ func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 	sessions, err := a.sm.List(r.Context(), userID, platform, limit, offset)
 	if err != nil {
 		a.log.Error("admin: list sessions", "err", err)
-		http.Error(w, "failed to list sessions", http.StatusInternalServerError)
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to list sessions")
 		return
 	}
 
@@ -109,13 +109,13 @@ func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/sessions/{id} [get]
 func (a *AdminAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionRead) {
-		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need session:read")
 		return
 	}
 	id := r.PathValue("id")
 	si, err := a.sm.Get(r.Context(), id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		web.WriteAppError(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
 
@@ -135,13 +135,13 @@ func (a *AdminAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/sessions/{id} [delete]
 func (a *AdminAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionKill) {
-		http.Error(w, "insufficient scope: need session:delete", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need session:delete")
 		return
 	}
 	id := r.PathValue("id")
 	if err := a.sm.Delete(r.Context(), id); err != nil {
 		a.log.Error("admin: delete session failed", "session_id", id, "err", err)
-		http.Error(w, "failed to delete session", http.StatusInternalServerError)
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to delete session")
 		return
 	}
 
@@ -164,13 +164,13 @@ func (a *AdminAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/sessions/{id}/terminate [post]
 func (a *AdminAPI) TerminateSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionWrite) {
-		http.Error(w, "insufficient scope: need session:write", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need session:write")
 		return
 	}
 	id := r.PathValue("id")
 	if err := a.sm.Transition(r.Context(), id, events.StateTerminated); err != nil {
 		a.log.Warn("admin: terminate session failed", "session_id", id, "err", err, "admin", adminKeyPrefix(r))
-		http.Error(w, "failed to terminate session", http.StatusInternalServerError)
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to terminate session")
 		return
 	}
 
@@ -192,7 +192,7 @@ func (a *AdminAPI) TerminateSession(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/sessions/pool [get]
 func (a *AdminAPI) PoolStats(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeStatsRead) {
-		http.Error(w, "insufficient scope: need stats:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need stats:read")
 		return
 	}
 	total, max, users := a.sm.Stats()
@@ -218,11 +218,11 @@ func (a *AdminAPI) PoolStats(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/sessions/{id}/stats [get]
 func (a *AdminAPI) HandleSessionStats(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeSessionRead) {
-		http.Error(w, "insufficient scope: need session:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need session:read")
 		return
 	}
 	if a.turnStore == nil {
-		http.Error(w, "turn stats not available", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "turn stats not available")
 		return
 	}
 
@@ -230,11 +230,11 @@ func (a *AdminAPI) HandleSessionStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := a.turnStore.TurnStats(r.Context(), id)
 	if err != nil {
 		if r.Context().Err() != nil {
-			http.Error(w, "request cancelled", http.StatusServiceUnavailable)
+			web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "request cancelled")
 			return
 		}
 		a.log.Warn("admin: session stats", "id", id, "err", err)
-		http.Error(w, "not found", http.StatusNotFound)
+		web.WriteAppError(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
 

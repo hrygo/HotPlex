@@ -15,17 +15,11 @@ import (
 	"github.com/hrygo/hotplex/internal/web"
 )
 
-// AppError is the JSON error envelope for multitenancy API endpoints (spec §12).
-type AppError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// writeAppError writes a structured JSON error (spec §12 error codes).
+// writeAppError writes a structured JSON error envelope (spec §12 error codes).
+// Thin wrapper over web.WriteAppError so gateway multitenancy handlers and the
+// admin API share one error shape (P2.8 unification).
 func writeAppError(w http.ResponseWriter, status int, code, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": AppError{Code: code, Message: msg}})
+	web.WriteAppError(w, status, code, msg)
 }
 
 // AuthHandlers holds dependencies for authentication + admin endpoints (spec §8, §11.1-11.2).

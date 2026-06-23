@@ -6,6 +6,8 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+
+	"github.com/hrygo/hotplex/internal/web"
 )
 
 type scopeContextKey struct{}
@@ -54,7 +56,7 @@ func hasScope(r *http.Request, required string) bool {
 // Returns false and writes 403 if not.
 func requireScope(w http.ResponseWriter, r *http.Request, scope string) bool {
 	if !hasScope(r, scope) {
-		http.Error(w, "insufficient scope: need "+scope, http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need "+scope)
 		return false
 	}
 	return true

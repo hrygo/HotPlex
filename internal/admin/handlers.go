@@ -28,14 +28,14 @@ import (
 // @Router       /admin/stats [get]
 func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeStatsRead) {
-		http.Error(w, "insufficient scope: need stats:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need stats:read")
 		return
 	}
 	total, _, _ := a.sm.Stats()
 	sessions, err := a.sm.List(r.Context(), "", "", 0, 0)
 	if err != nil {
 		a.log.Error("admin: failed to list sessions for stats", "err", err)
-		http.Error(w, "failed to query sessions", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "failed to query sessions")
 		return
 	}
 
@@ -84,7 +84,7 @@ func (a *AdminAPI) HandleStats(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/health [get]
 func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeHealthRead) {
-		http.Error(w, "insufficient scope: need health:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need health:read")
 		return
 	}
 	cfg := a.cfg.Get()
@@ -139,7 +139,7 @@ func (a *AdminAPI) HandleHealth(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/health/workers [get]
 func (a *AdminAPI) HandleWorkerHealth(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeHealthRead) {
-		http.Error(w, "insufficient scope: need health:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need health:read")
 		return
 	}
 
@@ -177,7 +177,7 @@ func (a *AdminAPI) HandleWorkerHealth(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/logs [get]
 func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminRead) {
-		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:read")
 		return
 	}
 	limit, _ := web.ParsePagination(r)
@@ -207,11 +207,11 @@ func (a *AdminAPI) HandleLogs(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/config/validate [post]
 func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeConfigRead) {
-		http.Error(w, "insufficient scope: need config:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need config:read")
 		return
 	}
 	if r.Body == nil {
-		http.Error(w, "empty request body", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "empty request body")
 		return
 	}
 	var body struct {
@@ -240,7 +240,7 @@ func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) 
 		} `json:"pool"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON")
 		return
 	}
 
@@ -308,29 +308,29 @@ func (a *AdminAPI) HandleConfigValidate(w http.ResponseWriter, r *http.Request) 
 // @Router       /admin/config/rollback [post]
 func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeConfigRead) {
-		http.Error(w, "insufficient scope: need config:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need config:read")
 		return
 	}
 	if a.configWatcher == nil {
-		http.Error(w, "config rollback is not available (no config file specified)", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "config rollback is not available (no config file specified)")
 		return
 	}
 	var body struct {
 		Version int `json:"version"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON")
 		return
 	}
 	if body.Version < 1 {
-		http.Error(w, "version must be a positive integer", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "version must be a positive integer")
 		return
 	}
 
 	_, idx, err := a.configWatcher.Rollback(body.Version)
 	if err != nil {
 		a.log.Error("admin: config rollback failed", "error", err)
-		http.Error(w, "rollback failed", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "rollback failed")
 		return
 	}
 
@@ -356,13 +356,13 @@ func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) 
 // @Router       /admin/debug/sessions/{id} [get]
 func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminRead) {
-		http.Error(w, "insufficient scope: need admin:read", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:read")
 		return
 	}
 	id := r.PathValue("id")
 	si, err := a.sm.Get(r.Context(), id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		web.WriteAppError(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
 
@@ -400,11 +400,11 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 // @Router       /admin/restart [post]
 func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 	if !hasScope(r, ScopeAdminWrite) {
-		http.Error(w, "insufficient scope: need admin:write", http.StatusForbidden)
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:write")
 		return
 	}
 	if a.restart == nil {
-		http.Error(w, "restart is not configured", http.StatusServiceUnavailable)
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "restart is not configured")
 		return
 	}
 
@@ -426,15 +426,15 @@ func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 // all others are logged and return 500.
 func respondStoreError(w http.ResponseWriter, log *slog.Logger, op string, err error) {
 	if errors.Is(err, ErrUserIDExists) {
-		http.Error(w, "user_id already exists", http.StatusConflict)
+		web.WriteAppError(w, http.StatusConflict, "CONFLICT", "user_id already exists")
 		return
 	}
 	if errors.Is(err, sql.ErrNoRows) ||
 		errors.Is(err, cron.ErrJobNotFound) ||
 		errors.Is(err, session.ErrSessionNotFound) {
-		http.Error(w, "not found", http.StatusNotFound)
+		web.WriteAppError(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
 	log.Error(op, "error", err)
-	http.Error(w, "internal error", http.StatusInternalServerError)
+	web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 }

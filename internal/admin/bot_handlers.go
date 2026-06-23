@@ -2,6 +2,8 @@ package admin
 
 import (
 	"net/http"
+
+	"github.com/hrygo/hotplex/internal/web"
 )
 
 // BotListerProvider abstracts bot registry access for the admin API.
@@ -62,18 +64,18 @@ func (a *AdminAPI) HandleGetBot(w http.ResponseWriter, r *http.Request) {
 
 	name := r.PathValue("name")
 	if name == "" {
-		http.Error(w, "missing bot name", http.StatusBadRequest)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing bot name")
 		return
 	}
 
 	if a.botLister == nil {
-		http.Error(w, "bot registry not available", http.StatusNotFound)
+		web.WriteAppError(w, http.StatusNotFound, "NOT_FOUND", "bot registry not available")
 		return
 	}
 
 	entry, ok := a.botLister.GetBot(name)
 	if !ok {
-		http.Error(w, "bot not found", http.StatusNotFound)
+		web.WriteAppError(w, http.StatusNotFound, "NOT_FOUND", "bot not found")
 		return
 	}
 	respondJSON(w, entry)
