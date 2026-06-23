@@ -2302,6 +2302,19 @@
                 }
             }
         },
+        "admin.AppError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "NOT_FOUND"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "resource not found"
+                }
+            }
+        },
         "admin.BotConfigAttrs": {
             "type": "object",
             "properties": {
@@ -2975,8 +2988,7 @@
             "type": "object",
             "properties": {
                 "error": {
-                    "type": "string",
-                    "example": "not found"
+                    "$ref": "#/definitions/admin.AppError"
                 }
             }
         },

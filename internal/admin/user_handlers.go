@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -74,7 +75,7 @@ func (h *UserAdminHandlers) CreateInvitation(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req createInvitationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid body")
 		return
 	}
@@ -153,7 +154,7 @@ func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Requ
 	}
 	id := r.PathValue("id")
 	var req updateUserStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid body")
 		return
 	}

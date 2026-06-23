@@ -498,7 +498,9 @@ per-workspace 并发上限：复用 `config.SecurityConfig` 或新增 `config.Qu
 
 ## 12. 错误码
 
-沿用项目 `AppError{Code, ...}` 模式（`.agents/rules/golang.md`）。新增码：
+沿用项目 `AppError{Code, ...}` 模式（`.agents/rules/golang.md`）。所有错误统一通过 `web.WriteAppError` 返回 `{"error":{"code":...,"message":...}}` JSON envelope（P2.8 统一信封）。
+
+### 12.1 多租户端点新增码（gateway multitenancy）
 
 | Code | HTTP | 场景 |
 |---|---|---|
@@ -513,6 +515,26 @@ per-workspace 并发上限：复用 `config.SecurityConfig` 或新增 `config.Qu
 | `WORKSPACE_NOT_EMPTY` | 409 | 删除时有活跃会话 |
 | `USER_DISABLED` | 403 | 用户已禁用 |
 | `USERNAME_TAKEN` | 409 | 用户名已存在 |
+
+### 12.2 Admin API 错误码
+
+Admin API（Bearer Token, 端口 9999）与 `/api/admin/*`（Cookie, 端口 8888）共用以下通用码（两端均由 `web.WriteAppError` 产出同一信封）：
+
+| Code | HTTP | 场景 |
+|---|---|---|
+| `BAD_REQUEST` | 400 | 请求体解析失败、参数校验错误、非法枚举值 |
+| `UNAUTHORIZED` | 401 | Token 缺失或无效 |
+| `INSUFFICIENT_SCOPE` | 403 | Bearer Token scope 不满足（Admin API） |
+| `FORBIDDEN` | 403 | 非管理员访问管理端点 |
+| `NOT_FOUND` | 404 | Session/Cron Job/Invitation 未找到 |
+| `CONFLICT` | 409 | 资源状态冲突 |
+| `RATE_LIMITED` | 429 | 触发 Rate Limit |
+| `INTERNAL` | 500 | 未分类内部错误 |
+| `NOT_IMPLEMENTED` | 501 | 接口尚未实现 |
+| `SERVICE_UNAVAILABLE` | 503 | 数据库故障、Cron 未启用 |
+| `NO_IDP` | 503 | 未配置身份提供者 |
+
+> `USER_DISABLED`（403）见 §12.1，多租户端点与管理端共用。
 
 配额错误复用现有 `QUOTA_EXCEEDED`（扩展 message 含 workspace 维度信息）。
 
