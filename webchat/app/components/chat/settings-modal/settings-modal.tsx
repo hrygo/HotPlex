@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import type { Workspace } from '@/lib/api/workspaces';
 import type { User } from '@/lib/api/auth';
 import { GeneralTab } from './general-tab';
+import { AIConfigTab } from './ai-config-tab';
 import { ProfileTab } from './profile-tab';
 
 interface SettingsModalProps {
@@ -79,8 +80,8 @@ export function SettingsModal({ open, onClose, workspace, currentUser, onWorkspa
           {activeTab === 'general' && workspace && (
             <GeneralTab workspace={workspace} onUpdated={onWorkspaceUpdated} />
           )}
-          {activeTab === 'ai' && (
-            <div className="text-center py-8 text-sm text-[var(--text-muted)]">AI Config — coming soon</div>
+          {activeTab === 'ai' && workspace && (
+            <AIConfigTab workspace={workspace} onUpdated={onWorkspaceUpdated} />
           )}
           {activeTab === 'profile' && currentUser && <ProfileTab user={currentUser} />}
           {activeTab === 'members' && currentUser?.role === 'admin' && (
