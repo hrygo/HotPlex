@@ -214,6 +214,10 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		ws.WorkerPreference = req.WorkerPreference
 	}
 	if err := h.store.UpdateWorkspace(r.Context(), ws, h.nowUnix()); err != nil {
+		if errors.Is(err, session.ErrWorkspaceConflict) {
+			writeAppError(w, http.StatusConflict, "WORKSPACE_VERSION_MISMATCH", "workspace concurrently modified, please re-fetch and retry")
+			return
+		}
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
 		return
 	}

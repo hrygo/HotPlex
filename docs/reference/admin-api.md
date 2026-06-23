@@ -305,7 +305,7 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 | 401 | `UNAUTHORIZED` | Token 缺失或无效 |
 | 401 | `INVALID_CREDENTIALS` | Cookie 会话失效或未登录 |
 | 403 | `INSUFFICIENT_SCOPE` | Bearer Token scope 不满足（Admin API） |
-| 403 | `FORBIDDEN` | 非管理员访问管理端点 |
+| 403 | `FORBIDDEN` | 非管理员访问管理端点，或请求 IP 不在白名单（见「安全中间件」IP Whitelist，两类 403 共用同一 code） |
 | 403 | `USER_DISABLED` | 用户已被禁用 |
 | 404 | `NOT_FOUND` | Session/Cron Job/Invitation 未找到 |
 | 409 | `CONFLICT` | 资源状态冲突 |

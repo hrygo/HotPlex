@@ -87,10 +87,43 @@ func TestSQLiteStore_UpdateWorkspace(t *testing.T) {
 	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 100))
 	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "p", WorkDir: "/tmp/x"}, 100))
 
-	require.NoError(t, store.UpdateWorkspace(ctx, &Workspace{ID: "ws-1", Name: "renamed", AgentConfigOverrides: `{"foo":"bar"}`}, 200))
+	// Optimistic concurrency (review P3-1): must Get first to load the current
+	// updated_at, then mutate and Update — the handler's read-modify-write mode.
+	ws, err := store.GetWorkspaceByID(ctx, "ws-1")
+	require.NoError(t, err)
+	ws.Name = "renamed"
+	ws.AgentConfigOverrides = `{"foo":"bar"}`
+	require.NoError(t, store.UpdateWorkspace(ctx, ws, 200))
+	require.Equal(t, int64(200), ws.UpdatedAt, "CAS success should bump in-memory updated_at")
+
 	got, _ := store.GetWorkspaceByID(ctx, "ws-1")
 	require.Equal(t, "renamed", got.Name)
 	require.Equal(t, `{"foo":"bar"}`, got.AgentConfigOverrides)
+	require.Equal(t, int64(200), got.UpdatedAt)
+}
+
+// TestSQLiteStore_UpdateWorkspace_VersionConflict verifies the optimistic-
+// concurrency CAS: a stale writer (cached updated_at) loses to a fresh write
+// and gets ErrWorkspaceConflict, preventing a silent lost update (review P3-1).
+func TestSQLiteStore_UpdateWorkspace_VersionConflict(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 100))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "p", WorkDir: "/tmp/x"}, 100))
+
+	wsA, _ := store.GetWorkspaceByID(ctx, "ws-1") // updated_at=100
+	wsB, _ := store.GetWorkspaceByID(ctx, "ws-1") // updated_at=100 (stale after A writes)
+
+	wsA.Name = "by-a"
+	require.NoError(t, store.UpdateWorkspace(ctx, wsA, 200)) // bumps to 200
+
+	wsB.Name = "by-b"
+	require.ErrorIs(t, store.UpdateWorkspace(ctx, wsB, 300), ErrWorkspaceConflict)
+
+	got, _ := store.GetWorkspaceByID(ctx, "ws-1")
+	require.Equal(t, "by-a", got.Name, "stale writer's change must be rejected")
+	require.Equal(t, int64(200), got.UpdatedAt)
 }
 
 func TestSQLiteStore_DeleteWorkspace(t *testing.T) {

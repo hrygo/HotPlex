@@ -137,10 +137,22 @@ func (s *pgStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID
 	return w, err
 }
 
+// UpdateWorkspace applies the in-memory workspace fields, guarded by an
+// optimistic-concurrency CAS on updated_at (review P3-1, mirrors SQLiteStore).
+// RowsAffected==0 means a concurrent update bumped updated_at (or the row was
+// deleted between the handler's Get and this write) → ErrWorkspaceConflict.
 func (s *pgStore) UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error {
-	_, err := s.db.ExecContext(ctx, s.queries["workspaces.update"],
-		w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), now, w.ID)
-	return err
+	res, err := s.db.ExecContext(ctx, s.queries["workspaces.update"],
+		w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), now, w.ID, w.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrWorkspaceConflict
+	}
+	w.UpdatedAt = now
+	return nil
 }
 
 func (s *pgStore) DeleteWorkspace(ctx context.Context, id string) error {
