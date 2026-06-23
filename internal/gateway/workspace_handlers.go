@@ -244,6 +244,10 @@ func (h *WorkspaceHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 			writeAppError(w, http.StatusConflict, "WORKSPACE_NOT_EMPTY", "workspace has active sessions")
 			return
 		}
+		if errors.Is(err, session.ErrWorkspaceNotFound) {
+			writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "workspace concurrently deleted")
+			return
+		}
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")
 		return
 	}

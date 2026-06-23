@@ -204,6 +204,23 @@ func TestWorkspacesStore_DeleteIfEmpty_BlockedByActiveSession(t *testing.T) {
 	require.Equal(t, "ws-1", got.ID)
 }
 
+func TestWorkspacesStore_DeleteIfEmpty_AlreadyDeletedReturnsNotFound(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "p", WorkDir: "/tmp/x"}, 1700000000))
+
+	// 第一次删除成功。
+	require.NoError(t, store.DeleteWorkspaceIfEmpty(ctx, "ws-1"))
+
+	// 第二次：workspace 已不存在（模拟并发 actor 在 Get↔Delete 间已删除）。
+	// 修复前 RowsAffected==0 一律返回 ErrWorkspaceNotEmpty（误导 409）；
+	// 修复后重新检查存在性，返回 ErrWorkspaceNotFound（404）。
+	err := store.DeleteWorkspaceIfEmpty(ctx, "ws-1")
+	require.ErrorIs(t, err, ErrWorkspaceNotFound, "已删除的 workspace 应返回 ErrWorkspaceNotFound 而非 ErrWorkspaceNotEmpty")
+}
+
 // --- invitations ---
 
 func TestInvitationsStore_CreateAndMarkUsedCAS(t *testing.T) {
