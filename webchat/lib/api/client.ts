@@ -11,6 +11,7 @@
  * import from here instead of re-declaring these helpers.
  */
 import { httpBase, apiKey, isSameOrigin } from "@/lib/config";
+import { parseApiError } from "./errors";
 
 export const BASE = httpBase();
 
@@ -40,6 +41,6 @@ export function withAuth(headers?: Record<string, string>): Record<string, strin
 // semantic error code like USER_DISABLED/FORBIDDEN was discarded in favor
 // of a generic "Create invitation failed: 403").
 export async function extractApiError(res: Response, fallback: string): Promise<string> {
-  const errData = await res.json().catch(() => ({}));
-  return errData?.error?.code || errData?.error?.message || fallback;
+  const info = await parseApiError(res);
+  return info.code || info.message || fallback;
 }

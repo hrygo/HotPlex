@@ -7,6 +7,8 @@
 
 import type { AdminConnection } from '@/lib/types/admin';
 
+import { parseApiError } from './errors';
+
 const STORAGE_URL_KEY = 'hotplex_admin_url';
 const STORAGE_TOKEN_KEY = 'hotplex_admin_token';
 
@@ -66,28 +68,22 @@ export async function adminFetch<T>(
 
   if (res.status === 401) {
     clearAdminConnection();
-    throw new Error('Admin authentication failed (401)');
+    // Parse the envelope so the caller gets the real code/message (e.g.
+    // UNAUTHORIZED vs INVALID_CREDENTIALS) instead of a generic string —
+    // avoids silently dropping future 401-scoped codes (PR #774 review P2).
+    const info = await parseApiError(res);
+    const err = new Error(info.message || info.code || 'Admin authentication failed (401)');
+    (err as any).status = 401;
+    if (info.code) (err as any).code = info.code;
+    throw err;
   }
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    // P2.8: admin API now returns JSON error envelope {"error":{code,message}}.
-    // Parse it to surface the human-readable message; fall back to raw body for
-    // non-JSON responses (backward compat with any plain-text error path).
-    let message = body || `Admin request failed: ${res.status}`;
-    let code: string | undefined;
-    try {
-      const envelope = JSON.parse(body);
-      if (envelope?.error?.message) {
-        message = envelope.error.message;
-        code = envelope.error.code;
-      }
-    } catch {
-      // not JSON — keep raw body as message
-    }
+    const info = await parseApiError(res);
+    const message = info.message || info.raw || `Admin request failed: ${res.status}`;
     const err = new Error(message);
-    (err as any).status = res.status;
-    if (code) (err as any).code = code;
+    (err as any).status = info.status;
+    if (info.code) (err as any).code = info.code;
     throw err;
   }
 
