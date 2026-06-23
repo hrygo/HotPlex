@@ -157,10 +157,10 @@ func (h *WorkspaceHandlers) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateWorkspaceRequest struct {
-	Name                 string `json:"name"`
-	AgentConfigOverrides string `json:"agent_config_overrides"`
-	WorkerPreference     string `json:"worker_preference"`
-	WorkDir              string `json:"work_dir"` // must be rejected (immutable, spec §6.2)
+	Name                 string  `json:"name"`
+	AgentConfigOverrides string  `json:"agent_config_overrides"`
+	WorkerPreference     *string `json:"worker_preference"` // nil = omit (no change); "" = explicit clear to default
+	WorkDir              string  `json:"work_dir"`          // must be rejected (immutable, spec §6.2)
 }
 
 // Update: PATCH /api/workspaces/{id}
@@ -206,12 +206,14 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ws.AgentConfigOverrides = req.AgentConfigOverrides
 	}
-	if req.WorkerPreference != "" {
-		if err := worker.ValidateType(worker.WorkerType(req.WorkerPreference)); err != nil {
+	if req.WorkerPreference != nil {
+		// nil = field omitted (no change); "" = explicit clear to default.
+		// ValidateType accepts "" as inherit-default, so clearing needs no special case.
+		if err := worker.ValidateType(worker.WorkerType(*req.WorkerPreference)); err != nil {
 			writeAppError(w, http.StatusBadRequest, "INVALID_WORKER_TYPE", err.Error())
 			return
 		}
-		ws.WorkerPreference = req.WorkerPreference
+		ws.WorkerPreference = *req.WorkerPreference
 	}
 	if err := h.store.UpdateWorkspace(r.Context(), ws, h.nowUnix()); err != nil {
 		if errors.Is(err, session.ErrWorkspaceConflict) {

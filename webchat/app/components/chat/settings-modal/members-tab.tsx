@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   adminListUsers,
   adminUpdateUserStatus,
@@ -25,24 +25,37 @@ export function MembersTab() {
     setTimeout(() => setActionMsg(null), 2500);
   };
 
+  const abortRef = useRef<AbortController | null>(null);
+
+  // AbortController guards against (a) rapid re-loads racing stale responses
+  // onto fresh state and (b) in-flight requests resolving after unmount (PR #779
+  // review P2-1). Each load() aborts the previous; unmount aborts whatever remains.
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setLoading(true);
     setError(null);
     try {
       const [u, inv] = await Promise.all([
-        adminListUsers(100, 0),
-        adminListInvitations(100, 0),
+        adminListUsers(100, 0, ctrl.signal),
+        adminListInvitations(100, 0, ctrl.signal),
       ]);
+      if (ctrl.signal.aborted) return;
       setUsers(u.users || []);
       setInvitations(inv.invitations || []);
     } catch (err) {
+      if (ctrl.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Load failed');
     } finally {
-      setLoading(false);
+      if (!ctrl.signal.aborted) setLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    return () => abortRef.current?.abort();
+  }, [load]);
 
   const handleToggleUser = async (user: User) => {
     const next = user.status === 'active' ? 'disabled' : 'active';
