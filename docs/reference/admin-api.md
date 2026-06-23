@@ -245,7 +245,7 @@ Gateway API（`/api/sessions`）监听在网关主端口（`8888`），面向客
 
 ### WebChat 多租户端点（spec ① / ④ / ⑥）
 
-WebChat 多租户登录与工作区管理端点，同样监听在网关主端口 `8888`，使用 **Cookie 认证**（登录后签发的 HMAC Cookie，非 API Key）。仅在启用 WebChat 多租户（`CookieAuth` + `WorkspaceStore` 就绪）时注册，普通 SDK/WebSocket 集成不涉及。
+WebChat 多租户登录与工作区管理端点，同样监听在网关主端口 `8888`，默认使用 **Cookie 认证**（登录后签发的 HMAC Cookie）；其中 workspace CRUD 还接受 **API Key**（跨通道租户接入，详见下方「Workspace 管理」）。仅在启用 WebChat 多租户（`CookieAuth` + `WorkspaceStore` 就绪）时注册，普通 SDK/WebSocket 集成不涉及。
 
 **账号登录（spec ①）**：
 
@@ -265,15 +265,19 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 | GET | `/api/auth/oauth/{provider}/login` | 无 | 发起 OIDC 登录，重定向到 IdP（name 须匹配 `[a-z0-9-]+`） |
 | GET | `/api/auth/oauth/{provider}/callback` | state cookie | OIDC 回调，完成 token exchange + ID Token 验证后签发 Cookie |
 
-**Workspace 管理（spec ⑥ A1）**：
+**Workspace 管理（spec ⑥ A1 / ⑦ 跨通道租户）**：
+
+Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API Key**（header `X-API-Key` 或 query `api_key`，面向第三方集成）还是 **Cookie**（WebChat UI）进入，都能拥有并管理自己的 workspace。鉴权链为 API Key 优先、Cookie 兜底（`AuthenticateRequest`），与 session REST、WS upgrade 对齐。`work_dir` 创建后不可变，PATCH 携带该字段返回 `400 WORK_DIR_IMMUTABLE`。
 
 | 方法 | 路径 | 认证 | 说明 |
 |------|------|------|------|
-| POST | `/api/workspaces` | Cookie | 创建 workspace |
-| GET | `/api/workspaces` | Cookie | 列出当前用户可访问的 workspace |
-| GET | `/api/workspaces/{id}` | Cookie | workspace 详情（含归属校验） |
-| PATCH | `/api/workspaces/{id}` | Cookie | 更新 workspace |
-| DELETE | `/api/workspaces/{id}` | Cookie | 删除 workspace |
+| POST | `/api/workspaces` | API Key / Cookie | 创建 workspace |
+| GET | `/api/workspaces` | API Key / Cookie | 列出当前用户可访问的 workspace |
+| GET | `/api/workspaces/{id}` | API Key / Cookie | workspace 详情（含归属校验） |
+| PATCH | `/api/workspaces/{id}` | API Key / Cookie | 更新 workspace（乐观并发，见下） |
+| DELETE | `/api/workspaces/{id}` | API Key / Cookie | 删除 workspace |
+
+> **PATCH 乐观并发（CAS）**：更新基于 `updated_at` 做乐观锁——服务端 `UPDATE ... WHERE id = ? AND updated_at = ?`，调用方缓存的 `updated_at` 不再匹配（被并发修改）时影响 0 行，返回 `409 WORKSPACE_VERSION_MISMATCH`（"workspace concurrently modified, please re-fetch and retry"）。客户端无需在 body 显式传版本字段（先 GET 取最新值再 PATCH），收到 409 后应重新 GET 再重试，避免静默 lost update。
 
 **Workspace 用户与邀请管理（spec ⑥，admin 维度）**：
 
@@ -309,6 +313,7 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 | 403 | `USER_DISABLED` | 用户已被禁用 |
 | 404 | `NOT_FOUND` | Session/Cron Job/Invitation 未找到 |
 | 409 | `CONFLICT` | 资源状态冲突 |
+| 409 | `WORKSPACE_VERSION_MISMATCH` | PATCH workspace 乐观并发冲突（`updated_at` CAS 失败，re-fetch 后重试） |
 | 429 | `RATE_LIMITED` | 触发 Rate Limit |
 | 500 | `INTERNAL` | Handler panic、未分类内部错误 |
 | 501 | `NOT_IMPLEMENTED` | 该接口尚未实现 |
