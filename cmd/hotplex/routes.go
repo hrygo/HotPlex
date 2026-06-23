@@ -216,17 +216,21 @@ func setupRoutes(
 		auth.SetIdentityProvider(lap)
 
 		authHandlers := gateway.NewAuthHandlers(auth, deps.CookieAuth, deps.WorkspaceStore, lap)
+		// /api/admin/* handlers (invitations/users CRUD) live in the admin package
+		// (P2.6) but mount on the gateway mux with cookie auth — WebChat admin UI
+		// uses cookie sessions, not the Bearer+scope tokens of the admin port.
+		userAdmin := admin.NewUserAdminHandlers(deps.WorkspaceStore, auth, deps.CookieAuth, lap)
 		mux.Handle("POST /api/auth/login", corsMw(http.HandlerFunc(authHandlers.Login)))
 		mux.Handle("POST /api/auth/logout", corsMw(http.HandlerFunc(authHandlers.Logout)))
 		mux.Handle("GET /api/auth/me", corsMw(http.HandlerFunc(authHandlers.Me)))
 		mux.Handle("POST /api/auth/accept-invite", corsMw(http.HandlerFunc(authHandlers.AcceptInvite)))
 
 		// App-level Admin endpoints
-		mux.Handle("POST /api/admin/invitations", corsMw(http.HandlerFunc(authHandlers.AdminCreateInvitation)))
-		mux.Handle("GET /api/admin/invitations", corsMw(http.HandlerFunc(authHandlers.AdminListInvitations)))
-		mux.Handle("DELETE /api/admin/invitations/{id}", corsMw(http.HandlerFunc(authHandlers.AdminDeleteInvitation)))
-		mux.Handle("GET /api/admin/users", corsMw(http.HandlerFunc(authHandlers.AdminListUsers)))
-		mux.Handle("PATCH /api/admin/users/{id}", corsMw(http.HandlerFunc(authHandlers.AdminUpdateUserStatus)))
+		mux.Handle("POST /api/admin/invitations", corsMw(http.HandlerFunc(userAdmin.CreateInvitation)))
+		mux.Handle("GET /api/admin/invitations", corsMw(http.HandlerFunc(userAdmin.ListInvitations)))
+		mux.Handle("DELETE /api/admin/invitations/{id}", corsMw(http.HandlerFunc(userAdmin.DeleteInvitation)))
+		mux.Handle("GET /api/admin/users", corsMw(http.HandlerFunc(userAdmin.ListUsers)))
+		mux.Handle("PATCH /api/admin/users/{id}", corsMw(http.HandlerFunc(userAdmin.UpdateUserStatus)))
 
 		// OPTIONS preflight handlers for Auth & Admin APIs
 		mux.Handle("OPTIONS /api/auth/login", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
