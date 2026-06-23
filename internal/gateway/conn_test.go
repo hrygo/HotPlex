@@ -121,6 +121,43 @@ func TestValidateInit(t *testing.T) {
 	}
 }
 
+// TestValidateInit_WorkspaceID guards the WS-side tenant anchor binding point
+// (spec ⑦ P1.3). api-key clients authenticate at WS upgrade (hub.go:421) and
+// then bind the session to an owned workspace via init.workspace_id; this field
+// must propagate through ValidateInit into InitData.WorkspaceID for the owner
+// check in resolveSession (conn.go:335-358).
+func TestValidateInit_WorkspaceID(t *testing.T) {
+	t.Parallel()
+	makeInit := func(ws any) map[string]any {
+		m := map[string]any{
+			"version":     events.Version,
+			"worker_type": "claude-code",
+		}
+		if ws != nil {
+			m["workspace_id"] = ws
+		}
+		return m
+	}
+	tests := []struct {
+		name string
+		ws   any
+		want string
+	}{
+		{"absent → empty (platform/cron session)", nil, ""},
+		{"string → propagated to InitData", "ws-abc-123", "ws-abc-123"},
+		{"non-string → empty (type assert fails safe)", 12345, ""},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			data, err := ValidateInit(envFromData(makeInit(tt.ws)))
+			require.True(t, err == nil, "ValidateInit error: %v", err)
+			require.Equal(t, tt.want, data.WorkspaceID)
+		})
+	}
+}
+
 func TestBuildInitAck(t *testing.T) {
 	t.Parallel()
 

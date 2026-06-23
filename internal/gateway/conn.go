@@ -347,6 +347,15 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 				observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))
 				return "", nil, fmt.Errorf("init: workspace %s is disabled", initData.WorkspaceID)
 			}
+			// Owner check: workspace is accessible only to its owner. The
+			// "anonymous" carve-out is a dev-mode path — anonymous-owned
+			// workspaces (uid="anonymous", created when no idp is configured)
+			// are treated as platform-shared so dev WS clients can bind to
+			// them. Production configures idp so uid is never "anonymous" and
+			// this branch is unreachable; it MUST NOT be extended to real
+			// identities. REST workspace handlers do not carry this carve-out
+			// (they require a resolved owner via AuthenticateRequest). See
+			// PR #773 review P3 for the security-boundary rationale.
 			if ws.OwnerUserID != "anonymous" && ws.OwnerUserID != c.userID {
 				c.sendInitError(events.ErrCodeInvalidMessage, "workspace access denied")
 				observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInvalidMessage))))

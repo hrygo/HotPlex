@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -20,7 +21,7 @@ func helperDB(t *testing.T) (*SQLiteStore, *config.Config) {
 	cfg.DB.SQLite.Path = cfg.DB.Path
 	cfg.DB.WALMode = true
 
-	store, err := NewSQLiteStore(context.Background(), cfg, nil)
+	store, err := NewSQLiteStore(context.Background(), cfg, sqlutil.NewWriteMu(sqlutil.DialectSQLite))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, cfg

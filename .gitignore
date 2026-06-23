@@ -122,6 +122,9 @@ skills-lock.json
 .agents/source-study-progress.json
 .agents/arch-analysis/progress.json
 
+# --- Codebase Memory (local knowledge graph index) ---
+.codebase-memory/
+
 # --- Miscellaneous ---
 /.worktrees/
 *.bak

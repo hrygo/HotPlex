@@ -18,23 +18,30 @@ import (
 
 // WorkspaceHandlers serves /api/workspaces (spec §9.1, §11.3).
 type WorkspaceHandlers struct {
-	store      session.UserWorkspaceStore
-	cookieAuth *security.CookieAuth
-	auth       *security.Authenticator
-	now        func() time.Time
+	store session.UserWorkspaceStore
+	auth  *security.Authenticator
+	now   func() time.Time
 }
 
 // NewWorkspaceHandlers constructs workspace CRUD handlers.
-func NewWorkspaceHandlers(store session.UserWorkspaceStore, cookieAuth *security.CookieAuth, auth *security.Authenticator) *WorkspaceHandlers {
-	return &WorkspaceHandlers{store: store, cookieAuth: cookieAuth, auth: auth, now: time.Now}
+func NewWorkspaceHandlers(store session.UserWorkspaceStore, auth *security.Authenticator) *WorkspaceHandlers {
+	return &WorkspaceHandlers{store: store, auth: auth, now: time.Now}
 }
 
 func (h *WorkspaceHandlers) nowUnix() int64 { return h.now().Unix() }
 
 func (h *WorkspaceHandlers) currentUser(r *http.Request) (string, bool) {
-	// Delegate to AuthenticateActiveCookie so disabled users are rejected on
-	// the cookie path, matching the REST API and WS upgrade enforcement.
-	return h.auth.AuthenticateActiveCookie(r)
+	// Dual-channel auth (spec ⑦ Phase 1): api-key header/query first (machine
+	// integration), cookie second (WebChat UI). AuthenticateRequest chains these
+	// two with shared disabled-user enforcement — the same enforcement used by
+	// the REST session API and the WS upgrade path. Aligning workspace REST on
+	// the same chain makes workspace a cross-channel tenant anchor: the same
+	// users.id owns workspaces regardless of entry channel.
+	uid, _, err := h.auth.AuthenticateRequest(r)
+	if err != nil {
+		return "", false
+	}
+	return uid, true
 }
 
 func (h *WorkspaceHandlers) requireAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -46,11 +53,24 @@ func (h *WorkspaceHandlers) requireAuth(w http.ResponseWriter, r *http.Request) 
 	return uid, true
 }
 
-// isAdmin reports whether the current cookie user is an active admin.
-// 委托 resolveCookieAdmin，使 admin 判定与 AuthHandlers.requireAdmin 同源（spec §11.2）。
-func (h *WorkspaceHandlers) isAdmin(r *http.Request) bool {
-	_, ok := resolveCookieAdmin(h.cookieAuth, h.auth, r)
-	return ok
+// isAdmin reports whether uid is an active admin (role==admin && status==active).
+//
+// Same-source authority (spec ⑦ P2.7): uid is the identity currentUser already
+// resolved via AuthenticateRequest (api-key first, cookie fallback), so
+// identity and admin authority now derive from the same channel. This closes
+// the cross-channel ambiguity flagged in the PR #773 review (P2-1, finding B):
+// a request carrying both api-key + admin cookie no longer earns the bypass
+// from the cookie alone — the resolved uid itself must be an admin.
+func (h *WorkspaceHandlers) isAdmin(r *http.Request, uid string) bool {
+	idp := h.auth.IdentityProvider()
+	if idp == nil {
+		return false
+	}
+	u, err := idp.Lookup(r.Context(), uid)
+	if err != nil || u.Role != "admin" || u.Status != "active" {
+		return false
+	}
+	return true
 }
 
 type createWorkspaceRequest struct {
@@ -103,19 +123,16 @@ func (h *WorkspaceHandlers) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	wss, err := h.store.ListWorkspacesByOwner(r.Context(), uid)
+	limit, offset := web.ParsePagination(r)
+	// LIMIT/OFFSET 下推到 store 层（PR #773 P2）：跨通道租户接入后 api-key 通道可能
+	// 程序化批量创建 workspace，内存分页会退化为无界查询。
+	wss, err := h.store.ListWorkspacesByOwner(r.Context(), uid, limit, offset)
 	if err != nil {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
 		return
 	}
-	limit, offset := web.ParsePagination(r)
-	// Per-owner workspace counts are small; the store returns all active rows
-	// (already ordered by created_at ASC), so we paginate in memory and echo
-	// the requested limit/offset to satisfy the ListWorkspacesResponse contract.
-	start := min(offset, len(wss))
-	end := min(start+limit, len(wss))
 	respondJSON(w, map[string]any{
-		"workspaces": wss[start:end],
+		"workspaces": wss,
 		"limit":      limit,
 		"offset":     offset,
 	})
@@ -132,7 +149,7 @@ func (h *WorkspaceHandlers) Get(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
 		return
 	}
-	if ws.OwnerUserID != uid && !h.isAdmin(r) {
+	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
 	}
@@ -166,7 +183,7 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
 		return
 	}
-	if ws.OwnerUserID != uid && !h.isAdmin(r) {
+	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
 	}
@@ -214,7 +231,7 @@ func (h *WorkspaceHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
 		return
 	}
-	if ws.OwnerUserID != uid && !h.isAdmin(r) {
+	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
 	}
@@ -222,6 +239,10 @@ func (h *WorkspaceHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.DeleteWorkspaceIfEmpty(r.Context(), ws.ID); err != nil {
 		if errors.Is(err, session.ErrWorkspaceNotEmpty) {
 			writeAppError(w, http.StatusConflict, "WORKSPACE_NOT_EMPTY", "workspace has active sessions")
+			return
+		}
+		if errors.Is(err, session.ErrWorkspaceNotFound) {
+			writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "workspace concurrently deleted")
 			return
 		}
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")

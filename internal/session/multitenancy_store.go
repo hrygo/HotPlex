@@ -76,7 +76,7 @@ type UserWorkspaceStore interface {
 	// workspaces
 	CreateWorkspace(ctx context.Context, w *Workspace, now int64) error
 	GetWorkspaceByID(ctx context.Context, id string) (*Workspace, error)
-	ListWorkspacesByOwner(ctx context.Context, ownerUserID string) ([]*Workspace, error)
+	ListWorkspacesByOwner(ctx context.Context, ownerUserID string, limit, offset int) ([]*Workspace, error)
 	ListAllWorkspaces(ctx context.Context) ([]*Workspace, error)
 	GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error)
 	UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error
@@ -261,8 +261,8 @@ func (s *SQLiteStore) GetWorkspaceByID(ctx context.Context, id string) (*Workspa
 	return w, err
 }
 
-func (s *SQLiteStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string) ([]*Workspace, error) {
-	rows, err := s.db.QueryContext(ctx, queries["workspaces.list_by_owner"], ownerUserID)
+func (s *SQLiteStore) ListWorkspacesByOwner(ctx context.Context, ownerUserID string, limit, offset int) ([]*Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, queries["workspaces.list_by_owner"], ownerUserID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -321,6 +321,12 @@ func (s *SQLiteStore) DeleteWorkspace(ctx context.Context, id string) error {
 }
 
 // DeleteWorkspaceIfEmpty 原子删除：仅当无活跃会话时成功（防 TOCTOU，spec §9.1）。
+//
+// RowsAffected==0 有两种成因，必须区分（review P3）：
+//   - workspace 存在但有活跃会话 → ErrWorkspaceNotEmpty（HTTP 409）
+//   - workspace 已被并发 actor 删除 → ErrWorkspaceNotFound（HTTP 404）
+//
+// 重新检查在 writeMu 内进行，关闭 Get↔Delete 之间的 TOCTOU 窗口。
 func (s *SQLiteStore) DeleteWorkspaceIfEmpty(ctx context.Context, id string) error {
 	return s.writeMu.WithLock(func() error {
 		res, err := s.db.ExecContext(ctx, queries["workspaces.delete_if_empty"], id, id)
@@ -329,6 +335,12 @@ func (s *SQLiteStore) DeleteWorkspaceIfEmpty(ctx context.Context, id string) err
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
+			if _, err := s.GetWorkspaceByID(ctx, id); err != nil {
+				if errors.Is(err, ErrWorkspaceNotFound) {
+					return ErrWorkspaceNotFound
+				}
+				return err
+			}
 			return ErrWorkspaceNotEmpty
 		}
 		return nil
