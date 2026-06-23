@@ -7,6 +7,7 @@ import type { User } from '@/lib/api/auth';
 import { GeneralTab } from './general-tab';
 import { AIConfigTab } from './ai-config-tab';
 import { ProfileTab } from './profile-tab';
+import { MembersTab } from './members-tab';
 
 interface SettingsModalProps {
   open: boolean;
@@ -84,9 +85,7 @@ export function SettingsModal({ open, onClose, workspace, currentUser, onWorkspa
             <AIConfigTab workspace={workspace} onUpdated={onWorkspaceUpdated} />
           )}
           {activeTab === 'profile' && currentUser && <ProfileTab user={currentUser} />}
-          {activeTab === 'members' && currentUser?.role === 'admin' && (
-            <div className="text-center py-8 text-sm text-[var(--text-muted)]">Members — coming soon</div>
-          )}
+          {activeTab === 'members' && currentUser?.role === 'admin' && <MembersTab />}
         </div>
       </motion.div>
     </motion.div>
