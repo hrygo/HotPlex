@@ -50,7 +50,7 @@ export class ApiError extends Error {
   readonly code?: string;
   readonly info: ApiErrorInfo;
   constructor(info: ApiErrorInfo, message?: string) {
-    super(message || info.code || info.message || `API error ${info.status}`);
+    super(message || info.code || info.message || info.raw || `API error ${info.status}`);
     this.name = 'ApiError';
     this.status = info.status;
     this.code = info.code;

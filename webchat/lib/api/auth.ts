@@ -1,4 +1,5 @@
 import { BASE, authHeaders, authOpts, withAuth, extractApiError } from "@/lib/api/client";
+import { ApiError } from "./errors";
 
 export interface User {
   id: string;
@@ -62,7 +63,7 @@ export async function getMe(signal?: AbortSignal): Promise<User> {
     signal,
   });
   if (!res.ok) {
-    throw new Error(await extractApiError(res, `getMe failed: ${res.status}`));
+    throw await ApiError.fromResponse(res);
   }
   return res.json();
 }

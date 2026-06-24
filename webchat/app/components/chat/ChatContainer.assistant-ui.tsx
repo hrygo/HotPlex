@@ -24,6 +24,7 @@ import {
   type Workspace,
 } from '@/lib/api/workspaces';
 import { logout, getMe, type User } from '@/lib/api/auth';
+import { ApiError } from '@/lib/api/errors';
 
 function ChatInterface({
   sessionId,
@@ -127,7 +128,14 @@ export default function ChatContainer() {
     let mounted = true;
     getMe()
       .then((u) => { if (mounted) { setCurrentUser(u); setAuthError(false); } })
-      .catch(() => { if (mounted) setAuthError(true); });
+      .catch((err) => {
+        if (!mounted) return;
+        // Only surface auth-expired for real 401/403; transient network/5xx
+        // failures are not solvable by re-login (PR #783 review P2).
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          setAuthError(true);
+        }
+      });
     return () => { mounted = false; };
   }, []);
 
