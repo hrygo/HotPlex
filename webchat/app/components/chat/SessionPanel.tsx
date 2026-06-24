@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react';
 import { formatRelativeTime, stateLabel, type SessionInfo } from '@/lib/api/sessions';
 import { BrandIcon, WORKER_DISPLAY, WorkerIcon } from '@/components/icons';
-import { httpBase } from '@/lib/config';
 
 function getDisplayTitle(session: SessionInfo): string {
   return session.title || session.id.slice(0, 8);
@@ -23,11 +22,7 @@ function SessionRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const displayTitle = getDisplayTitle(session);
   const workerName = WORKER_DISPLAY[session.worker_type] ?? session.worker_type;
-
-  const displayPath = session.work_dir || 'No workspace';
-  const parts = displayPath === '/' ? [] : displayPath.split('/');
-  const lastSegment = parts.length ? (parts[parts.length - 1] || displayPath) : '/';
-  const parentPath = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+  const hasTurns = typeof session.turn_count === 'number' && session.turn_count > 0;
 
   return (
     <div
@@ -35,70 +30,55 @@ function SessionRow({
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(e) => e.key === 'Enter' && onSelect()}
-      className={`group relative mx-2 mb-2 p-4 rounded-[var(--radius-md)] border transition-all duration-300 cursor-pointer overflow-hidden ${
+      className={`group relative mx-2 mb-2 p-3.5 rounded-[var(--radius-md)] border transition-all duration-300 cursor-pointer overflow-hidden ${
         isActive
           ? 'bg-[var(--bg-active)] border-[var(--border-active)] shadow-[var(--shadow-glow)]'
           : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-default)]'
       }`}
     >
-      <div className="flex flex-col gap-3.5">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className={`p-1.5 rounded-[var(--radius-sm)] transition-colors duration-300 ${isActive ? 'bg-[var(--accent-gold)] text-[var(--text-contrast)]' : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)]'}`}>
-              <WorkerIcon type={session.worker_type} className="w-3.5 h-3.5" />
+      <div className="flex flex-col gap-2.5">
+        {/* Title — primary */}
+        <h3 className={`text-[13px] font-bold leading-snug line-clamp-2 ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>
+          {displayTitle}
+        </h3>
+
+        {/* Worker + turn count */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <div className={`p-1 rounded-[var(--radius-xs)] transition-colors duration-300 shrink-0 ${isActive ? 'bg-[var(--accent-gold)] text-[var(--text-contrast)]' : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)]'}`}>
+              <WorkerIcon type={session.worker_type} className="w-3 h-3" />
             </div>
-            <span className={`text-[11px] font-display font-bold uppercase tracking-wider ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>
+            <span className={`text-[11px] font-display font-bold uppercase tracking-wider truncate ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>
               {workerName}
             </span>
           </div>
-          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-[var(--radius-xs)] border transition-colors ${
-            isActive ? 'text-[var(--accent-gold)] border-[var(--border-active)] bg-[var(--accent-gold-glow)]' : 'text-[var(--text-faint)] bg-[var(--bg-elevated)] border-[var(--border-subtle)]'
-          }`}>
-            {displayTitle}
-          </span>
-        </div>
-
-        {/* Directory */}
-        <div className="flex flex-col gap-0.5">
-          <div className="flex items-center gap-2 text-[var(--text-primary)] font-semibold text-[13px] truncate">
-            <svg className={`w-3.5 h-3.5 ${isActive ? 'text-[var(--accent-gold)]' : 'text-[var(--text-faint)]'} opacity-80`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-            </svg>
-            <span className="truncate" title={displayPath}>{lastSegment}</span>
-          </div>
-          {parentPath && (
-            <div className={`text-[11px] truncate pl-5.5 font-mono ${isActive ? 'text-[var(--text-muted)]' : 'text-[var(--text-faint)]'}`}>
-              {parentPath}/
+          {hasTurns && (
+            <div className={`flex items-center gap-1 text-[10px] font-mono font-medium shrink-0 ${isActive ? 'text-[var(--text-muted)]' : 'text-[var(--text-faint)]'}`}>
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              <span>{session.turn_count} turns</span>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between pt-3 border-t border-[var(--border-subtle)]">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5">
-                <div className={`w-1.5 h-1.5 rounded-full ${
-                  session.state === 'running' ? 'bg-[var(--accent-emerald)] shadow-[0_0_8px_var(--accent-emerald)] animate-pulse' :
-                  session.state === 'idle' ? 'bg-[var(--accent-gold)]' : 
-                  session.state === 'terminated' ? 'bg-[var(--text-faint)]' : 'bg-[var(--accent-blue)]'
-                }`} />
-                <span className={`text-[11px] font-bold ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>
-                  {stateLabel(session.state)}
-                </span>
-              </div>
-              <span className="text-[10px] text-[var(--text-faint)] opacity-40">•</span>
-              <span className={`text-[11px] font-medium ${isActive ? 'text-[var(--text-secondary)]' : 'text-[var(--text-faint)]'}`}>
-                {formatRelativeTime(session.updated_at)}
+        <div className="flex items-center justify-between pt-2 border-t border-[var(--border-subtle)]">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                session.state === 'running' ? 'bg-[var(--accent-emerald)] shadow-[0_0_8px_var(--accent-emerald)] animate-pulse' :
+                session.state === 'idle' ? 'bg-[var(--accent-gold)]' :
+                session.state === 'terminated' ? 'bg-[var(--text-faint)]' : 'bg-[var(--accent-blue)]'
+              }`} />
+              <span className={`text-[11px] font-bold ${isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>
+                {stateLabel(session.state)}
               </span>
             </div>
-            <div className={`flex items-center gap-1.5 text-[10px] font-medium ${isActive ? 'text-[var(--text-muted)]' : 'text-[var(--text-faint)]'}`}>
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>{new Date(session.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</span>
-            </div>
+            <span className="text-[10px] text-[var(--text-faint)] opacity-40">•</span>
+            <span className={`text-[11px] font-medium truncate ${isActive ? 'text-[var(--text-secondary)]' : 'text-[var(--text-faint)]'}`}>
+              {formatRelativeTime(session.updated_at)}
+            </span>
           </div>
 
           <div className="flex items-center">
@@ -131,26 +111,6 @@ function SessionRow({
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function EmptyState({ onCreate }: { onCreate: () => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 px-6 text-center animate-fade-in">
-      <div className="w-16 h-16 rounded-2xl glass-dark flex items-center justify-center mb-6">
-        <BrandIcon size={48} className="opacity-40" />
-      </div>
-      <p className="text-sm font-medium mb-1 text-[var(--text-primary)]">No sessions yet</p>
-      <p className="text-xs text-[var(--text-muted)] mb-8 max-w-[180px] mx-auto leading-relaxed">
-        Start a new conversation to begin your AI coding journey.
-      </p>
-      <button 
-        onClick={onCreate} 
-        className="px-6 py-2.5 rounded-full bg-[var(--accent-gold)] text-black text-sm font-bold shadow-[0_8px_20px_rgba(251,191,36,0.15)] hover:scale-105 active:scale-95 transition-all"
-      >
-        New Session
-      </button>
     </div>
   );
 }
