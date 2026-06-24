@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AssistantRuntimeProvider,
@@ -262,17 +261,6 @@ export default function ChatContainer() {
                     </button>
                   );
                 })}
-                <div className="border-t border-[var(--border-subtle)] my-1" />
-                <Link
-                  href="/admin/workspaces/new"
-                  onClick={() => setWsDropdownOpen(false)}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent-gold)] transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                  </svg>
-                  <span className="font-medium">New Workspace</span>
-                </Link>
               </div>
             </>
           )}
