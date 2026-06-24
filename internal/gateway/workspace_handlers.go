@@ -103,6 +103,10 @@ func (h *WorkspaceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusForbidden, "WORK_DIR_FORBIDDEN", err.Error())
 		return
 	}
+	if err := security.ValidateWorkspaceWorkDir(abs, uid); err != nil {
+		writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under $HOME/.hotplex/workspaces/<your-user-id>")
+		return
+	}
 	ws := &session.Workspace{
 		ID: uuid.NewString(), OwnerUserID: uid, Name: req.Name, WorkDir: abs, Status: "active",
 	}
@@ -191,6 +195,10 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := security.ValidateWorkDir(abs); err != nil {
 			writeAppError(w, http.StatusForbidden, "WORK_DIR_FORBIDDEN", err.Error())
+			return
+		}
+		if err := security.ValidateWorkspaceWorkDir(abs, uid); err != nil {
+			writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under $HOME/.hotplex/workspaces/<your-user-id>")
 			return
 		}
 		ws.WorkDir = abs
