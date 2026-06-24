@@ -1,5 +1,5 @@
 import { BASE, authHeaders, authOpts, withAuth, extractApiError } from "@/lib/api/client";
-import { parseApiError } from "@/lib/api/errors";
+import { parseApiError, ApiError } from "@/lib/api/errors";
 
 export interface Workspace {
   id: string;
@@ -123,16 +123,12 @@ export async function updateWorkspace(id: string, opts: UpdateWorkspaceOptions, 
     // message + the WORKSPACE_VERSION_MISMATCH code so UIs can re-fetch+retry.
     const info = await parseApiError(res);
     if (res.status === 409) {
-      const err = new Error('Workspace was modified concurrently — please reopen Settings and retry.');
-      (err as any).status = 409;
-      (err as any).code = info.code || 'WORKSPACE_VERSION_MISMATCH';
-      throw err;
+      throw new ApiError(
+        { ...info, code: info.code || 'WORKSPACE_VERSION_MISMATCH' },
+        'Workspace was modified concurrently — please reopen Settings and retry.',
+      );
     }
-    const msg = info.code || info.message || info.raw || `updateWorkspace failed: ${res.status}`;
-    const err = new Error(msg);
-    (err as any).status = info.status;
-    if (info.code) (err as any).code = info.code;
-    throw err;
+    throw new ApiError(info);
   }
   return normalizeWorkspace(await res.json());
 }

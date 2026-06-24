@@ -19,6 +19,9 @@ export interface Invitation {
   expires_at: number;
   created_at?: number;
   used_at?: number;
+  // Server-computed expiry flag (clock-source-of-truth, avoids client drift;
+  // PR #779 review P3-5). Undefined on older backends → caller falls back.
+  is_expired?: boolean;
 }
 
 export interface OAuthProvider {
@@ -120,6 +123,13 @@ export async function getOAuthProviders(signal?: AbortSignal): Promise<OAuthProv
   }
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Admin endpoints (/api/admin/*). These run through the webchat cookie channel
+// (same-origin credentials), NOT the admin-client Bearer-token path used by the
+// standalone /admin pages. Backend requireAdmin enforces role==admin &&
+// status==active regardless of channel (PR #779 review P3-5).
+// ---------------------------------------------------------------------------
 
 // Admin: Create Invitation
 export async function adminCreateInvitation(role: 'admin' | 'user', ttlSeconds?: number, signal?: AbortSignal): Promise<Invitation> {
