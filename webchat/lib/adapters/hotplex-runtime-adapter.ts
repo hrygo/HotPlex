@@ -25,7 +25,6 @@ import {
     workerType,
     apiKey,
     isSameOrigin,
-    workDir,
     allowedTools,
     type ConnectionState,
 } from "@/lib/config";
@@ -80,8 +79,10 @@ export interface UseHotPlexRuntimeConfig {
     sessionId?: string;
     /** Active workspace ID (spec ⑥) */
     workspaceId?: string;
-    /** Override workDir from URL deep link (spec §5.2). */
-    overrideWorkDir?: string;
+    /** Called when the server rejects the workspace during handshake
+     * (access denied / not found / disabled). Lets the host reset its
+     * workspace selection and reconnect instead of fatal-disconnecting. */
+    onWorkspaceError?: () => void;
     /** Called when session metrics update (for dashboard display). */
     onMetricsChange?: (
         metrics: import("@/lib/hooks/useMetrics").SessionMetrics,
@@ -226,7 +227,7 @@ function historyToMessages(records: ConversationRecord[]): HotPlexMessage[] {
 export function useHotPlexRuntime({
     sessionId,
     workspaceId,
-    overrideWorkDir,
+    onWorkspaceError,
     onMetricsChange,
     onSkillsChange,
     onSessionStateChange,
@@ -266,6 +267,8 @@ export function useHotPlexRuntime({
     onSkillsChangeRef.current = onSkillsChange;
     const onSessionStateChangeRef = useRef(onSessionStateChange);
     onSessionStateChangeRef.current = onSessionStateChange;
+    const onWorkspaceErrorRef = useRef(onWorkspaceError);
+    onWorkspaceErrorRef.current = onWorkspaceError;
 
     // Track whether skills have been fetched (only after first turn completes)
     const skillsFetchedRef = useRef(false);
@@ -389,8 +392,9 @@ export function useHotPlexRuntime({
         skillsFetchedRef.current = false;
 
         const initConfig: InitConfig = {};
-        const effectiveWorkDir = overrideWorkDir || workDir;
-        if (effectiveWorkDir) initConfig.work_dir = effectiveWorkDir;
+        // work_dir is omitted: the server derives it from the bound workspace
+        // (spec §6.2 — work_dir is immutable per workspace). Sending a client
+        // value is a dead path the backend already ignores.
         if (allowedTools.length > 0) initConfig.allowed_tools = allowedTools;
 
         const client = new BrowserHotPlexClient({
@@ -706,6 +710,25 @@ export function useHotPlexRuntime({
                     "RuntimeAdapter",
                     "Gateway shutdown, waiting for reconnect",
                 );
+                return;
+            }
+
+            // Workspace handshake rejection (access denied / not found / disabled).
+            // The bound workspace is invalid for the current user — surface it to the
+            // host so it can reset its workspace selection and reconnect, instead of
+            // fatal-disconnecting or dumping a raw error into the chat.
+            const wsMsg = (data?.message || "").toLowerCase();
+            const isWorkspaceError =
+                wsMsg === "workspace access denied" ||
+                wsMsg === "workspace not found" ||
+                wsMsg === "workspace is disabled";
+            if (isWorkspaceError) {
+                logger.warn(
+                    "RuntimeAdapter",
+                    "Workspace handshake rejected — notifying host to reset workspace",
+                    { message: data?.message },
+                );
+                onWorkspaceErrorRef.current?.();
                 return;
             }
 

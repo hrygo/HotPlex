@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { WorkerIcon } from "@/components/icons";
-import { workDir as configWorkDir } from "@/lib/config";
 
 interface WorkerOption {
   id: string;
@@ -19,20 +18,18 @@ const WORKER_OPTIONS: WorkerOption[] = [
 ];
 
 interface NewSessionModalProps {
-  onConfirm: (title: string, workerType: string, workDir: string) => void;
+  onConfirm: (title: string, workerType: string) => void;
   onCancel: () => void;
-  defaultWorkDir?: string;
 }
 
-export function NewSessionModal({ onConfirm, onCancel, defaultWorkDir }: NewSessionModalProps) {
+export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
   const [title, setTitle] = useState("");
   const [selectedWorker, setSelectedWorker] = useState("claude_code");
-  const [workDir, setWorkDir] = useState(defaultWorkDir || configWorkDir);
 
   const trimmedTitle = title.trim();
 
   const handleConfirm = () => {
-    onConfirm(trimmedTitle, selectedWorker, workDir.trim());
+    onConfirm(trimmedTitle, selectedWorker);
   };
 
   return (
@@ -117,21 +114,7 @@ export function NewSessionModal({ onConfirm, onCancel, defaultWorkDir }: NewSess
           </div>
         </div>
 
-        {/* Work Directory */}
-        <div className="px-6 pb-4">
-          <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
-            Working Directory
-          </label>
-          <input
-            id="workdir-input"
-            name="workdir"
-            type="text"
-            value={workDir}
-            onChange={(e) => setWorkDir(e.target.value)}
-            placeholder="/path/to/your/project"
-            className="w-full px-3 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--amber-border)] focus:ring-2 focus:ring-[rgba(251,191,36,0.1)] transition-all font-mono"
-          />
-        </div>
+        {/* Work Directory — removed: work_dir is immutable, derived from the workspace (spec §6.2). */}
 
         {/* Actions */}
         <div className="px-6 py-4 border-t border-[var(--border-subtle)] flex items-center justify-end gap-2">

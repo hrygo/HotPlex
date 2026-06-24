@@ -96,7 +96,6 @@ export interface CreateSessionOptions {
   clientSessionId: string;
   workerType?: string;
   title?: string;
-  workDir?: string;
   workspaceId?: string;
 }
 
@@ -105,9 +104,6 @@ export async function createSession(opts: CreateSessionOptions, signal?: AbortSi
   let url = `${BASE}/api/sessions?client_session_id=${encodeURIComponent(opts.clientSessionId)}&worker_type=${encodeURIComponent(workerType)}`;
   if (opts.title) {
     url += `&title=${encodeURIComponent(opts.title)}`;
-  }
-  if (opts.workDir) {
-    url += `&work_dir=${encodeURIComponent(opts.workDir)}`;
   }
   if (opts.workspaceId) {
     url += `&workspace_id=${encodeURIComponent(opts.workspaceId)}`;
