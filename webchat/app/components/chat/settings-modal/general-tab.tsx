@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { updateWorkspace, getWorkspace, type Workspace } from '@/lib/api/workspaces';
 import { ApiError } from '@/lib/api/errors';
+import { NewWorkspaceForm } from '../NewWorkspaceForm';
 
 const WORKER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'Default (Inherit team settings)' },
@@ -14,10 +15,12 @@ const WORKER_OPTIONS: { value: string; label: string }[] = [
 
 interface GeneralTabProps {
   workspace: Workspace;
+  uid: string;
   onUpdated?: (ws: Workspace) => void;
+  onCreated?: (ws: Workspace) => void;
 }
 
-export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
+export function GeneralTab({ workspace, uid, onUpdated, onCreated }: GeneralTabProps) {
   const [name, setName] = useState(workspace.name);
   const [worker, setWorker] = useState(workspace.worker_preference || '');
   const [workDir, setWorkDir] = useState(workspace.work_dir);
@@ -80,6 +83,17 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* New Workspace */}
+      <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <svg className="w-4 h-4 text-[var(--accent-gold)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          <span className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest">New Workspace</span>
+        </div>
+        <NewWorkspaceForm uid={uid} onCreated={(ws) => onCreated?.(ws)} />
+      </div>
+
       {/* Workspace Name Input Field */}
       <div>
         <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">

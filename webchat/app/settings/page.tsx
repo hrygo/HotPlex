@@ -91,6 +91,11 @@ export default function SettingsPage() {
     setWorkspace(ws);
   }, []);
 
+  const handleWorkspaceCreated = useCallback((ws: Workspace) => {
+    localStorage.setItem('hotplex_active_workspace_id', ws.id);
+    setWorkspace(ws);
+  }, []);
+
   const navigationGroups = [
     {
       title: 'Workspace Settings',
@@ -269,8 +274,13 @@ export default function SettingsPage() {
                   {/* Subtle top amber-gold highlight line for active tab cards */}
                   <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[var(--accent-gold)]/20 to-transparent" />
                   
-                  {activeTab === 'general' && workspace && (
-                    <GeneralTab workspace={workspace} onUpdated={handleWorkspaceUpdated} />
+                  {activeTab === 'general' && workspace && currentUser && (
+                    <GeneralTab
+                      workspace={workspace}
+                      uid={currentUser.id}
+                      onUpdated={handleWorkspaceUpdated}
+                      onCreated={handleWorkspaceCreated}
+                    />
                   )}
                   {activeTab === 'ai' && workspace && (
                     <AIConfigTab workspace={workspace} />

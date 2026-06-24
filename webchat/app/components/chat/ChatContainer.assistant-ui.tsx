@@ -12,6 +12,7 @@ import { Thread } from '@/components/assistant-ui/thread';
 import { BrandIcon, WORKER_DISPLAY } from '@/components/icons';
 import { SessionPanel } from './SessionPanel';
 import { NewSessionModal } from './NewSessionModal';
+import { NewWorkspaceModal } from './NewWorkspaceModal';
 import { MetricsBar } from '@/components/assistant-ui/MetricsBar';
 import { workerType as defaultWorkerType, httpBase, type ConnectionState } from '@/lib/config';
 import type { SessionMetrics } from '@/lib/hooks/useMetrics';
@@ -21,7 +22,8 @@ import {
   createWorkspace,
   type Workspace,
 } from '@/lib/api/workspaces';
-import { logout, getMe } from '@/lib/api/auth';
+import { buildWorkspaceWorkDir } from '@/lib/utils/workspace-path';
+import { logout, getMe, type User } from '@/lib/api/auth';
 import { ApiError } from '@/lib/api/errors';
 
 // Clear all hotplex workspace/session selection state from localStorage.
@@ -99,6 +101,8 @@ export default function ChatContainer() {
   // Workspaces State
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showNewWsModal, setShowNewWsModal] = useState(false);
 
   // Fetch workspaces list
   const loadWorkspaces = useCallback(async (selectId?: string) => {
@@ -108,7 +112,11 @@ export default function ChatContainer() {
 
       // Fallback: If no workspaces exist, create a default one
       if (list.length === 0) {
-        const defaultWS = await createWorkspace('Default Workspace', './workspace');
+        const me = await getMe();
+        const defaultWS = await createWorkspace(
+          'Default Workspace',
+          buildWorkspaceWorkDir(me.id, 'Default Workspace', 'default'),
+        );
         list = [defaultWS];
       }
 
@@ -138,7 +146,11 @@ export default function ChatContainer() {
   useEffect(() => {
     const ctrl = new AbortController();
     getMe(ctrl.signal)
-      .then(() => { if (!ctrl.signal.aborted) setAuthError(false); })
+      .then((u) => {
+        if (ctrl.signal.aborted) return;
+        setCurrentUser(u);
+        setAuthError(false);
+      })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
         // Only surface auth-expired for real 401/403; transient network/5xx
@@ -261,6 +273,17 @@ export default function ChatContainer() {
                     </button>
                   );
                 })}
+                <div className="border-t border-[var(--border-subtle)] my-1" />
+                <button
+                  type="button"
+                  onClick={() => { setWsDropdownOpen(false); setShowNewWsModal(true); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent-gold)] transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span className="font-medium">New Workspace</span>
+                </button>
               </div>
             </>
           )}
@@ -391,6 +414,18 @@ export default function ChatContainer() {
         <NewSessionModal
           onConfirm={handleModalConfirm}
           onCancel={() => setShowNewModal(false)}
+        />
+      )}
+
+      {/* New Workspace Modal */}
+      {showNewWsModal && currentUser && (
+        <NewWorkspaceModal
+          uid={currentUser.id}
+          onClose={() => setShowNewWsModal(false)}
+          onCreated={(ws) => {
+            handleSwitchWorkspace(ws);
+            loadWorkspaces(ws.id);
+          }}
         />
       )}
     </div>
