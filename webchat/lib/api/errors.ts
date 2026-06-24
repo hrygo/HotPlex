@@ -39,3 +39,25 @@ export async function parseApiError(res: Response): Promise<ApiErrorInfo> {
   }
   return { status: res.status, code, message, raw };
 }
+
+/**
+ * Typed API error — carries the parsed status/code/message so callers branch on
+ * `instanceof ApiError` instead of probing `(err as any).status`. Replaces the
+ * ad-hoc field-attachment pattern flagged in PR #779 review P3-4.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly info: ApiErrorInfo;
+  constructor(info: ApiErrorInfo, message?: string) {
+    super(message || info.code || info.message || info.raw || `API error ${info.status}`);
+    this.name = 'ApiError';
+    this.status = info.status;
+    this.code = info.code;
+    this.info = info;
+  }
+  /** Build from a Response, parsing the envelope exactly once. */
+  static async fromResponse(res: Response): Promise<ApiError> {
+    return new ApiError(await parseApiError(res));
+  }
+}

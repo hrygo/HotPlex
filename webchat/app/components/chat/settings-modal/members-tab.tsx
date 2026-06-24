@@ -7,23 +7,34 @@ import {
   adminListInvitations,
   adminCreateInvitation,
   adminDeleteInvitation,
+  logout,
   type User,
   type Invitation,
 } from '@/lib/api/auth';
 
 const DEFAULT_INVITE_TTL = 7 * 24 * 3600; // 7 days, matches backend default
 
-export function MembersTab() {
+interface MembersTabProps {
+  currentUser: User | null;
+}
+
+export function MembersTab({ currentUser }: MembersTabProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // busyUserId !== null disables every toggle button globally (PR #779 review
+  // P3-5): a second concurrent PATCH on a different user would mutate against a
+  // stale list snapshot. Serializing writes one-at-a-time is the simple fix.
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
+  // Flash timer ref so unmount clears the pending setState (PR #779 review P3-8).
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flash = (kind: 'ok' | 'err', text: string) => {
     setActionMsg({ kind, text });
-    setTimeout(() => setActionMsg(null), 2500);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setActionMsg(null), 2500);
   };
 
   const abortRef = useRef<AbortController | null>(null);
@@ -55,14 +66,32 @@ export function MembersTab() {
 
   useEffect(() => {
     load();
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    };
   }, [load]);
 
   const handleToggleUser = async (user: User) => {
+    // Self-lock guard (PR #779 review P3-3): disabling your own account logs
+    // you out and blocks sign-in. Confirm before the destructive action.
+    if (currentUser?.id === user.id && user.status === 'active') {
+      if (!window.confirm('Disable your own account? You will be logged out immediately and unable to sign back in.')) {
+        return;
+      }
+    }
     const next = user.status === 'active' ? 'disabled' : 'active';
     setBusyUserId(user.id);
     try {
       await adminUpdateUserStatus(user.id, next);
+      if (currentUser?.id === user.id && next === 'disabled') {
+        // Honor the confirm promise "logged out immediately" (PR #784 review P1):
+        // self-disable invalidates the session — redirect instead of reloading
+        // the list, which would 403 USER_DISABLED and strand the user on an error page.
+        try { await logout(); } catch { /* session already invalidated */ }
+        window.location.replace('/login');
+        return;
+      }
       flash('ok', `${user.username} → ${next}`);
       load();
     } catch (err) {
@@ -114,12 +143,12 @@ export function MembersTab() {
           {users.map((u) => (
             <div key={u.id} className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-bold text-[var(--text-primary)] truncate">{u.username}{u.display_name ? ` · ${u.display_name}` : ''}</div>
+                <div className="text-sm font-bold text-[var(--text-primary)] truncate">{u.username}{u.display_name ? ` · ${u.display_name}` : ''}{currentUser?.id === u.id ? ' (you)' : ''}</div>
                 <div className="text-[10px] text-[var(--text-muted)] font-mono">{u.role} · {u.status}</div>
               </div>
               <button
                 onClick={() => handleToggleUser(u)}
-                disabled={busyUserId === u.id}
+                disabled={busyUserId !== null}
                 className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${u.status === 'active' ? 'bg-[var(--accent-coral)]/10 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/20' : 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] hover:bg-[var(--accent-emerald)]/20'}`}
               >
                 {busyUserId === u.id ? '…' : u.status === 'active' ? 'Disable' : 'Enable'}
@@ -144,7 +173,9 @@ export function MembersTab() {
         <div className="space-y-1">
           {invitations.map((inv) => {
             const used = !!inv.used_at;
-            const expired = !used && inv.expires_at * 1000 < Date.now();
+            // Prefer server-computed is_expired (clock-source-of-truth, PR #779
+            // review P3-5); fall back to client calc for older backends.
+            const expired = !used && (inv.is_expired ?? inv.expires_at * 1000 < Date.now());
             const state = used ? 'used' : expired ? 'expired' : 'active';
             return (
               <div key={inv.id} className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] gap-3">

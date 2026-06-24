@@ -24,6 +24,7 @@ import {
   type Workspace,
 } from '@/lib/api/workspaces';
 import { logout, getMe, type User } from '@/lib/api/auth';
+import { ApiError } from '@/lib/api/errors';
 
 function ChatInterface({
   sessionId,
@@ -78,6 +79,7 @@ export default function ChatContainer() {
   const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authError, setAuthError] = useState(false);
   const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(null);
 
   // nuqs deep link params
@@ -119,11 +121,22 @@ export default function ChatContainer() {
     loadWorkspaces();
   }, [loadWorkspaces]);
 
-  // Fetch current user profile (Profile tab + Members tab gating)
+  // Fetch current user profile (Profile tab + Members tab gating). Distinguish
+  // loading from auth-error (401) so a stale session surfaces a re-login prompt
+  // instead of silently hiding the Members tab (PR #779 review P3-7).
   useEffect(() => {
-    let mounted = true;
-    getMe().then((u) => { if (mounted) setCurrentUser(u); }).catch(() => { /* not logged in or unreachable */ });
-    return () => { mounted = false; };
+    const ctrl = new AbortController();
+    getMe(ctrl.signal)
+      .then((u) => { if (!ctrl.signal.aborted) { setCurrentUser(u); setAuthError(false); } })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return;
+        // Only surface auth-expired for real 401/403; transient network/5xx
+        // failures are not solvable by re-login (PR #783 review P2).
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          setAuthError(true);
+        }
+      });
+    return () => { ctrl.abort(); };
   }, []);
 
   const handleSwitchWorkspace = (ws: Workspace) => {
@@ -214,10 +227,15 @@ export default function ChatContainer() {
                       onClick={() => handleSwitchWorkspace(ws)}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive ? 'bg-[var(--accent-gold)]/10 text-[var(--accent-gold)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
                     >
-                      <span className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-black uppercase ${isActive ? 'bg-[var(--accent-gold)] text-black' : 'bg-[var(--bg-surface)] text-[var(--text-muted)] border border-[var(--border-subtle)]'}`}>
+                      <span className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-black uppercase flex-shrink-0 ${isActive ? 'bg-[var(--accent-gold)] text-black' : 'bg-[var(--bg-surface)] text-[var(--text-muted)] border border-[var(--border-subtle)]'}`}>
                         {ws.name.slice(0, 2)}
                       </span>
-                      <span className="truncate font-medium">{ws.name}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="truncate font-medium block">{ws.name}</span>
+                        {isActive && ws.work_dir && (
+                          <span className="block text-[10px] font-mono text-[var(--text-faint)] truncate" title={ws.work_dir}>{ws.work_dir}</span>
+                        )}
+                      </span>
                     </button>
                   );
                 })}
@@ -271,12 +289,15 @@ export default function ChatContainer() {
             </svg>
             <span className="hidden md:inline">Docs</span>
           </a>
-          {/* Settings — opens SettingsModal (Phase 3) */}
+          {/* Settings — opens SettingsModal (Phase 3). Red dot on session expiry (PR #779 review P3-7). */}
           <button
             onClick={() => setSettingsOpen(true)}
-            className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all"
-            title="Settings"
+            className={`relative p-2 rounded-lg transition-all ${authError ? 'text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
+            title={authError ? 'Session expired — please re-login to access Settings' : 'Settings'}
           >
+            {authError && (
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)]" />
+            )}
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />

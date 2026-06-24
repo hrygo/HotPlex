@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { updateWorkspace, getWorkspace, type Workspace } from '@/lib/api/workspaces';
+import { ApiError } from '@/lib/api/errors';
 
 interface GeneralTabProps {
   workspace: Workspace;
@@ -13,6 +14,8 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // Tracked so unmount clears the pending setState (PR #779 review P3-8).
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Resync when the workspace prop changes (e.g. after a parent re-fetch).
   useEffect(() => {
@@ -20,6 +23,10 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
     setError(null);
     setSuccess(false);
   }, [workspace.id, workspace.name, workspace.updated_at]);
+
+  useEffect(() => () => {
+    if (successTimer.current) clearTimeout(successTimer.current);
+  }, []);
 
   const dirty = name.trim() !== workspace.name && name.trim().length > 0;
 
@@ -31,9 +38,12 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
       const updated = await updateWorkspace(workspace.id, { name: name.trim() });
       onUpdated?.(updated);
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 2000);
+      if (successTimer.current) clearTimeout(successTimer.current);
+      successTimer.current = setTimeout(() => setSuccess(false), 2000);
     } catch (err) {
-      if ((err as { status?: number }).status === 409) {
+      // CAS 409 (PR #779 review P2-2): re-fetch latest and repopulate so the
+      // form does not sit on a stale updated_at and 409 again on retry.
+      if (err instanceof ApiError && err.status === 409) {
         setError('Workspace was modified elsewhere — refreshed to latest, please retry.');
         try {
           onUpdated?.(await getWorkspace(workspace.id));

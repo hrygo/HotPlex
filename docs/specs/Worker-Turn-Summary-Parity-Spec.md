@@ -3,7 +3,7 @@ type: spec
 tags:
   - project/HotPlex
 date: 2026-06-23
-status: draft
+status: analysis
 progress: 0
 related_issues:
   - Turn-Summary-Spec.md (数据流基准)
@@ -72,7 +72,7 @@ Worker 产出事件 ──► SessionAccumulator 聚合 ──► snapshot() 注
 **Gap-C1：context_usage 管道完全断裂**
 - `commands.go:22-31` `get_context_usage` 调用 `thread/read` 后返回 `{"raw": string(resp)}`（未解析的原始 JSON 字符串）。
 - `pkg/events/helpers.go:60-98` `MapContextUsageResponse` 期望顶层 camelCase 键（`totalTokens`/`maxTokens`/`model`），`"raw"` 不匹配任何键 → `TotalTokens=0`。
-- `bridge_forward.go:913-916` 判断 `cu.TotalTokens <= 0` 跳过 `mergeContextUsage`。
+- `bridge_forward.go:913-916` 的守卫是 `cu.MaxTokens > 0 || cu.TotalTokens > 0 || cu.Model != ""` —— 三者皆空才跳过 `mergeContextUsage`（PR #779 review P3-1 勘误：原描述只提 TotalTokens，漏了 MaxTokens/Model 两个短路条件，可能误导修复者只补 TotalTokens）。
 - **后果**：`context_fill` / `context_window` / `context_pct` 三字段恒为 0。
 
 **Gap-C2：token 字段不全且非累计**

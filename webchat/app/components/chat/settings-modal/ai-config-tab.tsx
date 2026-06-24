@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { updateWorkspace, getWorkspace, type Workspace } from '@/lib/api/workspaces';
+import { ApiError } from '@/lib/api/errors';
 import { AgentConfigEditor } from '@/components/admin/agent-config-editor';
 
 const WORKER_OPTIONS: { value: string; label: string }[] = [
@@ -22,12 +23,18 @@ export function AIConfigTab({ workspace, onUpdated }: AIConfigTabProps) {
   const [savingWorker, setSavingWorker] = useState(false);
   const [workerError, setWorkerError] = useState<string | null>(null);
   const [workerSaved, setWorkerSaved] = useState(false);
+  // Tracked so unmount clears the pending setState (PR #779 review P3-8).
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setWorker(workspace.worker_preference || '');
     setWorkerError(null);
     setWorkerSaved(false);
   }, [workspace.id, workspace.worker_preference, workspace.updated_at]);
+
+  useEffect(() => () => {
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+  }, []);
 
   const dirty = worker !== (workspace.worker_preference || '');
 
@@ -39,9 +46,11 @@ export function AIConfigTab({ workspace, onUpdated }: AIConfigTabProps) {
       const updated = await updateWorkspace(workspace.id, { workerPreference: worker });
       onUpdated?.(updated);
       setWorkerSaved(true);
-      setTimeout(() => setWorkerSaved(false), 2000);
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setWorkerSaved(false), 2000);
     } catch (err) {
-      if ((err as { status?: number }).status === 409) {
+      // CAS 409 (PR #779 review P2-2): re-fetch latest and repopulate.
+      if (err instanceof ApiError && err.status === 409) {
         setWorkerError('Workspace was modified elsewhere — refreshed to latest, please retry.');
         try {
           onUpdated?.(await getWorkspace(workspace.id));
