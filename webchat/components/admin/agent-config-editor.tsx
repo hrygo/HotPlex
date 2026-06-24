@@ -210,7 +210,7 @@ export function AgentConfigEditor({
           )}
 
           {/* Content editing / preview panel (Viewport-bound height, no layout overflow) */}
-          <div className="h-[520px] lg:h-[calc(100vh-280px)] min-h-[350px] flex flex-col">
+          <div className="h-[300px] lg:h-[calc(100vh-500px)] min-h-[220px] flex flex-col">
             {viewMode === 'edit' && (
               <textarea
                 value={content}

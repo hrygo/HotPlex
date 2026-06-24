@@ -160,7 +160,7 @@ export default function SettingsPage() {
   const tabHeading = getTabHeading(activeTab);
 
   return (
-    <div className="h-screen overflow-y-auto bg-[var(--bg-base)] text-[var(--text-primary)] flex flex-col">
+    <div className="h-screen overflow-y-scroll [scrollbar-gutter:stable] bg-[var(--bg-base)] text-[var(--text-primary)] flex flex-col">
       {/* Mesh background effect matching Design System */}
       <div className="fixed inset-0 z-0 bg-mesh opacity-30 pointer-events-none" />
       <div className="fixed inset-0 z-0 noise-overlay pointer-events-none" />
@@ -183,8 +183,8 @@ export default function SettingsPage() {
       </header>
 
       {/* Main Container */}
-      <div className="relative z-10 max-w-7xl mx-auto px-4 md:px-6 py-6 md:py-10">
-        <div className="flex flex-col md:flex-row gap-8">
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 md:px-6 py-6 md:py-10">
+        <div className="flex flex-col md:flex-row items-start gap-8 w-full">
           {/* Left Sidebar Navigation */}
           <aside className="w-full md:w-60 shrink-0 flex flex-col gap-5">
             {/* Active Workspace Status Widget */}
@@ -221,7 +221,10 @@ export default function SettingsPage() {
                         return (
                           <button
                             key={item.id}
-                            onClick={() => setActiveTab(item.id)}
+                            onClick={() => {
+                              setActiveTab(item.id);
+                              window.scrollTo(0, 0);
+                            }}
                             className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all border shrink-0 md:shrink ${
                               isActive
                                 ? 'text-[var(--accent-gold)] bg-[var(--bg-active)] border-[rgba(251,191,36,0.15)] md:border-l-2 md:border-l-[var(--accent-gold)] md:rounded-l-none'
@@ -243,15 +246,16 @@ export default function SettingsPage() {
           </aside>
 
           {/* Right Content Panel */}
-          <main className="flex-1 min-w-0 max-w-5xl">
+          <main className="flex-1 min-w-0 w-full max-w-5xl">
             {loading ? (
               <div className="flex items-center justify-center py-24 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
                 <div className="w-8 h-8 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
               </div>
             ) : (
               <div className="flex flex-col gap-4">
-                {/* Section Header */}
-                <div className="mb-2">
+                {/* Section Header — fixed min-height so description length/wrap
+                    can't change the block height across tabs (no jump on switch). */}
+                <div className="mb-2 min-h-[4rem]">
                   <h1 className="text-lg font-display font-bold text-[var(--text-primary)]">
                     {tabHeading.title}
                   </h1>
@@ -261,7 +265,7 @@ export default function SettingsPage() {
                 </div>
 
                 {/* Section Content Card */}
-                <div className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[rgba(12,12,14,0.7)] backdrop-blur-md px-6 py-7 shadow-lg shadow-black/20">
+                <div className="relative w-full overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[rgba(12,12,14,0.7)] backdrop-blur-md px-6 py-7 shadow-lg shadow-black/20">
                   {/* Subtle top amber-gold highlight line for active tab cards */}
                   <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[var(--accent-gold)]/20 to-transparent" />
                   
