@@ -113,7 +113,19 @@ func (h *UserAdminHandlers) ListInvitations(w http.ResponseWriter, r *http.Reque
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "list failed")
 		return
 	}
-	respondJSON(w, map[string]any{"invitations": invs, "limit": limit, "offset": offset})
+	// Server-computed expiry (PR #779 review P3-5): avoids client clock drift.
+	// Embedded *session.Invitation serializes its fields plus is_expired.
+	now := h.nowUnix()
+	type invitationView struct {
+		*session.Invitation
+		IsExpired bool `json:"is_expired"`
+	}
+	views := make([]invitationView, len(invs))
+	for i := range invs {
+		inv := invs[i]
+		views[i] = invitationView{Invitation: inv, IsExpired: inv.UsedAt == nil && inv.ExpiresAt < now}
+	}
+	respondJSON(w, map[string]any{"invitations": views, "limit": limit, "offset": offset})
 }
 
 // DeleteInvitation: DELETE /api/admin/invitations/{id}
