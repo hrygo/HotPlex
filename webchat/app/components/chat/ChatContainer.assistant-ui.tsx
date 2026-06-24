@@ -125,18 +125,18 @@ export default function ChatContainer() {
   // loading from auth-error (401) so a stale session surfaces a re-login prompt
   // instead of silently hiding the Members tab (PR #779 review P3-7).
   useEffect(() => {
-    let mounted = true;
-    getMe()
-      .then((u) => { if (mounted) { setCurrentUser(u); setAuthError(false); } })
+    const ctrl = new AbortController();
+    getMe(ctrl.signal)
+      .then((u) => { if (!ctrl.signal.aborted) { setCurrentUser(u); setAuthError(false); } })
       .catch((err) => {
-        if (!mounted) return;
+        if (ctrl.signal.aborted) return;
         // Only surface auth-expired for real 401/403; transient network/5xx
         // failures are not solvable by re-login (PR #783 review P2).
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
           setAuthError(true);
         }
       });
-    return () => { mounted = false; };
+    return () => { ctrl.abort(); };
   }, []);
 
   const handleSwitchWorkspace = (ws: Workspace) => {

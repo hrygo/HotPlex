@@ -7,6 +7,7 @@ import {
   adminListInvitations,
   adminCreateInvitation,
   adminDeleteInvitation,
+  logout,
   type User,
   type Invitation,
 } from '@/lib/api/auth';
@@ -83,6 +84,14 @@ export function MembersTab({ currentUser }: MembersTabProps) {
     setBusyUserId(user.id);
     try {
       await adminUpdateUserStatus(user.id, next);
+      if (currentUser?.id === user.id && next === 'disabled') {
+        // Honor the confirm promise "logged out immediately" (PR #784 review P1):
+        // self-disable invalidates the session — redirect instead of reloading
+        // the list, which would 403 USER_DISABLED and strand the user on an error page.
+        try { await logout(); } catch { /* session already invalidated */ }
+        window.location.replace('/login');
+        return;
+      }
       flash('ok', `${user.username} → ${next}`);
       load();
     } catch (err) {
