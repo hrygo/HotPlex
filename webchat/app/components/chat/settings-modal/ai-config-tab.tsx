@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateWorkspace, type Workspace } from '@/lib/api/workspaces';
+import { updateWorkspace, getWorkspace, type Workspace } from '@/lib/api/workspaces';
 import { AgentConfigEditor } from '@/components/admin/agent-config-editor';
 
 const WORKER_OPTIONS: { value: string; label: string }[] = [
@@ -41,7 +41,16 @@ export function AIConfigTab({ workspace, onUpdated }: AIConfigTabProps) {
       setWorkerSaved(true);
       setTimeout(() => setWorkerSaved(false), 2000);
     } catch (err) {
-      setWorkerError(err instanceof Error ? err.message : 'Save failed');
+      if ((err as { status?: number }).status === 409) {
+        setWorkerError('Workspace was modified elsewhere — refreshed to latest, please retry.');
+        try {
+          onUpdated?.(await getWorkspace(workspace.id));
+        } catch {
+          // re-fetch failed; keep the 409 message above
+        }
+      } else {
+        setWorkerError(err instanceof Error ? err.message : 'Save failed');
+      }
     } finally {
       setSavingWorker(false);
     }

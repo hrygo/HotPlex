@@ -19,6 +19,7 @@ export function MembersTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
   const flash = (kind: 'ok' | 'err', text: string) => {
     setActionMsg({ kind, text });
@@ -59,12 +60,15 @@ export function MembersTab() {
 
   const handleToggleUser = async (user: User) => {
     const next = user.status === 'active' ? 'disabled' : 'active';
+    setBusyUserId(user.id);
     try {
       await adminUpdateUserStatus(user.id, next);
       flash('ok', `${user.username} → ${next}`);
       load();
     } catch (err) {
       flash('err', err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      setBusyUserId(null);
     }
   };
 
@@ -115,9 +119,10 @@ export function MembersTab() {
               </div>
               <button
                 onClick={() => handleToggleUser(u)}
-                className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex-shrink-0 ${u.status === 'active' ? 'bg-[var(--accent-coral)]/10 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/20' : 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] hover:bg-[var(--accent-emerald)]/20'}`}
+                disabled={busyUserId === u.id}
+                className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${u.status === 'active' ? 'bg-[var(--accent-coral)]/10 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/20' : 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] hover:bg-[var(--accent-emerald)]/20'}`}
               >
-                {u.status === 'active' ? 'Disable' : 'Enable'}
+                {busyUserId === u.id ? '…' : u.status === 'active' ? 'Disable' : 'Enable'}
               </button>
             </div>
           ))}

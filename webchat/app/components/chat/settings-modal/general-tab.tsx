@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateWorkspace, type Workspace } from '@/lib/api/workspaces';
+import { updateWorkspace, getWorkspace, type Workspace } from '@/lib/api/workspaces';
 
 interface GeneralTabProps {
   workspace: Workspace;
@@ -33,7 +33,16 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
+      if ((err as { status?: number }).status === 409) {
+        setError('Workspace was modified elsewhere — refreshed to latest, please retry.');
+        try {
+          onUpdated?.(await getWorkspace(workspace.id));
+        } catch {
+          // re-fetch failed; keep the 409 message above
+        }
+      } else {
+        setError(err instanceof Error ? err.message : 'Save failed');
+      }
     } finally {
       setSaving(false);
     }
