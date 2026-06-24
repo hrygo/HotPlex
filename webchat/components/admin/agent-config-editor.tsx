@@ -107,54 +107,58 @@ export function AgentConfigEditor({
   }, [dirty]);
 
   return (
-    <div>
+    <div className="space-y-4">
       {/* Banner */}
-      <div className="mb-4 px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)]">
-        Overrides stack on top of team defaults. Changes take effect for{' '}
-        <span className="text-[var(--text-secondary)] font-medium">new sessions</span> only — running
-        sessions are unaffected.
+      <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[rgba(24,24,27,0.3)] border border-[var(--border-subtle)] text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-2">
+        <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-gold)] animate-pulse" />
+        <span>
+          Overrides stack on top of team defaults. Changes apply to{' '}
+          <span className="text-[var(--text-secondary)] font-bold">new sessions</span> only.
+        </span>
       </div>
 
-      <div className="flex gap-4">
+      {/* Main editor layout (Vertical stacked to maximize horizontal space) */}
+      <div className="flex flex-col gap-4">
+        {/* Horizontal selector tab bar at the top */}
         <AgentConfigFileList activeKey={activeKey} overrides={map} onSelect={handleSwitchFile} />
 
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-[var(--text-primary)]">{activeDef.file}</span>
+        <div className="flex-1 flex flex-col min-w-0 mt-1">
+          {/* Header Controls Toolbar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-mono font-bold text-[var(--text-primary)]">{activeDef.file}</span>
               {hasOverride ? (
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--accent-gold)]/15 text-[var(--accent-gold)] uppercase tracking-wide">
-                  overridden
+                <span className="px-2 py-0.5 rounded text-[8px] font-bold bg-[var(--accent-gold)]/10 text-[var(--accent-gold)] uppercase tracking-wider border border-[var(--accent-gold)]/20">
+                  Overridden
                 </span>
               ) : (
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--bg-hover)] text-[var(--text-faint)] uppercase tracking-wide">
-                  inherits default
+                <span className="px-2 py-0.5 rounded text-[8px] font-bold bg-[var(--bg-hover)] text-[var(--text-faint)] uppercase tracking-wider border border-[var(--border-subtle)]">
+                  Inherits Default
                 </span>
               )}
               <span
-                className={`text-[10px] font-mono ${charWarning ? 'text-[var(--accent-coral)]' : 'text-[var(--text-faint)]'}`}
+                className={`text-[10px] font-mono font-bold ${charWarning ? 'text-[var(--accent-coral)]' : 'text-[var(--text-faint)]'}`}
               >
                 {charCount.toLocaleString()}
-                {charWarning && ` / ${MAX_FILE_CHARS}`}
+                {charWarning && ` / ${MAX_FILE_CHARS}`} chars
               </span>
               {dirty && (
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--accent-gold)]/15 text-[var(--accent-gold)]">
-                  unsaved
+                <span className="px-2 py-0.5 rounded text-[8px] font-bold bg-[var(--accent-gold)]/20 text-[var(--accent-gold)] uppercase tracking-wider animate-pulse border border-[var(--accent-gold)]/30">
+                  Unsaved Changes
                 </span>
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3 justify-end">
               {/* view mode toggle */}
-              <div className="flex rounded-[var(--radius-sm)] border border-[var(--border-subtle)] overflow-hidden">
+              <div className="flex rounded-[var(--radius-md)] border border-[var(--border-subtle)] overflow-hidden bg-[var(--bg-elevated)] p-0.5">
                 {(['edit', 'split', 'preview'] as ViewMode[]).map((m) => (
                   <button
                     key={m}
                     onClick={() => setViewMode(m)}
-                    className={`px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+                    className={`px-3 py-1 rounded-[var(--radius-sm)] text-[9px] font-bold uppercase tracking-widest transition-all cursor-pointer ${
                       viewMode === m
-                        ? 'bg-[var(--accent-gold)] text-black'
+                        ? 'bg-[var(--accent-gold)] text-black font-extrabold shadow-sm'
                         : 'text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                     }`}
                   >
@@ -162,12 +166,23 @@ export function AgentConfigEditor({
                   </button>
                 ))}
               </div>
+              
               <button
                 onClick={handleSave}
                 disabled={saving || !dirty}
-                className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent-gold)] text-[var(--text-contrast)] hover:bg-[var(--accent-gold-bright)]"
+                className="px-4 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] cursor-pointer active:scale-[0.98] shadow-sm hover:shadow-glow flex items-center gap-1.5"
               >
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? (
+                  <>
+                    <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={4} />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Saving
+                  </>
+                ) : (
+                  'Save'
+                )}
               </button>
             </div>
           </div>
@@ -175,64 +190,75 @@ export function AgentConfigEditor({
           {/* Status message */}
           {message && (
             <div
-              className={`mb-3 px-4 py-3 rounded-[var(--radius-md)] text-xs ${
+              className={`mb-4 px-4 py-3 rounded-[var(--radius-md)] text-xs font-bold flex items-center gap-2 animate-fade-in-up ${
                 message.type === 'success'
-                  ? 'bg-[var(--accent-emerald-glow)] text-[var(--accent-emerald)]'
+                  ? 'bg-[rgba(52,211,153,0.08)] border border-[rgba(52,211,153,0.15)] text-[var(--accent-emerald)]'
                   : 'bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] text-[var(--accent-coral)]'
               }`}
             >
-              {message.text}
+              {message.type === 'success' ? (
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              )}
+              <span>{message.text}</span>
             </div>
           )}
 
-          {/* Content area */}
-          {viewMode === 'edit' && (
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              className="w-full min-h-[600px] p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-y focus:outline-none focus:border-[var(--border-active)] transition-colors placeholder:text-[var(--text-faint)]"
-              placeholder={`Edit ${activeDef.file}...`}
-              spellCheck={false}
-            />
-          )}
-
-          {viewMode === 'split' && (
-            <div className="grid grid-cols-2 gap-4 min-h-[600px]">
+          {/* Content editing / preview panel (Viewport-bound height, no layout overflow) */}
+          <div className="h-[520px] lg:h-[calc(100vh-280px)] min-h-[350px] flex flex-col">
+            {viewMode === 'edit' && (
               <textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                className="w-full h-full min-h-[600px] p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--border-active)] transition-colors placeholder:text-[var(--text-faint)]"
+                className="w-full h-full p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(9,9,11,0.4)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)] overflow-y-auto"
                 placeholder={`Edit ${activeDef.file}...`}
                 spellCheck={false}
               />
-              <div className="h-full min-h-[600px] overflow-y-auto custom-scrollbar p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+            )}
+
+            {viewMode === 'split' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-full min-h-0">
+                <textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  className="w-full h-full p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(9,9,11,0.4)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)] overflow-y-auto"
+                  placeholder={`Edit ${activeDef.file}...`}
+                  spellCheck={false}
+                />
+                <div className="h-full overflow-y-auto p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(9,9,11,0.2)]">
+                  {content ? (
+                    <MarkdownText text={content} />
+                  ) : (
+                    <p className="text-xs text-[var(--text-faint)] font-mono">Preview will appear here when content is added.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {viewMode === 'preview' && (
+              <div className="h-full overflow-y-auto p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(9,9,11,0.2)]">
                 {content ? (
                   <MarkdownText text={content} />
                 ) : (
-                  <p className="text-xs text-[var(--text-faint)]">Preview will appear here.</p>
+                  <p className="text-xs text-[var(--text-faint)] font-mono">
+                    No content to preview. This file inherits the default settings.
+                  </p>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {viewMode === 'preview' && (
-            <div className="min-h-[600px] overflow-y-auto custom-scrollbar p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
-              {content ? (
-                <MarkdownText text={content} />
-              ) : (
-                <p className="text-xs text-[var(--text-faint)]">
-                  No content to preview. This file inherits the team default.
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Footer */}
-          <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-faint)]">
+          {/* Footer Toolbar Info */}
+          <div className="mt-3 flex items-center justify-between text-[10px] font-mono text-[var(--text-faint)]">
             <span>
-              {activeDef.description} · Ctrl+S to save
+              {activeDef.description} · Press <kbd className="px-1 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">Ctrl+S</kbd> to save
             </span>
-            {charWarning && <span className="text-[var(--accent-coral)]">Exceeds {MAX_FILE_CHARS} char limit</span>}
+            {charWarning && <span className="text-[var(--accent-coral)] font-bold">Exceeds {MAX_FILE_CHARS.toLocaleString()} character limit</span>}
           </div>
         </div>
       </div>

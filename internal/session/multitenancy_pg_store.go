@@ -143,7 +143,7 @@ func (s *pgStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID
 // deleted between the handler's Get and this write) → ErrWorkspaceConflict.
 func (s *pgStore) UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error {
 	res, err := s.db.ExecContext(ctx, s.queries["workspaces.update"],
-		w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), now, w.ID, w.UpdatedAt)
+		w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), w.WorkDir, now, w.ID, w.UpdatedAt)
 	if err != nil {
 		return err
 	}

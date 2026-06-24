@@ -34,7 +34,7 @@ func newPGMultitenancyMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 		"workspaces.get_by_id":                d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE id = ?"),
 		"workspaces.list_by_owner":            d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND status = 'active' ORDER BY created_at ASC LIMIT ? OFFSET ?"),
 		"workspaces.get_by_owner_and_workdir": d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND work_dir = ? AND status = 'active'"),
-		"workspaces.update":                   d.Rebind("UPDATE workspaces SET name = ?, agent_config_overrides = ?, worker_preference = ?, updated_at = ? WHERE id = ? AND updated_at = ?"),
+		"workspaces.update":                   d.Rebind("UPDATE workspaces SET name = ?, agent_config_overrides = ?, worker_preference = ?, work_dir = ?, updated_at = ? WHERE id = ? AND updated_at = ?"),
 		"workspaces.delete":                   d.Rebind("DELETE FROM workspaces WHERE id = ?"),
 		"workspaces.delete_if_empty":          d.Rebind("DELETE FROM workspaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle'))"),
 		"workspaces.count_active_sessions":    d.Rebind("SELECT COUNT(*) FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle')"),
@@ -244,7 +244,7 @@ func TestPGMultitenancy_UpdateWorkspace(t *testing.T) {
 	// ws.UpdatedAt=100 is the cached version from a prior Get (handler pattern);
 	// it binds the CAS WHERE clause's 6th arg.
 	mock.ExpectExec(regexp.QuoteMeta(q)).
-		WithArgs("newname", nil, nil, int64(200), "ws-1", int64(100)).
+		WithArgs("newname", nil, nil, "", int64(200), "ws-1", int64(100)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	ws := &Workspace{ID: "ws-1", Name: "newname", UpdatedAt: 100}
 	err := store.UpdateWorkspace(context.Background(), ws, 200)
@@ -260,8 +260,8 @@ func TestPGMultitenancy_UpdateWorkspace_VersionConflict(t *testing.T) {
 	defer cleanup()
 	q := store.queries["workspaces.update"]
 	mock.ExpectExec(regexp.QuoteMeta(q)).
-		WithArgs("by-b", nil, nil, int64(300), "ws-1", int64(100)). // stale cached updated_at
-		WillReturnResult(sqlmock.NewResult(0, 0))                   // 0 rows → conflict
+		WithArgs("by-b", nil, nil, "", int64(300), "ws-1", int64(100)). // stale cached updated_at
+		WillReturnResult(sqlmock.NewResult(0, 0))                       // 0 rows → conflict
 	ws := &Workspace{ID: "ws-1", Name: "by-b", UpdatedAt: 100}
 	require.ErrorIs(t, store.UpdateWorkspace(context.Background(), ws, 300), ErrWorkspaceConflict)
 }

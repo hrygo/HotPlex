@@ -314,7 +314,7 @@ func (s *SQLiteStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUs
 func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error {
 	return s.writeMu.WithLock(func() error {
 		res, err := s.db.ExecContext(ctx, queries["workspaces.update"],
-			w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), now, w.ID, w.UpdatedAt)
+			w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), w.WorkDir, now, w.ID, w.UpdatedAt)
 		if err != nil {
 			return err
 		}

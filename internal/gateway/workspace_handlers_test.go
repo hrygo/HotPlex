@@ -69,14 +69,16 @@ func TestWorkspaceCRUD(t *testing.T) {
 	env.wsHandlers.Update(w2, req2)
 	require.Equal(t, http.StatusOK, w2.Code)
 
-	// Update work_dir → rejected (immutable, spec §6.2)
+	// Update work_dir → OK (mutable at workspace-level)
 	req3 := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+ws.ID, bytes.NewReader([]byte(`{"work_dir":"/tmp/other"}`)))
 	req3.SetPathValue("id", ws.ID)
 	req3.Header.Set("Cookie", cookie)
 	w3 := httptest.NewRecorder()
 	env.wsHandlers.Update(w3, req3)
-	require.Equal(t, http.StatusBadRequest, w3.Code)
-	require.Contains(t, w3.Body.String(), "WORK_DIR_IMMUTABLE")
+	require.Equal(t, http.StatusOK, w3.Code)
+	var wsUpdated session.Workspace
+	require.NoError(t, json.NewDecoder(w3.Body).Decode(&wsUpdated))
+	require.Equal(t, "/tmp/other", wsUpdated.WorkDir)
 
 	// Delete (no active sessions) OK
 	req4 := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+ws.ID, nil)

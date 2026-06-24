@@ -160,7 +160,7 @@ type updateWorkspaceRequest struct {
 	Name                 string  `json:"name"`
 	AgentConfigOverrides string  `json:"agent_config_overrides"`
 	WorkerPreference     *string `json:"worker_preference"` // nil = omit (no change); "" = explicit clear to default
-	WorkDir              string  `json:"work_dir"`          // must be rejected (immutable, spec §6.2)
+	WorkDir              string  `json:"work_dir"`          // workspace-level mutable (session-level inherits)
 }
 
 // Update: PATCH /api/workspaces/{id}
@@ -174,10 +174,6 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid body")
 		return
 	}
-	if req.WorkDir != "" {
-		writeAppError(w, http.StatusBadRequest, "WORK_DIR_IMMUTABLE", "work_dir is immutable")
-		return
-	}
 	ws, err := h.store.GetWorkspaceByID(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
@@ -186,6 +182,18 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
+	}
+	if req.WorkDir != "" {
+		abs, err := config.ExpandAndAbs(req.WorkDir)
+		if err != nil {
+			writeAppError(w, http.StatusBadRequest, "INVALID_WORK_DIR", err.Error())
+			return
+		}
+		if err := security.ValidateWorkDir(abs); err != nil {
+			writeAppError(w, http.StatusForbidden, "WORK_DIR_FORBIDDEN", err.Error())
+			return
+		}
+		ws.WorkDir = abs
 	}
 	if req.Name != "" {
 		ws.Name = req.Name
@@ -220,7 +228,11 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 			writeAppError(w, http.StatusConflict, "WORKSPACE_VERSION_MISMATCH", "workspace concurrently modified, please re-fetch and retry")
 			return
 		}
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
+		if isUniqueViolation(err) {
+			writeAppError(w, http.StatusConflict, "WORK_DIR_TAKEN", "work_dir already used by you")
+			return
+		}
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed: "+err.Error())
 		return
 	}
 	respondJSON(w, ws)
