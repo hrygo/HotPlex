@@ -72,8 +72,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       router.replace('/');
     } else if (channel === 'cookie-admin' && isLoginPage) {
       router.replace('/admin');
+    } else if (channel === 'no-cookie-session' && tokenState === 'unauthenticated' && !isLoginPage) {
+      router.replace('/admin/login');
     }
-  }, [channel, isLoginPage, router]);
+  }, [channel, isLoginPage, tokenState, router]);
 
   if (channel === 'non-admin') {
     return null;
@@ -92,7 +94,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   // No chat session: standalone admin-token channel (remote operations).
   if (channel === 'no-cookie-session') {
     if (tokenState === 'unauthenticated' && !isLoginPage) {
-      router.replace('/admin/login');
+      // useEffect redirects to /admin/login (kept out of the render body).
       return null;
     }
     if (tokenState === 'checking') {
