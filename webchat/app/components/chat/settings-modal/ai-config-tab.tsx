@@ -6,12 +6,17 @@ import { TabPanel } from './tab-panel';
 
 interface AIConfigTabProps {
   workspace: Workspace;
+  onUpdated?: (ws: Workspace) => void;
 }
 
-export function AIConfigTab({ workspace }: AIConfigTabProps) {
+export function AIConfigTab({ workspace, onUpdated }: AIConfigTabProps) {
   return (
     <TabPanel>
-      <AgentConfigEditor workspaceId={workspace.id} overrides={workspace.agent_config_overrides || {}} />
+      <AgentConfigEditor
+        workspaceId={workspace.id}
+        overrides={workspace.agent_config_overrides || {}}
+        onSaved={onUpdated}
+      />
     </TabPanel>
   );
 }

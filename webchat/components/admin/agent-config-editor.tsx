@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { updateWorkspace } from '@/lib/api/workspaces';
+import { updateWorkspace, type Workspace } from '@/lib/api/workspaces';
 import { MarkdownText } from '@/components/assistant-ui/MarkdownText';
 import { AgentConfigFileList, CONFIG_FILES } from './agent-config-file-list';
 
@@ -33,9 +33,11 @@ function overridesEqual(a: OverridesMap, b: OverridesMap): boolean {
 export function AgentConfigEditor({
   workspaceId,
   overrides,
+  onSaved,
 }: {
   workspaceId: string;
   overrides: OverridesMap;
+  onSaved?: (ws: Workspace) => void;
 }) {
   const [map, setMap] = useState<OverridesMap>(overrides ?? {});
   const [saved, setSaved] = useState<OverridesMap>(overrides ?? {});
@@ -73,9 +75,10 @@ export function AgentConfigEditor({
     setSaving(true);
     setMessage(null);
     try {
-      await updateWorkspace(workspaceId, { agentConfigOverrides: cleaned });
+      const updated = await updateWorkspace(workspaceId, { agentConfigOverrides: cleaned });
       setSaved(cleaned);
       setMap(cleaned);
+      onSaved?.(updated);
       setMessage({ type: 'success', text: 'Saved. Changes apply to new sessions in this workspace.' });
       setTimeout(() => setMessage(null), 4000);
     } catch (err) {

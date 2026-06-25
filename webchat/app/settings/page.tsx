@@ -276,7 +276,7 @@ export default function SettingsPage() {
                     />
                   )}
                   {activeTab === 'ai' && workspace && (
-                    <AIConfigTab workspace={workspace} />
+                    <AIConfigTab workspace={workspace} onUpdated={handleWorkspaceUpdated} />
                   )}
                   {activeTab === 'profile' && currentUser && <ProfileTab user={currentUser} />}
                   {activeTab === 'members' && currentUser?.role === 'admin' && (
