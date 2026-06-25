@@ -157,8 +157,14 @@ export function useSessions({
     }
   }, [workspaceId, STORAGE_KEY, DEFAULT_WORKER_TYPE]);
 
-  // Load sessions when mount or workspaceId changes
+  // Load sessions when mount or workspaceId changes. Clear activeSession
+  // synchronously on switch: otherwise the stale session (bound to the
+  // previous workspace) is paired with the new workspaceId in the WS init
+  // handshake, which the server rejects as "session workspace mismatch"
+  // (internal/gateway/conn.go resolveSession). refreshSessions() repopulates
+  // activeSession from the new workspace's list.
   useEffect(() => {
+    setActiveSession(null);
     refreshSessions();
   }, [workspaceId, refreshSessions]);
 
