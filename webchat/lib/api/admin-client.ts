@@ -128,6 +128,10 @@ async function adminFetchCookie<T>(
   });
 
   if (!res.ok) {
+    // Cookie-channel !ok (typically 401) means the chat session expired or was
+    // revoked. TODO(issue #788 follow-up): signal AdminShell to re-probe the
+    // channel (getMe → redirect to /) so the admin isn't left looking at
+    // per-request error toasts. Until then the caller surfaces a normal error.
     const info = await parseApiError(res);
     const message = info.message || info.raw || `Admin request failed: ${res.status}`;
     const err = new Error(message);

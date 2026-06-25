@@ -43,8 +43,8 @@ function AdminLayout({
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { state: tokenState, logout: tokenLogout } = useAdminAuth();
   const [channel, setChannel] = useState<Channel>('checking');
+  const { state: tokenState, logout: tokenLogout } = useAdminAuth(channel === 'no-cookie-session');
   const isLoginPage = pathname === '/admin/login';
 
   useEffect(() => {
@@ -65,21 +65,24 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   // Non-admin (has a chat session but not admin) — never expose the admin
   // surface, including /admin/login. Redirect to the chat root.
+  // Side-effect redirects (issue #788 review P2: keep router.replace out of the
+  // render body — React forbids updating a component while rendering).
   useEffect(() => {
     if (channel === 'non-admin') {
       router.replace('/');
+    } else if (channel === 'cookie-admin' && isLoginPage) {
+      router.replace('/admin');
     }
-  }, [channel, router]);
+  }, [channel, isLoginPage, router]);
 
   if (channel === 'non-admin') {
     return null;
   }
 
   // Cookie-admin: authenticated via chat session. The login page is meaningless
-  // here (no token to enter), so redirect to /admin if visited directly.
+  // here (no token to enter); the effect above redirects to /admin.
   if (channel === 'cookie-admin') {
     if (isLoginPage) {
-      router.replace('/admin');
       return null;
     }
     // "Logout" in the embedded scenario = leave the admin console, return to chat.

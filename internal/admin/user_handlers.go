@@ -99,7 +99,7 @@ func (h *UserAdminHandlers) CreateInvitation(w http.ResponseWriter, r *http.Requ
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "create invitation failed")
 		return
 	}
-	AdminAudit(uid, AuditInvitationCreate, "/api/admin/invitations", "ok")
+	AdminAudit(uid, AuditInvitationCreate, r.URL.Path, "ok")
 	respondJSON(w, map[string]any{"id": inv.ID, "code": code, "role": inv.Role, "expires_at": inv.ExpiresAt})
 }
 
@@ -140,7 +140,7 @@ func (h *UserAdminHandlers) DeleteInvitation(w http.ResponseWriter, r *http.Requ
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")
 		return
 	}
-	AdminAudit(uid, AuditInvitationDelete, "/api/admin/invitations/"+id, "ok")
+	AdminAudit(uid, AuditInvitationDelete, r.URL.Path, "ok")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -182,6 +182,6 @@ func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Requ
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
 		return
 	}
-	AdminAudit(uid, AuditMemberStatusUpdate, "/api/admin/users/"+id, "ok")
+	AdminAudit(uid, AuditMemberStatusUpdate, r.URL.Path, "ok")
 	w.WriteHeader(http.StatusOK)
 }

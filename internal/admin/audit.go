@@ -23,14 +23,24 @@ const (
 	AuditCronTrigger        = "cron.trigger"
 	AuditSessionDelete      = "session.delete"
 	AuditSessionTerminate   = "session.terminate"
+	AuditConfigRollback     = "config.rollback"
+	AuditConfigValidate     = "config.validate"
 	AuditMemberStatusUpdate = "member.status.update"
 	AuditInvitationCreate   = "invitation.create"
 	AuditInvitationDelete   = "invitation.delete"
 )
 
 // auditLogger is slog.Default() so admin_audit records flow through the same
-// JSON handler as the rest of the gateway. Swap here to redirect audits.
+// JSON handler as the rest of the gateway. Swap via SetAuditLogger (tests).
 var auditLogger = slog.Default()
+
+// SetAuditLogger redirects admin_audit records. Tests use it to capture audits
+// without spinning the real slog pipeline; production never calls it.
+func SetAuditLogger(l *slog.Logger) {
+	if l != nil {
+		auditLogger = l
+	}
+}
 
 // AdminAudit records a structured admin action for compliance and incident
 // forensics (issue #788 A5). No new storage — rides the existing slog pipeline.
@@ -55,7 +65,9 @@ func isWriteMethod(method string) bool {
 }
 
 // adminActionFor maps a (method, path) to a stable audit action enum. Falls back
-// to "<method> <path>" for unmapped routes so no write is silently lost.
+// to "<method> <path>" for unmapped routes so no write is silently lost. Order
+// matters: specific sub-resources (/terminate, /run, /config/*) are matched
+// before their parent collections (/sessions, /cron/jobs).
 func adminActionFor(method, path string) string {
 	switch {
 	case strings.Contains(path, "/restart"):
@@ -64,6 +76,10 @@ func adminActionFor(method, path string) string {
 		return AuditSessionTerminate
 	case strings.HasSuffix(path, "/run") && strings.Contains(path, "/cron/"):
 		return AuditCronTrigger
+	case strings.Contains(path, "/config/rollback"):
+		return AuditConfigRollback
+	case strings.Contains(path, "/config/validate"):
+		return AuditConfigValidate
 	case strings.Contains(path, "/api-keys"):
 		return apiKeyAction(method)
 	case strings.Contains(path, "/cron/jobs"):
@@ -71,9 +87,7 @@ func adminActionFor(method, path string) string {
 	case strings.Contains(path, "/bots"):
 		return botAction(method)
 	case strings.Contains(path, "/sessions"):
-		if method == http.MethodDelete {
-			return AuditSessionDelete
-		}
+		return sessionAction(method)
 	}
 	return method + " " + path
 }
@@ -112,4 +126,13 @@ func cronAction(method string) string {
 		return AuditCronDelete
 	}
 	return "cron." + strings.ToLower(method)
+}
+
+// sessionAction covers DELETE; terminate is matched earlier in adminActionFor
+// (POST /admin/sessions/{id}/terminate → AuditSessionTerminate, not here).
+func sessionAction(method string) string {
+	if method == http.MethodDelete {
+		return AuditSessionDelete
+	}
+	return "session." + strings.ToLower(method)
 }

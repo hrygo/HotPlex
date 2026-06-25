@@ -11,7 +11,11 @@ import type { AdminConnection } from '@/lib/types/admin';
 
 export type AuthState = 'checking' | 'authenticated' | 'unauthenticated';
 
-export function useAdminAuth() {
+// enabled gates the mount-time token probe. AdminShell passes false until it
+// resolves the cookie channel, so embedded webchat admins (cookie-admin) never
+// pay for a redundant testConnection that 401s against a stale stored token
+// (issue #788 review P1-3). state stays 'checking' while disabled.
+export function useAdminAuth(enabled = true) {
   const [state, setState] = useState<AuthState>('checking');
   const [conn, setConn] = useState<AdminConnection | null>(null);
 
@@ -21,6 +25,7 @@ export function useAdminAuth() {
   // (every API call 401). testConnection hits /admin/health which requires
   // health:read scope, so it doubles as a scope sanity check.
   useEffect(() => {
+    if (!enabled) return; // stay 'checking'; AdminShell re-enables when needed
     const stored = getStoredAdminConnection();
     if (!stored) {
       setState('unauthenticated');
@@ -36,7 +41,7 @@ export function useAdminAuth() {
         setState('unauthenticated');
       }
     });
-  }, []);
+  }, [enabled]);
 
   const login = useCallback(async (url: string, token: string): Promise<boolean> => {
     const candidate: AdminConnection = { url, token };
