@@ -99,6 +99,7 @@ func (h *UserAdminHandlers) CreateInvitation(w http.ResponseWriter, r *http.Requ
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "create invitation failed")
 		return
 	}
+	AdminAudit(uid, AuditInvitationCreate, "/api/admin/invitations", "ok")
 	respondJSON(w, map[string]any{"id": inv.ID, "code": code, "role": inv.Role, "expires_at": inv.ExpiresAt})
 }
 
@@ -130,7 +131,8 @@ func (h *UserAdminHandlers) ListInvitations(w http.ResponseWriter, r *http.Reque
 
 // DeleteInvitation: DELETE /api/admin/invitations/{id}
 func (h *UserAdminHandlers) DeleteInvitation(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	uid, ok := h.requireAdmin(w, r)
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
@@ -138,6 +140,7 @@ func (h *UserAdminHandlers) DeleteInvitation(w http.ResponseWriter, r *http.Requ
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")
 		return
 	}
+	AdminAudit(uid, AuditInvitationDelete, "/api/admin/invitations/"+id, "ok")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -161,7 +164,8 @@ type updateUserStatusRequest struct {
 
 // UpdateUserStatus: PATCH /api/admin/users/{id}
 func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	uid, ok := h.requireAdmin(w, r)
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
@@ -178,5 +182,6 @@ func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Requ
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
 		return
 	}
+	AdminAudit(uid, AuditMemberStatusUpdate, "/api/admin/users/"+id, "ok")
 	w.WriteHeader(http.StatusOK)
 }

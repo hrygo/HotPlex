@@ -214,6 +214,10 @@ func setupRoutes(
 		// LocalAccountProvider is created lazily from WorkspaceStore + bcrypt cost.
 		lap := security.NewLocalAccountProvider(deps.WorkspaceStore, security.BcryptCostDefault)
 		auth.SetIdentityProvider(lap)
+		// Enable cookie-session fallback on the Bearer admin port so embedded
+		// webchat admins can reach Dashboard/Bots/Cron without a separate admin
+		// token (issue #788 A2). No-op semantics live in AdminAPI.Middleware.
+		adminAPI.SetCookieFallback(deps.CookieAuth, lap)
 
 		authHandlers := gateway.NewAuthHandlers(auth, deps.CookieAuth, deps.WorkspaceStore, lap)
 		// /api/admin/* handlers (invitations/users CRUD) live in the admin package

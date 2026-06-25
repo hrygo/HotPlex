@@ -119,6 +119,8 @@ type AdminAPI struct {
 	version          func() string
 	newSessionID     func() string
 	restart          func() error
+	cookieAuth       *security.CookieAuth           // Optional: enables cookie-session fallback (issue #788 A2)
+	idp              *security.LocalAccountProvider // Optional: paired with cookieAuth
 	startedAt        time.Time
 }
 
@@ -187,6 +189,15 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		var actor string // resolved during auth, recorded by the audit defer (issue #788 A5)
+
+		// Audit successful write operations (issue #788 A5). Runs after the
+		// handler sets sw.status; auth failures (status>=400) are excluded.
+		defer func() {
+			if isWriteMethod(r.Method) && sw.status >= 200 && sw.status < 300 {
+				AdminAudit(actor, adminActionFor(r.Method, r.URL.Path), r.URL.Path, "ok")
+			}
+		}()
 
 		defer func() {
 			a.log.Info("admin: request",
@@ -239,18 +250,49 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 		}
 
 		token := extractBearerToken(r)
-		if token == "" {
-			web.WriteAppError(sw, http.StatusUnauthorized, "UNAUTHORIZED", "missing admin token")
-			return
-		}
-		scopes, ok := a.validateToken(token)
-		if !ok {
-			web.WriteAppError(sw, http.StatusUnauthorized, "UNAUTHORIZED", "invalid admin token")
+		if token != "" {
+			scopes, ok := a.validateToken(token)
+			if !ok {
+				web.WriteAppError(sw, http.StatusUnauthorized, "UNAUTHORIZED", "invalid admin token")
+				return
+			}
+			actor = "admin-token"
+			ctx := context.WithValue(r.Context(), scopeContextKey{}, scopes)
+			next.ServeHTTP(sw, r.WithContext(ctx))
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), scopeContextKey{}, scopes)
-		next.ServeHTTP(sw, r.WithContext(ctx))
+		// Cookie fallback (issue #788 A2): embedded webchat scenario where the
+		// admin is already logged in via the chat session cookie. Mirrors the
+		// /api/admin/* requireAdmin check — cookie→uid→role, requires active
+		// admin. Granted the full scope set so every requireScope check passes.
+		if a.cookieAuth != nil && a.idp != nil {
+			uid, ok := a.cookieAuth.Authenticate(r)
+			if !ok {
+				web.WriteAppError(sw, http.StatusUnauthorized, "INVALID_CREDENTIALS", "not authenticated")
+				return
+			}
+			u, err := a.idp.Lookup(r.Context(), uid)
+			if err != nil || u.Status != "active" {
+				web.WriteAppError(sw, http.StatusForbidden, "USER_DISABLED", "user disabled")
+				return
+			}
+			if u.Role != "admin" {
+				web.WriteAppError(sw, http.StatusForbidden, "FORBIDDEN", "admin only")
+				return
+			}
+			actor = uid
+			scopes := []string{
+				ScopeAdminWrite, ScopeAdminRead,
+				ScopeSessionRead, ScopeSessionWrite, ScopeSessionKill,
+				ScopeStatsRead, ScopeHealthRead, ScopeConfigRead,
+			}
+			ctx := context.WithValue(r.Context(), scopeContextKey{}, scopes)
+			next.ServeHTTP(sw, r.WithContext(ctx))
+			return
+		}
+
+		web.WriteAppError(sw, http.StatusUnauthorized, "UNAUTHORIZED", "missing admin token")
 	})
 }
 
@@ -281,4 +323,14 @@ func (a *AdminAPI) SetRateLimiter(rl *simpleRateLimiter) {
 
 func (a *AdminAPI) SetAllowedCIDRs(cidrs []string) {
 	a.allowedCIDRs.Store(cidrs)
+}
+
+// SetCookieFallback enables cookie-session authentication on the Bearer admin
+// port (issue #788 A2). When a request carries no Bearer token, the middleware
+// resolves the chat session cookie and admits active admins, mirroring the
+// requireAdmin check on /api/admin/* (user_handlers.go). No-op when either
+// argument is nil — standalone/CLI deployments keep Bearer-only behavior.
+func (a *AdminAPI) SetCookieFallback(cookieAuth *security.CookieAuth, idp *security.LocalAccountProvider) {
+	a.cookieAuth = cookieAuth
+	a.idp = idp
 }

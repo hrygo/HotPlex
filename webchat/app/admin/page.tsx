@@ -5,7 +5,7 @@ import { listBots } from '@/lib/api/admin-bots';
 import { listSessions } from '@/lib/api/admin-sessions';
 import { listCronJobs } from '@/lib/api/admin-cron';
 import { MetricCard } from '@/components/admin/metric-card';
-import { adminFetch, getStoredAdminConnection } from '@/lib/api/admin-client';
+import { adminFetch } from '@/lib/api/admin-client';
 import { useAdminUI } from '@/context/admin-ui-context';
 
 interface DashboardMetrics {
@@ -162,41 +162,28 @@ export default function DashboardPage() {
 		return parts.join(' ');
 	};
 
-	// Exponential backoff polling routine for health recovery
+	// Exponential backoff polling routine for health recovery. Uses adminFetch
+	// so it works in both Bearer (remote ops) and cookie (embedded webchat)
+	// channels — the gateway is briefly unreachable mid-restart, so fetch
+	// failures just extend the backoff (issue #788 A2).
 	const startRecoveryPolling = async () => {
 		setRestartStep('polling');
 		let delay = 500;
 		const maxAttempts = 15;
-		const conn = getStoredAdminConnection();
-
-		if (!conn) {
-			setRestartStep('failed');
-			setIsRestarting(false);
-			showToast('Restart aborted: admin connection key missing.', 'error');
-			return;
-		}
 
 		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 			setPollingAttempts(attempt);
 			try {
-				const res = await fetch(`${conn.url}/admin/health`, {
-					headers: {
-						'Authorization': `Bearer ${conn.token}`,
-					},
-				});
-
-				if (res.ok) {
-					const data = await res.json();
-					if (data.status === 'healthy' || data.status === 'degraded') {
-						setRestartStep('completed');
-						showToast('Gateway successfully restarted and recovered!', 'success');
-						setTimeout(() => {
-							setIsRestarting(false);
-							setRestartStep('idle');
-							fetchAllMetrics();
-						}, 1500);
-						return;
-					}
+				const data = await adminFetch<{ status: string }>('/admin/health');
+				if (data.status === 'healthy' || data.status === 'degraded') {
+					setRestartStep('completed');
+					showToast('Gateway successfully restarted and recovered!', 'success');
+					setTimeout(() => {
+						setIsRestarting(false);
+						setRestartStep('idle');
+						fetchAllMetrics();
+					}, 1500);
+					return;
 				}
 			} catch (e) {
 				// Gateway is currently down / starting up

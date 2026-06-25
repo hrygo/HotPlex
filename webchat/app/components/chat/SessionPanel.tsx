@@ -122,15 +122,17 @@ interface SessionPanelProps {
   onSelect: (session: SessionInfo) => void;
   onCreate: () => void;
   onDelete: (id: string) => Promise<void>;
+  currentUserRole?: 'admin' | 'user';
 }
 
-export function SessionPanel({ 
-  sessions, 
-  activeSession, 
-  isLoading, 
-  onSelect, 
-  onCreate, 
-  onDelete 
+export function SessionPanel({
+  sessions,
+  activeSession,
+  isLoading,
+  onSelect,
+  onCreate,
+  onDelete,
+  currentUserRole,
 }: SessionPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -221,7 +223,8 @@ export function SessionPanel({
         </div>
       </div>
 
-      {/* Admin Entry */}
+      {/* Admin Entry — admin-only (spec G1, issue #788) */}
+      {currentUserRole === 'admin' && (
       <div className="mt-auto flex-shrink-0 border-t border-[var(--border-subtle)] p-3">
         <a
           href="/admin"
@@ -240,6 +243,7 @@ export function SessionPanel({
           </div>
         </a>
       </div>
+      )}
     </div>
   );
 }

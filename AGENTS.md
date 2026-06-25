@@ -268,6 +268,7 @@ hotplex cron trigger pr-review-hotplex
   5. 编译默认 `claude_code`（`config_defaults.go:127`）
 - **`inject_exclude` 边界**（`internal/agentconfig/loader.go:106`）：5 个可排除文件 `SOUL.md` / `AGENTS.md` / `SKILLS.md` / `USER.md` / `MEMORY.md`；`META-COGNITION.md` 是 `go:embed` **强制注入首位，无法被排除**（Worker 身份边界）。3 级 fallback：bot > platform > global；nil 继承父级，`[]string{}` 显式清空。
 - **dev YAML vs home YAML**: `configs/config-dev.yaml` 通过 `inherits: config.yaml` 覆盖基础，是 dev-only 覆盖层；`~/.hotplex/config.yaml` 是运行实例配置（影响服务安装路径）。两者**独立**，不互通。
+- **Admin 后台双通道鉴权**（issue #788）：`/admin/*`（Bearer+scope，`AdminAPI.Middleware`）与 `/api/admin/*`（cookie session，`UserAdminHandlers.requireAdmin`）是**两套独立 handler**，不是同一端点的两种认证。`/admin/*` 的 `Middleware` 支持 cookie fallback——无 Bearer 时回落 chat session cookie（校验 `role==admin && status==active`，注入全 scope），使内嵌 webchat admin 免另填 admin token；远程运维仍走 Bearer。SetCookieFallback 在 `routes.go` lap 创建后注入，nil 时回 Bearer-only。Admin 写操作（POST/PUT/PATCH/DELETE）由 middleware 级 `admin_audit` slog 统一记录（动作枚举 `internal/admin/audit.go`，actor=uid 或 `admin-token`）；`/api/admin/*` 写操作在各 handler 成功路径显式调用 `AdminAudit`。
 
 ---
 
