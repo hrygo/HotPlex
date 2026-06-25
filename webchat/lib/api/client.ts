@@ -15,9 +15,30 @@ import { parseApiError } from "./errors";
 
 export const BASE = httpBase();
 
-// Auth headers: X-API-Key attached only in cross-origin mode (optional).
+// hasSessionCookie reports whether a WebChat UI login cookie is present.
+// Used to decide cookie-vs-api-key identity in cross-origin mode (see below).
+function hasSessionCookie(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.cookie.split(';').some((c) => c.trim().startsWith('webchat_session='));
+}
+
+// Auth headers: X-API-Key attached only in cross-origin mode, and ONLY when no
+// cookie session exists.
+//
+// Why: the backend resolves identity api-key-first (security.AuthenticateRequest).
+// In cross-origin mode the browser cannot put an X-API-Key on the WebSocket
+// upgrade, so WS authenticates via cookie while REST authenticates via the
+// api-key. When a human is logged in (cookie present) AND an env api-key is
+// configured, this splits REST (api-key user) and WS (cookie user) into two
+// different identities — the REST workspace list returns workspaces the WS
+// user does not own, and every handshake fails with "workspace access denied".
+//
+// Preferring the cookie when a session exists keeps REST and WS on the same
+// (logged-in) identity. The env api-key remains the fallback for non-interactive
+// embedded use where no human ever logs in.
 export function authHeaders(): Record<string, string> {
   if (isSameOrigin()) return {};
+  if (hasSessionCookie()) return {};
   return apiKey ? { 'X-API-Key': apiKey } : {};
 }
 

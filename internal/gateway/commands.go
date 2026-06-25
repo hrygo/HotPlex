@@ -240,6 +240,9 @@ func (h *Handler) handleCD(ctx context.Context, env *events.Envelope) error {
 
 	result, err := h.bridge.SwitchWorkDir(ctx, env.SessionID, path)
 	if err != nil {
+		if errors.Is(err, ErrWorkDirImmutable) {
+			return h.sendErrorf(ctx, env, events.ErrCodeConfigInvalid, "当前会话绑定到工作区，work_dir 不可变；请切换或新建工作区")
+		}
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "切换失败：%v", err)
 	}
 

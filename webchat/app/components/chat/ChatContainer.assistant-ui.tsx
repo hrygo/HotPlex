@@ -1,19 +1,18 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
-import { useQueryState, parseAsString } from 'nuqs';
 import { useHotPlexRuntime } from '@/lib/adapters/hotplex-runtime-adapter';
 import { useSessions } from '@/lib/hooks/useSessions';
 import { Thread } from '@/components/assistant-ui/thread';
 import { BrandIcon, WORKER_DISPLAY } from '@/components/icons';
 import { SessionPanel } from './SessionPanel';
 import { NewSessionModal } from './NewSessionModal';
-import { SettingsModal } from './settings-modal/settings-modal';
+import { NewWorkspaceModal } from './NewWorkspaceModal';
 import { MetricsBar } from '@/components/assistant-ui/MetricsBar';
 import { workerType as defaultWorkerType, httpBase, type ConnectionState } from '@/lib/config';
 import type { SessionMetrics } from '@/lib/hooks/useMetrics';
@@ -23,30 +22,48 @@ import {
   createWorkspace,
   type Workspace,
 } from '@/lib/api/workspaces';
+import { buildWorkspaceWorkDir } from '@/lib/utils/workspace-path';
 import { logout, getMe, type User } from '@/lib/api/auth';
 import { ApiError } from '@/lib/api/errors';
 
+// Clear all hotplex workspace/session selection state from localStorage.
+// Called on logout so a different account logging into the same browser does
+// not inherit a workspace_id it does not own — which the server rejects at
+// WS handshake ("workspace access denied"). See internal/gateway/conn.go.
+function clearHotplexSessionStorage(): void {
+  try {
+    const keys = Object.keys(localStorage).filter(
+      (k) =>
+        k.startsWith('hotplex_active_session_id') ||
+        k === 'hotplex_active_workspace_id',
+    );
+    keys.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    // localStorage may be unavailable (private mode); logout proceeds regardless.
+  }
+}
+
 function ChatInterface({
   sessionId,
-  overrideWorkDir,
   onMetricsChange,
   onSessionStateChange,
   workspaceId,
+  onWorkspaceError,
 }: {
   sessionId: string | null;
-  overrideWorkDir?: string;
   onMetricsChange?: (metrics: SessionMetrics) => void;
   onSessionStateChange?: (state: string) => void;
   workspaceId?: string;
+  onWorkspaceError?: () => void;
 }) {
   const { skills, mergeSkills } = useSkillsCache(sessionId);
   const adapter = useHotPlexRuntime({
     sessionId: sessionId ?? undefined,
-    overrideWorkDir,
     onMetricsChange,
     onSkillsChange: mergeSkills,
     onSessionStateChange,
     workspaceId,
+    onWorkspaceError,
   });
 
   const runtime = useExternalStoreRuntime(adapter);
@@ -74,20 +91,18 @@ function ChatInterface({
 }
 
 export default function ChatContainer() {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
   const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState(false);
   const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(null);
-
-  // nuqs deep link params
-  const [urlDir] = useQueryState('dir', parseAsString);
 
   // Workspaces State
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showNewWsModal, setShowNewWsModal] = useState(false);
 
   // Fetch workspaces list
   const loadWorkspaces = useCallback(async (selectId?: string) => {
@@ -97,7 +112,11 @@ export default function ChatContainer() {
 
       // Fallback: If no workspaces exist, create a default one
       if (list.length === 0) {
-        const defaultWS = await createWorkspace('Default Workspace', './workspace');
+        const me = await getMe();
+        const defaultWS = await createWorkspace(
+          'Default Workspace',
+          buildWorkspaceWorkDir(me.id, 'Default Workspace', 'default'),
+        );
         list = [defaultWS];
       }
 
@@ -121,13 +140,17 @@ export default function ChatContainer() {
     loadWorkspaces();
   }, [loadWorkspaces]);
 
-  // Fetch current user profile (Profile tab + Members tab gating). Distinguish
-  // loading from auth-error (401) so a stale session surfaces a re-login prompt
-  // instead of silently hiding the Members tab (PR #779 review P3-7).
+  // Detect session expiry so the Settings button can flag re-login.
+  // Distinguish loading from auth-error (401) — a stale session surfaces a
+  // re-login prompt instead of a silent dead click (PR #779 review P3-7).
   useEffect(() => {
     const ctrl = new AbortController();
     getMe(ctrl.signal)
-      .then((u) => { if (!ctrl.signal.aborted) { setCurrentUser(u); setAuthError(false); } })
+      .then((u) => {
+        if (ctrl.signal.aborted) return;
+        setCurrentUser(u);
+        setAuthError(false);
+      })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
         // Only surface auth-expired for real 401/403; transient network/5xx
@@ -147,6 +170,7 @@ export default function ChatContainer() {
   };
 
   const handleLogout = async () => {
+    clearHotplexSessionStorage();
     try {
       await logout();
     } catch {
@@ -154,6 +178,16 @@ export default function ChatContainer() {
     }
     window.location.replace('/login');
   };
+
+  // Workspace handshake rejected (access denied / not found / disabled) —
+  // clear the stale selection and reload. loadWorkspaces() re-derives the
+  // active workspace as list[0] (only owned workspaces are returned), which
+  // changes the workspaceId prop → useSessions refetches → activeSessionId
+  // changes → ChatInterface remounts and reconnects with a valid workspace.
+  const handleWorkspaceError = useCallback(() => {
+    localStorage.removeItem('hotplex_active_workspace_id');
+    loadWorkspaces();
+  }, [loadWorkspaces]);
 
   // Sessions hook scoped to active workspace
   const {
@@ -173,9 +207,9 @@ export default function ChatContainer() {
   const activeSessionId = activeSession?.id || null;
 
   // Handle NewSessionModal confirm
-  const handleModalConfirm = useCallback(async (title: string, wt: string, dir: string) => {
+  const handleModalConfirm = useCallback(async (title: string, wt: string) => {
     setShowNewModal(false);
-    await createNewSession(title, wt, dir || undefined);
+    await createNewSession(title, wt);
   }, [createNewSession]);
 
   // Handle "New Chat" button
@@ -240,16 +274,16 @@ export default function ChatContainer() {
                   );
                 })}
                 <div className="border-t border-[var(--border-subtle)] my-1" />
-                <Link
-                  href="/admin/workspaces/new"
-                  onClick={() => setWsDropdownOpen(false)}
+                <button
+                  type="button"
+                  onClick={() => { setWsDropdownOpen(false); setShowNewWsModal(true); }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent-gold)] transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                   </svg>
                   <span className="font-medium">New Workspace</span>
-                </Link>
+                </button>
               </div>
             </>
           )}
@@ -289,9 +323,15 @@ export default function ChatContainer() {
             </svg>
             <span className="hidden md:inline">Docs</span>
           </a>
-          {/* Settings — opens SettingsModal (Phase 3). Red dot on session expiry (PR #779 review P3-7). */}
+          {/* Settings — full /settings page (Phase 3, moved out of modal). Red dot on session expiry (PR #779 review P3-7). */}
           <button
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              if (authError) {
+                window.location.replace('/login');
+                return;
+              }
+              router.push('/settings');
+            }}
             className={`relative p-2 rounded-lg transition-all ${authError ? 'text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
             title={authError ? 'Session expired — please re-login to access Settings' : 'Settings'}
           >
@@ -359,10 +399,10 @@ export default function ChatContainer() {
               <ChatInterface
                 key={activeSessionId}
                 sessionId={activeSessionId}
-                overrideWorkDir={urlDir ?? undefined}
                 onMetricsChange={setSessionMetrics}
                 onSessionStateChange={(state) => activeSessionId && updateSessionState(activeSessionId, state)}
                 workspaceId={activeWorkspace?.id}
+                onWorkspaceError={handleWorkspaceError}
               />
             )}
           </div>
@@ -374,21 +414,20 @@ export default function ChatContainer() {
         <NewSessionModal
           onConfirm={handleModalConfirm}
           onCancel={() => setShowNewModal(false)}
-          defaultWorkDir={activeWorkspace?.work_dir}
         />
       )}
 
-      {/* Settings Modal (Phase 3) */}
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        workspace={activeWorkspace}
-        currentUser={currentUser}
-        onWorkspaceUpdated={(ws) => {
-          setActiveWorkspace(ws);
-          setWorkspaces((prev) => prev.map((w) => (w.id === ws.id ? ws : w)));
-        }}
-      />
+      {/* New Workspace Modal */}
+      {showNewWsModal && currentUser && (
+        <NewWorkspaceModal
+          uid={currentUser.id}
+          onClose={() => setShowNewWsModal(false)}
+          onCreated={(ws) => {
+            handleSwitchWorkspace(ws);
+            loadWorkspaces(ws.id);
+          }}
+        />
+      )}
     </div>
   );
 }

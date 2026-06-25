@@ -185,6 +185,64 @@ func TestValidateWorkDir(t *testing.T) {
 	}
 }
 
+// ─── ValidateWorkspaceWorkDir ─────────────────────────────────────────────────
+
+func TestValidateWorkspaceWorkDir(t *testing.T) {
+	t.Parallel()
+
+	const home = "/home/testuser"
+	const uid = "11111111-2222-3333-4444-555555555555"
+	base := filepath.Join(home, ".hotplex", "workspaces", uid)
+	otherUID := "99999999-9999-9999-9999-999999999999"
+
+	tests := []struct {
+		name    string
+		dir     string
+		owner   string
+		wantErr bool
+	}{
+		{"empty dir rejected", "", uid, true},
+		{"empty owner rejected", base, "", true},
+		{"sandbox root allowed", base, uid, false},
+		{"direct subdir allowed", filepath.Join(base, "proj"), uid, false},
+		{"nested subdir allowed", filepath.Join(base, "a", "b", "c"), uid, false},
+		{"owner isolation: sibling uid rejected", filepath.Join(home, ".hotplex", "workspaces", otherUID, "x"), uid, true},
+		{"outside workspaces tree rejected", filepath.Join(home, "Documents", "proj"), uid, true},
+		{"unrelated tmp rejected", "/tmp/elsewhere", uid, true},
+		{"system dir rejected", "/etc/nginx", uid, true},
+		{"parent traversal to sibling uid rejected", filepath.Join(base, "..", otherUID), uid, true},
+		{"deep escape to system rejected", filepath.Join(base, "..", "..", "..", "..", "etc"), uid, true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateWorkspaceWorkDir(tt.dir, home, tt.owner)
+			if tt.wantErr {
+				require.ErrorIs(t, err, ErrWorkDirOutsideSandbox)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestValidateWorkspaceWorkDir_HomeResolution 覆盖公共函数的 $HOME 解析与哨兵。
+// 本文件带 //go:build darwin || linux，HOME 在这两个平台由 os.UserHomeDir 读取。
+func TestValidateWorkspaceWorkDir_HomeResolution(t *testing.T) {
+	// 不并行：修改进程级 $HOME。
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	const uid = "11111111-2222-3333-4444-555555555555"
+	inside := filepath.Join(home, ".hotplex", "workspaces", uid, "proj")
+	require.NoError(t, ValidateWorkspaceWorkDir(inside, uid))
+
+	outside := filepath.Join(t.TempDir(), "elsewhere")
+	require.ErrorIs(t, ValidateWorkspaceWorkDir(outside, uid), ErrWorkDirOutsideSandbox)
+}
+
 // ─── Intelligent directory access ─────────────────────────────────────────────
 
 func TestMatchesUserHomePattern(t *testing.T) {

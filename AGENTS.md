@@ -1,6 +1,6 @@
 # HotPlex 项目知识库
 
-**最后更新**: 2026-06-16 · **分支**: main · **版本**: v1.29.1 · **提交**: aa9900d2
+**最后更新**: 2026-06-25 · **分支**: main · **版本**: v1.30.0 · **提交**: 5538f924
 
 ---
 
@@ -218,28 +218,26 @@ configs/   - 配置文件
 
 ### PR Review 修复循环
 
-Review cron 是定时触发（30min），不是 push webhook。手动触发 + 轮询是可靠路径：
+hotplex-ai review 由 cron 定时跑（30min）；CI 成功后 webhook 也自动触发同一 job（`RunningAtMs` CAS 去重，手动 `trigger` 安全，不并发）。
 
 ```
-push → 轮询已有 review → 手动触发 → 轮询新 review → 修复 → push → 循环
-终止：reviewer 无有价值的新发现（APPROVED 是必要条件，不是充分条件）
+push → 等 review（自动）→ 一次性修 P0/P1 + 值得的 P2 → push → 重复
+终止：最新 review 对当前 HEAD 为 APPROVED 且无新 P0/P1
 ```
 
-**去重**：webhook（CI 成功自动触发）与手动 `trigger` 共享同一 cron job，`RunningAtMs` CAS 保证同 job 不并发。**先轮询再触发**——若 webhook 已提交 review 则跳过触发。
+急用不等定时：`hotplex cron trigger pr-review-hotplex`。
+
+**修复前先核实**（review 可能针对旧 commit 或含误报）：① 发现指向的代码位置在当前 HEAD 仍存在；② 该发现未被后续 commit 修过。一轮 review 的所有发现**一次性修、一次 push**，避免逐条触发新轮次。
 
 ```bash
-# 检查已有 review（push 时间之后）
-gh api repos/hrygo/hotplex/pulls/{N}/reviews \
-  --jq '[.[] | select(.submitted_at > "{push_time}")] | length'
+# 最新 review（commit_id 标明针对哪个 commit；先核对它 == 当前 HEAD）
+gh api repos/hrygo/hotplex/pulls/{N}/reviews --jq 'max_by(.id) | {state, commit_id, body}'
 
-# 手动触发（仅当无新 review 时）
+# 手动触发新一轮
 hotplex cron trigger pr-review-hotplex
-
-# 获取最新 review 内容
-gh api repos/hrygo/hotplex/pulls/{N}/reviews --jq 'max_by(.id) | .body'
 ```
 
-**优先级**：P0/P1 必修 → P2 有价值修 / 大型提 Issue → P3 轻量修 / 忽略
+**优先级**：P0/P1 必修 → P2 视价值修或提 Issue → P3 可忽略。
 
 ---
 

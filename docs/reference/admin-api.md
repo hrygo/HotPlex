@@ -267,7 +267,7 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 
 **Workspace 管理（spec ⑥ A1 / ⑦ 跨通道租户）**：
 
-Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API Key**（header `X-API-Key` 或 query `api_key`，面向第三方集成）还是 **Cookie**（WebChat UI）进入，都能拥有并管理自己的 workspace。鉴权链为 API Key 优先、Cookie 兜底（`AuthenticateRequest`），与 session REST、WS upgrade 对齐。`work_dir` 创建后不可变，PATCH 携带该字段返回 `400 WORK_DIR_IMMUTABLE`。
+Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API Key**（header `X-API-Key` 或 query `api_key`，面向第三方集成）还是 **Cookie**（WebChat UI）进入，都能拥有并管理自己的 workspace。鉴权链为 API Key 优先、Cookie 兜底（`AuthenticateRequest`），与 session REST、WS upgrade 对齐。`work_dir` workspace 级可改：PATCH 携带 `work_dir` 时校验 owner 沙箱（`403 WORK_DIR_OUTSIDE_SANDBOX`）且 workspace 必须无活跃会话（`409 WORKSPACE_NOT_EMPTY`，因 work_dir 进 session key 派生）。session 级 `switch-workdir` 对 workspace-bound session 返回 `400 WORK_DIR_IMMUTABLE`（worker 须跟随 workspace）。详见 WebChat-Workspace-Create-WorkDir-Prefix-Spec §5.1.4。
 
 | 方法 | 路径 | 认证 | 说明 |
 |------|------|------|------|
@@ -310,14 +310,26 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 | HTTP | code | 典型场景 |
 |------|------|----------|
 | 400 | `BAD_REQUEST` | JSON 解析失败、参数校验错误、非法枚举值 |
+| 400 | `INVALID_CONFIG_JSON` | workspace `agent_config_overrides` 不是合法 JSON 对象 |
+| 400 | `UNKNOWN_CONFIG_FILE` | workspace overrides 含未知配置文件键 |
+| 400 | `CONFIG_TOO_LARGE` | workspace overrides 超过单文件大小上限 |
+| 400 | `INVALID_CONFIG_VALUE` | workspace overrides 值类型/内容非法 |
+| 400 | `INVALID_WORK_DIR` | workspace `work_dir` 路径无法展开或不存在 |
+| 400 | `INVALID_WORKER_TYPE` | workspace `worker_preference` 非已注册 worker 类型 |
 | 401 | `UNAUTHORIZED` | Token 缺失或无效 |
 | 401 | `INVALID_CREDENTIALS` | Cookie 会话失效或未登录 |
 | 403 | `INSUFFICIENT_SCOPE` | Bearer Token scope 不满足（Admin API） |
 | 403 | `FORBIDDEN` | 非管理员访问管理端点，或请求 IP 不在白名单（见「安全中间件」IP Whitelist，两类 403 共用同一 code） |
 | 403 | `USER_DISABLED` | 用户已被禁用 |
+| 403 | `WORKSPACE_FORBIDDEN` | 非所有者访问他人 workspace（且非 admin） |
+| 403 | `WORK_DIR_FORBIDDEN` | workspace `work_dir` 命中安全黑名单（系统目录等） |
+| 403 | `WORK_DIR_OUTSIDE_SANDBOX` | workspace `work_dir` 不在 owner 沙箱前缀下 |
 | 404 | `NOT_FOUND` | Session/Cron Job/Invitation 未找到 |
+| 404 | `WORKSPACE_NOT_FOUND` | workspace id 不存在 |
 | 409 | `CONFLICT` | 资源状态冲突 |
 | 409 | `WORKSPACE_VERSION_MISMATCH` | PATCH workspace 乐观并发冲突（`updated_at` CAS 失败，re-fetch 后重试） |
+| 409 | `WORKSPACE_NOT_EMPTY` | workspace 存在活跃会话，拒绝改 `work_dir` / 删除 |
+| 409 | `WORK_DIR_TAKEN` | workspace `work_dir` 已被该 owner 的其他 workspace 占用 |
 | 429 | `RATE_LIMITED` | 触发 Rate Limit |
 | 500 | `INTERNAL` | Handler panic、未分类内部错误 |
 | 501 | `NOT_IMPLEMENTED` | 该接口尚未实现 |

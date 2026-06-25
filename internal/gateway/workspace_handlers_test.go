@@ -2,19 +2,35 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
-func (e *testAuthEnv) createWorkspace(t *testing.T, cookie, name, workDir string) *session.Workspace {
+// wsSandboxDir 构造 owner 沙箱内的 work_dir（$HOME/.hotplex/workspaces/<ownerUserID>/<sub>），
+// 使 security.ValidateWorkspaceWorkDir 约束自动满足。用真实 $HOME（与校验同源），可并行；
+// 目录无需预先存在 —— workspace Create 只持久化路径字符串。
+func wsSandboxDir(t *testing.T, ownerUserID, sub string) string {
 	t.Helper()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	return filepath.Join(home, ".hotplex", "workspaces", ownerUserID, sub)
+}
+
+func (e *testAuthEnv) createWorkspace(t *testing.T, cookie, ownerUID, name, sub string) *session.Workspace {
+	t.Helper()
+	workDir := wsSandboxDir(t, ownerUID, sub)
 	body := []byte(`{"name":"` + name + `","work_dir":"` + workDir + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
 	req.Header.Set("Cookie", cookie)
@@ -46,9 +62,9 @@ func TestWorkspaceCRUD(t *testing.T) {
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
 
 	// Create
-	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-crud")
+	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "crud")
 	require.NotEmpty(t, ws.ID)
-	require.Equal(t, "/tmp/hotplex-ws-crud", ws.WorkDir)
+	require.Equal(t, wsSandboxDir(t, "u-admin", "crud"), ws.WorkDir)
 
 	// List → 1
 	require.Len(t, env.listWorkspaces(t, cookie), 1)
@@ -69,14 +85,17 @@ func TestWorkspaceCRUD(t *testing.T) {
 	env.wsHandlers.Update(w2, req2)
 	require.Equal(t, http.StatusOK, w2.Code)
 
-	// Update work_dir → rejected (immutable, spec §6.2)
-	req3 := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+ws.ID, bytes.NewReader([]byte(`{"work_dir":"/tmp/other"}`)))
+	// Update work_dir → OK (mutable at workspace-level, must stay in sandbox)
+	otherDir := wsSandboxDir(t, "u-admin", "other")
+	req3 := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+ws.ID, bytes.NewReader([]byte(`{"work_dir":"`+otherDir+`"}`)))
 	req3.SetPathValue("id", ws.ID)
 	req3.Header.Set("Cookie", cookie)
 	w3 := httptest.NewRecorder()
 	env.wsHandlers.Update(w3, req3)
-	require.Equal(t, http.StatusBadRequest, w3.Code)
-	require.Contains(t, w3.Body.String(), "WORK_DIR_IMMUTABLE")
+	require.Equal(t, http.StatusOK, w3.Code)
+	var wsUpdated session.Workspace
+	require.NoError(t, json.NewDecoder(w3.Body).Decode(&wsUpdated))
+	require.Equal(t, otherDir, wsUpdated.WorkDir)
 
 	// Delete (no active sessions) OK
 	req4 := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+ws.ID, nil)
@@ -91,11 +110,11 @@ func TestWorkspace_Isolation_AcrossUsers(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)
 	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	wsAdmin := env.createWorkspace(t, cookieAdmin, "admin-proj", "/tmp/hotplex-ws-admin")
+	wsAdmin := env.createWorkspace(t, cookieAdmin, "u-admin", "admin-proj", "iso-admin")
 
 	env.createUser(t, "alice", "alicepass1", "user")
 	cookieAlice := env.loginAs(t, "alice", "alicepass1", http.StatusOK)
-	wsAlice := env.createWorkspace(t, cookieAlice, "alice-proj", "/tmp/hotplex-ws-alice")
+	wsAlice := env.createWorkspace(t, cookieAlice, "u-alice", "alice-proj", "iso-alice")
 
 	// Alice lists → only her own, never admin's
 	list := env.listWorkspaces(t, cookieAlice)
@@ -117,10 +136,11 @@ func TestWorkspace_UniqueWorkDirPerUser(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	env.createWorkspace(t, cookie, "first", "/tmp/hotplex-ws-unique")
+	env.createWorkspace(t, cookie, "u-admin", "first", "unique")
 
 	// Same owner + same work_dir → 409 WORK_DIR_TAKEN (per-user 1:1, spec §6.2)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader([]byte(`{"name":"second","work_dir":"/tmp/hotplex-ws-unique"}`)))
+	dupDir := wsSandboxDir(t, "u-admin", "unique")
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader([]byte(`{"name":"second","work_dir":"`+dupDir+`"}`)))
 	req.Header.Set("Cookie", cookie)
 	w := httptest.NewRecorder()
 	env.wsHandlers.Create(w, req)
@@ -151,7 +171,7 @@ func TestWorkspace_PatchAgentConfigOverrides_Validation(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-patch")
+	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "patch")
 
 	tests := []struct {
 		name       string
@@ -211,7 +231,7 @@ func TestWorkspace_PatchAgentConfigOverrides_Persists(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-persist")
+	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "persist")
 
 	w := env.patchWorkspace(t, cookie, ws.ID, `{"agent_config_overrides":"{\"SOUL.md\":\"ws-soul\"}"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -230,7 +250,7 @@ func TestWorkspace_PatchWorkerPreference_Whitelist(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-wp")
+	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "wp")
 
 	// The gateway test binary does not import the real worker adapters, so the
 	// registry holds only testNoopType ("noop_gateway_test", registered in init).
@@ -265,7 +285,7 @@ func TestWorkspace_PatchWorkerPreference_Persists(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	ws := env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-wp-persist")
+	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "wp-persist")
 
 	// Set a valid preference (testNoopType is the registered test worker).
 	w := env.patchWorkspace(t, cookie, ws.ID, `{"worker_preference":"`+string(testNoopType)+`"}`)
@@ -291,7 +311,7 @@ func TestWorkspace_JSONWireContract(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	env.createWorkspace(t, cookie, "proj", "/tmp/hotplex-ws-wire")
+	env.createWorkspace(t, cookie, "u-admin", "proj", "wire")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
 	req.Header.Set("Cookie", cookie)
@@ -326,8 +346,9 @@ func TestWorkspace_JSONWireContract(t *testing.T) {
 
 const testAPIKeyHeader = "X-API-Key"
 
-func (e *testAuthEnv) createWorkspaceWithAPIKey(t *testing.T, key, name, workDir string) *session.Workspace {
+func (e *testAuthEnv) createWorkspaceWithAPIKey(t *testing.T, key, ownerUID, name, sub string) *session.Workspace {
 	t.Helper()
+	workDir := wsSandboxDir(t, ownerUID, sub)
 	body := []byte(`{"name":"` + name + `","work_dir":"` + workDir + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
 	req.Header.Set(testAPIKeyHeader, key)
@@ -361,7 +382,7 @@ func TestWorkspace_APIKey_CRUD(t *testing.T) {
 	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1")
 
 	// Create — owner must be the api-key user, not "api_user" or "anonymous".
-	ws := env.createWorkspaceWithAPIKey(t, "svc1-key", "svc-proj", "/tmp/hotplex-ws-apikey-crud")
+	ws := env.createWorkspaceWithAPIKey(t, "svc1-key", "u-svc1", "svc-proj", "apikey-crud")
 	require.NotEmpty(t, ws.ID)
 	require.Equal(t, "u-svc1", ws.OwnerUserID, "workspace owner must resolve to the api-key user's users.id")
 
@@ -403,7 +424,7 @@ func TestWorkspace_APIKey_Isolation(t *testing.T) {
 	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1")
 	env.addAPIKeyUser(t, "svc2-key", "u-svc2", "apikey:svc2")
 
-	ws1 := env.createWorkspaceWithAPIKey(t, "svc1-key", "svc1-proj", "/tmp/hotplex-ws-apikey-iso1")
+	ws1 := env.createWorkspaceWithAPIKey(t, "svc1-key", "u-svc1", "svc1-proj", "apikey-iso1")
 
 	// svc2 lists → sees nothing of svc1's.
 	list := env.listWorkspacesWithAPIKey(t, "svc2-key")
@@ -431,7 +452,7 @@ func TestWorkspace_APIKey_Priority_Over_Cookie(t *testing.T) {
 	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1")
 	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
 
-	body := []byte(`{"name":"dual-channel","work_dir":"/tmp/hotplex-ws-apikey-prio"}`)
+	body := []byte(`{"name":"dual-channel","work_dir":"` + wsSandboxDir(t, "u-svc1", "apikey-prio") + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
 	req.Header.Set(testAPIKeyHeader, "svc1-key")
 	req.Header.Set("Cookie", cookieAdmin)
@@ -458,7 +479,7 @@ func TestWorkspace_MixedCredentials_NoBypassForNonAdminAPIKey(t *testing.T) {
 	env.addAPIKeyUser(t, "svc1-key", "u-svc1", "apikey:svc1")
 	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
 	// admin owns this workspace; svc1 (api-key user) does not.
-	wsAdmin := env.createWorkspace(t, cookieAdmin, "admin-proj", "/tmp/hotplex-ws-mixed-admin")
+	wsAdmin := env.createWorkspace(t, cookieAdmin, "u-admin", "admin-proj", "mixed-admin")
 
 	// Request carries svc1's api-key (non-owner uid) + admin's cookie.
 	// uid resolves to u-svc1 (role=user) → isAdmin=false → 403, even with the
@@ -482,7 +503,7 @@ func TestWorkspace_AdminCookie_CanReadOthers(t *testing.T) {
 	env := newTestAuthEnv(t)
 	env.createUser(t, "alice", "alicepass1", "user")
 	cookieAlice := env.loginAs(t, "alice", "alicepass1", http.StatusOK)
-	wsAlice := env.createWorkspace(t, cookieAlice, "alice-proj", "/tmp/hotplex-ws-admin-read")
+	wsAlice := env.createWorkspace(t, cookieAlice, "u-alice", "alice-proj", "admin-read")
 
 	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+wsAlice.ID, nil)
@@ -505,4 +526,137 @@ func TestWorkspace_APIKey_Invalid_Rejected(t *testing.T) {
 	w := httptest.NewRecorder()
 	env.wsHandlers.List(w, req)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// ---------------------------------------------------------------------------
+// work_dir sandbox 前缀约束（security.ValidateWorkspaceWorkDir）
+// ---------------------------------------------------------------------------
+
+// TestWorkspace_Create_OutsideSandbox_Rejected: 新约束 —— workspace work_dir 必须落在
+// owner 沙箱前缀 $HOME/.hotplex/workspaces/<uid> 下。
+func TestWorkspace_Create_OutsideSandbox_Rejected(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	body := []byte(`{"name":"escape","work_dir":"/tmp/hotplex-escape"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	env.wsHandlers.Create(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "WORK_DIR_OUTSIDE_SANDBOX")
+}
+
+// TestWorkspace_Update_WorkDir_OutsideSandbox_Rejected: PATCH 改 work_dir 也必须留在沙箱内。
+func TestWorkspace_Update_WorkDir_OutsideSandbox_Rejected(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "upd-sandbox")
+
+	// 改成沙箱外 → 403
+	w := env.patchWorkspace(t, cookie, ws.ID, `{"work_dir":"/tmp/hotplex-escape"}`)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "WORK_DIR_OUTSIDE_SANDBOX")
+
+	// 改成沙箱内另一个子目录 → 200
+	inside := wsSandboxDir(t, "u-admin", "upd-moved")
+	w2 := env.patchWorkspace(t, cookie, ws.ID, `{"work_dir":"`+inside+`"}`)
+	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
+}
+
+// TestWorkspace_OwnerIsolation_Sandbox: 即使 work_dir 落在 workspaces 树下，只要不在
+// 调用者自己 uid 的子树下（例如别人的 uid），也必须被拒。
+func TestWorkspace_OwnerIsolation_Sandbox(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	otherDir := wsSandboxDir(t, "u-someone-else", "stolen")
+	body := []byte(`{"name":"cross","work_dir":"` + otherDir + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	env.wsHandlers.Create(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "WORK_DIR_OUTSIDE_SANDBOX")
+}
+
+// TestWorkspace_Grandfather_LegacyWorkDir: 沙箱约束上线前的老 workspace work_dir 可能
+// 不在新前缀下。PATCH 非 work_dir 字段（如 name）不得触发前缀校验 —— 老 workspace 继续
+// 可用（grandfather）；仅 PATCH work_dir 时才强制前缀。
+func TestWorkspace_Grandfather_LegacyWorkDir(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	// 直接经 store 写入 legacy work_dir（绕过 handler 校验，模拟上线前老数据）。
+	legacy := &session.Workspace{
+		ID: "ws-legacy", OwnerUserID: "u-admin", Name: "legacy", WorkDir: "/tmp/hotplex-legacy-pre-sandbox", Status: "active",
+	}
+	require.NoError(t, env.store.CreateWorkspace(context.Background(), legacy, env.wsHandlers.nowUnix()))
+
+	// PATCH name → 200，不得触发 work_dir 前缀校验。
+	w := env.patchWorkspace(t, cookie, "ws-legacy", `{"name":"legacy-renamed"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// TestWorkspace_UpdateWorkDir_ActiveSessionBlocked: work_dir 参与 DeriveSessionKey
+// (key.go)，改它会 shift 确定性 session id 并孤立活跃会话的历史。Update 必须在有活跃
+// 会话时拒绝改动（对齐 Delete 的 DeleteWorkspaceIfEmpty 守卫，spec §9.1）。
+func TestWorkspace_UpdateWorkDir_ActiveSessionBlocked(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "u-admin", "guard", "initial")
+
+	// 直接写一条活跃 session 绑定该 workspace（绕过 WS 握手）。
+	sqlite := env.store.(*session.SQLiteStore)
+	require.NoError(t, sqlite.Upsert(context.Background(), &session.SessionInfo{
+		ID:          "sess-active",
+		UserID:      "u-admin",
+		WorkspaceID: ws.ID,
+		State:       events.StateRunning,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}))
+
+	// PATCH 改 work_dir 到沙箱内另一目录 → 409 WORKSPACE_NOT_EMPTY。
+	moved := wsSandboxDir(t, "u-admin", "moved")
+	w := env.patchWorkspace(t, cookie, ws.ID, `{"work_dir":"`+moved+`"}`)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "WORKSPACE_NOT_EMPTY")
+
+	// 同值 PATCH（abs == ws.WorkDir）不触发守卫 → 200。
+	w2 := env.patchWorkspace(t, cookie, ws.ID, `{"work_dir":"`+ws.WorkDir+`"}`)
+	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
+}
+
+// TestWorkspace_Update_OwnerIsolation_AdminEdit: admin 代改别人的 workspace 时，
+// work_dir 沙箱必须按 workspace OWNER 校验（spec §2 G2），而非操作者 admin 自己。
+// Create 路径无此问题（创建者即 owner）；Update 的 admin-edit 才会两者分离。
+func TestWorkspace_Update_OwnerIsolation_AdminEdit(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	adminCookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	env.createUser(t, "bob", "bobpass", "user")
+
+	// 直接经 store 写入 bob 的 workspace（owner=u-bob，绕过 handler 创建）。
+	bob := &session.Workspace{
+		ID: "ws-bob", OwnerUserID: "u-bob", Name: "bob-proj",
+		WorkDir: wsSandboxDir(t, "u-bob", "orig"), Status: "active",
+	}
+	require.NoError(t, env.store.CreateWorkspace(context.Background(), bob, env.wsHandlers.nowUnix()))
+
+	// admin 代改：work_dir 落 admin 自己沙箱 → 拒（owner 是 bob，必须落 bob 沙箱）。
+	adminDir := wsSandboxDir(t, "u-admin", "hijack")
+	w := env.patchWorkspace(t, adminCookie, "ws-bob", `{"work_dir":"`+adminDir+`"}`)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "WORK_DIR_OUTSIDE_SANDBOX")
+
+	// admin 代改：work_dir 落 bob 沙箱 → 200（owner 隔离保持，admin 可代办）。
+	bobDir := wsSandboxDir(t, "u-bob", "moved")
+	w2 := env.patchWorkspace(t, adminCookie, "ws-bob", `{"work_dir":"`+bobDir+`"}`)
+	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
 }

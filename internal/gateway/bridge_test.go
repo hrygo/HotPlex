@@ -253,6 +253,25 @@ func TestGetOrInitAccum_EmptyWorkDirNoOp(t *testing.T) {
 	assert.Equal(t, "", acc.WorkDir)
 }
 
+// TestBridge_SwitchWorkDir_WorkspaceBoundRejected verifies the bridge-level guard
+// that closes the WS /cd bypass (review P1-2): a workspace-bound session is
+// rejected before any worker terminate / transition, regardless of caller
+// (REST already guards at api.go; this is the backstop for the WS path).
+func TestBridge_SwitchWorkDir_WorkspaceBoundRejected(t *testing.T) {
+	t.Parallel()
+	sm := new(mockBridgeSM)
+	sm.On("Get", "sess-1").Return(&session.SessionInfo{
+		ID: "sess-1", State: events.StateRunning, WorkspaceID: "ws-1",
+	}, nil)
+	b := &Bridge{log: slog.Default(), sm: sm}
+
+	_, err := b.SwitchWorkDir(context.Background(), "sess-1", "/tmp/new")
+	require.ErrorIs(t, err, ErrWorkDirImmutable)
+	// Guard fires before GetWorker/Terminate/Transition — none should be touched.
+	sm.AssertNotCalled(t, "GetWorker")
+	sm.AssertNotCalled(t, "Transition")
+}
+
 // ─── Test injectSessionStats ─────────────────────────────────────────────────
 
 func TestInjectSessionStats(t *testing.T) {

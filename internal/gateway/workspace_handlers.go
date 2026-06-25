@@ -103,6 +103,10 @@ func (h *WorkspaceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusForbidden, "WORK_DIR_FORBIDDEN", err.Error())
 		return
 	}
+	if err := security.ValidateWorkspaceWorkDir(abs, uid); err != nil {
+		writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under $HOME/.hotplex/workspaces/<your-user-id>")
+		return
+	}
 	ws := &session.Workspace{
 		ID: uuid.NewString(), OwnerUserID: uid, Name: req.Name, WorkDir: abs, Status: "active",
 	}
@@ -160,7 +164,7 @@ type updateWorkspaceRequest struct {
 	Name                 string  `json:"name"`
 	AgentConfigOverrides string  `json:"agent_config_overrides"`
 	WorkerPreference     *string `json:"worker_preference"` // nil = omit (no change); "" = explicit clear to default
-	WorkDir              string  `json:"work_dir"`          // must be rejected (immutable, spec §6.2)
+	WorkDir              string  `json:"work_dir"`          // workspace-level mutable (session-level inherits)
 }
 
 // Update: PATCH /api/workspaces/{id}
@@ -174,10 +178,6 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid body")
 		return
 	}
-	if req.WorkDir != "" {
-		writeAppError(w, http.StatusBadRequest, "WORK_DIR_IMMUTABLE", "work_dir is immutable")
-		return
-	}
 	ws, err := h.store.GetWorkspaceByID(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
@@ -186,6 +186,42 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
+	}
+	if req.WorkDir != "" {
+		abs, err := config.ExpandAndAbs(req.WorkDir)
+		if err != nil {
+			writeAppError(w, http.StatusBadRequest, "INVALID_WORK_DIR", err.Error())
+			return
+		}
+		if err := security.ValidateWorkDir(abs); err != nil {
+			writeAppError(w, http.StatusForbidden, "WORK_DIR_FORBIDDEN", err.Error())
+			return
+		}
+		// Sandbox is keyed by the workspace OWNER, not the acting user, so an
+		// admin editing another user's workspace keeps owner isolation (spec §2 G2).
+		// Create (:106) passes uid because the creator IS the owner; Update is the
+		// admin-edit path where the two can differ.
+		if err := security.ValidateWorkspaceWorkDir(abs, ws.OwnerUserID); err != nil {
+			writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under the workspace owner's sandbox ($HOME/.hotplex/workspaces/<owner-user-id>)")
+			return
+		}
+		// work_dir participates in DeriveSessionKey (key.go), so changing it shifts
+		// the deterministic session id and orphans any bound active session's
+		// history. Reject the change while active sessions exist, mirroring the
+		// DeleteWorkspaceIfEmpty guard used by Delete (spec §9.1). No-op when the
+		// value is unchanged.
+		if abs != ws.WorkDir {
+			n, err := h.store.CountActiveSessionsInWorkspace(r.Context(), ws.ID)
+			if err != nil {
+				writeAppError(w, http.StatusInternalServerError, "INTERNAL", "check active sessions failed")
+				return
+			}
+			if n > 0 {
+				writeAppError(w, http.StatusConflict, "WORKSPACE_NOT_EMPTY", "cannot change work_dir while the workspace has active sessions")
+				return
+			}
+		}
+		ws.WorkDir = abs
 	}
 	if req.Name != "" {
 		ws.Name = req.Name
@@ -216,8 +252,16 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		ws.WorkerPreference = *req.WorkerPreference
 	}
 	if err := h.store.UpdateWorkspace(r.Context(), ws, h.nowUnix()); err != nil {
+		if errors.Is(err, session.ErrWorkspaceNotEmpty) {
+			writeAppError(w, http.StatusConflict, "WORKSPACE_NOT_EMPTY", "cannot change work_dir while the workspace has active sessions")
+			return
+		}
 		if errors.Is(err, session.ErrWorkspaceConflict) {
 			writeAppError(w, http.StatusConflict, "WORKSPACE_VERSION_MISMATCH", "workspace concurrently modified, please re-fetch and retry")
+			return
+		}
+		if isUniqueViolation(err) {
+			writeAppError(w, http.StatusConflict, "WORK_DIR_TAKEN", "work_dir already used by you")
 			return
 		}
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")

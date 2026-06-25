@@ -28,7 +28,7 @@ export function AgentConfigFileList({
   onSelect: (key: string) => void;
 }) {
   return (
-    <div className="w-48 flex-shrink-0 space-y-1">
+    <div className="w-full flex flex-wrap gap-1.5 border-b border-[var(--border-subtle)] pb-3">
       {CONFIG_FILES.map((def) => {
         const isActive = activeKey === def.key;
         const hasOverride = !!(overrides[def.file] && overrides[def.file].trim());
@@ -36,20 +36,18 @@ export function AgentConfigFileList({
           <button
             key={def.key}
             onClick={() => onSelect(def.key)}
-            className={`w-full text-left px-3 py-2.5 rounded-xl transition-all text-sm border ${
+            title={`${def.label}: ${def.description}`}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all text-xs font-bold border cursor-pointer select-none ${
               isActive
-                ? 'bg-[var(--bg-active)] border-[var(--border-active)] text-[var(--accent-gold)]'
-                : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border-transparent'
+                ? 'bg-[var(--bg-active)] border-[rgba(251,191,36,0.15)] text-[var(--accent-gold)]'
+                : 'bg-transparent border-transparent hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
             }`}
           >
-            <div className="flex items-center justify-between">
-              <span className="font-semibold">{def.label}</span>
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${hasOverride ? 'bg-[var(--accent-gold)]' : 'bg-[var(--border-subtle)]'}`}
-                title={hasOverride ? 'Overridden' : 'Inherits team default'}
-              />
-            </div>
-            <span className="text-[10px] text-[var(--text-faint)] block mt-0.5">{def.description}</span>
+            <span>{def.file}</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${hasOverride ? 'bg-[var(--accent-gold)]' : 'bg-[var(--border-subtle)]'}`}
+              title={hasOverride ? 'Overridden' : 'Inherits default'}
+            />
           </button>
         );
       })}

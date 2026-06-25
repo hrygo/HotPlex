@@ -16,9 +16,10 @@ import {
   createSession,
   deleteSession,
   AuthError,
+  ANCHOR_CLIENT_SESSION_ID,
   type SessionInfo,
 } from '@/lib/api/sessions';
-import { workerType as defaultWorkerType, workDir as configWorkDir } from '@/lib/config';
+import { workerType as defaultWorkerType } from '@/lib/config';
 import { newSessionId } from '@/lib/ai-sdk-transport/client/envelope';
 import { logger } from '@/lib/logger';
 
@@ -40,7 +41,7 @@ export interface UseSessionsReturn {
   openPanel: () => void;
   closePanel: () => void;
   selectSession: (session: SessionInfo) => void;
-  createNewSession: (title: string, workerType?: string, workDir?: string) => Promise<void>;
+  createNewSession: (title: string, workerType?: string) => Promise<void>;
   removeSession: (id: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   handleSessionSelect: (id: string) => void;
@@ -66,10 +67,6 @@ export function useSessions({
   const isCreating = useRef(false);
   const STORAGE_KEY = workspaceId ? `hotplex_active_session_id_${workspaceId}` : 'hotplex_active_session_id';
   const DEFAULT_WORKER_TYPE = defaultWorkerType;
-
-  // Deterministic anchor session — ensures the first auto-created session
-  // maps to the same server-side key via DeriveSessionKey(userID, workerType, "main", workDir).
-  const ANCHOR_SESSION_ID = 'main';
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -119,12 +116,10 @@ export function useSessions({
       if (!initId && !savedId && filtered.length === 0 && !isCreating.current) {
         isCreating.current = true;
         try {
-          const effectiveWorkDir = configWorkDir || undefined;
           const { session_id } = await createSession({
-            clientSessionId: ANCHOR_SESSION_ID,
+            clientSessionId: ANCHOR_CLIENT_SESSION_ID,
             workerType: DEFAULT_WORKER_TYPE,
-            title: ANCHOR_SESSION_ID,
-            workDir: effectiveWorkDir,
+            title: ANCHOR_CLIENT_SESSION_ID,
             workspaceId
           });
           const now = new Date().toISOString();
@@ -133,8 +128,8 @@ export function useSessions({
             user_id: '',
             worker_type: DEFAULT_WORKER_TYPE,
             state: 'created',
-            title: ANCHOR_SESSION_ID,
-            work_dir: effectiveWorkDir,
+            title: ANCHOR_CLIENT_SESSION_ID,
+            work_dir: '',
             created_at: now,
             updated_at: now,
           };
@@ -159,8 +154,14 @@ export function useSessions({
     }
   }, [workspaceId, STORAGE_KEY, DEFAULT_WORKER_TYPE]);
 
-  // Load sessions when mount or workspaceId changes
+  // Load sessions when mount or workspaceId changes. Clear activeSession
+  // synchronously on switch: otherwise the stale session (bound to the
+  // previous workspace) is paired with the new workspaceId in the WS init
+  // handshake, which the server rejects as "session workspace mismatch"
+  // (internal/gateway/conn.go resolveSession). refreshSessions() repopulates
+  // activeSession from the new workspace's list.
   useEffect(() => {
+    setActiveSession(null);
     refreshSessions();
   }, [workspaceId, refreshSessions]);
 
@@ -171,9 +172,8 @@ export function useSessions({
     setIsOpen(false);
   }, [STORAGE_KEY]);
 
-  const createNewSession = useCallback(async (title: string, workerType?: string, workDir?: string) => {
+  const createNewSession = useCallback(async (title: string, workerType?: string) => {
     const wt = workerType || DEFAULT_WORKER_TYPE;
-    const effectiveWorkDir = workDir || configWorkDir || undefined;
     if (isCreating.current) return;
     isCreating.current = true;
     setIsLoading(true);
@@ -182,7 +182,6 @@ export function useSessions({
         clientSessionId: newSessionId(),
         workerType: wt,
         title: title || undefined,
-        workDir: effectiveWorkDir,
         workspaceId
       });
       const now = new Date().toISOString();
@@ -192,7 +191,7 @@ export function useSessions({
         worker_type: wt,
         state: 'created',
         title,
-        work_dir: effectiveWorkDir,
+        work_dir: '',
         created_at: now,
         updated_at: now,
       };

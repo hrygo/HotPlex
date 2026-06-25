@@ -98,12 +98,14 @@ export interface UpdateWorkspaceOptions {
   name?: string;
   workerPreference?: string;
   agentConfigOverrides?: Record<string, string>;
+  workDir?: string;
 }
 
 export async function updateWorkspace(id: string, opts: UpdateWorkspaceOptions, signal?: AbortSignal): Promise<Workspace> {
   const body: any = {};
   if (opts.name !== undefined) body.name = opts.name;
   if (opts.workerPreference !== undefined) body.worker_preference = opts.workerPreference;
+  if (opts.workDir !== undefined) body.work_dir = opts.workDir;
   // Backend expects a JSON string, not an object (see parseOverrides note).
   if (opts.agentConfigOverrides !== undefined) body.agent_config_overrides = JSON.stringify(opts.agentConfigOverrides);
 

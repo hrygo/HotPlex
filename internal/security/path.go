@@ -1,7 +1,9 @@
 package security
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -75,6 +77,46 @@ func ValidateWorkDir(dir string) error {
 		return nil
 	}
 	return checkForbidden(realPath)
+}
+
+// ErrWorkDirOutsideSandbox 由 ValidateWorkspaceWorkDir 在 work_dir 越出 owner 的 workspace
+// 沙箱前缀（$HOME/.hotplex/workspaces/<ownerUserID>）时返回。
+var ErrWorkDirOutsideSandbox = errors.New("security: work dir outside owner workspace sandbox")
+
+// ValidateWorkspaceWorkDir 校验 dir 恰好等于或位于 owner 的 workspace 沙箱前缀下：
+//
+//	$HOME/.hotplex/workspaces/<ownerUserID>
+//
+// 这是 workspace 专用的额外约束，不替代通用 ValidateWorkDir（黑名单/symlink 仍需独立调用）。
+// dir 必须已是绝对路径（调用前先经 config.ExpandAndAbs）。
+func ValidateWorkspaceWorkDir(dir, ownerUserID string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("security: cannot resolve $HOME: %w", err)
+	}
+	return validateWorkspaceWorkDir(dir, home, ownerUserID)
+}
+
+// validateWorkspaceWorkDir 是 ValidateWorkspaceWorkDir 的可测试内核，注入 home 目录，
+// 使前缀/越界/owner 隔离逻辑可在不依赖进程级 $HOME 的情况下并行测试。
+func validateWorkspaceWorkDir(dir, home, ownerUserID string) error {
+	if dir == "" || ownerUserID == "" {
+		return ErrWorkDirOutsideSandbox
+	}
+	base := filepath.Join(home, ".hotplex", "workspaces", ownerUserID)
+	rel, err := filepath.Rel(base, dir)
+	if err != nil {
+		return ErrWorkDirOutsideSandbox
+	}
+	// rel == "." → dir == base（沙箱根本身，合法）；
+	// 任何以 ".." 开头的相对路径意味着 dir 在 base 之外 —— owner 隔离由此保证。
+	if rel == "." {
+		return nil
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ErrWorkDirOutsideSandbox
+	}
+	return nil
 }
 
 // checkForbidden returns an error if path is exactly or under a forbidden directory.

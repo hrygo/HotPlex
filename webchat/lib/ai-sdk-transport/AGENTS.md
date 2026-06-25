@@ -32,10 +32,9 @@ src/
 
 ## KEY PATTERNS
 
-**Three exports (package.json exports map)**
-- `@hotplex/ai-sdk-transport` → main barrel (transport utils)
+**Exports (package.json exports map)**
+- `@hotplex/ai-sdk-transport` → main barrel (BrowserHotPlexClient + transport utils)
 - `@hotplex/ai-sdk-transport/server` → createHotPlexHandler
-- `@hotplex/ai-sdk-transport/client` → BrowserHotPlexClient
 
 **Event mapping (chunk-mapper.ts)**
 - message.start → text-start

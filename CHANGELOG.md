@@ -1,5 +1,52 @@
 # Changelog
 
+## [1.30.0] - 2026-06-25
+
+### Summary
+
+v1.30.0 是一次 minor 版本更新，主题是 **WebChat 多租户化**（spec ①-⑦ 全套落地）。引入 workspace 作为跨通道租户锚，覆盖企业 SSO（OIDC 统一认证）、per-workspace agent-configs 两层继承、workspace 级 worker 选择、配额热重载与聚合指标，以及完整的多租户前端（登录 / workspace 切换 / 设置页）。附带 admin 模块完整重构与 work_dir 沙箱化。
+
+> **WebSocket Gateway 客户端 SDK 集成：完全向后兼容，现有集成无需改动。**
+> - AEP 事件协议（`pkg/events`、`pkg/aep`）**未变更**（仅新增文档）
+> - Session key 公式**向后兼容**：新增的 `workspaceID` 为可选参数，为空时保持旧 4 字段 hash，现有 session key 不变
+> - 客户端 SDK（Go / TypeScript / Python / Java）**零改动**
+> - WS init 握手**纯增量**：新增可选 `workspace_id` 字段，未设置时整块跳过
+>
+> **唯一行为边缘变更**：WS init 的 `session_id`（及 REST 的 `client_session_id`）若包含 `|` 字符，现在会被拒绝（`protocol_violation` / `invalid_message`）。此前是静默 alias 到错误的 session key —— 用 `|` 的客户端本就已损坏 —— 现在从静默 bug 变为硬错误。
+
+### Added
+
+- **Gateway Core**: WebChat 多租户地基（spec ①）— workspace 作为跨通道租户锚，`DeriveSessionKey` 扩展为 5 字段（ownerID, workerType, clientKey, workspaceID, workDir），`workspaceID` 为空时保持旧 hash；含 DB migrations 017-021（multitenancy tables / api_key_users / user_identities / 索引）。(#746)
+- **Gateway Core**: workspace 跨通道租户接入（spec ⑦ Phase 1）— WS init envelope 新增可选 `workspace_id` 字段绑定 session 到 workspace，含 owner 校验、disabled 校验、anonymous dev-mode carve-out。(#773)
+- **Configuration**: per-workspace agent-configs 两层继承（spec ②）— workspace 级配置覆盖全局。(#748)
+- **Configuration**: workspace 级 worker 选择（spec ③）— 每个 workspace 可独立指定 worker_type。(#753)
+- **Session**: 配额增强（spec ⑤）— per-workspace 配额热重载 + 聚合指标。(#755)
+- **Security**: 企业 SSO（OIDC 统一认证）（spec ④）— 新增 `oauth_handlers.go` + `user_identities` 表。(#757)
+- **WebChat UI**: 多租户前端一等公民化（spec ⑥）— 登录 / workspace 切换 / 设置页 + 后端 A1-A5 接线。(#762)
+- **WebChat UI**: Settings Modal + 顶部 workspace bar（spec ⑦ Phase 3）。(#779)
+- **WebChat UI**: workspace work_dir 可变 + Settings 页面 UI 重构 + workspace 创建入口 + Default 落沙箱。
+- **WebChat UI**: session card 重新设计，优先展示 title。
+- **Security**: workspace work_dir 沙箱前缀强制 — 防止 workspace work_dir 逃逸到约定目录之外。
+
+### Changed
+
+- **Admin**: admin 模块完整重构 — 前端去重 + 后端契约修复 + 文档补齐。(#764)
+- **Admin**: Phase 2 错误信封统一 + AdminShell 预检。(#774)
+- **WebChat UI**: Phase 3 契约修复 + UpdateWorkspace 乐观并发（`version` 字段 ETag）。(#775)
+- **WebChat UI**: Settings General 去重 + workDir 沙箱可视化 + Tab 布局统一。
+- **WebChat UI**: 移除死 admin 页面与未用模块。
+
+### Fixed
+
+- **Security**: session key aliasing — client-controlled `session_id` / `client_session_id` 含 `|` 会与 `DeriveSessionKey` 字段分隔符碰撞，alias 到错误的 (clientKey, workspaceID) 对。新增 `ValidateClientKey` 在所有入口预检。(#746 review P3)
+- **Gateway Core**: REST/WS identity split — 已登录用户持续 "workspace access denied"。根因：跨源模式下浏览器无法在 WS upgrade 上附带 `X-API-Key`，WS 走 cookie 鉴权而 REST 走 api-key，后端 identity 解析 api-key-first 导致两侧用户不一致。改为 logged-in 时优先 cookie。
+- **Gateway Core**: `markInitDone` 自死锁 — 持 `c.mu` 调 `Close()`（sync.Mutex 不可重入），改为锁外调 Close。
+- **Gateway Core**: workspace work_dir Update 硬化（PR #785 review P1/P2）。
+- **WebChat UI**: workspace 切换 session mismatch + 新 workspace 预创建 anchor session。
+- **WebChat UI**: AI Config 保存后切 tab 内容丢失。
+- **WebChat UI**: settings header 跨 tab 抖动。
+- **WebChat UI**: workspace handshake 韧性 + drop session workdir。
+
 ## [1.29.1] - 2026-06-16
 
 ### Summary
