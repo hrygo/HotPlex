@@ -279,6 +279,8 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 
 > **PATCH 乐观并发（CAS）**：更新基于 `updated_at` 做乐观锁——服务端 `UPDATE ... WHERE id = ? AND updated_at = ?`，调用方缓存的 `updated_at` 不再匹配（被并发修改）时影响 0 行，返回 `409 WORKSPACE_VERSION_MISMATCH`（"workspace concurrently modified, please re-fetch and retry"）。客户端无需在 body 显式传版本字段（先 GET 取最新值再 PATCH），收到 409 后应重新 GET 再重试，避免静默 lost update。
 
+> **PATCH body 字段语义**：`name`、`agent_config_overrides` 传空字符串表示**不更新**（无法通过 PATCH 清空这两项）；`worker_preference` 为指针类型以区分三态——**省略**（字段未传）不更新、**空字符串** `""` 显式清除回默认 worker、**非空**设为指定类型（校验失败返回 `400 INVALID_WORKER_TYPE`）；`work_dir` 创建后不可变（携带即 `400 WORK_DIR_IMMUTABLE`，见上）。
+
 **Workspace 用户与邀请管理（spec ⑥，admin 维度）**：
 
 | 方法 | 路径 | 认证 | 说明 |
@@ -288,6 +290,8 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 | POST | `/api/admin/invitations` | Cookie | 创建邀请码 |
 | GET | `/api/admin/invitations` | Cookie | 列出邀请 |
 | DELETE | `/api/admin/invitations/{id}` | Cookie | 删除邀请 |
+
+> **GET /api/admin/invitations** — 每条邀请额外返回服务器计算的 `is_expired`（`true` 表示邀请码**未被使用且已过期**），客户端无需自行比对 `expires_at` 与本地时钟，规避时钟漂移。
 
 > ⚠️ **注意区分**：此处的 `/api/admin/*`（端口 `8888`，Cookie 认证，WebChat workspace 维度）与本页上方「认证」章节描述的 Admin API（端口 `9999`，Bearer Token，网关运维维度）是**两套独立端点**，认证模型和作用域完全不同，不要混淆。
 
