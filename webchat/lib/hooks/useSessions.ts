@@ -16,6 +16,7 @@ import {
   createSession,
   deleteSession,
   AuthError,
+  ANCHOR_CLIENT_SESSION_ID,
   type SessionInfo,
 } from '@/lib/api/sessions';
 import { workerType as defaultWorkerType } from '@/lib/config';
@@ -67,10 +68,6 @@ export function useSessions({
   const STORAGE_KEY = workspaceId ? `hotplex_active_session_id_${workspaceId}` : 'hotplex_active_session_id';
   const DEFAULT_WORKER_TYPE = defaultWorkerType;
 
-  // Deterministic anchor session — ensures the first auto-created session
-  // maps to the same server-side key via DeriveSessionKey(userID, workerType, "main", workDir).
-  const ANCHOR_SESSION_ID = 'main';
-
   const refreshSessions = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -120,9 +117,9 @@ export function useSessions({
         isCreating.current = true;
         try {
           const { session_id } = await createSession({
-            clientSessionId: ANCHOR_SESSION_ID,
+            clientSessionId: ANCHOR_CLIENT_SESSION_ID,
             workerType: DEFAULT_WORKER_TYPE,
-            title: ANCHOR_SESSION_ID,
+            title: ANCHOR_CLIENT_SESSION_ID,
             workspaceId
           });
           const now = new Date().toISOString();
@@ -131,7 +128,7 @@ export function useSessions({
             user_id: '',
             worker_type: DEFAULT_WORKER_TYPE,
             state: 'created',
-            title: ANCHOR_SESSION_ID,
+            title: ANCHOR_CLIENT_SESSION_ID,
             work_dir: '',
             created_at: now,
             updated_at: now,

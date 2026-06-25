@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { createWorkspace, type Workspace } from '@/lib/api/workspaces';
+import { createSession, ANCHOR_CLIENT_SESSION_ID } from '@/lib/api/sessions';
+import { workerType } from '@/lib/config';
 import { buildWorkspaceWorkDir } from '@/lib/utils/workspace-path';
 
 interface NewWorkspaceFormProps {
@@ -32,6 +34,20 @@ export function NewWorkspaceForm({ uid, onCreated, onCancel }: NewWorkspaceFormP
     setError(null);
     try {
       const ws = await createWorkspace(name.trim(), buildWorkspaceWorkDir(uid, name, subdir));
+      // Pre-create the anchor session so the new workspace is immediately
+      // usable on switch (listSessions returns it, no empty-state window).
+      // Best-effort + idempotent: useSessions retries on switch, and
+      // DeriveSessionKey maps (clientSessionId, ws, workDir) to one session.
+      try {
+        await createSession({
+          clientSessionId: ANCHOR_CLIENT_SESSION_ID,
+          workerType,
+          title: ANCHOR_CLIENT_SESSION_ID,
+          workspaceId: ws.id,
+        });
+      } catch {
+        // Swallow — useSessions will (re)create the anchor session on switch.
+      }
       onCreated(ws);
       setName('');
       setSubdir('');

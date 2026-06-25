@@ -25,6 +25,12 @@ export interface SessionInfo {
   title?: string;
 }
 
+// Anchor client_session_id for a workspace's default session. Shared by
+// useSessions (fallback auto-create) and NewWorkspaceForm (eager pre-create
+// on workspace creation) so both resolve to the same server-side session key
+// via DeriveSessionKey(userID, wt, "main", workspaceID, workDir).
+export const ANCHOR_CLIENT_SESSION_ID = 'main';
+
 export type SessionState = 'created' | 'running' | 'idle' | 'terminated' | 'deleted';
 
 export interface ListSessionsResponse {
