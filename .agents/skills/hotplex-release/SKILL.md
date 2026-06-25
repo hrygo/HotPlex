@@ -399,7 +399,7 @@ echo "Release notes: ${LINES} lines"
 
 # 追加 Contributors 段（圆形头像，不使用 @mention 避免与 GitHub 原生列表重复）
 LAST_TAG=$(git tag --sort=-version:refname | sed -n '2p')
-LOGIN_BLACKLIST="HotPlexBot"  # Bot 账号过滤，| 分隔的 grep -E 模式
+LOGIN_BLACKLIST="HotPlexBot|hotplex-ai"  # Bot 账号过滤（含 doc patrol bot），| 分隔的 grep -E 模式
 CONTRIBUTORS=$(git log "${LAST_TAG}..v${VERSION}" --no-merges --format="%H" | while read sha; do
   gh api "repos/{owner}/{repo}/commits/$sha" --jq '.author.login // empty' 2>/dev/null
 done | sort -u | grep -vE "^($LOGIN_BLACKLIST)$")
