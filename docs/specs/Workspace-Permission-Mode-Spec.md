@@ -1,6 +1,6 @@
 # Workspace 权限模式规范
 
-**状态**: Draft · **日期**: 2026-06-25 · **关联 Issue**: 见跟踪 Issue · **版本目标**: v1.31.0
+**状态**: Draft · **日期**: 2026-06-25 · **关联 Issue**: [#789](https://github.com/hrygo/hotplex/issues/789) · **版本目标**: v1.31.0
 
 ---
 
