@@ -94,6 +94,19 @@ func ValidateWorkspaceWorkDir(dir, ownerUserID string) error {
 - 老 workspace（含 Default 的 `./workspace`）数据库记录原样保留；session 继承其 `work_dir` 不重新校验。
 - 仅"新建 workspace"或"更新 workspace 的 `work_dir`"两个动作强制前缀。
 
+#### 5.1.4 work_dir 变更层级（澄清与 SwitchWorkDir 的关系）
+
+work_dir 有两个互不冲突的变更层级（PR review 曾误读为契约矛盾，此处显式区分）：
+
+| 层级 | 入口 | 可变性 | 约束 |
+|------|------|--------|------|
+| workspace 级 | `PATCH /api/workspaces/{id}` 携带 `work_dir` | **可改** | ① 落 owner 沙箱（G2，按 `OwnerUserID` 校验，admin 代改时按 owner 而非操作者）；② workspace 无活跃会话（`CountActiveSessionsInWorkspace` 守卫，返回 `409 WORKSPACE_NOT_EMPTY`） |
+| session 级 | `POST /api/sessions/{id}/switch-workdir`（`/cd`） | workspace-bound session **不可改**（`400 WORK_DIR_IMMUTABLE`） | worker 必须跟随其 workspace 的 work_dir；platform/messaging session（`WorkspaceID==""`）仍支持 |
+
+- workspace 级 PATCH 改的是 workspace 实体的 work_dir，影响该 workspace 所有**未来** session 的派生 key；活跃会话守卫确保变更瞬间无 session 受 key 漂移影响，故 resume 语义不破。
+- session 级 SwitchWorkDir 是单 session 临时切换，对绑定 workspace 的 session 拒绝，避免 worker 脱离其 workspace 归属。
+- §1 所述"session 从 workspace 继承 work_dir 且不可变"指 **session 级**（session 不能自行脱离 workspace）；与本节 workspace 级可改不矛盾。
+
 ### 5.2 前端（webchat）
 
 #### 5.2.1 API 签名不变 + 新增路径 helper

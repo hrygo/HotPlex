@@ -170,7 +170,7 @@ Session (自动继承所属 Workspace 的全部配置)
 | 权限模型 | bootstrap admin + 邀请制 + workspace 私有 | 无公开注册最安全，协作靠共享 work_dir |
 | session key 改造 | 方案3：`workspace_id` + `work_dir` 都进 key | 保留 work_dir 防 session ID 冲突，加 workspace_id 逻辑归属 |
 | bootstrap admin 创建方式 | CLI `hotplex admin create` | 无前端依赖，纯后端可验证 |
-| `work_dir` 可变性 | 创建后**不可变**（进 key 派生，改了断 resume） | 换目录 = 新建 workspace |
+| `work_dir` 可变性 | workspace 级**可改**（落 owner 沙箱 + 无活跃会话守卫，见 WebChat-Workspace-Create-WorkDir-Prefix-Spec §5.1.4）；session 级 workspace-bound 不可改 | 改 work_dir 不再要求新建 workspace |
 | 旧 webchat 共享会话 | GC 清理 | 无隔离产物，无保留价值 |
 
 ---
@@ -239,7 +239,7 @@ CREATE TABLE workspaces (
 CREATE INDEX idx_workspaces_owner ON workspaces(owner_user_id);
 ```
 
-- `work_dir` 创建后**不可变**（应用层强制，PATCH 不接受该字段）。
+- `work_dir` workspace 级可改：PATCH 携带时校验 owner 沙箱（`403 WORK_DIR_OUTSIDE_SANDBOX`，按 `OwnerUserID`）+ 活跃会话守卫（`409 WORKSPACE_NOT_EMPTY`，因 work_dir 进 session key 派生）；改 `name` / `agent_config_overrides` / `worker_preference` 不触发。session 级 work_dir 仍从 workspace 继承，workspace-bound session 不可自行 `/cd`（`400 WORK_DIR_IMMUTABLE`）。详见 WebChat-Workspace-Create-WorkDir-Prefix-Spec §5.1.4。
 - `agent_config_overrides` / `worker_preference`：本 spec 建表留空，为 spec ③/④ 预留。
 
 ### 6.3 新表 `invitations`（admin 邀请制）
@@ -308,7 +308,7 @@ func DeriveSessionKey(ownerID string, wt WorkerType, clientKey, workspaceID, wor
 
 ### 7.3 resume 语义
 
-`workspace_id`（UUID）永不变；`work_dir` 不可变（§6.2）。故方案3 下 webchat 会话 resume 的 key 输入完全稳定，resume 语义与现有一致。
+`workspace_id`（UUID）永不变；`work_dir` 在 workspace 无活跃会话时可改（§6.2 + WebChat-Workspace-Create-WorkDir-Prefix-Spec §5.1.4）。活跃会话守卫确保变更瞬间无 session 受 key 漂移影响，故 webchat 会话在其生命周期内 resume 的 key 输入稳定，resume 语义保持。
 
 ---
 
