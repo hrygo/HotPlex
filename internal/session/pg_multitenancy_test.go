@@ -34,7 +34,7 @@ func newPGMultitenancyMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 		"workspaces.get_by_id":                d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE id = ?"),
 		"workspaces.list_by_owner":            d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND status = 'active' ORDER BY created_at ASC LIMIT ? OFFSET ?"),
 		"workspaces.get_by_owner_and_workdir": d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND work_dir = ? AND status = 'active'"),
-		"workspaces.update":                   d.Rebind("UPDATE workspaces SET name = ?, agent_config_overrides = ?, worker_preference = ?, work_dir = ?, updated_at = ? WHERE id = ? AND updated_at = ?"),
+		"workspaces.update":                   d.Rebind("UPDATE workspaces SET name = ?, agent_config_overrides = ?, worker_preference = ?, work_dir = ?, updated_at = ? WHERE id = ? AND updated_at = ? AND (? = work_dir OR NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle')))"),
 		"workspaces.delete":                   d.Rebind("DELETE FROM workspaces WHERE id = ?"),
 		"workspaces.delete_if_empty":          d.Rebind("DELETE FROM workspaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle'))"),
 		"workspaces.count_active_sessions":    d.Rebind("SELECT COUNT(*) FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle')"),
@@ -242,9 +242,11 @@ func TestPGMultitenancy_UpdateWorkspace(t *testing.T) {
 	defer cleanup()
 	q := store.queries["workspaces.update"]
 	// ws.UpdatedAt=100 is the cached version from a prior Get (handler pattern);
-	// it binds the CAS WHERE clause's 6th arg.
+	// it binds the CAS WHERE clause. The trailing "" and "ws-1" bind the TOCTOU
+	// guard (? = work_dir compare, workspace_id for NOT EXISTS) — work_dir is "",
+	// so the compare matches and the row updates regardless of sessions.
 	mock.ExpectExec(regexp.QuoteMeta(q)).
-		WithArgs("newname", nil, nil, "", int64(200), "ws-1", int64(100)).
+		WithArgs("newname", nil, nil, "", int64(200), "ws-1", int64(100), "", "ws-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	ws := &Workspace{ID: "ws-1", Name: "newname", UpdatedAt: 100}
 	err := store.UpdateWorkspace(context.Background(), ws, 200)
@@ -252,18 +254,39 @@ func TestPGMultitenancy_UpdateWorkspace(t *testing.T) {
 	require.Equal(t, int64(200), ws.UpdatedAt, "CAS success bumps in-memory updated_at")
 }
 
-// TestPGMultitenancy_UpdateWorkspace_VersionConflict: RowsAffected==0 surfaces
-// as ErrWorkspaceConflict (review P3-1, mirrors SQLite TestSQLiteStore_UpdateWorkspace_VersionConflict).
+// TestPGMultitenancy_UpdateWorkspace_VersionConflict: RowsAffected==0 with zero
+// active sessions surfaces as ErrWorkspaceConflict (review P3-1, mirrors SQLite).
 func TestPGMultitenancy_UpdateWorkspace_VersionConflict(t *testing.T) {
 	t.Parallel()
 	store, mock, cleanup := newPGMultitenancyMock(t)
 	defer cleanup()
 	q := store.queries["workspaces.update"]
 	mock.ExpectExec(regexp.QuoteMeta(q)).
-		WithArgs("by-b", nil, nil, "", int64(300), "ws-1", int64(100)). // stale cached updated_at
-		WillReturnResult(sqlmock.NewResult(0, 0))                       // 0 rows → conflict
+		WithArgs("by-b", nil, nil, "", int64(300), "ws-1", int64(100), "", "ws-1"). // stale cached updated_at
+		WillReturnResult(sqlmock.NewResult(0, 0))                                   // 0 rows → disambiguate
+	mock.ExpectQuery(regexp.QuoteMeta(store.queries["workspaces.count_active_sessions"])).
+		WithArgs("ws-1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0)) // no active session → conflict, not NotEmpty
 	ws := &Workspace{ID: "ws-1", Name: "by-b", UpdatedAt: 100}
 	require.ErrorIs(t, store.UpdateWorkspace(context.Background(), ws, 300), ErrWorkspaceConflict)
+}
+
+// TestPGMultitenancy_UpdateWorkspace_WorkDirChangeBlockedByActiveSession: the SQL
+// TOCTOU guard rejects a work_dir change when an active session exists, surfacing
+// as ErrWorkspaceNotEmpty (review P1-1, mirrors SQLite).
+func TestPGMultitenancy_UpdateWorkspace_WorkDirChangeBlockedByActiveSession(t *testing.T) {
+	t.Parallel()
+	store, mock, cleanup := newPGMultitenancyMock(t)
+	defer cleanup()
+	q := store.queries["workspaces.update"]
+	mock.ExpectExec(regexp.QuoteMeta(q)).
+		WithArgs("n", nil, nil, "/new/dir", int64(300), "ws-1", int64(100), "/new/dir", "ws-1").
+		WillReturnResult(sqlmock.NewResult(0, 0)) // guard blocked: 0 rows
+	mock.ExpectQuery(regexp.QuoteMeta(store.queries["workspaces.count_active_sessions"])).
+		WithArgs("ws-1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1)) // 1 active session → NotEmpty
+	ws := &Workspace{ID: "ws-1", Name: "n", WorkDir: "/new/dir", UpdatedAt: 100}
+	require.ErrorIs(t, store.UpdateWorkspace(context.Background(), ws, 300), ErrWorkspaceNotEmpty)
 }
 
 func TestPGMultitenancy_DeleteWorkspace(t *testing.T) {

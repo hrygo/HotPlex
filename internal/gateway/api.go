@@ -255,7 +255,10 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// work_dir is immutable and comes from the workspace (spec §6.2).
+	// work_dir is session-immutable and sourced from the workspace (spec §6.2).
+	// The workspace itself may change work_dir via the admin Update endpoint
+	// (guarded against active sessions), but once a session is bound its work_dir
+	// is fixed — it enters DeriveSessionKey.
 	workDir := ws.WorkDir
 	if err := security.ValidateWorkDir(workDir); err != nil {
 		g.log.Error("workspace workDir failed validation", "method", r.Method, "path", r.URL.Path, "workspace_id", workspaceID, "err", err)

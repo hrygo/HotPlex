@@ -126,6 +126,51 @@ func TestSQLiteStore_UpdateWorkspace_VersionConflict(t *testing.T) {
 	require.Equal(t, int64(200), got.UpdatedAt)
 }
 
+// TestSQLiteStore_UpdateWorkspace_WorkDirChangeBlockedByActiveSession verifies the
+// SQL TOCTOU guard (review P1-1): a work_dir change is rejected atomically when an
+// active session exists, even if the handler's Count pre-check ran before the
+// session was inserted (the insert doesn't bump updated_at, so CAS alone can't
+// catch it). Mirrors DeleteWorkspaceIfEmpty's defense; surfaces as ErrWorkspaceNotEmpty.
+func TestSQLiteStore_UpdateWorkspace_WorkDirChangeBlockedByActiveSession(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "p", WorkDir: "/tmp/old"}, 1700000000))
+
+	// Active session inserted after the handler's hypothetical Count pre-check.
+	_, err := store.db.ExecContext(ctx, queries["sessions.upsert_session"],
+		"sess-1", "u-1", "u-1", "", "", "", "claude_code", "running", "webchat", "{}", "/tmp/old", "",
+		int64(1700000000), int64(1700000000), int64(1800000000), int64(1800000000), "{}", "", "ck-1", "ws-1")
+	require.NoError(t, err)
+
+	ws, _ := store.GetWorkspaceByID(ctx, "ws-1")
+	ws.WorkDir = "/tmp/new" // work_dir changes while a session is active
+	require.ErrorIs(t, store.UpdateWorkspace(ctx, ws, 1800000000), ErrWorkspaceNotEmpty)
+
+	got, _ := store.GetWorkspaceByID(ctx, "ws-1")
+	require.Equal(t, "/tmp/old", got.WorkDir, "work_dir must be unchanged after rejection")
+}
+
+// TestSQLiteStore_UpdateWorkspace_WorkDirChangeOKWithoutActiveSession verifies the
+// guard doesn't false-fire: with no active session, a work_dir change commits and
+// bumps updated_at (review P1-1).
+func TestSQLiteStore_UpdateWorkspace_WorkDirChangeOKWithoutActiveSession(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "p", WorkDir: "/tmp/old"}, 1700000000))
+
+	ws, _ := store.GetWorkspaceByID(ctx, "ws-1")
+	ws.WorkDir = "/tmp/new"
+	require.NoError(t, store.UpdateWorkspace(ctx, ws, 1800000000))
+
+	got, _ := store.GetWorkspaceByID(ctx, "ws-1")
+	require.Equal(t, "/tmp/new", got.WorkDir)
+	require.Equal(t, int64(1800000000), got.UpdatedAt)
+}
+
 func TestSQLiteStore_DeleteWorkspace(t *testing.T) {
 	t.Parallel()
 	store, _ := helperDB(t)

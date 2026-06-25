@@ -10,7 +10,9 @@ import (
 )
 
 // Workspace is a per-user named project directory (spec §6.2).
-// work_dir is immutable after creation (enters session key derivation, spec §7).
+// work_dir is workspace-mutable via Update (workspaces.update.sql guards the
+// change against active sessions — see UpdateWorkspace), but immutable for any
+// bound session's lifetime since it enters DeriveSessionKey (spec §7).
 type Workspace struct {
 	ID                   string `json:"id"`
 	OwnerUserID          string `json:"owner_user_id"`
@@ -311,15 +313,30 @@ func (s *SQLiteStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUs
 // binds the caller's cached updated_at, so a concurrent update that bumped it
 // makes this affect 0 rows → ErrWorkspaceConflict. The writeMu scope keeps the
 // read-modify-write atomic against other SQLiteStore writers; PG relies on MVCC.
+//
+// The SQL also atomically rejects work_dir changes while active sessions exist
+// (review P1-1: closes the Count→Update TOCTOU the handler's pre-check alone
+// can't, since a concurrent session insert doesn't bump updated_at). RowsAffected==0
+// is disambiguated into ErrWorkspaceNotEmpty (work_dir change blocked by an
+// active session) vs ErrWorkspaceConflict (CAS loss / row gone), mirroring
+// DeleteWorkspaceIfEmpty.
 func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error {
 	return s.writeMu.WithLock(func() error {
 		res, err := s.db.ExecContext(ctx, queries["workspaces.update"],
-			w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), w.WorkDir, now, w.ID, w.UpdatedAt)
+			w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), w.WorkDir, now,
+			w.ID, w.UpdatedAt, w.WorkDir, w.ID)
 		if err != nil {
 			return err
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
+			cnt, qerr := s.CountActiveSessionsInWorkspace(ctx, w.ID)
+			if qerr != nil {
+				return qerr
+			}
+			if cnt > 0 {
+				return ErrWorkspaceNotEmpty
+			}
 			return ErrWorkspaceConflict
 		}
 		w.UpdatedAt = now

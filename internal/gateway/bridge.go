@@ -552,6 +552,18 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// ErrWorkDirImmutable is returned by SwitchWorkDir when the target session is
+// bound to a workspace (si.WorkspaceID != ""). Workspace-bound sessions derive
+// work_dir from their workspace, immutable for the session's lifetime; /cd would
+// start the worker in a directory the workspace doesn't own while keeping the
+// session bound to it — and, because DeleteWorkspaceIfEmpty counts active
+// sessions by workspace_id (not work_dir), could let another workspace be
+// hard-deleted while a worker still runs in its directory. The REST path
+// (api.go) guards this at the HTTP layer; this sentinel lets the WS /cd path
+// (commands.go) reuse the same rule so WebChat's native channel can't bypass it
+// (review P1-2).
+var ErrWorkDirImmutable = errors.New("work_dir immutable for workspace-bound session")
+
 // SwitchWorkDirResult holds the result of a workdir switch operation.
 type SwitchWorkDirResult struct {
 	OldSessionID string
@@ -573,6 +585,13 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 
 	if !si.State.IsActive() {
 		return nil, fmt.Errorf("switch-workdir: session not active (state: %s)", si.State)
+	}
+
+	// Workspace-bound sessions can't /cd: their work_dir is owned by the workspace.
+	// See ErrWorkDirImmutable. REST enforces this too (api.go); this guard is the
+	// backstop for the WS /cd path that bypasses the HTTP layer (review P1-2).
+	if si.WorkspaceID != "" {
+		return nil, fmt.Errorf("switch-workdir: %w", ErrWorkDirImmutable)
 	}
 
 	expanded, err := validateAndExpandWorkDir(newWorkDir)

@@ -119,7 +119,7 @@ interface HotPlexRouteConfig {
 Browser-native WebSocket client for HotPlex Gateway.
 
 ```typescript
-import { BrowserHotPlexClient } from '@hotplex/ai-sdk-transport/client';
+import { BrowserHotPlexClient } from '@hotplex/ai-sdk-transport';
 
 const client = new BrowserHotPlexClient({
   url: 'ws://localhost:8888',
