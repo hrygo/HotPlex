@@ -202,9 +202,9 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 				if actorVal == "" {
 					actorVal = "anonymous"
 				}
-				result := "ok"
+				result := AuditResultOk
 				if sw.status >= 400 {
-					result = "failed"
+					result = AuditResultFailed
 				}
 				AdminAudit(actorVal, adminActionFor(r.Method, r.URL.Path), r.URL.Path, result)
 			}

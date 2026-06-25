@@ -23,11 +23,20 @@ const (
 	AuditCronTrigger        = "cron.trigger"
 	AuditSessionDelete      = "session.delete"
 	AuditSessionTerminate   = "session.terminate"
+	AuditSessionPatch       = "session.patch"
+	AuditSessionPut         = "session.put"
 	AuditConfigRollback     = "config.rollback"
 	AuditConfigValidate     = "config.validate"
 	AuditMemberStatusUpdate = "member.status.update"
 	AuditInvitationCreate   = "invitation.create"
 	AuditInvitationDelete   = "invitation.delete"
+	AuditAuthDenied         = "auth.denied"
+
+	// AuditResult* — stable "result" field values. Reuse instead of literals so
+	// dashboard filters stay correct (issue #788 review P3).
+	AuditResultOk     = "ok"
+	AuditResultFailed = "failed"
+	AuditResultDenied = "denied"
 )
 
 // auditLogger is slog.Default() so admin_audit records flow through the same
@@ -44,8 +53,8 @@ func SetAuditLogger(l *slog.Logger) {
 
 // AdminAudit records a structured admin action for compliance and incident
 // forensics (issue #788 A5). No new storage — rides the existing slog pipeline.
-// actor is a uid (cookie channel) or "admin-token" (Bearer channel); target is
-// the request path (with ids); result is "ok"|"failed".
+// actor is a uid (cookie channel) or "admin-token"/"anonymous" (Bearer/failed);
+// target is the request path (with ids); result is one of the AuditResult*.
 func AdminAudit(actor, action, target, result string) {
 	auditLogger.Info("admin_audit",
 		"actor_user_id", actor,
@@ -66,8 +75,8 @@ func isWriteMethod(method string) bool {
 
 // adminActionFor maps a (method, path) to a stable audit action enum. Falls back
 // to "<method> <path>" for unmapped routes so no write is silently lost. Order
-// matters: specific sub-resources (/terminate, /run, /config/*) are matched
-// before their parent collections (/sessions, /cron/jobs).
+// matters for sub-resources: /terminate and /run must precede their collection
+// cases (/sessions, /cron/jobs) since they also contain those substrings.
 func adminActionFor(method, path string) string {
 	switch {
 	case strings.Contains(path, "/restart"):
@@ -128,11 +137,16 @@ func cronAction(method string) string {
 	return "cron." + strings.ToLower(method)
 }
 
-// sessionAction covers DELETE; terminate is matched earlier in adminActionFor
-// (POST /admin/sessions/{id}/terminate → AuditSessionTerminate, not here).
+// sessionAction covers DELETE/PATCH/PUT; terminate is matched earlier in
+// adminActionFor (POST /admin/sessions/{id}/terminate → AuditSessionTerminate).
 func sessionAction(method string) string {
-	if method == http.MethodDelete {
+	switch method {
+	case http.MethodDelete:
 		return AuditSessionDelete
+	case http.MethodPatch:
+		return AuditSessionPatch
+	case http.MethodPut:
+		return AuditSessionPut
 	}
 	return "session." + strings.ToLower(method)
 }
