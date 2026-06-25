@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -363,6 +364,13 @@ func (a *AdminAPI) SetCookieFallback(cookieAuth *security.CookieAuth, idp *secur
 // Gates cookie-authenticated writes against CSRF — a cross-site form POST
 // would otherwise ride the admin's SameSite=None session cookie (issue #788
 // review P1). Bearer-authenticated requests never reach this check.
+//
+// A wildcard "*" in allowedOrigins does NOT satisfy the proof (issue #788
+// review P1): CSRF defense must not depend on the operator having narrowed
+// the CORS allowlist, and SameSite=None cookies are sent cross-site precisely
+// when the allowlist is permissive. Same-origin traffic still passes via the
+// Sec-Fetch-Site branch above, so embedded webchat on the gateway origin is
+// unaffected; only cross-origin writes need an exact match.
 func (a *AdminAPI) sameOriginRequest(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "same-origin", "same-site":
@@ -372,10 +380,25 @@ func (a *AdminAPI) sameOriginRequest(r *http.Request) bool {
 	if origin == "" {
 		return false
 	}
-	for _, allowed := range a.allowedOriginsFn() {
-		if allowed == "*" || allowed == origin {
-			return true
-		}
+	if slices.Contains(a.allowedOriginsFn(), origin) {
+		return true
 	}
 	return false
+}
+
+// CSRFMiddleware gates cookie-authenticated state-changing requests against
+// cross-origin abuse (issue #788 review P0). /api/admin/* write routes
+// (invitations CRUD, user status) mount on the gateway mux and authenticate
+// via the SameSite=None session cookie, so they need the same defense the
+// Bearer admin port applies via Middleware. GET requests pass through; write
+// methods require same-origin proof. Apply inside corsMw so OPTIONS is
+// already handled.
+func (a *AdminAPI) CSRFMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isWriteMethod(r.Method) && !a.sameOriginRequest(r) {
+			web.WriteAppError(w, http.StatusForbidden, "FORBIDDEN", "cross-origin write blocked")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
