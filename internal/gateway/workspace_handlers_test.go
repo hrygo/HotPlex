@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // wsSandboxDir 构造 owner 沙箱内的 work_dir（$HOME/.hotplex/workspaces/<ownerUserID>/<sub>），
@@ -598,4 +600,63 @@ func TestWorkspace_Grandfather_LegacyWorkDir(t *testing.T) {
 	// PATCH name → 200，不得触发 work_dir 前缀校验。
 	w := env.patchWorkspace(t, cookie, "ws-legacy", `{"name":"legacy-renamed"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// TestWorkspace_UpdateWorkDir_ActiveSessionBlocked: work_dir 参与 DeriveSessionKey
+// (key.go)，改它会 shift 确定性 session id 并孤立活跃会话的历史。Update 必须在有活跃
+// 会话时拒绝改动（对齐 Delete 的 DeleteWorkspaceIfEmpty 守卫，spec §9.1）。
+func TestWorkspace_UpdateWorkDir_ActiveSessionBlocked(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "u-admin", "guard", "initial")
+
+	// 直接写一条活跃 session 绑定该 workspace（绕过 WS 握手）。
+	sqlite := env.store.(*session.SQLiteStore)
+	require.NoError(t, sqlite.Upsert(context.Background(), &session.SessionInfo{
+		ID:          "sess-active",
+		UserID:      "u-admin",
+		WorkspaceID: ws.ID,
+		State:       events.StateRunning,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}))
+
+	// PATCH 改 work_dir 到沙箱内另一目录 → 409 WORKSPACE_NOT_EMPTY。
+	moved := wsSandboxDir(t, "u-admin", "moved")
+	w := env.patchWorkspace(t, cookie, ws.ID, `{"work_dir":"`+moved+`"}`)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "WORKSPACE_NOT_EMPTY")
+
+	// 同值 PATCH（abs == ws.WorkDir）不触发守卫 → 200。
+	w2 := env.patchWorkspace(t, cookie, ws.ID, `{"work_dir":"`+ws.WorkDir+`"}`)
+	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
+}
+
+// TestWorkspace_Update_OwnerIsolation_AdminEdit: admin 代改别人的 workspace 时，
+// work_dir 沙箱必须按 workspace OWNER 校验（spec §2 G2），而非操作者 admin 自己。
+// Create 路径无此问题（创建者即 owner）；Update 的 admin-edit 才会两者分离。
+func TestWorkspace_Update_OwnerIsolation_AdminEdit(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	adminCookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	env.createUser(t, "bob", "bobpass", "user")
+
+	// 直接经 store 写入 bob 的 workspace（owner=u-bob，绕过 handler 创建）。
+	bob := &session.Workspace{
+		ID: "ws-bob", OwnerUserID: "u-bob", Name: "bob-proj",
+		WorkDir: wsSandboxDir(t, "u-bob", "orig"), Status: "active",
+	}
+	require.NoError(t, env.store.CreateWorkspace(context.Background(), bob, env.wsHandlers.nowUnix()))
+
+	// admin 代改：work_dir 落 admin 自己沙箱 → 拒（owner 是 bob，必须落 bob 沙箱）。
+	adminDir := wsSandboxDir(t, "u-admin", "hijack")
+	w := env.patchWorkspace(t, adminCookie, "ws-bob", `{"work_dir":"`+adminDir+`"}`)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "WORK_DIR_OUTSIDE_SANDBOX")
+
+	// admin 代改：work_dir 落 bob 沙箱 → 200（owner 隔离保持，admin 可代办）。
+	bobDir := wsSandboxDir(t, "u-bob", "moved")
+	w2 := env.patchWorkspace(t, adminCookie, "ws-bob", `{"work_dir":"`+bobDir+`"}`)
+	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
 }
