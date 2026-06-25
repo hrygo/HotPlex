@@ -366,6 +366,7 @@ export default function ChatContainer() {
             onSelect={selectSession}
             onCreate={handleCreateNew}
             onDelete={removeSession}
+            currentUserRole={currentUser?.role}
           />
         </aside>
 

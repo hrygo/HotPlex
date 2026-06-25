@@ -1,12 +1,21 @@
 /**
  * Admin API client.
  *
- * Provides connection management and a core fetch wrapper for the
- * admin endpoints (/admin/*). Credentials are persisted in localStorage.
+ * Two credential channels (issue #788 A2):
+ *   1. Bearer token — standalone /admin pages (remote gateway operations).
+ *      Connection { url, token } persisted in localStorage.
+ *   2. Cookie session — embedded webchat where the admin is already logged in
+ *      via the chat cookie. The backend AdminAPI.Middleware falls back from
+ *      Bearer to cookie-session auth, so same-origin requests carrying the
+ *      session cookie are accepted when role==admin && status==active.
+ *
+ * adminFetch auto-selects: Bearer when a stored connection exists, otherwise
+ * the cookie channel (same-origin).
  */
 
 import type { AdminConnection } from '@/lib/types/admin';
 
+import { BASE, authOpts } from './client';
 import { parseApiError } from './errors';
 
 const STORAGE_URL_KEY = 'hotplex_admin_url';
@@ -49,10 +58,18 @@ export async function adminFetch<T>(
   options?: AdminFetchOptions,
 ): Promise<T> {
   const conn = options?.conn ?? getStoredAdminConnection();
-  if (!conn) {
-    throw new Error('Admin connection not configured');
+  if (conn) {
+    return adminFetchBearer<T>(conn, path, options);
   }
+  return adminFetchCookie<T>(path, options);
+}
 
+// Bearer-token channel: standalone admin connection (remote operations).
+async function adminFetchBearer<T>(
+  conn: AdminConnection,
+  path: string,
+  options?: AdminFetchOptions,
+): Promise<T> {
   const url = `${conn.url}${path}`;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${conn.token}`,
@@ -94,8 +111,44 @@ export async function adminFetch<T>(
   return res.json();
 }
 
+// Cookie channel: embedded webchat (same-origin session cookie). Backend
+// AdminAPI.Middleware authenticates via the chat session when no Bearer token
+// is present (issue #788 A2).
+async function adminFetchCookie<T>(
+  path: string,
+  options?: AdminFetchOptions,
+): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    ...authOpts(),
+    headers: {
+      'Content-Type': 'application/json',
+      ...((options?.headers as Record<string, string> | undefined) ?? {}),
+    },
+  });
+
+  if (!res.ok) {
+    // Cookie-channel !ok (typically 401) means the chat session expired or was
+    // revoked. TODO(issue #788 follow-up): signal AdminShell to re-probe the
+    // channel (getMe → redirect to /) so the admin isn't left looking at
+    // per-request error toasts. Until then the caller surfaces a normal error.
+    const info = await parseApiError(res);
+    const message = info.message || info.raw || `Admin request failed: ${res.status}`;
+    const err = new Error(message);
+    (err as any).status = info.status;
+    if (info.code) (err as any).code = info.code;
+    throw err;
+  }
+
+  if (res.status === 204 || res.status === 202) {
+    return undefined as unknown as T;
+  }
+
+  return res.json();
+}
+
 // ---------------------------------------------------------------------------
-// Connection test
+// Connection test (login page — always Bearer, validates a candidate token)
 // ---------------------------------------------------------------------------
 
 export async function testConnection(conn: AdminConnection): Promise<boolean> {

@@ -88,7 +88,7 @@ export default function SettingsPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-xl font-display font-bold text-[var(--text-primary)]">
-            Connection Settings
+            Admin Connection
           </h1>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
             Manage your gateway connection credentials

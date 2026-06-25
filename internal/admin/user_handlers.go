@@ -42,19 +42,23 @@ func (h *UserAdminHandlers) nowUnix() int64 { return h.now().Unix() }
 func (h *UserAdminHandlers) requireAdmin(w http.ResponseWriter, r *http.Request) (string, bool) {
 	uid, ok := h.cookieAuth.Authenticate(r)
 	if !ok {
+		AdminAudit("anonymous", AuditAuthDenied, r.URL.Path, AuditResultDenied)
 		web.WriteAppError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "not authenticated")
 		return "", false
 	}
 	if h.idp == nil {
+		AdminAudit(uid, AuditAuthDenied, r.URL.Path, AuditResultDenied)
 		web.WriteAppError(w, http.StatusServiceUnavailable, "NO_IDP", "no identity provider")
 		return "", false
 	}
 	u, err := h.idp.Lookup(r.Context(), uid)
 	if err != nil || u.Status != "active" {
+		AdminAudit(uid, AuditAuthDenied, r.URL.Path, AuditResultDenied)
 		web.WriteAppError(w, http.StatusForbidden, "USER_DISABLED", "user disabled")
 		return "", false
 	}
 	if u.Role != "admin" {
+		AdminAudit(uid, AuditAuthDenied, r.URL.Path, AuditResultDenied)
 		web.WriteAppError(w, http.StatusForbidden, "FORBIDDEN", "admin only")
 		return "", false
 	}
@@ -96,9 +100,11 @@ func (h *UserAdminHandlers) CreateInvitation(w http.ResponseWriter, r *http.Requ
 		Role: req.Role, ExpiresAt: h.nowUnix() + int64(ttl),
 	}
 	if err := h.store.CreateInvitation(r.Context(), inv, h.nowUnix()); err != nil {
+		AdminAudit(uid, AuditInvitationCreate, r.URL.Path, AuditResultFailed)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "create invitation failed")
 		return
 	}
+	AdminAudit(uid, AuditInvitationCreate, r.URL.Path, AuditResultOk)
 	respondJSON(w, map[string]any{"id": inv.ID, "code": code, "role": inv.Role, "expires_at": inv.ExpiresAt})
 }
 
@@ -130,14 +136,17 @@ func (h *UserAdminHandlers) ListInvitations(w http.ResponseWriter, r *http.Reque
 
 // DeleteInvitation: DELETE /api/admin/invitations/{id}
 func (h *UserAdminHandlers) DeleteInvitation(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	uid, ok := h.requireAdmin(w, r)
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
 	if err := h.store.DeleteInvitation(r.Context(), id); err != nil {
+		AdminAudit(uid, AuditInvitationDelete, r.URL.Path, AuditResultFailed)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")
 		return
 	}
+	AdminAudit(uid, AuditInvitationDelete, r.URL.Path, AuditResultOk)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -161,7 +170,8 @@ type updateUserStatusRequest struct {
 
 // UpdateUserStatus: PATCH /api/admin/users/{id}
 func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	uid, ok := h.requireAdmin(w, r)
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
@@ -175,8 +185,10 @@ func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := h.store.UpdateUserStatus(r.Context(), id, req.Status, h.nowUnix()); err != nil {
+		AdminAudit(uid, AuditMemberStatusUpdate, r.URL.Path, AuditResultFailed)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
 		return
 	}
+	AdminAudit(uid, AuditMemberStatusUpdate, r.URL.Path, AuditResultOk)
 	w.WriteHeader(http.StatusOK)
 }

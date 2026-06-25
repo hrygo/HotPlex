@@ -1,6 +1,6 @@
 # WebChat Admin 后台收口与功能重排
 
-**状态**: 设计草案，待评审
+**状态**: 已实现（Phase 1-4），2026-06-25 · PR 追踪 issue #788
 **日期**: 2026-06-25
 **关联**: `WebChat-Multitenancy-Foundation-Design-Spec.md`、`WebChat-Workspace-Create-WorkDir-Prefix-Spec.md`、`premium-ux-sdk-integration.md`
 

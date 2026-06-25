@@ -214,6 +214,10 @@ func setupRoutes(
 		// LocalAccountProvider is created lazily from WorkspaceStore + bcrypt cost.
 		lap := security.NewLocalAccountProvider(deps.WorkspaceStore, security.BcryptCostDefault)
 		auth.SetIdentityProvider(lap)
+		// Enable cookie-session fallback on the Bearer admin port so embedded
+		// webchat admins can reach Dashboard/Bots/Cron without a separate admin
+		// token (issue #788 A2). No-op semantics live in AdminAPI.Middleware.
+		adminAPI.SetCookieFallback(deps.CookieAuth, lap)
 
 		authHandlers := gateway.NewAuthHandlers(auth, deps.CookieAuth, deps.WorkspaceStore, lap)
 		// /api/admin/* handlers (invitations/users CRUD) live in the admin package
@@ -225,12 +229,17 @@ func setupRoutes(
 		mux.Handle("GET /api/auth/me", corsMw(http.HandlerFunc(authHandlers.Me)))
 		mux.Handle("POST /api/auth/accept-invite", corsMw(http.HandlerFunc(authHandlers.AcceptInvite)))
 
-		// App-level Admin endpoints
-		mux.Handle("POST /api/admin/invitations", corsMw(http.HandlerFunc(userAdmin.CreateInvitation)))
+		// App-level Admin endpoints. /api/admin/* authenticates via the
+		// SameSite=None session cookie, so state-changing routes need the
+		// same CSRF defense the Bearer admin port applies. csrfMw wraps the
+		// write methods (POST/DELETE/PATCH); GETs pass through (issue #788
+		// review P0). Inside corsMw so OPTIONS preflight is handled first.
+		csrfMw := adminAPI.CSRFMiddleware
+		mux.Handle("POST /api/admin/invitations", corsMw(csrfMw(http.HandlerFunc(userAdmin.CreateInvitation))))
 		mux.Handle("GET /api/admin/invitations", corsMw(http.HandlerFunc(userAdmin.ListInvitations)))
-		mux.Handle("DELETE /api/admin/invitations/{id}", corsMw(http.HandlerFunc(userAdmin.DeleteInvitation)))
+		mux.Handle("DELETE /api/admin/invitations/{id}", corsMw(csrfMw(http.HandlerFunc(userAdmin.DeleteInvitation))))
 		mux.Handle("GET /api/admin/users", corsMw(http.HandlerFunc(userAdmin.ListUsers)))
-		mux.Handle("PATCH /api/admin/users/{id}", corsMw(http.HandlerFunc(userAdmin.UpdateUserStatus)))
+		mux.Handle("PATCH /api/admin/users/{id}", corsMw(csrfMw(http.HandlerFunc(userAdmin.UpdateUserStatus))))
 
 		// OPTIONS preflight handlers for Auth & Admin APIs
 		mux.Handle("OPTIONS /api/auth/login", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
