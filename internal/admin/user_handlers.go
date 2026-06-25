@@ -42,19 +42,23 @@ func (h *UserAdminHandlers) nowUnix() int64 { return h.now().Unix() }
 func (h *UserAdminHandlers) requireAdmin(w http.ResponseWriter, r *http.Request) (string, bool) {
 	uid, ok := h.cookieAuth.Authenticate(r)
 	if !ok {
+		AdminAudit("anonymous", "auth.denied", r.URL.Path, "denied")
 		web.WriteAppError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "not authenticated")
 		return "", false
 	}
 	if h.idp == nil {
+		AdminAudit(uid, "auth.denied", r.URL.Path, "denied")
 		web.WriteAppError(w, http.StatusServiceUnavailable, "NO_IDP", "no identity provider")
 		return "", false
 	}
 	u, err := h.idp.Lookup(r.Context(), uid)
 	if err != nil || u.Status != "active" {
+		AdminAudit(uid, "auth.denied", r.URL.Path, "denied")
 		web.WriteAppError(w, http.StatusForbidden, "USER_DISABLED", "user disabled")
 		return "", false
 	}
 	if u.Role != "admin" {
+		AdminAudit(uid, "auth.denied", r.URL.Path, "denied")
 		web.WriteAppError(w, http.StatusForbidden, "FORBIDDEN", "admin only")
 		return "", false
 	}
@@ -96,6 +100,7 @@ func (h *UserAdminHandlers) CreateInvitation(w http.ResponseWriter, r *http.Requ
 		Role: req.Role, ExpiresAt: h.nowUnix() + int64(ttl),
 	}
 	if err := h.store.CreateInvitation(r.Context(), inv, h.nowUnix()); err != nil {
+		AdminAudit(uid, AuditInvitationCreate, r.URL.Path, "failed")
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "create invitation failed")
 		return
 	}
@@ -137,6 +142,7 @@ func (h *UserAdminHandlers) DeleteInvitation(w http.ResponseWriter, r *http.Requ
 	}
 	id := r.PathValue("id")
 	if err := h.store.DeleteInvitation(r.Context(), id); err != nil {
+		AdminAudit(uid, AuditInvitationDelete, r.URL.Path, "failed")
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")
 		return
 	}
@@ -179,6 +185,7 @@ func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := h.store.UpdateUserStatus(r.Context(), id, req.Status, h.nowUnix()); err != nil {
+		AdminAudit(uid, AuditMemberStatusUpdate, r.URL.Path, "failed")
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
 		return
 	}

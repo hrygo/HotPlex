@@ -191,11 +191,21 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 		sw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		var actor string // resolved during auth, recorded by the audit defer (issue #788 A5)
 
-		// Audit successful write operations (issue #788 A5). Runs after the
-		// handler sets sw.status; auth failures (status>=400) are excluded.
+		// Audit all write operations — successes AND failures (issue #788 review
+		// P1-2). Failed/denied writes are the most forensically valuable; the
+		// prior status<300 guard dropped them. actor falls back to "anonymous"
+		// when auth never resolved (401/403 before actor assignment).
 		defer func() {
-			if isWriteMethod(r.Method) && sw.status >= 200 && sw.status < 300 {
-				AdminAudit(actor, adminActionFor(r.Method, r.URL.Path), r.URL.Path, "ok")
+			if isWriteMethod(r.Method) {
+				actorVal := actor
+				if actorVal == "" {
+					actorVal = "anonymous"
+				}
+				result := "ok"
+				if sw.status >= 400 {
+					result = "failed"
+				}
+				AdminAudit(actorVal, adminActionFor(r.Method, r.URL.Path), r.URL.Path, result)
 			}
 		}()
 
@@ -267,6 +277,14 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 		// /api/admin/* requireAdmin check — cookie→uid→role, requires active
 		// admin. Granted the full scope set so every requireScope check passes.
 		if a.cookieAuth != nil && a.idp != nil {
+			// CSRF defense (issue #788 review P1): SameSite=None cookies (needed
+			// for cross-subdomain webchat) otherwise let a cross-site form POST
+			// ride the admin session on state-changing routes. Require a same-
+			// origin proof; Bearer requests take the earlier branch and skip this.
+			if isWriteMethod(r.Method) && !a.sameOriginRequest(r) {
+				web.WriteAppError(sw, http.StatusForbidden, "FORBIDDEN", "cross-origin write blocked")
+				return
+			}
 			uid, ok := a.cookieAuth.Authenticate(r)
 			if !ok {
 				web.WriteAppError(sw, http.StatusUnauthorized, "INVALID_CREDENTIALS", "not authenticated")
@@ -330,7 +348,34 @@ func (a *AdminAPI) SetAllowedCIDRs(cidrs []string) {
 // resolves the chat session cookie and admits active admins, mirroring the
 // requireAdmin check on /api/admin/* (user_handlers.go). No-op when either
 // argument is nil — standalone/CLI deployments keep Bearer-only behavior.
+//
+// CORS note (issue #788 review P2): the cookie channel only works cross-origin
+// when allowedOriginsFn() lists the webchat origin explicitly (not "*") —
+// wildcard CORS suppresses Allow-Credentials and the browser refuses to send
+// the session cookie. Same-origin embedded webchat is unaffected.
 func (a *AdminAPI) SetCookieFallback(cookieAuth *security.CookieAuth, idp *security.LocalAccountProvider) {
 	a.cookieAuth = cookieAuth
 	a.idp = idp
+}
+
+// sameOriginRequest reports whether the request originated from the gateway's
+// own origin (Sec-Fetch-Site) or an explicitly allowed origin (Origin header).
+// Gates cookie-authenticated writes against CSRF — a cross-site form POST
+// would otherwise ride the admin's SameSite=None session cookie (issue #788
+// review P1). Bearer-authenticated requests never reach this check.
+func (a *AdminAPI) sameOriginRequest(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "same-site":
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	for _, allowed := range a.allowedOriginsFn() {
+		if allowed == "*" || allowed == origin {
+			return true
+		}
+	}
+	return false
 }
