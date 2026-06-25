@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { User } from '@/lib/api/auth';
+import { TabPanel } from './tab-panel';
 
 interface ProfileTabProps {
   user: User;
@@ -34,7 +35,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
     : '—';
 
   return (
-    <div className="space-y-6">
+    <TabPanel>
       {/* Profile Header Card */}
       <div className="flex flex-col sm:flex-row items-center gap-4 p-5 rounded-xl border border-[var(--border-subtle)] bg-[rgba(24,24,27,0.2)]">
         {/* Large Gradient Avatar */}
@@ -125,6 +126,6 @@ export function ProfileTab({ user }: ProfileTabProps) {
           </span>
         </div>
       </div>
-    </div>
+    </TabPanel>
   );
 }

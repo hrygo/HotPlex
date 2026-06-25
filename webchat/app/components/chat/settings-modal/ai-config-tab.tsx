@@ -2,6 +2,7 @@
 
 import { type Workspace } from '@/lib/api/workspaces';
 import { AgentConfigEditor } from '@/components/admin/agent-config-editor';
+import { TabPanel } from './tab-panel';
 
 interface AIConfigTabProps {
   workspace: Workspace;
@@ -9,8 +10,8 @@ interface AIConfigTabProps {
 
 export function AIConfigTab({ workspace }: AIConfigTabProps) {
   return (
-    <div className="w-full">
+    <TabPanel>
       <AgentConfigEditor workspaceId={workspace.id} overrides={workspace.agent_config_overrides || {}} />
-    </div>
+    </TabPanel>
   );
 }

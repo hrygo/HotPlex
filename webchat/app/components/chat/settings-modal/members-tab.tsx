@@ -11,6 +11,7 @@ import {
   type User,
   type Invitation,
 } from '@/lib/api/auth';
+import { TabPanel } from './tab-panel';
 
 const DEFAULT_INVITE_TTL = 7 * 24 * 3600; // 7 days, matches backend default
 
@@ -141,7 +142,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <TabPanel>
       {actionMsg && (
         <div className={`flex gap-2 px-4 py-3 rounded-[var(--radius-md)] border text-xs font-bold items-start animate-fade-in-up ${
           actionMsg.kind === 'ok' 
@@ -307,6 +308,6 @@ export function MembersTab({ currentUser }: MembersTabProps) {
           )}
         </div>
       </section>
-    </div>
+    </TabPanel>
   );
 }

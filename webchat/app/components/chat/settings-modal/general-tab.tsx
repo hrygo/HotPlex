@@ -3,7 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { updateWorkspace, getWorkspace, type Workspace } from '@/lib/api/workspaces';
 import { ApiError } from '@/lib/api/errors';
-import { NewWorkspaceForm } from '../NewWorkspaceForm';
+import { TabPanel } from './tab-panel';
+import {
+  resolveSandboxAnchor,
+  sanitizeWorkspaceDir,
+} from '@/lib/utils/workspace-path';
 
 const WORKER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'Default (Inherit team settings)' },
@@ -15,19 +19,26 @@ const WORKER_OPTIONS: { value: string; label: string }[] = [
 
 interface GeneralTabProps {
   workspace: Workspace;
-  uid: string;
   onUpdated?: (ws: Workspace) => void;
-  onCreated?: (ws: Workspace) => void;
 }
 
-export function GeneralTab({ workspace, uid, onUpdated, onCreated }: GeneralTabProps) {
+export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
+  // Anchor the sandbox by owner_id rather than a hard-coded ~/ prefix: backend
+  // ExpandAndAbs stores work_dir as an absolute $HOME path, so the on-disk form
+  // differs from the ~/ form used by the create flow. resolveSandboxAnchor reads
+  // the real prefix straight off work_dir, so both forms resolve correctly.
+  const anchor = resolveSandboxAnchor(workspace.work_dir, workspace.owner_user_id);
+  const segEditable = anchor !== null;
+  const prefix = anchor?.prefix ?? '';
+  const segBaseline = anchor?.seg ?? '';
+
   const [name, setName] = useState(workspace.name);
   const [worker, setWorker] = useState(workspace.worker_preference || '');
-  const [workDir, setWorkDir] = useState(workspace.work_dir);
+  const [seg, setSeg] = useState(segBaseline);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  
+
   // Tracked so unmount clears the pending setState (PR #779 review P3-8).
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -35,29 +46,41 @@ export function GeneralTab({ workspace, uid, onUpdated, onCreated }: GeneralTabP
   useEffect(() => {
     setName(workspace.name);
     setWorker(workspace.worker_preference || '');
-    setWorkDir(workspace.work_dir);
+    const a = resolveSandboxAnchor(workspace.work_dir, workspace.owner_user_id);
+    setSeg(a?.seg ?? workspace.work_dir);
     setError(null);
     setSuccess(false);
-  }, [workspace.id, workspace.name, workspace.worker_preference, workspace.work_dir, workspace.updated_at]);
+  }, [workspace.id, workspace.name, workspace.worker_preference, workspace.work_dir, workspace.owner_user_id, workspace.updated_at]);
 
   useEffect(() => () => {
     if (successTimer.current) clearTimeout(successTimer.current);
   }, []);
 
-  const dirty = 
-    (name.trim() !== workspace.name && name.trim().length > 0) || 
+  const dirty =
+    (name.trim() !== workspace.name && name.trim().length > 0) ||
     worker !== (workspace.worker_preference || '') ||
-    (workDir.trim() !== workspace.work_dir && workDir.trim().length > 0);
+    (segEditable && seg.trim() !== segBaseline);
+
+  const previewSeg = segEditable ? sanitizeWorkspaceDir(seg) : '';
+  const previewPath = segEditable
+    ? previewSeg
+      ? `${prefix}${previewSeg}`
+      : prefix.replace(/\/$/, '')
+    : workspace.work_dir;
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     setSuccess(false);
     try {
-      const updated = await updateWorkspace(workspace.id, { 
+      // seg is only editable when it resolves inside the sandbox prefix, so
+      // rejoining prefix + sanitized seg always yields a sandbox-conformant
+      // work_dir (backend ValidateWorkspaceWorkDir accepts it).
+      const workDir = segEditable ? `${prefix}${sanitizeWorkspaceDir(seg)}` : workspace.work_dir;
+      const updated = await updateWorkspace(workspace.id, {
         name: name.trim(),
         workerPreference: worker,
-        workDir: workDir.trim(),
+        workDir,
       });
       onUpdated?.(updated);
       setSuccess(true);
@@ -82,32 +105,19 @@ export function GeneralTab({ workspace, uid, onUpdated, onCreated }: GeneralTabP
   };
 
   return (
-    <div className="space-y-6">
-      {/* New Workspace */}
-      <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <svg className="w-4 h-4 text-[var(--accent-gold)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          <span className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest">New Workspace</span>
-        </div>
-        <NewWorkspaceForm uid={uid} onCreated={(ws) => onCreated?.(ws)} />
-      </div>
-
+    <TabPanel>
       {/* Workspace Name Input Field */}
       <div>
         <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
           Workspace Name
         </label>
-        <div className="relative group">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)]"
-            placeholder="Enter workspace name"
-          />
-        </div>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)]"
+          placeholder="Enter workspace name"
+        />
         <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
           The display name for your workspace, used inside the workspace switcher and header.
         </p>
@@ -141,22 +151,47 @@ export function GeneralTab({ workspace, uid, onUpdated, onCreated }: GeneralTabP
         </p>
       </div>
 
-      {/* Working Directory Input Field (Now Mutable) */}
+      {/* Working Directory: sandbox prefix (read-only) + editable segment */}
       <div>
         <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
           Working Directory
         </label>
-        <div className="relative group">
-          <input
-            type="text"
-            value={workDir}
-            onChange={(e) => setWorkDir(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)] font-mono"
-            placeholder="Enter working directory absolute path"
-          />
-        </div>
-        <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
-          The local directory where the CLI agents read, write, and execute files. Session-level runs automatically inherit this setting and cannot be changed dynamically per session.
+        {segEditable ? (
+          <>
+            <div className="flex flex-col gap-1.5">
+              {/* Read-only sandbox prefix */}
+              <div className="px-3.5 py-2 rounded-t-[var(--radius-md)] bg-[var(--bg-surface)] border border-b-0 border-[var(--border-subtle)] text-xs text-[var(--text-faint)] font-mono truncate select-all" title={prefix}>
+                {prefix}
+              </div>
+              {/* Editable last segment */}
+              <input
+                type="text"
+                value={seg}
+                onChange={(e) => setSeg(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-b-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)] font-mono"
+                placeholder="my-project"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+            </div>
+            {/* Live preview of the rejoined absolute path */}
+            <p className="text-[10px] font-mono text-[var(--text-faint)] mt-1.5 break-all leading-relaxed">
+              Path: <span className="text-[var(--text-secondary)]">{previewPath}</span>
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-faint)] font-mono truncate select-all" title={workspace.work_dir}>
+              {workspace.work_dir}
+            </div>
+            <p className="text-[10px] text-[var(--accent-coral)] mt-1.5 leading-relaxed font-bold">
+              This workspace uses a non-standard path outside the owner sandbox and can’t be edited here.
+            </p>
+          </>
+        )}
+        <p className="text-[10px] text-[var(--text-muted)] mt-1 leading-relaxed">
+          The local directory where CLI agents read, write, and execute files. Session-level runs inherit this setting and cannot change it per session.
         </p>
       </div>
 
@@ -169,7 +204,7 @@ export function GeneralTab({ workspace, uid, onUpdated, onCreated }: GeneralTabP
           <span className="break-words">{error}</span>
         </div>
       )}
-      
+
       {success && (
         <div className="flex gap-2 px-4 py-3 rounded-[var(--radius-md)] bg-[rgba(52,211,153,0.08)] border border-[rgba(52,211,153,0.15)] text-xs text-[var(--accent-emerald)] font-bold items-start animate-fade-in-up">
           <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -199,6 +234,6 @@ export function GeneralTab({ workspace, uid, onUpdated, onCreated }: GeneralTabP
           )}
         </button>
       </div>
-    </div>
+    </TabPanel>
   );
 }
