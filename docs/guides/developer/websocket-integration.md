@@ -1654,7 +1654,7 @@ curl -X POST http://localhost:8888/api/workspaces \
 }
 ```
 
-`owner_user_id` 自动设为 api-key 对应的 `users.id`；`work_dir` 创建后不可变。`id` 为无前缀 UUIDv4（服务端 `uuid.NewString()` 生成，无 `ws_` 等前缀）。
+`owner_user_id` 自动设为 api-key 对应的 `users.id`；`work_dir` 必须位于 owner 沙箱 `$HOME/.hotplex/workspaces/<owner_user_id>` 下，创建后仍可经 PATCH 变更（受沙箱与活跃会话约束，见 §16.3）。`id` 为无前缀 UUIDv4（服务端 `uuid.NewString()` 生成，无 `ws_` 等前缀）。
 
 **②（可选）配置偏好 Worker + agent 配置覆盖**：
 
@@ -1697,10 +1697,10 @@ curl -X PATCH http://localhost:8888/api/workspaces/7c9f6b2a-3e4d-4a8f-9b1c-2d5e7
 
 | 操作 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- | ---- |
-| 创建 | POST | `/api/workspaces` | body: `{name, work_dir}`；`work_dir` 安全校验 + per-owner 唯一 |
+| 创建 | POST | `/api/workspaces` | body: `{name, work_dir}`；`work_dir` 安全校验 + owner 沙箱 + per-owner 唯一 |
 | 列表 | GET | `/api/workspaces` | 只返回当前身份拥有的（`ListWorkspacesByOwner`） |
 | 查询 | GET | `/api/workspaces/{id}` | owner 或 admin 可读 |
-| 更新 | PATCH | `/api/workspaces/{id}` | `name` / `worker_preference` / `agent_config_overrides`（`work_dir` 不可变） |
+| 更新 | PATCH | `/api/workspaces/{id}` | `name` / `worker_preference` / `agent_config_overrides` / `work_dir`（须在 owner 沙箱下；workspace 有活跃会话时拒绝改，`409 WORKSPACE_NOT_EMPTY`） |
 | 删除 | DELETE | `/api/workspaces/{id}` | 仅当无活跃 session 时（`WORKSPACE_NOT_EMPTY` 否则） |
 
 所有端点同时接受 `X-API-Key`（机器通道）与同源 Cookie（WebChat 通道），鉴权链与 `/api/sessions` 一致（spec ⑦ Phase 1）。

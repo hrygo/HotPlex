@@ -279,7 +279,7 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 
 > **PATCH 乐观并发（CAS）**：更新基于 `updated_at` 做乐观锁——服务端 `UPDATE ... WHERE id = ? AND updated_at = ?`，调用方缓存的 `updated_at` 不再匹配（被并发修改）时影响 0 行，返回 `409 WORKSPACE_VERSION_MISMATCH`（"workspace concurrently modified, please re-fetch and retry"）。客户端无需在 body 显式传版本字段（先 GET 取最新值再 PATCH），收到 409 后应重新 GET 再重试，避免静默 lost update。
 
-> **PATCH body 字段语义**：`name`、`agent_config_overrides` 传空字符串表示**不更新**（无法通过 PATCH 清空这两项）；`worker_preference` 为指针类型以区分三态——**省略**（字段未传）不更新、**空字符串** `""` 显式清除回默认 worker、**非空**设为指定类型（校验失败返回 `400 INVALID_WORKER_TYPE`）；`work_dir` 创建后不可变（携带即 `400 WORK_DIR_IMMUTABLE`，见上）。
+> **PATCH body 字段语义**：`name`、`agent_config_overrides` 传空字符串表示**不更新**（无法通过 PATCH 清空这两项）；`worker_preference` 为指针类型以区分三态——**省略**（字段未传）不更新、**空字符串** `""` 显式清除回默认 worker、**非空**设为指定类型（校验失败返回 `400 INVALID_WORKER_TYPE`）；`work_dir` 为 workspace 级可变字段——**省略/空字符串**不更新，**非空**时校验 owner 沙箱（`403 WORK_DIR_OUTSIDE_SANDBOX`）、值变更须 workspace 无活跃会话（`409 WORKSPACE_NOT_EMPTY`，因 work_dir 进 session key 派生）、且未被该 owner 其他 workspace 占用（`409 WORK_DIR_TAKEN`）后更新（见上）。
 
 **Workspace 用户与邀请管理（spec ⑥，admin 维度）**：
 
