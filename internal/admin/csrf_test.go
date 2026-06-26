@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -100,4 +103,66 @@ func TestCSRFMiddleware(t *testing.T) {
 		a.CSRFMiddleware(okHandler).ServeHTTP(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code)
 	})
+
+	// P2-1 (issue #794): /api/workspaces/* write routes mount the same csrfMw
+	// as /api/admin/*. WorkspaceHandlers authenticates via the SameSite=None
+	// cookie fallback (AuthenticateRequest → AuthenticateActiveCookie), so a
+	// cross-site write must be blocked at CSRFMiddleware before it reaches the
+	// handler. Locks the wiring in routes.go against regression.
+	for _, m := range []string{http.MethodPost, http.MethodPatch, http.MethodDelete} {
+		method := m
+		t.Run("P2-1: workspace "+method+" cross-origin blocked", func(t *testing.T) {
+			t.Parallel()
+			rec := httptest.NewRecorder()
+			path := "/api/workspaces"
+			if method != http.MethodPost {
+				path = "/api/workspaces/ws-1"
+			}
+			req := httptest.NewRequest(method, path, nil)
+			req.Header.Set("Origin", "https://evil.example.com")
+			a.CSRFMiddleware(okHandler).ServeHTTP(rec, req)
+			require.Equal(t, http.StatusForbidden, rec.Code)
+		})
+	}
+}
+
+// auditMu serializes tests that swap the package-level auditLogger via
+// SetAuditLogger. The logger is process-global, so parallel audits would race
+// on the swap; tests acquiring this mutex run non-parallel by construction.
+var auditMu sync.Mutex
+
+// TestCSRFMiddleware_AuditsCSRFRejects locks issue #794 P2-2: a CSRF 403 must
+// leave an admin_audit trail. CSRFMiddleware runs on the gateway mux outside
+// AdminAPI.Middleware's audit defer, so without an explicit audit the rejection
+// is silent — yet CSRF denials are high-value security events. The proof must
+// land for both admin ports: the cookie write routes here, and (via the same
+// csrfMw) /api/workspaces/* writes (issue #794 P2-1).
+func TestCSRFMiddleware_AuditsCSRFRejects(t *testing.T) {
+	auditMu.Lock()
+	t.Cleanup(func() { auditMu.Unlock() })
+
+	prev := auditLogger
+	t.Cleanup(func() { auditLogger = prev })
+
+	var buf bytes.Buffer
+	SetAuditLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	a := &AdminAPI{allowedOriginsFn: func() []string { return []string{"*"} }}
+	okHandler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("handler must not run for a blocked cross-origin write")
+	})
+
+	// Workspace write path (P2-1): the csrfMw wrapping /api/workspaces/* uses
+	// this same middleware, so the audit proof covers both admin and workspace
+	// cookie write routes.
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	a.CSRFMiddleware(okHandler).ServeHTTP(httptest.NewRecorder(), req)
+
+	out := buf.String()
+	require.Contains(t, out, "admin_audit", "CSRF rejection must produce an admin_audit record")
+	require.Contains(t, out, "actor_user_id=anonymous", "actor must be anonymous (no auth resolved before the 403)")
+	require.Contains(t, out, "action="+AuditAuthDenied, "action must be the auth-denied enum")
+	require.Contains(t, out, "result="+AuditResultDenied, "result must be denied")
+	require.Contains(t, out, "target=/api/workspaces", "target must carry the rejected path for forensics")
 }

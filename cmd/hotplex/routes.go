@@ -253,13 +253,20 @@ func setupRoutes(
 		mux.Handle("OPTIONS /api/admin/users/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/admin/users/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 
-		// Workspaces CRUD endpoints
+		// Workspaces CRUD endpoints. Write routes (POST/PATCH/DELETE) mount
+		// csrfMw for the same reason /api/admin/* does (issue #794 P2-1):
+		// WorkspaceHandlers.currentUser → AuthenticateRequest falls back to
+		// AuthenticateActiveCookie when no api-key is present — the same
+		// SameSite=None cookie channel, so cross-site blind CSRF could create /
+		// mutate / delete a workspace. GETs pass through. Inside corsMw so
+		// OPTIONS preflight is handled first; csrfMw's 403s are audited
+		// (admin.go CSRFMiddleware, issue #794 P2-2).
 		wsHandlers := gateway.NewWorkspaceHandlers(deps.WorkspaceStore, auth)
-		mux.Handle("POST /api/workspaces", corsMw(http.HandlerFunc(wsHandlers.Create)))
+		mux.Handle("POST /api/workspaces", corsMw(csrfMw(http.HandlerFunc(wsHandlers.Create))))
 		mux.Handle("GET /api/workspaces", corsMw(http.HandlerFunc(wsHandlers.List)))
 		mux.Handle("GET /api/workspaces/{id}", corsMw(http.HandlerFunc(wsHandlers.Get)))
-		mux.Handle("PATCH /api/workspaces/{id}", corsMw(http.HandlerFunc(wsHandlers.Update)))
-		mux.Handle("DELETE /api/workspaces/{id}", corsMw(http.HandlerFunc(wsHandlers.Delete)))
+		mux.Handle("PATCH /api/workspaces/{id}", corsMw(csrfMw(http.HandlerFunc(wsHandlers.Update))))
+		mux.Handle("DELETE /api/workspaces/{id}", corsMw(csrfMw(http.HandlerFunc(wsHandlers.Delete))))
 
 		// OPTIONS preflight handlers for Workspaces API
 		mux.Handle("OPTIONS /api/workspaces", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))

@@ -137,8 +137,16 @@ func cronAction(method string) string {
 	return "cron." + strings.ToLower(method)
 }
 
-// sessionAction covers DELETE/PATCH/PUT; terminate is matched earlier in
+// sessionAction covers DELETE — the only routed session write
+// (DELETE /admin/sessions/{id}, routes.go) — plus PATCH/PUT, which are NOT
+// routed as admin session handlers (admin sessions expose only GET / DELETE /
+// POST-terminate; see routes.go). The PATCH/PUT branches exist so a 404 on
+// those un-routed methods still produces a descriptive audit action: the
+// Middleware audit defer (admin.go) calls adminActionFor before the 404
+// reaches its handler, yielding session.patch / session.put rather than a
+// generic "PATCH /admin/sessions/..". terminate is matched earlier in
 // adminActionFor (POST /admin/sessions/{id}/terminate → AuditSessionTerminate).
+// Delete the PATCH/PUT branches only if you accept losing those 404 labels.
 func sessionAction(method string) string {
 	switch method {
 	case http.MethodDelete:
