@@ -29,7 +29,7 @@
 
 ### 2.3 设置页 (Settings Modal)
 点击左侧下方的齿轮，弹出 Workspace & User 设置悬浮层：
-- **General (常规)**: 查看/修改 Workspace 名称。展示不可变的工作目录绝对路径 (`work_dir`)。
+- **General (常规)**: 查看/修改 Workspace 名称。展示并可修改工作目录绝对路径 (`work_dir`，须在 owner 沙箱下，前端用预填 + 实时预览引导）。
 - **AI Config (AI 配置)**:
   - 偏好 Worker 类型选择（切换 `claude_code` / `codexcli` 等，修改 `worker_preference`）。
   - Workspace 级 `agent_config_overrides`（YAML 格式文件编辑，校验后调用 `PATCH /api/workspaces/{id}`）。

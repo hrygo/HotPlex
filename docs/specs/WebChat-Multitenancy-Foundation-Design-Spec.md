@@ -395,8 +395,8 @@ hotplex admin create --username alice --password '...' --admin
   - `config.ExpandAndAbs(work_dir)` + `security.ValidateWorkDir(work_dir)` 双校验（防路径穿越，与 SwitchWorkDir 同标准，见 `.agents/rules/security.md`）。
   - `UNIQUE(owner_user_id, work_dir)` 约束保证 per-user 1:1。
 - **列出** `GET`：仅返回 `owner_user_id = 当前用户` 的 workspace（私有）。
-- **更新** `PATCH {name?, agent_config_overrides?, worker_preference?}`：
-  - 可改 `name` 及预留字段。**`work_dir` 不可变**（应用层拒绝，返回错误）。
+- **更新** `PATCH {name?, agent_config_overrides?, worker_preference?, work_dir?}`：
+  - 可改 `name` / `agent_config_overrides` / `worker_preference` / `work_dir`（`work_dir` 须在 owner 沙箱下且 workspace 无活跃会话时方可改，详见 §6.2）。
 - **删除** `DELETE`：
   - 校验无活跃会话；有则连带 TERMINATE（复用现有 `Transition(TERMINATED)`）。
   - 软删除（`status='deleted'`）或硬删除？建议**硬删除 + 校验无活跃会话**，避免 work_dir 解锁后被他人复用造成历史混淆。
@@ -482,7 +482,7 @@ per-workspace 并发上限：复用 `config.SecurityConfig` 或新增 `config.Qu
 | GET | `/api/workspaces` | 列出自己的 workspace |
 | POST | `/api/workspaces` | 创建 `{name, work_dir}` |
 | GET | `/api/workspaces/{id}` | 详情 |
-| PATCH | `/api/workspaces/{id}` | 更新（work_dir 不可变） |
+| PATCH | `/api/workspaces/{id}` | 更新（work_dir 可改，受 owner 沙箱 / 活跃会话 / per-owner 唯一约束） |
 | DELETE | `/api/workspaces/{id}` | 删除（校验无活跃会话） |
 | GET | `/api/workspaces/{id}/sessions` | 列出该 workspace 下的会话 |
 
@@ -511,7 +511,7 @@ per-workspace 并发上限：复用 `config.SecurityConfig` 或新增 `config.Qu
 | `WORKSPACE_NOT_FOUND` | 404 | workspace 不存在 |
 | `WORKSPACE_FORBIDDEN` | 403 | workspace 归属不匹配 |
 | `WORK_DIR_TAKEN` | 409 | per-user work_dir 1:1 冲突 |
-| `WORK_DIR_IMMUTABLE` | 400 | 尝试修改 work_dir |
+| `WORK_DIR_IMMUTABLE` | 400 | workspace-bound session 尝试 `/cd` 切 work_dir（session 级不可脱离 workspace） |
 | `WORKSPACE_NOT_EMPTY` | 409 | 删除时有活跃会话 |
 | `WORKSPACE_VERSION_MISMATCH` | 409 | 并发更新冲突（乐观锁 CAS 失败，客户端应重新 Get 再重试） |
 | `USER_DISABLED` | 403 | 用户已禁用 |
