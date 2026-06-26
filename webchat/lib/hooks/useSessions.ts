@@ -2,10 +2,14 @@
  * Session management hook for HotPlex webchat.
  *
  * Lifecycle:
- * 1. Mount → listSessions → auto-select most recent
- * 2. User selects session → calls onSelect(sessionId)
- * 3. User creates new → POST → calls onSelect(newId)
- * 4. User deletes → optimistically removes from list
+ * 1. Mount / workspace switch → listSessions → pick default session
+ *    (most-recently-active by updated_at; or initialSessionId if given)
+ * 2. No session in workspace → auto-create anchor 'main' session
+ * 3. User selects session → calls onSelect(sessionId)
+ * 4. User creates new → POST → calls onSelect(newId)
+ * 5. User deletes → optimistically removes from list
+ *
+ * 选择策略见 lib/session-select.ts(pickDefaultSession)。
  */
 
 'use client';
@@ -21,6 +25,7 @@ import {
 } from '@/lib/api/sessions';
 import { workerType as defaultWorkerType } from '@/lib/config';
 import { newSessionId } from '@/lib/ai-sdk-transport/client/envelope';
+import { pickDefaultSession } from '@/lib/session-select';
 import { logger } from '@/lib/logger';
 
 export interface UseSessionsOptions {
@@ -65,63 +70,48 @@ export function useSessions({
   initialRef.current = initialSessionId;
 
   const isCreating = useRef(false);
-  const STORAGE_KEY = workspaceId ? `hotplex_active_session_id_${workspaceId}` : 'hotplex_active_session_id';
   const DEFAULT_WORKER_TYPE = defaultWorkerType;
 
-  const refreshSessions = useCallback(async () => {
+  // refreshSessions fetches the workspace's sessions and selects the default.
+  // signal: caller (the workspaceId effect) passes an AbortController so a
+  // fast A→B workspace switch cancels the in-flight A response before it can
+  // overwrite activeSession (race → "entered the wrong session").
+  const refreshSessions = useCallback(async (signal?: AbortSignal) => {
+    const aborted = () => signal?.aborted ?? false;
     try {
       setIsLoading(true);
       setError(null);
-      const { sessions: list } = await listSessions(20, 0, workspaceId);
+      const { sessions: list } = await listSessions(20, 0, workspaceId, signal);
+      if (aborted()) return;
       const filtered = list.filter(s => s.state !== 'deleted');
       setSessions(filtered);
+      if (aborted()) return;
 
-      // 1. Try to restore from props (initialSessionId)
-      const initId = initialRef.current;
-      if (initId) {
-        const found = filtered.find(s => s.id === initId);
-        if (found) {
-          setActiveSession(found);
-          onSelectRef.current(found.id);
-          return;
-        }
-      }
-
-      // 2. Try to restore from localStorage for persistence
-      const savedId = localStorage.getItem(STORAGE_KEY)?.trim();
-      if (savedId) {
-        const found = filtered.find(s => s.id === savedId);
-        if (found) {
-          setActiveSession(found);
-          onSelectRef.current(found.id);
-          return;
-        } else {
-          // Stale ID found in storage but not in active list -> clear it
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      }
-
-      // 3. Auto-select most recent if existing
-      if (filtered.length > 0) {
-        const mostRecent = filtered.reduce((a, b) =>
-          new Date(a.updated_at) > new Date(b.updated_at) ? a : b
-        );
-        setActiveSession(mostRecent);
-        onSelectRef.current(mostRecent.id);
-        localStorage.setItem(STORAGE_KEY, mostRecent.id);
+      // Default-session policy: explicit initialSessionId (hit) > most-recent
+      // (updated_at) > none. savedId no longer participates — restoring a
+      // stale "last selected" id fought the "enter the most recent session on
+      // switch" expectation and blocked anchor auto-create when stale.
+      const pick = pickDefaultSession(filtered, initialRef.current);
+      if (pick) {
+        setActiveSession(pick);
+        onSelectRef.current(pick.id);
         return;
       }
 
-      // 4. No sessions at all? Auto-create the first one to "map to same session" by default
-      if (!initId && !savedId && filtered.length === 0 && !isCreating.current) {
+      // No usable session in this workspace → auto-create the anchor 'main'
+      // session so the workspace is immediately usable (期望:无 session 时创建默认).
+      // DeriveSessionKey(userID, wt, 'main', workspaceID, workDir) is idempotent,
+      // so concurrent callers (e.g. NewWorkspaceForm pre-create) resolve to one key.
+      if (!isCreating.current) {
         isCreating.current = true;
         try {
           const { session_id } = await createSession({
             clientSessionId: ANCHOR_CLIENT_SESSION_ID,
             workerType: DEFAULT_WORKER_TYPE,
             title: ANCHOR_CLIENT_SESSION_ID,
-            workspaceId
-          });
+            workspaceId,
+          }, signal);
+          if (aborted()) return;
           const now = new Date().toISOString();
           const newSession: SessionInfo = {
             id: session_id,
@@ -136,41 +126,47 @@ export function useSessions({
           setSessions([newSession]);
           setActiveSession(newSession);
           onSelectRef.current(newSession.id);
-          localStorage.setItem(STORAGE_KEY, newSession.id);
         } finally {
           isCreating.current = false;
         }
       } else {
-        // No sessions and we shouldn't auto-create (e.g. initId is set or already checking),
-        // or there is a savedId. In any case, if none matched, clear active session.
-        if (filtered.length === 0) {
-          setActiveSession(null);
-        }
+        // A creation is already in flight (concurrent refresh); leave active
+        // null and let the next refresh pick up the created session.
+        setActiveSession(null);
       }
     } catch (e) {
+      if (aborted()) return; // superseded by a newer switch — ignore stale error
       setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to load sessions'));
     } finally {
-      setIsLoading(false);
+      if (!aborted()) setIsLoading(false);
     }
-  }, [workspaceId, STORAGE_KEY, DEFAULT_WORKER_TYPE]);
+  }, [workspaceId, DEFAULT_WORKER_TYPE]);
 
-  // Load sessions when mount or workspaceId changes. Clear activeSession
-  // synchronously on switch: otherwise the stale session (bound to the
-  // previous workspace) is paired with the new workspaceId in the WS init
-  // handshake, which the server rejects as "session workspace mismatch"
-  // (internal/gateway/conn.go resolveSession). refreshSessions() repopulates
-  // activeSession from the new workspace's list.
+  // Load sessions on mount and whenever the active workspace changes.
+  // Clear activeSession synchronously on switch: otherwise the stale session
+  // (bound to the previous workspace) is paired with the new workspaceId in
+  // the WS init handshake, which the server rejects as "session workspace
+  // mismatch" (internal/gateway/conn.go resolveSession). refreshSessions()
+  // then repopulates activeSession from the new workspace's list.
+  //
+  // Skip while workspaceId is empty (ChatContainer's activeWorkspace is still
+  // loading): listSessions(undefined) would not filter by workspace and could
+  // briefly select a session from another workspace. The abort controller
+  // cancels the previous in-flight refresh on a rapid switch.
   useEffect(() => {
+    const ctrl = new AbortController();
     setActiveSession(null);
-    refreshSessions();
+    if (workspaceId) {
+      refreshSessions(ctrl.signal);
+    }
+    return () => ctrl.abort();
   }, [workspaceId, refreshSessions]);
 
   const selectSession = useCallback((session: SessionInfo) => {
     setActiveSession(session);
     onSelectRef.current(session.id);
-    localStorage.setItem(STORAGE_KEY, session.id);
     setIsOpen(false);
-  }, [STORAGE_KEY]);
+  }, []);
 
   const createNewSession = useCallback(async (title: string, workerType?: string) => {
     const wt = workerType || DEFAULT_WORKER_TYPE;
@@ -182,7 +178,7 @@ export function useSessions({
         clientSessionId: newSessionId(),
         workerType: wt,
         title: title || undefined,
-        workspaceId
+        workspaceId,
       });
       const now = new Date().toISOString();
       const newSession: SessionInfo = {
@@ -198,21 +194,19 @@ export function useSessions({
       setSessions(prev => [newSession, ...prev.filter(s => s.state !== 'deleted')]);
       setActiveSession(newSession);
       onSelectRef.current(session_id);
-      localStorage.setItem(STORAGE_KEY, session_id);
     } catch (e) {
       setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to create session'));
     } finally {
       setIsLoading(false);
       isCreating.current = false;
     }
-  }, [workspaceId, STORAGE_KEY, DEFAULT_WORKER_TYPE]);
+  }, [workspaceId, DEFAULT_WORKER_TYPE]);
 
   const removeSession = useCallback(async (id: string) => {
     // Optimistic remove
     setSessions((prev) => prev.filter((s) => s.id !== id));
     if (activeSession?.id === id) {
       setActiveSession(null);
-      localStorage.removeItem(STORAGE_KEY);
     }
 
     try {
@@ -222,7 +216,7 @@ export function useSessions({
       setError(e instanceof AuthError ? e.message : (e instanceof Error ? e.message : 'Failed to delete session'));
       refreshSessions();
     }
-  }, [activeSession, refreshSessions, STORAGE_KEY]);
+  }, [activeSession, refreshSessions]);
 
   // Handle manual session selection
   const handleSessionSelect = useCallback((id: string) => {
