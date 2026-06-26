@@ -371,6 +371,16 @@ func (a *AdminAPI) SetCookieFallback(cookieAuth *security.CookieAuth, idp *secur
 // when the allowlist is permissive. Same-origin traffic still passes via the
 // Sec-Fetch-Site branch above, so embedded webchat on the gateway origin is
 // unaffected; only cross-origin writes need an exact match.
+//
+// same-site trust assumption (issue #794 P3-2): the Sec-Fetch-Site: same-site
+// branch admits a sibling subdomain (e.g. evil.example.com vs
+// gateway.example.com — same registrable site) as trusted. This relies on two
+// premises: (1) browsers forbid cross-origin documents from forging Fetch
+// Metadata headers, so a genuine cross-site attacker cannot claim "same-site";
+// (2) within this deploy's registrable site no subdomain hosts user-controlled
+// content capable of initiating the write. If either premise fails (multi-
+// tenant subdomain hosting, or a compromised sibling subdomain), narrow
+// allowedOrigins and rely on the exact Origin-match branch instead.
 func (a *AdminAPI) sameOriginRequest(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "same-origin", "same-site":
@@ -388,14 +398,23 @@ func (a *AdminAPI) sameOriginRequest(r *http.Request) bool {
 
 // CSRFMiddleware gates cookie-authenticated state-changing requests against
 // cross-origin abuse (issue #788 review P0). /api/admin/* write routes
-// (invitations CRUD, user status) mount on the gateway mux and authenticate
-// via the SameSite=None session cookie, so they need the same defense the
-// Bearer admin port applies via Middleware. GET requests pass through; write
-// methods require same-origin proof. Apply inside corsMw so OPTIONS is
-// already handled.
+// (invitations CRUD, user status) and /api/workspaces/* write routes mount on
+// the gateway mux and authenticate via the SameSite=None session cookie
+// (issue #794 P2-1 extended coverage to workspaces), so they need the same
+// defense the Bearer admin port applies via Middleware. GET requests pass
+// through; write methods require same-origin proof. Apply inside corsMw so
+// OPTIONS is already handled.
+//
+// Audit (issue #794 P2-2): this middleware runs on the gateway mux, outside
+// AdminAPI.Middleware's audit defer, so a 403 would otherwise be silent.
+// CSRF denials are high-value security events — log them through the shared
+// admin_audit pipeline with the auth-denied action. actor is "anonymous"
+// because the cookie is never resolved before the cross-origin proof fails
+// (mirrors the Middleware defer's fallback for pre-auth rejections).
 func (a *AdminAPI) CSRFMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isWriteMethod(r.Method) && !a.sameOriginRequest(r) {
+			AdminAudit("anonymous", AuditAuthDenied, r.URL.Path, AuditResultDenied)
 			web.WriteAppError(w, http.StatusForbidden, "FORBIDDEN", "cross-origin write blocked")
 			return
 		}

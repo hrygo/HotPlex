@@ -1,6 +1,6 @@
 # Workspace 权限模式规范
 
-**状态**: Draft · **日期**: 2026-06-25 · **关联 Issue**: [#789](https://github.com/hrygo/hotplex/issues/789) · **版本目标**: v1.31.0
+**状态**: Draft · **日期**: 2026-06-26（修订：CC `auto-edit` 档改用原生 `auto` mode，消除 §3.2 退化） · **关联 Issue**: [#789](https://github.com/hrygo/hotplex/issues/789) · **版本目标**: v1.31.0
 
 ---
 
@@ -15,7 +15,7 @@
 | OpenCode Server | `set_permission_mode("bypassPermissions")` | `internal/worker/opencodeserver/worker.go:580-597` |
 | ACP | `autoApprove=true`（全局默认） | `internal/worker/acp/worker.go:48-63` |
 
-四种 Worker 的权限语义**完全不同构**：CC 是单维度 4 档 mode，Codex 是 `sandbox × approvalPolicy` 双维度 9 组合，OCS 是 CC 兼容的 mode 字符串，ACP 是 `autoApprove` 布尔。
+四种 Worker 的权限语义**完全不同构**：CC 是单维度 mode（本项目映射 `plan`/`acceptEdits`/`auto`/`bypass` 四档，原生共 6 档），Codex 是 `sandbox × approvalPolicy` 双维度 9 组合，OCS 是 CC 兼容的 mode 字符串，ACP 是 `autoApprove` 布尔。
 
 `SessionInfo` 已定义 `PermissionMode` 与 `SkipPermissions` 字段（`internal/worker/worker.go:267-271`），但**全代码库无任何赋值点**（除测试），因此全部走各 Worker 的默认 bypass 分支。
 
@@ -63,7 +63,7 @@ const (
 |---------|-------------|---------------------------------------|-----------------|-------------------|
 | `read-only` | `--permission-mode plan` | `read-only` × `untrusted` | `plan` | `false` |
 | `workspace` | `--permission-mode acceptEdits` | `workspace-write` × `on-request` | `acceptEdits` | `false` |
-| `auto-edit` | `--permission-mode acceptEdits` | `workspace-write` × `never` | `acceptEdits` | `true` |
+| `auto-edit` | `--permission-mode auto` | `workspace-write` × `never` | `acceptEdits` | `true` |
 | `bypass` | `--dangerously-skip-permissions` | `danger-full-access` × `never` | `bypassPermissions` | `true` |
 
 ### 3.2 退化说明
@@ -72,9 +72,10 @@ const (
 
 | Worker | 退化档位 | 原因 |
 |--------|---------|------|
-| Claude Code | `workspace` ≡ `auto-edit`（均映射 `acceptEdits`） | CC 无"自动编辑但危险操作仍确认"的独立档；`acceptEdits` 已是最高非 bypass 档，其本身即"自动接受编辑、危险操作仍确认" |
-| OpenCode Server | `workspace` ≡ `auto-edit`（均映射 `acceptEdits`） | OCS 采用 CC 兼容 mode 命名，同上原因 |
+| OpenCode Server | `workspace` ≡ `auto-edit`（均映射 `acceptEdits`） | OCS 服务端暂未暴露与 CC `auto` 等价的 mode（待 §11 校准），以 `acceptEdits` 承载两档 |
 | ACP | `read-only` ≡ `workspace`（均 `autoApprove=false`），`auto-edit` ≡ `bypass`（均 `true`） | ACP 仅布尔权限粒度，无中间询问档 |
+
+> **Claude Code 不再退化**：`workspace` → `acceptEdits`（自动接受编辑、危险操作仍确认），`auto-edit` → `auto`（全自动 + 后台安全分类器审查危险操作）。两档精确对齐 CC 原生 `acceptEdits`/`auto` 语义（详见 §6.2），admin 可在 CC workspace 下区分"编辑免确认"与"全自动"两种工作方式。
 
 admin UI 需展示当前 workspace 的 `worker_preference` 下各档实际效果，避免 admin 对退化档位产生误判。
 
@@ -154,14 +155,18 @@ if session.SkipPermissions { mode = worker.PermBypass } // 向后兼容
 switch mode {
 case worker.PermReadOnly:
     args = append(args, "--permission-mode", "plan")
-case worker.PermWorkspace, worker.PermAutoEdit:
+case worker.PermWorkspace:
     args = append(args, "--permission-mode", "acceptEdits")
+case worker.PermAutoEdit:
+    args = append(args, "--permission-mode", "auto")
 case worker.PermBypass:
     args = append(args, "--dangerously-skip-permissions")
 default: // 空值，保留现有 bypass 行为
     args = append(args, "--dangerously-skip-permissions")
 }
 ```
+
+> **前提（CC `auto` mode）**：`auto` 由较新版本 claude CLI 提供，语义为"全自动执行 + 后台安全分类器审查危险操作"——精确承载统一 `auto-edit` 档（区别于 `workspace` 档的 `acceptEdits`：后者仅自动接受文件编辑/常规 fs 命令，shell·网络等危险操作仍确认）。**决策：强制升级**——生产环境 claude CLI 必须支持 `--permission-mode auto`；旧版 CLI 下 CC worker 启动即失败报错（明确提示升级 CLI），**不静默降级**到 `acceptEdits`。doctor/onboard 应检测 CLI 版本，版本下限与探测落点见 §11。
 
 ### 6.3 Codex CLI（`codexcli/worker.go:701 buildThreadStartParams`）— 当前 gap
 
@@ -232,6 +237,7 @@ workspace 管理「创建 / 编辑」表单新增**权限模式**分段单选控
 | SessionInfo | `PermissionMode=""` 时各 Worker 走现有默认分支（= bypass） |
 | `SkipPermissions` | 保留，作 `bypass` 别名，现有调用无需改动 |
 | cron / 无 workspace session | 不读 workspace，走全局默认（bypass），行为不变 |
+| CC `auto` mode 依赖 | 仅 `auto-edit` 档要求 claude CLI 较新版本（强制升级，不回退）；默认 `bypass` 及 `read-only`/`workspace` 档不引入新依赖。旧 CLI + `auto-edit` → 启动失败报错，不降级 |
 
 零破坏性：未显式收紧的 workspace 升级后权限模式与现状完全一致。
 
@@ -240,6 +246,7 @@ workspace 管理「创建 / 编辑」表单新增**权限模式**分段单选控
 | 测试 | 范围 |
 |------|------|
 | 各 Worker 映射表测试 | 4 档 × 预期原生参数（CC args、Codex params map、OCS/ACP 调用参数），含退化档断言 |
+| CC `auto-edit` 独立性 | `auto-edit` 档产出的 args 含 `--permission-mode auto`，与 `workspace` 档（`acceptEdits`）严格区分；同时验证 `read-only`→`plan`、`bypass`→`--dangerously-skip-permissions`、空值→`--dangerously-skip-permissions` |
 | bridge 注入测试 | workspace 设档 → `SessionInfo.PermissionMode` 正确；空值 → 全局默认；无 workspace → 全局默认 |
 | store CRUD 测试 | CreateWorkspace 带权限、UpdateWorkspace 改权限、List/Get 回显 |
 | migration 测试 | 存量 workspace 升级后 `permission_mode='bypass'`；SQLite + PG 双驱动 |
@@ -275,5 +282,6 @@ workspace 管理「创建 / 编辑」表单新增**权限模式**分段单选控
 
 ## 11. 开放问题（实施阶段确认）
 
-- OCS 服务端实际支持的 mode 名集合（设计假设 `plan`/`acceptEdits`/`bypassPermissions`，需对照 opencode 版本校准）
+- OCS 服务端实际支持的 mode 名集合（设计假设 `plan`/`acceptEdits`/`bypassPermissions`，需对照 opencode 版本校准；若 OCS 后续支持与 CC `auto` 等价 mode，可消除 §3.2 中 OCS 的 `workspace`/`auto-edit` 退化）
+- claude CLI 支持 `--permission-mode auto` 的最低版本待实测确定（**决策：强制升级 CLI，不做静默降级**）。校准后须：① 将版本下限写入 doctor 检查（`internal/cli/checkers`）；② CC worker 启动期版本探测，不达标直接拒绝启动并提示升级；③ 仅影响显式设为 `auto-edit` 档的 CC workspace，默认 `bypass` 不受此依赖约束
 - admin UI 中"无 worker_preference 的 workspace"如何展示 tooltip（回退到默认 worker_type 的映射）

@@ -100,7 +100,9 @@ func (s *pgStore) List(ctx context.Context, userID, platform, workspaceID string
 	}
 	defer func() { _ = rows.Close() }()
 
-	var sessions []*SessionInfo
+	// Non-nil empty slice so empty results JSON-serialize to `[]` not `null`
+	// (frontend calls .filter() on the response — nil crashes it). See store.go.
+	sessions := make([]*SessionInfo, 0)
 	for rows.Next() {
 		si, err := scanSession(rows)
 		if err != nil {
