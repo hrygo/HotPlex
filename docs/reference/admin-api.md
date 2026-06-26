@@ -25,6 +25,8 @@ curl http://localhost:9999/admin/stats?access_token=<token>
 
 Token 使用 `crypto/subtle.ConstantTimeCompare` 进行常量时间比较，防止时序攻击。
 
+> **Cookie 认证兜底（WebChat 多租户部署）**：当请求未携带 Bearer Token 时，若已启用 WebChat 多租户（`CookieAuth` 与本地账号身份提供者就绪），中间件会转而解析 chat session cookie，校验为 **active 且角色为 `admin`** 的用户后放行，并授予完整 scope 集合——嵌入式 WebChat 中已登录的管理员可直接访问 Dashboard/Bots/Cron，无需另发 admin token。Bearer 仍优先；standalone/CLI 部署（未启用多租户）保持仅 Bearer 行为。该 cookie 通道的写方法同样适用下文的「CSRF 同源校验」；跨源 cookie 调用还需在 CORS `allowedOrigins` 显式列出 WebChat origin（`*` 通配会抑制 `Allow-Credentials`，浏览器将拒绝发送 session cookie）。
+
 ### Token 配置
 
 ```yaml
@@ -294,6 +296,8 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 > **GET /api/admin/invitations** — 每条邀请额外返回服务器计算的 `is_expired`（`true` 表示邀请码**未被使用且已过期**），客户端无需自行比对 `expires_at` 与本地时钟，规避时钟漂移。
 
 > ⚠️ **注意区分**：此处的 `/api/admin/*`（端口 `8888`，Cookie 认证，WebChat workspace 维度）与本页上方「认证」章节描述的 Admin API（端口 `9999`，Bearer Token，网关运维维度）是**两套独立端点**，认证模型和作用域完全不同，不要混淆。
+
+> 🔒 **CSRF 同源校验（写方法）**：`/api/admin/*` 与 `/api/workspaces/*` 的状态变更方法（`POST`/`PATCH`/`DELETE`）挂载同源验证中间件，防御针对 SameSite=None session cookie 的跨站写请求；`GET` 一律放行。写方法需提供「同源证明」之一——浏览器 `Sec-Fetch-Site` 取值为 `same-origin`/`same-site`，或 `Origin` 精确命中 CORS `allowedOrigins`（`*` 通配**不**满足：SameSite=None cookie 恰在 allowlist 宽松时跨站送达）。未通过返回 `403 FORBIDDEN`（`message`: `cross-origin write blocked`）并记入 admin 审计日志。嵌入式 WebChat SPA 与网关同源，天然通过；跨域前端需将自身 origin 列入 `allowedOrigins`。
 
 ## 错误响应格式
 
