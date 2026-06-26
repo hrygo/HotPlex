@@ -83,7 +83,9 @@ export function useSessions({
       setError(null);
       const { sessions: list } = await listSessions(20, 0, workspaceId, signal);
       if (aborted()) return;
-      const filtered = list.filter(s => s.state !== 'deleted');
+      // Defensive null-guard: backend store.List returns [] for empty (make),
+      // but guard against null from older deployments so we never crash on filter.
+      const filtered = (list ?? []).filter(s => s.state !== 'deleted');
       setSessions(filtered);
       if (aborted()) return;
 

@@ -123,6 +123,23 @@ func TestSQLiteStore_List_DefaultLimit(t *testing.T) {
 	require.GreaterOrEqual(t, len(sessions), 2)
 }
 
+// Regression: an empty result must serialize to JSON `[]`, never `null`.
+// The webchat frontend calls .filter() directly on the `sessions` field of
+// the list response; a Go nil slice marshals to `null` and crashes the UI
+// ("Cannot read properties of null (reading 'filter')"), which prevented
+// auto-creating a default session for an empty workspace.
+func TestSQLiteStore_List_EmptyMarshalsToArrayNotNull(t *testing.T) {
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	sessions, err := store.List(ctx, "user_with_no_sessions", "", "", 20, 0)
+	require.NoError(t, err)
+	require.NotNil(t, sessions, "List must return non-nil slice so JSON is [] not null (frontend does resp.sessions.filter)")
+	b, err := json.Marshal(sessions)
+	require.NoError(t, err)
+	require.Equal(t, "[]", string(b))
+}
+
 // ─── SQLiteStore: GetExpiredMaxLifetime / GetExpiredIdle ──────────────────────
 
 func TestSQLiteStore_GetExpiredMaxLifetime(t *testing.T) {

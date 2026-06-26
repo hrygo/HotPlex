@@ -184,7 +184,10 @@ func (s *SQLiteStore) List(ctx context.Context, userID, platform, workspaceID st
 	}
 	defer func() { _ = rows.Close() }()
 
-	var sessions []*SessionInfo
+	// Non-nil empty slice (not nil) so an empty result JSON-serializes to `[]`
+	// rather than `null`. The webchat frontend calls .filter() directly on the
+	// `sessions` field — a nil would crash it ("Cannot read properties of null").
+	sessions := make([]*SessionInfo, 0)
 	for rows.Next() {
 		si, err := scanSession(rows)
 		if err != nil {
