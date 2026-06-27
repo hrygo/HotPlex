@@ -71,6 +71,37 @@ admin:
 
 Rate Limit 和 IP Whitelist 支持配置热重载，无需重启生效。
 
+## 操作审计
+
+所有 admin 写操作（`POST`/`PUT`/`PATCH`/`DELETE`）均通过 `slog` 记录结构化审计事件（`admin_audit`，issue #788 A5），用于合规追溯与事故取证。审计复用网关现有 JSON 日志管道，无独立存储——直接流向标准日志输出，可由日志聚合系统按字段过滤检索，无需额外配置。
+
+**覆盖范围**：
+
+- **`/admin/*`（端口 9999，Bearer Token）**：在 `AdminAPI.Middleware` 的审计 defer 中统一记录——无论请求最终成功或失败，写方法都会产生一条审计记录；`(method, path)` 映射为稳定 action 枚举，未映射路由回退 `"<method> <path>"`，确保无写操作静默丢失。
+- **`/api/admin/*` 与 `/api/workspaces/*`（端口 8888，Cookie）**：在各 handler 的成功/失败路径显式记录；CSRF 同源校验拦截的跨站写请求同样记审计（action `auth.denied`，详见下文「CSRF 同源校验」）。
+
+**审计字段**：
+
+| 字段 | 说明 |
+|------|------|
+| `actor_user_id` | 操作者标识：Cookie 通道为用户 `uid`；Bearer 通道为 `admin-token`；认证未解析或失败时为 `anonymous` |
+| `action` | 稳定动作枚举（见下表），日志看板按此过滤，**不可重命名** |
+| `target` | 请求路径（含资源 id） |
+| `result` | `ok`（成功）/ `failed`（操作失败）/ `denied`（认证或授权拒绝） |
+
+**action 枚举**：
+
+| 资源域 | action |
+|--------|--------|
+| 网关 | `gateway.restart` |
+| Bot | `bot.create` / `bot.update` / `bot.delete` |
+| API Key | `apikey.create` / `apikey.update` / `apikey.delete` |
+| Cron | `cron.create` / `cron.update` / `cron.delete` / `cron.trigger` |
+| Session | `session.delete` / `session.terminate` / `session.patch` / `session.put` |
+| Config | `config.rollback` / `config.validate` |
+| 多租户成员/邀请 | `member.status.update` / `invitation.create` / `invitation.delete` |
+| 认证拒绝 | `auth.denied` |
+
 ## 端点总览
 
 ### 健康检查
