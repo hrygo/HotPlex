@@ -59,15 +59,16 @@ type Bridge struct {
 	retryCancelMu  sync.Mutex
 	retryCancel    map[string]chan struct{} // sessionID → cancel channel
 
-	agentConfigDir     string                   // agent config directory path; "" = disabled
-	turnTimeout        time.Duration            // per-turn timeout; 0 = disabled
-	workerEnv          []string                 // extra env vars from worker.environment config
-	workerEnvBlocklist []string                 // extra blocklist entries from worker.env_blocklist config
-	cronEnv            []string                 // env vars injected only into cron platform sessions
-	mcpConfigJSON      atomic.Value             // pre-serialized MCP config JSON string; "" = not configured
-	agentConfigExclude atomic.Value             // map[string][]string: platform → inject_exclude (global default at "" key)
-	wsStore            WorkspaceOverridesReader // per-workspace agent-config overrides resolver (spec ②); nil = Message Channel track
-	warnedOverrides    sync.Map                 // workspaceID → struct{}: dedup override-degrade warnings (#749)
+	agentConfigDir        string                   // agent config directory path; "" = disabled
+	turnTimeout           time.Duration            // per-turn timeout; 0 = disabled
+	workerEnv             []string                 // extra env vars from worker.environment config
+	workerEnvBlocklist    []string                 // extra blocklist entries from worker.env_blocklist config
+	cronEnv               []string                 // env vars injected only into cron platform sessions
+	mcpConfigJSON         atomic.Value             // pre-serialized MCP config JSON string; "" = not configured
+	defaultPermissionMode atomic.Value             // worker.PermissionMode* tier; global default (bypass) for sessions without a workspace override (issue #789)
+	agentConfigExclude    atomic.Value             // map[string][]string: platform → inject_exclude (global default at "" key)
+	wsStore               WorkspaceOverridesReader // per-workspace agent-config overrides resolver (spec ②); nil = Message Channel track
+	warnedOverrides       sync.Map                 // workspaceID → struct{}: dedup override-degrade warnings (#749)
 
 	accum map[string]*sessionAccumulator // per-session stats accumulator
 
@@ -118,6 +119,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		shutdownCancel:     shutdownCancel,
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
+	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(deps.DefaultPermissionMode))
 	b.agentConfigExclude.Store(deps.AgentConfigExclude)
 	return b
 }
@@ -131,6 +133,12 @@ func (b *Bridge) SetWorkerFactory(wf WorkerFactory) {
 // UpdateMCPConfig atomically updates the MCP config JSON. Used by config hot-reload.
 func (b *Bridge) UpdateMCPConfig(json string) {
 	b.mcpConfigJSON.Store(json)
+}
+
+// UpdateDefaultPermissionMode atomically updates the global default permission mode
+// tier. Empty/unknown normalizes to bypass. Used by config hot-reload (issue #789).
+func (b *Bridge) UpdateDefaultPermissionMode(mode string) {
+	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(mode))
 }
 
 // UpdateAgentConfigExclude atomically updates the platform → inject_exclude map.
@@ -895,6 +903,7 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		ACPCommand:      si.PlatformKey[worker.ACPCommandPlatformKey],
 		ForkSession:     si.PlatformKey[worker.ForkSessionPlatformKey] == "true",
 		JSONSchema:      si.PlatformKey[worker.JSONSchemaPlatformKey],
+		PermissionMode:  b.resolveWorkspacePermissionMode(si.WorkspaceID),
 		// TODO: platform adapters (Slack/Feishu) need to populate ForkSession/JSONSchema
 		// into PlatformKey for this wiring to take effect; tracked in UX follow-up.
 	}

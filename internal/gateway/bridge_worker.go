@@ -344,6 +344,29 @@ func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID stri
 	return overrides
 }
 
+// resolveWorkspacePermissionMode returns the effective permission mode tier for a
+// session (issue #789). Priority: workspace-level override > global default
+// (worker.default_permission_mode → bypass). Degrades to the global default on any
+// fetch error — never blocks worker launch (mirrors resolveWorkspaceOverrides).
+func (b *Bridge) resolveWorkspacePermissionMode(workspaceID string) string {
+	def, _ := b.defaultPermissionMode.Load().(string)
+	if def == "" {
+		def = worker.PermissionModeBypass // unconfigured bridge (e.g. zero-value in tests)
+	}
+	if workspaceID == "" || b.wsStore == nil {
+		return def
+	}
+	ws, err := b.wsStore.GetWorkspaceByID(b.shutdownCtx, workspaceID)
+	if err != nil {
+		b.warnOverrideDegrade(workspaceID, "fetch workspace permission_mode failed, degrading to global default", err)
+		return def
+	}
+	if ws.PermissionMode != "" {
+		return ws.PermissionMode
+	}
+	return def
+}
+
 // warnOverrideDegrade logs a degrading warning at most once per workspaceID per
 // process lifetime, preventing log spam under high-crash session loops (#749).
 // The warning is re-armed when the workspace later resolves successfully.
