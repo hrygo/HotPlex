@@ -74,8 +74,9 @@ func (h *WorkspaceHandlers) isAdmin(r *http.Request, uid string) bool {
 }
 
 type createWorkspaceRequest struct {
-	Name    string `json:"name"`
-	WorkDir string `json:"work_dir"`
+	Name           string  `json:"name"`
+	WorkDir        string  `json:"work_dir"`
+	PermissionMode *string `json:"permission_mode"` // nil/"" = "worker default" (no explicit override, stored as ""); else one of worker.PermissionMode* (issue #789)
 }
 
 // Create: POST /api/workspaces
@@ -93,6 +94,16 @@ func (h *WorkspaceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "name and work_dir required")
 		return
 	}
+	// Permission mode is optional; nil/"" means "worker default" (stored as "" — no
+	// explicit override). Validate before construction so an invalid tier is rejected early (issue #789).
+	var permMode string
+	if req.PermissionMode != nil {
+		if err := worker.ValidatePermissionMode(*req.PermissionMode); err != nil {
+			writeAppError(w, http.StatusBadRequest, "INVALID_PERMISSION_MODE", err.Error())
+			return
+		}
+		permMode = *req.PermissionMode
+	}
 	// Security dual-check (same standard as SwitchWorkDir, spec §9.1).
 	abs, err := config.ExpandAndAbs(req.WorkDir)
 	if err != nil {
@@ -109,6 +120,7 @@ func (h *WorkspaceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := &session.Workspace{
 		ID: uuid.NewString(), OwnerUserID: uid, Name: req.Name, WorkDir: abs, Status: "active",
+		PermissionMode: permMode,
 	}
 	if err := h.store.CreateWorkspace(r.Context(), ws, h.nowUnix()); err != nil {
 		if isUniqueViolation(err) {
@@ -165,6 +177,7 @@ type updateWorkspaceRequest struct {
 	AgentConfigOverrides string  `json:"agent_config_overrides"`
 	WorkerPreference     *string `json:"worker_preference"` // nil = omit (no change); "" = explicit clear to default
 	WorkDir              string  `json:"work_dir"`          // workspace-level mutable (session-level inherits)
+	PermissionMode       *string `json:"permission_mode"`   // nil = omit (no change); "" = clear to "worker default" (no explicit override); else worker.PermissionMode* (issue #789)
 }
 
 // Update: PATCH /api/workspaces/{id}
@@ -250,6 +263,15 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ws.WorkerPreference = *req.WorkerPreference
+	}
+	if req.PermissionMode != nil {
+		// nil = field omitted (no change); "" = clear to "worker default" (stored as "", no override).
+		// ValidatePermissionMode accepts "" as the valid "worker default" value (issue #789).
+		if err := worker.ValidatePermissionMode(*req.PermissionMode); err != nil {
+			writeAppError(w, http.StatusBadRequest, "INVALID_PERMISSION_MODE", err.Error())
+			return
+		}
+		ws.PermissionMode = *req.PermissionMode
 	}
 	if err := h.store.UpdateWorkspace(r.Context(), ws, h.nowUnix()); err != nil {
 		if errors.Is(err, session.ErrWorkspaceNotEmpty) {

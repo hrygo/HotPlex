@@ -221,6 +221,55 @@ func TestWorkspacesStore_DeleteIfEmpty_AlreadyDeletedReturnsNotFound(t *testing.
 	require.ErrorIs(t, err, ErrWorkspaceNotFound, "已删除的 workspace 应返回 ErrWorkspaceNotFound 而非 ErrWorkspaceNotEmpty")
 }
 
+// TestWorkspacesStore_PermissionModeRoundTrip verifies permission_mode persists across
+// create → get → update → get (issue #789). Also exercises the scanWorkspace column-count
+// contract: a mismatch between SELECT columns and scan destinations surfaces here.
+func TestWorkspacesStore_PermissionModeRoundTrip(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 1700000000))
+
+	// Create with permission_mode = "workspace".
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{
+		ID: "ws-1", OwnerUserID: "u-1", Name: "proj", WorkDir: "/tmp/p", PermissionMode: "workspace",
+	}, 1700000000))
+
+	got, err := store.GetWorkspaceByID(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Equal(t, "workspace", got.PermissionMode, "permission_mode round-trips via create+get")
+
+	// Update to "auto-edit" — CAS requires the cached updated_at from the prior Get.
+	got.PermissionMode = "auto-edit"
+	require.NoError(t, store.UpdateWorkspace(ctx, got, 1700000001))
+	got2, err := store.GetWorkspaceByID(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Equal(t, "auto-edit", got2.PermissionMode, "permission_mode round-trips via update")
+	require.Equal(t, int64(1700000001), got2.UpdatedAt, "CAS success bumps updated_at")
+
+	// Clear permission_mode: "" → nullableString → NULL.
+	got2.PermissionMode = ""
+	require.NoError(t, store.UpdateWorkspace(ctx, got2, 1700000002))
+	got3, err := store.GetWorkspaceByID(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Empty(t, got3.PermissionMode, "empty permission_mode persists as NULL and reads back empty")
+}
+
+// TestWorkspacesStore_PermissionModeDefaultNull verifies the backward-compatible default:
+// a workspace created without permission_mode stores NULL and reads back empty (the "worker
+// default" — the store does NOT normalize; each worker applies its own default). Existing
+// rows upgraded by migration 022 behave identically — zero-damage upgrade (issue #789).
+func TestWorkspacesStore_PermissionModeDefaultNull(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateWorkspace(ctx, &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "p", WorkDir: "/tmp/x"}, 1700000000))
+	got, err := store.GetWorkspaceByID(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Empty(t, got.PermissionMode, "NULL permission_mode reads back empty")
+}
+
 // --- invitations ---
 
 func TestInvitationsStore_CreateAndMarkUsedCAS(t *testing.T) {

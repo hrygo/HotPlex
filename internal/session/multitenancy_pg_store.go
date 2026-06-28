@@ -82,7 +82,7 @@ func (s *pgStore) HasAdmin(ctx context.Context) (bool, error) {
 
 func (s *pgStore) CreateWorkspace(ctx context.Context, w *Workspace, now int64) error {
 	_, err := s.db.ExecContext(ctx, s.queries["workspaces.create"],
-		w.ID, w.OwnerUserID, w.Name, w.WorkDir, now, now)
+		w.ID, w.OwnerUserID, w.Name, w.WorkDir, now, now, nullableString(w.PermissionMode))
 	return err
 }
 
@@ -146,7 +146,7 @@ func (s *pgStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID
 // ErrWorkspaceNotEmpty vs ErrWorkspaceConflict.
 func (s *pgStore) UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error {
 	res, err := s.db.ExecContext(ctx, s.queries["workspaces.update"],
-		w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), w.WorkDir, now,
+		w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), w.WorkDir, nullableString(w.PermissionMode), now,
 		w.ID, w.UpdatedAt, w.WorkDir, w.ID)
 	if err != nil {
 		return err

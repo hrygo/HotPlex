@@ -79,6 +79,7 @@ func Default() *Config {
 				UseAppServer:    true,
 				IdleDrainPeriod: 30 * time.Minute,
 			},
+			DefaultPermissionMode: "bypass", // no-op since #789 r2 P2: accepted but NOT injected by bridge (would override restricted codex/ACP config); retained for future per-worker-type use
 		},
 		Security: SecurityConfig{
 			APIKeyHeader:    "X-API-Key",

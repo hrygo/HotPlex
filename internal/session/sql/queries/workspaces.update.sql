@@ -10,10 +10,10 @@
 --   - NOT EXISTS    → work_dir is changing: require zero active sessions
 -- The `AND updated_at = ?` is the optimistic-concurrency guard (review P3-1): the
 -- last bind arg is the caller's cached updated_at. Args (in order): name,
--- agent_config_overrides, worker_preference, work_dir(new), updated_at(now),
+-- agent_config_overrides, worker_preference, work_dir(new), permission_mode, updated_at(now),
 -- id, updated_at(cached), work_dir(new, for the ?=work_dir compare), workspace_id.
 UPDATE workspaces SET
-  name = ?, agent_config_overrides = ?, worker_preference = ?, work_dir = ?, updated_at = ?
+  name = ?, agent_config_overrides = ?, worker_preference = ?, work_dir = ?, permission_mode = ?, updated_at = ?
 WHERE id = ? AND updated_at = ?
   AND (? = work_dir OR NOT EXISTS (
     SELECT 1 FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle')

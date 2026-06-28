@@ -4,6 +4,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/hrygo/hotplex/pkg/events"
@@ -230,6 +231,54 @@ type SystemPromptUpdater interface {
 	UpdateSystemPrompt(prompt string)
 }
 
+// PermissionMode tiers (issue #789). The gateway maps each tier to the worker's
+// native permission parameters at startup. Admin picks one per workspace; an empty
+// value means "worker default" (CC/OCS apply bypass; Codex/ACP honor operator config —
+// the admin global default is intentionally NOT injected; see resolveWorkspacePermissionMode).
+// Mapping lives inside each worker (not a central table) — see claudecode/codexcli/
+// opencodeserver/acp workers for the per-runtime translation.
+const (
+	PermissionModeReadOnly  = "read-only" // CC plan / Codex read-only×untrusted / OCS plan / ACP approve=false
+	PermissionModeWorkspace = "workspace" // CC acceptEdits / Codex workspace-write×on-request / OCS acceptEdits / ACP approve=false
+	PermissionModeAutoEdit  = "auto-edit" // CC auto / Codex workspace-write×never / OCS acceptEdits / ACP approve=true
+	PermissionModeBypass    = "bypass"    // CC --dangerously-skip-permissions / Codex danger-full-access×never / OCS bypassPermissions / ACP approve=true
+)
+
+// ErrInvalidPermissionMode signals a permission mode that is not one of the 4 tiers.
+var ErrInvalidPermissionMode = errors.New("invalid permission mode")
+
+var validPermissionModes = map[string]struct{}{
+	PermissionModeReadOnly:  {},
+	PermissionModeWorkspace: {},
+	PermissionModeAutoEdit:  {},
+	PermissionModeBypass:    {},
+}
+
+// ValidatePermissionMode returns nil for the empty string ("worker default":
+// CC/OCS apply bypass; Codex/ACP honor operator config) or a valid tier;
+// otherwise it wraps ErrInvalidPermissionMode. Mirrors ValidateType.
+func ValidatePermissionMode(mode string) error {
+	if mode == "" {
+		return nil
+	}
+	if _, ok := validPermissionModes[mode]; !ok {
+		return fmt.Errorf("%w: %q not a valid tier (read-only|workspace|auto-edit|bypass)", ErrInvalidPermissionMode, mode)
+	}
+	return nil
+}
+
+// NormalizePermissionMode returns the effective tier for a (possibly empty) mode:
+// empty → PermissionModeBypass. Valid tiers pass through unchanged. Its only consumer
+// today is NewBridge/UpdateDefaultPermissionMode normalizing the (currently no-op)
+// defaultPermissionMode field; resolveWorkspacePermissionMode does NOT call it —
+// explicit workspace overrides pass through verbatim and empty means "worker default" (#789 r2).
+func NormalizePermissionMode(mode string) string {
+	if mode == "" {
+		return PermissionModeBypass
+	}
+	return mode
+}
+
 // SessionInfo contains metadata about a session needed by the worker to start/resume.
 type SessionInfo struct {
 	SessionID    string
@@ -264,8 +313,10 @@ type SessionInfo struct {
 	// ConfigBlocklist holds additional env var names from worker.env_blocklist config.
 	// These are merged with the hardcoded per-worker blocklist in BuildEnv.
 	ConfigBlocklist []string
-	// PermissionMode controls how the worker handles permission requests.
-	// Valid values: "default", "plan", "auto-accept".
+	// PermissionMode controls how the worker handles permission requests (issue #789).
+	// Valid values: PermissionModeReadOnly|Workspace|AutoEdit|Bypass. Empty = "worker
+	// default" (CC/OCS apply bypass; Codex/ACP honor operator config); the bridge leaves
+	// it empty when no explicit workspace override exists (resolveWorkspacePermissionMode).
 	PermissionMode string
 	// SkipPermissions bypasses all permission checks (equivalent to --dangerously-skip-permissions).
 	SkipPermissions bool

@@ -7,6 +7,7 @@ export interface Workspace {
   work_dir: string;
   owner_user_id: string;
   worker_preference: string;
+  permission_mode: string;
   agent_config_overrides: Record<string, string>;
   status: string;
   created_at: number;
@@ -70,13 +71,13 @@ export async function listWorkspaces(limit = 100, offset = 0, signal?: AbortSign
   };
 }
 
-export async function createWorkspace(name: string, workDir: string, signal?: AbortSignal): Promise<Workspace> {
+export async function createWorkspace(name: string, workDir: string, permissionMode?: string, signal?: AbortSignal): Promise<Workspace> {
   const res = await fetch(
     `${BASE}/api/workspaces`,
     {
       method: 'POST',
       headers: withAuth({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ name, work_dir: workDir }),
+      body: JSON.stringify({ name, work_dir: workDir, ...(permissionMode ? { permission_mode: permissionMode } : {}) }),
       ...authOpts(),
       signal,
     }
@@ -97,6 +98,7 @@ export async function getWorkspace(id: string, signal?: AbortSignal): Promise<Wo
 export interface UpdateWorkspaceOptions {
   name?: string;
   workerPreference?: string;
+  permissionMode?: string;
   agentConfigOverrides?: Record<string, string>;
   workDir?: string;
 }
@@ -105,6 +107,7 @@ export async function updateWorkspace(id: string, opts: UpdateWorkspaceOptions, 
   const body: any = {};
   if (opts.name !== undefined) body.name = opts.name;
   if (opts.workerPreference !== undefined) body.worker_preference = opts.workerPreference;
+  if (opts.permissionMode !== undefined) body.permission_mode = opts.permissionMode;
   if (opts.workDir !== undefined) body.work_dir = opts.workDir;
   // Backend expects a JSON string, not an object (see parseOverrides note).
   if (opts.agentConfigOverrides !== undefined) body.agent_config_overrides = JSON.stringify(opts.agentConfigOverrides);

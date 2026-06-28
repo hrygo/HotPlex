@@ -691,6 +691,24 @@ func sandboxFromSession(session worker.SessionInfo, defaultSandbox string) strin
 	return defaultSandbox
 }
 
+// permissionModeFromSession maps a PermissionMode tier to Codex's (sandbox, approval)
+// pair. Returns ok=false for empty/unknown so the caller falls back to config defaults
+// (preserving the YOLO default for sessions without a workspace, issue #789).
+func permissionModeFromSession(mode string) (sandbox, approval string, ok bool) {
+	switch mode {
+	case worker.PermissionModeReadOnly:
+		return "read-only", "untrusted", true
+	case worker.PermissionModeWorkspace:
+		return "workspace-write", "on-request", true
+	case worker.PermissionModeAutoEdit:
+		return "workspace-write", "never", true
+	case worker.PermissionModeBypass:
+		return "danger-full-access", "never", true
+	default:
+		return "", "", false
+	}
+}
+
 // buildThreadStartParams constructs the JSON-RPC params for "thread/start".
 // Shared by Start() and ResetContext() to avoid duplication.
 //
@@ -700,12 +718,24 @@ func sandboxFromSession(session worker.SessionInfo, defaultSandbox string) strin
 // set sandbox to workspace-write or read-only for restricted environments.
 func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]any {
 	approvalMode := cfg.ApprovalMode
+	sandbox := sandboxFromSession(session, cfg.Sandbox)
+	// SkipPermissions: legacy hard-bypass escape hatch. In codex it only forces
+	// approval=never; a non-empty PermissionMode below takes precedence (asymmetric
+	// with claudecode, where SkipPermissions is top priority). Production never sets
+	// SkipPermissions (bridge injects only PermissionMode), so the two never co-occur
+	// in practice and the asymmetry is theoretical. Documented per #789 P3.
 	if session.SkipPermissions {
 		approvalMode = "never"
 	}
+	// Issue #789: a non-empty PermissionMode tier overrides both sandbox and approval
+	// (takes precedence over config defaults and SkipPermissions), mapping the unified
+	// 4 tiers onto Codex's native (sandbox, approvalPolicy) pair.
+	if sb, ap, ok := permissionModeFromSession(session.PermissionMode); ok {
+		sandbox, approvalMode = sb, ap
+	}
 	params := map[string]any{
 		"cwd":            session.ProjectDir,
-		"sandbox":        sandboxFromSession(session, cfg.Sandbox),
+		"sandbox":        sandbox,
 		"personality":    cfg.Personality,
 		"approvalPolicy": approvalMode,
 	}

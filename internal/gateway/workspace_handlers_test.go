@@ -303,6 +303,63 @@ func TestWorkspace_PatchWorkerPreference_Persists(t *testing.T) {
 	require.Equal(t, string(testNoopType), got.WorkerPreference)
 }
 
+func TestWorkspace_PatchPermissionMode_Whitelist(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "pm")
+
+	// ValidatePermissionMode accepts the 4 current tiers + "" ("worker default").
+	// Legacy values like "plan" (old 3-tier system) are rejected — empty is always
+	// valid (means "no explicit override"; bridge leaves it "" for the worker default).
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantCode   string
+	}{
+		{"read-only", `{"permission_mode":"read-only"}`, http.StatusOK, ""},
+		{"workspace", `{"permission_mode":"workspace"}`, http.StatusOK, ""},
+		{"auto-edit", `{"permission_mode":"auto-edit"}`, http.StatusOK, ""},
+		{"bypass", `{"permission_mode":"bypass"}`, http.StatusOK, ""},
+		{"empty means worker default", `{"permission_mode":""}`, http.StatusOK, ""},
+		{"unknown rejected", `{"permission_mode":"bogus"}`, http.StatusBadRequest, "INVALID_PERMISSION_MODE"},
+		{"legacy plan rejected", `{"permission_mode":"plan"}`, http.StatusBadRequest, "INVALID_PERMISSION_MODE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			w := env.patchWorkspace(t, cookie, ws.ID, tt.body)
+			require.Equal(t, tt.wantStatus, w.Code, "body=%s", w.Body.String())
+			if tt.wantCode != "" {
+				require.Contains(t, w.Body.String(), tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestWorkspace_PatchPermissionMode_Persists(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "pm-persist")
+
+	w := env.patchWorkspace(t, cookie, ws.ID, `{"permission_mode":"read-only"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// Re-fetch and confirm persisted (snake_case wire key, not just echoed).
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID, nil)
+	req.SetPathValue("id", ws.ID)
+	req.Header.Set("Cookie", cookie)
+	gr := httptest.NewRecorder()
+	env.wsHandlers.Get(gr, req)
+	require.Equal(t, http.StatusOK, gr.Code)
+	var got session.Workspace
+	require.NoError(t, json.NewDecoder(gr.Body).Decode(&got))
+	require.Equal(t, "read-only", got.PermissionMode)
+}
+
 // TestWorkspace_JSONWireContract guards the snake_case wire contract consumed by
 // webchat (webchat/lib/api/workspaces.ts). Decode into a raw map — NOT
 // session.Workspace — so the assertion sees the actual on-wire keys. A struct

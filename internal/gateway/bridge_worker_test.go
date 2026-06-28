@@ -118,3 +118,82 @@ func TestResolveWorkspaceOverrides(t *testing.T) {
 			"expected warn re-armed after success, got: %s", buf.String())
 	})
 }
+
+func TestResolveWorkspacePermissionMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty workspace id returns empty (platform/cron sessions, #789 P1)", func(t *testing.T) {
+		t.Parallel()
+		// Sessions without a workspace must NOT get bypass injected — each worker
+		// applies its own default/config (codex honors cfg.Sandbox, ACP honors cfg.AutoApprove).
+		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: "bypass"}, nil)
+		require.Equal(t, "", b.resolveWorkspacePermissionMode(""))
+	})
+
+	t.Run("nil wsStore returns empty", func(t *testing.T) {
+		t.Parallel()
+		b := &Bridge{log: testLogger(t)}
+		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
+	})
+
+	t.Run("workspace override wins", func(t *testing.T) {
+		t.Parallel()
+		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: "read-only"}, nil)
+		require.Equal(t, "read-only", b.resolveWorkspacePermissionMode("ws-1"))
+	})
+
+	t.Run("workspace unset returns empty (global default NOT injected, #789 r2 P2)", func(t *testing.T) {
+		t.Parallel()
+		// No explicit override → "" so each worker applies its own default/config.
+		// The admin global default is intentionally NOT injected here — injecting
+		// bypass would override a restricted codex.sandbox / acp.auto_approve. Admins
+		// set permission_mode explicitly per workspace to tighten blast radius.
+		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: ""}, nil)
+		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
+	})
+
+	t.Run("custom global default is NOT injected (stays empty, #789 r2 P2)", func(t *testing.T) {
+		t.Parallel()
+		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: ""}, nil)
+		b.defaultPermissionMode.Store("workspace")
+		// Even with a custom global default configured, a workspace without explicit
+		// override returns "" — default injection would override restricted worker config.
+		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
+	})
+
+	t.Run("fetch error degrades to empty, not bypass (#789 P1)", func(t *testing.T) {
+		t.Parallel()
+		// Degrade must NOT inject bypass — keep the worker's own config rather than
+		// silently upgrading a restricted operator setup.
+		b := newBridgeForOverrideTest(t, nil, errors.New("db down"))
+		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
+	})
+
+	t.Run("warn dedup: success re-arms warning (#789 P2, mirrors #749)", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		h := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
+		store := &stubWSStore{}
+		b := &Bridge{log: slog.New(h), wsStore: store}
+
+		// Fetch fails twice — only the first warns.
+		store.err = errors.New("boom")
+		b.resolveWorkspacePermissionMode("ws-dedup")
+		b.resolveWorkspacePermissionMode("ws-dedup")
+		require.Equal(t, 1, strings.Count(buf.String(), "level=WARN"),
+			"expected 1 warn for repeated degrade, got: %s", buf.String())
+
+		// Fetch succeeds → Delete clears the flag (P2 fix), no new warn.
+		store.err = nil
+		store.ws = &session.Workspace{PermissionMode: "read-only"}
+		b.resolveWorkspacePermissionMode("ws-dedup")
+		require.Equal(t, 1, strings.Count(buf.String(), "level=WARN"), "success path must not warn")
+
+		// Fail again → new warn appears (flag was cleared by the success path).
+		store.err = errors.New("boom2")
+		store.ws = nil
+		b.resolveWorkspacePermissionMode("ws-dedup")
+		require.Equal(t, 2, strings.Count(buf.String(), "level=WARN"),
+			"expected warn re-armed after success, got: %s", buf.String())
+	})
+}

@@ -1,6 +1,6 @@
 # Workspace 权限模式规范
 
-**状态**: Draft · **日期**: 2026-06-26（修订：CC `auto-edit` 档改用原生 `auto` mode，消除 §3.2 退化） · **关联 Issue**: [#789](https://github.com/hrygo/hotplex/issues/789) · **版本目标**: v1.31.0
+**状态**: Draft · **日期**: 2026-06-26（修订：CC `auto-edit` 档改用原生 `auto` mode，消除 §3.2 退化；2026-06-28 修订：empty→worker-default 语义对齐 r2 实现，消除"注入全局 bypass"误导） · **关联 Issue**: [#789](https://github.com/hrygo/hotplex/issues/789) · **版本目标**: v1.31.0
 
 ---
 
@@ -33,7 +33,7 @@
 - 不支持运行时实时切换活跃 session 的权限模式（启动锁定语义）
 - 不引入 bot 级权限覆盖（workspace 已是租户边界，策略在 workspace 层统一）
 - 不暴露各 Worker 原生权限参数的细粒度组合（统一抽象优先，原生细节由网关映射）
-- 不改变 cron / 无 workspace 临时 session 的权限行为（继续走全局默认）
+- 不改变 cron / 无 workspace 临时 session 的权限行为（继续走各 Worker 自身默认，与升级前一致）
 
 ## 3. 统一权限档位
 
@@ -86,19 +86,21 @@ admin UI 需展示当前 workspace 的 `worker_preference` 下各档实际效果
 新增列（`internal/session/sql/migrations/022_workspace_permission_mode.sql`）：
 
 ```sql
-ALTER TABLE workspaces ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'bypass';
+ALTER TABLE workspaces ADD COLUMN permission_mode TEXT;
 ```
 
-PostgreSQL 对应迁移：`internal/session/sql/migrations-postgres/022_workspace_permission_mode.pg.sql`（语法相同）。
+采用 **nullable 列**（不加 `NOT NULL DEFAULT`），规避 SQLite（< 3.35 无法 DROP COLUMN）与 PostgreSQL 在 `ADD COLUMN ... DEFAULT` 行为上的差异。读取时 NULL 直接扫描为 `""`（store 层不调用 `NormalizePermissionMode`；空串语义见 §5）。
 
-存量行自动获得 `'bypass'`，行为不变。
+PostgreSQL 对应迁移：`internal/session/sql/migrations-postgres/022_workspace_permission_mode.pg.sql`（Up 语法相同；Down 为 `DROP COLUMN permission_mode`）。
+
+存量行 `permission_mode` 为 `NULL`，读取归一化为 `""`（= "worker default"，见 §5），行为与升级前一致（各 Worker 走自身默认，CC/OCS→bypass）。
 
 ### 4.2 Workspace 结构体
 
 `internal/session/multitenancy_store.go:16` 的 `Workspace` 新增字段：
 
 ```go
-PermissionMode string `json:"permission_mode"` // 统一档位；"" = 用全局默认
+PermissionMode string `json:"permission_mode"` // 统一档位；"" = "worker default"（见 §5）
 ```
 
 store 层 CreateWorkspace / UpdateWorkspace / ListWorkspace / GetWorkspace 的 SQL 列表与 scan 均需带上 `permission_mode`。
@@ -111,23 +113,29 @@ store 层 CreateWorkspace / UpdateWorkspace / ListWorkspace / GetWorkspace 的 S
 
 ## 5. 配置链路与优先级
 
-`config.yaml` 的 `worker` 段（`configs/config.yaml:176`）新增全局默认：
+> **核心语义（r2 修订）**：权限模式是**显式收紧**语义——仅当 admin 为某个 workspace **显式**设置 `permission_mode` 时，bridge 才注入该档；否则注入空串 `""`，让每个 Worker 应用自身默认/操作员配置（CC/OCS→bypass；Codex→`cfg.Sandbox`/`cfg.ApprovalMode`；ACP→`cfg.AutoApprove`）。**全局默认不注入**——若注入全局 bypass，会静默覆盖操作员为受限 Codex/ACP 配的沙箱策略（见 §8 安全说明）。
+
+`config.yaml` 的 `worker` 段保留 `default_permission_mode`（`configs/config.yaml`）：
 
 ```yaml
 worker:
-  default_permission_mode: bypass  # opt-in 收紧；未配置则 bypass
+  default_permission_mode: bypass  # 当前为 no-op：已接受 + 热重载，但 bridge 不注入（见下）
 ```
 
-优先级（单一链路）：
+> `config.worker.default_permission_mode` 当前是 **no-op**（#789 r2 P2）：配置被接受、可热重载，但 `resolveWorkspacePermissionMode` 不消费它——保留以备将来按 worker-type 细化（如"CC 默认 bypass、Codex 默认 workspace"）。
+
+优先级链路（r2 实现）：
 
 ```
 workspace.permission_mode（admin 显式设置）
-        ↓ 为空（""）则
-config.worker.default_permission_mode（全局默认，缺省 bypass）
         ↓
-bridge.buildWorkerInfo 注入 SessionInfo.PermissionMode
+bridge.resolveWorkspacePermissionMode：
+  · workspace 有显式覆盖 → 注入该档
+  · 无覆盖 / fetch 失败 → 注入 ""（降级，不注入 bypass）
         ↓
-各 Worker 启动时内部映射到原生参数
+各 Worker 启动时：
+  · PermissionMode 非空 → 按档位映射原生参数
+  · PermissionMode == "" → 用自身默认/操作员配置（CC/OCS→bypass；Codex→cfg；ACP→cfg）
 ```
 
 无需 bot 级覆盖层。
@@ -136,14 +144,14 @@ bridge.buildWorkerInfo 注入 SessionInfo.PermissionMode
 
 ### 6.1 注入点（bridge）
 
-`internal/gateway/bridge.go:885 buildWorkerInfo` 新增权限模式注入。注入路径：
+`internal/gateway/bridge.go:885 buildWorkerInfo` 新增权限模式注入（实际由 `resolveWorkspacePermissionMode` 在 `bridge_worker.go` 实现，仿 `resolveWorkspaceOverrides` 的 fetch→降级模板）。注入路径：
 
-1. 从 `si`（`session.SessionInfo`）获取 `workspace_id`（实施时确认该字段是否已在 session 元数据中，若无需补齐 session → workspace 的关联读取）
-2. bridge 通过现有 `GetWorkspaceByID`（`bridge.go:143`）读取 workspace 的 `permission_mode`
-3. 空值（`""`）回退到 `config.worker.default_permission_mode`
-4. 写入 `SessionInfo.PermissionMode`
+1. 从 `si`（`session.SessionInfo`）获取 `workspace_id`
+2. bridge 通过现有 `GetWorkspaceByID` 读取 workspace 的 `permission_mode`
+3. **显式覆盖**：`ws.PermissionMode != ""` → 注入该档；**否则注入 `""`**（r2 P2：不注入全局默认，避免覆盖受限 worker 配置）
+4. fetch 失败 → `warnOverrideDegrade` 降级，注入 `""`（不注入 bypass）
 
-不引入 `platformKey` 中转——权限模式是 workspace 级策略（非 per-bot 通道变量），直接在 `buildWorkerInfo` 读取最清晰。cron / 无 workspace session 因 `workspace_id` 为空，跳过读取直接落全局默认。
+不引入 `platformKey` 中转——权限模式是 workspace 级策略（非 per-bot 通道变量），直接在 `buildWorkerInfo` 读取最清晰。cron / 无 workspace session 因 `workspace_id` 为空，注入 `""`，各 Worker 走自身默认。
 
 ### 6.2 Claude Code（`claudecode/worker.go:309-315`）
 
@@ -220,7 +228,7 @@ case worker.PermAutoEdit, worker.PermBypass:
 
 workspace 管理「创建 / 编辑」表单新增**权限模式**分段单选控件，4 档可选，每档配 tooltip 说明：
 
-- 控件默认选中 `bypass`（新建 workspace 与全局默认一致）
+- 控件默认选中 `bypass`（新建 workspace 与各 Worker 默认一致：CC/OCS=bypass，Codex/ACP=操作员配置；admin 全局默认当前为 no-op，见 §5/§8）
 - tooltip 文案随当前 workspace 的 `worker_preference` 动态展示该档在该 Worker 下的实际效果（含退化提示，如"此 Worker 下『工作区确认』与『自动编辑』效果相同"）
 - 保存走现有 workspace update API，后端校验 `permission_mode ∈ {read-only, workspace, auto-edit, bypass, ""}`
 
@@ -232,14 +240,16 @@ workspace 管理「创建 / 编辑」表单新增**权限模式**分段单选控
 
 | 维度 | 策略 |
 |------|------|
-| DB 迁移 | `permission_mode` 列 `DEFAULT 'bypass'`，存量 workspace 升级后 = bypass = 不变 |
-| 全局配置 | `config.worker.default_permission_mode` 缺省 bypass |
-| SessionInfo | `PermissionMode=""` 时各 Worker 走现有默认分支（= bypass） |
-| `SkipPermissions` | 保留，作 `bypass` 别名，现有调用无需改动 |
-| cron / 无 workspace session | 不读 workspace，走全局默认（bypass），行为不变 |
+| DB 迁移 | `permission_mode` 列 nullable（无 `DEFAULT`），存量行 `NULL`，读取归一化为 `""` |
+| 全局配置 | `config.worker.default_permission_mode` 已接受 + 热重载，但当前为 **no-op**（bridge 不注入）；缺省 bypass |
+| SessionInfo | `PermissionMode=""`（worker default）：CC/OCS 走 bypass；Codex 遵循 `cfg.Sandbox`/`cfg.ApprovalMode`；ACP 遵循 `cfg.AutoApprove` |
+| `SkipPermissions` | 保留，作 `bypass` 别名（CC 优先级最高），现有调用无需改动 |
+| cron / 无 workspace session | 不读 workspace，注入 `""`，各 Worker 走自身默认/配置，行为不变 |
 | CC `auto` mode 依赖 | 仅 `auto-edit` 档要求 claude CLI 较新版本（强制升级，不回退）；默认 `bypass` 及 `read-only`/`workspace` 档不引入新依赖。旧 CLI + `auto-edit` → 启动失败报错，不降级 |
 
-零破坏性：未显式收紧的 workspace 升级后权限模式与现状完全一致。
+**安全说明（r2 P2 核心动机）**：bridge **不注入全局默认 bypass**。若操作员为受限环境配了 `codex.sandbox=read-only` 或 `acp.auto_approve=false`，无显式覆盖的 workspace 注入 `""` 后，这些 Worker 会遵循操作员配置（收紧）；只有当 admin **显式**为某 workspace 设 `permission_mode` 时才覆盖。这避免了"升级后静默把受限 worker 提权到 bypass"的回归。
+
+零破坏性：未显式收紧的 workspace 升级后，各 Worker 走自身默认（CC/OCS=bypass，Codex/ACP=操作员配置），与升级前一致。
 
 ## 9. 测试策略
 
@@ -247,9 +257,9 @@ workspace 管理「创建 / 编辑」表单新增**权限模式**分段单选控
 |------|------|
 | 各 Worker 映射表测试 | 4 档 × 预期原生参数（CC args、Codex params map、OCS/ACP 调用参数），含退化档断言 |
 | CC `auto-edit` 独立性 | `auto-edit` 档产出的 args 含 `--permission-mode auto`，与 `workspace` 档（`acceptEdits`）严格区分；同时验证 `read-only`→`plan`、`bypass`→`--dangerously-skip-permissions`、空值→`--dangerously-skip-permissions` |
-| bridge 注入测试 | workspace 设档 → `SessionInfo.PermissionMode` 正确；空值 → 全局默认；无 workspace → 全局默认 |
+| bridge 注入测试 | workspace 设档 → `SessionInfo.PermissionMode` 正确；空值 → `""`（worker default）；无 workspace → `""` |
 | store CRUD 测试 | CreateWorkspace 带权限、UpdateWorkspace 改权限、List/Get 回显 |
-| migration 测试 | 存量 workspace 升级后 `permission_mode='bypass'`；SQLite + PG 双驱动 |
+| migration 测试 | 存量 workspace 升级后 `permission_mode` 为 NULL（读取为 `""`）；SQLite + PG 双驱动 |
 | handler 校验测试 | 非法 `permission_mode` 值被拒（400）；合法 4 档 + 空值通过 |
 | 向后兼容测试 | `PermissionMode=""` + `SkipPermissions=false` → 各 Worker 走 bypass 默认分支 |
 

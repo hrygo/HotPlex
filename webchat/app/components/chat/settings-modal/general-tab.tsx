@@ -17,6 +17,16 @@ const WORKER_OPTIONS: { value: string; label: string }[] = [
   { value: 'acp', label: 'ACP (Any ACP-compatible Agent)' },
 ];
 
+// Workspace permission tier → worker native mapping (issue #789). An empty
+// server value means "worker default" (CC/OCS apply bypass; the select exposes
+// the 4 tiers directly so the chosen blast radius is explicit, not inherited).
+const PERMISSION_MODE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'bypass', label: 'Bypass — Full access (default)' },
+  { value: 'auto-edit', label: 'Auto Edit — Auto-approve edits' },
+  { value: 'workspace', label: 'Workspace — Edits within workspace' },
+  { value: 'read-only', label: 'Read Only — Plan only' },
+];
+
 interface GeneralTabProps {
   workspace: Workspace;
   onUpdated?: (ws: Workspace) => void;
@@ -34,6 +44,7 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
 
   const [name, setName] = useState(workspace.name);
   const [worker, setWorker] = useState(workspace.worker_preference || '');
+  const [permMode, setPermMode] = useState(workspace.permission_mode || 'bypass');
   const [seg, setSeg] = useState(segBaseline);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,11 +57,12 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
   useEffect(() => {
     setName(workspace.name);
     setWorker(workspace.worker_preference || '');
+    setPermMode(workspace.permission_mode || 'bypass');
     const a = resolveSandboxAnchor(workspace.work_dir, workspace.owner_user_id);
     setSeg(a?.seg ?? workspace.work_dir);
     setError(null);
     setSuccess(false);
-  }, [workspace.id, workspace.name, workspace.worker_preference, workspace.work_dir, workspace.owner_user_id, workspace.updated_at]);
+  }, [workspace.id, workspace.name, workspace.worker_preference, workspace.permission_mode, workspace.work_dir, workspace.owner_user_id, workspace.updated_at]);
 
   useEffect(() => () => {
     if (successTimer.current) clearTimeout(successTimer.current);
@@ -59,6 +71,7 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
   const dirty =
     (name.trim() !== workspace.name && name.trim().length > 0) ||
     worker !== (workspace.worker_preference || '') ||
+    permMode !== (workspace.permission_mode || 'bypass') ||
     (segEditable && seg.trim() !== segBaseline);
 
   const previewSeg = segEditable ? sanitizeWorkspaceDir(seg) : '';
@@ -80,6 +93,7 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
       const updated = await updateWorkspace(workspace.id, {
         name: name.trim(),
         workerPreference: worker,
+        permissionMode: permMode,
         workDir,
       });
       onUpdated?.(updated);
@@ -148,6 +162,34 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
         </div>
         <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
           Select which agent binary is used to power new sessions in this workspace. Existing sessions keep their current engines.
+        </p>
+      </div>
+
+      {/* Permission Mode Selection (issue #789) */}
+      <div>
+        <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
+          Permission Mode
+        </label>
+        <div className="relative">
+          <select
+            value={permMode}
+            onChange={(e) => setPermMode(e.target.value)}
+            className="w-full pl-3.5 pr-10 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all appearance-none cursor-pointer"
+          >
+            {PERMISSION_MODE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[var(--text-faint)]">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </div>
+        <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
+          Controls the blast radius for new sessions: how aggressively the agent may edit files or run commands. Applies to new sessions only; existing sessions keep their current mode.
         </p>
       </div>
 
