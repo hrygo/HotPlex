@@ -20,7 +20,7 @@ type Workspace struct {
 	WorkDir              string `json:"work_dir"`
 	AgentConfigOverrides string `json:"agent_config_overrides"` // JSON value; spec ② fills, spec ① stays empty
 	WorkerPreference     string `json:"worker_preference"`      // spec ③ fills
-	PermissionMode       string `json:"permission_mode"`        // issue #789: read-only|workspace|auto-edit|bypass; "" = inherit global default (bypass)
+	PermissionMode       string `json:"permission_mode"`        // issue #789: read-only|workspace|auto-edit|bypass; "" = "worker default" (NULL scans to ""; bridge injects only explicit overrides)
 	Status               string `json:"status"`
 	CreatedAt            int64  `json:"created_at"`
 	UpdatedAt            int64  `json:"updated_at"`

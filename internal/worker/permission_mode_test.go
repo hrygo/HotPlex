@@ -12,7 +12,7 @@ func TestValidatePermissionMode(t *testing.T) {
 		mode    string
 		wantErr bool
 	}{
-		{"", false}, // empty = inherit global default (valid)
+		{"", false}, // empty = "worker default" (valid; no explicit override)
 		{PermissionModeReadOnly, false},
 		{PermissionModeWorkspace, false},
 		{PermissionModeAutoEdit, false},
@@ -37,7 +37,7 @@ func TestValidatePermissionMode(t *testing.T) {
 
 func TestNormalizePermissionMode(t *testing.T) {
 	t.Parallel()
-	// Empty → bypass (the backward-compatible global default; issue #789).
+	// NormalizePermissionMode maps "" → bypass (its own contract; the bridge does NOT inject this — #789 r2).
 	require.Equal(t, PermissionModeBypass, NormalizePermissionMode(""))
 	// Valid tiers pass through unchanged.
 	require.Equal(t, PermissionModeReadOnly, NormalizePermissionMode(PermissionModeReadOnly))

@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Worker**: workspace 权限模式（#789）— admin 可为每个 workspace 指定统一 4 档权限（`read-only` / `workspace` / `auto-edit` / `bypass`），网关在 Worker 启动时映射到各 Worker（CC / Codex CLI / OCS / ACP）的原生权限参数，收紧默认 blast radius。含 migration 022（SQLite + PG nullable 列）、`worker.PermissionMode*` 常量 + `ValidatePermissionMode`/`NormalizePermissionMode`、bridge `resolveWorkspacePermissionMode`（仿 `resolveWorkspaceOverrides`）、admin UI 权限分段控件、doctor `claude_auto_mode` 能力检测。
+- **Worker**: workspace 权限模式（#789）— admin 可为每个 workspace 指定统一 4 档权限（`read-only` / `workspace` / `auto-edit` / `bypass`），网关在 Worker 启动时映射到各 Worker（CC / Codex CLI / OCS / ACP）的原生权限参数，收紧默认 blast radius。含 migration 022（SQLite + PG nullable 列）、`worker.PermissionMode*` 常量 + `ValidatePermissionMode`、bridge `resolveWorkspacePermissionMode`（仿 `resolveWorkspaceOverrides`）、admin UI 权限分段控件、doctor `claude_auto_mode` 能力检测。
 
 ### Changed
 

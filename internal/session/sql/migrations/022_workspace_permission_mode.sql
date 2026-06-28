@@ -1,6 +1,6 @@
 -- +goose Up
 -- Issue #789: Workspace permission mode (read-only|workspace|auto-edit|bypass).
--- Nullable: NULL → bridge normalizes to the global default (bypass). Adding nullable
+-- Nullable: NULL scans as "" ("worker default"); bridge injects only explicit overrides. Adding nullable
 -- (not NOT NULL DEFAULT) avoids SQLite/PG ADD COLUMN rewrite differences and keeps
 -- existing rows untouched (zero-damage backward-compatible upgrade).
 ALTER TABLE workspaces ADD COLUMN permission_mode TEXT;

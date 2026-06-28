@@ -268,9 +268,10 @@ func ValidatePermissionMode(mode string) error {
 }
 
 // NormalizePermissionMode returns the effective tier for a (possibly empty) mode:
-// empty → PermissionModeBypass (the backward-compatible global default). Valid tiers
-// pass through unchanged. Used by the bridge before injecting PermissionMode into a
-// worker so the field is never the ambiguous empty string downstream.
+// empty → PermissionModeBypass. Valid tiers pass through unchanged. Its only consumer
+// today is NewBridge/UpdateDefaultPermissionMode normalizing the (currently no-op)
+// defaultPermissionMode field; resolveWorkspacePermissionMode does NOT call it —
+// explicit workspace overrides pass through verbatim and empty means "worker default" (#789 r2).
 func NormalizePermissionMode(mode string) string {
 	if mode == "" {
 		return PermissionModeBypass
@@ -313,8 +314,9 @@ type SessionInfo struct {
 	// These are merged with the hardcoded per-worker blocklist in BuildEnv.
 	ConfigBlocklist []string
 	// PermissionMode controls how the worker handles permission requests (issue #789).
-	// Valid values: PermissionModeReadOnly|Workspace|AutoEdit|Bypass. Empty = inherit
-	// the global default (bypass); the bridge normalizes it before injection.
+	// Valid values: PermissionModeReadOnly|Workspace|AutoEdit|Bypass. Empty = "worker
+	// default" (CC/OCS apply bypass; Codex/ACP honor operator config); the bridge leaves
+	// it empty when no explicit workspace override exists (resolveWorkspacePermissionMode).
 	PermissionMode string
 	// SkipPermissions bypasses all permission checks (equivalent to --dangerously-skip-permissions).
 	SkipPermissions bool

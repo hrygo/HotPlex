@@ -309,9 +309,9 @@ func TestWorkspace_PatchPermissionMode_Whitelist(t *testing.T) {
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
 	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "pm")
 
-	// ValidatePermissionMode accepts the 4 current tiers + "" (inherit default).
-	// Legacy values like "plan" (old 3-tier system) are rejected — the bridge
-	// normalizes "" → bypass, so empty is always valid.
+	// ValidatePermissionMode accepts the 4 current tiers + "" ("worker default").
+	// Legacy values like "plan" (old 3-tier system) are rejected — empty is always
+	// valid (means "no explicit override"; bridge leaves it "" for the worker default).
 	tests := []struct {
 		name       string
 		body       string
@@ -322,7 +322,7 @@ func TestWorkspace_PatchPermissionMode_Whitelist(t *testing.T) {
 		{"workspace", `{"permission_mode":"workspace"}`, http.StatusOK, ""},
 		{"auto-edit", `{"permission_mode":"auto-edit"}`, http.StatusOK, ""},
 		{"bypass", `{"permission_mode":"bypass"}`, http.StatusOK, ""},
-		{"empty inherits default", `{"permission_mode":""}`, http.StatusOK, ""},
+		{"empty means worker default", `{"permission_mode":""}`, http.StatusOK, ""},
 		{"unknown rejected", `{"permission_mode":"bogus"}`, http.StatusBadRequest, "INVALID_PERMISSION_MODE"},
 		{"legacy plan rejected", `{"permission_mode":"plan"}`, http.StatusBadRequest, "INVALID_PERMISSION_MODE"},
 	}

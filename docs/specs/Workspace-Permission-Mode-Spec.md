@@ -89,7 +89,7 @@ admin UI 需展示当前 workspace 的 `worker_preference` 下各档实际效果
 ALTER TABLE workspaces ADD COLUMN permission_mode TEXT;
 ```
 
-采用 **nullable 列**（不加 `NOT NULL DEFAULT`），规避 SQLite（< 3.35 无法 DROP COLUMN）与 PostgreSQL 在 `ADD COLUMN ... DEFAULT` 行为上的差异。读取时由 `worker.NormalizePermissionMode` 归一化。
+采用 **nullable 列**（不加 `NOT NULL DEFAULT`），规避 SQLite（< 3.35 无法 DROP COLUMN）与 PostgreSQL 在 `ADD COLUMN ... DEFAULT` 行为上的差异。读取时 NULL 直接扫描为 `""`（store 层不调用 `NormalizePermissionMode`；空串语义见 §5）。
 
 PostgreSQL 对应迁移：`internal/session/sql/migrations-postgres/022_workspace_permission_mode.pg.sql`（Up 语法相同；Down 为 `DROP COLUMN permission_mode`）。
 
@@ -228,7 +228,7 @@ case worker.PermAutoEdit, worker.PermBypass:
 
 workspace 管理「创建 / 编辑」表单新增**权限模式**分段单选控件，4 档可选，每档配 tooltip 说明：
 
-- 控件默认选中 `bypass`（新建 workspace 与全局默认一致）
+- 控件默认选中 `bypass`（新建 workspace 与各 Worker 默认一致：CC/OCS=bypass，Codex/ACP=操作员配置；admin 全局默认当前为 no-op，见 §5/§8）
 - tooltip 文案随当前 workspace 的 `worker_preference` 动态展示该档在该 Worker 下的实际效果（含退化提示，如"此 Worker 下『工作区确认』与『自动编辑』效果相同"）
 - 保存走现有 workspace update API，后端校验 `permission_mode ∈ {read-only, workspace, auto-edit, bypass, ""}`
 
@@ -257,9 +257,9 @@ workspace 管理「创建 / 编辑」表单新增**权限模式**分段单选控
 |------|------|
 | 各 Worker 映射表测试 | 4 档 × 预期原生参数（CC args、Codex params map、OCS/ACP 调用参数），含退化档断言 |
 | CC `auto-edit` 独立性 | `auto-edit` 档产出的 args 含 `--permission-mode auto`，与 `workspace` 档（`acceptEdits`）严格区分；同时验证 `read-only`→`plan`、`bypass`→`--dangerously-skip-permissions`、空值→`--dangerously-skip-permissions` |
-| bridge 注入测试 | workspace 设档 → `SessionInfo.PermissionMode` 正确；空值 → 全局默认；无 workspace → 全局默认 |
+| bridge 注入测试 | workspace 设档 → `SessionInfo.PermissionMode` 正确；空值 → `""`（worker default）；无 workspace → `""` |
 | store CRUD 测试 | CreateWorkspace 带权限、UpdateWorkspace 改权限、List/Get 回显 |
-| migration 测试 | 存量 workspace 升级后 `permission_mode='bypass'`；SQLite + PG 双驱动 |
+| migration 测试 | 存量 workspace 升级后 `permission_mode` 为 NULL（读取为 `""`）；SQLite + PG 双驱动 |
 | handler 校验测试 | 非法 `permission_mode` 值被拒（400）；合法 4 档 + 空值通过 |
 | 向后兼容测试 | `PermissionMode=""` + `SkipPermissions=false` → 各 Worker 走 bypass 默认分支 |
 

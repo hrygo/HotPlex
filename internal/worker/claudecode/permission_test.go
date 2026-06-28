@@ -19,7 +19,7 @@ func TestPermissionModeToCCArg(t *testing.T) {
 		{worker.PermissionModeWorkspace, "acceptEdits", false},
 		{worker.PermissionModeAutoEdit, "auto", false},
 		{worker.PermissionModeBypass, "", true},
-		{"", "", true},     // empty → bypass (bridge normalizes beforehand)
+		{"", "", true},     // empty → CC bypass ("worker default": CC applies bypass when no override)
 		{"plan", "", true}, // legacy value → bypass (no longer a valid tier)
 	}
 	for _, tt := range tests {
