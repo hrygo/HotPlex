@@ -79,6 +79,7 @@ func Default() *Config {
 				UseAppServer:    true,
 				IdleDrainPeriod: 30 * time.Minute,
 			},
+			DefaultPermissionMode: "bypass", // workspace permission tier fallback when ws.PermissionMode is empty (issue #789)
 		},
 		Security: SecurityConfig{
 			APIKeyHeader:    "X-API-Key",

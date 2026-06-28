@@ -459,19 +459,20 @@ func (p PostgresConfig) DSN() string {
 
 // WorkerConfig holds per-worker defaults.
 type WorkerConfig struct {
-	MaxLifetime      time.Duration        `mapstructure:"max_lifetime"`
-	IdleTimeout      time.Duration        `mapstructure:"idle_timeout"`
-	ExecutionTimeout time.Duration        `mapstructure:"execution_timeout"`
-	TurnTimeout      time.Duration        `mapstructure:"turn_timeout"`
-	EnvBlocklist     []string             `mapstructure:"env_blocklist"`
-	DefaultWorkDir   string               `mapstructure:"default_work_dir"`
-	PIDDir           string               `mapstructure:"pid_dir"`
-	AutoRetry        AutoRetryConfig      `mapstructure:"auto_retry"`
-	OpenCodeServer   OpenCodeServerConfig `mapstructure:"opencode_server"`
-	ClaudeCode       ClaudeCodeConfig     `mapstructure:"claude_code"`
-	CodexCLI         CodexCLIConfig       `mapstructure:"codex_cli"`
-	ACP              ACPConfig            `mapstructure:"acp"`
-	Environment      []string             `mapstructure:"environment"`
+	MaxLifetime           time.Duration        `mapstructure:"max_lifetime"`
+	IdleTimeout           time.Duration        `mapstructure:"idle_timeout"`
+	ExecutionTimeout      time.Duration        `mapstructure:"execution_timeout"`
+	TurnTimeout           time.Duration        `mapstructure:"turn_timeout"`
+	EnvBlocklist          []string             `mapstructure:"env_blocklist"`
+	DefaultWorkDir        string               `mapstructure:"default_work_dir"`
+	PIDDir                string               `mapstructure:"pid_dir"`
+	AutoRetry             AutoRetryConfig      `mapstructure:"auto_retry"`
+	OpenCodeServer        OpenCodeServerConfig `mapstructure:"opencode_server"`
+	ClaudeCode            ClaudeCodeConfig     `mapstructure:"claude_code"`
+	CodexCLI              CodexCLIConfig       `mapstructure:"codex_cli"`
+	ACP                   ACPConfig            `mapstructure:"acp"`
+	Environment           []string             `mapstructure:"environment"`
+	DefaultPermissionMode string               `mapstructure:"default_permission_mode"`
 }
 
 // MCPServerConfig defines a single MCP server for worker startup.

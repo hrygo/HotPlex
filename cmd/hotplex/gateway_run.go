@@ -259,20 +259,21 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	bridge := gateway.NewBridge(gateway.BridgeDeps{
-		Log:                log,
-		Hub:                hub,
-		SM:                 sm,
-		EventCollector:     stores.collector,
-		TurnsQuerier:       stores.event, // SQLiteStore implements TurnQuerier
-		RetryCtrl:          retryCtrl,
-		AgentConfigDir:     agentConfigDir,
-		TurnTimeout:        cfg.Worker.TurnTimeout,
-		WorkerEnv:          buildWorkerEnv(cfg),
-		WorkerEnvBlocklist: cfg.Worker.EnvBlocklist,
-		CronEnv:            buildCronEnv(cfg),
-		MCPConfigJSON:      buildMCPConfigJSON(cfg),
-		AgentConfigExclude: buildAgentConfigExclude(cfg),
-		WSStore:            stores.wsStore,
+		Log:                   log,
+		Hub:                   hub,
+		SM:                    sm,
+		EventCollector:        stores.collector,
+		TurnsQuerier:          stores.event, // SQLiteStore implements TurnQuerier
+		RetryCtrl:             retryCtrl,
+		AgentConfigDir:        agentConfigDir,
+		TurnTimeout:           cfg.Worker.TurnTimeout,
+		WorkerEnv:             buildWorkerEnv(cfg),
+		WorkerEnvBlocklist:    cfg.Worker.EnvBlocklist,
+		CronEnv:               buildCronEnv(cfg),
+		MCPConfigJSON:         buildMCPConfigJSON(cfg),
+		AgentConfigExclude:    buildAgentConfigExclude(cfg),
+		DefaultPermissionMode: cfg.Worker.DefaultPermissionMode,
+		WSStore:               stores.wsStore,
 	})
 
 	// One-time validation sweep: surface stale/invalid agent_config_overrides
@@ -353,6 +354,12 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		if !reflect.DeepEqual(prevExcl, nextExcl) {
 			bridge.UpdateAgentConfigExclude(nextExcl)
 			log.Info("config: agent config inject_exclude updated")
+		}
+	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		if prev.Worker.DefaultPermissionMode != next.Worker.DefaultPermissionMode {
+			bridge.UpdateDefaultPermissionMode(next.Worker.DefaultPermissionMode)
+			log.Info("config: worker default_permission_mode updated", "value", next.Worker.DefaultPermissionMode)
 		}
 	})
 
