@@ -371,16 +371,18 @@ func (b *Bridge) resolveWorkspacePermissionMode(workspaceID string) string {
 		return ""
 	}
 	// fetch succeeded: clear any prior degrade flag so a future regression warns again
-	// (#749, mirrors resolveWorkspaceOverrides at :343).
+	// (#749, mirrors resolveWorkspaceOverrides 成功路径的 Delete).
 	b.warnedOverrides.Delete(workspaceID)
 	if ws.PermissionMode != "" {
 		return ws.PermissionMode // explicit workspace override wins
 	}
-	def, _ := b.defaultPermissionMode.Load().(string)
-	if def == "" {
-		def = worker.PermissionModeBypass
-	}
-	return def
+	// No explicit override: return "" so each worker applies its own default/config,
+	// consistent with the no-workspace branch above. The admin-controlled global
+	// default (worker.default_permission_mode) is NOT injected here — injecting bypass
+	// would override a restricted codex.sandbox / acp.auto_approve for workspace
+	// sessions on those worker types. Admins set permission_mode explicitly per
+	// workspace to tighten blast radius. (#789 review r2 P2)
+	return ""
 }
 
 // warnOverrideDegrade logs a degrading warning at most once per workspaceID per

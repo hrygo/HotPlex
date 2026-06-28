@@ -142,17 +142,23 @@ func TestResolveWorkspacePermissionMode(t *testing.T) {
 		require.Equal(t, "read-only", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
-	t.Run("workspace unset falls back to global default bypass", func(t *testing.T) {
+	t.Run("workspace unset returns empty (global default NOT injected, #789 r2 P2)", func(t *testing.T) {
 		t.Parallel()
+		// No explicit override → "" so each worker applies its own default/config.
+		// The admin global default is intentionally NOT injected here — injecting
+		// bypass would override a restricted codex.sandbox / acp.auto_approve. Admins
+		// set permission_mode explicitly per workspace to tighten blast radius.
 		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: ""}, nil)
-		require.Equal(t, "bypass", b.resolveWorkspacePermissionMode("ws-1"))
+		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
-	t.Run("workspace unset honors custom global default", func(t *testing.T) {
+	t.Run("custom global default is NOT injected (stays empty, #789 r2 P2)", func(t *testing.T) {
 		t.Parallel()
 		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: ""}, nil)
 		b.defaultPermissionMode.Store("workspace")
-		require.Equal(t, "workspace", b.resolveWorkspacePermissionMode("ws-1"))
+		// Even with a custom global default configured, a workspace without explicit
+		// override returns "" — default injection would override restricted worker config.
+		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
 	t.Run("fetch error degrades to empty, not bypass (#789 P1)", func(t *testing.T) {
