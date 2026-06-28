@@ -33,7 +33,7 @@
 - 不支持运行时实时切换活跃 session 的权限模式（启动锁定语义）
 - 不引入 bot 级权限覆盖（workspace 已是租户边界，策略在 workspace 层统一）
 - 不暴露各 Worker 原生权限参数的细粒度组合（统一抽象优先，原生细节由网关映射）
-- 不改变 cron / 无 workspace 临时 session 的权限行为（继续走全局默认）
+- 不改变 cron / 无 workspace 临时 session 的权限行为（继续走各 Worker 自身默认，与升级前一致）
 
 ## 3. 统一权限档位
 
