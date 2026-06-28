@@ -96,6 +96,10 @@ AI 会切换到指定目录开始工作。
 
 ### 设置权限模式
 
+权限模式控制 AI 的自主操作范围，分 4 档：`read-only`（只读）、`workspace`（可编辑）、`auto-edit`（全自动）、`bypass`（跳过所有确认）。默认在 WebChat 的 Workspace 设置中选择；各档对 Claude Code / Codex / OpenCode Server / ACP 的具体映射见[远程开发指南](../developer/remote-coding-agent.md)。
+
+会话中也可用 `/perm` 临时切换（值透传至当前 Worker，如 Claude Code 的 `bypassPermissions`）：
+
 ```
 /perm bypassPermissions
 ```
