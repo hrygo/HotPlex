@@ -472,7 +472,7 @@ type WorkerConfig struct {
 	CodexCLI              CodexCLIConfig       `mapstructure:"codex_cli"`
 	ACP                   ACPConfig            `mapstructure:"acp"`
 	Environment           []string             `mapstructure:"environment"`
-	DefaultPermissionMode string               `mapstructure:"default_permission_mode"`
+	DefaultPermissionMode string               `mapstructure:"default_permission_mode"` // accepted but NOT injected by bridge since #789 r2 P2 (no-op); retained for future per-worker-type refinement
 }
 
 // MCPServerConfig defines a single MCP server for worker startup.

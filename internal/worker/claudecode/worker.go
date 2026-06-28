@@ -281,7 +281,7 @@ func permissionModeToCCArg(mode string) (permArg string, skip bool) {
 	case worker.PermissionModeBypass:
 		return "", true
 	default:
-		return "", true // empty (bridge normalizes) or legacy → bypass
+		return "", true // empty ("worker default": CC applies bypass) or legacy → bypass
 	}
 }
 
@@ -328,7 +328,7 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 	// --permission-prompt-tool disabled (default):
 	//   - All ask results auto-denied by Claude Code in headless mode
 	// Permission mode: map the unified 4 tiers to CC native args (issue #789).
-	// The bridge normalizes PermissionMode to a non-empty tier (default bypass).
+	// Empty PermissionMode ("worker default") → bypass; a non-empty tier maps per the table.
 	// SkipPermissions is kept as a legacy escape hatch (no production setter today).
 	permArg, skip := permissionModeToCCArg(session.PermissionMode)
 	if skip || session.SkipPermissions {

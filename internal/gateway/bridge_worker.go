@@ -353,9 +353,10 @@ func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID stri
 //     restricted codex.sandbox or acp.auto_approve — a security downgrade (#789 P1).
 //     codex permissionModeFromSession("") → ok=false → honors cfg.Sandbox/ApprovalMode;
 //     ACP skips the override; CC/OCS map "" to their own bypass default.
-//   - Workspace with no explicit override → admin-controlled global default
-//     (worker.default_permission_mode, bypass). WebChat-only path (default worker_type
-//     is claude_code, which has no config-level restriction) — policy, not a downgrade.
+//   - Workspace with no explicit override → "" (each worker applies its own
+//     default/config; admins set permission_mode explicitly per workspace to tighten
+//     blast radius). NOT injecting the global default keeps this symmetric with the
+//     no-workspace branch and avoids overriding a restricted codex/ACP config (#789 r2 P2).
 //
 // ctx note: GetWorkspaceByID uses shutdownCtx rather than a request-scoped ctx because
 // buildWorkerInfo/prepareWorkerInfo intentionally carry no ctx (see #714); the query is

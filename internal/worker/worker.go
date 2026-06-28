@@ -233,7 +233,8 @@ type SystemPromptUpdater interface {
 
 // PermissionMode tiers (issue #789). The gateway maps each tier to the worker's
 // native permission parameters at startup. Admin picks one per workspace; an empty
-// value inherits the global default (worker.default_permission_mode → bypass).
+// value means "worker default" (CC/OCS apply bypass; Codex/ACP honor operator config —
+// the admin global default is intentionally NOT injected; see resolveWorkspacePermissionMode).
 // Mapping lives inside each worker (not a central table) — see claudecode/codexcli/
 // opencodeserver/acp workers for the per-runtime translation.
 const (
@@ -253,8 +254,9 @@ var validPermissionModes = map[string]struct{}{
 	PermissionModeBypass:    {},
 }
 
-// ValidatePermissionMode returns nil for the empty string (inherit global default)
-// or a valid tier; otherwise it wraps ErrInvalidPermissionMode. Mirrors ValidateType.
+// ValidatePermissionMode returns nil for the empty string ("worker default":
+// CC/OCS apply bypass; Codex/ACP honor operator config) or a valid tier;
+// otherwise it wraps ErrInvalidPermissionMode. Mirrors ValidateType.
 func ValidatePermissionMode(mode string) error {
 	if mode == "" {
 		return nil

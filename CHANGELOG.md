@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Worker**: workspace 权限模式（#789）— admin 可为每个 workspace 指定统一 4 档权限（`read-only` / `workspace` / `auto-edit` / `bypass`），网关在 Worker 启动时映射到各 Worker（CC / Codex CLI / OCS / ACP）的原生权限参数，收紧默认 blast radius。含 migration 022（SQLite + PG nullable 列）、`worker.PermissionMode*` 常量 + `ValidatePermissionMode`/`NormalizePermissionMode`、bridge `resolveWorkspacePermissionMode`（仿 `resolveWorkspaceOverrides`）、admin UI 权限分段控件、doctor `claude_auto_mode` 能力检测。
+
+### Changed
+
+- **Worker**: `SessionInfo.PermissionMode` 语义重定义——从旧的 CC 私有 3 档（`default`/`plan`/`auto-accept`）改为统一 4 档（`read-only`/`workspace`/`auto-edit`/`bypass`）。CC `auto-edit` 档用原生 `--permission-mode auto`（强制升级，不回退 `acceptEdits`）。`SkipPermissions` 降级为 `bypass` 的 legacy 别名（生产无赋值点）。
+
+### Security
+
+- **Worker**: bridge 不再无条件注入 `bypass`（#789 review P1 回归修复）。仅当 admin 为 workspace **显式**设置 `permission_mode` 时才注入；否则注入 `""`（"worker default"），让每个 Worker 应用自身默认/操作员配置（CC/OCS→bypass；Codex→`cfg.Sandbox`；ACP→`cfg.AutoApprove`）。fetch 失败同样降级为 `""`，避免静默把受限 operator 配置提权到 bypass。`config.worker.default_permission_mode` 当前为 no-op（已接受 + 热重载，但 bridge 不注入），保留以备将来按 worker-type 细化。
+
 ## [1.30.0] - 2026-06-25
 
 ### Summary

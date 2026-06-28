@@ -43,7 +43,7 @@ type BridgeDeps struct {
 	WorkerEnvBlocklist    []string                 // extra blocklist entries from worker.env_blocklist config
 	CronEnv               []string                 // env vars injected only into cron platform sessions (e.g. admin API creds)
 	MCPConfigJSON         string                   // pre-serialized MCP config JSON; "" = not configured → Claude Code default discovery
-	DefaultPermissionMode string                   // worker.PermissionMode* tier; global default for sessions without a workspace override (issue #789); bridge normalizes empty → bypass
+	DefaultPermissionMode string                   // worker.PermissionMode* tier; accepted + hot-reloaded but NOT injected by resolveWorkspacePermissionMode since #789 r2 P2 (injection would override restricted codex.sandbox / acp.auto_approve); effectively a no-op today, retained for future per-worker-type use
 	AgentConfigExclude    map[string][]string      // platform → inject_exclude (global default at "" key)
 	WSStore               WorkspaceOverridesReader // WebChat per-workspace agent-config overrides (spec ②); nil = disabled
 }
