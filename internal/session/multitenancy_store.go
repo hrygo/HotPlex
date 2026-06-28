@@ -20,6 +20,7 @@ type Workspace struct {
 	WorkDir              string `json:"work_dir"`
 	AgentConfigOverrides string `json:"agent_config_overrides"` // JSON value; spec ② fills, spec ① stays empty
 	WorkerPreference     string `json:"worker_preference"`      // spec ③ fills
+	PermissionMode       string `json:"permission_mode"`        // issue #789: read-only|workspace|auto-edit|bypass; "" = inherit global default (bypass)
 	Status               string `json:"status"`
 	CreatedAt            int64  `json:"created_at"`
 	UpdatedAt            int64  `json:"updated_at"`
@@ -141,15 +142,16 @@ func scanIdentity(sc rowScanner) (*UserIdentity, error) {
 
 func scanWorkspace(sc rowScanner) (*Workspace, error) {
 	var w Workspace
-	var overrides, pref sql.NullString
+	var overrides, pref, perm sql.NullString
 	var createdAt, updatedAt sql.NullInt64
 	err := sc.Scan(&w.ID, &w.OwnerUserID, &w.Name, &w.WorkDir, &overrides, &pref, &w.Status,
-		&createdAt, &updatedAt)
+		&createdAt, &updatedAt, &perm)
 	if err != nil {
 		return nil, err
 	}
 	w.AgentConfigOverrides = overrides.String
 	w.WorkerPreference = pref.String
+	w.PermissionMode = perm.String
 	w.CreatedAt = createdAt.Int64
 	w.UpdatedAt = updatedAt.Int64
 	return &w, nil
@@ -251,7 +253,7 @@ func (s *SQLiteStore) HasAdmin(ctx context.Context) (bool, error) {
 func (s *SQLiteStore) CreateWorkspace(ctx context.Context, w *Workspace, now int64) error {
 	return s.writeMu.WithLock(func() error {
 		_, err := s.db.ExecContext(ctx, queries["workspaces.create"],
-			w.ID, w.OwnerUserID, w.Name, w.WorkDir, now, now)
+			w.ID, w.OwnerUserID, w.Name, w.WorkDir, now, now, nullableString(w.PermissionMode))
 		return err
 	})
 }
@@ -323,7 +325,7 @@ func (s *SQLiteStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUs
 func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error {
 	return s.writeMu.WithLock(func() error {
 		res, err := s.db.ExecContext(ctx, queries["workspaces.update"],
-			w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), w.WorkDir, now,
+			w.Name, nullableString(w.AgentConfigOverrides), nullableString(w.WorkerPreference), w.WorkDir, nullableString(w.PermissionMode), now,
 			w.ID, w.UpdatedAt, w.WorkDir, w.ID)
 		if err != nil {
 			return err

@@ -30,11 +30,11 @@ func newPGMultitenancyMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 		"users.list":                          d.Rebind("SELECT id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at FROM users ORDER BY created_at ASC LIMIT ? OFFSET ?"),
 		"users.update_status":                 d.Rebind("UPDATE users SET status = ?, updated_at = ? WHERE id = ?"),
 		"users.touch_last_login":              d.Rebind("UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?"),
-		"workspaces.create":                   d.Rebind("INSERT INTO workspaces (id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, 'active', ?, ?)"),
-		"workspaces.get_by_id":                d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE id = ?"),
-		"workspaces.list_by_owner":            d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND status = 'active' ORDER BY created_at ASC LIMIT ? OFFSET ?"),
-		"workspaces.get_by_owner_and_workdir": d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at FROM workspaces WHERE owner_user_id = ? AND work_dir = ? AND status = 'active'"),
-		"workspaces.update":                   d.Rebind("UPDATE workspaces SET name = ?, agent_config_overrides = ?, worker_preference = ?, work_dir = ?, updated_at = ? WHERE id = ? AND updated_at = ? AND (? = work_dir OR NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle')))"),
+		"workspaces.create":                   d.Rebind("INSERT INTO workspaces (id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at, permission_mode) VALUES (?, ?, ?, ?, NULL, NULL, 'active', ?, ?, ?)"),
+		"workspaces.get_by_id":                d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at, permission_mode FROM workspaces WHERE id = ?"),
+		"workspaces.list_by_owner":            d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at, permission_mode FROM workspaces WHERE owner_user_id = ? AND status = 'active' ORDER BY created_at ASC LIMIT ? OFFSET ?"),
+		"workspaces.get_by_owner_and_workdir": d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at, permission_mode FROM workspaces WHERE owner_user_id = ? AND work_dir = ? AND status = 'active'"),
+		"workspaces.update":                   d.Rebind("UPDATE workspaces SET name = ?, agent_config_overrides = ?, worker_preference = ?, work_dir = ?, permission_mode = ?, updated_at = ? WHERE id = ? AND updated_at = ? AND (? = work_dir OR NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle')))"),
 		"workspaces.delete":                   d.Rebind("DELETE FROM workspaces WHERE id = ?"),
 		"workspaces.delete_if_empty":          d.Rebind("DELETE FROM workspaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle'))"),
 		"workspaces.count_active_sessions":    d.Rebind("SELECT COUNT(*) FROM sessions WHERE workspace_id = ? AND state IN ('created','running','idle')"),
@@ -57,7 +57,7 @@ func userColumns() []string {
 }
 
 func workspaceColumns() []string {
-	return []string{"id", "owner_user_id", "name", "work_dir", "agent_config_overrides", "worker_preference", "status", "created_at", "updated_at"}
+	return []string{"id", "owner_user_id", "name", "work_dir", "agent_config_overrides", "worker_preference", "status", "created_at", "updated_at", "permission_mode"}
 }
 
 func invitationColumns() []string {
@@ -173,7 +173,7 @@ func TestPGMultitenancy_CreateWorkspace(t *testing.T) {
 	defer cleanup()
 	q := store.queries["workspaces.create"]
 	mock.ExpectExec(regexp.QuoteMeta(q)).
-		WithArgs("ws-1", "u-1", "proj", "/tmp/p", int64(100), int64(100)).
+		WithArgs("ws-1", "u-1", "proj", "/tmp/p", int64(100), int64(100), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	err := store.CreateWorkspace(context.Background(), &Workspace{ID: "ws-1", OwnerUserID: "u-1", Name: "proj", WorkDir: "/tmp/p"}, 100)
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestPGMultitenancy_GetWorkspaceByID(t *testing.T) {
 	store, mock, cleanup := newPGMultitenancyMock(t)
 	defer cleanup()
 	q := store.queries["workspaces.get_by_id"]
-	rows := sqlmock.NewRows(workspaceColumns()).AddRow("ws-1", "u-1", "proj", "/tmp/p", nil, nil, "active", int64(100), int64(100))
+	rows := sqlmock.NewRows(workspaceColumns()).AddRow("ws-1", "u-1", "proj", "/tmp/p", nil, nil, "active", int64(100), int64(100), nil)
 	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs("ws-1").WillReturnRows(rows)
 	w, err := store.GetWorkspaceByID(context.Background(), "ws-1")
 	require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestPGMultitenancy_ListWorkspacesByOwner(t *testing.T) {
 	defer cleanup()
 	q := store.queries["workspaces.list_by_owner"]
 	rows := sqlmock.NewRows(workspaceColumns()).
-		AddRow("ws-1", "u-1", "a", "/tmp/a", nil, nil, "active", int64(100), int64(100))
+		AddRow("ws-1", "u-1", "a", "/tmp/a", nil, nil, "active", int64(100), int64(100), nil)
 	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs("u-1", 100, 0).WillReturnRows(rows)
 	list, err := store.ListWorkspacesByOwner(context.Background(), "u-1", 100, 0)
 	require.NoError(t, err)
@@ -219,7 +219,7 @@ func TestPGMultitenancy_GetWorkspaceByOwnerAndWorkDir(t *testing.T) {
 	store, mock, cleanup := newPGMultitenancyMock(t)
 	defer cleanup()
 	q := store.queries["workspaces.get_by_owner_and_workdir"]
-	rows := sqlmock.NewRows(workspaceColumns()).AddRow("ws-1", "u-1", "p", "/tmp/x", nil, nil, "active", int64(100), int64(100))
+	rows := sqlmock.NewRows(workspaceColumns()).AddRow("ws-1", "u-1", "p", "/tmp/x", nil, nil, "active", int64(100), int64(100), nil)
 	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs("u-1", "/tmp/x").WillReturnRows(rows)
 	w, err := store.GetWorkspaceByOwnerAndWorkDir(context.Background(), "u-1", "/tmp/x")
 	require.NoError(t, err)
@@ -246,7 +246,7 @@ func TestPGMultitenancy_UpdateWorkspace(t *testing.T) {
 	// guard (? = work_dir compare, workspace_id for NOT EXISTS) — work_dir is "",
 	// so the compare matches and the row updates regardless of sessions.
 	mock.ExpectExec(regexp.QuoteMeta(q)).
-		WithArgs("newname", nil, nil, "", int64(200), "ws-1", int64(100), "", "ws-1").
+		WithArgs("newname", nil, nil, "", nil, int64(200), "ws-1", int64(100), "", "ws-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	ws := &Workspace{ID: "ws-1", Name: "newname", UpdatedAt: 100}
 	err := store.UpdateWorkspace(context.Background(), ws, 200)
@@ -262,8 +262,8 @@ func TestPGMultitenancy_UpdateWorkspace_VersionConflict(t *testing.T) {
 	defer cleanup()
 	q := store.queries["workspaces.update"]
 	mock.ExpectExec(regexp.QuoteMeta(q)).
-		WithArgs("by-b", nil, nil, "", int64(300), "ws-1", int64(100), "", "ws-1"). // stale cached updated_at
-		WillReturnResult(sqlmock.NewResult(0, 0))                                   // 0 rows → disambiguate
+		WithArgs("by-b", nil, nil, "", nil, int64(300), "ws-1", int64(100), "", "ws-1"). // stale cached updated_at
+		WillReturnResult(sqlmock.NewResult(0, 0))                                        // 0 rows → disambiguate
 	mock.ExpectQuery(regexp.QuoteMeta(store.queries["workspaces.count_active_sessions"])).
 		WithArgs("ws-1").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0)) // no active session → conflict, not NotEmpty
@@ -280,7 +280,7 @@ func TestPGMultitenancy_UpdateWorkspace_WorkDirChangeBlockedByActiveSession(t *t
 	defer cleanup()
 	q := store.queries["workspaces.update"]
 	mock.ExpectExec(regexp.QuoteMeta(q)).
-		WithArgs("n", nil, nil, "/new/dir", int64(300), "ws-1", int64(100), "/new/dir", "ws-1").
+		WithArgs("n", nil, nil, "/new/dir", nil, int64(300), "ws-1", int64(100), "/new/dir", "ws-1").
 		WillReturnResult(sqlmock.NewResult(0, 0)) // guard blocked: 0 rows
 	mock.ExpectQuery(regexp.QuoteMeta(store.queries["workspaces.count_active_sessions"])).
 		WithArgs("ws-1").
@@ -330,7 +330,7 @@ func TestPGMultitenancy_DeleteWorkspaceIfEmpty_NotEmpty(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(q)).WithArgs("ws-1", "ws-1").WillReturnResult(sqlmock.NewResult(0, 0))
 	// RowsAffected==0 → 重新检查存在性：workspace 仍存在 → 有活跃会话阻塞 → ErrWorkspaceNotEmpty。
 	getQ := store.queries["workspaces.get_by_id"]
-	rows := sqlmock.NewRows(workspaceColumns()).AddRow("ws-1", "u-1", "p", "/tmp/x", nil, nil, "active", int64(100), int64(100))
+	rows := sqlmock.NewRows(workspaceColumns()).AddRow("ws-1", "u-1", "p", "/tmp/x", nil, nil, "active", int64(100), int64(100), nil)
 	mock.ExpectQuery(regexp.QuoteMeta(getQ)).WithArgs("ws-1").WillReturnRows(rows)
 	require.ErrorIs(t, store.DeleteWorkspaceIfEmpty(context.Background(), "ws-1"), ErrWorkspaceNotEmpty)
 }
