@@ -25,6 +25,8 @@ curl http://localhost:9999/admin/stats?access_token=<token>
 
 Token 使用 `crypto/subtle.ConstantTimeCompare` 进行常量时间比较，防止时序攻击。
 
+> **Cookie 认证兜底（WebChat 多租户部署）**：当请求未携带 Bearer Token 时，若已启用 WebChat 多租户（`CookieAuth` 与本地账号身份提供者就绪），中间件会转而解析 chat session cookie，校验为 **active 且角色为 `admin`** 的用户后放行，并授予完整 scope 集合——嵌入式 WebChat 中已登录的管理员可直接访问 Dashboard/Bots/Cron，无需另发 admin token。Bearer 仍优先；standalone/CLI 部署（未启用多租户）保持仅 Bearer 行为。该 cookie 通道的写方法同样适用下文的「CSRF 同源校验」；跨源 cookie 调用还需在 CORS `allowedOrigins` 显式列出 WebChat origin（`*` 通配会抑制 `Allow-Credentials`，浏览器将拒绝发送 session cookie）。
+
 ### Token 配置
 
 ```yaml
@@ -68,6 +70,37 @@ admin:
 5. **Token Auth** — Bearer Token 提取 + scope 校验
 
 Rate Limit 和 IP Whitelist 支持配置热重载，无需重启生效。
+
+## 操作审计
+
+所有 admin 写操作（`POST`/`PUT`/`PATCH`/`DELETE`）均通过 `slog` 记录结构化审计事件（`admin_audit`，issue #788 A5），用于合规追溯与事故取证。审计复用网关现有 JSON 日志管道，无独立存储——直接流向标准日志输出，可由日志聚合系统按字段过滤检索，无需额外配置。
+
+**覆盖范围**：
+
+- **`/admin/*`（端口 9999，Bearer Token）**：在 `AdminAPI.Middleware` 的审计 defer 中统一记录——无论请求最终成功或失败，写方法都会产生一条审计记录；`(method, path)` 映射为稳定 action 枚举，未映射路由回退 `"<method> <path>"`，确保无写操作静默丢失。
+- **`/api/admin/*` 与 `/api/workspaces/*`（端口 8888，Cookie）**：在各 handler 的成功/失败路径显式记录；CSRF 同源校验拦截的跨站写请求同样记审计（action `auth.denied`，详见下文「CSRF 同源校验」）。
+
+**审计字段**：
+
+| 字段 | 说明 |
+|------|------|
+| `actor_user_id` | 操作者标识：Cookie 通道为用户 `uid`；Bearer 通道为 `admin-token`；认证未解析或失败时为 `anonymous` |
+| `action` | 稳定动作枚举（见下表），日志看板按此过滤，**不可重命名** |
+| `target` | 请求路径（含资源 id） |
+| `result` | `ok`（成功）/ `failed`（操作失败）/ `denied`（认证或授权拒绝） |
+
+**action 枚举**：
+
+| 资源域 | action |
+|--------|--------|
+| 网关 | `gateway.restart` |
+| Bot | `bot.create` / `bot.update` / `bot.delete` |
+| API Key | `apikey.create` / `apikey.update` / `apikey.delete` |
+| Cron | `cron.create` / `cron.update` / `cron.delete` / `cron.trigger` |
+| Session | `session.delete` / `session.terminate` / `session.patch` / `session.put` |
+| Config | `config.rollback` / `config.validate` |
+| 多租户成员/邀请 | `member.status.update` / `invitation.create` / `invitation.delete` |
+| 认证拒绝 | `auth.denied` |
 
 ## 端点总览
 
@@ -294,6 +327,8 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 > **GET /api/admin/invitations** — 每条邀请额外返回服务器计算的 `is_expired`（`true` 表示邀请码**未被使用且已过期**），客户端无需自行比对 `expires_at` 与本地时钟，规避时钟漂移。
 
 > ⚠️ **注意区分**：此处的 `/api/admin/*`（端口 `8888`，Cookie 认证，WebChat workspace 维度）与本页上方「认证」章节描述的 Admin API（端口 `9999`，Bearer Token，网关运维维度）是**两套独立端点**，认证模型和作用域完全不同，不要混淆。
+
+> 🔒 **CSRF 同源校验（写方法）**：`/api/admin/*` 与 `/api/workspaces/*` 的状态变更方法（`POST`/`PATCH`/`DELETE`）挂载同源验证中间件，防御针对 SameSite=None session cookie 的跨站写请求；`GET` 一律放行。写方法需提供「同源证明」之一——浏览器 `Sec-Fetch-Site` 取值为 `same-origin`/`same-site`，或 `Origin` 精确命中 CORS `allowedOrigins`（`*` 通配**不**满足：SameSite=None cookie 恰在 allowlist 宽松时跨站送达）。未通过返回 `403 FORBIDDEN`（`message`: `cross-origin write blocked`）并记入 admin 审计日志。嵌入式 WebChat SPA 与网关同源，天然通过；跨域前端需将自身 origin 列入 `allowedOrigins`。
 
 ## 错误响应格式
 
