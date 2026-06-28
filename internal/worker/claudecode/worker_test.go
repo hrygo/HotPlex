@@ -190,7 +190,7 @@ func TestBuildCLIArgs_AllOptions(t *testing.T) {
 		AllowedModels:          []string{"claude-sonnet-4-6"},
 		AllowedTools:           []string{"Read", "Write", "Bash"},
 		DisallowedTools:        []string{"WebSearch", "Edit"},
-		PermissionMode:         "plan",
+		PermissionMode:         worker.PermissionModeReadOnly, // read-only tier → --permission-mode plan
 		SkipPermissions:        false,
 		SystemPrompt:           "You are a helpful assistant.",
 		SystemPromptReplace:    "",
@@ -243,7 +243,7 @@ func TestBuildCLIArgs_AllOptions(t *testing.T) {
 	require.Contains(t, args, "--include-partial-messages")
 	// --permission-prompt-tool not present by default (disabled)
 	require.NotContains(t, args, "--permission-prompt-tool")
-	// Custom PermissionMode="plan" → no --dangerously-skip-permissions
+	// PermissionMode=read-only tier → --permission-mode plan (no --dangerously-skip-permissions)
 	require.NotContains(t, args, "--dangerously-skip-permissions")
 	require.NotContains(t, args, "--system-prompt-file") // replace mode not set
 }

@@ -221,6 +221,12 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 			slog.Warn("opencode: plan mode with allowed_tools may override read-only semantics",
 				"mode", mode, "allowed_tools", allowedTools)
 		}
+	case "acceptEdits":
+		// Auto-accept edits + reads; other ops still ask (issue #789 workspace/auto-edit tiers).
+		rules = []map[string]any{
+			{"permission": "read", "action": "allow", "pattern": "*"},
+			{"permission": "edit", "action": "allow", "pattern": "*"},
+		}
 	default:
 		// No rules injected: OCS default (no matching rule → ask → publishes permission.asked).
 		if len(allowedTools) > 0 {

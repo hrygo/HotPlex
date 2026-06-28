@@ -264,6 +264,27 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, resu
 // Session mode:
 //   - resume=true:  --resume <session-id>  (恢复已有会话)
 //   - resume=false: --session-id <id>       (创建新会话)
+//
+// permissionModeToCCArg maps a PermissionMode tier to Claude Code's native args.
+// Returns (permArg, skip): skip=true → emit --dangerously-skip-permissions; otherwise
+// permArg is the --permission-mode value (plan|acceptEdits|auto). Empty/unknown → bypass.
+// auto-edit uses native `auto` mode (full auto + background safety classifier); it does
+// NOT degrade to acceptEdits — requires a recent claude CLI (issue #789 §3.2/§6.2).
+func permissionModeToCCArg(mode string) (permArg string, skip bool) {
+	switch mode {
+	case worker.PermissionModeReadOnly:
+		return "plan", false
+	case worker.PermissionModeWorkspace:
+		return "acceptEdits", false
+	case worker.PermissionModeAutoEdit:
+		return "auto", false
+	case worker.PermissionModeBypass:
+		return "", true
+	default:
+		return "", true // empty (bridge normalizes) or legacy → bypass
+	}
+}
+
 func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string, error) {
 	args := []string{
 		"--print",
@@ -306,10 +327,14 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 	//   - Bypass-immune ops (.claude/, .git/, shell config): step 1g → ask → control_request
 	// --permission-prompt-tool disabled (default):
 	//   - All ask results auto-denied by Claude Code in headless mode
-	if session.SkipPermissions {
+	// Permission mode: map the unified 4 tiers to CC native args (issue #789).
+	// The bridge normalizes PermissionMode to a non-empty tier (default bypass).
+	// SkipPermissions is kept as a legacy escape hatch (no production setter today).
+	permArg, skip := permissionModeToCCArg(session.PermissionMode)
+	if skip || session.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
-	} else if session.PermissionMode != "" {
-		args = append(args, "--permission-mode", session.PermissionMode)
+	} else if permArg != "" {
+		args = append(args, "--permission-mode", permArg)
 	} else {
 		args = append(args, "--dangerously-skip-permissions") // default bypass
 	}

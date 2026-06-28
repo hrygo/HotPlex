@@ -233,11 +233,31 @@ func (w *Worker) GetWorkerSessionID() string {
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 
+// permissionModeToACPApprove maps a PermissionMode tier to ACP's autoApprove flag.
+// read-only/workspace → require approval (false); auto-edit/bypass → auto-approve (true).
+// Empty/unknown → true (the ACP default, issue #789).
+func permissionModeToACPApprove(mode string) bool {
+	switch mode {
+	case worker.PermissionModeReadOnly, worker.PermissionModeWorkspace:
+		return false
+	case worker.PermissionModeAutoEdit, worker.PermissionModeBypass:
+		return true
+	default:
+		return true
+	}
+}
+
 func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Phase 1: Assign fields under lock (fast, no I/O).
 	w.Mu.Lock()
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
+	// Issue #789: a non-empty PermissionMode tier overrides the constructor's config-level
+	// autoApprove default. Empty mode keeps the config default (backward compat for
+	// cron/platform sessions without a workspace).
+	if session.PermissionMode != "" {
+		w.autoApprove.Store(permissionModeToACPApprove(session.PermissionMode))
+	}
 	w.Mu.Unlock()
 
 	// Cache system prompt for first-input injection (ACP v1 has no native mechanism).

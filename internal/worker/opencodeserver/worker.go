@@ -568,6 +568,22 @@ func (w *Worker) UpdateSystemPrompt(prompt string) {
 
 // ─── Internal Methods ─────────────────────────────────────────────────────────
 
+// permissionModeToOCS maps a PermissionMode tier to OCS's native permission mode string.
+// workspace and auto-edit both map to acceptEdits (OCS has no finer tier between them).
+// Empty/unknown → bypassPermissions (the default blast radius, issue #789).
+func permissionModeToOCS(mode string) string {
+	switch mode {
+	case worker.PermissionModeReadOnly:
+		return "plan"
+	case worker.PermissionModeWorkspace, worker.PermissionModeAutoEdit:
+		return "acceptEdits"
+	case worker.PermissionModeBypass:
+		return "bypassPermissions"
+	default:
+		return "bypassPermissions"
+	}
+}
+
 func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInfo) error {
 	w.Mu.Lock()
 	cmd := w.cmd
@@ -577,11 +593,8 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 		return fmt.Errorf("commander not initialized")
 	}
 
-	// Default bypass (preserves existing behavior), configurable override.
-	mode := "bypassPermissions"
-	if session.PermissionMode != "" {
-		mode = session.PermissionMode
-	}
+	// Issue #789: map the unified 4 tiers to OCS native modes (default bypass).
+	mode := permissionModeToOCS(session.PermissionMode)
 
 	body := map[string]any{
 		"mode": mode,
