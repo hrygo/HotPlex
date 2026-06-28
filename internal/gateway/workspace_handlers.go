@@ -177,7 +177,7 @@ type updateWorkspaceRequest struct {
 	AgentConfigOverrides string  `json:"agent_config_overrides"`
 	WorkerPreference     *string `json:"worker_preference"` // nil = omit (no change); "" = explicit clear to default
 	WorkDir              string  `json:"work_dir"`          // workspace-level mutable (session-level inherits)
-	PermissionMode       *string `json:"permission_mode"`   // nil = omit (no change); "" = clear to global default; else worker.PermissionMode* (issue #789)
+	PermissionMode       *string `json:"permission_mode"`   // nil = omit (no change); "" = clear to "worker default" (no explicit override); else worker.PermissionMode* (issue #789)
 }
 
 // Update: PATCH /api/workspaces/{id}
@@ -265,8 +265,8 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		ws.WorkerPreference = *req.WorkerPreference
 	}
 	if req.PermissionMode != nil {
-		// nil = field omitted (no change); "" = clear to global default (bypass).
-		// ValidatePermissionMode accepts "" as inherit-default (issue #789).
+		// nil = field omitted (no change); "" = clear to "worker default" (stored as "", no override).
+		// ValidatePermissionMode accepts "" as the valid "worker default" value (issue #789).
 		if err := worker.ValidatePermissionMode(*req.PermissionMode); err != nil {
 			writeAppError(w, http.StatusBadRequest, "INVALID_PERMISSION_MODE", err.Error())
 			return

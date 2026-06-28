@@ -256,9 +256,9 @@ func TestWorkspacesStore_PermissionModeRoundTrip(t *testing.T) {
 }
 
 // TestWorkspacesStore_PermissionModeDefaultNull verifies the backward-compatible default:
-// a workspace created without permission_mode stores NULL and reads back empty (the bridge
-// normalizes empty → global default bypass). Existing rows upgraded by migration 022 behave
-// identically — zero-damage upgrade (issue #789).
+// a workspace created without permission_mode stores NULL and reads back empty (the "worker
+// default" — the store does NOT normalize; each worker applies its own default). Existing
+// rows upgraded by migration 022 behave identically — zero-damage upgrade (issue #789).
 func TestWorkspacesStore_PermissionModeDefaultNull(t *testing.T) {
 	t.Parallel()
 	store, _ := helperDB(t)

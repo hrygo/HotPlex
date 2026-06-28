@@ -18,8 +18,8 @@ const WORKER_OPTIONS: { value: string; label: string }[] = [
 ];
 
 // Workspace permission tier → worker native mapping (issue #789). An empty
-// server value normalizes to bypass (global default); the select exposes the 4
-// tiers directly so the chosen blast radius is explicit, not inherited.
+// server value means "worker default" (CC/OCS apply bypass; the select exposes
+// the 4 tiers directly so the chosen blast radius is explicit, not inherited).
 const PERMISSION_MODE_OPTIONS: { value: string; label: string }[] = [
   { value: 'bypass', label: 'Bypass — Full access (default)' },
   { value: 'auto-edit', label: 'Auto Edit — Auto-approve edits' },
