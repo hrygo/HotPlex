@@ -719,6 +719,11 @@ func permissionModeFromSession(mode string) (sandbox, approval string, ok bool) 
 func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]any {
 	approvalMode := cfg.ApprovalMode
 	sandbox := sandboxFromSession(session, cfg.Sandbox)
+	// SkipPermissions: legacy hard-bypass escape hatch. In codex it only forces
+	// approval=never; a non-empty PermissionMode below takes precedence (asymmetric
+	// with claudecode, where SkipPermissions is top priority). Production never sets
+	// SkipPermissions (bridge injects only PermissionMode), so the two never co-occur
+	// in practice and the asymmetry is theoretical. Documented per #789 P3.
 	if session.SkipPermissions {
 		approvalMode = "never"
 	}

@@ -345,24 +345,40 @@ func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID stri
 }
 
 // resolveWorkspacePermissionMode returns the effective permission mode tier for a
-// session (issue #789). Priority: workspace-level override > global default
-// (worker.default_permission_mode → bypass). Degrades to the global default on any
-// fetch error — never blocks worker launch (mirrors resolveWorkspaceOverrides).
+// session (issue #789). Only an explicit workspace-level override is force-injected;
+// everything else returns "" so each worker applies its OWN default/config:
+//
+//   - Sessions WITHOUT a workspace (platform/cron: Slack/Feishu/cron-driven) → "".
+//     Injecting the global bypass here would silently upgrade an operator's
+//     restricted codex.sandbox or acp.auto_approve — a security downgrade (#789 P1).
+//     codex permissionModeFromSession("") → ok=false → honors cfg.Sandbox/ApprovalMode;
+//     ACP skips the override; CC/OCS map "" to their own bypass default.
+//   - Workspace with no explicit override → admin-controlled global default
+//     (worker.default_permission_mode, bypass). WebChat-only path (default worker_type
+//     is claude_code, which has no config-level restriction) — policy, not a downgrade.
+//
+// ctx note: GetWorkspaceByID uses shutdownCtx rather than a request-scoped ctx because
+// buildWorkerInfo/prepareWorkerInfo intentionally carry no ctx (see #714); the query is
+// fast and degrades harmlessly, so request-scoped cancellation isn't propagated here
+// (unlike resolveWorkspaceOverrides, whose call sites carry a ctx). #789 review UNCERTAIN.
 func (b *Bridge) resolveWorkspacePermissionMode(workspaceID string) string {
-	def, _ := b.defaultPermissionMode.Load().(string)
-	if def == "" {
-		def = worker.PermissionModeBypass // unconfigured bridge (e.g. zero-value in tests)
-	}
 	if workspaceID == "" || b.wsStore == nil {
-		return def
+		return ""
 	}
 	ws, err := b.wsStore.GetWorkspaceByID(b.shutdownCtx, workspaceID)
 	if err != nil {
-		b.warnOverrideDegrade(workspaceID, "fetch workspace permission_mode failed, degrading to global default", err)
-		return def
+		b.warnOverrideDegrade(workspaceID, "fetch workspace permission_mode failed, degrading to worker default", err)
+		return ""
 	}
+	// fetch succeeded: clear any prior degrade flag so a future regression warns again
+	// (#749, mirrors resolveWorkspaceOverrides at :343).
+	b.warnedOverrides.Delete(workspaceID)
 	if ws.PermissionMode != "" {
-		return ws.PermissionMode
+		return ws.PermissionMode // explicit workspace override wins
+	}
+	def, _ := b.defaultPermissionMode.Load().(string)
+	if def == "" {
+		def = worker.PermissionModeBypass
 	}
 	return def
 }
