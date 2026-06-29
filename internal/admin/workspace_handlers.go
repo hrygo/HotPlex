@@ -133,13 +133,11 @@ func (a *AdminAPI) HandleUpdateAdminWorkspacePermissionMode(w http.ResponseWrite
 			web.WriteAppError(w, http.StatusConflict, "WORKSPACE_VERSION_MISMATCH", "workspace concurrently modified, please re-fetch and retry")
 			return
 		}
-		// permission_mode changes don't trip the work_dir CAS guard (work_dir is
-		// unchanged), so ErrWorkspaceNotEmpty shouldn't occur here — mapped
-		// defensively rather than leaking a 500.
-		if errors.Is(err, session.ErrWorkspaceNotEmpty) {
-			web.WriteAppError(w, http.StatusConflict, "WORKSPACE_NOT_EMPTY", "workspace has active sessions blocking the update")
-			return
-		}
+		// ErrWorkspaceNotEmpty is intentionally not mapped: the store only raises
+		// it when a work_dir change is blocked by an active session, but this
+		// endpoint only changes permission_mode (never work_dir), so it's
+		// unreachable for this path. A concurrent edit that loses the updated_at
+		// CAS is caught above as ErrWorkspaceConflict; any other failure is a 500.
 		a.log.Error("admin: update workspace permission_mode", "id", id, "err", err)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
 		return
